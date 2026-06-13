@@ -82,6 +82,7 @@ func (m *chatTUI) slashItems() []compItem {
 		{label: "/sandbox", insert: "/sandbox", hint: i18n.M.CmdSandbox},
 		{label: "/effort", insert: "/effort ", hint: i18n.M.CmdEffort, descend: true},
 		{label: "/auto-plan", insert: "/auto-plan ", hint: i18n.M.CmdAutoPlan, descend: true},
+		{label: "/reasoning-language", insert: "/reasoning-language ", hint: i18n.M.CmdReasonLang, descend: true},
 		{label: "/theme", insert: "/theme ", hint: i18n.M.CmdTheme, descend: true},
 		{label: "/language", insert: "/language ", hint: i18n.M.CmdLanguage, descend: true},
 		{label: "/help", insert: "/help ", hint: i18n.M.CmdHelp},
@@ -596,8 +597,26 @@ func (m *chatTUI) acceptCompletion() {
 
 var compSelStyle lipgloss.Style
 
+const completionPadCell = "\u00a0"
+
+// padCompletionLine pads completion rows with NBSPs instead of ASCII spaces.
+// Ultraviolet treats trailing ASCII spaces as clearable cells and may emit EL
+// or ECH erase sequences; mintty can leave stale CJK glyph cells after those
+// erases. NBSP is visually blank but forces the renderer to overwrite cells.
+func padCompletionLine(s string, w int) string {
+	pad := w - visibleWidth(s)
+	if pad <= 0 {
+		return s
+	}
+	return s + strings.Repeat(completionPadCell, pad)
+}
+
 // renderCompletion draws the menu above the input box: matching items, windowed
-// around the selection, the current row highlighted, hints dimmed.
+// around the selection, the current row highlighted, hints dimmed. Every line is
+// padded to m.width with non-clearable blank cells so bubbletea's delta renderer
+// has no ordinary trailing-space run to collapse into EL/ECH erase sequences.
+// That avoids ghost cells on terminals (mintty) with unreliable erases after
+// wide CJK glyphs.
 func (m chatTUI) renderCompletion() string {
 	if !m.completion.active || len(m.completion.items) == 0 {
 		return ""
@@ -621,14 +640,16 @@ func (m chatTUI) renderCompletion() string {
 	var b strings.Builder
 	for i := start; i < end; i++ {
 		it := items[i]
+		var line string
 		if i == m.completion.sel {
-			b.WriteString(accent("› ") + compSelStyle.Render(it.label))
+			line = accent("› ") + compSelStyle.Render(it.label)
 		} else {
-			b.WriteString("  " + it.label)
+			line = "  " + it.label
 		}
 		if it.hint != "" {
-			b.WriteString("  " + dim(it.hint))
+			line += "  " + dim(it.hint)
 		}
+		b.WriteString(padCompletionLine(line, m.width))
 		b.WriteByte('\n')
 	}
 	// A key-hint footer so users discover Tab — many won't know it accepts a
@@ -637,6 +658,6 @@ func (m chatTUI) renderCompletion() string {
 	if m.completion.kind == compAt {
 		hint = i18n.M.CompHintFile
 	}
-	b.WriteString(dim(hint))
+	b.WriteString(padCompletionLine(dim(hint), m.width))
 	return b.String()
 }

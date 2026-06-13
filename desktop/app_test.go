@@ -17,6 +17,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/jobs"
 	"reasonix/internal/memory"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
@@ -259,7 +260,7 @@ func TestEmitReadyInvokesReadyHook(t *testing.T) {
 		atomic.AddInt32(&calls, 1)
 	}
 
-	app.emitReady(nil)
+	app.emitReady(context.TODO())
 
 	if got := atomic.LoadInt32(&calls); got != 1 {
 		t.Fatalf("ready hook calls = %d, want 1", got)
@@ -301,6 +302,8 @@ language = "zh"
 theme = "light"
 theme_style = "glacier"
 close_behavior = "quit"
+status_bar_style = "icon"
+status_bar_items = ["cost", "balance"]
 `), 0o644); err != nil {
 		t.Fatalf("write project config: %v", err)
 	}
@@ -315,6 +318,12 @@ close_behavior = "quit"
 	if err := userCfg.SetDesktopCloseBehavior("background"); err != nil {
 		t.Fatalf("set desktop close behavior: %v", err)
 	}
+	if err := userCfg.SetDesktopStatusBarStyle("text"); err != nil {
+		t.Fatalf("set desktop status bar style: %v", err)
+	}
+	if err := userCfg.SetDesktopStatusBarItems([]string{"model", "balance", "cache"}); err != nil {
+		t.Fatalf("set desktop status bar items: %v", err)
+	}
 	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save user config: %v", err)
 	}
@@ -326,8 +335,11 @@ close_behavior = "quit"
 	}
 
 	got := NewApp().Settings()
-	if got.DesktopLanguage != "en" || got.DesktopTheme != "dark" || got.DesktopThemeStyle != "graphite" || got.CloseBehavior != "background" {
-		t.Fatalf("desktop settings = lang:%q theme:%q style:%q close:%q, want user-level desktop prefs", got.DesktopLanguage, got.DesktopTheme, got.DesktopThemeStyle, got.CloseBehavior)
+	if got.DesktopLanguage != "en" || got.DesktopTheme != "dark" || got.DesktopThemeStyle != "graphite" || got.CloseBehavior != "background" || got.StatusBarStyle != "text" {
+		t.Fatalf("desktop settings = lang:%q theme:%q style:%q close:%q status:%q, want user-level desktop prefs", got.DesktopLanguage, got.DesktopTheme, got.DesktopThemeStyle, got.CloseBehavior, got.StatusBarStyle)
+	}
+	if want := []string{"model", "balance", "cache"}; !reflect.DeepEqual(got.StatusBarItems, want) {
+		t.Fatalf("desktop status bar items = %v, want user-level %v", got.StatusBarItems, want)
 	}
 }
 
@@ -343,6 +355,8 @@ language = "zh"
 theme = "light"
 theme_style = "glacier"
 close_behavior = "quit"
+status_bar_style = "text"
+status_bar_items = ["model", "cache", "balance"]
 `), 0o644); err != nil {
 		t.Fatalf("write project config: %v", err)
 	}
@@ -358,8 +372,11 @@ close_behavior = "quit"
 	if got.ConfigPath != config.UserConfigPath() {
 		t.Fatalf("Settings configPath = %q, want user config %q", got.ConfigPath, config.UserConfigPath())
 	}
-	if got.DefaultModel != "legacy-provider/legacy-model" || got.DesktopLanguage != "zh" || got.DesktopTheme != "light" || got.DesktopThemeStyle != "glacier" || got.CloseBehavior != "quit" {
+	if got.DefaultModel != "legacy-provider/legacy-model" || got.DesktopLanguage != "zh" || got.DesktopTheme != "light" || got.DesktopThemeStyle != "glacier" || got.CloseBehavior != "quit" || got.StatusBarStyle != "text" {
 		t.Fatalf("Settings did not seed from legacy project config: %+v", got)
+	}
+	if want := []string{"model", "cache", "balance"}; !reflect.DeepEqual(got.StatusBarItems, want) {
+		t.Fatalf("Settings did not seed status bar items from legacy project config: got %v want %v", got.StatusBarItems, want)
 	}
 	if _, err := os.Stat(config.UserConfigPath()); !os.IsNotExist(err) {
 		t.Fatalf("Settings() should not write user config before an edit, stat err = %v", err)
@@ -368,8 +385,11 @@ close_behavior = "quit"
 		t.Fatalf("SetDesktopLanguage: %v", err)
 	}
 	userCfg := config.LoadForEdit(config.UserConfigPath())
-	if userCfg.DesktopLanguage() != "en" || userCfg.DesktopTheme() != "light" || userCfg.DesktopThemeStyle() != "glacier" || userCfg.DesktopCloseBehavior() != "quit" {
-		t.Fatalf("saved user config did not preserve seeded desktop prefs: lang:%q theme:%q style:%q close:%q", userCfg.DesktopLanguage(), userCfg.DesktopTheme(), userCfg.DesktopThemeStyle(), userCfg.DesktopCloseBehavior())
+	if userCfg.DesktopLanguage() != "en" || userCfg.DesktopTheme() != "light" || userCfg.DesktopThemeStyle() != "glacier" || userCfg.DesktopCloseBehavior() != "quit" || userCfg.DesktopStatusBarStyle() != "text" {
+		t.Fatalf("saved user config did not preserve seeded desktop prefs: lang:%q theme:%q style:%q close:%q status:%q", userCfg.DesktopLanguage(), userCfg.DesktopTheme(), userCfg.DesktopThemeStyle(), userCfg.DesktopCloseBehavior(), userCfg.DesktopStatusBarStyle())
+	}
+	if want := []string{"model", "cache", "balance"}; !reflect.DeepEqual(userCfg.DesktopStatusBarItems(), want) {
+		t.Fatalf("saved user config did not preserve seeded status bar items: got %v want %v", userCfg.DesktopStatusBarItems(), want)
 	}
 }
 
@@ -1316,6 +1336,47 @@ func TestDeleteSessionRejectsInactiveOpenTab(t *testing.T) {
 	}
 	if open[filepath.Base(otherPath)] {
 		t.Fatalf("ListSessions marked unopened session open, got %#v", open)
+	}
+}
+
+func TestRestoreSessionRejectsDestroyingSession(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	sessionPath := filepath.Join(dir, "trash-me.jsonl")
+	if err := os.WriteFile(sessionPath, []byte(`{"role":"user","content":"hello"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("deleteSessionFile: %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, filepath.Base(sessionPath), filepath.Base(sessionPath))
+
+	jm := jobs.NewManager(event.Discard)
+	defer jm.Close()
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: filepath.Join(dir, "active.jsonl"), Label: "active", Jobs: jm})
+	defer ctrl.Close()
+	destroy := ctrl.BeginDestroySession(sessionPath)
+	defer destroy.Finish()
+
+	app := NewApp()
+	app.setTestCtrl(ctrl, "")
+	if err := app.RestoreSession(trashPath); err == nil || !strings.Contains(err.Error(), "cleanup is still in progress") {
+		t.Fatalf("RestoreSession while destroying error = %v, want cleanup-in-progress", err)
+	}
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("trashed session should remain after rejected restore: %v", err)
+	}
+
+	destroy.Finish()
+	if err := app.RestoreSession(trashPath); err != nil {
+		t.Fatalf("RestoreSession after finish: %v", err)
+	}
+	if _, err := os.Stat(sessionPath); err != nil {
+		t.Fatalf("session should be restored: %v", err)
 	}
 }
 

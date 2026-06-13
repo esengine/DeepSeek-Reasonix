@@ -97,9 +97,36 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	return t, nil
 }
 
-var stdioShellPATH = defaultStdioShellPATH
+var stdioShellPATH = cachedShellPATH(defaultStdioShellPATH)
+
+// cachedShellPATH memoizes the first non-empty shell-PATH probe: the user's
+// interactive PATH is stable for the process, and resolveStdioExecutable now
+// probes for every stdio plugin, so caching avoids a login shell per server.
+func cachedShellPATH(probe func(context.Context) string) func(context.Context) string {
+	var (
+		mu     sync.Mutex
+		cached string
+		done   bool
+	)
+	return func(ctx context.Context) string {
+		mu.Lock()
+		defer mu.Unlock()
+		if done {
+			return cached
+		}
+		if p := probe(ctx); p != "" {
+			cached, done = p, true
+		}
+		return cached
+	}
+}
 
 func resolveStdioExecutable(ctx context.Context, s Spec, env []string) (string, []string, error) {
+	// Unconditionally enrich PATH with the user's shell PATH so every
+	// subprocess—including wrapper scripts that invoke npx, uvx, etc.—
+	// inherits the expected tool locations even under a GUI launch.
+	env = enrichStdioShellPATH(ctx, env)
+
 	if hasPathSeparator(s.Command) {
 		return s.Command, env, nil
 	}
@@ -108,17 +135,6 @@ func resolveStdioExecutable(ctx context.Context, s Spec, env []string) (string, 
 	}
 
 	currentPath, _ := envValue(env, "PATH")
-	if shellPath := strings.TrimSpace(stdioShellPATH(ctx)); shellPath != "" {
-		fallbackPath := mergePathLists(shellPath, currentPath)
-		if fallbackPath != currentPath {
-			fallbackEnv := setEnvValue(env, "PATH", fallbackPath)
-			if exe, ok := lookPathInEnv(s.Command, fallbackEnv); ok {
-				return exe, fallbackEnv, nil
-			}
-			env = fallbackEnv
-			currentPath = fallbackPath
-		}
-	}
 	if runtime.GOOS == "windows" {
 		fallbackPath := mergePathLists(windowsStdioFallbackPATH(env), currentPath)
 		if fallbackPath != currentPath {
@@ -133,6 +149,20 @@ func resolveStdioExecutable(ctx context.Context, s Spec, env []string) (string, 
 
 	return "", env, fmt.Errorf("stdio plugin %q: command %q not found on PATH; GUI launches and non-interactive sessions may not inherit your shell PATH. Use an absolute command path or set PATH in the MCP server env. PATH=%q",
 		s.Name, s.Command, currentPath)
+}
+
+// enrichStdioShellPATH probes the user's interactive login shell for its PATH
+// and prepends those directories to the current environment. The result is the
+// subprocess environment with a PATH that matches what the user sees in their
+// terminal, even when Reasonix was launched from the Finder / Dock / open(1).
+func enrichStdioShellPATH(ctx context.Context, env []string) []string {
+	currentPath, _ := envValue(env, "PATH")
+	if shellPath := strings.TrimSpace(stdioShellPATH(ctx)); shellPath != "" {
+		if fallbackPath := mergePathLists(shellPath, currentPath); fallbackPath != currentPath {
+			env = setEnvValue(env, "PATH", fallbackPath)
+		}
+	}
+	return env
 }
 
 func hasPathSeparator(s string) bool {

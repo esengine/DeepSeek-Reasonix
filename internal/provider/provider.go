@@ -28,9 +28,10 @@ const (
 
 // Message is a single conversation message.
 type Message struct {
-	Role             Role   `json:"role"`
-	Content          string `json:"content,omitempty"`
-	ReasoningContent string `json:"reasoning_content,omitempty"` // assistant: thinking-mode chain-of-thought, round-tripped on multi-turn
+	Role             Role     `json:"role"`
+	Content          string   `json:"content,omitempty"`
+	Images           []string `json:"images,omitempty"`            // data URLs (data:<mime>;base64,…); embedded only for vision-capable models
+	ReasoningContent string   `json:"reasoning_content,omitempty"` // assistant: thinking-mode chain-of-thought, round-tripped on multi-turn
 	// ReasoningSignature is an opaque, provider-issued proof that ReasoningContent
 	// is genuine model output. Anthropic requires the signed thinking block be
 	// replayed on the next turn when a tool call followed thinking; providers
@@ -40,6 +41,25 @@ type Message struct {
 	ToolCalls          []ToolCall `json:"tool_calls,omitempty"`   // set by assistant
 	ToolCallID         string     `json:"tool_call_id,omitempty"` // links a tool result to its call
 	Name               string     `json:"name,omitempty"`         // tool message: tool name
+}
+
+// ParseImageDataURL splits a `data:<media-type>;base64,<payload>` URL into its
+// media type and base64 payload. ok is false for anything that isn't a base64
+// data URL — providers that need the split (Anthropic) skip those silently.
+func ParseImageDataURL(dataURL string) (mediaType, base64Data string, ok bool) {
+	rest, found := strings.CutPrefix(dataURL, "data:")
+	if !found {
+		return "", "", false
+	}
+	meta, payload, found := strings.Cut(rest, ",")
+	if !found {
+		return "", "", false
+	}
+	mt, found := strings.CutSuffix(meta, ";base64")
+	if !found || mt == "" {
+		return "", "", false
+	}
+	return mt, payload, true
 }
 
 // ToolCall is a tool invocation requested by the model. Arguments is raw JSON.

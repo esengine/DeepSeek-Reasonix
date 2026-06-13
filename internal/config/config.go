@@ -74,16 +74,18 @@ type UIConfig struct {
 // separate from top-level language and [ui] so desktop choices do not affect CLI
 // language, terminal colours, or provider-visible prompt/request data.
 type DesktopConfig struct {
-	Language       string   `toml:"language"`        // auto|en|zh; empty/auto = browser/OS auto-detect
-	Theme          string   `toml:"theme"`           // auto|dark|light; empty resolves to dark
-	ThemeStyle     string   `toml:"theme_style"`     // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
-	CloseBehavior  string   `toml:"close_behavior"`  // quit|background; desktop window close behavior
-	DisplayMode    string   `toml:"display_mode"`    // standard|compact|minimal; transcript display mode
-	CheckUpdates   *bool    `toml:"check_updates"`   // startup update checks; nil keeps the default enabled
-	Telemetry      *bool    `toml:"telemetry"`       // anonymous launch ping (install id + version + OS); nil keeps the default enabled
-	Metrics        *bool    `toml:"metrics"`         // opt-in aggregate agent metrics (anonymous signal/bucket counts; no content); nil = disabled
-	ProviderAccess []string `toml:"provider_access"` // desktop-only list of provider entries shown in Settings > Model > Access
-	ExpandThinking bool     `toml:"expand_thinking"` // true = show reasoning text expanded by default; false = collapsed
+	Language       string   `toml:"language"`         // auto|en|zh; empty/auto = browser/OS auto-detect
+	Theme          string   `toml:"theme"`            // auto|dark|light; empty resolves to dark
+	ThemeStyle     string   `toml:"theme_style"`      // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
+	CloseBehavior  string   `toml:"close_behavior"`   // quit|background; desktop window close behavior
+	DisplayMode    string   `toml:"display_mode"`     // standard|compact (legacy "minimal" maps to compact); transcript display mode
+	StatusBarStyle string   `toml:"status_bar_style"` // icon|text; desktop status bar metric labels
+	StatusBarItems []string `toml:"status_bar_items"` // ordered visible desktop status bar items
+	CheckUpdates   *bool    `toml:"check_updates"`    // startup update checks; nil keeps the default enabled
+	Telemetry      *bool    `toml:"telemetry"`        // anonymous launch ping (install id + version + OS); nil keeps the default enabled
+	Metrics        *bool    `toml:"metrics"`          // opt-in aggregate agent metrics (anonymous signal/bucket counts; no content); nil = disabled
+	ProviderAccess []string `toml:"provider_access"`  // desktop-only list of provider entries shown in Settings > Model > Access
+	ExpandThinking bool     `toml:"expand_thinking"`  // true = show reasoning text expanded by default; false = collapsed
 }
 
 // NotificationsConfig controls optional system notifications for CLI chat/run.
@@ -193,18 +195,87 @@ func (c *Config) UICloseBehavior() string {
 }
 
 // DesktopDisplayMode normalizes the transcript display mode. Default is
-// "minimal" (collapsed model-generated intermediate items).
+// "standard" (flat rendering, no folding).
 func (c *Config) DesktopDisplayMode() string {
 	switch strings.ToLower(strings.TrimSpace(c.Desktop.DisplayMode)) {
 	case "standard":
 		return "standard"
-	case "compact":
+	case "compact", "minimal":
 		return "compact"
-	case "minimal":
-		return "minimal"
 	default:
-		return "minimal"
+		return "standard"
 	}
+}
+
+// DesktopStatusBarStyle normalizes the desktop status bar metric label style.
+// Default is "text"; explicit "icon" preserves the user's compact choice.
+func (c *Config) DesktopStatusBarStyle() string {
+	switch strings.ToLower(strings.TrimSpace(c.Desktop.StatusBarStyle)) {
+	case "icon":
+		return "icon"
+	case "text":
+		return "text"
+	default:
+		return "text"
+	}
+}
+
+var defaultDesktopStatusBarItems = []string{
+	"model",
+	"cache",
+	"cache_avg",
+	"session_tokens",
+	"turn_tokens",
+	"turn_cost",
+	"session_turns",
+	"context",
+	"compact",
+	"cost",
+	"balance",
+}
+
+var knownDesktopStatusBarItems = map[string]bool{
+	"model":          true,
+	"cache":          true,
+	"cache_avg":      true,
+	"session_tokens": true,
+	"turn_tokens":    true,
+	"turn_cost":      true,
+	"session_turns":  true,
+	"context":        true,
+	"compact":        true,
+	"cost":           true,
+	"balance":        true,
+}
+
+// DefaultDesktopStatusBarItems returns the default ordered visible desktop
+// status bar items.
+func DefaultDesktopStatusBarItems() []string {
+	return append([]string(nil), defaultDesktopStatusBarItems...)
+}
+
+// DesktopStatusBarItems normalizes the ordered visible desktop status bar items.
+// An unset or empty list uses the default full set; explicit non-empty lists
+// preserve user order and omit hidden items.
+func (c *Config) DesktopStatusBarItems() []string {
+	return normalizeDesktopStatusBarItems(c.Desktop.StatusBarItems)
+}
+
+func normalizeDesktopStatusBarItems(items []string) []string {
+	out := make([]string, 0, len(items))
+	seen := map[string]bool{}
+	for _, raw := range items {
+		id := strings.TrimSpace(raw)
+		if !knownDesktopStatusBarItems[id] || seen[id] {
+			continue
+		}
+		out = append(out, id)
+		seen[id] = true
+	}
+	if len(out) == 0 {
+		return DefaultDesktopStatusBarItems()
+	}
+	return out
 }
 
 // DesktopCheckUpdates reports whether the desktop should check for updates on
@@ -214,6 +285,40 @@ func (c *Config) DesktopCheckUpdates() bool {
 		return true
 	}
 	return *c.Desktop.CheckUpdates
+}
+
+// ColdResumePruneEnabled reports whether stale tool results are elided when a
+// session resumes past the provider cache window. Default true (cheaper cold
+// restart); users keep full history by disabling it.
+func (c *Config) ColdResumePruneEnabled() bool {
+	if c == nil || c.Agent.ColdResumePrune == nil {
+		return true
+	}
+	return *c.Agent.ColdResumePrune
+}
+
+// ReasoningLanguage normalizes agent.reasoning_language. Empty means auto:
+// visible reasoning follows the conversation language already described by the
+// stable LanguagePolicy. Legacy "default" is treated as auto.
+func (c *Config) ReasoningLanguage() string {
+	if c == nil {
+		return "auto"
+	}
+	return NormalizeReasoningLanguage(c.Agent.ReasoningLanguage)
+}
+
+// NormalizeReasoningLanguage returns one of auto|zh|en.
+func NormalizeReasoningLanguage(lang string) string {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "", "auto", "follow", "conversation", "detect", "default", "model", "model-default", "model_default", "provider":
+		return "auto"
+	case "zh", "cn", "chinese", "中文":
+		return "zh"
+	case "en", "english":
+		return "en"
+	default:
+		return "auto"
+	}
 }
 
 // DesktopTelemetry reports whether the desktop sends the anonymous launch ping.
@@ -336,15 +441,16 @@ func (c BuiltInMCPConfig) EnabledNames() []string {
 
 // BotConfig 控制多渠道 IM bot 消息网关。
 type BotConfig struct {
-	Enabled     bool                  `toml:"enabled"`
-	Model       string                `toml:"model"` // 用于 bot 的模型名，空则用 default_model
-	MaxSteps    int                   `toml:"max_steps"`
-	DebounceMs  int                   `toml:"debounce_ms"` // 消息合并窗口，毫秒
-	Allowlist   BotAllowlist          `toml:"allowlist"`
-	QQ          QQBotConfig           `toml:"qq"`
-	Feishu      FeishuBotConfig       `toml:"feishu"`
-	Weixin      WeixinBotConfig       `toml:"weixin"`
-	Connections []BotConnectionConfig `toml:"connections"`
+	Enabled          bool                  `toml:"enabled"`
+	Model            string                `toml:"model"` // 用于 bot 的模型名，空则用 default_model
+	ToolApprovalMode string                `toml:"tool_approval_mode"`
+	MaxSteps         int                   `toml:"max_steps"`
+	DebounceMs       int                   `toml:"debounce_ms"` // 消息合并窗口，毫秒
+	Allowlist        BotAllowlist          `toml:"allowlist"`
+	QQ               QQBotConfig           `toml:"qq"`
+	Feishu           FeishuBotConfig       `toml:"feishu"`
+	Weixin           WeixinBotConfig       `toml:"weixin"`
+	Connections      []BotConnectionConfig `toml:"connections"`
 }
 
 // BotAllowlist 控制哪些用户可以使用 bot。
@@ -391,19 +497,20 @@ type WeixinBotConfig struct {
 // knobs so the UI can expose a simple "connect first" flow while old configs
 // keep working.
 type BotConnectionConfig struct {
-	ID              string                        `toml:"id"`
-	Provider        string                        `toml:"provider"` // qq|feishu|weixin
-	Domain          string                        `toml:"domain"`   // feishu|lark|weixin|qq
-	Label           string                        `toml:"label"`
-	Enabled         bool                          `toml:"enabled"`
-	Status          string                        `toml:"status"` // disconnected|pending|connected|error
-	Model           string                        `toml:"model"`
-	WorkspaceRoot   string                        `toml:"workspace_root"`
-	Credential      BotConnectionCredential       `toml:"credential"`
-	SessionMappings []BotConnectionSessionMapping `toml:"session_mappings"`
-	LastError       string                        `toml:"last_error"`
-	CreatedAt       string                        `toml:"created_at"`
-	UpdatedAt       string                        `toml:"updated_at"`
+	ID               string                        `toml:"id"`
+	Provider         string                        `toml:"provider"` // qq|feishu|weixin
+	Domain           string                        `toml:"domain"`   // feishu|lark|weixin|qq
+	Label            string                        `toml:"label"`
+	Enabled          bool                          `toml:"enabled"`
+	Status           string                        `toml:"status"` // disconnected|pending|connected|error
+	Model            string                        `toml:"model"`
+	ToolApprovalMode string                        `toml:"tool_approval_mode"`
+	WorkspaceRoot    string                        `toml:"workspace_root"`
+	Credential       BotConnectionCredential       `toml:"credential"`
+	SessionMappings  []BotConnectionSessionMapping `toml:"session_mappings"`
+	LastError        string                        `toml:"last_error"`
+	CreatedAt        string                        `toml:"created_at"`
+	UpdatedAt        string                        `toml:"updated_at"`
 }
 
 type BotConnectionCredential struct {
@@ -677,6 +784,10 @@ type AgentConfig struct {
 	// plan mode automatically: "off" keeps plan mode manual, "on" enables the
 	// approval gate. Legacy "ask" is treated as "on".
 	AutoPlan string `toml:"auto_plan"`
+	// ReasoningLanguage controls the preferred language for visible reasoning
+	// text. Empty/auto follows the conversation language. Applied as transient
+	// turn context, not the stable prompt.
+	ReasoningLanguage string `toml:"reasoning_language"`
 	// AutoPlanClassifier optionally names a provider/model used to classify
 	// borderline auto-plan decisions. Empty keeps the zero-cost heuristic path.
 	AutoPlanClassifier string `toml:"auto_plan_classifier"`
@@ -684,6 +795,9 @@ type AgentConfig struct {
 	SoftCompactRatio  float64 `toml:"soft_compact_ratio"`
 	CompactRatio      float64 `toml:"compact_ratio"`
 	CompactForceRatio float64 `toml:"compact_force_ratio"`
+	// ColdResumePrune elides stale tool results when a session reopens past the
+	// provider cache window. nil = default enabled.
+	ColdResumePrune *bool `toml:"cold_resume_prune"`
 }
 
 // ProviderEntry declares a model provider instance. ContextWindow is the model's
@@ -709,6 +823,16 @@ type ProviderEntry struct {
 	// Empty = provider default.
 	Thinking string `toml:"thinking"`
 	Effort   string `toml:"effort"`
+	// Vision marks the model as accepting image input. When set, images the user
+	// attaches are embedded in the request (image_url for openai-kind, base64
+	// blocks for anthropic). Off by default: text-only models 400 on image input,
+	// and image tokens are heavy — gating keeps text-only flows cheap (the prompt
+	// prefix is byte-identical with no image, so the cache is unaffected either way).
+	Vision bool `toml:"vision"`
+	// VisionDetail sets the openai image_url detail hint (low|high); empty = auto
+	// (the field is omitted). "low" caps an image to a fixed ~85 tokens for cheap
+	// coarse reads; ignored by providers without the knob (e.g. anthropic).
+	VisionDetail string `toml:"vision_detail"`
 	// ReasoningProtocol selects the request shape for OpenAI-compatible reasoning
 	// models. Empty/auto uses the model capability registry plus endpoint
 	// heuristics; none disables automatic reasoning controls for this provider.
@@ -1019,12 +1143,13 @@ func Default() *Config {
 		LSP:     LSPConfig{Enabled: true},
 		Network: NetworkConfig{ProxyMode: netclient.ModeAuto},
 		Bot: BotConfig{
-			MaxSteps:   25,
-			DebounceMs: 1500,
-			Allowlist:  BotAllowlist{Enabled: true},
-			QQ:         QQBotConfig{AppSecretEnv: "QQ_BOT_APP_SECRET"},
-			Feishu:     FeishuBotConfig{Domain: "feishu", AppSecretEnv: "FEISHU_BOT_APP_SECRET", Mode: "webhook", WebhookPort: 8080, RequireMention: true},
-			Weixin:     WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
+			ToolApprovalMode: "ask",
+			MaxSteps:         25,
+			DebounceMs:       1500,
+			Allowlist:        BotAllowlist{Enabled: true},
+			QQ:               QQBotConfig{AppSecretEnv: "QQ_BOT_APP_SECRET"},
+			Feishu:           FeishuBotConfig{Domain: "feishu", AppSecretEnv: "FEISHU_BOT_APP_SECRET", Mode: "webhook", WebhookPort: 8080, RequireMention: true},
+			Weixin:           WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
 		},
 		Providers: []ProviderEntry{
 			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}},

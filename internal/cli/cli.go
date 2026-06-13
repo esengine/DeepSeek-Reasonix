@@ -171,7 +171,22 @@ func setup(ctx context.Context, modelName string, maxStepsOverride int, requireK
 		MaxSteps:   maxStepsOverride,
 		RequireKey: requireKey,
 		Sink:       sink,
+		SessionDir: resolveCLISessionDir(),
 	})
+}
+
+// resolveCLISessionDir returns the session dir for CLI invocations. When the
+// current working directory maps to a project session dir, the project dir is
+// used so /resume shows project history. Falls back to the global session dir.
+func resolveCLISessionDir() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return config.SessionDir()
+	}
+	if projDir := config.ProjectSessionDir(cwd); projDir != "" && projDir != config.SessionDir() {
+		return projDir
+	}
+	return config.SessionDir()
 }
 
 // setupQuiet is like setup but suppresses plugin subprocess stderr output.
@@ -281,12 +296,8 @@ func runAgent(args []string) int {
 		}
 		ctrl.Resume(loaded, *resume)
 	} else if *cont {
-		sessions, err := agent.ListSessions(config.SessionDir())
-		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		if len(sessions) == 0 {
+		sessions, err := agent.ListSessions(ctrl.SessionDir())
+		if err != nil || len(sessions) == 0 {
 			fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
 			return 1
 		}
@@ -398,12 +409,8 @@ func chatREPL(args []string) int {
 		}
 		resumePath = path
 	case *cont:
-		sessions, err := agent.ListSessions(config.SessionDir())
-		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		if len(sessions) == 0 {
+		sessions, err := agent.ListSessions(resolveCLISessionDir())
+		if err != nil || len(sessions) == 0 {
 			fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
 			return 1
 		}
@@ -764,12 +771,8 @@ func interactiveSetup(configPath, envPath string) int {
 // message so the user can pick one. Returns the chosen path and a process
 // exit code (non-zero when there's nothing to pick or the user cancelled).
 func pickSessionToResume() (string, int) {
-	sessions, err := agent.ListSessions(config.SessionDir())
-	if err != nil {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-		return "", 1
-	}
-	if len(sessions) == 0 {
+	sessions, err := agent.ListSessions(resolveCLISessionDir())
+	if err != nil || len(sessions) == 0 {
 		fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
 		return "", 1
 	}
@@ -1708,6 +1711,8 @@ func configCommand(args []string) int {
 	switch args[0] {
 	case "auto-plan":
 		return configAutoPlanCommand(args[1:])
+	case "reasoning-language":
+		return configReasoningLanguageCommand(args[1:])
 	default:
 		configUsage()
 		return 2
@@ -1776,14 +1781,81 @@ func configAutoPlanCommand(args []string) int {
 	return 0
 }
 
+func configReasoningLanguageCommand(args []string) int {
+	fs := flag.NewFlagSet("config reasoning-language", flag.ContinueOnError)
+	local := fs.Bool("local", false, "write ./reasonix.toml instead of the user config")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	rest := fs.Args()
+	if len(rest) > 1 {
+		configReasoningLanguageUsage()
+		return 2
+	}
+	if len(rest) == 0 {
+		cfg, err := config.Load()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		fmt.Printf("reasoning_language = %q\n", cliReasoningLanguageMode(cfg.ReasoningLanguage()))
+		return 0
+	}
+	mode, err := parseCLIReasoningLanguage(rest[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	path := config.UserConfigPath()
+	if *local {
+		path = "reasonix.toml"
+	}
+	if path == "" {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "cannot resolve config path")
+		return 1
+	}
+	if *local {
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			lang, err := config.SaveMinimalProjectReasoningLanguage(path, mode)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+				return 1
+			}
+			fmt.Printf("reasoning_language = %q (%s)\n", lang, displayPath(path))
+			return 0
+		} else if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+	}
+	cfg := config.LoadForEdit(path)
+	if err := cfg.SetReasoningLanguage(mode); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 1
+	}
+	fmt.Printf("reasoning_language = %q (%s)\n", cfg.ReasoningLanguage(), displayPath(path))
+	return 0
+}
+
 func configUsage() {
 	fmt.Print(`Usage:
   reasonix config auto-plan [--local] [off|on]
+  reasonix config reasoning-language [--local] [auto|zh|en]
 `)
 }
 
 func configAutoPlanUsage() {
 	fmt.Print(`Usage:
   reasonix config auto-plan [--local] [off|on]
+`)
+}
+
+func configReasoningLanguageUsage() {
+	fmt.Print(`Usage:
+  reasonix config reasoning-language [--local] [auto|zh|en]
 `)
 }

@@ -92,8 +92,21 @@ export function normalizeForFingerprint(kind: string, message: string): string {
       .replace(/[A-Za-z]:\\[^\s)('"]+/g, "<path>")
       .replace(/(?:wails|https?|file):\/\/[^\s)('"]+/g, "<url>")
       .replace(/0x[0-9a-fA-F]+/g, "<addr>")
+      .replace(/^build [0-9a-f]+$/gm, "build <commit>")
       .replace(/:\d+(?::\d+)?/g, ":<n>")
   );
+}
+
+// One-line human summary for the dashboard list. Frontend reports are formatted
+// "[label]\n\n<detail>", so a bare label alone is folded together with its detail.
+export function crashTitle(message: string): string {
+  const lines = message
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  let head = lines[0] ?? "";
+  if (/^\[[^\]]+\]$/.test(head) && lines[1]) head = `${head} ${lines[1]}`;
+  return head.slice(0, 200);
 }
 
 async function sha256Hex(s: string): Promise<string> {
@@ -124,14 +137,15 @@ async function handleReport(request: Request, env: Env): Promise<Response> {
 
   const fingerprint = await sha256Hex(normalizeForFingerprint(r.kind, r.message));
   const now = new Date().toISOString();
+  const title = crashTitle(r.message);
 
   await env.DB.prepare(
-    `INSERT INTO groups (fingerprint, kind, count, first_seen, last_seen, last_version)
-     VALUES (?1, ?2, 1, ?3, ?3, ?4)
+    `INSERT INTO groups (fingerprint, kind, count, first_seen, last_seen, last_version, title)
+     VALUES (?1, ?2, 1, ?3, ?3, ?4, ?5)
      ON CONFLICT (fingerprint) DO UPDATE SET
-       count = count + 1, last_seen = ?3, last_version = ?4`,
+       count = count + 1, last_seen = ?3, last_version = ?4, title = ?5`,
   )
-    .bind(fingerprint, r.kind, now, r.version)
+    .bind(fingerprint, r.kind, now, r.version, title)
     .run();
 
   const group = await env.DB.prepare("SELECT count FROM groups WHERE fingerprint = ?1")
@@ -291,8 +305,8 @@ async function handleStats(env: Env, user: User): Promise<Response> {
       "SELECT os || ' ' || arch AS label, COUNT(DISTINCT install_id) AS users FROM pings WHERE date >= date('now', '-6 day') GROUP BY label ORDER BY users DESC",
     ).all<{ label: string; users: number }>(),
     env.DB.prepare(
-      "SELECT fingerprint, kind, count, last_version, substr(last_seen, 1, 10) AS seen, status FROM groups ORDER BY last_seen DESC LIMIT 25",
-    ).all<{ fingerprint: string; kind: string; count: number; last_version: string; seen: string; status: string }>(),
+      "SELECT fingerprint, kind, count, last_version, substr(last_seen, 1, 10) AS seen, status, title FROM groups ORDER BY last_seen DESC LIMIT 25",
+    ).all<{ fingerprint: string; kind: string; count: number; last_version: string; seen: string; status: string; title: string }>(),
     env.DB.prepare(
       "SELECT signal, bucket, SUM(count) AS total FROM metrics WHERE date >= date('now', '-6 day') GROUP BY signal, bucket ORDER BY signal, total DESC",
     ).all<{ signal: string; bucket: string; total: number }>(),

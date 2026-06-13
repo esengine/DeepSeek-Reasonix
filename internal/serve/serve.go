@@ -921,15 +921,28 @@ func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot delete active session", http.StatusConflict)
 		return
 	}
+	destroy := s.ctl().BeginDestroySession(abs)
 	if err := os.Remove(abs); err != nil {
+		go finishSessionDestroy(destroy)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if err := agent.DeleteSubagentsByParent(dir, agent.BranchID(abs)); err != nil {
+		go finishSessionDestroy(destroy)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	go finishSessionDestroy(destroy)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func finishSessionDestroy(destroy control.SessionDestroyHandle) {
+	if destroy.Wait != nil {
+		destroy.Wait()
+	}
+	if destroy.Finish != nil {
+		destroy.Finish()
+	}
 }
 
 // sessionTitle returns a title for a session: the cached flash-generated title
@@ -982,7 +995,7 @@ func previewSessionFile(path string) (string, int) {
 		if m.Role == "user" {
 			turns++
 			if first == "" {
-				first = strings.TrimSpace(agent.HandoffTask(m.Content))
+				first = agent.UserPreviewText(m.Content)
 			}
 		}
 	}

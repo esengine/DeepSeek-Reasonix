@@ -267,49 +267,70 @@ func saveLinuxClipboardImage() (string, error) {
 }
 
 func ImageDataURL(path string) (string, error) {
-	clean, err := cleanAttachmentPath(path)
+	raw, mime, err := readAttachmentImage(path)
 	if err != nil {
 		return "", err
+	}
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(raw), nil
+}
+
+// visionImageDataURL reads an attachment and, unlike ImageDataURL (which feeds
+// the desktop preview at full resolution), downscales/recompresses it before
+// base64 so an oversized photo doesn't balloon the request bytes and image
+// tokens. Best-effort: an undecodable format passes through at original size.
+func visionImageDataURL(path string) (string, error) {
+	raw, mime, err := readAttachmentImage(path)
+	if err != nil {
+		return "", err
+	}
+	raw, mime = compressForVision(raw, mime)
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(raw), nil
+}
+
+func readAttachmentImage(path string) (raw []byte, mime string, err error) {
+	clean, err := cleanAttachmentPath(path)
+	if err != nil {
+		return nil, "", err
 	}
 	info, err := os.Lstat(clean)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("attachment path must not be a symlink")
+		return nil, "", fmt.Errorf("attachment path must not be a symlink")
 	}
 	if info.IsDir() || info.Size() <= 0 || info.Size() > maxImageAttachmentBytes {
-		return "", fmt.Errorf("attachment image must be between 1 byte and 10 MB")
+		return nil, "", fmt.Errorf("attachment image must be between 1 byte and 10 MB")
 	}
 	f, err := os.Open(clean)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	defer f.Close()
 	opened, err := f.Stat()
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	if !os.SameFile(info, opened) {
-		return "", fmt.Errorf("attachment changed while opening")
+		return nil, "", fmt.Errorf("attachment changed while opening")
 	}
-	raw, err := io.ReadAll(io.LimitReader(f, maxImageAttachmentBytes+1))
+	raw, err = io.ReadAll(io.LimitReader(f, maxImageAttachmentBytes+1))
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	if len(raw) == 0 || len(raw) > maxImageAttachmentBytes {
-		return "", fmt.Errorf("attachment image must be between 1 byte and 10 MB")
+		return nil, "", fmt.Errorf("attachment image must be between 1 byte and 10 MB")
 	}
 	if after, err := f.Stat(); err != nil {
-		return "", err
+		return nil, "", err
 	} else if !os.SameFile(opened, after) || after.Size() != opened.Size() {
-		return "", fmt.Errorf("attachment changed while reading")
+		return nil, "", fmt.Errorf("attachment changed while reading")
 	}
-	mime := detectedImageMime(raw)
+	mime = detectedImageMime(raw)
 	if mime == "" {
-		return "", fmt.Errorf("attachment is not an image")
+		return nil, "", fmt.Errorf("attachment is not an image")
 	}
-	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(raw), nil
+	return raw, mime, nil
 }
 
 func cleanAttachmentPath(path string) (string, error) {

@@ -4,10 +4,11 @@
 // new topic.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Archive, ChevronRight, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, ListCollapse, ListRestart, MessageSquare } from "lucide-react";
+import { Archive, ChevronRight, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, ListCollapse, ListRestart, MessageSquare, Clock } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import type { ProjectNode, ProjectTopicStatus } from "../lib/types";
+import { topicActivityTime } from "../lib/session";
 import { getLocale, useT, type DictKey, type Translator } from "../lib/i18n";
 import { PROJECT_COLOR_OPTIONS, projectColorValue } from "../lib/projectColors";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
@@ -25,6 +26,8 @@ interface ProjectTreeProps {
   onRenameTopic?: (topicId: string, title: string) => Promise<void> | void;
   onTopicsChanged?: () => Promise<void> | void;
   refreshSignal?: number;
+  timeFilter: "all" | "10" | "20" | "1h" | "3h" | "5h" | "1d";
+  onTimeFilterChange: (filter: "all" | "10" | "20" | "1h" | "3h" | "5h" | "1d") => void;
 }
 
 type ProjectTreeImTopicSource = {
@@ -207,6 +210,8 @@ export function ProjectTree({
   onRenameTopic,
   onTopicsChanged,
   refreshSignal,
+  timeFilter,
+  onTimeFilterChange,
 }: ProjectTreeProps) {
   const t = useT();
   const [tree, setTree] = useState<ProjectNode[]>([]);
@@ -228,6 +233,9 @@ export function ProjectTree({
   const [dropProject, setDropProject] = useState<{ root: string; position: ProjectDropPosition } | null>(null);
   const [collapseSnapshot, setCollapseSnapshot] = useState<CollapseSnapshot | null>(null);
   const [platform, setPlatform] = useState("");
+  const filterRef = useRef<HTMLDivElement>(null);
+  const filterTriggerRef = useRef<HTMLButtonElement>(null);
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const creatingRef = useRef(false);
   const manuallyCollapsedRef = useRef(manuallyCollapsed);
 
@@ -282,6 +290,43 @@ export function ProjectTree({
       cancelled = true;
     };
   }, []);
+
+  // Close the time-filter menu on outside click or Escape; move focus into the
+  // menu on open and back to the trigger on Escape so it is keyboard-operable.
+  useEffect(() => {
+    if (!filterMenuOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFilterMenuOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setFilterMenuOpen(false);
+        filterTriggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    const menu = filterRef.current?.querySelector<HTMLElement>(".project-tree__time-filter-menu");
+    (menu?.querySelector<HTMLButtonElement>(".project-tree__time-filter-opt--on") ??
+      menu?.querySelector<HTMLButtonElement>('[role="menuitem"]'))?.focus();
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [filterMenuOpen]);
+
+  const moveMenuFocus = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+    e.preventDefault();
+    const items = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+    if (items.length === 0) return;
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next = e.key === "Home" ? 0
+      : e.key === "End" ? items.length - 1
+      : e.key === "ArrowDown" ? (current + 1 + items.length) % items.length
+      : (current - 1 + items.length) % items.length;
+    items[next]?.focus();
+  };
 
   const toggleExpand = (key: string) => {
     const willCollapse = expanded.has(key);
@@ -493,20 +538,57 @@ export function ProjectTree({
 
   const visibleTree = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return tree;
-    const matches = (node: ProjectNode) =>
+    // Time filter: compute cutoff timestamp.
+    const diff = timeFilter === "1h" ? 60 * 60 * 1000
+      : timeFilter === "3h" ? 3 * 60 * 60 * 1000
+      : timeFilter === "5h" ? 5 * 60 * 60 * 1000
+      : timeFilter === "1d" ? 24 * 60 * 60 * 1000
+      : 0;
+    const nthLatestActivity = (n: number): number | null => {
+      const times = new Set<number>();
+      const collect = (nodes: ProjectNode[]) => {
+        for (const node of nodes) {
+          if (node.kind === "topic" || node.kind === "global_topic") times.add(topicActivityTime(node));
+          collect(asArray(node.children));
+        }
+      };
+      collect(tree);
+      const sorted = [...times].sort((a, b) => b - a);
+      return sorted.length === 0 ? null : sorted[Math.min(n, sorted.length) - 1];
+    };
+    const cutoff: number | null = timeFilter === "all" ? null
+      : timeFilter === "10" ? nthLatestActivity(10)
+      : timeFilter === "20" ? nthLatestActivity(20)
+      : Date.now() - diff;
+    const topicMatchesTime = (node: ProjectNode) => {
+      if (cutoff === null) return true;
+      return topicActivityTime(node) >= cutoff;
+    };
+    const matchesQuery = (node: ProjectNode) =>
       [node.label, node.root, node.topicId].some((value) => (value ?? "").toLowerCase().includes(q));
     const filterNode = (node: ProjectNode): ProjectNode | null => {
+      // For folder nodes: always show when time filter is active (so the tree structure remains navigable).
+      const isFolder = node.kind === "project" || node.kind === "global_folder";
       const children = asArray(node.children)
         .map(filterNode)
         .filter((child): child is ProjectNode => child !== null);
-      if (matches(node) || children.length > 0) return { ...node, children };
-      return null;
+      if (isFolder) {
+        if (cutoff !== null && children.length === 0 && !matchesQuery(node) && q === "") return null;
+        if (children.length > 0 || matchesQuery(node)) return { ...node, children };
+        if (q) return null;
+        // With only time filter, show folder if it has any child that matches the time.
+        const hasTimeMatch = asArray(node.children).some((c) => topicMatchesTime(c));
+        return hasTimeMatch ? { ...node, children: asArray(node.children).filter(topicMatchesTime) } : null;
+      }
+      if (!q && cutoff === null) return node;
+      if (cutoff !== null && !topicMatchesTime(node)) return null;
+      if (q && !matchesQuery(node)) return null;
+      return node;
     };
     return tree
       .map(filterNode)
       .filter((node): node is ProjectNode => node !== null);
-  }, [query, tree]);
+  }, [query, tree, timeFilter]);
 
   const projectDragEnabled = query.trim() === "";
 
@@ -940,6 +1022,88 @@ export function ProjectTree({
           {t("projectTree.workspaceTitle")}
         </span>
         <span className="project-tree__header-actions">
+          <Tooltip label={t("projectTree.timeFilter")} className="project-tree__action-slot project-tree__header-action-slot project-tree__header-action-slot--filter">
+            <div ref={filterRef} className="project-tree__time-filter">
+              <button
+                ref={filterTriggerRef}
+                type="button"
+                className={`project-tree__header-action-btn${timeFilter !== "all" ? " project-tree__header-action-btn--active" : ""}`}
+                aria-label={t("projectTree.timeFilter")}
+                aria-haspopup="menu"
+                aria-expanded={filterMenuOpen}
+                onClick={() => setFilterMenuOpen(!filterMenuOpen)}
+              >
+                <Clock size={14} />
+                {timeFilter !== "all" && (
+                  <span className="project-tree__time-filter-label">
+                    {timeFilter === "1d" ? "24h" : timeFilter}
+                  </span>
+                )}
+              </button>
+              {filterMenuOpen && (
+                <div className="project-tree__time-filter-menu" role="menu" aria-label={t("projectTree.timeFilter")} onKeyDown={moveMenuFocus}>
+                  <button
+                    type="button"
+                    className={`project-tree__time-filter-opt${timeFilter === "all" ? " project-tree__time-filter-opt--on" : ""}`}
+                    onClick={() => { onTimeFilterChange("all"); setFilterMenuOpen(false); }}
+                    role="menuitem"
+                  >
+                    {t("projectTree.timeFilterAll")}
+                  </button>
+                  <div className="project-tree__time-filter-sep" role="separator" />
+                  <button
+                    type="button"
+                    className={`project-tree__time-filter-opt${timeFilter === "10" ? " project-tree__time-filter-opt--on" : ""}`}
+                    onClick={() => { onTimeFilterChange("10"); setFilterMenuOpen(false); }}
+                    role="menuitem"
+                  >
+                    {t("projectTree.timeFilter10")}
+                  </button>
+                  <button
+                    type="button"
+                    className={`project-tree__time-filter-opt${timeFilter === "20" ? " project-tree__time-filter-opt--on" : ""}`}
+                    onClick={() => { onTimeFilterChange("20"); setFilterMenuOpen(false); }}
+                    role="menuitem"
+                  >
+                    {t("projectTree.timeFilter20")}
+                  </button>
+                  <div className="project-tree__time-filter-sep" role="separator" />
+                  <button
+                    type="button"
+                    className={`project-tree__time-filter-opt${timeFilter === "1h" ? " project-tree__time-filter-opt--on" : ""}`}
+                    onClick={() => { onTimeFilterChange("1h"); setFilterMenuOpen(false); }}
+                    role="menuitem"
+                  >
+                    {t("projectTree.timeFilter1h")}
+                  </button>
+                  <button
+                    type="button"
+                    className={`project-tree__time-filter-opt${timeFilter === "3h" ? " project-tree__time-filter-opt--on" : ""}`}
+                    onClick={() => { onTimeFilterChange("3h"); setFilterMenuOpen(false); }}
+                    role="menuitem"
+                  >
+                    {t("projectTree.timeFilter3h")}
+                  </button>
+                  <button
+                    type="button"
+                    className={`project-tree__time-filter-opt${timeFilter === "5h" ? " project-tree__time-filter-opt--on" : ""}`}
+                    onClick={() => { onTimeFilterChange("5h"); setFilterMenuOpen(false); }}
+                    role="menuitem"
+                  >
+                    {t("projectTree.timeFilter5h")}
+                  </button>
+                  <button
+                    type="button"
+                    className={`project-tree__time-filter-opt${timeFilter === "1d" ? " project-tree__time-filter-opt--on" : ""}`}
+                    onClick={() => { onTimeFilterChange("1d"); setFilterMenuOpen(false); }}
+                    role="menuitem"
+                  >
+                    {t("projectTree.timeFilter1d")}
+                  </button>
+                </div>
+              )}
+            </div>
+          </Tooltip>
           <Tooltip label={collapseToggleLabel} className="project-tree__action-slot project-tree__header-action-slot project-tree__action-slot--collapse">
             <button
               type="button"
@@ -969,6 +1133,16 @@ export function ProjectTree({
         {visibleTree.length === 0 ? (
           query.trim() ? (
             <div className="project-tree__empty">{t("projectTree.emptyNoMatch")}</div>
+          ) : timeFilter !== "all" ? (
+            <div className="project-tree__empty">{t("projectTree.emptyNoTimeFilterMatch")}
+              <button
+                type="button"
+                className="project-tree__empty-primary"
+                onClick={() => onTimeFilterChange("all")}
+              >
+                {t("projectTree.clearTimeFilter")}
+              </button>
+            </div>
           ) : (
             <div className="project-tree__empty-state">
               <div className="project-tree__empty project-tree__empty--subtle">{t("projectTree.emptyNoProjects")}</div>

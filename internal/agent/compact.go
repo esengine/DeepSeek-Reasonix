@@ -95,11 +95,9 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	}
 	if u.PromptTokens < high {
 		// A turn that sits under the trigger is the breathing room a healthy
-		// compaction buys; it clears the stuck latch, the run counter, and the
-		// one-shot soft notice.
+		// compaction buys; it clears the stuck latch and the run counter.
 		a.consecutiveCompacts = 0
 		a.compactStuck = false
-		a.softCompactNoticed = false
 		return
 	}
 	if a.compactStuck {

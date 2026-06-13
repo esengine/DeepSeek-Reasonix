@@ -21,51 +21,46 @@ import { openExternal } from "../lib/bridge";
 
 const STREAMING_CURSOR_CLASS = "cursor";
 
+/**
+ * Find the deepest last-element child of `container` that can hold inline
+ * content.  Walks `lastElementChild` recursively, stopping at `<pre>` blocks
+ * and void elements.  O(depth) — far cheaper than a full tree walker.
+ */
+function deepestLastInlineElement(container: HTMLElement): HTMLElement {
+  let target: HTMLElement = container;
+  while (target.lastElementChild) {
+    const last = target.lastElementChild as HTMLElement;
+    const tag = last.tagName;
+    if (tag === "PRE" || tag === "BR" || tag === "HR" || tag === "IMG") break;
+    target = last;
+  }
+  return target;
+}
+
 // Inject a blinking cursor span at the end of the last inline content node
 // inside the container, skipping code blocks entirely.  Called from
 // useLayoutEffect so the cursor appears synchronously before paint.
+//
+// Optimisation: during streaming the cursor is usually already in the right
+// place (React updates text in-place within the same element), so we check
+// position first and skip the DOM mutation entirely when nothing moved.
 function injectStreamingCursor(container: HTMLElement): void {
-  // Remove any cursor injected by a previous render cycle.
-  container
-    .querySelectorAll(`.${STREAMING_CURSOR_CLASS}`)
-    .forEach((el) => el.remove());
+  const target = deepestLastInlineElement(container);
 
-  // Walk the rendered tree and collect every text node outside <pre> blocks.
-  const walker = document.createTreeWalker(
-    container,
-    NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
-    {
-      acceptNode(node) {
-        if (node.nodeType === Node.ELEMENT_NODE) {
-          const tag = (node as Element).tagName;
-          // Skip entire code-block subtrees.
-          if (tag === "PRE") return NodeFilter.FILTER_REJECT;
-          return NodeFilter.FILTER_SKIP;
-        }
-        // Accept text nodes (but reject whitespace-only noise).
-        if (node.nodeType === Node.TEXT_NODE) {
-          return (node as Text).data.trim()
-            ? NodeFilter.FILTER_ACCEPT
-            : NodeFilter.FILTER_SKIP;
-        }
-        return NodeFilter.FILTER_SKIP;
-      },
-    },
-  );
+  // Check whether the cursor is already correctly positioned.
+  const existing = container.querySelector(`.${STREAMING_CURSOR_CLASS}`);
+  if (existing && existing.parentElement === target && target.lastChild === existing) {
+    return; // still at the end — nothing to do.
+  }
 
-  let lastText: Text | null = null;
-  while (walker.nextNode()) lastText = walker.currentNode as Text;
+  // Remove stale cursor (if any).
+  if (existing) existing.remove();
 
+  // Insert at the new position.
   const cursor = document.createElement("span");
   cursor.className = STREAMING_CURSOR_CLASS;
   cursor.dataset.streamingCursor = "true";
-
-  if (lastText?.parentElement) {
-    lastText.parentElement.appendChild(cursor);
-  } else {
-    // Fallback: no visible text yet (empty streaming start).
-    container.appendChild(cursor);
-  }
+  target.appendChild(cursor);
 }
 
 function removeStreamingCursor(container: HTMLElement): void {

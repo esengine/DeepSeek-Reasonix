@@ -175,6 +175,7 @@ type Messages struct {
 	CmdSandbox      string // /sandbox
 	CmdEffort       string // /effort
 	CmdAutoPlan     string // /auto-plan
+	CmdReasonLang   string // /reasoning-language
 	CmdHelp         string // /help
 	CmdTodo         string // /todo
 	CmdQuit         string // /quit (also accepts /exit as hidden alias)
@@ -456,6 +457,9 @@ func envCandidates() []string {
 
 func setLanguage(tag string) string {
 	switch tag {
+	case "zh-tw", "zh-TW":
+		M = ChineseTraditional
+		return "zh-TW"
 	case "zh":
 		M = Chinese
 		return "zh"
@@ -470,8 +474,12 @@ func setLanguage(tag string) string {
 // unrecognised input so DetectLanguage can fall through to the next candidate.
 func normalize(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.ReplaceAll(s, "_", "-") // zh_TW.UTF-8 → zh-tw.utf-8 (POSIX locales use underscores)
 	if s == "" {
 		return ""
+	}
+	if strings.HasPrefix(s, "zh-tw") || strings.HasPrefix(s, "zh-hant") || strings.Contains(s, "chinese traditional") || strings.Contains(s, "繁體") {
+		return "zh-TW"
 	}
 	if strings.HasPrefix(s, "zh") || strings.Contains(s, "chinese") || strings.Contains(s, "中文") {
 		return "zh"

@@ -2,7 +2,7 @@ import { Check, ChevronDown, ChevronRight, FileText, Pencil, Plus, RefreshCw, Se
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
-import type { MemoryArchive, MemoryFact, MemorySuggestion, MemorySuggestionsView, MemoryView, SkillSuggestion } from "../lib/types";
+import type { MemoryArchive, MemoryFact, MemorySuggestion, MemorySuggestionsView, MemoryView, SkillSuggestion, TabMeta } from "../lib/types";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
 import { ModalCloseButton } from "./ModalCloseButton";
@@ -572,7 +572,7 @@ export function MemoryPanel({
                                     {t("memory.confirmForget")}
                                   </button>
                                 </div>
-                              ) : (
+                               ) : (
                                 <button
                                   className="btn btn--small mem-fact__forget"
                                   onClick={() => setConfirmForget(f.name)}
@@ -591,8 +591,8 @@ export function MemoryPanel({
                   })}
                 </div>
               )}
-              {view.storeDir && (
-                <div className="mem-hint">{t("memory.storedUnder", { dir: view.storeDir })}</div>
+              {(view.storeDir || view.storeGlobalDir) && (
+                <div className="mem-hint">{t("memory.storedUnder", { dir: [view.storeDir, view.storeGlobalDir].filter(Boolean).join(" + ") })}</div>
               )}
             </section>
 
@@ -731,9 +731,9 @@ export function MemoryPanel({
                   </div>
                 ))
               )}
-              {view.storeDir && (
-                <div className="mem-hint" title={view.storeDir}>
-                  {t("memory.storedUnder", { dir: view.storeDir })}
+              {(view.storeDir || view.storeGlobalDir) && (
+                <div className="mem-hint" title={[view.storeDir, view.storeGlobalDir].filter(Boolean).join(" + ")}>
+                  {t("memory.storedUnder", { dir: [view.storeDir, view.storeGlobalDir].filter(Boolean).join(" + ") })}
                 </div>
               )}
             </section>
@@ -748,6 +748,8 @@ export function MemoryPanel({
 export function MemorySettingsPage() {
 	const t = useT();
 	const [view, setView] = useState<MemoryView | null>(null);
+	const [tabs, setTabs] = useState<TabMeta[]>([]);
+	const [selectedTabId, setSelectedTabId] = useState<string | null>(null);
 	const [note, setNote] = useState("");
 	const [scope, setScope] = useState("");
 	const [editingPath, setEditingPath] = useState<string | null>(null);
@@ -773,8 +775,20 @@ export function MemorySettingsPage() {
 	const factRefs = useRef<Record<string, HTMLElement | null>>({});
 
 	const reload = useCallback(async () => {
-		setView(await app.Memory().catch(() => null));
+		const tabId = selectedTabId;
+		setView(tabId ? await app.MemoryForTab(tabId).catch(() => null) : await app.Memory().catch(() => null));
+	}, [selectedTabId]);
+
+	useEffect(() => {
+		app.ListTabs().then((tabList) => {
+			setTabs(tabList);
+			if (!selectedTabId) {
+				const active = tabList.find((tb) => tb.active);
+				if (active) setSelectedTabId(active.id);
+			}
+		}).catch(() => {});
 	}, []);
+
 	useEffect(() => { void reload(); }, [reload]);
 
 	const refreshSuggestions = useCallback(async () => {
@@ -782,7 +796,9 @@ export function MemorySettingsPage() {
 		setSuggestionBusy(true);
 		setError(null);
 		try {
-			const next = await app.MemorySuggestions();
+			const next = selectedTabId
+				? await app.MemorySuggestionsForTab(selectedTabId)
+				: await app.MemorySuggestions();
 			setSuggestions({
 				memories: next.memories ?? [],
 				skills: next.skills ?? [],
@@ -796,7 +812,7 @@ export function MemorySettingsPage() {
 		} finally {
 			setSuggestionBusy(false);
 		}
-	}, [suggestionBusy]);
+	}, [selectedTabId, suggestionBusy]);
 
 	const setAutoSuggestionsPreference = useCallback((enabled: boolean) => {
 		autoSuggestionsRequested.current = false;
@@ -886,7 +902,8 @@ export function MemorySettingsPage() {
 		setBusy(true);
 		setError(null);
 		try {
-			await app.Forget(name);
+			if (selectedTabId) await app.ForgetForTab(selectedTabId, name);
+			else await app.Forget(name);
 			await reload();
 			if (expanded === name) setExpanded(null);
 			setConfirmForget(null);
@@ -895,7 +912,7 @@ export function MemorySettingsPage() {
 		} finally {
 			setBusy(false);
 		}
-	}, [busy, expanded, reload]);
+	}, [busy, expanded, reload, selectedTabId]);
 
 	const scopes = view?.scopes ?? [];
 	const activeScope =
@@ -907,7 +924,8 @@ export function MemorySettingsPage() {
 		setBusy(true);
 		setError(null);
 		try {
-			await app.Remember(activeScope, trimmed);
+			if (selectedTabId) await app.RememberForTab(selectedTabId, activeScope, trimmed);
+			else await app.Remember(activeScope, trimmed);
 			await reload();
 			setNote("");
 			setShowAdd(false);
@@ -916,7 +934,7 @@ export function MemorySettingsPage() {
 		} finally {
 			setBusy(false);
 		}
-	}, [note, busy, activeScope, reload]);
+	}, [note, busy, activeScope, reload, selectedTabId]);
 
 	const startEdit = useCallback((path: string, body: string) => {
 		setEditingPath(path);
@@ -928,7 +946,8 @@ export function MemorySettingsPage() {
 		setBusy(true);
 		setError(null);
 		try {
-			await app.SaveDoc(editingPath, draft);
+			if (selectedTabId) await app.SaveDocForTab(selectedTabId, editingPath, draft);
+			else await app.SaveDoc(editingPath, draft);
 			await reload();
 			setEditingPath(null);
 		} catch (err) {
@@ -936,14 +955,16 @@ export function MemorySettingsPage() {
 		} finally {
 			setBusy(false);
 		}
-	}, [editingPath, busy, draft, reload]);
+	}, [editingPath, busy, draft, reload, selectedTabId]);
 
 	const acceptMemorySuggestion = useCallback(async (candidate: MemorySuggestion) => {
 		if (busy) return;
 		setBusy(true);
 		setError(null);
 		try {
-			const path = await app.AcceptMemorySuggestion(candidate);
+			const path = selectedTabId
+				? await app.AcceptMemorySuggestionForTab(selectedTabId, candidate)
+				: await app.AcceptMemorySuggestion(candidate);
 			setAcceptedSuggestions((prev) => ({ ...prev, [candidate.id]: path || candidate.name }));
 			await reload();
 		} catch (err) {
@@ -951,24 +972,45 @@ export function MemorySettingsPage() {
 		} finally {
 			setBusy(false);
 		}
-	}, [busy, reload]);
+	}, [busy, reload, selectedTabId]);
 
 	const acceptSkillSuggestion = useCallback(async (candidate: SkillSuggestion) => {
 		if (busy) return;
 		setBusy(true);
 		setError(null);
 		try {
-			const path = await app.AcceptSkillSuggestion(candidate);
+			const path = selectedTabId
+				? await app.AcceptSkillSuggestionForTab(selectedTabId, candidate)
+				: await app.AcceptSkillSuggestion(candidate);
 			setAcceptedSuggestions((prev) => ({ ...prev, [candidate.id]: path || candidate.name }));
 		} catch (err) {
 			setError(errorMessage(err));
 		} finally {
 			setBusy(false);
 		}
-	}, [busy]);
+	}, [busy, selectedTabId]);
 
 	if (!view?.available) {
-		return <div className="empty">{t("memory.unavailable")}</div>;
+		return (
+			<>
+				{tabs.length > 1 && (
+					<div className="mem-tab-selector">
+						<select
+							className="mem-tab-select"
+							value={selectedTabId ?? ""}
+							onChange={(e) => setSelectedTabId(e.target.value || null)}
+						>
+							{tabs.map((tb) => (
+								<option key={tb.id} value={tb.id}>
+									{tb.label || tb.workspaceName || tb.scope || tb.id}
+								</option>
+							))}
+						</select>
+					</div>
+				)}
+				<div className="empty">{t("memory.unavailable")}</div>
+			</>
+		);
 	}
 
 	const hasSavedFilters = facts.length > 0;
@@ -1038,6 +1080,21 @@ export function MemorySettingsPage() {
 					{suggestionTotal(suggestions) > 0 && <span className="settings-subtab__count">{suggestionTotal(suggestions)}</span>}
 				</button>
 			</div>
+			{tabs.length > 1 && (
+				<div className="mem-tab-selector">
+					<select
+						className="mem-tab-select"
+						value={selectedTabId ?? ""}
+						onChange={(e) => setSelectedTabId(e.target.value || null)}
+					>
+						{tabs.map((tb) => (
+							<option key={tb.id} value={tb.id}>
+								{tb.label || tb.workspaceName || tb.scope}
+							</option>
+						))}
+					</select>
+				</div>
+			)}
 
 			{tab === "saved" && <section className="mem-section">
 				<div className="mem-section__head">
@@ -1265,6 +1322,9 @@ export function MemorySettingsPage() {
 						})}
 					</div>
 				)}
+			{(view.storeDir || view.storeGlobalDir) && (
+				<div className="mem-hint">{t("memory.storedUnder", { dir: [view.storeDir, view.storeGlobalDir].filter(Boolean).join(" + ") })}</div>
+			)}
 			</section>}
 
 			{tab === "suggestions" && <section className="mem-section">

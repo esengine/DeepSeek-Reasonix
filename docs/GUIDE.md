@@ -12,6 +12,7 @@
 ## Contents
 
 - [Configuration](#configuration)
+- [Reasoning language](./REASONING_LANGUAGE.md)
 - [Mode shortcuts quick map](#mode-shortcuts-quick-map)
 - [Permissions & sandbox](#permissions--sandbox)
 - [Plugins (MCP)](#plugins-mcp)
@@ -27,6 +28,9 @@ on Linux, `~/Library/Application Support/reasonix/` on macOS, `%AppData%\reasoni
 Windows. Secrets come from the environment via `api_key_env` and are
 never stored in config files.
 
+For the desktop and CLI usage of visible reasoning language, see
+[Reasoning language](./REASONING_LANGUAGE.md).
+
 ```toml
 default_model = "deepseek-flash"   # executor; set [agent].planner_model to add a planner
 # language    = "zh"               # ui language; empty = auto-detect from $LANG / $REASONIX_LANG
@@ -37,6 +41,7 @@ default_model = "deepseek-flash"   # executor; set [agent].planner_model to add 
 [agent]
 max_steps = 0                    # executor tool-call rounds; 0 = no limit
 planner_max_steps = 12           # planner read-only tool-call rounds; 0 = no limit
+reasoning_language = "auto"      # visible reasoning text: auto|zh|en
 # planner_model = "mimo-pro"          # optional low-frequency planner
 # subagent_model = "deepseek-pro"     # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
@@ -197,7 +202,8 @@ convenient.
 
 In `reasonix chat`, built-in commands (`/compact`, `/new`, `/clear`, `/rewind`,
 `/tree`, `/branch`, `/switch`, `/todo`, `/model`, `/mcp`, `/skills`, `/hooks`,
-`/memory`, `/output-style`, `/sandbox`, `/language`, `/auto-plan`, `/help`) run
+`/memory`, `/output-style`, `/sandbox`, `/language`, `/auto-plan`,
+`/reasoning-language`, `/help`) run
 locally — `/help` lists them all. `/new` starts a new session while saving the
 previous transcript for history/resume; `/clear` asks for confirmation, then
 discards the current context without saving it. `/tree` shows saved conversation
@@ -277,8 +283,11 @@ before editing or running side-effecting commands. `auto_plan_classifier` can
 name a cheap provider such as `deepseek-flash`; it is only called for borderline
 inputs and falls back to the heuristic if classification fails. Use
 `/auto-plan off|on` in `reasonix chat` to change the user-level setting, or
-`reasonix config auto-plan off|on` from a shell/script. Pass `--local` to the
-shell command only when you intentionally want a project-local override.
+`reasonix config auto-plan off|on` from a shell/script. The visible reasoning
+language uses the same shape: `/reasoning-language auto|zh|en` in chat, or
+`reasonix config reasoning-language auto|zh|en` in a shell/script. Pass
+`--local` to the shell command only when you intentionally want a project-local
+override.
 
 The why behind separate sessions (keeping each model's prefix cache-stable) is in
 [`SPEC.md` §3.5](./SPEC.md#35-two-model-collaboration-coordinator).

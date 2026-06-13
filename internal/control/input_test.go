@@ -101,6 +101,38 @@ func TestComposePlanModeMarker(t *testing.T) {
 	}
 }
 
+func TestComposeReasoningLanguagePreference(t *testing.T) {
+	auto := New(Options{ReasoningLanguage: "auto"})
+	if got := auto.Compose("hi"); got != "hi" {
+		t.Fatalf("auto reasoning language should not alter the turn, got %q", got)
+	}
+
+	zh := New(Options{ReasoningLanguage: "zh"})
+	got := zh.Compose("hi")
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "Simplified Chinese") || !strings.HasSuffix(got, "hi") {
+		t.Fatalf("zh reasoning language should ride the user turn, got %q", got)
+	}
+	if stripped := StripComposePrefixes(got); stripped != "hi" {
+		t.Fatalf("StripComposePrefixes = %q, want hi", stripped)
+	}
+}
+
+func TestRunComposesReasoningLanguagePreference(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	c := New(Options{ReasoningLanguage: "zh", Runner: runner})
+
+	if err := c.Run(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.inputs) != 1 {
+		t.Fatalf("runner inputs = %d, want 1", len(runner.inputs))
+	}
+	got := runner.inputs[0]
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "Simplified Chinese") || !strings.HasSuffix(got, "hi") {
+		t.Fatalf("headless Run should compose the reasoning language preference, got %q", got)
+	}
+}
+
 func TestComposeIncludesActiveGoal(t *testing.T) {
 	c := New(Options{})
 	c.SetGoal("ship the approval redesign")

@@ -61,6 +61,12 @@ func TestBuildSessionKey(t *testing.T) {
 			src2:     SessionSource{Platform: PlatformFeishu, ChatType: ChatDM, ChatID: "123", UserID: "u1"},
 			wantSame: false,
 		},
+		{
+			name:     "same platform different connection",
+			src:      SessionSource{Platform: PlatformFeishu, ConnectionID: "feishu-feishu", ChatType: ChatDM, ChatID: "123", UserID: "u1"},
+			src2:     SessionSource{Platform: PlatformFeishu, ConnectionID: "feishu-lark", ChatType: ChatDM, ChatID: "123", UserID: "u1"},
+			wantSame: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -88,6 +94,9 @@ func TestIsSlashBypass(t *testing.T) {
 		{"/reset", true},
 		{"/approve", true},
 		{"/deny", true},
+		{"/yolo", true},
+		{"/yolo on", true},
+		{"/mode yolo", true},
 		{"/status", true},
 		{"/help", true},
 		{"hello", false},
@@ -199,15 +208,17 @@ func TestHashID(t *testing.T) {
 
 func TestInboundMessage_Session(t *testing.T) {
 	msg := InboundMessage{
-		Platform: PlatformQQ,
-		ChatType: ChatDM,
-		ChatID:   "chat1",
-		UserID:   "user1",
-		ThreadID: "thread1",
+		Platform:     PlatformQQ,
+		ConnectionID: "qq-main",
+		Domain:       "qq",
+		ChatType:     ChatDM,
+		ChatID:       "chat1",
+		UserID:       "user1",
+		ThreadID:     "thread1",
 	}
 
 	src := msg.Session()
-	if src.Platform != PlatformQQ || src.ChatType != ChatDM || src.ChatID != "chat1" || src.UserID != "user1" || src.ThreadID != "thread1" {
+	if src.Platform != PlatformQQ || src.ConnectionID != "qq-main" || src.Domain != "qq" || src.ChatType != ChatDM || src.ChatID != "chat1" || src.UserID != "user1" || src.ThreadID != "thread1" {
 		t.Error("Session() should copy all fields")
 	}
 }

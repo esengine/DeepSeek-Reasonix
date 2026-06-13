@@ -33,6 +33,7 @@ func TestMigrateImportsKeyPluginsAndLang(t *testing.T) {
 	src, dest, home := legacyHome(t)
 	writeLegacy(t, src, `{
 		"apiKey": "sk-legacy-123",
+		"model": "deepseek-v4-pro",
 		"lang": "zh",
 		"mcpServers": {
 			"fs": {"command": "npx", "args": ["-y", "server-fs"], "type": "stdio"},
@@ -71,6 +72,17 @@ func TestMigrateImportsKeyPluginsAndLang(t *testing.T) {
 		if !strings.Contains(toml, want) {
 			t.Errorf("dest config missing %q:\n%s", want, toml)
 		}
+	}
+	if !strings.Contains(toml, `default_model = "deepseek-pro/deepseek-v4-pro"`) {
+		t.Errorf("dest config missing imported model:\n%s", toml)
+	}
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if loaded.DefaultModel != "deepseek-pro/deepseek-v4-pro" {
+		t.Errorf("DefaultModel = %q, want deepseek-pro/deepseek-v4-pro", loaded.DefaultModel)
 	}
 
 	if _, err := os.Stat(src); err != nil {

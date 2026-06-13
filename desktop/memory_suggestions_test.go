@@ -66,6 +66,87 @@ func TestMemorySuggestionsAcceptMemoryCandidate(t *testing.T) {
 	}
 }
 
+func TestMemorySuggestionsForTabUsesSelectedTab(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	activeUserDir := t.TempDir()
+	selectedUserDir := t.TempDir()
+	activeCwd := t.TempDir()
+	selectedCwd := t.TempDir()
+	activeSessionDir := t.TempDir()
+	selectedSessionDir := t.TempDir()
+	activeStore := memory.StoreFor(activeUserDir, activeCwd)
+	selectedStore := memory.StoreFor(selectedUserDir, selectedCwd)
+	writeSuggestionSession(t, selectedSessionDir, "selected.jsonl",
+		provider.Message{Role: provider.RoleUser, Content: "以后请始终用中文回复，除非我明确要求英文。"},
+		provider.Message{Role: provider.RoleAssistant, Content: "好的。"},
+	)
+
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{
+		Memory:     &memory.Set{Store: activeStore, CWD: activeCwd, UserDir: activeUserDir},
+		SessionDir: activeSessionDir,
+	}), "test-model")
+	app.tabs["test"].WorkspaceRoot = activeCwd
+	app.tabs["selected"] = &WorkspaceTab{
+		ID:            "selected",
+		Scope:         "project",
+		WorkspaceRoot: selectedCwd,
+		Ctrl: control.New(control.Options{
+			Memory:     &memory.Set{Store: selectedStore, CWD: selectedCwd, UserDir: selectedUserDir},
+			SessionDir: selectedSessionDir,
+		}),
+		Ready:       true,
+		disabledMCP: map[string]ServerView{},
+	}
+
+	if view := app.MemorySuggestions(); len(view.Memories) != 0 {
+		t.Fatalf("active tab suggestions = %+v, want none", view.Memories)
+	}
+	view := app.MemorySuggestionsForTab("selected")
+	if len(view.Memories) == 0 {
+		t.Fatalf("MemorySuggestionsForTab(selected) memories = %+v, want at least one candidate", view.Memories)
+	}
+	path, err := app.AcceptMemorySuggestionForTab("selected", view.Memories[0])
+	if err != nil {
+		t.Fatalf("AcceptMemorySuggestionForTab: %v", err)
+	}
+	if !strings.HasPrefix(path, selectedStore.Dir) && !strings.HasPrefix(path, selectedStore.GlobalDir) {
+		t.Fatalf("memory path = %q, want selected store under %q or %q", path, selectedStore.Dir, selectedStore.GlobalDir)
+	}
+	if got := activeStore.List(); len(got) != 0 {
+		t.Fatalf("active store should remain untouched, got %+v", got)
+	}
+	got := selectedStore.List()
+	if len(got) != 1 || !strings.Contains(got[0].Body, "中文回复") {
+		t.Fatalf("selected store = %+v, want confirmed candidate body", got)
+	}
+
+	skillPath, err := app.AcceptSkillSuggestionForTab("selected", SkillSuggestion{
+		ID:          "selected-skill",
+		Name:        "selected-workflow",
+		Description: "Selected workspace workflow",
+		Scope:       "project",
+		Body:        "Use the selected workspace context before changing files.",
+	})
+	if err != nil {
+		t.Fatalf("AcceptSkillSuggestionForTab: %v", err)
+	}
+	wantSkillPath := filepath.Join(selectedCwd, ".reasonix", "skills", "selected-workflow", "SKILL.md")
+	if skillPath != wantSkillPath {
+		t.Fatalf("skill path = %q, want %q", skillPath, wantSkillPath)
+	}
+	if _, err := os.Stat(filepath.Join(activeCwd, ".reasonix", "skills", "selected-workflow", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("active workspace should not receive selected skill, stat err = %v", err)
+	}
+	body, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("read selected skill: %v", err)
+	}
+	if !strings.Contains(string(body), "selected workspace context") {
+		t.Fatalf("selected skill body missing candidate content:\n%s", body)
+	}
+}
+
 func TestMemorySuggestionsAcceptSkillCandidate(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	userDir := t.TempDir()

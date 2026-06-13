@@ -66,7 +66,19 @@ function statusPill(status: string): string {
   return "";
 }
 
-type CrashRow = { fingerprint: string; kind: string; count: number; last_version: string; seen: string; status: string };
+type CrashRow = {
+  fingerprint: string;
+  kind: string;
+  count: number;
+  last_version: string;
+  seen: string;
+  status: string;
+  title: string;
+};
+
+function clip(s: string, n: number): string {
+  return s.length > n ? `${s.slice(0, n - 1)}…` : s;
+}
 
 export function renderStats(
   data: {
@@ -82,10 +94,10 @@ export function renderStats(
   const totalUsers = days.at(-1)?.users ?? 0;
   const anyPing = days.some((d) => d.opens > 0);
   const crashRows = data.crashes.length
-    ? `<table><thead><tr><th>fingerprint</th><th>kind</th><th>status</th><th>count</th><th>last version</th><th>last seen</th></tr></thead><tbody>${data.crashes
+    ? `<table><thead><tr><th>fingerprint</th><th>summary</th><th>kind</th><th>status</th><th>count</th><th>last version</th><th>last seen</th></tr></thead><tbody>${data.crashes
         .map(
           (c) =>
-            `<tr><td><a class="fp" href="/stats/group/${esc(c.fingerprint)}">${esc(c.fingerprint.slice(0, 8))}</a></td><td><span class="pill ${c.kind === "crash" ? "crash" : ""}">${esc(c.kind)}</span></td><td>${statusPill(c.status)}</td><td class="n">${c.count}</td><td class="n">${esc(c.last_version)}</td><td class="n">${esc(c.seen)}</td></tr>`,
+            `<tr><td><a class="fp" href="/stats/group/${esc(c.fingerprint)}">${esc(c.fingerprint.slice(0, 8))}</a></td><td class="summary"${c.title ? ` title="${esc(c.title)}"` : ""}>${c.title ? esc(clip(c.title, 90)) : `<span class="muted">—</span>`}</td><td><span class="pill ${c.kind === "crash" ? "crash" : ""}">${esc(c.kind)}</span></td><td>${statusPill(c.status)}</td><td class="n">${c.count}</td><td class="n">${esc(c.last_version)}</td><td class="n">${esc(c.seen)}</td></tr>`,
         )
         .join("")}</tbody></table>`
     : `<div class="empty">No crash reports yet — that's the good kind of empty · 还没有崩溃报告</div>`;
@@ -93,7 +105,7 @@ export function renderStats(
   return page(
     "Reasonix · Stats",
     "stats",
-    `<h1>Desktop stats</h1><p class="sub">Today: <b>${totalUsers}</b> active installs · anonymous launch pings and user-sent crash reports only</p>
+    `<h1>Desktop stats</h1><p class="sub">Today: <b>${totalUsers}</b> active installs · anonymous launch pings and crash reports only</p>
 <div class="grid">
 <div class="card full"><h2>Daily active installs · 每日活跃 <b>— 30 days</b> (solid: users, faded: opens)</h2>
 ${anyPing ? dailyChart(days) : `<div class="empty">No pings yet — data starts flowing once a telemetry-enabled build ships · 等带统计的版本发布后这里开始有数据</div>`}</div>
@@ -126,6 +138,7 @@ export type Group = {
   last_version: string;
   status: string;
   note: string;
+  title: string;
 };
 
 function manageGroup(group: Group): string {
@@ -161,6 +174,7 @@ export function renderGroup(
     `Reasonix · ${group.fingerprint.slice(0, 8)}`,
     `stats / ${group.fingerprint.slice(0, 8)}`,
     `<h1><span class="pill ${group.kind === "crash" ? "crash" : ""}">${esc(group.kind)}</span> ${esc(group.fingerprint.slice(0, 8))} ${statusPill(group.status)}</h1>
+${group.title ? `<p class="summary">${esc(group.title)}</p>` : ""}
 <p class="sub"><b>${group.count}</b> occurrences · first ${esc(group.first_seen.slice(0, 10))} · last ${esc(group.last_seen.slice(0, 10))} on ${esc(group.last_version)}${noteLine}</p>
 <div class="card full"><h2>Samples <b>— newest first, up to 5 kept</b></h2>${samples}</div>
 ${user.role === "admin" ? manageGroup(group) : ""}

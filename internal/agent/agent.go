@@ -54,6 +54,7 @@ type Asker interface {
 // callContextKey carries the executing tool call's identity into Execute.
 type callContextKey struct{}
 type parentSessionContextKey struct{}
+type userImagesContextKey struct{}
 
 // callContext is the per-call context a tool can read. parentID is the call being
 // executed and sink is the agent's event sink (the `task` tool uses both to nest
@@ -101,6 +102,19 @@ func WithParentSession(ctx context.Context, parentSession string) context.Contex
 func ParentSession(ctx context.Context) string {
 	parentSession, _ := ctx.Value(parentSessionContextKey{}).(string)
 	return strings.TrimSpace(parentSession)
+}
+
+// WithUserImages carries the data URLs of images the user attached to this turn,
+// resolved by the controller (which owns attachments) since the agent must not
+// depend on it. Run embeds them on the user message; the provider sends them only
+// when the model is vision-capable.
+func WithUserImages(ctx context.Context, images []string) context.Context {
+	return context.WithValue(ctx, userImagesContextKey{}, images)
+}
+
+func userImages(ctx context.Context) []string {
+	images, _ := ctx.Value(userImagesContextKey{}).([]string)
+	return images
 }
 
 // Gate decides, per tool call, whether it may run. The agent consults it at
@@ -528,7 +542,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 	}
 	a.repeatSuccessCounts = nil
 	a.sink.Emit(event.Event{Kind: event.TurnStarted})
-	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
+	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input, Images: userImages(ctx)})
 
 	finalReadinessBlocks := 0
 	emptyFinalBlocks := 0

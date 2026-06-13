@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, FileText, Folder, GitBranch, Image, MessageSquare, RotateCcw, ScrollText } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
@@ -6,6 +6,7 @@ import { ProcessBrainIcon } from "./ProcessCard";
 import { parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
+import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import type { Item, MessageActionScope } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 
@@ -109,6 +110,7 @@ export function UserMessage({
       data-turn={turn}
       data-im-source={imSource?.provider || undefined}
       data-history-restore={id && id.startsWith("h") ? "" : undefined}
+      data-entrance={id || undefined}
     >
       <div className="msg__body">
         {imSource ? (
@@ -341,21 +343,49 @@ export const AssistantMessage = memo(function AssistantMessage({
   defaultExpanded?: boolean;
 }) {
   const t = useT();
+  const reasoningBodyRef = useRef<HTMLDivElement>(null);
   // Thinking streams in before the answer — show it live while the model is still
   // working, then it stays available behind the toggle once the answer arrives.
   const [reasoningOpen, setReasoningOpen] = useState(item.streaming || defaultExpanded);
+  const userOverridden = useRef(false);
+  const prevStreamingRef = useRef(item.streaming);
+  useGSAPCollapse(reasoningBodyRef, reasoningOpen);
+
+  // Auto-open on new stream start; auto-close when stream finishes, but only
+  // when the user has never manually toggled this cycle.
+  useEffect(() => {
+    const wasStreaming = prevStreamingRef.current;
+    const nowStreaming = item.streaming;
+    prevStreamingRef.current = nowStreaming;
+
+    if (nowStreaming && !wasStreaming) {
+      // New stream started — reset user override, auto-open.
+      userOverridden.current = false;
+      if (!defaultExpanded) setReasoningOpen(true);
+    } else if (!nowStreaming && wasStreaming) {
+      // Stream just ended — auto-close if user didn't interact.
+      if (!defaultExpanded && !userOverridden.current) {
+        setReasoningOpen(false);
+      }
+    }
+  }, [item.streaming, defaultExpanded]);
+
+  const toggleReasoning = () => {
+    userOverridden.current = true;
+    setReasoningOpen((v) => !v);
+  };
   const hasText = item.streaming || item.text.trim() !== "";
   const processOnly = Boolean(item.reasoning) && !hasText;
   const processWithText = Boolean(item.reasoning) && hasText;
   return (
-    <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`} data-history-restore={item.id.startsWith("h") ? "" : undefined}>
+    <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`} data-history-restore={item.id.startsWith("h") ? "" : undefined} data-entrance={item.id}>
       {item.reasoning && (
         <div className="reasoning">
           <button
             type="button"
             className="reasoning__head"
             data-running={item.streaming ? "" : undefined}
-            onClick={() => setReasoningOpen((v) => !v)}
+            onClick={toggleReasoning}
             aria-expanded={reasoningOpen}
           >
             <ProcessBrainIcon size={12} />
@@ -363,9 +393,7 @@ export const AssistantMessage = memo(function AssistantMessage({
             <span className="reasoning__meta">{item.streaming ? t("msg.thinkingRunning") : t("msg.thinkingDone")}</span>
             <ChevronRight className={`reasoning__chevron${reasoningOpen ? " reasoning__chevron--open" : ""}`} size={12} />
           </button>
-          {reasoningOpen && (
-            <div className="reasoning__body">{item.reasoning}</div>
-          )}
+          <div ref={reasoningBodyRef} className="reasoning__body">{item.reasoning}</div>
         </div>
       )}
       {hasText && (

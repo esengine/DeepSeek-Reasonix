@@ -56,9 +56,10 @@ type Result struct {
 // terminal fields; the run goroutine writes them, readers (Output/Wait/snapshots)
 // take the same lock.
 type Job struct {
-	ID    string
-	Kind  string // "bash" | "task"
-	Label string
+	ID        string
+	Kind      string // "bash" | "task"
+	Label     string
+	SessionID string
 
 	mu         sync.Mutex
 	buf        bytes.Buffer
@@ -78,11 +79,18 @@ type Manager struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	mu        sync.Mutex
-	seq       int
-	jobs      map[string]*Job
-	order     []string
-	completed []string // finished-job summaries awaiting drain into the next turn
+	mu         sync.Mutex
+	seq        int
+	jobs       map[string]*Job
+	order      []string
+	completed  []completion // finished-job summaries awaiting drain into the next turn
+	active     string
+	destroying map[string]bool
+}
+
+type completion struct {
+	sessionID string
+	text      string
 }
 
 // NewManager returns a Manager whose jobs run under a fresh session-scoped
@@ -93,7 +101,7 @@ func NewManager(sink event.Sink) *Manager {
 		sink = event.Discard
 	}
 	root, cancel := context.WithCancel(context.Background())
-	return &Manager{sink: sink, root: root, cancel: cancel, jobs: map[string]*Job{}}
+	return &Manager{sink: sink, root: root, cancel: cancel, jobs: map[string]*Job{}, destroying: map[string]bool{}}
 }
 
 // jobWriter appends a job's streamed output under its lock so a concurrent
@@ -112,16 +120,23 @@ func (w jobWriter) Write(p []byte) (int, error) {
 // the buffer and returns ""). The job is marked killed when its context was
 // cancelled, failed on any other error, else done.
 func (m *Manager) Start(kind, label string, run func(ctx context.Context, out io.Writer) (string, error)) *Job {
+	return m.StartForSession("", kind, label, run)
+}
+
+// StartForSession launches a job owned by parentSession. Session-scoped readers
+// only see jobs whose owner matches the active session.
+func (m *Manager) StartForSession(parentSession, kind, label string, run func(ctx context.Context, out io.Writer) (string, error)) *Job {
+	parentSession = strings.TrimSpace(parentSession)
 	m.mu.Lock()
 	m.seq++
 	id := fmt.Sprintf("%s-%d", kind, m.seq)
 	ctx, cancel := context.WithCancel(m.root)
-	j := &Job{ID: id, Kind: kind, Label: label, status: Running, startedAt: nowMs(), cancel: cancel, done: make(chan struct{})}
+	j := &Job{ID: id, Kind: kind, Label: label, SessionID: parentSession, status: Running, startedAt: nowMs(), cancel: cancel, done: make(chan struct{})}
 	m.jobs[id] = j
 	m.order = append(m.order, id)
 	m.mu.Unlock()
 
-	m.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: startedText(kind, id, label)})
+	m.emitIfActive(parentSession, event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: startedText(kind, id, label)})
 
 	m.wg.Add(1)
 	go func() {
@@ -146,7 +161,7 @@ func (m *Manager) Start(kind, label string, run func(ctx context.Context, out io
 		// completion, skip j.done, and DrainCompletedNote would race ahead of the
 		// bookkeeping (the TestDrainMultiple -race flake). Recording first makes an
 		// observed terminal status imply the note is already queued.
-		m.recordCompletion(id, kind, label, st, err)
+		m.recordCompletion(parentSession, id, kind, label, st, err)
 
 		j.mu.Lock()
 		j.result = result
@@ -161,13 +176,24 @@ func (m *Manager) Start(kind, label string, run func(ctx context.Context, out io
 
 // recordCompletion queues the finished-job summary for DrainCompletedNote and
 // emits a closing Notice (warn for a failure, info otherwise).
-func (m *Manager) recordCompletion(id, kind, label string, st Status, err error) {
+func (m *Manager) recordCompletion(parentSession, id, kind, label string, st Status, err error) {
 	tag := id
 	if label != "" {
 		tag = fmt.Sprintf("%s (%s)", id, label)
 	}
+	parentSession = strings.TrimSpace(parentSession)
+	shouldEmit := false
 	m.mu.Lock()
-	m.completed = append(m.completed, fmt.Sprintf("%s — %s", tag, st))
+	if parentSession != "" && m.destroying[parentSession] {
+		m.mu.Unlock()
+		return
+	}
+	m.completed = append(m.completed, completion{
+		sessionID: parentSession,
+		text:      fmt.Sprintf("%s — %s", tag, st),
+	})
+	active := m.active
+	shouldEmit = active == "" || parentSession == "" || active == parentSession
 	m.mu.Unlock()
 
 	level, text := event.LevelInfo, fmt.Sprintf("background %s finished: %s", kind, id)
@@ -177,7 +203,9 @@ func (m *Manager) recordCompletion(id, kind, label string, st Status, err error)
 	case Killed:
 		text = fmt.Sprintf("background %s killed: %s", kind, id)
 	}
-	m.sink.Emit(event.Event{Kind: event.Notice, Level: level, Text: text})
+	if shouldEmit {
+		m.sink.Emit(event.Event{Kind: event.Notice, Level: level, Text: text})
+	}
 }
 
 func (m *Manager) get(id string) *Job {
@@ -189,8 +217,14 @@ func (m *Manager) get(id string) *Job {
 // Output returns the job's output produced since the last Output call plus its
 // current status. ok is false when the id is unknown.
 func (m *Manager) Output(id string) (text string, status Status, ok bool) {
+	return m.OutputForSession("", id)
+}
+
+// OutputForSession returns output only when id belongs to parentSession. Empty
+// parentSession preserves the legacy unscoped behavior.
+func (m *Manager) OutputForSession(parentSession, id string) (text string, status Status, ok bool) {
 	j := m.get(id)
-	if j == nil {
+	if j == nil || !sessionMatches(parentSession, j.SessionID) {
 		return "", "", false
 	}
 	j.mu.Lock()
@@ -211,8 +245,14 @@ func (m *Manager) Output(id string) (text string, status Status, ok bool) {
 // Kill cancels a running job. Returns false when the id is unknown or the job has
 // already finished.
 func (m *Manager) Kill(id string) bool {
+	return m.KillForSession("", id)
+}
+
+// KillForSession cancels a running job only when it belongs to parentSession.
+// Empty parentSession preserves the legacy unscoped behavior.
+func (m *Manager) KillForSession(parentSession, id string) bool {
 	j := m.get(id)
-	if j == nil {
+	if j == nil || !sessionMatches(parentSession, j.SessionID) {
 		return false
 	}
 	j.mu.Lock()
@@ -239,7 +279,13 @@ func (m *Manager) Kill(id string) bool {
 // (0 = no timeout). It returns each target's snapshot regardless of why it
 // returned, so a timeout still reports partial progress.
 func (m *Manager) Wait(ctx context.Context, ids []string, timeoutSec int) []Result {
-	targets := m.resolve(ids)
+	return m.WaitForSession(ctx, "", ids, timeoutSec)
+}
+
+// WaitForSession waits only on jobs owned by parentSession. Empty parentSession
+// preserves the legacy unscoped behavior.
+func (m *Manager) WaitForSession(ctx context.Context, parentSession string, ids []string, timeoutSec int) []Result {
+	targets := m.resolve(parentSession, ids)
 	if len(targets) == 0 {
 		return nil
 	}
@@ -262,13 +308,16 @@ func (m *Manager) Wait(ctx context.Context, ids []string, timeoutSec int) []Resu
 }
 
 // resolve maps requested ids to jobs; an empty list selects all running jobs.
-func (m *Manager) resolve(ids []string) []*Job {
+func (m *Manager) resolve(parentSession string, ids []string) []*Job {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []*Job
 	if len(ids) == 0 {
 		for _, id := range m.order {
 			j := m.jobs[id]
+			if !sessionMatches(parentSession, j.SessionID) {
+				continue
+			}
 			j.mu.Lock()
 			running := j.status == Running
 			j.mu.Unlock()
@@ -279,7 +328,7 @@ func (m *Manager) resolve(ids []string) []*Job {
 		return out
 	}
 	for _, id := range ids {
-		if j := m.jobs[id]; j != nil {
+		if j := m.jobs[id]; j != nil && sessionMatches(parentSession, j.SessionID) {
 			out = append(out, j)
 		}
 	}
@@ -302,11 +351,20 @@ func (m *Manager) results(targets []*Job) []Result {
 
 // Running returns a snapshot of the still-running jobs (for the status bar).
 func (m *Manager) Running() []View {
+	return m.RunningForSession("")
+}
+
+// RunningForSession returns still-running jobs owned by parentSession. Empty
+// parentSession preserves the legacy unscoped behavior.
+func (m *Manager) RunningForSession(parentSession string) []View {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []View
 	for _, id := range m.order {
 		j := m.jobs[id]
+		if !sessionMatches(parentSession, j.SessionID) {
+			continue
+		}
 		j.mu.Lock()
 		if j.status == Running {
 			out = append(out, View{ID: j.ID, Kind: j.Kind, Label: j.Label, Status: string(j.status), StartedAt: j.startedAt})
@@ -320,15 +378,111 @@ func (m *Manager) Running() []View {
 // finished since the last drain, for the controller to fold into the next turn
 // so the model learns of completions. "" when nothing finished.
 func (m *Manager) DrainCompletedNote() string {
+	return m.DrainCompletedNoteForSession("")
+}
+
+// DrainCompletedNoteForSession drains completion notes for parentSession only.
+// Notes for other sessions stay queued until that session becomes active again.
+// Empty parentSession preserves the legacy unscoped behavior.
+func (m *Manager) DrainCompletedNoteForSession(parentSession string) string {
 	m.mu.Lock()
-	c := m.completed
-	m.completed = nil
+	var c []string
+	if strings.TrimSpace(parentSession) == "" {
+		for _, item := range m.completed {
+			c = append(c, item.text)
+		}
+		m.completed = nil
+	} else {
+		remaining := m.completed[:0]
+		for _, item := range m.completed {
+			if item.sessionID == parentSession {
+				c = append(c, item.text)
+			} else {
+				remaining = append(remaining, item)
+			}
+		}
+		m.completed = remaining
+	}
 	m.mu.Unlock()
 	if len(c) == 0 {
 		return ""
 	}
 	return "Background jobs finished since your last message: " + strings.Join(c, "; ") +
 		". Read their output with bash_output or wait if you still need it."
+}
+
+// SetActiveSession controls which session receives lifecycle notices for jobs
+// that finish asynchronously. Empty active session preserves legacy behavior.
+func (m *Manager) SetActiveSession(parentSession string) {
+	m.mu.Lock()
+	m.active = strings.TrimSpace(parentSession)
+	m.mu.Unlock()
+}
+
+// DestroySession marks a parent session as being removed from active use and
+// cancels its running jobs. The returned channels close when each cancelled job
+// has fully unwound.
+func (m *Manager) DestroySession(parentSession string) []<-chan struct{} {
+	parentSession = strings.TrimSpace(parentSession)
+	if parentSession == "" {
+		return nil
+	}
+	var cancels []context.CancelFunc
+	var done []<-chan struct{}
+	m.mu.Lock()
+	m.destroying[parentSession] = true
+	remaining := m.completed[:0]
+	for _, item := range m.completed {
+		if item.sessionID != parentSession {
+			remaining = append(remaining, item)
+		}
+	}
+	m.completed = remaining
+	for _, id := range m.order {
+		j := m.jobs[id]
+		if !sessionMatches(parentSession, j.SessionID) {
+			continue
+		}
+		j.mu.Lock()
+		switch j.status {
+		case Running:
+			j.status = Killed
+			cancels = append(cancels, j.cancel)
+			done = append(done, j.done)
+		case Killed:
+			done = append(done, j.done)
+		}
+		j.mu.Unlock()
+	}
+	m.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+	return done
+}
+
+// IsDestroying reports whether parentSession is in the destroy window. Empty
+// parent sessions are never considered destroyed.
+func (m *Manager) IsDestroying(parentSession string) bool {
+	parentSession = strings.TrimSpace(parentSession)
+	if parentSession == "" {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.destroying[parentSession]
+}
+
+// FinishDestroySession ends the destroy window after all owned jobs have unwound
+// and persistent cleanup/move work has completed.
+func (m *Manager) FinishDestroySession(parentSession string) {
+	parentSession = strings.TrimSpace(parentSession)
+	if parentSession == "" {
+		return
+	}
+	m.mu.Lock()
+	delete(m.destroying, parentSession)
+	m.mu.Unlock()
 }
 
 // Close cancels the session context and waits for every background job goroutine
@@ -350,9 +504,24 @@ func startedText(kind, id, label string) string {
 	return fmt.Sprintf("background %s started: %s", kind, id)
 }
 
+func (m *Manager) emitIfActive(parentSession string, ev event.Event) {
+	m.mu.Lock()
+	active := m.active
+	m.mu.Unlock()
+	if active == "" || strings.TrimSpace(parentSession) == "" || active == strings.TrimSpace(parentSession) {
+		m.sink.Emit(ev)
+	}
+}
+
+func sessionMatches(filter, jobSession string) bool {
+	filter = strings.TrimSpace(filter)
+	return filter == "" || strings.TrimSpace(jobSession) == filter
+}
+
 // --- call-context injection (mirrors agent.CallContext) ---
 
 type ctxKey struct{}
+type sessionCtxKey struct{}
 
 // WithManager stamps ctx with the job manager so tools can reach it via
 // FromContext. The agent sets this on every tool call's context.
@@ -365,4 +534,17 @@ func WithManager(ctx context.Context, m *Manager) context.Context {
 func FromContext(ctx context.Context) (*Manager, bool) {
 	m, ok := ctx.Value(ctxKey{}).(*Manager)
 	return m, ok && m != nil
+}
+
+// WithSession stamps ctx with the active parent session ID for session-scoped job
+// operations.
+func WithSession(ctx context.Context, parentSession string) context.Context {
+	return context.WithValue(ctx, sessionCtxKey{}, strings.TrimSpace(parentSession))
+}
+
+// SessionFromContext returns the active parent session ID for job ownership and
+// filtering. Empty means no session scope is available.
+func SessionFromContext(ctx context.Context) string {
+	session, _ := ctx.Value(sessionCtxKey{}).(string)
+	return strings.TrimSpace(session)
 }

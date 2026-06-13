@@ -212,6 +212,12 @@ func (s *Store) List() []Meta {
 		for i, f := range c.Files {
 			paths[i] = f.Path
 		}
+		// The current in-progress turn's files haven't been committed
+		// yet — they must not participate in CanCode propagation.
+		// Include the turn itself so it still appears as a rewind point.
+		if c == s.cur {
+			paths = nil
+		}
 		out = append(out, Meta{Turn: c.Turn, Time: c.Time, Prompt: c.Prompt, Paths: paths})
 	}
 	return out

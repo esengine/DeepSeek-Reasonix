@@ -248,6 +248,77 @@ func TestConfigAutoPlanLocalCreatesMinimalProjectOverride(t *testing.T) {
 	}
 }
 
+func TestConfigReasoningLanguageCommandWritesUserConfig(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	out := captureStdout(t, func() {
+		if rc := Run([]string{"config", "reasoning-language", "zh"}, "test-version"); rc != 0 {
+			t.Fatalf("config reasoning-language rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, `reasoning_language = "zh"`) {
+		t.Fatalf("config reasoning-language output = %q", out)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if cfg.Agent.ReasoningLanguage != "zh" || cfg.ReasoningLanguage() != "zh" {
+		t.Fatalf("saved reasoning_language = %q/%q, want zh", cfg.Agent.ReasoningLanguage, cfg.ReasoningLanguage())
+	}
+}
+
+func TestConfigReasoningLanguageLocalCreatesMinimalProjectOverride(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	userCfg := config.Default()
+	userCfg.DefaultModel = "mimo-pro"
+	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("write user config: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if rc := Run([]string{"config", "reasoning-language", "--local", "en"}, "test-version"); rc != 0 {
+			t.Fatalf("config reasoning-language --local rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, `reasoning_language = "en"`) {
+		t.Fatalf("config reasoning-language --local output = %q", out)
+	}
+
+	body, err := os.ReadFile("reasonix.toml")
+	if err != nil {
+		t.Fatalf("read project config: %v", err)
+	}
+	if strings.Contains(string(body), "default_model") {
+		t.Fatalf("project reasoning-language override should not pin default_model:\n%s", body)
+	}
+	if !strings.Contains(string(body), "[agent]") || !strings.Contains(string(body), `reasoning_language = "en"`) {
+		t.Fatalf("project config missing reasoning_language override:\n%s", body)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load merged config: %v", err)
+	}
+	if cfg.DefaultModel != "mimo-pro" {
+		t.Fatalf("default_model = %q, want global mimo-pro", cfg.DefaultModel)
+	}
+	if cfg.ReasoningLanguage() != "en" {
+		t.Fatalf("reasoning_language = %q, want local en", cfg.ReasoningLanguage())
+	}
+}
+
+func TestConfigReasoningLanguageRejectsAliases(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	errOut := captureStderr(t, func() {
+		if rc := Run([]string{"config", "reasoning-language", "中文"}, "test-version"); rc != 2 {
+			t.Fatalf("config reasoning-language alias rc = %d, want 2", rc)
+		}
+	})
+	if !strings.Contains(errOut, "must be auto|zh|en") {
+		t.Fatalf("config reasoning-language alias stderr = %q", errOut)
+	}
+}
+
 func TestWelcomePromptMissingKeysRequiresConfigSource(t *testing.T) {
 	if welcomeShouldPromptMissingKeys("", nil) {
 		t.Fatal("built-in defaults without a config source should not prompt for missing provider keys")

@@ -136,6 +136,22 @@ func (c *Config) SetLanguage(lang string) error {
 	return nil
 }
 
+// SetReasoningLanguage pins the preferred language for visible reasoning text.
+// Empty/auto follows the conversation language.
+func (c *Config) SetReasoningLanguage(lang string) error {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "", "auto", "follow", "conversation", "detect", "default", "model", "model-default", "model_default", "provider":
+		c.Agent.ReasoningLanguage = ""
+	case "zh", "cn", "chinese", "中文":
+		c.Agent.ReasoningLanguage = "zh"
+	case "en", "english":
+		c.Agent.ReasoningLanguage = "en"
+	default:
+		return fmt.Errorf("reasoning language %q: must be auto|zh|en", lang)
+	}
+	return nil
+}
+
 // SetDesktopLanguage pins the desktop UI language. It intentionally does not
 // modify Config.Language, which is used by the CLI/model-facing runtime.
 func (c *Config) SetDesktopLanguage(lang string) error {
@@ -195,15 +211,50 @@ func (c *Config) SetDesktopCloseBehavior(mode string) error {
 // SetDesktopDisplayMode sets the transcript display mode. UI-only.
 func (c *Config) SetDesktopDisplayMode(mode string) error {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "compact":
+	case "compact", "minimal":
 		c.Desktop.DisplayMode = "compact"
-	case "minimal":
-		c.Desktop.DisplayMode = "minimal"
 	case "", "standard":
 		c.Desktop.DisplayMode = "standard"
 	default:
-		return fmt.Errorf("display mode %q: must be standard|compact|minimal", mode)
+		return fmt.Errorf("display mode %q: must be standard|compact", mode)
 	}
+	return nil
+}
+
+// SetDesktopStatusBarStyle sets the desktop status bar metric label style.
+// UI-only; it must not affect CLI output or provider-visible request data.
+func (c *Config) SetDesktopStatusBarStyle(style string) error {
+	switch strings.ToLower(strings.TrimSpace(style)) {
+	case "icon", "icons":
+		c.Desktop.StatusBarStyle = "icon"
+	case "", "text", "label", "labels":
+		c.Desktop.StatusBarStyle = "text"
+	default:
+		return fmt.Errorf("status bar style %q: must be icon|text", style)
+	}
+	return nil
+}
+
+// SetDesktopStatusBarItems sets the ordered visible desktop status bar items.
+// UI-only; it must not affect CLI output or provider-visible request data.
+func (c *Config) SetDesktopStatusBarItems(items []string) error {
+	out := make([]string, 0, len(items))
+	seen := map[string]bool{}
+	for _, raw := range items {
+		id := strings.TrimSpace(raw)
+		if id == "" || seen[id] {
+			continue
+		}
+		if !knownDesktopStatusBarItems[id] {
+			return fmt.Errorf("status bar item %q: unknown item", id)
+		}
+		out = append(out, id)
+		seen[id] = true
+	}
+	if len(out) == 0 {
+		out = DefaultDesktopStatusBarItems()
+	}
+	c.Desktop.StatusBarItems = out
 	return nil
 }
 
@@ -211,6 +262,12 @@ func (c *Config) SetDesktopDisplayMode(mode string) error {
 // startup. Manual checks remain available in Settings regardless of this value.
 func (c *Config) SetDesktopCheckUpdates(enabled bool) error {
 	c.Desktop.CheckUpdates = &enabled
+	return nil
+}
+
+// SetColdResumePrune toggles auto-elision of stale tool results on cold resume.
+func (c *Config) SetColdResumePrune(enabled bool) error {
+	c.Agent.ColdResumePrune = &enabled
 	return nil
 }
 
@@ -730,6 +787,22 @@ func SaveMinimalProjectAutoPlan(path, mode string) (string, error) {
 auto_plan = %q
 `, cfg.Agent.AutoPlan)
 	return cfg.Agent.AutoPlan, writeConfigFile(path, body)
+}
+
+// SaveMinimalProjectReasoningLanguage writes a new project config that only
+// overrides [agent].reasoning_language.
+func SaveMinimalProjectReasoningLanguage(path, lang string) (string, error) {
+	cfg := Default()
+	if err := cfg.SetReasoningLanguage(lang); err != nil {
+		return "", err
+	}
+	body := fmt.Sprintf(`# Reasonix project configuration.
+# Project-local overrides are merged over the user config.
+
+[agent]
+reasoning_language = %q
+`, cfg.ReasoningLanguage())
+	return cfg.ReasoningLanguage(), writeConfigFile(path, body)
 }
 
 func writeConfigFile(path, body string) error {
