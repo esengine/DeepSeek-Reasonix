@@ -1564,7 +1564,8 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const installUserCode = install.result?.userCode && installTarget !== "weixin" ? formatInstallUserCode(install.result.userCode) : "";
   const qqSecretEnv = draft.qq.appSecretEnv.trim() || DEFAULT_QQ_SECRET_ENV;
   const qqConfigured = draft.qq.enabled && draft.qq.appId.trim() && qqSecretEnv && draft.qq.secretSet;
-  const qqCanSaveAndEnable = Boolean(draft.qq.appId.trim() && qqSecretEnv && (draft.qq.secretSet || qqSecretValue.trim()));
+  const qqCanEnableAccess = qqAccessReady(draft.allowlist);
+  const qqCanSaveAndEnable = Boolean(draft.qq.appId.trim() && qqSecretEnv && (draft.qq.secretSet || qqSecretValue.trim()) && qqCanEnableAccess);
   const qqAdded = qqBotAdded(draft.qq);
   const nativeRuntimeAvailable = typeof window !== "undefined" && Boolean(window.runtime);
   const browserPreviewBotConfigured = !nativeRuntimeAvailable && (qqAdded || draft.connections.length > 0);
@@ -1716,7 +1717,18 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     });
     setQQSecretValue("");
   };
+  const focusQQAccessSettings = () => {
+    pendingAllowlistFocusRef.current = true;
+    setExpandedConnectionId(QQ_CONNECTION_ID);
+    setAllowlistOpen(true);
+    setAllowlistFocused(true);
+    setDiagnostics((prev) => ({ ...prev, [QQ_CONNECTION_ID]: t("settings.botQQAccessRequired") }));
+  };
   const saveQQAndEnable = async () => {
+    if (!qqCanEnableAccess) {
+      focusQQAccessSettings();
+      return;
+    }
     const env = draft.qq.appSecretEnv.trim() || DEFAULT_QQ_SECRET_ENV;
     const secret = qqSecretValue.trim();
     const nextDraft = botDraftWithDerivedGatewayState({
@@ -1758,6 +1770,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const selectedAllowlistTargetReady = selectedQQ || Boolean(selectedConnection);
   useEffect(() => {
     if (!pendingAllowlistFocusRef.current || !selectedAllowlistTargetReady) return;
+    setAllowlistOpen(true);
     const scrollTimer = window.setTimeout(() => {
       if (!allowlistRef.current) return;
       pendingAllowlistFocusRef.current = false;
@@ -1822,6 +1835,10 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
                             value={draft.qq.enabled}
                             disabled={busy}
                             onChange={(enabled) => {
+                              if (enabled && !qqCanEnableAccess) {
+                                focusQQAccessSettings();
+                                return;
+                              }
                               updateQQ({ enabled });
                               void persistQQ({ enabled });
                             }}
@@ -1838,6 +1855,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
                           </button>
                         </div>
                       </div>
+                      {diagnostics[QQ_CONNECTION_ID] ? <em className="bot-connection-row__diag">{diagnostics[QQ_CONNECTION_ID]}</em> : null}
                     </div>
                   );
                 }
@@ -1930,6 +1948,10 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
                   value={draft.qq.enabled}
                   disabled={busy}
                   onChange={(enabled) => {
+                    if (enabled && !qqCanEnableAccess) {
+                      focusQQAccessSettings();
+                      return;
+                    }
                     updateQQ({ enabled });
                     void persistQQ({ enabled });
                   }}
@@ -1993,6 +2015,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
                     {t("settings.clearKey")}
                   </button>
                 </div>
+                {!qqCanEnableAccess ? <div className="bot-connect-panel__hint bot-connect-panel__hint--warning">{t("settings.botQQAccessRequired")}</div> : null}
               </div>
             </section>
 
@@ -2404,6 +2427,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
                       {t("settings.botSaveAndEnable")}
                     </button>
                   </div>
+                  {!qqCanEnableAccess ? <div className="bot-connect-panel__hint bot-connect-panel__hint--warning">{t("settings.botQQAccessRequired")}</div> : null}
                 </div>
               </div>
             </div>
@@ -2492,6 +2516,12 @@ function botTargetHint(target: BotInstallTarget, t: ReturnType<typeof useT>): st
 
 function qqBotAdded(qq: BotSettingsView["qq"]): boolean {
   return Boolean(qq.enabled || qq.secretSet || qq.appId.trim());
+}
+
+function qqAccessReady(allowlist: BotAllowlistView): boolean {
+  if (allowlist.allowAll) return true;
+  if (!allowlist.enabled) return false;
+  return asArray(allowlist.qqUsers).some((value) => value.trim()) || asArray(allowlist.qqGroups).some((value) => value.trim());
 }
 
 function botInstallTargetMatchesConnection(target: BotOfficialInstallTarget, connection: BotConnectionView): boolean {

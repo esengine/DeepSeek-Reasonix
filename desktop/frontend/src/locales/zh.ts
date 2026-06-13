@@ -976,6 +976,7 @@ export const zh: Record<DictKey, string> = {
   "settings.botAllowlistEnabled": "启用白名单",
   "settings.botAllowAll": "允许所有人",
   "settings.botAllowAllWarn": "开启后所有进入渠道的消息都可以调用机器人。",
+  "settings.botQQAccessRequired": "启用 QQ Bot 前，请先在高级设置里添加 QQ 用户/群白名单，或临时改为允许所有人。",
   "settings.botAllowlistEntries": "用户与群",
   "settings.botQQUsers": "QQ 用户",
   "settings.botQQGroups": "QQ群",

@@ -23,13 +23,16 @@ import (
 )
 
 const (
-	qqTokenURL      = "https://bots.qq.com/app/getAppAccessToken"
-	qqBaseURL       = "https://api.sgroup.qq.com"
-	qqSandboxURL    = "https://sandbox.api.sgroup.qq.com"
-	qqGatewayURL    = "wss://api.sgroup.qq.com/websocket"
-	qqMaxChunkBytes = 1500
-	qqMinHeartbeat  = 5 * time.Second
-	qqMaxHeartbeat  = time.Minute
+	qqTokenURL                     = "https://bots.qq.com/app/getAppAccessToken"
+	qqBaseURL                      = "https://api.sgroup.qq.com"
+	qqSandboxURL                   = "https://sandbox.api.sgroup.qq.com"
+	qqGatewayURL                   = "wss://api.sgroup.qq.com/websocket"
+	qqMaxChunkBytes                = 1500
+	qqMaxPassiveReplyChunks        = 5
+	qqMinHeartbeat                 = 5 * time.Second
+	qqMaxHeartbeat                 = time.Minute
+	qqStartupValidationTimeout     = 10 * time.Second
+	qqPassiveReplyTruncationNotice = "\n\n[Truncated: QQ allows at most 5 passive replies for one incoming message.]"
 
 	opDispatch     = 0
 	opHeartbeat    = 1
@@ -515,6 +518,12 @@ func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot
 	if len(chunks) == 0 {
 		chunks = []string{""}
 	}
+	originalChunkCount := len(chunks)
+	var truncated bool
+	chunks, truncated = capQQPassiveReplyChunks(msg, chunks)
+	if truncated {
+		a.logger.Warn("qq passive reply truncated", "chat_type", msg.ChatType, "chunks", originalChunkCount, "limit", len(chunks))
+	}
 	var last bot.SendResult
 	for _, chunk := range chunks {
 		seq := a.nextMessageSeq(msg.ReplyToMsgID)
@@ -696,6 +705,38 @@ func splitQQMessage(text string, maxBytes int) []string {
 		remaining = strings.TrimLeft(remaining[splitAt:], " \t\r\n")
 	}
 	return chunks
+}
+
+func capQQPassiveReplyChunks(msg bot.OutboundMessage, chunks []string) ([]string, bool) {
+	if !qqUsesPassiveReplyLimit(msg) || len(chunks) <= qqMaxPassiveReplyChunks {
+		return chunks, false
+	}
+	capped := make([]string, 0, qqMaxPassiveReplyChunks)
+	capped = append(capped, chunks[:qqMaxPassiveReplyChunks-1]...)
+	capped = append(capped, fitQQChunkWithSuffix(chunks[qqMaxPassiveReplyChunks-1], qqPassiveReplyTruncationNotice, qqMaxChunkBytes))
+	return capped, true
+}
+
+func qqUsesPassiveReplyLimit(msg bot.OutboundMessage) bool {
+	if strings.TrimSpace(msg.ReplyToMsgID) == "" {
+		return false
+	}
+	return msg.ChatType == bot.ChatDM || msg.ChatType == bot.ChatGroup
+}
+
+func fitQQChunkWithSuffix(text, suffix string, maxBytes int) string {
+	if maxBytes <= 0 {
+		maxBytes = qqMaxChunkBytes
+	}
+	suffixBytes := len([]byte(suffix))
+	if suffixBytes >= maxBytes {
+		return fitUTF8Slice(suffix, maxBytes)
+	}
+	prefix := strings.TrimRight(fitUTF8Slice(text, maxBytes-suffixBytes), " \t\r\n")
+	if prefix == "" {
+		return strings.TrimLeft(fitUTF8Slice(suffix, maxBytes), " \t\r\n")
+	}
+	return prefix + suffix
 }
 
 func fitUTF8Slice(text string, maxBytes int) string {

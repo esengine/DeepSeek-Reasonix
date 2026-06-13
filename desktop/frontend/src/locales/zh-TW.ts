@@ -1320,6 +1320,7 @@ export const zhTW: Record<DictKey, string> = {
   "settings.botAllowlistEnabled": "啟用白名單",
   "settings.botAllowAll": "允許所有人",
   "settings.botAllowAllWarn": "開啟後所有進入頻道的訊息都可以呼叫機器人。",
+  "settings.botQQAccessRequired": "啟用 QQ Bot 前，請先在高階設定裡新增 QQ 使用者/群白名單，或臨時改為允許所有人。",
   "settings.botAllowlistEntries": "使用者與群",
   "settings.botQQUsers": "QQ 使用者",
   "settings.botQQGroups": "QQ群",

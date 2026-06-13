@@ -49,6 +49,15 @@ func (a *adapter) Name() string           { return "qq" }
 
 func (a *adapter) Start(ctx context.Context) error {
 	a.msgCh = make(chan bot.InboundMessage, 64)
+	startupCtx, startupCancel := context.WithTimeout(ctx, qqStartupValidationTimeout)
+	defer startupCancel()
+	token, err := a.getAccessToken(startupCtx)
+	if err != nil {
+		return err
+	}
+	if _, err := a.getGatewayURL(startupCtx, token); err != nil {
+		return err
+	}
 	ctx, a.cancel = context.WithCancel(ctx)
 
 	go a.gatewayLoop(ctx)

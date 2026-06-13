@@ -137,6 +137,66 @@ func TestSplitQQMessageKeepsUTF8Budget(t *testing.T) {
 	}
 }
 
+func TestCapQQPassiveReplyChunks(t *testing.T) {
+	chunks := splitQQMessage(strings.Repeat("chunk-", 1800), qqMaxChunkBytes)
+	if len(chunks) <= qqMaxPassiveReplyChunks {
+		t.Fatalf("chunks = %d, want more than passive reply limit", len(chunks))
+	}
+
+	got, truncated := capQQPassiveReplyChunks(bot.OutboundMessage{
+		ChatType:     bot.ChatDM,
+		ReplyToMsgID: "msg-id",
+	}, chunks)
+	if !truncated {
+		t.Fatal("capQQPassiveReplyChunks truncated = false, want true")
+	}
+	if len(got) != qqMaxPassiveReplyChunks {
+		t.Fatalf("capped chunks = %d, want %d", len(got), qqMaxPassiveReplyChunks)
+	}
+	for _, chunk := range got {
+		if len([]byte(chunk)) > qqMaxChunkBytes {
+			t.Fatalf("chunk byte length = %d, want <= %d", len([]byte(chunk)), qqMaxChunkBytes)
+		}
+	}
+	if !strings.Contains(got[len(got)-1], "Truncated") {
+		t.Fatalf("last chunk = %q, want truncation notice", got[len(got)-1])
+	}
+}
+
+func TestCapQQPassiveReplyChunksDoesNotCapNonPassiveReplies(t *testing.T) {
+	chunks := splitQQMessage(strings.Repeat("chunk-", 1800), qqMaxChunkBytes)
+	got, truncated := capQQPassiveReplyChunks(bot.OutboundMessage{
+		ChatType: bot.ChatDM,
+	}, chunks)
+	if truncated {
+		t.Fatal("capQQPassiveReplyChunks truncated non-passive reply")
+	}
+	if len(got) != len(chunks) {
+		t.Fatalf("chunks = %d, want %d", len(got), len(chunks))
+	}
+
+	got, truncated = capQQPassiveReplyChunks(bot.OutboundMessage{
+		ChatType:     bot.ChatDirect,
+		ReplyToMsgID: "msg-id",
+	}, chunks)
+	if truncated {
+		t.Fatal("capQQPassiveReplyChunks truncated direct/guild reply")
+	}
+	if len(got) != len(chunks) {
+		t.Fatalf("chunks = %d, want %d", len(got), len(chunks))
+	}
+}
+
+func TestStartValidatesQQCredentialsBeforeRunning(t *testing.T) {
+	a := &adapter{}
+	if err := a.Start(context.Background()); err == nil {
+		t.Fatal("Start() error = nil, want missing app_id error")
+	}
+	if a.cancel != nil {
+		t.Fatal("Start() installed runtime cancel after validation failure")
+	}
+}
+
 func TestQQExpiresInSecondsAcceptsNumberAndString(t *testing.T) {
 	for _, tt := range []struct {
 		name  string

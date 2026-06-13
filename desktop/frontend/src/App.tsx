@@ -57,6 +57,7 @@ import { parseTodos } from "./lib/tools";
 import { shouldShowTodoPanel } from "./lib/todoVisibility";
 import {
   type BotConnectionView,
+  type BotRuntimeStatusView,
   type BotSettingsView,
   type CollaborationMode,
   type ComposerInsertRequest,
@@ -256,18 +257,35 @@ function sidebarImQQAdded(qq: BotSettingsView["qq"]): boolean {
   return Boolean(qq.enabled || qq.secretSet || qq.appId.trim());
 }
 
-function sidebarImQQStatus(bot: BotSettingsView): SidebarImStatus {
+function sidebarImQQStatus(bot: BotSettingsView, runtimeStatus: BotRuntimeStatusView | null | undefined): SidebarImStatus {
   const appId = bot.qq.appId.trim();
   if (!bot.enabled || !bot.qq.enabled) return "disabled";
   if (!appId || !bot.qq.secretSet) return "disconnected";
   if (typeof window !== "undefined" && !window.runtime) return "pending";
-  return "connected";
+  if (!runtimeStatus) return "pending";
+  const status = runtimeStatus.status.trim().toLowerCase();
+  if (runtimeStatus.running && runtimeStatus.connections > 0 && status === "running") {
+    return "connected";
+  }
+  if (status === "error" || status === "blocked" || status === "degraded") return "error";
+  if (status === "stopped") return "disconnected";
+  return "pending";
 }
 
-function sidebarImQQConnection(bot: BotSettingsView, translate: Translator): SidebarImConnection | null {
+async function loadBotRuntimeStatus(): Promise<BotRuntimeStatusView | null> {
+  if (typeof window !== "undefined" && !window.runtime) return null;
+  try {
+    return await app.BotRuntimeStatus();
+  } catch (e) {
+    console.warn("bot runtime status failed", e);
+    return null;
+  }
+}
+
+function sidebarImQQConnection(bot: BotSettingsView, translate: Translator, runtimeStatus?: BotRuntimeStatusView | null): SidebarImConnection | null {
   if (!sidebarImQQAdded(bot.qq)) return null;
   const remoteId = bot.qq.appId.trim();
-  const status = sidebarImQQStatus(bot);
+  const status = sidebarImQQStatus(bot, runtimeStatus);
   const statusLabel = sidebarImStatusLabel(status, translate);
   const allowlistUsers = sidebarImAllowlistUsers(bot, "qq");
   const subtitleParts = [
@@ -293,9 +311,13 @@ function sidebarImQQConnection(bot: BotSettingsView, translate: Translator): Sid
   };
 }
 
-function sidebarImConnectionsFromBot(bot: BotSettingsView | null | undefined, translate: Translator): SidebarImConnection[] {
+function sidebarImConnectionsFromBot(
+  bot: BotSettingsView | null | undefined,
+  translate: Translator,
+  runtimeStatus?: BotRuntimeStatusView | null,
+): SidebarImConnection[] {
   if (!bot) return [];
-  const qqConnection = sidebarImQQConnection(bot, translate);
+  const qqConnection = sidebarImQQConnection(bot, translate, runtimeStatus);
   const connectionItems = asArray(bot.connections)
     .filter(isSidebarImConnection)
     .map((connection) => {
@@ -901,8 +923,11 @@ export default function App() {
   }, []);
 
   const reloadSidebarImConnections = useCallback(async () => {
-    const settings = await app.Settings();
-    setSidebarImConnections(sidebarImConnectionsFromBot(settings.bot, t));
+    const [settings, runtimeStatus] = await Promise.all([
+      app.Settings(),
+      loadBotRuntimeStatus(),
+    ]);
+    setSidebarImConnections(sidebarImConnectionsFromBot(settings.bot, t, runtimeStatus));
     setImTopicSources(sidebarImTopicSourcesFromBot(settings.bot, t));
   }, [t]);
 
@@ -1025,11 +1050,14 @@ export default function App() {
         clearLegacyLangPref();
         clearLegacyThemePreference();
       }
-      const settings = await app.Settings();
+      const [settings, runtimeStatus] = await Promise.all([
+        app.Settings(),
+        loadBotRuntimeStatus(),
+      ]);
       if (cancelled) return;
       applyDesktopPreferences(settings);
       hydrateDisplayMode(settings.displayMode);
-      setSidebarImConnections(sidebarImConnectionsFromBot(settings.bot, t));
+      setSidebarImConnections(sidebarImConnectionsFromBot(settings.bot, t, runtimeStatus));
       setImTopicSources(sidebarImTopicSourcesFromBot(settings.bot, t));
     };
     void syncDesktopPreferences().catch((e) => {

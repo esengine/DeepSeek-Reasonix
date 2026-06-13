@@ -974,6 +974,7 @@ export const en = {
   "settings.botAllowlistEnabled": "Enable allowlist",
   "settings.botAllowAll": "Allow everyone",
   "settings.botAllowAllWarn": "When enabled, every incoming channel message can invoke the bot.",
+  "settings.botQQAccessRequired": "Add a QQ user/group allowlist, or temporarily allow everyone in Advanced settings, before enabling QQ Bot.",
   "settings.botAllowlistEntries": "Users and groups",
   "settings.botQQUsers": "QQ users",
   "settings.botQQGroups": "QQ groups",

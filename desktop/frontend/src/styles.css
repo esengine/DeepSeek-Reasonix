@@ -12176,6 +12176,16 @@ a[href] {
   color: var(--fg-dim);
   line-height: 1.55;
 }
+.bot-connect-panel__hint {
+  min-width: 0;
+  color: var(--fg-dim);
+  font-size: var(--font-control-small);
+  line-height: 1.45;
+}
+.bot-connect-panel__hint--warning {
+  border-left: 2px solid var(--accent);
+  padding-left: 10px;
+}
 .bot-connect-panel__body code {
   width: fit-content;
   border: 1px solid var(--border);

@@ -2342,7 +2342,8 @@ function makeMockApp(): AppBindings {
           }));
         },
         async BotRuntimeStatus() {
-          const runningConnections = settings.bot.connections.filter((connection) => connection.enabled && connection.status === "connected").length;
+          const qqRunning = settings.bot.qq.enabled && settings.bot.qq.appId.trim() && settings.bot.qq.secretSet;
+          const runningConnections = (qqRunning ? 1 : 0) + settings.bot.connections.filter((connection) => connection.enabled && connection.status === "connected").length;
           return {
             running: settings.bot.enabled && runningConnections > 0,
             status: settings.bot.enabled && runningConnections > 0 ? "running" : "stopped",
