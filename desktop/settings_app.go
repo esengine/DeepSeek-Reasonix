@@ -1484,7 +1484,40 @@ func (a *App) SetColdResumePrune(enabled bool) error {
 }
 
 func (a *App) SetReasoningLanguage(lang string) error {
-	return a.applyConfigChange(func(c *config.Config) error { return c.SetReasoningLanguage(lang) })
+	cfg, path, err := a.loadDesktopUserConfigForEdit()
+	if err != nil {
+		return err
+	}
+	if err := cfg.SetReasoningLanguage(lang); err != nil {
+		return err
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		return err
+	}
+	a.applyReasoningLanguageToLiveControllers(cfg.ReasoningLanguage())
+	return nil
+}
+
+func (a *App) applyReasoningLanguageToLiveControllers(fallback string) {
+	type liveTab struct {
+		root string
+		ctrl *control.Controller
+	}
+	var tabs []liveTab
+	a.mu.RLock()
+	for _, tab := range a.tabs {
+		if tab != nil && tab.Ctrl != nil {
+			tabs = append(tabs, liveTab{root: tab.WorkspaceRoot, ctrl: tab.Ctrl})
+		}
+	}
+	a.mu.RUnlock()
+	for _, tab := range tabs {
+		mode := fallback
+		if cfg, err := config.LoadForRoot(tab.root); err == nil {
+			mode = cfg.ReasoningLanguage()
+		}
+		tab.ctrl.SetReasoningLanguage(mode)
+	}
 }
 
 // trimList drops blank entries from a string slice (and returns a non-nil slice).

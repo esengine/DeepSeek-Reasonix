@@ -600,7 +600,7 @@ func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input, raw, disp
 		c.approvedPlanAutoApproveTools = false
 		c.mu.Unlock()
 	}()
-	if err := c.runner.Run(ctx, planApprovedMessage); err != nil {
+	if err := c.runner.Run(ctx, c.ComposeSynthetic(planApprovedMessage)); err != nil {
 		return err
 	}
 	if todoArgs != "" && !c.hasTodoUpdateSince(execStart) {
@@ -1307,9 +1307,13 @@ func (c *Controller) SetAutoPlan(mode string) {
 // SetReasoningLanguage updates the visible reasoning language preference for
 // subsequent turns.
 func (c *Controller) SetReasoningLanguage(lang string) {
+	mode := config.NormalizeReasoningLanguage(lang)
 	c.mu.Lock()
-	c.reasoningLanguage = config.NormalizeReasoningLanguage(lang)
+	c.reasoningLanguage = mode
 	c.mu.Unlock()
+	if c.executor != nil {
+		c.executor.SetReasoningLanguage(mode)
+	}
 }
 
 // PlanMode reports whether outgoing turns currently receive the plan-mode

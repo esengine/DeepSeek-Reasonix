@@ -133,6 +133,18 @@ func TestRunComposesReasoningLanguagePreference(t *testing.T) {
 	}
 }
 
+func TestComposeSyntheticReasoningLanguagePreference(t *testing.T) {
+	c := New(Options{ReasoningLanguage: "zh"})
+
+	got := c.ComposeSynthetic(planApprovedMessage)
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "Simplified Chinese") || !strings.HasSuffix(got, planApprovedMessage) {
+		t.Fatalf("ComposeSynthetic should prefix reasoning language, got %q", got)
+	}
+	if !IsSyntheticUserMessage(got) {
+		t.Fatalf("reasoning-language-prefixed plan approval should still be synthetic")
+	}
+}
+
 func TestComposeIncludesActiveGoal(t *testing.T) {
 	c := New(Options{})
 	c.SetGoal("ship the approval redesign")
@@ -613,6 +625,11 @@ func TestIsSyntheticUserMessage(t *testing.T) {
 		{
 			name:  "plan approved message",
 			input: planApprovedMessage,
+			want:  true,
+		},
+		{
+			name:  "plan approved message with reasoning language",
+			input: reasoningLanguageBlock("zh") + "\n\n" + planApprovedMessage,
 			want:  true,
 		},
 		{
