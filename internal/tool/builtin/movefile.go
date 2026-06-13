@@ -171,6 +171,9 @@ func copyRegularFileAndRemoveSource(src, dst string, info os.FileInfo) error {
 	if err := out.Close(); err != nil {
 		return err
 	}
+	if err := in.Close(); err != nil {
+		return err
+	}
 	if err := os.Remove(src); err != nil {
 		return err
 	}
