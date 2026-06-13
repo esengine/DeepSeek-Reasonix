@@ -12,10 +12,9 @@ export interface UndoRewindMeta {
   onUndo: () => void;
 }
 
-export function UndoRewindBanner({ meta, onDismiss }: { meta: UndoRewindMeta; onDismiss: () => void }) {
+export function UndoRewindBanner({ meta }: { meta: UndoRewindMeta }) {
   const t = useT();
   const [confirm, setConfirm] = useState(false);
-  void onDismiss; // reserve for explicit dismiss (X button)
 
   const parts: string[] = [];
   if (meta.turns > 0) parts.push(t("undoRewind.turns", { n: meta.turns }));

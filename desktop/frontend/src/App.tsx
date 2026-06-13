@@ -1944,10 +1944,15 @@ export default function App() {
       try {
         await rewind(rs.turn, rs.scope);
         setRewindSignal((v) => v + 1);
+        if (rs.scope === "both") {
+          // Code was only reverted now (deferred), so refresh the dock here.
+          setDockRefreshKey((v) => v + 1);
+          setProjectRevision((v) => v + 1);
+        }
       } catch {
-        // Rewind failed — restore full items so the transcript isn't
-        // silently broken.  The controller emits a notice with details.
-        setRewindState({ ...rs, fullItems: rs.fullItems });
+        // Rewind failed: the Go conversation is intact, so the cleared
+        // optimistic state already shows the full transcript. Don't send —
+        // the controller emits a notice with the reason.
         return;
       }
     }
@@ -2002,11 +2007,6 @@ export default function App() {
     // Fill composer with the rewound-to user message.
     const insertId = Date.now();
     setComposerInsertRequest({ id: insertId, text: userItem?.text ?? "" });
-
-    if (scope === "both") {
-      setDockRefreshKey((v) => v + 1);
-      setProjectRevision((v) => v + 1);
-    }
 
     setRewindSignal((v) => v + 1);
   }, [state.items, rewind, refreshTabMetas, setComposerInsertRequest]);
@@ -2685,9 +2685,11 @@ export default function App() {
                   turns: rewindState.turnDiff,
                   filesRestored: [], // optimistic: files haven't changed yet
                   filesRemoved: [],
-                  onUndo: () => setRewindState(null),
+                  onUndo: () => {
+                    setRewindState(null);
+                    setComposerInsertRequest({ id: Date.now(), text: "" });
+                  },
                 }}
-                onDismiss={() => setRewindState(null)}
               />
             )}
             {state.approval && (

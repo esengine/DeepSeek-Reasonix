@@ -944,6 +944,7 @@ func (a *App) CheckpointsForTab(tabID string) []CheckpointMeta {
 		for f := range codeFileSet {
 			out[i].Files = append(out[i].Files, f)
 		}
+		sort.Strings(out[i].Files) // map iteration is unordered; keep the list stable
 	}
 	return out
 }
