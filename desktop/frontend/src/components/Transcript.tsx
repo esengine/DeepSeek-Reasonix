@@ -144,7 +144,7 @@ function buildTurnGroups(items: Item[], questions: QuestionAnchor[]): TurnGroup[
 
 // ── Transcript component ──────────────────────────────────────────────────────
 
-export function Transcript({
+export const Transcript = memo(function Transcript({
   items,
   live,
   footerHeight = 0,
@@ -597,7 +597,7 @@ export function Transcript({
       </LiveStreamContext.Provider>
     </div>
   );
-}
+});
 
 // ── WarmZone sub-component (React.memo for streaming isolation) ────────────
 // Receives structural props only; reads streaming state (items, live) via refs
