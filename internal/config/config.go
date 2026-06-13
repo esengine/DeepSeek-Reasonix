@@ -78,7 +78,7 @@ type DesktopConfig struct {
 	Theme          string   `toml:"theme"`            // auto|dark|light; empty resolves to dark
 	ThemeStyle     string   `toml:"theme_style"`      // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 	CloseBehavior  string   `toml:"close_behavior"`   // quit|background; desktop window close behavior
-	DisplayMode    string   `toml:"display_mode"`     // standard|compact|minimal; transcript display mode
+	DisplayMode    string   `toml:"display_mode"`     // standard|compact (legacy "minimal" maps to compact); transcript display mode
 	StatusBarStyle string   `toml:"status_bar_style"` // icon|text; desktop status bar metric labels
 	StatusBarItems []string `toml:"status_bar_items"` // ordered visible desktop status bar items
 	CheckUpdates   *bool    `toml:"check_updates"`    // startup update checks; nil keeps the default enabled
@@ -200,10 +200,8 @@ func (c *Config) DesktopDisplayMode() string {
 	switch strings.ToLower(strings.TrimSpace(c.Desktop.DisplayMode)) {
 	case "standard":
 		return "standard"
-	case "compact":
+	case "compact", "minimal":
 		return "compact"
-	case "minimal":
-		return "minimal"
 	default:
 		return "standard"
 	}

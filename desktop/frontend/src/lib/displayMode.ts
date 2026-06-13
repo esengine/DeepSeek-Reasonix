@@ -7,6 +7,7 @@ export function getDisplayMode(): DisplayMode {
   if (typeof localStorage === "undefined") return "standard";
   const stored = localStorage.getItem(DISPLAY_MODE_KEY);
   if (stored === "standard" || stored === "compact") return stored;
+  if (stored === "minimal") return "compact";
   return "standard";
 }
 
@@ -17,9 +18,10 @@ export function setDisplayMode(mode: DisplayMode): void {
 
 /** Adopts the toml-persisted mode at boot so config is the source of truth across machines. */
 export function hydrateDisplayMode(mode: string | undefined): void {
-  if (mode !== "standard" && mode !== "compact") return;
-  if (mode === getDisplayMode()) return;
-  setDisplayMode(mode);
+  const next: DisplayMode | undefined = mode === "standard" || mode === "compact" ? mode : mode === "minimal" ? "compact" : undefined;
+  if (!next) return;
+  if (next === getDisplayMode()) return;
+  setDisplayMode(next);
 }
 
 export function onDisplayModeChange(cb: (mode: DisplayMode) => void): () => void {
