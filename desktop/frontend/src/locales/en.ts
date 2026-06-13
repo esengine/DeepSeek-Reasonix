@@ -1275,6 +1275,11 @@ export const en = {
   "rewind.busyConversation": "Rewinding conversation…",
   "rewind.busyCode": "Rewinding code…",
   "rewind.busyBoth": "Rewinding code and conversation…",
+  "undoRewind.turns": "Rolled back {n} turn(s)",
+  "undoRewind.filesRestored": "{n} file(s) restored",
+  "undoRewind.filesRemoved": "{n} file(s) removed",
+  "undoRewind.undo": "Undo",
+  "undoRewind.confirm": "Confirm undo?",
   "msg.copied": "Copied",
 
   // tool card summaries

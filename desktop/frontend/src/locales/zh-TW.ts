@@ -785,6 +785,11 @@ export const zhTW: Record<DictKey, string> = {
   "rewind.busyConversation": "正在回滾對話…",
   "rewind.busyCode": "正在回滾程式碼…",
   "rewind.busyBoth": "正在回滾程式碼和對話…",
+  "undoRewind.turns": "已回滾 {n} 輪對話",
+  "undoRewind.filesRestored": "還原了 {n} 個檔案",
+  "undoRewind.filesRemoved": "移除了 {n} 個檔案",
+  "undoRewind.undo": "撤回",
+  "undoRewind.confirm": "確認撤回？",
   "msg.copied": "已複製",
 
   // 工具卡片摘要

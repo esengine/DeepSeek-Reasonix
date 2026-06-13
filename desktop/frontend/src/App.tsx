@@ -38,6 +38,7 @@ import { Composer } from "./components/Composer";
 import { TodoPanel } from "./components/TodoPanel";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
+import { UndoRewindBanner, type UndoRewindMeta } from "./components/UndoRewindBanner";
 import { ClearContextCard } from "./components/ClearContextCard";
 import { StatusBar } from "./components/StatusBar";
 import { HistoryPanel } from "./components/HistoryPanel";
@@ -57,6 +58,7 @@ import { shouldShowTodoPanel } from "./lib/todoVisibility";
 import {
   type BotConnectionView,
   type BotSettingsView,
+  type CheckpointMeta,
   type CollaborationMode,
   type ComposerInsertRequest,
   type Mode,
@@ -1910,7 +1912,30 @@ export default function App() {
     await openBlankSession(target.scope, target.workspaceRoot);
   }, [blankSessionTarget, closeTransientOverlays, openBlankSession]);
 
+  const [rewindSignal, setRewindSignal] = useState(0);
+  const [rewindUndo, setRewindUndo] = useState<UndoRewindMeta | null>(null);
+  const itemsRef = useRef<Item[]>([]);
+  itemsRef.current = state.items;
+  const checkpointsRef = useRef<CheckpointMeta[]>([]);
+  checkpointsRef.current = state.checkpoints as CheckpointMeta[];
+
   const handleMessageAction = useCallback(async (turn: number, scope: string) => {
+    const prevItems = itemsRef.current ?? [];
+    const prevCheckpoints = checkpointsRef.current ?? [];
+    const prevUserCount = prevItems.filter((it) => it.kind === "user").length;
+    const prevLastCp = prevCheckpoints[prevCheckpoints.length - 1];
+    const prevFiles = prevLastCp?.files ?? [];
+
+    // For non-fork rewinds, silently fork before truncating so undo can
+    // switch back to the pre-rewind state.
+    let undoForkTabId: string | undefined;
+    if (scope !== "fork") {
+      try {
+        const undoFork = await app.Fork(turn);
+        if (undoFork?.id) undoForkTabId = undoFork.id;
+      } catch { /* undo fork failed silently */ }
+    }
+
     await rewind(turn, scope);
     if (scope === "fork") {
       await refreshTabMetas();
@@ -1922,7 +1947,26 @@ export default function App() {
       setDockRefreshKey((value) => value + 1);
       setProjectRevision((value) => value + 1);
     }
-  }, [refreshTabMetas, rewind]);
+    // Compute undo meta from before/after state.
+    const nowUserCount = (itemsRef.current ?? []).filter((it) => it.kind === "user").length;
+    const turnDiff = prevUserCount - nowUserCount;
+    const nowCp = (checkpointsRef.current ?? [])[(checkpointsRef.current ?? []).length - 1];
+    const nowFiles = nowCp?.files ?? [];
+    const restored = prevFiles.filter((f: string) => !nowFiles.includes(f));
+    const removed = nowFiles.filter((f: string) => !prevFiles.includes(f));
+    if (turnDiff > 0 || restored.length > 0 || removed.length > 0) {
+      setRewindUndo({
+        turns: turnDiff,
+        filesRestored: restored,
+        filesRemoved: removed,
+        onUndo: () => {
+          setRewindUndo(null);
+          if (undoForkTabId) switchTab(undoForkTabId);
+        },
+      });
+    }
+    setRewindSignal((v) => v + 1);
+  }, [refreshTabMetas, rewind, switchTab]);
 
   const handleOpenTopic = useCallback(async (scope: string, workspaceRoot: string, topicId: string) => {
     closeTransientOverlays();
@@ -2584,6 +2628,7 @@ export default function App() {
                 checkpoints={state.checkpoints}
                 actionPending={state.messageAction != null}
                 rewindDisabled={state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
+                rewindSignal={rewindSignal}
               />
             )}
           </main>
@@ -2591,6 +2636,9 @@ export default function App() {
           {!sidebarImDetailConnection && (
           <footer className="footer" ref={footerRef}>
             {showTodos && <TodoPanel todos={todos} onDismiss={() => setDismissedTodo(todoItem!.id)} />}
+            {rewindUndo && (
+              <UndoRewindBanner meta={rewindUndo} onDismiss={() => setRewindUndo(null)} />
+            )}
             {state.approval && (
               <ApprovalModal
                 key={state.approval.id}

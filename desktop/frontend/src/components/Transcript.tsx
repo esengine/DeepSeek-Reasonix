@@ -141,6 +141,7 @@ export function Transcript({
   actionPending = false,
   rewindDisabled = false,
   questionNavigator = true,
+  rewindSignal = 0,
 }: {
   items: Item[];
   live?: LiveStream;
@@ -151,6 +152,7 @@ export function Transcript({
   actionPending?: boolean;
   rewindDisabled?: boolean;
   questionNavigator?: boolean;
+  rewindSignal?: number;
 }) {
   const {
     scrollRef,
@@ -223,6 +225,18 @@ export function Transcript({
     lastFooterHeight.current = footerHeight;
     repinIfWasPinned(previous - footerHeight);
   }, [footerHeight]);
+
+  // After a non-fork rewind, scroll to the last user message (the
+  // rewound-to point) so the user knows where they are.
+  useEffect(() => {
+    if (rewindSignal <= 0 || questions.length === 0) return;
+    const lastQ = questions[questions.length - 1];
+    const el = document.getElementById(questionAnchorId(lastQ.id));
+    if (!el || !scrollRef.current) return;
+    stick.current = false;
+    scrollRef.current.scrollTop = el.offsetTop - scrollRef.current.offsetTop - 12;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rewindSignal]);
 
   // Sub-agent calls carry a parentId; collect them under their parent `task`
   // call so the parent card can render them nested, and skip them at top level.
