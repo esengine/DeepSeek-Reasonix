@@ -80,6 +80,63 @@ func TestWriteFileInvalidArgs(t *testing.T) {
 	}
 }
 
+// --- move_file tests ---
+
+func TestMoveFileMovesIntoParentDir(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.md")
+	dst := filepath.Join(dir, "docs", "a.md")
+	if err := os.WriteFile(src, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := runTool(t, moveFile{}, map[string]any{"source_path": src, "destination_path": dst})
+	if !strings.Contains(out, "moved") {
+		t.Fatalf("move_file output = %q, want moved", out)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("source still exists or stat failed: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("destination content = %q, want hello", got)
+	}
+}
+
+func TestMoveFileRejectsDestinationExists(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.md")
+	dst := filepath.Join(dir, "b.md")
+	os.WriteFile(src, []byte("a"), 0o644)
+	os.WriteFile(dst, []byte("b"), 0o644)
+
+	if _, err := (moveFile{}).Execute(context.Background(), argsJSON(t, map[string]any{"source_path": src, "destination_path": dst})); err == nil {
+		t.Fatal("expected error for existing destination")
+	}
+}
+
+func TestMoveFileRejectsEscape(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	src := filepath.Join(dir, "a.md")
+	if err := os.WriteFile(src, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := (moveFile{roots: []string{dir}}).Execute(context.Background(), argsJSON(t, map[string]any{
+		"source_path":      src,
+		"destination_path": filepath.Join(outside, "a.md"),
+	})); err == nil {
+		t.Fatal("expected error for destination outside workspace")
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Fatalf("source should remain after refused move: %v", err)
+	}
+}
+
 // --- edit_file extended tests ---
 
 func TestEditFileNotFound(t *testing.T) {

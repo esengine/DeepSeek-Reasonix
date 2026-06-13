@@ -511,6 +511,7 @@ func TestApprovalSessionGrantGroupsFileMutationTools(t *testing.T) {
 		{"edit_file", "src/a.go"},
 		{"write_file", "src/b.go"},
 		{"multi_edit", "src/c.go"},
+		{"move_file", "src/d.go"},
 	} {
 		allow, _, err := gateApprover{c}.Approve(context.Background(), call.tool, call.subject, nil)
 		if err != nil || !allow {
