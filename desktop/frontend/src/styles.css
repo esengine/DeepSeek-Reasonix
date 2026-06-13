@@ -2577,7 +2577,6 @@ a[href] {
   padding: 24px 32px 32px;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
-  scroll-behavior: smooth;
 }
 .transcript > * {
   max-width: var(--maxw);
