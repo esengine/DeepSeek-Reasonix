@@ -666,6 +666,7 @@ export interface QQBotView {
   appId: string;
   appSecretEnv: string;
   secretSet: boolean;
+  sandbox: boolean;
 }
 
 export interface FeishuBotView {

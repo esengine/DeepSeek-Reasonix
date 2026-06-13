@@ -758,7 +758,7 @@ function makeMockApp(): AppBindings {
         feishuGroups: [],
         weixinGroups: [],
       },
-      qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false },
+      qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false, sandbox: false },
       feishu: {
         enabled: false,
         domain: "feishu",

@@ -141,7 +141,7 @@ type HistoryViewState =
   | { kind: "history"; source: "scope"; filter: HistoryScopeFilter; sessions: SessionMeta[] }
   | { kind: "history"; source: "all"; sessions: SessionMeta[] }
   | { kind: "trash"; sessions: SessionMeta[] };
-type SidebarImPlatform = "feishu" | "lark" | "weixin";
+type SidebarImPlatform = "qq" | "feishu" | "lark" | "weixin";
 type SidebarImStatus = "connected" | "disabled" | "pending" | "error" | "disconnected";
 type SidebarImConnection = {
   id: string;
@@ -185,6 +185,7 @@ function sidebarImPlatform(connection: BotConnectionView): SidebarImPlatform {
 }
 
 function sidebarImPlatformLabel(platform: SidebarImPlatform, translate: Translator): string {
+  if (platform === "qq") return "QQ";
   if (platform === "lark") return "Lark";
   if (platform === "weixin") return translate("settings.botWeixin");
   return translate("settings.botFeishu");
@@ -246,13 +247,56 @@ function uniqueTrimmedValues(values: string[]): string[] {
 }
 
 function sidebarImAllowlistUsers(bot: BotSettingsView, platform: SidebarImPlatform): string[] {
+  if (platform === "qq") return uniqueTrimmedValues(asArray(bot.allowlist.qqUsers));
   if (platform === "weixin") return uniqueTrimmedValues(asArray(bot.allowlist.weixinUsers));
   return uniqueTrimmedValues(asArray(bot.allowlist.feishuUsers));
 }
 
+function sidebarImQQAdded(qq: BotSettingsView["qq"]): boolean {
+  return Boolean(qq.enabled || qq.secretSet || qq.appId.trim());
+}
+
+function sidebarImQQStatus(bot: BotSettingsView): SidebarImStatus {
+  const appId = bot.qq.appId.trim();
+  if (!bot.enabled || !bot.qq.enabled) return "disabled";
+  if (!appId || !bot.qq.secretSet) return "disconnected";
+  if (typeof window !== "undefined" && !window.runtime) return "pending";
+  return "connected";
+}
+
+function sidebarImQQConnection(bot: BotSettingsView, translate: Translator): SidebarImConnection | null {
+  if (!sidebarImQQAdded(bot.qq)) return null;
+  const remoteId = bot.qq.appId.trim();
+  const status = sidebarImQQStatus(bot);
+  const statusLabel = sidebarImStatusLabel(status, translate);
+  const allowlistUsers = sidebarImAllowlistUsers(bot, "qq");
+  const subtitleParts = [
+    remoteId ? compactRemoteId(remoteId) : "QQ",
+    statusLabel,
+  ].filter(Boolean);
+  return {
+    id: "__qq_bot__",
+    platform: "qq",
+    title: "QQ Bot",
+    platformLabel: "QQ",
+    subtitle: subtitleParts.join(" · "),
+    status,
+    statusLabel,
+    remoteId,
+    sessionId: "",
+    scope: "global",
+    workspaceRoot: "",
+    allowAll: bot.allowlist.allowAll,
+    allowlistEnabled: bot.allowlist.enabled,
+    allowlistUsers,
+    allowlistMatched: remoteId ? allowlistUsers.includes(remoteId) : false,
+  };
+}
+
 function sidebarImConnectionsFromBot(bot: BotSettingsView | null | undefined, translate: Translator): SidebarImConnection[] {
-  if (!bot?.connections?.length) return [];
-  return bot.connections
+  if (!bot) return [];
+  const qqConnection = sidebarImQQConnection(bot, translate);
+  const connectionItems = asArray(bot.connections)
     .filter(isSidebarImConnection)
     .map((connection) => {
       const platform = sidebarImPlatform(connection);
@@ -288,6 +332,7 @@ function sidebarImConnectionsFromBot(bot: BotSettingsView | null | undefined, tr
         allowlistMatched: remoteId ? allowlistUsers.includes(remoteId) : false,
       };
     });
+  return qqConnection ? [qqConnection, ...connectionItems] : connectionItems;
 }
 
 function mappedSessionTarget(sessionId: string): { kind: "path" | "topic"; value: string } | null {
@@ -372,7 +417,7 @@ function SidebarImConnectionDetail({ connection, onClose, onOpenSession, onOpenS
     <div className="bot-detail">
       <section className="bot-detail__summary">
         <div className={`bot-detail__avatar bot-detail__avatar--${connection.platform}`} aria-hidden="true">
-          {connection.platform === "weixin" ? "微" : connection.platform === "lark" ? "L" : "飞"}
+          {connection.platform === "qq" ? "Q" : connection.platform === "weixin" ? "微" : connection.platform === "lark" ? "L" : "飞"}
         </div>
         <div className="bot-detail__summary-main">
           <span>{translate("botDetail.subtitle")}</span>
@@ -2457,7 +2502,7 @@ export default function App() {
                         onClick={() => void selectSidebarImConnection(connection)}
                       >
                         <span className={`sidebar-im-row__platform sidebar-im-row__platform--${connection.platform}`} aria-hidden="true">
-                          {connection.platform === "weixin" ? "微" : connection.platform === "lark" ? "L" : "飞"}
+                          {connection.platform === "qq" ? "Q" : connection.platform === "weixin" ? "微" : connection.platform === "lark" ? "L" : "飞"}
                         </span>
                         <span className="sidebar-im-row__main">
                           <strong>{connection.title}</strong>

@@ -38,6 +38,10 @@ type adapter struct {
 	token       string
 	tokenExpiry time.Time
 	tokenMu     sync.Mutex
+
+	sendMu             sync.Mutex
+	nextOutboundMsgSeq int
+	markdownDisabled   bool
 }
 
 func (a *adapter) Platform() bot.Platform { return bot.PlatformQQ }

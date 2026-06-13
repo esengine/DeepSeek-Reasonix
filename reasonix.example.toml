@@ -179,6 +179,7 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # enabled        = false
 # app_id         = ""
 # app_secret_env  = "QQ_BOT_APP_SECRET"
+# sandbox        = false   # true 使用 QQ 沙箱 API / gateway
 #
 # [bot.feishu]
 # enabled             = false

@@ -470,6 +470,7 @@ type QQBotConfig struct {
 	Enabled      bool   `toml:"enabled"`
 	AppID        string `toml:"app_id"`
 	AppSecretEnv string `toml:"app_secret_env"` // 环境变量名，如 QQ_BOT_APP_SECRET
+	Sandbox      bool   `toml:"sandbox"`        // true 使用 QQ 沙箱 API / gateway
 }
 
 // FeishuBotConfig 飞书自建应用 Bot 配置。

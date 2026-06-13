@@ -1808,6 +1808,9 @@ a[href] {
 .sidebar-im-row__platform--feishu {
   background: #2f80ff;
 }
+.sidebar-im-row__platform--qq {
+  background: #ff5a3d;
+}
 .sidebar-im-row__platform--lark {
   background: #4f7dff;
 }
@@ -2270,6 +2273,9 @@ a[href] {
 }
 .bot-detail__avatar--feishu {
   background: #2f80ff;
+}
+.bot-detail__avatar--qq {
+  background: #ff5a3d;
 }
 .bot-detail__avatar--lark {
   background: #4f7dff;
@@ -9799,6 +9805,7 @@ a[href] {
 
 .settings-center__content {
   min-width: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   scrollbar-gutter: stable;
   padding: 24px 32px;
@@ -9956,6 +9963,7 @@ a[href] {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  max-width: 100%;
 }
 
 .settings-field__control > .mem-input,
@@ -12208,6 +12216,102 @@ a[href] {
 .bot-connect-panel--phone .bot-connect-panel__body strong {
   font-size: 15px;
 }
+.bot-connect-panel--manual {
+  align-items: flex-start;
+}
+.bot-connect-panel--manual .bot-connect-panel__qr {
+  min-height: 220px;
+}
+.bot-connect-panel--qq {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px;
+}
+.bot-connect-panel--qq .bot-connect-panel__body {
+  gap: 12px;
+}
+.bot-qq-simple__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.bot-qq-simple__head > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.bot-qq-simple__head p {
+  max-width: 58ch;
+}
+.bot-qq-simple__status {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+  color: var(--fg-dim);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+.bot-qq-simple__status svg {
+  width: 14px;
+  height: 14px;
+}
+.bot-qq-simple__status--ready {
+  border-color: color-mix(in srgb, var(--ok) 28%, var(--border-soft));
+  background: color-mix(in srgb, var(--ok) 8%, var(--bg-elev));
+  color: var(--ok);
+}
+.bot-manual-form.bot-manual-form--qq {
+  gap: 10px;
+  max-width: none;
+}
+.bot-manual-form.bot-manual-form--qq .bot-card-field {
+  grid-template-columns: minmax(84px, 108px) minmax(0, 1fr);
+}
+.bot-manual-form.bot-manual-form--qq .bot-card-field > div {
+  justify-content: flex-start;
+}
+.bot-qq-simple__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 2px;
+}
+.bot-advanced--qq {
+  margin-top: 2px;
+}
+.bot-advanced--qq .bot-advanced__body {
+  padding-top: 6px;
+}
+.bot-manual-form {
+  display: grid;
+  gap: 9px;
+  width: 100%;
+  max-width: 560px;
+  min-width: 0;
+}
+.bot-manual-form .bot-card-field {
+  grid-template-columns: minmax(92px, 128px) minmax(0, 1fr);
+}
+.bot-secret-row--manual {
+  margin-top: 2px;
+}
+.bot-secret-row--qq {
+  grid-template-columns: minmax(110px, 0.85fr) minmax(130px, 0.9fr) minmax(150px, 1fr) auto auto;
+}
+.bot-list-grid--qq {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 .bot-connection-list {
   display: grid;
   gap: 12px;
@@ -12451,6 +12555,9 @@ a[href] {
 .bot-connection-row__status--connected {
   color: var(--ok);
 }
+.bot-connection-row__status--configured {
+  color: var(--accent);
+}
 .bot-connection-row__state {
   display: flex;
   align-items: center;
@@ -12636,10 +12743,14 @@ a[href] {
   align-items: center;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
-  border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border-soft));
+  border: 1px solid color-mix(in srgb, var(--danger) 20%, var(--border-soft));
+  border-left: 3px solid color-mix(in srgb, var(--danger) 70%, var(--border));
   border-radius: 8px;
-  background: color-mix(in srgb, var(--danger) 7%, var(--bg-elev));
-  padding: 12px;
+  background: color-mix(in srgb, var(--danger) 3%, var(--bg-elev-2));
+  padding: 11px 12px 11px 10px;
+}
+.bot-detail-section--danger .bot-detail-section__head {
+  color: var(--fg);
 }
 .bot-detail-section--danger p {
   margin: 4px 0 0;
@@ -13003,6 +13114,225 @@ a[href] {
   margin-top: 18px;
 }
 
+@media (max-width: 1180px) {
+  .settings-page--bots .bot-connection-table {
+    gap: 8px;
+    overflow: visible;
+    border: 0;
+    background: transparent;
+  }
+
+  .settings-page--bots .bot-connection-table__header {
+    display: none;
+  }
+
+  .settings-page--bots .bot-connection-row {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-elev);
+  }
+
+  .settings-page--bots .bot-connection-row:last-child {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .settings-page--bots .bot-connection-row__grid {
+    grid-template-columns: minmax(72px, 0.52fr) minmax(180px, 1fr) max-content;
+    grid-template-areas:
+      "channel remote state"
+      "name scope actions";
+    align-items: center;
+    gap: 8px 12px;
+    min-height: 0;
+    padding: 12px 14px;
+  }
+
+  .settings-page--bots .bot-connection-row__channel {
+    grid-area: channel;
+  }
+
+  .settings-page--bots .bot-connection-row__name {
+    grid-area: name;
+  }
+
+  .settings-page--bots .bot-connection-row__remote {
+    grid-area: remote;
+  }
+
+  .settings-page--bots .bot-connection-row__scope {
+    grid-area: scope;
+  }
+
+  .settings-page--bots .bot-connection-row__state {
+    grid-area: state;
+  }
+
+  .settings-page--bots .bot-connection-row__actions {
+    grid-area: actions;
+  }
+
+  .settings-page--bots .bot-connection-row__state,
+  .settings-page--bots .bot-connection-row__actions {
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+    width: auto;
+  }
+
+  .settings-page--bots .bot-connection-row__channel,
+  .settings-page--bots .bot-connection-row__name,
+  .settings-page--bots .bot-connection-row__scope {
+    align-self: center;
+  }
+
+  .settings-page--bots .bot-connection-row__actions .btn {
+    max-width: 100%;
+  }
+
+  .settings-page--bots .bot-manual-form .bot-card-field > div {
+    justify-content: flex-start;
+  }
+
+  .settings-page--bots .bot-manual-form .bot-card-field .set-seg {
+    width: fit-content;
+    max-width: 100%;
+  }
+
+  .settings-page--bots .bot-manual-form .bot-card-field .set-seg__btn {
+    flex: 0 1 auto;
+    min-width: 76px;
+  }
+}
+
+@media (max-width: 980px) {
+  .settings-center {
+    grid-template-columns: minmax(176px, 220px) minmax(0, 1fr);
+  }
+
+  .settings-center__content {
+    padding: 20px 24px;
+  }
+
+  .settings-section,
+  .settings-page--manager .mem-section {
+    padding: 14px;
+  }
+
+  .settings-field,
+  .settings-field--wide-copy,
+  .bot-access-panel .settings-field,
+  .bot-detail-card .settings-field,
+  .bot-advanced__body .settings-field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+  }
+
+  .settings-field__control,
+  .settings-inline-controls {
+    justify-content: flex-start;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .settings-field__control > .mem-input,
+  .settings-field__control > .mem-select,
+  .settings-field__control > .model-picker,
+  .settings-field__control > .settings-model-picker {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .settings-inline-controls,
+  .provider-access-card__head,
+  .provider-access-card__actions,
+  .set-rules__add {
+    flex-wrap: wrap;
+  }
+
+  .bot-connect-panel,
+  .bot-connect-panel--phone {
+    grid-template-columns: 1fr;
+  }
+
+  .bot-manual-form {
+    max-width: none;
+  }
+
+  .bot-card-field,
+  .bot-manual-form .bot-card-field,
+  .bot-detail-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .bot-card-field > div {
+    justify-content: flex-start;
+  }
+
+  .bot-secret-row,
+  .bot-detail-card .bot-secret-row {
+    grid-template-columns: 1fr;
+  }
+
+  .bot-secret-row .btn {
+    justify-self: flex-start;
+  }
+
+  .bot-list-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .bot-connection-table__header {
+    display: none;
+  }
+
+  .bot-connection-row__grid {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
+    gap: 7px;
+    min-height: 0;
+    padding: 10px 12px;
+  }
+
+  .bot-connection-row__state,
+  .bot-connection-row__actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .settings-page--bots .bot-connection-row__grid {
+    grid-template-columns: minmax(64px, 0.48fr) minmax(140px, 1fr) max-content;
+    grid-template-areas:
+      "channel remote state"
+      "name scope actions";
+    align-items: center;
+    gap: 7px 10px;
+  }
+
+  .settings-page--bots .bot-connection-row__state,
+  .settings-page--bots .bot-connection-row__actions {
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+    width: auto;
+  }
+
+  .settings-page--form .set-rules-grid,
+  .set-rules-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  }
+
+  .set-rule {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .set-rules__add .mem-input {
+    flex: 1 1 160px;
+    min-width: 0;
+  }
+}
+
 @media (max-width: 760px) {
   .drawer--wide {
     width: min(620px, 96vw);
@@ -13089,6 +13419,13 @@ a[href] {
   }
   .bot-connection-row__grid {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "channel"
+      "name"
+      "remote"
+      "scope"
+      "state"
+      "actions";
     align-items: flex-start;
     gap: 7px;
     min-height: 0;
@@ -13140,6 +13477,16 @@ a[href] {
   }
   .bot-secret-row .btn {
     justify-self: flex-end;
+  }
+  .bot-qq-simple__head,
+  .bot-qq-simple__actions {
+    align-items: flex-start;
+    flex-direction: column;
+    justify-content: flex-start;
+  }
+  .bot-manual-form.bot-manual-form--qq .bot-card-field {
+    grid-template-columns: 1fr;
+    gap: 5px;
   }
   .theme-card-grid {
     grid-template-columns: 1fr;

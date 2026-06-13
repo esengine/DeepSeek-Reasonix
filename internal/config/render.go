@@ -397,6 +397,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		fmt.Fprintf(&b, "enabled = %v\n", c.Bot.QQ.Enabled)
 		fmt.Fprintf(&b, "app_id = %q\n", c.Bot.QQ.AppID)
 		fmt.Fprintf(&b, "app_secret_env = %q\n", c.Bot.QQ.AppSecretEnv)
+		fmt.Fprintf(&b, "sandbox = %v\n", c.Bot.QQ.Sandbox)
 		b.WriteString("\n[bot.feishu]\n")
 		fmt.Fprintf(&b, "enabled = %v\n", c.Bot.Feishu.Enabled)
 		fmt.Fprintf(&b, "app_id = %q\n", c.Bot.Feishu.AppID)

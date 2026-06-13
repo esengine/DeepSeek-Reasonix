@@ -90,6 +90,55 @@ func TestMigrateImportsKeyPluginsAndLang(t *testing.T) {
 	}
 }
 
+func TestMigrateImportsLegacyQQConfig(t *testing.T) {
+	src, dest, _ := legacyHome(t)
+	writeLegacy(t, src, `{
+		"qq": {
+			"enabled": true,
+			"appId": "qq-app-id",
+			"appSecret": "qq-secret",
+			"sandbox": true,
+			"ownerOpenId": " owner-openid ",
+			"allowlist": ["owner-openid", " member-openid ", "member-openid", ""]
+		}
+	}`)
+
+	res, err := MigrateLegacyIfNeeded()
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if res == nil {
+		t.Fatal("expected migration result")
+	}
+	envData, err := os.ReadFile(UserCredentialsPath())
+	if err != nil {
+		t.Fatalf("read credentials: %v", err)
+	}
+	if !strings.Contains(string(envData), "QQ_BOT_APP_SECRET=qq-secret") {
+		t.Fatalf("credentials missing QQ secret: %q", envData)
+	}
+	tomlData, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read dest: %v", err)
+	}
+	toml := string(tomlData)
+	for _, want := range []string{
+		`[bot.qq]`,
+		`enabled = true`,
+		`app_id = "qq-app-id"`,
+		`app_secret_env = "QQ_BOT_APP_SECRET"`,
+		`sandbox = true`,
+		`qq_users = ["owner-openid", "member-openid"]`,
+	} {
+		if !strings.Contains(toml, want) {
+			t.Fatalf("migrated config missing %q:\n%s", want, toml)
+		}
+	}
+	if strings.Contains(toml, "qq-secret") {
+		t.Fatalf("migrated TOML must not contain QQ secret:\n%s", toml)
+	}
+}
+
 // TestMigrateImportsLegacyMCPStringList covers the pre-mcpServers `mcp` format
 // (#3949): `--mcp`-style strings, with mcpEnv/mcpDisabled keyed by name and
 // mcpServers winning a name collision.
