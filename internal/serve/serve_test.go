@@ -137,6 +137,24 @@ func TestHistoryMessagesPreserveToolDetails(t *testing.T) {
 	}
 }
 
+func TestPreviewSessionFileStripsTransientReasoningLanguageBlock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	s := agent.NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "<reasoning-language>\nVisible reasoning/thinking text preference: use English.\n</reasoning-language>\n\nExplain this module"})
+	if err := s.Save(path); err != nil {
+		t.Fatal(err)
+	}
+
+	preview, turns := previewSessionFile(path)
+	if turns != 1 {
+		t.Errorf("turns = %d, want 1", turns)
+	}
+	if preview != "Explain this module" {
+		t.Errorf("preview = %q, want user prompt", preview)
+	}
+}
+
 func TestServeCancelEndpoint(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})

@@ -2,13 +2,11 @@ package control
 
 import (
 	"context"
-	"regexp"
 	"strings"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/skill"
 )
-
-var reComposeBlock = regexp.MustCompile(`(?s)^\s*<(?:reasoning-language|memory-update|background-jobs)>.*?</(?:reasoning-language|memory-update|background-jobs)>\s*\n`)
 
 // PlanModeMarker is prepended to every user turn while plan mode is on. It rides
 // in the user message (not the system prompt or tools), so the cache-stable
@@ -29,31 +27,17 @@ const (
 
 // StripComposePrefixes removes controller-injected prefixes from a composed
 // user message so that the display text matches what the user actually typed.
-// It strips the PlanModeMarker, <memory-update>…</memory-update>, and
-// <background-jobs>…</background-jobs> blocks that Compose prepends to user
-// turns. This is used as a fallback when no .display.json sidecar recording
-// exists (e.g. sessions created before the display-recording feature, or
-// synthetic user messages injected by the controller).
+// It strips the PlanModeMarker plus transient XML blocks such as
+// <reasoning-language>, <memory-update>, and <background-jobs> that Compose
+// prepends to user turns. This is used as a fallback when no .display.json
+// sidecar recording exists (e.g. sessions created before the display-recording
+// feature, or synthetic user messages injected by the controller).
 func StripComposePrefixes(content string) string {
-	s := stripComposeBlocks(content)
+	s := agent.StripTransientUserBlocks(content)
 	s = strings.TrimPrefix(s, PlanModeMarker+"\n\n")
 	s = strings.TrimPrefix(s, PlanModeMarker)
 	s = strings.TrimSpace(s)
 	return s
-}
-
-func stripComposeBlocks(content string) string {
-	s := content
-	for {
-		next := reComposeBlock.ReplaceAllStringFunc(s, func(match string) string {
-			return ""
-		})
-		if next == s {
-			break
-		}
-		s = next
-	}
-	return strings.TrimLeft(s, " \t\r\n")
 }
 
 // IsSyntheticUserMessage returns true if the content matches one of the known

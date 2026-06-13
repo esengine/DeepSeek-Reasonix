@@ -982,7 +982,7 @@ func previewSessionFile(path string) (string, int) {
 		if m.Role == "user" {
 			turns++
 			if first == "" {
-				first = strings.TrimSpace(agent.HandoffTask(m.Content))
+				first = agent.UserPreviewText(m.Content)
 			}
 		}
 	}
