@@ -37,6 +37,7 @@ default_model = "deepseek-flash"   # executor; set [agent].planner_model to add 
 [agent]
 max_steps = 0                    # executor tool-call rounds; 0 = no limit
 planner_max_steps = 12           # planner read-only tool-call rounds; 0 = no limit
+reasoning_language = "auto"      # visible reasoning text: auto|zh|en
 # planner_model = "mimo-pro"          # optional low-frequency planner
 # subagent_model = "deepseek-pro"     # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }

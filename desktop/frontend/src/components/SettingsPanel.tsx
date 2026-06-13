@@ -253,7 +253,11 @@ function SettingsSection({
         <div className="settings-section__head">
           <div>
             {title && <div className="settings-section__title">{title}</div>}
-            {description && <div className="settings-section__desc">{description}</div>}
+            {description && (
+              <div className="settings-section__desc">
+                <SettingsHint hint={description} />
+              </div>
+            )}
           </div>
           {actions && <div className="settings-section__actions">{actions}</div>}
         </div>
@@ -464,6 +468,11 @@ function normalizeReasoningProtocol(protocol: string | undefined): string {
   return REASONING_PROTOCOLS.includes(protocol ?? "") ? protocol ?? "" : "";
 }
 
+function normalizeReasoningLanguage(lang: string | undefined): string {
+  const v = String(lang ?? "").trim().toLowerCase();
+  return v === "zh" || v === "en" ? v : "auto";
+}
+
 function defaultBotSettings(): BotSettingsView {
   return {
     enabled: false,
@@ -590,9 +599,10 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     noProxy: "",
     proxy: { type: "socks5", server: "", port: 0, username: "", password: "" },
   };
-  const agent = view.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 12, systemPrompt: "", coldResumePrune: true };
+  const agent = view.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 12, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" };
   agent.plannerMaxSteps = Number.isFinite(agent.plannerMaxSteps) ? Math.max(0, Math.trunc(agent.plannerMaxSteps)) : 12;
   agent.maxSteps = Number.isFinite(agent.maxSteps) ? Math.max(0, Math.trunc(agent.maxSteps)) : 0;
+  agent.reasoningLanguage = normalizeReasoningLanguage(agent.reasoningLanguage);
   return {
     ...view,
     providers: asArray(view.providers).map((p) => ({
@@ -2234,13 +2244,14 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
   const plannerRef = toRef(s.plannerModel, s);
   const subagentRef = toRef(s.subagentModel, s);
   const plannerSelectRef = plannerRef === defaultRef ? "" : plannerRef;
-  const [defaultProvider, defaultModel] = defaultRef.split("/");
+  const [defaultProvider] = defaultRef.split("/");
   const defaultProviderView = s.providers.find((p) => p.name === defaultProvider);
-  const currentModelLabel = defaultModel || defaultRef || t("common.none");
-  const providerLabel = defaultProvider ? modelProviderLabel(defaultProvider, defaultProviderView, t) : t("common.none");
-  const plannerLabel = plannerSelectRef || t("settings.plannerNone");
-  const keyStatusLabel = defaultProviderView?.keySet ? t("settings.keySet") : t("settings.noKey");
-  const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 12, systemPrompt: "", coldResumePrune: true };
+  const modelIssue = !defaultProviderView
+    ? t("settings.modelUnavailable", { ref: defaultRef || t("common.none") })
+    : !defaultProviderView.keySet
+      ? t("settings.modelNeedsKey", { provider: modelProviderLabel(defaultProvider, defaultProviderView, t) })
+      : "";
+  const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 12, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" };
   const setAgentSteps = (maxSteps: number, plannerMaxSteps: number) => (
     app.SetAgentParams(agent.temperature, maxSteps, plannerMaxSteps, agent.systemPrompt)
   );
@@ -2351,23 +2362,13 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
               </select>
             </SettingsField>
 
-            <div className="settings-model-current" aria-label={t("settings.modelCurrentStatus")}>
-              <div>
-                <span>{t("settings.modelCurrentStatus")}</span>
-                <strong>{currentModelLabel}</strong>
-              </div>
-              <div className="settings-model-current__meta">
-                <span>{providerLabel}</span>
-                <span>{plannerLabel}</span>
-                <span>{keyStatusLabel}</span>
-              </div>
-            </div>
+            {modelIssue && <div className="provider-fetch-banner provider-fetch-banner--warn">{modelIssue}</div>}
           </SettingsSection>
           <SettingsSection title={t("settings.agentRuntime")} description={t("settings.agentRuntimeHint")}>
             <SettingsField label={t("settings.executorMaxSteps")} hint={t("settings.executorMaxStepsHint")}>
               <StepLimitControl
                 value={agent.maxSteps}
-                presets={[0, 10, 25, 50]}
+                presets={[10, 25, 50, 0]}
                 busy={busy}
                 onChange={(next) => void apply(() => setAgentSteps(next, agent.plannerMaxSteps))}
               />
@@ -2390,6 +2391,20 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
                     onClick={() => void apply(() => app.SetColdResumePrune(on))}
                   >
                     {on ? t("settings.coldResumePrune.on") : t("settings.coldResumePrune.off")}
+                  </button>
+                ))}
+              </div>
+            </SettingsField>
+            <SettingsField label={t("settings.reasoningLanguage")} hint={t("settings.reasoningLanguageHint")}>
+              <div className="set-seg">
+                {(["auto", "zh", "en"] as const).map((lang) => (
+                  <button
+                    key={lang}
+                    className={`set-seg__btn${agent.reasoningLanguage === lang ? " set-seg__btn--on" : ""}`}
+                    disabled={busy}
+                    onClick={() => void apply(() => app.SetReasoningLanguage(lang))}
+                  >
+                    {t(`settings.reasoningLanguage.${lang}`)}
                   </button>
                 ))}
               </div>

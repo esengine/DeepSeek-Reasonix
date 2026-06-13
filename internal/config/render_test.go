@@ -65,6 +65,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Notifications.ApprovalRequest = true
 	orig.Notifications.AskRequest = true
 	orig.Agent.AutoPlanClassifier = "deepseek-flash"
+	orig.Agent.ReasoningLanguage = "zh"
 	orig.Agent.SubagentModel = "mimo-pro"
 	orig.Agent.SubagentModels = map[string]string{"review": "deepseek-pro"}
 	orig.Tools.BashTimeoutSeconds = intPtr(900)
@@ -204,6 +205,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if got.Agent.AutoPlanClassifier != "deepseek-flash" {
 		t.Errorf("auto_plan_classifier = %q, want deepseek-flash", got.Agent.AutoPlanClassifier)
+	}
+	if got.Agent.ReasoningLanguage != "zh" {
+		t.Errorf("reasoning_language = %q, want zh", got.Agent.ReasoningLanguage)
 	}
 	if got.Agent.SoftCompactRatio != orig.Agent.SoftCompactRatio {
 		t.Errorf("soft_compact_ratio = %v, want %v", got.Agent.SoftCompactRatio, orig.Agent.SoftCompactRatio)

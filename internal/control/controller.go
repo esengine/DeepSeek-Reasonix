@@ -62,19 +62,20 @@ type Controller struct {
 	sink     event.Sink
 	policy   permission.Policy
 
-	label         string
-	systemPrompt  string
-	sessionDir    string
-	host          *plugin.Host
-	commands      []command.Command
-	skills        []skill.Skill
-	allSkills     []skill.Skill
-	skillStore    *skill.Store
-	allSkillStore *skill.Store
-	hooks         *hook.Runner // session hook runner; nil-safe (no hooks configured)
-	mem           *memory.Set
-	cleanup       func()
-	autoPlan      string
+	label             string
+	systemPrompt      string
+	sessionDir        string
+	host              *plugin.Host
+	commands          []command.Command
+	skills            []skill.Skill
+	allSkills         []skill.Skill
+	skillStore        *skill.Store
+	allSkillStore     *skill.Store
+	hooks             *hook.Runner // session hook runner; nil-safe (no hooks configured)
+	mem               *memory.Set
+	cleanup           func()
+	autoPlan          string
+	reasoningLanguage string
 	// disableColdResumePrune skips stale-tool-result elision on cold resume.
 	// Zero value keeps the prune on (the cheaper default).
 	disableColdResumePrune bool
@@ -255,6 +256,10 @@ type Options struct {
 	// no confinement). Frontends pass the cwd they launched the session in.
 	WorkspaceRoot string
 	AutoPlan      string
+	// ReasoningLanguage controls visible reasoning language preference. Empty/auto
+	// means no transient injection because the stable language policy already
+	// follows the conversation language.
+	ReasoningLanguage string
 	// DisableColdResumePrune skips the stale-tool-result elision that otherwise
 	// runs when a session resumes past the provider cache window. Zero value
 	// keeps the prune on (the cheaper default).
@@ -302,6 +307,7 @@ func New(opts Options) *Controller {
 		mem:                    opts.Memory,
 		cleanup:                opts.Cleanup,
 		autoPlan:               normalizeAutoPlan(opts.AutoPlan),
+		reasoningLanguage:      config.NormalizeReasoningLanguage(opts.ReasoningLanguage),
 		disableColdResumePrune: opts.DisableColdResumePrune,
 		shell:                  opts.Shell,
 		classifier:             classifier,

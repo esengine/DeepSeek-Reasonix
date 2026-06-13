@@ -7,3 +7,9 @@ func TestDefaultAutoPlanOff(t *testing.T) {
 		t.Fatalf("default auto_plan = %q, want off", got)
 	}
 }
+
+func TestDefaultReasoningLanguageAuto(t *testing.T) {
+	if got := Default().ReasoningLanguage(); got != "auto" {
+		t.Fatalf("default reasoning_language = %q, want auto", got)
+	}
+}

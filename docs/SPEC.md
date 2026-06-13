@@ -446,6 +446,7 @@ system_prompt = "You are Reasonix, a coding agent..."  # or system_prompt_file =
 max_steps         = 0    # executor tool-call rounds; 0 = no limit
 planner_max_steps = 12   # planner read-only tool-call rounds; 0 = no limit
 temperature       = 0.0
+reasoning_language = "auto"       # visible reasoning text: auto|zh|en
 # planner_model = "mimo"   # optional: two-model collaboration (low-frequency planner)
 # subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }

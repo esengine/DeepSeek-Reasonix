@@ -9790,6 +9790,7 @@ a[href] {
   margin-bottom: 12px;
 }
 
+.settings-section__head > div:first-child,
 .settings-page--manager .mem-section__head > div:first-child {
   min-width: 0;
 }
@@ -10378,10 +10379,6 @@ a[href] {
   color: var(--accent);
 }
 
-.settings-page .settings-model-current {
-  margin-top: 14px;
-}
-
 .settings-page .prov-card,
 .settings-page .cap-server-entry,
 .settings-page .cap-source,
@@ -10814,58 +10811,6 @@ a[href] {
   }
 }
 
-.settings-model-current {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-elev-1);
-  padding: 11px 12px;
-}
-.settings-model-current > div:first-child {
-  min-width: 0;
-}
-.settings-model-current span,
-.settings-model-current strong {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.settings-model-current > div:first-child span {
-  color: var(--fg-dim);
-  font-size: var(--font-caption);
-  margin-bottom: 5px;
-}
-.settings-model-current strong {
-  min-width: 0;
-  font-size: var(--text-base);
-  font-weight: 700;
-  color: var(--fg);
-  font-family: inherit;
-}
-.settings-model-current__meta {
-  display: flex;
-  flex: 0 1 auto;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  min-width: 0;
-}
-.settings-model-current__meta span {
-  max-width: 220px;
-  border: 1px solid var(--border-soft);
-  border-radius: 999px;
-  background: var(--bg-elev-2);
-  color: var(--fg-muted);
-  font-family: inherit;
-  font-size: var(--text-2xs);
-  line-height: 1;
-  padding: 5px 8px;
-}
 .settings-field__control > .settings-model-picker {
   width: 100%;
   max-width: 520px;
@@ -12993,14 +12938,6 @@ a[href] {
   }
   .set-rules-grid {
     grid-template-columns: 1fr;
-  }
-  .settings-model-current,
-  .settings-model-current__meta {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  .settings-model-current__meta {
-    width: 100%;
   }
   .bot-detail {
     padding: 18px;

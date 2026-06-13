@@ -8,7 +8,7 @@ import (
 	"reasonix/internal/skill"
 )
 
-var reComposeBlock = regexp.MustCompile(`(?s)^\s*<(?:memory-update|background-jobs)>.*?</(?:memory-update|background-jobs)>\s*\n`)
+var reComposeBlock = regexp.MustCompile(`(?s)^\s*<(?:reasoning-language|memory-update|background-jobs)>.*?</(?:reasoning-language|memory-update|background-jobs)>\s*\n`)
 
 // PlanModeMarker is prepended to every user turn while plan mode is on. It rides
 // in the user message (not the system prompt or tools), so the cache-stable
@@ -105,6 +105,9 @@ func (c *Controller) Compose(text string) string {
 	if plan {
 		text = PlanModeMarker + "\n\n" + text
 	}
+	if note := reasoningLanguageBlock(c.reasoningLanguage); note != "" {
+		text = note + "\n\n" + text
+	}
 
 	// Memory added mid-session rides the turn (never the cached system prefix),
 	// so it takes effect now without invalidating the prompt cache. It folds into
@@ -129,6 +132,17 @@ func (c *Controller) Compose(text string) string {
 		}
 	}
 	return text
+}
+
+func reasoningLanguageBlock(lang string) string {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "zh":
+		return "<reasoning-language>\nVisible reasoning/thinking text preference: use Simplified Chinese when the provider exposes reasoning text. Keep code, identifiers, file paths, shell commands, and untranslated technical terms in their original form. This preference does not override an explicit user request for the final answer language.\n</reasoning-language>"
+	case "en":
+		return "<reasoning-language>\nVisible reasoning/thinking text preference: use English when the provider exposes reasoning text. Keep code, identifiers, file paths, shell commands, and untranslated technical terms in their original form. This preference does not override an explicit user request for the final answer language.\n</reasoning-language>"
+	default:
+		return ""
+	}
 }
 
 func activeGoalBlock(goal string) string {

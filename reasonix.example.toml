@@ -27,6 +27,7 @@ max_steps         = 0    # executor tool-call rounds; 0 = no limit
 planner_max_steps = 12   # planner read-only tool-call rounds; 0 = no limit
 temperature       = 0.0
 auto_plan         = "off"   # off|on; off keeps plan mode manual
+# reasoning_language = "auto"   # visible reasoning text: auto|zh|en
 # auto_plan_classifier = "deepseek-flash"   # optional; only used for borderline tasks
 soft_compact_ratio  = 0.5   # notice only; keeps the cache-first prefix intact
 compact_ratio       = 0.8   # try compacting when prompt reaches this fraction

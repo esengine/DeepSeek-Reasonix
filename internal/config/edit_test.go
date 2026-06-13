@@ -372,6 +372,31 @@ func TestSetLanguage(t *testing.T) {
 	}
 }
 
+func TestSetReasoningLanguage(t *testing.T) {
+	c := Default()
+	if err := c.SetReasoningLanguage("中文"); err != nil {
+		t.Fatalf("SetReasoningLanguage zh: %v", err)
+	}
+	if c.Agent.ReasoningLanguage != "zh" || c.ReasoningLanguage() != "zh" {
+		t.Fatalf("reasoning language = %q/%q, want zh", c.Agent.ReasoningLanguage, c.ReasoningLanguage())
+	}
+	if err := c.SetReasoningLanguage("model-default"); err != nil {
+		t.Fatalf("SetReasoningLanguage legacy default: %v", err)
+	}
+	if c.Agent.ReasoningLanguage != "" || c.ReasoningLanguage() != "auto" {
+		t.Fatalf("legacy default should normalize to empty/auto, got %q/%q", c.Agent.ReasoningLanguage, c.ReasoningLanguage())
+	}
+	if err := c.SetReasoningLanguage("auto"); err != nil {
+		t.Fatalf("SetReasoningLanguage auto: %v", err)
+	}
+	if c.Agent.ReasoningLanguage != "" || c.ReasoningLanguage() != "auto" {
+		t.Fatalf("reasoning language = %q/%q, want empty/auto", c.Agent.ReasoningLanguage, c.ReasoningLanguage())
+	}
+	if err := c.SetReasoningLanguage("klingon"); err == nil {
+		t.Fatal("SetReasoningLanguage should reject unknown values")
+	}
+}
+
 func TestNormalizeEffortDeepSeek(t *testing.T) {
 	e := &ProviderEntry{Name: "deepseek", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4"}
 	cap := EffortCapabilityForEntry(e)

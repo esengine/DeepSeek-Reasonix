@@ -297,6 +297,30 @@ func (c *Config) ColdResumePruneEnabled() bool {
 	return *c.Agent.ColdResumePrune
 }
 
+// ReasoningLanguage normalizes agent.reasoning_language. Empty means auto:
+// visible reasoning follows the conversation language already described by the
+// stable LanguagePolicy. Legacy "default" is treated as auto.
+func (c *Config) ReasoningLanguage() string {
+	if c == nil {
+		return "auto"
+	}
+	return NormalizeReasoningLanguage(c.Agent.ReasoningLanguage)
+}
+
+// NormalizeReasoningLanguage returns one of auto|zh|en.
+func NormalizeReasoningLanguage(lang string) string {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "", "auto", "follow", "conversation", "detect", "default", "model", "model-default", "model_default", "provider":
+		return "auto"
+	case "zh", "cn", "chinese", "中文":
+		return "zh"
+	case "en", "english":
+		return "en"
+	default:
+		return "auto"
+	}
+}
+
 // DesktopTelemetry reports whether the desktop sends the anonymous launch ping.
 // It carries no conversation, key, or file data — see desktop/README.md.
 func (c *Config) DesktopTelemetry() bool {
@@ -760,6 +784,10 @@ type AgentConfig struct {
 	// plan mode automatically: "off" keeps plan mode manual, "on" enables the
 	// approval gate. Legacy "ask" is treated as "on".
 	AutoPlan string `toml:"auto_plan"`
+	// ReasoningLanguage controls the preferred language for visible reasoning
+	// text. Empty/auto follows the conversation language. Applied as transient
+	// turn context, not the stable prompt.
+	ReasoningLanguage string `toml:"reasoning_language"`
 	// AutoPlanClassifier optionally names a provider/model used to classify
 	// borderline auto-plan decisions. Empty keeps the zero-cost heuristic path.
 	AutoPlanClassifier string `toml:"auto_plan_classifier"`

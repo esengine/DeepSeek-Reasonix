@@ -136,6 +136,22 @@ func (c *Config) SetLanguage(lang string) error {
 	return nil
 }
 
+// SetReasoningLanguage pins the preferred language for visible reasoning text.
+// Empty/auto follows the conversation language.
+func (c *Config) SetReasoningLanguage(lang string) error {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "", "auto", "follow", "conversation", "detect", "default", "model", "model-default", "model_default", "provider":
+		c.Agent.ReasoningLanguage = ""
+	case "zh", "cn", "chinese", "中文":
+		c.Agent.ReasoningLanguage = "zh"
+	case "en", "english":
+		c.Agent.ReasoningLanguage = "en"
+	default:
+		return fmt.Errorf("reasoning language %q: must be auto|zh|en", lang)
+	}
+	return nil
+}
+
 // SetDesktopLanguage pins the desktop UI language. It intentionally does not
 // modify Config.Language, which is used by the CLI/model-facing runtime.
 func (c *Config) SetDesktopLanguage(lang string) error {

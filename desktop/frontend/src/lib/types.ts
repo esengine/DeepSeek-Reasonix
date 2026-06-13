@@ -646,6 +646,7 @@ export interface AgentView {
   plannerMaxSteps: number;
   systemPrompt: string;
   coldResumePrune: boolean;
+  reasoningLanguage: string; // "auto" | "zh" | "en"
 }
 
 export interface BotAllowlistView {

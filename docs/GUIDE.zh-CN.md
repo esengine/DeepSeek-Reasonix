@@ -35,6 +35,7 @@ default_model = "deepseek-flash"   # 执行器；设 [agent].planner_model 可�
 [agent]
 max_steps = 0                    # 执行器工具调用轮数；0 表示不限
 planner_max_steps = 12           # 规划器只读工具调用轮数；0 表示不限
+reasoning_language = "auto"      # 可见思考过程语言：auto|zh|en
 # planner_model = "mimo-pro"          # 可选的低频规划器
 # subagent_model = "deepseek-pro"     # runAs=subagent skill 的默认模型
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }

@@ -246,6 +246,7 @@ export interface AppBindings {
   MigrateDesktopPreferences(language: string, theme: string, style: string): Promise<void>;
   SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
   SetColdResumePrune(enabled: boolean): Promise<void>;
+  SetReasoningLanguage(lang: string): Promise<void>;
   SetTrayLocale(locale: "en" | "zh" | "zh-TW"): Promise<void>;
   // SetBypass is the legacy Wails name for YOLO/full-access tool auto-approval
   // (ask questions and plan approvals still wait; deny rules still apply).
@@ -694,7 +695,7 @@ function makeMockApp(): AppBindings {
       noProxy: "",
       proxy: { type: "socks5", server: "127.0.0.1", port: 7890, username: "", password: "" },
     },
-    agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 12, systemPrompt: "You are Reasonix, a coding agent.", coldResumePrune: true },
+    agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 12, systemPrompt: "You are Reasonix, a coding agent.", coldResumePrune: true, reasoningLanguage: "auto" },
     bot: {
       enabled: !freshMock,
       model: "",
@@ -2379,6 +2380,10 @@ function makeMockApp(): AppBindings {
     },
     async SetColdResumePrune(enabled: boolean) {
       settings.agent = { ...settings.agent, coldResumePrune: enabled };
+    },
+    async SetReasoningLanguage(lang: string) {
+      const normalized = lang === "zh" || lang === "en" ? lang : "auto";
+      settings.agent = { ...settings.agent, reasoningLanguage: normalized };
     },
     async SetTrayLocale(_locale: "en" | "zh" | "zh-TW") {},
     async SetAutoApproveTools(on: boolean) {
