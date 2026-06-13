@@ -25,31 +25,42 @@ export function TerminalPanel({ active, openPathRequest }: { active: boolean; op
   const unsubRef = useRef<(() => void) | null>(null);
 
   const createTab = useCallback(async (label: string, sessionID: string) => {
+    // Read theme colors from CSS custom properties.
+    const style = getComputedStyle(document.documentElement);
+    const bg = style.getPropertyValue("--bg").trim() || "#090a0c";
+    const fg = style.getPropertyValue("--fg").trim() || "#f4f5f7";
+    const accent = style.getPropertyValue("--accent").trim() || "#d97757";
+
+    // Derive ANSI palette from theme colors.
+    const dimFg = style.getPropertyValue("--fg-dim").trim() || "#8a8fa0";
+    const brightFg = style.getPropertyValue("--fg-bright").trim() || "#ffffff";
+    const cursor = accent;
+
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
       fontFamily: "Menlo, Monaco, 'Courier New', monospace",
       theme: {
-        background: "#090a0c",
-        foreground: "#c8c8d0",
-        cursor: "#c8c8d0",
-        selectionBackground: "#2a2d3a",
-        black: "#090a0c",
+        background: bg,
+        foreground: fg,
+        cursor,
+        selectionBackground: accent + "44",
+        black: bg,
         red: "#ff6b6b",
         green: "#69db7c",
         yellow: "#ffd43b",
         blue: "#74c0fc",
         magenta: "#da77f2",
         cyan: "#63e6be",
-        white: "#c8c8d0",
-        brightBlack: "#3d3d5c",
+        white: fg,
+        brightBlack: dimFg,
         brightRed: "#ff8787",
         brightGreen: "#8ce99a",
         brightYellow: "#ffe066",
         brightBlue: "#91d5ff",
         brightMagenta: "#e599f7",
         brightCyan: "#8ce9d0",
-        brightWhite: "#e8e8f0",
+        brightWhite: brightFg,
       },
       allowProposedApi: true,
     });
