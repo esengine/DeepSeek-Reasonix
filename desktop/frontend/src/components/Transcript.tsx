@@ -224,17 +224,6 @@ export function Transcript({
     repinIfWasPinned(previous - footerHeight);
   }, [footerHeight]);
 
-  // Smooth transition when footer height changes.
-  const prevFooterRef = useRef(footerHeight);
-  useEffect(() => {
-    const prev = prevFooterRef.current;
-    if (prev !== footerHeight && scrollRef.current) {
-      // GSAP will handle scroll repositioning via repinIfWasPinned above.
-      // The composer and status bar transitions are handled by CSS.
-    }
-    prevFooterRef.current = footerHeight;
-  }, [footerHeight]);
-
   // Sub-agent calls carry a parentId; collect them under their parent `task`
   // call so the parent card can render them nested, and skip them at top level.
   const subcallsByParent = useMemo(() => {
@@ -316,7 +305,7 @@ export function Transcript({
   // (added by upstream PR #3423) instead of per-call renderSegments.
   const empty = items.length === 0;
 
-  // In compact/minimal mode, break each turn into step groups.
+  // In compact mode, break each turn into step groups.
   // A step = one assistant + its tool results, from one assistant to the next.
   // Each completed non-final step is folded into "Processed".
   const stepGroups = useMemo(() => {
@@ -383,7 +372,7 @@ export function Transcript({
       actionReady = false;
     };
 
-    // Compact/minimal mode: step-based rendering
+    // Compact mode: step-based rendering
     // Standard mode: flat rendering (no step groups)
     if (stepGroups) {
       // Collect consecutive completed non-final steps into batches
@@ -519,7 +508,7 @@ export function Transcript({
       pushTurnActions();
     }
     return out;
-  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, stepGroups, false]);
+  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, stepGroups]);
 
   // ── Assemble rendered output ──────────────────────────────────────────────
   // Warm/cold zone is a separate memo'd WarmZone component so streaming tokens
@@ -857,7 +846,7 @@ function WarmTurnCard({
   );
 }
 
-// ── TurnCollapse: compact/minimal mode grouping ──────────────────────────────
+// ── TurnCollapse: compact mode grouping ──────────────────────────────────────
 
 type TurnCollapseProps = {
   items: Item[];       // intermediate items (tools, reasoning, phase)
@@ -873,8 +862,7 @@ function TurnCollapse({ items, durationMs, mode, subcalls }: TurnCollapseProps) 
   useGSAPCollapse(bodyRef, open);
 
   // Keep only items the body will actually render — an expandable fold over
-  // nothing is worse than no fold. Minimal mode strips reasoning, so a
-  // reasoning-only assistant counts as empty there.
+  // nothing is worse than no fold.
   const displayItems = useMemo(() => {
     return items.filter((it) => {
       if (it.kind === "assistant") {

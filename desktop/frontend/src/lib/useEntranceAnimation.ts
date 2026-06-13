@@ -2,23 +2,9 @@ import { useEffect, useRef } from "react";
 import gsap from "gsap";
 import { DUR_SLOW, EASE_OUT, prefersReducedMotion } from "./gsapAnimations";
 
-/**
- * useEntranceAnimation — animates newly-mounted elements as they appear in
- * the DOM. Tracks seen item IDs so each element animates in only once.
- *
- * Key performance properties:
- *  - On first mount, ALL existing data-entrance IDs are pre-seeded into the
- *    "seen" set so no entrance animation runs for history items.
- *  - The scan only runs when `deps` changes (pass items.length or similar).
- *  - During streaming (text changes within same elements) the scanner is
- *    completely skipped, avoiding expensive querySelectorAll calls.
- *  - When `resetKey` changes (session switch), seen set + firstRun are
- *    cleared so the new session's first paint is also pre-seeded (no
- *    entrance animation for restored history).
- *
- * Usage:
- *   const entranceRef = useEntranceAnimation(items.length, sessionKey);
- */
+// Animates each data-entrance element in once. First mount (and every
+// resetKey change) pre-seeds the seen set so restored history never animates;
+// the scan only runs when deps changes, skipping streaming token updates.
 export function useEntranceAnimation<T extends HTMLElement>(
   resetKey?: unknown,
   deps?: unknown,
