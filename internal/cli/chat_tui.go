@@ -3268,14 +3268,26 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	case "/context":
 		m.echoLocalCommand(input)
 		rest := strings.TrimSpace(strings.TrimPrefix(input, cmd))
-		if rest != "" {
+		verbose := false
+		agentName := rest
+		if strings.HasSuffix(rest, " -v") {
+			verbose = true
+			agentName = strings.TrimSpace(strings.TrimSuffix(rest, " -v"))
+		} else if strings.HasPrefix(rest, "-v ") {
+			verbose = true
+			agentName = strings.TrimSpace(strings.TrimPrefix(rest, "-v "))
+		} else if rest == "-v" {
+			verbose = true
+			agentName = ""
+		}
+		if agentName != "" {
 			if m.orc == nil {
 				m.notice("no orchestrator configured")
 				break
 			}
-			a, ok := m.orc.Agent(rest)
+			a, ok := m.orc.Agent(agentName)
 			if !ok {
-				m.notice(fmt.Sprintf("agent %q not found", rest))
+				m.notice(fmt.Sprintf("agent %q not found", agentName))
 				break
 			}
 			bk := a.Ctrl.ContextBreakdown()
@@ -3283,6 +3295,7 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 				m.notice(fmt.Sprintf("%s: no session data yet", a.Name))
 				break
 			}
+			bk.Verbose = verbose
 			for _, ln := range strings.Split(bk.FormatBreakdown(), "\n") {
 				m.commitLine(ln)
 			}
@@ -3293,6 +3306,7 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 			m.notice("no session data yet")
 			break
 		}
+		bk.Verbose = verbose
 		for _, ln := range strings.Split(bk.FormatBreakdown(), "\n") {
 			m.commitLine(ln)
 		}
