@@ -4107,6 +4107,65 @@ a[href] {
   background: var(--chat-bg);
   padding: 12px 32px 10px;
 }
+
+/* ── undo-rewind banner (above composer after a rewind) ─────────────── */
+.undo-rewind {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: var(--maxw);
+  margin: 0 auto 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  font-size: 12.5px;
+  color: var(--fg-dim);
+}
+.undo-rewind__info {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+}
+.undo-rewind__label {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.undo-rewind__files {
+  color: var(--fg-faint);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.undo-rewind__btn {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-soft);
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+.undo-rewind__btn:hover {
+  border-color: var(--accent-soft);
+  color: var(--accent);
+}
+.undo-rewind__btn--confirm {
+  color: var(--accent);
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
+}
+.undo-rewind__btn--confirm:hover {
+  background: color-mix(in srgb, var(--accent-soft) 80%, transparent);
+}
+
 .composer-wrap {
   position: relative;
   max-width: var(--maxw);
