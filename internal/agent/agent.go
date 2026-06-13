@@ -789,7 +789,11 @@ func (a *Agent) advanceCanonicalTodo(step string) {
 	}
 	m, ok := evidence.MatchStep(step, a.todoState)
 	if !ok || canonicalTodoStatus(a.todoState[m.Index-1].Status) == "completed" {
+		// MatchStep failed or the step was already completed — still emit the
+		// current snapshot so the frontend stays in sync with the canonical state.
+		snapshot := append([]evidence.TodoItem(nil), a.todoState...)
 		a.todoMu.Unlock()
+		a.emitTodoState(snapshot, 0)
 		return
 	}
 	a.todoState[m.Index-1].Status = "completed"
