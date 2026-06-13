@@ -98,7 +98,9 @@ type sessionUsageStats struct {
 	SessionCostUsd   float64                     `json:"sessionCostUsd,omitempty"`
 	Sources          map[string]usageSourceStats `json:"sources,omitempty"`
 
-	activeTurnStartedAt int64
+	activeTurnStartedAt            int64
+	executorSessionCacheHitTokens  int
+	executorSessionCacheMissTokens int
 }
 
 type usageSourceStats struct {
@@ -186,8 +188,15 @@ func (t *WorkspaceTab) recordUsage(e event.Event) {
 	t.usageTelemetry.TotalTokens += u.TotalTokens
 	t.usageTelemetry.ReasoningTokens += u.ReasoningTokens
 	if source == event.UsageSourceExecutor && e.SessionHit+e.SessionMiss > 0 {
-		t.usageTelemetry.CacheHitTokens = e.SessionHit
-		t.usageTelemetry.CacheMissTokens = e.SessionMiss
+		if e.SessionHit < t.usageTelemetry.executorSessionCacheHitTokens || e.SessionMiss < t.usageTelemetry.executorSessionCacheMissTokens {
+			t.usageTelemetry.CacheHitTokens += u.CacheHitTokens
+			t.usageTelemetry.CacheMissTokens += u.CacheMissTokens
+		} else {
+			t.usageTelemetry.CacheHitTokens += e.SessionHit - t.usageTelemetry.executorSessionCacheHitTokens
+			t.usageTelemetry.CacheMissTokens += e.SessionMiss - t.usageTelemetry.executorSessionCacheMissTokens
+		}
+		t.usageTelemetry.executorSessionCacheHitTokens = e.SessionHit
+		t.usageTelemetry.executorSessionCacheMissTokens = e.SessionMiss
 	} else {
 		t.usageTelemetry.CacheHitTokens += u.CacheHitTokens
 		t.usageTelemetry.CacheMissTokens += u.CacheMissTokens
@@ -236,6 +245,8 @@ func (t *WorkspaceTab) telemetrySnapshot() tabTelemetrySnapshot {
 		}
 	}
 	usage.activeTurnStartedAt = 0
+	usage.executorSessionCacheHitTokens = 0
+	usage.executorSessionCacheMissTokens = 0
 	return tabTelemetrySnapshot{Version: 2, ReadFiles: records, Usage: usage}
 }
 

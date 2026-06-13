@@ -96,10 +96,16 @@ func TestWorkspaceTabSubagentUsageDoesNotOverwriteExecutorSessionCache(t *testin
 		SessionHit:  999,
 		SessionMiss: 999,
 	})
+	tab.recordUsage(event.Event{
+		Usage:       &provider.Usage{PromptTokens: 200, CompletionTokens: 20, TotalTokens: 220, CacheHitTokens: 100, CacheMissTokens: 100},
+		UsageSource: event.UsageSourceExecutor,
+		SessionHit:  800,
+		SessionMiss: 400,
+	})
 
 	got := tab.telemetrySnapshot().Usage
-	if got.CacheHitTokens != 705 || got.CacheMissTokens != 310 {
-		t.Fatalf("cache tokens = hit %d miss %d, want executor session plus subagent delta 705/310", got.CacheHitTokens, got.CacheMissTokens)
+	if got.CacheHitTokens != 805 || got.CacheMissTokens != 410 {
+		t.Fatalf("cache tokens = hit %d miss %d, want executor deltas plus subagent delta 805/410", got.CacheHitTokens, got.CacheMissTokens)
 	}
 	if got.Sources[event.UsageSourceSubagent].CacheHitTokens != 5 || got.Sources[event.UsageSourceSubagent].CacheMissTokens != 10 {
 		t.Fatalf("subagent cache source = %+v, want usage delta 5/10", got.Sources[event.UsageSourceSubagent])

@@ -126,6 +126,10 @@ function updatesContextGauge(usage?: WireUsage): boolean {
   return !source || source === "executor";
 }
 
+function countsTowardCurrentTurn(state: State, usage?: WireUsage): boolean {
+  return updatesContextGauge(usage) || state.turnActive;
+}
+
 export function sameMeta(a?: Meta, b?: Meta): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
@@ -411,6 +415,7 @@ function applyEvent(s: State, e: WireEvent): State {
       return { ...s, items: next };
     }
     case "usage": {
+      if (!countsTowardCurrentTurn(s, e.usage)) return s;
       const updateContextGauge = updatesContextGauge(e.usage);
       const used = e.usage && s.context.window && updateContextGauge ? e.usage.promptTokens : s.context.used;
       const turnTokens = s.turnTokens + (e.usage?.completionTokens ?? 0);

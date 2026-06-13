@@ -1,7 +1,7 @@
 // Run: tsx src/__tests__/use-controller-meta.test.ts
 
 import { initialState, reducer, sameMeta, shouldReconcileStaleTurn } from "../lib/useController";
-import type { Meta } from "../lib/types";
+import type { Meta, WireUsage } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -33,6 +33,21 @@ function meta(overrides: Partial<Meta> = {}): Meta {
   };
 }
 
+function usage(source: string): WireUsage {
+  return {
+    promptTokens: 100,
+    completionTokens: 20,
+    totalTokens: 120,
+    cacheHitTokens: 80,
+    cacheMissTokens: 20,
+    sessionCacheHitTokens: 80,
+    sessionCacheMissTokens: 20,
+    source,
+    cost: 0.001,
+    currency: "$",
+  };
+}
+
 console.log("\nuse controller meta");
 
 {
@@ -49,6 +64,17 @@ console.log("\nuse controller meta");
   eq(shouldReconcileStaleTurn(rendered, 1_000, 31_000), true, "stale completed stream still reconciles missed turn_done");
   eq(shouldReconcileStaleTurn(rendered, 1_000, 20_000), false, "fresh completed stream waits before reconciling");
   eq(shouldReconcileStaleTurn({ ...rendered, turnActive: false }, 1_000, 31_000), false, "local pending send before turn_started does not reconcile");
+}
+
+{
+  const idleHelper = reducer(initialState, { type: "event", e: { kind: "usage", usage: usage("classifier") } });
+  eq(idleHelper.sessionTokens, 0, "helper usage outside a turn does not inflate session tokens");
+  eq(idleHelper.sessionCost, 0, "helper usage outside a turn does not inflate session cost");
+
+  const active = reducer(initialState, { type: "event", e: { kind: "turn_started" } });
+  const activeHelper = reducer(active, { type: "event", e: { kind: "usage", usage: usage("subagent") } });
+  eq(activeHelper.sessionTokens, 120, "helper usage inside a turn still counts toward session tokens");
+  eq(activeHelper.sessionCost, 0.001, "helper usage inside a turn still counts toward session cost");
 }
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
