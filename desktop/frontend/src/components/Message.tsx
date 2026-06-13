@@ -6,6 +6,7 @@ import { ProcessBrainIcon } from "./ProcessCard";
 import { parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
+import { Tooltip } from "./Tooltip";
 import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import type { Item, MessageActionScope } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
@@ -232,6 +233,20 @@ export function TurnActions({
     }
     return "";
   };
+  const actionTooltipLabel = (scope: MessageActionScope): React.ReactNode => {
+    const reason = actionDisabledReason(scope);
+    if (reason) return <span>{reason}</span>;
+    if ((scope === "code" || scope === "both") && checkpoint?.files?.length) {
+      return (
+        <div className="rewind__files-tooltip">
+          {checkpoint.files.map((f) => (
+            <div key={f}>{f.split(/[/\\]/).pop() || f}</div>
+          ))}
+        </div>
+      );
+    }
+    return undefined;
+  };
   const runAction = (scope: MessageActionScope) => {
     setConfirmScope(null);
     onOpenMenu?.(null);
@@ -248,7 +263,8 @@ export function TurnActions({
   const renderAction = (scope: MessageActionScope, danger = false) => {
     const disabledReason = actionDisabledReason(scope);
     const meta = actionMeta(scope);
-    return (
+    const tipLabel = actionTooltipLabel(scope);
+    const btn = (
       <button
         className={[
           "rewind__menu-item",
@@ -257,13 +273,14 @@ export function TurnActions({
         ].filter(Boolean).join(" ")}
         type="button"
         disabled={Boolean(disabledReason)}
-        title={disabledReason || undefined}
         onClick={() => selectRewind(scope)}
+        {...(tipLabel ? {} : { title: disabledReason || undefined })}
       >
         <span>{actionLabel(scope)}</span>
         {meta && <span className="rewind__menu-meta">{meta}</span>}
       </button>
     );
+    return tipLabel ? <Tooltip key={scope} label={tipLabel} side="top" block fill>{btn}</Tooltip> : btn;
   };
   const forkDisabledReason = canAct ? actionDisabledReason("fork") : "";
   const toggleMenu = (menu: TurnActionMenu) => {
