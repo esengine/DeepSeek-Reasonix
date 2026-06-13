@@ -88,6 +88,22 @@ func TestSubject(t *testing.T) {
 	}
 }
 
+func TestSubjectsForMoveFile(t *testing.T) {
+	got := Subjects(json.RawMessage(`{"source_path":"tmp/a.md","destination_path":"secrets/a.md"}`))
+	want := []string{"tmp/a.md", "secrets/a.md"}
+	if len(got) != len(want) {
+		t.Fatalf("Subjects length = %d (%v), want %d", len(got), got, len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Subjects[%d] = %q, want %q (all subjects: %v)", i, got[i], want[i], got)
+		}
+	}
+	if primary := Subject(json.RawMessage(`{"source_path":"tmp/a.md","destination_path":"secrets/a.md"}`)); primary != "tmp/a.md" {
+		t.Fatalf("Subject primary = %q, want source path", primary)
+	}
+}
+
 func TestPolicyDecide(t *testing.T) {
 	p := New("ask",
 		[]string{"bash(go test*)", "ls"},
@@ -115,6 +131,28 @@ func TestPolicyDecide(t *testing.T) {
 		if got != c.want {
 			t.Errorf("%s: Decide(%q, ro=%v, %s) = %v, want %v", c.name, c.tool, c.readOnly, c.args, got, c.want)
 		}
+	}
+}
+
+func TestPolicyDecideMoveFileChecksBothEndpoints(t *testing.T) {
+	denyDest := New("allow", nil, nil, []string{"Edit(secrets/**)"})
+	if got := denyDest.Decide("move_file", false, json.RawMessage(`{"source_path":"tmp/a.md","destination_path":"secrets/a.md"}`)); got != Deny {
+		t.Fatalf("destination deny rule = %v, want Deny", got)
+	}
+
+	askDest := New("allow", nil, []string{"Edit(secrets/**)"}, nil)
+	if got := askDest.Decide("move_file", false, json.RawMessage(`{"source_path":"tmp/a.md","destination_path":"secrets/a.md"}`)); got != Ask {
+		t.Fatalf("destination ask rule = %v, want Ask", got)
+	}
+
+	sourceOnlyAllow := New("ask", []string{"Edit(tmp/**)"}, nil, nil)
+	if got := sourceOnlyAllow.Decide("move_file", false, json.RawMessage(`{"source_path":"tmp/a.md","destination_path":"docs/a.md"}`)); got != Ask {
+		t.Fatalf("source-only allow = %v, want Ask for unallowed destination", got)
+	}
+
+	bothAllowed := New("ask", []string{"Edit(tmp/**)", "Edit(docs/**)"}, nil, nil)
+	if got := bothAllowed.Decide("move_file", false, json.RawMessage(`{"source_path":"tmp/a.md","destination_path":"docs/a.md"}`)); got != Allow {
+		t.Fatalf("both endpoints allowed = %v, want Allow", got)
 	}
 }
 

@@ -414,6 +414,10 @@ func TestMemoryApprovalSubjectsAndNotifications(t *testing.T) {
 	if got := approvalNotificationText("bash", "go test ./..."); got != "approval needed: bash go test ./..." {
 		t.Fatalf("bash notification = %q", got)
 	}
+	moveSubject := approvalDisplaySubject("move_file", "src/a.md", json.RawMessage(`{"source_path":"src/a.md","destination_path":"docs/a.md"}`))
+	if moveSubject != "src/a.md -> docs/a.md" {
+		t.Fatalf("move_file approval subject = %q", moveSubject)
+	}
 }
 
 // TestApprovalDeny confirms a declined call returns allow=false.

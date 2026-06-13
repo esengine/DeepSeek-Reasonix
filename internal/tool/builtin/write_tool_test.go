@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,6 +135,79 @@ func TestMoveFileRejectsEscape(t *testing.T) {
 	}
 	if _, err := os.Stat(src); err != nil {
 		t.Fatalf("source should remain after refused move: %v", err)
+	}
+}
+
+func TestMoveFileSamePathRequiresExistingFile(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.md")
+	_, err := (moveFile{}).Execute(context.Background(), argsJSON(t, map[string]any{
+		"source_path":      missing,
+		"destination_path": missing,
+	}))
+	if err == nil {
+		t.Fatal("expected error for missing source even when source and destination match")
+	}
+}
+
+func TestMoveFileAllowsCaseOnlyRename(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "caseonly.txt")
+	dst := filepath.Join(dir, "CASEONLY.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstInfo, err := os.Stat(dst)
+	if os.IsNotExist(err) {
+		t.Skip("filesystem is case-sensitive")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(srcInfo, dstInfo) {
+		t.Skip("source and destination do not resolve to the same file")
+	}
+
+	runTool(t, moveFile{}, map[string]any{"source_path": src, "destination_path": dst})
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("destination content = %q, want hello", got)
+	}
+}
+
+func TestMoveFileFallsBackForCrossDeviceRename(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.md")
+	dst := filepath.Join(dir, "docs", "a.md")
+	if err := os.WriteFile(src, []byte("hello"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	oldRename := renameFile
+	renameFile = func(oldpath, newpath string) error {
+		return &os.LinkError{Op: "rename", Old: oldpath, New: newpath, Err: errors.New("invalid cross-device link")}
+	}
+	t.Cleanup(func() { renameFile = oldRename })
+
+	out := runTool(t, moveFile{}, map[string]any{"source_path": src, "destination_path": dst})
+	if !strings.Contains(out, "moved") {
+		t.Fatalf("move_file output = %q, want moved", out)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("source still exists or stat failed: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("destination content = %q, want hello", got)
 	}
 }
 

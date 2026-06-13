@@ -3,14 +3,19 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"reasonix/internal/tool"
 )
 
 func init() { tool.RegisterBuiltin(moveFile{}) }
+
+var renameFile = os.Rename
 
 // moveFile moves or renames one file. roots, when non-empty, confine both the
 // source and destination to the workspace; workDir resolves relative paths.
@@ -47,9 +52,6 @@ func (m moveFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 	src := resolveIn(m.workDir, p.SourcePath)
 	dst := resolveIn(m.workDir, p.DestinationPath)
-	if filepath.Clean(src) == filepath.Clean(dst) {
-		return fmt.Sprintf("%s is already at %s; no changes made", src, dst), nil
-	}
 	if err := confine(m.roots, src); err != nil {
 		return "", err
 	}
@@ -63,8 +65,15 @@ func (m moveFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	if info.IsDir() {
 		return "", fmt.Errorf("%s is a directory; move_file only moves files", src)
 	}
-	if _, err := os.Stat(dst); err == nil {
-		return "", fmt.Errorf("destination %s already exists", dst)
+	if filepath.Clean(src) == filepath.Clean(dst) {
+		return fmt.Sprintf("%s is already at %s; no changes made", src, dst), nil
+	}
+	sameFileDestination := false
+	if dstInfo, err := os.Stat(dst); err == nil {
+		if !os.SameFile(info, dstInfo) {
+			return "", fmt.Errorf("destination %s already exists", dst)
+		}
+		sameFileDestination = true
 	} else if !os.IsNotExist(err) {
 		return "", fmt.Errorf("stat %s: %w", dst, err)
 	}
@@ -73,8 +82,60 @@ func (m moveFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 			return "", fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 	}
-	if err := os.Rename(src, dst); err != nil {
+	if err := renameFile(src, dst); err != nil {
+		if !sameFileDestination && isCrossDeviceMove(err) {
+			if cerr := copyRegularFileAndRemoveSource(src, dst, info); cerr != nil {
+				return "", fmt.Errorf("move %s to %s: %w", src, dst, cerr)
+			}
+			return fmt.Sprintf("moved %s to %s", src, dst), nil
+		}
 		return "", fmt.Errorf("move %s to %s: %w", src, dst, err)
 	}
 	return fmt.Sprintf("moved %s to %s", src, dst), nil
+}
+
+func isCrossDeviceMove(err error) bool {
+	var linkErr *os.LinkError
+	if !errors.As(err, &linkErr) {
+		return false
+	}
+	msg := strings.ToLower(linkErr.Err.Error())
+	return strings.Contains(msg, "cross-device") ||
+		strings.Contains(msg, "different device") ||
+		strings.Contains(msg, "different disk") ||
+		strings.Contains(msg, "not same device")
+}
+
+func copyRegularFileAndRemoveSource(src, dst string, info os.FileInfo) error {
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("cross-filesystem fallback only supports regular files")
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	removeDst := true
+	defer func() {
+		if removeDst {
+			_ = os.Remove(dst)
+		}
+	}()
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	if err := os.Remove(src); err != nil {
+		return err
+	}
+	removeDst = false
+	return nil
 }
