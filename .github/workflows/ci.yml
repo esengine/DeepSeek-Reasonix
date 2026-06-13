@@ -136,6 +136,13 @@ jobs:
       - name: vet
         run: go vet ./...
 
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          working-directory: desktop
+          args: --timeout=5m
+
       - name: build
         run: go build ./...
 

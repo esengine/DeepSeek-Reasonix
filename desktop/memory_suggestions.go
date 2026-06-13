@@ -7,6 +7,9 @@ import (
 	"time"
 	"unicode"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
@@ -431,7 +434,7 @@ func workflowEvidence(cat workflowCategory, sessions []suggestionSession) []stri
 func skillCandidateBody(cat workflowCategory, evidence []string) string {
 	var b strings.Builder
 	title := strings.TrimPrefix(strings.ReplaceAll(cat.Name, "-", " "), "reasonix ")
-	b.WriteString("# " + strings.Title(title) + "\n\n")
+	b.WriteString("# " + cases.Title(language.Und).String(title) + "\n\n")
 	b.WriteString("Use this skill when the user asks for this repeated Reasonix workflow.\n\n")
 	b.WriteString("## Evidence\n\n")
 	for _, ev := range evidence {
