@@ -393,6 +393,27 @@ func TestMigrateLegacySessionsImportsJsonlOnly(t *testing.T) {
 	}
 }
 
+func TestMigrateLegacySessionsJsonlPassIgnoresOldRoutedMarker(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	os.WriteFile(filepath.Join(src, "desktop-session.jsonl"), []byte(legacyMessageLog), 0o644)
+	os.WriteFile(filepath.Join(dest, legacyRoutedHomeImportMarker), nil, 0o644)
+
+	n, err := MigrateLegacySessions(src, dest, nil)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("imported %d sessions, want jsonl pass to run after old routed marker", n)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "desktop-session.jsonl")); err != nil {
+		t.Fatalf("jsonl-only session missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, legacyJsonlPassMarker)); err != nil {
+		t.Errorf("jsonl pass marker missing: %v", err)
+	}
+}
+
 func TestMigrateLegacySessionsPrefersJsonlWhenNewer(t *testing.T) {
 	src := t.TempDir()
 	dest := t.TempDir()
@@ -402,9 +423,12 @@ func TestMigrateLegacySessionsPrefersJsonlWhenNewer(t *testing.T) {
 
 	// Write the event log first (older mtime).
 	os.WriteFile(eventsPath, []byte(legacyEventLog), 0o644)
-	time.Sleep(10 * time.Millisecond) // ensure mtime differs
+	eventsTime := time.Now().Add(-2 * time.Hour).Truncate(time.Second)
+	os.Chtimes(eventsPath, eventsTime, eventsTime)
 	// Write the .jsonl second (newer mtime) — it should be preferred.
 	os.WriteFile(jsonlPath, []byte(legacyMessageLog), 0o644)
+	jsonlTime := eventsTime.Add(time.Hour)
+	os.Chtimes(jsonlPath, jsonlTime, jsonlTime)
 	writeLegacyMeta(t, src, "chat-1", "", "newer jsonl wins")
 
 	n, err := MigrateLegacySessions(src, dest, nil)
@@ -423,6 +447,13 @@ func TestMigrateLegacySessionsPrefersJsonlWhenNewer(t *testing.T) {
 	// event log content ("list the files").
 	if !strings.Contains(string(data), `"hello from v0.x"`) {
 		t.Errorf("expected .jsonl content to be preferred:\n%s", data)
+	}
+	info, err := os.Stat(filepath.Join(dest, "chat-1.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(jsonlTime) {
+		t.Errorf("mtime = %s, want newer jsonl mtime %s", info.ModTime(), jsonlTime)
 	}
 }
 
@@ -560,6 +591,28 @@ func TestMigrateLegacySessionsRecursesIntoSubdirectories(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(global, "proj-chat.jsonl")); !os.IsNotExist(err) {
 		t.Errorf("subdirectory session should not land in global dir")
+	}
+}
+
+func TestMigrateLegacySessionsSkipsSubagentJsonlInSubdirectories(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+
+	subDir := filepath.Join(src, "Users_Yuki_git_polytone-audio-engine")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(subDir, "subagent-task.jsonl"), []byte(legacyMessageLog), 0o644)
+
+	n, err := MigrateLegacySessions(src, dest, nil)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("imported %d sessions, want standalone subagent jsonl skipped", n)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "subagent-task.jsonl")); !os.IsNotExist(err) {
+		t.Errorf("standalone subagent should not be imported")
 	}
 }
 

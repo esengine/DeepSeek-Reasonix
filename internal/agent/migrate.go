@@ -83,7 +83,9 @@ func migrateLegacySessions(srcDir, globalDest, marker string, projectDir func(st
 	if strings.TrimSpace(marker) == "" {
 		marker = legacyImportMarker
 	}
-	if importMarkerExists(globalDest, marker) {
+	primaryPassDone := importMarkerExists(globalDest, marker)
+	jsonlPassDone := importMarkerExists(globalDest, legacyJsonlPassMarker)
+	if primaryPassDone && jsonlPassDone {
 		return 0, nil
 	}
 	entries, err := os.ReadDir(srcDir)
@@ -103,63 +105,63 @@ func migrateLegacySessions(srcDir, globalDest, marker string, projectDir func(st
 
 	imported := 0
 
-	// Pass 1 — event-log sessions (*.events.jsonl). When a same-named .jsonl
-	// exists in the source with a modification time >= the event log's, prefer
-	// the .jsonl directly (it is already in the native message format).
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".events.jsonl") {
-			continue
-		}
-		base := strings.TrimSuffix(name, ".events.jsonl")
-		meta := readLegacyMeta(srcDir, base)
-		destDir := globalDest
-		if projectDir != nil && meta.Workspace != "" && dirExists(meta.Workspace) {
-			if d := projectDir(meta.Workspace); d != "" {
-				destDir = d
+	if !primaryPassDone {
+		// Pass 1 — event-log sessions (*.events.jsonl). When a same-named .jsonl
+		// exists in the source with a modification time >= the event log's, prefer
+		// the .jsonl directly (it is already in the native message format).
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || !strings.HasSuffix(name, ".events.jsonl") {
+				continue
 			}
-		}
-		dest := filepath.Join(destDir, base+".jsonl")
-		if _, err := os.Stat(dest); err == nil {
-			continue // already imported, or a v1+ session of the same name
-		}
-		eventsInfo, _ := e.Info()
-		if destDir != globalDest && moveFlatImport(filepath.Join(globalDest, base+".jsonl"), dest, eventsInfo) {
-			recordImportedTitle(destDir, base, meta.Summary)
-			imported++
-			continue
-		}
-
-		// If a .jsonl sidecar exists and is >= the event log's mtime, copy it
-		// directly — the TS version wrote the native format alongside or after
-		// the event log, so the .jsonl is the canonical record.
-		jsonlPath := filepath.Join(srcDir, base+".jsonl")
-		if jsonlInfo, err := os.Stat(jsonlPath); err == nil && isMessageFormat(jsonlPath) {
-			if eventsInfo == nil || !jsonlInfo.ModTime().Before(eventsInfo.ModTime()) {
-				if err := transformAndCopyJsonl(jsonlPath, dest); err == nil {
-					if eventsInfo != nil {
-						_ = os.Chtimes(dest, eventsInfo.ModTime(), eventsInfo.ModTime())
-					}
-					recordImportedTitle(destDir, base, meta.Summary)
-					imported++
-					continue
+			base := strings.TrimSuffix(name, ".events.jsonl")
+			meta := readLegacyMeta(srcDir, base)
+			destDir := globalDest
+			if projectDir != nil && meta.Workspace != "" && dirExists(meta.Workspace) {
+				if d := projectDir(meta.Workspace); d != "" {
+					destDir = d
 				}
 			}
-		}
+			dest := filepath.Join(destDir, base+".jsonl")
+			if _, err := os.Stat(dest); err == nil {
+				continue // already imported, or a v1+ session of the same name
+			}
+			eventsInfo, _ := e.Info()
+			if destDir != globalDest && moveFlatImport(filepath.Join(globalDest, base+".jsonl"), dest, eventsInfo) {
+				recordImportedTitle(destDir, base, meta.Summary)
+				imported++
+				continue
+			}
 
-		msgs, err := reconstructSession(filepath.Join(srcDir, name))
-		if err != nil || len(msgs) == 0 {
-			continue
+			// If a .jsonl sidecar exists and is >= the event log's mtime, copy it
+			// directly — the TS version wrote the native format alongside or after
+			// the event log, so the .jsonl is the canonical record.
+			jsonlPath := filepath.Join(srcDir, base+".jsonl")
+			if jsonlInfo, err := os.Stat(jsonlPath); err == nil && isMessageFormat(jsonlPath) {
+				if eventsInfo == nil || !jsonlInfo.ModTime().Before(eventsInfo.ModTime()) {
+					if err := transformAndCopyJsonl(jsonlPath, dest); err == nil {
+						_ = os.Chtimes(dest, jsonlInfo.ModTime(), jsonlInfo.ModTime())
+						recordImportedTitle(destDir, base, meta.Summary)
+						imported++
+						continue
+					}
+				}
+			}
+
+			msgs, err := reconstructSession(filepath.Join(srcDir, name))
+			if err != nil || len(msgs) == 0 {
+				continue
+			}
+			s := &Session{Messages: msgs}
+			if err := s.Save(dest); err != nil {
+				return imported, err
+			}
+			if eventsInfo != nil {
+				_ = os.Chtimes(dest, eventsInfo.ModTime(), eventsInfo.ModTime()) // preserve resume ordering
+			}
+			recordImportedTitle(destDir, base, meta.Summary)
+			imported++
 		}
-		s := &Session{Messages: msgs}
-		if err := s.Save(dest); err != nil {
-			return imported, err
-		}
-		if eventsInfo != nil {
-			_ = os.Chtimes(dest, eventsInfo.ModTime(), eventsInfo.ModTime()) // preserve resume ordering
-		}
-		recordImportedTitle(destDir, base, meta.Summary)
-		imported++
 	}
 
 	// Pass 2 — message-format .jsonl files without a .events.jsonl counterpart.
@@ -167,7 +169,7 @@ func migrateLegacySessions(srcDir, globalDest, marker string, projectDir func(st
 	// desktop, subagent, and later-version chat sessions). The pass is gated by
 	// its own marker so existing upgraders whose events passes completed still
 	// get their .jsonl-only sessions imported.
-	if !importMarkerExists(globalDest, legacyJsonlPassMarker) {
+	if !jsonlPassDone {
 		imported += importJsonlSessions(entries, srcDir, globalDest, hasEvents, projectDir)
 
 		// .jsonl.bak recovery: when the .jsonl was lost but a backup remains.
@@ -214,31 +216,33 @@ func migrateLegacySessions(srcDir, globalDest, marker string, projectDir func(st
 	// Pass 3 — recurse into subdirectories that look like project session dirs
 	// (e.g. Users_Yuki_git_polytone-audio-engine/ under ~/.reasonix/sessions/).
 	// The TS version nested project-scoped sessions under a workspace slug.
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		subDir := filepath.Join(srcDir, e.Name())
-		subEntries, err := os.ReadDir(subDir)
-		if err != nil {
-			continue
-		}
-		hasSessions := false
-		for _, se := range subEntries {
-			sn := se.Name()
-			if !se.IsDir() && (strings.HasSuffix(sn, ".jsonl") || strings.HasSuffix(sn, ".events.jsonl")) {
-				hasSessions = true
-				break
+	if !jsonlPassDone {
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
 			}
+			subDir := filepath.Join(srcDir, e.Name())
+			subEntries, err := os.ReadDir(subDir)
+			if err != nil {
+				continue
+			}
+			hasSessions := false
+			for _, se := range subEntries {
+				sn := se.Name()
+				if !se.IsDir() && (strings.HasSuffix(sn, ".jsonl") || strings.HasSuffix(sn, ".events.jsonl")) {
+					hasSessions = true
+					break
+				}
+			}
+			if !hasSessions {
+				continue
+			}
+			n, err := migrateSubDirectory(subDir, globalDest, projectDir)
+			if err != nil {
+				continue
+			}
+			imported += n
 		}
-		if !hasSessions {
-			continue
-		}
-		n, err := migrateSubDirectory(subDir, globalDest, projectDir)
-		if err != nil {
-			continue
-		}
-		imported += n
 	}
 
 	// Also stamp the flat markers so a downgrade to an older build doesn't
@@ -319,17 +323,20 @@ func migrateSubDirectory(subDir, globalDest string, projectDir func(string) stri
 		}
 		var base string
 		var srcPath string
+		var srcInfo os.FileInfo
 		reconstruct := false
 		switch {
 		case strings.HasSuffix(name, ".events.jsonl"):
 			base = strings.TrimSuffix(name, ".events.jsonl")
 			srcPath = filepath.Join(subDir, name)
+			eventsInfo, _ := e.Info()
+			srcInfo = eventsInfo
 			// Prefer .jsonl sidecar if it's newer.
 			if jsonlPath := filepath.Join(subDir, base+".jsonl"); fileExists(jsonlPath) && isMessageFormat(jsonlPath) {
-				eventsInfo, _ := e.Info()
 				if jsonlInfo, err := os.Stat(jsonlPath); err == nil {
 					if eventsInfo == nil || !jsonlInfo.ModTime().Before(eventsInfo.ModTime()) {
 						srcPath = jsonlPath
+						srcInfo = jsonlInfo
 						reconstruct = false
 					} else {
 						reconstruct = true
@@ -346,11 +353,15 @@ func migrateSubDirectory(subDir, globalDest string, projectDir func(string) stri
 				continue // handled by the events branch above
 			}
 			srcPath = filepath.Join(subDir, name)
+			srcInfo, _ = e.Info()
 			if !isMessageFormat(srcPath) {
 				continue
 			}
 			// reconstruct stays false
 		default:
+			continue
+		}
+		if strings.HasPrefix(base, "subagent-") {
 			continue
 		}
 		meta := readLegacyMeta(subDir, base)
@@ -364,7 +375,6 @@ func migrateSubDirectory(subDir, globalDest string, projectDir func(string) stri
 		if _, err := os.Stat(dest); err == nil {
 			continue
 		}
-		srcInfo, _ := e.Info()
 		if reconstruct {
 			msgs, err := reconstructSession(srcPath)
 			if err != nil || len(msgs) == 0 {
