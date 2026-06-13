@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"mime"
 	"net/http"
 	"net/url"
@@ -3857,6 +3858,39 @@ func (a *App) SearchFileRefs(query string) []DirEntry {
 		out = append(out, DirEntry{Name: r.Path, IsDir: r.IsDir})
 	}
 	return out
+}
+
+// ListWorkspaceFiles returns every non-ignored file path (relative to workspace
+// root) for the active workspace. The frontend uses this set to linkify file
+// references in assistant messages. Directories and noise entries (.git,
+// node_modules, etc.) are skipped.
+func (a *App) ListWorkspaceFiles() []string {
+	base, err := a.activeWorkspaceBase()
+	if err != nil {
+		return nil
+	}
+	var files []string
+	filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, err := filepath.Rel(base, path)
+		if err != nil {
+			return nil
+		}
+		name := d.Name()
+		if skipWorkspaceEntry(filepath.Dir(rel), name, d.IsDir()) {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !d.IsDir() {
+			files = append(files, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	return files
 }
 
 // ReadFile returns a small text preview for a file under the current workspace.

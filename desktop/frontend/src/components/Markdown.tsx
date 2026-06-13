@@ -1,4 +1,4 @@
-import { memo, useDeferredValue, useLayoutEffect, useRef } from "react";
+import { memo, useDeferredValue, useLayoutEffect, useMemo, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -25,12 +25,10 @@ const STREAMING_CURSOR_CLASS = "cursor";
 // inside the container, skipping code blocks entirely.  Called from
 // useLayoutEffect so the cursor appears synchronously before paint.
 function injectStreamingCursor(container: HTMLElement): void {
-  // Remove any cursor injected by a previous render cycle.
   container
     .querySelectorAll(`.${STREAMING_CURSOR_CLASS}`)
     .forEach((el) => el.remove());
 
-  // Walk the rendered tree and collect every text node outside <pre> blocks.
   const walker = document.createTreeWalker(
     container,
     NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
@@ -38,11 +36,9 @@ function injectStreamingCursor(container: HTMLElement): void {
       acceptNode(node) {
         if (node.nodeType === Node.ELEMENT_NODE) {
           const tag = (node as Element).tagName;
-          // Skip entire code-block subtrees.
           if (tag === "PRE") return NodeFilter.FILTER_REJECT;
           return NodeFilter.FILTER_SKIP;
         }
-        // Accept text nodes (but reject whitespace-only noise).
         if (node.nodeType === Node.TEXT_NODE) {
           return (node as Text).data.trim()
             ? NodeFilter.FILTER_ACCEPT
@@ -63,7 +59,6 @@ function injectStreamingCursor(container: HTMLElement): void {
   if (lastText?.parentElement) {
     lastText.parentElement.appendChild(cursor);
   } else {
-    // Fallback: no visible text yet (empty streaming start).
     container.appendChild(cursor);
   }
 }
@@ -74,50 +69,73 @@ function removeStreamingCursor(container: HTMLElement): void {
     .forEach((el) => el.remove());
 }
 
-const components: Components = {
-  pre: ({ children }) => <>{children}</>,
-  code: ({ className, children }) => {
-    const text = String(children ?? "");
-    const match = /language-([\w-]+)/.exec(className ?? "");
-    const isBlock = match !== null || text.includes("\n");
-    if (isBlock) {
-      return <CodeViewer value={text.replace(/\n$/, "")} language={match?.[1]} maxHeight={360} />;
-    }
-    return <code className="md-code">{children}</code>;
-  },
-  a: ({ href, children }) => (
-    <a
-      href={href}
-      onClick={(e) => {
-        e.preventDefault();
-        if (href) openExternal(href);
-      }}
-      onAuxClick={(e) => {
-        e.preventDefault();
-        if (href) openExternal(href);
-      }}
-      onMouseDown={(e) => {
-        if (e.button === 1) e.preventDefault();
-      }}
-    >
-      {children}
-    </a>
-  ),
-};
+function buildComponents(onOpenWorkspaceFile?: (path: string) => void): Components {
+  return {
+    pre: ({ children }) => <>{children}</>,
+    code: ({ className, children }) => {
+      const text = String(children ?? "");
+      const match = /language-([\w-]+)/.exec(className ?? "");
+      const isBlock = match !== null || text.includes("\n");
+      if (isBlock) {
+        return <CodeViewer value={text.replace(/\n$/, "")} language={match?.[1]} maxHeight={360} />;
+      }
+      return <code className="md-code">{children}</code>;
+    },
+    a: ({ href, children }) => {
+      // Workspace file path: no protocol prefix, relative to project root.
+      if (href && !/^https?:\/\//.test(href)) {
+        return (
+          <a
+            href="#"
+            className="md-link--workspace"
+            onClick={(e) => {
+              e.preventDefault();
+              onOpenWorkspaceFile?.(href);
+            }}
+          >
+            {children}
+          </a>
+        );
+      }
+      // External link: open in system browser.
+      return (
+        <a
+          href={href}
+          onClick={(e) => {
+            e.preventDefault();
+            if (href) openExternal(href);
+          }}
+          onAuxClick={(e) => {
+            e.preventDefault();
+            if (href) openExternal(href);
+          }}
+          onMouseDown={(e) => {
+            if (e.button === 1) e.preventDefault();
+          }}
+        >
+          {children}
+        </a>
+      );
+    },
+  };
+}
 
 export const Markdown = memo(function Markdown({
   text,
   showCursor,
+  onOpenWorkspaceFile,
 }: {
   text: string;
   showCursor?: boolean;
+  onOpenWorkspaceFile?: (path: string) => void;
 }) {
   const deferred = useDeferredValue(text);
   const containerRef = useRef<HTMLDivElement>(null);
+  const components = useMemo(
+    () => buildComponents(onOpenWorkspaceFile),
+    [onOpenWorkspaceFile],
+  );
 
-  // Inject / remove cursor after every React render cycle so the cursor
-  // always sits at the tail of the current streaming content — without
-  // ever touching the raw Markdown string that ReactMarkdown parses.
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;

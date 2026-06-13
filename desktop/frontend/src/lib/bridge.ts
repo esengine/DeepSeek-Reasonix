@@ -168,6 +168,7 @@ export interface AppBindings {
   SetMCPServerTier(name: string, tier: string): Promise<void>;
   SlashArgs(input: string): Promise<SlashArgsResult>;
   ListDir(rel: string): Promise<DirEntry[]>;
+  ListWorkspaceFiles(): Promise<string[]>;
   SearchFileRefs(query: string): Promise<DirEntry[]>;
   ReadFile(rel: string): Promise<FilePreview>;
   WorkspaceChanges(): Promise<WorkspaceChangesView>;
@@ -1966,6 +1967,21 @@ function makeMockApp(): AppBindings {
     },
     async GitCheckout(_branch: string) {
       console.info("mock GitCheckout", _branch);
+    },
+    async ListWorkspaceFiles() {
+      return [
+        "README.md",
+        "go.mod",
+        "desktop/app.go",
+        "desktop/frontend/src/App.tsx",
+        "desktop/frontend/src/components/Markdown.tsx",
+        "desktop/frontend/src/components/Message.tsx",
+        "desktop/frontend/src/components/Transcript.tsx",
+        "desktop/frontend/src/lib/bridge.ts",
+        "internal/control/controller.go",
+        "internal/control/input.go",
+        "internal/agent/coordinator.go",
+      ];
     },
     async WorkspaceGitHistory(path: string) {
       return [

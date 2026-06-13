@@ -29,6 +29,7 @@ import { app, onEvent, onProjectTreeChanged } from "./lib/bridge";
 import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-music";
 import { playSuccessChime } from "./lib/sound";
 import { Transcript } from "./components/Transcript";
+import { buildFileSetFromList } from "./lib/workspaceFileSet";
 import { Composer } from "./components/Composer";
 import { TodoPanel } from "./components/TodoPanel";
 import { ApprovalModal } from "./components/ApprovalModal";
@@ -814,6 +815,7 @@ export default function App() {
     return unsub;
   }, []);
 
+
   const [workspacePanelResizing, setWorkspacePanelResizing] = useState(false);
   const [workspacePanelMaximized, setWorkspacePanelMaximized] = useState(false);
   const [rightDockMode, setRightDockMode] = useState<RightDockMode>("context");
@@ -826,6 +828,37 @@ export default function App() {
   const [activeTopicTurns, setActiveTopicTurns] = useState<number | undefined>(undefined);
   const [composerInsertRequest, setComposerInsertRequest] = useState<ComposerInsertRequest | null>(null);
   const [transientOverlayDismissSignal, setTransientOverlayDismissSignal] = useState(0);
+  const [gitBranch, setGitBranch] = useState("");
+  const [gitAvailable, setGitAvailable] = useState(false);
+
+  // Fetch git branch info when the dock refresh key changes.
+  useEffect(() => {
+    let cancelled = false;
+    app.WorkspaceChanges().then((r) => {
+      if (cancelled) return;
+      setGitBranch(r.gitBranch ?? "");
+      setGitAvailable(r.gitAvailable);
+    }).catch(() => {
+      setGitBranch("");
+      setGitAvailable(false);
+    });
+    return () => { cancelled = true; };
+  }, [dockRefreshKey]);
+
+  const [workspaceFileSet, setWorkspaceFileSet] = useState<Set<string>>(new Set());
+
+  // Fetch workspace file list for path linkification.
+  useEffect(() => {
+    let cancelled = false;
+    app.ListWorkspaceFiles().then((files) => {
+      if (cancelled) return;
+      setWorkspaceFileSet(buildFileSetFromList(files));
+    }).catch(() => {
+      if (!cancelled) setWorkspaceFileSet(new Set());
+    });
+    return () => { cancelled = true; };
+  }, [projectRevision, dockRefreshKey]);
+
   const [desktopPlatform, setDesktopPlatform] = useState<DesktopPlatform>(detectBrowserPlatform);
   const [expandThinking, setExpandThinking] = useState(false);
   const [statusBarStyle, setStatusBarStyle] = useState<"icon" | "text">("text");
@@ -1929,6 +1962,7 @@ export default function App() {
       await openProjectTab(workspaceRoot, topicId);
     }
     await refreshTabMetas();
+    setDockRefreshKey((v) => v + 1);
     setTabRevealSignal((signal) => signal + 1);
   }, [closeTransientOverlays, openGlobalTab, openProjectTab, refreshTabMetas]);
 
@@ -2142,6 +2176,7 @@ export default function App() {
     if (picked) {
       setProjectRevision((value) => value + 1);
       await refreshTabMetas();
+      setDockRefreshKey((v) => v + 1);
     }
     return picked;
   }, [pickWorkspace, switchWorkspace, refreshTabMetas]);
@@ -2482,6 +2517,12 @@ export default function App() {
             <div className="topicbar__actions">
               {!sidebarImDetailConnection && (
               <>
+              {gitAvailable && gitBranch && (
+                <div className="workspace-branch-indicator" style={{ marginRight: 50 }}>
+                  <GitBranch size={13} />
+                  <span className="workspace-branch-name">{gitBranch}</span>
+                </div>
+              )}
               <CopyButton
                 getText={getSessionMarkdown}
                 label={t("topicBar.copyAll")}
@@ -2581,6 +2622,8 @@ export default function App() {
                 actionPending={state.messageAction != null}
                 rewindDisabled={state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
                 defaultExpandThinking={expandThinking}
+                filePathSet={workspaceFileSet}
+                onOpenWorkspaceFile={openRightDockFile}
               />
             )}
           </main>
