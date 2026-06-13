@@ -1933,14 +1933,15 @@ export default function App() {
   // Display items: truncated when an optimistic rewind is pending.
   const displayItems = useMemo(() => {
     if (!rewindState) return state.items;
-    return state.items.slice(0, rewindState.boundaryIdx);
+    // Filter out compaction cards — they're legitimate history but
+    // confusing when shown in a rewound (truncated) transcript.
+    return state.items.slice(0, rewindState.boundaryIdx).filter((it) => it.kind !== "compaction");
   }, [state.items, rewindState]);
 
   // send wrapper: commits any pending optimistic rewind before sending.
   const commitThenSend = useCallback(async (displayText: string, submitText?: string) => {
     const rs = rewindStateRef.current;
     if (rs) {
-      setRewindState(null);
       try {
         await rewind(rs.turn, rs.scope);
         setRewindSignal((v) => v + 1);
@@ -1955,6 +1956,9 @@ export default function App() {
         // the controller emits a notice with the reason.
         return;
       }
+      // Clear AFTER Go rewind succeeds — keep displayItems truncated
+      // during the async call to prevent a flash of full conversation.
+      setRewindState(null);
     }
     send(displayText, submitText);
   }, [send, rewind]);
