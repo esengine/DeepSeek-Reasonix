@@ -147,3 +147,30 @@ func TestCrashReportFromStructuredDetail(t *testing.T) {
 		}
 	}
 }
+
+func TestCrashReportFromPerformanceDetail(t *testing.T) {
+	payload := frontendCrashPayload{
+		SchemaVersion: 2,
+		Kind:          "performance",
+		Source:        "frontend.performance",
+		Label:         "performance.pressure",
+		Message:       "[performance.pressure]\n\n--- performance context ---\nreason: event loop lag 1300ms",
+		ErrorType:     "PerformancePressure",
+		ErrorMessage:  "UI responsiveness degraded because the app observed long tasks, event-loop lag, or high JS heap pressure.",
+		TopFrame:      "frontend.performance",
+	}
+	detail, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := crashReportFromDetail("performance", string(detail))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Kind != "performance" || r.Source != "frontend.performance" || r.Label != "performance.pressure" {
+		t.Fatalf("performance fields not preserved: %+v", r)
+	}
+	if !strings.Contains(r.Message, "--- native runtime context ---") || !strings.Contains(r.Message, "goroutines:") {
+		t.Fatalf("native runtime context missing from performance report: %q", r.Message)
+	}
+}

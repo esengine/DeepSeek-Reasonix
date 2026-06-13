@@ -1402,6 +1402,9 @@ export const zh: Record<DictKey, string> = {
   "crash.sent": "已发送，谢谢！",
   "crash.sendFailed": "发送失败 —— 请改用复制",
   "crash.privacyNote": "报告仅包含上方错误文本（路径中的用户名已移除）以及应用版本和操作系统。",
+  "performanceReport.title": "Reasonix 检测到响应卡顿",
+  "performanceReport.dismiss": "关闭",
+  "performanceReport.privacyNote": "上传前桌面端会移除路径与密钥；诊断信息只用于记录耗时、内存、网络状态、近期 breadcrumbs、应用版本和操作系统。",
 
   // 模拟/演示种子数据（仅浏览器开发模式）
   "mock.sessionFixLogin": "fix the login bug in auth.go",

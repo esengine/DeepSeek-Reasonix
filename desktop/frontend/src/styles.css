@@ -13752,6 +13752,78 @@ a[href] {
   font-size: 12px;
 }
 
+#performance-report-prompt {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: calc(var(--z-crash-overlay) - 1);
+  width: min(440px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, #d97757 22%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel, var(--bg-elev)) 96%, #d97757 4%);
+  color: var(--fg);
+  box-shadow: var(--shadow-2);
+}
+.performance-report__title {
+  font-size: 13px;
+  font-weight: 700;
+}
+.performance-report__body {
+  max-height: 170px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg-dim);
+  font-family: var(--mono, monospace);
+  font-size: 11.5px;
+  line-height: 1.45;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.performance-report__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.performance-report__copy,
+.performance-report__send,
+.performance-report__dismiss {
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--button-bg);
+  color: var(--fg);
+  font-size: 12px;
+}
+.performance-report__send {
+  border-color: color-mix(in srgb, var(--accent) 68%, var(--border));
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.performance-report__send[disabled] {
+  opacity: 0.7;
+}
+.performance-report__note {
+  color: var(--fg-faint);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+@media (max-width: 560px) {
+  #performance-report-prompt {
+    right: 12px;
+    bottom: 12px;
+  }
+}
+
 /* onboarding — first-run gate covering the whole window. Sits above every
    other layer; the card is centered, terminal-styled, with a faint scanline
    accent so it reads as "stop and paste a key" rather than a generic modal. */

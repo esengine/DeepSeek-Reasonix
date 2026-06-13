@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { installGlobalCrashHandlers } from "./lib/crash";
+import { installGlobalCrashHandlers, installPerformancePressureMonitor } from "./lib/crash";
 import { installBreadcrumbConsoleHook } from "./lib/breadcrumbs";
 import { installMessageSelectionCopy } from "./lib/messageSelectionCopy";
 import { LocaleProvider } from "./lib/i18n";
@@ -16,6 +16,7 @@ import "./styles.css";
 // featureless webview background, with the recent console trail attached.
 installGlobalCrashHandlers();
 installBreadcrumbConsoleHook();
+installPerformancePressureMonitor();
 
 // Apply the saved appearance (auto/light/dark) before the first paint.
 initTheme();
