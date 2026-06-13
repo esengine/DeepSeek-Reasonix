@@ -90,11 +90,6 @@ func (a *App) startTerminalAt(dir string) (string, error) {
 		shell = "/bin/bash"
 	}
 
-	// Verify directory before starting PTY.
-	if _, err := os.Stat(dir); err != nil {
-		return "", fmt.Errorf("directory not accessible: %w", err)
-	}
-
 	ctx, cancel := context.WithCancel(a.bootContext())
 	cmd := exec.CommandContext(ctx, shell, "-i")
 	cmd.Dir = dir
@@ -168,7 +163,8 @@ func (a *App) StartTerminalAt(rel string) string {
 		}
 		return "invalid path (outside workspace)"
 	}
-	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+	// If rel looks like a file (has extension), cd to parent directory.
+	if ext := filepath.Ext(path); ext != "" {
 		path = filepath.Dir(path)
 	}
 	id, err := a.startTerminalAt(path)
