@@ -5,9 +5,10 @@
 
 import { buildBasenameIndex } from "./workspaceFileSet";
 
-// Recognized source-code file extensions the AI commonly references.
-// Used as a fast pre-filter to avoid checking every word against the file set.
-const CODE_EXTS = new Set([
+// Common file extensions used as a baseline pre-filter so small or new projects
+// (with few files) still benefit from linkification without needing a large
+// workspace scan to build a useful extension set.
+const BASE_EXTS = new Set([
   ".go", ".ts", ".tsx", ".js", ".jsx", ".md", ".json", ".yaml", ".yml",
   ".toml", ".css", ".scss", ".html", ".svg", ".sql", ".proto", ".rs",
   ".py", ".c", ".h", ".cpp", ".hpp", ".java", ".kt", ".swift", ".sh",
@@ -17,6 +18,18 @@ const CODE_EXTS = new Set([
 // Fenced code block delimiter pattern.
 const FENCE_RE = /^(```|~~~)/;
 
+// buildExtSet returns the union of BASE_EXTS and every unique extension
+// actually present in fileSet. This dynamically adapts to the project while
+// keeping a reasonable baseline so small workspaces don't miss common files.
+function buildExtSet(fileSet: Set<string>): Set<string> {
+  const exts = new Set(BASE_EXTS);
+  for (const path of fileSet) {
+    const dot = path.lastIndexOf(".");
+    if (dot >= 0) exts.add(path.slice(dot).toLowerCase());
+  }
+  return exts;
+}
+
 // linkifyPaths scans markdown text for known workspace file paths and wraps
 // them in Markdown link syntax [path](path). Returns the transformed text.
 // Only runs on completed (non-streaming) text.
@@ -24,6 +37,7 @@ export function linkifyPaths(markdown: string, fileSet: Set<string>): string {
   if (!fileSet || fileSet.size === 0) return markdown;
 
   const basenameIndex = buildBasenameIndex(fileSet);
+  const extSet = buildExtSet(fileSet);
 
   // Step 1: extract fenced code blocks to protect them from replacement.
   const lines = markdown.split("\n");
@@ -48,7 +62,7 @@ export function linkifyPaths(markdown: string, fileSet: Set<string>): string {
       result.push(line);
       continue;
     }
-    result.push(linkifyLine(line, fileSet, basenameIndex));
+    result.push(linkifyLine(line, fileSet, basenameIndex, extSet));
   }
   return result.join("\n");
 }
@@ -57,6 +71,7 @@ function linkifyLine(
   line: string,
   fileSet: Set<string>,
   basenameIndex: Map<string, string | null>,
+  extSet: Set<string>,
 ): string {
   const tokens = tokenize(line);
   const out: string[] = [];
@@ -70,7 +85,7 @@ function linkifyLine(
     const word = token.text;
 
     // First, try the bare word as-is.
-    let link = tryMatch(word, word, fileSet, basenameIndex);
+    let link = tryMatch(word, word, fileSet, basenameIndex, extSet);
     if (link === null) {
       // Try stripping wrappers in sequence: backticks, surrounding punct, style.
       const stripped = [
@@ -80,7 +95,7 @@ function linkifyLine(
       ];
       for (const candidate of stripped) {
         if (candidate === "" || candidate === word) continue;
-        link = tryMatch(word, candidate, fileSet, basenameIndex);
+        link = tryMatch(word, candidate, fileSet, basenameIndex, extSet);
         if (link !== null) break;
       }
     }
@@ -113,11 +128,12 @@ function tryMatch(
   candidate: string,
   fileSet: Set<string>,
   basenameIndex: Map<string, string | null>,
+  extSet: Set<string>,
 ): string | null {
-  // Fast path: must contain "/" or end with a known code extension.
+  // Fast path: must contain "/" or end with a workspace-known extension.
   const hasSlash = candidate.includes("/");
   const ext = lastExt(candidate);
-  if (!hasSlash && !CODE_EXTS.has(ext)) {
+  if (!hasSlash && !extSet.has(ext)) {
     return null;
   }
 
