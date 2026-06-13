@@ -16539,11 +16539,16 @@ a[href] {
 .terminal-panel__body {
   flex: 1 1 auto;
   overflow: hidden;
+  background: var(--bg);
 }
 
 .terminal-panel__body .xterm {
   height: 100%;
   padding: 4px 0 0 8px;
+}
+
+.terminal-panel__body .xterm-viewport {
+  background: var(--bg) !important;
 }
 
 .workbench-dock__body > .workspace-panel {
