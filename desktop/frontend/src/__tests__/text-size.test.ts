@@ -16,13 +16,13 @@ function eq(a: unknown, b: unknown, label: string) {
 }
 
 console.log("\ntext size shortcuts");
-eq(nextTextSize("small", 1), DEFAULT_TEXT_SIZE, "increase from small");
+eq(nextTextSize("small", 1), "default", "increase from small");
 eq(nextTextSize("default", 1), "large", "increase from default");
 eq(nextTextSize("large", 1), "xlarge", "increase from large");
 eq(nextTextSize("xlarge", 1), "xlarge", "increase clamps at largest");
 eq(nextTextSize("xlarge", -1), "large", "decrease from xlarge");
-eq(nextTextSize("large", -1), DEFAULT_TEXT_SIZE, "decrease from large");
-eq(nextTextSize("default", -1), "small", "decrease from default");
+eq(nextTextSize("large", -1), "default", "decrease from large");
+eq(nextTextSize("default", -1), DEFAULT_TEXT_SIZE, "decrease from default");
 eq(nextTextSize("small", -1), "small", "decrease clamps at smallest");
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

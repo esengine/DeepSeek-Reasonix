@@ -2,7 +2,7 @@ export const FONT_FAMILIES = ["system", "yahei", "pingfang", "noto", "custom"] a
 
 export type FontFamily = (typeof FONT_FAMILIES)[number];
 
-export const DEFAULT_FONT_FAMILY: FontFamily = "system";
+export const DEFAULT_FONT_FAMILY: FontFamily = "noto";
 
 const FONT_FAMILY_KEY = "reasonix-font-family";
 const CUSTOM_FONT_KEY = "reasonix-font-family-custom";
