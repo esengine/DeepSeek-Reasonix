@@ -95,6 +95,7 @@
   --z-toast: 1302;
   --z-tooltip: 1302;
   --z-onboarding: 9999;
+  --z-performance-report-prompt: 99998;
   --z-crash-overlay: 99999;
 
   /* component recipes */
@@ -13756,7 +13757,7 @@ a[href] {
   position: fixed;
   right: 18px;
   bottom: 18px;
-  z-index: calc(var(--z-crash-overlay) - 1);
+  z-index: var(--z-performance-report-prompt);
   width: min(440px, calc(100vw - 24px));
   display: flex;
   flex-direction: column;
