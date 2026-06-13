@@ -62,7 +62,7 @@ function attachmentIcon(kind: "image" | "file" | "folder") {
   return <FileText size={15} />;
 }
 
-export function UserMessage({
+export const UserMessage = memo(function UserMessage({
   text,
   failed,
   turn,
@@ -154,7 +154,7 @@ export function UserMessage({
       </div>
     </div>
   );
-}
+});
 
 export function TurnActions({
   text,
