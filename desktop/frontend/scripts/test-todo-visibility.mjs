@@ -16,17 +16,21 @@ const transpiled = ts.transpileModule(source, {
 }).outputText;
 
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(transpiled).toString("base64")}`;
-const { shouldShowTodoPanel } = await import(moduleUrl);
+const { deriveTodoPanelState, shouldShowTodoPanel } = await import(moduleUrl);
 
 const completedTodos = [
   { content: "Inspect the report", status: "completed" },
   { content: "Ship the fix", status: "completed" },
 ];
+const activeTodos = [
+  { content: "Inspect the report", status: "in_progress" },
+  { content: "Ship the fix", status: "pending" },
+];
 
 assert.equal(
   shouldShowTodoPanel("todo-final", null, completedTodos),
-  true,
-  "the final all-completed todo_write must remain visible",
+  false,
+  "the final all-completed todo_write must auto-collapse",
 );
 assert.equal(
   shouldShowTodoPanel("todo-active", null, [{ content: "Run tests", status: "in_progress" }]),
@@ -41,11 +45,57 @@ assert.equal(
 assert.equal(shouldShowTodoPanel(null, null, completedTodos), false, "no canonical todo item means no panel");
 assert.equal(shouldShowTodoPanel("todo-empty", null, []), false, "empty todo lists do not render a panel");
 
+const activePanel = deriveTodoPanelState([
+  {
+    kind: "tool",
+    id: "todo-active",
+    name: "todo_write",
+    args: JSON.stringify({ todos: activeTodos }),
+    status: "done",
+  },
+]);
+assert.equal(activePanel?.id, "todo-active", "an active todo_write becomes the panel source");
+assert.equal(activePanel?.todos[0]?.status, "in_progress", "active todo state is preserved");
+
+const restoredPanel = deriveTodoPanelState([
+  {
+    kind: "tool",
+    id: "todo-restored",
+    name: "todo_write",
+    args: JSON.stringify({ todos: activeTodos }),
+    status: "done",
+  },
+  {
+    kind: "tool",
+    id: "complete-1",
+    name: "complete_step",
+    args: JSON.stringify({ step: "Inspect the report" }),
+    status: "done",
+  },
+  {
+    kind: "tool",
+    id: "complete-2",
+    name: "complete_step",
+    args: JSON.stringify({ step: "2" }),
+    status: "done",
+  },
+]);
+assert.equal(
+  shouldShowTodoPanel(restoredPanel?.id, null, restoredPanel?.todos ?? []),
+  false,
+  "restored history with all complete_steps auto-collapses",
+);
+assert.deepEqual(
+  restoredPanel?.todos.map((todo) => todo.status),
+  ["completed", "completed"],
+  "history replay marks completed steps and promotes pending work",
+);
+
 const iterations = 200_000;
 const started = performance.now();
 for (let i = 0; i < iterations; i += 1) {
-  if (!shouldShowTodoPanel("todo-perf", null, completedTodos)) {
-    throw new Error("unexpected hidden todo panel during performance loop");
+  if (shouldShowTodoPanel("todo-perf", null, completedTodos)) {
+    throw new Error("unexpected visible todo panel during performance loop");
   }
 }
 const elapsed = performance.now() - started;

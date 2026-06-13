@@ -53,8 +53,7 @@ import { OnboardingOverlay } from "./components/OnboardingOverlay";
 import { AppChrome } from "./components/AppChrome";
 import { ProjectTree } from "./components/ProjectTree";
 import { CopyButton } from "./components/CopyButton";
-import { parseTodos } from "./lib/tools";
-import { shouldShowTodoPanel } from "./lib/todoVisibility";
+import { deriveTodoPanelState, shouldShowTodoPanel } from "./lib/todoVisibility";
 import {
   type BotConnectionView,
   type BotSettingsView,
@@ -1276,24 +1275,12 @@ export default function App() {
   }, [composerProfile, controllerReady, goal, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, toolApprovalMode]);
 
   // The live task list pinned above the composer comes from the most recent
-  // successful top-level todo_write result; failed or still-running attempts do
-  // not advance the canonical panel state. It stays visible through the final
-  // all-completed update, and can be dismissed by the user (the ✕). A dismissal
-  // is keyed to that list's id, so a fresh accepted todo_write brings the panel
-  // back.
-  const todoEntry = useMemo(() => {
-    for (let i = state.items.length - 1; i >= 0; i--) {
-      const it = state.items[i];
-      if (it.kind === "tool" && it.name === "todo_write" && !it.parentId && it.status === "done" && !it.error) {
-        return { item: it, index: i };
-      }
-    }
-    return null;
-  }, [state.items]);
-  const todoItem = todoEntry?.item ?? null;
-  const todos = useMemo(() => (todoItem ? parseTodos(todoItem.args) : []), [todoItem]);
+  // successful top-level todo_write, with later complete_step calls replayed so
+  // restored history matches the runtime host-advanced list.
+  const todoPanel = useMemo(() => deriveTodoPanelState(state.items), [state.items]);
+  const todos = todoPanel?.todos ?? [];
   const [dismissedTodo, setDismissedTodo] = useState<string | null>(null);
-  const showTodos = shouldShowTodoPanel(todoItem?.id, dismissedTodo, todos);
+  const showTodos = shouldShowTodoPanel(todoPanel?.id, dismissedTodo, todos);
 
   const sessionTitle = topicTitle(activeTab);
   const sessionHasContent = state.items.length > 0 || Boolean(state.live?.text || state.live?.reasoning);
@@ -2678,7 +2665,7 @@ export default function App() {
 
           {!sidebarImDetailConnection && (
           <footer className="footer" ref={footerRef}>
-            {showTodos && <TodoPanel todos={todos} onDismiss={() => setDismissedTodo(todoItem!.id)} />}
+            {showTodos && <TodoPanel todos={todos} onDismiss={() => setDismissedTodo(todoPanel!.id)} />}
             {rewindState && (
               <UndoRewindBanner
                 meta={{
