@@ -54,15 +54,22 @@ func TestSinkSetParentID(t *testing.T) {
 }
 
 func TestSinkSetVerbose(t *testing.T) {
-	parent, _ := collectSink()
+	parent, get := collectSink()
 	m := NewSinkMultiplexer(parent, "agent-x")
 
 	m.SetVerbose(true)
-	e := event.Event{Kind: event.Message, Text: "hello"}
-	m.Emit(e)
+	m.Emit(event.Event{Kind: event.Message, Text: "hello"})
 
-	events := parent.(event.FuncSink)
-	_ = events // parent won't receive because we test with collectSink properly
+	events := get()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event with verbose=true, got %d", len(events))
+	}
+	if events[0].Kind != event.Message {
+		t.Fatalf("expected Message kind, got %v", events[0].Kind)
+	}
+	if events[0].Text != "[agent-x] hello" {
+		t.Fatalf("expected text '[agent-x] hello', got %q", events[0].Text)
+	}
 }
 
 func TestSinkEmitToolDispatch(t *testing.T) {
