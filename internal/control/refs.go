@@ -129,7 +129,7 @@ func (c *Controller) detectRefsMode(line string, scopedOnly bool) []ref {
 		if c.cpRoot != "" {
 			if rel, ok := workspaceRefPath(tok, c.cpRoot); ok {
 				kind := refFile
-				if isImageAttachmentRef(tok) || (isAttachmentRef(tok) && isImageAttachmentRef(rel)) {
+				if isAttachmentRef(rel) && isImageAttachmentRef(rel) {
 					kind = refImage
 				}
 				refs = append(refs, ref{kind: kind, path: rel, raw: tok})

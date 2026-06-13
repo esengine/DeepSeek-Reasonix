@@ -491,6 +491,44 @@ func TestResolveRefsWithWorkspaceRootStoresRelativePath(t *testing.T) {
 	}
 }
 
+func TestWorkspaceImageRefsOnlyTreatAttachmentsAsImages(t *testing.T) {
+	workspace := t.TempDir()
+	diagram := filepath.Join(workspace, "docs", "diagram.png")
+	if err := os.MkdirAll(filepath.Dir(diagram), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(diagram, []byte("\x89PNG\r\n\x1a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	attachment := filepath.Join(workspace, ".reasonix", "attachments", "shot.png")
+	if err := os.MkdirAll(filepath.Dir(attachment), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(attachment, []byte("\x89PNG\r\n\x1a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Controller{cpRoot: workspace}
+	refs := c.detectRefs("see @" + diagram + " @" + attachment)
+	if len(refs) != 2 {
+		t.Fatalf("detectRefs = %+v, want two refs", refs)
+	}
+	if refs[0].kind != refFile || refs[0].path != "docs/diagram.png" {
+		t.Fatalf("workspace png ref = %+v, want file ref", refs[0])
+	}
+	if refs[1].kind != refImage || refs[1].path != ".reasonix/attachments/shot.png" {
+		t.Fatalf("attachment png ref = %+v, want image attachment ref", refs[1])
+	}
+
+	block, errs := c.ResolveRefs(context.Background(), "see @"+diagram)
+	if len(errs) != 0 {
+		t.Fatalf("ResolveRefs errors = %v", errs)
+	}
+	if !strings.Contains(block, `<file path="docs/diagram.png">`) || !strings.Contains(block, "image file docs/diagram.png") {
+		t.Fatalf("workspace png should resolve as image-file metadata:\n%s", block)
+	}
+}
+
 func TestReadFileRefPDFExtractionWithBaseDirUsesAbsPath(t *testing.T) {
 	base := t.TempDir()
 	pdfPath := filepath.Join(base, "docs", "report.pdf")

@@ -98,6 +98,26 @@ func TestExtractAllowsInternalSymlink(t *testing.T) {
 	}
 }
 
+func TestExtractAllowsParentRelativeInternalSymlink(t *testing.T) {
+	dir := t.TempDir()
+	probe := filepath.Join(dir, "probe-link")
+	if err := os.Symlink("probe-target", probe); err != nil {
+		t.Skipf("symlink creation is not available in this environment: %v", err)
+	}
+	_ = os.Remove(probe)
+	data := tarGz(
+		&tar.Header{Name: "codegraph-linux-x64/lib/tool", Typeflag: tar.TypeReg, Mode: 0o755},
+		&tar.Header{Name: "codegraph-linux-x64/bin/tool", Typeflag: tar.TypeSymlink, Linkname: "../lib/tool", Mode: 0o777},
+	)
+	if err := extractTarGz(data, dir); err != nil {
+		t.Fatalf("parent-relative internal symlink should be allowed: %v", err)
+	}
+	link := filepath.Join(dir, "codegraph-linux-x64", "bin", "tool")
+	if got, err := os.Readlink(link); err != nil || got != "../lib/tool" {
+		t.Fatalf("symlink target = %q, %v; want ../lib/tool", got, err)
+	}
+}
+
 func TestExtractRejectsDanglingSymlink(t *testing.T) {
 	dir := t.TempDir()
 	err := extractTarGz(tarGzWithSymlink("link", "missing-target"), dir)

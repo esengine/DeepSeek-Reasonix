@@ -288,7 +288,7 @@ func resolveWithin(root, name string) (string, error) {
 }
 
 func cleanSymlinkTarget(root, linkPath, linkname string) (string, error) {
-	if linkname == "" || !filepath.IsLocal(linkname) {
+	if linkname == "" || filepath.IsAbs(linkname) {
 		return "", fmt.Errorf("unsafe symlink target %q in archive", linkname)
 	}
 	clean := filepath.Clean(linkname)
