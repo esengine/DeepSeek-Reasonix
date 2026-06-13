@@ -1896,7 +1896,6 @@ func (c *Controller) maybeColdResumePrune(path string) {
 	if err := c.Snapshot(); err != nil {
 		slog.Warn("controller: post-prune snapshot", "err", err)
 	}
-	}
 }
 
 // Snapshot writes the executor's conversation to the active session file. No-op
