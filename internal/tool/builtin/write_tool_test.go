@@ -181,6 +181,39 @@ func TestMoveFileAllowsCaseOnlyRename(t *testing.T) {
 	}
 }
 
+func TestMoveFileFallsBackWhenSameFileDestinationRenameFails(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.md")
+	dst := filepath.Join(dir, "same-file.md")
+	if err := os.WriteFile(src, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(src, dst); err != nil {
+		t.Skipf("hard links unavailable: %v", err)
+	}
+
+	oldRename := renameFile
+	renameFile = func(oldpath, newpath string) error {
+		if oldpath == src && newpath == dst {
+			return &os.LinkError{Op: "rename", Old: oldpath, New: newpath, Err: os.ErrExist}
+		}
+		return oldRename(oldpath, newpath)
+	}
+	t.Cleanup(func() { renameFile = oldRename })
+
+	runTool(t, moveFile{}, map[string]any{"source_path": src, "destination_path": dst})
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("source still exists or stat failed: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("destination content = %q, want hello", got)
+	}
+}
+
 func TestMoveFileFallsBackForCrossDeviceRename(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "a.md")

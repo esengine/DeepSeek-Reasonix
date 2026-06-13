@@ -83,7 +83,13 @@ func (m moveFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		}
 	}
 	if err := renameFile(src, dst); err != nil {
-		if !sameFileDestination && isCrossDeviceMove(err) {
+		if sameFileDestination {
+			if rerr := renameSameFileDestination(src, dst); rerr != nil {
+				return "", fmt.Errorf("move %s to %s: %w", src, dst, rerr)
+			}
+			return fmt.Sprintf("moved %s to %s", src, dst), nil
+		}
+		if isCrossDeviceMove(err) {
 			if cerr := copyRegularFileAndRemoveSource(src, dst, info); cerr != nil {
 				return "", fmt.Errorf("move %s to %s: %w", src, dst, cerr)
 			}
@@ -92,6 +98,32 @@ func (m moveFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "", fmt.Errorf("move %s to %s: %w", src, dst, err)
 	}
 	return fmt.Sprintf("moved %s to %s", src, dst), nil
+}
+
+func renameSameFileDestination(src, dst string) error {
+	tmp, err := os.CreateTemp(filepath.Dir(src), ".reasonix-move-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Remove(tmpName); err != nil {
+		return err
+	}
+
+	if err := renameFile(src, tmpName); err != nil {
+		return err
+	}
+	if err := renameFile(tmpName, dst); err != nil {
+		if restoreErr := renameFile(tmpName, src); restoreErr != nil {
+			return fmt.Errorf("%w; restore %s: %v", err, src, restoreErr)
+		}
+		return err
+	}
+	return nil
 }
 
 func isCrossDeviceMove(err error) bool {
