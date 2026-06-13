@@ -54,7 +54,7 @@ import { AppChrome } from "./components/AppChrome";
 import { ProjectTree } from "./components/ProjectTree";
 import { CopyButton } from "./components/CopyButton";
 import { parseTodos } from "./lib/tools";
-import { shouldShowTodoPanel } from "./lib/todoVisibility";
+import { shouldShowTodoPanel, todoDismissalKey } from "./lib/todoVisibility";
 import {
   type BotConnectionView,
   type BotSettingsView,
@@ -1277,10 +1277,10 @@ export default function App() {
 
   // The live task list pinned above the composer comes from the most recent
   // successful top-level todo_write result; failed or still-running attempts do
-  // not advance the canonical panel state. It stays visible through the final
-  // all-completed update, and can be dismissed by the user (the ✕). A dismissal
-  // is keyed to that list's id, so a fresh accepted todo_write brings the panel
-  // back.
+  // not advance the canonical panel state. It stays visible while any item is
+  // incomplete. It can be dismissed by the user (the ✕). A dismissal is keyed to
+  // the list's stable state, so host-advanced events and history reloads
+  // do not resurrect the same task list under a different event id.
   const todoEntry = useMemo(() => {
     for (let i = state.items.length - 1; i >= 0; i--) {
       const it = state.items[i];
@@ -1293,7 +1293,8 @@ export default function App() {
   const todoItem = todoEntry?.item ?? null;
   const todos = useMemo(() => (todoItem ? parseTodos(todoItem.args) : []), [todoItem]);
   const [dismissedTodo, setDismissedTodo] = useState<string | null>(null);
-  const showTodos = shouldShowTodoPanel(todoItem?.id, dismissedTodo, todos);
+  const todoKey = useMemo(() => todoDismissalKey(todos), [todos]);
+  const showTodos = shouldShowTodoPanel(todoKey, dismissedTodo, todos);
 
   const sessionTitle = topicTitle(activeTab);
   const sessionHasContent = state.items.length > 0 || Boolean(state.live?.text || state.live?.reasoning);
@@ -2678,7 +2679,7 @@ export default function App() {
 
           {!sidebarImDetailConnection && (
           <footer className="footer" ref={footerRef}>
-            {showTodos && <TodoPanel todos={todos} onDismiss={() => setDismissedTodo(todoItem!.id)} />}
+            {showTodos && <TodoPanel todos={todos} onDismiss={() => setDismissedTodo(todoKey)} />}
             {rewindState && (
               <UndoRewindBanner
                 meta={{

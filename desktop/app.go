@@ -33,6 +33,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 	"reasonix/internal/fileref"
 	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/i18n"
@@ -1604,6 +1605,7 @@ func (a *App) HistoryForTab(tabID string) []HistoryMessage {
 
 func historyMessages(msgs []provider.Message, resolveUserContent func(string) string) []HistoryMessage {
 	out := make([]HistoryMessage, 0, len(msgs))
+	replayedTodoArgs := historyTodoArgsWithCompleteSteps(msgs)
 	for _, m := range msgs {
 		content := m.Content
 		if m.Role == provider.RoleUser {
@@ -1630,7 +1632,13 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 		if m.Role == provider.RoleAssistant && len(m.ToolCalls) > 0 {
 			hm.ToolCalls = make([]HistoryToolCall, len(m.ToolCalls))
 			for i, tc := range m.ToolCalls {
-				hm.ToolCalls[i] = HistoryToolCall{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments}
+				args := tc.Arguments
+				if tc.Name == "todo_write" {
+					if replayed, ok := replayedTodoArgs[tc.ID]; ok {
+						args = replayed
+					}
+				}
+				hm.ToolCalls[i] = HistoryToolCall{ID: tc.ID, Name: tc.Name, Arguments: args}
 			}
 		}
 		if m.Role == provider.RoleTool {
@@ -1640,6 +1648,95 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 		out = append(out, hm)
 	}
 	return out
+}
+
+func historyTodoArgsWithCompleteSteps(msgs []provider.Message) map[string]string {
+	failed := failedHistoryToolCallIDs(msgs)
+	out := map[string]string{}
+	var todos []evidence.TodoItem
+	latestTodoID := ""
+	for _, m := range msgs {
+		for _, tc := range m.ToolCalls {
+			if tc.ID != "" && failed[tc.ID] {
+				continue
+			}
+			switch tc.Name {
+			case "todo_write":
+				rec := evidence.ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, true)
+				if len(rec.Todos) == 0 {
+					continue
+				}
+				todos = append([]evidence.TodoItem(nil), rec.Todos...)
+				latestTodoID = tc.ID
+				if latestTodoID != "" {
+					if args, ok := todoArgsJSON(todos); ok {
+						out[latestTodoID] = args
+					}
+				}
+			case "complete_step":
+				if latestTodoID == "" || len(todos) == 0 {
+					continue
+				}
+				rec := evidence.ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, true)
+				match, ok := evidence.MatchStep(rec.Step, todos)
+				if !ok || match.Index < 1 || match.Index > len(todos) || todoStatusForHistory(todos[match.Index-1].Status) == "completed" {
+					continue
+				}
+				todos[match.Index-1].Status = "completed"
+				promoteNextHistoryTodo(todos)
+				if args, ok := todoArgsJSON(todos); ok {
+					out[latestTodoID] = args
+				}
+			}
+		}
+	}
+	return out
+}
+
+func failedHistoryToolCallIDs(msgs []provider.Message) map[string]bool {
+	failed := map[string]bool{}
+	for _, msg := range msgs {
+		if msg.Role != provider.RoleTool || msg.ToolCallID == "" {
+			continue
+		}
+		if strings.HasPrefix(msg.Content, "error:") ||
+			strings.HasPrefix(msg.Content, "blocked:") ||
+			strings.HasPrefix(msg.Content, "Error:") ||
+			strings.HasPrefix(msg.Content, "[error") {
+			failed[msg.ToolCallID] = true
+		}
+	}
+	return failed
+}
+
+func todoArgsJSON(todos []evidence.TodoItem) (string, bool) {
+	b, err := json.Marshal(map[string]any{"todos": todos})
+	if err != nil {
+		return "", false
+	}
+	return string(b), true
+}
+
+func promoteNextHistoryTodo(todos []evidence.TodoItem) {
+	for _, todo := range todos {
+		if todoStatusForHistory(todo.Status) == "in_progress" {
+			return
+		}
+	}
+	for i := range todos {
+		if todoStatusForHistory(todos[i].Status) == "pending" {
+			todos[i].Status = "in_progress"
+			return
+		}
+	}
+}
+
+func todoStatusForHistory(status string) string {
+	status = strings.TrimSpace(status)
+	if status == "" {
+		return "pending"
+	}
+	return status
 }
 
 func previewSessionMessages(sessionDir, path string) ([]HistoryMessage, error) {
