@@ -46,6 +46,13 @@ node_modules/
 !/.reasonix/commands/
 !/.reasonix/commands/review.md
 
+# OpenSpec generated state (per-project, created by openspec init)
+/openspec/
+
+# Comet workflow runtime state (per-project)
+/.comet/
+/docs/superpowers/
+
 # CodeGraph per-project index (rebuilt locally; never committed)
 .codegraph/
 
