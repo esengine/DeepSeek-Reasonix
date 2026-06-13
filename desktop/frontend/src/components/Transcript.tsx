@@ -58,21 +58,6 @@ function compactQuestionText(text: string): string {
   return cleaned.slice(0, 80);
 }
 
-function scrollVersion(items: Item[]): string {
-  return items
-    .map((it) => {
-      switch (it.kind) {
-        case "assistant":
-          return `${it.id}:a:${it.text?.length ?? 0}:${it.reasoning?.length ?? 0}:${it.streaming ? 1 : 0}`;
-        case "tool":
-          return `${it.id}:t:${it.name}:${it.status}:${it.args?.length ?? 0}:${it.output?.length ?? 0}:${it.error?.length ?? 0}:${it.truncated ? 1 : 0}`;
-        default:
-          return `${it.id}:${it.kind}`;
-      }
-    })
-    .join("|");
-}
-
 // Summarise a warm turn for its compact card.
 function warmUserPreview(text: string): string {
   const cleaned = replaceAttachmentRefsForDisplay(text).replace(/\s+/g, " ").trim();
@@ -190,7 +175,18 @@ export function Transcript({
   // A 120ms tween during fast streaming is perpetually killed/restarted
   // before reaching the target, causing visible jitter.  Direct scrollTop
   // assignment is synchronous and always hits the exact bottom.
-  const contentVersion = useMemo(() => scrollVersion(items), [items]);
+  const contentVersion = useMemo(() => {
+    let hash = items.length.toString();
+    for (let i = Math.max(0, items.length - 5); i < items.length; i++) {
+      const it = items[i];
+      if (it.kind === "assistant") hash += `|${it.id}:a:${it.text?.length ?? 0}:${it.reasoning?.length ?? 0}:${it.streaming ? 1 : 0}`;
+      else if (it.kind === "tool") hash += `|${it.id}:t:${it.name}:${it.status}:${(it.output?.length ?? 0) + (it.error?.length ?? 0)}`;
+      else hash += `|${it.id}`;
+    }
+    return hash;
+    // Only recompute when items.length or assistant/tool state changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.reduce((c, it) => c + (it.kind === "assistant" ? 1 : 0) + (it.kind === "tool" ? 1 : 0), 0), items.length]);
   useEffect(() => {
     if (!stick.current) return;
     const el = scrollRef.current;
@@ -271,7 +267,8 @@ export function Transcript({
       }
     }
     return 0;
-  }, [items]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.reduce((c, it) => c + (it.kind === "user" ? 1 : 0), 0)]);
 
   // How many turns are in the cold zone (not yet shown).
   const warmTurnCount = turnGroups.length - Math.min(turnGroups.length, HOT_TURNS);
@@ -355,7 +352,7 @@ export function Transcript({
       groups.push({ items: current, isFinal, isComplete: false });
     }
     return groups;
-  }, [displayMode, hotStartIdx, items]);
+  }, [displayMode, hotStartIdx, items.length, items.length > 0 && items[items.length - 1].kind === "assistant" ? (items[items.length - 1] as Extract<Item, { kind: "assistant" }>).streaming ? 1 : 0 : 0]);
 
   const hotZoneNodes = useMemo<ReactNode[]>(() => {
     const out: ReactNode[] = [];
