@@ -12,6 +12,7 @@
 ## 目录
 
 - [配置](#配置)
+- [思考语言](./REASONING_LANGUAGE.zh-CN.md)
 - [模式快捷键速查](#模式快捷键速查)
 - [权限与沙盒](#权限与沙盒)
 - [插件（MCP）](#插件mcp)
@@ -24,6 +25,8 @@
 优先级：**flag > `./reasonix.toml` > 用户配置文件 > 内置默认值**。用户配置位于操作系统配置目录：
 Linux 为 `~/.config/reasonix/`，macOS 为 `~/Library/Application Support/reasonix/`，Windows 为 `%AppData%\reasonix\`。
 密钥经环境变量通过 `api_key_env` 注入，绝不写入配置文件。
+
+桌面端和 CLI 端的可见思考语言设置，见 [思考语言](./REASONING_LANGUAGE.zh-CN.md)。
 
 ```toml
 default_model = "deepseek-flash"   # 执行器；设 [agent].planner_model 可加规划器
@@ -180,7 +183,7 @@ headers = { Authorization = "Bearer ${STRIPE_KEY}" }
 
 ## 斜杠命令
 
-`reasonix chat` 里，内置命令（`/compact`、`/new`、`/clear`、`/rewind`、`/tree`、`/branch`、`/switch`、`/todo`、`/model`、`/mcp`、`/skills`、`/hooks`、`/memory`、`/output-style`、`/sandbox`、`/language`、`/auto-plan`、`/help`）在本地执行——`/help` 可列出全部。
+`reasonix chat` 里，内置命令（`/compact`、`/new`、`/clear`、`/rewind`、`/tree`、`/branch`、`/switch`、`/todo`、`/model`、`/mcp`、`/skills`、`/hooks`、`/memory`、`/output-style`、`/sandbox`、`/language`、`/auto-plan`、`/reasoning-language`、`/help`）在本地执行——`/help` 可列出全部。
 `/new` 会开启新会话，同时保存之前的 transcript 供历史记录和恢复使用；`/clear` 会二次确认，确认后丢弃当前上下文且不保存。
 `/tree` 查看已保存的对话分支，`/branch [name]` 从当前对话末端分支，`/branch <turn> [name]`
 从较早的 checkpoint 轮次分支，`/switch <id|name>` 切换到另一个分支。**自定义命令**
@@ -242,8 +245,10 @@ Subagent skills 默认继承执行器模型。设置 `subagent_model` 可让它�
 编辑文件或执行有副作用的命令。`auto_plan_classifier` 可以指定便宜的 provider，例如
 `deepseek-flash`；它只在边界输入上调用，分类失败会回退到启发式规则。也可以用
 `reasonix chat` 里的 `/auto-plan off|on` 修改用户级设置，或在 shell/脚本里用
-`reasonix config auto-plan off|on`。只有明确想写项目级覆盖时，才给 shell 命令加
-`--local`。
+`reasonix config auto-plan off|on`。可见思考语言也采用同样形态：chat 里用
+`/reasoning-language auto|zh|en`，shell/脚本里用
+`reasonix config reasoning-language auto|zh|en`。只有明确想写项目级覆盖时，才给
+shell 命令加 `--local`。
 
 桌面端“协作方式”菜单里的计划模式、目标模式和省 token 模式的使用方法与注意事项，
 见 [`COLLABORATION_MODES.zh-CN.md`](./COLLABORATION_MODES.zh-CN.md)。

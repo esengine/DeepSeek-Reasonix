@@ -12,6 +12,7 @@
 ## Contents
 
 - [Configuration](#configuration)
+- [Reasoning language](./REASONING_LANGUAGE.md)
 - [Mode shortcuts quick map](#mode-shortcuts-quick-map)
 - [Permissions & sandbox](#permissions--sandbox)
 - [Plugins (MCP)](#plugins-mcp)
@@ -26,6 +27,9 @@ built-in defaults**. The user config lives in your OS config dir: `~/.config/rea
 on Linux, `~/Library/Application Support/reasonix/` on macOS, `%AppData%\reasonix\` on
 Windows. Secrets come from the environment via `api_key_env` and are
 never stored in config files.
+
+For the desktop and CLI usage of visible reasoning language, see
+[Reasoning language](./REASONING_LANGUAGE.md).
 
 ```toml
 default_model = "deepseek-flash"   # executor; set [agent].planner_model to add a planner
@@ -198,7 +202,8 @@ convenient.
 
 In `reasonix chat`, built-in commands (`/compact`, `/new`, `/clear`, `/rewind`,
 `/tree`, `/branch`, `/switch`, `/todo`, `/model`, `/mcp`, `/skills`, `/hooks`,
-`/memory`, `/output-style`, `/sandbox`, `/language`, `/auto-plan`, `/help`) run
+`/memory`, `/output-style`, `/sandbox`, `/language`, `/auto-plan`,
+`/reasoning-language`, `/help`) run
 locally — `/help` lists them all. `/new` starts a new session while saving the
 previous transcript for history/resume; `/clear` asks for confirmation, then
 discards the current context without saving it. `/tree` shows saved conversation
@@ -278,8 +283,11 @@ before editing or running side-effecting commands. `auto_plan_classifier` can
 name a cheap provider such as `deepseek-flash`; it is only called for borderline
 inputs and falls back to the heuristic if classification fails. Use
 `/auto-plan off|on` in `reasonix chat` to change the user-level setting, or
-`reasonix config auto-plan off|on` from a shell/script. Pass `--local` to the
-shell command only when you intentionally want a project-local override.
+`reasonix config auto-plan off|on` from a shell/script. The visible reasoning
+language uses the same shape: `/reasoning-language auto|zh|en` in chat, or
+`reasonix config reasoning-language auto|zh|en` in a shell/script. Pass
+`--local` to the shell command only when you intentionally want a project-local
+override.
 
 The why behind separate sessions (keeping each model's prefix cache-stable) is in
 [`SPEC.md` §3.5](./SPEC.md#35-two-model-collaboration-coordinator).

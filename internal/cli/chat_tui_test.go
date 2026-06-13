@@ -995,6 +995,55 @@ func TestAutoPlanCommandWritesUserConfigNotProjectConfig(t *testing.T) {
 	}
 }
 
+func TestReasoningLanguageCommandPersistsAndUpdatesController(t *testing.T) {
+	isolateUserConfig(t)
+
+	ctrl := control.New(control.Options{ReasoningLanguage: "auto"})
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+
+	m.runReasoningLanguageCommand("/reasoning-language zh")
+
+	body, err := os.ReadFile(config.UserConfigPath())
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	if !strings.Contains(string(body), `reasoning_language = "zh"`) {
+		t.Fatalf("saved config missing reasoning_language=zh:\n%s", body)
+	}
+	composed := ctrl.Compose("hello")
+	if !strings.HasPrefix(composed, "<reasoning-language>") || !strings.Contains(composed, "Simplified Chinese") {
+		t.Fatalf("/reasoning-language zh should affect current controller, got %q", composed)
+	}
+}
+
+func TestReasoningLanguageCommandWritesUserConfigNotProjectConfig(t *testing.T) {
+	isolateUserConfig(t)
+	projectPath := filepath.Join(mustGetwd(t), "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("[agent]\nreasoning_language = \"en\"\n"), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{ReasoningLanguage: "en"})
+	m.runReasoningLanguageCommand("/reasoning-language zh")
+
+	userBody, err := os.ReadFile(config.UserConfigPath())
+	if err != nil {
+		t.Fatalf("read user config: %v", err)
+	}
+	if !strings.Contains(string(userBody), `reasoning_language = "zh"`) {
+		t.Fatalf("user config missing reasoning_language=zh:\n%s", userBody)
+	}
+	projectBody, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatalf("read project config: %v", err)
+	}
+	if string(projectBody) != "[agent]\nreasoning_language = \"en\"\n" {
+		t.Fatalf("/reasoning-language should not rewrite project config:\n%s", projectBody)
+	}
+}
+
 func TestLanguageCommandSwitchesImmediatelyAndPersists(t *testing.T) {
 	isolateUserConfig(t)
 	i18n.DetectLanguage("en")

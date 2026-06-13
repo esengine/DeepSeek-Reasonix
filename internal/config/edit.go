@@ -789,6 +789,22 @@ auto_plan = %q
 	return cfg.Agent.AutoPlan, writeConfigFile(path, body)
 }
 
+// SaveMinimalProjectReasoningLanguage writes a new project config that only
+// overrides [agent].reasoning_language.
+func SaveMinimalProjectReasoningLanguage(path, lang string) (string, error) {
+	cfg := Default()
+	if err := cfg.SetReasoningLanguage(lang); err != nil {
+		return "", err
+	}
+	body := fmt.Sprintf(`# Reasonix project configuration.
+# Project-local overrides are merged over the user config.
+
+[agent]
+reasoning_language = %q
+`, cfg.ReasoningLanguage())
+	return cfg.ReasoningLanguage(), writeConfigFile(path, body)
+}
+
 func writeConfigFile(path, body string) error {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("save: empty config path")

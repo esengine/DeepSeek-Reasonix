@@ -175,6 +175,7 @@ type Messages struct {
 	CmdSandbox      string // /sandbox
 	CmdEffort       string // /effort
 	CmdAutoPlan     string // /auto-plan
+	CmdReasonLang   string // /reasoning-language
 	CmdHelp         string // /help
 	CmdTodo         string // /todo
 	CmdQuit         string // /quit (also accepts /exit as hidden alias)

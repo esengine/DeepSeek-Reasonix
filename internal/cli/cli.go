@@ -1711,6 +1711,8 @@ func configCommand(args []string) int {
 	switch args[0] {
 	case "auto-plan":
 		return configAutoPlanCommand(args[1:])
+	case "reasoning-language":
+		return configReasoningLanguageCommand(args[1:])
 	default:
 		configUsage()
 		return 2
@@ -1779,14 +1781,81 @@ func configAutoPlanCommand(args []string) int {
 	return 0
 }
 
+func configReasoningLanguageCommand(args []string) int {
+	fs := flag.NewFlagSet("config reasoning-language", flag.ContinueOnError)
+	local := fs.Bool("local", false, "write ./reasonix.toml instead of the user config")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	rest := fs.Args()
+	if len(rest) > 1 {
+		configReasoningLanguageUsage()
+		return 2
+	}
+	if len(rest) == 0 {
+		cfg, err := config.Load()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		fmt.Printf("reasoning_language = %q\n", cliReasoningLanguageMode(cfg.ReasoningLanguage()))
+		return 0
+	}
+	mode, err := parseCLIReasoningLanguage(rest[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	path := config.UserConfigPath()
+	if *local {
+		path = "reasonix.toml"
+	}
+	if path == "" {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "cannot resolve config path")
+		return 1
+	}
+	if *local {
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			lang, err := config.SaveMinimalProjectReasoningLanguage(path, mode)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+				return 1
+			}
+			fmt.Printf("reasoning_language = %q (%s)\n", lang, displayPath(path))
+			return 0
+		} else if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+	}
+	cfg := config.LoadForEdit(path)
+	if err := cfg.SetReasoningLanguage(mode); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 1
+	}
+	fmt.Printf("reasoning_language = %q (%s)\n", cfg.ReasoningLanguage(), displayPath(path))
+	return 0
+}
+
 func configUsage() {
 	fmt.Print(`Usage:
   reasonix config auto-plan [--local] [off|on]
+  reasonix config reasoning-language [--local] [auto|zh|en]
 `)
 }
 
 func configAutoPlanUsage() {
 	fmt.Print(`Usage:
   reasonix config auto-plan [--local] [off|on]
+`)
+}
+
+func configReasoningLanguageUsage() {
+	fmt.Print(`Usage:
+  reasonix config reasoning-language [--local] [auto|zh|en]
 `)
 }

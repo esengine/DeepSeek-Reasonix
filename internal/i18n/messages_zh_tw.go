@@ -174,6 +174,7 @@ var ChineseTraditional = Messages{
 	CmdSandbox:      "檢視沙箱狀態",
 	CmdEffort:       "設定推理強度",
 	CmdAutoPlan:     "設定自動計畫模式",
+	CmdReasonLang:   "設定可見思考語言",
 	CmdHelp:         "檢視命令列表",
 	CmdTodo:         "清除任務清單",
 	CmdQuit:         "退出會話",
@@ -319,6 +320,7 @@ var ChineseTraditional = Messages{
   reasonix acp [--model NAME]                           透過 stdio 提供 Agent Client Protocol（也可用：reasonix --acp）
   reasonix setup [path]                                 互動式設定精靈；生成 reasonix.toml（及 .env）
   reasonix config auto-plan [off|on]                    設定自動計畫模式
+  reasonix config reasoning-language [auto|zh|en]        設定可見思考語言
   reasonix mcp <add|remove|list>                        管理 reasonix.toml 裡的 MCP 伺服器
   reasonix doctor [--json]                              輸出脫敏的本機診斷資訊
   reasonix version

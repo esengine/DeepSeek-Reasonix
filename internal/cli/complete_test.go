@@ -452,6 +452,23 @@ func TestSlashArgCompletionAutoPlan(t *testing.T) {
 	}
 }
 
+func TestSlashArgCompletionReasoningLanguage(t *testing.T) {
+	m := newTestChatTUI()
+	m.input.SetValue("/reasoning-language ")
+	m.updateCompletion()
+	if !m.completion.active || m.completion.kind != compSlashArg {
+		t.Fatalf("/reasoning-language should open arg completion: %+v", m.completion)
+	}
+	for _, want := range []string{"auto", "zh", "en"} {
+		if !hasLabel(m.completion.items, want) {
+			t.Fatalf("/reasoning-language completion missing %q: %v", want, labels(m.completion.items))
+		}
+	}
+	if hasLabel(m.completion.items, "中文") {
+		t.Fatalf("/reasoning-language completion should expose only auto|zh|en: %v", labels(m.completion.items))
+	}
+}
+
 func labels(items []compItem) []string {
 	out := make([]string, len(items))
 	for i, it := range items {
