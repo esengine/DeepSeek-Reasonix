@@ -24,3 +24,38 @@ export function formatMoney(amount?: number, currency?: string, empty: "zero" | 
   }
   return `${symbol}${amount < 1 ? amount.toFixed(4) : amount.toFixed(2)}`;
 }
+
+interface MoneyFormatOptions {
+  locale?: string;
+  empty?: "zero" | "dash";
+}
+
+function isoCurrencyCode(currency?: string): string | null {
+  const value = (currency || "").trim();
+  if (!/^[a-z]{3}$/i.test(value)) return null;
+  const code = value.toUpperCase();
+  try {
+    new Intl.NumberFormat("en", { style: "currency", currency: code }).format(0);
+    return code;
+  } catch {
+    return null;
+  }
+}
+
+export function formatMoneyLocalized(amount?: number, currency?: string, options: MoneyFormatOptions = {}): string {
+  const empty = options.empty ?? "zero";
+  if (typeof amount !== "number" || amount <= 0) {
+    return empty === "dash" ? "-" : formatMoney(0, currency, empty);
+  }
+
+  const code = isoCurrencyCode(currency);
+  if (!code) return formatMoney(amount, currency, empty);
+
+  const digits = amount < 1 ? 4 : 2;
+  return new Intl.NumberFormat(options.locale, {
+    style: "currency",
+    currency: code,
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(amount);
+}

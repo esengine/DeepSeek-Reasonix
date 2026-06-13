@@ -276,6 +276,8 @@ export const zhTW: Record<DictKey, string> = {
   "status.jobs": "{n} 個執行中",
   "status.jobsTitle": "背景作業",
   "status.workspaceTitle": "當前工作區",
+  "status.sandboxTitle": "沙箱路徑",
+  "status.gitBranchTitle": "當前 Git 分支",
   "status.yolo": "YOLO",
   "status.yoloTitle": "YOLO —— 本會話正在跳過所有核准",
 
@@ -1147,6 +1149,8 @@ export const zhTW: Record<DictKey, string> = {
   "settings.statusBarItemsExpand": "展開資訊欄顯示項",
   "settings.statusBarItemsCollapse": "收起資訊欄顯示項",
   "settings.statusBarItem.model": "模型",
+  "settings.statusBarItem.workspace": "工作區",
+  "settings.statusBarItem.gitBranch": "Git 分支",
   "settings.statusBarItem.drag": "拖拽移動 {label}",
   "settings.statusBarItem.moveUp": "上移 {label}",
   "settings.statusBarItem.moveDown": "下移 {label}",

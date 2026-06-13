@@ -5226,6 +5226,30 @@ a[href] {
   white-space: nowrap;
   min-width: 0;
 }
+.statusbar__tooltip-stack {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+.statusbar__workspace,
+.statusbar__branch {
+  max-width: 170px;
+}
+.statusbar__workspace b,
+.statusbar__branch b {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.statusbar__workspace b {
+  color: var(--fg-dim);
+}
+.statusbar__branch b {
+  color: var(--accent-strong);
+}
 .statusbar__cache b {
   color: var(--accent-strong);
 }
@@ -18028,6 +18052,20 @@ a[href] {
   padding-bottom: 0;
 }
 
+@media (max-width: 1120px) {
+  .statusbar__workspace,
+  .statusbar__branch {
+    max-width: 120px;
+  }
+}
+
+@media (max-width: 940px) {
+  .statusbar__workspace,
+  .statusbar__branch {
+    max-width: 96px;
+  }
+}
+
 @media (max-width: 820px) {
   .statusbar__group--account,
   .statusbar__item[data-statusbar-item="cache_avg"],
@@ -18035,6 +18073,16 @@ a[href] {
   .statusbar__item[data-statusbar-item="turn_cost"],
   .statusbar__item[data-statusbar-item="cost"],
   .statusbar__item[data-statusbar-item="balance"] {
+    display: none;
+  }
+
+  .statusbar__workspace,
+  .statusbar__branch {
+    max-width: none;
+  }
+
+  .statusbar__workspace b,
+  .statusbar__branch b {
     display: none;
   }
 
@@ -18060,6 +18108,13 @@ a[href] {
     opacity: 0;
     pointer-events: none;
     transform: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .statusbar__item[data-statusbar-item="workspace"],
+  .statusbar__item[data-statusbar-item="git_branch"] {
+    display: none;
   }
 }
 

@@ -415,6 +415,8 @@ export const zh: Record<DictKey, string> = {
   "status.jobsTitle": "后台作业",
   "status.modelTitle": "当前模型",
   "status.workspaceTitle": "当前工作区",
+  "status.sandboxTitle": "沙箱路径",
+  "status.gitBranchTitle": "当前 Git 分支",
   "status.yolo": "YOLO",
   "status.yoloTitle": "YOLO —— 正在跳过工具批准；ask 与计划确认仍会等待",
 
@@ -705,6 +707,8 @@ export const zh: Record<DictKey, string> = {
   "settings.statusBarItemsExpand": "展开信息栏显示项",
   "settings.statusBarItemsCollapse": "收起信息栏显示项",
   "settings.statusBarItem.model": "模型",
+  "settings.statusBarItem.workspace": "工作区",
+  "settings.statusBarItem.gitBranch": "Git 分支",
   "settings.statusBarItem.drag": "拖拽移动 {label}",
   "settings.statusBarItem.moveUp": "上移 {label}",
   "settings.statusBarItem.moveDown": "下移 {label}",

@@ -414,6 +414,8 @@ export const en = {
   "status.jobsTitle": "Background jobs",
   "status.modelTitle": "Current model",
   "status.workspaceTitle": "Current workspace",
+  "status.sandboxTitle": "Sandbox path",
+  "status.gitBranchTitle": "Current Git branch",
   "status.yolo": "YOLO",
   "status.yoloTitle": "YOLO — tool approvals are being skipped; ask and plan decisions still wait",
 
@@ -703,6 +705,8 @@ export const en = {
   "settings.statusBarItemsExpand": "Expand status bar items",
   "settings.statusBarItemsCollapse": "Collapse status bar items",
   "settings.statusBarItem.model": "Model",
+  "settings.statusBarItem.workspace": "Workspace",
+  "settings.statusBarItem.gitBranch": "Git branch",
   "settings.statusBarItem.drag": "Drag to move {label}",
   "settings.statusBarItem.moveUp": "Move {label} up",
   "settings.statusBarItem.moveDown": "Move {label} down",

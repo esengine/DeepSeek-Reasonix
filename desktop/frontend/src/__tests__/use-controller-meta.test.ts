@@ -22,6 +22,10 @@ function meta(overrides: Partial<Meta> = {}): Meta {
     ready: true,
     eventChannel: "events",
     cwd: "/repo",
+    workspaceRoot: "/repo",
+    workspaceName: "repo",
+    workspacePath: "/repo",
+    gitBranch: "main",
     autoApproveTools: false,
     bypass: false,
     collaborationMode: "normal",
@@ -38,6 +42,8 @@ console.log("\nuse controller meta");
 {
   eq(sameMeta(meta(), meta()), true, "identical meta is unchanged");
   eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "plan" })), false, "collaboration mode changes invalidate meta equality");
+  eq(sameMeta(meta({ workspacePath: "/repo" }), meta({ workspacePath: "/other" })), false, "workspace path changes invalidate meta equality");
+  eq(sameMeta(meta({ gitBranch: "main" }), meta({ gitBranch: "feature" })), false, "git branch changes invalidate meta equality");
 }
 
 {

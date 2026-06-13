@@ -1464,6 +1464,13 @@ func workspaceName(path string) string {
 	return name
 }
 
+func tabWorkspaceName(tab *WorkspaceTab, cwd string) string {
+	if tab.Scope == "global" {
+		return globalProjectTitle()
+	}
+	return workspaceName(cwd)
+}
+
 func (a *App) SwitchWorkspace(dir string) (string, error) {
 	if dir == "" {
 		home, err := os.UserHomeDir()
@@ -1832,6 +1839,10 @@ type Meta struct {
 	StartupErr        string `json:"startupErr,omitempty"`
 	EventChannel      string `json:"eventChannel"`
 	Cwd               string `json:"cwd"`
+	WorkspaceRoot     string `json:"workspaceRoot,omitempty"`
+	WorkspaceName     string `json:"workspaceName,omitempty"`
+	WorkspacePath     string `json:"workspacePath,omitempty"`
+	GitBranch         string `json:"gitBranch,omitempty"`
 	AutoApproveTools  bool   `json:"autoApproveTools"`
 	Bypass            bool   `json:"bypass"` // legacy JSON key for YOLO/full-access tool auto-approval
 	CollaborationMode string `json:"collaborationMode"`
@@ -1869,6 +1880,10 @@ func (a *App) MetaForTab(tabID string) Meta {
 		StartupErr:        tab.StartupErr,
 		EventChannel:      eventChannel,
 		Cwd:               cwd,
+		WorkspaceRoot:     cwd,
+		WorkspaceName:     tabWorkspaceName(tab, cwd),
+		WorkspacePath:     cwd,
+		GitBranch:         workspaceGitBranch(cwd),
 		AutoApproveTools:  autoApproveTools,
 		Bypass:            autoApproveTools,
 		CollaborationMode: collaborationMode,

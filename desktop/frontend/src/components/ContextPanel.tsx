@@ -4,8 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { FileText } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
-import { useT, type Translator } from "../lib/i18n";
-import { formatMoney } from "../lib/money";
+import { useI18n, type Translator } from "../lib/i18n";
+import { formatMoneyLocalized } from "../lib/money";
 import type { DictKey } from "../locales/en";
 import type { ContextInfo, ContextPanelInfo, WireUsage } from "../lib/types";
 
@@ -179,7 +179,7 @@ export function ContextPanel({
   onOpenWorkspaceChangeList,
   onOpenWorkspaceChangeFile,
 }: ContextPanelProps) {
-  const t = useT();
+  const { locale, t } = useI18n();
   const [info, setInfo] = useState<ContextPanelInfo | null>(null);
 
   const refresh = useCallback(async () => {
@@ -298,7 +298,7 @@ export function ContextPanel({
             <SectionHeading title={t("context.costMetrics")} />
             <div className="context-panel__stats">
               <MetricCard label={t("context.cacheHit")} value={cachePct > 0 ? `${cachePct}%` : "-"} tone="accent" />
-              <MetricCard label={t("context.sessionCost")} value={formatMoney(cost.amount, cost.currency, "dash")} />
+              <MetricCard label={t("context.sessionCost")} value={formatMoneyLocalized(cost.amount, cost.currency, { locale, empty: "dash" })} />
             </div>
           </section>
           <section className="context-panel__section context-panel__section--status">
