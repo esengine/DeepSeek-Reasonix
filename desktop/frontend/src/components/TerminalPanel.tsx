@@ -116,11 +116,6 @@ export function TerminalPanel({ active, openPathRequest }: { active: boolean; op
       }
       const next = prev.filter((t) => t.id !== tabID);
       if (next.length === 0) {
-        app.StartTerminal().then((result) => {
-          if (result && !result.startsWith("failed:")) {
-            createTab("Terminal", result).catch(() => {});
-          }
-        });
         setActiveTabID(null);
       } else if (activeIDRef.current === tabID) {
         const idx = prev.findIndex((t) => t.id === tabID);
@@ -129,7 +124,21 @@ export function TerminalPanel({ active, openPathRequest }: { active: boolean; op
       }
       return next;
     });
-  }, [createTab]);
+  }, []);
+
+  // Auto-restart when all tabs are closed.
+  useEffect(() => {
+    if (tabs.length === 0 && activeTabID === null) {
+      const timer = setTimeout(() => {
+        app.StartTerminal().then((result) => {
+          if (result && !result.startsWith("failed:")) {
+            createTab("Terminal", result).catch(() => {});
+          }
+        }).catch(() => {});
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [tabs.length, activeTabID, createTab]);
 
   // Search
   const toggleSearch = useCallback(() => {
