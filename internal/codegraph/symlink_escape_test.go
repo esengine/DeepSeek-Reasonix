@@ -21,6 +21,14 @@ func tarGzWithSymlink(link, dest string) []byte {
 	return buf.Bytes()
 }
 
+func tarGzWithExistingSymlinkTarget(link, dest string) []byte {
+	cleanDest := filepath.Clean(dest)
+	return tarGz(
+		&tar.Header{Name: cleanDest, Typeflag: tar.TypeReg, Mode: 0o644},
+		&tar.Header{Name: link, Typeflag: tar.TypeSymlink, Linkname: dest, Mode: 0o777},
+	)
+}
+
 // TestExtractRejectsEscapingSymlink proves a symlink pointing outside the
 // extraction dir is refused — otherwise a later entry written through it escapes
 // (tar-slip via symlink), letting a malicious third-party release plant files
@@ -84,8 +92,16 @@ func TestExtractAllowsInternalSymlink(t *testing.T) {
 	}
 	_ = os.Remove(probe)
 	for _, dest := range []string{"bin/codegraph", "./node", "sub/dir/../tool"} {
-		if err := extractTarGz(tarGzWithSymlink("link", dest), dir); err != nil {
+		if err := extractTarGz(tarGzWithExistingSymlinkTarget("link", dest), dir); err != nil {
 			t.Errorf("internal symlink -> %q should be allowed, got %v", dest, err)
 		}
+	}
+}
+
+func TestExtractRejectsDanglingSymlink(t *testing.T) {
+	dir := t.TempDir()
+	err := extractTarGz(tarGzWithSymlink("link", "missing-target"), dir)
+	if err == nil || !strings.Contains(err.Error(), "unsafe symlink") {
+		t.Fatalf("dangling symlink should be rejected, got %v", err)
 	}
 }

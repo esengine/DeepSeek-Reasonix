@@ -464,6 +464,33 @@ func TestDetectRefsUsesWorkspaceRootNotProcessCWD(t *testing.T) {
 	}
 }
 
+func TestResolveRefsWithWorkspaceRootStoresRelativePath(t *testing.T) {
+	workspace := t.TempDir()
+	absPath := filepath.Join(workspace, "docs", "note.txt")
+	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(absPath, []byte("workspace note"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Controller{cpRoot: workspace}
+	refs := c.detectRefs("see @" + absPath)
+	if len(refs) != 1 {
+		t.Fatalf("detectRefs absolute workspace path = %+v, want 1 ref", refs)
+	}
+	if refs[0].path != "docs/note.txt" {
+		t.Fatalf("ref path = %q, want workspace-relative path", refs[0].path)
+	}
+	block, errs := c.ResolveRefs(context.Background(), "see @"+absPath)
+	if len(errs) != 0 {
+		t.Fatalf("ResolveRefs errors = %v", errs)
+	}
+	if !strings.Contains(block, `<file path="docs/note.txt">`) || !strings.Contains(block, "workspace note") {
+		t.Fatalf("ResolveRefs block did not use relative workspace path:\n%s", block)
+	}
+}
+
 func TestReadFileRefPDFExtractionWithBaseDirUsesAbsPath(t *testing.T) {
 	base := t.TempDir()
 	pdfPath := filepath.Join(base, "docs", "report.pdf")

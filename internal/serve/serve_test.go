@@ -114,6 +114,28 @@ func TestServeEndpoints(t *testing.T) {
 	}
 }
 
+func TestServeSubmitRejectsShellShortcut(t *testing.T) {
+	bc := NewBroadcaster()
+	got := make(chan string, 1)
+	ctrl := control.New(control.Options{Runner: fakeRunner{got: got}, Sink: bc})
+	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/submit", "application/json", strings.NewReader(`{"input":"!echo nope"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("shell submit status = %d, want 403", resp.StatusCode)
+	}
+	select {
+	case in := <-got:
+		t.Fatalf("runner should not run shell submit, got %q", in)
+	default:
+	}
+}
+
 func TestHistoryMessagesPreserveToolDetails(t *testing.T) {
 	got := historyMessages([]provider.Message{
 		{Role: provider.RoleUser, Content: "run command"},
@@ -309,6 +331,50 @@ func TestServeIndexPagePassesLanguagePreferenceToClient(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "const __LANG_PREF = 'en';") {
 		t.Fatalf("pinned desktop language was not passed through:\n%s", string(body))
+	}
+}
+
+func TestResumeRequiresSessionPathInsideSessionDir(t *testing.T) {
+	dir := t.TempDir()
+	active := filepath.Join(dir, "active.jsonl")
+	inside := filepath.Join(dir, "inside.jsonl")
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "outside.jsonl")
+	for _, path := range []string{active, inside, outside} {
+		if err := os.WriteFile(path, []byte(`{"role":"user","content":"hi"}`+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc, SessionDir: dir, SessionPath: active})
+	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	defer srv.Close()
+
+	post := func(path string) int {
+		body, err := json.Marshal(map[string]string{"path": path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.Post(srv.URL+"/resume", "application/json", strings.NewReader(string(body)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := post(outside); got != http.StatusForbidden {
+		t.Fatalf("outside resume status = %d, want 403", got)
+	}
+	if got := post(inside); got != http.StatusNoContent {
+		t.Fatalf("inside resume status = %d, want 204", got)
+	}
+	want, err := filepath.EvalSymlinks(inside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := filepath.Clean(ctrl.SessionPath()); got != filepath.Clean(want) {
+		t.Fatalf("session path = %q, want %q", got, want)
 	}
 }
 

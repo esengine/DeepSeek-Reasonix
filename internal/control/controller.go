@@ -759,6 +759,13 @@ func (c *Controller) Submit(input string) {
 	c.submit(input, "")
 }
 
+// SubmitHTTP accepts input from the unauthenticated localhost HTTP frontend. It
+// deliberately omits the trusted TUI-only "!cmd" shell shortcut and resolves file
+// references only through the controller's workspace root.
+func (c *Controller) SubmitHTTP(input string) {
+	c.submitHTTP(input, "")
+}
+
 // SubmitDisplay runs input as a turn while remembering the user-facing display
 // text for transcript replay when controller-side composition expands input.
 func (c *Controller) SubmitDisplay(display, input string) {
@@ -781,6 +788,36 @@ func (c *Controller) submit(input, display string) {
 	if strings.HasPrefix(trimmed, "!") {
 		c.RunShell(trimmed[1:])
 		return
+	}
+	c.submitCommandOrTurn(trimmed, input, display, false)
+}
+
+func (c *Controller) submitHTTP(input, display string) {
+	trimmed := strings.TrimSpace(input)
+	if note, ok := MemoryQuickAddNote(trimmed); ok {
+		c.rememberProjectNote(note)
+		return
+	}
+	if note, ok := RememberCommandNote(trimmed); ok {
+		c.rememberProjectNote(note)
+		return
+	}
+	if c.applyGoalCommand(trimmed, display) {
+		return
+	}
+	if strings.HasPrefix(trimmed, "!") {
+		c.notice("shell commands are unavailable from this frontend")
+		return
+	}
+	c.submitCommandOrTurn(trimmed, input, display, true)
+}
+
+func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedRefsOnly bool) {
+	runRefTurn := c.runRefTurn
+	runRefTurnWithRefs := c.runRefTurnWithRefs
+	if scopedRefsOnly {
+		runRefTurn = c.runScopedRefTurn
+		runRefTurnWithRefs = c.runScopedRefTurnWithRefs
 	}
 	switch {
 	case trimmed == "/compact" || strings.HasPrefix(trimmed, "/compact "):
@@ -826,18 +863,18 @@ func (c *Controller) submit(input, display string) {
 	case strings.HasPrefix(trimmed, "//"):
 		// Double-slash — not a command. Common in code snippets (JS
 		// comments, file:// URLs). Run as a normal turn.
-		c.runRefTurn(input, display)
+		runRefTurn(input, display)
 	case strings.HasPrefix(trimmed, "/"):
 		if ref, ok := FileRefLine(trimmed); ok {
-			c.runRefTurn(ref, display)
+			runRefTurn(ref, display)
 			return
 		}
 		if ref, ok := SlashPathLineRef(trimmed, c.cpRoot); ok {
-			c.runRefTurnWithRefs(input, ref, display)
+			runRefTurnWithRefs(input, ref, display)
 			return
 		}
 		if SlashPathLikeLine(trimmed) {
-			c.runRefTurn(input, display)
+			runRefTurn(input, display)
 			return
 		}
 		// Read-only management verbs (/model /memory /skills /hooks /mcp) emit a
@@ -899,7 +936,7 @@ func (c *Controller) submit(input, display string) {
 		}
 		c.notice("unknown command: " + trimmed)
 	default:
-		c.runRefTurn(input, display)
+		runRefTurn(input, display)
 	}
 }
 
@@ -1053,12 +1090,24 @@ func (c *Controller) runRefTurn(input, display string) {
 	c.runRefTurnWithRefs(input, input, display)
 }
 
+func (c *Controller) runScopedRefTurn(input, display string) {
+	c.runScopedRefTurnWithRefs(input, input, display)
+}
+
 // runRefTurnWithRefs resolves references from refLine while preserving input as
 // the user's actual prompt text. This lets compiler diagnostics such as
 // "/path/File.kt:12: error" attach @/path/File.kt without rewriting the error.
 func (c *Controller) runRefTurnWithRefs(input, refLine, display string) {
+	c.runRefTurnWithResolver(input, refLine, display, c.ResolveRefs)
+}
+
+func (c *Controller) runScopedRefTurnWithRefs(input, refLine, display string) {
+	c.runRefTurnWithResolver(input, refLine, display, c.ResolveScopedRefs)
+}
+
+func (c *Controller) runRefTurnWithResolver(input, refLine, display string, resolve func(context.Context, string) (string, []string)) {
 	c.runGuarded(func(ctx context.Context) error {
-		block, errs := c.ResolveRefs(ctx, refLine)
+		block, errs := resolve(ctx, refLine)
 		for _, e := range errs {
 			c.notice(e)
 		}

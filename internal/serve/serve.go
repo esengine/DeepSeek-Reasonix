@@ -356,6 +356,10 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	trimmed := strings.TrimSpace(body.Input)
+	if strings.HasPrefix(trimmed, "!") {
+		http.Error(w, "shell commands are unavailable over HTTP", http.StatusForbidden)
+		return
+	}
 	// Intercept /model <ref> for runtime model switching (the controller's
 	// Submit path only lists models — switching is frontend-specific).
 	if strings.HasPrefix(trimmed, "/model ") {
@@ -381,7 +385,7 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.ctl().Submit(body.Input)
+	s.ctl().SubmitHTTP(body.Input)
 	w.WriteHeader(http.StatusAccepted)
 }
 
@@ -709,16 +713,45 @@ func (s *Server) resume(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing path", http.StatusBadRequest)
 		return
 	}
+	dir := s.ctl().SessionDir()
+	if dir == "" {
+		http.Error(w, "sessions disabled", http.StatusBadRequest)
+		return
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		http.Error(w, "invalid session dir", http.StatusBadRequest)
+		return
+	}
+	realDir, err := filepath.EvalSymlinks(absDir)
+	if err != nil {
+		http.Error(w, "invalid session dir", http.StatusBadRequest)
+		return
+	}
+	absPath, err := filepath.Abs(strings.TrimSpace(body.Path))
+	if err != nil || filepath.Ext(absPath) != ".jsonl" {
+		http.Error(w, "invalid session path", http.StatusBadRequest)
+		return
+	}
+	realPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		http.Error(w, "invalid session path", http.StatusBadRequest)
+		return
+	}
+	if realPath == realDir || !strings.HasPrefix(realPath, realDir+string(os.PathSeparator)) {
+		http.Error(w, "path outside session dir", http.StatusForbidden)
+		return
+	}
 	// Snapshot the current session before switching away.
 	if err := s.ctl().Snapshot(); err != nil {
 		slog.Warn("serve: snapshot before resume", "err", err)
 	}
-	loaded, err := agent.LoadSession(body.Path)
+	loaded, err := agent.LoadSession(realPath)
 	if err != nil {
 		http.Error(w, "load session: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.ctl().Resume(loaded, body.Path)
+	s.ctl().Resume(loaded, realPath)
 	w.WriteHeader(http.StatusNoContent)
 }
 
