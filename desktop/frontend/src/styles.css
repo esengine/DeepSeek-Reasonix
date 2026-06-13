@@ -17175,8 +17175,7 @@ a[href] {
   --button-radius: 7px;
   --radius: 8px;
   --maxw: 920px;
-  --sans: -apple-system, "SF Pro Text", "PingFang SC", "Noto Sans SC",
-    "Microsoft YaHei", BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --sans: var(--font-ui);
 }
 
 :root[data-theme="light"] {

@@ -78,6 +78,7 @@ eq(
   JSON.stringify(["small", "default", "large", "xlarge", "xxlarge"]),
   "text-size presets include the large accessibility step",
 );
+eq(finalDeclaration(":root", "--sans"), "var(--font-ui)", "legacy sans alias stays synced with UI font");
 eq(finalDeclaration(':root[data-text-size="xxlarge"]', "--font-scale"), "1.32", "xxlarge has a real scale bump");
 ok(
   (finalDeclaration(":root", "--statusbar-dock-height") ?? "").includes("var(--font-scale)"),
