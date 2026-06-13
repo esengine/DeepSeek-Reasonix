@@ -2573,11 +2573,14 @@ export default function App() {
             <div className="topicbar__actions">
               {!sidebarImDetailConnection && (
               <>
-              <CopyButton
-                getText={getSessionMarkdown}
-                label={t("topicBar.copyAll")}
-                className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"
-              />
+              <Tooltip label={t("topicBar.copyAll")}>
+                <CopyButton
+                  getText={getSessionMarkdown}
+                  label={t("topicBar.copyAll")}
+                  className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"
+                  showInlineLabel={false}
+                />
+              </Tooltip>
               <div className={`topicbar__export${topicExportOpen ? " topicbar__export--open" : ""}`}>
                 <Tooltip label={t("topicBar.export")}>
                   <button
