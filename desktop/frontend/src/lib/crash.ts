@@ -300,18 +300,31 @@ export function formatPerformanceContext(snapshot: PerformanceSnapshot): string 
   return lines.join("\n");
 }
 
+export function performanceLabelForReason(reason: string): string {
+  const normalized = reason.trim().toLowerCase();
+  if (normalized.startsWith("event loop lag")) return "performance.lag";
+  if (normalized.startsWith("long task")) return "performance.longtask";
+  if (normalized.startsWith("js heap")) return "performance.heap";
+  return "performance.pressure";
+}
+
+export function shouldRecordLongTaskSample(startMs: number, durationMs: number, graceUntilMs: number): boolean {
+  return durationMs >= 50 && startMs >= graceUntilMs;
+}
+
 export function buildPerformancePayload(snapshot: PerformanceSnapshot): CrashPayload {
   const buildCommit = typeof __BUILD_COMMIT__ === "string" ? __BUILD_COMMIT__ : "dev";
   const context = formatPerformanceContext(snapshot);
   const crumbs = dumpBreadcrumbs();
+  const label = performanceLabelForReason(snapshot.reason);
   const errorMessage = "UI responsiveness degraded because the app observed long tasks, event-loop lag, or high JS heap pressure.";
   return {
     schemaVersion: 2,
     source: "frontend.performance",
     kind: "performance",
-    label: "performance.pressure",
+    label,
     message: [
-      "[performance.pressure]",
+      `[${label}]`,
       errorMessage,
       `--- performance context ---\n${context}`,
       crumbs && `--- breadcrumbs ---\n${crumbs}`,
@@ -468,8 +481,9 @@ export function installPerformancePressureMonitor() {
   if (!window.runtime) return;
   performanceMonitorInstalled = true;
   const startedAt = performance.now();
+  const graceUntil = startedAt + STARTUP_GRACE_MS;
 
-  const pastGrace = () => performance.now() - startedAt >= STARTUP_GRACE_MS;
+  const pastGrace = () => performance.now() >= graceUntil;
   const inspectLongTasks = () => {
     if (!pastGrace()) return;
     const summary = longTaskSummary();
@@ -483,7 +497,7 @@ export function installPerformancePressureMonitor() {
     try {
       const observer = new PerformanceObserver((list) => {
         for (const entry of list.getEntries()) {
-          if (entry.duration < 50) continue;
+          if (!shouldRecordLongTaskSample(entry.startTime, entry.duration, graceUntil)) continue;
           longTasks.push({ startMs: Math.round(entry.startTime), durationMs: Math.round(entry.duration) });
         }
         pruneLongTasks();
@@ -500,9 +514,9 @@ export function installPerformancePressureMonitor() {
     const now = performance.now();
     const lagMs = Math.max(0, now - expected);
     expected = now + 1000;
+    if (!pastGrace()) return;
     lagSamples.push(lagMs);
     if (lagSamples.length > MAX_LAG_SAMPLES) lagSamples.shift();
-    if (!pastGrace()) return;
     if (lagMs >= EVENT_LOOP_LAG_PROMPT_MS) promptPerformanceReport(`event loop lag ${fmtNumber(lagMs)}ms`, lagMs);
     maybePromptForHeapPressure();
   }, 1000);

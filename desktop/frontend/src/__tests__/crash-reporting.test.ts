@@ -5,6 +5,8 @@ import {
   buildPerformancePayload,
   formatPerformanceContext,
   normalizeCrashError,
+  performanceLabelForReason,
+  shouldRecordLongTaskSample,
   topFrameFromStack,
   type PerformanceSnapshot,
 } from "../lib/crash";
@@ -60,10 +62,17 @@ const perf: PerformanceSnapshot = {
 const perfPayload = buildPerformancePayload(perf);
 eq(perfPayload.kind, "performance", "performance pressure reports use performance kind");
 eq(perfPayload.source, "frontend.performance", "performance pressure reports identify source");
+eq(perfPayload.label, "performance.lag", "performance pressure reports partition by stable pressure label");
 eq(perfPayload.errorType, "PerformancePressure", "performance pressure reports use a stable error type");
 eq(perfPayload.errorMessage.includes("1300"), false, "performance fingerprint message avoids dynamic durations");
+eq(perfPayload.label.includes("1300"), false, "performance fingerprint label avoids dynamic durations");
 eq(formatPerformanceContext(perf).includes("long tasks: 3"), true, "formats long task context");
 eq(perfPayload.message.includes("event loop lag 1300ms"), true, "payload message keeps lag context");
+eq(performanceLabelForReason("long task 900ms"), "performance.longtask", "labels long task pressure");
+eq(performanceLabelForReason("js heap 87% of limit"), "performance.heap", "labels heap pressure");
+eq(shouldRecordLongTaskSample(14_000, 900, 15_000), false, "ignores startup long tasks before grace ends");
+eq(shouldRecordLongTaskSample(16_000, 40, 15_000), false, "ignores short long-task observer entries");
+eq(shouldRecordLongTaskSample(16_000, 900, 15_000), true, "records post-grace long tasks");
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);
