@@ -53,6 +53,7 @@ type Config struct {
 	Network       NetworkConfig       `toml:"network"`
 	Plugins       []PluginEntry       `toml:"plugins"`
 	Skills        SkillsConfig        `toml:"skills"`
+	Orchestrator  OrchestratorConfig  `toml:"orchestrator"`
 	Codegraph     CodegraphConfig     `toml:"codegraph"`
 	Statusline    StatuslineConfig    `toml:"statusline"`
 	LSP           LSPConfig           `toml:"lsp"`
@@ -386,6 +387,41 @@ func (c *Config) IsSkillDisabled(name string) bool {
 	return false
 }
 
+// OrchestratorConfig configures multi-agent orchestration. Each agent entry
+// spawns an independent controller with its own model, tool registry, and session.
+type OrchestratorConfig struct {
+	Agents []OrchestratorAgentEntry `toml:"agents"`
+}
+
+// OrchestratorAgentEntry defines one managed agent in the orchestrator team.
+type OrchestratorAgentEntry struct {
+	Name            string   `toml:"name"`
+	Model           string   `toml:"model"`
+	Ref             string   `toml:"ref"`
+	Skills          []string `toml:"skills"`
+	SkipSkills      []string `toml:"skip_skills"`
+	Paths           []string `toml:"paths"`
+	SystemPrompt    string   `toml:"system_prompt"`
+	SystemPromptFile string  `toml:"system_prompt_file"`
+	Persist         bool     `toml:"persist"`
+	Ephemeral       bool     `toml:"ephemeral"`
+	Verbose         bool     `toml:"verbose"`
+	Tools           []string `toml:"tools"`
+}
+
+// ResolveSystemPrompt returns the entry's system prompt, reading system_prompt_file if set.
+// Returns empty string when neither is set — the caller falls back to the global prompt.
+func (e *OrchestratorAgentEntry) ResolveSystemPrompt() (string, error) {
+	if e.SystemPromptFile != "" {
+		b, err := os.ReadFile(e.SystemPromptFile)
+		if err != nil {
+			return "", fmt.Errorf("orchestrator agent %q system_prompt_file: %w", e.Name, err)
+		}
+		return strings.TrimSpace(string(b)), nil
+	}
+	return strings.TrimSpace(e.SystemPrompt), nil
+}
+
 // SandboxConfig bounds the blast radius of tool calls (Phase 0: file-writer
 // confinement). WorkspaceRoot is the directory the built-in file writers
 // (write_file / edit_file / multi_edit) may modify; empty means the current
@@ -694,6 +730,13 @@ type PluginEntry struct {
 	// Empty defaults to "background" so enabled MCPs connect automatically
 	// without blocking chat. Unknown non-empty values fall back to "lazy".
 	Tier string `toml:"tier"`
+	// Agents constrains this MCP server to only the named orchestrator agents.
+	// When empty (nil or []), the plugin is loaded for every controller (main
+	// agent + all orchestrator children). When non-empty, it loads only for
+	// controllers whose AgentName matches one of these entries. The main
+	// controller's AgentName is "" so it never matches a non-empty list — this
+	// is how you keep an MCP server away from the main agent.
+	Agents []string `toml:"agents"`
 }
 
 func (e PluginEntry) ShouldAutoStart() bool {

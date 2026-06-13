@@ -143,6 +143,25 @@ func SplitMCPName(name string) (server, tool string, ok bool) {
 	return parts[0], parts[1], true
 }
 
+// Remove unregisters a single tool by name. Returns false when the tool is not
+// present (no-op).
+func (r *Registry) Remove(name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.tools[name]; !ok {
+		return false
+	}
+	delete(r.tools, name)
+	delete(r.canon, name)
+	for i, n := range r.order {
+		if n == name {
+			r.order = append(r.order[:i], r.order[i+1:]...)
+			break
+		}
+	}
+	return true
+}
+
 // RemovePrefix unregisters every tool whose name starts with prefix — used to
 // drop an MCP server's "mcp__<server>__" namespace when it's disconnected — and
 // returns the count removed.

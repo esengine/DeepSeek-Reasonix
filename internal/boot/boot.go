@@ -76,6 +76,25 @@ type Options struct {
 	// (for example ACP session/new). They are connected eagerly for this
 	// controller but are not persisted to reasonix.toml.
 	ExtraPlugins []plugin.Spec
+	// SystemPrompt overrides the default base system prompt for this controller.
+	// When non-empty, it replaces cfg.ResolveSystemPrompt() before output style,
+	// language policy, memory, and skills are composed on top (Option 1 semantics).
+	// Designed for orchestrator child agents that need a different role/behavior
+	// while still inheriting REASONIX.md, skills index, etc.
+	SystemPrompt string
+	// ToolDenylist removes named tools from the registry after all built-ins,
+	// plugins, and skills are registered. Used to prevent managed agents from
+	// exposing orchestrator meta-tools or other unwanted capabilities.
+	ToolDenylist []string
+	// AgentName identifies the controller being built. Empty means the main
+	// agent; non-empty means an orchestrator child agent. When set, plugins
+	// with a non-empty Agents list are loaded only if this name appears in it.
+	// Plugins with an empty Agents list are always loaded (backward compatible).
+	AgentName string
+	// SkipCodegraph disables codegraph installation and plugin loading for this
+	// controller. Used for orchestrator child agents to avoid N concurrent
+	// downloads/installs when the main controller already handles it.
+	SkipCodegraph bool
 }
 
 // Build loads config, resolves the model(s), and returns a Controller wrapping a
@@ -151,9 +170,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		return nil, err
 	}
 
-	sysPrompt, err := cfg.ResolveSystemPrompt()
-	if err != nil {
-		return nil, err
+	var sysPrompt string
+	if opts.SystemPrompt != "" {
+		sysPrompt = opts.SystemPrompt
+	} else {
+		sysPrompt, err = cfg.ResolveSystemPrompt()
+		if err != nil {
+			return nil, err
+		}
 	}
 	// Output style: fold the selected persona/tone block into the base prompt
 	// before language/memory/skills append, so a "replace" style (keep-coding
@@ -209,6 +233,24 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// session starts immediately while enabled MCP servers warm up.
 	eagerEntries, lazyEntries, bgEntries := partitionByTier(cfg.AutoStartPlugins())
 
+	// Agent-scoped plugins: build a visibility map so all plugins are started
+	// on the host but their tools are only registered for matching agents.
+	// The main controller (AgentName "") never sees agent-scoped plugin tools.
+	// Plugins with an empty Agents list are visible to all agents.
+	agentAllowedPlugins := make(map[string]bool)
+	for _, e := range cfg.AutoStartPlugins() {
+		if len(e.Agents) == 0 {
+			agentAllowedPlugins[e.Name] = true
+		} else if opts.AgentName != "" {
+			for _, a := range e.Agents {
+				if a == opts.AgentName {
+					agentAllowedPlugins[e.Name] = true
+					break
+				}
+			}
+		}
+	}
+
 	// Auto-demote: any eager plugin that has been chronically slow (recent
 	// samples repeatedly hit the blocking startup budget) drops to lazy
 	// for this session. The user keeps eager intent, just doesn't pay for it
@@ -242,7 +284,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	//
 	// CodeGraph is fixed to background startup. Legacy tier values are ignored so
 	// enabling it never blocks chat startup.
-	if cfg.Codegraph.Enabled {
+	// Orchestrator child agents skip codegraph — the main controller handles it.
+	if cfg.Codegraph.Enabled && !opts.SkipCodegraph {
 		bin, ok := codegraph.Resolve(cfg.Codegraph.Path)
 		switch {
 		case ok:
@@ -308,7 +351,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		host, ptools := plugin.StartAvailable(ctx, eagerSpecs)
 		pluginHost = host
 		for _, t := range ptools {
-			reg.Add(t)
+			if pluginToolAllowed(t.Name(), agentAllowedPlugins) {
+				reg.Add(t)
+			}
 		}
 		// PhaseB (prompts + resources) runs on the boot ctx — which is the
 		// controller's session-scoped PluginCtx — so the auxiliary surfaces
@@ -325,6 +370,16 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// and Close see one cohesive set of servers regardless of tier.
 	registerDeferred := func(specs []plugin.Spec, kick bool) {
 		for _, s := range specs {
+			if !agentAllowedPlugins[s.Name] {
+				if kick {
+					go func(spec plugin.Spec) {
+						if _, err := pluginHost.Add(context.WithoutCancel(ctx), spec); err != nil {
+							pluginHost.RecordFailure(spec, err)
+						}
+					}(s)
+				}
+				continue
+			}
 			cs, _ := plugin.LoadCachedSchema(s.Name, plugin.SpecFingerprint(s))
 			for _, t := range plugin.LazyToolset(s, cs, pluginHost, reg, ctx, kick) {
 				reg.Add(t)
@@ -629,6 +684,10 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			return nil, fmt.Errorf("auto_plan_classifier %q: %w", cm, err)
 		}
 		classifier = control.NewProviderAutoPlanClassifier(classifierProv)
+	}
+
+	for _, name := range opts.ToolDenylist {
+		reg.Remove(name)
 	}
 
 	ctrlOpts := control.Options{
@@ -938,6 +997,19 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 			reg.Add(t)
 		}
 	}
+}
+
+// pluginToolAllowed checks whether a namespaced MCP tool name belongs to an
+// allowed plugin. It matches the tool's "mcp__<server>__<tool>" prefix against
+// each plugin's ToolPrefix. The caller supplies the set of plugin names that are
+// visible to the current agent.
+func pluginToolAllowed(toolName string, allowedPlugins map[string]bool) bool {
+	for name := range allowedPlugins {
+		if strings.HasPrefix(toolName, plugin.ToolPrefix(name)) {
+			return true
+		}
+	}
+	return false
 }
 
 // partitionByTier splits configured plugin entries into the three startup

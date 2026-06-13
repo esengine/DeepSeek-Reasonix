@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"reasonix/internal/checkpoint"
@@ -36,6 +37,10 @@ type ContextBreakdown struct {
 	// Compaction headroom.
 	Window     int
 	CompactPct float64
+
+	// Verbose switches token formatting to raw integers instead of short
+	// (e.g. "3.4M") so the caller can compare exact values across agents.
+	Verbose bool
 }
 
 // Breakdown computes a context breakdown from the agent's current state.
@@ -85,11 +90,20 @@ func (a *Agent) Breakdown(schemas []provider.ToolSchema, cps *checkpoint.Store) 
 	}
 
 	// Compaction headroom uses the last turn's prompt tokens (what's actually
-	// in the window), not the cumulative sessionUsage.PromptTokens.
+	// in the window), not the cumulative sessionUsage.PromptTokens. For
+	// sub-agent orchestrators that don't make direct API calls, fall back to
+	// the total estimated next-request size (system + schemas + conversation).
 	b.Window = a.contextWindow
-	if lu := a.LastUsage(); b.Window > 0 && lu != nil && lu.PromptTokens > 0 {
-		pct := float64(lu.PromptTokens) / float64(b.Window) * 100
-		b.CompactPct = pct
+	if b.Window > 0 {
+		promptTokens := 0
+		if lu := a.LastUsage(); lu != nil && lu.PromptTokens > 0 {
+			promptTokens = lu.PromptTokens
+		} else if b.TotalEstimated > 0 {
+			promptTokens = b.TotalEstimated
+		}
+		if promptTokens > 0 {
+			b.CompactPct = float64(promptTokens) / float64(b.Window) * 100
+		}
 	}
 
 	return b
@@ -168,19 +182,24 @@ func turnsFromCheckpoints(msgs []provider.Message, cps *checkpoint.Store) []Turn
 func (b *ContextBreakdown) FormatBreakdown() string {
 	var sb strings.Builder
 
+	tok := shortTokenCount
+	if b.Verbose {
+		tok = rawTokenCount
+	}
+
 	// Title bar.
 	sb.WriteString("── Context ─────────────────────────────────\n")
 
 	// Next request estimate.
-	sb.WriteString(fmt.Sprintf("Next request est. ~%s tokens\n", shortTokenCount(b.TotalEstimated)))
+	sb.WriteString(fmt.Sprintf("Next request est. ~%s tokens\n", tok(b.TotalEstimated)))
 
 	// System prompt.
 	sysPct := pct(b.SystemPromptTokens, b.TotalEstimated)
-	sb.WriteString(fmt.Sprintf("  System prompt:  %s (%s)\n", shortTokenCount(b.SystemPromptTokens), sysPct))
+	sb.WriteString(fmt.Sprintf("  System prompt:  %s (%s)\n", tok(b.SystemPromptTokens), sysPct))
 
 	// Tool schemas.
 	tsPct := pct(b.ToolSchemaTokens, b.TotalEstimated)
-	sb.WriteString(fmt.Sprintf("  Tool schemas:   %s (%s)\n", shortTokenCount(b.ToolSchemaTokens), tsPct))
+	sb.WriteString(fmt.Sprintf("  Tool schemas:   %s (%s)\n", tok(b.ToolSchemaTokens), tsPct))
 	if len(b.PerToolSchemas) > 0 {
 		// Show top 5 most expensive tools in a compact line.
 		sorted := append([]ToolSchemaCost(nil), b.PerToolSchemas...)
@@ -200,29 +219,36 @@ func (b *ContextBreakdown) FormatBreakdown() string {
 	// Conversation.
 	if len(b.Turns) > 0 {
 		convPct := pct(b.ConversationTokens, b.TotalEstimated)
-		sb.WriteString(fmt.Sprintf("  Conversation:   %s (%s)\n", shortTokenCount(b.ConversationTokens), convPct))
+		sb.WriteString(fmt.Sprintf("  Conversation:   %s (%s)\n", tok(b.ConversationTokens), convPct))
 		for _, t := range b.Turns {
 			fileTag := ""
 			if t.Files > 0 {
 				fileTag = fmt.Sprintf(" (%d file%s)", t.Files, plural(t.Files))
 			}
-			sb.WriteString(fmt.Sprintf("    t%d  %-48s %s%s\n", t.Turn, truncate(t.Prompt, 48), shortTokenCount(t.Tokens), fileTag))
+			sb.WriteString(fmt.Sprintf("    t%d  %-48s %s%s\n", t.Turn, truncate(t.Prompt, 48), tok(t.Tokens), fileTag))
 		}
 	}
 
 	// Cumulative totals broken down by input/output.
 	cachedNew := ""
 	if b.Usage.CacheHitTokens+b.Usage.CacheMissTokens > 0 {
-		cachedNew = fmt.Sprintf(" (%s cached / %s new)", shortTokenCount(b.Usage.CacheHitTokens), shortTokenCount(b.Usage.CacheMissTokens))
+		cachedNew = fmt.Sprintf(" (%s cached / %s new)", tok(b.Usage.CacheHitTokens), tok(b.Usage.CacheMissTokens))
 	}
 	reasoning := ""
 	if b.Usage.ReasoningTokens > 0 {
-		reasoning = fmt.Sprintf(" (%s reasoning)", shortTokenCount(b.Usage.ReasoningTokens))
+		reasoning = fmt.Sprintf(" (%s reasoning)", tok(b.Usage.ReasoningTokens))
 	}
-	sb.WriteString(fmt.Sprintf("  Cumulative (all turns):  %s · %s%.4f\n",
-		shortTokenCount(b.Usage.TotalTokens), b.Usage.Currency, b.Usage.Cost))
-	sb.WriteString(fmt.Sprintf("    Input:   %s%s\n", shortTokenCount(b.Usage.PromptTokens), cachedNew))
-	sb.WriteString(fmt.Sprintf("    Output:  %s%s\n", shortTokenCount(b.Usage.CompletionTokens), reasoning))
+	if b.Verbose {
+		sb.WriteString(fmt.Sprintf("  Cumulative (all turns):  %d · %s%.4f\n",
+			b.Usage.TotalTokens, b.Usage.Currency, b.Usage.Cost))
+		sb.WriteString(fmt.Sprintf("    Input:   %s%s\n", tok(b.Usage.PromptTokens), cachedNew))
+		sb.WriteString(fmt.Sprintf("    Output:  %s%s\n", tok(b.Usage.CompletionTokens), reasoning))
+	} else {
+		sb.WriteString(fmt.Sprintf("  Cumulative (all turns):  %s · %s%.4f\n",
+			tok(b.Usage.TotalTokens), b.Usage.Currency, b.Usage.Cost))
+		sb.WriteString(fmt.Sprintf("    Input:   %s%s\n", tok(b.Usage.PromptTokens), cachedNew))
+		sb.WriteString(fmt.Sprintf("    Output:  %s%s\n", tok(b.Usage.CompletionTokens), reasoning))
+	}
 
 	// Compaction headroom.
 	if b.Window > 0 {
@@ -231,10 +257,14 @@ func (b *ContextBreakdown) FormatBreakdown() string {
 			toCompact = 0
 		}
 		sb.WriteString(fmt.Sprintf("  Window: %s · %.0f%% used · %.0f%% to compact\n",
-			shortTokenCount(b.Window), b.CompactPct, toCompact))
+			tok(b.Window), b.CompactPct, toCompact))
 	}
 
 	return sb.String()
+}
+
+func rawTokenCount(n int) string {
+	return strconv.Itoa(n)
 }
 
 func shortTokenCount(n int) string {

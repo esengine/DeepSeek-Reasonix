@@ -25,6 +25,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/notify"
+	"reasonix/internal/orchestrator"
 	"reasonix/internal/provider"
 	"reasonix/internal/provider/openai"
 	"reasonix/internal/serve"
@@ -423,6 +424,53 @@ func chatREPL(args []string) int {
 		return 1
 	}
 
+	var orc *orchestrator.Orchestrator
+	if cfg != nil && len(cfg.Orchestrator.Agents) > 0 {
+		orc = orchestrator.New(sink)
+		orc.SetMainCtrl(ctrl)
+
+		for _, entry := range cfg.Orchestrator.Agents {
+			modelName := entry.Model
+			if modelName == "" {
+				modelName = cfg.DefaultModel
+			}
+			entryPrompt, pErr := entry.ResolveSystemPrompt()
+			if pErr != nil {
+				fmt.Fprintln(os.Stderr, "orchestrator: agent", entry.Name+":", pErr)
+				continue
+			}
+			agentSink := orchestrator.NewSinkMultiplexer(sink, entry.Name)
+			agentSink.SetVerbose(entry.Verbose)
+			denylist := orchestrator.OrchestratorToolNames()
+			childCtrl, cerr := boot.Build(ctx, boot.Options{
+				Model:         modelName,
+				AgentName:     entry.Name,
+				MaxSteps:      *maxSteps,
+				Sink:          agentSink,
+				SystemPrompt:  entryPrompt,
+				ToolDenylist:  denylist,
+				SkipCodegraph: true,
+			})
+			if cerr != nil {
+				fmt.Fprintln(os.Stderr, "orchestrator: failed to start agent", entry.Name+":", cerr)
+				continue
+			}
+			orc.AddAgent(entry.Name, childCtrl, entry)
+		}
+		orc.SetSessionDir(config.SessionDir())
+		if err := orc.LoadSessions(config.SessionDir()); err != nil {
+			fmt.Fprintln(os.Stderr, "orchestrator: load sessions:", err)
+		}
+
+		for _, t := range orchestrator.OrchestratorTools(orc) {
+			ctrl.Registry().Add(t)
+		}
+
+		if names := orc.AgentNames(); len(names) > 0 {
+			fmt.Fprintf(os.Stderr, "orchestrator: %d managed agent(s) — %s\n", len(names), strings.Join(names, ", "))
+		}
+	}
+
 	// Decide where this conversation's auto-save lands. A resume reuses the
 	// file so closing/reopening keeps appending to the same history; a fresh
 	// session lands in a new file stamped with the model name.
@@ -466,7 +514,7 @@ func chatREPL(args []string) int {
 		ctrl.SetBypass(true)
 	}
 
-	m := newChatTUI(ctrl, missing, eventCh, termW)
+	m := newChatTUI(ctrl, missing, eventCh, termW, orc)
 	if cfg, err := config.Load(); err == nil {
 		m.outputStyle = cfg.Agent.OutputStyle    // shown as the active entry in /output-style
 		m.statuslineCmd = cfg.Statusline.Command // custom status-line command, "" = built-in row
@@ -532,6 +580,12 @@ func chatREPL(args []string) int {
 		}
 	} else {
 		ctrl.Close()
+	}
+	if orc != nil {
+		if err := orc.SaveSessions(config.SessionDir()); err != nil {
+			fmt.Fprintln(os.Stderr, "orchestrator: save sessions:", err)
+		}
+		orc.Close()
 	}
 	if runErr != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, runErr)
