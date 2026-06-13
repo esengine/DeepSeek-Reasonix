@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/creack/pty"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -152,6 +153,11 @@ func (a *App) StartTerminal() string {
 
 // StartTerminalAt launches a shell PTY at a workspace-relative path.
 func (a *App) StartTerminalAt(rel string) string {
+	return a.startTerminalRelative(rel)
+}
+
+// startTerminalRelative resolves a workspace-relative path and starts a terminal there.
+func (a *App) startTerminalRelative(rel string) string {
 	base, err := a.activeWorkspaceBase()
 	if err != nil {
 		return "no workspace: " + err.Error()
@@ -167,11 +173,26 @@ func (a *App) StartTerminalAt(rel string) string {
 	if ext := filepath.Ext(path); ext != "" {
 		path = filepath.Dir(path)
 	}
-	id, err := a.startTerminalAt(path)
-	if err != nil {
-		return "failed: " + err.Error()
+	// Start the terminal in a goroutine so the Wails RPC returns immediately.
+	type result struct {
+		id  string
+		err string
 	}
-	return id
+	ch := make(chan result, 1)
+	go func() {
+		id, err := a.startTerminalAt(path)
+		if err != nil {
+			ch <- result{err: "failed: " + err.Error()}
+		} else {
+			ch <- result{id: id}
+		}
+	}()
+	select {
+	case r := <-ch:
+		return r.id
+	case <-time.After(5 * time.Second):
+		return "timeout: terminal did not start within 5s"
+	}
 }
 
 // TerminalInput writes data to a PTY session.
