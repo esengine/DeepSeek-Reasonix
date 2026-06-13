@@ -75,10 +75,13 @@ type Controller struct {
 	mem           *memory.Set
 	cleanup       func()
 	autoPlan      string
-	shell         sandbox.Shell // interpreter for user-invoked "!" commands; zero = auto
-	classifier    autoPlanClassifier
-	startedOnce   bool                             // guards the one-shot SessionStart hook on first turn
-	onRemember    func(rule string) RememberResult // set via Options; invoked when user picks "always allow"
+	// disableColdResumePrune skips stale-tool-result elision on cold resume.
+	// Zero value keeps the prune on (the cheaper default).
+	disableColdResumePrune bool
+	shell                  sandbox.Shell // interpreter for user-invoked "!" commands; zero = auto
+	classifier             autoPlanClassifier
+	startedOnce            bool                             // guards the one-shot SessionStart hook on first turn
+	onRemember             func(rule string) RememberResult // set via Options; invoked when user picks "always allow"
 
 	// balanceURL/balanceKey target the active provider's optional wallet-balance
 	// endpoint (empty when the provider declares none). Captured at build so a
@@ -252,6 +255,10 @@ type Options struct {
 	// no confinement). Frontends pass the cwd they launched the session in.
 	WorkspaceRoot string
 	AutoPlan      string
+	// DisableColdResumePrune skips the stale-tool-result elision that otherwise
+	// runs when a session resumes past the provider cache window. Zero value
+	// keeps the prune on (the cheaper default).
+	DisableColdResumePrune bool
 	// Shell is the interpreter user-invoked "!" commands run under, so /shell
 	// matches the agent's configured [tools.shell] choice. Zero value = auto.
 	Shell      sandbox.Shell
@@ -277,38 +284,39 @@ func New(opts Options) *Controller {
 		pluginCtx = context.Background()
 	}
 	c := &Controller{
-		runner:           opts.Runner,
-		executor:         opts.Executor,
-		sink:             sink,
-		policy:           opts.Policy,
-		label:            opts.Label,
-		systemPrompt:     opts.SystemPrompt,
-		sessionDir:       opts.SessionDir,
-		sessionPath:      opts.SessionPath,
-		host:             opts.Host,
-		commands:         opts.Commands,
-		skills:           opts.Skills,
-		allSkills:        opts.AllSkills,
-		skillStore:       opts.SkillStore,
-		allSkillStore:    opts.AllSkillStore,
-		hooks:            opts.Hooks,
-		mem:              opts.Memory,
-		cleanup:          opts.Cleanup,
-		autoPlan:         normalizeAutoPlan(opts.AutoPlan),
-		shell:            opts.Shell,
-		classifier:       classifier,
-		onRemember:       opts.OnRemember,
-		balanceURL:       opts.BalanceURL,
-		balanceKey:       opts.BalanceKey,
-		balanceClient:    opts.BalanceClient,
-		jobs:             opts.Jobs,
-		reg:              opts.Registry,
-		pluginCtx:        pluginCtx,
-		cpRoot:           opts.WorkspaceRoot,
-		toolApprovalMode: ToolApprovalAsk,
-		approvals:        map[string]pendingApproval{},
-		asks:             map[string]pendingAsk{},
-		granted:          map[string]bool{},
+		runner:                 opts.Runner,
+		executor:               opts.Executor,
+		sink:                   sink,
+		policy:                 opts.Policy,
+		label:                  opts.Label,
+		systemPrompt:           opts.SystemPrompt,
+		sessionDir:             opts.SessionDir,
+		sessionPath:            opts.SessionPath,
+		host:                   opts.Host,
+		commands:               opts.Commands,
+		skills:                 opts.Skills,
+		allSkills:              opts.AllSkills,
+		skillStore:             opts.SkillStore,
+		allSkillStore:          opts.AllSkillStore,
+		hooks:                  opts.Hooks,
+		mem:                    opts.Memory,
+		cleanup:                opts.Cleanup,
+		autoPlan:               normalizeAutoPlan(opts.AutoPlan),
+		disableColdResumePrune: opts.DisableColdResumePrune,
+		shell:                  opts.Shell,
+		classifier:             classifier,
+		onRemember:             opts.OnRemember,
+		balanceURL:             opts.BalanceURL,
+		balanceKey:             opts.BalanceKey,
+		balanceClient:          opts.BalanceClient,
+		jobs:                   opts.Jobs,
+		reg:                    opts.Registry,
+		pluginCtx:              pluginCtx,
+		cpRoot:                 opts.WorkspaceRoot,
+		toolApprovalMode:       ToolApprovalAsk,
+		approvals:              map[string]pendingApproval{},
+		asks:                   map[string]pendingAsk{},
+		granted:                map[string]bool{},
 	}
 	// Checkpoints: bind a store to the session and route writer pre-edits into it.
 	c.rebindCheckpoints(opts.SessionPath)
@@ -1801,7 +1809,7 @@ var cacheColdAfter = 24 * time.Hour
 // been idle past the provider's cache retention, then persists the pruned
 // transcript so the saved file and the prompt stay in sync.
 func (c *Controller) maybeColdResumePrune(path string) {
-	if c.executor == nil || path == "" {
+	if c.disableColdResumePrune || c.executor == nil || path == "" {
 		return
 	}
 	// Idle time comes from branch meta only — every session the controller has

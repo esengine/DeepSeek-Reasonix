@@ -249,6 +249,12 @@ func (c *Config) SetDesktopCheckUpdates(enabled bool) error {
 	return nil
 }
 
+// SetColdResumePrune toggles auto-elision of stale tool results on cold resume.
+func (c *Config) SetColdResumePrune(enabled bool) error {
+	c.Agent.ColdResumePrune = &enabled
+	return nil
+}
+
 // SetDesktopTelemetry sets whether the desktop sends the anonymous launch ping.
 func (c *Config) SetDesktopTelemetry(enabled bool) error {
 	c.Desktop.Telemetry = &enabled

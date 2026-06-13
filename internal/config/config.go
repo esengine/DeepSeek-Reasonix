@@ -287,6 +287,16 @@ func (c *Config) DesktopCheckUpdates() bool {
 	return *c.Desktop.CheckUpdates
 }
 
+// ColdResumePruneEnabled reports whether stale tool results are elided when a
+// session resumes past the provider cache window. Default true (cheaper cold
+// restart); users keep full history by disabling it.
+func (c *Config) ColdResumePruneEnabled() bool {
+	if c == nil || c.Agent.ColdResumePrune == nil {
+		return true
+	}
+	return *c.Agent.ColdResumePrune
+}
+
 // DesktopTelemetry reports whether the desktop sends the anonymous launch ping.
 // It carries no conversation, key, or file data — see desktop/README.md.
 func (c *Config) DesktopTelemetry() bool {
@@ -757,6 +767,9 @@ type AgentConfig struct {
 	SoftCompactRatio  float64 `toml:"soft_compact_ratio"`
 	CompactRatio      float64 `toml:"compact_ratio"`
 	CompactForceRatio float64 `toml:"compact_force_ratio"`
+	// ColdResumePrune elides stale tool results when a session reopens past the
+	// provider cache window. nil = default enabled.
+	ColdResumePrune *bool `toml:"cold_resume_prune"`
 }
 
 // ProviderEntry declares a model provider instance. ContextWindow is the model's

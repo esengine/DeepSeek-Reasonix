@@ -590,7 +590,7 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     noProxy: "",
     proxy: { type: "socks5", server: "", port: 0, username: "", password: "" },
   };
-  const agent = view.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 12, systemPrompt: "" };
+  const agent = view.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 12, systemPrompt: "", coldResumePrune: true };
   agent.plannerMaxSteps = Number.isFinite(agent.plannerMaxSteps) ? Math.max(0, Math.trunc(agent.plannerMaxSteps)) : 12;
   agent.maxSteps = Number.isFinite(agent.maxSteps) ? Math.max(0, Math.trunc(agent.maxSteps)) : 0;
   return {
@@ -2240,7 +2240,7 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
   const providerLabel = defaultProvider ? modelProviderLabel(defaultProvider, defaultProviderView, t) : t("common.none");
   const plannerLabel = plannerSelectRef || t("settings.plannerNone");
   const keyStatusLabel = defaultProviderView?.keySet ? t("settings.keySet") : t("settings.noKey");
-  const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 12, systemPrompt: "" };
+  const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 12, systemPrompt: "", coldResumePrune: true };
   const setAgentSteps = (maxSteps: number, plannerMaxSteps: number) => (
     app.SetAgentParams(agent.temperature, maxSteps, plannerMaxSteps, agent.systemPrompt)
   );
@@ -2379,6 +2379,20 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
                 busy={busy}
                 onChange={(next) => void apply(() => setAgentSteps(agent.maxSteps, next))}
               />
+            </SettingsField>
+            <SettingsField label={t("settings.coldResumePrune")} hint={t("settings.coldResumePruneHint")}>
+              <div className="set-seg">
+                {([true, false] as const).map((on) => (
+                  <button
+                    key={on ? "on" : "off"}
+                    className={`set-seg__btn${agent.coldResumePrune === on ? " set-seg__btn--on" : ""}`}
+                    disabled={busy}
+                    onClick={() => void apply(() => app.SetColdResumePrune(on))}
+                  >
+                    {on ? t("settings.coldResumePrune.on") : t("settings.coldResumePrune.off")}
+                  </button>
+                ))}
+              </div>
             </SettingsField>
           </SettingsSection>
         </>

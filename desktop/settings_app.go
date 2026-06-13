@@ -78,6 +78,7 @@ type AgentView struct {
 	MaxSteps        int     `json:"maxSteps"`
 	PlannerMaxSteps int     `json:"plannerMaxSteps"`
 	SystemPrompt    string  `json:"systemPrompt"`
+	ColdResumePrune bool    `json:"coldResumePrune"`
 }
 
 type BotAllowlistView struct {
@@ -326,7 +327,7 @@ func (a *App) Settings() SettingsView {
 				Deny:  []string{},
 			},
 			Sandbox:           SandboxView{Bash: "enforce", AllowWrite: []string{}, Shell: "auto"},
-			Agent:             AgentView{PlannerMaxSteps: 12},
+			Agent:             AgentView{PlannerMaxSteps: 12, ColdResumePrune: true},
 			Bot:               botSettingsView(config.BotConfig{}),
 			AutoPlan:          "off",
 			DesktopTheme:      "light",
@@ -381,7 +382,7 @@ func (a *App) Settings() SettingsView {
 				Password: cfg.Network.Proxy.Password,
 			},
 		},
-		Agent:             AgentView{Temperature: cfg.Agent.Temperature, MaxSteps: cfg.Agent.MaxSteps, PlannerMaxSteps: cfg.Agent.PlannerMaxSteps, SystemPrompt: cfg.Agent.SystemPrompt},
+		Agent:             AgentView{Temperature: cfg.Agent.Temperature, MaxSteps: cfg.Agent.MaxSteps, PlannerMaxSteps: cfg.Agent.PlannerMaxSteps, SystemPrompt: cfg.Agent.SystemPrompt, ColdResumePrune: cfg.ColdResumePruneEnabled()},
 		Bot:               botSettingsView(cfg.Bot),
 		DesktopLanguage:   cfg.DesktopLanguage(),
 		DesktopTheme:      cfg.DesktopTheme(),
@@ -1475,6 +1476,10 @@ func (a *App) SetAgentParams(temperature float64, maxSteps int, plannerMaxSteps 
 		c.Agent.SystemPrompt = systemPrompt
 		return nil
 	})
+}
+
+func (a *App) SetColdResumePrune(enabled bool) error {
+	return a.applyConfigChange(func(c *config.Config) error { return c.SetColdResumePrune(enabled) })
 }
 
 // trimList drops blank entries from a string slice (and returns a non-nil slice).
