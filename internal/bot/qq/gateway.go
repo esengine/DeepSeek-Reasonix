@@ -132,8 +132,8 @@ func (a *adapter) getAccessToken(ctx context.Context) (string, error) {
 	defer resp.Body.Close()
 
 	var result struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int    `json:"expires_in"`
+		AccessToken string      `json:"access_token"`
+		ExpiresIn   json.Number `json:"expires_in"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err
@@ -143,8 +143,12 @@ func (a *adapter) getAccessToken(ctx context.Context) (string, error) {
 	}
 	a.tokenMu.Lock()
 	a.token = result.AccessToken
-	if result.ExpiresIn > 60 {
-		a.tokenExpiry = time.Now().Add(time.Duration(result.ExpiresIn-60) * time.Second)
+	expiresIn := int64(0)
+	if n, err := result.ExpiresIn.Int64(); err == nil {
+		expiresIn = n
+	}
+	if expiresIn > 60 {
+		a.tokenExpiry = time.Now().Add(time.Duration(expiresIn-60) * time.Second)
 	} else {
 		a.tokenExpiry = time.Now().Add(5 * time.Minute)
 	}
