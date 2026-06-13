@@ -1231,6 +1231,7 @@ func LoadForRoot(root string) (*Config, error) {
 	normalizeLegacyMCPTiers(cfg)
 	normalizeLegacyProviderModels(cfg)
 	normalizeDesktopOfficialProviderAccess(cfg)
+	normalizeOfficialDeepSeekModels(cfg)
 	normalizeEffortConfig(cfg)
 	backfillDeepSeekPro(cfg)
 	// First run (no config file anywhere): keep CodeGraph off until the user opts
@@ -1450,6 +1451,52 @@ func normalizeLegacyProviderModels(c *Config) {
 			p.Model = model
 		}
 	}
+}
+
+func normalizeOfficialDeepSeekModels(c *Config) {
+	if c == nil {
+		return
+	}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if officialProviderHost(p.BaseURL) != "api.deepseek.com" {
+			continue
+		}
+		switch strings.TrimSpace(p.Name) {
+		case "deepseek":
+			ensureProviderModels(p, []string{"deepseek-v4-flash", "deepseek-v4-pro"}, "deepseek-v4-flash")
+		case "deepseek-flash":
+			ensureProviderModels(p, []string{"deepseek-v4-flash"}, "deepseek-v4-flash")
+		case "deepseek-pro":
+			ensureProviderModels(p, []string{"deepseek-v4-pro"}, "deepseek-v4-pro")
+		}
+	}
+}
+
+func officialProviderHost(baseURL string) string {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
+}
+
+func ensureProviderModels(p *ProviderEntry, required []string, fallbackDefault string) {
+	if p == nil {
+		return
+	}
+	models := mergeModelLists(required, p.ModelList())
+	if len(models) == 0 {
+		return
+	}
+	p.Model = models[0]
+	if len(models) > 1 {
+		p.Models = models
+		p.Default = firstKnownModel(p.Default, models, fallbackDefault)
+		return
+	}
+	p.Models = nil
+	p.Default = ""
 }
 
 func legacyOfficialProviderModel(name string) string {

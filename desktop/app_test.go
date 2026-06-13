@@ -995,6 +995,47 @@ func TestSetEffortRebuildsController(t *testing.T) {
 	}
 }
 
+func TestSetEffortMigratesStaleOfficialDeepSeekTabModel(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "deepseek/deepseek-v4-flash"
+	cfg.Desktop.ProviderAccess = []string{"deepseek"}
+	cfg.Providers = []config.ProviderEntry{{
+		Name:      "deepseek",
+		Kind:      "openai",
+		BaseURL:   "https://api.deepseek.com",
+		Model:     "glm-5",
+		APIKeyEnv: "DEEPSEEK_API_KEY",
+	}}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	old := control.New(control.Options{Label: "old-controller"})
+	app.setTestCtrl(old, "deepseek-flash/deepseek-v4-flash")
+	defer func() {
+		if c := app.activeCtrl(); c != nil {
+			c.Close()
+		}
+	}()
+
+	if err := app.SetEffort("max"); err != nil {
+		t.Fatalf("SetEffort(max): %v", err)
+	}
+	tab := app.activeTab()
+	if tab == nil {
+		t.Fatal("active tab missing")
+	}
+	if tab.model != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("tab model = %q, want migrated official ref", tab.model)
+	}
+}
+
 func TestSetTokenModeRebuildsController(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -1034,8 +1075,54 @@ func TestSetTokenModeRebuildsController(t *testing.T) {
 	}
 }
 
+func TestSetTokenModeMigratesStaleOfficialDeepSeekTabModel(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "deepseek/deepseek-v4-flash"
+	cfg.Desktop.ProviderAccess = []string{"deepseek"}
+	cfg.Providers = []config.ProviderEntry{{
+		Name:      "deepseek",
+		Kind:      "openai",
+		BaseURL:   "https://api.deepseek.com",
+		Model:     "glm-5",
+		APIKeyEnv: "DEEPSEEK_API_KEY",
+	}}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	old := control.New(control.Options{Label: "old-controller"})
+	app.setTestCtrl(old, "deepseek-flash/deepseek-v4-flash")
+	defer func() {
+		if c := app.activeCtrl(); c != nil {
+			c.Close()
+		}
+	}()
+
+	if err := app.SetTokenMode("economy"); err != nil {
+		t.Fatalf("SetTokenMode(economy): %v", err)
+	}
+	tab := app.activeTab()
+	if tab == nil {
+		t.Fatal("active tab missing")
+	}
+	if tab.model != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("tab model = %q, want migrated official ref", tab.model)
+	}
+	if got := currentTabTokenMode(tab); got != "economy" {
+		t.Fatalf("token mode = %q, want economy", got)
+	}
+}
+
 func TestSetTokenModeKeepsControllerWhenRebuildFails(t *testing.T) {
 	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	t.Setenv("MIMO_API_KEY", "")
 
 	app := NewApp()
 	app.ctx = context.Background()
