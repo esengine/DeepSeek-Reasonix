@@ -602,9 +602,8 @@ function safeFilename(name: string): string {
 function ShellHotkeys() {
   const shellExpand = useShellExpand();
   useGlobalHotkey("shortcuts.shellExpand", (e) => {
-    if (!shellExpand) return;
     e.preventDefault();
-    shellExpand.toggleLast();
+    shellExpand?.toggleLast();
   }, [shellExpand], !!shellExpand);
   return null;
 }
@@ -615,12 +614,20 @@ function TextSizeHotkeys() {
     e.preventDefault();
     applyTextSize(nextTextSize(getTextSize(), 1));
   });
-  // Fallback: match Ctrl+⇧+= / ⌘⇧+= for ++ on non-numpad keyboards
+  // Fallback: match Ctrl+Shift+= / ⌘⇧+= for ++ on non-numpad keyboards,
+  // and Ctrl+- / ⌘- for decrease, Ctrl+0 / ⌘0 for reset.
+  // Catches "+" (which some keyboards send instead of "=") and "0" in case
+  // the useGlobalHotkey handler misses them.
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "=") {
-        e.preventDefault();
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      if ((e.shiftKey && e.key === "=") || e.key === "+") {
         applyTextSize(nextTextSize(getTextSize(), 1));
+      } else if (e.key === "-") {
+        applyTextSize(nextTextSize(getTextSize(), -1));
+      } else if (e.key === "0") {
+        applyTextSize(DEFAULT_TEXT_SIZE);
       }
     };
     document.addEventListener("keydown", onKey, { capture: true });
