@@ -89,27 +89,14 @@ var syntheticPrefixes = []string{
 
 // Compose applies the plan-mode marker to a turn's text when plan mode is on,
 // returning the message to actually send to the model. The frontend keeps
-// showing the raw text as the user bubble. When an approved plan is paused,
-// only an explicit continuation command carries that approval into the next turn.
+// showing the raw text as the user bubble.
 func (c *Controller) Compose(text string) string {
 	c.mu.Lock()
 	plan := c.planMode
 	goal := c.goal
 	goalStatus := c.goalStatus
-	approvedPlan := c.approvedPlanActive
-	continuation := false
 	notes := c.pendingMemory
 	c.pendingMemory = nil
-	if !plan && approvedPlan {
-		continuation = isApprovedPlanContinuation(text)
-		if continuation {
-			c.approvedPlanContinuationTurn = true
-		} else {
-			c.approvedPlanActive = false
-			c.approvedPlanContinuationTurn = false
-			c.approvedPlanStart = 0
-		}
-	}
 	c.mu.Unlock()
 
 	if strings.TrimSpace(goal) != "" && goalStatus == GoalStatusRunning {
@@ -117,8 +104,6 @@ func (c *Controller) Compose(text string) string {
 	}
 	if plan {
 		text = PlanModeMarker + "\n\n" + text
-	} else if continuation {
-		text = approvedPlanExecutionMarker + "\n\n" + text
 	}
 
 	// Memory added mid-session rides the turn (never the cached system prefix),
@@ -158,19 +143,6 @@ func activeGoalBlock(goal string) string {
 	b.WriteString("\n")
 	b.WriteString(activeGoalClose)
 	return b.String()
-}
-
-func isApprovedPlanContinuation(text string) bool {
-	s := strings.ToLower(strings.TrimSpace(text))
-	s = strings.TrimRight(s, ".。!！")
-	s = strings.Join(strings.Fields(s), " ")
-	switch s {
-	case "继续", "继续执行", "继续吧", "接着执行", "下一步", "执行下一步",
-		"continue", "resume", "proceed", "go on", "continue execution":
-		return true
-	default:
-		return false
-	}
 }
 
 // MemoryQuickAddNote parses the "# <note>" memory shortcut. The space after
