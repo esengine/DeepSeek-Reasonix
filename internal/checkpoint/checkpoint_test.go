@@ -205,18 +205,70 @@ func TestSnapshotDedupsFirstTouchWins(t *testing.T) {
 	}
 }
 
-func TestRestoreRejectsPathEscape(t *testing.T) {
+func TestRestoreSkipsPersistedPathEscape(t *testing.T) {
 	root := t.TempDir()
+	inside := filepath.Join(root, "a.txt")
 	outside := filepath.Join(t.TempDir(), "evil.txt")
+	write(t, inside, "old")
 	write(t, outside, "keep")
 	s := New("", root)
 	s.Begin(0, "p", 0)
-	s.Snapshot(diff.Change{Path: outside, Kind: diff.Modify, OldText: "hacked"})
-	if _, _, err := s.RestoreCode(0); err == nil {
-		t.Fatal("RestoreCode should reject a path outside the workspace")
+	before := "old"
+	outsideBefore := "hacked"
+	s.cur.Files = append(s.cur.Files, FileSnap{Path: "a.txt", Content: &before})
+	s.cur.Files = append(s.cur.Files, FileSnap{Path: outside, Content: &outsideBefore})
+	write(t, inside, "new")
+	if _, _, err := s.RestoreCode(0); err != nil {
+		t.Fatalf("RestoreCode should skip a persisted path outside the workspace: %v", err)
+	}
+	if got := read(t, inside); got != "old" {
+		t.Fatalf("inside file = %q, want old", got)
 	}
 	if got := read(t, outside); got != "keep" {
 		t.Fatalf("outside file was modified: %q", got)
+	}
+}
+
+func TestSnapshotSkipsOutsideWorkspaceWithoutBreakingRestore(t *testing.T) {
+	root := t.TempDir()
+	inside := filepath.Join(root, "a.txt")
+	outside := filepath.Join(t.TempDir(), "memory.txt")
+	write(t, inside, "old")
+	write(t, outside, "keep")
+
+	s := New("", root)
+	s.Begin(0, "p", 0)
+	s.Snapshot(diff.Change{Path: inside, Kind: diff.Modify, OldText: "old"})
+	s.Snapshot(diff.Change{Path: outside, Kind: diff.Modify, OldText: "memory-old"})
+	write(t, inside, "new")
+	write(t, outside, "changed-outside")
+
+	if _, _, err := s.RestoreCode(0); err != nil {
+		t.Fatalf("RestoreCode should ignore outside-workspace snapshots captured during the turn: %v", err)
+	}
+	if got := read(t, inside); got != "old" {
+		t.Fatalf("inside file = %q, want old", got)
+	}
+	if got := read(t, outside); got != "changed-outside" {
+		t.Fatalf("outside file should not be restored, got %q", got)
+	}
+}
+
+func TestSnapshotStoresWorkspaceRelativePaths(t *testing.T) {
+	root := t.TempDir()
+	inside := filepath.Join(root, "sub", "a.txt")
+	write(t, inside, "old")
+
+	s := New("", root)
+	s.Begin(0, "p", 0)
+	s.Snapshot(diff.Change{Path: inside, Kind: diff.Modify, OldText: "old"})
+	s.Snapshot(diff.Change{Path: filepath.Join("sub", "a.txt"), Kind: diff.Modify, OldText: "new"})
+
+	if len(s.cur.Files) != 1 {
+		t.Fatalf("snapshots = %d, want 1", len(s.cur.Files))
+	}
+	if got := s.cur.Files[0].Path; got != "sub/a.txt" {
+		t.Fatalf("snapshot path = %q, want workspace-relative slash path", got)
 	}
 }
 

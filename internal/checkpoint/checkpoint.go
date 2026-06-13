@@ -134,24 +134,43 @@ func (s *Store) Snapshot(ch diff.Change) {
 	if ch.Path == "" {
 		return
 	}
+	path, ok := s.snapshotPath(ch.Path)
+	if !ok {
+		return
+	}
 	var enc *fileenc.Kind
 	if ch.Kind != diff.Create {
-		enc = s.detectEncoding(ch.Path)
+		enc = s.detectEncoding(path)
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.cur == nil || s.seen[ch.Path] {
+	if s.cur == nil || s.seen[path] {
 		return
 	}
-	s.seen[ch.Path] = true
+	s.seen[path] = true
 	var content *string
 	if ch.Kind != diff.Create { // create == file didn't exist → leave nil (restore deletes)
 		old := ch.OldText
 		content = &old
 	}
-	s.cur.Files = append(s.cur.Files, FileSnap{Path: ch.Path, Content: content, Encoding: enc})
+	s.cur.Files = append(s.cur.Files, FileSnap{Path: path, Content: content, Encoding: enc})
 	s.persist(s.cur)
+}
+
+func (s *Store) snapshotPath(p string) (string, bool) {
+	if s.root == "" {
+		return filepath.Clean(p), true
+	}
+	abs, err := safePath(s.root, p)
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(filepath.Clean(s.root), abs)
+	if err != nil || rel == "." || relEscapesRoot(rel) {
+		return "", false
+	}
+	return filepath.ToSlash(filepath.Clean(rel)), true
 }
 
 func (s *Store) detectEncoding(p string) *fileenc.Kind {
@@ -260,7 +279,7 @@ func (s *Store) RestoreCode(fromTurn int) (written, deleted []string, err error)
 	for _, p := range order {
 		abs, gerr := safePath(root, p)
 		if gerr != nil {
-			err = gerr
+			slog.Warn("checkpoint: skipped restore path outside workspace", "path", p, "root", root, "err", gerr)
 			continue
 		}
 		snap := earliest[p]
@@ -311,9 +330,14 @@ func safePath(root, p string) (string, error) {
 	abs = filepath.Clean(abs)
 	if root != "" {
 		r := filepath.Clean(root)
-		if abs != r && !strings.HasPrefix(abs, r+string(os.PathSeparator)) {
+		rel, err := filepath.Rel(r, abs)
+		if err != nil || relEscapesRoot(rel) {
 			return "", fmt.Errorf("checkpoint path %q escapes workspace %q", p, root)
 		}
 	}
 	return abs, nil
+}
+
+func relEscapesRoot(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel)
 }
