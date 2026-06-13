@@ -16499,6 +16499,43 @@ a[href] {
   opacity: 1;
 }
 
+.terminal-tabs__spacer {
+  flex: 1 1 auto;
+}
+
+.terminal-tab--icon {
+  width: 26px;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  opacity: 0.5;
+}
+
+.terminal-tab--icon:hover {
+  opacity: 1;
+}
+
+.terminal-search {
+  display: flex;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.terminal-search__input {
+  flex: 1 1 auto;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  outline: none;
+}
+
+.terminal-search__input:focus {
+  border-color: var(--accent);
+}
+
 .terminal-panel__body {
   flex: 1 1 auto;
   overflow: hidden;
