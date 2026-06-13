@@ -48,6 +48,20 @@
   --font-control: var(--text-md);
   --font-control-small: var(--text-sm);
   --font-status: var(--font-control-small);
+  --statusbar-dock-height: max(30px, calc(28px * var(--font-scale)));
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei",
+    "Noto Sans SC", "Helvetica Neue", Arial, sans-serif;
+  --font-content-family: var(--font-ui);
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Code",
+    Consolas, "Liberation Mono", Menlo, monospace;
+  --font-symbol: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
+    "Noto Color Emoji", sans-serif;
+  --font-smoothing: antialiased;
+  --text-rendering: optimizeLegibility;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-strong: 600;
   --scrollbar-size: 10px;
   --scrollbar-track: transparent;
   --scrollbar-thumb: color-mix(in srgb, var(--fg-faint) 42%, transparent);
@@ -188,36 +202,84 @@
 
   --radius: 9px;
   --maxw: 940px;
-  --mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Code", Consolas,
-    "Liberation Mono", Menlo, monospace;
-  --sans: "PingFang SC", "Microsoft YaHei", "Noto Sans SC",
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
+  --mono: var(--font-mono);
+  --sans: var(--font-ui);
+  --font-sans: var(--font-ui);
+}
+
+:root[data-platform="windows"] {
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI",
+    "Microsoft YaHei", "Noto Sans SC", Arial, sans-serif;
+  --font-content-family: var(--font-ui);
+  --font-mono: "Cascadia Code", "Cascadia Mono", Consolas, "Liberation Mono",
+    ui-monospace, monospace;
+  --font-smoothing: auto;
+  --text-rendering: auto;
+}
+
+:root[data-platform="darwin"] {
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Hiragino Sans GB", "Helvetica Neue", Arial, sans-serif;
+  --font-content-family: var(--font-ui);
+  --font-mono: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Monaco,
+    "Cascadia Code", Consolas, monospace;
+}
+
+:root[data-platform="linux"] {
+  --font-ui: system-ui, "Noto Sans", "Noto Sans CJK SC", "WenQuanYi Micro Hei",
+    "Microsoft YaHei", Arial, sans-serif;
+  --font-content-family: var(--font-ui);
+  --font-mono: ui-monospace, "Cascadia Code", "JetBrains Mono",
+    "Noto Sans Mono", "Liberation Mono", Consolas, monospace;
 }
 
 /* font-family presets */
 :root[data-font-family="yahei"] {
-  --sans: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Noto Sans SC",
+  --font-ui: "Microsoft YaHei UI", "Microsoft YaHei", "微软雅黑", "PingFang SC", "Noto Sans SC",
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-content-family: var(--font-ui);
 }
 
 :root[data-font-family="pingfang"] {
-  --sans: "PingFang SC", "苹方-简", "Noto Sans SC",
+  --font-ui: "PingFang SC", "苹方-简", "Noto Sans SC",
     "Microsoft YaHei", -apple-system, BlinkMacSystemFont,
     "Segoe UI", Roboto, sans-serif;
+  --font-content-family: var(--font-ui);
 }
 
 :root[data-font-family="noto"] {
-  --sans: "Noto Sans SC", "Noto Sans", "PingFang SC",
+  --font-ui: "Noto Sans SC", "Noto Sans", "PingFang SC",
     "Microsoft YaHei", -apple-system, BlinkMacSystemFont,
     "Segoe UI", Roboto, sans-serif;
+  --font-content-family: var(--font-ui);
 }
 
 :root[data-font-family="custom"] {
-  --sans: var(--font-family-custom, "PingFang SC"),
+  --font-ui: var(--font-family-custom, "PingFang SC"),
     "PingFang SC", "Microsoft YaHei", "Noto Sans SC",
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     sans-serif;
+  --font-content-family: var(--font-ui);
+}
+
+:root[data-mono-font-family="cascadia"] {
+  --font-mono: "Cascadia Code", "Cascadia Mono", Consolas, "Liberation Mono",
+    ui-monospace, monospace;
+}
+
+:root[data-mono-font-family="jetbrains"] {
+  --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas,
+    ui-monospace, monospace;
+}
+
+:root[data-mono-font-family="sfmono"] {
+  --font-mono: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Monaco,
+    "Cascadia Code", Consolas, monospace;
+}
+
+:root[data-mono-font-family="custom"] {
+  --font-mono: var(--font-family-mono-custom, "Cascadia Code"),
+    "Cascadia Code", "SF Mono", Consolas, ui-monospace, monospace;
 }
 
 @media (prefers-color-scheme: light) {
@@ -1406,7 +1468,11 @@
 }
 
 :root[data-text-size="xlarge"] {
-  --font-scale: 1.16;
+  --font-scale: 1.18;
+}
+
+:root[data-text-size="xxlarge"] {
+  --font-scale: 1.32;
 }
 
 * {
@@ -1424,10 +1490,12 @@ html {
 body {
   background: var(--bg);
   color: var(--fg);
-  font-family: var(--sans);
+  font-family: var(--font-content-family);
   font-size: var(--text-base);
   line-height: 1.6;
-  -webkit-font-smoothing: antialiased;
+  -webkit-font-smoothing: var(--font-smoothing);
+  text-rendering: var(--text-rendering);
+  font-synthesis-weight: auto;
   overflow: hidden;
 }
 
@@ -3572,7 +3640,8 @@ a[href] {
   border-left: 2px solid var(--border);
   padding-left: 12px;
   color: var(--fg-dim);
-  font-size: 13px;
+  font-family: var(--font-content-family);
+  font-size: var(--font-control);
   font-style: italic;
   line-height: 1.7;
   white-space: pre-wrap;
@@ -3608,6 +3677,10 @@ a[href] {
 }
 
 /* ── markdown prose ──────────────────────────────────────────────────────── */
+.md {
+  font-family: var(--font-content-family);
+  font-weight: var(--font-weight-regular);
+}
 .md > :first-child {
   margin-top: 0;
 }
@@ -3623,7 +3696,11 @@ a[href] {
 .md h4 {
   margin: 20px 0 10px;
   line-height: 1.3;
-  font-weight: 600;
+  font-weight: var(--font-weight-strong);
+}
+.md strong,
+.msg strong {
+  font-weight: var(--font-weight-strong);
 }
 .md h1 {
   font-size: 1.4em;
@@ -3668,7 +3745,7 @@ a[href] {
   margin: 18px 0;
 }
 .md-code {
-  font-family: var(--mono);
+  font-family: var(--font-mono);
   font-size: 0.88em;
   background: var(--bg-elev-2);
   border: 1px solid var(--border-soft);
@@ -3690,7 +3767,7 @@ a[href] {
 }
 .md th {
   background: var(--bg-soft);
-  font-weight: 600;
+  font-weight: var(--font-weight-strong);
 }
 
 /* ── code (editor seam fallback) ─────────────────────────────────────────── */
@@ -3701,7 +3778,7 @@ a[href] {
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  font-family: var(--mono);
+  font-family: var(--font-mono);
   font-size: var(--font-code);
   line-height: 1.55;
   overflow: auto;
@@ -5169,7 +5246,7 @@ a[href] {
   display: flex;
   align-items: center;
   gap: 0;
-  font-family: var(--mono);
+  font-family: var(--font-ui);
   font-size: var(--font-status);
   font-variant-numeric: tabular-nums;
   line-height: 1.35;
@@ -5203,6 +5280,7 @@ a[href] {
   content: "|";
   margin: 0 9px;
   color: color-mix(in srgb, var(--fg-faint) 50%, transparent);
+  font-family: var(--font-mono);
   font-weight: 400;
 }
 .statusbar__group .tooltip-trigger {
@@ -5284,6 +5362,7 @@ a[href] {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  font-family: var(--font-ui);
 }
 .statusbar__cache b {
   color: var(--accent-strong);
@@ -17122,7 +17201,7 @@ a[href] {
 .layout {
   --chat-min-width: 700px;
   --topicbar-height: 58px;
-  --statusbar-height: 30px;
+  --statusbar-height: var(--statusbar-dock-height);
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--bg) 94%, var(--accent) 6%), var(--bg) 360px);
 }
@@ -18978,8 +19057,8 @@ a[href] {
   z-index: var(--z-dock);
   max-width: none;
   width: auto;
-  height: 30px;
-  min-height: 30px;
+  height: var(--statusbar-dock-height);
+  min-height: var(--statusbar-dock-height);
   margin: 0;
   padding: 0 16px;
   gap: 0;
@@ -18987,7 +19066,7 @@ a[href] {
   background: var(--panel);
   box-sizing: border-box;
   color: var(--fg-faint);
-  font-size: 11.5px;
+  font-size: var(--font-status);
   justify-content: flex-start;
 }
 

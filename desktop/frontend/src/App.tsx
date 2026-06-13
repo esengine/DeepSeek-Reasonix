@@ -850,6 +850,9 @@ export default function App() {
 
   // Persist window geometry across launches.
   useWindowStatePersistence();
+  useEffect(() => {
+    document.documentElement.setAttribute("data-platform", desktopPlatform);
+  }, [desktopPlatform]);
 
   const closeTransientOverlays = useCallback(() => {
     setTransientOverlayDismissSignal((signal) => signal + 1);

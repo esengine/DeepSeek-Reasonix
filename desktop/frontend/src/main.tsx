@@ -18,6 +18,23 @@ installGlobalCrashHandlers();
 installBreadcrumbConsoleHook();
 
 // Apply the saved appearance (auto/light/dark) before the first paint.
+function initTypographyPlatform() {
+  if (typeof document === "undefined" || typeof navigator === "undefined") return;
+  const params = new URLSearchParams(window.location.search);
+  const override = params.get("platform");
+  const marker = `${navigator.platform} ${navigator.userAgent}`;
+  const platform =
+    override === "darwin" || override === "windows" || override === "linux"
+      ? override
+      : /Win/i.test(marker)
+        ? "windows"
+        : /Mac/i.test(marker)
+          ? "darwin"
+          : "linux";
+  document.documentElement.setAttribute("data-platform", platform);
+}
+
+initTypographyPlatform();
 initTheme();
 initTextSize();
 initFontFamily();

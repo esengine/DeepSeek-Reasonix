@@ -1,4 +1,4 @@
-export const TEXT_SIZES = ["small", "default", "large", "xlarge"] as const;
+export const TEXT_SIZES = ["small", "default", "large", "xlarge", "xxlarge"] as const;
 
 export type TextSize = (typeof TEXT_SIZES)[number];
 

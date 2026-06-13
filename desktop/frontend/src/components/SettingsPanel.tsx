@@ -18,7 +18,19 @@ import {
   type ThemeStyle,
 } from "../lib/theme";
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
-import { FONT_FAMILIES, applyFontFamily, getFontFamily, getCustomFontName, setCustomFontName, type FontFamily } from "../lib/fontFamily";
+import {
+  applyFontFamily,
+  applyMonoFontFamily,
+  getFontFamily,
+  getMonoFontFamily,
+  getCustomFontName,
+  getCustomMonoFontName,
+  setCustomFontName,
+  setCustomMonoFontName,
+  type FontFamily,
+  type MonoFontFamily,
+} from "../lib/fontFamily";
+import { getAvailableFontFamilies, getAvailableMonoFontFamilies } from "../lib/fontAvailability";
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
 import type { BotAllowlistView, BotConnectionView, BotInstallStartResult, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
@@ -59,7 +71,9 @@ export function SettingsPanel({
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => getThemeStyle(getTheme()));
   const [textSize, setTextSizeState] = useState<TextSize>(getTextSize());
   const [fontFamily, setFontFamilyState] = useState<FontFamily>(getFontFamily());
+  const [monoFontFamily, setMonoFontFamilyState] = useState<MonoFontFamily>(getMonoFontFamily());
   const [customFontName, setCustomFontNameState] = useState<string>(getCustomFontName());
+  const [customMonoFontName, setCustomMonoFontNameState] = useState<string>(getCustomMonoFontName());
   const [tab, setTab] = useState<SettingsTab>(initialTab === "providers" ? "models" : initialTab ?? "general");
   // Play the modal exit animation, then let the parent unmount us.
   const { status, requestClose } = useDeferredClose(onClose, 240);
@@ -160,7 +174,9 @@ export function SettingsPanel({
                       themeStyle={themeStyle}
                       textSize={textSize}
                       fontFamily={fontFamily}
+                      monoFontFamily={monoFontFamily}
                       customFontName={customFontName}
+                      customMonoFontName={customMonoFontName}
                       onTheme={(nextTheme) => {
                         applyTheme(nextTheme, themeStyle, { persist: false });
                         setThemeState(nextTheme);
@@ -179,10 +195,19 @@ export function SettingsPanel({
                         applyFontFamily(font);
                         setFontFamilyState(font);
                       }}
+                      onMonoFontFamily={(font) => {
+                        applyMonoFontFamily(font);
+                        setMonoFontFamilyState(font);
+                      }}
                       onCustomFontNameChange={(name) => {
                         setCustomFontNameState(name);
                         setCustomFontName(name);
                         applyFontFamily("custom");
+                      }}
+                      onCustomMonoFontNameChange={(name) => {
+                        setCustomMonoFontNameState(name);
+                        setCustomMonoFontName(name);
+                        applyMonoFontFamily("custom");
                       }}
                     />
                   </SettingsPageShell>
@@ -4311,26 +4336,36 @@ function AppearanceSection({
   themeStyle,
   textSize,
   fontFamily,
+  monoFontFamily,
   customFontName,
+  customMonoFontName,
   onTheme,
   onThemeStyle,
   onTextSize,
   onFontFamily,
+  onMonoFontFamily,
   onCustomFontNameChange,
+  onCustomMonoFontNameChange,
 }: {
   theme: Theme;
   themeStyle: ThemeStyle;
   textSize: TextSize;
   fontFamily: FontFamily;
+  monoFontFamily: MonoFontFamily;
   customFontName: string;
+  customMonoFontName: string;
   onTheme: (t: Theme) => void;
   onThemeStyle: (style: ThemeStyle) => void;
   onTextSize: (size: TextSize) => void;
   onFontFamily: (font: FontFamily) => void;
+  onMonoFontFamily: (font: MonoFontFamily) => void;
   onCustomFontNameChange: (name: string) => void;
+  onCustomMonoFontNameChange: (name: string) => void;
 }) {
   const t = useT();
   const themeOptions: Theme[] = ["auto", "light", "dark"];
+  const availableFontFamilies = useMemo(() => getAvailableFontFamilies(fontFamily), [fontFamily]);
+  const availableMonoFontFamilies = useMemo(() => getAvailableMonoFontFamilies(monoFontFamily), [monoFontFamily]);
   return (
     <SettingsSection title={t("settings.appearance")}>
       <SettingsField label={t("settings.theme")}>
@@ -4395,7 +4430,7 @@ function AppearanceSection({
       </SettingsField>
       <SettingsField label={t("settings.fontFamily")}>
         <div className="set-seg">
-          {FONT_FAMILIES.map((font) => (
+          {availableFontFamilies.map((font) => (
             <button
               key={font}
               className={`set-seg__btn${fontFamily === font ? " set-seg__btn--on" : ""}`}
@@ -4415,6 +4450,31 @@ function AppearanceSection({
             placeholder={t("settings.fontFamilyCustomPlaceholder")}
             value={customFontName}
             onChange={(e) => onCustomFontNameChange(e.target.value)}
+          />
+        </SettingsField>
+      )}
+      <SettingsField label={t("settings.monoFontFamily")}>
+        <div className="set-seg">
+          {availableMonoFontFamilies.map((font) => (
+            <button
+              key={font}
+              className={`set-seg__btn${monoFontFamily === font ? " set-seg__btn--on" : ""}`}
+              onClick={() => onMonoFontFamily(font)}
+            >
+              {monoFontFamilyName(font, t)}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
+      {monoFontFamily === "custom" && (
+        <SettingsField label={t("settings.monoFontFamilyCustomName")}>
+          <textarea
+            className="mem-input"
+            style={{ width: "100%", resize: "vertical" }}
+            rows={2}
+            placeholder={t("settings.monoFontFamilyCustomPlaceholder")}
+            value={customMonoFontName}
+            onChange={(e) => onCustomMonoFontNameChange(e.target.value)}
           />
         </SettingsField>
       )}
@@ -4443,6 +4503,8 @@ function textSizeName(size: TextSize, t: ReturnType<typeof useT>): string {
       return t("settings.textSizeLarge");
     case "xlarge":
       return t("settings.textSizeXLarge");
+    case "xxlarge":
+      return t("settings.textSizeXXLarge");
   }
 }
 
@@ -4458,6 +4520,21 @@ function fontFamilyName(font: FontFamily, t: ReturnType<typeof useT>): string {
       return t("settings.fontFamilyNoto");
     case "custom":
       return t("settings.fontFamilyCustom");
+  }
+}
+
+function monoFontFamilyName(font: MonoFontFamily, t: ReturnType<typeof useT>): string {
+  switch (font) {
+    case "system":
+      return t("settings.monoFontFamilySystem");
+    case "cascadia":
+      return t("settings.monoFontFamilyCascadia");
+    case "jetbrains":
+      return t("settings.monoFontFamilyJetBrains");
+    case "sfmono":
+      return t("settings.monoFontFamilySFMono");
+    case "custom":
+      return t("settings.monoFontFamilyCustom");
   }
 }
 
