@@ -928,12 +928,22 @@ func (a *App) CheckpointsForTab(tabID string) []CheckpointMeta {
 	// RestoreCode(turn) reverts every file touched in this turn or any later one, so
 	// a turn can rewind code even when it changed no files itself — as long as a
 	// later turn did. Propagate CanCode backwards over the oldest-first list.
+	// Also propagate the cumulative unique file count so the UI shows how many
+	// files RestoreCode would actually affect from this turn.
 	hasCodeAfter := false
+	codeFileSet := make(map[string]bool, len(metas)*2)
 	for i := len(out) - 1; i >= 0; i-- {
 		if len(out[i].Files) > 0 {
 			hasCodeAfter = true
 		}
+		for _, f := range out[i].Files {
+			codeFileSet[f] = true
+		}
 		out[i].CanCode = hasCodeAfter
+		out[i].Files = make([]string, 0, len(codeFileSet))
+		for f := range codeFileSet {
+			out[i].Files = append(out[i].Files, f)
+		}
 	}
 	return out
 }
