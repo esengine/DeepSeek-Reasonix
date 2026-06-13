@@ -610,7 +610,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			Gate:              headlessGate,
 			ContextWindow:     ctxWin,
 			ArchiveDir:        config.ArchiveDir(),
-			ReasoningLanguage: cfg.ReasoningLanguage(),
+			ReasoningLanguage: agent.ReasoningLanguageFromContext(sctx),
 		}, agent.NestedSink(sctx, event.Discard))
 		if err != nil {
 			return "", errors.Join(err, subagentStore.SaveFailed(run))

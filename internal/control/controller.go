@@ -1311,7 +1311,9 @@ func (c *Controller) SetReasoningLanguage(lang string) {
 	c.mu.Lock()
 	c.reasoningLanguage = mode
 	c.mu.Unlock()
-	if c.executor != nil {
+	if setter, ok := c.runner.(interface{ SetReasoningLanguage(string) }); ok {
+		setter.SetReasoningLanguage(mode)
+	} else if c.executor != nil {
 		c.executor.SetReasoningLanguage(mode)
 	}
 }

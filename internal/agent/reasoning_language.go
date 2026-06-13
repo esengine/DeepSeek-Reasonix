@@ -35,25 +35,59 @@ func ReasoningLanguageBlock(lang string) string {
 }
 
 // WithReasoningLanguage prefixes content with the transient reasoning-language
-// block unless it is already present. The broad contains check avoids duplicate
-// blocks in controller-composed turns and coordinator handoffs.
+// block unless the turn already starts with an injected reasoning-language
+// block. User-authored mentions of the tag later in the prompt must not suppress
+// the configured preference.
 func WithReasoningLanguage(content, lang string) string {
 	block := ReasoningLanguageBlock(lang)
-	if block == "" || strings.Contains(content, "<reasoning-language>") {
+	if block == "" || hasLeadingReasoningLanguageBlock(content) {
 		return content
 	}
 	return block + "\n\n" + content
 }
 
-// WithReasoningLanguagePreference carries the runtime preference to spawned
-// tools, especially task sub-agents whose first user turn is created outside the
-// parent controller.
-func WithReasoningLanguagePreference(ctx context.Context, lang string) context.Context {
-	mode := NormalizeReasoningLanguage(lang)
-	if mode == "auto" {
-		return ctx
+func hasLeadingReasoningLanguageBlock(content string) bool {
+	s := strings.TrimLeft(content, " \t\r\n")
+	for {
+		switch {
+		case strings.HasPrefix(s, "<reasoning-language>"):
+			return strings.Contains(s, "</reasoning-language>")
+		case strings.HasPrefix(s, "<memory-update>"):
+			var ok bool
+			s, ok = trimLeadingTransientBlock(s, "memory-update")
+			if !ok {
+				return false
+			}
+		case strings.HasPrefix(s, "<background-jobs>"):
+			var ok bool
+			s, ok = trimLeadingTransientBlock(s, "background-jobs")
+			if !ok {
+				return false
+			}
+		default:
+			return false
+		}
 	}
-	return context.WithValue(ctx, reasoningLanguageContextKey{}, mode)
+}
+
+func trimLeadingTransientBlock(content, tag string) (string, bool) {
+	closeTag := "</" + tag + ">"
+	i := strings.Index(content, closeTag)
+	if i < 0 {
+		return content, false
+	}
+	return strings.TrimLeft(content[i+len(closeTag):], " \t\r\n"), true
+}
+
+// WithReasoningLanguagePreference carries the runtime preference to spawned
+// tools, especially sub-agents whose first user turn is created outside the
+// parent controller. It stores auto explicitly so live zh/en -> auto changes
+// clear stale boot-time preferences in child paths.
+func WithReasoningLanguagePreference(ctx context.Context, lang string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, reasoningLanguageContextKey{}, NormalizeReasoningLanguage(lang))
 }
 
 // ReasoningLanguageFromContext returns auto|zh|en.
