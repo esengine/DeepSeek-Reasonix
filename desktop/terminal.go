@@ -3,8 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"io"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -151,6 +152,27 @@ func (a *App) StartTerminal() string {
 	return id
 }
 
+var errTerminalOutsideWorkspace = errors.New("outside workspace")
+
+// resolveTerminalStartDir maps a workspace-relative path to the directory where
+// an embedded terminal should start. Files resolve to their parent directory.
+func resolveTerminalStartDir(base, rel string) (string, error) {
+	path, ok, err := workspacePathForBase(base, rel)
+	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return "", errTerminalOutsideWorkspace
+		}
+		return "", err
+	}
+	if !ok {
+		return "", errTerminalOutsideWorkspace
+	}
+	if ext := filepath.Ext(path); ext != "" {
+		path = filepath.Dir(path)
+	}
+	return path, nil
+}
+
 // StartTerminalAt launches a shell PTY at a workspace-relative path.
 func (a *App) StartTerminalAt(rel string) string {
 	return a.startTerminalRelative(rel)
@@ -162,16 +184,12 @@ func (a *App) startTerminalRelative(rel string) string {
 	if err != nil {
 		return "no workspace: " + err.Error()
 	}
-	path, ok, err := workspacePathForBase(base, rel)
-	if err != nil || !ok {
-		if err != nil {
-			return "invalid path: " + err.Error()
+	path, err := resolveTerminalStartDir(base, rel)
+	if err != nil {
+		if errors.Is(err, errTerminalOutsideWorkspace) {
+			return "invalid path (outside workspace)"
 		}
-		return "invalid path (outside workspace)"
-	}
-	// If rel looks like a file (has extension), cd to parent directory.
-	if ext := filepath.Ext(path); ext != "" {
-		path = filepath.Dir(path)
+		return "invalid path: " + err.Error()
 	}
 	// Start the terminal in a goroutine so the Wails RPC returns immediately.
 	type result struct {

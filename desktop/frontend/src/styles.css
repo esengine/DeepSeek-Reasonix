@@ -16417,8 +16417,10 @@ a[href] {
 }
 
 .workbench-dock__body > .context-panel,
-.workbench-dock__body > .workspace-panel {
+.workbench-dock__body > .workspace-panel,
+.workbench-dock__body > div {
   height: 100%;
+  min-height: 0;
 }
 
 .terminal-panel {
@@ -16426,7 +16428,7 @@ a[href] {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  background: var(--bg-elev);
   border: none;
 }
 
@@ -16456,7 +16458,7 @@ a[href] {
 }
 
 .terminal-tab--active {
-  background: var(--bg-elev);
+  background: var(--bg-soft);
   color: var(--fg);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
 }
@@ -16539,8 +16541,9 @@ a[href] {
 
 .terminal-panel__body {
   flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
-  background: var(--bg);
+  background: var(--bg-elev);
 }
 
 .terminal-panel__body .xterm {
@@ -16549,8 +16552,9 @@ a[href] {
 }
 
 .terminal-panel__body .xterm-viewport,
-.terminal-panel__body .xterm-screen {
-  background: var(--bg) !important;
+.terminal-panel__body .xterm-screen,
+.terminal-panel__body .xterm-rows {
+  background: var(--bg-elev) !important;
 }
 
 .workbench-dock__body > .workspace-panel {

@@ -6,6 +6,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "xterm/css/xterm.css";
 import { Plus, X, Search } from "lucide-react";
 import { app } from "../lib/bridge";
+import { createTerminalOutputRouter } from "../lib/terminalOutput";
 
 interface TerminalTab {
   id: string;
@@ -29,12 +30,25 @@ export function TerminalPanel({ active, openPathRequest }: { active: boolean; op
   const activeIDRef = useRef(activeTabID);
   activeIDRef.current = activeTabID;
   const startedRef = useRef(false);
-  const unsubRef = useRef<(() => void) | null>(null);
+  const outputRouterRef = useRef(createTerminalOutputRouter());
   const activeSearchRef = useRef<SearchAddon | null>(null);
+
+  const flushPendingOutput = useCallback((tab: TerminalTab) => {
+    const pending = outputRouterRef.current.takePending(tab.sessionID);
+    if (pending) tab.term.write(pending);
+  }, []);
+
+  const writeTerminalOutput = useCallback((sessionID: string, data: string) => {
+    const sinks = tabsRef.current.map((t) => ({
+      sessionID: t.sessionID,
+      write: (chunk: string) => t.term.write(chunk),
+    }));
+    outputRouterRef.current.write(sessionID, data, sinks);
+  }, []);
 
   const getTheme = useCallback(() => {
     const style = getComputedStyle(document.documentElement);
-    const bg = style.getPropertyValue("--bg").trim() || "#090a0c";
+    const bg = style.getPropertyValue("--bg-elev").trim() || style.getPropertyValue("--bg").trim() || "#090a0c";
     const fg = style.getPropertyValue("--fg").trim() || "#f4f5f7";
     const accent = style.getPropertyValue("--accent").trim() || "#d97757";
     const dimFg = style.getPropertyValue("--fg-dim").trim() || "#8a8fa0";
@@ -107,11 +121,17 @@ export function TerminalPanel({ active, openPathRequest }: { active: boolean; op
     return newTab;
   }, [getTheme]);
 
+  // Flush buffered PTY output once a tab exists for the session.
+  useEffect(() => {
+    for (const tab of tabs) flushPendingOutput(tab);
+  }, [tabs, flushPendingOutput]);
+
   const closeTab = useCallback((tabID: string) => {
     setTabs((prev) => {
       const tab = prev.find((t) => t.id === tabID);
       if (tab) {
         app.StopTerminal(tab.sessionID).catch(() => {});
+        outputRouterRef.current.clearPending(tab.sessionID);
         tab.term.dispose();
       }
       const next = prev.filter((t) => t.id !== tabID);
@@ -190,10 +210,18 @@ export function TerminalPanel({ active, openPathRequest }: { active: boolean; op
     const tab = tabs.find((t) => t.id === activeTabID);
     if (tab) {
       tab.term.open(el);
-      requestAnimationFrame(() => { tab.fit.fit(); tab.term.focus(); });
+      flushPendingOutput(tab);
+      requestAnimationFrame(() => {
+        tab.fit.fit();
+        tab.term.focus();
+        const { cols, rows } = tab.term;
+        if (cols > 0 && rows > 0) {
+          app.TerminalResize(tab.sessionID, cols, rows).catch(() => {});
+        }
+      });
       activeSearchRef.current = tab.search;
     }
-  }, [tabs, activeTabID]);
+  }, [tabs, activeTabID, flushPendingOutput]);
 
   // Open-path requests
   const lastReqRef = useRef<number | null>(null);
@@ -201,7 +229,7 @@ export function TerminalPanel({ active, openPathRequest }: { active: boolean; op
     if (!openPathRequest || openPathRequest.id === lastReqRef.current) return;
     lastReqRef.current = openPathRequest.id;
     app.StartTerminalAt(openPathRequest.path).then((result) => {
-      if (!result || result.startsWith("failed:") || result.startsWith("no workspace:") || result.startsWith("invalid")) {
+      if (!result || result.startsWith("failed:") || result.startsWith("no workspace:") || result.startsWith("invalid") || result.startsWith("timeout:")) {
         console.warn("[Terminal] StartTerminalAt failed:", result, "path:", openPathRequest.path);
         // Fallback: just open at workspace root
         app.StartTerminal().then((r) => {
@@ -217,7 +245,19 @@ export function TerminalPanel({ active, openPathRequest }: { active: boolean; op
     }).catch(() => {});
   }, [openPathRequest, createTab]);
 
-  // Start first terminal
+  // Keep PTY output wired for the panel lifetime — not tied to dock visibility.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.runtime?.EventsOn) return;
+    const unsub = window.runtime.EventsOn("terminal:output", (raw: unknown) => {
+      try {
+        const parsed = typeof raw === "string" ? JSON.parse(raw) as { sessionId: string; data: string } : null;
+        if (parsed?.data) writeTerminalOutput(parsed.sessionId, parsed.data);
+      } catch { /* not JSON */ }
+    });
+    return () => { unsub?.(); };
+  }, [writeTerminalOutput]);
+
+  // Start first terminal when the dock tab is opened for the first time.
   useEffect(() => {
     if (active && !startedRef.current) {
       startedRef.current = true;
@@ -226,20 +266,7 @@ export function TerminalPanel({ active, openPathRequest }: { active: boolean; op
           createTab("Terminal", result).catch(() => {});
         }
       }).catch(() => {});
-
-      if (typeof window !== "undefined" && window.runtime?.EventsOn) {
-        unsubRef.current = window.runtime.EventsOn("terminal:output", (raw: unknown) => {
-          try {
-            const parsed = typeof raw === "string" ? JSON.parse(raw) as { sessionId: string; data: string } : null;
-            if (parsed?.data) {
-              const match = tabsRef.current.find((t) => t.sessionID === parsed.sessionId);
-              if (match) match.term.write(parsed.data);
-            }
-          } catch { /* not JSON */ }
-        });
-      }
     }
-    return () => { unsubRef.current?.(); };
   }, [active, createTab]);
 
   // Keyboard input
