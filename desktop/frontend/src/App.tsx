@@ -1779,8 +1779,11 @@ export default function App() {
 
   const openRightDockFile = useCallback(
     (path: string) => {
-      const nextPath = path.trim();
+      let nextPath = path.trim();
       if (!nextPath) return;
+      // react-markdown percent-encodes non-ASCII chars in link hrefs;
+      // decode them so the path matches what the file tree produces.
+      try { nextPath = decodeURIComponent(nextPath); } catch { /* fine, use as-is */ }
       setWorkspaceFileListRequest(null);
       setWorkspaceChangeListRequest(null);
       setWorkspaceChangeRevealRequest(null);
