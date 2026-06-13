@@ -192,10 +192,19 @@ export function TerminalPanel({ active, openPathRequest }: { active: boolean; op
     if (!openPathRequest || openPathRequest.id === lastReqRef.current) return;
     lastReqRef.current = openPathRequest.id;
     app.StartTerminalAt(openPathRequest.path).then((result) => {
-      if (result && !result.startsWith("failed:")) {
-        const label = openPathRequest.path.split("/").filter(Boolean).pop() || "shell";
-        createTab(label, result).catch(() => {});
+      if (!result || result.startsWith("failed:") || result.startsWith("no workspace:") || result.startsWith("invalid")) {
+        console.warn("[Terminal] StartTerminalAt failed:", result, "path:", openPathRequest.path);
+        // Fallback: just open at workspace root
+        app.StartTerminal().then((r) => {
+          if (r && !r.startsWith("failed:")) {
+            const label = openPathRequest.path.split("/").filter(Boolean).pop() || "shell";
+            createTab(label, r).catch(() => {});
+          }
+        }).catch(() => {});
+        return;
       }
+      const label = openPathRequest.path.split("/").filter(Boolean).pop() || "shell";
+      createTab(label, result).catch(() => {});
     }).catch(() => {});
   }, [openPathRequest, createTab]);
 

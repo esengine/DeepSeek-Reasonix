@@ -158,7 +158,10 @@ func (a *App) StartTerminalAt(rel string) string {
 	}
 	path, ok, err := workspacePathForBase(base, rel)
 	if err != nil || !ok {
-		return "invalid path"
+		if err != nil {
+			return "invalid path: " + err.Error()
+		}
+		return "invalid path (outside workspace)"
 	}
 	if info, err := os.Stat(path); err == nil && !info.IsDir() {
 		path = filepath.Dir(path)
