@@ -111,3 +111,45 @@ func TestRebuildTodoStateSkipsFailedCompleteStep(t *testing.T) {
 		t.Fatalf("a failed complete_step must not advance canonical state: %+v", a.todoState[0])
 	}
 }
+
+func TestSeedTodoState(t *testing.T) {
+	a := &Agent{sink: event.Discard}
+	todos := []evidence.TodoItem{
+		{Content: "step 1", Status: "in_progress"},
+		{Content: "step 2", Status: "pending"},
+	}
+	a.SeedTodoState(todos)
+	if len(a.todoState) != 2 {
+		t.Fatalf("SeedTodoState: got %d items, want 2", len(a.todoState))
+	}
+	if a.todoState[0].Status != "in_progress" {
+		t.Fatalf("SeedTodoState: first item status = %q, want in_progress", a.todoState[0].Status)
+	}
+}
+
+func TestSeedTodoStateNoOverwrite(t *testing.T) {
+	a := &Agent{sink: event.Discard, todoState: []evidence.TodoItem{
+		{Content: "existing", Status: "in_progress"},
+	}}
+	a.SeedTodoState([]evidence.TodoItem{
+		{Content: "new", Status: "in_progress"},
+	})
+	if len(a.todoState) != 1 || a.todoState[0].Content != "existing" {
+		t.Fatalf("SeedTodoState overwrote existing state: %+v", a.todoState)
+	}
+}
+
+func TestSeedTodoStateAllowsAdvanceAfterSeed(t *testing.T) {
+	a := &Agent{sink: event.Discard}
+	a.SeedTodoState([]evidence.TodoItem{
+		{Content: "step 1", Status: "in_progress"},
+		{Content: "step 2", Status: "pending"},
+	})
+	a.advanceCanonicalTodo("step 1")
+	if a.todoState[0].Status != "completed" {
+		t.Fatalf("advance after seed: item 0 status = %q, want completed", a.todoState[0].Status)
+	}
+	if a.todoState[1].Status != "in_progress" {
+		t.Fatalf("advance after seed: item 1 status = %q, want in_progress", a.todoState[1].Status)
+	}
+}

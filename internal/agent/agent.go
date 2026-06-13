@@ -768,6 +768,19 @@ func (a *Agent) setTodoState(todos []evidence.TodoItem) {
 	a.todoMu.Unlock()
 }
 
+func (a *Agent) SeedTodoState(todos []evidence.TodoItem) {
+	if len(todos) == 0 {
+		return
+	}
+	a.todoMu.Lock()
+	if len(a.todoState) > 0 {
+		a.todoMu.Unlock()
+		return
+	}
+	a.todoState = append([]evidence.TodoItem(nil), todos...)
+	a.todoMu.Unlock()
+}
+
 func (a *Agent) incompleteCanonicalTodos() ([]evidence.TodoStepMatch, bool) {
 	a.todoMu.Lock()
 	defer a.todoMu.Unlock()

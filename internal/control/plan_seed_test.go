@@ -1,6 +1,11 @@
 package control
 
-import "testing"
+import (
+	"testing"
+
+	"reasonix/internal/agent"
+	"reasonix/internal/event"
+)
 
 func TestParsePlanTodos(t *testing.T) {
 	tests := []struct {
@@ -108,5 +113,42 @@ func TestParsePlanTodosCapsAtTwenty(t *testing.T) {
 	}
 	if got := parsePlanTodos(plan); len(got) != 20 {
 		t.Fatalf("got %d todos, want cap of 20", len(got))
+	}
+}
+
+func TestSeedPlanTodosSeedsAgentState(t *testing.T) {
+	var events []event.Event
+	sink := event.FuncSink(func(e event.Event) { events = append(events, e) })
+	c := &Controller{
+		sink:     sink,
+		executor: &agent.Agent{},
+	}
+	plan := "1. Add the parser\n2. Wire it up\n3. Add tests"
+	args := c.seedPlanTodos(plan)
+	if args == "" {
+		t.Fatal("seedPlanTodos returned empty args for a valid plan")
+	}
+	var todoDispatches, todoResults int
+	for _, e := range events {
+		if e.Kind == event.ToolDispatch && e.Tool.Name == "todo_write" {
+			todoDispatches++
+		}
+		if e.Kind == event.ToolResult && e.Tool.Name == "todo_write" {
+			todoResults++
+		}
+	}
+	if todoDispatches != 1 || todoResults != 1 {
+		t.Fatalf("plan-seed events: %d dispatches, %d results; want 1,1", todoDispatches, todoResults)
+	}
+}
+
+func TestSeedPlanTodosEmptyPlanNoOp(t *testing.T) {
+	c := &Controller{
+		sink:     event.Discard,
+		executor: &agent.Agent{},
+	}
+	args := c.seedPlanTodos("no list items here")
+	if args != "" {
+		t.Fatalf("empty plan returned args = %q, want empty", args)
 	}
 }
