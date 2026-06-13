@@ -278,10 +278,10 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	go a.restoreOrBuildTabs()
-	go a.refreshBotRuntime()
-	go a.sendStartupPing()
-	go a.flushMetrics()
-	go a.flushPendingCrash()
+	a.goSafe("refreshBotRuntime", a.refreshBotRuntime)
+	a.goSafe("sendStartupPing", a.sendStartupPing)
+	a.goSafe("flushMetrics", a.flushMetrics)
+	a.goSafe("flushPendingCrash", a.flushPendingCrash)
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {

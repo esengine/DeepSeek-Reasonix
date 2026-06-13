@@ -37,7 +37,7 @@ func (a *App) refreshBotRuntimeAsync() {
 	if a.ctx == nil {
 		return
 	}
-	go a.refreshBotRuntime()
+	a.goSafe("refreshBotRuntime", a.refreshBotRuntime)
 }
 
 func (a *App) refreshBotRuntime() {

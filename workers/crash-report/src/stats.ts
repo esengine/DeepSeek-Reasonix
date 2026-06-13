@@ -70,10 +70,19 @@ type CrashRow = {
   fingerprint: string;
   kind: string;
   count: number;
+  first_version: string;
   last_version: string;
   seen: string;
   status: string;
   title: string;
+  source: string;
+  label: string;
+  error_type: string;
+  top_frame: string;
+  severity: string;
+  last_os: string;
+  last_arch: string;
+  regressed_at: string;
 };
 
 function clip(s: string, n: number): string {
@@ -87,17 +96,60 @@ export function renderStats(
     platforms: { label: string; users: number }[];
     crashes: CrashRow[];
     metrics: { signal: string; bucket: string; total: number }[];
+    sources: { label: string; users: number }[];
+    latestVersion: string;
+    filters: { status: string; source: string; version: string; os: string; platform: string; newLatest: boolean; regressed: boolean };
   },
   user: User,
 ): string {
   const days = last30Days(data.daily);
   const totalUsers = days.at(-1)?.users ?? 0;
   const anyPing = days.some((d) => d.opens > 0);
+  const filterQS = (patch: Record<string, string>) => {
+    const params = new URLSearchParams();
+    const put = (k: string, v: string) => {
+      if (v) params.set(k, v);
+    };
+    put("status", data.filters.status);
+    put("source", data.filters.source);
+    put("version", data.filters.version);
+    put("os", data.filters.os);
+    put("platform", data.filters.platform);
+    if (data.filters.newLatest) params.set("new", "latest");
+    if (data.filters.regressed) params.set("regressed", "1");
+    for (const [k, v] of Object.entries(patch)) {
+      if (v) params.set(k, v);
+      else params.delete(k);
+    }
+    const qs = params.toString();
+    return qs ? `/stats?${qs}` : "/stats";
+  };
+  const sourceLinks = data.sources.length
+    ? data.sources.map((s) => `<a class="chip" href="${esc(filterQS({ source: s.label }))}">${esc(s.label || "legacy")} <b>${s.users}</b></a>`).join("")
+    : `<span class="muted">no sources yet</span>`;
+  const versionLinks = data.versions.length
+    ? data.versions.slice(0, 8).map((v) => `<a class="chip" href="${esc(filterQS({ version: v.label }))}">${esc(v.label)} <b>${v.users}</b></a>`).join("")
+    : `<span class="muted">no versions yet</span>`;
+  const platformLinks = data.platforms.length
+    ? data.platforms.map((p) => `<a class="chip" href="${esc(filterQS({ platform: p.label }))}">${esc(p.label)} <b>${p.users}</b></a>`).join("")
+    : `<span class="muted">no platforms yet</span>`;
+  const filters = `<div class="card full"><h2>Crash filters · 崩溃筛选 <b>— latest ${esc(data.latestVersion || "n/a")}</b></h2>
+<div class="actions">
+<a class="btn sm ghost" href="/stats">All</a>
+<a class="btn sm ghost" href="${esc(filterQS({ status: "open" }))}">Open</a>
+<a class="btn sm ghost" href="${esc(filterQS({ status: "resolved" }))}">Resolved</a>
+<a class="btn sm ghost" href="${esc(filterQS({ status: "ignored" }))}">Ignored</a>
+<a class="btn sm ghost" href="${esc(filterQS({ new: data.filters.newLatest ? "" : "latest" }))}">New in latest</a>
+<a class="btn sm ghost" href="${esc(filterQS({ regressed: data.filters.regressed ? "" : "1" }))}">Regressed</a>
+</div>
+<div class="actions">${sourceLinks}</div>
+<div class="actions">${versionLinks}</div>
+<div class="actions">${platformLinks}</div></div>`;
   const crashRows = data.crashes.length
-    ? `<table><thead><tr><th>fingerprint</th><th>summary</th><th>kind</th><th>status</th><th>count</th><th>last version</th><th>last seen</th></tr></thead><tbody>${data.crashes
+    ? `<table><thead><tr><th>fingerprint</th><th>summary</th><th>source</th><th>severity</th><th>kind</th><th>status</th><th>count</th><th>versions</th><th>platform</th><th>last seen</th></tr></thead><tbody>${data.crashes
         .map(
           (c) =>
-            `<tr><td><a class="fp" href="/stats/group/${esc(c.fingerprint)}">${esc(c.fingerprint.slice(0, 8))}</a></td><td class="summary"${c.title ? ` title="${esc(c.title)}"` : ""}>${c.title ? esc(clip(c.title, 90)) : `<span class="muted">—</span>`}</td><td><span class="pill ${c.kind === "crash" ? "crash" : ""}">${esc(c.kind)}</span></td><td>${statusPill(c.status)}</td><td class="n">${c.count}</td><td class="n">${esc(c.last_version)}</td><td class="n">${esc(c.seen)}</td></tr>`,
+            `<tr><td><a class="fp" href="/stats/group/${esc(c.fingerprint)}">${esc(c.fingerprint.slice(0, 8))}</a></td><td class="summary"${c.title ? ` title="${esc(c.title)}"` : ""}>${c.title ? esc(clip(c.title, 90)) : `<span class="muted">—</span>`}${c.regressed_at ? ` <span class="pill ignored">regressed</span>` : ""}</td><td>${esc(c.source || "legacy")}</td><td><span class="pill">${esc(c.severity || "medium")}</span></td><td><span class="pill ${c.kind === "crash" ? "crash" : ""}">${esc(c.kind)}</span></td><td>${statusPill(c.status)}</td><td class="n">${c.count}</td><td class="n">${esc(c.first_version || "?")} → ${esc(c.last_version)}</td><td class="n">${esc([c.last_os, c.last_arch].filter(Boolean).join("/"))}</td><td class="n">${esc(c.seen)}</td></tr>`,
         )
         .join("")}</tbody></table>`
     : `<div class="empty">No crash reports yet — that's the good kind of empty · 还没有崩溃报告</div>`;
@@ -112,6 +164,7 @@ ${anyPing ? dailyChart(days) : `<div class="empty">No pings yet — data starts 
 <div class="card"><h2>Versions · 版本分布 <b>— 7 days</b></h2>${listBars(data.versions)}</div>
 <div class="card"><h2>Platforms · 平台分布 <b>— 7 days</b></h2>${listBars(data.platforms)}</div>
 <div class="card full"><h2>Agent signals · 运行指标 <b>— 7 days, opt-in aggregate</b></h2>${metricsCards(data.metrics)}</div>
+${filters}
 <div class="card full"><h2>Crash groups · 崩溃分组 <b>— click a fingerprint for stacks</b></h2>${crashRows}</div>
 </div>`,
     userNav(user),
@@ -135,10 +188,23 @@ export type Group = {
   count: number;
   first_seen: string;
   last_seen: string;
+  first_version: string;
   last_version: string;
   status: string;
   note: string;
   title: string;
+  source: string;
+  label: string;
+  error_type: string;
+  top_frame: string;
+  severity: string;
+  last_os: string;
+  last_arch: string;
+  last_build_commit: string;
+  last_channel: string;
+  resolved_in: string;
+  resolved_at: string;
+  regressed_at: string;
 };
 
 function manageGroup(group: Group): string {
@@ -150,33 +216,81 @@ function manageGroup(group: Group): string {
   return `<div class="card full" style="margin-top:20px"><h2>Manage <b>— admin</b></h2>
 <div class="actions">${setStatus("resolved", "Mark resolved", "ghost")}${setStatus("ignored", "Ignore", "ghost")}${setStatus("open", "Reopen", "ghost")}
 <form method="post" action="/stats/group/${fp}" class="inline" onsubmit="return confirm('Delete this crash group and all its samples?')"><input type="hidden" name="action" value="delete"><button class="btn danger sm" type="submit">Delete group</button></form></div>
+<form method="post" action="/stats/group/${fp}" class="note-edit"><input type="hidden" name="action" value="resolution"><input type="text" name="resolvedIn" placeholder="Resolved in version…" value="${esc(group.resolved_in)}"><button class="btn sm" type="submit">Save resolved version</button></form>
+<form method="post" action="/stats/group/${fp}" class="note-edit"><input type="hidden" name="action" value="severity"><select name="severity"><option${group.severity === "low" ? " selected" : ""}>low</option><option${group.severity === "medium" ? " selected" : ""}>medium</option><option${group.severity === "high" ? " selected" : ""}>high</option><option${group.severity === "critical" ? " selected" : ""}>critical</option></select><button class="btn sm" type="submit">Save severity</button></form>
 <form method="post" action="/stats/group/${fp}" class="note-edit"><input type="hidden" name="action" value="note"><input type="text" name="note" placeholder="Add a note…" value="${esc(group.note)}"><button class="btn sm" type="submit">Save note</button></form></div>`;
+}
+
+function breadcrumbsList(json: string): string {
+  try {
+    const rows = JSON.parse(json) as { cat?: string; msg?: string }[];
+    if (!Array.isArray(rows) || rows.length === 0) return "";
+    return `<details><summary>breadcrumbs</summary><pre>${esc(rows.map((b) => `[${b.cat ?? ""}] ${b.msg ?? ""}`).join("\n"))}</pre></details>`;
+  } catch {
+    return "";
+  }
 }
 
 export function renderGroup(
   group: Group,
-  reports: { version: string; os: string; arch: string; message: string; device: string; created_at: string }[],
+  reports: {
+    version: string;
+    os: string;
+    arch: string;
+    message: string;
+    device: string;
+    created_at: string;
+    source: string;
+    label: string;
+    error_type: string;
+    error_message: string;
+    top_frame: string;
+    build_commit: string;
+    channel: string;
+    language: string;
+    view: string;
+    breadcrumbs: string;
+    component_stack: string;
+    stack: string;
+    occurred_at: string;
+  }[],
   user: User,
 ): string {
   const samples = reports.length
     ? reports
         .map((r) => {
           const dev = fmtDevice(r.device);
+          const structured = [
+            r.source && `source ${r.source}`,
+            r.label && `label ${r.label}`,
+            r.error_type && `type ${r.error_type}`,
+            r.top_frame && `top ${r.top_frame}`,
+            r.build_commit && `build ${r.build_commit}`,
+            r.channel && `channel ${r.channel}`,
+            r.view && `view ${r.view}`,
+          ]
+            .filter(Boolean)
+            .map((x) => `<span>${esc(String(x))}</span>`)
+            .join("");
           return `<div class="report"><div class="meta"><span><b>${esc(r.version)}</b></span><span>${esc(r.os)}/${esc(r.arch)}</span>${
             dev ? `<span>${esc(dev)}</span>` : ""
-          }<span>${esc(r.created_at.slice(0, 19).replace("T", " "))}</span></div><pre>${esc(r.message)}</pre></div>`;
+          }<span>${esc(r.created_at.slice(0, 19).replace("T", " "))}</span>${structured}</div><pre>${esc(r.message)}</pre>${breadcrumbsList(r.breadcrumbs)}</div>`;
         })
         .join("")
     : `<div class="empty">No raw samples stored for this group</div>`;
   const noteLine = group.note ? ` · note: ${esc(group.note)}` : "";
+  const resolvedLine = group.resolved_in ? ` · resolved in ${esc(group.resolved_in)}` : "";
+  const regressLine = group.regressed_at ? ` · regressed ${esc(group.regressed_at.slice(0, 10))}` : "";
+  const groupMeta = [group.source, group.label, group.error_type, group.top_frame, group.severity, [group.last_os, group.last_arch].filter(Boolean).join("/")].filter(Boolean).join(" · ");
 
   return page(
     `Reasonix · ${group.fingerprint.slice(0, 8)}`,
     `stats / ${group.fingerprint.slice(0, 8)}`,
     `<h1><span class="pill ${group.kind === "crash" ? "crash" : ""}">${esc(group.kind)}</span> ${esc(group.fingerprint.slice(0, 8))} ${statusPill(group.status)}</h1>
 ${group.title ? `<p class="summary">${esc(group.title)}</p>` : ""}
-<p class="sub"><b>${group.count}</b> occurrences · first ${esc(group.first_seen.slice(0, 10))} · last ${esc(group.last_seen.slice(0, 10))} on ${esc(group.last_version)}${noteLine}</p>
-<div class="card full"><h2>Samples <b>— newest first, up to 5 kept</b></h2>${samples}</div>
+${groupMeta ? `<p class="sub">${esc(groupMeta)}</p>` : ""}
+<p class="sub"><b>${group.count}</b> occurrences · first ${esc(group.first_seen.slice(0, 10))} on ${esc(group.first_version || "?")} · last ${esc(group.last_seen.slice(0, 10))} on ${esc(group.last_version)}${resolvedLine}${regressLine}${noteLine}</p>
+<div class="card full"><h2>Samples <b>— newest first, first sample plus latest 5 kept</b></h2>${samples}</div>
 ${user.role === "admin" ? manageGroup(group) : ""}
 <a class="back" href="/stats">← Back to stats</a>`,
     userNav(user),
