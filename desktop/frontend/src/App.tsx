@@ -38,7 +38,7 @@ import { Composer } from "./components/Composer";
 import { TodoPanel } from "./components/TodoPanel";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
-import { UndoRewindBanner, type UndoRewindMeta } from "./components/UndoRewindBanner";
+import { UndoRewindBanner } from "./components/UndoRewindBanner";
 import { ClearContextCard } from "./components/ClearContextCard";
 import { StatusBar } from "./components/StatusBar";
 import { HistoryPanel } from "./components/HistoryPanel";
@@ -58,7 +58,6 @@ import { shouldShowTodoPanel } from "./lib/todoVisibility";
 import {
   type BotConnectionView,
   type BotSettingsView,
-  type CheckpointMeta,
   type CollaborationMode,
   type ComposerInsertRequest,
   type Mode,
@@ -1242,7 +1241,7 @@ export default function App() {
       const trimmed = nextGoal.trim();
       if (!trimmed) return;
       applyGoal(trimmed);
-      send(trimmed, `/goal ${trimmed}`);
+      commitThenSend(trimmed, `/goal ${trimmed}`);
     },
     [applyGoal, send],
   );
@@ -1350,7 +1349,7 @@ export default function App() {
     if (!pendingPlanRevision || state.running) return;
     const text = pendingPlanRevision;
     setPendingPlanRevision(null);
-    send(text);
+    commitThenSend(text);
   }, [pendingPlanRevision, send, state.running]);
 
   useEffect(() => {
@@ -1419,12 +1418,12 @@ export default function App() {
         } else if (["clear", "off", "stop", "done"].includes(arg.toLowerCase())) {
           applyGoal("");
         }
-        send(trimmed, submitText.trim());
+        commitThenSend(trimmed, submitText.trim());
         return;
       }
       if (collaborationMode === "goal" && !goal.trim()) {
         applyGoal(trimmed);
-        send(trimmed, `/goal ${submitText.trim()}`);
+        commitThenSend(trimmed, `/goal ${submitText.trim()}`);
         return;
       }
       const theme = /^\/theme(?:\s+(\S+))?$/.exec(trimmed);
@@ -1457,7 +1456,7 @@ export default function App() {
       await setControllerCollaborationMode(controllerComposerProfileCollaborationMode(composerProfile));
       await setControllerToolApprovalMode(toolApprovalMode);
       if (goal.trim()) await setControllerGoal(goal);
-      send(trimmed, submitText.trim());
+      commitThenSend(trimmed, submitText.trim());
     },
     [applyGoal, closeTransientOverlays, collaborationMode, composerProfile, goal, send, runShell, notice, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, steer, switchModel, t, toolApprovalMode],
   );
@@ -1913,60 +1912,104 @@ export default function App() {
   }, [blankSessionTarget, closeTransientOverlays, openBlankSession]);
 
   const [rewindSignal, setRewindSignal] = useState(0);
-  const [rewindUndo, setRewindUndo] = useState<UndoRewindMeta | null>(null);
-  const itemsRef = useRef<Item[]>([]);
-  itemsRef.current = state.items;
-  const checkpointsRef = useRef<CheckpointMeta[]>([]);
-  checkpointsRef.current = state.checkpoints as CheckpointMeta[];
 
-  const handleMessageAction = useCallback(async (turn: number, scope: string) => {
-    const prevItems = itemsRef.current ?? [];
-    const prevCheckpoints = checkpointsRef.current ?? [];
-    const prevUserCount = prevItems.filter((it) => it.kind === "user").length;
-    const prevLastCp = prevCheckpoints[prevCheckpoints.length - 1];
-    const prevFiles = prevLastCp?.files ?? [];
+  // ── Optimistic rewind ─────────────────────────────────────────────────
+  // Rewind is optimistic: the UI immediately truncates, scrolls to the
+  // target, fills the composer, and shows an undo banner.  The real Go
+  // Rewind is deferred until the user SENDS a new message.  Undo simply
+  // restores the full items list — no Go call needed.
+  type RewindState = {
+    turn: number;
+    scope: string;
+    fullItems: Item[];     // pre-truncation items (for undo)
+    boundaryIdx: number;   // first item index of the rewound-to turn
+    turnDiff: number;      // turns rolled back
+    prompt: string;        // user message text for composer fill
+  };
+  const [rewindState, setRewindState] = useState<RewindState | null>(null);
+  const rewindStateRef = useRef(rewindState);
+  rewindStateRef.current = rewindState;
 
-    // For non-fork rewinds, silently fork before truncating so undo can
-    // switch back to the pre-rewind state.
-    let undoForkTabId: string | undefined;
-    if (scope !== "fork") {
+  // Display items: truncated when an optimistic rewind is pending.
+  const displayItems = useMemo(() => {
+    if (!rewindState) return state.items;
+    return state.items.slice(0, rewindState.boundaryIdx);
+  }, [state.items, rewindState]);
+
+  // send wrapper: commits any pending optimistic rewind before sending.
+  const commitThenSend = useCallback(async (displayText: string, submitText?: string) => {
+    const rs = rewindStateRef.current;
+    if (rs) {
+      setRewindState(null);
       try {
-        const undoFork = await app.Fork(turn);
-        if (undoFork?.id) undoForkTabId = undoFork.id;
-      } catch { /* undo fork failed silently */ }
+        await rewind(rs.turn, rs.scope);
+        setRewindSignal((v) => v + 1);
+      } catch {
+        // Rewind failed — restore full items so the transcript isn't
+        // silently broken.  The controller emits a notice with details.
+        setRewindState({ ...rs, fullItems: rs.fullItems });
+        return;
+      }
     }
+    send(displayText, submitText);
+  }, [send, rewind]);
 
-    await rewind(turn, scope);
+  const handleMessageAction = useCallback((turn: number, scope: string) => {
     if (scope === "fork") {
-      await refreshTabMetas();
-      setProjectRevision((value) => value + 1);
-      setTabRevealSignal((signal) => signal + 1);
+      // Fork still goes through the controller (not optimistic).
+      rewind(turn, scope).then(() => {
+        refreshTabMetas();
+        setProjectRevision((v) => v + 1);
+        setTabRevealSignal((v) => v + 1);
+      });
       return;
     }
-    if (scope === "code" || scope === "both") {
-      setDockRefreshKey((value) => value + 1);
-      setProjectRevision((value) => value + 1);
+
+    // Code-only rewind only affects files — no message truncation,
+    // no optimistic UI needed.  Execute immediately.
+    if (scope === "code") {
+      rewind(turn, scope);
+      setDockRefreshKey((v) => v + 1);
+      setProjectRevision((v) => v + 1);
+      return;
     }
-    // Compute undo meta from before/after state.
-    const nowUserCount = (itemsRef.current ?? []).filter((it) => it.kind === "user").length;
-    const turnDiff = prevUserCount - nowUserCount;
-    const nowCp = (checkpointsRef.current ?? [])[(checkpointsRef.current ?? []).length - 1];
-    const nowFiles = nowCp?.files ?? [];
-    const restored = prevFiles.filter((f: string) => !nowFiles.includes(f));
-    const removed = nowFiles.filter((f: string) => !prevFiles.includes(f));
-    if (turnDiff > 0 || restored.length > 0 || removed.length > 0) {
-      setRewindUndo({
-        turns: turnDiff,
-        filesRestored: restored,
-        filesRemoved: removed,
-        onUndo: () => {
-          setRewindUndo(null);
-          if (undoForkTabId) switchTab(undoForkTabId);
-        },
-      });
+
+    const items = state.items;
+    // Find the boundary: index of the Nth user message where N = turn.
+    let boundaryIdx = 0;
+    let userCount = 0;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].kind === "user") {
+        if (userCount === turn) { boundaryIdx = i; break; }
+        userCount++;
+      }
     }
+
+    const prevUserCount = items.filter((it) => it.kind === "user").length;
+    const turnDiff = prevUserCount - userCount;
+
+    // Save full items for undo.
+    const userItem = items[boundaryIdx]?.kind === "user" ? items[boundaryIdx] as Extract<Item, { kind: "user" }> : undefined;
+    setRewindState({
+      turn,
+      scope,
+      fullItems: items,
+      boundaryIdx,
+      turnDiff,
+      prompt: userItem?.text ?? "",
+    });
+
+    // Fill composer with the rewound-to user message.
+    const insertId = Date.now();
+    setComposerInsertRequest({ id: insertId, text: userItem?.text ?? "" });
+
+    if (scope === "both") {
+      setDockRefreshKey((v) => v + 1);
+      setProjectRevision((v) => v + 1);
+    }
+
     setRewindSignal((v) => v + 1);
-  }, [refreshTabMetas, rewind, switchTab]);
+  }, [state.items, rewind, refreshTabMetas, setComposerInsertRequest]);
 
   const handleOpenTopic = useCallback(async (scope: string, workspaceRoot: string, topicId: string) => {
     closeTransientOverlays();
@@ -2620,10 +2663,10 @@ export default function App() {
               </div>
             ) : (
               <Transcript
-                items={state.items}
+                items={displayItems}
                 live={state.live}
                 footerHeight={footerHeight}
-                onPrompt={send}
+                onPrompt={commitThenSend}
                 onRewind={handleMessageAction}
                 checkpoints={state.checkpoints}
                 actionPending={state.messageAction != null}
@@ -2636,8 +2679,16 @@ export default function App() {
           {!sidebarImDetailConnection && (
           <footer className="footer" ref={footerRef}>
             {showTodos && <TodoPanel todos={todos} onDismiss={() => setDismissedTodo(todoItem!.id)} />}
-            {rewindUndo && (
-              <UndoRewindBanner meta={rewindUndo} onDismiss={() => setRewindUndo(null)} />
+            {rewindState && (
+              <UndoRewindBanner
+                meta={{
+                  turns: rewindState.turnDiff,
+                  filesRestored: [], // optimistic: files haven't changed yet
+                  filesRemoved: [],
+                  onUndo: () => setRewindState(null),
+                }}
+                onDismiss={() => setRewindState(null)}
+              />
             )}
             {state.approval && (
               <ApprovalModal
