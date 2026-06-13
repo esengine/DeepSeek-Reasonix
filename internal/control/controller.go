@@ -2442,13 +2442,43 @@ func (c *Controller) Label() string { return c.label }
 // Empty means no scoping is in effect.
 func (c *Controller) WorkspaceRoot() string { return c.cpRoot }
 
+// InheritLifecycleFrom carries same-session lifecycle state across controller
+// rebuilds, such as model switches that preserve the conversation.
+func (c *Controller) InheritLifecycleFrom(prev *Controller) {
+	if prev == nil {
+		return
+	}
+	prev.mu.Lock()
+	started := prev.startedOnce
+	turn := prev.turn
+	prev.mu.Unlock()
+
+	c.mu.Lock()
+	c.startedOnce = started
+	if c.turn < turn {
+		c.turn = turn
+	}
+	c.mu.Unlock()
+}
+
+// ReleaseResources stops plugin subprocesses and releases resources without
+// firing SessionEnd. Use it only when replacing the controller for the same
+// logical session.
+func (c *Controller) ReleaseResources() {
+	c.close(false)
+}
+
 // Close stops plugin subprocesses and releases resources. A session that ever
 // started fires SessionEnd so a teardown hook runs.
 func (c *Controller) Close() {
+	c.close(true)
+}
+
+func (c *Controller) close(fireSessionEnd bool) {
 	c.mu.Lock()
 	started := c.startedOnce
 	c.mu.Unlock()
-	if started {
+	if fireSessionEnd && started {
 		c.hooks.SessionEnd(context.Background())
 	}
 	if c.jobs != nil {
