@@ -151,7 +151,7 @@ func TestTermuxNativeScrollbackDefaultsToExpandedReasoning(t *testing.T) {
 // same column count — no trailing characters for \033[K to leave behind.
 func TestCompletionMenuFixedWidth(t *testing.T) {
 	ctrl := control.New(control.Options{})
-	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80, nil)
 	m.width = 80
 	m.completion.active = true
 	m.completion.items = []compItem{
@@ -180,7 +180,7 @@ func TestCompletionMenuFixedWidth(t *testing.T) {
 // halves of CJK glyphs when those sequences clear Chinese skill descriptions.
 func TestCompletionMenuPadsWithNonBreakingSpaces(t *testing.T) {
 	ctrl := control.New(control.Options{})
-	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80, nil)
 	m.width = 80
 	m.completion.active = true
 	m.completion.items = []compItem{
@@ -235,7 +235,7 @@ func TestTranscriptViewportSizing(t *testing.T) {
 // overlap.
 func TestStatusLineWrapAccounting(t *testing.T) {
 	ctrl := control.New(control.Options{})
-	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 30)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 30, nil)
 
 	// Narrow terminal: mode+state line and data line will both wrap.
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 30, Height: 12})
@@ -287,7 +287,7 @@ func TestStatusLineWrapAccounting(t *testing.T) {
 // hide the bottom row of the viewport.
 func TestStatusLineRenderedHeightMatchesBudget(t *testing.T) {
 	ctrl := control.New(control.Options{})
-	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 46)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 46, nil)
 
 	// Manually set a long git repo/branch so the status line contains CJK.
 	m.missing = ""
@@ -431,7 +431,7 @@ func TestClearCommandRequiresConfirmationAndDiscardsSession(t *testing.T) {
 	if err := ctrl.Snapshot(); err != nil {
 		t.Fatal(err)
 	}
-	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80, nil)
 
 	if cmd := m.runSlashCommand("/clear"); cmd != nil {
 		t.Fatal("/clear should open a local confirmation without returning a command")
@@ -826,7 +826,7 @@ func TestCtrlHomeEndScrollKeyBindings(t *testing.T) {
 		return n.(chatTUI)
 	}
 
-	cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
+	cur := adv(newChatTUI(ctrl, "", ch, 80, nil), tea.WindowSizeMsg{Width: 80, Height: 8})
 	for i := 0; i < 12; i++ {
 		cur = adv(cur, notice)
 	}
@@ -1793,8 +1793,8 @@ func TestTruncateSubject(t *testing.T) {
 // the copy the user can still press Ctrl+C again to clear the composer.
 func TestCtrlCCopyBeatsClearInput(t *testing.T) {
 	var copied string
-	clipboardWriteAll = func(text string) error { copied = text; return nil }
-	defer func() { clipboardWriteAll = clipboard.WriteAll }()
+	clipboardWrite = func(text string) error { copied = text; return nil }
+	defer func() { clipboardWrite = clipboard.Write }()
 
 	m := newTestChatTUI()
 	m.input.SetValue("draft I'm typing") // non-empty composer

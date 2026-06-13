@@ -176,6 +176,8 @@ var ChineseTraditional = Messages{
 	CmdAutoPlan:     "設定自動計畫模式",
 	CmdReasonLang:   "設定可見思考語言",
 	CmdHelp:         "檢視命令列表",
+	CmdContext:      "檢視上下文構成（tokens、工具、輪次）",
+	CmdStats:        "檢視會話總消耗",
 	CmdTodo:         "清除任務清單",
 	CmdQuit:         "退出會話",
 	ArgSkillList:    "列出 skills",

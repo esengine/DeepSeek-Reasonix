@@ -260,7 +260,7 @@ func renderStatuslineViewWithShortcutLayout(t *testing.T, layout string) string 
 	t.Helper()
 
 	ctrl := control.New(control.Options{})
-	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80, nil)
 	m.cfg = config.Default()
 	if err := m.cfg.SetUIShortcutLayout(layout); err != nil {
 		t.Fatal(err)
@@ -285,6 +285,38 @@ func renderStatuslineViewWithGitAndEffort(t *testing.T) string {
 
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 120, nil)
+	m.label = "deepseek-v4-flash"
+	m.effortLevel = "auto"
+	m.gitStatus = gitStatus{
+		Repo:      "Reasonix",
+		Branch:    "codex/demo",
+		Added:     3,
+		Removed:   1,
+		Untracked: 2,
+	}
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	return next.(chatTUI).View().Content
+}
+
+func renderStatuslineViewWithCache(t *testing.T) string {
+	t.Helper()
+
+	prov := testutil.NewMock("deepseek-v4-flash", testutil.Turn{
+		Text: "ok",
+		Usage: &provider.Usage{
+			CacheHitTokens:   900,
+			CacheMissTokens:  100,
+			CompletionTokens: 50,
+			PromptTokens:     1000,
+			TotalTokens:      1050,
+		},
+	})
+	exec := agent.New(prov, tool.NewRegistry(), agent.NewSession(""), agent.Options{MaxSteps: 1, ContextWindow: 200_000}, event.Discard)
+	if err := exec.Run(context.Background(), "hello"); err != nil {
+		t.Fatalf("seed agent usage: %v", err)
+	}
+	ctrl := control.New(control.Options{Executor: exec})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 160, nil)
 	m.label = "deepseek-v4-flash"
 	m.effortLevel = "auto"
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
