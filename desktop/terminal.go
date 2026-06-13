@@ -91,7 +91,7 @@ func (a *App) startTerminalAt(dir string) (string, error) {
 	}
 
 	ctx, cancel := context.WithCancel(a.bootContext())
-	cmd := exec.CommandContext(ctx, shell)
+	cmd := exec.CommandContext(ctx, shell, "-i")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"TERM=xterm-256color",

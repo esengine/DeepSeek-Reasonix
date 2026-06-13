@@ -59,7 +59,7 @@ export function TerminalPanel({ active, openPathRequest }: { active: boolean; op
     const newTab: TerminalTab = { id: `tab-${Date.now()}`, sessionID, label, term, fit };
     setTabs((prev) => {
       const next = [...prev, newTab];
-      if (!activeIDRef.current) setActiveTabID(newTab.id);
+      setActiveTabID(newTab.id);
       return next;
     });
 
@@ -74,14 +74,22 @@ export function TerminalPanel({ active, openPathRequest }: { active: boolean; op
         tab.term.dispose();
       }
       const next = prev.filter((t) => t.id !== tabID);
-      if (activeIDRef.current === tabID) {
+      if (next.length === 0) {
+        // All closed — restart a fresh terminal.
+        void app.StartTerminal().then((result) => {
+          if (result && !result.startsWith("failed:")) {
+            void createTab("Terminal", result);
+          }
+        });
+        setActiveTabID(null);
+      } else if (activeIDRef.current === tabID) {
         const idx = prev.findIndex((t) => t.id === tabID);
         const newActive = next[Math.min(idx, next.length - 1)];
         setActiveTabID(newActive?.id ?? null);
       }
       return next;
     });
-  }, []);
+  }, [createTab]);
 
   // Resize observer for active terminal — debounced with rAF.
   useEffect(() => {
@@ -217,14 +225,12 @@ export function TerminalPanel({ active, openPathRequest }: { active: boolean; op
             onClick={() => setActiveTabID(tab.id)}
           >
             <span className="terminal-tab__label">{tab.label}</span>
-            {tabs.length > 1 && (
-              <span
-                className="terminal-tab__close"
-                onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
-              >
-                <X size={10} />
-              </span>
-            )}
+            <span
+              className="terminal-tab__close"
+              onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
+            >
+              <X size={10} />
+            </span>
           </button>
         ))}
         <button className="terminal-tab terminal-tab--new" onClick={handleNewTab} title="New terminal">
