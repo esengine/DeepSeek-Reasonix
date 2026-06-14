@@ -13,6 +13,7 @@
 
 - [能做什么](#能做什么)
 - [连接三个渠道](#连接三个渠道)
+- [无界面运行 Bot](#无界面运行-bot)
 - [使用流程](#使用流程)
 - [三种渠道的交互差异](#三种渠道的交互差异)
 - [命令速查](#命令速查)
@@ -81,6 +82,40 @@ flowchart LR
 5. 给微信 Bot 发送消息。
 
 微信没有交互卡片按钮，因此审批和问答主要通过文字命令完成。
+
+## 无界面运行 Bot
+
+桌面端是创建和测试 Bot 连接最简单的入口，但 Bot 运行时也可以作为长期运行的
+无界面网关启动：
+
+```sh
+reasonix bot doctor
+reasonix bot start --channels feishu,lark,weixin --dir /path/to/project
+```
+
+`--channels` 用来选择接受哪些已配置的 IM 输入。`feishu` 和 `lark` 会选择对应
+飞书系连接，`weixin` 会选择已保存的微信 iLink 账号，`qq` 会选择已配置的 QQ
+Bot。`--dir` 用来把远端消息绑定到某个项目工作区，`--model` 可以为这个进程
+临时覆盖默认模型。
+
+无界面网关复用桌面端保存的同一套配置：
+
+- `[[bot.connections]]` 标识每个 IM 输入。`provider` 是适配器类型
+  （`feishu`、`weixin` 或 `qq`），`domain` 用来区分飞书和 Lark 等变体。
+- `credential.app_id`、`credential.app_secret_env`、`credential.account_id`
+  和 `credential.token_env` 指向应用 ID、应用密钥、保存的账号或 token。
+  密钥仍保存在环境变量或 Reasonix 用户凭据中。
+- `workspace_root`、`model` 和 `tool_approval_mode` 可以按连接单独设置，
+  因此不同 IM 渠道可以路由到不同本地项目或审批模式。
+- `session_mappings` 会根据收到的远端消息自动填充远端 chat ID 和作用域。
+  只有当该映射同时具备本地 `session_id` 目标时，桌面端才能打开对应会话；
+  例如桌面端托管的 Bot runtime 保存了 `path:` 会话目标，或用户手动配置了
+  映射目标。
+
+访问控制仍然是必需项。你需要在 `[bot.allowlist]` 下为对应平台至少配置一个
+用户 ID，或者有意设置 `allow_all = true`。群 ID 是群聊里的额外收窄条件，
+不能替代用户白名单。远端用户进入的是同一个 Reasonix controller、权限策略、
+工具审批模式和沙盒边界，和本地桌面端或 CLI 回合一致。
 
 ## 使用流程
 

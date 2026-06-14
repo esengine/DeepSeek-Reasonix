@@ -201,6 +201,12 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 	return out, nil
 }
 
+// SessionPreview returns the same preview and user-turn count used by
+// ListSessions for one session file.
+func SessionPreview(path string) (string, int) {
+	return previewSession(path)
+}
+
 // previewSession returns the first user message (truncated) and the number of
 // user-role messages so the picker can show "5 turns · 'help me debug the…'".
 // Errors are swallowed — a malformed file just shows up with an empty preview.

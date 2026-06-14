@@ -13,7 +13,7 @@ export function renderLogin(n?: { kind: "err" | "ok"; text: string }): string {
   return authShell(
     "Reasonix · Sign in",
     "sign in",
-    `<h1>Sign in</h1><p class="sub">Crash &amp; telemetry dashboard</p>${notice(n)}
+    `<h1>Sign in</h1><p class="sub">Diagnostic reports &amp; telemetry dashboard</p>${notice(n)}
 <form method="post" action="/login">
 <div class="field"><label>Email</label><input type="email" name="email" autocomplete="username" required></div>
 <div class="field"><label>Password</label><input type="password" name="password" autocomplete="current-password" required></div>
@@ -40,7 +40,7 @@ export function renderRegister(n?: { kind: "err" | "ok"; text: string }): string
 export function renderAccount(user: User, n?: { kind: "err" | "ok"; text: string }): string {
   const pending = user.role === "pending";
   const status = pending
-    ? `<div class="notice err">Your account is awaiting approval. An admin needs to grant you access before the crash dashboard becomes visible.</div>`
+    ? `<div class="notice err">Your account is awaiting approval. An admin needs to grant you access before the diagnostic reports dashboard becomes visible.</div>`
     : `<div class="notice ok">You have <b>${esc(user.role)}</b> access. <a href="/stats">Open the dashboard →</a></div>`;
   return page(
     "Reasonix · Account",

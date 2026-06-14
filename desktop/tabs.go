@@ -253,9 +253,11 @@ func (t *WorkspaceTab) telemetrySnapshot() tabTelemetrySnapshot {
 // tabEventSink wraps a parent event.Sink and prepends a tabId to every wire
 // event so the frontend can route it to the correct tab's reducer.
 type tabEventSink struct {
-	tabID string
-	app   *App
-	ctx   context.Context
+	tabID         string
+	app           *App
+	mu            sync.RWMutex
+	ctx           context.Context
+	runtimeEvents asyncRuntimeEmitter
 }
 
 func (s *tabEventSink) Emit(e event.Event) {
@@ -275,9 +277,7 @@ func (s *tabEventSink) Emit(e event.Event) {
 			}
 		}
 	}
-	if s.ctx != nil {
-		runtime.EventsEmit(s.ctx, eventChannel, toWireTab(e, s.tabID))
-	}
+	s.emitRuntimeEvent(eventChannel, toWireTab(e, s.tabID))
 	if s.app != nil {
 		if status, update := topicActivityStatusFromEvent(e); update && s.app.setTabActivityStatus(s.tabID, status) {
 			s.app.emitProjectTreeChanged()
@@ -290,6 +290,111 @@ func (s *tabEventSink) Emit(e event.Event) {
 	// Persist after each turn so a force-kill loses at most the in-flight prompt.
 	if e.Kind == event.TurnDone && s.app != nil {
 		s.app.scheduleTabSnapshot(s.tabID)
+	}
+}
+
+func (s *tabEventSink) setContext(ctx context.Context) {
+	s.mu.Lock()
+	s.ctx = ctx
+	s.mu.Unlock()
+}
+
+func (s *tabEventSink) clearContext() {
+	s.mu.Lock()
+	s.ctx = nil
+	s.mu.Unlock()
+	s.runtimeEvents.Clear()
+}
+
+func (s *tabEventSink) context() context.Context {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ctx
+}
+
+func (s *tabEventSink) emitRuntimeEvent(name string, payload ...interface{}) {
+	if s == nil {
+		return
+	}
+	ctx := s.context()
+	if ctx == nil {
+		return
+	}
+	s.runtimeEvents.Emit(ctx, name, payload...)
+}
+
+type runtimeEventEmitFunc func(context.Context, string, ...interface{})
+
+type runtimeEventEnvelope struct {
+	ctx     context.Context
+	name    string
+	payload []interface{}
+}
+
+// asyncRuntimeEmitter decouples Wails' runtime event bridge from agent
+// emission. runtime.EventsEmit can block when the single webview event channel
+// backs up; callers enqueue in-order work and return without holding the
+// agent's event.Sync lock.
+type asyncRuntimeEmitter struct {
+	mu      sync.Mutex
+	emit    runtimeEventEmitFunc
+	queue   []runtimeEventEnvelope
+	head    int
+	running bool
+}
+
+func (e *asyncRuntimeEmitter) Emit(ctx context.Context, name string, payload ...interface{}) {
+	if ctx == nil {
+		return
+	}
+	item := runtimeEventEnvelope{
+		ctx:     ctx,
+		name:    name,
+		payload: append([]interface{}(nil), payload...),
+	}
+	e.mu.Lock()
+	e.queue = append(e.queue, item)
+	if !e.running {
+		e.running = true
+		go e.run()
+	}
+	e.mu.Unlock()
+}
+
+func (e *asyncRuntimeEmitter) Clear() {
+	e.mu.Lock()
+	clear(e.queue)
+	e.queue = nil
+	e.head = 0
+	e.mu.Unlock()
+}
+
+func (e *asyncRuntimeEmitter) run() {
+	for {
+		e.mu.Lock()
+		if e.head >= len(e.queue) {
+			clear(e.queue)
+			e.queue = nil
+			e.head = 0
+			e.running = false
+			e.mu.Unlock()
+			return
+		}
+		item := e.queue[e.head]
+		var zero runtimeEventEnvelope
+		e.queue[e.head] = zero
+		e.head++
+		if e.head > 64 && e.head*2 >= len(e.queue) {
+			e.queue = append([]runtimeEventEnvelope(nil), e.queue[e.head:]...)
+			e.head = 0
+		}
+		emit := e.emit
+		if emit == nil {
+			emit = runtime.EventsEmit
+		}
+		e.mu.Unlock()
+
+		emit(item.ctx, item.name, item.payload...)
 	}
 }
 
@@ -842,6 +947,7 @@ func (a *App) indexedBlankTopicIDLocked(scope, workspaceRoot string) string {
 		}
 		openTopics[tab.TopicID] = true
 	}
+	sessionIndex, _ := topicSessionIndexForDir(config.SessionDir())
 	for _, topicID := range topicIDs {
 		if openTopics[topicID] {
 			continue
@@ -849,7 +955,7 @@ func (a *App) indexedBlankTopicIDLocked(scope, workspaceRoot string) string {
 		if topicTitleForTab(scope, workspaceRoot, topicID) != defaultTopicTitle {
 			continue
 		}
-		if findTopicSession(config.SessionDir(), topicID) != "" {
+		if topicSessionIndexHasTopic(sessionIndex, topicID) {
 			continue
 		}
 		return topicID
@@ -952,7 +1058,7 @@ func (a *App) CloseTab(tabID string) error {
 		tab.Ctrl.Close()
 	}
 	if tab.sink != nil {
-		tab.sink.ctx = nil // stop further emissions (nil ctx → Emit becomes no-op)
+		tab.sink.clearContext() // stop further emissions (nil ctx -> Emit becomes no-op)
 	}
 	return nil
 }
@@ -1014,7 +1120,7 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 	a.mu.Unlock()
 
 	if tab.sink != nil {
-		tab.sink.ctx = wailsCtx
+		tab.sink.setContext(wailsCtx)
 	}
 
 	sessionDir := desktopSessionDir(root)
@@ -1333,18 +1439,21 @@ const tabsFileName = "desktop-tabs.json"
 const desktopGlobalOrderToken = "__global__"
 
 type desktopProject struct {
-	Root   string   `json:"root"`
-	Title  string   `json:"title,omitempty"`
-	Color  string   `json:"color,omitempty"`
-	Topics []string `json:"topics"` // ordered topic IDs
+	Root         string   `json:"root"`
+	Title        string   `json:"title,omitempty"`
+	Color        string   `json:"color,omitempty"`
+	Topics       []string `json:"topics"` // ordered topic IDs
+	PinnedTopics []string `json:"pinnedTopics,omitempty"`
 }
 
 type desktopProjectFile struct {
-	GlobalTitle  string           `json:"globalTitle,omitempty"`
-	GlobalColor  string           `json:"globalColor,omitempty"`
-	GlobalTopics []string         `json:"globalTopics,omitempty"`
-	SidebarOrder []string         `json:"sidebarOrder,omitempty"`
-	Projects     []desktopProject `json:"projects"`
+	GlobalTitle        string           `json:"globalTitle,omitempty"`
+	GlobalColor        string           `json:"globalColor,omitempty"`
+	GlobalTopics       []string         `json:"globalTopics,omitempty"`
+	GlobalPinnedTopics []string         `json:"globalPinnedTopics,omitempty"`
+	PinnedProjects     []string         `json:"pinnedProjects,omitempty"`
+	SidebarOrder       []string         `json:"sidebarOrder,omitempty"`
+	Projects           []desktopProject `json:"projects"`
 }
 
 type desktopTabEntry struct {
@@ -1528,9 +1637,10 @@ func normalizeProjectRoot(root string) string {
 
 func normalizeProjectsFile(f desktopProjectFile) desktopProjectFile {
 	out := desktopProjectFile{
-		GlobalTitle:  strings.TrimSpace(f.GlobalTitle),
-		GlobalColor:  normalizeProjectColor(f.GlobalColor),
-		GlobalTopics: uniqueStrings(f.GlobalTopics),
+		GlobalTitle:        strings.TrimSpace(f.GlobalTitle),
+		GlobalColor:        normalizeProjectColor(f.GlobalColor),
+		GlobalTopics:       uniqueStrings(f.GlobalTopics),
+		GlobalPinnedTopics: uniqueStrings(f.GlobalPinnedTopics),
 	}
 	index := map[string]int{}
 	for _, p := range f.Projects {
@@ -1542,6 +1652,7 @@ func normalizeProjectsFile(f desktopProjectFile) desktopProjectFile {
 		p.Title = strings.TrimSpace(p.Title)
 		p.Color = normalizeProjectColor(p.Color)
 		p.Topics = uniqueStrings(p.Topics)
+		p.PinnedTopics = uniqueStrings(p.PinnedTopics)
 		if i, ok := index[root]; ok {
 			if out.Projects[i].Title == "" && p.Title != "" {
 				out.Projects[i].Title = p.Title
@@ -1550,10 +1661,21 @@ func normalizeProjectsFile(f desktopProjectFile) desktopProjectFile {
 				out.Projects[i].Color = p.Color
 			}
 			out.Projects[i].Topics = uniqueStrings(append(out.Projects[i].Topics, p.Topics...))
+			out.Projects[i].PinnedTopics = uniqueStrings(append(out.Projects[i].PinnedTopics, p.PinnedTopics...))
 			continue
 		}
 		index[root] = len(out.Projects)
 		out.Projects = append(out.Projects, p)
+	}
+	projectRoots := make(map[string]bool, len(out.Projects))
+	for _, project := range out.Projects {
+		projectRoots[project.Root] = true
+	}
+	for _, root := range uniqueStrings(f.PinnedProjects) {
+		root = normalizeProjectRoot(root)
+		if root != "" && projectRoots[root] && !containsDesktopString(out.PinnedProjects, root) {
+			out.PinnedProjects = append(out.PinnedProjects, root)
+		}
 	}
 	out.SidebarOrder = normalizeSidebarOrder(f.SidebarOrder, out.Projects)
 	return out
@@ -1618,6 +1740,43 @@ func removeString(values []string, value string) []string {
 	for _, item := range uniqueStrings(values) {
 		if item != value {
 			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func containsDesktopString(values []string, value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	for _, item := range uniqueStrings(values) {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func pinnedTopicIDs(topicIDs []string, pinned []string) []string {
+	if len(topicIDs) == 0 || len(pinned) == 0 {
+		return topicIDs
+	}
+	available := make(map[string]bool, len(topicIDs))
+	for _, tid := range topicIDs {
+		available[tid] = true
+	}
+	out := make([]string, 0, len(topicIDs))
+	seen := make(map[string]bool, len(topicIDs))
+	for _, tid := range uniqueStrings(pinned) {
+		if available[tid] && !seen[tid] {
+			out = append(out, tid)
+			seen[tid] = true
+		}
+	}
+	for _, tid := range topicIDs {
+		if !seen[tid] {
+			out = append(out, tid)
 		}
 	}
 	return out
@@ -1690,6 +1849,37 @@ func applyProjectTreeOrder(nodes []ProjectNode, order []string) []ProjectNode {
 		}
 		if key != "" {
 			seen[key] = true
+		}
+		out = append(out, node)
+	}
+	return out
+}
+
+func applyPinnedProjectOrder(nodes []ProjectNode, pinnedRoots []string) []ProjectNode {
+	pinnedRoots = uniqueStrings(pinnedRoots)
+	if len(pinnedRoots) == 0 {
+		return nodes
+	}
+	byRoot := make(map[string]ProjectNode, len(nodes))
+	for _, node := range nodes {
+		if node.Kind == "project" && node.Root != "" {
+			byRoot[normalizeProjectRoot(node.Root)] = node
+		}
+	}
+	seen := make(map[string]bool, len(pinnedRoots))
+	out := make([]ProjectNode, 0, len(nodes))
+	for _, root := range pinnedRoots {
+		root = normalizeProjectRoot(root)
+		node, ok := byRoot[root]
+		if !ok || seen[root] {
+			continue
+		}
+		seen[root] = true
+		out = append(out, node)
+	}
+	for _, node := range nodes {
+		if node.Kind == "project" && node.Root != "" && seen[normalizeProjectRoot(node.Root)] {
+			continue
 		}
 		out = append(out, node)
 	}
@@ -2099,6 +2289,7 @@ type ProjectNode struct {
 	Open           bool          `json:"open,omitempty"`
 	Running        bool          `json:"running,omitempty"`
 	Status         string        `json:"status,omitempty"`
+	Pinned         bool          `json:"pinned,omitempty"`
 	Children       []ProjectNode `json:"children,omitempty"`
 }
 
@@ -2190,27 +2381,38 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 	}
 	legacyMigrationMu.Lock()
 	defer legacyMigrationMu.Unlock()
-	infos, err := agent.ListSessions(dir)
+	infos, err := agent.ListSessionOrder(dir)
 	if err != nil || len(infos) == 0 {
 		return nil
 	}
-	titles := loadSessionTitles(dir)
-	topicTitles := loadTopicTitles(topicTitleRoot)
-	topicSources := loadTopicTitleSources(topicTitleRoot)
-	f := loadProjectsFile()
 
 	var migratedTopicIDs []string
+	var titles map[string]string
+	var topicTitles map[string]string
+	var topicSources map[string]string
 	for _, info := range infos {
 		if strings.TrimSpace(info.TopicID) != "" {
+			continue
+		}
+		if meta, ok, err := agent.LoadBranchMeta(info.Path); err != nil {
+			continue
+		} else if ok && (meta.Scope != "" || strings.TrimSpace(meta.WorkspaceRoot) != "" || strings.TrimSpace(meta.TopicID) != "") {
 			continue
 		}
 		topicID := legacySessionTopicID(info.Path)
 		if topicID == "" {
 			continue
 		}
+		preview, turns := agent.SessionPreview(info.Path)
+		if turns == 0 {
+			continue
+		}
+		if titles == nil {
+			titles = loadSessionTitles(dir)
+		}
 		title := strings.TrimSpace(titles[filepath.Base(info.Path)])
 		if title == "" {
-			title = topicTitleFromText(info.Preview)
+			title = topicTitleFromText(preview)
 		} else if normalized := topicTitleFromText(title); normalized != "" {
 			title = normalized
 		}
@@ -2242,6 +2444,12 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 		if err := agent.SaveBranchMetaPreserveUpdated(info.Path, meta); err != nil {
 			continue
 		}
+		if topicTitles == nil {
+			topicTitles = loadTopicTitles(topicTitleRoot)
+		}
+		if topicSources == nil {
+			topicSources = loadTopicTitleSources(topicTitleRoot)
+		}
 		if strings.TrimSpace(topicTitles[topicID]) == "" {
 			topicTitles[topicID] = title
 			topicSources[topicID] = topicTitleSourceManual
@@ -2251,6 +2459,7 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 	if len(migratedTopicIDs) == 0 {
 		return nil
 	}
+	f := loadProjectsFile()
 	if scope == "global" {
 		f.GlobalTopics = uniqueStrings(append(migratedTopicIDs, f.GlobalTopics...))
 	} else {
@@ -2263,8 +2472,13 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 		}
 	}
 	_ = saveProjectsFile(f)
-	_ = saveTopicTitles(topicTitleRoot, topicTitles)
-	_ = saveTopicTitleSources(topicTitleRoot, topicSources)
+	if topicTitles != nil {
+		_ = saveTopicTitles(topicTitleRoot, topicTitles)
+	}
+	if topicSources != nil {
+		_ = saveTopicTitleSources(topicTitleRoot, topicSources)
+	}
+	invalidateTopicSessionIndex(dir)
 	return migratedTopicIDs
 }
 
@@ -2338,7 +2552,11 @@ func restoreSessionTopicIndex(dir, sessionPath string) error {
 	if err := saveProjectsFile(f); err != nil {
 		return err
 	}
-	return agent.SaveBranchMetaPreserveUpdated(sessionPath, meta)
+	if err := agent.SaveBranchMetaPreserveUpdated(sessionPath, meta); err != nil {
+		return err
+	}
+	invalidateTopicSessionIndexForPath(sessionPath)
+	return nil
 }
 
 func restoredSessionTopicTitle(dir, sessionPath string, meta agent.BranchMeta) string {
@@ -2451,6 +2669,36 @@ func (a *App) RenameProject(workspaceRoot, title string) error {
 // in the sidebar and tabs. Empty color restores the default accent.
 func (a *App) SetProjectColor(workspaceRoot, color string) error {
 	if err := setProjectColor(workspaceRoot, color); err != nil {
+		return err
+	}
+	a.emitProjectTreeChanged()
+	return nil
+}
+
+// SetProjectPinned controls whether a project folder is pinned above the rest of
+// the desktop project tree.
+func (a *App) SetProjectPinned(workspaceRoot string, pinned bool) error {
+	root := normalizeProjectRoot(workspaceRoot)
+	if root == "" {
+		return fmt.Errorf("workspaceRoot is required")
+	}
+	f := loadProjectsFile()
+	found := false
+	for _, project := range f.Projects {
+		if project.Root == root {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("project %q not found", root)
+	}
+	if pinned {
+		f.PinnedProjects = prependUniqueString(f.PinnedProjects, root)
+	} else {
+		f.PinnedProjects = removeString(f.PinnedProjects, root)
+	}
+	if err := saveProjectsFile(f); err != nil {
 		return err
 	}
 	a.emitProjectTreeChanged()
@@ -2606,20 +2854,15 @@ func (a *App) updateTopicSessionTitles(topicID, title string) {
 		return
 	}
 	for _, dir := range a.knownSessionDirs() {
-		infos, err := agent.ListSessions(dir)
-		if err != nil {
-			continue
-		}
-		for _, info := range infos {
-			if info.TopicID != topicID {
-				continue
-			}
-			meta, ok, err := agent.LoadBranchMeta(info.Path)
+		for _, match := range topicSessionMatches(dir, topicID) {
+			meta, ok, err := agent.LoadBranchMeta(match.path)
 			if err != nil || !ok {
 				continue
 			}
 			meta.TopicTitle = title
-			_ = agent.SaveBranchMetaPreserveUpdated(info.Path, meta)
+			if err := agent.SaveBranchMetaPreserveUpdated(match.path, meta); err == nil {
+				invalidateTopicSessionIndex(dir)
+			}
 		}
 	}
 }
@@ -2640,9 +2883,14 @@ func (a *App) setTabActivityStatus(tabID, status string) bool {
 }
 
 func (a *App) emitProjectTreeChanged() {
-	if a.ctx != nil {
-		runtime.EventsEmit(a.ctx, "project-tree:changed")
+	a.emitRuntimeEvent("project-tree:changed")
+}
+
+func (a *App) emitRuntimeEvent(name string, payload ...interface{}) {
+	if a == nil || a.ctx == nil {
+		return
 	}
+	a.runtimeEvents.Emit(a.ctx, name, payload...)
 }
 
 // DeleteTopic removes a topic and its title metadata.
@@ -2672,6 +2920,7 @@ func (a *App) DeleteTopic(topicID string) error {
 			_ = saveTopicTitleSources("", sources)
 			deleteTopicCreatedAt("", topicID)
 			f.GlobalTopics = removeString(f.GlobalTopics, topicID)
+			f.GlobalPinnedTopics = removeString(f.GlobalPinnedTopics, topicID)
 			found = true
 		}
 	}
@@ -2679,6 +2928,7 @@ func (a *App) DeleteTopic(topicID string) error {
 		return fmt.Errorf("topic %q not found", topicID)
 	}
 	// Remove from project topic list.
+	f.GlobalPinnedTopics = removeString(f.GlobalPinnedTopics, topicID)
 	for i, p := range f.Projects {
 		for j, tid := range p.Topics {
 			if tid == topicID {
@@ -2686,8 +2936,49 @@ func (a *App) DeleteTopic(topicID string) error {
 				break
 			}
 		}
+		f.Projects[i].PinnedTopics = removeString(f.Projects[i].PinnedTopics, topicID)
 	}
 	_ = saveProjectsFile(f)
+	a.emitProjectTreeChanged()
+	return nil
+}
+
+// SetTopicPinned controls whether a topic is pinned to the top of its project
+// or Global section in the desktop project tree.
+func (a *App) SetTopicPinned(topicID string, pinned bool) error {
+	topicID = strings.TrimSpace(topicID)
+	if topicID == "" {
+		return fmt.Errorf("topicID is required")
+	}
+	f := loadProjectsFile()
+	for i, p := range f.Projects {
+		m := loadTopicTitles(p.Root)
+		if _, ok := m[topicID]; !ok && !containsDesktopString(p.Topics, topicID) {
+			continue
+		}
+		if pinned {
+			f.Projects[i].PinnedTopics = prependUniqueString(f.Projects[i].PinnedTopics, topicID)
+		} else {
+			f.Projects[i].PinnedTopics = removeString(f.Projects[i].PinnedTopics, topicID)
+		}
+		if err := saveProjectsFile(f); err != nil {
+			return err
+		}
+		a.emitProjectTreeChanged()
+		return nil
+	}
+	globalTitles := loadTopicTitles("")
+	if _, ok := globalTitles[topicID]; !ok && !containsDesktopString(f.GlobalTopics, topicID) {
+		return fmt.Errorf("topic %q not found", topicID)
+	}
+	if pinned {
+		f.GlobalPinnedTopics = prependUniqueString(f.GlobalPinnedTopics, topicID)
+	} else {
+		f.GlobalPinnedTopics = removeString(f.GlobalPinnedTopics, topicID)
+	}
+	if err := saveProjectsFile(f); err != nil {
+		return err
+	}
 	a.emitProjectTreeChanged()
 	return nil
 }
@@ -2738,7 +3029,7 @@ func (a *App) TrashTopic(topicID string) error {
 			item.ctrl.Close()
 		}
 		if item.sink != nil {
-			item.sink.ctx = nil
+			item.sink.clearContext()
 		}
 	}
 
@@ -2872,12 +3163,13 @@ func (a *App) ListProjectTree() []ProjectNode {
 			globalTitle = "Global"
 		}
 		globalColor := normalizeProjectColor(f.GlobalColor)
-		globalTopicIDs := orderedTopicIDs(f.GlobalTopics, globalTitleMap)
+		globalTopicIDs := pinnedTopicIDs(orderedTopicIDs(f.GlobalTopics, globalTitleMap), f.GlobalPinnedTopics)
 		children := make([]ProjectNode, 0, len(globalTopicIDs))
 		for _, id := range globalTopicIDs {
 			title := globalTitleMap[id]
 			summary := topicSummaries[topicSummaryKey("global", "", id)]
 			status := openTopics[topicSummaryKey("global", "", id)]
+			pinned := containsDesktopString(f.GlobalPinnedTopics, id)
 			children = append(children, ProjectNode{
 				Key:            "global_topic_" + id,
 				Kind:           "global_topic",
@@ -2890,6 +3182,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 				Open:           status.open,
 				Running:        status.running,
 				Status:         status.status,
+				Pinned:         pinned,
 			})
 		}
 		out = append(out, ProjectNode{
@@ -2909,15 +3202,16 @@ func (a *App) ListProjectTree() []ProjectNode {
 			title = workspaceName(p.Root)
 		}
 		node := ProjectNode{
-			Key:  "project_" + p.Root,
-			Kind: "project",
-			Root: p.Root,
+			Key:    "project_" + p.Root,
+			Kind:   "project",
+			Root:   p.Root,
+			Pinned: containsDesktopString(f.PinnedProjects, p.Root),
 		}
 
 		// Gather topics: explicit topic list + all known topic titles.
 		titleMap := loadTopicTitles(p.Root)
 		createdMap := loadTopicCreatedAts(p.Root)
-		topicIDs := orderedTopicIDs(p.Topics, titleMap)
+		topicIDs := pinnedTopicIDs(orderedTopicIDs(p.Topics, titleMap), p.PinnedTopics)
 
 		children := make([]ProjectNode, 0, len(topicIDs))
 		for _, tid := range topicIDs {
@@ -2927,6 +3221,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 			}
 			summary := topicSummaries[topicSummaryKey("project", p.Root, tid)]
 			status := openTopics[topicSummaryKey("project", p.Root, tid)]
+			pinned := containsDesktopString(p.PinnedTopics, tid)
 			children = append(children, ProjectNode{
 				Key:            "topic_" + tid,
 				Kind:           "topic",
@@ -2940,6 +3235,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 				Open:           status.open,
 				Running:        status.running,
 				Status:         status.status,
+				Pinned:         pinned,
 			})
 		}
 		node.Label = title
@@ -2948,7 +3244,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 		out = append(out, node)
 	}
 
-	return applyProjectTreeOrder(out, f.SidebarOrder)
+	return applyPinnedProjectOrder(applyProjectTreeOrder(out, f.SidebarOrder), f.PinnedProjects)
 }
 
 func topicSummaryKey(scope, workspaceRoot, topicID string) string {
@@ -3290,7 +3586,11 @@ func saveTabSessionMeta(tab *WorkspaceTab, path string) error {
 	m.WorkspaceRoot = tab.WorkspaceRoot
 	m.TopicID = tab.TopicID
 	m.TopicTitle = tab.TopicTitle
-	return agent.SaveBranchMetaPreserveUpdated(path, m)
+	if err := agent.SaveBranchMetaPreserveUpdated(path, m); err != nil {
+		return err
+	}
+	invalidateTopicSessionIndexForPath(path)
+	return nil
 }
 
 func canonicalTabSessionPath(path string) string {
@@ -3358,34 +3658,180 @@ func (a *App) knownSessionDirs() []string {
 	return out
 }
 
-// findTopicSession scans the session directory for a .jsonl file whose .meta
-// carries the given topicID. Returns the most recently updated match, or ""
-// if no session exists for this topic.
-func findTopicSession(dir, topicID string) string {
-	if topicID == "" || dir == "" {
+type topicSessionFileSignature struct {
+	name    string
+	size    int64
+	modTime int64
+}
+
+type topicSessionMatch struct {
+	path      string
+	updatedAt time.Time
+}
+
+type topicSessionDirIndex struct {
+	signature []topicSessionFileSignature
+	byTopic   map[string][]topicSessionMatch
+}
+
+var topicSessionIndexCache = struct {
+	sync.Mutex
+	byDir map[string]topicSessionDirIndex
+}{byDir: map[string]topicSessionDirIndex{}}
+
+func topicSessionDirKey(dir string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
 		return ""
 	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		return abs
+	}
+	return dir
+}
+
+func topicSessionDirSnapshot(dir string) ([]topicSessionFileSignature, []string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return ""
+		return nil, nil, err
 	}
-	var bestPath string
-	var bestTime time.Time
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
+	signature := []topicSessionFileSignature{}
+	sessionNames := []string{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() {
 			continue
 		}
-		path := filepath.Join(dir, e.Name())
+		isSession := filepath.Ext(name) == ".jsonl"
+		isMeta := strings.HasSuffix(name, ".jsonl.meta")
+		if !isSession && !isMeta {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		signature = append(signature, topicSessionFileSignature{
+			name:    name,
+			size:    info.Size(),
+			modTime: info.ModTime().UnixNano(),
+		})
+		if isSession {
+			sessionNames = append(sessionNames, name)
+		}
+	}
+	sort.Slice(signature, func(i, j int) bool {
+		return signature[i].name < signature[j].name
+	})
+	sort.Strings(sessionNames)
+	return signature, sessionNames, nil
+}
+
+func topicSessionSignaturesEqual(a, b []topicSessionFileSignature) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func topicSessionIndexForDir(dir string) (topicSessionDirIndex, error) {
+	key := topicSessionDirKey(dir)
+	if key == "" {
+		return topicSessionDirIndex{}, nil
+	}
+	signature, sessionNames, err := topicSessionDirSnapshot(key)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return topicSessionDirIndex{}, nil
+		}
+		return topicSessionDirIndex{}, err
+	}
+	topicSessionIndexCache.Lock()
+	cached, ok := topicSessionIndexCache.byDir[key]
+	if ok && topicSessionSignaturesEqual(cached.signature, signature) {
+		topicSessionIndexCache.Unlock()
+		return cached, nil
+	}
+	topicSessionIndexCache.Unlock()
+
+	index := topicSessionDirIndex{
+		signature: signature,
+		byTopic:   map[string][]topicSessionMatch{},
+	}
+	for _, name := range sessionNames {
+		path := filepath.Join(key, name)
 		meta, ok, err := agent.LoadBranchMeta(path)
 		if err != nil || !ok {
 			continue
 		}
-		if meta.TopicID != topicID {
+		topicID := strings.TrimSpace(meta.TopicID)
+		if topicID == "" {
 			continue
 		}
-		if meta.UpdatedAt.After(bestTime) {
-			bestTime = meta.UpdatedAt
-			bestPath = path
+		index.byTopic[topicID] = append(index.byTopic[topicID], topicSessionMatch{
+			path:      path,
+			updatedAt: meta.UpdatedAt,
+		})
+	}
+
+	topicSessionIndexCache.Lock()
+	topicSessionIndexCache.byDir[key] = index
+	topicSessionIndexCache.Unlock()
+	return index, nil
+}
+
+func topicSessionIndexHasTopic(index topicSessionDirIndex, topicID string) bool {
+	matches := index.byTopic[strings.TrimSpace(topicID)]
+	return len(matches) > 0
+}
+
+func topicSessionMatches(dir, topicID string) []topicSessionMatch {
+	index, err := topicSessionIndexForDir(dir)
+	if err != nil {
+		return nil
+	}
+	matches := index.byTopic[strings.TrimSpace(topicID)]
+	if len(matches) == 0 {
+		return nil
+	}
+	return append([]topicSessionMatch(nil), matches...)
+}
+
+func invalidateTopicSessionIndex(dir string) {
+	key := topicSessionDirKey(dir)
+	if key == "" {
+		return
+	}
+	topicSessionIndexCache.Lock()
+	delete(topicSessionIndexCache.byDir, key)
+	topicSessionIndexCache.Unlock()
+}
+
+func invalidateTopicSessionIndexForPath(path string) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return
+	}
+	invalidateTopicSessionIndex(filepath.Dir(path))
+}
+
+// findTopicSession returns the most recently updated .jsonl file whose .meta
+// carries the given topicID, using a directory-level sidecar index cache.
+func findTopicSession(dir, topicID string) string {
+	if topicID == "" || dir == "" {
+		return ""
+	}
+	var bestPath string
+	var bestTime time.Time
+	for _, match := range topicSessionMatches(dir, topicID) {
+		if match.updatedAt.After(bestTime) {
+			bestTime = match.updatedAt
+			bestPath = match.path
 		}
 	}
 	return bestPath

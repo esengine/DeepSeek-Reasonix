@@ -8,6 +8,7 @@ type DesktopPlatform = "darwin" | "windows" | "linux";
 interface AppChromeProps {
   platform: DesktopPlatform;
   browserPreviewChrome: boolean;
+  workbenchChrome?: boolean;
   tabs: TabMeta[];
   activeTabId?: string;
   revealActiveSignal: number;
@@ -33,6 +34,7 @@ interface AppChromeProps {
 export function AppChrome({
   platform,
   browserPreviewChrome,
+  workbenchChrome = false,
   tabs,
   activeTabId,
   revealActiveSignal,
@@ -62,6 +64,7 @@ export function AppChrome({
     "app-chrome",
     "app-chrome--tabs",
     darwinChrome ? "app-chrome--darwin-tabs" : "app-chrome--native-tabs",
+    workbenchChrome ? "app-chrome--workbench" : "",
     !darwinChrome ? "app-chrome--identityless" : "",
     showWindowsPreviewControls ? "app-chrome--preview-window-controls" : "",
     `app-chrome--platform-${platform}`,
@@ -107,6 +110,16 @@ export function AppChrome({
       >
         <PanelLeft size={16} />
       </button>
+      {workbenchChrome && (
+        <button
+          className="app-chrome__workbench-search"
+          type="button"
+          onClick={onOpenPalette}
+          aria-label={t("palette.placeholder")}
+        >
+          <Search size={18} />
+        </button>
+      )}
 
       {darwinChrome ? (
         <div className="app-chrome__tab-strip app-chrome__tab-strip--darwin">
@@ -130,11 +143,9 @@ export function AppChrome({
                 type="button"
                 onClick={onOpenPalette}
                 aria-label={t("palette.placeholder")}
+                title={t("palette.placeholder")}
               >
-                <Search size={13} className="tabbar__command-icon" />
-                <span className="tabbar__command-text tabbar__command-text--full">{t("tabBar.commandSearch")}</span>
-                <span className="tabbar__command-text tabbar__command-text--compact">{t("tabBar.commandSearchCompact")}</span>
-                <kbd className="tabbar__command-kbd">Ctrl+K</kbd>
+                <Search size={16} className="tabbar__command-icon" />
               </button>
             </div>
           )}

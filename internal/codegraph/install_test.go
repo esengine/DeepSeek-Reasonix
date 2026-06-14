@@ -174,6 +174,92 @@ func TestInstallReturnsCachedWithoutNetwork(t *testing.T) {
 	}
 }
 
+func TestUpdateDownloadsLatestAndActivates(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a POSIX +x launcher")
+	}
+	base := t.TempDir()
+	t.Setenv("REASONIX_CACHE_DIR", base)
+	asset := assetName()
+	body := makeTarGz(t, map[string]struct {
+		body string
+		mode int64
+	}{
+		"codegraph-test/bin/codegraph": {"#!/bin/sh\n", 0o755},
+	})
+	sum := sha256.Sum256(body)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/colbymchenry/codegraph/releases/latest":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"tag_name":"v9.9.9"}`))
+		case "/download/v9.9.9/SHA256SUMS":
+			fmt.Fprintf(w, "%x  %s\n", sum, asset)
+		case "/download/v9.9.9/" + asset:
+			w.Write(body)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	oldAPIBase := githubAPIBase
+	oldDownloadBase := githubReleaseDownloadBase
+	githubAPIBase = srv.URL
+	githubReleaseDownloadBase = func(version string) string { return srv.URL + "/download/" + version }
+	t.Cleanup(func() {
+		githubAPIBase = oldAPIBase
+		githubReleaseDownloadBase = oldDownloadBase
+	})
+
+	downloaded, err := DownloadLatestWithClient(context.Background(), srv.Client(), nil)
+	if err != nil {
+		t.Fatalf("DownloadLatestWithClient: %v", err)
+	}
+	if downloaded.Version != "v9.9.9" {
+		t.Fatalf("downloaded version = %q, want v9.9.9", downloaded.Version)
+	}
+	if got := ActiveVersion(); got != "" {
+		t.Fatalf("ActiveVersion after download-only = %q, want empty", got)
+	}
+	if p, ok := Resolve(""); ok && p == downloaded.Path {
+		t.Fatalf("Resolve used download-only latest path %q before activation", p)
+	}
+
+	res, err := UpdateWithClient(context.Background(), srv.Client(), nil)
+	if err != nil {
+		t.Fatalf("UpdateWithClient: %v", err)
+	}
+	if res.Version != "v9.9.9" {
+		t.Fatalf("version = %q, want v9.9.9", res.Version)
+	}
+	if want := filepath.Join(CacheDirForVersion("v9.9.9"), "bin", "codegraph"); res.Path != want {
+		t.Fatalf("path = %q, want %q", res.Path, want)
+	}
+	if got := ActiveVersion(); got != "v9.9.9" {
+		t.Fatalf("ActiveVersion = %q, want v9.9.9", got)
+	}
+	if p, ok := Resolve(""); !ok || p != res.Path {
+		t.Fatalf("Resolve = %q, %v; want active path %q", p, ok, res.Path)
+	}
+}
+
+func TestActiveVersionRejectsTraversal(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("REASONIX_CACHE_DIR", base)
+	dir := filepath.Join(base, "codegraph")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, activeVersionFile), []byte("../evil\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := ActiveVersion(); got != "" {
+		t.Fatalf("ActiveVersion = %q, want empty for traversal", got)
+	}
+}
+
 func TestDownloadAssetUsesEmbeddedChecksumAndMirrorFallback(t *testing.T) {
 	asset := assetName()
 	body := []byte("verified codegraph payload")

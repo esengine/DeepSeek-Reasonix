@@ -193,6 +193,20 @@ func (c *Config) SetDesktopAppearance(theme, style string) error {
 	return nil
 }
 
+// SetDesktopLayoutStyle sets the desktop layout style. UI-only; it must not
+// affect CLI output or provider-visible request data.
+func (c *Config) SetDesktopLayoutStyle(style string) error {
+	switch strings.ToLower(strings.TrimSpace(style)) {
+	case "", "classic":
+		c.Desktop.LayoutStyle = "classic"
+	case "workbench", "workspace":
+		c.Desktop.LayoutStyle = "workbench"
+	default:
+		return fmt.Errorf("desktop layout style %q: must be classic|workbench", style)
+	}
+	return nil
+}
+
 // SetDesktopCloseBehavior sets the desktop close-window preference. It is
 // intentionally UI-only and must not affect model prompts or provider-visible
 // request data.

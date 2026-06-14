@@ -3,7 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
 import { useT } from "../lib/i18n";
-import { diffsFor, subjectOf } from "../lib/tools";
+import { diffsFor, subjectOf, summarize } from "../lib/tools";
 import { useShellExpand } from "../lib/shellExpand";
 import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import type { Item } from "../lib/useController";
@@ -108,6 +108,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
     item.readOnly && !hasNested && item.status !== "error" && item.status !== "stopped";
 
   const duration = item.status === "running" ? "" : formatToolDuration(item.durationMs);
+  const summary = item.status === "running" ? "" : item.summary || summarize(item.name, effectiveArgs, effectiveOutput, item.error);
 
   // GSAP-driven collapse/expand for tool body
   const toolBodyRef = useRef<HTMLDivElement>(null);
@@ -131,6 +132,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
           {subject && <span className="tool__subject">{subject}</span>}
         </span>
         {profileText && <span className="tool__profile">{profileText}</span>}
+        {summary && <span className="tool__summary">{summary}</span>}
         {duration && <span className="tool__duration">{duration}</span>}
         {hasBody && (
           <span className={`tool__chevron${open ? " tool__chevron--open" : ""}`}>

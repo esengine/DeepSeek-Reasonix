@@ -1,4 +1,9 @@
-export type DiffRow = { type: "ctx" | "add" | "del"; text: string };
+export type DiffRow = {
+  type: "ctx" | "add" | "del";
+  text: string;
+  oldLine?: number;
+  newLine?: number;
+};
 
 // diffLines is a classic LCS line diff. Used by the diff seam to render edit-tool
 // before/after; a real editor (Monaco/CodeMirror merge) would replace the
@@ -17,21 +22,33 @@ export function diffLines(a: string, b: string): DiffRow[] {
   const rows: DiffRow[] = [];
   let i = 0;
   let j = 0;
+  let oldLine = 1;
+  let newLine = 1;
   while (i < n && j < m) {
     if (x[i] === y[j]) {
-      rows.push({ type: "ctx", text: x[i] });
+      rows.push({ type: "ctx", text: x[i], oldLine, newLine });
       i++;
       j++;
+      oldLine++;
+      newLine++;
     } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-      rows.push({ type: "del", text: x[i] });
+      rows.push({ type: "del", text: x[i], oldLine });
       i++;
+      oldLine++;
     } else {
-      rows.push({ type: "add", text: y[j] });
+      rows.push({ type: "add", text: y[j], newLine });
       j++;
+      newLine++;
     }
   }
-  while (i < n) rows.push({ type: "del", text: x[i++] });
-  while (j < m) rows.push({ type: "add", text: y[j++] });
+  while (i < n) {
+    rows.push({ type: "del", text: x[i++], oldLine });
+    oldLine++;
+  }
+  while (j < m) {
+    rows.push({ type: "add", text: y[j++], newLine });
+    newLine++;
+  }
   return rows;
 }
 

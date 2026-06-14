@@ -38,6 +38,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/diff"
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 	"reasonix/internal/hook"
 	"reasonix/internal/i18n"
 	"reasonix/internal/jobs"
@@ -2448,10 +2449,25 @@ func (c *Controller) ConnectConfiguredMCPServer(name string) (int, error) {
 // already-resolved config. Desktop uses this after saving user-level settings so
 // a stale project config cannot override the just-applied choice.
 func (c *Controller) ConnectCodegraphMCPServer(cfg *config.Config) (int, error) {
-	return c.connectCodegraphMCPServer(cfg)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return 0, err
+	}
+	return c.ConnectCodegraphMCPServerForRoot(cfg, cwd)
+}
+
+// ConnectCodegraphMCPServerForRoot connects CodeGraph pinned to root. Desktop
+// project tabs use this after hot updates so a reconnect keeps the same project
+// scope as boot-time CodeGraph startup.
+func (c *Controller) ConnectCodegraphMCPServerForRoot(cfg *config.Config, root string) (int, error) {
+	return c.connectCodegraphMCPServerForRoot(cfg, root)
 }
 
 func (c *Controller) connectCodegraphMCPServer(cfg *config.Config) (int, error) {
+	return c.ConnectCodegraphMCPServer(cfg)
+}
+
+func (c *Controller) connectCodegraphMCPServerForRoot(cfg *config.Config, root string) (int, error) {
 	if !cfg.Codegraph.Enabled {
 		return 0, fmt.Errorf("codegraph is disabled in config")
 	}
@@ -2459,17 +2475,21 @@ func (c *Controller) connectCodegraphMCPServer(cfg *config.Config) (int, error) 
 	if !ok {
 		return 0, fmt.Errorf("codegraph is not installed")
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return 0, err
+	root = strings.TrimSpace(root)
+	if root == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return 0, err
+		}
+		root = cwd
 	}
-	if !codegraph.IndexableRoot(cwd) {
-		return 0, fmt.Errorf("codegraph: refusing to index %q — a filesystem root would index the whole volume", cwd)
+	if !codegraph.IndexableRoot(root) {
+		return 0, fmt.Errorf("codegraph: refusing to index %q — a filesystem root would index the whole volume", root)
 	}
-	if err := codegraph.EnsureInit(c.pluginCtx, bin, cwd); err != nil {
+	if err := codegraph.EnsureInit(c.pluginCtx, bin, root); err != nil {
 		return 0, fmt.Errorf("codegraph init: %w", err)
 	}
-	return c.connectMCPSpec(codegraph.MCPSpec(bin, cwd))
+	return c.connectMCPSpec(codegraph.MCPSpec(bin, root))
 }
 
 // RemoveMCPServer disconnects a live MCP server — its tools vanish from the next
@@ -2960,7 +2980,19 @@ func (c *Controller) seedPlanTodos(plan string) string {
 	c.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: t})
 	t.Output = "task list seeded from the approved plan"
 	c.sink.Emit(event.Event{Kind: event.ToolResult, Tool: t})
+	c.seedAgentTodoState(args)
 	return args
+}
+
+func (c *Controller) seedAgentTodoState(args string) {
+	if c.executor == nil {
+		return
+	}
+	todos := agentTodoStateFromArgs(args)
+	if len(todos) == 0 {
+		return
+	}
+	c.executor.SeedTodoState(todos)
 }
 
 func (c *Controller) completePlanTodos(args string) {
@@ -2975,6 +3007,28 @@ func (c *Controller) completePlanTodos(args string) {
 	c.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: t})
 	t.Output = "approved plan finished"
 	c.sink.Emit(event.Event{Kind: event.ToolResult, Tool: t})
+	c.replaceAgentTodoState(done)
+}
+
+func (c *Controller) replaceAgentTodoState(args string) {
+	if c.executor == nil {
+		return
+	}
+	todos := agentTodoStateFromArgs(args)
+	if len(todos) == 0 {
+		return
+	}
+	c.executor.ReplaceTodoState(todos)
+}
+
+func agentTodoStateFromArgs(args string) []evidence.TodoItem {
+	var payload struct {
+		Todos []evidence.TodoItem `json:"todos"`
+	}
+	if err := json.Unmarshal([]byte(args), &payload); err != nil {
+		return nil
+	}
+	return payload.Todos
 }
 
 // PlanTodosJSON parses an approved plan's markdown into todo_write-shaped args

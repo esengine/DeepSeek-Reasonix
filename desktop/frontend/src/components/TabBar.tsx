@@ -275,11 +275,16 @@ export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose
           type="button"
           onClick={onOpenPalette}
           aria-label={t("palette.placeholder")}
+          title={t("palette.placeholder")}
         >
-          <Search size={13} className="tabbar__command-icon" />
-          <span className="tabbar__command-text tabbar__command-text--full">{t("tabBar.commandSearch")}</span>
-          <span className="tabbar__command-text tabbar__command-text--compact">{t("tabBar.commandSearchCompact")}</span>
-          <kbd className="tabbar__command-kbd">⌘K</kbd>
+          <Search size={commandCompact ? 16 : 13} className="tabbar__command-icon" />
+          {!commandCompact && (
+            <>
+              <span className="tabbar__command-text tabbar__command-text--full">{t("tabBar.commandSearch")}</span>
+              <span className="tabbar__command-text tabbar__command-text--compact">{t("tabBar.commandSearchCompact")}</span>
+              <kbd className="tabbar__command-kbd">⌘K</kbd>
+            </>
+          )}
         </button>
       )}
       <ContextMenu

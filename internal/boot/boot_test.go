@@ -2053,16 +2053,13 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	var got []byte
 	for {
 		got, err = os.ReadFile(envOut)
-		if err == nil {
+		if err == nil && string(got) == codegraph.ReasonixDaemonIdleTimeoutMS {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("codegraph helper never recorded idle timeout env: %v", err)
+			t.Fatalf("codegraph helper idle timeout env = %q, want %q (read error: %v)", got, codegraph.ReasonixDaemonIdleTimeoutMS, err)
 		}
 		time.Sleep(10 * time.Millisecond)
-	}
-	if string(got) != codegraph.ReasonixDaemonIdleTimeoutMS {
-		t.Fatalf("%s = %q; want %q", codegraph.DaemonIdleTimeoutEnv, got, codegraph.ReasonixDaemonIdleTimeoutMS)
 	}
 }
 

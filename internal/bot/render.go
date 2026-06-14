@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode"
 
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -27,12 +28,22 @@ type renderSink struct {
 	onAsk      func(event.Ask)
 
 	// 渲染缓冲
-	buf        strings.Builder
-	thinking   strings.Builder
-	inThinking bool
-	toolNames  map[string]string // tool ID -> name
-	lastFlush  time.Time
+	buf           strings.Builder
+	thinking      strings.Builder
+	inThinking    bool
+	toolNames     map[string]string // tool ID -> name
+	lastFlush     time.Time
+	lastProgress  time.Time
+	progressCount int
 }
+
+const (
+	renderSoftFlushAfter      = 1200 * time.Millisecond
+	renderMaxChunkRunes       = 1800
+	renderHardChunkRunes      = 3500
+	renderProgressMinInterval = 2 * time.Second
+	renderMaxProgressMessages = 3
+)
 
 func newRenderSink(ctx context.Context, adapter Adapter, connID, domain, chatID string, chatType ChatType, userID string, replyTo string, logger *slog.Logger, onApproval func(event.Approval), onAsk func(event.Ask)) *renderSink {
 	return &renderSink{
@@ -59,6 +70,8 @@ func (s *renderSink) Emit(e event.Event) {
 		s.thinking.Reset()
 		s.inThinking = false
 		s.toolNames = make(map[string]string)
+		s.progressCount = 0
+		s.lastProgress = time.Time{}
 
 	case event.Reasoning:
 		if !s.inThinking {
@@ -71,43 +84,27 @@ func (s *renderSink) Emit(e event.Event) {
 			s.inThinking = false
 		}
 		s.buf.WriteString(e.Text)
-		s.maybeFlush()
 
 	case event.Message:
 		// full message received, do nothing extra
 
 	case event.ToolDispatch:
-		s.toolNames[e.Tool.ID] = e.Tool.Name
-		txt := fmt.Sprintf("\n🔧 执行工具: %s", e.Tool.Name)
-		if e.Tool.ReadOnly {
-			txt += " (只读)"
-		}
-		s.buf.WriteString(txt)
-		s.maybeFlush()
+		name := renderToolName(e.Tool)
+		s.toolNames[e.Tool.ID] = name
+		s.sendProgress(fmt.Sprintf("正在执行: %s", name), false)
 
 	case event.ToolResult:
 		name := s.toolNames[e.Tool.ID]
 		if name == "" {
-			name = e.Tool.ID
+			name = renderToolName(e.Tool)
 		}
 		if e.Tool.Err != "" {
-			fmt.Fprintf(&s.buf, "\n❌ %s 出错: %s", name, e.Tool.Err)
-		} else {
-			// 截断输出
-			output := e.Tool.Output
-			if len(output) > 500 {
-				output = output[:500] + "\n... (已截断)"
-			}
-			fmt.Fprintf(&s.buf, "\n✅ %s 完成", name)
-			if output != "" {
-				fmt.Fprintf(&s.buf, "\n```\n%s\n```", output)
-			}
+			s.sendProgress(fmt.Sprintf("%s 执行失败，稍后会在结果中说明。", name), true)
 		}
-		s.maybeFlush()
 
 	case event.ToolProgress:
-		// 流式输出，不单独渲染
-		s.maybeFlush()
+		// Keep streaming tool output out of IM channels; the session transcript
+		// still records the complete controller turn for desktop review.
 
 	case event.ApprovalRequest:
 		// 发送审批请求
@@ -191,15 +188,30 @@ func (s *renderSink) Emit(e event.Event) {
 	}
 }
 
-func (s *renderSink) maybeFlush() {
-	if time.Since(s.lastFlush) > 500*time.Millisecond {
-		s.flush()
+func (s *renderSink) flush() {
+	for strings.TrimSpace(s.buf.String()) != "" {
+		idx := renderFlushIndex(s.buf.String(), renderSoftFlushAfter)
+		if idx <= 0 {
+			idx = byteIndexForRuneLimit(s.buf.String(), renderMaxChunkRunes)
+		}
+		if idx <= 0 || idx > len(s.buf.String()) {
+			idx = len(s.buf.String())
+		}
+		s.flushPrefix(idx)
 	}
 }
 
-func (s *renderSink) flush() {
-	text := strings.TrimSpace(s.buf.String())
+func (s *renderSink) flushPrefix(idx int) {
+	raw := s.buf.String()
+	if idx <= 0 || idx > len(raw) {
+		idx = len(raw)
+	}
+	text := strings.TrimSpace(raw[:idx])
 	if text == "" {
+		remaining := raw[idx:]
+		s.buf.Reset()
+		s.buf.WriteString(remaining)
+		s.lastFlush = time.Now()
 		return
 	}
 	_ = s.send(OutboundMessage{
@@ -210,8 +222,128 @@ func (s *renderSink) flush() {
 		Text:         text,
 		ReplyToMsgID: s.replyTo,
 	})
+	remaining := raw[idx:]
 	s.buf.Reset()
+	s.buf.WriteString(remaining)
 	s.lastFlush = time.Now()
+}
+
+func (s *renderSink) sendProgress(text string, force bool) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	now := time.Now()
+	if s.progressCount >= renderMaxProgressMessages {
+		return
+	}
+	if !force && !s.lastProgress.IsZero() && now.Sub(s.lastProgress) < renderProgressMinInterval {
+		return
+	}
+	_ = s.send(OutboundMessage{
+		ConnectionID: s.connID,
+		Domain:       s.domain,
+		ChatID:       s.chatID,
+		ChatType:     s.chatType,
+		Text:         text,
+		ReplyToMsgID: s.replyTo,
+	})
+	s.progressCount++
+	s.lastProgress = now
+}
+
+func renderToolName(t event.Tool) string {
+	if name := strings.TrimSpace(t.Name); name != "" {
+		return name
+	}
+	if id := strings.TrimSpace(t.ID); id != "" {
+		return id
+	}
+	return "tool"
+}
+
+func renderFlushIndex(text string, elapsed time.Duration) int {
+	if strings.TrimSpace(text) == "" {
+		return 0
+	}
+	runes := []rune(text)
+	if len(runes) >= renderHardChunkRunes {
+		if idx := lastSemanticBoundary(text, renderHardChunkRunes); idx > 0 {
+			return idx
+		}
+		return byteIndexForRuneLimit(text, renderMaxChunkRunes)
+	}
+	if len(runes) >= renderMaxChunkRunes {
+		if idx := lastSemanticBoundary(text, renderMaxChunkRunes); idx > 0 {
+			return idx
+		}
+	}
+	if elapsed < renderSoftFlushAfter {
+		return 0
+	}
+	return lastSemanticBoundary(text, len(runes))
+}
+
+func lastSemanticBoundary(text string, maxRunes int) int {
+	if maxRunes <= 0 {
+		return 0
+	}
+	count := 0
+	lastBoundary := 0
+	lastNonSpaceBoundary := 0
+	inFence := false
+	for idx, r := range text {
+		if strings.HasPrefix(text[idx:], "```") {
+			inFence = !inFence
+		}
+		count++
+		if count > maxRunes {
+			break
+		}
+		next := idx + len(string(r))
+		if r == '\n' && !inFence {
+			lastNonSpaceBoundary = next
+			lastBoundary = next
+			continue
+		}
+		if unicode.IsSpace(r) {
+			if lastNonSpaceBoundary > 0 {
+				lastBoundary = next
+			}
+			continue
+		}
+		if inFence {
+			continue
+		}
+		if isSemanticBoundaryRune(r) {
+			lastNonSpaceBoundary = next
+			lastBoundary = next
+		}
+	}
+	return lastBoundary
+}
+
+func isSemanticBoundaryRune(r rune) bool {
+	switch r {
+	case '.', '!', '?', ';', '。', '！', '？', '；', '…':
+		return true
+	default:
+		return false
+	}
+}
+
+func byteIndexForRuneLimit(text string, maxRunes int) int {
+	if maxRunes <= 0 {
+		return 0
+	}
+	count := 0
+	for idx, r := range text {
+		count++
+		if count >= maxRunes {
+			return idx + len(string(r))
+		}
+	}
+	return len(text)
 }
 
 func (s *renderSink) send(msg OutboundMessage) error {

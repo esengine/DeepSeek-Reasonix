@@ -7,7 +7,7 @@ import { t } from "./i18n";
 declare const __BUILD_COMMIT__: string;
 declare const __BUILD_CHANNEL__: string;
 
-export type CrashKind = "crash" | "exception" | "feedback" | "performance";
+export type CrashKind = "crash" | "exception" | "feedback" | "performance" | "bot";
 
 export type PerformanceSnapshot = {
   reason: string;
@@ -45,7 +45,7 @@ export type PerformanceSnapshot = {
 
 export type CrashPayload = {
   schemaVersion: 2;
-  source: "frontend" | "frontend.react" | "frontend.global" | "frontend.performance";
+  source: "frontend" | "frontend.react" | "frontend.global" | "frontend.performance" | "bot.runtime";
   kind: CrashKind;
   label: string;
   message: string;

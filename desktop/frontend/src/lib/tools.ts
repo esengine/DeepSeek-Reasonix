@@ -133,6 +133,19 @@ function countOf(n: number, one: DictKey, other: DictKey): string {
   return t(n === 1 ? one : other, { n });
 }
 
+function hasReplaceAllEdit(edits: Record<string, unknown>[]): boolean {
+  return edits.some((e) => e?.replace_all === true);
+}
+
+function multiEditAppliedSummary(output: string): string {
+  const match = output.match(/:\s*(\d+)\s+edits applied \((\d+)\s+total replacements\)/);
+  if (!match) return "";
+  const edits = Number(match[1]);
+  const replacements = Number(match[2]);
+  if (!Number.isFinite(edits) || !Number.isFinite(replacements)) return "";
+  return `${countOf(edits, "tool.editOne", "tool.editOther")} · ${countOf(replacements, "tool.replacementOne", "tool.replacementOther")}`;
+}
+
 // summarize derives the one-line outcome shown under a finished card (the "⎿"
 // secondary line) — counts from the args for writers, from the output for
 // readers. "" means there's nothing worth a summary line.
@@ -151,6 +164,9 @@ export function summarize(name: string, args: string, output?: string, error?: s
     }
     case "multi_edit": {
       const edits = Array.isArray(a.edits) ? (a.edits as Record<string, unknown>[]) : [];
+      if (hasReplaceAllEdit(edits)) {
+        return output ? multiEditAppliedSummary(output) : "";
+      }
       let add = 0;
       let del = 0;
       for (const e of edits) {

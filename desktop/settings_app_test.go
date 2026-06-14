@@ -121,12 +121,31 @@ func TestSaveProviderFiltersNonChatModels(t *testing.T) {
 	if !ok {
 		t.Fatal("saved provider not found")
 	}
-	want := []string{"mimo-v2.5-pro"}
+	want := []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"}
 	if !reflect.DeepEqual(got.ModelList(), want) {
 		t.Errorf("saved provider models = %v, want %v", got.ModelList(), want)
 	}
 	if got.DefaultModel() != "mimo-v2.5-pro" {
 		t.Errorf("saved provider default = %q, want mimo-v2.5-pro", got.DefaultModel())
+	}
+}
+
+func TestOfficialMimoAPITemplateIncludesVisionModels(t *testing.T) {
+	entries, keyEnv, err := officialProviderTemplate("mimo-api")
+	if err != nil {
+		t.Fatalf("officialProviderTemplate: %v", err)
+	}
+	if keyEnv != "MIMO_API_KEY" || len(entries) != 1 {
+		t.Fatalf("template = %v/%q, want one MIMO_API_KEY entry", entries, keyEnv)
+	}
+	got := entries[0]
+	for _, model := range []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"} {
+		if !got.HasModel(model) {
+			t.Fatalf("mimo-api models = %v, missing %s", got.ModelList(), model)
+		}
+	}
+	if got.DefaultModel() != "mimo-v2.5-pro" {
+		t.Fatalf("mimo-api default = %q, want mimo-v2.5-pro", got.DefaultModel())
 	}
 }
 

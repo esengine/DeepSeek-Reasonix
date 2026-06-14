@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { Check, CheckCircle2, ChevronDown, ChevronUp, GripVertical, KeyRound, Loader2, Play, QrCode, RefreshCw } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, GripVertical, KeyRound, Loader2, Play, QrCode, RefreshCw, Send } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { app } from "../lib/bridge";
@@ -33,7 +33,7 @@ import {
 import { getAvailableFontFamilies, getAvailableMonoFontFamilies } from "../lib/fontAvailability";
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
-import type { BotAllowlistView, BotConnectionView, BotInstallStartResult, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import type { BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
@@ -387,7 +387,7 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
     case "models":
       return settingsModelMeta(s, t);
     case "general":
-      return `${closeBehaviorLabel(normalizeCloseBehavior(s.closeBehavior), t)} · ${t(`settings.autoPlan.${normalizeAutoPlan(s.autoPlan)}`)}`;
+      return `${desktopLayoutStyleLabel(normalizeDesktopLayoutStyle(s.desktopLayoutStyle), t)} · ${closeBehaviorLabel(normalizeCloseBehavior(s.closeBehavior), t)}`;
     case "providers":
       return t("settings.providerCount", { n: s.providers.length });
     case "bots":
@@ -588,6 +588,10 @@ function normalizeBotConnection(raw: any) {
     sessionMappings: asArray(raw?.sessionMappings).map((item: any) => ({
       remoteId: String(item?.remoteId ?? "").trim(),
       sessionId: String(item?.sessionId ?? "").trim(),
+      sessionSource: String(item?.sessionSource ?? "").trim(),
+      chatType: String(item?.chatType ?? "").trim(),
+      userId: String(item?.userId ?? "").trim(),
+      threadId: String(item?.threadId ?? "").trim(),
       scope: normalizeBotMappingScope(item?.scope, item?.workspaceRoot ?? workspaceRoot),
       workspaceRoot: normalizeBotMappingScope(item?.scope, item?.workspaceRoot ?? workspaceRoot) === "project"
         ? String(item?.workspaceRoot ?? workspaceRoot).trim()
@@ -660,6 +664,7 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     autoApproveTools: Boolean(view.autoApproveTools ?? view.bypass),
     bypass: Boolean(view.autoApproveTools ?? view.bypass),
     desktopLanguage: normalizeLangPref(view.desktopLanguage),
+    desktopLayoutStyle: normalizeDesktopLayoutStyle(view.desktopLayoutStyle),
     desktopTheme: normalizeThemePreference(view.desktopTheme),
     desktopThemeStyle: normalizeThemeStyleForTheme(view.desktopThemeStyle, normalizeThemePreference(view.desktopTheme)),
     closeBehavior: normalizeCloseBehavior(view.closeBehavior),
@@ -680,6 +685,16 @@ type DisplayMode = "standard" | "compact";
 
 function normalizeDisplayMode(mode: string | undefined): DisplayMode {
   return mode === "standard" || mode === "compact" ? mode : "standard";
+}
+
+type DesktopLayoutStyle = "classic" | "workbench";
+
+function normalizeDesktopLayoutStyle(style: string | undefined): DesktopLayoutStyle {
+  return style === "workbench" ? "workbench" : "classic";
+}
+
+function desktopLayoutStyleLabel(style: DesktopLayoutStyle, t: ReturnType<typeof useT>): string {
+  return t(`settings.desktopLayoutStyle.${style}`);
 }
 
 type StatusBarStyle = "icon" | "text";
@@ -768,6 +783,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   useEffect(() => () => mouseDragCleanupRef.current?.(), []);
   const autoPlan = normalizeAutoPlan(s.autoPlan);
   const languagePref = normalizeLangPref(s.desktopLanguage);
+  const desktopLayoutStyle = normalizeDesktopLayoutStyle(s.desktopLayoutStyle);
   const [genMusicPreset, setGenMusicPreset] = useState<GenerativePreset>(getGenerativePreset());
   const [soundPref, setSoundPref] = useState<SoundWavPref>(getSuccessPreference());
   const [attentionPref, setAttentionPref] = useState<SoundWavPref>(getAttentionPreference());
@@ -934,6 +950,20 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
               onClick={() => setLanguage(pref)}
             >
               {pref === "" ? t("settings.langAuto") : pref === "zh" ? "中文" : "English"}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.desktopLayoutStyle")}>
+        <div className="set-seg">
+          {(["classic", "workbench"] as const).map((style) => (
+            <button
+              key={style}
+              className={`set-seg__btn${desktopLayoutStyle === style ? " set-seg__btn--on" : ""}`}
+              disabled={busy}
+              onClick={() => void apply(() => app.SetDesktopLayoutStyle(style))}
+            >
+              {desktopLayoutStyleLabel(style, t)}
             </button>
           ))}
         </div>
@@ -1482,7 +1512,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const [allowlistOpen, setAllowlistOpen] = useState(false);
   const [installTarget, setInstallTarget] = useState<BotInstallTarget>("qq");
   const [install, setInstall] = useState<BotInstallState>({ target: "qq", result: null, status: "idle", timeLeft: 0, message: "" });
-  const [diagnostics, setDiagnostics] = useState<Record<string, string>>({});
+  const [diagnostics, setDiagnostics] = useState<Record<string, BotConnectionDiagnostic | string>>({});
   const [testTargets, setTestTargets] = useState<Record<string, string>>({});
   const [connectionSecrets, setConnectionSecrets] = useState<Record<string, string>>({});
   const [qqSecretValue, setQQSecretValue] = useState("");
@@ -1696,22 +1726,57 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   }, [install.status, install.timeLeft]);
   const diagnoseConnection = async (id: string) => {
     const diag = await app.DiagnoseBotConnection(id);
-    setDiagnostics((prev) => ({ ...prev, [id]: diag.message || diag.status }));
+    setDiagnostics((prev) => ({ ...prev, [id]: diag }));
+    return diag;
   };
   const testConnection = async (connection: BotConnectionView) => {
     const target = (testTargets[connection.id] ?? firstConnectionRemote(connection)).trim();
     const diag = await app.TestBotConnection(connection.id, target);
-    setDiagnostics((prev) => ({ ...prev, [connection.id]: diag.message || diag.status }));
+    setDiagnostics((prev) => ({ ...prev, [connection.id]: diag }));
     if (diag.messageId && target) {
       const updatedAt = new Date().toISOString();
       await persistConnections((items) => items.map((item) => {
         if (item.id !== connection.id) return item;
         const scope = connection.workspaceRoot ? "project" : "global";
+        const matchesTestMapping = (mapping: BotConnectionView["sessionMappings"][number]) =>
+          mapping.remoteId === target &&
+          !mapping.chatType.trim() &&
+          !mapping.userId.trim() &&
+          !mapping.threadId.trim();
         const sessionMappings = [
-          ...item.sessionMappings.filter((mapping) => mapping.remoteId !== target),
-          { remoteId: target, sessionId: "", scope, workspaceRoot: scope === "project" ? connection.workspaceRoot : "", updatedAt },
+          ...item.sessionMappings.filter((mapping) => !matchesTestMapping(mapping)),
+          { remoteId: target, sessionId: "", sessionSource: "", chatType: "", userId: "", threadId: "", scope, workspaceRoot: scope === "project" ? connection.workspaceRoot : "", updatedAt },
         ];
         return { ...item, sessionMappings, updatedAt };
+      }));
+    }
+  };
+  const ensureReportableDiagnostic = async (connection: BotConnectionView) => {
+    return diagnoseConnection(connection.id);
+  };
+  const copyConnectionDiagnostic = async (connection: BotConnectionView) => {
+    const diag = await ensureReportableDiagnostic(connection);
+    if (!diag.reportDetail) return;
+    try {
+      await navigator.clipboard.writeText(diag.reportDetail);
+      setDiagnostics((prev) => ({ ...prev, [connection.id]: { ...diag, message: t("settings.botDiagnosticCopied") } }));
+    } catch (err) {
+      setDiagnostics((prev) => ({
+        ...prev,
+        [connection.id]: { ...diag, status: "error", message: err instanceof Error ? err.message : t("settings.botDiagnosticCopyFailed") },
+      }));
+    }
+  };
+  const reportConnectionDiagnostic = async (connection: BotConnectionView) => {
+    const diag = await ensureReportableDiagnostic(connection);
+    if (!diag.reportDetail) return;
+    try {
+      await app.ReportCrash(diag.reportKind || "bot", diag.reportDetail);
+      setDiagnostics((prev) => ({ ...prev, [connection.id]: { ...diag, status: "ok", message: t("settings.botDiagnosticReportSent") } }));
+    } catch (err) {
+      setDiagnostics((prev) => ({
+        ...prev,
+        [connection.id]: { ...diag, status: "error", message: err instanceof Error ? err.message : t("settings.botDiagnosticReportFailed") },
       }));
     }
   };
@@ -1790,6 +1855,8 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const onlineConnections = (qqOnline ? 1 : 0) + draft.connections.filter((connection) => connection.enabled && connection.status === "connected").length;
   const selectedQQ = qqAdded && expandedConnectionId === QQ_CONNECTION_ID;
   const selectedConnection = selectedQQ ? null : draft.connections.find((connection) => connection.id === expandedConnectionId) ?? null;
+  const selectedDiagnostic = selectedConnection ? diagnostics[selectedConnection.id] : undefined;
+  const selectedDiagnosticDetail = diagnosticReportDetail(selectedDiagnostic);
   const selectedConnectionRemote = selectedConnection ? firstConnectionRemote(selectedConnection) : "";
   const selectedConnectionToolApprovalMode = selectedConnection ? normalizeBotToolApprovalMode(selectedConnection.toolApprovalMode, true) : "";
   const selectedAllowlistTargetReady = selectedQQ || Boolean(selectedConnection);
@@ -1836,6 +1903,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
               {connectionItems.map((item) => {
                 if (item.kind === "qq") {
                   const appID = draft.qq.appId.trim();
+                  const qqDiagMessage = diagnosticMessage(diagnostics[QQ_CONNECTION_ID]);
                   const statusText = qqOnline
                     ? t("settings.botConnectionConnected")
                     : qqConfigured
@@ -1880,12 +1948,13 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
                           </button>
                         </div>
                       </div>
-                      {diagnostics[QQ_CONNECTION_ID] ? <em className="bot-connection-row__diag">{diagnostics[QQ_CONNECTION_ID]}</em> : null}
+                      {qqDiagMessage ? <em className="bot-connection-row__diag">{qqDiagMessage}</em> : null}
                     </div>
                   );
                 }
                 const connection = item.connection;
                 const sessionID = firstConnectionRemote(connection);
+                const diagMessage = diagnosticMessage(diagnostics[connection.id]);
                 return (
                   <div key={connection.id} className="bot-connection-row" role="rowgroup">
                     <div className="bot-connection-row__grid" role="row">
@@ -1916,7 +1985,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
                         </button>
                       </div>
                     </div>
-                    {diagnostics[connection.id] ? <em className="bot-connection-row__diag">{diagnostics[connection.id]}</em> : null}
+                    {diagMessage ? <em className="bot-connection-row__diag">{diagMessage}</em> : null}
                   </div>
                 );
               })}
@@ -2151,7 +2220,24 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
               </div>
             </div>
 
-              {diagnostics[selectedConnection.id] ? <div className="bot-detail-notice">{diagnostics[selectedConnection.id]}</div> : null}
+              {diagnosticMessage(selectedDiagnostic) ? (
+                <div className="bot-detail-notice">
+                  <span>{diagnosticMessage(selectedDiagnostic)}</span>
+                  {selectedDiagnosticDetail ? (
+                    <div className="bot-diagnostic-actions">
+                      <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => void copyConnectionDiagnostic(selectedConnection)}>
+                        <Clipboard aria-hidden="true" />
+                        {t("settings.botCopyDiagnostic")}
+                      </button>
+                      <button type="button" className="btn btn--primary btn--small" disabled={busy} onClick={() => void reportConnectionDiagnostic(selectedConnection)}>
+                        <Send aria-hidden="true" />
+                        {t("settings.botSendDiagnostic")}
+                      </button>
+                      <small>{t("settings.botDiagnosticPrivacy")}</small>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
 
               <section className="bot-detail-section">
                 <div className="bot-detail-section__head">{t("settings.botConnectionSummary")}</div>
@@ -2519,6 +2605,16 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
         </div>
     </div>
   );
+}
+
+function diagnosticMessage(diag?: BotConnectionDiagnostic | string): string {
+  if (typeof diag === "string") return diag;
+  return diag?.message || diag?.status || "";
+}
+
+function diagnosticReportDetail(diag?: BotConnectionDiagnostic | string): string {
+  if (typeof diag === "string") return "";
+  return diag?.reportDetail || "";
 }
 
 function botTargetLabel(target: BotInstallTarget, t: ReturnType<typeof useT>): string {

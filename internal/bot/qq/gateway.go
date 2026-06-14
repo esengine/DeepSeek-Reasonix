@@ -189,8 +189,9 @@ func (a *adapter) getAccessToken(ctx context.Context) (string, error) {
 	}
 	a.tokenMu.Lock()
 	a.token = result.AccessToken
-	if result.ExpiresIn > 60 {
-		a.tokenExpiry = time.Now().Add(time.Duration(result.ExpiresIn-60) * time.Second)
+	expiresIn := int(result.ExpiresIn)
+	if expiresIn > 60 {
+		a.tokenExpiry = time.Now().Add(time.Duration(expiresIn-60) * time.Second)
 	} else {
 		a.tokenExpiry = time.Now().Add(5 * time.Minute)
 	}
