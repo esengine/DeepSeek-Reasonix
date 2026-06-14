@@ -13,7 +13,10 @@ export function isLikelyInlineMath(math: string): boolean {
   // Unary plus/minus: +2, -x, +\alpha, - 3.14
   if (/^[+\-]\s*(?:\d+(?:\.\d+)?|[A-Za-z\\])/.test(math)) return true;
 
-  if (/\\[A-Za-z]+\b/.test(math)) return true;
+  // LaTeX command (\alpha, \frac{x}{y}, \tfrac12, …). No \b after the
+  // command name: \tfrac12 / \sqrt2 / \log3 have no word boundary between
+  // the name and a trailing digit, so \b would wrongly reject them.
+  if (/\\[A-Za-z]+/.test(math)) return true;
   if (/[\^_{}|]/.test(math)) return true;
   if (/\b(?:alpha|beta|gamma|sum|int|prod|lim|infty|sqrt|frac|sin|cos|tan|log|ln|max|min|partial|nabla|left|right)\b/.test(math)) return true;
   // Function / group notation: a short identifier (1–6 letters) immediately

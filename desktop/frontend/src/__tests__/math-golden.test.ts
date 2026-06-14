@@ -133,6 +133,13 @@ check("$\\frac{a}{b}$", () => isLikelyInlineMath("\\frac{a}{b}") === true);
 check("$f(x)$", () => isLikelyInlineMath("f(x)") === true);
 check("$x+1$", () => isLikelyInlineMath("x+1") === true);
 
+console.log("\nisLikelyInlineMath — LaTeX command followed by a digit (math)");
+check("$\\tfrac12$", () => isLikelyInlineMath("\\tfrac12") === true);
+check("$\\frac12$", () => isLikelyInlineMath("\\frac12") === true);
+check("$\\sqrt2$", () => isLikelyInlineMath("\\sqrt2") === true);
+check("$\\log3$", () => isLikelyInlineMath("\\log3") === true);
+check("$\\overline3$", () => isLikelyInlineMath("\\overline3") === true);
+
 console.log("\nisLikelyInlineMath — multi-letter group notation (math)");
 check("$SO(3,1)$", () => isLikelyInlineMath("SO(3,1)") === true);
 check("$SU(2)$", () => isLikelyInlineMath("SU(2)") === true);
