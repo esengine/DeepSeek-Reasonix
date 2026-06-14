@@ -679,7 +679,7 @@ function normalizeCloseBehavior(mode: string | undefined): CloseBehavior {
 type DisplayMode = "standard" | "compact";
 
 function normalizeDisplayMode(mode: string | undefined): DisplayMode {
-  return mode === "standard" || mode === "compact" ? mode : "compact";
+  return mode === "standard" || mode === "compact" ? mode : "standard";
 }
 
 type StatusBarStyle = "icon" | "text";

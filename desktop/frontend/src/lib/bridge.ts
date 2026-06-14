@@ -151,6 +151,7 @@ export interface AppBindings {
   BalanceForTab(tabID: string): Promise<BalanceInfo>;
   Jobs(): Promise<JobView[]>;
   JobsForTab(tabID: string): Promise<JobView[]>;
+  ToolResultForTab(tabID: string, toolID: string): Promise<{ args: string; output: string } | null>;
   Meta(): Promise<Meta>;
   MetaForTab(tabID: string): Promise<Meta>;
   Commands(): Promise<CommandInfo[]>;
@@ -1731,6 +1732,9 @@ function makeMockApp(): AppBindings {
         },
         async JobsForTab() {
           return this.Jobs();
+        },
+        async ToolResultForTab() {
+          return null;
         },
         async Meta() {
           const active = mockTabs.find((tab) => tab.active) ?? mockTabs[0];

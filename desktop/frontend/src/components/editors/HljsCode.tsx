@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react";
 import type { EditorProps } from "../CodeViewer";
 import { highlightToHtml } from "../../lib/highlight";
 import { CopyButton } from "../CopyButton";
@@ -6,12 +7,14 @@ import { CopyButton } from "../CopyButton";
 // renders highlight.js token markup into a <pre>; token colors live in styles.css
 // (.hljs-*). To upgrade to a full editor, point CodeViewer.tsx's lazy import at a
 // Monaco/CodeMirror module honoring the same EditorProps.
-export default function HljsCode({ value, language, maxHeight }: EditorProps) {
-  const html = highlightToHtml(value, language);
+const HljsCode = memo(function HljsCode({ value, language, maxHeight }: EditorProps) {
+  const html = useMemo(() => highlightToHtml(value, language), [value, language]);
   return (
     <pre className="code hljs" data-lang={language} style={maxHeight ? { maxHeight } : undefined}>
       <code dangerouslySetInnerHTML={{ __html: html }} />
       <CopyButton text={value} className="code-block__copy" />
     </pre>
   );
-}
+});
+
+export default HljsCode;

@@ -71,6 +71,11 @@ type App struct {
 	activeTabID string
 	readyHook   func()
 
+	// tabsSaveMu serializes writes to desktop-tabs.json and its fixed .tmp path.
+	tabsSaveMu             sync.Mutex
+	tabsSaveVersion        uint64 // protected by mu; assigned when collecting a snapshot
+	tabsLastWrittenVersion uint64 // protected by tabsSaveMu
+
 	forceQuit           atomic.Bool
 	backgroundMaximised atomic.Bool
 	trayReady           bool
@@ -947,6 +952,23 @@ func (a *App) CheckpointsForTab(tabID string) []CheckpointMeta {
 		sort.Strings(out[i].Files) // map iteration is unordered; keep the list stable
 	}
 	return out
+}
+
+// ToolResultForTab returns the full arguments and output for one tool call that
+// were elided from the frontend's in-memory items[] for memory efficiency. The
+// caller (frontend ToolCard) loads this on demand when the user expands a
+// collapsed tool card. Returns nil when the tool ID is not found.
+func (a *App) ToolResultForTab(tabID, toolID string) *control.ToolResultData {
+	a.mu.RLock()
+	var ctrl *control.Controller
+	if tab := a.tabByIDLocked(tabID); tab != nil {
+		ctrl = tab.Ctrl
+	}
+	a.mu.RUnlock()
+	if ctrl == nil {
+		return nil
+	}
+	return ctrl.ToolResult(toolID)
 }
 
 // Rewind restores the session to the start of turn. scope is "code",
