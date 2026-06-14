@@ -58,6 +58,7 @@ type feishuMsgEvent struct {
 	MessageID string          `json:"message_id"`
 	RootID    string          `json:"root_id"`
 	ParentID  string          `json:"parent_id"`
+	ThreadID  string          `json:"thread_id"`
 	ChatID    string          `json:"chat_id"`
 	ChatType  string          `json:"chat_type"`
 	MsgType   string          `json:"msg_type"`
@@ -432,14 +433,19 @@ func (a *adapter) handleMessage(msg feishuMsgEvent) {
 		return
 	}
 
-	// @mention gating：仅在群聊中检查是否 @了 bot
+	// @mention gating：仅在群聊或话题群中检查是否 @了 bot
 	chatType := bot.ChatDM
-	if msg.ChatType == "group" {
+	if msg.ChatType == "group" || msg.ChatType == "topic_group" {
 		chatType = bot.ChatGroup
 		if a.cfg.RequireMention && len(msg.Mentions) == 0 {
 			a.logger.Info("feishu message ignored", "reason", "missing_mention", "chat", logHash(msg.ChatID), "message", logHash(msg.MessageID))
 			return
 		}
+	}
+
+	threadID := firstNonEmpty(msg.ThreadID, msg.RootID)
+	if threadID == "" && msg.ChatType == "topic_group" {
+		threadID = msg.ChatID
 	}
 
 	ib := bot.InboundMessage{
@@ -450,6 +456,7 @@ func (a *adapter) handleMessage(msg feishuMsgEvent) {
 		UserName:  "",
 		Text:      content.Text,
 		MessageID: msg.MessageID,
+		ThreadID:  threadID,
 	}
 
 	// 获取用户信息填充用户名
@@ -623,7 +630,11 @@ func (a *adapter) sendCard(ctx context.Context, msg bot.OutboundMessage) (bot.Se
 		"elements": elements,
 	}
 
-	cardJSON, _ := json.Marshal(cardPayload)
+	cardJSON, err := json.Marshal(cardPayload)
+	if err != nil {
+		a.logger.Warn("feishu card marshal error", "err", err)
+		return bot.SendResult{}, fmt.Errorf("feishu card marshal: %w", err)
+	}
 	return a.sendSDKContent(ctx, msg, larkim.MsgTypeInteractive, string(cardJSON))
 }
 
