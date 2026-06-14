@@ -289,6 +289,7 @@ type asyncRuntimeEmitter struct {
 	mu      sync.Mutex
 	emit    runtimeEventEmitFunc
 	queue   []runtimeEventEnvelope
+	head    int
 	running bool
 }
 
@@ -314,22 +315,29 @@ func (e *asyncRuntimeEmitter) Clear() {
 	e.mu.Lock()
 	clear(e.queue)
 	e.queue = nil
+	e.head = 0
 	e.mu.Unlock()
 }
 
 func (e *asyncRuntimeEmitter) run() {
 	for {
 		e.mu.Lock()
-		if len(e.queue) == 0 {
+		if e.head >= len(e.queue) {
+			clear(e.queue)
+			e.queue = nil
+			e.head = 0
 			e.running = false
 			e.mu.Unlock()
 			return
 		}
-		item := e.queue[0]
-		copy(e.queue, e.queue[1:])
+		item := e.queue[e.head]
 		var zero runtimeEventEnvelope
-		e.queue[len(e.queue)-1] = zero
-		e.queue = e.queue[:len(e.queue)-1]
+		e.queue[e.head] = zero
+		e.head++
+		if e.head > 64 && e.head*2 >= len(e.queue) {
+			e.queue = append([]runtimeEventEnvelope(nil), e.queue[e.head:]...)
+			e.head = 0
+		}
 		emit := e.emit
 		if emit == nil {
 			emit = runtime.EventsEmit

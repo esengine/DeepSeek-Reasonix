@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -116,4 +117,54 @@ func TestEmitProjectTreeChangedDoesNotBlockOnRuntimeEventsEmit(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("runtime emit calls = %d, want at least 2", calls.Load())
+}
+
+func TestAsyncRuntimeEmitterDrainsBacklogInOrder(t *testing.T) {
+	const backlog = 256
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	delivered := make(chan string, backlog)
+	var calls atomic.Int32
+
+	emitter := &asyncRuntimeEmitter{}
+	emitter.emit = func(_ context.Context, _ string, payload ...interface{}) {
+		if len(payload) != 1 {
+			t.Errorf("payload count = %d, want 1", len(payload))
+			return
+		}
+		value, ok := payload[0].(string)
+		if !ok {
+			t.Errorf("payload type = %T, want string", payload[0])
+			return
+		}
+		delivered <- value
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+	}
+
+	ctx := context.Background()
+	for i := 0; i < backlog; i++ {
+		emitter.Emit(ctx, "agent:event", strconv.Itoa(i))
+	}
+
+	select {
+	case <-entered:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("first runtime emit did not start")
+	}
+	close(release)
+
+	for i := 0; i < backlog; i++ {
+		select {
+		case got := <-delivered:
+			if want := strconv.Itoa(i); got != want {
+				t.Fatalf("delivered[%d] = %q, want %q", i, got, want)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("timed out waiting for delivered event %d", i)
+		}
+	}
 }
