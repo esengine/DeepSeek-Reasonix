@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,6 +78,169 @@ func TestWriteFileInvalidArgs(t *testing.T) {
 	_, err := writeFile{}.Execute(context.Background(), json.RawMessage(`{invalid`))
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+// --- move_file tests ---
+
+func TestMoveFileMovesIntoParentDir(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.md")
+	dst := filepath.Join(dir, "docs", "a.md")
+	if err := os.WriteFile(src, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := runTool(t, moveFile{}, map[string]any{"source_path": src, "destination_path": dst})
+	if !strings.Contains(out, "moved") {
+		t.Fatalf("move_file output = %q, want moved", out)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("source still exists or stat failed: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("destination content = %q, want hello", got)
+	}
+}
+
+func TestMoveFileRejectsDestinationExists(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.md")
+	dst := filepath.Join(dir, "b.md")
+	os.WriteFile(src, []byte("a"), 0o644)
+	os.WriteFile(dst, []byte("b"), 0o644)
+
+	if _, err := (moveFile{}).Execute(context.Background(), argsJSON(t, map[string]any{"source_path": src, "destination_path": dst})); err == nil {
+		t.Fatal("expected error for existing destination")
+	}
+}
+
+func TestMoveFileRejectsEscape(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	src := filepath.Join(dir, "a.md")
+	if err := os.WriteFile(src, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := (moveFile{roots: []string{dir}}).Execute(context.Background(), argsJSON(t, map[string]any{
+		"source_path":      src,
+		"destination_path": filepath.Join(outside, "a.md"),
+	})); err == nil {
+		t.Fatal("expected error for destination outside workspace")
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Fatalf("source should remain after refused move: %v", err)
+	}
+}
+
+func TestMoveFileSamePathRequiresExistingFile(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.md")
+	_, err := (moveFile{}).Execute(context.Background(), argsJSON(t, map[string]any{
+		"source_path":      missing,
+		"destination_path": missing,
+	}))
+	if err == nil {
+		t.Fatal("expected error for missing source even when source and destination match")
+	}
+}
+
+func TestMoveFileAllowsCaseOnlyRename(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "caseonly.txt")
+	dst := filepath.Join(dir, "CASEONLY.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstInfo, err := os.Stat(dst)
+	if os.IsNotExist(err) {
+		t.Skip("filesystem is case-sensitive")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(srcInfo, dstInfo) {
+		t.Skip("source and destination do not resolve to the same file")
+	}
+
+	runTool(t, moveFile{}, map[string]any{"source_path": src, "destination_path": dst})
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("destination content = %q, want hello", got)
+	}
+}
+
+func TestMoveFileFallsBackWhenSameFileDestinationRenameFails(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.md")
+	dst := filepath.Join(dir, "same-file.md")
+	if err := os.WriteFile(src, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(src, dst); err != nil {
+		t.Skipf("hard links unavailable: %v", err)
+	}
+
+	oldRename := renameFile
+	renameFile = func(oldpath, newpath string) error {
+		if oldpath == src && newpath == dst {
+			return &os.LinkError{Op: "rename", Old: oldpath, New: newpath, Err: os.ErrExist}
+		}
+		return oldRename(oldpath, newpath)
+	}
+	t.Cleanup(func() { renameFile = oldRename })
+
+	runTool(t, moveFile{}, map[string]any{"source_path": src, "destination_path": dst})
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("source still exists or stat failed: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("destination content = %q, want hello", got)
+	}
+}
+
+func TestMoveFileFallsBackForCrossDeviceRename(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.md")
+	dst := filepath.Join(dir, "docs", "a.md")
+	if err := os.WriteFile(src, []byte("hello"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	oldRename := renameFile
+	renameFile = func(oldpath, newpath string) error {
+		return &os.LinkError{Op: "rename", Old: oldpath, New: newpath, Err: errors.New("invalid cross-device link")}
+	}
+	t.Cleanup(func() { renameFile = oldRename })
+
+	out := runTool(t, moveFile{}, map[string]any{"source_path": src, "destination_path": dst})
+	if !strings.Contains(out, "moved") {
+		t.Fatalf("move_file output = %q, want moved", out)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("source still exists or stat failed: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("destination content = %q, want hello", got)
 	}
 }
 

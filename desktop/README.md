@@ -220,5 +220,5 @@ includes conversations, API keys, file contents, or paths.
 
 Opt out any time: Settings > Updates > "Anonymous usage ping", or set
 `telemetry = false` under `[desktop]` in the global config. Dev builds
-never ping. Crash reports are separate and only ever sent when the user
-clicks "Send report" on the crash screen.
+never ping. Crash and performance-pressure reports are separate and only
+ever sent when the user clicks "Send report" on the diagnostic UI.

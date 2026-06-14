@@ -47,6 +47,9 @@ func TestRecoverToPendingCapturesAndReraises(t *testing.T) {
 	if !strings.Contains(r.Message, "[go panic] unit:") {
 		t.Errorf("message missing site prefix: %q", r.Message)
 	}
+	if r.Source != "go" || r.Label != "unit" || r.ErrorMessage == "" || r.Stack == "" || r.TopFrame == "" {
+		t.Errorf("structured panic metadata missing: %+v", r)
+	}
 	if strings.Contains(r.Message, `Users\alice`) {
 		t.Errorf("message not scrubbed: %q", r.Message)
 	}
@@ -61,6 +64,25 @@ func TestWritePendingCrashCaps(t *testing.T) {
 	}
 	if len(r.Message) > maxCrashDetailBytes {
 		t.Errorf("message len = %d, want <= %d", len(r.Message), maxCrashDetailBytes)
+	}
+}
+
+func TestWritePendingCrashScrubsSensitiveText(t *testing.T) {
+	t.Cleanup(func() { os.Remove(pendingCrashPath()) })
+	apiKey := "sk-proj-" + "abcdefghijklmnopqrstuvwxyz1234567890"
+	bearer := "abcdefghijklmnopqrstuvwxyz1234567890ABCDE"
+	longHex := "0123456789abcdef0123456789abcdef"
+
+	writePendingCrash("unit", "boom api_key="+apiKey+" user alice@example.com", []byte("goroutine\nAuthorization: Bearer "+bearer+"\n/home/alice/project/x.go:12\nhash "+longHex))
+	r, ok := readPending(t)
+	if !ok {
+		t.Fatal("expected a pending crash file")
+	}
+	freeText := strings.Join([]string{r.Message, r.ErrorMessage, r.Stack, r.TopFrame}, "\n")
+	for _, leaked := range []string{apiKey, bearer, longHex, "alice@example.com", "/home/alice"} {
+		if strings.Contains(freeText, leaked) {
+			t.Fatalf("sensitive value leaked %q in %+v", leaked, r)
+		}
 	}
 }
 

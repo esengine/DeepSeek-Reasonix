@@ -7,6 +7,7 @@
 
 import type * as GeneratedApp from "../../wailsjs/go/main/App";
 
+import { addBreadcrumb } from "./breadcrumbs";
 import { t } from "./i18n";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems } from "./statusBarItems";
 import { modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeTokenMode, normalizeToolApprovalMode } from "./types";
@@ -39,6 +40,8 @@ import type {
   ModelInfo,
   NetworkView,
   ProjectNode,
+  PromptHistoryEntry,
+  PromptHistoryResult,
   ProviderView,
   QuestionAnswer,
   ServerView,
@@ -140,6 +143,7 @@ export interface AppBindings {
   RestoreSession(path: string): Promise<void>;
   PurgeTrashedSession(path: string): Promise<void>;
   RenameSession(path: string, title: string): Promise<void>;
+  ScanPromptHistory(nonce: string): Promise<PromptHistoryResult>;
   ListWorkspaces(): Promise<WorkspaceView[]>;
   PickWorkspace(): Promise<string>;
   SwitchWorkspace(path: string): Promise<string>;
@@ -150,6 +154,7 @@ export interface AppBindings {
   BalanceForTab(tabID: string): Promise<BalanceInfo>;
   Jobs(): Promise<JobView[]>;
   JobsForTab(tabID: string): Promise<JobView[]>;
+  ToolResultForTab(tabID: string, toolID: string): Promise<{ args: string; output: string } | null>;
   Meta(): Promise<Meta>;
   MetaForTab(tabID: string): Promise<Meta>;
   Commands(): Promise<CommandInfo[]>;
@@ -409,11 +414,49 @@ export function onProjectTreeChanged(cb: () => void): () => void {
 
 // app proxies each call to the live binding (or the dev mock only when truly
 // outside the shell), so a late-injected window.go is picked up transparently.
+function bridgeBreadcrumb(method: string): string {
+  if (method === "ReportCrash") return "";
+  if (/^(Submit|SubmitDisplay|RunShell|Steer|Cancel|Approve|AnswerQuestion|ReplayPendingPrompts)/.test(method))
+    return `turn ${method}`;
+  if (/^(SetModel|SetEffort|SetTokenMode|SetDefaultModel|SetPlannerModel|SetSubagentModel|SetSubagentEffort)/.test(method))
+    return `model ${method}`;
+  if (/^(SetDesktop|SetCloseBehavior|SetDisplayMode|SetStatusBar|SetExpandThinking|SetAutoPlan|SetReasoningLanguage)/.test(method))
+    return `settings ${method}`;
+  if (/^(SaveProvider|AddOfficialProviderAccess|RemoveProviderAccess|DeleteProvider|SetProviderKey|ClearProviderKey|FetchProviderModels|ConnectKey)/.test(method))
+    return `provider ${method}`;
+  if (/^(CheckUpdate|ApplyUpdate|OpenDownloadPage)/.test(method)) return `update ${method}`;
+  if (/^(AddMCPServer|UpdateMCPServer|RemoveMCPServer|ReconnectMCPServer|ClearMCPServerAuthentication|SetMCPServer)/.test(method))
+    return `mcp ${method}`;
+  if (/^(AddSkillPath|RemoveSkillPath|RefreshSkills|SetSkillEnabled|AcceptSkillSuggestion)/.test(method))
+    return `skill ${method}`;
+  if (/^(OpenProjectTab|OpenGlobalTab|EnsureBlankTab|SetActiveTab|CloseTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace)/.test(method))
+    return `nav ${method}`;
+  return "";
+}
+
 export const app: AppBindings = new Proxy({} as AppBindings, {
   get(_t, prop) {
     const target = realApp() ?? getMock();
     const v = (target as unknown as Record<string, unknown>)[String(prop)];
-    return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+    if (typeof v !== "function") return v;
+    return (...args: unknown[]) => {
+      const method = String(prop);
+      const crumb = bridgeBreadcrumb(method);
+      if (crumb) addBreadcrumb("bridge", crumb);
+      try {
+        const result = (v as (...a: unknown[]) => unknown).apply(target, args);
+        if (result && typeof (result as Promise<unknown>).then === "function") {
+          return (result as Promise<unknown>).catch((err) => {
+            if (crumb) addBreadcrumb("bridge.error", method);
+            throw err;
+          });
+        }
+        return result;
+      } catch (err) {
+        if (crumb) addBreadcrumb("bridge.error", method);
+        throw err;
+      }
+    };
   },
 });
 
@@ -719,7 +762,7 @@ function makeMockApp(): AppBindings {
         feishuGroups: [],
         weixinGroups: [],
       },
-      qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false },
+      qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false, sandbox: false },
       feishu: {
         enabled: false,
         domain: "feishu",
@@ -1650,6 +1693,15 @@ function makeMockApp(): AppBindings {
       const s = sessions.find((x) => x.path === path);
       if (s) s.title = title.trim() || undefined;
     },
+	    async ScanPromptHistory(nonce: string) {
+	      // Dev mock returns a static set of sample prompts for UI development.
+	      const entries: PromptHistoryEntry[] = [
+	        { text: "Explain the architecture of this project", at: Date.now() - 60000, sessionPath: "/mock/sessions/arch.jsonl", turn: 0 },
+	        { text: "Fix the login button styling", at: Date.now() - 120000, sessionPath: "/mock/sessions/arch.jsonl", turn: 1 },
+	        { text: "What is the capital of France?", at: Date.now() - 300000, sessionPath: "/mock/sessions/general.jsonl", turn: 0 },
+	      ];
+	      return { entries, nonce: "mock-" + nonce, olderCursor: "", hasOlder: false };
+	    },
     async ListWorkspaces() {
       return mockProjectTree
         .filter((node) => node.kind === "project" && node.root)
@@ -1692,6 +1744,9 @@ function makeMockApp(): AppBindings {
         },
         async JobsForTab() {
           return this.Jobs();
+        },
+        async ToolResultForTab() {
+          return null;
         },
         async Meta() {
           const active = mockTabs.find((tab) => tab.active) ?? mockTabs[0];
@@ -2303,7 +2358,8 @@ function makeMockApp(): AppBindings {
           }));
         },
         async BotRuntimeStatus() {
-          const runningConnections = settings.bot.connections.filter((connection) => connection.enabled && connection.status === "connected").length;
+          const qqRunning = settings.bot.qq.enabled && settings.bot.qq.appId.trim() && settings.bot.qq.secretSet;
+          const runningConnections = (qqRunning ? 1 : 0) + settings.bot.connections.filter((connection) => connection.enabled && connection.status === "connected").length;
           return {
             running: settings.bot.enabled && runningConnections > 0,
             status: settings.bot.enabled && runningConnections > 0 ? "running" : "stopped",

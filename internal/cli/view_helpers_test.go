@@ -115,6 +115,21 @@ func TestRenderHooksUsesSharedVisualLanguage(t *testing.T) {
 	assertLinesWithin(t, got, width)
 }
 
+func TestRenderHooksShowsPermissionRequestMatch(t *testing.T) {
+	width := 72
+	got := renderHooks(width, []hook.ResolvedHook{{
+		HookConfig: hook.HookConfig{Command: "notify", Match: "bash"},
+		Event:      hook.PermissionRequest,
+		Scope:      hook.ScopeGlobal,
+	}}, true, true)
+	for _, want := range []string{"PermissionRequest", "global", "bash", "notify"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("hooks view missing %q:\n%s", want, got)
+		}
+	}
+	assertLinesWithin(t, got, width)
+}
+
 func TestRenderHelpGroupsCommands(t *testing.T) {
 	width := 72
 	got := renderHelp(width,

@@ -21,7 +21,9 @@ independent of git:
 
 - **Zero git pollution** — never commits, stages, or touches `.git/`. Works in a
   non-git directory.
-- **Tracks only edit-tool changes** — `write_file` / `edit_file` / `multi_edit`.
+- **Tracks only previewable edit-tool changes** — `write_file` / `edit_file` / `multi_edit`.
+  File moves via `move_file` follow the same workspace permission boundary, but
+  are not yet represented in checkpoint previews.
   `bash` side effects are **not** tracked (no way to know what a shell command
   touched), exactly as Claude Code. Risky bash is already permission-gated.
 - Full pre-edit content snapshots (simple; storage bounded by retention, below).

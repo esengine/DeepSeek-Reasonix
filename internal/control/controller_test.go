@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/event"
+	"reasonix/internal/hook"
 	"reasonix/internal/jobs"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
@@ -328,6 +329,64 @@ func approvalIDs() (*Controller, chan string, *int) {
 	return c, ids, &prompts
 }
 
+func permissionHookController(t *testing.T, match string) (*Controller, chan string, chan hook.Payload) {
+	t.Helper()
+	ids := make(chan string, 8)
+	payloads := make(chan hook.Payload, 8)
+	spawner := func(_ context.Context, in hook.SpawnInput) hook.SpawnResult {
+		var payload hook.Payload
+		if err := json.Unmarshal([]byte(in.Stdin), &payload); err != nil {
+			t.Errorf("permission hook payload json: %v", err)
+		}
+		payloads <- payload
+		return hook.SpawnResult{ExitCode: 0}
+	}
+	c := New(Options{
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.ApprovalRequest {
+				ids <- e.Approval.ID
+			}
+		}),
+		Hooks: hook.NewRunner([]hook.ResolvedHook{{
+			HookConfig: hook.HookConfig{Command: "notify", Match: match},
+			Event:      hook.PermissionRequest,
+			Scope:      hook.ScopeGlobal,
+		}}, "/tmp", spawner, nil),
+	})
+	return c, ids, payloads
+}
+
+func waitApprovalID(t *testing.T, ids <-chan string) string {
+	t.Helper()
+	select {
+	case id := <-ids:
+		return id
+	case <-time.After(2 * time.Second):
+		t.Fatal("ApprovalRequest was not emitted")
+	}
+	return ""
+}
+
+func waitPermissionHook(t *testing.T, payloads <-chan hook.Payload) hook.Payload {
+	t.Helper()
+	select {
+	case payload := <-payloads:
+		return payload
+	case <-time.After(2 * time.Second):
+		t.Fatal("PermissionRequest hook did not fire")
+	}
+	return hook.Payload{}
+}
+
+func assertNoPermissionHook(t *testing.T, payloads <-chan hook.Payload) {
+	t.Helper()
+	select {
+	case payload := <-payloads:
+		t.Fatalf("PermissionRequest hook fired unexpectedly: %+v", payload)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 // TestApprovalAllowOnce drives the happy path: the gate emits an ApprovalRequest,
 // the (fake) frontend answers allow, and the gate returns allow with no grant.
 func TestApprovalAllowOnce(t *testing.T) {
@@ -413,6 +472,182 @@ func TestMemoryApprovalSubjectsAndNotifications(t *testing.T) {
 	}
 	if got := approvalNotificationText("bash", "go test ./..."); got != "approval needed: bash go test ./..." {
 		t.Fatalf("bash notification = %q", got)
+	}
+	moveSubject := approvalDisplaySubject("move_file", "src/a.md", json.RawMessage(`{"source_path":"src/a.md","destination_path":"docs/a.md"}`))
+	if moveSubject != "src/a.md -> docs/a.md" {
+		t.Fatalf("move_file approval subject = %q", moveSubject)
+	}
+}
+
+func TestPermissionRequestHookFiresForToolApproval(t *testing.T) {
+	c, ids, payloads := permissionHookController(t, "bash")
+	args := json.RawMessage(`{"command":"go test ./..."}`)
+	type approveResult struct {
+		allow    bool
+		remember bool
+		err      error
+	}
+	done := make(chan approveResult, 1)
+	go func() {
+		allow, remember, err := gateApprover{c}.Approve(context.Background(), "bash", "go test ./...", args)
+		done <- approveResult{allow: allow, remember: remember, err: err}
+	}()
+
+	id := waitApprovalID(t, ids)
+	payload := waitPermissionHook(t, payloads)
+	if payload.Event != hook.PermissionRequest {
+		t.Fatalf("payload event = %q, want PermissionRequest", payload.Event)
+	}
+	if payload.ToolName != "bash" {
+		t.Fatalf("payload tool = %q, want bash", payload.ToolName)
+	}
+	if payload.Subject != "go test ./..." {
+		t.Fatalf("payload subject = %q, want command subject", payload.Subject)
+	}
+	if string(payload.ToolArgs) != string(args) {
+		t.Fatalf("payload args = %s, want %s", payload.ToolArgs, args)
+	}
+
+	c.Approve(id, true, false, false)
+	select {
+	case got := <-done:
+		if got.err != nil || !got.allow || got.remember {
+			t.Fatalf("Approve = (%v,%v,%v), want allow once", got.allow, got.remember, got.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("approval stayed blocked")
+	}
+}
+
+func TestPermissionRequestHookDoesNotFireForPolicyAllow(t *testing.T) {
+	c, _, payloads := permissionHookController(t, "bash")
+	g := permission.NewGate(permission.New("ask", []string{"bash(go test*)"}, nil, nil), gateApprover{c})
+
+	allow, _, err := g.Check(context.Background(), "bash", json.RawMessage(`{"command":"go test ./..."}`), false)
+	if err != nil || !allow {
+		t.Fatalf("allow-listed call = (%v,%v), want allowed", allow, err)
+	}
+	assertNoPermissionHook(t, payloads)
+}
+
+func TestPermissionRequestHookDoesNotFireForAutoApprovalMode(t *testing.T) {
+	c, _, payloads := permissionHookController(t, "bash")
+	c.SetToolApprovalMode(ToolApprovalAuto)
+	g := c.newInteractiveGate()
+
+	allow, _, err := g.Check(context.Background(), "bash", json.RawMessage(`{"command":"go test ./..."}`), false)
+	if err != nil || !allow {
+		t.Fatalf("auto-approved call = (%v,%v), want allowed", allow, err)
+	}
+	assertNoPermissionHook(t, payloads)
+}
+
+func TestPermissionRequestHookDoesNotFireForSessionGrant(t *testing.T) {
+	c, _, payloads := permissionHookController(t, "bash")
+	c.mu.Lock()
+	c.granted[permission.SessionGrantRuleForScope("bash", "go test ./...")] = true
+	c.mu.Unlock()
+
+	allow, _, err := c.requestApproval(context.Background(), "bash", "go test ./...", nil)
+	if err != nil || !allow {
+		t.Fatalf("session-granted approval = (%v,%v), want allowed", allow, err)
+	}
+	assertNoPermissionHook(t, payloads)
+}
+
+func TestPermissionRequestHookDoesNotFireForYolo(t *testing.T) {
+	c, _, payloads := permissionHookController(t, "bash")
+	c.SetToolApprovalMode(ToolApprovalYolo)
+
+	allow, _, err := c.requestApproval(context.Background(), "bash", "go test ./...", nil)
+	if err != nil || !allow {
+		t.Fatalf("YOLO approval = (%v,%v), want allowed", allow, err)
+	}
+	assertNoPermissionHook(t, payloads)
+}
+
+func TestPermissionRequestHookDoesNotFireForPlanApproval(t *testing.T) {
+	c, ids, payloads := permissionHookController(t, ".*")
+	done := make(chan bool, 1)
+	errs := make(chan error, 1)
+	go func() {
+		allow, _, err := c.requestApproval(context.Background(), planApprovalTool, "", nil)
+		if err != nil {
+			errs <- err
+			return
+		}
+		done <- allow
+	}()
+
+	id := waitApprovalID(t, ids)
+	assertNoPermissionHook(t, payloads)
+	c.Approve(id, true, false, false)
+
+	select {
+	case err := <-errs:
+		t.Fatalf("plan approval: %v", err)
+	case allow := <-done:
+		if !allow {
+			t.Fatal("manual plan approval should allow")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("plan approval stayed blocked")
+	}
+}
+
+func TestPermissionRequestHookRedactsMemoryApprovalPayload(t *testing.T) {
+	cases := []struct {
+		tool string
+		args json.RawMessage
+	}{
+		{
+			tool: "remember",
+			args: json.RawMessage(`{"name":"private-memory","description":"private description","body":"private memory body"}`),
+		},
+		{
+			tool: "forget",
+			args: json.RawMessage(`{"name":"private-memory"}`),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.tool, func(t *testing.T) {
+			c, ids, payloads := permissionHookController(t, tc.tool)
+			done := make(chan string, 1)
+			go func() {
+				allow, _, err := gateApprover{c}.Approve(context.Background(), tc.tool, "", tc.args)
+				if err != nil {
+					done <- err.Error()
+					return
+				}
+				if !allow {
+					done <- tc.tool + " approval denied"
+					return
+				}
+				done <- ""
+			}()
+
+			id := waitApprovalID(t, ids)
+			payload := waitPermissionHook(t, payloads)
+			if payload.ToolName != tc.tool {
+				t.Fatalf("payload tool = %q, want %s", payload.ToolName, tc.tool)
+			}
+			if payload.Subject != "" {
+				t.Fatalf("memory PermissionRequest subject = %q, want redacted", payload.Subject)
+			}
+			if len(payload.ToolArgs) != 0 {
+				t.Fatalf("memory PermissionRequest args = %s, want redacted", payload.ToolArgs)
+			}
+
+			c.Approve(id, true, false, false)
+			select {
+			case msg := <-done:
+				if msg != "" {
+					t.Fatal(msg)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("memory approval stayed blocked")
+			}
+		})
 	}
 }
 
@@ -511,6 +746,7 @@ func TestApprovalSessionGrantGroupsFileMutationTools(t *testing.T) {
 		{"edit_file", "src/a.go"},
 		{"write_file", "src/b.go"},
 		{"multi_edit", "src/c.go"},
+		{"move_file", "src/d.go"},
 	} {
 		allow, _, err := gateApprover{c}.Approve(context.Background(), call.tool, call.subject, nil)
 		if err != nil || !allow {

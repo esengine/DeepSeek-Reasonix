@@ -164,6 +164,43 @@ func TestListSessionsOrdersByLastActivityMeta(t *testing.T) {
 	}
 }
 
+func TestListSessionOrderIncludesEmptySessionsWithoutPreviewScan(t *testing.T) {
+	dir := t.TempDir()
+	emptyPath := filepath.Join(dir, "empty.jsonl")
+	realPath := filepath.Join(dir, "real.jsonl")
+	if err := os.WriteFile(emptyPath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := NewSession("")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "real prompt"})
+	if err := s.Save(realPath); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	writeBranchMeta(t, emptyPath, now, now.Add(time.Hour))
+	writeBranchMeta(t, realPath, now, now)
+
+	ordered, err := ListSessionOrder(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ordered) != 2 {
+		t.Fatalf("lightweight order len = %d, want 2", len(ordered))
+	}
+	if ordered[0].Path != emptyPath {
+		t.Fatalf("lightweight order first = %s, want newer empty session %s", ordered[0].Path, emptyPath)
+	}
+
+	listed, err := ListSessions(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].Path != realPath {
+		t.Fatalf("ListSessions = %+v, want only the non-empty real session", listed)
+	}
+}
+
 func writeBranchMeta(t *testing.T, path string, createdAt, updatedAt time.Time) {
 	t.Helper()
 	meta := BranchMeta{

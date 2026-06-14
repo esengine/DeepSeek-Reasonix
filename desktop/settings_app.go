@@ -98,6 +98,7 @@ type QQBotView struct {
 	AppID        string `json:"appId"`
 	AppSecretEnv string `json:"appSecretEnv"`
 	SecretSet    bool   `json:"secretSet"`
+	Sandbox      bool   `json:"sandbox"`
 }
 
 type FeishuBotView struct {
@@ -436,6 +437,7 @@ func botSettingsView(b config.BotConfig) BotSettingsView {
 			AppID:        b.QQ.AppID,
 			AppSecretEnv: b.QQ.AppSecretEnv,
 			SecretSet:    strings.TrimSpace(b.QQ.AppSecretEnv) != "" && os.Getenv(b.QQ.AppSecretEnv) != "",
+			Sandbox:      b.QQ.Sandbox,
 		},
 		Feishu: FeishuBotView{
 			Enabled:           b.Feishu.Enabled,
@@ -571,7 +573,7 @@ func desktopBotConfigConfigured(bot config.BotConfig) bool {
 		len(bot.Allowlist.QQGroups)+len(bot.Allowlist.FeishuGroups)+len(bot.Allowlist.WeixinGroups) > 0 {
 		return true
 	}
-	if bot.QQ.Enabled || strings.TrimSpace(bot.QQ.AppID) != "" || bot.QQ.AppSecretEnv != defaults.QQ.AppSecretEnv {
+	if bot.QQ.Enabled || strings.TrimSpace(bot.QQ.AppID) != "" || bot.QQ.AppSecretEnv != defaults.QQ.AppSecretEnv || bot.QQ.Sandbox != defaults.QQ.Sandbox {
 		return true
 	}
 	if bot.Feishu.Enabled ||
@@ -1321,6 +1323,7 @@ func (a *App) SetBotSettings(b BotSettingsView) error {
 			Enabled:      b.QQ.Enabled,
 			AppID:        strings.TrimSpace(b.QQ.AppID),
 			AppSecretEnv: strings.TrimSpace(b.QQ.AppSecretEnv),
+			Sandbox:      b.QQ.Sandbox,
 		}
 		c.Bot.Feishu = config.FeishuBotConfig{
 			Enabled:           b.Feishu.Enabled,
@@ -1488,7 +1491,40 @@ func (a *App) SetColdResumePrune(enabled bool) error {
 }
 
 func (a *App) SetReasoningLanguage(lang string) error {
-	return a.applyConfigChange(func(c *config.Config) error { return c.SetReasoningLanguage(lang) })
+	cfg, path, err := a.loadDesktopUserConfigForEdit()
+	if err != nil {
+		return err
+	}
+	if err := cfg.SetReasoningLanguage(lang); err != nil {
+		return err
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		return err
+	}
+	a.applyReasoningLanguageToLiveControllers(cfg.ReasoningLanguage())
+	return nil
+}
+
+func (a *App) applyReasoningLanguageToLiveControllers(fallback string) {
+	type liveTab struct {
+		root string
+		ctrl *control.Controller
+	}
+	var tabs []liveTab
+	a.mu.RLock()
+	for _, tab := range a.tabs {
+		if tab != nil && tab.Ctrl != nil {
+			tabs = append(tabs, liveTab{root: tab.WorkspaceRoot, ctrl: tab.Ctrl})
+		}
+	}
+	a.mu.RUnlock()
+	for _, tab := range tabs {
+		mode := fallback
+		if cfg, err := config.LoadForRoot(tab.root); err == nil {
+			mode = cfg.ReasoningLanguage()
+		}
+		tab.ctrl.SetReasoningLanguage(mode)
+	}
 }
 
 // trimList drops blank entries from a string slice (and returns a non-nil slice).

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { asArray } from "./array";
 import { addBreadcrumb } from "./breadcrumbs";
 import { app, onEvent, onReady } from "./bridge";
+import { invalidateCache } from "./composerHistory";
 import { createRafBatch } from "./rafBatch";
 import { t } from "./i18n";
 import { modeHasAutoApproveTools } from "./types";
@@ -34,13 +35,13 @@ import type {
 
 export type ToolStatus = "running" | "done" | "error" | "stopped";
 
-export type LiveStream = { id: string; text: string; reasoning: string };
+export type LiveStream = { id: string; text: string; reasoning: string; reasoningComplete: boolean };
 export type MessageActionScope = "fork" | "summ-from" | "summ-upto" | "conversation" | "code" | "both";
 export type MessageActionState = { turn: number; scope: MessageActionScope };
 
 export type Item =
   | { kind: "user"; id: string; text: string; failed?: boolean }
-  | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean }
+  | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; reasoningComplete?: boolean }
   | { kind: "phase"; id: string; text: string }
   | { kind: "notice"; id: string; level: "info" | "warn"; text: string }
   | {
@@ -62,6 +63,7 @@ export type Item =
       output?: string;
       error?: string;
       truncated?: boolean;
+      dataArchived?: boolean; // args/output trimmed for memory; full data available via backend
       durationMs?: number;
       isShell?: boolean; // true for !-prefix shell commands (controls default expand)
       parentId?: string; // a sub-agent call nests under the `task` call with this id
@@ -350,14 +352,17 @@ function applyEvent(s: State, e: WireEvent): State {
       let cur: State = s;
       if (cur.pendingUser !== undefined) cur = flushPendingUser(cur);
       const { items, id, seq } = ensureAssistant(cur);
-      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "" }, running: true, turnActive: true, turnStartAt: Date.now(), turnTokens: 0, turnTotalTokens: 0, turnCost: 0 };
+      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "", reasoningComplete: false }, running: true, turnActive: true, turnStartAt: Date.now(), turnTokens: 0, turnTotalTokens: 0, turnCost: 0 };
     }
     case "text":
     case "reasoning": {
       const { items, id, seq } = ensureAssistant(s);
       const delta = e.text ?? e.reasoning ?? "";
-      const base = s.live?.id === id ? s.live : { id, text: "", reasoning: "" };
-      const live = e.kind === "text" ? { ...base, text: base.text + delta } : { ...base, reasoning: base.reasoning + delta };
+      const base = s.live?.id === id ? s.live : { id, text: "", reasoning: "", reasoningComplete: false };
+      const live =
+        e.kind === "text"
+          ? { ...base, text: base.text + delta, reasoningComplete: base.reasoning !== "" || base.reasoningComplete }
+          : { ...base, reasoning: base.reasoning + delta, reasoningComplete: false };
       return { ...s, items, live, currentAssistant: id, seq };
     }
     case "message": {
@@ -400,7 +405,14 @@ function applyEvent(s: State, e: WireEvent): State {
       }
       if (idx >= 0) {
         const it = next[idx];
-        if (it.kind === "tool") next[idx] = { ...it, status: t.err ? "error" : "done", output: t.output, error: t.err, truncated: t.truncated, durationMs: t.durationMs };
+        if (it.kind === "tool") {
+          // Archive immediately: collapsed cards only show tool name + command
+          // subject (from args). Drop output entirely; full data is loaded on
+          // demand via app.ToolResultForTab when the card is expanded.
+          const existing = it;
+          const shortArgs = existing.args && existing.args.length > 200 ? existing.args.slice(0, 200) + "…" : existing.args;
+          next[idx] = { ...existing, status: t.err ? "error" : "done", args: shortArgs, output: undefined, error: t.err, truncated: t.truncated, durationMs: t.durationMs, dataArchived: true };
+        }
       }
       return { ...s, items: next };
     }
@@ -459,7 +471,7 @@ function applyEvent(s: State, e: WireEvent): State {
         if (it.kind === "tool" && it.status === "running") return { ...it, status: "stopped" as const };
         return it;
       });
-      const items: Item[] = e.err ? [...finalized, { kind: "notice", id: `e${s.seq}`, level: "warn", text: e.err }] : finalized;
+      let items: Item[] = e.err ? [...finalized, { kind: "notice", id: `e${s.seq}`, level: "warn", text: e.err }] : finalized;
       return { ...s, items, live: undefined, running: false, turnActive: false, currentAssistant: undefined, approval: undefined, ask: undefined, seq: s.seq + 1 };
     }
     default: return s;
@@ -521,7 +533,16 @@ export function reducer(s: State, a: Action): State {
     case "message_action_done": return { ...s, messageAction: undefined };
     case "history": {
       const { items, seq } = historyMessagesToItems(a.messages, "h", s.seq);
-      return { ...s, items, seq };
+      // Archive all tool items loaded from history: collapsed cards only need
+      // tool name + command; full data is loaded on demand from the backend.
+      const archived = items.map((it) => {
+        if (it.kind !== "tool") return it;
+        const t = it;
+        const shortArgs = t.args && t.args.length > 200 ? t.args.slice(0, 200) + "…" : t.args;
+        if (shortArgs === t.args && (t.output === undefined || t.output === "")) return it;
+        return { ...t, args: shortArgs, output: undefined, dataArchived: true };
+      });
+      return { ...s, items: archived, seq };
     }
     case "local_notice": return { ...s, running: false, turnActive: false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: a.level, text: a.text }] };
     case "clearApproval": return { ...s, approval: undefined };
@@ -572,6 +593,11 @@ async function refreshMetaForTab(tabId: string, dispatchTo: (tabId: string, acti
   } catch {
     /* ignore */
   }
+}
+
+export function replayPendingPromptsForActiveTab(activeTabId: string | undefined, replay: () => Promise<void> = () => app.ReplayPendingPrompts()): void {
+  if (!activeTabId) return;
+  void replay().catch(() => {});
 }
 
 export function useController() {
@@ -670,17 +696,17 @@ export function useController() {
     return active.id;
   }, [activeTabFromBackend, loadSessionDataForTab]);
 
-  const reconcileTabRuntime = useCallback(async (tabId: string) => {
+  const reconcileTabRuntime = useCallback(async (tabId: string): Promise<TabMeta[] | undefined> => {
     const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
     const tab = tabs.find((candidate) => candidate.id === tabId);
-    if (!tab) return;
+    if (!tab) return undefined;
     const local = statesRef.current.get(tabId);
     const needsInitialLoad = !local?.meta;
     const missedTurnDone = Boolean(local?.running && !tab.running);
     dispatchTo(tabId, { type: "backend_status", running: Boolean(tab.running) });
     if (needsInitialLoad || missedTurnDone) {
       await loadSessionDataForTab(tabId, missedTurnDone);
-      return;
+      return tabs;
     }
     const [jobs, effort, balance] = await Promise.all([
       app.JobsForTab(tabId).catch(() => undefined),
@@ -690,6 +716,7 @@ export function useController() {
     if (jobs) dispatchTo(tabId, { type: "jobs", jobs: asArray(jobs) });
     if (effort) dispatchTo(tabId, { type: "effort", effort });
     if (balance) dispatchTo(tabId, { type: "balance", balance });
+    return tabs;
   }, [dispatchTo, loadSessionDataForTab]);
 
   useEffect(() => {
@@ -775,12 +802,19 @@ export function useController() {
     return () => window.clearTimeout(timer);
   }, [activeTabId, reconcileTabRuntime, activeState.running, activeState.turnActive]);
 
+  // Replay any pending approval/ask prompts when switching tabs, so a
+  // plan-mode session left awaiting confirmation rebuilds its modal (#4275).
+  useEffect(() => {
+    replayPendingPromptsForActiveTab(activeTabId);
+  }, [activeTabId]);
+
   const send = useCallback((displayText: string, submitText = displayText) => {
     const submitForTab = (tabId: string) => {
       const seq = getOrCreateState(statesRef.current, tabId).seq;
       dispatchTo(tabId, { type: "user", text: displayText, seq });
       const display = displayText.trim();
       const submit = submitText.trim();
+      invalidateCache();
       (display !== submit ? app.SubmitDisplayToTab(tabId, display, submit) : app.SubmitToTab(tabId, submit)).catch((error) => {
         dispatchTo(tabId, { type: "send_failed", error: `Send failed: ${error instanceof Error ? error.message : String(error)}` });
       });
@@ -883,6 +917,7 @@ export function useController() {
     } catch {
       return; // backend refused (workspace starting / failed) — keep the transcript
     }
+    invalidateCache();
     if (tabId) dispatchTo(tabId, { type: "reset" });
   }, [activeTabId, bumpCheckpointRefreshSeq, dispatchTo]);
 
@@ -894,6 +929,7 @@ export function useController() {
     } catch {
       return;
     }
+    invalidateCache();
     if (tabId) dispatchTo(tabId, { type: "reset" });
   }, [activeTabId, bumpCheckpointRefreshSeq, dispatchTo]);
 
@@ -914,10 +950,10 @@ export function useController() {
   }, [activeTabId, dispatchTo, refreshCheckpoints, waitForTabReady]);
 
   const previewSession = useCallback(async (path: string): Promise<HistoryMessage[]> => asArray<HistoryMessage>(await app.PreviewSession(path).catch(() => [])), []);
-  const deleteSession = useCallback((path: string) => app.DeleteSession(path).catch(() => {}), []);
-  const restoreSession = useCallback((path: string) => app.RestoreSession(path).catch(() => {}), []);
-  const purgeTrashedSession = useCallback((path: string) => app.PurgeTrashedSession(path).catch(() => {}), []);
-  const renameSession = useCallback((path: string, title: string) => app.RenameSession(path, title).catch(() => {}), []);
+  const deleteSession = useCallback((path: string) => app.DeleteSession(path).catch(() => {}).finally(() => invalidateCache()), []);
+  const restoreSession = useCallback((path: string) => app.RestoreSession(path).catch(() => {}).finally(() => invalidateCache()), []);
+  const purgeTrashedSession = useCallback((path: string) => app.PurgeTrashedSession(path).catch(() => {}).finally(() => invalidateCache()), []);
+  const renameSession = useCallback((path: string, title: string) => app.RenameSession(path, title).catch(() => {}).finally(() => invalidateCache()), []);
 
   const refreshMeta = useCallback(async () => {
     if (!activeTabId) return;
@@ -1029,13 +1065,14 @@ export function useController() {
   }, [activeTabId, dispatchTo, loadSessionDataForTab, syncActiveTabFromBackend, waitForTabReady]);
 
   // Tab management: switch preserves per-tab state; open creates it.
-  const switchTab = useCallback(async (tabId: string) => {
+  const switchTab = useCallback(async (tabId: string): Promise<TabMeta[] | undefined> => {
     addBreadcrumb("nav", `switch tab ${tabId}`);
     setActiveTabId(tabId);
     try {
       await app.SetActiveTab(tabId);
-      await reconcileTabRuntime(tabId);
+      return await reconcileTabRuntime(tabId);
     } catch { /* ignore */ }
+    return undefined;
   }, [reconcileTabRuntime]);
 
   const openProjectTab = useCallback(async (workspaceRoot: string, topicId: string): Promise<TabMeta> => {
