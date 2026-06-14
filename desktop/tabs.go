@@ -247,9 +247,13 @@ func (s *tabEventSink) setContext(ctx context.Context) {
 	s.mu.Lock()
 	s.ctx = ctx
 	s.mu.Unlock()
-	if ctx == nil {
-		s.runtimeEvents.Clear()
-	}
+}
+
+func (s *tabEventSink) clearContext() {
+	s.mu.Lock()
+	s.ctx = nil
+	s.mu.Unlock()
+	s.runtimeEvents.Clear()
 }
 
 func (s *tabEventSink) context() context.Context {
@@ -995,7 +999,7 @@ func (a *App) CloseTab(tabID string) error {
 		tab.Ctrl.Close()
 	}
 	if tab.sink != nil {
-		tab.sink.setContext(nil) // stop further emissions (nil ctx -> Emit becomes no-op)
+		tab.sink.clearContext() // stop further emissions (nil ctx -> Emit becomes no-op)
 	}
 	return nil
 }
@@ -2786,7 +2790,7 @@ func (a *App) TrashTopic(topicID string) error {
 			item.ctrl.Close()
 		}
 		if item.sink != nil {
-			item.sink.setContext(nil)
+			item.sink.clearContext()
 		}
 	}
 
