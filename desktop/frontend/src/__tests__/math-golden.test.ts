@@ -133,6 +133,17 @@ check("$\\frac{a}{b}$", () => isLikelyInlineMath("\\frac{a}{b}") === true);
 check("$f(x)$", () => isLikelyInlineMath("f(x)") === true);
 check("$x+1$", () => isLikelyInlineMath("x+1") === true);
 
+console.log("\nisLikelyInlineMath — multi-letter group notation (math)");
+check("$SO(3,1)$", () => isLikelyInlineMath("SO(3,1)") === true);
+check("$SU(2)$", () => isLikelyInlineMath("SU(2)") === true);
+check("$SU(3)$", () => isLikelyInlineMath("SU(3)") === true);
+check("$SL(2)$", () => isLikelyInlineMath("SL(2)") === true);
+check("$GL(n)$", () => isLikelyInlineMath("GL(n)") === true);
+check("$Sp(2n)$", () => isLikelyInlineMath("Sp(2n)") === true);
+check("$SO(3)$", () => isLikelyInlineMath("SO(3)") === true);
+check("$Spin(3)$", () => isLikelyInlineMath("Spin(3)") === true);
+check("$Diff(M)$", () => isLikelyInlineMath("Diff(M)") === true);
+
 console.log("\nisLikelyInlineMath — currency/link (NOT math)");
 check("$5", () => isLikelyInlineMath("5") === false);
 check("$10", () => isLikelyInlineMath("10") === false);

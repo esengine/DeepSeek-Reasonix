@@ -16,7 +16,14 @@ export function isLikelyInlineMath(math: string): boolean {
   if (/\\[A-Za-z]+\b/.test(math)) return true;
   if (/[\^_{}|]/.test(math)) return true;
   if (/\b(?:alpha|beta|gamma|sum|int|prod|lim|infty|sqrt|frac|sin|cos|tan|log|ln|max|min|partial|nabla|left|right)\b/.test(math)) return true;
-  if (/^[A-Za-z]\s*\([^)]{1,80}\)$/.test(math)) return true;
+  // Function / group notation: a short identifier (1–6 letters) immediately
+  // followed by parenthesised arguments. Single-letter covers f(x), g(x);
+  // multi-letter covers standard group notation such as SO(3,1), SU(2),
+  // SL(2), GL(n), Sp(2n), Spin(n), Diff(M), Hom(A,B) — all of which would
+  // otherwise fall through to the final "single letter" check and be
+  // misclassified as prose. The 6-letter cap and the requirement that the
+  // whole token sits inside one $...$ span keep prose parentheticals out.
+  if (/^[A-Za-z]{1,6}\s*\([^)]{1,80}\)$/.test(math)) return true;
   if (/[A-Za-z0-9)\]}]\s*[+\-*/=<>]\s*[A-Za-z0-9([{\\]/.test(math)) return true;
   // One-sided comparison: < B, > 0, B < — comparison against an implicit
   // operand is common in prose.
