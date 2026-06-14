@@ -2442,7 +2442,7 @@ export default function App() {
           tabs={visibleTabs}
           activeTabId={visibleTabId}
           revealActiveSignal={tabRevealSignal}
-          commandCompact={workspacePanelGridOpen}
+          commandCompact={true}
           sidebarTogglePressed={sidebarTogglePressed}
           sidebarExpandBlocked={sidebarExpandBlocked}
           sidebarCollapsed={sidebarCollapsed}

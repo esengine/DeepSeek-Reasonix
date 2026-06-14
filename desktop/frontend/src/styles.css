@@ -15497,13 +15497,17 @@ a[href] {
 }
 
 .tabbar__command--compact {
-  flex: 0 0 112px;
-  width: 112px;
-  min-width: 112px;
-  max-width: 112px;
+  flex: 0 0 var(--chrome-panel-control-size, 30px);
+  width: var(--chrome-panel-control-size, 30px);
+  min-width: var(--chrome-panel-control-size, 30px);
+  max-width: var(--chrome-panel-control-size, 30px);
+  height: var(--chrome-panel-control-size, 30px);
   justify-content: center;
-  gap: 6px;
-  padding: 0 9px;
+  gap: 0;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--fg-dim);
 }
 
 .tabbar__command-text--compact {
@@ -15523,15 +15527,14 @@ a[href] {
 }
 
 .tabbar__command--compact .tabbar__command-text--compact {
-  display: inline-flex;
-  flex: 0 1 auto;
-  max-width: 48px;
-  opacity: 1;
-  transform: translateX(0);
+  display: none;
+  max-width: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .tabbar__command--compact .tabbar__command-kbd {
-  margin-left: 0;
+  display: none;
 }
 
 .tabbar__command-icon {
@@ -15563,10 +15566,10 @@ a[href] {
 }
 
 .tabbar__command.tabbar__command--compact .tabbar__command-text--compact {
-  flex: 0 1 auto;
-  max-width: 48px;
-  opacity: 1;
-  transform: translateX(0);
+  display: none;
+  max-width: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 .tabbar__command-kbd {
   flex: none;
@@ -18084,13 +18087,22 @@ a[href] {
 }
 
 :root[data-theme-style] .tabbar__command--compact {
-  width: 112px;
-  min-width: 112px;
-  max-width: 112px;
-  flex: 0 0 112px;
+  width: var(--chrome-panel-control-size);
+  min-width: var(--chrome-panel-control-size);
+  max-width: var(--chrome-panel-control-size);
+  height: var(--chrome-panel-control-size);
+  flex: 0 0 var(--chrome-panel-control-size);
   justify-content: center;
-  gap: 6px;
-  padding: 0 9px;
+  gap: 0;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--fg-dim);
+}
+
+:root[data-theme-style] .app--darwin .app-chrome--tabs .tabbar__command--compact {
+  position: relative;
+  top: 0.5px;
 }
 
 :root[data-theme-style] .tabbar__command--compact .tabbar__command-text--full {
@@ -18101,14 +18113,14 @@ a[href] {
 }
 
 :root[data-theme-style] .tabbar__command--compact .tabbar__command-text--compact {
-  display: inline-flex;
-  max-width: 48px;
-  opacity: 1;
-  transform: translateX(0);
+  display: none;
+  max-width: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 :root[data-theme-style] .tabbar__command--compact .tabbar__command-kbd {
-  margin-left: 0;
+  display: none;
 }
 
 :root[data-theme-style] .tabbar__mode-badge {
@@ -18155,10 +18167,11 @@ a[href] {
   }
 
   :root[data-theme-style] .tabbar__command--compact {
-    width: 104px;
-    min-width: 104px;
-    flex-basis: 104px;
-    padding: 0 8px;
+    width: var(--chrome-panel-control-size);
+    min-width: var(--chrome-panel-control-size);
+    flex-basis: var(--chrome-panel-control-size);
+    gap: 0;
+    padding: 0;
   }
 }
 
