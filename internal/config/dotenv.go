@@ -2,6 +2,7 @@ package config
 
 import (
 	"bufio"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,10 +41,12 @@ func loadDotEnvForRoot(root string) {
 func loadDotEnvFile(path string) {
 	f, err := os.Open(path)
 	if err != nil {
+		slog.Debug("config: dotenv file not loaded", "path", path, "err", err)
 		return
 	}
 	defer f.Close()
 
+	count := 0
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
@@ -62,6 +65,10 @@ func loadDotEnvFile(path string) {
 		}
 		if _, exists := os.LookupEnv(key); !exists {
 			os.Setenv(key, val)
+			count++
 		}
+	}
+	if count > 0 {
+		slog.Info("config: dotenv loaded", "path", path, "keys", count)
 	}
 }

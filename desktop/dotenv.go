@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,8 +86,10 @@ func upsertEnvFile(path, key, value string) error {
 	}
 	if err := fileutil.ReplaceFile(tmpPath, path); err != nil {
 		os.Remove(tmpPath)
+		slog.Warn("dotenv: write failed", "path", path, "key", key, "err", err)
 		return err
 	}
+	slog.Debug("dotenv: upserted", "path", path, "key", key)
 	return os.Setenv(key, value)
 }
 
@@ -183,11 +186,14 @@ func promoteProviderKeysToCredentials(cfg *config.Config) {
 		}
 		val := os.Getenv(env)
 		if val == "" {
+			slog.Debug("promote: key not in env", "env", env)
 			continue
 		}
 		if err := upsertEnvFile(credPath, env, val); err != nil {
+			slog.Warn("promote: write failed", "env", env, "err", err)
 			continue
 		}
+		slog.Info("promote: key migrated to credentials", "env", env)
 		have[env] = true
 		removeHomeEnvKey(env)
 	}
