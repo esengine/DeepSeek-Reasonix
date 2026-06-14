@@ -121,7 +121,7 @@ func TestSaveProviderFiltersNonChatModels(t *testing.T) {
 	if !ok {
 		t.Fatal("saved provider not found")
 	}
-	want := []string{"mimo-v2.5-pro"}
+	want := []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"}
 	if !reflect.DeepEqual(got.ModelList(), want) {
 		t.Errorf("saved provider models = %v, want %v", got.ModelList(), want)
 	}

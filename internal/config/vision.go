@@ -25,17 +25,21 @@ func EffectiveVision(e *ProviderEntry) bool {
 }
 
 func isOfficialMimoVisionEntry(e *ProviderEntry) bool {
-	if e == nil || e.Kind != "openai" || !mimoVisionModels[strings.ToLower(strings.TrimSpace(e.Model))] {
+	if !isOpenAIProviderKind(e) || !mimoVisionModels[strings.ToLower(strings.TrimSpace(e.Model))] {
 		return false
 	}
-	u, err := url.Parse(strings.TrimSpace(e.BaseURL))
-	if err != nil {
-		return false
-	}
-	switch strings.ToLower(u.Hostname()) {
+	switch officialMimoHost(e.BaseURL) {
 	case "api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com":
 		return true
 	default:
 		return false
 	}
+}
+
+func officialMimoHost(baseURL string) string {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
 }

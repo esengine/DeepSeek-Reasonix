@@ -1598,14 +1598,18 @@ func ensureDeepSeekOfficialProvider(c *Config) {
 }
 
 func ensureMimoAPIProvider(c *Config) {
-	if _, ok := c.Provider("mimo-api"); ok {
+	models := []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"}
+	if p, ok := c.Provider("mimo-api"); ok {
+		if isOfficialMimoAPIProvider(p) {
+			mergeCuratedModelsIntoProvider(p, models, "mimo-v2.5-pro")
+		}
 		return
 	}
 	c.Providers = append(c.Providers, ProviderEntry{
 		Name:          "mimo-api",
 		Kind:          "openai",
 		BaseURL:       "https://api.xiaomimimo.com/v1",
-		Models:        []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"},
+		Models:        models,
 		Default:       "mimo-v2.5-pro",
 		APIKeyEnv:     "MIMO_API_KEY",
 		ContextWindow: 1_048_576,
@@ -1614,14 +1618,19 @@ func ensureMimoAPIProvider(c *Config) {
 }
 
 func ensureMimoTokenPlanProvider(c *Config, includeMimoFlash bool) {
-	if _, ok := c.Provider("mimo-token-plan"); ok {
+	models := []string{"mimo-v2.5-pro", "mimo-v2.5"}
+	if p, ok := c.Provider("mimo-token-plan"); ok {
+		if isOfficialMimoTokenPlanProvider(p) {
+			mergeCuratedModelsIntoProvider(p, models, "mimo-v2.5-pro")
+			clearMixedMimoTokenPlanPrice(p)
+		}
 		return
 	}
 	entry := ProviderEntry{
 		Name:          "mimo-token-plan",
 		Kind:          "openai",
 		BaseURL:       "https://token-plan-cn.xiaomimimo.com/v1",
-		Models:        []string{"mimo-v2.5-pro", "mimo-v2.5"},
+		Models:        models,
 		Default:       "mimo-v2.5-pro",
 		APIKeyEnv:     "MIMO_API_KEY",
 		ContextWindow: 1_048_576,
@@ -1629,7 +1638,7 @@ func ensureMimoTokenPlanProvider(c *Config, includeMimoFlash bool) {
 	}
 	if old, ok := c.Provider("mimo-pro"); ok {
 		entry = officialProviderFromLegacy(entry, old)
-		entry.Models = mergeModelLists([]string{"mimo-v2.5-pro", "mimo-v2.5"}, old.ModelList())
+		entry.Models = mergeModelLists(models, old.ModelList())
 		entry.Default = firstKnownModel(entry.Default, entry.Models, "mimo-v2.5-pro")
 	}
 	if old, ok := c.Provider("mimo-flash"); includeMimoFlash && ok {
@@ -1639,7 +1648,35 @@ func ensureMimoTokenPlanProvider(c *Config, includeMimoFlash bool) {
 		entry.Models = mergeModelLists(entry.Models, old.ModelList())
 		entry.Default = firstKnownModel(entry.Default, entry.Models, entry.Default)
 	}
+	clearMixedMimoTokenPlanPrice(&entry)
 	c.Providers = append(c.Providers, entry)
+}
+
+func isOfficialMimoAPIProvider(e *ProviderEntry) bool {
+	return isOpenAIProviderKind(e) && officialMimoHost(e.BaseURL) == "api.xiaomimimo.com"
+}
+
+func isOfficialMimoTokenPlanProvider(e *ProviderEntry) bool {
+	return isOpenAIProviderKind(e) && officialMimoHost(e.BaseURL) == "token-plan-cn.xiaomimimo.com"
+}
+
+func isOpenAIProviderKind(e *ProviderEntry) bool {
+	return e != nil && strings.EqualFold(strings.TrimSpace(e.Kind), "openai")
+}
+
+func mergeCuratedModelsIntoProvider(e *ProviderEntry, models []string, fallback string) {
+	currentDefault := e.Default
+	if strings.TrimSpace(currentDefault) == "" {
+		currentDefault = e.Model
+	}
+	e.Models = mergeModelLists(models, e.ModelList())
+	e.Default = firstKnownModel(currentDefault, e.Models, fallback)
+}
+
+func clearMixedMimoTokenPlanPrice(e *ProviderEntry) {
+	if e != nil && e.HasModel("mimo-v2.5-pro") && e.HasModel("mimo-v2.5") {
+		e.Price = nil
+	}
 }
 
 func officialProviderFromLegacy(entry ProviderEntry, old *ProviderEntry) ProviderEntry {
