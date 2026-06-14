@@ -822,6 +822,8 @@ export const zhTW: Record<DictKey, string> = {
   "tool.entryOther": "{n} 項",
   "tool.editOne": "{n} 處編輯",
   "tool.editOther": "{n} 處編輯",
+  "tool.replacementOne": "{n} 處替換",
+  "tool.replacementOther": "{n} 處替換",
   "tool.emptyFile": "空檔案",
   "tool.noOutput": "無輸出",
 

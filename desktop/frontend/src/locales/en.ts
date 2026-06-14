@@ -1328,6 +1328,8 @@ export const en = {
   "tool.entryOther": "{n} entries",
   "tool.editOne": "{n} edit",
   "tool.editOther": "{n} edits",
+  "tool.replacementOne": "{n} replacement",
+  "tool.replacementOther": "{n} replacements",
   "tool.emptyFile": "empty file",
   "tool.noOutput": "no output",
 

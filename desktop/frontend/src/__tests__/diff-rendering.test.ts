@@ -111,6 +111,66 @@ for (const prefix of ["diff", "inline-diff"]) {
     e: {
       kind: "tool_dispatch",
       tool: {
+        id: "edit-error",
+        name: "edit_file",
+        args: JSON.stringify({ path: "settings/settings.gd", old_string: "old", new_string: "new" }),
+        readOnly: false,
+      },
+    },
+  });
+  s = reducer(s, { type: "event", e: { kind: "tool_result", tool: { id: "edit-error", name: "edit_file", readOnly: false, err: "old_string not found", durationMs: 12 } } });
+  const [tool] = toolItems(s);
+  eq(tool?.status, "error", "failed writer is marked as error");
+  eq(tool?.summary, undefined, "failed writer clears cached +N -M summary");
+}
+
+{
+  let s = reducer(initialState, { type: "event", e: { kind: "turn_started" } });
+  const args = JSON.stringify({
+    path: "settings/settings.gd",
+    edits: [
+      { old_string: "old", new_string: "new", replace_all: true },
+      { old_string: "same", new_string: "same2" },
+    ],
+  });
+  s = reducer(s, {
+    type: "event",
+    e: {
+      kind: "tool_dispatch",
+      tool: {
+        id: "multi-replace-all",
+        name: "multi_edit",
+        args,
+        readOnly: false,
+      },
+    },
+  });
+  let [tool] = toolItems(s);
+  eq(tool?.summary, "", "replace_all multi_edit defers summary until result");
+  s = reducer(s, {
+    type: "event",
+    e: {
+      kind: "tool_result",
+      tool: {
+        id: "multi-replace-all",
+        name: "multi_edit",
+        readOnly: false,
+        output: "multi_edit settings/settings.gd: 2 edits applied (5 total replacements)",
+        durationMs: 12,
+      },
+    },
+  });
+  [tool] = toolItems(s);
+  eq(tool?.summary, "2 edits · 5 replacements", "replace_all multi_edit uses applied replacement count");
+}
+
+{
+  let s = reducer(initialState, { type: "event", e: { kind: "turn_started" } });
+  s = reducer(s, {
+    type: "event",
+    e: {
+      kind: "tool_dispatch",
+      tool: {
         id: "tool-1",
         name: "edit_file",
         args: JSON.stringify({ path: "settings/settings.gd", old_string: "old", new_string: "new" }),

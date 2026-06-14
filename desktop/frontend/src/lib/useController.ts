@@ -409,7 +409,7 @@ function applyEvent(s: State, e: WireEvent): State {
           // demand via app.ToolResultForTab when the card is expanded.
           const existing = it;
           const shortArgs = existing.args && existing.args.length > 200 ? existing.args.slice(0, 200) + "…" : existing.args;
-          const summary = existing.summary || summarize(existing.name, existing.args, t.output, t.err);
+          const summary = t.err ? undefined : existing.summary || summarize(existing.name, existing.args, t.output);
           next[idx] = { ...existing, status: t.err ? "error" : "done", args: shortArgs, output: undefined, error: t.err, truncated: t.truncated, durationMs: t.durationMs, dataArchived: true, summary };
         }
       }

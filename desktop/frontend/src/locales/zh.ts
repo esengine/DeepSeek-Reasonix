@@ -1330,6 +1330,8 @@ export const zh: Record<DictKey, string> = {
   "tool.entryOther": "{n} 项",
   "tool.editOne": "{n} 处编辑",
   "tool.editOther": "{n} 处编辑",
+  "tool.replacementOne": "{n} 处替换",
+  "tool.replacementOther": "{n} 处替换",
   "tool.emptyFile": "空文件",
   "tool.noOutput": "无输出",
 
