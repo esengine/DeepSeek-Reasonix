@@ -13,6 +13,7 @@
 
 - [配置](#配置)
 - [思考语言](./REASONING_LANGUAGE.zh-CN.md)
+- [桌面端 Hooks](./DESKTOP_HOOKS.zh-CN.md)
 - [模式快捷键速查](#模式快捷键速查)
 - [权限与沙盒](#权限与沙盒)
 - [插件（MCP）](#插件mcp)
@@ -27,6 +28,7 @@ Linux 为 `~/.config/reasonix/`，macOS 为 `~/Library/Application Support/reaso
 密钥经环境变量通过 `api_key_env` 注入，绝不写入配置文件。
 
 桌面端和 CLI 端的可见思考语言设置，见 [思考语言](./REASONING_LANGUAGE.zh-CN.md)。
+桌面端 Hooks 的 JSON 配置、事件 key 和 payload 字段，见 [桌面端 Hooks](./DESKTOP_HOOKS.zh-CN.md)。
 
 ```toml
 default_model = "deepseek-flash"   # 执行器；设 [agent].planner_model 可加规划器
