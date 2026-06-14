@@ -306,7 +306,35 @@ func NewRemoteRememberer(logger *slog.Logger) func(bot.InboundMessage) {
 	}
 }
 
+func NewSessionRememberer(logger *slog.Logger) func(bot.InboundMessage, string) error {
+	return NewSessionRemembererWithWorkspace(logger, "")
+}
+
+func NewSessionRemembererWithWorkspace(logger *slog.Logger, workspaceRoot string) func(bot.InboundMessage, string) error {
+	return func(msg bot.InboundMessage, sessionID string) error {
+		if err := RememberInboundSessionWorkspace(msg, sessionID, workspaceRoot); err != nil {
+			if logger != nil {
+				logger.Warn("remember bot session failed", "platform", msg.Platform, "err", err)
+			}
+			return err
+		}
+		return nil
+	}
+}
+
 func RememberInbound(msg bot.InboundMessage) error {
+	return rememberInbound(msg, "", "")
+}
+
+func RememberInboundSession(msg bot.InboundMessage, sessionID string) error {
+	return RememberInboundSessionWorkspace(msg, sessionID, "")
+}
+
+func RememberInboundSessionWorkspace(msg bot.InboundMessage, sessionID string, workspaceRoot string) error {
+	return rememberInbound(msg, strings.TrimSpace(sessionID), strings.TrimSpace(workspaceRoot))
+}
+
+func rememberInbound(msg bot.InboundMessage, sessionID string, actualWorkspaceRoot string) error {
 	userPath := config.UserConfigPath()
 	platform := msg.Platform
 	remoteID := strings.TrimSpace(msg.ChatID)
@@ -324,14 +352,27 @@ func RememberInbound(msg bot.InboundMessage) error {
 		if strings.TrimSpace(conn.Provider) != string(platform) || !conn.Enabled || !connectionMatchesInbound(*conn, msg) {
 			continue
 		}
-		exists := false
-		for _, mapping := range conn.SessionMappings {
-			if strings.TrimSpace(mapping.RemoteID) == remoteID {
-				exists = true
+		mappingIndex := -1
+		for j := range conn.SessionMappings {
+			if botSessionMappingMatches(conn.SessionMappings[j], msg) {
+				mappingIndex = j
 				break
 			}
 		}
-		if exists {
+		if mappingIndex >= 0 {
+			if sessionID == "" {
+				continue
+			}
+			mapping := &conn.SessionMappings[mappingIndex]
+			current := strings.TrimSpace(mapping.SessionID)
+			if current == sessionID || botSessionMappingHasExplicitTarget(*mapping) {
+				continue
+			}
+			mapping.SessionID = sessionID
+			mapping.SessionSource = "auto"
+			mapping.UpdatedAt = now
+			conn.UpdatedAt = now
+			changed = true
 			continue
 		}
 		scope := "global"
@@ -339,10 +380,18 @@ func RememberInbound(msg bot.InboundMessage) error {
 		if strings.TrimSpace(conn.WorkspaceRoot) != "" {
 			scope = "project"
 			workspaceRoot = strings.TrimSpace(conn.WorkspaceRoot)
+		} else if actualWorkspaceRoot != "" {
+			scope = "project"
+			workspaceRoot = actualWorkspaceRoot
 		}
+		chatType, userID, threadID := botSessionMappingIdentity(msg)
 		conn.SessionMappings = append(conn.SessionMappings, config.BotConnectionSessionMapping{
 			RemoteID:      remoteID,
-			SessionID:     "",
+			SessionID:     sessionID,
+			SessionSource: botSessionSource(sessionID),
+			ChatType:      chatType,
+			UserID:        userID,
+			ThreadID:      threadID,
 			Scope:         scope,
 			WorkspaceRoot: workspaceRoot,
 			UpdatedAt:     now,
@@ -357,6 +406,54 @@ func RememberInbound(msg bot.InboundMessage) error {
 		return nil
 	}
 	return cfg.SaveTo(userPath)
+}
+
+func botSessionMappingMatches(mapping config.BotConnectionSessionMapping, msg bot.InboundMessage) bool {
+	if strings.TrimSpace(mapping.RemoteID) != strings.TrimSpace(msg.ChatID) {
+		return false
+	}
+	chatType, userID, threadID := botSessionMappingIdentity(msg)
+	mappingChatType := strings.TrimSpace(mapping.ChatType)
+	if mappingChatType == "" {
+		return chatType == ""
+	}
+	if mappingChatType != chatType {
+		return false
+	}
+	if strings.TrimSpace(mapping.UserID) != userID {
+		return false
+	}
+	return strings.TrimSpace(mapping.ThreadID) == threadID
+}
+
+func botSessionMappingIdentity(msg bot.InboundMessage) (chatType string, userID string, threadID string) {
+	switch msg.ChatType {
+	case bot.ChatGroup, bot.ChatGuild:
+		chatType = string(msg.ChatType)
+		userID = strings.TrimSpace(msg.UserID)
+	case bot.ChatThread:
+		chatType = string(msg.ChatType)
+		threadID = strings.TrimSpace(msg.ThreadID)
+		if threadID == "" {
+			threadID = strings.TrimSpace(msg.ChatID)
+		}
+	}
+	return chatType, userID, threadID
+}
+
+func botSessionMappingHasExplicitTarget(mapping config.BotConnectionSessionMapping) bool {
+	sessionID := strings.TrimSpace(mapping.SessionID)
+	if sessionID == "" || strings.TrimSpace(mapping.SessionSource) == "auto" {
+		return false
+	}
+	return true
+}
+
+func botSessionSource(sessionID string) string {
+	if strings.TrimSpace(sessionID) == "" {
+		return ""
+	}
+	return "auto"
 }
 
 func connectionMatchesInbound(conn config.BotConnectionConfig, msg bot.InboundMessage) bool {

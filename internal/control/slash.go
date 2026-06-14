@@ -396,7 +396,7 @@ func (c *Controller) managementNotice(trimmed string) bool {
 			if err := hook.Trust(root, ""); err != nil {
 				c.notice("hooks trust: " + err.Error())
 			} else {
-				c.notice("trusted this project's hooks — they load on the next /new or restart")
+				c.notice("trusted this project's hooks — restart Reasonix to load them")
 			}
 		default:
 			c.notice("unknown /hooks subcommand " + fields[1] + " — try: /hooks, /hooks trust")

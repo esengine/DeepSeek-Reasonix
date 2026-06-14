@@ -7,8 +7,13 @@ default_model = "deepseek"   # a provider name (→ its default model) or "provi
 
 [ui]
 theme = "auto"   # auto|dark|light; controls CLI colors only; REASONIX_THEME can override per run
-# theme_style = "graphite"   # graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
+# theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 # shortcut_layout = "desktop"   # classic|desktop; compatibility setting; Shift+Tab toggles Plan, Ctrl+Y toggles YOLO
+
+[desktop]
+layout_style = "classic"   # classic|workbench; desktop layout style
+# theme = "light"   # desktop only: auto|dark|light
+# theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 
 [notifications]
 enabled = false   # system notifications for CLI chat/run; default off
@@ -140,13 +145,14 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # disabled_skills = ["review"]                  # hide from prompt, slash invocation, and skill tools
 
 # Hooks run shell commands around the loop (PreToolUse / PostToolUse /
-# UserPromptSubmit / Stop). They are NOT configured here — put them in
+# PermissionRequest / UserPromptSubmit / Stop). They are NOT configured here — put them in
 # settings.json: ~/.reasonix/settings.json (global, always on) and
 # <project>/.reasonix/settings.json (project, runs only after `/hooks trust`).
 # Exit 0 = pass, exit 2 = block (PreToolUse / UserPromptSubmit only). Example
 # ~/.reasonix/settings.json:
 #   { "hooks": {
 #       "PreToolUse":  [ { "match": "bash", "command": "my-guard.sh" } ],
+#       "PermissionRequest": [ { "match": "bash", "command": "notify-send 'approval needed'" } ],
 #       "PostToolUse": [ { "match": ".*file", "command": "gofmt -w ." } ],
 #       "Stop":        [ { "command": "notify-send 'turn done'" } ] } }
 
@@ -185,6 +191,7 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # enabled        = false
 # app_id         = ""
 # app_secret_env  = "QQ_BOT_APP_SECRET"
+# sandbox        = false   # true 使用 QQ 沙箱 API / gateway
 #
 # [bot.feishu]
 # enabled             = false

@@ -33,14 +33,14 @@ func TestScrubSensitiveText(t *testing.T) {
 	bearer := "abcdefghijklmnopqrstuvwxyz1234567890ABCDE"
 	longHex := "0123456789abcdef0123456789abcdef"
 	jwt := "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature"
-	got := scrubSensitiveText("user dev@example.com Authorization: Bearer " + bearer + " api_key=" + apiKey + " jwt " + jwt + " hash " + longHex + " short abc1234 path /Users/alice/x")
+	got := scrubSensitiveText("user dev@example.com Authorization: Bearer " + bearer + " api_key=" + apiKey + " jwt " + jwt + " hash " + longHex + " env FEISHU_BOT_APP_SECRET WEIXIN_BOT_TOKEN short abc1234 path /Users/alice/x")
 
-	for _, leaked := range []string{"dev@example.com", bearer, apiKey, jwt, longHex, "alice"} {
+	for _, leaked := range []string{"dev@example.com", bearer, apiKey, jwt, longHex, "FEISHU_BOT_APP_SECRET", "WEIXIN_BOT_TOKEN", "alice"} {
 		if strings.Contains(got, leaked) {
 			t.Fatalf("sensitive text leaked %q in %q", leaked, got)
 		}
 	}
-	for _, want := range []string{"[redacted-email]", "Authorization=[redacted]", "api_key=[redacted]", "[redacted-jwt]", "[redacted-hex]", "short abc1234", "/Users/_/x"} {
+	for _, want := range []string{"[redacted-email]", "Authorization=[redacted]", "api_key=[redacted]", "[redacted-jwt]", "[redacted-hex]", "[redacted-env]", "short abc1234", "/Users/_/x"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("scrubSensitiveText() = %q, want it to contain %q", got, want)
 		}
@@ -145,5 +145,63 @@ func TestCrashReportFromStructuredDetail(t *testing.T) {
 		if strings.Contains(freeText, leaked) {
 			t.Fatalf("sensitive value leaked %q in %+v", leaked, r)
 		}
+	}
+}
+
+func TestCrashReportFromPerformanceDetail(t *testing.T) {
+	payload := frontendCrashPayload{
+		SchemaVersion: 2,
+		Kind:          "performance",
+		Source:        "frontend.performance",
+		Label:         "performance.pressure",
+		Message:       "[performance.pressure]\n\n--- performance context ---\nreason: event loop lag 1300ms",
+		ErrorType:     "PerformancePressure",
+		ErrorMessage:  "UI responsiveness degraded because the app observed long tasks, event-loop lag, or high JS heap pressure.",
+		TopFrame:      "frontend.performance",
+	}
+	detail, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := crashReportFromDetail("performance", string(detail))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Kind != "performance" || r.Source != "frontend.performance" || r.Label != "performance.pressure" {
+		t.Fatalf("performance fields not preserved: %+v", r)
+	}
+	if !strings.Contains(r.Message, "--- native runtime context ---") || !strings.Contains(r.Message, "goroutines:") {
+		t.Fatalf("native runtime context missing from performance report: %q", r.Message)
+	}
+}
+
+func TestCrashReportFromBotDetail(t *testing.T) {
+	token := "abcdefghijklmnopqrstuvwxyz1234567890ABCDE"
+	payload := frontendCrashPayload{
+		SchemaVersion: 2,
+		Kind:          "bot",
+		Source:        "bot.runtime",
+		Label:         "bot.feishu.lark.send",
+		Message:       "[bot]\n\nfailed at /Users/alice/project with token=" + token,
+		ErrorType:     "BotConnectionDiagnostic",
+		ErrorMessage:  "send failed with Bearer " + token,
+		TopFrame:      "bot.send",
+	}
+	detail, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := crashReportFromDetail("bot", string(detail))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Kind != "bot" || r.Source != "bot.runtime" || r.Label != "bot.feishu.lark.send" {
+		t.Fatalf("bot fields not preserved: %+v", r)
+	}
+	if strings.Contains(r.Message, "alice") || strings.Contains(r.Message, token) || strings.Contains(r.ErrorMessage, token) {
+		t.Fatalf("bot report was not scrubbed: %+v", r)
+	}
+	if strings.Contains(r.Message, "--- native runtime context ---") {
+		t.Fatalf("bot report should not include performance runtime context: %q", r.Message)
 	}
 }

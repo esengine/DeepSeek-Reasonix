@@ -28,14 +28,16 @@ import (
 // routes "ask" decisions back through that sink as ApprovalRequest events, which
 // the sink forwards to the client over session/request_permission.
 //
-// The Factory picks the model (ACP's session/new carries no model selection).
 // Cwd roots the session's file tools and bash (built via builtin.Workspace).
-// MCPServers are the stdio MCP servers the client asked the agent to connect for
-// this session.
+// Model and EffortOverride are optional session-local provider selectors from
+// ACP config options. MCPServers are the stdio MCP servers the client asked the
+// agent to connect for this session.
 type SessionParams struct {
-	Cwd        string
-	MCPServers []plugin.Spec
-	Sink       event.Sink
+	Cwd            string
+	MCPServers     []plugin.Spec
+	Sink           event.Sink
+	Model          string
+	EffortOverride *string
 }
 
 // Factory builds the per-session controller. The composition root (the cli's
@@ -46,6 +48,30 @@ type SessionParams struct {
 // MCP subprocesses), so the service calls ctrl.Close() on teardown.
 type Factory interface {
 	NewSession(ctx context.Context, p SessionParams) (*control.Controller, error)
+}
+
+// SessionConfigStateParams asks the Factory for normalized session config
+// selectors. Empty Model means the Factory should use its configured default.
+// Nil EffortOverride means provider config wins; a non-nil empty string means
+// provider default for this session.
+type SessionConfigStateParams struct {
+	Cwd            string
+	Model          string
+	EffortOverride *string
+}
+
+// SessionConfigState is the complete ACP-visible config state for a session.
+type SessionConfigState struct {
+	Model          string
+	EffortOverride *string
+	Models         *SessionModelState
+	ConfigOptions  []SessionConfigOption
+}
+
+// SessionConfigStateProvider lets a Factory expose model and effort selectors
+// without making the ACP transport depend on a concrete config backend.
+type SessionConfigStateProvider interface {
+	SessionConfigState(ctx context.Context, p SessionConfigStateParams) (SessionConfigState, error)
 }
 
 // SessionDirProvider lets a Factory expose the persistent session directory
@@ -80,6 +106,8 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, factory Factory, info 
 	conn.Handle("session/load", svc.sessionLoad)
 	conn.Handle("session/resume", svc.sessionResume)
 	conn.Handle("session/prompt", svc.sessionPrompt)
+	conn.Handle("session/set_config_option", svc.sessionSetConfigOption)
+	conn.Handle("session/set_model", svc.sessionSetModel)
 	conn.Handle("session/close", svc.sessionClose)
 	conn.Handle("session/list", svc.sessionList)
 	conn.Handle("session/delete", svc.sessionDelete)
@@ -108,9 +136,14 @@ type acpSession struct {
 	sink       *updateSink
 	transcript string
 	cwd        string
-	title      string
-	createdAt  time.Time
-	updatedAt  time.Time
+	mcpServers []plugin.Spec
+	model      string
+	// nil means use config; non-nil empty string means provider default.
+	effortOverride *string
+	pendingConfig  *SessionConfigState
+	title          string
+	createdAt      time.Time
+	updatedAt      time.Time
 
 	mu      sync.Mutex
 	cancel  context.CancelFunc
@@ -227,6 +260,10 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 	if err != nil {
 		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/new: " + err.Error()}
 	}
+	cfgState, err := s.sessionConfigState(ctx, SessionConfigStateParams{Cwd: cwd})
+	if err != nil {
+		return nil, &RPCError{Code: ErrInternal, Message: "session/new: " + err.Error()}
+	}
 
 	id, err := newSessionID()
 	if err != nil {
@@ -235,9 +272,11 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 
 	sink := newUpdateSink(s.conn, id)
 	ctrl, err := s.factory.NewSession(ctx, SessionParams{
-		Cwd:        cwd,
-		MCPServers: mcpServers,
-		Sink:       sink,
+		Cwd:            cwd,
+		MCPServers:     mcpServers,
+		Sink:           sink,
+		Model:          cfgState.Model,
+		EffortOverride: cloneStringPtr(cfgState.EffortOverride),
 	})
 	if err != nil {
 		return nil, &RPCError{Code: ErrInternal, Message: "session/new: " + err.Error()}
@@ -246,7 +285,17 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 	sink.bindApprove(ctrl.Approve)
 
 	now := time.Now().UTC()
-	sess := &acpSession{id: id, ctrl: ctrl, sink: sink, cwd: cwd, createdAt: now, updatedAt: now}
+	sess := &acpSession{
+		id:             id,
+		ctrl:           ctrl,
+		sink:           sink,
+		cwd:            cwd,
+		mcpServers:     clonePluginSpecs(mcpServers),
+		model:          cfgState.Model,
+		effortOverride: cloneStringPtr(cfgState.EffortOverride),
+		createdAt:      now,
+		updatedAt:      now,
+	}
 	// Pin a transcript file keyed by session id when the controller has a session
 	// dir, so every turn auto-saves there, session/prompt can hand the path back,
 	// and session/load can find it again by id across process restarts.
@@ -259,7 +308,11 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 	s.sessions[id] = sess
 	s.mu.Unlock()
 
-	return SessionNewResult{SessionID: id}, nil
+	return SessionNewResult{
+		SessionID:     id,
+		Models:        cfgState.Models,
+		ConfigOptions: cfgState.ConfigOptions,
+	}, nil
 }
 
 // sessionLoad resumes a previously-saved session by id: it builds a controller
@@ -272,10 +325,11 @@ func (s *service) sessionLoad(ctx context.Context, raw json.RawMessage) (any, er
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/load: " + err.Error()}
 	}
-	if err := s.openExistingSession(ctx, "session/load", p.SessionID, p.Cwd, p.MCPServers, true); err != nil {
+	cfgState, err := s.openExistingSession(ctx, "session/load", p.SessionID, p.Cwd, p.MCPServers, true)
+	if err != nil {
 		return nil, err
 	}
-	return SessionLoadResult{}, nil
+	return SessionLoadResult{Models: cfgState.Models, ConfigOptions: cfgState.ConfigOptions}, nil
 }
 
 // sessionResume restores a previously-saved session without replaying its
@@ -285,40 +339,68 @@ func (s *service) sessionResume(ctx context.Context, raw json.RawMessage) (any, 
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/resume: " + err.Error()}
 	}
-	if err := s.openExistingSession(ctx, "session/resume", p.SessionID, p.Cwd, p.MCPServers, false); err != nil {
+	cfgState, err := s.openExistingSession(ctx, "session/resume", p.SessionID, p.Cwd, p.MCPServers, false)
+	if err != nil {
 		return nil, err
 	}
-	return SessionResumeResult{}, nil
+	return SessionResumeResult{Models: cfgState.Models, ConfigOptions: cfgState.ConfigOptions}, nil
 }
 
-func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam string, servers []MCPServerSpec, replay bool) error {
+func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam string, servers []MCPServerSpec, replay bool) (SessionConfigState, error) {
 	if err := validateSessionID(method, id); err != nil {
-		return err
+		return SessionConfigState{}, err
 	}
 	cwd, err := s.resolveSessionCwd(cwdParam, id)
 	if err != nil {
-		return &RPCError{Code: ErrInvalidParams, Message: method + ": " + err.Error()}
+		return SessionConfigState{}, &RPCError{Code: ErrInvalidParams, Message: method + ": " + err.Error()}
 	}
 	mcpServers, err := mcpSpecs(servers, cwd)
 	if err != nil {
-		return &RPCError{Code: ErrInvalidParams, Message: method + ": " + err.Error()}
+		return SessionConfigState{}, &RPCError{Code: ErrInvalidParams, Message: method + ": " + err.Error()}
 	}
 
 	if sess := s.session(id); sess != nil {
 		if replay {
 			newUpdateSink(s.conn, id).replay(sess.ctrl.History())
 		}
-		return nil
+		cfgState, err := s.configStateForSession(ctx, sess)
+		if err != nil {
+			return SessionConfigState{}, &RPCError{Code: ErrInternal, Message: method + ": " + err.Error()}
+		}
+		return cfgState, nil
+	}
+
+	var saved acpSessionMeta
+	if dir := s.sessionDir(); dir != "" {
+		meta, _, metaErr := loadACPMeta(transcriptPath(dir, id))
+		if metaErr != nil {
+			return SessionConfigState{}, &RPCError{Code: ErrInternal, Message: method + ": " + metaErr.Error()}
+		}
+		saved = meta
+	}
+	cfgParams := SessionConfigStateParams{
+		Cwd:            cwd,
+		Model:          saved.Model,
+		EffortOverride: cloneStringPtr(saved.EffortOverride),
+	}
+	cfgState, err := s.sessionConfigState(ctx, cfgParams)
+	if err != nil && (strings.TrimSpace(saved.Model) != "" || saved.EffortOverride != nil) {
+		cfgState, err = s.sessionConfigState(ctx, SessionConfigStateParams{Cwd: cwd})
+	}
+	if err != nil {
+		return SessionConfigState{}, &RPCError{Code: ErrInternal, Message: method + ": " + err.Error()}
 	}
 
 	sink := newUpdateSink(s.conn, id)
 	ctrl, err := s.factory.NewSession(ctx, SessionParams{
-		Cwd:        cwd,
-		MCPServers: mcpServers,
-		Sink:       sink,
+		Cwd:            cwd,
+		MCPServers:     mcpServers,
+		Sink:           sink,
+		Model:          cfgState.Model,
+		EffortOverride: cloneStringPtr(cfgState.EffortOverride),
 	})
 	if err != nil {
-		return &RPCError{Code: ErrInternal, Message: method + ": " + err.Error()}
+		return SessionConfigState{}, &RPCError{Code: ErrInternal, Message: method + ": " + err.Error()}
 	}
 	ctrl.EnableInteractiveApproval()
 	sink.bindApprove(ctrl.Approve)
@@ -326,30 +408,35 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 	dir := ctrl.SessionDir()
 	if dir == "" {
 		ctrl.Close()
-		return &RPCError{Code: ErrInternal, Message: method + ": persistence is disabled"}
+		return SessionConfigState{}, &RPCError{Code: ErrInternal, Message: method + ": persistence is disabled"}
 	}
 	path := transcriptPath(dir, id)
 	loaded, err := agent.LoadSession(path)
 	if err != nil {
 		ctrl.Close()
-		return &RPCError{Code: ErrInvalidParams, Message: method + ": unknown session " + id}
+		return SessionConfigState{}, &RPCError{Code: ErrInvalidParams, Message: method + ": unknown session " + id}
 	}
 	ctrl.Resume(loaded, path)
 
 	meta := metadataForLoadedSession(path, id, cwd, ctrl.History())
+	meta.Model = cfgState.Model
+	meta.EffortOverride = cloneStringPtr(cfgState.EffortOverride)
 	sess := &acpSession{
-		id:         id,
-		ctrl:       ctrl,
-		sink:       sink,
-		transcript: path,
-		cwd:        meta.Cwd,
-		title:      meta.Title,
-		createdAt:  meta.CreatedAt,
-		updatedAt:  meta.UpdatedAt,
+		id:             id,
+		ctrl:           ctrl,
+		sink:           sink,
+		transcript:     path,
+		cwd:            meta.Cwd,
+		mcpServers:     clonePluginSpecs(mcpServers),
+		model:          cfgState.Model,
+		effortOverride: cloneStringPtr(cfgState.EffortOverride),
+		title:          meta.Title,
+		createdAt:      meta.CreatedAt,
+		updatedAt:      meta.UpdatedAt,
 	}
 	if err := saveACPMeta(path, sess.meta()); err != nil {
 		ctrl.Close()
-		return &RPCError{Code: ErrInternal, Message: method + ": " + err.Error()}
+		return SessionConfigState{}, &RPCError{Code: ErrInternal, Message: method + ": " + err.Error()}
 	}
 	s.mu.Lock()
 	s.sessions[id] = sess
@@ -358,7 +445,7 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 	if replay {
 		sink.replay(ctrl.History())
 	}
-	return nil
+	return cfgState, nil
 }
 
 // transcriptPath is where a session's transcript lives — keyed by id so
@@ -394,6 +481,9 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 	defer func() {
 		sess.sink.clearTurnContext()
 		sess.finish()
+		if err := s.applyPendingSessionConfig(ctx, sess); err != nil {
+			sess.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "session config switch failed after turn: " + err.Error()})
+		}
 		cancel()
 	}()
 	runErr := sess.ctrl.RunTurn(runCtx, text)
@@ -415,6 +505,183 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 		res.TranscriptPath = &sess.transcript
 	}
 	return res, nil
+}
+
+// sessionSetConfigOption applies ACP's generic session-level selector. Reasonix
+// currently exposes model and reasoning-effort selectors through this path.
+func (s *service) sessionSetConfigOption(ctx context.Context, raw json.RawMessage) (any, error) {
+	var p SetSessionConfigOptionParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/set_config_option: " + err.Error()}
+	}
+	sess := s.session(p.SessionID)
+	if sess == nil {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/set_config_option: unknown session " + p.SessionID}
+	}
+	cfgState, err := s.configStateForSession(ctx, sess)
+	if err != nil {
+		return nil, &RPCError{Code: ErrInternal, Message: "session/set_config_option: " + err.Error()}
+	}
+	option, ok := findConfigOption(cfgState.ConfigOptions, p.ConfigID)
+	if !ok {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/set_config_option: unknown config option " + p.ConfigID}
+	}
+	if !configOptionHasValue(option, p.Value) {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/set_config_option: invalid value " + p.Value + " for " + option.ID}
+	}
+
+	var next SessionConfigState
+	switch configOptionCategory(option) {
+	case "model":
+		next, err = s.switchSessionModel(ctx, sess, p.Value)
+	case "thought_level":
+		next, err = s.switchSessionEffort(ctx, sess, p.Value)
+	default:
+		err = &RPCError{Code: ErrInvalidParams, Message: "session/set_config_option: unsupported config option " + option.ID}
+	}
+	if err != nil {
+		return nil, err
+	}
+	return SetSessionConfigOptionResult{ConfigOptions: next.ConfigOptions}, nil
+}
+
+// sessionSetModel keeps older ACP clients working while configOptions becomes
+// the preferred model selector.
+func (s *service) sessionSetModel(ctx context.Context, raw json.RawMessage) (any, error) {
+	var p SetSessionModelParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/set_model: " + err.Error()}
+	}
+	sess := s.session(p.SessionID)
+	if sess == nil {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/set_model: unknown session " + p.SessionID}
+	}
+	if _, err := s.switchSessionModel(ctx, sess, p.ModelID); err != nil {
+		return nil, err
+	}
+	return SetSessionModelResult{}, nil
+}
+
+func (s *service) switchSessionModel(ctx context.Context, sess *acpSession, modelID string) (SessionConfigState, error) {
+	params := sess.configStateParams()
+	params.Model = modelID
+	cfgState, err := s.sessionConfigState(ctx, params)
+	if err != nil {
+		return SessionConfigState{}, &RPCError{Code: ErrInvalidParams, Message: "session/set_model: " + err.Error()}
+	}
+	if cfgState.Model == "" {
+		return SessionConfigState{}, &RPCError{Code: ErrInvalidRequest, Message: "session/set_model: model switching is unavailable in this session"}
+	}
+	if err := s.rebuildSession(ctx, sess, cfgState); err != nil {
+		return SessionConfigState{}, err
+	}
+	return cfgState, nil
+}
+
+func (s *service) switchSessionEffort(ctx context.Context, sess *acpSession, effort string) (SessionConfigState, error) {
+	params := sess.configStateParams()
+	level := strings.TrimSpace(effort)
+	if level == "auto" {
+		level = ""
+	}
+	params.EffortOverride = &level
+	cfgState, err := s.sessionConfigState(ctx, params)
+	if err != nil {
+		return SessionConfigState{}, &RPCError{Code: ErrInvalidParams, Message: "session/set_config_option: " + err.Error()}
+	}
+	if err := s.rebuildSession(ctx, sess, cfgState); err != nil {
+		return SessionConfigState{}, err
+	}
+	return cfgState, nil
+}
+
+func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState SessionConfigState) error {
+	sess.mu.Lock()
+	if sess.deleted {
+		sess.mu.Unlock()
+		return &RPCError{Code: ErrInvalidRequest, Message: "session config: session is deleted"}
+	}
+	if sess.running || sess.ctrl.Running() {
+		pending := cloneSessionConfigState(cfgState)
+		sess.model = cfgState.Model
+		sess.effortOverride = cloneStringPtr(cfgState.EffortOverride)
+		sess.pendingConfig = &pending
+		if sess.transcript != "" && sessionFileExists(sess.transcript) {
+			_ = saveACPMeta(sess.transcript, sess.metaLocked())
+		}
+		sess.mu.Unlock()
+		sess.sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: cfgState.ConfigOptions})
+		return nil
+	}
+	sess.pendingConfig = nil
+
+	cur := sess.ctrl
+	prevPath := cur.SessionPath()
+	if err := cur.Snapshot(); err != nil {
+		sess.mu.Unlock()
+		return &RPCError{Code: ErrInternal, Message: "session config: snapshot before switch: " + err.Error()}
+	}
+	carried := cur.History()
+	sink := sess.sink
+	mcpServers := clonePluginSpecs(sess.mcpServers)
+	cwd := sess.cwd
+
+	newCtrl, err := s.factory.NewSession(ctx, SessionParams{
+		Cwd:            cwd,
+		MCPServers:     mcpServers,
+		Sink:           sink,
+		Model:          cfgState.Model,
+		EffortOverride: cloneStringPtr(cfgState.EffortOverride),
+	})
+	if err != nil {
+		sess.mu.Unlock()
+		return &RPCError{Code: ErrInternal, Message: "session config: " + err.Error()}
+	}
+	newCtrl.EnableInteractiveApproval()
+	sink.bindApprove(newCtrl.Approve)
+	if len(carried) > 0 {
+		newCtrl.Resume(&agent.Session{Messages: carried}, prevPath)
+	} else if prevPath != "" {
+		newCtrl.SetSessionPath(prevPath)
+	}
+	newCtrl.InheritLifecycleFrom(cur)
+
+	sess.ctrl = newCtrl
+	sess.model = cfgState.Model
+	sess.effortOverride = cloneStringPtr(cfgState.EffortOverride)
+	if sess.transcript != "" && sessionFileExists(sess.transcript) {
+		_ = saveACPMeta(sess.transcript, sess.metaLocked())
+	}
+	sess.mu.Unlock()
+
+	cur.ReleaseResources()
+	sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: cfgState.ConfigOptions})
+	return nil
+}
+
+func (s *service) applyPendingSessionConfig(ctx context.Context, sess *acpSession) error {
+	if s.session(sess.id) != sess {
+		return nil
+	}
+	sess.mu.Lock()
+	if sess.deleted || sess.pendingConfig == nil {
+		sess.mu.Unlock()
+		return nil
+	}
+	cfgState := cloneSessionConfigState(*sess.pendingConfig)
+	sess.pendingConfig = nil
+	sess.mu.Unlock()
+
+	if err := s.rebuildSession(ctx, sess, cfgState); err != nil {
+		sess.mu.Lock()
+		if !sess.deleted && sess.pendingConfig == nil {
+			pending := cloneSessionConfigState(cfgState)
+			sess.pendingConfig = &pending
+		}
+		sess.mu.Unlock()
+		return err
+	}
+	return nil
 }
 
 // sessionClose releases an active session. Unknown sessions are accepted as a
@@ -568,6 +835,103 @@ func (s *service) sessionDir() string {
 	return ""
 }
 
+func (s *service) sessionConfigState(ctx context.Context, p SessionConfigStateParams) (SessionConfigState, error) {
+	if provider, ok := s.factory.(SessionConfigStateProvider); ok {
+		return provider.SessionConfigState(ctx, p)
+	}
+	return SessionConfigState{}, nil
+}
+
+func (s *service) configStateForSession(ctx context.Context, sess *acpSession) (SessionConfigState, error) {
+	return s.sessionConfigState(ctx, sess.configStateParams())
+}
+
+func (s *acpSession) configStateParams() SessionConfigStateParams {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return SessionConfigStateParams{
+		Cwd:            s.cwd,
+		Model:          s.model,
+		EffortOverride: cloneStringPtr(s.effortOverride),
+	}
+}
+
+func findConfigOption(options []SessionConfigOption, id string) (SessionConfigOption, bool) {
+	id = normalizeConfigID(id)
+	for _, opt := range options {
+		if normalizeConfigID(opt.ID) == id {
+			return opt, true
+		}
+	}
+	return SessionConfigOption{}, false
+}
+
+func normalizeConfigID(id string) string {
+	switch strings.TrimSpace(id) {
+	case "models":
+		return "model"
+	case "reasoning_effort", "thought_level":
+		return "effort"
+	default:
+		return strings.TrimSpace(id)
+	}
+}
+
+func configOptionHasValue(option SessionConfigOption, value string) bool {
+	for _, opt := range option.Options {
+		if opt.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
+func configOptionCategory(option SessionConfigOption) string {
+	if option.Category != "" {
+		return option.Category
+	}
+	switch normalizeConfigID(option.ID) {
+	case "model":
+		return "model"
+	case "effort":
+		return "thought_level"
+	default:
+		return ""
+	}
+}
+
+func cloneStringPtr(p *string) *string {
+	if p == nil {
+		return nil
+	}
+	cp := *p
+	return &cp
+}
+
+func cloneSessionConfigState(in SessionConfigState) SessionConfigState {
+	out := in
+	out.EffortOverride = cloneStringPtr(in.EffortOverride)
+	if in.Models != nil {
+		models := *in.Models
+		models.AvailableModels = append([]ModelInfo(nil), in.Models.AvailableModels...)
+		out.Models = &models
+	}
+	out.ConfigOptions = append([]SessionConfigOption(nil), in.ConfigOptions...)
+	for i := range out.ConfigOptions {
+		out.ConfigOptions[i].Options = append([]SessionConfigSelectOption(nil), out.ConfigOptions[i].Options...)
+	}
+	return out
+}
+
+func clonePluginSpecs(in []plugin.Spec) []plugin.Spec {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]plugin.Spec, len(in))
+	copy(out, in)
+	return out
+}
+
 func (s *service) resolveSessionCwd(cwd, sessionID string) (string, error) {
 	cwd = strings.TrimSpace(cwd)
 	if cwd != "" {
@@ -631,25 +995,25 @@ func (s *acpSession) persistAfterTurn(prompt string) {
 		s.createdAt = s.updatedAt
 	}
 	if s.transcript != "" && sessionFileExists(s.transcript) {
-		_ = saveACPMeta(s.transcript, acpSessionMeta{
-			SessionID: s.id,
-			Cwd:       s.cwd,
-			Title:     s.title,
-			CreatedAt: s.createdAt,
-			UpdatedAt: s.updatedAt,
-		})
+		_ = saveACPMeta(s.transcript, s.metaLocked())
 	}
 }
 
 func (s *acpSession) meta() acpSessionMeta {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.metaLocked()
+}
+
+func (s *acpSession) metaLocked() acpSessionMeta {
 	return acpSessionMeta{
-		SessionID: s.id,
-		Cwd:       s.cwd,
-		Title:     s.title,
-		CreatedAt: s.createdAt,
-		UpdatedAt: s.updatedAt,
+		SessionID:      s.id,
+		Cwd:            s.cwd,
+		Model:          s.model,
+		EffortOverride: cloneStringPtr(s.effortOverride),
+		Title:          s.title,
+		CreatedAt:      s.createdAt,
+		UpdatedAt:      s.updatedAt,
 	}
 }
 
@@ -666,11 +1030,13 @@ func (s *acpSession) info() SessionInfo {
 }
 
 type acpSessionMeta struct {
-	SessionID string    `json:"sessionId"`
-	Cwd       string    `json:"cwd"`
-	Title     string    `json:"title,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	SessionID      string    `json:"sessionId"`
+	Cwd            string    `json:"cwd"`
+	Model          string    `json:"model,omitempty"`
+	EffortOverride *string   `json:"effortOverride,omitempty"`
+	Title          string    `json:"title,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 func (m acpSessionMeta) info(extra map[string]any) SessionInfo {

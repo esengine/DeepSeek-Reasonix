@@ -5,15 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/codegraph"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -299,6 +303,7 @@ func TestSettingsUsesUserDesktopPreferencesNotProjectConfig(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
 [desktop]
 language = "zh"
+layout_style = "workbench"
 theme = "light"
 theme_style = "glacier"
 close_behavior = "quit"
@@ -311,6 +316,9 @@ status_bar_items = ["cost", "balance"]
 	userCfg := config.LoadForEdit(config.UserConfigPath())
 	if err := userCfg.SetDesktopLanguage("en"); err != nil {
 		t.Fatalf("set desktop language: %v", err)
+	}
+	if err := userCfg.SetDesktopLayoutStyle("classic"); err != nil {
+		t.Fatalf("set desktop layout style: %v", err)
 	}
 	if err := userCfg.SetDesktopAppearance("dark", "graphite"); err != nil {
 		t.Fatalf("set desktop appearance: %v", err)
@@ -335,8 +343,8 @@ status_bar_items = ["cost", "balance"]
 	}
 
 	got := NewApp().Settings()
-	if got.DesktopLanguage != "en" || got.DesktopTheme != "dark" || got.DesktopThemeStyle != "graphite" || got.CloseBehavior != "background" || got.StatusBarStyle != "text" {
-		t.Fatalf("desktop settings = lang:%q theme:%q style:%q close:%q status:%q, want user-level desktop prefs", got.DesktopLanguage, got.DesktopTheme, got.DesktopThemeStyle, got.CloseBehavior, got.StatusBarStyle)
+	if got.DesktopLanguage != "en" || got.DesktopLayoutStyle != "classic" || got.DesktopTheme != "dark" || got.DesktopThemeStyle != "graphite" || got.CloseBehavior != "background" || got.StatusBarStyle != "text" {
+		t.Fatalf("desktop settings = lang:%q layout:%q theme:%q style:%q close:%q status:%q, want user-level desktop prefs", got.DesktopLanguage, got.DesktopLayoutStyle, got.DesktopTheme, got.DesktopThemeStyle, got.CloseBehavior, got.StatusBarStyle)
 	}
 	if want := []string{"model", "balance", "cache"}; !reflect.DeepEqual(got.StatusBarItems, want) {
 		t.Fatalf("desktop status bar items = %v, want user-level %v", got.StatusBarItems, want)
@@ -352,6 +360,7 @@ default_model = "legacy-provider/legacy-model"
 
 [desktop]
 language = "zh"
+layout_style = "workbench"
 theme = "light"
 theme_style = "glacier"
 close_behavior = "quit"
@@ -372,7 +381,7 @@ status_bar_items = ["model", "cache", "balance"]
 	if got.ConfigPath != config.UserConfigPath() {
 		t.Fatalf("Settings configPath = %q, want user config %q", got.ConfigPath, config.UserConfigPath())
 	}
-	if got.DefaultModel != "legacy-provider/legacy-model" || got.DesktopLanguage != "zh" || got.DesktopTheme != "light" || got.DesktopThemeStyle != "glacier" || got.CloseBehavior != "quit" || got.StatusBarStyle != "text" {
+	if got.DefaultModel != "legacy-provider/legacy-model" || got.DesktopLanguage != "zh" || got.DesktopLayoutStyle != "workbench" || got.DesktopTheme != "light" || got.DesktopThemeStyle != "glacier" || got.CloseBehavior != "quit" || got.StatusBarStyle != "text" {
 		t.Fatalf("Settings did not seed from legacy project config: %+v", got)
 	}
 	if want := []string{"model", "cache", "balance"}; !reflect.DeepEqual(got.StatusBarItems, want) {
@@ -385,8 +394,8 @@ status_bar_items = ["model", "cache", "balance"]
 		t.Fatalf("SetDesktopLanguage: %v", err)
 	}
 	userCfg := config.LoadForEdit(config.UserConfigPath())
-	if userCfg.DesktopLanguage() != "en" || userCfg.DesktopTheme() != "light" || userCfg.DesktopThemeStyle() != "glacier" || userCfg.DesktopCloseBehavior() != "quit" || userCfg.DesktopStatusBarStyle() != "text" {
-		t.Fatalf("saved user config did not preserve seeded desktop prefs: lang:%q theme:%q style:%q close:%q status:%q", userCfg.DesktopLanguage(), userCfg.DesktopTheme(), userCfg.DesktopThemeStyle(), userCfg.DesktopCloseBehavior(), userCfg.DesktopStatusBarStyle())
+	if userCfg.DesktopLanguage() != "en" || userCfg.DesktopLayoutStyle() != "workbench" || userCfg.DesktopTheme() != "light" || userCfg.DesktopThemeStyle() != "glacier" || userCfg.DesktopCloseBehavior() != "quit" || userCfg.DesktopStatusBarStyle() != "text" {
+		t.Fatalf("saved user config did not preserve seeded desktop prefs: lang:%q layout:%q theme:%q style:%q close:%q status:%q", userCfg.DesktopLanguage(), userCfg.DesktopLayoutStyle(), userCfg.DesktopTheme(), userCfg.DesktopThemeStyle(), userCfg.DesktopCloseBehavior(), userCfg.DesktopStatusBarStyle())
 	}
 	if want := []string{"model", "cache", "balance"}; !reflect.DeepEqual(userCfg.DesktopStatusBarItems(), want) {
 		t.Fatalf("saved user config did not preserve seeded status bar items: got %v want %v", userCfg.DesktopStatusBarItems(), want)
@@ -735,6 +744,7 @@ func TestModelsForTabOnlyListsProviderAccessWhenConfigured(t *testing.T) {
 		"deepseek/deepseek-v4-flash",
 		"deepseek/deepseek-v4-pro",
 		"mimo-token-plan/mimo-v2.5-pro",
+		"mimo-token-plan/mimo-v2.5",
 	} {
 		if !refs[want] {
 			t.Fatalf("Models() refs = %+v, missing %s", models, want)
@@ -748,8 +758,8 @@ func TestModelsForTabOnlyListsProviderAccessWhenConfigured(t *testing.T) {
 			t.Fatalf("Models() refs = %+v, should not include hidden provider %s", models, hidden)
 		}
 	}
-	if len(models) != 3 {
-		t.Fatalf("Models() len = %d, want 3: %+v", len(models), models)
+	if len(models) != 4 {
+		t.Fatalf("Models() len = %d, want 4: %+v", len(models), models)
 	}
 }
 
@@ -766,11 +776,17 @@ func TestModelsForTabListsMimoAPIPaidAccess(t *testing.T) {
 
 	models := NewApp().Models()
 	refs := modelRefsFromView(models)
-	if !refs["mimo-api/mimo-v2.5-pro"] {
-		t.Fatalf("Models() refs = %+v, missing mimo-api/mimo-v2.5-pro", models)
+	for _, want := range []string{
+		"mimo-api/mimo-v2.5-pro",
+		"mimo-api/mimo-v2.5",
+		"mimo-api/mimo-v2-omni",
+	} {
+		if !refs[want] {
+			t.Fatalf("Models() refs = %+v, missing %s", models, want)
+		}
 	}
-	if len(models) != 1 {
-		t.Fatalf("Models() len = %d, want 1: %+v", len(models), models)
+	if len(models) != 3 {
+		t.Fatalf("Models() len = %d, want 3: %+v", len(models), models)
 	}
 }
 
@@ -943,12 +959,53 @@ func TestDeleteProviderRejectsRunningAffectedTab(t *testing.T) {
 	ctrl.Close()
 }
 
+func TestDeleteProviderRejectsAffectedBackgroundJobs(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("REASONIX_TEST_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "prov-a/model-a1"
+	cfg.Providers = []config.ProviderEntry{
+		{Name: "prov-a", Kind: "openai", BaseURL: "https://a.example.com", Model: "model-a1", APIKeyEnv: "REASONIX_TEST_KEY"},
+		{Name: "prov-b", Kind: "openai", BaseURL: "https://b.example.com", Model: "model-b1", APIKeyEnv: "REASONIX_TEST_KEY"},
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	path := filepath.Join(dir, "provider-job.jsonl")
+	jm := jobs.NewManager(event.Discard)
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: path, Label: "test", Jobs: jm})
+	defer ctrl.Close()
+	app := NewApp()
+	app.setTestCtrl(ctrl, "prov-a/model-a1")
+	jm.StartForSession(agent.BranchID(path), "bash", "provider job", func(ctx context.Context, _ io.Writer) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	})
+
+	err := app.DeleteProvider("prov-a")
+	if err == nil || !strings.Contains(err.Error(), "active work") {
+		t.Fatalf("DeleteProvider with background job error = %v, want active-work guard", err)
+	}
+	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); !ok {
+		t.Fatal("provider should remain after rejected deletion")
+	}
+}
+
 func TestMigrateDesktopPreferencesDoesNotOverwriteExistingConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	userCfg := config.LoadForEdit(config.UserConfigPath())
 	if err := userCfg.SetDesktopLanguage("en"); err != nil {
 		t.Fatalf("set desktop language: %v", err)
+	}
+	if err := userCfg.SetDesktopLayoutStyle("workbench"); err != nil {
+		t.Fatalf("set desktop layout style: %v", err)
 	}
 	if err := userCfg.SetDesktopAppearance("dark", "graphite"); err != nil {
 		t.Fatalf("set desktop appearance: %v", err)
@@ -962,8 +1019,8 @@ func TestMigrateDesktopPreferencesDoesNotOverwriteExistingConfig(t *testing.T) {
 	}
 
 	got := config.LoadForEdit(config.UserConfigPath())
-	if got.DesktopLanguage() != "en" || got.DesktopTheme() != "dark" || got.DesktopThemeStyle() != "graphite" {
-		t.Fatalf("desktop prefs after migration = lang:%q theme:%q style:%q, want existing config preserved", got.DesktopLanguage(), got.DesktopTheme(), got.DesktopThemeStyle())
+	if got.DesktopLanguage() != "en" || got.DesktopLayoutStyle() != "workbench" || got.DesktopTheme() != "dark" || got.DesktopThemeStyle() != "graphite" {
+		t.Fatalf("desktop prefs after migration = lang:%q layout:%q theme:%q style:%q, want existing config preserved", got.DesktopLanguage(), got.DesktopLayoutStyle(), got.DesktopTheme(), got.DesktopThemeStyle())
 	}
 }
 
@@ -1101,6 +1158,111 @@ func TestSetTokenModeRejectsRunningTurn(t *testing.T) {
 
 	close(runner.release)
 	waitNotRunning(t, app.activeCtrl())
+}
+
+func TestSetTokenModeRejectsBackgroundJobs(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	path := filepath.Join(dir, "jobs.jsonl")
+	jm := jobs.NewManager(event.Discard)
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: path, Label: "test", Jobs: jm})
+	defer ctrl.Close()
+	app := NewApp()
+	app.setTestCtrl(ctrl, "")
+
+	release := make(chan struct{})
+	jm.StartForSession(agent.BranchID(path), "bash", "long job", func(ctx context.Context, _ io.Writer) (string, error) {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-release:
+			return "", nil
+		}
+	})
+	defer close(release)
+
+	err := app.SetTokenMode("economy")
+	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
+		t.Fatalf("SetTokenMode with background job error = %v, want background-job guard", err)
+	}
+}
+
+func TestSettingsRebuildRejectsBackgroundJobs(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	path := filepath.Join(dir, "settings-job.jsonl")
+	jm := jobs.NewManager(event.Discard)
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: path, Label: "test", Jobs: jm})
+	defer ctrl.Close()
+	app := NewApp()
+	app.ctx = context.Background()
+	app.setTestCtrl(ctrl, "deepseek-flash/deepseek-v4-flash")
+
+	jm.StartForSession(agent.BranchID(path), "bash", "settings job", func(ctx context.Context, _ io.Writer) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	})
+
+	err := app.SetSandbox("enforce", true, "", nil, "")
+	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
+		t.Fatalf("SetSandbox with background job error = %v, want background-job guard", err)
+	}
+}
+
+func TestClearSessionCancelsRunningRuntimeAndKeepsTopic(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	path := filepath.Join(dir, "clear-running.jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"user","content":"old"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	oldCtrl := control.New(control.Options{Runner: runner, SessionDir: dir, SessionPath: path, Label: "test"})
+	app := NewApp()
+	app.projectTreeChangedHook = func() {}
+	app.setTestCtrl(oldCtrl, "deepseek-flash/deepseek-v4-flash")
+	app.tabs["test"].TopicID = "topic_clear"
+	app.tabs["test"].TopicTitle = "Clear topic"
+	defer func() {
+		if c := app.activeCtrl(); c != nil {
+			c.Close()
+		}
+	}()
+
+	oldCtrl.Submit("work")
+	<-runner.started
+	if err := app.ClearSession(); err != nil {
+		t.Fatalf("ClearSession: %v", err)
+	}
+	waitNotRunning(t, oldCtrl)
+	tab := app.activeTab()
+	if tab == nil || tab.Ctrl == nil {
+		t.Fatalf("active tab/controller missing after clear")
+	}
+	if tab.Ctrl == oldCtrl {
+		t.Fatalf("clear should replace the active controller after cancelling old work")
+	}
+	if tab.TopicID != "topic_clear" || tab.TopicTitle != "Clear topic" {
+		t.Fatalf("clear changed topic identity: %+v", tab)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("old cleared session artifacts should be removed, stat err = %v", err)
+	}
+	if got := tab.currentSessionPath(); got == "" || got == path {
+		t.Fatalf("new session path = %q, want fresh path", got)
+	}
 }
 
 func TestSearchFileRefsFindsNestedBasename(t *testing.T) {
@@ -1250,7 +1412,7 @@ func TestFileRefsUseActiveTabWorkspaceRoot(t *testing.T) {
 	}
 }
 
-func TestDeleteSessionRejectsActiveRelativePath(t *testing.T) {
+func TestDeleteSessionCancelsActiveRuntime(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	dir := config.SessionDir()
@@ -1263,22 +1425,80 @@ func TestDeleteSessionRejectsActiveRelativePath(t *testing.T) {
 	}
 
 	app := NewApp()
-	app.setTestCtrl(control.New(control.Options{SessionDir: dir, SessionPath: path, Label: "test"}), "")
-	defer func() {
-		if c := app.activeCtrl(); c != nil {
-			c.Close()
-		}
-	}()
-
-	if err := app.DeleteSession(filepath.Base(path)); err != errActiveSession {
-		t.Fatalf("DeleteSession(active basename) error = %v, want errActiveSession", err)
+	activeCtrl := control.New(control.Options{SessionDir: dir, SessionPath: path, Label: "test"})
+	keepPath := filepath.Join(dir, "keep.jsonl")
+	if err := os.WriteFile(keepPath, []byte(`{"role":"user","content":"keep"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write keep session: %v", err)
 	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("active session should remain: %v", err)
+	keepCtrl := control.New(control.Options{SessionDir: dir, SessionPath: keepPath, Label: "keep"})
+	defer keepCtrl.Close()
+	app.setTestCtrl(activeCtrl, "")
+	app.tabs["keep"] = &WorkspaceTab{ID: "keep", Scope: "global", Ctrl: keepCtrl, Ready: true}
+	app.tabOrder = []string{"test", "keep"}
+
+	if err := app.DeleteSession(filepath.Base(path)); err != nil {
+		t.Fatalf("DeleteSession(active basename): %v", err)
+	}
+	if _, ok := app.tabs["test"]; ok {
+		t.Fatalf("deleted active session runtime should be removed")
+	}
+	if got := app.activeTabID; got != "keep" {
+		t.Fatalf("active tab after delete = %q, want keep", got)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("active session should be moved out of active history, stat err = %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "active.jsonl", "active.jsonl")
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("active session should be moved to trash: %v", err)
 	}
 }
 
-func TestDeleteSessionRejectsInactiveOpenTab(t *testing.T) {
+func TestDeleteSessionTrashConflictKeepsRuntime(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	path := filepath.Join(dir, "active-conflict.jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"user","content":"hello"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, sessionTrashDir, filepath.Base(path)), 0o755); err != nil {
+		t.Fatalf("create trash conflict: %v", err)
+	}
+
+	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	ctrl := control.New(control.Options{Runner: runner, SessionDir: dir, SessionPath: path, Label: "test"})
+	app := NewApp()
+	app.setTestCtrl(ctrl, "")
+	defer ctrl.Close()
+	ctrl.Submit("work")
+	<-runner.started
+
+	err := app.DeleteSession(filepath.Base(path))
+	if err == nil || !strings.Contains(err.Error(), "already exists in trash") {
+		t.Fatalf("DeleteSession conflict error = %v, want trash conflict", err)
+	}
+	if app.activeCtrl() != ctrl {
+		t.Fatalf("active runtime should remain bound after preflight failure")
+	}
+	if !ctrl.Running() {
+		t.Fatalf("running turn should not be cancelled on preflight failure")
+	}
+	if _, ok := app.tabs["test"]; !ok {
+		t.Fatalf("tab should remain after preflight failure")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("active session file should remain: %v", err)
+	}
+
+	close(runner.release)
+	waitNotRunning(t, ctrl)
+}
+
+func TestDeleteSessionCancelsInactiveOpenRuntime(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	dir := config.SessionDir()
@@ -1308,11 +1528,18 @@ func TestDeleteSessionRejectsInactiveOpenTab(t *testing.T) {
 		activeTabID: "active",
 	}
 
-	if err := app.DeleteSession(filepath.Base(inactivePath)); err != errActiveSession {
-		t.Fatalf("DeleteSession(inactive open basename) error = %v, want errActiveSession", err)
+	if err := app.DeleteSession(filepath.Base(inactivePath)); err != nil {
+		t.Fatalf("DeleteSession(inactive open basename): %v", err)
 	}
-	if _, err := os.Stat(inactivePath); err != nil {
-		t.Fatalf("inactive open session should remain: %v", err)
+	if _, ok := app.tabs["inactive"]; ok {
+		t.Fatalf("deleted inactive session runtime should be removed")
+	}
+	if _, err := os.Stat(inactivePath); !os.IsNotExist(err) {
+		t.Fatalf("inactive open session should be moved out of active history, stat err = %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "inactive.jsonl", "inactive.jsonl")
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("inactive open session should be moved to trash: %v", err)
 	}
 
 	sessions := app.ListSessions()
@@ -1325,16 +1552,13 @@ func TestDeleteSessionRejectsInactiveOpenTab(t *testing.T) {
 	if !current[filepath.Base(activePath)] {
 		t.Fatalf("ListSessions should mark active session current, got %#v", current)
 	}
-	if current[filepath.Base(inactivePath)] {
-		t.Fatalf("ListSessions should not mark inactive open session current, got %#v", current)
-	}
 	if current[filepath.Base(otherPath)] {
 		t.Fatalf("ListSessions marked unopened session current, got %#v", current)
 	}
-	if !open[filepath.Base(activePath)] || !open[filepath.Base(inactivePath)] {
+	if !open[filepath.Base(activePath)] {
 		t.Fatalf("ListSessions should mark active and inactive open sessions open, got %#v", open)
 	}
-	if open[filepath.Base(otherPath)] {
+	if open[filepath.Base(inactivePath)] || open[filepath.Base(otherPath)] {
 		t.Fatalf("ListSessions marked unopened session open, got %#v", open)
 	}
 }
@@ -1685,6 +1909,9 @@ func TestCapabilitiesShowsDefaultCodegraphDisabled(t *testing.T) {
 			}
 			if s.Tier != "background" {
 				t.Fatalf("codegraph tier = %q, want background; server = %+v", s.Tier, s)
+			}
+			if s.Command != "codegraph" || !reflect.DeepEqual(s.Args, []string{"serve", "--mcp"}) {
+				t.Fatalf("codegraph command = %q %+v, want codegraph serve --mcp", s.Command, s.Args)
 			}
 			return
 		}
@@ -2409,6 +2636,226 @@ tier = "lazy"
 	t.Fatalf("codegraph missing from Capabilities: %+v", view.Servers)
 }
 
+func TestUpdateBuiltInMCPServerUpdatesCodegraphRuntime(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+[codegraph]
+enabled = false
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := updateBuiltInCodegraph
+	defer func() { updateBuiltInCodegraph = orig }()
+	called := false
+	updateBuiltInCodegraph = func(ctx context.Context, client *http.Client, log func(string)) (codegraph.UpdateResult, error) {
+		called = true
+		if ctx == nil {
+			t.Fatal("context is nil")
+		}
+		if client == nil {
+			t.Fatal("http client is nil")
+		}
+		return codegraph.UpdateResult{Version: "v9.9.9", Path: filepath.Join(dir, "cache", "codegraph")}, nil
+	}
+
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
+	defer app.activeCtrl().Close()
+
+	got, err := app.UpdateBuiltInMCPServer("codegraph")
+	if err != nil {
+		t.Fatalf("UpdateBuiltInMCPServer(codegraph): %v", err)
+	}
+	if !called {
+		t.Fatal("updater was not called")
+	}
+	if got.Name != "codegraph" || got.Version != "v9.9.9" || got.Path == "" {
+		t.Fatalf("UpdateBuiltInMCPServer result = %+v", got)
+	}
+}
+
+func TestUpdateBuiltInMCPServerRejectsOtherServers(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
+	defer app.activeCtrl().Close()
+
+	if _, err := app.UpdateBuiltInMCPServer("time"); err == nil {
+		t.Fatal("UpdateBuiltInMCPServer(time) succeeded; want error")
+	}
+}
+
+func TestBuiltInMCPBackgroundNotifyDoesNotDownload(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("REASONIX_CACHE_DIR", robustTempDir(t))
+
+	origCheck := checkCodegraphLatest
+	origDownload := downloadLatestCodegraph
+	origUpdate := updateBuiltInCodegraph
+	defer func() {
+		checkCodegraphLatest = origCheck
+		downloadLatestCodegraph = origDownload
+		updateBuiltInCodegraph = origUpdate
+	}()
+
+	checkCodegraphLatest = func(ctx context.Context, client *http.Client) (string, error) {
+		return "v99.99.99", nil
+	}
+	downloadLatestCodegraph = func(ctx context.Context, client *http.Client, log func(string)) (codegraph.UpdateResult, error) {
+		t.Fatal("notify mode should not download")
+		return codegraph.UpdateResult{}, nil
+	}
+	updateBuiltInCodegraph = func(ctx context.Context, client *http.Client, log func(string)) (codegraph.UpdateResult, error) {
+		t.Fatal("notify mode should not activate")
+		return codegraph.UpdateResult{}, nil
+	}
+
+	cfg := config.Default()
+	cfg.BuiltInMCPUpdates.Mode = config.BuiltInMCPUpdateModeNotify
+	statuses, err := NewApp().runBuiltInMCPUpdateCheck(cfg)
+	if err != nil {
+		t.Fatalf("runBuiltInMCPUpdateCheck: %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].Phase != "available" || statuses[0].Latest != "v99.99.99" {
+		t.Fatalf("statuses = %+v, want available latest v99.99.99", statuses)
+	}
+}
+
+func TestBuiltInMCPUpdateStatusesReturnArray(t *testing.T) {
+	app := NewApp()
+	empty := app.BuiltInMCPUpdateStatuses()
+	if empty == nil {
+		t.Fatal("empty BuiltInMCPUpdateStatuses returned nil; Wails should encode []")
+	}
+	app.recordBuiltInMCPUpdateStatus(BuiltInMCPUpdateStatus{
+		Name:    "codegraph",
+		Mode:    "notify",
+		Current: "v0.9.7",
+		Latest:  "v9.9.9",
+		Phase:   "available",
+	})
+	statuses := app.BuiltInMCPUpdateStatuses()
+	if len(statuses) != 1 || statuses[0].Name != "codegraph" || statuses[0].Phase != "available" {
+		t.Fatalf("BuiltInMCPUpdateStatuses = %+v, want codegraph available", statuses)
+	}
+}
+
+func TestBuiltInMCPBackgroundDownloadDoesNotActivate(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("REASONIX_CACHE_DIR", robustTempDir(t))
+
+	origCheck := checkCodegraphLatest
+	origDownload := downloadLatestCodegraph
+	origUpdate := updateBuiltInCodegraph
+	defer func() {
+		checkCodegraphLatest = origCheck
+		downloadLatestCodegraph = origDownload
+		updateBuiltInCodegraph = origUpdate
+	}()
+
+	checkCodegraphLatest = func(ctx context.Context, client *http.Client) (string, error) {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatal("manifest check context has no deadline")
+		}
+		return "v99.99.99", nil
+	}
+	downloaded := false
+	downloadLatestCodegraph = func(ctx context.Context, client *http.Client, log func(string)) (codegraph.UpdateResult, error) {
+		downloaded = true
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= httpTimeout+time.Second {
+			t.Fatalf("download context inherited manifest timeout; deadline=%v", deadline)
+		}
+		return codegraph.UpdateResult{Version: "v99.99.99", Path: filepath.Join(t.TempDir(), "codegraph")}, nil
+	}
+	updateBuiltInCodegraph = func(ctx context.Context, client *http.Client, log func(string)) (codegraph.UpdateResult, error) {
+		t.Fatal("download mode should not activate")
+		return codegraph.UpdateResult{}, nil
+	}
+
+	cfg := config.Default()
+	cfg.BuiltInMCPUpdates.Mode = config.BuiltInMCPUpdateModeDownload
+	statuses, err := NewApp().runBuiltInMCPUpdateCheck(cfg)
+	if err != nil {
+		t.Fatalf("runBuiltInMCPUpdateCheck: %v", err)
+	}
+	if !downloaded {
+		t.Fatal("download mode did not call downloader")
+	}
+	if len(statuses) != 1 || statuses[0].Phase != "downloaded" || statuses[0].Path == "" {
+		t.Fatalf("statuses = %+v, want downloaded with path", statuses)
+	}
+}
+
+func TestBuiltInMCPBackgroundAutoNextSessionActivates(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("REASONIX_CACHE_DIR", robustTempDir(t))
+
+	origCheck := checkCodegraphLatest
+	origDownload := downloadLatestCodegraph
+	origUpdate := updateBuiltInCodegraph
+	defer func() {
+		checkCodegraphLatest = origCheck
+		downloadLatestCodegraph = origDownload
+		updateBuiltInCodegraph = origUpdate
+	}()
+
+	checkCodegraphLatest = func(ctx context.Context, client *http.Client) (string, error) {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatal("manifest check context has no deadline")
+		}
+		return "v99.99.99", nil
+	}
+	downloadLatestCodegraph = func(ctx context.Context, client *http.Client, log func(string)) (codegraph.UpdateResult, error) {
+		t.Fatal("auto_next_session mode should activate through the updater")
+		return codegraph.UpdateResult{}, nil
+	}
+	activated := false
+	updateBuiltInCodegraph = func(ctx context.Context, client *http.Client, log func(string)) (codegraph.UpdateResult, error) {
+		activated = true
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= httpTimeout+time.Second {
+			t.Fatalf("activation context inherited manifest timeout; deadline=%v", deadline)
+		}
+		return codegraph.UpdateResult{Version: "v99.99.99", Path: filepath.Join(t.TempDir(), "codegraph")}, nil
+	}
+
+	cfg := config.Default()
+	cfg.BuiltInMCPUpdates.Mode = config.BuiltInMCPUpdateModeAutoNextSession
+	statuses, err := NewApp().runBuiltInMCPUpdateCheck(cfg)
+	if err != nil {
+		t.Fatalf("runBuiltInMCPUpdateCheck: %v", err)
+	}
+	if !activated {
+		t.Fatal("auto_next_session mode did not activate")
+	}
+	if len(statuses) != 1 || statuses[0].Phase != "activated" || statuses[0].Path == "" {
+		t.Fatalf("statuses = %+v, want activated with path", statuses)
+	}
+}
+
+func TestBuiltInMCPUpdateIntervalStamp(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	origNow := builtInMCPUpdateNow
+	defer func() { builtInMCPUpdateNow = origNow }()
+
+	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	builtInMCPUpdateNow = func() time.Time { return now }
+	if !shouldRunBuiltInMCPUpdateCheck(time.Hour) {
+		t.Fatal("first update check should run without a stamp")
+	}
+	markBuiltInMCPUpdateChecked()
+	if shouldRunBuiltInMCPUpdateCheck(time.Hour) {
+		t.Fatal("update check should be suppressed inside interval")
+	}
+	builtInMCPUpdateNow = func() time.Time { return now.Add(2 * time.Hour) }
+	if !shouldRunBuiltInMCPUpdateCheck(time.Hour) {
+		t.Fatal("update check should run after interval")
+	}
+}
+
 func TestCapabilitiesMigratesFailedMCPConfiguredTierAfterRestart(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
@@ -2567,5 +3014,686 @@ func TestSessionActionsWithoutControllerReturnError(t *testing.T) {
 	err := app.NewSession()
 	if err == nil || !strings.Contains(err.Error(), "boot exploded") {
 		t.Errorf("error should carry the tab's startup failure, got %v", err)
+	}
+}
+
+// --- Prompt history scanning tests ------------------------------------------
+
+func identityPromptDisplay(text string) string { return text }
+
+// TestCollectPromptHistoryEntriesLegacyEvent verifies that the legacy event format
+// {"kind":"user.message","text":"..."} is correctly extracted.
+func TestCollectPromptHistoryEntriesLegacyEvent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(path, []byte(`{"kind":"user.message","text":"hello world"}
+{"kind":"user.message","text":"second prompt"}
+{"kind":"model.final","content":"response"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := collectPromptHistoryEntries(path, info, identityPromptDisplay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	if entries[0].Text != "hello world" {
+		t.Errorf("expected 'hello world', got %q", entries[0].Text)
+	}
+	if entries[1].Text != "second prompt" {
+		t.Errorf("expected 'second prompt', got %q", entries[1].Text)
+	}
+	if entries[0].Turn != 0 || entries[1].Turn != 1 {
+		t.Errorf("expected turns 0,1; got %d,%d", entries[0].Turn, entries[1].Turn)
+	}
+	if entries[0].SessionPath != path {
+		t.Errorf("expected session path %q, got %q", path, entries[0].SessionPath)
+	}
+}
+
+// TestCollectPromptHistoryEntriesEarlyEvent verifies that the migrated legacy event
+// format {"type":"user.message","text":"..."} is correctly extracted.
+func TestCollectPromptHistoryEntriesEarlyEvent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"user.message","text":"v0 prompt"}
+{"type":"model.final","content":"response"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := collectPromptHistoryEntries(path, info, identityPromptDisplay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].Text != "v0 prompt" {
+		t.Errorf("expected 'v0 prompt', got %q", entries[0].Text)
+	}
+}
+
+// TestCollectPromptHistoryEntriesProviderMessage verifies that the current
+// provider.Message format {"role":"user","content":"..."} is correctly extracted.
+func TestCollectPromptHistoryEntriesProviderMessage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"user","content":"hello from provider"}
+{"role":"assistant","content":"response"}
+{"role":"user","content":"another prompt"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := collectPromptHistoryEntries(path, info, identityPromptDisplay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	if entries[0].Text != "hello from provider" {
+		t.Errorf("expected 'hello from provider', got %q", entries[0].Text)
+	}
+	if entries[1].Text != "another prompt" {
+		t.Errorf("expected 'another prompt', got %q", entries[1].Text)
+	}
+}
+
+// TestCollectPromptHistoryEntriesMixedFormats verifies that both formats in the
+// same file are extracted.
+func TestCollectPromptHistoryEntriesMixedFormats(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(path, []byte(`{"kind":"user.message","text":"legacy prompt"}
+{"role":"user","content":"modern prompt"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := collectPromptHistoryEntries(path, info, identityPromptDisplay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	if entries[0].Text != "legacy prompt" {
+		t.Errorf("expected 'legacy prompt', got %q", entries[0].Text)
+	}
+	if entries[1].Text != "modern prompt" {
+		t.Errorf("expected 'modern prompt', got %q", entries[1].Text)
+	}
+}
+
+func TestCollectPromptHistoryEntriesReadsEventTime(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	rfcTime := time.Date(2026, 6, 14, 10, 30, 5, 6_000_000, time.UTC)
+	if err := os.WriteFile(path, []byte(`{"kind":"user.message","text":"legacy timed","time":1800000000123}
+{"role":"user","content":"modern timed","createdAt":`+strconv.Quote(rfcTime.Format(time.RFC3339Nano))+`}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := collectPromptHistoryEntries(path, info, identityPromptDisplay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	if entries[0].At != 1800000000123 {
+		t.Errorf("numeric event time = %d, want 1800000000123", entries[0].At)
+	}
+	if entries[1].At != rfcTime.UnixMilli() {
+		t.Errorf("RFC3339 event time = %d, want %d", entries[1].At, rfcTime.UnixMilli())
+	}
+}
+
+// TestCollectPromptHistoryEntriesUsesDisplayResolver verifies history recall uses
+// the user-visible prompt text, not the controller-expanded model input.
+func TestCollectPromptHistoryEntriesUsesDisplayResolver(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	expanded := "<memory-update>\nSaved memory\n</memory-update>\n\nvisible prompt"
+	if err := os.WriteFile(path, []byte(`{"role":"user","content":`+strconv.Quote(expanded)+`}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordSessionDisplay(dir, path, expanded, "visible prompt"); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := collectPromptHistoryEntries(path, info, sessionDisplayResolver(dir, path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].Text != "visible prompt" {
+		t.Errorf("expected visible prompt, got %q", entries[0].Text)
+	}
+}
+
+func TestCollectPromptHistoryEntriesSkipsSyntheticMessages(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"user","content":"Plan approved — plan mode is off"}
+{"role":"user","content":"real prompt"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := collectPromptHistoryEntries(path, info, identityPromptDisplay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].Text != "real prompt" {
+		t.Errorf("expected real prompt, got %q", entries[0].Text)
+	}
+}
+
+// TestCollectPromptHistoryEntriesNoUserMessages verifies that a file with only
+// assistant/tool messages returns no entries.
+func TestCollectPromptHistoryEntriesNoUserMessages(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(path, []byte(`{"kind":"model.final","content":"response"}
+{"kind":"tool.result","output":"done"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := collectPromptHistoryEntries(path, info, identityPromptDisplay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries, got %d", len(entries))
+	}
+}
+
+// TestCollectPromptHistoryEntriesEmptyFile verifies that an empty JSONL file
+// returns no entries without error.
+func TestCollectPromptHistoryEntriesEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.jsonl")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := collectPromptHistoryEntries(path, info, identityPromptDisplay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries, got %d", len(entries))
+	}
+}
+
+// TestScanPromptHistoryFromDir verifies that scanPromptHistoryFromDir scans
+// multiple JSONL files and returns prompts newest-first.
+func TestScanPromptHistoryFromDir(t *testing.T) {
+	app := &App{tabs: map[string]*WorkspaceTab{"t1": {ID: "t1", Ctrl: nil, WorkspaceRoot: ""}}}
+	_ = app
+
+	dir := t.TempDir()
+	// Write two session files with different mtimes (sleep to ensure ordering).
+	if err := os.WriteFile(filepath.Join(dir, "a.jsonl"), []byte(`{"role":"user","content":"older prompt"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	if err := os.WriteFile(filepath.Join(dir, "b.jsonl"), []byte(`{"role":"user","content":"newer prompt"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := app.scanPromptHistoryFromDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	// Newest-first: "newer prompt" should be first.
+	if entries[0].Text != "newer prompt" {
+		t.Errorf("expected 'newer prompt' first, got %q", entries[0].Text)
+	}
+	if entries[1].Text != "older prompt" {
+		t.Errorf("expected 'older prompt' second, got %q", entries[1].Text)
+	}
+}
+
+func TestScanPromptHistoryFromDirUsesSessionActivityBeforeEventInterleaving(t *testing.T) {
+	app := &App{}
+	dir := t.TempDir()
+	base := time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC)
+	early := filepath.Join(dir, "early.jsonl")
+	late := filepath.Join(dir, "late.jsonl")
+
+	if err := os.WriteFile(early, []byte(fmt.Sprintf(`{"role":"user","content":"early first","time":%d}
+{"role":"assistant","content":"ok"}
+{"role":"user","content":"early second","time":%d}
+`, base.UnixMilli(), base.Add(time.Minute).UnixMilli())), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(late, []byte(fmt.Sprintf(`{"role":"user","content":"late newest","time":%d}
+`, base.Add(2*time.Minute).UnixMilli())), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Invert file mtimes: session activity should keep each session grouped
+	// before event timestamps are considered within that session.
+	if err := os.Chtimes(early, base.Add(3*time.Hour), base.Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(late, base.Add(-3*time.Hour), base.Add(-3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := app.scanPromptHistoryFromDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+	want := []string{"early second", "early first", "late newest"}
+	for i, w := range want {
+		if entries[i].Text != w {
+			t.Fatalf("entries[%d] = %q, want %q; all=%+v", i, entries[i].Text, w, entries)
+		}
+	}
+}
+
+func TestScanPromptHistoryFromDirUsesBranchMetaActivityFallback(t *testing.T) {
+	app := &App{}
+	dir := t.TempDir()
+	base := time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC)
+	early := filepath.Join(dir, "early.jsonl")
+	late := filepath.Join(dir, "late.jsonl")
+
+	if err := os.WriteFile(early, []byte(`{"role":"user","content":"early first"}
+{"role":"assistant","content":"ok"}
+{"role":"user","content":"early second"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(late, []byte(`{"role":"user","content":"late newest"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.SaveBranchMetaPreserveUpdated(early, agent.BranchMeta{
+		CreatedAt: base,
+		UpdatedAt: base.Add(time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.SaveBranchMetaPreserveUpdated(late, agent.BranchMeta{
+		CreatedAt: base.Add(time.Minute),
+		UpdatedAt: base.Add(2 * time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Invert file mtimes: branch UpdatedAt should be the activity clock.
+	if err := os.Chtimes(early, base.Add(3*time.Hour), base.Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(late, base.Add(-3*time.Hour), base.Add(-3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := app.scanPromptHistoryFromDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+	want := []string{"late newest", "early second", "early first"}
+	for i, w := range want {
+		if entries[i].Text != w {
+			t.Fatalf("entries[%d] = %q, want %q; all=%+v", i, entries[i].Text, w, entries)
+		}
+	}
+}
+
+func TestScanPromptHistoryFromDirSkipsEmptyOrderedSessions(t *testing.T) {
+	app := &App{}
+	dir := t.TempDir()
+	base := time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC)
+	empty := filepath.Join(dir, "empty.jsonl")
+	real := filepath.Join(dir, "real.jsonl")
+
+	if err := os.WriteFile(empty, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(real, []byte(`{"role":"user","content":"real prompt"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.SaveBranchMetaPreserveUpdated(empty, agent.BranchMeta{
+		CreatedAt: base,
+		UpdatedAt: base.Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.SaveBranchMetaPreserveUpdated(real, agent.BranchMeta{
+		CreatedAt: base,
+		UpdatedAt: base,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := app.scanPromptHistoryFromDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Text != "real prompt" {
+		t.Fatalf("entries = %+v, want only real prompt after skipping empty session", entries)
+	}
+}
+
+func TestScanPromptHistoryUsesCurrentSessionBeforeCrossSession(t *testing.T) {
+	dir := t.TempDir()
+	current := filepath.Join(dir, "current.jsonl")
+	other := filepath.Join(dir, "other.jsonl")
+	if err := os.WriteFile(current, []byte(`{"role":"user","content":"current first"}
+{"role":"assistant","content":"ok"}
+{"role":"user","content":"current second"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(other, []byte(`{"role":"user","content":"other newest"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC)
+	if err := agent.SaveBranchMetaPreserveUpdated(current, agent.BranchMeta{
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.SaveBranchMetaPreserveUpdated(other, agent.BranchMeta{
+		CreatedAt: now.Add(time.Minute),
+		UpdatedAt: now.Add(time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: current, Label: "test"})
+	defer ctrl.Close()
+	app.setTestCtrl(ctrl, "")
+
+	result, err := app.ScanPromptHistory("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Entries) != 3 {
+		t.Fatalf("expected current-session entries followed by cross-session fallback, got %d: %+v", len(result.Entries), result.Entries)
+	}
+	want := []string{"current second", "current first", "other newest"}
+	for i, w := range want {
+		if result.Entries[i].Text != w {
+			t.Fatalf("entries[%d] = %q, want %q; all=%+v", i, result.Entries[i].Text, w, result.Entries)
+		}
+	}
+}
+
+func TestScanPromptHistoryPaginatesCurrentSessionBeforeCrossSession(t *testing.T) {
+	dir := t.TempDir()
+	current := filepath.Join(dir, "current.jsonl")
+	other := filepath.Join(dir, "other.jsonl")
+	var lines []byte
+	for i := range 55 {
+		lines = append(lines, []byte(fmt.Sprintf(`{"role":"user","content":"current %d"}
+`, i))...)
+	}
+	if err := os.WriteFile(current, lines, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(other, []byte(`{"role":"user","content":"other newest"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC)
+	if err := agent.SaveBranchMetaPreserveUpdated(current, agent.BranchMeta{
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.SaveBranchMetaPreserveUpdated(other, agent.BranchMeta{
+		CreatedAt: now.Add(time.Minute),
+		UpdatedAt: now.Add(time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: current, Label: "test"})
+	defer ctrl.Close()
+	app.setTestCtrl(ctrl, "")
+
+	result, err := app.ScanPromptHistory("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Entries) != promptHistoryPageLimit {
+		t.Fatalf("expected %d entries, got %d", promptHistoryPageLimit, len(result.Entries))
+	}
+	if result.Entries[0].Text != "current 54" {
+		t.Fatalf("first entry = %q, want current 54", result.Entries[0].Text)
+	}
+	if result.Entries[len(result.Entries)-1].Text != "current 5" {
+		t.Fatalf("last first-page entry = %q, want current 5", result.Entries[len(result.Entries)-1].Text)
+	}
+	if !result.HasOlder || result.OlderCursor == "" {
+		t.Fatalf("first page should expose an older cursor: %+v", result)
+	}
+	for _, entry := range result.Entries {
+		if entry.Text == "other newest" {
+			t.Fatalf("cross-session entry appeared before current-session page was exhausted: %+v", result.Entries)
+		}
+	}
+
+	nextRequest, err := json.Marshal(promptHistoryRequest{Cursor: result.OlderCursor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := app.ScanPromptHistory(string(nextRequest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"current 4", "current 3", "current 2", "current 1", "current 0", "other newest"}
+	if len(next.Entries) != len(want) {
+		t.Fatalf("second page entries = %+v, want %d entries", next.Entries, len(want))
+	}
+	for i, w := range want {
+		if next.Entries[i].Text != w {
+			t.Fatalf("second page entries[%d] = %q, want %q; all=%+v", i, next.Entries[i].Text, w, next.Entries)
+		}
+	}
+}
+
+func TestScanPromptHistoryFromDirReadsAllEntriesForInternalHelper(t *testing.T) {
+	app := &App{}
+	dir := t.TempDir()
+	var lines []byte
+	for i := range 250 {
+		lines = append(lines, []byte(fmt.Sprintf(`{"role":"user","content":"prompt %d"}
+`, i))...)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "many.jsonl"), lines, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := app.scanPromptHistoryFromDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 250 {
+		t.Fatalf("expected 250 entries, got %d", len(entries))
+	}
+	if entries[0].Text != "prompt 249" {
+		t.Errorf("expected newest 'prompt 249' first, got %q", entries[0].Text)
+	}
+}
+
+// TestScanPromptHistoryFromDirEmpty verifies an empty directory returns nil.
+func TestScanPromptHistoryFromDirEmpty(t *testing.T) {
+	app := &App{}
+	dir := t.TempDir()
+	entries, err := app.scanPromptHistoryFromDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries, got %d", len(entries))
+	}
+}
+
+// TestScanPromptHistoryCacheHit verifies that ScanPromptHistory returns nil
+// on cache hit (nonce matches).
+func TestScanPromptHistoryCacheHit(t *testing.T) {
+	app := &App{tabs: map[string]*WorkspaceTab{}}
+	result, err := app.ScanPromptHistory("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonce := result.Nonce
+	if nonce == "" {
+		t.Error("expected a non-empty nonce on first call")
+	}
+
+	// Second call with the same nonce should be a cache hit (nil entries).
+	result2, err := app.ScanPromptHistory(nonce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result2.Entries != nil {
+		t.Error("expected nil entries on cache hit")
+	}
+	if result2.Nonce != nonce {
+		t.Errorf("expected nonce %q unchanged, got %q", nonce, result2.Nonce)
+	}
+}
+
+func TestScanPromptHistoryCacheIsScopedBySessionDir(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	pathA := filepath.Join(dirA, "a.jsonl")
+	pathB := filepath.Join(dirB, "b.jsonl")
+	if err := os.WriteFile(pathA, []byte(`{"role":"user","content":"workspace A"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pathB, []byte(`{"role":"user","content":"workspace B"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	ctrlA := control.New(control.Options{SessionDir: dirA, SessionPath: pathA, Label: "test"})
+	ctrlB := control.New(control.Options{SessionDir: dirB, SessionPath: pathB, Label: "test"})
+	defer ctrlA.Close()
+	defer ctrlB.Close()
+
+	app.setTestCtrl(ctrlA, "")
+	first, err := app.ScanPromptHistory("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Entries) != 1 || first.Entries[0].Text != "workspace A" {
+		t.Fatalf("first entries = %+v, want workspace A", first.Entries)
+	}
+
+	app.setTestCtrl(ctrlB, "")
+	second, err := app.ScanPromptHistory(first.Nonce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Entries == nil {
+		t.Fatal("expected rescan after session dir changes, got cache hit")
+	}
+	if len(second.Entries) != 1 || second.Entries[0].Text != "workspace B" {
+		t.Fatalf("second entries = %+v, want workspace B", second.Entries)
+	}
+}
+
+func TestScanPromptHistoryCacheIsScopedBySessionPath(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "a.jsonl")
+	pathB := filepath.Join(dir, "b.jsonl")
+	if err := os.WriteFile(pathA, []byte(`{"role":"user","content":"session A"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pathB, []byte(`{"role":"user","content":"session B"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	ctrlA := control.New(control.Options{SessionDir: dir, SessionPath: pathA, Label: "test"})
+	ctrlB := control.New(control.Options{SessionDir: dir, SessionPath: pathB, Label: "test"})
+	defer ctrlA.Close()
+	defer ctrlB.Close()
+
+	app.setTestCtrl(ctrlA, "")
+	first, err := app.ScanPromptHistory("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Entries) != 2 || first.Entries[0].Text != "session A" || first.Entries[1].Text != "session B" {
+		t.Fatalf("first entries = %+v, want session A followed by session B", first.Entries)
+	}
+
+	app.setTestCtrl(ctrlB, "")
+	second, err := app.ScanPromptHistory(first.Nonce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Entries == nil {
+		t.Fatal("expected rescan after session path changes, got cache hit")
+	}
+	if len(second.Entries) != 2 || second.Entries[0].Text != "session B" || second.Entries[1].Text != "session A" {
+		t.Fatalf("second entries = %+v, want session B followed by session A", second.Entries)
 	}
 }

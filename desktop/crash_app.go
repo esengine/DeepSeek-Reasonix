@@ -11,8 +11,8 @@ import (
 	"strings"
 )
 
-// crash_app.go is the crash/feedback reporting surface. Reports are sent only on
-// an explicit user click in the frontend crash overlay — never automatically.
+// crash_app.go is the crash/feedback/performance reporting surface. Reports are
+// sent only on an explicit user click in the frontend UI — never automatically.
 
 var crashEndpoint = "https://crash.reasonix.io/v1/report"
 
@@ -27,6 +27,7 @@ var (
 	secretKeyValuePattern = regexp.MustCompile(`(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization|secret|password|passwd|pwd|token)\b\s*[:=]\s*(?:Bearer\s+)?['"]?[^'"\s,;]+['"]?`)
 	bearerTokenPattern    = regexp.MustCompile(`(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{16,}`)
 	explicitKeyPattern    = regexp.MustCompile(`\b(?:sk|rk)-(?:proj-)?[A-Za-z0-9_-]{16,}\b`)
+	envIdentifierPattern  = regexp.MustCompile(`\b[A-Z][A-Z0-9_]*(?:API[_-]?KEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY|SECRET|TOKEN|PASSWORD|PASSWD|PWD)[A-Z0-9_]*\b`)
 	jwtPattern            = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b`)
 	longHexPattern        = regexp.MustCompile(`\b[0-9a-fA-F]{32,}\b`)
 	longBase64Pattern     = regexp.MustCompile(`[A-Za-z0-9+/]{40,}={0,2}`)
@@ -42,6 +43,7 @@ func scrubSensitiveText(s string) string {
 	s = emailPattern.ReplaceAllString(s, "[redacted-email]")
 	s = bearerTokenPattern.ReplaceAllString(s, "Bearer [redacted]")
 	s = secretKeyValuePattern.ReplaceAllString(s, "${1}=[redacted]")
+	s = envIdentifierPattern.ReplaceAllString(s, "[redacted-env]")
 	s = jwtPattern.ReplaceAllString(s, "[redacted-jwt]")
 	s = explicitKeyPattern.ReplaceAllString(s, "[redacted-key]")
 	s = longHexPattern.ReplaceAllString(s, "[redacted-hex]")
@@ -100,7 +102,7 @@ type frontendCrashPayload struct {
 
 func normalizeReportKind(kind string) (string, bool) {
 	switch strings.TrimSpace(kind) {
-	case "crash", "exception", "feedback":
+	case "crash", "exception", "feedback", "performance", "bot":
 		return strings.TrimSpace(kind), true
 	default:
 		return "", false
@@ -165,6 +167,28 @@ func topFrameFromStack(stack string) string {
 	return ""
 }
 
+func nativeResourceContext() string {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	mb := func(n uint64) string {
+		return fmt.Sprintf("%.1f MB", float64(n)/1024/1024)
+	}
+	return strings.Join([]string{
+		"go heap alloc: " + mb(m.Alloc),
+		"go heap sys: " + mb(m.HeapSys),
+		"go total sys: " + mb(m.Sys),
+		fmt.Sprintf("goroutines: %d", runtime.NumGoroutine()),
+		fmt.Sprintf("gc cycles: %d", m.NumGC),
+	}, "\n")
+}
+
+func appendNativeResourceContext(kind, message string) string {
+	if kind != "performance" {
+		return message
+	}
+	return sanitizeCrashText(message+"\n\n--- native runtime context ---\n"+nativeResourceContext(), maxCrashDetailBytes)
+}
+
 func crashReportFromDetail(kind, detail string) (crashReport, error) {
 	rawKind := kind
 	kind, ok := normalizeReportKind(kind)
@@ -205,6 +229,7 @@ func crashReportFromDetail(kind, detail string) (crashReport, error) {
 		if r.Source == "" {
 			r.Source = "frontend"
 		}
+		r.Message = appendNativeResourceContext(r.Kind, r.Message)
 		return r, nil
 	}
 
@@ -212,6 +237,7 @@ func crashReportFromDetail(kind, detail string) (crashReport, error) {
 	r.Source = "legacy"
 	r.Label = kind
 	r.Message = sanitizeCrashText(detail, maxCrashDetailBytes)
+	r.Message = appendNativeResourceContext(r.Kind, r.Message)
 	return r, nil
 }
 

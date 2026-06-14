@@ -45,6 +45,23 @@ func TestTaskToolReturnsSubAgentFinalAnswer(t *testing.T) {
 	}
 }
 
+func TestTaskToolInheritsReasoningLanguageFromContext(t *testing.T) {
+	sub := &mockProvider{name: "sub", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "done"},
+		{Type: provider.ChunkDone},
+	}}
+	task := newTestTaskTool(t, sub, tool.NewRegistry(), "sys", "", "", nil)
+
+	ctx := WithReasoningLanguagePreference(testTaskContext(), "zh")
+	if _, err := task.Execute(ctx, []byte(`{"prompt":"inspect auth"}`)); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	got := lastUser(sub.lastReq)
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "Simplified Chinese") || !strings.HasSuffix(got, "inspect auth") {
+		t.Fatalf("sub-agent user = %q, want reasoning-language-prefixed prompt", got)
+	}
+}
+
 // TestTaskToolFiltersTools verifies the whitelist behaviour: when the caller
 // names a subset of tools, the sub-agent's registry contains exactly that set
 // with subagent/skill meta-tools stripped to prevent recursive delegation.

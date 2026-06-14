@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,14 +31,17 @@ import (
 	"reasonix/internal/billing"
 	"reasonix/internal/boot"
 	"reasonix/internal/builtinmcp"
+	"reasonix/internal/codegraph"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 	"reasonix/internal/fileref"
 	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/i18n"
 	"reasonix/internal/mcpdiag"
 	"reasonix/internal/memory"
+	"reasonix/internal/netclient"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/skill"
@@ -54,6 +58,26 @@ const eventChannel = "agent:event"
 // reopen behavior remains predictable on every platform.
 const singleInstanceID = "com.reasonix.desktop"
 
+var updateBuiltInCodegraph = codegraph.UpdateWithClient
+
+// PromptHistoryEntry is one user prompt extracted from a session JSONL file.
+// The frontend uses these for ↑/↓ prompt-history navigation.
+type PromptHistoryEntry struct {
+	Text        string `json:"text"`
+	At          int64  `json:"at"` // unix ms
+	SessionPath string `json:"sessionPath"`
+	Turn        int    `json:"turn"`
+}
+
+// PromptHistoryResult is returned as one Wails value. It carries one loaded tape
+// segment plus the cursor needed to keep walking toward older prompts.
+type PromptHistoryResult struct {
+	Entries     []PromptHistoryEntry `json:"entries"`
+	Nonce       string               `json:"nonce"`
+	OlderCursor string               `json:"olderCursor,omitempty"`
+	HasOlder    bool                 `json:"hasOlder"`
+}
+
 // App is the Wails-bound application object: the desktop frontend's command
 // surface. Its exported methods (Submit/Cancel/Approve/…) are generated into JS
 // bindings. The app manages multiple WorkspaceTabs — each with its own controller
@@ -65,11 +89,16 @@ type App struct {
 
 	// mu protects the tab map, tabOrder, activeTabID, and per-tab fields that are read
 	// from bound methods. All bound methods that touch a controller use activeCtrl().
-	mu          sync.RWMutex
-	tabs        map[string]*WorkspaceTab
-	tabOrder    []string
-	activeTabID string
-	readyHook   func()
+	mu                     sync.RWMutex
+	tabs                   map[string]*WorkspaceTab
+	tabOrder               []string
+	activeTabID            string
+	readyHook              func()
+	projectTreeChangedHook func()
+
+	// detachedSessions keeps live session runtimes whose visible tab was closed.
+	// It is process-local by design: shutdown closes every detached controller.
+	detachedSessions map[string]*WorkspaceTab
 
 	// tabsSaveMu serializes writes to desktop-tabs.json and its fixed .tmp path.
 	tabsSaveMu             sync.Mutex
@@ -85,7 +114,18 @@ type App struct {
 	botInstalls map[string]*botInstallSession
 	botRuntime  *desktopBotRuntime
 
+	builtInMCPUpdatesMu sync.RWMutex
+	builtInMCPUpdates   map[string]BuiltInMCPUpdateStatus
+
 	metrics atomic.Pointer[metricsAggregator] // non-nil only when desktop.metrics is opted in; swapped live by SetDesktopMetrics
+
+	runtimeEvents asyncRuntimeEmitter
+
+	// promptHistoryTape is a lazy, cursor-addressed view of prompt history. It
+	// stores session order and per-session parsed entries only after that session is
+	// reached by ↑ navigation. See ScanPromptHistory.
+	promptHistoryMu   sync.Mutex
+	promptHistoryTape *promptHistoryTape
 }
 
 // mediaTokenEntry holds metadata for a workspace media file served via temporary URL.
@@ -254,7 +294,13 @@ func (a *App) workspaceMediaMiddleware() func(http.Handler) http.Handler {
 // NewApp constructs the bound object. Tabs are restored in startup from the
 // last session's desktop-tabs.json.
 func NewApp() *App {
-	return &App{tabs: map[string]*WorkspaceTab{}, mediaTokens: newMediaTokenStore(), botInstalls: map[string]*botInstallSession{}, botRuntime: newDesktopBotRuntime()}
+	return &App{
+		tabs:             map[string]*WorkspaceTab{},
+		detachedSessions: map[string]*WorkspaceTab{},
+		mediaTokens:      newMediaTokenStore(),
+		botInstalls:      map[string]*botInstallSession{},
+		botRuntime:       newDesktopBotRuntime(),
+	}
 }
 
 func (a *App) bootContext() context.Context {
@@ -284,6 +330,7 @@ func (a *App) startup(ctx context.Context) {
 
 	go a.restoreOrBuildTabs()
 	a.goSafe("refreshBotRuntime", a.refreshBotRuntime)
+	a.goSafe("checkBuiltInMCPUpdates", a.checkBuiltInMCPUpdates)
 	a.goSafe("sendStartupPing", a.sendStartupPing)
 	a.goSafe("flushMetrics", a.flushMetrics)
 	a.goSafe("flushPendingCrash", a.flushPendingCrash)
@@ -469,10 +516,7 @@ func (a *App) createTabEntryWithID(scope, workspaceRoot, topicID, id string) *Wo
 
 func (a *App) snapshotAllTabs() {
 	a.mu.RLock()
-	tabs := make([]*WorkspaceTab, 0, len(a.tabs))
-	for _, t := range a.tabs {
-		tabs = append(tabs, t)
-	}
+	tabs := a.runtimeTabsLocked()
 	a.mu.RUnlock()
 	for _, t := range tabs {
 		if t.Ctrl != nil {
@@ -490,10 +534,7 @@ func (a *App) shutdown(context.Context) {
 	a.saveWindowStateSync()
 
 	a.mu.RLock()
-	tabs := make([]*WorkspaceTab, 0, len(a.tabs))
-	for _, t := range a.tabs {
-		tabs = append(tabs, t)
-	}
+	tabs := a.runtimeTabsLocked()
 	a.mu.RUnlock()
 	for _, t := range tabs {
 		if t.Ctrl != nil {
@@ -656,10 +697,7 @@ func (a *App) ApproveTab(tabID, id string, allow, session, persist bool) {
 // "waiting" status with no way to answer — and no way to stop.
 func (a *App) ReplayPendingPrompts() {
 	a.mu.RLock()
-	tabs := make([]*WorkspaceTab, 0, len(a.tabs))
-	for _, t := range a.tabs {
-		tabs = append(tabs, t)
-	}
+	tabs := a.runtimeTabsLocked()
 	a.mu.RUnlock()
 	for _, t := range tabs {
 		if t.Ctrl != nil {
@@ -865,6 +903,7 @@ func (a *App) NewSession() error {
 		return err
 	}
 	a.persistTabSessionPath(tab, ctrl.SessionPath())
+	a.invalidatePromptHistoryCache()
 	return nil
 }
 
@@ -886,11 +925,101 @@ func (a *App) ClearSession() error {
 	if ctrl == nil {
 		return workspaceNotReadyErr(tab)
 	}
+	if controllerHasActiveRuntimeWork(ctrl) {
+		return a.clearActiveSessionRuntime(tab, ctrl)
+	}
 	if err := ctrl.ClearSession(); err != nil {
 		return err
 	}
 	a.persistTabSessionPath(tab, ctrl.SessionPath())
+	a.invalidatePromptHistoryCache()
 	return nil
+}
+
+func (a *App) clearActiveSessionRuntime(tab *WorkspaceTab, oldCtrl *control.Controller) error {
+	if tab == nil || oldCtrl == nil {
+		return fmt.Errorf("workspace is still starting")
+	}
+	oldPath := oldCtrl.SessionPath()
+	oldSink := tab.sink
+	if oldSink != nil {
+		oldSink.tabID = detachedRuntimeTabID(oldPath)
+		oldSink.ctx = nil
+	}
+	if oldCtrl.Running() {
+		oldCtrl.Cancel()
+		if err := waitControllerStopped(oldCtrl); err != nil {
+			return err
+		}
+	}
+	destroy := oldCtrl.BeginDestroySession(oldPath)
+	waitDestroyHandles([]control.SessionDestroyHandle{destroy})
+
+	newSink := &tabEventSink{tabID: tab.ID, app: a, ctx: a.ctx}
+	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
+		Model:          tab.model,
+		RequireKey:     false,
+		Sink:           newSink,
+		WorkspaceRoot:  tab.WorkspaceRoot,
+		SessionDir:     tabSessionDir(tab),
+		EffortOverride: cloneStringPtr(tab.effort),
+		TokenMode:      currentTabTokenMode(tab),
+	})
+	if err != nil {
+		finishDestroyHandles([]control.SessionDestroyHandle{destroy})
+		if oldSink != nil {
+			oldSink.tabID = tab.ID
+			oldSink.ctx = a.ctx
+		}
+		return err
+	}
+	if err := removeDesktopSessionArtifacts(oldPath); err != nil {
+		finishDestroyHandles([]control.SessionDestroyHandle{destroy})
+		newCtrl.Close()
+		return err
+	}
+	finishDestroyHandles([]control.SessionDestroyHandle{destroy})
+	a.bindControllerDisplayRecorder(newCtrl)
+	newCtrl.EnableInteractiveApproval()
+	applyTabModeToController(newCtrl, tab.mode)
+	applyTabToolApprovalModeToController(newCtrl, tab.toolApprovalMode)
+	newCtrl.SetGoal(tab.goal)
+	path := agent.NewSessionPath(newCtrl.SessionDir(), newCtrl.Label())
+	newCtrl.SetSessionPath(path)
+
+	a.mu.Lock()
+	if current := a.tabs[tab.ID]; current == tab {
+		tab.Ctrl = newCtrl
+		tab.sink = newSink
+		tab.SessionPath = path
+		tab.Label = newCtrl.Label()
+		tab.Ready = true
+		tab.StartupErr = ""
+		a.saveTabsLocked()
+	}
+	a.mu.Unlock()
+	oldCtrl.Close()
+	a.emitProjectTreeChanged()
+	return nil
+}
+
+func removeDesktopSessionArtifacts(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	paths := []string{path, agent.BranchMetaPath(path)}
+	if strings.HasSuffix(path, ".jsonl") {
+		paths = append(paths, strings.TrimSuffix(path, ".jsonl")+".ckpt")
+	}
+	for _, p := range paths {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		if err := os.RemoveAll(p); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return agent.DeleteSubagentsByParent(filepath.Dir(path), agent.BranchID(path))
 }
 
 // CheckpointMeta summarises one rewind point (a user turn) for the desktop.
@@ -1033,6 +1162,7 @@ func (a *App) Fork(turn int) (TabMeta, error) {
 	if err := agent.SaveBranchMeta(newPath, m); err != nil {
 		return TabMeta{}, err
 	}
+	invalidateTopicSessionIndexForPath(newPath)
 
 	a.mu.Lock()
 	tabID := a.newUniqueTabIDLocked()
@@ -1227,39 +1357,262 @@ func sessionMetaFromInfo(s agent.SessionInfo, title string, current, open bool, 
 	}
 }
 
-// DeleteSession moves a saved session to the local trash. It refuses any open
-// session because tab auto-save would recreate or append to the file later.
+// DeleteSession moves a saved session to the local trash. If the session still
+// has an in-process runtime, the runtime is cancelled and removed first so
+// autosave cannot recreate or append to the deleted file later.
 func (a *App) DeleteSession(path string) error {
 	dir := a.activeSessionDir()
 	sessionPath, key, err := validateSessionPath(dir, path)
 	if err != nil {
 		return err
 	}
-	if _, ok := a.openSessionPaths(dir)[sessionPath]; ok {
-		return errActiveSession
-	}
-	var destroys []control.SessionDestroyHandle
-	err = trashSessionArtifactsBeforeMove(dir, sessionPath, key, func() {
-		destroys = a.beginDestroySessionJobs(dir, sessionPath)
-	})
-	if err != nil {
-		if len(destroys) > 0 {
-			go runDestroyHandles(destroys)
-		}
+	if err := validateSessionTrashTarget(dir, sessionPath, key); err != nil {
 		return err
 	}
-	if len(destroys) > 0 {
-		go runDestroyHandles(destroys)
+	removed, fallback := a.removeSessionRuntimeBindings(dir, sessionPath)
+	if err := prepareRemovedSessionRuntimes(removed); err != nil {
+		a.closeRemovedSessionRuntimes(removed)
+		return err
+	}
+	err = trashSessionArtifactsBeforeMove(dir, sessionPath, key, func() {
+		destroys := a.destroyHandlesForSession(dir, sessionPath, removed)
+		waitDestroyHandles(destroys)
+		finishDestroyHandles(destroys)
+	})
+	if err != nil {
+		a.closeRemovedSessionRuntimes(removed)
+		return err
+	}
+	a.closeRemovedSessionRuntimes(removed)
+	if fallback.needs {
+		if err := a.openFallbackRuntime(fallback); err != nil {
+			return err
+		}
 	}
 	a.emitProjectTreeChanged()
+	a.invalidatePromptHistoryCache()
 	return nil
+}
+
+type removedSessionRuntime struct {
+	tab           *WorkspaceTab
+	ctrl          *control.Controller
+	sink          *tabEventSink
+	sessionDir    string
+	sessionPath   string
+	scope         string
+	workspaceRoot string
+	topicID       string
+}
+
+type fallbackRuntimeTarget struct {
+	needs         bool
+	scope         string
+	workspaceRoot string
+	topicID       string
+}
+
+func (a *App) removeSessionRuntimeBindings(dir, sessionPath string) ([]removedSessionRuntime, fallbackRuntimeTarget) {
+	var removed []removedSessionRuntime
+	var fallback fallbackRuntimeTarget
+
+	a.mu.Lock()
+	for id, tab := range a.tabs {
+		if !tabMatchesSession(tab, dir, sessionPath) {
+			continue
+		}
+		if len(removed) == 0 {
+			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot, topicID: tab.TopicID}
+		}
+		removed = append(removed, removedRuntimeFromTab(tab, dir, sessionPath))
+		delete(a.tabs, id)
+		a.removeTabOrderLocked(id)
+		if a.activeTabID == id {
+			a.activeTabID = ""
+		}
+	}
+	for key, tab := range a.detachedSessions {
+		if !tabMatchesSession(tab, dir, sessionPath) {
+			continue
+		}
+		if len(removed) == 0 {
+			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot, topicID: tab.TopicID}
+		}
+		removed = append(removed, removedRuntimeFromTab(tab, dir, sessionPath))
+		delete(a.detachedSessions, key)
+	}
+	if a.activeTabID == "" && len(a.tabOrder) > 0 {
+		a.activeTabID = a.tabOrder[0]
+	}
+	fallback.needs = len(removed) > 0 && len(a.tabs) == 0
+	a.saveTabsLocked()
+	a.mu.Unlock()
+
+	return removed, fallback
+}
+
+func (a *App) removeTopicRuntimeBindings(topicID string) ([]removedSessionRuntime, fallbackRuntimeTarget) {
+	var removed []removedSessionRuntime
+	var fallback fallbackRuntimeTarget
+
+	a.mu.Lock()
+	for id, tab := range a.tabs {
+		if tab == nil || tab.TopicID != topicID {
+			continue
+		}
+		sessionDir := tabSessionDir(tab)
+		sessionPath := canonicalTabSessionPath(tab.currentSessionPath())
+		if len(removed) == 0 {
+			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot}
+		}
+		removed = append(removed, removedRuntimeFromTab(tab, sessionDir, sessionPath))
+		delete(a.tabs, id)
+		a.removeTabOrderLocked(id)
+		if a.activeTabID == id {
+			a.activeTabID = ""
+		}
+	}
+	for key, tab := range a.detachedSessions {
+		if tab == nil || tab.TopicID != topicID {
+			continue
+		}
+		sessionDir := tabSessionDir(tab)
+		sessionPath := canonicalTabSessionPath(tab.currentSessionPath())
+		if len(removed) == 0 {
+			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot}
+		}
+		removed = append(removed, removedRuntimeFromTab(tab, sessionDir, sessionPath))
+		delete(a.detachedSessions, key)
+	}
+	if a.activeTabID == "" && len(a.tabOrder) > 0 {
+		a.activeTabID = a.tabOrder[0]
+	}
+	fallback.needs = len(removed) > 0 && len(a.tabs) == 0
+	a.saveTabsLocked()
+	a.mu.Unlock()
+
+	return removed, fallback
+}
+
+func removedRuntimeFromTab(tab *WorkspaceTab, dir, sessionPath string) removedSessionRuntime {
+	return removedSessionRuntime{
+		tab:           tab,
+		ctrl:          tab.Ctrl,
+		sink:          tab.sink,
+		sessionDir:    dir,
+		sessionPath:   sessionPath,
+		scope:         tab.Scope,
+		workspaceRoot: tab.WorkspaceRoot,
+		topicID:       tab.TopicID,
+	}
+}
+
+func tabMatchesSession(tab *WorkspaceTab, dir, sessionPath string) bool {
+	if tab == nil || tabSessionDir(tab) != dir {
+		return false
+	}
+	currentPath, _, err := validateSessionPath(dir, tab.currentSessionPath())
+	return err == nil && currentPath == sessionPath
+}
+
+func prepareRemovedSessionRuntimes(removed []removedSessionRuntime) error {
+	for _, item := range removed {
+		if item.sink != nil {
+			item.sink.ctx = nil
+		}
+		if item.ctrl == nil {
+			continue
+		}
+		if item.ctrl.Running() {
+			item.ctrl.Cancel()
+			if err := waitControllerStopped(item.ctrl); err != nil {
+				return err
+			}
+		}
+		if err := item.ctrl.Snapshot(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func waitControllerStopped(ctrl *control.Controller) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for ctrl.Running() {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out waiting for cancelled session work to stop")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return nil
+}
+
+func (a *App) destroyHandlesForSession(dir, sessionPath string, removed []removedSessionRuntime) []control.SessionDestroyHandle {
+	destroys := a.beginDestroySessionJobs(dir, sessionPath)
+	for _, item := range removed {
+		if item.ctrl == nil || item.sessionDir != dir || item.sessionPath != sessionPath {
+			continue
+		}
+		destroys = append(destroys, item.ctrl.BeginDestroySession(sessionPath))
+	}
+	return destroys
+}
+
+func waitDestroyHandles(destroys []control.SessionDestroyHandle) {
+	for _, destroy := range destroys {
+		if destroy.Wait != nil {
+			destroy.Wait()
+		}
+	}
+}
+
+func finishDestroyHandles(destroys []control.SessionDestroyHandle) {
+	for _, destroy := range destroys {
+		if destroy.Finish != nil {
+			destroy.Finish()
+		}
+	}
+}
+
+func (a *App) closeRemovedSessionRuntimes(removed []removedSessionRuntime) {
+	seen := map[*control.Controller]bool{}
+	for _, item := range removed {
+		if item.ctrl == nil || seen[item.ctrl] {
+			continue
+		}
+		seen[item.ctrl] = true
+		item.ctrl.Close()
+	}
+}
+
+func (a *App) openFallbackRuntime(target fallbackRuntimeTarget) error {
+	scope := target.scope
+	root := target.workspaceRoot
+	topicID := strings.TrimSpace(target.topicID)
+	if scope == "global" {
+		root = ""
+	}
+	if topicID == "" {
+		topic, err := a.CreateTopic(scope, root, "")
+		if err != nil {
+			return err
+		}
+		topicID = topic.ID
+	}
+	var err error
+	if scope == "global" {
+		_, err = a.OpenGlobalTab(topicID)
+	} else {
+		_, err = a.OpenProjectTab(root, topicID)
+	}
+	return err
 }
 
 func (a *App) beginDestroySessionJobs(dir, sessionPath string) []control.SessionDestroyHandle {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	var destroys []control.SessionDestroyHandle
-	for _, tab := range a.tabs {
+	for _, tab := range a.runtimeTabsLocked() {
 		if tab == nil || tab.Ctrl == nil || tabSessionDir(tab) != dir {
 			continue
 		}
@@ -1268,21 +1621,10 @@ func (a *App) beginDestroySessionJobs(dir, sessionPath string) []control.Session
 	return destroys
 }
 
-func runDestroyHandles(destroys []control.SessionDestroyHandle) {
-	for _, destroy := range destroys {
-		if destroy.Wait != nil {
-			destroy.Wait()
-		}
-		if destroy.Finish != nil {
-			destroy.Finish()
-		}
-	}
-}
-
 func (a *App) openSessionPaths(dir string) map[string]struct{} {
 	a.mu.RLock()
-	paths := make([]string, 0, len(a.tabs))
-	for _, tab := range a.tabs {
+	paths := make([]string, 0, len(a.tabs)+len(a.detachedSessions))
+	for _, tab := range a.runtimeTabsLocked() {
 		if tab != nil {
 			paths = append(paths, tab.currentSessionPath())
 		}
@@ -1334,13 +1676,14 @@ func (a *App) RestoreSession(path string) error {
 		return err
 	}
 	a.emitProjectTreeChanged()
+	a.invalidatePromptHistoryCache()
 	return nil
 }
 
 func (a *App) sessionDestroying(dir, sessionPath string) bool {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	for _, tab := range a.tabs {
+	for _, tab := range a.runtimeTabsLocked() {
 		if tab == nil || tab.Ctrl == nil || tabSessionDir(tab) != dir {
 			continue
 		}
@@ -1358,13 +1701,21 @@ func (a *App) PurgeTrashedSession(path string) error {
 	if err != nil {
 		return err
 	}
-	return purgeTrashedSessionFile(dir, path)
+	if err := purgeTrashedSessionFile(dir, path); err != nil {
+		return err
+	}
+	a.invalidatePromptHistoryCache()
+	return nil
 }
 
 // RenameSession sets a custom display name for a session (empty clears it back to
 // the preview). It only affects the history panel; the file on disk is unchanged.
 func (a *App) RenameSession(path, title string) error {
-	return setSessionTitle(a.activeSessionDir(), path, title)
+	if err := setSessionTitle(a.activeSessionDir(), path, title); err != nil {
+		return err
+	}
+	a.invalidatePromptHistoryCache()
+	return nil
 }
 
 // ResumeSession snapshots the current conversation, then loads the session at
@@ -1375,10 +1726,9 @@ func (a *App) ResumeSession(path string) ([]HistoryMessage, error) {
 	return a.ResumeSessionForTab("", path)
 }
 
-// ResumeSessionForTab is the tab-scoped form of ResumeSession. History rows
-// carry scope/workspace/topic metadata, so callers that opened or selected a
-// matching tab should resume on that exact controller instead of whichever tab is
-// active by the time the async call reaches the backend.
+// ResumeSessionForTab is the tab-scoped form of ResumeSession. A saved session
+// path is a runtime identity, so changing to a different path must replace the
+// tab's controller binding rather than mutating the current controller in place.
 func (a *App) ResumeSessionForTab(tabID, path string) ([]HistoryMessage, error) {
 	tab := a.tabByID(tabID)
 	if tab == nil || tab.Ctrl == nil {
@@ -1389,14 +1739,81 @@ func (a *App) ResumeSessionForTab(tabID, path string) ([]HistoryMessage, error) 
 	if err != nil {
 		return nil, err
 	}
-	loaded, err := agent.LoadSession(sessionPath)
-	if err != nil {
+	if _, err := agent.LoadSession(sessionPath); err != nil {
 		return nil, err
 	}
-	_ = ctrl.Snapshot() // persist the current session before switching away
-	ctrl.Resume(loaded, sessionPath)
-	a.rememberTabSessionPath(tab, sessionPath)
-	return a.HistoryForTab(tabID), nil
+	if sessionRuntimeKey(tab.currentSessionPath()) == sessionRuntimeKey(sessionPath) {
+		return a.HistoryForTab(tabID), nil
+	}
+
+	if err := a.rebindTabToSessionPath(tab, sessionPath); err != nil {
+		return nil, err
+	}
+	return a.HistoryForTab(tab.ID), nil
+}
+
+func (a *App) rebindTabToSessionPath(tab *WorkspaceTab, sessionPath string) error {
+	if tab == nil {
+		return fmt.Errorf("tab is not ready")
+	}
+	sessionPath = canonicalTabSessionPath(sessionPath)
+	if sessionPath == "" {
+		return fmt.Errorf("session path is required")
+	}
+	if _, err := agent.LoadSession(sessionPath); err != nil {
+		return err
+	}
+	if sessionRuntimeKey(tab.currentSessionPath()) == sessionRuntimeKey(sessionPath) {
+		return nil
+	}
+
+	ctrl := tab.Ctrl
+	if ctrl == nil {
+		a.mu.Lock()
+		tab.SessionPath = sessionPath
+		tab.Ready = false
+		tab.StartupErr = ""
+		tab.ActivityStatus = ""
+		tab.sink = &tabEventSink{tabID: tab.ID, app: a, ctx: a.ctx}
+		a.saveTabsLocked()
+		a.mu.Unlock()
+		a.buildTabController(tab)
+		if tab.Ctrl == nil {
+			if tab.StartupErr != "" {
+				return fmt.Errorf("resume session: %s", tab.StartupErr)
+			}
+			return fmt.Errorf("resume session: controller was not built")
+		}
+		return nil
+	}
+
+	_ = ctrl.Snapshot() // persist the current session before switching the view.
+	if tab.hasActiveRuntimeWork() {
+		if !a.detachRuntimeForReplacement(tab) {
+			return fmt.Errorf("current session runtime cannot be detached")
+		}
+	} else {
+		ctrl.Close()
+	}
+
+	a.mu.Lock()
+	tab.Ctrl = nil
+	tab.SessionPath = sessionPath
+	tab.Ready = false
+	tab.StartupErr = ""
+	tab.ActivityStatus = ""
+	tab.sink = &tabEventSink{tabID: tab.ID, app: a, ctx: a.ctx}
+	a.saveTabsLocked()
+	a.mu.Unlock()
+
+	a.buildTabController(tab)
+	if tab.Ctrl == nil {
+		if tab.StartupErr != "" {
+			return fmt.Errorf("resume session: %s", tab.StartupErr)
+		}
+		return fmt.Errorf("resume session: controller was not built")
+	}
+	return nil
 }
 
 // PreviewSession reads a saved session for display only. It does not snapshot or
@@ -1407,6 +1824,465 @@ func (a *App) PreviewSession(path string) ([]HistoryMessage, error) {
 		return nil, err
 	}
 	return previewSessionMessages(sessionDir, sessionPath)
+}
+
+// invalidatePromptHistoryCache resets the lazy prompt-history tape so the next
+// ScanPromptHistory call rebuilds session order and reloads sessions on demand.
+// Called from every session-mutating path: NewSession, ClearSession,
+// DeleteSession, RestoreSession, PurgeTrashedSession, RenameSession.
+func (a *App) invalidatePromptHistoryCache() {
+	a.promptHistoryMu.Lock()
+	a.promptHistoryTape = nil
+	a.promptHistoryMu.Unlock()
+}
+
+const (
+	promptHistoryPageLimit    = 50
+	promptHistoryMaxPageLimit = 200
+)
+
+type promptHistoryRequest struct {
+	Nonce  string `json:"nonce,omitempty"`
+	Cursor string `json:"cursor,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+	legacy bool
+}
+
+type promptHistoryCursor struct {
+	Nonce   string `json:"n"`
+	Session int    `json:"s"`
+	Offset  int    `json:"o"`
+}
+
+type promptHistoryTape struct {
+	nonce       string
+	dir         string
+	currentPath string
+	displays    sessionDisplayMap
+	sessions    []promptHistorySessionFile
+	loaded      map[string][]PromptHistoryEntry
+}
+
+// ScanPromptHistory returns the next prompt-history tape segment. The request is
+// a JSON string so the Wails binding stays one-argument while the protocol can
+// carry a cursor and page limit. Older clients may still pass a bare nonce; that
+// path keeps the old cache-hit behavior.
+func (a *App) ScanPromptHistory(rawRequest string) (PromptHistoryResult, error) {
+	req := parsePromptHistoryRequest(rawRequest)
+	dir := a.activeSessionDir()
+	sessionPath := a.activeSessionPath(dir)
+
+	a.promptHistoryMu.Lock()
+	tape, err := a.promptHistoryTapeForLocked(dir, sessionPath)
+	if err != nil {
+		a.promptHistoryMu.Unlock()
+		return PromptHistoryResult{}, err
+	}
+	if req.legacy && req.Nonce != "" && req.Nonce == tape.nonce {
+		a.promptHistoryMu.Unlock()
+		return PromptHistoryResult{Entries: nil, Nonce: req.Nonce}, nil
+	}
+	result := tape.readOlder(req.Cursor, promptHistoryLimit(req.Limit))
+	a.promptHistoryMu.Unlock()
+	return result, nil
+}
+
+func parsePromptHistoryRequest(raw string) promptHistoryRequest {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return promptHistoryRequest{}
+	}
+	if strings.HasPrefix(raw, "{") {
+		var req promptHistoryRequest
+		if err := json.Unmarshal([]byte(raw), &req); err == nil {
+			return req
+		}
+	}
+	return promptHistoryRequest{Nonce: raw, legacy: true}
+}
+
+func promptHistoryLimit(limit int) int {
+	if limit <= 0 {
+		return promptHistoryPageLimit
+	}
+	if limit > promptHistoryMaxPageLimit {
+		return promptHistoryMaxPageLimit
+	}
+	return limit
+}
+
+func (a *App) promptHistoryTapeForLocked(dir, sessionPath string) (*promptHistoryTape, error) {
+	currentPath := ""
+	if path, _, err := validateSessionPath(dir, sessionPath); err == nil {
+		currentPath = path
+	}
+	if a.promptHistoryTape != nil && a.promptHistoryTape.dir == dir && a.promptHistoryTape.currentPath == currentPath {
+		return a.promptHistoryTape, nil
+	}
+	tape, err := newPromptHistoryTape(dir, currentPath)
+	if err != nil {
+		return nil, err
+	}
+	a.promptHistoryTape = tape
+	return tape, nil
+}
+
+func (a *App) scanPromptHistoryFromDir(dir string) ([]PromptHistoryEntry, error) {
+	tape, err := newPromptHistoryTape(dir, "")
+	if err != nil {
+		return nil, err
+	}
+	return tape.readAll(), nil
+}
+
+func newPromptHistoryTape(dir, currentPath string) (*promptHistoryTape, error) {
+	tape := &promptHistoryTape{
+		nonce:       fmt.Sprintf("%d", time.Now().UnixNano()),
+		dir:         dir,
+		currentPath: currentPath,
+		displays:    loadSessionDisplays(dir),
+		loaded:      map[string][]PromptHistoryEntry{},
+	}
+	sessions, err := promptHistorySessionFiles(dir)
+	if err != nil {
+		return nil, err
+	}
+	if currentPath != "" {
+		currentPath = filepath.Clean(currentPath)
+		currentSession := promptHistorySessionFile{}
+		currentIndex := -1
+		for i, session := range sessions {
+			if filepath.Clean(session.path) == currentPath {
+				currentSession = session
+				currentIndex = i
+				break
+			}
+		}
+		if currentIndex >= 0 {
+			sessions = append([]promptHistorySessionFile{currentSession}, append(sessions[:currentIndex], sessions[currentIndex+1:]...)...)
+		} else if info, err := os.Stat(currentPath); err == nil && !info.IsDir() {
+			sessions = append([]promptHistorySessionFile{{
+				path: currentPath,
+			}}, sessions...)
+		}
+	}
+	tape.sessions = sessions
+	return tape, nil
+}
+
+func (t *promptHistoryTape) readOlder(cursor string, limit int) PromptHistoryResult {
+	c := promptHistoryCursor{Nonce: t.nonce}
+	if decoded, ok := decodePromptHistoryCursor(cursor); ok && decoded.Nonce == t.nonce {
+		c = decoded
+	}
+	if c.Session < 0 {
+		c.Session = 0
+	}
+	if c.Offset < 0 {
+		c.Offset = 0
+	}
+
+	out := make([]PromptHistoryEntry, 0, limit)
+	sessionIndex := c.Session
+	offset := c.Offset
+	for sessionIndex < len(t.sessions) && len(out) < limit {
+		entries, err := t.entriesForSession(sessionIndex)
+		if err != nil || offset >= len(entries) {
+			sessionIndex++
+			offset = 0
+			continue
+		}
+
+		end := min(len(entries), offset+limit-len(out))
+		out = append(out, entries[offset:end]...)
+		offset = end
+		if offset >= len(entries) && len(out) < limit {
+			sessionIndex++
+			offset = 0
+		}
+	}
+
+	if sessionIndex < len(t.sessions) {
+		if entries, ok := t.loaded[t.sessions[sessionIndex].path]; ok && offset >= len(entries) {
+			sessionIndex++
+			offset = 0
+		}
+	}
+	hasOlder := sessionIndex < len(t.sessions)
+	olderCursor := ""
+	if hasOlder {
+		olderCursor = encodePromptHistoryCursor(promptHistoryCursor{Nonce: t.nonce, Session: sessionIndex, Offset: offset})
+	}
+	return PromptHistoryResult{Entries: out, Nonce: t.nonce, OlderCursor: olderCursor, HasOlder: hasOlder}
+}
+
+func (t *promptHistoryTape) readAll() []PromptHistoryEntry {
+	out := []PromptHistoryEntry{}
+	cursor := ""
+	for {
+		page := t.readOlder(cursor, promptHistoryMaxPageLimit)
+		out = append(out, page.Entries...)
+		if !page.HasOlder || page.OlderCursor == "" {
+			return out
+		}
+		cursor = page.OlderCursor
+	}
+}
+
+func (t *promptHistoryTape) entriesForSession(index int) ([]PromptHistoryEntry, error) {
+	if index < 0 || index >= len(t.sessions) {
+		return nil, nil
+	}
+	path := t.sessions[index].path
+	if entries, ok := t.loaded[path]; ok {
+		return entries, nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.loaded[path] = nil
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	entries, err := scanPromptHistoryFile(path, info, sessionDisplayResolverFromMap(t.displays, path))
+	if err != nil {
+		t.loaded[path] = nil
+		return nil, err
+	}
+	t.loaded[path] = entries
+	return entries, nil
+}
+
+func encodePromptHistoryCursor(cursor promptHistoryCursor) string {
+	b, err := json.Marshal(cursor)
+	if err != nil {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func decodePromptHistoryCursor(value string) (promptHistoryCursor, bool) {
+	if strings.TrimSpace(value) == "" {
+		return promptHistoryCursor{}, false
+	}
+	b, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return promptHistoryCursor{}, false
+	}
+	var cursor promptHistoryCursor
+	if err := json.Unmarshal(b, &cursor); err != nil {
+		return promptHistoryCursor{}, false
+	}
+	return cursor, true
+}
+
+func scanPromptHistoryFile(path string, info os.FileInfo, resolveUserContent func(string) string) ([]PromptHistoryEntry, error) {
+	entries, err := collectPromptHistoryEntries(path, info, resolveUserContent)
+	if err != nil {
+		return nil, err
+	}
+	sortPromptHistoryNewestFirst(entries)
+	return entries, nil
+}
+
+type promptHistorySessionFile struct {
+	path string
+}
+
+func promptHistorySessionFiles(dir string) ([]promptHistorySessionFile, error) {
+	infos, err := agent.ListSessionOrder(dir)
+	if err != nil {
+		return nil, err
+	}
+	sessions := make([]promptHistorySessionFile, 0, len(infos))
+	for _, info := range infos {
+		sessions = append(sessions, promptHistorySessionFile{path: info.Path})
+	}
+	return sessions, nil
+}
+
+func promptHistoryEntryNewer(a, b PromptHistoryEntry) bool {
+	if a.At != b.At {
+		return a.At > b.At
+	}
+	if a.SessionPath != b.SessionPath {
+		return a.SessionPath > b.SessionPath
+	}
+	return a.Turn > b.Turn
+}
+
+func sortPromptHistoryNewestFirst(entries []PromptHistoryEntry) {
+	sort.Slice(entries, func(i, j int) bool {
+		return promptHistoryEntryNewer(entries[i], entries[j])
+	})
+}
+
+func collectPromptHistoryEntries(path string, info os.FileInfo, resolveUserContent func(string) string) ([]PromptHistoryEntry, error) {
+	var out []PromptHistoryEntry
+	err := collectJSONLUserPrompts(path, info, resolveUserContent, func(entry PromptHistoryEntry) {
+		out = append(out, entry)
+	})
+	return out, err
+}
+
+func collectJSONLUserPrompts(path string, info os.FileInfo, resolveUserContent func(string) string, emit func(PromptHistoryEntry)) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	fallbackAt := promptHistoryFallbackMillis(path, info)
+
+	dec := json.NewDecoder(f)
+	turn := 0
+	for {
+		var rec previewEventRecord
+		if err := dec.Decode(&rec); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil // partial results are better than none
+		}
+		// Format compatibility:
+		// 1) Legacy event format: {"kind":"user.message","text":"..."}
+		// 2) Early event format:   {"type":"user.message","text":"..."}
+		// 3) Current provider.Message format: {"role":"user","content":"..."}
+		text := ""
+		kindOrType := strings.TrimSpace(rec.Kind)
+		if kindOrType == "" {
+			kindOrType = strings.TrimSpace(rec.Type)
+		}
+		if kindOrType == "user.message" {
+			text = strings.TrimSpace(rec.Text)
+		} else if strings.TrimSpace(rec.Role) == "user" {
+			text = strings.TrimSpace(rec.Content)
+		}
+		if text != "" {
+			text = resolveUserContent(text)
+			text = strings.TrimSpace(text)
+			if text == "" {
+				continue
+			}
+			if control.IsSyntheticUserMessage(text) {
+				continue
+			}
+			at := fallbackAt
+			if eventAt, ok := promptHistoryEventMillis(rec); ok {
+				at = eventAt
+			}
+			entry := PromptHistoryEntry{
+				Text:        text,
+				At:          at,
+				SessionPath: path,
+				Turn:        turn,
+			}
+			emit(entry)
+			turn++
+		}
+	}
+	return nil
+}
+
+func promptHistoryFallbackMillis(path string, info os.FileInfo) int64 {
+	if meta, ok, err := agent.LoadBranchMeta(path); err == nil && ok && !meta.UpdatedAt.IsZero() {
+		return meta.UpdatedAt.UnixMilli()
+	}
+	if info != nil {
+		return info.ModTime().UnixMilli()
+	}
+	return 0
+}
+
+func promptHistoryEventMillis(rec previewEventRecord) (int64, bool) {
+	for _, raw := range []json.RawMessage{
+		rec.Time,
+		rec.Timestamp,
+		rec.CreatedAt,
+		rec.CreatedAtSnake,
+		rec.UpdatedAt,
+		rec.UpdatedAtSnake,
+	} {
+		if at, ok := parseJSONTimestampMillis(raw); ok {
+			return at, true
+		}
+	}
+	return 0, false
+}
+
+func parseJSONTimestampMillis(raw json.RawMessage) (int64, bool) {
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return 0, false
+	}
+
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return 0, false
+		}
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return normalizeTimestampMillis(n)
+		}
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			return normalizeTimestampMillisFloat(f)
+		}
+		if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+			return t.UnixMilli(), true
+		}
+		return 0, false
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var n json.Number
+	if err := dec.Decode(&n); err != nil {
+		return 0, false
+	}
+	if i, err := strconv.ParseInt(n.String(), 10, 64); err == nil {
+		return normalizeTimestampMillis(i)
+	}
+	if f, err := strconv.ParseFloat(n.String(), 64); err == nil {
+		return normalizeTimestampMillisFloat(f)
+	}
+	return 0, false
+}
+
+func normalizeTimestampMillis(v int64) (int64, bool) {
+	if v <= 0 {
+		return 0, false
+	}
+	switch {
+	case v >= 1_000_000_000_000_000_000:
+		return v / 1_000_000, true // nanoseconds
+	case v >= 1_000_000_000_000_000:
+		return v / 1_000, true // microseconds
+	case v >= 100_000_000_000:
+		return v, true // milliseconds
+	case v >= 1_000_000_000:
+		return v * 1_000, true // seconds
+	default:
+		return 0, false
+	}
+}
+
+func normalizeTimestampMillisFloat(v float64) (int64, bool) {
+	if v <= 0 {
+		return 0, false
+	}
+	switch {
+	case v >= 1_000_000_000_000_000_000:
+		return int64(v / 1_000_000), true
+	case v >= 1_000_000_000_000_000:
+		return int64(v / 1_000), true
+	case v >= 100_000_000_000:
+		return int64(v), true
+	case v >= 1_000_000_000:
+		return int64(v * 1_000), true
+	default:
+		return 0, false
+	}
 }
 
 // PickWorkspace opens a folder chooser and, on a pick, opens a new project tab
@@ -1626,6 +2502,7 @@ func (a *App) HistoryForTab(tabID string) []HistoryMessage {
 
 func historyMessages(msgs []provider.Message, resolveUserContent func(string) string) []HistoryMessage {
 	out := make([]HistoryMessage, 0, len(msgs))
+	replayedTodoArgs := historyTodoArgsWithCompleteSteps(msgs)
 	for _, m := range msgs {
 		content := m.Content
 		if m.Role == provider.RoleUser {
@@ -1652,7 +2529,13 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 		if m.Role == provider.RoleAssistant && len(m.ToolCalls) > 0 {
 			hm.ToolCalls = make([]HistoryToolCall, len(m.ToolCalls))
 			for i, tc := range m.ToolCalls {
-				hm.ToolCalls[i] = HistoryToolCall{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments}
+				args := tc.Arguments
+				if tc.Name == "todo_write" {
+					if replayed, ok := replayedTodoArgs[tc.ID]; ok {
+						args = replayed
+					}
+				}
+				hm.ToolCalls[i] = HistoryToolCall{ID: tc.ID, Name: tc.Name, Arguments: args}
 			}
 		}
 		if m.Role == provider.RoleTool {
@@ -1662,6 +2545,98 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 		out = append(out, hm)
 	}
 	return out
+}
+
+func historyTodoArgsWithCompleteSteps(msgs []provider.Message) map[string]string {
+	successful := successfulHistoryToolCallIDs(msgs)
+	out := map[string]string{}
+	var todos []evidence.TodoItem
+	latestTodoID := ""
+	for _, m := range msgs {
+		for _, tc := range m.ToolCalls {
+			if tc.ID == "" || !successful[tc.ID] {
+				continue
+			}
+			switch tc.Name {
+			case "todo_write":
+				rec := evidence.ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, true)
+				if len(rec.Todos) == 0 {
+					continue
+				}
+				todos = append([]evidence.TodoItem(nil), rec.Todos...)
+				latestTodoID = tc.ID
+				if args, ok := todoArgsJSON(todos); ok {
+					out[latestTodoID] = args
+				}
+			case "complete_step":
+				if latestTodoID == "" || len(todos) == 0 {
+					continue
+				}
+				rec := evidence.ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, true)
+				match, ok := evidence.MatchStep(rec.Step, todos)
+				if !ok || match.Index < 1 || match.Index > len(todos) || todoStatusForHistory(todos[match.Index-1].Status) == "completed" {
+					continue
+				}
+				todos[match.Index-1].Status = "completed"
+				promoteNextHistoryTodo(todos)
+				if args, ok := todoArgsJSON(todos); ok {
+					out[latestTodoID] = args
+				}
+			}
+		}
+	}
+	return out
+}
+
+func successfulHistoryToolCallIDs(msgs []provider.Message) map[string]bool {
+	successful := map[string]bool{}
+	for _, msg := range msgs {
+		if msg.Role != provider.RoleTool || msg.ToolCallID == "" {
+			continue
+		}
+		if !historyToolResultFailed(msg.Content) {
+			successful[msg.ToolCallID] = true
+		}
+	}
+	return successful
+}
+
+func historyToolResultFailed(content string) bool {
+	content = strings.TrimSpace(content)
+	return strings.HasPrefix(content, "error:") ||
+		strings.HasPrefix(content, "blocked:") ||
+		strings.HasPrefix(content, "Error:") ||
+		strings.HasPrefix(content, "[error")
+}
+
+func todoArgsJSON(todos []evidence.TodoItem) (string, bool) {
+	b, err := json.Marshal(map[string]any{"todos": todos})
+	if err != nil {
+		return "", false
+	}
+	return string(b), true
+}
+
+func promoteNextHistoryTodo(todos []evidence.TodoItem) {
+	for _, todo := range todos {
+		if todoStatusForHistory(todo.Status) == "in_progress" {
+			return
+		}
+	}
+	for i := range todos {
+		if todoStatusForHistory(todos[i].Status) == "pending" {
+			todos[i].Status = "in_progress"
+			return
+		}
+	}
+}
+
+func todoStatusForHistory(status string) string {
+	status = strings.TrimSpace(status)
+	if status == "" {
+		return "pending"
+	}
+	return status
 }
 
 func previewSessionMessages(sessionDir, path string) ([]HistoryMessage, error) {
@@ -1683,6 +2658,12 @@ type previewEventRecord struct {
 	Kind             string             `json:"kind"`
 	Type             string             `json:"type"`
 	Role             string             `json:"role"`
+	Time             json.RawMessage    `json:"time"`
+	Timestamp        json.RawMessage    `json:"timestamp"`
+	CreatedAt        json.RawMessage    `json:"createdAt"`
+	CreatedAtSnake   json.RawMessage    `json:"created_at"`
+	UpdatedAt        json.RawMessage    `json:"updatedAt"`
+	UpdatedAtSnake   json.RawMessage    `json:"updated_at"`
 	Text             string             `json:"text"`
 	Content          string             `json:"content"`
 	Reasoning        string             `json:"reasoning"`
@@ -2201,6 +3182,12 @@ type ToolView struct {
 	Description string `json:"description"`
 }
 
+type BuiltInMCPUpdateResult struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	Path    string `json:"path"`
+}
+
 // SkillView is one discoverable skill for the drawer.
 type SkillView struct {
 	Name        string `json:"name"`
@@ -2417,6 +3404,11 @@ func withCodegraphConfig(v ServerView, c config.CodegraphConfig) ServerView {
 	v.Configured = true
 	v.AutoStart = c.ShouldAutoStart()
 	v.Tier = c.ResolvedTier()
+	v.Command = strings.TrimSpace(c.Path)
+	if v.Command == "" {
+		v.Command = "codegraph"
+	}
+	v.Args = []string{"serve", "--mcp"}
 	v.AuthStatus = mcpdiag.AuthNone
 	return v
 }
@@ -2811,6 +3803,57 @@ func (a *App) ReconnectMCPServer(name string) error {
 	return nil
 }
 
+// UpdateBuiltInMCPServer downloads and activates the latest runtime for a
+// bundled MCP. It is intentionally explicit because newer MCP releases can
+// change tool schemas and prompt-cache shape.
+func (a *App) UpdateBuiltInMCPServer(name string) (BuiltInMCPUpdateResult, error) {
+	name = strings.TrimSpace(name)
+	if name != "codegraph" {
+		return BuiltInMCPUpdateResult{}, fmt.Errorf("%s is not an updatable built-in MCP server", name)
+	}
+	tab := a.activeTab()
+	if tab == nil || tab.Ctrl == nil {
+		return BuiltInMCPUpdateResult{}, fmt.Errorf("no active session")
+	}
+	cfg, err := config.LoadForRoot(tab.WorkspaceRoot)
+	if err != nil {
+		return BuiltInMCPUpdateResult{}, err
+	}
+	client, err := netclient.NewHTTPClient(cfg.NetworkProxySpec(), netclient.TransportOptions{})
+	if err != nil {
+		return BuiltInMCPUpdateResult{}, err
+	}
+	updated, err := updateBuiltInCodegraph(a.bootContext(), client, nil)
+	if err != nil {
+		return BuiltInMCPUpdateResult{}, err
+	}
+	result := BuiltInMCPUpdateResult{Name: name, Version: updated.Version, Path: updated.Path}
+	a.recordBuiltInMCPUpdateStatus(BuiltInMCPUpdateStatus{
+		Name:    name,
+		Mode:    "manual",
+		Current: codegraph.ActiveVersion(),
+		Latest:  updated.Version,
+		Phase:   "activated",
+		Path:    updated.Path,
+	})
+
+	a.mu.RLock()
+	_, sessionDisabled := tab.disabledMCP[name]
+	a.mu.RUnlock()
+	if cfg.Codegraph.Enabled && !sessionDisabled {
+		if mcpConnected(tab.Ctrl, name) {
+			tab.Ctrl.DisconnectMCPServer(name)
+		}
+		if h := tab.Ctrl.Host(); h != nil {
+			h.ClearFailure(name)
+		}
+		if _, err := tab.Ctrl.ConnectCodegraphMCPServerForRoot(cfg, tab.WorkspaceRoot); err != nil {
+			recordCodegraphFailure(tab.Ctrl, cfg.Codegraph, err)
+		}
+	}
+	return result, nil
+}
+
 // ClearMCPServerAuthentication removes local auth-like config for one MCP and
 // clears the current session's cached connection failure. It does not remove the
 // server itself or try to sign the user out of the third-party browser session.
@@ -2904,7 +3947,7 @@ func (a *App) connectConfiguredMCPServerForTab(tab *WorkspaceTab, name string) (
 		}
 	}
 	if name == "codegraph" {
-		return tab.Ctrl.ConnectCodegraphMCPServer(cfg)
+		return tab.Ctrl.ConnectCodegraphMCPServerForRoot(cfg, tab.WorkspaceRoot)
 	}
 	if p, ok := builtinmcp.Entry(name); ok {
 		return tab.Ctrl.ConnectMCPServer(p)
@@ -3019,7 +4062,7 @@ func (a *App) setCodegraphEnabled(enabled bool) error {
 		a.mu.Lock()
 		delete(tab.disabledMCP, "codegraph")
 		a.mu.Unlock()
-		if _, err := tab.Ctrl.ConnectCodegraphMCPServer(cfg); err != nil {
+		if _, err := tab.Ctrl.ConnectCodegraphMCPServerForRoot(cfg, tab.WorkspaceRoot); err != nil {
 			recordCodegraphFailure(tab.Ctrl, cfg.Codegraph, err)
 			return nil
 		}
@@ -3061,7 +4104,7 @@ func (a *App) setCodegraphTier(_ string) error {
 	delete(tab.disabledMCP, "codegraph")
 	a.mu.Unlock()
 	if !mcpConnected(tab.Ctrl, "codegraph") {
-		if _, err := tab.Ctrl.ConnectCodegraphMCPServer(cfg); err != nil {
+		if _, err := tab.Ctrl.ConnectCodegraphMCPServerForRoot(cfg, tab.WorkspaceRoot); err != nil {
 			recordCodegraphFailure(tab.Ctrl, cfg.Codegraph, err)
 			return nil
 		}
@@ -3414,6 +4457,14 @@ func modelProviderAccessAllowed(access map[string]bool, name string) bool {
 	return access[strings.TrimSpace(name)]
 }
 
+func controllerHasActiveRuntimeWork(ctrl *control.Controller) bool {
+	return ctrl != nil && (ctrl.Running() || ctrl.PendingPrompt() || len(ctrl.Jobs()) > 0)
+}
+
+func rebuildControllerActiveWorkError(setting string) error {
+	return fmt.Errorf("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing %s", setting)
+}
+
 // SetModel switches the active model and carries the current conversation into the
 // new model's session, so the chat continues seamlessly and subsequent turns use
 // the new model. No-op if name is already active or the controller is down.
@@ -3432,8 +4483,8 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	if name == tab.model {
 		return nil
 	}
-	if tab.Ctrl != nil && tab.Ctrl.Running() {
-		return fmt.Errorf("finish or cancel the current turn before changing model")
+	if controllerHasActiveRuntimeWork(tab.Ctrl) {
+		return rebuildControllerActiveWorkError("model")
 	}
 	cfg, err := config.LoadForRoot(tab.WorkspaceRoot)
 	if err != nil {
@@ -3542,8 +4593,8 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 		return fmt.Errorf("tab %q not found", tabID)
 	}
 	ctrl := tab.Ctrl
-	if ctrl != nil && ctrl.Running() {
-		return fmt.Errorf("finish or cancel the current turn before changing effort")
+	if controllerHasActiveRuntimeWork(ctrl) {
+		return rebuildControllerActiveWorkError("effort")
 	}
 	entry, err := a.currentProviderEntryForTab(tabID)
 	if err != nil {
@@ -3613,8 +4664,8 @@ func (a *App) SetTokenModeForTab(tabID, mode string) error {
 		return nil
 	}
 	ctrl := tab.Ctrl
-	if ctrl != nil && ctrl.Running() {
-		return fmt.Errorf("finish or cancel the current turn before changing token mode")
+	if controllerHasActiveRuntimeWork(ctrl) {
+		return rebuildControllerActiveWorkError("token mode")
 	}
 
 	var carried []provider.Message

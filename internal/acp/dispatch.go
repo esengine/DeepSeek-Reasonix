@@ -297,7 +297,7 @@ func toolKindFor(name string) string {
 		return "read"
 	case "grep":
 		return "search"
-	case "edit_file", "multiedit", "write_file":
+	case "edit_file", "move_file", "multiedit", "write_file":
 		return "edit"
 	case "bash":
 		return "execute"

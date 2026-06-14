@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 
@@ -39,6 +40,7 @@ func SkillNameKey(name string) string {
 
 // Config is Reasonix's runtime configuration.
 type Config struct {
+
 	ConfigVersion int                 `toml:"config_version"`
 	DefaultModel  string              `toml:"default_model"`
 	Language      string              `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $REASONIX_LANG
@@ -59,6 +61,7 @@ type Config struct {
 	Statusline    StatuslineConfig    `toml:"statusline"`
 	LSP           LSPConfig           `toml:"lsp"`
 	Bot           BotConfig           `toml:"bot"`
+
 }
 
 // UIConfig controls CLI presentation-only settings. Desktop appearance is kept in
@@ -76,6 +79,7 @@ type UIConfig struct {
 // language, terminal colours, or provider-visible prompt/request data.
 type DesktopConfig struct {
 	Language       string   `toml:"language"`         // auto|en|zh; empty/auto = browser/OS auto-detect
+	LayoutStyle    string   `toml:"layout_style"`     // classic|workbench; desktop layout style
 	Theme          string   `toml:"theme"`            // auto|dark|light; empty resolves to dark
 	ThemeStyle     string   `toml:"theme_style"`      // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 	CloseBehavior  string   `toml:"close_behavior"`   // quit|background; desktop window close behavior
@@ -136,6 +140,15 @@ func normalizeThemeStyle(style string) string {
 	}
 }
 
+func normalizeDesktopLayoutStyle(style string) string {
+	switch strings.ToLower(strings.TrimSpace(style)) {
+	case "workbench", "workspace":
+		return "workbench"
+	default:
+		return "classic"
+	}
+}
+
 func normalizeCloseBehavior(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "quit", "exit":
@@ -178,6 +191,16 @@ func (c *Config) DesktopTheme() string {
 // chooses the default style for the resolved desktop theme.
 func (c *Config) DesktopThemeStyle() string {
 	return normalizeThemeStyle(c.Desktop.ThemeStyle)
+}
+
+// DesktopLayoutStyle normalizes the desktop layout style. It falls back to the
+// classic layout, while accepting the short-lived desktop.theme_style=workbench
+// value as a compatibility migration hint.
+func (c *Config) DesktopLayoutStyle() string {
+	if strings.EqualFold(strings.TrimSpace(c.Desktop.ThemeStyle), "workbench") && strings.TrimSpace(c.Desktop.LayoutStyle) == "" {
+		return "workbench"
+	}
+	return normalizeDesktopLayoutStyle(c.Desktop.LayoutStyle)
 }
 
 // DesktopCloseBehavior normalizes the desktop close-window preference. It falls
@@ -448,6 +471,52 @@ func (c BuiltInMCPConfig) EnabledNames() []string {
 	return out
 }
 
+const (
+	BuiltInMCPUpdateModeOff             = "off"
+	BuiltInMCPUpdateModeNotify          = "notify"
+	BuiltInMCPUpdateModeDownload        = "download"
+	BuiltInMCPUpdateModeAutoNextSession = "auto_next_session"
+
+	defaultBuiltInMCPUpdateInterval = 24 * time.Hour
+)
+
+// BuiltInMCPUpdatesConfig controls background update checks for Reasonix-owned
+// built-in MCP runtimes. The default is notify-only so startup never silently
+// changes provider-visible MCP tool schemas.
+type BuiltInMCPUpdatesConfig struct {
+	Mode          string `toml:"mode"`
+	CheckInterval string `toml:"check_interval"`
+}
+
+func (c BuiltInMCPUpdatesConfig) ResolvedMode() string {
+	switch strings.ToLower(strings.TrimSpace(c.Mode)) {
+	case BuiltInMCPUpdateModeOff:
+		return BuiltInMCPUpdateModeOff
+	case BuiltInMCPUpdateModeDownload:
+		return BuiltInMCPUpdateModeDownload
+	case BuiltInMCPUpdateModeAutoNextSession:
+		return BuiltInMCPUpdateModeAutoNextSession
+	default:
+		return BuiltInMCPUpdateModeNotify
+	}
+}
+
+func (c BuiltInMCPUpdatesConfig) CheckIntervalDuration() time.Duration {
+	raw := strings.TrimSpace(c.CheckInterval)
+	if raw == "" {
+		return defaultBuiltInMCPUpdateInterval
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return defaultBuiltInMCPUpdateInterval
+	}
+	return d
+}
+
+func (c BuiltInMCPUpdatesConfig) ResolvedCheckInterval() string {
+	return c.CheckIntervalDuration().String()
+}
+
 // BotConfig 控制多渠道 IM bot 消息网关。
 type BotConfig struct {
 	Enabled          bool                  `toml:"enabled"`
@@ -479,6 +548,7 @@ type QQBotConfig struct {
 	Enabled      bool   `toml:"enabled"`
 	AppID        string `toml:"app_id"`
 	AppSecretEnv string `toml:"app_secret_env"` // 环境变量名，如 QQ_BOT_APP_SECRET
+	Sandbox      bool   `toml:"sandbox"`        // true 使用 QQ 沙箱 API / gateway
 }
 
 // FeishuBotConfig 飞书自建应用 Bot 配置。
@@ -532,6 +602,10 @@ type BotConnectionCredential struct {
 type BotConnectionSessionMapping struct {
 	RemoteID      string `toml:"remote_id"`
 	SessionID     string `toml:"session_id"`
+	SessionSource string `toml:"session_source"`
+	ChatType      string `toml:"chat_type"`
+	UserID        string `toml:"user_id"`
+	ThreadID      string `toml:"thread_id"`
 	Scope         string `toml:"scope"`
 	WorkspaceRoot string `toml:"workspace_root"`
 	UpdatedAt     string `toml:"updated_at"`
@@ -709,7 +783,7 @@ func (c *Config) IsSkillDisabled(name string) bool {
 
 // SandboxConfig bounds the blast radius of tool calls (Phase 0: file-writer
 // confinement). WorkspaceRoot is the directory the built-in file writers
-// (write_file / edit_file / multi_edit) may modify; empty means the current
+// (write_file / edit_file / multi_edit / move_file) may modify; empty means the current
 // working directory, so writes stay inside the project by default. AllowWrite
 // lists extra directories writers may also touch (e.g. a sibling repo or a temp
 // dir). Both support ${VAR} / ${VAR:-default} expansion. Reads are unrestricted;
@@ -1162,6 +1236,10 @@ func Default() *Config {
 		// Time is dependency-free and bundled, so expose it by default. Context7
 		// can invoke a package runner and remains opt-in.
 		BuiltInMCP: BuiltInMCPConfig{TimeEnabled: true},
+		BuiltInMCPUpdates: BuiltInMCPUpdatesConfig{
+			Mode:          BuiltInMCPUpdateModeNotify,
+			CheckInterval: defaultBuiltInMCPUpdateInterval.String(),
+		},
 		// LSP tools on by default, but dormant until a language server is on PATH;
 		// a missing server yields an install hint rather than an error.
 		LSP:     LSPConfig{Enabled: true},
@@ -1621,14 +1699,18 @@ func ensureDeepSeekOfficialProvider(c *Config) {
 }
 
 func ensureMimoAPIProvider(c *Config) {
-	if _, ok := c.Provider("mimo-api"); ok {
+	models := []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"}
+	if p, ok := c.Provider("mimo-api"); ok {
+		if isOfficialMimoAPIProvider(p) {
+			mergeCuratedModelsIntoProvider(p, models, "mimo-v2.5-pro")
+		}
 		return
 	}
 	c.Providers = append(c.Providers, ProviderEntry{
 		Name:          "mimo-api",
 		Kind:          "openai",
 		BaseURL:       "https://api.xiaomimimo.com/v1",
-		Models:        []string{"mimo-v2.5-pro"},
+		Models:        models,
 		Default:       "mimo-v2.5-pro",
 		APIKeyEnv:     "MIMO_API_KEY",
 		ContextWindow: 1_048_576,
@@ -1637,14 +1719,19 @@ func ensureMimoAPIProvider(c *Config) {
 }
 
 func ensureMimoTokenPlanProvider(c *Config, includeMimoFlash bool) {
-	if _, ok := c.Provider("mimo-token-plan"); ok {
+	models := []string{"mimo-v2.5-pro", "mimo-v2.5"}
+	if p, ok := c.Provider("mimo-token-plan"); ok {
+		if isOfficialMimoTokenPlanProvider(p) {
+			mergeCuratedModelsIntoProvider(p, models, "mimo-v2.5-pro")
+			clearMixedMimoTokenPlanPrice(p)
+		}
 		return
 	}
 	entry := ProviderEntry{
 		Name:          "mimo-token-plan",
 		Kind:          "openai",
 		BaseURL:       "https://token-plan-cn.xiaomimimo.com/v1",
-		Models:        []string{"mimo-v2.5-pro"},
+		Models:        models,
 		Default:       "mimo-v2.5-pro",
 		APIKeyEnv:     "MIMO_API_KEY",
 		ContextWindow: 1_048_576,
@@ -1652,7 +1739,7 @@ func ensureMimoTokenPlanProvider(c *Config, includeMimoFlash bool) {
 	}
 	if old, ok := c.Provider("mimo-pro"); ok {
 		entry = officialProviderFromLegacy(entry, old)
-		entry.Models = mergeModelLists([]string{"mimo-v2.5-pro"}, old.ModelList())
+		entry.Models = mergeModelLists(models, old.ModelList())
 		entry.Default = firstKnownModel(entry.Default, entry.Models, "mimo-v2.5-pro")
 	}
 	if old, ok := c.Provider("mimo-flash"); includeMimoFlash && ok {
@@ -1662,7 +1749,35 @@ func ensureMimoTokenPlanProvider(c *Config, includeMimoFlash bool) {
 		entry.Models = mergeModelLists(entry.Models, old.ModelList())
 		entry.Default = firstKnownModel(entry.Default, entry.Models, entry.Default)
 	}
+	clearMixedMimoTokenPlanPrice(&entry)
 	c.Providers = append(c.Providers, entry)
+}
+
+func isOfficialMimoAPIProvider(e *ProviderEntry) bool {
+	return isOpenAIProviderKind(e) && officialMimoHost(e.BaseURL) == "api.xiaomimimo.com"
+}
+
+func isOfficialMimoTokenPlanProvider(e *ProviderEntry) bool {
+	return isOpenAIProviderKind(e) && officialMimoHost(e.BaseURL) == "token-plan-cn.xiaomimimo.com"
+}
+
+func isOpenAIProviderKind(e *ProviderEntry) bool {
+	return e != nil && strings.EqualFold(strings.TrimSpace(e.Kind), "openai")
+}
+
+func mergeCuratedModelsIntoProvider(e *ProviderEntry, models []string, fallback string) {
+	currentDefault := e.Default
+	if strings.TrimSpace(currentDefault) == "" {
+		currentDefault = e.Model
+	}
+	e.Models = mergeModelLists(models, e.ModelList())
+	e.Default = firstKnownModel(currentDefault, e.Models, fallback)
+}
+
+func clearMixedMimoTokenPlanPrice(e *ProviderEntry) {
+	if e != nil && e.HasModel("mimo-v2.5-pro") && e.HasModel("mimo-v2.5") {
+		e.Price = nil
+	}
 }
 
 func officialProviderFromLegacy(entry ProviderEntry, old *ProviderEntry) ProviderEntry {

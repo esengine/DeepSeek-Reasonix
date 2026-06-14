@@ -171,28 +171,46 @@ func (a *adapter) runWebSocket(ctx context.Context) {
 		return
 	}
 	eventHandler := a.newEventDispatcher()
-	opts := []larkws.ClientOption{
-		larkws.WithEventHandler(eventHandler),
-		larkws.WithLogLevel(larkcore.LogLevelError),
-		larkws.WithAutoReconnect(true),
-		larkws.WithOnReady(func() { a.logger.Info("feishu sdk websocket connected") }),
-		larkws.WithOnReconnecting(func() { a.logger.Warn("feishu sdk websocket reconnecting") }),
-		larkws.WithOnReconnected(func() { a.logger.Info("feishu sdk websocket reconnected") }),
-		larkws.WithOnError(func(err error) { a.logger.Error("feishu sdk websocket error", "err", err) }),
-	}
-	if feishuDomain(a.cfg.Domain) == "lark" {
-		opts = append(opts, larkws.WithDomain(lark.LarkBaseUrl))
-	}
-	client := larkws.NewClient(a.cfg.AppID, secret, opts...)
-	a.wsClient = client
-	errCh := make(chan error, 1)
-	go func() { errCh <- client.Start(ctx) }()
-	select {
-	case <-ctx.Done():
-		client.Close()
-	case err := <-errCh:
-		if err != nil {
-			a.logger.Error("feishu sdk websocket stopped", "err", err)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		opts := []larkws.ClientOption{
+			larkws.WithEventHandler(eventHandler),
+			larkws.WithLogLevel(larkcore.LogLevelError),
+			larkws.WithAutoReconnect(true),
+			larkws.WithOnReady(func() { a.logger.Info("feishu sdk websocket connected") }),
+			larkws.WithOnReconnecting(func() { a.logger.Warn("feishu sdk websocket reconnecting") }),
+			larkws.WithOnReconnected(func() { a.logger.Info("feishu sdk websocket reconnected") }),
+			larkws.WithOnError(func(err error) { a.logger.Error("feishu sdk websocket error", "err", err) }),
+		}
+		if feishuDomain(a.cfg.Domain) == "lark" {
+			opts = append(opts, larkws.WithDomain(lark.LarkBaseUrl))
+		}
+		client := larkws.NewClient(a.cfg.AppID, secret, opts...)
+		a.wsClient = client
+		errCh := make(chan error, 1)
+		go func() { errCh <- client.Start(ctx) }()
+		select {
+		case <-ctx.Done():
+			client.Close()
+			return
+		case err := <-errCh:
+			client.Close()
+			if err != nil {
+				a.logger.Error("feishu sdk websocket stopped", "err", err)
+			} else {
+				a.logger.Warn("feishu sdk websocket stopped without error")
+			}
+		}
+		timer := time.NewTimer(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
 		}
 	}
 }
@@ -434,7 +452,7 @@ func (a *adapter) handleMessage(msg feishuMsgEvent) {
 
 	// @mention gating：仅在群聊中检查是否 @了 bot
 	chatType := bot.ChatDM
-	if msg.ChatType == "group" {
+	if msg.ChatType == "group" || msg.ChatType == "topic_group" {
 		chatType = bot.ChatGroup
 		if a.cfg.RequireMention && len(msg.Mentions) == 0 {
 			a.logger.Info("feishu message ignored", "reason", "missing_mention", "chat", logHash(msg.ChatID), "message", logHash(msg.MessageID))

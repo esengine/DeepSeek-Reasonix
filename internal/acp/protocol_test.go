@@ -71,6 +71,7 @@ func TestToolKindFor(t *testing.T) {
 		"glob":                  "read",
 		"grep":                  "search",
 		"edit_file":             "edit",
+		"move_file":             "edit",
 		"multiedit":             "edit",
 		"write_file":            "edit",
 		"bash":                  "execute",

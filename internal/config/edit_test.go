@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -108,6 +109,9 @@ func TestDesktopPreferencesAreSeparateFromCLI(t *testing.T) {
 	if err := c.SetDesktopAppearance("dark", "graphite"); err != nil {
 		t.Fatalf("SetDesktopAppearance: %v", err)
 	}
+	if err := c.SetDesktopLayoutStyle("workbench"); err != nil {
+		t.Fatalf("SetDesktopLayoutStyle: %v", err)
+	}
 	if err := c.SetDesktopStatusBarStyle("text"); err != nil {
 		t.Fatalf("SetDesktopStatusBarStyle: %v", err)
 	}
@@ -133,11 +137,48 @@ func TestDesktopPreferencesAreSeparateFromCLI(t *testing.T) {
 	if got := c.DesktopThemeStyle(); got != "graphite" {
 		t.Fatalf("desktop theme style = %q, want graphite", got)
 	}
+	if got := c.DesktopLayoutStyle(); got != "workbench" {
+		t.Fatalf("desktop layout style = %q, want workbench", got)
+	}
 	if got := c.DesktopStatusBarStyle(); got != "text" {
 		t.Fatalf("desktop status bar style = %q, want text", got)
 	}
 	if got, want := c.DesktopStatusBarItems(), []string{"model", "balance", "cache"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("desktop status bar items = %v, want %v", got, want)
+	}
+}
+
+func TestDesktopLayoutStyleNormalizes(t *testing.T) {
+	if got := Default().DesktopLayoutStyle(); got != "classic" {
+		t.Fatalf("default desktop layout style = %q, want classic", got)
+	}
+	for _, tt := range []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"", "classic", false},
+		{"classic", "classic", false},
+		{" workbench ", "workbench", false},
+		{"workspace", "workbench", false},
+		{"later", "classic", true},
+	} {
+		c := Default()
+		if err := c.SetDesktopLayoutStyle(tt.in); (err != nil) != tt.wantErr {
+			t.Fatalf("SetDesktopLayoutStyle(%q) err = %v, wantErr %v", tt.in, err, tt.wantErr)
+		}
+		if got := c.DesktopLayoutStyle(); got != tt.want {
+			t.Fatalf("DesktopLayoutStyle(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+
+	c := Default()
+	c.Desktop.ThemeStyle = "workbench"
+	if got := c.DesktopLayoutStyle(); got != "workbench" {
+		t.Fatalf("legacy desktop theme_style=workbench layout = %q, want workbench", got)
+	}
+	if got := c.DesktopThemeStyle(); got != "" {
+		t.Fatalf("legacy desktop theme_style=workbench theme style = %q, want empty", got)
 	}
 }
 
@@ -471,6 +512,52 @@ func TestResolveModelPreservesProviderEffort(t *testing.T) {
 	}
 }
 
+func TestEffectiveVisionForOfficialMimoModels(t *testing.T) {
+	c := Default()
+	c.Desktop.ProviderAccess = []string{"mimo-api"}
+	normalizeDesktopOfficialProviderAccess(c)
+
+	pro, ok := c.ResolveModel("mimo-api/mimo-v2.5-pro")
+	if !ok {
+		t.Fatal("ResolveModel did not find mimo-api/mimo-v2.5-pro")
+	}
+	if EffectiveVision(pro) {
+		t.Fatalf("mimo-v2.5-pro should remain text-only by default")
+	}
+
+	vision, ok := c.ResolveModel("mimo-api/mimo-v2.5")
+	if !ok {
+		t.Fatal("ResolveModel did not find mimo-api/mimo-v2.5")
+	}
+	if !EffectiveVision(vision) {
+		t.Fatalf("mimo-v2.5 on the official MiMo API should enable vision")
+	}
+
+	omni, ok := c.ResolveModel("mimo-api/mimo-v2-omni")
+	if !ok {
+		t.Fatal("ResolveModel did not find mimo-api/mimo-v2-omni")
+	}
+	if !EffectiveVision(omni) {
+		t.Fatalf("mimo-v2-omni on the official MiMo API should enable vision")
+	}
+}
+
+func TestEffectiveVisionDoesNotInferCustomMimoProxy(t *testing.T) {
+	custom := &ProviderEntry{
+		Name:    "mimo-proxy",
+		Kind:    "openai",
+		BaseURL: "https://proxy.example.com/v1",
+		Model:   "mimo-v2.5",
+	}
+	if EffectiveVision(custom) {
+		t.Fatalf("custom MiMo proxy should require explicit vision=true")
+	}
+	custom.Vision = true
+	if !EffectiveVision(custom) {
+		t.Fatalf("explicit vision=true should still enable custom providers")
+	}
+}
+
 func TestRemoveProvider(t *testing.T) {
 	c := Default()
 	c.Agent.PlannerModel = "deepseek-pro"
@@ -686,6 +773,23 @@ func TestBuiltInMCPDefaultsEnableOnlyTime(t *testing.T) {
 	c := Default()
 	if !c.BuiltInMCP.TimeEnabled || c.BuiltInMCP.Context7Enabled {
 		t.Fatalf("built-in MCP defaults = %+v, want time enabled and context7 disabled", c.BuiltInMCP)
+	}
+}
+
+func TestBuiltInMCPUpdateDefaultsAreNotifyOnly(t *testing.T) {
+	c := Default()
+	if got := c.BuiltInMCPUpdates.ResolvedMode(); got != BuiltInMCPUpdateModeNotify {
+		t.Fatalf("builtin MCP update mode = %q, want notify", got)
+	}
+	if got := c.BuiltInMCPUpdates.CheckIntervalDuration(); got != 24*time.Hour {
+		t.Fatalf("builtin MCP update interval = %v, want 24h", got)
+	}
+	invalid := BuiltInMCPUpdatesConfig{Mode: "surprise", CheckInterval: "-1s"}
+	if got := invalid.ResolvedMode(); got != BuiltInMCPUpdateModeNotify {
+		t.Fatalf("invalid mode resolved to %q, want notify", got)
+	}
+	if got := invalid.CheckIntervalDuration(); got != 24*time.Hour {
+		t.Fatalf("invalid interval resolved to %v, want 24h", got)
 	}
 }
 

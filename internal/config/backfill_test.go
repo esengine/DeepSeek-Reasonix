@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"reasonix/internal/provider"
+)
 
 func hasModel(c *Config, model string) *ProviderEntry {
 	for i := range c.Providers {
@@ -109,6 +113,9 @@ func TestNormalizeDesktopOfficialProviderAccessCanonicalizesLegacyIDs(t *testing
 	if _, ok := c.Provider("mimo-token-plan"); !ok {
 		t.Fatal("canonical mimo-token-plan provider missing")
 	}
+	if p, _ := c.Provider("mimo-token-plan"); p.Price != nil {
+		t.Fatalf("mimo-token-plan mixed-model price = %+v, want nil", p.Price)
+	}
 }
 
 func TestNormalizeDesktopOfficialProviderAccessEnsuresMimoAPI(t *testing.T) {
@@ -116,10 +123,90 @@ func TestNormalizeDesktopOfficialProviderAccessEnsuresMimoAPI(t *testing.T) {
 	c.DefaultModel = "mimo-api/mimo-v2.5-pro"
 	c.Desktop.ProviderAccess = []string{"mimo-api"}
 	normalizeDesktopOfficialProviderAccess(c)
-	if _, ok := c.Provider("mimo-api"); !ok {
+	p, ok := c.Provider("mimo-api")
+	if !ok {
 		t.Fatal("mimo-api paid provider missing")
+	}
+	if !p.HasModel("mimo-v2.5") || !p.HasModel("mimo-v2-omni") {
+		t.Fatalf("mimo-api models = %v, want vision-capable MiMo models", p.ModelList())
 	}
 	if got := c.Desktop.ProviderAccess; len(got) != 1 || got[0] != "mimo-api" {
 		t.Fatalf("provider_access = %+v, want mimo-api", got)
+	}
+}
+
+func TestNormalizeDesktopOfficialProviderAccessBackfillsExistingMimoAPIModels(t *testing.T) {
+	c := &Config{
+		DefaultModel: "mimo-api/mimo-v2.5-pro",
+		Desktop:      DesktopConfig{ProviderAccess: []string{"mimo-api"}},
+		Providers: []ProviderEntry{{
+			Name:      "mimo-api",
+			Kind:      "openai",
+			BaseURL:   "https://api.xiaomimimo.com/v1",
+			Model:     "mimo-v2.5-pro",
+			APIKeyEnv: "MIMO_API_KEY",
+		}},
+	}
+
+	normalizeDesktopOfficialProviderAccess(c)
+
+	p, ok := c.Provider("mimo-api")
+	if !ok {
+		t.Fatal("mimo-api provider missing")
+	}
+	if !p.HasModel("mimo-v2.5-pro") || !p.HasModel("mimo-v2.5") || !p.HasModel("mimo-v2-omni") {
+		t.Fatalf("mimo-api models = %v, want curated MiMo API models", p.ModelList())
+	}
+	if p.Default != "mimo-v2.5-pro" {
+		t.Fatalf("mimo-api default = %q, want mimo-v2.5-pro", p.Default)
+	}
+}
+
+func TestNormalizeDesktopOfficialProviderAccessDoesNotBackfillCustomNamedMimoAPI(t *testing.T) {
+	c := &Config{
+		Desktop: DesktopConfig{ProviderAccess: []string{"mimo-api"}},
+		Providers: []ProviderEntry{{
+			Name:    "mimo-api",
+			Kind:    "openai",
+			BaseURL: "https://proxy.example.com/v1",
+			Model:   "mimo-v2.5-pro",
+		}},
+	}
+
+	normalizeDesktopOfficialProviderAccess(c)
+
+	p, ok := c.Provider("mimo-api")
+	if !ok {
+		t.Fatal("mimo-api provider missing")
+	}
+	if p.HasModel("mimo-v2.5") || p.HasModel("mimo-v2-omni") {
+		t.Fatalf("custom mimo-api models = %v, want original custom list", p.ModelList())
+	}
+}
+
+func TestNormalizeDesktopOfficialProviderAccessBackfillsExistingMimoTokenPlanAndClearsPrice(t *testing.T) {
+	c := &Config{
+		Desktop: DesktopConfig{ProviderAccess: []string{"mimo-token-plan"}},
+		Providers: []ProviderEntry{{
+			Name:      "mimo-token-plan",
+			Kind:      "openai",
+			BaseURL:   "https://token-plan-cn.xiaomimimo.com/v1",
+			Model:     "mimo-v2.5-pro",
+			APIKeyEnv: "MIMO_API_KEY",
+			Price:     &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "CNY"},
+		}},
+	}
+
+	normalizeDesktopOfficialProviderAccess(c)
+
+	p, ok := c.Provider("mimo-token-plan")
+	if !ok {
+		t.Fatal("mimo-token-plan provider missing")
+	}
+	if !p.HasModel("mimo-v2.5-pro") || !p.HasModel("mimo-v2.5") {
+		t.Fatalf("mimo-token-plan models = %v, want pro and flash models", p.ModelList())
+	}
+	if p.Price != nil {
+		t.Fatalf("mimo-token-plan mixed-model price = %+v, want nil", p.Price)
 	}
 }

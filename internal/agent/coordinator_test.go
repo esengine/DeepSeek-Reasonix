@@ -195,6 +195,32 @@ func TestCoordinatorPlannerUsesReadOnlyResearchTools(t *testing.T) {
 	}
 }
 
+func TestCoordinatorSetReasoningLanguageClearsPlannerAgent(t *testing.T) {
+	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "1. inspect the narrow path"},
+		{Type: provider.ChunkDone},
+	}}
+	exec := &mockProvider{name: "executor", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "Done."},
+		{Type: provider.ChunkDone},
+	}}
+
+	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{ReasoningLanguage: "zh"}, event.Discard)
+	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, tool.NewRegistry(), Options{ReasoningLanguage: "zh"}, executor, 0, event.Discard, nil)
+	coord.SetReasoningLanguage("auto")
+
+	if err := coord.Run(context.Background(), "plan a change"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if got := lastUser(planner.requests[0]); strings.Contains(got, "<reasoning-language>") {
+		t.Fatalf("planner should clear stale reasoning language after live auto update, got %q", got)
+	}
+	if got := lastUser(exec.requests[0]); strings.Contains(got, "<reasoning-language>") {
+		t.Fatalf("executor should clear stale reasoning language after live auto update, got %q", got)
+	}
+}
+
 func TestCoordinatorPlannerMaxStepsUsesPlannerConfigKey(t *testing.T) {
 	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
 		{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "read_file", Arguments: `{"path":"REASONIX.md"}`}},

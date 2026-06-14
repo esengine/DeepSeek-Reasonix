@@ -1,17 +1,51 @@
 // Last-resort crash surface: a React render error with no boundary unmounts the
 // whole tree (blank window), and global errors/rejections leave no trace either.
 
-import { dumpBreadcrumbs, snapshotBreadcrumbs, type Breadcrumb } from "./breadcrumbs";
+import { addBreadcrumb, dumpBreadcrumbs, snapshotBreadcrumbs, type Breadcrumb } from "./breadcrumbs";
 import { t } from "./i18n";
 
 declare const __BUILD_COMMIT__: string;
 declare const __BUILD_CHANNEL__: string;
 
-export type CrashKind = "crash" | "exception" | "feedback";
+export type CrashKind = "crash" | "exception" | "feedback" | "performance" | "bot";
+
+export type PerformanceSnapshot = {
+  reason: string;
+  uptimeMs: number;
+  visibility: string;
+  focused: boolean;
+  online: boolean;
+  hardwareConcurrency: number;
+  deviceMemoryGb?: number;
+  jsHeap?: {
+    usedMb: number;
+    totalMb: number;
+    limitMb: number;
+    usagePercent?: number;
+  };
+  eventLoopLag?: {
+    currentMs: number;
+    maxMs: number;
+    avgMs: number;
+    samples: number;
+  };
+  longTasks?: {
+    count: number;
+    totalMs: number;
+    maxMs: number;
+    recent: { startMs: number; durationMs: number }[];
+  };
+  connection?: {
+    effectiveType?: string;
+    downlinkMbps?: number;
+    rttMs?: number;
+    saveData?: boolean;
+  };
+};
 
 export type CrashPayload = {
   schemaVersion: 2;
-  source: "frontend" | "frontend.react" | "frontend.global";
+  source: "frontend" | "frontend.react" | "frontend.global" | "frontend.performance" | "bot.runtime";
   kind: CrashKind;
   label: string;
   message: string;
@@ -33,6 +67,40 @@ type NormalizedError = {
   errorMessage: string;
   stack?: string;
 };
+
+type LongTaskSample = {
+  startMs: number;
+  durationMs: number;
+};
+
+type BrowserPerformanceMemory = {
+  usedJSHeapSize?: number;
+  totalJSHeapSize?: number;
+  jsHeapSizeLimit?: number;
+};
+
+type BrowserNavigator = Navigator & {
+  deviceMemory?: number;
+  connection?: {
+    effectiveType?: string;
+    downlink?: number;
+    rtt?: number;
+    saveData?: boolean;
+  };
+};
+
+const LONG_TASK_WINDOW_MS = 60_000;
+const LONG_TASK_PROMPT_MS = 800;
+const LONG_TASK_TOTAL_PROMPT_MS = 1_500;
+const EVENT_LOOP_LAG_PROMPT_MS = 1_200;
+const STARTUP_GRACE_MS = 15_000;
+const PROMPT_COOLDOWN_MS = 10 * 60_000;
+const MAX_LAG_SAMPLES = 60;
+
+const longTasks: LongTaskSample[] = [];
+const lagSamples: number[] = [];
+let performanceMonitorInstalled = false;
+let lastPerformancePromptAt = 0;
 
 function clip(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) : s;
@@ -106,6 +174,176 @@ function formatText(label: string, normalized: NormalizedError, extra?: string):
     .join("\n\n");
 }
 
+function fmtNumber(n: number, digits = 0): string {
+  return Number.isFinite(n) ? n.toFixed(digits) : "0";
+}
+
+function fmtMb(n: number): string {
+  return `${fmtNumber(n, 1)} MB`;
+}
+
+function readHeapSnapshot(): PerformanceSnapshot["jsHeap"] | undefined {
+  if (typeof performance === "undefined") return undefined;
+  const memory = (performance as Performance & { memory?: BrowserPerformanceMemory }).memory;
+  if (!memory?.usedJSHeapSize || !memory.totalJSHeapSize || !memory.jsHeapSizeLimit) return undefined;
+  const usedMb = memory.usedJSHeapSize / 1024 / 1024;
+  const totalMb = memory.totalJSHeapSize / 1024 / 1024;
+  const limitMb = memory.jsHeapSizeLimit / 1024 / 1024;
+  return {
+    usedMb,
+    totalMb,
+    limitMb,
+    usagePercent: limitMb > 0 ? (usedMb / limitMb) * 100 : undefined,
+  };
+}
+
+function pruneLongTasks(now = performance.now()): void {
+  while (longTasks.length && now - longTasks[0].startMs > LONG_TASK_WINDOW_MS) longTasks.shift();
+}
+
+function longTaskSummary(now = performance.now()): PerformanceSnapshot["longTasks"] {
+  pruneLongTasks(now);
+  if (!longTasks.length) return undefined;
+  const totalMs = longTasks.reduce((sum, t) => sum + t.durationMs, 0);
+  const maxMs = Math.max(...longTasks.map((t) => t.durationMs));
+  return {
+    count: longTasks.length,
+    totalMs,
+    maxMs,
+    recent: longTasks.slice(-5),
+  };
+}
+
+function eventLoopLagSummary(currentMs = 0): PerformanceSnapshot["eventLoopLag"] {
+  const samples = lagSamples.filter((n) => n > 0);
+  if (!samples.length && currentMs <= 0) return undefined;
+  const all = currentMs > 0 ? [...samples, currentMs] : samples;
+  const total = all.reduce((sum, n) => sum + n, 0);
+  return {
+    currentMs,
+    maxMs: Math.max(...all),
+    avgMs: total / all.length,
+    samples: all.length,
+  };
+}
+
+function networkSnapshot(): PerformanceSnapshot["connection"] {
+  if (typeof navigator === "undefined") return undefined;
+  const connection = (navigator as BrowserNavigator).connection;
+  if (!connection) return undefined;
+  return {
+    effectiveType: connection.effectiveType,
+    downlinkMbps: connection.downlink,
+    rttMs: connection.rtt,
+    saveData: connection.saveData,
+  };
+}
+
+function performanceSnapshot(reason: string, currentLagMs = 0): PerformanceSnapshot {
+  const nav = typeof navigator === "undefined" ? undefined : (navigator as BrowserNavigator);
+  const doc = typeof document === "undefined" ? undefined : document;
+  return {
+    reason,
+    uptimeMs: typeof performance !== "undefined" ? performance.now() : 0,
+    visibility: doc?.visibilityState ?? "",
+    focused: doc?.hasFocus?.() ?? false,
+    online: nav?.onLine ?? true,
+    hardwareConcurrency: nav?.hardwareConcurrency ?? 0,
+    deviceMemoryGb: nav?.deviceMemory,
+    jsHeap: readHeapSnapshot(),
+    eventLoopLag: eventLoopLagSummary(currentLagMs),
+    longTasks: typeof performance !== "undefined" ? longTaskSummary() : undefined,
+    connection: networkSnapshot(),
+  };
+}
+
+export function formatPerformanceContext(snapshot: PerformanceSnapshot): string {
+  const lines = [
+    `reason: ${snapshot.reason}`,
+    `uptime: ${fmtNumber(snapshot.uptimeMs / 1000, 1)}s`,
+    `visibility: ${snapshot.visibility || "unknown"}`,
+    `focused: ${snapshot.focused ? "true" : "false"}`,
+    `online: ${snapshot.online ? "true" : "false"}`,
+    `hardware concurrency: ${snapshot.hardwareConcurrency || "unknown"}`,
+  ];
+  if (snapshot.deviceMemoryGb) lines.push(`device memory: ${snapshot.deviceMemoryGb} GB`);
+  if (snapshot.jsHeap) {
+    const pct =
+      snapshot.jsHeap.usagePercent !== undefined ? `, ${fmtNumber(snapshot.jsHeap.usagePercent)}% of limit` : "";
+    lines.push(
+      `js heap: ${fmtMb(snapshot.jsHeap.usedMb)} used, ${fmtMb(snapshot.jsHeap.totalMb)} allocated, ${fmtMb(snapshot.jsHeap.limitMb)} limit${pct}`,
+    );
+  }
+  if (snapshot.eventLoopLag) {
+    lines.push(
+      `event loop lag: current ${fmtNumber(snapshot.eventLoopLag.currentMs)}ms, max ${fmtNumber(snapshot.eventLoopLag.maxMs)}ms, avg ${fmtNumber(snapshot.eventLoopLag.avgMs)}ms over ${snapshot.eventLoopLag.samples} samples`,
+    );
+  }
+  if (snapshot.longTasks) {
+    const recent = snapshot.longTasks.recent
+      .map((t) => `${fmtNumber(t.durationMs)}ms @ ${fmtNumber(t.startMs / 1000, 1)}s`)
+      .join("; ");
+    lines.push(
+      `long tasks: ${snapshot.longTasks.count} in the last 60s, max ${fmtNumber(snapshot.longTasks.maxMs)}ms, total ${fmtNumber(snapshot.longTasks.totalMs)}ms`,
+    );
+    if (recent) lines.push(`recent long tasks: ${recent}`);
+  }
+  if (snapshot.connection) {
+    const parts = [
+      snapshot.connection.effectiveType,
+      snapshot.connection.rttMs !== undefined ? `${snapshot.connection.rttMs}ms rtt` : "",
+      snapshot.connection.downlinkMbps !== undefined ? `${snapshot.connection.downlinkMbps} Mbps` : "",
+      snapshot.connection.saveData !== undefined ? `saveData ${snapshot.connection.saveData ? "true" : "false"}` : "",
+    ].filter(Boolean);
+    if (parts.length) lines.push(`connection: ${parts.join(", ")}`);
+  }
+  return lines.join("\n");
+}
+
+export function performanceLabelForReason(reason: string): string {
+  const normalized = reason.trim().toLowerCase();
+  if (normalized.startsWith("event loop lag")) return "performance.lag";
+  if (normalized.startsWith("long task")) return "performance.longtask";
+  if (normalized.startsWith("js heap")) return "performance.heap";
+  return "performance.pressure";
+}
+
+export function shouldRecordLongTaskSample(startMs: number, durationMs: number, graceUntilMs: number): boolean {
+  return durationMs >= 50 && startMs >= graceUntilMs;
+}
+
+export function buildPerformancePayload(snapshot: PerformanceSnapshot): CrashPayload {
+  const buildCommit = typeof __BUILD_COMMIT__ === "string" ? __BUILD_COMMIT__ : "dev";
+  const context = formatPerformanceContext(snapshot);
+  const crumbs = dumpBreadcrumbs();
+  const label = performanceLabelForReason(snapshot.reason);
+  const errorMessage = "UI responsiveness degraded because the app observed long tasks, event-loop lag, or high JS heap pressure.";
+  return {
+    schemaVersion: 2,
+    source: "frontend.performance",
+    kind: "performance",
+    label,
+    message: [
+      `[${label}]`,
+      errorMessage,
+      `--- performance context ---\n${context}`,
+      crumbs && `--- breadcrumbs ---\n${crumbs}`,
+      `build ${buildCommit}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    errorType: "PerformancePressure",
+    errorMessage,
+    topFrame: "frontend.performance",
+    buildCommit,
+    channel: typeof __BUILD_CHANNEL__ === "string" ? __BUILD_CHANNEL__ : "",
+    language: typeof navigator !== "undefined" ? navigator.language || "" : "",
+    view: currentView(),
+    breadcrumbs: snapshotBreadcrumbs(),
+    occurredAt: new Date().toISOString(),
+  };
+}
+
 export function buildCrashPayload(label: string, err: unknown, extra?: string): CrashPayload {
   const normalized = normalizeCrashError(err);
   const buildCommit = typeof __BUILD_COMMIT__ === "string" ? __BUILD_COMMIT__ : "dev";
@@ -129,13 +367,13 @@ export function buildCrashPayload(label: string, err: unknown, extra?: string): 
   };
 }
 
-function sendButton(payload: CrashPayload): HTMLButtonElement | null {
+function sendButton(payload: CrashPayload, className = "crash-overlay__send"): HTMLButtonElement | null {
   // Resolved at click time via window.go, not the bridge module: this overlay must
   // stay usable even when the rest of the app (and its imports) is broken.
   const report = window.go?.main?.App?.ReportCrash;
   if (!report) return null;
   const send = document.createElement("button");
-  send.className = "crash-overlay__send";
+  send.className = className;
   send.textContent = t("crash.send");
   send.onclick = async () => {
     send.disabled = true;
@@ -148,6 +386,39 @@ function sendButton(payload: CrashPayload): HTMLButtonElement | null {
     }
   };
   return send;
+}
+
+function paintPerformancePrompt(payload: CrashPayload, snapshot: PerformanceSnapshot) {
+  if (typeof document === "undefined") return;
+  let host = document.getElementById("performance-report-prompt");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "performance-report-prompt";
+    document.body.appendChild(host);
+  }
+  const title = document.createElement("div");
+  title.className = "performance-report__title";
+  title.textContent = t("performanceReport.title");
+  const body = document.createElement("pre");
+  body.className = "performance-report__body";
+  body.textContent = formatPerformanceContext(snapshot);
+  const actions = document.createElement("div");
+  actions.className = "performance-report__actions";
+  const send = sendButton(payload, "performance-report__send");
+  const copy = document.createElement("button");
+  copy.className = "performance-report__copy";
+  copy.textContent = t("crash.copy");
+  copy.onclick = () => void navigator.clipboard?.writeText(payload.message);
+  const dismiss = document.createElement("button");
+  dismiss.className = "performance-report__dismiss";
+  dismiss.textContent = t("performanceReport.dismiss");
+  dismiss.onclick = () => host?.remove();
+  if (send) actions.append(send);
+  actions.append(copy, dismiss);
+  const note = document.createElement("div");
+  note.className = "performance-report__note";
+  note.textContent = t("performanceReport.privacyNote");
+  host.replaceChildren(title, body, actions, note);
 }
 
 function paint(payload: CrashPayload) {
@@ -180,6 +451,75 @@ function paint(payload: CrashPayload) {
 
 export function reportCrash(label: string, err: unknown, extra?: string) {
   paint(buildCrashPayload(label, err, extra));
+}
+
+function shouldPromptForPerformance(now: number): boolean {
+  if (now - lastPerformancePromptAt < PROMPT_COOLDOWN_MS) return false;
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") return false;
+  return true;
+}
+
+function promptPerformanceReport(reason: string, currentLagMs = 0): void {
+  const now = Date.now();
+  if (!shouldPromptForPerformance(now)) return;
+  lastPerformancePromptAt = now;
+  addBreadcrumb("performance", reason);
+  const snapshot = performanceSnapshot(reason, currentLagMs);
+  paintPerformancePrompt(buildPerformancePayload(snapshot), snapshot);
+}
+
+function maybePromptForHeapPressure(): void {
+  const heap = readHeapSnapshot();
+  if (!heap?.usagePercent) return;
+  if (heap.usedMb >= 512 && heap.usagePercent >= 85) {
+    promptPerformanceReport(`js heap ${fmtNumber(heap.usagePercent)}% of limit`);
+  }
+}
+
+export function installPerformancePressureMonitor() {
+  if (performanceMonitorInstalled || typeof window === "undefined" || typeof performance === "undefined") return;
+  if (!window.runtime) return;
+  performanceMonitorInstalled = true;
+  const startedAt = performance.now();
+  const graceUntil = startedAt + STARTUP_GRACE_MS;
+
+  const pastGrace = () => performance.now() >= graceUntil;
+  const inspectLongTasks = () => {
+    if (!pastGrace()) return;
+    const summary = longTaskSummary();
+    if (!summary) return;
+    if (summary.maxMs >= LONG_TASK_PROMPT_MS || (summary.count >= 3 && summary.totalMs >= LONG_TASK_TOTAL_PROMPT_MS)) {
+      promptPerformanceReport(`long task ${fmtNumber(summary.maxMs)}ms`);
+    }
+  };
+
+  if (typeof PerformanceObserver !== "undefined") {
+    try {
+      const observer = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          if (!shouldRecordLongTaskSample(entry.startTime, entry.duration, graceUntil)) continue;
+          longTasks.push({ startMs: Math.round(entry.startTime), durationMs: Math.round(entry.duration) });
+        }
+        pruneLongTasks();
+        inspectLongTasks();
+      });
+      observer.observe({ entryTypes: ["longtask"] });
+    } catch {
+      // Some WebViews expose PerformanceObserver without the longtask entry type.
+    }
+  }
+
+  let expected = performance.now() + 1000;
+  window.setInterval(() => {
+    const now = performance.now();
+    const lagMs = Math.max(0, now - expected);
+    expected = now + 1000;
+    if (!pastGrace()) return;
+    lagSamples.push(lagMs);
+    if (lagSamples.length > MAX_LAG_SAMPLES) lagSamples.shift();
+    if (lagMs >= EVENT_LOOP_LAG_PROMPT_MS) promptPerformanceReport(`event loop lag ${fmtNumber(lagMs)}ms`, lagMs);
+    maybePromptForHeapPressure();
+  }, 1000);
 }
 
 export function installGlobalCrashHandlers() {
