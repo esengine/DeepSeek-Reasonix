@@ -1251,6 +1251,14 @@ func (a *App) CloseTab(tabID string) error {
 		a.mu.Unlock()
 		return fmt.Errorf("cannot close the last tab")
 	}
+	// Snapshot the session state before removing the tab from a.tabs.
+	// This closes a race window with DeleteSession: if Snapshot runs
+	// after delete(a.tabs, tabID), a concurrent DeleteSession can delete
+	// the session files, and the deferred Snapshot recreates them.
+	if tab.Ctrl != nil {
+		_ = tab.Ctrl.Snapshot()
+	}
+
 	ordered := a.orderedTabIDsLocked()
 	closedIndex := -1
 	for i, id := range ordered {
@@ -1280,7 +1288,6 @@ func (a *App) CloseTab(tabID string) error {
 
 	// Tear down outside the lock.
 	if tab.Ctrl != nil {
-		_ = tab.Ctrl.Snapshot()
 		if tab.hasActiveRuntimeWork() && a.detachSessionRuntime(tab) {
 			return nil
 		}
