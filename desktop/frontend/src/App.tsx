@@ -9,6 +9,8 @@ gsap.registerPlugin(useGSAP, Flip, ScrollToPlugin);
 import {
   Activity,
   Command,
+  Copy,
+  Check,
   Download,
   SquarePen,
   FileDown,
@@ -838,6 +840,7 @@ export default function App() {
   const [renamingTopicId, setRenamingTopicId] = useState<string | null>(null);
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
   const [topicExportOpen, setTopicExportOpen] = useState(false);
+  const [sessionCopied, setSessionCopied] = useState(false);
   const [sidebarTogglePressed, setSidebarTogglePressed] = useState(false);
   const [workspaceTogglePressed, setWorkspaceTogglePressed] = useState(false);
   const [clearContextPending, setClearContextPending] = useState(false);
@@ -2573,11 +2576,22 @@ export default function App() {
             <div className="topicbar__actions">
               {!sidebarImDetailConnection && (
               <>
-              <CopyButton
-                getText={getSessionMarkdown}
-                label={t("topicBar.copyAll")}
-                className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"
-              />
+              <Tooltip label={sessionCopied ? t("msg.copied") : t("topicBar.copyAll")}>
+                <button
+                  className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"
+                  type="button"
+                  aria-label={t("topicBar.copyAll")}
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(getSessionMarkdown());
+                      setSessionCopied(true);
+                      setTimeout(() => setSessionCopied(false), 1200);
+                    } catch { /* clipboard unavailable */ }
+                  }}
+                >
+                  {sessionCopied ? <Check size={14} /> : <Copy size={14} />}
+                </button>
+              </Tooltip>
               <div className={`topicbar__export${topicExportOpen ? " topicbar__export--open" : ""}`}>
                 <Tooltip label={t("topicBar.export")}>
                   <button
