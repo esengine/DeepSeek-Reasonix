@@ -99,16 +99,18 @@ if (!publish) {
   process.exit(0);
 }
 
-// Three independent dist-tags: 0.x stable is the promoted default (`latest`); a
-// `-canary.` build is the opt-in tester channel (`canary`); everything else — the
-// 1.x line and rc prereleases — ships under `next`. Only a `--tag canary` publish
-// moves canary, so `next`/`latest` users never resolve a canary. Promote a 1.x
-// stable to default with a manual `npm dist-tag add reasonix@<ver> latest`.
-const distTag = version.includes("-canary.")
-  ? "canary"
-  : version.startsWith("0.") && !version.includes("-")
-    ? "latest"
-    : "next";
+// Three independent dist-tags: any stable release (no prerelease suffix
+// like `-rc` or `-canary`) publishes under `latest` — the default install
+// channel for `npm i -g reasonix`. A `-canary.` build goes to `canary`;
+// rc and other prereleases go to `next`. The `release` environment approval
+// in CI already gates stable publishing, so there's no need for a separate
+// manual `npm dist-tag` promotion step.
+const isPrerelease = version.includes("-");
+const distTag = isPrerelease
+  ? version.includes("-canary.")
+    ? "canary"
+    : "next"
+  : "latest";
 const publishArgs = ["publish", "--access", "public", "--tag", distTag];
 
 for (const sub of subPackages) {

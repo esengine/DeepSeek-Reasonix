@@ -6,15 +6,14 @@ name: Release npm
 # own tag lets a prerelease ship to npm's `next` channel without touching the
 # stable Homebrew cask (and lets a stable cask ship without forcing npm to leave
 # its rc). Bump with:
-#   git tag npm-vX.Y.Z          # stable  -> publishes under `next`
+#   git tag npm-vX.Y.Z          # stable  -> publishes under `latest`
 #   git tag npm-vX.Y.Z-rc.N     # prerelease -> publishes under `next`
 #   git push origin <tag>
 #
 # A manual workflow_dispatch with base_version publishes an opt-in canary to the
 # `canary` dist-tag (npm i reasonix@canary) from the current ref; it never moves
-# `next`/`latest`. build.mjs decides the dist-tag: 0.x stable is `latest`; a
-# `-canary.` build is `canary`; the 1.x line and rc prereleases are `next`. Promote
-# a 1.x stable to the default install with `npm dist-tag add reasonix@X.Y.Z latest`.
+# `next`/`latest`. build.mjs decides the dist-tag: any stable release goes to
+# `latest`; a `-canary.` build is `canary`; rc and other prereleases are `next`.
 on:
   push:
     tags: ['npm-v*']
