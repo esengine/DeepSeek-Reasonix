@@ -33,7 +33,7 @@ func ConfineWebFetch(proxySpec netclient.ProxySpec) tool.Tool {
 }
 
 // ConfineWriters returns the file-writing built-ins (write_file, edit_file,
-// multi_edit, notebook_edit) bound to roots — the only directories they may
+// multi_edit, move_file, notebook_edit) bound to roots — the only directories they may
 // modify. The composition root adds these to the per-run registry to override
 // the unconfined instances registered at init time, so writes stay inside the
 // workspace by default. roots may be relative; they are resolved to absolute,
@@ -44,6 +44,7 @@ func ConfineWriters(roots []string) []tool.Tool {
 		writeFile{roots: rs},
 		editFile{roots: rs},
 		multiEdit{roots: rs},
+		moveFile{roots: rs},
 		notebookEdit{roots: rs},
 		deleteRange{roots: rs},
 		deleteSymbol{roots: rs},

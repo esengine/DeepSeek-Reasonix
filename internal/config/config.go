@@ -700,7 +700,7 @@ func (c *Config) IsSkillDisabled(name string) bool {
 
 // SandboxConfig bounds the blast radius of tool calls (Phase 0: file-writer
 // confinement). WorkspaceRoot is the directory the built-in file writers
-// (write_file / edit_file / multi_edit) may modify; empty means the current
+// (write_file / edit_file / multi_edit / move_file) may modify; empty means the current
 // working directory, so writes stay inside the project by default. AllowWrite
 // lists extra directories writers may also touch (e.g. a sibling repo or a temp
 // dir). Both support ${VAR} / ${VAR:-default} expansion. Reads are unrestricted;

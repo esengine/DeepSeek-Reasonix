@@ -983,6 +983,7 @@ command = "reasonix-missing-mockmcp"
 		"kill_shell",
 		"ls",
 		"memory",
+		"move_file",
 		"multi_edit",
 		"read_file",
 		"remember",
@@ -1246,6 +1247,7 @@ func TestAddBuiltinsWithWorkspaceRootKeepsSessionTools(t *testing.T) {
 		"bash_output",
 		"kill_shell",
 		"wait",
+		"move_file",
 		"notebook_edit",
 	} {
 		if _, ok := reg.Get(name); !ok {

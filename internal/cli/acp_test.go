@@ -34,6 +34,7 @@ func TestACPBuiltinToolsKeepSessionLevelBuiltins(t *testing.T) {
 		"bash_output",
 		"kill_shell",
 		"wait",
+		"move_file",
 		"notebook_edit",
 	} {
 		if tools[name] == nil {

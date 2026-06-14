@@ -1479,7 +1479,7 @@ func repeatSuccessSignature(call provider.ToolCall, t tool.Tool) (string, bool) 
 		return "", false
 	}
 	switch call.Name {
-	case "write_file", "edit_file", "multi_edit", "notebook_edit":
+	case "write_file", "edit_file", "multi_edit", "move_file", "notebook_edit":
 		return call.Name + "\x00" + canonicalToolArgs(call.Arguments), true
 	case "bash":
 		var p struct {

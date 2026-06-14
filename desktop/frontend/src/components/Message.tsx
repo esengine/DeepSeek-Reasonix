@@ -426,7 +426,7 @@ export const AssistantMessage = memo(function AssistantMessage({
       )}
       {hasText && (
         <div className="msg__body">
-          <Markdown text={item.text} showCursor={item.streaming} />
+          <Markdown text={item.text} />
         </div>
       )}
     </div>

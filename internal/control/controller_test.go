@@ -414,6 +414,10 @@ func TestMemoryApprovalSubjectsAndNotifications(t *testing.T) {
 	if got := approvalNotificationText("bash", "go test ./..."); got != "approval needed: bash go test ./..." {
 		t.Fatalf("bash notification = %q", got)
 	}
+	moveSubject := approvalDisplaySubject("move_file", "src/a.md", json.RawMessage(`{"source_path":"src/a.md","destination_path":"docs/a.md"}`))
+	if moveSubject != "src/a.md -> docs/a.md" {
+		t.Fatalf("move_file approval subject = %q", moveSubject)
+	}
 }
 
 // TestApprovalDeny confirms a declined call returns allow=false.
@@ -511,6 +515,7 @@ func TestApprovalSessionGrantGroupsFileMutationTools(t *testing.T) {
 		{"edit_file", "src/a.go"},
 		{"write_file", "src/b.go"},
 		{"multi_edit", "src/c.go"},
+		{"move_file", "src/d.go"},
 	} {
 		allow, _, err := gateApprover{c}.Approve(context.Background(), call.tool, call.subject, nil)
 		if err != nil || !allow {

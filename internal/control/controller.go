@@ -2756,9 +2756,28 @@ func approvalDisplaySubject(tool, subject string, args json.RawMessage) string {
 		return rememberApprovalSubject(subject, args)
 	case memoryForgetTool:
 		return forgetApprovalSubject(subject, args)
+	case "move_file":
+		return moveApprovalSubject(subject, args)
 	default:
 		return subject
 	}
+}
+
+func moveApprovalSubject(fallback string, args json.RawMessage) string {
+	if len(args) == 0 {
+		return fallback
+	}
+	var in struct {
+		SourcePath      string `json:"source_path"`
+		DestinationPath string `json:"destination_path"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return fallback
+	}
+	if in.SourcePath == "" || in.DestinationPath == "" {
+		return fallback
+	}
+	return in.SourcePath + " -> " + in.DestinationPath
 }
 
 func rememberApprovalSubject(fallback string, args json.RawMessage) string {

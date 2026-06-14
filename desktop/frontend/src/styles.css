@@ -2816,6 +2816,8 @@ a[href] {
 /* ── TurnCollapse: fold line for completed steps ──────────────────── */
 .turn-collapse {
   margin: 4px auto;
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 36px;
 }
 .turn-collapse__label {
   white-space: nowrap;
@@ -3101,6 +3103,8 @@ a[href] {
   margin: 18px auto;
   user-select: text;
   -webkit-user-select: text;
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 60px;
 }
 .msg--user {
   display: flex;
@@ -3400,6 +3404,8 @@ a[href] {
   box-sizing: border-box;
   margin: 6px auto;
   overflow: hidden;
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 36px;
 }
 /* T1: a tone-colored sweep bar along the bottom while the card is running
    (running cards render a .process-card__spin status icon). */
@@ -3646,36 +3652,6 @@ a[href] {
   line-height: 1.7;
   white-space: pre-wrap;
 }
-/* live bubble while the answer streams — markdown renders in real time */
-.msg__stream {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-.msg__cursor {
-  display: inline-block;
-  width: 7px;
-  height: 1.05em;
-  margin-top: 4px;
-  background: var(--accent);
-  vertical-align: text-bottom;
-  animation: blink 1.05s steps(2, start) infinite;
-}
-.cursor {
-  display: inline-block;
-  width: 7px;
-  height: 1.05em;
-  margin-left: 2px;
-  background: var(--accent);
-  vertical-align: text-bottom;
-  animation: blink 1.05s steps(2, start) infinite;
-}
-@keyframes blink {
-  to {
-    visibility: hidden;
-  }
-}
-
 /* ── markdown prose ──────────────────────────────────────────────────────── */
 .md {
   font-family: var(--font-content-family);
@@ -3934,6 +3910,8 @@ a[href] {
 .tool {
   margin: 6px auto;
   overflow: hidden;
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 36px;
 }
 .tool__head {
   display: flex;
@@ -18761,11 +18739,6 @@ a[href] {
   color: var(--fg);
   font-size: 14px;
   line-height: 1.85;
-}
-
-:root[data-theme-style] .msg__cursor {
-  background: var(--accent);
-  border-radius: 2px;
 }
 
 :root[data-theme-style] .process-card,
