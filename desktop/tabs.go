@@ -1283,18 +1283,21 @@ const tabsFileName = "desktop-tabs.json"
 const desktopGlobalOrderToken = "__global__"
 
 type desktopProject struct {
-	Root   string   `json:"root"`
-	Title  string   `json:"title,omitempty"`
-	Color  string   `json:"color,omitempty"`
-	Topics []string `json:"topics"` // ordered topic IDs
+	Root         string   `json:"root"`
+	Title        string   `json:"title,omitempty"`
+	Color        string   `json:"color,omitempty"`
+	Topics       []string `json:"topics"` // ordered topic IDs
+	PinnedTopics []string `json:"pinnedTopics,omitempty"`
 }
 
 type desktopProjectFile struct {
-	GlobalTitle  string           `json:"globalTitle,omitempty"`
-	GlobalColor  string           `json:"globalColor,omitempty"`
-	GlobalTopics []string         `json:"globalTopics,omitempty"`
-	SidebarOrder []string         `json:"sidebarOrder,omitempty"`
-	Projects     []desktopProject `json:"projects"`
+	GlobalTitle        string           `json:"globalTitle,omitempty"`
+	GlobalColor        string           `json:"globalColor,omitempty"`
+	GlobalTopics       []string         `json:"globalTopics,omitempty"`
+	GlobalPinnedTopics []string         `json:"globalPinnedTopics,omitempty"`
+	PinnedProjects     []string         `json:"pinnedProjects,omitempty"`
+	SidebarOrder       []string         `json:"sidebarOrder,omitempty"`
+	Projects           []desktopProject `json:"projects"`
 }
 
 type desktopTabEntry struct {
@@ -1478,9 +1481,10 @@ func normalizeProjectRoot(root string) string {
 
 func normalizeProjectsFile(f desktopProjectFile) desktopProjectFile {
 	out := desktopProjectFile{
-		GlobalTitle:  strings.TrimSpace(f.GlobalTitle),
-		GlobalColor:  normalizeProjectColor(f.GlobalColor),
-		GlobalTopics: uniqueStrings(f.GlobalTopics),
+		GlobalTitle:        strings.TrimSpace(f.GlobalTitle),
+		GlobalColor:        normalizeProjectColor(f.GlobalColor),
+		GlobalTopics:       uniqueStrings(f.GlobalTopics),
+		GlobalPinnedTopics: uniqueStrings(f.GlobalPinnedTopics),
 	}
 	index := map[string]int{}
 	for _, p := range f.Projects {
@@ -1492,6 +1496,7 @@ func normalizeProjectsFile(f desktopProjectFile) desktopProjectFile {
 		p.Title = strings.TrimSpace(p.Title)
 		p.Color = normalizeProjectColor(p.Color)
 		p.Topics = uniqueStrings(p.Topics)
+		p.PinnedTopics = uniqueStrings(p.PinnedTopics)
 		if i, ok := index[root]; ok {
 			if out.Projects[i].Title == "" && p.Title != "" {
 				out.Projects[i].Title = p.Title
@@ -1500,10 +1505,21 @@ func normalizeProjectsFile(f desktopProjectFile) desktopProjectFile {
 				out.Projects[i].Color = p.Color
 			}
 			out.Projects[i].Topics = uniqueStrings(append(out.Projects[i].Topics, p.Topics...))
+			out.Projects[i].PinnedTopics = uniqueStrings(append(out.Projects[i].PinnedTopics, p.PinnedTopics...))
 			continue
 		}
 		index[root] = len(out.Projects)
 		out.Projects = append(out.Projects, p)
+	}
+	projectRoots := make(map[string]bool, len(out.Projects))
+	for _, project := range out.Projects {
+		projectRoots[project.Root] = true
+	}
+	for _, root := range uniqueStrings(f.PinnedProjects) {
+		root = normalizeProjectRoot(root)
+		if root != "" && projectRoots[root] && !containsDesktopString(out.PinnedProjects, root) {
+			out.PinnedProjects = append(out.PinnedProjects, root)
+		}
 	}
 	out.SidebarOrder = normalizeSidebarOrder(f.SidebarOrder, out.Projects)
 	return out
@@ -1568,6 +1584,43 @@ func removeString(values []string, value string) []string {
 	for _, item := range uniqueStrings(values) {
 		if item != value {
 			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func containsDesktopString(values []string, value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	for _, item := range uniqueStrings(values) {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func pinnedTopicIDs(topicIDs []string, pinned []string) []string {
+	if len(topicIDs) == 0 || len(pinned) == 0 {
+		return topicIDs
+	}
+	available := make(map[string]bool, len(topicIDs))
+	for _, tid := range topicIDs {
+		available[tid] = true
+	}
+	out := make([]string, 0, len(topicIDs))
+	seen := make(map[string]bool, len(topicIDs))
+	for _, tid := range uniqueStrings(pinned) {
+		if available[tid] && !seen[tid] {
+			out = append(out, tid)
+			seen[tid] = true
+		}
+	}
+	for _, tid := range topicIDs {
+		if !seen[tid] {
+			out = append(out, tid)
 		}
 	}
 	return out
@@ -1640,6 +1693,37 @@ func applyProjectTreeOrder(nodes []ProjectNode, order []string) []ProjectNode {
 		}
 		if key != "" {
 			seen[key] = true
+		}
+		out = append(out, node)
+	}
+	return out
+}
+
+func applyPinnedProjectOrder(nodes []ProjectNode, pinnedRoots []string) []ProjectNode {
+	pinnedRoots = uniqueStrings(pinnedRoots)
+	if len(pinnedRoots) == 0 {
+		return nodes
+	}
+	byRoot := make(map[string]ProjectNode, len(nodes))
+	for _, node := range nodes {
+		if node.Kind == "project" && node.Root != "" {
+			byRoot[normalizeProjectRoot(node.Root)] = node
+		}
+	}
+	seen := make(map[string]bool, len(pinnedRoots))
+	out := make([]ProjectNode, 0, len(nodes))
+	for _, root := range pinnedRoots {
+		root = normalizeProjectRoot(root)
+		node, ok := byRoot[root]
+		if !ok || seen[root] {
+			continue
+		}
+		seen[root] = true
+		out = append(out, node)
+	}
+	for _, node := range nodes {
+		if node.Kind == "project" && node.Root != "" && seen[normalizeProjectRoot(node.Root)] {
+			continue
 		}
 		out = append(out, node)
 	}
@@ -2049,6 +2133,7 @@ type ProjectNode struct {
 	Open           bool          `json:"open,omitempty"`
 	Running        bool          `json:"running,omitempty"`
 	Status         string        `json:"status,omitempty"`
+	Pinned         bool          `json:"pinned,omitempty"`
 	Children       []ProjectNode `json:"children,omitempty"`
 }
 
@@ -2407,6 +2492,36 @@ func (a *App) SetProjectColor(workspaceRoot, color string) error {
 	return nil
 }
 
+// SetProjectPinned controls whether a project folder is pinned above the rest of
+// the desktop project tree.
+func (a *App) SetProjectPinned(workspaceRoot string, pinned bool) error {
+	root := normalizeProjectRoot(workspaceRoot)
+	if root == "" {
+		return fmt.Errorf("workspaceRoot is required")
+	}
+	f := loadProjectsFile()
+	found := false
+	for _, project := range f.Projects {
+		if project.Root == root {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("project %q not found", root)
+	}
+	if pinned {
+		f.PinnedProjects = prependUniqueString(f.PinnedProjects, root)
+	} else {
+		f.PinnedProjects = removeString(f.PinnedProjects, root)
+	}
+	if err := saveProjectsFile(f); err != nil {
+		return err
+	}
+	a.emitProjectTreeChanged()
+	return nil
+}
+
 // ReorderProjects persists the user-defined order of project folders and,
 // when present, the virtual Global sidebar section.
 func (a *App) ReorderProjects(workspaceRoots []string) error {
@@ -2622,6 +2737,7 @@ func (a *App) DeleteTopic(topicID string) error {
 			_ = saveTopicTitleSources("", sources)
 			deleteTopicCreatedAt("", topicID)
 			f.GlobalTopics = removeString(f.GlobalTopics, topicID)
+			f.GlobalPinnedTopics = removeString(f.GlobalPinnedTopics, topicID)
 			found = true
 		}
 	}
@@ -2629,6 +2745,7 @@ func (a *App) DeleteTopic(topicID string) error {
 		return fmt.Errorf("topic %q not found", topicID)
 	}
 	// Remove from project topic list.
+	f.GlobalPinnedTopics = removeString(f.GlobalPinnedTopics, topicID)
 	for i, p := range f.Projects {
 		for j, tid := range p.Topics {
 			if tid == topicID {
@@ -2636,8 +2753,49 @@ func (a *App) DeleteTopic(topicID string) error {
 				break
 			}
 		}
+		f.Projects[i].PinnedTopics = removeString(f.Projects[i].PinnedTopics, topicID)
 	}
 	_ = saveProjectsFile(f)
+	a.emitProjectTreeChanged()
+	return nil
+}
+
+// SetTopicPinned controls whether a topic is pinned to the top of its project
+// or Global section in the desktop project tree.
+func (a *App) SetTopicPinned(topicID string, pinned bool) error {
+	topicID = strings.TrimSpace(topicID)
+	if topicID == "" {
+		return fmt.Errorf("topicID is required")
+	}
+	f := loadProjectsFile()
+	for i, p := range f.Projects {
+		m := loadTopicTitles(p.Root)
+		if _, ok := m[topicID]; !ok && !containsDesktopString(p.Topics, topicID) {
+			continue
+		}
+		if pinned {
+			f.Projects[i].PinnedTopics = prependUniqueString(f.Projects[i].PinnedTopics, topicID)
+		} else {
+			f.Projects[i].PinnedTopics = removeString(f.Projects[i].PinnedTopics, topicID)
+		}
+		if err := saveProjectsFile(f); err != nil {
+			return err
+		}
+		a.emitProjectTreeChanged()
+		return nil
+	}
+	globalTitles := loadTopicTitles("")
+	if _, ok := globalTitles[topicID]; !ok && !containsDesktopString(f.GlobalTopics, topicID) {
+		return fmt.Errorf("topic %q not found", topicID)
+	}
+	if pinned {
+		f.GlobalPinnedTopics = prependUniqueString(f.GlobalPinnedTopics, topicID)
+	} else {
+		f.GlobalPinnedTopics = removeString(f.GlobalPinnedTopics, topicID)
+	}
+	if err := saveProjectsFile(f); err != nil {
+		return err
+	}
 	a.emitProjectTreeChanged()
 	return nil
 }
@@ -2822,12 +2980,13 @@ func (a *App) ListProjectTree() []ProjectNode {
 			globalTitle = "Global"
 		}
 		globalColor := normalizeProjectColor(f.GlobalColor)
-		globalTopicIDs := orderedTopicIDs(f.GlobalTopics, globalTitleMap)
+		globalTopicIDs := pinnedTopicIDs(orderedTopicIDs(f.GlobalTopics, globalTitleMap), f.GlobalPinnedTopics)
 		children := make([]ProjectNode, 0, len(globalTopicIDs))
 		for _, id := range globalTopicIDs {
 			title := globalTitleMap[id]
 			summary := topicSummaries[topicSummaryKey("global", "", id)]
 			status := openTopics[topicSummaryKey("global", "", id)]
+			pinned := containsDesktopString(f.GlobalPinnedTopics, id)
 			children = append(children, ProjectNode{
 				Key:            "global_topic_" + id,
 				Kind:           "global_topic",
@@ -2840,6 +2999,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 				Open:           status.open,
 				Running:        status.running,
 				Status:         status.status,
+				Pinned:         pinned,
 			})
 		}
 		out = append(out, ProjectNode{
@@ -2859,15 +3019,16 @@ func (a *App) ListProjectTree() []ProjectNode {
 			title = workspaceName(p.Root)
 		}
 		node := ProjectNode{
-			Key:  "project_" + p.Root,
-			Kind: "project",
-			Root: p.Root,
+			Key:    "project_" + p.Root,
+			Kind:   "project",
+			Root:   p.Root,
+			Pinned: containsDesktopString(f.PinnedProjects, p.Root),
 		}
 
 		// Gather topics: explicit topic list + all known topic titles.
 		titleMap := loadTopicTitles(p.Root)
 		createdMap := loadTopicCreatedAts(p.Root)
-		topicIDs := orderedTopicIDs(p.Topics, titleMap)
+		topicIDs := pinnedTopicIDs(orderedTopicIDs(p.Topics, titleMap), p.PinnedTopics)
 
 		children := make([]ProjectNode, 0, len(topicIDs))
 		for _, tid := range topicIDs {
@@ -2877,6 +3038,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 			}
 			summary := topicSummaries[topicSummaryKey("project", p.Root, tid)]
 			status := openTopics[topicSummaryKey("project", p.Root, tid)]
+			pinned := containsDesktopString(p.PinnedTopics, tid)
 			children = append(children, ProjectNode{
 				Key:            "topic_" + tid,
 				Kind:           "topic",
@@ -2890,6 +3052,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 				Open:           status.open,
 				Running:        status.running,
 				Status:         status.status,
+				Pinned:         pinned,
 			})
 		}
 		node.Label = title
@@ -2898,7 +3061,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 		out = append(out, node)
 	}
 
-	return applyProjectTreeOrder(out, f.SidebarOrder)
+	return applyPinnedProjectOrder(applyProjectTreeOrder(out, f.SidebarOrder), f.PinnedProjects)
 }
 
 func topicSummaryKey(scope, workspaceRoot, topicID string) string {

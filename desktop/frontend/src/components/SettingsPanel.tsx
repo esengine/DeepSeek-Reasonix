@@ -387,7 +387,7 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
     case "models":
       return settingsModelMeta(s, t);
     case "general":
-      return `${closeBehaviorLabel(normalizeCloseBehavior(s.closeBehavior), t)} · ${t(`settings.autoPlan.${normalizeAutoPlan(s.autoPlan)}`)}`;
+      return `${desktopLayoutStyleLabel(normalizeDesktopLayoutStyle(s.desktopLayoutStyle), t)} · ${closeBehaviorLabel(normalizeCloseBehavior(s.closeBehavior), t)}`;
     case "providers":
       return t("settings.providerCount", { n: s.providers.length });
     case "bots":
@@ -588,6 +588,10 @@ function normalizeBotConnection(raw: any) {
     sessionMappings: asArray(raw?.sessionMappings).map((item: any) => ({
       remoteId: String(item?.remoteId ?? "").trim(),
       sessionId: String(item?.sessionId ?? "").trim(),
+      sessionSource: String(item?.sessionSource ?? "").trim(),
+      chatType: String(item?.chatType ?? "").trim(),
+      userId: String(item?.userId ?? "").trim(),
+      threadId: String(item?.threadId ?? "").trim(),
       scope: normalizeBotMappingScope(item?.scope, item?.workspaceRoot ?? workspaceRoot),
       workspaceRoot: normalizeBotMappingScope(item?.scope, item?.workspaceRoot ?? workspaceRoot) === "project"
         ? String(item?.workspaceRoot ?? workspaceRoot).trim()
@@ -660,6 +664,7 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     autoApproveTools: Boolean(view.autoApproveTools ?? view.bypass),
     bypass: Boolean(view.autoApproveTools ?? view.bypass),
     desktopLanguage: normalizeLangPref(view.desktopLanguage),
+    desktopLayoutStyle: normalizeDesktopLayoutStyle(view.desktopLayoutStyle),
     desktopTheme: normalizeThemePreference(view.desktopTheme),
     desktopThemeStyle: normalizeThemeStyleForTheme(view.desktopThemeStyle, normalizeThemePreference(view.desktopTheme)),
     closeBehavior: normalizeCloseBehavior(view.closeBehavior),
@@ -680,6 +685,16 @@ type DisplayMode = "standard" | "compact";
 
 function normalizeDisplayMode(mode: string | undefined): DisplayMode {
   return mode === "standard" || mode === "compact" ? mode : "standard";
+}
+
+type DesktopLayoutStyle = "classic" | "workbench";
+
+function normalizeDesktopLayoutStyle(style: string | undefined): DesktopLayoutStyle {
+  return style === "workbench" ? "workbench" : "classic";
+}
+
+function desktopLayoutStyleLabel(style: DesktopLayoutStyle, t: ReturnType<typeof useT>): string {
+  return t(`settings.desktopLayoutStyle.${style}`);
 }
 
 type StatusBarStyle = "icon" | "text";
@@ -768,6 +783,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   useEffect(() => () => mouseDragCleanupRef.current?.(), []);
   const autoPlan = normalizeAutoPlan(s.autoPlan);
   const languagePref = normalizeLangPref(s.desktopLanguage);
+  const desktopLayoutStyle = normalizeDesktopLayoutStyle(s.desktopLayoutStyle);
   const [genMusicPreset, setGenMusicPreset] = useState<GenerativePreset>(getGenerativePreset());
   const [soundPref, setSoundPref] = useState<SoundWavPref>(getSuccessPreference());
   const [attentionPref, setAttentionPref] = useState<SoundWavPref>(getAttentionPreference());
@@ -934,6 +950,20 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
               onClick={() => setLanguage(pref)}
             >
               {pref === "" ? t("settings.langAuto") : pref === "zh" ? "中文" : "English"}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.desktopLayoutStyle")}>
+        <div className="set-seg">
+          {(["classic", "workbench"] as const).map((style) => (
+            <button
+              key={style}
+              className={`set-seg__btn${desktopLayoutStyle === style ? " set-seg__btn--on" : ""}`}
+              disabled={busy}
+              onClick={() => void apply(() => app.SetDesktopLayoutStyle(style))}
+            >
+              {desktopLayoutStyleLabel(style, t)}
             </button>
           ))}
         </div>
@@ -1708,9 +1738,14 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
       await persistConnections((items) => items.map((item) => {
         if (item.id !== connection.id) return item;
         const scope = connection.workspaceRoot ? "project" : "global";
+        const matchesTestMapping = (mapping: BotConnectionView["sessionMappings"][number]) =>
+          mapping.remoteId === target &&
+          !mapping.chatType.trim() &&
+          !mapping.userId.trim() &&
+          !mapping.threadId.trim();
         const sessionMappings = [
-          ...item.sessionMappings.filter((mapping) => mapping.remoteId !== target),
-          { remoteId: target, sessionId: "", scope, workspaceRoot: scope === "project" ? connection.workspaceRoot : "", updatedAt },
+          ...item.sessionMappings.filter((mapping) => !matchesTestMapping(mapping)),
+          { remoteId: target, sessionId: "", sessionSource: "", chatType: "", userId: "", threadId: "", scope, workspaceRoot: scope === "project" ? connection.workspaceRoot : "", updatedAt },
         ];
         return { ...item, sessionMappings, updatedAt };
       }));

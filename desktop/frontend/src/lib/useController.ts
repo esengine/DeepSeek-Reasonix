@@ -213,11 +213,14 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
       resultByID.set(m.toolCallId, m);
     }
   }
+  const positionalResults = positionalToolResults(messages);
+  const consumedPositionalToolIndexes = new Set(Array.from(positionalResults.values(), (result) => result.index));
 
   const items: Item[] = [];
   let seq = startSeq;
   const consumedToolIDs = new Set<string>();
-  for (const m of messages) {
+  for (let messageIndex = 0; messageIndex < messages.length; messageIndex += 1) {
+    const m = messages[messageIndex];
     if (m.role === "system") continue;
     if (m.role === "phase") {
       if (m.content.trim() !== "") {
@@ -258,18 +261,21 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
         items.push({ kind: "assistant", id: `${idPrefix}${seq}`, text: m.content, reasoning: m.reasoning ?? "", streaming: false });
         seq++;
       }
-      for (const tc of m.toolCalls ?? []) {
-        const result = resultByID.get(tc.id);
+      const toolCalls = m.toolCalls ?? [];
+      for (let callIndex = 0; callIndex < toolCalls.length; callIndex += 1) {
+        const tc = toolCalls[callIndex];
+        const positionalResult = tc.id ? undefined : positionalResults.get(positionalToolResultKey(messageIndex, callIndex));
+        const result = tc.id ? resultByID.get(tc.id) : positionalResult?.message;
         if (tc.id) consumedToolIDs.add(tc.id);
         const output = result?.content ?? "";
-        const error = output.startsWith("[error") || output.startsWith("Error:") ? output : undefined;
+        const error = result ? historyToolError(output) : undefined;
         items.push({
           kind: "tool",
           id: tc.id || `${idPrefix}tool${seq}`,
           name: tc.name,
           args: tc.arguments ?? "",
           readOnly: isReadOnlyTool(tc.name),
-          status: error ? "error" : "done",
+          status: result ? (error ? "error" : "done") : "stopped",
           output,
           error,
           isShell: (tc.id || "").startsWith("shell-"),
@@ -279,9 +285,9 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
       continue;
     }
     if (m.role === "tool") {
-      if (m.toolCallId && consumedToolIDs.has(m.toolCallId)) continue;
+      if ((m.toolCallId && consumedToolIDs.has(m.toolCallId)) || consumedPositionalToolIndexes.has(messageIndex)) continue;
       const output = m.content;
-      const error = output.startsWith("[error") || output.startsWith("Error:") ? output : undefined;
+      const error = historyToolError(output);
       items.push({
         kind: "tool",
         id: m.toolCallId || `${idPrefix}tool${seq}`,
@@ -298,6 +304,51 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
     }
   }
   return { items, seq };
+}
+
+function positionalToolResults(messages: HistoryMessage[]): Map<string, { message: HistoryMessage; index: number }> {
+  const out = new Map<string, { message: HistoryMessage; index: number }>();
+  const consumed = new Set<number>();
+  for (let messageIndex = 0; messageIndex < messages.length; messageIndex += 1) {
+    const message = messages[messageIndex];
+    const toolCalls = message.role === "assistant" ? message.toolCalls ?? [] : [];
+    if (toolCalls.length === 0) continue;
+    let resultIndex = messageIndex + 1;
+    for (let callIndex = 0; callIndex < toolCalls.length; callIndex += 1) {
+      if (toolCalls[callIndex].id) continue;
+      let matched = false;
+      while (resultIndex < messages.length) {
+        const candidate = messages[resultIndex];
+        if (candidate.role !== "tool") break;
+        const candidateIndex = resultIndex;
+        resultIndex += 1;
+        if (candidate.toolCallId || consumed.has(candidateIndex)) continue;
+        consumed.add(candidateIndex);
+        out.set(positionalToolResultKey(messageIndex, callIndex), { message: candidate, index: candidateIndex });
+        matched = true;
+        break;
+      }
+      if (!matched) break;
+    }
+  }
+  return out;
+}
+
+function positionalToolResultKey(messageIndex: number, callIndex: number): string {
+  return `${messageIndex}:${callIndex}`;
+}
+
+function historyToolError(output: string): string | undefined {
+  const trimmed = output.trimStart();
+  if (
+    trimmed.startsWith("[error") ||
+    trimmed.startsWith("Error:") ||
+    trimmed.startsWith("error:") ||
+    trimmed.startsWith("blocked:")
+  ) {
+    return output;
+  }
+  return undefined;
 }
 
 function ensureAssistant(s: State): { items: Item[]; id: string; seq: number } {

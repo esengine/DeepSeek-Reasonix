@@ -10,7 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/boot"
+	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 )
@@ -27,6 +29,9 @@ type GatewayConfig struct {
 	Enabled            map[Platform]bool
 	Debounce           time.Duration
 	OnInbound          func(InboundMessage)
+	// OnSessionReady persists the concrete Reasonix session ID after the bot
+	// has created or reused the controller for an inbound remote.
+	OnSessionReady func(InboundMessage, string) error
 	// OnToolApprovalModeChange persists a remote IM request such as /yolo on.
 	// The gateway updates the live session and in-memory defaults first; this
 	// callback lets desktop save the chosen connection mode to user config.
@@ -510,6 +515,7 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 			if err := state.ctrl.NewSession(); err != nil {
 				gw.logger.Warn("new session failed", "err", err)
 			}
+			gw.rememberSessionReady(msg, state.ctrl)
 		}
 		gw.sessions.ForceRelease(key)
 		_ = gw.sendText(ctx, adapter, msg, "已开始新会话。")
@@ -765,6 +771,7 @@ func (gw *BotGateway) runTurn(ctx context.Context, adapter Adapter, key string, 
 		_ = gw.sendText(ctx, adapter, msg, "内部错误：无法创建会话。")
 		return
 	}
+	gw.rememberSessionReady(msg, state.ctrl)
 
 	// 发送"正在输入"状态
 	_ = adapter.SendTyping(ctx, msg.ChatID)
@@ -842,6 +849,7 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 		RequireKey:    true,
 		Sink:          sessionSink,
 		WorkspaceRoot: workspaceRoot,
+		SessionDir:    botSessionDir(workspaceRoot),
 	})
 	if err != nil {
 		gw.logger.Error("build controller failed", "err", err)
@@ -849,6 +857,7 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	}
 	ctrl.EnableInteractiveApproval()
 	ctrl.SetToolApprovalMode(toolApprovalMode)
+	ensureControllerSessionPath(ctrl)
 
 	gw.mu.Lock()
 	gw.controllers[key] = &sessionState{
@@ -863,6 +872,44 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 
 	gw.logger.Info("bot session created", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8])
 	return state
+}
+
+func ensureControllerSessionPath(ctrl *control.Controller) {
+	if ctrl == nil || ctrl.SessionPath() != "" || ctrl.SessionDir() == "" {
+		return
+	}
+	ctrl.SetSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
+}
+
+func botSessionDir(workspaceRoot string) string {
+	if strings.TrimSpace(workspaceRoot) == "" {
+		return config.SessionDir()
+	}
+	if dir := config.ProjectSessionDir(workspaceRoot); dir != "" {
+		return dir
+	}
+	return config.SessionDir()
+}
+
+func (gw *BotGateway) rememberSessionReady(msg InboundMessage, ctrl *control.Controller) {
+	if gw.cfg.OnSessionReady == nil || ctrl == nil {
+		return
+	}
+	sessionID := botSessionTarget(ctrl.SessionPath())
+	if sessionID == "" {
+		return
+	}
+	if err := gw.cfg.OnSessionReady(msg, sessionID); err != nil {
+		gw.logger.Warn("remember bot session failed", "platform", msg.Platform, "connection", msg.ConnectionID, "err", err)
+	}
+}
+
+func botSessionTarget(sessionPath string) string {
+	sessionPath = strings.TrimSpace(sessionPath)
+	if sessionPath == "" {
+		return ""
+	}
+	return "path:" + sessionPath
 }
 
 func (gw *BotGateway) sessionOptionsForMessage(msg InboundMessage) (model string, workspaceRoot string, toolApprovalMode string) {

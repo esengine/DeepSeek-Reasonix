@@ -155,6 +155,7 @@ export interface ProjectNode {
   open?: boolean;
   running?: boolean;
   status?: ProjectTopicStatus;
+  pinned?: boolean;
   children?: ProjectNode[];
 }
 
@@ -485,6 +486,23 @@ export interface CapabilitiesView {
   skills: SkillView[];
   skillRoots: SkillRootView[];
 }
+export interface BuiltInMCPUpdateResult {
+  name: string;
+  version: string;
+  path: string;
+}
+
+export type BuiltInMCPUpdatePhase = "current" | "available" | "downloaded" | "activated" | "skipped" | "error";
+
+export interface BuiltInMCPUpdateStatus {
+  name: string;
+  mode: string;
+  current: string;
+  latest: string;
+  phase: BuiltInMCPUpdatePhase;
+  path?: string;
+  err?: string;
+}
 export interface MCPServerInput {
   name: string;
   transport: string; // stdio | http | sse
@@ -714,6 +732,10 @@ export interface BotConnectionCredentialView {
 export interface BotConnectionSessionMappingView {
   remoteId: string;
   sessionId: string;
+  sessionSource: string;
+  chatType: string;
+  userId: string;
+  threadId: string;
   scope: "global" | "project" | string;
   workspaceRoot: string;
   updatedAt: string;
@@ -823,6 +845,7 @@ export interface SettingsView {
   agent: AgentView;
   bot: BotSettingsView;
   desktopLanguage: string; // "" | "en" | "zh"; empty = auto
+  desktopLayoutStyle: string; // "classic" | "workbench"
   desktopTheme: string; // "auto" | "dark" | "light"
   desktopThemeStyle: string;
   closeBehavior: string; // "background" | "quit"

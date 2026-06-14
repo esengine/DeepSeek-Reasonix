@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 
@@ -39,25 +40,26 @@ func SkillNameKey(name string) string {
 
 // Config is Reasonix's runtime configuration.
 type Config struct {
-	ConfigVersion int                 `toml:"config_version"`
-	DefaultModel  string              `toml:"default_model"`
-	Language      string              `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $REASONIX_LANG
-	UI            UIConfig            `toml:"ui"`
-	Desktop       DesktopConfig       `toml:"desktop"`
-	Notifications NotificationsConfig `toml:"notifications"`
-	Agent         AgentConfig         `toml:"agent"`
-	Providers     []ProviderEntry     `toml:"providers"`
-	Tools         ToolsConfig         `toml:"tools"`
-	Permissions   PermissionsConfig   `toml:"permissions"`
-	Sandbox       SandboxConfig       `toml:"sandbox"`
-	Network       NetworkConfig       `toml:"network"`
-	Plugins       []PluginEntry       `toml:"plugins"`
-	Skills        SkillsConfig        `toml:"skills"`
-	Codegraph     CodegraphConfig     `toml:"codegraph"`
-	BuiltInMCP    BuiltInMCPConfig    `toml:"builtin_mcp"`
-	Statusline    StatuslineConfig    `toml:"statusline"`
-	LSP           LSPConfig           `toml:"lsp"`
-	Bot           BotConfig           `toml:"bot"`
+	ConfigVersion     int                     `toml:"config_version"`
+	DefaultModel      string                  `toml:"default_model"`
+	Language          string                  `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $REASONIX_LANG
+	UI                UIConfig                `toml:"ui"`
+	Desktop           DesktopConfig           `toml:"desktop"`
+	Notifications     NotificationsConfig     `toml:"notifications"`
+	Agent             AgentConfig             `toml:"agent"`
+	Providers         []ProviderEntry         `toml:"providers"`
+	Tools             ToolsConfig             `toml:"tools"`
+	Permissions       PermissionsConfig       `toml:"permissions"`
+	Sandbox           SandboxConfig           `toml:"sandbox"`
+	Network           NetworkConfig           `toml:"network"`
+	Plugins           []PluginEntry           `toml:"plugins"`
+	Skills            SkillsConfig            `toml:"skills"`
+	Codegraph         CodegraphConfig         `toml:"codegraph"`
+	BuiltInMCP        BuiltInMCPConfig        `toml:"builtin_mcp"`
+	BuiltInMCPUpdates BuiltInMCPUpdatesConfig `toml:"builtin_mcp_updates"`
+	Statusline        StatuslineConfig        `toml:"statusline"`
+	LSP               LSPConfig               `toml:"lsp"`
+	Bot               BotConfig               `toml:"bot"`
 }
 
 // UIConfig controls CLI presentation-only settings. Desktop appearance is kept in
@@ -75,6 +77,7 @@ type UIConfig struct {
 // language, terminal colours, or provider-visible prompt/request data.
 type DesktopConfig struct {
 	Language       string   `toml:"language"`         // auto|en|zh; empty/auto = browser/OS auto-detect
+	LayoutStyle    string   `toml:"layout_style"`     // classic|workbench; desktop layout style
 	Theme          string   `toml:"theme"`            // auto|dark|light; empty resolves to dark
 	ThemeStyle     string   `toml:"theme_style"`      // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 	CloseBehavior  string   `toml:"close_behavior"`   // quit|background; desktop window close behavior
@@ -135,6 +138,15 @@ func normalizeThemeStyle(style string) string {
 	}
 }
 
+func normalizeDesktopLayoutStyle(style string) string {
+	switch strings.ToLower(strings.TrimSpace(style)) {
+	case "workbench", "workspace":
+		return "workbench"
+	default:
+		return "classic"
+	}
+}
+
 func normalizeCloseBehavior(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "quit", "exit":
@@ -177,6 +189,16 @@ func (c *Config) DesktopTheme() string {
 // chooses the default style for the resolved desktop theme.
 func (c *Config) DesktopThemeStyle() string {
 	return normalizeThemeStyle(c.Desktop.ThemeStyle)
+}
+
+// DesktopLayoutStyle normalizes the desktop layout style. It falls back to the
+// classic layout, while accepting the short-lived desktop.theme_style=workbench
+// value as a compatibility migration hint.
+func (c *Config) DesktopLayoutStyle() string {
+	if strings.EqualFold(strings.TrimSpace(c.Desktop.ThemeStyle), "workbench") && strings.TrimSpace(c.Desktop.LayoutStyle) == "" {
+		return "workbench"
+	}
+	return normalizeDesktopLayoutStyle(c.Desktop.LayoutStyle)
 }
 
 // DesktopCloseBehavior normalizes the desktop close-window preference. It falls
@@ -439,6 +461,52 @@ func (c BuiltInMCPConfig) EnabledNames() []string {
 	return out
 }
 
+const (
+	BuiltInMCPUpdateModeOff             = "off"
+	BuiltInMCPUpdateModeNotify          = "notify"
+	BuiltInMCPUpdateModeDownload        = "download"
+	BuiltInMCPUpdateModeAutoNextSession = "auto_next_session"
+
+	defaultBuiltInMCPUpdateInterval = 24 * time.Hour
+)
+
+// BuiltInMCPUpdatesConfig controls background update checks for Reasonix-owned
+// built-in MCP runtimes. The default is notify-only so startup never silently
+// changes provider-visible MCP tool schemas.
+type BuiltInMCPUpdatesConfig struct {
+	Mode          string `toml:"mode"`
+	CheckInterval string `toml:"check_interval"`
+}
+
+func (c BuiltInMCPUpdatesConfig) ResolvedMode() string {
+	switch strings.ToLower(strings.TrimSpace(c.Mode)) {
+	case BuiltInMCPUpdateModeOff:
+		return BuiltInMCPUpdateModeOff
+	case BuiltInMCPUpdateModeDownload:
+		return BuiltInMCPUpdateModeDownload
+	case BuiltInMCPUpdateModeAutoNextSession:
+		return BuiltInMCPUpdateModeAutoNextSession
+	default:
+		return BuiltInMCPUpdateModeNotify
+	}
+}
+
+func (c BuiltInMCPUpdatesConfig) CheckIntervalDuration() time.Duration {
+	raw := strings.TrimSpace(c.CheckInterval)
+	if raw == "" {
+		return defaultBuiltInMCPUpdateInterval
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return defaultBuiltInMCPUpdateInterval
+	}
+	return d
+}
+
+func (c BuiltInMCPUpdatesConfig) ResolvedCheckInterval() string {
+	return c.CheckIntervalDuration().String()
+}
+
 // BotConfig 控制多渠道 IM bot 消息网关。
 type BotConfig struct {
 	Enabled          bool                  `toml:"enabled"`
@@ -524,6 +592,10 @@ type BotConnectionCredential struct {
 type BotConnectionSessionMapping struct {
 	RemoteID      string `toml:"remote_id"`
 	SessionID     string `toml:"session_id"`
+	SessionSource string `toml:"session_source"`
+	ChatType      string `toml:"chat_type"`
+	UserID        string `toml:"user_id"`
+	ThreadID      string `toml:"thread_id"`
 	Scope         string `toml:"scope"`
 	WorkspaceRoot string `toml:"workspace_root"`
 	UpdatedAt     string `toml:"updated_at"`
@@ -1139,6 +1211,10 @@ func Default() *Config {
 		// Time is dependency-free and bundled, so expose it by default. Context7
 		// can invoke a package runner and remains opt-in.
 		BuiltInMCP: BuiltInMCPConfig{TimeEnabled: true},
+		BuiltInMCPUpdates: BuiltInMCPUpdatesConfig{
+			Mode:          BuiltInMCPUpdateModeNotify,
+			CheckInterval: defaultBuiltInMCPUpdateInterval.String(),
+		},
 		// LSP tools on by default, but dormant until a language server is on PATH;
 		// a missing server yields an install hint rather than an error.
 		LSP:     LSPConfig{Enabled: true},

@@ -29,6 +29,10 @@ type BotConnectionCredentialView struct {
 type BotConnectionSessionMappingView struct {
 	RemoteID      string `json:"remoteId"`
 	SessionID     string `json:"sessionId"`
+	SessionSource string `json:"sessionSource"`
+	ChatType      string `json:"chatType"`
+	UserID        string `json:"userId"`
+	ThreadID      string `json:"threadId"`
 	Scope         string `json:"scope"`
 	WorkspaceRoot string `json:"workspaceRoot"`
 	UpdatedAt     string `json:"updatedAt"`
@@ -830,6 +834,10 @@ func botSessionMappingViews(mappings []config.BotConnectionSessionMapping, conne
 		out = append(out, BotConnectionSessionMappingView{
 			RemoteID:      m.RemoteID,
 			SessionID:     m.SessionID,
+			SessionSource: m.SessionSource,
+			ChatType:      m.ChatType,
+			UserID:        m.UserID,
+			ThreadID:      m.ThreadID,
 			Scope:         scope,
 			WorkspaceRoot: botMappingWorkspaceRoot(scope, workspaceRoot),
 			UpdatedAt:     m.UpdatedAt,
@@ -849,6 +857,10 @@ func botSessionMappingConfigs(mappings []BotConnectionSessionMappingView, connec
 		out = append(out, config.BotConnectionSessionMapping{
 			RemoteID:      strings.TrimSpace(m.RemoteID),
 			SessionID:     strings.TrimSpace(m.SessionID),
+			SessionSource: strings.TrimSpace(m.SessionSource),
+			ChatType:      strings.TrimSpace(m.ChatType),
+			UserID:        strings.TrimSpace(m.UserID),
+			ThreadID:      strings.TrimSpace(m.ThreadID),
 			Scope:         scope,
 			WorkspaceRoot: botMappingWorkspaceRoot(scope, workspaceRoot),
 			UpdatedAt:     strings.TrimSpace(m.UpdatedAt),

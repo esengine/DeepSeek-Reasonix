@@ -144,6 +144,114 @@ func TestDeleteTopicKeepsSessionHistory(t *testing.T) {
 	}
 }
 
+func TestSetTopicPinnedOrdersProjectTopics(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, "topic_a", "Alpha"); err != nil {
+		t.Fatalf("set topic a title: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, "topic_b", "Beta"); err != nil {
+		t.Fatalf("set topic b title: %v", err)
+	}
+	app := NewApp()
+	nodes := app.ListProjectTree()
+	if got := []string{nodes[0].Children[0].TopicID, nodes[0].Children[1].TopicID}; got[0] != "topic_a" || got[1] != "topic_b" {
+		t.Fatalf("initial topic order = %v, want [topic_a topic_b]", got)
+	}
+
+	if err := app.SetTopicPinned("topic_b", true); err != nil {
+		t.Fatalf("pin topic: %v", err)
+	}
+	nodes = app.ListProjectTree()
+	if got := []string{nodes[0].Children[0].TopicID, nodes[0].Children[1].TopicID}; got[0] != "topic_b" || got[1] != "topic_a" {
+		t.Fatalf("pinned topic order = %v, want [topic_b topic_a]", got)
+	}
+	if !nodes[0].Children[0].Pinned {
+		t.Fatalf("pinned topic should expose pinned=true")
+	}
+
+	if err := app.SetTopicPinned("topic_b", false); err != nil {
+		t.Fatalf("unpin topic: %v", err)
+	}
+	nodes = app.ListProjectTree()
+	if nodes[0].Children[0].Pinned || nodes[0].Children[1].Pinned {
+		t.Fatalf("unpin should clear pinned flags: %#v", nodes[0].Children)
+	}
+}
+
+func TestSetProjectPinnedOrdersProjectFolders(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	first := t.TempDir()
+	second := t.TempDir()
+	third := t.TempDir()
+	if err := addProject(first, "First"); err != nil {
+		t.Fatalf("add first project: %v", err)
+	}
+	if err := addProject(second, "Second"); err != nil {
+		t.Fatalf("add second project: %v", err)
+	}
+	if err := addProject(third, "Third"); err != nil {
+		t.Fatalf("add third project: %v", err)
+	}
+
+	app := NewApp()
+	if err := app.ReorderProjects([]string{third, first, second}); err != nil {
+		t.Fatalf("ReorderProjects: %v", err)
+	}
+	if err := app.SetProjectPinned(second, true); err != nil {
+		t.Fatalf("pin project: %v", err)
+	}
+	nodes := app.ListProjectTree()
+	if got := []string{nodes[0].Root, nodes[1].Root, nodes[2].Root}; got[0] != second || got[1] != third || got[2] != first {
+		t.Fatalf("pinned project order = %v, want %v", got, []string{second, third, first})
+	}
+	if !nodes[0].Pinned {
+		t.Fatalf("pinned project should expose pinned=true")
+	}
+
+	if err := app.SetProjectPinned(second, false); err != nil {
+		t.Fatalf("unpin project: %v", err)
+	}
+	nodes = app.ListProjectTree()
+	if got := []string{nodes[0].Root, nodes[1].Root, nodes[2].Root}; got[0] != third || got[1] != first || got[2] != second {
+		t.Fatalf("unpinned project order = %v, want %v", got, []string{third, first, second})
+	}
+	if nodes[0].Pinned || nodes[1].Pinned || nodes[2].Pinned {
+		t.Fatalf("unpin should clear pinned flags: %#v", nodes)
+	}
+}
+
+func TestDeleteTopicClearsPinnedTopic(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, "topic_pinned_delete", "Pinned"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	app := NewApp()
+	if err := app.SetTopicPinned("topic_pinned_delete", true); err != nil {
+		t.Fatalf("pin topic: %v", err)
+	}
+	if err := app.DeleteTopic("topic_pinned_delete"); err != nil {
+		t.Fatalf("delete topic: %v", err)
+	}
+	projects := loadProjectsFile().Projects
+	if len(projects) != 1 {
+		t.Fatalf("projects len = %d, want 1", len(projects))
+	}
+	if got := projects[0].PinnedTopics; len(got) != 0 {
+		t.Fatalf("pinned topics after delete = %v, want empty", got)
+	}
+}
+
 func TestRenameProjectUpdatesSidebarTitle(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

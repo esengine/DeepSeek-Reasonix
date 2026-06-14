@@ -67,7 +67,7 @@ export function renderAudit(viewer: User, rows: AuditRow[]): string {
   return page(
     "Reasonix · Audit",
     "admin / audit",
-    `<h1>Audit log</h1><p class="sub">Permission and crash-data changes, newest first</p>
+    `<h1>Audit log</h1><p class="sub">Permission and report-data changes, newest first</p>
 <div class="card full">${body}</div>
 <a class="back" href="/admin">← Back to users</a>`,
     userNav(viewer),

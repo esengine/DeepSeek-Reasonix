@@ -58,7 +58,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		if style := c.UIThemeStyle(); style != "" {
 			fmt.Fprintf(&b, "theme_style = %q   # CLI accent palette; REASONIX_THEME_STYLE can override per run\n", style)
 		} else {
-			b.WriteString("# theme_style = \"graphite\"   # graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier\n")
+			b.WriteString("# theme_style = \"graphite\"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases\n")
 		}
 		if layout := c.UIShortcutLayout(); layout != "classic" {
 			fmt.Fprintf(&b, "shortcut_layout = %q   # classic|desktop; compatibility setting; Shift+Tab toggles Plan, Ctrl+Y toggles YOLO\n", layout)
@@ -83,11 +83,12 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		} else {
 			b.WriteString("# language = \"zh\"   # desktop UI language; empty/auto = browser/OS auto-detect\n")
 		}
+		fmt.Fprintf(&b, "layout_style = %q   # desktop layout: classic|workbench\n", c.DesktopLayoutStyle())
 		fmt.Fprintf(&b, "theme = %q   # desktop only: auto|dark|light\n", c.DesktopTheme())
 		if style := c.DesktopThemeStyle(); style != "" {
 			fmt.Fprintf(&b, "theme_style = %q   # desktop accent palette\n", style)
 		} else {
-			b.WriteString("# theme_style = \"graphite\"   # graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier\n")
+			b.WriteString("# theme_style = \"graphite\"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases\n")
 		}
 		fmt.Fprintf(&b, "close_behavior = %q   # desktop: quit|background when the window close button is clicked\n", c.DesktopCloseBehavior())
 		fmt.Fprintf(&b, "status_bar_style = %q   # desktop: icon|text metric labels in the bottom status bar\n", c.DesktopStatusBarStyle())
@@ -300,6 +301,13 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	fmt.Fprintf(&b, "time_enabled = %v   # built-in Time MCP; off until manually enabled\n", c.BuiltInMCP.TimeEnabled)
 	fmt.Fprintf(&b, "context7_enabled = %v   # built-in Context7 MCP; off until manually enabled\n", c.BuiltInMCP.Context7Enabled)
 	b.WriteString("\n")
+
+	if scope != RenderScopeProject {
+		b.WriteString("[builtin_mcp_updates]\n")
+		fmt.Fprintf(&b, "mode = %q   # off|notify|download|auto_next_session; auto never hot-swaps active sessions\n", c.BuiltInMCPUpdates.ResolvedMode())
+		fmt.Fprintf(&b, "check_interval = %q   # minimum interval between desktop startup background checks\n", c.BuiltInMCPUpdates.ResolvedCheckInterval())
+		b.WriteString("\n")
+	}
 
 	renderLSPConfig(&b, c.LSP)
 
@@ -658,6 +666,18 @@ func renderBotSessionMappings(mappings []BotConnectionSessionMapping) string {
 		parts := map[string]string{
 			"remote_id":  mapping.RemoteID,
 			"session_id": mapping.SessionID,
+		}
+		if mapping.SessionSource != "" {
+			parts["session_source"] = mapping.SessionSource
+		}
+		if mapping.ChatType != "" {
+			parts["chat_type"] = mapping.ChatType
+		}
+		if mapping.UserID != "" {
+			parts["user_id"] = mapping.UserID
+		}
+		if mapping.ThreadID != "" {
+			parts["thread_id"] = mapping.ThreadID
 		}
 		if mapping.Scope != "" {
 			parts["scope"] = mapping.Scope

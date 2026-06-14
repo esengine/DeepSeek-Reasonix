@@ -19,6 +19,8 @@ import type {
   BotInstallStartResult,
   BotRuntimeStatusView,
   BotSettingsView,
+  BuiltInMCPUpdateResult,
+  BuiltInMCPUpdateStatus,
   CapabilitiesView,
   CheckpointMeta,
   CommandInfo,
@@ -163,6 +165,8 @@ export interface AppBindings {
   UpdateMCPServer(name: string, input: MCPServerInput): Promise<void>;
   RemoveMCPServer(name: string): Promise<void>;
   ReconnectMCPServer(name: string): Promise<void>;
+  UpdateBuiltInMCPServer(name: string): Promise<BuiltInMCPUpdateResult>;
+  BuiltInMCPUpdateStatuses(): Promise<BuiltInMCPUpdateStatus[]>;
   ClearMCPServerAuthentication(name: string): Promise<void>;
   PickSkillFolder(): Promise<string>;
   AddSkillPath(path: string): Promise<void>;
@@ -251,6 +255,7 @@ export interface AppBindings {
   SetStatusBarItems(items: string[]): Promise<void>;
   SetDesktopLanguage(lang: string): Promise<void>;
   SetDesktopAppearance(theme: string, style: string): Promise<void>;
+  SetDesktopLayoutStyle(style: string): Promise<void>;
   SetDesktopCheckUpdates(enabled: boolean): Promise<void>;
   SetDesktopTelemetry(enabled: boolean): Promise<void>;
   SetDesktopMetrics(enabled: boolean): Promise<void>;
@@ -283,11 +288,13 @@ export interface AppBindings {
   ListProjectTree(): Promise<ProjectNode[]>;
   RenameProject(workspaceRoot: string, title: string): Promise<void>;
   SetProjectColor(workspaceRoot: string, color: string): Promise<void>;
+  SetProjectPinned(workspaceRoot: string, pinned: boolean): Promise<void>;
   ReorderProjects(workspaceRoots: string[]): Promise<void>;
   CreateTopic(scope: string, workspaceRoot: string, title: string): Promise<TopicMeta>;
   RenameTopic(topicID: string, title: string): Promise<void>;
   DeleteTopic(topicID: string): Promise<void>;
   TrashTopic(topicID: string): Promise<void>;
+  SetTopicPinned(topicID: string, pinned: boolean): Promise<void>;
   ContextPanel(tabID: string): Promise<ContextPanelInfo>;
   // New native-feel bindings (added with the desktop native-feel plan).
   ConfirmAction(req: NativeConfirmRequest): Promise<boolean>;
@@ -360,6 +367,13 @@ export function onUpdaterProgress(cb: (p: UpdateProgress) => void): () => void {
   };
 }
 
+export function onBuiltInMCPUpdate(cb: (status: BuiltInMCPUpdateStatus) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("builtin-mcp:update", (status) => cb(status as BuiltInMCPUpdateStatus));
+  }
+  return () => {};
+}
+
 // onFilesDropped subscribes to native OS file drops landing on the composer (the
 // --wails-drop-target element); the callback gets the dropped files' absolute
 // paths. No-op in the browser dev mock, where the runtime is absent.
@@ -425,7 +439,7 @@ function bridgeBreadcrumb(method: string): string {
   if (/^(SaveProvider|AddOfficialProviderAccess|RemoveProviderAccess|DeleteProvider|SetProviderKey|ClearProviderKey|FetchProviderModels|ConnectKey)/.test(method))
     return `provider ${method}`;
   if (/^(CheckUpdate|ApplyUpdate|OpenDownloadPage)/.test(method)) return `update ${method}`;
-  if (/^(AddMCPServer|UpdateMCPServer|RemoveMCPServer|ReconnectMCPServer|ClearMCPServerAuthentication|SetMCPServer)/.test(method))
+  if (/^(AddMCPServer|UpdateMCPServer|RemoveMCPServer|ReconnectMCPServer|UpdateBuiltInMCPServer|BuiltInMCPUpdateStatuses|ClearMCPServerAuthentication|SetMCPServer)/.test(method))
     return `mcp ${method}`;
   if (/^(AddSkillPath|RemoveSkillPath|RefreshSkills|SetSkillEnabled|AcceptSkillSuggestion)/.test(method))
     return `skill ${method}`;
@@ -551,6 +565,8 @@ function makeMockApp(): AppBindings {
       configured: true,
       autoStart: false,
       tier: "background",
+      command: "codegraph",
+      args: ["serve", "--mcp"],
       tools: 0,
       prompts: 0,
       resources: 0,
@@ -615,6 +631,15 @@ function makeMockApp(): AppBindings {
       ],
     },
     { name: "figma", transport: "http", status: "failed", configured: true, autoStart: true, tier: "background", url: "https://mcp.figma.com/mcp", authStatus: "required", authUrl: "https://mcp.figma.com/mcp", tools: 0, prompts: 0, resources: 0, error: "connect: 401 unauthorized" },
+  ];
+  let builtInMCPUpdates: BuiltInMCPUpdateStatus[] = [
+    {
+      name: "codegraph",
+      mode: "notify",
+      current: "v0.9.7",
+      latest: "v0.10.0",
+      phase: "available",
+    },
   ];
   const capSkills: SkillView[] = [
     { name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "builtin", runAs: "subagent", enabled: true },
@@ -803,6 +828,10 @@ function makeMockApp(): AppBindings {
             {
               remoteId: "ou_mock_user_001",
               sessionId: "topic:topic_product",
+              sessionSource: "",
+              chatType: "",
+              userId: "",
+              threadId: "",
               scope: "global",
               workspaceRoot: "",
               updatedAt: new Date(Date.now() - 4 * 60_000).toISOString(),
@@ -833,6 +862,10 @@ function makeMockApp(): AppBindings {
             {
               remoteId: "wxid_mock_user_001",
               sessionId: "topic:topic_ai",
+              sessionSource: "",
+              chatType: "",
+              userId: "",
+              threadId: "",
               scope: "global",
               workspaceRoot: "",
               updatedAt: new Date(Date.now() - 12 * 60_000).toISOString(),
@@ -845,6 +878,7 @@ function makeMockApp(): AppBindings {
       ],
     },
     desktopLanguage: "",
+    desktopLayoutStyle: "classic",
     desktopTheme: "light",
     desktopThemeStyle: "graphite",
     closeBehavior: "background",
@@ -941,9 +975,15 @@ function makeMockApp(): AppBindings {
     }
     return node;
   };
+  const mockProjectTreeForDisplay = () => {
+    const pinnedProjects = mockProjectTree.filter((node) => node.kind === "project" && node.pinned);
+    if (pinnedProjects.length === 0) return mockProjectTree;
+    const rest = mockProjectTree.filter((node) => !(node.kind === "project" && node.pinned));
+    return [...pinnedProjects, ...rest];
+  };
   const cloneProjectTree = () => {
     if (mockProjectTree.length === 0) ensureMockGlobalFolder();
-    return JSON.parse(JSON.stringify(mockProjectTree)) as ProjectNode[];
+    return JSON.parse(JSON.stringify(mockProjectTreeForDisplay())) as ProjectNode[];
   };
   const projectChildren = (node: ProjectNode): ProjectNode[] => Array.isArray(node.children) ? node.children : [];
   const findMockTopic = (topicId: string): ProjectNode | null => {
@@ -952,6 +992,26 @@ function makeMockApp(): AppBindings {
       if (found) return found;
     }
     return null;
+  };
+  const setMockTopicPinned = (topicId: string, pinned: boolean) => {
+    for (const parent of mockProjectTree) {
+      const children = projectChildren(parent);
+      const index = children.findIndex((child) => child.topicId === topicId);
+      if (index < 0) continue;
+      const topic = { ...children[index], pinned: pinned || undefined };
+      if (!pinned) {
+        parent.children = children.map((child, i) => (i === index ? topic : child));
+        return;
+      }
+      const remaining = children.filter((_, i) => i !== index);
+      parent.children = [topic, ...remaining];
+      return;
+    }
+  };
+  const setMockProjectPinned = (workspaceRoot: string, pinned: boolean) => {
+    const index = mockProjectTree.findIndex((node) => node.kind === "project" && node.root === workspaceRoot);
+    if (index < 0) return;
+    mockProjectTree[index] = { ...mockProjectTree[index], pinned: pinned || undefined };
   };
   const deleteMockTopic = (topicId: string) => {
     for (const parent of mockProjectTree) {
@@ -963,6 +1023,10 @@ function makeMockApp(): AppBindings {
   const mockTopicIsRunning = (topicId: string) => {
     const status = mockTopicStatus(topicId);
     return status === "streaming" || status === "thinking" || status === "waiting_confirmation";
+  };
+  const mockTopicIsBlank = (topicId: string) => {
+    const topic = findMockTopic(topicId);
+    return Boolean(topic && topic.label === t("mock.newSession") && !topic.turns && !topic.lastActivityAt && !topic.status);
   };
   const mockTopicRunsInScenario = (topicId: string) => runningMock && mockTopicIsRunning(topicId);
   const mockTopicHistory = (topicId: string): HistoryMessage[] => {
@@ -1862,6 +1926,28 @@ function makeMockApp(): AppBindings {
         s.name === name ? { ...s, status: "connected", tools: s.tools || 4 } : s,
       );
     },
+    async UpdateBuiltInMCPServer(name: string) {
+      if (name !== "codegraph") throw new Error(`${name} is not an updatable built-in MCP server`);
+      capServers = capServers.map((s) =>
+        s.name === name
+          ? { ...s, status: s.autoStart ? "connected" : s.status, tools: s.autoStart ? s.tools || 4 : s.tools, error: undefined }
+          : s,
+      );
+      builtInMCPUpdates = [
+        {
+          name,
+          mode: "manual",
+          current: "v0.10.0",
+          latest: "v0.10.0",
+          phase: "activated",
+          path: "/tmp/reasonix/codegraph/mock/codegraph",
+        },
+      ];
+      return { name, version: "v0.10.0", path: "/tmp/reasonix/codegraph/mock/codegraph" };
+    },
+    async BuiltInMCPUpdateStatuses() {
+      return builtInMCPUpdates.map((s) => ({ ...s }));
+    },
     async ClearMCPServerAuthentication(name: string) {
       capServers = capServers.map((s) =>
         s.name === name
@@ -2444,6 +2530,9 @@ function makeMockApp(): AppBindings {
           settings.desktopTheme = theme === "auto" || theme === "light" ? theme : "dark";
           settings.desktopThemeStyle = style;
         },
+        async SetDesktopLayoutStyle(style: string) {
+          settings.desktopLayoutStyle = style === "workbench" ? "workbench" : "classic";
+        },
         async SetDesktopCheckUpdates(enabled: boolean) {
           settings.checkUpdates = enabled;
         },
@@ -2591,7 +2680,8 @@ function makeMockApp(): AppBindings {
       const existing = mockTabs.find((tab) =>
         tab.scope === targetScope &&
         (targetScope === "global" || tab.workspaceRoot === targetRoot) &&
-        !tab.running
+        !tab.running &&
+        mockTopicIsBlank(tab.topicId)
       );
       if (existing) {
         setMockActiveTab(existing.id);
@@ -2637,8 +2727,11 @@ function makeMockApp(): AppBindings {
       mockTabs = mockTabs.map((tab) =>
         (workspaceRoot ? tab.workspaceRoot === workspaceRoot : tab.scope === "global")
           ? { ...tab, projectColor: node.projectColor }
-          : tab,
+        : tab,
       );
+    },
+    async SetProjectPinned(workspaceRoot: string, pinned: boolean) {
+      setMockProjectPinned(workspaceRoot, pinned);
     },
     async ReorderProjects(workspaceRoots: string[]) {
       const projects = mockProjectTree.filter((node) => node.kind === "project");
@@ -2704,6 +2797,9 @@ function makeMockApp(): AppBindings {
     },
     async TrashTopic(topicID: string) {
       deleteMockTopic(topicID);
+    },
+    async SetTopicPinned(topicID: string, pinned: boolean) {
+      setMockTopicPinned(topicID, pinned);
     },
     async SaveWindowState(_state) {
       // no-op in browser dev — no real window geometry to persist
