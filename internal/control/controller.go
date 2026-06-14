@@ -579,7 +579,7 @@ func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input, raw, disp
 	}
 	// The plan is already visible as the assistant's answer, so the request
 	// carries no subject — it's purely the gate.
-	allow, _, err := c.requestApproval(ctx, planApprovalTool, "")
+	allow, _, err := c.requestApproval(ctx, planApprovalTool, "", nil)
 	if err != nil {
 		return err
 	}
@@ -600,7 +600,7 @@ func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input, raw, disp
 		c.approvedPlanAutoApproveTools = false
 		c.mu.Unlock()
 	}()
-	if err := c.runner.Run(ctx, planApprovedMessage); err != nil {
+	if err := c.runner.Run(ctx, c.ComposeSynthetic(planApprovedMessage)); err != nil {
 		return err
 	}
 	if todoArgs != "" && !c.hasTodoUpdateSince(execStart) {
@@ -1307,9 +1307,15 @@ func (c *Controller) SetAutoPlan(mode string) {
 // SetReasoningLanguage updates the visible reasoning language preference for
 // subsequent turns.
 func (c *Controller) SetReasoningLanguage(lang string) {
+	mode := config.NormalizeReasoningLanguage(lang)
 	c.mu.Lock()
-	c.reasoningLanguage = config.NormalizeReasoningLanguage(lang)
+	c.reasoningLanguage = mode
 	c.mu.Unlock()
+	if setter, ok := c.runner.(interface{ SetReasoningLanguage(string) }); ok {
+		setter.SetReasoningLanguage(mode)
+	} else if c.executor != nil {
+		c.executor.SetReasoningLanguage(mode)
+	}
 }
 
 // PlanMode reports whether outgoing turns currently receive the plan-mode
@@ -2095,6 +2101,49 @@ func (c *Controller) SessionCache() (hit, miss int) {
 	return c.executor.SessionCache()
 }
 
+// ToolResultData holds the full arguments and output for one tool call, loaded
+// on demand when a frontend expands a collapsed tool card.
+type ToolResultData struct {
+	Args   string `json:"args"`
+	Output string `json:"output"`
+}
+
+// ToolResult looks up a tool call by its ID in the session history and returns
+// the full arguments + output that were elided from the frontend's items[].
+// Returns nil when the tool ID isn't found (e.g. a sub-agent's tool call that
+// lives in a different session).
+func (c *Controller) ToolResult(toolID string) *ToolResultData {
+	if c.executor == nil {
+		return nil
+	}
+	msgs := c.executor.Session().Snapshot()
+	// Search backwards: tool result first (most recent), then find the args
+	// from the preceding assistant turn.
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != provider.RoleTool || msgs[i].ToolCallID != toolID {
+			continue
+		}
+		out := &ToolResultData{
+			Args:   "",
+			Output: msgs[i].Content,
+		}
+		// Walk back to find the assistant turn that issued this call.
+		for j := i; j >= 0; j-- {
+			if msgs[j].Role != provider.RoleAssistant {
+				continue
+			}
+			for _, tc := range msgs[j].ToolCalls {
+				if tc.ID == toolID {
+					out.Args = tc.Arguments
+					return out
+				}
+			}
+		}
+		return out
+	}
+	return nil
+}
+
 // Balance queries the active provider's wallet balance, or (nil, nil) when the
 // provider declares no balance_url — so a caller treats "not configured" and
 // "fetched" the same and just omits the readout when nil.
@@ -2698,7 +2747,7 @@ func (g gateApprover) Approve(ctx context.Context, tool, subject string, args js
 	if auto {
 		return true, false, nil
 	}
-	return g.c.requestApproval(ctx, tool, subject)
+	return g.c.requestApproval(ctx, tool, subject, args)
 }
 
 func approvalDisplaySubject(tool, subject string, args json.RawMessage) string {
@@ -2707,9 +2756,28 @@ func approvalDisplaySubject(tool, subject string, args json.RawMessage) string {
 		return rememberApprovalSubject(subject, args)
 	case memoryForgetTool:
 		return forgetApprovalSubject(subject, args)
+	case "move_file":
+		return moveApprovalSubject(subject, args)
 	default:
 		return subject
 	}
+}
+
+func moveApprovalSubject(fallback string, args json.RawMessage) string {
+	if len(args) == 0 {
+		return fallback
+	}
+	var in struct {
+		SourcePath      string `json:"source_path"`
+		DestinationPath string `json:"destination_path"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return fallback
+	}
+	if in.SourcePath == "" || in.DestinationPath == "" {
+		return fallback
+	}
+	return in.SourcePath + " -> " + in.DestinationPath
 }
 
 func rememberApprovalSubject(fallback string, args json.RawMessage) string {
@@ -3029,7 +3097,7 @@ func parseRewind(args string, cps []checkpoint.Meta) (int, RewindScope, error) {
 // requestApproval emits an ApprovalRequest and blocks until Approve(ID, …)
 // answers or ctx is cancelled. A prior session grant for the same approval scope
 // short-circuits. promptMu serialises outstanding prompts.
-func (c *Controller) requestApproval(ctx context.Context, tool, subject string) (bool, bool, error) {
+func (c *Controller) requestApproval(ctx context.Context, tool, subject string, args json.RawMessage) (bool, bool, error) {
 	c.mu.Lock()
 	// YOLO/full access and the just-approved-plan execution window auto-allow
 	// approval-gated tools without prompting. Plan approval is a user decision,
@@ -3057,6 +3125,9 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string) 
 	c.mu.Unlock()
 
 	c.sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: id, Tool: tool, Subject: subject}})
+	if hookSubject, hookArgs, ok := permissionRequestHookPayload(tool, subject, args); ok {
+		go c.hooks.PermissionRequest(ctx, tool, hookSubject, hookArgs)
+	}
 	// The agent now needs the user's attention; a Notification hook can ping an
 	// external channel (desktop notice, phone) while the run blocks on the reply.
 	go c.hooks.Notification(ctx, approvalNotificationText(tool, subject))
@@ -3091,6 +3162,17 @@ func approvalNotificationText(tool, subject string) string {
 		return "approval needed: " + tool
 	}
 	return "approval needed: " + tool + " " + subject
+}
+
+func permissionRequestHookPayload(tool, subject string, args json.RawMessage) (string, json.RawMessage, bool) {
+	switch tool {
+	case planApprovalTool:
+		return "", nil, false
+	case memoryRememberTool, memoryForgetTool:
+		return "", nil, true
+	default:
+		return subject, args, true
+	}
 }
 
 func (c *Controller) approvalBypassAllowsLocked(tool string) bool {

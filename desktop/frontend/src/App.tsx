@@ -917,6 +917,9 @@ export default function App() {
 
   // Persist window geometry across launches.
   useWindowStatePersistence();
+  useEffect(() => {
+    document.documentElement.setAttribute("data-platform", desktopPlatform);
+  }, [desktopPlatform]);
 
   const closeTransientOverlays = useCallback(() => {
     setTransientOverlayDismissSignal((signal) => signal + 1);
@@ -1921,10 +1924,10 @@ export default function App() {
 
   const handleTabChange = useCallback(async (id: string) => {
     closeTransientOverlays();
-    await switchTab(id);
-    await refreshTabMetas();
+    const tabs = await switchTab(id);
+    if (tabs) setTabMetas(tabs);
     setTabRevealSignal((signal) => signal + 1);
-  }, [closeTransientOverlays, refreshTabMetas, switchTab]);
+  }, [closeTransientOverlays, setTabMetas, switchTab]);
 
   const handleTabClose = useCallback(async (id: string) => {
     closeTransientOverlays();
@@ -2646,11 +2649,14 @@ export default function App() {
             <div className="topicbar__actions">
               {!sidebarImDetailConnection && (
               <>
-              <CopyButton
-                getText={getSessionMarkdown}
-                label={t("topicBar.copyAll")}
-                className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"
-              />
+              <Tooltip label={t("topicBar.copyAll")}>
+                <CopyButton
+                  getText={getSessionMarkdown}
+                  label={t("topicBar.copyAll")}
+                  className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"
+                  showInlineLabel={false}
+                />
+              </Tooltip>
               <div className={`topicbar__export${topicExportOpen ? " topicbar__export--open" : ""}`}>
                 <Tooltip label={t("topicBar.export")}>
                   <button
@@ -2744,6 +2750,7 @@ export default function App() {
                 checkpoints={state.checkpoints}
                 actionPending={state.messageAction != null}
                 rewindDisabled={state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
+                running={state.running}
                 rewindSignal={rewindSignal}
               />
             )}

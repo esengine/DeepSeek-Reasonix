@@ -1147,7 +1147,10 @@ export function Composer({
     };
     window.addEventListener("resize", update);
     const observer = new MutationObserver(update);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-text-size"] });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-text-size", "data-font-family", "data-mono-font-family", "style"],
+    });
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
       window.removeEventListener("resize", update);

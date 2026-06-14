@@ -2,6 +2,7 @@ package main
 
 import (
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -53,6 +54,55 @@ func TestListTabsKeepsExplicitOrderWhenActiveChanges(t *testing.T) {
 	assertTabIDs(t, app.ListTabs(), "a", "b", "c")
 	if got := app.activeTabID; got != "c" {
 		t.Fatalf("active tab = %q, want c", got)
+	}
+}
+
+func TestListTabsRepairsStaleOrderWithoutRacing(t *testing.T) {
+	app := testAppWithOrderedTabs(t, "a", "a", "b", "c")
+	app.tabOrder = []string{"a"}
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	errs := make(chan string, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 100; j++ {
+				if got := strings.Join(tabIDs(app.ListTabs()), ","); got != "a,b,c" {
+					errs <- got
+					return
+				}
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for got := range errs {
+		t.Fatalf("tab ids = %q, want a,b,c", got)
+	}
+
+	if got := strings.Join(app.tabOrder, ","); got != "a,b,c" {
+		t.Fatalf("repaired tab order = %q, want a,b,c", got)
+	}
+}
+
+func TestSaveTabsSkipsOlderSnapshot(t *testing.T) {
+	app := testAppWithOrderedTabs(t, "a", "a", "b")
+
+	app.mu.Lock()
+	dir, oldEntries, oldActiveID, oldVersion := app.saveTabsCollectLocked()
+	app.activeTabID = "b"
+	_, newEntries, newActiveID, newVersion := app.saveTabsCollectLocked()
+	app.mu.Unlock()
+
+	app.saveTabsWrite(dir, newEntries, newActiveID, newVersion)
+	app.saveTabsWrite(dir, oldEntries, oldActiveID, oldVersion)
+
+	if got := loadTabsFile().ActiveTab; got != "b" {
+		t.Fatalf("persisted active tab = %q, want b", got)
 	}
 }
 

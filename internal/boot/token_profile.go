@@ -28,6 +28,7 @@ var tokenEconomyCoreBuiltins = []string{
 	"grep",
 	"kill_shell",
 	"ls",
+	"move_file",
 	"multi_edit",
 	"read_file",
 	"todo_write",

@@ -133,7 +133,7 @@ export function renderStats(
   const platformLinks = data.platforms.length
     ? data.platforms.map((p) => `<a class="chip" href="${esc(filterQS({ platform: p.label }))}">${esc(p.label)} <b>${p.users}</b></a>`).join("")
     : `<span class="muted">no platforms yet</span>`;
-  const filters = `<div class="card full"><h2>Crash filters · 崩溃筛选 <b>— latest ${esc(data.latestVersion || "n/a")}</b></h2>
+  const filters = `<div class="card full"><h2>Report filters · 诊断筛选 <b>— latest ${esc(data.latestVersion || "n/a")}</b></h2>
 <div class="actions">
 <a class="btn sm ghost" href="/stats">All</a>
 <a class="btn sm ghost" href="${esc(filterQS({ status: "open" }))}">Open</a>
@@ -152,12 +152,12 @@ export function renderStats(
             `<tr><td><a class="fp" href="/stats/group/${esc(c.fingerprint)}">${esc(c.fingerprint.slice(0, 8))}</a></td><td class="summary"${c.title ? ` title="${esc(c.title)}"` : ""}>${c.title ? esc(clip(c.title, 90)) : `<span class="muted">—</span>`}${c.regressed_at ? ` <span class="pill ignored">regressed</span>` : ""}</td><td>${esc(c.source || "legacy")}</td><td><span class="pill">${esc(c.severity || "medium")}</span></td><td><span class="pill ${c.kind === "crash" ? "crash" : ""}">${esc(c.kind)}</span></td><td>${statusPill(c.status)}</td><td class="n">${c.count}</td><td class="n">${esc(c.first_version || "?")} → ${esc(c.last_version)}</td><td class="n">${esc([c.last_os, c.last_arch].filter(Boolean).join("/"))}</td><td class="n">${esc(c.seen)}</td></tr>`,
         )
         .join("")}</tbody></table>`
-    : `<div class="empty">No crash reports yet — that's the good kind of empty · 还没有崩溃报告</div>`;
+    : `<div class="empty">No reports yet — that's the good kind of empty · 还没有诊断报告</div>`;
 
   return page(
     "Reasonix · Stats",
     "stats",
-    `<h1>Desktop stats</h1><p class="sub">Today: <b>${totalUsers}</b> active installs · anonymous launch pings and crash reports only</p>
+    `<h1>Desktop stats</h1><p class="sub">Today: <b>${totalUsers}</b> active installs · anonymous launch pings and user-sent diagnostic reports only</p>
 <div class="grid">
 <div class="card full"><h2>Daily active installs · 每日活跃 <b>— 30 days</b> (solid: users, faded: opens)</h2>
 ${anyPing ? dailyChart(days) : `<div class="empty">No pings yet — data starts flowing once a telemetry-enabled build ships · 等带统计的版本发布后这里开始有数据</div>`}</div>
@@ -165,7 +165,7 @@ ${anyPing ? dailyChart(days) : `<div class="empty">No pings yet — data starts 
 <div class="card"><h2>Platforms · 平台分布 <b>— 7 days</b></h2>${listBars(data.platforms)}</div>
 <div class="card full"><h2>Agent signals · 运行指标 <b>— 7 days, opt-in aggregate</b></h2>${metricsCards(data.metrics)}</div>
 ${filters}
-<div class="card full"><h2>Crash groups · 崩溃分组 <b>— click a fingerprint for stacks</b></h2>${crashRows}</div>
+<div class="card full"><h2>Report groups · 诊断分组 <b>— click a fingerprint for details</b></h2>${crashRows}</div>
 </div>`,
     userNav(user),
   );
