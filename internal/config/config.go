@@ -46,6 +46,7 @@ type Config struct {
 	Desktop       DesktopConfig       `toml:"desktop"`
 	Notifications NotificationsConfig `toml:"notifications"`
 	Agent         AgentConfig         `toml:"agent"`
+	Personality   PersonalityConfig    `toml:"personality"`
 	Providers     []ProviderEntry     `toml:"providers"`
 	Tools         ToolsConfig         `toml:"tools"`
 	Permissions   PermissionsConfig   `toml:"permissions"`
@@ -295,6 +296,14 @@ func (c *Config) ColdResumePruneEnabled() bool {
 		return true
 	}
 	return *c.Agent.ColdResumePrune
+}
+
+// PersonalityEnabled returns whether the personality module is enabled.
+func (c *Config) PersonalityEnabled() bool {
+	if c == nil {
+		return false
+	}
+	return c.Personality.Enabled
 }
 
 // ReasoningLanguage normalizes agent.reasoning_language. Empty means auto:
@@ -800,6 +809,18 @@ type AgentConfig struct {
 	ColdResumePrune *bool `toml:"cold_resume_prune"`
 }
 
+// PersonalityConfig controls the personality module — three markdown files
+// (IDENTITY.md, SOUL.md, USER.md) that fold into the system prompt so the
+// agent has a durable identity, core behavioural traits, and knowledge about
+// the user. Files live under <root>/.reasonix/personality/ and
+// ~/.config/reasonix/personality/. This toggle enables/disables the injection
+// of those files into the system prompt.
+type PersonalityConfig struct {
+	// Enabled controls whether personality files are loaded and folded into
+	// the system prompt. When disabled the system prompt is not altered.
+	Enabled bool `toml:"enabled"`
+}
+
 // ProviderEntry declares a model provider instance. ContextWindow is the model's
 // token budget; the harness compacts older history as a turn's prompt approaches
 // it (see agent compaction). 0 disables compaction for the instance.
@@ -1120,6 +1141,9 @@ func Default() *Config {
 			SoftCompactRatio:  0.5,
 			CompactRatio:      0.8,
 			CompactForceRatio: 0.9,
+		},
+		Personality: PersonalityConfig{
+			Enabled: false, // off by default; users opt in by creating files
 		},
 		// Mode "ask" with no rules keeps `reasonix run` autonomous (no TTY → ask
 		// resolves to allow) while `reasonix chat` prompts before writers. Users add

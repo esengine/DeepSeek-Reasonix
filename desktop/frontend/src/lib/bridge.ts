@@ -39,6 +39,8 @@ import type {
   Meta,
   ModelInfo,
   NetworkView,
+  PersonalityFileView,
+  PersonalitySettingsView,
   ProjectNode,
   ProviderView,
   QuestionAnswer,
@@ -216,6 +218,11 @@ export interface AppBindings {
   SaveHooksSettingsForRoot(scope: string, projectRoot: string, hooks: HookConfigView[]): Promise<void>;
   TrustProjectHooks(): Promise<void>;
   TrustProjectHooksForRoot(projectRoot: string): Promise<void>;
+  GetPersonalitySettings(): Promise<PersonalitySettingsView>;
+  GetPersonalityFile(name: string): Promise<PersonalityFileView>;
+  SavePersonalityFile(name: string, content: string): Promise<void>;
+  DeletePersonalityFile(name: string): Promise<void>;
+  SetPersonalityEnabled(enabled: boolean): Promise<void>;
   SetDefaultModel(ref: string): Promise<void>;
   SetPlannerModel(ref: string): Promise<void>;
   SetSubagentModel(ref: string): Promise<void>;
@@ -423,6 +430,8 @@ function bridgeBreadcrumb(method: string): string {
   if (/^(CheckUpdate|ApplyUpdate|OpenDownloadPage)/.test(method)) return `update ${method}`;
   if (/^(AddMCPServer|UpdateMCPServer|RemoveMCPServer|ReconnectMCPServer|ClearMCPServerAuthentication|SetMCPServer)/.test(method))
     return `mcp ${method}`;
+  if (/^(GetPersonality|SavePersonalityFile|DeletePersonalityFile|SetPersonalityEnabled)/.test(method))
+    return `personality ${method}`;
   if (/^(AddSkillPath|RemoveSkillPath|RefreshSkills|SetSkillEnabled|AcceptSkillSuggestion)/.test(method))
     return `skill ${method}`;
   if (/^(OpenProjectTab|OpenGlobalTab|EnsureBlankTab|SetActiveTab|CloseTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace)/.test(method))
@@ -537,6 +546,9 @@ function makeMockApp(): AppBindings {
   let mockEffort = "auto";
   const day = 86_400_000;
   const t0 = Date.now();
+  // Personality mock state
+  let personalityEnabled = false;
+  const personalityFiles: Record<string, string> = {};
   // Mutable so MCP add/remove/retry are observable in browser dev.
   let capServers: ServerView[] = [
     {
@@ -2238,6 +2250,29 @@ function makeMockApp(): AppBindings {
       if (projectRoot && projectRoot === hookSettings.project.projectRoot) {
         hookSettings.project.trusted = true;
       }
+    },
+    // Personality mock state
+    async GetPersonalitySettings() {
+      const names = ["IDENTITY.md", "SOUL.md", "USER.md"];
+      const files = names.map((name) => {
+        const content = personalityFiles[name] ?? "";
+        return { name, content, exists: content !== "" };
+      });
+      return { enabled: personalityEnabled, files };
+    },
+    async GetPersonalityFile(name: string) {
+      const content = personalityFiles[name] ?? "";
+      return { name, content, exists: content !== "" };
+    },
+    async SavePersonalityFile(name: string, content: string) {
+      personalityFiles[name] = content;
+      personalityEnabled = true;
+    },
+    async DeletePersonalityFile(name: string) {
+      delete personalityFiles[name];
+    },
+    async SetPersonalityEnabled(enabled: boolean) {
+      personalityEnabled = enabled;
     },
     async SetDefaultModel(ref: string) {
       settings.defaultModel = ref;

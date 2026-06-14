@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/boot"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/personality"
 	"reasonix/internal/provider"
 )
 
@@ -1496,4 +1497,99 @@ func trimList(in []string) []string {
 		}
 	}
 	return out
+}
+
+// --- Personality module ---
+
+// PersonalityFileView represents a single personality file (IDENTITY.md / SOUL.md / USER.md).
+type PersonalityFileView struct {
+	Name    string `json:"name"`
+	Content string `json:"content"`
+	Exists  bool   `json:"exists"`
+}
+
+// PersonalitySettingsView is the personality panel payload.
+type PersonalitySettingsView struct {
+	Enabled bool                 `json:"enabled"`
+	Files   []PersonalityFileView `json:"files"`
+}
+
+// GetPersonalitySettings returns the current personality configuration and file contents.
+func (a *App) GetPersonalitySettings() PersonalitySettingsView {
+	cfg, _, err := a.loadDesktopUserConfigForEdit()
+	enabled := false
+	if err == nil {
+		enabled = cfg.PersonalityEnabled()
+	}
+	root := a.activeWorkspaceRoot()
+	dirs := personality.ProjectDirs(root)
+
+	var files []PersonalityFileView
+	for _, name := range []string{personality.FileNameIdentity, personality.FileNameSoul, personality.FileNameUser} {
+		content, exists := personality.ReadFile(name, dirs)
+		files = append(files, PersonalityFileView{
+			Name:    name,
+			Content: content,
+			Exists:  exists,
+		})
+	}
+	return PersonalitySettingsView{Enabled: enabled, Files: files}
+}
+
+// GetPersonalityFile returns the content of a single personality file.
+func (a *App) GetPersonalityFile(name string) (PersonalityFileView, error) {
+	if name != personality.FileNameIdentity && name != personality.FileNameSoul && name != personality.FileNameUser {
+		return PersonalityFileView{}, fmt.Errorf("invalid personality file name: %q", name)
+	}
+	root := a.activeWorkspaceRoot()
+	dirs := personality.ProjectDirs(root)
+	content, exists := personality.ReadFile(name, dirs)
+	return PersonalityFileView{Name: name, Content: content, Exists: exists}, nil
+}
+
+// SavePersonalityFile writes a personality file and rebuilds the controller.
+func (a *App) SavePersonalityFile(name, content string) error {
+	if name != personality.FileNameIdentity && name != personality.FileNameSoul && name != personality.FileNameUser {
+		return fmt.Errorf("invalid personality file name: %q", name)
+	}
+	root := a.activeWorkspaceRoot()
+	if root == "" {
+		return fmt.Errorf("no active workspace")
+	}
+	path, err := personality.WriteFile(name, content, root)
+	if err != nil {
+		return err
+	}
+	// If personality is not yet enabled, enable it automatically when a file is saved.
+	if err := a.applyConfigOnly(func(c *config.Config) error {
+		c.Personality.Enabled = true
+		return nil
+	}); err != nil {
+		return err
+	}
+	_ = path
+	return a.rebuild()
+}
+
+// DeletePersonalityFile removes a personality file and rebuilds the controller.
+func (a *App) DeletePersonalityFile(name string) error {
+	if name != personality.FileNameIdentity && name != personality.FileNameSoul && name != personality.FileNameUser {
+		return fmt.Errorf("invalid personality file name: %q", name)
+	}
+	root := a.activeWorkspaceRoot()
+	if root == "" {
+		return fmt.Errorf("no active workspace")
+	}
+	if err := personality.DeleteFile(name, root); err != nil {
+		return err
+	}
+	return a.rebuild()
+}
+
+// SetPersonalityEnabled toggles the personality module on/off.
+func (a *App) SetPersonalityEnabled(enabled bool) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		c.Personality.Enabled = enabled
+		return nil
+	})
 }

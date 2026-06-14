@@ -572,7 +572,7 @@ export interface MemoryView {
 }
 
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
-export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "skills" | "memory" | "hooks" | "permissions" | "sandbox" | "network" | "appearance" | "updates";
+export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "skills" | "memory" | "hooks" | "permissions" | "sandbox" | "network" | "appearance" | "personality" | "updates";
 
 // Settings panel payloads (desktop/settings_app.go).
 export interface ProviderView {
@@ -816,6 +816,18 @@ export interface SettingsView {
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
   autoApproveTools: boolean;
   bypass: boolean; // legacy JSON key for live YOLO/full-access tool auto-approval
+}
+
+// Personality file types (desktop/settings_app.go).
+export interface PersonalityFileView {
+  name: string; // "IDENTITY.md" | "SOUL.md" | "USER.md"
+  content: string;
+  exists: boolean;
+}
+
+export interface PersonalitySettingsView {
+  enabled: boolean;
+  files: PersonalityFileView[];
 }
 
 // Auto-updater payloads (desktop/updater.go). UpdateInfo drives the update banner;

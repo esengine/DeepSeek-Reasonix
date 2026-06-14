@@ -35,6 +35,7 @@ import (
 	"reasonix/internal/memory"
 	"reasonix/internal/netclient"
 	"reasonix/internal/outputstyle"
+	"reasonix/internal/personality"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
@@ -180,6 +181,17 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	sysPrompt += "\n\n" + config.LanguagePolicy
 	if tokenEconomy {
 		sysPrompt += "\n\n" + tokenEconomyPrompt
+	}
+
+	// Personality module: load IDENTITY.md / SOUL.md / USER.md and fold them
+	// into the system prompt after the language policy but before memory/skills,
+	// so personality is part of the cache-stable prefix. Personality content is
+	// always project-scoped and user-scoped; it never reaches a shared prefix.
+	if cfg.PersonalityEnabled() {
+		personalityDirs := personality.ProjectDirs(root)
+		if p := personality.Load(personalityDirs...); !p.Empty() {
+			sysPrompt = personality.Compose(sysPrompt, p)
+		}
 	}
 
 	// Persistent memory (REASONIX.md / AGENTS.md hierarchy + auto-memory index)

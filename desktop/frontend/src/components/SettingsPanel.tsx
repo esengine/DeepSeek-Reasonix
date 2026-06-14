@@ -21,7 +21,7 @@ import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/te
 import { FONT_FAMILIES, applyFontFamily, getFontFamily, getCustomFontName, setCustomFontName, type FontFamily } from "../lib/fontFamily";
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
-import type { BotAllowlistView, BotConnectionView, BotInstallStartResult, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import type { BotAllowlistView, BotConnectionView, BotInstallStartResult, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, PersonalitySettingsView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
@@ -32,7 +32,7 @@ import { SoundSelect } from "./SoundSelect";
 import { getSuccessPreference, setSuccessPreference, getAttentionPreference, setAttentionPreference, playSuccessChime, playAttentionChime, type SoundWavPref } from "../lib/sound";
 import { ModalCloseButton } from "./ModalCloseButton";
 
-const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "hooks", "permissions", "sandbox", "network", "appearance", "updates"];
+const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "hooks", "permissions", "sandbox", "network", "appearance", "personality", "updates"];
 export type SettingsInitialFocus = { target: "bot-allowlist"; connectionId?: string };
 
 // SettingsPanel is the desktop settings centre — a centred modal with left
@@ -187,6 +187,7 @@ export function SettingsPanel({
                     />
                   </SettingsPageShell>
                 )}
+                {tab === "personality" && <SettingsPageShell key={tab} s={null} tab={tab} busy={false} apply={apply}><PersonalitySection /></SettingsPageShell>}
                 {tab === "updates" && s && (
                   <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}>
                     <UpdatesSection
@@ -326,6 +327,189 @@ type ModelsSectionProps = SectionProps & {
   backgroundApply: (fn: () => Promise<void>) => Promise<void>;
 };
 
+// --- Personality section ---
+
+const PERSONALITY_FILE_NAMES = ["IDENTITY.md", "SOUL.md", "USER.md"];
+
+const PERSONALITY_FILE_LABELS: Record<string, string> = {
+  "IDENTITY.md": "IDENTITY.md — Who you are",
+  "SOUL.md": "SOUL.md — Your behavioural traits",
+  "USER.md": "USER.md — About the user",
+};
+
+const PERSONALITY_FILE_HINTS: Record<string, string> = {
+  "IDENTITY.md": "Define the agent's core identity, beliefs, and values. This replaces the default 'You are Reasonix...' framing.",
+  "SOUL.md": "Describe behavioural traits, communication style, emotional tone, and quirks. This shapes how the agent expresses itself.",
+  "USER.md": "Describe the user — their role, preferences, goals, and context. The agent uses this to personalise responses.",
+};
+
+function PersonalitySection() {
+  const t = useT();
+  const [settings, setSettings] = useState<PersonalitySettingsView | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [activeFile, setActiveFile] = useState<string>(PERSONALITY_FILE_NAMES[0]);
+  const [editContent, setEditContent] = useState("");
+  const [dirty, setDirty] = useState(false);
+
+  const load = async () => {
+    try {
+      const s = await app.GetPersonalitySettings();
+      setSettings(s);
+      const file = s.files.find((f) => f.name === activeFile);
+      if (file && !dirty) {
+        setEditContent(file.content);
+      }
+    } catch (e) {
+      setErr(String(e));
+    }
+  };
+
+  useEffect(() => { void load(); }, []);
+
+  const selectFile = (name: string) => {
+    setActiveFile(name);
+    setDirty(false);
+    const file = settings?.files.find((f) => f.name === name);
+    setEditContent(file?.content ?? "");
+  };
+
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await app.SavePersonalityFile(activeFile, editContent);
+      setDirty(false);
+      await load();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (name: string) => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await app.DeletePersonalityFile(name);
+      if (activeFile === name) {
+        const next = PERSONALITY_FILE_NAMES.find((n) => n !== name) ?? PERSONALITY_FILE_NAMES[0];
+        setActiveFile(next);
+        setEditContent("");
+      }
+      await load();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleEnabled = async (enabled: boolean) => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await app.SetPersonalityEnabled(enabled);
+      await load();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <SettingsSection title={t("settings.tab.personality")} description={t("settings.pageDesc.personality")}>
+      {err && <div className="banner banner--error">{err}</div>}
+
+      <SettingsField label={t("settings.personality.enable")} hint={t("settings.personality.enableHint")}>
+        <div className="set-seg">
+          <button
+            type="button"
+            className={`set-seg__btn${settings?.enabled ? " set-seg__btn--on" : ""}`}
+            disabled={busy}
+            onClick={() => toggleEnabled(true)}
+          >
+            {t("common.on")}
+          </button>
+          <button
+            type="button"
+            className={`set-seg__btn${!settings?.enabled ? " set-seg__btn--on" : ""}`}
+            disabled={busy}
+            onClick={() => toggleEnabled(false)}
+          >
+            {t("common.off")}
+          </button>
+        </div>
+      </SettingsField>
+
+      {!settings ? (
+        <div className="empty">{t("common.loading")}</div>
+      ) : (
+        <>
+          <SettingsField label={t("settings.personality.file")}>
+            <div className="set-seg" role="group" aria-label={t("settings.personality.file")}>
+              {PERSONALITY_FILE_NAMES.map((name) => {
+                const file = settings.files.find((f) => f.name === name);
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    className={`set-seg__btn${activeFile === name ? " set-seg__btn--on" : ""}`}
+                    onClick={() => selectFile(name)}
+                    disabled={busy}
+                  >
+                    {name.replace(".md", "")}
+                    <small>{file?.exists ? "✓" : ""}</small>
+                  </button>
+                );
+              })}
+            </div>
+          </SettingsField>
+
+          <SettingsField label={PERSONALITY_FILE_LABELS[activeFile]} hint={PERSONALITY_FILE_HINTS[activeFile]} stacked>
+            <textarea
+              className="mem-input"
+              value={editContent}
+              disabled={busy}
+              placeholder={t("settings.personality.placeholder")}
+              spellCheck={false}
+              onChange={(e) => {
+                setEditContent(e.target.value);
+                setDirty(true);
+              }}
+              rows={20}
+              style={{ width: "100%", minHeight: 300, resize: "vertical" }}
+            />
+          </SettingsField>
+
+          <SettingsField label="">
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={busy || !dirty}
+                onClick={() => void save()}
+              >
+                {t("common.save")}
+              </button>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                disabled={busy || !editContent.trim()}
+                onClick={() => void remove(activeFile)}
+              >
+                {t("settings.personality.clear")}
+              </button>
+            </div>
+          </SettingsField>
+        </>
+      )}
+    </SettingsSection>
+  );
+}
+
 function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
   switch (id) {
     case "general":
@@ -352,8 +536,12 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.sandbox");
     case "appearance":
       return t("settings.tab.appearance");
+    case "personality":
+      return t("settings.tab.personality");
     case "updates":
       return t("settings.tab.updates");
+    default:
+      return "";
   }
 }
 
@@ -383,8 +571,12 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
       return sandboxModeLabel(s.sandbox.bash, t);
     case "appearance":
       return t("settings.appearanceMeta");
+    case "personality":
+      return t("settings.personalityMeta");
     case "updates":
       return t("settings.updatesMeta");
+    default:
+      return "";
   }
 }
 

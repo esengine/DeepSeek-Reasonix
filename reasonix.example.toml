@@ -38,6 +38,12 @@ compact_force_ratio = 0.9   # force compacting at this high-water mark
 # output_style = "explanatory"   # persona/tone folded into the prompt: explanatory | learning | concise,
 #                                  or a custom .reasonix/output-styles/<name>.md ; empty = default
 
+[personality]
+# Personality module: when enabled, IDENTITY.md / SOUL.md / USER.md from
+# .reasonix/personality/ are injected into the system prompt under dedicated
+# headers, shaping the agent's identity, behaviour, and user awareness.
+# enabled = false   # off by default; set true (or toggle in Settings) to activate
+
 # A provider is a vendor endpoint (one base_url + key) that offers one or more
 # models. Use `models = [...]` to expose several under a single entry — switching
 # models reuses the same connection; no need to re-declare base_url/api_key.
