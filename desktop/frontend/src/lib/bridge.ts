@@ -40,6 +40,8 @@ import type {
   ModelInfo,
   NetworkView,
   ProjectNode,
+  PromptHistoryEntry,
+  PromptHistoryResult,
   ProviderView,
   QuestionAnswer,
   ServerView,
@@ -141,6 +143,7 @@ export interface AppBindings {
   RestoreSession(path: string): Promise<void>;
   PurgeTrashedSession(path: string): Promise<void>;
   RenameSession(path: string, title: string): Promise<void>;
+  ScanPromptHistory(nonce: string): Promise<PromptHistoryResult>;
   ListWorkspaces(): Promise<WorkspaceView[]>;
   PickWorkspace(): Promise<string>;
   SwitchWorkspace(path: string): Promise<string>;
@@ -762,7 +765,7 @@ function makeMockApp(): AppBindings {
         feishuGroups: [],
         weixinGroups: [],
       },
-      qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false },
+      qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false, sandbox: false },
       feishu: {
         enabled: false,
         domain: "feishu",
@@ -1724,6 +1727,15 @@ function makeMockApp(): AppBindings {
       const s = sessions.find((x) => x.path === path);
       if (s) s.title = title.trim() || undefined;
     },
+	    async ScanPromptHistory(nonce: string) {
+	      // Dev mock returns a static set of sample prompts for UI development.
+	      const entries: PromptHistoryEntry[] = [
+	        { text: "Explain the architecture of this project", at: Date.now() - 60000, sessionPath: "/mock/sessions/arch.jsonl", turn: 0 },
+	        { text: "Fix the login button styling", at: Date.now() - 120000, sessionPath: "/mock/sessions/arch.jsonl", turn: 1 },
+	        { text: "What is the capital of France?", at: Date.now() - 300000, sessionPath: "/mock/sessions/general.jsonl", turn: 0 },
+	      ];
+	      return { entries, nonce: "mock-" + nonce, olderCursor: "", hasOlder: false };
+	    },
     async ListWorkspaces() {
       return mockProjectTree
         .filter((node) => node.kind === "project" && node.root)
@@ -2380,7 +2392,8 @@ function makeMockApp(): AppBindings {
           }));
         },
         async BotRuntimeStatus() {
-          const runningConnections = settings.bot.connections.filter((connection) => connection.enabled && connection.status === "connected").length;
+          const qqRunning = settings.bot.qq.enabled && settings.bot.qq.appId.trim() && settings.bot.qq.secretSet;
+          const runningConnections = (qqRunning ? 1 : 0) + settings.bot.connections.filter((connection) => connection.enabled && connection.status === "connected").length;
           return {
             running: settings.bot.enabled && runningConnections > 0,
             status: settings.bot.enabled && runningConnections > 0 ? "running" : "stopped",

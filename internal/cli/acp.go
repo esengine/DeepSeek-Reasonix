@@ -74,13 +74,114 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 		return nil, fmt.Errorf("session cwd must be an absolute path: %s", root)
 	}
 	return boot.Build(ctx, boot.Options{
-		Model:         f.model,
-		RequireKey:    true,
-		Sink:          p.Sink,
-		Stderr:        os.Stderr,
-		WorkspaceRoot: root,
-		ExtraPlugins:  p.MCPServers,
+		Model:          firstNonEmpty(p.Model, f.model),
+		RequireKey:     true,
+		Sink:           p.Sink,
+		EffortOverride: p.EffortOverride,
+		Stderr:         os.Stderr,
+		WorkspaceRoot:  root,
+		ExtraPlugins:   p.MCPServers,
 	})
+}
+
+func (f *acpFactory) SessionConfigState(_ context.Context, p acp.SessionConfigStateParams) (acp.SessionConfigState, error) {
+	root := strings.TrimSpace(p.Cwd)
+	if root == "" {
+		if wd, err := os.Getwd(); err == nil {
+			root = wd
+		}
+	}
+	if root != "" && !filepath.IsAbs(root) {
+		return acp.SessionConfigState{}, fmt.Errorf("session cwd must be an absolute path: %s", root)
+	}
+	_, _ = config.MigrateLegacyIfNeeded()
+	cfg, err := config.LoadForRoot(root)
+	if err != nil {
+		return acp.SessionConfigState{}, err
+	}
+
+	ref := firstNonEmpty(p.Model, f.model, cfg.DefaultModel)
+	if strings.TrimSpace(ref) == "" {
+		return acp.SessionConfigState{}, fmt.Errorf("no default_model configured")
+	}
+	entry, ok := cfg.ResolveModel(ref)
+	if !ok {
+		return acp.SessionConfigState{}, fmt.Errorf("unknown model %q", ref)
+	}
+	if !entry.Configured() {
+		return acp.SessionConfigState{}, fmt.Errorf("model %q is not configured", ref)
+	}
+	currentModel := entry.Name + "/" + entry.Model
+	modelOptions, modelInfos := acpModelOptions(cfg)
+	if !hasModelOption(modelOptions, currentModel) {
+		modelOptions = append(modelOptions, acp.SessionConfigSelectOption{
+			Value:       currentModel,
+			Name:        currentModel,
+			Description: entry.Name,
+		})
+		modelInfos = append(modelInfos, acp.ModelInfo{
+			ModelID:     currentModel,
+			Name:        currentModel,
+			Description: entry.Name,
+		})
+	}
+
+	effortEntry := *entry
+	effortOverride := cloneStringPtr(p.EffortOverride)
+	hadEffortOverride := effortOverride != nil
+	if effortOverride != nil {
+		if strings.TrimSpace(*effortOverride) == "" {
+			effortEntry.Effort = ""
+		} else {
+			normalized, err := config.NormalizeEffort(&effortEntry, *effortOverride)
+			if err != nil {
+				effortEntry.Effort = ""
+				cleared := ""
+				effortOverride = &cleared
+			} else {
+				effortEntry.Effort = normalized
+				effortOverride = &normalized
+			}
+		}
+	}
+
+	options := []acp.SessionConfigOption{{
+		ID:           "model",
+		Name:         "Model",
+		Category:     "model",
+		Type:         "select",
+		CurrentValue: currentModel,
+		Options:      modelOptions,
+	}}
+	if cap := config.EffortCapabilityForEntry(&effortEntry); cap.Supported {
+		currentEffort := config.EffortDisplay(&effortEntry)
+		if !containsString(cap.Levels, currentEffort) {
+			currentEffort = "auto"
+			auto := ""
+			effortOverride = &auto
+		}
+		options = append(options, acp.SessionConfigOption{
+			ID:           "effort",
+			Name:         "Effort",
+			Category:     "thought_level",
+			Type:         "select",
+			CurrentValue: currentEffort,
+			Options:      acpEffortOptions(cap.Levels),
+		})
+	} else if hadEffortOverride {
+		cleared := ""
+		effortOverride = &cleared
+	}
+
+	return acp.SessionConfigState{
+		Model:          currentModel,
+		EffortOverride: effortOverride,
+		Models: &acp.SessionModelState{
+			AvailableModels: modelInfos,
+			CurrentModelID:  currentModel,
+		},
+		ConfigOptions: options,
+	}, nil
 }
 
 func acpBuiltinTools(cfg *config.Config, cwd string, writeRoots []string) []tool.Tool {
@@ -94,6 +195,78 @@ func acpBuiltinTools(cfg *config.Config, cwd string, writeRoots []string) []tool
 		ProxySpec:   cfg.NetworkProxySpec(),
 	}
 	return ws.Tools(cfg.Tools.Enabled...)
+}
+
+func acpModelOptions(cfg *config.Config) ([]acp.SessionConfigSelectOption, []acp.ModelInfo) {
+	if cfg == nil {
+		return nil, nil
+	}
+	var options []acp.SessionConfigSelectOption
+	var models []acp.ModelInfo
+	for i := range cfg.Providers {
+		p := &cfg.Providers[i]
+		if !p.Configured() {
+			continue
+		}
+		for _, model := range p.ChatModelList() {
+			ref := p.Name + "/" + model
+			options = append(options, acp.SessionConfigSelectOption{
+				Value:       ref,
+				Name:        ref,
+				Description: p.Name,
+			})
+			models = append(models, acp.ModelInfo{
+				ModelID:     ref,
+				Name:        ref,
+				Description: p.Name,
+			})
+		}
+	}
+	return options, models
+}
+
+func hasModelOption(options []acp.SessionConfigSelectOption, ref string) bool {
+	for _, opt := range options {
+		if opt.Value == ref {
+			return true
+		}
+	}
+	return false
+}
+
+func acpEffortOptions(levels []string) []acp.SessionConfigSelectOption {
+	out := make([]acp.SessionConfigSelectOption, 0, len(levels))
+	for _, level := range levels {
+		out = append(out, acp.SessionConfigSelectOption{Value: level, Name: effortOptionName(level)})
+	}
+	return out
+}
+
+func effortOptionName(level string) string {
+	if level == "" {
+		return ""
+	}
+	if level == "xhigh" {
+		return "XHigh"
+	}
+	return strings.ToUpper(level[:1]) + level[1:]
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func cloneStringPtr(p *string) *string {
+	if p == nil {
+		return nil
+	}
+	cp := *p
+	return &cp
 }
 
 func acpTaskProfileDefaults(cfg *config.Config) (string, string) {

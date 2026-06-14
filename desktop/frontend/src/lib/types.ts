@@ -228,6 +228,20 @@ export interface HistoryToolCall {
   arguments: string;
 }
 
+export interface PromptHistoryEntry {
+  text: string;
+  at: number;          // unix ms
+  sessionPath: string;
+  turn: number;
+}
+
+export interface PromptHistoryResult {
+  entries: PromptHistoryEntry[] | null;
+  nonce: string;
+  olderCursor?: string;
+  hasOlder?: boolean;
+}
+
 // CheckpointMeta is one rewind point (a user turn) for the rewind UI.
 export interface CheckpointMeta {
   turn: number;
@@ -667,6 +681,7 @@ export interface QQBotView {
   appId: string;
   appSecretEnv: string;
   secretSet: boolean;
+  sandbox: boolean;
 }
 
 export interface FeishuBotView {

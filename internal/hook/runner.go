@@ -75,6 +75,16 @@ func (r *Runner) PostToolUse(ctx context.Context, name string, args json.RawMess
 	r.handle(rep)
 }
 
+// PermissionRequest fires before a tool approval prompt is shown. It can't
+// block; non-pass outcomes are surfaced to the user via notify.
+func (r *Runner) PermissionRequest(ctx context.Context, name, subject string, args json.RawMessage) {
+	if !r.Enabled() {
+		return
+	}
+	rep := Run(ctx, Payload{Event: PermissionRequest, Cwd: r.cwd, ToolName: name, ToolArgs: args, Subject: subject}, r.hooks, r.spawner)
+	r.handle(rep)
+}
+
 // PromptSubmit fires before a turn starts. block=true aborts the turn; message
 // is the reason.
 func (r *Runner) PromptSubmit(ctx context.Context, prompt string, turn int) (block bool, message string) {

@@ -761,12 +761,12 @@ function approvalPersistentLabel(a) {
 }
 function approvalSessionRule(a) {
   if (a.tool === 'bash' && a.subject) return 'Bash('+String(a.subject).trim()+')';
-  if (['write_file','edit_file','multi_edit','notebook_edit','delete_range','delete_symbol'].includes(a.tool)) return 'Edit';
+  if (['write_file','edit_file','multi_edit','move_file','notebook_edit','delete_range','delete_symbol'].includes(a.tool)) return 'Edit';
   return a.tool;
 }
 function approvalPersistentRule(a) {
   if (a.tool === 'bash' && a.subject) return 'Bash('+String(a.subject).trim()+')';
-  if (['write_file','edit_file','multi_edit','notebook_edit','delete_range','delete_symbol'].includes(a.tool)) return a.subject ? 'Edit('+String(a.subject).trim()+')' : 'Edit';
+  if (['write_file','edit_file','multi_edit','move_file','notebook_edit','delete_range','delete_symbol'].includes(a.tool)) return a.subject ? 'Edit('+String(a.subject).trim()+')' : 'Edit';
   return a.tool;
 }
 function bashCommandPrefix(subject) {

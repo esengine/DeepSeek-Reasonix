@@ -490,6 +490,7 @@ type QQBotConfig struct {
 	Enabled      bool   `toml:"enabled"`
 	AppID        string `toml:"app_id"`
 	AppSecretEnv string `toml:"app_secret_env"` // 环境变量名，如 QQ_BOT_APP_SECRET
+	Sandbox      bool   `toml:"sandbox"`        // true 使用 QQ 沙箱 API / gateway
 }
 
 // FeishuBotConfig 飞书自建应用 Bot 配置。
@@ -720,7 +721,7 @@ func (c *Config) IsSkillDisabled(name string) bool {
 
 // SandboxConfig bounds the blast radius of tool calls (Phase 0: file-writer
 // confinement). WorkspaceRoot is the directory the built-in file writers
-// (write_file / edit_file / multi_edit) may modify; empty means the current
+// (write_file / edit_file / multi_edit / move_file) may modify; empty means the current
 // working directory, so writes stay inside the project by default. AllowWrite
 // lists extra directories writers may also touch (e.g. a sibling repo or a temp
 // dir). Both support ${VAR} / ${VAR:-default} expansion. Reads are unrestricted;

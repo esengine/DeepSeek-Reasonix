@@ -10,11 +10,13 @@ export function CopyButton({
   getText,
   className,
   label,
+  showInlineLabel = true,
 }: {
   text?: string;
   getText?: () => string | Promise<string>;
   className?: string;
   label?: string;
+  showInlineLabel?: boolean;
 }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
@@ -37,7 +39,9 @@ export function CopyButton({
       type="button"
     >
       {copied ? <Check size={13} /> : <Copy size={13} />}
-      <span className="copybtn__label-inline">{copied ? t("msg.copied") : actionLabel}</span>
+      {showInlineLabel && (
+        <span className="copybtn__label-inline">{copied ? t("msg.copied") : actionLabel}</span>
+      )}
     </button>
   );
 }

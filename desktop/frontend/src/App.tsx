@@ -57,6 +57,7 @@ import { parseTodos } from "./lib/tools";
 import { shouldShowTodoPanel } from "./lib/todoVisibility";
 import {
   type BotConnectionView,
+  type BotRuntimeStatusView,
   type BotSettingsView,
   type CollaborationMode,
   type ComposerInsertRequest,
@@ -147,7 +148,7 @@ type HistoryViewState =
   | { kind: "history"; source: "scope"; filter: HistoryScopeFilter; sessions: SessionMeta[] }
   | { kind: "history"; source: "all"; sessions: SessionMeta[] }
   | { kind: "trash"; sessions: SessionMeta[] };
-type SidebarImPlatform = "feishu" | "lark" | "weixin";
+type SidebarImPlatform = "qq" | "feishu" | "lark" | "weixin";
 type SidebarImStatus = "connected" | "disabled" | "pending" | "error" | "disconnected";
 type SidebarImConnection = {
   id: string;
@@ -191,6 +192,7 @@ function sidebarImPlatform(connection: BotConnectionView): SidebarImPlatform {
 }
 
 function sidebarImPlatformLabel(platform: SidebarImPlatform, translate: Translator): string {
+  if (platform === "qq") return "QQ";
   if (platform === "lark") return "Lark";
   if (platform === "weixin") return translate("settings.botWeixin");
   return translate("settings.botFeishu");
@@ -252,13 +254,77 @@ function uniqueTrimmedValues(values: string[]): string[] {
 }
 
 function sidebarImAllowlistUsers(bot: BotSettingsView, platform: SidebarImPlatform): string[] {
+  if (platform === "qq") return uniqueTrimmedValues(asArray(bot.allowlist.qqUsers));
   if (platform === "weixin") return uniqueTrimmedValues(asArray(bot.allowlist.weixinUsers));
   return uniqueTrimmedValues(asArray(bot.allowlist.feishuUsers));
 }
 
-function sidebarImConnectionsFromBot(bot: BotSettingsView | null | undefined, translate: Translator): SidebarImConnection[] {
-  if (!bot?.connections?.length) return [];
-  return bot.connections
+function sidebarImQQAdded(qq: BotSettingsView["qq"]): boolean {
+  return Boolean(qq.enabled || qq.secretSet || qq.appId.trim());
+}
+
+function sidebarImQQStatus(bot: BotSettingsView, runtimeStatus: BotRuntimeStatusView | null | undefined): SidebarImStatus {
+  const appId = bot.qq.appId.trim();
+  if (!bot.enabled || !bot.qq.enabled) return "disabled";
+  if (!appId || !bot.qq.secretSet) return "disconnected";
+  if (typeof window !== "undefined" && !window.runtime) return "pending";
+  if (!runtimeStatus) return "pending";
+  const status = runtimeStatus.status.trim().toLowerCase();
+  if (runtimeStatus.running && runtimeStatus.connections > 0 && status === "running") {
+    return "connected";
+  }
+  if (status === "error" || status === "blocked" || status === "degraded") return "error";
+  if (status === "stopped") return "disconnected";
+  return "pending";
+}
+
+async function loadBotRuntimeStatus(): Promise<BotRuntimeStatusView | null> {
+  if (typeof window !== "undefined" && !window.runtime) return null;
+  try {
+    return await app.BotRuntimeStatus();
+  } catch (e) {
+    console.warn("bot runtime status failed", e);
+    return null;
+  }
+}
+
+function sidebarImQQConnection(bot: BotSettingsView, translate: Translator, runtimeStatus?: BotRuntimeStatusView | null): SidebarImConnection | null {
+  if (!sidebarImQQAdded(bot.qq)) return null;
+  const remoteId = bot.qq.appId.trim();
+  const status = sidebarImQQStatus(bot, runtimeStatus);
+  const statusLabel = sidebarImStatusLabel(status, translate);
+  const allowlistUsers = sidebarImAllowlistUsers(bot, "qq");
+  const subtitleParts = [
+    remoteId ? compactRemoteId(remoteId) : "QQ",
+    statusLabel,
+  ].filter(Boolean);
+  return {
+    id: "__qq_bot__",
+    platform: "qq",
+    title: "QQ Bot",
+    platformLabel: "QQ",
+    subtitle: subtitleParts.join(" · "),
+    status,
+    statusLabel,
+    remoteId,
+    sessionId: "",
+    scope: "global",
+    workspaceRoot: "",
+    allowAll: bot.allowlist.allowAll,
+    allowlistEnabled: bot.allowlist.enabled,
+    allowlistUsers,
+    allowlistMatched: remoteId ? allowlistUsers.includes(remoteId) : false,
+  };
+}
+
+function sidebarImConnectionsFromBot(
+  bot: BotSettingsView | null | undefined,
+  translate: Translator,
+  runtimeStatus?: BotRuntimeStatusView | null,
+): SidebarImConnection[] {
+  if (!bot) return [];
+  const qqConnection = sidebarImQQConnection(bot, translate, runtimeStatus);
+  const connectionItems = asArray(bot.connections)
     .filter(isSidebarImConnection)
     .map((connection) => {
       const platform = sidebarImPlatform(connection);
@@ -294,6 +360,7 @@ function sidebarImConnectionsFromBot(bot: BotSettingsView | null | undefined, tr
         allowlistMatched: remoteId ? allowlistUsers.includes(remoteId) : false,
       };
     });
+  return qqConnection ? [qqConnection, ...connectionItems] : connectionItems;
 }
 
 function mappedSessionTarget(sessionId: string): { kind: "path" | "topic"; value: string } | null {
@@ -378,7 +445,7 @@ function SidebarImConnectionDetail({ connection, onClose, onOpenSession, onOpenS
     <div className="bot-detail">
       <section className="bot-detail__summary">
         <div className={`bot-detail__avatar bot-detail__avatar--${connection.platform}`} aria-hidden="true">
-          {connection.platform === "weixin" ? "微" : connection.platform === "lark" ? "L" : "飞"}
+          {connection.platform === "qq" ? "Q" : connection.platform === "weixin" ? "微" : connection.platform === "lark" ? "L" : "飞"}
         </div>
         <div className="bot-detail__summary-main">
           <span>{translate("botDetail.subtitle")}</span>
@@ -857,14 +924,20 @@ export default function App() {
 
   // Persist window geometry across launches.
   useWindowStatePersistence();
+  useEffect(() => {
+    document.documentElement.setAttribute("data-platform", desktopPlatform);
+  }, [desktopPlatform]);
 
   const closeTransientOverlays = useCallback(() => {
     setTransientOverlayDismissSignal((signal) => signal + 1);
   }, []);
 
   const reloadSidebarImConnections = useCallback(async () => {
-    const settings = await app.Settings();
-    setSidebarImConnections(sidebarImConnectionsFromBot(settings.bot, t));
+    const [settings, runtimeStatus] = await Promise.all([
+      app.Settings(),
+      loadBotRuntimeStatus(),
+    ]);
+    setSidebarImConnections(sidebarImConnectionsFromBot(settings.bot, t, runtimeStatus));
     setImTopicSources(sidebarImTopicSourcesFromBot(settings.bot, t));
   }, [t]);
 
@@ -988,11 +1061,14 @@ export default function App() {
         clearLegacyLangPref();
         clearLegacyThemePreference();
       }
-      const settings = await app.Settings();
+      const [settings, runtimeStatus] = await Promise.all([
+        app.Settings(),
+        loadBotRuntimeStatus(),
+      ]);
       if (cancelled) return;
       applyDesktopPreferences(settings);
       hydrateDisplayMode(settings.displayMode);
-      setSidebarImConnections(sidebarImConnectionsFromBot(settings.bot, t));
+      setSidebarImConnections(sidebarImConnectionsFromBot(settings.bot, t, runtimeStatus));
       setImTopicSources(sidebarImTopicSourcesFromBot(settings.bot, t));
     };
     void syncDesktopPreferences().catch((e) => {
@@ -2392,7 +2468,7 @@ export default function App() {
                   onClick={() => void selectSidebarImConnection(connection)}
                 >
                   <span className={`sidebar-im-row__platform sidebar-im-row__platform--${connection.platform}`} aria-hidden="true">
-                    {connection.platform === "weixin" ? "微" : connection.platform === "lark" ? "L" : "飞"}
+                    {connection.platform === "qq" ? "Q" : connection.platform === "weixin" ? "微" : connection.platform === "lark" ? "L" : "飞"}
                   </span>
                   <span className="sidebar-im-row__main">
                     <strong>{connection.title}</strong>
@@ -2667,11 +2743,14 @@ export default function App() {
             <div className="topicbar__actions">
               {!sidebarImDetailConnection && (
               <>
-              <CopyButton
-                getText={getSessionMarkdown}
-                label={t("topicBar.copyAll")}
-                className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"
-              />
+              <Tooltip label={t("topicBar.copyAll")}>
+                <CopyButton
+                  getText={getSessionMarkdown}
+                  label={t("topicBar.copyAll")}
+                  className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"
+                  showInlineLabel={false}
+                />
+              </Tooltip>
               <div className={`topicbar__export${topicExportOpen ? " topicbar__export--open" : ""}`}>
                 <Tooltip label={t("topicBar.export")}>
                   <button

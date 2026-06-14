@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"reasonix/internal/config"
+	"reasonix/internal/control"
 	"reasonix/internal/hook"
 	"reasonix/internal/provider"
 )
@@ -169,6 +171,49 @@ func TestSetReasoningLanguagePersistsToUserConfig(t *testing.T) {
 	cfg := config.LoadForEdit(config.UserConfigPath())
 	if cfg.Agent.ReasoningLanguage != "zh" || cfg.ReasoningLanguage() != "zh" {
 		t.Fatalf("saved reasoning language = %q/%q, want zh", cfg.Agent.ReasoningLanguage, cfg.ReasoningLanguage())
+	}
+}
+
+func TestSetReasoningLanguageUpdatesLiveTabControllers(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	projectRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectRoot, "reasonix.toml"), []byte("[agent]\nreasoning_language = \"en\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	userCtrl := control.New(control.Options{ReasoningLanguage: "auto"})
+	projectCtrl := control.New(control.Options{ReasoningLanguage: "auto"})
+	app.tabs = map[string]*WorkspaceTab{
+		"user": {
+			ID:          "user",
+			Scope:       "global",
+			Ctrl:        userCtrl,
+			Ready:       true,
+			disabledMCP: map[string]ServerView{},
+		},
+		"project": {
+			ID:            "project",
+			Scope:         "project",
+			WorkspaceRoot: projectRoot,
+			Ctrl:          projectCtrl,
+			Ready:         true,
+			disabledMCP:   map[string]ServerView{},
+		},
+	}
+	app.activeTabID = "user"
+
+	if err := app.SetReasoningLanguage("zh"); err != nil {
+		t.Fatalf("SetReasoningLanguage: %v", err)
+	}
+
+	userComposed := userCtrl.Compose("hi")
+	if !strings.Contains(userComposed, "Simplified Chinese") {
+		t.Fatalf("user-level tab Compose = %q, want zh reasoning language", userComposed)
+	}
+	projectComposed := projectCtrl.Compose("hi")
+	if !strings.Contains(projectComposed, "use English") {
+		t.Fatalf("project override tab Compose = %q, want en reasoning language", projectComposed)
 	}
 }
 
