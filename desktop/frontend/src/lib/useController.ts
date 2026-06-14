@@ -10,6 +10,7 @@ import { app, onEvent, onReady } from "./bridge";
 import { invalidateCache } from "./composerHistory";
 import { createRafBatch } from "./rafBatch";
 import { t } from "./i18n";
+import { summarize } from "./tools";
 import { modeHasAutoApproveTools } from "./types";
 import type {
   BalanceInfo,
@@ -65,6 +66,7 @@ export type Item =
       truncated?: boolean;
       dataArchived?: boolean; // args/output trimmed for memory; full data available via backend
       durationMs?: number;
+      summary?: string; // stable collapsed readout kept even after args/output archive
       isShell?: boolean; // true for !-prefix shell commands (controls default expand)
       parentId?: string; // a sub-agent call nests under the `task` call with this id
       profile?: { model?: string; effort?: string }; // subagent model/effort from tool event
@@ -378,10 +380,15 @@ function applyEvent(s: State, e: WireEvent): State {
       if (idx >= 0) {
         const next = [...s.items];
         const it = next[idx];
-        if (it.kind === "tool") next[idx] = { ...it, name: t.name, args: t.args ? t.args : it.args, readOnly: t.readOnly, profile: t.profile ?? it.profile };
+        if (it.kind === "tool") {
+          const args = t.args ? t.args : it.args;
+          const summary = summarize(t.name, args) || (t.name === it.name && args === it.args ? it.summary : undefined);
+          next[idx] = { ...it, name: t.name, args, readOnly: t.readOnly, profile: t.profile ?? it.profile, summary };
+        }
         return { ...s, items: next };
       }
-      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "tool", id, name: t.name, args: t.args ?? "", readOnly: t.readOnly, status: "running", isShell: id.startsWith("shell-"), parentId: t.parentId, profile: t.profile }] };
+      const args = t.args ?? "";
+      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "tool", id, name: t.name, args, readOnly: t.readOnly, status: "running", summary: summarize(t.name, args), isShell: id.startsWith("shell-"), parentId: t.parentId, profile: t.profile }] };
     }
     case "tool_result": {
       const t = e.tool;
@@ -402,7 +409,8 @@ function applyEvent(s: State, e: WireEvent): State {
           // demand via app.ToolResultForTab when the card is expanded.
           const existing = it;
           const shortArgs = existing.args && existing.args.length > 200 ? existing.args.slice(0, 200) + "…" : existing.args;
-          next[idx] = { ...existing, status: t.err ? "error" : "done", args: shortArgs, output: undefined, error: t.err, truncated: t.truncated, durationMs: t.durationMs, dataArchived: true };
+          const summary = existing.summary || summarize(existing.name, existing.args, t.output, t.err);
+          next[idx] = { ...existing, status: t.err ? "error" : "done", args: shortArgs, output: undefined, error: t.err, truncated: t.truncated, durationMs: t.durationMs, dataArchived: true, summary };
         }
       }
       return { ...s, items: next };
