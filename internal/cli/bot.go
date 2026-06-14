@@ -7,10 +7,12 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/bot"
 	"reasonix/internal/bot/weixin"
 	"reasonix/internal/botruntime"
@@ -62,36 +64,92 @@ func botStart(args []string, version string) int {
 		return 1
 	}
 
-	if !cfg.Bot.Enabled {
-		fmt.Fprintln(os.Stderr, "error: bot is not enabled in config — set [bot] enabled = true")
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	prepared, err := prepareBotGateway(cfg, botGatewayOptions{
+		Channels:      *channels,
+		WorkspaceRoot: *dir,
+		Model:         *model,
+	}, logger, func(format string, args ...interface{}) {
+		fmt.Fprintf(os.Stderr, "warning: "+format+"\n", args...)
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	if !cfg.Bot.Allowlist.AllowAll && (!cfg.Bot.Allowlist.Enabled || botruntime.AllowlistUserCount(cfg.Bot.Allowlist) == 0) {
-		fmt.Fprintln(os.Stderr, "error: bot requires an explicit allowlist; set [bot.allowlist] enabled = true with platform user ids, or set allow_all = true intentionally")
+	gw := prepared.Gateway
+
+	// 信号处理
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigCh
+		fmt.Fprintln(os.Stderr, "\nshutting down...")
+		cancel()
+		gw.Stop()
+	}()
+
+	fmt.Fprintf(os.Stderr, "reasonix bot starting (model: %s, channels: %s)...\n", prepared.Model, prepared.ChannelSummary)
+	fmt.Fprintf(os.Stderr, "version: %s\n", version)
+
+	if err := gw.Start(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "error: start gateway: %v\n", err)
 		return 1
 	}
 
-	workspaceRoot := *dir
+	// 等待信号或 context 取消
+	<-ctx.Done()
+	return 0
+}
+
+type botGatewayOptions struct {
+	Channels      string
+	WorkspaceRoot string
+	Model         string
+}
+
+type preparedBotGateway struct {
+	Gateway        *bot.BotGateway
+	Model          string
+	ChannelSummary string
+}
+
+func prepareBotGateway(cfg *config.Config, opts botGatewayOptions, logger *slog.Logger, warnf func(string, ...interface{})) (*preparedBotGateway, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("bot config is nil")
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if !cfg.Bot.Enabled {
+		return nil, fmt.Errorf("bot is not enabled in config — set [bot] enabled = true")
+	}
+	if !cfg.Bot.Allowlist.AllowAll && (!cfg.Bot.Allowlist.Enabled || botruntime.AllowlistUserCount(cfg.Bot.Allowlist) == 0) {
+		return nil, fmt.Errorf("bot requires an explicit allowlist; set [bot.allowlist] enabled = true with platform user ids, or set allow_all = true intentionally")
+	}
+
+	workspaceRoot := opts.WorkspaceRoot
 	if workspaceRoot == "" {
 		if wd, err := os.Getwd(); err == nil {
 			workspaceRoot = wd
 		}
 	}
 
-	requestedChannels := splitBotChannels(*channels)
+	requestedChannels := splitBotChannels(opts.Channels)
 	enabledPlatforms, unknownChannels := botruntime.EnabledPlatforms(cfg, requestedChannels)
 	for _, ch := range unknownChannels {
-		fmt.Fprintf(os.Stderr, "warning: unknown channel %q\n", ch)
+		if warnf != nil {
+			warnf("unknown channel %q", ch)
+		}
 	}
 	if !botruntime.HasEnabledPlatform(enabledPlatforms) {
-		fmt.Fprintln(os.Stderr, "error: no bot channels enabled — enable at least one in config")
-		return 1
+		return nil, fmt.Errorf("no bot channels enabled — enable at least one in config")
 	}
 
-	modelName := botruntime.ModelName(cfg, *model)
+	modelName := botruntime.ModelName(cfg, opts.Model)
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	rememberInboundRemote := botruntime.NewRemoteRememberer(logger)
+	sessionSearchDirs := botSessionSearchDirs(workspaceRoot)
 
 	// 构建网关配置
 	gwCfg := bot.GatewayConfig{
@@ -99,8 +157,12 @@ func botStart(args []string, version string) int {
 		ToolApprovalMode:   cfg.Bot.ToolApprovalMode,
 		MaxSteps:           cfg.Bot.MaxSteps,
 		WorkspaceRoot:      workspaceRoot,
-		Channels:           botruntime.ChannelConfigs(cfg.Bot.Connections, *model == "", *dir == ""),
-		ConnectionChannels: botruntime.ConnectionChannelConfigs(cfg.Bot.Connections, *model == "", *dir == ""),
+		SessionDir:         botPrimarySessionDir(workspaceRoot),
+		SessionSearchDirs:  sessionSearchDirs,
+		SessionMappingPath: botSessionMappingPath(),
+		SessionMappings:    botStaticSessionMappings(cfg.Bot.Connections, sessionSearchDirs),
+		Channels:           botruntime.ChannelConfigs(cfg.Bot.Connections, strings.TrimSpace(opts.Model) == "", strings.TrimSpace(opts.WorkspaceRoot) == ""),
+		ConnectionChannels: botruntime.ConnectionChannelConfigs(cfg.Bot.Connections, strings.TrimSpace(opts.Model) == "", strings.TrimSpace(opts.WorkspaceRoot) == ""),
 		Enabled:            enabledPlatforms,
 		Allowlist: bot.AllowlistConfig{
 			Enabled:  cfg.Bot.Allowlist.Enabled,
@@ -122,29 +184,173 @@ func botStart(args []string, version string) int {
 
 	feishuDomains := botruntime.RequestedFeishuDomains(requestedChannels)
 	gw := bot.NewGatewayWithAdapterBindings(gwCfg, botruntime.AdapterBindings(cfg, enabledPlatforms, feishuDomains, logger), logger)
+	return &preparedBotGateway{
+		Gateway:        gw,
+		Model:          modelName,
+		ChannelSummary: botChannelSummaryFromRequest(opts.Channels, enabledPlatforms),
+	}, nil
+}
 
-	// 信号处理
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigCh
-		fmt.Fprintln(os.Stderr, "\nshutting down...")
-		cancel()
-		gw.Stop()
-	}()
-
-	fmt.Fprintf(os.Stderr, "reasonix bot starting (model: %s, channels: %s)...\n", modelName, *channels)
-	fmt.Fprintf(os.Stderr, "version: %s\n", version)
-
-	if err := gw.Start(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "error: start gateway: %v\n", err)
-		return 1
+func resolveBotEnabledPlatforms(cfg config.BotConfig, channels string, warnf func(string, ...interface{})) map[bot.Platform]bool {
+	enabledPlatforms := make(map[bot.Platform]bool)
+	if strings.TrimSpace(channels) != "" {
+		for _, ch := range strings.Split(channels, ",") {
+			ch = strings.TrimSpace(ch)
+			switch bot.Platform(ch) {
+			case bot.PlatformQQ:
+				enabledPlatforms[bot.PlatformQQ] = cfg.QQ.Enabled
+			case bot.PlatformFeishu:
+				enabledPlatforms[bot.PlatformFeishu] = cfg.Feishu.Enabled
+			case bot.PlatformWeixin:
+				enabledPlatforms[bot.PlatformWeixin] = cfg.Weixin.Enabled
+			default:
+				if warnf != nil {
+					warnf("unknown channel %q", ch)
+				}
+			}
+		}
+		return enabledPlatforms
 	}
+	enabledPlatforms[bot.PlatformQQ] = cfg.QQ.Enabled
+	enabledPlatforms[bot.PlatformFeishu] = cfg.Feishu.Enabled
+	enabledPlatforms[bot.PlatformWeixin] = cfg.Weixin.Enabled
+	return enabledPlatforms
+}
 
-	// 等待信号或 context 取消
-	<-ctx.Done()
-	return 0
+func hasEnabledBotPlatform(enabled map[bot.Platform]bool) bool {
+	for _, v := range enabled {
+		if v {
+			return true
+		}
+	}
+	return false
+}
+
+func botChannelSummary(enabled map[bot.Platform]bool) string {
+	var names []string
+	for _, plat := range []bot.Platform{bot.PlatformQQ, bot.PlatformFeishu, bot.PlatformWeixin} {
+		if enabled[plat] {
+			names = append(names, string(plat))
+		}
+	}
+	if len(names) == 0 {
+		return "(none)"
+	}
+	return strings.Join(names, ",")
+}
+
+func botChannelSummaryFromRequest(channels string, enabled map[bot.Platform]bool) string {
+	if trimmed := strings.TrimSpace(channels); trimmed != "" {
+		return trimmed
+	}
+	return botChannelSummary(enabled)
+}
+
+func botSessionMappingPath() string {
+	root := config.MemoryUserDir()
+	if strings.TrimSpace(root) == "" {
+		return ""
+	}
+	return filepath.Join(root, "bot-session-mappings.json")
+}
+
+func botPrimarySessionDir(workspaceRoot string) string {
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	if workspaceRoot != "" {
+		if dir := config.ProjectSessionDir(workspaceRoot); dir != "" {
+			return dir
+		}
+	}
+	return config.SessionDir()
+}
+
+func botSessionSearchDirs(workspaceRoot string) []string {
+	var dirs []string
+	add := func(dir string) {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			return
+		}
+		for _, existing := range dirs {
+			if existing == dir {
+				return
+			}
+		}
+		dirs = append(dirs, dir)
+	}
+	add(botPrimarySessionDir(workspaceRoot))
+	add(config.SessionDir())
+	return dirs
+}
+
+func botStaticSessionMappings(connections []config.BotConnectionConfig, dirs []string) []bot.SessionMapping {
+	var out []bot.SessionMapping
+	for _, conn := range connections {
+		if !conn.Enabled {
+			continue
+		}
+		searchDirs := append([]string(nil), dirs...)
+		if conn.WorkspaceRoot != "" {
+			searchDirs = append(searchDirs, botSessionSearchDirs(conn.WorkspaceRoot)...)
+		}
+		for _, mapping := range conn.SessionMappings {
+			remoteID := strings.TrimSpace(mapping.RemoteID)
+			sessionID := strings.TrimSpace(mapping.SessionID)
+			if remoteID == "" || sessionID == "" {
+				continue
+			}
+			if mapping.WorkspaceRoot != "" {
+				searchDirs = append(searchDirs, botSessionSearchDirs(mapping.WorkspaceRoot)...)
+			}
+			path := resolveBotSessionPath(sessionID, searchDirs)
+			if path == "" {
+				continue
+			}
+			out = append(out, bot.SessionMapping{
+				RemoteKey:     remoteID,
+				SessionPath:   path,
+				SessionID:     sessionID,
+				WorkspaceRoot: firstNonEmptyString(mapping.WorkspaceRoot, conn.WorkspaceRoot),
+			})
+		}
+	}
+	return out
+}
+
+func resolveBotSessionPath(sessionID string, dirs []string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ""
+	}
+	if filepath.IsAbs(sessionID) || strings.Contains(sessionID, string(filepath.Separator)) {
+		if _, err := os.Stat(sessionID); err == nil {
+			return sessionID
+		}
+		return ""
+	}
+	for _, dir := range dirs {
+		sessions, err := agent.ListSessions(dir)
+		if err != nil {
+			continue
+		}
+		for _, session := range sessions {
+			id := agent.BranchID(session.Path)
+			base := strings.TrimSuffix(filepath.Base(session.Path), filepath.Ext(session.Path))
+			if id == sessionID || strings.HasPrefix(id, sessionID) || base == sessionID || strings.HasPrefix(base, sessionID) {
+				return session.Path
+			}
+		}
+	}
+	return ""
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func splitBotChannels(raw string) []string {

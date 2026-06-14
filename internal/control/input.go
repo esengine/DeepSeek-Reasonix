@@ -180,9 +180,10 @@ func RememberCommandNote(input string) (note string, ok bool) {
 type GoalCommandAction int
 
 const (
-	GoalCommandStatus GoalCommandAction = iota + 1
+	GoalCommandStatus   GoalCommandAction = iota + 1
 	GoalCommandSet
 	GoalCommandClear
+	GoalCommandContinue
 )
 
 type GoalCommand struct {
@@ -201,6 +202,8 @@ func ParseGoalCommand(input string) (GoalCommand, bool) {
 		return GoalCommand{Action: GoalCommandStatus}, true
 	case "clear", "off", "stop", "done":
 		return GoalCommand{Action: GoalCommandClear}, true
+	case "continue", "resume":
+		return GoalCommand{Action: GoalCommandContinue}, true
 	default:
 		return GoalCommand{Action: GoalCommandSet, Text: args}, true
 	}

@@ -253,3 +253,65 @@ func TestRunResumeSwitchesSession(t *testing.T) {
 		t.Fatalf("history not loaded from target: %+v", hist)
 	}
 }
+
+func TestRunResumeShowsRuntimeGoalNotice(t *testing.T) {
+	dir := t.TempDir()
+
+	active := agent.NewSession("sys")
+	active.Add(provider.Message{Role: provider.RoleUser, Content: "active prompt"})
+	exec := agent.New(nil, nil, active, agent.Options{}, event.Discard)
+	eventCh := make(chan event.Event, 8)
+	ctrl := control.New(control.Options{
+		Executor:   exec,
+		SessionDir: dir,
+		Label:      "test",
+		Sink: event.FuncSink(func(e event.Event) {
+			eventCh <- e
+		}),
+	})
+	activePath := filepath.Join(dir, "active.jsonl")
+	ctrl.SetSessionPath(activePath)
+	if err := ctrl.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+
+	otherPath := filepath.Join(dir, "other.jsonl")
+	saveTestSession(t, otherPath, "other prompt")
+	if err := agent.SaveRuntimeMeta(otherPath, agent.RuntimeMeta{
+		Goal: agent.RuntimeGoalMeta{Text: "finish resumed goal", Status: control.GoalStatusRunning},
+		Run:  agent.RuntimeRunMeta{Status: "idle"},
+	}); err != nil {
+		t.Fatalf("SaveRuntimeMeta: %v", err)
+	}
+
+	m := newTestChatTUI()
+	m.width = 80
+	m.ctrl = ctrl
+
+	target := 0
+	for i, s := range recentSessions(dir) {
+		if s.Path == otherPath {
+			target = i + 1
+		}
+	}
+	if target == 0 {
+		t.Fatal("saved session not listed by recentSessions")
+	}
+
+	m.runResumeCommand("/resume " + strconv.Itoa(target))
+	var notice event.Event
+	select {
+	case notice = <-eventCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for resume notice")
+	}
+	if notice.Kind != event.Notice || notice.Text != "resumed active goal: finish resumed goal" {
+		t.Fatalf("resume event = %+v, want active goal notice", notice)
+	}
+	m.ingestEvent(notice)
+
+	out := strings.Join(m.transcript, "\n")
+	if !strings.Contains(out, "resumed active goal: finish resumed goal") {
+		t.Fatalf("resume notice should be visible:\n%s", out)
+	}
+}

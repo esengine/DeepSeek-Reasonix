@@ -269,6 +269,88 @@ export interface SessionMeta {
   topicTitle?: string;
 }
 
+export interface DaemonStatusView {
+  connected: boolean;
+  status?: string;
+  addr?: string;
+  sessions?: number;
+  uptime?: string;
+  pid?: number;
+  error?: string;
+}
+
+export interface DaemonProcessActionResult {
+  message?: string;
+  status: DaemonStatusView;
+}
+
+export interface DaemonStartupHelperView {
+  platform: string;
+  installCommand: string;
+  uninstallCommand: string;
+  printCommand: string;
+  description: string;
+}
+
+export interface DaemonSessionView {
+  id: string;
+  path: string;
+  goalText?: string;
+  goalStatus?: GoalStatus;
+  runStatus?: string;
+  waitKind?: string;
+  waitReason?: string;
+  waitId?: string;
+  waitTool?: string;
+  waitSubject?: string;
+  active?: boolean;
+  open?: boolean;
+  scope?: string;
+  workspaceRoot?: string;
+  topicId?: string;
+  topicTitle?: string;
+  nextWakeupAt?: string;
+  dailyWakeupLimit?: number;
+  dailyWakeups?: number;
+  maxGoalAutoTurns?: number;
+  dailyModelCallLimit?: number;
+  dailyModelCalls?: number;
+  dailyModelCostLimit?: number;
+  dailyModelCost?: number;
+  modelCostCurrency?: string;
+  budgetBlockedReason?: string;
+  scheduled?: boolean;
+  watched?: boolean;
+}
+
+export interface DaemonApprovalOptionView {
+  label: string;
+  description?: string;
+}
+
+export interface DaemonApprovalQuestionView {
+  id?: string;
+  header?: string;
+  prompt?: string;
+  options?: DaemonApprovalOptionView[];
+  multi?: boolean;
+}
+
+export interface DaemonApprovalDeskItemView {
+  sessionId: string;
+  kind: "approval" | "ask" | string;
+  id?: string;
+  tool?: string;
+  subject?: string;
+  reason?: string;
+  goalText?: string;
+  goalStatus?: GoalStatus;
+  runStatus?: string;
+  active?: boolean;
+  since?: string;
+  questions?: DaemonApprovalQuestionView[];
+}
+
 // SessionReference is a session selected via @ past:chats for context injection.
 export interface SessionReference {
   path: string;

@@ -106,6 +106,9 @@ func Run(args []string, version string) int {
 	case "bot":
 		configureCLIThemeFromConfigNoProbe()
 		return botCommand(rest, version)
+	case "daemon":
+		configureCLIThemeFromConfigNoProbe()
+		return daemonCommand(rest)
 	case "upgrade", "update":
 		configureCLIThemeFromConfigNoProbe()
 		return upgradeCommand(rest, version)
@@ -124,7 +127,7 @@ func Run(args []string, version string) int {
 
 func shouldMigrateLegacyConfigForCLI(cmd string) bool {
 	switch cmd {
-	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "codegraph", "doctor", "bot", "upgrade", "update":
+	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "codegraph", "doctor", "bot", "daemon", "upgrade", "update":
 		return true
 	default:
 		return false

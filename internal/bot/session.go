@@ -49,16 +49,24 @@ func sessionSourceID(src SessionSource) string {
 
 // slashCommands 是绕过忙碌队列的命令集合。
 var slashCommands = map[string]bool{
-	"/stop":    true,
-	"/new":     true,
-	"/reset":   true,
-	"/approve": true,
-	"/deny":    true,
-	"/answer":  true,
-	"/yolo":    true,
-	"/mode":    true,
-	"/status":  true,
-	"/help":    true,
+	"/stop":      true,
+	"/new":       true,
+	"/reset":     true,
+	"/approve":   true,
+	"/deny":      true,
+	"/answer":    true,
+	"/yolo":      true,
+	"/mode":      true,
+	"/status":    true,
+	"/approvals": true,
+	"/sessions":  true,
+	"/attach":    true,
+	"/detach":    true,
+	"/goal":      true,
+	"/timeline":  true,
+	"/wakeups":   true,
+	"/recap":     true,
+	"/help":      true,
 }
 
 // IsSlashBypass 判断消息是否为绕过队列的斜杠命令。
@@ -135,6 +143,19 @@ func (sm *SessionManager) TryAcquire(key string, msg InboundMessage) (acquired b
 
 	sm.active[key] = true
 	return true, false
+}
+
+// TryStart marks a session active only when no turn currently owns it. Unlike
+// TryAcquire, it never queues messages and never treats slash commands as a
+// bypass. It is for command handlers that start their own asynchronous run.
+func (sm *SessionManager) TryStart(key string) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.active[key] {
+		return false
+	}
+	sm.active[key] = true
+	return true
 }
 
 // Release 释放 session 锁，返回等待队列中的下一条消息（合并后）。

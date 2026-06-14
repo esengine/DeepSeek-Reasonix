@@ -3301,6 +3301,9 @@ func (a *App) knownSessionDirs() []string {
 	a.mu.RLock()
 	for _, tab := range a.tabs {
 		add(tabSessionDir(tab))
+		if path := strings.TrimSpace(tab.currentSessionPath()); path != "" {
+			add(filepath.Dir(path))
+		}
 	}
 	a.mu.RUnlock()
 	return out

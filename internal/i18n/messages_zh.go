@@ -239,6 +239,10 @@ var Chinese = Messages{
 	GoalCurrentFmt:         "目标：%s",
 	GoalSetFmt:             "目标已设置 → %s",
 	GoalCleared:            "目标已清除",
+	GoalContinued:          "继续执行目标…",
+	GoalNoActive:           "没有活跃目标可以继续",
+	GoalAlreadyComplete:    "目标已完成 — 用 /goal <目标> 设置新目标",
+	GoalAlreadyStopped:     "目标已停止 — 用 /goal <目标> 设置新目标",
 	ModelSwitchUnavailable: "本会话不支持切换模型",
 	ModelSwitchBusy:        "请先完成或取消当前这一轮再切换模型",
 	ModelAlreadyOnFmt:      "已经在使用 %s",
@@ -375,6 +379,7 @@ var Chinese = Messages{
   reasonix mcp <add|remove|list>                        管理 reasonix.toml 里的 MCP 服务器
   reasonix doctor [--json]                              输出脱敏的本地诊断信息
   reasonix bot start|doctor|weixin-login                多渠道 IM bot 网关
+  reasonix daemon start|status|sessions|stop            常驻后台 agent 服务
   reasonix upgrade [--check] [--force]                   自更新到最新版本
   reasonix version
   reasonix help

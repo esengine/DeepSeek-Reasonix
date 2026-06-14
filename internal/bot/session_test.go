@@ -98,6 +98,7 @@ func TestIsSlashBypass(t *testing.T) {
 		{"/yolo on", true},
 		{"/mode yolo", true},
 		{"/status", true},
+		{"/goal continue", true},
 		{"/help", true},
 		{"hello", false},
 		{"/unknown", false},
@@ -110,6 +111,27 @@ func TestIsSlashBypass(t *testing.T) {
 		if got != tt.bypass {
 			t.Errorf("IsSlashBypass(%q) = %v, want %v", tt.text, got, tt.bypass)
 		}
+	}
+}
+
+func TestSessionManager_TryStart(t *testing.T) {
+	sm := NewSessionManager(100 * time.Millisecond)
+
+	msg := InboundMessage{Text: "hello", Platform: PlatformQQ, ChatType: ChatDM, ChatID: "c1", UserID: "u1"}
+	key := BuildSessionKey(msg.Session())
+
+	if !sm.TryStart(key) {
+		t.Fatal("first TryStart should succeed")
+	}
+	if sm.TryStart(key) {
+		t.Fatal("second TryStart should fail while active")
+	}
+	if next := sm.Release(key); next != nil {
+		t.Fatalf("TryStart should not queue messages, got %q", next.Text)
+	}
+	acquired, merged := sm.TryAcquire(key, msg)
+	if !acquired || merged {
+		t.Fatal("session should be available after Release")
 	}
 }
 

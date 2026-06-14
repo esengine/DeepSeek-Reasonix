@@ -38,6 +38,9 @@ import { Composer } from "./components/Composer";
 import { TodoPanel } from "./components/TodoPanel";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
+import { DaemonApprovalsPanel } from "./components/DaemonApprovalsPanel";
+import { DaemonProcessPanel } from "./components/DaemonProcessPanel";
+import { DaemonSessionsPanel } from "./components/DaemonSessionsPanel";
 import { UndoRewindBanner } from "./components/UndoRewindBanner";
 import { ClearContextCard } from "./components/ClearContextCard";
 import { StatusBar } from "./components/StatusBar";
@@ -2807,6 +2810,9 @@ export default function App() {
                 }}
               />
             )}
+            <DaemonProcessPanel />
+            <DaemonSessionsPanel />
+            <DaemonApprovalsPanel />
             <Composer
               running={state.running}
               collaborationMode={collaborationMode}

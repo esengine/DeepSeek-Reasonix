@@ -136,6 +136,7 @@ type Controller struct {
 	goalTurns   int
 	goalBlocks  int
 	goalBlock   string
+	goalTurnCap int
 	sessionPath string
 	approvals   map[string]pendingApproval
 	asks        map[string]pendingAsk
@@ -208,8 +209,9 @@ const (
 )
 
 const (
-	maxGoalAutoTurns = 50
-	goalContinueTurn = "Continue pursuing the active goal. If it is complete, provide the concise final result and end with [goal:complete]. If it is truly blocked on a user-owned decision after trying sensible defaults, end with [goal:blocked:<short reason>]. Otherwise do the next useful work and end with [goal:continue]."
+	DefaultMaxGoalAutoTurns = 50
+	maxGoalAutoTurns        = DefaultMaxGoalAutoTurns
+	goalContinueTurn        = "Continue pursuing the active goal. If it is complete, provide the concise final result and end with [goal:complete]. If it is truly blocked on a user-owned decision after trying sensible defaults, end with [goal:blocked:<short reason>]. Otherwise do the next useful work and end with [goal:continue]."
 )
 
 // RememberResult describes what happened when an approval rule was persisted.
@@ -443,7 +445,11 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 				c.mu.Lock()
 				c.running = false
 				c.cancel = nil
+				path := c.sessionPath
 				c.mu.Unlock()
+				if path != "" {
+					c.saveRuntimeSidecar(path)
+				}
 				c.sink.Emit(event.Event{Kind: event.TurnDone, Err: fmt.Errorf("internal error: %v", r)})
 			}
 		}()
@@ -451,7 +457,11 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 		c.mu.Lock()
 		c.running = false
 		c.cancel = nil
+		path := c.sessionPath
 		c.mu.Unlock()
+		if path != "" {
+			c.saveRuntimeSidecar(path)
+		}
 		c.sink.Emit(event.Event{Kind: event.TurnDone, Err: explainError(err)})
 	}()
 }
@@ -513,7 +523,11 @@ func (c *Controller) RunTurn(ctx context.Context, input string) error {
 		c.mu.Lock()
 		c.running = false
 		c.cancel = nil
+		path := c.sessionPath
 		c.mu.Unlock()
+		if path != "" {
+			c.saveRuntimeSidecar(path)
+		}
 		cancel()
 	}()
 	return c.runTurn(ctx, input)
@@ -531,10 +545,12 @@ func (c *Controller) runGoalLoopWithRawDisplay(ctx context.Context, input, raw, 
 	if err := c.runTurnWithRawDisplay(ctx, input, raw, display); err != nil {
 		if ctx.Err() != nil {
 			c.stopGoal(GoalStatusStopped)
+			c.appendRuntimeTimeline(runtimeEventGoalContinuationStopped, "goal", ctx.Err().Error(), "goal continuation stopped")
+			c.saveRuntimeSidecarForCurrentSession()
 		}
 		return err
 	}
-	return c.continueGoal(ctx)
+	return c.continueGoal(ctx, "", "goal")
 }
 
 func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input, raw, display string) error {
@@ -609,29 +625,46 @@ func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input, raw, disp
 	return nil
 }
 
-func (c *Controller) continueGoal(ctx context.Context) error {
+func (c *Controller) continueGoal(ctx context.Context, wakeupContext, source string) error {
+	first := true
+	started := false
 	for {
-		cont := c.advanceGoalAfterTurn()
+		cont := c.advanceGoalAfterTurn(source)
 		if !cont {
 			return nil
 		}
+		if !started {
+			c.appendRuntimeTimeline(runtimeEventGoalContinuationStarted, source, "", "goal continuation started")
+			started = true
+		}
 		if err := ctx.Err(); err != nil {
 			c.stopGoal(GoalStatusStopped)
+			c.appendRuntimeTimeline(runtimeEventGoalContinuationStopped, source, err.Error(), "goal continuation stopped")
+			c.saveRuntimeSidecarForCurrentSession()
 			return err
 		}
-		if err := c.runTurnWithRawDisplay(ctx, goalContinueTurn, goalContinueTurn, ""); err != nil {
+		prompt := goalContinueTurn
+		if first && strings.TrimSpace(wakeupContext) != "" {
+			prompt += "\n\n<wakeup-context>\n" + strings.TrimSpace(wakeupContext) + "\n</wakeup-context>"
+		}
+		first = false
+		if err := c.runTurnWithRawDisplay(ctx, prompt, prompt, ""); err != nil {
 			if ctx.Err() != nil {
 				c.stopGoal(GoalStatusStopped)
+				c.appendRuntimeTimeline(runtimeEventGoalContinuationStopped, source, ctx.Err().Error(), "goal continuation stopped")
+				c.saveRuntimeSidecarForCurrentSession()
 			}
 			return err
 		}
 	}
 }
 
-func (c *Controller) advanceGoalAfterTurn() bool {
+func (c *Controller) advanceGoalAfterTurn(source string) bool {
 	reply := lastAssistantText(c.History())
 	status, reason, _ := parseGoalStatusMarker(reply)
 	var notice string
+	var eventType string
+	var eventReason string
 	c.mu.Lock()
 	if strings.TrimSpace(c.goal) == "" || c.goalStatus != GoalStatusRunning {
 		c.mu.Unlock()
@@ -645,6 +678,7 @@ func (c *Controller) advanceGoalAfterTurn() bool {
 		c.goalBlocks = 0
 		c.goalBlock = ""
 		notice = "goal complete"
+		eventType = runtimeEventGoalContinuationComplete
 	case GoalStatusBlocked:
 		reason = cleanGoalBlockReason(reason)
 		if reason == "" {
@@ -659,22 +693,38 @@ func (c *Controller) advanceGoalAfterTurn() bool {
 		if c.goalBlocks >= 3 {
 			c.goalStatus = GoalStatusBlocked
 			notice = "goal blocked: " + reason
+			eventType = runtimeEventGoalBlocked
+			eventReason = reason
 		}
 	default:
 		c.goalBlocks = 0
 		c.goalBlock = ""
 	}
-	if notice == "" && c.goalTurns >= maxGoalAutoTurns {
+	turnCap := c.goalAutoTurnLimitLocked()
+	if notice == "" && turnCap > 0 && c.goalTurns >= turnCap {
 		c.goalStatus = GoalStatusBlocked
-		c.goalBlock = "goal continuation limit reached"
+		c.goalBlock = goalContinuationLimitReason
 		notice = c.goalBlock
+		eventType = runtimeEventGoalContinuationLimitReached
+		eventReason = c.goalBlock
 	}
 	cont := notice == ""
 	c.mu.Unlock()
 	if notice != "" {
 		c.notice(notice)
 	}
+	if eventType != "" {
+		c.appendRuntimeTimeline(eventType, source, eventReason, notice)
+		c.saveRuntimeSidecarForCurrentSession()
+	}
 	return cont
+}
+
+func (c *Controller) goalAutoTurnLimitLocked() int {
+	if c.goalTurnCap > 0 {
+		return c.goalTurnCap
+	}
+	return maxGoalAutoTurns
 }
 
 func parseGoalStatusMarker(text string) (status, reason string, ok bool) {
@@ -970,6 +1020,8 @@ func (c *Controller) applyGoalCommand(input, display string) bool {
 	case GoalCommandClear:
 		c.ClearGoal()
 		c.notice(i18n.M.GoalCleared)
+	case GoalCommandContinue:
+		c.applyGoalContinue()
 	default:
 		goal := c.Goal()
 		if strings.TrimSpace(goal) == "" {
@@ -1381,16 +1433,21 @@ func (c *Controller) PlanMode() bool {
 func (c *Controller) SetGoal(goal string) {
 	goal = strings.TrimSpace(goal)
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if goal == "" {
 		c.goal = ""
 		c.goalStatus = GoalStatusStopped
 		c.goalTurns = 0
 		c.goalBlocks = 0
 		c.goalBlock = ""
+		path := c.sessionPath
+		c.mu.Unlock()
+		if path != "" {
+			c.saveRuntimeSidecar(path)
+		}
 		return
 	}
 	if c.goal == goal && c.goalStatus == GoalStatusRunning {
+		c.mu.Unlock()
 		return
 	}
 	c.goal = goal
@@ -1398,6 +1455,7 @@ func (c *Controller) SetGoal(goal string) {
 	c.goalTurns = 0
 	c.goalBlocks = 0
 	c.goalBlock = ""
+	c.mu.Unlock()
 }
 
 func (c *Controller) ClearGoal() {
@@ -1905,7 +1963,51 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 	c.mu.Unlock()
 	c.setActiveJobSession(path)
 	c.rebindCheckpoints(path)
+	// Restore runtime sidecar (goal/run state) BEFORE cold-resume prune, so
+	// a prune-triggered snapshot does not overwrite the just-restored state.
+	if c.loadAndRestoreRuntime(path) {
+		if text := c.runtimeResumeNotice(); text != "" {
+			c.notice(text)
+		}
+	}
 	c.maybeColdResumePrune(path)
+}
+
+func (c *Controller) runtimeResumeNotice() string {
+	c.mu.Lock()
+	goal := c.goal
+	status := c.goalStatus
+	c.mu.Unlock()
+	switch status {
+	case GoalStatusRunning:
+		if goal == "" {
+			return "resumed active goal"
+		}
+		return fmt.Sprintf("resumed active goal: %s", ShortGoalForNotice(goal))
+	case GoalStatusBlocked:
+		if goal == "" {
+			return "resumed blocked goal"
+		}
+		return fmt.Sprintf("resumed blocked goal: %s", ShortGoalForNotice(goal))
+	case GoalStatusComplete:
+		if goal == "" {
+			return "resumed completed goal"
+		}
+		return fmt.Sprintf("resumed completed goal: %s", ShortGoalForNotice(goal))
+	case GoalStatusStopped:
+		if goal == "" {
+			return "resumed stopped goal"
+		}
+		return fmt.Sprintf("resumed stopped goal: %s", ShortGoalForNotice(goal))
+	default:
+		if goal == "" {
+			return ""
+		}
+		if status == "" {
+			return fmt.Sprintf("resumed goal: %s", ShortGoalForNotice(goal))
+		}
+		return fmt.Sprintf("resumed %s goal: %s", status, ShortGoalForNotice(goal))
+	}
 }
 
 // cacheColdAfter approximates how long the provider keeps a prompt prefix
@@ -2006,6 +2108,8 @@ func (c *Controller) snapshot(markActivity bool) error {
 	if err := s.Save(path); err != nil {
 		return err
 	}
+	// Persist runtime sidecar alongside the transcript when there's an active goal.
+	c.saveRuntimeSidecar(path)
 	if markActivity {
 		return agent.TouchBranchMeta(path)
 	}

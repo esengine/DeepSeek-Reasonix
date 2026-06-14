@@ -238,6 +238,10 @@ var English = Messages{
 	GoalCurrentFmt:         "goal: %s",
 	GoalSetFmt:             "goal set → %s",
 	GoalCleared:            "goal cleared",
+	GoalContinued:          "continuing goal…",
+	GoalNoActive:           "no active goal to continue",
+	GoalAlreadyComplete:    "goal already complete — set a new one with /goal <objective>",
+	GoalAlreadyStopped:     "goal stopped — set a new one with /goal <objective>",
 	ModelSwitchUnavailable: "model switching is unavailable in this session",
 	ModelSwitchBusy:        "finish or cancel the current turn before switching models",
 	ModelAlreadyOnFmt:      "already on %s",
@@ -374,6 +378,7 @@ Usage:
   reasonix mcp <add|remove|list>                        manage MCP servers in reasonix.toml
   reasonix doctor [--json]                              print redacted local diagnostics
   reasonix bot start|doctor|weixin-login                multi-channel IM bot gateway
+  reasonix daemon start|status|sessions|stop            background agent service
   reasonix upgrade [--check] [--force]                   self-update to the latest release
   reasonix version
   reasonix help

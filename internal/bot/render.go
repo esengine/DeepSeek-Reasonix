@@ -110,10 +110,10 @@ func (s *renderSink) Emit(e event.Event) {
 		s.maybeFlush()
 
 	case event.ApprovalRequest:
-		// 发送审批请求
 		if s.onApproval != nil {
 			s.onApproval(e.Approval)
 		}
+		// 发送审批请求
 		approvalText := fmt.Sprintf("⚠️ 需要批准操作:\n工具: %s\n操作: %s\n\nID: `%s`\n回复 1 批准，回复 2 拒绝；也可用 /approve %s 或 /deny %s。",
 			e.Approval.Tool, e.Approval.Subject, e.Approval.ID, e.Approval.ID, e.Approval.ID)
 		msg := OutboundMessage{

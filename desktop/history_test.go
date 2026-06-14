@@ -170,6 +170,55 @@ func TestResumeSessionForTabTargetsSpecifiedTab(t *testing.T) {
 	}
 }
 
+func TestResumeSessionForTabRestoresRuntimeGoalIntoMeta(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+
+	currentPath := filepath.Join(dir, "current.jsonl")
+	targetPath := filepath.Join(dir, "target-runtime.jsonl")
+	writeHistoryTestSession(t, currentPath, "current prompt")
+	writeHistoryTestSession(t, targetPath, "target prompt")
+	if err := agent.SaveRuntimeMeta(targetPath, agent.RuntimeMeta{
+		Goal: agent.RuntimeGoalMeta{
+			Text:   "finish restored desktop goal",
+			Status: control.GoalStatusRunning,
+		},
+		Run: agent.RuntimeRunMeta{Status: "idle"},
+	}); err != nil {
+		t.Fatalf("SaveRuntimeMeta: %v", err)
+	}
+
+	exec := agent.New(nil, nil, agent.NewSession(""), agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{Executor: exec, SessionDir: dir, SessionPath: currentPath, Label: "desktop"})
+	defer ctrl.Close()
+
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"tab": {ID: "tab", Scope: "global", Ctrl: ctrl, Ready: true, Label: "desktop"},
+		},
+		tabOrder:    []string{"tab"},
+		activeTabID: "tab",
+	}
+
+	if _, err := app.ResumeSessionForTab("tab", targetPath); err != nil {
+		t.Fatalf("ResumeSessionForTab: %v", err)
+	}
+	meta := app.MetaForTab("tab")
+	if meta.Goal != "finish restored desktop goal" || meta.GoalStatus != control.GoalStatusRunning || meta.CollaborationMode != "goal" {
+		t.Fatalf("MetaForTab after runtime resume = %+v, want restored running goal", meta)
+	}
+	tabs := app.ListTabs()
+	if len(tabs) != 1 {
+		t.Fatalf("ListTabs length = %d, want 1", len(tabs))
+	}
+	if tabs[0].Goal != "finish restored desktop goal" || tabs[0].GoalStatus != control.GoalStatusRunning || tabs[0].CollaborationMode != "goal" {
+		t.Fatalf("ListTabs after runtime resume = %+v, want restored running goal", tabs[0])
+	}
+}
+
 func writeHistoryTestSession(t *testing.T, path, prompt string) {
 	t.Helper()
 	session := agent.NewSession("")

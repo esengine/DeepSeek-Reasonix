@@ -12,6 +12,7 @@ require (
 	github.com/alecthomas/chroma/v2 v2.26.1
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/x/ansi v0.11.7
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/larksuite/oapi-sdk-go/v3 v3.9.4
 	github.com/mattn/go-runewidth v0.0.24
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06

@@ -2,17 +2,22 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/boot"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/fileutil"
 )
 
 // GatewayConfig 是 BotGateway 的配置。
@@ -21,6 +26,10 @@ type GatewayConfig struct {
 	ToolApprovalMode   string
 	MaxSteps           int
 	WorkspaceRoot      string
+	SessionDir         string
+	SessionSearchDirs  []string
+	SessionMappingPath string
+	SessionMappings    []SessionMapping
 	Channels           map[Platform]ChannelConfig
 	ConnectionChannels map[string]ChannelConfig
 	Allowlist          AllowlistConfig
@@ -58,6 +67,20 @@ type AllowlistConfig struct {
 	Groups   map[Platform][]string
 }
 
+// SessionMapping binds a remote IM session key to a Reasonix session file.
+type SessionMapping struct {
+	RemoteKey     string    `json:"remote_key"`
+	SessionPath   string    `json:"session_path"`
+	SessionID     string    `json:"session_id,omitempty"`
+	WorkspaceRoot string    `json:"workspace_root,omitempty"`
+	UpdatedAt     time.Time `json:"updated_at,omitempty"`
+}
+
+type sessionMappingFile struct {
+	Version  int              `json:"version"`
+	Mappings []SessionMapping `json:"mappings"`
+}
+
 // BotGateway 是 reasonix bot 消息网关，管理 Controller 生命周期、session 并发、
 // 事件渲染和平台适配器。
 type BotGateway struct {
@@ -68,6 +91,7 @@ type BotGateway struct {
 
 	mu             sync.Mutex
 	controllers    map[string]*sessionState // session key -> active state
+	mappings       map[string]SessionMapping
 	allowlist      map[Platform]map[string]bool
 	groupAllowlist map[Platform]map[string]bool
 
@@ -133,10 +157,12 @@ func NewGatewayWithAdapterBindings(cfg GatewayConfig, adapters []AdapterBinding,
 		adapters:       normalizeAdapterBindings(adapters),
 		sessions:       NewSessionManager(cfg.Debounce),
 		controllers:    make(map[string]*sessionState),
+		mappings:       make(map[string]SessionMapping),
 		allowlist:      make(map[Platform]map[string]bool),
 		groupAllowlist: make(map[Platform]map[string]bool),
 		logger:         logger.With("component", "bot_gateway"),
 	}
+	gw.loadSessionMappings()
 	gw.buildAllowlist()
 	return gw
 }
@@ -509,7 +535,10 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 			}
 			if err := state.ctrl.NewSession(); err != nil {
 				gw.logger.Warn("new session failed", "err", err)
+				_ = gw.sendText(ctx, adapter, msg, "新会话创建失败："+err.Error())
+				return
 			}
+			gw.ensureControllerSessionMapping(key, msg, state.ctrl)
 		}
 		gw.sessions.ForceRelease(key)
 		_ = gw.sendText(ctx, adapter, msg, "已开始新会话。")
@@ -527,6 +556,7 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 		if ok && state.ctrl != nil {
 			state.ctrl.Approve(parts[1], true, false, false)
 			gw.forgetPendingApproval(key, parts[1])
+			gw.clearRuntimeWait(key, "approval", parts[1])
 			_ = gw.sendText(ctx, adapter, msg, "已批准。")
 		} else {
 			_ = gw.sendText(ctx, adapter, msg, "没有找到当前会话中的待审批操作，请重新触发一次操作。")
@@ -544,6 +574,7 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 		if ok && state.ctrl != nil {
 			state.ctrl.Approve(parts[1], false, false, false)
 			gw.forgetPendingApproval(key, parts[1])
+			gw.clearRuntimeWait(key, "approval", parts[1])
 			_ = gw.sendText(ctx, adapter, msg, "已拒绝。")
 		} else {
 			_ = gw.sendText(ctx, adapter, msg, "没有找到当前会话中的待审批操作，请重新触发一次操作。")
@@ -578,6 +609,7 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 		}
 		answers := parseAskAnswers(questions, rawAnswer)
 		state.ctrl.AnswerQuestion(askID, answers)
+		gw.clearRuntimeWait(key, "ask", askID)
 		_ = gw.sendText(ctx, adapter, msg, "已提交回答。")
 
 	case strings.HasPrefix(msg.Text, "/yolo") || strings.HasPrefix(msg.Text, "/mode"):
@@ -601,21 +633,84 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 		active := gw.sessions.ActiveCount()
 		gw.mu.Lock()
 		sessions := len(gw.controllers)
+		state, hasState := gw.controllers[key]
 		gw.mu.Unlock()
+		status := gw.renderStatus(key, state, hasState, active, sessions)
 		mode := gw.currentToolApprovalMode(key, msg)
-		_ = gw.sendText(ctx, adapter, msg, fmt.Sprintf("活跃任务数: %d\n保留会话数: %d\n工具审批模式: %s", active, sessions, toolApprovalModeLabel(mode)))
+		_ = gw.sendText(ctx, adapter, msg, status+"\n工具审批模式: "+toolApprovalModeLabel(mode))
+
+	case strings.HasPrefix(msg.Text, "/approvals"):
+		_ = gw.sendText(ctx, adapter, msg, gw.renderApprovals(key))
+
+	case strings.HasPrefix(msg.Text, "/timeline"):
+		_ = gw.sendText(ctx, adapter, msg, gw.renderTimeline(key, msg.Text))
+
+	case strings.HasPrefix(msg.Text, "/wakeups"):
+		_ = gw.sendText(ctx, adapter, msg, gw.renderWakeupHistory(key, msg.Text))
+
+	case strings.HasPrefix(msg.Text, "/recap"):
+		_ = gw.sendText(ctx, adapter, msg, gw.renderRecap(key, msg.Text))
+
+	case strings.HasPrefix(msg.Text, "/sessions"):
+		_ = gw.sendText(ctx, adapter, msg, gw.renderSessionList(8))
+
+	case strings.HasPrefix(msg.Text, "/attach"):
+		parts := strings.Fields(msg.Text)
+		if len(parts) < 2 {
+			_ = gw.sendText(ctx, adapter, msg, "用法: /attach <session-id-or-path>")
+			return
+		}
+		if err := gw.attachSession(ctx, key, msg, parts[1]); err != nil {
+			_ = gw.sendText(ctx, adapter, msg, "绑定失败："+err.Error())
+			return
+		}
+		mapping, _ := gw.sessionMapping(key)
+		_ = gw.sendText(ctx, adapter, msg, fmt.Sprintf("已绑定会话：%s", shortSessionID(mapping.SessionPath)))
+
+	case strings.HasPrefix(msg.Text, "/detach"):
+		if ok := gw.clearSessionMapping(key); ok {
+			gw.mu.Lock()
+			if state, exists := gw.controllers[key]; exists {
+				if state.cancel != nil {
+					state.cancel()
+				}
+				if state.ctrl != nil {
+					state.ctrl.Close()
+				}
+				delete(gw.controllers, key)
+			}
+			gw.mu.Unlock()
+			gw.sessions.ForceRelease(key)
+			_ = gw.sendText(ctx, adapter, msg, "已解除当前 IM 会话绑定。")
+		} else {
+			_ = gw.sendText(ctx, adapter, msg, "当前 IM 会话没有绑定 Reasonix session。")
+		}
+
+	case strings.HasPrefix(msg.Text, "/goal"):
+		gw.handleGoalCommand(ctx, adapter, key, msg)
 
 	case strings.HasPrefix(msg.Text, "/help"):
 		help := "可用命令:\n" +
 			"/stop - 停止当前任务\n" +
 			"/new - 开始新会话\n" +
 			"/reset - 重置会话\n" +
+			"/goal <text> - 设置目标\n" +
+			"/goal continue - 继续执行目标\n" +
+			"/goal status - 查看目标\n" +
+			"/goal clear - 清除目标\n" +
 			"/approve <id> - 批准操作\n" +
 			"/deny <id> - 拒绝操作\n" +
 			"/answer <id> <选项> - 回答 ask 问题\n" +
+			"/approvals - 查看等待审批或回答的任务\n" +
 			"/yolo on|off|auto|status - 切换或查看工具审批模式\n" +
 			"/mode yolo|ask|auto - 切换工具审批模式\n" +
+			"/sessions - 列出可绑定的 Reasonix 会话\n" +
+			"/attach <id> - 绑定并恢复已有 Reasonix 会话\n" +
+			"/detach - 解除当前 IM 会话绑定\n" +
 			"/status - 查看状态\n" +
+			"/timeline [n] - 查看当前会话最近运行事件\n" +
+			"/wakeups [n] - 查看当前会话最近唤醒历史\n" +
+			"/recap [YYYY-MM-DD] - 复盘当天自动处理和待决策任务\n" +
 			"/help - 显示帮助"
 		_ = gw.sendText(ctx, adapter, msg, help)
 	}
@@ -788,6 +883,14 @@ func (gw *BotGateway) runTurn(ctx context.Context, adapter Adapter, key string, 
 			state.pendingApprovals[approval.ID] = approval
 			state.lastApprovalID = approval.ID
 			gw.mu.Unlock()
+			gw.recordRuntimeWait(key, agent.RuntimeWaitMeta{
+				Kind:       "approval",
+				Reason:     "approval required",
+				ApprovalID: approval.ID,
+				Tool:       approval.Tool,
+				Subject:    approval.Subject,
+				Since:      time.Now().UTC(),
+			})
 		},
 		func(ask event.Ask) {
 			gw.mu.Lock()
@@ -797,6 +900,13 @@ func (gw *BotGateway) runTurn(ctx context.Context, adapter Adapter, key string, 
 			state.pendingAsks[ask.ID] = ask.Questions
 			state.lastAskID = ask.ID
 			gw.mu.Unlock()
+			gw.recordRuntimeWait(key, agent.RuntimeWaitMeta{
+				Kind:    "ask",
+				Reason:  "user answer required",
+				AskID:   ask.ID,
+				Subject: askSubject(ask),
+				Since:   time.Now().UTC(),
+			})
 		},
 	)
 	state.sink.setTarget(sink)
@@ -832,23 +942,23 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	}
 	gw.mu.Unlock()
 
+	if mapping, ok := gw.sessionMapping(key); ok {
+		if state := gw.resumeMappedSession(ctx, key, msg, mapping); state != nil {
+			return state
+		}
+	}
+
 	// 创建新 Controller
 	sessionSink := &sessionEventSink{}
 	model, workspaceRoot, toolApprovalMode := gw.sessionOptionsForMessage(msg)
 	gw.logger.Info("bot session creating", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8], "model", model, "workspace_set", strings.TrimSpace(workspaceRoot) != "", "tool_approval_mode", normalizeBotToolApprovalMode(toolApprovalMode))
-	ctrl, err := boot.Build(ctx, boot.Options{
-		Model:         model,
-		MaxSteps:      gw.cfg.MaxSteps,
-		RequireKey:    true,
-		Sink:          sessionSink,
-		WorkspaceRoot: workspaceRoot,
-	})
+	ctrl, err := gw.buildController(ctx, msg, sessionSink)
 	if err != nil {
 		gw.logger.Error("build controller failed", "err", err)
 		return nil
 	}
 	ctrl.EnableInteractiveApproval()
-	ctrl.SetToolApprovalMode(toolApprovalMode)
+	gw.ensureControllerSessionMapping(key, msg, ctrl)
 
 	gw.mu.Lock()
 	gw.controllers[key] = &sessionState{
@@ -863,6 +973,98 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 
 	gw.logger.Info("bot session created", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8])
 	return state
+}
+
+func (gw *BotGateway) buildController(ctx context.Context, msg InboundMessage, sink event.Sink) (*control.Controller, error) {
+	model, workspaceRoot, toolApprovalMode := gw.sessionOptionsForMessage(msg)
+	ctrl, err := boot.Build(ctx, boot.Options{
+		Model:         model,
+		MaxSteps:      gw.cfg.MaxSteps,
+		RequireKey:    true,
+		Sink:          sink,
+		WorkspaceRoot: workspaceRoot,
+		SessionDir:    gw.cfg.SessionDir,
+	})
+	if err != nil {
+		return nil, err
+	}
+	ctrl.SetToolApprovalMode(toolApprovalMode)
+	return ctrl, nil
+}
+
+func (gw *BotGateway) resumeMappedSession(ctx context.Context, key string, msg InboundMessage, mapping SessionMapping) *sessionState {
+	if strings.TrimSpace(mapping.SessionPath) == "" {
+		return nil
+	}
+	loaded, err := agent.LoadSession(mapping.SessionPath)
+	if err != nil {
+		gw.logger.Warn("bot mapped session load failed", "session", shortSessionID(mapping.SessionPath), "err", err)
+		return nil
+	}
+	sessionSink := &sessionEventSink{}
+	ctrl, err := gw.buildController(ctx, msg, sessionSink)
+	if err != nil {
+		gw.logger.Warn("bot mapped controller build failed", "session", shortSessionID(mapping.SessionPath), "err", err)
+		return nil
+	}
+	ctrl.Resume(loaded, mapping.SessionPath)
+	ctrl.EnableInteractiveApproval()
+	state := &sessionState{
+		ctrl:        ctrl,
+		sink:        sessionSink,
+		pendingAsks: make(map[string][]event.AskQuestion),
+		createdAt:   time.Now(),
+		lastActive:  time.Now(),
+	}
+	gw.mu.Lock()
+	gw.controllers[key] = state
+	gw.mu.Unlock()
+	gw.logger.Info("bot resumed mapped session", "session", shortSessionID(mapping.SessionPath))
+	return state
+}
+
+func (gw *BotGateway) attachSession(ctx context.Context, key string, msg InboundMessage, ref string) error {
+	path, err := gw.resolveSessionRef(ref)
+	if err != nil {
+		return err
+	}
+	loaded, err := agent.LoadSession(path)
+	if err != nil {
+		return err
+	}
+	sessionSink := &sessionEventSink{}
+	ctrl, err := gw.buildController(ctx, msg, sessionSink)
+	if err != nil {
+		return err
+	}
+	ctrl.Resume(loaded, path)
+	ctrl.EnableInteractiveApproval()
+	gw.mu.Lock()
+	if existing, ok := gw.controllers[key]; ok {
+		if existing.ctrl != nil && existing.ctrl.Running() {
+			gw.mu.Unlock()
+			ctrl.Close()
+			return fmt.Errorf("当前会话正在运行，无法绑定")
+		}
+		if existing.cancel != nil {
+			existing.cancel()
+		}
+		if existing.ctrl != nil {
+			existing.ctrl.Close()
+		}
+	}
+	gw.controllers[key] = &sessionState{
+		ctrl:        ctrl,
+		sink:        sessionSink,
+		pendingAsks: make(map[string][]event.AskQuestion),
+		createdAt:   time.Now(),
+		lastActive:  time.Now(),
+	}
+	gw.mu.Unlock()
+	if err := gw.setSessionMapping(key, path, gw.workspaceRootForMessage(msg)); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (gw *BotGateway) sessionOptionsForMessage(msg InboundMessage) (model string, workspaceRoot string, toolApprovalMode string) {
@@ -922,6 +1124,958 @@ func normalizeOptionalBotToolApprovalMode(mode string) string {
 	}
 }
 
+func (gw *BotGateway) workspaceRootForMessage(msg InboundMessage) string {
+	_, workspaceRoot, _ := gw.sessionOptionsForMessage(msg)
+	return workspaceRoot
+}
+
+func (gw *BotGateway) ensureControllerSessionMapping(key string, msg InboundMessage, ctrl *control.Controller) {
+	if ctrl == nil {
+		return
+	}
+	path := strings.TrimSpace(ctrl.SessionPath())
+	if path == "" {
+		dir := strings.TrimSpace(ctrl.SessionDir())
+		if dir == "" {
+			return
+		}
+		path = agent.NewSessionPath(dir, ctrl.Label())
+		ctrl.SetSessionPath(path)
+	}
+	if err := gw.setSessionMapping(key, path, gw.workspaceRootForMessage(msg)); err != nil {
+		gw.logger.Warn("bot session mapping save failed", "err", err, "session", shortSessionID(path))
+	}
+}
+
+func (gw *BotGateway) setSessionMapping(key, path, workspaceRoot string) error {
+	key = strings.TrimSpace(key)
+	path = strings.TrimSpace(path)
+	if key == "" || path == "" {
+		return nil
+	}
+	gw.mu.Lock()
+	gw.mappings[key] = SessionMapping{
+		RemoteKey:     key,
+		SessionPath:   path,
+		SessionID:     shortSessionID(path),
+		WorkspaceRoot: workspaceRoot,
+		UpdatedAt:     time.Now().UTC(),
+	}
+	gw.mu.Unlock()
+	return gw.saveSessionMappings()
+}
+
+func (gw *BotGateway) loadSessionMappings() {
+	for _, mapping := range gw.cfg.SessionMappings {
+		if mapping.RemoteKey == "" || mapping.SessionPath == "" {
+			continue
+		}
+		gw.mappings[mapping.RemoteKey] = mapping
+	}
+	path := strings.TrimSpace(gw.cfg.SessionMappingPath)
+	if path == "" {
+		return
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			gw.logger.Warn("bot session mappings load failed", "err", err)
+		}
+		return
+	}
+	var file sessionMappingFile
+	if err := json.Unmarshal(b, &file); err != nil {
+		gw.logger.Warn("bot session mappings decode failed", "err", err)
+		return
+	}
+	for _, mapping := range file.Mappings {
+		if mapping.RemoteKey == "" || mapping.SessionPath == "" {
+			continue
+		}
+		gw.mappings[mapping.RemoteKey] = mapping
+	}
+}
+
+func (gw *BotGateway) saveSessionMappings() error {
+	path := strings.TrimSpace(gw.cfg.SessionMappingPath)
+	if path == "" {
+		return nil
+	}
+	gw.mu.Lock()
+	mappings := make([]SessionMapping, 0, len(gw.mappings))
+	for _, mapping := range gw.mappings {
+		if strings.TrimSpace(mapping.RemoteKey) == "" || strings.TrimSpace(mapping.SessionPath) == "" {
+			continue
+		}
+		mappings = append(mappings, mapping)
+	}
+	gw.mu.Unlock()
+	data, err := json.MarshalIndent(sessionMappingFile{Version: 1, Mappings: mappings}, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".bot-session-mappings.*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return fileutil.ReplaceFile(tmpPath, path)
+}
+
+func (gw *BotGateway) sessionMapping(key string) (SessionMapping, bool) {
+	gw.mu.Lock()
+	defer gw.mu.Unlock()
+	mapping, ok := gw.mappings[key]
+	return mapping, ok
+}
+
+func (gw *BotGateway) clearSessionMapping(key string) bool {
+	gw.mu.Lock()
+	_, ok := gw.mappings[key]
+	if ok {
+		delete(gw.mappings, key)
+	}
+	gw.mu.Unlock()
+	if ok {
+		if err := gw.saveSessionMappings(); err != nil {
+			gw.logger.Warn("bot session mapping save failed", "err", err)
+		}
+	}
+	return ok
+}
+
+func (gw *BotGateway) renderSessionList(limit int) string {
+	sessions := gw.availableSessions()
+	if len(sessions) == 0 {
+		return "没有可绑定的 Reasonix session。"
+	}
+	if limit <= 0 || limit > len(sessions) {
+		limit = len(sessions)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "可绑定会话（使用 /attach <id>）：")
+	for _, session := range sessions[:limit] {
+		id := shortSessionID(session.Path)
+		preview := strings.TrimSpace(session.Preview)
+		if preview == "" {
+			preview = "(empty)"
+		}
+		fmt.Fprintf(&b, "\n%s  %s", id, truncateBotText(preview, 48))
+	}
+	if omitted := len(sessions) - limit; omitted > 0 {
+		fmt.Fprintf(&b, "\n... 还有 %d 个", omitted)
+	}
+	return b.String()
+}
+
+func (gw *BotGateway) resolveSessionRef(ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", fmt.Errorf("session id required")
+	}
+	if filepath.IsAbs(ref) || strings.Contains(ref, string(filepath.Separator)) {
+		path := ref
+		if !filepath.IsAbs(path) {
+			path = filepath.Clean(path)
+		}
+		if _, err := os.Stat(path); err != nil {
+			return "", err
+		}
+		return path, nil
+	}
+	var matches []agent.SessionInfo
+	for _, session := range gw.availableSessions() {
+		id := shortSessionID(session.Path)
+		base := strings.TrimSuffix(filepath.Base(session.Path), filepath.Ext(session.Path))
+		if strings.HasPrefix(id, ref) || strings.HasPrefix(base, ref) {
+			matches = append(matches, session)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("session %q not found", ref)
+	case 1:
+		return matches[0].Path, nil
+	default:
+		return "", fmt.Errorf("session %q is ambiguous", ref)
+	}
+}
+
+func (gw *BotGateway) availableSessions() []agent.SessionInfo {
+	var out []agent.SessionInfo
+	seen := make(map[string]struct{})
+	for _, dir := range gw.sessionSearchDirs() {
+		sessions, err := agent.ListSessions(dir)
+		if err != nil {
+			gw.logger.Warn("bot list sessions failed", "dir", dir, "err", err)
+			continue
+		}
+		for _, session := range sessions {
+			if _, ok := seen[session.Path]; ok {
+				continue
+			}
+			seen[session.Path] = struct{}{}
+			out = append(out, session)
+		}
+	}
+	return out
+}
+
+func (gw *BotGateway) sessionSearchDirs() []string {
+	var dirs []string
+	add := func(dir string) {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			return
+		}
+		clean := filepath.Clean(dir)
+		for _, existing := range dirs {
+			if existing == clean {
+				return
+			}
+		}
+		dirs = append(dirs, clean)
+	}
+	add(gw.cfg.SessionDir)
+	for _, dir := range gw.cfg.SessionSearchDirs {
+		add(dir)
+	}
+	return dirs
+}
+
+func shortSessionID(path string) string {
+	id := agent.BranchID(path)
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
+
+func (gw *BotGateway) recordRuntimeWait(key string, wait agent.RuntimeWaitMeta) {
+	sessionPath := gw.sessionPathForKey(key)
+	if sessionPath == "" || wait.Kind == "" {
+		return
+	}
+	meta, ok, err := agent.LoadRuntimeMeta(sessionPath)
+	if err != nil {
+		gw.logger.Warn("bot runtime wait load failed", "session", shortSessionID(sessionPath), "err", err)
+		return
+	}
+	if !ok {
+		meta = agent.RuntimeMeta{}
+	}
+	gw.mu.Lock()
+	state := gw.controllers[key]
+	gw.mu.Unlock()
+	if state != nil && state.ctrl != nil {
+		snapshot := state.ctrl.RuntimeSnapshot()
+		if snapshot.Goal.Text != "" || snapshot.Goal.Status != "" {
+			meta.Goal = snapshot.Goal
+		}
+		if meta.Model == "" {
+			meta.Model = snapshot.Model
+		}
+		if meta.WorkspaceRoot == "" {
+			meta.WorkspaceRoot = snapshot.WorkspaceRoot
+		}
+		if meta.Run.LastTurnAt.IsZero() {
+			meta.Run.LastTurnAt = snapshot.Run.LastTurnAt
+		}
+	}
+	meta.Wait = wait
+	meta.Run.Status = botWaitRunStatus(wait.Kind)
+	if err := agent.SaveRuntimeMeta(sessionPath, meta); err != nil {
+		gw.logger.Warn("bot runtime wait save failed", "session", shortSessionID(sessionPath), "err", err)
+		return
+	}
+	_ = agent.AppendRuntimeTimeline(sessionPath, agent.RuntimeTimelineEvent{
+		Type:       "wait_started",
+		Source:     "bot",
+		RunStatus:  meta.Run.Status,
+		GoalStatus: meta.Goal.Status,
+		WaitKind:   wait.Kind,
+		WaitID:     firstNonEmpty(wait.ApprovalID, wait.AskID, wait.EventID),
+		Tool:       wait.Tool,
+		Subject:    wait.Subject,
+		Reason:     wait.Reason,
+		EventID:    wait.EventID,
+	})
+}
+
+func (gw *BotGateway) clearRuntimeWait(key, kind, id string) {
+	sessionPath := gw.sessionPathForKey(key)
+	if sessionPath == "" {
+		return
+	}
+	meta, ok, err := agent.LoadRuntimeMeta(sessionPath)
+	if err != nil {
+		gw.logger.Warn("bot runtime wait clear load failed", "session", shortSessionID(sessionPath), "err", err)
+		return
+	}
+	if !ok || meta.Wait.Kind == "" {
+		return
+	}
+	if kind != "" && meta.Wait.Kind != kind {
+		return
+	}
+	if id != "" && firstNonEmpty(meta.Wait.ApprovalID, meta.Wait.AskID, meta.Wait.EventID) != id {
+		return
+	}
+	cleared := meta.Wait
+	meta.Wait = agent.RuntimeWaitMeta{}
+	meta.Run.Status = agent.RunStatusRunning
+	if err := agent.SaveRuntimeMeta(sessionPath, meta); err != nil {
+		gw.logger.Warn("bot runtime wait clear save failed", "session", shortSessionID(sessionPath), "err", err)
+		return
+	}
+	_ = agent.AppendRuntimeTimeline(sessionPath, agent.RuntimeTimelineEvent{
+		Type:       "wait_cleared",
+		Source:     "bot",
+		RunStatus:  meta.Run.Status,
+		GoalStatus: meta.Goal.Status,
+		WaitKind:   cleared.Kind,
+		WaitID:     firstNonEmpty(cleared.ApprovalID, cleared.AskID, cleared.EventID),
+		Tool:       cleared.Tool,
+		Subject:    cleared.Subject,
+		Reason:     cleared.Reason,
+		EventID:    cleared.EventID,
+	})
+}
+
+func botWaitRunStatus(kind string) string {
+	switch kind {
+	case "approval":
+		return agent.RunStatusWaitingApproval
+	case "ask":
+		return agent.RunStatusWaitingAsk
+	case "event":
+		return agent.RunStatusWaitingEvent
+	case "time":
+		return agent.RunStatusWaitingTime
+	case "file":
+		return agent.RunStatusWaitingFile
+	default:
+		return "waiting_" + kind
+	}
+}
+
+func (gw *BotGateway) sessionPathForKey(key string) string {
+	gw.mu.Lock()
+	state := gw.controllers[key]
+	gw.mu.Unlock()
+	if state != nil && state.ctrl != nil {
+		if path := strings.TrimSpace(state.ctrl.SessionPath()); path != "" {
+			return path
+		}
+	}
+	if mapping, ok := gw.sessionMapping(key); ok {
+		return strings.TrimSpace(mapping.SessionPath)
+	}
+	return ""
+}
+
+func (gw *BotGateway) renderStatus(key string, state *sessionState, hasState bool, active, sessions int) string {
+	lines := []string{
+		fmt.Sprintf("活跃任务数: %d", active),
+		fmt.Sprintf("保留会话数: %d", sessions),
+	}
+
+	var sessionPath string
+	if hasState && state != nil && state.ctrl != nil {
+		sessionPath = strings.TrimSpace(state.ctrl.SessionPath())
+	}
+	if sessionPath == "" {
+		if mapping, ok := gw.sessionMapping(key); ok {
+			sessionPath = strings.TrimSpace(mapping.SessionPath)
+		}
+	}
+	if sessionPath != "" {
+		lines = append(lines, "会话: "+shortSessionID(sessionPath))
+	}
+
+	var meta agent.RuntimeMeta
+	hasMeta := false
+	if sessionPath != "" {
+		loaded, ok, err := agent.LoadRuntimeMeta(sessionPath)
+		if err != nil {
+			gw.logger.Warn("bot status runtime load failed", "session", shortSessionID(sessionPath), "err", err)
+			lines = append(lines, "runtime: 读取失败")
+		} else if ok {
+			meta = loaded
+			hasMeta = true
+		}
+	}
+
+	if hasState && state != nil && state.ctrl != nil {
+		goal := state.ctrl.Goal()
+		goalStatus := state.ctrl.GoalStatus()
+		if goal != "" {
+			lines = append(lines, "目标: "+truncateBotText(goal, 120))
+		} else if hasMeta && meta.Goal.Text != "" {
+			lines = append(lines, "目标: "+truncateBotText(meta.Goal.Text, 120))
+		}
+		if goalStatus != "" {
+			lines = append(lines, "目标状态: "+goalStatus)
+		} else if hasMeta && meta.Goal.Status != "" {
+			lines = append(lines, "目标状态: "+meta.Goal.Status)
+		}
+		if hasMeta && meta.Run.Status != "" {
+			lines = append(lines, "运行状态: "+meta.Run.Status)
+		} else if state.ctrl.Running() {
+			lines = append(lines, "运行状态: running")
+		} else {
+			lines = append(lines, "运行状态: idle")
+		}
+	} else if hasMeta {
+		if meta.Goal.Text != "" {
+			lines = append(lines, "目标: "+truncateBotText(meta.Goal.Text, 120))
+		}
+		if meta.Goal.Status != "" {
+			lines = append(lines, "目标状态: "+meta.Goal.Status)
+		}
+		if meta.Run.Status != "" {
+			lines = append(lines, "运行状态: "+meta.Run.Status)
+		}
+	}
+
+	if hasMeta {
+		lines = append(lines, renderRuntimeStatusLines(meta)...)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (gw *BotGateway) renderApprovals(key string) string {
+	sessionPath := gw.sessionPathForKey(key)
+	if sessionPath == "" {
+		return "当前 IM 会话没有绑定 Reasonix session。"
+	}
+	meta, ok, err := agent.LoadRuntimeMeta(sessionPath)
+	if err != nil {
+		gw.logger.Warn("bot approvals load failed", "session", shortSessionID(sessionPath), "err", err)
+		return "审批台读取失败。"
+	}
+	if !ok || (meta.Wait.Kind != "approval" && meta.Wait.Kind != "ask") {
+		return "当前没有等待审批或回答的任务。"
+	}
+
+	lines := []string{fmt.Sprintf("待处理审批/提问（%s）：", shortSessionID(sessionPath))}
+	switch meta.Wait.Kind {
+	case "approval":
+		line := "审批: " + firstNonEmpty(meta.Wait.ApprovalID, "(unknown)")
+		if meta.Wait.Tool != "" {
+			line += "  tool=" + meta.Wait.Tool
+		}
+		if meta.Wait.Subject != "" {
+			line += "  subject=" + truncateBotText(meta.Wait.Subject, 80)
+		}
+		lines = append(lines, line)
+		if meta.Wait.Reason != "" {
+			lines = append(lines, "原因: "+truncateBotText(meta.Wait.Reason, 100))
+		}
+		if meta.Wait.ApprovalID != "" {
+			lines = append(lines, "命令: /approve "+meta.Wait.ApprovalID+" 或 /deny "+meta.Wait.ApprovalID)
+		}
+	case "ask":
+		line := "提问: " + firstNonEmpty(meta.Wait.AskID, "(unknown)")
+		if meta.Wait.Subject != "" {
+			line += "  subject=" + truncateBotText(meta.Wait.Subject, 80)
+		}
+		lines = append(lines, line)
+		if meta.Wait.Reason != "" {
+			lines = append(lines, "原因: "+truncateBotText(meta.Wait.Reason, 100))
+		}
+		for _, qLine := range gw.renderPendingAskQuestions(key, meta.Wait.AskID) {
+			lines = append(lines, qLine)
+		}
+		if meta.Wait.AskID != "" {
+			lines = append(lines, "命令: /answer "+meta.Wait.AskID+" <选项>")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (gw *BotGateway) renderPendingAskQuestions(key, askID string) []string {
+	if askID == "" {
+		return nil
+	}
+	gw.mu.Lock()
+	state := gw.controllers[key]
+	var questions []event.AskQuestion
+	if state != nil && len(state.pendingAsks) > 0 {
+		questions = append(questions, state.pendingAsks[askID]...)
+	}
+	gw.mu.Unlock()
+	if len(questions) == 0 {
+		return nil
+	}
+	lines := make([]string, 0, len(questions))
+	for _, q := range questions {
+		line := "问题"
+		if q.ID != "" {
+			line += " " + q.ID
+		}
+		if q.Prompt != "" {
+			line += ": " + truncateBotText(q.Prompt, 90)
+		}
+		var options []string
+		for _, opt := range q.Options {
+			if opt.Label != "" {
+				options = append(options, opt.Label)
+			}
+		}
+		if len(options) > 0 {
+			line += " [" + strings.Join(options, " / ") + "]"
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+func (gw *BotGateway) renderTimeline(key, command string) string {
+	sessionPath := gw.sessionPathForKey(key)
+	if sessionPath == "" {
+		return "当前 IM 会话没有绑定 Reasonix session。"
+	}
+	limit := parseTimelineLimit(command, 8)
+	events, ok, err := agent.LoadRuntimeTimeline(sessionPath, limit)
+	if err != nil {
+		gw.logger.Warn("bot timeline load failed", "session", shortSessionID(sessionPath), "err", err)
+		return "timeline 读取失败。"
+	}
+	if !ok || len(events) == 0 {
+		return "当前会话还没有 runtime timeline 事件。"
+	}
+	lines := []string{fmt.Sprintf("最近运行事件（%s）：", shortSessionID(sessionPath))}
+	for _, e := range events {
+		lines = append(lines, renderTimelineEvent(e))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (gw *BotGateway) renderWakeupHistory(key, command string) string {
+	sessionPath := gw.sessionPathForKey(key)
+	if sessionPath == "" {
+		return "当前 IM 会话没有绑定 Reasonix session。"
+	}
+	limit := parseTimelineLimit(command, 8)
+	readLimit := limit * 4
+	if readLimit < 32 {
+		readLimit = 32
+	}
+	events, ok, err := agent.LoadRuntimeTimeline(sessionPath, readLimit)
+	if err != nil {
+		gw.logger.Warn("bot wakeup history load failed", "session", shortSessionID(sessionPath), "err", err)
+		return "wakeup history 读取失败。"
+	}
+	if !ok || len(events) == 0 {
+		return "当前会话还没有唤醒历史。"
+	}
+	wakeups := make([]agent.RuntimeTimelineEvent, 0, limit)
+	for i := len(events) - 1; i >= 0; i-- {
+		e := events[i]
+		if !isWakeupTimelineEvent(e) {
+			continue
+		}
+		wakeups = append(wakeups, e)
+		if limit > 0 && len(wakeups) >= limit {
+			break
+		}
+	}
+	if len(wakeups) == 0 {
+		return "当前会话还没有唤醒历史。"
+	}
+	for i, j := 0, len(wakeups)-1; i < j; i, j = i+1, j-1 {
+		wakeups[i], wakeups[j] = wakeups[j], wakeups[i]
+	}
+	lines := []string{fmt.Sprintf("最近唤醒历史（%s）：", shortSessionID(sessionPath))}
+	for _, e := range wakeups {
+		lines = append(lines, renderTimelineEvent(e))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (gw *BotGateway) renderRecap(key, command string) string {
+	sessionPath := gw.sessionPathForKey(key)
+	if sessionPath == "" {
+		return "当前 IM 会话没有绑定 Reasonix session。"
+	}
+	start, end, label, ok := parseRecapWindow(command, time.Now)
+	if !ok {
+		return "用法: /recap [YYYY-MM-DD]"
+	}
+	events, hasTimeline, err := agent.LoadRuntimeTimeline(sessionPath, 0)
+	if err != nil {
+		gw.logger.Warn("bot recap timeline load failed", "session", shortSessionID(sessionPath), "err", err)
+		return "复盘 timeline 读取失败。"
+	}
+	meta, hasMeta, err := agent.LoadRuntimeMeta(sessionPath)
+	if err != nil {
+		gw.logger.Warn("bot recap runtime load failed", "session", shortSessionID(sessionPath), "err", err)
+		return "复盘 runtime 读取失败。"
+	}
+
+	dayEvents := filterRecapEvents(events, start, end)
+	stats := summarizeRecapEvents(dayEvents)
+	lines := []string{fmt.Sprintf("任务复盘（%s，%s）：", shortSessionID(sessionPath), label)}
+	if !hasTimeline || len(dayEvents) == 0 {
+		lines = append(lines, "自动处理: 今天还没有记录到 runtime 事件。")
+	} else {
+		lines = append(lines, fmt.Sprintf(
+			"自动处理: 唤醒 %d 次，运行完成 %d 次，等待用户 %d 次，预算阻断 %d 次。",
+			stats.Wakeups, stats.RunFinished, stats.WaitStarted, stats.BudgetBlocked,
+		))
+		if stats.ModelCalls > 0 {
+			cost := ""
+			if stats.Cost > 0 {
+				currency := stats.Currency
+				if currency == "" {
+					currency = "cost"
+				}
+				cost = fmt.Sprintf("，费用 %s %.4f", currency, stats.Cost)
+			}
+			lines = append(lines, fmt.Sprintf("模型使用: 调用 %d 次，tokens %d%s。", stats.ModelCalls, stats.Tokens, cost))
+		}
+		lines = append(lines, "最近事件:")
+		for _, event := range lastRecapEvents(dayEvents, 5) {
+			lines = append(lines, "- "+renderTimelineEvent(event))
+		}
+	}
+
+	decisionLines := gw.renderRecapDecisionLines(key, meta, hasMeta)
+	lines = append(lines, decisionLines...)
+	return strings.Join(lines, "\n")
+}
+
+type recapStats struct {
+	Wakeups       int
+	RunFinished   int
+	WaitStarted   int
+	BudgetBlocked int
+	ModelCalls    int
+	Tokens        int
+	Cost          float64
+	Currency      string
+}
+
+func parseRecapWindow(command string, now func() time.Time) (time.Time, time.Time, string, bool) {
+	if now == nil {
+		now = time.Now
+	}
+	parts := strings.Fields(command)
+	loc := time.Local
+	if len(parts) >= 2 {
+		day, err := time.ParseInLocation("2006-01-02", parts[1], loc)
+		if err != nil {
+			return time.Time{}, time.Time{}, "", false
+		}
+		return day, day.Add(24 * time.Hour), parts[1], true
+	}
+	t := now().In(loc)
+	start := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
+	return start, start.Add(24 * time.Hour), start.Format("2006-01-02"), true
+}
+
+func filterRecapEvents(events []agent.RuntimeTimelineEvent, start, end time.Time) []agent.RuntimeTimelineEvent {
+	if start.IsZero() || end.IsZero() {
+		return nil
+	}
+	out := make([]agent.RuntimeTimelineEvent, 0, len(events))
+	for _, event := range events {
+		if event.Time.IsZero() {
+			continue
+		}
+		t := event.Time.In(start.Location())
+		if (t.Equal(start) || t.After(start)) && t.Before(end) {
+			out = append(out, event)
+		}
+	}
+	return out
+}
+
+func summarizeRecapEvents(events []agent.RuntimeTimelineEvent) recapStats {
+	var stats recapStats
+	for _, event := range events {
+		if isWakeupTimelineEvent(event) {
+			stats.Wakeups++
+		}
+		switch event.Type {
+		case "run_finished":
+			stats.RunFinished++
+		case "wait_started":
+			stats.WaitStarted++
+		case "wakeup_budget_blocked":
+			stats.BudgetBlocked++
+		case "model_usage":
+			stats.ModelCalls++
+			stats.Tokens += event.Total
+			if event.Cost > 0 {
+				stats.Cost += event.Cost
+				if stats.Currency == "" {
+					stats.Currency = event.Currency
+				}
+			}
+		}
+	}
+	return stats
+}
+
+func lastRecapEvents(events []agent.RuntimeTimelineEvent, limit int) []agent.RuntimeTimelineEvent {
+	if limit <= 0 || len(events) <= limit {
+		return events
+	}
+	return events[len(events)-limit:]
+}
+
+func (gw *BotGateway) renderRecapDecisionLines(key string, meta agent.RuntimeMeta, hasMeta bool) []string {
+	if !hasMeta || (meta.Wait.Kind != "approval" && meta.Wait.Kind != "ask") {
+		return []string{"待决策: 无。"}
+	}
+	lines := []string{"待决策:"}
+	switch meta.Wait.Kind {
+	case "approval":
+		id := firstNonEmpty(meta.Wait.ApprovalID, "(unknown)")
+		line := "- 审批 " + id
+		if meta.Wait.Tool != "" {
+			line += " tool=" + meta.Wait.Tool
+		}
+		if meta.Wait.Subject != "" {
+			line += " subject=" + truncateBotText(meta.Wait.Subject, 80)
+		}
+		lines = append(lines, line)
+		if meta.Wait.Reason != "" {
+			lines = append(lines, "  原因: "+truncateBotText(meta.Wait.Reason, 100))
+		}
+		if meta.Wait.ApprovalID != "" {
+			lines = append(lines, "  命令: /approve "+meta.Wait.ApprovalID+" 或 /deny "+meta.Wait.ApprovalID)
+		}
+	case "ask":
+		id := firstNonEmpty(meta.Wait.AskID, "(unknown)")
+		line := "- 回答 " + id
+		if meta.Wait.Subject != "" {
+			line += " subject=" + truncateBotText(meta.Wait.Subject, 80)
+		}
+		lines = append(lines, line)
+		if meta.Wait.Reason != "" {
+			lines = append(lines, "  原因: "+truncateBotText(meta.Wait.Reason, 100))
+		}
+		for _, qLine := range gw.renderPendingAskQuestions(key, meta.Wait.AskID) {
+			lines = append(lines, "  "+qLine)
+		}
+		if meta.Wait.AskID != "" {
+			lines = append(lines, "  命令: /answer "+meta.Wait.AskID+" <选项>")
+		}
+	}
+	return lines
+}
+
+func parseTimelineLimit(command string, fallback int) int {
+	parts := strings.Fields(command)
+	if len(parts) < 2 {
+		return fallback
+	}
+	limit, err := strconv.Atoi(parts[1])
+	if err != nil || limit < 0 {
+		return fallback
+	}
+	if limit > 50 {
+		return 50
+	}
+	return limit
+}
+
+func isWakeupTimelineEvent(e agent.RuntimeTimelineEvent) bool {
+	switch e.Type {
+	case "wakeup_budget_blocked", "wait_time_reached", "wait_event_failure_detected", "file_change_detected":
+		return true
+	case "intent_queued":
+		switch e.Source {
+		case "cron", "time", "webhook", "file_watch":
+			return true
+		}
+	}
+	return false
+}
+
+func renderTimelineEvent(e agent.RuntimeTimelineEvent) string {
+	when := ""
+	if !e.Time.IsZero() {
+		when = formatBotStatusTime(e.Time)
+	}
+	parts := []string{}
+	if when != "" {
+		parts = append(parts, when)
+	}
+	if e.Type != "" {
+		parts = append(parts, e.Type)
+	}
+	if e.Source != "" {
+		parts = append(parts, "source="+e.Source)
+	}
+	if e.RunStatus != "" {
+		parts = append(parts, "run="+e.RunStatus)
+	}
+	if e.WaitKind != "" {
+		wait := e.WaitKind
+		if e.WaitID != "" {
+			wait += ":" + e.WaitID
+		}
+		parts = append(parts, "wait="+wait)
+	}
+	if e.Tool != "" {
+		parts = append(parts, "tool="+e.Tool)
+	}
+	if e.Subject != "" {
+		parts = append(parts, "subject="+truncateBotText(e.Subject, 60))
+	}
+	if e.Reason != "" {
+		parts = append(parts, "reason="+truncateBotText(e.Reason, 60))
+	}
+	if e.Error != "" {
+		parts = append(parts, "error="+truncateBotText(e.Error, 60))
+	}
+	return strings.Join(parts, "  ")
+}
+
+func renderRuntimeStatusLines(meta agent.RuntimeMeta) []string {
+	var lines []string
+	if meta.Wait.Kind != "" {
+		wait := "等待: " + meta.Wait.Kind
+		if id := firstNonEmpty(meta.Wait.ApprovalID, meta.Wait.AskID, meta.Wait.EventID); id != "" {
+			wait += " " + id
+		}
+		if meta.Wait.Subject != "" {
+			wait += " (" + truncateBotText(meta.Wait.Subject, 80) + ")"
+		}
+		lines = append(lines, wait)
+		if meta.Wait.Reason != "" {
+			lines = append(lines, "等待原因: "+truncateBotText(meta.Wait.Reason, 100))
+		}
+		if event := runtimeEventWaitSummary(meta.Wait); event != "" {
+			lines = append(lines, "事件条件: "+event)
+		}
+		if !meta.Wait.Until.IsZero() {
+			lines = append(lines, "等待到: "+formatBotStatusTime(meta.Wait.Until))
+		}
+		if len(meta.Wait.FilePaths) > 0 {
+			lines = append(lines, "等待文件: "+truncateBotText(strings.Join(meta.Wait.FilePaths, ", "), 100))
+		}
+	}
+	if meta.Run.LastWakeupReason != "" {
+		lines = append(lines, "运行唤醒: "+truncateBotText(meta.Run.LastWakeupReason, 80))
+	}
+	if sched := runtimeScheduleSummary(meta.Scheduler); sched != "" {
+		lines = append(lines, "调度: "+sched)
+	}
+	if !meta.Scheduler.LastWakeupAt.IsZero() {
+		line := "上次唤醒: " + formatBotStatusTime(meta.Scheduler.LastWakeupAt)
+		if meta.Scheduler.LastWakeupReason != "" {
+			line += " (" + meta.Scheduler.LastWakeupReason + ")"
+		}
+		lines = append(lines, line)
+	}
+	if !meta.Scheduler.NextWakeupAt.IsZero() {
+		lines = append(lines, "下次唤醒: "+formatBotStatusTime(meta.Scheduler.NextWakeupAt))
+	}
+	if meta.Budget.DailyWakeupLimit > 0 {
+		lines = append(lines, fmt.Sprintf("唤醒预算: %d/%d", meta.Budget.DailyWakeups, meta.Budget.DailyWakeupLimit))
+	}
+	if meta.Budget.DailyModelCallLimit > 0 {
+		lines = append(lines, fmt.Sprintf("模型调用预算: %d/%d", meta.Budget.DailyModelCalls, meta.Budget.DailyModelCallLimit))
+	}
+	if meta.Budget.DailyModelCostLimit > 0 {
+		currency := meta.Budget.ModelCostCurrency
+		if currency == "" {
+			currency = "cost"
+		}
+		lines = append(lines, fmt.Sprintf("模型费用预算: %s %.4f/%.4f", currency, meta.Budget.DailyModelCost, meta.Budget.DailyModelCostLimit))
+	}
+	if meta.Budget.MaxGoalAutoTurns > 0 {
+		lines = append(lines, fmt.Sprintf("自动续跑上限: %d 轮", meta.Budget.MaxGoalAutoTurns))
+	}
+	if meta.Budget.LastBlockedReason != "" {
+		lines = append(lines, "预算阻塞: "+truncateBotText(meta.Budget.LastBlockedReason, 100))
+	}
+	return lines
+}
+
+func runtimeEventWaitSummary(wait agent.RuntimeWaitMeta) string {
+	var parts []string
+	if wait.EventSource != "" {
+		parts = append(parts, "source="+wait.EventSource)
+	}
+	if wait.EventStatus != "" {
+		parts = append(parts, "status="+wait.EventStatus)
+	}
+	if wait.EventConclusion != "" {
+		parts = append(parts, "conclusion="+wait.EventConclusion)
+	}
+	return strings.Join(parts, " ")
+}
+
+func runtimeScheduleSummary(sched agent.RuntimeSchedMeta) string {
+	var parts []string
+	if sched.Enabled {
+		parts = append(parts, "enabled")
+	}
+	if sched.DailyAt != "" {
+		parts = append(parts, "daily="+sched.DailyAt)
+	}
+	if sched.Interval > 0 {
+		parts = append(parts, "interval="+sched.Interval.String())
+	}
+	return strings.Join(parts, " ")
+}
+
+func formatBotStatusTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Local().Format("2006-01-02 15:04:05")
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func askSubject(ask event.Ask) string {
+	if len(ask.Questions) == 0 {
+		return ""
+	}
+	if ask.Questions[0].Prompt != "" {
+		return ask.Questions[0].Prompt
+	}
+	return ask.Questions[0].Header
+}
+
+func truncateBotText(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	if max <= 1 {
+		return string(runes[:max])
+	}
+	return string(runes[:max-1]) + "…"
+}
+
 func (gw *BotGateway) sendText(ctx context.Context, adapter Adapter, msg InboundMessage, text string) error {
 	result, err := adapter.Send(ctx, OutboundMessage{
 		ConnectionID: msg.ConnectionID,
@@ -937,6 +2091,143 @@ func (gw *BotGateway) sendText(ctx context.Context, adapter Adapter, msg Inbound
 	}
 	gw.logger.Info("bot send completed", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "reply_to", hashID(msg.MessageID), "message", hashID(result.MessageID))
 	return err
+}
+
+// handleGoalCommand dispatches /goal subcommands from the bot.
+func (gw *BotGateway) handleGoalCommand(ctx context.Context, adapter Adapter, key string, msg InboundMessage) {
+	args := strings.TrimSpace(strings.TrimPrefix(msg.Text, "/goal"))
+
+	gw.mu.Lock()
+	state, ok := gw.controllers[key]
+	gw.mu.Unlock()
+
+	switch strings.ToLower(args) {
+	case "", "status":
+		if !ok || state.ctrl == nil {
+			_ = gw.sendText(ctx, adapter, msg, "目标：无（没有活跃会话）")
+			return
+		}
+		goal := state.ctrl.Goal()
+		goalStatus := state.ctrl.GoalStatus()
+		if goal == "" {
+			_ = gw.sendText(ctx, adapter, msg, fmt.Sprintf("目标：无\n状态：%s", goalStatus))
+		} else {
+			_ = gw.sendText(ctx, adapter, msg, fmt.Sprintf("目标：%s\n状态：%s", goal, goalStatus))
+		}
+
+	case "clear", "off", "stop", "done":
+		if !ok || state.ctrl == nil {
+			_ = gw.sendText(ctx, adapter, msg, "没有活跃会话。")
+			return
+		}
+		state.ctrl.ClearGoal()
+		_ = gw.sendText(ctx, adapter, msg, "目标已清除。")
+
+	case "continue", "resume":
+		if !ok || state.ctrl == nil {
+			_ = gw.sendText(ctx, adapter, msg, "没有活跃会话。")
+			return
+		}
+		if state.ctrl.Running() {
+			_ = gw.sendText(ctx, adapter, msg, "当前正在运行，无法重复启动。")
+			return
+		}
+		goal := state.ctrl.Goal()
+		goalStatus := state.ctrl.GoalStatus()
+		if goal == "" && (goalStatus == "" || goalStatus == control.GoalStatusStopped) {
+			_ = gw.sendText(ctx, adapter, msg, "没有活跃目标可以继续。")
+			return
+		}
+		if goalStatus == control.GoalStatusComplete {
+			_ = gw.sendText(ctx, adapter, msg, "目标已完成，请设置新目标。")
+			return
+		}
+		if !gw.sessions.TryStart(key) {
+			_ = gw.sendText(ctx, adapter, msg, "当前正在运行，无法重复启动。")
+			return
+		}
+		_ = gw.sendText(ctx, adapter, msg, "继续执行目标…")
+		go func() {
+			defer func() {
+				next := gw.sessions.Release(key)
+				if next != nil {
+					gw.runTurn(ctx, adapter, key, *next)
+				}
+			}()
+
+			sink := newRenderSink(
+				ctx,
+				adapter,
+				msg.ConnectionID,
+				msg.Domain,
+				msg.ChatID,
+				msg.ChatType,
+				msg.UserID,
+				msg.MessageID,
+				gw.logger,
+				func(approval event.Approval) {
+					gw.mu.Lock()
+					if state.pendingApprovals == nil {
+						state.pendingApprovals = make(map[string]event.Approval)
+					}
+					state.pendingApprovals[approval.ID] = approval
+					state.lastApprovalID = approval.ID
+					gw.mu.Unlock()
+					gw.recordRuntimeWait(key, agent.RuntimeWaitMeta{
+						Kind:       "approval",
+						Reason:     "approval required",
+						ApprovalID: approval.ID,
+						Tool:       approval.Tool,
+						Subject:    approval.Subject,
+						Since:      time.Now().UTC(),
+					})
+				},
+				func(ask event.Ask) {
+					gw.mu.Lock()
+					if state.pendingAsks == nil {
+						state.pendingAsks = make(map[string][]event.AskQuestion)
+					}
+					state.pendingAsks[ask.ID] = ask.Questions
+					state.lastAskID = ask.ID
+					gw.mu.Unlock()
+					gw.recordRuntimeWait(key, agent.RuntimeWaitMeta{
+						Kind:    "ask",
+						Reason:  "user answer required",
+						AskID:   ask.ID,
+						Subject: askSubject(ask),
+						Since:   time.Now().UTC(),
+					})
+				},
+			)
+			state.sink.setTarget(sink)
+			defer state.sink.setTarget(nil)
+
+			turnCtx, cancel := context.WithCancel(ctx)
+			gw.mu.Lock()
+			if s, ok2 := gw.controllers[key]; ok2 {
+				s.cancel = cancel
+				s.lastActive = time.Now()
+			}
+			gw.mu.Unlock()
+			defer cancel()
+			sink.ctrl = state.ctrl
+			err := state.ctrl.ContinueGoal(turnCtx, "bot")
+			sink.Emit(event.Event{Kind: event.TurnDone, Err: err})
+			if err != nil {
+				gw.logger.Warn("bot goal continue failed", "err", err)
+			}
+		}()
+
+	default:
+		// /goal <text> — set a new goal
+		if !ok || state.ctrl == nil {
+			_ = gw.sendText(ctx, adapter, msg, "没有活跃会话，请先发送一条消息创建会话。")
+			return
+		}
+		state.ctrl.SetPlanMode(false)
+		state.ctrl.SetGoal(args)
+		_ = gw.sendText(ctx, adapter, msg, fmt.Sprintf("目标已设置 → %s", args))
+	}
 }
 
 func parseAskAnswers(questions []event.AskQuestion, raw string) []event.AskAnswer {

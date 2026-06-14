@@ -24,6 +24,11 @@ import type {
   CommandInfo,
   ContextInfo,
   ContextPanelInfo,
+  DaemonApprovalDeskItemView,
+  DaemonProcessActionResult,
+  DaemonSessionView,
+  DaemonStartupHelperView,
+  DaemonStatusView,
   DirEntry,
   DroppedItem,
   EffortInfo,
@@ -110,6 +115,20 @@ export interface AppBindings {
   ApproveTab(tabID: string, id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
   AnswerQuestion(id: string, answers: QuestionAnswer[]): Promise<void>;
   AnswerQuestionForTab(tabID: string, id: string, answers: QuestionAnswer[]): Promise<void>;
+  DaemonStatus(addr: string): Promise<DaemonStatusView>;
+  StartDaemon(addr: string): Promise<DaemonProcessActionResult>;
+  StopDaemon(addr: string): Promise<DaemonProcessActionResult>;
+  RestartDaemon(addr: string): Promise<DaemonProcessActionResult>;
+  DaemonStartupHelper(): Promise<DaemonStartupHelperView>;
+  ListDaemonSessions(addr: string): Promise<DaemonSessionView[]>;
+  ListDaemonApprovals(addr: string): Promise<DaemonApprovalDeskItemView[]>;
+  OpenDaemonSession(sessionID: string, addr: string): Promise<TabMeta>;
+  ContinueDaemonGoal(sessionID: string, addr: string): Promise<void>;
+  StopDaemonSession(sessionID: string, addr: string): Promise<void>;
+  DisableDaemonSchedule(sessionID: string, addr: string): Promise<void>;
+  DisableDaemonWatch(sessionID: string, addr: string): Promise<void>;
+  ApproveDaemon(sessionID: string, approvalID: string, allow: boolean, session: boolean, persist: boolean, addr: string): Promise<void>;
+  AnswerDaemonQuestion(sessionID: string, askID: string, answers: QuestionAnswer[], selected: string, addr: string): Promise<void>;
   ReplayPendingPrompts(): Promise<void>;
   SetPlanMode(on: boolean): Promise<void>;
   SetMode(mode: string): Promise<void>;
@@ -510,6 +529,18 @@ function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function mockDaemonApprovalsPreviewEnabled(): boolean {
+  return typeof window !== "undefined" && new URLSearchParams(window.location.search).get("daemonApprovalsPreview") === "1";
+}
+
+function mockDaemonSessionsPreviewEnabled(): boolean {
+  return typeof window !== "undefined" && new URLSearchParams(window.location.search).get("daemonSessionsPreview") === "1";
+}
+
+function mockDaemonProcessPreviewEnabled(): boolean {
+  return typeof window !== "undefined" && new URLSearchParams(window.location.search).get("daemonProcessPreview") === "1";
+}
+
 function baseName(path: string): string {
   return path.replace(/[/\\]+$/, "").split(/[/\\]/).filter(Boolean).pop() ?? path;
 }
@@ -539,6 +570,7 @@ function makeMockApp(): AppBindings {
   let cwd = freshMock ? globalWorkspaceRoot : "~/projects/joyquant-db"; // mutable so PickWorkspace is visible in dev
   let workspaces = freshMock ? [] : ["~/projects/joyquant-db", "~/projects/joyquant-sys", "~/projects/reasonix", "~/projects/blade"];
   let mockEffort = "auto";
+  let mockDaemonOnline = mockDaemonSessionsPreviewEnabled() || mockDaemonProcessPreviewEnabled();
   const day = 86_400_000;
   const t0 = Date.now();
   // Mutable so MCP add/remove/retry are observable in browser dev.
@@ -1505,6 +1537,157 @@ function makeMockApp(): AppBindings {
         async AnswerQuestionForTab(_tabID, id, answers) {
           await withMockTabScope(_tabID, () => this.AnswerQuestion(id, answers));
         },
+        async DaemonStatus(addr) {
+          if (mockDaemonOnline) {
+            return { connected: true, status: "running", addr: addr || "127.0.0.1:19840", sessions: 3, uptime: "2h14m", pid: 19840 };
+          }
+          return { connected: false, addr: addr || "127.0.0.1:19840", error: "mock daemon is offline" };
+        },
+        async StartDaemon(addr) {
+          await delay(120);
+          mockDaemonOnline = true;
+          return { message: "daemon started", status: await this.DaemonStatus(addr) };
+        },
+        async StopDaemon(addr) {
+          await delay(120);
+          mockDaemonOnline = false;
+          return { message: "daemon stopped", status: await this.DaemonStatus(addr) };
+        },
+        async RestartDaemon(addr) {
+          await delay(180);
+          mockDaemonOnline = true;
+          return { message: "daemon restarted", status: await this.DaemonStatus(addr) };
+        },
+        async DaemonStartupHelper() {
+          return {
+            platform: "launchd",
+            installCommand: "reasonix daemon startup install",
+            uninstallCommand: "reasonix daemon startup uninstall",
+            printCommand: "reasonix daemon startup print",
+            description: "Install a user-level login helper for the local Reasonix daemon.",
+          };
+        },
+        async ListDaemonSessions() {
+          if (mockDaemonSessionsPreviewEnabled() && mockDaemonOnline) {
+            return [
+              {
+                id: "triage-session-20260613",
+                path: "mock-sessions/triage-session.jsonl",
+                goalText: "Daily PR and issue triage",
+                goalStatus: "running",
+                runStatus: "waiting_event",
+                waitKind: "event",
+                waitReason: "CI checks",
+                waitId: "workflow-run-42",
+                active: false,
+                scope: "project",
+                workspaceRoot: "mock-workspace/DeepSeek-Reasonix",
+                topicTitle: "DeepSeek-Reasonix",
+                nextWakeupAt: "2026-06-14T00:30:00Z",
+                dailyWakeupLimit: 3,
+                dailyWakeups: 1,
+                dailyModelCallLimit: 5,
+                dailyModelCalls: 2,
+                dailyModelCostLimit: 1.5,
+                dailyModelCost: 0.24,
+                modelCostCurrency: "$",
+                scheduled: true,
+                watched: false,
+              },
+              {
+                id: "release-session-20260613",
+                path: "mock-sessions/release-session.jsonl",
+                goalText: "Prepare release assistant",
+                goalStatus: "running",
+                runStatus: "running",
+                active: true,
+                scope: "project",
+                workspaceRoot: "mock-workspace/DeepSeek-Reasonix",
+                topicTitle: "Release",
+                dailyWakeupLimit: 2,
+                dailyWakeups: 1,
+                scheduled: false,
+                watched: true,
+              },
+              {
+                id: "recap-session-20260613",
+                path: "mock-sessions/recap-session.jsonl",
+                goalText: "Personal AgentOS recap",
+                goalStatus: "blocked",
+                runStatus: "blocked",
+                waitKind: "ask",
+                waitReason: "needs decision",
+                active: false,
+                scope: "global",
+                budgetBlockedReason: "daily automatic wakeup budget exhausted",
+              },
+            ];
+          }
+          return [];
+        },
+        async ListDaemonApprovals() {
+          if (mockDaemonApprovalsPreviewEnabled()) {
+            return [
+              {
+                sessionId: "release-session-20260613",
+                kind: "approval",
+                id: "approval-1",
+                tool: "shell",
+                subject: "pnpm --dir desktop/frontend build",
+                reason: "approval required",
+                goalText: "Ship the desktop daemon approval panel",
+                goalStatus: "running",
+                runStatus: "waiting_approval",
+                active: true,
+                since: "2026-06-13T09:18:00Z",
+              },
+              {
+                sessionId: "triage-session-20260613",
+                kind: "ask",
+                id: "ask-1",
+                tool: "request_user_input",
+                subject: "Choose the next PR triage lane",
+                reason: "daily cron wakeup needs a routing decision",
+                goalText: "Daily PR triage",
+                goalStatus: "blocked",
+                runStatus: "dormant_wait",
+                active: false,
+                since: "2026-06-13T01:05:00Z",
+                questions: [
+                  {
+                    id: "q1",
+                    header: "Triage",
+                    prompt: "Which queue should this PR enter?",
+                    options: [
+                      { label: "Review now", description: "Open the diff and prepare review notes." },
+                      { label: "Wait for CI", description: "Resume after checks report a conclusion." },
+                    ],
+                  },
+                ],
+              },
+            ];
+          }
+          return [];
+        },
+        async OpenDaemonSession(sessionID) {
+          const active = mockTabs.find((tab) => tab.active) ?? mockTabs[0];
+          emit({ kind: "notice", level: "info", text: `mock daemon session opened: ${sessionID}` });
+          return { ...(active ?? mockTabs[0]) };
+        },
+        async ContinueDaemonGoal(sessionID) {
+          emit({ kind: "notice", level: "info", text: `mock daemon continue: ${sessionID}` });
+        },
+        async StopDaemonSession(sessionID) {
+          emit({ kind: "notice", level: "info", text: `mock daemon stopped: ${sessionID}` });
+        },
+        async DisableDaemonSchedule(sessionID) {
+          emit({ kind: "notice", level: "info", text: `mock daemon schedule disabled: ${sessionID}` });
+        },
+        async DisableDaemonWatch(sessionID) {
+          emit({ kind: "notice", level: "info", text: `mock daemon watch disabled: ${sessionID}` });
+        },
+        async ApproveDaemon(_sessionID, _approvalID, _allow, _session, _persist) {},
+        async AnswerDaemonQuestion(_sessionID, _askID, _answers, _selected) {},
         async ReplayPendingPrompts() {},
         async ConfirmAction(req) {
           void req;
