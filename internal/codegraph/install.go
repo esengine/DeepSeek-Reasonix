@@ -299,7 +299,7 @@ func cleanSymlinkTarget(root, linkPath, linkname string) (string, error) {
 	if dest != root && !strings.HasPrefix(dest, root+string(os.PathSeparator)) {
 		return "", fmt.Errorf("unsafe symlink target %q in archive", linkname)
 	}
-	return clean, nil
+	return filepath.ToSlash(clean), nil
 }
 
 // symlinkWithin rejects a symlink whose target escapes root. linkPath is the

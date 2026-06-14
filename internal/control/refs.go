@@ -108,10 +108,6 @@ func (c *Controller) detectRefs(line string) []ref {
 	return c.detectRefsMode(line, false)
 }
 
-func (c *Controller) detectScopedRefs(line string) []ref {
-	return c.detectRefsMode(line, true)
-}
-
 func (c *Controller) detectRefsMode(line string, scopedOnly bool) []ref {
 	known := map[string]bool{}
 	if c.host != nil {
@@ -426,6 +422,7 @@ func readFileRef(path, baseDir string) (content string, isDir bool, err error) {
 	if rerr != nil {
 		return "", false, rerr
 	}
+	displayPath := filepath.ToSlash(rel)
 
 	info, err := root.Stat(rel)
 	if err != nil {
@@ -462,10 +459,10 @@ func readFileRef(path, baseDir string) (content string, isDir bool, err error) {
 	data := buf[:n]
 
 	if mime := imageMime(data, rel); mime != "" {
-		return fmt.Sprintf("[image file %s, mime=%s, %d bytes — image bytes are not inlined. Use an available MCP image/OCR/vision tool with this path when visual understanding is needed.]", rel, mime, info.Size()), false, nil
+		return fmt.Sprintf("[image file %s, mime=%s, %d bytes — image bytes are not inlined. Use an available MCP image/OCR/vision tool with this path when visual understanding is needed.]", displayPath, mime, info.Size()), false, nil
 	}
 	if bytes.IndexByte(data[:min(n, 8192)], 0) >= 0 {
-		return fmt.Sprintf("[binary file %s, %d bytes — not shown]", rel, info.Size()), false, nil
+		return fmt.Sprintf("[binary file %s, %d bytes — not shown]", displayPath, info.Size()), false, nil
 	}
 	if n > maxFileRefBytes {
 		return string(data[:maxFileRefBytes]) + fmt.Sprintf("\n…[truncated; file is %d bytes]…", info.Size()), false, nil
