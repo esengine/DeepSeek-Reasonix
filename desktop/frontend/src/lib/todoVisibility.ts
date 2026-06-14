@@ -5,5 +5,8 @@ export function shouldShowTodoPanel(
   dismissedTodoId: string | null,
   todos: Todo[],
 ): boolean {
-  return !!todoId && todoId !== dismissedTodoId && todos.length > 0;
+  if (!todoId || todoId === dismissedTodoId || todos.length === 0) return false;
+  // Hide the panel when every todo item is completed — the user no longer
+  // needs to see the list, and after a restart the panel stays gone.
+  return todos.some((t) => t.status !== "completed");
 }

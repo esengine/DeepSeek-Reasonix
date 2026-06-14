@@ -18,6 +18,14 @@ export function TodoPanel({ todos, onDismiss }: { todos: Todo[]; onDismiss: () =
 
   const done = todos.filter((t) => t.status === "completed").length;
   const current = todos.find((t) => t.status === "in_progress");
+  const allDone = done === todos.length && todos.length > 0;
+
+  // Auto-collapse when every item is completed; the user has watched the
+  // progress and no longer needs the expanded list. A fresh todo_write with
+  // new pending items will re-open it (via the parent's shouldShowTodoPanel).
+  useEffect(() => {
+    if (allDone) setOpen(false);
+  }, [allDone]);
 
   useEffect(() => {
     if (!open) return;

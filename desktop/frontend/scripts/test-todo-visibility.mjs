@@ -23,10 +23,13 @@ const completedTodos = [
   { content: "Ship the fix", status: "completed" },
 ];
 
+// Once every item is completed the panel is hidden — the user has watched
+// the progress and no longer needs to see the completed list. On restart
+// the panel also stays gone.
 assert.equal(
   shouldShowTodoPanel("todo-final", null, completedTodos),
-  true,
-  "the final all-completed todo_write must remain visible",
+  false,
+  "a fully-completed todo list hides the panel",
 );
 assert.equal(
   shouldShowTodoPanel("todo-active", null, [{ content: "Run tests", status: "in_progress" }]),
@@ -41,10 +44,20 @@ assert.equal(
 assert.equal(shouldShowTodoPanel(null, null, completedTodos), false, "no canonical todo item means no panel");
 assert.equal(shouldShowTodoPanel("todo-empty", null, []), false, "empty todo lists do not render a panel");
 
+// Mixed-status lists (some pending, some completed) still show.
+assert.equal(
+  shouldShowTodoPanel("todo-mixed", null, [
+    { content: "a", status: "completed" },
+    { content: "b", status: "pending" },
+  ]),
+  true,
+  "a partially-completed todo list stays visible",
+);
+
 const iterations = 200_000;
 const started = performance.now();
 for (let i = 0; i < iterations; i += 1) {
-  if (!shouldShowTodoPanel("todo-perf", null, completedTodos)) {
+  if (!shouldShowTodoPanel("todo-perf", null, [{ content: "keep", status: "pending" }])) {
     throw new Error("unexpected hidden todo panel during performance loop");
   }
 }
