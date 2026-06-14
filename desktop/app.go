@@ -1826,14 +1826,23 @@ func (a *App) ContextUsageForTab(tabID string) ContextInfo {
 	return ContextInfo{Used: used, Window: window, SessionTokens: sessionTokens, CompactRatio: ctrl.CompactRatio()}
 }
 
+// BalanceEntry is one currency's display entry for multi-currency balance.
+type BalanceEntry struct {
+	Currency string `json:"currency"` // "CNY" | "USD"
+	Display  string `json:"display"`  // "¥110.00"
+}
+
 // BalanceInfo is the wallet-balance readout for the status bar. Available is true
 // only when a balance was fetched; Display is the formatted amount (e.g. "¥110.00")
 // and is "" when the active provider declares no balance_url — the frontend then
 // omits the readout. Err carries a fetch failure for an optional tooltip.
+// Entries carries every currency reported by the provider for multi-currency
+// switching in the desktop UI.
 type BalanceInfo struct {
-	Available bool   `json:"available"`
-	Display   string `json:"display"`
-	Err       string `json:"err,omitempty"`
+	Available bool           `json:"available"`
+	Display   string         `json:"display"`
+	Entries   []BalanceEntry `json:"entries"`
+	Err       string         `json:"err,omitempty"`
 }
 
 // Balance queries the active provider's wallet balance (a network call). It
@@ -1847,16 +1856,27 @@ func (a *App) Balance() BalanceInfo {
 func (a *App) BalanceForTab(tabID string) BalanceInfo {
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
-		return BalanceInfo{}
+		return BalanceInfo{Entries: []BalanceEntry{}}
 	}
 	b, err := ctrl.Balance(a.ctx)
 	if err != nil {
-		return BalanceInfo{Err: err.Error()}
+		return BalanceInfo{Err: err.Error(), Entries: []BalanceEntry{}}
 	}
 	if b == nil {
-		return BalanceInfo{} // provider declares no balance endpoint
+		return BalanceInfo{Entries: []BalanceEntry{}} // provider declares no balance endpoint
 	}
-	return BalanceInfo{Available: true, Display: b.Display()}
+	entries := make([]BalanceEntry, 0, len(b.Infos))
+	for _, info := range b.Infos {
+		entries = append(entries, BalanceEntry{
+			Currency: info.Currency,
+			Display:  billing.Symbol(info.Currency) + strings.TrimSpace(info.TotalBalance),
+		})
+	}
+	return BalanceInfo{
+		Available: true,
+		Display:   b.DisplayAll(" | "),
+		Entries:   entries,
+	}
 }
 
 // JobView is one running background job (bash/task started with

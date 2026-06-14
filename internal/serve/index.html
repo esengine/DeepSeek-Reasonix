@@ -66,9 +66,9 @@ input,textarea{font:inherit;color:inherit}
 
 /* status metrics */
 .status-metrics{display:flex;gap:0;padding:5px 8px;border-top:1px dashed var(--border);font-family:var(--mono);font-size:10.5px;color:var(--muted-2)}
-.status-metrics .sm-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px}
-.status-metrics .sm-val{color:var(--fg-2);font-weight:500;font-size:11.5px}
-.status-metrics .sm-val.acc{color:var(--accent)}
+.status-metrics .sm-item{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:2px}
+.status-metrics .sm-val{display:flex;align-items:center;justify-content:center;width:100%;color:var(--fg-2);font-weight:500;font-size:11.5px}
+.status-metrics .sm-val.acc{color:var(--accent)}.sm-val .bt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:1;min-width:0}.sm-val .bi{flex-shrink:0;margin-left:2px;font-size:9px;opacity:.6}
 
 .msg{max-width:760px;margin:0 auto 14px;animation:msg-in .25s ease}
 @keyframes msg-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
@@ -1006,8 +1006,12 @@ function fetchStatus(){
     $('#sm-cache').textContent=cacheTotal>0?Math.round((s.cacheHit||0)/cacheTotal*100)+'%':'—';
     const lastCost=s.lastUsage?.cost??s.lastUsage?.costUsd??s.lastUsage?.totalCost;
     if(typeof lastCost==='number')$('#sm-cost').textContent=fmtMoney(lastCost,s.lastUsage?.currency);
-    if(s.balance?.display)$('#sm-balance').textContent=s.balance.display;
-    if(s.balance?.display)balanceInfo.textContent='💰 '+s.balance.display;
+    if(s.balance?.display){
+      var full=s.balance.display,parts=full.split(' | '),el=$('#sm-balance');
+      el.innerHTML='<span class="bt">'+parts[0]+'</span><span class="bi">ⓘ</span>';
+      el.title=full;
+      balanceInfo.textContent='💰 '+full;
+    }
   }).catch(()=>{});
 }
 setInterval(fetchStatus,30000);

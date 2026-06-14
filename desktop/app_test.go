@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -2567,5 +2569,111 @@ func TestSessionActionsWithoutControllerReturnError(t *testing.T) {
 	err := app.NewSession()
 	if err == nil || !strings.Contains(err.Error(), "boot exploded") {
 		t.Errorf("error should carry the tab's startup failure, got %v", err)
+	}
+}
+
+// TestBalanceForTabMultiCurrency verifies that BalanceForTab returns all
+// currencies when the provider reports multiple balance entries.
+func TestBalanceForTabMultiCurrency(t *testing.T) {
+	// Start a mock HTTP server that returns a DeepSeek-shaped balance response
+	// with two currencies (CNY and USD).
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify auth header is passed through
+		if r.Header.Get("Authorization") != "Bearer test-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"is_available": true,
+			"balance_infos": [
+				{"currency": "CNY", "total_balance": "110.00", "granted_balance": "10.00", "topped_up_balance": "100.00"},
+				{"currency": "USD", "total_balance": "15.30", "granted_balance": "0.00", "topped_up_balance": "15.30"}
+			]
+		}`))
+	}))
+	defer ts.Close()
+
+	ctrl := control.New(control.Options{
+		BalanceURL: ts.URL,
+		BalanceKey: "test-key",
+	})
+	defer ctrl.Close()
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.setTestCtrl(ctrl, "deepseek-flash/deepseek-v4-flash")
+
+	info := app.BalanceForTab("test")
+
+	if !info.Available {
+		t.Fatalf("BalanceForTab().Available = false, want true")
+	}
+	if info.Display != "¥110.00 | $15.30" {
+		t.Errorf("BalanceForTab().Display = %q, want %q", info.Display, "¥110.00 | $15.30")
+	}
+	if len(info.Entries) != 2 {
+		t.Fatalf("BalanceForTab().Entries len = %d, want 2", len(info.Entries))
+	}
+	if info.Entries[0].Currency != "CNY" || info.Entries[0].Display != "¥110.00" {
+		t.Errorf("Entries[0] = %+v, want {CNY ¥110.00}", info.Entries[0])
+	}
+	if info.Entries[1].Currency != "USD" || info.Entries[1].Display != "$15.30" {
+		t.Errorf("Entries[1] = %+v, want {USD $15.30}", info.Entries[1])
+	}
+}
+
+// TestBalanceForTabEmptyInfos verifies that BalanceForTab handles empty
+// balance_infos gracefully.
+func TestBalanceForTabEmptyInfos(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"is_available": true, "balance_infos": []}`))
+	}))
+	defer ts.Close()
+
+	ctrl := control.New(control.Options{
+		BalanceURL: ts.URL,
+		BalanceKey: "test-key",
+	})
+	defer ctrl.Close()
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.setTestCtrl(ctrl, "deepseek-flash/deepseek-v4-flash")
+
+	info := app.BalanceForTab("test")
+
+	if !info.Available {
+		t.Fatalf("BalanceForTab().Available = false, want true")
+	}
+	if info.Display != "" {
+		t.Errorf("BalanceForTab().Display = %q, want empty", info.Display)
+	}
+	if len(info.Entries) != 0 {
+		t.Errorf("BalanceForTab().Entries len = %d, want 0", len(info.Entries))
+	}
+}
+
+// TestBalanceForTabNoBalanceURL verifies that BalanceForTab returns unavailable
+// when the controller has no balance_url configured.
+func TestBalanceForTabNoBalanceURL(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	defer ctrl.Close()
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.setTestCtrl(ctrl, "test-model")
+
+	info := app.BalanceForTab("test")
+
+	if info.Available {
+		t.Errorf("BalanceForTab().Available = true, want false (no balance_url)")
+	}
+	if info.Display != "" {
+		t.Errorf("BalanceForTab().Display = %q, want empty", info.Display)
+	}
+	if len(info.Entries) != 0 {
+		t.Errorf("BalanceForTab().Entries = %+v, want empty", info.Entries)
 	}
 }

@@ -95,9 +95,9 @@ func FetchWithClient(ctx context.Context, client *http.Client, url, apiKey strin
 	return b, nil
 }
 
-// symbol maps an ISO currency code to a compact symbol; an unknown code passes
+// Symbol maps an ISO currency code to a compact symbol; an unknown code passes
 // through with a trailing space ("XYZ 12.00").
-func symbol(currency string) string {
+func Symbol(currency string) string {
 	switch strings.ToUpper(currency) {
 	case "CNY", "RMB":
 		return "¥"
@@ -124,5 +124,18 @@ func (b *Balance) Display() string {
 			break
 		}
 	}
-	return symbol(pick.Currency) + strings.TrimSpace(pick.TotalBalance)
+	return Symbol(pick.Currency) + strings.TrimSpace(pick.TotalBalance)
+}
+
+// DisplayAll renders every currency joined by sep, e.g. "¥110.00 | $15.30".
+// Returns "" when there is nothing to show.
+func (b *Balance) DisplayAll(sep string) string {
+	if b == nil || len(b.Infos) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(b.Infos))
+	for _, info := range b.Infos {
+		parts = append(parts, Symbol(info.Currency)+strings.TrimSpace(info.TotalBalance))
+	}
+	return strings.Join(parts, sep)
 }

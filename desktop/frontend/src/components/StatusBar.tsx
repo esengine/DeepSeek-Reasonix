@@ -54,6 +54,58 @@ function JobsChip({ jobs }: { jobs: JobView[] }) {
   );
 }
 
+// BalanceIndicator shows wallet balance with click-to-cycle for multi-currency.
+function BalanceIndicator({
+  balance,
+  metricLabelStyle,
+  t,
+}: {
+  balance?: BalanceInfo;
+  metricLabelStyle: StatusBarLabelStyle;
+  t: Translator;
+}) {
+  const [balanceMode, setBalanceMode] = useState(0);
+  const entries = balance?.entries ?? [];
+  const multiCurrency = entries.length > 1;
+
+  const handleClick = () => {
+    if (!multiCurrency) return;
+    setBalanceMode((prev) => (prev + 1) % (entries.length + 1));
+  };
+
+  const label =
+    balance?.available
+      ? balanceMode === 0
+        ? balance.display || "-"
+        : (entries[balanceMode - 1]?.display ?? balance.display) || "-"
+      : "-";
+
+  const content = (
+    <>
+      <MetricLabel style={metricLabelStyle} icon={<Wallet size={12} />} label={t("status.balanceLabel")} />
+      <b className={label === "-" ? "stat__value--empty" : undefined}>{label}</b>
+    </>
+  );
+
+  return (
+    <Tooltip label={t("status.balanceTitle")} className="statusbar__metric statusbar__metric--balance">
+      {multiCurrency ? (
+        <button
+          className="stat stat--balance statusbar__balance statusbar__balance--clickable"
+          onClick={handleClick}
+          title={multiCurrency ? (balanceMode === 0 ? entries.map(e => e.currency).join(" / ") : entries[balanceMode - 1]?.currency) : undefined}
+        >
+          {content}
+        </button>
+      ) : (
+        <span className="stat stat--balance statusbar__balance">
+          {content}
+        </span>
+      )}
+    </Tooltip>
+  );
+}
+
 function formatRate(hit: number, denom: number): string | null {
   if (denom <= 0) return null;
   return ((hit / denom) * 100).toFixed(2);
@@ -153,7 +205,6 @@ export function StatusBar({
   const turnLabel = formatTurnCount(sessionTurns, t);
   const tokenLabel = formatTokenCount(sessionTokens);
   const turnTokenLabel = formatTokenCount(turnTokens);
-  const balanceLabel = balance?.available && balance.display ? balance.display : "-";
   const planMode = collaborationMode === "plan";
   const goalMode = collaborationMode === "goal";
   const metricLabelStyle = labelStyle === "text" ? "text" : "icon";
@@ -246,14 +297,12 @@ export function StatusBar({
         </span>
       </Tooltip>
     ),
-    balance: (
-      <Tooltip label={t("status.balanceTitle")} className="statusbar__metric statusbar__metric--balance">
-        <span className="stat stat--balance statusbar__balance">
-          <MetricLabel style={metricLabelStyle} icon={<Wallet size={12} />} label={t("status.balanceLabel")} />
-          <b className={balanceLabel === "-" ? "stat__value--empty" : undefined}>{balanceLabel}</b>
-        </span>
-      </Tooltip>
-    ),
+    balance: <BalanceIndicator
+      balance={balance}
+      metricLabelStyle={metricLabelStyle}
+      t={t}
+      key="balance"
+    />,
   };
   const modeIndicators = [
     planMode ? <span className="statusbar__plan" key="plan">{t("status.plan")}</span> : null,

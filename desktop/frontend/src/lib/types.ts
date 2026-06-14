@@ -593,12 +593,20 @@ export interface ProviderView {
   defaultEffort: string; // /effort level when user picks "auto" or unset; "" = supportedEfforts[0]
 }
 
+// BalanceEntry is one currency's display entry (desktop/app.go BalanceEntry).
+export interface BalanceEntry {
+  currency: string;
+  display: string;
+}
+
 // BalanceInfo is the wallet-balance readout (desktop/app.go Balance). available
 // is false when the provider declares no balanceUrl or a fetch failed; display is
-// the formatted amount (e.g. "¥110.00").
+// the formatted amount (e.g. "¥110.00 | $15.30"), entries carries each individual
+// currency for click-to-toggle switching.
 export interface BalanceInfo {
   available: boolean;
   display: string;
+  entries: BalanceEntry[];
   err?: string;
 }
 

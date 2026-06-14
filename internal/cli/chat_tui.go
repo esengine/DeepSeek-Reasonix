@@ -407,7 +407,7 @@ func fetchBalance(ctrl *control.Controller) tea.Cmd {
 		if err != nil || b == nil {
 			return balanceMsg{}
 		}
-		return balanceMsg{text: b.Display()}
+		return balanceMsg{text: b.DisplayAll(" | ")}
 	}
 }
 

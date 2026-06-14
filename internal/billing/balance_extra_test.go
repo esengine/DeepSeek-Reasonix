@@ -11,39 +11,39 @@ import (
 // --- symbol ---
 
 func TestSymbolCNY(t *testing.T) {
-	if got := symbol("CNY"); got != "¥" {
-		t.Errorf("symbol(CNY) = %q", got)
+	if got := Symbol("CNY"); got != "¥" {
+		t.Errorf("Symbol(CNY) = %q", got)
 	}
 }
 
 func TestSymbolRMB(t *testing.T) {
-	if got := symbol("RMB"); got != "¥" {
-		t.Errorf("symbol(RMB) = %q", got)
+	if got := Symbol("RMB"); got != "¥" {
+		t.Errorf("Symbol(RMB) = %q", got)
 	}
 }
 
 func TestSymbolUSD(t *testing.T) {
-	if got := symbol("USD"); got != "$" {
-		t.Errorf("symbol(USD) = %q", got)
+	if got := Symbol("USD"); got != "$" {
+		t.Errorf("Symbol(USD) = %q", got)
 	}
 }
 
 func TestSymbolUnknown(t *testing.T) {
-	if got := symbol("EUR"); got != "EUR " {
-		t.Errorf("symbol(EUR) = %q, want \"EUR \"", got)
+	if got := Symbol("EUR"); got != "EUR " {
+		t.Errorf("Symbol(EUR) = %q, want \"EUR \"", got)
 	}
 }
 
 func TestSymbolEmpty(t *testing.T) {
-	if got := symbol(""); got != "" {
-		t.Errorf("symbol(\"\") = %q, want empty", got)
+	if got := Symbol(""); got != "" {
+		t.Errorf("Symbol(\"\") = %q, want empty", got)
 	}
 }
 
 func TestSymbolLowercase(t *testing.T) {
 	// symbol should be case-insensitive.
-	if got := symbol("usd"); got != "$" {
-		t.Errorf("symbol(usd) = %q", got)
+	if got := Symbol("usd"); got != "$" {
+		t.Errorf("Symbol(usd) = %q", got)
 	}
 }
 
@@ -141,5 +141,26 @@ func TestFetchServerUnavailable(t *testing.T) {
 	_, err := Fetch(context.Background(), "http://127.0.0.1:1", "key")
 	if err == nil {
 		t.Fatal("expected error for unavailable server")
+	}
+}
+
+// --- DisplayAll extra edge cases ---
+
+func TestDisplayAllWhitespaceTotalBalance(t *testing.T) {
+	b := &Balance{Infos: []Info{
+		{Currency: "USD", TotalBalance: "  15.30  "},
+	}}
+	if got := b.DisplayAll(" | "); got != "$15.30" {
+		t.Errorf("DisplayAll with whitespace = %q, want %q", got, "$15.30")
+	}
+}
+
+func TestDisplayAllUnknownCurrencyThenCNY(t *testing.T) {
+	b := &Balance{Infos: []Info{
+		{Currency: "GBP", TotalBalance: "25.00"},
+		{Currency: "CNY", TotalBalance: "100.00"},
+	}}
+	if got := b.DisplayAll(" | "); got != "GBP 25.00 | ¥100.00" {
+		t.Errorf("DisplayAll with GBP = %q, want %q", got, "GBP 25.00 | ¥100.00")
 	}
 }

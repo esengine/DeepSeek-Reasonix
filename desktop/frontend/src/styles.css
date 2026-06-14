@@ -5324,6 +5324,17 @@ a[href] {
 .statusbar__balance {
   justify-content: flex-start;
 }
+.statusbar__balance--clickable {
+  cursor: pointer;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+}
 .statusbar__jobswrap {
   position: relative;
   display: inline-flex;

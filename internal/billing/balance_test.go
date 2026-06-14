@@ -76,3 +76,63 @@ func TestDisplayUSDOnly(t *testing.T) {
 		t.Errorf("Display = %q, want %q", got, "$9.99")
 	}
 }
+
+// DisplayAll joins all currencies with separator.
+func TestDisplayAllDefault(t *testing.T) {
+	b := &Balance{Available: true, Infos: []Info{
+		{Currency: "USD", TotalBalance: "15.30"},
+		{Currency: "CNY", TotalBalance: "110.00"},
+	}}
+	if got := b.DisplayAll(" | "); got != "$15.30 | ¥110.00" {
+		t.Errorf("DisplayAll = %q, want %q", got, "$15.30 | ¥110.00")
+	}
+}
+
+// DisplayAll returns "" on nil balance, same as Display.
+func TestDisplayAllNil(t *testing.T) {
+	var b *Balance
+	if got := b.DisplayAll(" | "); got != "" {
+		t.Errorf("nil DisplayAll = %q, want empty", got)
+	}
+}
+
+// DisplayAll returns "" on empty Infos.
+func TestDisplayAllEmptyInfos(t *testing.T) {
+	b := &Balance{Available: true}
+	if got := b.DisplayAll(" | "); got != "" {
+		t.Errorf("empty infos DisplayAll = %q, want empty", got)
+	}
+}
+
+// DisplayAll handles single currency without separator.
+func TestDisplayAllSingle(t *testing.T) {
+	b := &Balance{Infos: []Info{
+		{Currency: "USD", TotalBalance: "9.99"},
+	}}
+	if got := b.DisplayAll(" | "); got != "$9.99" {
+		t.Errorf("DisplayAll = %q, want %q", got, "$9.99")
+	}
+}
+
+// DisplayAll handles three currencies.
+func TestDisplayAllThreeCurrencies(t *testing.T) {
+	b := &Balance{Infos: []Info{
+		{Currency: "USD", TotalBalance: "10.00"},
+		{Currency: "CNY", TotalBalance: "50.00"},
+		{Currency: "EUR", TotalBalance: "20.00"},
+	}}
+	if got := b.DisplayAll(" | "); got != "$10.00 | ¥50.00 | EUR 20.00" {
+		t.Errorf("DisplayAll = %q, want %q", got, "$10.00 | ¥50.00 | EUR 20.00")
+	}
+}
+
+// DisplayAll uses custom separator.
+func TestDisplayAllCustomSep(t *testing.T) {
+	b := &Balance{Infos: []Info{
+		{Currency: "USD", TotalBalance: "5.00"},
+		{Currency: "CNY", TotalBalance: "30.00"},
+	}}
+	if got := b.DisplayAll("  "); got != "$5.00  ¥30.00" {
+		t.Errorf("DisplayAll = %q, want %q", got, "$5.00  ¥30.00")
+	}
+}
