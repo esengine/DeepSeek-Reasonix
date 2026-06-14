@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -574,7 +575,7 @@ func renderTranscript(msgs []provider.Message) string {
 				fmt.Fprintf(&b, "[assistant]\n%s\n", m.Content)
 			}
 			for _, tc := range m.ToolCalls {
-				fmt.Fprintf(&b, "[assistant calls %s] %s\n", tc.Name, tc.Arguments)
+				fmt.Fprintf(&b, "[assistant calls %s] %s\n", tc.Name, summarizeToolArgs(tc.Arguments))
 			}
 			b.WriteString("\n")
 		case provider.RoleTool:
@@ -584,6 +585,27 @@ func renderTranscript(msgs []provider.Message) string {
 		}
 	}
 	return b.String()
+}
+
+// summarizeToolArgs returns a short summary of tool-call arguments instead of
+// the full JSON. This prevents the summarizer from reproducing long argument
+// text (like sub-agent task prompts) in the compaction summary, which would
+// leak into the session as a user message (#4317).
+func summarizeToolArgs(args string) string {
+	if args == "" {
+		return "(no arguments)"
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(args), &parsed); err != nil {
+		// Not valid JSON — return a length hint instead of raw text.
+		return fmt.Sprintf("(%d bytes)", len(args))
+	}
+	keys := make([]string, 0, len(parsed))
+	for k := range parsed {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return fmt.Sprintf("{%s} (%d keys)", strings.Join(keys, ", "), len(parsed))
 }
 
 // archiveMessages writes the dropped originals to a timestamped .jsonl (one

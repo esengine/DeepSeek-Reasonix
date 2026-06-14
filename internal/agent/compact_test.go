@@ -642,3 +642,70 @@ func TestMaybeCompactFoldsSingleLargeMessageAtThreshold(t *testing.T) {
 		t.Fatalf("single large message was not compacted at threshold: %+v", sess.Messages)
 	}
 }
+
+func TestRenderTranscriptRedactsToolCallArgs(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleUser, Content: "Find me popular GitHub MCP projects"},
+		{
+			Role:    provider.RoleAssistant,
+			Content: "I'll research that.",
+			ToolCalls: []provider.ToolCall{
+				{Name: "research", Arguments: `{"task":"Search for recently popular GitHub projects that let AI use/control any software through MCP..."}`},
+			},
+		},
+		{Role: provider.RoleTool, Name: "research", Content: "Found 5 projects."},
+	}
+
+	out := renderTranscript(msgs)
+
+	if strings.Contains(out, "Search for recently popular") {
+		t.Fatalf("renderTranscript leaked tool-call arguments into transcript:\n%s", out)
+	}
+	if !strings.Contains(out, "[assistant calls research]") {
+		t.Fatalf("renderTranscript missing tool-call label:\n%s", out)
+	}
+	if !strings.Contains(out, "task") {
+		t.Fatalf("renderTranscript missing key names:\n%s", out)
+	}
+}
+
+func TestSummarizeToolArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    string
+		want    string
+		wantNot string
+	}{
+		{
+			name: "redacts long task prompt",
+			args: `{"task":"Search for recently popular GitHub projects that let AI use/control any software through MCP..."}`,
+			want: "task",
+		},
+		{
+			name: "empty args",
+			args: "",
+			want: "no arguments",
+		},
+		{
+			name: "invalid json",
+			args: "not json",
+			want: "bytes",
+		},
+		{
+			name: "multiple keys sorted",
+			args: `{"prompt":"do something","model":"gpt-4"}`,
+			want: "model, prompt",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := summarizeToolArgs(tt.args)
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("summarizeToolArgs(%q) = %q, want contains %q", tt.args, got, tt.want)
+			}
+			if tt.wantNot != "" && strings.Contains(got, tt.wantNot) {
+				t.Errorf("summarizeToolArgs(%q) = %q, should NOT contain %q", tt.args, got, tt.wantNot)
+			}
+		})
+	}
+}
