@@ -17,7 +17,7 @@ Hooks 让 Reasonix 在会话、用户输入、工具调用、模型返回、压�
    - “全局”：保存到 `~/.reasonix/settings.json`，始终加载。
    - “项目”：保存到当前工作区的 `.reasonix/settings.json`，必须点击“信任此工作区”后才会加载。
 3. 在 JSON 配置框里编辑 `hooks`。
-4. 保存后，用 `/new` 开新会话，或重启桌面端，让新配置进入会话。
+4. 保存后，重启桌面端，让新配置进入会话。`/new` 只开启新对话，不会重新读取 hooks 配置。
 
 示例：
 
@@ -222,7 +222,7 @@ if (/\brm\s+-rf\b/.test(command) || /\bgit\s+push\b/.test(command)) {
 
 ## 排障
 
-- 保存后当前会话没有变化：Hooks 在会话构建时加载。用 `/new` 开新会话，或重启桌面端。
+- 保存后当前会话没有变化：Hooks 在会话构建时加载。重启桌面端后才会重新读取配置；`/new` 只开启新对话，不会重新加载 hooks。
 - 项目 hooks 不执行：确认当前是项目工作区，并在“设置 -> Hooks -> 项目”点击“信任此工作区”。CLI 中也可以运行 `/hooks trust`。
 - `match` 没生效：它只对 `PreToolUse` 和 `PostToolUse` 生效，并且是锚定正则。
 - JSON 报 unknown hook event：事件 key 必须完全等于上表的大小写。
