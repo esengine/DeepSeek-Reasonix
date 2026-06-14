@@ -52,6 +52,7 @@ func TestLoadOverride(t *testing.T) {
 	if p.Identity != "Project identity" {
 		t.Fatalf("expected project identity, got %q", p.Identity)
 	}
+	// Second dir fills in files missing from first
 	if p.Soul != "Home soul" {
 		t.Fatalf("expected home soul, got %q", p.Soul)
 	}
@@ -88,16 +89,18 @@ func TestComposeEmpty(t *testing.T) {
 }
 
 func TestProjectDirs(t *testing.T) {
-	dirs := ProjectDirs("/tmp/project")
+	// Use os-specific temp dir to avoid hardcoded Unix paths
+	projectRoot := t.TempDir()
+	dirs := ProjectDirs(projectRoot)
 	found := false
 	for _, d := range dirs {
-		if strings.Contains(d, ".reasonix/personality") && strings.Contains(d, "/tmp/project") {
+		if strings.Contains(d, "personality") && strings.HasPrefix(d, projectRoot) {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected project .reasonix/personality in dirs: %v", dirs)
+		t.Fatalf("expected project personality dir in dirs: %v", dirs)
 	}
 }
 
@@ -107,7 +110,7 @@ func TestWriteAndReadFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(path, ".reasonix/personality/IDENTITY.md") {
+	if !strings.HasSuffix(path, "IDENTITY.md") {
 		t.Fatalf("unexpected path: %s", path)
 	}
 	dirs := ProjectDirs(root)

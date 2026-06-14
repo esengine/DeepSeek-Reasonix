@@ -41,8 +41,8 @@ func (p Personality) Empty() bool {
 }
 
 // Load reads the three personality files from the given directories.
-// Directories are tried in order — later dirs override earlier ones when
-// the same file exists in both (so pass project dir first, then home dir).
+// Directories are tried in order — first found wins (project takes
+// precedence over home when both have the same file).
 // Non-existent files or directories are silently skipped.
 func Load(dirs ...string) Personality {
 	var p Personality
@@ -50,14 +50,20 @@ func Load(dirs ...string) Personality {
 		if dir == "" {
 			continue
 		}
-		if content, ok := readFile(filepath.Join(dir, FileNameIdentity)); ok {
-			p.Identity = content
+		if p.Identity == "" {
+			if content, ok := readFile(filepath.Join(dir, FileNameIdentity)); ok {
+				p.Identity = content
+			}
 		}
-		if content, ok := readFile(filepath.Join(dir, FileNameSoul)); ok {
-			p.Soul = content
+		if p.Soul == "" {
+			if content, ok := readFile(filepath.Join(dir, FileNameSoul)); ok {
+				p.Soul = content
+			}
 		}
-		if content, ok := readFile(filepath.Join(dir, FileNameUser)); ok {
-			p.User = content
+		if p.User == "" {
+			if content, ok := readFile(filepath.Join(dir, FileNameUser)); ok {
+				p.User = content
+			}
 		}
 	}
 	return p
@@ -94,9 +100,8 @@ func Dir(conventionDir string) string {
 	return filepath.Join(conventionDir, "personality")
 }
 
-// ProjectDirs returns the personality search directories for a project root:
-//  1. <root>/.reasonix/personality
-//  2. ~/.config/reasonix/personality   (or the OS equivalent)
+// ProjectDirs returns the personality search directories for a project root.
+// Earlier directories take precedence over later ones (first-wins).
 func ProjectDirs(root string) []string {
 	var dirs []string
 	if root != "" {

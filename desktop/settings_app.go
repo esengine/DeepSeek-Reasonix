@@ -1510,7 +1510,7 @@ type PersonalityFileView struct {
 
 // PersonalitySettingsView is the personality panel payload.
 type PersonalitySettingsView struct {
-	Enabled bool                 `json:"enabled"`
+	Enabled bool                  `json:"enabled"`
 	Files   []PersonalityFileView `json:"files"`
 }
 

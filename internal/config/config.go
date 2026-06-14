@@ -46,7 +46,7 @@ type Config struct {
 	Desktop       DesktopConfig       `toml:"desktop"`
 	Notifications NotificationsConfig `toml:"notifications"`
 	Agent         AgentConfig         `toml:"agent"`
-	Personality   PersonalityConfig    `toml:"personality"`
+	Personality   PersonalityConfig   `toml:"personality"`
 	Providers     []ProviderEntry     `toml:"providers"`
 	Tools         ToolsConfig         `toml:"tools"`
 	Permissions   PermissionsConfig   `toml:"permissions"`
