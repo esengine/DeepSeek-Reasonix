@@ -30,7 +30,7 @@ import { useToast } from "./lib/toast";
 import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, useI18n, useT, type Translator } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
-import { app, onBuiltInMCPUpdate, onEvent, onProjectTreeChanged } from "./lib/bridge";
+import { app, onEvent, onProjectTreeChanged } from "./lib/bridge";
 import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-music";
 import { playSuccessChime } from "./lib/sound";
 import { Transcript } from "./components/Transcript";
@@ -54,10 +54,9 @@ import { AppChrome } from "./components/AppChrome";
 import { ProjectTree } from "./components/ProjectTree";
 import { CopyButton } from "./components/CopyButton";
 import { parseTodos } from "./lib/tools";
-import { shouldShowTodoPanel, todoDismissalKey } from "./lib/todoVisibility";
+import { shouldShowTodoPanel } from "./lib/todoVisibility";
 import {
   type BotConnectionView,
-  type BotRuntimeStatusView,
   type BotSettingsView,
   type CollaborationMode,
   type ComposerInsertRequest,
@@ -122,12 +121,6 @@ const WORKSPACE_RESIZER_WIDTH = 8;
 function isThemeMode(value: string): value is Theme {
   return value === "auto" || value === "light" || value === "dark";
 }
-
-type DesktopLayoutStyle = "classic" | "workbench";
-
-function normalizeDesktopLayoutStyle(style: string | undefined): DesktopLayoutStyle {
-  return style === "workbench" ? "workbench" : "classic";
-}
 const RIGHT_DOCK_TREE_DEFAULT_WIDTH = 300;
 const RIGHT_DOCK_TREE_MIN_WIDTH = 300;
 const RIGHT_DOCK_TREE_MAX_WIDTH = 560;
@@ -148,11 +141,10 @@ type HistoryViewState =
   | { kind: "history"; source: "scope"; filter: HistoryScopeFilter; sessions: SessionMeta[] }
   | { kind: "history"; source: "all"; sessions: SessionMeta[] }
   | { kind: "trash"; sessions: SessionMeta[] };
-type SidebarImPlatform = "qq" | "feishu" | "lark" | "weixin";
+type SidebarImPlatform = "feishu" | "lark" | "weixin";
 type SidebarImStatus = "connected" | "disabled" | "pending" | "error" | "disconnected";
 type SidebarImConnection = {
   id: string;
-  connectionId: string;
   platform: SidebarImPlatform;
   title: string;
   platformLabel: string;
@@ -193,10 +185,17 @@ function sidebarImPlatform(connection: BotConnectionView): SidebarImPlatform {
 }
 
 function sidebarImPlatformLabel(platform: SidebarImPlatform, translate: Translator): string {
-  if (platform === "qq") return "QQ";
   if (platform === "lark") return "Lark";
   if (platform === "weixin") return translate("settings.botWeixin");
   return translate("settings.botFeishu");
+}
+
+function firstBotSessionMapping(connection: BotConnectionView): BotConnectionView["sessionMappings"][number] | null {
+  return (
+    connection.sessionMappings.find((mapping) => mapping.sessionId.trim()) ??
+    connection.sessionMappings.find((mapping) => mapping.remoteId.trim()) ??
+    null
+  );
 }
 
 function botMappingScope(mapping: BotConnectionView["sessionMappings"][number] | null | undefined, connectionWorkspaceRoot: string): "global" | "project" {
@@ -217,15 +216,6 @@ function compactRemoteId(value: string): string {
   const trimmed = value.trim();
   if (trimmed.length <= 28) return trimmed;
   return `${trimmed.slice(0, 12)}…${trimmed.slice(-8)}`;
-}
-
-function botMappingIdentityLabel(mapping: BotConnectionView["sessionMappings"][number] | null | undefined): string {
-  const chatType = (mapping?.chatType ?? "").trim();
-  const userId = (mapping?.userId ?? "").trim();
-  const threadId = (mapping?.threadId ?? "").trim();
-  if (threadId) return compactRemoteId(threadId);
-  if ((chatType === "group" || chatType === "guild") && userId) return compactRemoteId(userId);
-  return "";
 }
 
 function sidebarImStatus(connection: BotConnectionView, botEnabled: boolean): SidebarImStatus {
@@ -256,85 +246,18 @@ function uniqueTrimmedValues(values: string[]): string[] {
 }
 
 function sidebarImAllowlistUsers(bot: BotSettingsView, platform: SidebarImPlatform): string[] {
-  if (platform === "qq") return uniqueTrimmedValues(asArray(bot.allowlist.qqUsers));
   if (platform === "weixin") return uniqueTrimmedValues(asArray(bot.allowlist.weixinUsers));
   return uniqueTrimmedValues(asArray(bot.allowlist.feishuUsers));
 }
 
-function sidebarImQQAdded(qq: BotSettingsView["qq"]): boolean {
-  return Boolean(qq.enabled || qq.secretSet || qq.appId.trim());
-}
-
-function sidebarImQQStatus(bot: BotSettingsView, runtimeStatus: BotRuntimeStatusView | null | undefined): SidebarImStatus {
-  const appId = bot.qq.appId.trim();
-  if (!bot.enabled || !bot.qq.enabled) return "disabled";
-  if (!appId || !bot.qq.secretSet) return "disconnected";
-  if (typeof window !== "undefined" && !window.runtime) return "pending";
-  if (!runtimeStatus) return "pending";
-  const status = runtimeStatus.status.trim().toLowerCase();
-  if (runtimeStatus.running && runtimeStatus.connections > 0 && status === "running") {
-    return "connected";
-  }
-  if (status === "error" || status === "blocked" || status === "degraded") return "error";
-  if (status === "stopped") return "disconnected";
-  return "pending";
-}
-
-async function loadBotRuntimeStatus(): Promise<BotRuntimeStatusView | null> {
-  if (typeof window !== "undefined" && !window.runtime) return null;
-  try {
-    return await app.BotRuntimeStatus();
-  } catch (e) {
-    console.warn("bot runtime status failed", e);
-    return null;
-  }
-}
-
-function sidebarImQQConnection(bot: BotSettingsView, translate: Translator, runtimeStatus?: BotRuntimeStatusView | null): SidebarImConnection | null {
-  if (!sidebarImQQAdded(bot.qq)) return null;
-  const remoteId = bot.qq.appId.trim();
-  const status = sidebarImQQStatus(bot, runtimeStatus);
-  const statusLabel = sidebarImStatusLabel(status, translate);
-  const allowlistUsers = sidebarImAllowlistUsers(bot, "qq");
-  const subtitleParts = [
-    remoteId ? compactRemoteId(remoteId) : "QQ",
-    statusLabel,
-  ].filter(Boolean);
-  return {
-    id: "__qq_bot__",
-    connectionId: "__qq_bot__",
-    platform: "qq",
-    title: "QQ Bot",
-    platformLabel: "QQ",
-    subtitle: subtitleParts.join(" · "),
-    status,
-    statusLabel,
-    remoteId,
-    sessionId: "",
-    scope: "global",
-    workspaceRoot: "",
-    allowAll: bot.allowlist.allowAll,
-    allowlistEnabled: bot.allowlist.enabled,
-    allowlistUsers,
-    allowlistMatched: remoteId ? allowlistUsers.includes(remoteId) : false,
-  };
-}
-
-function sidebarImConnectionsFromBot(
-  bot: BotSettingsView | null | undefined,
-  translate: Translator,
-  runtimeStatus?: BotRuntimeStatusView | null,
-): SidebarImConnection[] {
-  if (!bot) return [];
-  const qqConnection = sidebarImQQConnection(bot, translate, runtimeStatus);
-  const connectionItems: SidebarImConnection[] = [];
-  for (const connection of asArray(bot.connections)) {
-    if (!isSidebarImConnection(connection)) continue;
-    const mappings = connection.sessionMappings.filter((mapping) => mapping.sessionId.trim() || mapping.remoteId.trim());
-    const rowMappings = mappings.length > 0 ? mappings : [null];
-    rowMappings.forEach((mapping, index) => {
+function sidebarImConnectionsFromBot(bot: BotSettingsView | null | undefined, translate: Translator): SidebarImConnection[] {
+  if (!bot?.connections?.length) return [];
+  return bot.connections
+    .filter(isSidebarImConnection)
+    .map((connection) => {
       const platform = sidebarImPlatform(connection);
       const platformLabel = sidebarImPlatformLabel(platform, translate);
+      const mapping = firstBotSessionMapping(connection);
       const remoteId = mapping?.remoteId.trim() ?? "";
       const sessionId = mapping?.sessionId.trim() ?? "";
       const scope = botMappingScope(mapping, connection.workspaceRoot);
@@ -342,17 +265,13 @@ function sidebarImConnectionsFromBot(
       const status = sidebarImStatus(connection, bot.enabled);
       const title = connection.label.trim() || platformLabel;
       const allowlistUsers = sidebarImAllowlistUsers(bot, platform);
-      const identityLabel = botMappingIdentityLabel(mapping);
-      const mappedUserId = mapping?.userId.trim() ?? "";
       const subtitleParts = [
         remoteId ? compactRemoteId(remoteId) : platformLabel,
-        identityLabel,
         connection.model.trim() || "",
         sidebarImStatusLabel(status, translate),
       ].filter(Boolean);
-      connectionItems.push({
-        id: mapping ? `${connection.id}:mapping:${index}` : connection.id,
-        connectionId: connection.id,
+      return {
+        id: connection.id,
         platform,
         title,
         platformLabel,
@@ -366,13 +285,9 @@ function sidebarImConnectionsFromBot(
         allowAll: bot.allowlist.allowAll,
         allowlistEnabled: bot.allowlist.enabled,
         allowlistUsers,
-        allowlistMatched: remoteId
-          ? allowlistUsers.includes(remoteId) || (mappedUserId ? allowlistUsers.includes(mappedUserId) : false)
-          : false,
-      });
+        allowlistMatched: remoteId ? allowlistUsers.includes(remoteId) : false,
+      };
     });
-  }
-  return qqConnection ? [qqConnection, ...connectionItems] : connectionItems;
 }
 
 function mappedSessionTarget(sessionId: string): { kind: "path" | "topic"; value: string } | null {
@@ -457,7 +372,7 @@ function SidebarImConnectionDetail({ connection, onClose, onOpenSession, onOpenS
     <div className="bot-detail">
       <section className="bot-detail__summary">
         <div className={`bot-detail__avatar bot-detail__avatar--${connection.platform}`} aria-hidden="true">
-          {connection.platform === "qq" ? "Q" : connection.platform === "weixin" ? "微" : connection.platform === "lark" ? "L" : "飞"}
+          {connection.platform === "weixin" ? "微" : connection.platform === "lark" ? "L" : "飞"}
         </div>
         <div className="bot-detail__summary-main">
           <span>{translate("botDetail.subtitle")}</span>
@@ -848,7 +763,6 @@ export default function App() {
     openGlobalTab,
     closeTab,
     reorderTabs,
-    openTopicSession,
     syncActiveTab,
     ensureBlankTab,
   } = useController();
@@ -865,7 +779,6 @@ export default function App() {
   const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
   const [settingsTarget, setSettingsTarget] = useState<SettingsTab | null>(null);
   const [settingsFocus, setSettingsFocus] = useState<SettingsInitialFocus | null>(null);
-  const [desktopLayoutStyle, setDesktopLayoutStyle] = useState<DesktopLayoutStyle>("classic");
   const [startupUpdateChecksEnabled, setStartupUpdateChecksEnabled] = useState<boolean | null>(null);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -907,21 +820,6 @@ export default function App() {
     return unsub;
   }, []);
 
-  useEffect(() => {
-    return onBuiltInMCPUpdate((status) => {
-      if (status.name !== "codegraph") return;
-      if (status.phase === "available") {
-        showToast(t("caps.updateToastAvailable", { name: "codegraph", latest: status.latest || "" }));
-      } else if (status.phase === "downloaded") {
-        showToast(t("caps.updateToastDownloaded", { name: "codegraph", latest: status.latest || "" }));
-      } else if (status.phase === "activated") {
-        showToast(t("caps.updateToastActivated", { name: "codegraph", latest: status.latest || "" }));
-      } else if (status.phase === "error") {
-        showToast(t("caps.updateToastError", { name: "codegraph" }), "warn");
-      }
-    });
-  }, [showToast, t]);
-
   const [workspacePanelResizing, setWorkspacePanelResizing] = useState(false);
   const [workspacePanelMaximized, setWorkspacePanelMaximized] = useState(false);
   const [rightDockMode, setRightDockMode] = useState<RightDockMode>("context");
@@ -952,20 +850,14 @@ export default function App() {
 
   // Persist window geometry across launches.
   useWindowStatePersistence();
-  useEffect(() => {
-    document.documentElement.setAttribute("data-platform", desktopPlatform);
-  }, [desktopPlatform]);
 
   const closeTransientOverlays = useCallback(() => {
     setTransientOverlayDismissSignal((signal) => signal + 1);
   }, []);
 
   const reloadSidebarImConnections = useCallback(async () => {
-    const [settings, runtimeStatus] = await Promise.all([
-      app.Settings(),
-      loadBotRuntimeStatus(),
-    ]);
-    setSidebarImConnections(sidebarImConnectionsFromBot(settings.bot, t, runtimeStatus));
+    const settings = await app.Settings();
+    setSidebarImConnections(sidebarImConnectionsFromBot(settings.bot, t));
     setImTopicSources(sidebarImTopicSourcesFromBot(settings.bot, t));
   }, [t]);
 
@@ -1066,11 +958,10 @@ export default function App() {
   }, []);
 
   const applyDesktopPreferences = useCallback(
-    (settings: Pick<SettingsView, "desktopTheme" | "desktopThemeStyle" | "desktopLayoutStyle" | "desktopLanguage" | "checkUpdates" | "statusBarStyle" | "statusBarItems">) => {
+    (settings: Pick<SettingsView, "desktopTheme" | "desktopThemeStyle" | "desktopLanguage" | "checkUpdates" | "statusBarStyle" | "statusBarItems">) => {
       const nextTheme = normalizeThemePreference(settings.desktopTheme);
       const nextStyle = normalizeThemeStyleForTheme(settings.desktopThemeStyle, nextTheme);
       applyTheme(nextTheme, nextStyle, { persist: false });
-      setDesktopLayoutStyle(normalizeDesktopLayoutStyle(settings.desktopLayoutStyle));
       setLocalePref(normalizeLangPref(settings.desktopLanguage));
       setStartupUpdateChecksEnabled(settings.checkUpdates !== false);
       setStatusBarStyle(settings.statusBarStyle === "text" ? "text" : "icon");
@@ -1089,14 +980,11 @@ export default function App() {
         clearLegacyLangPref();
         clearLegacyThemePreference();
       }
-      const [settings, runtimeStatus] = await Promise.all([
-        app.Settings(),
-        loadBotRuntimeStatus(),
-      ]);
+      const settings = await app.Settings();
       if (cancelled) return;
       applyDesktopPreferences(settings);
       hydrateDisplayMode(settings.displayMode);
-      setSidebarImConnections(sidebarImConnectionsFromBot(settings.bot, t, runtimeStatus));
+      setSidebarImConnections(sidebarImConnectionsFromBot(settings.bot, t));
       setImTopicSources(sidebarImTopicSourcesFromBot(settings.bot, t));
     };
     void syncDesktopPreferences().catch((e) => {
@@ -1389,10 +1277,10 @@ export default function App() {
 
   // The live task list pinned above the composer comes from the most recent
   // successful top-level todo_write result; failed or still-running attempts do
-  // not advance the canonical panel state. It stays visible while any item is
-  // incomplete. It can be dismissed by the user (the ✕). A dismissal is keyed to
-  // the list's stable state, so host-advanced events and history reloads
-  // do not resurrect the same task list under a different event id.
+  // not advance the canonical panel state. It stays visible through the final
+  // all-completed update, and can be dismissed by the user (the ✕). A dismissal
+  // is keyed to that list's id, so a fresh accepted todo_write brings the panel
+  // back.
   const todoEntry = useMemo(() => {
     for (let i = state.items.length - 1; i >= 0; i--) {
       const it = state.items[i];
@@ -1405,8 +1293,7 @@ export default function App() {
   const todoItem = todoEntry?.item ?? null;
   const todos = useMemo(() => (todoItem ? parseTodos(todoItem.args) : []), [todoItem]);
   const [dismissedTodo, setDismissedTodo] = useState<string | null>(null);
-  const todoKey = useMemo(() => todoDismissalKey(todos), [todos]);
-  const showTodos = shouldShowTodoPanel(todoKey, dismissedTodo, todos);
+  const showTodos = shouldShowTodoPanel(todoItem?.id, dismissedTodo, todos);
 
   const sessionTitle = topicTitle(activeTab);
   const sessionHasContent = state.items.length > 0 || Boolean(state.live?.text || state.live?.reasoning);
@@ -1964,7 +1851,7 @@ export default function App() {
     const tabs = await switchTab(id);
     if (tabs) setTabMetas(tabs);
     setTabRevealSignal((signal) => signal + 1);
-  }, [closeTransientOverlays, switchTab]);
+  }, [closeTransientOverlays, setTabMetas, switchTab]);
 
   const handleTabClose = useCallback(async (id: string) => {
     closeTransientOverlays();
@@ -2078,6 +1965,7 @@ export default function App() {
       rewind(turn, scope).then(() => {
         refreshTabMetas();
         setProjectRevision((v) => v + 1);
+        setTabRevealSignal((v) => v + 1);
       });
       return;
     }
@@ -2123,18 +2011,17 @@ export default function App() {
     setRewindSignal((v) => v + 1);
   }, [state.items, rewind, refreshTabMetas, setComposerInsertRequest]);
 
-  const handleOpenTopic = useCallback(async (scope: string, workspaceRoot: string, topicId: string, sessionPath?: string) => {
+  const handleOpenTopic = useCallback(async (scope: string, workspaceRoot: string, topicId: string) => {
     closeTransientOverlays();
     setSidebarImDetailConnectionId("");
-    if (sessionPath) {
-      await openTopicSession(scope, workspaceRoot, topicId, sessionPath);
-    } else if (scope === "global") {
+    if (scope === "global") {
       await openGlobalTab(topicId);
     } else {
       await openProjectTab(workspaceRoot, topicId);
     }
     await refreshTabMetas();
-  }, [closeTransientOverlays, openGlobalTab, openProjectTab, openTopicSession, refreshTabMetas]);
+    setTabRevealSignal((signal) => signal + 1);
+  }, [closeTransientOverlays, openGlobalTab, openProjectTab, refreshTabMetas]);
 
   const openSidebarImConnectionSession = useCallback(async (connection: SidebarImConnection) => {
     const target = mappedSessionTarget(connection.sessionId);
@@ -2154,6 +2041,7 @@ export default function App() {
       }
       await refreshTabMetas();
       setProjectRevision((value) => value + 1);
+      setTabRevealSignal((signal) => signal + 1);
     } catch (err) {
       console.warn("bot sidebar open failed", err);
       showToast(t("sidebar.imOpenFailed", { name: connection.title }));
@@ -2214,6 +2102,7 @@ export default function App() {
         setHistView(null);
         await resumeSession(session.path, targetTab.id);
         await refreshTabMetas();
+        setTabRevealSignal((signal) => signal + 1);
       } catch (err: any) {
         setHistView(null);
         if (scope === "project" && session.workspaceRoot) {
@@ -2432,102 +2321,15 @@ export default function App() {
   const sidebarImToggleLabel = !sidebarImHasConnections
     ? t("sidebar.im")
     : t(sidebarImExpanded ? "sidebar.imCollapse" : "sidebar.imExpand");
-  const sidebarWorkbench = desktopLayoutStyle === "workbench";
-  const sidebarClassName = [
-    "sidebar",
-    sidebarCollapsed ? "sidebar--collapsed" : "",
-    sidebarWorkbench ? "sidebar--workbench" : "",
-  ].filter(Boolean).join(" ");
-  const sidebarImBlock = (
-    <div className={`sidebar-im${sidebarImExpanded ? " sidebar-im--expanded" : ""}`} aria-label={t("sidebar.im")}>
-      <button
-        className="sidebar-im__summary"
-        type="button"
-        aria-expanded={sidebarImExpanded}
-        aria-label={sidebarImToggleLabel}
-        title={sidebarImToggleLabel}
-        onPointerDown={(event) => {
-          if (event.button !== 0) return;
-          event.preventDefault();
-          toggleSidebarImPanel();
-        }}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter" && event.key !== " ") return;
-          event.preventDefault();
-          toggleSidebarImPanel();
-        }}
-      >
-        <MessageSquare size={15} />
-        <span className="sidebar-im__summary-label">{t("sidebar.im")}</span>
-        {sidebarImSummaryText ? <span className="sidebar-im__summary-status">{sidebarImSummaryText}</span> : null}
-      </button>
-      {sidebarImExpanded && sidebarImConnections.length > 0 && (
-        <div className="sidebar-im__panel" role="dialog" aria-label={t("sidebar.imManage")}>
-          <div className="sidebar-im__panel-head">
-            <span>{t("sidebar.imManage")}</span>
-            <div className="sidebar-im__panel-actions">
-              <Tooltip label={t("sidebar.imAdd")} fill side="right" disabled={sidebarNavTooltipDisabled}>
-                <button
-                  className="sidebar-im__icon-button"
-                  type="button"
-                  onClick={openBotSettings}
-                  aria-label={t("sidebar.imAdd")}
-                >
-                  <Plus size={13} />
-                </button>
-              </Tooltip>
-            </div>
-          </div>
-          <div className="sidebar-im__list">
-            {sidebarImConnections.map((connection) => (
-              <div
-                key={connection.id}
-                className={[
-                  "sidebar-im-row-shell",
-                  activeSidebarImConnectionId === connection.id ? "sidebar-im-row-shell--active" : "",
-                  `sidebar-im-row-shell--${connection.status}`,
-                ].filter(Boolean).join(" ")}
-              >
-                <button
-                  className="sidebar-im-row"
-                  type="button"
-                  title={`${connection.platformLabel} · ${connection.statusLabel}`}
-                  onClick={() => void selectSidebarImConnection(connection)}
-                >
-                  <span className={`sidebar-im-row__platform sidebar-im-row__platform--${connection.platform}`} aria-hidden="true">
-                    {connection.platform === "qq" ? "Q" : connection.platform === "weixin" ? "微" : connection.platform === "lark" ? "L" : "飞"}
-                  </span>
-                  <span className="sidebar-im-row__main">
-                    <strong>{connection.title}</strong>
-                    <span>{connection.subtitle}</span>
-                  </span>
-                  <span className={`sidebar-im-row__status sidebar-im-row__status--${connection.status}`} title={connection.statusLabel} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
 
   return (
     <ShellExpandProvider>
     <ShellHotkeys />
     <TextSizeHotkeys />
-    <div
-      ref={appRef}
-      className={[
-        "app",
-        `app--${desktopPlatform}`,
-        browserPreviewChrome ? "app--browser-preview" : "",
-        sidebarWorkbench ? "app--workbench" : "",
-      ].filter(Boolean).join(" ")}
-    >
+    <div ref={appRef} className={["app", `app--${desktopPlatform}`, browserPreviewChrome ? "app--browser-preview" : ""].filter(Boolean).join(" ")}>
       <div
         className={[
           "layout",
-          sidebarWorkbench ? "layout--workbench" : "",
           sidebarCollapsed ? "layout--sidebar-collapsed" : "",
           sidebarResizing ? "layout--resizing layout--sidebar-resizing" : "",
           workspacePanelGridOpen ? "layout--workspace-open" : "",
@@ -2541,11 +2343,10 @@ export default function App() {
         <AppChrome
           platform={desktopPlatform}
           browserPreviewChrome={browserPreviewChrome}
-          workbenchChrome={sidebarWorkbench}
           tabs={visibleTabs}
           activeTabId={visibleTabId}
           revealActiveSignal={tabRevealSignal}
-          commandCompact={true}
+          commandCompact={workspacePanelGridOpen}
           sidebarTogglePressed={sidebarTogglePressed}
           sidebarExpandBlocked={sidebarExpandBlocked}
           sidebarCollapsed={sidebarCollapsed}
@@ -2564,52 +2365,26 @@ export default function App() {
           onOpenPalette={() => void openPalette()}
         />
 
-        <aside className={sidebarClassName} aria-label={t("sidebar.navigation")}>
-          {sidebarWorkbench ? (
-            <>
-              <div className="sidebar__head" aria-hidden={sidebarCollapsed}>
-                <div className="sidebar__brand sidebar__brand--workbench">
-                  <img src={logoWordmark} alt="Reasonix" className="sidebar__brand-logo sidebar__brand-logo--workbench" draggable={false} />
-                </div>
-              </div>
+        <aside className={`sidebar${sidebarCollapsed ? " sidebar--collapsed" : ""}`} aria-label={t("sidebar.navigation")}>
+          <div className="sidebar__brand" aria-hidden={sidebarCollapsed}>
+            <img src={logoWordmark} alt="Reasonix" className="sidebar__brand-logo" draggable={false} />
+          </div>
 
-              <div className="sidebar__quick-actions">
-                <button
-                  className="sidebar__quick-action"
-                  type="button"
-                  onClick={() => {
-                    void handleNewTab();
-                  }}
-                >
-                  <MessageSquare size={18} aria-hidden="true" />
-                  <span>{t("topbar.newSession")}</span>
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="sidebar__brand" aria-hidden={sidebarCollapsed}>
-                <img src={logoWordmark} alt="Reasonix" className="sidebar__brand-logo" draggable={false} />
-              </div>
-
-              <button
-                className="sidebar__new"
-                onClick={() => {
-                  void handleNewTab();
-                }}
-              >
-                <SquarePen size={18} />
-                <span>{t("topbar.newSession")}</span>
-              </button>
-            </>
-          )}
+          <button
+            className="sidebar__new"
+            onClick={() => {
+              void handleNewTab();
+            }}
+          >
+            <SquarePen size={18} />
+            <span>{t("topbar.newSession")}</span>
+          </button>
 
           <section className="sidebar__section sidebar__section--projects">
             <ProjectTree
               activeScope={activeTab?.scope}
               activeWorkspaceRoot={activeTab?.workspaceRoot}
               activeTopicId={activeTab?.topicId}
-              activeSessionPath={activeTab?.sessionPath}
               imTopicSources={imTopicSources}
               onOpenTopic={handleOpenTopic}
               onOpenProjectHistory={openProjectHistory}
@@ -2622,84 +2397,111 @@ export default function App() {
               }}
               timeFilter={topicTimeFilter}
               onTimeFilterChange={setTopicTimeFilter}
-              variant={sidebarWorkbench ? "workbench" : "classic"}
             />
           </section>
 
-          {sidebarWorkbench ? (
-            <nav className="sidebar__nav sidebar__nav--footer">
-              {sidebarImBlock}
-              <div className="sidebar__utility-row" aria-label={t("sidebar.utilityActions")}>
-                <Tooltip label={t("sidebar.allHistory")} fill side="top">
-                  <button
-                    className="sidebar__utility-button"
-                    type="button"
-                    onClick={() => void openAllHistory()}
-                  >
-                    <History size={16} aria-hidden="true" />
-                    <span className="sr-only">{t("sidebar.allHistory")}</span>
-                  </button>
-                </Tooltip>
-                <Tooltip label={t("sidebar.trash")} fill side="top">
-                  <button
-                    className="sidebar__utility-button"
-                    type="button"
-                    onClick={() => void openTrash()}
-                  >
-                    <Trash2 size={16} aria-hidden="true" />
-                    <span className="sr-only">{t("sidebar.trash")}</span>
-                  </button>
-                </Tooltip>
-                <Tooltip label={t("topbar.settings")} fill side="top">
-                  <button
-                    className="sidebar__utility-button"
-                    type="button"
-                    onClick={() => {
-                      closeTransientOverlays();
-                      setSettingsTarget("general");
-                    }}
-                  >
-                    <SettingsIcon size={16} aria-hidden="true" />
-                    <span className="sr-only">{t("topbar.settings")}</span>
-                  </button>
-                </Tooltip>
+          <nav className="sidebar__nav">
+          <div className={`sidebar-im${sidebarImExpanded ? " sidebar-im--expanded" : ""}`} aria-label={t("sidebar.im")}>
+            <button
+              className="sidebar-im__summary"
+              type="button"
+              aria-expanded={sidebarImExpanded}
+              aria-label={sidebarImToggleLabel}
+              title={sidebarImToggleLabel}
+              onPointerDown={(event) => {
+                if (event.button !== 0) return;
+                event.preventDefault();
+                toggleSidebarImPanel();
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                toggleSidebarImPanel();
+              }}
+            >
+              <MessageSquare size={15} />
+              <span className="sidebar-im__summary-label">{t("sidebar.im")}</span>
+              {sidebarImSummaryText ? <span className="sidebar-im__summary-status">{sidebarImSummaryText}</span> : null}
+            </button>
+            {sidebarImExpanded && sidebarImConnections.length > 0 && (
+              <div className="sidebar-im__panel" role="dialog" aria-label={t("sidebar.imManage")}>
+                <div className="sidebar-im__panel-head">
+                  <span>{t("sidebar.imManage")}</span>
+                  <div className="sidebar-im__panel-actions">
+                    <Tooltip label={t("sidebar.imAdd")} fill side="right" disabled={sidebarNavTooltipDisabled}>
+                      <button
+                        className="sidebar-im__icon-button"
+                        type="button"
+                        onClick={openBotSettings}
+                        aria-label={t("sidebar.imAdd")}
+                      >
+                        <Plus size={13} />
+                      </button>
+                    </Tooltip>
+                  </div>
+                </div>
+                <div className="sidebar-im__list">
+                  {sidebarImConnections.map((connection) => (
+                    <div
+                      key={connection.id}
+                      className={[
+                        "sidebar-im-row-shell",
+                        activeSidebarImConnectionId === connection.id ? "sidebar-im-row-shell--active" : "",
+                        `sidebar-im-row-shell--${connection.status}`,
+                      ].filter(Boolean).join(" ")}
+                    >
+                      <button
+                        className="sidebar-im-row"
+                        type="button"
+                        title={`${connection.platformLabel} · ${connection.statusLabel}`}
+                        onClick={() => void selectSidebarImConnection(connection)}
+                      >
+                        <span className={`sidebar-im-row__platform sidebar-im-row__platform--${connection.platform}`} aria-hidden="true">
+                          {connection.platform === "weixin" ? "微" : connection.platform === "lark" ? "L" : "飞"}
+                        </span>
+                        <span className="sidebar-im-row__main">
+                          <strong>{connection.title}</strong>
+                          <span>{connection.subtitle}</span>
+                        </span>
+                        <span className={`sidebar-im-row__status sidebar-im-row__status--${connection.status}`} title={connection.statusLabel} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </nav>
-          ) : (
-            <nav className="sidebar__nav">
-              {sidebarImBlock}
-              <Tooltip label={t("sidebar.allHistory")} fill side="right" disabled={sidebarNavTooltipDisabled}>
-                <button
-                  className="sidebar__navitem"
-                  onClick={() => void openAllHistory()}
-                >
-                  <History size={15} />
-                  <span>{t("sidebar.allHistory")}</span>
-                </button>
-              </Tooltip>
-              <Tooltip label={t("sidebar.trash")} fill side="right" disabled={sidebarNavTooltipDisabled}>
-                <button
-                  className="sidebar__navitem"
-                  onClick={() => void openTrash()}
-                >
-                  <Trash2 size={15} />
-                  <span>{t("sidebar.trash")}</span>
-                </button>
-              </Tooltip>
-              <Tooltip label={t("topbar.settings")} fill side="right" disabled={sidebarNavTooltipDisabled}>
-                <button
-                  className="sidebar__navitem"
-                  onClick={() => {
-                    closeTransientOverlays();
-                    setSettingsTarget("general");
-                  }}
-                >
-                  <SettingsIcon size={15} />
-                  <span>{t("topbar.settings")}</span>
-                </button>
-              </Tooltip>
-            </nav>
-          )}
+            )}
+          </div>
+            <Tooltip label={t("sidebar.allHistory")} fill side="right" disabled={sidebarNavTooltipDisabled}>
+              <button
+                className="sidebar__navitem"
+                onClick={() => void openAllHistory()}
+              >
+                <History size={15} />
+                <span>{t("sidebar.allHistory")}</span>
+              </button>
+            </Tooltip>
+            <Tooltip label={t("sidebar.trash")} fill side="right" disabled={sidebarNavTooltipDisabled}>
+              <button
+                className="sidebar__navitem"
+                onClick={() => void openTrash()}
+              >
+                <Trash2 size={15} />
+                <span>{t("sidebar.trash")}</span>
+              </button>
+            </Tooltip>
+            <Tooltip label={t("topbar.settings")} fill side="right" disabled={sidebarNavTooltipDisabled}>
+              <button
+                className="sidebar__navitem"
+                onClick={() => {
+                  closeTransientOverlays();
+                  setSettingsTarget("general");
+                }}
+              >
+                <SettingsIcon size={15} />
+                <span>{t("topbar.settings")}</span>
+              </button>
+            </Tooltip>
+          </nav>
 
         </aside>
         <button
@@ -2771,14 +2573,11 @@ export default function App() {
             <div className="topicbar__actions">
               {!sidebarImDetailConnection && (
               <>
-              <Tooltip label={t("topicBar.copyAll")}>
-                <CopyButton
-                  getText={getSessionMarkdown}
-                  label={t("topicBar.copyAll")}
-                  className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"
-                  showInlineLabel={false}
-                />
-              </Tooltip>
+              <CopyButton
+                getText={getSessionMarkdown}
+                label={t("topicBar.copyAll")}
+                className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"
+              />
               <div className={`topicbar__export${topicExportOpen ? " topicbar__export--open" : ""}`}>
                 <Tooltip label={t("topicBar.export")}>
                   <button
@@ -2854,7 +2653,7 @@ export default function App() {
                 connection={sidebarImDetailConnection}
                 onClose={() => setSidebarImDetailConnectionId("")}
                 onOpenSettings={openBotSettings}
-                onManageAllowlist={() => openBotAllowlistSettings(sidebarImDetailConnection.connectionId)}
+                onManageAllowlist={() => openBotAllowlistSettings(sidebarImDetailConnection.id)}
                 onOpenSession={() => void openSidebarImConnectionSession(sidebarImDetailConnection)}
               />
             ) : state.meta?.ready === false && !state.meta?.startupErr ? (
@@ -2880,7 +2679,7 @@ export default function App() {
 
           {!sidebarImDetailConnection && (
           <footer className="footer" ref={footerRef}>
-            {showTodos && <TodoPanel todos={todos} onDismiss={() => setDismissedTodo(todoKey)} />}
+            {showTodos && <TodoPanel todos={todos} onDismiss={() => setDismissedTodo(todoItem!.id)} />}
             {rewindState && (
               <UndoRewindBanner
                 meta={{

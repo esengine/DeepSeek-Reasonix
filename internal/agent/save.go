@@ -94,24 +94,11 @@ type SessionInfo struct {
 	TopicTitle     string
 }
 
-// SessionOrderInfo is the lightweight sidecar/mtime ordering record shared by
-// session pickers and prompt-history navigation. It intentionally avoids reading
-// JSONL content; callers that need previews can layer that on afterwards.
-type SessionOrderInfo struct {
-	Path           string
-	CreatedAt      time.Time
-	LastActivityAt time.Time
-	ModTime        time.Time // compatibility alias for LastActivityAt
-	Scope          string
-	WorkspaceRoot  string
-	TopicID        string
-	TopicTitle     string
-}
-
-// ListSessionOrder returns every *.jsonl session under dir in the same
-// most-recently-active order used by ListSessions, using only file metadata and
-// branch sidecars. A missing directory is not an error.
-func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
+// ListSessions returns every *.jsonl session under dir, most-recently-active
+// first, each with a preview line so the picker can show something the user
+// recognises. A missing directory is not an error — it just means there's
+// nothing to resume yet.
+func ListSessions(dir string) ([]SessionInfo, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -119,7 +106,7 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 		}
 		return nil, err
 	}
-	var out []SessionOrderInfo
+	var out []SessionInfo
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
 			continue
@@ -129,6 +116,13 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 			continue
 		}
 		full := filepath.Join(dir, e.Name())
+		preview, turns := previewSession(full)
+		if turns == 0 {
+			// Skip sessions that have never had user interaction — they are
+			// empty conversations that should not appear in the history panel
+			// or the resume picker.
+			continue
+		}
 		createdAt := info.ModTime()
 		lastActivityAt := info.ModTime()
 		scope := "global"
@@ -147,11 +141,13 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 			topicID = meta.TopicID
 			topicTitle = meta.TopicTitle
 		}
-		out = append(out, SessionOrderInfo{
+		out = append(out, SessionInfo{
 			Path:           full,
 			CreatedAt:      createdAt,
 			LastActivityAt: lastActivityAt,
 			ModTime:        lastActivityAt,
+			Preview:        preview,
+			Turns:          turns,
 			Scope:          scope,
 			WorkspaceRoot:  workspaceRoot,
 			TopicID:        topicID,
@@ -165,46 +161,6 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 		return out[i].LastActivityAt.After(out[j].LastActivityAt)
 	})
 	return out, nil
-}
-
-// ListSessions returns every non-empty *.jsonl session under dir,
-// most-recently-active first, each with a preview line so the picker can show
-// something the user recognises. A missing directory is not an error — it just
-// means there's nothing to resume yet.
-func ListSessions(dir string) ([]SessionInfo, error) {
-	ordered, err := ListSessionOrder(dir)
-	if err != nil {
-		return nil, err
-	}
-	var out []SessionInfo
-	for _, session := range ordered {
-		preview, turns := previewSession(session.Path)
-		if turns == 0 {
-			// Skip sessions that have never had user interaction — they are
-			// empty conversations that should not appear in the history panel
-			// or the resume picker.
-			continue
-		}
-		out = append(out, SessionInfo{
-			Path:           session.Path,
-			CreatedAt:      session.CreatedAt,
-			LastActivityAt: session.LastActivityAt,
-			ModTime:        session.ModTime,
-			Preview:        preview,
-			Turns:          turns,
-			Scope:          session.Scope,
-			WorkspaceRoot:  session.WorkspaceRoot,
-			TopicID:        session.TopicID,
-			TopicTitle:     session.TopicTitle,
-		})
-	}
-	return out, nil
-}
-
-// SessionPreview returns the same preview and user-turn count used by
-// ListSessions for one session file.
-func SessionPreview(path string) (string, int) {
-	return previewSession(path)
 }
 
 // previewSession returns the first user message (truncated) and the number of
