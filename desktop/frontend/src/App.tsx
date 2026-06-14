@@ -18,6 +18,8 @@ import {
   GitBranch,
   History,
   MessageSquare,
+  PanelLeft,
+  PanelRight,
   Plus,
   Settings as SettingsIcon,
   Pencil,
@@ -50,7 +52,6 @@ import { WorkspacePanel } from "./components/WorkspacePanel";
 import { Tooltip } from "./components/Tooltip";
 import { StartupSplash, shouldShowStartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
-import { AppChrome } from "./components/AppChrome";
 import { ProjectTree } from "./components/ProjectTree";
 import { CopyButton } from "./components/CopyButton";
 import { parseTodos } from "./lib/tools";
@@ -957,7 +958,6 @@ export default function App() {
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
   const [topicExportOpen, setTopicExportOpen] = useState(false);
   const [sidebarTogglePressed, setSidebarTogglePressed] = useState(false);
-  const [workspaceTogglePressed, setWorkspaceTogglePressed] = useState(false);
   const [clearContextPending, setClearContextPending] = useState(false);
   const topicRenameSkipCommitRef = useRef(false);
   const topicRenameCommitHandledRef = useRef(false);
@@ -1022,18 +1022,6 @@ export default function App() {
     sidebarTogglePressTimerRef.current = window.setTimeout(() => {
       sidebarTogglePressTimerRef.current = null;
       setSidebarTogglePressed(false);
-    }, 260);
-  }, []);
-
-  const pulseWorkspaceToggle = useCallback(() => {
-    if (typeof window === "undefined") return;
-    if (workspaceTogglePressTimerRef.current !== null) {
-      window.clearTimeout(workspaceTogglePressTimerRef.current);
-    }
-    setWorkspaceTogglePressed(true);
-    workspaceTogglePressTimerRef.current = window.setTimeout(() => {
-      workspaceTogglePressTimerRef.current = null;
-      setWorkspaceTogglePressed(false);
     }, 260);
   }, []);
 
@@ -1238,25 +1226,6 @@ export default function App() {
     [activeTabId, composerProfile],
   );
   const topicbarEditing = Boolean(activeTab?.topicId && activeTab.topicId === renamingTopicId);
-  const visibleTabId = activeTabId;
-  const visibleTabs = useMemo(() => {
-    const byId = new Map(tabMetas.map((tab) => [tab.id, tab]));
-    const ordered = tabOrderIds.map((id) => byId.get(id)).filter((tab): tab is TabMeta => Boolean(tab));
-    const missing = tabMetas.filter((tab) => !tabOrderIds.includes(tab.id));
-    return [...ordered, ...missing].map((tab) => {
-      const profile = composerProfilesByTab[tab.id] ?? composerProfileFromTab(tab);
-      return {
-        ...tab,
-        running: tab.id === visibleTabId ? tab.running || state.running : tab.running,
-        mode: composerProfileMode(profile),
-        collaborationMode: displayedComposerProfileCollaborationMode(profile),
-        toolApprovalMode: profile.toolApprovalMode,
-        tokenMode: profile.tokenMode,
-        goal: profile.goal,
-        active: tab.id === visibleTabId,
-      };
-    });
-  }, [composerProfilesByTab, state.running, tabMetas, tabOrderIds, visibleTabId]);
 
   useEffect(() => {
     const ids = tabMetas.map((tab) => tab.id);
@@ -1858,15 +1827,6 @@ export default function App() {
     setWorkspacePanelOpen(false);
   }, [closeTransientOverlays, workspacePanelOpen]);
 
-  const toggleWorkspacePanel = useCallback(() => {
-    pulseWorkspaceToggle();
-    if (workspacePanelRenderable) {
-      closeWorkspacePanel();
-      return;
-    }
-    openWorkspacePanel("context");
-  }, [closeWorkspacePanel, openWorkspacePanel, pulseWorkspaceToggle, workspacePanelRenderable]);
-
   const openRightDockMode = useCallback(
     (mode: RightDockMode) => {
       setWorkspaceRevealRequest(null);
@@ -2426,9 +2386,6 @@ export default function App() {
   }, [renameTopic, renamingTopicId, topicTitleDraft]);
 
   const sidebarExpandBlocked = false;
-  const sidebarToggleTitle = sidebarCollapsed
-      ? t("sidebar.expand")
-      : t("sidebar.collapse");
   const sidebarNavTooltipDisabled = !sidebarCollapsed;
   const browserPreviewChrome = typeof window !== "undefined" && !window.runtime;
   const workspacePanelResetWidth = rightDockDetailActive
@@ -2728,19 +2685,30 @@ export default function App() {
           )}
 
         </aside>
-        <button
-          className="sidebar-resizer"
-          type="button"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label={t("sidebar.resize")}
-          aria-valuemin={SIDEBAR_MIN_WIDTH}
-          aria-valuemax={SIDEBAR_MAX_WIDTH}
-          aria-valuenow={sidebarWidth}
-          onPointerDown={startSidebarResize}
-          onKeyDown={resizeSidebarWithKeyboard}
-          onDoubleClick={() => setExpandedSidebarWidth(defaultSidebarWidth())}
-        />
+        <div className="sidebar-resizer-shell">
+          <button
+            className="sidebar-resizer"
+            type="button"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t("sidebar.resize")}
+            aria-valuemin={SIDEBAR_MIN_WIDTH}
+            aria-valuemax={SIDEBAR_MAX_WIDTH}
+            aria-valuenow={sidebarWidth}
+            onPointerDown={startSidebarResize}
+            onKeyDown={resizeSidebarWithKeyboard}
+            onDoubleClick={() => setExpandedSidebarWidth(defaultSidebarWidth())}
+          />
+          <button
+            className="sidebar-resizer__collapse-btn"
+            type="button"
+            onClick={sidebarExpandBlocked ? undefined : toggleSidebar}
+            aria-label={sidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+            aria-disabled={sidebarExpandBlocked}
+          >
+            <PanelLeft size={14} />
+          </button>
+        </div>
 
         <section className="chat-pane">
           <>
@@ -2844,25 +2812,40 @@ export default function App() {
               )}
               <Tooltip label={t("workspace.changedTab")}>
                 <button
-                  className="topicbar__action-btn topicbar__action-btn--label"
+                  className="topicbar__action-btn topicbar__action-btn--icon"
                   type="button"
                   aria-label={t("workspace.changedTab")}
                   aria-pressed={workspacePanelRenderable && rightDockMode === "changed"}
                   onClick={() => openRightDockMode("changed")}
                 >
                   <GitBranch size={14} />
-                  <span>{t("workspace.changedTab")}</span>
                 </button>
               </Tooltip>
               <Tooltip label={t("topicBar.command")}>
                 <button
-                  className="topicbar__action-btn topicbar__action-btn--label topicbar__action-btn--accent"
+                  className="topicbar__action-btn topicbar__action-btn--icon"
                   type="button"
                   aria-label={t("topicBar.command")}
                   onClick={() => void openPalette()}
                 >
                   <Command size={14} />
-                  <span>{t("topicBar.command")}</span>
+                </button>
+              </Tooltip>
+              <Tooltip label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}>
+                <button
+                  className="topicbar__action-btn topicbar__action-btn--icon"
+                  type="button"
+                  aria-label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
+                  aria-pressed={workspacePanelRenderable}
+                  onClick={() => {
+                    if (workspacePanelRenderable) {
+                      setWorkspacePanel(false);
+                    } else {
+                      openRightDockMode("context");
+                    }
+                  }}
+                >
+                  <PanelRight size={14} />
                 </button>
               </Tooltip>
             </div>
