@@ -72,7 +72,7 @@ func Run(args []string, version string) int {
 	switch cmd {
 	case "run":
 		return runAgent(rest)
-	case "chat", "code": // "code" is the v0.x name for the interactive session
+	case "chat":
 		return chatREPL(rest)
 	case "serve":
 		return runServe(rest)
@@ -124,7 +124,7 @@ func Run(args []string, version string) int {
 
 func shouldMigrateLegacyConfigForCLI(cmd string) bool {
 	switch cmd {
-	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "codegraph", "doctor", "bot", "upgrade", "update":
+	case "", "run", "chat", "serve", "setup", "config", "init", "acp", "mcp", "codegraph", "doctor", "bot", "upgrade", "update":
 		return true
 	default:
 		return false

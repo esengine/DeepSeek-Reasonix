@@ -72,8 +72,8 @@ brew install esengine/reasonix/reasonix</div>
 
       <h2 id="quickstart"><span class="l-en">Quick start</span><span class="l-zh">快速上手</span></h2>
       <p><span class="l-en">First run is minimal — <code>reasonix setup</code> walks you through picking a provider and keys. Then point Reasonix at a repo and start a session:</span><span class="l-zh">首次运行很简单——<code>reasonix setup</code> 引导你选择 provider 与密钥。然后指向仓库、开始会话:</span></p>
-      <div class="codeblock"><button data-copy="cd your-project && reasonix code">Copy</button>cd your-project
-reasonix code</div>
+      <div class="codeblock"><button data-copy="cd your-project && reasonix chat">Copy</button>cd your-project
+reasonix chat</div>
       <p><span class="l-en">Then just describe the task:</span><span class="l-zh">然后直接描述任务:</span></p>
       <div class="codeblock"><span class="a">›</span> add retry with backoff to the http client
 <span class="a">›</span> refactor the auth flow, keep the public API stable
@@ -108,7 +108,6 @@ headers = &#123; Authorization = "Bearer $&#123;STRIPE_KEY&#125;" &#125;</div>
 
       <h2 id="cli"><span class="l-en">CLI &amp; slash commands</span><span class="l-zh">命令行与斜杠命令</span></h2>
       <div class="codeblock">reasonix setup            <span class="c"># first-run: pick provider + keys</span>
-reasonix code             <span class="c"># start an interactive session in the current repo</span>
 reasonix chat             <span class="c"># interactive session, prompts before writes</span>
 reasonix run "&lt;task&gt;"     <span class="c"># autonomous run, honours deny rules</span></div>
       <p><span class="l-en">Inside a session, slash commands run locally — <code>/help</code> lists them all:</span><span class="l-zh">会话中,斜杠命令在本地运行——<code>/help</code> 列出全部:</span></p>
