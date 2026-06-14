@@ -113,7 +113,7 @@ func TestExtractAllowsParentRelativeInternalSymlink(t *testing.T) {
 		t.Fatalf("parent-relative internal symlink should be allowed: %v", err)
 	}
 	link := filepath.Join(dir, "codegraph-linux-x64", "bin", "tool")
-	if got, err := os.Readlink(link); err != nil || got != "../lib/tool" {
+	if got, err := os.Readlink(link); err != nil || filepath.ToSlash(got) != "../lib/tool" {
 		t.Fatalf("symlink target = %q, %v; want ../lib/tool", got, err)
 	}
 }
