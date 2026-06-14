@@ -203,9 +203,11 @@ func (t *WorkspaceTab) telemetrySnapshot() tabTelemetrySnapshot {
 // tabEventSink wraps a parent event.Sink and prepends a tabId to every wire
 // event so the frontend can route it to the correct tab's reducer.
 type tabEventSink struct {
-	tabID string
-	app   *App
-	ctx   context.Context
+	tabID         string
+	app           *App
+	mu            sync.RWMutex
+	ctx           context.Context
+	runtimeEvents asyncRuntimeEmitter
 }
 
 func (s *tabEventSink) Emit(e event.Event) {
@@ -225,9 +227,7 @@ func (s *tabEventSink) Emit(e event.Event) {
 			}
 		}
 	}
-	if s.ctx != nil {
-		runtime.EventsEmit(s.ctx, eventChannel, toWireTab(e, s.tabID))
-	}
+	s.emitRuntimeEvent(eventChannel, toWireTab(e, s.tabID))
 	if s.app != nil {
 		if status, update := topicActivityStatusFromEvent(e); update && s.app.setTabActivityStatus(s.tabID, status) {
 			s.app.emitProjectTreeChanged()
@@ -240,6 +240,99 @@ func (s *tabEventSink) Emit(e event.Event) {
 	// Persist after each turn so a force-kill loses at most the in-flight prompt.
 	if e.Kind == event.TurnDone && s.app != nil {
 		s.app.scheduleTabSnapshot(s.tabID)
+	}
+}
+
+func (s *tabEventSink) setContext(ctx context.Context) {
+	s.mu.Lock()
+	s.ctx = ctx
+	s.mu.Unlock()
+	if ctx == nil {
+		s.runtimeEvents.Clear()
+	}
+}
+
+func (s *tabEventSink) context() context.Context {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ctx
+}
+
+func (s *tabEventSink) emitRuntimeEvent(name string, payload ...interface{}) {
+	if s == nil {
+		return
+	}
+	ctx := s.context()
+	if ctx == nil {
+		return
+	}
+	s.runtimeEvents.Emit(ctx, name, payload...)
+}
+
+type runtimeEventEmitFunc func(context.Context, string, ...interface{})
+
+type runtimeEventEnvelope struct {
+	ctx     context.Context
+	name    string
+	payload []interface{}
+}
+
+// asyncRuntimeEmitter decouples Wails' runtime event bridge from agent
+// emission. runtime.EventsEmit can block when the single webview event channel
+// backs up; callers enqueue in-order work and return without holding the
+// agent's event.Sync lock.
+type asyncRuntimeEmitter struct {
+	mu      sync.Mutex
+	emit    runtimeEventEmitFunc
+	queue   []runtimeEventEnvelope
+	running bool
+}
+
+func (e *asyncRuntimeEmitter) Emit(ctx context.Context, name string, payload ...interface{}) {
+	if ctx == nil {
+		return
+	}
+	item := runtimeEventEnvelope{
+		ctx:     ctx,
+		name:    name,
+		payload: append([]interface{}(nil), payload...),
+	}
+	e.mu.Lock()
+	e.queue = append(e.queue, item)
+	if !e.running {
+		e.running = true
+		go e.run()
+	}
+	e.mu.Unlock()
+}
+
+func (e *asyncRuntimeEmitter) Clear() {
+	e.mu.Lock()
+	clear(e.queue)
+	e.queue = nil
+	e.mu.Unlock()
+}
+
+func (e *asyncRuntimeEmitter) run() {
+	for {
+		e.mu.Lock()
+		if len(e.queue) == 0 {
+			e.running = false
+			e.mu.Unlock()
+			return
+		}
+		item := e.queue[0]
+		copy(e.queue, e.queue[1:])
+		var zero runtimeEventEnvelope
+		e.queue[len(e.queue)-1] = zero
+		e.queue = e.queue[:len(e.queue)-1]
+		emit := e.emit
+		if emit == nil {
+			emit = runtime.EventsEmit
+		}
+		e.mu.Unlock()
+
+		emit(item.ctx, item.name, item.payload...)
 	}
 }
 
@@ -902,7 +995,7 @@ func (a *App) CloseTab(tabID string) error {
 		tab.Ctrl.Close()
 	}
 	if tab.sink != nil {
-		tab.sink.ctx = nil // stop further emissions (nil ctx → Emit becomes no-op)
+		tab.sink.setContext(nil) // stop further emissions (nil ctx -> Emit becomes no-op)
 	}
 	return nil
 }
@@ -964,7 +1057,7 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 	a.mu.Unlock()
 
 	if tab.sink != nil {
-		tab.sink.ctx = wailsCtx
+		tab.sink.setContext(wailsCtx)
 	}
 
 	sessionDir := desktopSessionDir(root)
@@ -2590,9 +2683,14 @@ func (a *App) setTabActivityStatus(tabID, status string) bool {
 }
 
 func (a *App) emitProjectTreeChanged() {
-	if a.ctx != nil {
-		runtime.EventsEmit(a.ctx, "project-tree:changed")
+	a.emitRuntimeEvent("project-tree:changed")
+}
+
+func (a *App) emitRuntimeEvent(name string, payload ...interface{}) {
+	if a == nil || a.ctx == nil {
+		return
 	}
+	a.runtimeEvents.Emit(a.ctx, name, payload...)
 }
 
 // DeleteTopic removes a topic and its title metadata.
@@ -2688,7 +2786,7 @@ func (a *App) TrashTopic(topicID string) error {
 			item.ctrl.Close()
 		}
 		if item.sink != nil {
-			item.sink.ctx = nil
+			item.sink.setContext(nil)
 		}
 	}
 
