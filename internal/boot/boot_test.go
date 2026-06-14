@@ -22,6 +22,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/agent/testutil"
 	"reasonix/internal/builtinmcp"
+	"reasonix/internal/codegraph"
 	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/memory"
@@ -1888,6 +1889,57 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 }
 
+func TestBuildCodegraphSetsShortDaemonIdleTimeout(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	launcher := writeCodegraphHelper(t, dir)
+	envOut := filepath.Join(dir, "codegraph-idle-env")
+	t.Setenv("REASONIX_CODEGRAPH_HELPER_ENV_OUT", envOut)
+
+	writeFile(t, dir, "reasonix.toml", fmt.Sprintf(`
+default_model = "test-model"
+
+[codegraph]
+enabled = true
+path = %q
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`, launcher))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	ctrl, err := Build(ctx, Options{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	deadline := time.Now().Add(5 * time.Second)
+	var got []byte
+	for {
+		got, err = os.ReadFile(envOut)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("codegraph helper never recorded idle timeout env: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if string(got) != codegraph.ReasonixDaemonIdleTimeoutMS {
+		t.Fatalf("%s = %q; want %q", codegraph.DaemonIdleTimeoutEnv, got, codegraph.ReasonixDaemonIdleTimeoutMS)
+	}
+}
+
 func TestBuildWarmCodegraphIgnoresLegacyEagerTier(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake launcher is a POSIX-sh script")
@@ -2135,6 +2187,11 @@ func main() {
 	if len(os.Args) >= 3 && os.Args[1] == "init" {
 		_ = os.MkdirAll(filepath.Join(os.Args[2], ".codegraph"), 0o755)
 		return
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "serve" {
+		if out := os.Getenv("REASONIX_CODEGRAPH_HELPER_ENV_OUT"); out != "" {
+			_ = os.WriteFile(out, []byte(os.Getenv("CODEGRAPH_DAEMON_IDLE_TIMEOUT_MS")), 0o644)
+		}
 	}
 
 	in := bufio.NewReader(os.Stdin)

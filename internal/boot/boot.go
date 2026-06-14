@@ -305,10 +305,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				Text: "codegraph: project root is a filesystem root — skipped to avoid indexing the whole volume"})
 		case ok:
 			spec := plugin.Spec{
-				Name:              "codegraph",
-				StripRawPrefix:    "codegraph_",
-				Command:           bin,
-				Args:              []string{"serve", "--mcp"},
+				Name:           "codegraph",
+				StripRawPrefix: "codegraph_",
+				Command:        bin,
+				Args:           []string{"serve", "--mcp"},
+				Env: map[string]string{
+					codegraph.DaemonIdleTimeoutEnv: codegraph.ReasonixDaemonIdleTimeoutMS,
+				},
 				Dir:               root,
 				ReadOnlyToolNames: codegraph.ReadOnlyToolNames(),
 				// The daemon walks and indexes the whole tree; below-normal

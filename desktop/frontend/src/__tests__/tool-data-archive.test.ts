@@ -1,0 +1,128 @@
+// Run: tsx src/__tests__/tool-data-archive.test.ts
+//
+// Verifies that the tool_result reducer archives ALL completed tools
+// immediately: args are trimmed to 200 chars, output is set to undefined,
+// and the dataArchived flag is set. Collapsed cards only keep tool name
+// + command in memory; full data is loaded on demand via the backend.
+
+import { initialState, reducer } from "../lib/useController";
+import type { Item } from "../lib/useController";
+
+type TestState = typeof initialState;
+type ToolItem = Extract<Item, { kind: "tool" }>;
+
+let passed = 0;
+let failed = 0;
+
+function eq<T>(a: T, b: T, label: string) {
+  if (a === b) {
+    process.stdout.write(`  PASS  ${label}\n`);
+    passed += 1;
+  } else {
+    process.stdout.write(`  FAIL  ${label}: expected ${JSON.stringify(b).slice(0, 120)}, got ${JSON.stringify(a).slice(0, 120)}\n`);
+    failed += 1;
+  }
+}
+
+function ok(cond: boolean, label: string) {
+  if (cond) {
+    process.stdout.write(`  PASS  ${label}\n`);
+    passed += 1;
+  } else {
+    process.stdout.write(`  FAIL  ${label}\n`);
+    failed += 1;
+  }
+}
+
+/** Run tool_dispatch + tool_result for each item and return final state. */
+function addTools(state: TestState, count: number, argsLen = 5000, outputLen = 10000): TestState {
+  let s = state;
+  for (let i = 0; i < count; i++) {
+    const id = `t${i}`;
+    s = reducer(s, { type: "event", e: { kind: "turn_started" } });
+    s = reducer(s, { type: "event", e: { kind: "tool_dispatch", tool: { id, name: "bash", args: "x".repeat(argsLen), readOnly: false } } });
+    s = reducer(s, { type: "event", e: { kind: "tool_result", tool: { id, name: "bash", readOnly: false, output: "y".repeat(outputLen), durationMs: 100 } } });
+  }
+  return s;
+}
+
+function toolItems(s: TestState): ToolItem[] {
+  return s.items.filter((it): it is ToolItem => it.kind === "tool");
+}
+
+console.log("\ntool data archiving on tool_result");
+
+// ── Test 1: Every completed tool is archived immediately ──
+{
+  let s = addTools(initialState, 1, 5000, 10000);
+  const tools = toolItems(s);
+  ok(tools.length >= 1, "tool item exists after tool_result");
+  ok(tools[0].dataArchived === true, "single tool is archived immediately");
+  eq(tools[0].output, undefined, "output is dropped");
+  ok((tools[0].args?.length ?? 0) <= 205, `args truncated to ≤200 chars (got ${tools[0].args?.length})`);
+}
+
+// ── Test 2: Multiple tools all archived (no threshold) ──
+{
+  let s = addTools(initialState, 50, 5000, 10000);
+  const tools = toolItems(s);
+  ok(tools.length >= 50, `${tools.length} tools present`);
+  const allArchived = tools.every((t) => t.dataArchived === true);
+  ok(allArchived, "all 50 tools archived immediately");
+  const allNoOutput = tools.every((t) => t.output === undefined);
+  ok(allNoOutput, "all tools have output dropped");
+  const maxArgs = Math.max(...tools.map((t) => t.args?.length ?? 0));
+  ok(maxArgs <= 205, `all args ≤200 chars (max ${maxArgs})`);
+}
+
+// ── Test 3: Undefined output doesn't crash ──
+{
+  let s = initialState;
+  s = reducer(s, { type: "event", e: { kind: "turn_started" } });
+  s = reducer(s, { type: "event", e: { kind: "tool_dispatch", tool: { id: "noop", name: "glob", args: JSON.stringify({ pattern: "**/*" }), readOnly: true } } });
+  s = reducer(s, { type: "event", e: { kind: "tool_result", tool: { id: "noop", name: "glob", readOnly: true, output: undefined, durationMs: 5 } } });
+  const tools = toolItems(s);
+  ok(tools.length >= 1, "no crash when tool output is undefined");
+}
+
+// ── Test 4: Running (in-flight) tools keep full args for subject/UI ──
+{
+  let s = initialState;
+  s = reducer(s, { type: "event", e: { kind: "turn_started" } });
+  s = reducer(s, { type: "event", e: { kind: "tool_dispatch", tool: { id: "run1", name: "bash", args: '{"command":"echo hello"}', readOnly: false } } });
+  // Before tool_result: tool is running, args should still be full
+  const before = toolItems(s);
+  ok(before.length >= 1, "tool exists while running");
+  eq(before[0].status, "running", "tool is running");
+  eq(before[0].dataArchived, undefined, "running tool not archived yet");
+  eq(before[0].args, '{"command":"echo hello"}', "running tool keeps full args");
+
+  // After tool_result: archived
+  s = reducer(s, { type: "event", e: { kind: "tool_result", tool: { id: "run1", name: "bash", readOnly: false, output: "hello world", durationMs: 50 } } });
+  const after = toolItems(s);
+  ok(after[0].dataArchived === true, "tool archived after result");
+  eq(after[0].output, undefined, "output dropped after result");
+}
+
+// ── Test 5: Total string size reduction in a long session ──
+{
+  const TOOL_COUNT = 500;
+  const ARGS_SIZE = 5000;
+  const OUTPUT_SIZE = 10000;
+  let s = addTools(initialState, TOOL_COUNT, ARGS_SIZE, OUTPUT_SIZE);
+  const tools = toolItems(s);
+  ok(tools.length >= TOOL_COUNT, `${tools.length} tools present`);
+
+  // All tools should be archived: args ≤200, no output
+  const totalStringBytes = tools.reduce((sum, t) => sum + (t.args?.length ?? 0) + (t.output?.length ?? 0), 0);
+  // Expected: each tool has ~200 chars args + 0 output = ~200 per tool
+  const expectedMax = TOOL_COUNT * 205;
+  ok(totalStringBytes <= expectedMax, `total string size ${totalStringBytes.toLocaleString()} ≤ ${expectedMax.toLocaleString()} (${(100 * totalStringBytes / expectedMax).toFixed(0)}% of max)`);
+
+  const withoutArchive = TOOL_COUNT * (ARGS_SIZE + OUTPUT_SIZE);
+  const reduction = (withoutArchive - totalStringBytes) / withoutArchive;
+  ok(reduction > 0.95, `archive removed ${(reduction * 100).toFixed(0)}% of tool string data`);
+}
+
+console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
+if (failed > 0) process.exit(1);

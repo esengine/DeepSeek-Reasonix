@@ -1848,10 +1848,10 @@ export default function App() {
 
   const handleTabChange = useCallback(async (id: string) => {
     closeTransientOverlays();
-    await switchTab(id);
-    await refreshTabMetas();
+    const tabs = await switchTab(id);
+    if (tabs) setTabMetas(tabs);
     setTabRevealSignal((signal) => signal + 1);
-  }, [closeTransientOverlays, refreshTabMetas, switchTab]);
+  }, [closeTransientOverlays, setTabMetas, switchTab]);
 
   const handleTabClose = useCallback(async (id: string) => {
     closeTransientOverlays();
@@ -2671,6 +2671,7 @@ export default function App() {
                 checkpoints={state.checkpoints}
                 actionPending={state.messageAction != null}
                 rewindDisabled={state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
+                running={state.running}
                 rewindSignal={rewindSignal}
               />
             )}
