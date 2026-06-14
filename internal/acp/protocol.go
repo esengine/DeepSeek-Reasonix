@@ -147,23 +147,7 @@ func (e *MCPEnv) UnmarshalJSON(raw []byte) error {
 
 // SessionNewResult returns the opaque id used to address the session thereafter.
 type SessionNewResult struct {
-	SessionID     string                `json:"sessionId"`
-	Models        *SessionModelState    `json:"models,omitempty"`
-	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
-}
-
-// ModelInfo describes one selectable model in ACP's legacy model selector.
-type ModelInfo struct {
-	ModelID     string `json:"modelId"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-}
-
-// SessionModelState is ACP's legacy model selector state. New clients should
-// prefer the category:"model" config option, but some hosts still probe this.
-type SessionModelState struct {
-	AvailableModels []ModelInfo `json:"availableModels"`
-	CurrentModelID  string      `json:"currentModelId"`
+	SessionID string `json:"sessionId"`
 }
 
 // --- session/load ---
@@ -180,10 +164,7 @@ type SessionLoadParams struct {
 
 // SessionLoadResult is the empty ack; the conversation has already arrived as a
 // burst of session/update notifications by the time it is sent.
-type SessionLoadResult struct {
-	Models        *SessionModelState    `json:"models,omitempty"`
-	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
-}
+type SessionLoadResult struct{}
 
 // --- session/resume ---
 
@@ -195,53 +176,7 @@ type SessionResumeParams struct {
 }
 
 // SessionResumeResult is the empty ack returned once the session is ready.
-type SessionResumeResult struct {
-	Models        *SessionModelState    `json:"models,omitempty"`
-	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
-}
-
-// --- session/set_config_option ---
-
-// SetSessionConfigOptionParams changes one advertised session config option.
-type SetSessionConfigOptionParams struct {
-	SessionID string `json:"sessionId"`
-	ConfigID  string `json:"configId"`
-	Value     string `json:"value"`
-}
-
-// SetSessionConfigOptionResult returns the full refreshed config state.
-type SetSessionConfigOptionResult struct {
-	ConfigOptions []SessionConfigOption `json:"configOptions"`
-}
-
-// SessionConfigOption is a single-value ACP session selector.
-type SessionConfigOption struct {
-	ID           string                      `json:"id"`
-	Name         string                      `json:"name"`
-	Description  string                      `json:"description,omitempty"`
-	Category     string                      `json:"category,omitempty"`
-	Type         string                      `json:"type"`
-	CurrentValue string                      `json:"currentValue"`
-	Options      []SessionConfigSelectOption `json:"options"`
-}
-
-// SessionConfigSelectOption is one selectable value for a config option.
-type SessionConfigSelectOption struct {
-	Value       string `json:"value"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-}
-
-// --- session/set_model ---
-
-// SetSessionModelParams is ACP's legacy model-switching request.
-type SetSessionModelParams struct {
-	SessionID string `json:"sessionId"`
-	ModelID   string `json:"modelId"`
-}
-
-// SetSessionModelResult is the empty ack for legacy model switching.
-type SetSessionModelResult struct{}
+type SessionResumeResult struct{}
 
 // --- session/list ---
 
@@ -405,12 +340,6 @@ type toolCallUpdateMsg struct {
 type toolContent struct {
 	Type    string       `json:"type"`
 	Content ContentBlock `json:"content"`
-}
-
-// configOptionUpdate reports a complete refreshed session config state.
-type configOptionUpdate struct {
-	SessionUpdate string                `json:"sessionUpdate"`
-	ConfigOptions []SessionConfigOption `json:"configOptions"`
 }
 
 // --- session/cancel (client → agent notification) ---

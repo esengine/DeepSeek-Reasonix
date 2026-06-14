@@ -45,7 +45,7 @@ func StripComposePrefixes(content string) string {
 // approval, stream recovery, readiness retry, etc.). These should not be shown
 // in the chat UI.
 func IsSyntheticUserMessage(content string) bool {
-	trimmed := strings.TrimSpace(agent.StripTransientUserBlocks(content))
+	trimmed := strings.TrimSpace(content)
 	if trimmed == planApprovedMessage {
 		return true
 	}
@@ -84,7 +84,6 @@ func (c *Controller) Compose(text string) string {
 	plan := c.planMode
 	goal := c.goal
 	goalStatus := c.goalStatus
-	reasoningLanguage := c.reasoningLanguage
 	notes := c.pendingMemory
 	c.pendingMemory = nil
 	c.mu.Unlock()
@@ -95,7 +94,9 @@ func (c *Controller) Compose(text string) string {
 	if plan {
 		text = PlanModeMarker + "\n\n" + text
 	}
-	text = agent.WithReasoningLanguage(text, reasoningLanguage)
+	if note := reasoningLanguageBlock(c.reasoningLanguage); note != "" {
+		text = note + "\n\n" + text
+	}
 
 	// Memory added mid-session rides the turn (never the cached system prefix),
 	// so it takes effect now without invalidating the prompt cache. It folds into
@@ -123,14 +124,14 @@ func (c *Controller) Compose(text string) string {
 }
 
 func reasoningLanguageBlock(lang string) string {
-	return agent.ReasoningLanguageBlock(lang)
-}
-
-func (c *Controller) ComposeSynthetic(text string) string {
-	c.mu.Lock()
-	lang := c.reasoningLanguage
-	c.mu.Unlock()
-	return agent.WithReasoningLanguage(text, lang)
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "zh":
+		return "<reasoning-language>\nVisible reasoning/thinking text preference: use Simplified Chinese when the provider exposes reasoning text. Keep code, identifiers, file paths, shell commands, and untranslated technical terms in their original form. This preference does not override an explicit user request for the final answer language.\n</reasoning-language>"
+	case "en":
+		return "<reasoning-language>\nVisible reasoning/thinking text preference: use English when the provider exposes reasoning text. Keep code, identifiers, file paths, shell commands, and untranslated technical terms in their original form. This preference does not override an explicit user request for the final answer language.\n</reasoning-language>"
+	default:
+		return ""
+	}
 }
 
 func activeGoalBlock(goal string) string {

@@ -1,7 +1,6 @@
 // Package hook runs user-configured shell-command hooks around the agent loop:
-// PreToolUse / PostToolUse fire around each tool call, PermissionRequest fires
-// before a tool approval prompt is shown, UserPromptSubmit before a turn, Stop
-// after it. Hooks come from settings.json — a project
+// PreToolUse / PostToolUse fire around each tool call, UserPromptSubmit before a
+// turn, Stop after it. Hooks come from settings.json — a project
 // (.reasonix/settings.json, only when the project is trusted) and a global
 // (~/.reasonix/settings.json) file. A hook's exit
 // code is its verdict: 0 = pass, 2 = block (only on the gating events), other =
@@ -32,11 +31,10 @@ import (
 type Event string
 
 const (
-	PreToolUse        Event = "PreToolUse"
-	PostToolUse       Event = "PostToolUse"
-	PermissionRequest Event = "PermissionRequest"
-	UserPromptSubmit  Event = "UserPromptSubmit"
-	Stop              Event = "Stop"
+	PreToolUse       Event = "PreToolUse"
+	PostToolUse      Event = "PostToolUse"
+	UserPromptSubmit Event = "UserPromptSubmit"
+	Stop             Event = "Stop"
 	// PostLLMCall fires after every model turn completes (streaming finishes) but
 	// before the reasoning_content is stored in the session. The hook receives the
 	// raw reasoning text in the payload; its stdout, if non-empty on exit 0,
@@ -57,7 +55,7 @@ const (
 
 // Events is every event, in a stable order — drives loading and `/hooks`.
 var Events = []Event{
-	PreToolUse, PostToolUse, PermissionRequest, UserPromptSubmit, Stop,
+	PreToolUse, PostToolUse, UserPromptSubmit, Stop,
 	PostLLMCall,
 	SessionStart, SessionEnd, SubagentStop, Notification, PreCompact,
 }
@@ -71,7 +69,7 @@ func IsBlocking(e Event) bool { return e == PreToolUse || e == UserPromptSubmit 
 // hooks gate progress, so they're tight; post/stop hooks get more room.
 func defaultTimeout(e Event) time.Duration {
 	switch e {
-	case PreToolUse, PermissionRequest, UserPromptSubmit:
+	case PreToolUse, UserPromptSubmit:
 		return 5 * time.Second
 	default:
 		return 30 * time.Second
@@ -89,9 +87,8 @@ const (
 
 // HookConfig is one hook as written in settings.json.
 type HookConfig struct {
-	// Match is an anchored regex selecting tools (Pre/PostToolUse and
-	// PermissionRequest only); "" or "*" = every tool. Anchored: "file" won't
-	// match "read_file" — use ".*file".
+	// Match is an anchored regex selecting tools (Pre/PostToolUse only); "" or
+	// "*" = every tool. Anchored: "file" won't match "read_file" — use ".*file".
 	Match string `json:"match,omitempty"`
 	// Command is the shell command to run (spawned through the platform shell).
 	Command string `json:"command"`
@@ -213,7 +210,7 @@ func appendResolved(out *[]ResolvedHook, s *Settings, scope Scope, source string
 // anchored regex; non-tool events always match. A malformed regex never fires
 // (safer than firing on everything).
 func MatchesTool(h ResolvedHook, toolName string) bool {
-	if h.Event != PreToolUse && h.Event != PostToolUse && h.Event != PermissionRequest {
+	if h.Event != PreToolUse && h.Event != PostToolUse {
 		return true
 	}
 	m := h.Match
@@ -233,7 +230,6 @@ type Payload struct {
 	Cwd           string          `json:"cwd"`
 	ToolName      string          `json:"toolName,omitempty"`
 	ToolArgs      json.RawMessage `json:"toolArgs,omitempty"`
-	Subject       string          `json:"subject,omitempty"`
 	ToolResult    string          `json:"toolResult,omitempty"`
 	Prompt        string          `json:"prompt,omitempty"`
 	LastAssistant string          `json:"lastAssistantText,omitempty"`

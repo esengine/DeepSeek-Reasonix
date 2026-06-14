@@ -1,6 +1,5 @@
-// Ingest + dashboard for desktop crash/feedback/performance reports and the
-// anonymous launch ping. Reports are user-initiated; pings are opt-out
-// (desktop.telemetry).
+// Ingest + dashboard for desktop crash/feedback reports and the anonymous launch
+// ping. Reports are user-initiated; pings are opt-out (desktop.telemetry).
 import { z } from "zod";
 import type { Env } from "./env";
 import { html, redirect } from "./shell";
@@ -36,7 +35,7 @@ const Device = z
   .partial();
 
 const Report = z.object({
-  kind: z.enum(["crash", "exception", "feedback", "performance", "bot"]),
+  kind: z.enum(["crash", "exception", "feedback"]),
   version: z.string().min(1).max(64),
   os: z.string().min(1).max(32),
   arch: z.string().min(1).max(32),
@@ -209,8 +208,6 @@ export function crashTitle(message: string): string {
 
 function severityForKind(kind: string): string {
   if (kind === "crash") return "high";
-  if (kind === "performance") return "medium";
-  if (kind === "bot") return "medium";
   if (kind === "exception") return "medium";
   return "low";
 }

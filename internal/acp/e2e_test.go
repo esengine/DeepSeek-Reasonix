@@ -349,7 +349,7 @@ func TestE2ESessionListResumeAndDelete(t *testing.T) {
 	default:
 	}
 
-	deleteResp := client2.call(t, "session/delete", SessionDeleteParams{SessionID: nr.SessionID})
+	deleteResp := client2.call(t, "session/delete", SessionDeleteParams(nr))
 	if deleteResp.Error != nil {
 		t.Fatalf("session/delete errored: %+v", deleteResp.Error)
 	}

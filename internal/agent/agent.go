@@ -164,7 +164,6 @@ type Agent struct {
 	executorHandoffGuard bool
 	temperature          float64
 	pricing              *provider.Pricing
-	reasoningLanguage    atomic.Value // string: auto|zh|en
 
 	// sink receives the turn's typed event stream (reasoning/text deltas, tool
 	// dispatch/results, usage, notices). The agent no longer formats output
@@ -300,15 +299,6 @@ type Agent struct {
 // history — are left untouched, so the toggle costs nothing in cache hits.
 func (a *Agent) SetPlanMode(v bool) { a.planMode.Store(v) }
 
-// SetReasoningLanguage updates the visible reasoning language preference for
-// subsequent user-role messages emitted by this agent.
-func (a *Agent) SetReasoningLanguage(lang string) {
-	if a == nil {
-		return
-	}
-	a.reasoningLanguage.Store(NormalizeReasoningLanguage(lang))
-}
-
 // SetGate installs the per-call permission gate. Used by `reasonix chat` to swap the
 // headless gate built in setup for an interactive one that prompts the user;
 // nil disables gating. Safe to call before the run loop starts.
@@ -317,19 +307,6 @@ func (a *Agent) SetGate(g Gate) {
 		g = nil
 	}
 	a.gate = g
-}
-
-func (a *Agent) withReasoningLanguage(input string) string {
-	if a == nil {
-		return input
-	}
-	lang := "auto"
-	if v := a.reasoningLanguage.Load(); v != nil {
-		if s, ok := v.(string); ok {
-			lang = s
-		}
-	}
-	return WithReasoningLanguage(input, lang)
 }
 
 // SetAsker installs the asker the `ask` tool uses to question the user.
@@ -492,10 +469,6 @@ type Options struct {
 
 	// ProjectChecks are host-observable structured checks extracted during boot.
 	ProjectChecks []instruction.VerifyCheck
-
-	// ReasoningLanguage controls visible reasoning language preference as transient
-	// user-turn context. Empty/auto injects nothing.
-	ReasoningLanguage string
 }
 
 // New constructs an Agent. MaxSteps <= 0 means no cap — the run loop continues
@@ -530,7 +503,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	if strings.TrimSpace(maxStepsKey) == "" {
 		maxStepsKey = "agent.max_steps"
 	}
-	a := &Agent{
+	return &Agent{
 		prov:              prov,
 		tools:             tools,
 		session:           session,
@@ -551,8 +524,6 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		recentKeep:        opts.RecentKeep,
 		archiveDir:        opts.ArchiveDir,
 	}
-	a.SetReasoningLanguage(opts.ReasoningLanguage)
-	return a
 }
 
 // Run appends the user input and drives the tool loop until the model returns a
@@ -571,7 +542,6 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 	}
 	a.repeatSuccessCounts = nil
 	a.sink.Emit(event.Event{Kind: event.TurnStarted})
-	input = a.withReasoningLanguage(input)
 	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input, Images: userImages(ctx)})
 
 	finalReadinessBlocks := 0
@@ -586,7 +556,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 		// guidance (with a prefix), not a new task. One cache miss per
 		// steer is unavoidable — the model must see the new instruction.
 		if text, ok := a.consumeSteer(); ok {
-			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withReasoningLanguage(midTurnSteerMessage(text))})
+			a.session.Add(provider.Message{Role: provider.RoleUser, Content: midTurnSteerMessage(text)})
 			a.sink.Emit(event.Event{Kind: event.Steer, Text: text})
 		}
 		schemas := a.tools.Schemas()
@@ -610,7 +580,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 				}
 				a.session.Add(provider.Message{
 					Role:    provider.RoleUser,
-					Content: a.withReasoningLanguage(streamRecoveryMessage(hasVisibleFinalAnswer(text), partialToolStarted)),
+					Content: streamRecoveryMessage(hasVisibleFinalAnswer(text), partialToolStarted),
 				})
 				a.sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: streamRecoveries, RetryMax: maxStreamRecoveries})
 				step-- // recovery retries do not consume the tool-round maxSteps budget
@@ -655,7 +625,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 				}
 				event.RecordReadinessAudit(a.sink, readiness.audit(result, false))
 				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "final-answer readiness blocked: " + readiness.reason})
-				a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withReasoningLanguage(finalReadinessRetryMessage(readiness.reason))})
+				a.session.Add(provider.Message{Role: provider.RoleUser, Content: finalReadinessRetryMessage(readiness.reason)})
 				a.maybeCompact(ctx, usage)
 				continue
 			}
@@ -665,14 +635,14 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 					return fmt.Errorf("model finished without a visible final answer %d times", emptyFinalBlocks)
 				}
 				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: emptyFinalNotice(a.prov.Name(), usage, len(reasoning))})
-				a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withReasoningLanguage(emptyFinalRetryMessage())})
+				a.session.Add(provider.Message{Role: provider.RoleUser, Content: emptyFinalRetryMessage()})
 				a.maybeCompact(ctx, usage)
 				continue
 			}
 			if executorHandoff && !usedAnyTool && handoffNudges < maxExecutorHandoffNudges {
 				handoffNudges++
 				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "executor answered without taking any action; nudging it to use its tools"})
-				a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withReasoningLanguage(executorHandoffRetryMessage())})
+				a.session.Add(provider.Message{Role: provider.RoleUser, Content: executorHandoffRetryMessage()})
 				a.maybeCompact(ctx, usage)
 				continue
 			}
@@ -798,30 +768,6 @@ func (a *Agent) setTodoState(todos []evidence.TodoItem) {
 	a.todoMu.Unlock()
 }
 
-// SeedTodoState initializes the canonical task list from a host-generated
-// starter list, such as an approved plan. A new host seed replaces stale state
-// from earlier work so complete_step matches the plan the UI just displayed.
-func (a *Agent) SeedTodoState(todos []evidence.TodoItem) {
-	if len(todos) == 0 {
-		return
-	}
-	a.setTodoState(todos)
-}
-
-// ReplaceTodoState mirrors a host-generated todo list into the canonical state.
-// It is used when the host, rather than the model, owns the full state transition.
-func (a *Agent) ReplaceTodoState(todos []evidence.TodoItem) {
-	a.setTodoState(todos)
-	a.recordTodoState(todos)
-}
-
-// CanonicalTodoState returns a copy of the host-reconstructed task list.
-func (a *Agent) CanonicalTodoState() []evidence.TodoItem {
-	a.todoMu.Lock()
-	defer a.todoMu.Unlock()
-	return append([]evidence.TodoItem(nil), a.todoState...)
-}
-
 func (a *Agent) incompleteCanonicalTodos() ([]evidence.TodoStepMatch, bool) {
 	a.todoMu.Lock()
 	defer a.todoMu.Unlock()
@@ -913,12 +859,12 @@ func (a *Agent) emitTodoState(todos []evidence.TodoItem, itemIndex int) {
 // fresh load or a rewind (the truncated history yields the historical state).
 // Empty after compaction drops the todo_write — no worse than no canonical list.
 func (a *Agent) rebuildTodoState(msgs []provider.Message) {
-	successful := successfulToolCallIDs(msgs)
+	failed := failedToolCallIDs(msgs)
 	var todos []evidence.TodoItem
 	baseIdx := -1
 	for i, msg := range msgs {
 		for _, tc := range msg.ToolCalls {
-			if tc.Name != "todo_write" || !successful[tc.ID] {
+			if tc.Name != "todo_write" || failed[tc.ID] {
 				continue
 			}
 			if rec := evidence.ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, true); len(rec.Todos) > 0 {
@@ -933,7 +879,7 @@ func (a *Agent) rebuildTodoState(msgs []provider.Message) {
 	}
 	for i := baseIdx; i < len(msgs); i++ {
 		for _, tc := range msgs[i].ToolCalls {
-			if tc.Name != "complete_step" || !successful[tc.ID] {
+			if tc.Name != "complete_step" || failed[tc.ID] {
 				continue
 			}
 			rec := evidence.ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, true)
@@ -946,25 +892,17 @@ func (a *Agent) rebuildTodoState(msgs []provider.Message) {
 	a.setTodoState(todos)
 }
 
-func successfulToolCallIDs(msgs []provider.Message) map[string]bool {
-	successful := map[string]bool{}
+func failedToolCallIDs(msgs []provider.Message) map[string]bool {
+	failed := map[string]bool{}
 	for _, msg := range msgs {
 		if msg.Role != provider.RoleTool || msg.ToolCallID == "" {
 			continue
 		}
-		if !toolResultFailed(msg.Content) {
-			successful[msg.ToolCallID] = true
+		if strings.HasPrefix(msg.Content, "error:") || strings.HasPrefix(msg.Content, "blocked:") {
+			failed[msg.ToolCallID] = true
 		}
 	}
-	return successful
-}
-
-func toolResultFailed(content string) bool {
-	content = strings.TrimSpace(content)
-	return strings.HasPrefix(content, "error:") ||
-		strings.HasPrefix(content, "blocked:") ||
-		strings.HasPrefix(content, "Error:") ||
-		strings.HasPrefix(content, "[error")
+	return failed
 }
 
 func finalReadinessCheckSource(check instruction.VerifyCheck) string {
@@ -1425,11 +1363,6 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	if a.jobs != nil {
 		cctx = jobs.WithManager(cctx, a.jobs)
 	}
-	if v := a.reasoningLanguage.Load(); v != nil {
-		if lang, ok := v.(string); ok {
-			cctx = WithReasoningLanguagePreference(cctx, lang)
-		}
-	}
 	if a.memQueue != nil {
 		cctx = memory.WithQueue(cctx, a.memQueue)
 	}
@@ -1511,7 +1444,7 @@ func repeatSuccessSignature(call provider.ToolCall, t tool.Tool) (string, bool) 
 		return "", false
 	}
 	switch call.Name {
-	case "write_file", "edit_file", "multi_edit", "move_file", "notebook_edit":
+	case "write_file", "edit_file", "multi_edit", "notebook_edit":
 		return call.Name + "\x00" + canonicalToolArgs(call.Arguments), true
 	case "bash":
 		var p struct {

@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/boot"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/personality"
 	"reasonix/internal/provider"
 )
 
@@ -98,7 +99,6 @@ type QQBotView struct {
 	AppID        string `json:"appId"`
 	AppSecretEnv string `json:"appSecretEnv"`
 	SecretSet    bool   `json:"secretSet"`
-	Sandbox      bool   `json:"sandbox"`
 }
 
 type FeishuBotView struct {
@@ -136,31 +136,30 @@ type BotSettingsView struct {
 
 // SettingsView is the whole Settings panel payload.
 type SettingsView struct {
-	DefaultModel       string          `json:"defaultModel"`
-	PlannerModel       string          `json:"plannerModel"`
-	SubagentModel      string          `json:"subagentModel"`
-	SubagentEffort     string          `json:"subagentEffort"`
-	AutoPlan           string          `json:"autoPlan"`
-	Providers          []ProviderView  `json:"providers"`
-	OfficialProviders  []ProviderView  `json:"officialProviders"`
-	Permissions        PermissionsView `json:"permissions"`
-	Sandbox            SandboxView     `json:"sandbox"`
-	Network            NetworkView     `json:"network"`
-	Agent              AgentView       `json:"agent"`
-	Bot                BotSettingsView `json:"bot"`
-	DesktopLanguage    string          `json:"desktopLanguage"`
-	DesktopLayoutStyle string          `json:"desktopLayoutStyle"`
-	DesktopTheme       string          `json:"desktopTheme"`
-	DesktopThemeStyle  string          `json:"desktopThemeStyle"`
-	CloseBehavior      string          `json:"closeBehavior"`
-	DisplayMode        string          `json:"displayMode"`
-	StatusBarStyle     string          `json:"statusBarStyle"`
-	StatusBarItems     []string        `json:"statusBarItems"`
-	CheckUpdates       bool            `json:"checkUpdates"`
-	Telemetry          bool            `json:"telemetry"`
-	Metrics            bool            `json:"metrics"`
-	ExpandThinking     bool            `json:"expandThinking"`
-	ConfigPath         string          `json:"configPath"`
+	DefaultModel      string          `json:"defaultModel"`
+	PlannerModel      string          `json:"plannerModel"`
+	SubagentModel     string          `json:"subagentModel"`
+	SubagentEffort    string          `json:"subagentEffort"`
+	AutoPlan          string          `json:"autoPlan"`
+	Providers         []ProviderView  `json:"providers"`
+	OfficialProviders []ProviderView  `json:"officialProviders"`
+	Permissions       PermissionsView `json:"permissions"`
+	Sandbox           SandboxView     `json:"sandbox"`
+	Network           NetworkView     `json:"network"`
+	Agent             AgentView       `json:"agent"`
+	Bot               BotSettingsView `json:"bot"`
+	DesktopLanguage   string          `json:"desktopLanguage"`
+	DesktopTheme      string          `json:"desktopTheme"`
+	DesktopThemeStyle string          `json:"desktopThemeStyle"`
+	CloseBehavior     string          `json:"closeBehavior"`
+	DisplayMode       string          `json:"displayMode"`
+	StatusBarStyle    string          `json:"statusBarStyle"`
+	StatusBarItems    []string        `json:"statusBarItems"`
+	CheckUpdates      bool            `json:"checkUpdates"`
+	Telemetry         bool            `json:"telemetry"`
+	Metrics           bool            `json:"metrics"`
+	ExpandThinking    bool            `json:"expandThinking"`
+	ConfigPath        string          `json:"configPath"`
 	// ProviderKinds lists the provider implementations the kernel actually
 	// registered (provider.Kinds()), so the editor's "kind" picker offers only
 	// kinds that resolve — selecting an unregistered one would fail the rebuild.
@@ -329,21 +328,20 @@ func (a *App) Settings() SettingsView {
 				Ask:   []string{},
 				Deny:  []string{},
 			},
-			Sandbox:            SandboxView{Bash: "enforce", AllowWrite: []string{}, Shell: "auto"},
-			Agent:              AgentView{PlannerMaxSteps: 12, ColdResumePrune: true, ReasoningLanguage: "auto"},
-			Bot:                botSettingsView(config.BotConfig{}),
-			AutoPlan:           "off",
-			DesktopLayoutStyle: "classic",
-			DesktopTheme:       "light",
-			DesktopThemeStyle:  "graphite",
-			CloseBehavior:      "background",
-			DisplayMode:        "standard",
-			StatusBarStyle:     "text",
-			StatusBarItems:     config.DefaultDesktopStatusBarItems(),
-			CheckUpdates:       true,
-			Telemetry:          true,
-			Metrics:            false,
-			ExpandThinking:     false,
+			Sandbox:           SandboxView{Bash: "enforce", AllowWrite: []string{}, Shell: "auto"},
+			Agent:             AgentView{PlannerMaxSteps: 12, ColdResumePrune: true, ReasoningLanguage: "auto"},
+			Bot:               botSettingsView(config.BotConfig{}),
+			AutoPlan:          "off",
+			DesktopTheme:      "light",
+			DesktopThemeStyle: "graphite",
+			CloseBehavior:     "background",
+			DisplayMode:       "standard",
+			StatusBarStyle:    "text",
+			StatusBarItems:    config.DefaultDesktopStatusBarItems(),
+			CheckUpdates:      true,
+			Telemetry:         true,
+			Metrics:           false,
+			ExpandThinking:    false,
 		}
 	}
 	ctrl := a.activeCtrl()
@@ -386,24 +384,23 @@ func (a *App) Settings() SettingsView {
 				Password: cfg.Network.Proxy.Password,
 			},
 		},
-		Agent:              AgentView{Temperature: cfg.Agent.Temperature, MaxSteps: cfg.Agent.MaxSteps, PlannerMaxSteps: cfg.Agent.PlannerMaxSteps, SystemPrompt: cfg.Agent.SystemPrompt, ColdResumePrune: cfg.ColdResumePruneEnabled(), ReasoningLanguage: cfg.ReasoningLanguage()},
-		Bot:                botSettingsView(cfg.Bot),
-		DesktopLanguage:    cfg.DesktopLanguage(),
-		DesktopLayoutStyle: cfg.DesktopLayoutStyle(),
-		DesktopTheme:       cfg.DesktopTheme(),
-		DesktopThemeStyle:  cfg.DesktopThemeStyle(),
-		CloseBehavior:      cfg.DesktopCloseBehavior(),
-		DisplayMode:        cfg.DesktopDisplayMode(),
-		StatusBarStyle:     cfg.DesktopStatusBarStyle(),
-		StatusBarItems:     cfg.DesktopStatusBarItems(),
-		CheckUpdates:       cfg.DesktopCheckUpdates(),
-		Telemetry:          cfg.DesktopTelemetry(),
-		Metrics:            cfg.DesktopMetrics(),
-		ExpandThinking:     cfg.Desktop.ExpandThinking,
-		ConfigPath:         cfgPath,
-		ProviderKinds:      nonNil(provider.Kinds()),
-		AutoApproveTools:   ctrl != nil && ctrl.AutoApproveTools(),
-		Bypass:             ctrl != nil && ctrl.AutoApproveTools(),
+		Agent:             AgentView{Temperature: cfg.Agent.Temperature, MaxSteps: cfg.Agent.MaxSteps, PlannerMaxSteps: cfg.Agent.PlannerMaxSteps, SystemPrompt: cfg.Agent.SystemPrompt, ColdResumePrune: cfg.ColdResumePruneEnabled(), ReasoningLanguage: cfg.ReasoningLanguage()},
+		Bot:               botSettingsView(cfg.Bot),
+		DesktopLanguage:   cfg.DesktopLanguage(),
+		DesktopTheme:      cfg.DesktopTheme(),
+		DesktopThemeStyle: cfg.DesktopThemeStyle(),
+		CloseBehavior:     cfg.DesktopCloseBehavior(),
+		DisplayMode:       cfg.DesktopDisplayMode(),
+		StatusBarStyle:    cfg.DesktopStatusBarStyle(),
+		StatusBarItems:    cfg.DesktopStatusBarItems(),
+		CheckUpdates:      cfg.DesktopCheckUpdates(),
+		Telemetry:         cfg.DesktopTelemetry(),
+		Metrics:           cfg.DesktopMetrics(),
+		ExpandThinking:    cfg.Desktop.ExpandThinking,
+		ConfigPath:        cfgPath,
+		ProviderKinds:     nonNil(provider.Kinds()),
+		AutoApproveTools:  ctrl != nil && ctrl.AutoApproveTools(),
+		Bypass:            ctrl != nil && ctrl.AutoApproveTools(),
 	}
 	added := providerAccessSet(cfg.Desktop.ProviderAccess)
 	v.OfficialProviders = officialProviderViews(officialProviderAddedSet(cfg))
@@ -440,7 +437,6 @@ func botSettingsView(b config.BotConfig) BotSettingsView {
 			AppID:        b.QQ.AppID,
 			AppSecretEnv: b.QQ.AppSecretEnv,
 			SecretSet:    strings.TrimSpace(b.QQ.AppSecretEnv) != "" && os.Getenv(b.QQ.AppSecretEnv) != "",
-			Sandbox:      b.QQ.Sandbox,
 		},
 		Feishu: FeishuBotView{
 			Enabled:           b.Feishu.Enabled,
@@ -485,9 +481,6 @@ func botDomainOrDefault(domain string) string {
 // keys are account-level, not per-project: writing them to the global config
 // rather than the cwd's reasonix.toml is what lets them survive a workspace switch.
 func (a *App) applyConfigChange(mutate func(*config.Config) error) error {
-	if err := a.ensureActiveTabRebuildAllowed("settings"); err != nil {
-		return err
-	}
 	cfg, path, err := a.loadDesktopUserConfigForEdit()
 	if err != nil {
 		return err
@@ -510,20 +503,6 @@ func (a *App) applyConfigOnly(mutate func(*config.Config) error) error {
 		return err
 	}
 	return cfg.SaveTo(path)
-}
-
-func (a *App) ensureActiveTabRebuildAllowed(setting string) error {
-	if a.ctx == nil {
-		return nil
-	}
-	tab := a.activeTab()
-	if tab == nil {
-		return fmt.Errorf("no active tab")
-	}
-	if controllerHasActiveRuntimeWork(tab.Ctrl) {
-		return rebuildControllerActiveWorkError(setting)
-	}
-	return nil
 }
 
 func (a *App) loadDesktopUserConfigForEdit() (*config.Config, string, error) {
@@ -593,7 +572,7 @@ func desktopBotConfigConfigured(bot config.BotConfig) bool {
 		len(bot.Allowlist.QQGroups)+len(bot.Allowlist.FeishuGroups)+len(bot.Allowlist.WeixinGroups) > 0 {
 		return true
 	}
-	if bot.QQ.Enabled || strings.TrimSpace(bot.QQ.AppID) != "" || bot.QQ.AppSecretEnv != defaults.QQ.AppSecretEnv || bot.QQ.Sandbox != defaults.QQ.Sandbox {
+	if bot.QQ.Enabled || strings.TrimSpace(bot.QQ.AppID) != "" || bot.QQ.AppSecretEnv != defaults.QQ.AppSecretEnv {
 		return true
 	}
 	if bot.Feishu.Enabled ||
@@ -683,9 +662,6 @@ func (a *App) rebuild() error {
 	tab := a.activeTab()
 	if tab == nil {
 		return fmt.Errorf("no active tab")
-	}
-	if controllerHasActiveRuntimeWork(tab.Ctrl) {
-		return rebuildControllerActiveWorkError("settings")
 	}
 	var carried []provider.Message
 	prevPath := ""
@@ -896,7 +872,7 @@ func officialProviderTemplate(kind string) ([]config.ProviderEntry, string, erro
 			Name:          "mimo-api",
 			Kind:          "openai",
 			BaseURL:       "https://api.xiaomimimo.com/v1",
-			Models:        []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"},
+			Models:        []string{"mimo-v2.5-pro"},
 			Default:       "mimo-v2.5-pro",
 			APIKeyEnv:     "MIMO_API_KEY",
 			ContextWindow: 1_048_576,
@@ -907,7 +883,7 @@ func officialProviderTemplate(kind string) ([]config.ProviderEntry, string, erro
 			Name:          "mimo-token-plan",
 			Kind:          "openai",
 			BaseURL:       "https://token-plan-cn.xiaomimimo.com/v1",
-			Models:        []string{"mimo-v2.5-pro", "mimo-v2.5"},
+			Models:        []string{"mimo-v2.5-pro"},
 			Default:       "mimo-v2.5-pro",
 			APIKeyEnv:     "MIMO_API_KEY",
 			ContextWindow: 1_048_576,
@@ -1120,9 +1096,9 @@ func (a *App) removeBuiltInProviderAccessAndRetargetTabs(name string) error {
 			if !desktopModelRefsProvider(cfg, ref, name) {
 				continue
 			}
-			if controllerHasActiveRuntimeWork(tab.Ctrl) {
+			if tab.Ctrl != nil && tab.Ctrl.Running() {
 				a.mu.RUnlock()
-				return fmt.Errorf("finish or cancel active work using %q before removing the provider access", name)
+				return fmt.Errorf("finish or cancel conversations using %q before removing the provider access", name)
 			}
 			affected = append(affected, providerRemovalTab{id: id, ctrl: tab.Ctrl})
 		}
@@ -1194,9 +1170,9 @@ func (a *App) deleteProviderAndRetargetTabs(name string) error {
 		if !desktopModelRefsProvider(cfg, ref, name) {
 			continue
 		}
-		if controllerHasActiveRuntimeWork(tab.Ctrl) {
+		if tab.Ctrl != nil && tab.Ctrl.Running() {
 			a.mu.RUnlock()
-			return fmt.Errorf("finish or cancel active work using %q before deleting the provider", name)
+			return fmt.Errorf("finish or cancel conversations using %q before deleting the provider", name)
 		}
 		affected = append(affected, providerRemovalTab{id: id, ctrl: tab.Ctrl})
 	}
@@ -1255,9 +1231,6 @@ func (a *App) SetProviderKey(apiKeyEnv, value string) error {
 	if strings.TrimSpace(apiKeyEnv) == "" {
 		return fmt.Errorf("this provider has no api_key_env set")
 	}
-	if err := a.ensureActiveTabRebuildAllowed("provider key"); err != nil {
-		return err
-	}
 	if err := upsertDotEnv(apiKeyEnv, value); err != nil {
 		return err
 	}
@@ -1269,9 +1242,6 @@ func (a *App) SetProviderKey(apiKeyEnv, value string) error {
 func (a *App) ClearProviderKey(apiKeyEnv string) error {
 	if strings.TrimSpace(apiKeyEnv) == "" {
 		return fmt.Errorf("this provider has no api_key_env set")
-	}
-	if err := a.ensureActiveTabRebuildAllowed("provider key"); err != nil {
-		return err
 	}
 	if err := removeDotEnv(apiKeyEnv); err != nil {
 		return err
@@ -1348,7 +1318,6 @@ func (a *App) SetBotSettings(b BotSettingsView) error {
 			Enabled:      b.QQ.Enabled,
 			AppID:        strings.TrimSpace(b.QQ.AppID),
 			AppSecretEnv: strings.TrimSpace(b.QQ.AppSecretEnv),
-			Sandbox:      b.QQ.Sandbox,
 		}
 		c.Bot.Feishu = config.FeishuBotConfig{
 			Enabled:           b.Feishu.Enabled,
@@ -1448,12 +1417,6 @@ func (a *App) SetDesktopAppearance(theme, style string) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopAppearance(theme, style) })
 }
 
-// SetDesktopLayoutStyle updates only the desktop layout style. It does not
-// rebuild the active controller and must stay out of provider-visible requests.
-func (a *App) SetDesktopLayoutStyle(style string) error {
-	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopLayoutStyle(style) })
-}
-
 // SetDesktopCheckUpdates updates only the desktop startup update-check
 // preference. Manual checks in Settings are unaffected.
 func (a *App) SetDesktopCheckUpdates(enabled bool) error {
@@ -1522,40 +1485,7 @@ func (a *App) SetColdResumePrune(enabled bool) error {
 }
 
 func (a *App) SetReasoningLanguage(lang string) error {
-	cfg, path, err := a.loadDesktopUserConfigForEdit()
-	if err != nil {
-		return err
-	}
-	if err := cfg.SetReasoningLanguage(lang); err != nil {
-		return err
-	}
-	if err := cfg.SaveTo(path); err != nil {
-		return err
-	}
-	a.applyReasoningLanguageToLiveControllers(cfg.ReasoningLanguage())
-	return nil
-}
-
-func (a *App) applyReasoningLanguageToLiveControllers(fallback string) {
-	type liveTab struct {
-		root string
-		ctrl *control.Controller
-	}
-	var tabs []liveTab
-	a.mu.RLock()
-	for _, tab := range a.tabs {
-		if tab != nil && tab.Ctrl != nil {
-			tabs = append(tabs, liveTab{root: tab.WorkspaceRoot, ctrl: tab.Ctrl})
-		}
-	}
-	a.mu.RUnlock()
-	for _, tab := range tabs {
-		mode := fallback
-		if cfg, err := config.LoadForRoot(tab.root); err == nil {
-			mode = cfg.ReasoningLanguage()
-		}
-		tab.ctrl.SetReasoningLanguage(mode)
-	}
+	return a.applyConfigChange(func(c *config.Config) error { return c.SetReasoningLanguage(lang) })
 }
 
 // trimList drops blank entries from a string slice (and returns a non-nil slice).
@@ -1567,4 +1497,99 @@ func trimList(in []string) []string {
 		}
 	}
 	return out
+}
+
+// --- Personality module ---
+
+// PersonalityFileView represents a single personality file (IDENTITY.md / SOUL.md / USER.md).
+type PersonalityFileView struct {
+	Name    string `json:"name"`
+	Content string `json:"content"`
+	Exists  bool   `json:"exists"`
+}
+
+// PersonalitySettingsView is the personality panel payload.
+type PersonalitySettingsView struct {
+	Enabled bool                  `json:"enabled"`
+	Files   []PersonalityFileView `json:"files"`
+}
+
+// GetPersonalitySettings returns the current personality configuration and file contents.
+func (a *App) GetPersonalitySettings() PersonalitySettingsView {
+	cfg, _, err := a.loadDesktopUserConfigForEdit()
+	enabled := false
+	if err == nil {
+		enabled = cfg.PersonalityEnabled()
+	}
+	root := a.activeWorkspaceRoot()
+	dirs := personality.ProjectDirs(root)
+
+	var files []PersonalityFileView
+	for _, name := range []string{personality.FileNameIdentity, personality.FileNameSoul, personality.FileNameUser} {
+		content, exists := personality.ReadFile(name, dirs)
+		files = append(files, PersonalityFileView{
+			Name:    name,
+			Content: content,
+			Exists:  exists,
+		})
+	}
+	return PersonalitySettingsView{Enabled: enabled, Files: files}
+}
+
+// GetPersonalityFile returns the content of a single personality file.
+func (a *App) GetPersonalityFile(name string) (PersonalityFileView, error) {
+	if name != personality.FileNameIdentity && name != personality.FileNameSoul && name != personality.FileNameUser {
+		return PersonalityFileView{}, fmt.Errorf("invalid personality file name: %q", name)
+	}
+	root := a.activeWorkspaceRoot()
+	dirs := personality.ProjectDirs(root)
+	content, exists := personality.ReadFile(name, dirs)
+	return PersonalityFileView{Name: name, Content: content, Exists: exists}, nil
+}
+
+// SavePersonalityFile writes a personality file and rebuilds the controller.
+func (a *App) SavePersonalityFile(name, content string) error {
+	if name != personality.FileNameIdentity && name != personality.FileNameSoul && name != personality.FileNameUser {
+		return fmt.Errorf("invalid personality file name: %q", name)
+	}
+	root := a.activeWorkspaceRoot()
+	if root == "" {
+		return fmt.Errorf("no active workspace")
+	}
+	path, err := personality.WriteFile(name, content, root)
+	if err != nil {
+		return err
+	}
+	// If personality is not yet enabled, enable it automatically when a file is saved.
+	if err := a.applyConfigOnly(func(c *config.Config) error {
+		c.Personality.Enabled = true
+		return nil
+	}); err != nil {
+		return err
+	}
+	_ = path
+	return a.rebuild()
+}
+
+// DeletePersonalityFile removes a personality file and rebuilds the controller.
+func (a *App) DeletePersonalityFile(name string) error {
+	if name != personality.FileNameIdentity && name != personality.FileNameSoul && name != personality.FileNameUser {
+		return fmt.Errorf("invalid personality file name: %q", name)
+	}
+	root := a.activeWorkspaceRoot()
+	if root == "" {
+		return fmt.Errorf("no active workspace")
+	}
+	if err := personality.DeleteFile(name, root); err != nil {
+		return err
+	}
+	return a.rebuild()
+}
+
+// SetPersonalityEnabled toggles the personality module on/off.
+func (a *App) SetPersonalityEnabled(enabled bool) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		c.Personality.Enabled = enabled
+		return nil
+	})
 }
