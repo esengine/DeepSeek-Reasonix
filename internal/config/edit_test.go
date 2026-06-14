@@ -471,6 +471,52 @@ func TestResolveModelPreservesProviderEffort(t *testing.T) {
 	}
 }
 
+func TestEffectiveVisionForOfficialMimoModels(t *testing.T) {
+	c := Default()
+	c.Desktop.ProviderAccess = []string{"mimo-api"}
+	normalizeDesktopOfficialProviderAccess(c)
+
+	pro, ok := c.ResolveModel("mimo-api/mimo-v2.5-pro")
+	if !ok {
+		t.Fatal("ResolveModel did not find mimo-api/mimo-v2.5-pro")
+	}
+	if EffectiveVision(pro) {
+		t.Fatalf("mimo-v2.5-pro should remain text-only by default")
+	}
+
+	vision, ok := c.ResolveModel("mimo-api/mimo-v2.5")
+	if !ok {
+		t.Fatal("ResolveModel did not find mimo-api/mimo-v2.5")
+	}
+	if !EffectiveVision(vision) {
+		t.Fatalf("mimo-v2.5 on the official MiMo API should enable vision")
+	}
+
+	omni, ok := c.ResolveModel("mimo-api/mimo-v2-omni")
+	if !ok {
+		t.Fatal("ResolveModel did not find mimo-api/mimo-v2-omni")
+	}
+	if !EffectiveVision(omni) {
+		t.Fatalf("mimo-v2-omni on the official MiMo API should enable vision")
+	}
+}
+
+func TestEffectiveVisionDoesNotInferCustomMimoProxy(t *testing.T) {
+	custom := &ProviderEntry{
+		Name:    "mimo-proxy",
+		Kind:    "openai",
+		BaseURL: "https://proxy.example.com/v1",
+		Model:   "mimo-v2.5",
+	}
+	if EffectiveVision(custom) {
+		t.Fatalf("custom MiMo proxy should require explicit vision=true")
+	}
+	custom.Vision = true
+	if !EffectiveVision(custom) {
+		t.Fatalf("explicit vision=true should still enable custom providers")
+	}
+}
+
 func TestRemoveProvider(t *testing.T) {
 	c := Default()
 	c.Agent.PlannerModel = "deepseek-pro"

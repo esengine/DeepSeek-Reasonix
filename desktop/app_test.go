@@ -736,6 +736,7 @@ func TestModelsForTabOnlyListsProviderAccessWhenConfigured(t *testing.T) {
 		"deepseek/deepseek-v4-flash",
 		"deepseek/deepseek-v4-pro",
 		"mimo-token-plan/mimo-v2.5-pro",
+		"mimo-token-plan/mimo-v2.5",
 	} {
 		if !refs[want] {
 			t.Fatalf("Models() refs = %+v, missing %s", models, want)
@@ -749,8 +750,8 @@ func TestModelsForTabOnlyListsProviderAccessWhenConfigured(t *testing.T) {
 			t.Fatalf("Models() refs = %+v, should not include hidden provider %s", models, hidden)
 		}
 	}
-	if len(models) != 3 {
-		t.Fatalf("Models() len = %d, want 3: %+v", len(models), models)
+	if len(models) != 4 {
+		t.Fatalf("Models() len = %d, want 4: %+v", len(models), models)
 	}
 }
 
@@ -767,11 +768,17 @@ func TestModelsForTabListsMimoAPIPaidAccess(t *testing.T) {
 
 	models := NewApp().Models()
 	refs := modelRefsFromView(models)
-	if !refs["mimo-api/mimo-v2.5-pro"] {
-		t.Fatalf("Models() refs = %+v, missing mimo-api/mimo-v2.5-pro", models)
+	for _, want := range []string{
+		"mimo-api/mimo-v2.5-pro",
+		"mimo-api/mimo-v2.5",
+		"mimo-api/mimo-v2-omni",
+	} {
+		if !refs[want] {
+			t.Fatalf("Models() refs = %+v, missing %s", models, want)
+		}
 	}
-	if len(models) != 1 {
-		t.Fatalf("Models() len = %d, want 1: %+v", len(models), models)
+	if len(models) != 3 {
+		t.Fatalf("Models() len = %d, want 3: %+v", len(models), models)
 	}
 }
 

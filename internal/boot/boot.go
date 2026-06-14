@@ -1182,7 +1182,7 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 			"effort":             config.EffectiveEffort(e),
 			"reasoning_protocol": config.ReasoningProtocolForEntry(e),
 			"proxy_spec":         proxy,
-			"vision":             e.Vision,
+			"vision":             config.EffectiveVision(e),
 			"vision_detail":      e.VisionDetail,
 		},
 	})

@@ -116,8 +116,12 @@ func TestNormalizeDesktopOfficialProviderAccessEnsuresMimoAPI(t *testing.T) {
 	c.DefaultModel = "mimo-api/mimo-v2.5-pro"
 	c.Desktop.ProviderAccess = []string{"mimo-api"}
 	normalizeDesktopOfficialProviderAccess(c)
-	if _, ok := c.Provider("mimo-api"); !ok {
+	p, ok := c.Provider("mimo-api")
+	if !ok {
 		t.Fatal("mimo-api paid provider missing")
+	}
+	if !p.HasModel("mimo-v2.5") || !p.HasModel("mimo-v2-omni") {
+		t.Fatalf("mimo-api models = %v, want vision-capable MiMo models", p.ModelList())
 	}
 	if got := c.Desktop.ProviderAccess; len(got) != 1 || got[0] != "mimo-api" {
 		t.Fatalf("provider_access = %+v, want mimo-api", got)
