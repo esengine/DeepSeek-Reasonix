@@ -1274,6 +1274,83 @@ func TestLegacyMigrationConcurrentRunsHaveNoLostUpdates(t *testing.T) {
 	}
 }
 
+func TestFindTopicSessionIndexRefreshesWhenMetaChanges(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	topicID := "topic_cache_refresh"
+	now := time.Now().UTC()
+	first := writeTopicSessionWithPrompt(t, dir, "first.jsonl", topicID, "First", "", "first prompt", now.Add(-time.Hour))
+
+	if got := findTopicSession(dir, topicID); got != first {
+		t.Fatalf("first lookup = %q, want %q", got, first)
+	}
+
+	second := writeTopicSessionWithPrompt(t, dir, "second.jsonl", topicID, "Second", "", "second prompt", now)
+	if got := findTopicSession(dir, topicID); got != second {
+		t.Fatalf("lookup after new session = %q, want newer %q", got, second)
+	}
+
+	meta, ok, err := agent.LoadBranchMeta(second)
+	if err != nil || !ok {
+		t.Fatalf("load second meta: ok=%v err=%v", ok, err)
+	}
+	meta.TopicID = "topic_cache_other"
+	meta.UpdatedAt = now.Add(time.Hour)
+	if err := agent.SaveBranchMetaPreserveUpdated(second, meta); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(agent.BranchMetaPath(second), future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := findTopicSession(dir, topicID); got != first {
+		t.Fatalf("lookup after retopic = %q, want remaining %q", got, first)
+	}
+	if got := findTopicSession(dir, "topic_cache_other"); got != second {
+		t.Fatalf("lookup for retopic session = %q, want %q", got, second)
+	}
+}
+
+func TestUpdateTopicSessionTitlesUsesTopicIndex(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	topicID := "topic_title_index"
+	now := time.Now().UTC()
+	valid := writeTopicSessionWithPrompt(t, dir, "valid.jsonl", topicID, "Old", "", "hello", now)
+	unpreviewable := filepath.Join(dir, "unpreviewable.jsonl")
+	if err := os.WriteFile(unpreviewable, []byte("not-json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.SaveBranchMetaPreserveUpdated(unpreviewable, agent.BranchMeta{
+		CreatedAt:  now.Add(-time.Minute),
+		UpdatedAt:  now,
+		Scope:      "global",
+		TopicID:    topicID,
+		TopicTitle: "Old",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	NewApp().updateTopicSessionTitles(topicID, "Renamed")
+
+	for _, path := range []string{valid, unpreviewable} {
+		meta, ok, err := agent.LoadBranchMeta(path)
+		if err != nil || !ok {
+			t.Fatalf("load meta for %s: ok=%v err=%v", path, ok, err)
+		}
+		if meta.TopicTitle != "Renamed" {
+			t.Fatalf("topic title for %s = %q, want Renamed", path, meta.TopicTitle)
+		}
+	}
+}
+
 func TestEnsureTopicIndexedConcurrentRunsHaveNoLostProjectUpdates(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

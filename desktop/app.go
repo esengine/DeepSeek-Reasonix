@@ -1060,6 +1060,7 @@ func (a *App) Fork(turn int) (TabMeta, error) {
 	if err := agent.SaveBranchMeta(newPath, m); err != nil {
 		return TabMeta{}, err
 	}
+	invalidateTopicSessionIndexForPath(newPath)
 
 	a.mu.Lock()
 	tabID := a.newUniqueTabIDLocked()
