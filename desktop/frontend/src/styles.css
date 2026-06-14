@@ -14867,9 +14867,9 @@ a[href] {
 
 .app--windows .app-chrome--native-tabs .tabbar__command--compact,
 .app--linux .app-chrome--native-tabs .tabbar__command--compact {
-  flex: 0 0 112px;
-  width: 112px;
-  min-width: 112px;
+  flex: 0 0 120px;
+  width: 120px;
+  min-width: 120px;
 }
 
 .workspace-tabs-bar {
@@ -15497,10 +15497,10 @@ a[href] {
 }
 
 .tabbar__command--compact {
-  flex: 0 0 112px;
-  width: 112px;
-  min-width: 112px;
-  max-width: 112px;
+  flex: 0 0 120px;
+  width: 120px;
+  min-width: 120px;
+  max-width: 120px;
   justify-content: center;
   gap: 6px;
   padding: 0 9px;
@@ -18003,10 +18003,10 @@ a[href] {
 }
 
 :root[data-theme-style] .tabbar__command--compact {
-  width: 112px;
-  min-width: 112px;
-  max-width: 112px;
-  flex: 0 0 112px;
+  width: 120px;
+  min-width: 120px;
+  max-width: 120px;
+  flex: 0 0 120px;
   justify-content: center;
   gap: 6px;
   padding: 0 9px;
@@ -18074,9 +18074,9 @@ a[href] {
   }
 
   :root[data-theme-style] .tabbar__command--compact {
-    width: 104px;
-    min-width: 104px;
-    flex-basis: 104px;
+    width: 112px;
+    min-width: 112px;
+    flex-basis: 112px;
     padding: 0 8px;
   }
 }
