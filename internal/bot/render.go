@@ -93,10 +93,11 @@ func (s *renderSink) Emit(e event.Event) {
 		if e.Tool.Err != "" {
 			fmt.Fprintf(&s.buf, "\n❌ %s 出错: %s", name, e.Tool.Err)
 		} else {
-			// 截断输出
+			// 截断输出（按字符数而非字节数，避免截断多字节 UTF-8 字符）
 			output := e.Tool.Output
-			if len(output) > 500 {
-				output = output[:500] + "\n... (已截断)"
+			runes := []rune(output)
+			if len(runes) > 500 {
+				output = string(runes[:500]) + "\n... (已截断)"
 			}
 			fmt.Fprintf(&s.buf, "\n✅ %s 完成", name)
 			if output != "" {
