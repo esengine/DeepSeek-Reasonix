@@ -292,20 +292,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
 				Text: "codegraph: project root is a filesystem root — skipped to avoid indexing the whole volume"})
 		case ok:
-			spec := plugin.Spec{
-				Name:           "codegraph",
-				StripRawPrefix: "codegraph_",
-				Command:        bin,
-				Args:           []string{"serve", "--mcp"},
-				Env: map[string]string{
-					codegraph.DaemonIdleTimeoutEnv: codegraph.ReasonixDaemonIdleTimeoutMS,
-				},
-				Dir:               root,
-				ReadOnlyToolNames: codegraph.ReadOnlyToolNames(),
-				// The daemon walks and indexes the whole tree; below-normal
-				// priority keeps it from starving the user's machine (#3797).
-				LowPriority: true,
-			}
+			spec := codegraph.MCPSpec(bin, root)
 			warm := codegraph.Initialized(root)
 			if err := codegraph.EnsureInit(ctx, bin, root); err != nil {
 				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
@@ -783,15 +770,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				if err := codegraph.EnsureInit(ctx, bin, root); err != nil {
 					return "", fmt.Errorf("codegraph init: %w", err)
 				}
-				spec := plugin.Spec{
-					Name:              "codegraph",
-					StripRawPrefix:    "codegraph_",
-					Command:           bin,
-					Args:              []string{"serve", "--mcp"},
-					Dir:               root,
-					ReadOnlyToolNames: codegraph.ReadOnlyToolNames(),
-					LowPriority:       true,
-				}
+				spec := codegraph.MCPSpec(bin, root)
 				if opts.Stderr != nil {
 					spec.Stderr = opts.Stderr
 				}

@@ -1003,6 +1003,65 @@ model = "x"
 	}
 }
 
+func TestBuildTokenEconomyCodegraphSetsShortDaemonIdleTimeout(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	launcher := writeCodegraphHelper(t, dir)
+	envOut := filepath.Join(dir, "codegraph-idle-env")
+	t.Setenv("REASONIX_CODEGRAPH_HELPER_ENV_OUT", envOut)
+
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("token-economy",
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "source-1", Name: "connect_tool_source", Arguments: `{"source":"codegraph"}`},
+		}},
+		testutil.Turn{Text: "done"},
+	)
+	setBootTokenProfileTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", fmt.Sprintf(`
+default_model = "test-model"
+
+[codegraph]
+enabled = true
+path = %q
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`, launcher))
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	if err := ctrl.Run(context.Background(), "enable codegraph later"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("requests = %d, want 2", len(reqs))
+	}
+	if requestHasToolPrefix(reqs[0], "mcp__codegraph__") {
+		t.Fatalf("first request should hide codegraph; tools=%v", toolSchemaNames(reqs[0].Tools))
+	}
+	if !requestHasToolPrefix(reqs[1], "mcp__codegraph__") {
+		t.Fatalf("second request should expose codegraph after connect_tool_source; tools=%v", toolSchemaNames(reqs[1].Tools))
+	}
+	got, err := os.ReadFile(envOut)
+	if err != nil {
+		t.Fatalf("read codegraph idle timeout env: %v", err)
+	}
+	if string(got) != codegraph.ReasonixDaemonIdleTimeoutMS {
+		t.Fatalf("%s = %q; want %q", codegraph.DaemonIdleTimeoutEnv, got, codegraph.ReasonixDaemonIdleTimeoutMS)
+	}
+}
+
 func TestBuildTokenEconomyPlanModeCanConnectWebFetch(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)
