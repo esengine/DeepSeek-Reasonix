@@ -76,7 +76,7 @@ const infoCost = contextCostDisplay({
 });
 eq(infoCost, { amount: 0.1759, currency: "$" }, "panel cost keeps the panel currency instead of state default");
 eq(formatMoney(infoCost.amount, infoCost.currency, "dash"), "$0.1759", "USD panel cost renders with dollar sign");
-eq(formatCnyMoney(infoCost.amount, "dash"), "¥0.1759", "status bar cost renders as RMB");
+eq(formatCnyMoney(infoCost.amount, "dash"), "¥0.1759", "status bar and workbench costs render as RMB");
 eq(normalizeCnyMoneyDisplay("$2.33"), "¥2.33", "status bar balance normalizes dollar display to RMB");
 eq(normalizeCnyMoneyDisplay("CNY 2.33"), "¥2.33", "status bar balance normalizes CNY code to RMB");
 eq(currencySymbol("楼"), "¥", "unexpected currency text does not leak into money values");

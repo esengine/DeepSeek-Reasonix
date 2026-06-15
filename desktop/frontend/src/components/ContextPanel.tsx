@@ -5,7 +5,7 @@ import { FileText } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { useT, type Translator } from "../lib/i18n";
-import { formatMoney } from "../lib/money";
+import { formatCnyMoney } from "../lib/money";
 import type { DictKey } from "../locales/en";
 import type { ContextInfo, ContextPanelInfo, UsageSourceStats, WireUsage } from "../lib/types";
 
@@ -338,14 +338,14 @@ export function ContextPanel({
             <SectionHeading title={t("context.costMetrics")} />
             <div className="context-panel__stats">
               <MetricCard label={t("context.cacheHit")} value={cachePct > 0 ? `${cachePct}%` : "-"} tone="accent" />
-              <MetricCard label={t("context.sessionCost")} value={formatMoney(cost.amount, cost.currency, "dash")} />
+              <MetricCard label={t("context.sessionCost")} value={formatCnyMoney(cost.amount, "dash")} />
             </div>
             {showCostSources && (
               <div className="context-panel__source-list" aria-label={t("context.costBreakdown")}>
                 {costSources.map((row) => (
                   <div className="context-panel__source-row" key={row.source}>
                     <span>{sourceLabel(row.label, t)}</span>
-                    <strong>{formatMoney(row.cost, row.currency, "dash")}</strong>
+                    <strong>{formatCnyMoney(row.cost, "dash")}</strong>
                     <em>{t("context.sourceRequests", { count: row.requests })}</em>
                   </div>
                 ))}
