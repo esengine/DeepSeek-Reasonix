@@ -444,10 +444,10 @@ func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bo
 	}
 
 	name := stem
-	if v := fm["name"]; v != "" && IsValidName(v) {
+	if v := fm[skillFrontmatterName]; v != "" && IsValidName(v) {
 		name = v
 	}
-	desc := strings.TrimSpace(fm["description"])
+	desc := strings.TrimSpace(fm[skillFrontmatterDescription])
 	if desc == "" {
 		fmt.Fprintf(s.stderr, "warning: skill %q at %s has no description: — it will load but won't appear in the skills index\n", name, path)
 	}
@@ -457,14 +457,34 @@ func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bo
 		Body:         loadBodyWithReferences(path, strings.TrimSpace(body)),
 		Scope:        scope,
 		Path:         path,
-		AllowedTools: parseAllowedTools(fm["allowed-tools"]),
-		RunAs:        parseRunAs(fm["runas"], fm["context"], fm["agent"]),
-		Model:        strings.TrimSpace(fm["model"]),
-		Effort:       strings.TrimSpace(fm["effort"]),
+		AllowedTools: parseAllowedTools(fm[skillFrontmatterAllowedTools]),
+		RunAs:        parseRunAs(fm[skillFrontmatterRunAs], fm[skillFrontmatterContext], fm[skillFrontmatterAgent]),
+		Model:        strings.TrimSpace(fm[skillFrontmatterModel]),
+		Effort:       strings.TrimSpace(fm[skillFrontmatterEffort]),
 	}, true
 }
 
-var skillMarkerFrontmatterKeys = []string{"description", "name", "runas", "context", "agent", "allowed-tools", "model", "effort"}
+const (
+	skillFrontmatterDescription  = "description"
+	skillFrontmatterName         = "name"
+	skillFrontmatterRunAs        = "runas"
+	skillFrontmatterContext      = "context"
+	skillFrontmatterAgent        = "agent"
+	skillFrontmatterAllowedTools = "allowed-tools"
+	skillFrontmatterModel        = "model"
+	skillFrontmatterEffort       = "effort"
+)
+
+var skillMarkerFrontmatterKeys = []string{
+	skillFrontmatterDescription,
+	skillFrontmatterName,
+	skillFrontmatterRunAs,
+	skillFrontmatterContext,
+	skillFrontmatterAgent,
+	skillFrontmatterAllowedTools,
+	skillFrontmatterModel,
+	skillFrontmatterEffort,
+}
 
 func hasSkillMarker(fm map[string]string) bool {
 	for _, key := range skillMarkerFrontmatterKeys {
