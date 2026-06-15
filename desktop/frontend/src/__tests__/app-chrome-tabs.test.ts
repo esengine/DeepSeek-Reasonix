@@ -74,8 +74,13 @@ ok(
 );
 
 ok(
-  finalDeclaration(":root[data-theme-style] .app-chrome--tabs .tabbar__tabs", "max-width") === "100%",
-  "themed AppChrome tab lists keep a bounded maximum width",
+  finalDeclaration(":root[data-theme-style] .app-chrome--tabs .tabbar__tabs", "max-width")?.includes("--chrome-panel-control-size"),
+  "themed AppChrome tab lists reserve a flowing new-tab button slot",
+);
+
+ok(
+  finalDeclaration(":root[data-theme-style] .app-chrome--tabs .tabbar > .tooltip-trigger:has(.tabbar__new)", "flex")?.includes("--chrome-panel-control-size"),
+  "themed AppChrome new-tab button keeps a stable slot beside the tabs",
 );
 
 ok(

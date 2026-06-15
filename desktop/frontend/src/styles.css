@@ -18537,10 +18537,21 @@ a[href] {
   display: none;
 }
 
-:root[data-theme-style] .app-chrome--tabs .tabbar,
-:root[data-theme-style] .app-chrome--tabs .tabbar__tabs {
+:root[data-theme-style] .app-chrome--tabs .tabbar {
   flex: 1 1 auto;
   max-width: 100%;
+}
+
+:root[data-theme-style] .app-chrome--tabs .tabbar__tabs {
+  flex: 1 1 auto;
+  max-width: calc(100% - var(--chrome-panel-control-size, 30px) - 10px);
+}
+
+:root[data-theme-style] .app-chrome--tabs .tabbar > .tooltip-trigger:has(.tabbar__new) {
+  flex: 0 0 var(--chrome-panel-control-size, 30px);
+  width: var(--chrome-panel-control-size, 30px);
+  min-width: var(--chrome-panel-control-size, 30px);
+  display: inline-flex;
 }
 
 .app-chrome--workbench .app-chrome__workbench-search {
