@@ -4,6 +4,22 @@ All notable changes to the Go line (Reasonix 1.0+) are recorded here. The legacy
 `0.x` TypeScript history lives on the [`v1`](https://github.com/esengine/DeepSeek-Reasonix/tree/v1)
 branch.
 
+## [1.8.0] — 2026-06-15
+
+### Added
+
+- (Your additions here)
+
+### Fixed
+
+- (Your fixes here)
+
+### Changed
+
+- (Your changes here)
+
+[1.8.0]: https://github.com/esengine/DeepSeek-Reasonix/releases/tag/v1.8.0
+
 ## [1.0.0] — 2026-06-03
 
 First stable release — a **ground-up rewrite in Go**. Not an upgrade of the `0.x`

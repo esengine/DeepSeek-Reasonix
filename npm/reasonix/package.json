@@ -1,6 +1,6 @@
 {
   "name": "reasonix",
-  "version": "0.0.0",
+  "version": "1.8.0",
   "description": "Cache-first DeepSeek coding agent for the terminal.",
   "bin": {
     "reasonix": "bin/reasonix.js"
@@ -29,11 +29,11 @@
     "tui"
   ],
   "optionalDependencies": {
-    "@reasonix/cli-darwin-arm64": "0.0.0",
-    "@reasonix/cli-darwin-x64": "0.0.0",
-    "@reasonix/cli-linux-arm64": "0.0.0",
-    "@reasonix/cli-linux-x64": "0.0.0",
-    "@reasonix/cli-win32-arm64": "0.0.0",
-    "@reasonix/cli-win32-x64": "0.0.0"
+    "@reasonix/cli-darwin-arm64": "1.8.0",
+    "@reasonix/cli-darwin-x64": "1.8.0",
+    "@reasonix/cli-linux-arm64": "1.8.0",
+    "@reasonix/cli-linux-x64": "1.8.0",
+    "@reasonix/cli-win32-arm64": "1.8.0",
+    "@reasonix/cli-win32-x64": "1.8.0"
   }
 }
