@@ -27,35 +27,34 @@ func CanonicalizeSchema(raw json.RawMessage) json.RawMessage {
 	return json.RawMessage(b)
 }
 
-var setLikeSchemaArrays = map[string]bool{
-	"required":          true,
-	"dependentRequired": true,
-}
-
 func canonicalizeSchemaValue(v any) any {
 	switch val := v.(type) {
 	case map[string]any:
 		for k, inner := range val {
 			val[k] = canonicalizeSchemaValue(inner)
 		}
-		for key := range val {
-			if setLikeSchemaArrays[key] {
-				if arr, ok := val[key].([]any); ok {
-					sort.SliceStable(arr, func(i, j int) bool {
-						return schemaJSONString(arr[i]) < schemaJSONString(arr[j])
-					})
-				}
+		if req, ok := val["required"]; ok {
+			if arr, ok := req.([]any); ok {
+				sortSchemaArray(arr)
+			} else {
+				// Some MCP servers emit OpenAPI-style property metadata such as
+				// {"required": true}. OpenAI-compatible function schemas require
+				// JSON Schema's array form; dropping the invalid value keeps the
+				// whole tool list from being rejected with HTTP 400.
+				delete(val, "required")
 			}
 		}
 		if dr, ok := val["dependentRequired"]; ok {
 			if drMap, ok := dr.(map[string]any); ok {
-				for _, inner := range drMap {
+				for key, inner := range drMap {
 					if arr, ok := inner.([]any); ok {
-						sort.SliceStable(arr, func(i, j int) bool {
-							return schemaJSONString(arr[i]) < schemaJSONString(arr[j])
-						})
+						sortSchemaArray(arr)
+					} else {
+						delete(drMap, key)
 					}
 				}
+			} else {
+				delete(val, "dependentRequired")
 			}
 		}
 		return val
@@ -67,6 +66,12 @@ func canonicalizeSchemaValue(v any) any {
 	default:
 		return v
 	}
+}
+
+func sortSchemaArray(arr []any) {
+	sort.SliceStable(arr, func(i, j int) bool {
+		return schemaJSONString(arr[i]) < schemaJSONString(arr[j])
+	})
 }
 
 func schemaJSONString(v any) string {
