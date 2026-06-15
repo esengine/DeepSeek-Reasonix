@@ -158,7 +158,10 @@ func parseLegacyMCPSpec(raw string) (PluginEntry, bool) {
 	if !ok || len(parts) == 0 {
 		return PluginEntry{}, false
 	}
-	return PluginEntry{Name: name, Command: parts[0], Args: parts[1:]}, true
+	if shouldSplitPluginCommand(body, parts[0]) {
+		return PluginEntry{Name: name, Command: parts[0], Args: parts[1:]}, true
+	}
+	return PluginEntry{Name: name, Command: body}, true
 }
 
 // anonymousMCPName names a v0.x spec that carried no name= prefix (its tools
