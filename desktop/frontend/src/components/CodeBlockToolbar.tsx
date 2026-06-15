@@ -2,6 +2,16 @@ import { useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { CopyButton } from "./CopyButton";
 
+export function buildMarkdownCodeBlock(value: string, language?: string): string {
+  let longestBacktickRun = 0;
+  for (const match of value.matchAll(/`+/g)) {
+    longestBacktickRun = Math.max(longestBacktickRun, match[0].length);
+  }
+  const fence = "`".repeat(Math.max(3, longestBacktickRun + 1));
+  const lang = language?.trim() ?? "";
+  return `${fence}${lang}\n${value.replace(/\n$/, "")}\n${fence}\n`;
+}
+
 // CodeBlockToolbar keeps code-block actions outside the scrollable <pre>, so
 // copy controls stay visible for long snippets while HljsCode remains a pure
 // syntax-highlighting renderer.
@@ -16,11 +26,8 @@ export function CodeBlockToolbar({
   const label = language?.trim() || "auto";
 
   const copyAsMarkdown = async () => {
-    const fence = "```";
-    const lang = language?.trim() ?? "";
-    const body = `${fence}${lang}\n${value.replace(/\n$/, "")}\n${fence}\n`;
     try {
-      await navigator.clipboard.writeText(body);
+      await navigator.clipboard.writeText(buildMarkdownCodeBlock(value, language));
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch {
