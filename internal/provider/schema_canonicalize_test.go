@@ -54,3 +54,22 @@ func TestCanonicalizeSchemaDependentRequired(t *testing.T) {
 		t.Fatalf("CanonicalizeSchema() = %s, want %s", got, want)
 	}
 }
+
+func TestCanonicalizeSchemaPreservesDependentRequiredPropertyName(t *testing.T) {
+	raw := json.RawMessage(`{
+		"type":"object",
+		"properties":{
+			"dependentRequired":{"type":"string"},
+			"x":{"type":"string"}
+		},
+		"dependentRequired":{
+			"dependentRequired":["x"]
+		}
+	}`)
+
+	got := string(CanonicalizeSchema(raw))
+	want := `{"dependentRequired":{"dependentRequired":["x"]},"properties":{"dependentRequired":{"type":"string"},"x":{"type":"string"}},"type":"object"}`
+	if got != want {
+		t.Fatalf("CanonicalizeSchema() = %s, want %s", got, want)
+	}
+}

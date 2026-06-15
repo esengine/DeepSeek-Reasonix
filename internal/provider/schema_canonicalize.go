@@ -38,6 +38,8 @@ func canonicalizeSchemaObject(v any) any {
 			switch k {
 			case "properties", "patternProperties", "$defs", "definitions", "dependentSchemas":
 				val[k] = canonicalizeNamedSchemas(inner)
+			case "dependentRequired":
+				val[k] = canonicalizeDependentRequired(inner)
 			default:
 				val[k] = canonicalizeSchemaObject(inner)
 			}
@@ -53,18 +55,8 @@ func canonicalizeSchemaObject(v any) any {
 				delete(val, "required")
 			}
 		}
-		if dr, ok := val["dependentRequired"]; ok {
-			if drMap, ok := dr.(map[string]any); ok {
-				for key, inner := range drMap {
-					if arr, ok := inner.([]any); ok {
-						sortSchemaArray(arr)
-					} else {
-						delete(drMap, key)
-					}
-				}
-			} else {
-				delete(val, "dependentRequired")
-			}
+		if dr, ok := val["dependentRequired"]; ok && !isJSONObject(dr) {
+			delete(val, "dependentRequired")
 		}
 		return val
 	case []any:
@@ -86,6 +78,26 @@ func canonicalizeNamedSchemas(v any) any {
 		m[name] = canonicalizeSchemaObject(schema)
 	}
 	return m
+}
+
+func canonicalizeDependentRequired(v any) any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return v
+	}
+	for key, inner := range m {
+		if arr, ok := inner.([]any); ok {
+			sortSchemaArray(arr)
+		} else {
+			delete(m, key)
+		}
+	}
+	return m
+}
+
+func isJSONObject(v any) bool {
+	_, ok := v.(map[string]any)
+	return ok
 }
 
 func sortSchemaArray(arr []any) {
