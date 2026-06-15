@@ -22012,6 +22012,7 @@ a[href] {
 :root[data-theme-style] .sidebar__brand-logo {
   width: 21px;
   height: 21px;
+  margin: 0;
   object-fit: contain;
   object-position: center;
 }
