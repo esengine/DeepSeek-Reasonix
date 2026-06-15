@@ -21,6 +21,7 @@ import {
   PanelLeft,
   PanelRight,
   Plus,
+  Search,
   Settings as SettingsIcon,
   Pencil,
   Trash2,
@@ -110,13 +111,13 @@ import {
 import { applyTextSize, DEFAULT_TEXT_SIZE, getTextSize, nextTextSize } from "./lib/textSize";
 import { useWindowStatePersistence } from "./lib/windowState";
 import { availableWorkspacePanelWidth, resolveWorkspacePanelWidth, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
-import logoWordmark from "./assets/logo-wordmark.svg";
+import logoSymbol from "./assets/logo-symbol.svg";
 
 const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
-const SIDEBAR_DEFAULT_WIDTH = 264;
-const SIDEBAR_MIN_WIDTH = 264;
-const SIDEBAR_MAX_WIDTH = 300;
-const SIDEBAR_VIEWPORT_RATIO = 0.18;
+const SIDEBAR_DEFAULT_WIDTH = 232;
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 320;
+const SIDEBAR_VIEWPORT_RATIO = 0.16;
 const CHAT_MIN_WIDTH = 400;
 const CHAT_COMFORT_MIN_WIDTH = 560;
 const WORKSPACE_RESIZER_WIDTH = 8;
