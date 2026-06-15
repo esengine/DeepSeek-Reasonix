@@ -299,6 +299,19 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 	fmt.Fprintf(&b, "bash_timeout_seconds = %d   # foreground safety cap; set 0 for no tool-local cap\n\n", c.BashTimeoutSeconds())
 
+	b.WriteString("[tools.shell]\n")
+	if c.Tools.Shell.Prefer != "" {
+		fmt.Fprintf(&b, "prefer = %q\n", c.Tools.Shell.Prefer)
+	} else {
+		b.WriteString("# prefer = \"\"   # auto | bash | powershell | pwsh\n")
+	}
+	if c.Tools.Shell.Path != "" {
+		fmt.Fprintf(&b, "path   = %q\n", c.Tools.Shell.Path)
+	} else {
+		b.WriteString("# path   = \"\"   # empty = probe standard locations\n")
+	}
+	b.WriteString("\n")
+
 	b.WriteString("[codegraph]\n")
 	fmt.Fprintf(&b, "enabled      = %v   # built-in MCP server; off by default for first-run sessions\n", c.Codegraph.Enabled)
 	fmt.Fprintf(&b, "auto_install = %v   # fetch the runtime when CodeGraph is enabled but missing\n", c.Codegraph.AutoInstall)
