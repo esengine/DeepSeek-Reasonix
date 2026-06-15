@@ -52,6 +52,15 @@ type WorkspaceTab struct {
 	saving    bool
 	saveAgain bool
 
+	// closing is set under saveMu when the tab is being torn down. Once set,
+	// tabSnapshotLoop stops taking new snapshot work and CloseTab waits on
+	// saveCond until any in-flight snapshot finishes - so no background
+	// snapshot can write a session file back to disk after CloseTab returns.
+	// Without this, deleting a just-closed session races that write and the
+	// session "resurrects" (#4384).
+	closing  bool
+	saveCond *sync.Cond
+
 	// readTelemetry tracks files read during this tab's session.
 	readTelemetry  []readFileRecord
 	usageTelemetry sessionUsageStats
@@ -1280,10 +1289,22 @@ func (a *App) CloseTab(tabID string) error {
 
 	// Tear down outside the lock.
 	if tab.Ctrl != nil {
+		// Final snapshot while the controller still owns its session path.
+		// a.mu stays free during the disk write; the two resurrection
+		// vectors are neutralized below before DeleteSession can see the
+		// tab as gone:
+		//   (1) clear the controller's session path so any later Snapshot
+		//       (including the autosave loop) is a no-op;
+		//   (2) drain any in-flight tabSnapshotLoop before returning, so no
+		//       background write can land after the file is trashed.
 		_ = tab.Ctrl.Snapshot()
 		if tab.hasActiveRuntimeWork() && a.detachSessionRuntime(tab) {
+			// Detached runtimes keep running and must keep saving: do not
+			// clear the path or drain for them.
 			return nil
 		}
+		tab.Ctrl.SetSessionPath("") // future snapshots become no-ops
+		a.quiesceTabAutosave(tab)   // wait for any in-flight snapshot to finish
 		tab.Ctrl.Cancel()
 		tab.Ctrl.Close()
 	}
@@ -1551,14 +1572,43 @@ func (a *App) scheduleTabSnapshot(tabID string) {
 		return
 	}
 	tab.saveMu.Lock()
+	defer tab.saveMu.Unlock()
+	if tab.closing {
+		// Tab is being torn down: don't start new snapshot work that could
+		// race DeleteSession and resurrect a trashed session file (#4384).
+		return
+	}
 	if tab.saving {
 		tab.saveAgain = true
-		tab.saveMu.Unlock()
 		return
 	}
 	tab.saving = true
-	tab.saveMu.Unlock()
 	go a.tabSnapshotLoop(tab)
+}
+
+// quiesceTabAutosave marks the tab as closing and blocks until any in-flight
+// tabSnapshotLoop has finished its current (and final) write. After it returns,
+// no background goroutine can call Snapshot on this tab's controller again, so
+// a subsequent DeleteSession cannot race a late write. Safe to call after the
+// controller's session path has been cleared: the loop's Snapshot becomes a
+// no-op and it exits on its next iteration.
+func (a *App) quiesceTabAutosave(tab *WorkspaceTab) {
+	if tab == nil {
+		return
+	}
+	tab.saveMu.Lock()
+	if tab.saveCond == nil {
+		// saveCond is lazily initialized on first snapshot; if it was never
+		// set there is no loop to wait for.
+		tab.closing = true
+		tab.saveMu.Unlock()
+		return
+	}
+	tab.closing = true
+	for tab.saving {
+		tab.saveCond.Wait()
+	}
+	tab.saveMu.Unlock()
 }
 
 func (a *App) tabSnapshotLoop(tab *WorkspaceTab) {
@@ -1575,12 +1625,23 @@ func (a *App) tabSnapshotLoop(tab *WorkspaceTab) {
 			}
 		}
 		tab.saveMu.Lock()
+		if tab.saveCond == nil {
+			tab.saveCond = sync.NewCond(&tab.saveMu)
+		}
+		if tab.closing {
+			// Tab is being torn down: stop without picking up saveAgain work.
+			tab.saving = false
+			tab.saveCond.Broadcast()
+			tab.saveMu.Unlock()
+			return
+		}
 		if tab.saveAgain {
 			tab.saveAgain = false
 			tab.saveMu.Unlock()
 			continue
 		}
 		tab.saving = false
+		tab.saveCond.Broadcast()
 		tab.saveMu.Unlock()
 		return
 	}
