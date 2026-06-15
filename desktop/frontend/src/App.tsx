@@ -21,7 +21,6 @@ import {
   PanelLeft,
   PanelRight,
   Plus,
-  Search,
   Settings as SettingsIcon,
   Trash2,
   Brain,
@@ -52,6 +51,7 @@ import { WorkspacePanel } from "./components/WorkspacePanel";
 import { Tooltip } from "./components/Tooltip";
 import { StartupSplash, shouldShowStartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
+import { AppChrome } from "./components/AppChrome";
 import { ProjectTree } from "./components/ProjectTree";
 import { CopyButton } from "./components/CopyButton";
 import { parseTodos } from "./lib/tools";
@@ -110,7 +110,7 @@ import {
 import { applyTextSize, DEFAULT_TEXT_SIZE, getTextSize, nextTextSize } from "./lib/textSize";
 import { useWindowStatePersistence } from "./lib/windowState";
 import { availableWorkspacePanelWidth, resolveWorkspacePanelWidth, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
-import logoSymbol from "./assets/logo-symbol.svg";
+import logoWordmark from "./assets/logo-wordmark.svg";
 
 const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
 const SIDEBAR_DEFAULT_WIDTH = 232;
@@ -960,6 +960,7 @@ export default function App() {
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
   const [topicExportOpen, setTopicExportOpen] = useState(false);
   const [sidebarTogglePressed, setSidebarTogglePressed] = useState(false);
+  const [workspaceTogglePressed, setWorkspaceTogglePressed] = useState(false);
   const [clearContextPending, setClearContextPending] = useState(false);
   const topicRenameSkipCommitRef = useRef(false);
   const topicRenameCommitHandledRef = useRef(false);
@@ -1024,6 +1025,18 @@ export default function App() {
     sidebarTogglePressTimerRef.current = window.setTimeout(() => {
       sidebarTogglePressTimerRef.current = null;
       setSidebarTogglePressed(false);
+    }, 260);
+  }, []);
+
+  const pulseWorkspaceToggle = useCallback(() => {
+    if (typeof window === "undefined") return;
+    if (workspaceTogglePressTimerRef.current !== null) {
+      window.clearTimeout(workspaceTogglePressTimerRef.current);
+    }
+    setWorkspaceTogglePressed(true);
+    workspaceTogglePressTimerRef.current = window.setTimeout(() => {
+      workspaceTogglePressTimerRef.current = null;
+      setWorkspaceTogglePressed(false);
     }, 260);
   }, []);
 
@@ -1230,6 +1243,25 @@ export default function App() {
     [activeTabId, composerProfile],
   );
   const topicbarEditing = Boolean(activeTab?.topicId && activeTab.topicId === renamingTopicId);
+  const visibleTabId = activeTabId;
+  const visibleTabs = useMemo(() => {
+    const byId = new Map(tabMetas.map((tab) => [tab.id, tab]));
+    const ordered = tabOrderIds.map((id) => byId.get(id)).filter((tab): tab is TabMeta => Boolean(tab));
+    const missing = tabMetas.filter((tab) => !tabOrderIds.includes(tab.id));
+    return [...ordered, ...missing].map((tab) => {
+      const profile = composerProfilesByTab[tab.id] ?? composerProfileFromTab(tab);
+      return {
+        ...tab,
+        running: tab.id === visibleTabId ? tab.running || state.running : tab.running,
+        mode: composerProfileMode(profile),
+        collaborationMode: displayedComposerProfileCollaborationMode(profile),
+        toolApprovalMode: profile.toolApprovalMode,
+        tokenMode: profile.tokenMode,
+        goal: profile.goal,
+        active: tab.id === visibleTabId,
+      };
+    });
+  }, [composerProfilesByTab, state.running, tabMetas, tabOrderIds, visibleTabId]);
 
   useEffect(() => {
     const ids = tabMetas.map((tab) => tab.id);
@@ -1831,6 +1863,15 @@ export default function App() {
     setWorkspacePanelOpen(false);
   }, [closeTransientOverlays, workspacePanelOpen]);
 
+  const toggleWorkspacePanel = useCallback(() => {
+    pulseWorkspaceToggle();
+    if (workspacePanelRenderable) {
+      closeWorkspacePanel();
+      return;
+    }
+    openWorkspacePanel("context");
+  }, [closeWorkspacePanel, openWorkspacePanel, pulseWorkspaceToggle, workspacePanelRenderable]);
+
   const openRightDockMode = useCallback(
     (mode: RightDockMode) => {
       setWorkspaceRevealRequest(null);
@@ -2390,6 +2431,9 @@ export default function App() {
   }, [renameTopic, renamingTopicId, topicTitleDraft]);
 
   const sidebarExpandBlocked = false;
+  const sidebarToggleTitle = sidebarCollapsed
+    ? t("sidebar.expand")
+    : t("sidebar.collapse");
   const sidebarNavTooltipDisabled = !sidebarCollapsed;
   const browserPreviewChrome = typeof window !== "undefined" && !window.runtime;
   const workspacePanelResetWidth = rightDockDetailActive
