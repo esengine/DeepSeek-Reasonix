@@ -32,6 +32,7 @@ import {
 } from "../lib/fontFamily";
 import { getAvailableFontFamilies, getAvailableMonoFontFamilies } from "../lib/fontAvailability";
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
+import { getStatusBarVisible, setStatusBarVisible } from "../lib/statusBarVisible";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
 import type { BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
@@ -788,6 +789,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   const [soundPref, setSoundPref] = useState<SoundWavPref>(getSuccessPreference());
   const [attentionPref, setAttentionPref] = useState<SoundWavPref>(getAttentionPreference());
   const [soundExpanded, setSoundExpanded] = useState(false);
+  const [statusBarVisible, setStatusBarVisibleState] = useState(() => getStatusBarVisible());
   const statusBarStyle = normalizeStatusBarStyle(s.statusBarStyle);
   const statusBarItems = normalizeStatusBarItems(s.statusBarItems);
   const soundStatus = summarizeSoundStatus(genMusicPreset, soundPref, attentionPref);
@@ -1096,6 +1098,24 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
               onClick={() => void apply(() => app.SetStatusBarStyle(style))}
             >
               {t(`settings.statusBarStyle.${style}`)}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.statusBarVisible")} hint={t("settings.statusBarVisibleHint")}>
+        <div className="set-seg">
+          {(["on", "off"] as const).map((mode) => (
+            <button
+              key={mode}
+              className={`set-seg__btn${statusBarVisible === (mode === "on") ? " set-seg__btn--on" : ""}`}
+              disabled={busy}
+              onClick={() => {
+                const next = mode === "on";
+                setStatusBarVisibleState(next);
+                setStatusBarVisible(next);
+              }}
+            >
+              {t(`settings.statusBarVisible.${mode}`)}
             </button>
           ))}
         </div>

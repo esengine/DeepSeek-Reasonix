@@ -135,6 +135,18 @@ export default defineConfig({
     // (katex alone is ~300KB). The manual split ensures it's cached separately.
     chunkSizeWarningLimit: 600,
   },
+  // esbuild target for production builds (terser is the minifier, but
+  // esbuild still does the transpilation step). WebView2 / WKWebView are
+  // modern enough for es2021; the default breaks ESM destructuring in deps.
+  esbuild: { target: "es2021" },
+  optimizeDeps: {
+    esbuildOptions: {
+      // Dev-mode dependency pre-bundling also needs a modern target, otherwise
+      // third-party ESM packages with destructuring fail — Vite's default is
+      // chrome87/edge88/es2020, which is far too old for a desktop webview.
+      target: "es2021",
+    },
+  },
   server: {
     // Bind IPv4 — unset host listens on ::1, and the Wails dev proxy's [::1]
     // dial fails on Windows hosts where IPv6 loopback is filtered.

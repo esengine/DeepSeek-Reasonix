@@ -92,6 +92,7 @@ import {
 } from "./lib/toolApprovalMode";
 import { loadLayoutSize, saveLayoutSize } from "./lib/layoutPreferences";
 import { hydrateDisplayMode } from "./lib/displayMode";
+import { getStatusBarVisible, onStatusBarVisibleChange } from "./lib/statusBarVisible";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems, type StatusBarItemId } from "./lib/statusBarItems";
 import { blobToBase64, renderSessionImageBlob, renderSessionPdfBlob } from "./lib/sessionExport";
 import { sessionActivityTime } from "./lib/session";
@@ -954,6 +955,7 @@ export default function App() {
   const [desktopPlatform, setDesktopPlatform] = useState<DesktopPlatform>(detectBrowserPlatform);
   const [statusBarStyle, setStatusBarStyle] = useState<"icon" | "text">("text");
   const [statusBarItems, setStatusBarItems] = useState<StatusBarItemId[]>(() => [...DEFAULT_STATUS_BAR_ITEMS]);
+  const [statusBarVisible, setStatusBarVisible] = useState(() => getStatusBarVisible());
   const [renamingTopicId, setRenamingTopicId] = useState<string | null>(null);
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
   const [topicExportOpen, setTopicExportOpen] = useState(false);
@@ -1111,6 +1113,8 @@ export default function App() {
       cancelled = true;
     };
   }, [applyDesktopPreferences, t]);
+
+  useEffect(() => onStatusBarVisibleChange(setStatusBarVisible), []);
 
   useEffect(() => {
     if (sidebarImConnections.length === 0) {
@@ -2516,6 +2520,7 @@ export default function App() {
           workspacePanelGridOpen ? "layout--workspace-open" : "",
           workspacePanelOpen && workspacePanelMaximized ? "layout--workspace-maximized" : "",
           workspacePanelResizing ? "layout--resizing layout--workspace-resizing" : "",
+          !statusBarVisible ? "layout--status-bar-hidden" : "",
         ]
           .filter(Boolean)
           .join(" ")}
@@ -2685,6 +2690,15 @@ export default function App() {
           )}
 
         </aside>
+        <button
+          className="sidebar-float-toggle"
+          type="button"
+          onClick={sidebarExpandBlocked ? undefined : toggleSidebar}
+          aria-label={sidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+          aria-disabled={sidebarExpandBlocked}
+        >
+          <PanelLeft size={14} />
+        </button>
         <div className="sidebar-resizer-shell">
           <button
             className="sidebar-resizer"
