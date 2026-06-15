@@ -1,6 +1,7 @@
 package skill
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -151,6 +152,53 @@ func TestConventionDirsDiscovered(t *testing.T) {
 		if _, ok := find(list, name); !ok {
 			t.Errorf("convention dir for %q not scanned", name)
 		}
+	}
+}
+
+func TestNonSkillMarkdownInClaudeSkillRootsIgnored(t *testing.T) {
+	proj := t.TempDir()
+	writeSkill(t, proj, ".claude/skills/README.md", "# Skill notes\n\nThis is documentation, not a skill.")
+	writeSkill(t, proj, ".claude/skills/notes.md", "---\ntitle: Notes\n---\n# Notes")
+	writeSkill(t, proj, ".claude/skills/real.md", "---\ndescription: real skill\n---\nbody")
+
+	var stderr bytes.Buffer
+	st := New(Options{HomeDir: t.TempDir(), ProjectRoot: proj, DisableBuiltins: true, Stderr: &stderr})
+	list := st.List()
+	if _, ok := find(list, "real"); !ok {
+		t.Fatal("real skill should be discovered")
+	}
+	for _, name := range []string{"README", "notes"} {
+		if _, ok := find(list, name); ok {
+			t.Errorf("non-skill markdown %q should not be listed", name)
+		}
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("non-skill markdown should not warn during List, got %q", got)
+	}
+
+	for _, name := range []string{"README", "notes"} {
+		stderr.Reset()
+		if _, ok := st.Read(name); ok {
+			t.Errorf("non-skill markdown %q should not be readable as a skill", name)
+		}
+		if got := stderr.String(); got != "" {
+			t.Errorf("non-skill markdown %q should not warn during Read, got %q", name, got)
+		}
+	}
+}
+
+func TestSkillLikeFlatClaudeMarkdownWithoutDescriptionWarns(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".claude/skills/named.md", "---\nname: renamed\n---\nbody")
+
+	var stderr bytes.Buffer
+	st := New(Options{HomeDir: home, DisableBuiltins: true, Stderr: &stderr})
+	list := st.List()
+	if _, ok := find(list, "renamed"); !ok {
+		t.Fatal("skill-like flat Claude markdown should still load")
+	}
+	if got := stderr.String(); !strings.Contains(got, "has no description") {
+		t.Fatalf("skill-like flat Claude markdown without description should warn, got %q", got)
 	}
 }
 

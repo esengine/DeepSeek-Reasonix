@@ -6,8 +6,10 @@
 // enter the cache-stable system-prompt index (see index.go) — bodies load on
 // demand. Discovery scans several conventions (.reasonix / .agents / .agent /
 // .claude under the project root and the home dir — see config.ConventionDirs) so
-// skills authored for other agent tools migrate in unchanged, and follows
-// symlinks, so a linked skill directory or flat <name>.md is picked up like a real one.
+// skills authored for other agent tools migrate in unchanged. Directory skills
+// use <name>/SKILL.md; flat <name>.md files from Claude roots are loaded only
+// when they carry skill frontmatter. Discovery follows symlinks, so linked
+// skills are picked up like real ones.
 package skill
 
 import (
@@ -153,10 +155,11 @@ const (
 
 // Root is one discovery directory with its scope, priority, and status.
 type Root struct {
-	Dir      string
-	Scope    Scope
-	Priority int
-	Status   PathStatus
+	Dir               string
+	Scope             Scope
+	Priority          int
+	Status            PathStatus
+	requireFlatMarker bool
 }
 
 // roots returns the discovery directories, highest priority first: the
@@ -165,27 +168,28 @@ type Root struct {
 // dir. A later root never overrides an earlier one.
 func (s *Store) roots() []Root {
 	type de struct {
-		dir   string
-		scope Scope
+		dir               string
+		scope             Scope
+		requireFlatMarker bool
 	}
 	var dirs []de
 	if s.projectRoot != "" {
 		for _, c := range config.ConventionDirs {
-			dirs = append(dirs, de{filepath.Join(s.projectRoot, c, SkillsDirname), ScopeProject})
+			dirs = append(dirs, de{filepath.Join(s.projectRoot, c, SkillsDirname), ScopeProject, c == ".claude"})
 		}
 	}
 	for _, d := range s.customPaths {
-		dirs = append(dirs, de{d, ScopeCustom})
+		dirs = append(dirs, de{d, ScopeCustom, false})
 	}
 	for _, c := range config.ConventionDirs {
-		dirs = append(dirs, de{filepath.Join(s.homeDir, c, SkillsDirname), ScopeGlobal})
+		dirs = append(dirs, de{filepath.Join(s.homeDir, c, SkillsDirname), ScopeGlobal, c == ".claude"})
 	}
 	out := make([]Root, 0, len(dirs))
 	for _, d := range dirs {
 		if s.excludedPaths[config.CanonicalSkillPath(d.dir)] {
 			continue
 		}
-		out = append(out, Root{Dir: d.dir, Scope: d.scope, Priority: len(out), Status: pathStatus(d.dir)})
+		out = append(out, Root{Dir: d.dir, Scope: d.scope, Priority: len(out), Status: pathStatus(d.dir), requireFlatMarker: d.requireFlatMarker})
 	}
 	return out
 }
@@ -300,11 +304,11 @@ func (s *Store) Read(name string) (Skill, bool) {
 
 func (s *Store) discoverRoot(r Root) []Skill {
 	var out []Skill
-	s.scanDir(r.Dir, r.Scope, 1, map[string]bool{}, &out)
+	s.scanDir(r.Dir, r.Scope, r.requireFlatMarker, 1, map[string]bool{}, &out)
 	return out
 }
 
-func (s *Store) scanDir(dir string, scope Scope, depth int, seen map[string]bool, out *[]Skill) {
+func (s *Store) scanDir(dir string, scope Scope, requireFlatMarker bool, depth int, seen map[string]bool, out *[]Skill) {
 	key := filepath.Clean(dir)
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
 		key = filepath.Clean(resolved)
@@ -319,7 +323,7 @@ func (s *Store) scanDir(dir string, scope Scope, depth int, seen map[string]bool
 		return
 	}
 	for _, e := range entries {
-		sk, ok := s.readEntry(dir, scope, e)
+		sk, ok := s.readEntry(dir, scope, requireFlatMarker, e)
 		if ok {
 			if depth == 1 || strings.TrimSpace(sk.Description) != "" {
 				*out = append(*out, sk)
@@ -329,7 +333,7 @@ func (s *Store) scanDir(dir string, scope Scope, depth int, seen map[string]bool
 		if depth >= s.maxDepth || !s.canScanChildDir(dir, e) {
 			continue
 		}
-		s.scanDir(filepath.Join(dir, e.Name()), scope, depth+1, seen, out)
+		s.scanDir(filepath.Join(dir, e.Name()), scope, requireFlatMarker, depth+1, seen, out)
 	}
 }
 
@@ -362,10 +366,10 @@ func shouldSkipScanDir(name string) bool {
 }
 
 // readEntry turns one directory entry into a skill. It resolves symlinks via
-// os.Stat (os.ReadDir reports a symlink's own type, not its target's), so a
-// linked skill directory or a linked flat <name>.md is discovered like a real
-// one; a broken link fails Stat and is skipped.
-func (s *Store) readEntry(dir string, scope Scope, e os.DirEntry) (Skill, bool) {
+// os.Stat (os.ReadDir reports a symlink's own type, not its target's), so linked
+// skill directories and linked flat skill files behave like real ones; a broken
+// link fails Stat and is skipped.
+func (s *Store) readEntry(dir string, scope Scope, requireFlatMarker bool, e os.DirEntry) (Skill, bool) {
 	name := e.Name()
 	full := filepath.Join(dir, name)
 
@@ -395,7 +399,7 @@ func (s *Store) readEntry(dir string, scope Scope, e os.DirEntry) (Skill, bool) 
 		if !IsValidName(stem) {
 			return Skill{}, false
 		}
-		return s.parse(full, stem, scope)
+		return s.parseFlat(full, stem, scope, requireFlatMarker)
 	}
 	return Skill{}, false
 }
@@ -404,12 +408,26 @@ func (s *Store) readEntry(dir string, scope Scope, e os.DirEntry) (Skill, bool) 
 // filename stem when valid; a missing `description:` is a warning, not a failure
 // (the skill loads but won't appear in the model's index).
 func (s *Store) parse(path, stem string, scope Scope) (Skill, bool) {
+	return s.parseSkill(path, stem, scope, false)
+}
+
+// parseFlat reads a flat <name>.md skill candidate. Claude skill roots can also
+// contain ordinary documentation, so those flat files need explicit skill
+// frontmatter before they are treated as skills.
+func (s *Store) parseFlat(path, stem string, scope Scope, requireSkillMarker bool) (Skill, bool) {
+	return s.parseSkill(path, stem, scope, requireSkillMarker)
+}
+
+func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bool) (Skill, bool) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return Skill{}, false
 	}
 	content := strings.TrimPrefix(strings.ReplaceAll(string(b), "\r\n", "\n"), "\uFEFF")
 	fm, body := splitFrontmatter(content)
+	if requireSkillMarker && !hasSkillMarker(fm) {
+		return Skill{}, false
+	}
 
 	name := stem
 	if v := fm["name"]; v != "" && IsValidName(v) {
@@ -430,6 +448,15 @@ func (s *Store) parse(path, stem string, scope Scope) (Skill, bool) {
 		Model:        strings.TrimSpace(fm["model"]),
 		Effort:       strings.TrimSpace(fm["effort"]),
 	}, true
+}
+
+func hasSkillMarker(fm map[string]string) bool {
+	for _, key := range []string{"description", "name", "runas", "context", "agent", "allowed-tools", "model", "effort"} {
+		if strings.TrimSpace(fm[key]) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Create scaffolds a new skill stub at the chosen scope. Refuses to overwrite.
