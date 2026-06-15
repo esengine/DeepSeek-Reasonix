@@ -219,6 +219,10 @@ func TestApplyLocalSKILLFileCopiesSiblingResources(t *testing.T) {
 }
 
 func TestApplyLocalSkillLinkMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+
 	project := t.TempDir()
 	home := t.TempDir()
 	src := filepath.Join(project, "local-skills", "gamma.md")
@@ -235,9 +239,6 @@ func TestApplyLocalSkillLinkMode(t *testing.T) {
 
 	if !resp.OK {
 		t.Fatalf("response = %+v", resp)
-	}
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink semantics differ on Windows")
 	}
 	if resp.Actions[0].Action != "link_skill" {
 		t.Fatalf("action = %q, want link_skill", resp.Actions[0].Action)

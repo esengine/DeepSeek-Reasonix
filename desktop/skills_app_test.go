@@ -27,6 +27,7 @@ func TestNormalizeSkillPathDirectoryLayout(t *testing.T) {
 func TestSkillRootsViewCountsProjectSkills(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	project := t.TempDir()
@@ -65,6 +66,7 @@ func TestSkillRootsViewCountsProjectSkills(t *testing.T) {
 func TestSkillRootsViewMarksEnvConfiguredCustomRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	project := t.TempDir()
@@ -111,6 +113,7 @@ func TestSkillRootsViewMarksEnvConfiguredCustomRoot(t *testing.T) {
 func TestSkillRootsViewOmitsExcludedConventionRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	project := t.TempDir()
@@ -149,6 +152,7 @@ func TestSkillRootsViewOmitsExcludedConventionRoot(t *testing.T) {
 func TestRemoveSkillPathPseudoDeletesConventionRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	path := filepath.Join(home, ".agents", "skills")
@@ -166,6 +170,7 @@ func TestRemoveSkillPathPseudoDeletesConventionRoot(t *testing.T) {
 func TestAddSkillPathRestoresConventionRootWithoutCustomPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	path := filepath.Join(home, ".agents", "skills")
@@ -204,6 +209,7 @@ func TestCapabilitiesIncludesDisabledSkills(t *testing.T) {
 	defer a.activeCtrl().Close()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	cfgPath := config.UserConfigPath()

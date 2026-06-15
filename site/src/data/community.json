@@ -1,7 +1,7 @@
 {
-  "stars": 20910,
-  "mergedPrs": 1799,
-  "contributors": 44,
+  "stars": 20843,
+  "mergedPrs": 1982,
+  "contributors": 41,
   "list": [
     {
       "login": "esengine",
@@ -13,7 +13,7 @@
       "login": "SivanCola",
       "avatar": "/av/SivanCola.png",
       "url": "https://github.com/SivanCola",
-      "c": 167
+      "c": 158
     },
     {
       "login": "HUQIANTAO",
@@ -28,15 +28,9 @@
       "c": 16
     },
     {
-      "login": "lanshi17",
-      "avatar": "/av/lanshi17.png",
-      "url": "https://github.com/lanshi17",
-      "c": 10
-    },
-    {
-      "login": "SuMuxi66",
-      "avatar": "/av/SuMuxi66.png",
-      "url": "https://github.com/SuMuxi66",
+      "login": "CVEngineer66",
+      "avatar": "/av/CVEngineer66.png",
+      "url": "https://github.com/CVEngineer66",
       "c": 10
     },
     {
@@ -46,21 +40,27 @@
       "c": 10
     },
     {
-      "login": "CVEngineer66",
-      "avatar": "/av/CVEngineer66.png",
-      "url": "https://github.com/CVEngineer66",
-      "c": 10
+      "login": "SuMuxi66",
+      "avatar": "/av/SuMuxi66.png",
+      "url": "https://github.com/SuMuxi66",
+      "c": 9
     },
     {
-      "login": "wade19990814-hue",
-      "avatar": "/av/wade19990814-hue.png",
-      "url": "https://github.com/wade19990814-hue",
-      "c": 7
+      "login": "lanshi17",
+      "avatar": "/av/lanshi17.png",
+      "url": "https://github.com/lanshi17",
+      "c": 9
     },
     {
       "login": "paradoxSCH",
       "avatar": "/av/paradoxSCH.png",
       "url": "https://github.com/paradoxSCH",
+      "c": 7
+    },
+    {
+      "login": "wade19990814-hue",
+      "avatar": "/av/wade19990814-hue.png",
+      "url": "https://github.com/wade19990814-hue",
       "c": 7
     },
     {
@@ -88,15 +88,9 @@
       "c": 5
     },
     {
-      "login": "jiaxindeyang-a11y",
-      "avatar": "/av/jiaxindeyang-a11y.png",
-      "url": "https://github.com/jiaxindeyang-a11y",
-      "c": 3
-    },
-    {
-      "login": "kekexunxun",
-      "avatar": "/av/kekexunxun.png",
-      "url": "https://github.com/kekexunxun",
+      "login": "AtmoOmen",
+      "avatar": "/av/AtmoOmen.png",
+      "url": "https://github.com/AtmoOmen",
       "c": 3
     },
     {
@@ -106,9 +100,15 @@
       "c": 3
     },
     {
-      "login": "AtmoOmen",
-      "avatar": "/av/AtmoOmen.png",
-      "url": "https://github.com/AtmoOmen",
+      "login": "kekexunxun",
+      "avatar": "/av/kekexunxun.png",
+      "url": "https://github.com/kekexunxun",
+      "c": 3
+    },
+    {
+      "login": "jiaxindeyang-a11y",
+      "avatar": "/av/jiaxindeyang-a11y.png",
+      "url": "https://github.com/jiaxindeyang-a11y",
       "c": 3
     },
     {
@@ -124,21 +124,9 @@
       "c": 2
     },
     {
-      "login": "whale-fall-ouo",
-      "avatar": "/av/whale-fall-ouo.png",
-      "url": "https://github.com/whale-fall-ouo",
-      "c": 2
-    },
-    {
       "login": "ttmouse",
       "avatar": "/av/ttmouse.png",
       "url": "https://github.com/ttmouse",
-      "c": 2
-    },
-    {
-      "login": "lightfront",
-      "avatar": "/av/lightfront.png",
-      "url": "https://github.com/lightfront",
       "c": 2
     },
     {
@@ -169,6 +157,12 @@
       "login": "xinrenH",
       "avatar": "/av/xinrenH.png",
       "url": "https://github.com/xinrenH",
+      "c": 1
+    },
+    {
+      "login": "lightfront",
+      "avatar": "/av/lightfront.png",
+      "url": "https://github.com/lightfront",
       "c": 1
     },
     {
@@ -232,12 +226,6 @@
       "c": 1
     },
     {
-      "login": "JesonChou",
-      "avatar": "/av/JesonChou.png",
-      "url": "https://github.com/JesonChou",
-      "c": 1
-    },
-    {
       "login": "HorusJiang",
       "avatar": "/av/HorusJiang.png",
       "url": "https://github.com/HorusJiang",
@@ -247,12 +235,6 @@
       "login": "HBLADEH",
       "avatar": "/av/HBLADEH.png",
       "url": "https://github.com/HBLADEH",
-      "c": 1
-    },
-    {
-      "login": "Diarica",
-      "avatar": "/av/Diarica.png",
-      "url": "https://github.com/Diarica",
       "c": 1
     },
     {

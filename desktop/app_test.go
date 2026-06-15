@@ -50,8 +50,10 @@ func isolateDesktopUserDirs(t *testing.T) string {
 	t.Helper()
 	home := robustTempDir(t)
 	xdg := filepath.Join(home, ".config")
+	xdgCache := filepath.Join(home, ".cache")
 	appData := filepath.Join(home, "AppData")
-	for _, dir := range []string{xdg, appData} {
+	localAppData := filepath.Join(home, "LocalAppData")
+	for _, dir := range []string{xdg, xdgCache, appData, localAppData} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -59,7 +61,9 @@ func isolateDesktopUserDirs(t *testing.T) string {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("XDG_CACHE_HOME", xdgCache)
 	t.Setenv("AppData", appData)
+	t.Setenv("LOCALAPPDATA", localAppData)
 	return home
 }
 
@@ -2465,7 +2469,7 @@ tier = "lazy"
 
 func TestUpdateMCPServerSplitsPastedCommandLine(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
