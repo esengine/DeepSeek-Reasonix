@@ -1,8 +1,8 @@
 package agent_test
 
 import (
-	"testing"
 	"reasonix/internal/agent"
+	"testing"
 )
 
 func TestStripTransientBlocksActiveGoal(t *testing.T) {
