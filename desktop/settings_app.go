@@ -237,7 +237,7 @@ func providerAccessSet(names []string) map[string]bool {
 	for _, name := range names {
 		name = strings.TrimSpace(name)
 		if name != "" {
-			out[name] = true
+			out[config.CanonicalDesktopOfficialProviderName(name)] = true
 		}
 	}
 	return out
@@ -246,7 +246,7 @@ func providerAccessSet(names []string) map[string]bool {
 func addProviderAccess(c *config.Config, names ...string) {
 	seen := providerAccessSet(c.Desktop.ProviderAccess)
 	for _, name := range names {
-		name = strings.TrimSpace(name)
+		name = config.CanonicalDesktopOfficialProviderName(strings.TrimSpace(name))
 		if name == "" || seen[name] {
 			continue
 		}
@@ -262,7 +262,7 @@ func removeProviderAccess(c *config.Config, names ...string) {
 	}
 	out := c.Desktop.ProviderAccess[:0]
 	for _, name := range c.Desktop.ProviderAccess {
-		if !remove[name] {
+		if !remove[config.CanonicalDesktopOfficialProviderName(strings.TrimSpace(name))] {
 			out = append(out, name)
 		}
 	}
@@ -305,7 +305,7 @@ func officialProviderAddedSet(cfg *config.Config) map[string]bool {
 	access := providerAccessSet(cfg.Desktop.ProviderAccess)
 	for i := range cfg.Providers {
 		p := cfg.Providers[i]
-		if !access[p.Name] {
+		if !access[config.CanonicalDesktopOfficialProviderName(strings.TrimSpace(p.Name))] {
 			continue
 		}
 		if kind := officialProviderKindFromEntry(p); kind != "" {
@@ -409,7 +409,7 @@ func (a *App) Settings() SettingsView {
 	v.OfficialProviders = officialProviderViews(officialProviderAddedSet(cfg))
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		v.Providers = append(v.Providers, providerViewFromEntry(*p, isOfficialBuiltInProvider(*p), added[p.Name]))
+		v.Providers = append(v.Providers, providerViewFromEntry(*p, isOfficialBuiltInProvider(*p), added[config.CanonicalDesktopOfficialProviderName(strings.TrimSpace(p.Name))]))
 	}
 	return v
 }
@@ -687,22 +687,24 @@ func (a *App) rebuild() error {
 	if controllerHasActiveRuntimeWork(tab.Ctrl) {
 		return rebuildControllerActiveWorkError("settings")
 	}
-	var carried []provider.Message
-	prevPath := ""
-	if tab.Ctrl != nil {
-		prevPath = tab.Ctrl.SessionPath()
-		_ = a.snapshotTab(tab)
-		carried = tab.Ctrl.History()
-		tab.Ctrl.Close()
-	}
 	model := tab.model
 	if cfg, err := config.LoadForRoot(tab.WorkspaceRoot); err == nil {
-		if resolved, fallback, ok := cfg.ResolveModelWithFallback(model); ok {
-			if fallback && strings.TrimSpace(model) != "" {
-				a.noticeForTab(tab.ID, fmt.Sprintf("model %q is no longer available; switched to %s", model, resolved))
-			}
-			model = resolved
+		resolved, fallback, ok := resolveAccessibleModelWithFallback(cfg, model)
+		if !ok {
+			return noAccessibleModelError(model)
 		}
+		if fallback && strings.TrimSpace(model) != "" {
+			a.noticeForTab(tab.ID, fmt.Sprintf("model %q is no longer available; switched to %s", model, resolved))
+		}
+		model = resolved
+	}
+	var carried []provider.Message
+	prevPath := ""
+	oldCtrl := tab.Ctrl
+	if oldCtrl != nil {
+		prevPath = oldCtrl.SessionPath()
+		_ = a.snapshotTab(tab)
+		carried = oldCtrl.History()
 	}
 	ctrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model: model, RequireKey: false,
@@ -713,14 +715,12 @@ func (a *App) rebuild() error {
 		TokenMode:      currentTabTokenMode(tab),
 	})
 	if err != nil {
-		a.mu.Lock()
-		tab.StartupErr = err.Error()
-		tab.Ready = true
-		a.mu.Unlock()
-		a.emitReady(a.ctx)
 		return err
 	}
 	a.bindControllerDisplayRecorder(ctrl)
+	if oldCtrl != nil {
+		oldCtrl.Close()
+	}
 	a.mu.Lock()
 	tab.Ctrl = ctrl
 	tab.model = model
@@ -1068,17 +1068,17 @@ type providerRemovalTab struct {
 }
 
 func providerAccessFallbackRef(c *config.Config, name string) string {
-	name = strings.TrimSpace(name)
+	name = config.CanonicalDesktopOfficialProviderName(strings.TrimSpace(name))
 	for _, candidate := range c.Desktop.ProviderAccess {
-		candidate = strings.TrimSpace(candidate)
+		candidate = config.CanonicalDesktopOfficialProviderName(strings.TrimSpace(candidate))
 		if candidate == "" || candidate == name {
 			continue
 		}
-		p, ok := c.Provider(candidate)
-		if !ok || len(p.ModelList()) == 0 {
+		p, ok := c.ResolveModel(candidate)
+		if !ok || !p.Configured() {
 			continue
 		}
-		return p.Name + "/" + p.DefaultModel()
+		return p.Name + "/" + p.Model
 	}
 	return ""
 }

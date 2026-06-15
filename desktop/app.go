@@ -4910,7 +4910,50 @@ func modelProviderAccessAllowed(access map[string]bool, name string) bool {
 	if len(access) == 0 {
 		return true
 	}
-	return access[strings.TrimSpace(name)]
+	return access[config.CanonicalDesktopOfficialProviderName(strings.TrimSpace(name))]
+}
+
+func resolveAccessibleModelWithFallback(cfg *config.Config, ref string) (resolvedRef string, fallback bool, ok bool) {
+	if cfg == nil {
+		return "", false, false
+	}
+	access := providerAccessSet(cfg.Desktop.ProviderAccess)
+	tryResolve := func(candidate string, fallback bool) (string, bool, bool) {
+		entry, found := cfg.ResolveModel(candidate)
+		if !found || !entry.Configured() || !modelProviderAccessAllowed(access, entry.Name) {
+			return "", false, false
+		}
+		return entry.Name + "/" + entry.Model, fallback, true
+	}
+
+	ref = strings.TrimSpace(ref)
+	if ref != "" {
+		if resolved, fallback, ok := tryResolve(ref, false); ok {
+			return resolved, fallback, true
+		}
+	}
+	defaultRef := strings.TrimSpace(cfg.DefaultModel)
+	if ref != defaultRef && defaultRef != "" {
+		if resolved, fallback, ok := tryResolve(defaultRef, true); ok {
+			return resolved, fallback, true
+		}
+	}
+	for i := range cfg.Providers {
+		p := &cfg.Providers[i]
+		if len(p.ModelList()) == 0 || !p.Configured() || !modelProviderAccessAllowed(access, p.Name) {
+			continue
+		}
+		return p.Name + "/" + p.DefaultModel(), true, true
+	}
+	return "", false, false
+}
+
+func noAccessibleModelError(ref string) error {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		ref = "<default>"
+	}
+	return fmt.Errorf("model %q is no longer available and no accessible fallback is configured", ref)
 }
 
 func controllerHasActiveRuntimeWork(ctrl *control.Controller) bool {
@@ -5652,9 +5695,9 @@ func (a *App) currentProviderEntryForTab(tabID string) (*config.ProviderEntry, e
 	if strings.TrimSpace(ref) == "" {
 		ref = cfg.DefaultModel
 	}
-	resolved, _, ok := cfg.ResolveModelWithFallback(ref)
+	resolved, _, ok := resolveAccessibleModelWithFallback(cfg, ref)
 	if !ok {
-		return nil, fmt.Errorf("unknown model %q", ref)
+		return nil, noAccessibleModelError(ref)
 	}
 	entry, ok := cfg.ResolveModel(resolved)
 	if !ok {
@@ -5678,9 +5721,9 @@ func (a *App) resolvedModelForTab(tab *WorkspaceTab) (string, bool, error) {
 	if ref == "" {
 		ref = cfg.DefaultModel
 	}
-	resolved, fallback, ok := cfg.ResolveModelWithFallback(ref)
+	resolved, fallback, ok := resolveAccessibleModelWithFallback(cfg, ref)
 	if !ok {
-		return "", false, fmt.Errorf("unknown model %q", ref)
+		return "", false, noAccessibleModelError(ref)
 	}
 	return resolved, fallback, nil
 }

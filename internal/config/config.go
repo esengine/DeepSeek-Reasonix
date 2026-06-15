@@ -1330,6 +1330,16 @@ func LoadForRoot(root string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Plugins = plugins
+	// Apply the same later-wins merge for [[providers]], but only across actual
+	// TOML sources. This preserves the long-standing rule that declaring
+	// [[providers]] replaces the built-in defaults, while preventing a project
+	// reasonix.toml from accidentally dropping the user's global custom
+	// providers.
+	if providers, ok, err := mergeTOMLProviders(tomlSources); err != nil {
+		return nil, err
+	} else if ok {
+		cfg.Providers = providers
+	}
 
 	// Claude Code's .mcp.json (project root) is read last and merged into
 	// [[plugins]], so a server configured for Claude works here unchanged.
@@ -1479,6 +1489,38 @@ func mergeTOMLPlugins(paths []string) ([]PluginEntry, error) {
 		}
 	}
 	return merged, nil
+}
+
+// mergeTOMLProviders merges [[providers]] across TOML sources by name (later
+// source wins). The bool reports whether any TOML source explicitly declared a
+// provider, so callers can distinguish "no provider blocks anywhere" from an
+// intentional merged list.
+func mergeTOMLProviders(paths []string) ([]ProviderEntry, bool, error) {
+	var merged []ProviderEntry
+	index := map[string]int{}
+	found := false
+	for _, path := range paths {
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		var f Config
+		if _, err := toml.DecodeFile(path, &f); err != nil {
+			return nil, false, fmt.Errorf("config %s: %w", path, err)
+		}
+		if len(f.Providers) == 0 {
+			continue
+		}
+		found = true
+		for _, p := range f.Providers {
+			if i, ok := index[p.Name]; ok {
+				merged[i] = p
+				continue
+			}
+			index[p.Name] = len(merged)
+			merged = append(merged, p)
+		}
+	}
+	return merged, found, nil
 }
 
 // LoadForEdit returns a config to seed the `reasonix setup` wizard when reconfiguring:

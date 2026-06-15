@@ -1176,6 +1176,165 @@ func TestSetTokenModeMigratesStaleOfficialDeepSeekTabModel(t *testing.T) {
 	}
 }
 
+func TestSetTokenModeFallsBackWhenTabProviderAccessWasRemoved(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+	t.Setenv("PROV_A_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "prov-a/model-a"
+	cfg.Desktop.ProviderAccess = []string{"prov-a"}
+	cfg.Providers = append(cfg.Providers, config.ProviderEntry{
+		Name:      "prov-a",
+		Kind:      "openai",
+		BaseURL:   "https://a.example.com/v1",
+		Model:     "model-a",
+		APIKeyEnv: "PROV_A_KEY",
+	})
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	old := control.New(control.Options{Label: "old-controller"})
+	app.setTestCtrl(old, "deepseek-flash/deepseek-v4-flash")
+	defer func() {
+		if c := app.activeCtrl(); c != nil {
+			c.Close()
+		}
+	}()
+
+	if err := app.SetTokenMode("economy"); err != nil {
+		t.Fatalf("SetTokenMode(economy): %v", err)
+	}
+	tab := app.activeTab()
+	if tab == nil {
+		t.Fatal("active tab missing")
+	}
+	if tab.model != "prov-a/model-a" {
+		t.Fatalf("tab model = %q, want prov-a/model-a fallback", tab.model)
+	}
+}
+
+func TestBuildTabControllerFallsBackWhenSavedTabProviderAccessWasRemoved(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+	t.Setenv("PROV_A_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "prov-a/model-a"
+	cfg.Desktop.ProviderAccess = []string{"prov-a"}
+	cfg.Providers = append(cfg.Providers, config.ProviderEntry{
+		Name:      "prov-a",
+		Kind:      "openai",
+		BaseURL:   "https://a.example.com/v1",
+		Model:     "model-a",
+		APIKeyEnv: "PROV_A_KEY",
+	})
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	project := t.TempDir()
+	app := NewApp()
+	tab := app.createTabEntryWithID("project", project, "", "tab_access_removed")
+	tab.model = "deepseek-flash/deepseek-v4-flash"
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	app.buildTabController(tab)
+	if tab.Ctrl == nil {
+		t.Fatalf("tab controller was not built: %s", tab.StartupErr)
+	}
+	defer tab.Ctrl.Close()
+
+	if tab.model != "prov-a/model-a" {
+		t.Fatalf("tab model = %q, want prov-a/model-a fallback", tab.model)
+	}
+	saved := loadTabsFile()
+	if len(saved.Tabs) != 1 || saved.Tabs[0].Model != "prov-a/model-a" {
+		t.Fatalf("saved tabs = %+v, want prov-a/model-a", saved.Tabs)
+	}
+}
+
+func TestBuildTabControllerErrorsWhenNoAccessibleFallbackExists(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("PROV_A_KEY", "")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "prov-a/model-a"
+	cfg.Desktop.ProviderAccess = []string{"prov-a"}
+	cfg.Providers = []config.ProviderEntry{{
+		Name:      "prov-a",
+		Kind:      "openai",
+		BaseURL:   "https://a.example.com/v1",
+		Model:     "model-a",
+		APIKeyEnv: "PROV_A_KEY",
+	}}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	project := t.TempDir()
+	app := NewApp()
+	tab := app.createTabEntryWithID("project", project, "", "tab_no_accessible_fallback")
+	tab.model = "deepseek-flash/deepseek-v4-flash"
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	app.buildTabController(tab)
+	if tab.Ctrl != nil {
+		t.Fatalf("tab controller should not be built when no accessible fallback exists")
+	}
+	if tab.StartupErr == "" || !strings.Contains(tab.StartupErr, "no accessible fallback") {
+		t.Fatalf("startup error = %q, want no accessible fallback message", tab.StartupErr)
+	}
+}
+
+func TestRebuildKeepsExistingControllerWhenNoAccessibleFallbackExists(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("PROV_A_KEY", "")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "prov-a/model-a"
+	cfg.Desktop.ProviderAccess = []string{"prov-a"}
+	cfg.Providers = []config.ProviderEntry{{
+		Name:      "prov-a",
+		Kind:      "openai",
+		BaseURL:   "https://a.example.com/v1",
+		Model:     "model-a",
+		APIKeyEnv: "PROV_A_KEY",
+	}}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	old := control.New(control.Options{Label: "old-controller"})
+	app.setTestCtrl(old, "deepseek-flash/deepseek-v4-flash")
+	defer func() {
+		if c := app.activeCtrl(); c != nil {
+			c.Close()
+		}
+	}()
+
+	err := app.rebuild()
+	if err == nil || !strings.Contains(err.Error(), "no accessible fallback") {
+		t.Fatalf("rebuild error = %v, want no accessible fallback", err)
+	}
+	if got := app.activeCtrl(); got != old {
+		t.Fatalf("active controller = %v, want existing controller preserved", got)
+	}
+}
+
 func TestSetTokenModeKeepsControllerWhenRebuildFails(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	t.Setenv("DEEPSEEK_API_KEY", "")

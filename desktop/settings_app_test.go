@@ -149,6 +149,47 @@ func TestOfficialMimoAPITemplateIncludesVisionModels(t *testing.T) {
 	}
 }
 
+func TestSettingsTreatsLegacyExplicitProviderAccessAsAdded(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+	t.Setenv("MIMO_API_KEY", "sk-test")
+	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(config.UserConfigPath(), []byte(`
+default_model = "deepseek-flash/deepseek-v4-flash"
+
+[desktop]
+provider_access = ["deepseek-flash", "mimo-pro"]
+
+[[providers]]
+name = "deepseek-flash"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+models = ["deepseek-v4-flash", "deepseek-v4-pro"]
+default = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[[providers]]
+name = "mimo-pro"
+kind = "openai"
+base_url = "https://token-plan-cn.xiaomimimo.com/v1"
+model = "mimo-v2.5-pro"
+api_key_env = "MIMO_API_KEY"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got := NewApp().Settings()
+	providers := map[string]ProviderView{}
+	for _, p := range got.Providers {
+		providers[p.Name] = p
+	}
+	if !providers["deepseek"].Added || !providers["mimo-token-plan"].Added {
+		t.Fatalf("providers = %+v, want canonical official providers marked added", providers)
+	}
+}
+
 func TestSetAgentParamsPersistsStepLimitsToUserConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

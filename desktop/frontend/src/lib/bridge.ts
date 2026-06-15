@@ -1264,8 +1264,16 @@ function makeMockApp(): AppBindings {
     },
   ];
   const mockModelCatalog = [
-    { ref: "deepseek/deepseek-v4-flash", provider: "deepseek", model: "deepseek-v4-flash" },
-    { ref: "deepseek/deepseek-v4-pro", provider: "deepseek", model: "deepseek-v4-pro" },
+    {
+      ref: "deepseek/deepseek-v4-flash",
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+    },
+    {
+      ref: "deepseek/deepseek-v4-pro",
+      provider: "deepseek",
+      model: "deepseek-v4-pro",
+    },
   ];
   const defaultMockModelRef = mockModelCatalog[0].ref;
   const mockModelRef = (name: string): string => {

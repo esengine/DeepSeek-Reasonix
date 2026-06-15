@@ -1410,12 +1410,19 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 		model = cfg.DefaultModel
 	}
 	requestedModel := model
-	if resolved, fallback, ok := cfg.ResolveModelWithFallback(model); ok {
-		if fallback && strings.TrimSpace(tab.model) != "" {
-			a.noticeForTab(tab.ID, fmt.Sprintf("model %q is no longer available; switched to %s", requestedModel, resolved))
-		}
-		model = resolved
+	resolved, fallback, ok := resolveAccessibleModelWithFallback(cfg, model)
+	if !ok {
+		a.mu.Lock()
+		tab.StartupErr = noAccessibleModelError(requestedModel).Error()
+		tab.Ready = true
+		a.mu.Unlock()
+		a.emitReady(wailsCtx)
+		return
 	}
+	if fallback && strings.TrimSpace(tab.model) != "" {
+		a.noticeForTab(tab.ID, fmt.Sprintf("model %q is no longer available; switched to %s", requestedModel, resolved))
+	}
+	model = resolved
 
 	a.mu.Lock()
 	tab.model = model
