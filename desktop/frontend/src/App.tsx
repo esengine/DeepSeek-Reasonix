@@ -3001,7 +3001,6 @@ export default function App() {
               turnTokens={state.turnTotalTokens}
               turnCost={state.turnCost}
               cost={state.sessionCost}
-              currency={state.sessionCurrency}
               modelLabel={state.meta?.label}
               labelStyle={statusBarStyle}
               items={statusBarItems}

@@ -24,3 +24,15 @@ export function formatMoney(amount?: number, currency?: string, empty: "zero" | 
   }
   return `${symbol}${amount < 1 ? amount.toFixed(4) : amount.toFixed(2)}`;
 }
+
+export function formatCnyMoney(amount?: number, empty: "zero" | "dash" = "zero"): string {
+  return formatMoney(amount, DEFAULT_CURRENCY_SYMBOL, empty);
+}
+
+export function normalizeCnyMoneyDisplay(display?: string): string {
+  const value = (display ?? "").trim();
+  if (!value) return "";
+  const amount = value.match(/[-+]?\d[\d,]*(?:\.\d+)?/);
+  if (!amount) return value;
+  return `${DEFAULT_CURRENCY_SYMBOL}${amount[0]}`;
+}

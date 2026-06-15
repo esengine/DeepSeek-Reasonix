@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Activity, CircleDollarSign, CircleGauge, Database, Layers, Percent, RefreshCw, Wallet, Zap } from "lucide-react";
 import { Tooltip } from "./Tooltip";
 import { useI18n, type Translator } from "../lib/i18n";
-import { formatMoney } from "../lib/money";
+import { formatCnyMoney, normalizeCnyMoneyDisplay } from "../lib/money";
 import { normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
 import { type BalanceInfo, type CollaborationMode, type ContextInfo, type JobView, type ToolApprovalMode, type WireUsage } from "../lib/types";
 
@@ -118,7 +118,6 @@ export function StatusBar({
   turnTokens,
   turnCost,
   cost,
-  currency,
   modelLabel,
   labelStyle = "text",
   items,
@@ -135,7 +134,6 @@ export function StatusBar({
   turnTokens?: number;
   turnCost?: number;
   cost?: number;
-  currency?: string;
   modelLabel?: string;
   labelStyle?: StatusBarLabelStyle;
   items?: readonly string[];
@@ -148,12 +146,12 @@ export function StatusBar({
   const nowPct = nowRate(usage);
   const avgPct = avgRate(usage);
   const jobsList = jobs ?? [];
-  const turnCostLabel = formatMoney(turnCost, currency);
-  const costLabel = formatMoney(cost, currency);
+  const turnCostLabel = formatCnyMoney(turnCost);
+  const costLabel = formatCnyMoney(cost);
   const turnLabel = formatTurnCount(sessionTurns, t);
   const tokenLabel = formatTokenCount(sessionTokens);
   const turnTokenLabel = formatTokenCount(turnTokens);
-  const balanceLabel = balance?.available && balance.display ? balance.display : "-";
+  const balanceLabel = balance?.available && balance.display ? normalizeCnyMoneyDisplay(balance.display) : "-";
   const planMode = collaborationMode === "plan";
   const goalMode = collaborationMode === "goal";
   const metricLabelStyle = labelStyle === "text" ? "text" : "icon";
