@@ -1999,9 +1999,29 @@ func retargetDesktopOfficialRef(ref string, access map[string]bool) string {
 	}
 }
 
+var (
+	osUserConfigDir = os.UserConfigDir
+	osUserHomeDir   = os.UserHomeDir
+)
+
+func userConfigDir() string {
+	dir, err := osUserConfigDir()
+	if err == nil && strings.TrimSpace(dir) != "" {
+		return dir
+	}
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return ""
+	}
+	home, homeErr := osUserHomeDir()
+	if homeErr != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.Join(home, ".config")
+}
+
 func userConfigPath() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
+	dir := userConfigDir()
+	if dir == "" {
 		return ""
 	}
 	return filepath.Join(dir, "reasonix", "config.toml")
@@ -2036,8 +2056,8 @@ func UserConfigPath() string { return userConfigPath() }
 // committed, and resolve from any working directory. "" when the user config dir
 // can't be resolved.
 func UserCredentialsPath() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
+	dir := userConfigDir()
+	if dir == "" {
 		return ""
 	}
 	return filepath.Join(dir, "reasonix", "credentials")
@@ -2047,8 +2067,8 @@ func UserCredentialsPath() string {
 // traceability (one timestamped .jsonl per compaction). Empty if the user config
 // directory cannot be resolved, in which case archiving is skipped.
 func ArchiveDir() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
+	dir := userConfigDir()
+	if dir == "" {
 		return ""
 	}
 	return filepath.Join(dir, "reasonix", "archive")
@@ -2058,8 +2078,8 @@ func ArchiveDir() string {
 // Used by `reasonix chat --continue` / `--resume` to find the recent ones. Empty
 // if the user config dir can't be resolved — sessions then aren't saved.
 func SessionDir() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
+	dir := userConfigDir()
+	if dir == "" {
 		return ""
 	}
 	return filepath.Join(dir, "reasonix", "sessions")
@@ -2092,8 +2112,8 @@ func WorkspaceSlug(absPath string) string {
 // shares one root the user can wipe in a single rm. Empty when the OS dir is
 // unavailable — callers must tolerate that (caching is best-effort).
 func CacheDir() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
+	dir := userConfigDir()
+	if dir == "" {
 		return ""
 	}
 	return filepath.Join(dir, "reasonix", "cache")
@@ -2103,8 +2123,8 @@ func CacheDir() string {
 // the user-global REASONIX.md and the per-project auto-memory store live. Empty
 // when the user config dir can't be resolved, which disables user-scoped memory.
 func MemoryUserDir() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
+	dir := userConfigDir()
+	if dir == "" {
 		return ""
 	}
 	return filepath.Join(dir, "reasonix")
