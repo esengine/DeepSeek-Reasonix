@@ -102,6 +102,57 @@ const lagSamples: number[] = [];
 let performanceMonitorInstalled = false;
 let lastPerformancePromptAt = 0;
 
+const PERF_REPORTED_STORAGE_KEY = "reasonix:perf-reported";
+
+// Idempotent per pressure label: once a category is reported (persisted per build) or
+// dismissed (session only), stop re-surfacing it so a steady slowdown can't spam prompts.
+const dismissedPerfLabels = new Set<string>();
+let reportedPerfLabels: Set<string> | null = null;
+
+function currentBuildCommit(): string {
+  return typeof __BUILD_COMMIT__ === "string" ? __BUILD_COMMIT__ : "dev";
+}
+
+export function parseReportedPerf(raw: string | null, build: string): Set<string> {
+  if (!raw) return new Set();
+  try {
+    const parsed = JSON.parse(raw) as { build?: string; labels?: unknown };
+    if (parsed.build !== build || !Array.isArray(parsed.labels)) return new Set();
+    return new Set(parsed.labels.filter((label): label is string => typeof label === "string"));
+  } catch {
+    return new Set();
+  }
+}
+
+export function serializeReportedPerf(labels: ReadonlySet<string>, build: string): string {
+  return JSON.stringify({ build, labels: [...labels] });
+}
+
+function getReportedPerfLabels(): Set<string> {
+  if (reportedPerfLabels) return reportedPerfLabels;
+  let raw: string | null = null;
+  try {
+    raw = typeof localStorage !== "undefined" ? localStorage.getItem(PERF_REPORTED_STORAGE_KEY) : null;
+  } catch {
+    raw = null;
+  }
+  reportedPerfLabels = parseReportedPerf(raw, currentBuildCommit());
+  return reportedPerfLabels;
+}
+
+function markPerfReported(label: string): void {
+  const set = getReportedPerfLabels();
+  if (set.has(label)) return;
+  set.add(label);
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(PERF_REPORTED_STORAGE_KEY, serializeReportedPerf(set, currentBuildCommit()));
+    }
+  } catch {
+    // localStorage can throw (private mode / quota); the session-level set still dedups.
+  }
+}
+
 function clip(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) : s;
 }
@@ -367,7 +418,11 @@ export function buildCrashPayload(label: string, err: unknown, extra?: string): 
   };
 }
 
-function sendButton(payload: CrashPayload, className = "crash-overlay__send"): HTMLButtonElement | null {
+function sendButton(
+  payload: CrashPayload,
+  className = "crash-overlay__send",
+  onSent?: () => void,
+): HTMLButtonElement | null {
   // Resolved at click time via window.go, not the bridge module: this overlay must
   // stay usable even when the rest of the app (and its imports) is broken.
   const report = window.go?.main?.App?.ReportCrash;
@@ -381,6 +436,7 @@ function sendButton(payload: CrashPayload, className = "crash-overlay__send"): H
     try {
       await report(payload.kind, JSON.stringify(payload));
       send.textContent = t("crash.sent");
+      onSent?.();
     } catch {
       send.textContent = t("crash.sendFailed");
     }
@@ -404,7 +460,7 @@ function paintPerformancePrompt(payload: CrashPayload, snapshot: PerformanceSnap
   body.textContent = formatPerformanceContext(snapshot);
   const actions = document.createElement("div");
   actions.className = "performance-report__actions";
-  const send = sendButton(payload, "performance-report__send");
+  const send = sendButton(payload, "performance-report__send", () => markPerfReported(payload.label));
   const copy = document.createElement("button");
   copy.className = "performance-report__copy";
   copy.textContent = t("crash.copy");
@@ -412,7 +468,10 @@ function paintPerformancePrompt(payload: CrashPayload, snapshot: PerformanceSnap
   const dismiss = document.createElement("button");
   dismiss.className = "performance-report__dismiss";
   dismiss.textContent = t("performanceReport.dismiss");
-  dismiss.onclick = () => host?.remove();
+  dismiss.onclick = () => {
+    dismissedPerfLabels.add(payload.label);
+    host?.remove();
+  };
   if (send) actions.append(send);
   actions.append(copy, dismiss);
   const note = document.createElement("div");
@@ -453,15 +512,30 @@ export function reportCrash(label: string, err: unknown, extra?: string) {
   paint(buildCrashPayload(label, err, extra));
 }
 
-function shouldPromptForPerformance(now: number): boolean {
-  if (now - lastPerformancePromptAt < PROMPT_COOLDOWN_MS) return false;
-  if (typeof document !== "undefined" && document.visibilityState === "hidden") return false;
+export function shouldPromptForPerformanceLabel(
+  alreadyHandled: boolean,
+  msSinceLastPrompt: number,
+  visibilityHidden: boolean,
+): boolean {
+  if (alreadyHandled) return false;
+  if (msSinceLastPrompt < PROMPT_COOLDOWN_MS) return false;
+  if (visibilityHidden) return false;
   return true;
+}
+
+function isPerfLabelHandled(label: string): boolean {
+  return dismissedPerfLabels.has(label) || getReportedPerfLabels().has(label);
+}
+
+function shouldPromptForPerformance(now: number, label: string): boolean {
+  const hidden = typeof document !== "undefined" && document.visibilityState === "hidden";
+  return shouldPromptForPerformanceLabel(isPerfLabelHandled(label), now - lastPerformancePromptAt, hidden);
 }
 
 function promptPerformanceReport(reason: string, currentLagMs = 0): void {
   const now = Date.now();
-  if (!shouldPromptForPerformance(now)) return;
+  const label = performanceLabelForReason(reason);
+  if (!shouldPromptForPerformance(now, label)) return;
   lastPerformancePromptAt = now;
   addBreadcrumb("performance", reason);
   const snapshot = performanceSnapshot(reason, currentLagMs);
