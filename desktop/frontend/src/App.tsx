@@ -112,7 +112,6 @@ import { useWindowStatePersistence } from "./lib/windowState";
 import { availableWorkspacePanelWidth, resolveWorkspacePanelWidth, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
 import { isCloseTabShortcut } from "./lib/keyboardShortcuts";
 import logoSymbol from "./assets/logo-symbol.svg";
-import logoWordmark from "./assets/logo-wordmark.svg";
 
 const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
 const SIDEBAR_DEFAULT_WIDTH = 232;
@@ -1943,6 +1942,12 @@ export default function App() {
     const target = blankSessionTarget();
     await openBlankSession(target.scope, target.workspaceRoot);
   }, [blankSessionTarget, closeTransientOverlays, openBlankSession]);
+
+  const handleTabClose = useCallback(async (tabId: string) => {
+    closeTransientOverlays();
+    await _closeTab(tabId);
+    await refreshTabMetas();
+  }, [_closeTab, closeTransientOverlays, refreshTabMetas]);
 
   const [rewindSignal, setRewindSignal] = useState(0);
 
