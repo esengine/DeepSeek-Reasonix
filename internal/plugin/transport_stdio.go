@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,18 @@ import (
 )
 
 const closeWaitBudget = 5 * time.Second
+
+// defaultCallTimeout is the per-call deadline applied when the caller's context
+// carries no deadline of its own. Without this a slow or hung MCP server blocks
+// the agent's turn indefinitely — the select in call() parks on ctx.Done()
+// which never fires because the turn context is only cancelled by explicit user
+// action (Ctrl+C), not by a timeout (#4299).
+//
+// No other major MCP client retries timed-out tool calls (Claude Code, the
+// official Python and TypeScript SDKs all treat timeout as a hard failure).
+// Retries are unsafe for side-effecting calls and pointless when the server is
+// truly hung — a single configurable timeout is the industry-standard pattern.
+const defaultCallTimeout = 60 * time.Second
 
 // stdioTransport speaks newline-delimited JSON-RPC 2.0 over a subprocess's
 // stdin/stdout — the MCP stdio convention (one JSON message per line, no
@@ -35,7 +48,8 @@ type stdioTransport struct {
 	stdout *bufio.Reader
 	stderr *tailBuffer
 
-	callMu sync.Mutex // one in-flight request/response at a time over the shared pipe
+	callMu      sync.Mutex    // one in-flight request/response at a time over the shared pipe
+	callTimeout time.Duration // per-call deadline when ctx has no deadline; 0 means defaultCallTimeout
 
 	mu      sync.Mutex
 	nextID  int
@@ -472,8 +486,33 @@ func (t *stdioTransport) call(ctx context.Context, method string, params any) (j
 		return nil, fmt.Errorf("plugin %q: write %s: %w", t.name, method, err)
 	}
 
+	// Apply a per-call timeout when the caller's context carries no deadline
+	// of its own. The agent's turn context is only cancelled by explicit user
+	// action (Ctrl+C); without our own deadline a slow server blocks forever.
+	//
+	// callMu serialises the write + response read over the shared stdin/stdout
+	// pipe. One timed-out call therefore blocks all other tools on this server
+	// for the timeout duration. Removing callMu would allow interleaved
+	// JSON-RPC messages on the pipe — correct in theory (the pending map
+	// already demuxes by id) but risky without upstream MCP conformance tests.
+	// The timeout cap (∞ → 60s) is the critical fix; serialization is deferred.
+	var appliedTimeout time.Duration
+	if _, ok := ctx.Deadline(); !ok {
+		appliedTimeout = t.callTimeout
+		if appliedTimeout <= 0 {
+			appliedTimeout = defaultCallTimeout
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, appliedTimeout)
+		defer cancel()
+	}
+
 	select {
 	case <-ctx.Done():
+		if ctx.Err() == context.DeadlineExceeded {
+			slog.Warn("plugin: MCP call timed out",
+				"server", t.name, "method", method, "timeout", appliedTimeout)
+		}
 		return nil, ctx.Err()
 	case resp, ok := <-ch:
 		if !ok {
