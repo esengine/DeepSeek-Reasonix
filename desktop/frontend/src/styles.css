@@ -1606,7 +1606,13 @@ a[href] {
   border-right: 1px solid var(--border-soft);
   --wails-draggable: drag;
   user-select: none;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.sidebar::-webkit-scrollbar {
+  display: none;
 }
 
 .app--darwin .sidebar {
@@ -2084,6 +2090,8 @@ a[href] {
   min-width: 0;
   min-height: 0;
   background: var(--chat-bg);
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* ── top bar (drag region) ───────────────────────────────────────────────── */
@@ -5274,7 +5282,19 @@ a[href] {
      CJK text breaks one character per line. The metric chips keep their width
      (flex-shrink: 0) and only the model label ellipsizes to absorb the squeeze. */
   white-space: nowrap;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+.statusbar::-webkit-scrollbar {
+  height: 4px;
+}
+.statusbar::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg-faint) 30%, transparent);
+}
+.statusbar::-webkit-scrollbar-track {
+  background: transparent;
 }
 .statusbar > * {
   flex-shrink: 0;
