@@ -5,10 +5,24 @@ CREATE TABLE IF NOT EXISTS groups (
   count INTEGER NOT NULL,
   first_seen TEXT NOT NULL,
   last_seen TEXT NOT NULL,
+  first_version TEXT NOT NULL DEFAULT '',
   last_version TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'open',
   note TEXT NOT NULL DEFAULT '',
-  title TEXT NOT NULL DEFAULT ''
+  title TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT 'legacy',
+  label TEXT NOT NULL DEFAULT '',
+  error_type TEXT NOT NULL DEFAULT '',
+  top_frame TEXT NOT NULL DEFAULT '',
+  severity TEXT NOT NULL DEFAULT 'medium',
+  last_os TEXT NOT NULL DEFAULT '',
+  last_arch TEXT NOT NULL DEFAULT '',
+  last_build_commit TEXT NOT NULL DEFAULT '',
+  last_channel TEXT NOT NULL DEFAULT '',
+  resolved_in TEXT NOT NULL DEFAULT '',
+  resolved_at TEXT NOT NULL DEFAULT '',
+  regressed_at TEXT NOT NULL DEFAULT '',
+  last_sample_at TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS reports (
@@ -20,7 +34,20 @@ CREATE TABLE IF NOT EXISTS reports (
   arch TEXT NOT NULL,
   message TEXT NOT NULL,
   device TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'legacy',
+  label TEXT NOT NULL DEFAULT '',
+  error_type TEXT NOT NULL DEFAULT '',
+  error_message TEXT NOT NULL DEFAULT '',
+  top_frame TEXT NOT NULL DEFAULT '',
+  build_commit TEXT NOT NULL DEFAULT '',
+  channel TEXT NOT NULL DEFAULT '',
+  language TEXT NOT NULL DEFAULT '',
+  view TEXT NOT NULL DEFAULT '',
+  breadcrumbs TEXT NOT NULL DEFAULT '',
+  component_stack TEXT NOT NULL DEFAULT '',
+  stack TEXT NOT NULL DEFAULT '',
+  occurred_at TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS reports_fingerprint ON reports (fingerprint);

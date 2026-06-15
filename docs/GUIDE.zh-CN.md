@@ -13,6 +13,7 @@
 
 - [配置](#配置)
 - [思考语言](./REASONING_LANGUAGE.zh-CN.md)
+- [桌面端 Hooks](./DESKTOP_HOOKS.zh-CN.md)
 - [模式快捷键速查](#模式快捷键速查)
 - [权限与沙盒](#权限与沙盒)
 - [插件（MCP）](#插件mcp)
@@ -27,6 +28,7 @@ Linux 为 `~/.config/reasonix/`，macOS 为 `~/Library/Application Support/reaso
 密钥经环境变量通过 `api_key_env` 注入，绝不写入配置文件。
 
 桌面端和 CLI 端的可见思考语言设置，见 [思考语言](./REASONING_LANGUAGE.zh-CN.md)。
+桌面端 Hooks 的 JSON 配置、事件 key 和 payload 字段，见 [桌面端 Hooks](./DESKTOP_HOOKS.zh-CN.md)。
 
 ```toml
 default_model = "deepseek-flash"   # 执行器；设 [agent].planner_model 可加规划器
@@ -69,7 +71,7 @@ allow = ["Bash(go test:*)"]                  # 从不询问
 
 [sandbox]
 # workspace_root = ""          # 文件写工具被限制在此目录；留空 = 当前目录
-# allow_write    = ["/tmp"]    # write_file/edit_file/multi_edit 额外可写的目录
+# allow_write    = ["/tmp"]    # write_file/edit_file/multi_edit/move_file 额外可写的目录
 
 [[plugins]]
 name    = "example"
@@ -128,7 +130,7 @@ command = "reasonix-plugin-example"
 `reasonix run` 保持自主运行但仍然遵守 `deny`。
 
 权限是**策略**（哪些调用放行/询问），**沙盒**是**强制**：文件写工具
-（`write_file` / `edit_file` / `multi_edit`）拒绝 `[sandbox] workspace_root`
+（`write_file` / `edit_file` / `multi_edit` / `move_file`）拒绝 `[sandbox] workspace_root`
 之外的任何路径（默认当前目录，编辑不出项目），并解析符号链接与 `..`，使链接无法
 打洞越界。读不受限。`bash` 本身在 macOS 默认进沙盒（`[sandbox] bash`，Seatbelt）：
 命令只能写这些 root（外加临时目录与工具链缓存），`[sandbox] network` 为真时才能联网；

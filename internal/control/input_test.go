@@ -39,6 +39,15 @@ func (f *fakeTurnRunner) Run(ctx context.Context, input string) error {
 	return nil
 }
 
+type fakeLanguageRunner struct {
+	fakeTurnRunner
+	lang string
+}
+
+func (f *fakeLanguageRunner) SetReasoningLanguage(lang string) {
+	f.lang = lang
+}
+
 func TestCustomCommandLookup(t *testing.T) {
 	c := New(Options{Commands: []command.Command{{Name: "review"}, {Name: "git:commit"}}})
 
@@ -130,6 +139,33 @@ func TestRunComposesReasoningLanguagePreference(t *testing.T) {
 	got := runner.inputs[0]
 	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "Simplified Chinese") || !strings.HasSuffix(got, "hi") {
 		t.Fatalf("headless Run should compose the reasoning language preference, got %q", got)
+	}
+}
+
+func TestSetReasoningLanguageUpdatesRunner(t *testing.T) {
+	runner := &fakeLanguageRunner{}
+	c := New(Options{Runner: runner})
+
+	c.SetReasoningLanguage("zh")
+	if runner.lang != "zh" {
+		t.Fatalf("runner reasoning language = %q, want zh", runner.lang)
+	}
+
+	c.SetReasoningLanguage("auto")
+	if runner.lang != "auto" {
+		t.Fatalf("runner reasoning language = %q, want auto", runner.lang)
+	}
+}
+
+func TestComposeSyntheticReasoningLanguagePreference(t *testing.T) {
+	c := New(Options{ReasoningLanguage: "zh"})
+
+	got := c.ComposeSynthetic(planApprovedMessage)
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "Simplified Chinese") || !strings.HasSuffix(got, planApprovedMessage) {
+		t.Fatalf("ComposeSynthetic should prefix reasoning language, got %q", got)
+	}
+	if !IsSyntheticUserMessage(got) {
+		t.Fatalf("reasoning-language-prefixed plan approval should still be synthetic")
 	}
 }
 
@@ -613,6 +649,11 @@ func TestIsSyntheticUserMessage(t *testing.T) {
 		{
 			name:  "plan approved message",
 			input: planApprovedMessage,
+			want:  true,
+		},
+		{
+			name:  "plan approved message with reasoning language",
+			input: reasoningLanguageBlock("zh") + "\n\n" + planApprovedMessage,
 			want:  true,
 		},
 		{

@@ -1,6 +1,6 @@
 // Run: tsx src/__tests__/send-failed.test.ts
 
-import { initialState, reducer } from "../lib/useController";
+import { initialState, reducer, replayPendingPromptsForActiveTab } from "../lib/useController";
 import type { WireEvent } from "../lib/types";
 
 let passed = 0;
@@ -43,6 +43,26 @@ eq(lateFailure, confirmed, "send_failed after backend confirmation is a no-op");
 const unsent = reducer(sent, { type: "unsend" });
 eq(unsent.pendingUser, undefined, "unsend clears the pending marker");
 eq(unsent.discardTurn, true, "unsend discards the in-flight turn");
+
+let replayCalls = 0;
+replayPendingPromptsForActiveTab(undefined, () => {
+  replayCalls += 1;
+  return Promise.resolve();
+});
+eq(replayCalls, 0, "no active tab does not replay pending prompts");
+
+replayPendingPromptsForActiveTab("tab-a", () => {
+  replayCalls += 1;
+  return Promise.resolve();
+});
+eq(replayCalls, 1, "active tab switch replays pending prompts");
+
+replayPendingPromptsForActiveTab("tab-b", () => {
+  replayCalls += 1;
+  return Promise.reject(new Error("bridge unavailable"));
+});
+await new Promise((resolve) => setTimeout(resolve, 0));
+eq(replayCalls, 2, "replay bridge failures are swallowed by the tab-switch effect");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

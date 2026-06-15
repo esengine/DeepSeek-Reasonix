@@ -75,6 +75,28 @@ func TestWorkspaceWriteConfinement(t *testing.T) {
 	}
 }
 
+func TestWorkspaceMoveFileBindsAndConfines(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "evil.txt")
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mv := byName(Workspace{Dir: dir}.Tools())["move_file"]
+
+	if _, err := mv.Execute(context.Background(), argsJSON(t, map[string]any{"source_path": "a.md", "destination_path": "docs/a.md"})); err != nil {
+		t.Fatalf("move inside workspace should succeed: %v", err)
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "docs", "a.md")); err != nil || string(b) != "hello" {
+		t.Fatalf("file not moved inside workspace: %q err=%v", b, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mv.Execute(context.Background(), argsJSON(t, map[string]any{"source_path": "b.md", "destination_path": outside})); err == nil {
+		t.Fatal("move outside the workspace should be refused")
+	}
+}
+
 // TestWorkspaceBashDir checks bash runs in the workspace directory.
 func TestWorkspaceBashDir(t *testing.T) {
 	dir := t.TempDir()
@@ -123,6 +145,7 @@ func TestWorkspacePreservesSessionLevelBuiltins(t *testing.T) {
 		"bash_output",
 		"kill_shell",
 		"wait",
+		"move_file",
 		"notebook_edit",
 	} {
 		if got[name] == nil {

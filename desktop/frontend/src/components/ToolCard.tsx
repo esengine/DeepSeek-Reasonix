@@ -3,7 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
 import { useT } from "../lib/i18n";
-import { diffsFor, subjectOf } from "../lib/tools";
+import { diffsFor, subjectOf, summarize } from "../lib/tools";
 import { useShellExpand } from "../lib/shellExpand";
 import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import type { Item } from "../lib/useController";
@@ -43,8 +43,6 @@ function splitPreview(text: string, n: number): { preview: string; total: number
 // the sub-agent's work is visible as it happens.
 export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolItem; subcalls?: ToolItem[] }) {
   const t = useT();
-  const diffs = diffsFor(item.name, item.args);
-  const subject = subjectOf(item.name, item.args);
   const nested = subcalls ?? [];
   const hasNested = nested.length > 0;
   const isSubagent = SUBAGENT_TOOLS.has(item.name);
@@ -53,15 +51,6 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
       ? [item.profile.model, item.profile.effort ? `effort ${item.profile.effort}` : ""].filter(Boolean).join(" · ")
       : "";
 
-  // edit diffs are the point of the card, so they're shown inline; everything
-  // else folds its args/output away by default.  Open while running so the
-  // user sees progress; closed by default once settled.
-  const hasArgsOrOutput = diffs.length === 0 && (!!item.args || !!item.output);
-
-  // Shell output: split into preview + "show all" toggle.
-  const shellOutput = item.isShell && item.output ? item.output : null;
-  const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_PREVIEW_LINES) : null;
-  const hasBody = Boolean(diffs.length || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error);
   // All tools default to collapsed. Sub-agent tools open while running so the
   // user sees nested calls; they collapse when done. Reasoning (AssistantMessage)
   // also opens while streaming and closes on finish.
@@ -71,6 +60,37 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   const openRef = useRef(open);
   openRef.current = open;
   const [showAll, setShowAll] = useState(false);
+  // Lazy-load full tool data from the backend when the card is expanded and
+  // the in-memory copy was archived for memory efficiency.
+  const [fullData, setFullData] = useState<{ args: string; output?: string } | null>(null);
+  const effectiveArgs = fullData?.args ?? item.args;
+  const effectiveOutput = fullData?.output ?? item.output;
+  const diffs = diffsFor(item.name, effectiveArgs);
+  const subject = subjectOf(item.name, effectiveArgs);
+  // Reset cached fullData when the item identity changes (e.g. after rewind).
+  useEffect(() => {
+    return () => setFullData(null);
+  }, [item]);
+
+  // edit diffs are the point of the card, so they're shown inline; everything
+  // else folds its args/output away by default.  Open while running so the
+  // user sees progress; closed by default once settled.
+  const hasArgsOrOutput = diffs.length === 0 && (!!effectiveArgs || !!effectiveOutput || item.dataArchived);
+
+  // Shell output: split into preview + "show all" toggle.
+  const shellOutput = item.isShell && effectiveOutput ? effectiveOutput : null;
+  const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_PREVIEW_LINES) : null;
+  const hasBody = Boolean(diffs.length || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error);
+  useEffect(() => {
+    if (!open || !item.dataArchived || fullData) return;
+    let cancelled = false;
+    import("../lib/bridge").then(({ app }) =>
+      app.ToolResultForTab("", item.id).then((d) => {
+        if (!cancelled && d) setFullData(d);
+      }).catch(() => {}),
+    );
+    return () => { cancelled = true; };
+  }, [open, item.id, item.dataArchived, fullData]);
 
   // Register this shell card's toggle with the global ShellExpand context so
   // Ctrl/Cmd+B can expand/collapse the most recent shell output. openRef keeps the
@@ -88,6 +108,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
     item.readOnly && !hasNested && item.status !== "error" && item.status !== "stopped";
 
   const duration = item.status === "running" ? "" : formatToolDuration(item.durationMs);
+  const summary = item.status === "running" ? "" : item.summary || summarize(item.name, effectiveArgs, effectiveOutput, item.error);
 
   // GSAP-driven collapse/expand for tool body
   const toolBodyRef = useRef<HTMLDivElement>(null);
@@ -111,6 +132,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
           {subject && <span className="tool__subject">{subject}</span>}
         </span>
         {profileText && <span className="tool__profile">{profileText}</span>}
+        {summary && <span className="tool__summary">{summary}</span>}
         {duration && <span className="tool__duration">{duration}</span>}
         {hasBody && (
           <span className={`tool__chevron${open ? " tool__chevron--open" : ""}`}>
@@ -166,10 +188,10 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
 
         {!shellPreview && hasArgsOrOutput && (
           <>
-            {item.args && <CodeViewer value={pretty(item.args)} language="json" maxHeight={180} />}
-            {item.output && (
+            {effectiveArgs && <CodeViewer value={pretty(effectiveArgs)} language="json" maxHeight={180} />}
+            {effectiveOutput && (
               <>
-                <CodeViewer value={item.output} maxHeight={280} />
+                <CodeViewer value={effectiveOutput} maxHeight={280} />
                 {item.truncated && <div className="tool__note">{t("tool.truncated")}</div>}
               </>
             )}

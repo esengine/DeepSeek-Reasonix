@@ -72,7 +72,7 @@ allow = ["Bash(go test:*)"]                  # never prompted
 
 [sandbox]
 # workspace_root = ""          # file-writers confined here; empty = current dir
-# allow_write    = ["/tmp"]    # extra dirs write_file/edit_file/multi_edit may touch
+# allow_write    = ["/tmp"]    # extra dirs write_file/edit_file/multi_edit/move_file may touch
 
 [[plugins]]
 name    = "example"
@@ -135,7 +135,7 @@ edit grants and persist path-scoped rules such as `Edit(src/app.go)`.
 `reasonix run` stays autonomous but still honours `deny`.
 
 Permissions are *policy* (which calls to allow / prompt). The **sandbox** is
-*enforcement*: the file-writers (`write_file` / `edit_file` / `multi_edit`)
+*enforcement*: the file-writers (`write_file` / `edit_file` / `multi_edit` / `move_file`)
 refuse any path outside `[sandbox] workspace_root` (default: the current dir, so
 edits stay in the project), resolving symlinks and `..` so a link can't tunnel
 out. Reads are unrestricted. `bash` is itself jailed on macOS by default

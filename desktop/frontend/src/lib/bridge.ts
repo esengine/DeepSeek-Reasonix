@@ -7,6 +7,7 @@
 
 import type * as GeneratedApp from "../../wailsjs/go/main/App";
 
+import { addBreadcrumb } from "./breadcrumbs";
 import { t } from "./i18n";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems } from "./statusBarItems";
 import { modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeTokenMode, normalizeToolApprovalMode } from "./types";
@@ -18,6 +19,8 @@ import type {
   BotInstallStartResult,
   BotRuntimeStatusView,
   BotSettingsView,
+  BuiltInMCPUpdateResult,
+  BuiltInMCPUpdateStatus,
   CapabilitiesView,
   CheckpointMeta,
   CommandInfo,
@@ -39,6 +42,8 @@ import type {
   ModelInfo,
   NetworkView,
   ProjectNode,
+  PromptHistoryEntry,
+  PromptHistoryResult,
   ProviderView,
   QuestionAnswer,
   ServerView,
@@ -140,6 +145,7 @@ export interface AppBindings {
   RestoreSession(path: string): Promise<void>;
   PurgeTrashedSession(path: string): Promise<void>;
   RenameSession(path: string, title: string): Promise<void>;
+  ScanPromptHistory(nonce: string): Promise<PromptHistoryResult>;
   ListWorkspaces(): Promise<WorkspaceView[]>;
   PickWorkspace(): Promise<string>;
   SwitchWorkspace(path: string): Promise<string>;
@@ -150,6 +156,7 @@ export interface AppBindings {
   BalanceForTab(tabID: string): Promise<BalanceInfo>;
   Jobs(): Promise<JobView[]>;
   JobsForTab(tabID: string): Promise<JobView[]>;
+  ToolResultForTab(tabID: string, toolID: string): Promise<{ args: string; output: string } | null>;
   Meta(): Promise<Meta>;
   MetaForTab(tabID: string): Promise<Meta>;
   Commands(): Promise<CommandInfo[]>;
@@ -158,6 +165,8 @@ export interface AppBindings {
   UpdateMCPServer(name: string, input: MCPServerInput): Promise<void>;
   RemoveMCPServer(name: string): Promise<void>;
   ReconnectMCPServer(name: string): Promise<void>;
+  UpdateBuiltInMCPServer(name: string): Promise<BuiltInMCPUpdateResult>;
+  BuiltInMCPUpdateStatuses(): Promise<BuiltInMCPUpdateStatus[]>;
   ClearMCPServerAuthentication(name: string): Promise<void>;
   PickSkillFolder(): Promise<string>;
   AddSkillPath(path: string): Promise<void>;
@@ -246,6 +255,7 @@ export interface AppBindings {
   SetStatusBarItems(items: string[]): Promise<void>;
   SetDesktopLanguage(lang: string): Promise<void>;
   SetDesktopAppearance(theme: string, style: string): Promise<void>;
+  SetDesktopLayoutStyle(style: string): Promise<void>;
   SetDesktopCheckUpdates(enabled: boolean): Promise<void>;
   SetDesktopTelemetry(enabled: boolean): Promise<void>;
   SetDesktopMetrics(enabled: boolean): Promise<void>;
@@ -271,6 +281,7 @@ export interface AppBindings {
   ListTabs(): Promise<TabMeta[]>;
   OpenProjectTab(workspaceRoot: string, topicID: string): Promise<TabMeta>;
   OpenGlobalTab(topicID: string): Promise<TabMeta>;
+  OpenTopicSession(scope: string, workspaceRoot: string, topicID: string, sessionPath: string): Promise<TabMeta>;
   EnsureBlankTab(scope: string, workspaceRoot: string): Promise<TabMeta>;
   SetActiveTab(tabID: string): Promise<void>;
   ReorderTabs(tabIDs: string[]): Promise<void>;
@@ -278,11 +289,13 @@ export interface AppBindings {
   ListProjectTree(): Promise<ProjectNode[]>;
   RenameProject(workspaceRoot: string, title: string): Promise<void>;
   SetProjectColor(workspaceRoot: string, color: string): Promise<void>;
+  SetProjectPinned(workspaceRoot: string, pinned: boolean): Promise<void>;
   ReorderProjects(workspaceRoots: string[]): Promise<void>;
   CreateTopic(scope: string, workspaceRoot: string, title: string): Promise<TopicMeta>;
   RenameTopic(topicID: string, title: string): Promise<void>;
   DeleteTopic(topicID: string): Promise<void>;
   TrashTopic(topicID: string): Promise<void>;
+  SetTopicPinned(topicID: string, pinned: boolean): Promise<void>;
   ContextPanel(tabID: string): Promise<ContextPanelInfo>;
   // New native-feel bindings (added with the desktop native-feel plan).
   ConfirmAction(req: NativeConfirmRequest): Promise<boolean>;
@@ -355,6 +368,13 @@ export function onUpdaterProgress(cb: (p: UpdateProgress) => void): () => void {
   };
 }
 
+export function onBuiltInMCPUpdate(cb: (status: BuiltInMCPUpdateStatus) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("builtin-mcp:update", (status) => cb(status as BuiltInMCPUpdateStatus));
+  }
+  return () => {};
+}
+
 // onFilesDropped subscribes to native OS file drops landing on the composer (the
 // --wails-drop-target element); the callback gets the dropped files' absolute
 // paths. No-op in the browser dev mock, where the runtime is absent.
@@ -409,11 +429,49 @@ export function onProjectTreeChanged(cb: () => void): () => void {
 
 // app proxies each call to the live binding (or the dev mock only when truly
 // outside the shell), so a late-injected window.go is picked up transparently.
+function bridgeBreadcrumb(method: string): string {
+  if (method === "ReportCrash") return "";
+  if (/^(Submit|SubmitDisplay|RunShell|Steer|Cancel|Approve|AnswerQuestion|ReplayPendingPrompts)/.test(method))
+    return `turn ${method}`;
+  if (/^(SetModel|SetEffort|SetTokenMode|SetDefaultModel|SetPlannerModel|SetSubagentModel|SetSubagentEffort)/.test(method))
+    return `model ${method}`;
+  if (/^(SetDesktop|SetCloseBehavior|SetDisplayMode|SetStatusBar|SetExpandThinking|SetAutoPlan|SetReasoningLanguage)/.test(method))
+    return `settings ${method}`;
+  if (/^(SaveProvider|AddOfficialProviderAccess|RemoveProviderAccess|DeleteProvider|SetProviderKey|ClearProviderKey|FetchProviderModels|ConnectKey)/.test(method))
+    return `provider ${method}`;
+  if (/^(CheckUpdate|ApplyUpdate|OpenDownloadPage)/.test(method)) return `update ${method}`;
+  if (/^(AddMCPServer|UpdateMCPServer|RemoveMCPServer|ReconnectMCPServer|UpdateBuiltInMCPServer|BuiltInMCPUpdateStatuses|ClearMCPServerAuthentication|SetMCPServer)/.test(method))
+    return `mcp ${method}`;
+  if (/^(AddSkillPath|RemoveSkillPath|RefreshSkills|SetSkillEnabled|AcceptSkillSuggestion)/.test(method))
+    return `skill ${method}`;
+  if (/^(OpenProjectTab|OpenGlobalTab|EnsureBlankTab|SetActiveTab|CloseTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace)/.test(method))
+    return `nav ${method}`;
+  return "";
+}
+
 export const app: AppBindings = new Proxy({} as AppBindings, {
   get(_t, prop) {
     const target = realApp() ?? getMock();
     const v = (target as unknown as Record<string, unknown>)[String(prop)];
-    return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+    if (typeof v !== "function") return v;
+    return (...args: unknown[]) => {
+      const method = String(prop);
+      const crumb = bridgeBreadcrumb(method);
+      if (crumb) addBreadcrumb("bridge", crumb);
+      try {
+        const result = (v as (...a: unknown[]) => unknown).apply(target, args);
+        if (result && typeof (result as Promise<unknown>).then === "function") {
+          return (result as Promise<unknown>).catch((err) => {
+            if (crumb) addBreadcrumb("bridge.error", method);
+            throw err;
+          });
+        }
+        return result;
+      } catch (err) {
+        if (crumb) addBreadcrumb("bridge.error", method);
+        throw err;
+      }
+    };
   },
 });
 
@@ -508,6 +566,8 @@ function makeMockApp(): AppBindings {
       configured: true,
       autoStart: false,
       tier: "background",
+      command: "codegraph",
+      args: ["serve", "--mcp"],
       tools: 0,
       prompts: 0,
       resources: 0,
@@ -572,6 +632,15 @@ function makeMockApp(): AppBindings {
       ],
     },
     { name: "figma", transport: "http", status: "failed", configured: true, autoStart: true, tier: "background", url: "https://mcp.figma.com/mcp", authStatus: "required", authUrl: "https://mcp.figma.com/mcp", tools: 0, prompts: 0, resources: 0, error: "connect: 401 unauthorized" },
+  ];
+  let builtInMCPUpdates: BuiltInMCPUpdateStatus[] = [
+    {
+      name: "codegraph",
+      mode: "notify",
+      current: "v0.9.7",
+      latest: "v0.10.0",
+      phase: "available",
+    },
   ];
   const capSkills: SkillView[] = [
     { name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "builtin", runAs: "subagent", enabled: true },
@@ -687,12 +756,12 @@ function makeMockApp(): AppBindings {
     autoPlan: "off",
     providers: [
       { name: "deepseek", builtIn: true, added: false, kind: "openai", baseUrl: "https://api.deepseek.com", modelsUrl: "", models: ["deepseek-v4-flash"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: true, balanceUrl: "https://api.deepseek.com/user/balance", contextWindow: 1_000_000, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
-      { name: "mimo-token-plan", builtIn: true, added: false, kind: "openai", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
+      { name: "mimo-token-plan", builtIn: true, added: false, kind: "openai", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro", "mimo-v2.5"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
     ],
     officialProviders: [
       { name: "deepseek", builtIn: true, added: false, kind: "openai", baseUrl: "https://api.deepseek.com", modelsUrl: "", models: ["deepseek-v4-flash", "deepseek-v4-pro"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: true, balanceUrl: "https://api.deepseek.com/user/balance", contextWindow: 1_000_000, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
-      { name: "mimo-api", builtIn: true, added: false, kind: "openai", baseUrl: "https://api.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
-      { name: "mimo-token-plan", builtIn: true, added: false, kind: "openai", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
+      { name: "mimo-api", builtIn: true, added: false, kind: "openai", baseUrl: "https://api.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
+      { name: "mimo-token-plan", builtIn: true, added: false, kind: "openai", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro", "mimo-v2.5"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
     ],
     permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["Bash(rm:*)"] },
     sandbox: { bash: "enforce", network: true, workspaceRoot: "", allowWrite: [], shell: "auto" },
@@ -719,7 +788,7 @@ function makeMockApp(): AppBindings {
         feishuGroups: [],
         weixinGroups: [],
       },
-      qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false },
+      qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false, sandbox: false },
       feishu: {
         enabled: false,
         domain: "feishu",
@@ -760,6 +829,10 @@ function makeMockApp(): AppBindings {
             {
               remoteId: "ou_mock_user_001",
               sessionId: "topic:topic_product",
+              sessionSource: "",
+              chatType: "",
+              userId: "",
+              threadId: "",
               scope: "global",
               workspaceRoot: "",
               updatedAt: new Date(Date.now() - 4 * 60_000).toISOString(),
@@ -790,6 +863,10 @@ function makeMockApp(): AppBindings {
             {
               remoteId: "wxid_mock_user_001",
               sessionId: "topic:topic_ai",
+              sessionSource: "",
+              chatType: "",
+              userId: "",
+              threadId: "",
               scope: "global",
               workspaceRoot: "",
               updatedAt: new Date(Date.now() - 12 * 60_000).toISOString(),
@@ -802,6 +879,7 @@ function makeMockApp(): AppBindings {
       ],
     },
     desktopLanguage: "",
+    desktopLayoutStyle: "classic",
     desktopTheme: "light",
     desktopThemeStyle: "graphite",
     closeBehavior: "background",
@@ -898,9 +976,15 @@ function makeMockApp(): AppBindings {
     }
     return node;
   };
+  const mockProjectTreeForDisplay = () => {
+    const pinnedProjects = mockProjectTree.filter((node) => node.kind === "project" && node.pinned);
+    if (pinnedProjects.length === 0) return mockProjectTree;
+    const rest = mockProjectTree.filter((node) => !(node.kind === "project" && node.pinned));
+    return [...pinnedProjects, ...rest];
+  };
   const cloneProjectTree = () => {
     if (mockProjectTree.length === 0) ensureMockGlobalFolder();
-    return JSON.parse(JSON.stringify(mockProjectTree)) as ProjectNode[];
+    return JSON.parse(JSON.stringify(mockProjectTreeForDisplay())) as ProjectNode[];
   };
   const projectChildren = (node: ProjectNode): ProjectNode[] => Array.isArray(node.children) ? node.children : [];
   const findMockTopic = (topicId: string): ProjectNode | null => {
@@ -909,6 +993,26 @@ function makeMockApp(): AppBindings {
       if (found) return found;
     }
     return null;
+  };
+  const setMockTopicPinned = (topicId: string, pinned: boolean) => {
+    for (const parent of mockProjectTree) {
+      const children = projectChildren(parent);
+      const index = children.findIndex((child) => child.topicId === topicId);
+      if (index < 0) continue;
+      const topic = { ...children[index], pinned: pinned || undefined };
+      if (!pinned) {
+        parent.children = children.map((child, i) => (i === index ? topic : child));
+        return;
+      }
+      const remaining = children.filter((_, i) => i !== index);
+      parent.children = [topic, ...remaining];
+      return;
+    }
+  };
+  const setMockProjectPinned = (workspaceRoot: string, pinned: boolean) => {
+    const index = mockProjectTree.findIndex((node) => node.kind === "project" && node.root === workspaceRoot);
+    if (index < 0) return;
+    mockProjectTree[index] = { ...mockProjectTree[index], pinned: pinned || undefined };
   };
   const deleteMockTopic = (topicId: string) => {
     for (const parent of mockProjectTree) {
@@ -920,6 +1024,10 @@ function makeMockApp(): AppBindings {
   const mockTopicIsRunning = (topicId: string) => {
     const status = mockTopicStatus(topicId);
     return status === "streaming" || status === "thinking" || status === "waiting_confirmation";
+  };
+  const mockTopicIsBlank = (topicId: string) => {
+    const topic = findMockTopic(topicId);
+    return Boolean(topic && topic.label === t("mock.newSession") && !topic.turns && !topic.lastActivityAt && !topic.status);
   };
   const mockTopicRunsInScenario = (topicId: string) => runningMock && mockTopicIsRunning(topicId);
   const mockTopicHistory = (topicId: string): HistoryMessage[] => {
@@ -1650,6 +1758,15 @@ function makeMockApp(): AppBindings {
       const s = sessions.find((x) => x.path === path);
       if (s) s.title = title.trim() || undefined;
     },
+	    async ScanPromptHistory(nonce: string) {
+	      // Dev mock returns a static set of sample prompts for UI development.
+	      const entries: PromptHistoryEntry[] = [
+	        { text: "Explain the architecture of this project", at: Date.now() - 60000, sessionPath: "/mock/sessions/arch.jsonl", turn: 0 },
+	        { text: "Fix the login button styling", at: Date.now() - 120000, sessionPath: "/mock/sessions/arch.jsonl", turn: 1 },
+	        { text: "What is the capital of France?", at: Date.now() - 300000, sessionPath: "/mock/sessions/general.jsonl", turn: 0 },
+	      ];
+	      return { entries, nonce: "mock-" + nonce, olderCursor: "", hasOlder: false };
+	    },
     async ListWorkspaces() {
       return mockProjectTree
         .filter((node) => node.kind === "project" && node.root)
@@ -1692,6 +1809,9 @@ function makeMockApp(): AppBindings {
         },
         async JobsForTab() {
           return this.Jobs();
+        },
+        async ToolResultForTab() {
+          return null;
         },
         async Meta() {
           const active = mockTabs.find((tab) => tab.active) ?? mockTabs[0];
@@ -1806,6 +1926,28 @@ function makeMockApp(): AppBindings {
       capServers = capServers.map((s) =>
         s.name === name ? { ...s, status: "connected", tools: s.tools || 4 } : s,
       );
+    },
+    async UpdateBuiltInMCPServer(name: string) {
+      if (name !== "codegraph") throw new Error(`${name} is not an updatable built-in MCP server`);
+      capServers = capServers.map((s) =>
+        s.name === name
+          ? { ...s, status: s.autoStart ? "connected" : s.status, tools: s.autoStart ? s.tools || 4 : s.tools, error: undefined }
+          : s,
+      );
+      builtInMCPUpdates = [
+        {
+          name,
+          mode: "manual",
+          current: "v0.10.0",
+          latest: "v0.10.0",
+          phase: "activated",
+          path: "/tmp/reasonix/codegraph/mock/codegraph",
+        },
+      ];
+      return { name, version: "v0.10.0", path: "/tmp/reasonix/codegraph/mock/codegraph" };
+    },
+    async BuiltInMCPUpdateStatuses() {
+      return builtInMCPUpdates.map((s) => ({ ...s }));
     },
     async ClearMCPServerAuthentication(name: string) {
       capServers = capServers.map((s) =>
@@ -2224,8 +2366,8 @@ function makeMockApp(): AppBindings {
     async AddOfficialProviderAccess(kind: string, key: string) {
       const templates: Record<string, ProviderView> = {
         deepseek: { name: "deepseek", builtIn: true, added: true, kind: "openai", baseUrl: "https://api.deepseek.com", modelsUrl: "", models: ["deepseek-v4-flash", "deepseek-v4-pro"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: !!key.trim(), balanceUrl: "https://api.deepseek.com/user/balance", contextWindow: 1_000_000, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
-        "mimo-api": { name: "mimo-api", builtIn: true, added: true, kind: "openai", baseUrl: "https://api.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: !!key.trim(), balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
-        "mimo-token-plan": { name: "mimo-token-plan", builtIn: true, added: true, kind: "openai", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: !!key.trim(), balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
+        "mimo-api": { name: "mimo-api", builtIn: true, added: true, kind: "openai", baseUrl: "https://api.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: !!key.trim(), balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
+        "mimo-token-plan": { name: "mimo-token-plan", builtIn: true, added: true, kind: "openai", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro", "mimo-v2.5"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: !!key.trim(), balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
       };
       const next = templates[kind] ?? templates.deepseek;
       const i = settings.providers.findIndex((x) => x.name === next.name);
@@ -2303,7 +2445,8 @@ function makeMockApp(): AppBindings {
           }));
         },
         async BotRuntimeStatus() {
-          const runningConnections = settings.bot.connections.filter((connection) => connection.enabled && connection.status === "connected").length;
+          const qqRunning = settings.bot.qq.enabled && settings.bot.qq.appId.trim() && settings.bot.qq.secretSet;
+          const runningConnections = (qqRunning ? 1 : 0) + settings.bot.connections.filter((connection) => connection.enabled && connection.status === "connected").length;
           return {
             running: settings.bot.enabled && runningConnections > 0,
             status: settings.bot.enabled && runningConnections > 0 ? "running" : "stopped",
@@ -2359,9 +2502,10 @@ function makeMockApp(): AppBindings {
         },
         async DiagnoseBotConnection(id: string) {
           const connection = settings.bot.connections.find((c) => c.id === id);
+          const occurredAt = new Date().toISOString();
           return connection
-            ? { id, label: connection.label, status: connection.enabled ? "ok" : "disabled", message: connection.enabled ? "连接配置已保存。" : "连接已保存但未启用。", messageId: "" }
-            : { id, label: "", status: "missing", message: "未找到连接。", messageId: "" };
+            ? { id, label: connection.label, status: connection.enabled ? "ok" : "disabled", message: connection.enabled ? "连接配置已保存。" : "连接已保存但未启用。", messageId: "", phase: "config", code: connection.enabled ? "config_ok" : "connection_disabled", reportKind: "", reportDetail: "", occurredAt }
+            : { id, label: "", status: "missing", message: "未找到连接。", messageId: "", phase: "config", code: "connection_missing", reportKind: "bot", reportDetail: JSON.stringify({ schemaVersion: 2, kind: "bot", source: "bot.runtime", label: "bot.mock.config", message: "mock missing bot connection", errorType: "BotConnectionDiagnostic", errorMessage: "bot connection record was not found", topFrame: "bot.config", occurredAt }), occurredAt };
         },
         async TestBotConnection(id: string, target?: string) {
           const diag = await this.DiagnoseBotConnection(id);
@@ -2386,6 +2530,9 @@ function makeMockApp(): AppBindings {
         async SetDesktopAppearance(theme: string, style: string) {
           settings.desktopTheme = theme === "auto" || theme === "light" ? theme : "dark";
           settings.desktopThemeStyle = style;
+        },
+        async SetDesktopLayoutStyle(style: string) {
+          settings.desktopLayoutStyle = style === "workbench" ? "workbench" : "classic";
         },
         async SetDesktopCheckUpdates(enabled: boolean) {
           settings.checkUpdates = enabled;
@@ -2488,6 +2635,7 @@ function makeMockApp(): AppBindings {
         workspaceName: workspaceRoot.split("/").filter(Boolean).pop() ?? workspaceRoot,
         topicId: _topicID,
         topicTitle: topicLabel(_topicID, t("mock.newSession")),
+        sessionPath: `/mock/sessions/${_topicID}.jsonl`,
         projectColor: mockProjectTree.find((node) => node.root === workspaceRoot)?.projectColor,
         label: "deepseek-v4-flash",
         ready: true,
@@ -2515,6 +2663,7 @@ function makeMockApp(): AppBindings {
         workspaceName: "Global",
         topicId: _topicID,
         topicTitle: topicLabel(_topicID, "Global"),
+        sessionPath: `/mock/sessions/${_topicID}.jsonl`,
         label: "deepseek-v4-flash",
         ready: true,
         running: false,
@@ -2528,13 +2677,22 @@ function makeMockApp(): AppBindings {
       mockTabs = [...mockTabs.map((item) => ({ ...item, active: false })), tab];
       return { ...tab };
     },
+    async OpenTopicSession(scope: string, workspaceRoot: string, topicID: string, sessionPath: string) {
+      const tab = scope === "project"
+        ? await this.OpenProjectTab(workspaceRoot, topicID)
+        : await this.OpenGlobalTab(topicID);
+      const active = { ...tab, sessionPath };
+      mockTabs = mockTabs.map((item) => (item.id === tab.id ? active : item));
+      return { ...active };
+    },
     async EnsureBlankTab(scope: string, workspaceRoot: string) {
       const targetScope = scope === "project" && workspaceRoot ? "project" : "global";
       const targetRoot = targetScope === "project" ? workspaceRoot : "";
       const existing = mockTabs.find((tab) =>
         tab.scope === targetScope &&
         (targetScope === "global" || tab.workspaceRoot === targetRoot) &&
-        !tab.running
+        !tab.running &&
+        mockTopicIsBlank(tab.topicId)
       );
       if (existing) {
         setMockActiveTab(existing.id);
@@ -2580,8 +2738,11 @@ function makeMockApp(): AppBindings {
       mockTabs = mockTabs.map((tab) =>
         (workspaceRoot ? tab.workspaceRoot === workspaceRoot : tab.scope === "global")
           ? { ...tab, projectColor: node.projectColor }
-          : tab,
+        : tab,
       );
+    },
+    async SetProjectPinned(workspaceRoot: string, pinned: boolean) {
+      setMockProjectPinned(workspaceRoot, pinned);
     },
     async ReorderProjects(workspaceRoots: string[]) {
       const projects = mockProjectTree.filter((node) => node.kind === "project");
@@ -2647,6 +2808,9 @@ function makeMockApp(): AppBindings {
     },
     async TrashTopic(topicID: string) {
       deleteMockTopic(topicID);
+    },
+    async SetTopicPinned(topicID: string, pinned: boolean) {
+      setMockTopicPinned(topicID, pinned);
     },
     async SaveWindowState(_state) {
       // no-op in browser dev — no real window geometry to persist

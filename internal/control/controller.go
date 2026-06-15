@@ -40,6 +40,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/diff"
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 	"reasonix/internal/hook"
 	"reasonix/internal/i18n"
 	"reasonix/internal/jobs"
@@ -685,7 +686,7 @@ func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input, raw, disp
 	}
 	// The plan is already visible as the assistant's answer, so the request
 	// carries no subject — it's purely the gate.
-	allow, _, err := c.requestApproval(ctx, planApprovalTool, "")
+	allow, _, err := c.requestApproval(ctx, planApprovalTool, "", nil)
 	if err != nil {
 		return err
 	}
@@ -706,7 +707,7 @@ func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input, raw, disp
 		c.approvedPlanAutoApproveTools = false
 		c.mu.Unlock()
 	}()
-	if err := c.runner.Run(ctx, planApprovedMessage); err != nil {
+	if err := c.runner.Run(ctx, c.ComposeSynthetic(planApprovedMessage)); err != nil {
 		return err
 	}
 	if todoArgs != "" && !c.hasTodoUpdateSince(execStart) {
@@ -971,6 +972,13 @@ func (c *Controller) Submit(input string) {
 	c.submit(input, "")
 }
 
+// SubmitHTTP accepts input from the unauthenticated localhost HTTP frontend. It
+// deliberately omits the trusted TUI-only "!cmd" shell shortcut and resolves file
+// references only through the controller's workspace root.
+func (c *Controller) SubmitHTTP(input string) {
+	c.submitHTTP(input, "")
+}
+
 // SubmitDisplay runs input as a turn while remembering the user-facing display
 // text for transcript replay when controller-side composition expands input.
 func (c *Controller) SubmitDisplay(display, input string) {
@@ -993,6 +1001,36 @@ func (c *Controller) submit(input, display string) {
 	if strings.HasPrefix(trimmed, "!") {
 		c.RunShell(trimmed[1:])
 		return
+	}
+	c.submitCommandOrTurn(trimmed, input, display, false)
+}
+
+func (c *Controller) submitHTTP(input, display string) {
+	trimmed := strings.TrimSpace(input)
+	if note, ok := MemoryQuickAddNote(trimmed); ok {
+		c.rememberProjectNote(note)
+		return
+	}
+	if note, ok := RememberCommandNote(trimmed); ok {
+		c.rememberProjectNote(note)
+		return
+	}
+	if c.applyGoalCommand(trimmed, display) {
+		return
+	}
+	if strings.HasPrefix(trimmed, "!") {
+		c.notice("shell commands are unavailable from this frontend")
+		return
+	}
+	c.submitCommandOrTurn(trimmed, input, display, true)
+}
+
+func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedRefsOnly bool) {
+	runRefTurn := c.runRefTurn
+	runRefTurnWithRefs := c.runRefTurnWithRefs
+	if scopedRefsOnly {
+		runRefTurn = c.runScopedRefTurn
+		runRefTurnWithRefs = c.runScopedRefTurnWithRefs
 	}
 	switch {
 	case trimmed == "/compact" || strings.HasPrefix(trimmed, "/compact "):
@@ -1038,18 +1076,18 @@ func (c *Controller) submit(input, display string) {
 	case strings.HasPrefix(trimmed, "//"):
 		// Double-slash — not a command. Common in code snippets (JS
 		// comments, file:// URLs). Run as a normal turn.
-		c.runRefTurn(input, display)
+		runRefTurn(input, display)
 	case strings.HasPrefix(trimmed, "/"):
 		if ref, ok := FileRefLine(trimmed); ok {
-			c.runRefTurn(ref, display)
+			runRefTurn(ref, display)
 			return
 		}
 		if ref, ok := SlashPathLineRef(trimmed, c.cpRoot); ok {
-			c.runRefTurnWithRefs(input, ref, display)
+			runRefTurnWithRefs(input, ref, display)
 			return
 		}
 		if SlashPathLikeLine(trimmed) {
-			c.runRefTurn(input, display)
+			runRefTurn(input, display)
 			return
 		}
 		// Read-only management verbs (/model /memory /skills /hooks /mcp) emit a
@@ -1116,7 +1154,7 @@ func (c *Controller) submit(input, display string) {
 		}
 		c.notice("unknown command: " + trimmed)
 	default:
-		c.runRefTurn(input, display)
+		runRefTurn(input, display)
 	}
 }
 
@@ -1270,12 +1308,24 @@ func (c *Controller) runRefTurn(input, display string) {
 	c.runRefTurnWithRefs(input, input, display)
 }
 
+func (c *Controller) runScopedRefTurn(input, display string) {
+	c.runScopedRefTurnWithRefs(input, input, display)
+}
+
 // runRefTurnWithRefs resolves references from refLine while preserving input as
 // the user's actual prompt text. This lets compiler diagnostics such as
 // "/path/File.kt:12: error" attach @/path/File.kt without rewriting the error.
 func (c *Controller) runRefTurnWithRefs(input, refLine, display string) {
+	c.runRefTurnWithResolver(input, refLine, display, c.ResolveRefs)
+}
+
+func (c *Controller) runScopedRefTurnWithRefs(input, refLine, display string) {
+	c.runRefTurnWithResolver(input, refLine, display, c.ResolveScopedRefs)
+}
+
+func (c *Controller) runRefTurnWithResolver(input, refLine, display string, resolve func(context.Context, string) (string, []string)) {
 	c.runGuarded(func(ctx context.Context) error {
-		block, errs := c.ResolveRefs(ctx, refLine)
+		block, errs := resolve(ctx, refLine)
 		for _, e := range errs {
 			c.notice(e)
 		}
@@ -1484,6 +1534,14 @@ func (c *Controller) Running() bool {
 	return c.running
 }
 
+// PendingPrompt reports whether the current turn is blocked waiting for a user
+// approval, plan approval, memory approval, or ask-tool answer.
+func (c *Controller) PendingPrompt() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.approvals) > 0 || len(c.asks) > 0
+}
+
 // Turn returns the current turn number (0 before the first submit).
 func (c *Controller) Turn() int {
 	c.mu.Lock()
@@ -1676,9 +1734,15 @@ func (c *Controller) SetAutoPlan(mode string) {
 // SetReasoningLanguage updates the visible reasoning language preference for
 // subsequent turns.
 func (c *Controller) SetReasoningLanguage(lang string) {
+	mode := config.NormalizeReasoningLanguage(lang)
 	c.mu.Lock()
-	c.reasoningLanguage = config.NormalizeReasoningLanguage(lang)
+	c.reasoningLanguage = mode
 	c.mu.Unlock()
+	if setter, ok := c.runner.(interface{ SetReasoningLanguage(string) }); ok {
+		setter.SetReasoningLanguage(mode)
+	} else if c.executor != nil {
+		c.executor.SetReasoningLanguage(mode)
+	}
 }
 
 // PlanMode reports whether outgoing turns currently receive the plan-mode
@@ -2464,6 +2528,49 @@ func (c *Controller) SessionCache() (hit, miss int) {
 	return c.executor.SessionCache()
 }
 
+// ToolResultData holds the full arguments and output for one tool call, loaded
+// on demand when a frontend expands a collapsed tool card.
+type ToolResultData struct {
+	Args   string `json:"args"`
+	Output string `json:"output"`
+}
+
+// ToolResult looks up a tool call by its ID in the session history and returns
+// the full arguments + output that were elided from the frontend's items[].
+// Returns nil when the tool ID isn't found (e.g. a sub-agent's tool call that
+// lives in a different session).
+func (c *Controller) ToolResult(toolID string) *ToolResultData {
+	if c.executor == nil {
+		return nil
+	}
+	msgs := c.executor.Session().Snapshot()
+	// Search backwards: tool result first (most recent), then find the args
+	// from the preceding assistant turn.
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != provider.RoleTool || msgs[i].ToolCallID != toolID {
+			continue
+		}
+		out := &ToolResultData{
+			Args:   "",
+			Output: msgs[i].Content,
+		}
+		// Walk back to find the assistant turn that issued this call.
+		for j := i; j >= 0; j-- {
+			if msgs[j].Role != provider.RoleAssistant {
+				continue
+			}
+			for _, tc := range msgs[j].ToolCalls {
+				if tc.ID == toolID {
+					out.Args = tc.Arguments
+					return out
+				}
+			}
+		}
+		return out
+	}
+	return nil
+}
+
 // Balance queries the active provider's wallet balance, or (nil, nil) when the
 // provider declares no balance_url — so a caller treats "not configured" and
 // "fetched" the same and just omits the readout when nil.
@@ -2719,10 +2826,25 @@ func (c *Controller) ConnectConfiguredMCPServer(name string) (int, error) {
 // already-resolved config. Desktop uses this after saving user-level settings so
 // a stale project config cannot override the just-applied choice.
 func (c *Controller) ConnectCodegraphMCPServer(cfg *config.Config) (int, error) {
-	return c.connectCodegraphMCPServer(cfg)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return 0, err
+	}
+	return c.ConnectCodegraphMCPServerForRoot(cfg, cwd)
+}
+
+// ConnectCodegraphMCPServerForRoot connects CodeGraph pinned to root. Desktop
+// project tabs use this after hot updates so a reconnect keeps the same project
+// scope as boot-time CodeGraph startup.
+func (c *Controller) ConnectCodegraphMCPServerForRoot(cfg *config.Config, root string) (int, error) {
+	return c.connectCodegraphMCPServerForRoot(cfg, root)
 }
 
 func (c *Controller) connectCodegraphMCPServer(cfg *config.Config) (int, error) {
+	return c.ConnectCodegraphMCPServer(cfg)
+}
+
+func (c *Controller) connectCodegraphMCPServerForRoot(cfg *config.Config, root string) (int, error) {
 	if !cfg.Codegraph.Enabled {
 		return 0, fmt.Errorf("codegraph is disabled in config")
 	}
@@ -2730,23 +2852,21 @@ func (c *Controller) connectCodegraphMCPServer(cfg *config.Config) (int, error) 
 	if !ok {
 		return 0, fmt.Errorf("codegraph is not installed")
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return 0, err
+	root = strings.TrimSpace(root)
+	if root == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return 0, err
+		}
+		root = cwd
 	}
-	if !codegraph.IndexableRoot(cwd) {
-		return 0, fmt.Errorf("codegraph: refusing to index %q — a filesystem root would index the whole volume", cwd)
+	if !codegraph.IndexableRoot(root) {
+		return 0, fmt.Errorf("codegraph: refusing to index %q — a filesystem root would index the whole volume", root)
 	}
-	if err := codegraph.EnsureInit(c.pluginCtx, bin, cwd); err != nil {
+	if err := codegraph.EnsureInit(c.pluginCtx, bin, root); err != nil {
 		return 0, fmt.Errorf("codegraph init: %w", err)
 	}
-	return c.connectMCPSpec(plugin.Spec{
-		Name:              "codegraph",
-		Command:           bin,
-		Args:              []string{"serve", "--mcp"},
-		Dir:               cwd,
-		ReadOnlyToolNames: codegraph.ReadOnlyToolNames(),
-	})
+	return c.connectMCPSpec(codegraph.MCPSpec(bin, root))
 }
 
 // RemoveMCPServer disconnects a live MCP server — its tools vanish from the next
@@ -2811,13 +2931,43 @@ func (c *Controller) Label() string { return c.label }
 // Empty means no scoping is in effect.
 func (c *Controller) WorkspaceRoot() string { return c.cpRoot }
 
+// InheritLifecycleFrom carries same-session lifecycle state across controller
+// rebuilds, such as model switches that preserve the conversation.
+func (c *Controller) InheritLifecycleFrom(prev *Controller) {
+	if prev == nil {
+		return
+	}
+	prev.mu.Lock()
+	started := prev.startedOnce
+	turn := prev.turn
+	prev.mu.Unlock()
+
+	c.mu.Lock()
+	c.startedOnce = started
+	if c.turn < turn {
+		c.turn = turn
+	}
+	c.mu.Unlock()
+}
+
+// ReleaseResources stops plugin subprocesses and releases resources without
+// firing SessionEnd. Use it only when replacing the controller for the same
+// logical session.
+func (c *Controller) ReleaseResources() {
+	c.close(false)
+}
+
 // Close stops plugin subprocesses and releases resources. A session that ever
 // started fires SessionEnd so a teardown hook runs.
 func (c *Controller) Close() {
+	c.close(true)
+}
+
+func (c *Controller) close(fireSessionEnd bool) {
 	c.mu.Lock()
 	started := c.startedOnce
 	c.mu.Unlock()
-	if started {
+	if fireSessionEnd && started {
 		c.hooks.SessionEnd(context.Background())
 	}
 	if c.jobs != nil {
@@ -3067,7 +3217,7 @@ func (g gateApprover) Approve(ctx context.Context, tool, subject string, args js
 	if auto {
 		return true, false, nil
 	}
-	return g.c.requestApproval(ctx, tool, subject)
+	return g.c.requestApproval(ctx, tool, subject, args)
 }
 
 func approvalDisplaySubject(tool, subject string, args json.RawMessage) string {
@@ -3076,9 +3226,28 @@ func approvalDisplaySubject(tool, subject string, args json.RawMessage) string {
 		return rememberApprovalSubject(subject, args)
 	case memoryForgetTool:
 		return forgetApprovalSubject(subject, args)
+	case "move_file":
+		return moveApprovalSubject(subject, args)
 	default:
 		return subject
 	}
+}
+
+func moveApprovalSubject(fallback string, args json.RawMessage) string {
+	if len(args) == 0 {
+		return fallback
+	}
+	var in struct {
+		SourcePath      string `json:"source_path"`
+		DestinationPath string `json:"destination_path"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return fallback
+	}
+	if in.SourcePath == "" || in.DestinationPath == "" {
+		return fallback
+	}
+	return in.SourcePath + " -> " + in.DestinationPath
 }
 
 func rememberApprovalSubject(fallback string, args json.RawMessage) string {
@@ -3188,7 +3357,19 @@ func (c *Controller) seedPlanTodos(plan string) string {
 	c.emit(event.Event{Kind: event.ToolDispatch, Tool: t})
 	t.Output = "task list seeded from the approved plan"
 	c.emit(event.Event{Kind: event.ToolResult, Tool: t})
+	c.seedAgentTodoState(args)
 	return args
+}
+
+func (c *Controller) seedAgentTodoState(args string) {
+	if c.executor == nil {
+		return
+	}
+	todos := agentTodoStateFromArgs(args)
+	if len(todos) == 0 {
+		return
+	}
+	c.executor.SeedTodoState(todos)
 }
 
 func (c *Controller) completePlanTodos(args string) {
@@ -3203,6 +3384,28 @@ func (c *Controller) completePlanTodos(args string) {
 	c.emit(event.Event{Kind: event.ToolDispatch, Tool: t})
 	t.Output = "approved plan finished"
 	c.emit(event.Event{Kind: event.ToolResult, Tool: t})
+	c.replaceAgentTodoState(done)
+}
+
+func (c *Controller) replaceAgentTodoState(args string) {
+	if c.executor == nil {
+		return
+	}
+	todos := agentTodoStateFromArgs(args)
+	if len(todos) == 0 {
+		return
+	}
+	c.executor.ReplaceTodoState(todos)
+}
+
+func agentTodoStateFromArgs(args string) []evidence.TodoItem {
+	var payload struct {
+		Todos []evidence.TodoItem `json:"todos"`
+	}
+	if err := json.Unmarshal([]byte(args), &payload); err != nil {
+		return nil
+	}
+	return payload.Todos
 }
 
 // PlanTodosJSON parses an approved plan's markdown into todo_write-shaped args
@@ -3398,7 +3601,7 @@ func parseRewind(args string, cps []checkpoint.Meta) (int, RewindScope, error) {
 // requestApproval emits an ApprovalRequest and blocks until Approve(ID, …)
 // answers or ctx is cancelled. A prior session grant for the same approval scope
 // short-circuits. promptMu serialises outstanding prompts.
-func (c *Controller) requestApproval(ctx context.Context, tool, subject string) (bool, bool, error) {
+func (c *Controller) requestApproval(ctx context.Context, tool, subject string, args json.RawMessage) (bool, bool, error) {
 	c.mu.Lock()
 	// YOLO/full access and the just-approved-plan execution window auto-allow
 	// approval-gated tools without prompting. Plan approval is a user decision,
@@ -3426,6 +3629,9 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string) 
 	c.mu.Unlock()
 
 	c.emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: id, Tool: tool, Subject: subject}})
+	if hookSubject, hookArgs, ok := permissionRequestHookPayload(tool, subject, args); ok {
+		go c.hooks.PermissionRequest(ctx, tool, hookSubject, hookArgs)
+	}
 	// The agent now needs the user's attention; a Notification hook can ping an
 	// external channel (desktop notice, phone) while the run blocks on the reply.
 	go c.hooks.Notification(ctx, approvalNotificationText(tool, subject))
@@ -3460,6 +3666,17 @@ func approvalNotificationText(tool, subject string) string {
 		return "approval needed: " + tool
 	}
 	return "approval needed: " + tool + " " + subject
+}
+
+func permissionRequestHookPayload(tool, subject string, args json.RawMessage) (string, json.RawMessage, bool) {
+	switch tool {
+	case planApprovalTool:
+		return "", nil, false
+	case memoryRememberTool, memoryForgetTool:
+		return "", nil, true
+	default:
+		return subject, args, true
+	}
 }
 
 func (c *Controller) approvalBypassAllowsLocked(tool string) bool {

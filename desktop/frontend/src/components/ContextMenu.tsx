@@ -12,6 +12,7 @@ export type ContextMenuItem =
       label: ReactNode;
       disabled?: boolean;
       danger?: boolean;
+      variant?: "section";
       onSelect: () => void;
     }
   | {
@@ -117,7 +118,7 @@ export function ContextMenu({
             type="button"
             role="menuitem"
             disabled={item.disabled}
-            className={`context-menu__item${item.danger ? " context-menu__item--danger" : ""}`}
+            className={`context-menu__item${item.danger ? " context-menu__item--danger" : ""}${item.variant ? ` context-menu__item--${item.variant}` : ""}`}
             onClick={(event) => {
               event.stopPropagation();
               if (!item.disabled) item.onSelect();

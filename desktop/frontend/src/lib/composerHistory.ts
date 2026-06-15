@@ -1,78 +1,165 @@
-// composerHistory is a tiny ring buffer of the user's last sent prompts with
-// ⌥↑/⌥↓ navigation. The history is shared across all sessions (the same way
-// a shell history is — having "fix the lint errors" only available in the
-// session it was first sent in would defeat the point), capped at 200 entries
-// to bound localStorage, and deduped to keep the most recent occurrence of any
-// repeated prompt at the top (mirroring the .bash_history "HISTCONTROL=
-// erasedups" convention).
+// composerHistory provides ↑/↓ prompt-history navigation by reading a lazy
+// backend "tape" of user prompts. The tape starts with the active session and
+// then continues through the same session order used by the history sidebar.
+//
+// Unlike the old localStorage ring buffer, the session JSONL files are the
+// canonical source of truth — we read them through the Go bound method
+// ScanPromptHistory, which exposes cursor pages and invalidates the tape when
+// sessions are created, deleted, or renamed.
 //
 // We don't try to do prefix-search navigation (Ctrl-R in bash) — that needs a
 // search UI and a keybinding the OS doesn't already take. The arrow
 // navigation is the common case and is the smallest useful addition.
 
-const KEY = "reasonix.composer.history";
-const CAP = 200;
+import { app } from "./bridge";
+import type { PromptHistoryEntry, PromptHistoryResult } from "./types";
 
-export interface HistoryEntry {
-  // text is the exact string the user sent (post-trim, attachments joined
-  // as @path tokens). We store the text verbatim so the user can edit a
-  // recalled prompt with a single keystroke rather than starting from a
-  // "rewritten" version.
-  text: string;
-  // at is the wall-clock ms when the prompt was sent. Used to display a
-  // tooltip like "Sent 3h ago" on the optional history preview pill (a
-  // future addition; right now the field is here so adding the pill is a
-  // one-line change).
-  at: number;
+// currentNonce identifies the backend tape. olderCursor points to the next
+// unread segment; cachedEntries are only the entries the user has reached.
+let currentNonce = "";
+let olderCursor = "";
+let hasOlder = true;
+let cachedEntries: PromptHistoryEntry[] = [];
+let generation = 0;
+const PROMPT_HISTORY_PAGE_LIMIT = 50;
+
+type ScanPromptHistoryResultTuple = [PromptHistoryEntry[] | null, string];
+type ScanPromptHistoryResultTupleWithErr = [PromptHistoryEntry[] | null, string, unknown];
+type ScanPromptHistoryResult =
+  | PromptHistoryEntry[]
+  | PromptHistoryResult
+  | ScanPromptHistoryResultTuple
+  | ScanPromptHistoryResultTupleWithErr
+  | Record<string, unknown>;
+
+interface NormalizedPromptHistoryPage {
+  entries: PromptHistoryEntry[] | null;
+  nonce: string;
+  olderCursor: string;
+  hasOlder: boolean;
 }
 
-function readAll(): HistoryEntry[] {
-  if (typeof localStorage === "undefined") return [];
+function asEntries(value: unknown): PromptHistoryEntry[] {
+  return Array.isArray(value) ? (value as PromptHistoryEntry[]) : [];
+}
+
+function maybeTupleResult(result: unknown): { entries: PromptHistoryEntry[] | null; nonce: string } | null {
+  if (!Array.isArray(result)) return null;
+  if (result.length >= 2 && typeof result[1] === "string") {
+    return { entries: result[0] === null ? null : asEntries(result[0]), nonce: result[1] };
+  }
+  return null;
+}
+
+function maybeTupleMapResult(result: unknown): { entries: PromptHistoryEntry[] | null; nonce: string } | null {
+  if (typeof result !== "object" || result === null) return null;
+  const map = result as Record<string, unknown>;
+  if (!("0" in map) || !("1" in map)) return null;
+  if (typeof map["1"] !== "string") return null;
+  return { entries: map["0"] === null ? null : asEntries(map["0"]), nonce: map["1"] };
+}
+
+function normalizePageResult(result: ScanPromptHistoryResult): NormalizedPromptHistoryPage {
+  const tuple = maybeTupleResult(result) ?? maybeTupleMapResult(result);
+  if (tuple !== null) {
+    return { entries: tuple.entries, nonce: tuple.nonce, olderCursor: "", hasOlder: false };
+  }
+
+  if (Array.isArray(result)) {
+    return { entries: asEntries(result), nonce: currentNonce, olderCursor: "", hasOlder: false };
+  }
+
+  if (typeof result === "object" && result !== null) {
+    if ("entries" in result) {
+      const rawEntries = (result as { entries?: unknown }).entries;
+      const nextNonce = typeof (result as { nonce?: unknown }).nonce === "string"
+        ? (result as { nonce: string }).nonce
+        : currentNonce;
+      const nextOlderCursor = typeof (result as { olderCursor?: unknown }).olderCursor === "string"
+        ? (result as { olderCursor: string }).olderCursor
+        : "";
+      const nextHasOlder = typeof (result as { hasOlder?: unknown }).hasOlder === "boolean"
+        ? (result as { hasOlder: boolean }).hasOlder
+        : nextOlderCursor !== "";
+      return {
+        entries: rawEntries === null || rawEntries === undefined ? null : asEntries(rawEntries),
+        nonce: nextNonce,
+        olderCursor: nextOlderCursor,
+        hasOlder: nextHasOlder,
+      };
+    }
+
+    if (typeof (result as { nonce?: unknown }).nonce === "string") {
+      return { entries: null, nonce: (result as { nonce: string }).nonce, olderCursor: "", hasOlder: false };
+    }
+  }
+
+  if (result === null || result === undefined) {
+    return { entries: [], nonce: currentNonce, olderCursor: "", hasOlder: false };
+  }
+  return { entries: asEntries(result), nonce: currentNonce, olderCursor: "", hasOlder: false };
+}
+
+// invalidateCache resets the tape so the next loadOlder() call starts from the
+// current active session. Call this after any session mutation.
+export function invalidateCache(): void {
+  currentNonce = "";
+  olderCursor = "";
+  hasOlder = true;
+  cachedEntries = [];
+  generation++;
+}
+
+export function cacheGeneration(): number {
+  return generation;
+}
+
+export async function loadOlder(): Promise<PromptHistoryEntry[]> {
+  if (!hasOlder && olderCursor === "") return [];
   try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const v = JSON.parse(raw);
-    if (!Array.isArray(v)) return [];
-    return v.filter((e): e is HistoryEntry => !!e && typeof e.text === "string" && typeof e.at === "number");
+    const request = JSON.stringify({
+      nonce: currentNonce,
+      cursor: olderCursor,
+      limit: PROMPT_HISTORY_PAGE_LIMIT,
+    });
+    const result = await app.ScanPromptHistory(request);
+    const page = normalizePageResult(result as ScanPromptHistoryResult);
+    currentNonce = page.nonce;
+    olderCursor = page.olderCursor;
+    hasOlder = page.hasOlder;
+    const entries = page.entries ?? [];
+    if (entries.length > 0) {
+      cachedEntries = cachedEntries.concat(entries);
+    }
+    return entries.slice();
   } catch {
     return [];
   }
 }
 
-function writeAll(list: HistoryEntry[]): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    localStorage.setItem(KEY, JSON.stringify(list));
-  } catch {
-    /* private mode — fine to forget */
+export function hasMoreOlder(): boolean {
+  return hasOlder || olderCursor !== "";
+}
+
+// snapshot returns a defensive copy of the entries loaded so far. If nothing has
+// been loaded yet, it fetches the first tape page for compatibility with older
+// callers and tests.
+export async function snapshot(): Promise<PromptHistoryEntry[]> {
+  if (cachedEntries.length === 0 && hasMoreOlder()) {
+    await loadOlder();
   }
+  return cachedEntries.slice();
 }
 
-// push adds `text` to the history. Same-text entries are deduped (the new
-// entry takes the new timestamp) and the list is capped at CAP. We don't
-// dedupe across whitespace differences — "fix lint" and "fix  lint" are
-// different prompts the user typed, and silently coalescing them would
-// confuse recall.
-export function pushHistory(text: string): void {
-  const trimmed = text.trim();
-  if (!trimmed) return;
-  const all = readAll();
-  const without = all.filter((e) => e.text !== trimmed);
-  without.unshift({ text: trimmed, at: Date.now() });
-  if (without.length > CAP) without.length = CAP;
-  writeAll(without);
+// pushHistory is a no-op — prompts are persisted by the Go kernel as session
+// JSONL files, so there's nothing local to append.
+export function pushHistory(_text: string): void {
+  // no-op: prompts are recorded by the kernel
 }
 
-// snapshot returns the current history, most-recent first. The list is
-// returned as a defensive copy so callers can't mutate the cache by
-// accident.
-export function snapshot(): HistoryEntry[] {
-  return readAll().slice();
-}
-
-// clear wipes the persisted history. The settings panel may eventually
-// expose a "clear prompt history" button — the function is here so that
-// addition is a 2-line change.
+// clearHistory is a no-op — session logs are the canonical store; there's
+// nothing local to clear. A "clear prompt history" button would need to delete
+// session files, which is a bigger operation.
 export function clearHistory(): void {
-  writeAll([]);
+  // no-op: session logs are the canonical store
 }

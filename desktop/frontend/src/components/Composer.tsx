@@ -5,10 +5,12 @@ import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
+import { canUsePromptHistory, isFnKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
+import { cacheGeneration, loadOlder } from "../lib/composerHistory";
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import { useToast } from "../lib/toast";
-import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type DirEntry, type EffortInfo, type HistoryMessage, type Mode, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type TokenMode, type ToolApprovalMode } from "../lib/types";
+import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type DirEntry, type EffortInfo, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type TokenMode, type ToolApprovalMode } from "../lib/types";
 import {
   formatWorkspaceReference,
   parseWorkspaceReference,
@@ -45,6 +47,7 @@ const COMPOSER_MIN_HEIGHT = 104;
 const COMPOSER_MAX_HEIGHT = 360;
 const COMPOSER_MAX_VIEWPORT_RATIO = 0.4;
 const COMPOSER_AUTO_RESERVED_HEIGHT = 58;
+const PROMPT_HISTORY_PREFETCH_REMAINING = 3;
 // Grace after compositionend to swallow a confirm-Enter that lands just after
 // it; the real gap is a few ms, so keep it short or a deliberate quick second
 // Enter (submit) gets eaten too.
@@ -414,6 +417,17 @@ export function Composer({
   const [loadingPastChats, setLoadingPastChats] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [composerPrompt, setComposerPrompt] = useState<string | null>(null);
+  // Prompt history navigation (plain ↑/↓)
+  // Use refs for values read inside async closures to avoid stale captures
+  // on rapid key presses (the React closure trap).
+  const historyIndexRef = useRef(-1);
+  const historyEntriesRef = useRef<PromptHistoryEntry[]>([]);
+  const historyLoadRef = useRef<Promise<void> | null>(null);
+  const historyGenerationRef = useRef(cacheGeneration());
+  // historyIndex state is written (via setHistoryIndex) for potential future
+  // UI feedback (e.g. "3/200" indicator); currently unused in render.
+  const [, setHistoryIndex] = useState(-1);
+  const savedTextRef = useRef("");
   const taRef = useRef<HTMLTextAreaElement>(null);
   const composerCardRef = useRef<HTMLDivElement>(null);
   const intentMenuAnchorRef = useRef<HTMLButtonElement>(null);
@@ -663,6 +677,46 @@ export function Composer({
     }
   }, [menuMode]);
 
+  const resetPromptHistoryNavigation = () => {
+    if (historyIndexRef.current === -1) return;
+    historyIndexRef.current = -1;
+    setHistoryIndex(-1);
+  };
+
+  const syncPromptHistoryGeneration = () => {
+    const nextGeneration = cacheGeneration();
+    if (historyGenerationRef.current === nextGeneration) return;
+    historyGenerationRef.current = nextGeneration;
+    historyEntriesRef.current = [];
+    historyLoadRef.current = null;
+    historyIndexRef.current = -1;
+    setHistoryIndex(-1);
+  };
+
+  const ensurePromptHistoryIndex = async (index: number): Promise<boolean> => {
+    if (index < historyEntriesRef.current.length) return true;
+    if (historyLoadRef.current) await historyLoadRef.current;
+    while (index >= historyEntriesRef.current.length) {
+      let loaded = 0;
+      const task = loadOlder().then((entries) => {
+        loaded = entries.length;
+        if (loaded > 0) {
+          historyEntriesRef.current = historyEntriesRef.current.concat(entries);
+        }
+      });
+      historyLoadRef.current = task;
+      await task;
+      historyLoadRef.current = null;
+      if (loaded === 0) return index < historyEntriesRef.current.length;
+    }
+    return true;
+  };
+
+  const prefetchPromptHistoryTail = () => {
+    if (historyLoadRef.current) return;
+    void ensurePromptHistoryIndex(historyEntriesRef.current.length);
+  };
+
   const setTextCaretEnd = (next: string) => {
     setText(next);
     requestAnimationFrame(() => {
@@ -853,6 +907,8 @@ export function Composer({
     const submitText = sessionContext ? `${sessionContext}${baseSubmitText}` : baseSubmitText;
     onSend(displayText, submitText);
     setText("");
+    historyIndexRef.current = -1;
+    setHistoryIndex(-1);
     clearAttachments();
     setWorkspaceRefs([]);
     setSessionRefs([]);
@@ -1147,7 +1203,10 @@ export function Composer({
     };
     window.addEventListener("resize", update);
     const observer = new MutationObserver(update);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-text-size"] });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-text-size", "data-font-family", "data-mono-font-family", "style"],
+    });
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
       window.removeEventListener("resize", update);
@@ -1357,7 +1416,21 @@ export function Composer({
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     const composing = isImeKeyEvent(e, composingRef.current, lastCompositionEndAt.current);
+    const native = e.nativeEvent as globalThis.KeyboardEvent & {
+      keyCode?: number;
+      which?: number;
+      code?: string;
+    };
+    const fnKey = isFnKeyEvent(native);
+    const historyDirection = promptHistoryDirectionFromEvent({
+      key: e.key,
+      code: native.code,
+      keyCode: native.keyCode,
+      which: native.which,
+    });
+
     if (e.key === "Enter" && composing) return;
+    if (fnKey) return;
 
     if (isPasteShortcut(e) && !composing) {
       clearNativeClipboardPasteTimer();
@@ -1378,6 +1451,70 @@ export function Composer({
     if (isYoloToggleShortcut(e) && !composing) {
       e.preventDefault();
       onToggleYoloApprovalMode();
+      return;
+    }
+
+    syncPromptHistoryGeneration();
+
+    const canUseCurrentPromptHistory = () => canUsePromptHistory({
+      direction: historyDirection,
+      menuOpen: Boolean(menuMode),
+      composing,
+      altKey: e.altKey,
+      ctrlKey: e.ctrlKey,
+      metaKey: e.metaKey,
+      shiftKey: e.shiftKey,
+      fnKey,
+      value: e.currentTarget.value,
+      selectionStart: e.currentTarget.selectionStart,
+      selectionEnd: e.currentTarget.selectionEnd,
+      historyIndex: historyIndexRef.current,
+    });
+
+    // Prompt history navigation: plain ↑/↓ only. Fn/Page/Home/End are left to
+    // the native textarea/OS so macOS dictation and text navigation keep working.
+
+    // When navigating history, any other key (letter, Backspace, etc.) resets
+    // back to the saved draft when another key is used.
+    if (historyIndexRef.current !== -1 && !canUseCurrentPromptHistory()) {
+      historyIndexRef.current = -1;
+      setHistoryIndex(-1);
+    }
+
+    if (canUseCurrentPromptHistory()) {
+      e.preventDefault();
+      void (async () => {
+        // Use refs for all mutable reads inside the async closure so rapid
+        // successive key presses always see the latest values.
+        if (historyIndexRef.current === -1) {
+          savedTextRef.current = text; // save current draft
+        }
+        const target =
+          historyDirection === "up"
+            ? historyIndexRef.current + 1
+            : historyDirection === "down"
+              ? historyIndexRef.current - 1
+              : historyIndexRef.current;
+        if (target >= historyEntriesRef.current.length && !(await ensurePromptHistoryIndex(target))) {
+          return;
+        }
+        const next =
+          historyDirection === "up"
+            ? Math.min(target, historyEntriesRef.current.length - 1)
+            : historyDirection === "down"
+              ? Math.max(target, -1)
+              : historyIndexRef.current;
+        historyIndexRef.current = next;
+        setHistoryIndex(next);
+        if (next === -1) {
+          setTextCaretEnd(savedTextRef.current);
+        } else {
+          setTextCaretEnd(historyEntriesRef.current[next].text);
+          if (historyDirection === "up" && historyEntriesRef.current.length - 1 - next <= PROMPT_HISTORY_PREFETCH_REMAINING) {
+            prefetchPromptHistoryTail();
+          }
+        }
+      })();
       return;
     }
 
@@ -1913,6 +2050,7 @@ export function Composer({
             className="composer__input"
             value={text}
             onChange={(e) => {
+              resetPromptHistoryNavigation();
               setText(e.target.value);
               if (composerPrompt) setComposerPrompt(null);
             }}

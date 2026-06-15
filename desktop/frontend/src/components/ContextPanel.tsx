@@ -289,9 +289,9 @@ export function ContextPanel({
           <section className="context-panel__section">
             <SectionHeading title={t("context.runtimeMetrics")} />
             <div className="context-panel__stats">
-              <MetricCard label={t("context.sessionTokens")} value={totalTokens > 0 ? totalTokens.toLocaleString() : "-"} />
-              <MetricCard label={t("context.requests")} value={requestCount > 0 ? String(requestCount) : "-"} />
               <MetricCard label={t("context.time")} value={fmtDuration(elapsed, t)} />
+              <MetricCard label={t("context.requests")} value={requestCount > 0 ? String(requestCount) : "-"} />
+              <MetricCard label={t("context.sessionTokens")} value={totalTokens > 0 ? totalTokens.toLocaleString() : "-"} wide />
             </div>
           </section>
           <section className="context-panel__section">
@@ -393,10 +393,11 @@ function TokenLegend({ label, value, color }: { label: string; value: number; co
   );
 }
 
-function MetricCard({ label, value, tone }: { label: string; value: string; tone?: "accent" | "good" | "notice" | "warn" }) {
+function MetricCard({ label, value, tone, wide }: { label: string; value: string; tone?: "accent" | "good" | "notice" | "warn"; wide?: boolean }) {
   const toneClass = tone ? ` context-panel__metric--${tone}` : "";
+  const wideClass = wide ? " context-panel__metric--wide" : "";
   return (
-    <div className={`context-panel__metric${toneClass}`}>
+    <div className={`context-panel__metric${toneClass}${wideClass}`}>
       <span>{label}</span>
       <strong>{value}</strong>
     </div>

@@ -292,17 +292,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
 				Text: "codegraph: project root is a filesystem root — skipped to avoid indexing the whole volume"})
 		case ok:
-			spec := plugin.Spec{
-				Name:              "codegraph",
-				StripRawPrefix:    "codegraph_",
-				Command:           bin,
-				Args:              []string{"serve", "--mcp"},
-				Dir:               root,
-				ReadOnlyToolNames: codegraph.ReadOnlyToolNames(),
-				// The daemon walks and indexes the whole tree; below-normal
-				// priority keeps it from starving the user's machine (#3797).
-				LowPriority: true,
-			}
+			spec := codegraph.MCPSpec(bin, root)
 			warm := codegraph.Initialized(root)
 			if err := codegraph.EnsureInit(ctx, bin, root); err != nil {
 				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
@@ -457,7 +447,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// project hooks run arbitrary shell commands, so cloning a repo must not
 	// silently execute them). Non-blocking hook output is surfaced to the user as
 	// a Notice through the shared sink. The runner fires PreToolUse/PostToolUse in
-	// the agent loop and UserPromptSubmit/Stop at the controller's turn boundary.
+	// the agent loop and PermissionRequest/UserPromptSubmit/Stop at the controller
+	// boundary.
 	hooksTrusted := hook.IsTrusted(root, "")
 	hookRunner := hook.NewRunner(
 		hook.Load(hook.LoadOptions{ProjectRoot: root, Trusted: hooksTrusted}),
@@ -612,13 +603,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			gate = runCtx.Gate
 		}
 		answer, err := agent.RunSubAgentWithSessionConfig(sctx, prov, subReg, run.Session, task, agent.Options{
-			MaxSteps:      steps,
-			Temperature:   cfg.Agent.Temperature,
-			Pricing:       price,
-			Gate:          gate,
-			ProjectChecks: projectChecks,
-			ContextWindow: ctxWin,
-			ArchiveDir:    config.ArchiveDir(),
+			MaxSteps:          steps,
+			Temperature:       cfg.Agent.Temperature,
+			Pricing:           price,
+			Gate:              gate,
+			ProjectChecks:     projectChecks,
+			ContextWindow:     ctxWin,
+			ArchiveDir:        config.ArchiveDir(),
+			ReasoningLanguage: agent.ReasoningLanguageFromContext(sctx),
 		}, agent.SubagentRunConfig{
 			Sink:        sink,
 			PlanMode:    agent.PlanModeContext(sctx),
@@ -799,15 +791,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				if err := codegraph.EnsureInit(ctx, bin, root); err != nil {
 					return "", fmt.Errorf("codegraph init: %w", err)
 				}
-				spec := plugin.Spec{
-					Name:              "codegraph",
-					StripRawPrefix:    "codegraph_",
-					Command:           bin,
-					Args:              []string{"serve", "--mcp"},
-					Dir:               root,
-					ReadOnlyToolNames: codegraph.ReadOnlyToolNames(),
-					LowPriority:       true,
-				}
+				spec := codegraph.MCPSpec(bin, root)
 				if opts.Stderr != nil {
 					spec.Stderr = opts.Stderr
 				}
@@ -856,6 +840,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		CompactRatio:      cfg.Agent.CompactRatio,
 		CompactForceRatio: cfg.Agent.CompactForceRatio,
 		ArchiveDir:        config.ArchiveDir(),
+		ReasoningLanguage: cfg.ReasoningLanguage(),
 	}, sink)
 
 	var runner agent.Runner = executor
@@ -887,6 +872,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				CompactRatio:      cfg.Agent.CompactRatio,
 				CompactForceRatio: cfg.Agent.CompactForceRatio,
 				ArchiveDir:        config.ArchiveDir(),
+				ReasoningLanguage: cfg.ReasoningLanguage(),
 			}, executor, cfg.Agent.Temperature, sink, control.TaskWarrantsPlanner)
 			label = entry.Model + " + planner " + pe.Model
 		}
@@ -1216,7 +1202,7 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 			"effort":             config.EffectiveEffort(e),
 			"reasoning_protocol": config.ReasoningProtocolForEntry(e),
 			"proxy_spec":         proxy,
-			"vision":             e.Vision,
+			"vision":             config.EffectiveVision(e),
 			"vision_detail":      e.VisionDetail,
 		},
 	})

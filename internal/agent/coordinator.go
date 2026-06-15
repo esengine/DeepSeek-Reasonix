@@ -87,6 +87,21 @@ func NewCoordinator(planner provider.Provider, plannerSession *Session, plannerP
 	}
 }
 
+// SetReasoningLanguage updates both agents in two-model mode. The raw planner
+// path receives controller-composed input directly, but a tool-enabled planner
+// owns its own Agent and must clear stale zh/en preferences on live changes.
+func (c *Coordinator) SetReasoningLanguage(lang string) {
+	if c == nil {
+		return
+	}
+	if c.plannerAgent != nil {
+		c.plannerAgent.SetReasoningLanguage(lang)
+	}
+	if c.executor != nil {
+		c.executor.SetReasoningLanguage(lang)
+	}
+}
+
 // Run plans with the planner model, then hands the plan to the executor.
 func (c *Coordinator) Run(ctx context.Context, input string) error {
 	c.sink.Emit(event.Event{Kind: event.TurnStarted})

@@ -37,7 +37,7 @@ func (a *App) refreshBotRuntimeAsync() {
 	if a.ctx == nil {
 		return
 	}
-	go a.refreshBotRuntime()
+	a.goSafe("refreshBotRuntime", a.refreshBotRuntime)
 }
 
 func (a *App) refreshBotRuntime() {
@@ -116,6 +116,7 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 		},
 		Debounce:                 time.Duration(cfg.Bot.DebounceMs) * time.Millisecond,
 		OnInbound:                botruntime.NewRemoteRememberer(logger),
+		OnSessionReady:           botruntime.NewSessionRememberer(logger),
 		OnToolApprovalModeChange: onToolApprovalModeChange,
 	}
 	bindings := botruntime.AdapterBindings(cfg, plan.Enabled, nil, logger)

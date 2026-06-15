@@ -91,7 +91,7 @@ func (b bash) Description() string {
 // bashToolSteer points the model at the cross-platform built-in tools instead of
 // shell utilities, so it doesn't reach for grep/cat/ls/find (absent or different
 // on native Windows) when a native tool already does the job everywhere.
-const bashToolSteer = " Use for builds, tests, git, package managers, etc. To search/read/list/edit files, prefer the dedicated tools (grep, read_file, ls, glob, edit_file) over shell grep/cat/ls/find/sed — they behave identically on every OS. For symbol search, call graphs, or architecture questions, use codegraph tools instead of grep."
+const bashToolSteer = " Use for builds, tests, git, package managers, etc. To search/read/list/edit/move files, prefer the dedicated tools (grep, read_file, ls, glob, edit_file, move_file) over shell grep/cat/ls/find/sed/mv/Move-Item — they behave identically on every OS. For symbol search, call graphs, or architecture questions, use codegraph tools instead of grep."
 
 // resolved returns the bound shell, resolving lazily for the zero-value instance
 // (e.g. a registry that never went through ConfineBash).

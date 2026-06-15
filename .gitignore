@@ -22,9 +22,11 @@ mem.prof
 # Wails desktop artifacts
 /desktop/build/*
 !/desktop/build/appicon.png
+!/desktop/build/appicon.svg
 /desktop/desktop
 /desktop/frontend/dist/*
 !/desktop/frontend/dist/.gitkeep
+/desktop/frontend/sourcemaps/
 /desktop/frontend/wailsjs/
 /desktop/frontend/package.json.md5
 

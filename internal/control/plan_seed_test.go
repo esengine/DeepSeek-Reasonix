@@ -1,6 +1,11 @@
 package control
 
-import "testing"
+import (
+	"testing"
+
+	"reasonix/internal/agent"
+	"reasonix/internal/event"
+)
 
 func TestParsePlanTodos(t *testing.T) {
 	tests := []struct {
@@ -108,5 +113,79 @@ func TestParsePlanTodosCapsAtTwenty(t *testing.T) {
 	}
 	if got := parsePlanTodos(plan); len(got) != 20 {
 		t.Fatalf("got %d todos, want cap of 20", len(got))
+	}
+}
+
+func TestSeedPlanTodosSeedsAgentState(t *testing.T) {
+	var events []event.Event
+	sink := event.FuncSink(func(e event.Event) { events = append(events, e) })
+	executor := &agent.Agent{}
+	c := &Controller{
+		sink:     sink,
+		executor: executor,
+	}
+	plan := "1. Add the parser\n2. Wire it up\n3. Add tests"
+	args := c.seedPlanTodos(plan)
+	if args == "" {
+		t.Fatal("seedPlanTodos returned empty args for a valid plan")
+	}
+	var todoDispatches, todoResults int
+	for _, e := range events {
+		if e.Kind == event.ToolDispatch && e.Tool.Name == "todo_write" {
+			todoDispatches++
+		}
+		if e.Kind == event.ToolResult && e.Tool.Name == "todo_write" {
+			todoResults++
+		}
+	}
+	if todoDispatches != 1 || todoResults != 1 {
+		t.Fatalf("plan-seed events: %d dispatches, %d results; want 1,1", todoDispatches, todoResults)
+	}
+	if got := executor.CanonicalTodoState(); len(got) != 3 || got[0].Content != "Add the parser" || got[0].Status != "in_progress" {
+		t.Fatalf("seedPlanTodos did not seed canonical todo state: %+v", got)
+	}
+}
+
+func TestSeedPlanTodosEmptyPlanNoOp(t *testing.T) {
+	c := &Controller{
+		sink:     event.Discard,
+		executor: &agent.Agent{},
+	}
+	args := c.seedPlanTodos("no list items here")
+	if args != "" {
+		t.Fatalf("empty plan returned args = %q, want empty", args)
+	}
+}
+
+func TestCompletePlanTodosMirrorsAgentState(t *testing.T) {
+	var events []event.Event
+	sink := event.FuncSink(func(e event.Event) { events = append(events, e) })
+	executor := &agent.Agent{}
+	c := &Controller{
+		sink:     sink,
+		executor: executor,
+	}
+
+	args := c.seedPlanTodos("1. Add the parser\n2. Wire it up")
+	c.completePlanTodos(args)
+
+	got := executor.CanonicalTodoState()
+	if len(got) != 2 {
+		t.Fatalf("canonical todo count = %d, want 2: %+v", len(got), got)
+	}
+	for i, todo := range got {
+		if todo.Status != "completed" {
+			t.Fatalf("canonical todo %d status = %q, want completed: %+v", i, todo.Status, got)
+		}
+	}
+
+	var completedResults int
+	for _, e := range events {
+		if e.Kind == event.ToolResult && e.Tool.Name == "todo_write" && e.Tool.Output == "approved plan finished" {
+			completedResults++
+		}
+	}
+	if completedResults != 1 {
+		t.Fatalf("completed plan UI events = %d, want 1", completedResults)
 	}
 }

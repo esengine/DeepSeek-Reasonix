@@ -225,6 +225,61 @@ func TestHandleCardActionDoesNotTrustCardRequesterAsOperator(t *testing.T) {
 	}
 }
 
+func TestHandleMessageTreatsTopicGroupAsGroup(t *testing.T) {
+	a := &adapter{
+		cfg:    config.FeishuBotConfig{RequireMention: true},
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		msgCh:  make(chan bot.InboundMessage, 1),
+	}
+	a.handleMessage(feishuMsgEvent{
+		MessageID: "msg-topic",
+		ChatID:    "chat-topic",
+		ChatType:  "topic_group",
+		MsgType:   "text",
+		Content:   `{"text":"hello"}`,
+		Sender: feishuSender{SenderID: struct {
+			UserID  string `json:"user_id"`
+			OpenID  string `json:"open_id"`
+			UnionID string `json:"union_id"`
+		}{OpenID: "open-user"}},
+		Mentions: []feishuMention{{Key: "@_user_1"}},
+	})
+
+	msg := <-a.msgCh
+	if msg.ChatType != bot.ChatGroup {
+		t.Fatalf("chat type = %q, want group", msg.ChatType)
+	}
+	if msg.ChatID != "chat-topic" || msg.UserID != "open-user" {
+		t.Fatalf("message = %+v, want topic group routing", msg)
+	}
+}
+
+func TestHandleMessageRequiresMentionInTopicGroup(t *testing.T) {
+	a := &adapter{
+		cfg:    config.FeishuBotConfig{RequireMention: true},
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		msgCh:  make(chan bot.InboundMessage, 1),
+	}
+	a.handleMessage(feishuMsgEvent{
+		MessageID: "msg-topic",
+		ChatID:    "chat-topic",
+		ChatType:  "topic_group",
+		MsgType:   "text",
+		Content:   `{"text":"hello"}`,
+		Sender: feishuSender{SenderID: struct {
+			UserID  string `json:"user_id"`
+			OpenID  string `json:"open_id"`
+			UnionID string `json:"union_id"`
+		}{OpenID: "open-user"}},
+	})
+
+	select {
+	case msg := <-a.msgCh:
+		t.Fatalf("message without mention was queued: %+v", msg)
+	default:
+	}
+}
+
 func TestWebSocketDispatcherHandlesCardActionTrigger(t *testing.T) {
 	a := &adapter{
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),

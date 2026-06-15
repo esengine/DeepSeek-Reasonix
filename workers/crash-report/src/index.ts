@@ -1,5 +1,6 @@
-// Ingest + dashboard for desktop crash/feedback reports and the anonymous launch
-// ping. Reports are user-initiated; pings are opt-out (desktop.telemetry).
+// Ingest + dashboard for desktop crash/feedback/performance reports and the
+// anonymous launch ping. Reports are user-initiated; pings are opt-out
+// (desktop.telemetry).
 import { z } from "zod";
 import type { Env } from "./env";
 import { html, redirect } from "./shell";
@@ -22,8 +23,8 @@ import {
   type User,
 } from "./auth";
 
-const MAX_BODY_BYTES = 32 * 1024;
-const SAMPLES_PER_GROUP = 5;
+const MAX_BODY_BYTES = 96 * 1024;
+const LATEST_SAMPLES_PER_GROUP = 5;
 
 const Device = z
   .object({
@@ -35,13 +36,37 @@ const Device = z
   .partial();
 
 const Report = z.object({
-  kind: z.enum(["crash", "feedback"]),
+  kind: z.enum(["crash", "exception", "feedback", "performance", "bot"]),
   version: z.string().min(1).max(64),
   os: z.string().min(1).max(32),
   arch: z.string().min(1).max(32),
   message: z.string().min(1).max(16 * 1024),
   device: Device.optional(),
+  schemaVersion: z.number().int().min(1).max(10).optional(),
+  source: z.string().trim().min(1).max(32).regex(/^[a-z0-9_.-]+$/).optional(),
+  label: z.string().max(64).optional(),
+  errorType: z.string().max(128).optional(),
+  errorMessage: z.string().max(4 * 1024).optional(),
+  stack: z.string().max(16 * 1024).optional(),
+  componentStack: z.string().max(16 * 1024).optional(),
+  topFrame: z.string().max(300).optional(),
+  buildCommit: z.string().max(64).optional(),
+  channel: z.string().max(32).optional(),
+  language: z.string().max(64).optional(),
+  view: z.string().max(200).optional(),
+  breadcrumbs: z
+    .array(
+      z.object({
+        t: z.number().int().optional(),
+        cat: z.string().max(64).optional(),
+        msg: z.string().max(240).optional(),
+      }),
+    )
+    .max(30)
+    .optional(),
+  occurredAt: z.string().max(64).optional(),
 });
+type ReportPayload = z.infer<typeof Report>;
 
 const Ping = z.object({
   installId: z.string().regex(/^[0-9a-f]{32}$/),
@@ -83,17 +108,90 @@ const Metrics = z.object({
     .max(64),
 });
 
-export function normalizeForFingerprint(kind: string, message: string): string {
-  const head = message.split("\n").slice(0, 12).join("\n");
+type FingerprintInput = {
+  kind: string;
+  message: string;
+  source?: string;
+  label?: string;
+  errorType?: string;
+  errorMessage?: string;
+  topFrame?: string;
+};
+
+export function scrubSensitiveText(input: string): string {
+  return input
+    .replace(/([A-Z]:\\Users\\)[^/\\:\s"']+/gi, "$1_")
+    .replace(/(\/(?:home|Users)\/)[^/\\:\s"']+/g, "$1_")
+    .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, "[redacted-email]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/gi, "Bearer [redacted]")
+    .replace(
+      /\b(api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization|secret|password|passwd|pwd|token)\b\s*[:=]\s*(?:Bearer\s+)?['"]?[^'"\s,;]+['"]?/gi,
+      "$1=[redacted]",
+    )
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted-jwt]")
+    .replace(/\b(?:sk|rk)-(?:proj-)?[A-Za-z0-9_-]{16,}\b/g, "[redacted-key]")
+    .replace(/\b[0-9a-fA-F]{32,}\b/g, "[redacted-hex]")
+    .replace(/[A-Za-z0-9+/]{40,}={0,2}/g, "[redacted-token]")
+    .replace(/\b[A-Za-z0-9_-]{48,}\b/g, "[redacted-token]");
+}
+
+function normalizeStackFrame(frame: string): string {
+  return frame
+    .replace(/[A-Za-z]:\\[^\s)('"]+/g, "<path>")
+    .replace(/\/(?:home|Users)\/[^\s)('"]+/g, "/<home>")
+    .replace(/(?:wails|https?|file):\/\/[^\s)('"]+/g, "<url>")
+    .replace(/0x[0-9a-fA-F]+/g, "<addr>")
+    .replace(/:\d+(?::\d+)?/g, ":<n>");
+}
+
+function normalizeFingerprintText(text: string): string {
+  return text
+    .replace(/[A-Za-z]:\\[^\s)('"]+/g, "<path>")
+    .replace(/(?:wails|https?|file):\/\/[^\s)('"]+/g, "<url>")
+    .replace(/0x[0-9a-fA-F]+/g, "<addr>")
+    .replace(/^build [0-9a-f]+$/gm, "build <commit>")
+    .replace(/:\d+(?::\d+)?/g, ":<n>");
+}
+
+export function normalizeForFingerprint(inputOrKind: FingerprintInput | string, legacyMessage = ""): string {
+  if (typeof inputOrKind === "string") {
+    const head = legacyMessage.split("\n").slice(0, 12).join("\n");
+    return inputOrKind + "\n" + normalizeFingerprintText(head);
+  }
+  const input = inputOrKind;
+  const messageBasis = input.errorMessage || input.message;
+  const head = messageBasis.split("\n").slice(0, 6).join("\n");
   return (
-    kind +
+    input.kind +
     "\n" +
-    head
-      .replace(/[A-Za-z]:\\[^\s)('"]+/g, "<path>")
-      .replace(/(?:wails|https?|file):\/\/[^\s)('"]+/g, "<url>")
-      .replace(/0x[0-9a-fA-F]+/g, "<addr>")
-      .replace(/^build [0-9a-f]+$/gm, "build <commit>")
-      .replace(/:\d+(?::\d+)?/g, ":<n>")
+    (input.source || "legacy") +
+    "\n" +
+    (input.label || "") +
+    "\n" +
+    (input.errorType || "") +
+    "\n" +
+    normalizeStackFrame(input.topFrame || "") +
+    "\n" +
+    normalizeFingerprintText(head)
+  );
+}
+
+function hasStructuredCrashFields(r: ReportPayload): boolean {
+  return Boolean(
+    r.schemaVersion ||
+      r.source ||
+      r.label ||
+      r.errorType ||
+      r.errorMessage ||
+      r.stack ||
+      r.componentStack ||
+      r.topFrame ||
+      r.buildCommit ||
+      r.channel ||
+      r.language ||
+      r.view ||
+      r.breadcrumbs?.length ||
+      r.occurredAt,
   );
 }
 
@@ -107,6 +205,14 @@ export function crashTitle(message: string): string {
   let head = lines[0] ?? "";
   if (/^\[[^\]]+\]$/.test(head) && lines[1]) head = `${head} ${lines[1]}`;
   return head.slice(0, 200);
+}
+
+function severityForKind(kind: string): string {
+  if (kind === "crash") return "high";
+  if (kind === "performance") return "medium";
+  if (kind === "bot") return "medium";
+  if (kind === "exception") return "medium";
+  return "low";
 }
 
 async function sha256Hex(s: string): Promise<string> {
@@ -134,31 +240,113 @@ async function handleReport(request: Request, env: Env): Promise<Response> {
   const parsed = Report.safeParse(raw);
   if (!parsed.success) return new Response("bad request", { status: 400 });
   const r = parsed.data;
+  const message = scrubSensitiveText(r.message);
+  const errorMessage = scrubSensitiveText(r.errorMessage ?? "");
+  const stack = scrubSensitiveText(r.stack ?? "");
+  const componentStack = scrubSensitiveText(r.componentStack ?? "");
+  const topFrame = scrubSensitiveText(r.topFrame ?? "");
+  const view = scrubSensitiveText(r.view ?? "");
+  const breadcrumbs = (r.breadcrumbs ?? []).map((b) => ({
+    ...b,
+    msg: b.msg ? scrubSensitiveText(b.msg) : b.msg,
+  }));
 
-  const fingerprint = await sha256Hex(normalizeForFingerprint(r.kind, r.message));
+  const fingerprintBasis = hasStructuredCrashFields(r)
+    ? normalizeForFingerprint({
+        kind: r.kind,
+        message,
+        source: r.source,
+        label: r.label,
+        errorType: r.errorType,
+        errorMessage,
+        topFrame,
+      })
+    : normalizeForFingerprint(r.kind, message);
+  const fingerprint = await sha256Hex(fingerprintBasis);
   const now = new Date().toISOString();
-  const title = crashTitle(r.message);
+  const title = crashTitle(message);
+  const source = r.source ?? "legacy";
+  const label = r.label ?? "";
+  const errorType = r.errorType ?? "";
+  const buildCommit = r.buildCommit ?? "";
+  const channel = r.channel ?? "";
+  const severity = severityForKind(r.kind);
+  const prior = await env.DB.prepare("SELECT status FROM groups WHERE fingerprint = ?1")
+    .bind(fingerprint)
+    .first<{ status: string }>();
+  const regressedAt = prior?.status === "resolved" ? now : "";
 
   await env.DB.prepare(
-    `INSERT INTO groups (fingerprint, kind, count, first_seen, last_seen, last_version, title)
-     VALUES (?1, ?2, 1, ?3, ?3, ?4, ?5)
+    `INSERT INTO groups (
+       fingerprint, kind, count, first_seen, last_seen, first_version, last_version,
+       status, title, source, label, error_type, top_frame, severity,
+       last_os, last_arch, last_build_commit, last_channel, last_sample_at, regressed_at
+     )
+     VALUES (?1, ?2, 1, ?3, ?3, ?4, ?4, 'open', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?3, ?15)
      ON CONFLICT (fingerprint) DO UPDATE SET
-       count = count + 1, last_seen = ?3, last_version = ?4, title = ?5`,
+       count = count + 1,
+       last_seen = ?3,
+       last_version = ?4,
+       title = ?5,
+       source = ?6,
+       label = ?7,
+       error_type = ?8,
+       top_frame = ?9,
+       last_os = ?11,
+       last_arch = ?12,
+       last_build_commit = ?13,
+       last_channel = ?14,
+       last_sample_at = ?3,
+       status = CASE WHEN status = 'resolved' THEN 'open' ELSE status END,
+       regressed_at = CASE WHEN status = 'resolved' THEN ?3 ELSE regressed_at END`,
   )
-    .bind(fingerprint, r.kind, now, r.version, title)
+    .bind(fingerprint, r.kind, now, r.version, title, source, label, errorType, topFrame, severity, r.os, r.arch, buildCommit, channel, regressedAt)
     .run();
 
-  const group = await env.DB.prepare("SELECT count FROM groups WHERE fingerprint = ?1")
-    .bind(fingerprint)
-    .first<{ count: number }>();
-  if ((group?.count ?? 1) <= SAMPLES_PER_GROUP) {
-    await env.DB.prepare(
-      `INSERT INTO reports (fingerprint, kind, version, os, arch, message, device, created_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+  await env.DB.prepare(
+    `INSERT INTO reports (
+       fingerprint, kind, version, os, arch, message, device, created_at,
+       source, label, error_type, error_message, top_frame, build_commit, channel,
+       language, view, breadcrumbs, component_stack, stack, occurred_at
+     )
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)`,
+  )
+    .bind(
+      fingerprint,
+      r.kind,
+      r.version,
+      r.os,
+      r.arch,
+      message,
+      JSON.stringify(r.device ?? {}),
+      now,
+      source,
+      label,
+      errorType,
+      errorMessage,
+      topFrame,
+      buildCommit,
+      channel,
+      r.language ?? "",
+      view,
+      JSON.stringify(breadcrumbs),
+      componentStack,
+      stack,
+      r.occurredAt ?? "",
     )
-      .bind(fingerprint, r.kind, r.version, r.os, r.arch, r.message, JSON.stringify(r.device ?? {}), now)
-      .run();
-  }
+    .run();
+
+  await env.DB.prepare(
+    `DELETE FROM reports
+     WHERE fingerprint = ?1
+       AND id NOT IN (
+         SELECT id FROM (SELECT id FROM reports WHERE fingerprint = ?1 ORDER BY id ASC LIMIT 1)
+         UNION
+         SELECT id FROM (SELECT id FROM reports WHERE fingerprint = ?1 ORDER BY id DESC LIMIT ?2)
+       )`,
+  )
+    .bind(fingerprint, LATEST_SAMPLES_PER_GROUP)
+    .run();
 
   return new Response("ok", { status: 202 });
 }
@@ -225,9 +413,11 @@ const UserAction = z.object({
 });
 
 const GroupAction = z.object({
-  action: z.enum(["status", "delete", "note"]),
+  action: z.enum(["status", "delete", "note", "resolution", "severity"]),
   status: z.enum(["open", "resolved", "ignored"]).optional(),
   note: z.string().max(500).optional(),
+  resolvedIn: z.string().max(64).optional(),
+  severity: z.enum(["low", "medium", "high", "critical"]).optional(),
 });
 
 async function formObject(request: Request): Promise<Record<string, string>> {
@@ -293,8 +483,118 @@ async function handleAccountPassword(request: Request, env: Env, user: User): Pr
   return html(renderAccount(user, { kind: "ok", text: "Password updated." }));
 }
 
-async function handleStats(env: Env, user: User): Promise<Response> {
-  const [daily, versions, platforms, crashes, metrics] = await Promise.all([
+type StatsFilters = {
+  status: string;
+  source: string;
+  version: string;
+  os: string;
+  platform: string;
+  newLatest: boolean;
+  regressed: boolean;
+};
+
+function statsFilters(url: URL): StatsFilters {
+  const status = url.searchParams.get("status") ?? "";
+  return {
+    status: ["open", "resolved", "ignored"].includes(status) ? status : "",
+    source: (url.searchParams.get("source") ?? "").slice(0, 32),
+    version: (url.searchParams.get("version") ?? "").slice(0, 64),
+    os: (url.searchParams.get("os") ?? "").slice(0, 32),
+    platform: (url.searchParams.get("platform") ?? "").slice(0, 80),
+    newLatest: url.searchParams.get("new") === "latest",
+    regressed: url.searchParams.get("regressed") === "1",
+  };
+}
+
+async function crashGroups(env: Env, filters: StatsFilters, latestVersion: string) {
+  const where: string[] = [];
+  const binds: unknown[] = [];
+  const add = (sql: string, value?: unknown) => {
+    where.push(sql.replace("?", `?${binds.length + 1}`));
+    if (value !== undefined) binds.push(value);
+  };
+  if (filters.status) add("status = ?", filters.status);
+  if (filters.source) add("source = ?", filters.source);
+  if (filters.version) add("last_version = ?", filters.version);
+  if (filters.os) add("last_os = ?", filters.os);
+  if (filters.platform) add("last_os || ' ' || last_arch = ?", filters.platform);
+  if (filters.newLatest && latestVersion) add("first_version = ?", latestVersion);
+  if (filters.regressed) where.push("regressed_at <> ''");
+  const sql = `SELECT fingerprint, kind, count, first_version, last_version, substr(last_seen, 1, 10) AS seen,
+      status, title, source, label, error_type, top_frame, severity, last_os, last_arch, regressed_at
+    FROM groups ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+    ORDER BY last_seen DESC LIMIT 50`;
+  const stmt = env.DB.prepare(sql);
+  const query = binds.length ? stmt.bind(...binds) : stmt;
+  return query.all<{
+    fingerprint: string;
+    kind: string;
+    count: number;
+    first_version: string;
+    last_version: string;
+    seen: string;
+    status: string;
+    title: string;
+    source: string;
+    label: string;
+    error_type: string;
+    top_frame: string;
+    severity: string;
+    last_os: string;
+    last_arch: string;
+    regressed_at: string;
+  }>();
+}
+
+type ParsedVersion = {
+  version: string;
+  major: number;
+  minor: number;
+  patch: number;
+};
+
+function parseReleaseVersion(version: string): ParsedVersion | null {
+  const m = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+  if (!m) return null;
+  return {
+    version,
+    major: Number(m[1]),
+    minor: Number(m[2]),
+    patch: Number(m[3]),
+  };
+}
+
+function newestReleaseVersion(versions: string[]): string {
+  const parsed = versions
+    .filter((v) => v && v.toLowerCase() !== "dev")
+    .map(parseReleaseVersion)
+    .filter((v): v is ParsedVersion => v !== null);
+  parsed.sort(
+    (a, b) =>
+      b.major - a.major ||
+      b.minor - a.minor ||
+      b.patch - a.patch ||
+      b.version.localeCompare(a.version),
+  );
+  return parsed[0]?.version ?? "";
+}
+
+async function latestObservedVersion(env: Env): Promise<string> {
+  const rows = await env.DB.prepare(
+    `SELECT version FROM (
+       SELECT version FROM pings WHERE date >= date('now', '-29 day')
+       UNION
+       SELECT last_version AS version FROM groups
+     ) AS versions WHERE version <> ''`,
+  ).all<{ version: string }>();
+  return newestReleaseVersion(rows.results.map((r) => r.version));
+}
+
+async function handleStats(request: Request, env: Env, user: User): Promise<Response> {
+  const url = new URL(request.url);
+  const filters = statsFilters(url);
+  const latestVersion = await latestObservedVersion(env);
+  const [daily, versions, platforms, crashes, metrics, sources] = await Promise.all([
     env.DB.prepare(
       "SELECT date, COUNT(*) AS users, SUM(opens) AS opens FROM pings WHERE date >= date('now', '-29 day') GROUP BY date",
     ).all<{ date: string; users: number; opens: number }>(),
@@ -304,12 +604,11 @@ async function handleStats(env: Env, user: User): Promise<Response> {
     env.DB.prepare(
       "SELECT os || ' ' || arch AS label, COUNT(DISTINCT install_id) AS users FROM pings WHERE date >= date('now', '-6 day') GROUP BY label ORDER BY users DESC",
     ).all<{ label: string; users: number }>(),
-    env.DB.prepare(
-      "SELECT fingerprint, kind, count, last_version, substr(last_seen, 1, 10) AS seen, status, title FROM groups ORDER BY last_seen DESC LIMIT 25",
-    ).all<{ fingerprint: string; kind: string; count: number; last_version: string; seen: string; status: string; title: string }>(),
+    crashGroups(env, filters, latestVersion),
     env.DB.prepare(
       "SELECT signal, bucket, SUM(count) AS total FROM metrics WHERE date >= date('now', '-6 day') GROUP BY signal, bucket ORDER BY signal, total DESC",
     ).all<{ signal: string; bucket: string; total: number }>(),
+    env.DB.prepare("SELECT source AS label, COUNT(*) AS users FROM groups GROUP BY source ORDER BY users DESC").all<{ label: string; users: number }>(),
   ]);
   return html(
     renderStats(
@@ -319,6 +618,9 @@ async function handleStats(env: Env, user: User): Promise<Response> {
         platforms: platforms.results,
         crashes: crashes.results,
         metrics: metrics.results,
+        sources: sources.results,
+        latestVersion,
+        filters,
       },
       user,
     ),
@@ -329,10 +631,32 @@ async function handleGroup(env: Env, fingerprint: string, user: User): Promise<R
   const group = await env.DB.prepare("SELECT * FROM groups WHERE fingerprint = ?1").bind(fingerprint).first<Group>();
   if (!group) return new Response("not found", { status: 404 });
   const reports = await env.DB.prepare(
-    "SELECT version, os, arch, message, device, created_at FROM reports WHERE fingerprint = ?1 ORDER BY id DESC",
+    `SELECT version, os, arch, message, device, created_at, source, label, error_type, error_message,
+      top_frame, build_commit, channel, language, view, breadcrumbs, component_stack, stack, occurred_at
+     FROM reports WHERE fingerprint = ?1 ORDER BY id DESC`,
   )
     .bind(fingerprint)
-    .all<{ version: string; os: string; arch: string; message: string; device: string; created_at: string }>();
+    .all<{
+      version: string;
+      os: string;
+      arch: string;
+      message: string;
+      device: string;
+      created_at: string;
+      source: string;
+      label: string;
+      error_type: string;
+      error_message: string;
+      top_frame: string;
+      build_commit: string;
+      channel: string;
+      language: string;
+      view: string;
+      breadcrumbs: string;
+      component_stack: string;
+      stack: string;
+      occurred_at: string;
+    }>();
   return html(renderGroup(group, reports.results, user));
 }
 
@@ -352,8 +676,26 @@ async function handleGroupAction(request: Request, env: Env, admin: User, finger
   }
   if (a.action === "status") {
     const status = a.status ?? "open";
-    await env.DB.prepare("UPDATE groups SET status = ?1 WHERE fingerprint = ?2").bind(status, fingerprint).run();
+    await env.DB.prepare(
+      "UPDATE groups SET status = ?1, resolved_at = CASE WHEN ?1 = 'resolved' THEN ?3 ELSE resolved_at END WHERE fingerprint = ?2",
+    )
+      .bind(status, fingerprint, new Date().toISOString())
+      .run();
     await logAction(env, admin, "set_status", fingerprint.slice(0, 8), status);
+    return redirect(`/stats/group/${fingerprint}`);
+  }
+  if (a.action === "resolution") {
+    await env.DB.prepare("UPDATE groups SET resolved_in = ?1 WHERE fingerprint = ?2")
+      .bind(a.resolvedIn ?? "", fingerprint)
+      .run();
+    await logAction(env, admin, "set_resolved_in", fingerprint.slice(0, 8), a.resolvedIn ?? "");
+    return redirect(`/stats/group/${fingerprint}`);
+  }
+  if (a.action === "severity") {
+    await env.DB.prepare("UPDATE groups SET severity = ?1 WHERE fingerprint = ?2")
+      .bind(a.severity ?? "medium", fingerprint)
+      .run();
+    await logAction(env, admin, "set_severity", fingerprint.slice(0, 8), a.severity ?? "medium");
     return redirect(`/stats/group/${fingerprint}`);
   }
   await env.DB.prepare("UPDATE groups SET note = ?1 WHERE fingerprint = ?2").bind(a.note ?? "", fingerprint).run();
@@ -440,7 +782,7 @@ export default {
       return user ? handleAccountPassword(request, env, user) : redirect("/login");
 
     const groupMatch = path.match(/^\/stats\/group\/([0-9a-f]{64})$/);
-    if (path === "/stats" && method === "GET") return requireViewer(user) ?? handleStats(env, user as User);
+    if (path === "/stats" && method === "GET") return requireViewer(user) ?? handleStats(request, env, user as User);
     if (groupMatch && method === "GET") return requireViewer(user) ?? handleGroup(env, groupMatch[1], user as User);
     if (groupMatch && method === "POST") {
       if (user?.role !== "admin") return new Response("forbidden", { status: 403 });
