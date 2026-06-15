@@ -3403,6 +3403,7 @@ type Meta struct {
 	TokenMode         string `json:"tokenMode"`
 	Goal              string `json:"goal,omitempty"`
 	GoalStatus        string `json:"goalStatus,omitempty"`
+	Currency          string `json:"currency,omitempty"` // display currency symbol from provider pricing (e.g. "$", "¥")
 }
 
 // Meta reports the model label, readiness, any startup error, the working
@@ -3427,6 +3428,10 @@ func (a *App) MetaForTab(tabID string) Meta {
 	tokenMode := currentTabTokenMode(tab)
 	goal := currentTabGoal(tab)
 	goalStatus := currentTabGoalStatus(tab)
+	var currency string
+	if tab.Ctrl != nil {
+		currency = tab.Ctrl.CurrencySymbol()
+	}
 	return Meta{
 		Label:             tab.Label,
 		Ready:             tab.Ready,
@@ -3444,6 +3449,7 @@ func (a *App) MetaForTab(tabID string) Meta {
 		TokenMode:         tokenMode,
 		Goal:              goal,
 		GoalStatus:        goalStatus,
+		Currency:          currency,
 	}
 }
 

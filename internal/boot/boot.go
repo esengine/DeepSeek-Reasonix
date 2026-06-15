@@ -823,6 +823,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		DisableColdResumePrune: !cfg.ColdResumePruneEnabled(),
 		Shell:                  shell,
 		PlanModeAllowedTools:   cfg.Agent.PlanModeAllowedTools,
+		CurrencySymbol:         entry.Price.Symbol(),
 		OnRemember: func(rule string) control.RememberResult {
 			return rememberPermissionRule(root, rule)
 		},

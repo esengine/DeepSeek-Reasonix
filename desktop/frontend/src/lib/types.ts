@@ -355,6 +355,7 @@ export interface Meta {
   tokenMode?: TokenMode;
   goal?: string;
   goalStatus?: GoalStatus;
+  currency?: string; // display currency symbol from provider pricing (e.g. "$", "¥")
 }
 
 export type CollaborationMode = "normal" | "plan" | "goal";

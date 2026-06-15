@@ -64,6 +64,7 @@ type Controller struct {
 
 	label             string
 	modelRef          string
+	currencySymbol    string // display currency symbol from provider pricing (e.g. "$", "¥"); empty = default "¥"
 	systemPrompt      string
 	sessionDir        string
 	host              *plugin.Host
@@ -287,6 +288,10 @@ type Options struct {
 	// matches the agent's configured [tools.shell] choice. Zero value = auto.
 	Shell      sandbox.Shell
 	Classifier autoPlanClassifier
+	// CurrencySymbol is the display currency symbol from the provider's pricing
+	// configuration (e.g. "$" for USD, "¥" for CNY). Empty means no pricing was
+	// configured and the frontend should use its default.
+	CurrencySymbol string
 	// OnRemember, when set, is invoked with a new allow rule the user chose to
 	// persist to disk (e.g. "Bash(go test:*)"). The callback is wired into the
 	// permission Gate on EnableInteractiveApproval.
@@ -334,6 +339,7 @@ func New(opts Options) *Controller {
 		disableColdResumePrune: opts.DisableColdResumePrune,
 		shell:                  opts.Shell,
 		classifier:             classifier,
+		currencySymbol:         opts.CurrencySymbol,
 		onRemember:             opts.OnRemember,
 		balanceURL:             opts.BalanceURL,
 		balanceKey:             opts.BalanceKey,
@@ -2580,6 +2586,11 @@ func (c *Controller) DisconnectMCPServer(name string) bool {
 
 // Label returns the human-readable model label, e.g. "deepseek-flash".
 func (c *Controller) Label() string { return c.label }
+
+// CurrencySymbol returns the display currency symbol from the provider's
+// pricing configuration (e.g. "$" for USD, "¥" for CNY). Empty means the
+// provider had no pricing configured and the frontend should use its default.
+func (c *Controller) CurrencySymbol() string { return c.currencySymbol }
 
 // WorkspaceRoot returns the workspace root for this controller's session
 // (the directory that file-writers and @-references are scoped to).

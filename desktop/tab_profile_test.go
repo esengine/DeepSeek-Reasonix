@@ -446,6 +446,44 @@ func TestSetBypassPreservesPlanMode(t *testing.T) {
 	}
 }
 
+func TestMetaReportsCurrencyFromProvider(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	tab := testTab("a", t.TempDir())
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	defer tab.Ctrl.Close()
+
+	// Default: no pricing configured → empty currency.
+	meta := app.MetaForTab(tab.ID)
+	if meta.Currency != "" {
+		t.Fatalf("default currency = %q, want empty", meta.Currency)
+	}
+
+	// Simulate a controller built with USD pricing (e.g. DeepSeek).
+	tab.Ctrl = control.New(control.Options{Label: "deepseek", CurrencySymbol: "$"})
+	meta = app.MetaForTab(tab.ID)
+	if meta.Currency != "$" {
+		t.Fatalf("USD currency = %q, want $", meta.Currency)
+	}
+
+	// Simulate a controller built with CNY pricing (e.g. MIMO).
+	tab.Ctrl = control.New(control.Options{Label: "mimo", CurrencySymbol: "¥"})
+	meta = app.MetaForTab(tab.ID)
+	if meta.Currency != "¥" {
+		t.Fatalf("CNY currency = %q, want ¥", meta.Currency)
+	}
+
+	// Nil controller (boot failed / tab still loading) → empty, no panic.
+	tab.Ctrl = nil
+	meta = app.MetaForTab(tab.ID)
+	if meta.Currency != "" {
+		t.Fatalf("nil ctrl currency = %q, want empty", meta.Currency)
+	}
+}
+
 func userConfigPathForTest() string {
 	if dir, err := os.UserConfigDir(); err == nil {
 		return dir + "/reasonix/reasonix.toml"
