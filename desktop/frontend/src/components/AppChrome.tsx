@@ -58,7 +58,6 @@ export function AppChrome({
 }: AppChromeProps) {
   const t = useT();
   const darwinChrome = platform === "darwin";
-  const detachCommand = !darwinChrome;
   const showWindowsPreviewControls = browserPreviewChrome && platform === "windows";
   const chromeClassName = [
     "app-chrome",
@@ -69,7 +68,6 @@ export function AppChrome({
     showWindowsPreviewControls ? "app-chrome--preview-window-controls" : "",
     `app-chrome--platform-${platform}`,
   ].filter(Boolean).join(" ");
-
   const tabBar = (
     <TabBar
       tabs={tabs}
@@ -80,7 +78,7 @@ export function AppChrome({
       onTabsClose={onTabsClose}
       onTabsReorder={onTabsReorder}
       onNewTab={onNewTab}
-      onOpenPalette={detachCommand ? undefined : onOpenPalette}
+      onOpenPalette={undefined}
       commandCompact={commandCompact}
     />
   );
@@ -121,34 +119,62 @@ export function AppChrome({
         </button>
       )}
 
-      {darwinChrome ? (
-        <div className="app-chrome__tab-strip app-chrome__tab-strip--darwin">
-          {tabBar}
-        </div>
+      {workbenchChrome ? (
+        <span className="app-chrome__spacer" aria-hidden="true" />
+      ) : darwinChrome ? (
+        <>
+          <div className="app-chrome__tab-strip app-chrome__tab-strip--darwin">
+            {tabBar}
+          </div>
+          <div
+            className={[
+              "app-chrome__tools",
+              "app-chrome__tools--fixed",
+              workspaceTogglePressed ? "app-chrome__tools--workspace-pressed" : "",
+            ].filter(Boolean).join(" ")}
+            aria-label={t("tabBar.commandSearch")}
+          >
+            <button
+              className={[
+                "tabbar__command",
+                "tabbar__command--compact",
+                "app-chrome__command",
+              ].filter(Boolean).join(" ")}
+              type="button"
+              onClick={onOpenPalette}
+              aria-label={t("palette.placeholder")}
+              title={t("palette.placeholder")}
+            >
+              <Search size={16} className="tabbar__command-icon" />
+            </button>
+          </div>
+        </>
       ) : (
         <>
           <div className="app-chrome__tab-strip app-chrome__tab-strip--native">
             {tabBar}
           </div>
-          {detachCommand && (
-            <div
+          <div
+            className={[
+              "app-chrome__tools",
+              workspaceTogglePressed ? "app-chrome__tools--workspace-pressed" : "",
+            ].filter(Boolean).join(" ")}
+            aria-label={t("tabBar.commandSearch")}
+          >
+            <button
               className={[
-                "app-chrome__tools",
-                workspaceTogglePressed ? "app-chrome__tools--workspace-pressed" : "",
+                "tabbar__command",
+                "tabbar__command--compact",
+                "app-chrome__command",
               ].filter(Boolean).join(" ")}
-              aria-label={t("tabBar.commandSearch")}
+              type="button"
+              onClick={onOpenPalette}
+              aria-label={t("palette.placeholder")}
+              title={t("palette.placeholder")}
             >
-              <button
-                className="tabbar__command tabbar__command--compact app-chrome__command"
-                type="button"
-                onClick={onOpenPalette}
-                aria-label={t("palette.placeholder")}
-                title={t("palette.placeholder")}
-              >
-                <Search size={16} className="tabbar__command-icon" />
-              </button>
-            </div>
-          )}
+              <Search size={16} className="tabbar__command-icon" />
+            </button>
+          </div>
         </>
       )}
 

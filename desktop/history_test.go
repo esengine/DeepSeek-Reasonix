@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"reasonix/internal/agent"
-	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
@@ -116,7 +115,7 @@ func TestPreviewSessionMessagesIncludesProcessEvents(t *testing.T) {
 
 func TestResumeSessionForTabTargetsSpecifiedTab(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := config.SessionDir()
+	dir := desktopSessionDir(globalTabWorkspaceRoot())
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir session dir: %v", err)
 	}
@@ -137,8 +136,25 @@ func TestResumeSessionForTabTargetsSpecifiedTab(t *testing.T) {
 
 	app := &App{
 		tabs: map[string]*WorkspaceTab{
-			"active":   {ID: "active", Scope: "global", Ctrl: activeCtrl, Ready: true},
-			"inactive": {ID: "inactive", Scope: "global", Ctrl: inactiveCtrl, Ready: true},
+			"active": {
+				ID:            "active",
+				Scope:         "global",
+				WorkspaceRoot: globalTabWorkspaceRoot(),
+				Ctrl:          activeCtrl,
+				Ready:         true,
+				sink:          &tabEventSink{tabID: "active"},
+				disabledMCP:   map[string]ServerView{},
+			},
+			"inactive": {
+				ID:            "inactive",
+				Scope:         "global",
+				WorkspaceRoot: globalTabWorkspaceRoot(),
+				SessionPath:   inactivePath,
+				Ctrl:          inactiveCtrl,
+				Ready:         true,
+				sink:          &tabEventSink{tabID: "inactive"},
+				disabledMCP:   map[string]ServerView{},
+			},
 		},
 		tabOrder:    []string{"active", "inactive"},
 		activeTabID: "active",
@@ -151,8 +167,14 @@ func TestResumeSessionForTabTargetsSpecifiedTab(t *testing.T) {
 	if activeCtrl.SessionPath() != activePath {
 		t.Fatalf("active tab session path = %q, want %q", activeCtrl.SessionPath(), activePath)
 	}
-	if inactiveCtrl.SessionPath() != targetPath {
-		t.Fatalf("inactive tab session path = %q, want %q", inactiveCtrl.SessionPath(), targetPath)
+	if inactiveCtrl.SessionPath() != inactivePath {
+		t.Fatalf("original inactive controller session path = %q, want %q", inactiveCtrl.SessionPath(), inactivePath)
+	}
+	if app.tabs["inactive"].Ctrl == inactiveCtrl {
+		t.Fatal("resume to a different sessionPath mutated the existing controller in place")
+	}
+	if app.tabs["inactive"].Ctrl.SessionPath() != targetPath {
+		t.Fatalf("inactive tab session path = %q, want %q", app.tabs["inactive"].Ctrl.SessionPath(), targetPath)
 	}
 	f := loadTabsFile()
 	var savedInactive string
@@ -168,6 +190,117 @@ func TestResumeSessionForTabTargetsSpecifiedTab(t *testing.T) {
 	if len(got) != 1 || got[0].Content != "target prompt" {
 		t.Fatalf("resumed history = %+v, want target prompt", got)
 	}
+}
+
+func TestResumeSessionForTabDetachesRunningRuntimeForDifferentSessionPath(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := desktopSessionDir(globalTabWorkspaceRoot())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+
+	topicID := "topic_same"
+	sessionA := filepath.Join(dir, "session-a.jsonl")
+	sessionB := filepath.Join(dir, "session-b.jsonl")
+	writeHistoryTestSession(t, sessionA, "session A prompt")
+	writeHistoryTestSession(t, sessionB, "session B prompt")
+
+	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	ctrlA := control.New(control.Options{
+		Runner:      runner,
+		SessionDir:  dir,
+		SessionPath: sessionA,
+		Label:       "session-a",
+		Sink:        event.Discard,
+	})
+	defer ctrlA.Close()
+
+	app := NewApp()
+	tab := &WorkspaceTab{
+		ID:            "topic-tab",
+		Scope:         "global",
+		WorkspaceRoot: globalTabWorkspaceRoot(),
+		TopicID:       topicID,
+		TopicTitle:    "Same topic",
+		SessionPath:   sessionA,
+		Ctrl:          ctrlA,
+		Ready:         true,
+		sink:          &tabEventSink{tabID: "topic-tab", app: app},
+		disabledMCP:   map[string]ServerView{},
+	}
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	ctrlA.Submit("keep running")
+	<-runner.started
+
+	got, err := app.ResumeSessionForTab(tab.ID, sessionB)
+	if err != nil {
+		t.Fatalf("ResumeSessionForTab: %v", err)
+	}
+	if !ctrlA.Running() {
+		t.Fatal("session A controller was cancelled while resuming session B")
+	}
+	if ctrlA.SessionPath() != sessionA {
+		t.Fatalf("session A controller path = %q, want %q", ctrlA.SessionPath(), sessionA)
+	}
+	detached := app.detachedSessions[sessionRuntimeKey(sessionA)]
+	if detached == nil || detached.Ctrl != ctrlA {
+		t.Fatalf("session A runtime was not detached: %+v", detached)
+	}
+	if detached.ID == tab.ID {
+		t.Fatalf("detached runtime kept visible tab id %q", detached.ID)
+	}
+	if detached.sink == nil {
+		t.Fatal("detached runtime lost its event sink")
+	}
+	if detached.sink.tabID == tab.ID {
+		t.Fatalf("detached sink tab id = %q, want non-visible id", detached.sink.tabID)
+	}
+	if app.tabs[tab.ID].Ctrl == ctrlA {
+		t.Fatal("visible tab still points at session A runtime after resuming session B")
+	}
+	if gotPath := app.tabs[tab.ID].Ctrl.SessionPath(); gotPath != sessionB {
+		t.Fatalf("visible tab session path = %q, want %q", gotPath, sessionB)
+	}
+	if len(got) != 1 || got[0].Content != "session B prompt" {
+		t.Fatalf("resumed history = %+v, want session B prompt", got)
+	}
+
+	visible := app.tabs[tab.ID]
+	detached.sink.Emit(event.Event{Kind: event.TurnStarted})
+	if visible.ActivityStatus != "" {
+		t.Fatalf("detached runtime event changed visible tab status to %q", visible.ActivityStatus)
+	}
+	detached.sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{
+		Name:   "read_file",
+		Args:   `{"path":"detached.go","offset":3,"limit":7}`,
+		Output: "package main",
+	}})
+	if got := detached.telemetrySnapshot().ReadFiles; len(got) != 1 || got[0].Path != "detached.go" || got[0].Offset != 3 || got[0].Limit != 7 {
+		t.Fatalf("detached runtime read telemetry = %+v", got)
+	}
+	if got := visible.telemetrySnapshot().ReadFiles; len(got) != 0 {
+		t.Fatalf("detached runtime read telemetry was recorded on visible tab: %+v", got)
+	}
+	detached.sink.Emit(event.Event{Kind: event.Usage, Usage: &provider.Usage{PromptTokens: 42}})
+	detached.sink.Emit(event.Event{Kind: event.TurnDone})
+	if detached.usageTelemetry.PromptTokens != 42 {
+		t.Fatalf("detached runtime usage was not recorded on detached tab: %+v", detached.usageTelemetry)
+	}
+	if detached.usageTelemetry.RequestCount != 1 {
+		t.Fatalf("detached runtime request count = %d, want 1", detached.usageTelemetry.RequestCount)
+	}
+	if visible.usageTelemetry.PromptTokens != 0 {
+		t.Fatalf("detached runtime usage was recorded on visible tab: %+v", visible.usageTelemetry)
+	}
+	if visible.saveAgain || visible.saving {
+		t.Fatalf("detached runtime scheduled visible tab snapshot: saving=%v saveAgain=%v", visible.saving, visible.saveAgain)
+	}
+
+	close(runner.release)
+	waitNotRunning(t, ctrlA)
 }
 
 func writeHistoryTestSession(t *testing.T, path, prompt string) {

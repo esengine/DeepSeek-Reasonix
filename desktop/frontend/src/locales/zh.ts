@@ -30,7 +30,7 @@ export const zh: Record<DictKey, string> = {
   "topbar.newSession": "新建会话",
   "topbar.startupError": "启动错误：{msg}",
 
-  // 标签页栏
+  // 顶部应用栏
   "tabBar.closeTab": "关闭标签页",
   "tabBar.closeOtherTabs": "关闭其他标签页",
   "tabBar.closeTabsToRight": "关闭右侧标签页",
@@ -556,6 +556,7 @@ export const zh: Record<DictKey, string> = {
   "projectTree.status.thinking": "思考中",
   "projectTree.status.streaming": "输出中",
   "projectTree.status.waitingConfirmation": "待确认",
+  "projectTree.status.backgroundJob": "后台任务",
   "projectTree.status.paused": "已暂停",
   "projectTree.status.error": "异常",
   "projectTree.removeProject": "移出侧边栏",

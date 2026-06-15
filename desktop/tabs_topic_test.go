@@ -1200,6 +1200,46 @@ func TestRestoreProjectTopicSessionReindexesProjectTree(t *testing.T) {
 	}
 }
 
+func TestOpenProjectTabResolvesProjectSessionFromLegacyDir(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_legacy_project"
+	topicTitle := "Legacy project topic"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, topicTitle); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	sessionPath := writeTopicSessionWithPrompt(t, dir, "legacy-project.jsonl", topicID, topicTitle, projectRoot, "legacy project prompt", time.Now())
+	app := NewApp()
+
+	nodes := app.ListProjectTree()
+	if len(nodes) != 1 || nodes[0].Kind != "project" || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topicID {
+		t.Fatalf("legacy project session should appear in project tree, got %#v", nodes)
+	}
+	meta, err := app.OpenProjectTab(projectRoot, topicID)
+	if err != nil {
+		t.Fatalf("OpenProjectTab: %v", err)
+	}
+	tab := waitForTabReady(t, app, meta.ID)
+	if tab.Ctrl == nil {
+		t.Fatalf("tab controller was not built")
+	}
+	if got := filepath.Clean(tab.Ctrl.SessionPath()); got != filepath.Clean(sessionPath) {
+		t.Fatalf("opened session path = %q, want %q", got, sessionPath)
+	}
+	history := tab.Ctrl.History()
+	if len(history) == 0 || history[0].Content != "legacy project prompt" {
+		t.Fatalf("opened history = %+v, want legacy project prompt", history)
+	}
+}
+
 func TestRestoreSessionWithoutTopicMetadataFallsBackToGlobal(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -1308,6 +1348,131 @@ func TestTrashTopicMovesOpenSessionToTrash(t *testing.T) {
 	if got := loadTopicTitle(projectRoot, topicID); got != "" {
 		t.Fatalf("topic title should be removed, got %q", got)
 	}
+}
+
+func TestTrashTopicCancelsRunningSessionRuntime(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_running_trash"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "Running trash"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	sessionPath := writeTopicSession(t, dir, "running-trash.jsonl", topicID, "Running trash", projectRoot)
+	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	ctrl := control.New(control.Options{Runner: runner, SessionDir: dir, SessionPath: sessionPath, Label: "test", WorkspaceRoot: projectRoot})
+	defer ctrl.Close()
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"running": {
+				ID:            "running",
+				Scope:         "project",
+				WorkspaceRoot: projectRoot,
+				TopicID:       topicID,
+				TopicTitle:    "Running trash",
+				Ctrl:          ctrl,
+				Ready:         true,
+				disabledMCP:   map[string]ServerView{},
+			},
+			"keep": {
+				ID:            "keep",
+				Scope:         "project",
+				WorkspaceRoot: projectRoot,
+				TopicID:       "topic_keep",
+				TopicTitle:    "Keep",
+				Ready:         true,
+				disabledMCP:   map[string]ServerView{},
+			},
+		},
+		tabOrder:    []string{"running", "keep"},
+		activeTabID: "running",
+	}
+
+	ctrl.Submit("long turn")
+	<-runner.started
+	if err := app.TrashTopic(topicID); err != nil {
+		t.Fatalf("trash topic: %v", err)
+	}
+	waitNotRunning(t, ctrl)
+	if _, ok := app.tabs["running"]; ok {
+		t.Fatalf("running topic runtime should be removed")
+	}
+	if got := app.activeTabID; got != "keep" {
+		t.Fatalf("active tab = %q, want keep", got)
+	}
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
+		t.Fatalf("running topic session should be moved out of active history, stat err = %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "running-trash.jsonl", "running-trash.jsonl")
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("running topic session should be moved to trash: %v", err)
+	}
+}
+
+func TestTrashTopicTrashConflictKeepsRunningRuntime(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_trash_conflict"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "Trash conflict"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	sessionPath := writeTopicSession(t, dir, "trash-conflict.jsonl", topicID, "Trash conflict", projectRoot)
+	if err := os.MkdirAll(filepath.Join(dir, sessionTrashDir, filepath.Base(sessionPath)), 0o755); err != nil {
+		t.Fatalf("create trash conflict: %v", err)
+	}
+	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	ctrl := control.New(control.Options{Runner: runner, SessionDir: dir, SessionPath: sessionPath, Label: "test", WorkspaceRoot: projectRoot})
+	defer ctrl.Close()
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"running": {
+				ID:            "running",
+				Scope:         "project",
+				WorkspaceRoot: projectRoot,
+				TopicID:       topicID,
+				TopicTitle:    "Trash conflict",
+				Ctrl:          ctrl,
+				Ready:         true,
+				disabledMCP:   map[string]ServerView{},
+			},
+		},
+		tabOrder:    []string{"running"},
+		activeTabID: "running",
+	}
+
+	ctrl.Submit("long turn")
+	<-runner.started
+	err := app.TrashTopic(topicID)
+	if err == nil || !strings.Contains(err.Error(), "already exists in trash") {
+		t.Fatalf("TrashTopic conflict error = %v, want trash conflict", err)
+	}
+	if _, ok := app.tabs["running"]; !ok {
+		t.Fatalf("running runtime should remain bound after preflight failure")
+	}
+	if !ctrl.Running() {
+		t.Fatalf("running turn should not be cancelled on preflight failure")
+	}
+	if _, err := os.Stat(sessionPath); err != nil {
+		t.Fatalf("session file should remain after preflight failure: %v", err)
+	}
+
+	close(runner.release)
+	waitNotRunning(t, ctrl)
 }
 
 func hasHistoryContent(messages []HistoryMessage, content string) bool {

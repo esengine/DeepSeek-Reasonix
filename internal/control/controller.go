@@ -1165,6 +1165,14 @@ func (c *Controller) Running() bool {
 	return c.running
 }
 
+// PendingPrompt reports whether the current turn is blocked waiting for a user
+// approval, plan approval, memory approval, or ask-tool answer.
+func (c *Controller) PendingPrompt() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.approvals) > 0 || len(c.asks) > 0
+}
+
 // Turn returns the current turn number (0 before the first submit).
 func (c *Controller) Turn() int {
 	c.mu.Lock()

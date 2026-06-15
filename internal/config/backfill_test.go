@@ -118,6 +118,54 @@ func TestNormalizeDesktopOfficialProviderAccessCanonicalizesLegacyIDs(t *testing
 	}
 }
 
+func TestNormalizeOfficialDeepSeekModelsRepairsCanonicalProvider(t *testing.T) {
+	c := &Config{
+		DefaultModel: "deepseek-flash/deepseek-v4-flash",
+		Desktop:      DesktopConfig{ProviderAccess: []string{"deepseek"}},
+		Providers: []ProviderEntry{{
+			Name:      "deepseek",
+			Kind:      "openai",
+			BaseURL:   "https://api.deepseek.com",
+			Model:     "glm-5",
+			APIKeyEnv: "DEEPSEEK_API_KEY",
+		}},
+	}
+	normalizeDesktopOfficialProviderAccess(c)
+	normalizeOfficialDeepSeekModels(c)
+
+	p, ok := c.Provider("deepseek")
+	if !ok {
+		t.Fatal("deepseek provider missing")
+	}
+	if !p.HasModel("deepseek-v4-flash") || !p.HasModel("deepseek-v4-pro") || !p.HasModel("glm-5") {
+		t.Fatalf("deepseek models = %+v, want official models plus existing model", p.ModelList())
+	}
+	if c.DefaultModel != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("default_model = %q, want retargeted official ref", c.DefaultModel)
+	}
+	if _, ok := c.ResolveModel(c.DefaultModel); !ok {
+		t.Fatalf("retargeted default_model %q should resolve", c.DefaultModel)
+	}
+}
+
+func TestNormalizeOfficialDeepSeekModelsLeavesExternalEndpointUntouched(t *testing.T) {
+	c := &Config{Providers: []ProviderEntry{{
+		Name:    "deepseek",
+		Kind:    "openai",
+		BaseURL: "https://proxy.example.com/v1",
+		Model:   "glm-5",
+	}}}
+	normalizeOfficialDeepSeekModels(c)
+
+	p, ok := c.Provider("deepseek")
+	if !ok {
+		t.Fatal("deepseek provider missing")
+	}
+	if p.HasModel("deepseek-v4-flash") || p.HasModel("deepseek-v4-pro") {
+		t.Fatalf("external endpoint models = %+v, want untouched custom list", p.ModelList())
+	}
+}
+
 func TestNormalizeDesktopOfficialProviderAccessEnsuresMimoAPI(t *testing.T) {
 	c := Default()
 	c.DefaultModel = "mimo-api/mimo-v2.5-pro"

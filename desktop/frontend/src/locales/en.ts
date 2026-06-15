@@ -29,7 +29,7 @@ export const en = {
   "topbar.newSession": "New session",
   "topbar.startupError": "startup error: {msg}",
 
-  // tab bar
+  // app chrome
   "tabBar.closeTab": "Close tab",
   "tabBar.closeOtherTabs": "Close other tabs",
   "tabBar.closeTabsToRight": "Close tabs to right",
@@ -555,6 +555,7 @@ export const en = {
   "projectTree.status.thinking": "thinking",
   "projectTree.status.streaming": "responding",
   "projectTree.status.waitingConfirmation": "waiting",
+  "projectTree.status.backgroundJob": "background job",
   "projectTree.status.paused": "paused",
   "projectTree.status.error": "error",
   "projectTree.removeProject": "Remove from sidebar",

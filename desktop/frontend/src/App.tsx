@@ -848,6 +848,7 @@ export default function App() {
     openGlobalTab,
     closeTab,
     reorderTabs,
+    openTopicSession,
     syncActiveTab,
     ensureBlankTab,
   } = useController();
@@ -1963,7 +1964,7 @@ export default function App() {
     const tabs = await switchTab(id);
     if (tabs) setTabMetas(tabs);
     setTabRevealSignal((signal) => signal + 1);
-  }, [closeTransientOverlays, setTabMetas, switchTab]);
+  }, [closeTransientOverlays, switchTab]);
 
   const handleTabClose = useCallback(async (id: string) => {
     closeTransientOverlays();
@@ -2077,7 +2078,6 @@ export default function App() {
       rewind(turn, scope).then(() => {
         refreshTabMetas();
         setProjectRevision((v) => v + 1);
-        setTabRevealSignal((v) => v + 1);
       });
       return;
     }
@@ -2123,17 +2123,18 @@ export default function App() {
     setRewindSignal((v) => v + 1);
   }, [state.items, rewind, refreshTabMetas, setComposerInsertRequest]);
 
-  const handleOpenTopic = useCallback(async (scope: string, workspaceRoot: string, topicId: string) => {
+  const handleOpenTopic = useCallback(async (scope: string, workspaceRoot: string, topicId: string, sessionPath?: string) => {
     closeTransientOverlays();
     setSidebarImDetailConnectionId("");
-    if (scope === "global") {
+    if (sessionPath) {
+      await openTopicSession(scope, workspaceRoot, topicId, sessionPath);
+    } else if (scope === "global") {
       await openGlobalTab(topicId);
     } else {
       await openProjectTab(workspaceRoot, topicId);
     }
     await refreshTabMetas();
-    setTabRevealSignal((signal) => signal + 1);
-  }, [closeTransientOverlays, openGlobalTab, openProjectTab, refreshTabMetas]);
+  }, [closeTransientOverlays, openGlobalTab, openProjectTab, openTopicSession, refreshTabMetas]);
 
   const openSidebarImConnectionSession = useCallback(async (connection: SidebarImConnection) => {
     const target = mappedSessionTarget(connection.sessionId);
@@ -2153,7 +2154,6 @@ export default function App() {
       }
       await refreshTabMetas();
       setProjectRevision((value) => value + 1);
-      setTabRevealSignal((signal) => signal + 1);
     } catch (err) {
       console.warn("bot sidebar open failed", err);
       showToast(t("sidebar.imOpenFailed", { name: connection.title }));
@@ -2214,7 +2214,6 @@ export default function App() {
         setHistView(null);
         await resumeSession(session.path, targetTab.id);
         await refreshTabMetas();
-        setTabRevealSignal((signal) => signal + 1);
       } catch (err: any) {
         setHistView(null);
         if (scope === "project" && session.workspaceRoot) {
@@ -2610,6 +2609,7 @@ export default function App() {
               activeScope={activeTab?.scope}
               activeWorkspaceRoot={activeTab?.workspaceRoot}
               activeTopicId={activeTab?.topicId}
+              activeSessionPath={activeTab?.sessionPath}
               imTopicSources={imTopicSources}
               onOpenTopic={handleOpenTopic}
               onOpenProjectHistory={openProjectHistory}

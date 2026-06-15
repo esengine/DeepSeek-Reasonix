@@ -469,14 +469,6 @@ func TestSessionTitlesPath(t *testing.T) {
 	}
 }
 
-// --- errActiveSession ---
-
-func TestErrActiveSession(t *testing.T) {
-	if errActiveSession.Error() == "" {
-		t.Error("errActiveSession should have a message")
-	}
-}
-
 func TestSessionDisplayRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	sessionPath := filepath.Join(dir, "s.jsonl")

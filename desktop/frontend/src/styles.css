@@ -1516,7 +1516,7 @@ a[href] {
 .app {
   height: 100%;
   min-height: 0;
-  overflow-x: hidden;
+  overflow-x: auto;
   overflow-y: hidden;
 }
 
@@ -1569,15 +1569,15 @@ a[href] {
 }
 .layout--workspace-open {
   --chrome-right-toggle-offset: calc(var(--workspace-width) + var(--workspace-resizer-width));
-  min-width: 0;
+  min-width: min(780px, 100vw);
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--workspace-resizer-width) minmax(0, var(--workspace-width));
 }
 .layout--workspace-open:not(.layout--sidebar-collapsed) {
-  min-width: 0;
+  min-width: min(780px, 100vw);
   grid-template-columns: var(--sidebar-expanded-width) minmax(0, 1fr) var(--workspace-resizer-width) minmax(0, var(--workspace-width));
 }
 .layout--workspace-open.layout--sidebar-collapsed {
-  min-width: 0;
+  min-width: min(560px, 100vw);
   grid-template-columns: 0px minmax(0, 1fr) var(--workspace-resizer-width) minmax(0, var(--workspace-width));
 }
 .layout--workspace-maximized {
@@ -14783,8 +14783,11 @@ a[href] {
 .app-chrome__tab-strip {
   flex: 1 1 auto;
   min-width: 0;
+  max-width: 100%;
   height: 100%;
-  display: none;
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
 }
 
 .app-chrome__identity {
@@ -14842,6 +14845,14 @@ a[href] {
   margin-left: 0;
 }
 
+.app-chrome__tools--fixed {
+  position: absolute;
+  top: 0;
+  right: calc(var(--chrome-toggle-size) + 8px);
+  z-index: var(--z-local-raised);
+  margin-left: 0;
+}
+
 .app-chrome__tools--workspace-pressed .app-chrome__command {
   animation: app-chrome-command-follow-toggle 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
@@ -14895,28 +14906,15 @@ a[href] {
 
 .app--darwin .app-chrome--tabs {
   align-items: stretch;
-  padding: 0 calc(var(--chrome-right-toggle-offset) + var(--chrome-toggle-size) + 8px) 0 calc(var(--chrome-left-toggle-offset) + var(--chrome-toggle-size) + 8px);
+  padding: 0 calc(var(--chrome-toggle-size) + var(--chrome-toggle-size) + 16px) 0 calc(var(--chrome-left-toggle-offset) + var(--chrome-toggle-size) + 8px);
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--bg-soft) 94%, var(--bg-elev)), var(--bg-soft));
   transition: padding 0.28s cubic-bezier(0.2, 0.72, 0.2, 1);
 }
 
-.app--darwin .app-chrome--tabs .app-chrome__tab-strip {
-  display: flex;
-  --wails-draggable: no-drag;
-}
-
-.app--darwin .app-chrome--tabs .app-chrome__tab-strip *,
 .app--darwin .app-chrome--tabs .tabbar,
 .app--darwin .app-chrome--tabs .tabbar * {
   --wails-draggable: no-drag;
-}
-
-/* The empty strip between the last tab and the search button must drag the
-   window like a native titlebar — the 10px top rail alone is unusable (#3853). */
-.app--darwin .app-chrome--tabs .tabbar__spacer {
-  --wails-draggable: drag;
-  align-self: stretch;
 }
 
 .app--darwin .app-chrome--tabs .app-chrome__drag-rail {
@@ -14924,7 +14922,7 @@ a[href] {
   position: absolute;
   top: 0;
   left: calc(var(--chrome-left-toggle-offset) + var(--chrome-toggle-size) + 12px);
-  right: calc(var(--chrome-right-toggle-offset) + var(--chrome-toggle-size) + 12px);
+  right: calc(var(--chrome-toggle-size) + var(--chrome-toggle-size) + 20px);
   z-index: var(--z-local-handle);
   height: 10px;
   --wails-draggable: drag;
@@ -14977,7 +14975,7 @@ a[href] {
 }
 
 .app--darwin .app-chrome--tabs .app-chrome__panel-toggle--right {
-  right: var(--chrome-right-toggle-offset);
+  right: 8px;
 }
 
 .app--darwin .app-chrome--tabs .app-chrome__panel-toggle:hover {
@@ -15207,7 +15205,7 @@ a[href] {
 .app--linux .app-chrome--native-tabs {
   align-items: center;
   gap: 12px;
-  padding: 0 calc(var(--chrome-toggle-size) + 10px) 0 calc(var(--chrome-toggle-size) + 10px);
+  padding: 0 calc(var(--chrome-right-toggle-offset) + var(--chrome-toggle-size) + 10px) 0 calc(var(--chrome-toggle-size) + 10px);
   background: var(--bg-soft);
 }
 
@@ -15217,21 +15215,13 @@ a[href] {
 }
 
 .app--browser-preview.app--windows .app-chrome--native-tabs {
-  padding-right: calc(var(--windows-preview-controls-width) + 48px);
+  padding-right: calc(var(--chrome-right-toggle-offset) + var(--windows-preview-controls-width) + 48px);
 }
 
 .app--linux .app-chrome--native-tabs {
   background: color-mix(in srgb, var(--bg-soft) 92%, var(--bg-elev));
 }
 
-.app--windows .app-chrome--native-tabs .app-chrome__tab-strip,
-.app--linux .app-chrome--native-tabs .app-chrome__tab-strip {
-  display: flex;
-  --wails-draggable: no-drag;
-}
-
-.app--windows .app-chrome--native-tabs .app-chrome__tab-strip *,
-.app--linux .app-chrome--native-tabs .app-chrome__tab-strip *,
 .app--windows .app-chrome--native-tabs .tabbar,
 .app--linux .app-chrome--native-tabs .tabbar,
 .app--windows .app-chrome--native-tabs .tabbar *,
@@ -16769,6 +16759,11 @@ a[href] {
   color: color-mix(in srgb, var(--warn) 82%, var(--fg));
 }
 
+.project-tree__topic-status--background_job {
+  background: color-mix(in srgb, var(--shell-accent) 11%, transparent);
+  color: color-mix(in srgb, var(--shell-accent) 78%, var(--fg));
+}
+
 .project-tree__topic-status--paused {
   background: color-mix(in srgb, var(--fg-faint) 11%, transparent);
   color: var(--fg-faint);
@@ -16791,6 +16786,10 @@ a[href] {
   color: var(--fg-faint);
   font-size: 11px;
   line-height: 1.2;
+}
+
+.project-tree__topic--session .project-tree__topic-label {
+  color: var(--fg-dim);
 }
 
 .project-tree__topic-main:focus-visible {
@@ -17818,7 +17817,7 @@ a[href] {
 }
 
 .app--darwin .app-chrome--tabs {
-  padding-right: calc(var(--chrome-right-toggle-offset) + var(--chrome-toggle-size) + 10px);
+  padding-right: calc(var(--chrome-toggle-size) + var(--chrome-toggle-size) + 16px);
   background: color-mix(in srgb, var(--bg-soft) 90%, var(--bg-elev));
 }
 
@@ -18407,7 +18406,7 @@ a[href] {
 
 :root[data-theme-style] .app--darwin .app-chrome--tabs {
   padding-left: calc(var(--chrome-left-safe-offset) + var(--chrome-toggle-size) + 8px);
-  padding-right: calc(var(--chrome-toggle-size) + 12px);
+  padding-right: calc(var(--chrome-toggle-size) + var(--chrome-toggle-size) + 16px);
   background: var(--bg-elev);
   transition: background var(--dur-fast), border-color var(--dur-fast);
 }
@@ -18416,7 +18415,7 @@ a[href] {
 :root[data-theme-style] .app--linux .app-chrome--native-tabs {
   gap: 12px;
   padding-left: 48px;
-  padding-right: 48px;
+  padding-right: calc(var(--chrome-right-toggle-offset) + 48px);
   background: var(--bg-elev);
   transition: background var(--dur-fast), border-color var(--dur-fast);
 }
@@ -18427,7 +18426,7 @@ a[href] {
 }
 
 :root[data-theme-style] .app--browser-preview.app--windows .app-chrome--native-tabs {
-  padding-right: calc(var(--windows-preview-controls-width) + 48px);
+  padding-right: calc(var(--chrome-right-toggle-offset) + var(--windows-preview-controls-width) + 48px);
 }
 
 :root[data-theme-style] .app--linux .app-chrome--native-tabs {
@@ -18575,6 +18574,12 @@ a[href] {
 
 :root[data-theme-style] .tabbar__tabs::-webkit-scrollbar {
   display: none;
+}
+
+:root[data-theme-style] .app-chrome--tabs .tabbar,
+:root[data-theme-style] .app-chrome--tabs .tabbar__tabs {
+  flex: 1 1 auto;
+  max-width: 100%;
 }
 
 .app-chrome--workbench .app-chrome__workbench-search {
@@ -19155,6 +19160,12 @@ a[href] {
   background: color-mix(in srgb, var(--warn) 12%, var(--bg-elev));
   color: color-mix(in srgb, var(--warn) 82%, var(--fg));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 20%, transparent);
+}
+
+:root[data-theme-style] .project-tree__topic-status--background_job {
+  background: color-mix(in srgb, var(--shell-accent) 10%, var(--bg-elev));
+  color: color-mix(in srgb, var(--shell-accent) 80%, var(--fg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--shell-accent) 18%, transparent);
 }
 
 :root[data-theme-style] .project-tree__topic-status--paused {
@@ -20600,11 +20611,15 @@ a[href] {
    new_design comps: panel toggles, run-mode badges, active sessions, and file
    tree folder rows all use each theme's accent + accent-soft pair. */
 :root[data-theme-style] .app--darwin .app-chrome--tabs {
-  padding-right: calc(var(--chrome-toggle-size) + 12px);
+  padding-right: calc(var(--chrome-toggle-size) + var(--chrome-toggle-size) + 16px);
 }
 
 :root[data-theme-style] .app--darwin .app-chrome--tabs .app-chrome__panel-toggle--right {
   right: 8px;
+}
+
+:root[data-theme-style] .app--darwin .app-chrome--tabs .app-chrome__tools--fixed {
+  right: calc(8px + var(--chrome-toggle-size) + 8px);
 }
 
 :root[data-theme-style] .app--darwin .app-chrome--tabs .app-chrome__panel-toggle--left.app-chrome__panel-toggle--active,

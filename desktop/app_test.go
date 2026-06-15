@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -958,6 +959,44 @@ func TestDeleteProviderRejectsRunningAffectedTab(t *testing.T) {
 	ctrl.Close()
 }
 
+func TestDeleteProviderRejectsAffectedBackgroundJobs(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("REASONIX_TEST_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "prov-a/model-a1"
+	cfg.Providers = []config.ProviderEntry{
+		{Name: "prov-a", Kind: "openai", BaseURL: "https://a.example.com", Model: "model-a1", APIKeyEnv: "REASONIX_TEST_KEY"},
+		{Name: "prov-b", Kind: "openai", BaseURL: "https://b.example.com", Model: "model-b1", APIKeyEnv: "REASONIX_TEST_KEY"},
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	path := filepath.Join(dir, "provider-job.jsonl")
+	jm := jobs.NewManager(event.Discard)
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: path, Label: "test", Jobs: jm})
+	defer ctrl.Close()
+	app := NewApp()
+	app.setTestCtrl(ctrl, "prov-a/model-a1")
+	jm.StartForSession(agent.BranchID(path), "bash", "provider job", func(ctx context.Context, _ io.Writer) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	})
+
+	err := app.DeleteProvider("prov-a")
+	if err == nil || !strings.Contains(err.Error(), "active work") {
+		t.Fatalf("DeleteProvider with background job error = %v, want active-work guard", err)
+	}
+	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); !ok {
+		t.Fatal("provider should remain after rejected deletion")
+	}
+}
+
 func TestMigrateDesktopPreferencesDoesNotOverwriteExistingConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -1013,6 +1052,47 @@ func TestSetEffortRebuildsController(t *testing.T) {
 	}
 }
 
+func TestSetEffortMigratesStaleOfficialDeepSeekTabModel(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "deepseek/deepseek-v4-flash"
+	cfg.Desktop.ProviderAccess = []string{"deepseek"}
+	cfg.Providers = []config.ProviderEntry{{
+		Name:      "deepseek",
+		Kind:      "openai",
+		BaseURL:   "https://api.deepseek.com",
+		Model:     "glm-5",
+		APIKeyEnv: "DEEPSEEK_API_KEY",
+	}}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	old := control.New(control.Options{Label: "old-controller"})
+	app.setTestCtrl(old, "deepseek-flash/deepseek-v4-flash")
+	defer func() {
+		if c := app.activeCtrl(); c != nil {
+			c.Close()
+		}
+	}()
+
+	if err := app.SetEffort("max"); err != nil {
+		t.Fatalf("SetEffort(max): %v", err)
+	}
+	tab := app.activeTab()
+	if tab == nil {
+		t.Fatal("active tab missing")
+	}
+	if tab.model != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("tab model = %q, want migrated official ref", tab.model)
+	}
+}
+
 func TestSetTokenModeRebuildsController(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -1052,8 +1132,54 @@ func TestSetTokenModeRebuildsController(t *testing.T) {
 	}
 }
 
+func TestSetTokenModeMigratesStaleOfficialDeepSeekTabModel(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "deepseek/deepseek-v4-flash"
+	cfg.Desktop.ProviderAccess = []string{"deepseek"}
+	cfg.Providers = []config.ProviderEntry{{
+		Name:      "deepseek",
+		Kind:      "openai",
+		BaseURL:   "https://api.deepseek.com",
+		Model:     "glm-5",
+		APIKeyEnv: "DEEPSEEK_API_KEY",
+	}}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	old := control.New(control.Options{Label: "old-controller"})
+	app.setTestCtrl(old, "deepseek-flash/deepseek-v4-flash")
+	defer func() {
+		if c := app.activeCtrl(); c != nil {
+			c.Close()
+		}
+	}()
+
+	if err := app.SetTokenMode("economy"); err != nil {
+		t.Fatalf("SetTokenMode(economy): %v", err)
+	}
+	tab := app.activeTab()
+	if tab == nil {
+		t.Fatal("active tab missing")
+	}
+	if tab.model != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("tab model = %q, want migrated official ref", tab.model)
+	}
+	if got := currentTabTokenMode(tab); got != "economy" {
+		t.Fatalf("token mode = %q, want economy", got)
+	}
+}
+
 func TestSetTokenModeKeepsControllerWhenRebuildFails(t *testing.T) {
 	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	t.Setenv("MIMO_API_KEY", "")
 
 	app := NewApp()
 	app.ctx = context.Background()
@@ -1119,6 +1245,111 @@ func TestSetTokenModeRejectsRunningTurn(t *testing.T) {
 
 	close(runner.release)
 	waitNotRunning(t, app.activeCtrl())
+}
+
+func TestSetTokenModeRejectsBackgroundJobs(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	path := filepath.Join(dir, "jobs.jsonl")
+	jm := jobs.NewManager(event.Discard)
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: path, Label: "test", Jobs: jm})
+	defer ctrl.Close()
+	app := NewApp()
+	app.setTestCtrl(ctrl, "")
+
+	release := make(chan struct{})
+	jm.StartForSession(agent.BranchID(path), "bash", "long job", func(ctx context.Context, _ io.Writer) (string, error) {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-release:
+			return "", nil
+		}
+	})
+	defer close(release)
+
+	err := app.SetTokenMode("economy")
+	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
+		t.Fatalf("SetTokenMode with background job error = %v, want background-job guard", err)
+	}
+}
+
+func TestSettingsRebuildRejectsBackgroundJobs(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	path := filepath.Join(dir, "settings-job.jsonl")
+	jm := jobs.NewManager(event.Discard)
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: path, Label: "test", Jobs: jm})
+	defer ctrl.Close()
+	app := NewApp()
+	app.ctx = context.Background()
+	app.setTestCtrl(ctrl, "deepseek-flash/deepseek-v4-flash")
+
+	jm.StartForSession(agent.BranchID(path), "bash", "settings job", func(ctx context.Context, _ io.Writer) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	})
+
+	err := app.SetSandbox("enforce", true, "", nil, "")
+	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
+		t.Fatalf("SetSandbox with background job error = %v, want background-job guard", err)
+	}
+}
+
+func TestClearSessionCancelsRunningRuntimeAndKeepsTopic(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	path := filepath.Join(dir, "clear-running.jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"user","content":"old"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	oldCtrl := control.New(control.Options{Runner: runner, SessionDir: dir, SessionPath: path, Label: "test"})
+	app := NewApp()
+	app.projectTreeChangedHook = func() {}
+	app.setTestCtrl(oldCtrl, "deepseek-flash/deepseek-v4-flash")
+	app.tabs["test"].TopicID = "topic_clear"
+	app.tabs["test"].TopicTitle = "Clear topic"
+	defer func() {
+		if c := app.activeCtrl(); c != nil {
+			c.Close()
+		}
+	}()
+
+	oldCtrl.Submit("work")
+	<-runner.started
+	if err := app.ClearSession(); err != nil {
+		t.Fatalf("ClearSession: %v", err)
+	}
+	waitNotRunning(t, oldCtrl)
+	tab := app.activeTab()
+	if tab == nil || tab.Ctrl == nil {
+		t.Fatalf("active tab/controller missing after clear")
+	}
+	if tab.Ctrl == oldCtrl {
+		t.Fatalf("clear should replace the active controller after cancelling old work")
+	}
+	if tab.TopicID != "topic_clear" || tab.TopicTitle != "Clear topic" {
+		t.Fatalf("clear changed topic identity: %+v", tab)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("old cleared session artifacts should be removed, stat err = %v", err)
+	}
+	if got := tab.currentSessionPath(); got == "" || got == path {
+		t.Fatalf("new session path = %q, want fresh path", got)
+	}
 }
 
 func TestSearchFileRefsFindsNestedBasename(t *testing.T) {
@@ -1268,7 +1499,7 @@ func TestFileRefsUseActiveTabWorkspaceRoot(t *testing.T) {
 	}
 }
 
-func TestDeleteSessionRejectsActiveRelativePath(t *testing.T) {
+func TestDeleteSessionCancelsActiveRuntime(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	dir := config.SessionDir()
@@ -1281,22 +1512,80 @@ func TestDeleteSessionRejectsActiveRelativePath(t *testing.T) {
 	}
 
 	app := NewApp()
-	app.setTestCtrl(control.New(control.Options{SessionDir: dir, SessionPath: path, Label: "test"}), "")
-	defer func() {
-		if c := app.activeCtrl(); c != nil {
-			c.Close()
-		}
-	}()
-
-	if err := app.DeleteSession(filepath.Base(path)); err != errActiveSession {
-		t.Fatalf("DeleteSession(active basename) error = %v, want errActiveSession", err)
+	activeCtrl := control.New(control.Options{SessionDir: dir, SessionPath: path, Label: "test"})
+	keepPath := filepath.Join(dir, "keep.jsonl")
+	if err := os.WriteFile(keepPath, []byte(`{"role":"user","content":"keep"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write keep session: %v", err)
 	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("active session should remain: %v", err)
+	keepCtrl := control.New(control.Options{SessionDir: dir, SessionPath: keepPath, Label: "keep"})
+	defer keepCtrl.Close()
+	app.setTestCtrl(activeCtrl, "")
+	app.tabs["keep"] = &WorkspaceTab{ID: "keep", Scope: "global", Ctrl: keepCtrl, Ready: true}
+	app.tabOrder = []string{"test", "keep"}
+
+	if err := app.DeleteSession(filepath.Base(path)); err != nil {
+		t.Fatalf("DeleteSession(active basename): %v", err)
+	}
+	if _, ok := app.tabs["test"]; ok {
+		t.Fatalf("deleted active session runtime should be removed")
+	}
+	if got := app.activeTabID; got != "keep" {
+		t.Fatalf("active tab after delete = %q, want keep", got)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("active session should be moved out of active history, stat err = %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "active.jsonl", "active.jsonl")
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("active session should be moved to trash: %v", err)
 	}
 }
 
-func TestDeleteSessionRejectsInactiveOpenTab(t *testing.T) {
+func TestDeleteSessionTrashConflictKeepsRuntime(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	path := filepath.Join(dir, "active-conflict.jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"user","content":"hello"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, sessionTrashDir, filepath.Base(path)), 0o755); err != nil {
+		t.Fatalf("create trash conflict: %v", err)
+	}
+
+	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	ctrl := control.New(control.Options{Runner: runner, SessionDir: dir, SessionPath: path, Label: "test"})
+	app := NewApp()
+	app.setTestCtrl(ctrl, "")
+	defer ctrl.Close()
+	ctrl.Submit("work")
+	<-runner.started
+
+	err := app.DeleteSession(filepath.Base(path))
+	if err == nil || !strings.Contains(err.Error(), "already exists in trash") {
+		t.Fatalf("DeleteSession conflict error = %v, want trash conflict", err)
+	}
+	if app.activeCtrl() != ctrl {
+		t.Fatalf("active runtime should remain bound after preflight failure")
+	}
+	if !ctrl.Running() {
+		t.Fatalf("running turn should not be cancelled on preflight failure")
+	}
+	if _, ok := app.tabs["test"]; !ok {
+		t.Fatalf("tab should remain after preflight failure")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("active session file should remain: %v", err)
+	}
+
+	close(runner.release)
+	waitNotRunning(t, ctrl)
+}
+
+func TestDeleteSessionCancelsInactiveOpenRuntime(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	dir := config.SessionDir()
@@ -1326,11 +1615,18 @@ func TestDeleteSessionRejectsInactiveOpenTab(t *testing.T) {
 		activeTabID: "active",
 	}
 
-	if err := app.DeleteSession(filepath.Base(inactivePath)); err != errActiveSession {
-		t.Fatalf("DeleteSession(inactive open basename) error = %v, want errActiveSession", err)
+	if err := app.DeleteSession(filepath.Base(inactivePath)); err != nil {
+		t.Fatalf("DeleteSession(inactive open basename): %v", err)
 	}
-	if _, err := os.Stat(inactivePath); err != nil {
-		t.Fatalf("inactive open session should remain: %v", err)
+	if _, ok := app.tabs["inactive"]; ok {
+		t.Fatalf("deleted inactive session runtime should be removed")
+	}
+	if _, err := os.Stat(inactivePath); !os.IsNotExist(err) {
+		t.Fatalf("inactive open session should be moved out of active history, stat err = %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "inactive.jsonl", "inactive.jsonl")
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("inactive open session should be moved to trash: %v", err)
 	}
 
 	sessions := app.ListSessions()
@@ -1343,16 +1639,13 @@ func TestDeleteSessionRejectsInactiveOpenTab(t *testing.T) {
 	if !current[filepath.Base(activePath)] {
 		t.Fatalf("ListSessions should mark active session current, got %#v", current)
 	}
-	if current[filepath.Base(inactivePath)] {
-		t.Fatalf("ListSessions should not mark inactive open session current, got %#v", current)
-	}
 	if current[filepath.Base(otherPath)] {
 		t.Fatalf("ListSessions marked unopened session current, got %#v", current)
 	}
-	if !open[filepath.Base(activePath)] || !open[filepath.Base(inactivePath)] {
+	if !open[filepath.Base(activePath)] {
 		t.Fatalf("ListSessions should mark active and inactive open sessions open, got %#v", open)
 	}
-	if open[filepath.Base(otherPath)] {
+	if open[filepath.Base(inactivePath)] || open[filepath.Base(otherPath)] {
 		t.Fatalf("ListSessions marked unopened session open, got %#v", open)
 	}
 }
