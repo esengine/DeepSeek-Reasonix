@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/config"
 )
@@ -397,6 +398,48 @@ func TestSymlinkedDirAndFile(t *testing.T) {
 	}
 	if _, ok := find(st.List(), "broken"); ok {
 		t.Error("broken symlink should not yield a skill")
+	}
+}
+
+type fakeDirEntry struct {
+	name  string
+	isDir bool
+	typ   os.FileMode
+}
+
+func (f fakeDirEntry) Name() string      { return f.name }
+func (f fakeDirEntry) IsDir() bool       { return f.isDir }
+func (f fakeDirEntry) Type() os.FileMode { return f.typ }
+func (f fakeDirEntry) Info() (os.FileInfo, error) {
+	return fakeFileInfo{name: f.name, mode: f.typ}, nil
+}
+
+type fakeFileInfo struct {
+	name string
+	mode os.FileMode
+}
+
+func (f fakeFileInfo) Name() string       { return f.name }
+func (f fakeFileInfo) Size() int64        { return 0 }
+func (f fakeFileInfo) Mode() os.FileMode  { return f.mode }
+func (f fakeFileInfo) ModTime() time.Time { return time.Time{} }
+func (f fakeFileInfo) IsDir() bool        { return f.mode.IsDir() }
+func (f fakeFileInfo) Sys() any           { return nil }
+
+func TestIrregularDirectoryEntryFollowsTarget(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, ".agents", "skills")
+	writeSkill(t, root, "linkedpack/SKILL.md", "---\ndescription: linked pack\n---\nbody")
+	writeSkill(t, root, "collection/nested.md", "---\ndescription: nested\n---\nbody")
+
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	linkedPack := fakeDirEntry{name: "linkedpack", typ: os.ModeIrregular}
+	if sk, ok := st.readEntry(root, ScopeGlobal, linkedPack); !ok || sk.Name != "linkedpack" {
+		t.Fatalf("irregular directory-layout entry should follow target, got %+v ok=%v", sk, ok)
+	}
+	collection := fakeDirEntry{name: "collection", typ: os.ModeIrregular}
+	if !st.canScanChildDir(root, collection) {
+		t.Fatal("irregular directory entry should be scannable when its target is a directory")
 	}
 }
 

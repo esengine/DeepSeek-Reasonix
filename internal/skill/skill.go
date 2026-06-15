@@ -338,15 +338,18 @@ func (s *Store) canScanChildDir(dir string, e os.DirEntry) bool {
 	if shouldSkipScanDir(name) {
 		return false
 	}
-	full := filepath.Join(dir, name)
 	if e.IsDir() {
 		return true
 	}
-	if e.Type()&os.ModeSymlink == 0 {
+	if !shouldStatEntryTarget(e.Type()) {
 		return false
 	}
-	info, err := os.Stat(full)
+	info, err := os.Stat(filepath.Join(dir, name))
 	return err == nil && info.IsDir()
+}
+
+func shouldStatEntryTarget(mode os.FileMode) bool {
+	return mode&os.ModeSymlink != 0 || mode&os.ModeIrregular != 0
 }
 
 func shouldSkipScanDir(name string) bool {
@@ -361,17 +364,17 @@ func shouldSkipScanDir(name string) bool {
 	}
 }
 
-// readEntry turns one directory entry into a skill. It resolves symlinks via
-// os.Stat (os.ReadDir reports a symlink's own type, not its target's), so a
-// linked skill directory or a linked flat <name>.md is discovered like a real
-// one; a broken link fails Stat and is skipped.
+// readEntry turns one directory entry into a skill. It resolves symlink and
+// Windows reparse-style entries via os.Stat (os.ReadDir can report the link's
+// own type, not its target's), so a linked skill directory or flat <name>.md is
+// discovered like a real one; a broken link fails Stat and is skipped.
 func (s *Store) readEntry(dir string, scope Scope, e os.DirEntry) (Skill, bool) {
 	name := e.Name()
 	full := filepath.Join(dir, name)
 
 	isDir := e.IsDir()
 	isFile := e.Type().IsRegular()
-	if e.Type()&os.ModeSymlink != 0 {
+	if !isDir && !isFile && shouldStatEntryTarget(e.Type()) {
 		info, err := os.Stat(full) // follows the link
 		if err != nil {
 			return Skill{}, false // broken link
