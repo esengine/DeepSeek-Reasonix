@@ -1,8 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, FileText, Folder, GitBranch, Image, MessageSquare, RotateCcw, ScrollText } from "lucide-react";
+import { ChevronRight, FileText, Folder, GitBranch, Image, MessageSquare, RotateCcw, ScrollText } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
-import { ProcessBrainIcon } from "./ProcessCard";
 import { parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
@@ -177,7 +176,13 @@ export function TurnActions({
 }) {
   const t = useT();
   const [confirmScope, setConfirmScope] = useState<MessageActionScope | null>(null);
+  const hoverCloseTimer = useRef<number | null>(null);
   const canAct = onRewind != null && turn != null;
+  const clearHoverClose = () => {
+    if (hoverCloseTimer.current === null) return;
+    window.clearTimeout(hoverCloseTimer.current);
+    hoverCloseTimer.current = null;
+  };
   const actionDisabledReason = (scope: string): string => {
     if (rewindDisabled || actionPending) return t("rewind.disabledRunning");
     if (!checkpoint) return t("rewind.disabledNoCheckpoint");
@@ -271,34 +276,58 @@ export function TurnActions({
     setConfirmScope(null);
     onOpenMenu?.(openMenu === menu ? null : menu);
   };
+  const showMenu = (menu: TurnActionMenu) => {
+    clearHoverClose();
+    setConfirmScope(null);
+    onOpenMenu?.(menu);
+  };
+  const hideMenu = (menu: TurnActionMenu) => {
+    clearHoverClose();
+    hoverCloseTimer.current = window.setTimeout(() => {
+      if (openMenu === menu) onOpenMenu?.(null);
+      hoverCloseTimer.current = null;
+    }, 180);
+  };
+  useEffect(() => clearHoverClose, []);
 
   return (
     <div className="turn-actions">
-      <CopyButton text={text} label={t("msg.copy")} />
+      <span className="turn-actions__tip" data-label={t("msg.copy")}>
+        <CopyButton text={text} label={t("msg.copy")} className="turn-actions__btn" showInlineLabel={false} />
+      </span>
       {canAct && (
         <>
-          <button
-            className={`turn-actions__btn${confirmScope === "fork" ? " turn-actions__btn--confirm" : ""}`}
-            type="button"
-            disabled={Boolean(forkDisabledReason)}
-            title={forkDisabledReason || undefined}
-            onClick={() => selectRewind("fork")}
-          >
-            <GitBranch size={13} />
-            <span>{actionLabel("fork")}</span>
-          </button>
-          <div className={`turn-actions__group${openMenu === "summary" ? " turn-actions__group--open" : ""}`}>
+          <span className="turn-actions__tip" data-label={actionLabel("fork")}>
             <button
-              className="turn-actions__btn"
+              className={`turn-actions__btn${confirmScope === "fork" ? " turn-actions__btn--confirm" : ""}`}
               type="button"
-              aria-haspopup="menu"
-              aria-expanded={openMenu === "summary"}
-              onClick={() => toggleMenu("summary")}
+              disabled={Boolean(forkDisabledReason)}
+              aria-label={actionLabel("fork")}
+              title={forkDisabledReason || actionLabel("fork")}
+              onClick={() => selectRewind("fork")}
             >
-              <ScrollText size={13} />
-              <span>{t("turnActions.summary")}</span>
-              <ChevronDown size={12} />
+              <GitBranch size={14} />
             </button>
+          </span>
+          <div
+            className={`turn-actions__group${openMenu === "summary" ? " turn-actions__group--open" : ""}`}
+            onMouseEnter={() => showMenu("summary")}
+            onMouseLeave={() => hideMenu("summary")}
+            onFocus={() => showMenu("summary")}
+          >
+            <span className="turn-actions__tip turn-actions__tip--menu" data-label={t("turnActions.summary")}>
+              <button
+                className="turn-actions__btn"
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={openMenu === "summary"}
+                aria-label={t("turnActions.summary")}
+                title={t("turnActions.summary")}
+                onClick={() => toggleMenu("summary")}
+              >
+                <ScrollText size={14} />
+              </button>
+            </span>
             {openMenu === "summary" && (
               <div className="rewind__menu turn-actions__menu" role="menu">
                 {rewindDisabled && <div className="rewind__menu-hint">{t("rewind.disabledRunning")}</div>}
@@ -308,18 +337,25 @@ export function TurnActions({
               </div>
             )}
           </div>
-          <div className={`turn-actions__group${openMenu === "rewind" ? " turn-actions__group--open" : ""}`}>
-            <button
-              className="turn-actions__btn"
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={openMenu === "rewind"}
-              onClick={() => toggleMenu("rewind")}
-            >
-              <RotateCcw size={13} />
-              <span>{t("turnActions.rewind")}</span>
-              <ChevronDown size={12} />
-            </button>
+          <div
+            className={`turn-actions__group${openMenu === "rewind" ? " turn-actions__group--open" : ""}`}
+            onMouseEnter={() => showMenu("rewind")}
+            onMouseLeave={() => hideMenu("rewind")}
+            onFocus={() => showMenu("rewind")}
+          >
+            <span className="turn-actions__tip turn-actions__tip--menu" data-label={t("turnActions.rewind")}>
+              <button
+                className="turn-actions__btn"
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={openMenu === "rewind"}
+                aria-label={t("turnActions.rewind")}
+                title={t("turnActions.rewind")}
+                onClick={() => toggleMenu("rewind")}
+              >
+                <RotateCcw size={14} />
+              </button>
+            </span>
             {openMenu === "rewind" && (
               <div className="rewind__menu turn-actions__menu" role="menu">
                 {rewindDisabled && <div className="rewind__menu-hint">{t("rewind.disabledRunning")}</div>}
@@ -397,6 +433,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   const hasText = item.streaming || item.text.trim() !== "";
   const processOnly = Boolean(item.reasoning) && !hasText;
   const processWithText = Boolean(item.reasoning) && hasText;
+  const reasoningRunning = item.streaming && !item.reasoningComplete;
   const visibleReasoning = reasoningOpen
     ? displayReasoningText(item.reasoning, {
         streaming: item.streaming,
@@ -410,13 +447,11 @@ export const AssistantMessage = memo(function AssistantMessage({
           <button
             type="button"
             className="reasoning__head"
-            data-running={item.streaming && !item.reasoningComplete ? "" : undefined}
+            data-running={reasoningRunning ? "" : undefined}
             onClick={toggleReasoning}
             aria-expanded={reasoningOpen}
           >
-            <ProcessBrainIcon size={12} />
-            <span>{t("msg.thinking")}</span>
-            <span className="reasoning__meta">{item.streaming && !item.reasoningComplete ? t("msg.thinkingRunning") : t("msg.thinkingDone")}</span>
+            <span>{reasoningRunning ? t("msg.thinkingRunning") : t("msg.thinking")}</span>
             <ChevronRight className={`reasoning__chevron${reasoningOpen ? " reasoning__chevron--open" : ""}`} size={12} />
           </button>
           {reasoningOpen && (

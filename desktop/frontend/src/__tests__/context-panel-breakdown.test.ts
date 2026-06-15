@@ -39,7 +39,7 @@ eq(
   42_124,
   "legend values sum to used context tokens",
 );
-eq(Math.round(mock.otherPct), 33, "donut endpoint follows used/window percent");
+eq(Math.round(mock.otherPct), 33, "usage bar endpoint follows used/window percent");
 
 const oversized = contextBreakdown(61_000, 1_000_000, 1_622_277, 12_049, 3_217);
 eq(
@@ -47,7 +47,7 @@ eq(
   61_000,
   "oversized provider breakdown is normalized to used context tokens",
 );
-eq(Math.round(oversized.otherPct * 10) / 10, 6.1, "oversized provider breakdown does not fill the ring");
+eq(Math.round(oversized.otherPct * 10) / 10, 6.1, "oversized provider breakdown does not fill the bar");
 
 const unknownWindow = contextBreakdown(42_124, 0, 22_134, 12_345, 7_521);
 eq(
@@ -63,7 +63,7 @@ eq(
     reasoningPct: 0,
     otherPct: 0,
   },
-  "unknown context window keeps donut segments empty",
+  "unknown context window keeps usage bar segments empty",
 );
 
 console.log("\ncontext panel cost");

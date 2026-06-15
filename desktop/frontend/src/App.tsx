@@ -18,9 +18,11 @@ import {
   GitBranch,
   History,
   MessageSquare,
+  PanelLeft,
+  PanelRight,
   Plus,
+  Search,
   Settings as SettingsIcon,
-  Pencil,
   Trash2,
   Brain,
   Cpu,
@@ -50,7 +52,6 @@ import { WorkspacePanel } from "./components/WorkspacePanel";
 import { Tooltip } from "./components/Tooltip";
 import { StartupSplash, shouldShowStartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
-import { AppChrome } from "./components/AppChrome";
 import { ProjectTree } from "./components/ProjectTree";
 import { CopyButton } from "./components/CopyButton";
 import { parseTodos } from "./lib/tools";
@@ -91,6 +92,7 @@ import {
 } from "./lib/toolApprovalMode";
 import { loadLayoutSize, saveLayoutSize } from "./lib/layoutPreferences";
 import { hydrateDisplayMode } from "./lib/displayMode";
+import { getStatusBarVisible, onStatusBarVisibleChange } from "./lib/statusBarVisible";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems, type StatusBarItemId } from "./lib/statusBarItems";
 import { blobToBase64, renderSessionImageBlob, renderSessionPdfBlob } from "./lib/sessionExport";
 import { sessionActivityTime } from "./lib/session";
@@ -109,13 +111,13 @@ import { applyTextSize, DEFAULT_TEXT_SIZE, getTextSize, nextTextSize } from "./l
 import { useWindowStatePersistence } from "./lib/windowState";
 import { availableWorkspacePanelWidth, resolveWorkspacePanelWidth, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
 import { isCloseTabShortcut } from "./lib/keyboardShortcuts";
-import logoWordmark from "./assets/logo-wordmark.svg";
+import logoSymbol from "./assets/logo-symbol.svg";
 
 const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
-const SIDEBAR_DEFAULT_WIDTH = 264;
-const SIDEBAR_MIN_WIDTH = 264;
-const SIDEBAR_MAX_WIDTH = 300;
-const SIDEBAR_VIEWPORT_RATIO = 0.18;
+const SIDEBAR_DEFAULT_WIDTH = 232;
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 320;
+const SIDEBAR_VIEWPORT_RATIO = 0.16;
 const CHAT_MIN_WIDTH = 400;
 const CHAT_COMFORT_MIN_WIDTH = 560;
 const WORKSPACE_RESIZER_WIDTH = 8;
@@ -860,11 +862,11 @@ export default function App() {
     setModel,
     setEffort,
     setTokenMode,
-    switchTab,
+    switchTab: _switchTab,
     openProjectTab,
     openGlobalTab,
-    closeTab,
-    reorderTabs,
+    closeTab: _closeTab,
+    reorderTabs: _reorderTabs,
     openTopicSession,
     syncActiveTab,
     ensureBlankTab,
@@ -874,15 +876,15 @@ export default function App() {
   const [composerProfilesByTab, setComposerProfilesByTab] = useState<Record<string, ComposerProfile>>({});
   const yoloRestoreToolApprovalModesRef = useRef<Record<string, RestorableToolApprovalMode>>({});
   const [tabMetas, setTabMetas] = useState<TabMeta[]>([]);
-  const [tabOrderIds, setTabOrderIds] = useState<string[]>([]);
-  const [tabRevealSignal, setTabRevealSignal] = useState(0);
+  const [_tabOrderIds, setTabOrderIds] = useState<string[]>([]);
+  const [_tabRevealSignal, setTabRevealSignal] = useState(0);
   const [startupSplashVisible, setStartupSplashVisible] = useState<boolean>(() => shouldShowStartupSplash());
   // null until the mount probe resolves; true shows the overlay. Probed once —
   // clearing the key mid-session is the Settings panel's job, not the gate's.
   const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
   const [settingsTarget, setSettingsTarget] = useState<SettingsTab | null>(null);
   const [settingsFocus, setSettingsFocus] = useState<SettingsInitialFocus | null>(null);
-  const [desktopLayoutStyle, setDesktopLayoutStyle] = useState<DesktopLayoutStyle>("classic");
+  const [_desktopLayoutStyle, setDesktopLayoutStyle] = useState<DesktopLayoutStyle>("classic");
   const [startupUpdateChecksEnabled, setStartupUpdateChecksEnabled] = useState<boolean | null>(null);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -954,17 +956,16 @@ export default function App() {
   const [desktopPlatform, setDesktopPlatform] = useState<DesktopPlatform>(detectBrowserPlatform);
   const [statusBarStyle, setStatusBarStyle] = useState<"icon" | "text">("text");
   const [statusBarItems, setStatusBarItems] = useState<StatusBarItemId[]>(() => [...DEFAULT_STATUS_BAR_ITEMS]);
+  const [statusBarVisible, setStatusBarVisible] = useState(() => getStatusBarVisible());
   const [renamingTopicId, setRenamingTopicId] = useState<string | null>(null);
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
   const [topicExportOpen, setTopicExportOpen] = useState(false);
-  const [sidebarTogglePressed, setSidebarTogglePressed] = useState(false);
-  const [workspaceTogglePressed, setWorkspaceTogglePressed] = useState(false);
+  const [_sidebarTogglePressed, setSidebarTogglePressed] = useState(false);
   const [clearContextPending, setClearContextPending] = useState(false);
   const topicRenameSkipCommitRef = useRef(false);
   const topicRenameCommitHandledRef = useRef(false);
   const appRef = useRef<HTMLDivElement>(null);
   const sidebarTogglePressTimerRef = useRef<number | null>(null);
-  const workspaceTogglePressTimerRef = useRef<number | null>(null);
   const sidebarImRefreshRef = useRef({ last: 0, inFlight: false });
 
   // Persist window geometry across launches.
@@ -1026,18 +1027,6 @@ export default function App() {
     }, 260);
   }, []);
 
-  const pulseWorkspaceToggle = useCallback(() => {
-    if (typeof window === "undefined") return;
-    if (workspaceTogglePressTimerRef.current !== null) {
-      window.clearTimeout(workspaceTogglePressTimerRef.current);
-    }
-    setWorkspaceTogglePressed(true);
-    workspaceTogglePressTimerRef.current = window.setTimeout(() => {
-      workspaceTogglePressTimerRef.current = null;
-      setWorkspaceTogglePressed(false);
-    }, 260);
-  }, []);
-
   const anchorAppScrollToChat = useCallback(() => {
     if (typeof window === "undefined") return;
     const el = appRef.current;
@@ -1054,9 +1043,6 @@ export default function App() {
     return () => {
       if (sidebarTogglePressTimerRef.current !== null) {
         window.clearTimeout(sidebarTogglePressTimerRef.current);
-      }
-      if (workspaceTogglePressTimerRef.current !== null) {
-        window.clearTimeout(workspaceTogglePressTimerRef.current);
       }
     };
   }, []);
@@ -1124,6 +1110,8 @@ export default function App() {
       cancelled = true;
     };
   }, [applyDesktopPreferences, t]);
+
+  useEffect(() => onStatusBarVisibleChange(setStatusBarVisible), []);
 
   useEffect(() => {
     if (sidebarImConnections.length === 0) {
@@ -1239,25 +1227,6 @@ export default function App() {
     [activeTabId, composerProfile],
   );
   const topicbarEditing = Boolean(activeTab?.topicId && activeTab.topicId === renamingTopicId);
-  const visibleTabId = activeTabId;
-  const visibleTabs = useMemo(() => {
-    const byId = new Map(tabMetas.map((tab) => [tab.id, tab]));
-    const ordered = tabOrderIds.map((id) => byId.get(id)).filter((tab): tab is TabMeta => Boolean(tab));
-    const missing = tabMetas.filter((tab) => !tabOrderIds.includes(tab.id));
-    return [...ordered, ...missing].map((tab) => {
-      const profile = composerProfilesByTab[tab.id] ?? composerProfileFromTab(tab);
-      return {
-        ...tab,
-        running: tab.id === visibleTabId ? tab.running || state.running : tab.running,
-        mode: composerProfileMode(profile),
-        collaborationMode: displayedComposerProfileCollaborationMode(profile),
-        toolApprovalMode: profile.toolApprovalMode,
-        tokenMode: profile.tokenMode,
-        goal: profile.goal,
-        active: tab.id === visibleTabId,
-      };
-    });
-  }, [composerProfilesByTab, state.running, tabMetas, tabOrderIds, visibleTabId]);
 
   useEffect(() => {
     const ids = tabMetas.map((tab) => tab.id);
@@ -1859,15 +1828,6 @@ export default function App() {
     setWorkspacePanelOpen(false);
   }, [closeTransientOverlays, workspacePanelOpen]);
 
-  const toggleWorkspacePanel = useCallback(() => {
-    pulseWorkspaceToggle();
-    if (workspacePanelRenderable) {
-      closeWorkspacePanel();
-      return;
-    }
-    openWorkspacePanel("context");
-  }, [closeWorkspacePanel, openWorkspacePanel, pulseWorkspaceToggle, workspacePanelRenderable]);
-
   const openRightDockMode = useCallback(
     (mode: RightDockMode) => {
       setWorkspaceRevealRequest(null);
@@ -1976,70 +1936,18 @@ export default function App() {
     setComposerInsertRequest({ id: Date.now(), text });
   }, []);
 
-  const handleTabChange = useCallback(async (id: string) => {
-    closeTransientOverlays();
-    const tabs = await switchTab(id);
-    if (tabs) setTabMetas(tabs);
-    setTabRevealSignal((signal) => signal + 1);
-  }, [closeTransientOverlays, switchTab]);
-
-  const handleTabClose = useCallback(async (id: string) => {
-    closeTransientOverlays();
-    setComposerProfilesByTab((current) => {
-      if (!(id in current)) return current;
-      const next = { ...current };
-      delete next[id];
-      return next;
-    });
-    setTabMetas((current) => {
-      if (current.length <= 1) return current;
-      const closingIndex = current.findIndex((tab) => tab.id === id);
-      if (closingIndex < 0) return current;
-      const closingTab = current[closingIndex];
-      const remaining = current.filter((tab) => tab.id !== id);
-      if (!closingTab.active && closingTab.id !== activeTabId) return remaining;
-      const nextIndex = Math.min(closingIndex, remaining.length - 1);
-      const nextActiveId = remaining[nextIndex]?.id;
-      return remaining.map((tab) => ({ ...tab, active: tab.id === nextActiveId }));
-    });
-    await closeTab(id);
-    await refreshTabMetas();
-    setTabRevealSignal((signal) => signal + 1);
-  }, [activeTabId, closeTab, closeTransientOverlays, refreshTabMetas]);
-
-  const handleTabsClose = useCallback(async (ids: string[], nextActiveTabId?: string) => {
-    closeTransientOverlays();
-    const currentIds = tabMetas.map((tab) => tab.id);
-    const targets = ids.filter((id, index) => currentIds.includes(id) && ids.indexOf(id) === index);
-    if (targets.length === 0) return;
-    for (const id of targets) {
-      await closeTab(id);
-    }
-    if (nextActiveTabId && currentIds.includes(nextActiveTabId)) {
-      await switchTab(nextActiveTabId);
-    }
-    await refreshTabMetas();
-    setTabRevealSignal((signal) => signal + 1);
-  }, [closeTab, closeTransientOverlays, refreshTabMetas, switchTab, tabMetas]);
-
-  const handleTabsReorder = useCallback(async (ids: string[]) => {
-    setTabOrderIds(ids);
-    setTabMetas((current) => {
-      const byId = new Map(current.map((tab) => [tab.id, tab]));
-      const ordered = ids.map((id) => byId.get(id)).filter((tab): tab is TabMeta => Boolean(tab));
-      return ordered.length === current.length ? ordered : current;
-    });
-    await reorderTabs(ids);
-    await refreshTabMetas();
-    setTabRevealSignal((signal) => signal + 1);
-  }, [refreshTabMetas, reorderTabs]);
-
   const handleNewTab = useCallback(async () => {
     closeTransientOverlays();
     setSidebarImDetailConnectionId("");
     const target = blankSessionTarget();
     await openBlankSession(target.scope, target.workspaceRoot);
   }, [blankSessionTarget, closeTransientOverlays, openBlankSession]);
+
+  const handleTabClose = useCallback(async (tabId: string) => {
+    closeTransientOverlays();
+    await _closeTab(tabId);
+    await refreshTabMetas();
+  }, [_closeTab, closeTransientOverlays, refreshTabMetas]);
 
   const [rewindSignal, setRewindSignal] = useState(0);
 
@@ -2441,9 +2349,6 @@ export default function App() {
   }, [renameTopic, renamingTopicId, topicTitleDraft]);
 
   const sidebarExpandBlocked = false;
-  const sidebarToggleTitle = sidebarCollapsed
-      ? t("sidebar.expand")
-      : t("sidebar.collapse");
   const sidebarNavTooltipDisabled = !sidebarCollapsed;
   const browserPreviewChrome = typeof window !== "undefined" && !window.runtime;
   const workspacePanelResetWidth = rightDockDetailActive
@@ -2463,6 +2368,7 @@ export default function App() {
   const topicbarSubtitleTitle = sidebarImDetailConnection
     ? [topicbarWorkspaceLabel, topicbarImSourceLabel, sidebarImScopeLabel(sidebarImDetailConnection, t)].filter(Boolean).join(" · ")
     : [topicbarWorkspacePath || topicbarWorkspaceLabel, topicbarImSourceLabel].filter(Boolean).join(" · ");
+  const topicTitleEditWidth = `${Math.min(Math.max(Array.from(topicTitleDraft || topicbarTitle).length + 4, 8), 36)}ch`;
   const sidebarImConnectedCount = sidebarImConnections.filter((connection) => connection.status === "connected").length;
   const sidebarImHasConnections = sidebarImConnections.length > 0;
   const sidebarImSummaryText = sidebarImHasConnections
@@ -2473,85 +2379,6 @@ export default function App() {
   const sidebarImToggleLabel = !sidebarImHasConnections
     ? t("sidebar.im")
     : t(sidebarImExpanded ? "sidebar.imCollapse" : "sidebar.imExpand");
-  const sidebarWorkbench = desktopLayoutStyle === "workbench";
-  const sidebarClassName = [
-    "sidebar",
-    sidebarCollapsed ? "sidebar--collapsed" : "",
-    sidebarWorkbench ? "sidebar--workbench" : "",
-  ].filter(Boolean).join(" ");
-  const sidebarImBlock = (
-    <div className={`sidebar-im${sidebarImExpanded ? " sidebar-im--expanded" : ""}`} aria-label={t("sidebar.im")}>
-      <button
-        className="sidebar-im__summary"
-        type="button"
-        aria-expanded={sidebarImExpanded}
-        aria-label={sidebarImToggleLabel}
-        title={sidebarImToggleLabel}
-        onPointerDown={(event) => {
-          if (event.button !== 0) return;
-          event.preventDefault();
-          toggleSidebarImPanel();
-        }}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter" && event.key !== " ") return;
-          event.preventDefault();
-          toggleSidebarImPanel();
-        }}
-      >
-        <MessageSquare size={15} />
-        <span className="sidebar-im__summary-label">{t("sidebar.im")}</span>
-        {sidebarImSummaryText ? <span className="sidebar-im__summary-status">{sidebarImSummaryText}</span> : null}
-      </button>
-      {sidebarImExpanded && sidebarImConnections.length > 0 && (
-        <div className="sidebar-im__panel" role="dialog" aria-label={t("sidebar.imManage")}>
-          <div className="sidebar-im__panel-head">
-            <span>{t("sidebar.imManage")}</span>
-            <div className="sidebar-im__panel-actions">
-              <Tooltip label={t("sidebar.imAdd")} fill side="right" disabled={sidebarNavTooltipDisabled}>
-                <button
-                  className="sidebar-im__icon-button"
-                  type="button"
-                  onClick={openBotSettings}
-                  aria-label={t("sidebar.imAdd")}
-                >
-                  <Plus size={13} />
-                </button>
-              </Tooltip>
-            </div>
-          </div>
-          <div className="sidebar-im__list">
-            {sidebarImConnections.map((connection) => (
-              <div
-                key={connection.id}
-                className={[
-                  "sidebar-im-row-shell",
-                  activeSidebarImConnectionId === connection.id ? "sidebar-im-row-shell--active" : "",
-                  `sidebar-im-row-shell--${connection.status}`,
-                ].filter(Boolean).join(" ")}
-              >
-                <button
-                  className="sidebar-im-row"
-                  type="button"
-                  title={`${connection.platformLabel} · ${connection.statusLabel}`}
-                  onClick={() => void selectSidebarImConnection(connection)}
-                >
-                  <span className={`sidebar-im-row__platform sidebar-im-row__platform--${connection.platform}`} aria-hidden="true">
-                    {connection.platform === "qq" ? "Q" : connection.platform === "weixin" ? "微" : connection.platform === "lark" ? "L" : "飞"}
-                  </span>
-                  <span className="sidebar-im-row__main">
-                    <strong>{connection.title}</strong>
-                    <span>{connection.subtitle}</span>
-                  </span>
-                  <span className={`sidebar-im-row__status sidebar-im-row__status--${connection.status}`} title={connection.statusLabel} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
   return (
     <ShellExpandProvider>
     <ShellHotkeys />
@@ -2562,88 +2389,133 @@ export default function App() {
         "app",
         `app--${desktopPlatform}`,
         browserPreviewChrome ? "app--browser-preview" : "",
-        sidebarWorkbench ? "app--workbench" : "",
       ].filter(Boolean).join(" ")}
     >
       <div
         className={[
           "layout",
-          sidebarWorkbench ? "layout--workbench" : "",
           sidebarCollapsed ? "layout--sidebar-collapsed" : "",
           sidebarResizing ? "layout--resizing layout--sidebar-resizing" : "",
           workspacePanelGridOpen ? "layout--workspace-open" : "",
           workspacePanelOpen && workspacePanelMaximized ? "layout--workspace-maximized" : "",
           workspacePanelResizing ? "layout--resizing layout--workspace-resizing" : "",
+          !statusBarVisible ? "layout--status-bar-hidden" : "",
         ]
           .filter(Boolean)
           .join(" ")}
         style={layoutStyle}
       >
-        <AppChrome
-          platform={desktopPlatform}
-          browserPreviewChrome={browserPreviewChrome}
-          workbenchChrome={sidebarWorkbench}
-          tabs={visibleTabs}
-          activeTabId={visibleTabId}
-          revealActiveSignal={tabRevealSignal}
-          commandCompact={true}
-          sidebarTogglePressed={sidebarTogglePressed}
-          sidebarExpandBlocked={sidebarExpandBlocked}
-          sidebarCollapsed={sidebarCollapsed}
-          sidebarToggleTitle={sidebarToggleTitle}
-          workspacePanelMaximized={workspacePanelMaximized}
-          workspacePanelRenderable={workspacePanelRenderable}
-          workspaceTogglePressed={workspaceTogglePressed}
-          workspacePanelLabel={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
-          onToggleSidebar={toggleSidebar}
-          onToggleWorkspacePanel={toggleWorkspacePanel}
-          onTabChange={(id) => void handleTabChange(id)}
-          onTabClose={(id) => void handleTabClose(id)}
-          onTabsClose={(ids, nextActiveTabId) => void handleTabsClose(ids, nextActiveTabId)}
-          onTabsReorder={(ids) => void handleTabsReorder(ids)}
-          onNewTab={() => void handleNewTab()}
-          onOpenPalette={() => void openPalette()}
-        />
+        <aside className={`sidebar${sidebarCollapsed ? " sidebar--collapsed" : ""}`} aria-label={t("sidebar.navigation")}>
+          <div className="sidebar__brand">
+            <span className="sidebar__brand-mark" aria-hidden="true">
+              <img src={logoSymbol} alt="" className="sidebar__brand-logo" draggable={false} />
+            </span>
+            <span className="sidebar__brand-name">Reasonix</span>
+            <button
+              className="sidebar__brand-search"
+              type="button"
+              aria-label={t("projectTree.searchPlaceholder")}
+              tabIndex={sidebarCollapsed ? -1 : 0}
+              onClick={() => {
+                document.querySelector<HTMLInputElement>(".project-tree__search input")?.focus();
+              }}
+            >
+              <Search size={18} />
+            </button>
+          </div>
 
-        <aside className={sidebarClassName} aria-label={t("sidebar.navigation")}>
-          {sidebarWorkbench ? (
-            <>
-              <div className="sidebar__head" aria-hidden={sidebarCollapsed}>
-                <div className="sidebar__brand sidebar__brand--workbench">
-                  <img src={logoWordmark} alt="Reasonix" className="sidebar__brand-logo sidebar__brand-logo--workbench" draggable={false} />
-                </div>
-              </div>
+          <button
+            className="sidebar__new"
+            onClick={() => {
+              void handleNewTab();
+            }}
+          >
+            <SquarePen size={18} />
+            <span>New Chat</span>
+          </button>
 
-              <div className="sidebar__quick-actions">
-                <button
-                  className="sidebar__quick-action"
-                  type="button"
-                  onClick={() => {
-                    void handleNewTab();
-                  }}
-                >
-                  <MessageSquare size={18} aria-hidden="true" />
-                  <span>{t("topbar.newSession")}</span>
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="sidebar__brand" aria-hidden={sidebarCollapsed}>
-                <img src={logoWordmark} alt="Reasonix" className="sidebar__brand-logo" draggable={false} />
-              </div>
-
+          <nav className="sidebar__features">
+            <span className="sidebar__nav-label">功能</span>
+            <div className={`sidebar-im${sidebarImExpanded ? " sidebar-im--expanded" : ""}`} aria-label={t("sidebar.im")}>
               <button
-                className="sidebar__new"
-                onClick={() => {
-                  void handleNewTab();
+                className="sidebar-im__summary"
+                type="button"
+                aria-expanded={sidebarImExpanded}
+                aria-label={sidebarImToggleLabel}
+                title={sidebarImToggleLabel}
+                onPointerDown={(event) => {
+                  if (event.button !== 0) return;
+                  event.preventDefault();
+                  toggleSidebarImPanel();
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
+                  toggleSidebarImPanel();
                 }}
               >
-                <SquarePen size={18} />
-                <span>{t("topbar.newSession")}</span>
+                <MessageSquare size={15} />
+                <span className="sidebar-im__summary-label">{t("sidebar.im")}</span>
+                {sidebarImSummaryText ? <span className="sidebar-im__summary-status">{sidebarImSummaryText}</span> : null}
               </button>
-            </>
-          )}
+              {sidebarImExpanded && sidebarImConnections.length > 0 && (
+                <div className="sidebar-im__panel" role="dialog" aria-label={t("sidebar.imManage")}>
+                  <div className="sidebar-im__panel-head">
+                    <span>{t("sidebar.imManage")}</span>
+                    <div className="sidebar-im__panel-actions">
+                      <Tooltip label={t("sidebar.imAdd")} fill side="right" disabled={sidebarNavTooltipDisabled}>
+                        <button
+                          className="sidebar-im__icon-button"
+                          type="button"
+                          onClick={openBotSettings}
+                          aria-label={t("sidebar.imAdd")}
+                        >
+                          <Plus size={13} />
+                        </button>
+                      </Tooltip>
+                    </div>
+                  </div>
+                  <div className="sidebar-im__list">
+                    {sidebarImConnections.map((connection) => (
+                      <div
+                        key={connection.id}
+                        className={[
+                          "sidebar-im-row-shell",
+                          activeSidebarImConnectionId === connection.id ? "sidebar-im-row-shell--active" : "",
+                          `sidebar-im-row-shell--${connection.status}`,
+                        ].filter(Boolean).join(" ")}
+                      >
+                        <button
+                          className="sidebar-im-row"
+                          type="button"
+                          title={`${connection.platformLabel} · ${connection.statusLabel}`}
+                          onClick={() => void selectSidebarImConnection(connection)}
+                        >
+                          <span className={`sidebar-im-row__platform sidebar-im-row__platform--${connection.platform}`} aria-hidden="true">
+                            {connection.platform === "qq" ? "Q" : connection.platform === "weixin" ? "微" : connection.platform === "lark" ? "L" : "飞"}
+                          </span>
+                          <span className="sidebar-im-row__main">
+                            <strong>{connection.title}</strong>
+                            <span>{connection.subtitle}</span>
+                          </span>
+                          <span className={`sidebar-im-row__status sidebar-im-row__status--${connection.status}`} title={connection.statusLabel} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <Tooltip label={t("sidebar.allHistory")} fill side="right" disabled={sidebarNavTooltipDisabled}>
+              <button
+                className="sidebar__feature"
+                onClick={() => void openAllHistory()}
+              >
+                <FileText size={15} />
+                <span>会话历史</span>
+              </button>
+            </Tooltip>
+          </nav>
 
           <section className="sidebar__section sidebar__section--projects">
             <ProjectTree
@@ -2663,103 +2535,69 @@ export default function App() {
               }}
               timeFilter={topicTimeFilter}
               onTimeFilterChange={setTopicTimeFilter}
-              variant={sidebarWorkbench ? "workbench" : "classic"}
             />
           </section>
 
-          {sidebarWorkbench ? (
-            <nav className="sidebar__nav sidebar__nav--footer">
-              {sidebarImBlock}
-              <div className="sidebar__utility-row" aria-label={t("sidebar.utilityActions")}>
-                <Tooltip label={t("sidebar.allHistory")} fill side="top">
-                  <button
-                    className="sidebar__utility-button"
-                    type="button"
-                    onClick={() => void openAllHistory()}
-                  >
-                    <History size={16} aria-hidden="true" />
-                    <span className="sr-only">{t("sidebar.allHistory")}</span>
-                  </button>
-                </Tooltip>
-                <Tooltip label={t("sidebar.trash")} fill side="top">
-                  <button
-                    className="sidebar__utility-button"
-                    type="button"
-                    onClick={() => void openTrash()}
-                  >
-                    <Trash2 size={16} aria-hidden="true" />
-                    <span className="sr-only">{t("sidebar.trash")}</span>
-                  </button>
-                </Tooltip>
-                <Tooltip label={t("topbar.settings")} fill side="top">
-                  <button
-                    className="sidebar__utility-button"
-                    type="button"
-                    onClick={() => {
-                      closeTransientOverlays();
-                      setSettingsTarget("general");
-                    }}
-                  >
-                    <SettingsIcon size={16} aria-hidden="true" />
-                    <span className="sr-only">{t("topbar.settings")}</span>
-                  </button>
-                </Tooltip>
-              </div>
-            </nav>
-          ) : (
-            <nav className="sidebar__nav">
-              {sidebarImBlock}
-              <Tooltip label={t("sidebar.allHistory")} fill side="right" disabled={sidebarNavTooltipDisabled}>
-                <button
-                  className="sidebar__navitem"
-                  onClick={() => void openAllHistory()}
-                >
-                  <History size={15} />
-                  <span>{t("sidebar.allHistory")}</span>
-                </button>
-              </Tooltip>
-              <Tooltip label={t("sidebar.trash")} fill side="right" disabled={sidebarNavTooltipDisabled}>
-                <button
-                  className="sidebar__navitem"
-                  onClick={() => void openTrash()}
-                >
-                  <Trash2 size={15} />
-                  <span>{t("sidebar.trash")}</span>
-                </button>
-              </Tooltip>
-              <Tooltip label={t("topbar.settings")} fill side="right" disabled={sidebarNavTooltipDisabled}>
-                <button
-                  className="sidebar__navitem"
-                  onClick={() => {
-                    closeTransientOverlays();
-                    setSettingsTarget("general");
-                  }}
-                >
-                  <SettingsIcon size={15} />
-                  <span>{t("topbar.settings")}</span>
-                </button>
-              </Tooltip>
-            </nav>
-          )}
+          <nav className="sidebar__utility" aria-label={t("sidebar.navigation")}>
+            <Tooltip label={t("sidebar.trash")} fill side="right" disabled={sidebarNavTooltipDisabled}>
+              <button
+                className="sidebar__utility-btn"
+                onClick={() => void openTrash()}
+              >
+                <Trash2 size={15} />
+              </button>
+            </Tooltip>
+            <Tooltip label={t("topbar.settings")} fill side="right" disabled={sidebarNavTooltipDisabled}>
+              <button
+                className="sidebar__utility-btn"
+                onClick={() => {
+                  closeTransientOverlays();
+                  setSettingsTarget("general");
+                }}
+              >
+                <SettingsIcon size={15} />
+              </button>
+            </Tooltip>
+          </nav>
 
         </aside>
         <button
-          className="sidebar-resizer"
+          className="sidebar-float-toggle"
           type="button"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label={t("sidebar.resize")}
-          aria-valuemin={SIDEBAR_MIN_WIDTH}
-          aria-valuemax={SIDEBAR_MAX_WIDTH}
-          aria-valuenow={sidebarWidth}
-          onPointerDown={startSidebarResize}
-          onKeyDown={resizeSidebarWithKeyboard}
-          onDoubleClick={() => setExpandedSidebarWidth(defaultSidebarWidth())}
-        />
+          onClick={sidebarExpandBlocked ? undefined : toggleSidebar}
+          aria-label={sidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+          aria-disabled={sidebarExpandBlocked}
+        >
+          <PanelLeft size={14} />
+        </button>
+        <div className="sidebar-resizer-shell">
+          <button
+            className="sidebar-resizer"
+            type="button"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t("sidebar.resize")}
+            aria-valuemin={SIDEBAR_MIN_WIDTH}
+            aria-valuemax={SIDEBAR_MAX_WIDTH}
+            aria-valuenow={sidebarWidth}
+            onPointerDown={startSidebarResize}
+            onKeyDown={resizeSidebarWithKeyboard}
+            onDoubleClick={() => setExpandedSidebarWidth(defaultSidebarWidth())}
+          />
+          <button
+            className="sidebar-resizer__collapse-btn"
+            type="button"
+            onClick={sidebarExpandBlocked ? undefined : toggleSidebar}
+            aria-label={sidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+            aria-disabled={sidebarExpandBlocked}
+          >
+            <PanelLeft size={14} />
+          </button>
+        </div>
 
         <section className="chat-pane">
           <>
-          <header className="topicbar">
+          <header className={`topicbar${!sidebarImDetailConnection && !sessionHasContent ? " topicbar--welcome" : ""}`}>
             <div className="topicbar__identity">
               <div className="topicbar__title-row">
                 {topicbarEditing ? (
@@ -2768,6 +2606,7 @@ export default function App() {
                       autoFocus
                       className="topicbar__title-input"
                       value={topicTitleDraft}
+                      style={{ "--topic-title-input-width": topicTitleEditWidth } as CSSProperties}
                       onChange={(event) => setTopicTitleDraft(event.target.value)}
                       onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
                         if (event.key === "Enter") {
@@ -2783,19 +2622,17 @@ export default function App() {
                     />
                   </div>
                 ) : (
-                  <h1 title={sidebarImDetailConnection ? topicbarTitle : topicTitle(activeTab)}>{topicbarTitle}</h1>
-                )}
-                <Tooltip label={t("topicBar.renameSession")}>
                   <button
-                    className="topicbar__icon-btn"
+                    className="topicbar__title-button"
                     type="button"
-                    disabled={Boolean(sidebarImDetailConnection) || !activeTab?.topicId || topicbarEditing}
+                    disabled={Boolean(sidebarImDetailConnection) || !activeTab?.topicId}
                     onClick={startActiveTopicRename}
+                    title={sidebarImDetailConnection ? topicbarTitle : topicTitle(activeTab)}
                     aria-label={t("topicBar.renameSession")}
                   >
-                    <Pencil size={14} />
+                    <span>{topicbarTitle}</span>
                   </button>
-                </Tooltip>
+                )}
               </div>
               {topicbarSubtitleVisible && (
                 <div className="topicbar__subtitle" title={topicbarSubtitleTitle}>
@@ -2859,25 +2696,40 @@ export default function App() {
               )}
               <Tooltip label={t("workspace.changedTab")}>
                 <button
-                  className="topicbar__action-btn topicbar__action-btn--label"
+                  className="topicbar__action-btn topicbar__action-btn--icon"
                   type="button"
                   aria-label={t("workspace.changedTab")}
                   aria-pressed={workspacePanelRenderable && rightDockMode === "changed"}
                   onClick={() => openRightDockMode("changed")}
                 >
                   <GitBranch size={14} />
-                  <span>{t("workspace.changedTab")}</span>
                 </button>
               </Tooltip>
               <Tooltip label={t("topicBar.command")}>
                 <button
-                  className="topicbar__action-btn topicbar__action-btn--label topicbar__action-btn--accent"
+                  className="topicbar__action-btn topicbar__action-btn--icon"
                   type="button"
                   aria-label={t("topicBar.command")}
                   onClick={() => void openPalette()}
                 >
                   <Command size={14} />
-                  <span>{t("topicBar.command")}</span>
+                </button>
+              </Tooltip>
+              <Tooltip label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}>
+                <button
+                  className="topicbar__action-btn topicbar__action-btn--icon"
+                  type="button"
+                  aria-label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
+                  aria-pressed={workspacePanelRenderable}
+                  onClick={() => {
+                    if (workspacePanelRenderable) {
+                      setWorkspacePanel(false);
+                    } else {
+                      openRightDockMode("context");
+                    }
+                  }}
+                >
+                  <PanelRight size={14} />
                 </button>
               </Tooltip>
             </div>
