@@ -3021,13 +3021,13 @@ a[href] {
 }
 
 :root[data-theme="dark"] .sidebar__brand-logo {
-  filter: brightness(0) invert(1);
+  filter: none;
   opacity: 0.94;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) .sidebar__brand-logo {
-    filter: brightness(0) invert(1);
+    filter: none;
     opacity: 0.94;
   }
 }
