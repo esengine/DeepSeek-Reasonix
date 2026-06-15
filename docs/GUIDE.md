@@ -13,7 +13,7 @@
 
 - [Configuration](#configuration)
 - [Reasoning language](./REASONING_LANGUAGE.md)
-- [Mode shortcuts quick map](#mode-shortcuts-quick-map)
+- [Keyboard shortcuts](#keyboard-shortcuts)
 - [Permissions & sandbox](#permissions--sandbox)
 - [Plugins (MCP)](#plugins-mcp)
 - [Slash commands](#slash-commands)
@@ -81,37 +81,93 @@ command = "reasonix-plugin-example"
 
 For the full schema and every field's contract, see [`SPEC.md` §5](./SPEC.md#5-configuration-toml).
 
-## Mode shortcuts quick map
+## Keyboard shortcuts
 
 Shortcuts are documented by client because users usually look for the keys that
-work in the surface they are using. The small rule is: `Shift+Tab` only controls
-Plan, `Ctrl/Cmd+Y` only controls YOLO, and paste stays on the platform paste key.
+work in the surface they are using. The small mode rule is: `Shift+Tab` only
+controls Plan, `Ctrl/Cmd+Y` only controls YOLO, and paste stays on the platform
+paste key.
+
+`[ui].shortcut_layout` is still accepted for old configs, but the shortcut
+behavior below is unified across layouts.
 
 ### Desktop GUI
 
+Global shortcuts:
+
 | Key or control | What it does | Notes |
 | --- | --- | --- |
-| `Shift+Tab` | Toggles Plan on/off | Composer shortcut. Plan is read-only planning and does not cycle Ask/Auto/YOLO. |
-| `Ctrl+Y` / `Cmd+Y` | Toggles YOLO on/off | Composer shortcut. Turning YOLO off restores the previous Ask/Auto base when known. |
-| Ask / Auto / YOLO approval controls | Picks the tool approval posture directly | Clicking these controls is unchanged by the keyboard shortcuts. |
+| `Cmd+K` on macOS, `Ctrl+K` on Windows/Linux | Opens the command palette | `Esc` closes the palette. |
+| `Cmd+W` on macOS, `Ctrl+W` on Windows/Linux | Closes the active top tab | The last tab is kept by the normal close-tab guard. |
+| `Cmd+B` / `Ctrl+B` | Expands or collapses the most recent shell output | Same action as clicking the collapsed shell-output hint. |
+| `Cmd++`, `Cmd+-`, `Cmd+0` on macOS; `Ctrl++`, `Ctrl+-`, `Ctrl+0` elsewhere | Increases, decreases, or resets text size | `=` is accepted for the plus key on keyboards that report it that way. |
+
+Composer shortcuts:
+
+| Key or control | What it does | Notes |
+| --- | --- | --- |
+| `Enter` | Sends the current message | IME composition confirmation is left alone. |
+| `Shift+Enter` | Inserts a newline | The composer keeps focus. |
+| `Shift+Tab` | Toggles Plan on/off | Plan is read-only planning and does not cycle Ask/Auto/YOLO. |
+| `Cmd+Y` / `Ctrl+Y` | Toggles YOLO on/off | Turning YOLO off restores the previous Ask/Auto base when known. |
+| `Cmd+V` on macOS, `Ctrl+V` on Windows/Linux | Pastes clipboard content | Clipboard images are attached; images can also be dropped into the composer. |
+| Plain `Up` / `Down` at the prompt boundary | Recalls older or newer submitted prompts | Modified arrows and native text navigation stay with the textarea. |
+| `Esc` while a turn is running | Cancels the running turn | If the turn has not produced a response yet, the draft is restored. |
+
+Menus and controls:
+
+| Key or control | What it does | Notes |
+| --- | --- | --- |
+| `Up` / `Down` in slash, `@`, or past-chat menus | Moves the highlighted item | Past-chat search uses the same navigation keys. |
+| `Enter` / `Tab` in those menus | Accepts the highlighted item | Directory-like entries can keep the menu open for the next level. |
+| `Esc` in those menus | Closes the current menu or returns from past-chat search | Regular typing continues after the menu closes. |
+| Ask / Auto / YOLO approval controls | Picks the tool approval posture directly | Clicking these controls is unchanged by keyboard shortcuts. |
 | Plan control | Toggles Plan on/off | Same mode as `Shift+Tab`. |
 | Goal item in the collaboration menu | Starts, views, or clears Goal | Goal is not in any keyboard cycle. |
-| `Cmd+V` on macOS, `Ctrl+V` on Windows/Linux | Pastes clipboard content | Images can also be dropped into the composer. |
 
 ### CLI / TUI
+
+Chat and transcript shortcuts:
+
+| Key or command | What it does | Notes |
+| --- | --- | --- |
+| `Enter` | Sends the current message | While a turn is running, non-empty input is queued as follow-up feedback. |
+| `Shift+Enter`, `Alt+Enter`, or `Ctrl+J` | Inserts a newline | Plain `Enter` is reserved for send/confirm. |
+| Plain `Up` / `Down` while idle | Recalls older or newer submitted prompts | In a running turn, the same keys navigate queued follow-up feedback. |
+| `PageUp` / `PageDown` | Scrolls the transcript | Works regardless of the current chat state. |
+| `Ctrl+Home` / `Ctrl+End` | Jumps to the top or bottom of the transcript | Useful after long tool output. |
+| `Esc` | Backs out of the current action | It un-sends a just-submitted turn before any reply, cancels a running turn, or clears non-empty input. |
+| Double `Esc` on an empty idle composer | Opens the rewind picker | Same entry point as `/rewind`. |
+| `Ctrl+C` / `Meta+C` / `Super+C` | Copies an active transcript selection | Without a selection it cancels a running turn, clears non-empty input, or quits on a second empty-composer press. |
+| `Ctrl+D` | Quits the TUI | Immediate quit. |
+| `Ctrl+V`, `Ctrl+Shift+V`, `Meta+V`, or `Super+V` | Pastes clipboard content | The CLI tries an image first, then falls back to text or file references. |
+| `/paste-image` | Pastes a clipboard image | Use it when you want image-only paste or the terminal handles text paste itself. |
+| A line starting with `!` | Runs a shell command directly | The command runs locally without asking the model. |
+
+Mode and display shortcuts:
 
 | Key or command | What it does | Notes |
 | --- | --- | --- |
 | `Shift+Tab` | Toggles Plan on/off | Plan is read-only planning and does not cycle Ask/Auto/YOLO. |
 | `Ctrl+Y` | Toggles YOLO on/off | Turning YOLO off restores the previous Ask/Auto base when known. Terminals that forward Command/Super may also send `Cmd+Y`, but `Ctrl+Y` is the reliable terminal shortcut. |
 | `--yolo`, `--dangerously-skip-permissions` | Starts chat in YOLO | Same runtime mode as `Ctrl+Y`. |
+| `Ctrl+O` | Toggles verbose reasoning display | Also available through `/verbose`. |
+| `Ctrl+B` | Expands or collapses long shell output | Same action as clicking the collapsed shell-output hint. |
 | Ask / Auto | No keyboard cycle | Ask is the default interactive base. Auto is not entered through `Shift+Tab`; use clients or APIs that expose the tool approval posture directly. |
-| `Ctrl+V` | Pastes clipboard content | The CLI tries a clipboard image first, then falls back to text paste. |
-| `/paste-image` | Pastes a clipboard image | Use it when you want image-only paste or the terminal handles text paste itself. |
 | `/goal <objective>`, `/goal status`, `/goal clear` | Starts, checks, or clears Goal | Goal is not in any keyboard cycle. |
 
-`[ui].shortcut_layout` is still accepted for old configs, but the shortcut
-behavior above is unified across layouts.
+Picker and approval shortcuts:
+
+| Context | Keys | What they do |
+| --- | --- | --- |
+| Slash or `@` completion | `Up` / `Down`, `Tab` / `Enter`, `Esc` | Move, accept, or close the completion menu. |
+| Tool approval prompt | `y`/`1`, `a`/`2`, `p`/`3`, `n`/`4`, `Enter`, `Esc`, `Ctrl+C` | Allow once, allow for session, persist allow, deny, accept default allow once, deny, or cancel the turn. |
+| Ask question card | `Up`/`Down` or `j`/`k`, `Left`/`Right` or `h`/`l`, `Space`, `Enter`, `1`-`9`, `Esc`, `Ctrl+C` | Navigate answers/tabs, toggle multi-select answers, submit/activate, pick numbered options, dismiss, or cancel the turn. |
+| Rewind picker | `Up`/`Down` or `j`/`k`, `Enter`, `b`, `c`, `d`, `f`, `s`, `u`, `Esc` | Choose a turn, apply both/conversation/code/fork/summarize actions, or go back/close. |
+| Resume picker | `Up`/`Down` or `j`/`k`, `Enter`, `Esc` | Choose a saved session or close the picker. |
+| MCP import picker | `Up`/`Down` or `j`/`k`, `Space`, `Enter`, `Esc` / `Ctrl+C` | Move, select servers, import selected servers, or cancel. |
+| MCP manager | `Up`/`Down` or `j`/`k`, `Enter`, `Left`/`Right` or `h`/`l`, `r`, number keys, `q` / `Ctrl+C` | Navigate server lists/details, refresh, choose actions, or close. |
+| `/clear` confirmation | Arrow keys or `j`/`k` / `Tab`, `Enter`, `y`, `n`, `Esc` / `Ctrl+C` | Toggle Clear/Cancel, confirm clear, or cancel. |
 
 Mode meanings:
 

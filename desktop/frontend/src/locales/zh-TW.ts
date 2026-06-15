@@ -286,6 +286,8 @@ export const zhTW: Record<DictKey, string> = {
   "status.connecting": "連線中…",
   "status.plan": "計畫",
   "status.switchModel": "切換模型",
+  "modelSwitcher.searchPlaceholder": "搜尋模型…",
+  "modelSwitcher.noMatches": "沒有匹配的模型",
   "status.noModels": "沒有可切換模型",
   "status.modelSwitchFailed": "模型切換失敗：{err}",
   "status.effort": "effort {level}",

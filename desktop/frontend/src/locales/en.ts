@@ -432,6 +432,8 @@ export const en = {
   "status.jobsLabel": "jobs",
   "status.plan": "PLAN",
   "status.switchModel": "Switch model",
+  "modelSwitcher.searchPlaceholder": "Search models…",
+  "modelSwitcher.noMatches": "No matching models",
   "status.noModels": "no switchable models",
   "status.modelSwitchFailed": "Model switch failed: {err}",
   "status.tokenModeSwitchFailed": "Token saver switch failed: {err}",

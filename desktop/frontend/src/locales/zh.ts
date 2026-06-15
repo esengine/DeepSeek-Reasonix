@@ -433,6 +433,8 @@ export const zh: Record<DictKey, string> = {
   "status.jobsLabel": "任务",
   "status.plan": "计划",
   "status.switchModel": "切换模型",
+  "modelSwitcher.searchPlaceholder": "搜索模型…",
+  "modelSwitcher.noMatches": "没有匹配的模型",
   "status.noModels": "没有可切换模型",
   "status.modelSwitchFailed": "模型切换失败：{err}",
   "status.tokenModeSwitchFailed": "省 token 模式切换失败：{err}",

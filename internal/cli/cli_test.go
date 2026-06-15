@@ -66,6 +66,14 @@ func TestReserveNativeScrollbackFrameWritesOnlyNewlines(t *testing.T) {
 	}
 }
 
+func TestPrepareNativeScrollbackClearsBeforeFrame(t *testing.T) {
+	var b bytes.Buffer
+	prepareNativeScrollback(&b, 2)
+	if got, want := b.String(), "\x1B[3J\x1B[2J\x1B[H\n\n"; got != want {
+		t.Fatalf("prepareNativeScrollback wrote %q, want %q", got, want)
+	}
+}
+
 func mustGetwd(t *testing.T) string {
 	t.Helper()
 	cwd, err := os.Getwd()

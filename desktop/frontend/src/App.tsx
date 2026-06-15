@@ -110,7 +110,9 @@ import {
 import { applyTextSize, DEFAULT_TEXT_SIZE, getTextSize, nextTextSize } from "./lib/textSize";
 import { useWindowStatePersistence } from "./lib/windowState";
 import { availableWorkspacePanelWidth, resolveWorkspacePanelWidth, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
+import { isCloseTabShortcut } from "./lib/keyboardShortcuts";
 import logoSymbol from "./assets/logo-symbol.svg";
+import logoWordmark from "./assets/logo-wordmark.svg";
 
 const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
 const SIDEBAR_DEFAULT_WIDTH = 232;
@@ -2178,6 +2180,20 @@ export default function App() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [openPalette]);
+
+  // Cmd/Ctrl+W — close the active tab
+  useEffect(() => {
+    if (!activeTabId) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (isCloseTabShortcut(e, desktopPlatform)) {
+        e.preventDefault();
+        handleTabClose(activeTabId);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [activeTabId, desktopPlatform, handleTabClose]);
+
   const paletteItems = useMemo<PaletteItem[]>(() => {
     const cmds: PaletteItem[] = [
       { id: "cmd-new", group: t("palette.group.commands"), title: t("palette.cmd.newSession"), icon: <SquarePen size={15} />, compact: true, keywords: ["new", "新建"], run: () => void handleNewTab() },
