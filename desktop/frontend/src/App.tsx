@@ -2414,7 +2414,7 @@ export default function App() {
           </button>
 
           <nav className="sidebar__features">
-            <span className="sidebar__nav-label">FEATURES</span>
+            <span className="sidebar__nav-label">功能</span>
             <div className={`sidebar-im${sidebarImExpanded ? " sidebar-im--expanded" : ""}`} aria-label={t("sidebar.im")}>
               <button
                 className="sidebar-im__summary"
@@ -2491,7 +2491,7 @@ export default function App() {
                 onClick={() => void openAllHistory()}
               >
                 <FileText size={15} />
-                <span>Library</span>
+                <span>会话历史</span>
               </button>
             </Tooltip>
           </nav>
@@ -2576,7 +2576,7 @@ export default function App() {
 
         <section className="chat-pane">
           <>
-          <header className="topicbar">
+          <header className={`topicbar${!sidebarImDetailConnection && !sessionHasContent ? " topicbar--welcome" : ""}`}>
             <div className="topicbar__identity">
               <div className="topicbar__title-row">
                 {topicbarEditing ? (
