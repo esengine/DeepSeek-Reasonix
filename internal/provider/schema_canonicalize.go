@@ -28,10 +28,19 @@ func CanonicalizeSchema(raw json.RawMessage) json.RawMessage {
 }
 
 func canonicalizeSchemaValue(v any) any {
+	return canonicalizeSchemaObject(v)
+}
+
+func canonicalizeSchemaObject(v any) any {
 	switch val := v.(type) {
 	case map[string]any:
 		for k, inner := range val {
-			val[k] = canonicalizeSchemaValue(inner)
+			switch k {
+			case "properties", "patternProperties", "$defs", "definitions", "dependentSchemas":
+				val[k] = canonicalizeNamedSchemas(inner)
+			default:
+				val[k] = canonicalizeSchemaObject(inner)
+			}
 		}
 		if req, ok := val["required"]; ok {
 			if arr, ok := req.([]any); ok {
@@ -60,12 +69,23 @@ func canonicalizeSchemaValue(v any) any {
 		return val
 	case []any:
 		for i, elem := range val {
-			val[i] = canonicalizeSchemaValue(elem)
+			val[i] = canonicalizeSchemaObject(elem)
 		}
 		return val
 	default:
 		return v
 	}
+}
+
+func canonicalizeNamedSchemas(v any) any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return canonicalizeSchemaObject(v)
+	}
+	for name, schema := range m {
+		m[name] = canonicalizeSchemaObject(schema)
+	}
+	return m
 }
 
 func sortSchemaArray(arr []any) {

@@ -22,6 +22,23 @@ func TestCanonicalizeSchemaDropsNonArrayRequired(t *testing.T) {
 	}
 }
 
+func TestCanonicalizeSchemaPreservesPropertyNamedRequired(t *testing.T) {
+	raw := json.RawMessage(`{
+		"type":"object",
+		"properties":{
+			"required":{"type":"boolean","description":"Whether the item is required"},
+			"normal":{"type":"string"}
+		},
+		"required":["required"]
+	}`)
+
+	got := string(CanonicalizeSchema(raw))
+	want := `{"properties":{"normal":{"type":"string"},"required":{"description":"Whether the item is required","type":"boolean"}},"required":["required"],"type":"object"}`
+	if got != want {
+		t.Fatalf("CanonicalizeSchema() = %s, want %s", got, want)
+	}
+}
+
 func TestCanonicalizeSchemaDependentRequired(t *testing.T) {
 	raw := json.RawMessage(`{
 		"type":"object",
