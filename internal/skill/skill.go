@@ -155,10 +155,14 @@ const (
 
 // Root is one discovery directory with its scope, priority, and status.
 type Root struct {
-	Dir               string
-	Scope             Scope
-	Priority          int
-	Status            PathStatus
+	Dir      string
+	Scope    Scope
+	Priority int
+	Status   PathStatus
+}
+
+type discoveryRoot struct {
+	Root
 	requireFlatMarker bool
 }
 
@@ -166,7 +170,7 @@ type Root struct {
 // convention dirs (config.ConventionDirs: .reasonix / .agents / .agent / .claude)
 // under the project root → custom paths → the same convention dirs under the home
 // dir. A later root never overrides an earlier one.
-func (s *Store) roots() []Root {
+func (s *Store) roots() []discoveryRoot {
 	type de struct {
 		dir               string
 		scope             Scope
@@ -184,18 +188,28 @@ func (s *Store) roots() []Root {
 	for _, c := range config.ConventionDirs {
 		dirs = append(dirs, de{filepath.Join(s.homeDir, c, SkillsDirname), ScopeGlobal, c == ".claude"})
 	}
-	out := make([]Root, 0, len(dirs))
+	out := make([]discoveryRoot, 0, len(dirs))
 	for _, d := range dirs {
 		if s.excludedPaths[config.CanonicalSkillPath(d.dir)] {
 			continue
 		}
-		out = append(out, Root{Dir: d.dir, Scope: d.scope, Priority: len(out), Status: pathStatus(d.dir), requireFlatMarker: d.requireFlatMarker})
+		out = append(out, discoveryRoot{
+			Root:              Root{Dir: d.dir, Scope: d.scope, Priority: len(out), Status: pathStatus(d.dir)},
+			requireFlatMarker: d.requireFlatMarker,
+		})
 	}
 	return out
 }
 
 // Roots exposes the discovery directories with their status for `/skill paths`.
-func (s *Store) Roots() []Root { return s.roots() }
+func (s *Store) Roots() []Root {
+	roots := s.roots()
+	out := make([]Root, 0, len(roots))
+	for _, r := range roots {
+		out = append(out, r.Root)
+	}
+	return out
+}
 
 func disabledNameSet(names []string) map[string]bool {
 	out := map[string]bool{}
@@ -302,7 +316,7 @@ func (s *Store) Read(name string) (Skill, bool) {
 	return Skill{}, false
 }
 
-func (s *Store) discoverRoot(r Root) []Skill {
+func (s *Store) discoverRoot(r discoveryRoot) []Skill {
 	var out []Skill
 	s.scanDir(r.Dir, r.Scope, r.requireFlatMarker, 1, map[string]bool{}, &out)
 	return out
@@ -450,8 +464,10 @@ func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bo
 	}, true
 }
 
+var skillMarkerFrontmatterKeys = []string{"description", "name", "runas", "context", "agent", "allowed-tools", "model", "effort"}
+
 func hasSkillMarker(fm map[string]string) bool {
-	for _, key := range []string{"description", "name", "runas", "context", "agent", "allowed-tools", "model", "effort"} {
+	for _, key := range skillMarkerFrontmatterKeys {
 		if strings.TrimSpace(fm[key]) != "" {
 			return true
 		}

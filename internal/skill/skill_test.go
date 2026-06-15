@@ -157,7 +157,7 @@ func TestConventionDirsDiscovered(t *testing.T) {
 
 func TestNonSkillMarkdownInClaudeSkillRootsIgnored(t *testing.T) {
 	proj := t.TempDir()
-	writeSkill(t, proj, ".claude/skills/README.md", "# Skill notes\n\nThis is documentation, not a skill.")
+	writeSkill(t, proj, ".claude/skills/guide.md", "# Skill notes\n\nThis is documentation, not a skill.")
 	writeSkill(t, proj, ".claude/skills/notes.md", "---\ntitle: Notes\n---\n# Notes")
 	writeSkill(t, proj, ".claude/skills/real.md", "---\ndescription: real skill\n---\nbody")
 
@@ -167,7 +167,7 @@ func TestNonSkillMarkdownInClaudeSkillRootsIgnored(t *testing.T) {
 	if _, ok := find(list, "real"); !ok {
 		t.Fatal("real skill should be discovered")
 	}
-	for _, name := range []string{"README", "notes"} {
+	for _, name := range []string{"guide", "notes"} {
 		if _, ok := find(list, name); ok {
 			t.Errorf("non-skill markdown %q should not be listed", name)
 		}
@@ -176,7 +176,7 @@ func TestNonSkillMarkdownInClaudeSkillRootsIgnored(t *testing.T) {
 		t.Fatalf("non-skill markdown should not warn during List, got %q", got)
 	}
 
-	for _, name := range []string{"README", "notes"} {
+	for _, name := range []string{"guide", "notes"} {
 		stderr.Reset()
 		if _, ok := st.Read(name); ok {
 			t.Errorf("non-skill markdown %q should not be readable as a skill", name)
@@ -199,6 +199,24 @@ func TestSkillLikeFlatClaudeMarkdownWithoutDescriptionWarns(t *testing.T) {
 	}
 	if got := stderr.String(); !strings.Contains(got, "has no description") {
 		t.Fatalf("skill-like flat Claude markdown without description should warn, got %q", got)
+	}
+}
+
+func TestRunAsOnlyFlatClaudeMarkdownIsSkillLike(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".claude/skills/sub.md", "---\nrunAs: subagent\n---\nbody")
+
+	var stderr bytes.Buffer
+	st := New(Options{HomeDir: home, DisableBuiltins: true, Stderr: &stderr})
+	sk, ok := st.Read("sub")
+	if !ok {
+		t.Fatal("runAs-only Claude markdown should be treated as skill-like")
+	}
+	if sk.RunAs != RunSubagent {
+		t.Fatalf("runAs should be parsed despite frontmatter key casing, got %s", sk.RunAs)
+	}
+	if got := stderr.String(); !strings.Contains(got, "has no description") {
+		t.Fatalf("runAs-only Claude markdown without description should warn, got %q", got)
 	}
 }
 
