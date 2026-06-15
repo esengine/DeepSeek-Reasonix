@@ -40,7 +40,7 @@
     "vite": "^6.0.7"
   },
   "overrides": {
-    "esbuild": "0.28.1",
+    "esbuild": "^0.25.0",
     "mdast-util-gfm-autolink-literal": "2.0.0"
   }
 }
