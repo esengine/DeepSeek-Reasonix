@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, FileText, Folder, GitBranch, Image, MessageSquare, RotateCcw, ScrollText } from "lucide-react";
+import { ChevronRight, FileText, Folder, GitBranch, Image, MessageSquare, RotateCcw, ScrollText } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
 import { parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
@@ -302,11 +302,11 @@ export function TurnActions({
               className={`turn-actions__btn${confirmScope === "fork" ? " turn-actions__btn--confirm" : ""}`}
               type="button"
               disabled={Boolean(forkDisabledReason)}
-              title={forkDisabledReason || undefined}
+              aria-label={actionLabel("fork")}
+              title={forkDisabledReason || actionLabel("fork")}
               onClick={() => selectRewind("fork")}
             >
               <GitBranch size={14} />
-              <span className="turn-actions__label">{actionLabel("fork")}</span>
             </button>
           </span>
           <div
@@ -321,11 +321,11 @@ export function TurnActions({
                 type="button"
                 aria-haspopup="menu"
                 aria-expanded={openMenu === "summary"}
+                aria-label={t("turnActions.summary")}
+                title={t("turnActions.summary")}
                 onClick={() => toggleMenu("summary")}
               >
                 <ScrollText size={14} />
-                <span className="turn-actions__label">{t("turnActions.summary")}</span>
-                <ChevronDown className="turn-actions__caret" size={11} />
               </button>
             </span>
             {openMenu === "summary" && (
@@ -349,11 +349,11 @@ export function TurnActions({
                 type="button"
                 aria-haspopup="menu"
                 aria-expanded={openMenu === "rewind"}
+                aria-label={t("turnActions.rewind")}
+                title={t("turnActions.rewind")}
                 onClick={() => toggleMenu("rewind")}
               >
                 <RotateCcw size={14} />
-                <span className="turn-actions__label">{t("turnActions.rewind")}</span>
-                <ChevronDown className="turn-actions__caret" size={11} />
               </button>
             </span>
             {openMenu === "rewind" && (

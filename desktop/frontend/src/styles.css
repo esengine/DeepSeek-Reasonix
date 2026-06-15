@@ -3889,9 +3889,9 @@ a[href] {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 14px;
   margin-top: 10px;
-  min-height: 32px;
+  min-height: 28px;
 }
 .turn-actions__group {
   position: relative;
@@ -3914,24 +3914,24 @@ a[href] {
   align-items: center;
   justify-content: center;
   gap: 0;
-  width: 32px;
-  height: 32px;
-  min-width: 32px;
-  min-height: 32px;
-  background: color-mix(in srgb, var(--bg-elev-2) 78%, transparent);
-  border: 1px solid color-mix(in srgb, var(--fg-faint) 16%, transparent);
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  background: transparent;
+  border: 0;
   color: var(--fg-faint);
-  border-radius: 9px;
+  border-radius: 7px;
   padding: 0;
   font: inherit;
   font-size: 11px;
   line-height: 1.25;
   overflow: hidden;
   white-space: nowrap;
-  transition: color 0.12s, border-color 0.12s, background 0.12s, box-shadow 0.12s;
+  transition: color 0.12s, opacity 0.12s;
 }
 .turn-actions__btn.copybtn {
-  min-width: 32px;
+  min-width: 28px;
 }
 .turn-actions__label {
   display: none;
@@ -3943,9 +3943,8 @@ a[href] {
 .turn-actions__btn:focus-visible:not(:disabled),
 .turn-actions__group--open .turn-actions__btn {
   color: var(--fg);
-  border-color: color-mix(in srgb, var(--fg-faint) 32%, transparent);
-  background: color-mix(in srgb, var(--bg-elev) 88%, transparent);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 5%, transparent);
+  background: transparent;
+  box-shadow: none;
 }
 .turn-actions__tip::after {
   position: absolute;
