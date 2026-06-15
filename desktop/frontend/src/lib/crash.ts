@@ -366,12 +366,19 @@ export function shouldRecordLongTaskSample(
   graceUntilMs: number,
   visibilityHidden = false,
   visibleSinceMs = 0,
+  focused = true,
 ): boolean {
+  if (!focused) return false;
   if (visibilityHidden) return false;
   return durationMs >= 50 && startMs >= graceUntilMs && startMs - visibleSinceMs >= VISIBILITY_RESUME_GRACE_MS;
 }
 
-export function shouldRecordEventLoopLagSample(visibilityHidden: boolean, msSinceVisible: number): boolean {
+export function shouldRecordEventLoopLagSample(
+  visibilityHidden: boolean,
+  msSinceVisible: number,
+  focused = true,
+): boolean {
+  if (!focused) return false;
   if (visibilityHidden) return false;
   return msSinceVisible >= VISIBILITY_RESUME_GRACE_MS;
 }
@@ -529,10 +536,12 @@ export function shouldPromptForPerformanceLabel(
   alreadyHandled: boolean,
   msSinceLastPrompt: number,
   visibilityHidden: boolean,
+  focused = true,
 ): boolean {
   if (alreadyHandled) return false;
   if (msSinceLastPrompt < PROMPT_COOLDOWN_MS) return false;
   if (visibilityHidden) return false;
+  if (!focused) return false;
   return true;
 }
 
@@ -542,7 +551,8 @@ function isPerfLabelHandled(label: string): boolean {
 
 function shouldPromptForPerformance(now: number, label: string): boolean {
   const hidden = typeof document !== "undefined" && document.visibilityState === "hidden";
-  return shouldPromptForPerformanceLabel(isPerfLabelHandled(label), now - lastPerformancePromptAt, hidden);
+  const focused = typeof document === "undefined" || document.hasFocus?.() !== false;
+  return shouldPromptForPerformanceLabel(isPerfLabelHandled(label), now - lastPerformancePromptAt, hidden, focused);
 }
 
 function promptPerformanceReport(reason: string, currentLagMs = 0): void {
@@ -570,6 +580,7 @@ export function installPerformancePressureMonitor() {
   const startedAt = performance.now();
   const graceUntil = startedAt + STARTUP_GRACE_MS;
   const isHidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
+  const isFocused = () => typeof document === "undefined" || document.hasFocus?.() !== false;
   let visibleSince = isHidden() ? Number.POSITIVE_INFINITY : startedAt;
   let expected = performance.now() + 1000;
 
@@ -596,7 +607,7 @@ export function installPerformancePressureMonitor() {
     try {
       const observer = new PerformanceObserver((list) => {
         for (const entry of list.getEntries()) {
-          if (!shouldRecordLongTaskSample(entry.startTime, entry.duration, graceUntil, isHidden(), visibleSince)) continue;
+          if (!shouldRecordLongTaskSample(entry.startTime, entry.duration, graceUntil, isHidden(), visibleSince, isFocused())) continue;
           longTasks.push({ startMs: Math.round(entry.startTime), durationMs: Math.round(entry.duration) });
         }
         pruneLongTasks();
@@ -613,7 +624,7 @@ export function installPerformancePressureMonitor() {
     const lagMs = Math.max(0, now - expected);
     expected = now + 1000;
     if (!pastGrace()) return;
-    if (!shouldRecordEventLoopLagSample(isHidden(), now - visibleSince)) return;
+    if (!shouldRecordEventLoopLagSample(isHidden(), now - visibleSince, isFocused())) return;
     lagSamples.push(lagMs);
     if (lagSamples.length > MAX_LAG_SAMPLES) lagSamples.shift();
     if (lagMs >= EVENT_LOOP_LAG_PROMPT_MS) promptPerformanceReport(`event loop lag ${fmtNumber(lagMs)}ms`, lagMs);
