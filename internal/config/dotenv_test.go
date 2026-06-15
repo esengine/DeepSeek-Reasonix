@@ -46,6 +46,48 @@ func TestLoadDotEnvFallsBackToHome(t *testing.T) {
 	}
 }
 
+// TestLoadDotEnvReadsGlobalCredentials proves `reasonix setup`'s target — the
+// reasonix-owned credentials file in the user config dir — is loaded from any
+// working directory, while a project ./.env still wins on a shared key.
+func TestLoadDotEnvReadsGlobalCredentials(t *testing.T) {
+	cwd := t.TempDir()
+	cfgHome := t.TempDir()
+
+	t.Chdir(cwd)
+	t.Setenv("HOME", cfgHome)
+	t.Setenv("USERPROFILE", cfgHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(cfgHome, ".config"))
+	t.Setenv("AppData", filepath.Join(cfgHome, "AppData"))
+
+	cred := UserCredentialsPath()
+	if cred == "" {
+		t.Skip("user config dir unresolved on this platform")
+	}
+	if err := os.MkdirAll(filepath.Dir(cred), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cred, []byte("KEY_GLOBAL=from_credentials\nKEY_SHARED=global_loses\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".env"), []byte("KEY_SHARED=cwd_wins\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("KEY_GLOBAL", "")
+	os.Unsetenv("KEY_GLOBAL")
+	t.Setenv("KEY_SHARED", "")
+	os.Unsetenv("KEY_SHARED")
+
+	loadDotEnv()
+
+	if got := os.Getenv("KEY_GLOBAL"); got != "from_credentials" {
+		t.Errorf("global credentials not loaded: KEY_GLOBAL=%q want from_credentials", got)
+	}
+	if got := os.Getenv("KEY_SHARED"); got != "cwd_wins" {
+		t.Errorf("project .env should win over global credentials: KEY_SHARED=%q want cwd_wins", got)
+	}
+}
+
 // TestLoadDotEnvDoesNotOverrideEnv confirms an already-set environment variable
 // beats both .env files (the documented first-wins contract).
 func TestLoadDotEnvDoesNotOverrideEnv(t *testing.T) {

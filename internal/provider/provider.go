@@ -7,8 +7,13 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
+	"strings"
+	"unicode"
+
+	"reasonix/internal/nilutil"
 )
 
 // Role is the role of a message.
@@ -23,9 +28,10 @@ const (
 
 // Message is a single conversation message.
 type Message struct {
-	Role             Role   `json:"role"`
-	Content          string `json:"content,omitempty"`
-	ReasoningContent string `json:"reasoning_content,omitempty"` // assistant: thinking-mode chain-of-thought, round-tripped on multi-turn
+	Role             Role     `json:"role"`
+	Content          string   `json:"content,omitempty"`
+	Images           []string `json:"images,omitempty"`            // data URLs (data:<mime>;base64,…); embedded only for vision-capable models
+	ReasoningContent string   `json:"reasoning_content,omitempty"` // assistant: thinking-mode chain-of-thought, round-tripped on multi-turn
 	// ReasoningSignature is an opaque, provider-issued proof that ReasoningContent
 	// is genuine model output. Anthropic requires the signed thinking block be
 	// replayed on the next turn when a tool call followed thinking; providers
@@ -37,11 +43,33 @@ type Message struct {
 	Name               string     `json:"name,omitempty"`         // tool message: tool name
 }
 
+// ParseImageDataURL splits a `data:<media-type>;base64,<payload>` URL into its
+// media type and base64 payload. ok is false for anything that isn't a base64
+// data URL — providers that need the split (Anthropic) skip those silently.
+func ParseImageDataURL(dataURL string) (mediaType, base64Data string, ok bool) {
+	rest, found := strings.CutPrefix(dataURL, "data:")
+	if !found {
+		return "", "", false
+	}
+	meta, payload, found := strings.Cut(rest, ",")
+	if !found {
+		return "", "", false
+	}
+	mt, found := strings.CutSuffix(meta, ";base64")
+	if !found || mt == "" {
+		return "", "", false
+	}
+	return mt, payload, true
+}
+
 // ToolCall is a tool invocation requested by the model. Arguments is raw JSON.
 type ToolCall struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
+	Diff      string `json:"diff,omitempty"`
+	Added     int    `json:"added,omitempty"`
+	Removed   int    `json:"removed,omitempty"`
 }
 
 // ToolSchema is a tool definition exposed to the model. Parameters is JSON Schema.
@@ -57,6 +85,176 @@ type Request struct {
 	Tools       []ToolSchema
 	Temperature float64
 	MaxTokens   int
+}
+
+// interruptedToolResult stands in for a tool result that never landed — an
+// assistant tool_calls turn whose execution was cut short (interrupt, crash) and
+// later resumed. Sending such a turn unanswered trips the OpenAI/DeepSeek 400
+// "An assistant message with 'tool_calls' must be followed by tool messages
+// responding to each 'tool_call_id'".
+const interruptedToolResult = "[no result: the previous turn was interrupted before this tool call completed]"
+
+// SanitizeToolPairing repairs a history so it satisfies the tool-call contract the
+// OpenAI-compatible and Anthropic APIs enforce: every assistant tool_calls entry
+// must be answered by a following tool message for its id, and a tool message must
+// follow such a call. It backfills a placeholder result for any unanswered call
+// (so the turn stays intact), drops orphan tool messages, and closes truncated
+// call-argument JSON (DeepSeek 400s on replayed half-streamed args, #3953).
+// Well-formed histories pass through unchanged (results stay in call order).
+// Callers send the result; the stored session keeps the original.
+func SanitizeToolPairing(msgs []Message) []Message {
+	out := make([]Message, 0, len(msgs))
+	for i := 0; i < len(msgs); {
+		m := msgs[i]
+		if m.Role == RoleAssistant && len(m.ToolCalls) > 0 {
+			j := i + 1
+			for j < len(msgs) && msgs[j].Role == RoleTool {
+				j++
+			}
+			out = append(out, repairToolCallArgs(m))
+			out = append(out, pairToolResults(m.ToolCalls, msgs[i+1:j])...)
+			i = j // tool messages consumed here; any non-matching ones are orphans, dropped
+			continue
+		}
+		if m.Role == RoleTool {
+			i++ // orphan tool message (no preceding assistant tool_calls) — drop
+			continue
+		}
+		out = append(out, m)
+		i++
+	}
+	return out
+}
+
+// repairToolCallArgs returns m with any undecodable tool-call Arguments closed
+// into valid JSON (copy-on-write; the caller's history is never mutated). Empty
+// arguments pass through — some gateways send "" for no-arg tools.
+func repairToolCallArgs(m Message) Message {
+	broken := false
+	for _, tc := range m.ToolCalls {
+		if tc.Arguments != "" && !json.Valid([]byte(tc.Arguments)) {
+			broken = true
+			break
+		}
+	}
+	if !broken {
+		return m
+	}
+	calls := make([]ToolCall, len(m.ToolCalls))
+	copy(calls, m.ToolCalls)
+	for i := range calls {
+		if calls[i].Arguments == "" || json.Valid([]byte(calls[i].Arguments)) {
+			continue
+		}
+		calls[i].Arguments = closeTruncatedJSON(calls[i].Arguments)
+	}
+	m.ToolCalls = calls
+	return m
+}
+
+// closeTruncatedJSON best-effort completes a JSON document cut off mid-stream
+// (unterminated string, open braces, dangling comma/colon); anything still
+// invalid after closing degrades to "{}".
+func closeTruncatedJSON(s string) string {
+	var stack []byte
+	inStr, esc := false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inStr {
+			switch {
+			case esc:
+				esc = false
+			case c == '\\':
+				esc = true
+			case c == '"':
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = true
+		case '{':
+			stack = append(stack, '}')
+		case '[':
+			stack = append(stack, ']')
+		case '}', ']':
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	out := s
+	if esc {
+		out = out[:len(out)-1]
+	}
+	if inStr {
+		out += `"`
+	}
+	trimmed := strings.TrimRight(out, " \t\r\n")
+	switch {
+	case strings.HasSuffix(trimmed, ","):
+		out = trimmed[:len(trimmed)-1]
+	case strings.HasSuffix(trimmed, ":"):
+		out = trimmed + "null"
+	}
+	for i := len(stack) - 1; i >= 0; i-- {
+		out += string(stack[i])
+	}
+	if !json.Valid([]byte(out)) {
+		return "{}"
+	}
+	return out
+}
+
+// pairToolResults answers each tool_call with its result, backfilling a
+// placeholder for any unanswered one. Distinct non-empty ids pair by id (so
+// reordered results re-sort to call order); empty or duplicate ids pair by
+// position instead — some gateways stream tool calls by index with no id, and a
+// map keyed on id would collapse those results into one (call order is preserved
+// because the loop appends results in call order).
+func pairToolResults(calls []ToolCall, avail []Message) []Message {
+	out := make([]Message, 0, len(calls))
+	if idDistinct(calls) {
+		byID := make(map[string]Message, len(avail))
+		for _, r := range avail {
+			byID[r.ToolCallID] = r
+		}
+		for _, tc := range calls {
+			if r, ok := byID[tc.ID]; ok {
+				out = append(out, r)
+			} else {
+				out = append(out, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tc.Name, Content: interruptedToolResult})
+			}
+		}
+		return out
+	}
+	for k, tc := range calls {
+		if k < len(avail) {
+			r := avail[k]
+			r.ToolCallID = tc.ID
+			out = append(out, r)
+		} else {
+			out = append(out, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tc.Name, Content: interruptedToolResult})
+		}
+	}
+	return out
+}
+
+// idDistinct reports whether every call carries a non-empty id unique within the
+// batch — the condition under which id-keyed pairing is safe.
+func idDistinct(calls []ToolCall) bool {
+	seen := make(map[string]struct{}, len(calls))
+	for _, tc := range calls {
+		if tc.ID == "" {
+			return false
+		}
+		if _, dup := seen[tc.ID]; dup {
+			return false
+		}
+		seen[tc.ID] = struct{}{}
+	}
+	return true
 }
 
 // ChunkType identifies the kind of a streamed increment.
@@ -90,7 +288,7 @@ type Usage struct {
 }
 
 // Pricing is a provider's per-1M-token rates, used to estimate spend. Currency
-// is just a display symbol (default "¥"). toml tags let config decode it.
+// is a display symbol or ISO-like code (default "¥"). toml tags let config decode it.
 type Pricing struct {
 	CacheHit float64 `toml:"cache_hit"` // per 1M cached prompt tokens
 	Input    float64 `toml:"input"`     // per 1M uncached prompt tokens
@@ -103,8 +301,15 @@ func (p *Pricing) Cost(u *Usage) float64 {
 	if p == nil || u == nil {
 		return 0
 	}
-	return (float64(u.CacheHitTokens)*p.CacheHit +
-		float64(u.CacheMissTokens)*p.Input +
+	hit := u.CacheHitTokens
+	miss := u.CacheMissTokens
+	if hit+miss == 0 && u.PromptTokens > 0 {
+		miss = u.PromptTokens
+	} else if miss == 0 && hit > 0 && u.PromptTokens > hit {
+		miss = u.PromptTokens - hit
+	}
+	return (float64(hit)*p.CacheHit +
+		float64(miss)*p.Input +
 		float64(u.CompletionTokens)*p.Output) / 1e6
 }
 
@@ -113,7 +318,54 @@ func (p *Pricing) Symbol() string {
 	if p == nil || p.Currency == "" {
 		return "¥"
 	}
-	return p.Currency
+	return currencySymbol(p.Currency)
+}
+
+func currencySymbol(currency string) string {
+	value := strings.TrimSpace(currency)
+	if value == "" {
+		return "¥"
+	}
+	switch strings.ToLower(value) {
+	case "cny", "rmb", "yuan", "renminbi", "cnh":
+		return "¥"
+	case "usd", "dollar", "dollars", "us dollar", "us dollars", "us$":
+		return "$"
+	case "eur", "euro", "euros":
+		return "€"
+	case "gbp", "pound", "pounds", "sterling":
+		return "£"
+	case "jpy", "yen":
+		return "¥"
+	}
+	switch value {
+	case "￥", "¥":
+		return "¥"
+	case "$", "€", "£":
+		return value
+	}
+	// any embedded currency sign → keep as-is (compact symbols like A$, HK$).
+	for _, r := range value {
+		if unicode.Is(unicode.Sc, r) {
+			return value
+		}
+	}
+	if isThreeLetterCurrencyCode(value) {
+		return strings.ToUpper(value) + " "
+	}
+	return "¥"
+}
+
+func isThreeLetterCurrencyCode(value string) bool {
+	if len(value) != 3 {
+		return false
+	}
+	for _, r := range value {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') {
+			return false
+		}
+	}
+	return true
 }
 
 // Chunk is a single streamed event. Read the field matching Type.
@@ -124,6 +376,33 @@ type Chunk struct {
 	ToolCall  *ToolCall // ChunkToolCallStart (ID+Name only), ChunkToolCall (complete)
 	Usage     *Usage    // ChunkUsage
 	Err       error     // ChunkError
+}
+
+// StreamInterruptedError marks a recoverable transport cut that happened after
+// the caller had already received model output. Providers must not replay these
+// requests themselves because doing so could duplicate visible text or tool
+// calls; the agent can append a tail recovery prompt instead.
+type StreamInterruptedError struct {
+	Err error
+}
+
+func (e *StreamInterruptedError) Error() string {
+	if e == nil || e.Err == nil {
+		return "stream interrupted"
+	}
+	return e.Err.Error()
+}
+
+func (e *StreamInterruptedError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func IsStreamInterrupted(err error) bool {
+	var interrupted *StreamInterruptedError
+	return errors.As(err, &interrupted)
 }
 
 // Provider is a chat-capable model backend.
@@ -154,6 +433,7 @@ type AuthError struct {
 	Provider string // the provider instance name, e.g. "deepseek"
 	KeyEnv   string // the api_key_env the key is read from, when known
 	Status   int    // the HTTP status (401 or 403)
+	HasKey   bool   // a non-empty key was sent — the server rejected it, vs. no key configured at all
 }
 
 func (e *AuthError) Error() string {
@@ -185,7 +465,14 @@ func New(kind string, cfg Config) (Provider, error) {
 	if !ok {
 		return nil, fmt.Errorf("provider: unknown kind %q (registered: %v)", kind, Kinds())
 	}
-	return f(cfg)
+	p, err := f(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if nilutil.IsNil(p) {
+		return nil, fmt.Errorf("provider: factory %q returned nil provider", kind)
+	}
+	return p, nil
 }
 
 // Kinds returns the registered kinds, sorted.

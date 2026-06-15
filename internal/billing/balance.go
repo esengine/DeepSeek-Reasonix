@@ -50,8 +50,17 @@ var httpClient = &http.Client{Timeout: 12 * time.Second}
 // configured", not an error — so callers can treat both the same and just omit
 // the readout.
 func Fetch(ctx context.Context, url, apiKey string) (*Balance, error) {
+	return FetchWithClient(ctx, httpClient, url, apiKey)
+}
+
+// FetchWithClient queries the balance endpoint using the caller-provided client.
+// A nil client falls back to the package default.
+func FetchWithClient(ctx context.Context, client *http.Client, url, apiKey string) (*Balance, error) {
 	if strings.TrimSpace(url) == "" {
 		return nil, nil
+	}
+	if client == nil {
+		client = httpClient
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -61,7 +70,7 @@ func Fetch(ctx context.Context, url, apiKey string) (*Balance, error) {
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
-	resp, err := httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

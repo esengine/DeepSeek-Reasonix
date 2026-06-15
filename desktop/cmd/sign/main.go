@@ -35,7 +35,7 @@ import (
 // platforms are the manifest keys we publish. A built artifact is matched to a key
 // by substring (file names embed the key, e.g. Reasonix-darwin-arm64.zip), so the
 // generator and the updater agree on update.PlatformKey output.
-var platforms = []string{"darwin-arm64", "darwin-amd64", "windows-amd64", "linux-amd64"}
+var platforms = []string{"darwin-arm64", "darwin-amd64", "windows-amd64", "windows-arm64", "linux-amd64"}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -207,6 +207,16 @@ func genManifest(dir, version, tag string) error {
 
 // matchPlatform returns the platform key embedded in a file name, or "" if none.
 func matchPlatform(name string) string {
+	// The .deb is a human-download package (like the macOS .dmg); the Linux updater
+	// channel is the .tar.gz. Skip it so it doesn't shadow the tarball's linux-amd64 key.
+	if strings.HasSuffix(name, ".deb") {
+		return ""
+	}
+	// The Windows updater channel is the per-arch -installer.exe; the portable .zip
+	// is a human download, so skip it or it would shadow the installer's key.
+	if strings.Contains(name, "windows-") && !strings.HasSuffix(name, "-installer.exe") {
+		return ""
+	}
 	for _, p := range platforms {
 		if strings.Contains(name, p) {
 			return p

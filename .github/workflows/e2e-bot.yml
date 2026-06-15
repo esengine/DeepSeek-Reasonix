@@ -1,0 +1,160 @@
+name: e2e-bot
+
+# Comment "/e2e" (fixed suite) or "/e2e diff" (generate tests for the PR's diff)
+# on a pull request to run the e2e benchmark against the real provider and post a
+# report back. Gated to trusted authors: the job checks out PR-head code and runs
+# it with the provider API key, so only the repo owner, members, and collaborators
+# may trigger it.
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: e2e-bot-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    if: >-
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/e2e') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    # Running PR-head code with the provider secret is gated twice: the author_
+    # association check above, and this deployment environment. Configure the
+    # `e2e-bot` environment with required reviewers in repo settings to force a
+    # human approval per run (actions/untrusted-checkout-toctou).
+    environment: e2e-bot
+    steps:
+      - name: Acknowledge
+        uses: actions/github-script@v9
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              comment_id: context.payload.comment.id, content: 'eyes',
+            });
+
+      # Default-branch checkout: this is where the harness (cmd/e2ebench), the
+      # suite, and a run --metrics-capable agent live.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Build harness + fallback agent from the default branch
+        # Harness (e2ebench) and suite always come from main-v2 so a PR can't weaken
+        # its own grader or tests. The agent is rebuilt from the PR head below; this
+        # main-v2 build is only the fallback for heads that predate `run --metrics`.
+        run: |
+          go build -o "$RUNNER_TEMP/reasonix-base" ./cmd/reasonix
+          go build -o "$RUNNER_TEMP/e2ebench" ./cmd/e2ebench
+          cp -r benchmarks/e2e "$RUNNER_TEMP/suite"
+
+      - name: Check out the PR head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Pin to the head commit resolved now and check it out detached, not the
+        # mutable PR ref: a force-push mid-run can't swap in different code after
+        # the trusted-author gate passed.
+        run: |
+          SHA=$(gh pr view ${{ github.event.issue.number }} --json headRefOid -q .headRefOid)
+          git fetch -q origin "$SHA"
+          git checkout -q --detach "$SHA"
+
+      - name: Build the agent from the PR head
+        # The whole point of the bot is to drive the PR's code, not main-v2's. Fall
+        # back to the main-v2 build only when the PR head can't yield a
+        # run --metrics-capable binary (build break or predates the flag).
+        id: agent
+        run: |
+          bin="$RUNNER_TEMP/reasonix-base"
+          src="main-v2 fallback (PR head lacks run --metrics)"
+          if go build -o "$RUNNER_TEMP/reasonix-pr" ./cmd/reasonix \
+            && "$RUNNER_TEMP/reasonix-pr" run -h 2>&1 | grep -q -- '-metrics'; then
+            bin="$RUNNER_TEMP/reasonix-pr"
+            src="PR head ($(git rev-parse --short HEAD))"
+          fi
+          echo "bin=$bin" >> "$GITHUB_OUTPUT"
+          echo "src=$src" >> "$GITHUB_OUTPUT"
+          echo "agent under test: $src"
+
+      - name: Write provider config
+        # User config covers suite tasks (they run in temp dirs); the repo-root copy
+        # covers diff mode (the agent runs in the repo root, where project config wins).
+        run: |
+          mkdir -p ~/.config/reasonix
+          cat > /tmp/reasonix-e2e.toml <<EOF
+          default_model = "e2e"
+
+          [[providers]]
+          name = "e2e"
+          kind = "openai"
+          base_url = "${{ vars.REASONIX_E2E_BASE_URL || 'https://api.deepseek.com' }}"
+          model = "${{ vars.REASONIX_E2E_MODEL || 'deepseek-v4-flash' }}"
+          api_key_env = "DEEPSEEK_API_KEY"
+          context_window = 20000   # small so the suite actually exercises compaction + cache churn
+
+          [providers.price]
+          cache_hit = ${{ vars.REASONIX_E2E_PRICE_CACHE_HIT || '0.02' }}
+          input = ${{ vars.REASONIX_E2E_PRICE_INPUT || '1' }}
+          output = ${{ vars.REASONIX_E2E_PRICE_OUTPUT || '2' }}
+          currency = "${{ vars.REASONIX_E2E_PRICE_CURRENCY || '¥' }}"
+
+          [permissions]
+          mode = "allow"
+
+          [codegraph]
+          enabled = false
+          EOF
+          cp /tmp/reasonix-e2e.toml ~/.config/reasonix/config.toml
+          cp /tmp/reasonix-e2e.toml ./reasonix.toml
+
+      - name: Run e2e
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          if [ -z "$DEEPSEEK_API_KEY" ]; then
+            printf 'missing DEEPSEEK_API_KEY secret\n\nAdd a repository secret named DEEPSEEK_API_KEY to enable the e2e bot.\n' > report.md
+            exit 0
+          fi
+          if printf '%s' "$COMMENT_BODY" | grep -q '/e2e[[:space:]]\+diff'; then
+            ATTEMPTS=$(printf '%s' "$COMMENT_BODY" | sed -nE 's@.*/e2e[[:space:]]+diff[[:space:]]+x([0-9]+).*@\1@p' | head -1)
+            [ -z "$ATTEMPTS" ] && ATTEMPTS=1
+            [ "$ATTEMPTS" -gt 5 ] && ATTEMPTS=5
+            BASE_REF=$(gh pr view ${{ github.event.issue.number }} --json baseRefName -q .baseRefName)
+            git fetch -q origin "$BASE_REF"
+            BASE=$(git merge-base "origin/$BASE_REF" HEAD)
+            "$RUNNER_TEMP/e2ebench" -mode diff -bin "${{ steps.agent.outputs.bin }}" -repo . -base "$BASE" -model e2e -attempts "$ATTEMPTS" -out report.md
+          else
+            "$RUNNER_TEMP/e2ebench" -bin "${{ steps.agent.outputs.bin }}" -suite "$RUNNER_TEMP/suite" -model e2e -out report.md -json report.json -budget 400000
+          fi
+
+      - name: Post report
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TRIGGER_USER: ${{ github.event.comment.user.login }}
+        run: |
+          printf '\n> agent: %s · triggered by @%s\n' "${{ steps.agent.outputs.src }}" "$TRIGGER_USER" >> report.md
+          gh pr comment ${{ github.event.issue.number }} --body-file report.md
+
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr comment ${{ github.event.issue.number }} --body "🤖 e2e bot failed — see the [run log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."

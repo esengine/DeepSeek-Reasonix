@@ -1,0 +1,3 @@
+prompt = "Begin by reading the file story/chapter-1.md. Each chapter ends by telling you which chapter to read next; follow that trail one chapter at a time — read a chapter, find where it points you, then read that next chapter — until a chapter says the trail ends. You cannot know the next chapter without reading the current one, so do not guess or read ahead. In chapter 1 a river village is named; in the final chapter on the trail a noble House is named. When the trail ends, write a file answer.txt whose entire contents are the village name from chapter 1, a single hyphen, and the House name from the final chapter — for example Riverton-Stark — and nothing else."
+max_steps = 40
+timeout_sec = 900

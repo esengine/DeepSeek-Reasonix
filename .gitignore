@@ -2,8 +2,14 @@
 /bin/
 /dist/
 /stage/
+/npm/.stage/
 /reasonix
 /reasonix.exe
+
+# Website (Astro) build output
+/site/dist/
+/site/.astro/
+/site/_preview.png
 
 # Go test/build scratch
 *.test
@@ -16,9 +22,11 @@ mem.prof
 # Wails desktop artifacts
 /desktop/build/*
 !/desktop/build/appicon.png
+!/desktop/build/appicon.svg
 /desktop/desktop
 /desktop/frontend/dist/*
 !/desktop/frontend/dist/.gitkeep
+/desktop/frontend/sourcemaps/
 /desktop/frontend/wailsjs/
 /desktop/frontend/package.json.md5
 
@@ -48,3 +56,6 @@ node_modules/
 Thumbs.db
 .idea/
 .vscode/
+/site/public/av/
+
+benchmarks/context-maintenance-e2e/run/

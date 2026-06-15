@@ -22,10 +22,22 @@ func wrapTranscript(s string, width int) string {
 	return lipgloss.NewStyle().Width(width).Render(s)
 }
 
-// copyToClipboard writes text to the system clipboard off the event loop.
+// clipboardWriteAll is the platform clipboard writer; a var so tests can force
+// the failure path (the tmux / SSH scenario) without a real display server.
+var clipboardWriteAll = clipboard.WriteAll
+
+// copyToClipboard writes text to the system clipboard. It first tries the
+// platform tool (xclip / xsel / wl-copy / pbcopy) via atotto; when that fails —
+// typically inside tmux or over SSH where the display server is unreachable — it
+// falls back to OSC 52, which tmux and modern terminals forward to the host
+// clipboard. tea.SetClipboard's command is *run* here so the message it yields
+// (handled by the runtime) reaches the event loop; returning the command itself
+// would be dropped as an unrecognized message and emit nothing.
 func copyToClipboard(text string) tea.Cmd {
 	return func() tea.Msg {
-		_ = clipboard.WriteAll(text)
+		if err := clipboardWriteAll(text); err != nil {
+			return tea.SetClipboard(text)()
+		}
 		return nil
 	}
 }
@@ -74,8 +86,8 @@ func (s selection) empty() bool { return s.anchor == s.head }
 
 var (
 	selStyle         = lipgloss.NewStyle().Reverse(true)
-	scrollThumbStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("173"))
-	scrollTrackStyle = lipgloss.NewStyle().Faint(true)
+	scrollThumbStyle lipgloss.Style
+	scrollTrackStyle lipgloss.Style
 )
 
 // renderTranscript draws the viewport's visible window with a scrollbar in the

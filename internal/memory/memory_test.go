@@ -138,3 +138,42 @@ func mustWrite(t *testing.T, path, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestImportDiamondAndCycle(t *testing.T) {
+	proj := t.TempDir()
+	mustMkdir(t, filepath.Join(proj, ".git"))
+
+	mustWrite(t, filepath.Join(proj, "shared.md"), "SHARED CONTENT")
+	mustWrite(t, filepath.Join(proj, "a.md"), "A\n@shared.md")
+	mustWrite(t, filepath.Join(proj, "b.md"), "B\n@shared.md")
+	mustWrite(t, filepath.Join(proj, "REASONIX.md"), "@a.md\n@b.md")
+
+	set := Load(Options{CWD: proj})
+	if len(set.Docs) != 1 {
+		t.Fatalf("want 1 doc, got %d", len(set.Docs))
+	}
+	body := set.Docs[0].Body
+
+	count := strings.Count(body, "SHARED CONTENT")
+	if count != 2 {
+		t.Errorf("expected 'SHARED CONTENT' to appear twice, got %d times. Body:\n%s", count, body)
+	}
+	if strings.Contains(body, "skipped: import cycle") {
+		t.Errorf("body contains incorrect import cycle message:\n%s", body)
+	}
+
+	projCycle := t.TempDir()
+	mustMkdir(t, filepath.Join(projCycle, ".git"))
+	mustWrite(t, filepath.Join(projCycle, "cycle1.md"), "CYCLE1\n@cycle2.md")
+	mustWrite(t, filepath.Join(projCycle, "cycle2.md"), "CYCLE2\n@cycle1.md")
+	mustWrite(t, filepath.Join(projCycle, "REASONIX.md"), "@cycle1.md")
+
+	setCycle := Load(Options{CWD: projCycle})
+	if len(setCycle.Docs) != 1 {
+		t.Fatalf("want 1 doc, got %d", len(setCycle.Docs))
+	}
+	bodyCycle := setCycle.Docs[0].Body
+	if !strings.Contains(bodyCycle, "skipped: import cycle") {
+		t.Errorf("expected import cycle to be detected and reported. Body:\n%s", bodyCycle)
+	}
+}

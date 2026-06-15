@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reasonix — DeepSeek-native coding agent for your terminal</title>
+<meta name="description" content="Open-source AI coding agent for your terminal, engineered around DeepSeek's byte-stable prefix cache. Long sessions hold 90%+ cache hit and input-token cost collapses to ~1/5. A single Go binary. npm · Homebrew · desktop. MIT." />
+<link rel="canonical" href="https://esengine.github.io/DeepSeek-Reasonix/" />
+<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<meta property="og:title" content="Reasonix — DeepSeek-native coding agent" />
+<meta property="og:description" content="Cache-first AI coding agent for your terminal. A single Go binary. npm · Homebrew · desktop. MIT." />
+<meta property="og:url" content="https://esengine.github.io/DeepSeek-Reasonix/" />
+<style>
+  :root{
+    --bg:#f7f6f3; --paper:#fdfdfc; --ink:#16171a; --body:#3c3e44; --muted:#74777e; --faint:#9b9ea5;
+    --line:#e7e5df; --line-2:#dcd9d1; --accent:#2f5bd6; --code-bg:#17181c; --code-fg:#d7dae1;
+    --maxw:1060px; --radius:12px;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+    --serif:"Iowan Old Style","Palatino Linotype",Georgia,"Songti SC",serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--body);font-family:var(--sans);font-size:17px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  ::selection{background:#dfe6fb}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 28px}
+
+  nav{position:sticky;top:0;z-index:40;background:rgba(247,246,243,.82);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .nav{display:flex;align-items:center;justify-content:space-between;height:64px}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:600;font-size:17px;letter-spacing:-.02em;color:var(--ink)}
+  .brand .mk{width:22px;height:22px;border-radius:6px;background:var(--ink);color:#fff;display:grid;place-items:center;font-size:13px;font-weight:700}
+  .nav-links{display:flex;gap:30px}
+  .nav-links a{color:var(--muted);font-size:15px;transition:color .15s}
+  .nav-links a:hover{color:var(--ink)}
+  .nav-right{display:flex;align-items:center;gap:18px}
+  .lang{font-family:var(--mono);font-size:13px;color:var(--muted);background:none;border:none;cursor:pointer;padding:4px}
+  .lang:hover{color:var(--ink)}
+  @media(max-width:720px){.nav-links{display:none}}
+
+  .btn{display:inline-flex;align-items:center;gap:8px;font-weight:500;font-size:15px;padding:11px 20px;border-radius:9px;transition:.16s;cursor:pointer;border:1px solid transparent;white-space:nowrap}
+  .btn-dark{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .btn-dark:hover{background:#000}
+  .btn-line{background:transparent;color:var(--ink);border-color:var(--line-2)}
+  .btn-line:hover{border-color:var(--ink)}
+
+  /* hero */
+  .hero{text-align:center;padding:104px 0 0}
+  .kicker{font-family:var(--mono);font-size:13px;letter-spacing:.04em;color:var(--muted);margin-bottom:30px}
+  .kicker .b{color:var(--ink)}
+  h1{font-size:clamp(40px,6.4vw,74px);line-height:1.05;letter-spacing:-.04em;font-weight:600;color:var(--ink);margin:0 auto 26px;max-width:14ch}
+  h1 em{font-style:italic;font-family:var(--serif);font-weight:500;color:var(--accent)}
+  .lede{max-width:600px;margin:0 auto 40px;color:var(--muted);font-size:clamp(17px,2.1vw,20px);line-height:1.6}
+  .lede b{color:var(--ink);font-weight:500}
+  .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .install{display:inline-flex;align-items:center;gap:16px;margin:34px auto 0;font-family:var(--mono);font-size:15px;color:var(--ink);
+    background:var(--paper);border:1px solid var(--line-2);border-radius:10px;padding:13px 12px 13px 18px}
+  .install .p{color:var(--faint)}
+  .cp{cursor:pointer;background:var(--bg);border:1px solid var(--line-2);border-radius:7px;color:var(--muted);font-family:var(--mono);font-size:12px;padding:6px 11px;transition:.15s}
+  .cp:hover{color:var(--ink);border-color:var(--line-2)}
+  .cp.ok{color:#1a8f5a;border-color:#bfe3cd}
+
+  /* terminal */
+  .term{max-width:720px;margin:72px auto 0;text-align:left;background:var(--code-bg);border-radius:14px;overflow:hidden;
+    box-shadow:0 1px 0 rgba(0,0,0,.04),0 26px 60px -32px rgba(20,22,40,.5)}
+  .tbar{display:flex;align-items:center;gap:7px;padding:13px 16px;border-bottom:1px solid rgba(255,255,255,.07)}
+  .tbar i{width:11px;height:11px;border-radius:50%;background:#3a3d46;display:inline-block}
+  .tbar span{margin-left:10px;font-family:var(--mono);font-size:12px;color:#71757f}
+  .tbody{padding:20px 22px;font-family:var(--mono);font-size:13px;line-height:1.95;color:var(--code-fg);white-space:pre}
+  .tbody .u{color:#6f9bff}.tbody .i{color:#8fb4ff}.tbody .d{color:#6a6e78}
+  .tbody .k{color:#8fd6b0}.tbody .e{color:#c7a3f0}.tbody .c{color:#5a5e68}
+  @media(max-width:560px){.tbody{font-size:11.5px}}
+
+  /* sections */
+  section{padding:108px 0}
+  .lab{font-family:var(--mono);font-size:13px;letter-spacing:.04em;color:var(--accent);margin-bottom:16px}
+  h2{font-size:clamp(28px,4vw,42px);line-height:1.12;letter-spacing:-.03em;font-weight:600;color:var(--ink);margin:0 0 16px;max-width:18ch}
+  .sub{color:var(--muted);font-size:18px;max-width:560px;margin:0}
+  .head{margin-bottom:48px}
+
+  /* install tabs */
+  .tabs{display:flex;gap:24px;border-bottom:1px solid var(--line);margin-bottom:0}
+  .tab{font-size:15px;font-weight:500;color:var(--muted);background:none;border:none;border-bottom:2px solid transparent;padding:0 0 14px;cursor:pointer;transition:.15s;margin-bottom:-1px}
+  .tab.on{color:var(--ink);border-bottom-color:var(--ink)}
+  .tab:hover{color:var(--ink)}
+  .panel{display:none}.panel.on{display:block}
+  .block{position:relative;background:var(--code-bg);border-radius:12px;margin-top:24px;overflow:hidden}
+  .block pre{margin:0;padding:24px 26px;font-family:var(--mono);font-size:14px;line-height:2.1;color:var(--code-fg);white-space:pre-wrap;overflow-x:auto}
+  .block .p{color:#6f9bff}.block .c{color:#6a6e78}
+  .block .cp{position:absolute;top:14px;right:14px;background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.12);color:#aeb2bc}
+  .block .cp:hover{color:#fff}
+  .undertext{margin-top:16px;color:var(--muted);font-size:15px}
+  .undertext code{font-family:var(--mono);font-size:13px;background:var(--paper);border:1px solid var(--line);padding:1px 6px;border-radius:5px;color:var(--ink)}
+  .undertext a{color:var(--accent)}
+
+  .dls{margin-top:24px;border-top:1px solid var(--line)}
+  .dl{display:flex;align-items:center;gap:18px;padding:18px 6px;border-bottom:1px solid var(--line);transition:.15s}
+  .dl:hover{background:var(--paper)}
+  .dl .os{font-weight:600;color:var(--ink);min-width:84px;font-size:15.5px}
+  .dl .fn{font-family:var(--mono);font-size:13.5px;color:var(--body);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dl .ar{font-size:13px;color:var(--faint);white-space:nowrap}
+  .dl .go{color:var(--accent);font-family:var(--mono);font-size:14px}
+  @media(max-width:600px){.dl .ar{display:none}.dl .fn{font-size:12px}}
+
+  /* features */
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--line)}
+  @media(max-width:820px){.grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:540px){.grid{grid-template-columns:1fr}}
+  .feat{padding:34px 30px 34px 0;border-bottom:1px solid var(--line)}
+  .feat .n{font-family:var(--mono);font-size:12.5px;color:var(--faint);margin-bottom:14px}
+  .feat h3{font-size:18px;font-weight:600;color:var(--ink);margin:0 0 8px;letter-spacing:-.01em}
+  .feat p{margin:0;color:var(--muted);font-size:15px;line-height:1.6}
+  .feat code{font-family:var(--mono);font-size:12.5px;color:var(--ink)}
+
+  /* stats */
+  .why{display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:center}
+  @media(max-width:760px){.why{grid-template-columns:1fr;gap:40px}}
+  .nums{display:flex;flex-direction:column;gap:28px}
+  .num{display:flex;align-items:baseline;gap:18px;border-top:1px solid var(--line);padding-top:22px}
+  .num .v{font-size:40px;font-weight:600;letter-spacing:-.03em;color:var(--ink);min-width:120px}
+  .num .l{color:var(--muted);font-size:15px}
+
+  footer{border-top:1px solid var(--line);padding:44px 0}
+  .foot{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;color:var(--faint);font-size:14.5px}
+  .foot a{color:var(--muted)}.foot a:hover{color:var(--ink)}
+  .foot-links{display:flex;gap:26px;flex-wrap:wrap}
+
+  [data-zh]{display:none}
+  html[lang="zh"] [data-en]{display:none}
+  html[lang="zh"] [data-zh]{display:inline}
+  html[lang="zh"] [data-zh].blk{display:block}
+  html[lang="zh"] h1,html[lang="zh"] h2{letter-spacing:-.02em}
+</style>
+</head>
+<body>
+<nav>
+  <div class="wrap nav">
+    <a class="brand" href="#top"><span class="mk">R</span>Reasonix</a>
+    <div class="nav-links">
+      <a href="#install" data-en>Install</a><a href="#install" data-zh>安装</a>
+      <a href="#features" data-en>Features</a><a href="#features" data-zh>特性</a>
+      <a href="#why" data-en>Why DeepSeek</a><a href="#why" data-zh>为何 DeepSeek</a>
+      <a href="https://github.com/esengine/DeepSeek-Reasonix">GitHub</a>
+    </div>
+    <div class="nav-right">
+      <button class="lang" id="lang">中文</button>
+      <a class="btn btn-dark" href="#install"><span data-en>Get started</span><span data-zh>开始</span></a>
+    </div>
+  </div>
+</nav>
+
+<a id="top"></a>
+<header class="hero wrap">
+  <div class="kicker"><span class="b">v1.0.0</span> · <span data-en>a ground-up rewrite in Go · open source, MIT</span><span data-zh>Go 全新重写 · 开源 MIT</span></div>
+  <h1>
+    <span data-en>A <em>DeepSeek</em>-native agent for your terminal.</span>
+    <span data-zh><em>DeepSeek</em> 原生的终端编码 Agent。</span>
+  </h1>
+  <p class="lede">
+    <span data-en>The loop is append-only, aligned to DeepSeek's byte-stable prefix cache — so long sessions hold <b>90%+ cache hit</b> and input-token cost collapses to <b>~1/5</b>. One Go binary. Terminal-first.</span>
+    <span data-zh>运行循环 append-only,对齐 DeepSeek 字节稳定的 prefix-cache —— 长会话缓存命中 <b>90%+</b>,输入 token 成本降到 <b>约 1/5</b>。单个 Go 二进制,终端优先。</span>
+  </p>
+  <div class="cta">
+    <a class="btn btn-dark" href="#install"><span data-en>Get started</span><span data-zh>开始使用</span></a>
+    <a class="btn btn-line" href="https://github.com/esengine/DeepSeek-Reasonix"><span data-en>View on GitHub</span><span data-zh>在 GitHub 查看</span></a>
+  </div>
+  <div class="install">
+    <span><span class="p">$ </span>npm i -g reasonix</span>
+    <button class="cp" data-copy="npm i -g reasonix"><span data-en>Copy</span><span data-zh>复制</span></button>
+  </div>
+
+  <div class="term">
+    <div class="tbar"><i></i><i></i><i></i><span>~/app — reasonix chat</span></div>
+    <div class="tbody"><span class="u">$</span> reasonix chat
+<span class="i">reasonix v1.0.0 · model deepseek-v4-flash · ~/app</span>
+<span class="d">cache 94.2% hit · session 18m · cost $0.043</span>
+<span class="u">›</span> add retry with backoff to the http client
+<span class="e">edit</span>  internal/net/client.go        <span class="c">+24 −3</span>
+<span class="e">edit</span>  internal/net/client_test.go   <span class="c">+41 −0</span>
+<span class="k">✓</span> go test ./internal/net/   ok  0.21s
+<span class="d">2 files · cache 94.2% → 95.1%</span></div>
+  </div>
+</header>
+
+<section id="install" class="wrap">
+  <div class="head">
+    <div class="lab" data-en>Install</div><div class="lab" data-zh>安装</div>
+    <h2><span data-en>Up and running in one line.</span><span data-zh>一行命令,跑起来。</span></h2>
+    <p class="sub"><span data-en>The npm package pulls the prebuilt native binary for your platform — no Node runtime needed to run it.</span><span data-zh>npm 包自动拉取对应平台的预编译原生二进制 —— 运行时不需要 Node。</span></p>
+  </div>
+  <div class="tabs">
+    <button class="tab on" data-tab="npm">npm</button>
+    <button class="tab" data-tab="brew">Homebrew</button>
+    <button class="tab" data-tab="desk"><span data-en>Desktop</span><span data-zh>桌面端</span></button>
+  </div>
+  <div class="panel on" data-panel="npm">
+    <div class="block"><button class="cp" data-copy="npm i -g reasonix
+reasonix setup
+reasonix chat"><span data-en>Copy</span><span data-zh>复制</span></button><pre><span class="p">$</span> npm i -g reasonix
+<span class="p">$</span> reasonix setup        <span class="c"># config wizard → ./reasonix.toml</span>
+<span class="p">$</span> reasonix chat         <span class="c"># or: reasonix run "implement the TODOs"</span></pre></div>
+    <p class="undertext"><span data-en>Any OS · macOS, Linux, Windows × amd64/arm64. Short alias <code>dsnix</code> too.</span><span data-zh>任意系统 · macOS、Linux、Windows × amd64/arm64。</span></p>
+  </div>
+  <div class="panel" data-panel="brew">
+    <div class="block"><button class="cp" data-copy="brew install esengine/reasonix/reasonix"><span data-en>Copy</span><span data-zh>复制</span></button><pre><span class="p">$</span> brew install esengine/reasonix/reasonix</pre></div>
+    <p class="undertext"><span data-en>macOS. The cask pulls the archive from the latest release.</span><span data-zh>macOS。cask 从最新 release 拉取归档。</span></p>
+  </div>
+  <div class="panel" data-panel="desk">
+    <div class="dls">
+      <a class="dl" href="https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev/latest/Reasonix-darwin-arm64.zip" download>
+        <span class="os">macOS</span><span class="fn">Reasonix-darwin-arm64.zip</span><span class="ar" data-en>universal · Intel + Apple Silicon</span><span class="ar" data-zh>通用 · Intel + Apple Silicon</span><span class="go">↓</span>
+      </a>
+      <a class="dl" href="https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev/latest/Reasonix-windows-amd64-installer.exe" download>
+        <span class="os">Windows</span><span class="fn">Reasonix-windows-amd64-installer.exe</span><span class="ar" data-en>installer · x64</span><span class="ar" data-zh>安装器 · x64</span><span class="go">↓</span>
+      </a>
+      <a class="dl" href="https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev/latest/Reasonix-linux-amd64.tar.gz" download>
+        <span class="os">Linux</span><span class="fn">Reasonix-linux-amd64.tar.gz</span><span class="ar" data-en>x64</span><span class="ar" data-zh>x64</span><span class="go">↓</span>
+      </a>
+    </div>
+    <p class="undertext"><span data-en>Served from the R2 CDN (fast worldwide). Or browse <a href="https://github.com/esengine/DeepSeek-Reasonix/releases/latest">all releases on GitHub</a>.</span><span data-zh>经 R2 CDN 分发(全球加速)。或在 <a href="https://github.com/esengine/DeepSeek-Reasonix/releases/latest">GitHub releases</a> 浏览全部。</span></p>
+  </div>
+</section>
+
+<section id="features" class="wrap">
+  <div class="head">
+    <div class="lab" data-en>Features</div><div class="lab" data-zh>特性</div>
+    <h2><span data-en>Built for long, cheap sessions.</span><span data-zh>为长会话、低成本而生。</span></h2>
+  </div>
+  <div class="grid">
+    <div class="feat"><div class="n">01</div><h3 data-en>Cache-first loop</h3><h3 data-zh>缓存优先循环</h3><p data-en>Append-only history aligned to DeepSeek's prefix cache. 90%+ hit on long sessions; input tokens bill at ~1/5.</p><p data-zh>append-only 历史对齐 DeepSeek prefix-cache。长会话 90%+ 命中,输入 token 约 1/5 计费。</p></div>
+    <div class="feat"><div class="n">02</div><h3 data-en>Single Go binary</h3><h3 data-zh>单个 Go 二进制</h3><p data-en>CGO-free, cross-compiled for darwin/linux/windows × amd64/arm64. No Node runtime.</p><p data-zh>无 CGO,交叉编译覆盖 darwin/linux/windows × amd64/arm64。运行不需要 Node。</p></div>
+    <div class="feat"><div class="n">03</div><h3>MCP first-class</h3><p data-en>stdio, SSE, streamable HTTP. External servers merge their tools into one registry under a prefix.</p><p data-zh>stdio、SSE、streamable HTTP。外部服务器的工具以前缀合并进同一 registry。</p></div>
+    <div class="feat"><div class="n">04</div><h3 data-en>Plan mode + sandbox</h3><h3 data-zh>计划模式 + 沙箱</h3><p data-en>Writers are jailed to the workspace; <code>/plan</code> gates the session read-only until you approve.</p><p data-zh>写工具被关进工作区;<code>/plan</code> 进只读门,批准前不写盘。</p></div>
+    <div class="feat"><div class="n">05</div><h3 data-en>Subagents &amp; skills</h3><h3 data-zh>子智能体与技能</h3><p data-en>explore / research / review / security-review agents, plus Markdown skill scripts with isolated tools.</p><p data-zh>explore / research / review / security-review 子智能体,加 Markdown 技能脚本与隔离工具。</p></div>
+    <div class="feat"><div class="n">06</div><h3 data-en>Terminal-native</h3><h3 data-zh>终端原生</h3><p data-en>Not another IDE plugin. <code>git diff</code> handles diffs, <code>ls</code> handles trees — the terminal is the workspace.</p><p data-zh>不是又一个 IDE 插件。diff 交给 <code>git diff</code> —— 终端就是工作面板。</p></div>
+  </div>
+</section>
+
+<section id="why" class="wrap">
+  <div class="why">
+    <div>
+      <div class="lab" data-en>Why DeepSeek</div><div class="lab" data-zh>为何 DeepSeek</div>
+      <h2><span data-en>The cheapness is the point.</span><span data-zh>便宜,就是核心。</span></h2>
+      <p class="sub"><span data-en>Most agents pay full price for the same growing prompt every turn. Reasonix keeps the prefix byte-identical so DeepSeek's cache does the heavy lifting.</span><span data-zh>多数 agent 每回合都为同一段不断增长的 prompt 付全价。Reasonix 让前缀逐字节稳定,让 DeepSeek 的缓存替你扛下来。</span></p>
+    </div>
+    <div class="nums">
+      <div class="num"><div class="v">90%+</div><div class="l"><span data-en>cache hit on long sessions</span><span data-zh>长会话缓存命中</span></div></div>
+      <div class="num"><div class="v">~1/5</div><div class="l"><span data-en>input-token cost</span><span data-zh>输入 token 成本</span></div></div>
+      <div class="num"><div class="v">0</div><div class="l"><span data-en>Node runtime to run it</span><span data-zh>运行所需 Node</span></div></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot">
+    <div>© 2026 Reasonix · <span data-en>MIT licensed</span><span data-zh>MIT 许可</span></div>
+    <div class="foot-links">
+      <a href="https://github.com/esengine/DeepSeek-Reasonix">GitHub</a>
+      <a href="https://www.npmjs.com/package/reasonix">npm</a>
+      <a href="https://platform.deepseek.com" target="_blank" rel="noreferrer">DeepSeek</a>
+      <a href="https://github.com/esengine/DeepSeek-Reasonix/releases/latest"><span data-en>Releases</span><span data-zh>下载</span></a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  var html=document.documentElement, langBtn=document.getElementById('lang');
+  function setLang(l){html.lang=l;langBtn.textContent=l==='zh'?'EN':'中文';try{localStorage.setItem('rx-lang',l)}catch(e){}}
+  var saved; try{saved=localStorage.getItem('rx-lang')}catch(e){}
+  setLang(saved||((navigator.language||'').toLowerCase().indexOf('zh')===0?'zh':'en'));
+  langBtn.onclick=function(){setLang(html.lang==='zh'?'en':'zh')};
+
+  document.querySelectorAll('.tab').forEach(function(t){
+    t.onclick=function(){
+      document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('on')});
+      document.querySelectorAll('.panel').forEach(function(x){x.classList.remove('on')});
+      t.classList.add('on');
+      document.querySelector('[data-panel="'+t.dataset.tab+'"]').classList.add('on');
+    };
+  });
+
+  document.querySelectorAll('.cp').forEach(function(b){
+    b.onclick=function(){
+      navigator.clipboard.writeText(b.dataset.copy).then(function(){
+        var prev=b.innerHTML; b.classList.add('ok');
+        b.innerHTML='<span data-en>Copied</span><span data-zh>已复制</span>';
+        setTimeout(function(){b.innerHTML=prev;b.classList.remove('ok')},1400);
+      });
+    };
+  });
+</script>
+</body>
+</html>

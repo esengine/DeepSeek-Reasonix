@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -23,7 +24,9 @@ If you need to ask for clarification, fail with a precise question instead of gu
 var subagentMetaTools = []string{
 	"task",
 	"run_skill",
+	"read_skill",
 	"install_skill",
+	"install_source",
 	"explore",
 	"research",
 	"review",
@@ -49,15 +52,26 @@ func SubagentMetaTools() []string {
 // parallel research across independent areas (the parallel-dispatch path picks
 // these up only when readOnly, which task is not).
 type TaskTool struct {
-	prov          provider.Provider
-	pricing       *provider.Pricing
-	parentReg     *tool.Registry
-	maxSteps      int
-	contextWindow int
-	temperature   float64
-	archiveDir    string
-	sysPrompt     string
-	gate          Gate
+	prov              provider.Provider
+	pricing           *provider.Pricing
+	parentReg         *tool.Registry
+	maxSteps          int
+	contextWindow     int
+	softCompactRatio  float64
+	compactRatio      float64
+	compactForceRatio float64
+	temperature       float64
+	archiveDir        string
+	sysPrompt         string
+	gate              Gate
+	subagentModel     string
+	subagentEffort    string
+	resolveProvider   func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error)
+	transcripts       *SubagentStore
+	workspaceRoot     string
+	baseModel         string
+	baseEffort        string
+	identityProfile   func(modelRef, effort string) (string, string)
 }
 
 // NewTaskTool wires a task tool to the parent agent's environment so its
@@ -67,21 +81,44 @@ type TaskTool struct {
 // deny rules still bite while autonomous sub-agents are never blocked on an
 // interactive prompt (there is no UI to answer one).
 func NewTaskTool(prov provider.Provider, pricing *provider.Pricing, parentReg *tool.Registry,
-	maxSteps, contextWindow int, temperature float64, archiveDir, sysPrompt string, gate Gate) *TaskTool {
+	maxSteps, contextWindow int, softCompactRatio, compactRatio, compactForceRatio, temperature float64, archiveDir, sysPrompt string, gate Gate,
+	subagentModel, subagentEffort string, resolveProvider func(string, string) (provider.Provider, *provider.Pricing, int, error)) *TaskTool {
 	if sysPrompt == "" {
 		sysPrompt = DefaultTaskSystemPrompt
 	}
 	return &TaskTool{
-		prov:          prov,
-		pricing:       pricing,
-		parentReg:     parentReg,
-		maxSteps:      maxSteps,
-		contextWindow: contextWindow,
-		temperature:   temperature,
-		archiveDir:    archiveDir,
-		sysPrompt:     sysPrompt,
-		gate:          gate,
+		prov:              prov,
+		pricing:           pricing,
+		parentReg:         parentReg,
+		maxSteps:          maxSteps,
+		contextWindow:     contextWindow,
+		softCompactRatio:  softCompactRatio,
+		compactRatio:      compactRatio,
+		compactForceRatio: compactForceRatio,
+		temperature:       temperature,
+		archiveDir:        archiveDir,
+		sysPrompt:         sysPrompt,
+		gate:              gate,
+		subagentModel:     subagentModel,
+		subagentEffort:    subagentEffort,
+		resolveProvider:   resolveProvider,
 	}
+}
+
+// WithTranscripts enables persisted sub-agent transcript continuation for this
+// task tool. The base model/effort are the parent provider identity used when no
+// subagent override is configured.
+func (t *TaskTool) WithTranscripts(store *SubagentStore, workspaceRoot, baseModel, baseEffort string) *TaskTool {
+	t.transcripts = store
+	t.workspaceRoot = strings.TrimSpace(workspaceRoot)
+	t.baseModel = strings.TrimSpace(baseModel)
+	t.baseEffort = strings.TrimSpace(baseEffort)
+	return t
+}
+
+func (t *TaskTool) WithTranscriptIdentityResolver(resolve func(modelRef, effort string) (string, string)) *TaskTool {
+	t.identityProfile = resolve
+	return t
 }
 
 func (t *TaskTool) Name() string { return "task" }
@@ -98,7 +135,11 @@ func (t *TaskTool) Schema() json.RawMessage {
   "description":{"type":"string","description":"Short label for the sub-task (3-7 words). Surfaced in the dispatch line so the user sees what's running."},
   "tools":{"type":"array","items":{"type":"string"},"description":"Optional tool whitelist. Subagent/skill meta-tools are still excluded so delegation stays one layer deep."},
   "max_steps":{"type":"integer","description":"Optional cap on tool-call rounds. Defaults to half the parent's cap (min 5).","minimum":1},
-  "run_in_background":{"type":"boolean","description":"Run the sub-agent asynchronously: returns a job id immediately and keeps working across turns. Collect its final answer with wait, and you'll be notified when it finishes. Use for long, independent sub-tasks you don't need to block on right now."}
+  "run_in_background":{"type":"boolean","description":"Run the sub-agent asynchronously: returns a job id immediately and keeps working across turns. Collect its final answer with wait, and you'll be notified when it finishes. Use for long, independent sub-tasks you don't need to block on right now."},
+  "model":{"type":"string","description":"Optional model override for the sub-agent (a configured provider/model name)."},
+  "effort":{"type":"string","description":"Optional reasoning effort for the sub-agent (e.g. high, max)."},
+  "continue_from":{"type":"string","description":"Resume a prior subagent run in place: the subagent retains its context from the previous run; use in iterative loops (e.g. review -> fix -> review again) by passing only the 'sa_...' value from the prior result's 'Subagent reference: ...' line. Requires a compatible subagent identity, including tools, model, effort, and workspace."},
+  "fork_from":{"type":"string","description":"Fork a prior subagent run: copies its transcript, leaves the source unchanged, and continues independently. Use only when you need an independent branch; for iterative continuation on the same thread, use continue_from. Pass the 'sa_...' value from the prior result's 'Subagent reference: ...' line. Requires a compatible subagent identity, including tools, model, effort, and workspace. Mutually exclusive with continue_from."}
 },
 "required":["prompt"]
 }`)
@@ -109,6 +150,34 @@ func (t *TaskTool) Schema() json.RawMessage {
 // running two sub-agents at once and letting their writes race.
 func (t *TaskTool) ReadOnly() bool { return false }
 
+// ResolveProfile extracts model/effort from task args and applies config defaults.
+func (t *TaskTool) ResolveProfile(args json.RawMessage) *event.Profile {
+	var p struct {
+		Model  string `json:"model"`
+		Effort string `json:"effort"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil
+	}
+	model, effort := t.effectiveProfile(p.Model, p.Effort)
+	if model == "" && effort == "" {
+		return nil
+	}
+	return &event.Profile{Model: model, Effort: effort}
+}
+
+func (t *TaskTool) effectiveProfile(model, effort string) (string, string) {
+	model = strings.TrimSpace(model)
+	effort = strings.TrimSpace(effort)
+	if model == "" {
+		model = strings.TrimSpace(t.subagentModel)
+	}
+	if effort == "" {
+		effort = strings.TrimSpace(t.subagentEffort)
+	}
+	return model, effort
+}
+
 func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		Prompt          string   `json:"prompt"`
@@ -116,6 +185,10 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		Tools           []string `json:"tools"`
 		MaxSteps        int      `json:"max_steps"`
 		RunInBackground bool     `json:"run_in_background"`
+		Model           string   `json:"model"`
+		Effort          string   `json:"effort"`
+		ContinueFrom    string   `json:"continue_from"`
+		ForkFrom        string   `json:"fork_from"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -140,6 +213,17 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 	}
 
 	subReg := t.buildSubReg(p.Tools)
+	modelRef, effortRef := t.effectiveProfile(p.Model, p.Effort)
+	parentID, parent, _, _ := CallContext(ctx)
+	run, err := t.prepareTranscriptRun(subReg, modelRef, effortRef, ParentSession(ctx), parentID, p.ContinueFrom, p.ForkFrom)
+	if err != nil {
+		return "", err
+	}
+	prov, pricing, ctxWin, err := t.resolveSubSessionRuntime(modelRef, effortRef)
+	if err != nil {
+		run.Release()
+		return "", fmt.Errorf("sub-agent profile: %w", err)
+	}
 
 	// Background: register a job that runs the sub-agent under the manager's
 	// session context (so it survives this turn) and return immediately. The
@@ -148,22 +232,115 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 	if p.RunInBackground {
 		jm, ok := jobs.FromContext(ctx)
 		if !ok {
+			if run != nil {
+				run.Release()
+			}
 			return "", fmt.Errorf("background execution is not available in this context")
 		}
-		parentID, parent, _, _ := CallContext(ctx)
 		nested := subSinkFor(parentID, parent)
 		label := p.Description
 		if label == "" {
 			label = "task"
 		}
-		job := jm.Start("task", label, func(jobCtx context.Context, _ io.Writer) (string, error) {
-			return t.runSub(jobCtx, p.Prompt, subReg, nested, maxSteps)
+		if t.transcripts != nil && run != nil && run.Ref != "" {
+			if err := t.transcripts.MarkRunning(run); err != nil {
+				run.Release()
+				return "", err
+			}
+		}
+		job := jm.StartForSession(jobs.SessionFromContext(ctx), "task", label, func(jobCtx context.Context, _ io.Writer) (string, error) {
+			defer run.Release()
+			answer, err := t.runSubSession(jobCtx, p.Prompt, subReg, nested, maxSteps, prov, pricing, ctxWin, run.Session)
+			if err != nil {
+				return FormatSubagentResult("", run.Ref, true), errors.Join(err, t.transcripts.SaveFailed(run))
+			}
+			if err := t.transcripts.SaveCompleted(run); err != nil {
+				return FormatSubagentResult("", run.Ref, true), errors.Join(err, t.transcripts.SaveFailed(run))
+			}
+			return FormatSubagentResult(answer, run.Ref, false), nil
 		})
+		if run != nil && run.Ref != "" {
+			return fmt.Sprintf("Started background task %q (%s).\nSubagent reference: %s\nIt runs across turns; collect its final answer with wait (or wait will return it once done), and you'll be notified when it finishes.", job.ID, label, run.Ref), nil
+		}
 		return fmt.Sprintf("Started background task %q (%s). It runs across turns; collect its final answer with wait (or wait will return it once done), and you'll be notified when it finishes.", job.ID, label), nil
 	}
 
 	// Foreground: run synchronously, nesting events under this call.
-	return t.runSub(ctx, p.Prompt, subReg, subSink(ctx), maxSteps)
+	defer run.Release()
+	answer, err := t.runSubSession(ctx, p.Prompt, subReg, subSink(ctx), maxSteps, prov, pricing, ctxWin, run.Session)
+	if err != nil {
+		return "", errors.Join(err, t.transcripts.SaveFailed(run))
+	}
+	if t.transcripts != nil && run.Ref != "" {
+		if err := t.transcripts.SaveCompleted(run); err != nil {
+			return "", errors.Join(err, t.transcripts.SaveFailed(run))
+		}
+		return FormatSubagentResult(answer, run.Ref, false), nil
+	}
+	return answer, nil
+}
+
+func (t *TaskTool) prepareTranscriptRun(subReg *tool.Registry, modelRef, effortRef, parentSession, parentID, continueFrom, forkFrom string) (*SubagentRun, error) {
+	continueFrom = strings.TrimSpace(continueFrom)
+	forkFrom = strings.TrimSpace(forkFrom)
+	parentSession = strings.TrimSpace(parentSession)
+	if continueFrom != "" && forkFrom != "" {
+		return nil, fmt.Errorf("continue_from and fork_from are mutually exclusive")
+	}
+	if t.transcripts == nil {
+		return nil, fmt.Errorf("subagent transcript store is required")
+	}
+	// Headless runs (e.g. `reasonix run`) never mint a session path, so there is
+	// no parent session to own a transcript. Run the sub-agent ephemerally —
+	// exactly as before persisted transcripts existed — instead of failing the
+	// call. Continuation/fork need a persisted owner, so they error here.
+	if parentSession == "" {
+		if continueFrom != "" || forkFrom != "" {
+			return nil, fmt.Errorf("continue_from/fork_from require a persisted session; none is active in this run")
+		}
+		return EphemeralSubagentRun(t.sysPrompt), nil
+	}
+	identityModel, identityEffort := t.effectiveIdentity(modelRef, effortRef)
+	spec := SubagentSpec{
+		Kind:             "task",
+		Name:             "task",
+		WorkspaceRoot:    t.workspaceRoot,
+		ParentSession:    parentSession,
+		ParentToolCallID: parentID,
+		SystemPrompt:     t.sysPrompt,
+		Registry:         subReg,
+		Model:            identityModel,
+		Effort:           identityEffort,
+	}
+	if continueFrom != "" || forkFrom != "" {
+		if continueFrom != "" {
+			return t.transcripts.PrepareContinue(continueFrom, spec)
+		}
+		return t.transcripts.PrepareFork(forkFrom, spec)
+	}
+	return t.transcripts.PrepareFresh(spec)
+}
+
+func (t *TaskTool) effectiveIdentity(modelRef, effort string) (string, string) {
+	if t.identityProfile != nil {
+		model, eff := t.identityProfile(modelRef, effort)
+		return strings.TrimSpace(model), strings.TrimSpace(eff)
+	}
+	return t.effectiveModelIdentity(modelRef), t.effectiveEffortIdentity(effort)
+}
+
+func (t *TaskTool) effectiveModelIdentity(modelRef string) string {
+	if strings.TrimSpace(modelRef) != "" {
+		return strings.TrimSpace(modelRef)
+	}
+	return strings.TrimSpace(t.baseModel)
+}
+
+func (t *TaskTool) effectiveEffortIdentity(effort string) string {
+	if strings.TrimSpace(effort) != "" {
+		return strings.TrimSpace(effort)
+	}
+	return strings.TrimSpace(t.baseEffort)
 }
 
 // buildSubReg returns the sub-agent's tool set: the named whitelist (minus
@@ -198,27 +375,96 @@ func FilterRegistry(parent *tool.Registry, names []string, exclude ...string) *t
 	return sub
 }
 
-// runSub builds a sub-agent over subReg, runs prompt to completion emitting to
-// sink, and returns its final assistant answer. Shared by the foreground and
-// background paths.
-func (t *TaskTool) runSub(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int) (string, error) {
-	return RunSubAgent(ctx, t.prov, subReg, t.sysPrompt, prompt, Options{
-		MaxSteps:      maxSteps,
-		Temperature:   t.temperature,
-		Pricing:       t.pricing,
-		Gate:          t.gate,
-		ContextWindow: t.contextWindow,
-		ArchiveDir:    t.archiveDir,
+var plannerNonResearchTools = []string{
+	"ask",
+	"bash_output",
+	"complete_step",
+	"slash_command",
+	"todo_write",
+	"wait",
+}
+
+// PlannerToolRegistry returns the tool set exposed to the two-model planner:
+// read-only research tools only. It deliberately excludes workflow/meta tools
+// that are technically read-only but can prompt the user, update visible task
+// state, wait on jobs, or expand commands instead of inspecting context.
+func PlannerToolRegistry(parent *tool.Registry) *tool.Registry {
+	exclude := append(SubagentMetaTools(), plannerNonResearchTools...)
+	return FilterReadOnlyRegistry(parent, exclude...)
+}
+
+// FilterReadOnlyRegistry builds a sub-registry containing only tools whose
+// ReadOnly contract is true, minus explicit exclusions.
+func FilterReadOnlyRegistry(parent *tool.Registry, exclude ...string) *tool.Registry {
+	ex := make(map[string]bool, len(exclude))
+	for _, e := range exclude {
+		ex[e] = true
+	}
+	sub := tool.NewRegistry()
+	if parent == nil {
+		return sub
+	}
+	for _, name := range parent.Names() {
+		if ex[name] {
+			continue
+		}
+		tl, ok := parent.Get(name)
+		if !ok || !tl.ReadOnly() {
+			continue
+		}
+		sub.Add(tl)
+	}
+	return sub
+}
+
+func (t *TaskTool) resolveSubSessionRuntime(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error) {
+	prov, pricing, ctxWin := t.prov, t.pricing, t.contextWindow
+	if t.resolveProvider != nil && (modelRef != "" || effort != "") {
+		p, pr, cw, err := t.resolveProvider(modelRef, effort)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		prov, pricing, ctxWin = p, pr, cw
+	}
+	return prov, pricing, ctxWin, nil
+}
+
+func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session) (string, error) {
+	return RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, Options{
+		MaxSteps:          maxSteps,
+		Temperature:       t.temperature,
+		Pricing:           pricing,
+		UsageSource:       event.UsageSourceSubagent,
+		Gate:              t.gate,
+		ContextWindow:     ctxWin,
+		SoftCompactRatio:  t.softCompactRatio,
+		CompactRatio:      t.compactRatio,
+		CompactForceRatio: t.compactForceRatio,
+		ArchiveDir:        t.archiveDir,
+		ReasoningLanguage: ReasoningLanguageFromContext(ctx),
 	}, sink)
 }
 
-// RunSubAgent runs prompt to completion in a fresh sub-agent session over reg,
-// emitting tool activity to sink, and returns the sub-agent's final assistant
-// answer. It is the shared core behind the `task` tool and subagent skills: a
-// caller supplies the system prompt (the task persona or the skill body), the
-// tool registry (already filtered), and the run Options (model budget, gate).
-func RunSubAgent(ctx context.Context, prov provider.Provider, reg *tool.Registry, sysPrompt, prompt string, opts Options, sink event.Sink) (string, error) {
-	sess := NewSession(sysPrompt)
+func FormatSubagentResult(answer, ref string, failed bool) string {
+	if ref == "" {
+		return answer
+	}
+	if failed {
+		if answer == "" {
+			return "Subagent reference (failed): " + ref
+		}
+		return "Subagent reference (failed): " + ref + "\n\nFinal answer:\n" + answer
+	}
+	return "Subagent reference: " + ref + "\n\nFinal answer:\n" + answer
+}
+
+// RunSubAgentWithSession continues an existing sub-agent session with prompt and
+// returns the latest final assistant answer. Fresh sub-agents pass a newly-created
+// session; continued sub-agents pass a loaded transcript session.
+func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *tool.Registry, sess *Session, prompt string, opts Options, sink event.Sink) (string, error) {
+	if sess == nil {
+		return "", fmt.Errorf("sub-agent session is nil")
+	}
 	sub := New(prov, reg, sess, opts, sink)
 	if err := sub.Run(ctx, prompt); err != nil {
 		return "", fmt.Errorf("sub-agent: %w", err)
@@ -247,14 +493,22 @@ func NestedSink(ctx context.Context, fallback event.Sink) event.Sink {
 	return subSinkFor(parentID, parent)
 }
 
-// subSink forwards a sub-agent's tool dispatch/result events to the parent's
-// event stream, tagged with the parent task call's ID so a frontend nests them
-// under it. The sub-agent's own turn/usage/text/reasoning events are dropped —
-// only its tool activity (the part worth seeing live) and its final answer
-// (returned by Execute) reach the parent. The forwarded call IDs are namespaced
-// with the parent ID so a sub-agent call can never collide with a parent call in
-// the frontend's dispatch→result matching. Falls back to Discard when there's no
-// parent stream (the headless run loop, or a direct Execute in tests).
+// subSink forwards a sub-agent's tool dispatch/result events and billable usage
+// to the parent's event stream. Only tool activity is nested visually; the
+// sub-agent's text/reasoning stays isolated and only its final answer is returned.
+//
+// The sub-agent's own turn/text/reasoning events are dropped — forwarding them
+// would make the parent transcript noisy and could imply they belong to the
+// parent model context, which they do not.
+//
+// Usage events are observability only, so forwarding them preserves billing
+// totals without polluting the parent provider-visible prefix.
+//
+// Tool events are tagged with the parent task call's ID so a frontend nests them
+// under it. The forwarded call IDs are namespaced with the parent ID so a
+// sub-agent call can never collide with a parent call in the frontend's
+// dispatch→result matching. Falls back to Discard when there's no parent stream
+// (the headless run loop, or a direct Execute in tests).
 func subSink(ctx context.Context) event.Sink {
 	parentID, parent, _, ok := CallContext(ctx)
 	if !ok || parent == nil {
@@ -275,6 +529,11 @@ func subSinkFor(parentID string, parent event.Sink) event.Sink {
 		case event.ToolDispatch, event.ToolResult:
 			e.Tool.ParentID = parentID
 			e.Tool.ID = parentID + "/" + e.Tool.ID
+			parent.Emit(e)
+		case event.Usage:
+			if e.UsageSource == "" {
+				e.UsageSource = event.UsageSourceSubagent
+			}
 			parent.Emit(e)
 		}
 	})

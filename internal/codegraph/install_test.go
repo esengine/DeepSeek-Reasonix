@@ -5,11 +5,18 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestAssetNameForCurrentPlatform(t *testing.T) {
@@ -26,6 +33,38 @@ func TestAssetNameForCurrentPlatform(t *testing.T) {
 	}
 }
 
+func TestPromoteReplacesStalePartialDest(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, ".dl-x", "codegraph-x64")
+	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bin", "codegraph"), []byte("new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := filepath.Join(parent, "v0.9.7")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "stale.txt"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := promote(root, dir); err != nil {
+		t.Fatalf("promote over a stale dest: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "bin", "codegraph")); err != nil || string(got) != "new" {
+		t.Fatalf("dest missing promoted bundle: %q %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "stale.txt")); !os.IsNotExist(err) {
+		t.Fatal("stale dest content survived promote")
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatal("root should have been moved into dir")
+	}
+}
+
 func TestSha256For(t *testing.T) {
 	sums := "abc123  codegraph-linux-x64.tar.gz\ndef456  codegraph-darwin-arm64.tar.gz\n"
 	got, err := sha256For(sums, "codegraph-darwin-arm64.tar.gz")
@@ -37,13 +76,16 @@ func TestSha256For(t *testing.T) {
 	}
 }
 
-func TestSafeJoinRejectsTraversal(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := safeJoin(dir, "../escape"); err == nil {
-		t.Fatal("safeJoin should reject ../escape")
+func TestResolveWithinRejectsTraversal(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := safeJoin(dir, "bin/codegraph"); err != nil {
-		t.Fatalf("safeJoin rejected a normal path: %v", err)
+	if _, err := resolveWithin(root, "../escape"); err == nil {
+		t.Fatal("resolveWithin should reject ../escape")
+	}
+	if _, err := resolveWithin(root, "bin/codegraph"); err != nil {
+		t.Fatalf("resolveWithin rejected a normal path: %v", err)
 	}
 }
 
@@ -129,5 +171,224 @@ func TestInstallReturnsCachedWithoutNetwork(t *testing.T) {
 	// Resolve should also find it (no override, cache wins).
 	if p, ok := Resolve(""); !ok || p != launcher {
 		t.Fatalf("Resolve = %q, %v; want %q", p, ok, launcher)
+	}
+}
+
+func TestUpdateDownloadsLatestAndActivates(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a POSIX +x launcher")
+	}
+	base := t.TempDir()
+	t.Setenv("REASONIX_CACHE_DIR", base)
+	asset := assetName()
+	body := makeTarGz(t, map[string]struct {
+		body string
+		mode int64
+	}{
+		"codegraph-test/bin/codegraph": {"#!/bin/sh\n", 0o755},
+	})
+	sum := sha256.Sum256(body)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/colbymchenry/codegraph/releases/latest":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"tag_name":"v9.9.9"}`))
+		case "/download/v9.9.9/SHA256SUMS":
+			fmt.Fprintf(w, "%x  %s\n", sum, asset)
+		case "/download/v9.9.9/" + asset:
+			w.Write(body)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	oldAPIBase := githubAPIBase
+	oldDownloadBase := githubReleaseDownloadBase
+	githubAPIBase = srv.URL
+	githubReleaseDownloadBase = func(version string) string { return srv.URL + "/download/" + version }
+	t.Cleanup(func() {
+		githubAPIBase = oldAPIBase
+		githubReleaseDownloadBase = oldDownloadBase
+	})
+
+	downloaded, err := DownloadLatestWithClient(context.Background(), srv.Client(), nil)
+	if err != nil {
+		t.Fatalf("DownloadLatestWithClient: %v", err)
+	}
+	if downloaded.Version != "v9.9.9" {
+		t.Fatalf("downloaded version = %q, want v9.9.9", downloaded.Version)
+	}
+	if got := ActiveVersion(); got != "" {
+		t.Fatalf("ActiveVersion after download-only = %q, want empty", got)
+	}
+	if p, ok := Resolve(""); ok && p == downloaded.Path {
+		t.Fatalf("Resolve used download-only latest path %q before activation", p)
+	}
+
+	res, err := UpdateWithClient(context.Background(), srv.Client(), nil)
+	if err != nil {
+		t.Fatalf("UpdateWithClient: %v", err)
+	}
+	if res.Version != "v9.9.9" {
+		t.Fatalf("version = %q, want v9.9.9", res.Version)
+	}
+	if want := filepath.Join(CacheDirForVersion("v9.9.9"), "bin", "codegraph"); res.Path != want {
+		t.Fatalf("path = %q, want %q", res.Path, want)
+	}
+	if got := ActiveVersion(); got != "v9.9.9" {
+		t.Fatalf("ActiveVersion = %q, want v9.9.9", got)
+	}
+	if p, ok := Resolve(""); !ok || p != res.Path {
+		t.Fatalf("Resolve = %q, %v; want active path %q", p, ok, res.Path)
+	}
+}
+
+func TestActiveVersionRejectsTraversal(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("REASONIX_CACHE_DIR", base)
+	dir := filepath.Join(base, "codegraph")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, activeVersionFile), []byte("../evil\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := ActiveVersion(); got != "" {
+		t.Fatalf("ActiveVersion = %q, want empty for traversal", got)
+	}
+}
+
+func TestDownloadAssetUsesEmbeddedChecksumAndMirrorFallback(t *testing.T) {
+	asset := assetName()
+	body := []byte("verified codegraph payload")
+	sum := sha256.Sum256(body)
+	prev, hadPrev := releaseAssetSHA256[asset]
+	releaseAssetSHA256[asset] = fmt.Sprintf("%x", sum)
+	t.Cleanup(func() {
+		if hadPrev {
+			releaseAssetSHA256[asset] = prev
+		} else {
+			delete(releaseAssetSHA256, asset)
+		}
+	})
+
+	bad := httptest.NewServer(http.NotFoundHandler())
+	defer bad.Close()
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/"+asset) {
+			t.Fatalf("download path = %q, want asset suffix", r.URL.Path)
+		}
+		w.Write(body)
+	}))
+	defer good.Close()
+
+	got, err := downloadAssetFromBases(context.Background(), http.DefaultClient, asset, fmt.Sprintf("%x", sum), []string{bad.URL, good.URL}, nil)
+	if err != nil {
+		t.Fatalf("downloadAsset: %v", err)
+	}
+	if string(got) != string(body) {
+		t.Fatalf("downloadAsset body = %q, want %q", got, body)
+	}
+}
+
+func TestDownloadAssetRejectsMirrorChecksumMismatch(t *testing.T) {
+	asset := assetName()
+	prev, hadPrev := releaseAssetSHA256[asset]
+	releaseAssetSHA256[asset] = strings.Repeat("0", 64)
+	t.Cleanup(func() {
+		if hadPrev {
+			releaseAssetSHA256[asset] = prev
+		} else {
+			delete(releaseAssetSHA256, asset)
+		}
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("tampered"))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := downloadAssetFromBases(ctx, http.DefaultClient, asset, strings.Repeat("0", 64), []string{srv.URL}, nil); err == nil {
+		t.Fatal("downloadAsset accepted a checksum mismatch")
+	}
+}
+
+func TestDownloadBasesUseOfficialSourcesBeforeGitHub(t *testing.T) {
+	got := downloadBases()
+	want := []string{
+		officialMirrorBase + "/" + Version,
+		fmt.Sprintf("https://github.com/%s/releases/download/%s", cgRepo, Version),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("downloadBases = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("downloadBases[%d] = %q, want %q (all=%#v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestHTTPGetDetachedCtxSurvivesParentCancel(t *testing.T) {
+	started := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		select {
+		case <-time.After(300 * time.Millisecond):
+		case <-r.Context().Done():
+		}
+		w.Write([]byte("payload"))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	var got []byte
+	var gotErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		got, gotErr = httpGet(context.WithoutCancel(ctx), http.DefaultClient, srv.URL)
+	}()
+
+	<-started
+	cancel()
+	wg.Wait()
+
+	if gotErr != nil {
+		t.Fatalf("detached download aborted after parent cancel: %v", gotErr)
+	}
+	if string(got) != "payload" {
+		t.Fatalf("got %q, want payload", got)
+	}
+}
+
+func TestHTTPGetPlainCtxAbortsOnParentCancel(t *testing.T) {
+	started := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	var gotErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, gotErr = httpGet(ctx, http.DefaultClient, srv.URL)
+	}()
+
+	<-started
+	cancel()
+	wg.Wait()
+
+	if !errors.Is(gotErr, context.Canceled) {
+		t.Fatalf("plain ctx should abort on parent cancel, got %v", gotErr)
 	}
 }

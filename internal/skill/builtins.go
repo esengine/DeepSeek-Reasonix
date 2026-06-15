@@ -14,9 +14,10 @@ const tuiFormatting = `Keep the final answer compact and terminal-friendly: shor
 const builtinExploreBody = `You are running as an exploration subagent. Investigate the codebase the parent pointed you at, then return one focused, distilled answer.
 
 How to operate:
-- Use read_file, grep, glob, ls as your primary tools. Stay read-only.
-- For "find all places that call / reference / use X" questions, use ` + "`grep`" + ` (content search) — NOT ` + "`glob`" + ` (which only matches file names). Using the wrong one gives empty results and wastes your budget.
-- Cast a wide net first (grep for symbol references, ls/glob for structure) to map the territory; then read the 3-10 most relevant files in full.
+- Use codegraph tools (codegraph_context, codegraph_search, codegraph_callers, codegraph_callees, codegraph_trace) as your PRIMARY tools for symbol/code-structure questions. Fall back to read_file, grep, glob, ls for content search (comments, strings, config) or when codegraph tools are not available. Stay read-only.
+- codegraph_context is the best starting point for "how does X work" / architecture questions — it returns entry points + related symbols + key code in one call.
+- For "find all places that call / reference / use X" questions: use codegraph_callers (preferred) or ` + "`grep`" + ` (content search) — NOT ` + "`glob`" + ` (which only matches file names). Using the wrong one gives empty results and wastes your budget.
+- Cast a wide net first (codegraph_search for symbols, grep for content references, ls/glob for structure) to map the territory; then read the 3-10 most relevant files in full.
 - Don't read every file — be selective. Breadth on the first pass, depth only where the question demands it.
 - Stop exploring as soon as you can answer. The parent doesn't see your tool calls, so over-exploration is pure waste.
 
@@ -34,8 +35,9 @@ The 'task' the parent gave you is the question you must answer. Treat any other 
 const builtinResearchBody = `You are running as a research subagent. Gather information from code AND the web, synthesize it, and return one focused conclusion.
 
 How to operate:
-- Combine code reading (read_file, grep, glob) with web_fetch as appropriate. (There is no dedicated web-search tool — fetch the canonical doc/spec URL directly when you know it.)
-- For "how does X work" / "is Y supported" questions: fetch the canonical reference, then verify against the local code.
+- Combine code reading (codegraph tools + read_file, grep, glob) with web_fetch as appropriate. (There is no dedicated web-search tool — fetch the canonical doc/spec URL directly when you know it.)
+- For "how does X work" questions: use codegraph_context first for symbol-level understanding, then read_file for full context.
+- For "is Y supported" questions: fetch the canonical reference, then verify against the local code.
 - For "what's our policy on Z" / "where do we use Q": local code first, web only to compare against external standards.
 - Cap yourself at ~10 tool calls. If you can't converge, return what you have plus a note on what's missing.
 
@@ -51,13 +53,42 @@ Your final answer:
 
 The 'task' the parent gave you is the research question. Stay on it.`
 
+const builtinInstallCapabilityBody = `This skill is INLINED. Use it when the user asks to install a Reasonix MCP server or skill from a URL, local file, local folder, .mcp.json, or package name. For removing a previously installed skill or MCP server, follow the "Uninstall" rules at the bottom — same tool, different op.
+
+Operate as an installer, not as a shell-script guesser:
+1. Extract the source string exactly from the user's request. It may be an https URL, GitHub URL, local path, .mcp.json, executable path, or npm package name.
+2. Decide kind only when it is explicit. Use kind="auto" when unsure.
+3. First call install_source with apply=false. Include scope when the user says project/global. Include mode when they say copy/link/register; otherwise leave mode="auto".
+4. Read the returned plan. If status is blocked or failed, report the concrete next step. Do not invent a command from a README when the tool could not identify a manifest.
+5. Inspect the plan's actions. Each one carries a riskLevel:
+   - low → safe to apply without asking.
+   - medium → safe to apply, but mention what was written.
+   - high → ask the user to confirm in one short question before apply=true. High actions include MCP installs that send auth headers, eager-tier servers, link targets that are absolute paths outside the project/home root, and any replace=true on an existing entry.
+6. If the plan is acceptable and any needed user confirmation has happened, call install_source again with apply=true and echo back the same planId you got from the planning call. The tool refuses to apply when the planId does not match, so always re-fetch by running apply=false again if the user changed their mind about the source. Host permissions may still deny the apply call.
+7. After apply=true, report what was installed, where it was persisted, and whether it is usable in the current session. For skills, prefer actions[].canonicalPath, actions[].installRoot, actions[].discoverable, and actions[].indexed over guessing from the source path. The plan's kinds field tells you how many skills vs MCP servers were touched.
+
+Defaults:
+- A folder containing many skills should be registered as a skill root, not copied.
+- A single SKILL.md, <name>.md, or <name>/SKILL.md should be copied unless the user asked to link/register. The installer writes canonical <skill-name>/SKILL.md paths by default; flat <name>.md is compatibility input, not the preferred output.
+- A local SKILL.md source may have references/, scripts/, assets/, or other sibling files. Treat its parent directory as the skill package so those files remain available after install.
+- Local skill folders may contain grouped skills up to a bounded depth. Let install_source decide which roots to register instead of telling the user to manually split every nested folder first.
+- Remote MCP URLs should use http unless the endpoint is explicitly SSE.
+- Package-name MCP installs should default to npx -y <package>.
+- Never put raw tokens in headers or config. Prefer ${VAR} placeholders and tell the user which env var to set.
+
+Uninstall (op=uninstall):
+- Use op=uninstall with the same name and scope as the original install. Source is ignored.
+- Skill and MCP server matching happen in the chosen scope's active config; if you don't know where the entry lives, ask the user. Removal is destructive but symmetric with a previously approved install, so it is applied directly (no approval step).
+
+Stop rather than guessing when the source is only a documentation page, README without a manifest, or a repo whose install command cannot be determined.`
+
 const builtinReviewBody = `You are running as a code-review subagent. Inspect the changes the user is about to ship — usually the current git branch vs its upstream — and produce a focused review the parent can hand back.
 
 How to operate:
 - Default scope: the current branch's diff vs the default branch. If the task names a specific commit range or files, honor that instead.
 - Discover scope first: ` + "`bash git status`" + `, ` + "`git diff --stat`" + `, ` + "`git log --oneline`" + `. Then ` + "`git diff`" + ` (or ` + "`git diff <base>...HEAD`" + `) for the hunks.
 - Read touched files (read_file) when the diff alone lacks context — signatures, surrounding invariants, callers.
-- For "any callers depending on this?" questions: grep the symbol BEFORE asserting impact.
+- For "any callers depending on this?" questions: use codegraph_callers or codegraph_impact (preferred) or grep the symbol BEFORE asserting impact.
 - Stay read-only. Never commit, never write files, never propose edits as applied changes. The parent decides whether to act.
 - Cap yourself at ~12 tool calls. If the diff is too big, pick the riskiest 2-3 files and say so.
 
@@ -85,7 +116,7 @@ const builtinSecurityReviewBody = `You are running as a security-review subagent
 How to operate:
 - Default scope: the current branch's diff vs the default branch. Honor a named range or directory if given.
 - Discover scope first: ` + "`bash git status`" + `, ` + "`git diff --stat`" + `, ` + "`git diff <base>...HEAD`" + `. Read touched files (read_file) when the diff lacks security context — auth checks, input validation, the handler that calls the changed code.
-- Use grep to verify "is this user-controlled input ever sanitized later?" / "what other call sites depend on this validation?" before asserting impact.
+- Use codegraph_callers or codegraph_impact (preferred) or grep to verify "is this user-controlled input ever sanitized later?" / "what other call sites depend on this validation?" before asserting impact.
 - Stay read-only. Never write, never run destructive commands. The parent decides what to act on.
 - Cap yourself at ~12 tool calls. If the diff is too big, focus on the riskiest 2-3 files and say so.
 
@@ -112,7 +143,7 @@ const builtinTestBody = `This skill is INLINED — you run in the parent loop. T
 
 How to operate:
 1. Detect the test command. Look at the project: go.mod → ` + "`go test ./...`" + `; package.json scripts.test → ` + "`npm test`" + ` (or pnpm/yarn); pyproject.toml/requirements.txt → ` + "`pytest`" + `; Cargo.toml → ` + "`cargo test`" + `. If you can't tell, ASK — don't guess.
-2. Run it via bash (timeout ~120s, more for a big suite). Capture stdout + stderr.
+2. Run it via bash. Capture stdout + stderr; for intentionally long-running commands, start them in the background and use wait/bash_output.
 3. Read the failures: which tests failed, the actual error, the file + line that threw. Locate the exact assertion or stack frame.
 4. Fix each distinct failure:
    - Production bug (test caught a real defect) → fix the production code.
@@ -148,11 +179,20 @@ Rules:
 - Don't fabricate conventions the code doesn't demonstrate.
 - After writing, summarize in one or two lines what you captured and tell the user to review and edit it.`
 
+// extraReadTools holds additional tool names (e.g. codegraph tools) injected at
+// boot time so subagent skills can use them without hardcoding MCP-prefixed names.
+var extraReadTools []string
+
+// SetExtraReadTools registers additional read-only tool names that subagent
+// skills (explore, research, review, security-review) are allowed to use. Call
+// from boot after plugin tools are registered.
+func SetExtraReadTools(names []string) { extraReadTools = names }
+
 // builtinSkills returns the shipped skills. A fresh slice each call so callers
 // can't mutate the shared set.
 func builtinSkills() []Skill {
-	readCodeTools := []string{"read_file", "ls", "glob", "grep"}
-	reviewTools := []string{"read_file", "ls", "glob", "grep", "bash"}
+	readCodeTools := append([]string{"read_file", "ls", "glob", "grep"}, extraReadTools...)
+	reviewTools := append(append([]string(nil), readCodeTools...), "bash")
 	return []Skill{
 		{
 			Name:        "init",
@@ -179,6 +219,14 @@ func builtinSkills() []Skill {
 			Path:         "(builtin)",
 			RunAs:        RunSubagent,
 			AllowedTools: append(append([]string(nil), readCodeTools...), "web_fetch"),
+		},
+		{
+			Name:        "install-capability",
+			Description: "Install or uninstall Reasonix MCP servers and skills from a URL, GitHub/raw file, local path/folder, .mcp.json, executable, or package name. Plans with install_source (op=install or op=uninstall) before applying, surfacing per-action riskLevel.",
+			Body:        builtinInstallCapabilityBody,
+			Scope:       ScopeBuiltin,
+			Path:        "(builtin)",
+			RunAs:       RunInline,
 		},
 		{
 			Name:         "review",

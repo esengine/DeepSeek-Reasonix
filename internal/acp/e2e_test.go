@@ -80,6 +80,8 @@ type e2eFactory struct {
 	sessionDir string
 }
 
+func (f *e2eFactory) SessionDir() string { return f.sessionDir }
+
 func (f *e2eFactory) NewSession(_ context.Context, p SessionParams) (*control.Controller, error) {
 	reg := tool.NewRegistry()
 	reg.Add(f.tool)
@@ -277,6 +279,192 @@ func TestE2ESessionLoad(t *testing.T) {
 	if kinds["tool_call"] != 1 || kinds["tool_call_update"] != 1 {
 		t.Errorf("tool replay = %v, want 1 tool_call + 1 tool_call_update", kinds)
 	}
+}
+
+func TestE2ESessionListResumeAndDelete(t *testing.T) {
+	dir := t.TempDir()
+	cwd := t.TempDir()
+	mkFactory := func() *e2eFactory {
+		return &e2eFactory{
+			prov: &scriptedProvider{name: "fake", responses: [][]provider.Chunk{
+				{{Type: provider.ChunkText, Text: "Stored answer."}, {Type: provider.ChunkDone}},
+			}},
+			tool:       fakeTool{name: "peek", ro: true, out: "unused"},
+			policy:     permission.New("ask", nil, nil, nil),
+			sessionDir: dir,
+		}
+	}
+
+	client1, stop1 := startServer(t, mkFactory())
+	client1.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
+	newResp := client1.call(t, "session/new", SessionNewParams{Cwd: cwd})
+	var nr SessionNewResult
+	if err := json.Unmarshal(newResp.Result, &nr); err != nil || nr.SessionID == "" {
+		t.Fatalf("session/new: %v (%q)", err, nr.SessionID)
+	}
+	promptCh := client1.callAsync("session/prompt", SessionPromptParams{
+		SessionID: nr.SessionID,
+		Prompt:    []ContentBlock{{Type: "text", Text: "remember this session"}},
+	})
+	_, promptResp := drainPrompt(t, client1, promptCh)
+	var pr SessionPromptResult
+	if err := json.Unmarshal(promptResp.Result, &pr); err != nil {
+		t.Fatalf("prompt result: %v", err)
+	}
+	if pr.TranscriptPath == nil {
+		t.Fatal("prompt did not return a transcript path")
+	}
+	transcript := *pr.TranscriptPath
+	stop1()
+
+	client2, stop2 := startServer(t, mkFactory())
+	defer stop2()
+	client2.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
+	listResp := client2.call(t, "session/list", SessionListParams{Cwd: cwd})
+	var lr SessionListResult
+	if err := json.Unmarshal(listResp.Result, &lr); err != nil {
+		t.Fatalf("session/list result: %v", err)
+	}
+	if len(lr.Sessions) != 1 {
+		t.Fatalf("session/list returned %d sessions, want 1: %+v", len(lr.Sessions), lr.Sessions)
+	}
+	got := lr.Sessions[0]
+	if got.SessionID != nr.SessionID || got.Cwd != cwd {
+		t.Fatalf("listed session = %+v, want id %q cwd %q", got, nr.SessionID, cwd)
+	}
+	if !strings.Contains(got.Title, "remember this session") {
+		t.Fatalf("listed title = %q, want prompt preview", got.Title)
+	}
+	if got.UpdatedAt == "" {
+		t.Fatal("listed session missing updatedAt")
+	}
+
+	resumeResp := client2.call(t, "session/resume", SessionResumeParams{SessionID: nr.SessionID, Cwd: cwd})
+	if resumeResp.Error != nil {
+		t.Fatalf("session/resume errored: %+v", resumeResp.Error)
+	}
+	select {
+	case n := <-client2.notifs:
+		t.Fatalf("session/resume replayed an unexpected notification: %+v", n)
+	default:
+	}
+
+	deleteResp := client2.call(t, "session/delete", SessionDeleteParams{SessionID: nr.SessionID})
+	if deleteResp.Error != nil {
+		t.Fatalf("session/delete errored: %+v", deleteResp.Error)
+	}
+	listResp = client2.call(t, "session/list", SessionListParams{Cwd: cwd})
+	if err := json.Unmarshal(listResp.Result, &lr); err != nil {
+		t.Fatalf("session/list after delete: %v", err)
+	}
+	if len(lr.Sessions) != 0 {
+		t.Fatalf("session/list after delete = %+v, want empty", lr.Sessions)
+	}
+	if _, err := os.Stat(transcript); !os.IsNotExist(err) {
+		t.Fatalf("transcript after delete stat err = %v, want not exist", err)
+	}
+}
+
+func TestE2ESessionListSkipsUnpromptedSessionAfterRestart(t *testing.T) {
+	dir := t.TempDir()
+	factory := &e2eFactory{
+		prov: &scriptedProvider{name: "fake", responses: [][]provider.Chunk{
+			{{Type: provider.ChunkText, Text: "unused"}, {Type: provider.ChunkDone}},
+		}},
+		tool:       fakeTool{name: "peek", ro: true, out: "unused"},
+		policy:     permission.New("ask", nil, nil, nil),
+		sessionDir: dir,
+	}
+
+	client1, stop1 := startServer(t, factory)
+	client1.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
+	resp := client1.call(t, "session/new", SessionNewParams{Cwd: t.TempDir()})
+	var nr SessionNewResult
+	if err := json.Unmarshal(resp.Result, &nr); err != nil || nr.SessionID == "" {
+		t.Fatalf("session/new: %v (%q)", err, nr.SessionID)
+	}
+	stop1()
+
+	client2, stop2 := startServer(t, factory)
+	defer stop2()
+	client2.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
+	listResp := client2.call(t, "session/list", SessionListParams{})
+	var lr SessionListResult
+	if err := json.Unmarshal(listResp.Result, &lr); err != nil {
+		t.Fatalf("session/list result: %v", err)
+	}
+	if len(lr.Sessions) != 0 {
+		t.Fatalf("session/list returned unprompted session: %+v", lr.Sessions)
+	}
+}
+
+func TestE2EDeleteActiveSessionDoesNotRecreateFiles(t *testing.T) {
+	dir := t.TempDir()
+	releaseTool := make(chan struct{})
+	started := make(chan struct{})
+	prov := &scriptedProvider{name: "fake", responses: [][]provider.Chunk{
+		{
+			{Type: provider.ChunkText, Text: "Starting."},
+			toolCallChunk("c1", "slow", `{}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "unreachable"}, {Type: provider.ChunkDone}},
+	}}
+	factory := &e2eFactory{
+		prov:       prov,
+		tool:       blockingTool{started: started, release: releaseTool},
+		policy:     permission.New("ask", nil, nil, nil),
+		sessionDir: dir,
+	}
+	client, stop := startServer(t, factory)
+	defer stop()
+
+	sid := openSession(t, client)
+	promptCh := client.callAsync("session/prompt", SessionPromptParams{
+		SessionID: sid,
+		Prompt:    []ContentBlock{{Type: "text", Text: "delete me while running"}},
+	})
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("tool never started")
+	}
+	deleteResp := client.call(t, "session/delete", SessionDeleteParams{SessionID: sid})
+	if deleteResp.Error != nil {
+		t.Fatalf("session/delete errored: %+v", deleteResp.Error)
+	}
+
+	select {
+	case resp := <-promptCh:
+		if resp.Error != nil {
+			t.Fatalf("prompt errored after delete: %+v", resp.Error)
+		}
+		var pr SessionPromptResult
+		if err := json.Unmarshal(resp.Result, &pr); err != nil {
+			t.Fatalf("prompt result: %v", err)
+		}
+		if pr.StopReason != StopCancelled {
+			t.Fatalf("stopReason = %q, want cancelled", pr.StopReason)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("prompt did not finish after delete")
+	}
+
+	listResp := client.call(t, "session/list", SessionListParams{})
+	var lr SessionListResult
+	if err := json.Unmarshal(listResp.Result, &lr); err != nil {
+		t.Fatalf("session/list result: %v", err)
+	}
+	if len(lr.Sessions) != 0 {
+		t.Fatalf("session/list after active delete = %+v, want empty", lr.Sessions)
+	}
+	for _, path := range []string{transcriptPath(dir, sid), acpMetaPath(transcriptPath(dir, sid))} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("%s after active delete stat err = %v, want not exist", path, err)
+		}
+	}
+	close(releaseTool)
 }
 
 // TestE2EApprovalRoundTrip drives a write tool through the gate: the policy asks,

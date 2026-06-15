@@ -1,5 +1,6 @@
 VERSION := $(shell git describe --tags --always 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
+GOEXE := $(shell go env GOEXE)
 
 # CodeGraph release pinned for the bundled MCP server / e2e test. Bump together
 # with any change to the integration in internal/codegraph.
@@ -8,8 +9,8 @@ CODEGRAPH_VERSION := v0.9.7
 .PHONY: build vet fmt test hooks cross clean e2e-codegraph
 
 build:
-	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/reasonix ./cmd/reasonix
-	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/reasonix-plugin-example ./cmd/reasonix-plugin-example
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/reasonix$(GOEXE) ./cmd/reasonix
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/reasonix-plugin-example$(GOEXE) ./cmd/reasonix-plugin-example
 
 vet:
 	go vet ./...

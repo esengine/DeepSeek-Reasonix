@@ -1,5 +1,12 @@
 name: Release
 
+# CLI binary line. Tag namespace `v<semver>` triggers this — it builds the
+# release archives + checksums, publishes the GitHub release, and updates the
+# Homebrew cask. npm is a SEPARATE line (release-npm.yml, `npm-v*`) so an npm
+# prerelease can ship without forcing the stable cask, and vice versa; desktop is
+# `desktop-v*` (release-desktop.yml). A prerelease `v*-rc*` still builds archives
+# and a prerelease GitHub release, but goreleaser auto-skips the cask upload
+# (brew has no prerelease channel — see .goreleaser.yaml).
 on:
   push:
     tags: ['v*']
@@ -8,28 +15,85 @@ permissions:
   contents: write # create the release and upload archives
 
 jobs:
-  release:
+  cache-guard:
+    name: cache hit guard
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
-      VERSION: ${{ github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
+      - run: ./scripts/cache-guard.sh
 
-      - name: Cache hit guard
-        run: ./scripts/cache-guard.sh
+  goreleaser:
+    name: archives + checksums + homebrew tap
+    needs: cache-guard
+    runs-on: ubuntu-latest
+    # CLI stable release (archives + GitHub release + Homebrew cask). Gated on the
+    # `release` environment so only esengine can approve it going public.
+    environment: release
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
-      - name: Build, bundle CodeGraph, and package
-        run: ./scripts/release.sh
+  mirror-codegraph:
+    name: mirror CodeGraph runtime to R2
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    if: ${{ github.repository_owner == 'esengine' }}
+    env:
+      HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
+    steps:
+      - uses: actions/checkout@v6
 
-      - name: Publish GitHub release
+      - name: Download CodeGraph release assets
+        if: env.HAS_R2 == 'true'
         run: |
-          gh release create "$VERSION" \
-            dist/SHA256SUMS dist/*.tar.gz dist/*.zip \
-            --title "$VERSION" \
-            --generate-notes
+          version="$(awk '/^CODEGRAPH_VERSION[[:space:]]*:=/ { print $3; exit }' Makefile)"
+          [ -n "$version" ] || { echo "CODEGRAPH_VERSION not found" >&2; exit 1; }
+          base="https://github.com/colbymchenry/codegraph/releases/download/${version}"
+          mkdir -p codegraph-assets
+          curl -fsSL "$base/SHA256SUMS" -o codegraph-assets/SHA256SUMS
+          for asset in \
+            codegraph-darwin-arm64.tar.gz \
+            codegraph-darwin-x64.tar.gz \
+            codegraph-linux-arm64.tar.gz \
+            codegraph-linux-x64.tar.gz \
+            codegraph-win32-arm64.zip \
+            codegraph-win32-x64.zip
+          do
+            curl -fsSL "$base/$asset" -o "codegraph-assets/$asset"
+            want="$(awk -v name="$asset" '$2 == name { print $1 }' codegraph-assets/SHA256SUMS)"
+            got="$(shasum -a 256 "codegraph-assets/$asset" | awk '{ print $1 }')"
+            [ "$got" = "$want" ] || { echo "checksum mismatch for $asset" >&2; exit 1; }
+          done
+          echo "CODEGRAPH_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Configure AWS CLI for R2
+        if: env.HAS_R2 == 'true'
+        run: |
+          aws configure set aws_access_key_id "${{ secrets.R2_ACCESS_KEY_ID }}"
+          aws configure set aws_secret_access_key "${{ secrets.R2_SECRET_ACCESS_KEY }}"
+          aws configure set region auto
+
+      - name: Mirror CodeGraph to R2
+        if: env.HAS_R2 == 'true'
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp codegraph-assets/ "s3://${R2_BUCKET}/codegraph/${CODEGRAPH_VERSION}/" --recursive --endpoint-url "$ENDPOINT"

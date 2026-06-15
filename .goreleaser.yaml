@@ -1,0 +1,61 @@
+version: 2
+project_name: reasonix
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: reasonix
+    main: ./cmd/reasonix
+    binary: reasonix
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Tag }}
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: reasonix
+    ids: [reasonix]
+    name_template: "reasonix-{{ .Os }}-{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: SHA256SUMS
+  algorithm: sha256
+
+homebrew_casks:
+  - name: reasonix
+    ids: [reasonix]
+    # Prereleases (v*-rc*) must not update the stable tap; brew has no separate
+    # prerelease channel, so a pushed rc cask becomes the default `brew install`.
+    # npm is a separate line (release-npm.yml, `npm-v*`), so an npm prerelease no
+    # longer drags brew along — a stable `v*` cask can ship while npm stays on rc.
+    skip_upload: "auto"
+    repository:
+      owner: esengine
+      name: homebrew-reasonix
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/esengine/DeepSeek-Reasonix"
+    description: "Cache-first DeepSeek coding agent for the terminal."
+    commit_author:
+      name: reasonix
+      email: reasonix@deepseek.com
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/reasonix"]
+          end
+
+release:
+  prerelease: auto
+  name_template: "Reasonix CLI {{ .Tag }}"

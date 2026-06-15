@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"reasonix/internal/fileutil"
 )
 
 // BranchMeta is the small sidecar record that turns flat session files into a
@@ -21,6 +23,19 @@ type BranchMeta struct {
 	ForkMessageIndex int       `json:"fork_message_index,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
+	Scope            string    `json:"scope,omitempty"`
+	WorkspaceRoot    string    `json:"workspace_root,omitempty"`
+	TopicID          string    `json:"topic_id,omitempty"`
+	TopicTitle       string    `json:"topic_title,omitempty"`
+}
+
+func (m BranchMeta) DefaultScope() string {
+	switch m.Scope {
+	case "project":
+		return "project"
+	default:
+		return "global"
+	}
 }
 
 // BranchInfo combines sidecar metadata with the session file details needed for
@@ -74,6 +89,14 @@ func LoadBranchMeta(sessionPath string) (BranchMeta, bool, error) {
 }
 
 func SaveBranchMeta(sessionPath string, m BranchMeta) error {
+	return saveBranchMeta(sessionPath, m, true)
+}
+
+func SaveBranchMetaPreserveUpdated(sessionPath string, m BranchMeta) error {
+	return saveBranchMeta(sessionPath, m, false)
+}
+
+func saveBranchMeta(sessionPath string, m BranchMeta, touchUpdated bool) error {
 	metaPath := BranchMetaPath(sessionPath)
 	if metaPath == "" {
 		return fmt.Errorf("empty session path")
@@ -85,7 +108,9 @@ func SaveBranchMeta(sessionPath string, m BranchMeta) error {
 	if m.CreatedAt.IsZero() {
 		m.CreatedAt = now
 	}
-	m.UpdatedAt = now
+	if touchUpdated || m.UpdatedAt.IsZero() {
+		m.UpdatedAt = now
+	}
 	if err := os.MkdirAll(filepath.Dir(metaPath), 0o755); err != nil {
 		return err
 	}
@@ -108,7 +133,7 @@ func SaveBranchMeta(sessionPath string, m BranchMeta) error {
 		os.Remove(tmpPath)
 		return err
 	}
-	return os.Rename(tmpPath, metaPath)
+	return fileutil.ReplaceFile(tmpPath, metaPath)
 }
 
 func EnsureBranchMeta(sessionPath string) (BranchMeta, error) {
@@ -118,13 +143,16 @@ func EnsureBranchMeta(sessionPath string) (BranchMeta, error) {
 	if m, ok, err := LoadBranchMeta(sessionPath); err != nil || ok {
 		return m, err
 	}
-	now := time.Now().UTC()
+	when := time.Now().UTC()
+	if info, err := os.Stat(sessionPath); err == nil {
+		when = info.ModTime().UTC()
+	}
 	m := BranchMeta{
 		ID:        BranchID(sessionPath),
-		CreatedAt: now,
-		UpdatedAt: now,
+		CreatedAt: when,
+		UpdatedAt: when,
 	}
-	return m, SaveBranchMeta(sessionPath, m)
+	return m, saveBranchMeta(sessionPath, m, false)
 }
 
 func TouchBranchMeta(sessionPath string) error {
@@ -132,7 +160,8 @@ func TouchBranchMeta(sessionPath string) error {
 	if err != nil {
 		return err
 	}
-	return SaveBranchMeta(sessionPath, m)
+	m.UpdatedAt = time.Now().UTC()
+	return saveBranchMeta(sessionPath, m, false)
 }
 
 func ListBranches(dir string) ([]BranchInfo, error) {
@@ -186,4 +215,19 @@ func ListBranches(dir string) ([]BranchInfo, error) {
 		return out[i].CreatedAt.Before(out[j].CreatedAt)
 	})
 	return out, nil
+}
+
+// RenameSession updates the TopicTitle in the session's .jsonl.meta sidecar
+// file. If no meta file exists yet, one is created. This is used by the
+// /rename CLI command and desktop UI to give sessions human-readable names.
+func RenameSession(sessionPath string, title string) error {
+	if sessionPath == "" {
+		return fmt.Errorf("empty session path")
+	}
+	m, err := EnsureBranchMeta(sessionPath)
+	if err != nil {
+		return err
+	}
+	m.TopicTitle = title
+	return SaveBranchMeta(sessionPath, m)
 }

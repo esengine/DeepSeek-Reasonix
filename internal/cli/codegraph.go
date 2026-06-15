@@ -7,6 +7,7 @@ import (
 
 	"reasonix/internal/codegraph"
 	"reasonix/internal/config"
+	"reasonix/internal/netclient"
 )
 
 // codegraphCommand backs `reasonix codegraph` — managing the CodeGraph
@@ -19,6 +20,8 @@ func codegraphCommand(args []string) int {
 	switch sub {
 	case "install":
 		return codegraphInstall()
+	case "update":
+		return codegraphUpdate()
 	case "status", "":
 		return codegraphStatus()
 	case "help", "-h", "--help":
@@ -32,12 +35,42 @@ func codegraphCommand(args []string) int {
 }
 
 func codegraphInstall() int {
-	p, err := codegraph.Install(context.Background(), func(m string) { fmt.Println(m) })
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	client, err := netclient.NewHTTPClient(cfg.NetworkProxySpec(), netclient.TransportOptions{})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	p, err := codegraph.InstallWithClient(context.Background(), client, func(m string) { fmt.Println(m) })
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	fmt.Println("codegraph ready:", p)
+	return 0
+}
+
+func codegraphUpdate() int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	client, err := netclient.NewHTTPClient(cfg.NetworkProxySpec(), netclient.TransportOptions{})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	res, err := codegraph.UpdateWithClient(context.Background(), client, func(m string) { fmt.Println(m) })
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Printf("codegraph updated: %s (%s)\n", res.Path, res.Version)
 	return 0
 }
 
@@ -49,7 +82,11 @@ func codegraphStatus() int {
 	}
 	fmt.Printf("%-13s %v\n", "enabled:", cfg.Codegraph.Enabled)
 	fmt.Printf("%-13s %v\n", "auto_install:", cfg.Codegraph.AutoInstall)
+	fmt.Printf("%-13s %s\n", "startup:", cfg.Codegraph.ResolvedTier())
 	fmt.Printf("%-13s %s\n", "version:", codegraph.Version)
+	if active := codegraph.ActiveVersion(); active != "" {
+		fmt.Printf("%-13s %s\n", "active:", active)
+	}
 	fmt.Printf("%-13s %s\n", "cache:", codegraph.CacheDir())
 	if p, ok := codegraph.Resolve(cfg.Codegraph.Path); ok {
 		fmt.Printf("%-13s %s\n", "resolved:", p)
@@ -64,9 +101,11 @@ func codegraphUsage() {
 
 Usage:
   reasonix codegraph install   download + cache the runtime for this platform
+  reasonix codegraph update    download latest upstream runtime and make it active
   reasonix codegraph status    show config, cache dir, and resolved launcher
 
 CodeGraph is fetched automatically on first use (unless [codegraph].auto_install
-is false); this command installs it explicitly or reports where it resolves from.
+is false); install uses Reasonix's pinned runtime. Update is explicit because a
+new CodeGraph release can change MCP tool schemas and prompt-cache shape.
 `)
 }

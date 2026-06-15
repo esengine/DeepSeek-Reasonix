@@ -60,40 +60,111 @@ func FormatBranchTree(branches []agent.BranchInfo, currentID string) string {
 	var out strings.Builder
 	out.WriteString("branches:\n")
 	seen := map[string]bool{}
-	var walk func(agent.BranchInfo, int)
-	walk = func(b agent.BranchInfo, depth int) {
+	var walk func(agent.BranchInfo, string, bool, int)
+	walk = func(b agent.BranchInfo, prefix string, last bool, depth int) {
 		if seen[b.ID] {
 			return
 		}
 		seen[b.ID] = true
-		marker := " "
+		joint := "├─"
+		childPrefix := prefix + "│  "
+		if last {
+			joint = "└─"
+			childPrefix = prefix + "   "
+		}
+		current := ""
 		if b.ID == currentID {
-			marker = "*"
+			current = "  current"
 		}
-		name := strings.TrimSpace(b.Name)
-		if name == "" {
-			name = oneLineBranch(b.Preview, 54)
-		}
-		if name == "" {
-			name = "(untitled)"
-		}
-		fmt.Fprintf(&out, "%s%s %s  %s  (%d turns)\n",
-			strings.Repeat("  ", depth), marker, b.ID, name, b.Turns)
-		for _, child := range children[b.ID] {
-			walk(child, depth+1)
+		fmt.Fprintf(&out, "%s%s %s  %s  %s%s\n",
+			prefix, joint, shortBranchID(b.ID), branchTitle(b, depth), turnText(b.Turns), current)
+		for i, child := range children[b.ID] {
+			walk(child, childPrefix, i == len(children[b.ID])-1, depth+1)
 		}
 	}
-	for _, root := range roots {
-		walk(root, 0)
+	for i, root := range roots {
+		walk(root, "", i == len(roots)-1, 0)
 	}
 	for _, b := range branches {
-		walk(b, 0)
+		walk(b, "", true, 0)
 	}
 	return strings.TrimRight(out.String(), "\n")
 }
 
+func branchTitle(b agent.BranchInfo, depth int) string {
+	title := strings.TrimSpace(b.Name)
+	if title == "" {
+		title = strings.TrimSpace(b.Preview)
+	}
+	if label, ok := structuredBranchLabel(title); ok {
+		return label
+	}
+	maxRunes := 32 - depth*4
+	if maxRunes < 18 {
+		maxRunes = 18
+	}
+	title = oneLineBranch(title, maxRunes)
+	if title == "" {
+		return "(untitled)"
+	}
+	return title
+}
+
+func structuredBranchLabel(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", false
+	}
+	switch s[0] {
+	case '{':
+		lower := strings.ToLower(s)
+		switch {
+		case strings.Contains(lower, `"msg"`) && strings.Contains(lower, "success"):
+			return "JSON response: success", true
+		case strings.Contains(lower, `"error"`) || strings.Contains(lower, `"errors"`):
+			return "JSON payload: error", true
+		default:
+			return "JSON object", true
+		}
+	case '[':
+		return "JSON array", true
+	default:
+		return "", false
+	}
+}
+
+func turnText(n int) string {
+	if n == 1 {
+		return "1 turn"
+	}
+	return fmt.Sprintf("%d turns", n)
+}
+
+func shortBranchID(id string) string {
+	if len(id) >= 16 && numeric(id[:8]) && id[8] == '-' && numeric(id[9:15]) && id[15] == '.' {
+		fracEnd := 16
+		for fracEnd < len(id) && fracEnd < 19 && id[fracEnd] >= '0' && id[fracEnd] <= '9' {
+			fracEnd++
+		}
+		if fracEnd > 16 {
+			return id[4:8] + "-" + id[9:15] + "." + id[16:fracEnd]
+		}
+		return id[4:8] + "-" + id[9:15]
+	}
+	return oneLineBranch(id, 18)
+}
+
+func numeric(s string) bool {
+	for _, ch := range s {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return s != ""
+}
+
 func oneLineBranch(s string, maxRunes int) string {
-	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
+	s = strings.Join(strings.Fields(s), " ")
 	if maxRunes <= 0 {
 		return s
 	}

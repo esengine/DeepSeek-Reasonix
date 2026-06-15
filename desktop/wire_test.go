@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"reasonix/internal/event"
@@ -43,6 +44,21 @@ func TestToWireNoticeWarn(t *testing.T) {
 	}
 }
 
+func TestToWireRetrying(t *testing.T) {
+	e := event.Event{Kind: event.Retrying, RetryAttempt: 3, RetryMax: 10}
+	w := toWire(e)
+	if w.Kind != "retrying" || w.RetryAttempt != 3 || w.RetryMax != 10 {
+		t.Errorf("retrying wire = %+v", w)
+	}
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if s := string(b); !strings.Contains(s, `"retryAttempt":3`) || !strings.Contains(s, `"retryMax":10`) {
+		t.Errorf("retrying JSON = %s", s)
+	}
+}
+
 func TestToWireToolDispatch(t *testing.T) {
 	e := event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "1", Name: "bash", Args: `{"c":"echo"}`, ReadOnly: false}}
 	w := toWire(e)
@@ -51,11 +67,51 @@ func TestToWireToolDispatch(t *testing.T) {
 	}
 }
 
-func TestToWireToolResult(t *testing.T) {
-	e := event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "1", Output: "ok", Truncated: true}}
+func TestToWireToolDispatchProfile(t *testing.T) {
+	e := event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
+		ID: "1", Name: "task", Args: `{"prompt":"x"}`,
+		Profile: &event.Profile{Model: "deepseek-pro", Effort: "max"},
+	}}
 	w := toWire(e)
-	if w.Tool == nil || w.Tool.Output != "ok" || !w.Tool.Truncated {
+	if w.Tool == nil || w.Tool.Profile == nil || w.Tool.Profile.Model != "deepseek-pro" || w.Tool.Profile.Effort != "max" {
+		t.Errorf("tool profile = %+v", w.Tool)
+	}
+}
+
+func TestToWireToolDispatchFileDiff(t *testing.T) {
+	e := event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
+		ID:       "1",
+		Name:     "edit_file",
+		Args:     `{"path":"settings/settings_IO.gd"}`,
+		FileDiff: event.FileDiff{Diff: "@@ -27 +27 @@\n-old\n+new\n", Added: 1, Removed: 1},
+	}}
+	w := toWire(e)
+	if w.Tool == nil {
+		t.Fatal("missing wire tool")
+	}
+	b, err := json.Marshal(w.Tool)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(b)
+	if !strings.Contains(s, `"diff":"@@ -27 +27 @@\n-old\n+new\n"`) || !strings.Contains(s, `"added":1`) || !strings.Contains(s, `"removed":1`) {
+		t.Fatalf("tool file diff was not serialized: %s", s)
+	}
+}
+
+func TestToWireToolResult(t *testing.T) {
+	e := event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "1", Output: "ok", Truncated: true, DurationMs: 522}}
+	w := toWire(e)
+	if w.Tool == nil || w.Tool.Output != "ok" || !w.Tool.Truncated || w.Tool.DurationMs != 522 {
 		t.Errorf("tool result = %+v", w.Tool)
+	}
+}
+
+func TestToWireToolProgress(t *testing.T) {
+	e := event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: "1", Output: "chunk"}}
+	w := toWire(e)
+	if w.Kind != "tool_progress" || w.Tool == nil || w.Tool.Output != "chunk" {
+		t.Errorf("tool progress = kind:%q tool:%+v", w.Kind, w.Tool)
 	}
 }
 
@@ -63,12 +119,16 @@ func TestToWireUsage(t *testing.T) {
 	e := event.Event{
 		Kind:        event.Usage,
 		Usage:       &provider.Usage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150, CacheHitTokens: 80, CacheMissTokens: 20},
+		UsageSource: event.UsageSourceSubagent,
 		SessionHit:  800,
 		SessionMiss: 200,
 	}
 	w := toWire(e)
 	if w.Usage == nil || w.Usage.PromptTokens != 100 || w.Usage.TotalTokens != 150 {
 		t.Errorf("usage = %+v", w.Usage)
+	}
+	if w.Usage.Source != event.UsageSourceSubagent {
+		t.Errorf("usage source = %q, want subagent", w.Usage.Source)
 	}
 	if w.Usage.SessionCacheHitTokens != 800 || w.Usage.SessionCacheMissTokens != 200 {
 		t.Errorf("session cache = hit:%d miss:%d", w.Usage.SessionCacheHitTokens, w.Usage.SessionCacheMissTokens)
@@ -82,8 +142,11 @@ func TestToWireUsageWithPricing(t *testing.T) {
 		Pricing: &provider.Pricing{CacheHit: 1.0, Input: 2.0, Output: 10.0},
 	}
 	w := toWire(e)
-	if w.Usage == nil || w.Usage.CostUSD != 1.0 {
-		t.Errorf("cost = %f, want 1.0", w.Usage.CostUSD)
+	if w.Usage == nil || w.Usage.Cost != 1.0 || w.Usage.CostUSD != 1.0 {
+		t.Errorf("cost = %+v, want cost and compat costUsd of 1.0", w.Usage)
+	}
+	if w.Usage.Currency != "¥" {
+		t.Errorf("currency = %q, want ¥", w.Usage.Currency)
 	}
 }
 
@@ -127,15 +190,20 @@ func TestToWireTurnDoneNoError(t *testing.T) {
 
 // --- kindNames completeness ---
 
-func TestKindNamesComplete(t *testing.T) {
-	allKinds := []event.Kind{
-		event.TurnStarted, event.Reasoning, event.Text, event.Message,
-		event.ToolDispatch, event.ToolResult, event.Usage, event.Notice,
-		event.Phase, event.ApprovalRequest, event.AskRequest, event.TurnDone,
+func TestToWireSteer(t *testing.T) {
+	e := event.Event{Kind: event.Steer, Text: "please use smaller diffs"}
+	w := toWire(e)
+	if w.Kind != "steer" || w.Text != "please use smaller diffs" {
+		t.Errorf("steer wire = %+v", w)
 	}
-	for _, k := range allKinds {
-		if _, ok := kindNames[k]; !ok {
-			t.Errorf("kind %d not in kindNames", k)
+}
+
+func TestKindNamesComplete(t *testing.T) {
+	// Steer is the last Kind; every value through it must have a wire name,
+	// or toWire emits kind:"" and the frontend reducer falls through to undefined.
+	for k := event.Kind(0); k <= event.Steer; k++ {
+		if kindNames[k] == "" {
+			t.Errorf("kind %d has no wire name — toWire would emit kind:\"\"", k)
 		}
 	}
 }

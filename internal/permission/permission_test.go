@@ -12,15 +12,22 @@ func TestParseRule(t *testing.T) {
 		in       string
 		wantTool string
 		wantSubj string
+		wantLit  bool
 		wantOK   bool
 	}{
-		{"bash", "bash", "", true},
-		{"bash(rm -rf*)", "bash", "rm -rf*", true},
-		{"  read_file  ", "read_file", "", true},
-		{"bash( go test ./... )", "bash", " go test ./... ", true}, // subject preserved verbatim
-		{"bash(echo (hi))", "bash", "echo (hi)", true},             // first '(' wins, trailing ')'
-		{"", "", "", false},
-		{"(noTool)", "", "", false},
+		{"bash", "bash", "", false, true},
+		{"Bash(npm run build)", "Bash", "npm run build", false, true},
+		{"Edit(docs/**)", "Edit", "docs/**", false, true},
+		{"bash(rm -rf*)", "bash", "rm -rf*", false, true},
+		{"  read_file  ", "read_file", "", false, true},
+		{"bash( go test ./... )", "bash", " go test ./... ", false, true}, // subject preserved verbatim
+		{"bash(echo (hi))", "bash", "echo (hi)", false, true},             // first '(' wins, trailing ')'
+		{"bash=rm *.log", "bash", "rm *.log", true, true},                 // literal: '*' is not a wildcard
+		{"bash=make FOO=bar", "bash", "make FOO=bar", true, true},         // split on first '=' only
+		{"bash=echo (hi)", "bash", "echo (hi)", true, true},               // '=' before '(' → literal, parens kept
+		{"bash(make FOO=*)", "bash", "make FOO=*", false, true},           // '(' before '=' → still a glob
+		{"", "", "", false, false},
+		{"(noTool)", "", "", false, false},
 	}
 	for _, c := range cases {
 		r, ok := ParseRule(c.in)
@@ -28,8 +35,8 @@ func TestParseRule(t *testing.T) {
 			t.Errorf("ParseRule(%q) ok = %v, want %v", c.in, ok, c.wantOK)
 			continue
 		}
-		if ok && (r.Tool != c.wantTool || r.Subject != c.wantSubj) {
-			t.Errorf("ParseRule(%q) = {%q,%q}, want {%q,%q}", c.in, r.Tool, r.Subject, c.wantTool, c.wantSubj)
+		if ok && (r.Tool != c.wantTool || r.Subject != c.wantSubj || r.Literal != c.wantLit) {
+			t.Errorf("ParseRule(%q) = {%q,%q,lit=%v}, want {%q,%q,lit=%v}", c.in, r.Tool, r.Subject, r.Literal, c.wantTool, c.wantSubj, c.wantLit)
 		}
 	}
 }
@@ -81,6 +88,22 @@ func TestSubject(t *testing.T) {
 	}
 }
 
+func TestSubjectsForMoveFile(t *testing.T) {
+	got := Subjects(json.RawMessage(`{"source_path":"tmp/a.md","destination_path":"secrets/a.md"}`))
+	want := []string{"tmp/a.md", "secrets/a.md"}
+	if len(got) != len(want) {
+		t.Fatalf("Subjects length = %d (%v), want %d", len(got), got, len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Subjects[%d] = %q, want %q (all subjects: %v)", i, got[i], want[i], got)
+		}
+	}
+	if primary := Subject(json.RawMessage(`{"source_path":"tmp/a.md","destination_path":"secrets/a.md"}`)); primary != "tmp/a.md" {
+		t.Fatalf("Subject primary = %q, want source path", primary)
+	}
+}
+
 func TestPolicyDecide(t *testing.T) {
 	p := New("ask",
 		[]string{"bash(go test*)", "ls"},
@@ -108,6 +131,28 @@ func TestPolicyDecide(t *testing.T) {
 		if got != c.want {
 			t.Errorf("%s: Decide(%q, ro=%v, %s) = %v, want %v", c.name, c.tool, c.readOnly, c.args, got, c.want)
 		}
+	}
+}
+
+func TestPolicyDecideMoveFileChecksBothEndpoints(t *testing.T) {
+	denyDest := New("allow", nil, nil, []string{"Edit(secrets/**)"})
+	if got := denyDest.Decide("move_file", false, json.RawMessage(`{"source_path":"tmp/a.md","destination_path":"secrets/a.md"}`)); got != Deny {
+		t.Fatalf("destination deny rule = %v, want Deny", got)
+	}
+
+	askDest := New("allow", nil, []string{"Edit(secrets/**)"}, nil)
+	if got := askDest.Decide("move_file", false, json.RawMessage(`{"source_path":"tmp/a.md","destination_path":"secrets/a.md"}`)); got != Ask {
+		t.Fatalf("destination ask rule = %v, want Ask", got)
+	}
+
+	sourceOnlyAllow := New("ask", []string{"Edit(tmp/**)"}, nil, nil)
+	if got := sourceOnlyAllow.Decide("move_file", false, json.RawMessage(`{"source_path":"tmp/a.md","destination_path":"docs/a.md"}`)); got != Ask {
+		t.Fatalf("source-only allow = %v, want Ask for unallowed destination", got)
+	}
+
+	bothAllowed := New("ask", []string{"Edit(tmp/**)", "Edit(docs/**)"}, nil, nil)
+	if got := bothAllowed.Decide("move_file", false, json.RawMessage(`{"source_path":"tmp/a.md","destination_path":"docs/a.md"}`)); got != Allow {
+		t.Fatalf("both endpoints allowed = %v, want Allow", got)
 	}
 }
 
@@ -162,8 +207,10 @@ func TestGateInteractive(t *testing.T) {
 	if ap.calls != 1 {
 		t.Errorf("approver calls = %d, want 1", ap.calls)
 	}
-	if remembered != "bash(go build)" {
-		t.Errorf("remembered rule = %q, want %q", remembered, "bash(go build)")
+	// "Always allow" is tool-wide: the persisted rule is the bare tool name, not
+	// pinned to "go build", so any later command runs without re-prompting.
+	if remembered != "bash" {
+		t.Errorf("remembered rule = %q, want tool-wide %q", remembered, "bash")
 	}
 
 	// Decline path.
@@ -187,5 +234,31 @@ func TestGateInteractive(t *testing.T) {
 	allow, _, _ = g4.Check(context.Background(), "bash", json.RawMessage(`{"command":"ok go"}`), false)
 	if !allow || ap4.calls != 0 {
 		t.Errorf("allow-listed call reached approver: allow=%v calls=%d", allow, ap4.calls)
+	}
+}
+
+func TestClaudeStyleRuleMatchesExactCommandWithoutWildcard(t *testing.T) {
+	p := New("ask", []string{"Bash(go build)"}, nil, nil)
+
+	if got := p.Decide("bash", false, json.RawMessage(`{"command":"go build"}`)); got != Allow {
+		t.Errorf("exact command = %v, want Allow", got)
+	}
+	if got := p.Decide("bash", false, json.RawMessage(`{"command":"go build ./cmd"}`)); got == Allow {
+		t.Errorf("exact command rule matched longer command")
+	}
+}
+
+// TestLegacyLiteralRuleMatchesExactly guards configs written before the
+// Claude-style Bash(...) rules: a literal "bash=rm *.log" must allow only that
+// exact command, never the wildcard expansion a glob "bash(rm *.log)" would
+// have matched.
+func TestLegacyLiteralRuleMatchesExactly(t *testing.T) {
+	p := New("ask", []string{"bash=rm *.log"}, nil, nil)
+
+	if got := p.Decide("bash", false, json.RawMessage(`{"command":"rm *.log"}`)); got != Allow {
+		t.Errorf("exact command = %v, want Allow", got)
+	}
+	if got := p.Decide("bash", false, json.RawMessage(`{"command":"rm secrets.log"}`)); got == Allow {
+		t.Errorf("literal rule wildcard-matched %q — '*' must stay literal", "rm secrets.log")
 	}
 }

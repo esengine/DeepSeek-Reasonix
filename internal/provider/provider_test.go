@@ -6,6 +6,126 @@ import (
 	"testing"
 )
 
+// --- SanitizeToolPairing ---
+
+// toolIDsAnswered reports whether every assistant tool_call id has a following
+// tool message answering it — the contract the OpenAI/DeepSeek API enforces.
+func toolIDsAnswered(msgs []Message) bool {
+	answered := map[string]bool{}
+	for _, m := range msgs {
+		if m.Role == RoleTool {
+			answered[m.ToolCallID] = true
+		}
+	}
+	for _, m := range msgs {
+		for _, tc := range m.ToolCalls {
+			if !answered[tc.ID] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func TestSanitizeToolPairingBackfillsDanglingCall(t *testing.T) {
+	in := []Message{
+		{Role: RoleUser, Content: "list files"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c1", Name: "ls"}}},
+		{Role: RoleUser, Content: "never mind"},
+	}
+	out := SanitizeToolPairing(in)
+	if !toolIDsAnswered(out) {
+		t.Fatalf("dangling tool_call left unanswered: %+v", out)
+	}
+	// The backfilled result sits right after the assistant turn, keyed to its id.
+	if out[2].Role != RoleTool || out[2].ToolCallID != "c1" {
+		t.Fatalf("expected a backfilled tool result for c1 at index 2, got %+v", out[2])
+	}
+}
+
+func TestSanitizeToolPairingKeepsCallOrderAndMultiple(t *testing.T) {
+	in := []Message{
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "a"}, {ID: "b"}, {ID: "c"}}},
+		{Role: RoleTool, ToolCallID: "b", Content: "B"}, // out of order, c missing
+		{Role: RoleTool, ToolCallID: "a", Content: "A"},
+	}
+	out := SanitizeToolPairing(in)
+	if !toolIDsAnswered(out) {
+		t.Fatalf("not all calls answered: %+v", out)
+	}
+	gotOrder := []string{out[1].ToolCallID, out[2].ToolCallID, out[3].ToolCallID}
+	want := []string{"a", "b", "c"}
+	for i := range want {
+		if gotOrder[i] != want[i] {
+			t.Fatalf("tool results out of call order: got %v want %v", gotOrder, want)
+		}
+	}
+}
+
+func TestSanitizeToolPairingDropsOrphanToolMessage(t *testing.T) {
+	in := []Message{
+		{Role: RoleUser, Content: "hi"},
+		{Role: RoleTool, ToolCallID: "ghost", Content: "leftover"}, // no preceding call
+		{Role: RoleAssistant, Content: "hello"},
+	}
+	out := SanitizeToolPairing(in)
+	for _, m := range out {
+		if m.Role == RoleTool {
+			t.Fatalf("orphan tool message survived: %+v", out)
+		}
+	}
+	if len(out) != 2 {
+		t.Fatalf("want 2 messages after dropping the orphan, got %d: %+v", len(out), out)
+	}
+}
+
+func TestSanitizeToolPairingLeavesWellFormedUnchanged(t *testing.T) {
+	in := []Message{
+		{Role: RoleSystem, Content: "sys"},
+		{Role: RoleUser, Content: "q"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c1", Name: "ls"}}},
+		{Role: RoleTool, ToolCallID: "c1", Name: "ls", Content: "main.go"},
+		{Role: RoleAssistant, Content: "done"},
+	}
+	out := SanitizeToolPairing(in)
+	if len(out) != len(in) {
+		t.Fatalf("well-formed history changed length: %d -> %d", len(in), len(out))
+	}
+	for i := range in {
+		if out[i].Role != in[i].Role || out[i].Content != in[i].Content || out[i].ToolCallID != in[i].ToolCallID {
+			t.Fatalf("well-formed message %d mutated: %+v -> %+v", i, in[i], out[i])
+		}
+	}
+}
+
+func TestSanitizeToolPairingClosesTruncatedArgs(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`{`, `{}`},
+		{`{"time": 2`, `{"time": 2}`},
+		{`{"command": "ls -la`, `{"command": "ls -la"}`},
+		{`{"a": 1,`, `{"a": 1}`},
+		{`{"a":`, `{"a":null}`},
+		{`{"path": "C:\\tmp\`, `{"path": "C:\\tmp"}`},
+		{`{"items": [1, 2`, `{"items": [1, 2]}`},
+		{`total garbage`, `{}`},
+		{`{"ok": true}`, `{"ok": true}`},
+		{``, ``},
+	}
+	for _, c := range cases {
+		in := []Message{
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c1", Name: "bash", Arguments: c.in}}},
+			{Role: RoleTool, ToolCallID: "c1", Content: "r"},
+		}
+		out := SanitizeToolPairing(in)
+		if got := out[0].ToolCalls[0].Arguments; got != c.want {
+			t.Errorf("args %q repaired to %q, want %q", c.in, got, c.want)
+		}
+		if in[0].ToolCalls[0].Arguments != c.in {
+			t.Errorf("stored history mutated for %q: %q", c.in, in[0].ToolCalls[0].Arguments)
+		}
+	}
+}
+
 // --- Pricing.Cost ---
 
 func TestPricingCostNil(t *testing.T) {
@@ -48,6 +168,14 @@ func TestPricingCostCalculation(t *testing.T) {
 	}
 }
 
+func TestPricingCostFallsBackToPromptTokensAsMiss(t *testing.T) {
+	p := &Pricing{Input: 2.0, Output: 10.0}
+	u := &Usage{PromptTokens: 500_000, CompletionTokens: 100_000}
+	if got := p.Cost(u); got != 2.0 {
+		t.Errorf("Cost = %f, want 2.0", got)
+	}
+}
+
 func TestPricingCostZeroTokens(t *testing.T) {
 	p := &Pricing{Input: 2.0, Output: 10.0}
 	u := &Usage{}
@@ -76,6 +204,30 @@ func TestPricingSymbolCustom(t *testing.T) {
 	p := &Pricing{Currency: "$"}
 	if got := p.Symbol(); got != "$" {
 		t.Errorf("Symbol() = %q, want $", got)
+	}
+}
+
+func TestPricingSymbolNormalizesCurrencyCodes(t *testing.T) {
+	cases := []struct {
+		currency string
+		want     string
+	}{
+		{currency: "USD", want: "$"},
+		{currency: "dollars", want: "$"},
+		{currency: "CNY", want: "¥"},
+		{currency: "￥", want: "¥"},
+		{currency: "EUR", want: "€"},
+		{currency: "₹", want: "₹"},
+		{currency: "aud", want: "AUD "},
+		{currency: "A$", want: "A$"},
+		{currency: "HK$", want: "HK$"},
+		{currency: "楼", want: "¥"},
+	}
+	for _, tc := range cases {
+		p := &Pricing{Currency: tc.currency}
+		if got := p.Symbol(); got != tc.want {
+			t.Errorf("Currency %q Symbol() = %q, want %q", tc.currency, got, tc.want)
+		}
 	}
 }
 
@@ -139,6 +291,22 @@ func TestNewWithRegisteredKind(t *testing.T) {
 		return nil, nil
 	})
 	// We can't easily unregister, but we can test it doesn't panic.
+}
+
+func TestNewRejectsTypedNilProvider(t *testing.T) {
+	kind := "test-typed-nil-__" + t.Name()
+	Register(kind, func(cfg Config) (Provider, error) {
+		var p *mockProvider
+		return p, nil
+	})
+
+	_, err := New(kind, Config{})
+	if err == nil {
+		t.Fatal("New should reject typed nil provider")
+	}
+	if !contains(err.Error(), "returned nil provider") {
+		t.Fatalf("New error = %v, want returned nil provider", err)
+	}
 }
 
 // --- Role constants ---

@@ -13,7 +13,9 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +23,8 @@ import (
 	"golang.org/x/mod/semver"
 
 	"reasonix/desktop/internal/update"
+	"reasonix/internal/config"
+	"reasonix/internal/netclient"
 )
 
 // updater.go is the transport-free core of the desktop auto-updater: manifest
@@ -29,13 +33,36 @@ import (
 // the thin Wails binding that wires these into App methods and progress events.
 
 // Manifest endpoints — R2 CDN first (fast, especially in CN), GitHub releases as
-// fallback. Mirrors the v1 desktop's two-endpoint scheme.
+// fallback. The build channel picks the rolling pointer so a canary build polls
+// the canary line and a stable build polls latest; the two never cross.
 const (
-	manifestPrimary     = "https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev/latest/latest.json"
-	manifestFallback    = "https://github.com/esengine/reasonix/releases/latest/download/latest.json"
-	defaultDownloadPage = "https://github.com/esengine/reasonix/releases/latest"
-	httpTimeout         = 15 * time.Second
+	r2Base         = "https://dl.reasonix.io"
+	ghReleasesBase = "https://github.com/esengine/reasonix/releases"
+	httpTimeout    = 15 * time.Second
 )
+
+// manifestEndpoints returns the primary (R2) then fallback (GitHub) manifest URLs
+// for the running build's channel.
+func manifestEndpoints() []string {
+	if channel == "canary" {
+		// Canary publishes only to R2 (no GitHub release), so there is no
+		// GitHub fallback for this channel.
+		return []string{r2Base + "/canary/latest.json"}
+	}
+	return []string{
+		r2Base + "/latest/latest.json",
+		ghReleasesBase + "/latest/download/latest.json",
+	}
+}
+
+// downloadPage is the human-facing releases page shown when self-update is
+// unavailable (macOS) or the manifest omits its own link.
+func downloadPage() string {
+	if channel == "canary" {
+		return ghReleasesBase // lists pre-releases too
+	}
+	return ghReleasesBase + "/latest"
+}
 
 // UpdateInfo is the CheckUpdate result that drives the frontend's update banner.
 type UpdateInfo struct {
@@ -58,7 +85,19 @@ type updateProgress struct {
 	Err      string `json:"err,omitempty"`
 }
 
-func httpClient() *http.Client { return &http.Client{Timeout: httpTimeout} }
+func httpClient() (*http.Client, error) { return newHTTPClient(false) }
+
+// httpClientIPv4 pins the dialer to IPv4 — the download fallback when the default
+// (often IPv6-first) route to Cloudflare keeps resetting mid-transfer.
+func httpClientIPv4() (*http.Client, error) { return newHTTPClient(true) }
+
+func newHTTPClient(forceIPv4 bool) (*http.Client, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netclient.NewHTTPClient(cfg.NetworkProxySpec(), netclient.TransportOptions{ForceIPv4: forceIPv4})
+}
 
 // canSelfUpdate reports whether in-place update is possible. macOS is excluded:
 // without a Developer ID signature + notarization, swapping the .app and relaunching
@@ -86,7 +125,7 @@ func normalizeVersion(v string) (string, bool) {
 // and decodes it.
 func fetchManifest(ctx context.Context, c *http.Client) (*update.Manifest, error) {
 	var lastErr error
-	for _, url := range []string{manifestPrimary, manifestFallback} {
+	for _, url := range manifestEndpoints() {
 		b, err := fetchBytes(ctx, c, url)
 		if err != nil {
 			lastErr = err
@@ -107,7 +146,7 @@ func fetchManifest(ctx context.Context, c *http.Client) (*update.Manifest, error
 func evaluate(current string, m *update.Manifest) UpdateInfo {
 	page := m.DownloadPage
 	if page == "" {
-		page = defaultDownloadPage
+		page = downloadPage()
 	}
 	info := UpdateInfo{
 		Current:       current,
@@ -132,8 +171,50 @@ func evaluate(current string, m *update.Manifest) UpdateInfo {
 	return info
 }
 
-// fetchBytes GETs a URL fully into memory.
+// downloadAttempts caps how many times a transient transport failure (connection
+// reset, read timeout, gateway 5xx) is retried before the update gives up. CN IPv6
+// routes to Cloudflare reset mid-transfer often enough that a retry or two usually
+// completes the download instead of surfacing a "forcibly closed" error.
+const downloadAttempts = 3
+
+// retryBackoff is the pause before the Nth retry; a package var so tests shrink it.
+var retryBackoff = func(attempt int) time.Duration { return time.Duration(attempt) * 500 * time.Millisecond }
+
+// retryTransient runs attempt 1..downloadAttempts of fetch, pausing between tries,
+// until one succeeds. fetch receives the 1-based attempt number so a caller can
+// switch transports on a retry. It stops early when ctx is cancelled (window closed
+// / user cancelled). Only the transport is retried; the signature and sha256 checks
+// run downstream in downloadVerify and are not retried.
+func retryTransient(ctx context.Context, fetch func(attempt int) error) error {
+	var err error
+	for attempt := 1; attempt <= downloadAttempts; attempt++ {
+		if err = fetch(attempt); err == nil {
+			return nil
+		}
+		if ctx.Err() != nil || attempt == downloadAttempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(retryBackoff(attempt)):
+		}
+	}
+	return err
+}
+
+// fetchBytes GETs a URL fully into memory, retrying transient transport failures.
 func fetchBytes(ctx context.Context, c *http.Client, url string) ([]byte, error) {
+	var data []byte
+	err := retryTransient(ctx, func(int) error {
+		var e error
+		data, e = fetchBytesOnce(ctx, c, url)
+		return e
+	})
+	return data, err
+}
+
+func fetchBytesOnce(ctx context.Context, c *http.Client, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -149,30 +230,75 @@ func fetchBytes(ctx context.Context, c *http.Client, url string) ([]byte, error)
 	return io.ReadAll(resp.Body)
 }
 
-// download fetches url into memory, invoking onProgress as bytes arrive. total is
-// the expected size for the progress denominator (overridden by Content-Length).
-func download(ctx context.Context, c *http.Client, url string, total int64, onProgress func(received, total int64)) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
-	}
-	if resp.ContentLength > 0 {
-		total = resp.ContentLength
-	}
+// download fetches url into memory, invoking onProgress as bytes arrive. A transient
+// transport failure is retried; the retry resumes from the bytes already received
+// via a Range request instead of restarting, and switches to the IPv4 fallback
+// client (when provided) since a reset usually means the IPv6 route is the problem.
+// total is the expected size for the progress denominator (refined from the response).
+func download(ctx context.Context, c, fallback *http.Client, url string, total int64, onProgress func(received, total int64)) ([]byte, error) {
 	var buf bytes.Buffer
-	pr := &progressReader{r: resp.Body, total: total, onProgress: onProgress}
-	if _, err := io.Copy(&buf, pr); err != nil {
+	err := retryTransient(ctx, func(attempt int) error {
+		client := c
+		if attempt > 1 && fallback != nil {
+			client = fallback
+		}
+		return downloadInto(ctx, client, url, &buf, &total, onProgress)
+	})
+	if err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// downloadInto appends url's body to buf, resuming from buf's current length via a
+// Range request so a retry continues the partial download. A 206 carries the
+// remaining bytes; a 200 means the server ignored Range, so buf is reset and the
+// whole file re-downloaded. total is refined from the response for the progress
+// denominator (Content-Length on 200, the size field of Content-Range on 206).
+func downloadInto(ctx context.Context, c *http.Client, url string, buf *bytes.Buffer, total *int64, onProgress func(received, total int64)) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	if buf.Len() > 0 {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", buf.Len()))
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		buf.Reset()
+		if resp.ContentLength > 0 {
+			*total = resp.ContentLength
+		}
+	case http.StatusPartialContent:
+		if t := totalFromContentRange(resp.Header.Get("Content-Range")); t > 0 {
+			*total = t
+		}
+	default:
+		return fmt.Errorf("GET %s: %s", url, resp.Status)
+	}
+	have := int64(buf.Len())
+	pr := &progressReader{r: resp.Body, received: have, lastEmit: have, total: *total, onProgress: onProgress}
+	_, err = io.Copy(buf, pr)
+	return err
+}
+
+// totalFromContentRange parses the total size out of a "bytes 200-999/1000" header,
+// returning 0 when it's absent or "*" (unknown).
+func totalFromContentRange(v string) int64 {
+	i := strings.LastIndex(v, "/")
+	if i < 0 {
+		return 0
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(v[i+1:]), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // progressReader reports cumulative bytes read, throttled so the event channel
@@ -240,7 +366,10 @@ func applyLinux(targz []byte) error {
 
 // applyWindows writes the downloaded NSIS installer to a temp file and launches it.
 // The per-user installer needs no admin rights and its finish page relaunches the
-// app; the caller then exits so the installer can replace the running exe.
+// app; the caller then exits so the installer can replace the running exe. The
+// installer targets the running app's own directory (issue #3217) so an update
+// overwrites in place instead of landing a second copy at the per-user default —
+// this also covers upgrades from builds that predate the registry InstallLocation.
 func applyWindows(installer []byte) error {
 	f, err := os.CreateTemp("", "reasonix-update-*.exe")
 	if err != nil {
@@ -254,7 +383,21 @@ func applyWindows(installer []byte) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	return exec.Command(name).Start()
+	return installerCommand(name, currentInstallDir()).Start()
+}
+
+// currentInstallDir is the directory of the running executable — the location a
+// Windows update must overwrite. Empty when it can't be resolved, in which case
+// the installer falls back to its own InstallDir logic.
+func currentInstallDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return filepath.Dir(exe)
 }
 
 // relaunch starts a fresh copy of the (just-replaced) executable.

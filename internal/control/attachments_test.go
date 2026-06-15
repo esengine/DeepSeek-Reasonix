@@ -102,6 +102,66 @@ func TestSaveImageFile(t *testing.T) {
 	}
 }
 
+func TestSaveAttachmentFile(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile("notes.pdf", []byte("%PDF-1.4 body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := SaveAttachmentFile("notes.pdf")
+	if err != nil {
+		t.Fatalf("SaveAttachmentFile: %v", err)
+	}
+	if !strings.HasPrefix(got, ".reasonix/attachments/clipboard-") || !strings.HasSuffix(got, ".pdf") {
+		t.Fatalf("path = %q, want attachment pdf path", got)
+	}
+	if data, err := os.ReadFile(got); err != nil || string(data) != "%PDF-1.4 body" {
+		t.Fatalf("stored bytes = %q (err %v), want original", data, err)
+	}
+}
+
+func TestSaveAttachmentFileRejectsEmptyAndDir(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile("empty.txt", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SaveAttachmentFile("empty.txt"); err == nil {
+		t.Fatal("empty file should fail")
+	}
+	if err := os.Mkdir("adir", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SaveAttachmentFile("adir"); err == nil {
+		t.Fatal("directory should fail")
+	}
+}
+
+func TestSaveAttachmentFileSanitizesExtension(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile("payload.weird-ext-here", []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := SaveAttachmentFile("payload.weird-ext-here")
+	if err != nil {
+		t.Fatalf("SaveAttachmentFile: %v", err)
+	}
+	if !strings.HasSuffix(got, ".bin") {
+		t.Fatalf("path = %q, want .bin fallback for unsafe extension", got)
+	}
+}
+
+func TestSaveAttachmentFileRejectsSymlink(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile("source.bin", []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("source.bin", "link.bin"); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if _, err := SaveAttachmentFile("link.bin"); err == nil {
+		t.Fatal("symlink attachment path should fail")
+	}
+}
+
 func TestSaveImageFileRejectsSymlink(t *testing.T) {
 	t.Chdir(t.TempDir())
 	if err := os.WriteFile("source.png", mustBase64(t, tinyPNG), 0o644); err != nil {

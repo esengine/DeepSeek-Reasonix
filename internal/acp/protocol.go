@@ -16,6 +16,7 @@ package acp
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -47,10 +48,9 @@ type Implementation struct {
 	Version string `json:"version,omitempty"`
 }
 
-// InitializeResult advertises what this agent supports. The capability flags
-// match main exactly: sessions are created via session/new (no loadSession),
-// prompts may carry inline resource text (embeddedContext) but not image/audio,
-// and MCP is stdio-only (no http/sse).
+// InitializeResult advertises what this agent supports: persisted session load,
+// ACP v1 session lifecycle helpers, inline resource text (embeddedContext) but
+// not image/audio, and stdio-only MCP (no http/sse).
 type InitializeResult struct {
 	ProtocolVersion   int               `json:"protocolVersion"`
 	AgentCapabilities AgentCapabilities `json:"agentCapabilities"`
@@ -60,9 +60,21 @@ type InitializeResult struct {
 
 // AgentCapabilities is the agentCapabilities object in InitializeResult.
 type AgentCapabilities struct {
-	LoadSession        bool               `json:"loadSession"`
-	PromptCapabilities PromptCapabilities `json:"promptCapabilities"`
-	MCPCapabilities    MCPCapabilities    `json:"mcpCapabilities"`
+	LoadSession         bool                `json:"loadSession"`
+	SessionCapabilities SessionCapabilities `json:"sessionCapabilities,omitempty"`
+	PromptCapabilities  PromptCapabilities  `json:"promptCapabilities"`
+	MCPCapabilities     MCPCapabilities     `json:"mcpCapabilities"`
+}
+
+// EmptyCapability serializes to {} for ACP capability flags.
+type EmptyCapability struct{}
+
+// SessionCapabilities advertises optional session lifecycle methods.
+type SessionCapabilities struct {
+	List   *EmptyCapability `json:"list,omitempty"`
+	Resume *EmptyCapability `json:"resume,omitempty"`
+	Close  *EmptyCapability `json:"close,omitempty"`
+	Delete *EmptyCapability `json:"delete,omitempty"`
 }
 
 // PromptCapabilities reports which content-block kinds prompts may carry.
@@ -89,15 +101,69 @@ type SessionNewParams struct {
 
 // MCPServerSpec describes one stdio MCP server the client asks the agent to run.
 type MCPServerSpec struct {
-	Name    string            `json:"name"`
-	Command string            `json:"command,omitempty"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
+	Name    string   `json:"name"`
+	Type    string   `json:"type,omitempty"`
+	Command string   `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
+	Env     MCPEnv   `json:"env,omitempty"`
+}
+
+// MCPEnv accepts ACP's official EnvVariable[] shape while still accepting the
+// older map shape that Reasonix v1 clients used.
+type MCPEnv map[string]string
+
+// EnvVariable is one official ACP MCP environment variable entry.
+type EnvVariable struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+func (e *MCPEnv) UnmarshalJSON(raw []byte) error {
+	if strings.TrimSpace(string(raw)) == "" || strings.TrimSpace(string(raw)) == "null" {
+		*e = nil
+		return nil
+	}
+
+	var vars []EnvVariable
+	if err := json.Unmarshal(raw, &vars); err == nil {
+		out := make(map[string]string, len(vars))
+		for i, v := range vars {
+			if strings.TrimSpace(v.Name) == "" {
+				return fmt.Errorf("env[%d].name is required", i)
+			}
+			out[v.Name] = v.Value
+		}
+		*e = out
+		return nil
+	}
+
+	var legacy map[string]string
+	if err := json.Unmarshal(raw, &legacy); err == nil {
+		*e = legacy
+		return nil
+	}
+	return fmt.Errorf("env must be an array of {name,value} objects")
 }
 
 // SessionNewResult returns the opaque id used to address the session thereafter.
 type SessionNewResult struct {
-	SessionID string `json:"sessionId"`
+	SessionID     string                `json:"sessionId"`
+	Models        *SessionModelState    `json:"models,omitempty"`
+	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
+}
+
+// ModelInfo describes one selectable model in ACP's legacy model selector.
+type ModelInfo struct {
+	ModelID     string `json:"modelId"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// SessionModelState is ACP's legacy model selector state. New clients should
+// prefer the category:"model" config option, but some hosts still probe this.
+type SessionModelState struct {
+	AvailableModels []ModelInfo `json:"availableModels"`
+	CurrentModelID  string      `json:"currentModelId"`
 }
 
 // --- session/load ---
@@ -114,7 +180,112 @@ type SessionLoadParams struct {
 
 // SessionLoadResult is the empty ack; the conversation has already arrived as a
 // burst of session/update notifications by the time it is sent.
-type SessionLoadResult struct{}
+type SessionLoadResult struct {
+	Models        *SessionModelState    `json:"models,omitempty"`
+	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
+}
+
+// --- session/resume ---
+
+// SessionResumeParams resumes a session without replaying its transcript.
+type SessionResumeParams struct {
+	SessionID  string          `json:"sessionId"`
+	Cwd        string          `json:"cwd,omitempty"`
+	MCPServers []MCPServerSpec `json:"mcpServers,omitempty"`
+}
+
+// SessionResumeResult is the empty ack returned once the session is ready.
+type SessionResumeResult struct {
+	Models        *SessionModelState    `json:"models,omitempty"`
+	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
+}
+
+// --- session/set_config_option ---
+
+// SetSessionConfigOptionParams changes one advertised session config option.
+type SetSessionConfigOptionParams struct {
+	SessionID string `json:"sessionId"`
+	ConfigID  string `json:"configId"`
+	Value     string `json:"value"`
+}
+
+// SetSessionConfigOptionResult returns the full refreshed config state.
+type SetSessionConfigOptionResult struct {
+	ConfigOptions []SessionConfigOption `json:"configOptions"`
+}
+
+// SessionConfigOption is a single-value ACP session selector.
+type SessionConfigOption struct {
+	ID           string                      `json:"id"`
+	Name         string                      `json:"name"`
+	Description  string                      `json:"description,omitempty"`
+	Category     string                      `json:"category,omitempty"`
+	Type         string                      `json:"type"`
+	CurrentValue string                      `json:"currentValue"`
+	Options      []SessionConfigSelectOption `json:"options"`
+}
+
+// SessionConfigSelectOption is one selectable value for a config option.
+type SessionConfigSelectOption struct {
+	Value       string `json:"value"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// --- session/set_model ---
+
+// SetSessionModelParams is ACP's legacy model-switching request.
+type SetSessionModelParams struct {
+	SessionID string `json:"sessionId"`
+	ModelID   string `json:"modelId"`
+}
+
+// SetSessionModelResult is the empty ack for legacy model switching.
+type SetSessionModelResult struct{}
+
+// --- session/list ---
+
+// SessionListParams lists known sessions, optionally filtered by cwd.
+type SessionListParams struct {
+	Cwd    string `json:"cwd,omitempty"`
+	Cursor string `json:"cursor,omitempty"`
+}
+
+// SessionListResult is the first and only page of sessions Reasonix currently
+// returns. NextCursor is omitted because the in-process list is unpaged.
+type SessionListResult struct {
+	Sessions   []SessionInfo `json:"sessions"`
+	NextCursor string        `json:"nextCursor,omitempty"`
+}
+
+// SessionInfo is the ACP session/list item shape.
+type SessionInfo struct {
+	SessionID string         `json:"sessionId"`
+	Cwd       string         `json:"cwd"`
+	Title     string         `json:"title,omitempty"`
+	UpdatedAt string         `json:"updatedAt,omitempty"`
+	Meta      map[string]any `json:"_meta,omitempty"`
+}
+
+// --- session/close ---
+
+// SessionCloseParams closes an active session and releases its resources.
+type SessionCloseParams struct {
+	SessionID string `json:"sessionId"`
+}
+
+// SessionCloseResult is the empty close ack.
+type SessionCloseResult struct{}
+
+// --- session/delete ---
+
+// SessionDeleteParams removes a session from future session/list results.
+type SessionDeleteParams struct {
+	SessionID string `json:"sessionId"`
+}
+
+// SessionDeleteResult is the empty delete ack.
+type SessionDeleteResult struct{}
 
 // --- content blocks (inbound prompt) ---
 
@@ -236,6 +407,12 @@ type toolContent struct {
 	Content ContentBlock `json:"content"`
 }
 
+// configOptionUpdate reports a complete refreshed session config state.
+type configOptionUpdate struct {
+	SessionUpdate string                `json:"sessionUpdate"`
+	ConfigOptions []SessionConfigOption `json:"configOptions"`
+}
+
 // --- session/cancel (client → agent notification) ---
 
 // SessionCancelParams cancels an in-progress turn.
@@ -249,10 +426,11 @@ type SessionCancelParams struct {
 type PermissionOptionKind string
 
 const (
-	OptAllowOnce    PermissionOptionKind = "allow_once"
-	OptAllowAlways  PermissionOptionKind = "allow_always"
-	OptRejectOnce   PermissionOptionKind = "reject_once"
-	OptRejectAlways PermissionOptionKind = "reject_always"
+	OptAllowOnce       PermissionOptionKind = "allow_once"
+	OptAllowAlways     PermissionOptionKind = "allow_always"
+	OptAllowPersistent PermissionOptionKind = "allow_persistent"
+	OptRejectOnce      PermissionOptionKind = "reject_once"
+	OptRejectAlways    PermissionOptionKind = "reject_always"
 )
 
 // PermissionOption is one choice offered to the user for a permission request.

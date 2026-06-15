@@ -9,14 +9,29 @@ name: Release desktop
 # runner per platform. Artifacts are minisign-signed (MINISIGN_* secrets), a
 # latest.json manifest is generated, and everything is published to a GitHub
 # release and mirrored to R2 (the updater reads R2 first, GitHub as fallback).
+#
+# The same build/sign/manifest pipeline serves two channels. A `desktop-v*` tag
+# (or manual stable dispatch) publishes a GitHub release and moves R2's latest/
+# pointer. A manual `channel: canary` dispatch builds with -X main.channel=canary
+# and uploads only to R2's canary/ pointer — no GitHub release, so canary never
+# shows on the releases page and never touches latest/.
 on:
   push:
     tags: ["desktop-v*"]
   workflow_dispatch:
     inputs:
+      channel:
+        description: "Release channel"
+        type: choice
+        options: [stable, canary]
+        default: stable
       tag:
-        description: "Tag to publish (e.g. desktop-v1.1.0). Required when run manually."
-        required: true
+        description: "stable: tag to publish (e.g. desktop-v1.1.0)"
+        required: false
+        type: string
+      base_version:
+        description: "canary: intended next stable version, e.g. 1.5.0"
+        required: false
         type: string
 
 permissions:
@@ -27,9 +42,9 @@ jobs:
     name: cache hit guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -44,36 +59,45 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { runner: macos-14, platform: darwin/arm64, name: darwin-arm64 }
-          - { runner: macos-13, platform: darwin/amd64, name: darwin-amd64 }
+          # One universal macOS build (Intel + Apple Silicon) on a single arm64
+          # runner — avoids the scarce/slow macos-13 Intel runner.
+          - { runner: macos-14, platform: darwin/universal, name: darwin-universal }
           - { runner: windows-latest, platform: windows/amd64, name: windows-amd64 }
+          - { runner: windows-11-arm, platform: windows/arm64, name: windows-arm64 }
           - { runner: ubuntu-22.04, platform: linux/amd64, name: linux-amd64 }
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
         shell: bash # desktop-build.sh is bash; windows runners default to pwsh otherwise
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: desktop/go.mod
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
-          version: 9
+          version: 10
 
-      # Linux: WebKitGTK 4.0 toolchain (pinned to ubuntu-22.04; no webkit2_41 tag).
+      # Linux: WebKitGTK 4.1 toolchain (-tags webkit2_41 in desktop-build.sh).
+      # 4.1 ships from ubuntu-22.04 on and is the only one present on 24.04+/Fedora 40+.
       - name: Install Linux build deps
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.0-dev
+          sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      # Linux: nfpm builds the .deb in desktop-build.sh's linux branch. go install
+      # drops it in ~/go/bin, already on PATH (same place the wails CLI lands below).
+      - name: Install nfpm
+        if: runner.os == 'Linux'
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.46.3
 
       # Windows: NSIS provides makensis for `wails build -nsis`.
       - name: Install NSIS
@@ -82,18 +106,62 @@ jobs:
           choco install nsis -y --no-progress
           echo "C:\Program Files (x86)\NSIS" >> "$GITHUB_PATH"
 
+      # macOS: create-dmg packages the .app into a drag-to-Applications .dmg.
+      - name: Install create-dmg
+        if: runner.os == 'macOS'
+        run: brew install create-dmg
+
+      # macOS signing: import the Developer ID cert into a throwaway keychain and
+      # stage the notarization key. No-ops (and the build ad-hoc signs) when the
+      # APPLE_* secrets aren't set, so forks still build.
+      - name: Import Apple signing certificate
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          if [ -z "$APPLE_CERT_P12" ]; then
+            echo "APPLE_CERT_P12 unset — desktop build will ad-hoc sign (un-notarized)"
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASS="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          echo "$APPLE_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" >/dev/null
+          # Prepend the signing keychain to the search list so codesign / find-identity see it.
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          echo "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          rm -f "$RUNNER_TEMP/cert.p12"
+
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
 
       - name: Resolve version
         id: ver
-        run: |
-          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#desktop-}" >> "$GITHUB_OUTPUT"
+        run: bash scripts/resolve-desktop-release.sh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IN_CHANNEL: ${{ inputs.channel }}
+          IN_TAG: ${{ inputs.tag }}
+          IN_BASE_VERSION: ${{ inputs.base_version }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
 
       - name: Build and package
-        run: scripts/desktop-build.sh "${{ matrix.platform }}" "${{ steps.ver.outputs.version }}"
+        env:
+          # macOS Developer ID + notarization path turns on only when all five
+          # APPLE_* secrets are present; otherwise desktop-build.sh ad-hoc signs.
+          # Harmless on Windows/Linux runners (only the darwin branch reads these).
+          HAS_APPLE_CERT: ${{ secrets.APPLE_CERT_P12 != '' && secrets.APPLE_CERT_PASSWORD != '' && secrets.APPLE_API_KEY_P8 != '' && secrets.APPLE_API_KEY_ID != '' && secrets.APPLE_API_ISSUER_ID != '' }}
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/notary.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: scripts/desktop-build.sh "${{ matrix.platform }}" "${{ steps.ver.outputs.version }}" "${{ steps.ver.outputs.channel }}"
 
       - name: Sign artifacts (minisign)
         working-directory: desktop
@@ -102,7 +170,7 @@ jobs:
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
         run: go run ./cmd/sign sign ../dist/*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.name }}
           path: dist/*
@@ -112,16 +180,19 @@ jobs:
     name: publish release
     needs: build
     runs-on: ubuntu-latest
+    # Stable publishes go through the `release` environment (esengine must
+    # approve); canary uses the open `canary` environment so maintainers self-serve.
+    environment: ${{ (github.event_name == 'workflow_dispatch' && inputs.channel == 'canary') && 'canary' || 'release' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: desktop/go.mod
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: dist-*
@@ -129,10 +200,14 @@ jobs:
 
       - name: Resolve version
         id: ver
-        run: |
-          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#desktop-}" >> "$GITHUB_OUTPUT"
+        run: bash scripts/resolve-desktop-release.sh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IN_CHANNEL: ${{ inputs.channel }}
+          IN_TAG: ${{ inputs.tag }}
+          IN_BASE_VERSION: ${{ inputs.base_version }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
 
       # Generate latest.json with GitHub release download URLs; the mirror step
       # rewrites them to R2 afterwards. GITHUB_REPOSITORY is provided by the runner.
@@ -140,31 +215,62 @@ jobs:
         working-directory: desktop
         run: go run ./cmd/sign manifest ../dist "${{ steps.ver.outputs.version }}" "${{ steps.ver.outputs.tag }}"
 
+      # Canary is R2-only and never appears on the GitHub releases page; the mirror
+      # job picks up the signed dist via the canary-dist artifact below. Stable
+      # publishes a GitHub release as usual.
       - name: Publish GitHub release
+        if: steps.ver.outputs.channel != 'canary'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.ver.outputs.tag }}" dist/* \
-            --title "Reasonix Desktop ${{ steps.ver.outputs.tag }}" \
-            --generate-notes
+          args=(--title "Reasonix Desktop ${{ steps.ver.outputs.version }}" --generate-notes)
+          [ "${{ steps.ver.outputs.prerelease }}" = "true" ] && args+=(--prerelease)
+          gh release create "${{ steps.ver.outputs.tag }}" dist/* "${args[@]}"
+
+      - name: Upload canary dist for mirror
+        if: steps.ver.outputs.channel == 'canary'
+        uses: actions/upload-artifact@v7
+        with:
+          name: canary-dist
+          path: dist/*
+          if-no-files-found: error
 
   mirror:
     name: mirror to R2
     needs: publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # gh release download
+      actions: write # dispatch pages.yml to re-bake the site version
     # Skip cleanly when R2 isn't configured; GitHub release still works as fallback.
     if: ${{ github.repository_owner == 'esengine' }}
     env:
       HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
     steps:
-      - name: Resolve tag
+      - uses: actions/checkout@v6
+
+      - name: Resolve version
         id: ver
-        run: |
-          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+        run: bash scripts/resolve-desktop-release.sh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IN_CHANNEL: ${{ inputs.channel }}
+          IN_TAG: ${{ inputs.tag }}
+          IN_BASE_VERSION: ${{ inputs.base_version }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+
+      # Canary has no GitHub release — pull the signed dist from the workflow
+      # artifact. Stable pulls from the published release.
+      - name: Download canary dist
+        if: env.HAS_R2 == 'true' && steps.ver.outputs.channel == 'canary'
+        uses: actions/download-artifact@v8
+        with:
+          name: canary-dist
+          path: assets
 
       - name: Download release assets
-        if: env.HAS_R2 == 'true'
+        if: env.HAS_R2 == 'true' && steps.ver.outputs.channel != 'canary'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -176,7 +282,7 @@ jobs:
       - name: Rewrite latest.json URLs to R2
         if: env.HAS_R2 == 'true'
         env:
-          R2_PUBLIC_BASE: https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev
+          R2_PUBLIC_BASE: https://dl.reasonix.io
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
           f=assets/latest.json
@@ -205,4 +311,20 @@ jobs:
         run: |
           ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           aws s3 cp assets/ "s3://${R2_BUCKET}/${TAG}/" --recursive --endpoint-url "$ENDPOINT"
-          aws s3 cp assets/ "s3://${R2_BUCKET}/latest/" --recursive --endpoint-url "$ENDPOINT"
+          # The pointer a release moves is its channel's alone: canary writes
+          # canary/, stable writes latest/. A stable prerelease (rc) moves neither.
+          if [ "${{ steps.ver.outputs.channel }}" = "canary" ]; then
+            aws s3 cp assets/ "s3://${R2_BUCKET}/canary/" --recursive --endpoint-url "$ENDPOINT"
+          elif [ "${{ steps.ver.outputs.prerelease }}" = "true" ]; then
+            echo "prerelease — leaving R2 latest/ untouched"
+          else
+            aws s3 cp assets/ "s3://${R2_BUCKET}/latest/" --recursive --endpoint-url "$ENDPOINT"
+          fi
+
+      # Stable release moved R2 latest/ — rebuild the site so its build-time baked
+      # version + JSON-LD follow (site.js's runtime .rxv refresh can't touch first paint / SEO).
+      - name: Refresh site to the new version
+        if: env.HAS_R2 == 'true' && steps.ver.outputs.channel != 'canary' && steps.ver.outputs.prerelease != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main-v2

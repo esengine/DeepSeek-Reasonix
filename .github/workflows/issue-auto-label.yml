@@ -1,0 +1,99 @@
+name: Auto-label issues
+
+# Classify new issues into area / platform / severity labels using the DeepSeek
+# API (the project's own model). The model is constrained to a fixed label set —
+# anything it returns outside the set is dropped — so it can't invent labels.
+# Issues it can't place into any area get `needs-triage` for a human to look at.
+# Version (v1/v2) labels are handled separately by issue-version-label.yml.
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  issues: write
+
+concurrency:
+  group: issue-autolabel-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v9
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        with:
+          script: |
+            const AREA = ['agent','mcp','config','updater','provider','desktop','tui','skills','rendering'];
+            const PLATFORM = ['windows','macos','linux'];
+            const SEVERITY = ['crash','data-loss','security'];
+            const ALLOWED = new Set([...AREA, ...PLATFORM, ...SEVERITY]);
+
+            const issue = context.payload.issue;
+            const title = issue.title || '';
+            const body = (issue.body || '').slice(0, 4000);
+
+            const system = [
+              'You categorize GitHub issues for Reasonix, a Go-based AI coding agent with a Wails desktop app and a terminal UI.',
+              'Pick labels ONLY from these fixed sets. Never invent labels.',
+              'area (0-2, the affected subsystem):',
+              '  agent: core agent loop / tool-calling / reasoning',
+              '  mcp: MCP servers, plugins, codegraph',
+              '  config: configuration, setup wizard, .toml/.env',
+              '  updater: auto-update, installer, release packaging',
+              '  provider: model providers, model selection/switching',
+              '  desktop: Wails desktop GUI',
+              '  tui: terminal UI / CLI',
+              '  skills: skills system',
+              '  rendering: terminal rendering / flicker / repaint',
+              'platform (only if clearly specific to one OS): windows, macos, linux',
+              'severity (only if clearly applicable):',
+              '  crash: app crashes, hangs, or freezes',
+              '  data-loss: loss of sessions, config, or history',
+              '  security: credential/secret exposure or a security flaw',
+              'Be conservative: omit a label when unsure. The issue may be in Chinese.',
+              'Reply with JSON only: {"area":[],"platform":[],"severity":[]}',
+            ].join('\n');
+
+            let labels = [];
+            try {
+              const res = await fetch('https://api.deepseek.com/chat/completions', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  model: 'deepseek-chat',
+                  temperature: 0,
+                  response_format: { type: 'json_object' },
+                  messages: [
+                    { role: 'system', content: system },
+                    { role: 'user', content: `Title: ${title}\n\nBody:\n${body}` },
+                  ],
+                }),
+              });
+              if (!res.ok) {
+                core.warning(`DeepSeek API ${res.status}: ${await res.text()}`);
+                return;
+              }
+              const data = await res.json();
+              const parsed = JSON.parse(data.choices[0].message.content);
+              labels = [...(parsed.area || []), ...(parsed.platform || []), ...(parsed.severity || [])]
+                .filter(l => ALLOWED.has(l));
+            } catch (e) {
+              core.warning(`Classification failed: ${e.message}`);
+              return;
+            }
+
+            if (!labels.some(l => AREA.includes(l))) labels.push('needs-triage');
+
+            if (labels.length) {
+              await github.rest.issues.addLabels({
+                ...context.repo,
+                issue_number: issue.number,
+                labels,
+              });
+              core.info(`Applied: ${labels.join(', ')}`);
+            }

@@ -1,0 +1,110 @@
+package cli
+
+import (
+	"fmt"
+	"strings"
+
+	"reasonix/internal/command"
+	"reasonix/internal/i18n"
+	"reasonix/internal/plugin"
+	"reasonix/internal/skill"
+)
+
+const helpMaxDynamicItems = 8
+
+func (m *chatTUI) showHelp() {
+	m.commitLine(renderHelp(m.width, m.commands, m.skills, m.prompts()))
+}
+
+func renderHelp(width int, commands []command.Command, skills []skill.Skill, prompts []plugin.Prompt) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n", viewHeader("commands"))
+	writeHelpItems(&b, width, "built-in", builtinHelpItems(), 0)
+	if len(commands) > 0 {
+		writeHelpItems(&b, width, "custom", customHelpItems(commands), helpMaxDynamicItems)
+	}
+	if len(skills) > 0 {
+		writeHelpItems(&b, width, "skills", skillHelpItems(skills), helpMaxDynamicItems)
+	}
+	if len(prompts) > 0 {
+		writeHelpItems(&b, width, "MCP prompts", promptHelpItems(prompts), helpMaxDynamicItems)
+	}
+	b.WriteString(viewHint("type a command, or press Tab after / for completion"))
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func writeHelpItems(b *strings.Builder, width int, title string, items []compItem, limit int) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString(viewSubhead(title) + "\n")
+	n := len(items)
+	if limit > 0 && n > limit {
+		n = limit
+	}
+	for _, item := range items[:n] {
+		name := item.label
+		used := 2 + viewPadWidth(name, 18) + 1
+		hint := viewCompactText(item.hint, viewBudget(width, used))
+		fmt.Fprintf(b, "  %-18s %s\n", name, viewMeta(hint))
+	}
+	if extra := len(items) - n; extra > 0 {
+		b.WriteString(viewMore(extra, "items") + "\n")
+	}
+}
+
+func builtinHelpItems() []compItem {
+	return []compItem{
+		{label: "/compact", hint: i18n.M.CmdCompact},
+		{label: "/new", hint: i18n.M.CmdNew},
+		{label: "/rename", hint: i18n.M.CmdRename},
+		{label: "/clear", hint: i18n.M.CmdClear},
+		{label: "/rewind", hint: i18n.M.CmdRewind},
+		{label: "/tree", hint: i18n.M.CmdTree},
+		{label: "/branch", hint: i18n.M.CmdBranch},
+		{label: "/switch", hint: i18n.M.CmdSwitchBranch},
+		{label: "/todo", hint: i18n.M.CmdTodo},
+		{label: "/model", hint: i18n.M.CmdModel},
+		{label: "/provider", hint: i18n.M.CmdProvider},
+		{label: "/mcp", hint: i18n.M.CmdMcp},
+		{label: "/skills", hint: i18n.M.CmdSkill},
+		{label: "/hooks", hint: i18n.M.CmdHooks},
+		{label: "/memory", hint: i18n.M.CmdMemory},
+		{label: "/output-style", hint: i18n.M.CmdOutputStyle},
+		{label: "/diff-fold", hint: i18n.M.CmdDiffFold},
+		{label: "/sandbox", hint: i18n.M.CmdSandbox},
+		{label: "/verbose", hint: i18n.M.CmdVerbose},
+		{label: "/language", hint: i18n.M.CmdLanguage},
+		{label: "/auto-plan", hint: i18n.M.CmdAutoPlan},
+		{label: "/reasoning-language", hint: i18n.M.CmdReasonLang},
+		{label: "/help", hint: i18n.M.CmdHelp},
+	}
+}
+
+func customHelpItems(commands []command.Command) []compItem {
+	items := make([]compItem, 0, len(commands))
+	for _, c := range commands {
+		items = append(items, compItem{label: "/" + c.Name, hint: c.Description})
+	}
+	return items
+}
+
+func skillHelpItems(skills []skill.Skill) []compItem {
+	items := make([]compItem, 0, len(skills))
+	for _, s := range skills {
+		hint := s.Description
+		if s.RunAs == skill.RunSubagent {
+			hint = "subagent · " + hint
+		}
+		items = append(items, compItem{label: "/" + s.Name, hint: hint})
+	}
+	return items
+}
+
+func promptHelpItems(prompts []plugin.Prompt) []compItem {
+	items := make([]compItem, 0, len(prompts))
+	for _, p := range prompts {
+		items = append(items, compItem{label: "/" + p.Name, hint: p.Description})
+	}
+	return items
+}

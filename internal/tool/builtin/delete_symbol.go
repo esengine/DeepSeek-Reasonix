@@ -28,6 +28,7 @@ type symbolMatch struct {
 	parent   string
 	line     int
 	start    token.Pos
+	docStart token.Pos // start of the symbol's doc comment, if any (excluded from start)
 	end      token.Pos
 	siblings []string
 }
@@ -187,11 +188,11 @@ func (d deleteSymbol) findSymbol(path, name, kind, parent string) (symbolMatch, 
 
 	if len(filtered) > 1 {
 		var b strings.Builder
-		b.WriteString(fmt.Sprintf("Multiple matches for %q — disambiguate with kind/parent:\n", name))
+		fmt.Fprintf(&b, "Multiple matches for %q — disambiguate with kind/parent:\n", name)
 		for _, m := range filtered {
-			b.WriteString(fmt.Sprintf("  line %d: %s %s", m.line, m.kind, m.name))
+			fmt.Fprintf(&b, "  line %d: %s %s", m.line, m.kind, m.name)
 			if m.parent != "" {
-				b.WriteString(fmt.Sprintf(" (on %s)", m.parent))
+				fmt.Fprintf(&b, " (on %s)", m.parent)
 			}
 			b.WriteString("\n")
 		}
@@ -216,6 +217,9 @@ func collectSymbols(fset *token.FileSet, f *ast.File) []symbolMatch {
 				start: d.Pos(),
 				end:   d.End(),
 				line:  fset.Position(d.Pos()).Line,
+			}
+			if d.Doc != nil {
+				m.docStart = d.Doc.Pos()
 			}
 			if d.Recv != nil && len(d.Recv.List) > 0 {
 				m.kind = "method"
@@ -244,6 +248,9 @@ func collectSymbols(fset *token.FileSet, f *ast.File) []symbolMatch {
 					} else {
 						m.kind = "type"
 					}
+					if doc := specDoc(d, s.Doc); doc != nil {
+						m.docStart = doc.Pos()
+					}
 					matches = append(matches, m)
 				case *ast.ValueSpec:
 					kind := "var"
@@ -254,12 +261,17 @@ func collectSymbols(fset *token.FileSet, f *ast.File) []symbolMatch {
 					for _, ident := range s.Names {
 						names = append(names, ident.Name)
 					}
+					var docStart token.Pos
+					if doc := specDoc(d, s.Doc); doc != nil {
+						docStart = doc.Pos()
+					}
 					for _, ident := range s.Names {
 						matches = append(matches, symbolMatch{
 							name:     ident.Name,
 							kind:     kind,
 							start:    ident.Pos(),
-							end:      ident.End(),
+							docStart: docStart,
+							end:      s.End(), // whole spec, incl. a multi-line value — ident.End() stops at the name
 							line:     fset.Position(ident.Pos()).Line,
 							siblings: names,
 						})
@@ -271,8 +283,27 @@ func collectSymbols(fset *token.FileSet, f *ast.File) []symbolMatch {
 	return matches
 }
 
+// specDoc returns the doc comment governing one spec of a GenDecl: the spec's own
+// doc when grouped (type/const/var (...)), else the GenDecl's doc for an
+// unparenthesized single declaration — where the parser attaches the comment to
+// the GenDecl, not the spec. nil for an undocumented spec, and never the group's
+// own doc when deleting just one spec of a parenthesized block.
+func specDoc(gen *ast.GenDecl, own *ast.CommentGroup) *ast.CommentGroup {
+	if own != nil {
+		return own
+	}
+	if gen.Lparen == token.NoPos {
+		return gen.Doc
+	}
+	return nil
+}
+
 func deleteLines(content string, fset *token.FileSet, m symbolMatch) string {
-	startOff := fset.Position(m.start).Offset
+	start := m.start
+	if m.docStart.IsValid() {
+		start = m.docStart // delete the doc comment along with the symbol, not orphan it
+	}
+	startOff := fset.Position(start).Offset
 	endOff := fset.Position(m.end).Offset
 
 	lineStart := startOff

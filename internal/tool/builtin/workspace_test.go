@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,6 +75,28 @@ func TestWorkspaceWriteConfinement(t *testing.T) {
 	}
 }
 
+func TestWorkspaceMoveFileBindsAndConfines(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "evil.txt")
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mv := byName(Workspace{Dir: dir}.Tools())["move_file"]
+
+	if _, err := mv.Execute(context.Background(), argsJSON(t, map[string]any{"source_path": "a.md", "destination_path": "docs/a.md"})); err != nil {
+		t.Fatalf("move inside workspace should succeed: %v", err)
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "docs", "a.md")); err != nil || string(b) != "hello" {
+		t.Fatalf("file not moved inside workspace: %q err=%v", b, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mv.Execute(context.Background(), argsJSON(t, map[string]any{"source_path": "b.md", "destination_path": outside})); err == nil {
+		t.Fatal("move outside the workspace should be refused")
+	}
+}
+
 // TestWorkspaceBashDir checks bash runs in the workspace directory.
 func TestWorkspaceBashDir(t *testing.T) {
 	dir := t.TempDir()
@@ -108,9 +131,41 @@ func TestWorkspacePreviewBinds(t *testing.T) {
 
 // TestWorkspaceEnabledFilter checks the enabled whitelist.
 func TestWorkspaceEnabledFilter(t *testing.T) {
-	got := byName(Workspace{Dir: t.TempDir()}.Tools("read_file", "bash"))
-	if len(got) != 2 || got["read_file"] == nil || got["bash"] == nil {
+	got := byName(Workspace{Dir: t.TempDir()}.Tools("read_file", "bash", "todo_write", "wait"))
+	if len(got) != 4 || got["read_file"] == nil || got["bash"] == nil || got["todo_write"] == nil || got["wait"] == nil {
 		t.Fatalf("enabled filter returned %d tools: %v", len(got), keys(got))
+	}
+}
+
+func TestWorkspacePreservesSessionLevelBuiltins(t *testing.T) {
+	got := byName(Workspace{Dir: t.TempDir()}.Tools())
+	for _, name := range []string{
+		"todo_write",
+		"complete_step",
+		"bash_output",
+		"kill_shell",
+		"wait",
+		"move_file",
+		"notebook_edit",
+	} {
+		if got[name] == nil {
+			t.Fatalf("workspace tools missing %q; got %v", name, keys(got))
+		}
+	}
+}
+
+func TestWorkspaceToolSchemasStableAcrossRoots(t *testing.T) {
+	firstRoot := t.TempDir()
+	secondRoot := t.TempDir()
+
+	first := workspaceSchemasJSON(t, firstRoot)
+	second := workspaceSchemasJSON(t, secondRoot)
+
+	if first != second {
+		t.Fatalf("workspace tool schemas should not depend on workspace root:\nfirst=%s\nsecond=%s", first, second)
+	}
+	if strings.Contains(first, firstRoot) || strings.Contains(first, secondRoot) {
+		t.Fatalf("workspace paths must not leak into tool schemas: %s", first)
 	}
 }
 
@@ -144,4 +199,17 @@ func keys(m map[string]tool.Tool) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+func workspaceSchemasJSON(t *testing.T, dir string) string {
+	t.Helper()
+	reg := tool.NewRegistry()
+	for _, tt := range (Workspace{Dir: dir}).Tools() {
+		reg.Add(tt)
+	}
+	b, err := json.Marshal(reg.Schemas())
+	if err != nil {
+		t.Fatalf("marshal schemas: %v", err)
+	}
+	return string(b)
 }

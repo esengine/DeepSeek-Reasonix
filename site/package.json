@@ -1,0 +1,20 @@
+{
+  "name": "reasonix-site",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "prebuild": "node scripts/fetch-community.mjs",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/sitemap": "^3.7.3",
+    "@fontsource-variable/jetbrains-mono": "^5.1.0",
+    "@fontsource-variable/outfit": "^5.1.0",
+    "astro": "^6.4.4"
+  },
+  "overrides": {
+    "esbuild": "0.28.1"
+  }
+}

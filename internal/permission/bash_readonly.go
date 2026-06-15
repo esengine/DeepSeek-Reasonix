@@ -12,7 +12,7 @@ var readOnlyBashCommands = map[string]bool{
 	"ls": true, "find": true, "locate": true, "which": true, "whereis": true, "type": true,
 	"grep": true, "egrep": true, "fgrep": true, "rg": true,
 	"echo": true, "printf": true,
-	"pwd": true, "whoami": true, "id": true, "uname": true, "hostname": true,
+	"pwd": true, "cd": true, "whoami": true, "id": true, "uname": true, "hostname": true,
 	"date": true, "env": true, "printenv": true,
 	"wc": true, "sort": true, "uniq": true, "cut": true, "tr": true,
 	"stat": true, "file": true, "du": true, "df": true,
@@ -76,10 +76,7 @@ func isReadOnlyBashSubject(subject string) bool {
 
 	// Check single-word read-only commands.
 	if readOnlyBashCommands[base] {
-		if hasUnsafeReadOnlyArgs(base, fields[1:]) {
-			return false
-		}
-		return true
+		return !hasUnsafeReadOnlyArgs(base, fields[1:])
 	}
 
 	// Check prefix commands (git log, go vet, etc.).

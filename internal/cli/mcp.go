@@ -163,6 +163,8 @@ func mcpCommand(args []string) int {
 		return mcpAddCLI(args[1:])
 	case "remove", "rm":
 		return mcpRemoveCLI(args[1:])
+	case "import":
+		return mcpImportCLI()
 	case "help", "-h", "--help":
 		mcpUsage()
 		return 0
@@ -173,6 +175,16 @@ func mcpCommand(args []string) int {
 	}
 }
 
+func mcpImportCLI() int {
+	total, added, updated, err := config.ImportCCSwitchMCP()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Printf("imported %d MCP servers from cc-switch (%d added, %d updated) — servers load on the next session\n", total, added, updated)
+	return 0
+}
+
 func mcpList() int {
 	cfg, err := config.Load()
 	if err != nil {
@@ -181,17 +193,19 @@ func mcpList() int {
 	}
 	listed := 0
 	// CodeGraph is a built-in server injected by boot, not a [[plugins]] entry, so
-	// report its resolved status here too — otherwise `mcp list` looks empty even
-	// when codegraph will load. This doubles as a headless preflight: it shows
-	// whether the binary resolves before you enter a session.
-	if cfg.Codegraph.Enabled {
-		if bin, ok := codegraph.Resolve(cfg.Codegraph.Path); ok {
-			fmt.Printf("%-16s (stdio, built-in)  %s serve --mcp\n", "codegraph", bin)
-		} else {
-			fmt.Printf("%-16s (built-in, not installed)  run `reasonix codegraph install` (or it auto-installs on first use)\n", "codegraph")
+	// report its resolved status here too. It is listed even when disabled, matching
+	// the MCP manager where the user can enable it.
+	codegraphMeta := fmt.Sprintf(" [enabled=%v auto_install=%v]", cfg.Codegraph.Enabled, cfg.Codegraph.AutoInstall)
+	if bin, ok := codegraph.Resolve(cfg.Codegraph.Path); ok {
+		fmt.Printf("%-16s (stdio, built-in)%s  %s serve --mcp\n", "codegraph", codegraphMeta, bin)
+	} else {
+		fmt.Printf("%-16s (built-in, not installed)%s  run `reasonix codegraph install`", "codegraph", codegraphMeta)
+		if cfg.Codegraph.Enabled && cfg.Codegraph.AutoInstall {
+			fmt.Print(" (or let auto_install fetch it on next startup)")
 		}
-		listed++
+		fmt.Println()
 	}
+	listed++
 	for _, p := range cfg.Plugins {
 		typ := p.Type
 		if typ == "" {
@@ -269,6 +283,7 @@ Usage:
   reasonix mcp add <name> <command> [args...]        stdio server
   reasonix mcp add <name> --http <url> [--header K=V] remote (Streamable HTTP)
   reasonix mcp add <name> --sse  <url>               remote (legacy SSE)
+  reasonix mcp import                                import Codex-enabled servers from cc-switch
   reasonix mcp remove <name>
 
 Flags for add:

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"reasonix/internal/diff"
@@ -44,7 +43,13 @@ func (d deleteRange) Execute(ctx context.Context, args json.RawMessage) (string,
 	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(change.Path, []byte(change.NewText), 0o644); err != nil {
+	// Re-detect the file's encoding so the rewrite preserves it (GBK/UTF-16/BOM)
+	// rather than forcing UTF-8 and corrupting a non-UTF-8 file.
+	_, enc, err := readFileEncoded(change.Path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", change.Path, err)
+	}
+	if err := writeFileEncoded(change.Path, change.NewText, enc); err != nil {
 		return "", fmt.Errorf("write %s: %w", change.Path, err)
 	}
 	return change.Diff, nil
@@ -84,11 +89,10 @@ func (d deleteRange) preview(args json.RawMessage) (diff.Change, error) {
 		return diff.Change{}, err
 	}
 
-	b, err := os.ReadFile(p.Path)
+	original, _, err := readFileEncoded(p.Path)
 	if err != nil {
 		return diff.Change{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}
-	original := string(b)
 
 	// Detect line ending style so we can preserve it on write.
 	lineSep := "\n"
@@ -122,6 +126,12 @@ func (d deleteRange) preview(args json.RawMessage) (diff.Change, error) {
 		keep = append(keep, lines[:startLine]...)
 		keep = append(keep, lines[endLine+1:]...)
 	} else {
+		// Same line for both anchors: the kept prefix and suffix would overlap at
+		// that line and duplicate it. There is nothing strictly between a line and
+		// itself, so the exclusive deletion is contradictory — reject it.
+		if startLine == endLine {
+			return diff.Change{}, fmt.Errorf("start_anchor and end_anchor match the same line in %s; with inclusive=false there is nothing between them to delete", p.Path)
+		}
 		keep = append(keep, lines[:startLine+1]...)
 		keep = append(keep, lines[endLine:]...)
 	}

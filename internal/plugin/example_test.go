@@ -7,9 +7,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"reasonix/internal/event"
 	"reasonix/internal/tool"
 )
 
@@ -89,6 +91,24 @@ func TestExamplePluginEndToEnd(t *testing.T) {
 	// which the adapter surfaces as a Go error the model can read.
 	if _, err := echo.Execute(ctx, json.RawMessage(`{"text":123}`)); err == nil {
 		t.Error("echo with non-string text should return an error (isError result)")
+	}
+
+	// Prompts and resources stream in on phase B (post-startup), so the test
+	// must drive it and wait for both surfaces before asserting. A WaitGroup
+	// completes once both MCPSurfaceReady events fire.
+	var wg sync.WaitGroup
+	wg.Add(2) // prompts + resources
+	host.StartPhaseB(ctx, event.FuncSink(func(e event.Event) {
+		if e.Kind == event.MCPSurfaceReady {
+			wg.Done()
+		}
+	}))
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("phase B did not finish in time")
 	}
 
 	// Prompts: the server advertises the capability, so the host discovers the

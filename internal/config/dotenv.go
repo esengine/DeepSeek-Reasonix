@@ -7,15 +7,29 @@ import (
 	"strings"
 )
 
-// loadDotEnv loads .env files into the process environment without overriding
-// variables that are already set. The working-directory .env is read first, so a
-// project-local key takes precedence; then ~/.env is read as a fallback. This
-// unifies the key source across frontends: the desktop app's working dir is
-// $HOME so it writes ~/.env, and the CLI — run from any project directory — now
-// picks up that same key instead of needing a copy in every project's .env.
-// Existing environment variables always win over both files.
+// loadDotEnv loads KEY=value files into the process environment without
+// overriding variables that are already set (first file to set a key wins).
+// Order: a project ./.env (read-only back-compat, so a manual project override
+// takes precedence), then the reasonix-owned global credentials file in the user
+// config dir (where `reasonix setup` writes keys, so they resolve from any
+// directory without ever touching a project's own .env), then ~/.env as a legacy
+// fallback (the desktop app writes there). Existing environment variables always
+// win over all three.
 func loadDotEnv() {
-	loadDotEnvFile(".env")
+	loadDotEnvForRoot(".")
+}
+
+// loadDotEnvForRoot loads a root's .env file (if present) before the home .env
+// fallback. When root is "." it behaves like loadDotEnv().
+func loadDotEnvForRoot(root string) {
+	dotEnvPath := ".env"
+	if root != "" && root != "." {
+		dotEnvPath = filepath.Join(root, ".env")
+	}
+	loadDotEnvFile(dotEnvPath)
+	if p := UserCredentialsPath(); p != "" {
+		loadDotEnvFile(p)
+	}
 	if home, err := os.UserHomeDir(); err == nil {
 		loadDotEnvFile(filepath.Join(home, ".env"))
 	}

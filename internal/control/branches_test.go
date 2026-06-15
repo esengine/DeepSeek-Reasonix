@@ -44,7 +44,7 @@ func TestBranchAndSwitch(t *testing.T) {
 	}
 
 	tree := c.BranchTreeText()
-	if !strings.Contains(tree, rootID) || !strings.Contains(tree, "try something") {
+	if !strings.Contains(tree, shortBranchID(rootID)) || !strings.Contains(tree, "try something") {
 		t.Fatalf("tree missing expected branches:\n%s", tree)
 	}
 }
@@ -97,13 +97,125 @@ func TestParseBranchTarget(t *testing.T) {
 	}
 }
 
+func TestSubmitSwitchEmitsErrorNotice(t *testing.T) {
+	var notices []string
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	c := New(Options{
+		Executor: exec,
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices = append(notices, e.Text)
+			}
+		}),
+	})
+
+	c.Submit("/switch")
+	if len(notices) == 0 {
+		t.Fatal("/switch with empty ref should emit an error notice")
+	}
+	if !strings.Contains(notices[len(notices)-1], "usage") {
+		t.Fatalf("notice = %q, want usage hint", notices[len(notices)-1])
+	}
+
+	notices = notices[:0]
+	c.Submit("/switch nonexistent")
+	if len(notices) == 0 {
+		t.Fatal("/switch with unknown ref should emit an error notice")
+	}
+}
+
+func TestSubmitBranchEmitsErrorNoticeWhileRunning(t *testing.T) {
+	var notices []string
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	c := New(Options{
+		Executor:   exec,
+		SessionDir: t.TempDir(),
+		Label:      "test",
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices = append(notices, e.Text)
+			}
+		}),
+	})
+	c.SetSessionPath(agent.NewSessionPath(c.sessionDir, "test"))
+
+	c.mu.Lock()
+	c.running = true
+	c.mu.Unlock()
+
+	c.Submit("/branch experiment")
+	if len(notices) == 0 {
+		t.Fatal("/branch while running should emit an error notice")
+	}
+	if !strings.Contains(notices[len(notices)-1], "cannot branch") {
+		t.Fatalf("notice = %q, want 'cannot branch' error", notices[len(notices)-1])
+	}
+}
+
 func TestFormatBranchTreeMarksCurrent(t *testing.T) {
 	branches := []agent.BranchInfo{
 		{BranchMeta: agent.BranchMeta{ID: "root"}, Preview: "root", Turns: 1},
 		{BranchMeta: agent.BranchMeta{ID: "child", ParentID: "root", Name: "child branch"}, Turns: 2},
 	}
 	got := FormatBranchTree(branches, "child")
-	if !strings.Contains(got, "* child") {
+	if !strings.Contains(got, "child branch  2 turns  current") {
 		t.Fatalf("tree should mark current branch:\n%s", got)
+	}
+	if strings.Contains(got, "*") {
+		t.Fatalf("tree should not use duplicate current markers:\n%s", got)
+	}
+}
+
+func TestFormatBranchTreeUsesCompactVisualRows(t *testing.T) {
+	branches := []agent.BranchInfo{
+		{
+			BranchMeta: agent.BranchMeta{ID: "20260601-033830.928433000-deepseek-v4-flash"},
+			Preview:    "你是谁",
+			Turns:      3,
+		},
+		{
+			BranchMeta: agent.BranchMeta{
+				ID:       "20260601-033937.165828000-deepseek-v4-flash",
+				ParentID: "20260601-033830.928433000-deepseek-v4-flash",
+			},
+			Preview: `{ "code": 0, "msg": "success", "data": { "rows": [] } }`,
+			Turns:   1,
+		},
+	}
+	got := FormatBranchTree(branches, "20260601-033937.165828000-deepseek-v4-flash")
+	checks := []string{
+		"└─",
+		"0601-033937.165",
+		"JSON response: success",
+		"1 turn",
+		"current",
+	}
+	for _, want := range checks {
+		if !strings.Contains(got, want) {
+			t.Fatalf("tree missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "20260601-033937.165828000-deepseek-v4-flash") {
+		t.Fatalf("tree should use compact branch IDs:\n%s", got)
+	}
+	if strings.Contains(got, `"data"`) {
+		t.Fatalf("tree should summarize JSON-like previews:\n%s", got)
+	}
+}
+
+func TestResolveBranchAcceptsDisplayedShortID(t *testing.T) {
+	branches := []agent.BranchInfo{
+		{BranchMeta: agent.BranchMeta{ID: "20260601-033937.165828000-deepseek-v4-flash"}},
+	}
+	got, err := resolveBranch(branches, "0601-033937.165")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != branches[0].ID {
+		t.Fatalf("branch = %q, want %q", got.ID, branches[0].ID)
 	}
 }

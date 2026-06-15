@@ -2,12 +2,11 @@ package cli
 
 import (
 	"fmt"
-	"log/slog"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
 	"reasonix/internal/config"
+	"reasonix/internal/i18n"
 )
 
 // runModelSubcommand handles "/model": with no argument it lists the configured
@@ -22,22 +21,28 @@ func (m *chatTUI) runModelSubcommand(input string) {
 	}
 	ref := args[1]
 	if m.buildController == nil {
-		m.notice("model switching is unavailable in this session")
+		m.notice(i18n.M.ModelSwitchUnavailable)
 		return
 	}
 	if m.ctrl.Running() {
-		m.notice("finish or cancel the current turn before switching models")
+		m.notice(i18n.M.ModelSwitchBusy)
 		return
 	}
 	if ref == m.modelRef {
-		m.notice("already on " + ref)
+		m.notice(fmt.Sprintf(i18n.M.ModelAlreadyOnFmt, ref))
 		return
 	}
+	// Persist the user's choice to the user config.toml so the next
+	// session starts on the same model instead of falling back to the global
+	// default. Mirrors the pattern used by /theme (persistTheme), /effort, and
+	// /language.
+	m.persistModel(ref)
 	carried := m.ctrl.History()
+	prevPath := m.ctrl.SessionPath()
 	if err := m.ctrl.Snapshot(); err != nil {
-		slog.Warn("model switch: snapshot failed", "err", err)
+		m.notice("model: snapshot failed: " + err.Error())
 	}
-	m.notice(fmt.Sprintf("switching to %s…", ref))
+	m.notice(fmt.Sprintf(i18n.M.ModelSwitchingFmt, ref))
 
 	// Capture old controller for cleanup after the async build succeeds.
 	oldCtrl := m.ctrl
@@ -51,7 +56,7 @@ func (m *chatTUI) runModelSubcommand(input string) {
 	// must happen here, before we hand the new controller back.
 	m.modelSwitchPending = true
 	m.pendingModelSwitch = func() tea.Msg {
-		c, err := build(ref, carried)
+		c, err := build(ref, carried, prevPath)
 		if err != nil {
 			return modelSwitchMsg{ref: ref, err: err}
 		}
@@ -80,23 +85,42 @@ func (m *chatTUI) showModels() {
 		m.notice("model: " + err.Error())
 		return
 	}
-	var b strings.Builder
-	b.WriteString(dim("  · models (/model <provider/model> to switch)\n"))
+	var refs []string
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
 		if !p.Configured() {
 			continue
 		}
-		for _, model := range p.ModelList() {
-			ref := p.Name + "/" + model
-			marker := "  "
-			if ref == m.modelRef {
-				marker = accent("› ")
-			}
-			fmt.Fprintf(&b, "%s%s\n", marker, ref)
+		for _, model := range p.ChatModelList() {
+			refs = append(refs, p.Name+"/"+model)
 		}
 	}
-	m.notice(strings.TrimRight(b.String(), "\n"))
+	m.commitLine(renderModels(m.width, refs, m.modelRef))
+}
+
+// persistModel writes ref (a "provider/model" string) to default_model in the
+// user config.toml so the next CLI launch starts on the same
+// model. The in-memory switch is always allowed to proceed regardless of the
+// outcome here, but every step (rejected by validation, save failed, or
+// persisted successfully) reports back to the TUI notice channel so the user
+// can see whether their /model choice will survive a restart. Run before
+// Snapshot/ModelSwitchingFmt so the persistence outcome shows up first in
+// the notice area.
+func (m *chatTUI) persistModel(ref string) {
+	path := config.UserConfigPath()
+	if path == "" {
+		return
+	}
+	edit := config.LoadForEdit(path)
+	if err := edit.SetDefaultModel(ref); err != nil {
+		m.notice(fmt.Sprintf("model: persist refused: %v (ref=%s)", err, ref))
+		return
+	}
+	if err := edit.SaveTo(path); err != nil {
+		m.notice(fmt.Sprintf("model: persist save failed: %v (ref=%s, path=%s)", err, ref, path))
+		return
+	}
+	m.notice(fmt.Sprintf("model: persisted (ref=%s, path=%s)", ref, path))
 }
 
 // modelRefs returns the configured provider/model refs for slash completion.
@@ -111,9 +135,26 @@ func modelRefs() []string {
 		if !p.Configured() {
 			continue
 		}
-		for _, model := range p.ModelList() {
+		for _, model := range p.ChatModelList() {
 			out = append(out, p.Name+"/"+model)
 		}
+	}
+	return out
+}
+
+// providerNames returns the names of configured providers for slash completion.
+func providerNames() []string {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for i := range cfg.Providers {
+		p := &cfg.Providers[i]
+		if !p.Configured() {
+			continue
+		}
+		out = append(out, p.Name)
 	}
 	return out
 }

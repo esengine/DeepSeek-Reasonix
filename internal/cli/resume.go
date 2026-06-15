@@ -41,7 +41,8 @@ func (m *chatTUI) runResumeCommand(input string) {
 
 	args := tokenizeArgs(input) // args[0] == "/resume"
 	if len(args) < 2 {
-		m.showSessions(sessions)
+		m.showSessions(sessions) // write list to scrollback (above input)
+		m.openResumePicker()     // open interactive picker below
 		return
 	}
 	if m.ctrl.Running() {
@@ -112,10 +113,15 @@ func (m *chatTUI) resumeArgItems(val string) ([]compItem, int, bool) {
 	return out, from, true
 }
 
-// sessionSummary is the "N turns · first message" line shared by the /resume
-// list and its argument completion.
+// sessionSummary is the "N turns · project · topicTitle/first message" line
+// shared by the /resume list and its argument completion.
+// When a TopicTitle is set (via /rename or desktop), it is shown instead of
+// the raw preview so the user can identify sessions at a glance.
 func sessionSummary(s agent.SessionInfo) string {
 	preview := s.Preview
+	if s.TopicTitle != "" {
+		preview = s.TopicTitle
+	}
 	if preview == "" {
 		preview = "(no user message yet)"
 	}

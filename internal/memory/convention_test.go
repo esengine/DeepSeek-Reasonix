@@ -18,6 +18,20 @@ func TestClaudeMdDiscovered(t *testing.T) {
 	}
 }
 
+func TestSymlinkedAgentAndClaudeDocsComposeOnce(t *testing.T) {
+	proj := t.TempDir()
+	mustMkdir(t, filepath.Join(proj, ".git"))
+	mustWrite(t, filepath.Join(proj, "CLAUDE.md"), "Shared symlink guidance")
+	if err := os.Symlink("CLAUDE.md", filepath.Join(proj, "AGENTS.md")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	prompt := Compose("BASE", Load(Options{CWD: proj}))
+	if got := strings.Count(prompt, "Shared symlink guidance"); got != 1 {
+		t.Fatalf("symlinked memory should be composed once, got %d occurrences:\n%s", got, prompt)
+	}
+}
+
 func TestDocPathDefaultsToAgents(t *testing.T) {
 	proj := t.TempDir()
 	set := Load(Options{CWD: proj})

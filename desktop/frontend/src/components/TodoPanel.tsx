@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronRight, Circle, CircleDot, X } from "lucide-react";
 import { useT } from "../lib/i18n";
 import type { Todo } from "../lib/tools";
+import { Tooltip } from "./Tooltip";
 
 // TodoPanel is the live task list pinned just above the composer — the kernel's
 // latest todo_write call drives it, and it updates in place as the agent flips
@@ -13,10 +14,17 @@ import type { Todo } from "../lib/tools";
 export function TodoPanel({ todos, onDismiss }: { todos: Todo[]; onDismiss: () => void }) {
   const t = useT();
   const [open, setOpen] = useState(true);
-  if (todos.length === 0) return null;
+  const currentRef = useRef<HTMLLIElement | null>(null);
 
   const done = todos.filter((t) => t.status === "completed").length;
   const current = todos.find((t) => t.status === "in_progress");
+
+  useEffect(() => {
+    if (!open) return;
+    currentRef.current?.scrollIntoView({ block: "nearest" });
+  }, [open, current?.content, current?.activeForm]);
+
+  if (todos.length === 0) return null;
 
   return (
     <div className="todobar">
@@ -31,9 +39,11 @@ export function TodoPanel({ todos, onDismiss }: { todos: Todo[]; onDismiss: () =
             <span className="todobar__current">{current.activeForm || current.content}</span>
           )}
         </button>
-        <button className="todobar__close" onClick={onDismiss} title={t("todo.dismiss")}>
-          <X size={13} />
-        </button>
+        <Tooltip label={t("todo.dismiss")}>
+          <button className="todobar__close" onClick={onDismiss}>
+            <X size={13} />
+          </button>
+        </Tooltip>
       </div>
 
       {open && (
@@ -41,6 +51,7 @@ export function TodoPanel({ todos, onDismiss }: { todos: Todo[]; onDismiss: () =
           {todos.map((t, i) => (
             <li
               key={i}
+              ref={t.status === "in_progress" ? currentRef : undefined}
               className={`todobar__item todobar__item--${t.status}${t.level ? " todobar__item--sub" : ""}`}
             >
               {t.status === "completed" ? (

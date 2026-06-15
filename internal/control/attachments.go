@@ -8,17 +8,62 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"reasonix/internal/proc"
 )
 
 const maxImageAttachmentBytes = 10 * 1024 * 1024
+const maxFileAttachmentBytes = 25 * 1024 * 1024
 const maxAttachmentCreateAttempts = 1000
 
 var attachmentPathSeq atomic.Uint64
 var attachmentNow = time.Now
+var safeAttachmentExt = regexp.MustCompile(`^\.[a-z0-9]{1,12}$`)
+
+// SaveAttachmentDataURL stores a non-image file (dropped/pasted in the desktop
+// app, where the browser exposes bytes but not a real path) under
+// .reasonix/attachments and returns its repo-relative path for @referencing.
+// origName supplies only the extension; the stored name is generated.
+func SaveAttachmentDataURL(origName, dataURL string) (string, error) {
+	const marker = ";base64,"
+	i := strings.Index(dataURL, marker)
+	if !strings.HasPrefix(dataURL, "data:") || i < 0 {
+		return "", fmt.Errorf("unsupported pasted file")
+	}
+	raw, err := base64.StdEncoding.DecodeString(dataURL[i+len(marker):])
+	if err != nil {
+		return "", fmt.Errorf("decode pasted file: %w", err)
+	}
+	if len(raw) == 0 || len(raw) > maxFileAttachmentBytes {
+		return "", fmt.Errorf("attachment must be between 1 byte and 25 MB")
+	}
+	ext := strings.ToLower(filepath.Ext(origName))
+	if !safeAttachmentExt.MatchString(ext) {
+		ext = ".bin"
+	}
+	if err := ensureAttachmentRoot(); err != nil {
+		return "", err
+	}
+	rel, f, err := createAttachmentFile(ext)
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.Write(raw); err != nil {
+		_ = f.Close()
+		_ = os.Remove(rel)
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(rel)
+		return "", err
+	}
+	return filepath.ToSlash(rel), nil
+}
 
 func SaveImageDataURL(dataURL string) (string, error) {
 	const prefix = "data:"
@@ -111,6 +156,64 @@ func SaveImageFile(path string) (string, error) {
 	return SaveImageBytes("", raw)
 }
 
+func SaveAttachmentFile(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("attachment path must not be a symlink")
+	}
+	if info.IsDir() || info.Size() <= 0 || info.Size() > maxFileAttachmentBytes {
+		return "", fmt.Errorf("attachment must be between 1 byte and 25 MB")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	if !os.SameFile(info, opened) {
+		return "", fmt.Errorf("attachment changed while opening")
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, maxFileAttachmentBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if len(raw) == 0 || len(raw) > maxFileAttachmentBytes {
+		return "", fmt.Errorf("attachment must be between 1 byte and 25 MB")
+	}
+	if after, err := f.Stat(); err != nil {
+		return "", err
+	} else if !os.SameFile(opened, after) || after.Size() != opened.Size() {
+		return "", fmt.Errorf("attachment changed while reading")
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	if !safeAttachmentExt.MatchString(ext) {
+		ext = ".bin"
+	}
+	if err := ensureAttachmentRoot(); err != nil {
+		return "", err
+	}
+	rel, dst, err := createAttachmentFile(ext)
+	if err != nil {
+		return "", err
+	}
+	if _, err := dst.Write(raw); err != nil {
+		_ = dst.Close()
+		_ = os.Remove(rel)
+		return "", err
+	}
+	if err := dst.Close(); err != nil {
+		_ = os.Remove(rel)
+		return "", err
+	}
+	return filepath.ToSlash(rel), nil
+}
+
 func SaveClipboardImage() (string, error) {
 	switch runtime.GOOS {
 	case "darwin":
@@ -134,7 +237,9 @@ if ($null -eq $img) { [Console]::Error.WriteLine('clipboard has no image'); exit
 $ms = New-Object System.IO.MemoryStream
 $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
 [Convert]::ToBase64String($ms.ToArray())`
-	out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script).Output()
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	proc.HideWindow(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
 			return "", fmt.Errorf("read clipboard image: %s", strings.TrimSpace(string(ee.Stderr)))
@@ -162,49 +267,70 @@ func saveLinuxClipboardImage() (string, error) {
 }
 
 func ImageDataURL(path string) (string, error) {
-	clean, err := cleanAttachmentPath(path)
+	raw, mime, err := readAttachmentImage(path)
 	if err != nil {
 		return "", err
+	}
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(raw), nil
+}
+
+// visionImageDataURL reads an attachment and, unlike ImageDataURL (which feeds
+// the desktop preview at full resolution), downscales/recompresses it before
+// base64 so an oversized photo doesn't balloon the request bytes and image
+// tokens. Best-effort: an undecodable format passes through at original size.
+func visionImageDataURL(path string) (string, error) {
+	raw, mime, err := readAttachmentImage(path)
+	if err != nil {
+		return "", err
+	}
+	raw, mime = compressForVision(raw, mime)
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(raw), nil
+}
+
+func readAttachmentImage(path string) (raw []byte, mime string, err error) {
+	clean, err := cleanAttachmentPath(path)
+	if err != nil {
+		return nil, "", err
 	}
 	info, err := os.Lstat(clean)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("attachment path must not be a symlink")
+		return nil, "", fmt.Errorf("attachment path must not be a symlink")
 	}
 	if info.IsDir() || info.Size() <= 0 || info.Size() > maxImageAttachmentBytes {
-		return "", fmt.Errorf("attachment image must be between 1 byte and 10 MB")
+		return nil, "", fmt.Errorf("attachment image must be between 1 byte and 10 MB")
 	}
 	f, err := os.Open(clean)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	defer f.Close()
 	opened, err := f.Stat()
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	if !os.SameFile(info, opened) {
-		return "", fmt.Errorf("attachment changed while opening")
+		return nil, "", fmt.Errorf("attachment changed while opening")
 	}
-	raw, err := io.ReadAll(io.LimitReader(f, maxImageAttachmentBytes+1))
+	raw, err = io.ReadAll(io.LimitReader(f, maxImageAttachmentBytes+1))
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	if len(raw) == 0 || len(raw) > maxImageAttachmentBytes {
-		return "", fmt.Errorf("attachment image must be between 1 byte and 10 MB")
+		return nil, "", fmt.Errorf("attachment image must be between 1 byte and 10 MB")
 	}
 	if after, err := f.Stat(); err != nil {
-		return "", err
+		return nil, "", err
 	} else if !os.SameFile(opened, after) || after.Size() != opened.Size() {
-		return "", fmt.Errorf("attachment changed while reading")
+		return nil, "", fmt.Errorf("attachment changed while reading")
 	}
-	mime := detectedImageMime(raw)
+	mime = detectedImageMime(raw)
 	if mime == "" {
-		return "", fmt.Errorf("attachment is not an image")
+		return nil, "", fmt.Errorf("attachment is not an image")
 	}
-	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(raw), nil
+	return raw, mime, nil
 }
 
 func cleanAttachmentPath(path string) (string, error) {

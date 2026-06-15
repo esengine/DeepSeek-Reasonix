@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/agent"
 )
 
 // --- loadSessionTitles ---
@@ -114,21 +116,87 @@ func TestDeleteSessionFile(t *testing.T) {
 	dir := t.TempDir()
 	sessionPath := filepath.Join(dir, "session.jsonl")
 	os.WriteFile(sessionPath, []byte("data"), 0o644)
+	metaPath := sessionPath + ".meta"
+	os.WriteFile(metaPath, []byte("{}"), 0o644)
+	ckptDir := filepath.Join(dir, "session.ckpt")
+	if err := os.MkdirAll(ckptDir, 0o755); err != nil {
+		t.Fatalf("mkdir ckpt: %v", err)
+	}
+	os.WriteFile(filepath.Join(ckptDir, "1.json"), []byte("{}"), 0o644)
 
 	// Set a title first.
 	setSessionTitle(dir, sessionPath, "My Title")
+	if err := recordSessionDisplay(dir, sessionPath, "expanded prompt", "[Pasted text #1 · 5 lines]"); err != nil {
+		t.Fatalf("record display: %v", err)
+	}
 
 	if err := deleteSessionFile(dir, sessionPath); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	// File should be gone.
+	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
+	trashMetaPath := trashPath + ".meta"
+	trashCkptDir := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.ckpt")
+
+	// File should be moved out of the active session list.
 	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
-		t.Error("session file should be deleted")
+		t.Error("session file should be removed from active sessions")
 	}
-	// Title should be gone.
+	if _, err := os.Stat(metaPath); !os.IsNotExist(err) {
+		t.Error("session meta should be removed from active sessions")
+	}
+	if _, err := os.Stat(ckptDir); !os.IsNotExist(err) {
+		t.Error("session checkpoints should be removed from active sessions")
+	}
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("session file should be in trash: %v", err)
+	}
+	if _, err := os.Stat(trashMetaPath); err != nil {
+		t.Fatalf("session meta should be in trash: %v", err)
+	}
+	if _, err := os.Stat(trashCkptDir); err != nil {
+		t.Fatalf("session checkpoints should be in trash: %v", err)
+	}
+	// Title/display should be retained until permanent deletion.
 	m := loadSessionTitles(dir)
-	if _, ok := m["session.jsonl"]; ok {
-		t.Error("title should be removed after delete")
+	if m["session.jsonl"] != "My Title" {
+		t.Errorf("title should be retained in trash, got %q", m["session.jsonl"])
+	}
+	if got := resolveSessionDisplay(dir, sessionPath, "expanded prompt"); got != "[Pasted text #1 · 5 lines]" {
+		t.Errorf("display sidecar should be retained in trash, got %q", got)
+	}
+}
+
+func TestDeleteSessionFileMovesOwnedSubagentsToTrash(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session.jsonl")
+	os.WriteFile(sessionPath, []byte("data"), 0o644)
+	writeSubagentArtifact(t, dir, "sa_20260102_030405_000000000_aabbccddeeff", agent.BranchID(sessionPath))
+	writeSubagentArtifact(t, dir, "sa_20260102_030405_000000000_112233445566", "other-parent")
+
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	ownedJSONL := filepath.Join(dir, "subagents", "sa_20260102_030405_000000000_aabbccddeeff.jsonl")
+	ownedMeta := filepath.Join(dir, "subagents", "sa_20260102_030405_000000000_aabbccddeeff.meta.json")
+	if _, err := os.Stat(ownedJSONL); !os.IsNotExist(err) {
+		t.Fatalf("owned subagent jsonl should be moved out of active dir, stat err = %v", err)
+	}
+	if _, err := os.Stat(ownedMeta); !os.IsNotExist(err) {
+		t.Fatalf("owned subagent meta should be moved out of active dir, stat err = %v", err)
+	}
+	trashSubagentDir := filepath.Join(dir, sessionTrashDir, "session.jsonl", "subagents")
+	if _, err := os.Stat(filepath.Join(trashSubagentDir, "sa_20260102_030405_000000000_aabbccddeeff.jsonl")); err != nil {
+		t.Fatalf("owned subagent jsonl should be in trash: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(trashSubagentDir, "sa_20260102_030405_000000000_aabbccddeeff.meta.json")); err != nil {
+		t.Fatalf("owned subagent meta should be in trash: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "subagents", "sa_20260102_030405_000000000_112233445566.jsonl")); err != nil {
+		t.Fatalf("unowned subagent jsonl should remain active: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "subagents", "sa_20260102_030405_000000000_112233445566.meta.json")); err != nil {
+		t.Fatalf("unowned subagent meta should remain active: %v", err)
 	}
 }
 
@@ -141,7 +209,177 @@ func TestDeleteSessionFileNoTitle(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
-		t.Error("session file should be deleted")
+		t.Error("session file should be removed from active sessions")
+	}
+	if _, err := os.Stat(filepath.Join(dir, sessionTrashDir, "no-title.jsonl", "no-title.jsonl")); err != nil {
+		t.Fatalf("session file should be in trash: %v", err)
+	}
+}
+
+func TestRestoreTrashedSessionFile(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(sessionPath, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sessionPath+".meta", []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ckptDir := filepath.Join(dir, "session.ckpt")
+	if err := os.MkdirAll(ckptDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ckptDir, "1.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := setSessionTitle(dir, sessionPath, "My Title"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("trash: %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
+	if err := restoreTrashedSessionFile(dir, trashPath); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+
+	if _, err := os.Stat(sessionPath); err != nil {
+		t.Fatalf("session file should be restored: %v", err)
+	}
+	if _, err := os.Stat(sessionPath + ".meta"); err != nil {
+		t.Fatalf("session meta should be restored: %v", err)
+	}
+	if _, err := os.Stat(ckptDir); err != nil {
+		t.Fatalf("session checkpoints should be restored: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(trashPath)); !os.IsNotExist(err) {
+		t.Fatalf("trash item should be removed after restore, stat err = %v", err)
+	}
+	if got := loadSessionTitles(dir)["session.jsonl"]; got != "My Title" {
+		t.Fatalf("title should survive restore, got %q", got)
+	}
+}
+
+func TestRestoreTrashedSessionFileRestoresSubagents(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(sessionPath, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref := "sa_20260102_030405_000000000_aabbccddeeff"
+	writeSubagentArtifact(t, dir, ref, agent.BranchID(sessionPath))
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("trash: %v", err)
+	}
+
+	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
+	if err := restoreTrashedSessionFile(dir, trashPath); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "subagents", ref+".jsonl")); err != nil {
+		t.Fatalf("subagent jsonl should be restored: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "subagents", ref+".meta.json")); err != nil {
+		t.Fatalf("subagent meta should be restored: %v", err)
+	}
+}
+
+func TestRestoreTrashedSessionFileRejectsSubagentConflict(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(sessionPath, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref := "sa_20260102_030405_000000000_aabbccddeeff"
+	writeSubagentArtifact(t, dir, ref, agent.BranchID(sessionPath))
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("trash: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "subagents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "subagents", ref+".jsonl"), []byte("conflict"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
+	if err := restoreTrashedSessionFile(dir, trashPath); err == nil {
+		t.Fatal("restore should fail on subagent conflict")
+	}
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("trash item should remain after failed restore: %v", err)
+	}
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
+		t.Fatalf("parent session should not be restored after conflict, stat err = %v", err)
+	}
+}
+
+func TestPurgeTrashedSessionFile(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session.jsonl")
+	os.WriteFile(sessionPath, []byte("data"), 0o644)
+	if err := setSessionTitle(dir, sessionPath, "My Title"); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordSessionDisplay(dir, sessionPath, "expanded prompt", "[Pasted text #1 · 5 lines]"); err != nil {
+		t.Fatal(err)
+	}
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("trash: %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
+	if err := purgeTrashedSessionFile(dir, trashPath); err != nil {
+		t.Fatalf("purge: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(trashPath)); !os.IsNotExist(err) {
+		t.Fatalf("trash item should be removed after purge, stat err = %v", err)
+	}
+	if _, ok := loadSessionTitles(dir)["session.jsonl"]; ok {
+		t.Fatal("title should be removed after purge")
+	}
+	if got := resolveSessionDisplay(dir, sessionPath, "expanded prompt"); got != "expanded prompt" {
+		t.Fatalf("display sidecar should be removed after purge, got %q", got)
+	}
+}
+
+func TestPurgeTrashedSessionFileRemovesSubagents(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session.jsonl")
+	os.WriteFile(sessionPath, []byte("data"), 0o644)
+	ref := "sa_20260102_030405_000000000_aabbccddeeff"
+	writeSubagentArtifact(t, dir, ref, agent.BranchID(sessionPath))
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("trash: %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
+	if err := purgeTrashedSessionFile(dir, trashPath); err != nil {
+		t.Fatalf("purge: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, sessionTrashDir, "session.jsonl", "subagents", ref+".jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("trashed subagent should be removed by purge, stat err = %v", err)
+	}
+}
+
+func TestListTrashedSessionFilesRejectsSymlinkEscape(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.jsonl")
+	os.WriteFile(outside, []byte("data"), 0o644)
+	itemDir := filepath.Join(dir, sessionTrashDir, "outside.jsonl")
+	if err := os.MkdirAll(itemDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(itemDir, "outside.jsonl")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	got, err := listTrashedSessionFiles(dir)
+	if err != nil {
+		t.Fatalf("list trash: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("trash listing should skip symlink escape, got %v", got)
 	}
 }
 
@@ -150,6 +388,74 @@ func TestDeleteSessionFileMissing(t *testing.T) {
 	// Deleting a non-existent file should not error.
 	if err := deleteSessionFile(dir, filepath.Join(dir, "missing.jsonl")); err != nil {
 		t.Fatalf("delete missing: %v", err)
+	}
+}
+
+func TestDeleteSessionFileRejectsOutsideDir(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.jsonl")
+	os.WriteFile(outside, []byte("data"), 0o644)
+
+	if err := deleteSessionFile(dir, outside); err == nil {
+		t.Fatal("delete outside dir should fail")
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("outside file should remain: %v", err)
+	}
+}
+
+func TestDeleteSessionFileRejectsNonJSONL(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.meta")
+	os.WriteFile(path, []byte("data"), 0o644)
+
+	if err := deleteSessionFile(dir, path); err == nil {
+		t.Fatal("delete non-jsonl should fail")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("non-jsonl file should remain: %v", err)
+	}
+}
+
+func TestDeleteSessionFileRejectsSymlinkEscape(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.jsonl")
+	os.WriteFile(outside, []byte("data"), 0o644)
+	link := filepath.Join(dir, "link.jsonl")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	if err := deleteSessionFile(dir, link); err == nil {
+		t.Fatal("delete symlink escape should fail")
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("outside target should remain: %v", err)
+	}
+}
+
+func writeSubagentArtifact(t *testing.T, dir, ref, parentSession string) {
+	t.Helper()
+	subagentDir := filepath.Join(dir, "subagents")
+	if err := os.MkdirAll(subagentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subagentDir, ref+".jsonl"), []byte(`{"role":"user","content":"sub"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	meta := agent.SubagentMeta{
+		Ref:           ref,
+		Status:        agent.SubagentCompleted,
+		Kind:          "task",
+		Name:          "task",
+		ParentSession: parentSession,
+	}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subagentDir, ref+".meta.json"), data, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -163,10 +469,29 @@ func TestSessionTitlesPath(t *testing.T) {
 	}
 }
 
-// --- errActiveSession ---
+func TestSessionDisplayRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "s.jsonl")
+	content := "prefix\n--- Begin [Pasted text #1 · 5 lines] ---\nfull text\n--- End [Pasted text #1 · 5 lines] ---"
+	display := "[Pasted text #1 · 5 lines]"
+	if err := recordSessionDisplay(dir, sessionPath, content, display); err != nil {
+		t.Fatalf("record display: %v", err)
+	}
+	if got := resolveSessionDisplay(dir, sessionPath, content); got != display {
+		t.Fatalf("display = %q, want %q", got, display)
+	}
+	if got := resolveSessionDisplay(dir, sessionPath, "other"); got != "other" {
+		t.Fatalf("unknown content should pass through, got %q", got)
+	}
+}
 
-func TestErrActiveSession(t *testing.T) {
-	if errActiveSession.Error() == "" {
-		t.Error("errActiveSession should have a message")
+func TestRecordSessionDisplaySkipsNoop(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "s.jsonl")
+	if err := recordSessionDisplay(dir, sessionPath, "same", "same"); err != nil {
+		t.Fatalf("record display: %v", err)
+	}
+	if _, err := os.Stat(sessionDisplayPath(dir)); !os.IsNotExist(err) {
+		t.Fatalf("noop display should not create sidecar, stat err = %v", err)
 	}
 }

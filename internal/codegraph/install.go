@@ -7,7 +7,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 const (
@@ -22,13 +23,45 @@ const (
 	// with CODEGRAPH_VERSION in the Makefile and .github/workflows.
 	Version = "v0.9.7"
 	cgRepo  = "colbymchenry/codegraph"
+
+	officialMirrorBase         = "https://dl.reasonix.io/codegraph"
+	officialMainlandMirrorBase = ""
+	perSourceDownloadTimeout   = 10 * time.Minute
+	activeVersionFile          = "active-version"
+
+	renameAttempts = 5
+	renameBackoff  = 200 * time.Millisecond
 )
+
+var (
+	githubAPIBase             = "https://api.github.com"
+	githubReleaseDownloadBase = func(version string) string {
+		return fmt.Sprintf("https://github.com/%s/releases/download/%s", cgRepo, version)
+	}
+)
+
+type UpdateResult struct {
+	Version string
+	Path    string
+}
 
 // CacheDir is where the CodeGraph bundle is unpacked on first use:
 // <user cache>/reasonix/codegraph/<Version>. Versioned so a bump installs cleanly
 // beside the old one. REASONIX_CACHE_DIR overrides the base (relocate the cache,
 // or isolate it in tests). Empty when no cache/config dir resolves.
 func CacheDir() string {
+	return CacheDirForVersion(Version)
+}
+
+func CacheDirForVersion(version string) string {
+	base := cacheRoot()
+	if base == "" {
+		return ""
+	}
+	return filepath.Join(base, "codegraph", version)
+}
+
+func cacheRoot() string {
 	base := os.Getenv("REASONIX_CACHE_DIR")
 	if base == "" {
 		var err error
@@ -39,12 +72,120 @@ func CacheDir() string {
 		}
 		base = filepath.Join(base, "reasonix")
 	}
-	return filepath.Join(base, "codegraph", Version)
+	return base
+}
+
+func activeVersion() string {
+	base := cacheRoot()
+	if base == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(base, "codegraph", activeVersionFile))
+	if err != nil {
+		return ""
+	}
+	version := strings.TrimSpace(string(data))
+	if !validVersion(version) {
+		return ""
+	}
+	return version
+}
+
+func ActiveVersion() string {
+	return activeVersion()
+}
+
+func NewerThanActive(version string) bool {
+	if !validVersion(version) {
+		return false
+	}
+	current := activeVersion()
+	if current == "" {
+		current = Version
+	}
+	return compareVersion(version, current) > 0
+}
+
+func writeActiveVersion(version string) error {
+	if !validVersion(version) {
+		return fmt.Errorf("codegraph: invalid version %q", version)
+	}
+	base := cacheRoot()
+	if base == "" {
+		return fmt.Errorf("codegraph: no cache directory available")
+	}
+	dir := filepath.Join(base, "codegraph")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, activeVersionFile), []byte(version+"\n"), 0o644)
+}
+
+func validVersion(version string) bool {
+	version = strings.TrimSpace(version)
+	if version == "" || strings.ContainsAny(version, `/\`) || version == "." || version == ".." {
+		return false
+	}
+	for _, r := range version {
+		if !(r == '.' || r == '-' || r == '_' || r == '+' || r >= '0' && r <= '9' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z') {
+			return false
+		}
+	}
+	return true
+}
+
+func compareVersion(a, b string) int {
+	aa, bb := versionParts(a), versionParts(b)
+	n := len(aa)
+	if len(bb) > n {
+		n = len(bb)
+	}
+	for i := 0; i < n; i++ {
+		av, bv := 0, 0
+		if i < len(aa) {
+			av = aa[i]
+		}
+		if i < len(bb) {
+			bv = bb[i]
+		}
+		if av > bv {
+			return 1
+		}
+		if av < bv {
+			return -1
+		}
+	}
+	return 0
+}
+
+func versionParts(version string) []int {
+	version = strings.TrimPrefix(strings.TrimSpace(version), "v")
+	fields := strings.FieldsFunc(version, func(r rune) bool {
+		return r < '0' || r > '9'
+	})
+	out := make([]int, 0, len(fields))
+	for _, f := range fields {
+		var n int
+		for _, r := range f {
+			n = n*10 + int(r-'0')
+		}
+		out = append(out, n)
+	}
+	return out
 }
 
 // cached returns the launcher path inside CacheDir when the bundle is present.
 func cached() (string, bool) {
-	dir := CacheDir()
+	if active := activeVersion(); active != "" && compareVersion(active, Version) >= 0 {
+		if p, ok := cachedForVersion(active); ok {
+			return p, true
+		}
+	}
+	return cachedForVersion(Version)
+}
+
+func cachedForVersion(version string) (string, bool) {
+	dir := CacheDirForVersion(version)
 	if dir == "" {
 		return "", false
 	}
@@ -75,37 +216,109 @@ func assetName() string {
 }
 
 // Install downloads and unpacks the CodeGraph bundle into CacheDir on first use,
-// verifying it against the release's SHA256SUMS, then returns the launcher path.
+// verifying it against the checksum baked into the reasonix binary, then returns
+// the launcher path.
 // It is idempotent: a present cache is returned untouched. log, if non-nil,
 // receives a couple of progress lines. The extraction is staged in a temp dir and
 // atomically renamed into place, so a cancelled or failed run leaves no partial
 // install behind.
 func Install(ctx context.Context, log func(string)) (string, error) {
-	if p, ok := cached(); ok {
-		return p, nil
+	return InstallWithClient(ctx, http.DefaultClient, log)
+}
+
+// InstallWithClient is Install with an explicit HTTP client, used when Reasonix
+// network proxy settings should apply.
+func InstallWithClient(ctx context.Context, client *http.Client, log func(string)) (string, error) {
+	if client == nil {
+		client = http.DefaultClient
 	}
-	dir := CacheDir()
-	if dir == "" {
-		return "", fmt.Errorf("codegraph: no cache directory available")
+	if p, ok := cachedForVersion(Version); ok {
+		return p, nil
 	}
 	asset := assetName()
 	logf(log, "codegraph: downloading %s (%s, one-time)…", asset, Version)
+	want := expectedAssetSHA256(asset)
+	if want == "" {
+		return "", fmt.Errorf("codegraph: no embedded checksum for %s (%s)", asset, Version)
+	}
+	return installVersionWithClient(ctx, client, Version, want, downloadBases(), false, log)
+}
 
-	base := fmt.Sprintf("https://github.com/%s/releases/download/%s", cgRepo, Version)
-	sums, err := httpGet(ctx, base+"/SHA256SUMS")
+func UpdateWithClient(ctx context.Context, client *http.Client, log func(string)) (UpdateResult, error) {
+	res, err := DownloadLatestWithClient(ctx, client, log)
 	if err != nil {
-		return "", fmt.Errorf("codegraph: fetch checksums: %w", err)
+		return UpdateResult{}, err
+	}
+	if err := writeActiveVersion(res.Version); err != nil {
+		return UpdateResult{}, err
+	}
+	return res, nil
+}
+
+func DownloadLatestWithClient(ctx context.Context, client *http.Client, log func(string)) (UpdateResult, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	version, err := LatestVersionWithClient(ctx, client)
+	if err != nil {
+		return UpdateResult{}, err
+	}
+	if p, ok := cachedForVersion(version); ok {
+		return UpdateResult{Version: version, Path: p}, nil
+	}
+	asset := assetName()
+	sums, err := downloadReleaseFile(ctx, client, version, "SHA256SUMS")
+	if err != nil {
+		return UpdateResult{}, err
 	}
 	want, err := sha256For(string(sums), asset)
 	if err != nil {
+		return UpdateResult{}, err
+	}
+	logf(log, "codegraph: downloading %s (%s)…", asset, version)
+	path, err := installVersionWithClient(ctx, client, version, want, []string{githubReleaseDownloadBase(version)}, true, log)
+	if err != nil {
+		return UpdateResult{}, err
+	}
+	return UpdateResult{Version: version, Path: path}, nil
+}
+
+func LatestVersionWithClient(ctx context.Context, client *http.Client) (string, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	url := strings.TrimRight(githubAPIBase, "/") + "/repos/" + cgRepo + "/releases/latest"
+	data, err := httpGet(ctx, client, url)
+	if err != nil {
 		return "", err
 	}
-	data, err := httpGet(ctx, base+"/"+asset)
-	if err != nil {
-		return "", fmt.Errorf("codegraph: download %s: %w", asset, err)
+	var release struct {
+		TagName string `json:"tag_name"`
 	}
-	if got := sha256.Sum256(data); hex.EncodeToString(got[:]) != want {
-		return "", fmt.Errorf("codegraph: checksum mismatch for %s", asset)
+	if err := json.Unmarshal(data, &release); err != nil {
+		return "", fmt.Errorf("codegraph: parse latest release: %w", err)
+	}
+	version := strings.TrimSpace(release.TagName)
+	if !validVersion(version) {
+		return "", fmt.Errorf("codegraph: invalid latest version %q", version)
+	}
+	return version, nil
+}
+
+func installVersionWithClient(ctx context.Context, client *http.Client, version, want string, bases []string, force bool, log func(string)) (string, error) {
+	dir := CacheDirForVersion(version)
+	if dir == "" {
+		return "", fmt.Errorf("codegraph: no cache directory available")
+	}
+	if !force {
+		if p, ok := cachedForVersion(version); ok {
+			return p, nil
+		}
+	}
+	asset := assetName()
+	data, err := downloadAssetFromBases(ctx, client, asset, want, bases, log)
+	if err != nil {
+		return "", err
 	}
 
 	parent := filepath.Dir(dir)
@@ -132,14 +345,18 @@ func Install(ctx context.Context, log func(string)) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := os.Rename(root, dir); err != nil {
-		// A concurrent session may have won the race; accept its install.
-		if p, ok := cached(); ok {
-			return p, nil
+	if !force {
+		if p, ok := cachedForVersion(version); ok {
+			return p, nil // a concurrent session already populated dir
 		}
-		return "", err
 	}
-	p, ok := cached()
+	if err := promote(root, dir); err != nil {
+		if p, ok := cachedForVersion(version); ok {
+			return p, nil // a concurrent winner landed during our retries
+		}
+		return "", fmt.Errorf("codegraph: install to %s failed: %w — the cache directory may be read-only or locked by antivirus; set REASONIX_CACHE_DIR to a writable location to relocate it", dir, err)
+	}
+	p, ok := cachedForVersion(version)
 	if !ok {
 		return "", fmt.Errorf("codegraph: launcher not found after install (unexpected bundle layout)")
 	}
@@ -147,12 +364,87 @@ func Install(ctx context.Context, log func(string)) (string, error) {
 	return p, nil
 }
 
-func httpGet(ctx context.Context, url string) ([]byte, error) {
+func downloadReleaseFile(ctx context.Context, client *http.Client, version, name string) ([]byte, error) {
+	if !validVersion(version) || strings.ContainsAny(name, `/\`) || strings.TrimSpace(name) == "" {
+		return nil, fmt.Errorf("codegraph: invalid release file %q for %q", name, version)
+	}
+	return httpGet(ctx, client, strings.TrimRight(githubReleaseDownloadBase(version), "/")+"/"+name)
+}
+
+func downloadAssetFromBases(ctx context.Context, client *http.Client, asset, want string, bases []string, log func(string)) ([]byte, error) {
+	var errs []string
+	for _, base := range bases {
+		url := strings.TrimRight(base, "/") + "/" + asset
+		getCtx := ctx
+		cancel := func() {}
+		if perSourceDownloadTimeout > 0 {
+			getCtx, cancel = context.WithTimeout(ctx, perSourceDownloadTimeout)
+		}
+		data, err := httpGet(getCtx, client, url)
+		cancel()
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", base, err))
+			continue
+		}
+		got := fmt.Sprintf("%x", sha256.Sum256(data))
+		if got != want {
+			errs = append(errs, fmt.Sprintf("%s: checksum mismatch for %s", base, asset))
+			continue
+		}
+		logf(log, "codegraph: downloaded from %s", base)
+		return data, nil
+	}
+	return nil, fmt.Errorf("codegraph: download %s failed (%s)", asset, strings.Join(errs, "; "))
+}
+
+func expectedAssetSHA256(asset string) string {
+	return releaseAssetSHA256[asset]
+}
+
+func downloadBases() []string {
+	bases := []string{officialMirrorBase + "/" + Version}
+	if strings.TrimSpace(officialMainlandMirrorBase) != "" {
+		bases = append(bases, strings.TrimRight(officialMainlandMirrorBase, "/")+"/"+Version)
+	}
+	bases = append(bases, fmt.Sprintf("https://github.com/%s/releases/download/%s", cgRepo, Version))
+	return dedupeStrings(bases)
+}
+
+func dedupeStrings(values []string) []string {
+	var out []string
+	seen := make(map[string]bool, len(values))
+	for _, v := range values {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// promote moves the freshly extracted bundle (root) into its versioned home
+// (dir). On Windows os.Rename onto an existing directory fails with "Access is
+// denied", so a stale/partial dest from an earlier interrupted install (cached()
+// already reported it incomplete) is cleared first; a just-extracted .exe can
+// also stay briefly locked by an AV scanner, so the move is retried.
+func promote(root, dir string) error {
+	_ = os.RemoveAll(dir)
+	var err error
+	for i := 0; i < renameAttempts; i++ {
+		if err = os.Rename(root, dir); err == nil {
+			return nil
+		}
+		time.Sleep(renameBackoff)
+	}
+	return err
+}
+
+func httpGet(ctx context.Context, client *http.Client, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -175,14 +467,63 @@ func sha256For(sums, name string) (string, error) {
 	return "", fmt.Errorf("codegraph: %s not listed in SHA256SUMS", name)
 }
 
-// safeJoin joins dir and a (possibly hostile) archive entry name, rejecting any
-// path that would escape dir — the zip-slip / tar-slip guard.
-func safeJoin(dir, name string) (string, error) {
-	p := filepath.Join(dir, name)
-	if p != dir && !strings.HasPrefix(p, dir+string(os.PathSeparator)) {
+// resolveWithin returns the real path to write archive entry name under root
+// (parents created), rejecting escapes. EvalSymlinks on the parent also catches
+// the symlink-redirect variant a lexical "../" check misses: a parent component
+// an earlier entry turned into a symlink, written *through* to land outside root.
+func resolveWithin(root, name string) (string, error) {
+	if !filepath.IsLocal(name) {
 		return "", fmt.Errorf("unsafe path %q in archive", name)
 	}
-	return p, nil
+	target := filepath.Join(root, name)
+	if target != root && !strings.HasPrefix(target, root+string(os.PathSeparator)) {
+		return "", fmt.Errorf("unsafe path %q in archive", name)
+	}
+	if target == root {
+		return root, nil
+	}
+	parent := filepath.Dir(target)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return "", err
+	}
+	realParent, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return "", err
+	}
+	if realParent != root && !strings.HasPrefix(realParent, root+string(os.PathSeparator)) {
+		return "", fmt.Errorf("unsafe path %q in archive: escapes via symlink", name)
+	}
+	return filepath.Join(realParent, filepath.Base(target)), nil
+}
+
+func cleanSymlinkTarget(root, linkPath, linkname string) (string, error) {
+	if linkname == "" || filepath.IsAbs(linkname) {
+		return "", fmt.Errorf("unsafe symlink target %q in archive", linkname)
+	}
+	clean := filepath.Clean(linkname)
+	dest, err := filepath.EvalSymlinks(filepath.Join(filepath.Dir(linkPath), clean))
+	if err != nil {
+		return "", fmt.Errorf("unsafe symlink target %q in archive: %w", linkname, err)
+	}
+	if dest != root && !strings.HasPrefix(dest, root+string(os.PathSeparator)) {
+		return "", fmt.Errorf("unsafe symlink target %q in archive", linkname)
+	}
+	return filepath.ToSlash(clean), nil
+}
+
+// symlinkWithin rejects a symlink whose target escapes root. linkPath is the
+// symlink's already-resolved real location (from resolveWithin), so a relative
+// target is judged from where the link truly lands, not its lexical archive path.
+func symlinkWithin(root, linkPath, linkname string) error {
+	dest := linkname
+	if !filepath.IsAbs(dest) {
+		dest = filepath.Join(filepath.Dir(linkPath), linkname)
+	}
+	dest = filepath.Clean(dest)
+	if dest != root && !strings.HasPrefix(dest, root+string(os.PathSeparator)) {
+		return fmt.Errorf("unsafe symlink %q -> %q in archive", linkPath, linkname)
+	}
+	return nil
 }
 
 func extractTarGz(data []byte, dir string) error {
@@ -191,6 +532,10 @@ func extractTarGz(data []byte, dir string) error {
 		return err
 	}
 	defer gz.Close()
+	root, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return err
+	}
 	tr := tar.NewReader(gz)
 	for {
 		hdr, err := tr.Next()
@@ -200,7 +545,7 @@ func extractTarGz(data []byte, dir string) error {
 		if err != nil {
 			return err
 		}
-		target, err := safeJoin(dir, hdr.Name)
+		target, err := resolveWithin(root, hdr.Name)
 		if err != nil {
 			return err
 		}
@@ -210,11 +555,15 @@ func extractTarGz(data []byte, dir string) error {
 				return err
 			}
 		case tar.TypeSymlink:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			linkname, err := cleanSymlinkTarget(root, target, hdr.Linkname)
+			if err != nil {
+				return err
+			}
+			if err := symlinkWithin(root, target, linkname); err != nil {
 				return err
 			}
 			_ = os.Remove(target)
-			if err := os.Symlink(hdr.Linkname, target); err != nil {
+			if err := os.Symlink(linkname, target); err != nil {
 				return err
 			}
 		case tar.TypeReg:
@@ -230,8 +579,12 @@ func extractZip(data []byte, dir string) error {
 	if err != nil {
 		return err
 	}
+	root, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return err
+	}
 	for _, f := range zr.File {
-		target, err := safeJoin(dir, f.Name)
+		target, err := resolveWithin(root, f.Name)
 		if err != nil {
 			return err
 		}
@@ -255,9 +608,6 @@ func extractZip(data []byte, dir string) error {
 }
 
 func writeFileFromReader(target string, r io.Reader, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
-	}
 	f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode.Perm())
 	if err != nil {
 		return err

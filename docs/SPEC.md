@@ -40,7 +40,7 @@ reasonix/
     ├── provider/            # Provider interface + types + kind→factory registry
     │   └── openai/          # OpenAI-compatible impl; init() registers "openai"
     ├── tool/                # Tool interface + Registry
-    │   └── builtin/         # read_file/write_file/edit_file/bash/ls/glob/grep
+    │   └── builtin/         # read_file/write_file/edit_file/move_file/bash/ls/glob/grep
     ├── permission/          # per-call Policy: allow/ask/deny rules → Decision
     ├── command/             # custom slash commands loaded from .reasonix/commands/*.md
     ├── plugin/              # stdio JSON-RPC (MCP) client; adapts remote tools
@@ -165,8 +165,11 @@ When `agent.planner_model` names a provider different from the executor, a
 `Coordinator` runs two models in **separate sessions** to keep each one's prompt
 prefix cache-stable:
 
-- The **planner** (low-frequency) runs in its own session with no tools and
-  produces a concise plan.
+- The **planner** (low-frequency) runs in its own session with the same standing
+  memory context plus a filtered read-only research tool set, then produces a
+  concise plan. It can inspect files/docs before planning, but writer and
+  workflow tools are not exposed to it. `agent.planner_max_steps` bounds this
+  read-only exploration independently from the executor's `agent.max_steps`.
 - The plan is handed off as structured text to the **executor** — a full
   tool-using `Agent` in its own session — which carries it out.
 - The sessions never mix, so neither model's prefix is disturbed by the other's
@@ -182,14 +185,47 @@ Long tasks eventually fill the model's context window. Reasonix manages this wit
 - Each provider declares its `context_window` (tokens). When a turn's reported
   `prompt_tokens` reach `compactRatio` (default `0.8`) of that window, the
   executor compacts **once** before the next turn.
-- Compaction summarizes the older middle of the session into a single briefing —
-  using the executor's own provider, no tools — and replaces it in place: the
-  session becomes `system + summary + recentKeep` (default `8`) verbatim
-  messages. The boundary is aligned backward off any tool result so the recent
-  tail never begins with an orphan tool message whose `tool_calls` were
-  summarized away.
-- The dropped originals are archived to `~/.config/reasonix/archive/<timestamp>.jsonl`
-  (one message per line), so the full history stays traceable.
+- Compaction folds only the assistant/tool work. Every **user turn** small
+  enough to be a brief and every **prior digest** is kept verbatim; the foldable
+  remainder is summarized — using the executor's own provider, no tools — in
+  place. The boundary is aligned backward off any tool result so the recent tail
+  never begins with an orphan tool message whose `tool_calls` were summarized away.
+- The dropped originals are archived under the user config dir
+  (`reasonix/archive/<timestamp>.jsonl`; see §5 for its per-OS location), one
+  message per line, so the full history stays traceable.
+- The read-only `history` tool gives the agent on-demand BM25 retrieval over
+  saved session JSONL files. `scope="project"` searches the current controller's
+  session directory; `scope="global"` also searches the user-global session
+  directory and compacted-history archives. `operation="around"` can then read a
+  bounded transcript window around a returned hit. Search keeps the best hit and
+  trims trailing common-word-only noise with a relative score floor; a 0-result
+  response tells the agent how to retry with rarer terms or widen scope.
+- The read-only `memory` tool gives the agent on-demand search/list/read access
+  to saved auto-memory files. It complements the writer tools: `memory` checks
+  what already exists, `remember` saves or updates a fact, and `forget` removes
+  a stale one from the active index while archiving the file for traceability.
+  Archived memory files are visible in local management surfaces (`/memory`,
+  TUI, desktop panel) but are excluded from active-memory retrieval. Memory
+  search uses the same relative BM25 floor and guides the agent to fall back to
+  history when exact original wording or tool output matters.
+- Agent-initiated `remember` and `forget` calls require a fresh human approval
+  each time, even when tool auto-approval or YOLO/full-access mode is enabled.
+  The approval request includes a compact preview of the memory being saved or
+  archived, while external notification hooks only receive the tool name.
+  User-initiated memory edits in the local UI are already explicit user actions.
+  See [`SESSION_MEMORY_RETRIEVAL.md`](SESSION_MEMORY_RETRIEVAL.md) for the
+  detailed implementation contract.
+
+**What survives a fold.** A fact the user states in a normal-sized turn is kept
+verbatim and is never summarized away — at any point in the session, across any
+number of compactions. A digest, once written, is likewise kept verbatim rather
+than re-summarized, so facts it captured are not lost to drift. The one
+**best-effort** boundary: a fact buried inside a single oversized message (a
+large paste, over the per-turn pin budget) folds with the rest, so its survival
+depends on the summarizer catching it while compressing bulk. There is no
+reliable way to auto-detect an arbitrary fact in bulk, so durable facts belong in
+their own turn rather than buried in a large paste; the raw oversized content is
+still archived and recoverable either way.
 
 This is the **only** point where the prompt prefix changes — a deliberate, rare
 "cache-reset point". Between compactions the session grows prepend-only and
@@ -213,18 +249,36 @@ type Policy struct { Mode Decision; Allow, Ask, Deny []Rule }
 func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Decision
 ```
 
-- **Rule syntax.** A rule is `ToolName` (matches any call to that tool) or
-  `ToolName(glob)` (matches when the call's *subject* matches the glob, via
-  `path.Match`). The subject is extracted generically from the call's JSON args
-  by a small set of known keys — `command` (bash), `path` / `file_path`
-  (file tools), `pattern` (grep/glob) — so tools need not change. A rule whose
-  subject the args don't expose only matches in its bare `ToolName` form.
+- **Rule syntax.** A rule is `Tool` (matches any call in that tool family) or
+  `Tool(specifier)` (matches when the call's *subject* matches the specifier).
+  Bash and file mutation approvals use Claude Code-style families such as
+  `Bash(npm run build)`, `Bash(npm run test:*)`, and `Edit(docs/**)`. Built-in
+  file mutations include writes, edits, notebook edits, symbol/range deletes,
+  and `move_file` renames/moves. Legacy
+  lowercase tool IDs and `tool=literal` rules still load for compatibility. The
+  `:*` suffix marks a Bash command-prefix approval; generated prefix rules also
+  reject later commands that introduce shell operators, so `Bash(go test:*)`
+  does not cover `go test ./... && rm -rf tmp`.
+  Legacy `Bash(go test *)` prefix rules still load, but new rules are saved as
+  `Bash(go test:*)`. The subject is extracted generically from the call's JSON
+  args by a small set of
+  known keys — `command` (bash), `path` / `file_path` (file tools), `pattern`
+  (grep/glob) — so tools need not change. A rule whose subject the args don't
+  expose only matches in its bare `Tool` form.
 - **Precedence.** `deny` > `ask` > `allow` > fallback. Fallback is `Allow` for
   read-only tools and `Mode` (default `Ask`) for writers. `deny` always wins, so
-  a broad `allow = ["bash"]` can still be carved by `deny = ["bash(rm -rf*)"]`;
+  a broad `allow = ["Bash"]` can still be carved by `deny = ["Bash(rm -rf*)"]`;
   conversely `ask` overrides a broad `allow` to force a prompt on a risky subset.
 - **Resolving `Ask`.** The interactive front-end (the chat TUI) prompts the user
-  — allow once / always allow / deny — via an `Approver`. A non-interactive run
+  — allow once / allow this approval scope for the session / always allow this
+  approval scope / deny — via an `Approver`. For Bash, the default scope is the
+  concrete command subject, and the user may choose a conservative command-prefix
+  scope when available (for example `Bash(go test:*)`) so similar invocations in
+  the same session or saved config do not prompt again. For file-mutation tools,
+  a session grant covers editing for the rest of the session while a persisted
+  grant is path-scoped when a path is available, stored as `Edit(<path>)` so all
+  built-in file-mutating tools share it. A
+  non-interactive run
   (`reasonix run`, a sub-agent, anything with no TTY / no approver) cannot prompt, so
   it resolves `Ask` to **allow** — preserving autonomous behaviour. A `Deny` is a
   hard block in *every* mode: the tool never executes and the model receives a
@@ -232,6 +286,40 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
 - **Relationship to plan mode.** Plan mode (§3.4) is an orthogonal, coarser gate
   that refuses *all* writers regardless of policy; it is checked first. The
   permission layer is the fine-grained, always-on gate underneath it.
+- **User decisions are separate from tool approvals.** Runtime tool approval has
+  three user-facing postures: `ask` ("需要批准"), `auto` ("自动批准"), and
+  `yolo` ("Yolo批准"). `auto` lets the permission policy auto-approve the writer
+  fallback while preserving explicit ask/deny rules; `yolo` skips all tool
+  permission approvals for approval-gated tools such as writers and Bash.
+  Neither posture answers `ask` questions or approves `exit_plan_mode` plans for
+  the user.
+  Auto-plan is also a separate feature flag: when enabled, a complex task may
+  still enter plan mode in any tool approval posture. After a user approves a
+  plan, the controller opens a short `approvedPlanAutoApproveTools` execution
+  window so the model can perform the approved writes without re-prompting; that
+  transient window still does not auto-approve future plans. In headless `ask`
+  execution, any fallback answer is labelled as a model assumption, not as a
+  user decision.
+
+- **Collaboration mode is separate from tool approval.** The desktop composer
+  presents collaboration as `normal` ("正常模式"), `plan` ("计划模式"), and
+  `goal` ("目标模式"). `/goal <objective>` starts an autonomous, session-scoped
+  active goal: the controller prepends goal context to user turns outside the
+  cache-stable system prompt and keeps issuing continuation turns until the
+  model reports completion, repeats the same blocked state three times, the user
+  stops it, or the safety continuation limit is reached. Blocked-state matching
+  is normalized for casing, whitespace, and punctuation so minor wording drift
+  does not reset the audit; restarting a goal begins a fresh blocked audit.
+  `/goal clear` removes it. Switching into plan/normal mode clears the active
+  goal in the desktop UI so the collaboration mode remains one of the three
+  choices, while the underlying tool approval posture is preserved.
+
+| Tool approval posture | Tool approvals | Plan approval | `ask` questions |
+| --- | --- | --- | --- |
+| Need approval / `ask` | Follow permission policy (`Ask` prompts interactively) | Waits for user | Waits for user |
+| Auto approve / `auto` | Writer fallback auto-allowed; explicit ask/deny rules still apply | Waits for user | Waits for user |
+| YOLO approval / `yolo` | Approval prompts auto-allowed unless denied | Waits for user | Waits for user |
+| Approved-plan execution window | Approved plan's tool calls auto-allowed unless denied | Future plans still wait | Waits for user |
 
 Out of the box (`mode = "ask"`, no rules) `reasonix run` behaves exactly as before
 (writers resolve `Ask`→allow with no TTY), while `reasonix chat` now prompts before
@@ -241,10 +329,13 @@ each writer/bash call. `deny` rules harden both modes.
 
 The chat TUI accepts `/command` input. Three kinds share one dispatch:
 
-- **Built-in actions** (`/compact`, `/new`, `/mcp`, `/help`) manipulate session
-  state locally and never reach the model.
+- **Built-in actions** (`/compact`, `/new`, `/clear`, `/effort`, `/mcp`, `/help`) manipulate session
+  state locally and never reach the model. `/new` starts a new session while
+  saving the previous transcript for resume/history. `/clear` requires
+  confirmation, then discards the current context without saving it; it does not
+  delete project memory.
 - **Custom commands** are Markdown files under `.reasonix/commands/` (project) and
-  `~/.config/reasonix/commands/` (user); the project dir overrides the user dir on a
+  `reasonix/commands/` in your OS config dir (user; see §5); the project dir overrides the user dir on a
   name clash. A file `review.md` becomes `/review`; a subdirectory namespaces it
   (`git/commit.md` → `/git:commit`). Invoking one renders its body and sends the
   result as the next user turn.
@@ -268,6 +359,22 @@ Review the staged diff. Focus on $ARGUMENTS, list bugs with file:line.
   skipped, not fatal. Custom and MCP-prompt commands both resolve to text and
   reuse the same "start a turn" path as a typed message.
 
+#### CLI modal/composer ownership
+
+The Bubble Tea chat TUI has one bottom composer. A slash-command overlay must
+declare whether it owns keyboard input:
+
+- **Modal overlays** own navigation/confirm/cancel keys and must hide the
+  composer while open. Examples: `/mcp`, `/resume`, `/rewind`, approval prompts,
+  and non-typing `ask` choice cards.
+- **Input-owned overlays** are attached to the textarea and must keep the
+  composer visible. Examples: slash/@ autocomplete and `ask` free-text mode.
+
+New CLI overlays must update `chat_tui.hideComposer()` and add/extend layout
+tests so `bottomRows()` accounts for either `panel + status` or
+`panel + composer + status`. This prevents inactive chat input boxes from being
+rendered under modal panels.
+
 ### 3.9 Chat references (`@`)
 
 A chat message may embed `@` references; before the turn is sent, each is
@@ -279,7 +386,8 @@ resolved and prepended to the message as a tagged block the model can read.
   actually exists on disk. This existence gate is the disambiguator: an ordinary
   `@mention` or an email address resolves to no file and stays literal text. A
   file is wrapped `<file path="…">…</file>` (size-capped, binary files noted not
-  dumped); a directory becomes a one-level listing.
+  dumped); a directory becomes a recursive listing (depth-first, skipping common
+  noise like `.git` and `node_modules`).
 - Resolution is asynchronous (off the TUI event loop); a fetch failure surfaces
   as a notice but doesn't block the turn. Reads are user-initiated and read-only
   — they do **not** pass the permission gate (§3.7).
@@ -322,10 +430,14 @@ type Chunk struct {
 
 ## 5. Configuration (TOML)
 
-Resolution order: **flag > project `./reasonix.toml` > user `~/.config/reasonix/config.toml`
-> built-in defaults**. Secrets come from the environment via `api_key_env` and
+Resolution order: **flag > project `./reasonix.toml` > the user config file
+> built-in defaults**. The user config lives in your OS config dir — `~/.config/reasonix/`
+on Linux, `~/Library/Application Support/reasonix/` on macOS, `%AppData%\reasonix\` on
+Windows. Secrets come from the environment via `api_key_env` and
 are never stored in config files. A `.env` in the working directory is loaded if
-present.
+present. Step-limit preferences usually belong in the user config; project
+`reasonix.toml` should override them only when the repository needs shared
+runtime bounds.
 
 ```toml
 default_model = "deepseek"   # provider name (→ its default model) or "provider/model"
@@ -333,8 +445,10 @@ default_model = "deepseek"   # provider name (→ its default model) or "provide
 
 [agent]
 system_prompt = "You are Reasonix, a coding agent..."  # or system_prompt_file = "..."
-max_steps     = 25
-temperature   = 0.0
+max_steps         = 0    # executor tool-call rounds; 0 = no limit
+planner_max_steps = 12   # planner read-only tool-call rounds; 0 = no limit
+temperature       = 0.0
+reasoning_language = "auto"       # visible reasoning text: auto|zh|en
 # planner_model = "mimo"   # optional: two-model collaboration (low-frequency planner)
 # subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
@@ -353,29 +467,39 @@ context_window = 1000000   # tokens; harness compacts older history near this li
 [[providers]]
 name        = "mimo-pro"
 kind        = "openai"
-base_url    = "https://api.xiaomimimo.com/v1"
+base_url    = "https://token-plan-cn.xiaomimimo.com/v1"
 model       = "mimo-v2.5-pro"
 api_key_env = "MIMO_API_KEY"
 
 [[providers]]
 name        = "mimo-flash"
 kind        = "openai"
-base_url    = "https://api.xiaomimimo.com/v1"
-model       = "mimo-v2-flash"
+base_url    = "https://token-plan-cn.xiaomimimo.com/v1"
+model       = "mimo-v2.5"
 api_key_env = "MIMO_API_KEY"
 
 [tools]
 enabled = []   # omit/empty = all built-ins
+bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
+
+[tools.shell]
+prefer = "auto"   # auto (default) | bash | powershell | pwsh — force the shell tool's interpreter
+# path = "C:\\Program Files\\PowerShell\\7\\pwsh.exe"   # explicit executable for the chosen shell
+
+[skills]
+# paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
+# excluded_paths = ["~/.agents/skills"]         # hide convention roots without deleting folders
+# disabled_skills = ["review"]                  # hidden from prompt, slash invocation, and skill tools
 
 [permissions]
 mode  = "ask"                              # writer fallback when no rule matches: ask|allow|deny
-deny  = ["bash(rm -rf*)", "bash(git push*)"]   # hard-blocked in every mode
-allow = ["bash(go test*)", "bash(git status*)"]  # never prompted
+deny  = ["Bash(rm -rf*)", "Bash(git push*)"]   # hard-blocked in every mode
+allow = ["Bash(go test:*)", "Bash(git status:*)"]  # never prompted
 ask   = []                                 # force a prompt even if otherwise allowed
 
 [sandbox]
 # workspace_root = ""          # file-writers confined here; empty = cwd (writes stay in-project)
-# allow_write    = ["/tmp"]    # extra dirs write_file/edit_file/multi_edit may modify
+# allow_write    = ["/tmp"]    # extra dirs write_file/edit_file/multi_edit/move_file may modify
 
 [[plugins]]
 name    = "example"            # type defaults to "stdio"
@@ -408,7 +532,7 @@ Reasonix unchanged.
 
 `[sandbox]` is the *enforcement* layer beneath permissions (which are *policy*).
 Phase 0 confines the file-writing built-ins (`write_file`, `edit_file`,
-`multi_edit`) to `workspace_root` (default cwd) plus `allow_write`: a write whose
+`multi_edit`, `move_file`) to `workspace_root` (default cwd) plus `allow_write`: a write whose
 target — resolved to an absolute, symlink-free path so a symlinked dir or `..`
 cannot tunnel out — falls outside every root is refused, and the error is fed
 back to the model. Confinement is on by default (root = cwd), so edits stay in

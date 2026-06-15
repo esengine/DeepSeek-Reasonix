@@ -11,7 +11,11 @@
 // line prefixes — fragile, and lossy for any frontend richer than a terminal.
 package event
 
-import "reasonix/internal/provider"
+import (
+	"reasonix/internal/evidence"
+	"reasonix/internal/nilutil"
+	"reasonix/internal/provider"
+)
 
 // Kind tags an Event. Read the field(s) documented for that kind.
 type Kind int
@@ -63,6 +67,27 @@ const (
 	// Summary so the placeholder still resolves. Replaces the older plain Notice
 	// so a sink can render a distinct, expandable card.
 	CompactionDone
+	// ToolProgress streams a chunk of a still-running tool's combined output
+	// (Tool: ID + Output = the new chunk). Emitted between ToolDispatch and
+	// ToolResult for long tools like bash so a frontend can show live progress.
+	// Appended last to keep the Kind values before it wire-stable.
+	ToolProgress
+	// MCPSurfaceReady fires once per server when its background-loaded surface
+	// (prompts or resources) finishes after startup. Lets UIs refresh /mcp
+	// status without polling. Text carries "<server>: <surface> ready (<count>
+	// items)". Appended last to keep the Kind values before it wire-stable.
+	MCPSurfaceReady
+	// Retrying fires before each backoff sleep while the provider re-attempts the
+	// connection+header phase after a transient failure (RetryAttempt of RetryMax).
+	// A frontend shows a transient "retrying (n/m)" indicator that the next stream
+	// event — or TurnDone — clears. Appended last to keep the Kind values before
+	// it wire-stable.
+	Retrying
+	// Steer fires when a mid-turn steer message is consumed from the queue and
+	// injected as a user message. Text carries the raw steer content (without the
+	// wrapper prefix), so a frontend can display it to the user as confirmation.
+	// Frontends use Steer to know a queued message has been delivered.
+	Steer
 )
 
 // Level classifies a Notice so sinks can style or filter it.
@@ -73,17 +98,24 @@ const (
 	LevelWarn
 )
 
+// Profile carries the subagent model/effort resolved for this call.
+type Profile struct {
+	Model  string
+	Effort string
+}
+
 // Tool describes a tool call for ToolDispatch / ToolResult events. On dispatch
 // only ID/Name/Args/ReadOnly are set; on result Output/Err/Truncated are filled
 // in. Args is the raw JSON arguments — a sink compacts it for display.
 type Tool struct {
-	ID        string
-	Name      string
-	Args      string
-	Output    string // ToolResult: the result text fed to the model
-	Err       string // ToolResult: non-empty when the call failed or was blocked
-	ReadOnly  bool
-	Truncated bool // ToolResult: Output was head+tailed before display/model
+	ID         string
+	Name       string
+	Args       string
+	Output     string // ToolResult: the result text fed to the model
+	Err        string // ToolResult: non-empty when the call failed or was blocked
+	ReadOnly   bool
+	Truncated  bool  // ToolResult: Output was head+tailed before display/model
+	DurationMs int64 // ToolResult: wall-clock execution time in milliseconds
 	// Partial marks an early ToolDispatch emitted when a call begins (ID/Name set,
 	// Args still streaming) so a frontend can show the card immediately; a second,
 	// full ToolDispatch (Partial false, Args set) follows when the call completes.
@@ -92,6 +124,18 @@ type Tool struct {
 	// sub-agent's calls carry the parent `task` call's ID so a frontend can nest
 	// them under it. Empty for top-level calls.
 	ParentID string
+	FileDiff
+	Profile *Profile // ToolDispatch: subagent model/effort (set for task/skill calls)
+}
+
+// FileDiff is a previewed change carried on a writer tool's full ToolDispatch
+// and on its ApprovalRequest, so a frontend can render +/- lines before the
+// call runs. Diff is the unified diff (empty for read-only tools, binary files,
+// or no-op changes); Added/Removed are its line tallies.
+type FileDiff struct {
+	Diff    string
+	Added   int
+	Removed int
 }
 
 // Approval identifies a pending tool-call approval for an ApprovalRequest
@@ -143,26 +187,70 @@ type AskAnswer struct {
 	Selected   []string
 }
 
+// CacheDiagnostics describes whether and why the cacheable prefix changed since
+// the last turn. It rides on the Usage event so every frontend can show
+// cache-churn attribution.
+type CacheDiagnostics struct {
+	PrefixHash          string
+	PrefixChanged       bool
+	PrefixChangeReasons []string // "system", "tools", "log_rewrite"
+	SystemHash          string
+	ToolsHash           string
+	LogRewriteVersion   int
+	ToolSchemaTokens    int
+	CacheMissTokens     int
+	CacheHitTokens      int
+}
+
+const (
+	UsageSourceExecutor   = "executor"
+	UsageSourcePlanner    = "planner"
+	UsageSourceSubagent   = "subagent"
+	UsageSourceCompaction = "compaction"
+	UsageSourceClassifier = "classifier"
+	UsageSourceTitle      = "title"
+)
+
 // Event is one increment in a turn's event stream. Read the field(s) documented
 // for Kind; the others are zero.
 type Event struct {
-	Kind      Kind
-	Text      string            // Reasoning / Text / Message / Notice / Phase
-	Reasoning string            // Message: the full reasoning chain
-	Tool      Tool              // ToolDispatch / ToolResult
-	Usage     *provider.Usage   // Usage
-	Pricing   *provider.Pricing // Usage: for cost display (nil = omit cost)
+	Kind             Kind
+	Text             string            // Reasoning / Text / Message / Notice / Phase
+	Reasoning        string            // Message: the full reasoning chain
+	Tool             Tool              // ToolDispatch / ToolResult
+	Usage            *provider.Usage   // Usage
+	Pricing          *provider.Pricing // Usage: for cost display (nil = omit cost)
+	UsageSource      string            // Usage: billable call source; empty means executor for compatibility
+	CacheDiagnostics *CacheDiagnostics // Usage: cache-churn attribution (nil = N/A)
 	// SessionHit/SessionMiss carry cumulative cache tokens across the whole
 	// session (Usage events only), so a frontend can show the aggregate hit-rate
 	// — which doesn't crater on a short turn or after compaction — alongside
 	// Usage's single-turn numbers.
-	SessionHit  int        // Usage: cumulative cache-hit prompt tokens this session
-	SessionMiss int        // Usage: cumulative cache-miss prompt tokens this session
-	Level       Level      // Notice
-	Approval    Approval   // ApprovalRequest
-	Ask         Ask        // AskRequest
-	Err         error      // TurnDone: non-nil on failure
-	Compaction  Compaction // Compaction
+	SessionHit   int        // Usage: cumulative cache-hit prompt tokens this session
+	SessionMiss  int        // Usage: cumulative cache-miss prompt tokens this session
+	Level        Level      // Notice
+	Approval     Approval   // ApprovalRequest
+	Ask          Ask        // AskRequest
+	Err          error      // TurnDone: non-nil on failure
+	Compaction   Compaction // Compaction
+	RetryAttempt int        // Retrying: 1-based attempt about to be made
+	RetryMax     int        // Retrying: total attempts before giving up
+}
+
+// ReadinessAuditSink is an optional sink capability. Sinks that do not care
+// about readiness audit receipts can implement only Sink and will ignore them.
+type ReadinessAuditSink interface {
+	RecordReadinessAudit(evidence.ReadinessAudit)
+}
+
+// RecordReadinessAudit forwards a readiness audit receipt to sinks that opt in.
+func RecordReadinessAudit(s Sink, a evidence.ReadinessAudit) {
+	if nilutil.IsNil(s) {
+		return
+	}
+	if rs, ok := s.(ReadinessAuditSink); ok {
+		rs.RecordReadinessAudit(a)
+	}
 }
 
 // Sink consumes a turn's events. The agent calls Emit serially from its run
@@ -178,7 +266,11 @@ type Sink interface {
 type FuncSink func(Event)
 
 // Emit calls the wrapped function.
-func (f FuncSink) Emit(e Event) { f(e) }
+func (f FuncSink) Emit(e Event) {
+	if f != nil {
+		f(e)
+	}
+}
 
 // Discard is a Sink that drops every event. Useful in tests and for runs that
 // only care about the final session state.

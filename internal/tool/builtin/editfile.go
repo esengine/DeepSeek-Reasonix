@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"reasonix/internal/tool"
@@ -52,13 +51,13 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "", err
 	}
 
-	b, err := os.ReadFile(p.Path)
+	content, enc, err := readFileEncoded(p.Path)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", p.Path, err)
 	}
-	content := string(b)
 
-	switch strings.Count(content, p.OldString) {
+	old, newStr := matchLineEndings(content, p.OldString, p.NewString)
+	switch strings.Count(content, old) {
 	case 0:
 		return "", fmt.Errorf("old_string not found in %s", p.Path)
 	case 1:
@@ -67,8 +66,8 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "", fmt.Errorf("old_string is not unique in %s; add more surrounding context", p.Path)
 	}
 
-	updated := strings.Replace(content, p.OldString, p.NewString, 1)
-	if err := os.WriteFile(p.Path, []byte(updated), 0o644); err != nil {
+	updated := strings.Replace(content, old, newStr, 1)
+	if err := writeFileEncoded(p.Path, updated, enc); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
 	return fmt.Sprintf("edited %s", p.Path), nil

@@ -144,16 +144,3 @@ func toolNames(ts []tool.Tool) []string {
 	}
 	return names
 }
-
-func getJSONKeys(t *testing.T, raw json.RawMessage) []string {
-	t.Helper()
-	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
-}

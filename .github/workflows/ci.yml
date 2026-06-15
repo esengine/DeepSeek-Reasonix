@@ -18,17 +18,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
+      # Skipped on Windows: the runner checks out CRLF, so gofmt -l flags every
+      # file. gofmt output is OS-independent, so the Unix legs already cover it.
       - name: gofmt
+        if: runner.os != 'Windows'
         run: |
           # Root module only — desktop/ is a separate module with its own tooling.
           unformatted=$(gofmt -l . | grep -v '^desktop/' || true)
@@ -45,4 +48,156 @@ jobs:
         run: go build ./...
 
       - name: test
+        env:
+          # Run the prompt-cache prefix-stability guard (TestCacheHit*) in CI: a
+          # regression there silently tanks the cache hit rate the project is
+          # built around.
+          REASONIX_RELEASE_CACHE_GUARD: "1"
         run: go test ./...
+
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The matrix never runs -race (it needs cgo); the project's concurrency
+      # (plugin fan-out, background phase B, jobs Kill/Wait) would otherwise
+      # ship without race coverage.
+      - name: test -race
+        env:
+          REASONIX_RELEASE_CACHE_GUARD: "1"
+        run: go test -race ./...
+
+  desktop:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+
+      - name: Install Wails CLI
+        run: |
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go.mod tidy
+        run: |
+          go mod tidy
+          if ! git diff --quiet -- go.mod go.sum; then
+            echo "desktop/go.mod or go.sum is stale - run 'cd desktop && go mod tidy' and commit."
+            git diff -- go.mod go.sum
+            exit 1
+          fi
+
+      # WebKitGTK 4.0 toolchain (pinned to ubuntu-22.04; no webkit2_41 tag).
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      - name: Build frontend
+        run: |
+          wails generate module
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend build
+
+      - name: vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          working-directory: desktop
+          args: --timeout=5m
+
+      - name: build
+        run: go build ./...
+
+      - name: test
+        run: go test ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          args: --timeout=5m
+
+  govulncheck:
+    runs-on: ubuntu-latest
+    continue-on-error: true # informational — stdlib vulns need a Go patch release
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: govulncheck
+        run: govulncheck ./...
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: test with coverage
+        run: go test -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: upload coverage
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: coverage.out
+          retention-days: 7

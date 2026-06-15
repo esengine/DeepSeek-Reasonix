@@ -1,0 +1,3 @@
+prompt = "Create a file named palindrome.py with a function is_palindrome(s) that returns True if s reads the same forwards and backwards ignoring case, spaces, and punctuation, and False otherwise. Do not print anything at import time."
+max_steps = 12
+timeout_sec = 180

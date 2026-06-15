@@ -157,10 +157,10 @@ func (m chatTUI) chooserActivate(row int) (tea.Model, tea.Cmd) {
 	switch {
 	case row < len(q.Options):
 		if q.Multi {
-			c.sel[c.tab][row] = !c.sel[c.tab][row]
-			c.custom[c.tab] = ""
-			c.cursor = row
-			return m, nil
+			// Space toggles; Enter confirms current selections and advances.
+			// (Toggling is handled in handleChooserKey; we only arrive here
+			// via Enter or number keys, both of which should commit.)
+			return m.chooserAdvance()
 		}
 		c.sel[c.tab] = map[int]bool{row: true}
 		c.custom[c.tab] = ""
@@ -214,16 +214,16 @@ func (m chatTUI) renderChooser() string {
 	}
 
 	if c.onSubmitTab() {
-		b.WriteString(accent("提交答案 / Submit") + "\n")
+		b.WriteString(accent(i18n.M.AskSubmitTitle) + "\n")
 		for i, q := range c.questions {
 			label := headerOr(q, i)
-			ans := dim("(未答)")
+			ans := dim(i18n.M.AskUnanswered)
 			if a := c.answers()[i]; len(a.Selected) > 0 {
 				ans = strings.Join(a.Selected, ", ")
 			}
 			fmt.Fprintf(&b, "  %s: %s\n", dim(label), ans)
 		}
-		b.WriteString(dim("Enter 提交 · ← 返回修改"))
+		b.WriteString(dim(i18n.M.AskSubmitHint))
 		return choicePanelStyle.Width(w).Render(b.String())
 	}
 
@@ -321,7 +321,4 @@ func headerOr(q event.AskQuestion, i int) string {
 
 // choicePanelStyle frames the question card, matching the input box's top/bottom
 // rule but in the accent colour.
-var choicePanelStyle = lipgloss.NewStyle().
-	Border(lipgloss.NormalBorder(), true, false, true, false).
-	BorderForeground(lipgloss.Color("173")).
-	PaddingLeft(1)
+var choicePanelStyle lipgloss.Style
