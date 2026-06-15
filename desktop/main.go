@@ -81,7 +81,7 @@ func main() {
 		Title:     "Reasonix",
 		Width:     width,
 		Height:    height,
-		MinWidth:  760,
+		MinWidth:  400,
 		MinHeight: 480,
 		// Match the dark UI shell so the initial webview background doesn't flash
 		// white before CSS loads — particularly visible on WebKitGTK.

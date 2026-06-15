@@ -1522,7 +1522,7 @@ a[href] {
 
 .layout {
   --sidebar-width: var(--sidebar-expanded-width, clamp(264px, 18vw, 300px));
-  --chat-min-width: 760px;
+  --chat-min-width: 320px;
   --workspace-width: 420px;
   --workspace-resizer-width: 8px;
   --app-chrome-height: 38px;
@@ -1536,7 +1536,7 @@ a[href] {
   display: grid;
   justify-content: start;
   grid-template-rows: var(--app-chrome-height) minmax(0, 1fr);
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width) minmax(var(--chat-min-width), 1fr);
   height: 100%;
   min-height: 0;
   width: 100%;
@@ -1562,30 +1562,30 @@ a[href] {
 }
 .layout--sidebar-collapsed {
   --sidebar-width: 0px;
-  grid-template-columns: 0px minmax(0, 1fr);
+  grid-template-columns: 0px minmax(var(--chat-min-width), 1fr);
 }
 .layout:not(.layout--sidebar-collapsed):not(.layout--workspace-open):not(.layout--workspace-maximized) {
-  grid-template-columns: var(--sidebar-expanded-width) minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-expanded-width) minmax(var(--chat-min-width), 1fr);
 }
 .layout--workspace-open {
   --chrome-right-toggle-offset: calc(var(--workspace-width) + var(--workspace-resizer-width));
   min-width: min(780px, 100vw);
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--workspace-resizer-width) minmax(0, var(--workspace-width));
+  grid-template-columns: var(--sidebar-width) minmax(var(--chat-min-width), 1fr) var(--workspace-resizer-width) minmax(0, var(--workspace-width));
 }
 .layout--workspace-open:not(.layout--sidebar-collapsed) {
   min-width: min(780px, 100vw);
-  grid-template-columns: var(--sidebar-expanded-width) minmax(0, 1fr) var(--workspace-resizer-width) minmax(0, var(--workspace-width));
+  grid-template-columns: var(--sidebar-expanded-width) minmax(var(--chat-min-width), 1fr) var(--workspace-resizer-width) minmax(0, var(--workspace-width));
 }
 .layout--workspace-open.layout--sidebar-collapsed {
   min-width: min(560px, 100vw);
-  grid-template-columns: 0px minmax(0, 1fr) var(--workspace-resizer-width) minmax(0, var(--workspace-width));
+  grid-template-columns: 0px minmax(var(--chat-min-width), 1fr) var(--workspace-resizer-width) minmax(0, var(--workspace-width));
 }
 .layout--workspace-maximized {
   min-width: 0;
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width) minmax(var(--chat-min-width), 1fr);
 }
 .layout--workspace-maximized.layout--sidebar-collapsed {
-  grid-template-columns: 0px minmax(0, 1fr);
+  grid-template-columns: 0px minmax(var(--chat-min-width), 1fr);
 }
 .layout--workspace-maximized .chat-pane {
   display: none;
@@ -14182,7 +14182,7 @@ a[href] {
 
 @media (max-width: 820px) {
   .layout {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(var(--chat-min-width), 1fr);
   }
   .sidebar {
     display: none;
