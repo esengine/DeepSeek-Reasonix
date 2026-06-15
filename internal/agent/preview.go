@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-var reTransientUserBlock = regexp.MustCompile(`(?s)^\s*<(?:reasoning-language|memory-update|background-jobs)>.*?</(?:reasoning-language|memory-update|background-jobs)>\s*\n?`)
+var reTransientUserBlock = regexp.MustCompile(`(?s)^\s*<(?:reasoning-language|memory-update|background-jobs|active-goal)>.*?</(?:reasoning-language|memory-update|background-jobs|active-goal)>\s*\n?`)
 
 // StripTransientUserBlocks removes controller-injected transient XML blocks
 // from persisted user messages before deriving display text, previews, or
