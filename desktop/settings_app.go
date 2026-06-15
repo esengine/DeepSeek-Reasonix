@@ -221,7 +221,7 @@ func officialProviderKindFromEntry(p config.ProviderEntry) string {
 			return "mimo-api"
 		}
 	case "mimo-token-plan":
-		if host == "token-plan-cn.xiaomimimo.com" {
+		if config.IsMimoTokenPlanHost(host) {
 			return "mimo-token-plan"
 		}
 	}
@@ -286,7 +286,7 @@ func providerViewFromEntry(p config.ProviderEntry, builtIn, added bool) Provider
 func officialProviderViews(added map[string]bool) []ProviderView {
 	var out []ProviderView
 	for _, kind := range []string{"deepseek", "mimo-api", "mimo-token-plan"} {
-		entries, _, err := officialProviderTemplate(kind)
+		entries, _, err := officialProviderTemplate(kind, "")
 		if err != nil {
 			continue
 		}
@@ -878,7 +878,7 @@ func desktopAutoPlanMode(mode string) string {
 	}
 }
 
-func officialProviderTemplate(kind string) ([]config.ProviderEntry, string, error) {
+func officialProviderTemplate(kind, region string) ([]config.ProviderEntry, string, error) {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "deepseek", "deepseek-official":
 		return []config.ProviderEntry{{
@@ -910,7 +910,7 @@ func officialProviderTemplate(kind string) ([]config.ProviderEntry, string, erro
 		return []config.ProviderEntry{{
 			Name:          "mimo-token-plan",
 			Kind:          "openai",
-			BaseURL:       "https://token-plan-cn.xiaomimimo.com/v1",
+			BaseURL:       config.MimoTokenPlanBaseURL(region),
 			Models:        []string{"mimo-v2.5-pro", "mimo-v2.5"},
 			Default:       "mimo-v2.5-pro",
 			APIKeyEnv:     "MIMO_API_KEY",
@@ -994,8 +994,10 @@ func (a *App) SaveProvider(p ProviderView) error {
 // AddOfficialProviderAccess adds one curated desktop provider template to the
 // Settings > Model > Access list. The runtime default providers still exist
 // independently; this only records the user's explicit access setup.
-func (a *App) AddOfficialProviderAccess(kind, key string) error {
-	entries, keyEnv, err := officialProviderTemplate(kind)
+// region selects the Mimo Token Plan cluster ("cn", "sgp", "ams"); ignored
+// for other providers.
+func (a *App) AddOfficialProviderAccess(kind, key, region string) error {
+	entries, keyEnv, err := officialProviderTemplate(kind, region)
 	if err != nil {
 		return err
 	}

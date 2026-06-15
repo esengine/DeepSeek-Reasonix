@@ -558,6 +558,29 @@ func TestEffectiveVisionDoesNotInferCustomMimoProxy(t *testing.T) {
 	}
 }
 
+func TestEffectiveVisionRecognizesAllMimoTokenPlanRegions(t *testing.T) {
+	for _, host := range []string{"token-plan-cn.xiaomimimo.com", "token-plan-sgp.xiaomimimo.com", "token-plan-ams.xiaomimimo.com"} {
+		e := &ProviderEntry{
+			Name:    "mimo-token-plan",
+			Kind:    "openai",
+			BaseURL: "https://" + host + "/v1",
+			Model:   "mimo-v2.5",
+		}
+		if !EffectiveVision(e) {
+			t.Errorf("host=%q: mimo-v2.5 on official Token Plan should enable vision", host)
+		}
+		pro := &ProviderEntry{
+			Name:    "mimo-token-plan",
+			Kind:    "openai",
+			BaseURL: "https://" + host + "/v1",
+			Model:   "mimo-v2.5-pro",
+		}
+		if EffectiveVision(pro) {
+			t.Errorf("host=%q: mimo-v2.5-pro should remain text-only", host)
+		}
+	}
+}
+
 func TestRemoveProvider(t *testing.T) {
 	c := Default()
 	c.Agent.PlannerModel = "deepseek-pro"

@@ -230,7 +230,7 @@ export interface AppBindings {
   SetSubagentEffort(level: string): Promise<void>;
   SetAutoPlan(mode: string): Promise<void>;
   SaveProvider(p: ProviderView): Promise<void>;
-  AddOfficialProviderAccess(kind: string, key: string): Promise<void>;
+  AddOfficialProviderAccess(kind: string, key: string, region: string): Promise<void>;
   FetchProviderModels(p: ProviderView): Promise<string[]>;
   DeleteProvider(name: string): Promise<void>;
   RemoveProviderAccess(name: string): Promise<void>;
@@ -2363,11 +2363,12 @@ function makeMockApp(): AppBindings {
       if (i >= 0) settings.providers[i] = p;
       else settings.providers.push(p);
     },
-    async AddOfficialProviderAccess(kind: string, key: string) {
+    async AddOfficialProviderAccess(kind: string, key: string, region?: string) {
+      const mimoTPBaseURL = region === "sgp" ? "https://token-plan-sgp.xiaomimimo.com/v1" : region === "ams" ? "https://token-plan-ams.xiaomimimo.com/v1" : "https://token-plan-cn.xiaomimimo.com/v1";
       const templates: Record<string, ProviderView> = {
         deepseek: { name: "deepseek", builtIn: true, added: true, kind: "openai", baseUrl: "https://api.deepseek.com", modelsUrl: "", models: ["deepseek-v4-flash", "deepseek-v4-pro"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: !!key.trim(), balanceUrl: "https://api.deepseek.com/user/balance", contextWindow: 1_000_000, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
         "mimo-api": { name: "mimo-api", builtIn: true, added: true, kind: "openai", baseUrl: "https://api.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: !!key.trim(), balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
-        "mimo-token-plan": { name: "mimo-token-plan", builtIn: true, added: true, kind: "openai", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro", "mimo-v2.5"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: !!key.trim(), balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
+        "mimo-token-plan": { name: "mimo-token-plan", builtIn: true, added: true, kind: "openai", baseUrl: mimoTPBaseURL, modelsUrl: "", models: ["mimo-v2.5-pro", "mimo-v2.5"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: !!key.trim(), balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
       };
       const next = templates[kind] ?? templates.deepseek;
       const i = settings.providers.findIndex((x) => x.name === next.name);

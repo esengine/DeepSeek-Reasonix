@@ -305,3 +305,47 @@ func TestNormalizeDesktopOfficialProviderAccessBackfillsExistingMimoTokenPlanAnd
 		t.Fatalf("mimo-token-plan mixed-model price = %+v, want nil", p.Price)
 	}
 }
+
+func TestIsOfficialMimoTokenPlanProviderRecognizesAllRegions(t *testing.T) {
+	for _, tc := range []struct {
+		host  string
+		want  bool
+	}{
+		{"token-plan-cn.xiaomimimo.com", true},
+		{"token-plan-sgp.xiaomimimo.com", true},
+		{"token-plan-ams.xiaomimimo.com", true},
+		{"api.xiaomimimo.com", false},
+		{"custom-proxy.example.com", false},
+	} {
+		e := &ProviderEntry{Name: "mimo-token-plan", Kind: "openai", BaseURL: "https://" + tc.host + "/v1"}
+		if got := isOfficialMimoTokenPlanProvider(e); got != tc.want {
+			t.Errorf("host=%q: isOfficialMimoTokenPlanProvider = %v, want %v", tc.host, got, tc.want)
+		}
+	}
+}
+
+func TestNormalizeDesktopOfficialProviderAccessBackfillsSGPMimoTokenPlan(t *testing.T) {
+	c := &Config{
+		Desktop: DesktopConfig{ProviderAccess: []string{"mimo-token-plan"}},
+		Providers: []ProviderEntry{{
+			Name:      "mimo-token-plan",
+			Kind:      "openai",
+			BaseURL:   "https://token-plan-sgp.xiaomimimo.com/v1",
+			Model:     "mimo-v2.5-pro",
+			APIKeyEnv: "MIMO_API_KEY",
+		}},
+	}
+
+	normalizeDesktopOfficialProviderAccess(c)
+
+	p, ok := c.Provider("mimo-token-plan")
+	if !ok {
+		t.Fatal("mimo-token-plan provider missing")
+	}
+	if p.BaseURL != "https://token-plan-sgp.xiaomimimo.com/v1" {
+		t.Fatalf("mimo-token-plan BaseURL = %q, want sgp URL preserved", p.BaseURL)
+	}
+	if !p.HasModel("mimo-v2.5-pro") || !p.HasModel("mimo-v2.5") {
+		t.Fatalf("mimo-token-plan models = %v, want pro and flash models", p.ModelList())
+	}
+}

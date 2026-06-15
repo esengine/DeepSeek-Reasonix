@@ -661,7 +661,7 @@ api_key_env = "DEEPSEEK_API_KEY"
 		t.Fatalf("write config: %v", err)
 	}
 
-	if err := NewApp().AddOfficialProviderAccess("deepseek", "test-key"); err != nil {
+	if err := NewApp().AddOfficialProviderAccess("deepseek", "test-key", ""); err != nil {
 		t.Fatalf("AddOfficialProviderAccess: %v", err)
 	}
 	cfg := config.LoadForEdit(config.UserConfigPath())

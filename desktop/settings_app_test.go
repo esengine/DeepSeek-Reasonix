@@ -131,7 +131,7 @@ func TestSaveProviderFiltersNonChatModels(t *testing.T) {
 }
 
 func TestOfficialMimoAPITemplateIncludesVisionModels(t *testing.T) {
-	entries, keyEnv, err := officialProviderTemplate("mimo-api")
+	entries, keyEnv, err := officialProviderTemplate("mimo-api", "")
 	if err != nil {
 		t.Fatalf("officialProviderTemplate: %v", err)
 	}
@@ -146,6 +146,43 @@ func TestOfficialMimoAPITemplateIncludesVisionModels(t *testing.T) {
 	}
 	if got.DefaultModel() != "mimo-v2.5-pro" {
 		t.Fatalf("mimo-api default = %q, want mimo-v2.5-pro", got.DefaultModel())
+	}
+}
+
+func TestOfficialMimoTokenPlanTemplateRegion(t *testing.T) {
+	for _, tc := range []struct {
+		region   string
+		wantHost string
+	}{
+		{"", "token-plan-cn.xiaomimimo.com"},
+		{"cn", "token-plan-cn.xiaomimimo.com"},
+		{"sgp", "token-plan-sgp.xiaomimimo.com"},
+		{"ams", "token-plan-ams.xiaomimimo.com"},
+	} {
+		entries, _, err := officialProviderTemplate("mimo-token-plan", tc.region)
+		if err != nil {
+			t.Fatalf("region=%q: officialProviderTemplate: %v", tc.region, err)
+		}
+		if len(entries) != 1 {
+			t.Fatalf("region=%q: got %d entries, want 1", tc.region, len(entries))
+		}
+		got := entries[0]
+		wantURL := "https://" + tc.wantHost + "/v1"
+		if got.BaseURL != wantURL {
+			t.Errorf("region=%q: BaseURL = %q, want %q", tc.region, got.BaseURL, wantURL)
+		}
+		if got.Name != "mimo-token-plan" {
+			t.Errorf("region=%q: Name = %q, want mimo-token-plan", tc.region, got.Name)
+		}
+	}
+}
+
+func TestOfficialProviderKindFromEntryRecognizesAllMimoTokenPlanHosts(t *testing.T) {
+	for _, host := range []string{"token-plan-cn.xiaomimimo.com", "token-plan-sgp.xiaomimimo.com", "token-plan-ams.xiaomimimo.com"} {
+		p := config.ProviderEntry{Name: "mimo-token-plan", Kind: "openai", BaseURL: "https://" + host + "/v1"}
+		if got := officialProviderKindFromEntry(p); got != "mimo-token-plan" {
+			t.Errorf("host=%q: officialProviderKindFromEntry = %q, want mimo-token-plan", host, got)
+		}
 	}
 }
 

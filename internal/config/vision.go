@@ -29,7 +29,7 @@ func isOfficialMimoVisionEntry(e *ProviderEntry) bool {
 		return false
 	}
 	switch officialMimoHost(e.BaseURL) {
-	case "api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com":
+	case "api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com", "token-plan-sgp.xiaomimimo.com", "token-plan-ams.xiaomimimo.com":
 		return true
 	default:
 		return false

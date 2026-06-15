@@ -1864,7 +1864,37 @@ func isOfficialMimoAPIProvider(e *ProviderEntry) bool {
 }
 
 func isOfficialMimoTokenPlanProvider(e *ProviderEntry) bool {
-	return isOpenAIProviderKind(e) && officialMimoHost(e.BaseURL) == "token-plan-cn.xiaomimimo.com"
+	if !isOpenAIProviderKind(e) {
+		return false
+	}
+	switch officialMimoHost(e.BaseURL) {
+	case "token-plan-cn.xiaomimimo.com", "token-plan-sgp.xiaomimimo.com", "token-plan-ams.xiaomimimo.com":
+		return true
+	}
+	return false
+}
+
+// MimoTokenPlanBaseURL returns the Mimo Token Plan API endpoint for the given
+// region. Supported regions: "cn" (default), "sgp", "ams".
+func MimoTokenPlanBaseURL(region string) string {
+	switch strings.ToLower(strings.TrimSpace(region)) {
+	case "sgp":
+		return "https://token-plan-sgp.xiaomimimo.com/v1"
+	case "ams":
+		return "https://token-plan-ams.xiaomimimo.com/v1"
+	default:
+		return "https://token-plan-cn.xiaomimimo.com/v1"
+	}
+}
+
+// IsMimoTokenPlanHost reports whether host is an official Mimo Token Plan
+// endpoint (any region).
+func IsMimoTokenPlanHost(host string) bool {
+	switch strings.ToLower(strings.TrimSpace(host)) {
+	case "token-plan-cn.xiaomimimo.com", "token-plan-sgp.xiaomimimo.com", "token-plan-ams.xiaomimimo.com":
+		return true
+	}
+	return false
 }
 
 func isOpenAIProviderKind(e *ProviderEntry) bool {

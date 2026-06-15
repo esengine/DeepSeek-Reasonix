@@ -3378,7 +3378,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             busy={busy}
             onMode={setAdding}
             onCancel={() => setAdding(null)}
-            onAddOfficial={(kind, key) => apply(() => app.AddOfficialProviderAccess(kind, key)).then(() => setAdding(null))}
+            onAddOfficial={(kind, key, region) => apply(() => app.AddOfficialProviderAccess(kind, key, region)).then(() => setAdding(null))}
             onAddCustom={(pv) => apply(() => app.SaveProvider(pv)).then(() => setAdding(null))}
           />
         )}
@@ -3466,12 +3466,13 @@ function AddProviderPanel({
   busy: boolean;
   onMode: (mode: AddProviderMode) => void;
   onCancel: () => void;
-  onAddOfficial: (kind: OfficialProviderKind, key: string) => Promise<void>;
+  onAddOfficial: (kind: OfficialProviderKind, key: string, region: string) => Promise<void>;
   onAddCustom: (p: ProviderView) => void | Promise<void>;
 }) {
   const t = useT();
   const [officialKind, setOfficialKind] = useState<OfficialProviderKind>("deepseek");
   const [key, setKey] = useState("");
+  const [region, setRegion] = useState("cn");
   const selected = OFFICIAL_PROVIDER_CHOICES.find((choice) => choice.kind === officialKind) ?? OFFICIAL_PROVIDER_CHOICES[0];
 
   const header = (
@@ -3530,6 +3531,21 @@ function AddProviderPanel({
             </button>
           ))}
         </div>
+        {officialKind === "mimo-token-plan" && (
+          <>
+            <label className="set-label">{t("settings.mimoRegion")}</label>
+            <select
+              className="mem-input"
+              value={region}
+              disabled={busy}
+              onChange={(e) => setRegion(e.target.value)}
+            >
+              <option value="cn">{t("settings.mimoRegion.cn")}</option>
+              <option value="sgp">{t("settings.mimoRegion.sgp")}</option>
+              <option value="ams">{t("settings.mimoRegion.ams")}</option>
+            </select>
+          </>
+        )}
         <label className="set-label">{t("settings.providerKeyOptional")}</label>
         <input
           className="mem-input"
@@ -3547,7 +3563,7 @@ function AddProviderPanel({
             type="button"
             className="btn btn--primary btn--small"
             disabled={busy}
-            onClick={() => void onAddOfficial(officialKind, key.trim())}
+            onClick={() => void onAddOfficial(officialKind, key.trim(), region)}
           >
             {t("settings.addProvider.confirm")}
           </button>
@@ -3894,7 +3910,7 @@ function officialProviderKind(p: ProviderView): string {
   const name = canonicalOfficialProviderName(p.name);
   const host = providerBaseHost(p.baseUrl);
   if (name === "deepseek" && host === "api.deepseek.com") return "deepseek";
-  if (name === "mimo-token-plan" && host === "token-plan-cn.xiaomimimo.com") return "mimo-token-plan";
+  if (name === "mimo-token-plan" && host && /^token-plan-[a-z]+\.xiaomimimo\.com$/.test(host)) return "mimo-token-plan";
   if (name === "mimo-api" && host === "api.xiaomimimo.com") return "mimo-api";
   return "";
 }
