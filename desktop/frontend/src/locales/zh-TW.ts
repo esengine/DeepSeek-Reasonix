@@ -237,13 +237,16 @@ export const zhTW: Record<DictKey, string> = {
   "caps.hideDiagnostics": "隱藏診斷路徑",
 
   // 歡迎 / 空狀態
-  "welcome.tagline": "一個編碼智慧體 —— 描述任務或隨便問點什麼。",
+  "welcome.tagline": "描述目標、貼錯誤、引用檔案，Reasonix 會從理解到執行一路推進。",
   "welcome.hintCommands": "命令",
   "welcome.hintFiles": "引用檔案",
   "welcome.hintSend": "傳送",
-  "welcome.ex1": "講講這個程式碼庫的架構",
-  "welcome.ex2": "總結最近的 git 變更",
+  "welcome.ex1": "講解程式架構",
+  "welcome.ex1Desc": "梳理模組和關鍵鏈路。",
+  "welcome.ex2": "總結 Git 變更",
+  "welcome.ex2Desc": "查看變化和風險點。",
   "welcome.ex3": "智慧體的執行主循環在哪，它做了什麼？",
+  "welcome.ex3Desc": "定位核心檔案並解釋控制流。",
 
   // 輸入框
   "composer.placeholder": "給 Reasonix 發訊息…  ( / 命令 · @ 檔案 )",
@@ -1080,8 +1083,10 @@ export const zhTW: Record<DictKey, string> = {
   "caps.failureGroupCommandUnavailable": "{count} 個命令不可用",
   "caps.failureGroupNetwork": "{count} 個網路/權限異常",
   "caps.failureGroupOther": "{count} 個其他異常",
-  "welcome.title": "一個編碼智慧體",
-  "welcome.ex4": "找出並修復這個專案裡的一個 bug",
+  "welcome.title": "你好，今天想構建什麼？",
+  "welcome.question": "從一個任務開始。",
+  "welcome.ex4": "修復一個 Bug",
+  "welcome.ex4Desc": "定位問題並驗證補丁。",
   "composer.normalMode": "對話模式",
   "composer.normalModeDesc": "直接對話或執行任務。",
   "composer.goalMode": "目標模式",

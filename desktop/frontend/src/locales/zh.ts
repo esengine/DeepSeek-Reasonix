@@ -322,15 +322,20 @@ export const zh: Record<DictKey, string> = {
   "caps.hideDiagnostics": "隐藏诊断路径",
 
   // 欢迎 / 空状态
-  "welcome.title": "一个编码智能体",
-  "welcome.tagline": "描述任务，或随便问点什么。",
+  "welcome.title": "你好，今天想构建什么？",
+  "welcome.question": "从一个任务开始。",
+  "welcome.tagline": "描述目标、贴错误、引用文件，Reasonix 会从理解到执行一路推进。",
   "welcome.hintCommands": "命令",
   "welcome.hintFiles": "引用文件",
   "welcome.hintSend": "发送",
-  "welcome.ex1": "讲讲这个代码库的架构",
-  "welcome.ex2": "总结最近的 git 改动",
+  "welcome.ex1": "讲解代码架构",
+  "welcome.ex1Desc": "梳理模块和关键链路。",
+  "welcome.ex2": "总结 Git 改动",
+  "welcome.ex2Desc": "查看变化和风险点。",
   "welcome.ex3": "智能体的运行主循环在哪，它做了什么？",
-  "welcome.ex4": "找出并修复这个项目里的一个 bug",
+  "welcome.ex3Desc": "定位核心文件并解释控制流。",
+  "welcome.ex4": "修复一个 Bug",
+  "welcome.ex4Desc": "定位问题并验证补丁。",
 
   // 输入框
   "composer.placeholder": "给 Reasonix 发消息…  ( / 命令 · @ 文件 · ! 终端 )",

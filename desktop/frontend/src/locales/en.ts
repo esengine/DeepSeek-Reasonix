@@ -321,15 +321,20 @@ export const en = {
   "caps.hideDiagnostics": "Hide diagnostic paths",
 
   // welcome / empty state
-  "welcome.title": "A coding agent",
-  "welcome.tagline": "Describe a task, or ask anything.",
+  "welcome.title": "Hello, what are we building?",
+  "welcome.question": "Start with one task.",
+  "welcome.tagline": "Describe a goal, paste an error, or reference files. Reasonix can reason, edit, and verify.",
   "welcome.hintCommands": "commands",
   "welcome.hintFiles": "reference files",
   "welcome.hintSend": "send",
-  "welcome.ex1": "Explain this codebase's architecture",
-  "welcome.ex2": "Summarize the recent git changes",
+  "welcome.ex1": "Explain architecture",
+  "welcome.ex1Desc": "Map modules and key paths.",
+  "welcome.ex2": "Summarize Git changes",
+  "welcome.ex2Desc": "Review changes and risks.",
   "welcome.ex3": "Where is the agent run loop, and what does it do?",
-  "welcome.ex4": "Find and fix a bug in this project",
+  "welcome.ex3Desc": "Find the core files and explain the control flow.",
+  "welcome.ex4": "Fix a bug",
+  "welcome.ex4Desc": "Diagnose, patch, and verify.",
 
   // composer
   "composer.placeholder": "Message Reasonix…  ( / commands · @ files · ! shell )",

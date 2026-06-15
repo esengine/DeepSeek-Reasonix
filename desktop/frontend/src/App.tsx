@@ -23,7 +23,6 @@ import {
   Plus,
   Search,
   Settings as SettingsIcon,
-  Pencil,
   Trash2,
   Brain,
   Cpu,
@@ -2410,6 +2409,7 @@ export default function App() {
   const topicbarSubtitleTitle = sidebarImDetailConnection
     ? [topicbarWorkspaceLabel, topicbarImSourceLabel, sidebarImScopeLabel(sidebarImDetailConnection, t)].filter(Boolean).join(" · ")
     : [topicbarWorkspacePath || topicbarWorkspaceLabel, topicbarImSourceLabel].filter(Boolean).join(" · ");
+  const topicTitleEditWidth = `${Math.min(Math.max(Array.from(topicTitleDraft || topicbarTitle).length + 4, 8), 36)}ch`;
   const sidebarImConnectedCount = sidebarImConnections.filter((connection) => connection.status === "connected").length;
   const sidebarImHasConnections = sidebarImConnections.length > 0;
   const sidebarImSummaryText = sidebarImHasConnections
@@ -2736,6 +2736,7 @@ export default function App() {
                       autoFocus
                       className="topicbar__title-input"
                       value={topicTitleDraft}
+                      style={{ "--topic-title-input-width": topicTitleEditWidth } as CSSProperties}
                       onChange={(event) => setTopicTitleDraft(event.target.value)}
                       onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
                         if (event.key === "Enter") {
@@ -2751,19 +2752,17 @@ export default function App() {
                     />
                   </div>
                 ) : (
-                  <h1 title={sidebarImDetailConnection ? topicbarTitle : topicTitle(activeTab)}>{topicbarTitle}</h1>
-                )}
-                <Tooltip label={t("topicBar.renameSession")}>
                   <button
-                    className="topicbar__icon-btn"
+                    className="topicbar__title-button"
                     type="button"
-                    disabled={Boolean(sidebarImDetailConnection) || !activeTab?.topicId || topicbarEditing}
+                    disabled={Boolean(sidebarImDetailConnection) || !activeTab?.topicId}
                     onClick={startActiveTopicRename}
+                    title={sidebarImDetailConnection ? topicbarTitle : topicTitle(activeTab)}
                     aria-label={t("topicBar.renameSession")}
                   >
-                    <Pencil size={14} />
+                    <span>{topicbarTitle}</span>
                   </button>
-                </Tooltip>
+                )}
               </div>
               {topicbarSubtitleVisible && (
                 <div className="topicbar__subtitle" title={topicbarSubtitleTitle}>
