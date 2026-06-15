@@ -1155,6 +1155,15 @@ export default function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  // Auto-collapse sidebar when viewport is too narrow for chat-pane
+  useEffect(() => {
+    const minViewportForSidebar = sidebarWidth + CHAT_MIN_WIDTH;
+    if (!sidebarCollapsed && viewportWidth < minViewportForSidebar) {
+      setSidebarCollapsed(true);
+      saveSidebarCollapsed(true);
+    }
+  }, [viewportWidth, sidebarWidth, sidebarCollapsed]);
+
   const [pendingPlanRevision, setPendingPlanRevision] = useState<string | null>(null);
   const [footerHeight, setFooterHeight] = useState(0);
   const footerHeightRef = useRef(0);
