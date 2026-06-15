@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, memo, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, GripVertical, KeyRound, Loader2, Play, QrCode, RefreshCw, Send } from "lucide-react";
 import { asArray } from "../lib/array";
@@ -78,11 +78,11 @@ export function SettingsPanel({
   // Play the modal exit animation, then let the parent unmount us.
   const { status, requestClose } = useDeferredClose(onClose, 240);
 
-  const reload = async () => setS(normalizeSettingsView(await app.Settings().catch(() => null)));
+  const reload = useCallback(async () => setS(normalizeSettingsView(await app.Settings().catch(() => null))), []);
   useEffect(() => {
     void reload();
     if (initialTab) setTab(initialTab === "providers" ? "models" : initialTab);
-  }, [initialTab]);
+  }, [initialTab, reload]);
   useEffect(() => {
     if (!s) return;
     const nextTheme = normalizeThemePreference(s.desktopTheme);
@@ -92,7 +92,7 @@ export function SettingsPanel({
   }, [s?.desktopTheme, s?.desktopThemeStyle]);
 
   // apply runs a mutation, re-reads settings, and refreshes the topbar/model.
-  const apply = async (fn: () => Promise<void>) => {
+  const apply = useCallback(async (fn: () => Promise<void>) => {
     setBusy(true);
     setErr(null);
     try {
@@ -104,8 +104,8 @@ export function SettingsPanel({
     } finally {
       setBusy(false);
     }
-  };
-  const backgroundApply = async (fn: () => Promise<void>) => {
+  }, [reload, onChanged]);
+  const backgroundApply = useCallback(async (fn: () => Promise<void>) => {
     setErr(null);
     try {
       await fn();
@@ -114,7 +114,7 @@ export function SettingsPanel({
     } catch (e) {
       setErr(String((e as Error)?.message ?? e));
     }
-  };
+  }, [reload, onChanged]);
 
   // Close on Esc
   useEffect(() => {
@@ -2788,7 +2788,7 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
   const t = useT();
   const [subtab, setSubtab] = useState<"usage" | "access">("usage");
   const autoRefreshKeyRef = useRef("");
-  const refs = allRefs(s);
+  const refs = useMemo(() => allRefs(s), [s.providers]);
   const defaultRef = toRef(s.defaultModel, s);
   const plannerRef = toRef(s.plannerModel, s);
   const subagentRef = toRef(s.subagentModel, s);
@@ -2996,8 +2996,14 @@ function ModelPicker({
   const t = useT();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const q = query.trim().toLowerCase();
+  // Debounce search to avoid expensive filtering on every keystroke
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 150);
+    return () => clearTimeout(timer);
+  }, [query]);
+  const q = debouncedQuery.trim().toLowerCase();
   const emptyLabel = includeSameDefault ? t("settings.plannerNone") : emptyOptionLabel;
   const emptyHint = includeSameDefault ? t("settings.plannerNoneHint") : emptyOptionHint;
   const emptyMeta = includeSameDefault ? t("settings.plannerNoneHintShort") : emptyOptionHint;
@@ -3196,7 +3202,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
   const [fetchingProvider, setFetchingProvider] = useState<string | null>(null);
   const [fetchResults, setFetchResults] = useState<Record<string, ProviderFetchResult>>({});
   const [modelDrafts, setModelDrafts] = useState<Record<string, ProviderModelDraft>>({});
-  const groups = providerAccessGroups(s.providers.filter((p) => p.added), t);
+  const groups = useMemo(() => providerAccessGroups(s.providers.filter((p) => p.added), t), [s.providers, t]);
 
   const setGroupFetchResult = (groupID: string, result: ProviderFetchResult | null) => {
     setFetchResults((prev) => {
@@ -3779,8 +3785,14 @@ function ProviderModelDraftPicker({
 }) {
   const t = useT();
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  // Debounce search to avoid expensive filtering on every keystroke
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 150);
+    return () => clearTimeout(timer);
+  }, [query]);
   const selected = new Set(draft.selected);
-  const q = query.trim().toLowerCase();
+  const q = debouncedQuery.trim().toLowerCase();
   const visibleCandidates = q
     ? draft.candidates.filter((model) => model.toLowerCase().includes(q))
     : draft.candidates;
@@ -3922,9 +3934,13 @@ function providerGroupDescription(p: ProviderView, t: ReturnType<typeof useT>): 
 }
 
 function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
   const out: string[] = [];
   for (const value of values) {
-    if (value && !out.includes(value)) out.push(value);
+    if (value && !seen.has(value)) {
+      seen.add(value);
+      out.push(value);
+    }
   }
   return out;
 }
@@ -3955,6 +3971,23 @@ function apiKeyEnvFromProviderName(name: string): string {
     .replace(/^_+|_+$/g, "");
   return stem ? `${stem}_API_KEY` : "CUSTOM_API_KEY";
 }
+
+// Memoized model chips for ProviderEditor — prevents re-render when typing
+// in name/key/baseUrl fields.
+const ModelChips = memo(function ModelChips({ modelNames }: { modelNames: string[] }) {
+  const t = useT();
+  if (modelNames.length === 0) return null;
+  return (
+    <div className="provider-model-chips">
+      {modelNames.slice(0, 8).map((model) => (
+        <span className="provider-model-chip" key={model}>{model}</span>
+      ))}
+      {modelNames.length > 8 && (
+        <span className="provider-model-chip provider-model-chip--more">{t("settings.moreModels", { n: modelNames.length - 8 })}</span>
+      )}
+    </div>
+  );
+});
 
 function ProviderEditor({
   initial,
@@ -4125,10 +4158,10 @@ function ProviderEditor({
     );
   }
 
-  const modelNames = models
-    .split(",")
-    .map((m) => m.trim())
-    .filter(Boolean);
+  const modelNames = useMemo(
+    () => models.split(",").map((m) => m.trim()).filter(Boolean),
+    [models]
+  );
   const canFetch = Boolean(name.trim() && baseUrl.trim() && (keyDraft.trim() || apiKeyEnv.trim()));
 
   const protocolField = initial ? (
@@ -4299,14 +4332,7 @@ function ProviderEditor({
       {modelNames.length > 0 && (
         <div className="provider-card-block">
           <div className="provider-card-block__label">{t("settings.availableModels")}</div>
-          <div className="provider-model-chips">
-            {modelNames.slice(0, 8).map((model) => (
-              <span className="provider-model-chip" key={model}>{model}</span>
-            ))}
-            {modelNames.length > 8 && (
-              <span className="provider-model-chip provider-model-chip--more">{t("settings.moreModels", { n: modelNames.length - 8 })}</span>
-            )}
-          </div>
+          <ModelChips modelNames={modelNames} />
         </div>
       )}
       <label className="set-label">{t("settings.manualModels")}</label>
