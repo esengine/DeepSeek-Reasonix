@@ -1316,9 +1316,8 @@ export const en = {
   "slash.skill": "skill",
 
   // assistant message
-  "msg.thinking": "thinking",
-  "msg.thinkingRunning": "thinking…",
-  "msg.thinkingDone": "done",
+  "msg.thinking": "Deep Thinking",
+  "msg.thinkingRunning": "Deep Thinking",
   "msg.copy": "Copy",
   "msg.attachments": "Attachments",
   "msg.fromIm": "From {source}",

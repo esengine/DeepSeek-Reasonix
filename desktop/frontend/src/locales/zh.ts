@@ -1318,9 +1318,8 @@ export const zh: Record<DictKey, string> = {
   "slash.skill": "skill",
 
   // 助手消息
-  "msg.thinking": "思考过程",
-  "msg.thinkingRunning": "思考中…",
-  "msg.thinkingDone": "已完成",
+  "msg.thinking": "深度思考",
+  "msg.thinkingRunning": "深度思考",
   "msg.copy": "复制",
   "msg.attachments": "附件",
   "msg.fromIm": "来自 {source}",

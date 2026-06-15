@@ -801,9 +801,8 @@ export const zhTW: Record<DictKey, string> = {
   "slash.skill": "skill",
 
   // 助手訊息
-  "msg.thinking": "思考過程",
-  "msg.thinkingRunning": "思考中…",
-  "msg.thinkingDone": "已完成",
+  "msg.thinking": "深度思考",
+  "msg.thinkingRunning": "深度思考",
   "msg.copy": "複製",
   "msg.attachments": "附件",
   "msg.fileAttachment": "檔案",
