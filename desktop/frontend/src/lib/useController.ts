@@ -775,6 +775,9 @@ export function useController() {
     const needsInitialLoad = !local?.meta;
     const missedTurnDone = Boolean(local?.running && !tab.running);
     dispatchTo(tabId, { type: "backend_status", running: Boolean(tab.running) });
+    // Replay any pending approval/ask prompts so the modal doesn't stay hidden
+    // after a stale-turn reconcile (#4275, #4474).
+    replayPendingPromptsForActiveTab(tabId);
     if (needsInitialLoad || missedTurnDone) {
       await loadSessionDataForTab(tabId, missedTurnDone);
       return tabs;
