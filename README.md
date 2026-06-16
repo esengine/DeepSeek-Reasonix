@@ -66,8 +66,9 @@
 ## Install
 
 ```sh
-npm i -g reasonix                  # any OS; pulls the prebuilt native binary
-brew install esengine/reasonix/reasonix   # macOS
+npm i -g reasonix                              # any OS; pulls the prebuilt native binary
+brew install esengine/reasonix/reasonix        # macOS
+scoop bucket add reasonix https://github.com/esengine/scoop-bucket && scoop install reasonix   # Windows
 ```
 
 Prebuilt archives (`darwin|linux|windows × amd64|arm64`) and `SHA256SUMS` are on

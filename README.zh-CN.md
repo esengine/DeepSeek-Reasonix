@@ -63,8 +63,9 @@
 ## 安装
 
 ```sh
-npm i -g reasonix                  # 任意系统;自动拉取对应平台的原生二进制
-brew install esengine/reasonix/reasonix   # macOS
+npm i -g reasonix                              # 任意系统;自动拉取对应平台的原生二进制
+brew install esengine/reasonix/reasonix        # macOS
+scoop bucket add reasonix https://github.com/esengine/scoop-bucket && scoop install reasonix   # Windows
 ```
 
 预编译归档(`darwin|linux|windows × amd64|arm64`)和 `SHA256SUMS` 见每个

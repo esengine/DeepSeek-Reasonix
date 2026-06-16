@@ -18,6 +18,7 @@ provides the pre-release buffer instead of a long-lived branch.
 | Surface | Stable | Pre-release buffer |
 |---|---|---|
 | npm | `latest` (0.x), `next` (1.x) | `canary` (`npm i reasonix@canary`) |
+| Scoop | `esengine/scoop-bucket` (auto-updated by GoReleaser) | skipped for prereleases (`skip_upload: "auto"`) |
 | Desktop | R2 `latest/` pointer | R2 `canary/` pointer (R2-only — never on the GitHub releases page) |
 
 A canary build is isolated: it **never** moves `latest` / `next` / desktop `latest/`.

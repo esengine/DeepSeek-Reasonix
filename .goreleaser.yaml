@@ -56,6 +56,22 @@ homebrew_casks:
             system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/reasonix"]
           end
 
+scoops:
+  - name: reasonix
+    ids: [reasonix]
+    skip_upload: "auto"
+    repository:
+      owner: esengine
+      name: scoop-bucket
+      branch: main
+      token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
+    homepage: "https://github.com/esengine/DeepSeek-Reasonix"
+    description: "Cache-first DeepSeek coding agent for the terminal."
+    license: MIT
+    commit_author:
+      name: reasonix
+      email: reasonix@deepseek.com
+
 release:
   prerelease: auto
   name_template: "Reasonix CLI {{ .Tag }}"
