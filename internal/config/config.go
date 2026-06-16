@@ -2465,6 +2465,29 @@ func (c *Config) Provider(name string) (*ProviderEntry, bool) {
 	return nil, false
 }
 
+func (c *Config) providerForModelRef(name string) (*ProviderEntry, bool) {
+	if e, ok := c.Provider(name); ok {
+		return e, true
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, false
+	}
+	match := -1
+	for i := range c.Providers {
+		if strings.EqualFold(c.Providers[i].Name, name) {
+			if match >= 0 {
+				return nil, false
+			}
+			match = i
+		}
+	}
+	if match >= 0 {
+		return &c.Providers[match], true
+	}
+	return nil, false
+}
+
 // ResolveModel resolves a model reference to a provider entry whose Model is the
 // selected model string (a copy, so the config's lists stay intact). It accepts:
 //   - "provider/model" — that exact model under that provider;
@@ -2476,6 +2499,7 @@ func (c *Config) Provider(name string) (*ProviderEntry, bool) {
 // without duplicating base_url/api_key_env. Single-`model` entries still resolve
 // by provider name, keeping older configs working unchanged.
 func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
+	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return nil, false
 	}
@@ -2484,7 +2508,7 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 	}
 	// "provider/model"
 	if prov, model, ok := strings.Cut(ref, "/"); ok {
-		if e, found := c.Provider(prov); found && e.HasModel(model) {
+		if e, found := c.providerForModelRef(prov); found && e.HasModel(model) {
 			cp := *e
 			cp.Model = model
 			cp.applyModelPrice()
@@ -2492,7 +2516,7 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 		}
 	}
 	// a provider name → its default model
-	if e, found := c.Provider(ref); found {
+	if e, found := c.providerForModelRef(ref); found {
 		cp := *e
 		cp.Model = e.DefaultModel()
 		cp.applyModelPrice()

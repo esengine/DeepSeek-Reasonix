@@ -82,3 +82,43 @@ api_key_env = "`+keyEnv+`"
 		t.Fatalf("expected a notice naming the unset key env %q; got %v", keyEnv, notices)
 	}
 }
+
+func TestBuildContinuesWhenOptionalPlannerModelIsStale(t *testing.T) {
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "executor/main"
+
+[agent]
+planner_model = "OpenRouter/moonshotai/kimi-k2.6:free"
+
+[[providers]]
+name = "executor"
+kind = "openai"
+base_url = "https://example.invalid/v1"
+model = "main"
+`)
+
+	var notices []string
+	ctrl, err := Build(context.Background(), Options{
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices = append(notices, e.Text)
+			}
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Build should keep the executor usable when optional planner_model is stale: %v", err)
+	}
+	defer ctrl.Close()
+
+	found := false
+	for _, n := range notices {
+		if strings.Contains(n, `planner_model "OpenRouter/moonshotai/kimi-k2.6:free"`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a notice naming the stale planner_model; got %v", notices)
+	}
+}

@@ -52,6 +52,40 @@ func TestResolveModelWithFallback(t *testing.T) {
 	}
 }
 
+func TestResolveModelAcceptsProviderNameCaseInsensitiveRef(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "sk-test")
+	c := &Config{
+		DefaultModel: "openrouter/moonshotai/kimi-k2.6:free",
+		Agent: AgentConfig{
+			PlannerModel: "OpenRouter/moonshotai/kimi-k2.6:free",
+		},
+		Providers: []ProviderEntry{{
+			Name:      "openrouter",
+			Kind:      "openai",
+			BaseURL:   "https://openrouter.ai/api/v1",
+			Models:    []string{"moonshotai/kimi-k2.6:free"},
+			APIKeyEnv: "OPENROUTER_API_KEY",
+		}},
+	}
+
+	entry, ok := c.ResolveModel(c.Agent.PlannerModel)
+	if !ok {
+		t.Fatalf("ResolveModel(%q) did not match configured provider %q", c.Agent.PlannerModel, c.Providers[0].Name)
+	}
+	if entry.Name != "openrouter" || entry.Model != "moonshotai/kimi-k2.6:free" {
+		t.Fatalf("resolved entry = %s/%s, want openrouter/moonshotai/kimi-k2.6:free", entry.Name, entry.Model)
+	}
+
+	got, fallback, ok := c.ResolveModelWithFallback(c.Agent.PlannerModel)
+	if !ok || fallback || got != "openrouter/moonshotai/kimi-k2.6:free" {
+		t.Fatalf("ResolveModelWithFallback(%q) = (%q, %v, %v), want canonical ref without fallback", c.Agent.PlannerModel, got, fallback, ok)
+	}
+
+	if _, ok := c.ResolveModel("OpenRouter/moonshotai/KIMI-k2.6:free"); ok {
+		t.Fatal("model IDs must remain case-sensitive even when provider names are matched case-insensitively")
+	}
+}
+
 func TestResolveModelWithFallbackSkipsKeylessProvider(t *testing.T) {
 	c := testModelFallbackConfig(t)
 	// Make the first provider keyless. A fallback must skip it and pick the next

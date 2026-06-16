@@ -751,9 +751,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if pm := cfg.Agent.PlannerModel; pm != "" && !tokenEconomy {
 		pe, ok := cfg.ResolveModel(pm)
 		if !ok {
-			return nil, fmt.Errorf("planner_model %q is not a configured provider", pm)
-		}
-		if pe.Model != entry.Model {
+			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: fmt.Sprintf("planner_model %q is not a configured provider; continuing with %s/%s only", pm, entry.Name, entry.Model)})
+		} else if pe.Model != entry.Model {
 			plannerProv, err := NewProviderWithProxy(pe, proxySpec)
 			if err != nil {
 				return nil, fmt.Errorf("planner %q: %w", pm, err)
