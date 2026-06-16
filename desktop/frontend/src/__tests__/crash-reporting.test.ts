@@ -8,6 +8,7 @@ import {
   parseReportedPerf,
   performanceLabelForReason,
   serializeReportedPerf,
+  shouldRecordEventLoopLagSample,
   shouldPromptForPerformanceLabel,
   shouldRecordLongTaskSample,
   topFrameFromStack,
@@ -76,11 +77,20 @@ eq(performanceLabelForReason("js heap 87% of limit"), "performance.heap", "label
 eq(shouldRecordLongTaskSample(14_000, 900, 15_000), false, "ignores startup long tasks before grace ends");
 eq(shouldRecordLongTaskSample(16_000, 40, 15_000), false, "ignores short long-task observer entries");
 eq(shouldRecordLongTaskSample(16_000, 900, 15_000), true, "records post-grace long tasks");
+eq(shouldRecordLongTaskSample(60_000, 900, 15_000, true, 20_000), false, "ignores long tasks while the window is hidden");
+eq(shouldRecordLongTaskSample(23_000, 900, 15_000, false, 20_000), false, "ignores long tasks immediately after visibility resumes");
+eq(shouldRecordLongTaskSample(26_000, 900, 15_000, false, 20_000), true, "records long tasks after the visibility resume grace period");
+eq(shouldRecordLongTaskSample(570_000, 92, 15_000, false, 20_000, false), false, "ignores long tasks while unfocused");
+eq(shouldRecordEventLoopLagSample(true, 60_000), false, "ignores event-loop lag while the window is hidden");
+eq(shouldRecordEventLoopLagSample(false, 3_000), false, "ignores event-loop lag immediately after visibility resumes");
+eq(shouldRecordEventLoopLagSample(false, 6_000), true, "records event-loop lag after the visibility resume grace period");
+eq(shouldRecordEventLoopLagSample(false, 60_000, false), false, "ignores event-loop lag while unfocused");
 
 eq(shouldPromptForPerformanceLabel(false, 11 * 60_000, false), true, "prompts an unhandled label past cooldown while visible");
 eq(shouldPromptForPerformanceLabel(true, 11 * 60_000, false), false, "suppresses an already reported or dismissed label");
 eq(shouldPromptForPerformanceLabel(false, 5 * 60_000, false), false, "respects the prompt cooldown window");
 eq(shouldPromptForPerformanceLabel(false, 11 * 60_000, true), false, "never prompts while the window is hidden");
+eq(shouldPromptForPerformanceLabel(false, 11 * 60_000, false, false), false, "never prompts while unfocused");
 
 const reportedPerf = serializeReportedPerf(new Set(["performance.lag"]), "abc123");
 eq([...parseReportedPerf(reportedPerf, "abc123")], ["performance.lag"], "round-trips reported labels for the same build");
