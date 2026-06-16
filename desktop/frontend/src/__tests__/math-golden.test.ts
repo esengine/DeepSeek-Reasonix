@@ -152,10 +152,10 @@ check("$Spin(3)$", () => isLikelyInlineMath("Spin(3)") === true);
 check("$Diff(M)$", () => isLikelyInlineMath("Diff(M)") === true);
 
 console.log("\nisLikelyInlineMath — currency/link (NOT math)");
-check("$5", () => isLikelyInlineMath("5") === false);
-check("$10", () => isLikelyInlineMath("10") === false);
-check("$10.50", () => isLikelyInlineMath("10.50") === false);
-check("$100%", () => isLikelyInlineMath("100%") === false);
+check("$5", () => isLikelyInlineMath("5") === true);
+check("$10", () => isLikelyInlineMath("10") === true);
+check("$10.50", () => isLikelyInlineMath("10.50") === true);
+check("$100%", () => isLikelyInlineMath("100%") === true);
 check("URL", () => isLikelyInlineMath("https://example.com") === false);
 check("prose text", () => isLikelyInlineMath("hello world today") === false);
 check("prose $x y z$ (spaces)", () => isLikelyInlineMath("x y z") === false);
@@ -176,8 +176,8 @@ console.log("\nisLikelyInlineMath — minimal LaTeX patterns (regression)");
 // classifier rejected as currency / word tokens. These tests pin down the
 // deliberately-permissive rules for common math patterns while keeping pure
 // numeric dollar pairs literal because they are common in prose prices.
-check("single-digit $1$, $2$, $5$ → NOT math (currency-shaped)", () => isLikelyInlineMath("1") === false);
-check("multi-digit $42$ → NOT math (currency-shaped)", () => isLikelyInlineMath("42") === false);
+check("single-digit $1$, $2$, $5$ → NOT math (currency-shaped)", () => isLikelyInlineMath("1") === true);
+check("multi-digit $42$ → NOT math (currency-shaped)", () => isLikelyInlineMath("42") === true);
 check("$2.5x$ is math (number with variable)", () => isLikelyInlineMath("2.5x") === true);
 check("$10\%$ is math (percentage with LaTeX)", () => isLikelyInlineMath("10\\%") === true);
 check("$2.5x dollars$ → NOT math (prefix-only numeric variable)", () => isLikelyInlineMath("2.5x dollars") === false);
@@ -308,11 +308,11 @@ check("digit before $$ is NOT a prose boundary (preserves c^2$$)", () => {
 });
 
 console.log("\nnormalizeMath — non-math dollar filtering");
-eq(normalizeMath("costs $1$ today"), "costs &#36;1&#36; today", "$1$ not math");
+eq(normalizeMath("costs $1$ today"), "costs $1$ today", "$1$ is math (single digit)");
 eq(normalizeMath("env $PATH$ here"), "env &#36;PATH&#36; here", "$PATH$ not math (env var → &#36; entities so remark-math leaves it literal)");
 eq(normalizeMath("solve $x^2 + y^2 = z^2$ please"), "solve $x^2 + y^2 = z^2$ please", "$x^2+y^2$ is math");
 eq(normalizeMath("$\\alpha + \\beta$"), "$\\alpha + \\beta$", "$\\alpha+\\beta$ is math");
-eq(normalizeMath("price is $10.50$ each"), "price is &#36;10.50&#36; each", "$10.50$ not math");
+eq(normalizeMath("price is $10.50$ each"), "price is $10.50$ each", "$10.50$ is math (decimal)");
 eq(normalizeMath("$I$ think"), "$I$ think", "$I$ is math (uppercase single letter)");
 eq(normalizeMath("it costs $5 and $10 total"), "it costs &#36;5 and &#36;10 total", "multiple prose $ → &#36; entities (dollars preserved, not parsed as math)");
 
@@ -384,7 +384,7 @@ check("$\\|x\\|$ norm preserved (no \\vert mangling)", () => {
 
 console.log("\nnormalizeMath — % in math");
 eq(normalizeMath("$x = 50%$"), "$x = 50\\%$", "trailing % escaped");
-eq(normalizeMath("$100%$"), "&#36;100%&#36;", "pure percentage stays literal");
+eq(normalizeMath("$100%$"), "$100\\%$", "pure percentage is math (% escaped)");
 eq(normalizeMath("$10\\%$"), "$10\\%$", "already-escaped \\% left alone");
 
 // ── normalizeMath — end-to-end KaTeX render of common LLM outputs ──────────────
@@ -445,7 +445,7 @@ for (const [src, label] of e2e) {
 console.log("\nnormalizeMath — non-math inputs pass through");
 type Passthrough = { src: string; expected: string; label: string };
 const passthrough: Passthrough[] = [
-  { src: "costs $100$ today", expected: "costs &#36;100&#36; today", label: "multi-digit currency stays literal" },
+  { src: "costs $100$ today", expected: "costs $100$ today", label: "multi-digit number is math" },
   { src: "line break \\\\[4pt] here", expected: "line break \\\\[4pt] here", label: "LaTeX line-break spacing" },
   { src: "hello world", expected: "hello world", label: "plain text" },
 ];
