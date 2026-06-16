@@ -67,6 +67,10 @@ func (m *chatTUI) runResumeCommand(input string) {
 	// Persist the conversation we're leaving so switching back later restores it.
 	_ = m.ctrl.Snapshot()
 	m.ctrl.Resume(loaded, target.Path)
+	// Warn when the session was created with a different model (#4519).
+	if sm, ok := agent.LoadSessionModel(target.Path); ok && sm != m.ctrl.Label() && !strings.Contains(sm, m.ctrl.Label()) {
+		m.notice(fmt.Sprintf("session was created with model %q but the current model is %q — use /model %s to switch", sm, m.ctrl.Label(), sm))
+	}
 	m.replayActiveBranch(i18n.M.ResumedTitle)
 }
 
