@@ -8,7 +8,7 @@ import { AnchoredPopover } from "./AnchoredPopover";
 
 // ModelSwitcher opens an upward popover listing configured providers. Selecting
 // one switches the active model while the current conversation continues.
-export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?: string; onPick: (name: string) => void }) {
+export function ModelSwitcher({ label, tabId, onPick, hideProvider }: { label: string; tabId?: string; onPick: (name: string) => void; hideProvider?: boolean }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -85,7 +85,7 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
         onClick={() => setOpen((v) => !v)}
       >
         <Brain size={13} className="modelsw__kind" />
-        <span className="modelsw__label">{label}{currentProvider ? ` · ${currentProvider}` : ""}</span>
+        <span className="modelsw__label">{label}{!hideProvider && currentProvider ? ` · ${currentProvider}` : ""}</span>
         <ChevronsUpDown size={11} />
       </button>
       <AnchoredPopover

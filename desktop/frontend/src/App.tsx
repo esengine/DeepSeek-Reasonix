@@ -3212,6 +3212,7 @@ export default function App() {
               transientDismissSignal={transientOverlayDismissSignal}
               variant={sidebarCreation ? "creation" : "default"}
             />
+            {!sidebarCreation && (
             <StatusBar
               context={state.context}
               usage={state.usage}
@@ -3233,6 +3234,7 @@ export default function App() {
               workspaceName={state.meta?.workspaceName}
               gitBranch={state.meta?.gitBranch}
             />
+            )}
           </footer>
           )}
           </>

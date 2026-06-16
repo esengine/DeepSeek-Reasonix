@@ -1839,7 +1839,7 @@ export function Composer({
   );
   const modelControl = (
     <div className="composer-meta__control composer-meta__control--model">
-      <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} />
+      <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} hideProvider={creationVariant} />
     </div>
   );
   const effortControl = hasEffort ? (

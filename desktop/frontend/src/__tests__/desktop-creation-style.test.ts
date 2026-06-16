@@ -143,7 +143,7 @@ ok(
     /:root\[data-theme-style\] \.app--creation \.composer-card/.test(stylesSource) &&
     /\.app--creation \.composer__btn--send svg/.test(stylesSource) &&
     /\.app--creation \.composer__btn--send:disabled[\s\S]*color: #ffffff;/.test(stylesSource) &&
-    /\.app--creation \.composer-meta \.modelsw__kind,\n\.app--creation \.composer-modebar__item span[\s\S]*display: none;/.test(stylesSource),
+    /\.app--creation \.composer-meta \.modelsw__kind,\r?\n\.app--creation \.composer-modebar__item span[\s\S]*display: none;/.test(stylesSource),
   "Creation keeps the original composer glow and white send icon contract",
 );
 
