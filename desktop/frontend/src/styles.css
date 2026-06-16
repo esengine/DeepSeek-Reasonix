@@ -4347,10 +4347,10 @@ a[href] {
   white-space: pre;
 }
 .diff__row--add {
-  --diff-row-bg: linear-gradient(var(--add-bg), var(--add-bg)), var(--bg-soft);
+  --diff-row-bg: rgba(46, 160, 67, 0.06);
 }
 .diff__row--del {
-  --diff-row-bg: linear-gradient(var(--del-bg), var(--del-bg)), var(--bg-soft);
+  --diff-row-bg: rgba(248, 81, 73, 0.06);
 }
 .diff__gutter {
   position: sticky;
@@ -4377,10 +4377,10 @@ a[href] {
   user-select: none;
 }
 .diff__row--add .diff__sign {
-  color: var(--add-fg);
+  color: var(--fg-faint);
 }
 .diff__row--del .diff__sign {
-  color: var(--del-fg);
+  color: var(--fg-faint);
 }
 .diff__text {
   flex: 1 0 auto;
