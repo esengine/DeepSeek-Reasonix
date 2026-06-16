@@ -795,6 +795,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Sink:                   sink,
 		Policy:                 policy,
 		Label:                  label,
+		ModelRef:               modelName,
 		SystemPrompt:           sysPrompt,
 		SessionDir:             sessionDir,
 		Host:                   pluginHost,

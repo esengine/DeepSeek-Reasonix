@@ -63,6 +63,7 @@ type Controller struct {
 	policy   permission.Policy
 
 	label             string
+	modelRef          string
 	systemPrompt      string
 	sessionDir        string
 	host              *plugin.Host
@@ -242,6 +243,7 @@ type Options struct {
 	Sink          event.Sink
 	Policy        permission.Policy
 	Label         string
+	ModelRef      string
 	SystemPrompt  string
 	SessionDir    string
 	SessionPath   string
@@ -307,6 +309,7 @@ func New(opts Options) *Controller {
 		sink:                   sink,
 		policy:                 opts.Policy,
 		label:                  opts.Label,
+		modelRef:               opts.ModelRef,
 		systemPrompt:           opts.SystemPrompt,
 		sessionDir:             opts.SessionDir,
 		sessionPath:            opts.SessionPath,
@@ -2052,6 +2055,12 @@ func (c *Controller) snapshot(markActivity bool) error {
 	if !markActivity {
 		if _, err := agent.EnsureBranchMeta(path); err != nil {
 			return err
+		}
+		// Persist the model ref so resume can restore the correct model.
+		if ref := c.modelRef; ref != "" {
+			if err := agent.SetBranchModel(path, ref); err != nil {
+				return err
+			}
 		}
 	}
 	if err := s.Save(path); err != nil {
