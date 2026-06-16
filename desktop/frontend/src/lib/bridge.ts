@@ -180,11 +180,11 @@ export interface AppBindings {
   ListDir(rel: string): Promise<DirEntry[]>;
   SearchFileRefs(query: string): Promise<DirEntry[]>;
   ReadFile(rel: string): Promise<FilePreview>;
-  WorkspaceChanges(): Promise<WorkspaceChangesView>;
+  WorkspaceChanges(tabID: string): Promise<WorkspaceChangesView>;
   GitBranches(): Promise<string[]>;
   GitCheckout(branch: string): Promise<void>;
-  WorkspaceGitHistory(path: string): Promise<GitCommitView[]>;
-  WorkspaceGitCommitDetail(hash: string, path: string): Promise<GitCommitDetailView>;
+  WorkspaceGitHistory(tabID: string, path: string): Promise<GitCommitView[]>;
+  WorkspaceGitCommitDetail(tabID: string, hash: string, path: string): Promise<GitCommitDetailView>;
   OpenWorkspacePath(rel: string): Promise<void>;
   RevealWorkspacePath(rel: string): Promise<void>;
   RevealPath(path: string): Promise<void>;
@@ -2098,7 +2098,7 @@ function makeMockApp(): AppBindings {
         binary: false,
       };
     },
-    async WorkspaceChanges() {
+    async WorkspaceChanges(_tabID: string) {
       return {
         gitAvailable: true,
         gitBranch: "main",
@@ -2122,12 +2122,12 @@ function makeMockApp(): AppBindings {
     async GitCheckout(_branch: string) {
       console.info("mock GitCheckout", _branch);
     },
-    async WorkspaceGitHistory(path: string) {
+    async WorkspaceGitHistory(_tabID: string, path: string) {
       return [
         { hash: "abcdef123456", author: "Mock Author", date: new Date().toISOString(), message: "Mock commit message for " + path },
       ];
     },
-    async WorkspaceGitCommitDetail(_hash: string, path: string) {
+    async WorkspaceGitCommitDetail(_tabID: string, _hash: string, path: string) {
       if (path) {
         return { diff: "--- a/mock\n+++ b/mock\n@@ -1,1 +1,1 @@\n-mock\n+mock diff" };
       }

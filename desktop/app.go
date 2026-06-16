@@ -5356,7 +5356,10 @@ func skipWorkspaceEntry(rel, name string, isDir bool) bool {
 }
 
 func (a *App) activeWorkspaceBase() (string, error) {
-	root := a.activeWorkspaceRoot()
+	return workspaceBaseFromRoot(a.activeWorkspaceRoot())
+}
+
+func workspaceBaseFromRoot(root string) (string, error) {
 	if strings.TrimSpace(root) == "" || root == "." {
 		return os.Getwd()
 	}

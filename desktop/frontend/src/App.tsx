@@ -1828,15 +1828,13 @@ export default function App() {
     setWorkspacePanelOpen(false);
   }, [closeTransientOverlays, workspacePanelOpen]);
 
+
   const openRightDockMode = useCallback(
     (mode: RightDockMode) => {
-      setWorkspaceRevealRequest(null);
-      setWorkspaceChangeRevealRequest(null);
-      setWorkspaceFileListRequest(null);
-      setWorkspaceChangeListRequest(null);
+      clearWorkspaceRequests();
       openWorkspacePanel(mode);
     },
-    [openWorkspacePanel],
+    [clearWorkspaceRequests, openWorkspacePanel],
   );
 
   const openRightDockFile = useCallback(
@@ -1935,6 +1933,7 @@ export default function App() {
   const addWorkspaceTextToComposer = useCallback((text: string) => {
     setComposerInsertRequest({ id: Date.now(), text });
   }, []);
+
 
   const handleNewTab = useCallback(async () => {
     closeTransientOverlays();
@@ -2957,6 +2956,7 @@ export default function App() {
               ) : (
                 <WorkspacePanel
                   open={workspacePanelRenderable}
+                  tabId={activeTabId}
                   cwd={state.meta?.cwd}
                   maximized={workspacePanelMaximized}
                   panelWidth={workspacePanelRenderWidth}
