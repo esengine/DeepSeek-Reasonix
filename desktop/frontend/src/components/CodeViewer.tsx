@@ -1,4 +1,5 @@
 import { lazy, Suspense } from "react";
+import { CodeBlockToolbar } from "./CodeBlockToolbar";
 
 export interface EditorProps {
   value: string;
@@ -23,6 +24,7 @@ const Impl = lazy(() => import("./editors/HljsCode"));
 export function CodeViewer(props: EditorProps) {
   return (
     <div className="code-block">
+      <CodeBlockToolbar value={props.value} language={props.language} />
       <Suspense
         fallback={
           <pre className="code code--loading">
