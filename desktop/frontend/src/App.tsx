@@ -1830,71 +1830,6 @@ export default function App() {
     [clearWorkspaceRequests, openWorkspacePanel],
   );
 
-  const openRightDockFile = useCallback(
-    (path: string) => {
-      const nextPath = path.trim();
-      if (!nextPath) return;
-      setWorkspaceFileListRequest(null);
-      setWorkspaceChangeListRequest(null);
-      setWorkspaceChangeRevealRequest(null);
-      setWorkspaceRevealRequest((current) => ({ id: (current?.id ?? 0) + 1, path: nextPath }));
-      openWorkspacePanel("files");
-    },
-    [openWorkspacePanel],
-  );
-
-  const openRightDockFileList = useCallback(
-    (paths: string[]) => {
-      const normalized = Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)));
-      setWorkspaceRevealRequest(null);
-      setWorkspaceChangeRevealRequest(null);
-      setWorkspaceChangeListRequest(null);
-      setWorkspaceFileListRequest((current) =>
-        normalized.length > 0
-          ? { id: (current?.id ?? 0) + 1, paths: normalized }
-          : null,
-      );
-      openWorkspacePanel("files");
-    },
-    [openWorkspacePanel],
-  );
-
-  const openRightDockChangeFile = useCallback(
-    (path: string) => {
-      const nextPath = path.trim();
-      if (!nextPath) return;
-      setWorkspaceRevealRequest(null);
-      setWorkspaceFileListRequest(null);
-      setWorkspaceChangeListRequest(null);
-      setWorkspaceChangeRevealRequest((current) => ({ id: (current?.id ?? 0) + 1, path: nextPath }));
-      openWorkspacePanel("changed");
-    },
-    [openWorkspacePanel],
-  );
-
-  const openRightDockChangeList = useCallback(
-    (changes: WorkspaceChangeListEntry[]) => {
-      const seen = new Set<string>();
-      const normalized = changes
-        .map((change) => ({ ...change, path: change.path.trim() }))
-        .filter((change) => {
-          if (!change.path || seen.has(change.path)) return false;
-          seen.add(change.path);
-          return true;
-      });
-      setWorkspaceRevealRequest(null);
-      setWorkspaceChangeRevealRequest(null);
-      setWorkspaceFileListRequest(null);
-      setWorkspaceChangeListRequest((current) =>
-        normalized.length > 0
-          ? { id: (current?.id ?? 0) + 1, changes: normalized }
-          : null,
-      );
-      openWorkspacePanel("changed");
-    },
-    [openWorkspacePanel],
-  );
-
   const handleWorkspacePreviewModeChange = useCallback(
     (active: boolean) => {
       if (workspacePreviewActive === active) return;
@@ -2941,11 +2876,6 @@ export default function App() {
                   sessionCurrency={state.sessionCurrency}
                   sessionGen={state.sessionGen}
                   refreshKey={dockRefreshKey}
-                  onOpenWorkspaceMode={openRightDockMode}
-                  onOpenWorkspaceFile={openRightDockFile}
-                  onOpenWorkspaceFileList={openRightDockFileList}
-                  onOpenWorkspaceChangeList={openRightDockChangeList}
-                  onOpenWorkspaceChangeFile={openRightDockChangeFile}
                 />
               ) : (
                 <WorkspacePanel

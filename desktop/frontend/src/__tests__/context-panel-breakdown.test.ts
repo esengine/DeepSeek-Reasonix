@@ -1,7 +1,7 @@
 // Run: tsx src/__tests__/context-panel-breakdown.test.ts
 
 import { contextBreakdown, contextCostDisplay, formatCacheHitRate } from "../components/ContextPanel";
-import { currencySymbol, formatMoney } from "../lib/money";
+import { currencySymbol, formatMoney, formatMoneyLocalized } from "../lib/money";
 
 let passed = 0;
 let failed = 0;

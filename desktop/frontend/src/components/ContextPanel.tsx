@@ -1,12 +1,10 @@
 // ContextPanel shows the active tab's context gauge, token usage, read files,
 // and workspace changes. All visible text is routed through the i18n dictionary.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FileText } from "lucide-react";
-import { asArray } from "../lib/array";
+
 import { app } from "../lib/bridge";
 import { useI18n, type Translator } from "../lib/i18n";
 import { formatMoney, formatMoneyLocalized } from "../lib/money";
-import type { DictKey } from "../locales/en";
 import type { ContextInfo, ContextPanelInfo, UsageSourceStats, WireUsage } from "../lib/types";
 
 interface ContextPanelProps {
@@ -18,11 +16,6 @@ interface ContextPanelProps {
   sessionCurrency?: string;
   sessionGen?: number;
   refreshKey?: number;
-  onOpenWorkspaceMode?: (mode: "files" | "changed") => void;
-  onOpenWorkspaceFile?: (path: string) => void;
-  onOpenWorkspaceFileList?: (paths: string[]) => void;
-  onOpenWorkspaceChangeList?: (changes: ContextFileRow[]) => void;
-  onOpenWorkspaceChangeFile?: (path: string) => void;
 }
 
 function fmtTokens(n: number): string {
@@ -30,10 +23,7 @@ function fmtTokens(n: number): string {
   return String(n);
 }
 
-function fmtTime(ms?: number): string {
-  if (!ms) return "";
-  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
+
 
 function fmtDuration(ms: number, t: Translator): string {
   if (ms <= 0) return "-";
@@ -49,14 +39,6 @@ export function formatCacheHitRate(hitTokens: number, missTokens: number): strin
   if (denom <= 0) return "-";
   return `${((hitTokens / denom) * 100).toFixed(2)}%`;
 }
-
-interface HealthResult {
-  tone: "good" | "notice" | "warn";
-  shortKey: DictKey;
-  vars: Record<string, string | number>;
-}
-
-type ContextFileRow = { key: string; path: string; meta: string; time: string; detail: string };
 
 export function contextCostDisplay({
   info,
@@ -143,34 +125,7 @@ export function contextBreakdown(
   };
 }
 
-function contextHealth(usagePct: number, cachePct: number, readCount: number): HealthResult {
-  if (usagePct >= 85) {
-    return {
-      tone: "warn",
-      shortKey: "context.healthNearLimitShort",
-      vars: { pct: usagePct },
-    };
-  }
-  if (readCount >= 8) {
-    return {
-      tone: "notice",
-      shortKey: "context.healthManyFilesShort",
-      vars: { count: readCount },
-    };
-  }
-  if (cachePct > 0 && cachePct < 50) {
-    return {
-      tone: "notice",
-      shortKey: "context.healthLowCacheShort",
-      vars: { pct: cachePct },
-    };
-  }
-  return {
-    tone: "good",
-    shortKey: "context.healthGoodShort",
-    vars: {},
-  };
-}
+
 
 const SOURCE_ORDER = ["executor", "planner", "subagent", "compaction", "classifier", "title"];
 
@@ -219,11 +174,6 @@ export function ContextPanel({
   sessionCurrency,
   sessionGen,
   refreshKey,
-  onOpenWorkspaceMode,
-  onOpenWorkspaceFile,
-  onOpenWorkspaceFileList,
-  onOpenWorkspaceChangeList,
-  onOpenWorkspaceChangeFile,
 }: ContextPanelProps) {
   const { locale, t } = useI18n();
   const [info, setInfo] = useState<ContextPanelInfo | null>(null);
@@ -281,13 +231,8 @@ export function ContextPanel({
   const cost = contextCostDisplay({ info, sessionCost, sessionCurrency, usage });
   const costSources = sourceRows(info, sessionCurrency);
   const showCostSources = costSources.some((row) => row.source !== "executor") || costSources.length > 1;
-  const readFiles = asArray(info?.readFiles);
-  const changedFiles = asArray(info?.changedFiles);
 
   const usagePct = windowTokens > 0 ? Math.min(100, Math.round((usedTokens / windowTokens) * 100)) : 0;
-  const compactPct = context?.compactRatio ? Math.round(context.compactRatio * 100) : 0;
-  const cacheDenom = cacheHitTokens + cacheMissTokens;
-  const cachePct = cacheDenom > 0 ? (cacheHitTokens / cacheDenom) * 100 : 0;
   const cachePctDisplay = formatCacheHitRate(cacheHitTokens, cacheMissTokens);
   const breakdown = contextBreakdown(usedTokens, windowTokens, promptTokens, completionTokens, reasoningTokens);
   const usageSegments = [
@@ -296,29 +241,9 @@ export function ContextPanel({
     { color: "reasoning", pct: Math.max(0, breakdown.reasoningPct - breakdown.completionPct) },
     { color: "other", pct: Math.max(0, breakdown.otherPct - breakdown.reasoningPct) },
   ].filter((segment) => segment.pct > 0);
-  const eventTimes = [
-    ...readFiles.map((file) => file.time),
-    ...changedFiles.map((file) => file.latestTime ?? 0),
-  ].filter((time) => time > 0);
-  const derivedElapsed = eventTimes.length > 1 ? Math.max(...eventTimes) - Math.min(...eventTimes) : 0;
-  const elapsed = info?.elapsedMs && info.elapsedMs > 0 ? info.elapsedMs : derivedElapsed;
-  const derivedRequestCount = Math.max(readFiles.length + changedFiles.length, 0);
-  const requestCount = info?.requestCount && info.requestCount > 0 ? info.requestCount : derivedRequestCount;
-  const readRows = readFiles.map((f, i) => ({
-    key: `${f.path}-${i}`,
-    path: f.path,
-    meta: `#${f.turn}`,
-    time: fmtTime(f.time),
-    detail: f.limit ? `${f.offset ?? 0}-${(f.offset ?? 0) + f.limit}${f.truncated ? " truncated" : ""}` : "",
-  }));
-  const changedRows = changedFiles.map((f, i) => ({
-    key: `${f.path}-${i}`,
-    path: f.path,
-    meta: f.gitStatus || asArray(f.sources).join(", ") || "changed",
-    time: fmtTime(f.latestTime),
-    detail: asArray(f.turns).length > 0 ? `T${asArray(f.turns).join(",")}` : "",
-  }));
-  const health = contextHealth(usagePct, Math.round(cachePct), readRows.length);
+  const elapsed = info?.elapsedMs && info.elapsedMs > 0 ? info.elapsedMs : 0;
+  const requestCount = info?.requestCount && info.requestCount > 0 ? info.requestCount : 0;
+
 
   return (
     <div className="context-panel">
@@ -387,43 +312,7 @@ export function ContextPanel({
               </div>
             )}
           </section>
-          <section className="context-panel__section context-panel__section--status">
-            <SectionHeading title={t("context.sessionStatus")} />
-            <div className="context-panel__stats">
-              <MetricCard label={t("context.health")} value={t(health.shortKey, health.vars)} tone={health.tone} />
-              <MetricCard label={t("context.compaction")} value={compactPct > 0 ? `${compactPct}%` : "-"} />
-            </div>
-          </section>
-          <PreviewSection
-            title={t("context.referencedFiles")}
-            meta={t("context.readMeta", { count: readRows.length })}
-            action={t("context.viewAll")}
-            onAction={() => {
-              if (onOpenWorkspaceFileList) {
-                onOpenWorkspaceFileList(readRows.map((row) => row.path));
-                return;
-              }
-              onOpenWorkspaceMode?.("files");
-            }}
-            onRowAction={onOpenWorkspaceFile}
-            rows={readRows.slice(0, 3)}
-            empty={t("context.noReads")}
-          />
-          <PreviewSection
-            title={t("context.sessionChanges")}
-            meta={t("context.changedMeta", { count: changedRows.length })}
-            action={t("context.viewAll")}
-            onAction={() => {
-              if (onOpenWorkspaceChangeList) {
-                onOpenWorkspaceChangeList(changedRows);
-                return;
-              }
-              onOpenWorkspaceMode?.("changed");
-            }}
-            onRowAction={onOpenWorkspaceChangeFile}
-            rows={changedRows.slice(0, 3)}
-            empty={t("context.noChanges")}
-          />
+
         </section>
       </div>
 
@@ -440,34 +329,7 @@ function SectionHeading({ title, meta }: { title: string; meta?: string }) {
   );
 }
 
-function PreviewSection({
-  title,
-  meta,
-  action,
-  onAction,
-  onRowAction,
-  rows,
-  empty,
-}: {
-  title: string;
-  meta?: string;
-  action: string;
-  onAction: () => void;
-  onRowAction?: (path: string) => void;
-  rows: ContextFileRow[];
-  empty: string;
-}) {
-  return (
-    <section className="context-panel__preview">
-      <header className="context-panel__preview-head">
-        <h3>{title}</h3>
-        {meta && <span>{meta}</span>}
-        {rows.length > 0 && <button type="button" onClick={onAction}>{action}</button>}
-      </header>
-      <FileTable rows={rows} empty={empty} compact onRowAction={onRowAction} />
-    </section>
-  );
-}
+
 
 function TokenLegend({ label, value, color }: { label: string; value: number; color: string }) {
   return (
@@ -490,55 +352,4 @@ function MetricCard({ label, value, tone, wide }: { label: string; value: string
   );
 }
 
-function FileTable({
-  rows,
-  empty,
-  compact = false,
-  onRowAction,
-}: {
-  rows: ContextFileRow[];
-  empty: string;
-  compact?: boolean;
-  onRowAction?: (path: string) => void;
-}) {
-  if (rows.length === 0) return <div className="context-panel__empty">{empty}</div>;
-  return (
-    <div className={`context-panel__file-list${compact ? " context-panel__file-list--compact" : ""}`}>
-      {rows.map((row) => {
-        const content = (
-          <>
-            <span className="context-panel__file-main">
-              <FileText size={14} />
-              <span className="context-panel__file-copy">
-                <span>{row.path}</span>
-                {row.detail && <small>{row.detail}</small>}
-              </span>
-            </span>
-            <span className="context-panel__file-meta">
-              <span className="context-panel__file-turn">{row.meta}</span>
-              {row.time && <span>{row.time}</span>}
-            </span>
-          </>
-        );
-        if (onRowAction) {
-          return (
-            <button
-              className="context-panel__file-row context-panel__file-row--button"
-              key={row.key}
-              type="button"
-              title={row.path}
-              onClick={() => onRowAction(row.path)}
-            >
-              {content}
-            </button>
-          );
-        }
-        return (
-          <div className="context-panel__file-row" key={row.key} title={row.path}>
-            {content}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+
