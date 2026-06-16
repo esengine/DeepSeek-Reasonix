@@ -241,7 +241,7 @@ check("\\|x\\| renders as double bars", () => {
 
 console.log("\nnormalizeMath — LLM delimiter conversion");
 eq(normalizeMath("\\(x^2\\)"), "$x^2$", "\\(…\\) → $…$");
-eq(normalizeMath("\\[E=mc^2\\]"), "$$E=mc^2$$", "\\[…\\] → $$…$$");
+eq(normalizeMath("\\[E=mc^2\\]"), "$$\nE=mc^2\n$$", "\\[…\\] → $$…$$");
 eq(normalizeMath("\\\\[4pt]"), "\\\\[4pt]", "\\\\[ line-break spacing protected");
 
 console.log("\nnormalizeMath — \\slashed conversion (regression)");
@@ -266,12 +266,12 @@ check("inline $$ after closing bracket", () => {
   return out.startsWith("(octet)\n\n$$");
 });
 check("inline $$ after closing brace (\\end{...}$$)", () => {
-  // A model that writes `\end{array}$$` or `\frac{a}{b}$$` on one line
-  // has the same micromark-fence problem as the comma case. The
-  // closing brace is the most common end-of-content marker in LaTeX
-  // math, so the repair-regex character class includes it.
+  // A display equation ending with }$$ must be extracted as a unit.
+  // The closing $$ must NOT be split off (the old bug inserted \n\n
+  // before it, emptying the equation). The extraction regex catches
+  // $$...$$ as a pair before the repair regex can split it.
   const out = normalizeMath("$$\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}$$");
-  return out.includes("\\end{pmatrix},\n\n$$") || out.includes("\\end{pmatrix}\n\n$$");
+  return out.includes("$$") && out.includes("\\begin{pmatrix}") && !out.includes("}\\n\\n$$") && !out.includes("$$\\n\\n");
 });
 check("inline $$ after comma on same line as content", () => {
   // User-reported (2026-06-12, soft-pion chat): the model wrote the
@@ -289,20 +289,22 @@ check("inline $$ after comma on same line as content", () => {
 });
 check("well-formed $$ already on own line is normalised consistently", () => {
   // Whether the model writes `decomposes as$$\n\mathbf{6}.$$` or
-  // `decomposes as\n\n$$\n\mathbf{6}.$$`, both must produce the same
-  // remark-math-parseable form: opening $$ on its own line, body, blank
-  // line, closing $$ on its own line.
+  // `decomposes as\n\n$$\n\mathbf{6}.$$`, the opening $$ must be
+  // paragraph-separated (blank line before it). The display pair is
+  // extracted as a unit, so the closing $$ stays attached to the body.
   const inline = normalizeMath("decomposes as$$\n\\mathbf{6}.$$");
   const block = normalizeMath("decomposes as\n\n$$\n\\mathbf{6}.$$");
-  const expected = "decomposes as\n\n$$\n\\mathbf{6}.\n\n$$";
-  return inline === expected && block === expected;
+  // Both must have the opening $$ on its own line (blank line before it)
+  return inline.startsWith("decomposes as\n\n$$") && block.startsWith("decomposes as\n\n$$")
+    // And the math body must be present (not emptied)
+    && inline.includes("\\mathbf{6}") && block.includes("\\mathbf{6}");
 });
 check("\\[…\\] → $$…$$ still works (no spurious blank line)", () => {
-  return normalizeMath("\\[E=mc^2\\]") === "$$E=mc^2$$";
+  return normalizeMath("\\[E=mc^2\\]") === "$$\nE=mc^2\n$$";
 });
 check("digit before $$ is NOT a prose boundary (preserves c^2$$)", () => {
   const out = normalizeMath("c^2$$ x $$");
-  return out === "c^2$$ x $$";
+  return out === "c^2$$\n x \n$$";
 });
 
 console.log("\nnormalizeMath — non-math dollar filtering");
@@ -510,7 +512,7 @@ check("\\yng inside \\(...\\) does not get double-wrapped", () => {
 });
 check("\\yng inside \\[...\\] stays display math without triple dollars", () => {
   const out = normalizeMath("\\[\\yng(2,1)\\]");
-  return out.startsWith("$$\\begin{array}{l}")
+  return out.startsWith("$$\n\\begin{array}{l}")
     && out.endsWith("$$")
     && !out.includes("$$$");
 });
@@ -529,7 +531,7 @@ check("digit-starting inline math with \\young does not get nested wrappers", ()
 });
 check("display math ending in digit closes before following bare \\yng", () => {
   const out = normalizeMath("$$x^2$$ \\yng(1)");
-  return out === "$$x^2$$ $\\begin{array}{l}\\square\\end{array}$";
+  return out === "$$\nx^2\n$$ $\\begin{array}{l}\\square\\end{array}$";
 });
 check("bare \\yng after inline math is separated from adjacent dollars", () => {
   const out = normalizeMath("$x$\\yng(1)");

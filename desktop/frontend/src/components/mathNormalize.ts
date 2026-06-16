@@ -67,9 +67,22 @@ function normalizeMathText(s: string): string {
   const escapedDollarToken = unusedEscapedDollarToken(r);
   r = r.split("\\$").join(escapedDollarToken);
 
-  // Step 3: repair inline $$. CommonMark requires a blank line before
-  // block math; without it remark-math parses the opening $$ as an
-  // empty math node and the formula leaks out as literal text.
+  // Step 3: extract well-formed $$…$$ display pairs into placeholders as
+  // a unit, BEFORE the repair regex below can split the closing $$.
+  // (Without this, the repair regex would turn `…x$$` into `…x\n\n$$`,
+  // breaking display math — the d450aec1 regression.) When the opening $$
+  // is glued to preceding prose, insert a blank line before it.
+  r = r.replace(/\$\$([\s\S]*?)\$\$/g, (_m, m, offset, full) => {
+    const prefix = offset > 0 && /[A-Za-z\)\]\>\.。！？,{}]/.test(full[offset - 1])
+      ? "\n\n"
+      : "";
+    return prefix + DM + latexNormalizeForKatex(m) + DM;
+  });
+
+  // Step 3.5: repair any remaining glued $$. After extracting well-formed
+  // $$…$$ pairs above, remaining $$ are orphaned openings (model forgot
+  // the closing $$) or stray double-dollars. Insert a blank line before
+  // them so remark-math recognises a block boundary.
   // Digits are excluded so `c^2$$` inside a formula is left alone.
   // Comma is included so `…D(q^2),$$` (closing $$ on the same line as
   // the trailing content) is repaired: micromark-extension-math only
@@ -86,11 +99,6 @@ function normalizeMathText(s: string): string {
   // converting it to a lone $ would interact badly with the $…$
   // matcher below and wrap whole prose paragraphs in math spans. The
   // right fix is upstream — a post-generation lint or stricter prompt.
-
-  // Step 4: $$…$$ → display placeholders. KaTeX-specific normalisation
-  // runs here so |→\vert (with \| protected) and \text{} escapes both
-  // apply to display math.
-  r = r.replace(/\$\$([\s\S]*?)\$\$/g, (_m, m) => `${DM}${latexNormalizeForKatex(m)}${DM}`);
 
   // Step 5: $\cmd{...}$ pairs where the body may contain a stray $
   // (e.g. $\text{price is $5}$). Recognised first so the inner $ doesn't
@@ -111,10 +119,36 @@ function normalizeMathText(s: string): string {
   });
 
   // Step 7: restore standard $/$$ delimiters for remark-math to parse.
-  return r
-    .replace(new RegExp(DM, "g"), () => "$$")
-    .replace(new RegExp(IM, "g"), "$")
-    .split(escapedDollarToken).join("\\$");
+  // Display math: restore as $$\n...\n$$ so remark-math recognises block
+  // math (it requires $$ on its own line, not glued to content like $$x$$).
+  // Inside a blockquote, the closing $$ must be prefixed with the blockquote
+  // marker (>) so remark-math recognises the fence boundary — otherwise it
+  // swallows the following paragraph as math content.
+  let displayOpen = true;
+  let lastDisplayContext = "";
+  r = r.replace(new RegExp(DM, "g"), (_match, offset, full) => {
+    let delim: string;
+    if (displayOpen) {
+      // Remember the text before this opening $$ so the closing $$ can
+      // detect whether we're inside a blockquote.
+      lastDisplayContext = full.slice(0, offset);
+      delim = "$$\n";
+    } else {
+      // Check if the opening $$ was inside a blockquote: look at the line
+      // the opening $$ was on. If it starts with ">" (possibly preceded by
+      // other > lines), we're in a blockquote and the closing $$ needs a >
+      // prefix for remark-math to recognise the fence.
+      const lastLineStart = lastDisplayContext.lastIndexOf("\n") + 1;
+      const lastLine = lastDisplayContext.slice(lastLineStart);
+      const inBlockquote = /^\s*>/.test(lastLine);
+      delim = inBlockquote ? "\n> $$" : "\n$$";
+    }
+    displayOpen = !displayOpen;
+    return delim;
+  });
+  r = r.replace(new RegExp(IM, "g"), "$");
+  // Restore escaped dollars (hidden before the $...$ classifier passes).
+  return r.split(escapedDollarToken).join("\\$");
 }
 
 function unusedEscapedDollarToken(s: string): string {
