@@ -19,6 +19,9 @@ export function isLikelyInlineMath(math: string): boolean {
   // the name and a trailing digit, so \b would wrongly reject them.
   if (/\\[A-Za-z]+/.test(math)) return true;
   if (/[\^_{}|]/.test(math)) return true;
+  // Lone math operators: +, -, =, <, >, ±, ∓. Common in physics prose
+  // ("the sign of $+$", "the $<$ relation"). Must be exactly one operator.
+  if (/^[+\-=<>±∓]$/.test(math)) return true;
   if (/\b(?:alpha|beta|gamma|sum|int|prod|lim|infty|sqrt|frac|sin|cos|tan|log|ln|max|min|partial|nabla|left|right)\b/.test(math)) return true;
   // Function / group notation: a short identifier (1–6 letters) immediately
   // followed by parenthesised arguments. Single-letter covers f(x), g(x);
@@ -34,7 +37,10 @@ export function isLikelyInlineMath(math: string): boolean {
   // as a literal dollar span instead of reaching KaTeX. (Comma-separated
   // tuples like $(1, 2, 3)$ are already accepted by the rule above.)
   if (/^(?:\(\d+\))+$/.test(math)) return true;
-  if (/[A-Za-z0-9)\]}]\s*[+\-*/=<>]\s*[A-Za-z0-9([{\\]/.test(math)) return true;
+  // Binary operator between operands: A = B, x + 1, E = mc^2. The RHS
+  // allows a leading sign ([+\-]?) so that K = -iJ, p = +\alpha,
+  // a = -b are recognised (the sign starts a unary operand).
+  if (/[A-Za-z0-9)\]}]\s*[+\-*/=<>]\s*[+\-]?\s*[A-Za-z0-9([{\\]/.test(math)) return true;
   // One-sided comparison: < B, > 0, B < — comparison against an implicit
   // operand is common in prose.
   if (/^(?:<=?|>=?|≠|≤|≥)\s*[A-Za-z0-9]|[A-Za-z0-9]\s*(?:<=?|>=?|≠|≤|≥)$/.test(math)) return true;

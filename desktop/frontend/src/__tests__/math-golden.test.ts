@@ -151,6 +151,16 @@ check("$SO(3)$", () => isLikelyInlineMath("SO(3)") === true);
 check("$Spin(3)$", () => isLikelyInlineMath("Spin(3)") === true);
 check("$Diff(M)$", () => isLikelyInlineMath("Diff(M)") === true);
 
+console.log("\nisLikelyInlineMath — binary operators with signed RHS / lone operators (math)");
+check("$K = -iJ$", () => isLikelyInlineMath("K = -iJ") === true);
+check("$K = +iJ$", () => isLikelyInlineMath("K = +iJ") === true);
+check("$p = +\\alpha$", () => isLikelyInlineMath("p = +\\alpha") === true);
+check("$a = -b$", () => isLikelyInlineMath("a = -b") === true);
+check("$+$", () => isLikelyInlineMath("+") === true);
+check("$-$", () => isLikelyInlineMath("-") === true);
+check("$=$", () => isLikelyInlineMath("=") === true);
+check("$<$", () => isLikelyInlineMath("<") === true);
+
 console.log("\nisLikelyInlineMath — currency/link (NOT math)");
 check("$5", () => isLikelyInlineMath("5") === true);
 check("$10", () => isLikelyInlineMath("10") === true);
