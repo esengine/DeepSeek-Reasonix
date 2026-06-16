@@ -60,7 +60,16 @@ type Config struct {
 	Statusline        StatuslineConfig        `toml:"statusline"`
 	LSP               LSPConfig               `toml:"lsp"`
 	Bot               BotConfig               `toml:"bot"`
+
+	providerSources map[string]providerSourceScope
 }
+
+type providerSourceScope string
+
+const (
+	providerSourceUser    providerSourceScope = "user"
+	providerSourceProject providerSourceScope = "project"
+)
 
 // UIConfig controls CLI presentation-only settings. Desktop appearance is kept in
 // DesktopConfig so desktop preferences cannot alter terminal output or prompts.
@@ -1330,6 +1339,17 @@ func LoadForRoot(root string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Plugins = plugins
+	if providers, providerSources, ok, err := mergeTOMLProviders(tomlSources); err != nil {
+		return nil, err
+	} else if ok {
+		cfg.Providers = providers
+		cfg.providerSources = providerSources
+	}
+	if access, ok, err := mergeTOMLProviderAccess(tomlSources); err != nil {
+		return nil, err
+	} else if ok {
+		cfg.Desktop.ProviderAccess = access
+	}
 
 	// Claude Code's .mcp.json (project root) is read last and merged into
 	// [[plugins]], so a server configured for Claude works here unchanged.
@@ -1479,6 +1499,86 @@ func mergeTOMLPlugins(paths []string) ([]PluginEntry, error) {
 		}
 	}
 	return merged, nil
+}
+
+// mergeTOMLProviders merges [[providers]] across TOML sources by provider name
+// (later source wins). Keep official legacy aliases distinct here: they can carry
+// different default models and effort capabilities, and the later desktop
+// normalization layer handles canonical Settings access.
+func mergeTOMLProviders(paths []string) ([]ProviderEntry, map[string]providerSourceScope, bool, error) {
+	var merged []ProviderEntry
+	index := map[string]int{}
+	sources := map[string]providerSourceScope{}
+	saw := false
+	for _, path := range paths {
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		var f Config
+		if _, err := toml.DecodeFile(path, &f); err != nil {
+			return nil, nil, false, fmt.Errorf("config %s: %w", path, err)
+		}
+		if len(f.Providers) == 0 {
+			continue
+		}
+		saw = true
+		source := providerSourceForPath(path)
+		for _, p := range f.Providers {
+			normalizeProviderEffortFields(&p)
+			key := providerMergeKey(p)
+			if i, ok := index[key]; ok {
+				merged[i] = p
+			} else {
+				index[key] = len(merged)
+				merged = append(merged, p)
+			}
+			sources[key] = source
+		}
+	}
+	return merged, sources, saw, nil
+}
+
+func providerSourceForPath(path string) providerSourceScope {
+	if isUserConfigPath(path) {
+		return providerSourceUser
+	}
+	return providerSourceProject
+}
+
+func providerMergeKey(p ProviderEntry) string {
+	return strings.TrimSpace(p.Name)
+}
+
+// mergeTOMLProviderAccess merges desktop.provider_access across TOML sources so
+// project desktop settings do not hide account-level providers from the desktop
+// model switcher.
+func mergeTOMLProviderAccess(paths []string) ([]string, bool, error) {
+	var merged []string
+	seen := map[string]bool{}
+	saw := false
+	for _, path := range paths {
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		var f Config
+		meta, err := toml.DecodeFile(path, &f)
+		if err != nil {
+			return nil, false, fmt.Errorf("config %s: %w", path, err)
+		}
+		if !meta.IsDefined("desktop", "provider_access") {
+			continue
+		}
+		saw = true
+		for _, name := range f.Desktop.ProviderAccess {
+			name = strings.TrimSpace(name)
+			if name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			merged = append(merged, name)
+		}
+	}
+	return merged, saw, nil
 }
 
 // LoadForEdit returns a config to seed the `reasonix setup` wizard when reconfiguring:
