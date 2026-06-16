@@ -93,14 +93,22 @@ behavior below is unified across layouts.
 
 ### Desktop GUI
 
+Desktop shortcuts are managed from **Settings → Shortcuts**. Pick a row, press a
+new key combination, and Reasonix saves it for the desktop app. Conflicting
+bindings are rejected so one shortcut never triggers two actions. Press `?` or
+use the help button in the topic bar to open the shortcuts sheet; it is generated
+from the same shortcut registry, so it reflects any custom bindings.
+
 Global shortcuts:
 
 | Key or control | What it does | Notes |
 | --- | --- | --- |
 | `Cmd+K` on macOS, `Ctrl+K` on Windows/Linux | Opens the command palette | `Esc` closes the palette. |
+| `Cmd+,` on macOS, `Ctrl+,` on Windows/Linux | Opens Settings | Use **Shortcuts** in Settings to customize desktop bindings. |
 | `Cmd+W` on macOS, `Ctrl+W` on Windows/Linux | Closes the active top tab | The last tab is kept by the normal close-tab guard. |
 | `Cmd+B` / `Ctrl+B` | Expands or collapses the most recent shell output | Same action as clicking the collapsed shell-output hint. |
 | `Cmd++`, `Cmd+-`, `Cmd+0` on macOS; `Ctrl++`, `Ctrl+-`, `Ctrl+0` elsewhere | Increases, decreases, or resets text size | `=` is accepted for the plus key on keyboards that report it that way. |
+| `?` | Opens the keyboard shortcuts sheet | The sheet shows the current effective desktop bindings. |
 
 Composer shortcuts:
 

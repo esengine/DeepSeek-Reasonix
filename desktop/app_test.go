@@ -790,6 +790,53 @@ func TestModelsForTabListsMimoAPIPaidAccess(t *testing.T) {
 	}
 }
 
+func TestModelsForTabKeepsUserProvidersWithProjectConfig(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+	t.Setenv("MIMO_API_KEY", "sk-test")
+
+	userCfg := config.Default()
+	userCfg.DefaultModel = "mimo-token-plan/mimo-v2.5-pro"
+	userCfg.Desktop.ProviderAccess = []string{"deepseek-flash", "mimo-pro"}
+	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save user config: %v", err)
+	}
+
+	projectRoot := t.TempDir()
+	projectConfig := `default_model = "deepseek-flash/deepseek-v4-flash"
+
+[desktop]
+provider_access = ["deepseek-flash"]
+
+[[providers]]
+name = "deepseek-flash"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+`
+	if err := os.WriteFile(filepath.Join(projectRoot, "reasonix.toml"), []byte(projectConfig), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+
+	app := NewApp()
+	tab := &WorkspaceTab{ID: "project", WorkspaceRoot: projectRoot, Ready: true}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.activeTabID = tab.ID
+
+	models := app.ModelsForTab(tab.ID)
+	refs := modelRefsFromView(models)
+	for _, want := range []string{
+		"deepseek/deepseek-v4-flash",
+		"mimo-token-plan/mimo-v2.5-pro",
+		"mimo-token-plan/mimo-v2.5",
+	} {
+		if !refs[want] {
+			t.Fatalf("ModelsForTab refs = %+v, missing %s", models, want)
+		}
+	}
+}
+
 func TestSetModelForTabRejectsProviderOutsideAccess(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	t.Setenv("DEEPSEEK_API_KEY", "sk-test")

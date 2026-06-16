@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, GripVertical, KeyRound, Loader2, Play, QrCode, RefreshCw, Send } from "lucide-react";
 import { asArray } from "../lib/array";
@@ -33,6 +33,18 @@ import {
 import { getAvailableFontFamilies, getAvailableMonoFontFamilies } from "../lib/fontAvailability";
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
+import {
+  comboFromKeyboardEvent,
+  detectShortcutPlatform,
+  formatShortcutCombo,
+  onShortcutsChanged,
+  resetCustomShortcuts,
+  resolvedShortcutCombo,
+  saveCustomShortcut,
+  shortcutConflict,
+  shortcutDefinitions,
+  type ShortcutAction,
+} from "../lib/keyboardShortcuts";
 import type { BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
@@ -44,7 +56,7 @@ import { SoundSelect } from "./SoundSelect";
 import { getSuccessPreference, setSuccessPreference, getAttentionPreference, setAttentionPreference, playSuccessChime, playAttentionChime, type SoundWavPref } from "../lib/sound";
 import { ModalCloseButton } from "./ModalCloseButton";
 
-const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "hooks", "permissions", "sandbox", "network", "appearance", "updates"];
+const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "hooks", "shortcuts", "permissions", "sandbox", "network", "appearance", "updates"];
 export type SettingsInitialFocus = { target: "bot-allowlist"; connectionId?: string };
 
 // SettingsPanel is the desktop settings centre — a centred modal with left
@@ -164,6 +176,7 @@ export function SettingsPanel({
                 {tab === "skills" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><SkillsSettingsPage /></SettingsPageShell>}
                 {tab === "memory" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><MemorySettingsPage /></SettingsPageShell>}
                 {tab === "hooks" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><HooksSection onChanged={onChanged} /></SettingsPageShell>}
+                {tab === "shortcuts" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><ShortcutsSection /></SettingsPageShell>}
                 {tab === "permissions" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "network" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
@@ -337,6 +350,7 @@ function settingsTabPageTitle(id: SettingsTab, t: ReturnType<typeof useT>): stri
     case "mcp": return t("settings.tab.mcp");
     case "skills": return t("settings.tab.skills");
     case "memory": return t("settings.tab.memory");
+    case "shortcuts": return t("settings.tab.shortcuts");
     default: return settingsTabLabel(id, t);
   }
 }
@@ -369,6 +383,8 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.memory");
     case "hooks":
       return t("settings.tab.hooks");
+    case "shortcuts":
+      return t("settings.tab.shortcuts");
     case "network":
       return t("settings.tab.network");
     case "permissions":
@@ -400,6 +416,8 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
       return t("settings.tabSub.memory");
     case "hooks":
       return t("settings.tabSub.hooks");
+    case "shortcuts":
+      return t("settings.tabSub.shortcuts");
     case "network":
       return proxyModeLabel(normalizeProxyMode(s.network.proxyMode), t);
     case "permissions":
@@ -429,6 +447,109 @@ function botSettingsMeta(bot: BotSettingsView, t: ReturnType<typeof useT>): stri
   if (connections === 0) return t("settings.botNoConnections");
   if (!normalized.enabled) return t("settings.botDisabledWithConnections", { n: connections });
   return t("settings.botConnectionCount", { n: connections });
+}
+
+function ShortcutsSection() {
+  const t = useT();
+  const [platform] = useState(() => detectShortcutPlatform());
+  const [revision, setRevision] = useState(0);
+  const [recording, setRecording] = useState<ShortcutAction | null>(null);
+  const [conflict, setConflict] = useState<{ action: ShortcutAction; conflictAction: ShortcutAction } | null>(null);
+
+  useEffect(() => onShortcutsChanged(() => setRevision((value) => value + 1)), []);
+
+  const definitions = shortcutDefinitions();
+  const commitShortcut = (action: ShortcutAction, event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    const combo = comboFromKeyboardEvent(event.nativeEvent);
+    if (!combo) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const conflictDefinition = shortcutConflict(action, combo, platform);
+    if (conflictDefinition) {
+      setConflict({ action, conflictAction: conflictDefinition.action });
+      return;
+    }
+    saveCustomShortcut(action, combo);
+    setConflict(null);
+    setRecording(null);
+    setRevision((value) => value + 1);
+  };
+
+  return (
+    <SettingsSection
+      title={t("settings.shortcutsTitle")}
+      description={t("settings.shortcutsHint")}
+      actions={
+        <button
+          className="chip chip--icon"
+          type="button"
+          title={t("settings.shortcutsResetAll")}
+          aria-label={t("settings.shortcutsResetAll")}
+          onClick={() => {
+            resetCustomShortcuts();
+            setConflict(null);
+            setRecording(null);
+            setRevision((value) => value + 1);
+          }}
+        >
+          <RefreshCw size={14} />
+        </button>
+      }
+    >
+      <div className="shortcuts-settings" data-revision={revision}>
+        {conflict && (
+          <div className="shortcuts-settings__conflict" role="alert">
+            {t("settings.shortcutsConflict", {
+              action: t(definitions.find((definition) => definition.action === conflict.action)?.labelKey ?? "settings.tab.shortcuts"),
+              conflict: t(definitions.find((definition) => definition.action === conflict.conflictAction)?.labelKey ?? "settings.tab.shortcuts"),
+            })}
+          </div>
+        )}
+        {definitions.map((definition) => {
+          const resolved = resolvedShortcutCombo(definition.action, platform);
+          const defaultCombo = definition.defaults[platform];
+          const display = formatShortcutCombo(resolved, platform);
+          const isCustom = formatShortcutCombo(resolved, platform) !== formatShortcutCombo(defaultCombo, platform);
+          const isRecording = recording === definition.action;
+          return (
+            <div className="shortcuts-settings__row" key={definition.action}>
+              <div className="shortcuts-settings__copy">
+                <div className="shortcuts-settings__label">{t(definition.labelKey)}</div>
+                <div className="shortcuts-settings__desc">{t(definition.descriptionKey)}</div>
+              </div>
+              <div className="shortcuts-settings__control">
+                <button
+                  className={`shortcuts-settings__key${isRecording ? " shortcuts-settings__key--recording" : ""}`}
+                  type="button"
+                  aria-pressed={isRecording}
+                  onClick={() => {
+                    setRecording(definition.action);
+                    setConflict(null);
+                  }}
+                  onKeyDown={(event) => isRecording && commitShortcut(definition.action, event)}
+                >
+                  {isRecording ? t("settings.shortcutsRecording") : display}
+                </button>
+                <button
+                  className="chip"
+                  type="button"
+                  disabled={!isCustom}
+                  onClick={() => {
+                    saveCustomShortcut(definition.action, null);
+                    setConflict(null);
+                    setRecording(null);
+                    setRevision((value) => value + 1);
+                  }}
+                >
+                  {t("settings.shortcutsReset")}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </SettingsSection>
+  );
 }
 
 // allRefs flattens providers into "provider/model" refs for the model selectors.

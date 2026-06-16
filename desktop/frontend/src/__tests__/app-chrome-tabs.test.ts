@@ -79,6 +79,16 @@ ok(
 );
 
 ok(
+  finalDeclaration(":root[data-theme-style] .app-chrome--tabs .tabbar__tabs", "flex") === "0 1 auto",
+  "themed AppChrome tab lists size to tab content before shrinking",
+);
+
+ok(
+  finalDeclaration(":root[data-theme-style] .app-chrome--tabs .tabbar__tabs", "width") === "max-content",
+  "themed AppChrome tab lists keep the new-tab button next to the last tab",
+);
+
+ok(
   finalDeclaration(":root[data-theme-style] .app-chrome--tabs .tabbar > .tooltip-trigger:has(.tabbar__new)", "flex")?.includes("--chrome-panel-control-size"),
   "themed AppChrome new-tab button keeps a stable slot beside the tabs",
 );

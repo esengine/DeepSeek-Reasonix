@@ -38,6 +38,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	default:
 		scope = RenderScopeFull
 	}
+	if scope == RenderScopeProject {
+		c = projectScopedConfigForRender(c)
+	}
 	defaults := Default()
 	var b strings.Builder
 
@@ -570,6 +573,21 @@ func shouldRenderProviders(c, defaults *Config, scope RenderScope) bool {
 		return true
 	}
 	return !reflect.DeepEqual(c.Providers, defaults.Providers)
+}
+
+func projectScopedConfigForRender(c *Config) *Config {
+	if c == nil || len(c.providerSources) == 0 {
+		return c
+	}
+	cp := *c
+	cp.Providers = make([]ProviderEntry, 0, len(c.Providers))
+	for _, p := range c.Providers {
+		if c.providerSources[providerMergeKey(p)] == providerSourceUser {
+			continue
+		}
+		cp.Providers = append(cp.Providers, p)
+	}
+	return &cp
 }
 
 func shouldRenderBot(c, defaults *Config, scope RenderScope) bool {
