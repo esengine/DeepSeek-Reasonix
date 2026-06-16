@@ -1,11 +1,13 @@
 package skill
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/config"
 )
@@ -151,6 +153,107 @@ func TestConventionDirsDiscovered(t *testing.T) {
 		if _, ok := find(list, name); !ok {
 			t.Errorf("convention dir for %q not scanned", name)
 		}
+	}
+}
+
+func TestNonSkillMarkdownInClaudeSkillRootsIgnored(t *testing.T) {
+	proj := t.TempDir()
+	writeSkill(t, proj, ".claude/skills/guide.md", "# Skill notes\n\nThis is documentation, not a skill.")
+	writeSkill(t, proj, ".claude/skills/notes.md", "---\ntitle: Notes\n---\n# Notes")
+	writeSkill(t, proj, ".claude/skills/real.md", "---\ndescription: real skill\n---\nbody")
+
+	var stderr bytes.Buffer
+	st := New(Options{HomeDir: t.TempDir(), ProjectRoot: proj, DisableBuiltins: true, Stderr: &stderr})
+	list := st.List()
+	if _, ok := find(list, "real"); !ok {
+		t.Fatal("real skill should be discovered")
+	}
+	for _, name := range []string{"guide", "notes"} {
+		if _, ok := find(list, name); ok {
+			t.Errorf("non-skill markdown %q should not be listed", name)
+		}
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("non-skill markdown should not warn during List, got %q", got)
+	}
+
+	for _, name := range []string{"guide", "notes"} {
+		stderr.Reset()
+		if _, ok := st.Read(name); ok {
+			t.Errorf("non-skill markdown %q should not be readable as a skill", name)
+		}
+		if got := stderr.String(); got != "" {
+			t.Errorf("non-skill markdown %q should not warn during Read, got %q", name, got)
+		}
+	}
+}
+
+func TestSkillLikeFlatClaudeMarkdownWithoutDescriptionWarns(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".claude/skills/named.md", "---\nname: renamed\n---\nbody")
+
+	var stderr bytes.Buffer
+	st := New(Options{HomeDir: home, DisableBuiltins: true, Stderr: &stderr})
+	list := st.List()
+	if _, ok := find(list, "renamed"); !ok {
+		t.Fatal("skill-like flat Claude markdown should still load")
+	}
+	if got := stderr.String(); !strings.Contains(got, "has no description") {
+		t.Fatalf("skill-like flat Claude markdown without description should warn, got %q", got)
+	}
+}
+
+func TestBlankDescriptionFlatClaudeMarkdownIsSkillLike(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content string
+	}{
+		{name: "blank", content: "---\ndescription:\n---\nbody"},
+		{name: "quoted", content: "---\ndescription: \"\"\n---\nbody"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			writeSkill(t, home, ".claude/skills/"+tc.name+".md", tc.content)
+
+			var stderr bytes.Buffer
+			st := New(Options{HomeDir: home, DisableBuiltins: true, Stderr: &stderr})
+			if _, ok := find(st.List(), tc.name); !ok {
+				t.Fatal("blank description marker should still list flat Claude markdown as skill-like")
+			}
+			if got := stderr.String(); !strings.Contains(got, "has no description") {
+				t.Fatalf("blank description listed skill should warn, got %q", got)
+			}
+
+			stderr.Reset()
+			sk, ok := st.Read(tc.name)
+			if !ok {
+				t.Fatal("blank description marker should still make flat Claude markdown skill-like")
+			}
+			if sk.Description != "" {
+				t.Fatalf("description should stay empty, got %q", sk.Description)
+			}
+			if got := stderr.String(); !strings.Contains(got, "has no description") {
+				t.Fatalf("blank description skill should warn, got %q", got)
+			}
+		})
+	}
+}
+
+func TestRunAsOnlyFlatClaudeMarkdownIsSkillLike(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".claude/skills/sub.md", "---\nrunAs: subagent\n---\nbody")
+
+	var stderr bytes.Buffer
+	st := New(Options{HomeDir: home, DisableBuiltins: true, Stderr: &stderr})
+	sk, ok := st.Read("sub")
+	if !ok {
+		t.Fatal("runAs-only Claude markdown should be treated as skill-like")
+	}
+	if sk.RunAs != RunSubagent {
+		t.Fatalf("runAs should be parsed despite frontmatter key casing, got %s", sk.RunAs)
+	}
+	if got := stderr.String(); !strings.Contains(got, "has no description") {
+		t.Fatalf("runAs-only Claude markdown without description should warn, got %q", got)
 	}
 }
 
@@ -397,6 +500,48 @@ func TestSymlinkedDirAndFile(t *testing.T) {
 	}
 	if _, ok := find(st.List(), "broken"); ok {
 		t.Error("broken symlink should not yield a skill")
+	}
+}
+
+type fakeDirEntry struct {
+	name  string
+	isDir bool
+	typ   os.FileMode
+}
+
+func (f fakeDirEntry) Name() string      { return f.name }
+func (f fakeDirEntry) IsDir() bool       { return f.isDir }
+func (f fakeDirEntry) Type() os.FileMode { return f.typ }
+func (f fakeDirEntry) Info() (os.FileInfo, error) {
+	return fakeFileInfo{name: f.name, mode: f.typ}, nil
+}
+
+type fakeFileInfo struct {
+	name string
+	mode os.FileMode
+}
+
+func (f fakeFileInfo) Name() string       { return f.name }
+func (f fakeFileInfo) Size() int64        { return 0 }
+func (f fakeFileInfo) Mode() os.FileMode  { return f.mode }
+func (f fakeFileInfo) ModTime() time.Time { return time.Time{} }
+func (f fakeFileInfo) IsDir() bool        { return f.mode.IsDir() }
+func (f fakeFileInfo) Sys() any           { return nil }
+
+func TestIrregularDirectoryEntryFollowsTarget(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, ".agents", "skills")
+	writeSkill(t, root, "linkedpack/SKILL.md", "---\ndescription: linked pack\n---\nbody")
+	writeSkill(t, root, "collection/nested.md", "---\ndescription: nested\n---\nbody")
+
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	linkedPack := fakeDirEntry{name: "linkedpack", typ: os.ModeIrregular}
+	if sk, ok := st.readEntry(root, ScopeGlobal, false, linkedPack); !ok || sk.Name != "linkedpack" {
+		t.Fatalf("irregular directory-layout entry should follow target, got %+v ok=%v", sk, ok)
+	}
+	collection := fakeDirEntry{name: "collection", typ: os.ModeIrregular}
+	if !st.canScanChildDir(root, collection) {
+		t.Fatal("irregular directory entry should be scannable when its target is a directory")
 	}
 }
 
