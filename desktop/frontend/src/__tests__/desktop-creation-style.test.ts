@@ -53,7 +53,10 @@ ok(
 ok(
   /sidebarCreationFeaturesBlock/.test(appSource) &&
     /sidebar__features sidebar__features--creation/.test(appSource) &&
-    /\{sidebarCreation \? sidebarCreationFeaturesBlock : null\}/.test(appSource),
+    /\{sidebarCreation \? sidebarCreationFeaturesBlock : null\}/.test(appSource) &&
+    /className="sidebar__feature"/.test(appSource) &&
+    /className="sidebar__utility"/.test(appSource) &&
+    /className="sidebar__utility-btn"/.test(appSource),
   "Creation renders a dedicated sidebar feature area before the project tree",
 );
 
@@ -84,6 +87,8 @@ ok(
     /--creation-accent: var\(--accent\)/.test(stylesSource) &&
     /--sidebar-rail-card: var\(--side-panel-card\)/.test(stylesSource) &&
     /\.sidebar--creation \.sidebar__brand-search/.test(stylesSource) &&
+    /\.sidebar--creation \.sidebar__new/.test(stylesSource) &&
+    /\.sidebar--creation \.sidebar__utility-btn/.test(stylesSource) &&
     /\.layout--creation \.sidebar-resizer-shell/.test(stylesSource) &&
     /\.context-panel--creation \.context-panel__usage-bar/.test(stylesSource),
   "Creation styles are scoped and include the original sidebar rail tokens",
@@ -94,7 +99,8 @@ ok(
     /--composer-glow: var\(--creation-glow\)/.test(stylesSource) &&
     /:root\[data-theme-style\] \.app--creation \.composer-card/.test(stylesSource) &&
     /\.app--creation \.composer__btn--send svg/.test(stylesSource) &&
-    /\.app--creation \.composer__btn--send:disabled[\s\S]*color: #ffffff;/.test(stylesSource),
+    /\.app--creation \.composer__btn--send:disabled[\s\S]*color: #ffffff;/.test(stylesSource) &&
+    /\.app--creation \.composer-meta \.modelsw__kind,\n\.app--creation \.composer-modebar__item span[\s\S]*display: none;/.test(stylesSource),
   "Creation keeps the original composer glow and white send icon contract",
 );
 

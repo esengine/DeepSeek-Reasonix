@@ -2561,12 +2561,12 @@ export default function App() {
       {sidebarImBlock}
       <Tooltip label={t("sidebar.allHistory")} fill side="right" disabled={sidebarNavTooltipDisabled}>
         <button
-          className="sidebar__feature sidebar__feature-button"
+          className="sidebar__feature"
           type="button"
           onClick={() => void openAllHistory()}
         >
-          <History size={15} aria-hidden="true" />
-          <span>{t("sidebar.allHistory")}</span>
+          <FileText size={15} aria-hidden="true" />
+          <span>会话历史</span>
         </button>
       </Tooltip>
     </nav>
@@ -2664,23 +2664,26 @@ export default function App() {
                     className="sidebar__brand-search"
                     type="button"
                     aria-label={t("projectTree.searchPlaceholder")}
-                    onClick={() => void openPalette()}
+                    tabIndex={sidebarCollapsed ? -1 : 0}
+                    onClick={() => {
+                      document.querySelector<HTMLInputElement>(".project-tree__search input")?.focus();
+                    }}
                   >
-                    <Search size={14} aria-hidden="true" />
+                    <Search size={18} aria-hidden="true" />
                   </button>
                 </div>
               </div>
 
               <div className="sidebar__quick-actions sidebar__quick-actions--creation">
                 <button
-                  className="sidebar__quick-action sidebar__quick-action--creation"
+                  className="sidebar__new sidebar__new--creation"
                   type="button"
                   onClick={() => {
                     void handleNewTab();
                   }}
                 >
                   <SquarePen size={18} aria-hidden="true" />
-                  <span>{t("topbar.newSession")}</span>
+                  <span>New Chat</span>
                 </button>
               </div>
             </>
@@ -2726,22 +2729,44 @@ export default function App() {
             />
           </section>
 
-          {sidebarWorkbench || sidebarCreation ? (
+          {sidebarCreation ? (
+            <nav className="sidebar__utility" aria-label={t("sidebar.navigation")}>
+              <Tooltip label={t("sidebar.trash")} fill side="right" disabled={sidebarNavTooltipDisabled}>
+                <button
+                  className="sidebar__utility-btn"
+                  type="button"
+                  onClick={() => void openTrash()}
+                >
+                  <Trash2 size={15} aria-hidden="true" />
+                </button>
+              </Tooltip>
+              <Tooltip label={t("topbar.settings")} fill side="right" disabled={sidebarNavTooltipDisabled}>
+                <button
+                  className="sidebar__utility-btn"
+                  type="button"
+                  onClick={() => {
+                    closeTransientOverlays();
+                    setSettingsTarget("general");
+                  }}
+                >
+                  <SettingsIcon size={15} aria-hidden="true" />
+                </button>
+              </Tooltip>
+            </nav>
+          ) : sidebarWorkbench ? (
             <nav className="sidebar__nav sidebar__nav--footer">
-              {sidebarWorkbench ? sidebarImBlock : null}
+              {sidebarImBlock}
               <div className="sidebar__utility-row" aria-label={t("sidebar.utilityActions")}>
-                {sidebarWorkbench ? (
-                  <Tooltip label={t("sidebar.allHistory")} fill side="top">
-                    <button
-                      className="sidebar__utility-button"
-                      type="button"
-                      onClick={() => void openAllHistory()}
-                    >
-                      <History size={16} aria-hidden="true" />
-                      <span className="sr-only">{t("sidebar.allHistory")}</span>
-                    </button>
-                  </Tooltip>
-                ) : null}
+                <Tooltip label={t("sidebar.allHistory")} fill side="top">
+                  <button
+                    className="sidebar__utility-button"
+                    type="button"
+                    onClick={() => void openAllHistory()}
+                  >
+                    <History size={16} aria-hidden="true" />
+                    <span className="sr-only">{t("sidebar.allHistory")}</span>
+                  </button>
+                </Tooltip>
                 <Tooltip label={t("sidebar.trash")} fill side="top">
                   <button
                     className="sidebar__utility-button"
