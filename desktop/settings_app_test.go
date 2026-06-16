@@ -465,6 +465,81 @@ func TestSaveProviderPreservesExplicitEmptyVisionModels(t *testing.T) {
 	}
 }
 
+func TestSettingsSandboxReflectsProjectOverride(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	userCfg := config.LoadForEdit(config.UserConfigPath())
+	userCfg.Sandbox.Bash = "off"
+	userCfg.Sandbox.Network = true
+	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("SaveTo user config: %v", err)
+	}
+
+	project := robustTempDir(t)
+	projectPath := filepath.Join(project, "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte(`
+[sandbox]
+bash = "enforce"
+network = true
+`), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+	t.Chdir(project)
+
+	got := NewApp().Settings()
+	if got.Sandbox.Bash != "enforce" {
+		t.Fatalf("Settings sandbox bash = %q, want project override enforce", got.Sandbox.Bash)
+	}
+}
+
+func TestSetSandboxUpdatesProjectOverrideConfig(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	project := robustTempDir(t)
+	projectPath := filepath.Join(project, "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte(`
+[sandbox]
+bash = "enforce"
+network = true
+`), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+	t.Chdir(project)
+
+	app := NewApp()
+	if err := app.SetSandbox("off", false, "custom-root", []string{" /tmp/a ", "", "/tmp/b"}, "powershell"); err != nil {
+		t.Fatalf("SetSandbox: %v", err)
+	}
+
+	projectCfg := config.LoadForEdit(projectPath)
+	if got := projectCfg.BashMode(); got != "off" {
+		t.Fatalf("project sandbox bash mode = %q, want off", got)
+	}
+	if projectCfg.Sandbox.Network {
+		t.Fatal("project sandbox network = true, want false")
+	}
+	if projectCfg.Sandbox.WorkspaceRoot != "custom-root" {
+		t.Fatalf("project workspace root = %q, want custom-root", projectCfg.Sandbox.WorkspaceRoot)
+	}
+	if want := []string{"/tmp/a", "/tmp/b"}; !reflect.DeepEqual(projectCfg.Sandbox.AllowWrite, want) {
+		t.Fatalf("project allow_write = %v, want %v", projectCfg.Sandbox.AllowWrite, want)
+	}
+	if projectCfg.Tools.Shell.Prefer != "powershell" {
+		t.Fatalf("project shell prefer = %q, want powershell", projectCfg.Tools.Shell.Prefer)
+	}
+	if _, err := os.Stat(config.UserConfigPath()); !os.IsNotExist(err) {
+		t.Fatalf("SetSandbox should update the project override without creating user config, stat err = %v", err)
+	}
+
+	effective, err := config.LoadForRoot(project)
+	if err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
+	}
+	if got := effective.BashMode(); got != "off" {
+		t.Fatalf("effective sandbox bash mode = %q, want off", got)
+	}
+}
+
 func TestOfficialMimoAPITemplateRemoved(t *testing.T) {
 	if entries, keyEnv, err := officialProviderTemplate("mimo-api", "en"); err == nil {
 		t.Fatalf("officialProviderTemplate(mimo-api) = entries=%v key=%q nil error, want unknown template", entries, keyEnv)

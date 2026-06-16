@@ -333,6 +333,18 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	b.WriteString("[tools.background_jobs]\n")
 	fmt.Fprintf(&b, "stalled_warning_seconds = %d   # warn once per background job after this many quiet seconds; 0 disables\n\n", c.BackgroundJobStalledWarningSeconds())
 
+	b.WriteString("[tools.shell]\n")
+	prefer := strings.TrimSpace(c.Tools.Shell.Prefer)
+	if prefer == "" {
+		prefer = "auto"
+	}
+	fmt.Fprintf(&b, "prefer = %q   # auto|bash|powershell|pwsh\n", prefer)
+	if strings.TrimSpace(c.Tools.Shell.Path) != "" {
+		fmt.Fprintf(&b, "path = %q   # optional absolute shell executable override\n\n", c.Tools.Shell.Path)
+	} else {
+		b.WriteString("# path = \"/usr/bin/bash\"   # optional absolute shell executable override\n\n")
+	}
+
 	renderLSPConfig(&b, c.LSP)
 
 	b.WriteString("[skills]\n")
@@ -765,6 +777,18 @@ func RenderTOMLProjectDelta(c *Config) string {
 			fmt.Fprintf(&b, "stalled_warning_seconds = %d\n", *c.Tools.BackgroundJobs.StalledWarningSeconds)
 			b.WriteString("\n")
 		}
+	}
+
+	// [tools.shell]
+	if !reflect.DeepEqual(c.Tools.Shell, d.Tools.Shell) {
+		b.WriteString("[tools.shell]\n")
+		if prefer := strings.TrimSpace(c.Tools.Shell.Prefer); prefer != "" {
+			fmt.Fprintf(&b, "prefer = %q\n", prefer)
+		}
+		if path := strings.TrimSpace(c.Tools.Shell.Path); path != "" {
+			fmt.Fprintf(&b, "path = %q\n", path)
+		}
+		b.WriteString("\n")
 	}
 
 	// [lsp]

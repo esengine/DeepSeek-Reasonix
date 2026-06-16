@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
 	"reasonix/internal/config"
@@ -431,11 +432,9 @@ func (a *App) Settings() SettingsView {
 		}
 	}
 	ctrl := a.activeCtrl()
-	bash := cfg.Sandbox.Bash
-	if bash == "" {
-		bash = "enforce"
-	}
-	shell := cfg.Tools.Shell.Prefer
+	sandboxCfg := a.sandboxConfigForView(cfg, cfgPath)
+	bash := sandboxCfg.BashMode()
+	shell := sandboxCfg.Tools.Shell.Prefer
 	if shell == "" {
 		shell = "auto"
 	}
@@ -454,8 +453,8 @@ func (a *App) Settings() SettingsView {
 			Deny:  nonNil(cfg.Permissions.Deny),
 		},
 		Sandbox: SandboxView{
-			Bash: bash, Network: cfg.Sandbox.Network,
-			WorkspaceRoot: cfg.Sandbox.WorkspaceRoot, AllowWrite: nonNil(cfg.Sandbox.AllowWrite),
+			Bash: bash, Network: sandboxCfg.Sandbox.Network,
+			WorkspaceRoot: sandboxCfg.Sandbox.WorkspaceRoot, AllowWrite: nonNil(sandboxCfg.Sandbox.AllowWrite),
 			Shell: shell,
 		},
 		Network: NetworkView{
@@ -696,6 +695,90 @@ func (a *App) loadDesktopUserConfigForView() (*config.Config, string, error) {
 		return nil, "", err
 	}
 	return legacyCfg, userPath, nil
+}
+
+func (a *App) loadSandboxConfigForEdit() (*config.Config, string, error) {
+	userCfg, userPath, err := a.loadDesktopUserConfigForEdit()
+	if err != nil {
+		return nil, "", err
+	}
+	projectPath := projectConfigPathForRoot(a.activeWorkspaceRoot())
+	if projectPath == "" || sameConfigPath(projectPath, userPath) {
+		return userCfg, userPath, nil
+	}
+	hasProjectOverride, err := projectDefinesSandboxSettings(projectPath)
+	if err != nil {
+		return nil, "", err
+	}
+	if !hasProjectOverride {
+		return userCfg, userPath, nil
+	}
+	return config.LoadForEdit(projectPath), projectPath, nil
+}
+
+func (a *App) sandboxConfigForView(userCfg *config.Config, userPath string) *config.Config {
+	if userCfg == nil {
+		return userCfg
+	}
+	projectPath := projectConfigPathForRoot(a.activeWorkspaceRoot())
+	if projectPath == "" || sameConfigPath(projectPath, userPath) {
+		return userCfg
+	}
+	if _, err := os.Stat(projectPath); err != nil {
+		return userCfg
+	}
+	var projectCfg config.Config
+	meta, err := toml.DecodeFile(projectPath, &projectCfg)
+	if err != nil {
+		return userCfg
+	}
+	merged := *userCfg
+	if meta.IsDefined("sandbox", "bash") {
+		merged.Sandbox.Bash = projectCfg.Sandbox.Bash
+	}
+	if meta.IsDefined("sandbox", "network") {
+		merged.Sandbox.Network = projectCfg.Sandbox.Network
+	}
+	if meta.IsDefined("sandbox", "workspace_root") {
+		merged.Sandbox.WorkspaceRoot = projectCfg.Sandbox.WorkspaceRoot
+	}
+	if meta.IsDefined("sandbox", "allow_write") {
+		merged.Sandbox.AllowWrite = projectCfg.Sandbox.AllowWrite
+	}
+	if meta.IsDefined("tools", "shell", "prefer") {
+		merged.Tools.Shell.Prefer = projectCfg.Tools.Shell.Prefer
+	}
+	if meta.IsDefined("tools", "shell", "path") {
+		merged.Tools.Shell.Path = projectCfg.Tools.Shell.Path
+	}
+	return &merged
+}
+
+func projectDefinesSandboxSettings(path string) (bool, error) {
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	var parsed config.Config
+	meta, err := toml.DecodeFile(path, &parsed)
+	if err != nil {
+		return false, fmt.Errorf("config %s: %w", path, err)
+	}
+	for _, keys := range [][]string{
+		{"sandbox", "bash"},
+		{"sandbox", "network"},
+		{"sandbox", "workspace_root"},
+		{"sandbox", "allow_write"},
+		{"tools", "shell", "prefer"},
+		{"tools", "shell", "path"},
+	} {
+		if meta.IsDefined(keys...) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (a *App) migrateLegacyBotConfigToUser(userCfg *config.Config, userPath string) error {
@@ -1597,14 +1680,22 @@ func (a *App) RemovePermissionRule(list, rule string) error {
 
 // SetSandbox updates the bash sandbox mode, network egress, and write roots.
 func (a *App) SetSandbox(bash string, network bool, workspaceRoot string, allowWrite []string, shell string) error {
-	return a.applyConfigChange(func(c *config.Config) error {
-		c.Sandbox.Bash = bash
-		c.Sandbox.Network = network
-		c.Sandbox.WorkspaceRoot = strings.TrimSpace(workspaceRoot)
-		c.Sandbox.AllowWrite = trimList(allowWrite)
-		c.Tools.Shell.Prefer = strings.TrimSpace(shell)
-		return nil
-	})
+	if err := a.ensureActiveTabRebuildAllowed("settings"); err != nil {
+		return err
+	}
+	cfg, path, err := a.loadSandboxConfigForEdit()
+	if err != nil {
+		return err
+	}
+	cfg.Sandbox.Bash = bash
+	cfg.Sandbox.Network = network
+	cfg.Sandbox.WorkspaceRoot = strings.TrimSpace(workspaceRoot)
+	cfg.Sandbox.AllowWrite = trimList(allowWrite)
+	cfg.Tools.Shell.Prefer = strings.TrimSpace(shell)
+	if err := cfg.SaveTo(path); err != nil {
+		return err
+	}
+	return a.rebuild()
 }
 
 // SetNetwork updates ordinary outbound proxy settings.
