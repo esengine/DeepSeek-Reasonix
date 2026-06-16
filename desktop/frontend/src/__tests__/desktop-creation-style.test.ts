@@ -37,7 +37,8 @@ ok(
 );
 
 ok(
-  /sidebarCreation = desktopLayoutStyle === "creation"/.test(appSource) &&
+  /creationLayoutActive = desktopLayoutStyle === "creation"/.test(appSource) &&
+    /sidebarCreation = creationLayoutActive/.test(appSource) &&
     /sidebarCreation \? "app--creation"/.test(appSource) &&
     /sidebarCreation \? "layout--creation"/.test(appSource),
   "App scopes Creation with dedicated layout classes",
@@ -61,9 +62,25 @@ ok(
 );
 
 ok(
-  /<AppChrome[\s\S]*workbenchChrome=\{sidebarWorkbench \|\| sidebarCreation\}/.test(appSource) &&
-    /\.app--creation \.app-chrome__panel-toggle--left/.test(stylesSource),
-  "Creation skips the classic AppChrome tab strip",
+  /sidebarCreation \? \(\s*<button\s+className="topicbar__title-button"/.test(appSource) &&
+    /\{!sidebarCreation && \(\s*<Tooltip label=\{t\("topicBar\.renameSession"\)\}>/.test(appSource) &&
+    /\.app--creation \.topicbar__title-button span/.test(stylesSource),
+  "Creation restores the original topic title button instead of the separate rename icon",
+);
+
+ok(
+  /CREATION_SIDEBAR_VIEWPORT_RATIO = 0\.16/.test(appSource) &&
+    /CREATION_SIDEBAR_MIN_WIDTH = 220/.test(appSource) &&
+    /CREATION_SIDEBAR_MAX_WIDTH = 320/.test(appSource) &&
+    /CREATION_SIDEBAR_WIDTH_KEY = "sidebarWidthCreation"/.test(appSource) &&
+    /effectiveSidebarWidth = creationLayoutActive \? creationSidebarWidth : sidebarWidth/.test(appSource),
+  "Creation keeps the original PR sidebar width model isolated",
+);
+
+ok(
+  /\{!sidebarCreation && \(\s*<AppChrome[\s\S]*workbenchChrome=\{sidebarWorkbench\}/.test(appSource) &&
+    /\.layout--creation[\s\S]*--app-chrome-height: 0px;/.test(stylesSource),
+  "Creation omits the AppChrome shell from the original PR layout",
 );
 
 ok(
@@ -84,13 +101,21 @@ ok(
 ok(
   /\.app--creation/.test(stylesSource) &&
     /\.layout--creation/.test(stylesSource) &&
+    /\.layout--creation \.chat-pane[\s\S]*padding-left: calc\(var\(--sidebar-width\) \+ 50px\);/.test(stylesSource) &&
+    /\.layout--creation \.workbench-dock[\s\S]*grid-column: 3;/.test(stylesSource) &&
+    /:root\[data-theme-style\] \.app--creation \.sidebar--creation[\s\S]*position: absolute;[\s\S]*grid-row: 1;/.test(stylesSource) &&
+    /:root\[data-theme-style\] \.app--creation \.sidebar--creation \.sidebar__brand--creation[\s\S]*flex: 1 1 auto;/.test(stylesSource) &&
+    /:root\[data-theme-style\] \.app--creation \.composer-wrap[\s\S]*max-width: 800px;/.test(stylesSource) &&
     /--creation-accent: var\(--accent\)/.test(stylesSource) &&
     /--sidebar-rail-card: var\(--side-panel-card\)/.test(stylesSource) &&
     /\.sidebar--creation \.sidebar__brand-search/.test(stylesSource) &&
     /\.sidebar--creation \.sidebar__new/.test(stylesSource) &&
     /\.sidebar--creation \.sidebar__utility-btn/.test(stylesSource) &&
+    /\.app--creation \.topicbar[\s\S]*min-height: 48px;/.test(stylesSource) &&
     /\.layout--creation \.sidebar-resizer-shell/.test(stylesSource) &&
-    /\.context-panel--creation \.context-panel__usage-bar/.test(stylesSource),
+    /\.context-panel--creation \.context-panel__body[\s\S]*padding: 8px var\(--context-panel-gutter\) 10px 6px;[\s\S]*scrollbar-gutter: auto;/.test(stylesSource) &&
+    /\.context-panel--creation \.context-panel__usage[\s\S]*padding: 12px;/.test(stylesSource) &&
+    /\.context-panel--creation \.context-panel__usage-bar[\s\S]*height: 19px;/.test(stylesSource),
   "Creation styles are scoped and include the original sidebar rail tokens",
 );
 

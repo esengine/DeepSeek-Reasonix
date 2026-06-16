@@ -1,6 +1,7 @@
 export type LayoutSizeKey =
   | "sidebarWidth"
   | "sidebarWidthGraphite"
+  | "sidebarWidthCreation"
   | "rightDockWidth"
   | "rightDockTreeWidth"
   | "rightDockPreviewWidth"
@@ -19,6 +20,7 @@ const STORAGE_KEY = "reasonix.layoutPreferences.v1";
 const LEGACY_SIZE_KEYS: Record<LayoutSizeKey, string[]> = {
   sidebarWidth: ["reasonix.sidebar.width"],
   sidebarWidthGraphite: [],
+  sidebarWidthCreation: [],
   rightDockWidth: [],
   rightDockTreeWidth: [],
   rightDockPreviewWidth: [],

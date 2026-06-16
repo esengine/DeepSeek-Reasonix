@@ -122,6 +122,11 @@ const SIDEBAR_DEFAULT_WIDTH = 264;
 const SIDEBAR_MIN_WIDTH = 264;
 const SIDEBAR_MAX_WIDTH = 300;
 const SIDEBAR_VIEWPORT_RATIO = 0.18;
+const CREATION_SIDEBAR_DEFAULT_WIDTH = 232;
+const CREATION_SIDEBAR_MIN_WIDTH = 220;
+const CREATION_SIDEBAR_MAX_WIDTH = 320;
+const CREATION_SIDEBAR_VIEWPORT_RATIO = 0.16;
+const CREATION_SIDEBAR_WIDTH_KEY = "sidebarWidthCreation";
 const CHAT_MIN_WIDTH = 400;
 const CHAT_COMFORT_MIN_WIDTH = 560;
 const WORKSPACE_RESIZER_WIDTH = 8;
@@ -604,6 +609,10 @@ function clampSidebarWidth(width: number): number {
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
 }
 
+function clampCreationSidebarWidth(width: number): number {
+  return Math.min(CREATION_SIDEBAR_MAX_WIDTH, Math.max(CREATION_SIDEBAR_MIN_WIDTH, Math.round(width)));
+}
+
 function clampRightDockPreviewWidth(width: number): number {
   return Math.min(RIGHT_DOCK_MAX_WIDTH, Math.max(RIGHT_DOCK_PREVIEW_MIN_WIDTH, Math.round(width)));
 }
@@ -617,6 +626,13 @@ function defaultSidebarWidth(): number {
     return clampSidebarWidth(window.innerWidth * SIDEBAR_VIEWPORT_RATIO);
   }
   return SIDEBAR_DEFAULT_WIDTH;
+}
+
+function defaultCreationSidebarWidth(): number {
+  if (typeof window !== "undefined") {
+    return clampCreationSidebarWidth(window.innerWidth * CREATION_SIDEBAR_VIEWPORT_RATIO);
+  }
+  return CREATION_SIDEBAR_DEFAULT_WIDTH;
 }
 
 function defaultRightDockTreeWidth(): number {
@@ -647,6 +663,14 @@ function loadSidebarWidth(): number {
 
 function saveSidebarWidth(width: number): void {
   saveLayoutSize("sidebarWidthGraphite", width, clampSidebarWidth);
+}
+
+function loadCreationSidebarWidth(): number {
+  return loadLayoutSize(CREATION_SIDEBAR_WIDTH_KEY, defaultCreationSidebarWidth(), clampCreationSidebarWidth);
+}
+
+function saveCreationSidebarWidth(width: number): void {
+  saveLayoutSize(CREATION_SIDEBAR_WIDTH_KEY, width, clampCreationSidebarWidth);
 }
 
 function normalizeDesktopPlatform(value: string): DesktopPlatform {
@@ -892,6 +916,7 @@ export default function App() {
     try { localStorage.setItem("projectTree:timeFilter", topicTimeFilter); } catch { /* ignore */ }
   }, [topicTimeFilter]);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
+  const [creationSidebarWidth, setCreationSidebarWidth] = useState(loadCreationSidebarWidth);
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 1440 : window.innerWidth));
   const [workspacePanelOpen, setWorkspacePanelOpen] = useState(true);
@@ -1148,13 +1173,15 @@ export default function App() {
   const footerRef = useRef<HTMLElement>(null);
   const runningRef = useRef(state.running);
   const rightDockDetailActive = rightDockMode !== "context" && workspacePreviewActive;
+  const creationLayoutActive = desktopLayoutStyle === "creation";
+  const effectiveSidebarWidth = creationLayoutActive ? creationSidebarWidth : sidebarWidth;
   const preferredWorkspacePanelWidth = rightDockDetailActive ? rightDockPreviewWidth : rightDockTreeWidth;
   const workspacePanelMinWidth = rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
   const chatReservedWidth = workspacePanelOpen && !workspacePanelMaximized ? CHAT_COMFORT_MIN_WIDTH : CHAT_MIN_WIDTH;
   const workspacePanelAvailableWidth = availableWorkspacePanelWidth({
     viewportWidth,
     sidebarCollapsed,
-    sidebarWidth,
+    sidebarWidth: effectiveSidebarWidth,
     chatMinWidth: chatReservedWidth,
     resizerWidth: WORKSPACE_RESIZER_WIDTH,
   });
@@ -1682,10 +1709,16 @@ export default function App() {
 
   const setExpandedSidebarWidth = useCallback((width: number) => {
     closeTransientOverlays();
+    if (desktopLayoutStyle === "creation") {
+      const next = clampCreationSidebarWidth(width);
+      setCreationSidebarWidth(next);
+      saveCreationSidebarWidth(next);
+      return;
+    }
     const next = clampSidebarWidth(width);
     setSidebarWidth(next);
     saveSidebarWidth(next);
-  }, [closeTransientOverlays]);
+  }, [closeTransientOverlays, desktopLayoutStyle]);
 
   const startSidebarResize = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -1693,14 +1726,24 @@ export default function App() {
       event.preventDefault();
       closeTransientOverlays();
       setSidebarResizing(true);
-      let nextWidth = sidebarWidth;
+      const creationResize = desktopLayoutStyle === "creation";
+      let nextWidth = effectiveSidebarWidth;
       const onMove = (moveEvent: PointerEvent) => {
-        nextWidth = clampSidebarWidth(moveEvent.clientX);
-        setSidebarWidth(nextWidth);
+        nextWidth = creationResize ? clampCreationSidebarWidth(moveEvent.clientX) : clampSidebarWidth(moveEvent.clientX);
+        if (creationResize) {
+          setCreationSidebarWidth(nextWidth);
+        } else {
+          setSidebarWidth(nextWidth);
+        }
       };
       const onDone = () => {
-        setSidebarWidth(nextWidth);
-        saveSidebarWidth(nextWidth);
+        if (creationResize) {
+          setCreationSidebarWidth(nextWidth);
+          saveCreationSidebarWidth(nextWidth);
+        } else {
+          setSidebarWidth(nextWidth);
+          saveSidebarWidth(nextWidth);
+        }
         setSidebarResizing(false);
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onDone);
@@ -1714,7 +1757,7 @@ export default function App() {
       window.addEventListener("pointerup", onDone);
       window.addEventListener("pointercancel", onDone);
     },
-    [closeTransientOverlays, sidebarCollapsed, sidebarWidth],
+    [closeTransientOverlays, desktopLayoutStyle, effectiveSidebarWidth, sidebarCollapsed],
   );
 
   const resizeSidebarWithKeyboard = useCallback(
@@ -1722,16 +1765,16 @@ export default function App() {
       if (sidebarCollapsed) return;
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         event.preventDefault();
-        setExpandedSidebarWidth(sidebarWidth + (event.key === "ArrowRight" ? 16 : -16));
+        setExpandedSidebarWidth(effectiveSidebarWidth + (event.key === "ArrowRight" ? 16 : -16));
       } else if (event.key === "Home") {
         event.preventDefault();
-        setExpandedSidebarWidth(SIDEBAR_MIN_WIDTH);
+        setExpandedSidebarWidth(creationLayoutActive ? CREATION_SIDEBAR_MIN_WIDTH : SIDEBAR_MIN_WIDTH);
       } else if (event.key === "End") {
         event.preventDefault();
-        setExpandedSidebarWidth(SIDEBAR_MAX_WIDTH);
+        setExpandedSidebarWidth(creationLayoutActive ? CREATION_SIDEBAR_MAX_WIDTH : SIDEBAR_MAX_WIDTH);
       }
     },
-    [setExpandedSidebarWidth, sidebarCollapsed, sidebarWidth],
+    [creationLayoutActive, effectiveSidebarWidth, setExpandedSidebarWidth, sidebarCollapsed],
   );
 
   const setSavedWorkspacePanelWidth = useCallback(
@@ -1952,12 +1995,12 @@ export default function App() {
   const layoutStyle = useMemo(
     () =>
       ({
-        "--sidebar-expanded-width": `${sidebarWidth}px`,
+        "--sidebar-expanded-width": `${effectiveSidebarWidth}px`,
         "--chat-min-width": `${chatReservedWidth}px`,
         "--workspace-width": `${workspacePanelRenderWidth}px`,
         "--workspace-resizer-width": `${WORKSPACE_RESIZER_WIDTH}px`,
       }) as CSSProperties,
-    [chatReservedWidth, sidebarWidth, workspacePanelRenderWidth],
+    [chatReservedWidth, effectiveSidebarWidth, workspacePanelRenderWidth],
   );
 
   const setWorkspacePanel = useCallback((open: boolean) => {
@@ -2474,7 +2517,10 @@ export default function App() {
     ? t("sidebar.im")
     : t(sidebarImExpanded ? "sidebar.imCollapse" : "sidebar.imExpand");
   const sidebarWorkbench = desktopLayoutStyle === "workbench";
-  const sidebarCreation = desktopLayoutStyle === "creation";
+  const sidebarCreation = creationLayoutActive;
+  const activeSidebarMinWidth = sidebarCreation ? CREATION_SIDEBAR_MIN_WIDTH : SIDEBAR_MIN_WIDTH;
+  const activeSidebarMaxWidth = sidebarCreation ? CREATION_SIDEBAR_MAX_WIDTH : SIDEBAR_MAX_WIDTH;
+  const activeSidebarDefaultWidth = sidebarCreation ? defaultCreationSidebarWidth() : defaultSidebarWidth();
   const sidebarWorkbenchLike = sidebarWorkbench;
   const projectTreeVariant = sidebarWorkbench ? "workbench" : "classic";
   const sidebarClassName = [
@@ -2601,31 +2647,33 @@ export default function App() {
           .join(" ")}
         style={layoutStyle}
       >
-        <AppChrome
-          platform={desktopPlatform}
-          browserPreviewChrome={browserPreviewChrome}
-          workbenchChrome={sidebarWorkbench || sidebarCreation}
-          tabs={visibleTabs}
-          activeTabId={visibleTabId}
-          revealActiveSignal={tabRevealSignal}
-          commandCompact={true}
-          sidebarTogglePressed={sidebarTogglePressed}
-          sidebarExpandBlocked={sidebarExpandBlocked}
-          sidebarCollapsed={sidebarCollapsed}
-          sidebarToggleTitle={sidebarToggleTitle}
-          workspacePanelMaximized={workspacePanelMaximized}
-          workspacePanelRenderable={workspacePanelRenderable}
-          workspaceTogglePressed={workspaceTogglePressed}
-          workspacePanelLabel={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
-          onToggleSidebar={toggleSidebar}
-          onToggleWorkspacePanel={toggleWorkspacePanel}
-          onTabChange={(id) => void handleTabChange(id)}
-          onTabClose={(id) => void handleTabClose(id)}
-          onTabsClose={(ids, nextActiveTabId) => void handleTabsClose(ids, nextActiveTabId)}
-          onTabsReorder={(ids) => void handleTabsReorder(ids)}
-          onNewTab={() => void handleNewTab()}
-          onOpenPalette={() => void openPalette()}
-        />
+        {!sidebarCreation && (
+          <AppChrome
+            platform={desktopPlatform}
+            browserPreviewChrome={browserPreviewChrome}
+            workbenchChrome={sidebarWorkbench}
+            tabs={visibleTabs}
+            activeTabId={visibleTabId}
+            revealActiveSignal={tabRevealSignal}
+            commandCompact={true}
+            sidebarTogglePressed={sidebarTogglePressed}
+            sidebarExpandBlocked={sidebarExpandBlocked}
+            sidebarCollapsed={sidebarCollapsed}
+            sidebarToggleTitle={sidebarToggleTitle}
+            workspacePanelMaximized={workspacePanelMaximized}
+            workspacePanelRenderable={workspacePanelRenderable}
+            workspaceTogglePressed={workspaceTogglePressed}
+            workspacePanelLabel={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
+            onToggleSidebar={toggleSidebar}
+            onToggleWorkspacePanel={toggleWorkspacePanel}
+            onTabChange={(id) => void handleTabChange(id)}
+            onTabClose={(id) => void handleTabClose(id)}
+            onTabsClose={(ids, nextActiveTabId) => void handleTabsClose(ids, nextActiveTabId)}
+            onTabsReorder={(ids) => void handleTabsReorder(ids)}
+            onNewTab={() => void handleNewTab()}
+            onOpenPalette={() => void openPalette()}
+          />
+        )}
         <a className="skip-to-composer" href="#composer-input">
           {t("shortcuts.skipToComposer")}
         </a>
@@ -2848,12 +2896,12 @@ export default function App() {
                 role="separator"
                 aria-orientation="vertical"
                 aria-label={t("sidebar.resize")}
-                aria-valuemin={SIDEBAR_MIN_WIDTH}
-                aria-valuemax={SIDEBAR_MAX_WIDTH}
-                aria-valuenow={sidebarWidth}
+                aria-valuemin={activeSidebarMinWidth}
+                aria-valuemax={activeSidebarMaxWidth}
+                aria-valuenow={effectiveSidebarWidth}
                 onPointerDown={startSidebarResize}
                 onKeyDown={resizeSidebarWithKeyboard}
-                onDoubleClick={() => setExpandedSidebarWidth(defaultSidebarWidth())}
+                onDoubleClick={() => setExpandedSidebarWidth(activeSidebarDefaultWidth)}
               />
               <button
                 className="sidebar-resizer__collapse-btn"
@@ -2874,12 +2922,12 @@ export default function App() {
             role="separator"
             aria-orientation="vertical"
             aria-label={t("sidebar.resize")}
-            aria-valuemin={SIDEBAR_MIN_WIDTH}
-            aria-valuemax={SIDEBAR_MAX_WIDTH}
-            aria-valuenow={sidebarWidth}
+            aria-valuemin={activeSidebarMinWidth}
+            aria-valuemax={activeSidebarMaxWidth}
+            aria-valuenow={effectiveSidebarWidth}
             onPointerDown={startSidebarResize}
             onKeyDown={resizeSidebarWithKeyboard}
-            onDoubleClick={() => setExpandedSidebarWidth(defaultSidebarWidth())}
+            onDoubleClick={() => setExpandedSidebarWidth(activeSidebarDefaultWidth)}
           />
         )}
 
@@ -2908,20 +2956,33 @@ export default function App() {
                       onBlur={() => void commitActiveTopicRename()}
                     />
                   </div>
+                ) : sidebarCreation ? (
+                  <button
+                    className="topicbar__title-button"
+                    type="button"
+                    title={sidebarImDetailConnection ? topicbarTitle : topicTitle(activeTab)}
+                    aria-label={t("topicBar.renameSession")}
+                    disabled={Boolean(sidebarImDetailConnection) || !activeTab?.topicId}
+                    onClick={startActiveTopicRename}
+                  >
+                    <span>{topicbarTitle}</span>
+                  </button>
                 ) : (
                   <h1 title={sidebarImDetailConnection ? topicbarTitle : topicTitle(activeTab)}>{topicbarTitle}</h1>
                 )}
-                <Tooltip label={t("topicBar.renameSession")}>
-                  <button
-                    className="topicbar__icon-btn"
-                    type="button"
-                    disabled={Boolean(sidebarImDetailConnection) || !activeTab?.topicId || topicbarEditing}
-                    onClick={startActiveTopicRename}
-                    aria-label={t("topicBar.renameSession")}
-                  >
-                    <Pencil size={14} />
-                  </button>
-                </Tooltip>
+                {!sidebarCreation && (
+                  <Tooltip label={t("topicBar.renameSession")}>
+                    <button
+                      className="topicbar__icon-btn"
+                      type="button"
+                      disabled={Boolean(sidebarImDetailConnection) || !activeTab?.topicId || topicbarEditing}
+                      onClick={startActiveTopicRename}
+                      aria-label={t("topicBar.renameSession")}
+                    >
+                      <Pencil size={14} />
+                    </button>
+                  </Tooltip>
+                )}
               </div>
               {topicbarSubtitleVisible && (
                 <div className="topicbar__subtitle" title={topicbarSubtitleTitle}>
