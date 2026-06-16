@@ -53,3 +53,48 @@ func TestBranchMetaRoundTripAndList(t *testing.T) {
 		t.Fatalf("child with parent root and name experiment not found among %+v", branches)
 	}
 }
+
+func TestBranchMetaModelRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.jsonl")
+
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
+	if err := s.Save(path); err != nil {
+		t.Fatal(err)
+	}
+
+	// Model should be absent initially.
+	if m, ok := LoadSessionModel(path); ok {
+		t.Fatalf("LoadSessionModel on fresh session = %q, want empty", m)
+	}
+
+	// Set model and verify it is persisted.
+	if err := SetBranchModel(path, "openrouter/anthropic/claude-sonnet"); err != nil {
+		t.Fatal(err)
+	}
+	m, ok := LoadSessionModel(path)
+	if !ok {
+		t.Fatal("LoadSessionModel failed after SetBranchModel")
+	}
+	if m != "openrouter/anthropic/claude-sonnet" {
+		t.Fatalf("model = %q, want %q", m, "openrouter/anthropic/claude-sonnet")
+	}
+
+	// Update model and verify.
+	if err := SetBranchModel(path, "deepseek/deepseek-v4-flash"); err != nil {
+		t.Fatal(err)
+	}
+	m, ok = LoadSessionModel(path)
+	if !ok {
+		t.Fatal("LoadSessionModel failed after update")
+	}
+	if m != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("model = %q, want %q", m, "deepseek/deepseek-v4-flash")
+	}
+
+	// LoadSessionModel returns false for a non-existent file.
+	if _, ok := LoadSessionModel(filepath.Join(dir, "nonexistent.jsonl")); ok {
+		t.Fatal("LoadSessionModel on nonexistent path returned ok")
+	}
+}

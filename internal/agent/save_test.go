@@ -246,3 +246,43 @@ func TestListSessionsMissingDir(t *testing.T) {
 		t.Errorf("missing dir = %v / %v, want nil/nil", got, err)
 	}
 }
+
+func TestSetAndLoadSessionModel(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.jsonl")
+
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
+	if err := s.Save(path); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should not find a model in a fresh session.
+	if _, ok := LoadSessionModel(path); ok {
+		t.Fatal("expected no model in fresh session")
+	}
+
+	// Set model and verify round-trip.
+	if err := SetBranchModel(path, "openrouter/anthropic/claude-sonnet"); err != nil {
+		t.Fatal(err)
+	}
+	m, ok := LoadSessionModel(path)
+	if !ok {
+		t.Fatal("expected model after SetBranchModel")
+	}
+	if m != "openrouter/anthropic/claude-sonnet" {
+		t.Fatalf("model = %q, want %q", m, "openrouter/anthropic/claude-sonnet")
+	}
+
+	// Update model.
+	if err := SetBranchModel(path, "deepseek/deepseek-v4-flash"); err != nil {
+		t.Fatal(err)
+	}
+	m, ok = LoadSessionModel(path)
+	if !ok {
+		t.Fatal("expected model after update")
+	}
+	if m != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("model = %q, want %q", m, "deepseek/deepseek-v4-flash")
+	}
+}
