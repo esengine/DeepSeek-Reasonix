@@ -19,7 +19,10 @@ import {
   GitBranch,
   History,
   MessageSquare,
+  PanelLeft,
+  PanelRight,
   Plus,
+  Search,
   Settings as SettingsIcon,
   Pencil,
   Trash2,
@@ -2472,8 +2475,8 @@ export default function App() {
     : t(sidebarImExpanded ? "sidebar.imCollapse" : "sidebar.imExpand");
   const sidebarWorkbench = desktopLayoutStyle === "workbench";
   const sidebarCreation = desktopLayoutStyle === "creation";
-  const sidebarWorkbenchLike = sidebarWorkbench || sidebarCreation;
-  const projectTreeVariant = sidebarWorkbenchLike ? "workbench" : "classic";
+  const sidebarWorkbenchLike = sidebarWorkbench;
+  const projectTreeVariant = sidebarWorkbench ? "workbench" : "classic";
   const sidebarClassName = [
     "sidebar",
     sidebarCollapsed ? "sidebar--collapsed" : "",
@@ -2554,10 +2557,11 @@ export default function App() {
   );
   const sidebarCreationFeaturesBlock = (
     <nav className="sidebar__features sidebar__features--creation" aria-label={t("sidebar.utilityActions")}>
+      <span className="sidebar__nav-label">功能</span>
       {sidebarImBlock}
       <Tooltip label={t("sidebar.allHistory")} fill side="right" disabled={sidebarNavTooltipDisabled}>
         <button
-          className="sidebar__feature-button"
+          className="sidebar__feature sidebar__feature-button"
           type="button"
           onClick={() => void openAllHistory()}
         >
@@ -2600,7 +2604,7 @@ export default function App() {
         <AppChrome
           platform={desktopPlatform}
           browserPreviewChrome={browserPreviewChrome}
-          workbenchChrome={sidebarWorkbench}
+          workbenchChrome={sidebarWorkbench || sidebarCreation}
           tabs={visibleTabs}
           activeTabId={visibleTabId}
           revealActiveSignal={tabRevealSignal}
@@ -2656,6 +2660,14 @@ export default function App() {
                     <img src={logoSymbol} alt="" className="sidebar__brand-logo sidebar__brand-logo--creation" draggable={false} />
                   </span>
                   <span className="sidebar__brand-name">Reasonix</span>
+                  <button
+                    className="sidebar__brand-search"
+                    type="button"
+                    aria-label={t("projectTree.searchPlaceholder")}
+                    onClick={() => void openPalette()}
+                  >
+                    <Search size={14} aria-hidden="true" />
+                  </button>
                 </div>
               </div>
 
@@ -2792,19 +2804,59 @@ export default function App() {
           )}
 
         </aside>
-        <button
-          className="sidebar-resizer"
-          type="button"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label={t("sidebar.resize")}
-          aria-valuemin={SIDEBAR_MIN_WIDTH}
-          aria-valuemax={SIDEBAR_MAX_WIDTH}
-          aria-valuenow={sidebarWidth}
-          onPointerDown={startSidebarResize}
-          onKeyDown={resizeSidebarWithKeyboard}
-          onDoubleClick={() => setExpandedSidebarWidth(defaultSidebarWidth())}
-        />
+        {sidebarCreation ? (
+          <>
+            <button
+              className="sidebar-float-toggle"
+              type="button"
+              onClick={sidebarExpandBlocked ? undefined : toggleSidebar}
+              aria-label={sidebarToggleTitle}
+              aria-pressed={!sidebarCollapsed}
+              aria-disabled={sidebarExpandBlocked}
+            >
+              <PanelLeft size={14} />
+            </button>
+            <div className="sidebar-resizer-shell">
+              <button
+                className="sidebar-resizer"
+                type="button"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label={t("sidebar.resize")}
+                aria-valuemin={SIDEBAR_MIN_WIDTH}
+                aria-valuemax={SIDEBAR_MAX_WIDTH}
+                aria-valuenow={sidebarWidth}
+                onPointerDown={startSidebarResize}
+                onKeyDown={resizeSidebarWithKeyboard}
+                onDoubleClick={() => setExpandedSidebarWidth(defaultSidebarWidth())}
+              />
+              <button
+                className="sidebar-resizer__collapse-btn"
+                type="button"
+                onClick={sidebarExpandBlocked ? undefined : toggleSidebar}
+                aria-label={sidebarToggleTitle}
+                aria-pressed={!sidebarCollapsed}
+                aria-disabled={sidebarExpandBlocked}
+              >
+                {sidebarCollapsed ? <PanelRight size={12} /> : <PanelLeft size={12} />}
+              </button>
+            </div>
+          </>
+        ) : (
+          <button
+            className="sidebar-resizer"
+            type="button"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t("sidebar.resize")}
+            aria-valuemin={SIDEBAR_MIN_WIDTH}
+            aria-valuemax={SIDEBAR_MAX_WIDTH}
+            aria-valuenow={sidebarWidth}
+            onPointerDown={startSidebarResize}
+            onKeyDown={resizeSidebarWithKeyboard}
+            onDoubleClick={() => setExpandedSidebarWidth(defaultSidebarWidth())}
+          />
+        )}
 
         <section className="chat-pane">
           <>
@@ -3072,6 +3124,7 @@ export default function App() {
               turnTokens={state.turnTokens}
               retry={state.retry}
               transientDismissSignal={transientOverlayDismissSignal}
+              variant={sidebarCreation ? "creation" : "default"}
             />
             <StatusBar
               context={state.context}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowUp, Check, Eye, FileText, Folder, Gauge, List, MessageSquare, MoreHorizontal, Search, Shield, ShieldAlert, ShieldCheck, SlidersHorizontal, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowUp, Check, Eye, FileText, Folder, Gauge, List, MessageSquare, MoreHorizontal, Search, Send, Shield, ShieldAlert, ShieldCheck, SlidersHorizontal, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
@@ -350,6 +350,7 @@ export function Composer({
   turnTokens,
   retry,
   transientDismissSignal,
+  variant = "default",
 }: {
   running: boolean;
   collaborationMode: CollaborationMode;
@@ -387,6 +388,7 @@ export function Composer({
   turnTokens?: number;
   retry?: { attempt: number; max: number };
   transientDismissSignal?: number;
+  variant?: "default" | "creation";
 }) {
   const { t, locale } = useI18n();
   const { showToast } = useToast();
@@ -1667,6 +1669,225 @@ export function Composer({
     hasEffort ? "composer-meta--has-effort" : "composer-meta--no-effort",
     planModeOn || goalModeOn || tokenModeOn ? "composer-meta--has-intent-chip" : "composer-meta--no-intent-chip",
   ].join(" ");
+  const creationVariant = variant === "creation";
+  const sendDisabled =
+    submitting ||
+    pendingPaste > 0 ||
+    ((!text.trim() && attachments.length === 0 && workspaceRefs.length === 0) && !(goalModeOn && !activeGoal)) ||
+    disabled ||
+    readOnly;
+  const sendButton = (
+    <Tooltip label={t("composer.send")}>
+      <button
+        className="composer__btn composer__btn--send"
+        onClick={submit}
+        disabled={sendDisabled}
+      >
+        {creationVariant ? <Send size={12} /> : <ArrowUp size={16} />}
+      </button>
+    </Tooltip>
+  );
+  const inputField = (
+    <textarea
+      id="composer-input"
+      ref={taRef}
+      className="composer__input"
+      aria-label={t("composer.placeholder")}
+      value={text}
+      onChange={(e) => {
+        resetPromptHistoryNavigation();
+        setText(e.target.value);
+        if (composerPrompt) setComposerPrompt(null);
+      }}
+      onSelect={rememberCaret}
+      onClick={rememberCaret}
+      onKeyUp={rememberCaret}
+      onFocus={rememberCaret}
+      onPaste={onPaste}
+      onKeyDown={onKeyDown}
+      onCompositionStart={() => {
+        composingRef.current = true;
+      }}
+      onCompositionEnd={() => {
+        composingRef.current = false;
+        lastCompositionEndAt.current = Date.now();
+      }}
+      style={textareaStyle}
+      placeholder={readOnly ? t("composer.readOnlyChannel") : disabled ? t("common.loading") : goalModeOn && !activeGoal ? t("composer.goalInputPlaceholder") : t("composer.placeholder")}
+      rows={1}
+      disabled={disabled || readOnly}
+    />
+  );
+  const intentControl = (
+    <div className="composer-meta__control composer-meta__control--intent">
+      <Tooltip label={t("composer.intentMenuTitle")} disabled={intentMenuOpen || intentMenuClosing}>
+        <button
+          ref={intentMenuAnchorRef}
+          type="button"
+          className={`composer-action-trigger${intentMenuOpen || intentMenuClosing ? " composer-action-trigger--open" : ""}`}
+          onClick={() => (intentMenuOpen || intentMenuClosing ? closeIntentMenu() : openIntentMenu())}
+          disabled={disabled || running}
+          aria-haspopup="menu"
+          aria-expanded={intentMenuOpen && !intentMenuClosing}
+          aria-label={t("composer.intentMenuTitle")}
+          title={intentMenuOpen || intentMenuClosing ? undefined : t("composer.intentMenuTitle")}
+        >
+          <SlidersHorizontal size={17} />
+        </button>
+      </Tooltip>
+      {planModeOn && (
+        <Tooltip label={t("composer.exitPlanTitle")}>
+          <button
+            type="button"
+            className="composer-mode-chip composer-mode-chip--plan"
+            onClick={choosePlanMode}
+            disabled={disabled}
+            title={t("composer.exitPlanTitle")}
+            aria-label={t("composer.exitPlanTitle")}
+          >
+            <span className="composer-mode-chip__icon composer-mode-chip__icon--mode" aria-hidden="true">
+              <List size={14} />
+            </span>
+            <span className="composer-mode-chip__icon composer-mode-chip__icon--dismiss" aria-hidden="true">
+              <X size={11} />
+            </span>
+            <span className="composer-mode-chip__label">{t("composer.modePlan")}</span>
+          </button>
+        </Tooltip>
+      )}
+      {goalModeOn && (
+        <Tooltip label={t("composer.exitGoalTitle")}>
+          <button
+            type="button"
+            className="composer-mode-chip composer-mode-chip--goal"
+            onClick={chooseGoalMode}
+            disabled={disabled}
+            title={activeGoal || t("composer.exitGoalTitle")}
+            aria-label={t("composer.exitGoalTitle")}
+          >
+            <span className="composer-mode-chip__icon composer-mode-chip__icon--mode" aria-hidden="true">
+              <Target size={14} />
+            </span>
+            <span className="composer-mode-chip__icon composer-mode-chip__icon--dismiss" aria-hidden="true">
+              <X size={11} />
+            </span>
+            <span className="composer-mode-chip__label">{t("composer.modeGoal")}</span>
+          </button>
+        </Tooltip>
+      )}
+      {tokenModeOn && (
+        <Tooltip label={t("composer.tokenEconomyOnDesc")}>
+          <button
+            type="button"
+            className="composer-mode-chip composer-mode-chip--token"
+            onClick={chooseTokenMode}
+            disabled={disabled || running}
+            title={t("composer.tokenEconomyExitTitle")}
+            aria-label={t("composer.tokenEconomyExitTitle")}
+          >
+            <span className="composer-mode-chip__icon composer-mode-chip__icon--mode" aria-hidden="true">
+              <Gauge size={14} />
+            </span>
+            <span className="composer-mode-chip__icon composer-mode-chip__icon--dismiss" aria-hidden="true">
+              <X size={11} />
+            </span>
+            <span className="composer-mode-chip__label">{t("composer.tokenEconomyShort")}</span>
+          </button>
+        </Tooltip>
+      )}
+    </div>
+  );
+  const approvalControl = (
+    <div className="composer-meta__control composer-meta__control--approval">
+      <div className="composer-modebar composer-modebar--approval" data-mode={toolApprovalMode} title={t("composer.accessMenuTitle")}>
+        <span className="composer-modebar__thumb" aria-hidden="true" />
+        <button
+          type="button"
+          className={`composer-modebar__item composer-modebar__item--ask${toolApprovalMode === "ask" ? " composer-modebar__item--active" : ""}`}
+          onClick={() => chooseApprovalMode("ask")}
+          disabled={disabled}
+          aria-pressed={toolApprovalMode === "ask"}
+          title={t("composer.accessAskTitle")}
+        >
+          <Shield size={14} />
+          <span>{t("composer.modeAsk")}</span>
+        </button>
+        <button
+          type="button"
+          className={`composer-modebar__item composer-modebar__item--auto${toolApprovalMode === "auto" ? " composer-modebar__item--active" : ""}`}
+          onClick={() => chooseApprovalMode("auto")}
+          disabled={disabled}
+          aria-pressed={toolApprovalMode === "auto"}
+          title={t("composer.accessAutoTitle")}
+        >
+          <ShieldCheck size={14} />
+          <span>{t("composer.modeNormal")}</span>
+        </button>
+        <button
+          type="button"
+          className={`composer-modebar__item composer-modebar__item--yolo${toolApprovalMode === "yolo" ? " composer-modebar__item--active" : ""}`}
+          onClick={() => chooseApprovalMode("yolo")}
+          disabled={disabled}
+          aria-pressed={toolApprovalMode === "yolo"}
+          title={t("composer.accessYoloTitle")}
+        >
+          <ShieldAlert size={14} />
+          <span>{t("composer.modeYolo")}</span>
+        </button>
+      </div>
+    </div>
+  );
+  const modelControl = (
+    <div className="composer-meta__control composer-meta__control--model">
+      <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} />
+    </div>
+  );
+  const effortControl = hasEffort ? (
+    <div className="composer-meta__control composer-meta__control--effort">
+      <EffortSwitcher effort={effort} disabled={running} onPick={onSetEffort} />
+    </div>
+  ) : null;
+  const moreControl = hasEffort ? (
+    <div className="composer-meta__control composer-meta__control--more">
+      <Tooltip label={t("composer.moreControls")} disabled={moreMenuOpen || moreMenuClosing}>
+        <button
+          ref={moreMenuAnchorRef}
+          type="button"
+          className={`composer-more-trigger${moreMenuOpen || moreMenuClosing ? " composer-more-trigger--open" : ""}`}
+          onClick={() => (moreMenuOpen || moreMenuClosing ? closeMoreMenu() : openMoreMenu())}
+          disabled={disabled || running}
+          aria-haspopup="menu"
+          aria-expanded={moreMenuOpen && !moreMenuClosing}
+          aria-label={t("composer.moreControls")}
+          title={moreMenuOpen || moreMenuClosing ? undefined : t("composer.moreControls")}
+        >
+          <MoreHorizontal size={16} />
+          <span>{t("topicBar.more")}</span>
+        </button>
+      </Tooltip>
+    </div>
+  ) : null;
+  const composerMetaControls = creationVariant ? (
+    <>
+      <div className="composer-meta__group composer-meta__group--left">
+        {intentControl}
+        {approvalControl}
+      </div>
+      <div className="composer-meta__group composer-meta__group--right">
+        {modelControl}
+        {effortControl}
+        {moreControl}
+      </div>
+    </>
+  ) : (
+    <>
+      {intentControl}
+      {approvalControl}
+      {modelControl}
+      {effortControl}
+      {moreControl}
+    </>
+  );
 
   return (
     <div
@@ -2007,7 +2228,7 @@ export function Composer({
         </div>
       )}
       <div
-        className={`composer-card${composerHeight !== null ? " composer-card--resized" : ""}${composerAutoExpanded ? " composer-card--autosized" : ""}${composerResizing ? " composer-card--resizing" : ""}`}
+        className={`composer-card${composerHeight !== null ? " composer-card--resized" : ""}${composerAutoExpanded ? " composer-card--autosized" : ""}${composerResizing ? " composer-card--resizing" : ""}${creationVariant && runActivity ? " composer-card--running" : ""}`}
         ref={composerCardRef}
         style={composerCardStyle}
       >
@@ -2026,198 +2247,33 @@ export function Composer({
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
         >
-          <span className="composer__caret">{shellModeActive ? "$" : "›"}</span>
-          <textarea
-            id="composer-input"
-            ref={taRef}
-            className="composer__input"
-            aria-label={t("composer.placeholder")}
-            value={text}
-            onChange={(e) => {
-              resetPromptHistoryNavigation();
-              setText(e.target.value);
-              if (composerPrompt) setComposerPrompt(null);
-            }}
-            onSelect={rememberCaret}
-            onClick={rememberCaret}
-            onKeyUp={rememberCaret}
-            onFocus={rememberCaret}
-            onPaste={onPaste}
-            onKeyDown={onKeyDown}
-            onCompositionStart={() => {
-              composingRef.current = true;
-            }}
-            onCompositionEnd={() => {
-              composingRef.current = false;
-              lastCompositionEndAt.current = Date.now();
-            }}
-            style={textareaStyle}
-            placeholder={readOnly ? t("composer.readOnlyChannel") : disabled ? t("common.loading") : goalModeOn && !activeGoal ? t("composer.goalInputPlaceholder") : t("composer.placeholder")}
-            rows={1}
-            disabled={disabled || readOnly}
-          />
-          {composerPrompt && (
-            <span className="composer__prompt" role="status">
-              {composerPrompt}
-            </span>
-          )}
-          {!running && (
-            <Tooltip label={t("composer.send")}>
-              <button
-                className="composer__btn composer__btn--send"
-                onClick={submit}
-                disabled={submitting || pendingPaste > 0 || ((!text.trim() && attachments.length === 0 && workspaceRefs.length === 0) && !(goalModeOn && !activeGoal)) || disabled || readOnly}
-              >
-                <ArrowUp size={16} />
-              </button>
-            </Tooltip>
+          {creationVariant ? (
+            <div className="composer__input-row">
+              <span className="composer__caret">{shellModeActive ? "$" : "›"}</span>
+              {inputField}
+              {composerPrompt && (
+                <span className="composer__prompt" role="status">
+                  {composerPrompt}
+                </span>
+              )}
+            </div>
+          ) : (
+            <>
+              <span className="composer__caret">{shellModeActive ? "$" : "›"}</span>
+              {inputField}
+              {composerPrompt && (
+                <span className="composer__prompt" role="status">
+                  {composerPrompt}
+                </span>
+              )}
+              {!running && sendButton}
+            </>
           )}
         </div>
+        {creationVariant && !running && sendButton}
         <div className={composerMetaClass}>
           <div className="composer-meta__params">
-            <div className="composer-meta__control composer-meta__control--intent">
-              <Tooltip label={t("composer.intentMenuTitle")} disabled={intentMenuOpen || intentMenuClosing}>
-                <button
-                  ref={intentMenuAnchorRef}
-                  type="button"
-                  className={`composer-action-trigger${intentMenuOpen || intentMenuClosing ? " composer-action-trigger--open" : ""}`}
-                  onClick={() => (intentMenuOpen || intentMenuClosing ? closeIntentMenu() : openIntentMenu())}
-                  disabled={disabled || running}
-                  aria-haspopup="menu"
-                  aria-expanded={intentMenuOpen && !intentMenuClosing}
-                  aria-label={t("composer.intentMenuTitle")}
-                  title={intentMenuOpen || intentMenuClosing ? undefined : t("composer.intentMenuTitle")}
-                >
-                  <SlidersHorizontal size={17} />
-                </button>
-              </Tooltip>
-              {planModeOn && (
-                <Tooltip label={t("composer.exitPlanTitle")}>
-                  <button
-                    type="button"
-                    className="composer-mode-chip composer-mode-chip--plan"
-                    onClick={choosePlanMode}
-                    disabled={disabled}
-                    title={t("composer.exitPlanTitle")}
-                    aria-label={t("composer.exitPlanTitle")}
-                  >
-                    <span className="composer-mode-chip__icon composer-mode-chip__icon--mode" aria-hidden="true">
-                      <List size={14} />
-                    </span>
-                    <span className="composer-mode-chip__icon composer-mode-chip__icon--dismiss" aria-hidden="true">
-                      <X size={11} />
-                    </span>
-                    <span className="composer-mode-chip__label">{t("composer.modePlan")}</span>
-                  </button>
-                </Tooltip>
-              )}
-              {goalModeOn && (
-                <Tooltip label={t("composer.exitGoalTitle")}>
-                  <button
-                    type="button"
-                    className="composer-mode-chip composer-mode-chip--goal"
-                    onClick={chooseGoalMode}
-                    disabled={disabled}
-                    title={activeGoal || t("composer.exitGoalTitle")}
-                    aria-label={t("composer.exitGoalTitle")}
-                  >
-                    <span className="composer-mode-chip__icon composer-mode-chip__icon--mode" aria-hidden="true">
-                      <Target size={14} />
-                    </span>
-                    <span className="composer-mode-chip__icon composer-mode-chip__icon--dismiss" aria-hidden="true">
-                      <X size={11} />
-                    </span>
-                    <span className="composer-mode-chip__label">{t("composer.modeGoal")}</span>
-                  </button>
-                </Tooltip>
-              )}
-              {tokenModeOn && (
-                <Tooltip label={t("composer.tokenEconomyOnDesc")}>
-                  <button
-                    type="button"
-                    className="composer-mode-chip composer-mode-chip--token"
-                    onClick={chooseTokenMode}
-                    disabled={disabled || running}
-                    title={t("composer.tokenEconomyExitTitle")}
-                    aria-label={t("composer.tokenEconomyExitTitle")}
-                  >
-                    <span className="composer-mode-chip__icon composer-mode-chip__icon--mode" aria-hidden="true">
-                      <Gauge size={14} />
-                    </span>
-                    <span className="composer-mode-chip__icon composer-mode-chip__icon--dismiss" aria-hidden="true">
-                      <X size={11} />
-                    </span>
-                    <span className="composer-mode-chip__label">{t("composer.tokenEconomyShort")}</span>
-                  </button>
-                </Tooltip>
-              )}
-            </div>
-            <div className="composer-meta__control composer-meta__control--approval">
-              <div className="composer-modebar composer-modebar--approval" data-mode={toolApprovalMode} title={t("composer.accessMenuTitle")}>
-                <span className="composer-modebar__thumb" aria-hidden="true" />
-                <button
-                  type="button"
-                  className={`composer-modebar__item composer-modebar__item--ask${toolApprovalMode === "ask" ? " composer-modebar__item--active" : ""}`}
-                  onClick={() => chooseApprovalMode("ask")}
-                  disabled={disabled}
-                  aria-pressed={toolApprovalMode === "ask"}
-                  title={t("composer.accessAskTitle")}
-                >
-                  <Shield size={14} />
-                  <span>{t("composer.modeAsk")}</span>
-                </button>
-                <button
-                  type="button"
-                  className={`composer-modebar__item composer-modebar__item--auto${toolApprovalMode === "auto" ? " composer-modebar__item--active" : ""}`}
-                  onClick={() => chooseApprovalMode("auto")}
-                  disabled={disabled}
-                  aria-pressed={toolApprovalMode === "auto"}
-                  title={t("composer.accessAutoTitle")}
-                >
-                  <ShieldCheck size={14} />
-                  <span>{t("composer.modeNormal")}</span>
-                </button>
-                <button
-                  type="button"
-                  className={`composer-modebar__item composer-modebar__item--yolo${toolApprovalMode === "yolo" ? " composer-modebar__item--active" : ""}`}
-                  onClick={() => chooseApprovalMode("yolo")}
-                  disabled={disabled}
-                  aria-pressed={toolApprovalMode === "yolo"}
-                  title={t("composer.accessYoloTitle")}
-                >
-                  <ShieldAlert size={14} />
-                  <span>{t("composer.modeYolo")}</span>
-                </button>
-              </div>
-            </div>
-            <div className="composer-meta__control composer-meta__control--model">
-              <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} />
-            </div>
-            {hasEffort && (
-              <div className="composer-meta__control composer-meta__control--effort">
-                <EffortSwitcher effort={effort} disabled={running} onPick={onSetEffort} />
-              </div>
-            )}
-            {hasEffort && (
-              <div className="composer-meta__control composer-meta__control--more">
-                <Tooltip label={t("composer.moreControls")} disabled={moreMenuOpen || moreMenuClosing}>
-                  <button
-                    ref={moreMenuAnchorRef}
-                    type="button"
-                    className={`composer-more-trigger${moreMenuOpen || moreMenuClosing ? " composer-more-trigger--open" : ""}`}
-                    onClick={() => (moreMenuOpen || moreMenuClosing ? closeMoreMenu() : openMoreMenu())}
-                    disabled={disabled || running}
-                    aria-haspopup="menu"
-                    aria-expanded={moreMenuOpen && !moreMenuClosing}
-                    aria-label={t("composer.moreControls")}
-                    title={moreMenuOpen || moreMenuClosing ? undefined : t("composer.moreControls")}
-                  >
-                    <MoreHorizontal size={16} />
-                    <span>{t("topicBar.more")}</span>
-                  </button>
-                </Tooltip>
-              </div>
-            )}
+            {composerMetaControls}
           </div>
         </div>
       </div>

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
+const composerSource = readFileSync(resolve(testDir, "../components/Composer.tsx"), "utf8");
 const settingsSource = readFileSync(resolve(testDir, "../components/SettingsPanel.tsx"), "utf8");
 const contextPanelSource = readFileSync(resolve(testDir, "../components/ContextPanel.tsx"), "utf8");
 const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8");
@@ -43,10 +44,10 @@ ok(
 );
 
 ok(
-  /sidebarWorkbenchLike = sidebarWorkbench \|\| sidebarCreation/.test(appSource) &&
+  /sidebarWorkbenchLike = sidebarWorkbench;/.test(appSource) &&
     /sidebarWorkbenchLike \? "sidebar--workbench"/.test(appSource) &&
-    /projectTreeVariant = sidebarWorkbenchLike \? "workbench" : "classic"/.test(appSource),
-  "Creation inherits Workbench sidebar density",
+    /projectTreeVariant = sidebarWorkbench \? "workbench" : "classic"/.test(appSource),
+  "Creation does not inherit Workbench sidebar density",
 );
 
 ok(
@@ -57,8 +58,18 @@ ok(
 );
 
 ok(
-  /<AppChrome[\s\S]*workbenchChrome=\{sidebarWorkbench\}/.test(appSource),
-  "Creation keeps AppChrome tab strip mounted instead of using workbench chrome",
+  /<AppChrome[\s\S]*workbenchChrome=\{sidebarWorkbench \|\| sidebarCreation\}/.test(appSource) &&
+    /\.app--creation \.app-chrome__panel-toggle--left/.test(stylesSource),
+  "Creation skips the classic AppChrome tab strip",
+);
+
+ok(
+  /<Composer[\s\S]*variant=\{sidebarCreation \? "creation" : "default"\}/.test(appSource) &&
+    /creationVariant = variant === "creation"/.test(composerSource) &&
+    /composer__input-row/.test(composerSource) &&
+    /composer-meta__group composer-meta__group--left/.test(composerSource) &&
+    /composer-card--running/.test(composerSource),
+  "Creation uses the original composer structure behind a variant",
 );
 
 ok(
@@ -71,9 +82,11 @@ ok(
   /\.app--creation/.test(stylesSource) &&
     /\.layout--creation/.test(stylesSource) &&
     /--creation-accent: var\(--accent\)/.test(stylesSource) &&
-    /--sidebar-workbench-active: color-mix\(in srgb, var\(--creation-accent\)/.test(stylesSource) &&
+    /--sidebar-rail-card: var\(--side-panel-card\)/.test(stylesSource) &&
+    /\.sidebar--creation \.sidebar__brand-search/.test(stylesSource) &&
+    /\.layout--creation \.sidebar-resizer-shell/.test(stylesSource) &&
     /\.context-panel--creation \.context-panel__usage-bar/.test(stylesSource),
-  "Creation styles are scoped and include the sidebar density tokens",
+  "Creation styles are scoped and include the original sidebar rail tokens",
 );
 
 ok(
