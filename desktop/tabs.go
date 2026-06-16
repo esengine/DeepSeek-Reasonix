@@ -1442,6 +1442,14 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 	promoteProviderKeysToCredentials(cfg)
 
 	model := strings.TrimSpace(tab.model)
+	// Prefer the session's original model from BranchMeta — the session file
+	// always knows what model created it, so it survives tab-model drift
+	// across restarts.
+	if tab.SessionPath != "" {
+		if sm, ok := agent.LoadSessionModel(tab.SessionPath); ok {
+			model = sm
+		}
+	}
 	if model == "" {
 		model = cfg.DefaultModel
 	}
