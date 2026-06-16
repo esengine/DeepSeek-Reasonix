@@ -121,27 +121,35 @@ function normalizeMathText(s: string): string {
   // Step 7: restore standard $/$$ delimiters for remark-math to parse.
   // Display math: restore as $$\n...\n$$ so remark-math recognises block
   // math (it requires $$ on its own line, not glued to content like $$x$$).
-  // Inside a blockquote, the closing $$ must be prefixed with the blockquote
-  // marker (>) so remark-math recognises the fence boundary — otherwise it
-  // swallows the following paragraph as math content.
+  //
+  // Blockquote workaround: remark-math has a known limitation where multi-line
+  // $$...$$ display math inside a Markdown blockquote (>) breaks inline math
+  // parsing on subsequent blockquote lines. To avoid this, when display math
+  // is detected inside a blockquote, we close the blockquote before the
+  // display math and reopen it after — putting the math outside the quote.
   let displayOpen = true;
-  let lastDisplayContext = "";
+  let lastDisplayInBlockquote = false;
   r = r.replace(new RegExp(DM, "g"), (_match, offset, full) => {
     let delim: string;
     if (displayOpen) {
-      // Remember the text before this opening $$ so the closing $$ can
-      // detect whether we're inside a blockquote.
-      lastDisplayContext = full.slice(0, offset);
-      delim = "$$\n";
+      // Detect blockquote: check the line the opening $$ was on
+      const before = full.slice(0, offset);
+      const lastLineStart = before.lastIndexOf("\n") + 1;
+      const lastLine = before.slice(lastLineStart);
+      lastDisplayInBlockquote = /^\s*>/.test(lastLine);
+      if (lastDisplayInBlockquote) {
+        // Close the blockquote before the display math
+        delim = "\n\n$$\n";
+      } else {
+        delim = "$$\n";
+      }
     } else {
-      // Check if the opening $$ was inside a blockquote: look at the line
-      // the opening $$ was on. If it starts with ">" (possibly preceded by
-      // other > lines), we're in a blockquote and the closing $$ needs a >
-      // prefix for remark-math to recognise the fence.
-      const lastLineStart = lastDisplayContext.lastIndexOf("\n") + 1;
-      const lastLine = lastDisplayContext.slice(lastLineStart);
-      const inBlockquote = /^\s*>/.test(lastLine);
-      delim = inBlockquote ? "\n> $$" : "\n$$";
+      if (lastDisplayInBlockquote) {
+        // Reopen the blockquote after the display math
+        delim = "\n$$\n\n> ";
+      } else {
+        delim = "\n$$";
+      }
     }
     displayOpen = !displayOpen;
     return delim;
