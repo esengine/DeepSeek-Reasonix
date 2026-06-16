@@ -1766,6 +1766,7 @@ html,
 body,
 #root {
   height: 100%;
+  min-height: 100%;
   margin: 0;
 }
 html {
@@ -1797,7 +1798,7 @@ a[href] {
 }
 
 .app {
-  height: 100%;
+  height: var(--app-viewport-height, 100%);
   min-height: 0;
   overflow-x: auto;
   overflow-y: hidden;
@@ -2997,14 +2998,20 @@ a[href] {
 }
 .transcript--empty {
   container-type: size;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 16px 32px;
 }
 .transcript--empty > * {
   max-width: none;
-  margin: 0;
+}
+.transcript--empty > .welcome {
+  margin-block: auto;
+  margin-inline: 0;
 }
 .warm-collapse {
   display: block;
@@ -3277,7 +3284,7 @@ a[href] {
 
 .welcome {
   width: min(100%, 600px);
-  max-height: 100%;
+  max-height: none;
   min-height: 0;
   display: grid;
   align-content: center;
@@ -3285,8 +3292,23 @@ a[href] {
   gap: 28px;
   text-align: left;
   color: var(--fg-faint);
-  overflow: hidden;
-  transform: translateY(116px);
+  overflow: visible;
+}
+.welcome--brand {
+  margin-top: 0;
+  transform: translateY(-20px);
+}
+.welcome__brand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--welcome-brand-gap);
+}
+.welcome__brand-logo {
+  display: block;
+  width: var(--welcome-brand-width);
+  height: var(--welcome-brand-height);
+  object-fit: contain;
 }
 
 .welcome__copy {
@@ -3384,6 +3406,15 @@ a[href] {
 }
 
 @container (max-height: 560px) {
+  .welcome--brand {
+    --welcome-brand-width: 224px;
+    --welcome-brand-height: 52px;
+    --welcome-brand-gap: 22px;
+    transform: translateY(-16px);
+  }
+  .welcome__brand {
+    margin-bottom: var(--welcome-brand-gap);
+  }
   .welcome__title {
     font-size: clamp(30px, 5vw, 44px);
   }
@@ -3413,6 +3444,16 @@ a[href] {
 }
 
 @container (max-height: 330px) {
+  .transcript--empty > .welcome {
+    margin-block: 0 auto;
+  }
+  .welcome--brand {
+    transform: none;
+  }
+  .welcome__tag,
+  .welcome__hints {
+    display: none;
+  }
   .welcome__examples {
     margin-top: 0;
   }
