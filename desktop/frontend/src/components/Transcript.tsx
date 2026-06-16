@@ -78,6 +78,7 @@ export function Transcript({
   tabId,
   footerHeight = 0,
   onPrompt,
+  onEditPrompt,
   onRewind,
   checkpoints = [],
   actionPending = false,
@@ -91,6 +92,7 @@ export function Transcript({
   tabId?: string;
   footerHeight?: number;
   onPrompt: (text: string) => void;
+  onEditPrompt?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
   onRewind?: (turn: number, scope: string) => void;
   checkpoints?: CheckpointMeta[];
   actionPending?: boolean;
@@ -387,9 +389,21 @@ export function Transcript({
           flushCollapseBatch();
           pushTurnActions();
           const tn = userTurn.get(first.id);
+          const checkpoint = tn == null ? undefined : checkpointsByTurn.get(tn);
           activeTurn = tn;
           out.push(
-            <UserMessage key={first.id} id={first.id} text={first.text} failed={first.failed} turn={tn} anchorId={questionAnchorId(first.id)} />,
+            <UserMessage
+              key={first.id}
+              id={first.id}
+              text={first.text}
+              submitText={first.submitText}
+              failed={first.failed}
+              createdAt={first.createdAt}
+              turn={tn}
+              anchorId={questionAnchorId(first.id)}
+              onEdit={onEditPrompt}
+              editDisabled={rewindDisabled || !checkpoint?.canConversation}
+            />,
           );
           continue;
         }
@@ -475,9 +489,21 @@ export function Transcript({
           case "user": {
             pushTurnActions();
             const tn = userTurn.get(it.id);
+            const checkpoint = tn == null ? undefined : checkpointsByTurn.get(tn);
             activeTurn = tn;
             out.push(
-              <UserMessage key={it.id} id={it.id} text={it.text} failed={it.failed} turn={tn} anchorId={questionAnchorId(it.id)} />,
+              <UserMessage
+                key={it.id}
+                id={it.id}
+                text={it.text}
+                submitText={it.submitText}
+                failed={it.failed}
+                createdAt={it.createdAt}
+                turn={tn}
+                anchorId={questionAnchorId(it.id)}
+                onEdit={onEditPrompt}
+                editDisabled={rewindDisabled || !checkpoint?.canConversation}
+              />,
             );
             break;
           }
@@ -503,7 +529,7 @@ export function Transcript({
       if (!running) pushTurnActions();
     }
     return out;
-  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, running, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, stepGroups, tabId]);
+  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, running, onEditPrompt, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, stepGroups, tabId]);
 
   // ── Assemble rendered output ──────────────────────────────────────────────
   // Warm/cold zone is a separate memo'd WarmZone component so streaming tokens
@@ -538,6 +564,7 @@ export function Transcript({
             warmRewindDisabled={rewindDisabled}
             warmOnRewind={onRewind}
             warmSetOpenAction={setOpenAction}
+            warmOnEdit={onEditPrompt}
             tabId={tabId}
             onToggleColdPage={() => setColdPage((p) => p + 1)}
             onToggleWarmTurn={(g, expand) => {
@@ -576,6 +603,7 @@ const WarmZone = memo(function WarmZone({
   warmRewindDisabled,
   warmOnRewind,
   warmSetOpenAction,
+  warmOnEdit,
   tabId,
   onToggleColdPage,
   onToggleWarmTurn,
@@ -594,6 +622,7 @@ const WarmZone = memo(function WarmZone({
   warmRewindDisabled: boolean;
   warmOnRewind: ((turn: number, scope: string) => void) | undefined;
   warmSetOpenAction: (action: OpenTurnAction | null) => void;
+  warmOnEdit?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
   tabId?: string;
   onToggleColdPage: () => void;
   onToggleWarmTurn: (g: number, expand: boolean) => void;
@@ -649,6 +678,7 @@ const WarmZone = memo(function WarmZone({
               rewindDisabled={warmRewindDisabled}
               onRewind={warmOnRewind}
               setOpenAction={warmSetOpenAction}
+              onEdit={warmOnEdit}
               tabId={tabId}
             />
           </WarmTurnCard>,
@@ -693,6 +723,7 @@ function WarmTurnItems({
   rewindDisabled,
   onRewind,
   setOpenAction,
+  onEdit,
   tabId,
 }: {
   startIdx: number;
@@ -706,6 +737,7 @@ function WarmTurnItems({
   rewindDisabled: boolean;
   onRewind: ((turn: number, scope: string) => void) | undefined;
   setOpenAction: (action: OpenTurnAction | null) => void;
+  onEdit?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
   tabId?: string;
 }) {
   const nodes: React.ReactNode[] = [];
@@ -758,9 +790,20 @@ function WarmTurnItems({
       case "user": {
         pushTurnActions();
         const tn = userTurnMap.get(it.id);
+        const checkpoint = tn == null ? undefined : checkpoints.get(tn);
         activeTurn = tn;
         nodes.push(
-          <UserMessage key={it.id} text={it.text} failed={it.failed} turn={tn} anchorId={questionAnchorId(it.id)} />,
+          <UserMessage
+            key={it.id}
+            text={it.text}
+            submitText={it.submitText}
+            failed={it.failed}
+            createdAt={it.createdAt}
+            turn={tn}
+            anchorId={questionAnchorId(it.id)}
+            onEdit={onEdit}
+            editDisabled={rewindDisabled || !checkpoint?.canConversation}
+          />,
         );
         break;
       }

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
 import {
-  formatShortcutCombo,
   resolvedShortcutCombo,
   shortcutDefinitions,
   type ShortcutPlatform,
@@ -8,6 +7,7 @@ import {
 } from "../lib/keyboardShortcuts";
 import type { DictKey, Translator } from "../lib/i18n";
 import { ModalCloseButton } from "./ModalCloseButton";
+import { ShortcutComboDisplay } from "./ShortcutComboDisplay";
 
 const SECTION_ORDER: ShortcutSection[] = ["global", "session", "view", "tools", "help"];
 const SECTION_LABEL_KEYS: Record<ShortcutSection, DictKey> = {
@@ -86,10 +86,14 @@ export function ShortcutsCheatsheet({
               <div className="shortcuts-cheatsheet__list">
                 {group.items.map((definition) => (
                   <div className="shortcuts-cheatsheet__row" key={definition.action}>
-                    <kbd>{formatShortcutCombo(resolvedShortcutCombo(definition.action, platform), platform)}</kbd>
+                    <ShortcutComboDisplay
+                      as="kbd"
+                      combo={resolvedShortcutCombo(definition.action, platform)}
+                      platform={platform}
+                    />
                     <div>
                       <strong>{t(definition.labelKey)}</strong>
-                      <span>{t(definition.descriptionKey)}</span>
+                      <span className="shortcuts-cheatsheet__desc">{t(definition.descriptionKey)}</span>
                     </div>
                   </div>
                 ))}

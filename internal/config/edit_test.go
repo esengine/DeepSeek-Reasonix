@@ -161,6 +161,7 @@ func TestDesktopLayoutStyleNormalizes(t *testing.T) {
 		{"classic", "classic", false},
 		{" workbench ", "workbench", false},
 		{"workspace", "workbench", false},
+		{"creation", "creation", false},
 		{"later", "classic", true},
 	} {
 		c := Default()
@@ -555,6 +556,38 @@ func TestEffectiveVisionDoesNotInferCustomMimoProxy(t *testing.T) {
 	custom.Vision = true
 	if !EffectiveVision(custom) {
 		t.Fatalf("explicit vision=true should still enable custom providers")
+	}
+}
+
+func TestEffectiveVisionUsesPerModelVisionList(t *testing.T) {
+	c := &Config{Providers: []ProviderEntry{{
+		Name:         "custom",
+		Kind:         "openai",
+		BaseURL:      "https://proxy.example.com/v1",
+		Models:       []string{"text-only", "qwen-vl-plus"},
+		Default:      "text-only",
+		VisionModels: []string{"qwen-vl-plus"},
+	}}}
+
+	textOnly, ok := c.ResolveModel("custom/text-only")
+	if !ok {
+		t.Fatal("ResolveModel did not find custom/text-only")
+	}
+	if EffectiveVision(textOnly) {
+		t.Fatalf("text-only should remain text-only when not listed in vision_models")
+	}
+
+	vision, ok := c.ResolveModel("custom/qwen-vl-plus")
+	if !ok {
+		t.Fatal("ResolveModel did not find custom/qwen-vl-plus")
+	}
+	if !EffectiveVision(vision) {
+		t.Fatalf("model listed in vision_models should enable image input")
+	}
+
+	textOnly.Vision = true
+	if !EffectiveVision(textOnly) {
+		t.Fatalf("provider-level vision=true should still enable every selected model")
 	}
 }
 

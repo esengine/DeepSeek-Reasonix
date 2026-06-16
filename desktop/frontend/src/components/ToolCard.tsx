@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
-import { CopyButton } from "./CopyButton";
+import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
 import { useT } from "../lib/i18n";
 import { diffsFor, languageForToolArgs, subjectOf, summarize, summarizeFileDiff } from "../lib/tools";
@@ -16,7 +16,6 @@ const SUBAGENT_TOOLS = new Set(["task", "run_skill", "explore", "research", "rev
 
 /** Lines shown by default in a shell output block before the "show all" button. */
 const SHELL_PREVIEW_LINES = 10;
-const SHELL_HEADER_MAX_CHARS = 72;
 
 function pretty(json: string): string {
   try {
@@ -29,46 +28,6 @@ function pretty(json: string): string {
 function formatToolDuration(ms?: number): string {
   if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return "";
   return `${Math.round(ms)} ms`;
-}
-
-function isLikelyPath(token: string): boolean {
-  return token.length > 32 || /^[A-Za-z]:[\\/]/.test(token) || token.includes("/") || token.includes("\\");
-}
-
-function shellSegmentSummary(segment: string): string {
-  const tokens = segment.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
-  if (tokens.length === 0) return "";
-  const command = (tokens[0] ?? "").replace(/^['"]|['"]$/g, "");
-  const commandName = command.split(/[\\/]/).pop() || command;
-  if (commandName === "echo" && tokens.length > 1) return "";
-  const kept = [commandName];
-  for (let index = 1; index < tokens.length && kept.length < 3; index++) {
-    const token = tokens[index].replace(/^['"]|['"]$/g, "");
-    if (commandName === "git" && token === "-C") {
-      index++;
-      continue;
-    }
-    if (isLikelyPath(token)) continue;
-    kept.push(token);
-  }
-  return kept.join(" ");
-}
-
-function shellHeaderSubject(command: string): string {
-  const cleaned = command.replace(/\s+/g, " ").trim();
-  if (!cleaned) return "";
-  const summaries = cleaned
-    .split(/\s*(?:&&|\|\||;)\s*/)
-    .map(shellSegmentSummary)
-    .filter(Boolean);
-  const summary = summaries.length > 0 ? summaries.slice(0, 4).join(" && ") + (summaries.length > 4 ? " …" : "") : cleaned;
-  return summary.length <= SHELL_HEADER_MAX_CHARS ? summary : `${summary.slice(0, SHELL_HEADER_MAX_CHARS - 1).trimEnd()}…`;
-}
-
-function compactSubject(subject: string): string {
-  const cleaned = subject.replace(/\s+/g, " ").trim();
-  if (cleaned.length <= SHELL_HEADER_MAX_CHARS) return cleaned;
-  return `${cleaned.slice(0, SHELL_HEADER_MAX_CHARS - 1).trimEnd()}…`;
 }
 
 /** Returns the first n lines of text and the total line count. */
@@ -87,7 +46,6 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId }: { item
   const nested = subcalls ?? [];
   const hasNested = nested.length > 0;
   const isSubagent = SUBAGENT_TOOLS.has(item.name);
-  const isShellTool = item.isShell || item.name === "bash";
   const profileText =
     isSubagent && item.profile
       ? [item.profile.model, item.profile.effort ? `effort ${item.profile.effort}` : ""].filter(Boolean).join(" · ")
@@ -111,9 +69,6 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId }: { item
   const previewDiff = item.fileDiff?.diff ? item.fileDiff : undefined;
   const diffs = previewDiff || archivedWithoutFullData ? [] : diffsFor(item.name, effectiveArgs);
   const subject = fullData ? subjectOf(item.name, effectiveArgs) : item.subject || subjectOf(item.name, effectiveArgs);
-  const toolDisplayName = isShellTool ? "Shell" : item.name;
-  const headerSubject = isShellTool ? shellHeaderSubject(subject) : compactSubject(subject);
-  const callSummary = [toolDisplayName, headerSubject].filter(Boolean).join(" ");
   // Reset cached fullData when the item identity changes (e.g. after rewind).
   useEffect(() => {
     return () => setFullData(null);
@@ -125,9 +80,10 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId }: { item
   const hasArchivedOnDemandBody = Boolean(item.dataArchived && tabId);
   const hasArgsOrOutput = !previewDiff && diffs.length === 0 && (!!effectiveArgs || !!effectiveOutput || hasArchivedOnDemandBody);
 
-  // Tool output: split into preview + "show all" toggle.
-  const outputPreview = effectiveOutput ? splitPreview(effectiveOutput, SHELL_PREVIEW_LINES) : null;
-  const hasBody = Boolean(previewDiff || diffs.length || hasNested || outputPreview || (!outputPreview && hasArgsOrOutput) || item.error);
+  // Shell output: split into preview + "show all" toggle.
+  const shellOutput = item.isShell && effectiveOutput ? effectiveOutput : null;
+  const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_PREVIEW_LINES) : null;
+  const hasBody = Boolean(previewDiff || diffs.length || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error);
   useEffect(() => {
     if (!open || !item.dataArchived || fullData || !tabId) return;
     let cancelled = false;
@@ -144,9 +100,9 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId }: { item
   // registered closure flipping the current state, not a stale one.
   const shellExpand = useShellExpand();
   useEffect(() => {
-    if (!isShellTool || !shellExpand) return;
+    if (!item.isShell || !shellExpand) return;
     return shellExpand.register(item.id, () => setUserOpen(!openRef.current));
-  }, [isShellTool, item.id, shellExpand]);
+  }, [item.isShell, item.id, shellExpand]);
 
   // Read-only "research" calls (read/grep/ls/glob/web_fetch) are hidden after
   // completion so they don't clutter the transcript. During execution they still
@@ -172,8 +128,11 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId }: { item
       >
         <span className="tool__label-group">
           {hasNested && <span className="tool__nested-count">⊞{nested.length}</span>}
-          <span className="tool__name">{toolDisplayName}</span>
-          {headerSubject && <span className="tool__subject">{headerSubject}</span>}
+          {item.status === "error" && <span className="tool__status-icon tool__status-icon--err">✗</span>}
+          {item.status === "done" && <span className="tool__status-icon tool__status-icon--ok">✓</span>}
+          {item.status === "stopped" && <span className="tool__status-icon tool__status-icon--stopped">—</span>}
+          <span className="tool__name">{item.name}</span>
+          {subject && <span className="tool__subject">{subject}</span>}
         </span>
         {profileText && <span className="tool__profile">{profileText}</span>}
         {summary && <span className="tool__summary">{summary}</span>}
@@ -222,44 +181,31 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId }: { item
           </div>
         )}
 
-        {outputPreview && (
+        {shellPreview && (
           <>
-            <div className="tool__section tool__section--shell">
-              <div className="shell-output" style={{ maxHeight: showAll ? 480 : 260 }}>
-                <CopyButton text={`${subject ? `${toolDisplayName} ${subject}\n\n` : ""}${showAll ? effectiveOutput! : outputPreview.preview}`} className="shell-output__copy" />
-                {callSummary && <div className="shell-output__command"><span>{isShellTool ? "$" : "›"}</span>{callSummary}</div>}
-                <pre className="shell-output__text">{showAll ? effectiveOutput! : outputPreview.preview}</pre>
-              </div>
-            </div>
-            {outputPreview.hasMore && !showAll && (
+            <CodeViewer value={showAll ? shellOutput! : shellPreview.preview} maxHeight={showAll ? 480 : 260} />
+            {shellPreview.hasMore && !showAll && (
               <button className="tool__showall" onClick={() => setShowAll(true)}>
-                {t("tool.showAllLines", { n: outputPreview.total })}
+                {t("tool.showAllLines", { n: shellPreview.total })}
               </button>
             )}
             {item.truncated && <div className="tool__note">{t("tool.truncated")}</div>}
           </>
         )}
 
-        {!outputPreview && hasArgsOrOutput && (
+        {!shellPreview && hasArgsOrOutput && (
           <>
-            {effectiveArgs && (
-              <div className="tool__section tool__section--shell">
-                <div className="shell-output" style={{ maxHeight: 260 }}>
-                  <CopyButton text={pretty(effectiveArgs)} className="shell-output__copy" />
-                  {callSummary && <div className="shell-output__command"><span>{isShellTool ? "$" : "›"}</span>{callSummary}</div>}
-                  <pre className="shell-output__text">{pretty(effectiveArgs)}</pre>
-                </div>
-              </div>
+            {effectiveArgs && <CodeViewer value={pretty(effectiveArgs)} language="json" maxHeight={180} />}
+            {effectiveOutput && (
+              <>
+                <CodeViewer value={effectiveOutput} maxHeight={280} />
+                {item.truncated && <div className="tool__note">{t("tool.truncated")}</div>}
+              </>
             )}
           </>
         )}
 
-        {item.error && (
-          <div className="tool__section tool__section--error">
-            <div className="tool__section-label">Error</div>
-            <div className="tool__err">{item.error}</div>
-          </div>
-        )}
+        {item.error && <div className="tool__err">{item.error}</div>}
       </div>
     </div>
   );

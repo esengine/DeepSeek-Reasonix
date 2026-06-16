@@ -1,6 +1,6 @@
 // Run: tsx src/__tests__/use-controller-meta.test.ts
 
-import { initialState, reducer, sameMeta, shouldReconcileStaleTurn } from "../lib/useController";
+import { foregroundRunningFromRuntimeMeta, initialState, reducer, sameMeta, shouldReconcileStaleTurn } from "../lib/useController";
 import type { Meta, WireUsage } from "../lib/types";
 
 let passed = 0;
@@ -70,6 +70,34 @@ console.log("\nuse controller meta");
   eq(shouldReconcileStaleTurn(rendered, 1_000, 31_000), true, "stale completed stream still reconciles missed turn_done");
   eq(shouldReconcileStaleTurn(rendered, 1_000, 20_000), false, "fresh completed stream waits before reconciling");
   eq(shouldReconcileStaleTurn({ ...rendered, turnActive: false }, 1_000, 31_000), false, "local pending send before turn_started does not reconcile");
+}
+
+{
+  const started = reducer(initialState, { type: "event", e: { kind: "turn_started" } });
+  const waiting = reducer(started, { type: "event", e: { kind: "approval_request", approval: { id: "1", tool: "bash", subject: "go test" } } });
+  eq(waiting.running, true, "approval prompt keeps the turn running");
+  eq(waiting.pendingPrompt, true, "approval prompt marks pendingPrompt");
+  eq(waiting.cancellable, true, "approval prompt remains cancellable");
+
+  const canceling = reducer(waiting, { type: "cancel_requested" });
+  eq(canceling.approval, undefined, "cancel_requested clears approval prompt locally");
+  eq(canceling.pendingPrompt, false, "cancel_requested clears pendingPrompt locally");
+  eq(canceling.cancelRequested, true, "cancel_requested marks cancelling");
+  eq(canceling.running, true, "cancel_requested waits for backend turn_done before idling");
+  const stalePrompt = reducer(canceling, { type: "event", e: { kind: "approval_request", approval: { id: "late", tool: "bash", subject: "sleep" } } });
+  eq(stalePrompt.approval, undefined, "late approval after cancel_requested stays hidden");
+
+  const backgroundOnly = reducer(initialState, { type: "backend_status", running: false, backgroundJobs: 1, cancellable: false });
+  eq(backgroundOnly.running, false, "background jobs alone do not make the composer runstatus active");
+  eq(backgroundOnly.backgroundJobs, 1, "backend_status stores background job count");
+  eq(backgroundOnly.cancellable, false, "background jobs alone are not foreground-cancellable");
+
+  const omittedCancellableBackgroundOnly = reducer(initialState, { type: "backend_status", running: true, backgroundJobs: 1 });
+  eq(omittedCancellableBackgroundOnly.running, false, "missing cancellable does not promote background-only metadata");
+  eq(omittedCancellableBackgroundOnly.cancellable, false, "missing cancellable stays non-cancellable with background-only metadata");
+  eq(foregroundRunningFromRuntimeMeta({ running: true }), true, "legacy running metadata remains foreground-running");
+  eq(foregroundRunningFromRuntimeMeta({ running: true, pendingPrompt: true, backgroundJobs: 1 }), true, "pending prompts remain foreground-running");
+  eq(foregroundRunningFromRuntimeMeta({ running: true, backgroundJobs: 1 }), false, "background jobs without cancellable are background-only");
 }
 
 {

@@ -10,6 +10,7 @@ import {
   serializeReportedPerf,
   shouldRecordEventLoopLagSample,
   shouldPromptForPerformanceLabel,
+  shouldReportGlobalCrashEvent,
   shouldRecordLongTaskSample,
   topFrameFromStack,
   type PerformanceSnapshot,
@@ -41,6 +42,8 @@ eq(payload.source, "frontend.global", "global handler payload identifies source"
 eq(payload.errorType, "TypeError", "captures error type");
 eq(payload.componentStack, "component stack", "captures component stack");
 eq(payload.message.includes("[unhandledrejection]"), true, "keeps human-readable message");
+eq(shouldReportGlobalCrashEvent({ defaultPrevented: false }), true, "reports unhandled global events by default");
+eq(shouldReportGlobalCrashEvent({ defaultPrevented: true }), false, "ignores global events already handled by a filter");
 
 const perf: PerformanceSnapshot = {
   reason: "event loop lag 1300ms",

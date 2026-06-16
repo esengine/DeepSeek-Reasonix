@@ -139,6 +139,10 @@ export interface TabMeta {
   label: string;
   ready: boolean;
   running: boolean;
+  pendingPrompt?: boolean;
+  backgroundJobs?: number;
+  cancelRequested?: boolean;
+  cancellable?: boolean;
   mode: Mode;
   collaborationMode?: CollaborationMode;
   toolApprovalMode?: ToolApprovalMode;
@@ -233,6 +237,8 @@ export interface ChangedFileInfo {
 export interface HistoryMessage {
   role: string;
   content: string;
+  submitText?: string;
+  createdAt?: number;
   reasoning?: string;
   level?: "info" | "warn";
   toolCalls?: HistoryToolCall[];
@@ -471,6 +477,7 @@ export interface GitCommitDetailView {
 export interface ComposerInsertRequest {
   id: number;
   text: string;
+  mode?: "insert" | "replace";
 }
 
 // MCP & Skills drawer (desktop/app.go Capabilities) — the GUI counterpart to
@@ -657,6 +664,8 @@ export interface ProviderView {
   kind: string;
   baseUrl: string;
   models: string[];
+  visionModels: string[]; // subset of models that accepts image input
+  visionModelsConfigured: boolean; // true when an empty list is an explicit choice
   modelsUrl: string; // optional override for model discovery; empty derives from baseUrl
   default: string;
   apiKeyEnv: string;
@@ -888,7 +897,7 @@ export interface SettingsView {
   agent: AgentView;
   bot: BotSettingsView;
   desktopLanguage: string; // "" | "en" | "zh"; empty = auto
-  desktopLayoutStyle: string; // "classic" | "workbench"
+  desktopLayoutStyle: string; // "classic" | "workbench" | "creation"
   desktopTheme: string; // "auto" | "dark" | "light"
   desktopThemeStyle: string;
   closeBehavior: string; // "background" | "quit"

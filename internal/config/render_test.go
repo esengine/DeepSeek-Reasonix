@@ -72,6 +72,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Agent.ReasoningLanguage = "zh"
 	orig.Agent.SubagentModel = "mimo-pro"
 	orig.Agent.SubagentModels = map[string]string{"review": "deepseek-pro"}
+	orig.Agent.Keep = []string{"errors", "user_marked"}
+	orig.Agent.RecentKeep = 4
 	orig.Tools.BashTimeoutSeconds = intPtr(900)
 	orig.Tools.BackgroundJobs.StalledWarningSeconds = intPtr(30)
 	orig.Permissions = PermissionsConfig{
@@ -226,6 +228,12 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if got.Agent.CompactForceRatio != orig.Agent.CompactForceRatio {
 		t.Errorf("compact_force_ratio = %v, want %v", got.Agent.CompactForceRatio, orig.Agent.CompactForceRatio)
+	}
+	if strings.Join(got.Agent.Keep, ",") != strings.Join(orig.Agent.Keep, ",") {
+		t.Errorf("keep = %v, want %v", got.Agent.Keep, orig.Agent.Keep)
+	}
+	if got.Agent.RecentKeep != orig.Agent.RecentKeep {
+		t.Errorf("recent_keep = %d, want %d", got.Agent.RecentKeep, orig.Agent.RecentKeep)
 	}
 	if got.Agent.SystemPrompt != orig.Agent.SystemPrompt {
 		t.Errorf("system_prompt mismatch:\n got %q\nwant %q", got.Agent.SystemPrompt, orig.Agent.SystemPrompt)
@@ -513,6 +521,64 @@ func TestRenderTOMLRoundTripsPerModelPrices(t *testing.T) {
 	}
 	if p.Prices["deepseek-v4-flash"].Input != 1 || p.Prices["deepseek-v4-pro"].Output != 6 {
 		t.Fatalf("prices after round trip = %+v", p.Prices)
+	}
+}
+
+func TestRenderTOMLRoundTripsVisionModels(t *testing.T) {
+	orig := Default()
+	orig.Providers = []ProviderEntry{
+		{
+			Name:         "custom",
+			Kind:         "openai",
+			BaseURL:      "https://proxy.example.com/v1",
+			Models:       []string{"text-only", "qwen-vl-plus"},
+			Default:      "text-only",
+			APIKeyEnv:    "CUSTOM_API_KEY",
+			VisionModels: []string{"qwen-vl-plus"},
+			VisionDetail: "low",
+		},
+		{
+			Name:         "disabled-vision",
+			Kind:         "openai",
+			BaseURL:      "https://proxy.example.com/v1",
+			Models:       []string{"qwen-vl-plus"},
+			Default:      "qwen-vl-plus",
+			APIKeyEnv:    "CUSTOM_API_KEY",
+			VisionModels: []string{},
+		},
+	}
+
+	rendered := RenderTOML(orig)
+	if !strings.Contains(rendered, `vision_models = ["qwen-vl-plus"]`) {
+		t.Fatalf("rendered TOML missing vision_models:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, `vision_models = []`) {
+		t.Fatalf("rendered TOML missing explicit empty vision_models:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, `vision_detail = "low"`) {
+		t.Fatalf("rendered TOML missing vision_detail:\n%s", rendered)
+	}
+
+	var got Config
+	if _, err := toml.Decode(rendered, &got); err != nil {
+		t.Fatalf("rendered TOML does not parse: %v", err)
+	}
+	p, ok := got.Provider("custom")
+	if !ok {
+		t.Fatal("custom provider missing after round trip")
+	}
+	if !reflect.DeepEqual(p.VisionModels, []string{"qwen-vl-plus"}) {
+		t.Fatalf("vision_models after round trip = %v, want [qwen-vl-plus]", p.VisionModels)
+	}
+	if p.VisionDetail != "low" {
+		t.Fatalf("vision_detail after round trip = %q, want low", p.VisionDetail)
+	}
+	disabled, ok := got.Provider("disabled-vision")
+	if !ok {
+		t.Fatal("disabled-vision provider missing after round trip")
+	}
+	if disabled.VisionModels == nil || len(disabled.VisionModels) != 0 {
+		t.Fatalf("disabled-vision vision_models after round trip = %#v, want explicit empty list", disabled.VisionModels)
 	}
 }
 

@@ -273,6 +273,7 @@ type Agent struct {
 	softCompactNoticed  bool
 	recentKeep          int
 	archiveDir          string
+	keepPolicy          KeepPolicy
 	compactStuck        bool
 	consecutiveCompacts int
 
@@ -294,6 +295,15 @@ type Agent struct {
 	// error for the failure-only storm breaker to see.
 	repeatSuccessCounts map[string]int
 }
+
+// KeepPolicy is a bitmask controlling which messages are preserved beyond the
+// recent tail during compaction.
+type KeepPolicy int
+
+const (
+	KeepErrors KeepPolicy = 1 << iota
+	KeepUserMarked
+)
 
 // SetPlanMode flips the read-only gate. While true, executeOne refuses any
 // non-ReadOnly tool the model calls and returns a "blocked" result instead of
@@ -486,6 +496,7 @@ type Options struct {
 	CompactForceRatio float64
 	RecentKeep        int
 	ArchiveDir        string
+	KeepPolicy        KeepPolicy
 
 	// Hooks fires PreToolUse / PostToolUse shell hooks around tool calls. nil
 	// disables hook firing.
@@ -555,6 +566,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		compactForceRatio: opts.CompactForceRatio,
 		recentKeep:        opts.RecentKeep,
 		archiveDir:        opts.ArchiveDir,
+		keepPolicy:        opts.KeepPolicy,
 	}
 	a.SetReasoningLanguage(opts.ReasoningLanguage)
 	return a

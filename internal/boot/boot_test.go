@@ -38,6 +38,18 @@ import (
 	_ "reasonix/internal/provider/openai"
 )
 
+func TestAgentKeepPolicyFromConfig(t *testing.T) {
+	if got := agentKeepPolicy(nil); got != agent.KeepErrors {
+		t.Fatalf("nil keep policy = %v, want KeepErrors", got)
+	}
+	if got := agentKeepPolicy([]string{}); got != 0 {
+		t.Fatalf("empty keep policy = %v, want 0", got)
+	}
+	if got := agentKeepPolicy([]string{"errors", "user_marked"}); got != agent.KeepErrors|agent.KeepUserMarked {
+		t.Fatalf("combined keep policy = %v, want errors|user_marked", got)
+	}
+}
+
 // TestBuildFoldsProjectMemoryIntoSystemPrompt is the end-to-end proof of the
 // cache-first wiring: a project REASONIX.md is discovered at boot and folded
 // into the session's system message (the cached prefix), and the `remember`

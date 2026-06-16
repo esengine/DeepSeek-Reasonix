@@ -80,6 +80,17 @@ func modelRefsFromView(models []ModelInfo) map[string]bool {
 	return out
 }
 
+type desktopAskRuntimeRunner struct {
+	ask func(context.Context) error
+}
+
+func (r *desktopAskRuntimeRunner) Run(ctx context.Context, _ string) error {
+	if r.ask == nil {
+		return nil
+	}
+	return r.ask(ctx)
+}
+
 func TestCommandsIncludesEffortNotThinking(t *testing.T) {
 	app := NewApp()
 	cmds := app.Commands()
@@ -176,6 +187,56 @@ func TestListTabsDoesNotExposeConfiguredSandboxPath(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "sandboxPath") || strings.Contains(string(raw), configuredSandboxRoot) {
 		t.Fatalf("tab metadata should not expose configured sandbox root as sandboxPath: %s", raw)
+	}
+}
+
+func TestListTabsExposesStructuredRuntimeStatus(t *testing.T) {
+	asks := make(chan event.Ask, 1)
+	done := make(chan event.Event, 1)
+	runner := &desktopAskRuntimeRunner{}
+	ctrl := control.New(control.Options{
+		Runner: runner,
+		Sink: event.FuncSink(func(e event.Event) {
+			switch e.Kind {
+			case event.AskRequest:
+				asks <- e.Ask
+			case event.TurnDone:
+				done <- e
+			}
+		}),
+	})
+	runner.ask = func(ctx context.Context) error {
+		_, err := ctrl.Ask(ctx, []event.AskQuestion{{
+			ID:      "choice",
+			Prompt:  "Pick one",
+			Options: []event.AskOption{{Label: "A"}, {Label: "B"}},
+		}})
+		return err
+	}
+
+	app := NewApp()
+	app.setTestCtrl(ctrl, "prov/model")
+	app.tabOrder = []string{"test"}
+	ctrl.Send("ask user")
+	select {
+	case <-asks:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for ask request")
+	}
+
+	tabs := app.ListTabs()
+	if len(tabs) != 1 {
+		t.Fatalf("tabs = %d, want 1", len(tabs))
+	}
+	if !tabs[0].Running || !tabs[0].PendingPrompt || !tabs[0].Cancellable || tabs[0].CancelRequested {
+		t.Fatalf("tab runtime = running:%v pending:%v cancellable:%v cancel:%v", tabs[0].Running, tabs[0].PendingPrompt, tabs[0].Cancellable, tabs[0].CancelRequested)
+	}
+
+	app.CancelTab("test")
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for turn_done")
 	}
 }
 

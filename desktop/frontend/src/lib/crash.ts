@@ -532,6 +532,10 @@ export function reportCrash(label: string, err: unknown, extra?: string) {
   paint(buildCrashPayload(label, err, extra));
 }
 
+export function shouldReportGlobalCrashEvent(e: Pick<Event, "defaultPrevented">): boolean {
+  return !e.defaultPrevented;
+}
+
 export function shouldPromptForPerformanceLabel(
   alreadyHandled: boolean,
   msSinceLastPrompt: number,
@@ -633,6 +637,10 @@ export function installPerformancePressureMonitor() {
 }
 
 export function installGlobalCrashHandlers() {
-  window.addEventListener("error", (e) => reportCrash("window.error", e.error ?? e.message));
-  window.addEventListener("unhandledrejection", (e) => reportCrash("unhandledrejection", e.reason));
+  window.addEventListener("error", (e) => {
+    if (shouldReportGlobalCrashEvent(e)) reportCrash("window.error", e.error ?? e.message);
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    if (shouldReportGlobalCrashEvent(e)) reportCrash("unhandledrejection", e.reason);
+  });
 }

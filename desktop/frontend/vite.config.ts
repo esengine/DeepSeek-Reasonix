@@ -88,6 +88,13 @@ function keepDistPlaceholder(): Plugin {
 const commit = buildCommit();
 const channel = buildChannel();
 
+const nodeModulePath = String.raw`[\\/]node_modules[\\/](?:\.pnpm[\\/][^\\/]+[\\/]node_modules[\\/])?`;
+const vendorReact = new RegExp(`${nodeModulePath}(?:react|react-dom)(?:[\\/]|$)`);
+const vendorMarkdown = new RegExp(
+  `${nodeModulePath}(?:react-markdown|remark-gfm|remark-math|rehype-katex|katex)(?:[\\/]|$)`,
+);
+const vendorHighlight = new RegExp(`${nodeModulePath}highlight\\.js(?:[\\/]|$)`);
+
 // base: "./" so built asset URLs are relative. Wails serves the embedded dist from
 // the app root over the wails:// scheme, where absolute "/assets/..." URLs 404.
 export default defineConfig({
@@ -112,40 +119,24 @@ export default defineConfig({
       keep_classnames: true,
       keep_fnames: true,
     },
-    rollupOptions: {
+    rolldownOptions: {
       output: {
         // Manual chunk splitting: keep the heavy markdown/math/code pipeline
         // in a separate chunk so it can be cached independently from the
         // app shell. The vendor chunk splits react+react-dom (stable, rarely
         // changes) from the markdown stack (changes more often).
-        manualChunks: {
-          "vendor-react": ["react", "react-dom"],
-          "vendor-markdown": [
-            "react-markdown",
-            "remark-gfm",
-            "remark-math",
-            "rehype-katex",
-            "katex",
+        codeSplitting: {
+          groups: [
+            { name: "vendor-react", test: vendorReact },
+            { name: "vendor-markdown", test: vendorMarkdown },
+            { name: "vendor-highlight", test: vendorHighlight },
           ],
-          "vendor-highlight": ["highlight.js"],
         },
       },
     },
     // Raise the warning limit — the markdown vendor chunk is legitimately large
     // (katex alone is ~300KB). The manual split ensures it's cached separately.
     chunkSizeWarningLimit: 600,
-  },
-  // esbuild target for production builds (terser is the minifier, but
-  // esbuild still does the transpilation step). WebView2 / WKWebView are
-  // modern enough for es2021; the default breaks ESM destructuring in deps.
-  esbuild: { target: "es2021" },
-  optimizeDeps: {
-    esbuildOptions: {
-      // Dev-mode dependency pre-bundling also needs a modern target, otherwise
-      // third-party ESM packages with destructuring fail — Vite's default is
-      // chrome87/edge88/es2020, which is far too old for a desktop webview.
-      target: "es2021",
-    },
   },
   server: {
     // Bind IPv4 — unset host listens on ::1, and the Wails dev proxy's [::1]

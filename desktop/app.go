@@ -936,7 +936,7 @@ func (a *App) NewSession() error {
 		return workspaceNotReadyErr(tab)
 	}
 	// Tab is already blank — just persist and skip the new-session dance.
-	if !ctrl.Running() && !messagesHaveConversationContent(ctrl.History()) {
+	if !controllerHasActiveRuntimeWork(ctrl) && !messagesHaveConversationContent(ctrl.History()) {
 		a.persistTabSessionPath(tab, ctrl.SessionPath())
 		return nil
 	}
@@ -992,7 +992,7 @@ func (a *App) clearActiveSessionRuntime(tab *WorkspaceTab, oldCtrl *control.Cont
 		oldSink.tabID = detachedRuntimeTabID(oldPath)
 		oldSink.ctx = nil
 	}
-	if oldCtrl.Running() {
+	if oldCtrl.RuntimeStatus().Cancellable {
 		oldCtrl.Cancel()
 		if err := waitControllerStopped(oldCtrl); err != nil {
 			return err
@@ -2693,6 +2693,7 @@ func (a *App) SwitchWorkspace(dir string) (string, error) {
 type HistoryMessage struct {
 	Role               string            `json:"role"`
 	Content            string            `json:"content"`
+	SubmitText         string            `json:"submitText,omitempty"`
 	Reasoning          string            `json:"reasoning,omitempty"`
 	Level              string            `json:"level,omitempty"`
 	ToolCalls          []HistoryToolCall `json:"toolCalls,omitempty"`
@@ -2760,6 +2761,9 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 			reasoning = m.ReasoningContent
 		}
 		hm := HistoryMessage{Role: string(m.Role), Content: content, Reasoning: reasoning}
+		if m.Role == provider.RoleUser && content != m.Content {
+			hm.SubmitText = m.Content
+		}
 		if m.Role == provider.RoleAssistant && len(m.ToolCalls) > 0 {
 			hm.ToolCalls = make([]HistoryToolCall, len(m.ToolCalls))
 			for i, tc := range m.ToolCalls {
@@ -4931,7 +4935,11 @@ func modelProviderAccessAllowed(access map[string]bool, name string) bool {
 }
 
 func controllerHasActiveRuntimeWork(ctrl *control.Controller) bool {
-	return ctrl != nil && (ctrl.Running() || ctrl.PendingPrompt() || len(ctrl.Jobs()) > 0)
+	if ctrl == nil {
+		return false
+	}
+	status := ctrl.RuntimeStatus()
+	return status.Running || status.PendingPrompt || status.BackgroundJobs > 0
 }
 
 func rebuildControllerActiveWorkError(setting string) error {

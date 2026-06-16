@@ -130,6 +130,7 @@ type Controller struct {
 	mu          sync.Mutex
 	cancel      context.CancelFunc
 	running     bool
+	canceling   bool
 	autosaveWG  sync.WaitGroup
 	planMode    bool
 	goal        string
@@ -195,6 +196,18 @@ type pendingApproval struct {
 type pendingAsk struct {
 	questions []event.AskQuestion
 	reply     chan []event.AskAnswer
+}
+
+// RuntimeStatus is the frontend-facing snapshot of foreground turn state. It is
+// intentionally more explicit than the legacy Running bool so UI code can
+// distinguish a cancellable foreground turn from pending prompts and background
+// jobs.
+type RuntimeStatus struct {
+	Running         bool
+	PendingPrompt   bool
+	BackgroundJobs  int
+	CancelRequested bool
+	Cancellable     bool
 }
 
 const (
@@ -430,6 +443,7 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancel = cancel
 	c.running = true
+	c.canceling = false
 	c.mu.Unlock()
 
 	c.autosaveWG.Add(1)
@@ -444,6 +458,7 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 				c.mu.Lock()
 				c.running = false
 				c.cancel = nil
+				c.canceling = false
 				c.mu.Unlock()
 				c.sink.Emit(event.Event{Kind: event.TurnDone, Err: fmt.Errorf("internal error: %v", r)})
 			}
@@ -452,6 +467,7 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 		c.mu.Lock()
 		c.running = false
 		c.cancel = nil
+		c.canceling = false
 		c.mu.Unlock()
 		c.sink.Emit(event.Event{Kind: event.TurnDone, Err: explainError(err)})
 	}()
@@ -508,12 +524,14 @@ func (c *Controller) RunTurn(ctx context.Context, input string) error {
 	}
 	c.cancel = cancel
 	c.running = true
+	c.canceling = false
 	c.mu.Unlock()
 
 	defer func() {
 		c.mu.Lock()
 		c.running = false
 		c.cancel = nil
+		c.canceling = false
 		c.mu.Unlock()
 		cancel()
 	}()
@@ -1152,6 +1170,15 @@ func (c *Controller) Run(ctx context.Context, input string) error {
 func (c *Controller) Cancel() {
 	c.mu.Lock()
 	cancel := c.cancel
+	if cancel != nil {
+		c.canceling = true
+		for id := range c.approvals {
+			delete(c.approvals, id)
+		}
+		for id := range c.asks {
+			delete(c.asks, id)
+		}
+	}
 	c.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -1171,6 +1198,23 @@ func (c *Controller) PendingPrompt() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.approvals) > 0 || len(c.asks) > 0
+}
+
+// RuntimeStatus reports the active work owned by the foreground controller.
+func (c *Controller) RuntimeStatus() RuntimeStatus {
+	c.mu.Lock()
+	running := c.running
+	pending := len(c.approvals) > 0 || len(c.asks) > 0
+	canceling := c.canceling
+	c.mu.Unlock()
+	backgroundJobs := len(c.Jobs())
+	return RuntimeStatus{
+		Running:         running,
+		PendingPrompt:   pending,
+		BackgroundJobs:  backgroundJobs,
+		CancelRequested: canceling,
+		Cancellable:     running || pending,
+	}
 }
 
 // Turn returns the current turn number (0 before the first submit).

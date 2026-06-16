@@ -37,6 +37,9 @@ func TestHistoryMessagesIncludeAssistantReasoning(t *testing.T) {
 	if got[0].Content != "display prompt" {
 		t.Fatalf("user display content = %q, want display prompt", got[0].Content)
 	}
+	if got[0].SubmitText != "expanded prompt" {
+		t.Fatalf("user submit text = %q, want expanded prompt", got[0].SubmitText)
+	}
 	if got[1].Reasoning != "thinking trace" {
 		t.Fatalf("assistant reasoning = %q, want thinking trace", got[1].Reasoning)
 	}

@@ -19,14 +19,17 @@
 !/build/darwin
 /build/darwin/*
 !/build/darwin/entitlements.plist
+!/build/darwin/icon.icns
 
-# Commit the hand-written Linux .deb packaging inputs (nfpm config + .desktop entry).
+# Commit the hand-written Linux .deb packaging inputs and app icon assets.
 # `wails build` does not generate these, so they must live in git. The .deb is built
 # by scripts/desktop-build.sh's linux branch via goreleaser/nfpm. Parent un-ignored first.
 !/build/linux
 /build/linux/*
 !/build/linux/nfpm.yaml
 !/build/linux/reasonix.desktop
+!/build/linux/icons
+!/build/linux/icons/**
 
 # Go test binaries
 *.test

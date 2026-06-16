@@ -40,12 +40,14 @@ const LEGACY_STYLE_MAP: Record<string, ThemeStyle> = {
 };
 
 const DEFAULT_THEME_STYLE: ThemeStyle = "graphite";
-const DEFAULT_THEME: Theme = "light";
+const DEFAULT_THEME: Theme = "auto";
 
 const THEME_KEY = "reasonix-theme";
 const STYLE_KEY = "reasonix-theme-style";
+const AUTO_THEME_MEDIA_QUERY = "(prefers-color-scheme: light)";
 let currentTheme: Theme = DEFAULT_THEME;
 let currentThemeStyle: ThemeStyle = DEFAULT_THEME_STYLE;
+let autoThemeMediaQuery: MediaQueryList | null = null;
 
 export function normalizeThemePreference(value: unknown): Theme {
   if (typeof value === "object" && value !== null) {
@@ -78,7 +80,7 @@ export function getTheme(): Theme {
 
 export function getResolvedTheme(theme: Theme = getTheme()): ResolvedTheme {
   if (theme === "light" || theme === "dark") return theme;
-  if (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: light)").matches) return "light";
+  if (typeof window !== "undefined" && window.matchMedia?.(AUTO_THEME_MEDIA_QUERY).matches) return "light";
   return "dark";
 }
 
@@ -119,6 +121,7 @@ export function applyTheme(theme: Theme, style: ThemeStyle = getThemeStyle(theme
 
   // Sync the native window theme (title bar, traffic lights) to match.
   if (typeof window !== "undefined" && window.runtime) {
+    syncAutoThemeBackgroundListener(theme);
     if (theme === "auto") {
       WindowSetSystemDefaultTheme();
     } else if (theme === "light") {
@@ -130,6 +133,36 @@ export function applyTheme(theme: Theme, style: ThemeStyle = getThemeStyle(theme
   }
 
   void options;
+}
+
+function syncAutoThemeBackgroundListener(theme: Theme): void {
+  if (theme !== "auto") {
+    clearAutoThemeBackgroundListener();
+    return;
+  }
+  if (autoThemeMediaQuery || typeof window === "undefined" || !window.matchMedia) return;
+  autoThemeMediaQuery = window.matchMedia(AUTO_THEME_MEDIA_QUERY);
+  if (typeof autoThemeMediaQuery.addEventListener === "function") {
+    autoThemeMediaQuery.addEventListener("change", syncAutoThemeBackground);
+  } else {
+    autoThemeMediaQuery.addListener(syncAutoThemeBackground);
+  }
+}
+
+function clearAutoThemeBackgroundListener(): void {
+  if (!autoThemeMediaQuery) return;
+  if (typeof autoThemeMediaQuery.removeEventListener === "function") {
+    autoThemeMediaQuery.removeEventListener("change", syncAutoThemeBackground);
+  } else {
+    autoThemeMediaQuery.removeListener(syncAutoThemeBackground);
+  }
+  autoThemeMediaQuery = null;
+}
+
+function syncAutoThemeBackground(): void {
+  if (currentTheme === "auto" && typeof window !== "undefined" && window.runtime) {
+    syncNativeWindowBackground("auto");
+  }
 }
 
 export function readLegacyThemePreference(): { theme: Theme; style: ThemeStyle; hasValue: boolean } {

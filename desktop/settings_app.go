@@ -32,6 +32,8 @@ type ProviderView struct {
 	Kind              string   `json:"kind"`
 	BaseURL           string   `json:"baseUrl"`
 	Models            []string `json:"models"`
+	VisionModels      []string `json:"visionModels"`
+	VisionModelsSet   bool     `json:"visionModelsConfigured"`
 	ModelsURL         string   `json:"modelsUrl"`
 	Default           string   `json:"default"`
 	APIKeyEnv         string   `json:"apiKeyEnv"`
@@ -270,9 +272,15 @@ func removeProviderAccess(c *config.Config, names ...string) {
 }
 
 func providerViewFromEntry(p config.ProviderEntry, builtIn, added bool) ProviderView {
+	models := p.ChatModelList()
+	visionModels := p.VisionModels
+	visionModelsSet := p.Vision || p.VisionModels != nil
+	if p.Vision {
+		visionModels = models
+	}
 	return ProviderView{
 		Name: p.Name, BuiltIn: builtIn, Added: added, Kind: p.Kind, BaseURL: p.BaseURL,
-		Models: nonNil(p.ChatModelList()), ModelsURL: p.ModelsURL, Default: p.DefaultModel(),
+		Models: nonNil(models), VisionModels: nonNil(providerVisionModels(models, visionModels)), VisionModelsSet: visionModelsSet, ModelsURL: p.ModelsURL, Default: p.DefaultModel(),
 		APIKeyEnv:         p.APIKeyEnv,
 		KeySet:            p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) != "",
 		BalanceURL:        p.BalanceURL,
@@ -334,7 +342,7 @@ func (a *App) Settings() SettingsView {
 			Bot:                botSettingsView(config.BotConfig{}),
 			AutoPlan:           "off",
 			DesktopLayoutStyle: "classic",
-			DesktopTheme:       "light",
+			DesktopTheme:       "auto",
 			DesktopThemeStyle:  "graphite",
 			CloseBehavior:      "background",
 			DisplayMode:        "standard",
@@ -899,6 +907,7 @@ func officialProviderTemplate(kind, pricingLanguage string) ([]config.ProviderEn
 			Kind:          "openai",
 			BaseURL:       "https://api.xiaomimimo.com/v1",
 			Models:        models,
+			VisionModels:  []string{"mimo-v2.5", "mimo-v2-omni"},
 			Default:       "mimo-v2.5-pro",
 			APIKeyEnv:     "MIMO_API_KEY",
 			ContextWindow: 1_048_576,
@@ -916,6 +925,7 @@ func officialProviderTemplate(kind, pricingLanguage string) ([]config.ProviderEn
 			Kind:          "openai",
 			BaseURL:       "https://token-plan-cn.xiaomimimo.com/v1",
 			Models:        models,
+			VisionModels:  []string{"mimo-v2.5"},
 			Default:       "mimo-v2.5-pro",
 			APIKeyEnv:     "MIMO_API_KEY",
 			ContextWindow: 1_048_576,
@@ -944,6 +954,20 @@ func chatProviderModels(models []string) []string {
 	return out
 }
 
+func providerVisionModels(models, visionModels []string) []string {
+	enabled := map[string]bool{}
+	for _, model := range models {
+		enabled[model] = true
+	}
+	out := make([]string, 0, len(visionModels))
+	for _, model := range chatProviderModels(visionModels) {
+		if enabled[model] {
+			out = append(out, model)
+		}
+	}
+	return out
+}
+
 func providerDefaultForModels(currentDefault string, models []string) string {
 	currentDefault = strings.TrimSpace(currentDefault)
 	if currentDefault != "" {
@@ -959,8 +983,9 @@ func providerDefaultForModels(currentDefault string, models []string) string {
 	return ""
 }
 
-// SaveProvider adds or updates a provider. A single model fills `model`; several
-// fill `models` (with `default`). The shared key/endpoint live on the entry.
+// SaveProvider adds or updates a provider. Enabled models are persisted through
+// `models` even when only one model is selected, while `model` remains populated
+// in-memory for validation/back-compat. The shared key/endpoint live on the entry.
 func (a *App) SaveProvider(p ProviderView) error {
 	return a.applyConfigChange(func(c *config.Config) error {
 		e := config.ProviderEntry{Name: p.Name}
@@ -983,13 +1008,21 @@ func (a *App) SaveProvider(p ProviderView) error {
 		e.Model = ""
 		e.Models = nil
 		e.Default = ""
+		e.VisionModels = nil
 		models := chatProviderModels(p.Models)
 		if len(models) > 0 {
 			e.Model = models[0] // also satisfies validateProvider's model requirement
+			e.Models = models
+			if p.VisionModelsSet || len(p.VisionModels) > 0 {
+				e.Vision = false
+				e.VisionModels = providerVisionModels(models, p.VisionModels)
+			}
 			if len(models) > 1 {
-				e.Models = models
 				e.Default = providerDefaultForModels(p.Default, models)
 			}
+		} else {
+			e.Vision = false
+			e.VisionModels = nil
 		}
 		if err := c.UpsertProvider(e); err != nil {
 			return err

@@ -165,7 +165,8 @@ func (t *WorkspaceTab) hasActiveRuntimeWork() bool {
 	if t == nil || t.Ctrl == nil {
 		return false
 	}
-	return t.Ctrl.Running() || t.Ctrl.PendingPrompt() || len(t.Ctrl.Jobs()) > 0
+	status := t.Ctrl.RuntimeStatus()
+	return status.Running || status.PendingPrompt || status.BackgroundJobs > 0
 }
 
 func sessionRuntimeKey(path string) string {
@@ -840,6 +841,10 @@ type TabMeta struct {
 	Label             string `json:"label"`
 	Ready             bool   `json:"ready"`
 	Running           bool   `json:"running"`
+	PendingPrompt     bool   `json:"pendingPrompt,omitempty"`
+	BackgroundJobs    int    `json:"backgroundJobs,omitempty"`
+	CancelRequested   bool   `json:"cancelRequested,omitempty"`
+	Cancellable       bool   `json:"cancellable"`
 	Mode              string `json:"mode"`
 	CollaborationMode string `json:"collaborationMode"`
 	ToolApprovalMode  string `json:"toolApprovalMode"`
@@ -898,7 +903,12 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		m.ProjectColor = projectColor(tab.WorkspaceRoot)
 	}
 	if tab.Ctrl != nil {
-		m.Running = tab.Ctrl.Running()
+		status := tab.Ctrl.RuntimeStatus()
+		m.Running = status.Running || status.PendingPrompt || status.BackgroundJobs > 0
+		m.PendingPrompt = status.PendingPrompt
+		m.BackgroundJobs = status.BackgroundJobs
+		m.CancelRequested = status.CancelRequested
+		m.Cancellable = status.Cancellable
 	}
 	return m
 }
@@ -1224,7 +1234,7 @@ func (a *App) blankTabMatchesTargetLocked(tab *WorkspaceTab, scope, workspaceRoo
 	if tab.Ctrl == nil {
 		return strings.TrimSpace(tab.SessionPath) == ""
 	}
-	if tab.Ctrl.Running() {
+	if tab.hasActiveRuntimeWork() {
 		return false
 	}
 	return !messagesHaveConversationContent(tab.Ctrl.History())
@@ -2688,16 +2698,17 @@ func activityStatusForTab(tab *WorkspaceTab) string {
 	if tab.Ctrl == nil {
 		return status
 	}
-	if tab.Ctrl.PendingPrompt() {
+	runtimeStatus := tab.Ctrl.RuntimeStatus()
+	if runtimeStatus.PendingPrompt {
 		return topicStatusWaitingConfirmation
 	}
-	if tab.Ctrl.Running() {
+	if runtimeStatus.Running {
 		if status == "" || status == topicStatusError {
 			return topicStatusThinking
 		}
 		return status
 	}
-	if len(tab.Ctrl.Jobs()) > 0 {
+	if runtimeStatus.BackgroundJobs > 0 {
 		return topicStatusBackgroundJob
 	}
 	if status == topicStatusError || status == topicStatusPaused {
@@ -3524,7 +3535,11 @@ func (a *App) ListProjectTree() []ProjectNode {
 		info := sessionInfos[sessionPath]
 		label := runtimeSessionTreeLabel(tab, info, sessionTitles[sessionPath])
 		status := activityStatusForTab(tab)
-		running := status != "" || (tab.Ctrl != nil && (tab.Ctrl.Running() || tab.Ctrl.PendingPrompt() || len(tab.Ctrl.Jobs()) > 0))
+		runtimeStatus := control.RuntimeStatus{}
+		if tab.Ctrl != nil {
+			runtimeStatus = tab.Ctrl.RuntimeStatus()
+		}
+		running := status != "" || runtimeStatus.Running || runtimeStatus.PendingPrompt || runtimeStatus.BackgroundJobs > 0
 		runtimeSessionsByTopic[topicSummaryKey(tab.Scope, tab.WorkspaceRoot, tab.TopicID)] = append(runtimeSessionsByTopic[topicSummaryKey(tab.Scope, tab.WorkspaceRoot, tab.TopicID)], runtimeSessionStatus{
 			sessionPath:    sessionPath,
 			label:          label,

@@ -11,7 +11,7 @@
 // migration from older desktop builds.
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import type { Context, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { en, type DictKey } from "../locales/en";
 import { zh } from "../locales/zh";
 import { zhTW } from "../locales/zh-TW";
@@ -105,12 +105,7 @@ interface I18nValue {
   t: Translator;
 }
 
-const i18nGlobal = globalThis as typeof globalThis & {
-  __reasonixI18nContext?: Context<I18nValue | null>;
-};
-
-const I18nContext = i18nGlobal.__reasonixI18nContext ?? createContext<I18nValue | null>(null);
-i18nGlobal.__reasonixI18nContext = I18nContext;
+const I18nContext = createContext<I18nValue | null>(null);
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
   const [pref, setPrefState] = useState<LangPref>(() => readPref());

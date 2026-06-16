@@ -3,6 +3,7 @@
 import {
   defaultShortcutCombo,
   formatShortcutCombo,
+  formatShortcutComboParts,
   isCloseTabShortcut,
   matchesShortcut,
   shortcutConflict,
@@ -51,7 +52,9 @@ eq(matchesShortcut(event("k", { ctrlKey: true }), "commandPalette.open", "window
 eq(matchesShortcut({ key: "?", shiftKey: true }, "shortcuts.show", "darwin"), true, "? opens shortcut help");
 eq(matchesShortcut({ key: "+", metaKey: true, shiftKey: true }, "textSize.increase", "darwin"), true, "Cmd+Plus still increases text size");
 eq(formatShortcutCombo(defaultShortcutCombo("settings.open", "darwin"), "darwin"), "⌘,", "formats mac settings shortcut");
+eq(JSON.stringify(formatShortcutComboParts(defaultShortcutCombo("settings.open", "darwin"), "darwin")), JSON.stringify(["⌘", ","]), "splits mac settings shortcut for display");
 eq(formatShortcutCombo(defaultShortcutCombo("settings.open", "windows"), "windows"), "Ctrl+,", "formats Windows settings shortcut");
+eq(JSON.stringify(formatShortcutComboParts(defaultShortcutCombo("settings.open", "windows"), "windows")), JSON.stringify(["Ctrl", ","]), "splits Windows settings shortcut for display");
 eq(shortcutConflict("settings.open", defaultShortcutCombo("commandPalette.open", "darwin"), "darwin")?.action, "commandPalette.open", "detects shortcut conflicts");
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

@@ -13,3 +13,13 @@ func TestDefaultReasoningLanguageAuto(t *testing.T) {
 		t.Fatalf("default reasoning_language = %q, want auto", got)
 	}
 }
+
+func TestDefaultDesktopAppearanceAutoGraphite(t *testing.T) {
+	cfg := Default()
+	if got := cfg.DesktopTheme(); got != "auto" {
+		t.Fatalf("default desktop theme = %q, want auto", got)
+	}
+	if got := cfg.DesktopThemeStyle(); got != "" {
+		t.Fatalf("default desktop theme style = %q, want empty so frontend resolves graphite", got)
+	}
+}

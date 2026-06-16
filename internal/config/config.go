@@ -86,8 +86,8 @@ type UIConfig struct {
 // language, terminal colours, or provider-visible prompt/request data.
 type DesktopConfig struct {
 	Language       string   `toml:"language"`         // auto|en|zh; empty/auto = browser/OS auto-detect
-	LayoutStyle    string   `toml:"layout_style"`     // classic|workbench; desktop layout style
-	Theme          string   `toml:"theme"`            // auto|dark|light; empty resolves to dark
+	LayoutStyle    string   `toml:"layout_style"`     // classic|workbench|creation; desktop layout style
+	Theme          string   `toml:"theme"`            // auto|dark|light; empty resolves to auto
 	ThemeStyle     string   `toml:"theme_style"`      // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 	CloseBehavior  string   `toml:"close_behavior"`   // quit|background; desktop window close behavior
 	DisplayMode    string   `toml:"display_mode"`     // standard|compact (legacy "minimal" maps to compact); transcript display mode
@@ -151,6 +151,8 @@ func normalizeDesktopLayoutStyle(style string) string {
 	switch strings.ToLower(strings.TrimSpace(style)) {
 	case "workbench", "workspace":
 		return "workbench"
+	case "creation":
+		return "creation"
 	default:
 		return "classic"
 	}
@@ -179,8 +181,8 @@ func (c *Config) DesktopLanguage() string {
 	}
 }
 
-// DesktopTheme normalizes desktop.theme. New desktop users default to the light
-// graphite product look; an explicit auto/light/dark is preserved.
+// DesktopTheme normalizes desktop.theme. New desktop users default to the OS
+// automatic graphite product look; an explicit auto/light/dark is preserved.
 func (c *Config) DesktopTheme() string {
 	switch strings.ToLower(strings.TrimSpace(c.Desktop.Theme)) {
 	case "auto":
@@ -190,7 +192,7 @@ func (c *Config) DesktopTheme() string {
 	case "dark":
 		return "dark"
 	default:
-		return "light"
+		return "auto"
 	}
 }
 
@@ -877,6 +879,11 @@ type AgentConfig struct {
 	SoftCompactRatio  float64 `toml:"soft_compact_ratio"`
 	CompactRatio      float64 `toml:"compact_ratio"`
 	CompactForceRatio float64 `toml:"compact_force_ratio"`
+	// Keep controls which compactable messages stay verbatim beyond the current
+	// user-fact/digest floor and recent tail. Empty uses the conservative default
+	// of keeping error tool results.
+	Keep       []string `toml:"keep"`
+	RecentKeep int      `toml:"recent_keep"`
 	// ColdResumePrune elides stale tool results when a session reopens past the
 	// provider cache window. nil = default enabled.
 	ColdResumePrune *bool `toml:"cold_resume_prune"`
@@ -912,6 +919,10 @@ type ProviderEntry struct {
 	// and image tokens are heavy — gating keeps text-only flows cheap (the prompt
 	// prefix is byte-identical with no image, so the cache is unaffected either way).
 	Vision bool `toml:"vision"`
+	// VisionModels narrows image input support to specific models in a multi-model
+	// provider. This lets one provider expose both text-only and multimodal chat
+	// models without enabling image payloads for every model.
+	VisionModels []string `toml:"vision_models"`
 	// VisionDetail sets the openai image_url detail hint (low|high); empty = auto
 	// (the field is omitted). "low" caps an image to a fixed ~85 tokens for cheap
 	// coarse reads; ignored by providers without the knob (e.g. anthropic).
@@ -1663,6 +1674,11 @@ func backfillDeepSeekPro(c *Config) {
 	if flash == nil {
 		return
 	}
+	// If the user has explicitly curated a model list for the flash provider
+	// (e.g. unchecked pro in Settings), respect that choice and do not backfill.
+	if len(flash.Models) > 0 {
+		return
+	}
 	for _, bp := range Default().Providers {
 		if bp.Name == "deepseek-pro" {
 			bp.APIKeyEnv = flash.APIKeyEnv
@@ -1999,6 +2015,11 @@ func ensureProviderModels(p *ProviderEntry, required []string, fallbackDefault s
 	if p == nil {
 		return
 	}
+	// If the user has explicitly curated a model list (via Settings), respect
+	// that choice and do not merge additional required models.
+	if len(p.Models) > 0 {
+		return
+	}
 	models := mergeModelLists(required, p.ModelList())
 	if len(models) == 0 {
 		return
@@ -2161,9 +2182,11 @@ func ensureDeepSeekOfficialProvider(c *Config) {
 
 func ensureMimoAPIProvider(c *Config) {
 	models := []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"}
+	visionModels := []string{"mimo-v2.5", "mimo-v2-omni"}
 	if p, ok := c.Provider("mimo-api"); ok {
 		if isOfficialMimoAPIProvider(p) {
 			mergeCuratedModelsIntoProvider(p, models, "mimo-v2.5-pro")
+			mergeVisionModelsIntoProvider(p, visionModels)
 			backfillMimoDomesticPrices(p)
 		}
 		return
@@ -2173,6 +2196,7 @@ func ensureMimoAPIProvider(c *Config) {
 		Kind:          "openai",
 		BaseURL:       "https://api.xiaomimimo.com/v1",
 		Models:        models,
+		VisionModels:  visionModels,
 		Default:       "mimo-v2.5-pro",
 		APIKeyEnv:     "MIMO_API_KEY",
 		ContextWindow: 1_048_576,
@@ -2183,9 +2207,11 @@ func ensureMimoAPIProvider(c *Config) {
 
 func ensureMimoTokenPlanProvider(c *Config, includeMimoFlash bool) {
 	models := []string{"mimo-v2.5-pro", "mimo-v2.5"}
+	visionModels := []string{"mimo-v2.5"}
 	if p, ok := c.Provider("mimo-token-plan"); ok {
 		if isOfficialMimoTokenPlanProvider(p) {
 			mergeCuratedModelsIntoProvider(p, models, "mimo-v2.5-pro")
+			mergeVisionModelsIntoProvider(p, visionModels)
 			clearMixedMimoTokenPlanPrice(p)
 			backfillMimoDomesticPrices(p)
 		}
@@ -2196,6 +2222,7 @@ func ensureMimoTokenPlanProvider(c *Config, includeMimoFlash bool) {
 		Kind:          "openai",
 		BaseURL:       "https://token-plan-cn.xiaomimimo.com/v1",
 		Models:        models,
+		VisionModels:  visionModels,
 		Default:       "mimo-v2.5-pro",
 		APIKeyEnv:     "MIMO_API_KEY",
 		ContextWindow: 1_048_576,
@@ -2232,12 +2259,38 @@ func isOpenAIProviderKind(e *ProviderEntry) bool {
 }
 
 func mergeCuratedModelsIntoProvider(e *ProviderEntry, models []string, fallback string) {
+	// If the user has explicitly curated a model list (via Settings), respect
+	// that choice and do not merge additional curated models.
+	if len(e.Models) > 0 {
+		return
+	}
 	currentDefault := e.Default
 	if strings.TrimSpace(currentDefault) == "" {
 		currentDefault = e.Model
 	}
 	e.Models = mergeModelLists(models, e.ModelList())
 	e.Default = firstKnownModel(currentDefault, e.Models, fallback)
+}
+
+func mergeVisionModelsIntoProvider(e *ProviderEntry, models []string) {
+	if e == nil {
+		return
+	}
+	enabled := map[string]bool{}
+	for _, model := range e.ChatModelList() {
+		enabled[model] = true
+	}
+	merged := e.VisionModels
+	if merged == nil {
+		merged = models
+	}
+	out := make([]string, 0, len(merged))
+	for _, model := range merged {
+		if enabled[model] && IsLikelyChatModel(model) {
+			out = append(out, model)
+		}
+	}
+	e.VisionModels = out
 }
 
 func clearMixedMimoTokenPlanPrice(e *ProviderEntry) {

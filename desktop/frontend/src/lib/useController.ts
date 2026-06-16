@@ -41,7 +41,7 @@ export type MessageActionScope = "fork" | "summ-from" | "summ-upto" | "conversat
 export type MessageActionState = { turn: number; scope: MessageActionScope };
 
 export type Item =
-  | { kind: "user"; id: string; text: string; failed?: boolean }
+  | { kind: "user"; id: string; text: string; submitText?: string; failed?: boolean; createdAt?: number }
   | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; reasoningComplete?: boolean }
   | { kind: "phase"; id: string; text: string }
   | { kind: "notice"; id: string; level: "info" | "warn"; text: string }
@@ -78,6 +78,10 @@ interface State {
   items: Item[];
   running: boolean;
   turnActive: boolean;
+  pendingPrompt: boolean;
+  backgroundJobs: number;
+  cancelRequested: boolean;
+  cancellable: boolean;
   approval?: WireApproval;
   ask?: WireAsk;
   usage?: WireUsage;
@@ -108,6 +112,10 @@ export const initialState: State = {
   items: [],
   running: false,
   turnActive: false,
+  pendingPrompt: false,
+  backgroundJobs: 0,
+  cancelRequested: false,
+  cancellable: false,
   context: { used: 0, window: 0, sessionTokens: 0 },
   jobs: [],
   checkpoints: [],
@@ -127,6 +135,19 @@ function usageTotalTokens(usage?: WireUsage): number {
   if (usage.totalTokens > 0) return usage.totalTokens;
   const promptTokens = usage.promptTokens || usage.cacheHitTokens + usage.cacheMissTokens;
   return Math.max(0, promptTokens + usage.completionTokens);
+}
+
+type RuntimeMetaSnapshot = {
+  running: boolean;
+  pendingPrompt?: boolean;
+  backgroundJobs?: number;
+  cancellable?: boolean;
+};
+
+export function foregroundRunningFromRuntimeMeta(meta: RuntimeMetaSnapshot): boolean {
+  if (typeof meta.cancellable === "boolean") return meta.cancellable;
+  if ((meta.backgroundJobs ?? 0) > 0 && !meta.pendingPrompt) return false;
+  return Boolean(meta.running);
 }
 
 function updatesContextGauge(usage?: WireUsage): boolean {
@@ -203,10 +224,11 @@ export function isReadOnlyTool(name: string): boolean {
 
 type Action =
   | { type: "event"; e: WireEvent }
-  | { type: "user"; text: string; seq: number }
+  | { type: "user"; text: string; submitText?: string; seq: number }
   | { type: "unsend" }
   | { type: "send_failed"; error: string }
-  | { type: "backend_status"; running: boolean }
+  | { type: "backend_status"; running: boolean; pendingPrompt?: boolean; backgroundJobs?: number; cancelRequested?: boolean; cancellable?: boolean }
+  | { type: "cancel_requested" }
   | { type: "meta"; meta: Meta }
   | { type: "context"; context: ContextInfo }
   | { type: "balance"; balance: BalanceInfo }
@@ -268,7 +290,7 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
     }
     if (m.role === "user") {
       if (m.content.trim() === "") continue;
-      items.push({ kind: "user", id: `${idPrefix}${seq}`, text: m.content });
+      items.push({ kind: "user", id: `${idPrefix}${seq}`, text: m.content, submitText: m.submitText, createdAt: m.createdAt });
       seq++;
       continue;
     }
@@ -394,14 +416,14 @@ function flushPendingUser(s: State): State {
   return {
     ...s,
     seq: s.seq + 1,
-    items: [...s.items, { kind: "user", id: `u${s.seq}`, text: s.pendingUser }],
+    items: [...s.items, { kind: "user", id: `u${s.seq}`, text: s.pendingUser, createdAt: Date.now() }],
     pendingUser: undefined,
   };
 }
 
 function applyEvent(s: State, e: WireEvent): State {
   if (s.discardTurn) {
-    if (e.kind === "turn_done") return { ...s, discardTurn: false, running: false, turnActive: false, currentAssistant: undefined, live: undefined };
+    if (e.kind === "turn_done") return { ...s, discardTurn: false, running: false, turnActive: false, pendingPrompt: false, cancelRequested: false, cancellable: false, currentAssistant: undefined, live: undefined };
     return s;
   }
   if (s.pendingUser !== undefined && e.kind !== "turn_done") {
@@ -420,7 +442,7 @@ function applyEvent(s: State, e: WireEvent): State {
       let cur: State = s;
       if (cur.pendingUser !== undefined) cur = flushPendingUser(cur);
       const { items, id, seq } = ensureAssistant(cur);
-      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "", reasoningComplete: false }, running: true, turnActive: true, turnStartAt: Date.now(), turnTokens: 0, turnTotalTokens: 0, turnCost: 0 };
+      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "", reasoningComplete: false }, running: true, turnActive: true, pendingPrompt: false, cancelRequested: false, cancellable: true, turnStartAt: Date.now(), turnTokens: 0, turnTotalTokens: 0, turnCost: 0 };
     }
     case "text":
     case "reasoning": {
@@ -537,8 +559,14 @@ function applyEvent(s: State, e: WireEvent): State {
     }
     case "steer":
       return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `s${s.seq}`, level: "info", text: `↪ ${e.text ?? ""}` }] };
-    case "approval_request": return { ...s, approval: e.approval };
-    case "ask_request": return { ...s, ask: e.ask };
+    case "approval_request": {
+      if (s.cancelRequested) return s;
+      return { ...s, approval: e.approval, pendingPrompt: true, running: true, turnActive: true, cancellable: true };
+    }
+    case "ask_request": {
+      if (s.cancelRequested) return s;
+      return { ...s, ask: e.ask, pendingPrompt: true, running: true, turnActive: true, cancellable: true };
+    }
     case "turn_done": {
       if (s.pendingUser !== undefined) s = flushPendingUser(s);
       const finalized = s.items.map((it) => {
@@ -548,7 +576,7 @@ function applyEvent(s: State, e: WireEvent): State {
         return it;
       });
       let items: Item[] = e.err ? [...finalized, { kind: "notice", id: `e${s.seq}`, level: "warn", text: e.err }] : finalized;
-      return { ...s, items, live: undefined, running: false, turnActive: false, currentAssistant: undefined, approval: undefined, ask: undefined, seq: s.seq + 1 };
+      return { ...s, items, live: undefined, running: false, turnActive: false, pendingPrompt: false, cancelRequested: false, cancellable: false, currentAssistant: undefined, approval: undefined, ask: undefined, seq: s.seq + 1 };
     }
     default: return s;
   }
@@ -561,8 +589,11 @@ export function reducer(s: State, a: Action): State {
       return {
         ...s,
         seq: seq + 1,
-        items: [...s.items, { kind: "user", id: `u${seq}`, text: a.text }],
+        items: [...s.items, { kind: "user", id: `u${seq}`, text: a.text, submitText: a.submitText, createdAt: Date.now() }],
         running: true,
+        pendingPrompt: false,
+        cancelRequested: false,
+        cancellable: true,
         turnStartAt: Date.now(),
         turnTokens: 0,
         turnTotalTokens: 0,
@@ -571,7 +602,8 @@ export function reducer(s: State, a: Action): State {
         discardTurn: false,
       };
     }
-    case "unsend": return { ...s, pendingUser: undefined, discardTurn: true, running: false, live: undefined };
+    case "unsend": return { ...s, pendingUser: undefined, discardTurn: true, running: false, pendingPrompt: false, cancelRequested: true, cancellable: false, approval: undefined, ask: undefined, live: undefined };
+    case "cancel_requested": return { ...s, pendingPrompt: false, cancelRequested: true, approval: undefined, ask: undefined, cancellable: s.running || s.turnActive };
     case "send_failed": {
       if (s.pendingUser === undefined) return s;
       let idx = -1;
@@ -581,18 +613,40 @@ export function reducer(s: State, a: Action): State {
       }
       const items = idx >= 0 ? s.items.map((it, i) => (i === idx ? { ...it, failed: true } : it)) : s.items;
       const notice: Item = { kind: "notice", id: `n${s.seq}`, level: "warn", text: a.error };
-      return { ...s, pendingUser: undefined, running: false, turnActive: false, live: undefined, seq: s.seq + 1, items: [...items, notice] };
+      return { ...s, pendingUser: undefined, running: false, turnActive: false, pendingPrompt: false, cancelRequested: false, cancellable: false, live: undefined, seq: s.seq + 1, items: [...items, notice] };
     }
     case "backend_status": {
-      if (a.running === s.running) return s;
-      if (a.running) return { ...s, running: true, turnActive: true, turnStartAt: s.turnStartAt || Date.now() };
+      const pendingPrompt = Boolean(a.pendingPrompt);
+      const backgroundJobs = Math.max(0, a.backgroundJobs ?? s.backgroundJobs ?? 0);
+      const cancelRequested = Boolean(a.cancelRequested);
+      const foregroundRunning = foregroundRunningFromRuntimeMeta({ running: a.running, pendingPrompt, backgroundJobs, cancellable: a.cancellable });
+      const cancellable = foregroundRunning;
+      if (
+        foregroundRunning === s.running &&
+        pendingPrompt === s.pendingPrompt &&
+        backgroundJobs === s.backgroundJobs &&
+        cancelRequested === s.cancelRequested &&
+        cancellable === s.cancellable
+      ) return s;
+      if (foregroundRunning) {
+        return {
+          ...s,
+          running: true,
+          turnActive: true,
+          pendingPrompt,
+          backgroundJobs,
+          cancelRequested,
+          cancellable,
+          turnStartAt: s.turnStartAt || Date.now(),
+        };
+      }
       const finalized = s.items.map((it) => {
         if (it.kind === "assistant" && s.live && it.id === s.live.id) return { ...it, text: s.live.text, reasoning: s.live.reasoning, streaming: false };
         if (it.kind === "assistant" && it.streaming) return { ...it, streaming: false };
         if (it.kind === "tool" && it.status === "running") return { ...it, status: "stopped" as const };
         return it;
       });
-      return { ...s, items: finalized, running: false, turnActive: false, live: undefined, currentAssistant: undefined, approval: undefined, ask: undefined };
+      return { ...s, items: finalized, running: false, turnActive: false, pendingPrompt, backgroundJobs, cancelRequested, cancellable, live: undefined, currentAssistant: undefined, approval: undefined, ask: undefined };
     }
     case "meta": return sameMeta(s.meta, a.meta) ? s : { ...s, meta: a.meta };
     case "context": {
@@ -622,8 +676,8 @@ export function reducer(s: State, a: Action): State {
       return { ...s, items: archived, seq };
     }
     case "local_notice": return { ...s, running: false, turnActive: false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: a.level, text: a.text }] };
-    case "clearApproval": return { ...s, approval: undefined };
-    case "clearAsk": return { ...s, ask: undefined };
+    case "clearApproval": return { ...s, approval: undefined, pendingPrompt: false };
+    case "clearAsk": return { ...s, ask: undefined, pendingPrompt: false };
     case "reset": return { ...initialState, meta: s.meta, context: { ...s.context, used: 0, sessionTokens: 0 }, balance: s.balance, effort: s.effort, jobs: s.jobs, sessionGen: s.sessionGen + 1 };
     case "event": return applyEvent(s, a.e);
     default: return s;
@@ -779,8 +833,16 @@ export function useController() {
     if (!tab) return undefined;
     const local = statesRef.current.get(tabId);
     const needsInitialLoad = !local?.meta;
-    const missedTurnDone = Boolean(local?.running && !tab.running);
-    dispatchTo(tabId, { type: "backend_status", running: Boolean(tab.running) });
+    const foregroundRunning = foregroundRunningFromRuntimeMeta(tab);
+    const missedTurnDone = Boolean(local?.running && !foregroundRunning);
+    dispatchTo(tabId, {
+      type: "backend_status",
+      running: foregroundRunning,
+      pendingPrompt: Boolean(tab.pendingPrompt),
+      backgroundJobs: tab.backgroundJobs ?? 0,
+      cancelRequested: Boolean(tab.cancelRequested),
+      cancellable: foregroundRunning,
+    });
     if (needsInitialLoad || missedTurnDone) {
       await loadSessionDataForTab(tabId, missedTurnDone);
       return tabs;
@@ -885,28 +947,30 @@ export function useController() {
     replayPendingPromptsForActiveTab(activeTabId);
   }, [activeTabId]);
 
+  const sendToTab = useCallback((tabId: string, displayText: string, submitText = displayText) => {
+    if (!tabId) return;
+    const seq = getOrCreateState(statesRef.current, tabId).seq;
+    const display = displayText.trim();
+    const submit = submitText.trim();
+    dispatchTo(tabId, { type: "user", text: displayText, submitText: display !== submit ? submit : undefined, seq });
+    invalidateCache();
+    (display !== submit ? app.SubmitDisplayToTab(tabId, display, submit) : app.SubmitToTab(tabId, submit)).catch((error) => {
+      dispatchTo(tabId, { type: "send_failed", error: `Send failed: ${error instanceof Error ? error.message : String(error)}` });
+    });
+  }, [dispatchTo]);
+
   const send = useCallback((displayText: string, submitText = displayText) => {
-    const submitForTab = (tabId: string) => {
-      const seq = getOrCreateState(statesRef.current, tabId).seq;
-      dispatchTo(tabId, { type: "user", text: displayText, seq });
-      const display = displayText.trim();
-      const submit = submitText.trim();
-      invalidateCache();
-      (display !== submit ? app.SubmitDisplayToTab(tabId, display, submit) : app.SubmitToTab(tabId, submit)).catch((error) => {
-        dispatchTo(tabId, { type: "send_failed", error: `Send failed: ${error instanceof Error ? error.message : String(error)}` });
-      });
-    };
     const tabId = activeTabIdRef.current ?? activeTabId;
     if (tabId) {
-      submitForTab(tabId);
+      sendToTab(tabId, displayText, submitText);
       return;
     }
     void activeTabFromBackend().then((active) => {
       if (!active?.id) return;
       setActiveTabId(active.id);
-      submitForTab(active.id);
+      sendToTab(active.id, displayText, submitText);
     });
-  }, [activeTabFromBackend, activeTabId, dispatchTo]);
+  }, [activeTabFromBackend, activeTabId, sendToTab]);
 
   const runShell = useCallback((command: string) => {
     if (!activeTabId) return;
@@ -938,7 +1002,10 @@ export function useController() {
       }
       return text;
     }
-    if (tabId) app.CancelTab(tabId).catch(() => {});
+    if (tabId) {
+      dispatchTo(tabId, { type: "cancel_requested" });
+      app.CancelTab(tabId).catch(() => {});
+    }
     return undefined;
   }, [activeTabId, dispatchTo]);
 
@@ -1116,9 +1183,9 @@ export function useController() {
   const forget = useCallback(async (name: string) => { await app.Forget(name).catch(() => {}); }, []);
   const saveDoc = useCallback(async (path: string, body: string) => { await app.SaveDoc(path, body).catch(() => {}); }, []);
 
-  const rewind = useCallback(async (turn: number, scope: string) => {
+  const rewind = useCallback(async (turn: number, scope: string): Promise<boolean> => {
     const sourceTabId = activeTabId;
-    if (!sourceTabId) return;
+    if (!sourceTabId) return false;
     const actionScope = (["fork", "summ-from", "summ-upto", "conversation", "code", "both"].includes(scope) ? scope : "both") as MessageActionScope;
     dispatchTo(sourceTabId, { type: "message_action_start", action: { turn, scope: actionScope } });
     dispatchTo(sourceTabId, { type: "local_notice", level: "info", text: messageActionBusyText(actionScope) });
@@ -1135,7 +1202,7 @@ export function useController() {
         } else {
           await syncActiveTabFromBackend(true);
         }
-        return;
+        return true;
       }
 
       if (actionScope === "summ-from") await app.SummarizeFrom(turn);
@@ -1147,8 +1214,10 @@ export function useController() {
       if (messages.length) dispatchTo(sourceTabId, { type: "history", messages });
       dispatchTo(sourceTabId, { type: "context", context: await app.ContextUsageForTab(sourceTabId) });
       dispatchTo(sourceTabId, { type: "checkpoints", checkpoints: asArray(await app.CheckpointsForTab(sourceTabId)) });
+      return true;
     } catch {
       /* The controller emits a warning notice with the specific failure reason. */
+      return false;
     } finally {
       dispatchTo(sourceTabId, { type: "message_action_done" });
     }
@@ -1213,7 +1282,7 @@ export function useController() {
   return {
     state: activeState,
     activeTabId,
-    send, runShell, steer, notice, cancel, approve, answerQuestion, setControllerMode, setCollaborationMode, setToolApprovalMode, setGoal, clearGoal,
+    send, sendToTab, runShell, steer, notice, cancel, approve, answerQuestion, setControllerMode, setCollaborationMode, setToolApprovalMode, setGoal, clearGoal,
     newSession, clearSession, listSessions, listTrashedSessions, resumeSession, openChannelSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
     refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, setModel, setEffort, setTokenMode,
     fetchMemory, remember, forget, saveDoc,

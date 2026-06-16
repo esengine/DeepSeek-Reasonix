@@ -18,7 +18,7 @@ export type ShortcutAction =
 type KeyboardShortcutEvent = Pick<globalThis.KeyboardEvent, "key"> &
   Partial<Pick<globalThis.KeyboardEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "target">>;
 
-type ShortcutCombo = {
+export type ShortcutCombo = {
   key: string;
   ctrl?: boolean;
   meta?: boolean;
@@ -247,6 +247,10 @@ export function onShortcutsChanged(callback: () => void): () => void {
 }
 
 export function formatShortcutCombo(combo: ShortcutCombo, platform: ShortcutPlatform): string {
+  return formatShortcutComboParts(combo, platform).join(platform === "darwin" ? "" : "+");
+}
+
+export function formatShortcutComboParts(combo: ShortcutCombo, platform: ShortcutPlatform): string[] {
   const normalized = normalizeCombo(combo);
   const parts: string[] = [];
   if (platform === "darwin") {
@@ -255,14 +259,14 @@ export function formatShortcutCombo(combo: ShortcutCombo, platform: ShortcutPlat
     if (normalized.alt) parts.push("⌥");
     if (normalized.shift) parts.push("⇧");
     parts.push(displayKey(normalized.key));
-    return parts.join("");
+    return parts;
   }
   if (normalized.ctrl) parts.push("Ctrl");
   if (normalized.meta) parts.push("Meta");
   if (normalized.alt) parts.push("Alt");
   if (normalized.shift) parts.push("Shift");
   parts.push(displayKey(normalized.key));
-  return parts.join("+");
+  return parts;
 }
 
 export function comboFromKeyboardEvent(event: KeyboardShortcutEvent): ShortcutCombo | null {

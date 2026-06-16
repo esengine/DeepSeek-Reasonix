@@ -2,6 +2,7 @@ package config
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/BurntSushi/toml"
@@ -453,6 +454,9 @@ func TestNormalizeDesktopOfficialProviderAccessBackfillsExistingMimoAPIModels(t 
 	if p.Default != "mimo-v2.5-pro" {
 		t.Fatalf("mimo-api default = %q, want mimo-v2.5-pro", p.Default)
 	}
+	if want := []string{"mimo-v2.5", "mimo-v2-omni"}; !reflect.DeepEqual(p.VisionModels, want) {
+		t.Fatalf("mimo-api vision_models = %v, want %v", p.VisionModels, want)
+	}
 }
 
 func TestNormalizeDesktopOfficialProviderAccessDoesNotBackfillCustomNamedMimoAPI(t *testing.T) {
@@ -507,5 +511,127 @@ func TestNormalizeDesktopOfficialProviderAccessBackfillsExistingMimoTokenPlanAnd
 	}
 	if p.Prices["mimo-v2.5"] == nil || p.Prices["mimo-v2.5"].Currency != "¥" || p.Prices["mimo-v2.5"].Output != 2 {
 		t.Fatalf("mimo-v2.5 price = %+v, want RMB domestic pricing", p.Prices["mimo-v2.5"])
+	}
+	if want := []string{"mimo-v2.5"}; !reflect.DeepEqual(p.VisionModels, want) {
+		t.Fatalf("mimo-token-plan vision_models = %v, want %v", p.VisionModels, want)
+	}
+}
+
+// ── Explicit model list: normalization must not override user selection ───────
+
+func TestBackfillDeepSeekProSkipsWhenExplicitModelList(t *testing.T) {
+	// User saved with only flash via Settings → Models = ["deepseek-v4-flash"].
+	c := &Config{Providers: []ProviderEntry{
+		{Name: "deepseek", Kind: "openai", BaseURL: "https://api.deepseek.com", Models: []string{"deepseek-v4-flash"}, Default: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY"},
+	}}
+	backfillDeepSeekPro(c)
+	if hasModel(c, "deepseek-v4-pro") != nil {
+		t.Fatal("deepseek-v4-pro must not be added when user has an explicit model list")
+	}
+	if len(c.Providers) != 1 {
+		t.Fatalf("providers = %d, want 1 (no new entry should be added)", len(c.Providers))
+	}
+}
+
+func TestEnsureProviderModelsSkipsWhenExplicitModelList(t *testing.T) {
+	// User saved with only flash via Settings → Models = ["deepseek-v4-flash"].
+	p := &ProviderEntry{
+		Name:    "deepseek",
+		BaseURL: "https://api.deepseek.com",
+		Models:  []string{"deepseek-v4-flash"},
+		Default: "deepseek-v4-flash",
+	}
+	ensureProviderModels(p, []string{"deepseek-v4-flash", "deepseek-v4-pro"}, "deepseek-v4-flash")
+	if p.HasModel("deepseek-v4-pro") {
+		t.Fatal("ensureProviderModels must not merge required models when Models is explicitly set")
+	}
+	if len(p.Models) != 1 || p.Models[0] != "deepseek-v4-flash" {
+		t.Fatalf("models = %v, want [deepseek-v4-flash]", p.Models)
+	}
+}
+
+func TestMergeCuratedModelsIntoProviderSkipsWhenExplicitModelList(t *testing.T) {
+	// User saved with only two mimo models via Settings.
+	p := &ProviderEntry{
+		Name:    "mimo-api",
+		BaseURL: "https://api.xiaomimimo.com/v1",
+		Models:  []string{"mimo-v2.5-pro", "mimo-v2.5"},
+		Default: "mimo-v2.5-pro",
+	}
+	mergeCuratedModelsIntoProvider(p, []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"}, "mimo-v2.5-pro")
+	if p.HasModel("mimo-v2-omni") {
+		t.Fatal("mergeCuratedModelsIntoProvider must not add mimo-v2-omni when Models is explicitly set")
+	}
+	if len(p.Models) != 2 {
+		t.Fatalf("models = %v, want 2 selected models", p.Models)
+	}
+}
+
+func TestNormalizeOfficialMimoVisionModelsSkipsExplicitModelList(t *testing.T) {
+	// User saved with only pro via Settings → Models = ["mimo-v2.5-pro"].
+	c := &Config{
+		Desktop: DesktopConfig{ProviderAccess: []string{"mimo-api"}},
+		Providers: []ProviderEntry{{
+			Name:      "mimo-api",
+			Kind:      "openai",
+			BaseURL:   "https://api.xiaomimimo.com/v1",
+			Models:    []string{"mimo-v2.5-pro"},
+			Default:   "mimo-v2.5-pro",
+			APIKeyEnv: "MIMO_API_KEY",
+		}},
+	}
+	normalizeDesktopOfficialProviderAccess(c)
+	p, ok := c.Provider("mimo-api")
+	if !ok {
+		t.Fatal("mimo-api provider missing")
+	}
+	if p.HasModel("mimo-v2.5") || p.HasModel("mimo-v2-omni") {
+		t.Fatalf("mimo-api models = %v, want only explicitly selected pro model", p.ModelList())
+	}
+	if len(p.VisionModels) != 0 {
+		t.Fatalf("mimo-api vision_models = %v, want empty for pro-only explicit model list", p.VisionModels)
+	}
+}
+
+func TestNormalizeOfficialMimoVisionModelsPreservesExplicitEmptyList(t *testing.T) {
+	c := &Config{
+		Desktop: DesktopConfig{ProviderAccess: []string{"mimo-api"}},
+		Providers: []ProviderEntry{{
+			Name:         "mimo-api",
+			Kind:         "openai",
+			BaseURL:      "https://api.xiaomimimo.com/v1",
+			Models:       []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"},
+			Default:      "mimo-v2.5-pro",
+			APIKeyEnv:    "MIMO_API_KEY",
+			VisionModels: []string{},
+		}},
+	}
+	normalizeDesktopOfficialProviderAccess(c)
+	p, ok := c.Provider("mimo-api")
+	if !ok {
+		t.Fatal("mimo-api provider missing")
+	}
+	if p.VisionModels == nil || len(p.VisionModels) != 0 {
+		t.Fatalf("mimo-api vision_models = %#v, want explicit empty list", p.VisionModels)
+	}
+}
+
+func TestNormalizeOfficialDeepSeekModelsSkipsExplicitModelList(t *testing.T) {
+	// User saved with only flash via Settings → Models = ["deepseek-v4-flash"].
+	c := &Config{Providers: []ProviderEntry{{
+		Name:      "deepseek",
+		Kind:      "openai",
+		BaseURL:   "https://api.deepseek.com",
+		Models:    []string{"deepseek-v4-flash"},
+		Default:   "deepseek-v4-flash",
+		APIKeyEnv: "DEEPSEEK_API_KEY",
+	}}}
+	normalizeOfficialDeepSeekModels(c)
+	p, ok := c.Provider("deepseek")
+	if !ok {
+		t.Fatal("deepseek provider missing")
+	}
+	if p.HasModel("deepseek-v4-pro") {
+		t.Fatal("normalizeOfficialDeepSeekModels must not add pro when Models is explicitly set")
 	}
 }

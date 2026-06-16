@@ -310,6 +310,121 @@ func TestCompactReplacesHistory(t *testing.T) {
 	}
 }
 
+func TestCompactKeepsErrorMessages(t *testing.T) {
+	prov := &fakeProvider{reply: "- normal work summarized"}
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "1", Name: "bash", Arguments: `{"cmd":"bad"}`}}},
+		{Role: provider.RoleTool, ToolCallID: "1", Name: "bash", Content: "error: command failed"},
+		{Role: provider.RoleUser, Content: "continue"},
+		{Role: provider.RoleAssistant, Content: "continued"},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: t.TempDir(), KeepPolicy: KeepErrors}, event.Discard)
+
+	if err := a.compact(context.Background(), "manual", "", true); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if len(sess.Messages) < 6 {
+		t.Fatalf("session unexpectedly short after compact: %+v", sess.Messages)
+	}
+	if sess.Messages[2].Role != provider.RoleAssistant || len(sess.Messages[2].ToolCalls) != 1 {
+		t.Fatalf("kept error lost its assistant tool call: %+v", sess.Messages)
+	}
+	if sess.Messages[3].Role != provider.RoleTool || sess.Messages[3].Content != "error: command failed" {
+		t.Fatalf("error tool result not kept verbatim: %+v", sess.Messages)
+	}
+	if strings.Contains(prov.got[1].Content, "error: command failed") {
+		t.Fatalf("kept error was still folded into summary input:\n%s", prov.got[1].Content)
+	}
+}
+
+func TestKeepIndexesKeepsSiblingToolResultsForKeptError(t *testing.T) {
+	region := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
+			{ID: "err", Name: "bash", Arguments: `{"cmd":"bad"}`},
+			{ID: "ok", Name: "read_file", Arguments: `{"path":"main.go"}`},
+		}},
+		{Role: provider.RoleTool, ToolCallID: "err", Name: "bash", Content: "error: command failed"},
+		{Role: provider.RoleTool, ToolCallID: "ok", Name: "read_file", Content: "package main"},
+	}
+
+	keep := keepIndexes(region, KeepErrors)
+	for i, kept := range keep {
+		if !kept {
+			t.Fatalf("keep[%d] = false, want all sibling tool-call messages kept: %v", i, keep)
+		}
+	}
+}
+
+func TestKeepIndexesScopesPolicyAfterLatestSummary(t *testing.T) {
+	priorSummary := provider.Message{Role: provider.RoleUser, Content: summaryTagOpen + "\nprior digest\n" + summaryTagClose}
+	region := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "old", Name: "bash", Arguments: `{}`}}},
+		{Role: provider.RoleTool, ToolCallID: "old", Name: "bash", Content: "error: old failure"},
+		priorSummary,
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "new", Name: "bash", Arguments: `{}`}}},
+		{Role: provider.RoleTool, ToolCallID: "new", Name: "bash", Content: "error: new failure"},
+	}
+
+	keep := keepIndexes(region, KeepErrors)
+	want := []bool{false, false, false, true, true}
+	for i := range want {
+		if keep[i] != want[i] {
+			t.Fatalf("keep = %v, want %v", keep, want)
+		}
+	}
+}
+
+func TestCompactKeepsUserMarkedMessages(t *testing.T) {
+	prov := &fakeProvider{reply: "- unmarked work summarized"}
+	marked := "[[keep]] exact requirement " + strings.Repeat("must stay verbatim ", 200)
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleUser, Content: marked},
+		{Role: provider.RoleAssistant, Content: "worked"},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: t.TempDir(), KeepPolicy: KeepUserMarked}, event.Discard)
+
+	if err := a.compact(context.Background(), "manual", "", true); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	var kept bool
+	for _, m := range sess.Messages {
+		if m.Content == marked {
+			kept = true
+			break
+		}
+	}
+	if !kept {
+		t.Fatalf("marked message not kept verbatim: %+v", sess.Messages)
+	}
+	if strings.Contains(prov.got[1].Content, "exact requirement") {
+		t.Fatalf("marked message was still folded into summary input:\n%s", prov.got[1].Content)
+	}
+}
+
+func TestKeepUserMarkedRequiresUserPrefixMarker(t *testing.T) {
+	region := []provider.Message{
+		{Role: provider.RoleAssistant, Content: "[keep] assistant output"},
+		{Role: provider.RoleUser, Content: "ordinary prose mentioning [keep] later"},
+		{Role: provider.RoleUser, Content: "  <keep> exact requirement"},
+	}
+
+	keep := keepIndexes(region, KeepUserMarked)
+	want := []bool{false, false, true}
+	for i := range want {
+		if keep[i] != want[i] {
+			t.Fatalf("keep = %v, want %v", keep, want)
+		}
+	}
+}
+
 // TestCompactFallsBackToMechanicalFoldWhenSummaryFails: when the summarizer is
 // unreachable, /compact must still free context (fold mechanically) and surface a
 // card, not hang or abort leaving a full window.

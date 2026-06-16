@@ -49,7 +49,7 @@ eq(
   42_124,
   "legend values sum to used context tokens",
 );
-eq(Math.round(mock.otherPct), 33, "usage bar endpoint follows used/window percent");
+eq(Math.round(mock.otherPct), 33, "donut endpoint follows used/window percent");
 
 const oversized = contextBreakdown(61_000, 1_000_000, 1_622_277, 12_049, 3_217);
 eq(
@@ -57,7 +57,7 @@ eq(
   61_000,
   "oversized provider breakdown is normalized to used context tokens",
 );
-eq(Math.round(oversized.otherPct * 10) / 10, 6.1, "oversized provider breakdown does not fill the bar");
+eq(Math.round(oversized.otherPct * 10) / 10, 6.1, "oversized provider breakdown does not fill the ring");
 
 const unknownWindow = contextBreakdown(42_124, 0, 22_134, 12_345, 7_521);
 eq(
@@ -73,7 +73,7 @@ eq(
     reasoningPct: 0,
     otherPct: 0,
   },
-  "unknown context window keeps usage bar segments empty",
+  "unknown context window keeps donut segments empty",
 );
 
 console.log("\ncontext panel cost");
@@ -95,12 +95,6 @@ const cnyLocalized = formatMoneyLocalized(12.3, "CNY", { locale: "zh" });
 ok(/¥|CNY|CN¥/.test(cnyLocalized) && cnyLocalized.includes("12.30"), "ISO CNY cost renders with locale-aware currency formatting");
 eq(formatMoneyLocalized(0.1759, "A$", { locale: "en" }), "A$0.1759", "symbol currency remains symbol-based");
 eq(formatMoneyLocalized(0, "USD", { locale: "en", empty: "dash" }), "-", "localized money preserves dash empty state");
-
-console.log("\ncontext panel cache rate");
-
-eq(formatCacheHitRate(99_950, 50), "99.95%", "cache hit rate preserves two decimal places");
-eq(formatCacheHitRate(0, 10_000), "0.00%", "cache hit rate shows zero when usage data exists");
-eq(formatCacheHitRate(0, 0), "-", "cache hit rate stays empty before usage data exists");
 
 console.log("\ncontext panel cache rate");
 

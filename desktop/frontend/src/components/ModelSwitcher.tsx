@@ -64,6 +64,11 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
       }));
   }, [filtered, t]);
 
+  const currentProvider = useMemo(() => {
+    const cur = models.find((m) => m.current) ?? models.find((m) => m.model === label || m.ref === label);
+    return cur ? providerLabel(cur.provider, t) : null;
+  }, [label, models, t]);
+
   const pick = (name: string) => {
     setModels((prev) => prev.map((m) => ({ ...m, current: m.ref === name })));
     setOpen(false);
@@ -80,7 +85,7 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
         onClick={() => setOpen((v) => !v)}
       >
         <Brain size={13} className="modelsw__kind" />
-        <span className="modelsw__label">{label.split("+")[0].trim()}</span>
+        <span className="modelsw__label">{label}{currentProvider ? ` · ${currentProvider}` : ""}</span>
         <ChevronsUpDown size={11} />
       </button>
       <AnchoredPopover

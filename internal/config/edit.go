@@ -203,8 +203,10 @@ func (c *Config) SetDesktopLayoutStyle(style string) error {
 		c.Desktop.LayoutStyle = "classic"
 	case "workbench", "workspace":
 		c.Desktop.LayoutStyle = "workbench"
+	case "creation":
+		c.Desktop.LayoutStyle = "creation"
 	default:
-		return fmt.Errorf("desktop layout style %q: must be classic|workbench", style)
+		return fmt.Errorf("desktop layout style %q: must be classic|workbench|creation", style)
 	}
 	return nil
 }
