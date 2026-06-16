@@ -38,6 +38,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	default:
 		scope = RenderScopeFull
 	}
+	if scope == RenderScopeProject {
+		c = projectScopedConfigForRender(c)
+	}
 	defaults := Default()
 	var b strings.Builder
 
@@ -311,6 +314,8 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		b.WriteString("# path   = \"\"   # empty = probe standard locations\n")
 	}
 	b.WriteString("\n")
+	b.WriteString("[tools.background_jobs]\n")
+	fmt.Fprintf(&b, "stalled_warning_seconds = %d   # warn once per background job after this many quiet seconds; 0 disables\n\n", c.BackgroundJobStalledWarningSeconds())
 
 	b.WriteString("[codegraph]\n")
 	fmt.Fprintf(&b, "enabled      = %v   # built-in MCP server; off by default for first-run sessions\n", c.Codegraph.Enabled)
@@ -583,6 +588,21 @@ func shouldRenderProviders(c, defaults *Config, scope RenderScope) bool {
 		return true
 	}
 	return !reflect.DeepEqual(c.Providers, defaults.Providers)
+}
+
+func projectScopedConfigForRender(c *Config) *Config {
+	if c == nil || len(c.providerSources) == 0 {
+		return c
+	}
+	cp := *c
+	cp.Providers = make([]ProviderEntry, 0, len(c.Providers))
+	for _, p := range c.Providers {
+		if c.providerSources[providerMergeKey(p)] == providerSourceUser {
+			continue
+		}
+		cp.Providers = append(cp.Providers, p)
+	}
+	return &cp
 }
 
 func shouldRenderBot(c, defaults *Config, scope RenderScope) bool {

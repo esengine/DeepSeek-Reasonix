@@ -1,4 +1,4 @@
-import { createContext, memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
@@ -136,6 +136,7 @@ export function Transcript({
   // updates into one layout read/write per animation frame.
   const contentVersion = useMemo(() => scrollVersion(items), [items]);
   useEffect(() => {
+    if (items.length === 0) return;
     if (!stick.current) return;
     if (autoScrollFrame.current !== null) return;
     autoScrollFrame.current = requestAnimationFrame(() => {
@@ -162,6 +163,7 @@ export function Transcript({
     const observer = new ResizeObserver(() => {
       const previous = lastClientHeight.current ?? el.clientHeight;
       lastClientHeight.current = el.clientHeight;
+      if (items.length === 0) return;
       repinIfWasPinned(el.clientHeight - previous);
     });
     observer.observe(el);
@@ -172,7 +174,7 @@ export function Transcript({
         resizeFrame.current = null;
       }
     };
-  }, []);
+  }, [items.length]);
 
   // Footer height changes → smooth scroll repin with GSAP.
   useEffect(() => {
@@ -180,8 +182,9 @@ export function Transcript({
     if (!el) return;
     const previous = lastFooterHeight.current ?? footerHeight;
     lastFooterHeight.current = footerHeight;
+    if (items.length === 0) return;
     repinIfWasPinned(previous - footerHeight);
-  }, [footerHeight]);
+  }, [footerHeight, items.length]);
 
   // After a non-fork rewind, scroll to the last user message (the
   // rewound-to point) so the user knows where they are.
@@ -274,6 +277,18 @@ export function Transcript({
   // the warm/cold zone JSX trees. Uses LiveStreamContext for streaming data
   // (added by upstream PR #3423) instead of per-call renderSegments.
   const empty = items.length === 0;
+
+  useLayoutEffect(() => {
+    if (!empty) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = 0;
+    stick.current = false;
+    const frame = requestAnimationFrame(() => {
+      el.scrollTop = 0;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [empty, scrollRef, stick, tabId]);
 
   // In compact mode, break each turn into step groups.
   // A step = one assistant + its tool results, from one assistant to the next.

@@ -101,6 +101,7 @@ interface State {
   sessionCurrency: string;
   retry?: { attempt: number; max: number };
   seq: number;
+  sessionGen: number;
 }
 
 export const initialState: State = {
@@ -118,6 +119,7 @@ export const initialState: State = {
   sessionCost: 0,
   sessionCurrency: "¥",
   seq: 0,
+  sessionGen: 0,
 };
 
 function usageTotalTokens(usage?: WireUsage): number {
@@ -132,8 +134,8 @@ function updatesContextGauge(usage?: WireUsage): boolean {
   return !source || source === "executor";
 }
 
-function countsTowardCurrentTurn(state: State, usage?: WireUsage): boolean {
-  return updatesContextGauge(usage) || state.turnActive;
+function countsTowardCurrentTurn(state: State): boolean {
+  return state.turnActive || state.running;
 }
 
 export function sameMeta(a?: Meta, b?: Meta): boolean {
@@ -145,6 +147,10 @@ export function sameMeta(a?: Meta, b?: Meta): boolean {
     a.startupErr === b.startupErr &&
     a.eventChannel === b.eventChannel &&
     a.cwd === b.cwd &&
+    a.workspaceRoot === b.workspaceRoot &&
+    a.workspaceName === b.workspaceName &&
+    a.workspacePath === b.workspacePath &&
+    a.gitBranch === b.gitBranch &&
     a.autoApproveTools === b.autoApproveTools &&
     a.bypass === b.bypass &&
     a.collaborationMode === b.collaborationMode &&
@@ -497,7 +503,7 @@ function applyEvent(s: State, e: WireEvent): State {
       return { ...s, items: next };
     }
     case "usage": {
-      if (!countsTowardCurrentTurn(s, e.usage)) return s;
+      if (!countsTowardCurrentTurn(s)) return s;
       const updateContextGauge = updatesContextGauge(e.usage);
       const used = e.usage && s.context.window && updateContextGauge ? e.usage.promptTokens : s.context.used;
       const turnTokens = s.turnTokens + (e.usage?.completionTokens ?? 0);
@@ -618,7 +624,7 @@ export function reducer(s: State, a: Action): State {
     case "local_notice": return { ...s, running: false, turnActive: false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: a.level, text: a.text }] };
     case "clearApproval": return { ...s, approval: undefined };
     case "clearAsk": return { ...s, ask: undefined };
-    case "reset": return { ...initialState, meta: s.meta, context: { ...s.context, used: 0, sessionTokens: 0 }, balance: s.balance, effort: s.effort, jobs: s.jobs };
+    case "reset": return { ...initialState, meta: s.meta, context: { ...s.context, used: 0, sessionTokens: 0 }, balance: s.balance, effort: s.effort, jobs: s.jobs, sessionGen: s.sessionGen + 1 };
     case "event": return applyEvent(s, a.e);
     default: return s;
   }

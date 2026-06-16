@@ -1,5 +1,7 @@
 export const STATUS_BAR_ITEM_IDS = [
   "model",
+  "workspace",
+  "git_branch",
   "cache",
   "cache_avg",
   "session_tokens",

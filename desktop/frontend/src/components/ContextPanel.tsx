@@ -1,11 +1,11 @@
 // ContextPanel shows the active tab's context gauge, token usage, read files,
 // and workspace changes. All visible text is routed through the i18n dictionary.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FileText } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
-import { useT, type Translator } from "../lib/i18n";
-import { formatMoney } from "../lib/money";
+import { useI18n, type Translator } from "../lib/i18n";
+import { formatMoneyLocalized } from "../lib/money";
 import type { DictKey } from "../locales/en";
 import type { ContextInfo, ContextPanelInfo, UsageSourceStats, WireUsage } from "../lib/types";
 
@@ -16,6 +16,7 @@ interface ContextPanelProps {
   sessionTokens?: number;
   sessionCost?: number;
   sessionCurrency?: string;
+  sessionGen?: number;
   refreshKey?: number;
   onOpenWorkspaceMode?: (mode: "files" | "changed") => void;
   onOpenWorkspaceFile?: (path: string) => void;
@@ -41,6 +42,12 @@ function fmtDuration(ms: number, t: Translator): string {
   const seconds = totalSeconds % 60;
   if (minutes <= 0) return t("context.durationSeconds", { seconds });
   return t("context.durationMinutesSeconds", { minutes, seconds });
+}
+
+export function formatCacheHitRate(hitTokens: number, missTokens: number): string {
+  const denom = hitTokens + missTokens;
+  if (denom <= 0) return "-";
+  return `${((hitTokens / denom) * 100).toFixed(2)}%`;
 }
 
 interface HealthResult {
@@ -210,6 +217,7 @@ export function ContextPanel({
   sessionTokens,
   sessionCost,
   sessionCurrency,
+  sessionGen,
   refreshKey,
   onOpenWorkspaceMode,
   onOpenWorkspaceFile,
@@ -217,13 +225,16 @@ export function ContextPanel({
   onOpenWorkspaceChangeList,
   onOpenWorkspaceChangeFile,
 }: ContextPanelProps) {
-  const t = useT();
+  const { locale, t } = useI18n();
   const [info, setInfo] = useState<ContextPanelInfo | null>(null);
+  const refreshSeq = useRef(0);
 
   const refresh = useCallback(async () => {
     if (!tabId) return;
+    const seq = ++refreshSeq.current;
     try {
-      setInfo(await app.ContextPanel(tabId));
+      const next = await app.ContextPanel(tabId);
+      if (refreshSeq.current === seq) setInfo(next);
     } catch {
       /* bridge unavailable */
     }
@@ -233,6 +244,12 @@ export function ContextPanel({
     const id = window.setInterval(() => void refresh(), 2000);
     return () => window.clearInterval(id);
   }, [refresh]);
+
+  useEffect(() => {
+    refreshSeq.current += 1;
+    setInfo(null);
+    void refresh();
+  }, [refresh, sessionGen]);
 
   useEffect(() => {
     void refresh();
@@ -269,9 +286,9 @@ export function ContextPanel({
 
   const usagePct = windowTokens > 0 ? Math.min(100, Math.round((usedTokens / windowTokens) * 100)) : 0;
   const compactPct = context?.compactRatio ? Math.round(context.compactRatio * 100) : 0;
-  const cachePct = cacheHitTokens + cacheMissTokens > 0
-    ? Math.round((cacheHitTokens / (cacheHitTokens + cacheMissTokens)) * 100)
-    : 0;
+  const cacheDenom = cacheHitTokens + cacheMissTokens;
+  const cachePct = cacheDenom > 0 ? (cacheHitTokens / cacheDenom) * 100 : 0;
+  const cachePctDisplay = formatCacheHitRate(cacheHitTokens, cacheMissTokens);
   const breakdown = contextBreakdown(usedTokens, windowTokens, promptTokens, completionTokens, reasoningTokens);
   const donutStyle = {
     background: `conic-gradient(#13a7a5 0 ${breakdown.promptPct}%, #2f6df6 ${breakdown.promptPct}% ${breakdown.completionPct}%, #f97316 ${breakdown.completionPct}% ${breakdown.reasoningPct}%, var(--border) ${breakdown.reasoningPct}% ${breakdown.otherPct}%, var(--border-soft) ${breakdown.otherPct}% 100%)`,
@@ -298,7 +315,7 @@ export function ContextPanel({
     time: fmtTime(f.latestTime),
     detail: asArray(f.turns).length > 0 ? `T${asArray(f.turns).join(",")}` : "",
   }));
-  const health = contextHealth(usagePct, cachePct, readRows.length);
+  const health = contextHealth(usagePct, Math.round(cachePct), readRows.length);
 
   return (
     <div className="context-panel">
@@ -337,15 +354,15 @@ export function ContextPanel({
           <section className="context-panel__section">
             <SectionHeading title={t("context.costMetrics")} />
             <div className="context-panel__stats">
-              <MetricCard label={t("context.cacheHit")} value={cachePct > 0 ? `${cachePct}%` : "-"} tone="accent" />
-              <MetricCard label={t("context.sessionCost")} value={formatMoney(cost.amount, cost.currency, "dash")} />
+              <MetricCard label={t("context.cacheHit")} value={cachePctDisplay} tone="accent" />
+              <MetricCard label={t("context.sessionCost")} value={formatMoneyLocalized(cost.amount, cost.currency, { locale, empty: "dash" })} />
             </div>
             {showCostSources && (
               <div className="context-panel__source-list" aria-label={t("context.costBreakdown")}>
                 {costSources.map((row) => (
                   <div className="context-panel__source-row" key={row.source}>
                     <span>{sourceLabel(row.label, t)}</span>
-                    <strong>{formatMoney(row.cost, row.currency, "dash")}</strong>
+                    <strong>{formatMoneyLocalized(row.cost, row.currency, { locale, empty: "dash" })}</strong>
                     <em>{t("context.sourceRequests", { count: row.requests })}</em>
                   </div>
                 ))}

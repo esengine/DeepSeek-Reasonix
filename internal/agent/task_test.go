@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"reasonix/internal/event"
+	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
@@ -316,6 +317,43 @@ func TestTaskToolFailedForegroundContinuationPersistsAndRejectsReuse(t *testing.
 	}
 }
 
+func TestTaskToolBackgroundPanicPersistsFailedMetadata(t *testing.T) {
+	sub := panicProvider{name: "panic-sub"}
+	store := NewSubagentStore(t.TempDir())
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "read_file", readOnly: true})
+	task := NewTaskTool(sub, nil, reg, 20, 0, 0, 0, 0, 0.0, "", "sys", nil, "", "", nil).
+		WithTranscripts(store, t.TempDir(), "base-model", "base-effort")
+
+	jm := jobs.NewManager(event.Discard)
+	defer jm.Close()
+	ctx := testTaskContext()
+	ctx = jobs.WithSession(ctx, "parent-session")
+	ctx = jobs.WithManager(ctx, jm)
+	out, err := task.Execute(ctx, []byte(`{"prompt":"panic task","run_in_background":true}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	ref := subagentRefFromOutput(t, out)
+	res := jm.Wait(context.Background(), nil, 5)
+	if len(res) != 1 || res[0].Status != jobs.Failed {
+		t.Fatalf("background job result = %+v, want failed", res)
+	}
+	if !strings.Contains(res[0].Output, "Subagent reference (failed): "+ref) {
+		t.Fatalf("job output = %q, want failed subagent ref %s", res[0].Output, ref)
+	}
+	meta, err := store.LoadMeta(ref)
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	if meta.Status != SubagentFailed {
+		t.Fatalf("status = %q, want failed", meta.Status)
+	}
+	if _, err := task.Execute(testTaskContext(), []byte(`{"prompt":"again","continue_from":"`+ref+`"}`)); err == nil || !strings.Contains(err.Error(), "failed and cannot be continued") {
+		t.Fatalf("reuse error = %v, want failed continuation rejection", err)
+	}
+}
+
 func TestTaskToolRejectsMismatchedContinuationProfile(t *testing.T) {
 	sub := &mockProvider{name: "sub", chunks: []provider.Chunk{
 		{Type: provider.ChunkText, Text: "answer"},
@@ -365,4 +403,12 @@ func newTestTaskTool(t *testing.T, prov provider.Provider, reg *tool.Registry, s
 	t.Helper()
 	return NewTaskTool(prov, nil, reg, 20, 0, 0, 0, 0, 0.0, "", sysPrompt, nil, subagentModel, subagentEffort, resolve).
 		WithTranscripts(NewSubagentStore(t.TempDir()), t.TempDir(), "base-model", "base-effort")
+}
+
+type panicProvider struct{ name string }
+
+func (p panicProvider) Name() string { return p.name }
+
+func (p panicProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	panic("subagent boom")
 }

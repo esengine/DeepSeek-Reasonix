@@ -8,6 +8,7 @@ import { ScrollToPlugin } from "gsap/ScrollToPlugin";
 gsap.registerPlugin(useGSAP, Flip, ScrollToPlugin);
 import {
   Activity,
+  CircleHelp,
   Command,
   Download,
   SquarePen,
@@ -51,6 +52,7 @@ import { Tooltip } from "./components/Tooltip";
 import { StartupSplash, shouldShowStartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
 import { AppChrome } from "./components/AppChrome";
+import { ShortcutsCheatsheet } from "./components/ShortcutsCheatsheet";
 import { ProjectTree } from "./components/ProjectTree";
 import { CopyButton } from "./components/CopyButton";
 import { parseTodos } from "./lib/tools";
@@ -106,9 +108,9 @@ import {
   type Theme,
 } from "./lib/theme";
 import { applyTextSize, DEFAULT_TEXT_SIZE, getTextSize, nextTextSize } from "./lib/textSize";
-import { useWindowStatePersistence } from "./lib/windowState";
+import { useViewportHeightVar, useWindowStatePersistence } from "./lib/windowState";
 import { availableWorkspacePanelWidth, resolveWorkspacePanelWidth, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
-import { isCloseTabShortcut } from "./lib/keyboardShortcuts";
+import { useGlobalShortcut } from "./lib/keyboardShortcuts";
 import logoWordmark from "./assets/logo-wordmark.svg";
 
 const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
@@ -793,37 +795,15 @@ function safeFilename(name: string): string {
 /** Global hotkey handler for shell-expand toggle (Ctrl/Cmd+B). */
 function ShellHotkeys() {
   const shellExpand = useShellExpand();
-  useEffect(() => {
-    if (!shellExpand) return;
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "b") {
-        e.preventDefault();
-        shellExpand.toggleLast();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [shellExpand]);
+  useGlobalShortcut("shell.toggle", () => shellExpand?.toggleLast(), [shellExpand], Boolean(shellExpand));
   return null;
 }
 
 /** Global hotkey handler for text-size shortcuts (Ctrl/Cmd + Plus/Minus/0). */
 function TextSizeHotkeys() {
-  useEffect(() => {
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      if (e.key !== "+" && e.key !== "=" && e.key !== "-" && e.key !== "0") return;
-
-      e.preventDefault();
-      if (e.key === "0") {
-        applyTextSize(DEFAULT_TEXT_SIZE);
-        return;
-      }
-      applyTextSize(nextTextSize(getTextSize(), e.key === "-" ? -1 : 1));
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, []);
+  useGlobalShortcut("textSize.increase", () => applyTextSize(nextTextSize(getTextSize(), 1)));
+  useGlobalShortcut("textSize.decrease", () => applyTextSize(nextTextSize(getTextSize(), -1)));
+  useGlobalShortcut("textSize.reset", () => applyTextSize(DEFAULT_TEXT_SIZE));
   return null;
 }
 
@@ -886,6 +866,7 @@ export default function App() {
   const [startupUpdateChecksEnabled, setStartupUpdateChecksEnabled] = useState<boolean | null>(null);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [paletteSessions, setPaletteSessions] = useState<SessionMeta[]>([]);
   const { showToast } = useToast();
   const [sidebarImConnections, setSidebarImConnections] = useState<SidebarImConnection[]>([]);
@@ -969,6 +950,7 @@ export default function App() {
 
   // Persist window geometry across launches.
   useWindowStatePersistence();
+  useViewportHeightVar();
   useEffect(() => {
     document.documentElement.setAttribute("data-platform", desktopPlatform);
   }, [desktopPlatform]);
@@ -1494,6 +1476,7 @@ export default function App() {
     setClearContextPending(false);
     try {
       await clearSession();
+      setDockRefreshKey((v) => v + 1);
       notice(t("clearContext.done"));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1868,15 +1851,23 @@ export default function App() {
     openWorkspacePanel("context");
   }, [closeWorkspacePanel, openWorkspacePanel, pulseWorkspaceToggle, workspacePanelRenderable]);
 
+  const clearWorkspaceRequests = useCallback(() => {
+    setWorkspaceRevealRequest(null);
+    setWorkspaceChangeRevealRequest(null);
+    setWorkspaceFileListRequest(null);
+    setWorkspaceChangeListRequest(null);
+  }, []);
+
+  useEffect(() => {
+    clearWorkspaceRequests();
+  }, [activeTabId, clearWorkspaceRequests]);
+
   const openRightDockMode = useCallback(
     (mode: RightDockMode) => {
-      setWorkspaceRevealRequest(null);
-      setWorkspaceChangeRevealRequest(null);
-      setWorkspaceFileListRequest(null);
-      setWorkspaceChangeListRequest(null);
+      clearWorkspaceRequests();
       openWorkspacePanel(mode);
     },
-    [openWorkspacePanel],
+    [clearWorkspaceRequests, openWorkspacePanel],
   );
 
   const openRightDockFile = useCallback(
@@ -1978,10 +1969,11 @@ export default function App() {
 
   const handleTabChange = useCallback(async (id: string) => {
     closeTransientOverlays();
+    clearWorkspaceRequests();
     const tabs = await switchTab(id);
     if (tabs) setTabMetas(tabs);
     setTabRevealSignal((signal) => signal + 1);
-  }, [closeTransientOverlays, switchTab]);
+  }, [clearWorkspaceRequests, closeTransientOverlays, switchTab]);
 
   const handleTabClose = useCallback(async (id: string) => {
     closeTransientOverlays();
@@ -2262,34 +2254,21 @@ export default function App() {
     setPaletteOpen(true);
     setPaletteSessions(await listSessions().catch(() => []));
   }, [closeTransientOverlays, listSessions]);
-  useEffect(() => {
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setPaletteOpen((cur) => {
-          if (!cur) void openPalette();
-          return cur;
-        });
-      } else if (e.key === "Escape") {
-        setPaletteOpen(false);
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+  useGlobalShortcut("commandPalette.open", () => {
+    setPaletteOpen((current) => {
+      if (!current) void openPalette();
+      return current;
+    });
   }, [openPalette]);
-
-  // Cmd/Ctrl+W — close the active tab
-  useEffect(() => {
-    if (!activeTabId) return;
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if (isCloseTabShortcut(e, desktopPlatform)) {
-        e.preventDefault();
-        handleTabClose(activeTabId);
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [activeTabId, desktopPlatform, handleTabClose]);
+  useGlobalShortcut("app.newSession", () => void handleNewTab(), [handleNewTab]);
+  useGlobalShortcut("settings.open", () => {
+    closeTransientOverlays();
+    setSettingsTarget("general");
+  }, [closeTransientOverlays]);
+  useGlobalShortcut("tab.close", () => {
+    if (activeTabId) void handleTabClose(activeTabId);
+  }, [activeTabId, handleTabClose], Boolean(activeTabId));
+  useGlobalShortcut("shortcuts.show", () => setShortcutsOpen(true));
 
   const paletteItems = useMemo<PaletteItem[]>(() => {
     const cmds: PaletteItem[] = [
@@ -2604,6 +2583,9 @@ export default function App() {
           onNewTab={() => void handleNewTab()}
           onOpenPalette={() => void openPalette()}
         />
+        <a className="skip-to-composer" href="#composer-input">
+          {t("shortcuts.skipToComposer")}
+        </a>
 
         <aside className={sidebarClassName} aria-label={t("sidebar.navigation")}>
           {sidebarWorkbench ? (
@@ -2869,6 +2851,16 @@ export default function App() {
                   <span>{t("workspace.changedTab")}</span>
                 </button>
               </Tooltip>
+              <Tooltip label={t("shortcuts.cheatsheetTitle")}>
+                <button
+                  className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"
+                  type="button"
+                  aria-label={t("shortcuts.cheatsheetTitle")}
+                  onClick={() => setShortcutsOpen(true)}
+                >
+                  <CircleHelp size={14} />
+                </button>
+              </Tooltip>
               <Tooltip label={t("topicBar.command")}>
                 <button
                   className="topicbar__action-btn topicbar__action-btn--label topicbar__action-btn--accent"
@@ -3020,6 +3012,9 @@ export default function App() {
               modelLabel={state.meta?.label}
               labelStyle={statusBarStyle}
               items={statusBarItems}
+              workspacePath={state.meta?.workspacePath || state.meta?.workspaceRoot || state.meta?.cwd}
+              workspaceName={state.meta?.workspaceName}
+              gitBranch={state.meta?.gitBranch}
             />
           </footer>
           )}
@@ -3095,6 +3090,7 @@ export default function App() {
                   sessionTokens={state.sessionTokens}
                   sessionCost={state.sessionCost}
                   sessionCurrency={state.sessionCurrency}
+                  sessionGen={state.sessionGen}
                   refreshKey={dockRefreshKey}
                   onOpenWorkspaceMode={openRightDockMode}
                   onOpenWorkspaceFile={openRightDockFile}
@@ -3105,6 +3101,7 @@ export default function App() {
               ) : (
                 <WorkspacePanel
                   open={workspacePanelRenderable}
+                  tabId={activeTabId}
                   cwd={state.meta?.cwd}
                   maximized={workspacePanelMaximized}
                   panelWidth={workspacePanelRenderWidth}
@@ -3171,6 +3168,13 @@ export default function App() {
         items={paletteItems}
         placeholder={t("palette.placeholder")}
         emptyText={t("palette.empty")}
+      />
+
+      <ShortcutsCheatsheet
+        open={shortcutsOpen}
+        platform={desktopPlatform}
+        onClose={() => setShortcutsOpen(false)}
+        t={t}
       />
 
       {startupSplashVisible && (

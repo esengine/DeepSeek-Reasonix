@@ -283,10 +283,10 @@ func providerViewFromEntry(p config.ProviderEntry, builtIn, added bool) Provider
 	}
 }
 
-func officialProviderViews(added map[string]bool) []ProviderView {
+func officialProviderViews(added map[string]bool, pricingLanguage string) []ProviderView {
 	var out []ProviderView
 	for _, kind := range []string{"deepseek", "mimo-api", "mimo-token-plan"} {
-		entries, _, err := officialProviderTemplate(kind)
+		entries, _, err := officialProviderTemplate(kind, pricingLanguage)
 		if err != nil {
 			continue
 		}
@@ -321,7 +321,7 @@ func (a *App) Settings() SettingsView {
 	if err != nil {
 		return SettingsView{
 			Providers:         []ProviderView{},
-			OfficialProviders: officialProviderViews(map[string]bool{}),
+			OfficialProviders: officialProviderViews(map[string]bool{}, ""),
 			ProviderKinds:     nonNil(provider.Kinds()),
 			Permissions: PermissionsView{
 				Mode:  "ask",
@@ -406,7 +406,7 @@ func (a *App) Settings() SettingsView {
 		Bypass:             ctrl != nil && ctrl.AutoApproveTools(),
 	}
 	added := providerAccessSet(cfg.Desktop.ProviderAccess)
-	v.OfficialProviders = officialProviderViews(officialProviderAddedSet(cfg))
+	v.OfficialProviders = officialProviderViews(officialProviderAddedSet(cfg), cfg.DeepSeekOfficialPricingLanguage())
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
 		v.Providers = append(v.Providers, providerViewFromEntry(*p, isOfficialBuiltInProvider(*p), added[p.Name]))
@@ -878,7 +878,7 @@ func desktopAutoPlanMode(mode string) string {
 	}
 }
 
-func officialProviderTemplate(kind string) ([]config.ProviderEntry, string, error) {
+func officialProviderTemplate(kind, pricingLanguage string) ([]config.ProviderEntry, string, error) {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "deepseek", "deepseek-official":
 		return []config.ProviderEntry{{
@@ -890,32 +890,40 @@ func officialProviderTemplate(kind string) ([]config.ProviderEntry, string, erro
 			APIKeyEnv:     "DEEPSEEK_API_KEY",
 			BalanceURL:    "https://api.deepseek.com/user/balance",
 			ContextWindow: 1_000_000,
-			Prices: map[string]*provider.Pricing{
-				"deepseek-v4-flash": &provider.Pricing{CacheHit: 0.0028, Input: 0.14, Output: 0.28, Currency: "$"},
-				"deepseek-v4-pro":   &provider.Pricing{CacheHit: 0.003625, Input: 0.435, Output: 0.87, Currency: "$"},
-			},
+			Prices:        config.DeepSeekV4PricesForLanguage(pricingLanguage),
 		}}, "DEEPSEEK_API_KEY", nil
 	case "mimo-api", "xiaomi-mimo", "xiaomi_mimo":
+		models := []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"}
 		return []config.ProviderEntry{{
 			Name:          "mimo-api",
 			Kind:          "openai",
 			BaseURL:       "https://api.xiaomimimo.com/v1",
-			Models:        []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"},
+			Models:        models,
 			Default:       "mimo-v2.5-pro",
 			APIKeyEnv:     "MIMO_API_KEY",
 			ContextWindow: 1_048_576,
-			NoProxy:       true,
+			Prices: map[string]*provider.Pricing{
+				"mimo-v2.5-pro": &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"},
+				"mimo-v2.5":     &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"},
+				"mimo-v2-omni":  &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"},
+			},
+			NoProxy: true,
 		}}, "MIMO_API_KEY", nil
 	case "mimo-token-plan", "xiaomi-mimo-token-plan", "xiaomi_mimo_token_plan":
+		models := []string{"mimo-v2.5-pro", "mimo-v2.5"}
 		return []config.ProviderEntry{{
 			Name:          "mimo-token-plan",
 			Kind:          "openai",
 			BaseURL:       "https://token-plan-cn.xiaomimimo.com/v1",
-			Models:        []string{"mimo-v2.5-pro", "mimo-v2.5"},
+			Models:        models,
 			Default:       "mimo-v2.5-pro",
 			APIKeyEnv:     "MIMO_API_KEY",
 			ContextWindow: 1_048_576,
-			NoProxy:       true,
+			Prices: map[string]*provider.Pricing{
+				"mimo-v2.5-pro": &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"},
+				"mimo-v2.5":     &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"},
+			},
+			NoProxy: true,
 		}}, "MIMO_API_KEY", nil
 	default:
 		return nil, "", fmt.Errorf("unknown official provider template %q", kind)
@@ -995,7 +1003,11 @@ func (a *App) SaveProvider(p ProviderView) error {
 // Settings > Model > Access list. The runtime default providers still exist
 // independently; this only records the user's explicit access setup.
 func (a *App) AddOfficialProviderAccess(kind, key string) error {
-	entries, keyEnv, err := officialProviderTemplate(kind)
+	cfg, _, err := a.loadDesktopUserConfigForEdit()
+	if err != nil {
+		return err
+	}
+	entries, keyEnv, err := officialProviderTemplate(kind, cfg.DeepSeekOfficialPricingLanguage())
 	if err != nil {
 		return err
 	}

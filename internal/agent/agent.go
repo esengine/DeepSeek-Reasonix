@@ -364,6 +364,8 @@ func (a *Agent) SetSession(s *Session) {
 	a.sessMu.Lock()
 	a.session = s
 	a.sessMu.Unlock()
+	a.sessCacheHit.Store(0)
+	a.sessCacheMiss.Store(0)
 	if s != nil {
 		a.rebuildTodoState(s.Snapshot())
 	}
