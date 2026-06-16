@@ -56,7 +56,7 @@ eq(
   "restores named display refs for submit",
 );
 eq(
-  formatAttachmentRefForDisplay({ path: ".reasonix/attachments/clipboard-20260610-121238.444775-000001.png", name: "park.png", kind: "image", source: "attachment", ext: "PNG" }),
+  formatAttachmentRefForDisplay({ path: ".reasonix/attachments/clipboard-20260610-121238.444775-000001.png", name: "park.png", source: "attachment" }),
   "@[park.png](.reasonix/attachments/clipboard-20260610-121238.444775-000001.png)",
   "formats attachment display refs for edit replay",
 );

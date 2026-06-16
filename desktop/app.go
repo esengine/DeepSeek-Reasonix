@@ -4147,11 +4147,18 @@ func (a *App) ReconnectMCPServer(name string) error {
 	if tab == nil || tab.Ctrl == nil {
 		return fmt.Errorf("no active session")
 	}
-	if mcpConnected(tab.Ctrl, name) {
-		tab.Ctrl.DisconnectMCPServer(name)
+	tab.Ctrl.DisconnectMCPServer(name)
+	if h := tab.Ctrl.Host(); h != nil {
+		h.ClearFailure(name)
 	}
 	_, err := a.connectConfiguredMCPServerForTab(tab, name)
 	if err != nil {
+		if plugin.IsServerAlreadyConnected(err) {
+			a.mu.Lock()
+			delete(tab.disabledMCP, name)
+			a.mu.Unlock()
+			return nil
+		}
 		entry := config.PluginEntry{Name: name}
 		if p, found, cfgErr := a.desktopMCPServerForEdit(name); cfgErr == nil && found {
 			entry = p

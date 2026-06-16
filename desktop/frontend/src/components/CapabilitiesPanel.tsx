@@ -833,6 +833,7 @@ function ServerRow({
 }) {
   const t = useT();
   const actionLabel = serverActionLabel(s, t);
+  const lifecycle = mcpServerLifecycleActions(s);
   const tools = s.toolList ?? [];
   let sub =
     s.status === "failed"
@@ -849,7 +850,6 @@ function ServerRow({
   if (s.authStatus === "possible" && s.status !== "failed") {
     sub = `${sub} · ${t("caps.authPossibleShort")}`;
   }
-  const enabled = s.status === "connected" || s.status === "deferred" || s.status === "initializing";
   const handlePrimaryAction = () => {
     if (shouldOpenAuth(s)) {
       openExternal((s.authUrl || "").trim());
@@ -880,18 +880,16 @@ function ServerRow({
             <div className="cap-row__sub">{sub}</div>
           </div>
           <div className="cap-row__actions">
-            {s.status === "failed" ? (
+            {lifecycle.showRetryInRow ? (
               <button className="btn btn--small" disabled={busy} onClick={handlePrimaryAction}>
                 {actionLabel}
               </button>
-            ) : s.status === "initializing" ? (
-              <span className="cap-row__pending">{t("caps.initializingShort")}</span>
             ) : (
-              <Tooltip label={enabled ? t("caps.disable") : t("caps.enable")}>
+              <Tooltip label={lifecycle.enabled ? t("caps.disable") : t("caps.enable")}>
                 <label className="cap-switch">
                   <input
                     type="checkbox"
-                    checked={enabled}
+                    checked={lifecycle.enabled}
                     disabled={busy}
                     onChange={(e) => onToggle(e.target.checked)}
                   />
@@ -955,8 +953,9 @@ function ServerDetails({
   const t = useT();
   const command = serverCommand(s);
   const canEditConfig = s.configured && !s.builtIn;
-  const canConnectNow = s.status === "deferred" || s.status === "disabled";
-  const canReconnect = s.status === "connected";
+  const lifecycle = mcpServerLifecycleActions(s);
+  const canConnectNow = lifecycle.canConnectNow;
+  const canReconnect = lifecycle.canReconnect;
   const canShowTools = s.status === "connected" && ((s.tools ?? 0) > 0 || (tools?.length ?? 0) > 0);
   const showClearAuth = canClearAuth(s);
   const authLabel = serverAuthLabel(s, t);
@@ -1248,6 +1247,20 @@ function canBulkRemoveFailure(server: ServerView): boolean {
   if (server.builtIn || !server.configured) return false;
   const kind = failureKind(server);
   return kind === "missing-command" || kind === "command-unavailable";
+}
+
+export function mcpServerLifecycleActions(s: ServerView): {
+  enabled: boolean;
+  showRetryInRow: boolean;
+  canConnectNow: boolean;
+  canReconnect: boolean;
+} {
+  return {
+    enabled: s.status === "connected" || s.status === "deferred" || s.status === "initializing",
+    showRetryInRow: s.status === "failed" || s.status === "initializing",
+    canConnectNow: s.status === "deferred" || s.status === "disabled",
+    canReconnect: s.status === "connected" || s.status === "initializing",
+  };
 }
 
 function serverActionLabel(s: ServerView, t: ReturnType<typeof useT>): string {

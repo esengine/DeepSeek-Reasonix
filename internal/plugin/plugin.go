@@ -9,6 +9,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -175,6 +176,20 @@ const defaultStartConcurrency = 8
 // that, an interactive user is better served by recording the failure and moving
 // on than by stalling the whole session.
 const defaultStartTimeout = 5 * time.Second
+
+// ErrServerAlreadyConnected marks an attempted MCP connection whose server name
+// is already live on the host.
+var ErrServerAlreadyConnected = errors.New("plugin server already connected")
+
+func serverAlreadyConnectedError(name string) error {
+	return fmt.Errorf("%w: %q", ErrServerAlreadyConnected, name)
+}
+
+// IsServerAlreadyConnected reports whether err means the MCP server name is
+// already live on the host.
+func IsServerAlreadyConnected(err error) bool {
+	return errors.Is(err, ErrServerAlreadyConnected)
+}
 
 // StartAll connects every plugin in parallel, performs the MCP handshake, and
 // returns the union of their tools (namespaced "mcp__<server>__<tool>"). On any
@@ -608,6 +623,10 @@ func (h *Host) endDeferredSpawn() {
 func (h *Host) has(name string) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	return h.hasLocked(name)
+}
+
+func (h *Host) hasLocked(name string) bool {
 	for _, c := range h.clients {
 		if c.name == name {
 			return true
@@ -623,7 +642,7 @@ func (h *Host) has(name string) bool {
 // — or the subprocess dies when that turn ends. Errors if the name is taken.
 func (h *Host) Add(ctx context.Context, s Spec) ([]tool.Tool, error) {
 	if h.has(s.Name) {
-		return nil, fmt.Errorf("server %q is already connected", s.Name)
+		return nil, serverAlreadyConnectedError(s.Name)
 	}
 	return h.addConnected(ctx, s)
 }
@@ -651,6 +670,11 @@ func (h *Host) addConnected(ctx context.Context, s Spec) ([]tool.Tool, error) {
 		h.mu.Unlock()
 		c.close()
 		return nil, fmt.Errorf("plugin host is closed")
+	}
+	if h.hasLocked(s.Name) {
+		h.mu.Unlock()
+		c.close()
+		return nil, serverAlreadyConnectedError(s.Name)
 	}
 	h.clients = append(h.clients, c)
 	h.clearFailure(s.Name)
