@@ -270,6 +270,25 @@ func runAgent(args []string) int {
 		sink = metrics
 	}
 	sink = withNotifications(sink, cfg)
+
+	// When resuming without an explicit --model, read the model from the
+	// session's BranchMeta sidecar so the conversation continues with the
+	// same model it was created with.
+	if *model == "" {
+		if *resume != "" {
+			if sm, ok := agent.LoadSessionModel(*resume); ok {
+				*model = sm
+			}
+		} else if *cont {
+			sessions, err := agent.ListSessions(resolveCLISessionDir())
+			if err == nil && len(sessions) > 0 {
+				if sm, ok := agent.LoadSessionModel(sessions[0].Path); ok {
+					*model = sm
+				}
+			}
+		}
+	}
+
 	ctrl, err := setup(ctx, *model, *maxSteps, true, sink)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -337,6 +356,15 @@ func runServe(args []string) int {
 
 	ctx := context.Background()
 	bc := serve.NewBroadcaster()
+
+	// When resuming without an explicit --model, read the model from the
+	// session's BranchMeta sidecar.
+	if *model == "" && *resume != "" {
+		if sm, ok := agent.LoadSessionModel(*resume); ok {
+			*model = sm
+		}
+	}
+
 	ctrl, err := setup(ctx, *model, *maxSteps, true, bc)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -411,6 +439,15 @@ func chatREPL(args []string) int {
 	}
 
 	ctx := context.Background()
+
+	// When resuming without an explicit --model, read the model from the
+	// session's BranchMeta sidecar so the conversation continues with the
+	// same model it was created with.
+	if resumePath != "" && *model == "" {
+		if sm, ok := agent.LoadSessionModel(resumePath); ok {
+			*model = sm
+		}
+	}
 
 	// Plumb the controller's typed event stream through a channel so each event
 	// can become a tea.Msg inside the TUI's update loop. Buffered generously:
