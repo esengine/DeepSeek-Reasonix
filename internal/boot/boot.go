@@ -147,7 +147,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if !opts.RequireKey && entry.APIKeyEnv != "" && entry.APIKey() == "" {
 		sink.Emit(event.Event{Kind: event.Notice, Text: fmt.Sprintf("model %q is selected but its API key %s is not set — requests will fail until you set it", modelName, entry.APIKeyEnv)})
 	}
-	jm := jobs.NewManager(sink)
+	jm := jobs.NewManager(sink, jobs.WithStalledWarningAfter(time.Duration(cfg.BackgroundJobStalledWarningSeconds())*time.Second))
 	sessionDir := opts.SessionDir
 	if sessionDir == "" {
 		sessionDir = config.SessionDir()
@@ -429,7 +429,10 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if opts.MaxSteps > 0 {
 		maxSteps = opts.MaxSteps
 	}
-	subagentStore := newSubagentStore(sessionDir)
+	subagentStore, err := newSubagentStore(sessionDir)
+	if err != nil {
+		return nil, err
+	}
 	if subagentStore != nil {
 		subagentStore.WithDestroyedChecker(jm.IsDestroying)
 	}
@@ -544,7 +547,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			}
 			prov, price, ctxWin = p, pr, cw
 		}
-		subReg := agent.FilterRegistry(reg, sk.AllowedTools, agent.SubagentMetaTools()...)
+		subReg := agent.SubagentToolRegistry(reg, sk.AllowedTools)
 		continueFrom, forkFrom := strings.TrimSpace(runOpts.ContinueFrom), strings.TrimSpace(runOpts.ForkFrom)
 		if continueFrom != "" && forkFrom != "" {
 			return "", fmt.Errorf("continue_from and fork_from are mutually exclusive")
@@ -1114,12 +1117,16 @@ func isGitMarker(path string) bool {
 	return err == nil && (fi.IsDir() || fi.Mode().IsRegular())
 }
 
-func newSubagentStore(sessionDir string) *agent.SubagentStore {
+func newSubagentStore(sessionDir string) (*agent.SubagentStore, error) {
 	sessionDir = strings.TrimSpace(sessionDir)
 	if sessionDir == "" {
-		return nil
+		return nil, nil
 	}
-	return agent.NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	store := agent.NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	if _, err := store.CleanupStaleRunning(); err != nil {
+		return nil, fmt.Errorf("cleanup stale subagents: %w", err)
+	}
+	return store, nil
 }
 
 func subagentEffectiveIdentity(cfg *config.Config, baseModelRef string, base *config.ProviderEntry, modelRef, effort string) (string, string) {

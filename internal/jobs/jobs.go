@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -61,15 +62,18 @@ type Job struct {
 	Label     string
 	SessionID string
 
-	mu         sync.Mutex
-	buf        bytes.Buffer
-	readOffset int
-	status     Status
-	result     string
-	resultRead bool // result already surfaced by Output (task jobs stream nothing to buf)
-	startedAt  int64
-	cancel     context.CancelFunc
-	done       chan struct{}
+	mu          sync.Mutex
+	buf         bytes.Buffer
+	readOffset  int
+	status      Status
+	result      string
+	resultRead  bool // result already surfaced by Output (task jobs stream nothing to buf)
+	startedAt   int64
+	activityAt  int64
+	runReturned bool
+	cancel      context.CancelFunc
+	done        chan struct{}
+	stalled     bool
 }
 
 // Manager is the session's background-job table. It is safe for concurrent use.
@@ -86,6 +90,8 @@ type Manager struct {
 	completed  []completion // finished-job summaries awaiting drain into the next turn
 	active     string
 	destroying map[string]bool
+
+	stalledWarning time.Duration
 }
 
 type completion struct {
@@ -93,15 +99,34 @@ type completion struct {
 	text      string
 }
 
+// Option configures a Manager.
+type Option func(*Manager)
+
+// WithStalledWarningAfter enables one stalled warning per job after d without
+// job-owned visible output. A non-positive duration disables stalled warnings.
+func WithStalledWarningAfter(d time.Duration) Option {
+	return func(m *Manager) {
+		if d > 0 {
+			m.stalledWarning = d
+		}
+	}
+}
+
 // NewManager returns a Manager whose jobs run under a fresh session-scoped
 // context (cancelled by Close). sink receives job-lifecycle notices; pass the
 // session's synchronized sink (event.Sync) since jobs emit from goroutines.
-func NewManager(sink event.Sink) *Manager {
+func NewManager(sink event.Sink, opts ...Option) *Manager {
 	if nilutil.IsNil(sink) {
 		sink = event.Discard
 	}
 	root, cancel := context.WithCancel(context.Background())
-	return &Manager{sink: sink, root: root, cancel: cancel, jobs: map[string]*Job{}, destroying: map[string]bool{}}
+	m := &Manager{sink: sink, root: root, cancel: cancel, jobs: map[string]*Job{}, destroying: map[string]bool{}}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(m)
+		}
+	}
+	return m
 }
 
 // jobWriter appends a job's streamed output under its lock so a concurrent
@@ -111,6 +136,7 @@ type jobWriter struct{ j *Job }
 func (w jobWriter) Write(p []byte) (int, error) {
 	w.j.mu.Lock()
 	defer w.j.mu.Unlock()
+	w.j.activityAt = nowMs()
 	return w.j.buf.Write(p)
 }
 
@@ -131,7 +157,8 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 	m.seq++
 	id := fmt.Sprintf("%s-%d", kind, m.seq)
 	ctx, cancel := context.WithCancel(m.root)
-	j := &Job{ID: id, Kind: kind, Label: label, SessionID: parentSession, status: Running, startedAt: nowMs(), cancel: cancel, done: make(chan struct{})}
+	startedAt := nowMs()
+	j := &Job{ID: id, Kind: kind, Label: label, SessionID: parentSession, status: Running, startedAt: startedAt, activityAt: startedAt, cancel: cancel, done: make(chan struct{})}
 	m.jobs[id] = j
 	m.order = append(m.order, id)
 	m.mu.Unlock()
@@ -139,9 +166,16 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 	m.emitIfActive(parentSession, event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: startedText(kind, id, label)})
 
 	m.wg.Add(1)
+	if m.stalledWarning > 0 {
+		m.wg.Add(1)
+		go m.monitorStalled(parentSession, j)
+	}
 	go func() {
 		defer m.wg.Done()
-		result, err := run(ctx, jobWriter{j})
+		result, err := runRecovered(ctx, jobWriter{j}, run)
+		j.mu.Lock()
+		j.runReturned = true
+		j.mu.Unlock()
 
 		var st Status
 		switch {
@@ -172,6 +206,46 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 		close(j.done)
 	}()
 	return j
+}
+
+func runRecovered(ctx context.Context, out io.Writer, run func(context.Context, io.Writer) (string, error)) (result string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("internal error: panic: %v\n%s", r, debug.Stack())
+		}
+	}()
+	return run(ctx, out)
+}
+
+func (m *Manager) monitorStalled(parentSession string, j *Job) {
+	defer m.wg.Done()
+	timer := time.NewTimer(m.stalledWarning)
+	defer timer.Stop()
+	for {
+		select {
+		case <-j.done:
+			return
+		case <-timer.C:
+			j.mu.Lock()
+			if j.runReturned || j.status != Running {
+				j.mu.Unlock()
+				return
+			}
+			idle := time.Since(time.UnixMilli(j.activityAt))
+			if idle >= m.stalledWarning && !j.stalled {
+				j.stalled = true
+				j.mu.Unlock()
+				m.recordStalled(parentSession, j.ID, j.Kind, j.Label)
+				return
+			}
+			wait := m.stalledWarning - idle
+			if wait <= 0 {
+				wait = m.stalledWarning
+			}
+			j.mu.Unlock()
+			timer.Reset(wait)
+		}
+	}
 }
 
 // recordCompletion queues the finished-job summary for DrainCompletedNote and
@@ -205,6 +279,31 @@ func (m *Manager) recordCompletion(parentSession, id, kind, label string, st Sta
 	}
 	if shouldEmit {
 		m.sink.Emit(event.Event{Kind: event.Notice, Level: level, Text: text})
+	}
+}
+
+func (m *Manager) recordStalled(parentSession, id, kind, label string) {
+	tag := id
+	if label != "" {
+		tag = fmt.Sprintf("%s (%s)", id, label)
+	}
+	parentSession = strings.TrimSpace(parentSession)
+	m.mu.Lock()
+	if parentSession != "" && m.destroying[parentSession] {
+		m.mu.Unlock()
+		return
+	}
+	text := fmt.Sprintf("%s may be stalled — still running after %s with no visible output. Inspect it with wait or bash_output, or stop it with kill_shell.", tag, m.stalledWarning.Round(time.Second))
+	m.completed = append(m.completed, completion{sessionID: parentSession, text: text})
+	active := m.active
+	shouldEmit := active == "" || parentSession == "" || active == parentSession
+	m.mu.Unlock()
+	if shouldEmit {
+		m.sink.Emit(event.Event{
+			Kind:  event.Notice,
+			Level: event.LevelWarn,
+			Text:  fmt.Sprintf("background %s may be stalled: %s — still running after %s with no visible output; inspect with wait/bash_output or stop with kill_shell", kind, id, m.stalledWarning.Round(time.Second)),
+		})
 	}
 }
 
@@ -407,7 +506,7 @@ func (m *Manager) DrainCompletedNoteForSession(parentSession string) string {
 	if len(c) == 0 {
 		return ""
 	}
-	return "Background jobs finished since your last message: " + strings.Join(c, "; ") +
+	return "Background job updates since your last message: " + strings.Join(c, "; ") +
 		". Read their output with bash_output or wait if you still need it."
 }
 

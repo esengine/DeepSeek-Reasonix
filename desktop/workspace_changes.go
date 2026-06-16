@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"reasonix/internal/control"
 	"reasonix/internal/proc"
@@ -138,7 +140,11 @@ func (a *App) workspaceBaseForTab(tabID string) (string, error) {
 // children inherit the invisible console, fsmonitor/auto-maintenance off so a
 // probe never spawns a background daemon that opens a console of its own (#3906).
 func workspaceGit(args ...string) *exec.Cmd {
-	cmd := exec.Command("git", append([]string{"-c", "core.fsmonitor=false", "-c", "maintenance.auto=false"}, args...)...)
+	return workspaceGitCommand(context.Background(), args...)
+}
+
+func workspaceGitCommand(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-c", "core.fsmonitor=false", "-c", "maintenance.auto=false"}, args...)...)
 	proc.HideWindow(cmd)
 	return cmd
 }
@@ -223,7 +229,10 @@ func workspaceRelPathFromGitStatus(repoRoot, base, path string) string {
 // at base, or an empty string when base is not inside a git repository or when
 // git is unavailable.
 func workspaceGitBranch(base string) string {
-	cmd := workspaceGit("-C", base, "branch", "--show-current")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cmd := workspaceGitCommand(ctx, "-C", base, "branch", "--show-current")
 	raw, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -232,7 +241,7 @@ func workspaceGitBranch(base string) string {
 		return branch
 	}
 
-	headCmd := workspaceGit("-C", base, "rev-parse", "--short", "HEAD")
+	headCmd := workspaceGitCommand(ctx, "-C", base, "rev-parse", "--short", "HEAD")
 	raw, err = headCmd.Output()
 	if err != nil {
 		return ""

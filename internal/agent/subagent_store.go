@@ -21,9 +21,10 @@ import (
 type SubagentStatus string
 
 const (
-	SubagentRunning   SubagentStatus = "running"
-	SubagentCompleted SubagentStatus = "completed"
-	SubagentFailed    SubagentStatus = "failed"
+	SubagentRunning     SubagentStatus = "running"
+	SubagentCompleted   SubagentStatus = "completed"
+	SubagentFailed      SubagentStatus = "failed"
+	SubagentInterrupted SubagentStatus = "interrupted"
 )
 
 // SubagentMeta is the sidecar for a persisted sub-agent transcript. It captures
@@ -183,6 +184,47 @@ func DeleteSubagentsByParent(sessionDir, parentSession string) error {
 		}
 	}
 	return nil
+}
+
+// CleanupStaleRunning marks persisted running sub-agents as interrupted. It is
+// intended for startup, before this process accepts new background sub-agent
+// work, so a previous crash cannot leave ghost "running" refs behind.
+func (s *SubagentStore) CleanupStaleRunning() (int, error) {
+	if s == nil {
+		return 0, nil
+	}
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	now := time.Now().UTC()
+	cleaned := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".meta.json") {
+			continue
+		}
+		ref := strings.TrimSuffix(entry.Name(), ".meta.json")
+		if !validSubagentRef(ref) {
+			continue
+		}
+		meta, err := s.LoadMeta(ref)
+		if err != nil {
+			return cleaned, err
+		}
+		if meta.Status != SubagentRunning {
+			continue
+		}
+		meta.Status = SubagentInterrupted
+		meta.UpdatedAt = now
+		if err := s.saveMeta(meta); err != nil {
+			return cleaned, err
+		}
+		cleaned++
+	}
+	return cleaned, nil
 }
 
 func (s *SubagentStore) PrepareFresh(spec SubagentSpec) (*SubagentRun, error) {
@@ -383,6 +425,9 @@ func validateMeta(meta SubagentMeta, spec SubagentSpec) error {
 	}
 	if meta.Status == SubagentFailed {
 		return fmt.Errorf("subagent reference %q failed and cannot be continued", meta.Ref)
+	}
+	if meta.Status == SubagentInterrupted {
+		return fmt.Errorf("subagent reference %q was interrupted by a previous shutdown or crash and cannot be continued or forked; run a fresh subagent instead", meta.Ref)
 	}
 	want := metaFromSpec(meta.Ref, meta.Status, meta.CreatedAt, meta.UpdatedAt, spec)
 	switch {

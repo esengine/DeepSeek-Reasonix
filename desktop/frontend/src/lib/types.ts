@@ -128,6 +128,8 @@ export interface TabMeta {
   scope: string;
   workspaceRoot: string;
   workspaceName: string;
+  workspacePath?: string;
+  gitBranch?: string;
   topicId: string;
   topicTitle: string;
   sessionPath?: string;
@@ -336,6 +338,10 @@ export interface Meta {
   startupErr?: string;
   eventChannel: string;
   cwd: string;
+  workspaceRoot?: string;
+  workspaceName?: string;
+  workspacePath?: string;
+  gitBranch?: string;
   autoApproveTools?: boolean;
   bypass?: boolean; // legacy JSON key for YOLO/full-access tool auto-approval
   collaborationMode?: CollaborationMode;
@@ -641,7 +647,7 @@ export interface MemoryView {
 }
 
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
-export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "skills" | "memory" | "hooks" | "permissions" | "sandbox" | "network" | "appearance" | "updates";
+export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "skills" | "memory" | "hooks" | "shortcuts" | "permissions" | "sandbox" | "network" | "appearance" | "updates";
 
 // Settings panel payloads (desktop/settings_app.go).
 export interface ProviderView {

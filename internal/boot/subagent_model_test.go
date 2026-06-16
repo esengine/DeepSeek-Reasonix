@@ -1,10 +1,13 @@
 package boot
 
 import (
+	"path/filepath"
 	"testing"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/skill"
+	"reasonix/internal/tool"
 )
 
 func TestSubagentModelRefUsesConfiguredDefault(t *testing.T) {
@@ -117,10 +120,54 @@ func TestSubagentEffectiveIdentityUsesResolvedModelAndEffort(t *testing.T) {
 }
 
 func TestNewSubagentStoreRequiresSessionDir(t *testing.T) {
-	if got := newSubagentStore(""); got != nil {
+	if got, err := newSubagentStore(""); err != nil || got != nil {
+		if err != nil {
+			t.Fatalf("empty session dir error = %v", err)
+		}
 		t.Fatalf("empty session dir should disable subagent store, got %#v", got)
 	}
-	if got := newSubagentStore(t.TempDir()); got == nil {
+	if got, err := newSubagentStore(t.TempDir()); err != nil || got == nil {
+		if err != nil {
+			t.Fatalf("non-empty session dir error = %v", err)
+		}
 		t.Fatal("non-empty session dir should create subagent store")
+	}
+}
+
+func TestNewSubagentStoreCleansStaleRunningRefs(t *testing.T) {
+	sessionDir := t.TempDir()
+	store := agent.NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	spec := agent.SubagentSpec{
+		Kind:          "task",
+		Name:          "task",
+		WorkspaceRoot: t.TempDir(),
+		ParentSession: "parent-session",
+		SystemPrompt:  "sys",
+		Registry:      tool.NewRegistry(),
+		Model:         "base-model",
+	}
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	if err := store.MarkRunning(run); err != nil {
+		t.Fatalf("MarkRunning: %v", err)
+	}
+	ref := run.Ref
+	run.Release()
+
+	got, err := newSubagentStore(sessionDir)
+	if err != nil {
+		t.Fatalf("newSubagentStore: %v", err)
+	}
+	if got == nil {
+		t.Fatal("newSubagentStore returned nil")
+	}
+	meta, err := got.LoadMeta(ref)
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	if meta.Status != agent.SubagentInterrupted {
+		t.Fatalf("status = %q, want interrupted", meta.Status)
 	}
 }

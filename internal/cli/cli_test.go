@@ -168,7 +168,7 @@ command = "legacy-bin"
 	if err != nil {
 		t.Fatalf("read migrated user config: %v", err)
 	}
-	for _, want := range []string{`config_version = 2`, `[desktop]`, `name    = "legacy-cli"`} {
+	for _, want := range []string{`config_version = 3`, `[desktop]`, `name    = "legacy-cli"`} {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("migrated config missing %q:\n%s", want, body)
 		}
@@ -951,6 +951,23 @@ func TestWithBuiltinFamiliesAddsMissingMiMo(t *testing.T) {
 	// A user's customized deepseek must not be duplicated.
 	if n := len(groupByFamilyKeys(withBuiltinFamilies(cfg), "deepseek")); n != 2 {
 		t.Fatalf("deepseek members = %d, want the user's 2 (no injected duplicate)", n)
+	}
+}
+
+func TestWithBuiltinFamiliesForLanguageUsesDeepSeekPricing(t *testing.T) {
+	providers := withBuiltinFamiliesForLanguage(nil, "zh")
+	var flash *config.ProviderEntry
+	for i := range providers {
+		if providers[i].Name == "deepseek-flash" {
+			flash = &providers[i]
+			break
+		}
+	}
+	if flash == nil {
+		t.Fatal("deepseek-flash provider missing")
+	}
+	if flash.Price == nil || flash.Price.Output != 2 || flash.Price.Currency != "¥" {
+		t.Fatalf("flash price = %+v, want CNY preset", flash.Price)
 	}
 }
 

@@ -54,7 +54,9 @@ models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default     = "deepseek-v4-flash"   # optional; defaults to the first of `models`
 api_key_env = "DEEPSEEK_API_KEY"
 context_window = 1000000
-prices      = { "deepseek-v4-flash" = { cache_hit = 0.0028, input = 0.14, output = 0.28, currency = "$" }, "deepseek-v4-pro" = { cache_hit = 0.003625, input = 0.435, output = 0.87, currency = "$" } }   # per 1M tokens
+# Official DeepSeek providers seed RMB prices by default.
+# Set prices explicitly only when you want to pin a currency/rate.
+# prices = { "deepseek-v4-flash" = { cache_hit = 0.02, input = 1, output = 2, currency = "¥" }, "deepseek-v4-pro" = { cache_hit = 0.025, input = 3, output = 6, currency = "¥" } }   # per 1M tokens
 # DeepSeek thinking is always on; effort: high | max. Omit for auto (provider default).
 effort      = "high"
 
@@ -69,6 +71,7 @@ base_url       = "https://api.xiaomimimo.com/v1"
 model          = "mimo-v2.5-pro"   # thinking-mode on by default; reasoning_content rendered dim above the answer
 api_key_env    = "MIMO_API_KEY"
 context_window = 1000000
+price          = { cache_hit = 0.025, input = 3, output = 6, currency = "¥" }   # per 1M tokens
 
 [[providers]]
 name           = "mimo-flash"
@@ -77,6 +80,7 @@ base_url       = "https://api.xiaomimimo.com/v1"
 model          = "mimo-v2-flash"   # thinking-mode off by default; cheaper / faster
 api_key_env    = "MIMO_API_KEY"
 context_window = 65536
+price          = { cache_hit = 0.07, input = 0.70, output = 2.10, currency = "¥" }   # per 1M tokens
 
 # Custom /effort levels for a provider. When supported_efforts is set, the
 # /effort command exposes these levels; default_effort is what "/effort auto"
@@ -115,6 +119,9 @@ effort         = "high"
 [tools]
 enabled = []   # empty = all built-in tools
 bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
+
+[tools.background_jobs]
+stalled_warning_seconds = 900   # warn once per background job after this many quiet seconds; 0 disables
 
 # CodeGraph code intelligence (symbol/call-graph search via tree-sitter + SQLite),
 # a built-in MCP server giving the agent codegraph_* search / context / explore /

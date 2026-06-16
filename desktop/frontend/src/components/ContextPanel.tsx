@@ -1,11 +1,11 @@
 // ContextPanel shows the active tab's context gauge, token usage, read files,
 // and workspace changes. All visible text is routed through the i18n dictionary.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FileText } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
-import { useT, type Translator } from "../lib/i18n";
-import { formatMoney } from "../lib/money";
+import { useI18n, type Translator } from "../lib/i18n";
+import { formatMoney, formatMoneyLocalized } from "../lib/money";
 import type { DictKey } from "../locales/en";
 import type { ContextInfo, ContextPanelInfo, UsageSourceStats, WireUsage } from "../lib/types";
 
@@ -16,6 +16,7 @@ interface ContextPanelProps {
   sessionTokens?: number;
   sessionCost?: number;
   sessionCurrency?: string;
+  sessionGen?: number;
   refreshKey?: number;
   onOpenWorkspaceMode?: (mode: "files" | "changed") => void;
   onOpenWorkspaceFile?: (path: string) => void;
@@ -216,6 +217,7 @@ export function ContextPanel({
   sessionTokens,
   sessionCost,
   sessionCurrency,
+  sessionGen,
   refreshKey,
   onOpenWorkspaceMode,
   onOpenWorkspaceFile,
@@ -223,13 +225,16 @@ export function ContextPanel({
   onOpenWorkspaceChangeList,
   onOpenWorkspaceChangeFile,
 }: ContextPanelProps) {
-  const t = useT();
+  const { locale, t } = useI18n();
   const [info, setInfo] = useState<ContextPanelInfo | null>(null);
+  const refreshSeq = useRef(0);
 
   const refresh = useCallback(async () => {
     if (!tabId) return;
+    const seq = ++refreshSeq.current;
     try {
-      setInfo(await app.ContextPanel(tabId));
+      const next = await app.ContextPanel(tabId);
+      if (refreshSeq.current === seq) setInfo(next);
     } catch {
       /* bridge unavailable */
     }
@@ -239,6 +244,12 @@ export function ContextPanel({
     const id = window.setInterval(() => void refresh(), 2000);
     return () => window.clearInterval(id);
   }, [refresh]);
+
+  useEffect(() => {
+    refreshSeq.current += 1;
+    setInfo(null);
+    void refresh();
+  }, [refresh, sessionGen]);
 
   useEffect(() => {
     void refresh();
@@ -369,7 +380,7 @@ export function ContextPanel({
                 {costSources.map((row) => (
                   <div className="context-panel__source-row" key={row.source}>
                     <span>{sourceLabel(row.label, t)}</span>
-                    <strong>{formatMoney(row.cost, row.currency, "dash")}</strong>
+                    <strong>{formatMoneyLocalized(row.cost, row.currency, { locale, empty: "dash" })}</strong>
                     <em>{t("context.sourceRequests", { count: row.requests })}</em>
                   </div>
                 ))}

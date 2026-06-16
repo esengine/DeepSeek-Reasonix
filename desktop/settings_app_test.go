@@ -131,7 +131,7 @@ func TestSaveProviderFiltersNonChatModels(t *testing.T) {
 }
 
 func TestOfficialMimoAPITemplateIncludesVisionModels(t *testing.T) {
-	entries, keyEnv, err := officialProviderTemplate("mimo-api")
+	entries, keyEnv, err := officialProviderTemplate("mimo-api", "en")
 	if err != nil {
 		t.Fatalf("officialProviderTemplate: %v", err)
 	}
@@ -146,6 +146,32 @@ func TestOfficialMimoAPITemplateIncludesVisionModels(t *testing.T) {
 	}
 	if got.DefaultModel() != "mimo-v2.5-pro" {
 		t.Fatalf("mimo-api default = %q, want mimo-v2.5-pro", got.DefaultModel())
+	}
+	if got.Prices["mimo-v2.5-pro"] == nil || got.Prices["mimo-v2.5-pro"].Currency != "¥" || got.Prices["mimo-v2.5-pro"].Output != 6 {
+		t.Fatalf("mimo-v2.5-pro price = %+v, want RMB domestic pricing", got.Prices["mimo-v2.5-pro"])
+	}
+	if got.Prices["mimo-v2.5"] == nil || got.Prices["mimo-v2.5"].Currency != "¥" || got.Prices["mimo-v2.5"].Output != 2 {
+		t.Fatalf("mimo-v2.5 price = %+v, want RMB domestic pricing", got.Prices["mimo-v2.5"])
+	}
+	if got.Prices["mimo-v2-omni"] == nil || got.Prices["mimo-v2-omni"].Currency != "¥" || got.Prices["mimo-v2-omni"].Output != 2 {
+		t.Fatalf("mimo-v2-omni price = %+v, want RMB domestic pricing", got.Prices["mimo-v2-omni"])
+	}
+}
+
+func TestOfficialDeepSeekTemplateDefaultsToRMBPricing(t *testing.T) {
+	entries, keyEnv, err := officialProviderTemplate("deepseek", "en")
+	if err != nil {
+		t.Fatalf("officialProviderTemplate: %v", err)
+	}
+	if keyEnv != "DEEPSEEK_API_KEY" || len(entries) != 1 {
+		t.Fatalf("template = %v/%q, want one DEEPSEEK_API_KEY entry", entries, keyEnv)
+	}
+	got := entries[0]
+	if got.Prices["deepseek-v4-flash"] == nil || got.Prices["deepseek-v4-flash"].Currency != "¥" || got.Prices["deepseek-v4-flash"].Output != 2 {
+		t.Fatalf("deepseek-v4-flash price = %+v, want RMB pricing", got.Prices["deepseek-v4-flash"])
+	}
+	if got.Prices["deepseek-v4-pro"] == nil || got.Prices["deepseek-v4-pro"].Currency != "¥" || got.Prices["deepseek-v4-pro"].Output != 6 {
+		t.Fatalf("deepseek-v4-pro price = %+v, want RMB pricing", got.Prices["deepseek-v4-pro"])
 	}
 }
 

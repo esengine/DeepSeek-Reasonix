@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -87,6 +88,112 @@ func TestCommandsIncludesEffortNotThinking(t *testing.T) {
 	}
 	if hasCommand(cmds, "thinking") {
 		t.Fatalf("Commands() should not include thinking: %+v", cmds)
+	}
+}
+
+func TestMetaForTabIncludesWorkspaceContext(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolateDesktopUserDirs(t)
+
+	repo := t.TempDir()
+	configuredSandboxRoot := filepath.Join(t.TempDir(), "sandbox")
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	cfg.Sandbox.WorkspaceRoot = configuredSandboxRoot
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatal(err)
+	}
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(orig); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "init")
+	runGit(t, "checkout", "-b", "feature/meta")
+
+	app := NewApp()
+	app.tabs = map[string]*WorkspaceTab{"tab-1": {
+		ID:            "tab-1",
+		Scope:         "project",
+		WorkspaceRoot: repo,
+		Ready:         true,
+		disabledMCP:   map[string]ServerView{},
+	}}
+	app.activeTabID = "tab-1"
+
+	got := app.MetaForTab("tab-1")
+	if got.Cwd != repo || got.WorkspaceRoot != repo || got.WorkspacePath != repo {
+		t.Fatalf("workspace fields = cwd:%q root:%q path:%q, want %q", got.Cwd, got.WorkspaceRoot, got.WorkspacePath, repo)
+	}
+	if got.WorkspaceName != filepath.Base(repo) {
+		t.Fatalf("workspaceName = %q, want %q", got.WorkspaceName, filepath.Base(repo))
+	}
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal meta: %v", err)
+	}
+	if strings.Contains(string(raw), "sandboxPath") || strings.Contains(string(raw), configuredSandboxRoot) {
+		t.Fatalf("meta should not expose configured sandbox root as sandboxPath: %s", raw)
+	}
+	if got.GitBranch != "feature/meta" {
+		t.Fatalf("gitBranch = %q, want feature/meta", got.GitBranch)
+	}
+}
+
+func TestListTabsDoesNotExposeConfiguredSandboxPath(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	workspace := t.TempDir()
+	configuredSandboxRoot := filepath.Join(t.TempDir(), "sandbox")
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	cfg.Sandbox.WorkspaceRoot = configuredSandboxRoot
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.tabs = map[string]*WorkspaceTab{"tab-1": {
+		ID:            "tab-1",
+		Scope:         "project",
+		WorkspaceRoot: workspace,
+		Ready:         true,
+		disabledMCP:   map[string]ServerView{},
+	}}
+	app.activeTabID = "tab-1"
+	app.tabOrder = []string{"tab-1"}
+
+	raw, err := json.Marshal(app.ListTabs())
+	if err != nil {
+		t.Fatalf("marshal tabs: %v", err)
+	}
+	if strings.Contains(string(raw), "sandboxPath") || strings.Contains(string(raw), configuredSandboxRoot) {
+		t.Fatalf("tab metadata should not expose configured sandbox root as sandboxPath: %s", raw)
+	}
+}
+
+func TestMetaForTabLeavesGitBranchEmptyOutsideGit(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	workspace := t.TempDir()
+	app := NewApp()
+	app.tabs = map[string]*WorkspaceTab{"tab-1": {
+		ID:            "tab-1",
+		Scope:         "project",
+		WorkspaceRoot: workspace,
+		Ready:         true,
+		disabledMCP:   map[string]ServerView{},
+	}}
+	app.activeTabID = "tab-1"
+
+	if got := app.MetaForTab("tab-1"); got.GitBranch != "" {
+		t.Fatalf("gitBranch = %q, want empty", got.GitBranch)
 	}
 }
 
@@ -677,6 +784,36 @@ api_key_env = "DEEPSEEK_API_KEY"
 	}
 	if cfg.DefaultModel != "deepseek/deepseek-v4-flash" {
 		t.Fatalf("default_model = %q, want deepseek/deepseek-v4-flash", cfg.DefaultModel)
+	}
+}
+
+func TestAddOfficialProviderAccessUsesDesktopLanguagePricing(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(config.UserConfigPath(), []byte(`
+[desktop]
+language = "zh"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if err := NewApp().AddOfficialProviderAccess("deepseek", ""); err != nil {
+		t.Fatalf("AddOfficialProviderAccess: %v", err)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	p, ok := cfg.Provider("deepseek")
+	if !ok {
+		t.Fatal("deepseek provider not saved")
+	}
+	flash := p.Prices["deepseek-v4-flash"]
+	pro := p.Prices["deepseek-v4-pro"]
+	if flash == nil || flash.Output != 2 || flash.Currency != "¥" {
+		t.Fatalf("flash price = %+v, want CNY preset", flash)
+	}
+	if pro == nil || pro.Output != 6 || pro.Currency != "¥" {
+		t.Fatalf("pro price = %+v, want CNY preset", pro)
 	}
 }
 

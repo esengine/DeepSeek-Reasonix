@@ -22,6 +22,10 @@ function meta(overrides: Partial<Meta> = {}): Meta {
     ready: true,
     eventChannel: "events",
     cwd: "/repo",
+    workspaceRoot: "/repo",
+    workspaceName: "repo",
+    workspacePath: "/repo",
+    gitBranch: "main",
     autoApproveTools: false,
     bypass: false,
     collaborationMode: "normal",
@@ -53,6 +57,8 @@ console.log("\nuse controller meta");
 {
   eq(sameMeta(meta(), meta()), true, "identical meta is unchanged");
   eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "plan" })), false, "collaboration mode changes invalidate meta equality");
+  eq(sameMeta(meta({ workspacePath: "/repo" }), meta({ workspacePath: "/other" })), false, "workspace path changes invalidate meta equality");
+  eq(sameMeta(meta({ gitBranch: "main" }), meta({ gitBranch: "feature" })), false, "git branch changes invalidate meta equality");
 }
 
 {
@@ -67,9 +73,24 @@ console.log("\nuse controller meta");
 }
 
 {
+  const idleExecutor = reducer(
+    { ...initialState, context: { used: 0, window: 200, sessionTokens: 0 } },
+    { type: "event", e: { kind: "usage", usage: usage("executor") } },
+  );
+  eq(idleExecutor.sessionTokens, 0, "executor usage outside a turn does not inflate session tokens");
+  eq(idleExecutor.context.used, 0, "executor usage outside a turn does not refresh context used tokens");
+
   const idleHelper = reducer(initialState, { type: "event", e: { kind: "usage", usage: usage("classifier") } });
   eq(idleHelper.sessionTokens, 0, "helper usage outside a turn does not inflate session tokens");
   eq(idleHelper.sessionCost, 0, "helper usage outside a turn does not inflate session cost");
+
+  const pendingClassifier = reducer(
+    { ...initialState, running: true, context: { used: 0, window: 200, sessionTokens: 0 } },
+    { type: "event", e: { kind: "usage", usage: usage("classifier") } },
+  );
+  eq(pendingClassifier.sessionTokens, 120, "classifier usage while send is running counts toward session tokens");
+  eq(pendingClassifier.sessionCost, 0.001, "classifier usage while send is running counts toward session cost");
+  eq(pendingClassifier.context.used, 0, "classifier usage while send is running does not refresh context used tokens");
 
   const active = reducer(initialState, { type: "event", e: { kind: "turn_started" } });
   const activeHelper = reducer(active, { type: "event", e: { kind: "usage", usage: usage("subagent") } });

@@ -264,6 +264,15 @@ func requestHasTool(req provider.Request, name string) bool {
 	return false
 }
 
+func requestToolSchemaContains(req provider.Request, name, want string) bool {
+	for _, schema := range req.Tools {
+		if schema.Name == name {
+			return strings.Contains(string(schema.Parameters), want)
+		}
+	}
+	return false
+}
+
 func requestHasToolPrefix(req provider.Request, prefix string) bool {
 	for _, schema := range req.Tools {
 		if strings.HasPrefix(schema.Name, prefix) {
@@ -474,6 +483,65 @@ model = "x"
 	}
 	if got := bootLastUser(reqs[1]); got != "first skill task" {
 		t.Fatalf("skill subagent user prompt = %q, want first skill task", got)
+	}
+}
+
+func TestBuildSubagentSkillGetsForegroundOnlyBash(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootSubagentTestProvider()
+	prov := &bootSubagentTestProvider{}
+	setBootSubagentTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-subagent-test"
+model = "x"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	ctrl.SetSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
+
+	if err := ctrl.Run(context.Background(), "first review"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.requestsSnapshot()
+	if len(reqs) < 2 {
+		t.Fatalf("provider requests = %d, want parent request plus skill subagent request", len(reqs))
+	}
+	parentReq, subReq := reqs[0], reqs[1]
+	for _, want := range []string{"task", "bash", "wait", "bash_output", "kill_shell"} {
+		if !requestHasTool(parentReq, want) {
+			t.Fatalf("parent request missing %q; tools=%v", want, toolSchemaNames(parentReq.Tools))
+		}
+	}
+	if !requestToolSchemaContains(parentReq, "bash", "run_in_background") {
+		t.Fatalf("parent bash schema should include run_in_background")
+	}
+	for _, hidden := range []string{"task", "run_skill", "read_skill", "install_skill", "install_source", "explore", "research", "review", "security_review", "wait", "bash_output", "kill_shell"} {
+		if requestHasTool(subReq, hidden) {
+			t.Fatalf("skill subagent request should hide %q; tools=%v", hidden, toolSchemaNames(subReq.Tools))
+		}
+	}
+	if !requestHasTool(subReq, "bash") {
+		t.Fatalf("skill subagent request should keep foreground bash; tools=%v", toolSchemaNames(subReq.Tools))
+	}
+	if requestToolSchemaContains(subReq, "bash", "run_in_background") {
+		t.Fatalf("skill subagent bash schema should not include run_in_background")
 	}
 }
 
