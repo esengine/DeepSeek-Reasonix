@@ -199,6 +199,7 @@ export function WorkspacePanel({
   fileListRequest,
   changeListRequest,
   showViewTabs = true,
+  gitBranch,
 }: {
   open: boolean;
   tabId?: string;
@@ -217,6 +218,7 @@ export function WorkspacePanel({
   fileListRequest?: WorkspaceFileListRequest | null;
   changeListRequest?: WorkspaceChangeListRequest | null;
   showViewTabs?: boolean;
+  gitBranch?: string;
 }) {
   const t = useT();
   const panelRef = useRef<HTMLElement>(null);
@@ -707,7 +709,9 @@ export function WorkspacePanel({
     ? scopedChangeRows ? t("context.sessionChanges") : t("workspace.changedTab")
     : currentFileName;
   const previewSubtitle = changedMode && !selectedPath
-    ? scopedChangeRows ? t("context.changedMeta", { count: scopedChangeRows.length }) : shortCwd(cwd) || t("workspace.title")
+    ? scopedChangeRows
+      ? t("context.changedMeta", { count: scopedChangeRows.length })
+      : [gitBranch ? `@${gitBranch.trim()}` : "", cwd ? shortCwd(cwd) : ""].filter(Boolean).join(" · ") || t("workspace.title")
     : currentFileDir;
   const recentFiles = useMemo(() => [...openTabs].reverse(), [openTabs]);
   const flattened = useMemo(() => {

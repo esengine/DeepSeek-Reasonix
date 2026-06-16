@@ -3148,6 +3148,7 @@ export default function App() {
                   fileListRequest={workspaceFileListRequest}
                   changeListRequest={workspaceChangeListRequest}
                   showViewTabs={false}
+                  gitBranch={state.meta?.gitBranch}
                 />
               )}
             </div>
