@@ -19186,7 +19186,8 @@ a[href] {
 }
 
 :root[data-theme-style] .app-chrome--tabs .tabbar__tabs {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
+  width: max-content;
   max-width: calc(100% - var(--chrome-panel-control-size, 30px) - 10px);
 }
 
