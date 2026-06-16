@@ -15255,10 +15255,6 @@ a[href] {
   padding-top: 12px;
 }
 
-.sidebar__new {
-  display: none;
-}
-
 .sidebar__section--projects {
   flex: 1 1 auto;
   min-height: 160px;
