@@ -21968,12 +21968,15 @@ a[href] {
 
 /* ── Creation desktop style ─────────────────────────────────────────── */
 .app--creation {
-  --creation-accent: #13a7a5;
-  --creation-warm: #e58a6b;
+  --creation-accent: var(--accent);
+  --creation-accent-text: var(--accent-text, var(--accent-fg, #ffffff));
+  --creation-warm: var(--warn);
   --creation-surface: color-mix(in srgb, var(--bg-elev) 76%, var(--bg));
   --creation-surface-strong: color-mix(in srgb, var(--bg-elev-2) 76%, var(--bg));
   --creation-hairline: color-mix(in srgb, var(--border-soft) 82%, transparent);
-  --creation-glow: 0 18px 48px color-mix(in srgb, var(--creation-accent) 12%, transparent);
+  --creation-glow: var(--creation-accent);
+  --creation-shadow: 0 18px 48px color-mix(in srgb, var(--creation-accent) 12%, transparent);
+  --user-bubble-accent: var(--creation-accent);
 }
 
 .layout--creation {
@@ -22055,18 +22058,68 @@ a[href] {
 
 .sidebar--creation .sidebar__quick-action--creation {
   width: 100%;
-  height: 38px;
+  height: 44px;
   justify-content: center;
-  border: 1px solid color-mix(in srgb, var(--creation-accent) 30%, var(--border-soft));
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--creation-accent) 13%, var(--bg-elev));
-  color: var(--fg);
-  box-shadow: none;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--creation-accent), color-mix(in srgb, var(--creation-accent) 76%, #ffffff));
+  color: var(--creation-accent-text);
+  box-shadow:
+    0 6px 18px -8px color-mix(in srgb, var(--creation-accent) 84%, transparent),
+    var(--shadow-1);
 }
 
 .sidebar--creation .sidebar__quick-action--creation:hover {
-  background: color-mix(in srgb, var(--creation-accent) 20%, var(--bg-elev));
-  border-color: color-mix(in srgb, var(--creation-accent) 46%, var(--border));
+  background: linear-gradient(135deg, var(--creation-accent), color-mix(in srgb, var(--creation-accent) 82%, #ffffff));
+  color: var(--creation-accent-text);
+  filter: saturate(1.08) brightness(1.03);
+  transform: translateY(-1px);
+}
+
+.sidebar--creation .sidebar__features--creation {
+  display: grid;
+  gap: 6px;
+  padding: 8px 0 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
+}
+
+.sidebar--creation .sidebar__features--creation .sidebar-im,
+.sidebar--creation .sidebar__features--creation .tooltip-trigger {
+  min-width: 0;
+}
+
+.sidebar--creation .sidebar__feature-button,
+.sidebar--creation .sidebar__features--creation .sidebar-im__summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar--creation .sidebar__feature-button:hover,
+.sidebar--creation .sidebar__features--creation .sidebar-im__summary:hover {
+  background: color-mix(in srgb, var(--creation-accent) 9%, var(--bg-elev));
+  color: var(--fg);
+}
+
+.sidebar--creation .sidebar__feature-button span,
+.sidebar--creation .sidebar__features--creation .sidebar-im__summary-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sidebar--creation .sidebar__section--projects {
@@ -22086,7 +22139,10 @@ a[href] {
 }
 
 .sidebar--creation.sidebar--collapsed .sidebar__brand-name,
-.sidebar--creation.sidebar--collapsed .sidebar__quick-action--creation span {
+.sidebar--creation.sidebar--collapsed .sidebar__quick-action--creation span,
+.sidebar--creation.sidebar--collapsed .sidebar__feature-button span,
+.sidebar--creation.sidebar--collapsed .sidebar-im__summary-label,
+.sidebar--creation.sidebar--collapsed .sidebar-im__summary-status {
   display: none;
 }
 
@@ -22133,35 +22189,179 @@ a[href] {
 }
 
 .app--creation .composer-card {
-  border-color: color-mix(in srgb, var(--creation-accent) 22%, var(--border-soft));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-elev) 84%, var(--chat-bg));
-  box-shadow: var(--creation-glow);
+  --composer-glow: var(--creation-glow);
+  --composer-control-height: 30px;
+  --composer-controls-bottom: 16px;
+  --composer-send-lift: 2px;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  min-height: 106px;
+  border-color: color-mix(in srgb, var(--fg-faint) 10%, transparent);
+  border-radius: 20px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--chat-bg) 88%, var(--bg-elev) 12%),
+    color-mix(in srgb, var(--chat-bg) 93%, var(--bg-elev) 7%)
+  );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 3%, transparent),
+    0 16px 36px -34px color-mix(in srgb, #000 82%, transparent);
+  overflow: visible;
+}
+
+.app--creation .composer-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-local-raised);
+  padding: 1px;
+  border-radius: inherit;
+  background:
+    radial-gradient(28% 120% at 0% 50%, color-mix(in srgb, var(--composer-glow) 48%, transparent), transparent 74%),
+    radial-gradient(28% 120% at 100% 50%, color-mix(in srgb, var(--composer-glow) 48%, transparent), transparent 74%);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  opacity: 0.28;
+  pointer-events: none;
+  transition: opacity var(--dur-base) var(--ease-out), background var(--dur-base) var(--ease-out);
+}
+
+.app--creation .composer-card:hover::before {
+  background:
+    linear-gradient(90deg, transparent 4%, color-mix(in srgb, var(--composer-glow) 70%, transparent) 20%, color-mix(in srgb, var(--composer-glow) 46%, transparent) 48%, transparent 78%) top / 100% 1px no-repeat,
+    linear-gradient(90deg, transparent 22%, color-mix(in srgb, var(--composer-glow) 44%, transparent) 52%, color-mix(in srgb, var(--composer-glow) 72%, transparent) 84%, transparent 98%) bottom / 100% 1px no-repeat;
+  opacity: 0.78;
 }
 
 .app--creation .composer-card:focus-within {
-  border-color: color-mix(in srgb, var(--creation-accent) 50%, var(--border));
+  border-color: color-mix(in srgb, var(--composer-glow) 18%, transparent);
   box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--creation-accent) 13%, transparent),
-    var(--creation-glow);
+    inset 0 1px 0 color-mix(in srgb, #fff 4%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--composer-glow) 7%, transparent),
+    0 16px 38px -34px color-mix(in srgb, #000 84%, transparent);
+}
+
+.app--creation .composer-card:focus-within::before {
+  opacity: 0.58;
 }
 
 .app--creation .composer-card--running {
   border-color: color-mix(in srgb, var(--creation-warm) 42%, var(--border));
 }
 
+.app--creation .composer-card--running::before,
+.app--creation .composer-card--running:hover::before,
+.app--creation .composer-card--running:focus-within::before {
+  opacity: 0.82;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 42deg,
+    color-mix(in srgb, var(--composer-glow) 46%, transparent) 58deg,
+    color-mix(in srgb, var(--composer-glow) 72%, transparent) 76deg,
+    color-mix(in srgb, #fff 36%, var(--composer-glow)) 94deg,
+    color-mix(in srgb, var(--composer-glow) 58%, transparent) 112deg,
+    color-mix(in srgb, var(--composer-glow) 30%, transparent) 130deg,
+    transparent 152deg,
+    transparent 360deg
+  );
+}
+
+.app--creation .composer-resize-handle::before,
+.app--creation .composer-resize-handle:hover::before,
+.app--creation .composer-resize-handle:focus-visible::before,
+.app--creation .composer-card--resizing .composer-resize-handle::before,
+.app--creation .composer-card:focus-within .composer-resize-handle::before {
+  opacity: 0 !important;
+  box-shadow: none !important;
+}
+
+.app--creation .composer {
+  position: relative;
+  z-index: var(--z-local-handle);
+  display: block;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 18px 78px 0 28px;
+  border: 0;
+}
+
+.app--creation .composer-card--resized .composer,
+.app--creation .composer-card--autosized .composer {
+  align-items: stretch;
+}
+
+.app--creation .composer__input-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  min-height: 36px;
+}
+
 .app--creation .composer__input {
   color: var(--fg);
+  flex: 1 1 auto;
+  min-height: 28px;
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+
+.app--creation .composer__input::placeholder {
+  color: color-mix(in srgb, var(--fg-dim) 50%, transparent);
+}
+
+.app--creation .composer-card > .tooltip-trigger:has(.composer__btn--send) {
+  position: absolute;
+  right: 30px;
+  bottom: calc(var(--composer-controls-bottom) + var(--composer-send-lift));
+  z-index: var(--z-local-handle-active);
+}
+
+.app--creation .composer__btn {
+  width: var(--composer-control-height);
+  height: var(--composer-control-height);
+  border-radius: 999px;
 }
 
 .app--creation .composer__btn--send {
-  border-color: color-mix(in srgb, var(--creation-accent) 55%, var(--border));
   background: var(--creation-accent);
   color: #ffffff;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 34%, transparent),
+    0 12px 24px -15px color-mix(in srgb, var(--creation-accent) 88%, transparent),
+    0 0 0 1px color-mix(in srgb, #fff 14%, transparent);
+}
+
+.app--creation .composer__btn--send svg {
+  transform: translate(0.4px, -0.2px);
+  stroke-width: 2.3;
 }
 
 .app--creation .composer__btn--send:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--creation-accent) 82%, #ffffff);
+  background: var(--creation-accent);
+  color: #ffffff;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 42%, transparent),
+    0 15px 28px -14px color-mix(in srgb, var(--creation-accent) 84%, transparent),
+    0 0 20px -9px color-mix(in srgb, var(--creation-accent) 76%, transparent);
+  transform: translateY(-2px) scale(1.04);
+}
+
+.app--creation .composer__btn--send:disabled {
+  background: color-mix(in srgb, var(--creation-accent) 72%, transparent);
+  color: #ffffff;
+  opacity: 1;
+}
+
+.app--creation .composer-meta {
+  position: relative;
+  z-index: var(--z-local-handle);
+  flex: 0 0 auto;
+  min-height: calc(var(--composer-control-height) + var(--composer-controls-bottom));
+  padding: 0 84px var(--composer-controls-bottom) 28px;
 }
 
 .app--creation .composer-modebar,
@@ -22189,6 +22389,253 @@ a[href] {
 .app--creation .workbench-dock__tab--active {
   color: var(--fg);
   background: color-mix(in srgb, var(--creation-accent) 13%, var(--bg-elev));
+}
+
+.app--creation .msg--user:not(.msg--im-source) .msg__body {
+  background: color-mix(in srgb, var(--user-bubble-accent, var(--creation-accent)) 90%, #000000);
+  border: 1px solid color-mix(in srgb, var(--user-bubble-accent, var(--creation-accent)) 92%, #000000);
+  border-radius: 13px 13px 5px 13px;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .app--creation .msg--user:not(.msg--im-source) .msg__body {
+  background: color-mix(in srgb, var(--user-bubble-accent, var(--creation-accent)) 90%, #ffffff);
+  border-color: color-mix(in srgb, var(--user-bubble-accent, var(--creation-accent)) 92%, #ffffff);
+  color: #ffffff;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .app--creation .msg--user:not(.msg--im-source) .msg__body {
+    background: color-mix(in srgb, var(--user-bubble-accent, var(--creation-accent)) 90%, #ffffff);
+    border-color: color-mix(in srgb, var(--user-bubble-accent, var(--creation-accent)) 92%, #ffffff);
+    color: #ffffff;
+  }
+}
+
+.app--creation .process-card,
+.app--creation .tool-card,
+.app--creation .ask-card,
+.app--creation .prompt-shelf__bar {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-1);
+}
+
+.app--creation .process-card:hover {
+  border-color: color-mix(in srgb, var(--fg-faint) 30%, var(--border));
+  transform: translateY(-1px);
+}
+
+.app--creation .process-card__head {
+  min-height: 42px;
+  padding: 10px 13px;
+}
+
+.app--creation .process-card__head:hover {
+  background: transparent;
+}
+
+.app--creation .process-card__icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  color: var(--creation-accent);
+  background: color-mix(in srgb, var(--creation-accent) 12%, transparent);
+}
+
+.app--creation .process-card[data-tone="accent"] .process-card__icon,
+.app--creation .process-card[data-tone="violet"] .process-card__icon {
+  color: var(--creation-accent-text);
+  background: linear-gradient(135deg, var(--creation-accent), color-mix(in srgb, var(--creation-accent) 72%, #ffffff));
+  box-shadow: 0 6px 14px -10px var(--creation-accent);
+}
+
+.app--creation .process-card.tool .process-card__icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app--creation .process-card__kind {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.app--creation .process-card.tool .process-card__kind,
+.app--creation .msg--assistant > .process-card[data-tone="violet"] .process-card__kind {
+  display: none;
+}
+
+.app--creation .msg--assistant > .process-card[data-tone="violet"] .process-card__name {
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.app--creation .process-card__name,
+.app--creation .process-card__meta {
+  color: var(--fg-faint);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.app--creation .process-card[data-open="false"] .process-card__chevron {
+  transform: none;
+}
+
+.app--creation .process-card[data-open="true"] .process-card__chevron {
+  transform: rotate(180deg);
+}
+
+.app--creation .process-card__body {
+  border-top-color: transparent;
+  background: transparent;
+}
+
+.app--creation .tool__body {
+  border-left-color: color-mix(in srgb, var(--creation-accent) 22%, var(--border));
+}
+
+.app--creation .approval-subject {
+  border-color: var(--border-soft);
+  background: color-mix(in srgb, var(--bg-soft) 72%, transparent);
+}
+
+.app--creation .prompt-action--selected {
+  border-color: color-mix(in srgb, var(--creation-accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--creation-accent) 12%, var(--bg-elev));
+}
+
+.app--creation .prompt-action--selected .prompt-action__key {
+  border-color: var(--creation-accent);
+  background: var(--creation-accent);
+  color: var(--creation-accent-text);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .app--creation .process-card:has(.process-card__spin)::after {
+    background: linear-gradient(90deg, transparent, var(--creation-accent), transparent);
+    animation-duration: 1.15s;
+  }
+}
+
+:root[data-theme-style] .app--creation {
+  --creation-accent: var(--accent);
+  --creation-accent-text: var(--accent-text, var(--accent-fg, #ffffff));
+  --creation-glow: var(--creation-accent);
+  --user-bubble-accent: var(--creation-accent);
+}
+
+:root[data-theme-style] .app--creation .composer-card {
+  --composer-glow: var(--creation-glow);
+  --composer-control-height: 30px;
+  --composer-controls-bottom: 16px;
+  --composer-send-lift: 2px;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  min-height: 106px;
+  border-color: color-mix(in srgb, var(--fg-faint) 10%, transparent);
+  border-radius: 20px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--chat-bg) 88%, var(--bg-elev) 12%),
+    color-mix(in srgb, var(--chat-bg) 93%, var(--bg-elev) 7%)
+  );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 3%, transparent),
+    0 16px 36px -34px color-mix(in srgb, #000 82%, transparent);
+}
+
+:root[data-theme-style] .app--creation .composer-card:focus-within {
+  border-color: color-mix(in srgb, var(--composer-glow) 18%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 4%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--composer-glow) 7%, transparent),
+    0 16px 38px -34px color-mix(in srgb, #000 84%, transparent);
+  transform: none;
+}
+
+:root[data-theme-style] .app--creation .composer {
+  display: block;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 18px 78px 0 28px;
+  border: 0;
+}
+
+:root[data-theme-style] .app--creation .composer__input {
+  min-height: 28px;
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+
+:root[data-theme-style] .app--creation .composer-card > .tooltip-trigger:has(.composer__btn--send) {
+  position: absolute;
+  right: 30px;
+  bottom: calc(var(--composer-controls-bottom) + var(--composer-send-lift));
+  z-index: var(--z-local-handle-active);
+}
+
+:root[data-theme-style] .app--creation .composer__btn {
+  width: var(--composer-control-height);
+  height: var(--composer-control-height);
+  border-radius: 999px;
+}
+
+:root[data-theme-style] .app--creation .composer__btn--send,
+:root[data-theme-style] .app--creation .composer__btn--send:disabled {
+  background: var(--creation-accent);
+  color: #ffffff;
+}
+
+:root[data-theme-style] .app--creation .composer__btn--send svg {
+  color: #ffffff;
+}
+
+:root[data-theme-style] .app--creation .composer-meta {
+  min-height: calc(var(--composer-control-height) + var(--composer-controls-bottom));
+  padding: 0 84px var(--composer-controls-bottom) 28px;
+}
+
+:root[data-theme-style] .app--creation .msg--user:not(.msg--im-source) .msg__body {
+  background: color-mix(in srgb, var(--user-bubble-accent, var(--creation-accent)) 90%, #000000);
+  border-color: color-mix(in srgb, var(--user-bubble-accent, var(--creation-accent)) 92%, #000000);
+  color: #ffffff;
+}
+
+:root[data-theme="light"][data-theme-style] .app--creation .msg--user:not(.msg--im-source) .msg__body {
+  background: color-mix(in srgb, var(--user-bubble-accent, var(--creation-accent)) 90%, #ffffff);
+  border-color: color-mix(in srgb, var(--user-bubble-accent, var(--creation-accent)) 92%, #ffffff);
+}
+
+:root[data-theme-style] .app--creation .process-card,
+:root[data-theme-style] .app--creation .tool-card,
+:root[data-theme-style] .app--creation .ask-card,
+:root[data-theme-style] .app--creation .prompt-shelf__bar {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-1);
+}
+
+:root[data-theme-style] .app--creation .process-card__body {
+  border-top-color: transparent;
+  background: transparent;
+}
+
+:root[data-theme-style] .app--creation .approval-subject {
+  border-color: var(--border-soft);
+  background: color-mix(in srgb, var(--bg-soft) 72%, transparent);
 }
 
 .context-panel--creation .context-panel__overview {

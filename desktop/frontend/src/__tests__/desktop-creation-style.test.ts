@@ -50,6 +50,13 @@ ok(
 );
 
 ok(
+  /sidebarCreationFeaturesBlock/.test(appSource) &&
+    /sidebar__features sidebar__features--creation/.test(appSource) &&
+    /\{sidebarCreation \? sidebarCreationFeaturesBlock : null\}/.test(appSource),
+  "Creation renders a dedicated sidebar feature area before the project tree",
+);
+
+ok(
   /<AppChrome[\s\S]*workbenchChrome=\{sidebarWorkbench\}/.test(appSource),
   "Creation keeps AppChrome tab strip mounted instead of using workbench chrome",
 );
@@ -63,9 +70,29 @@ ok(
 ok(
   /\.app--creation/.test(stylesSource) &&
     /\.layout--creation/.test(stylesSource) &&
+    /--creation-accent: var\(--accent\)/.test(stylesSource) &&
     /--sidebar-workbench-active: color-mix\(in srgb, var\(--creation-accent\)/.test(stylesSource) &&
     /\.context-panel--creation \.context-panel__usage-bar/.test(stylesSource),
   "Creation styles are scoped and include the sidebar density tokens",
+);
+
+ok(
+  /\.app--creation \.composer-card::before/.test(stylesSource) &&
+    /--composer-glow: var\(--creation-glow\)/.test(stylesSource) &&
+    /:root\[data-theme-style\] \.app--creation \.composer-card/.test(stylesSource) &&
+    /\.app--creation \.composer__btn--send svg/.test(stylesSource) &&
+    /\.app--creation \.composer__btn--send:disabled[\s\S]*color: #ffffff;/.test(stylesSource),
+  "Creation keeps the original composer glow and white send icon contract",
+);
+
+ok(
+  /\.app--creation \.msg--user:not\(\.msg--im-source\) \.msg__body/.test(stylesSource) &&
+    /:root\[data-theme-style\] \.app--creation \.msg--user:not\(\.msg--im-source\) \.msg__body/.test(stylesSource) &&
+    /\.app--creation \.process-card,/.test(stylesSource) &&
+    /:root\[data-theme-style\] \.app--creation \.process-card,/.test(stylesSource) &&
+    /\.app--creation \.prompt-shelf__bar/.test(stylesSource) &&
+    /\.app--creation \.approval-subject/.test(stylesSource),
+  "Creation scopes message bubbles and simplified process/approval cards",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);
