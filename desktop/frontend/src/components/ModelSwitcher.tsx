@@ -64,11 +64,6 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
       }));
   }, [filtered, t]);
 
-  const currentProvider = useMemo(() => {
-    const cur = models.find((m) => m.current) ?? models.find((m) => m.model === label || m.ref === label);
-    return cur ? providerLabel(cur.provider, t) : null;
-  }, [label, models, t]);
-
   const pick = (name: string) => {
     setModels((prev) => prev.map((m) => ({ ...m, current: m.ref === name })));
     setOpen(false);
