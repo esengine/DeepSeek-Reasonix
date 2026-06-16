@@ -27,6 +27,7 @@ type BranchMeta struct {
 	WorkspaceRoot    string    `json:"workspace_root,omitempty"`
 	TopicID          string    `json:"topic_id,omitempty"`
 	TopicTitle       string    `json:"topic_title,omitempty"`
+	Model            string    `json:"model,omitempty"`
 }
 
 func (m BranchMeta) DefaultScope() string {
@@ -229,5 +230,29 @@ func RenameSession(sessionPath string, title string) error {
 		return err
 	}
 	m.TopicTitle = title
+	return SaveBranchMeta(sessionPath, m)
+}
+
+// LoadSessionModel reads the model ref from a session's .jsonl.meta sidecar.
+// Returns the model (empty when absent) and whether a meta file was found.
+func LoadSessionModel(sessionPath string) (string, bool) {
+	m, ok, err := LoadBranchMeta(sessionPath)
+	if err != nil || !ok || m.Model == "" {
+		return "", false
+	}
+	return m.Model, true
+}
+
+// SetBranchModel sets the model ref in a session's .jsonl.meta sidecar.
+// If no meta file exists yet, one is created.
+func SetBranchModel(sessionPath, model string) error {
+	if sessionPath == "" {
+		return fmt.Errorf("empty session path")
+	}
+	m, err := EnsureBranchMeta(sessionPath)
+	if err != nil {
+		return err
+	}
+	m.Model = model
 	return SaveBranchMeta(sessionPath, m)
 }
