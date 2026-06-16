@@ -188,6 +188,12 @@ check("comma-separated $A, B$ → math (ordered pair)", () => isLikelyInlineMath
 check("comma-separated $1, 2, 3$ → math (sequence)", () => isLikelyInlineMath("1, 2, 3") === true);
 check("comma-separated $\\alpha, \\beta$ → math (Greek pair)", () => isLikelyInlineMath("\\alpha, \\beta") === true);
 check("parens-wrapped $(A, B)$ inner → math", () => isLikelyInlineMath("(A, B)") === true);
+check("cycle notation $(12)$ → math (transposition)", () => isLikelyInlineMath("(12)") === true);
+check("cycle notation $(123)$ → math (3-cycle)", () => isLikelyInlineMath("(123)") === true);
+check("cycle notation $(12)(34)$ → math (product)", () => isLikelyInlineMath("(12)(34)") === true);
+check("$(12)$ survives normalizeMath as math", () => {
+  return normalizeMath("the transposition $(12)$ swaps") === "the transposition $(12)$ swaps";
+});
 check("$S$ (set name) → math", () => isLikelyInlineMath("S") === true);
 check("$S$ with surrounding prose (regression)", () => {
   return normalizeMath("$S$ 非空\n$S$ 有上界") === "$S$ 非空\n$S$ 有上界";

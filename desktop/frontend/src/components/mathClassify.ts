@@ -27,6 +27,12 @@ export function isLikelyInlineMath(math: string): boolean {
   // misclassified as prose. The 6-letter cap and the requirement that the
   // whole token sits inside one $...$ span keep prose parentheticals out.
   if (/^[A-Za-z]{1,6}\s*\([^)]{1,80}\)$/.test(math)) return true;
+  // Permutation cycle notation: (12), (123), (12)(34), (123)(45), … —
+  // one or more parenthesised digit groups with no separating commas.
+  // Without this, $(12)$ falls through every accept rule and is rendered
+  // as a literal dollar span instead of reaching KaTeX. (Comma-separated
+  // tuples like $(1, 2, 3)$ are already accepted by the rule above.)
+  if (/^(?:\(\d+\))+$/.test(math)) return true;
   if (/[A-Za-z0-9)\]}]\s*[+\-*/=<>]\s*[A-Za-z0-9([{\\]/.test(math)) return true;
   // One-sided comparison: < B, > 0, B < — comparison against an implicit
   // operand is common in prose.
