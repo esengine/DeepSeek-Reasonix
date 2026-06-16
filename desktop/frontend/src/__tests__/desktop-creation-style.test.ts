@@ -10,6 +10,9 @@ const composerSource = readFileSync(resolve(testDir, "../components/Composer.tsx
 const settingsSource = readFileSync(resolve(testDir, "../components/SettingsPanel.tsx"), "utf8");
 const contextPanelSource = readFileSync(resolve(testDir, "../components/ContextPanel.tsx"), "utf8");
 const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8");
+const zhSource = readFileSync(resolve(testDir, "../locales/zh.ts"), "utf8");
+const zhTwSource = readFileSync(resolve(testDir, "../locales/zh-TW.ts"), "utf8");
+const enSource = readFileSync(resolve(testDir, "../locales/en.ts"), "utf8");
 
 let passed = 0;
 let failed = 0;
@@ -42,6 +45,15 @@ ok(
     /sidebarCreation \? "app--creation"/.test(appSource) &&
     /sidebarCreation \? "layout--creation"/.test(appSource),
   "App scopes Creation with dedicated layout classes",
+);
+
+ok(
+  /const \[desktopLayoutStyle, setDesktopLayoutStyle\] = useState<DesktopLayoutStyle>\("classic"\);/.test(appSource) &&
+    /sidebarWorkbench = desktopLayoutStyle === "workbench"/.test(appSource) &&
+    /sidebarCreation = creationLayoutActive/.test(appSource) &&
+    /sidebarCreation \? "app--creation" : ""/.test(appSource) &&
+    /sidebarCreation \? "layout--creation" : ""/.test(appSource),
+  "Classic remains the default path and does not get Creation layout classes",
 );
 
 ok(
@@ -99,6 +111,12 @@ ok(
 );
 
 ok(
+  /const creation = variant === "creation";/.test(contextPanelSource) &&
+    /\{!creation && \(\s*<>[\s\S]*context\.sessionStatus[\s\S]*context\.referencedFiles[\s\S]*context\.sessionChanges[\s\S]*<\/>/.test(contextPanelSource),
+  "Classic ContextPanel keeps session status, dependency files, and session changes",
+);
+
+ok(
   /\.app--creation/.test(stylesSource) &&
     /\.layout--creation/.test(stylesSource) &&
     /\.layout--creation \.chat-pane[\s\S]*padding-left: calc\(var\(--sidebar-width\) \+ 50px\);/.test(stylesSource) &&
@@ -137,6 +155,14 @@ ok(
     /\.app--creation \.prompt-shelf__bar/.test(stylesSource) &&
     /\.app--creation \.approval-subject/.test(stylesSource),
   "Creation scopes message bubbles and simplified process/approval cards",
+);
+
+ok(
+  /"settings\.desktopLayoutStyle\.creation": "创作"/.test(zhSource) &&
+    /"settings\.desktopLayoutStyle\.creation": "創作"/.test(zhTwSource) &&
+    /"settings\.desktopLayoutStyle\.creation": "Creation"/.test(enSource) &&
+    !/创作Creation|創作Creation/.test(`${zhSource}\n${zhTwSource}`),
+  "Creation desktop style label is localized without mixed-language Chinese copy",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

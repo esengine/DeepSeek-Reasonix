@@ -763,7 +763,7 @@ export const zh: Record<DictKey, string> = {
   "settings.desktopLayoutStyle": "桌面风格",
   "settings.desktopLayoutStyle.classic": "经典",
   "settings.desktopLayoutStyle.workbench": "工作台",
-  "settings.desktopLayoutStyle.creation": "创作Creation",
+  "settings.desktopLayoutStyle.creation": "创作",
   "settings.displayMode": "会话展示模式",
   "settings.displayMode.standard": "标准",
   "settings.displayMode.compact": "紧凑",
