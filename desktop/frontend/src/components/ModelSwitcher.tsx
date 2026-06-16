@@ -85,7 +85,7 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
         onClick={() => setOpen((v) => !v)}
       >
         <Brain size={13} className="modelsw__kind" />
-        <span className="modelsw__label">{label}{currentProvider ? ` · ${currentProvider}` : ""}</span>
+        <span className="modelsw__label">{label.split("+")[0].trim()}</span>
         <ChevronsUpDown size={11} />
       </button>
       <AnchoredPopover
