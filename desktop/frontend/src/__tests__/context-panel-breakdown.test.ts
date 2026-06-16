@@ -1,6 +1,6 @@
 // Run: tsx src/__tests__/context-panel-breakdown.test.ts
 
-import { contextBreakdown, contextCostDisplay } from "../components/ContextPanel";
+import { contextBreakdown, contextCostDisplay, formatCacheHitRate } from "../components/ContextPanel";
 import { currencySymbol, formatMoney } from "../lib/money";
 
 let passed = 0;
@@ -79,6 +79,12 @@ eq(formatMoney(infoCost.amount, infoCost.currency, "dash"), "$0.1759", "USD pane
 eq(currencySymbol("楼"), "¥", "unexpected currency text does not leak into money values");
 eq(currencySymbol("aud"), "AUD ", "unknown ISO currency codes stay readable");
 eq(currencySymbol("A$"), "A$", "compact multi-character currency symbols are preserved");
+
+console.log("\ncontext panel cache rate");
+
+eq(formatCacheHitRate(99_950, 50), "99.95%", "cache hit rate preserves two decimal places");
+eq(formatCacheHitRate(0, 10_000), "0.00%", "cache hit rate shows zero when usage data exists");
+eq(formatCacheHitRate(0, 0), "-", "cache hit rate stays empty before usage data exists");
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

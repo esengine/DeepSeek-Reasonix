@@ -43,6 +43,12 @@ function fmtDuration(ms: number, t: Translator): string {
   return t("context.durationMinutesSeconds", { minutes, seconds });
 }
 
+export function formatCacheHitRate(hitTokens: number, missTokens: number): string {
+  const denom = hitTokens + missTokens;
+  if (denom <= 0) return "-";
+  return `${((hitTokens / denom) * 100).toFixed(2)}%`;
+}
+
 interface HealthResult {
   tone: "good" | "notice" | "warn";
   shortKey: DictKey;
@@ -269,9 +275,9 @@ export function ContextPanel({
 
   const usagePct = windowTokens > 0 ? Math.min(100, Math.round((usedTokens / windowTokens) * 100)) : 0;
   const compactPct = context?.compactRatio ? Math.round(context.compactRatio * 100) : 0;
-  const cachePct = cacheHitTokens + cacheMissTokens > 0
-    ? Math.round((cacheHitTokens / (cacheHitTokens + cacheMissTokens)) * 100)
-    : 0;
+  const cacheDenom = cacheHitTokens + cacheMissTokens;
+  const cachePct = cacheDenom > 0 ? (cacheHitTokens / cacheDenom) * 100 : 0;
+  const cachePctDisplay = formatCacheHitRate(cacheHitTokens, cacheMissTokens);
   const breakdown = contextBreakdown(usedTokens, windowTokens, promptTokens, completionTokens, reasoningTokens);
   const usageSegments = [
     { color: "prompt", pct: breakdown.promptPct },
@@ -301,7 +307,7 @@ export function ContextPanel({
     time: fmtTime(f.latestTime),
     detail: asArray(f.turns).length > 0 ? `T${asArray(f.turns).join(",")}` : "",
   }));
-  const health = contextHealth(usagePct, cachePct, readRows.length);
+  const health = contextHealth(usagePct, Math.round(cachePct), readRows.length);
 
   return (
     <div className="context-panel">
@@ -355,7 +361,7 @@ export function ContextPanel({
           <section className="context-panel__section">
             <SectionHeading title={t("context.costMetrics")} />
             <div className="context-panel__stats">
-              <MetricCard label={t("context.cacheHit")} value={cachePct > 0 ? `${cachePct}%` : "-"} tone="accent" />
+              <MetricCard label={t("context.cacheHit")} value={cachePctDisplay} tone="accent" />
               <MetricCard label={t("context.sessionCost")} value={formatMoney(cost.amount, cost.currency, "dash")} />
             </div>
             {showCostSources && (
