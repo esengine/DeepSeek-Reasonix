@@ -280,13 +280,20 @@ func providerViewFromEntry(p config.ProviderEntry, builtIn, added bool) Provider
 }
 
 func providerViewFromEntryForRoot(p config.ProviderEntry, builtIn, added bool, root string) ProviderView {
+	return providerViewFromEntryForRootWithResolver(p, builtIn, added, root, nil)
+}
+
+func providerViewFromEntryForRootWithResolver(p config.ProviderEntry, builtIn, added bool, root string, resolver *config.CredentialResolver) ProviderView {
 	models := p.ChatModelList()
 	visionModels := p.VisionModels
 	visionModelsSet := p.Vision || p.VisionModels != nil
 	if p.Vision {
 		visionModels = models
 	}
-	key := config.ResolveCredentialForRootGlobalFirst(root, p.APIKeyEnv)
+	if resolver == nil {
+		resolver = config.NewCredentialResolverForRoot(root)
+	}
+	key := resolver.ResolveGlobalFirst(p.APIKeyEnv)
 	requiresKey := p.RequiresAPIKey()
 	return ProviderView{
 		Name: p.Name, BuiltIn: builtIn, Added: added, Kind: p.Kind, BaseURL: p.BaseURL,
@@ -310,14 +317,21 @@ func officialProviderViews(added map[string]bool, pricingLanguage string) []Prov
 }
 
 func officialProviderViewsForRoot(added map[string]bool, pricingLanguage, root string) []ProviderView {
+	return officialProviderViewsForRootWithResolver(added, pricingLanguage, root, nil)
+}
+
+func officialProviderViewsForRootWithResolver(added map[string]bool, pricingLanguage, root string, resolver *config.CredentialResolver) []ProviderView {
 	var out []ProviderView
+	if resolver == nil {
+		resolver = config.NewCredentialResolverForRoot(root)
+	}
 	for _, kind := range []string{"deepseek", "mimo-api", "mimo-token-plan"} {
 		entries, _, err := officialProviderTemplate(kind, pricingLanguage)
 		if err != nil {
 			continue
 		}
 		for _, entry := range entries {
-			out = append(out, providerViewFromEntryForRoot(entry, true, added[entry.Name], root))
+			out = append(out, providerViewFromEntryForRootWithResolver(entry, true, added[entry.Name], root, resolver))
 		}
 	}
 	return out
@@ -433,10 +447,11 @@ func (a *App) Settings() SettingsView {
 	}
 	added := providerAccessSet(cfg.Desktop.ProviderAccess)
 	root := a.activeWorkspaceRoot()
-	v.OfficialProviders = officialProviderViewsForRoot(officialProviderAddedSet(cfg), cfg.DeepSeekOfficialPricingLanguage(), root)
+	resolver := config.NewCredentialResolverForRoot(root)
+	v.OfficialProviders = officialProviderViewsForRootWithResolver(officialProviderAddedSet(cfg), cfg.DeepSeekOfficialPricingLanguage(), root, resolver)
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		v.Providers = append(v.Providers, providerViewFromEntryForRoot(*p, isOfficialBuiltInProvider(*p), added[p.Name], root))
+		v.Providers = append(v.Providers, providerViewFromEntryForRootWithResolver(*p, isOfficialBuiltInProvider(*p), added[p.Name], root, resolver))
 	}
 	return v
 }

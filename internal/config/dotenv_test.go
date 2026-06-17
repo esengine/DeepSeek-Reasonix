@@ -125,6 +125,42 @@ func TestResolveCredentialGlobalFirstDoesNotMutateProjectEnv(t *testing.T) {
 	}
 }
 
+func TestCredentialResolverCachesGlobalFirstLookups(t *testing.T) {
+	project := t.TempDir()
+	key := "KEY_SETTINGS_CACHE"
+	calls := 0
+	stubStoredCredentialValueForTest(t, func(got string) (string, CredentialSource, bool) {
+		calls++
+		if got != key {
+			t.Fatalf("stored credential lookup key = %q, want %q", got, key)
+		}
+		return "from_credentials", CredentialSource{Kind: CredentialSourceCredentials, Label: "Reasonix credentials"}, true
+	})
+
+	resolver := NewCredentialResolverForRoot(project)
+	first := resolver.ResolveGlobalFirst(key)
+	second := resolver.ResolveGlobalFirst(key)
+
+	if !first.Set || first.Value != "from_credentials" {
+		t.Fatalf("first credential = %+v, want stored credential", first)
+	}
+	if !second.Set || second.Value != "from_credentials" {
+		t.Fatalf("second credential = %+v, want cached stored credential", second)
+	}
+	if calls != 1 {
+		t.Fatalf("stored credential lookups = %d, want 1 for repeated key in one resolver", calls)
+	}
+}
+
+func stubStoredCredentialValueForTest(t *testing.T, fn func(string) (string, CredentialSource, bool)) {
+	t.Helper()
+	old := storedCredentialValueLookup
+	storedCredentialValueLookup = fn
+	t.Cleanup(func() {
+		storedCredentialValueLookup = old
+	})
+}
+
 func TestResolveCredentialSourceShowsCredentialsShadowingProjectEnv(t *testing.T) {
 	cwd := t.TempDir()
 	cfgHome := t.TempDir()
