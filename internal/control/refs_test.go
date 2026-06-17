@@ -491,7 +491,7 @@ func TestResolveRefsWithWorkspaceRootStoresRelativePath(t *testing.T) {
 	}
 }
 
-func TestWorkspaceImageRefsOnlyTreatAttachmentsAsImages(t *testing.T) {
+func TestWorkspaceImageRefsAlsoAttachAsModelImages(t *testing.T) {
 	workspace := t.TempDir()
 	diagram := filepath.Join(workspace, "docs", "diagram.png")
 	if err := os.MkdirAll(filepath.Dir(diagram), 0o755); err != nil {
@@ -524,8 +524,11 @@ func TestWorkspaceImageRefsOnlyTreatAttachmentsAsImages(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("ResolveRefs errors = %v", errs)
 	}
-	if !strings.Contains(block, `<file path="docs/diagram.png">`) || !strings.Contains(block, "image file docs/diagram.png") {
-		t.Fatalf("workspace png should resolve as image-file metadata:\n%s", block)
+	if !strings.Contains(block, `<file path="docs/diagram.png">`) || !strings.Contains(block, "attached to this turn as model image input") || strings.Contains(block, "OCR") {
+		t.Fatalf("workspace png should resolve as attached image-file metadata without OCR guidance:\n%s", block)
+	}
+	if urls := c.inputImages("see @" + diagram); len(urls) != 1 || !strings.HasPrefix(urls[0], "data:image/png;base64,") {
+		t.Fatalf("workspace png inputImages = %v, want one png data URL", urls)
 	}
 }
 
