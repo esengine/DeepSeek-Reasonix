@@ -4397,6 +4397,11 @@ a[href] {
   height: auto;
 }
 
+/* SVG links: show pointer cursor and route clicks via openExternal */
+.mermaid-diagram__svg a {
+  cursor: pointer;
+}
+
 /* Copy button: overlay top-right (same pattern as .code-block__copy) */
 .mermaid-diagram .code-block__copy {
   position: absolute;
