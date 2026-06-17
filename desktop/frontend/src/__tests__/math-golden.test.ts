@@ -181,6 +181,38 @@ check("uppercase $I$ → math (math name in non-English prose)", () => isLikelyI
 check("uppercase $A$ → math", () => isLikelyInlineMath("A") === true);
 check("uppercase $V$ → math", () => isLikelyInlineMath("V") === true);
 
+console.log("\nisLikelyInlineMath — primed letters (regression)");
+// A letter followed by primes (') is the LaTeX prime symbol — ubiquitous
+// in math for derivatives (x', f'), transformed/labelled states (S', T'),
+// and second derivatives (y''). The classifier used to reject these as
+// non-math, so $S'$ was escaped to a literal dollar entity and never
+// reached KaTeX.
+check("$S'$ → math (primed letter)", () => isLikelyInlineMath("S'") === true);
+check("$S''$ → math (double prime)", () => isLikelyInlineMath("S''") === true);
+check("$x'$ → math (derivative)", () => isLikelyInlineMath("x'") === true);
+check("$y''$ → math (second derivative)", () => isLikelyInlineMath("y''") === true);
+check("$a'$ → math", () => isLikelyInlineMath("a'") === true);
+check("$T'$ → math", () => isLikelyInlineMath("T'") === true);
+check("$\\psi'$ → math (Greek with prime)", () => isLikelyInlineMath("\\psi'") === true);
+check("$f'(x)$ → math (primed function call)", () => isLikelyInlineMath("f'(x)") === true);
+check("$S'$ in prose stays math", () => normalizeMath("the $S'$ admixture") === "the $S'$ admixture");
+
+console.log("\nisLikelyInlineMath — bracketed labels (regression)");
+// Square brackets in a $...$ context denote group-theory irrep labels
+// ([56], [8], [70] for SU(6) multiplets), array subscripts, and interval
+// notation. The classifier used to reject pure bracketed numbers/letters,
+// so $[56]$ was escaped to a literal dollar entity and never reached KaTeX.
+// Markdown link syntax [text](url) is rejected separately upstream.
+check("$[56]$ → math (SU(6) irrep label)", () => isLikelyInlineMath("[56]") === true);
+check("$[70]$ → math", () => isLikelyInlineMath("[70]") === true);
+check("$[8]$ → math (octet label)", () => isLikelyInlineMath("[8]") === true);
+check("$[1]$ → math (singlet label)", () => isLikelyInlineMath("[1]") === true);
+check("$[x]$ → math (bracketed variable)", () => isLikelyInlineMath("[x]") === true);
+check("$[N]$ → math", () => isLikelyInlineMath("[N]") === true);
+check("$[56,0^+]$ → math", () => isLikelyInlineMath("[56,0^+]") === true);
+check("$[\\mathbf{56}]$ → math (bold command)", () => isLikelyInlineMath("[\\mathbf{56}]") === true);
+check("$[56]$ in prose stays math", () => normalizeMath("the $[56]$ multiplet") === "the $[56]$ multiplet");
+
 console.log("\nisLikelyInlineMath — minimal LaTeX patterns (regression)");
 // LLMs frequently emit minimal LaTeX in math contexts that the older
 // classifier rejected as currency / word tokens. These tests pin down the
@@ -445,6 +477,17 @@ const e2e: Array<[string, string]> = [
   ["$\\frac{1}{\\sqrt{2}}\\|uud\\rangle$", "ket in fraction with \\|"],
   ["$\\|x\\|$", "norm \\|x\\| → double bar (regression)"],
   ["$\\langle\\psi\\|$", "bra closer \\| → single bar (regression)"],
+  // Primed letters — KaTeX renders ' natively as a prime symbol.
+  ["$S'$", "primed letter S' (regression)"],
+  ["$x'$", "derivative x'"],
+  ["$y''$", "second derivative y''"],
+  ["$f'(x)$", "primed function call f'(x)"],
+  ["$\\psi'$", "Greek letter with prime"],
+  // Bracketed irrep labels — common in SU(6) baryon physics.
+  ["$[56]$", "SU(6) [56] multiplet (regression)"],
+  ["$[8]$", "[8] octet label"],
+  ["$[56,0^+]$", "[56,0^+] labelled irrep"],
+  ["$[\\mathbf{56}]$", "[\\mathbf{56}] bold command in brackets"],
 ];
 for (const [src, label] of e2e) {
   check(`${label}: ${src}`, () => katexOf(normalizeMath(src), false));
