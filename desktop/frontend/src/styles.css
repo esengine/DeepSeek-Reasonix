@@ -4472,6 +4472,9 @@ a[href] {
 
 .mermaid-diagram__error-icon {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .mermaid-diagram--error > .code.hljs {

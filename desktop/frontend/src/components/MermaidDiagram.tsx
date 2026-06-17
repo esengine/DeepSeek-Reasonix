@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useId, useRef, useState } from "react";
-import { TriangleAlert } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { CopyButton } from "./CopyButton";
 import { openExternal } from "../lib/bridge";
 
@@ -115,7 +115,7 @@ export const MermaidDiagram = memo(function MermaidDiagram({ definition }: Merma
     return (
       <div className="mermaid-diagram mermaid-diagram--error">
         <div className="mermaid-diagram__error-bar">
-          <TriangleAlert size={14} className="mermaid-diagram__error-icon" />
+          <AlertCircle size={14} className="mermaid-diagram__error-icon" />
           <span>Diagram syntax error</span>
         </div>
         <pre className="code hljs" data-lang="mermaid">
