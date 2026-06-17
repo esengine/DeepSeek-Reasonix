@@ -117,9 +117,8 @@ func SanitizeToolPairing(msgs []Message) []Message {
 			// never omitted, so this backfill is a UX improvement, not a
 			// correctness requirement.
 			calls := backfillToolCallNames(m.ToolCalls, msgs[i+1:j])
-			m2 := m
-			m2.ToolCalls = calls
-			out = append(out, repairToolCallArgs(m2))
+			m.ToolCalls = calls
+			out = append(out, repairToolCallArgs(m))
 			out = append(out, pairToolResults(calls, msgs[i+1:j])...)
 			i = j
 			continue
@@ -249,12 +248,23 @@ func pairToolResults(calls []ToolCall, avail []Message) []Message {
 	return out
 }
 
-// backfillToolCallNames returns a copy of calls with any empty Name filled in
-// from the matching tool result (by id, then by position). Old sessions (#4727)
-// may have saved assistant tool-calls with an empty name; backfilling gives the
-// model useful context during replay. Unpaired calls keep their empty name,
+// backfillToolCallNames returns calls with any empty Name filled in from the
+// matching tool result (by id, then by position). Old sessions (#4727) may have
+// saved assistant tool-calls with an empty name; backfilling gives the model
+// useful context during replay. The common case (no empty names) returns the
+// input unchanged without allocating. Unpaired calls keep their empty name,
 // which the wire-format fix (openai.go) handles gracefully.
 func backfillToolCallNames(calls []ToolCall, results []Message) []ToolCall {
+	missing := false
+	for _, c := range calls {
+		if c.Name == "" {
+			missing = true
+			break
+		}
+	}
+	if !missing {
+		return calls
+	}
 	out := make([]ToolCall, len(calls))
 	copy(out, calls)
 	if idDistinct(calls) {
