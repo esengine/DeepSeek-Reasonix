@@ -111,9 +111,17 @@ func SanitizeToolPairing(msgs []Message) []Message {
 			for j < len(msgs) && msgs[j].Role == RoleTool {
 				j++
 			}
-			out = append(out, repairToolCallArgs(m))
-			out = append(out, pairToolResults(m.ToolCalls, msgs[i+1:j])...)
-			i = j // tool messages consumed here; any non-matching ones are orphans, dropped
+			// Backfill empty tool-call names from the corresponding tool
+			// results so the model sees which tool was invoked (#4727).
+			// The wire-format fix (openai.go) ensures empty fields are
+			// never omitted, so this backfill is a UX improvement, not a
+			// correctness requirement.
+			calls := backfillToolCallNames(m.ToolCalls, msgs[i+1:j])
+			m2 := m
+			m2.ToolCalls = calls
+			out = append(out, repairToolCallArgs(m2))
+			out = append(out, pairToolResults(calls, msgs[i+1:j])...)
+			i = j
 			continue
 		}
 		if m.Role == RoleTool {
@@ -236,6 +244,39 @@ func pairToolResults(calls []ToolCall, avail []Message) []Message {
 			out = append(out, r)
 		} else {
 			out = append(out, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tc.Name, Content: interruptedToolResult})
+		}
+	}
+	return out
+}
+
+// backfillToolCallNames returns a copy of calls with any empty Name filled in
+// from the matching tool result (by id, then by position). Old sessions (#4727)
+// may have saved assistant tool-calls with an empty name; backfilling gives the
+// model useful context during replay. Unpaired calls keep their empty name,
+// which the wire-format fix (openai.go) handles gracefully.
+func backfillToolCallNames(calls []ToolCall, results []Message) []ToolCall {
+	out := make([]ToolCall, len(calls))
+	copy(out, calls)
+	if idDistinct(calls) {
+		byID := make(map[string]string, len(results))
+		for _, r := range results {
+			if r.Name != "" {
+				byID[r.ToolCallID] = r.Name
+			}
+		}
+		for k := range out {
+			if out[k].Name == "" {
+				if n, ok := byID[out[k].ID]; ok {
+					out[k].Name = n
+				}
+			}
+		}
+		return out
+	}
+	// Fallback: positional pairing (same order as pairToolResults).
+	for k := range out {
+		if out[k].Name == "" && k < len(results) {
+			out[k].Name = results[k].Name
 		}
 	}
 	return out
