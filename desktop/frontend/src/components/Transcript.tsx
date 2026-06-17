@@ -70,6 +70,14 @@ const WARM_PAGE_SIZE = 20; // cold-zone pagination batch
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// Module-level cache for per-tab scroll positions.  Keyed by tabId.  Lives
+// across Transcript mount/unmount cycles created by the key={activeTabId}
+// boundary in App.tsx.  Entries are tiny (a number + boolean) and live for
+// the lifetime of the app window; they are never evicted because tab close
+// events are not available at this level.  In practice the memory cost is
+// negligible even with hundreds of tabs (#4584).
+const scrollStateCache = new Map<string, { scrollTop: number; stick: boolean }>();
+
 // ── Transcript component ──────────────────────────────────────────────────────
 
 export function Transcript({
@@ -134,13 +142,39 @@ export function Transcript({
   // Track question count and auto-scroll on new messages.
   useEffect(() => { trackQuestions(questions.length); }, [questions.length, trackQuestions]);
 
-  // Reset the auto-scroll pin when switching tabs so the new session always
-  // starts at the bottom. Without this, stick.current from the previous tab
-  // persists across React re-renders (Transcript is not keyed by tabId) and
-  // disables auto-scroll when the user had scrolled up in the old tab (#4584).
+  // ── Per-tab scroll-position persistence (#4584) ──────────────────────
+  // Transcript is keyed by activeTabId in App.tsx so each tab gets its
+  // own component instance.  On unmount the scroll state is saved to a
+  // module-level cache; on mount it is restored (first-open tabs default
+  // to bottom, letting the auto-scroll effect pin to the newest output).
+  const cacheKey = tabId ?? "";
+  const skipPersist = !tabId; // HistoryPanel uses no tabId — don't persist.
   useEffect(() => {
-    stick.current = true;
-  }, [tabId]);
+    if (skipPersist) return;
+    const saved = scrollStateCache.get(cacheKey);
+    if (!saved) {
+      stick.current = true;
+      return;
+    }
+    stick.current = saved.stick;
+    const el = scrollRef.current;
+    const frame = requestAnimationFrame(() => {
+      if (el) el.scrollTop = saved.scrollTop;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Save on unmount.  useLayoutEffect cleanup runs before the DOM is
+  // detached, so scrollRef.current is still valid.
+  useLayoutEffect(() => {
+    const key = cacheKey;
+    const persist = !skipPersist;
+    return () => {
+      if (!persist) return;
+      const el = scrollRef.current;
+      if (el) scrollStateCache.set(key, { scrollTop: el.scrollTop, stick: stick.current });
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll to bottom during streaming. Coalesce fast token/reasoning
   // updates into one layout read/write per animation frame.

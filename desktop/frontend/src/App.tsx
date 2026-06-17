@@ -2738,6 +2738,7 @@ export default function App() {
               </div>
             ) : (
               <Transcript
+                key={activeTabId ?? "__history__"}
                 items={displayItems}
                 live={state.live}
                 tabId={activeTabId}
