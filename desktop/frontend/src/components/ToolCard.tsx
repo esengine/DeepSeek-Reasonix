@@ -131,7 +131,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId }: { item
           {item.status === "error" && <span className="tool__status-icon tool__status-icon--err">✗</span>}
           {item.status === "done" && <span className="tool__status-icon tool__status-icon--ok">✓</span>}
           {item.status === "stopped" && <span className="tool__status-icon tool__status-icon--stopped">—</span>}
-          <span className="tool__name">{item.name}</span>
+          <span className="tool__name">{item.name || item.id?.replace(/^call_(\d+)_?(.{0,8}).*/, "tool_$1_$2…") || "(unknown tool)"}</span>
           {subject && <span className="tool__subject">{subject}</span>}
         </span>
         {profileText && <span className="tool__profile">{profileText}</span>}

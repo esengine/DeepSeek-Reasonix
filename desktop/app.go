@@ -2791,11 +2791,17 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 const historyToolPreviewLimit = 2_000
 
 func historyToolCall(tc provider.ToolCall, args string, result provider.Message) HistoryToolCall {
+	// Old sessions (#4727) may have tool_calls with an empty name; backfill
+	// from the tool result so the frontend can display the tool name.
+	name := tc.Name
+	if name == "" && result.Name != "" {
+		name = result.Name
+	}
 	call := HistoryToolCall{
 		ID:      tc.ID,
-		Name:    tc.Name,
-		Subject: historyToolSubject(tc.Name, args),
-		Summary: historyToolSummary(tc.Name, args, result.Content),
+		Name:    name,
+		Subject: historyToolSubject(name, args),
+		Summary: historyToolSummary(name, args, result.Content),
 		Diff:    tc.Diff,
 		Added:   tc.Added,
 		Removed: tc.Removed,
