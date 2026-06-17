@@ -4424,7 +4424,7 @@ a[href] {
   display: flex;
   align-items: center;
   gap: 10px;
-  color: var(--text-dim, #888);
+  color: var(--fg-dim, #c0c4cc);
   font-size: 13px;
 }
 
@@ -4450,7 +4450,7 @@ a[href] {
 
 /* Error state */
 .mermaid-diagram--error {
-  border: 1px solid var(--error-border, #c0392b);
+  border: 1px solid color-mix(in srgb, var(--err, #e0696a) 40%, transparent);
   background: var(--surface, #1a1b1e);
 }
 
@@ -4459,14 +4459,14 @@ a[href] {
   align-items: center;
   gap: 6px;
   padding: 8px 12px;
-  background: var(--error-bg, rgba(192, 57, 43, 0.1));
-  color: var(--error-text, #e74c3c);
+  background: color-mix(in srgb, var(--err, #e0696a) 12%, transparent);
+  color: var(--err, #e0696a);
   font-size: 13px;
   font-weight: 500;
 }
 
 .mermaid-diagram__error-icon {
-  font-size: 14px;
+  flex-shrink: 0;
 }
 
 .mermaid-diagram--error > .code.hljs {
@@ -4478,13 +4478,13 @@ a[href] {
 .mermaid-diagram__error-details {
   padding: 8px 12px;
   font-size: 12px;
-  color: var(--text-dim, #888);
+  color: var(--fg-dim, #c0c4cc);
   cursor: pointer;
 }
 
 .mermaid-diagram__error-details summary {
   font-size: 12px;
-  color: var(--text-dim, #888);
+  color: var(--fg-dim, #c0c4cc);
   cursor: pointer;
 }
 
@@ -4497,7 +4497,7 @@ a[href] {
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-all;
-  color: var(--text, #ddd);
+  color: var(--fg, #f4f5f7);
 }
 
 .msg--assistant .msg__body {
