@@ -390,7 +390,7 @@ func TestOfficialMimoAPITemplateIncludesVisionModels(t *testing.T) {
 }
 
 func TestOfficialDeepSeekTemplateDefaultsToRMBPricing(t *testing.T) {
-	entries, keyEnv, err := officialProviderTemplate("deepseek", "en")
+	entries, keyEnv, err := officialProviderTemplate("deepseek", "", "en")
 	if err != nil {
 		t.Fatalf("officialProviderTemplate: %v", err)
 	}
@@ -416,7 +416,7 @@ func TestOfficialMimoTokenPlanTemplateRegion(t *testing.T) {
 		{"sgp", "token-plan-sgp.xiaomimimo.com"},
 		{"ams", "token-plan-ams.xiaomimimo.com"},
 	} {
-		entries, _, err := officialProviderTemplate("mimo-token-plan", tc.region)
+		entries, _, err := officialProviderTemplate("mimo-token-plan", tc.region, "")
 		if err != nil {
 			t.Fatalf("region=%q: officialProviderTemplate: %v", tc.region, err)
 		}

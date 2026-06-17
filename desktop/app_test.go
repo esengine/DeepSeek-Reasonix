@@ -847,7 +847,7 @@ api_key_env = "DEEPSEEK_API_KEY"
 		t.Fatalf("write config: %v", err)
 	}
 
-	if _, err := NewApp().AddOfficialProviderAccess("deepseek", "test-key"); err != nil {
+	if _, err := NewApp().AddOfficialProviderAccess("deepseek", "test-key", ""); err != nil {
 		t.Fatalf("AddOfficialProviderAccess: %v", err)
 	}
 	cfg := config.LoadForEdit(config.UserConfigPath())
@@ -878,7 +878,7 @@ language = "zh"
 		t.Fatalf("write config: %v", err)
 	}
 
-	if _, err := NewApp().AddOfficialProviderAccess("deepseek", ""); err != nil {
+	if _, err := NewApp().AddOfficialProviderAccess("deepseek", "", ""); err != nil {
 		t.Fatalf("AddOfficialProviderAccess: %v", err)
 	}
 	cfg := config.LoadForEdit(config.UserConfigPath())
