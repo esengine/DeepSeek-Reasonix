@@ -4251,6 +4251,7 @@ export default function App() {
         <aside className={sidebarClassName} aria-label={t("sidebar.navigation")}>
           {sidebarWorkbench ? (
             <>
+              {desktopPlatform === "darwin" && <div style={{ height: 46, flexShrink: 0 }} onDoubleClick={() => window.runtime?.WindowToggleMaximise?.()} />}
               <div className="sidebar__head" aria-hidden={sidebarCollapsed}>
                 <div className="sidebar__brand sidebar__brand--workbench">
                   <img src={logoWordmark} alt="Reasonix" className="sidebar__brand-logo sidebar__brand-logo--workbench" draggable={false} />
@@ -4485,7 +4486,7 @@ export default function App() {
 
         <section className={`chat-pane${creationEmptyHero ? " chat-pane--creation-empty" : ""}`}>
           <>
-          <header className="topicbar">
+          <header className="topicbar" onDoubleClick={(e) => { if (!sidebarWorkbench) return; if (desktopPlatform !== "darwin") return; const el = e.target as HTMLElement; if (el.tagName === "BUTTON" || el.closest("button")) return; window.runtime?.WindowToggleMaximise?.(); }}>
             {workbenchChromeHidden && (
               <Tooltip label={sidebarToggleTitle}>
                 <button
@@ -5098,7 +5099,7 @@ export default function App() {
             ].join(" ")}
             aria-label={t("rightDock.workbench")}
           >
-            <div className="workbench-dock__tools">
+            <div className="workbench-dock__tools" onDoubleClick={(e) => { if (!sidebarWorkbench) return; if (desktopPlatform !== "darwin") return; const el = e.target as HTMLElement; if (el.tagName === "BUTTON" || el.closest("button")) return; window.runtime?.WindowToggleMaximise?.(); }}>
               <div className="workbench-dock__tabs" role="tablist" aria-label={t("rightDock.views")}>
                 {SHOW_CONTEXT_DOCK && desktopLayoutStyle !== "creation" && (
                   <button
