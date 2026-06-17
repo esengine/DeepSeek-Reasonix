@@ -15,22 +15,29 @@ type DiagramState =
   | { status: "error"; message: string };
 
 // Lazy import — mermaid is ~500 kB gzipped, so we only load it on demand.
+// The module-level promise is cached so only the first caller pays the cost;
+// if the import fails we reset so a later render can retry.
 let mermaidModule: typeof import("mermaid") | null = null;
 let initPromise: Promise<void> | null = null;
 
 async function ensureMermaid(): Promise<void> {
   if (mermaidModule) return;
   if (initPromise) return initPromise;
-  initPromise = (async () => {
-    mermaidModule = await import("mermaid");
+  initPromise = import("mermaid").then((mod) => {
+    mermaidModule = mod;
     mermaidModule.default.initialize({
       startOnLoad: false,
       theme: "dark",
       maxTextSize: 100000,
       securityLevel: "sandbox",
-      fontFamily: "var(--font-ui, sans-serif)",
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
     });
-  })();
+  }).catch((err) => {
+    // Reset so a later render can retry on transient failures.
+    initPromise = null;
+    mermaidModule = null;
+    throw err;
+  });
   return initPromise;
 }
 
@@ -46,7 +53,6 @@ function resolveMermaidTheme(): "dark" | "default" {
 
 export const MermaidDiagram = memo(function MermaidDiagram({ definition }: MermaidDiagramProps) {
   const [state, setState] = useState<DiagramState>({ status: "loading" });
-  const containerRef = useRef<HTMLDivElement>(null);
   const instanceId = useId().replace(/[:.]/g, "-");
   const svgId = `mermaid-${instanceId}`;
   const mountedRef = useRef(true);
@@ -57,6 +63,11 @@ export const MermaidDiagram = memo(function MermaidDiagram({ definition }: Merma
 
     (async () => {
       try {
+        if (!definition.trim()) {
+          setState({ status: "error", message: "Empty diagram definition" });
+          return;
+        }
+
         await ensureMermaid();
         if (cancelled || !mountedRef.current) return;
 
@@ -68,7 +79,7 @@ export const MermaidDiagram = memo(function MermaidDiagram({ definition }: Merma
           theme,
           maxTextSize: 100000,
           securityLevel: "sandbox",
-          fontFamily: "var(--font-ui, sans-serif)",
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
         });
 
         const { svg } = await mermaidModule!.default.render(svgId, definition);
@@ -118,7 +129,7 @@ export const MermaidDiagram = memo(function MermaidDiagram({ definition }: Merma
   }
 
   return (
-    <div className="mermaid-diagram mermaid-diagram--rendered" ref={containerRef}>
+    <div className="mermaid-diagram mermaid-diagram--rendered">
       <SvgWrapper svg={state.svg} />
       <CopyButton text={definition} className="code-block__copy" />
     </div>

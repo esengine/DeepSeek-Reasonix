@@ -4441,6 +4441,13 @@ a[href] {
   to { transform: rotate(360deg); }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .mermaid-diagram__spinner {
+    animation: none;
+    border-color: var(--border, #333);
+  }
+}
+
 /* Error state */
 .mermaid-diagram--error {
   border: 1px solid var(--error-border, #c0392b);
