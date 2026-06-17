@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import gsap from "gsap";
@@ -43,9 +43,8 @@ import { AskCard } from "./components/AskCard";
 import { UndoRewindBanner } from "./components/UndoRewindBanner";
 import { ClearContextCard } from "./components/ClearContextCard";
 import { StatusBar } from "./components/StatusBar";
-import { HistoryPanel } from "./components/HistoryPanel";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
-import { SettingsPanel, type SettingsInitialFocus } from "./components/SettingsPanel";
+import type { SettingsInitialFocus } from "./components/SettingsPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ContextPanel } from "./components/ContextPanel";
 import { WorkspacePanel } from "./components/WorkspacePanel";
@@ -95,7 +94,6 @@ import {
 import { loadLayoutSize, saveLayoutSize } from "./lib/layoutPreferences";
 import { hydrateDisplayMode } from "./lib/displayMode";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems, type StatusBarItemId } from "./lib/statusBarItems";
-import { blobToBase64, renderSessionImageBlob, renderSessionPdfBlob } from "./lib/sessionExport";
 import { sessionActivityTime } from "./lib/session";
 import {
   applyTheme,
@@ -113,6 +111,9 @@ import { useViewportHeightVar, useWindowStatePersistence } from "./lib/windowSta
 import { availableWorkspacePanelWidth, resolveWorkspacePanelWidth, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
 import { useGlobalShortcut } from "./lib/keyboardShortcuts";
 import logoWordmark from "./assets/logo-wordmark.svg";
+
+const HistoryPanel = lazy(() => import("./components/HistoryPanel").then((module) => ({ default: module.HistoryPanel })));
+const SettingsPanel = lazy(() => import("./components/SettingsPanel").then((module) => ({ default: module.SettingsPanel })));
 
 const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
 const SIDEBAR_DEFAULT_WIDTH = 264;
@@ -1398,11 +1399,13 @@ export default function App() {
         } else if (format === "pdf") {
           const path = await app.PickExportFile(`${base}.pdf`, "application/pdf");
           if (!path) return;
+          const { blobToBase64, renderSessionPdfBlob } = await import("./lib/sessionExport");
           const blob = await renderSessionPdfBlob(getSessionMarkdown(), sessionTitle);
           await app.SaveExportFile(path, await blobToBase64(blob), true);
         } else if (format === "image") {
           const path = await app.PickExportFile(`${base}.png`, "image/png");
           if (!path) return;
+          const { blobToBase64, renderSessionImageBlob } = await import("./lib/sessionExport");
           const blob = await renderSessionImageBlob(getSessionMarkdown());
           await app.SaveExportFile(path, await blobToBase64(blob), true);
         } else {
@@ -2968,43 +2971,47 @@ export default function App() {
       </div>
 
       {histView !== null && (
-        <HistoryPanel
-          kind={histView.kind}
-          sessions={histView.sessions}
-          running={state.running}
-          onResume={onResumeSession}
-          onPreview={previewSession}
-          onDelete={onDeleteSession}
-          onRename={onRenameSession}
-          onRestore={onRestoreTrashedSession}
-          onPurge={onPurgeTrashedSession}
-          onPurgeAll={onPurgeAllTrashedSessions}
-          onClose={closeHistory}
-        />
+        <Suspense fallback={null}>
+          <HistoryPanel
+            kind={histView.kind}
+            sessions={histView.sessions}
+            running={state.running}
+            onResume={onResumeSession}
+            onPreview={previewSession}
+            onDelete={onDeleteSession}
+            onRename={onRenameSession}
+            onRestore={onRestoreTrashedSession}
+            onPurge={onPurgeTrashedSession}
+            onPurgeAll={onPurgeAllTrashedSessions}
+            onClose={closeHistory}
+          />
+        </Suspense>
       )}
 
       {settingsTarget !== null && (
-        <SettingsPanel
-          initialTab={settingsTarget}
-          initialFocus={settingsFocus ?? undefined}
-          agentRunning={state.running}
-          onClose={() => {
-            setSettingsFocus(null);
-            setSettingsTarget(null);
-          }}
-          onChanged={(settings) => {
-            void refreshMeta();
-            if (settings) {
-              applyDesktopPreferences(settings);
-              void refreshSidebarImConnectionsFromSettings(settings).catch((e) => console.warn("bot sidebar refresh failed", e));
-              return;
-            }
-            void reloadSidebarImConnections().catch((e) => console.warn("bot sidebar refresh failed", e));
-            void app.Settings()
-              .then(applyDesktopPreferences)
-              .catch((e) => console.warn("desktop preferences refresh failed", e));
-          }}
-        />
+        <Suspense fallback={null}>
+          <SettingsPanel
+            initialTab={settingsTarget}
+            initialFocus={settingsFocus ?? undefined}
+            agentRunning={state.running}
+            onClose={() => {
+              setSettingsFocus(null);
+              setSettingsTarget(null);
+            }}
+            onChanged={(settings) => {
+              void refreshMeta();
+              if (settings) {
+                applyDesktopPreferences(settings);
+                void refreshSidebarImConnectionsFromSettings(settings).catch((e) => console.warn("bot sidebar refresh failed", e));
+                return;
+              }
+              void reloadSidebarImConnections().catch((e) => console.warn("bot sidebar refresh failed", e));
+              void app.Settings()
+                .then(applyDesktopPreferences)
+                .catch((e) => console.warn("desktop preferences refresh failed", e));
+            }}
+          />
+        </Suspense>
       )}
 
       <CommandPalette
