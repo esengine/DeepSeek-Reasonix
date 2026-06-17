@@ -190,13 +190,16 @@ jobs:
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
           project-slug: DeepSeek-Reasonix
           signing-policy-slug: ${{ steps.ver.outputs.channel == 'canary' && 'test-signing' || 'release-signing' }}
           artifact-configuration-slug: windows-installer
           github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
           github-token: ${{ github.token }}
           wait-for-completion: true
+          # The policy uses an approval process — leave headroom for a human to approve
+          # the request (the approver gets an email on submit) before the job gives up.
+          wait-for-completion-timeout-in-seconds: 1800
           output-artifact-directory: signed
 
       - name: Replace installer with signed build
