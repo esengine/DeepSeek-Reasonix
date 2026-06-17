@@ -67,6 +67,13 @@ npm i -g reasonix                  # 任意系统;自动拉取对应平台的原
 brew install esengine/reasonix/reasonix   # macOS
 ```
 
+### 卸载
+
+```sh
+npm uninstall -g reasonix          # 卸载 npm 安装的二进制
+brew uninstall reasonix            # 卸载 Homebrew 安装的二进制
+```
+
 预编译归档(`darwin|linux|windows × amd64|arm64`)和 `SHA256SUMS` 见每个
 [GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases)。
 
