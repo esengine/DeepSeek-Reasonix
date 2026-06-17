@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -13,6 +14,7 @@ func legacyHome(t *testing.T) (src, dest, home string) {
 	t.Helper()
 	home = t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Setenv("USERPROFILE", home)                               // os.UserHomeDir on Windows
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config")) // os.UserConfigDir on Linux
 	t.Setenv("AppData", filepath.Join(home, "AppData"))         // os.UserConfigDir on Windows
@@ -230,6 +232,182 @@ func TestMigrateSkipsWhenDestExists(t *testing.T) {
 	}
 }
 
+func TestMigrateMCPToUserConfigOnUpgradeCollectsKnownSources(t *testing.T) {
+	srcJSON, dest, _ := legacyHome(t)
+	writeLegacy(t, srcJSON, `{
+		"mcpServers": {
+			"legacy-json": {"command": "legacy-json-bin"},
+			"disabled-json": {"command": "disabled-json-bin", "disabled": true},
+			"project-json": {"command": "legacy-json-should-not-win"},
+			"global": {"command": "legacy-should-not-win"}
+		}
+	}`)
+	writeLegacy(t, filepath.Join(filepath.Dir(dest), "reasonix.toml"), `
+[[plugins]]
+name = "legacy-toml"
+command = "legacy-toml-bin"
+`)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte(`
+[[plugins]]
+name = "global"
+command = "global-bin"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projectTOML := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectTOML, "reasonix.toml"), []byte(`
+[[plugins]]
+name = "project-toml"
+command = "project-toml-bin"
+
+[[plugins]]
+name = "global"
+command = "project-should-not-win"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projectJSON := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectJSON, ".mcp.json"), []byte(`{
+		"mcpServers": {
+			"project-json": {"command": "project-json-bin"}
+		}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := MigrateMCPToUserConfigOnUpgrade([]string{projectTOML, projectJSON, projectTOML})
+	if err != nil {
+		t.Fatalf("MigrateMCPToUserConfigOnUpgrade: %v", err)
+	}
+	if res == nil || res.Added != 5 {
+		t.Fatalf("migration result = %+v, want 5 added", res)
+	}
+	cfg := LoadForEdit(dest)
+	byName := map[string]PluginEntry{}
+	for _, p := range cfg.Plugins {
+		byName[p.Name] = p
+	}
+	for name, command := range map[string]string{
+		"global":        "global-bin",
+		"disabled-json": "disabled-json-bin",
+		"legacy-toml":   "legacy-toml-bin",
+		"legacy-json":   "legacy-json-bin",
+		"project-toml":  "project-toml-bin",
+		"project-json":  "project-json-bin",
+	} {
+		if byName[name].Command != command {
+			t.Fatalf("%s command = %q, want %q; plugins=%+v", name, byName[name].Command, command, cfg.Plugins)
+		}
+	}
+	if p := byName["disabled-json"]; p.AutoStart == nil || *p.AutoStart {
+		t.Fatalf("disabled legacy MCP should migrate with auto_start=false: %+v", p)
+	}
+	if _, err := os.Stat(mcpGlobalMigrationMarkerPath()); err != nil {
+		t.Fatalf("migration marker missing: %v", err)
+	}
+
+	lateProject := t.TempDir()
+	if err := os.WriteFile(filepath.Join(lateProject, "reasonix.toml"), []byte(`
+[[plugins]]
+name = "late"
+command = "late-bin"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err = MigrateMCPToUserConfigOnUpgrade([]string{lateProject})
+	if err != nil {
+		t.Fatalf("second migration: %v", err)
+	}
+	if res != nil {
+		t.Fatalf("second migration result = %+v, want nil due marker", res)
+	}
+	if got := LoadForEdit(dest); len(got.Plugins) != len(cfg.Plugins) {
+		t.Fatalf("second migration changed plugins: %+v", got.Plugins)
+	}
+}
+
+func TestMigrateMCPToUserConfigOnUpgradeDoesNotMarkEmptyScan(t *testing.T) {
+	_, _, _ = legacyHome(t)
+	res, err := MigrateMCPToUserConfigOnUpgrade(nil)
+	if err != nil {
+		t.Fatalf("MigrateMCPToUserConfigOnUpgrade: %v", err)
+	}
+	if res != nil {
+		t.Fatalf("result = %+v, want nil", res)
+	}
+	if _, err := os.Stat(mcpGlobalMigrationMarkerPath()); !os.IsNotExist(err) {
+		t.Fatalf("empty scan should not write marker, stat err=%v", err)
+	}
+}
+
+func TestMigrateMCPToUserConfigOnUpgradeRefusesMalformedGlobalConfig(t *testing.T) {
+	srcJSON, dest, _ := legacyHome(t)
+	writeLegacy(t, srcJSON, `{
+		"mcpServers": {
+			"legacy-json": {"command": "legacy-json-bin"}
+		}
+	}`)
+	const malformed = "[[plugins]\nname = \"broken\"\n"
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte(malformed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := MigrateMCPToUserConfigOnUpgrade(nil)
+	if err == nil {
+		t.Fatal("expected malformed global config to abort MCP migration")
+	}
+	if res != nil {
+		t.Fatalf("result = %+v, want nil", res)
+	}
+	if got, readErr := os.ReadFile(dest); readErr != nil {
+		t.Fatalf("read dest: %v", readErr)
+	} else if string(got) != malformed {
+		t.Fatalf("malformed config was overwritten:\n%s", got)
+	}
+	if _, statErr := os.Stat(mcpGlobalMigrationMarkerPath()); !os.IsNotExist(statErr) {
+		t.Fatalf("failed migration must not write marker, stat err=%v", statErr)
+	}
+}
+
+func TestMigrateMCPToUserConfigOnUpgradePreservesConfigVersion(t *testing.T) {
+	_, dest, _ := legacyHome(t)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte("config_version = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+[[plugins]]
+name = "project"
+command = "project-bin"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := MigrateMCPToUserConfigOnUpgrade([]string{project})
+	if err != nil {
+		t.Fatalf("MigrateMCPToUserConfigOnUpgrade: %v", err)
+	}
+	if res == nil || res.Added != 1 {
+		t.Fatalf("result = %+v, want 1 added", res)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read dest: %v", err)
+	}
+	if !strings.Contains(string(got), "config_version = 1") {
+		t.Fatalf("MCP migration should not advance config_version:\n%s", got)
+	}
+}
+
 func TestMigrateImportsLegacyV1TOMLBeforeJSON(t *testing.T) {
 	srcJSON, dest, _ := legacyHome(t)
 	legacyTOML := filepath.Join(filepath.Dir(dest), "reasonix.toml")
@@ -266,7 +444,7 @@ command = "legacy-bin"
 		t.Fatalf("read migrated config: %v", err)
 	}
 	text := string(got)
-	for _, want := range []string{`config_version = 2`, `[desktop]`, `close_behavior = "quit"`, `name    = "legacy-v1"`} {
+	for _, want := range []string{`config_version = 3`, `[desktop]`, `close_behavior = "quit"`, `name    = "legacy-v1"`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("migrated TOML missing %q:\n%s", want, text)
 		}
@@ -311,6 +489,222 @@ command = "legacy-home-bin"
 	}
 	if strings.Contains(text, `name    = "json"`) {
 		t.Fatalf("lower-priority v0.5 JSON should not be merged when v1 TOML exists:\n%s", text)
+	}
+}
+
+func TestLoadFallsBackToLegacyOSConfigWhenPrimaryMissing(t *testing.T) {
+	_, dest, _ := legacyHome(t)
+	legacy := legacyUserConfigPath()
+	if legacy == "" {
+		t.Skip("legacy OS config path matches primary path on this platform")
+	}
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte(`default_model = "legacy-provider/legacy-model"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if source := SourcePath(); source != legacy {
+		t.Fatalf("SourcePath() = %q, want legacy path %q", source, legacy)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DefaultModel != "legacy-provider/legacy-model" {
+		t.Fatalf("DefaultModel = %q, want legacy value", cfg.DefaultModel)
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatalf("Load fallback should not create primary config, stat err=%v", err)
+	}
+}
+
+func TestLoadPrefersPrimaryConfigOverLegacyOSConfig(t *testing.T) {
+	_, dest, _ := legacyHome(t)
+	legacy := legacyUserConfigPath()
+	if legacy == "" {
+		t.Skip("legacy OS config path matches primary path on this platform")
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte(`default_model = "primary-provider/primary-model"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte(`default_model = "legacy-provider/legacy-model"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if source := SourcePath(); source != dest {
+		t.Fatalf("SourcePath() = %q, want primary path %q", source, dest)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DefaultModel != "primary-provider/primary-model" {
+		t.Fatalf("DefaultModel = %q, want primary value", cfg.DefaultModel)
+	}
+}
+
+func TestMigrateImportsLegacyOSConfigToPrimaryConfig(t *testing.T) {
+	_, dest, _ := legacyHome(t)
+	legacy := legacyUserConfigPath()
+	if legacy == "" {
+		t.Skip("legacy OS config path matches primary path on this platform")
+	}
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte(`
+default_model = "legacy-provider/legacy-model"
+
+[[plugins]]
+name = "legacy-os"
+command = "legacy-os-bin"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := MigrateLegacyIfNeeded()
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if res == nil || res.From != legacy || res.To != dest {
+		t.Fatalf("migration result = %+v, want %s -> %s", res, legacy, dest)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read migrated config: %v", err)
+	}
+	if !strings.Contains(string(got), `name    = "legacy-os"`) {
+		t.Fatalf("dest missing legacy plugin:\n%s", got)
+	}
+	if _, err := os.Stat(legacy); err != nil {
+		t.Fatalf("legacy file must remain untouched: %v", err)
+	}
+}
+
+func TestMigrateImportsLegacyXDGConfigToPrimaryConfig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("legacy XDG paths are Unix-only")
+	}
+	_, dest, home := legacyHome(t)
+	legacy := filepath.Join(home, ".config", "reasonix", "config.toml")
+	if samePath(legacy, dest) {
+		t.Skip("legacy XDG config path matches primary path on this platform")
+	}
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte(`
+default_model = "legacy-xdg-provider/legacy-xdg-model"
+
+[[plugins]]
+name = "legacy-xdg"
+command = "legacy-xdg-bin"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := MigrateLegacyIfNeeded()
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if res == nil || res.From != legacy || res.To != dest {
+		t.Fatalf("migration result = %+v, want %s -> %s", res, legacy, dest)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read migrated config: %v", err)
+	}
+	if !strings.Contains(string(got), `name    = "legacy-xdg"`) {
+		t.Fatalf("dest missing legacy XDG plugin:\n%s", got)
+	}
+}
+
+func TestMigrateImportsLegacyCredentialsEvenWhenPrimaryConfigExists(t *testing.T) {
+	_, dest, _ := legacyHome(t)
+	legacy := legacyUserConfigPath()
+	if legacy == "" {
+		t.Skip("legacy OS config path matches primary path on this platform")
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte(`default_model = "deepseek-flash/deepseek-chat"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	legacyCred := filepath.Join(filepath.Dir(legacy), "credentials")
+	if err := os.MkdirAll(filepath.Dir(legacyCred), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyCred, []byte("DEEPSEEK_API_KEY=sk-old-creds\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := MigrateLegacyIfNeeded()
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if res != nil {
+		t.Fatalf("primary config exists, config migration should be skipped, got %+v", res)
+	}
+	data, err := os.ReadFile(UserCredentialsPath())
+	if err != nil {
+		t.Fatalf("read migrated credentials: %v", err)
+	}
+	if string(data) != "DEEPSEEK_API_KEY=sk-old-creds\n" {
+		t.Fatalf("migrated credentials = %q", data)
+	}
+}
+
+func TestMigrateSkipsLegacyCredentialsAlreadyInCurrentAutoStore(t *testing.T) {
+	_, dest, _ := legacyHome(t)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte(`default_model = "deepseek-flash/deepseek-chat"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	currentCred := UserCredentialsPath()
+	if err := os.MkdirAll(filepath.Dir(currentCred), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(currentCred, []byte("DEEPSEEK_API_KEY=sk-current\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	legacyPaths := legacyCredentialsPaths()
+	if len(legacyPaths) == 0 {
+		t.Skip("no legacy credentials path on this platform")
+	}
+	legacyCred := legacyPaths[0]
+	if err := os.MkdirAll(filepath.Dir(legacyCred), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyCred, []byte("DEEPSEEK_API_KEY=sk-stale\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := MigrateLegacyIfNeeded()
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if res != nil {
+		t.Fatalf("primary config exists, config migration should be skipped, got %+v", res)
+	}
+	data, err := os.ReadFile(currentCred)
+	if err != nil {
+		t.Fatalf("read current credentials: %v", err)
+	}
+	if string(data) != "DEEPSEEK_API_KEY=sk-current\n" {
+		t.Fatalf("current credentials were overwritten: %q", data)
 	}
 }
 

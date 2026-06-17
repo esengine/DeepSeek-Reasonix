@@ -54,6 +54,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		name = "openai"
 	}
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
+	keySource, _ := cfg.Extra["api_key_source"].(string)
 	effort, _ := cfg.Extra["effort"].(string)
 	effort = strings.ToLower(strings.TrimSpace(effort))
 	if effort == "auto" {
@@ -113,6 +114,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		name:         name,
 		apiKey:       cfg.APIKey,
 		keyEnv:       keyEnv,
+		keySource:    keySource,
 		baseURL:      strings.TrimRight(cfg.BaseURL, "/"),
 		model:        cfg.Model,
 		deepseek:     deepseek,
@@ -139,6 +141,7 @@ type client struct {
 	name         string
 	apiKey       string
 	keyEnv       string // api_key_env name, surfaced in auth errors
+	keySource    string // source of keyEnv, surfaced in auth errors
 	baseURL      string
 	model        string
 	http         *http.Client
@@ -157,6 +160,7 @@ func (c *client) sendOpts() provider.SendOptions {
 	return provider.SendOptions{
 		Provider:   c.name,
 		KeyEnv:     c.keyEnv,
+		KeySource:  c.keySource,
 		KeyPresent: c.apiKey != "",
 		RetryAuth:  c.authed.Load(),
 	}

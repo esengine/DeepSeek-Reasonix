@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
@@ -53,6 +53,40 @@ func TestChdirTo(t *testing.T) {
 	}
 }
 
+func TestModelForResumePathUsesStoredModelWhenAvailable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	session := agent.NewSession("sys")
+	session.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
+	if err := session.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.SetBranchModelPreserveUpdated(path, "saved/model"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		DefaultModel: "default/model",
+		Providers: []config.ProviderEntry{
+			{Name: "default", Kind: "openai", BaseURL: "https://default.invalid/v1", Model: "model"},
+			{Name: "saved", Kind: "openai", BaseURL: "https://saved.invalid/v1", Model: "model"},
+		},
+	}
+
+	if got := modelForResumePath("", path, cfg); got != "saved/model" {
+		t.Fatalf("modelForResumePath = %q, want saved/model", got)
+	}
+	if got := modelForResumePath("explicit/model", path, cfg); got != "explicit/model" {
+		t.Fatalf("explicit model was overwritten: %q", got)
+	}
+	if got := modelForResumePath("", filepath.Join(dir, "missing.jsonl"), cfg); got != "" {
+		t.Fatalf("missing session model = %q, want empty fallback", got)
+	}
+	cfg.Providers = cfg.Providers[:1]
+	if got := modelForResumePath("", path, cfg); got != "" {
+		t.Fatalf("unknown stored model = %q, want empty fallback", got)
+	}
+}
+
 func TestReserveNativeScrollbackFrameWritesOnlyNewlines(t *testing.T) {
 	var b bytes.Buffer
 	reserveNativeScrollbackFrame(&b, 3)
@@ -63,6 +97,14 @@ func TestReserveNativeScrollbackFrameWritesOnlyNewlines(t *testing.T) {
 	reserveNativeScrollbackFrame(&b, 0)
 	if got := b.String(); got != "\n\n\n" {
 		t.Fatalf("reserveNativeScrollbackFrame(0) changed output to %q", got)
+	}
+}
+
+func TestPrepareNativeScrollbackClearsBeforeFrame(t *testing.T) {
+	var b bytes.Buffer
+	prepareNativeScrollback(&b, 2)
+	if got, want := b.String(), "\x1B[3J\x1B[2J\x1B[H\n\n"; got != want {
+		t.Fatalf("prepareNativeScrollback wrote %q, want %q", got, want)
 	}
 }
 
@@ -79,11 +121,46 @@ func isolateCLIConfigHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	t.Chdir(t.TempDir())
 	return home
+}
+
+func TestMCPMigrationWaitsForCLIWorkspace(t *testing.T) {
+	isolateCLIConfigHome(t)
+	cwd := mustGetwd(t)
+	if err := os.WriteFile(filepath.Join(cwd, "reasonix.toml"), []byte(`
+[[plugins]]
+name = "cwd-project"
+command = "cwd-project-bin"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	migrateLegacyConfigForCLI()
+	if cfg := config.LoadForEdit(config.UserConfigPath()); hasPluginNamed(cfg, "cwd-project") {
+		t.Fatalf("early CLI legacy migration imported the cwd project plugin: %+v", cfg.Plugins)
+	}
+
+	migrateMCPConfigForCLIWorkspace()
+	if cfg := config.LoadForEdit(config.UserConfigPath()); !hasPluginNamed(cfg, "cwd-project") {
+		t.Fatalf("workspace-aware CLI migration did not import project plugin: %+v", cfg.Plugins)
+	}
+}
+
+func hasPluginNamed(cfg *config.Config, name string) bool {
+	if cfg == nil {
+		return false
+	}
+	for _, plugin := range cfg.Plugins {
+		if plugin.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func TestMetadataCommandsDoNotProbeTerminalTheme(t *testing.T) {
@@ -131,6 +208,110 @@ func TestRunDispatchesACPLongFlagAlias(t *testing.T) {
 	}
 }
 
+func TestRunDefaultsToInteractiveSession(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	prev := runInteractiveSession
+	prevInteractive := cliIsInteractive
+	t.Cleanup(func() {
+		runInteractiveSession = prev
+		cliIsInteractive = prevInteractive
+	})
+	cliIsInteractive = func() bool { return true }
+
+	var gotArgs []string
+	runInteractiveSession = func(args []string) int {
+		gotArgs = append([]string(nil), args...)
+		return 17
+	}
+
+	if rc := Run(nil, "test-version"); rc != 17 {
+		t.Fatalf("Run(nil) rc = %d, want 17", rc)
+	}
+	if gotArgs != nil {
+		t.Fatalf("interactive args = %#v, want nil", gotArgs)
+	}
+}
+
+func TestRunNoArgsNonInteractivePrintsUsage(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	prev := runInteractiveSession
+	prevInteractive := cliIsInteractive
+	t.Cleanup(func() {
+		runInteractiveSession = prev
+		cliIsInteractive = prevInteractive
+	})
+	cliIsInteractive = func() bool { return false }
+	runInteractiveSession = func(args []string) int {
+		t.Fatalf("non-interactive no-arg Run should not start session with %#v", args)
+		return 99
+	}
+
+	out := captureStdout(t, func() {
+		if rc := Run(nil, "test-version"); rc != 0 {
+			t.Fatalf("Run(nil) rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, "reasonix —") || !strings.Contains(out, "reasonix run") {
+		t.Fatalf("non-interactive no-arg Run should print usage, got:\n%s", out)
+	}
+}
+
+func TestRunRoutesBareInteractiveFlagsToSession(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	prev := runInteractiveSession
+	t.Cleanup(func() { runInteractiveSession = prev })
+
+	for _, args := range [][]string{
+		{"--continue"},
+		{"--continue=true"},
+		{"-c=true"},
+		{"--resume=true"},
+		{"--yolo=true"},
+		{"--dangerously-skip-permissions=true"},
+	} {
+		var gotArgs []string
+		runInteractiveSession = func(args []string) int {
+			gotArgs = append([]string(nil), args...)
+			return 23
+		}
+
+		if rc := Run(args, "test-version"); rc != 23 {
+			t.Fatalf("Run(%#v) rc = %d, want 23", args, rc)
+		}
+		if !reflect.DeepEqual(gotArgs, args) {
+			t.Fatalf("interactive args = %#v, want %#v", gotArgs, args)
+		}
+	}
+}
+
+func TestRunKeepsChatAndCodeCompatibilityAliases(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	prev := runInteractiveSession
+	t.Cleanup(func() { runInteractiveSession = prev })
+
+	var calls [][]string
+	runInteractiveSession = func(args []string) int {
+		calls = append(calls, append([]string(nil), args...))
+		return 0
+	}
+
+	if rc := Run([]string{"chat", "--resume"}, "test-version"); rc != 0 {
+		t.Fatalf("Run(chat --resume) rc = %d, want 0", rc)
+	}
+	if rc := Run([]string{"code", "--continue"}, "test-version"); rc != 0 {
+		t.Fatalf("Run(code --continue) rc = %d, want 0", rc)
+	}
+
+	want := [][]string{{"--resume"}, {"--continue"}}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("interactive calls = %#v, want %#v", calls, want)
+	}
+}
+
 func TestRunMigratesLegacyConfigBeforeConfigOnlyCommands(t *testing.T) {
 	isolateCLIConfigHome(t)
 	legacyPath := filepath.Join(filepath.Dir(config.UserConfigPath()), "reasonix.toml")
@@ -160,7 +341,7 @@ command = "legacy-bin"
 	if err != nil {
 		t.Fatalf("read migrated user config: %v", err)
 	}
-	for _, want := range []string{`config_version = 2`, `[desktop]`, `name    = "legacy-cli"`} {
+	for _, want := range []string{`config_version = 3`, `[desktop]`, `name    = "legacy-cli"`} {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("migrated config missing %q:\n%s", want, body)
 		}
@@ -316,18 +497,6 @@ func TestConfigReasoningLanguageRejectsAliases(t *testing.T) {
 	})
 	if !strings.Contains(errOut, "must be auto|zh|en") {
 		t.Fatalf("config reasoning-language alias stderr = %q", errOut)
-	}
-}
-
-func TestWelcomePromptMissingKeysRequiresConfigSource(t *testing.T) {
-	if welcomeShouldPromptMissingKeys("", nil) {
-		t.Fatal("built-in defaults without a config source should not prompt for missing provider keys")
-	}
-	if welcomeShouldPromptMissingKeys("reasonix.toml", errors.New("bad config")) {
-		t.Fatal("invalid config should not enter the missing-key prompt path")
-	}
-	if !welcomeShouldPromptMissingKeys("reasonix.toml", nil) {
-		t.Fatal("valid config source should enter the missing-key prompt path")
 	}
 }
 
@@ -946,18 +1115,42 @@ func TestWithBuiltinFamiliesAddsMissingMiMo(t *testing.T) {
 	}
 }
 
+func TestWithBuiltinFamiliesForLanguageUsesDeepSeekPricing(t *testing.T) {
+	providers := withBuiltinFamiliesForLanguage(nil, "zh")
+	var flash *config.ProviderEntry
+	for i := range providers {
+		if providers[i].Name == "deepseek-flash" {
+			flash = &providers[i]
+			break
+		}
+	}
+	if flash == nil {
+		t.Fatal("deepseek-flash provider missing")
+	}
+	if flash.Price == nil || flash.Price.Output != 2 || flash.Price.Currency != "¥" {
+		t.Fatalf("flash price = %+v, want CNY preset", flash.Price)
+	}
+}
+
 func groupByFamilyKeys(ps []config.ProviderEntry, key string) []int {
 	_, members, _ := groupByFamily(ps)
 	return members[key]
 }
 
-func TestWriteDefaultConfigDisablesCodegraph(t *testing.T) {
+func TestWriteDefaultConfigOmitsLegacyInternalMCPSections(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "reasonix.toml")
 	if rc := writeDefaultConfig(path); rc != 0 {
 		t.Fatalf("writeDefaultConfig rc = %d", rc)
 	}
-	if c := config.LoadForEdit(path); c.Codegraph.Enabled {
-		t.Fatal("a freshly scaffolded config left codegraph enabled; new users should start without it")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, forbidden := range []string{"[codegraph]", "[builtin_mcp]", "[builtin_mcp_updates]"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("default config should omit %s:\n%s", forbidden, text)
+		}
 	}
 }
 

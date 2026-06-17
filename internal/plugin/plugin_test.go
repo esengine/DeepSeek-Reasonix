@@ -95,6 +95,45 @@ func TestSpecReadOnlyToolNamesMarksUnhintedToolsReadOnly(t *testing.T) {
 	}
 }
 
+func TestApplyKnownReadOnlyOverridesMarksCodeGraphReadTools(t *testing.T) {
+	got := ApplyKnownReadOnlyOverrides(Spec{Name: "codegraph", ReadOnlyToolNames: map[string]bool{"custom": true}})
+	for _, name := range []string{"custom", "codegraph_context", "codegraph_search", "context", "search"} {
+		if !got.ReadOnlyToolNames[name] {
+			t.Fatalf("codegraph read-only override missing %q: %+v", name, got.ReadOnlyToolNames)
+		}
+	}
+
+	other := ApplyKnownReadOnlyOverrides(Spec{Name: "not-codegraph"})
+	if other.ReadOnlyToolNames["codegraph_context"] {
+		t.Fatalf("non-codegraph spec should not receive codegraph overrides: %+v", other.ReadOnlyToolNames)
+	}
+}
+
+func TestApplyKnownOverridesPinsCodeGraphStdioToWorkspace(t *testing.T) {
+	got := ApplyKnownOverrides(Spec{Name: "codegraph"}, "/workspace")
+	if got.Dir != "/workspace" {
+		t.Fatalf("codegraph stdio Dir = %q, want workspace root", got.Dir)
+	}
+	if !got.ReadOnlyToolNames["codegraph_search"] {
+		t.Fatalf("codegraph read-only override missing: %+v", got.ReadOnlyToolNames)
+	}
+
+	preset := ApplyKnownOverrides(Spec{Name: "codegraph", Dir: "/custom"}, "/workspace")
+	if preset.Dir != "/custom" {
+		t.Fatalf("existing Dir should be preserved, got %q", preset.Dir)
+	}
+
+	httpSpec := ApplyKnownOverrides(Spec{Name: "codegraph", Type: "http"}, "/workspace")
+	if httpSpec.Dir != "" {
+		t.Fatalf("http codegraph should not receive stdio Dir, got %q", httpSpec.Dir)
+	}
+
+	other := ApplyKnownOverrides(Spec{Name: "other"}, "/workspace")
+	if other.Dir != "" {
+		t.Fatalf("non-codegraph should not receive Dir, got %q", other.Dir)
+	}
+}
+
 func TestStartAvailableKeepsGoodServers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

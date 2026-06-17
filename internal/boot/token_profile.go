@@ -17,11 +17,12 @@ const (
 	TokenModeEconomy = "economy"
 )
 
-const tokenEconomyPrompt = `Token economy mode is on. Keep the default tool surface lean. Optional sources are hidden behind connect_tool_source; enable skills, MCP servers, CodeGraph, LSP, web_fetch, install_source, or task only when the current request actually needs them.`
+const tokenEconomyPrompt = `Token economy mode is on. Keep the default tool surface lean. Optional sources are hidden behind connect_tool_source; enable skills, MCP servers, LSP, web_fetch, install_source, or task only when the current request actually needs them.`
 
 var tokenEconomyCoreBuiltins = []string{
 	"bash",
 	"bash_output",
+	"code_index",
 	"complete_step",
 	"edit_file",
 	"glob",
@@ -69,20 +70,19 @@ func tokenEconomyBuiltins(configured []string) []string {
 type toolSourceConnector struct {
 	mu sync.Mutex
 
-	skills    func(context.Context) (string, error)
-	task      func(context.Context) (string, error)
-	install   func(context.Context) (string, error)
-	webFetch  func(context.Context) (string, error)
-	lsp       func(context.Context) (string, error)
-	codegraph func(context.Context) (string, error)
-	mcp       func(context.Context, string) (string, error)
-	mcpNames  []string
+	skills   func(context.Context) (string, error)
+	task     func(context.Context) (string, error)
+	install  func(context.Context) (string, error)
+	webFetch func(context.Context) (string, error)
+	lsp      func(context.Context) (string, error)
+	mcp      func(context.Context, string) (string, error)
+	mcpNames []string
 }
 
 func (*toolSourceConnector) Name() string { return "connect_tool_source" }
 
 func (*toolSourceConnector) Description() string {
-	return "Token economy mode only: enable an optional tool source when the task needs it. Sources: skills, mcp, codegraph, lsp, web_fetch, install_source, task. For mcp, pass the configured server name; omit name to list servers. Newly enabled tools are available on the next model request."
+	return "Token economy mode only: enable an optional tool source when the task needs it. Sources: skills, mcp, lsp, web_fetch, install_source, task. For mcp, pass the configured server name; omit name to list servers. Newly enabled tools are available on the next model request."
 }
 
 func (*toolSourceConnector) ReadOnly() bool { return true }
@@ -91,7 +91,7 @@ func (*toolSourceConnector) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type":"object",
 		"properties":{
-			"source":{"type":"string","description":"Tool source to enable: skills, mcp, codegraph, lsp, web_fetch, install_source, or task."},
+			"source":{"type":"string","description":"Tool source to enable: skills, mcp, lsp, web_fetch, install_source, or task."},
 			"name":{"type":"string","description":"For source=mcp, the configured server name. Omit to list configured MCP servers without connecting them."}
 		},
 		"required":["source"]
@@ -131,8 +131,6 @@ func (t *toolSourceConnector) Execute(ctx context.Context, args json.RawMessage)
 		return runSourceInstaller(ctx, "web_fetch", t.webFetch)
 	case "lsp":
 		return runSourceInstaller(ctx, "lsp", t.lsp)
-	case "codegraph":
-		return runSourceInstaller(ctx, "codegraph", t.codegraph)
 	case "mcp":
 		name := strings.TrimSpace(p.Name)
 		if name == "" {
@@ -158,8 +156,6 @@ func normalizeToolSource(source string) string {
 		return "skills"
 	case "mcp", "plugin", "plugins", "server", "servers":
 		return "mcp"
-	case "codegraph", "code_graph", "symbol", "symbols":
-		return "codegraph"
 	case "lsp", "language_server", "language-servers":
 		return "lsp"
 	case "web", "web_fetch", "webfetch", "fetch":
@@ -180,9 +176,6 @@ func (t *toolSourceConnector) availableSources() []string {
 	}
 	if t.mcp != nil || len(t.mcpNames) > 0 {
 		out = append(out, "mcp")
-	}
-	if t.codegraph != nil {
-		out = append(out, "codegraph")
 	}
 	if t.lsp != nil {
 		out = append(out, "lsp")

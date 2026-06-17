@@ -17,6 +17,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/fileutil"
+	"reasonix/internal/jobs"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 )
@@ -30,8 +31,8 @@ import (
 //
 // Cwd roots the session's file tools and bash (built via builtin.Workspace).
 // Model and EffortOverride are optional session-local provider selectors from
-// ACP config options. MCPServers are the stdio MCP servers the client asked the
-// agent to connect for this session.
+// ACP config options. MCPServers are the MCP servers the client asked the agent
+// to connect for this session.
 type SessionParams struct {
 	Cwd            string
 	MCPServers     []plugin.Spec
@@ -102,6 +103,7 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, factory Factory, info 
 		sessions: make(map[string]*acpSession),
 	}
 	conn.Handle("initialize", svc.initialize)
+	conn.Handle("authenticate", svc.authenticate)
 	conn.Handle("session/new", svc.sessionNew)
 	conn.Handle("session/load", svc.sessionLoad)
 	conn.Handle("session/resume", svc.sessionResume)
@@ -217,7 +219,8 @@ func (s *acpSession) deleteAndWait() {
 
 // initialize advertises the agent's capability set: persisted load plus ACP v1
 // list/resume/close/delete lifecycle helpers, prompts carrying inline resource
-// text (embeddedContext) but not image/audio, and stdio-only MCP (no http/sse).
+// text (embeddedContext) but not image/audio, and stdio / Streamable HTTP MCP
+// (no legacy sse).
 func (s *service) initialize(_ context.Context, _ json.RawMessage) (any, error) {
 	return InitializeResult{
 		ProtocolVersion: ProtocolVersion,
@@ -234,11 +237,32 @@ func (s *service) initialize(_ context.Context, _ json.RawMessage) (any, error) 
 				Audio:           false,
 				EmbeddedContext: true,
 			},
-			MCPCapabilities: MCPCapabilities{HTTP: false, SSE: false},
+			MCPCapabilities: MCPCapabilities{HTTP: true, SSE: false},
 		},
 		AgentInfo:   Implementation{Name: s.info.Name, Version: s.info.Version},
-		AuthMethods: []any{},
+		AuthMethods: []AuthMethod{reasonixSetupAuthMethod()},
 	}, nil
+}
+
+func reasonixSetupAuthMethod() AuthMethod {
+	return AuthMethod{
+		ID:          "reasonix-setup",
+		Name:        "Reasonix setup",
+		Description: "Configure Reasonix providers and credentials in a terminal",
+		Type:        "terminal",
+		Args:        []string{"setup"},
+	}
+}
+
+func (s *service) authenticate(_ context.Context, raw json.RawMessage) (any, error) {
+	var p AuthenticateParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: "authenticate: " + err.Error()}
+	}
+	if strings.TrimSpace(p.MethodID) != reasonixSetupAuthMethod().ID {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: "authenticate: unknown methodId " + p.MethodID}
+	}
+	return AuthenticateResult{}, nil
 }
 
 // sessionNew opens a session: it mints an id, builds the session's sink bound to
@@ -283,6 +307,7 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 	}
 	ctrl.EnableInteractiveApproval()
 	sink.bindApprove(ctrl.Approve)
+	sink.bindAnswer(ctrl.AnswerQuestion)
 
 	now := time.Now().UTC()
 	sess := &acpSession{
@@ -307,6 +332,7 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 	s.mu.Lock()
 	s.sessions[id] = sess
 	s.mu.Unlock()
+	s.sendAvailableCommands(sess)
 
 	return SessionNewResult{
 		SessionID:     id,
@@ -404,6 +430,7 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 	}
 	ctrl.EnableInteractiveApproval()
 	sink.bindApprove(ctrl.Approve)
+	sink.bindAnswer(ctrl.AnswerQuestion)
 
 	dir := ctrl.SessionDir()
 	if dir == "" {
@@ -441,6 +468,7 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 	s.mu.Lock()
 	s.sessions[id] = sess
 	s.mu.Unlock()
+	s.sendAvailableCommands(sess)
 
 	if replay {
 		sink.replay(ctrl.History())
@@ -472,6 +500,7 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 	if text == "" {
 		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/prompt: empty prompt"}
 	}
+	text = s.resolveSlashPrompt(ctx, sess, text)
 
 	runCtx, cancel, ok := sess.begin(ctx)
 	if !ok {
@@ -639,6 +668,7 @@ func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState
 	}
 	newCtrl.EnableInteractiveApproval()
 	sink.bindApprove(newCtrl.Approve)
+	sink.bindAnswer(newCtrl.AnswerQuestion)
 	if len(carried) > 0 {
 		newCtrl.Resume(&agent.Session{Messages: carried}, prevPath)
 	} else if prevPath != "" {
@@ -655,6 +685,7 @@ func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState
 	sess.mu.Unlock()
 
 	cur.ReleaseResources()
+	s.sendAvailableCommands(sess)
 	sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: cfgState.ConfigOptions})
 	return nil
 }
@@ -1029,6 +1060,100 @@ func (s *acpSession) info() SessionInfo {
 	return meta.info(extra)
 }
 
+func (s *service) sendAvailableCommands(sess *acpSession) {
+	if sess == nil || sess.ctrl == nil {
+		return
+	}
+	cmds := availableCommandsFor(sess.ctrl)
+	if len(cmds) == 0 {
+		return
+	}
+	sess.sink.send(availableCommandsUpdate{
+		SessionUpdate:     "available_commands_update",
+		AvailableCommands: cmds,
+	})
+}
+
+func availableCommandsFor(ctrl *control.Controller) []AvailableCommand {
+	if ctrl == nil {
+		return nil
+	}
+	byName := map[string]AvailableCommand{}
+	for _, cmd := range ctrl.Commands() {
+		name := strings.TrimSpace(cmd.Name)
+		if name == "" {
+			continue
+		}
+		desc := strings.TrimSpace(cmd.Description)
+		if desc == "" {
+			desc = "Run the " + name + " command"
+		}
+		ac := AvailableCommand{Name: name, Description: desc}
+		if hint := strings.TrimSpace(cmd.ArgHint); hint != "" {
+			ac.Input = &AvailableCommandInput{Hint: hint}
+		}
+		byName[name] = ac
+	}
+	for _, sk := range ctrl.Skills() {
+		name := strings.TrimSpace(sk.Name)
+		if name == "" {
+			continue
+		}
+		if _, exists := byName[name]; exists {
+			continue
+		}
+		desc := strings.TrimSpace(sk.Description)
+		if desc == "" {
+			desc = "Run the " + name + " skill"
+		}
+		byName[name] = AvailableCommand{
+			Name:        name,
+			Description: desc,
+			Input:       &AvailableCommandInput{Hint: "instructions"},
+		}
+	}
+	if host := ctrl.Host(); host != nil {
+		for _, prompt := range host.Prompts() {
+			name := strings.TrimSpace(prompt.Name)
+			if name == "" {
+				continue
+			}
+			desc := strings.TrimSpace(prompt.Description)
+			if desc == "" {
+				desc = "Run the " + name + " MCP prompt"
+			}
+			ac := AvailableCommand{Name: name, Description: desc}
+			if len(prompt.Args) > 0 {
+				ac.Input = &AvailableCommandInput{Hint: "arguments"}
+			}
+			byName[name] = ac
+		}
+	}
+	out := make([]AvailableCommand, 0, len(byName))
+	for _, cmd := range byName {
+		out = append(out, cmd)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+func (s *service) resolveSlashPrompt(ctx context.Context, sess *acpSession, text string) string {
+	line := strings.TrimSpace(text)
+	if sess == nil || sess.ctrl == nil || !strings.HasPrefix(line, "/") {
+		return text
+	}
+	if sent, ok := sess.ctrl.CustomCommand(line); ok {
+		return sent
+	}
+	if sent, ok := sess.ctrl.RunSkill(line); ok {
+		return sent
+	}
+	if sent, ok, err := sess.ctrl.MCPPrompt(ctx, line); err == nil && ok {
+		return sent
+	}
+	return text
+}
+
 type acpSessionMeta struct {
 	SessionID      string    `json:"sessionId"`
 	Cwd            string    `json:"cwd"`
@@ -1286,6 +1411,9 @@ func deleteSessionFiles(sessionPath string) error {
 	if err := agent.DeleteSubagentsByParent(filepath.Dir(sessionPath), agent.BranchID(sessionPath)); err != nil {
 		return err
 	}
+	if err := jobs.RemoveArtifacts(sessionPath); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1296,8 +1424,7 @@ func checkpointPath(sessionPath string) string {
 	return strings.TrimSuffix(sessionPath, ".jsonl") + ".ckpt"
 }
 
-// mcpSpecs converts ACP stdio MCP server declarations to plugin.Spec. ACP's
-// session/new only carries stdio servers (the agent advertises http/sse off).
+// mcpSpecs converts ACP MCP server declarations to plugin.Spec.
 func mcpSpecs(in []MCPServerSpec, cwd string) ([]plugin.Spec, error) {
 	if len(in) == 0 {
 		return nil, nil
@@ -1308,25 +1435,45 @@ func mcpSpecs(in []MCPServerSpec, cwd string) ([]plugin.Spec, error) {
 		if typ == "" {
 			typ = "stdio"
 		}
-		if typ != "stdio" {
-			return nil, fmt.Errorf("MCP server %q uses unsupported transport %q", m.Name, m.Type)
-		}
 		if strings.TrimSpace(m.Name) == "" {
 			return nil, fmt.Errorf("MCP server name is required")
 		}
-		if strings.TrimSpace(m.Command) == "" {
-			return nil, fmt.Errorf("MCP server %q command is required", m.Name)
+		switch typ {
+		case "stdio":
+			if strings.TrimSpace(m.Command) == "" {
+				return nil, fmt.Errorf("MCP server %q command is required", m.Name)
+			}
+		case "http", "streamable-http", "streamable_http":
+			if strings.TrimSpace(m.URL) == "" {
+				return nil, fmt.Errorf("MCP server %q url is required", m.Name)
+			}
+			typ = "http"
+		default:
+			return nil, fmt.Errorf("MCP server %q uses unsupported transport %q", m.Name, m.Type)
 		}
 		out = append(out, plugin.Spec{
-			Name:    m.Name,
+			Name:    strings.TrimSpace(m.Name),
 			Type:    typ,
-			Command: m.Command,
-			Args:    m.Args,
-			Env:     map[string]string(m.Env),
+			Command: strings.TrimSpace(m.Command),
+			Args:    append([]string(nil), m.Args...),
+			Env:     mapString(m.Env),
+			URL:     strings.TrimSpace(m.URL),
+			Headers: mapString(m.Headers),
 			Dir:     cwd,
 		})
 	}
 	return out, nil
+}
+
+func mapString(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // newSessionID returns a random RFC 4122 v4 UUID string used to address a session.

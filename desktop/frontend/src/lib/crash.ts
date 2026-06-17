@@ -96,6 +96,7 @@ const EVENT_LOOP_LAG_PROMPT_MS = 1_200;
 const STARTUP_GRACE_MS = 15_000;
 const PROMPT_COOLDOWN_MS = 10 * 60_000;
 const MAX_LAG_SAMPLES = 60;
+const VISIBILITY_RESUME_GRACE_MS = 5_000;
 
 const longTasks: LongTaskSample[] = [];
 const lagSamples: number[] = [];
@@ -359,8 +360,27 @@ export function performanceLabelForReason(reason: string): string {
   return "performance.pressure";
 }
 
-export function shouldRecordLongTaskSample(startMs: number, durationMs: number, graceUntilMs: number): boolean {
-  return durationMs >= 50 && startMs >= graceUntilMs;
+export function shouldRecordLongTaskSample(
+  startMs: number,
+  durationMs: number,
+  graceUntilMs: number,
+  visibilityHidden = false,
+  visibleSinceMs = 0,
+  focused = true,
+): boolean {
+  if (!focused) return false;
+  if (visibilityHidden) return false;
+  return durationMs >= 50 && startMs >= graceUntilMs && startMs - visibleSinceMs >= VISIBILITY_RESUME_GRACE_MS;
+}
+
+export function shouldRecordEventLoopLagSample(
+  visibilityHidden: boolean,
+  msSinceVisible: number,
+  focused = true,
+): boolean {
+  if (!focused) return false;
+  if (visibilityHidden) return false;
+  return msSinceVisible >= VISIBILITY_RESUME_GRACE_MS;
 }
 
 export function buildPerformancePayload(snapshot: PerformanceSnapshot): CrashPayload {
@@ -512,14 +532,46 @@ export function reportCrash(label: string, err: unknown, extra?: string) {
   paint(buildCrashPayload(label, err, extra));
 }
 
+type GlobalCrashEventLike = Pick<Event, "defaultPrevented"> & {
+  message?: unknown;
+  error?: unknown;
+};
+
+const RESIZE_OBSERVER_LOOP_MESSAGE_RE =
+  /^ResizeObserver loop (?:limit exceeded|completed with undelivered notifications\.?)$/;
+
+function globalCrashEventMessages(e: GlobalCrashEventLike): string[] {
+  const messages: string[] = [];
+  const pushMessage = (message: string) => {
+    const trimmed = message.trim();
+    if (trimmed) messages.push(trimmed);
+  };
+  if (typeof e.message === "string") pushMessage(e.message);
+  const error = e.error;
+  if (typeof error === "string") pushMessage(error);
+  if (error && typeof error === "object" && "message" in error) {
+    const msg = (error as { message?: unknown }).message;
+    if (typeof msg === "string") pushMessage(msg);
+  }
+  return messages;
+}
+
+export function shouldReportGlobalCrashEvent(e: GlobalCrashEventLike): boolean {
+  if (e.defaultPrevented) return false;
+  if (globalCrashEventMessages(e).some((message) => RESIZE_OBSERVER_LOOP_MESSAGE_RE.test(message))) return false;
+  return true;
+}
+
 export function shouldPromptForPerformanceLabel(
   alreadyHandled: boolean,
   msSinceLastPrompt: number,
   visibilityHidden: boolean,
+  focused = true,
 ): boolean {
   if (alreadyHandled) return false;
   if (msSinceLastPrompt < PROMPT_COOLDOWN_MS) return false;
   if (visibilityHidden) return false;
+  if (!focused) return false;
   return true;
 }
 
@@ -529,7 +581,8 @@ function isPerfLabelHandled(label: string): boolean {
 
 function shouldPromptForPerformance(now: number, label: string): boolean {
   const hidden = typeof document !== "undefined" && document.visibilityState === "hidden";
-  return shouldPromptForPerformanceLabel(isPerfLabelHandled(label), now - lastPerformancePromptAt, hidden);
+  const focused = typeof document === "undefined" || document.hasFocus?.() !== false;
+  return shouldPromptForPerformanceLabel(isPerfLabelHandled(label), now - lastPerformancePromptAt, hidden, focused);
 }
 
 function promptPerformanceReport(reason: string, currentLagMs = 0): void {
@@ -556,6 +609,10 @@ export function installPerformancePressureMonitor() {
   performanceMonitorInstalled = true;
   const startedAt = performance.now();
   const graceUntil = startedAt + STARTUP_GRACE_MS;
+  const isHidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
+  const isFocused = () => typeof document === "undefined" || document.hasFocus?.() !== false;
+  let visibleSince = isHidden() ? Number.POSITIVE_INFINITY : startedAt;
+  let expected = performance.now() + 1000;
 
   const pastGrace = () => performance.now() >= graceUntil;
   const inspectLongTasks = () => {
@@ -567,11 +624,20 @@ export function installPerformancePressureMonitor() {
     }
   };
 
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => {
+      longTasks.length = 0;
+      lagSamples.length = 0;
+      expected = performance.now() + 1000;
+      if (!isHidden()) visibleSince = performance.now();
+    });
+  }
+
   if (typeof PerformanceObserver !== "undefined") {
     try {
       const observer = new PerformanceObserver((list) => {
         for (const entry of list.getEntries()) {
-          if (!shouldRecordLongTaskSample(entry.startTime, entry.duration, graceUntil)) continue;
+          if (!shouldRecordLongTaskSample(entry.startTime, entry.duration, graceUntil, isHidden(), visibleSince, isFocused())) continue;
           longTasks.push({ startMs: Math.round(entry.startTime), durationMs: Math.round(entry.duration) });
         }
         pruneLongTasks();
@@ -583,12 +649,12 @@ export function installPerformancePressureMonitor() {
     }
   }
 
-  let expected = performance.now() + 1000;
   window.setInterval(() => {
     const now = performance.now();
     const lagMs = Math.max(0, now - expected);
     expected = now + 1000;
     if (!pastGrace()) return;
+    if (!shouldRecordEventLoopLagSample(isHidden(), now - visibleSince, isFocused())) return;
     lagSamples.push(lagMs);
     if (lagSamples.length > MAX_LAG_SAMPLES) lagSamples.shift();
     if (lagMs >= EVENT_LOOP_LAG_PROMPT_MS) promptPerformanceReport(`event loop lag ${fmtNumber(lagMs)}ms`, lagMs);
@@ -597,6 +663,10 @@ export function installPerformancePressureMonitor() {
 }
 
 export function installGlobalCrashHandlers() {
-  window.addEventListener("error", (e) => reportCrash("window.error", e.error ?? e.message));
-  window.addEventListener("unhandledrejection", (e) => reportCrash("unhandledrejection", e.reason));
+  window.addEventListener("error", (e) => {
+    if (shouldReportGlobalCrashEvent(e)) reportCrash("window.error", e.error ?? e.message);
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    if (shouldReportGlobalCrashEvent(e)) reportCrash("unhandledrejection", e.reason);
+  });
 }

@@ -23,21 +23,22 @@ const (
 
 // skillAction builds the DTO for a single-skill install (copy or link).
 func (t *installSourceTool) skillAction(req request, cand skillCandidate, mode string) action {
+	scope := t.installScope(req, "skill", cand.SourcePath)
 	actionName := "copy_skill"
 	if mode == "link" {
 		actionName = "link_skill"
 	}
-	canonical, _ := t.skillCanonicalPath(cand.Name, req.Scope)
-	root, _ := t.skillInstallRoot(req.Scope)
+	canonical, _ := t.skillCanonicalPath(cand.Name, scope)
+	root, _ := t.skillInstallRoot(scope)
 	a := action{
 		Kind:          "skill",
 		Action:        actionName,
 		Name:          cand.Name,
 		Source:        cand.SourcePath,
 		Target:        canonical,
-		Scope:         req.Scope,
+		Scope:         scope,
 		Mode:          mode,
-		ConfigPath:    t.configPath(req.Scope),
+		ConfigPath:    t.configPath(scope),
 		Skills:        []string{cand.Name},
 		SkillCount:    1,
 		Layout:        "canonical_dir",
@@ -76,14 +77,15 @@ func skillActionRisk(mode string, cand skillCandidate) (RiskLevel, []string) {
 
 // skillRootAction builds the DTO for registering a whole skill directory.
 func (t *installSourceTool) skillRootAction(req request, path string, names []string) action {
+	scope := t.installScope(req, "skill", path)
 	return action{
 		Kind:        "skill",
 		Action:      "register_skill_root",
 		Name:        "",
 		Source:      path,
 		Target:      path,
-		ConfigPath:  t.configPath(req.Scope),
-		Scope:       req.Scope,
+		ConfigPath:  t.configPath(scope),
+		Scope:       scope,
 		Mode:        "register",
 		Skills:      names,
 		SkillCount:  len(names),
@@ -96,10 +98,10 @@ func (t *installSourceTool) skillRootAction(req request, path string, names []st
 
 func (t *installSourceTool) skillInstallRoot(scope string) (string, error) {
 	if scope == "global" {
-		if t.home == "" {
-			return "", newErr(ErrSourceUnreadable, "global skill install requires a home directory")
+		if t.reasonixHome == "" {
+			return "", newErr(ErrSourceUnreadable, "global skill install requires a Reasonix home directory")
 		}
-		return filepath.Join(t.home, ".reasonix", skill.SkillsDirname), nil
+		return filepath.Join(t.reasonixHome, skill.SkillsDirname), nil
 	}
 	return filepath.Join(t.root, ".reasonix", skill.SkillsDirname), nil
 }
@@ -130,7 +132,7 @@ func (t *installSourceTool) verifySkill(scope, name string, act *action) error {
 		custom = cfg.SkillCustomPaths()
 	}
 	var stderr bytes.Buffer
-	store := skill.New(skill.Options{HomeDir: t.home, ProjectRoot: t.root, CustomPaths: custom, DisableBuiltins: true, Stderr: &stderr})
+	store := skill.New(skill.Options{HomeDir: t.home, ReasonixHomeDir: t.reasonixHome, ProjectRoot: t.root, CustomPaths: custom, DisableBuiltins: true, Stderr: &stderr})
 	sk, ok := store.Read(name)
 	if !ok {
 		return newErr(ErrSourceUnreadable, "skill %q is installed but not discoverable", name)

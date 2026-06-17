@@ -5,11 +5,14 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -105,6 +108,99 @@ func TestChannelSelectsDistinctPointers(t *testing.T) {
 	}
 	if downloadPage() == (ghReleasesBase + "/latest") {
 		t.Error("canary download page should not be the stable latest releases page")
+	}
+}
+
+func withUpdateCacheDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	restore := updateCacheBaseDir
+	updateCacheBaseDir = func() (string, error) { return dir, nil }
+	t.Cleanup(func() { updateCacheBaseDir = restore })
+	return dir
+}
+
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func TestSaveCachedUpdateMarksEvaluateDownloaded(t *testing.T) {
+	withUpdateCacheDir(t)
+	oldChannel := channel
+	channel = "stable"
+	t.Cleanup(func() { channel = oldChannel })
+
+	data := []byte("verified artifact")
+	asset := update.Asset{
+		URL:    "https://dl.reasonix.io/desktop-v9.9.9/Reasonix-linux-amd64.tar.gz",
+		Size:   int64(len(data)),
+		SHA256: sha256Hex(data),
+	}
+	manifest := &update.Manifest{
+		Version:   "v9.9.9",
+		Platforms: map[string]update.Asset{update.CurrentPlatform(): asset},
+	}
+	if got := evaluate("v1.0.0", manifest); got.Downloaded {
+		t.Fatal("fresh cache should not report a downloaded update")
+	}
+	meta, err := saveCachedUpdate("v9.9.9", asset, data)
+	if err != nil {
+		t.Fatalf("saveCachedUpdate: %v", err)
+	}
+	if meta.Version != "v9.9.9" || meta.Channel != "stable" || meta.Platform != update.CurrentPlatform() {
+		t.Fatalf("cached metadata mismatch: %+v", meta)
+	}
+	if got := evaluate("v1.0.0", manifest); !got.Downloaded {
+		t.Fatalf("evaluate did not detect cached update: %+v", got)
+	}
+}
+
+func TestCachedUpdateRejectsTamperedArtifact(t *testing.T) {
+	withUpdateCacheDir(t)
+	oldChannel := channel
+	channel = "stable"
+	t.Cleanup(func() { channel = oldChannel })
+
+	data := []byte("verified artifact")
+	asset := update.Asset{
+		URL:    "https://dl.reasonix.io/desktop-v9.9.9/Reasonix-linux-amd64.tar.gz",
+		Size:   int64(len(data)),
+		SHA256: sha256Hex(data),
+	}
+	meta, err := saveCachedUpdate("v9.9.9", asset, data)
+	if err != nil {
+		t.Fatalf("saveCachedUpdate: %v", err)
+	}
+	if err := os.WriteFile(meta.Path, []byte("tampered"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if cachedUpdateMatches("v9.9.9", asset) {
+		t.Fatal("tampered cached artifact should not match")
+	}
+	if _, _, err := readVerifiedCachedUpdate(); err == nil {
+		t.Fatal("readVerifiedCachedUpdate should reject a tampered artifact")
+	}
+}
+
+func TestCachedUpdateRejectsDifferentChannel(t *testing.T) {
+	withUpdateCacheDir(t)
+	oldChannel := channel
+	channel = "stable"
+	t.Cleanup(func() { channel = oldChannel })
+
+	data := []byte("verified artifact")
+	asset := update.Asset{
+		URL:    "https://dl.reasonix.io/desktop-v9.9.9/Reasonix-linux-amd64.tar.gz",
+		Size:   int64(len(data)),
+		SHA256: sha256Hex(data),
+	}
+	if _, err := saveCachedUpdate("v9.9.9", asset, data); err != nil {
+		t.Fatalf("saveCachedUpdate: %v", err)
+	}
+	channel = "canary"
+	if _, _, err := readVerifiedCachedUpdate(); err == nil {
+		t.Fatal("readVerifiedCachedUpdate should reject a cache from another channel")
 	}
 }
 

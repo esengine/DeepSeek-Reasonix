@@ -15,6 +15,7 @@ import (
 // caller decides whether apply=true actually runs cfg.UpsertPlugin +
 // SaveTo + connectMCP.
 func (t *installSourceTool) mcpEntryAction(req request, e config.PluginEntry, source string) action {
+	scope := t.installScope(req, "mcp", source)
 	var normalizedCommand bool
 	e, normalizedCommand = config.NormalizePluginCommandLine(e)
 	// Tier comes from the call (req.Tier) or the entry; either way we
@@ -28,8 +29,8 @@ func (t *installSourceTool) mcpEntryAction(req request, e config.PluginEntry, so
 		Action:     "install_mcp_server",
 		Name:       e.Name,
 		Source:     source,
-		ConfigPath: t.configPath(req.Scope),
-		Scope:      req.Scope,
+		ConfigPath: t.configPath(scope),
+		Scope:      scope,
 		Transport:  pluginTransport(e),
 		URL:        e.URL,
 		Command:    e.Command,

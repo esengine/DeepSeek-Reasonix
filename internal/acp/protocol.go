@@ -50,12 +50,12 @@ type Implementation struct {
 
 // InitializeResult advertises what this agent supports: persisted session load,
 // ACP v1 session lifecycle helpers, inline resource text (embeddedContext) but
-// not image/audio, and stdio-only MCP (no http/sse).
+// not image/audio, and stdio / Streamable HTTP MCP (no legacy sse).
 type InitializeResult struct {
 	ProtocolVersion   int               `json:"protocolVersion"`
 	AgentCapabilities AgentCapabilities `json:"agentCapabilities"`
 	AgentInfo         Implementation    `json:"agentInfo"`
-	AuthMethods       []any             `json:"authMethods"`
+	AuthMethods       []AuthMethod      `json:"authMethods"`
 }
 
 // AgentCapabilities is the agentCapabilities object in InitializeResult.
@@ -90,22 +90,44 @@ type MCPCapabilities struct {
 	SSE  bool `json:"sse"`
 }
 
+// AuthMethod advertises how a client can prepare credentials for the agent.
+type AuthMethod struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Description string            `json:"description,omitempty"`
+	Type        string            `json:"type,omitempty"`
+	Args        []string          `json:"args,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+}
+
+// AuthenticateParams selects one advertised auth method. Terminal methods are
+// normally handled by the client by launching the agent with the method's args;
+// accepting this request keeps clients that call authenticate directly working.
+type AuthenticateParams struct {
+	MethodID string `json:"methodId"`
+}
+
+// AuthenticateResult is the empty authentication ack.
+type AuthenticateResult struct{}
+
 // --- session/new ---
 
-// SessionNewParams opens a session rooted at cwd, optionally with stdio MCP
-// servers the agent should connect for the session's lifetime.
+// SessionNewParams opens a session rooted at cwd, optionally with MCP servers
+// the agent should connect for the session's lifetime.
 type SessionNewParams struct {
 	Cwd        string          `json:"cwd,omitempty"`
 	MCPServers []MCPServerSpec `json:"mcpServers,omitempty"`
 }
 
-// MCPServerSpec describes one stdio MCP server the client asks the agent to run.
+// MCPServerSpec describes one MCP server the client asks the agent to connect.
 type MCPServerSpec struct {
-	Name    string   `json:"name"`
-	Type    string   `json:"type,omitempty"`
-	Command string   `json:"command,omitempty"`
-	Args    []string `json:"args,omitempty"`
-	Env     MCPEnv   `json:"env,omitempty"`
+	Name    string            `json:"name"`
+	Type    string            `json:"type,omitempty"`
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Env     MCPEnv            `json:"env,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // MCPEnv accepts ACP's official EnvVariable[] shape while still accepting the
@@ -407,6 +429,26 @@ type toolContent struct {
 	Content ContentBlock `json:"content"`
 }
 
+// availableCommandsUpdate advertises slash commands that the ACP client may
+// surface in its composer. The client sends invocations back as normal
+// session/prompt text such as "/review diff".
+type availableCommandsUpdate struct {
+	SessionUpdate     string             `json:"sessionUpdate"`
+	AvailableCommands []AvailableCommand `json:"availableCommands"`
+}
+
+// AvailableCommand is one slash command available in a session.
+type AvailableCommand struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Input       *AvailableCommandInput `json:"input,omitempty"`
+}
+
+// AvailableCommandInput describes a command's free-form text argument.
+type AvailableCommandInput struct {
+	Hint string `json:"hint"`
+}
+
 // configOptionUpdate reports a complete refreshed session config state.
 type configOptionUpdate struct {
 	SessionUpdate string                `json:"sessionUpdate"`
@@ -453,6 +495,7 @@ type PermissionToolCall struct {
 	Title      string          `json:"title,omitempty"`
 	Kind       string          `json:"kind,omitempty"`
 	Status     string          `json:"status,omitempty"`
+	Content    []toolContent   `json:"content,omitempty"`
 	RawInput   json.RawMessage `json:"rawInput,omitempty"`
 }
 

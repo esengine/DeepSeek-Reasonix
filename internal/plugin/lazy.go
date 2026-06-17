@@ -94,7 +94,9 @@ func (s *lazySpawn) run() {
 	if err != nil {
 		s.state = spawnFailed
 		s.spawnErr = err
-		s.host.RecordFailure(s.spec, err)
+		if !IsServerAlreadyConnected(err) {
+			s.host.RecordFailure(s.spec, err)
+		}
 		return
 	}
 	s.real = make(map[string]tool.Tool, len(real))
@@ -204,7 +206,9 @@ func (lt *lazyTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 		if err != nil {
 			sp.state = spawnFailed
 			sp.spawnErr = err
-			sp.host.RecordFailure(sp.spec, err)
+			if !IsServerAlreadyConnected(err) {
+				sp.host.RecordFailure(sp.spec, err)
+			}
 			return "", fmt.Errorf("MCP server %q failed to start: %w", sp.spec.Name, err)
 		}
 		sp.real = make(map[string]tool.Tool, len(real))

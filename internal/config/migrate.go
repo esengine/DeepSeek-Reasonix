@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/BurntSushi/toml"
 )
 
 // legacyConfig is the subset of the v0.x (~/.reasonix/config.json) schema this
@@ -55,6 +57,14 @@ type MigrationResult struct {
 	Warnings []string
 }
 
+// MCPGlobalMigrationResult summarizes the v1.9.1 MCP backfill that lifts MCP
+// servers from legacy and project-local sources into the user-global config.
+type MCPGlobalMigrationResult struct {
+	To      string
+	Added   int
+	Sources int
+}
+
 func (r *MigrationResult) Notice() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "migrated your previous configuration: %s → %s", r.From, r.To)
@@ -77,18 +87,22 @@ func (r *MigrationResult) Notice() string {
 // modifies or deletes the legacy files. Returns nil when there is nothing to
 // migrate, or when the current user config already exists.
 func MigrateLegacyIfNeeded() (*MigrationResult, error) {
+	credErr := migrateLegacyCredentialsIfNeeded()
 	dest := userConfigPath()
 	if dest == "" {
-		return nil, nil
+		return nil, credErr
 	}
 	if _, err := os.Stat(dest); err == nil {
-		return nil, nil
+		return nil, credErr
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, nil
+		return nil, credErr
 	}
 	if res, err := migrateLegacyTOMLIfNeeded(dest, home); res != nil || err != nil {
+		if err == nil {
+			err = credErr
+		}
 		return res, err
 	}
 	src := filepath.Join(home, ".reasonix", "config.json")
@@ -145,7 +159,209 @@ func MigrateLegacyIfNeeded() (*MigrationResult, error) {
 			return res, fmt.Errorf("write credentials: %w", err)
 		}
 	}
+	return res, credErr
+}
+
+// MigrateMCPToUserConfigOnUpgrade runs a one-time best-effort backfill for the
+// v1.9.1 desktop/CLI upgrade: MCP servers found in legacy TOML, known project
+// roots, and legacy v0.x JSON are copied into the user-global config so the MCP
+// settings page is stable across Global/project tabs. Existing global entries win
+// on name collisions, and source files are left untouched.
+func MigrateMCPToUserConfigOnUpgrade(projectRoots []string) (*MCPGlobalMigrationResult, error) {
+	marker := mcpGlobalMigrationMarkerPath()
+	if marker == "" {
+		return nil, nil
+	}
+	if _, err := os.Stat(marker); err == nil {
+		return nil, nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	res, err := migrateMCPToUserConfig(projectRoots)
+	if err != nil {
+		return res, err
+	}
+	if res == nil {
+		return nil, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
+		return res, err
+	}
+	if err := os.WriteFile(marker, []byte("v1\n"), 0o644); err != nil {
+		return res, err
+	}
 	return res, nil
+}
+
+func migrateMCPToUserConfig(projectRoots []string) (*MCPGlobalMigrationResult, error) {
+	dest := userConfigPath()
+	if dest == "" {
+		return nil, nil
+	}
+	userCfg, err := loadForEditStrict(dest)
+	if err != nil {
+		return nil, err
+	}
+	have := make(map[string]bool, len(userCfg.Plugins))
+	for _, p := range userCfg.Plugins {
+		if name := strings.TrimSpace(p.Name); name != "" {
+			have[name] = true
+		}
+	}
+
+	result := &MCPGlobalMigrationResult{To: dest}
+	addEntries := func(entries []PluginEntry) {
+		if len(entries) == 0 {
+			return
+		}
+		result.Sources++
+		for _, entry := range entries {
+			entry, _ = NormalizePluginCommandLine(entry)
+			name := strings.TrimSpace(entry.Name)
+			if name == "" || have[name] || validatePlugin(entry) != nil {
+				continue
+			}
+			userCfg.Plugins = append(userCfg.Plugins, entry)
+			have[name] = true
+			result.Added++
+		}
+	}
+
+	home, _ := os.UserHomeDir()
+	for _, path := range mcpMigrationLegacyTOMLPaths(dest, home) {
+		addEntries(loadPluginEntriesFromTOML(path))
+	}
+	for _, root := range normalizedMCPMigrationRoots(projectRoots) {
+		addEntries(loadPluginEntriesFromTOML(filepath.Join(root, "reasonix.toml")))
+		if entries, err := loadMCPJSON(filepath.Join(root, mcpJSONFile)); err == nil {
+			addEntries(entries)
+		}
+	}
+	addEntries(loadLegacyConfigPlugins(legacyConfigPath()))
+
+	if result.Sources == 0 {
+		return nil, nil
+	}
+	if result.Added > 0 {
+		if err := userCfg.SaveTo(dest); err != nil {
+			return result, err
+		}
+	}
+	return result, nil
+}
+
+func mcpGlobalMigrationMarkerPath() string {
+	dir := userSupportDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "mcp-global-migration-v1")
+}
+
+func mcpMigrationLegacyTOMLPaths(dest, home string) []string {
+	var paths []string
+	for _, path := range legacyTOMLPaths(dest, home) {
+		if path == "" || samePath(path, dest) {
+			continue
+		}
+		paths = append(paths, path)
+	}
+	return paths
+}
+
+func loadPluginEntriesFromTOML(path string) []PluginEntry {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	if _, err := os.Stat(path); err != nil {
+		return nil
+	}
+	var cfg Config
+	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+		return nil
+	}
+	out := make([]PluginEntry, 0, len(cfg.Plugins))
+	for _, p := range cfg.Plugins {
+		p, _ = NormalizePluginCommandLine(p)
+		out = append(out, p)
+	}
+	return out
+}
+
+func loadLegacyConfigPlugins(path string) []PluginEntry {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var legacy legacyConfig
+	data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		return nil
+	}
+	return legacyPlugins(legacy)
+}
+
+func normalizedMCPMigrationRoots(roots []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(roots))
+	for _, root := range roots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		if abs, err := filepath.Abs(root); err == nil {
+			root = abs
+		}
+		root = filepath.Clean(root)
+		if seen[root] {
+			continue
+		}
+		seen[root] = true
+		out = append(out, root)
+	}
+	return out
+}
+
+func migrateLegacyCredentialsIfNeeded() error {
+	missing := map[string]string{}
+	for _, src := range legacyCredentialsPaths() {
+		if src == "" {
+			continue
+		}
+		data, err := os.ReadFile(src)
+		if err != nil {
+			continue
+		}
+		assignments := parseCredentialLines(strings.Split(string(data), "\n"))
+		for key, value := range assignments {
+			if _, exists := missing[key]; !exists && !credentialCurrentStoreHasKey(key) {
+				missing[key] = value
+			}
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	_, err := StoreCredentialLines(credentialLines(missing))
+	return err
+}
+
+func credentialLines(assignments map[string]string) []string {
+	keys := make([]string, 0, len(assignments))
+	for key := range assignments {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	lines := make([]string, 0, len(keys))
+	for _, key := range keys {
+		lines = append(lines, key+"="+assignments[key])
+	}
+	return lines
 }
 
 func migrateLegacyQQConfig(cfg *Config, legacy legacyQQConfig) {
@@ -213,9 +429,29 @@ func migrateLegacyTOMLIfNeeded(dest, home string) (*MigrationResult, error) {
 }
 
 func legacyTOMLPaths(dest, home string) []string {
-	paths := []string{filepath.Join(filepath.Dir(dest), "reasonix.toml")}
+	seen := map[string]bool{}
+	var paths []string
+	add := func(path string) {
+		if path == "" {
+			return
+		}
+		path = filepath.Clean(path)
+		if seen[path] {
+			return
+		}
+		seen[path] = true
+		paths = append(paths, path)
+	}
+	if legacy := legacyUserConfigPath(); legacy != "" {
+		add(legacy)
+	}
+	for _, legacy := range legacyXDGConfigPaths() {
+		add(legacy)
+		add(filepath.Join(filepath.Dir(legacy), "reasonix.toml"))
+	}
+	add(filepath.Join(filepath.Dir(dest), "reasonix.toml"))
 	if home != "" {
-		paths = append(paths, filepath.Join(home, ".reasonix", "reasonix.toml"))
+		add(filepath.Join(home, ".reasonix", "reasonix.toml"))
 	}
 	return paths
 }
@@ -321,52 +557,17 @@ func mergeEnv(base, overlay map[string]string) map[string]string {
 	return out
 }
 
-// writeCredentialsEnv merges lines into the reasonix-owned global credentials
-// file (UserCredentialsPath, e.g. %AppData%\reasonix\credentials), replacing any
-// existing assignment of the same key, and pins them into the current process env
-// so the just-built session resolves the key without a restart. Falls back to
-// ~/.env only when the user config dir can't be resolved — never a project .env,
-// so a migration keeps secrets out of the user's project tree.
+// writeCredentialsEnv merges lines into the configured global credential store
+// and pins them into the current process env so the just-built session resolves
+// the key without a restart. Falls back to ~/.env only when Reasonix home can't
+// be resolved — never a project .env, so a migration keeps secrets out of the
+// user's project tree.
 func writeCredentialsEnv(home string, lines []string) error {
-	path := UserCredentialsPath()
-	if path == "" {
-		path = filepath.Join(home, ".env")
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if _, err := StoreCredentialLines(lines); err != nil {
+		if UserCredentialsPath() == "" && home != "" {
+			return os.WriteFile(filepath.Join(home, ".env"), []byte(strings.Join(lines, "\n")+"\n"), 0o600)
+		}
 		return err
 	}
-	target := make(map[string]bool, len(lines))
-	for _, l := range lines {
-		if k, _, ok := strings.Cut(l, "="); ok {
-			target[strings.TrimSpace(k)] = true
-		}
-	}
-	var kept []string
-	if data, err := os.ReadFile(path); err == nil {
-		for _, raw := range strings.Split(string(data), "\n") {
-			check := strings.TrimPrefix(strings.TrimSpace(raw), "export ")
-			if k, _, ok := strings.Cut(check, "="); ok && target[strings.TrimSpace(k)] {
-				continue
-			}
-			kept = append(kept, raw)
-		}
-		if n := len(kept); n > 0 && kept[n-1] == "" {
-			kept = kept[:n-1]
-		}
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	var b strings.Builder
-	for _, l := range kept {
-		b.WriteString(l)
-		b.WriteByte('\n')
-	}
-	for _, l := range lines {
-		b.WriteString(l)
-		b.WriteByte('\n')
-		if k, v, ok := strings.Cut(l, "="); ok {
-			os.Setenv(strings.TrimSpace(k), v)
-		}
-	}
-	return os.WriteFile(path, []byte(b.String()), 0o600)
+	return nil
 }

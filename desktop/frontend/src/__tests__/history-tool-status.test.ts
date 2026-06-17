@@ -22,6 +22,13 @@ function toolItems(messages: HistoryMessage[]) {
 
 console.log("\nhistory tool status");
 
+const userTimeItems = historyMessagesToItems([
+  { role: "user", content: "old prompt" },
+  { role: "user", content: "new prompt", createdAt: 1_718_000_000_000 },
+] as HistoryMessage[], "u").items.filter((item) => item.kind === "user");
+eq(userTimeItems[0]?.kind === "user" && userTimeItems[0].createdAt, undefined, "history users without createdAt keep no timestamp");
+eq(userTimeItems[1]?.kind === "user" && userTimeItems[1].createdAt, 1_718_000_000_000, "history users preserve createdAt when present");
+
 const lowercaseError = toolItems([
   {
     role: "assistant",

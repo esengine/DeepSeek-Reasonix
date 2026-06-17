@@ -9,9 +9,9 @@ import (
 
 // KillTree kills cmd's whole process group. StartTracked (and SetProcessGroupKill
 // for children started outside it) put the child in its own group via Setpgid, so
-// the negative-pid signal reaches every descendant — a launcher whose sub-daemon
-// survives the parent (e.g. codegraph's bundled node runtime) included, where a
-// plain Process.Kill would only hit the direct child and orphan the grandchild.
+// the negative-pid signal reaches every descendant, including a launcher whose
+// sub-daemon survives the parent, where a plain Process.Kill would only hit the
+// direct child and orphan the grandchild.
 func KillTree(cmd *exec.Cmd) {
 	if cmd == nil || cmd.Process == nil {
 		return

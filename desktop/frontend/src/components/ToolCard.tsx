@@ -3,7 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
 import { useT } from "../lib/i18n";
-import { diffsFor, subjectOf, summarize } from "../lib/tools";
+import { diffsFor, languageForToolArgs, subjectOf, summarize, summarizeFileDiff } from "../lib/tools";
 import { useShellExpand } from "../lib/shellExpand";
 import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import type { Item } from "../lib/useController";
@@ -66,7 +66,8 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId }: { item
   const archivedWithoutFullData = Boolean(item.dataArchived && !fullData);
   const effectiveArgs = archivedWithoutFullData ? "" : fullData?.args ?? item.args;
   const effectiveOutput = fullData?.output ?? item.output;
-  const diffs = archivedWithoutFullData ? [] : diffsFor(item.name, effectiveArgs);
+  const previewDiff = item.fileDiff?.diff ? item.fileDiff : undefined;
+  const diffs = previewDiff || archivedWithoutFullData ? [] : diffsFor(item.name, effectiveArgs);
   const subject = fullData ? subjectOf(item.name, effectiveArgs) : item.subject || subjectOf(item.name, effectiveArgs);
   // Reset cached fullData when the item identity changes (e.g. after rewind).
   useEffect(() => {
@@ -77,12 +78,12 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId }: { item
   // else folds its args/output away by default.  Open while running so the
   // user sees progress; closed by default once settled.
   const hasArchivedOnDemandBody = Boolean(item.dataArchived && tabId);
-  const hasArgsOrOutput = diffs.length === 0 && (!!effectiveArgs || !!effectiveOutput || hasArchivedOnDemandBody);
+  const hasArgsOrOutput = !previewDiff && diffs.length === 0 && (!!effectiveArgs || !!effectiveOutput || hasArchivedOnDemandBody);
 
   // Shell output: split into preview + "show all" toggle.
   const shellOutput = item.isShell && effectiveOutput ? effectiveOutput : null;
   const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_PREVIEW_LINES) : null;
-  const hasBody = Boolean(diffs.length || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error);
+  const hasBody = Boolean(previewDiff || diffs.length || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error);
   useEffect(() => {
     if (!open || !item.dataArchived || fullData || !tabId) return;
     let cancelled = false;
@@ -110,7 +111,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId }: { item
     item.readOnly && !hasNested && item.status !== "error" && item.status !== "stopped";
 
   const duration = item.status === "running" ? "" : formatToolDuration(item.durationMs);
-  const summary = item.status === "running" ? "" : item.summary || summarize(item.name, effectiveArgs, effectiveOutput, item.error);
+  const summary = item.status === "running" ? "" : item.summary || summarizeFileDiff(item.fileDiff) || (archivedWithoutFullData ? "" : summarize(item.name, effectiveArgs, effectiveOutput, item.error));
 
   // GSAP-driven collapse/expand for tool body
   const toolBodyRef = useRef<HTMLDivElement>(null);
@@ -145,12 +146,16 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId }: { item
 
       <div ref={toolBodyRef} className="tool__body">
 
-        {diffs.map((d, i) => (
-          <div key={i}>
-            {d.label && <div className="tool__difflabel">{d.label}</div>}
-            <DiffView original={d.original} modified={d.modified} language={d.lang} maxHeight={260} />
-          </div>
-        ))}
+        {previewDiff ? (
+          <DiffView diff={previewDiff.diff} language={languageForToolArgs(fullData?.args ?? item.args)} maxHeight={260} />
+        ) : (
+          diffs.map((d, i) => (
+            <div key={i}>
+              {d.label && <div className="tool__difflabel">{d.label}</div>}
+              <DiffView original={d.original} modified={d.modified} language={d.lang} maxHeight={260} />
+            </div>
+          ))
+        )}
 
         {hasNested && (
           <div className="tool__nested">

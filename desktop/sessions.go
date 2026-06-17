@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/fileutil"
+	"reasonix/internal/jobs"
 )
 
 // sessions.go holds the desktop-only session-management state that the shared
@@ -160,6 +161,10 @@ func trashSessionArtifactsBeforeMove(dir, sessionPath, key string, beforeMove fu
 	if err := movePathIfExists(strings.TrimSuffix(sessionPath, ".jsonl")+".ckpt", filepath.Join(itemDir, ckptName)); err != nil {
 		return err
 	}
+	jobsName := strings.TrimSuffix(key, ".jsonl") + ".jobs"
+	if err := movePathIfExists(jobs.ArtifactDir(sessionPath), filepath.Join(itemDir, jobsName)); err != nil {
+		return err
+	}
 	if err := trashSubagentArtifacts(dir, sessionPath, itemDir); err != nil {
 		return err
 	}
@@ -241,6 +246,10 @@ func restoreTrashedSessionFile(dir, path string) error {
 	}
 	ckptName := strings.TrimSuffix(key, ".jsonl") + ".ckpt"
 	if err := movePathIfExists(filepath.Join(itemDir, ckptName), filepath.Join(dir, ckptName)); err != nil {
+		return err
+	}
+	jobsName := strings.TrimSuffix(key, ".jsonl") + ".jobs"
+	if err := movePathIfExists(filepath.Join(itemDir, jobsName), filepath.Join(dir, jobsName)); err != nil {
 		return err
 	}
 	if err := restoreSubagentArtifacts(dir, itemDir); err != nil {

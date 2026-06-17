@@ -39,7 +39,9 @@ numver="${VERSION#v}"; numver="${numver%%-*}"
 node -e 'const fs=require("fs"),f="wails.json",j=JSON.parse(fs.readFileSync(f,"utf8"));j.info.productVersion=process.argv[1];fs.writeFileSync(f,JSON.stringify(j,null,2)+"\n")' "$numver"
 
 # NSIS installer is Windows-only (Wails requires a single windows target for -nsis).
-build_args=(-clean -platform "$PLATFORM" -ldflags "-X main.version=$VERSION -X main.channel=$CHANNEL")
+ldflags="-X main.version=$VERSION -X main.channel=$CHANNEL"
+[ "$os" = "darwin" ] && [ "${HAS_APPLE_CERT:-}" = "true" ] && ldflags="$ldflags -X main.macSelfUpdate=true"
+build_args=(-clean -platform "$PLATFORM" -ldflags "$ldflags")
 [ "$os" = windows ] && build_args+=(-nsis -webview2 embed)
 # Link cgo against WebKitGTK 4.1: 4.0 (libwebkit2gtk-4.0.so.37) is gone on
 # Ubuntu 24.04+/Fedora 40+, while 4.1 ships from Ubuntu 22.04 onward.

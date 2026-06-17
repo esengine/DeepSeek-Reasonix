@@ -121,10 +121,17 @@ export function AnchoredPopover({
       if (anchor) observer.observe(anchor);
       if (menu) observer.observe(menu);
     }
+    // Portaled popovers use viewport coordinates; scrollable ancestors move the anchor.
+    window.addEventListener("scroll", scheduleUpdate, true);
+    window.visualViewport?.addEventListener("scroll", scheduleUpdate);
+    window.visualViewport?.addEventListener("resize", scheduleUpdate);
 
     return () => {
       if (frame !== null) window.cancelAnimationFrame(frame);
       observer?.disconnect();
+      window.removeEventListener("scroll", scheduleUpdate, true);
+      window.visualViewport?.removeEventListener("scroll", scheduleUpdate);
+      window.visualViewport?.removeEventListener("resize", scheduleUpdate);
     };
   }, [rendered, anchorRef, align, offset, placement]);
 

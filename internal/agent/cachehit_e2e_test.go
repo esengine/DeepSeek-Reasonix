@@ -355,6 +355,26 @@ func TestSessionAggregateCacheRate(t *testing.T) {
 	}
 }
 
+func TestSetSessionResetsSessionCache(t *testing.T) {
+	mock := &mockDeepSeek{t: t, reasoning: longReasoning}
+	srv := httptest.NewServer(http.HandlerFunc(mock.handler))
+	defer srv.Close()
+
+	a, _ := newAgent(t, srv.URL, mock.tools(), 0, 0)
+	if err := a.Run(context.Background(), strings.Repeat("please consider this requirement. ", 6)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	hit, miss := a.SessionCache()
+	if hit+miss == 0 {
+		t.Fatalf("SessionCache()=%d/%d before reset, want telemetry to record the turn", hit, miss)
+	}
+	a.SetSession(NewSession("system"))
+	hit, miss = a.SessionCache()
+	if hit != 0 || miss != 0 {
+		t.Fatalf("SessionCache()=%d/%d after SetSession, want reset", hit, miss)
+	}
+}
+
 func TestReleaseCacheHitGuard(t *testing.T) {
 	if os.Getenv("REASONIX_RELEASE_CACHE_GUARD") == "" {
 		t.Skip("set REASONIX_RELEASE_CACHE_GUARD=1 to run the release cache guard")

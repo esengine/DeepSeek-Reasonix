@@ -1,6 +1,7 @@
 // Run: tsx src/__tests__/project-tree-runtime.test.ts
 
 import {
+  projectTreeFolderDisclosure,
   defaultExpandedProjectTreeKeys,
   projectTreeTopicOpenRequest,
 } from "../components/ProjectTree";
@@ -81,6 +82,39 @@ eq(
   }),
   { scope: "project", workspaceRoot: "/repo", topicId: "topic-project", sessionPath: undefined },
   "regular project topic still opens by topic",
+);
+
+eq(
+  projectTreeFolderDisclosure(false, true),
+  {
+    canExpand: false,
+    isOpen: false,
+    ariaExpanded: undefined,
+    iconStackClassName: "project-tree__icon-stack",
+  },
+  "empty project folders are not exposed as expandable disclosure rows",
+);
+
+eq(
+  projectTreeFolderDisclosure(true, false),
+  {
+    canExpand: true,
+    isOpen: false,
+    ariaExpanded: false,
+    iconStackClassName: "project-tree__icon-stack project-tree__icon-stack--expandable",
+  },
+  "collapsed project folders keep disclosure semantics when children exist",
+);
+
+eq(
+  projectTreeFolderDisclosure(true, true),
+  {
+    canExpand: true,
+    isOpen: true,
+    ariaExpanded: true,
+    iconStackClassName: "project-tree__icon-stack project-tree__icon-stack--expandable",
+  },
+  "expanded project folders can show the open-folder state only when children exist",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -15,10 +17,11 @@ import (
 	"reasonix/internal/event"
 )
 
-// metrics_app.go is the opt-in aggregate agent-metrics flush: anonymous
-// (signal, bucket) counters observed from the event stream, POSTed once per
-// launch. Never carries content, keys, prompts, or paths — only enumerated
-// integer counts. Gated on config desktop.metrics (default off), dev-skipped.
+// metrics_app.go is the aggregate desktop-metrics flush: anonymous (signal,
+// bucket) counters observed from the event stream and safe desktop preference
+// snapshots, POSTed once per launch. Never carries content, keys, prompts, paths,
+// or base URLs; custom provider/model identifiers are normalized into bounded
+// buckets. Gated on config desktop.metrics (default on), dev-skipped.
 
 var metricsEndpoint = "https://crash.reasonix.io/v1/metrics"
 
@@ -59,6 +62,220 @@ func (m *metricsAggregator) inc(signal, bucket string) {
 	m.mu.Lock()
 	m.c.add(signal, bucket, 1)
 	m.mu.Unlock()
+}
+
+func boolBucket(v bool) string {
+	if v {
+		return "on"
+	}
+	return "off"
+}
+
+func statusBarItemsCountBucket(n int) string {
+	if n < 0 {
+		n = 0
+	}
+	return "n_" + strconv.Itoa(n)
+}
+
+func countBucket(n int) string {
+	if n < 0 {
+		n = 0
+	}
+	switch {
+	case n == 0:
+		return "n_0"
+	case n == 1:
+		return "n_1"
+	case n <= 3:
+		return "n_2_3"
+	case n <= 5:
+		return "n_4_5"
+	default:
+		return "n_6_plus"
+	}
+}
+
+func knownBucket(value string, allowed ...string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	for _, ok := range allowed {
+		if value == ok {
+			return value
+		}
+	}
+	return "other"
+}
+
+func knownBucketDefault(value, def string, allowed ...string) string {
+	if strings.TrimSpace(value) == "" {
+		value = def
+	}
+	return knownBucket(value, allowed...)
+}
+
+func metricBucket(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "default"
+	}
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range value {
+		ok := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if ok {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	out := strings.Trim(b.String(), "_")
+	if out == "" {
+		return "other"
+	}
+	if len(out) > 96 {
+		return out[:96]
+	}
+	return out
+}
+
+func metricsOfficialProviderHost(baseURL string) string {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
+}
+
+func officialProviderBucket(e *config.ProviderEntry) string {
+	if e == nil {
+		return ""
+	}
+	switch config.CanonicalDesktopOfficialProviderName(e.Name) {
+	case "deepseek":
+		if metricsOfficialProviderHost(e.BaseURL) == "api.deepseek.com" {
+			return "deepseek"
+		}
+	case "mimo-api":
+		if metricsOfficialProviderHost(e.BaseURL) == "api.xiaomimimo.com" {
+			return "mimoapi"
+		}
+	case "mimo-token-plan":
+		if metricsOfficialProviderHost(e.BaseURL) == "token-plan-cn.xiaomimimo.com" {
+			return "mimoplan"
+		}
+	}
+	return ""
+}
+
+func providerMetricsBucket(e *config.ProviderEntry) string {
+	if b := officialProviderBucket(e); b != "" {
+		return b
+	}
+	if e == nil {
+		return "unknown"
+	}
+	return metricBucket("custom_" + e.Name)
+}
+
+func safeModelBucket(c *config.Config, ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		ref = c.DefaultModel
+	}
+	e, ok := c.ResolveModel(ref)
+	if !ok {
+		return "unresolved"
+	}
+	provider := providerMetricsBucket(e)
+	return metricBucket(provider + "_" + e.Model)
+}
+
+func plannerModelBucket(c *config.Config) string {
+	if strings.TrimSpace(c.Agent.PlannerModel) == "" {
+		return "off"
+	}
+	return safeModelBucket(c, c.Agent.PlannerModel)
+}
+
+func safeProviderAccessBucket(c *config.Config, name string) string {
+	if p, ok := c.Provider(name); ok {
+		return providerMetricsBucket(p)
+	}
+	return metricBucket("custom_" + name)
+}
+
+func (m *metricsAggregator) observeSettingsSnapshot(c *config.Config) {
+	if c == nil {
+		return
+	}
+	lang := c.DesktopLanguage()
+	if lang == "" {
+		lang = "auto"
+	}
+	themeStyle := c.DesktopThemeStyle()
+	if themeStyle == "" {
+		themeStyle = "default"
+	}
+	m.inc("settings_language", lang)
+	m.inc("client_surface", "desktop")
+	m.inc("client_version", metricBucket(version))
+	m.inc("settings_desktop_layout", c.DesktopLayoutStyle())
+	m.inc("settings_theme", c.DesktopTheme())
+	m.inc("settings_theme_style", themeStyle)
+	m.inc("settings_close_behavior", c.DesktopCloseBehavior())
+	m.inc("settings_display_mode", c.DesktopDisplayMode())
+	m.inc("settings_auto_plan", desktopAutoPlanMode(c.Agent.AutoPlan))
+	m.inc("settings_status_bar_style", c.DesktopStatusBarStyle())
+	m.inc("settings_status_bar_items_count", statusBarItemsCountBucket(len(c.DesktopStatusBarItems())))
+	m.inc("settings_check_updates", boolBucket(c.DesktopCheckUpdates()))
+	m.inc("settings_default_model", safeModelBucket(c, c.DefaultModel))
+	m.inc("settings_planner_model", plannerModelBucket(c))
+	m.inc("settings_subagent_model", safeModelBucket(c, c.Agent.SubagentModel))
+	m.inc("settings_subagent_effort", knownBucketDefault(c.Agent.SubagentEffort, "auto", "auto", "low", "medium", "high", "xhigh", "max", "off"))
+	m.inc("settings_reasoning_language", config.NormalizeReasoningLanguage(c.Agent.ReasoningLanguage))
+	m.inc("settings_provider_count", countBucket(len(c.Providers)))
+	m.inc("settings_provider_access_count", countBucket(len(c.Desktop.ProviderAccess)))
+	for _, name := range c.Desktop.ProviderAccess {
+		m.inc("settings_provider_access", safeProviderAccessBucket(c, name))
+	}
+	m.observeBotSettingsSnapshot(c)
+}
+
+func (m *metricsAggregator) observeBotSettingsSnapshot(c *config.Config) {
+	bot := c.Bot
+	m.inc("settings_bot_enabled", boolBucket(bot.Enabled))
+	m.inc("settings_bot_model", safeModelBucket(c, bot.Model))
+	m.inc("settings_bot_tool_approval", knownBucketDefault(bot.ToolApprovalMode, "ask", "ask", "auto", "yolo"))
+	m.inc("settings_bot_allowlist", boolBucket(bot.Allowlist.Enabled))
+	m.inc("settings_bot_allow_all", boolBucket(bot.Allowlist.AllowAll))
+	m.inc("settings_bot_qq_enabled", boolBucket(bot.QQ.Enabled))
+	m.inc("settings_bot_feishu_enabled", boolBucket(bot.Feishu.Enabled))
+	m.inc("settings_bot_weixin_enabled", boolBucket(bot.Weixin.Enabled))
+	m.inc("settings_bot_connection_count", countBucket(len(bot.Connections)))
+	for _, conn := range bot.Connections {
+		provider := knownBucket(conn.Provider, "qq", "feishu", "weixin")
+		m.inc("settings_bot_connection_provider", provider)
+		m.inc("settings_bot_connection_enabled", boolBucket(conn.Enabled))
+		m.inc("settings_bot_connection_status", knownBucket(conn.Status, "disconnected", "pending", "connected", "error"))
+		m.inc("settings_bot_connection_model", safeModelBucket(c, conn.Model))
+		m.inc("settings_bot_connection_approval", knownBucketDefault(conn.ToolApprovalMode, "default", "default", "ask", "auto", "yolo"))
+	}
+}
+
+func (a *App) recordSettingsMetricsSnapshot(c *config.Config) {
+	if version == "dev" || c == nil {
+		return
+	}
+	m := a.metrics.Load()
+	if m == nil {
+		return
+	}
+	m.observeSettingsSnapshot(c)
+	m.persist()
 }
 
 // observe maps one event to counter increments, reading only enumerated facts
@@ -193,9 +410,10 @@ type metricCounter struct {
 }
 
 type metricsPayload struct {
-	Version  string          `json:"version"`
-	OS       string          `json:"os"`
-	Counters []metricCounter `json:"counters"`
+	InstallID string          `json:"installId,omitempty"`
+	Version   string          `json:"version"`
+	OS        string          `json:"os"`
+	Counters  []metricCounter `json:"counters"`
 }
 
 func flatten(c counters) []metricCounter {
@@ -221,13 +439,17 @@ func (a *App) flushMetrics() {
 	if err != nil || !cfg.DesktopMetrics() {
 		return
 	}
-	path := filepath.Join(filepath.Dir(config.UserConfigPath()), metricsPendingFile)
+	path := filepath.Join(config.MemoryUserDir(), metricsPendingFile)
 	temp := path + ".sending"
 	if os.Rename(path, temp) != nil {
 		return // nothing pending
 	}
 	flat := flatten(readCounters(temp))
-	if len(flat) == 0 || a.postMetrics(metricsPayload{Version: version, OS: runtime.GOOS, Counters: flat}) {
+	payload := metricsPayload{Version: version, OS: runtime.GOOS, Counters: flat}
+	if id, err := installID(); err == nil {
+		payload.InstallID = id
+	}
+	if len(flat) == 0 || a.postMetrics(payload) {
 		_ = os.Remove(temp)
 		return
 	}

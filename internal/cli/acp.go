@@ -95,6 +95,7 @@ func (f *acpFactory) SessionConfigState(_ context.Context, p acp.SessionConfigSt
 		return acp.SessionConfigState{}, fmt.Errorf("session cwd must be an absolute path: %s", root)
 	}
 	_, _ = config.MigrateLegacyIfNeeded()
+	_, _ = config.MigrateMCPToUserConfigOnUpgrade([]string{root})
 	cfg, err := config.LoadForRoot(root)
 	if err != nil {
 		return acp.SessionConfigState{}, err

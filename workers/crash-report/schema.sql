@@ -63,8 +63,8 @@ CREATE TABLE IF NOT EXISTS pings (
   PRIMARY KEY (date, install_id)
 );
 
--- Opt-in aggregate agent metrics: anonymous per-day (signal, bucket) counters,
--- no install id and no content. Generic shape so a new signal is just new rows.
+-- Opt-in aggregate desktop metrics: anonymous per-day (signal, bucket) counters,
+-- no content. Generic shape so a new signal is just new rows.
 CREATE TABLE IF NOT EXISTS metrics (
   date TEXT NOT NULL,
   version TEXT NOT NULL,
@@ -73,6 +73,18 @@ CREATE TABLE IF NOT EXISTS metrics (
   bucket TEXT NOT NULL,
   count INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (date, version, os, signal, bucket)
+);
+
+-- Deduplicated DAU for opt-in metric buckets. install_id is the same random
+-- anonymous desktop install id used by launch pings; it is not an account id.
+CREATE TABLE IF NOT EXISTS metric_users (
+  date TEXT NOT NULL,
+  signal TEXT NOT NULL,
+  bucket TEXT NOT NULL,
+  install_id TEXT NOT NULL,
+  version TEXT NOT NULL,
+  os TEXT NOT NULL,
+  PRIMARY KEY (date, signal, bucket, install_id)
 );
 
 CREATE TABLE IF NOT EXISTS users (

@@ -8,6 +8,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/hook"
 	"reasonix/internal/i18n"
+	"reasonix/internal/migration"
 	"reasonix/internal/skill"
 )
 
@@ -188,7 +189,7 @@ func mcpArgItems(prior []string, cur string, d ArgData) []SlashItem {
 			{Label: "show", Insert: "show ", Hint: "show MCP server details", Descend: true},
 			{Label: "tools", Insert: "tools ", Hint: "show MCP server tools", Descend: true},
 			{Label: "remove", Insert: "remove ", Hint: i18n.M.ArgMcpRemove, Descend: true},
-			{Label: "import", Insert: "import", Hint: "import Codex-enabled servers from cc-switch"},
+			{Label: "import", Insert: "import", Hint: "import MCP servers from cc-switch"},
 		}
 	}
 	switch prior[1] {
@@ -342,11 +343,11 @@ func filterSlash(items []SlashItem, line string, from int, cur string) []SlashIt
 	return out
 }
 
-// managementNotice handles the read-only management slash commands on the Submit
-// path (used by the desktop and HTTP frontends, which route raw input through
-// Submit — the chat TUI has its own richer handlers). It emits a Notice listing
-// and reports whether it handled the verb. Skills and custom commands are NOT
-// here — those resolve to a turn in Submit.
+// managementNotice handles management slash commands on the Submit path (used by
+// the desktop and HTTP frontends, which route raw input through Submit — the chat
+// TUI has its own richer handlers). It emits Notice output and reports whether
+// it handled the verb. Skills and custom commands are NOT here — those resolve
+// to a turn in Submit.
 func (c *Controller) managementNotice(trimmed string) bool {
 	fields := strings.Fields(trimmed)
 	if len(fields) == 0 {
@@ -363,6 +364,8 @@ func (c *Controller) managementNotice(trimmed string) bool {
 		}
 	case "/memory":
 		c.notice(c.memoryListText())
+	case "/migrate", "/migration":
+		migration.RunLegacyRescue(c.sink)
 	case "/skill", "/skills":
 		sub := ""
 		if len(fields) >= 2 {

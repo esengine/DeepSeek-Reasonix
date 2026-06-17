@@ -16,6 +16,12 @@ export interface ToolDiff {
   label?: string; // multi_edit labels each step ("edit 1", …)
 }
 
+export interface ToolFileDiff {
+  diff: string;
+  added: number;
+  removed: number;
+}
+
 function parse(args: string): Record<string, unknown> {
   try {
     return JSON.parse(args) as Record<string, unknown>;
@@ -26,6 +32,23 @@ function parse(args: string): Record<string, unknown> {
 
 function str(a: Record<string, unknown>, key: string): string {
   return typeof a[key] === "string" ? (a[key] as string) : "";
+}
+
+function num(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+export function fileDiffFromWire(value?: { diff?: unknown; added?: unknown; removed?: unknown }): ToolFileDiff | undefined {
+  const diff = typeof value?.diff === "string" ? value.diff : "";
+  const added = num(value?.added);
+  const removed = num(value?.removed);
+  if (!diff && added === 0 && removed === 0) return undefined;
+  return { diff, added, removed };
+}
+
+export function summarizeFileDiff(fileDiff?: ToolFileDiff): string {
+  if (!fileDiff || (fileDiff.added === 0 && fileDiff.removed === 0)) return "";
+  return `+${fileDiff.added} -${fileDiff.removed}`;
 }
 
 // subjectOf pulls the most informative one-liner out of a call's args — the
@@ -84,6 +107,11 @@ export function diffsFor(name: string, args: string): ToolDiff[] {
     return out;
   }
   return [];
+}
+
+export function languageForToolArgs(args: string): string {
+  const a = parse(args);
+  return extToLang(str(a, "path") || str(a, "file_path"));
 }
 
 export type TodoStatus = "pending" | "in_progress" | "completed";
@@ -154,7 +182,7 @@ export function summarize(name: string, args: string, output?: string, error?: s
   const a = parse(args);
   switch (name) {
     case "write_file":
-      return countOf(lineCount(str(a, "content")), "tool.lineOne", "tool.lineOther");
+      return typeof a.content === "string" ? countOf(lineCount(a.content), "tool.lineOne", "tool.lineOther") : "";
     case "edit_file": {
       if (typeof a.old_string === "string" && typeof a.new_string === "string") {
         const { add, del } = plusMinus(a.old_string, a.new_string);

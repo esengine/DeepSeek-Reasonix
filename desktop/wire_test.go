@@ -78,6 +78,27 @@ func TestToWireToolDispatchProfile(t *testing.T) {
 	}
 }
 
+func TestToWireToolDispatchFileDiff(t *testing.T) {
+	e := event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
+		ID:       "1",
+		Name:     "edit_file",
+		Args:     `{"path":"settings/settings_IO.gd"}`,
+		FileDiff: event.FileDiff{Diff: "@@ -27 +27 @@\n-old\n+new\n", Added: 1, Removed: 1},
+	}}
+	w := toWire(e)
+	if w.Tool == nil {
+		t.Fatal("missing wire tool")
+	}
+	b, err := json.Marshal(w.Tool)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(b)
+	if !strings.Contains(s, `"diff":"@@ -27 +27 @@\n-old\n+new\n"`) || !strings.Contains(s, `"added":1`) || !strings.Contains(s, `"removed":1`) {
+		t.Fatalf("tool file diff was not serialized: %s", s)
+	}
+}
+
 func TestToWireToolResult(t *testing.T) {
 	e := event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "1", Output: "ok", Truncated: true, DurationMs: 522}}
 	w := toWire(e)

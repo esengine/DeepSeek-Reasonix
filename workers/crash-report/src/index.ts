@@ -76,9 +76,9 @@ const Ping = z.object({
   osVersion: z.string().max(128).optional(),
 });
 
-// Opt-in aggregate agent metrics: a per-launch snapshot of (signal, bucket)
-// counters. No install id, no content — just enumerated signals so the worker
-// table can never be polluted with arbitrary keys.
+// Opt-in aggregate desktop metrics: a per-launch snapshot of (signal, bucket)
+// counters. No install id, no content — just enumerated signals and bounded
+// buckets so the worker table can never be polluted with arbitrary keys.
 const METRIC_SIGNALS = [
   "finish_reason",
   "empty_final",
@@ -87,9 +87,47 @@ const METRIC_SIGNALS = [
   "tool_error",
   "compaction",
   "turns",
+  "client_surface",
+  "client_version",
+  "settings_language",
+  "settings_desktop_layout",
+  "settings_theme",
+  "settings_theme_style",
+  "settings_close_behavior",
+  "settings_display_mode",
+  "settings_auto_plan",
+  "settings_status_bar_style",
+  "settings_status_bar_items_count",
+  "settings_check_updates",
+  "settings_default_model",
+  "settings_planner_model",
+  "settings_subagent_model",
+  "settings_subagent_effort",
+  "settings_reasoning_language",
+  "settings_provider_count",
+  "settings_provider_access_count",
+  "settings_provider_access",
+  "settings_bot_enabled",
+  "settings_bot_model",
+  "settings_bot_tool_approval",
+  "settings_bot_allowlist",
+  "settings_bot_allow_all",
+  "settings_bot_qq_enabled",
+  "settings_bot_feishu_enabled",
+  "settings_bot_weixin_enabled",
+  "settings_bot_connection_count",
+  "settings_bot_connection_provider",
+  "settings_bot_connection_enabled",
+  "settings_bot_connection_status",
+  "settings_bot_connection_model",
+  "settings_bot_connection_approval",
 ] as const;
 
 const Metrics = z.object({
+  installId: z
+    .string()
+    .regex(/^[0-9a-f]{32}$/)
+    .optional(),
   version: z.string().min(1).max(64),
   os: z.string().min(1).max(32),
   counters: z
@@ -99,13 +137,13 @@ const Metrics = z.object({
         bucket: z
           .string()
           .min(1)
-          .max(32)
+          .max(96)
           .regex(/^[a-z0-9_]+$/),
         count: z.number().int().min(1).max(1_000_000),
       }),
     )
     .min(1)
-    .max(64),
+    .max(128),
 });
 
 type FingerprintInput = {
@@ -392,6 +430,19 @@ async function handleMetrics(request: Request, env: Env): Promise<Response> {
        count = count + ?5`,
   );
   await env.DB.batch(m.counters.map((c) => upsert.bind(m.version, m.os, c.signal, c.bucket, c.count)));
+  if (m.installId) {
+    const userUpsert = env.DB.prepare(
+      `INSERT INTO metric_users (date, version, os, signal, bucket, install_id)
+       VALUES (date('now'), ?1, ?2, ?3, ?4, ?5)
+       ON CONFLICT (date, signal, bucket, install_id) DO UPDATE SET
+         version = ?1, os = ?2`,
+    );
+    try {
+      await env.DB.batch(m.counters.map((c) => userUpsert.bind(m.version, m.os, c.signal, c.bucket, m.installId)));
+    } catch (err) {
+      console.warn("metric_users write failed", err);
+    }
+  }
 
   return new Response("ok", { status: 202 });
 }
@@ -590,11 +641,23 @@ async function latestObservedVersion(env: Env): Promise<string> {
   return newestReleaseVersion(rows.results.map((r) => r.version));
 }
 
+async function metricUserRows(env: Env): Promise<{ signal: string; bucket: string; total: number }[]> {
+  try {
+    const rows = await env.DB.prepare(
+      "SELECT signal, bucket, COUNT(*) AS total FROM metric_users WHERE date >= date('now', '-6 day') GROUP BY signal, bucket ORDER BY signal, total DESC",
+    ).all<{ signal: string; bucket: string; total: number }>();
+    return rows.results;
+  } catch (err) {
+    console.warn("metric_users query failed", err);
+    return [];
+  }
+}
+
 async function handleStats(request: Request, env: Env, user: User): Promise<Response> {
   const url = new URL(request.url);
   const filters = statsFilters(url);
   const latestVersion = await latestObservedVersion(env);
-  const [daily, versions, platforms, crashes, metrics, sources] = await Promise.all([
+  const [daily, versions, platforms, crashes, metrics, metricUsers, sources] = await Promise.all([
     env.DB.prepare(
       "SELECT date, COUNT(*) AS users, SUM(opens) AS opens FROM pings WHERE date >= date('now', '-29 day') GROUP BY date",
     ).all<{ date: string; users: number; opens: number }>(),
@@ -608,6 +671,7 @@ async function handleStats(request: Request, env: Env, user: User): Promise<Resp
     env.DB.prepare(
       "SELECT signal, bucket, SUM(count) AS total FROM metrics WHERE date >= date('now', '-6 day') GROUP BY signal, bucket ORDER BY signal, total DESC",
     ).all<{ signal: string; bucket: string; total: number }>(),
+    metricUserRows(env),
     env.DB.prepare("SELECT source AS label, COUNT(*) AS users FROM groups GROUP BY source ORDER BY users DESC").all<{ label: string; users: number }>(),
   ]);
   return html(
@@ -618,6 +682,7 @@ async function handleStats(request: Request, env: Env, user: User): Promise<Resp
         platforms: platforms.results,
         crashes: crashes.results,
         metrics: metrics.results,
+        metricUsers,
         sources: sources.results,
         latestVersion,
         filters,

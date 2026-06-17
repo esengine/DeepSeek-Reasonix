@@ -37,6 +37,9 @@ func TestHistoryMessagesIncludeAssistantReasoning(t *testing.T) {
 	if got[0].Content != "display prompt" {
 		t.Fatalf("user display content = %q, want display prompt", got[0].Content)
 	}
+	if got[0].SubmitText != "expanded prompt" {
+		t.Fatalf("user submit text = %q, want expanded prompt", got[0].SubmitText)
+	}
 	if got[1].Reasoning != "thinking trace" {
 		t.Fatalf("assistant reasoning = %q, want thinking trace", got[1].Reasoning)
 	}
@@ -97,6 +100,30 @@ func TestHistoryMessagesArchiveCompletedToolPayloads(t *testing.T) {
 	}
 	if strings.Contains(string(encoded), largeArgs) || strings.Contains(string(encoded), largeOutput) {
 		t.Fatalf("initial history JSON still contains large args/output: %d bytes", len(encoded))
+	}
+}
+
+func TestHistoryMessagesKeepToolFileDiffMetadata(t *testing.T) {
+	diff := "@@ -27 +27 @@\n-func save():\n+func save_file():\n"
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID:        "edit",
+			Name:      "edit_file",
+			Arguments: `{"path":"settings/settings_IO.gd","old_string":"func save():","new_string":"func save_file():"}`,
+			Diff:      diff,
+			Added:     1,
+			Removed:   1,
+		}}},
+		{Role: provider.RoleTool, Name: "edit_file", ToolCallID: "edit", Content: "edited settings/settings_IO.gd"},
+	}
+
+	got := historyMessages(msgs, func(content string) string { return content })
+	call := got[0].ToolCalls[0]
+	if call.Diff != diff || call.Added != 1 || call.Removed != 1 {
+		t.Fatalf("history tool diff metadata = diff:%q +%d -%d", call.Diff, call.Added, call.Removed)
+	}
+	if !call.ArgumentsArchived || call.Arguments != "" {
+		t.Fatalf("tool arguments should still be archived: %+v", call)
 	}
 }
 

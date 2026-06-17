@@ -28,6 +28,8 @@ type request struct {
 	// PlanID is echoed back on a confirm-apply call so the host can refuse
 	// to apply a plan that does not match the one it approved.
 	PlanID string `json:"planId"`
+
+	scopeExplicit bool
 }
 
 // response is the JSON shape returned to the model. Status is one of

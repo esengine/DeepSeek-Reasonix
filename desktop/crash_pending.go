@@ -19,7 +19,7 @@ import (
 const pendingCrashFile = "crash-pending.json"
 
 func pendingCrashPath() string {
-	return filepath.Join(filepath.Dir(config.UserConfigPath()), pendingCrashFile)
+	return filepath.Join(config.MemoryUserDir(), pendingCrashFile)
 }
 
 // recoverToPending records a panicking goroutine to the pending-crash file and

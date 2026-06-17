@@ -9,6 +9,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -47,17 +48,18 @@ type Spec struct {
 	// the terminal so child logs cannot corrupt interactive UIs.
 	Stderr io.Writer
 	// ReadOnlyToolNames marks trusted raw MCP tool names as read-only even when
-	// the server omits annotations.readOnlyHint. It is for first-party adapters
-	// with known semantics; user-configured plugins should rely on MCP metadata.
+	// the server omits annotations.readOnlyHint. It is for known compatibility
+	// overrides where the tool semantics are stable; other user-configured
+	// plugins should rely on MCP metadata.
 	ReadOnlyToolNames map[string]bool
 	// StripRawPrefix, when non-empty, removes this prefix from each MCP tool's
-	// raw name before namespacing. For example, StripRawPrefix="codegraph_" turns
-	// "codegraph_context" into "context", yielding "mcp__codegraph__context"
-	// instead of the redundant "mcp__codegraph__codegraph_context". The original
-	// raw name is preserved for MCP protocol calls.
+	// raw name before namespacing. For example, StripRawPrefix="server_" turns
+	// "server_search" into "search", yielding "mcp__search__search" instead of
+	// the redundant "mcp__search__server_search". The original raw name is
+	// preserved for MCP protocol calls.
 	StripRawPrefix string
 	// LowPriority runs a stdio subprocess below normal scheduling priority, for
-	// background indexers (CodeGraph) that must not starve the user's machine.
+	// background indexers that must not starve the user's machine.
 	LowPriority bool
 }
 
@@ -174,6 +176,20 @@ const defaultStartConcurrency = 8
 // that, an interactive user is better served by recording the failure and moving
 // on than by stalling the whole session.
 const defaultStartTimeout = 5 * time.Second
+
+// ErrServerAlreadyConnected marks an attempted MCP connection whose server name
+// is already live on the host.
+var ErrServerAlreadyConnected = errors.New("plugin server already connected")
+
+func serverAlreadyConnectedError(name string) error {
+	return fmt.Errorf("%w: %q", ErrServerAlreadyConnected, name)
+}
+
+// IsServerAlreadyConnected reports whether err means the MCP server name is
+// already live on the host.
+func IsServerAlreadyConnected(err error) bool {
+	return errors.Is(err, ErrServerAlreadyConnected)
+}
 
 // StartAll connects every plugin in parallel, performs the MCP handshake, and
 // returns the union of their tools (namespaced "mcp__<server>__<tool>"). On any
@@ -607,6 +623,10 @@ func (h *Host) endDeferredSpawn() {
 func (h *Host) has(name string) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	return h.hasLocked(name)
+}
+
+func (h *Host) hasLocked(name string) bool {
 	for _, c := range h.clients {
 		if c.name == name {
 			return true
@@ -622,7 +642,7 @@ func (h *Host) has(name string) bool {
 // — or the subprocess dies when that turn ends. Errors if the name is taken.
 func (h *Host) Add(ctx context.Context, s Spec) ([]tool.Tool, error) {
 	if h.has(s.Name) {
-		return nil, fmt.Errorf("server %q is already connected", s.Name)
+		return nil, serverAlreadyConnectedError(s.Name)
 	}
 	return h.addConnected(ctx, s)
 }
@@ -650,6 +670,11 @@ func (h *Host) addConnected(ctx context.Context, s Spec) ([]tool.Tool, error) {
 		h.mu.Unlock()
 		c.close()
 		return nil, fmt.Errorf("plugin host is closed")
+	}
+	if h.hasLocked(s.Name) {
+		h.mu.Unlock()
+		c.close()
+		return nil, serverAlreadyConnectedError(s.Name)
 	}
 	h.clients = append(h.clients, c)
 	h.clearFailure(s.Name)

@@ -9,7 +9,6 @@ import (
 
 var skipEntryNames = map[string]bool{
 	".codex":       true,
-	".codegraph":   true,
 	".DS_Store":    true,
 	".git":         true,
 	".npm":         true,

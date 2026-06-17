@@ -12,7 +12,7 @@ func TestEnsureBlankTabInheritsActiveTabSettings(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	workspace := robustTempDir(t)
 	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"),
-		[]byte("[codegraph]\nenabled = false\n"), 0o644); err != nil {
+		[]byte(""), 0o644); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
 

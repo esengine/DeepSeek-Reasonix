@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/jobs"
 )
 
 // --- loadSessionTitles ---
@@ -123,6 +124,13 @@ func TestDeleteSessionFile(t *testing.T) {
 		t.Fatalf("mkdir ckpt: %v", err)
 	}
 	os.WriteFile(filepath.Join(ckptDir, "1.json"), []byte("{}"), 0o644)
+	jobsDir := jobs.ArtifactDir(sessionPath)
+	if err := os.MkdirAll(jobsDir, 0o755); err != nil {
+		t.Fatalf("mkdir jobs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(jobsDir, "bash-1.log"), []byte("output"), 0o644); err != nil {
+		t.Fatalf("write job artifact: %v", err)
+	}
 
 	// Set a title first.
 	setSessionTitle(dir, sessionPath, "My Title")
@@ -136,6 +144,7 @@ func TestDeleteSessionFile(t *testing.T) {
 	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
 	trashMetaPath := trashPath + ".meta"
 	trashCkptDir := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.ckpt")
+	trashJobsDir := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jobs")
 
 	// File should be moved out of the active session list.
 	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
@@ -147,6 +156,9 @@ func TestDeleteSessionFile(t *testing.T) {
 	if _, err := os.Stat(ckptDir); !os.IsNotExist(err) {
 		t.Error("session checkpoints should be removed from active sessions")
 	}
+	if _, err := os.Stat(jobsDir); !os.IsNotExist(err) {
+		t.Error("session jobs should be removed from active sessions")
+	}
 	if _, err := os.Stat(trashPath); err != nil {
 		t.Fatalf("session file should be in trash: %v", err)
 	}
@@ -155,6 +167,9 @@ func TestDeleteSessionFile(t *testing.T) {
 	}
 	if _, err := os.Stat(trashCkptDir); err != nil {
 		t.Fatalf("session checkpoints should be in trash: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(trashJobsDir, "bash-1.log")); err != nil {
+		t.Fatalf("session jobs should be in trash: %v", err)
 	}
 	// Title/display should be retained until permanent deletion.
 	m := loadSessionTitles(dir)
@@ -232,6 +247,13 @@ func TestRestoreTrashedSessionFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ckptDir, "1.json"), []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	jobsDir := jobs.ArtifactDir(sessionPath)
+	if err := os.MkdirAll(jobsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(jobsDir, "bash-1.log"), []byte("output"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := setSessionTitle(dir, sessionPath, "My Title"); err != nil {
 		t.Fatal(err)
 	}
@@ -252,6 +274,9 @@ func TestRestoreTrashedSessionFile(t *testing.T) {
 	}
 	if _, err := os.Stat(ckptDir); err != nil {
 		t.Fatalf("session checkpoints should be restored: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(jobsDir, "bash-1.log")); err != nil {
+		t.Fatalf("session jobs should be restored: %v", err)
 	}
 	if _, err := os.Stat(filepath.Dir(trashPath)); !os.IsNotExist(err) {
 		t.Fatalf("trash item should be removed after restore, stat err = %v", err)
@@ -320,6 +345,13 @@ func TestPurgeTrashedSessionFile(t *testing.T) {
 	dir := t.TempDir()
 	sessionPath := filepath.Join(dir, "session.jsonl")
 	os.WriteFile(sessionPath, []byte("data"), 0o644)
+	jobsDir := jobs.ArtifactDir(sessionPath)
+	if err := os.MkdirAll(jobsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(jobsDir, "bash-1.log"), []byte("output"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := setSessionTitle(dir, sessionPath, "My Title"); err != nil {
 		t.Fatal(err)
 	}
@@ -335,6 +367,9 @@ func TestPurgeTrashedSessionFile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Dir(trashPath)); !os.IsNotExist(err) {
 		t.Fatalf("trash item should be removed after purge, stat err = %v", err)
+	}
+	if _, err := os.Stat(jobsDir); !os.IsNotExist(err) {
+		t.Fatalf("session jobs should be removed after purge, stat err = %v", err)
 	}
 	if _, ok := loadSessionTitles(dir)["session.jsonl"]; ok {
 		t.Fatal("title should be removed after purge")

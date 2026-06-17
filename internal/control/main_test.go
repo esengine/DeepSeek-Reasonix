@@ -8,9 +8,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	if os.Getenv("REASONIX_TEST_CODEGRAPH_MCP") == "1" {
-		runCodegraphMCPHelper()
-		os.Exit(0)
+	if os.Getenv("REASONIX_CREDENTIALS_STORE") == "" {
+		_ = os.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	}
 	goleak.VerifyTestMain(m)
 }

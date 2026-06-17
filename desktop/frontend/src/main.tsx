@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { installGlobalCrashHandlers, installPerformancePressureMonitor } from "./lib/crash";
+import { installWailsNonFileDragErrorSuppression } from "./lib/bridge";
 import { installBreadcrumbConsoleHook } from "./lib/breadcrumbs";
 import { installMessageSelectionCopy } from "./lib/messageSelectionCopy";
 import { LocaleProvider } from "./lib/i18n";
@@ -14,6 +15,7 @@ import "./styles.css";
 
 // Install first so startup/runtime failures paint a useful error instead of a
 // featureless webview background, with the recent console trail attached.
+installWailsNonFileDragErrorSuppression();
 installGlobalCrashHandlers();
 installBreadcrumbConsoleHook();
 installPerformancePressureMonitor();

@@ -103,6 +103,22 @@ func (c *Coordinator) SetReasoningLanguage(lang string) {
 	}
 }
 
+// SetPlanMode propagates the read-only gate to both planner and executor agents
+// in two-model mode. Callers that only set the controller's executor would miss
+// the planner agent inside the Coordinator, causing stale plan-mode state after
+// approvals or manual mode switches.
+func (c *Coordinator) SetPlanMode(v bool) {
+	if c == nil {
+		return
+	}
+	if c.plannerAgent != nil {
+		c.plannerAgent.SetPlanMode(v)
+	}
+	if c.executor != nil {
+		c.executor.SetPlanMode(v)
+	}
+}
+
 // Run plans with the planner model, then hands the plan to the executor.
 func (c *Coordinator) Run(ctx context.Context, input string) error {
 	c.sink.Emit(event.Event{Kind: event.TurnStarted})

@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -192,6 +194,20 @@ func TestProjectTreeShowsBackgroundJobStatus(t *testing.T) {
 	topic := nodes[0].Children[0]
 	if topic.Status != topicStatusBackgroundJob || !topic.Running {
 		t.Fatalf("background job topic status = %+v, want background_job/running", topic)
+	}
+	tabs := app.ListTabs()
+	if len(tabs) != 1 {
+		t.Fatalf("tabs = %d, want 1", len(tabs))
+	}
+	if !tabs[0].Running || tabs[0].PendingPrompt || tabs[0].Cancellable || tabs[0].BackgroundJobs != 1 {
+		t.Fatalf("tab runtime = running:%v pending:%v cancellable:%v background:%d, want background-only running tab", tabs[0].Running, tabs[0].PendingPrompt, tabs[0].Cancellable, tabs[0].BackgroundJobs)
+	}
+	raw, err := json.Marshal(tabs[0])
+	if err != nil {
+		t.Fatalf("marshal tab meta: %v", err)
+	}
+	if !strings.Contains(string(raw), `"cancellable":false`) {
+		t.Fatalf("tab metadata should serialize explicit cancellable=false: %s", raw)
 	}
 
 	close(release)

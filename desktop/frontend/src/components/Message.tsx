@@ -1,10 +1,14 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, FileText, Folder, GitBranch, Image, MessageSquare, RotateCcw, ScrollText } from "lucide-react";
+import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
+import { ChevronDown, ChevronRight, FileText, Folder, GitBranch, Image, MessageSquare, Pencil, RotateCcw, ScrollText } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
 import { ProcessBrainIcon } from "./ProcessCard";
-import { parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
+import { ComposerContextCard } from "./ComposerContextCard";
+import { formatAttachmentRefForDisplay, formatAttachmentRefForSubmit, parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
+import type { DisplayAttachment } from "../lib/attachmentDisplay";
 import { app } from "../lib/bridge";
+import { replaySubmitText } from "../lib/editReplay";
 import { useT } from "../lib/i18n";
 import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import { displayReasoningText } from "../lib/reasoningDisplay";
@@ -62,29 +66,147 @@ function attachmentIcon(kind: "image" | "file" | "folder") {
   return <FileText size={15} />;
 }
 
+function mergeDisplayAttachments(existing: DisplayAttachment[], incoming: DisplayAttachment[]): DisplayAttachment[] {
+  if (incoming.length === 0) return existing;
+  const seen = new Set(existing.map((attachment) => attachment.path));
+  const merged = [...existing];
+  for (const attachment of incoming) {
+    if (seen.has(attachment.path)) continue;
+    seen.add(attachment.path);
+    merged.push(attachment);
+  }
+  return merged;
+}
+
+function messageDate(value?: number): Date {
+  return new Date(typeof value === "number" && Number.isFinite(value) && value > 0 ? value : Date.now());
+}
+
+function formatMessageTime(date: Date): string {
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
 export function UserMessage({
   text,
+  submitText,
   failed,
   turn,
   anchorId,
   id,
+  createdAt,
+  onEdit,
+  editDisabled = false,
 }: {
   text: string;
+  submitText?: string;
   failed?: boolean;
   turn?: number;
   anchorId?: string;
   id?: string;
+  createdAt?: number;
+  onEdit?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
+  editDisabled?: boolean;
 }) {
   const t = useT();
   const imSource = parseImSourceMessage(text);
-  const { text: displayText, attachments } = parseAttachmentRefsForDisplay(imSource?.text ?? text);
+  const actionText = imSource?.text ?? text;
+  const { text: displayText, attachments } = parseAttachmentRefsForDisplay(actionText);
   const orderedAttachments = sortDisplayAttachments(attachments);
   const sourceLabel = imSource ? imSourceLabel(imSource, t) : "";
+  const sentAt = createdAt === undefined ? null : messageDate(createdAt);
+  const canEdit = turn !== undefined && onEdit !== undefined && !editDisabled;
+  const [editing, setEditing] = useState(false);
+  const [draftText, setDraftText] = useState(displayText);
+  const [draftAttachments, setDraftAttachments] = useState<DisplayAttachment[]>(attachments);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const editRef = useRef<HTMLTextAreaElement>(null);
   const [imagePreviews, setImagePreviews] = useState<Record<string, string>>({});
+  const orderedDraftAttachments = sortDisplayAttachments(draftAttachments);
   const imagePreviewKey = orderedAttachments
+    .concat(orderedDraftAttachments)
     .filter((attachment) => attachment.kind === "image" && attachment.source === "attachment")
     .map((attachment) => attachment.path)
     .join("\n");
+
+  useEffect(() => {
+    if (editing) return;
+    const parsed = parseAttachmentRefsForDisplay(actionText);
+    setDraftText(parsed.text);
+    setDraftAttachments(parsed.attachments);
+  }, [actionText, editing]);
+
+  useEffect(() => {
+    if (!editing) return;
+    requestAnimationFrame(() => {
+      const node = editRef.current;
+      if (!node) return;
+      node.focus();
+      node.selectionStart = node.selectionEnd = node.value.length;
+    });
+  }, [editing]);
+
+  const startEdit = () => {
+    if (!canEdit) return;
+    const parsed = parseAttachmentRefsForDisplay(actionText);
+    setDraftText(parsed.text);
+    setDraftAttachments(parsed.attachments);
+    setEditing(true);
+  };
+
+  const cancelEdit = () => {
+    const parsed = parseAttachmentRefsForDisplay(actionText);
+    setDraftText(parsed.text);
+    setDraftAttachments(parsed.attachments);
+    setEditing(false);
+  };
+
+  const updateDraftText = (value: string) => {
+    const parsed = parseAttachmentRefsForDisplay(value);
+    if (parsed.attachments.length > 0) {
+      setDraftText(parsed.text);
+      setDraftAttachments((prev) => mergeDisplayAttachments(prev, parsed.attachments));
+      return;
+    }
+    setDraftText(value);
+  };
+
+  const removeDraftAttachment = (path: string) => {
+    setDraftAttachments((prev) => prev.filter((attachment) => attachment.path !== path));
+  };
+
+  const submitEdit = async (event?: FormEvent) => {
+    event?.preventDefault();
+    if (!canEdit || editSubmitting) return;
+    const parsedDraft = parseAttachmentRefsForDisplay(draftText);
+    const nextAttachments = sortDisplayAttachments(mergeDisplayAttachments(draftAttachments, parsedDraft.attachments));
+    const bodyText = parsedDraft.text.trim();
+    const displayRefs = nextAttachments.map(formatAttachmentRefForDisplay).join(" ");
+    const submitRefs = nextAttachments.map(formatAttachmentRefForSubmit).join(" ");
+    const next = [bodyText, displayRefs].filter(Boolean).join(bodyText && displayRefs ? " " : "");
+    const fallbackSubmit = [bodyText, submitRefs].filter(Boolean).join(bodyText && submitRefs ? " " : "");
+    const submit = replaySubmitText(submitText, actionText, next, fallbackSubmit);
+    if (!next) return;
+    setEditSubmitting(true);
+    try {
+      const ok = await onEdit?.(turn as number, next, submit);
+      if (ok !== false) setEditing(false);
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
+  const onEditKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelEdit();
+      return;
+    }
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      void submitEdit();
+    }
+  };
 
   useEffect(() => {
     const paths = imagePreviewKey ? imagePreviewKey.split("\n") : [];
@@ -113,8 +235,54 @@ export function UserMessage({
       data-history-restore={id && id.startsWith("h") ? "" : undefined}
       data-entrance={id || undefined}
     >
-      <div className="msg__body">
-        {imSource ? (
+      <div className={`msg__body${editing ? " msg__body--editing" : ""}`}>
+        {editing ? (
+          <form className="msg-edit" onSubmit={(event) => void submitEdit(event)}>
+            {orderedDraftAttachments.length > 0 && (
+              <div className="msg-edit__attachments composer-context" aria-label={t("composer.contextItems")}>
+                {orderedDraftAttachments.map((attachment) => {
+                  const imagePreview = attachment.kind === "image" ? imagePreviews[attachment.path] : undefined;
+                  const imageOnly = Boolean(imagePreview) && orderedDraftAttachments.every((item) => item.kind === "image" && imagePreviews[item.path]);
+                  return (
+                    <ComposerContextCard
+                      key={attachment.path}
+                      variant={attachment.source === "workspace" ? "workspace" : "attachment"}
+                      tooltipLabel={attachment.source === "workspace" ? formatAttachmentRefForSubmit(attachment) : attachment.path}
+                      removeLabel={attachment.source === "workspace" ? t("composer.removeReference") : t("composer.removeImage")}
+                      removeDisabled={editSubmitting}
+                      onRemove={() => removeDraftAttachment(attachment.path)}
+                      previewUrl={imagePreview}
+                      imageOnly={imageOnly}
+                      folder={attachment.kind === "folder"}
+                      label={attachment.kind === "folder" ? `${attachment.name}/` : attachment.name}
+                      name={attachment.name}
+                      meta={attachment.ext || t("msg.fileAttachment")}
+                      icon={attachment.kind === "image" ? <Image size={20} /> : undefined}
+                    />
+                  );
+                })}
+              </div>
+            )}
+            <textarea
+              ref={editRef}
+              className="msg-edit__input"
+              value={draftText}
+              rows={Math.max(2, Math.min(8, draftText.split(/\r?\n/).length))}
+              aria-label={t("common.edit")}
+              disabled={editSubmitting}
+              onChange={(event) => updateDraftText(event.target.value)}
+              onKeyDown={onEditKeyDown}
+            />
+            <div className="msg-edit__actions">
+              <button className="msg-edit__btn" type="button" disabled={editSubmitting} onClick={cancelEdit}>
+                {t("common.cancel")}
+              </button>
+              <button className="msg-edit__btn msg-edit__btn--primary" type="submit" disabled={editSubmitting || (draftText.trim() === "" && draftAttachments.length === 0)}>
+                {t("msg.editSend")}
+              </button>
+            </div>
+          </form>
+        ) : imSource ? (
           <div className="im-source-card">
             <div className="im-source-card__head">
               <MessageSquare size={14} />
@@ -152,6 +320,28 @@ export function UserMessage({
           </div>
         )}
       </div>
+      {!editing && (
+        <div className="msg-meta" role="group" aria-label={t("rewind.label")}>
+          {sentAt && (
+            <time className="msg-meta__time" dateTime={sentAt.toISOString()} title={sentAt.toLocaleString()}>
+              {formatMessageTime(sentAt)}
+            </time>
+          )}
+          <CopyButton text={actionText} label={t("msg.copy")} showInlineLabel={false} className="msg-meta__btn msg-meta__copy" />
+          {onEdit && (
+            <button
+              className="msg-meta__btn"
+              type="button"
+              aria-label={t("common.edit")}
+              title={t("common.edit")}
+              disabled={!canEdit}
+              onClick={startEdit}
+            >
+              <Pencil size={14} />
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

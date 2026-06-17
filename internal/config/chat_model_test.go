@@ -66,6 +66,43 @@ func TestIsLikelyChatModel_DoesNotFilterVoiceAlone(t *testing.T) {
 	}
 }
 
+func TestIsLikelyVisionModel(t *testing.T) {
+	for _, model := range []string{
+		"mimo-v2.5", "mimo-v2-omni", "gpt-4o", "gpt-4o-mini",
+		"qwen2.5-vl-72b-instruct", "custom-vision-chat",
+	} {
+		if !IsLikelyVisionModel(model) {
+			t.Errorf("IsLikelyVisionModel(%q) = false, want true", model)
+		}
+	}
+	for _, model := range []string{
+		"", "mimo-v2.5-pro", "deepseek-v4-pro", "mimo-v2.5-asr", "text-embedding-3-small",
+		"gpt-4o-audio-preview", "gpt-4o-mini-audio-preview",
+	} {
+		if IsLikelyVisionModel(model) {
+			t.Errorf("IsLikelyVisionModel(%q) = true, want false", model)
+		}
+	}
+}
+
+func TestInferVisionModels(t *testing.T) {
+	got := InferVisionModels([]string{
+		"mimo-v2.5-pro",
+		"mimo-v2.5",
+		"mimo-v2.5",
+		"mimo-v2-omni",
+		"qwen-vl-plus",
+		"mimo-v2.5-asr",
+		"audio-omni-tts",
+		"gpt-4o-audio-preview",
+		"gpt-4o-mini-audio-preview",
+	})
+	want := []string{"mimo-v2.5", "mimo-v2-omni", "qwen-vl-plus"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("InferVisionModels() = %v, want %v", got, want)
+	}
+}
+
 // ── ModelList / ChatModelList ──────────────────────────────────────────────────
 
 func TestModelList_ReturnsRawList(t *testing.T) {

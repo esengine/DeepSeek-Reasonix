@@ -65,6 +65,9 @@ type wireTool struct {
 	DurationMs int64        `json:"durationMs,omitempty"`
 	Partial    bool         `json:"partial,omitempty"`
 	ParentID   string       `json:"parentId,omitempty"`
+	Diff       string       `json:"diff,omitempty"`
+	Added      int          `json:"added,omitempty"`
+	Removed    int          `json:"removed,omitempty"`
 	Profile    *wireProfile `json:"profile,omitempty"`
 }
 
@@ -163,6 +166,7 @@ func toWire(e event.Event) wireEvent {
 			ReadOnly: e.Tool.ReadOnly, Truncated: e.Tool.Truncated,
 			DurationMs: e.Tool.DurationMs, Partial: e.Tool.Partial,
 			ParentID: e.Tool.ParentID,
+			Diff:     e.Tool.Diff, Added: e.Tool.Added, Removed: e.Tool.Removed,
 		}
 		if e.Tool.Profile != nil {
 			wt.Profile = &wireProfile{Model: e.Tool.Profile.Model, Effort: e.Tool.Profile.Effort}

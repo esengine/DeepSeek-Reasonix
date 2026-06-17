@@ -42,10 +42,6 @@ func TestLoadForEditMigratesLegacyMCPTiers(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "reasonix.toml")
 	body := `
-[codegraph]
-enabled = true
-tier = "eager"
-
 [[plugins]]
 name = "playwright"
 command = "npx"
@@ -62,9 +58,6 @@ model = "m"
 	}
 
 	cfg := LoadForEdit(path)
-	if cfg.Codegraph.Tier != "" {
-		t.Fatalf("codegraph tier = %q, want migrated empty", cfg.Codegraph.Tier)
-	}
 	if len(cfg.Plugins) != 1 || cfg.Plugins[0].Tier != "" {
 		t.Fatalf("plugins after migration = %+v, want empty tier", cfg.Plugins)
 	}
@@ -75,7 +68,7 @@ model = "m"
 	if strings.Contains(string(updated), "\ntier") {
 		t.Fatalf("legacy tier lines should be removed from file:\n%s", updated)
 	}
-	if !strings.Contains(string(updated), `command = "npx"`) || !strings.Contains(string(updated), `[codegraph]`) {
+	if !strings.Contains(string(updated), `command = "npx"`) || !strings.Contains(string(updated), `name = "local"`) {
 		t.Fatalf("migration should preserve ordinary config:\n%s", updated)
 	}
 }

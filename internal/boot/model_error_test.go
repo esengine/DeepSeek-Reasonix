@@ -21,9 +21,6 @@ func TestBuildUnknownModelErrorIsActionable(t *testing.T) {
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "mimo"
 
-[codegraph]
-enabled = false
-
 [[providers]]
 name = "deepseek-flash"
 kind = "openai"
@@ -53,9 +50,6 @@ func TestBuildNoticesMissingAPIKey(t *testing.T) {
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "x"
-
-[codegraph]
-enabled = false
 
 [[providers]]
 name = "x"

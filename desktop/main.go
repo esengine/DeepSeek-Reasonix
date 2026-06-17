@@ -18,8 +18,6 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 
-	"reasonix/internal/builtinmcp"
-
 	// Blank imports wire compile-time built-ins into their registries, exactly as
 	// cmd/reasonix does — boot.Build resolves providers/tools from these registries.
 	_ "reasonix/internal/provider/anthropic"
@@ -45,7 +43,20 @@ var version = "dev"
 // tracks the opt-in pre-release line and never crosses over to stable.
 var channel = "stable"
 
+// macSelfUpdate is injected as "true" only for Developer ID signed + notarized
+// macOS release builds. Local/ad-hoc macOS builds keep the manual download path.
+var macSelfUpdate = "false"
+
 const disableWebview2GPUEnv = "REASONIX_DESKTOP_DISABLE_WEBVIEW2_GPU"
+
+func macSelfUpdateAllowed() bool {
+	switch strings.ToLower(strings.TrimSpace(macSelfUpdate)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
 
 func windowsWebview2GPUDisabled() bool {
 	if raw, ok := os.LookupEnv(disableWebview2GPUEnv); ok {
@@ -60,10 +71,6 @@ func windowsWebview2GPUDisabled() bool {
 }
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "builtin-mcp" {
-		os.Exit(builtinmcp.RunCommand(os.Args[2:], os.Stdin, os.Stdout, os.Stderr, version))
-	}
-
 	app := NewApp()
 
 	// Restore saved window size, or fall back to the default.

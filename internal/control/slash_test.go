@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/event"
 	"reasonix/internal/hook"
 	"reasonix/internal/memory"
 	"reasonix/internal/skill"
@@ -215,16 +216,39 @@ func TestMemoryListTextIncludesArchivedMemories(t *testing.T) {
 }
 
 func TestManagementHooksTrustUsesWorkspaceRoot(t *testing.T) {
-	home := t.TempDir()
+	isolateControlConfigHome(t)
 	project := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
 
 	c := New(Options{WorkspaceRoot: project})
 	if !c.managementNotice("/hooks trust") {
 		t.Fatal("/hooks trust was not handled")
 	}
-	if !hook.IsTrusted(project, home) {
+	if !hook.IsTrusted(project, "") {
 		t.Fatal("/hooks trust did not trust the controller workspace root")
+	}
+}
+
+func TestManagementMigrateEmitsProgress(t *testing.T) {
+	isolateControlConfigHome(t)
+	var notices []string
+	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice {
+			notices = append(notices, e.Text)
+		}
+	})})
+
+	if !c.managementNotice("/migrate") {
+		t.Fatal("/migrate was not handled")
+	}
+	joined := strings.Join(notices, "\n")
+	for _, want := range []string{
+		"migration rescue: checking legacy config and credentials",
+		"migration rescue: scanning legacy memory",
+		"migration rescue: scanning legacy sessions",
+		"migration rescue complete:",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing notice %q in:\n%s", want, joined)
+		}
 	}
 }

@@ -39,3 +39,39 @@ contents:
     dst: /usr/share/pixmaps/reasonix-desktop.png
     file_info:
       mode: 0644
+  - src: ./build/linux/icons/hicolor/16x16/apps/reasonix-desktop.png
+    dst: /usr/share/icons/hicolor/16x16/apps/reasonix-desktop.png
+    file_info:
+      mode: 0644
+  - src: ./build/linux/icons/hicolor/24x24/apps/reasonix-desktop.png
+    dst: /usr/share/icons/hicolor/24x24/apps/reasonix-desktop.png
+    file_info:
+      mode: 0644
+  - src: ./build/linux/icons/hicolor/32x32/apps/reasonix-desktop.png
+    dst: /usr/share/icons/hicolor/32x32/apps/reasonix-desktop.png
+    file_info:
+      mode: 0644
+  - src: ./build/linux/icons/hicolor/48x48/apps/reasonix-desktop.png
+    dst: /usr/share/icons/hicolor/48x48/apps/reasonix-desktop.png
+    file_info:
+      mode: 0644
+  - src: ./build/linux/icons/hicolor/64x64/apps/reasonix-desktop.png
+    dst: /usr/share/icons/hicolor/64x64/apps/reasonix-desktop.png
+    file_info:
+      mode: 0644
+  - src: ./build/linux/icons/hicolor/128x128/apps/reasonix-desktop.png
+    dst: /usr/share/icons/hicolor/128x128/apps/reasonix-desktop.png
+    file_info:
+      mode: 0644
+  - src: ./build/linux/icons/hicolor/256x256/apps/reasonix-desktop.png
+    dst: /usr/share/icons/hicolor/256x256/apps/reasonix-desktop.png
+    file_info:
+      mode: 0644
+  - src: ./build/linux/icons/hicolor/512x512/apps/reasonix-desktop.png
+    dst: /usr/share/icons/hicolor/512x512/apps/reasonix-desktop.png
+    file_info:
+      mode: 0644
+  - src: ./build/linux/icons/hicolor/scalable/apps/reasonix-desktop.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/reasonix-desktop.svg
+    file_info:
+      mode: 0644

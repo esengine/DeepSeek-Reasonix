@@ -24,6 +24,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/jobs"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/provider"
 )
@@ -859,7 +860,7 @@ func (s *Server) generateTitle(ctx context.Context, firstMsg string) string {
 		case provider.ChunkText:
 			text.WriteString(chunk.Text)
 		case provider.ChunkUsage:
-			usage = chunk.Usage
+			// Title usage is intentionally not broadcast on the shared chat SSE stream.
 		case provider.ChunkError:
 			return ""
 		}
@@ -973,7 +974,11 @@ func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	go finishSessionDestroy(destroy)
+	finishSessionDestroy(destroy)
+	if err := jobs.RemoveArtifacts(abs); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

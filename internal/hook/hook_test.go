@@ -2,6 +2,7 @@ package hook
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -53,6 +54,72 @@ func TestLoadPermissionRequestHook(t *testing.T) {
 	}
 	if got[0].Event != PermissionRequest || got[0].Match != "bash" || got[0].Command != "notify" {
 		t.Fatalf("loaded hook = %+v, want PermissionRequest/bash/notify", got[0])
+	}
+}
+
+func TestReasonixHomeOverridesGlobalHookPaths(t *testing.T) {
+	home := t.TempDir()
+	reasonixHome := filepath.Join(t.TempDir(), "rx-home")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("REASONIX_HOME", reasonixHome)
+	if err := os.MkdirAll(reasonixHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(reasonixHome, SettingsFilename), []byte(`{"hooks":{"PostToolUse":[{"command":"echo rx"}]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeSettings(t, home, `{"hooks":{"PostToolUse":[{"command":"echo old"}]}}`)
+
+	if got := GlobalSettingsPath(""); got != filepath.Join(reasonixHome, SettingsFilename) {
+		t.Fatalf("GlobalSettingsPath = %q, want Reasonix home", got)
+	}
+	if got := TrustPath(""); got != filepath.Join(reasonixHome, TrustFilename) {
+		t.Fatalf("TrustPath = %q, want Reasonix home", got)
+	}
+	hooks := Load(LoadOptions{})
+	if len(hooks) != 1 || hooks[0].Command != "echo rx" {
+		t.Fatalf("Load hooks = %+v, want Reasonix home hook only", hooks)
+	}
+}
+
+func TestReasonixHomeFallsBackToLegacyGlobalHooksAndTrust(t *testing.T) {
+	home := t.TempDir()
+	reasonixHome := filepath.Join(t.TempDir(), "rx-home")
+	proj := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("REASONIX_HOME", reasonixHome)
+	writeSettings(t, home, `{"hooks":{"PostToolUse":[{"command":"echo old"}]}}`)
+
+	hooks := Load(LoadOptions{})
+	if len(hooks) != 1 || hooks[0].Command != "echo old" {
+		t.Fatalf("Load hooks = %+v, want legacy global hook", hooks)
+	}
+	if hooks[0].Source != filepath.Join(home, SettingsDirname, SettingsFilename) {
+		t.Fatalf("legacy hook source = %q", hooks[0].Source)
+	}
+
+	absProj, err := filepath.Abs(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(trustFile{Projects: map[string]bool{absProj: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyTrust := filepath.Join(home, SettingsDirname, TrustFilename)
+	if err := os.WriteFile(legacyTrust, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !IsTrusted(proj, "") {
+		t.Fatal("legacy trust should be honored when new trust.json is absent")
+	}
+	if err := Trust(proj, ""); err != nil {
+		t.Fatalf("Trust: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(reasonixHome, TrustFilename)); err != nil {
+		t.Fatalf("Trust should write current Reasonix home trust file: %v", err)
 	}
 }
 

@@ -1,7 +1,9 @@
 package serve
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"reasonix/internal/event"
@@ -23,6 +25,25 @@ func TestToWire(t *testing.T) {
 		}})
 		if w.Tool == nil || w.Tool.Profile == nil || w.Tool.Profile.Model != "deepseek-pro" || w.Tool.Profile.Effort != "max" {
 			t.Errorf("profile = %+v", w.Tool)
+		}
+	})
+
+	t.Run("tool dispatch file diff", func(t *testing.T) {
+		w := toWire(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
+			Name:     "edit_file",
+			Args:     `{"path":"settings/settings_IO.gd"}`,
+			FileDiff: event.FileDiff{Diff: "@@ -27 +27 @@\n-old\n+new\n", Added: 1, Removed: 1},
+		}})
+		if w.Tool == nil {
+			t.Fatal("missing tool")
+		}
+		b, err := json.Marshal(w.Tool)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		s := string(b)
+		if !strings.Contains(s, `"diff":"@@ -27 +27 @@\n-old\n+new\n"`) || !strings.Contains(s, `"added":1`) || !strings.Contains(s, `"removed":1`) {
+			t.Fatalf("tool file diff was not serialized: %s", s)
 		}
 	})
 

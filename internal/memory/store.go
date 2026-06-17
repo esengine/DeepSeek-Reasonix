@@ -69,7 +69,7 @@ type ArchivedMemory struct {
 }
 
 // StoreFor resolves the auto-memory directory for a project working dir under
-// the user config root, e.g. ~/.config/reasonix/projects/-Users-me-proj/memory.
+// Reasonix home, e.g. ~/.reasonix/projects/-Users-me-proj/memory.
 // A "" userDir (config dir unresolvable) yields a zero Store, which all methods
 // treat as a disabled no-op.
 func StoreFor(userDir, cwd string) Store {
