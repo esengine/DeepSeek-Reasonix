@@ -252,6 +252,8 @@ func (c *Config) DesktopStatusBarStyle() string {
 
 var defaultDesktopStatusBarItems = []string{
 	"model",
+	"workspace",
+	"git_branch",
 	"cache",
 	"cache_avg",
 	"session_tokens",
@@ -266,6 +268,8 @@ var defaultDesktopStatusBarItems = []string{
 
 var knownDesktopStatusBarItems = map[string]bool{
 	"model":          true,
+	"workspace":      true,
+	"git_branch":     true,
 	"cache":          true,
 	"cache_avg":      true,
 	"session_tokens": true,
