@@ -3,6 +3,7 @@ package hook
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -90,7 +91,9 @@ func TestRunnerPreToolUseBlock(t *testing.T) {
 func TestRunnerPostToolUseNoHooks(t *testing.T) {
 	r := NewRunner(nil, "/tmp", nil, nil)
 	// Should not panic.
-	r.PostToolUse(context.Background(), "bash", nil, "ok")
+	if got := r.PostToolUse(context.Background(), "call_1", "bash", nil, "ok"); got != nil {
+		t.Fatalf("no hooks should return no advisories, got %v", got)
+	}
 }
 
 func TestRunnerPostToolUseWarn(t *testing.T) {
@@ -103,9 +106,49 @@ func TestRunnerPostToolUseWarn(t *testing.T) {
 	var notified string
 	notify := func(msg string) { notified = msg }
 	r := NewRunner(hooks, "/tmp", spawner, notify)
-	r.PostToolUse(context.Background(), "bash", nil, "result")
+	advisories := r.PostToolUse(context.Background(), "call_1", "bash", nil, "result")
 	if notified == "" {
 		t.Error("PostToolUse warn should notify")
+	}
+	if len(advisories) != 0 {
+		t.Fatalf("warn outcomes should not produce model advisories: %v", advisories)
+	}
+}
+
+func TestRunnerPostToolUseModelContextAdvisory(t *testing.T) {
+	hooks := []ResolvedHook{
+		{HookConfig: HookConfig{Name: "lint", Command: "advise", ModelContext: true}, Event: PostToolUse},
+		{HookConfig: HookConfig{Name: "silent", Command: "silent"}, Event: PostToolUse},
+	}
+	var got Payload
+	spawner := func(_ context.Context, in SpawnInput) SpawnResult {
+		if err := json.Unmarshal([]byte(in.Stdin), &got); err != nil {
+			t.Fatalf("payload json: %v", err)
+		}
+		if in.Command == "silent" {
+			return SpawnResult{ExitCode: 0, Stdout: "not opted in"}
+		}
+		return SpawnResult{ExitCode: 0, Stdout: "\x1b[31mremember exact nonce\x1b[0m\x00"}
+	}
+	r := NewRunner(hooks, "/tmp", spawner, nil)
+	args := json.RawMessage(`{"command":"go test"}`)
+	advisories := r.PostToolUse(context.Background(), "call_1", "bash", args, "ok")
+
+	if got.ToolCallID != "call_1" {
+		t.Fatalf("ToolCallID = %q, want call_1", got.ToolCallID)
+	}
+	if got.ToolName != "bash" || string(got.ToolArgs) != string(args) || got.ToolResult != "ok" {
+		t.Fatalf("unexpected payload: %+v", got)
+	}
+	if len(advisories) != 1 {
+		t.Fatalf("advisories = %d, want 1: %v", len(advisories), advisories)
+	}
+	adv := advisories[0]
+	if !strings.Contains(adv, "hook: lint") || !strings.Contains(adv, "tool_call_id: call_1") || !strings.Contains(adv, "remember exact nonce") {
+		t.Fatalf("advisory missing expected fields: %q", adv)
+	}
+	if strings.Contains(adv, "\x1b[") || strings.Contains(adv, "\x00") || strings.Contains(adv, "not opted in") {
+		t.Fatalf("advisory should be sanitized and opt-in only: %q", adv)
 	}
 }
 

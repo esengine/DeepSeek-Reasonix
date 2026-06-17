@@ -46,6 +46,9 @@ func StripComposePrefixes(content string) string {
 // in the chat UI.
 func IsSyntheticUserMessage(content string) bool {
 	trimmed := strings.TrimSpace(agent.StripTransientUserBlocks(content))
+	if agent.IsPostToolUseAdvisoryMessage(trimmed) {
+		return true
+	}
 	if trimmed == planApprovedMessage {
 		return true
 	}

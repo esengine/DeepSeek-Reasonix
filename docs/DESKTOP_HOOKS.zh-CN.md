@@ -97,10 +97,12 @@ Hooks 让 Reasonix 在会话、用户输入、工具调用、模型返回、压�
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `command` | string | 必填。通过平台 shell 执行的命令。空字符串会被忽略。 |
+| `name` | string | 可选。hook 的稳定名称；当 `PostToolUse` 输出进入模型上下文时用于标注来源。 |
 | `match` | string | 仅 `PreToolUse`、`PostToolUse` 使用。锚定正则，空字符串或 `*` 表示匹配所有工具。 |
 | `description` | string | 可选。显示在 hooks 列表或设置页里的说明。 |
 | `timeout` | number | 可选。毫秒数。未设置时，阻塞型事件默认 5000ms，其它事件默认 30000ms。 |
 | `cwd` | string | 可选。覆盖 hook 命令工作目录。默认使用当前会话的 `cwd`。 |
+| `model_context` | boolean | 可选。仅对 `PostToolUse` 生效；为 `true` 时，exit 0 且非空的 stdout 会作为主机建议进入下一次模型请求。默认 `false`。 |
 
 `match` 是锚定正则：`"file"` 不会匹配 `read_file`，需要写成 `".*file"`。正则非法时该 hook 不会触发。
 
@@ -113,7 +115,7 @@ Hooks 让 Reasonix 在会话、用户输入、工具调用、模型返回、压�
 | 事件 key | 触发时机 | 是否可阻塞 | stdout 特殊作用 |
 | --- | --- | --- | --- |
 | `PreToolUse` | 工具权限已通过、工具真正执行前 | 是 | 无特殊作用 |
-| `PostToolUse` | 工具执行后，不论成功或失败 | 否 | 无特殊作用 |
+| `PostToolUse` | 工具执行后，不论成功或失败 | 否 | 设置 `model_context: true` 时，exit 0 且非空的 stdout 会进入下一次模型请求 |
 | `UserPromptSubmit` | 用户输入提交后、本轮模型调用前 | 是 | 无特殊作用 |
 | `Stop` | 一轮对话结束后 | 否 | 无特殊作用 |
 | `PostLLMCall` | 模型流式返回完成后，reasoning 入库前 | 否 | exit 0 且 stdout 非空时，用 stdout 替换展示的 reasoning |
@@ -139,7 +141,7 @@ Reasonix 会把一行 JSON 写入 hook 命令的 stdin。所有 payload 都至�
 | 事件 key | 额外 payload key | 示例 |
 | --- | --- | --- |
 | `PreToolUse` | `toolName`, `toolArgs` | `{"event":"PreToolUse","cwd":"/repo","toolName":"bash","toolArgs":{"command":"go test ./..."}}` |
-| `PostToolUse` | `toolName`, `toolArgs`, `toolResult` | `{"event":"PostToolUse","cwd":"/repo","toolName":"bash","toolArgs":{"command":"go test ./..."},"toolResult":"ok"}` |
+| `PostToolUse` | `toolCallId`, `toolName`, `toolArgs`, `toolResult` | `{"event":"PostToolUse","cwd":"/repo","toolCallId":"call_1","toolName":"bash","toolArgs":{"command":"go test ./..."},"toolResult":"ok"}` |
 | `UserPromptSubmit` | `prompt`, `turn` | `{"event":"UserPromptSubmit","cwd":"/repo","prompt":"修复测试","turn":1}` |
 | `Stop` | `lastAssistantText`, `turn` | `{"event":"Stop","cwd":"/repo","lastAssistantText":"已修复","turn":1}` |
 | `PostLLMCall` | `reasoning`, `turn` | `{"event":"PostLLMCall","cwd":"/repo","reasoning":"raw reasoning","turn":1}` |
@@ -166,8 +168,28 @@ stdout 和 stderr 会被捕获、去掉首尾空白，并限制单路输出最�
 特殊 stdout 行为：
 
 - `PostLLMCall`：exit 0 且 stdout 非空时，stdout 会替换用户看到的 reasoning。若 provider 的 reasoning 带签名，Reasonix 会保留原始 signed reasoning 用于后续请求，同时仍展示 hook 转换后的文本。
+- `PostToolUse`：默认不把 stdout 发给模型。只有该 hook 显式设置 `model_context: true`、命令 exit 0、且 stdout 非空时，Reasonix 才会在本轮所有工具结果之后追加一条合成的用户角色消息，把 stdout 作为主机建议发给下一次模型请求。该消息不会显示成真实用户输入。
 - `PreCompact`：所有非空 stdout 会按换行拼接，作为本次压缩摘要的额外指导。
 - 其它事件：stdout 只在非通过结果中作为提示文本使用，不会自动进入模型上下文。
+
+## 示例：把工具后的检查结果发给模型
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "name": "policy-ledger",
+        "match": "bash",
+        "command": "node .reasonix/hooks/post-tool-ledger.js",
+        "model_context": true
+      }
+    ]
+  }
+}
+```
+
+这个 hook 的 stdout 只在 exit 0 时进入模型上下文；非零退出仍只作为 warning 展示给用户。Reasonix 会限制进入模型的输出大小，并去除 ANSI 控制序列。
 
 ## 示例：阻止危险 bash 命令
 

@@ -160,11 +160,31 @@ func TestHistoryMessagesPreserveToolDetails(t *testing.T) {
 	}
 }
 
+func TestHistoryMessagesDropPostToolUseAdvisory(t *testing.T) {
+	advisory := agent.FormatPostToolUseAdvisoryMessage([]string{"hook: lint\nstdout:\nremember nonce"})
+	got := historyMessages([]provider.Message{
+		{Role: provider.RoleUser, Content: "run command"},
+		{Role: provider.RoleTool, Name: "bash", ToolCallID: "call_1", Content: "ok"},
+		{Role: provider.RoleUser, Content: advisory},
+		{Role: provider.RoleAssistant, Content: "done"},
+	})
+
+	if len(got) != 3 {
+		t.Fatalf("history length = %d, want 3: %+v", len(got), got)
+	}
+	for _, m := range got {
+		if strings.Contains(m.Content, "remember nonce") {
+			t.Fatalf("synthetic advisory should not render in history: %+v", got)
+		}
+	}
+}
+
 func TestPreviewSessionFileStripsTransientReasoningLanguageBlock(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
 	s := agent.NewSession("system")
 	s.Add(provider.Message{Role: provider.RoleUser, Content: "<reasoning-language>\nVisible reasoning/thinking text preference: use English.\n</reasoning-language>\n\nExplain this module"})
+	s.Add(provider.Message{Role: provider.RoleUser, Content: agent.FormatPostToolUseAdvisoryMessage([]string{"hook: lint\nstdout:\nremember nonce"})})
 	if err := s.Save(path); err != nil {
 		t.Fatal(err)
 	}

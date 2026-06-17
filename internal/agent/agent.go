@@ -181,12 +181,13 @@ type Gate interface {
 
 // ToolHooks fires user-configured shell hooks around each tool call. PreToolUse
 // runs before the call and may block it (block=true; message is the reason fed
-// back to the model); PostToolUse runs after and only surfaces output to the
-// user (it can't block). It is interface-shaped so the agent stays independent
-// of the hook package — a nil hooks field disables hook firing entirely.
+// back to the model); PostToolUse runs after and may return opt-in advisory
+// output for the next model turn. It is interface-shaped so the agent stays
+// independent of the hook package — a nil hooks field disables hook firing
+// entirely.
 type ToolHooks interface {
 	PreToolUse(ctx context.Context, name string, args json.RawMessage) (block bool, message string)
-	PostToolUse(ctx context.Context, name string, args json.RawMessage, result string)
+	PostToolUse(ctx context.Context, callID, name string, args json.RawMessage, result string) []string
 	// PostLLMCall fires after each model turn completes (streaming finishes)
 	// but before reasoning_content is stored. It returns the (possibly
 	// translated) reasoning string — the original when no hook is configured.
@@ -803,14 +804,17 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 		emptyFinalBlocks = 0
 		usedAnyTool = true
 
-		results := a.executeBatch(ctx, calls)
+		batch := a.executeBatch(ctx, calls)
 		for i, call := range calls {
 			a.session.Add(provider.Message{
 				Role:       provider.RoleTool,
-				Content:    results[i],
+				Content:    batch.results[i],
 				ToolCallID: call.ID,
 				Name:       call.Name,
 			})
+		}
+		if advisory := FormatPostToolUseAdvisoryMessage(batch.postToolAdvisories); advisory != "" {
+			a.session.Add(provider.Message{Role: provider.RoleUser, Content: advisory})
 		}
 
 		// The prompt only grows from here; compact before the next turn so it
@@ -1256,7 +1260,7 @@ func (a *Agent) systemPrompt() string {
 // write/read ordering stays provider-ordered. ToolResult events are emitted
 // after the batch in call order, so emission stays serial even when execution
 // parallelised.
-func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []string {
+func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) toolBatchResult {
 	for _, c := range calls {
 		t, ok := a.tools.Get(c.Name)
 		ev := event.Tool{ID: c.ID, Name: c.Name, Args: c.Arguments, ReadOnly: ok && t.ReadOnly()}
@@ -1314,7 +1318,16 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 		}
 	}
 	a.applyStormBreaker(calls, outcomes, results)
-	return results
+	var advisories []string
+	for _, o := range outcomes {
+		advisories = append(advisories, o.postToolAdvisories...)
+	}
+	return toolBatchResult{results: results, postToolAdvisories: advisories}
+}
+
+type toolBatchResult struct {
+	results            []string
+	postToolAdvisories []string
 }
 
 func (a *Agent) withPreviewFileDiffs(calls []provider.ToolCall) []provider.ToolCall {
@@ -1478,11 +1491,12 @@ func batchStormSignature(calls []provider.ToolCall, outcomes []toolOutcome) (str
 // blocked narrows that to a refusal (plan mode / permission). truncMsg is set
 // (without the "· " prefix) when the output was head+tailed.
 type toolOutcome struct {
-	output    string
-	blocked   bool
-	errMsg    string
-	truncated bool
-	truncMsg  string
+	output             string
+	blocked            bool
+	errMsg             string
+	truncated          bool
+	truncMsg           string
+	postToolAdvisories []string
 }
 
 // executeOne runs a single tool call. It is pure with respect to the event sink
@@ -1595,8 +1609,9 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	}
 	// PostToolUse hooks observe the result (they can't block); fired whether the
 	// call succeeded or errored, since the tool did run.
+	var postToolAdvisories []string
 	if a.hooks != nil {
-		a.hooks.PostToolUse(ctx, call.Name, json.RawMessage(call.Arguments), result)
+		postToolAdvisories = a.hooks.PostToolUse(ctx, call.ID, call.Name, json.RawMessage(call.Arguments), result)
 	}
 	if err != nil {
 		detail := result
@@ -1608,7 +1623,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 			detail = strings.TrimRight(detail, "\n") + "\nThe arguments were not valid JSON. Re-emit them exactly per this schema:\n" + string(t.Schema())
 		}
 		body, truncMsg := truncateToolOutput(fmt.Sprintf("error: %v\n%s", err, detail))
-		return toolOutcome{output: body, errMsg: firstLine(err.Error()), truncated: truncMsg != "", truncMsg: truncMsg}
+		return toolOutcome{output: body, errMsg: firstLine(err.Error()), truncated: truncMsg != "", truncMsg: truncMsg, postToolAdvisories: postToolAdvisories}
 	}
 	a.recordRepeatSuccess(call, t)
 	// A foreground `task` sub-agent just finished — its result is the final answer.
@@ -1618,7 +1633,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		a.hooks.SubagentStop(ctx, result)
 	}
 	body, truncMsg := truncateToolOutput(result)
-	return toolOutcome{output: body, truncated: truncMsg != "", truncMsg: truncMsg}
+	return toolOutcome{output: body, truncated: truncMsg != "", truncMsg: truncMsg, postToolAdvisories: postToolAdvisories}
 }
 
 func (a *Agent) planModeBlocked(toolName string, readOnly bool, args json.RawMessage) (blocked bool, message string) {

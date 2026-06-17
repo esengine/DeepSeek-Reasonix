@@ -3796,6 +3796,9 @@ func replaySectionsFor(history []provider.Message, width int, renderer *mdRender
 	for _, m := range history {
 		switch m.Role {
 		case provider.RoleUser:
+			if agent.IsPostToolUseAdvisoryMessage(m.Content) {
+				continue
+			}
 			// Steer messages are surfaced as a notice line, not a user bubble.
 			if steerText, isSteer := agent.SteerText(m.Content); isSteer {
 				out = append(out, fmt.Sprintf("  ↪ %s\n\n", steerText))

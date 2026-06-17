@@ -90,6 +90,8 @@ const (
 
 // HookConfig is one hook as written in settings.json.
 type HookConfig struct {
+	// Name is an optional stable label used in model-visible hook advisories.
+	Name string `json:"name,omitempty"`
 	// Match is an anchored regex selecting tools (Pre/PostToolUse and
 	// PermissionRequest only); "" or "*" = every tool. Anchored: "file" won't
 	// match "read_file" — use ".*file".
@@ -102,6 +104,9 @@ type HookConfig struct {
 	Timeout int `json:"timeout,omitempty"`
 	// Cwd overrides the working directory (defaults to the payload's cwd).
 	Cwd string `json:"cwd,omitempty"`
+	// ModelContext opts a passing PostToolUse hook's stdout into the next model
+	// request as host-provided advisory context. Ignored for other events.
+	ModelContext bool `json:"model_context,omitempty"`
 }
 
 // Settings is the shape of a settings.json (only hooks for now).
@@ -247,6 +252,7 @@ func MatchesTool(h ResolvedHook, toolName string) bool {
 type Payload struct {
 	Event         Event           `json:"event"`
 	Cwd           string          `json:"cwd"`
+	ToolCallID    string          `json:"toolCallId,omitempty"`
 	ToolName      string          `json:"toolName,omitempty"`
 	ToolArgs      json.RawMessage `json:"toolArgs,omitempty"`
 	Subject       string          `json:"subject,omitempty"`

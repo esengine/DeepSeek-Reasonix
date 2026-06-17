@@ -173,3 +173,43 @@ func TestRunWellFormedToolLoopRoundTrips(t *testing.T) {
 		t.Errorf("repair mutated a well-formed session: %d -> %d", before, after)
 	}
 }
+
+func TestRunPostToolUseAdvisoryReachesNextModelTurn(t *testing.T) {
+	mp := testutil.NewMock("m",
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}}},
+		testutil.Turn{Text: "all set"},
+	)
+	hooks := &stubHooks{postAdvisories: map[string][]string{
+		"echo": []string{"observer: remember nonce 7b42"},
+	}}
+	a := New(mp, echoRegistry(), NewSession(""), Options{Hooks: hooks}, event.Discard)
+	if err := a.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	reqs := mp.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("provider requests = %d, want 2", len(reqs))
+	}
+	second := reqs[1].Messages
+	if len(second) < 2 {
+		t.Fatalf("second request missing tool/advisory messages: %+v", second)
+	}
+	toolMsg := second[len(second)-2]
+	advisory := second[len(second)-1]
+	if toolMsg.Role != provider.RoleTool || toolMsg.ToolCallID != "c1" {
+		t.Fatalf("tool result should immediately precede advisory, got %+v", toolMsg)
+	}
+	if advisory.Role != provider.RoleUser || !IsPostToolUseAdvisoryMessage(advisory.Content) {
+		t.Fatalf("last message should be synthetic advisory, got %+v", advisory)
+	}
+	if !strings.Contains(advisory.Content, "nonce 7b42") {
+		t.Fatalf("advisory content missing hook output: %q", advisory.Content)
+	}
+	if after := len(provider.SanitizeToolPairing(second)); after != len(second) {
+		t.Fatalf("advisory should preserve tool pairing, messages %d -> %d", len(second), after)
+	}
+	if got := strings.Join(hooks.postCallIDs, ","); got != "c1" {
+		t.Fatalf("PostToolUse should receive call id, got %q", got)
+	}
+}

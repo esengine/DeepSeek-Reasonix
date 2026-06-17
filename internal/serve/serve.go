@@ -464,6 +464,9 @@ func historyMessages(msgs []provider.Message) []historyMessage {
 	for _, m := range msgs {
 		// Steer messages are surfaced as a notice, not a user message.
 		if m.Role == provider.RoleUser {
+			if agent.IsPostToolUseAdvisoryMessage(m.Content) {
+				continue
+			}
 			if steerText, isSteer := agent.SteerText(m.Content); isSteer {
 				out = append(out, historyMessage{Role: "notice", Content: "↪ " + steerText})
 				continue
@@ -1039,6 +1042,9 @@ func previewSessionFile(path string) (string, int) {
 			break
 		}
 		if m.Role == "user" {
+			if agent.IsPostToolUseAdvisoryMessage(m.Content) {
+				continue
+			}
 			turns++
 			if first == "" {
 				first = agent.UserPreviewText(m.Content)

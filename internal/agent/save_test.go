@@ -97,6 +97,7 @@ func TestListSessionsOrdersByMTime(t *testing.T) {
 	for _, name := range []string{"a.jsonl", "b.jsonl"} {
 		s := NewSession("")
 		s.Add(provider.Message{Role: provider.RoleUser, Content: "preview for " + name})
+		s.Add(provider.Message{Role: provider.RoleUser, Content: FormatPostToolUseAdvisoryMessage([]string{"hook: lint\nstdout:\nremember nonce"})})
 		if err := s.Save(filepath.Join(dir, name)); err != nil {
 			t.Fatal(err)
 		}

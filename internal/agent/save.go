@@ -225,6 +225,9 @@ func previewSession(path string) (string, int) {
 			break // EOF or a malformed tail — return the preview gathered so far
 		}
 		if m.Role == provider.RoleUser {
+			if IsPostToolUseAdvisoryMessage(m.Content) {
+				continue
+			}
 			turns++
 			if first == "" {
 				s := UserPreviewText(m.Content)

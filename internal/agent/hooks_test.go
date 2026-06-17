@@ -13,15 +13,17 @@ import (
 
 // stubHooks blocks PreToolUse for named tools and records what it saw.
 type stubHooks struct {
-	blockPre      map[string]bool
-	preSeen       []string
-	postSeen      []string
-	preCompactOut string   // returned from PreCompact (extra summary guidance)
-	subagentSeen  []string // last-answer text passed to each SubagentStop
-	hasPostLLM    bool     // whether HasPostLLMCall reports a PostLLMCall hook
-	postLLMOut    string   // replacement returned from PostLLMCall (when hasPostLLM)
-	postLLMSeen   []string // reasoning text each PostLLMCall received
-	postLLMTurns  []int    // turn number each PostLLMCall received
+	blockPre       map[string]bool
+	preSeen        []string
+	postSeen       []string
+	postCallIDs    []string
+	postAdvisories map[string][]string
+	preCompactOut  string   // returned from PreCompact (extra summary guidance)
+	subagentSeen   []string // last-answer text passed to each SubagentStop
+	hasPostLLM     bool     // whether HasPostLLMCall reports a PostLLMCall hook
+	postLLMOut     string   // replacement returned from PostLLMCall (when hasPostLLM)
+	postLLMSeen    []string // reasoning text each PostLLMCall received
+	postLLMTurns   []int    // turn number each PostLLMCall received
 }
 
 func (h *stubHooks) PreToolUse(_ context.Context, name string, _ json.RawMessage) (bool, string) {
@@ -32,8 +34,10 @@ func (h *stubHooks) PreToolUse(_ context.Context, name string, _ json.RawMessage
 	return false, ""
 }
 
-func (h *stubHooks) PostToolUse(_ context.Context, name string, _ json.RawMessage, _ string) {
+func (h *stubHooks) PostToolUse(_ context.Context, callID, name string, _ json.RawMessage, _ string) []string {
 	h.postSeen = append(h.postSeen, name)
+	h.postCallIDs = append(h.postCallIDs, callID)
+	return h.postAdvisories[name]
 }
 
 func (h *stubHooks) SubagentStop(_ context.Context, last string) {

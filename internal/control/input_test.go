@@ -717,6 +717,11 @@ func TestIsSyntheticUserMessage(t *testing.T) {
 			want:  true,
 		},
 		{
+			name:  "post tool use advisory",
+			input: agent.FormatPostToolUseAdvisoryMessage([]string{"hook: lint\nstdout:\nremember nonce"}),
+			want:  true,
+		},
+		{
 			name:  "user mentioning a summary is not synthetic",
 			input: "Summary of what I want: fix the login bug first.",
 			want:  false,

@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Runner binds a set of resolved hooks to a session: a working directory, the
@@ -66,13 +69,15 @@ func (r *Runner) PreToolUse(ctx context.Context, name string, args json.RawMessa
 }
 
 // PostToolUse fires after a tool call. It can't block; non-pass outcomes are
-// surfaced to the user via notify.
-func (r *Runner) PostToolUse(ctx context.Context, name string, args json.RawMessage, result string) {
+// surfaced to the user via notify. Passing hooks that opt into model_context
+// return bounded stdout advisories for the next model turn.
+func (r *Runner) PostToolUse(ctx context.Context, callID, name string, args json.RawMessage, result string) []string {
 	if !r.Enabled() {
-		return
+		return nil
 	}
-	rep := Run(ctx, Payload{Event: PostToolUse, Cwd: r.cwd, ToolName: name, ToolArgs: args, ToolResult: result}, r.hooks, r.spawner)
+	rep := Run(ctx, Payload{Event: PostToolUse, Cwd: r.cwd, ToolCallID: callID, ToolName: name, ToolArgs: args, ToolResult: result}, r.hooks, r.spawner)
 	r.handle(rep)
+	return postToolUseModelAdvisories(rep, callID, name)
 }
 
 // PermissionRequest fires before a tool approval prompt is shown. It can't
@@ -228,4 +233,84 @@ func clipRunes(s string, max int) string {
 		return ""
 	}
 	return string(r[:max]) + "…"
+}
+
+const postToolUseModelContextMaxBytes = 4 * 1024
+
+var ansiEscapeRE = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+
+func postToolUseModelAdvisories(rep Report, callID, toolName string) []string {
+	var out []string
+	for _, o := range rep.Outcomes {
+		if o.Decision != DecisionPass || !o.Hook.ModelContext {
+			continue
+		}
+		stdout := sanitizeAdvisoryText(o.Stdout)
+		if stdout == "" {
+			continue
+		}
+		stdout, truncated := clipUTF8Bytes(stdout, postToolUseModelContextMaxBytes)
+		var b strings.Builder
+		b.WriteString("hook: ")
+		b.WriteString(postToolUseHookLabel(o.Hook))
+		b.WriteString("\ntool: ")
+		b.WriteString(toolName)
+		if callID != "" {
+			b.WriteString("\ntool_call_id: ")
+			b.WriteString(callID)
+		}
+		if truncated || o.Truncated {
+			b.WriteString("\ntruncated: true")
+		}
+		b.WriteString("\nstdout:\n")
+		b.WriteString(stdout)
+		out = append(out, b.String())
+	}
+	return out
+}
+
+func postToolUseHookLabel(h ResolvedHook) string {
+	if s := strings.TrimSpace(h.Name); s != "" {
+		return clipRunes(oneLine(s), 80)
+	}
+	if s := strings.TrimSpace(h.Description); s != "" {
+		return clipRunes(oneLine(s), 80)
+	}
+	return string(h.Scope) + "/" + string(h.Event)
+}
+
+func oneLine(s string) string {
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.Join(strings.Fields(s), " ")
+	return s
+}
+
+func sanitizeAdvisoryText(s string) string {
+	s = strings.ToValidUTF8(s, "")
+	s = ansiEscapeRE.ReplaceAllString(s, "")
+	s = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\t' {
+			return r
+		}
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+	return strings.TrimSpace(s)
+}
+
+func clipUTF8Bytes(s string, max int) (string, bool) {
+	if len(s) <= max {
+		return s, false
+	}
+	if max <= 0 {
+		return "", true
+	}
+	cut := max
+	for cut > 0 && !utf8.ValidString(s[:cut]) {
+		cut--
+	}
+	return strings.TrimRight(s[:cut], " \t\r\n"), true
 }

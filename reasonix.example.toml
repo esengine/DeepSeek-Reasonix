@@ -137,12 +137,14 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # PermissionRequest / UserPromptSubmit / Stop). They are NOT configured here — put them in
 # settings.json: ~/.reasonix/settings.json (global, always on) and
 # <project>/.reasonix/settings.json (project, runs only after `/hooks trust`).
+# PostToolUse stdout is user-visible only by default; set "model_context": true on
+# a PostToolUse hook to send passing stdout as advisory context after tool results.
 # Exit 0 = pass, exit 2 = block (PreToolUse / UserPromptSubmit only). Example
 # ~/.reasonix/settings.json:
 #   { "hooks": {
 #       "PreToolUse":  [ { "match": "bash", "command": "my-guard.sh" } ],
 #       "PermissionRequest": [ { "match": "bash", "command": "notify-send 'approval needed'" } ],
-#       "PostToolUse": [ { "match": ".*file", "command": "gofmt -w ." } ],
+#       "PostToolUse": [ { "name": "formatter", "match": ".*file", "command": "gofmt -w .", "model_context": true } ],
 #       "Stop":        [ { "command": "notify-send 'turn done'" } ] } }
 
 # A custom status line: a command whose first stdout line replaces the built-in
