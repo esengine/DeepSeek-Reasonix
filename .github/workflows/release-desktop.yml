@@ -173,10 +173,12 @@ jobs:
       # Authenticode-sign the Windows installer through SignPath. Runs BEFORE minisign:
       # the signature rewrites the installer's bytes, so the updater's minisign sig and
       # the manifest SHA must be computed over the signed build. SignPath pulls the file
-      # from the Actions artifact API, so it must be uploaded first. Canary signs with
-      # the test certificate; stable/rc use the Foundation release certificate.
+      # from the Actions artifact API, so it must be uploaded first. Canary signs with the
+      # test certificate; stable/rc sign with the Foundation release certificate, but only
+      # once SIGNPATH_RELEASE_SIGNING_READY is set — until that cert clears CSR-pending,
+      # stable ships unsigned instead of failing the whole release on an invalid policy.
       - name: Upload unsigned installer for SignPath
-        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
+        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true' && (steps.ver.outputs.channel == 'canary' || vars.SIGNPATH_RELEASE_SIGNING_READY == 'true')
         id: unsigned-installer
         uses: actions/upload-artifact@v7
         with:
@@ -186,7 +188,7 @@ jobs:
           retention-days: 1
 
       - name: Submit installer for Authenticode signing
-        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
+        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true' && (steps.ver.outputs.channel == 'canary' || vars.SIGNPATH_RELEASE_SIGNING_READY == 'true')
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -203,7 +205,7 @@ jobs:
           output-artifact-directory: signed
 
       - name: Replace installer with signed build
-        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
+        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true' && (steps.ver.outputs.channel == 'canary' || vars.SIGNPATH_RELEASE_SIGNING_READY == 'true')
         run: cp signed/*installer*.exe dist/
 
       - name: Sign artifacts (minisign)
