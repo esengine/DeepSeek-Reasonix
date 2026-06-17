@@ -21,6 +21,7 @@
     "highlight.js": "^11.10.0",
     "katex": "^0.17.0",
     "lucide-react": "^1.18.0",
+    "mermaid": "^11.15.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

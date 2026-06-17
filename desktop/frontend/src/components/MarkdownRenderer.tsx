@@ -6,6 +6,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import { CodeViewer } from "./CodeViewer";
+import { MermaidDiagram } from "./MermaidDiagram";
 import { normalizeMath } from "./mathNormalize";
 import { openExternal } from "../lib/bridge";
 
@@ -24,9 +25,13 @@ const components: Components = {
   code: ({ className, children }) => {
     const text = String(children ?? "");
     const match = /language-([\w-]+)/.exec(className ?? "");
+    const lang = match?.[1];
     const isBlock = match !== null || text.includes("\n");
     if (isBlock) {
-      return <CodeViewer value={text.replace(/\n$/, "")} language={match?.[1]} maxHeight={360} />;
+      if (lang === "mermaid") {
+        return <MermaidDiagram definition={text.replace(/\n$/, "")} />;
+      }
+      return <CodeViewer value={text.replace(/\n$/, "")} language={lang} maxHeight={360} />;
     }
     return <code className="md-code">{children}</code>;
   },

@@ -4366,6 +4366,133 @@ a[href] {
 .code-block__wrap {
   position: relative;
 }
+
+/* ── Mermaid diagram renderer ───────────────────────────────────────────── */
+
+.mermaid-diagram {
+  position: relative;
+  margin: 12px 0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Rendered diagram: center the SVG with a subtle surface background */
+.mermaid-diagram--rendered {
+  background: var(--surface, #1a1b1e);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.mermaid-diagram__svg {
+  width: 100%;
+  overflow-x: auto;
+  display: flex;
+  justify-content: center;
+}
+
+.mermaid-diagram__svg svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Copy button: overlay top-right (same pattern as .code-block__copy) */
+.mermaid-diagram .code-block__copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.mermaid-diagram:hover .code-block__copy,
+.mermaid-diagram:focus-within .code-block__copy {
+  opacity: 1;
+}
+
+/* Loading state */
+.mermaid-diagram--loading {
+  background: var(--surface, #1a1b1e);
+  padding: 24px 16px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.mermaid-diagram__placeholder {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-dim, #888);
+  font-size: 13px;
+}
+
+.mermaid-diagram__spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border, #333);
+  border-top-color: var(--accent, #ff6a3d);
+  border-radius: 50%;
+  animation: mermaid-spin 0.7s linear infinite;
+}
+
+@keyframes mermaid-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Error state */
+.mermaid-diagram--error {
+  border: 1px solid var(--error-border, #c0392b);
+  background: var(--surface, #1a1b1e);
+}
+
+.mermaid-diagram__error-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--error-bg, rgba(192, 57, 43, 0.1));
+  color: var(--error-text, #e74c3c);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.mermaid-diagram__error-icon {
+  font-size: 14px;
+}
+
+.mermaid-diagram--error > .code.hljs {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+}
+
+.mermaid-diagram__error-details {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-dim, #888);
+  cursor: pointer;
+}
+
+.mermaid-diagram__error-details summary {
+  font-size: 12px;
+  color: var(--text-dim, #888);
+  cursor: pointer;
+}
+
+.mermaid-diagram__error-detail-text {
+  margin-top: 6px;
+  padding: 8px;
+  background: var(--bg, #090a0c);
+  border-radius: 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text, #ddd);
+}
+
 .msg--assistant .msg__body {
   line-height: 1.68;
   user-select: text;
