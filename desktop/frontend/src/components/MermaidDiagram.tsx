@@ -16,11 +16,14 @@ type DiagramState =
   | { status: "rendered"; svg: string }
   | { status: "error"; message: string };
 
-// Lazy import — mermaid is ~500 kB gzipped, so we only load it on demand.
-// The module-level promise is cached so only the first caller pays the cost;
-// if the import fails we reset so a later render can retry.
+// ── Module-level lazy import + render serialisation ──────────────────────
+// Mermaid's renderer uses shared global state; concurrent render() calls
+// from multiple instances can corrupt each other's output, so we serialise
+// every render call through a module-level promise chain.
+
 let mermaidModule: typeof import("mermaid") | null = null;
 let initPromise: Promise<void> | null = null;
+let renderQueue: Promise<void> = Promise.resolve();
 
 async function ensureMermaid(): Promise<void> {
   if (mermaidModule) return;
@@ -31,7 +34,7 @@ async function ensureMermaid(): Promise<void> {
       startOnLoad: false,
       theme: "dark",
       maxTextSize: 100000,
-      securityLevel: "sandbox",
+      securityLevel: "antiscript",
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
     });
   }).catch((err) => {
@@ -43,6 +46,25 @@ async function ensureMermaid(): Promise<void> {
   return initPromise;
 }
 
+function queuedRender(svgId: string, definition: string, theme: "dark" | "default"): Promise<string> {
+  const promise = renderQueue.then(async () => {
+    mermaidModule!.default.initialize({
+      startOnLoad: false,
+      theme,
+      maxTextSize: 100000,
+      securityLevel: "antiscript",
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    });
+    const { svg } = await mermaidModule!.default.render(svgId, definition);
+    return svg;
+  });
+  // Chain the error handler separately so one failure doesn't kill the queue.
+  renderQueue = promise.then(() => {}, () => {});
+  return promise;
+}
+
+// ── Theme detection ──────────────────────────────────────────────────────
+
 function resolveMermaidTheme(): "dark" | "default" {
   if (typeof document === "undefined") return "dark";
   const html = document.documentElement;
@@ -53,8 +75,35 @@ function resolveMermaidTheme(): "dark" | "default" {
   return window.matchMedia("(prefers-color-scheme: light)").matches ? "default" : "dark";
 }
 
+function useMermaidTheme(): "dark" | "default" {
+  const [theme, setTheme] = useState<"dark" | "default">(resolveMermaidTheme);
+
+  useEffect(() => {
+    // Observe data-theme changes on <html> so the diagram re-renders when
+    // the user switches between light/dark mode.
+    const html = document.documentElement;
+    const observer = new MutationObserver(() => {
+      setTheme(resolveMermaidTheme());
+    });
+    observer.observe(html, { attributeFilter: ["data-theme", "data-theme-mode"] });
+    // Also listen for OS-level changes when in auto mode.
+    const mq = window.matchMedia("(prefers-color-scheme: light)");
+    const onOsChange = () => setTheme(resolveMermaidTheme());
+    mq.addEventListener("change", onOsChange);
+    return () => {
+      observer.disconnect();
+      mq.removeEventListener("change", onOsChange);
+    };
+  }, []);
+
+  return theme;
+}
+
+// ── Component ────────────────────────────────────────────────────────────
+
 export const MermaidDiagram = memo(function MermaidDiagram({ definition }: MermaidDiagramProps) {
   const [state, setState] = useState<DiagramState>({ status: "loading" });
+  const theme = useMermaidTheme();
   const instanceId = useId().replace(/[:.]/g, "-");
   const svgId = `mermaid-${instanceId}`;
   const mountedRef = useRef(true);
@@ -73,18 +122,7 @@ export const MermaidDiagram = memo(function MermaidDiagram({ definition }: Merma
         await ensureMermaid();
         if (cancelled || !mountedRef.current) return;
 
-        const theme = resolveMermaidTheme();
-
-        // Re-initialize with the correct theme before rendering.
-        mermaidModule!.default.initialize({
-          startOnLoad: false,
-          theme,
-          maxTextSize: 100000,
-          securityLevel: "sandbox",
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-        });
-
-        const { svg } = await mermaidModule!.default.render(svgId, definition);
+        const svg = await queuedRender(svgId, definition, theme);
         if (cancelled || !mountedRef.current) return;
 
         setState({ status: "rendered", svg });
@@ -98,7 +136,7 @@ export const MermaidDiagram = memo(function MermaidDiagram({ definition }: Merma
     return () => {
       cancelled = true;
     };
-  }, [definition, svgId]);
+  }, [definition, svgId, theme]);
 
   if (state.status === "loading") {
     return (
