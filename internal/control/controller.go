@@ -104,6 +104,10 @@ type Controller struct {
 	reg       *tool.Registry
 	pluginCtx context.Context
 
+	// goalStatePath is where the current goal state is persisted for session
+	// continuity. Empty means no persistence.
+	goalStatePath string
+
 	// Checkpoints (snapshot-based rewind). cp is the per-session store rebound when
 	// the session path changes; cpRoot is the workspace root used to guard restore
 	// writes. cpTurn is the monotonic turn counter (decoupled from the store so it
@@ -721,6 +725,7 @@ func (c *Controller) advanceGoalAfterTurn() bool {
 		c.goalIntercepts = 0
 		c.goalSelfCheckDone = false
 		c.goalIdleTurns = 0
+		c.saveGoalState()
 		c.goal = ""
 		c.goalStatus = GoalStatusComplete
 		c.goalBlocks = 0
@@ -771,6 +776,9 @@ func (c *Controller) advanceGoalAfterTurn() bool {
 		c.goalInterceptMsg = ""
 		c.goalIdleTurns = 0
 		notice = c.goalBlock
+	}
+	if notice != "" {
+		c.saveGoalState()
 	}
 	cont := notice == ""
 	c.mu.Unlock()
@@ -897,7 +905,42 @@ func (c *Controller) stopGoal(status string) {
 	c.goalIntercepts = 0
 	c.goalSelfCheckDone = false
 	c.goalIdleTurns = 0
+	c.saveGoalState()
 	c.mu.Unlock()
+}
+
+// saveGoalState persists the current goal state to disk for session continuity.
+func (c *Controller) saveGoalState() {
+	if c.goalStatePath == "" || c.executor == nil {
+		return
+	}
+	todos := c.executor.CanonicalTodoState()
+	state := goalState{
+		Goal:       c.goal,
+		Status:     c.goalStatus,
+		Turns:      c.goalTurns,
+		Blocks:     c.goalBlocks,
+		Block:      c.goalBlock,
+		Strict:     c.goalStrict,
+		Todos:      todos,
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(c.goalStatePath), 0o755)
+	_ = os.WriteFile(c.goalStatePath, data, 0o644)
+}
+
+// goalState is the serializable form of a running goal.
+type goalState struct {
+	Goal   string            `json:"goal,omitempty"`
+	Status string            `json:"status,omitempty"`
+	Turns  int               `json:"turns,omitempty"`
+	Blocks int               `json:"blocks,omitempty"`
+	Block  string            `json:"block,omitempty"`
+	Strict bool              `json:"strict,omitempty"`
+	Todos  []evidence.TodoItem `json:"todos,omitempty"`
 }
 
 // lastAssistantText returns the content of the most recent assistant message with
@@ -1714,6 +1757,7 @@ func (c *Controller) SetGoal(goal string) {
 	c.goalSelfCheckDone = false
 	c.goalIdleTurns = 0
 	c.goalStrict = false
+	c.saveGoalState()
 }
 
 func (c *Controller) ClearGoal() {

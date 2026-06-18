@@ -129,22 +129,46 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 
 	// Channels for task completion signals and for spawning tasks.
 	type runRequest struct {
-		idx int
-		t   parallelTaskItem
+		idx    int
+		prompt string
+		label  string
+		tools  []string
+		maxSteps int
+		model    string
+		effort   string
 	}
 	spawnCh := make(chan runRequest, n)
 	doneCh := make(chan subResult, n)
 	allDone := make(chan struct{})
 
-	// Dispatcher goroutine: spawns tasks when their deps are satisfied.
+	// Dispatcher goroutine: spawns tasks when their deps are satisfied,
+	// accumulating wisdom from completed tasks and passing it forward.
 	go func() {
 		spawned := 0
 		completed := 0
+		var wisdom strings.Builder
+
+		makePrompt := func(t parallelTaskItem) string {
+			if wisdom.Len() == 0 || len(t.DependsOn) == 0 {
+				return t.Prompt
+			}
+			return "Previous task results:\n" + wisdom.String() + "\n\nNow do:\n" + t.Prompt
+		}
+		makeLabel := func(t parallelTaskItem, idx int) string {
+			if t.Description != "" {
+				return t.Description
+			}
+			return fmt.Sprintf("task-%d", idx+1)
+		}
+
 		// Seed: spawn all tasks with no dependencies.
 		for i, t := range params.Tasks {
 			if remaining[i] == 0 && !running[i] && !done[i] {
 				running[i] = true
-				spawnCh <- runRequest{idx: i, t: t}
+				spawnCh <- runRequest{
+					idx: i, prompt: makePrompt(t), label: makeLabel(t, i),
+					tools: t.Tools, maxSteps: t.MaxSteps, model: t.Model, effort: t.Effort,
+				}
 				spawned++
 			}
 		}
@@ -156,10 +180,26 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 			outputs[r.index] = r.output
 			errors[r.index] = r.err
 
+			// Accumulate wisdom from successful tasks.
+			if r.err == nil && r.output != "" {
+				summary := strings.TrimSpace(r.output)
+				if len(summary) > 200 {
+					summary = summary[:200] + "..."
+				}
+				if wisdom.Len() > 0 {
+					wisdom.WriteString("\n")
+				}
+				fmt.Fprintf(&wisdom, "- Task %d: %s", r.index+1, summary)
+			} else if r.err != nil {
+				if wisdom.Len() > 0 {
+					wisdom.WriteString("\n")
+				}
+				fmt.Fprintf(&wisdom, "- Task %d: FAILED - %s", r.index+1, r.err)
+			}
+
 			// Check if any waiting tasks are now unblocked.
 			for i, t := range params.Tasks {
 				if remaining[i] > 0 && !running[i] && !done[i] {
-					// Check if this dep is the one that just finished.
 					for _, dep := range t.DependsOn {
 						if dep == r.index {
 							remaining[i]--
@@ -167,7 +207,10 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 					}
 					if remaining[i] == 0 {
 						running[i] = true
-						spawnCh <- runRequest{idx: i, t: t}
+						spawnCh <- runRequest{
+							idx: i, prompt: makePrompt(t), label: makeLabel(t, i),
+							tools: t.Tools, maxSteps: t.MaxSteps, model: t.Model, effort: t.Effort,
+						}
 						spawned++
 					}
 				}
@@ -183,14 +226,16 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 		go func() {
 			defer wg.Done()
 			for req := range spawnCh {
-				idx, t := req.idx, req.t
-				label := t.Description
-				if label == "" {
-					label = fmt.Sprintf("task-%d", idx+1)
-				}
+				idx := req.idx
+				prompt := req.prompt
+				label := req.label
+				tools := req.tools
+				maxSteps := req.maxSteps
+				model := req.model
+				effort := req.effort
 
 				subID := fmt.Sprintf("%s/sub-%d", parentID, idx+1)
-				dispatchArgs, _ := json.Marshal(map[string]string{"prompt": t.Prompt, "description": label})
+				dispatchArgs, _ := json.Marshal(map[string]string{"prompt": prompt, "description": label})
 				sink.Emit(event.Event{
 					Kind: event.ToolDispatch,
 					Tool: event.Tool{
@@ -200,12 +245,12 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 				})
 
 				nested := subSinkFor(subID, sink)
-				modelRef, effortRef := p.taskTool.effectiveProfile(t.Model, t.Effort)
-				subReg := p.taskTool.buildSubReg(t.Tools)
+				modelRef, effortRef := p.taskTool.effectiveProfile(model, effort)
+				subReg := p.taskTool.buildSubReg(tools)
 
-				maxSteps := t.MaxSteps
-				if maxSteps <= 0 {
-					maxSteps = 20
+				max := maxSteps
+				if max <= 0 {
+					max = 20
 				}
 
 				prov, pricing, ctxWin, err := resolveSubagentProvider(p.taskTool, modelRef, effortRef)
@@ -219,8 +264,8 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 				}
 
 				sess := NewSession("")
-				output, runErr := RunSubAgentWithSession(ctx, prov, subReg, sess, t.Prompt, Options{
-					MaxSteps:          maxSteps,
+				output, runErr := RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, Options{
+					MaxSteps:          max,
 					Temperature:       p.taskTool.temperature,
 					Pricing:           pricing,
 					UsageSource:       event.UsageSourceSubagent,
