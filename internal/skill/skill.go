@@ -477,7 +477,7 @@ func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bo
 	return Skill{
 		Name:         name,
 		Description:  desc,
-		Body:         loadBodyWithReferences(path, strings.TrimSpace(body)),
+		Body:         loadBodyWithScripts(path, loadBodyWithReferences(path, strings.TrimSpace(body))),
 		Scope:        scope,
 		Path:         path,
 		AllowedTools: parseAllowedTools(fm[skillFrontmatterAllowedTools]),
@@ -642,6 +642,38 @@ func loadBodyWithReferences(skillPath, body string) string {
 		}
 		slug := strings.TrimSuffix(n, filepath.Ext(n))
 		b.WriteString("\n\n## Reference: " + slug + "\n\n" + trimmed)
+	}
+	return b.String()
+}
+
+// loadBodyWithScripts appends a directory-layout skill's sibling scripts/
+// directory listing to the body, so the model knows what scripts are
+// available and can run them via bash (inheriting sandbox, gate, hooks).
+func loadBodyWithScripts(skillPath, body string) string {
+	if filepath.Base(skillPath) != SkillFile {
+		return body
+	}
+	scriptsDir := filepath.Join(filepath.Dir(skillPath), "scripts")
+	entries, err := os.ReadDir(scriptsDir)
+	if err != nil {
+		return body
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	if len(names) == 0 {
+		return body
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	b.WriteString(body)
+	b.WriteString("\n\n## Scripts\n\n")
+	b.WriteString("The skill has the following scripts. Run them with bash, for example `python " + filepath.Join(scriptsDir, "<name>") + "`. Read a script with read_file before running if unsure.\n\n")
+	for _, n := range names {
+		b.WriteString("- `" + filepath.Join(scriptsDir, n) + "`\n")
 	}
 	return b.String()
 }
