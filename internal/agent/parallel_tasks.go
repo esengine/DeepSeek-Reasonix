@@ -276,6 +276,21 @@ func (p *ParallelTasksTool) runAsBackgroundJobs(ctx context.Context, tasks []par
 	}
 	session := jobs.SessionFromContext(ctx)
 
+	// Validate all tasks upfront before dispatching any.
+	for i, t := range tasks {
+		if strings.TrimSpace(t.Prompt) == "" {
+			return "", fmt.Errorf("task %d: prompt is required", i+1)
+		}
+		for _, dep := range t.DependsOn {
+			if dep < 0 || dep >= len(tasks) {
+				return "", fmt.Errorf("task %d: depends_on[%d] = %d out of range (0-%d)", i+1, dep, dep, len(tasks)-1)
+			}
+			if dep == i {
+				return "", fmt.Errorf("task %d: self-referencing depends_on", i+1)
+			}
+		}
+	}
+
 	type jobRef struct {
 		id    string
 		label string

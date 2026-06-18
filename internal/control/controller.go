@@ -1128,8 +1128,8 @@ func (c *Controller) applyGoalCommand(input, display string) bool {
 	switch cmd.Action {
 	case GoalCommandSet:
 		c.SetPlanMode(false)
-		c.GoalStrict(cmd.Strict)
 		c.SetGoal(cmd.Text)
+		c.GoalStrict(cmd.Strict)
 		c.notice(fmt.Sprintf(i18n.M.GoalSetFmt, ShortGoalForNotice(cmd.Text)))
 		if c.runner != nil {
 			c.runGuarded(func(ctx context.Context) error {
