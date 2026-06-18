@@ -3426,17 +3426,19 @@ func (a *App) TrashTopic(topicID string) error {
 		return err
 	}
 	removed, fallback := a.removeTopicRuntimeBindings(topicID)
-	if err := prepareRemovedSessionRuntimes(removed); err != nil {
+	if err := a.prepareRemovedSessionRuntimes(removed); err != nil {
 		a.closeRemovedSessionRuntimes(removed)
 		return err
 	}
-	defer a.closeRemovedSessionRuntimes(removed)
+	closedRemoved := map[*control.Controller]bool{}
+	defer a.closeRemainingRemovedSessionRuntimes(removed, closedRemoved)
 
 	for _, target := range targets {
 		var destroys []control.SessionDestroyHandle
 		err := trashSessionArtifactsBeforeMove(target.dir, target.sessionPath, target.key, func() {
 			destroys = a.destroyHandlesForSession(target.dir, target.sessionPath, removed)
 			waitDestroyHandles(destroys)
+			a.closeRemovedSessionRuntimesForSession(removed, target.dir, target.sessionPath, closedRemoved)
 		})
 		finishDestroyHandles(destroys)
 		if err != nil {

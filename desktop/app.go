@@ -1552,20 +1552,26 @@ func (a *App) DeleteSession(path string) error {
 		return err
 	}
 	removed, fallback := a.removeSessionRuntimeBindings(dir, sessionPath)
-	if err := prepareRemovedSessionRuntimes(removed); err != nil {
+	if err := a.prepareRemovedSessionRuntimes(removed); err != nil {
 		a.closeRemovedSessionRuntimes(removed)
 		return err
 	}
+	closedRemoved := map[*control.Controller]bool{}
+	closeRemovedForSession := func() {
+		a.closeRemovedSessionRuntimesForSession(removed, dir, sessionPath, closedRemoved)
+	}
+	var destroys []control.SessionDestroyHandle
 	err = trashSessionArtifactsBeforeMove(dir, sessionPath, key, func() {
-		destroys := a.destroyHandlesForSession(dir, sessionPath, removed)
+		destroys = a.destroyHandlesForSession(dir, sessionPath, removed)
 		waitDestroyHandles(destroys)
-		finishDestroyHandles(destroys)
+		closeRemovedForSession()
 	})
+	finishDestroyHandles(destroys)
 	if err != nil {
-		a.closeRemovedSessionRuntimes(removed)
+		a.closeRemainingRemovedSessionRuntimes(removed, closedRemoved)
 		return err
 	}
-	a.closeRemovedSessionRuntimes(removed)
+	a.closeRemainingRemovedSessionRuntimes(removed, closedRemoved)
 	if fallback.needs {
 		if err := a.openFallbackRuntime(fallback); err != nil {
 			return err
@@ -1699,7 +1705,7 @@ func tabMatchesSession(tab *WorkspaceTab, dir, sessionPath string) bool {
 	return err == nil && currentPath == sessionPath
 }
 
-func prepareRemovedSessionRuntimes(removed []removedSessionRuntime) error {
+func (a *App) prepareRemovedSessionRuntimes(removed []removedSessionRuntime) error {
 	for _, item := range removed {
 		if item.sink != nil {
 			item.sink.ctx = nil
@@ -1719,6 +1725,8 @@ func prepareRemovedSessionRuntimes(removed []removedSessionRuntime) error {
 		if err := item.ctrl.Snapshot(); err != nil {
 			return err
 		}
+		item.ctrl.SetSessionPath("")
+		a.quiesceTabAutosave(item.tab)
 	}
 	return nil
 }
@@ -1762,12 +1770,30 @@ func finishDestroyHandles(destroys []control.SessionDestroyHandle) {
 }
 
 func (a *App) closeRemovedSessionRuntimes(removed []removedSessionRuntime) {
+	a.closeRemainingRemovedSessionRuntimes(removed, map[*control.Controller]bool{})
+}
+
+func (a *App) closeRemovedSessionRuntimesForSession(removed []removedSessionRuntime, dir, sessionPath string, closed map[*control.Controller]bool) {
+	for _, item := range removed {
+		if item.ctrl == nil || closed[item.ctrl] {
+			continue
+		}
+		if item.sessionDir != dir || item.sessionPath != sessionPath {
+			continue
+		}
+		closed[item.ctrl] = true
+		item.ctrl.Close()
+	}
+}
+
+func (a *App) closeRemainingRemovedSessionRuntimes(removed []removedSessionRuntime, closed map[*control.Controller]bool) {
 	seen := map[*control.Controller]bool{}
 	for _, item := range removed {
-		if item.ctrl == nil || seen[item.ctrl] {
+		if item.ctrl == nil || seen[item.ctrl] || closed[item.ctrl] {
 			continue
 		}
 		seen[item.ctrl] = true
+		closed[item.ctrl] = true
 		item.ctrl.Close()
 	}
 }

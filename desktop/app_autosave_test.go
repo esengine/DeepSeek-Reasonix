@@ -32,7 +32,7 @@ func controllerWithContent(t *testing.T, path string) *control.Controller {
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "remember this turn"})
 	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "acknowledged"})
 	ag := agent.New(stubProvider{}, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
-	return control.New(control.Options{Executor: ag, SessionPath: path, Sink: event.Discard})
+	return control.New(control.Options{Executor: ag, SessionDir: filepath.Dir(path), SessionPath: path, Sink: event.Discard})
 }
 
 func waitForFile(t *testing.T, path, want string) {
@@ -219,5 +219,101 @@ func TestCloseTabSurvivorKeepsAutosave(t *testing.T) {
 	}
 	if survivor.closing {
 		t.Fatal("survivor tab was marked closing — closing flag leaked across tabs")
+	}
+}
+
+func TestDeleteSessionClearsRemovedRuntimeSessionPath(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "delete-open.jsonl")
+	ctrl := controllerWithContent(t, path)
+	tab := &WorkspaceTab{
+		ID:          "delete_open",
+		Scope:       "global",
+		Ready:       true,
+		Ctrl:        ctrl,
+		disabledMCP: map[string]ServerView{},
+	}
+	app := &App{
+		tabs:        map[string]*WorkspaceTab{"delete_open": tab},
+		activeTabID: "delete_open",
+	}
+	if err := ctrl.Snapshot(); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+
+	if err := app.DeleteSession(path); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+
+	if got := ctrl.SessionPath(); got != "" {
+		t.Fatalf("removed controller session path = %q, want empty before trash move can race Windows file locks", got)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "delete-open.jsonl", "delete-open.jsonl")
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("session should be in trash: %v", err)
+	}
+}
+
+func TestTrashTopicClearsRemovedRuntimeSessionPath(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_clear_removed_runtime"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "Clear removed runtime"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "trash-open-topic.jsonl")
+	ctrl := controllerWithContent(t, path)
+	if err := ctrl.Snapshot(); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if err := agent.SaveBranchMeta(path, agent.BranchMeta{
+		CreatedAt:     time.Now().Add(-time.Minute),
+		UpdatedAt:     time.Now(),
+		Scope:         "project",
+		WorkspaceRoot: projectRoot,
+		TopicID:       topicID,
+		TopicTitle:    "Clear removed runtime",
+	}); err != nil {
+		t.Fatalf("save branch meta: %v", err)
+	}
+	tab := &WorkspaceTab{
+		ID:            "trash_open",
+		Scope:         "project",
+		WorkspaceRoot: projectRoot,
+		TopicID:       topicID,
+		TopicTitle:    "Clear removed runtime",
+		Ready:         true,
+		Ctrl:          ctrl,
+		disabledMCP:   map[string]ServerView{},
+	}
+	survivor := &WorkspaceTab{
+		ID:          "survivor",
+		Scope:       "global",
+		Ready:       true,
+		disabledMCP: map[string]ServerView{},
+	}
+	app := &App{
+		tabs:        map[string]*WorkspaceTab{"trash_open": tab, "survivor": survivor},
+		tabOrder:    []string{"trash_open", "survivor"},
+		activeTabID: "trash_open",
+	}
+
+	if err := app.TrashTopic(topicID); err != nil {
+		t.Fatalf("TrashTopic: %v", err)
+	}
+
+	if got := ctrl.SessionPath(); got != "" {
+		t.Fatalf("removed topic controller session path = %q, want empty before trash move can race Windows file locks", got)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "trash-open-topic.jsonl", "trash-open-topic.jsonl")
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("topic session should be in trash: %v", err)
 	}
 }
