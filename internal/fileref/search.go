@@ -18,8 +18,9 @@ var skipEntryNames = map[string]bool{
 }
 
 var skipDirNames = map[string]bool{
-	"build": true,
-	"dist":  true,
+	"build":  true,
+	"dist":   true,
+	"target": true,
 }
 
 var skipDirPaths = map[string]bool{

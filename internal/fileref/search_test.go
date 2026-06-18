@@ -152,3 +152,17 @@ func TestSearchSkipsNoiseStillWorks(t *testing.T) {
 		t.Fatalf("Search should still return legitimate hit, got %v", resultPaths(got))
 	}
 }
+
+func TestSearchSkipsMavenTargetDirectory(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "src", "main", "java", "App.java"))
+	writeFile(t, filepath.Join(root, "target", "classes", "App.class"))
+
+	got := Search(root, "app", 50)
+	if containsPath(got, "target/classes/App.class") {
+		t.Fatalf("Search should skip Maven target/ build output, got %v", resultPaths(got))
+	}
+	if !containsPath(got, "src/main/java/App.java") {
+		t.Fatalf("Search should still return source files, got %v", resultPaths(got))
+	}
+}
