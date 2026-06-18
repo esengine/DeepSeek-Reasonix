@@ -35,8 +35,8 @@ const (
 
 // ghRelease is the subset of the GitHub release API response we need.
 type ghRelease struct {
-	TagName string    `json:"tag_name"`
-	Body    string    `json:"body"`
+	TagName string `json:"tag_name"`
+	Body    string `json:"body"`
 	Assets  []ghAsset
 }
 
@@ -422,7 +422,6 @@ func humanSize(b int64) string {
 		return fmt.Sprintf("%d B", b)
 	}
 }
-
 
 // upgradeCleanupOldBinary removes a .old binary left by a previous upgrade.
 func upgradeCleanupOldBinary() {
