@@ -1082,7 +1082,7 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 			}
 			return
 		case "/plan-exec":
-			c.applyPlanExec(display)
+			c.applyPlanExec(trimmed, display)
 			return
 		}
 		if c.managementNotice(trimmed) {
@@ -1162,27 +1162,62 @@ func ShortGoalForNotice(goal string) string {
 
 // applyPlanExec reads the current canonical todo list and starts a goal that
 // analyzes and dispatches independent steps concurrently via parallel_tasks.
-func (c *Controller) applyPlanExec(display string) {
+// Supports --strict flag: /plan-exec --strict enables strict goal mode.
+func (c *Controller) applyPlanExec(input, display string) {
 	todos := c.executor.CanonicalTodoState()
 	if len(todos) == 0 {
 		c.notice("no active plan with todos to execute")
 		return
 	}
+
+	// Parse --strict flag.
+	strict := false
+	fields := strings.Fields(input)
+	for _, f := range fields {
+		if f == "--strict" {
+			strict = true
+			break
+		}
+	}
+
+	// Count completion status.
+	total := len(todos)
+	done := 0
+	for _, t := range todos {
+		if t.Status == "completed" {
+			done++
+		}
+	}
+
 	var b strings.Builder
-	b.WriteString("Analyze the following plan steps and dispatch independent ones concurrently using parallel_tasks:\n\n")
-	for i, t := range todos {
+	b.WriteString("You are the execution conductor. Read the following plan and execute it:\n\n")
+	for _, t := range todos {
 		status := t.Status
 		if status == "" {
 			status = "pending"
 		}
-		fmt.Fprintf(&b, "%d. [%s] %s\n", i+1, status, t.Content)
+		mark := " "
+		if status == "completed" {
+			mark = "x"
+		}
+		fmt.Fprintf(&b, "- [%s] %s (%s)\n", mark, t.Content, status)
 	}
-	b.WriteString("\nGroup steps that don't overlap (different files, no dependency) into parallel batches. Steps in the same batch run concurrently via parallel_tasks. Dependent steps wait for their prerequisites. Report progress after each batch completes.")
+	b.WriteString("\nExecution rules:\n")
+	b.WriteString("1. Identify steps that are independent (different files, no dependency) and group them into batches\n")
+	b.WriteString("2. Dispatch each batch concurrently using parallel_tasks\n")
+	b.WriteString("3. Dependent steps run after their prerequisites complete\n")
+	b.WriteString("4. After each batch, verify results before proceeding\n")
+	b.WriteString("5. If a step fails, fix it before moving on\n")
+	b.WriteString("6. Report progress after each batch\n")
+	if done > 0 {
+		fmt.Fprintf(&b, "\nNote: %d/%d steps are already completed. Focus on the remaining %d steps.\n", done, total, total-done)
+	}
 	prompt := b.String()
 
 	c.SetPlanMode(false)
 	c.SetGoal("execute plan: " + ShortGoalForNotice(todos[0].Content))
-	c.notice("plan-exec: analyzing and dispatching plan steps")
+	c.GoalStrict(strict)
+	c.notice(fmt.Sprintf("plan-exec: dispatching %d plan steps (strict=%v)", total, strict))
 	if c.runner != nil {
 		c.runGuarded(func(ctx context.Context) error {
 			return c.runGoalLoopWithRawDisplay(ctx, prompt, prompt, display)
