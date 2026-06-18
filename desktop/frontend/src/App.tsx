@@ -1127,8 +1127,7 @@ export default function App() {
   const workspacePanelGridOpen = workspacePanelRenderable && !workspacePanelMaximized;
   const workspacePanelRenderWidth = workspacePanelMaximized ? preferredWorkspacePanelWidth : resolvedWorkspacePanelWidth;
   const activeTab = useMemo(
-    () => tabMetas.find((tab) => tab.id === activeTabId)
-      ?? (activeTabId == null ? tabMetas.find((tab) => tab.active) : undefined),
+    () => tabMetas.find((tab) => tab.id === activeTabId) ?? tabMetas.find((tab) => tab.active),
     [activeTabId, tabMetas],
   );
   const sidebarImDetailConnection = useMemo(
