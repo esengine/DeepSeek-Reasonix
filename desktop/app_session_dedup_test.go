@@ -101,6 +101,67 @@ func TestEnsureBlankTabCreatesOneBlankPerProject(t *testing.T) {
 	}
 }
 
+func TestEnsureBlankTabResetsReusableAutoTopicTitle(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	app := NewApp()
+	topic, err := app.CreateTopic("project", projectRoot, "")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	if err := setTopicTitleWithSource(projectRoot, topic.ID, "Old auto title", topicTitleSourceAuto); err != nil {
+		t.Fatalf("set stale auto title: %v", err)
+	}
+	tab := app.createTabEntryWithID("project", projectRoot, topic.ID, "tab1")
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	meta, err := app.EnsureBlankTab("project", projectRoot)
+	if err != nil {
+		t.Fatalf("EnsureBlankTab: %v", err)
+	}
+	if got := meta.TopicTitle; got != defaultTopicTitle {
+		t.Fatalf("reused auto topic title = %q, want %q", got, defaultTopicTitle)
+	}
+	if got := loadTopicTitle(projectRoot, topic.ID); got != defaultTopicTitle {
+		t.Fatalf("stored title = %q, want %q", got, defaultTopicTitle)
+	}
+	if got := loadTopicTitleSource(projectRoot, topic.ID); got != topicTitleSourceAuto {
+		t.Fatalf("title source = %q, want auto", got)
+	}
+}
+
+func TestEnsureBlankTabPreservesReusableManualTopicTitle(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	app := NewApp()
+	topic, err := app.CreateTopic("project", projectRoot, "Manual title")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	tab := app.createTabEntryWithID("project", projectRoot, topic.ID, "tab1")
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	meta, err := app.EnsureBlankTab("project", projectRoot)
+	if err != nil {
+		t.Fatalf("EnsureBlankTab: %v", err)
+	}
+	if got := meta.TopicTitle; got != "Manual title" {
+		t.Fatalf("reused manual topic title = %q, want Manual title", got)
+	}
+	if got := loadTopicTitle(projectRoot, topic.ID); got != "Manual title" {
+		t.Fatalf("stored title = %q, want Manual title", got)
+	}
+	if got := loadTopicTitleSource(projectRoot, topic.ID); got != topicTitleSourceManual {
+		t.Fatalf("title source = %q, want manual", got)
+	}
+}
+
 // EnsureBlankTab picks up an existing blank topic created in the sidebar
 // instead of creating a fresh topic, for global scope.
 

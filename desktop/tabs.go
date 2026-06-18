@@ -1115,7 +1115,10 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 		tab := a.tabs[id]
 		if a.blankTabMatchesTargetLocked(tab, scope, workspaceRoot) {
 			a.activeTabID = tab.ID
-			tab.TopicTitle = defaultTopicTitle
+			if err := resetReusableBlankTabTitle(tab, scope, workspaceRoot); err != nil {
+				a.mu.Unlock()
+				return TabMeta{}, err
+			}
 			meta := a.tabMeta(tab, true)
 			a.saveTabsLocked()
 			a.mu.Unlock()
@@ -1239,6 +1242,25 @@ func (a *App) blankTabMatchesTargetLocked(tab *WorkspaceTab, scope, workspaceRoo
 		return false
 	}
 	return !messagesHaveConversationContent(tab.Ctrl.History())
+}
+
+func resetReusableBlankTabTitle(tab *WorkspaceTab, scope, workspaceRoot string) error {
+	if tab == nil {
+		return nil
+	}
+	topicID := strings.TrimSpace(tab.TopicID)
+	if topicID == "" {
+		return nil
+	}
+	titleRoot := topicTitleRoot(scope, workspaceRoot)
+	if source := loadTopicTitleSource(titleRoot, topicID); source != topicTitleSourceAuto {
+		return nil
+	}
+	if err := setTopicTitleWithSource(titleRoot, topicID, defaultTopicTitle, topicTitleSourceAuto); err != nil {
+		return err
+	}
+	tab.TopicTitle = defaultTopicTitle
+	return nil
 }
 
 // indexedBlankTopicIDLocked finds a blank topic ID that is indexed on disk
