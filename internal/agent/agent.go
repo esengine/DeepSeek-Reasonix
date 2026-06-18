@@ -804,33 +804,10 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 		emptyFinalBlocks = 0
 		usedAnyTool = true
 
-		// Soft brake: when budget is exhausted, skip tool execution and give the
-		// model one grace round to produce a final answer from existing results.
-		if a.maxSteps > 0 && step >= a.maxSteps-1 {
-			if graceRound {
-				// Already gave one grace round — hard stop.
-				return fmt.Errorf("paused after %d tool-call rounds (%s) — the work so far is saved; send another message to continue, or set %s higher or to 0 for no limit", a.maxSteps, a.maxStepsKey, a.maxStepsKey)
-			}
-			graceRound = true
-			// Emit full dispatch events for the UI even though we skip execution.
-			for _, call := range calls {
-				tl, _ := a.tools.Get(call.Name)
-				a.sink.Emit(event.Event{
-					Kind: event.ToolDispatch,
-					Tool: event.Tool{
-						ID: call.ID, Name: call.Name, Args: call.Arguments,
-						ReadOnly: tl != nil && tl.ReadOnly(),
-					},
-				})
-				a.sink.Emit(event.Event{
-					Kind: event.ToolResult,
-					Tool: event.Tool{ID: call.ID, Name: call.Name, Err: "skipped: budget exhausted"},
-				})
-			}
-			nudge := "Tool-call budget exhausted. You have one extra response — do not call any more tools."
-			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withReasoningLanguage(nudge)})
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "budget exhausted: one grace round to finalize"})
-			continue
+		// Grace round guard: if we already gave the model one extra response
+		// and it still wants to call tools, stop here.
+		if graceRound {
+			return fmt.Errorf("paused after %d tool-call rounds (%s) — the work so far is saved; send another message to continue, or set %s higher or to 0 for no limit", a.maxSteps, a.maxStepsKey, a.maxStepsKey)
 		}
 
 		results := a.executeBatch(ctx, calls)
@@ -846,6 +823,15 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 		// The prompt only grows from here; compact before the next turn so it
 		// stays within the model's window.
 		a.maybeCompact(ctx, usage)
+
+		// When the tool-call budget runs out this round, give the model
+		// one grace round to produce a final answer from completed work.
+		if a.maxSteps > 0 && step+1 >= a.maxSteps {
+			graceRound = true
+			nudge := fmt.Sprintf("You have reached the tool-call round limit (%s). Based on the work completed and the results you already have, produce your final answer now without calling any more tools.", a.maxStepsKey)
+			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withReasoningLanguage(nudge)})
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("budget (%s=%d) exhausted: one grace round to finalize", a.maxStepsKey, a.maxSteps)})
+		}
 	}
 	// Only reached when a positive maxSteps guard is configured. The work so far
 	// is already in the session, so the user can just send another message to pick
