@@ -81,7 +81,7 @@ type Controller struct {
 	// Zero value keeps the prune on (the cheaper default).
 	disableColdResumePrune bool
 	shell                  sandbox.Shell // interpreter for user-invoked "!" commands; zero = auto
-	classifier             autoPlanClassifier
+	classifier             AutoPlanClassifier
 	startedOnce            bool                             // guards the one-shot SessionStart hook on first turn
 	onRemember             func(rule string) RememberResult // set via Options; invoked when user picks "always allow"
 
@@ -286,7 +286,7 @@ type Options struct {
 	// Shell is the interpreter user-invoked "!" commands run under, so /shell
 	// matches the agent's configured [tools.shell] choice. Zero value = auto.
 	Shell      sandbox.Shell
-	Classifier autoPlanClassifier
+	Classifier AutoPlanClassifier
 	// OnRemember, when set, is invoked with a new allow rule the user chose to
 	// persist to disk (e.g. "Bash(go test:*)"). The callback is wired into the
 	// permission Gate on EnableInteractiveApproval.

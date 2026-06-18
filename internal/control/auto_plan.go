@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/nilutil"
 )
 
 const (
@@ -17,7 +18,10 @@ const (
 
 var numberedListRE = regexp.MustCompile(`(?m)^\s*(?:[-*]|\d+[.)])\s+\S`)
 
-type autoPlanClassifier interface {
+// AutoPlanClassifier classifies whether a user request needs a planning pass.
+// The ProviderAutoPlanClassifier implements it with a small LLM call; nil
+// disables classification and falls back to the pure heuristic.
+type AutoPlanClassifier interface {
 	NeedsPlan(ctx context.Context, input string, score int) (bool, string, error)
 }
 
@@ -118,11 +122,35 @@ func autoPlanScore(input string) int {
 
 func isLowRiskQuestion(lower string) bool {
 	lower = strings.TrimSpace(lower)
-	if strings.HasPrefix(lower, "解释") || strings.HasPrefix(lower, "说明") ||
+	// English question/instruction prefixes that indicate an informational
+	// request, not a work request. Apostrophe variants ("what's") are
+	// normalised so the prefix still matches.
+	normalized := strings.ReplaceAll(lower, "'", "")
+	if strings.HasPrefix(lower, "what ") || strings.HasPrefix(normalized, "whats ") ||
+		strings.HasPrefix(lower, "why ") || strings.HasPrefix(lower, "how ") ||
+		strings.HasPrefix(lower, "who ") || strings.HasPrefix(lower, "where ") ||
+		strings.HasPrefix(lower, "when ") || strings.HasPrefix(lower, "which ") ||
+		strings.HasPrefix(lower, "whose ") || strings.HasPrefix(lower, "whom ") ||
+		strings.HasPrefix(lower, "explain ") || strings.HasPrefix(lower, "describe ") ||
+		strings.HasPrefix(lower, "tell ") || strings.HasPrefix(lower, "show ") ||
+		strings.HasPrefix(lower, "list ") || strings.HasPrefix(lower, "summarize ") ||
+		strings.HasPrefix(lower, "summarise ") || strings.HasPrefix(lower, "compare ") ||
+		strings.HasPrefix(lower, "difference ") || strings.HasPrefix(lower, "is ") ||
+		strings.HasPrefix(lower, "are ") || strings.HasPrefix(lower, "can ") ||
+		strings.HasPrefix(lower, "could ") || strings.HasPrefix(lower, "do ") ||
+		strings.HasPrefix(lower, "does ") || strings.HasPrefix(lower, "did ") ||
+		strings.HasPrefix(lower, "should ") || strings.HasPrefix(lower, "would ") ||
+		strings.HasPrefix(lower, "will ") || strings.HasPrefix(lower, "run ") ||
+		strings.HasPrefix(lower, "what's") || strings.HasPrefix(normalized, "whats") ||
+		// Chinese informational prefixes
+		strings.HasPrefix(lower, "解释") || strings.HasPrefix(lower, "说明") ||
 		strings.HasPrefix(lower, "怎么看") || strings.HasPrefix(lower, "查一下") ||
-		strings.HasPrefix(lower, "运行") || strings.HasPrefix(lower, "run ") ||
-		strings.HasPrefix(lower, "show ") || strings.HasPrefix(lower, "what ") ||
-		strings.HasPrefix(lower, "why ") || strings.HasPrefix(lower, "how ") {
+		strings.HasPrefix(lower, "运行") || strings.HasPrefix(lower, "介绍一下") ||
+		strings.HasPrefix(lower, "说一下") || strings.HasPrefix(lower, "帮我看") ||
+		strings.HasPrefix(lower, "帮我查") || strings.HasPrefix(lower, "是什么") ||
+		strings.HasPrefix(lower, "有没有") || strings.HasPrefix(lower, "能不能") ||
+		strings.HasPrefix(lower, "可以吗") || strings.HasPrefix(lower, "对吗") ||
+		strings.HasPrefix(lower, "是不是") || strings.HasPrefix(lower, "请问") {
 		return !containsAny(lower, complexIntentTerms)
 	}
 	return false
@@ -153,4 +181,32 @@ var multiSurfaceTerms = []string{
 var docsAndIssueTerms = []string{
 	"prd", "issue", "requirements", "spec", "proposal", "roadmap",
 	"需求", "产品文档", "接口文档", "方案", "规划",
+}
+
+// NewPlannerGate returns a shouldPlan function for the two-model Coordinator.
+// When classifier is nil it falls back to the pure heuristic (TaskWarrantsPlanner).
+// When classifier is non-nil, borderline inputs (heuristic score ≤ 2) are sent
+// to the LLM classifier for a precise needs_plan decision, mirroring the
+// single-model shouldAutoPlan path. High-score inputs skip the classifier
+// (they are clearly work requests) and low-score inputs skip the planner
+// (they are clearly informational).
+func NewPlannerGate(classifier AutoPlanClassifier) func(string) bool {
+	if nilutil.IsNil(classifier) {
+		return TaskWarrantsPlanner
+	}
+	return func(input string) bool {
+		if !TaskWarrantsPlanner(input) {
+			return false
+		}
+		score := autoPlanScore(input)
+		if score <= 2 {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			needsPlan, _, err := classifier.NeedsPlan(ctx, input, score)
+			if err == nil {
+				return needsPlan
+			}
+		}
+		return true
+	}
 }

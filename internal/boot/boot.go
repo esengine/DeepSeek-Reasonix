@@ -748,6 +748,21 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	label := entry.Model
 	var classifier *control.ProviderAutoPlanClassifier
 
+	// Auto-plan classifier: built before the Coordinator so it can be wired
+	// into NewPlannerGate for the two-model path, not just shouldAutoPlan.
+	if !tokenEconomy && !strings.EqualFold(strings.TrimSpace(cfg.Agent.AutoPlan), "off") && cfg.Agent.AutoPlanClassifier != "" {
+		cm := cfg.Agent.AutoPlanClassifier
+		ce, ok := cfg.ResolveModel(cm)
+		if !ok {
+			return nil, fmt.Errorf("auto_plan_classifier %q is not a configured provider", cm)
+		}
+		classifierProv, err := NewProviderWithProxy(ce, proxySpec)
+		if err != nil {
+			return nil, fmt.Errorf("auto_plan_classifier %q: %w", cm, err)
+		}
+		classifier = control.NewBillableProviderAutoPlanClassifier(classifierProv, ce.Price, sink)
+	}
+
 	// Two-model collaboration: a distinct planner_model wraps the executor in a
 	// Coordinator with its own session, kept separate for cache stability. The
 	// planner gets the same standing memory context and a filtered read-only
@@ -776,21 +791,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				ArchiveDir:        config.ArchiveDir(),
 				KeepPolicy:        keepPolicy,
 				ReasoningLanguage: cfg.ReasoningLanguage(),
-			}, executor, cfg.Agent.Temperature, sink, control.TaskWarrantsPlanner)
+			}, executor, cfg.Agent.Temperature, sink, control.NewPlannerGate(classifier))
 			label = entry.Model + " + planner " + pe.Model
 		}
-	}
-	if !tokenEconomy && !strings.EqualFold(strings.TrimSpace(cfg.Agent.AutoPlan), "off") && cfg.Agent.AutoPlanClassifier != "" {
-		cm := cfg.Agent.AutoPlanClassifier
-		ce, ok := cfg.ResolveModel(cm)
-		if !ok {
-			return nil, fmt.Errorf("auto_plan_classifier %q is not a configured provider", cm)
-		}
-		classifierProv, err := NewProviderWithProxy(ce, proxySpec)
-		if err != nil {
-			return nil, fmt.Errorf("auto_plan_classifier %q: %w", cm, err)
-		}
-		classifier = control.NewBillableProviderAutoPlanClassifier(classifierProv, ce.Price, sink)
 	}
 
 	ctrlOpts := control.Options{
