@@ -19,7 +19,11 @@ var (
 // the complete new file, never a truncated one. perm applies to the final file.
 func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	dirPerm := os.FileMode(0o755)
+	if perm&0o077 == 0 {
+		dirPerm = 0o700
+	}
+	if err := os.MkdirAll(dir, dirPerm); err != nil {
 		return fmt.Errorf("create dir for %s: %w", path, err)
 	}
 	tmp, err := os.CreateTemp(dir, ".atomic-*.tmp")
@@ -45,7 +49,11 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		os.Remove(tmpPath)
 		return fmt.Errorf("chmod tmp for %s: %w", path, err)
 	}
-	return ReplaceFile(tmpPath, path)
+	if err := ReplaceFile(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 // ReplaceFile renames tmp onto dest, falling back to a copy when the rename

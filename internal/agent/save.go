@@ -48,7 +48,11 @@ func (s *Session) Save(path string) error {
 		os.Remove(tmpPath)
 		return err
 	}
-	return fileutil.ReplaceFile(tmpPath, path)
+	if err := fileutil.ReplaceFile(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 // LoadSession reads a JSONL file written by Save into a fresh Session value.

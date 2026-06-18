@@ -47,8 +47,8 @@ export default function HljsDiff({ original = "", modified = "", diff = "", lang
       className="diff hljs"
       style={{
         maxHeight: maxHeight || undefined,
-        overflow: maxHeight ? "auto" : undefined,
-        position: maxHeight ? "relative" : undefined,
+        overflow: (maxHeight || isVirtual) ? "auto" : undefined,
+        position: (maxHeight || isVirtual) ? "relative" : undefined,
       }}
     >
       {isVirtual ? (
@@ -60,22 +60,26 @@ export default function HljsDiff({ original = "", modified = "", diff = "", lang
             position: "relative",
           }}
         >
-          {virtualizer.getVirtualItems().map((row) => (
-            <div
-              key={row.key}
-              data-index={row.index}
-              ref={virtualizer.measureElement}
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                transform: `translateY(${row.start}px)`,
-              }}
-            >
-              {renderRow(rows[row.index], row.index)}
-            </div>
-          ))}
+          {virtualizer.getVirtualItems().map((row) => {
+            const item = rows[row.index];
+            if (!item) return null;
+            return (
+              <div
+                key={row.key}
+                data-index={row.index}
+                ref={virtualizer.measureElement}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  transform: `translateY(${row.start}px)`,
+                }}
+              >
+                {renderRow(item, row.index)}
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="diff__table">

@@ -305,5 +305,9 @@ func writeMCPJSON(path string, root map[string]json.RawMessage) error {
 		os.Remove(tmpPath)
 		return fmt.Errorf("mcp config %s: close temp: %w", path, err)
 	}
-	return fileutil.ReplaceFile(tmpPath, path)
+	if err := fileutil.ReplaceFile(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }

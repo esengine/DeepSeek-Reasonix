@@ -134,7 +134,11 @@ func saveBranchMeta(sessionPath string, m BranchMeta, touchUpdated bool) error {
 		os.Remove(tmpPath)
 		return err
 	}
-	return fileutil.ReplaceFile(tmpPath, metaPath)
+	if err := fileutil.ReplaceFile(tmpPath, metaPath); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 func EnsureBranchMeta(sessionPath string) (BranchMeta, error) {
