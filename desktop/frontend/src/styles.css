@@ -17433,19 +17433,7 @@ a[href] {
   overflow: hidden;
 }
 
-/* Chevron rotates 90° on expand; single icon keeps the rotation smooth. */
-.project-tree__chevron {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: transform 0.2s ease;
-}
-
-.project-tree__chevron--open {
-  transform: rotate(90deg);
-}
-
-/* Project tree: icon stack holds chevron + folder icon at same position */
+/* Project tree: icon stack holds folder open/closed icon */
 .project-tree__icon-stack {
   display: inline-flex;
   align-items: center;
@@ -17459,31 +17447,6 @@ a[href] {
   width: 14px;
   height: 14px;
   color: var(--fg-faint);
-}
-.project-tree__icon-stack > .project-tree__chevron {
-  position: absolute;
-  color: var(--fg-faint);
-}
-/* Override workbench width constraint on chevron */
-.sidebar--workbench .project-tree__icon-stack > .project-tree__chevron {
-  width: auto;
-  height: auto;
-}
-.project-tree__icon-stack > .project-tree__chevron > svg {
-  display: block;
-}
-/* Default: hide chevron, show folder icon */
-.project-tree__chevron--on-hover {
-  display: none;
-}
-/* Hover: show chevron, hide folder icon */
-:root[data-theme-style] .project-tree__folder-main:hover .project-tree__icon-stack--expandable .project-tree__chevron--on-hover,
-.project-tree__folder-main:hover .project-tree__icon-stack--expandable .project-tree__chevron--on-hover {
-  display: inline-flex;
-}
-:root[data-theme-style] .project-tree__folder-main:hover .project-tree__icon-stack--expandable > .project-tree__folder-icon,
-.project-tree__folder-main:hover .project-tree__icon-stack--expandable > .project-tree__folder-icon {
-  display: none;
 }
 /* Topic hover/active effect: full row width (remove left margin) */
 :root[data-theme-style] .sidebar--workbench .project-tree__topic {
@@ -17550,13 +17513,13 @@ a[href] {
 }
 
 /* Folder: no active background, but very weak hover hint */
-:root[data-theme-style] .sidebar--workbench .project-tree__folder:hover {
+:root[data-theme-style] .sidebar--workbench .project-tree__folder:hover,
+:root[data-theme-style] .sidebar--workbench .project-tree__folder--active:hover,
+:root[data-theme-style] .sidebar--workbench .project-tree__folder--menu-open:hover {
   background: color-mix(in srgb, var(--sidebar-hover) 60%, transparent);
 }
 :root[data-theme-style] .sidebar--workbench .project-tree__folder--active,
-:root[data-theme-style] .sidebar--workbench .project-tree__folder--menu-open,
-:root[data-theme-style] .sidebar--workbench .project-tree__folder--active:hover,
-:root[data-theme-style] .sidebar--workbench .project-tree__folder--menu-open:hover {
+:root[data-theme-style] .sidebar--workbench .project-tree__folder--menu-open {
   background: transparent;
 }
 
@@ -17613,8 +17576,7 @@ a[href] {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .project-tree__children,
-  .project-tree__chevron {
+  .project-tree__children {
     transition: none;
   }
 
@@ -18628,9 +18590,13 @@ a[href] {
 }
 
 .project-tree__folder--active,
-.project-tree__folder--menu-open,
-.project-tree__folder--active:hover {
+.project-tree__folder--menu-open {
   background: color-mix(in srgb, var(--project-accent, var(--accent)) 7%, var(--bg-elev));
+}
+
+.project-tree__folder--active:hover,
+.project-tree__folder--menu-open:hover {
+  background: var(--sidebar-hover);
 }
 
 .project-tree__topic {
@@ -19728,9 +19694,14 @@ a[href] {
 }
 
 :root[data-theme-style] .project-tree__folder--active,
-:root[data-theme-style] .project-tree__folder--menu-open,
-:root[data-theme-style] .project-tree__folder--active:hover {
+:root[data-theme-style] .project-tree__folder--menu-open {
   background: color-mix(in srgb, var(--project-accent, var(--accent)) 5%, transparent);
+  color: var(--fg);
+}
+
+:root[data-theme-style] .project-tree__folder--active:hover,
+:root[data-theme-style] .project-tree__folder--menu-open:hover {
+  background: var(--sidebar-hover);
   color: var(--fg);
 }
 
@@ -21795,13 +21766,15 @@ a[href] {
   font-weight: 500;
 }
 
-.sidebar--workbench .project-tree__folder:hover {
-  background: transparent;
+.sidebar--workbench .project-tree__folder:hover,
+.sidebar--workbench .project-tree__folder--active:hover,
+.sidebar--workbench .project-tree__folder--menu-open:hover {
+  background: var(--sidebar-hover);
   color: var(--fg);
 }
 
 .sidebar--workbench .project-tree__folder--active,
-.sidebar--workbench .project-tree__folder--active:hover {
+.sidebar--workbench .project-tree__folder--menu-open {
   background: transparent;
   color: var(--fg);
 }
@@ -21830,18 +21803,13 @@ a[href] {
   stroke-width: 1.9;
 }
 
-.sidebar--workbench .project-tree__folder:hover .project-tree__folder-main > svg,
-.sidebar--workbench .project-tree__folder--active .project-tree__folder-main > svg {
+.sidebar--workbench .project-tree__folder:hover .project-tree__folder-icon,
+.sidebar--workbench .project-tree__folder--active:hover .project-tree__folder-icon {
   color: var(--fg);
 }
 
 .sidebar--workbench .project-tree__folder-color {
   display: none;
-}
-
-.sidebar--workbench .project-tree__chevron {
-  width: 12px;
-  color: var(--fg-faint);
 }
 
 .sidebar--workbench .project-tree__folder-action-slot {
@@ -22121,7 +22089,7 @@ a[href] {
 
 .sidebar--workbench .sidebar__utility-row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
 }
 

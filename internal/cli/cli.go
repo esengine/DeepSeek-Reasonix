@@ -261,6 +261,13 @@ func modelForResumePath(modelName, resumePath string, cfg *config.Config) string
 	return sessionModel
 }
 
+func loadResumableSession(path string) (*agent.Session, error) {
+	if agent.IsCleanupPending(path) {
+		return nil, fmt.Errorf("session is pending cleanup")
+	}
+	return agent.LoadSession(path)
+}
+
 var newNotificationSender = func() notify.Sender { return notify.NewPlatformSender() }
 
 // withNotifications adds system notifications to CLI event streams when configured.
@@ -297,6 +304,16 @@ func runAgent(args []string) int {
 	if prompt == "" {
 		fmt.Fprintln(os.Stderr, i18n.M.UsageRunHint)
 		return 2
+	}
+
+	var resumeSession *agent.Session
+	if *resume != "" {
+		var err error
+		resumeSession, err = loadResumableSession(*resume)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
@@ -341,12 +358,7 @@ func runAgent(args []string) int {
 	// precedence over --continue.
 	// --continue: resume the most recent saved session.
 	if *resume != "" {
-		loaded, err := agent.LoadSession(*resume)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		ctrl.Resume(loaded, *resume)
+		ctrl.Resume(resumeSession, *resume)
 	} else if *cont {
 		sessions, err := agent.ListSessions(ctrl.SessionDir())
 		if err != nil || len(sessions) == 0 {
@@ -397,6 +409,15 @@ func runServe(args []string) int {
 	ctx := context.Background()
 	bc := serve.NewBroadcaster()
 	cfg, _ := config.Load()
+	var resumeSession *agent.Session
+	if *resume != "" {
+		var err error
+		resumeSession, err = loadResumableSession(*resume)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+	}
 	*model = modelForResumePath(*model, *resume, cfg)
 	ctrl, err := setup(ctx, *model, *maxSteps, true, bc)
 	if err != nil {
@@ -407,12 +428,7 @@ func runServe(args []string) int {
 
 	// Auto-save target: reuse the resumed file, else a fresh one — same as chat.
 	if *resume != "" {
-		loaded, err := agent.LoadSession(*resume)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		ctrl.Resume(loaded, *resume)
+		ctrl.Resume(resumeSession, *resume)
 	} else if ctrl.SessionDir() != "" {
 		ctrl.SetSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
 	}

@@ -545,6 +545,22 @@ func TestSetReasoningLanguageUpdatesLiveTabControllers(t *testing.T) {
 	}
 }
 
+func TestSetReasoningLanguageRejectsBackgroundJobsBeforeSavingConfig(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	app.setTestCtrl(newBackgroundJobController(t, "reasoning-language-job"), "")
+
+	err := app.SetReasoningLanguage("zh")
+	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
+		t.Fatalf("SetReasoningLanguage with background job error = %v, want active-work guard", err)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if cfg.ReasoningLanguage() != "auto" {
+		t.Fatalf("reasoning language changed after rejected update: %q", cfg.ReasoningLanguage())
+	}
+}
+
 func TestSetDesktopCheckUpdatesPersistsToUserConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

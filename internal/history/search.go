@@ -230,6 +230,9 @@ func (s *Searcher) Around(ctx context.Context, req AroundRequest) ([]MessageCont
 	if !s.allowedPath(path) {
 		return nil, fmt.Errorf("session_path is outside the configured history roots")
 	}
+	if !s.visiblePath(path) {
+		return nil, fmt.Errorf("session_path is pending cleanup")
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -294,7 +297,7 @@ func (s *Searcher) sources(scope string) ([]sourceFile, error) {
 	out = appendSessionSources(out, seen, s.sessionDir, scopeProject)
 	if scope == scopeGlobal {
 		out = appendSessionSources(out, seen, s.globalSessionDir, scopeGlobal)
-		out = appendFiles(out, seen, listJSONL(s.archiveDir, "archive")...)
+		out = appendFiles(out, seen, listJSONL(s.archiveDir, "archive", nil)...)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].mod == out[j].mod {
@@ -306,9 +309,11 @@ func (s *Searcher) sources(scope string) ([]sourceFile, error) {
 }
 
 func appendSessionSources(out []sourceFile, seen map[string]bool, dir, source string) []sourceFile {
-	out = appendFiles(out, seen, listJSONL(dir, source)...)
+	out = appendFiles(out, seen, listJSONL(dir, source, agent.IsVisibleSession)...)
 	if strings.TrimSpace(dir) != "" {
-		out = appendFiles(out, seen, listJSONL(filepath.Join(dir, "subagents"), source)...)
+		out = appendFiles(out, seen, listJSONL(subagentsDir(dir), source, func(path string) bool {
+			return visibleSubagentSession(dir, path)
+		})...)
 	}
 	return out
 }
@@ -328,7 +333,7 @@ func appendFiles(out []sourceFile, seen map[string]bool, files ...sourceFile) []
 	return out
 }
 
-func listJSONL(dir, source string) []sourceFile {
+func listJSONL(dir, source string, visible func(string) bool) []sourceFile {
 	if strings.TrimSpace(dir) == "" {
 		return nil
 	}
@@ -345,8 +350,12 @@ func listJSONL(dir, source string) []sourceFile {
 		if err != nil {
 			continue
 		}
+		path := filepath.Join(dir, entry.Name())
+		if visible != nil && !visible(path) {
+			continue
+		}
 		out = append(out, sourceFile{
-			path:   filepath.Join(dir, entry.Name()),
+			path:   path,
 			source: source,
 			mod:    info.ModTime().UnixNano(),
 		})
@@ -475,13 +484,64 @@ func clamp(n, def, max int) int {
 	return n
 }
 
+func (s *Searcher) visiblePath(path string) bool {
+	switch {
+	case underRoot(path, subagentsDir(s.sessionDir)):
+		return visibleSubagentSession(s.sessionDir, path)
+	case underRoot(path, s.sessionDir):
+		return agent.IsVisibleSession(path)
+	case underRoot(path, subagentsDir(s.globalSessionDir)):
+		return visibleSubagentSession(s.globalSessionDir, path)
+	case underRoot(path, s.globalSessionDir):
+		return agent.IsVisibleSession(path)
+	case underRoot(path, s.archiveDir):
+		return true
+	default:
+		return false
+	}
+}
+
+func visibleSubagentSession(sessionDir, path string) bool {
+	if !agent.IsVisibleSession(path) {
+		return false
+	}
+	parentSession, ok := subagentParentSession(path)
+	if !ok || parentSession == "" {
+		return true
+	}
+	return !agent.IsCleanupPending(filepath.Join(sessionDir, parentSession+".jsonl"))
+}
+
+func subagentParentSession(path string) (string, bool) {
+	ref := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	if ref == "" || ref == filepath.Base(path) {
+		return "", false
+	}
+	b, err := os.ReadFile(filepath.Join(filepath.Dir(path), ref+".meta.json"))
+	if err != nil {
+		return "", false
+	}
+	var meta agent.SubagentMeta
+	if err := json.Unmarshal(b, &meta); err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(meta.ParentSession), true
+}
+
+func subagentsDir(dir string) string {
+	if strings.TrimSpace(dir) == "" {
+		return ""
+	}
+	return filepath.Join(dir, "subagents")
+}
+
 func (s *Searcher) allowedPath(path string) bool {
 	roots := []string{s.sessionDir, s.globalSessionDir, s.archiveDir}
 	if s.sessionDir != "" {
-		roots = append(roots, filepath.Join(s.sessionDir, "subagents"))
+		roots = append(roots, subagentsDir(s.sessionDir))
 	}
 	if s.globalSessionDir != "" {
-		roots = append(roots, filepath.Join(s.globalSessionDir, "subagents"))
+		roots = append(roots, subagentsDir(s.globalSessionDir))
 	}
 	for _, root := range roots {
 		if underRoot(path, root) {

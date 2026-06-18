@@ -55,6 +55,56 @@ var credentialSourceTracker = struct {
 	byKey map[string]trackedCredentialSource
 }{byKey: map[string]trackedCredentialSource{}}
 
+var storedCredentialValueLookup = storedCredentialValue
+
+// CredentialResolver resolves credentials repeatedly for one caller-owned view
+// build. It keeps expensive global credential-store lookups bounded to one per
+// key while preserving the same source/shadow reporting as the one-shot helpers.
+type CredentialResolver struct {
+	root string
+
+	mu               sync.Mutex
+	globalFirstCache map[string]CredentialResolution
+}
+
+// NewCredentialResolverForRoot returns a resolver scoped to a workspace root.
+func NewCredentialResolverForRoot(root string) *CredentialResolver {
+	return &CredentialResolver{root: resolveRoot(root)}
+}
+
+// ResolveGlobalFirst resolves key with the Reasonix credential store taking
+// precedence over project env files. Repeated calls for the same key reuse the
+// first result so UI views with multiple provider entries sharing api_key_env do
+// not repeatedly hit the OS credential store.
+func (r *CredentialResolver) ResolveGlobalFirst(key string) CredentialResolution {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return CredentialResolution{Name: key}
+	}
+	if r == nil {
+		return resolveCredentialForRootGlobalFirst(".", key)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.globalFirstCache == nil {
+		r.globalFirstCache = map[string]CredentialResolution{}
+	}
+	if cached, ok := r.globalFirstCache[key]; ok {
+		return cloneCredentialResolution(cached)
+	}
+	res := resolveCredentialForRootGlobalFirst(r.root, key)
+	r.globalFirstCache[key] = cloneCredentialResolution(res)
+	return res
+}
+
+func cloneCredentialResolution(res CredentialResolution) CredentialResolution {
+	if len(res.Shadowed) > 0 {
+		res.Shadowed = append([]CredentialSource(nil), res.Shadowed...)
+	}
+	return res
+}
+
 func normalizeCredentialsStore(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case CredentialsStoreKeyring:
@@ -389,11 +439,16 @@ func ResolveCredentialForRoot(root, key string) CredentialResolution {
 
 func ResolveCredentialForRootGlobalFirst(root, key string) CredentialResolution {
 	key = strings.TrimSpace(key)
+	return NewCredentialResolverForRoot(root).ResolveGlobalFirst(key)
+}
+
+func resolveCredentialForRootGlobalFirst(root, key string) CredentialResolution {
+	root = resolveRoot(root)
 	res := CredentialResolution{Name: key}
 	if key == "" {
 		return res
 	}
-	if value, source, ok := storedCredentialValue(key); ok {
+	if value, source, ok := storedCredentialValueLookup(key); ok {
 		res.Set = true
 		res.Value = value
 		res.Source = source

@@ -442,6 +442,16 @@ func TestInstallCapabilityBuiltinIsInlineWithExpectedMetadata(t *testing.T) {
 	}
 }
 
+func TestAutoResearchIsNotSeparateBuiltinSkill(t *testing.T) {
+	st := New(Options{HomeDir: t.TempDir()})
+	if _, listed := find(st.List(), "auto-research"); listed {
+		t.Error("auto-research should be a Goal strategy, not a separate builtin skill")
+	}
+	if _, ok := st.Read("auto-research"); ok {
+		t.Error("auto-research should not be readable as a standalone builtin skill")
+	}
+}
+
 func TestDisabledSkillsAreFilteredFromListAndRead(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, home, ".reasonix/skills/active.md", "---\ndescription: active\n---\nbody")

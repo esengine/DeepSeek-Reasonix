@@ -14,6 +14,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -92,11 +93,35 @@ func (s *lazySpawn) run() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err != nil {
+		if errors.Is(err, ErrSpawningInFlight) {
+			// Another tab is already spawning this server; reset to idle so
+			// the next call retries instead of recording a spurious failure.
+			s.state = spawnIdle
+			s.spawnErr = nil
+			return
+		}
+		if IsServerAlreadyConnected(err) {
+			// The server was already started by another controller sharing
+			// the same host. Fetch the tools from the existing client
+			// instead of entering the failed state.
+			if tools, err2 := s.host.ToolsFor(s.ctx, s.spec.Name); err2 == nil {
+				s.real = make(map[string]tool.Tool, len(tools))
+				for _, t := range tools {
+					s.real[t.Name()] = t
+				}
+				s.state = spawnReady
+				s.trySwap()
+				return
+			}
+			// ToolsFor failed — still not a real failure; just mark failed
+			// without recording it so /mcp status stays clean.
+			s.state = spawnFailed
+			s.spawnErr = err
+			return
+		}
 		s.state = spawnFailed
 		s.spawnErr = err
-		if !IsServerAlreadyConnected(err) {
-			s.host.RecordFailure(s.spec, err)
-		}
+		s.host.RecordFailure(s.spec, err)
 		return
 	}
 	s.real = make(map[string]tool.Tool, len(real))
@@ -204,11 +229,45 @@ func (lt *lazyTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 		sp.mu.Lock()
 		defer sp.mu.Unlock()
 		if err != nil {
+			if errors.Is(err, ErrSpawningInFlight) {
+				// Another tab is already spawning this server on the shared
+				// host, but this lazySpawn has no goroutine that can publish
+				// that result. Reset to idle so the next call can reuse the
+				// connected client once the other spawn finishes.
+				sp.state = spawnIdle
+				sp.spawnErr = nil
+				return "", fmt.Errorf("MCP server %q is being started by another tab — retry on next turn", sp.spec.Name)
+			}
+			if IsServerAlreadyConnected(err) {
+				// Another tab on the shared host already started the
+				// server. Fetch the tools from the existing client.
+				if tools, err2 := sp.host.ToolsFor(ctx, sp.spec.Name); err2 == nil {
+					sp.real = make(map[string]tool.Tool, len(tools))
+					for _, t := range tools {
+						sp.real[t.Name()] = t
+					}
+					sp.state = spawnReady
+					sp.trySwap()
+					r := sp.real[lt.name]
+					if r != nil {
+						// Unlock before forwarding so the lock isn't held
+						// during Execute (matching the spawnReady pattern).
+						// Re-acquire so the outer deferred Unlock handles
+						// the final release cleanly.
+						sp.mu.Unlock()
+						result, execErr := r.Execute(ctx, args)
+						sp.mu.Lock()
+						return result, execErr
+					}
+				}
+				// ToolsFor failed — not our fault, don't record as failure.
+				sp.state = spawnFailed
+				sp.spawnErr = err
+				return "", fmt.Errorf("MCP server %q failed to start: %w", sp.spec.Name, err)
+			}
 			sp.state = spawnFailed
 			sp.spawnErr = err
-			if !IsServerAlreadyConnected(err) {
-				sp.host.RecordFailure(sp.spec, err)
-			}
+			sp.host.RecordFailure(sp.spec, err)
 			return "", fmt.Errorf("MCP server %q failed to start: %w", sp.spec.Name, err)
 		}
 		sp.real = make(map[string]tool.Tool, len(real))

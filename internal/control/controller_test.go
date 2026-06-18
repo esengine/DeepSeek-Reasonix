@@ -153,6 +153,88 @@ func TestNewTreatsTypedNilSinkAsDiscard(t *testing.T) {
 	c.notice("typed nil sink should not panic")
 }
 
+func TestClearSessionMarksCleanupPendingBeforeReturningForRunningJobs(t *testing.T) {
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "old.jsonl")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(oldPath, []byte(`{"role":"user","content":"old"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	jm := jobs.NewManager(event.Discard)
+	release := make(chan struct{})
+	started := make(chan struct{})
+	defer func() {
+		close(release)
+		jm.Close()
+	}()
+	jm.StartForSession(agent.BranchID(oldPath), "task", "stuck clear", func(ctx context.Context, _ io.Writer) (string, error) {
+		close(started)
+		<-ctx.Done()
+		<-release
+		return "", ctx.Err()
+	})
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("background job never started")
+	}
+
+	ctrl := New(Options{Executor: exec, SessionDir: dir, SessionPath: oldPath, Label: "test", Jobs: jm})
+	if err := ctrl.ClearSession(); err != nil {
+		t.Fatalf("ClearSession: %v", err)
+	}
+	if !agent.IsCleanupPending(oldPath) {
+		t.Fatalf("old session should be cleanup-pending before ClearSession returns")
+	}
+	if _, err := os.Stat(oldPath); err != nil {
+		t.Fatalf("old session file should remain until delayed cleanup: %v", err)
+	}
+	sessions, err := agent.ListSessions(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range sessions {
+		if filepath.Clean(session.Path) == filepath.Clean(oldPath) {
+			t.Fatalf("cleanup-pending old session still listed: %+v", sessions)
+		}
+	}
+}
+
+func TestReconcileCleanupPendingRemovesOrphanedArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "orphan.jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"user","content":"orphan"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.SaveBranchMeta(path, agent.BranchMeta{Name: "orphan"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(jobs.ArtifactDir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(jobs.ArtifactDir(path), "job.log"), []byte("job output"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(ckptDir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.MarkCleanupPending(path, "delete"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ReconcileCleanupPending(dir); err != nil {
+		t.Fatalf("ReconcileCleanupPending: %v", err)
+	}
+	for _, p := range []string{path, agent.BranchMetaPath(path), jobs.ArtifactDir(path), ckptDir(path), agent.CleanupPendingPath(path)} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("%s still exists after reconciliation (err=%v)", p, err)
+		}
+	}
+}
+
 func TestRunTurnSnapshotsActivityWhenTranscriptChanges(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSession("sys")

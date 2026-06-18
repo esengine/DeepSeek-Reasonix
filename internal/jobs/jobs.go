@@ -39,6 +39,9 @@ const (
 	Killed  Status = "killed"
 )
 
+// DefaultTeardownGrace bounds Close and destroy waits for non-cooperative jobs.
+const DefaultTeardownGrace = 15 * time.Second
+
 // View is a read-only snapshot of a job for the status bar.
 type View struct {
 	ID        string `json:"id"`
@@ -55,6 +58,45 @@ type Result struct {
 	Label  string
 	Status Status
 	Output string // the terminal result text, or the streamed buffer when no result was set
+}
+
+// TeardownJob identifies a job that is still unwinding after teardown waited.
+type TeardownJob struct {
+	ID     string
+	Kind   string
+	Label  string
+	Waited time.Duration
+}
+
+// TeardownResult reports jobs that did not unwind within the teardown grace.
+type TeardownResult struct {
+	TimedOut []TeardownJob
+}
+
+// HasTimedOut reports whether teardown returned before every job had unwound.
+func (r TeardownResult) HasTimedOut() bool { return len(r.TimedOut) > 0 }
+
+type teardownTarget struct {
+	info TeardownJob
+	done <-chan struct{}
+}
+
+// SessionTeardown is the destroy handle for a session's owned background jobs.
+type SessionTeardown struct {
+	SessionID string
+	targets   []teardownTarget
+}
+
+// Async reports whether the handle has jobs to wait on.
+func (h SessionTeardown) Async() bool { return len(h.targets) > 0 }
+
+// DoneChannels returns each target's completion channel for legacy callers.
+func (h SessionTeardown) DoneChannels() []<-chan struct{} {
+	out := make([]<-chan struct{}, 0, len(h.targets))
+	for _, target := range h.targets {
+		out = append(out, target.done)
+	}
+	return out
 }
 
 // Job is one background job. The mutex guards the streaming buffer and the
@@ -107,6 +149,7 @@ type Manager struct {
 	tempRoot     string
 
 	stalledWarning time.Duration
+	teardownGrace  time.Duration
 }
 
 type completion struct {
@@ -127,6 +170,19 @@ func WithStalledWarningAfter(d time.Duration) Option {
 	}
 }
 
+// WithTeardownGrace overrides the Close/destroy grace window. Tests can set a
+// short value; production uses DefaultTeardownGrace.
+func WithTeardownGrace(d time.Duration) Option {
+	return func(m *Manager) {
+		if d >= 0 {
+			m.teardownGrace = d
+		}
+	}
+}
+
+// TeardownGrace reports the manager's configured close/destroy wait window.
+func (m *Manager) TeardownGrace() time.Duration { return m.teardownGrace }
+
 // NewManager returns a Manager whose jobs run under a fresh session-scoped
 // context (cancelled by Close). sink receives job-lifecycle notices; pass the
 // session's synchronized sink (event.Sync) since jobs emit from goroutines.
@@ -137,14 +193,15 @@ func NewManager(sink event.Sink, opts ...Option) *Manager {
 	root, cancel := context.WithCancel(context.Background())
 	tempRoot, _ := os.MkdirTemp("", "reasonix-jobs-*")
 	m := &Manager{
-		sink:         sink,
-		root:         root,
-		cancel:       cancel,
-		jobs:         map[string]*Job{},
-		destroying:   map[string]bool{},
-		artifactDirs: map[string]string{},
-		loaded:       map[string]bool{},
-		tempRoot:     tempRoot,
+		sink:          sink,
+		root:          root,
+		cancel:        cancel,
+		jobs:          map[string]*Job{},
+		destroying:    map[string]bool{},
+		artifactDirs:  map[string]string{},
+		loaded:        map[string]bool{},
+		tempRoot:      tempRoot,
+		teardownGrace: DefaultTeardownGrace,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -747,6 +804,26 @@ func (m *Manager) RunningForSession(parentSession string) []View {
 	return out
 }
 
+// HasUnfinishedForSession reports whether parentSession owns any job whose
+// goroutine has not fully exited yet. Empty parentSession preserves the legacy
+// unscoped behavior.
+func (m *Manager) HasUnfinishedForSession(parentSession string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, key := range m.order {
+		j := m.jobs[key]
+		if !sessionMatches(parentSession, j.SessionID) {
+			continue
+		}
+		select {
+		case <-j.done:
+		default:
+			return true
+		}
+	}
+	return false
+}
+
 // DrainCompletedNote returns (and clears) a one-line summary of jobs that
 // finished since the last drain, for the controller to fold into the next turn
 // so the model learns of completions. "" when nothing finished.
@@ -1123,16 +1200,15 @@ func (m *Manager) loadSessionArtifacts(parentSession, dir string) {
 	m.loaded[parentSession] = true
 }
 
-// DestroySession marks a parent session as being removed from active use and
-// cancels its running jobs. The returned channels close when each cancelled job
-// has fully unwound.
-func (m *Manager) DestroySession(parentSession string) []<-chan struct{} {
+// BeginDestroySession marks a parent session as being removed from active use
+// and cancels its running jobs. WaitTeardown waits for the returned handle.
+func (m *Manager) BeginDestroySession(parentSession string) SessionTeardown {
 	parentSession = strings.TrimSpace(parentSession)
 	if parentSession == "" {
-		return nil
+		return SessionTeardown{}
 	}
 	var cancels []context.CancelFunc
-	var done []<-chan struct{}
+	var targets []teardownTarget
 	m.mu.Lock()
 	m.destroying[parentSession] = true
 	remaining := m.completed[:0]
@@ -1152,9 +1228,9 @@ func (m *Manager) DestroySession(parentSession string) []<-chan struct{} {
 		case Running:
 			j.status = Killed
 			cancels = append(cancels, j.cancel)
-			done = append(done, j.done)
+			targets = append(targets, teardownTarget{info: TeardownJob{ID: j.ID, Kind: j.Kind, Label: j.Label}, done: j.done})
 		case Killed:
-			done = append(done, j.done)
+			targets = append(targets, teardownTarget{info: TeardownJob{ID: j.ID, Kind: j.Kind, Label: j.Label}, done: j.done})
 		}
 		j.mu.Unlock()
 	}
@@ -1162,7 +1238,22 @@ func (m *Manager) DestroySession(parentSession string) []<-chan struct{} {
 	for _, cancel := range cancels {
 		cancel()
 	}
-	return done
+	return SessionTeardown{SessionID: parentSession, targets: targets}
+}
+
+// DestroySession preserves the legacy channel-based destroy API.
+func (m *Manager) DestroySession(parentSession string) []<-chan struct{} {
+	return m.BeginDestroySession(parentSession).DoneChannels()
+}
+
+// WaitTeardown waits for a destroy handle to unwind up to grace. A timed-out
+// result means the caller should defer physical cleanup until the jobs exit.
+func (m *Manager) WaitTeardown(ctx context.Context, h SessionTeardown, grace time.Duration) TeardownResult {
+	result, timedOut := waitTeardownTargets(ctx, h.targets, grace)
+	if timedOut {
+		m.emitTeardownTimeout("destroy session "+h.SessionID, result)
+	}
+	return result
 }
 
 // IsDestroying reports whether parentSession is in the destroy window. Empty
@@ -1205,14 +1296,147 @@ func (m *Manager) purgeSessionLocked(parentSession string) {
 	m.order = kept
 }
 
-// Close cancels the session context and waits for every background job goroutine
-// to return before unblocking. Jobs observe the cancel through their run context
-// (exec.CommandContext kills a bash job's process), so the wait is bounded. This
-// matters for callers tearing down a t.TempDir: without the wait, RemoveAll can
-// race a job goroutine that still holds a file under that dir.
+// Close cancels the session context and waits briefly for every background job
+// goroutine to return before unblocking. If a non-cooperative job ignores
+// cancellation, cleanup of the temporary artifact root continues in the
+// background after the goroutines eventually unwind.
 func (m *Manager) Close() {
+	_ = m.CloseWithGrace(m.teardownGrace)
+}
+
+// CloseAsync cancels the manager and returns immediately. It is used when a
+// caller has already begun session-specific teardown and owns the delayed
+// persistent cleanup, but still needs the manager's root context and temporary
+// artifact root released eventually.
+func (m *Manager) CloseAsync() {
 	m.cancel()
-	m.wg.Wait()
+	go func() {
+		m.wg.Wait()
+		m.removeTempRoot()
+	}()
+}
+
+// CloseWithGrace is Close with an explicit wait window, used by tests and
+// callers that need to surface non-cooperative jobs.
+func (m *Manager) CloseWithGrace(grace time.Duration) TeardownResult {
+	m.cancel()
+	done := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(done)
+	}()
+	result, timedOut := waitTeardownTargets(context.Background(), m.closeTargets(), grace, done)
+	if timedOut {
+		m.emitTeardownTimeout("close", result)
+		go func() {
+			<-done
+			m.removeTempRoot()
+		}()
+		return result
+	}
+	m.removeTempRoot()
+	return result
+}
+
+func waitTeardownTargets(ctx context.Context, targets []teardownTarget, grace time.Duration, allDone ...<-chan struct{}) (TeardownResult, bool) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+	var timeout <-chan time.Time
+	if grace >= 0 {
+		timer := time.NewTimer(grace)
+		defer timer.Stop()
+		timeout = timer.C
+	}
+	if len(allDone) > 0 && allDone[0] != nil {
+		select {
+		case <-allDone[0]:
+			return TeardownResult{}, false
+		case <-ctx.Done():
+			return teardownTimedOut(targets, time.Since(start)), false
+		case <-timeout:
+			return teardownTimedOut(targets, time.Since(start)), true
+		}
+	}
+	for _, target := range targets {
+		select {
+		case <-target.done:
+		case <-ctx.Done():
+			return teardownTimedOut(targets, time.Since(start)), false
+		case <-timeout:
+			return teardownTimedOut(targets, time.Since(start)), true
+		}
+	}
+	return TeardownResult{}, false
+}
+
+func teardownTimedOut(targets []teardownTarget, waited time.Duration) TeardownResult {
+	var out []TeardownJob
+	for _, target := range targets {
+		select {
+		case <-target.done:
+			continue
+		default:
+		}
+		info := target.info
+		info.Waited = waited
+		out = append(out, info)
+	}
+	return TeardownResult{TimedOut: out}
+}
+
+func (m *Manager) closeTargets() []teardownTarget {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var targets []teardownTarget
+	for _, key := range m.order {
+		j := m.jobs[key]
+		if j == nil {
+			continue
+		}
+		select {
+		case <-j.done:
+			continue
+		default:
+		}
+		j.mu.Lock()
+		switch j.status {
+		case Running:
+			j.status = Killed
+			targets = append(targets, teardownTarget{info: TeardownJob{ID: j.ID, Kind: j.Kind, Label: j.Label}, done: j.done})
+		case Killed:
+			targets = append(targets, teardownTarget{info: TeardownJob{ID: j.ID, Kind: j.Kind, Label: j.Label}, done: j.done})
+		}
+		j.mu.Unlock()
+	}
+	return targets
+}
+
+func (m *Manager) emitTeardownTimeout(action string, result TeardownResult) {
+	if len(result.TimedOut) == 0 {
+		return
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "background job teardown timed out during %s", strings.TrimSpace(action))
+	for i, job := range result.TimedOut {
+		if i == 0 {
+			b.WriteString(": ")
+		} else {
+			b.WriteString("; ")
+		}
+		fmt.Fprintf(&b, "%s kind=%s", job.ID, job.Kind)
+		if strings.TrimSpace(job.Label) != "" {
+			fmt.Fprintf(&b, " label=%q", job.Label)
+		}
+		if job.Waited > 0 {
+			fmt.Fprintf(&b, " waited=%s", job.Waited.Round(time.Millisecond))
+		}
+	}
+	m.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: b.String()})
+}
+
+func (m *Manager) removeTempRoot() {
 	if m.tempRoot != "" {
 		_ = os.RemoveAll(m.tempRoot)
 	}

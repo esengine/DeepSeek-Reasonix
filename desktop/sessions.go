@@ -120,6 +120,52 @@ func trashSessionArtifacts(dir, sessionPath, key string) error {
 	return trashSessionArtifactsBeforeMove(dir, sessionPath, key, nil)
 }
 
+func reconcileDesktopCleanupPending(dir string) error {
+	return agent.ReconcileCleanupPending(dir, func(item agent.CleanupPendingInfo) error {
+		if strings.TrimSpace(item.Meta.Operation) == "delete" {
+			sessionPath, key, err := validateSessionPath(dir, item.SessionPath)
+			if err != nil {
+				return err
+			}
+			return reconcileDesktopTrashSessionArtifacts(dir, sessionPath, key)
+		}
+		return removeDesktopSessionArtifacts(item.SessionPath)
+	})
+}
+
+func reconcileDesktopTrashSessionArtifacts(dir, sessionPath, key string) error {
+	itemDir := filepath.Join(sessionTrashPath(dir), key)
+	if err := os.MkdirAll(itemDir, 0o755); err != nil {
+		return err
+	}
+	if err := movePathIfExists(sessionPath, filepath.Join(itemDir, key)); err != nil {
+		return err
+	}
+	if err := movePathIfExists(sessionPath+".meta", filepath.Join(itemDir, key+".meta")); err != nil {
+		return err
+	}
+	ckptName := strings.TrimSuffix(key, ".jsonl") + ".ckpt"
+	if err := movePathIfExists(strings.TrimSuffix(sessionPath, ".jsonl")+".ckpt", filepath.Join(itemDir, ckptName)); err != nil {
+		return err
+	}
+	jobsName := strings.TrimSuffix(key, ".jsonl") + ".jobs"
+	if err := movePathIfExists(jobs.ArtifactDir(sessionPath), filepath.Join(itemDir, jobsName)); err != nil {
+		return err
+	}
+	if err := trashSubagentArtifacts(dir, sessionPath, itemDir); err != nil {
+		return err
+	}
+	meta := trashedSessionMeta{Key: key, DeletedAt: time.Now().UnixMilli()}
+	b, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(itemDir, sessionTrashMetaFile), b, 0o644); err != nil {
+		return err
+	}
+	return agent.ClearCleanupPending(sessionPath)
+}
+
 func validateSessionTrashTarget(dir, sessionPath, key string) error {
 	if _, err := os.Stat(sessionPath); os.IsNotExist(err) {
 		return nil
@@ -174,6 +220,9 @@ func trashSessionArtifactsBeforeMove(dir, sessionPath, key string, beforeMove fu
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(itemDir, sessionTrashMetaFile), b, 0o644); err != nil {
+		return err
+	}
+	if err := agent.ClearCleanupPending(sessionPath); err != nil {
 		return err
 	}
 	return nil

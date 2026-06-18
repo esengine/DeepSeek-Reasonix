@@ -142,6 +142,14 @@ func TestSlashArgItems(t *testing.T) {
 	if !has(items, "off") || !has(items, "on") || has(items, "ask") {
 		t.Errorf("/auto-plan should offer only off/on; got %v", labelsOf(items))
 	}
+	// /goal
+	items, _ = SlashArgItems("/goal ", data)
+	if !has(items, "--research") || !has(items, "--simple") || !has(items, "status") || !has(items, "clear") {
+		t.Errorf("/goal should offer research overrides and management commands; got %v", labelsOf(items))
+	}
+	if items, _ := SlashArgItems("/goal --research ", data); len(items) != 0 {
+		t.Errorf("/goal after a research flag should accept free-form objectives; got %v", labelsOf(items))
+	}
 	// /reasoning-language
 	items, _ = SlashArgItems("/reasoning-language ", data)
 	if !has(items, "auto") || !has(items, "zh") || !has(items, "en") || has(items, "中文") {

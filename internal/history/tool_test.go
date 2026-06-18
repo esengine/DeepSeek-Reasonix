@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/provider"
 )
 
@@ -63,6 +64,42 @@ func TestHistoryToolSearchAndAroundAreUsable(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("around output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestHistoryToolSkipsCleanupPending(t *testing.T) {
+	sessionDir := t.TempDir()
+	visiblePath := filepath.Join(sessionDir, "visible.jsonl")
+	pendingPath := filepath.Join(sessionDir, "pending.jsonl")
+	writeSession(t, visiblePath, []provider.Message{
+		{Role: provider.RoleUser, Content: "visible cleanup-safe retrieval note"},
+	})
+	writeSession(t, pendingPath, []provider.Message{
+		{Role: provider.RoleUser, Content: "pending cleanup-hidden retrieval note"},
+	})
+	if err := agent.MarkCleanupPending(pendingPath, "delete"); err != nil {
+		t.Fatal(err)
+	}
+
+	tl := NewTool(Options{SessionDir: sessionDir})
+	out, err := tl.Execute(context.Background(), []byte(`{"operation":"search","query":"retrieval note","limit":5}`))
+	if err != nil {
+		t.Fatalf("Execute search: %v", err)
+	}
+	if !strings.Contains(out, "visible.jsonl") {
+		t.Fatalf("search output missing visible session:\n%s", out)
+	}
+	if strings.Contains(out, "pending.jsonl") || strings.Contains(out, "cleanup-hidden") {
+		t.Fatalf("search output leaked cleanup-pending session:\n%s", out)
+	}
+
+	args, _ := json.Marshal(map[string]any{
+		"operation":     "around",
+		"session_path":  pendingPath,
+		"message_index": 0,
+	})
+	if _, err := tl.Execute(context.Background(), args); err == nil {
+		t.Fatal("Execute around cleanup-pending error = nil, want rejection")
 	}
 }
 

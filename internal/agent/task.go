@@ -24,6 +24,7 @@ If you need to ask for clarification, fail with a precise question instead of gu
 
 var subagentMetaTools = []string{
 	"task",
+	"parallel_tasks",
 	"run_skill",
 	"read_skill",
 	"install_skill",

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -386,6 +387,9 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 	}
 
 	if sess := s.session(id); sess != nil {
+		if agent.IsCleanupPending(sess.transcript) {
+			return SessionConfigState{}, &RPCError{Code: ErrInvalidParams, Message: method + ": unknown session " + id}
+		}
 		if replay {
 			newUpdateSink(s.conn, id).replay(sess.ctrl.History())
 		}
@@ -397,8 +401,13 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 	}
 
 	var saved acpSessionMeta
+	persistedPath := ""
 	if dir := s.sessionDir(); dir != "" {
-		meta, _, metaErr := loadACPMeta(transcriptPath(dir, id))
+		persistedPath = transcriptPath(dir, id)
+		if agent.IsCleanupPending(persistedPath) {
+			return SessionConfigState{}, &RPCError{Code: ErrInvalidParams, Message: method + ": unknown session " + id}
+		}
+		meta, _, metaErr := loadACPMeta(persistedPath)
 		if metaErr != nil {
 			return SessionConfigState{}, &RPCError{Code: ErrInternal, Message: method + ": " + metaErr.Error()}
 		}
@@ -438,6 +447,10 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 		return SessionConfigState{}, &RPCError{Code: ErrInternal, Message: method + ": persistence is disabled"}
 	}
 	path := transcriptPath(dir, id)
+	if path != persistedPath && agent.IsCleanupPending(path) {
+		ctrl.Close()
+		return SessionConfigState{}, &RPCError{Code: ErrInvalidParams, Message: method + ": unknown session " + id}
+	}
 	loaded, err := agent.LoadSession(path)
 	if err != nil {
 		ctrl.Close()
@@ -796,19 +809,34 @@ func (s *service) sessionDelete(_ context.Context, raw json.RawMessage) (any, er
 	}
 
 	path := ""
+	var destroy control.SessionDestroyHandle
+	var delayed bool
 	if sess := s.takeSession(p.SessionID); sess != nil {
 		sess.deleteAndWait()
-		sess.ctrl.Close()
 		path = sess.transcript
+		destroy = sess.ctrl.BeginDestroySession(path)
+		if result := destroy.Wait(); result.HasTimedOut() {
+			if err := agent.MarkCleanupPending(path, "delete"); err != nil {
+				go delayedDeleteSessionFiles(path, destroy)
+				sess.ctrl.CloseAfterDestroy()
+				return nil, &RPCError{Code: ErrInternal, Message: "session/delete: " + err.Error()}
+			}
+			go delayedDeleteSessionFiles(path, destroy)
+			delayed = true
+		}
+		sess.ctrl.CloseAfterDestroy()
 	}
 	if path == "" {
 		if dir := s.sessionDir(); dir != "" {
 			path = transcriptPath(dir, p.SessionID)
 		}
 	}
-	if path != "" {
+	if path != "" && !delayed {
 		if err := deleteSessionFiles(path); err != nil {
 			return nil, &RPCError{Code: ErrInternal, Message: "session/delete: " + err.Error()}
+		}
+		if destroy.Finish != nil {
+			destroy.Finish()
 		}
 	}
 	return SessionDeleteResult{}, nil
@@ -1286,6 +1314,9 @@ func listACPMetas(dir string) ([]acpSessionMeta, error) {
 		}
 		id := strings.TrimSuffix(e.Name(), ".acp.json")
 		sessionPath := transcriptPath(dir, id)
+		if agent.IsCleanupPending(sessionPath) {
+			continue
+		}
 		if !sessionFileExists(sessionPath) {
 			continue
 		}
@@ -1414,7 +1445,27 @@ func deleteSessionFiles(sessionPath string) error {
 	if err := jobs.RemoveArtifacts(sessionPath); err != nil {
 		return err
 	}
-	return nil
+	return agent.ClearCleanupPending(sessionPath)
+}
+
+// ReconcileCleanupPending retries delayed ACP session cleanup left by a previous
+// process, including ACP's own metadata sidecar.
+func ReconcileCleanupPending(dir string) error {
+	return agent.ReconcileCleanupPending(dir, func(item agent.CleanupPendingInfo) error {
+		return deleteSessionFiles(item.SessionPath)
+	})
+}
+
+func delayedDeleteSessionFiles(sessionPath string, destroy control.SessionDestroyHandle) {
+	if destroy.WaitAll != nil {
+		destroy.WaitAll()
+	}
+	if err := deleteSessionFiles(sessionPath); err != nil {
+		slog.Warn("acp: delayed session delete failed", "path", sessionPath, "err", err)
+	}
+	if destroy.Finish != nil {
+		destroy.Finish()
+	}
 }
 
 func checkpointPath(sessionPath string) string {

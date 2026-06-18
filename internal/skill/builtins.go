@@ -8,9 +8,10 @@ import (
 )
 
 // Built-in skills ship with Reasonix and back the dedicated subagent tools
-// (explore / research / review / security_review) plus the inline `test`
-// playbook. A user/project file with the same name overrides the built-in (see
-// Store.List / Store.Read). Tool names in the bodies match internal/tool/builtin.
+// (explore / research / review / security_review) plus inline playbooks such as
+// test. A user/project file with the same name overrides the
+// built-in (see Store.List / Store.Read). Tool names in the bodies match
+// internal/tool/builtin.
 
 // negativeClaimRule keeps subagents honest about "found nothing" answers.
 const negativeClaimRule = `When you claim something does NOT exist (no caller, no usage, not implemented), say which searches you ran to reach that conclusion — a negative claim is only as trustworthy as the search behind it.`

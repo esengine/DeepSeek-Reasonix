@@ -336,7 +336,6 @@ export function Composer({
   onSetCollaborationMode,
   onSetToolApprovalMode,
   onToggleYoloApprovalMode,
-  onSetGoal,
   onClearGoal,
   onSwitchModel,
   onSetEffort,
@@ -369,7 +368,6 @@ export function Composer({
   onSetCollaborationMode: (mode: CollaborationMode) => void;
   onSetToolApprovalMode: (mode: ToolApprovalMode) => void;
   onToggleYoloApprovalMode: () => void;
-  onSetGoal: (goal: string) => void;
   onClearGoal: () => void;
   onSwitchModel: (name: string) => void;
   onSetEffort: (level: string) => void;
@@ -1603,7 +1601,6 @@ export function Composer({
     ? ({ height: `${textareaAutoHeight}px`, overflowY: textareaAutoOverflow ? "auto" : "hidden" } as CSSProperties)
     : undefined;
   const composerAutoExpanded = composerHeight === null && textareaAutoHeight !== null && textareaAutoHeight > 40;
-  const draftGoal = text.trim();
   void onSetMode;
   const chooseApprovalMode = (nextMode: ToolApprovalMode) => {
     onSetToolApprovalMode(nextMode);
@@ -1619,14 +1616,6 @@ export function Composer({
     if (goalModeOn) {
       closeIntentMenu(() => {
         onClearGoal();
-        requestAnimationFrame(() => taRef.current?.focus());
-      });
-      return;
-    }
-    if (draftGoal) {
-      closeIntentMenu(() => {
-        onSetGoal(draftGoal);
-        setText("");
         requestAnimationFrame(() => taRef.current?.focus());
       });
       return;

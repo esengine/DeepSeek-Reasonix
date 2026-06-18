@@ -827,6 +827,13 @@ func (a *Agent) finalReadinessFailure() string {
 	return a.finalReadinessCheck().reason
 }
 
+// GoalReadinessFailure returns the final-readiness failure reason — a summary of
+// incomplete todos and unverified project checks — or empty string if none.
+// Exported so the Controller can gate [goal:complete] on evidence.
+func (a *Agent) GoalReadinessFailure() string {
+	return a.finalReadinessFailure()
+}
+
 type finalReadinessCheck struct {
 	applies              bool
 	reason               string

@@ -43,7 +43,7 @@ type ArgData struct {
 // (everything after the command word). It returns the suggestions filtered by
 // the token being typed and the byte offset where that token begins, so a caller
 // replaces just that token. Only structured commands participate (/mcp /model
-// /skills /hooks /effort /auto-plan /reasoning-language /theme /language);
+// /skills /hooks /effort /auto-plan /goal /reasoning-language /theme /language);
 // others yield nil. Single source of truth for CLI + desktop.
 func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 	cmdEnd := strings.IndexAny(line, " \t")
@@ -69,6 +69,8 @@ func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 		raw = effortArgItems(prior, d)
 	case "/auto-plan":
 		raw = autoPlanArgItems(prior)
+	case "/goal":
+		raw = goalArgItems(prior)
 	case "/reasoning-language":
 		raw = reasoningLanguageArgItems(prior)
 	case "/theme":
@@ -79,6 +81,18 @@ func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 		return nil, from
 	}
 	return filterSlash(raw, line, from, cur), from
+}
+
+func goalArgItems(prior []string) []SlashItem {
+	if len(prior) > 1 {
+		return nil
+	}
+	return []SlashItem{
+		{Label: "--research", Insert: "--research ", Hint: "force durable AutoResearch state"},
+		{Label: "--simple", Insert: "--simple ", Hint: "force lightweight Goal"},
+		{Label: "status", Insert: "status", Hint: "show active goal"},
+		{Label: "clear", Insert: "clear", Hint: "stop goal mode"},
+	}
 }
 
 func autoPlanArgItems(prior []string) []SlashItem {

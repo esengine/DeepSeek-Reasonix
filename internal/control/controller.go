@@ -126,22 +126,40 @@ type Controller struct {
 
 	// mu guards the run state and approval bookkeeping; every critical section
 	// under it is short and non-blocking.
-	mu          sync.Mutex
-	cancel      context.CancelFunc
-	running     bool
-	canceling   bool
-	autosaveWG  sync.WaitGroup
-	planMode    bool
-	goal        string
-	goalStatus  string
-	goalTurns   int
-	goalBlocks  int
-	goalBlock   string
-	sessionPath string
-	approvals   map[string]pendingApproval
-	asks        map[string]pendingAsk
-	granted     map[string]bool
-	nextID      int
+	mu               sync.Mutex
+	cancel           context.CancelFunc
+	running          bool
+	canceling        bool
+	autosaveWG       sync.WaitGroup
+	planMode         bool
+	goal             string
+	goalStatus       string
+	goalResearchMode GoalResearchMode
+	goalTurns        int
+	goalBlocks       int
+	goalBlock        string
+	// goalInterceptMsg, when non-empty, overrides the generic goalContinueTurn prompt
+	// for the next continuation turn. Used by advanceGoalAfterTurn to inject specific
+	// feedback such as incomplete-todo reminders.
+	goalInterceptMsg string
+	// goalIntercepts counts consecutive incomplete-todo intercepts for the current
+	// goal. After the first intercept, the agent is reminded to update its todo
+	// list if the work is actually done; a second consecutive claim of completion
+	// is treated as an override and let through.
+	goalIntercepts int
+	// goalStrict, when true, disables the override escape hatch: every
+	// [goal:complete] while todos are incomplete is intercepted, and the
+	// agent must actually finish or update all items before it can complete.
+	goalStrict bool
+	// goalSelfCheckDone tracks whether the quality self-check prompt has been
+	// injected for the current goal. On first [goal:complete] with all todos
+	// done, the agent is asked to self-verify before final completion.
+	goalSelfCheckDone bool
+	sessionPath       string
+	approvals         map[string]pendingApproval
+	asks              map[string]pendingAsk
+	granted           map[string]bool
+	nextID            int
 	// turn counts model turns this session, passed to hooks in their payload.
 	turn int
 	// approvedPlanAutoApproveTools auto-allows writer tool calls without prompting.
@@ -225,8 +243,9 @@ const (
 )
 
 const (
-	maxGoalAutoTurns = 50
-	goalContinueTurn = "Continue pursuing the active goal. If it is complete, provide the concise final result and end with [goal:complete]. If it is truly blocked on a user-owned decision after trying sensible defaults, end with [goal:blocked:<short reason>]. Otherwise do the next useful work and end with [goal:continue]."
+	maxGoalAutoTurns  = 50
+	goalContinueTurn  = "Continue pursuing the active goal. If it is complete, provide the concise final result and end with [goal:complete]. If it is truly blocked on a user-owned decision after trying sensible defaults, end with [goal:blocked:<short reason>]. Otherwise do the next useful work and end with [goal:continue]."
+	goalSelfCheckTurn = "The agent signaled goal completion and all tasks are marked done. Before finalizing, perform a brief quality self-check:\n1. Verify any changed files compile or parse correctly\n2. Run the relevant tests if applicable\n3. Confirm the original requirements are met\nIf everything checks out, signal [goal:complete]. If issues are found, fix them and signal [goal:complete] when done."
 )
 
 // RememberResult describes what happened when an approval rule was persisted.
@@ -646,7 +665,17 @@ func (c *Controller) continueGoal(ctx context.Context) error {
 			c.stopGoal(GoalStatusStopped)
 			return err
 		}
-		if err := c.runTurnWithRawDisplay(ctx, goalContinueTurn, goalContinueTurn, ""); err != nil {
+		turn := goalContinueTurn
+		c.mu.Lock()
+		if c.goalInterceptMsg != "" {
+			turn = c.goalInterceptMsg
+			c.goalInterceptMsg = ""
+			c.mu.Unlock()
+			c.notice("goal intercept: incomplete todos remain (override with a second [goal:complete])")
+		} else {
+			c.mu.Unlock()
+		}
+		if err := c.runTurnWithRawDisplay(ctx, turn, turn, ""); err != nil {
 			if ctx.Err() != nil {
 				c.stopGoal(GoalStatusStopped)
 			}
@@ -667,10 +696,28 @@ func (c *Controller) advanceGoalAfterTurn() bool {
 	c.goalTurns++
 	switch status {
 	case GoalStatusComplete:
+		if incomplete := c.incompleteGoalTodos(); len(incomplete) > 0 && (c.goalStrict || c.goalIntercepts == 0) {
+			// In strict mode every claim is blocked until todos are done;
+			// otherwise only the first consecutive claim is intercepted.
+			c.goalIntercepts++
+			c.goalInterceptMsg = incomplete
+			break
+		}
+		// Todos are all done — in strict mode run self-check before final
+		// completion. Non-strict mode completes immediately.
+		if c.goalStrict && !c.goalSelfCheckDone {
+			c.goalSelfCheckDone = true
+			c.goalInterceptMsg = goalSelfCheckTurn
+			break
+		}
+		// Self-check passed — complete the goal.
+		c.goalIntercepts = 0
+		c.goalSelfCheckDone = false
 		c.goal = ""
 		c.goalStatus = GoalStatusComplete
 		c.goalBlocks = 0
 		c.goalBlock = ""
+		c.goalInterceptMsg = ""
 		notice = "goal complete"
 	case GoalStatusBlocked:
 		reason = cleanGoalBlockReason(reason)
@@ -690,10 +737,15 @@ func (c *Controller) advanceGoalAfterTurn() bool {
 	default:
 		c.goalBlocks = 0
 		c.goalBlock = ""
+		c.goalIntercepts = 0
+		c.goalSelfCheckDone = false
 	}
 	if notice == "" && c.goalTurns >= maxGoalAutoTurns {
 		c.goalStatus = GoalStatusBlocked
 		c.goalBlock = "goal continuation limit reached"
+		c.goalIntercepts = 0
+		c.goalSelfCheckDone = false
+		c.goalInterceptMsg = ""
 		notice = c.goalBlock
 	}
 	cont := notice == ""
@@ -702,6 +754,48 @@ func (c *Controller) advanceGoalAfterTurn() bool {
 		c.notice(notice)
 	}
 	return cont
+}
+
+// incompleteGoalTodos checks the executor's canonical todo state and evidence
+// readiness (project checks) for anything that should block [goal:complete].
+// Returns a formatted reminder string, or empty if nothing is blocking.
+func (c *Controller) incompleteGoalTodos() string {
+	if c.executor == nil {
+		return ""
+	}
+	var parts []string
+
+	// 1. Check canonical todos.
+	todos := c.executor.CanonicalTodoState()
+	if len(todos) > 0 {
+		incomplete := evidence.IncompleteTodos(todos)
+		if len(incomplete) > 0 {
+			var b strings.Builder
+			b.WriteString("the following tasks are still incomplete:")
+			for _, t := range incomplete {
+				fmt.Fprintf(&b, "\n  - %s (%s)", t.Content, t.Status)
+			}
+			parts = append(parts, b.String())
+		}
+	}
+
+	// 2. Check evidence readiness (project checks from AGENTS.md).
+	if reason := c.executor.GoalReadinessFailure(); reason != "" {
+		parts = append(parts, reason)
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("The agent signaled goal completion but the following issues remain:\n")
+	for _, p := range parts {
+		b.WriteString(p)
+		b.WriteString("\n")
+	}
+	b.WriteString("\nIf the work is actually done, update your task list with todo_write or complete_step and run the required verification commands, then signal [goal:complete] again. Otherwise finish the remaining work.")
+	return b.String()
 }
 
 func parseGoalStatusMarker(text string) (status, reason string, ok bool) {
@@ -759,6 +853,9 @@ func (c *Controller) stopGoal(status string) {
 	if strings.TrimSpace(c.goal) != "" && c.goalStatus == GoalStatusRunning {
 		c.goalStatus = status
 	}
+	c.goalInterceptMsg = ""
+	c.goalIntercepts = 0
+	c.goalSelfCheckDone = false
 	c.mu.Unlock()
 }
 
@@ -797,6 +894,13 @@ func (c *Controller) SubmitHTTP(input string) {
 // text for transcript replay when controller-side composition expands input.
 func (c *Controller) SubmitDisplay(display, input string) {
 	c.submit(input, display)
+}
+
+// SubmitUserTurn starts a normal model turn without interpreting shell or slash
+// commands. It still resolves references, so callers can submit trusted
+// user-authored prompt text without expanding the command surface.
+func (c *Controller) SubmitUserTurn(input, display string) {
+	c.runRefTurn(input, display)
 }
 
 func (c *Controller) submit(input, display string) {
@@ -963,8 +1067,66 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 		}
 		c.notice("unknown command: " + trimmed)
 	default:
+		if c.maybeAutoStartResearchGoal(input, display) {
+			return
+		}
 		runRefTurn(input, display)
 	}
+}
+
+func (c *Controller) maybeAutoStartResearchGoal(input, display string) bool {
+	goal, ok := c.autoStartResearchGoalCandidate(input)
+	if !ok {
+		return false
+	}
+	if c.runner != nil {
+		displayText := display
+		if strings.TrimSpace(displayText) == "" {
+			displayText = goal
+		}
+		c.runGuarded(func(ctx context.Context) error {
+			c.SetGoalWithResearchMode(goal, GoalResearchOn)
+			c.notice(fmt.Sprintf(i18n.M.GoalSetFmt, ShortGoalForNotice(goal)))
+			block, errs := c.ResolveRefs(ctx, goal)
+			for _, e := range errs {
+				c.notice(e)
+			}
+			sent := "Start pursuing the active goal now."
+			if block != "" {
+				sent = "Referenced context:\n\n" + block + "\n\n" + sent
+			}
+			return c.runGoalLoopWithRawDisplay(ctx, sent, goal, displayText)
+		})
+	}
+	return true
+}
+
+// AutoStartResearchGoal upgrades a strong long-horizon ordinary prompt into a
+// Goal + AutoResearch run for frontends that already accepted an idle turn.
+func (c *Controller) AutoStartResearchGoal(input string) (string, bool) {
+	goal, ok := c.autoStartResearchGoalCandidate(input)
+	if !ok {
+		return "", false
+	}
+	c.SetGoalWithResearchMode(goal, GoalResearchOn)
+	c.notice(fmt.Sprintf(i18n.M.GoalSetFmt, ShortGoalForNotice(goal)))
+	return goal, true
+}
+
+func (c *Controller) autoStartResearchGoalCandidate(input string) (string, bool) {
+	goal := strings.TrimSpace(input)
+	if !shouldAutoStartResearchGoal(goal) {
+		return "", false
+	}
+	c.mu.Lock()
+	plan := c.planMode
+	running := c.running
+	activeGoal := strings.TrimSpace(c.goal) != "" && c.goalStatus == GoalStatusRunning
+	c.mu.Unlock()
+	if plan || running || activeGoal {
+		return "", false
+	}
+	return goal, true
 }
 
 func (c *Controller) rememberProjectNote(note string) {
@@ -987,7 +1149,8 @@ func (c *Controller) applyGoalCommand(input, display string) bool {
 	switch cmd.Action {
 	case GoalCommandSet:
 		c.SetPlanMode(false)
-		c.SetGoal(cmd.Text)
+		c.SetGoalWithResearchMode(cmd.Text, cmd.ResearchMode)
+		c.GoalStrict(cmd.Strict)
 		c.notice(fmt.Sprintf(i18n.M.GoalSetFmt, ShortGoalForNotice(cmd.Text)))
 		if c.runner != nil {
 			c.runGuarded(func(ctx context.Context) error {
@@ -1439,29 +1602,48 @@ func (c *Controller) PlanMode() bool {
 	return c.planMode
 }
 
+// GoalStrict enables or disables strict goal mode. In strict mode the agent
+// cannot override an incomplete-todo intercept — it must actually finish or
+// update all items before [goal:complete] is accepted.
+func (c *Controller) GoalStrict(strict bool) {
+	c.mu.Lock()
+	c.goalStrict = strict
+	c.mu.Unlock()
+}
+
 // SetGoal stores a session-scoped active goal. Compose injects it into outgoing
 // user turns, not the system prompt or tool schema, so it does not disturb the
 // cache-stable prefix.
 func (c *Controller) SetGoal(goal string) {
+	c.SetGoalWithResearchMode(goal, GoalResearchAuto)
+}
+
+func (c *Controller) SetGoalWithResearchMode(goal string, researchMode GoalResearchMode) {
 	goal = strings.TrimSpace(goal)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if goal == "" {
 		c.goal = ""
 		c.goalStatus = GoalStatusStopped
+		c.goalResearchMode = GoalResearchAuto
 		c.goalTurns = 0
 		c.goalBlocks = 0
 		c.goalBlock = ""
 		return
 	}
-	if c.goal == goal && c.goalStatus == GoalStatusRunning {
+	if c.goal == goal && c.goalStatus == GoalStatusRunning && c.goalResearchMode == researchMode {
 		return
 	}
 	c.goal = goal
 	c.goalStatus = GoalStatusRunning
+	c.goalResearchMode = researchMode
 	c.goalTurns = 0
 	c.goalBlocks = 0
 	c.goalBlock = ""
+	c.goalInterceptMsg = ""
+	c.goalIntercepts = 0
+	c.goalSelfCheckDone = false
+	c.goalStrict = false
 }
 
 func (c *Controller) ClearGoal() {
@@ -1549,6 +1731,12 @@ func (c *Controller) ClearSession() error {
 	if running {
 		return fmt.Errorf("cannot clear while a turn is running")
 	}
+	preMarkedCleanup := c.hasUnfinishedSessionJobs(oldPath)
+	if preMarkedCleanup {
+		if err := agent.MarkCleanupPending(oldPath, "clear"); err != nil {
+			return err
+		}
+	}
 	destroy := c.BeginDestroySession(oldPath)
 	if !destroy.Async {
 		if err := removeSessionArtifacts(oldPath); err != nil {
@@ -1573,7 +1761,13 @@ func (c *Controller) ClearSession() error {
 	c.hooks.SessionStart(context.Background())
 	if destroy.Async {
 		go func() {
-			destroy.Wait()
+			result := destroy.Wait()
+			if result.HasTimedOut() && destroy.WaitAll != nil {
+				if err := agent.MarkCleanupPending(oldPath, "clear"); err != nil {
+					c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "mark cleanup pending failed: " + err.Error()})
+				}
+				destroy.WaitAll()
+			}
 			if err := removeSessionArtifacts(oldPath); err != nil {
 				c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "clear session cleanup failed: " + err.Error()})
 			}
@@ -1581,6 +1775,13 @@ func (c *Controller) ClearSession() error {
 		}()
 	}
 	return nil
+}
+
+func (c *Controller) hasUnfinishedSessionJobs(sessionPath string) bool {
+	if c.jobs == nil {
+		return false
+	}
+	return c.jobs.HasUnfinishedForSession(agent.BranchID(sessionPath))
 }
 
 func removeSessionArtifacts(path string) error {
@@ -1606,7 +1807,18 @@ func removeSessionArtifacts(path string) error {
 	if err := agent.DeleteSubagentsByParent(filepath.Dir(path), agent.BranchID(path)); err != nil {
 		return err
 	}
+	if err := agent.ClearCleanupPending(path); err != nil {
+		return err
+	}
 	return nil
+}
+
+// ReconcileCleanupPending retries physical cleanup for logically removed
+// sessions that were left behind by a previous process.
+func ReconcileCleanupPending(dir string) error {
+	return agent.ReconcileCleanupPending(dir, func(item agent.CleanupPendingInfo) error {
+		return removeSessionArtifacts(item.SessionPath)
+	})
 }
 
 // RewindScope selects what a Rewind restores.
@@ -1864,6 +2076,9 @@ func (c *Controller) SwitchBranch(ref string) (agent.BranchInfo, error) {
 	match, err := resolveBranch(branches, ref)
 	if err != nil {
 		return agent.BranchInfo{}, c.rewindFail(err)
+	}
+	if !agent.IsVisibleSession(match.Path) {
+		return agent.BranchInfo{}, c.rewindFail(fmt.Errorf("branch %q not found", ref))
 	}
 	loaded, err := agent.LoadSession(match.Path)
 	if err != nil {
@@ -2127,9 +2342,10 @@ func (c *Controller) SetSessionPath(p string) {
 // SessionDestroyHandle separates waiting for cancelled jobs from ending the
 // destroy window, so callers can move/delete persistent artifacts in between.
 type SessionDestroyHandle struct {
-	Wait   func()
-	Finish func()
-	Async  bool
+	Wait    func() jobs.TeardownResult
+	WaitAll func()
+	Finish  func()
+	Async   bool
 }
 
 // BeginDestroySession marks a session as leaving active use and cancels its
@@ -2138,20 +2354,24 @@ type SessionDestroyHandle struct {
 func (c *Controller) BeginDestroySession(sessionPath string) SessionDestroyHandle {
 	parentSession := agent.BranchID(sessionPath)
 	if c.jobs == nil || parentSession == "" {
+		wait := func() jobs.TeardownResult { return jobs.TeardownResult{} }
 		noop := func() {}
-		return SessionDestroyHandle{Wait: noop, Finish: noop}
+		return SessionDestroyHandle{Wait: wait, WaitAll: noop, Finish: noop}
 	}
-	done := c.jobs.DestroySession(parentSession)
+	teardown := c.jobs.BeginDestroySession(parentSession)
 	return SessionDestroyHandle{
-		Wait: func() {
-			for _, ch := range done {
+		Wait: func() jobs.TeardownResult {
+			return c.jobs.WaitTeardown(context.Background(), teardown, c.jobs.TeardownGrace())
+		},
+		WaitAll: func() {
+			for _, ch := range teardown.DoneChannels() {
 				<-ch
 			}
 		},
 		Finish: func() {
 			c.jobs.FinishDestroySession(parentSession)
 		},
-		Async: len(done) > 0,
+		Async: teardown.Async(),
 	}
 }
 
@@ -2419,7 +2639,15 @@ func (c *Controller) connectMCPSpec(s plugin.Spec) (int, error) {
 	}
 	tools, err := c.host.Add(c.pluginCtx, s)
 	if err != nil {
-		return 0, err
+		if !plugin.IsServerAlreadyConnected(err) {
+			return 0, err
+		}
+		toolsCtx, cancel := context.WithTimeout(c.pluginCtx, 5*time.Second)
+		defer cancel()
+		tools, err = c.host.ToolsFor(toolsCtx, s.Name)
+		if err != nil {
+			return 0, err
+		}
 	}
 	if c.reg != nil {
 		c.reg.RemovePrefix(plugin.ToolPrefix(s.Name))
@@ -2578,6 +2806,17 @@ func (c *Controller) DisconnectMCPServer(name string) bool {
 	return disconnected || removedPlaceholder > 0
 }
 
+// UnregisterMCPServerTools hides a shared MCP server from this controller only.
+// The desktop shared-host path uses this for per-tab connector toggles: the
+// shared client stays alive for sibling tabs, while this session's registry drops
+// the server's provider-visible tools before the next turn.
+func (c *Controller) UnregisterMCPServerTools(name string) bool {
+	if c.reg == nil {
+		return false
+	}
+	return c.reg.RemovePrefix(plugin.ToolPrefix(name)) > 0
+}
+
 // Label returns the human-readable model label, e.g. "deepseek-flash".
 func (c *Controller) Label() string { return c.label }
 
@@ -2609,16 +2848,31 @@ func (c *Controller) InheritLifecycleFrom(prev *Controller) {
 // firing SessionEnd. Use it only when replacing the controller for the same
 // logical session.
 func (c *Controller) ReleaseResources() {
-	c.close(false)
+	c.close(false, closeJobsWithGrace)
 }
 
 // Close stops plugin subprocesses and releases resources. A session that ever
 // started fires SessionEnd so a teardown hook runs.
 func (c *Controller) Close() {
-	c.close(true)
+	c.close(true, closeJobsWithGrace)
 }
 
-func (c *Controller) close(fireSessionEnd bool) {
+// CloseAfterDestroy releases controller resources after the caller has already
+// begun session-specific job teardown. It avoids a second synchronous job grace
+// wait while still cancelling the manager root and reaping temporary artifacts
+// once every job goroutine finally exits.
+func (c *Controller) CloseAfterDestroy() {
+	c.close(true, closeJobsAsync)
+}
+
+type closeJobsMode int
+
+const (
+	closeJobsWithGrace closeJobsMode = iota
+	closeJobsAsync
+)
+
+func (c *Controller) close(fireSessionEnd bool, jobsMode closeJobsMode) {
 	c.mu.Lock()
 	started := c.startedOnce
 	c.mu.Unlock()
@@ -2626,7 +2880,12 @@ func (c *Controller) close(fireSessionEnd bool) {
 		c.hooks.SessionEnd(context.Background())
 	}
 	if c.jobs != nil {
-		c.jobs.Close() // cancel any still-running background jobs
+		switch jobsMode {
+		case closeJobsAsync:
+			c.jobs.CloseAsync()
+		default:
+			c.jobs.Close() // cancel any still-running background jobs
+		}
 	}
 	if c.cleanup != nil {
 		c.cleanup()
