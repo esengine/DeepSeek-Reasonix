@@ -1236,7 +1236,8 @@ func (c *Controller) applyPlanExec(input, display string) {
 	}
 
 	var b strings.Builder
-	b.WriteString("You are the execution conductor. Read the following plan and execute it:\n\n")
+	b.WriteString("You are the execution conductor. Your job: route each plan step to the right sub-agent so each sub-agent has a clean, focused context.\n\n")
+	b.WriteString("## Plan steps\n\n")
 	for _, t := range todos {
 		status := t.Status
 		if status == "" {
@@ -1248,13 +1249,15 @@ func (c *Controller) applyPlanExec(input, display string) {
 		}
 		fmt.Fprintf(&b, "- [%s] %s (%s)\n", mark, t.Content, status)
 	}
-	b.WriteString("\nExecution rules:\n")
-	b.WriteString("1. Identify steps that are independent (different files, no dependency) and group them into batches\n")
-	b.WriteString("2. Dispatch each batch concurrently using parallel_tasks\n")
-	b.WriteString("3. Dependent steps run after their prerequisites complete\n")
-	b.WriteString("4. After each batch, verify results before proceeding\n")
-	b.WriteString("5. If a step fails, fix it before moving on\n")
-	b.WriteString("6. Report progress after each batch\n")
+	b.WriteString("\n## Routing rules\n")
+	b.WriteString("1. Analyze each step: what files/directories does it touch? What module is it about?\n")
+	b.WriteString("2. Group steps by MODULE — steps in different modules can run in parallel batches\n")
+	b.WriteString("3. Steps in the SAME module must run sequentially (to avoid context pollution)\n")
+	b.WriteString("4. Dispatch each batch using parallel_tasks — each sub-agent gets ONLY its module's context\n")
+	b.WriteString("5. After each batch, verify results before proceeding to the next batch\n")
+	b.WriteString("6. If a step fails, fix it before moving on\n")
+	b.WriteString("7. Report which module each batch covered\n")
+	b.WriteString("\nGoal: each sub-agent focuses on one module and does not carry irrelevant context.\n")
 	if done > 0 {
 		fmt.Fprintf(&b, "\nNote: %d/%d steps are already completed. Focus on the remaining %d steps.\n", done, total, total-done)
 	}
@@ -1272,7 +1275,7 @@ func (c *Controller) applyPlanExec(input, display string) {
 }
 
 // prometheusPrompt is the strategic planner system prompt.
-const prometheusPrompt = "You are Prometheus, a strategic planner. Your job is to interview the user about their request before any plan is created.\n\nFollow this process:\n1. Ask one clarifying question at a time \u2014 do not dump all questions at once\n2. Cover: scope, files involved, constraints, test strategy, edge cases\n3. Listen to each answer before asking the next question\n4. When you have enough context to create a solid plan, output a numbered plan with acceptance criteria, then end with [goal:complete]\n5. Do not start implementing \u2014 your role is purely planning\n\nKeep questions concise. Plan steps should be concrete and actionable."
+const prometheusPrompt = "You are Prometheus, a strategic planner. Your job is to interview the user and produce a plan organized by project module.\n\nProcess:\n1. Ask one clarifying question at a time\n2. Cover: scope, module boundaries, files involved, constraints, test strategy\n3. Understand which modules/directories are affected\n4. When ready, output a numbered plan with each step tagged by module, plus acceptance criteria\n5. End with [goal:complete]\n6. Do not start implementing\n\nEach plan step should specify which file, directory, or module it belongs to. This lets the execution conductor route steps to the right sub-agent."
 
 // applyPrometheus starts an interactive planning interview, inspired by OMO's
 // Prometheus agent. It enters goal mode with a structured interview prompt.
