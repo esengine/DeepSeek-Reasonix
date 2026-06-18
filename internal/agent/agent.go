@@ -689,8 +689,9 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 	handoffNudges := 0
 	usedAnyTool := false
 	streamRecoveries := 0
+	graceRound := false
 	executorHandoff := a.executorHandoffGuard && strings.Contains(input, executorHandoffMarker)
-	for step := 0; a.maxSteps <= 0 || step < a.maxSteps; step++ {
+	for step := 0; a.maxSteps <= 0 || step < a.maxSteps || graceRound; step++ {
 		// Consume a queued steer and persist it to the session so it
 		// survives tab switches and history replay. The model sees it as
 		// guidance (with a prefix), not a new task. One cache miss per
@@ -802,6 +803,35 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 		}
 		emptyFinalBlocks = 0
 		usedAnyTool = true
+
+		// Soft brake: when budget is exhausted, skip tool execution and give the
+		// model one grace round to produce a final answer from existing results.
+		if a.maxSteps > 0 && step >= a.maxSteps-1 {
+			if graceRound {
+				// Already gave one grace round — hard stop.
+				return fmt.Errorf("paused after %d tool-call rounds (%s) — the work so far is saved; send another message to continue, or set %s higher or to 0 for no limit", a.maxSteps, a.maxStepsKey, a.maxStepsKey)
+			}
+			graceRound = true
+			// Emit full dispatch events for the UI even though we skip execution.
+			for _, call := range calls {
+				tl, _ := a.tools.Get(call.Name)
+				a.sink.Emit(event.Event{
+					Kind: event.ToolDispatch,
+					Tool: event.Tool{
+						ID: call.ID, Name: call.Name, Args: call.Arguments,
+						ReadOnly: tl != nil && tl.ReadOnly(),
+					},
+				})
+				a.sink.Emit(event.Event{
+					Kind: event.ToolResult,
+					Tool: event.Tool{ID: call.ID, Name: call.Name, Err: "skipped: budget exhausted"},
+				})
+			}
+			nudge := "Tool-call budget exhausted. You have one extra response — do not call any more tools."
+			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withReasoningLanguage(nudge)})
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "budget exhausted: one grace round to finalize"})
+			continue
+		}
 
 		results := a.executeBatch(ctx, calls)
 		for i, call := range calls {
