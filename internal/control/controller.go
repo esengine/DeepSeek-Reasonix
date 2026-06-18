@@ -1081,6 +1081,9 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 				c.notice(err.Error())
 			}
 			return
+		case "/plan-exec":
+			c.applyPlanExec(display)
+			return
 		}
 		if c.managementNotice(trimmed) {
 			return
@@ -1155,6 +1158,36 @@ func ShortGoalForNotice(goal string) string {
 		return goal
 	}
 	return string(runes[:max]) + "..."
+}
+
+// applyPlanExec reads the current canonical todo list and starts a goal that
+// analyzes and dispatches independent steps concurrently via parallel_tasks.
+func (c *Controller) applyPlanExec(display string) {
+	todos := c.executor.CanonicalTodoState()
+	if len(todos) == 0 {
+		c.notice("no active plan with todos to execute")
+		return
+	}
+	var b strings.Builder
+	b.WriteString("Analyze the following plan steps and dispatch independent ones concurrently using parallel_tasks:\n\n")
+	for i, t := range todos {
+		status := t.Status
+		if status == "" {
+			status = "pending"
+		}
+		fmt.Fprintf(&b, "%d. [%s] %s\n", i+1, status, t.Content)
+	}
+	b.WriteString("\nGroup steps that don't overlap (different files, no dependency) into parallel batches. Steps in the same batch run concurrently via parallel_tasks. Dependent steps wait for their prerequisites. Report progress after each batch completes.")
+	prompt := b.String()
+
+	c.SetPlanMode(false)
+	c.SetGoal("execute plan: " + ShortGoalForNotice(todos[0].Content))
+	c.notice("plan-exec: analyzing and dispatching plan steps")
+	if c.runner != nil {
+		c.runGuarded(func(ctx context.Context) error {
+			return c.runGoalLoopWithRawDisplay(ctx, prompt, prompt, display)
+		})
+	}
 }
 
 // shellTimeout is the maximum time a user-invoked "!command" may run. Matches
