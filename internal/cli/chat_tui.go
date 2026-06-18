@@ -460,6 +460,7 @@ func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Eve
 
 	commitBuf := []string{}
 	nativeScrollback := detectTermuxTerminal()
+	renderW := transcriptContentWidth(termW, nativeScrollback)
 	return chatTUI{
 		ctrl:                 ctrl,
 		label:                ctrl.Label(),
@@ -477,7 +478,7 @@ func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Eve
 		reasoning:            &strings.Builder{},
 		pending:              &strings.Builder{},
 		pendingCommit:        &commitBuf,
-		renderer:             newMarkdownRenderer(termW),
+		renderer:             newMarkdownRenderer(renderW),
 		diffMaxLines:         diffFoldLimit,
 		showReasoning:        nativeScrollback,
 		shellOutputs:         make(map[string]string),
@@ -492,6 +493,13 @@ func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Eve
 		viewport:             viewport.New(viewport.WithWidth(termW)),
 		statusLineCount:      2,
 	}
+}
+
+func transcriptContentWidth(termW int, nativeScrollback bool) int {
+	if !nativeScrollback {
+		termW-- // reserve the last column for the transcript scrollbar
+	}
+	return max(termW, 1)
 }
 
 func configureChatTextarea(ti *textarea.Model) {
@@ -668,14 +676,7 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	cm := next.(chatTUI)
 
-	contentW := cm.width - 1 // last column is the scrollbar
-	if contentW < 1 {
-		contentW = 1
-	}
-	// Recompute the wrapped status-line count so bottomRows reserves the right
-	// height for the viewport. The data-line tags (model, git, effort, context,
-	// cache, jobs, balance) are the ones most likely to wrap on a narrow terminal.
-	cm.statusLineCount = cm.computeStatusLineCount(contentW)
+	contentW := transcriptContentWidth(cm.width, cm.nativeScrollback)
 	cm.viewport.SetWidth(contentW)
 	// Recompute the wrapped status-line count so bottomRows reserves the right
 	// height for the viewport. Use cm.width (same as boxW in View()) so the
@@ -714,16 +715,17 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.input.SetWidth(msg.Width - 4)
-		m.renderer = newMarkdownRenderer(msg.Width)
+		contentW := transcriptContentWidth(msg.Width, m.nativeScrollback)
+		m.renderer = newMarkdownRenderer(contentW)
 		// Commit the banner — and a resumed session's transcript — once, now
 		// that the width is known.
 		if !m.started {
 			m.started = true
 			var b strings.Builder
-			b.WriteString(renderTUIBanner(m.label, m.missing, msg.Width))
+			b.WriteString(renderTUIBanner(m.label, m.missing, contentW))
 			if len(m.history) > 0 {
-				r := newMarkdownRenderer(msg.Width)
-				for _, sec := range replaySectionsFor(m.history, msg.Width, r) {
+				r := newMarkdownRenderer(contentW)
+				for _, sec := range replaySectionsFor(m.history, contentW, r) {
 					b.WriteString(sec)
 				}
 				m.history = nil

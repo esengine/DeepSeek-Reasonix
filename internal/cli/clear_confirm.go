@@ -61,7 +61,7 @@ func (m *chatTUI) resetFreshContextView(clearTranscript bool) {
 	} else {
 		m.commitLine("")
 	}
-	m.commitLine(strings.TrimRight(renderTUIBanner(m.label, "", m.width), "\n"))
+	m.commitLine(strings.TrimRight(renderTUIBanner(m.label, "", transcriptContentWidth(m.width, m.nativeScrollback)), "\n"))
 	m.transcriptDirty = true
 	m.forceGotoBottom = true
 }
