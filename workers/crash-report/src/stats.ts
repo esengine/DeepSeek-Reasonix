@@ -2,6 +2,7 @@ import { esc, page } from "./shell";
 import { type User, userNav } from "./auth";
 
 type Daily = { date: string; users: number; opens: number };
+type MetricRow = { signal: string; bucket: string; total: number };
 
 function last30Days(rows: Daily[]): Daily[] {
   const byDate = new Map(rows.map((r) => [r.date, r]));
@@ -85,18 +86,154 @@ function listBars(rows: { label: string; users: number }[]): string {
     .join("");
 }
 
-function metricsCards(rows: { signal: string; bucket: string; total: number }[]): string {
-  if (!rows.length)
-    return `<div class="empty">${i18n("No metrics yet — flows in once an opt-in build ships", "暂无运行指标 — 等 opt-in 版本发布后有数据")}</div>`;
+const METRIC_SIGNAL_LABELS: Record<string, { en: string; zh: string }> = {
+  finish_reason: { en: "Finish reason", zh: "结束原因" },
+  empty_final: { en: "Empty final guard", zh: "空回复拦截" },
+  provider_error: { en: "Provider errors", zh: "Provider 错误" },
+  cache_hit: { en: "Cache hit rate", zh: "缓存命中率" },
+  tool_error: { en: "Tool errors", zh: "工具错误" },
+  compaction: { en: "Compactions", zh: "压缩" },
+  turns: { en: "Turns", zh: "轮次" },
+  client_surface: { en: "Client surface", zh: "客户端形态" },
+  client_version: { en: "Client version", zh: "客户端版本" },
+  settings_language: { en: "Settings: language", zh: "设置：语言" },
+  settings_desktop_layout: { en: "Settings: desktop style", zh: "设置：桌面风格" },
+  settings_theme: { en: "Settings: light/dark", zh: "设置：深浅模式" },
+  settings_theme_style: { en: "Settings: theme style", zh: "设置：主题" },
+  settings_close_behavior: { en: "Settings: close behavior", zh: "设置：关闭行为" },
+  settings_display_mode: { en: "Settings: transcript mode", zh: "设置：会话展示" },
+  settings_auto_plan: { en: "Settings: auto plan", zh: "设置：自动计划" },
+  settings_status_bar_style: { en: "Settings: status bar style", zh: "设置：信息栏样式" },
+  settings_status_bar_items_count: { en: "Settings: status bar items", zh: "设置：信息栏项数" },
+  settings_check_updates: { en: "Settings: update checks", zh: "设置：更新检查" },
+  settings_default_model: { en: "Settings: default model", zh: "设置：默认模型" },
+  settings_planner_model: { en: "Settings: planner model", zh: "设置：规划模型" },
+  settings_subagent_model: { en: "Settings: subagent model", zh: "设置：子代理模型" },
+  settings_subagent_effort: { en: "Settings: subagent effort", zh: "设置：子代理 effort" },
+  settings_reasoning_language: { en: "Settings: reasoning language", zh: "设置：推理语言" },
+  settings_provider_count: { en: "Settings: provider count", zh: "设置：Provider 数量" },
+  settings_provider_access_count: { en: "Settings: enabled providers", zh: "设置：启用 Provider 数量" },
+  settings_provider_access: { en: "Settings: provider access", zh: "设置：Provider 选择" },
+  settings_bot_enabled: { en: "Bot: enabled", zh: "机器人：总开关" },
+  settings_bot_model: { en: "Bot: default model", zh: "机器人：默认模型" },
+  settings_bot_tool_approval: { en: "Bot: tool approval", zh: "机器人：工具审批" },
+  settings_bot_allowlist: { en: "Bot: allowlist", zh: "机器人：白名单" },
+  settings_bot_allow_all: { en: "Bot: allow all", zh: "机器人：允许所有人" },
+  settings_bot_qq_enabled: { en: "Bot: QQ legacy", zh: "机器人：QQ 旧配置" },
+  settings_bot_feishu_enabled: { en: "Bot: Feishu legacy", zh: "机器人：飞书旧配置" },
+  settings_bot_weixin_enabled: { en: "Bot: Weixin legacy", zh: "机器人：微信旧配置" },
+  settings_bot_connection_count: { en: "Bot: connection count", zh: "机器人：连接数量" },
+  settings_bot_connection_provider: { en: "Bot: connection provider", zh: "机器人：连接渠道" },
+  settings_bot_connection_enabled: { en: "Bot: connection enabled", zh: "机器人：连接开关" },
+  settings_bot_connection_status: { en: "Bot: connection status", zh: "机器人：连接状态" },
+  settings_bot_connection_model: { en: "Bot: connection model", zh: "机器人：连接模型" },
+  settings_bot_connection_approval: { en: "Bot: connection approval", zh: "机器人：连接审批" },
+};
+
+const AGENT_METRIC_SIGNALS = ["finish_reason", "empty_final", "provider_error", "cache_hit", "tool_error", "compaction", "turns"];
+
+const SETTINGS_METRIC_GROUPS: { en: string; zh: string; signals: string[] }[] = [
+  {
+    en: "Client",
+    zh: "客户端",
+    signals: ["client_surface", "client_version", "settings_language"],
+  },
+  {
+    en: "Appearance and layout",
+    zh: "外观与布局",
+    signals: [
+      "settings_desktop_layout",
+      "settings_theme",
+      "settings_theme_style",
+      "settings_display_mode",
+      "settings_status_bar_style",
+      "settings_status_bar_items_count",
+    ],
+  },
+  {
+    en: "Models",
+    zh: "模型",
+    signals: [
+      "settings_default_model",
+      "settings_planner_model",
+      "settings_subagent_model",
+      "settings_subagent_effort",
+      "settings_reasoning_language",
+    ],
+  },
+  {
+    en: "Providers",
+    zh: "Provider",
+    signals: ["settings_provider_count", "settings_provider_access_count", "settings_provider_access"],
+  },
+  {
+    en: "Behavior toggles",
+    zh: "行为开关",
+    signals: ["settings_close_behavior", "settings_auto_plan", "settings_check_updates"],
+  },
+  {
+    en: "Bots",
+    zh: "机器人",
+    signals: [
+      "settings_bot_enabled",
+      "settings_bot_model",
+      "settings_bot_tool_approval",
+      "settings_bot_allowlist",
+      "settings_bot_allow_all",
+      "settings_bot_qq_enabled",
+      "settings_bot_feishu_enabled",
+      "settings_bot_weixin_enabled",
+      "settings_bot_connection_count",
+      "settings_bot_connection_provider",
+      "settings_bot_connection_enabled",
+      "settings_bot_connection_status",
+      "settings_bot_connection_model",
+      "settings_bot_connection_approval",
+    ],
+  },
+];
+
+function metricSignalLabel(signal: string): string {
+  const label = METRIC_SIGNAL_LABELS[signal];
+  return label ? i18n(label.en, label.zh) : esc(signal);
+}
+
+function metricsBySignal(rows: MetricRow[]): Map<string, { label: string; users: number }[]> {
   const bySignal = new Map<string, { label: string; users: number }[]>();
   for (const r of rows) {
     const list = bySignal.get(r.signal) ?? [];
     list.push({ label: r.bucket, users: r.total });
     bySignal.set(r.signal, list);
   }
-  return `<div class="metrics">${[...bySignal.entries()]
-    .map(([signal, list]) => `<div class="metric-block"><h3>${esc(signal)}</h3>${listBars(list)}</div>`)
-    .join("")}</div>`;
+  return bySignal;
+}
+
+function metricBlocks(bySignal: Map<string, { label: string; users: number }[]>, signals: string[]): string {
+  return signals
+    .filter((signal) => bySignal.has(signal))
+    .map((signal) => `<div class="metric-block"><h3>${metricSignalLabel(signal)}</h3>${listBars(bySignal.get(signal) ?? [])}</div>`)
+    .join("");
+}
+
+function metricsCards(rows: MetricRow[], signals = AGENT_METRIC_SIGNALS): string {
+  if (!rows.length)
+    return `<div class="empty">${i18n("No metrics yet — flows in once an opt-in build ships", "暂无运行指标 — 等 opt-in 版本发布后有数据")}</div>`;
+  const bySignal = metricsBySignal(rows);
+  const blocks = metricBlocks(bySignal, signals);
+  return blocks ? `<div class="metrics">${blocks}</div>` : `<div class="empty">${i18n("No data in the last 7 days", "近 7 天暂无数据")}</div>`;
+}
+
+function settingsDashboard(rows: MetricRow[]): string {
+  const bySignal = metricsBySignal(rows);
+  const sections = SETTINGS_METRIC_GROUPS.map((group) => {
+    const blocks = metricBlocks(bySignal, group.signals);
+    if (!blocks) return "";
+    return `<section class="pref-section"><h3>${i18n(group.en, group.zh)}</h3><div class="metrics pref-metrics">${blocks}</div></section>`;
+  })
+    .filter(Boolean)
+    .join("");
+  if (!sections) return `<div class="empty">${i18n("No settings preference metrics yet", "暂无设置偏好指标")}</div>`;
+  return `<div class="preference-dashboard">${sections}</div>`;
 }
 
 function statusPill(status: string): string {
@@ -168,7 +305,8 @@ export function renderStats(
     versions: { label: string; users: number }[];
     platforms: { label: string; users: number }[];
     crashes: CrashRow[];
-    metrics: { signal: string; bucket: string; total: number }[];
+    metrics: MetricRow[];
+    metricUsers: MetricRow[];
     sources: { label: string; users: number }[];
     latestVersion: string;
     filters: { status: string; source: string; version: string; os: string; platform: string; newLatest: boolean; regressed: boolean };
@@ -178,6 +316,9 @@ export function renderStats(
   const days = last30Days(data.daily);
   const totalUsers = days.at(-1)?.users ?? 0;
   const anyPing = days.some((d) => d.opens > 0);
+  const agentMetrics = data.metrics.filter((r) => AGENT_METRIC_SIGNALS.includes(r.signal));
+  const settingsMetrics = data.metrics.filter((r) => r.signal === "client_surface" || r.signal === "client_version" || r.signal.startsWith("settings_"));
+  const settingsMetricUsers = data.metricUsers.filter((r) => r.signal === "client_surface" || r.signal === "client_version" || r.signal.startsWith("settings_"));
   const filterQS = (patch: Record<string, string>) => {
     const params = new URLSearchParams();
     const put = (k: string, v: string) => {
@@ -227,7 +368,9 @@ ${filterTab("Regressed", "回归", filterQS({ regressed: data.filters.regressed 
 ${anyPing ? dailyChart(days) : `<div class="empty">${i18n("No pings yet — data starts flowing once a telemetry-enabled build ships", "暂无启动 ping — 等带统计的版本发布后这里开始有数据")}</div>`}</div>
 <div class="card"><h2>${i18nHTML("Versions <b>— 7 days</b>", "版本分布 <b>— 7 天</b>")}</h2>${listBars(data.versions)}</div>
 <div class="card"><h2>${i18nHTML("Platforms <b>— 7 days</b>", "平台分布 <b>— 7 天</b>")}</h2>${listBars(data.platforms)}</div>
-<div class="card full"><h2>${i18nHTML("Agent signals <b>— 7 days, opt-in aggregate</b>", "运行指标 <b>— 7 天，opt-in 汇总</b>")}</h2>${metricsCards(data.metrics)}</div>
+<div class="card full"><h2>${i18nHTML("Settings preference DAU <b>— 7 days, deduplicated by install</b>", "设置偏好 DAU <b>— 7 天，按安装去重</b>")}</h2>${settingsDashboard(settingsMetricUsers)}</div>
+<div class="card full"><h2>${i18nHTML("Settings preference snapshots <b>— 7 days, launch/open counts</b>", "设置偏好快照 <b>— 7 天，启动/开启次数</b>")}</h2>${settingsDashboard(settingsMetrics)}</div>
+<div class="card full"><h2>${i18nHTML("Agent signals <b>— 7 days, opt-in aggregate</b>", "运行指标 <b>— 7 天，opt-in 汇总</b>")}</h2>${metricsCards(agentMetrics)}</div>
 ${filters}
 <div class="card full crash-card"><h2>${i18nHTML("Report groups <b>— select a row for stack samples</b>", "诊断分组 <b>— 选择一行查看堆栈样本</b>")}</h2>${reportGroups(data.crashes)}</div>
 </div>`,

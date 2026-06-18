@@ -35,6 +35,11 @@ func TestExplainError(t *testing.T) {
 		t.Errorf("401 should still name the key env: %q", rejected.Error())
 	}
 
+	sourced := explainError(&provider.AuthError{Provider: "deepseek", KeyEnv: "DEEPSEEK_API_KEY", KeySource: "project .env", Status: 401, HasKey: true})
+	if !strings.Contains(sourced.Error(), "DEEPSEEK_API_KEY from project .env") {
+		t.Errorf("401 should name the key source: %q", sourced.Error())
+	}
+
 	for _, status := range []int{400, 422, 429, 500, 503} {
 		got := explainError(&provider.APIError{Provider: "p", Status: status})
 		if got.Error() == "" || got.Error() == (&provider.APIError{Provider: "p", Status: status}).Error() {

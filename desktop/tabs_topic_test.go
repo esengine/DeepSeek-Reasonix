@@ -512,6 +512,84 @@ func TestBuildTabControllerRestoresPinnedSessionBeforeTopicFallback(t *testing.T
 	}
 }
 
+func TestBuildTabControllerIgnoresStaleSessionModelWhenTabModelResolves(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("REASONIX_TEST_KEY", "sk-test")
+	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(config.UserConfigPath(), []byte(`
+default_model = "default-provider/default-model"
+
+[[providers]]
+name = "default-provider"
+kind = "openai"
+base_url = "https://default.invalid/v1"
+model = "default-model"
+api_key_env = "REASONIX_TEST_KEY"
+
+[[providers]]
+name = "tab-provider"
+kind = "openai"
+base_url = "https://tab.invalid/v1"
+model = "tab-model"
+api_key_env = "REASONIX_TEST_KEY"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	pinned := writeLegacySession(t, dir, "stale-model.jsonl", "resume with tab model", time.Now())
+	meta, err := agent.EnsureBranchMeta(pinned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta.Model = "missing-provider/missing-model"
+	if err := agent.SaveBranchMetaPreserveUpdated(pinned, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	tab := app.createTabEntryWithID("global", globalTabWorkspaceRoot(), "", "tab_stale_model")
+	tab.SessionPath = pinned
+	tab.model = "tab-provider/tab-model"
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	app.buildTabController(tab)
+	if tab.Ctrl == nil {
+		t.Fatalf("tab controller was not built: %s", tab.StartupErr)
+	}
+	defer tab.Ctrl.Close()
+	if tab.model != "tab-provider/tab-model" {
+		t.Fatalf("tab model = %q, want valid tab model", tab.model)
+	}
+}
+
+func TestLoadPinnedTabSessionFallsBackToMigratedBasename(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := writeLegacySession(t, dir, "migrated-tab.jsonl", "resume after path migration", time.Now())
+	oldPath := filepath.Join(t.TempDir(), "old-reasonix", "projects", "slug", "sessions", filepath.Base(path))
+
+	loaded, pinnedPath, ok := loadPinnedTabSession(dir, oldPath)
+	if !ok || loaded == nil {
+		t.Fatalf("loadPinnedTabSession did not recover migrated basename: ok=%v loaded=%v path=%q", ok, loaded, pinnedPath)
+	}
+	if filepath.Clean(pinnedPath) != filepath.Clean(path) {
+		t.Fatalf("pinned path = %q, want %q", pinnedPath, path)
+	}
+}
+
 func TestBuildTabControllerKeepsMissingPinnedSessionPath(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

@@ -12,7 +12,7 @@ changed and how to move over.
 | Branch | [`v1`](https://github.com/esengine/DeepSeek-Reasonix/tree/v1) (maintenance only) | `main-v2` (default, active) |
 | Versions | `0.x` (up to v0.54.x) | `1.0.0`+ |
 | Install | `npm i -g reasonix` (the `latest` tag, stays on `0.x`) | `npm i -g reasonix@next` — `latest` deliberately stays on `0.x`; or a release archive / `go build` |
-| Code intelligence | embedding semantic search | bundled [CodeGraph](https://github.com/colbymchenry/codegraph) (symbol/call graph) |
+| Code intelligence | embedding semantic search + tree-sitter symbols | LSP-assisted code reading plus grep/read_file/glob; semantic index is not yet ported |
 
 "v1" and "v2" are **codebase generations**, not semver: the v1 line never reached
 1.0, so the Go rewrite takes the `1.x` major.
@@ -30,7 +30,7 @@ without asking. v1.x (Go) ships under the `next` tag; opt in explicitly:
 
 ```sh
 npm i -g reasonix@next     # or pin a version: reasonix@1.1.0
-reasonix chat
+reasonix
 ```
 
 `latest` will stay on `0.x` for the foreseeable future, so installing or
@@ -52,22 +52,35 @@ cd DeepSeek-Reasonix && make build                        # -> bin/reasonix(.exe
 
 | Legacy | Reasonix 1.0 |
 |---|---|
-| TS config files | `reasonix.toml` (project) / `config.toml` in your OS config dir (user; `~/.config/reasonix/` on Linux, `~/Library/Application Support/reasonix/` on macOS, `%AppData%\reasonix\` on Windows) — see `reasonix.example.toml` |
+| TS config files | `reasonix.toml` (project) / `config.toml` in Reasonix home (`~/.reasonix/` on macOS/Linux; `%AppData%\reasonix\` on Windows) from v1.8.1 — see `reasonix.example.toml` and [Configuration paths](./CONFIG_PATHS.md) |
 | env / API keys | `.env` or the environment (`DEEPSEEK_API_KEY`, `MIMO_API_KEY`, …) via `api_key_env` |
 | project memory | `REASONIX.md` (+ auto-memory), Claude-Code-compatible |
 | MCP servers | `[[plugins]]` in `reasonix.toml`, or a Claude-Code `.mcp.json` (read as-is) |
 
-On first launch v2 runs a one-time, **non-destructive** import: it reads a v0.x
-`~/.reasonix/config.json` (API key, base URL, language, MCP servers) and imports
-past sessions from `~/.reasonix/sessions` and legacy event logs already located
-in the current user config session directory, leaves the old files untouched, and
-prints a boot notice when it does. Each session lands in the workspace it
-belonged to (read from its v0.x sidecar meta, summary carried over as the title),
-so the desktop sidebar lists it under the right project; sessions whose workspace
-no longer exists land in the global session dir. Imported sessions resume with
-`--resume` or the history panel. The config import only runs when no v2 config exists yet — if v2
-wrote its config before your `0.x` data was in place nothing is overwritten, so
-copy any missing values across by hand.
+On first launch, v1.8.1+ runs a one-time, **non-destructive** import: it reads
+legacy config from `~/Library/Application Support/reasonix/config.toml`,
+`~/.config/reasonix/config.toml`, `~/.reasonix/reasonix.toml`, or v0.x
+`~/.reasonix/config.json` (API key, base URL, language, MCP servers), and imports
+past sessions from legacy session directories. Old files are left untouched, and
+Reasonix prints a boot notice when it imports data. Each session lands in the
+workspace it belonged to (read from its v0.x sidecar meta, summary carried over
+as the title), so the desktop sidebar lists it under the right project; sessions
+whose workspace no longer exists land in the global session dir. Imported
+sessions resume with `--resume` or the history panel. The config import only
+runs when no v1.8.1+ config exists yet — if v1.8.1+ wrote its config before your
+legacy data was in place nothing is overwritten, so copy any missing values
+across by hand.
+
+If the automatic pass missed data because you opened a v1.8.1+ CLI/desktop build
+before the old paths were available, run `/migrate` from an interactive session.
+The command is available only in Go-based Reasonix builds that include it; if you
+see `unknown command`, upgrade first. It prints progress while it checks legacy
+config and credentials, scans legacy memory and session directories, imports
+memory files and sessions that were not previously imported, and summarizes the
+result. `/migrate` keeps the same safety rules as startup migration: it does not
+overwrite an existing `config.toml` or memory file, it respects session import
+markers, and it is not available in the legacy 0.x TypeScript line. See
+[Configuration paths](./CONFIG_PATHS.md) for the full path list and limitations.
 
 ## What's the same
 
@@ -77,11 +90,10 @@ and DeepSeek prefix-cache–oriented design.
 
 ## What's different
 
-- **Code intelligence**: embedding semantic search is replaced by **CodeGraph**
-  (`codegraph_*` tools) — a tree-sitter symbol/call graph, no embedding service or
-  API cost. New (first-run) configs start with it off; existing configs keep it
-  on across upgrades. Toggle `[codegraph]` in the MCP manager or config; when
-  enabled it starts in the background so chat startup is never blocked.
+- **Code intelligence**: the Go rewrite uses LSP-assisted code reading plus
+  `grep` / `read_file` / `glob` for local understanding. The legacy v1 semantic
+  search + tree-sitter symbol index is not bundled in v2 yet, and CodeGraph is no
+  longer shipped as an internal MCP server.
 - **Plan mode** + `complete_step` (evidence-backed step sign-off).
 - **No web dashboard** — the v2 line is terminal + desktop (Wails), by design.
 - Some granular v1 tools are intentionally consolidated (e.g. file-management ops

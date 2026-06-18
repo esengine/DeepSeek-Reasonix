@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
@@ -49,6 +50,101 @@ func TestObserveReadsNoMessageText(t *testing.T) {
 	m.observe(event.Event{Kind: event.Notice, Text: "see docs: empty final answer blocked is a guard"})
 	if m.c["empty_final"] != nil {
 		t.Errorf("empty_final should only match the notice prefix, got %v", m.c["empty_final"])
+	}
+}
+
+func TestObserveSettingsSnapshotUsesSafeBuckets(t *testing.T) {
+	cfg := config.Default()
+	if err := cfg.SetDesktopLanguage(""); err != nil {
+		t.Fatalf("SetDesktopLanguage: %v", err)
+	}
+	if err := cfg.SetDesktopLayoutStyle("workbench"); err != nil {
+		t.Fatalf("SetDesktopLayoutStyle: %v", err)
+	}
+	if err := cfg.SetDesktopAppearance("dark", "graphite"); err != nil {
+		t.Fatalf("SetDesktopAppearance: %v", err)
+	}
+	if err := cfg.SetDesktopCloseBehavior("quit"); err != nil {
+		t.Fatalf("SetDesktopCloseBehavior: %v", err)
+	}
+	if err := cfg.SetDesktopDisplayMode("compact"); err != nil {
+		t.Fatalf("SetDesktopDisplayMode: %v", err)
+	}
+	if err := cfg.SetAutoPlan("on"); err != nil {
+		t.Fatalf("SetAutoPlan: %v", err)
+	}
+	if err := cfg.SetDesktopStatusBarStyle("icon"); err != nil {
+		t.Fatalf("SetDesktopStatusBarStyle: %v", err)
+	}
+	if err := cfg.SetDesktopStatusBarItems([]string{"model", "cache", "balance"}); err != nil {
+		t.Fatalf("SetDesktopStatusBarItems: %v", err)
+	}
+	if err := cfg.SetDesktopCheckUpdates(false); err != nil {
+		t.Fatalf("SetDesktopCheckUpdates: %v", err)
+	}
+	customProvider := "Local OpenAI"
+	customModel := "Qwen-72B-Instruct.private"
+	cfg.Providers = append(cfg.Providers, config.ProviderEntry{
+		Name:    customProvider,
+		Kind:    "openai",
+		BaseURL: "http://127.0.0.1:9999/v1",
+		Models:  []string{customModel},
+		Default: customModel,
+	})
+	cfg.Agent.PlannerModel = customProvider + "/" + customModel
+	cfg.Desktop.ProviderAccess = []string{customProvider}
+	cfg.Bot.Connections = []config.BotConnectionConfig{{
+		Provider: "feishu",
+		Enabled:  true,
+		Status:   "connected",
+		Model:    customProvider + "/" + customModel,
+	}}
+
+	m := newMetricsAggregator(t.TempDir())
+	m.observeSettingsSnapshot(cfg)
+
+	want := map[string]string{
+		"settings_language":                "auto",
+		"client_surface":                   "desktop",
+		"client_version":                   metricBucket(version),
+		"settings_desktop_layout":          "workbench",
+		"settings_theme":                   "dark",
+		"settings_theme_style":             "graphite",
+		"settings_close_behavior":          "quit",
+		"settings_display_mode":            "compact",
+		"settings_auto_plan":               "on",
+		"settings_status_bar_style":        "icon",
+		"settings_status_bar_items_count":  "n_3",
+		"settings_check_updates":           "off",
+		"settings_default_model":           "deepseek_deepseek_v4_flash",
+		"settings_planner_model":           metricBucket("custom_" + customProvider + "_" + customModel),
+		"settings_provider_access":         metricBucket("custom_" + customProvider),
+		"settings_bot_enabled":             "off",
+		"settings_bot_connection_count":    "n_1",
+		"settings_bot_connection_provider": "feishu",
+		"settings_bot_connection_enabled":  "on",
+		"settings_bot_connection_status":   "connected",
+		"settings_bot_connection_model":    metricBucket("custom_" + customProvider + "_" + customModel),
+	}
+	for signal, bucket := range want {
+		if got := m.c[signal][bucket]; got != 1 {
+			t.Errorf("%s/%s = %d, want 1", signal, bucket, got)
+		}
+	}
+}
+
+func TestObserveSettingsSnapshotCountsDisabledPlannerAsOff(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agent.PlannerModel = ""
+
+	m := newMetricsAggregator(t.TempDir())
+	m.observeSettingsSnapshot(cfg)
+
+	if got := m.c["settings_planner_model"]["off"]; got != 1 {
+		t.Fatalf("settings_planner_model/off = %d, want 1", got)
+	}
+	if got := m.c["settings_planner_model"][safeModelBucket(cfg, cfg.DefaultModel)]; got != 0 {
+		t.Fatalf("disabled planner should not count the default model, got %d", got)
 	}
 }
 

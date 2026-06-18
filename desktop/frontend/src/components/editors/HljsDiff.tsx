@@ -1,5 +1,5 @@
 import type { DiffProps } from "../DiffView";
-import { diffLines } from "../../lib/diff";
+import { diffLines, diffRowsFromUnifiedDiff } from "../../lib/diff";
 import { highlightToHtml } from "../../lib/highlight";
 
 // HljsDiff is the syntax-highlighted default behind the diff seam: an LCS line
@@ -12,8 +12,8 @@ function lineNo(n?: number): string {
   return typeof n === "number" ? String(n) : "";
 }
 
-export default function HljsDiff({ original, modified, language, maxHeight }: DiffProps) {
-  const rows = diffLines(original, modified);
+export default function HljsDiff({ original = "", modified = "", diff = "", language, maxHeight }: DiffProps) {
+  const rows = diff ? diffRowsFromUnifiedDiff(diff) : diffLines(original, modified);
   return (
     <div className="diff hljs" style={maxHeight ? { maxHeight } : undefined}>
       <div className="diff__table">

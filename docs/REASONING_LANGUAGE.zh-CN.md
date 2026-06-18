@@ -44,7 +44,7 @@ reasonix config reasoning-language en
 reasonix config reasoning-language --local zh
 ```
 
-在 `reasonix chat` 内可以用斜杠命令：
+在 `reasonix` 内可以用斜杠命令：
 
 ```text
 /reasoning-language auto

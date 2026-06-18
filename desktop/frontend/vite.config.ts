@@ -88,6 +88,13 @@ function keepDistPlaceholder(): Plugin {
 const commit = buildCommit();
 const channel = buildChannel();
 
+const nodeModulePath = String.raw`[\\/]node_modules[\\/](?:\.pnpm[\\/][^\\/]+[\\/]node_modules[\\/])?`;
+const vendorReact = new RegExp(`${nodeModulePath}(?:react|react-dom)(?:[\\/]|$)`);
+const vendorMarkdown = new RegExp(
+  `${nodeModulePath}(?:react-markdown|remark-gfm|remark-math|rehype-katex|katex)(?:[\\/]|$)`,
+);
+const vendorHighlight = new RegExp(`${nodeModulePath}highlight\\.js(?:[\\/]|$)`);
+
 // base: "./" so built asset URLs are relative. Wails serves the embedded dist from
 // the app root over the wails:// scheme, where absolute "/assets/..." URLs 404.
 export default defineConfig({
@@ -112,22 +119,18 @@ export default defineConfig({
       keep_classnames: true,
       keep_fnames: true,
     },
-    rollupOptions: {
+    rolldownOptions: {
       output: {
         // Manual chunk splitting: keep the heavy markdown/math/code pipeline
         // in a separate chunk so it can be cached independently from the
         // app shell. The vendor chunk splits react+react-dom (stable, rarely
         // changes) from the markdown stack (changes more often).
-        manualChunks: {
-          "vendor-react": ["react", "react-dom"],
-          "vendor-markdown": [
-            "react-markdown",
-            "remark-gfm",
-            "remark-math",
-            "rehype-katex",
-            "katex",
+        codeSplitting: {
+          groups: [
+            { name: "vendor-react", test: vendorReact },
+            { name: "vendor-markdown", test: vendorMarkdown },
+            { name: "vendor-highlight", test: vendorHighlight },
           ],
-          "vendor-highlight": ["highlight.js"],
         },
       },
     },

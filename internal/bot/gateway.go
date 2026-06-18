@@ -29,8 +29,9 @@ type GatewayConfig struct {
 	Enabled            map[Platform]bool
 	Debounce           time.Duration
 	OnInbound          func(InboundMessage)
-	// OnSessionReady persists the concrete Reasonix session ID after the bot
-	// has created or reused the controller for an inbound remote.
+	// OnSessionReady notifies the host after the bot has created or reused the
+	// controller for an inbound remote. Hosts may persist the concrete session ID
+	// or keep the remote as a read-only channel.
 	OnSessionReady func(InboundMessage, string) error
 	// OnToolApprovalModeChange persists a remote IM request such as /yolo on.
 	// The gateway updates the live session and in-memory defaults first; this

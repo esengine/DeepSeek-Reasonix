@@ -214,18 +214,78 @@ func TestCapabilitiesIncludesDisabledSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	view := a.Capabilities()
-	states := map[string]bool{}
-	for _, sk := range view.Skills {
-		states[sk.Name] = sk.Enabled
+	settingsView := a.SkillsSettings()
+	assertSkillStates := func(t *testing.T, skills []SkillView) {
+		t.Helper()
+		states := map[string]bool{}
+		for _, sk := range skills {
+			states[sk.Name] = sk.Enabled
+		}
+		if states["explore"] != true {
+			t.Fatalf("explore should be enabled in skills view: %+v", skills)
+		}
+		enabled, ok := states["review"]
+		if !ok || enabled {
+			t.Fatalf("review should be disabled but present in skills view: %+v", skills)
+		}
 	}
-	if states["explore"] != true {
-		t.Fatalf("explore should be enabled in capabilities: %+v", view.Skills)
+	assertSkillStates(t, settingsView.Skills)
+	assertSkillStates(t, a.Capabilities().Skills)
+}
+
+func TestSkillsSettingsRefreshInvalidatesSkillRootsCache(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	project := t.TempDir()
+	root := filepath.Join(project, ".reasonix", "skills")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	enabled, ok := states["review"]
-	if !ok || enabled {
-		t.Fatalf("review should be disabled but present in capabilities: %+v", view.Skills)
+	if err := os.WriteFile(filepath.Join(root, "one.md"), []byte("---\ndescription: one\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
 	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(wd)
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+	a := NewApp()
+	a.setTestCtrl(control.New(control.Options{}), "")
+	defer a.activeCtrl().Close()
+
+	first := a.SkillsSettings()
+	if got := skillRootCount(first.SkillRoots, root); got != 1 {
+		t.Fatalf("initial project skill count = %d, want 1; roots=%+v", got, first.SkillRoots)
+	}
+	if err := os.WriteFile(filepath.Join(root, "two.md"), []byte("---\ndescription: two\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cached := a.SkillsSettings()
+	if got := skillRootCount(cached.SkillRoots, root); got != 1 {
+		t.Fatalf("cached project skill count = %d, want 1 before refresh; roots=%+v", got, cached.SkillRoots)
+	}
+	if err := a.RefreshSkills(); err != nil {
+		t.Fatalf("RefreshSkills: %v", err)
+	}
+	refreshed := a.SkillsSettings()
+	if got := skillRootCount(refreshed.SkillRoots, root); got != 2 {
+		t.Fatalf("refreshed project skill count = %d, want 2; roots=%+v", got, refreshed.SkillRoots)
+	}
+}
+
+func skillRootCount(roots []SkillRootView, path string) int {
+	want := realTestPath(path)
+	for _, r := range roots {
+		if realTestPath(r.Dir) == want {
+			return r.Skills
+		}
+	}
+	return -1
 }
 
 func realTestPath(path string) string {

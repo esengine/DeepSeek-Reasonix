@@ -7,9 +7,8 @@ import (
 )
 
 // TestLoadDotEnvFallsBackToHome proves the unified-key behaviour: the working
-// directory's .env wins, but a key only present in ~/.env is still picked up —
-// so a key set once in the home .env (the desktop app writes there) reaches the
-// CLI run from any project directory. Existing env vars beat both files.
+// directory's .env is still read as a fallback, and a key only present in ~/.env
+// is picked up too. Existing env vars beat file-backed credential sources.
 func TestLoadDotEnvFallsBackToHome(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
@@ -23,6 +22,7 @@ func TestLoadDotEnvFallsBackToHome(t *testing.T) {
 
 	t.Chdir(cwd)
 	t.Setenv("HOME", home)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Setenv("USERPROFILE", home) // os.UserHomeDir reads HOME on Unix and USERPROFILE on Windows.
 
 	// Start clean so the file values are what land (Setenv auto-restores).
@@ -47,14 +47,15 @@ func TestLoadDotEnvFallsBackToHome(t *testing.T) {
 }
 
 // TestLoadDotEnvReadsGlobalCredentials proves `reasonix setup`'s target — the
-// reasonix-owned credentials file in the user config dir — is loaded from any
-// working directory, while a project ./.env still wins on a shared key.
+// reasonix-owned credentials file under Reasonix home — is loaded from any
+// working directory and wins over a project ./.env on a shared key.
 func TestLoadDotEnvReadsGlobalCredentials(t *testing.T) {
 	cwd := t.TempDir()
 	cfgHome := t.TempDir()
 
 	t.Chdir(cwd)
 	t.Setenv("HOME", cfgHome)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Setenv("USERPROFILE", cfgHome)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(cfgHome, ".config"))
 	t.Setenv("AppData", filepath.Join(cfgHome, "AppData"))
@@ -66,7 +67,7 @@ func TestLoadDotEnvReadsGlobalCredentials(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(cred), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(cred, []byte("KEY_GLOBAL=from_credentials\nKEY_SHARED=global_loses\n"), 0o600); err != nil {
+	if err := os.WriteFile(cred, []byte("KEY_GLOBAL=from_credentials\nKEY_SHARED=global_wins\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(cwd, ".env"), []byte("KEY_SHARED=cwd_wins\n"), 0o600); err != nil {
@@ -83,8 +84,271 @@ func TestLoadDotEnvReadsGlobalCredentials(t *testing.T) {
 	if got := os.Getenv("KEY_GLOBAL"); got != "from_credentials" {
 		t.Errorf("global credentials not loaded: KEY_GLOBAL=%q want from_credentials", got)
 	}
-	if got := os.Getenv("KEY_SHARED"); got != "cwd_wins" {
-		t.Errorf("project .env should win over global credentials: KEY_SHARED=%q want cwd_wins", got)
+	if got := os.Getenv("KEY_SHARED"); got != "global_wins" {
+		t.Errorf("global credentials should win over project .env: KEY_SHARED=%q want global_wins", got)
+	}
+}
+
+func TestResolveCredentialGlobalFirstDoesNotMutateProjectEnv(t *testing.T) {
+	project := t.TempDir()
+	home := t.TempDir()
+
+	t.Setenv("HOME", home)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+
+	key := "KEY_GLOBAL_PRIORITY"
+	if err := os.MkdirAll(filepath.Dir(UserCredentialsPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(UserCredentialsPath(), []byte(key+"=from_credentials\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, ".env"), []byte(key+"=from_project\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(key, "")
+	os.Unsetenv(key)
+	t.Setenv(key, "from_project")
+
+	if got := os.Getenv(key); got != "from_project" {
+		t.Fatalf("precondition: existing env should be project value, got %q", got)
+	}
+	got := ResolveCredentialForRootGlobalFirst(project, key)
+	if got.Value != "from_credentials" || got.Source.Kind != CredentialSourceCredentials {
+		t.Fatalf("credential = %+v, want global credentials for settings display", got)
+	}
+	if env := os.Getenv(key); env != "from_project" {
+		t.Fatalf("global-first resolution mutated process env: %q", env)
+	}
+}
+
+func TestResolveCredentialSourceShowsCredentialsShadowingProjectEnv(t *testing.T) {
+	cwd := t.TempDir()
+	cfgHome := t.TempDir()
+
+	t.Chdir(cwd)
+	t.Setenv("HOME", cfgHome)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	t.Setenv("USERPROFILE", cfgHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(cfgHome, ".config"))
+	t.Setenv("AppData", filepath.Join(cfgHome, "AppData"))
+
+	key := "KEY_SOURCE_PROJECT"
+	cred := UserCredentialsPath()
+	if cred == "" {
+		t.Skip("user config dir unresolved on this platform")
+	}
+	if err := os.MkdirAll(filepath.Dir(cred), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cred, []byte(key+"=from_credentials\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".env"), []byte(key+"=from_project\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(key, "")
+	os.Unsetenv(key)
+
+	loadDotEnv()
+
+	got := ResolveCredentialForRoot(cwd, key)
+	if !got.Set || got.Source.Kind != CredentialSourceCredentials {
+		t.Fatalf("source = %+v set=%v, want Reasonix credentials", got.Source, got.Set)
+	}
+	foundProjectShadow := false
+	for _, source := range got.Shadowed {
+		if source.Kind == CredentialSourceProjectEnv {
+			foundProjectShadow = true
+		}
+	}
+	if !foundProjectShadow {
+		t.Fatalf("shadowed = %+v, want project .env shadowed by credentials", got.Shadowed)
+	}
+}
+
+func TestResolveCredentialSourceShowsCredentialsShadowingEmptyProjectEnv(t *testing.T) {
+	cwd := t.TempDir()
+	cfgHome := t.TempDir()
+
+	t.Chdir(cwd)
+	t.Setenv("HOME", cfgHome)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	t.Setenv("USERPROFILE", cfgHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(cfgHome, ".config"))
+	t.Setenv("AppData", filepath.Join(cfgHome, "AppData"))
+
+	key := "KEY_SOURCE_EMPTY_PROJECT"
+	cred := UserCredentialsPath()
+	if cred == "" {
+		t.Skip("user config dir unresolved on this platform")
+	}
+	if err := os.MkdirAll(filepath.Dir(cred), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cred, []byte(key+"=from_credentials\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".env"), []byte(key+"=\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(key, "")
+	os.Unsetenv(key)
+
+	if _, err := StoreCredentialLines([]string{key + "=from_credentials"}); err != nil {
+		t.Fatalf("StoreCredentialLines: %v", err)
+	}
+
+	got := ResolveCredentialForRoot(cwd, key)
+	foundProjectShadow := false
+	for _, source := range got.Shadowed {
+		if source.Kind == CredentialSourceProjectEnv {
+			foundProjectShadow = true
+		}
+	}
+	if !foundProjectShadow {
+		t.Fatalf("shadowed = %+v, want empty project .env shadowed by credentials", got.Shadowed)
+	}
+}
+
+func TestResolveCredentialSourceShowsCredentialsBeforeHomeEnv(t *testing.T) {
+	cwd := t.TempDir()
+	cfgHome := t.TempDir()
+
+	t.Chdir(cwd)
+	t.Setenv("HOME", cfgHome)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	t.Setenv("USERPROFILE", cfgHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(cfgHome, ".config"))
+	t.Setenv("AppData", filepath.Join(cfgHome, "AppData"))
+
+	key := "KEY_SOURCE_CREDENTIALS"
+	cred := UserCredentialsPath()
+	if cred == "" {
+		t.Skip("user config dir unresolved on this platform")
+	}
+	if err := os.MkdirAll(filepath.Dir(cred), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cred, []byte(key+"=from_credentials\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgHome, ".env"), []byte(key+"=from_home\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(key, "")
+	os.Unsetenv(key)
+
+	loadDotEnv()
+
+	got := ResolveCredentialForRoot(cwd, key)
+	if !got.Set || got.Source.Kind != CredentialSourceCredentials {
+		t.Fatalf("source = %+v set=%v, want Reasonix credentials", got.Source, got.Set)
+	}
+	if got.Value != "from_credentials" {
+		t.Fatalf("value = %q, want credentials value", got.Value)
+	}
+}
+
+func TestStoreCredentialLinesFileMode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	t.Setenv("KEY_FILE_MODE", "")
+	os.Unsetenv("KEY_FILE_MODE")
+
+	target, err := StoreCredentialLines([]string{"KEY_FILE_MODE=from_file_store"})
+	if err != nil {
+		t.Fatalf("StoreCredentialLines: %v", err)
+	}
+	if target != UserCredentialsPath() {
+		t.Fatalf("target = %q, want %q", target, UserCredentialsPath())
+	}
+	data, err := os.ReadFile(UserCredentialsPath())
+	if err != nil {
+		t.Fatalf("read credentials file: %v", err)
+	}
+	if string(data) != "KEY_FILE_MODE=from_file_store\n" {
+		t.Fatalf("credentials file = %q", data)
+	}
+	if got := os.Getenv("KEY_FILE_MODE"); got != "from_file_store" {
+		t.Fatalf("process env = %q, want stored value", got)
+	}
+}
+
+func TestStoreCredentialLinesRejectsUnsafeFileLines(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+
+	_, err := StoreCredentialLines([]string{
+		"VALID_KEY=kept",
+		"BAD-KEY=ignored",
+		"MULTILINE=first\nINJECTED=second",
+	})
+	if err != nil {
+		t.Fatalf("StoreCredentialLines: %v", err)
+	}
+	data, err := os.ReadFile(UserCredentialsPath())
+	if err != nil {
+		t.Fatalf("read credentials file: %v", err)
+	}
+	if string(data) != "VALID_KEY=kept\n" {
+		t.Fatalf("credentials file = %q", data)
+	}
+	if got := os.Getenv("INJECTED"); got != "" {
+		t.Fatalf("injected env was set: %q", got)
+	}
+}
+
+func TestSetCredentialRejectsInvalidInput(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+
+	if _, err := SetCredential("BAD-KEY", "value"); err == nil {
+		t.Fatal("SetCredential accepted invalid key")
+	}
+	if _, err := SetCredential("VALID_KEY", "first\nsecond"); err == nil {
+		t.Fatal("SetCredential accepted newline value")
+	}
+	if _, err := os.Stat(UserCredentialsPath()); !os.IsNotExist(err) {
+		t.Fatalf("credentials file should not be created for rejected input, stat err=%v", err)
+	}
+}
+
+func TestProjectConfigCannotOverrideCredentialStoreMode(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "")
+	os.Unsetenv("REASONIX_CREDENTIALS_STORE")
+	if err := os.MkdirAll(filepath.Dir(UserConfigPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(UserConfigPath(), []byte(`credentials_store = "file"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`credentials_store = "keyring"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadForRoot(project)
+	if err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
+	}
+	if cfg.CredentialsStore != CredentialsStoreFile {
+		t.Fatalf("CredentialsStore = %q, want file from user config", cfg.CredentialsStore)
 	}
 }
 
@@ -98,6 +362,7 @@ func TestLoadDotEnvDoesNotOverrideEnv(t *testing.T) {
 	t.Chdir(cwd)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("PINNED", "from_env")
 

@@ -217,6 +217,344 @@ func writeLegacyMeta(t *testing.T, srcDir, base, workspace, summary string) {
 	}
 }
 
+const v1MessageSession = `{"role":"user","content":"recovered after downgrade"}
+{"role":"assistant","content":"ok"}
+`
+
+// stampMigrated marks src/dest as already through the one-time passes, with the
+// routing watermark set to `at`. It mirrors what a completed migration leaves
+// behind so the re-home pass (not the full passes) handles the next run.
+func stampMigrated(t *testing.T, dest string, at time.Time) {
+	t.Helper()
+	for _, m := range []string{legacyRoutedHomeImportMarker, legacyJsonlPassMarker, legacyImportMarker} {
+		path := filepath.Join(dest, m)
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestRehomeStrandedSessionAfterDowngrade reproduces #4666: after the one-time
+// routing pass completes, a downgrade-to-old-build writes a project session into
+// the flat dir. The next upgrade must re-home it into its workspace dir even
+// though the routing marker is present.
+func TestRehomeStrandedSessionAfterDowngrade(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	workspace := t.TempDir()
+	projectDest := t.TempDir()
+	projectDir := func(root string) string {
+		if root == workspace {
+			return projectDest
+		}
+		return ""
+	}
+
+	// Migration already ran a day ago.
+	past := time.Now().Add(-24 * time.Hour)
+	stampMigrated(t, dest, past)
+
+	// The downgraded build then wrote a project session into the flat dir.
+	base := "20260101-000000.000000000-deepseek"
+	sessionPath := filepath.Join(src, base+".jsonl")
+	if err := os.WriteFile(sessionPath, []byte(v1MessageSession), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveBranchMeta(sessionPath, BranchMeta{Scope: "project", WorkspaceRoot: workspace, TopicTitle: "downgrade work"}); err != nil {
+		t.Fatal(err)
+	}
+	ref := "sa_20260101_000000_000000000_aabbccddeeff"
+	writeMigratedSubagentArtifact(t, src, ref, base)
+
+	n, err := MigrateLegacySessions(src, dest, projectDir)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("stranded project session should be re-homed, imported %d", n)
+	}
+	if _, err := os.Stat(filepath.Join(projectDest, base+".jsonl")); err != nil {
+		t.Errorf("session should land in the project dir: %v", err)
+	}
+	// The branch sidecar must follow so the sidebar keeps title/topic.
+	if _, err := os.Stat(BranchMetaPath(filepath.Join(projectDest, base+".jsonl"))); err != nil {
+		t.Errorf("branch meta sidecar should be copied alongside: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectDest, "subagents", ref+".jsonl")); err != nil {
+		t.Errorf("subagent transcript should be copied alongside: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectDest, "subagents", ref+".meta.json")); err != nil {
+		t.Errorf("subagent metadata should be copied alongside: %v", err)
+	}
+	// Source is never modified.
+	if _, err := os.Stat(sessionPath); err != nil {
+		t.Errorf("source session must be left intact: %v", err)
+	}
+}
+
+func TestJsonlPassRoutesBranchMetaWhenJsonlMarkerMissing(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	workspace := t.TempDir()
+	projectDest := t.TempDir()
+	projectDir := func(root string) string {
+		if root == workspace {
+			return projectDest
+		}
+		return ""
+	}
+
+	past := time.Now().Add(-24 * time.Hour)
+	routedMarker := filepath.Join(dest, legacyRoutedHomeImportMarker)
+	if err := os.WriteFile(routedMarker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(routedMarker, past, past); err != nil {
+		t.Fatal(err)
+	}
+
+	base := "20260101-003000.000000000-deepseek"
+	sessionPath := filepath.Join(src, base+".jsonl")
+	if err := os.WriteFile(sessionPath, []byte(v1MessageSession), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveBranchMeta(sessionPath, BranchMeta{Scope: "project", WorkspaceRoot: workspace, TopicTitle: "half-upgraded"}); err != nil {
+		t.Fatal(err)
+	}
+	ref := "sa_20260101_003000_000000000_aabbccddeeff"
+	writeMigratedSubagentArtifact(t, src, ref, base)
+
+	n, err := MigrateLegacySessions(src, dest, projectDir)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("branch-meta jsonl session should be imported once, got %d", n)
+	}
+	if _, err := os.Stat(filepath.Join(projectDest, base+".jsonl")); err != nil {
+		t.Fatalf("session should be routed to the project dir while the jsonl marker is missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, base+".jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("project session must not be copied into the global dir: %v", err)
+	}
+	if _, err := os.Stat(BranchMetaPath(filepath.Join(projectDest, base+".jsonl"))); err != nil {
+		t.Fatalf("branch meta sidecar should be copied alongside: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectDest, "subagents", ref+".jsonl")); err != nil {
+		t.Fatalf("subagent transcript should be copied alongside: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectDest, "subagents", ref+".meta.json")); err != nil {
+		t.Fatalf("subagent metadata should be copied alongside: %v", err)
+	}
+	if n, err := MigrateLegacySessions(src, dest, projectDir); err != nil || n != 0 {
+		t.Fatalf("second run should be a no-op: n=%d err=%v", n, err)
+	}
+}
+
+// TestRehomeLeavesGlobalSessionsAlone guards the main risk: the flat dir is also
+// where CLI/global sessions live. A session with no project scope must stay put.
+func TestRehomeLeavesGlobalSessionsAlone(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	projectDir := func(string) string { return t.TempDir() }
+
+	stampMigrated(t, dest, time.Now().Add(-24*time.Hour))
+
+	// A global session (no branch meta, no workspace) written post-migration.
+	base := "20260101-010000.000000000-deepseek"
+	if err := os.WriteFile(filepath.Join(src, base+".jsonl"), []byte(v1MessageSession), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := MigrateLegacySessions(src, dest, projectDir)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("a global flat session must not be re-homed, imported %d", n)
+	}
+}
+
+// TestRehomeIgnoresSessionsOlderThanWatermark ensures a session the user
+// imported and then deleted is not resurrected: only files newer than the
+// migration watermark are candidates.
+func TestRehomeIgnoresSessionsOlderThanWatermark(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	workspace := t.TempDir()
+	projectDest := t.TempDir()
+	projectDir := func(root string) string {
+		if root == workspace {
+			return projectDest
+		}
+		return ""
+	}
+
+	now := time.Now()
+	stampMigrated(t, dest, now) // watermark = now
+
+	// A project session whose mtime predates the watermark (it was already seen
+	// by the original pass and the user deleted the import).
+	base := "20250101-000000.000000000-deepseek"
+	sessionPath := filepath.Join(src, base+".jsonl")
+	if err := os.WriteFile(sessionPath, []byte(v1MessageSession), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveBranchMeta(sessionPath, BranchMeta{Scope: "project", WorkspaceRoot: workspace}); err != nil {
+		t.Fatal(err)
+	}
+	old := now.Add(-48 * time.Hour)
+	if err := os.Chtimes(sessionPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := MigrateLegacySessions(src, dest, projectDir)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("a pre-watermark session must not be revived, imported %d", n)
+	}
+}
+
+// TestRehomeIsIdempotent verifies the second boot does not re-import: the
+// destination check skips already-routed sessions and the watermark advances.
+func TestRehomeIsIdempotent(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	workspace := t.TempDir()
+	projectDest := t.TempDir()
+	projectDir := func(root string) string {
+		if root == workspace {
+			return projectDest
+		}
+		return ""
+	}
+
+	stampMigrated(t, dest, time.Now().Add(-24*time.Hour))
+	base := "20260101-020000.000000000-deepseek"
+	sessionPath := filepath.Join(src, base+".jsonl")
+	os.WriteFile(sessionPath, []byte(v1MessageSession), 0o644)
+	if err := SaveBranchMeta(sessionPath, BranchMeta{Scope: "project", WorkspaceRoot: workspace}); err != nil {
+		t.Fatal(err)
+	}
+
+	if n, _ := MigrateLegacySessions(src, dest, projectDir); n != 1 {
+		t.Fatalf("first run should re-home 1, got %d", n)
+	}
+	if n, err := MigrateLegacySessions(src, dest, projectDir); err != nil || n != 0 {
+		t.Fatalf("second run must be a no-op: n=%d err=%v", n, err)
+	}
+}
+
+func TestRehomeKeepsWatermarkWhenProjectCopyFails(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	workspace := t.TempDir()
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("block"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projectDir := func(root string) string {
+		if root == workspace {
+			return filepath.Join(blocker, "sessions")
+		}
+		return ""
+	}
+
+	past := time.Now().Add(-24 * time.Hour).Round(0)
+	stampMigrated(t, dest, past)
+	base := "20260101-023000.000000000-deepseek"
+	sessionPath := filepath.Join(src, base+".jsonl")
+	if err := os.WriteFile(sessionPath, []byte(v1MessageSession), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveBranchMeta(sessionPath, BranchMeta{Scope: "project", WorkspaceRoot: workspace}); err != nil {
+		t.Fatal(err)
+	}
+
+	if n, err := MigrateLegacySessions(src, dest, projectDir); err != nil || n != 0 {
+		t.Fatalf("copy failure should not import: n=%d err=%v", n, err)
+	}
+	info, err := os.Stat(filepath.Join(dest, legacyRoutedHomeImportMarker))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(past) {
+		t.Fatalf("watermark advanced after copy failure: got %s want %s", info.ModTime(), past)
+	}
+}
+
+func TestRehomeKeepsWatermarkWhenSubagentCopyFails(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	workspace := t.TempDir()
+	projectDest := t.TempDir()
+	projectDir := func(root string) string {
+		if root == workspace {
+			return projectDest
+		}
+		return ""
+	}
+
+	past := time.Now().Add(-24 * time.Hour).Round(0)
+	stampMigrated(t, dest, past)
+	base := "20260101-024000.000000000-deepseek"
+	sessionPath := filepath.Join(src, base+".jsonl")
+	if err := os.WriteFile(sessionPath, []byte(v1MessageSession), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveBranchMeta(sessionPath, BranchMeta{Scope: "project", WorkspaceRoot: workspace}); err != nil {
+		t.Fatal(err)
+	}
+	writeMigratedSubagentArtifact(t, src, "sa_20260101_024000_000000000_aabbccddeeff", base)
+	if err := os.MkdirAll(projectDest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDest, "subagents"), []byte("block"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if n, err := MigrateLegacySessions(src, dest, projectDir); err != nil || n != 1 {
+		t.Fatalf("parent session should still import: n=%d err=%v", n, err)
+	}
+	info, err := os.Stat(filepath.Join(dest, legacyRoutedHomeImportMarker))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(past) {
+		t.Fatalf("watermark advanced after subagent copy failure: got %s want %s", info.ModTime(), past)
+	}
+}
+
+func writeMigratedSubagentArtifact(t *testing.T, sessionDir, ref, parentSession string) {
+	t.Helper()
+	subagentDir := filepath.Join(sessionDir, "subagents")
+	if err := os.MkdirAll(subagentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subagentDir, ref+".jsonl"), []byte(`{"role":"user","content":"sub"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	meta := SubagentMeta{
+		Ref:           ref,
+		Status:        SubagentCompleted,
+		Kind:          "task",
+		Name:          "task",
+		ParentSession: parentSession,
+	}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subagentDir, ref+".meta.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMigrateLegacySessionsRoutesByWorkspaceMeta(t *testing.T) {
 	src := t.TempDir()
 	global := t.TempDir()

@@ -19,7 +19,9 @@ function eq<T>(a: T, b: T, label: string) {
     process.stdout.write(`  PASS  ${label}\n`);
     passed += 1;
   } else {
-    process.stdout.write(`  FAIL  ${label}: expected ${JSON.stringify(b).slice(0, 120)}, got ${JSON.stringify(a).slice(0, 120)}\n`);
+    const expected = JSON.stringify(b) ?? String(b);
+    const actual = JSON.stringify(a) ?? String(a);
+    process.stdout.write(`  FAIL  ${label}: expected ${expected.slice(0, 120)}, got ${actual.slice(0, 120)}\n`);
     failed += 1;
   }
 }
@@ -122,6 +124,80 @@ console.log("\ntool data archiving on tool_result");
   const withoutArchive = TOOL_COUNT * (ARGS_SIZE + OUTPUT_SIZE);
   const reduction = (withoutArchive - totalStringBytes) / withoutArchive;
   ok(reduction > 0.95, `archive removed ${(reduction * 100).toFixed(0)}% of tool string data`);
+}
+
+// ── Test 6: Restored history starts light, without a full-output transient ──
+{
+  const output = "z".repeat(100_000);
+  const args = JSON.stringify({ command: "printf z" });
+  const s = reducer(initialState, {
+    type: "history",
+    messages: [
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "hist-bash",
+          name: "bash",
+          arguments: "",
+          argumentsArchived: true,
+          subject: "printf z",
+          summary: "1 line",
+        }],
+      },
+      {
+        role: "tool",
+        content: "",
+        toolCallId: "hist-bash",
+        toolName: "bash",
+        toolResultArchived: true,
+      },
+    ] as any,
+  });
+  const tools = toolItems(s);
+  ok(tools.length === 1, "history restored one archived tool");
+  eq(tools[0].dataArchived, true, "history archived tool is marked archived");
+  eq(tools[0].output, undefined, "history archived tool has no output");
+  eq(tools[0].args, "", "history archived tool has no args");
+  eq(tools[0].subject, "printf z", "history archived tool keeps subject");
+  eq(tools[0].summary, "1 line", "history archived tool keeps summary");
+  const totalStringBytes = tools.reduce((sum, t) => sum + (t.args?.length ?? 0) + (t.output?.length ?? 0), 0);
+  ok(totalStringBytes < args.length + output.length, "history restore avoids large args/output strings");
+}
+
+// ── Test 7: Restored todo_write keeps full structured args for the todo panel ──
+{
+  const todos = Array.from({ length: 8 }, (_, i) => ({
+    content: `Task ${i} ${"x".repeat(30)}`,
+    status: i === 0 ? "in_progress" : "pending",
+  }));
+  const args = JSON.stringify({ todos });
+  const s = reducer(initialState, {
+    type: "history",
+    messages: [
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "todo-long",
+          name: "todo_write",
+          arguments: args,
+        }],
+      },
+      {
+        role: "tool",
+        content: "",
+        toolCallId: "todo-long",
+        toolName: "todo_write",
+        toolResultArchived: true,
+      },
+    ] as any,
+  });
+  const tools = toolItems(s);
+  const todo = tools.find((tool) => tool.name === "todo_write");
+  ok(Boolean(todo), "history restored todo_write");
+  eq(todo?.args, args, "todo_write args are not truncated during history restore");
+  eq(JSON.parse(todo?.args ?? "{}").todos.length, todos.length, "todo_write args remain parseable JSON");
 }
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

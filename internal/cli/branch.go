@@ -105,6 +105,15 @@ func (m *chatTUI) replayActiveBranch(title string) {
 	m.bubblePending = false
 	m.turnDiscarded = false
 
+	// Discard the previous session's transcript so the viewport only shows the
+	// newly loaded session. Without this the transcript accumulates across
+	// every /resume / /switch / /rewind / /branch, bloating memory and causing
+	// the scroll position to be preserved at a stale offset inside the merged
+	// content (#4584).
+	m.transcript = nil
+	m.transcriptDirty = true
+	m.forceGotoBottom = true
+
 	m.commitLine("")
 	if title != "" {
 		m.commitLine(dim("  -- " + title + " --"))

@@ -57,11 +57,177 @@ func TestProviderViewFromEntry_FiltersNonChatModels(t *testing.T) {
 			"mimo-v2-asr", "mimo-v2-tts",
 			"mimo-v2-tts-voiceclone", "mimo-v2-tts-voicedesign",
 		},
+		VisionModels: []string{"mimo-v2", "mimo-v2-asr", "mimo-v2-omni"},
 	}
 	view := providerViewFromEntry(p, true, false)
 	want := []string{"mimo-v2", "mimo-v2-pro"}
 	if !reflect.DeepEqual(view.Models, want) {
 		t.Errorf("ProviderView.Models = %v, want %v", view.Models, want)
+	}
+	if got, want := view.VisionModels, []string{"mimo-v2"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("ProviderView.VisionModels = %v, want %v", got, want)
+	}
+	if !view.VisionModelsSet {
+		t.Fatal("ProviderView.VisionModelsSet = false, want true for configured vision_models")
+	}
+}
+
+func TestProviderViewFromEntry_MigratesProviderWideVision(t *testing.T) {
+	p := config.ProviderEntry{
+		Name:   "custom",
+		Models: []string{"text-only", "qwen-vl-plus"},
+		Vision: true,
+	}
+	view := providerViewFromEntry(p, false, true)
+	if got, want := view.VisionModels, []string{"text-only", "qwen-vl-plus"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("ProviderView.VisionModels = %v, want %v", got, want)
+	}
+	if !view.VisionModelsSet {
+		t.Fatal("ProviderView.VisionModelsSet = false, want true for provider-wide vision")
+	}
+}
+
+func TestProviderViewFromEntryShowsKeySource(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("TEST_PROVIDER_KEY_SOURCE", "")
+	os.Unsetenv("TEST_PROVIDER_KEY_SOURCE")
+	if _, err := config.SetCredential("TEST_PROVIDER_KEY_SOURCE", "sk-test"); err != nil {
+		t.Fatalf("SetCredential: %v", err)
+	}
+
+	view := providerViewFromEntry(config.ProviderEntry{
+		Name:      "custom",
+		APIKeyEnv: "TEST_PROVIDER_KEY_SOURCE",
+	}, false, true)
+	if !view.KeySet {
+		t.Fatal("KeySet = false, want true")
+	}
+	if !view.Configured {
+		t.Fatal("Configured = false, want true from resolved credentials")
+	}
+	if view.KeySource == "" || !strings.Contains(view.KeySource, "credentials") {
+		t.Fatalf("KeySource = %q, want credentials source", view.KeySource)
+	}
+}
+
+func TestProviderViewFromEntryExposesNoAuthAvailability(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("LOCAL_API_KEY", "")
+	os.Unsetenv("LOCAL_API_KEY")
+
+	noAuth := providerViewFromEntry(config.ProviderEntry{
+		Name:    "local",
+		Kind:    "openai",
+		BaseURL: "http://127.0.0.1:23333/v1",
+		Models:  []string{"model-a"},
+	}, false, true)
+	if noAuth.RequiresKey {
+		t.Fatal("no-auth provider RequiresKey = true, want false")
+	}
+	if !noAuth.Configured {
+		t.Fatal("no-auth provider Configured = false, want true")
+	}
+	if noAuth.KeySet {
+		t.Fatal("no-auth provider KeySet = true, want false")
+	}
+
+	legacyLoopback := providerViewFromEntry(config.ProviderEntry{
+		Name:      "local",
+		Kind:      "openai",
+		BaseURL:   "http://127.0.0.1:23333/v1",
+		Models:    []string{"model-a"},
+		APIKeyEnv: "LOCAL_API_KEY",
+	}, false, true)
+	if legacyLoopback.RequiresKey {
+		t.Fatal("loopback provider with missing legacy key env RequiresKey = true, want false")
+	}
+	if !legacyLoopback.Configured {
+		t.Fatal("loopback provider with missing legacy key env Configured = false, want true")
+	}
+
+	official := providerViewFromEntry(config.ProviderEntry{
+		Name:    "deepseek",
+		Kind:    "openai",
+		BaseURL: "https://api.deepseek.com",
+		Models:  []string{"deepseek-v4-flash"},
+	}, true, true)
+	if !official.RequiresKey {
+		t.Fatal("official provider RequiresKey = false, want true")
+	}
+	if official.Configured {
+		t.Fatal("official provider without key Configured = true, want false")
+	}
+}
+
+func TestSetProviderKeyWarnsWhenProjectEnvWillShadowSavedKey(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("TEST_PROVIDER_SHADOW=old-key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TEST_PROVIDER_SHADOW", "")
+	os.Unsetenv("TEST_PROVIDER_SHADOW")
+
+	app := &App{
+		tabs:        map[string]*WorkspaceTab{"project": {ID: "project", WorkspaceRoot: project}},
+		activeTabID: "project",
+	}
+	warning, err := app.SetProviderKey("TEST_PROVIDER_SHADOW", "new-key")
+	if err != nil {
+		t.Fatalf("SetProviderKey: %v", err)
+	}
+	if !strings.Contains(warning, "project .env") {
+		t.Fatalf("SetProviderKey warning = %q, want project .env shadow warning", warning)
+	}
+	data, readErr := os.ReadFile(config.UserCredentialsPath())
+	if readErr != nil {
+		t.Fatalf("read credentials: %v", readErr)
+	}
+	if !strings.Contains(string(data), "TEST_PROVIDER_SHADOW=new-key") {
+		t.Fatalf("saved credentials missing new key:\n%s", data)
+	}
+}
+
+func TestSetProviderKeyWarnsWhenEmptyEnvironmentWillShadowSavedKey(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("TEST_PROVIDER_EMPTY_ENV", "")
+
+	app := &App{}
+	warning, err := app.SetProviderKey("TEST_PROVIDER_EMPTY_ENV", "new-key")
+	if err != nil {
+		t.Fatalf("SetProviderKey: %v", err)
+	}
+	if !strings.Contains(warning, "environment variable") {
+		t.Fatalf("SetProviderKey warning = %q, want environment variable shadow warning", warning)
+	}
+	data, readErr := os.ReadFile(config.UserCredentialsPath())
+	if readErr != nil {
+		t.Fatalf("read credentials: %v", readErr)
+	}
+	if !strings.Contains(string(data), "TEST_PROVIDER_EMPTY_ENV=new-key") {
+		t.Fatalf("saved credentials missing new key:\n%s", data)
+	}
+}
+
+func TestSetProviderKeyWarnsWhenEmptyProjectEnvWillShadowSavedKey(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("TEST_PROVIDER_EMPTY_PROJECT=\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TEST_PROVIDER_EMPTY_PROJECT", "")
+	os.Unsetenv("TEST_PROVIDER_EMPTY_PROJECT")
+
+	app := &App{
+		tabs:        map[string]*WorkspaceTab{"project": {ID: "project", WorkspaceRoot: project}},
+		activeTabID: "project",
+	}
+	warning, err := app.SetProviderKey("TEST_PROVIDER_EMPTY_PROJECT", "new-key")
+	if err != nil {
+		t.Fatalf("SetProviderKey: %v", err)
+	}
+	if !strings.Contains(warning, "project .env") {
+		t.Fatalf("SetProviderKey warning = %q, want project .env shadow warning", warning)
 	}
 }
 
@@ -106,12 +272,18 @@ func TestSaveProviderFiltersNonChatModels(t *testing.T) {
 
 	app := NewApp()
 	if err := app.SaveProvider(ProviderView{
-		Name:      "mimo-api",
-		Kind:      "openai",
-		BaseURL:   "https://api.xiaomimimo.com/v1",
-		Models:    []string{"mimo-v2.5-asr", "mimo-v2.5-pro", "mimo-v2.5-tts"},
-		Default:   "mimo-v2.5-asr",
-		APIKeyEnv: "MIMO_API_KEY",
+		Name:    "mimo-api",
+		Kind:    "openai",
+		BaseURL: "https://api.xiaomimimo.com/v1",
+		Models:  []string{"mimo-v2.5-asr", "mimo-v2.5-pro", "mimo-v2.5-tts"},
+		VisionModels: []string{
+			"mimo-v2.5-asr",
+			"mimo-v2.5-pro",
+			"mimo-v2.5-tts",
+		},
+		VisionModelsSet: true,
+		Default:         "mimo-v2.5-asr",
+		APIKeyEnv:       "MIMO_API_KEY",
 	}); err != nil {
 		t.Fatalf("SaveProvider: %v", err)
 	}
@@ -121,17 +293,125 @@ func TestSaveProviderFiltersNonChatModels(t *testing.T) {
 	if !ok {
 		t.Fatal("saved provider not found")
 	}
-	want := []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"}
+	want := []string{"mimo-v2.5-pro"}
 	if !reflect.DeepEqual(got.ModelList(), want) {
 		t.Errorf("saved provider models = %v, want %v", got.ModelList(), want)
 	}
 	if got.DefaultModel() != "mimo-v2.5-pro" {
 		t.Errorf("saved provider default = %q, want mimo-v2.5-pro", got.DefaultModel())
 	}
+	if got, want := got.VisionModels, []string{"mimo-v2.5-pro"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("saved provider vision_models = %v, want %v", got, want)
+	}
+	raw, err := os.ReadFile(config.UserConfigPath())
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	saved := string(raw)
+	blockStart := strings.Index(saved, "\n[[providers]]\nname        = \"mimo-api\"")
+	if blockStart < 0 {
+		t.Fatalf("saved config missing mimo-api provider block:\n%s", raw)
+	}
+	block := saved[blockStart:]
+	if next := strings.Index(block[len("\n[[providers]]"):], "\n[[providers]]"); next >= 0 {
+		block = block[:len("\n[[providers]]")+next]
+	}
+	if !strings.Contains(block, `models      = ["mimo-v2.5-pro"]`) {
+		t.Fatalf("saved provider block did not persist single selection as models array:\n%s", block)
+	}
+	if strings.Contains(block, `model       = "mimo-v2.5-pro"`) {
+		t.Fatalf("saved provider block should not persist explicit single selection as legacy model:\n%s", block)
+	}
+	if !strings.Contains(block, `vision_models = ["mimo-v2.5-pro"]`) {
+		t.Fatalf("saved provider block did not persist filtered vision_models:\n%s", block)
+	}
+}
+
+func TestSaveProviderClearsProviderWideVisionForPerModelSelection(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	cfg.Providers = []config.ProviderEntry{{
+		Name:    "custom",
+		Kind:    "openai",
+		BaseURL: "https://proxy.example.com/v1",
+		Models:  []string{"text-only", "qwen-vl-plus"},
+		Default: "text-only",
+		Vision:  true,
+	}}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+
+	if err := NewApp().SaveProvider(ProviderView{
+		Name:            "custom",
+		Kind:            "openai",
+		BaseURL:         "https://proxy.example.com/v1",
+		Models:          []string{"text-only", "qwen-vl-plus"},
+		VisionModels:    []string{"qwen-vl-plus"},
+		VisionModelsSet: true,
+		Default:         "text-only",
+	}); err != nil {
+		t.Fatalf("SaveProvider: %v", err)
+	}
+
+	gotCfg := config.LoadForEdit(config.UserConfigPath())
+	got, ok := gotCfg.Provider("custom")
+	if !ok {
+		t.Fatal("saved provider not found")
+	}
+	if got.Vision {
+		t.Fatal("saved provider kept provider-wide vision=true")
+	}
+	if got, want := got.VisionModels, []string{"qwen-vl-plus"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("saved provider vision_models = %v, want %v", got, want)
+	}
+	textOnly := *got
+	textOnly.Model = "text-only"
+	if config.EffectiveVision(&textOnly) {
+		t.Fatal("unchecked text-only model should not inherit image input")
+	}
+	vision := *got
+	vision.Model = "qwen-vl-plus"
+	if !config.EffectiveVision(&vision) {
+		t.Fatal("checked vision model should keep image input")
+	}
+}
+
+func TestSaveProviderPreservesExplicitEmptyVisionModels(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	if err := NewApp().SaveProvider(ProviderView{
+		Name:            "custom",
+		Kind:            "openai",
+		BaseURL:         "https://proxy.example.com/v1",
+		Models:          []string{"text-only", "qwen-vl-plus"},
+		VisionModels:    []string{},
+		VisionModelsSet: true,
+		Default:         "text-only",
+	}); err != nil {
+		t.Fatalf("SaveProvider: %v", err)
+	}
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	got, ok := cfg.Provider("custom")
+	if !ok {
+		t.Fatal("saved provider not found")
+	}
+	if got.VisionModels == nil || len(got.VisionModels) != 0 {
+		t.Fatalf("saved provider vision_models = %#v, want explicit empty list", got.VisionModels)
+	}
+	raw, err := os.ReadFile(config.UserConfigPath())
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	if !strings.Contains(string(raw), `vision_models = []`) {
+		t.Fatalf("saved config did not persist explicit empty vision_models:\n%s", raw)
+	}
 }
 
 func TestOfficialMimoAPITemplateIncludesVisionModels(t *testing.T) {
-	entries, keyEnv, err := officialProviderTemplate("mimo-api")
+	entries, keyEnv, err := officialProviderTemplate("mimo-api", "en")
 	if err != nil {
 		t.Fatalf("officialProviderTemplate: %v", err)
 	}
@@ -146,6 +426,35 @@ func TestOfficialMimoAPITemplateIncludesVisionModels(t *testing.T) {
 	}
 	if got.DefaultModel() != "mimo-v2.5-pro" {
 		t.Fatalf("mimo-api default = %q, want mimo-v2.5-pro", got.DefaultModel())
+	}
+	if got.Prices["mimo-v2.5-pro"] == nil || got.Prices["mimo-v2.5-pro"].Currency != "¥" || got.Prices["mimo-v2.5-pro"].Output != 6 {
+		t.Fatalf("mimo-v2.5-pro price = %+v, want RMB domestic pricing", got.Prices["mimo-v2.5-pro"])
+	}
+	if got.Prices["mimo-v2.5"] == nil || got.Prices["mimo-v2.5"].Currency != "¥" || got.Prices["mimo-v2.5"].Output != 2 {
+		t.Fatalf("mimo-v2.5 price = %+v, want RMB domestic pricing", got.Prices["mimo-v2.5"])
+	}
+	if got.Prices["mimo-v2-omni"] == nil || got.Prices["mimo-v2-omni"].Currency != "¥" || got.Prices["mimo-v2-omni"].Output != 2 {
+		t.Fatalf("mimo-v2-omni price = %+v, want RMB domestic pricing", got.Prices["mimo-v2-omni"])
+	}
+	if want := []string{"mimo-v2.5", "mimo-v2-omni"}; !reflect.DeepEqual(got.VisionModels, want) {
+		t.Fatalf("mimo-api vision_models = %v, want %v", got.VisionModels, want)
+	}
+}
+
+func TestOfficialDeepSeekTemplateDefaultsToRMBPricing(t *testing.T) {
+	entries, keyEnv, err := officialProviderTemplate("deepseek", "en")
+	if err != nil {
+		t.Fatalf("officialProviderTemplate: %v", err)
+	}
+	if keyEnv != "DEEPSEEK_API_KEY" || len(entries) != 1 {
+		t.Fatalf("template = %v/%q, want one DEEPSEEK_API_KEY entry", entries, keyEnv)
+	}
+	got := entries[0]
+	if got.Prices["deepseek-v4-flash"] == nil || got.Prices["deepseek-v4-flash"].Currency != "¥" || got.Prices["deepseek-v4-flash"].Output != 2 {
+		t.Fatalf("deepseek-v4-flash price = %+v, want RMB pricing", got.Prices["deepseek-v4-flash"])
+	}
+	if got.Prices["deepseek-v4-pro"] == nil || got.Prices["deepseek-v4-pro"].Currency != "¥" || got.Prices["deepseek-v4-pro"].Output != 6 {
+		t.Fatalf("deepseek-v4-pro price = %+v, want RMB pricing", got.Prices["deepseek-v4-pro"])
 	}
 }
 
@@ -256,6 +565,29 @@ func TestSetDesktopCheckUpdatesPersistsToUserConfig(t *testing.T) {
 	}
 	if cfg.DesktopCheckUpdates() {
 		t.Fatal("DesktopCheckUpdates() = true, want false")
+	}
+}
+
+func TestSetDesktopMetricsDefaultsOnAndPersistsOff(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	if !app.Settings().Metrics {
+		t.Fatal("Settings().Metrics default = false, want true")
+	}
+	if err := app.SetDesktopMetrics(false); err != nil {
+		t.Fatalf("SetDesktopMetrics: %v", err)
+	}
+	view := app.Settings()
+	if view.Metrics {
+		t.Fatal("Settings().Metrics = true, want false")
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if cfg.Desktop.Metrics == nil || *cfg.Desktop.Metrics {
+		t.Fatalf("desktop.metrics = %+v, want false", cfg.Desktop.Metrics)
+	}
+	if cfg.DesktopMetrics() {
+		t.Fatal("DesktopMetrics() = true, want false")
 	}
 }
 

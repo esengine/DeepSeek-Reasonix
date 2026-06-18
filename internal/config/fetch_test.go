@@ -97,3 +97,25 @@ func TestProviderFetchModelsFallsBackToV1Models(t *testing.T) {
 		t.Fatalf("got %v, want [model-a model-b]", got)
 	}
 }
+
+func TestProviderFetchModelsAllowsNoAuthEndpoint(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			http.Error(w, "unexpected auth header", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]string{{"id": "local-b"}, {"id": "local-a"}},
+		})
+	}))
+	defer srv.Close()
+
+	p := ProviderEntry{Name: "local", BaseURL: srv.URL}
+	got, err := p.FetchModels(context.Background())
+	if err != nil {
+		t.Fatalf("FetchModels no-auth: %v", err)
+	}
+	if len(got) != 2 || got[0] != "local-a" || got[1] != "local-b" {
+		t.Fatalf("got %v, want [local-a local-b]", got)
+	}
+}

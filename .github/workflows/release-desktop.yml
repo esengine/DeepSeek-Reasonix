@@ -55,6 +55,9 @@ jobs:
   build:
     name: build (${{ matrix.name }})
     needs: cache-guard
+    permissions:
+      contents: read # checkout only; the publish job holds contents: write
+      actions: read # SignPath reads run details + downloads the unsigned artifact
     strategy:
       fail-fast: false
       matrix:
@@ -66,6 +69,10 @@ jobs:
           - { runner: windows-11-arm, platform: windows/arm64, name: windows-arm64 }
           - { runner: ubuntu-22.04, platform: linux/amd64, name: linux-amd64 }
     runs-on: ${{ matrix.runner }}
+    env:
+      # Windows Authenticode signing engages only when the SignPath token is set, so
+      # forks / token-less runs still build (unsigned), mirroring the APPLE_* gate.
+      HAS_SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
     defaults:
       run:
         shell: bash # desktop-build.sh is bash; windows runners default to pwsh otherwise
@@ -162,6 +169,44 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: scripts/desktop-build.sh "${{ matrix.platform }}" "${{ steps.ver.outputs.version }}" "${{ steps.ver.outputs.channel }}"
+
+      # Authenticode-sign the Windows installer through SignPath. Runs BEFORE minisign:
+      # the signature rewrites the installer's bytes, so the updater's minisign sig and
+      # the manifest SHA must be computed over the signed build. SignPath pulls the file
+      # from the Actions artifact API, so it must be uploaded first. Canary signs with the
+      # test certificate; stable/rc sign with the Foundation release certificate, but only
+      # once SIGNPATH_RELEASE_SIGNING_READY is set — until that cert clears CSR-pending,
+      # stable ships unsigned instead of failing the whole release on an invalid policy.
+      - name: Upload unsigned installer for SignPath
+        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true' && (steps.ver.outputs.channel == 'canary' || vars.SIGNPATH_RELEASE_SIGNING_READY == 'true')
+        id: unsigned-installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-${{ matrix.name }}
+          path: dist/*installer*.exe
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Submit installer for Authenticode signing
+        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true' && (steps.ver.outputs.channel == 'canary' || vars.SIGNPATH_RELEASE_SIGNING_READY == 'true')
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: DeepSeek-Reasonix
+          signing-policy-slug: ${{ steps.ver.outputs.channel == 'canary' && 'test-signing' || 'release-signing' }}
+          artifact-configuration-slug: windows-installer
+          github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
+          github-token: ${{ github.token }}
+          wait-for-completion: true
+          # The policy uses an approval process — leave headroom for a human to approve
+          # the request (the approver gets an email on submit) before the job gives up.
+          wait-for-completion-timeout-in-seconds: 1800
+          output-artifact-directory: signed
+
+      - name: Replace installer with signed build
+        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true' && (steps.ver.outputs.channel == 'canary' || vars.SIGNPATH_RELEASE_SIGNING_READY == 'true')
+        run: cp signed/*installer*.exe dist/
 
       - name: Sign artifacts (minisign)
         working-directory: desktop

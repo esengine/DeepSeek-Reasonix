@@ -44,7 +44,9 @@ func FetchModels(ctx context.Context, baseURL, apiKey string) ([]string, error) 
 	if err != nil {
 		return nil, fmt.Errorf("fetch models: build request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	if strings.TrimSpace(apiKey) != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := cli.Do(req)

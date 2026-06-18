@@ -156,6 +156,7 @@ func (c *Controller) finishGuardedTurnLocked() {
 	c.flushPendingCompletionsLocked()
 	c.running = false
 	c.cancel = nil
+	c.canceling = false
 }
 
 func (c *Controller) flushPendingCompletionsLocked() {

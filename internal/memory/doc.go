@@ -27,7 +27,7 @@ import (
 type Scope string
 
 const (
-	ScopeUser     Scope = "user"     // ~/.config/reasonix/REASONIX.md
+	ScopeUser     Scope = "user"     // ~/.reasonix/REASONIX.md
 	ScopeAncestor Scope = "ancestor" // a REASONIX.md above the project root
 	ScopeProject  Scope = "project"  // ./REASONIX.md (committed, shared)
 	ScopeLocal    Scope = "local"    // ./REASONIX.local.md (personal, git-ignored)

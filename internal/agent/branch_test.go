@@ -53,3 +53,35 @@ func TestBranchMetaRoundTripAndList(t *testing.T) {
 		t.Fatalf("child with parent root and name experiment not found among %+v", branches)
 	}
 }
+
+func TestSessionModelRoundTripPreservesActivity(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	session := NewSession("sys")
+	session.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
+	if err := session.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := LoadSessionModel(path); ok {
+		t.Fatal("fresh session should not have a stored model")
+	}
+	meta, err := EnsureBranchMeta(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SetBranchModelPreserveUpdated(path, "openrouter/anthropic/claude-sonnet"); err != nil {
+		t.Fatal(err)
+	}
+	model, ok := LoadSessionModel(path)
+	if !ok || model != "openrouter/anthropic/claude-sonnet" {
+		t.Fatalf("LoadSessionModel = %q, %v", model, ok)
+	}
+	updated, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta ok=%v err=%v", ok, err)
+	}
+	if !updated.UpdatedAt.Equal(meta.UpdatedAt) {
+		t.Fatalf("model write refreshed activity: before=%s after=%s", meta.UpdatedAt, updated.UpdatedAt)
+	}
+}

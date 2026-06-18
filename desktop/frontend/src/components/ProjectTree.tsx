@@ -4,7 +4,7 @@
 // new topic.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Archive, ArrowDown, ChevronRight, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, ListCollapse, ListRestart, MessageSquare, Clock, Pin, MoreHorizontal, SquarePen, Minimize2, Maximize2 } from "lucide-react";
+import { Archive, ArrowDown, ChevronRight, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, ListCollapse, ListRestart, MessageSquare, Clock, Pin, MoreHorizontal, Minimize2, Maximize2 } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import type { ProjectNode, ProjectTopicStatus } from "../lib/types";
@@ -66,6 +66,24 @@ export function projectTreeTopicOpenRequest(node: ProjectNode): ProjectTreeTopic
     workspaceRoot: scope === "global" ? "" : node.root ?? "",
     topicId: node.topicId ?? "",
     sessionPath: node.sessionPath,
+  };
+}
+
+export type ProjectTreeFolderDisclosure = {
+  canExpand: boolean;
+  isOpen: boolean;
+  ariaExpanded?: boolean;
+  iconStackClassName: string;
+};
+
+export function projectTreeFolderDisclosure(hasChildren: boolean, isExpanded: boolean): ProjectTreeFolderDisclosure {
+  const canExpand = hasChildren;
+  const isOpen = canExpand && isExpanded;
+  return {
+    canExpand,
+    isOpen,
+    ariaExpanded: canExpand ? isExpanded : undefined,
+    iconStackClassName: `project-tree__icon-stack${canExpand ? " project-tree__icon-stack--expandable" : ""}`,
   };
 }
 
@@ -921,6 +939,7 @@ export function ProjectTree({
     const children = asArray(node.children);
     const isExpanded = query.trim() ? true : expanded.has(key);
     const hasChildren = children.length > 0;
+    const folderDisclosure = projectTreeFolderDisclosure(hasChildren, isExpanded);
 
     if (isTopicNode(node) || isRuntimeSessionNode(node)) {
       const isSessionNode = isRuntimeSessionNode(node);
@@ -1046,8 +1065,8 @@ export function ProjectTree({
                 </span>
               )}
             </span>
-            {compactTopics && (timeLabel || showStatusInSide) && (
-              <span className="project-tree__topic-side" aria-hidden="true">
+            {compactTopics && (
+              <span className={`project-tree__topic-side${!timeLabel && !showStatusInSide ? " project-tree__topic-side--empty" : ""}`} aria-hidden="true">
                 {showStatusInSide && <span className={`project-tree__topic-state project-tree__topic-state--${status}`} title={statusLabel} />}
                 {timeLabel && <span className="project-tree__topic-time">{timeLabel}</span>}
               </span>
@@ -1325,7 +1344,7 @@ export function ProjectTree({
 
     if (editingProject?.key === key) {
       return (
-        <div key={key}>
+        <div key={key} className="project-tree__project-wrapper">
           <div
             className={`project-tree__folder project-tree__folder--editing${projectActive ? " project-tree__folder--active" : ""}`}
             style={{ paddingLeft: 8 + depth * 16 }}
@@ -1354,7 +1373,7 @@ export function ProjectTree({
     }
 
     return (
-      <div key={key}>
+      <div key={key} className="project-tree__project-wrapper">
         <div
           className={`project-tree__folder${scopeClass}${pinnedClass}${draggableProject ? " project-tree__folder--draggable" : ""}${projectActive ? " project-tree__folder--active" : ""}${projectMenuOpen ? " project-tree__folder--menu-open" : ""}${dragProjectRoot === projectDragKey ? " project-tree__folder--dragging" : ""}${projectDropPosition ? ` project-tree__folder--drop-${projectDropPosition}` : ""}`}
           style={accentStyle}
@@ -1374,25 +1393,25 @@ export function ProjectTree({
             className="project-tree__folder-main"
             style={{ paddingLeft: 8 + depth * 16 }}
             onClick={() => {
-              if (hasChildren) toggleExpand(key);
+              if (folderDisclosure.canExpand) toggleExpand(key);
             }}
             onKeyDown={(event) => {
               if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
                 openProjectMenu(event);
               }
             }}
-            aria-expanded={hasChildren ? isExpanded : undefined}
+            aria-expanded={folderDisclosure.ariaExpanded}
           >
-            {hasChildren ? (
-              <span className={`project-tree__chevron${isExpanded ? " project-tree__chevron--open" : ""}`}>
-                <ChevronRight size={12} />
-              </span>
-            ) : (
-              <span style={{ width: 12 }} />
-            )}
-            <Folder size={12} />
+            <span className={folderDisclosure.iconStackClassName}>
+              {folderDisclosure.canExpand && (
+                <span className={`project-tree__chevron project-tree__chevron--on-hover${folderDisclosure.isOpen ? " project-tree__chevron--open" : ""}`}>
+                  <ChevronRight size={16} strokeWidth={2} />
+                </span>
+              )}
+              {folderDisclosure.isOpen ? <FolderOpen size={14} className="project-tree__folder-icon" /> : <Folder size={14} className="project-tree__folder-icon" />}
+            </span>
             <span className="project-tree__folder-color" aria-hidden="true" />
-            <span className="project-tree__folder-label">{projectLabel}</span>
+            <span className={`project-tree__folder-label${!hasChildren ? " project-tree__folder-label--empty" : ""}`}>{projectLabel}</span>
           </button>
           {compactTopics && (
             <Tooltip label={t("projectTree.projectActions")} className="project-tree__folder-action-slot">
@@ -1423,7 +1442,7 @@ export function ProjectTree({
                 void handleCreateTopic(scope, projectRoot, key);
               }}
             >
-              {compactTopics ? <SquarePen size={15} aria-hidden="true" /> : <Plus size={12} aria-hidden="true" />}
+              {compactTopics ? <Plus size={15} aria-hidden="true" /> : <Plus size={12} aria-hidden="true" />}
             </button>
           </Tooltip>
           <ContextMenu
@@ -1801,24 +1820,26 @@ export function ProjectTree({
         />
       </label>
       {compactTopics ? (
-        <div className="project-tree__list project-tree__list--workbench">
-          {!hasWorkbenchRows ? (
-            renderEmptyState()
-          ) : (
-            <>
-              {workbenchTreeSections.pinned.length > 0 && (
-                <div className="project-tree__section project-tree__section--pinned">
-                  <div className="project-tree__section-title">{t("projectTree.pinnedTitle")}</div>
-                  {workbenchTreeSections.pinned.map((node) => renderNode(node, 0, "pinned"))}
+        <>
+          {renderProjectHeader("workbench")}
+          <div className="project-tree__list project-tree__list--workbench">
+            {!hasWorkbenchRows ? (
+              renderEmptyState()
+            ) : (
+              <>
+                {workbenchTreeSections.pinned.length > 0 && (
+                  <div className="project-tree__section project-tree__section--pinned">
+                    <div className="project-tree__section-title">{t("projectTree.pinnedTitle")}</div>
+                    {workbenchTreeSections.pinned.map((node) => renderNode(node, 0, "pinned"))}
+                  </div>
+                )}
+                <div className="project-tree__section project-tree__section--projects">
+                  {workbenchTreeSections.projects.map((node) => renderNode(node, 0, "projects"))}
                 </div>
-              )}
-              <div className="project-tree__section project-tree__section--projects">
-                {renderProjectHeader("workbench")}
-                {workbenchTreeSections.projects.map((node) => renderNode(node, 0, "projects"))}
-              </div>
-            </>
-          )}
-        </div>
+              </>
+            )}
+          </div>
+        </>
       ) : (
         <>
           {renderProjectHeader("classic")}

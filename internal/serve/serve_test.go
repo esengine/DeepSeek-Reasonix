@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
 )
 
@@ -389,6 +390,13 @@ func TestDeleteSessionRequiresSessionNameInsideSessionDir(t *testing.T) {
 	}
 	ref := "sa_20260102_030405_000000000_aabbccddeeff"
 	writeServeSubagentArtifact(t, dir, ref, agent.BranchID(old))
+	oldJobsDir := jobs.ArtifactDir(old)
+	if err := os.MkdirAll(oldJobsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(oldJobsDir, "bash-1.log"), []byte("output"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	sibling := dir + "-other"
 	if err := os.MkdirAll(sibling, 0o755); err != nil {
 		t.Fatal(err)
@@ -434,6 +442,9 @@ func TestDeleteSessionRequiresSessionNameInsideSessionDir(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "subagents", ref+".meta.json")); !os.IsNotExist(err) {
 		t.Fatalf("old session subagent meta still exists or stat failed unexpectedly: %v", err)
+	}
+	if _, err := os.Stat(oldJobsDir); !os.IsNotExist(err) {
+		t.Fatalf("old session jobs sidecar still exists or stat failed unexpectedly: %v", err)
 	}
 }
 

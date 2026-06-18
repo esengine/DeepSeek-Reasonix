@@ -10,9 +10,10 @@ type ToolItem = Extract<Item, { kind: "tool" }>;
 type ReadOnlyBatchProps = {
   items: ToolItem[];
   subcalls: ReadonlyMap<string, ToolItem[]>;
+  tabId?: string;
 };
 
-export const ReadOnlyBatch = memo(function ReadOnlyBatch({ items, subcalls }: ReadOnlyBatchProps) {
+export const ReadOnlyBatch = memo(function ReadOnlyBatch({ items, subcalls, tabId }: ReadOnlyBatchProps) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -38,7 +39,7 @@ export const ReadOnlyBatch = memo(function ReadOnlyBatch({ items, subcalls }: Re
       </button>
       <div ref={bodyRef} className="readonly-batch__body">
         {items.map((it) => (
-          <ToolCard key={it.id} item={it} subcalls={subcalls.get(it.id)} />
+          <ToolCard key={it.id} item={it} subcalls={subcalls.get(it.id)} tabId={tabId} />
         ))}
       </div>
     </div>

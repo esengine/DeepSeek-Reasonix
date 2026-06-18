@@ -9,11 +9,9 @@ import (
 	"reasonix/internal/fileutil"
 )
 
-// credentialsPath is the reasonix-owned global secrets file the settings panel
-// writes API keys to — the same file `reasonix setup` writes and config.loadDotEnv
-// reads, so a key set in the desktop app resolves for the CLI from any directory.
-// Never a project .env: keys stay out of the user's project tree. Falls back to
-// ~/.env only when the user config dir can't be resolved.
+// credentialsPath is the file fallback for the reasonix-owned global credential
+// store. The settings panel writes through config.SetCredential instead, so
+// systems with a usable keyring do not need to store secrets in this file.
 func credentialsPath() string {
 	if p := config.UserCredentialsPath(); p != "" {
 		return p
@@ -24,15 +22,15 @@ func credentialsPath() string {
 	return ".env"
 }
 
-// upsertDotEnv sets KEY=value in the global credentials file (replacing an
-// existing KEY line, else appending), and applies it to the running process so a
-// rebuild picks it up without a restart.
+// upsertDotEnv stores KEY=value in the configured global credential store and
+// applies it to the running process so a rebuild picks it up without a restart.
 func upsertDotEnv(key, value string) error {
-	return upsertEnvFile(credentialsPath(), key, value)
+	_, err := config.SetCredential(key, value)
+	return err
 }
 
 func removeDotEnv(key string) error {
-	return removeEnvFile(credentialsPath(), key)
+	return config.RemoveCredential(key)
 }
 
 // upsertEnvFile merges KEY=value into a KEY=value file at path, preserving
@@ -147,48 +145,25 @@ func removeEnvFile(path, key string) error {
 	return os.Unsetenv(key)
 }
 
-// envFileKeys returns the set of KEY names assigned in a KEY=value file, empty
-// when the file is absent.
-func envFileKeys(path string) map[string]bool {
-	keys := map[string]bool{}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return keys
-	}
-	for _, raw := range strings.Split(string(data), "\n") {
-		line := strings.TrimPrefix(strings.TrimSpace(raw), "export ")
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if k, _, ok := strings.Cut(line, "="); ok {
-			keys[strings.TrimSpace(k)] = true
-		}
-	}
-	return keys
-}
-
 // promoteProviderKeysToCredentials copies any configured provider api_key_env that
 // currently resolves (from a project .env, ~/.env, or the OS env) into the global
-// credentials file when it isn't there yet, so a key set for one workspace follows
+// credential store when it isn't there yet, so a key set for one workspace follows
 // the user across every project. Promoted keys are then stripped from ~/.env so the
-// credentials file is the single source of truth; a project's own .env is
+// credential store is the single source of truth; a project's own .env is
 // user-owned and left untouched.
 func promoteProviderKeysToCredentials(cfg *config.Config) {
-	credPath := credentialsPath()
-	have := envFileKeys(credPath)
 	for _, p := range cfg.Providers {
 		env := strings.TrimSpace(p.APIKeyEnv)
-		if env == "" || have[env] {
+		if env == "" || config.CredentialStored(env) {
 			continue
 		}
 		val := os.Getenv(env)
 		if val == "" {
 			continue
 		}
-		if err := upsertEnvFile(credPath, env, val); err != nil {
+		if _, err := config.SetCredential(env, val); err != nil {
 			continue
 		}
-		have[env] = true
 		removeHomeEnvKey(env)
 	}
 }

@@ -35,7 +35,7 @@ const SYSTEM = [
   'Pick labels ONLY from these fixed sets. Never invent labels.',
   'area (0-2, the affected subsystem):',
   '  agent: core agent loop / tool-calling / reasoning',
-  '  mcp: MCP servers, plugins, codegraph',
+  '  mcp: MCP servers and plugins',
   '  config: configuration, setup wizard, .toml/.env',
   '  updater: auto-update, installer, release packaging',
   '  provider: model providers, model selection/switching',

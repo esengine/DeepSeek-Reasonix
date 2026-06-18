@@ -264,8 +264,10 @@ func normalizeTier(tier string) (string, bool) {
 		return "eager", true
 	case "background":
 		return "background", true
-	case "", "lazy":
+	case "lazy":
 		return "lazy", true
+	case "":
+		return "background", true
 	default:
 		return "lazy", false
 	}

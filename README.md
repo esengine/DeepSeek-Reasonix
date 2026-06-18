@@ -90,8 +90,8 @@ make cross      # -> dist/ (darwin|linux|windows × amd64|arm64)
 
 ```sh
 reasonix setup                      # config wizard → ./reasonix.toml
-export DEEPSEEK_API_KEY=sk-...  # or put it in .env (see .env.example)
-reasonix chat                       # then run /init to generate AGENTS.md (project memory)
+export DEEPSEEK_API_KEY=sk-...      # or let setup save it to the credential store
+reasonix                            # then run /init to generate AGENTS.md (project memory)
 reasonix run "implement the TODOs in main.go"
 reasonix run --model mimo-pro "add unit tests for this function"
 echo "explain this code" | reasonix run
@@ -113,10 +113,13 @@ api_key_env = "DEEPSEEK_API_KEY"
 ```
 
 Resolution order is **flag > `./reasonix.toml` > the user config file >
-built-in defaults**; the user file lives in your OS config dir — `~/.config/reasonix/`
-on Linux, `~/Library/Application Support/reasonix/` on macOS, `%AppData%\reasonix\` on
-Windows. Secrets come from the environment via `api_key_env` and are
-never written to config files. Permissions, the sandbox, plugins (MCP), slash
+built-in defaults**; starting with **Reasonix v1.8.1**, the user file lives at
+`~/.reasonix/config.toml` on macOS/Linux and
+`%AppData%\reasonix\config.toml` on Windows. See
+**[Configuration paths](./docs/CONFIG_PATHS.md)** for migration details. Secrets come from the environment via `api_key_env`, are
+never written to config files, and new keys default to the OS credential store
+with a Reasonix-owned file fallback. Project `.env` files are read as a
+compatibility override, but Reasonix does not write new keys there. Permissions, the sandbox, plugins (MCP), slash
 commands, `@` references, and two-model setup are all in the
 **[Guide](./docs/GUIDE.md)**.
 

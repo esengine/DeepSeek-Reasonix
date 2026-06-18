@@ -332,6 +332,42 @@ func TestSubagentStoreSaveFailedPersistsTranscriptAndRejectsReuse(t *testing.T) 
 	}
 }
 
+func TestSubagentStoreCleanupStaleRunningMarksInterrupted(t *testing.T) {
+	store := NewSubagentStore(t.TempDir())
+	spec := testSubagentSpec(t, "review")
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	run.Session.Add(provider.Message{Role: provider.RoleUser, Content: "interrupted prompt"})
+	if err := store.MarkRunning(run); err != nil {
+		t.Fatalf("MarkRunning: %v", err)
+	}
+	ref := run.Ref
+	run.Release()
+
+	cleaned, err := store.CleanupStaleRunning()
+	if err != nil {
+		t.Fatalf("CleanupStaleRunning: %v", err)
+	}
+	if cleaned != 1 {
+		t.Fatalf("cleaned = %d, want 1", cleaned)
+	}
+	meta, err := store.LoadMeta(ref)
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	if meta.Status != SubagentInterrupted {
+		t.Fatalf("status = %q, want interrupted", meta.Status)
+	}
+	if _, err := store.PrepareContinue(ref, spec); err == nil || !strings.Contains(err.Error(), "interrupted by a previous shutdown or crash") {
+		t.Fatalf("PrepareContinue error = %v, want interrupted rejection", err)
+	}
+	if _, err := store.PrepareFork(ref, spec); err == nil || !strings.Contains(err.Error(), "cannot be continued or forked") {
+		t.Fatalf("PrepareFork error = %v, want interrupted fork rejection", err)
+	}
+}
+
 func TestSubagentStoreSkipsSaveForDestroyedParent(t *testing.T) {
 	store := NewSubagentStore(t.TempDir()).WithDestroyedChecker(func(parentSession string) bool {
 		return parentSession == "parent-session"

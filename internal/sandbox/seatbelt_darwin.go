@@ -30,9 +30,9 @@ func Available() bool {
 // all file writes and re-allows them only under the write-roots (workspace +
 // temp + caches). Network is denied unless allowed. Reads are left open so the
 // toolchain (compilers reading GOROOT, git reading ~/.gitconfig, …) keeps
-// working — the boundary this draws is "can't write outside the workspace, and
-// optionally can't talk to the network", which is the Phase 0 blast-radius made
-// to also cover arbitrary shell commands.
+// working — the boundary this draws is "can't write outside the configured
+// writable roots, and optionally can't talk to the network", which is the Phase
+// 0 blast-radius made to also cover arbitrary shell commands.
 func seatbeltProfile(spec Spec) string {
 	var b strings.Builder
 	b.WriteString("(version 1)\n(allow default)\n(deny file-write*)\n(allow file-write*\n")

@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, GripVertical, KeyRound, Loader2, Play, QrCode, RefreshCw, Send } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { app } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
-import { mergedFetchedProviderModels, providerDefaultModel, providerModelCandidates } from "../lib/providerModels";
+import { apiKeyEnvFromProviderName, inferredVisionModels, mergedFetchedProviderModels, providerApiKeyEnvForSave, providerDefaultModel, providerIsConfigured, providerModelCandidates, providerRequiresKey } from "../lib/providerModels";
 import { useUpdater } from "../lib/useUpdater";
 import {
   THEME_STYLES,
@@ -33,6 +33,18 @@ import {
 import { getAvailableFontFamilies, getAvailableMonoFontFamilies } from "../lib/fontAvailability";
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
+import {
+  comboFromKeyboardEvent,
+  detectShortcutPlatform,
+  formatShortcutCombo,
+  onShortcutsChanged,
+  resetCustomShortcuts,
+  resolvedShortcutCombo,
+  saveCustomShortcut,
+  shortcutConflict,
+  shortcutDefinitions,
+  type ShortcutAction,
+} from "../lib/keyboardShortcuts";
 import type { BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
@@ -43,8 +55,9 @@ import { getGenerativePreset, setGenerativePreset, generativeMusic, type Generat
 import { SoundSelect } from "./SoundSelect";
 import { getSuccessPreference, setSuccessPreference, getAttentionPreference, setAttentionPreference, playSuccessChime, playAttentionChime, type SoundWavPref } from "../lib/sound";
 import { ModalCloseButton } from "./ModalCloseButton";
+import { ShortcutComboDisplay } from "./ShortcutComboDisplay";
 
-const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "hooks", "permissions", "sandbox", "network", "appearance", "updates"];
+const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "hooks", "shortcuts", "permissions", "sandbox", "network", "appearance", "updates"];
 export type SettingsInitialFocus = { target: "bot-allowlist"; connectionId?: string };
 
 // SettingsPanel is the desktop settings centre — a centred modal with left
@@ -58,7 +71,7 @@ export function SettingsPanel({
   agentRunning = false,
 }: {
   onClose: () => void;
-  onChanged: () => void;
+  onChanged: (settings?: SettingsView | null) => void;
   initialTab?: SettingsTab;
   initialFocus?: SettingsInitialFocus;
   agentRunning?: boolean;
@@ -67,6 +80,7 @@ export function SettingsPanel({
   const [s, setS] = useState<SettingsView | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [theme, setThemeState] = useState<Theme>(getTheme());
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => getThemeStyle(getTheme()));
   const [textSize, setTextSizeState] = useState<TextSize>(getTextSize());
@@ -78,7 +92,11 @@ export function SettingsPanel({
   // Play the modal exit animation, then let the parent unmount us.
   const { status, requestClose } = useDeferredClose(onClose, 240);
 
-  const reload = async () => setS(normalizeSettingsView(await app.Settings().catch(() => null)));
+  const reload = async () => {
+    const next = normalizeSettingsView(await app.Settings().catch(() => null));
+    setS(next);
+    return next;
+  };
   useEffect(() => {
     void reload();
     if (initialTab) setTab(initialTab === "providers" ? "models" : initialTab);
@@ -92,13 +110,17 @@ export function SettingsPanel({
   }, [s?.desktopTheme, s?.desktopThemeStyle]);
 
   // apply runs a mutation, re-reads settings, and refreshes the topbar/model.
-  const apply = async (fn: () => Promise<void>) => {
+  const apply = async (fn: () => Promise<unknown>) => {
     setBusy(true);
     setErr(null);
+    setWarning(null);
     try {
-      await fn();
-      await reload();
-      onChanged();
+      const result = await fn();
+      const next = await reload();
+      onChanged(next);
+      if (typeof result === "string" && result.trim()) {
+        setWarning(result.trim());
+      }
     } catch (e) {
       setErr(String((e as Error)?.message ?? e));
     } finally {
@@ -107,10 +129,11 @@ export function SettingsPanel({
   };
   const backgroundApply = async (fn: () => Promise<void>) => {
     setErr(null);
+    setWarning(null);
     try {
       await fn();
-      await reload();
-      onChanged();
+      const next = await reload();
+      onChanged(next);
     } catch (e) {
       setErr(String((e as Error)?.message ?? e));
     }
@@ -153,6 +176,7 @@ export function SettingsPanel({
           </nav>
           <main className="settings-center__content">
             {needsSettings && err && <div className="banner banner--error">{err}</div>}
+            {needsSettings && warning && <div className="banner banner--warning">{warning}</div>}
             {needsSettings && !s ? (
               <div className="empty">{t("settings.loading")}</div>
             ) : (
@@ -164,6 +188,7 @@ export function SettingsPanel({
                 {tab === "skills" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><SkillsSettingsPage /></SettingsPageShell>}
                 {tab === "memory" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><MemorySettingsPage /></SettingsPageShell>}
                 {tab === "hooks" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><HooksSection onChanged={onChanged} /></SettingsPageShell>}
+                {tab === "shortcuts" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><ShortcutsSection /></SettingsPageShell>}
                 {tab === "permissions" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "network" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
@@ -218,7 +243,7 @@ export function SettingsPanel({
                       configPath={s.configPath}
                       checkUpdates={s.checkUpdates}
                       telemetry={s.telemetry !== false}
-                      metrics={s.metrics === true}
+                      metrics={s.metrics !== false}
                       settingsBusy={busy}
                       applySettings={apply}
                     />
@@ -233,7 +258,7 @@ export function SettingsPanel({
   );
 }
 
-function SettingsPageShell({ s: _s, tab, children }: { s: SettingsView | null; tab: SettingsTab; busy: boolean; apply: (fn: () => Promise<void>) => Promise<void>; children: ReactNode }) {
+function SettingsPageShell({ s: _s, tab, children }: { s: SettingsView | null; tab: SettingsTab; busy: boolean; apply: (fn: () => Promise<unknown>) => Promise<void>; children: ReactNode }) {
   const t = useT();
   const descKey = `settings.pageDesc.${tab}` as keyof typeof import("../locales/en").en;
   const desc = t(descKey as any);
@@ -337,6 +362,7 @@ function settingsTabPageTitle(id: SettingsTab, t: ReturnType<typeof useT>): stri
     case "mcp": return t("settings.tab.mcp");
     case "skills": return t("settings.tab.skills");
     case "memory": return t("settings.tab.memory");
+    case "shortcuts": return t("settings.tab.shortcuts");
     default: return settingsTabLabel(id, t);
   }
 }
@@ -344,7 +370,7 @@ function settingsTabPageTitle(id: SettingsTab, t: ReturnType<typeof useT>): stri
 type SectionProps = {
   s: SettingsView;
   busy: boolean;
-  apply: (fn: () => Promise<void>) => Promise<void>;
+  apply: (fn: () => Promise<unknown>) => Promise<void>;
 };
 
 type ModelsSectionProps = SectionProps & {
@@ -369,6 +395,8 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.memory");
     case "hooks":
       return t("settings.tab.hooks");
+    case "shortcuts":
+      return t("settings.tab.shortcuts");
     case "network":
       return t("settings.tab.network");
     case "permissions":
@@ -400,6 +428,8 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
       return t("settings.tabSub.memory");
     case "hooks":
       return t("settings.tabSub.hooks");
+    case "shortcuts":
+      return t("settings.tabSub.shortcuts");
     case "network":
       return proxyModeLabel(normalizeProxyMode(s.network.proxyMode), t);
     case "permissions":
@@ -431,11 +461,115 @@ function botSettingsMeta(bot: BotSettingsView, t: ReturnType<typeof useT>): stri
   return t("settings.botConnectionCount", { n: connections });
 }
 
+function ShortcutsSection() {
+  const t = useT();
+  const [platform] = useState(() => detectShortcutPlatform());
+  const [revision, setRevision] = useState(0);
+  const [recording, setRecording] = useState<ShortcutAction | null>(null);
+  const [conflict, setConflict] = useState<{ action: ShortcutAction; conflictAction: ShortcutAction } | null>(null);
+
+  useEffect(() => onShortcutsChanged(() => setRevision((value) => value + 1)), []);
+
+  const definitions = shortcutDefinitions();
+  const commitShortcut = (action: ShortcutAction, event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    const combo = comboFromKeyboardEvent(event.nativeEvent);
+    if (!combo) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const conflictDefinition = shortcutConflict(action, combo, platform);
+    if (conflictDefinition) {
+      setConflict({ action, conflictAction: conflictDefinition.action });
+      return;
+    }
+    saveCustomShortcut(action, combo);
+    setConflict(null);
+    setRecording(null);
+    setRevision((value) => value + 1);
+  };
+
+  return (
+    <SettingsSection
+      title={t("settings.shortcutsTitle")}
+      description={t("settings.shortcutsHint")}
+      actions={
+        <button
+          className="chip chip--icon"
+          type="button"
+          title={t("settings.shortcutsResetAll")}
+          aria-label={t("settings.shortcutsResetAll")}
+          onClick={() => {
+            resetCustomShortcuts();
+            setConflict(null);
+            setRecording(null);
+            setRevision((value) => value + 1);
+          }}
+        >
+          <RefreshCw size={14} />
+        </button>
+      }
+    >
+      <div className="shortcuts-settings" data-revision={revision}>
+        {conflict && (
+          <div className="shortcuts-settings__conflict" role="alert">
+            {t("settings.shortcutsConflict", {
+              action: t(definitions.find((definition) => definition.action === conflict.action)?.labelKey ?? "settings.tab.shortcuts"),
+              conflict: t(definitions.find((definition) => definition.action === conflict.conflictAction)?.labelKey ?? "settings.tab.shortcuts"),
+            })}
+          </div>
+        )}
+        {definitions.map((definition) => {
+          const resolved = resolvedShortcutCombo(definition.action, platform);
+          const defaultCombo = definition.defaults[platform];
+          const display = formatShortcutCombo(resolved, platform);
+          const isCustom = formatShortcutCombo(resolved, platform) !== formatShortcutCombo(defaultCombo, platform);
+          const isRecording = recording === definition.action;
+          return (
+            <div className="shortcuts-settings__row" key={definition.action}>
+              <div className="shortcuts-settings__copy">
+                <div className="shortcuts-settings__label">{t(definition.labelKey)}</div>
+                <div className="shortcuts-settings__desc">{t(definition.descriptionKey)}</div>
+              </div>
+              <div className="shortcuts-settings__control">
+                <button
+                  className={`shortcuts-settings__key${isRecording ? " shortcuts-settings__key--recording" : ""}`}
+                  type="button"
+                  aria-label={isRecording ? t("settings.shortcutsRecording") : display}
+                  aria-pressed={isRecording}
+                  onClick={() => {
+                    setRecording(definition.action);
+                    setConflict(null);
+                  }}
+                  onKeyDown={(event) => isRecording && commitShortcut(definition.action, event)}
+                >
+                  {isRecording ? t("settings.shortcutsRecording") : <ShortcutComboDisplay combo={resolved} platform={platform} />}
+                </button>
+                <button
+                  className="chip"
+                  type="button"
+                  disabled={!isCustom}
+                  onClick={() => {
+                    saveCustomShortcut(definition.action, null);
+                    setConflict(null);
+                    setRecording(null);
+                    setRevision((value) => value + 1);
+                  }}
+                >
+                  {t("settings.shortcutsReset")}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </SettingsSection>
+  );
+}
+
 // allRefs flattens providers into "provider/model" refs for the model selectors.
 function allRefs(s: SettingsView): string[] {
   const out: string[] = [];
   for (const p of s.providers) {
-    if (!p.added || !p.keySet) continue;
+    if (!p.added || !providerIsConfigured(p)) continue;
     for (const m of p.models) out.push(`${p.name}/${m}`);
   }
   return out;
@@ -618,6 +752,26 @@ function normalizeBotMappingScope(scope: unknown, workspaceRoot: unknown): "glob
   return String(workspaceRoot ?? "").trim() ? "project" : "global";
 }
 
+function normalizeProviderView(p: ProviderView): ProviderView {
+  const visionModels = asArray(p.visionModels);
+  const requiresKey = providerRequiresKey(p);
+  return {
+    ...p,
+    builtIn: Boolean(p.builtIn),
+    added: Boolean(p.added),
+    models: asArray(p.models),
+    visionModels,
+    visionModelsConfigured: Boolean(p.visionModelsConfigured ?? visionModels.length > 0),
+    modelsUrl: p.modelsUrl ?? "",
+    reasoningProtocol: normalizeReasoningProtocol(p.reasoningProtocol),
+    supportedEfforts: asArray(p.supportedEfforts),
+    requiresKey,
+    configured: providerIsConfigured({ ...p, requiresKey }),
+    keySource: p.keySource ?? "",
+    keySourcePath: p.keySourcePath ?? "",
+  };
+}
+
 function normalizeSettingsView(view: SettingsView | null | undefined): SettingsView | null {
   if (!view) return null;
   const permissions = view.permissions ?? { mode: "ask", allow: [], ask: [], deny: [] };
@@ -634,15 +788,8 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
   agent.reasoningLanguage = normalizeReasoningLanguage(agent.reasoningLanguage);
   return {
     ...view,
-    providers: asArray(view.providers).map((p) => ({
-      ...p,
-      builtIn: Boolean(p.builtIn),
-      added: Boolean(p.added),
-      models: asArray(p.models),
-      modelsUrl: p.modelsUrl ?? "",
-      reasoningProtocol: normalizeReasoningProtocol(p.reasoningProtocol),
-      supportedEfforts: asArray(p.supportedEfforts),
-    })),
+    providers: asArray(view.providers).map(normalizeProviderView),
+    officialProviders: asArray(view.officialProviders).map(normalizeProviderView),
     providerKinds: asArray(view.providerKinds),
     permissions: {
       ...permissions,
@@ -690,7 +837,7 @@ function normalizeDisplayMode(mode: string | undefined): DisplayMode {
 type DesktopLayoutStyle = "classic" | "workbench";
 
 function normalizeDesktopLayoutStyle(style: string | undefined): DesktopLayoutStyle {
-  return style === "workbench" ? "workbench" : "classic";
+  return style === "classic" ? "classic" : "workbench";
 }
 
 function desktopLayoutStyleLabel(style: DesktopLayoutStyle, t: ReturnType<typeof useT>): string {
@@ -712,6 +859,10 @@ function statusBarItemLabel(id: StatusBarItemId, t: ReturnType<typeof useT>): st
   switch (id) {
     case "model":
       return t("settings.statusBarItem.model");
+    case "workspace":
+      return t("settings.statusBarItem.workspace");
+    case "git_branch":
+      return t("settings.statusBarItem.gitBranch");
     case "cache":
       return t("status.cacheLabel");
     case "cache_avg":
@@ -939,7 +1090,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
     void apply(() => app.SetDesktopLanguage(next));
   };
   return (
-    <SettingsSection title={t("settings.tab.general")}>
+    <SettingsSection>
       <SettingsField label={t("settings.language")}>
         <div className="set-seg">
           {LANGUAGE_PREFS.map((pref) => (
@@ -1895,8 +2046,6 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
               <div className="bot-connection-table__header" role="row">
                 <span>{t("settings.botConnectionColumnChannel")}</span>
                 <span>{t("settings.botConnectionColumnName")}</span>
-                <span>{t("settings.botConnectionColumnRemote")}</span>
-                <span>{t("settings.botConnectionColumnScope")}</span>
                 <span>{t("settings.botConnectionColumnStatus")}</span>
                 <span>{t("settings.botConnectionColumnActions")}</span>
               </div>
@@ -1914,14 +2063,25 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
                   return (
                     <div key={QQ_CONNECTION_ID} className="bot-connection-row" role="rowgroup">
                       <div className="bot-connection-row__grid" role="row">
-                        <div className="bot-connection-row__channel" role="cell">
-                          <span>QQ</span>
-                        </div>
-                        <strong className="bot-connection-row__name" role="cell">QQ Bot</strong>
-                        <code className="bot-connection-row__remote" role="cell" title={appID || undefined}>{appID || "—"}</code>
-                        <span className="bot-connection-row__scope" role="cell">{t("settings.botScopeGlobal")}</span>
-                        <div className="bot-connection-row__state" role="cell">
-                          <span className={`bot-connection-row__status bot-connection-row__status--${qqOnline ? "connected" : qqConfigured ? "configured" : "disconnected"}`}>
+                      <div className="bot-connection-row__channel" role="cell">
+                        <span>QQ</span>
+                      </div>
+                      <div className="bot-connection-row__identity-cell" role="cell">
+                        <button
+                          type="button"
+                          className="bot-connection-identity"
+                          disabled={busy}
+                          onClick={() => setExpandedConnectionId((current) => current === QQ_CONNECTION_ID ? "" : QQ_CONNECTION_ID)}
+                          title={appID || "QQ Bot"}
+                        >
+                          <span className="bot-connection-identity__main">
+                            <strong>QQ Bot</strong>
+                            <code>{appID || "—"}</code>
+                          </span>
+                        </button>
+                      </div>
+                      <div className="bot-connection-row__state" role="cell">
+                        <span className={`bot-connection-row__status bot-connection-row__status--${qqOnline ? "connected" : qqConfigured ? "configured" : "disconnected"}`}>
                             {statusText}
                           </span>
                           <ToggleSegment
@@ -1955,17 +2115,29 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
                 const connection = item.connection;
                 const sessionID = firstConnectionRemote(connection);
                 const diagMessage = diagnosticMessage(diagnostics[connection.id]);
+                const connectionStatusClass = connection.status === "connected" ? "connected" : "disconnected";
                 return (
                   <div key={connection.id} className="bot-connection-row" role="rowgroup">
                     <div className="bot-connection-row__grid" role="row">
                       <div className="bot-connection-row__channel" role="cell">
                         <span>{botConnectionLabel(connection, t)}</span>
                       </div>
-                      <strong className="bot-connection-row__name" role="cell">{connection.label || botConnectionLabel(connection, t)}</strong>
-                      <code className="bot-connection-row__remote" role="cell" title={sessionID || undefined}>{sessionID || "—"}</code>
-                      <span className="bot-connection-row__scope" role="cell">{botConnectionScopeLabel(connection, t)}</span>
+                      <div className="bot-connection-row__identity-cell" role="cell">
+                        <button
+                          type="button"
+                          className="bot-connection-identity"
+                          disabled={busy}
+                          onClick={() => setExpandedConnectionId((current) => current === connection.id ? "" : connection.id)}
+                          title={sessionID || connection.label || botConnectionLabel(connection, t)}
+                        >
+                          <span className="bot-connection-identity__main">
+                            <strong>{connection.label || botConnectionLabel(connection, t)}</strong>
+                            <code>{sessionID || "—"}</code>
+                          </span>
+                        </button>
+                      </div>
                       <div className="bot-connection-row__state" role="cell">
-                        <span className={`bot-connection-row__status bot-connection-row__status--${connection.status === "connected" ? "connected" : "disconnected"}`}>
+                        <span className={`bot-connection-row__status bot-connection-row__status--${connectionStatusClass}`}>
                           {connection.status === "connected" ? t("settings.botConnectionConnected") : connection.status || t("settings.botConnectionDisconnected")}
                         </span>
                         <ToggleSegment
@@ -2797,7 +2969,7 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
   const defaultProviderView = s.providers.find((p) => p.name === defaultProvider);
   const modelIssue = !defaultProviderView
     ? t("settings.modelUnavailable", { ref: defaultRef || t("common.none") })
-    : !defaultProviderView.keySet
+    : !providerIsConfigured(defaultProviderView)
       ? t("settings.modelNeedsKey", { provider: modelProviderLabel(defaultProvider, defaultProviderView, t) })
       : "";
   const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 12, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" };
@@ -2810,11 +2982,11 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
     const groups = providerAccessGroups(s.providers.filter((p) => p.added), t);
     const candidates = groups
       .map((group) => {
-        const provider = group.providers.find((p) => p.keySet && p.apiKeyEnv && p.baseUrl);
+        const provider = group.providers.find((p) => providerIsConfigured(p) && p.baseUrl);
         return provider ? { group, provider } : null;
       })
       .filter((item): item is { group: ProviderAccessGroup; provider: ProviderView } => Boolean(item));
-    const refreshKey = candidates.map(({ group, provider }) => `${group.id}:${provider.apiKeyEnv}`).join("|");
+    const refreshKey = candidates.map(({ group, provider }) => `${group.id}:${provider.apiKeyEnv || provider.name}:${provider.baseUrl}`).join("|");
     if (!refreshKey || autoRefreshKeyRef.current === refreshKey) return;
     autoRefreshKeyRef.current = refreshKey;
 
@@ -2829,8 +3001,9 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
           if (fetched.length === 0) continue;
           const models = mergedFetchedProviderModels(provider.models, fetched, { preserveCurated: true });
           const currentDefault = providerDefaultModel(provider.default, models);
-          if (sameStringList(provider.models, models) && provider.default === currentDefault) continue;
-          await app.SaveProvider({ ...provider, models, default: currentDefault });
+          const visionModels = provider.visionModels.filter((model) => models.includes(model));
+          if (sameStringList(provider.models, models) && provider.default === currentDefault && sameStringList(provider.visionModels, visionModels)) continue;
+          await app.SaveProvider({ ...provider, models, default: currentDefault, visionModels });
         } catch {
           // Background discovery is opportunistic; manual refresh shows errors.
         }
@@ -3041,6 +3214,7 @@ function ModelPicker({
           groupID,
           label: firstProvider ? providerGroupLabel(firstProvider, t) : groupID,
           keySet: providerViews.some((p) => p.keySet),
+          requiresKey: providerViews.every((p) => providerRequiresKey(p)),
           options: uniqueModelOptions(options.filter((opt) => modelOptionGroupID(opt) === groupID)),
         };
       })
@@ -3109,7 +3283,7 @@ function ModelPicker({
             <div className="settings-model-picker__group" key={group.groupID}>
               <div className="settings-model-picker__group-title">
                 <span>{group.label}</span>
-                <small>{group.keySet ? t("settings.keySet") : t("settings.noKey")}</small>
+                <small>{providerKeyStatusLabel(group, t)}</small>
               </div>
               {group.options.map((opt) => (
                 <button
@@ -3149,8 +3323,13 @@ function modelOptionFromRef(ref: string, s: SettingsView): ModelPickerOption | n
 }
 
 function modelOptionMeta(option: ModelPickerOption, t: ReturnType<typeof useT>): string {
-  const key = option.providerView?.keySet ? t("settings.keySet") : t("settings.noKey");
+  const key = option.providerView ? providerKeyStatusLabel(option.providerView, t) : t("settings.noKey");
   return `${modelProviderLabel(option.provider, option.providerView, t)} · ${key}`;
+}
+
+function providerKeyStatusLabel(provider: { keySet: boolean; requiresKey?: boolean; apiKeyEnv?: string }, t: ReturnType<typeof useT>): string {
+  if (!providerRequiresKey(provider)) return t("settings.noKeyRequired");
+  return provider.keySet ? t("settings.keySet") : t("settings.noKey");
 }
 
 function modelProviderLabel(provider: string, providerView: ProviderView | undefined, t: ReturnType<typeof useT>): string {
@@ -3219,10 +3398,12 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
   const modelDraftForFetch = (p: ProviderView, fetched: string[]): ProviderModelDraft => {
     const candidates = providerModelCandidates(p.models, fetched);
     const selected = mergedFetchedProviderModels(p.models, fetched, { preserveCurated: true });
+    const visionSource = p.visionModelsConfigured ? p.visionModels : inferredVisionModels(candidates);
     return {
       providerName: p.name,
       candidates,
       selected: candidates.filter((model) => selected.includes(model)),
+      visionModels: candidates.filter((model) => visionSource.includes(model)),
     };
   };
 
@@ -3236,6 +3417,22 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
         [groupID]: {
           ...draft,
           selected: draft.candidates.filter((model) => selectedSet.has(model)),
+        },
+      };
+    });
+  };
+
+  const toggleModelDraftVision = (groupID: string, model: string) => {
+    setModelDrafts((prev) => {
+      const draft = prev[groupID];
+      if (!draft) return prev;
+      return {
+        ...prev,
+        [groupID]: {
+          ...draft,
+          visionModels: draft.visionModels.includes(model)
+            ? draft.visionModels.filter((candidate) => candidate !== model)
+            : draft.candidates.filter((candidate) => candidate === model || draft.visionModels.includes(candidate)),
         },
       };
     });
@@ -3332,10 +3529,17 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
     const draft = modelDrafts[group.id];
     const provider = draft ? group.providers.find((p) => p.name === draft.providerName) : null;
     const models = uniqueStrings(draft?.selected ?? []);
+    const visionModels = uniqueStrings(draft?.visionModels ?? []).filter((model) => models.includes(model));
     if (!draft || !provider || models.length === 0) return;
     let saved = false;
     await apply(async () => {
-      await app.SaveProvider({ ...provider, models, default: providerDefaultModel(provider.default, models) });
+      await app.SaveProvider({
+        ...provider,
+        models,
+        visionModels,
+        visionModelsConfigured: true,
+        default: providerDefaultModel(provider.default, models),
+      });
       saved = true;
     });
     if (!saved) return;
@@ -3405,6 +3609,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
                 ? draft.selected.filter((candidate) => candidate !== model)
                 : [...draft.selected, model]
             ))}
+            onToggleDraftVision={(model) => toggleModelDraftVision(group.id, model)}
             onSelectAllDraftModels={() => updateModelDraftSelection(group.id, (draft) => draft.candidates)}
             onClearDraftModels={() => updateModelDraftSelection(group.id, () => [])}
             onCancelDraftModels={() => setGroupModelDraft(group.id, null)}
@@ -3427,6 +3632,10 @@ type ProviderAccessGroup = {
   providers: ProviderView[];
   apiKeyEnv: string;
   keySet: boolean;
+  requiresKey: boolean;
+  configured: boolean;
+  keySource?: string;
+  keySourcePath?: string;
   baseUrl: string;
   kind: string;
   models: string[];
@@ -3441,6 +3650,7 @@ type ProviderModelDraft = {
   providerName: string;
   candidates: string[];
   selected: string[];
+  visionModels: string[];
 };
 
 type AddProviderMode = null | "official" | "custom";
@@ -3588,6 +3798,7 @@ function ProviderAccessCard({
   onSave,
   onRefresh,
   onToggleDraftModel,
+  onToggleDraftVision,
   onSelectAllDraftModels,
   onClearDraftModels,
   onCancelDraftModels,
@@ -3609,6 +3820,7 @@ function ProviderAccessCard({
   onSave: (p: ProviderView) => void | Promise<void>;
   onRefresh: () => void;
   onToggleDraftModel: (model: string) => void;
+  onToggleDraftVision: (model: string) => void;
   onSelectAllDraftModels: () => void;
   onClearDraftModels: () => void;
   onCancelDraftModels: () => void;
@@ -3634,7 +3846,7 @@ function ProviderAccessCard({
               {group.builtIn ? t("settings.builtinProviderBadge") : t("settings.customProviderBadge")}
             </span>
             <span className={`badge ${group.keySet ? "badge--project" : "badge--feedback"}`}>
-              {group.keySet ? t("settings.keySet") : t("settings.noKey")}
+              {providerKeyStatusLabel(group, t)}
             </span>
           </div>
           <div className="provider-access-card__desc">{group.description}</div>
@@ -3652,7 +3864,7 @@ function ProviderAccessCard({
           )}
           <button
             className="btn btn--small"
-            disabled={busy || fetching || !group.baseUrl || !group.apiKeyEnv || !group.keySet}
+            disabled={busy || fetching || !group.baseUrl || !group.configured}
             onClick={onRefresh}
           >
             {fetching ? t("settings.fetchingModels") : t("settings.fetchModels")}
@@ -3680,11 +3892,12 @@ function ProviderAccessCard({
         <span>{group.kind}</span>
         <span>{group.baseUrl}</span>
         <span>{group.apiKeyEnv || t("common.none")}</span>
+        {group.keySource && <span title={group.keySourcePath || undefined}>{t("settings.keySource", { source: group.keySource })}</span>}
       </div>
 
       <div className="provider-card-block">
-        <div className="provider-card-block__label">{t(group.keySet ? "settings.enabledModels" : "settings.modelList")}</div>
-        <div className="provider-model-chips" aria-label={t(group.keySet ? "settings.enabledModels" : "settings.modelList")}>
+        <div className="provider-card-block__label">{t(group.configured ? "settings.enabledModels" : "settings.modelList")}</div>
+        <div className="provider-model-chips" aria-label={t(group.configured ? "settings.enabledModels" : "settings.modelList")}>
           {visibleModels.length > 0 ? visibleModels.map((model) => (
             <span className="provider-model-chip" key={model}>
               {model}
@@ -3696,7 +3909,7 @@ function ProviderAccessCard({
             </span>
           )}
         </div>
-        {!group.keySet && (
+        {!group.configured && group.requiresKey && (
           <div className="provider-card-status provider-card-status--warn">
             {t("settings.modelsRequireKey")}
           </div>
@@ -3714,6 +3927,7 @@ function ProviderAccessCard({
           busy={busy}
           fetching={fetching}
           onToggle={onToggleDraftModel}
+          onToggleVision={onToggleDraftVision}
           onSelectAll={onSelectAllDraftModels}
           onClear={onClearDraftModels}
           onCancel={onCancelDraftModels}
@@ -3763,6 +3977,7 @@ function ProviderModelDraftPicker({
   busy,
   fetching,
   onToggle,
+  onToggleVision,
   onSelectAll,
   onClear,
   onCancel,
@@ -3772,6 +3987,7 @@ function ProviderModelDraftPicker({
   busy: boolean;
   fetching: boolean;
   onToggle: (model: string) => void;
+  onToggleVision: (model: string) => void;
   onSelectAll: () => void;
   onClear: () => void;
   onCancel: () => void;
@@ -3780,6 +3996,7 @@ function ProviderModelDraftPicker({
   const t = useT();
   const [query, setQuery] = useState("");
   const selected = new Set(draft.selected);
+  const vision = new Set(draft.visionModels);
   const q = query.trim().toLowerCase();
   const visibleCandidates = q
     ? draft.candidates.filter((model) => model.toLowerCase().includes(q))
@@ -3810,17 +4027,31 @@ function ProviderModelDraftPicker({
         onChange={(e) => setQuery(e.target.value)}
       />
       <div className="provider-model-draft__list" role="list" aria-label={t("settings.modelCandidates")}>
-        {visibleCandidates.length > 0 ? visibleCandidates.map((model) => (
-          <label className="provider-model-draft__option" key={model}>
-            <input
-              type="checkbox"
-              checked={selected.has(model)}
-              disabled={disabled}
-              onChange={() => onToggle(model)}
-            />
-            <span>{model}</span>
-          </label>
-        )) : (
+        {visibleCandidates.length > 0 ? visibleCandidates.map((model) => {
+          const enabled = selected.has(model);
+          return (
+            <div className="provider-model-draft__option" key={model}>
+              <label className="provider-model-draft__model">
+                <input
+                  type="checkbox"
+                  checked={enabled}
+                  disabled={disabled}
+                  onChange={() => onToggle(model)}
+                />
+                <span>{model}</span>
+              </label>
+              <label className="provider-model-draft__vision">
+                <input
+                  type="checkbox"
+                  checked={enabled && vision.has(model)}
+                  disabled={disabled || !enabled}
+                  onChange={() => onToggleVision(model)}
+                />
+                <span>{t("settings.visionModel")}</span>
+              </label>
+            </div>
+          );
+        }) : (
           <div className="provider-model-draft__empty">{t("settings.noMatchingCandidateModels")}</div>
         )}
       </div>
@@ -3845,6 +4076,10 @@ function providerAccessGroups(providers: ProviderView[], t: ReturnType<typeof us
     if (existing) {
       existing.providers.push(p);
       existing.keySet = existing.keySet || p.keySet;
+      existing.requiresKey = existing.requiresKey && providerRequiresKey(p);
+      existing.configured = existing.configured || providerIsConfigured(p);
+      if (!existing.keySource && p.keySource) existing.keySource = p.keySource;
+      if (!existing.keySourcePath && p.keySourcePath) existing.keySourcePath = p.keySourcePath;
       existing.models = uniqueStrings([...existing.models, ...p.models]);
       continue;
     }
@@ -3856,6 +4091,10 @@ function providerAccessGroups(providers: ProviderView[], t: ReturnType<typeof us
       providers: [p],
       apiKeyEnv: p.apiKeyEnv,
       keySet: p.keySet,
+      requiresKey: providerRequiresKey(p),
+      configured: providerIsConfigured(p),
+      keySource: p.keySource,
+      keySourcePath: p.keySourcePath,
       baseUrl: p.baseUrl,
       kind: p.kind,
       models: uniqueStrings(p.models),
@@ -3929,6 +4168,13 @@ function uniqueStrings(values: string[]): string[] {
   return out;
 }
 
+function parseProviderListInput(value: string): string[] {
+  return uniqueStrings(value
+    .split(/[,，]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean));
+}
+
 function botAllowlistTextValues(allowlist: BotAllowlistView): Record<BotAllowlistTextKey, string> {
   return {
     qqUsers: allowlist.qqUsers.join("\n"),
@@ -3945,15 +4191,6 @@ function parseBotListInput(value: string): string[] {
     .split(/[\n,，]+/)
     .map((entry) => entry.trim())
     .filter(Boolean));
-}
-
-function apiKeyEnvFromProviderName(name: string): string {
-  const stem = name
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return stem ? `${stem}_API_KEY` : "CUSTOM_API_KEY";
 }
 
 function ProviderEditor({
@@ -3978,6 +4215,10 @@ function ProviderEditor({
   const [kind, setKind] = useState(initial?.kind ?? kinds[0] ?? "openai");
   const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? "");
   const [models, setModels] = useState((initial?.models ?? []).join(", "));
+  const [visionModels, setVisionModels] = useState((initial?.visionModels ?? []).join(", "));
+  const [visionModelsConfigured, setVisionModelsConfigured] = useState(
+    Boolean(initial?.visionModelsConfigured ?? ((initial?.visionModels ?? []).length > 0)),
+  );
   const [modelsUrl] = useState(initial?.modelsUrl ?? "");
   const [apiKeyEnv, setApiKeyEnv] = useState(initial?.apiKeyEnv ?? "");
   const [keyDraft, setKeyDraft] = useState("");
@@ -4034,7 +4275,7 @@ function ProviderEditor({
     setFetchStatus(null);
     setFetchErr(null);
     try {
-      const effectiveApiKeyEnv = apiKeyEnv.trim() || apiKeyEnvFromProviderName(name);
+      const effectiveApiKeyEnv = providerApiKeyEnvForSave(name, apiKeyEnv, keyDraft);
       if (!apiKeyEnv.trim()) setApiKeyEnv(effectiveApiKeyEnv);
       if (keyDraft.trim()) await app.SetProviderKey(effectiveApiKeyEnv, keyDraft.trim());
       const fetched = await app.FetchProviderModels({
@@ -4045,6 +4286,8 @@ function ProviderEditor({
         baseUrl: baseUrl.trim(),
         modelsUrl,
         models: [],
+        visionModels: [],
+        visionModelsConfigured: false,
         default: "",
         apiKeyEnv: effectiveApiKeyEnv,
         keySet: Boolean(keyDraft.trim()) || (initial?.keySet ?? false),
@@ -4056,6 +4299,11 @@ function ProviderEditor({
       });
       if (fetched.length === 0) throw new Error(t("settings.fetchModelsEmpty"));
       setModels(fetched.join(", "));
+      setVisionModels((current) => {
+        const existing = parseProviderListInput(current).filter((model) => fetched.includes(model));
+        return uniqueStrings([...existing, ...inferredVisionModels(fetched)]).filter((model) => fetched.includes(model)).join(", ");
+      });
+      setVisionModelsConfigured(true);
       if (keyDraft.trim()) setKeyDraft("");
       setDefaultEffort((v) => v);
       setFetchStatus(t("settings.fetchModelsSuccess", { n: fetched.length }));
@@ -4067,11 +4315,9 @@ function ProviderEditor({
   };
 
   const save = async () => {
-    const ms = models
-      .split(",")
-      .map((m) => m.trim())
-      .filter(Boolean);
-    const effectiveApiKeyEnv = apiKeyEnv.trim() || apiKeyEnvFromProviderName(name);
+    const ms = parseProviderListInput(models);
+    const vms = parseProviderListInput(visionModels).filter((model) => ms.includes(model));
+    const effectiveApiKeyEnv = providerApiKeyEnvForSave(name, apiKeyEnv, keyDraft);
     if (keyDraft.trim()) await app.SetProviderKey(effectiveApiKeyEnv, keyDraft.trim());
     onSave({
       name: name.trim(),
@@ -4080,6 +4326,8 @@ function ProviderEditor({
       kind: kind.trim() || kinds[0] || "openai",
       baseUrl: baseUrl.trim(),
       models: ms,
+      visionModels: vms,
+      visionModelsConfigured: visionModelsConfigured || vms.length > 0,
       default: ms[0] ?? "",
       apiKeyEnv: effectiveApiKeyEnv,
       modelsUrl,
@@ -4101,7 +4349,10 @@ function ProviderEditor({
         {initial && onSaveKey && keyEnv && (
           <>
             <div className="provider-key-status provider-key-status--managed provider-key-status--compact">
-              <span>{initial.keySet ? t("settings.configuredKey", { env: keyEnv }) : t("settings.notConfiguredKey", { env: keyEnv })}</span>
+              <span title={initial.keySourcePath || undefined}>
+                {initial.keySet ? t("settings.configuredKey", { env: keyEnv }) : t("settings.notConfiguredKey", { env: keyEnv })}
+                {initial.keySource ? ` · ${t("settings.keySource", { source: initial.keySource })}` : ""}
+              </span>
               {initial.keySet && onClearKey && (
                 <InlineConfirmButton
                   label={t("settings.clearKey")}
@@ -4129,7 +4380,7 @@ function ProviderEditor({
     .split(",")
     .map((m) => m.trim())
     .filter(Boolean);
-  const canFetch = Boolean(name.trim() && baseUrl.trim() && (keyDraft.trim() || apiKeyEnv.trim()));
+  const canFetch = Boolean(name.trim() && baseUrl.trim());
 
   const protocolField = initial ? (
     <select className="mem-select" value={kind} onChange={(e) => setKind(e.target.value)}>
@@ -4164,6 +4415,17 @@ function ProviderEditor({
         <label className="set-label">{t("settings.providerContextWindow")}</label>
         <input className="mem-input" placeholder={t("settings.contextWindowPlaceholder")} value={ctx} onChange={(e) => setCtx(e.target.value)} inputMode="numeric" />
         <div className="mem-hint">{t("settings.contextWindowHint")}</div>
+        <label className="set-label">{t("settings.visionModels")}</label>
+        <input
+          className="mem-input"
+          placeholder={t("settings.providerModels")}
+          value={visionModels}
+          onChange={(e) => {
+            setVisionModelsConfigured(true);
+            setVisionModels(e.target.value);
+          }}
+        />
+        <div className="mem-hint">{t("settings.visionModelsHint")}</div>
         <label className="set-label">{t("settings.reasoningProtocol")}</label>
         <select className="mem-select" value={reasoningProtocol} onChange={(e) => setReasoningProtocol(e.target.value)}>
           {REASONING_PROTOCOLS.map((protocol) => (
@@ -4275,6 +4537,11 @@ function ProviderEditor({
       {initial && onSaveKey && apiKeyEnv.trim() && (
         <>
           <label className="set-label">{t("settings.providerKey")}</label>
+          {initial.keySource && (
+            <div className="mem-hint" title={initial.keySourcePath || undefined}>
+              {t("settings.keySource", { source: initial.keySource })}
+            </div>
+          )}
           <KeyField
             apiKeyEnv={apiKeyEnv.trim()}
             busy={busy || fetchingModels}
@@ -4487,7 +4754,7 @@ function ruleListHint(list: string, t: ReturnType<typeof useT>): string {
 
 type HookScope = "global" | "project";
 
-function HooksSection({ onChanged }: { onChanged: () => void }) {
+function HooksSection({ onChanged }: { onChanged: (settings?: SettingsView | null) => void }) {
   const t = useT();
   const [scope, setScope] = useState<HookScope>("global");
   const [view, setView] = useState<HooksSettingsView | null>(null);
@@ -5069,7 +5336,7 @@ const mb = (n: number) => (n / MB).toFixed(1);
 
 // UpdatesSection is the manual side of the auto-updater: it shows the startup
 // check preference, running version, and a Check button, then the same state
-// machine the top banner uses (useUpdater) — available → install/download, with
+// machine the top banner uses (useUpdater) — available → download → install, with
 // progress and errors inline.
 function UpdatesSection({
   configPath,
@@ -5087,14 +5354,14 @@ function UpdatesSection({
   applySettings: (fn: () => Promise<void>) => Promise<void>;
 }) {
   const t = useT();
-  const { status, check, apply: applyUpdate } = useUpdater();
+  const { status, check, download: downloadUpdate, install: installUpdate } = useUpdater();
   const [version, setVersion] = useState("");
   useEffect(() => {
     app.Version().then(setVersion).catch(() => {});
   }, []);
 
   const updaterBusy =
-    status.kind === "checking" || status.kind === "downloading" || status.kind === "verifying" || status.kind === "applying";
+    status.kind === "checking" || status.kind === "downloading" || status.kind === "verifying" || status.kind === "installing";
 
   return (
     <SettingsSection title={t("updater.title")}>
@@ -5136,15 +5403,18 @@ function UpdatesSection({
           {status.kind === "checking" ? t("updater.checking") : t("updater.checkButton")}
         </button>
       </SettingsField>
+      {status.kind === "available" && (
+        <div className="mem-hint">{t("updater.channelLabel", { channel: status.info.channel || "stable" })}</div>
+      )}
       {status.kind === "upToDate" && <div className="mem-hint">{t("updater.upToDate")}</div>}
       {status.kind === "available" && (
         <>
           <SettingsField label={t("updater.available", { v: status.info.latest })}>
-            <button className="btn btn--primary btn--small" onClick={() => applyUpdate(status.info)}>
-              {status.info.canSelfUpdate ? t("updater.installNow") : t("updater.goToDownload")}
+            <button className="btn btn--primary btn--small" onClick={() => downloadUpdate(status.info)}>
+              {status.info.canSelfUpdate ? t("updater.downloadUpdate") : t("updater.goToDownload")}
             </button>
           </SettingsField>
-          {!status.info.canSelfUpdate && <div className="mem-hint">{t("updater.macHint")}</div>}
+          {!status.info.canSelfUpdate && <div className="mem-hint">{status.info.manualReason || t("updater.macHint")}</div>}
         </>
       )}
       {status.kind === "downloading" && (
@@ -5157,7 +5427,14 @@ function UpdatesSection({
         </div>
       )}
       {status.kind === "verifying" && <div className="mem-hint">{t("updater.verifying")}</div>}
-      {status.kind === "applying" && <div className="mem-hint">{t("updater.applying")}</div>}
+      {status.kind === "downloaded" && (
+        <SettingsField label={t("updater.downloaded", { v: status.info.latest })}>
+          <button className="btn btn--primary btn--small" onClick={installUpdate}>
+            {t("updater.restartInstall")}
+          </button>
+        </SettingsField>
+      )}
+      {status.kind === "installing" && <div className="mem-hint">{t("updater.installing")}</div>}
       {status.kind === "done" && <div className="mem-hint">{t("updater.done")}</div>}
       {status.kind === "error" && <div className="banner banner--error">{t("updater.failed", { msg: status.message })}</div>}
       {configPath && (

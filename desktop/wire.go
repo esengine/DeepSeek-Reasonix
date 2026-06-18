@@ -65,6 +65,9 @@ type wireTool struct {
 	DurationMs int64        `json:"durationMs,omitempty"`
 	Partial    bool         `json:"partial,omitempty"`
 	ParentID   string       `json:"parentId,omitempty"`
+	Diff       string       `json:"diff,omitempty"`
+	Added      int          `json:"added,omitempty"`
+	Removed    int          `json:"removed,omitempty"`
 	Profile    *wireProfile `json:"profile,omitempty"`
 }
 
@@ -80,6 +83,7 @@ type wireUsage struct {
 	CacheHitTokens   int                   `json:"cacheHitTokens"`
 	CacheMissTokens  int                   `json:"cacheMissTokens"`
 	ReasoningTokens  int                   `json:"reasoningTokens,omitempty"`
+	Source           string                `json:"source,omitempty"`
 	CacheDiagnostics *wireCacheDiagnostics `json:"cacheDiagnostics,omitempty"`
 	// Session-cumulative cache tokens — the status line shows the aggregate
 	// hit-rate Σhit/Σ(hit+miss), steadier than the single-turn CacheHitTokens.
@@ -162,6 +166,7 @@ func toWire(e event.Event) wireEvent {
 			ReadOnly: e.Tool.ReadOnly, Truncated: e.Tool.Truncated,
 			DurationMs: e.Tool.DurationMs, Partial: e.Tool.Partial,
 			ParentID: e.Tool.ParentID,
+			Diff:     e.Tool.Diff, Added: e.Tool.Added, Removed: e.Tool.Removed,
 		}
 		if e.Tool.Profile != nil {
 			wt.Profile = &wireProfile{Model: e.Tool.Profile.Model, Effort: e.Tool.Profile.Effort}
@@ -173,6 +178,7 @@ func toWire(e event.Event) wireEvent {
 				PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens,
 				TotalTokens: u.TotalTokens, CacheHitTokens: u.CacheHitTokens,
 				CacheMissTokens: u.CacheMissTokens, ReasoningTokens: u.ReasoningTokens,
+				Source:                e.UsageSource,
 				SessionCacheHitTokens: e.SessionHit, SessionCacheMissTokens: e.SessionMiss,
 			}
 			if e.CacheDiagnostics != nil {

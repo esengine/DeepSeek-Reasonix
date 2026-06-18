@@ -17,7 +17,7 @@ func touch(path string, t time.Time) error {
 	return os.Chtimes(path, t, t)
 }
 
-// TestSaveLoadRoundTrip is the contract `reasonix chat --resume` depends on: a
+// TestSaveLoadRoundTrip is the contract `reasonix --resume` depends on: a
 // session written to disk reloads byte-for-byte, including tool calls and
 // reasoning content (which the model wants to keep across resumes for cache
 // hits on thinking-mode providers).
@@ -90,7 +90,7 @@ func TestSaveLoadLargeMessage(t *testing.T) {
 
 // TestListSessionsOrdersByMTime makes sure the picker shows the most
 // recently used conversation first — that's what users reach for when they
-// hit `reasonix chat --continue`.
+// hit `reasonix --continue`.
 func TestListSessionsOrdersByMTime(t *testing.T) {
 	dir := t.TempDir()
 	// Write two sessions with explicit mtimes so the order is deterministic.

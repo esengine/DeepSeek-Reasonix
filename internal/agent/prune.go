@@ -42,6 +42,15 @@ func (a *Agent) PruneStaleToolResults() (PruneStats, error) {
 		if m.Role != provider.RoleTool || len(m.Content) < minPruneBytes || strings.HasPrefix(m.Content, prunedMarker) {
 			continue
 		}
+		// Honor the keep policy before pruning: an error:/blocked: tool result
+		// that KeepErrors would preserve must reach compact() verbatim.
+		// Eliding it here rewrites Content to the [elided ...] marker, so the
+		// KeepErrors predicate sees only the placeholder and the failure is
+		// lost on the next fold. Long build/test failures sit beyond the recent
+		// tail, exactly this range.
+		if a.keepPolicy&KeepErrors != 0 && isErrorMessage(m) {
+			continue
+		}
 		idx = append(idx, i)
 	}
 	if len(idx) == 0 {

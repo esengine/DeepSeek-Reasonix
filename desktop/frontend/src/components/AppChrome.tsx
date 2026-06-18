@@ -58,7 +58,6 @@ export function AppChrome({
 }: AppChromeProps) {
   const t = useT();
   const darwinChrome = platform === "darwin";
-  const detachCommand = !darwinChrome;
   const showWindowsPreviewControls = browserPreviewChrome && platform === "windows";
   const chromeClassName = [
     "app-chrome",
@@ -79,7 +78,7 @@ export function AppChrome({
       onTabsClose={onTabsClose}
       onTabsReorder={onTabsReorder}
       onNewTab={onNewTab}
-      onOpenPalette={detachCommand ? undefined : onOpenPalette}
+      onOpenPalette={undefined}
       commandCompact={commandCompact}
     />
   );
@@ -123,9 +122,33 @@ export function AppChrome({
       {workbenchChrome ? (
         <span className="app-chrome__spacer" aria-hidden="true" />
       ) : darwinChrome ? (
-        <div className="app-chrome__tab-strip app-chrome__tab-strip--darwin">
-          {tabBar}
-        </div>
+        <>
+          <div className="app-chrome__tab-strip app-chrome__tab-strip--darwin">
+            {tabBar}
+          </div>
+          <div
+            className={[
+              "app-chrome__tools",
+              "app-chrome__tools--fixed",
+              workspaceTogglePressed ? "app-chrome__tools--workspace-pressed" : "",
+            ].filter(Boolean).join(" ")}
+            aria-label={t("tabBar.commandSearch")}
+          >
+            <button
+              className={[
+                "tabbar__command",
+                "tabbar__command--compact",
+                "app-chrome__command",
+              ].filter(Boolean).join(" ")}
+              type="button"
+              onClick={onOpenPalette}
+              aria-label={t("palette.placeholder")}
+              title={t("palette.placeholder")}
+            >
+              <Search size={16} className="tabbar__command-icon" />
+            </button>
+          </div>
+        </>
       ) : (
         <>
           <div className="app-chrome__tab-strip app-chrome__tab-strip--native">

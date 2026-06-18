@@ -2,9 +2,9 @@ package config
 
 import "testing"
 
-// TestProviderConfigured verifies Configured tracks whether the api_key_env
-// resolves to a non-empty value — the same key check Validate enforces at build
-// time, so model pickers can filter on it.
+// TestProviderConfigured verifies Configured tracks whether the provider can be
+// selected. Providers with no api_key_env are explicit no-auth providers; if an
+// env var is configured, it must resolve to a non-empty value.
 func TestProviderConfigured(t *testing.T) {
 	t.Setenv("REASONIX_TEST_KEY", "secret")
 	t.Setenv("REASONIX_TEST_EMPTY", "")
@@ -17,11 +17,35 @@ func TestProviderConfigured(t *testing.T) {
 		{"key set", ProviderEntry{APIKeyEnv: "REASONIX_TEST_KEY"}, true},
 		{"key env empty", ProviderEntry{APIKeyEnv: "REASONIX_TEST_EMPTY"}, false},
 		{"key env unset", ProviderEntry{APIKeyEnv: "REASONIX_TEST_MISSING"}, false},
-		{"no api_key_env", ProviderEntry{}, false},
+		{"loopback key env unset", ProviderEntry{BaseURL: "http://127.0.0.1:23333/v1", APIKeyEnv: "REASONIX_TEST_MISSING"}, true},
+		{"official endpoint without key env", ProviderEntry{BaseURL: "https://api.deepseek.com"}, false},
+		{"no api_key_env", ProviderEntry{}, true},
 	}
 	for _, c := range cases {
 		if got := c.p.Configured(); got != c.want {
 			t.Errorf("%s: Configured() = %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+func TestValidateAllowsNoAuthProvider(t *testing.T) {
+	c := &Config{
+		DefaultModel: "local/model-a",
+		Providers: []ProviderEntry{{
+			Name:    "local",
+			Kind:    "openai",
+			BaseURL: "http://127.0.0.1:23333/v1",
+			Models:  []string{"model-a", "model-b"},
+			Default: "model-a",
+		}},
+	}
+
+	if err := c.Validate("local/model-b"); err != nil {
+		t.Fatalf("Validate no-auth local provider: %v", err)
+	}
+
+	c.Providers[0].APIKeyEnv = "LOCAL_API_KEY"
+	if err := c.Validate("local/model-b"); err != nil {
+		t.Fatalf("Validate loopback local provider with missing key env: %v", err)
 	}
 }

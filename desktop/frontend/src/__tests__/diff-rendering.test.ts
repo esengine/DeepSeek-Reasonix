@@ -3,7 +3,8 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { diffLines } from "../lib/diff";
+import { diffLines, diffRowsFromUnifiedDiff } from "../lib/diff";
+import { summarize } from "../lib/tools";
 import { initialState, reducer } from "../lib/useController";
 import type { Item } from "../lib/useController";
 
@@ -75,12 +76,108 @@ console.log("\ndiff rendering contract");
   ]), "diff rows carry old/new line numbers");
 }
 
+{
+  const rows = diffRowsFromUnifiedDiff([
+    "--- a/settings/settings_IO.gd",
+    "+++ b/settings/settings_IO.gd",
+    "@@ -27,2 +27,3 @@",
+    " func keep():",
+    "-func save():",
+    "+func save_file():",
+    "+func save_backup():",
+    "",
+  ].join("\n"));
+  eq(JSON.stringify(rows.map((r) => [r.type, r.oldLine ?? "", r.newLine ?? "", r.text])), JSON.stringify([
+    ["ctx", 27, 27, "func keep():"],
+    ["del", 28, "", "func save():"],
+    ["add", "", 28, "func save_file():"],
+    ["add", "", 29, "func save_backup():"],
+  ]), "unified diff rows preserve hunk line numbers");
+}
+
+{
+  eq(summarize("write_file", ""), "", "archived write_file without args does not synthesize 0 lines");
+  eq(summarize("write_file", JSON.stringify({ content: "" })), "0 lines", "explicit empty write_file content still summarizes as 0 lines");
+}
+
 for (const prefix of ["diff", "inline-diff"]) {
   eq(finalDeclaration(`.${prefix}__table`, "min-width"), "max-content", `${prefix} rows share the longest scroll width`);
   eq(finalDeclaration(`.${prefix}__table`, "width"), "100%", `${prefix} table fills the visible viewport`);
   eq(finalDeclaration(`.${prefix}__row`, "width"), "100%", `${prefix} row background fills table width`);
   eq(finalDeclaration(`.${prefix}__gutter`, "position"), "sticky", `${prefix} gutter remains visible while horizontally scrolled`);
   eq(finalDeclaration(`.${prefix}__gutter`, "left"), "0", `${prefix} sticky gutter anchors at left`);
+}
+
+{
+  let s = reducer(initialState, { type: "event", e: { kind: "turn_started" } });
+  const fileDiff = [
+    "--- a/settings/pages/video_settings.tscn",
+    "+++ b/settings/pages/video_settings.tscn",
+    "@@ -42,2 +42,2 @@",
+    "-layout_mode = 3",
+    "+layout_mode = 1",
+  ].join("\n");
+  s = reducer(s, {
+    type: "event",
+    e: {
+      kind: "tool_dispatch",
+      tool: {
+        id: "write-existing",
+        name: "write_file",
+        args: JSON.stringify({ path: "settings/pages/video_settings.tscn", content: "full\nreplacement\nfile\n" }),
+        readOnly: false,
+        diff: fileDiff,
+        added: 1,
+        removed: 1,
+      } as any,
+    },
+  });
+  let [tool] = toolItems(s);
+  eq(tool?.summary, "+1 -1", "writer dispatch uses preview file diff summary instead of content line count");
+  eq((tool as any)?.fileDiff?.diff, fileDiff, "writer dispatch keeps preview file diff for rendering");
+  s = reducer(s, { type: "event", e: { kind: "tool_result", tool: { id: "write-existing", name: "write_file", readOnly: false, output: "wrote 22 bytes", durationMs: 12 } } });
+  [tool] = toolItems(s);
+  eq(tool?.summary, "+1 -1", "completed writer archives with preview file diff summary");
+  ok(tool?.dataArchived === true, "completed writer with preview diff is still archived");
+}
+
+{
+  const fileDiff = [
+    "--- a/settings/settings_IO.gd",
+    "+++ b/settings/settings_IO.gd",
+    "@@ -27 +27 @@",
+    "-func save():",
+    "+func save_file():",
+  ].join("\n");
+  const s = reducer(initialState, {
+    type: "history",
+    messages: [
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "hist-edit",
+          name: "edit_file",
+          arguments: "",
+          argumentsArchived: true,
+          subject: "settings/settings_IO.gd",
+          diff: fileDiff,
+          added: 1,
+          removed: 1,
+        }],
+      },
+      {
+        role: "tool",
+        content: "",
+        toolCallId: "hist-edit",
+        toolName: "edit_file",
+        toolResultArchived: true,
+      },
+    ] as any,
+  });
+  const [tool] = toolItems(s);
+  eq(tool?.summary, "+1 -1", "history writer restores preview file diff summary");
+  eq((tool as any)?.fileDiff?.diff, fileDiff, "history writer restores preview file diff body");
 }
 
 {

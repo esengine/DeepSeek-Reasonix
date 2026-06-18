@@ -30,6 +30,7 @@ import (
 	"reasonix/internal/hook"
 	"reasonix/internal/i18n"
 	"reasonix/internal/memory"
+	"reasonix/internal/migration"
 	"reasonix/internal/outputstyle"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
@@ -170,10 +171,14 @@ type chatTUI struct {
 	toolLineCountByID map[string]int
 	// toolStreamStart / toolStreamFrame drive the "⎿ working · Ns" line shown
 	// under a dispatched tool that hasn't produced output yet, so a slow tool
-	// (e.g. codegraph_context) reads as making progress rather than frozen.
+	// reads as making progress rather than frozen.
 	toolStreamStart time.Time
 	toolStreamFrame int
 	transcriptDirty bool
+	// forceGotoBottom is set by replayActiveBranch and resetFreshContextView to
+	// pin the viewport to the bottom after a session / branch / clear switch
+	// regardless of the previous wasAtBottom state (#4584).
+	forceGotoBottom bool
 	eventCh         chan event.Event
 	started         bool // banner + resumed history committed once
 
@@ -689,8 +694,9 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		wrapped := wrapTranscript(strings.Join(cm.transcript, "\n"), contentW)
 		cm.viewport.SetContent(wrapped)
 		cm.wrappedLines = strings.Split(wrapped, "\n")
-		if wasAtBottom {
+		if wasAtBottom || cm.forceGotoBottom {
 			cm.viewport.GotoBottom() // tail-follow: stay pinned to newest output
+			cm.forceGotoBottom = false
 		}
 	}
 	cm.transcriptDirty = false
@@ -3682,6 +3688,13 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	case "/memory":
 		m.echoLocalCommand(input)
 		m.showMemory()
+	case "/migrate", "/migration":
+		m.echoLocalCommand(input)
+		migration.RunLegacyRescue(event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				m.notice(e.Text)
+			}
+		}))
 	case "/goal":
 		return m.runGoalSubcommand(input)
 	case "/remember":
@@ -3943,7 +3956,7 @@ func replaySectionsFor(history []provider.Message, width int, renderer *mdRender
 // at the top of the session.
 func renderTUIBanner(label, missing string, width int) string {
 	var b strings.Builder
-	b.WriteString(accent("◆") + " " + bold("reasonix chat") + "  " + dim("· "+label) + "\n")
+	b.WriteString(accent("◆") + " " + bold("reasonix") + "  " + dim("· "+label) + "\n")
 	b.WriteString(dim("  "+i18n.M.ChatTip) + "\n")
 	if missing != "" {
 		b.WriteString(wrapForViewport("  ! "+missing, width, activeCLITheme.warn) + "\n")

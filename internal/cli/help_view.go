@@ -71,6 +71,7 @@ func builtinHelpItems() []compItem {
 		{label: "/subagents", hint: i18n.M.CmdSubagents},
 		{label: "/hooks", hint: i18n.M.CmdHooks},
 		{label: "/memory", hint: i18n.M.CmdMemory},
+		{label: "/migrate", hint: i18n.M.CmdMigrate},
 		{label: "/output-style", hint: i18n.M.CmdOutputStyle},
 		{label: "/diff-fold", hint: i18n.M.CmdDiffFold},
 		{label: "/sandbox", hint: i18n.M.CmdSandbox},

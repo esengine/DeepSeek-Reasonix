@@ -48,3 +48,22 @@ func TestHostAddRemove(t *testing.T) {
 		t.Error("removing an absent server should report not found")
 	}
 }
+
+func TestHostAddConnectedRejectsLateDuplicate(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	h := NewHost()
+	defer h.Close()
+
+	spec := helperSpec()
+	if _, err := h.addConnected(ctx, spec); err != nil {
+		t.Fatalf("first addConnected: %v", err)
+	}
+	if _, err := h.addConnected(ctx, spec); !IsServerAlreadyConnected(err) {
+		t.Fatalf("second addConnected error = %v, want ErrServerAlreadyConnected", err)
+	}
+	if got := h.ServerNames(); len(got) != 1 || got[0] != spec.Name {
+		t.Fatalf("ServerNames() = %v, want exactly one %q", got, spec.Name)
+	}
+}

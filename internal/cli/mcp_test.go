@@ -161,7 +161,7 @@ func TestRenderMCPManagerListGroupsRuntimeAndConfiguredServers(t *testing.T) {
 	p := &mcpManager{snapshot: mcpSnapshot{
 		configPath: "reasonix.toml",
 		servers: []mcpServerView{
-			{Name: "codegraph", Transport: "stdio", Status: "connected", BuiltIn: true, Tools: 4},
+			{Name: "managed-search", Transport: "stdio", Status: "connected", BuiltIn: true, Tools: 4},
 			{Name: "github", Transport: "stdio", Status: "deferred", Configured: true, Tier: "lazy", Tools: 12},
 			{Name: "figma", Transport: "http", Status: "failed", Configured: true, Tier: "lazy", URL: "https://mcp.figma.com", Error: "connect: 401 unauthorized"},
 		},
@@ -170,9 +170,9 @@ func TestRenderMCPManagerListGroupsRuntimeAndConfiguredServers(t *testing.T) {
 	for _, want := range []string{
 		"Manage MCP servers",
 		"3 servers",
-		"Built-in MCPs",
+		"Managed MCPs",
 		"User MCPs (reasonix.toml)",
-		"codegraph",
+		"managed-search",
 		"connected",
 		"github",
 		"connect on use",
@@ -453,85 +453,13 @@ func TestApplyMCPModeRecordsPluginConnectFailure(t *testing.T) {
 	}
 }
 
-func TestApplyMCPModeRecordsCodegraphConnectFailure(t *testing.T) {
-	isolateUserConfig(t)
-	t.Setenv("PATH", "")
-	t.Setenv("REASONIX_CACHE_DIR", t.TempDir())
-	cfg := config.Default()
-	cfg.Codegraph.Enabled = false
-	cfg.Codegraph.Tier = "eager"
-	if err := cfg.SaveTo("reasonix.toml"); err != nil {
-		t.Fatalf("save config: %v", err)
-	}
-
-	m := newTestChatTUI()
-	m.ctrl = control.New(control.Options{Host: plugin.NewHost()})
-	defer m.ctrl.Close()
-	m.host = m.ctrl.Host()
-	m.mcp = &mcpManager{
-		stage: mcpStageMode,
-		name:  "codegraph",
-		snapshot: mcpSnapshot{configPath: "reasonix.toml", servers: []mcpServerView{{
-			Name: "codegraph", Transport: "stdio", Status: "disabled", BuiltIn: true, Configured: true, Tier: "background",
-		}}},
-	}
-
-	_, _ = m.applyMCPMode("eager")
-
-	failures := m.ctrl.Host().Failures()
-	if len(failures) != 1 || failures[0].Name != "codegraph" {
-		t.Fatalf("Host.Failures() = %+v, want codegraph failure", failures)
-	}
-	if !strings.Contains(failures[0].Error, "not installed") {
-		t.Fatalf("codegraph failure error = %q, want not installed", failures[0].Error)
-	}
-	v, ok := m.mcp.selectedServer()
-	if !ok {
-		t.Fatal("selected server missing after refresh")
-	}
-	if v.Status != "failed" {
-		t.Fatalf("codegraph status = %q, want failed; server = %+v", v.Status, v)
-	}
-}
-
-func TestDisableCodegraphPersistsEnabledFalse(t *testing.T) {
-	isolateUserConfig(t)
-	cfg := config.Default()
-	cfg.Codegraph.Enabled = true
-	cfg.Codegraph.Tier = "background"
-	if err := cfg.SaveTo("reasonix.toml"); err != nil {
-		t.Fatalf("save config: %v", err)
-	}
-
-	m := newTestChatTUI()
-	m.ctrl = control.New(control.Options{Host: plugin.NewHost()})
-	defer m.ctrl.Close()
-	m.mcp = &mcpManager{
-		stage: mcpStageDetail,
-		name:  "codegraph",
-		snapshot: mcpSnapshot{configPath: "reasonix.toml", servers: []mcpServerView{{
-			Name: "codegraph", Transport: "stdio", Status: "connected", BuiltIn: true, Configured: true, AutoStart: true, Tier: "background",
-		}}},
-	}
-
-	_, _ = m.disableSelectedMCP(m.mcp.snapshot.servers[0])
-
-	loaded, err := config.Load()
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-	if loaded.Codegraph.Enabled {
-		t.Fatalf("codegraph enabled = true, want false")
-	}
-}
-
 func TestMCPManagerEscFromDetailReturnsToList(t *testing.T) {
 	m := newTestChatTUI()
 	m.mcp = &mcpManager{
 		stage: mcpStageDetail,
-		name:  "codegraph",
+		name:  "managed-search",
 		snapshot: mcpSnapshot{servers: []mcpServerView{{
-			Name: "codegraph", Transport: "stdio", Status: "connected", BuiltIn: true,
+			Name: "managed-search", Transport: "stdio", Status: "connected", BuiltIn: true,
 		}}},
 	}
 

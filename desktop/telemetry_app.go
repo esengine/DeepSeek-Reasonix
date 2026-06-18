@@ -32,7 +32,7 @@ type startupPing struct {
 }
 
 func installID() (string, error) {
-	path := filepath.Join(filepath.Dir(config.UserConfigPath()), "install-id")
+	path := filepath.Join(config.MemoryUserDir(), "install-id")
 	if b, err := os.ReadFile(path); err == nil {
 		if id := string(bytes.TrimSpace(b)); installIDPattern.MatchString(id) {
 			return id, nil

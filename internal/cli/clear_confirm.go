@@ -63,6 +63,7 @@ func (m *chatTUI) resetFreshContextView(clearTranscript bool) {
 	}
 	m.commitLine(strings.TrimRight(renderTUIBanner(m.label, "", m.width), "\n"))
 	m.transcriptDirty = true
+	m.forceGotoBottom = true
 }
 
 func (m chatTUI) renderClearConfirm() string {

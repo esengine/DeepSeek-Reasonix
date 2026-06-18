@@ -406,3 +406,50 @@ func BenchmarkPlannerToolRegistry(b *testing.B) {
 		}
 	}
 }
+
+func TestCoordinatorSetPlanModePropagates(t *testing.T) {
+	prov := &mockProvider{name: "planner", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "plan"},
+		{Type: provider.ChunkDone},
+	}}
+	plannerSess := NewSession("planner-sys")
+	plannerReg := tool.NewRegistry()
+	plannerReg.Add(coordinatorTestTool{name: "read_file", readOnly: true})
+	plannerTools := PlannerToolRegistry(plannerReg)
+
+	exec := New(nil, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
+
+	coord := NewCoordinator(prov, plannerSess, nil, plannerTools, Options{MaxSteps: 2}, exec, 0, event.Discard, nil)
+
+	// Both should start with planMode=false
+	if coord.plannerAgent.planMode.Load() {
+		t.Error("planner should start with planMode=false")
+	}
+	if coord.executor.planMode.Load() {
+		t.Error("executor should start with planMode=false")
+	}
+
+	// SetPlanMode(true) should propagate to both
+	coord.SetPlanMode(true)
+	if !coord.plannerAgent.planMode.Load() {
+		t.Error("planner should have planMode=true after SetPlanMode(true)")
+	}
+	if !coord.executor.planMode.Load() {
+		t.Error("executor should have planMode=true after SetPlanMode(true)")
+	}
+
+	// SetPlanMode(false) should propagate to both
+	coord.SetPlanMode(false)
+	if coord.plannerAgent.planMode.Load() {
+		t.Error("planner should have planMode=false after SetPlanMode(false)")
+	}
+	if coord.executor.planMode.Load() {
+		t.Error("executor should have planMode=false after SetPlanMode(false)")
+	}
+}
+
+func TestCoordinatorSetPlanModeNilSafety(t *testing.T) {
+	var c *Coordinator
+	c.SetPlanMode(true)  // should not panic
+	c.SetPlanMode(false) // should not panic
+}

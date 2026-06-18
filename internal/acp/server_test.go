@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,9 +13,11 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/command"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/hook"
+	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
 )
 
@@ -40,6 +43,23 @@ type fakeFactory struct {
 func (f *fakeFactory) NewSession(_ context.Context, p SessionParams) (*control.Controller, error) {
 	runner := &fakeRunner{sink: p.Sink, behavior: f.behavior}
 	return control.New(control.Options{Runner: runner, Sink: p.Sink}), nil
+}
+
+type commandFactory struct {
+	commands []command.Command
+	seen     chan string
+}
+
+func (f *commandFactory) NewSession(_ context.Context, p SessionParams) (*control.Controller, error) {
+	runner := &fakeRunner{
+		sink: p.Sink,
+		behavior: func(_ context.Context, sink event.Sink, input string) error {
+			f.seen <- input
+			sink.Emit(event.Event{Kind: event.Text, Text: input})
+			return nil
+		},
+	}
+	return control.New(control.Options{Runner: runner, Sink: p.Sink, Commands: f.commands}), nil
 }
 
 type configurableFactory struct {
@@ -333,6 +353,21 @@ func TestServeLifecycle(t *testing.T) {
 	if ir.AgentCapabilities.PromptCapabilities.Image {
 		t.Errorf("image must not be advertised")
 	}
+	if len(ir.AuthMethods) != 1 || ir.AuthMethods[0].ID != "reasonix-setup" || ir.AuthMethods[0].Type != "terminal" {
+		t.Fatalf("authMethods = %+v, want terminal reasonix setup", ir.AuthMethods)
+	}
+	if len(ir.AuthMethods[0].Args) != 1 || ir.AuthMethods[0].Args[0] != "setup" {
+		t.Fatalf("auth args = %+v, want [setup]", ir.AuthMethods[0].Args)
+	}
+
+	authResp := client.call(t, "authenticate", AuthenticateParams{MethodID: "reasonix-setup"})
+	if authResp.Error != nil {
+		t.Fatalf("authenticate errored: %+v", authResp.Error)
+	}
+	badAuthResp := client.call(t, "authenticate", AuthenticateParams{MethodID: "missing"})
+	if badAuthResp.Error == nil || badAuthResp.Error.Code != ErrInvalidParams {
+		t.Fatalf("bad authenticate = %+v, want invalid params", badAuthResp.Error)
+	}
 
 	newResp := client.call(t, "session/new", SessionNewParams{Cwd: t.TempDir()})
 	var nr SessionNewResult
@@ -361,6 +396,72 @@ func TestServeLifecycle(t *testing.T) {
 	}
 	if pr.StopReason != StopEndTurn {
 		t.Errorf("stopReason = %q, want %q", pr.StopReason, StopEndTurn)
+	}
+}
+
+func TestServeAdvertisesAndExpandsCustomCommands(t *testing.T) {
+	factory := &commandFactory{
+		seen: make(chan string, 1),
+		commands: []command.Command{{
+			Name:        "review",
+			Description: "Review the target",
+			ArgHint:     "path",
+			Body:        "Review $1",
+		}},
+	}
+	client, stop := startServer(t, factory)
+	defer stop()
+
+	client.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
+	newResp := client.call(t, "session/new", SessionNewParams{Cwd: t.TempDir()})
+	var nr SessionNewResult
+	if err := json.Unmarshal(newResp.Result, &nr); err != nil || nr.SessionID == "" {
+		t.Fatalf("session/new result: %v (%q)", err, nr.SessionID)
+	}
+
+	var advertised bool
+	select {
+	case n := <-client.notifs:
+		var p struct {
+			Update struct {
+				SessionUpdate     string             `json:"sessionUpdate"`
+				AvailableCommands []AvailableCommand `json:"availableCommands"`
+			} `json:"update"`
+		}
+		if err := json.Unmarshal(n.Params, &p); err != nil {
+			t.Fatalf("available commands update: %v", err)
+		}
+		for _, cmd := range p.Update.AvailableCommands {
+			if p.Update.SessionUpdate == "available_commands_update" &&
+				cmd.Name == "review" &&
+				cmd.Description == "Review the target" &&
+				cmd.Input != nil &&
+				cmd.Input.Hint == "path" {
+				advertised = true
+			}
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for available_commands_update")
+	}
+	if !advertised {
+		t.Fatal("review command was not advertised")
+	}
+
+	promptCh := client.callAsync("session/prompt", SessionPromptParams{
+		SessionID: nr.SessionID,
+		Prompt:    []ContentBlock{{Type: "text", Text: "/review src/main.go"}},
+	})
+	_, resp := drainPrompt(t, client, promptCh)
+	if resp.Error != nil {
+		t.Fatalf("prompt errored: %+v", resp.Error)
+	}
+	select {
+	case got := <-factory.seen:
+		if got != "Review src/main.go" {
+			t.Fatalf("runner input = %q, want expanded command", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner did not receive prompt")
 	}
 }
 
@@ -635,6 +736,32 @@ func TestServeCancel(t *testing.T) {
 	}
 }
 
+func TestServePromptErrorIsNotReportedAsCancelled(t *testing.T) {
+	factory := &fakeFactory{behavior: func(context.Context, event.Sink, string) error {
+		return errors.New("provider failed")
+	}}
+	client, stop := startServer(t, factory)
+	defer stop()
+
+	client.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
+	newResp := client.call(t, "session/new", SessionNewParams{})
+	var nr SessionNewResult
+	json.Unmarshal(newResp.Result, &nr)
+
+	promptCh := client.callAsync("session/prompt", SessionPromptParams{
+		SessionID: nr.SessionID,
+		Prompt:    []ContentBlock{{Type: "text", Text: "fail"}},
+	})
+	_, resp := drainPrompt(t, client, promptCh)
+	var pr SessionPromptResult
+	if err := json.Unmarshal(resp.Result, &pr); err != nil {
+		t.Fatalf("prompt result: %v", err)
+	}
+	if pr.StopReason != StopError {
+		t.Errorf("stopReason = %q, want error", pr.StopReason)
+	}
+}
+
 func TestServeRejectsConcurrentPromptForSameSession(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -730,6 +857,13 @@ func TestDeleteSessionFilesDeletesOwnedSubagents(t *testing.T) {
 	}
 	ref := "sa_20260102_030405_000000000_aabbccddeeff"
 	writeACPSubagentArtifact(t, dir, ref, agent.BranchID(sessionPath))
+	jobsDir := jobs.ArtifactDir(sessionPath)
+	if err := os.MkdirAll(jobsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(jobsDir, "bash-1.log"), []byte("output"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := deleteSessionFiles(sessionPath); err != nil {
 		t.Fatalf("deleteSessionFiles: %v", err)
@@ -739,6 +873,9 @@ func TestDeleteSessionFilesDeletesOwnedSubagents(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "subagents", ref+".meta.json")); !os.IsNotExist(err) {
 		t.Fatalf("subagent meta should be deleted, stat err = %v", err)
+	}
+	if _, err := os.Stat(jobsDir); !os.IsNotExist(err) {
+		t.Fatalf("jobs sidecar should be deleted, stat err = %v", err)
 	}
 }
 
