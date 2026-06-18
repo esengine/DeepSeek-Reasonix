@@ -70,6 +70,21 @@ npm i -g reasonix                  # any OS; pulls the prebuilt native binary
 brew install esengine/reasonix/reasonix   # macOS
 ```
 
+### Uninstall
+
+```sh
+npm uninstall -g reasonix          # remove the npm-installed binary
+brew uninstall reasonix            # remove the Homebrew-installed binary
+```
+
+### Upgrade
+
+```sh
+reasonix upgrade                   # self-update to the latest release
+reasonix upgrade --check           # check without installing
+npm i -g reasonix@next             # or upgrade via npm
+```
+
 Prebuilt archives (`darwin|linux|windows × amd64|arm64`) and `SHA256SUMS` are on
 every [GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases).
 
