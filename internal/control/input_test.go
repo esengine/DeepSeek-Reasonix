@@ -221,14 +221,14 @@ func TestGoalCommandSetsReportsAndClears(t *testing.T) {
 
 func TestParseGoalCommandWithStrict(t *testing.T) {
 	tests := []struct {
-		input string
-		text  string
+		input  string
+		text   string
 		strict bool
-		ok    bool
+		ok     bool
 	}{
 		{"/goal --strict implement calculator", "implement calculator", true, true},
 		{"/goal implement calculator", "implement calculator", false, true},
-		{"/goal --strict", "", true, true}, // --strict shows status
+		{"/goal --strict", "", true, true},        // --strict shows status
 		{"/goal --strict status", "", true, true}, // --strict shows status
 	}
 	for _, tt := range tests {

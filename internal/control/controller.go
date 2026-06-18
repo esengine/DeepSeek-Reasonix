@@ -126,17 +126,17 @@ type Controller struct {
 
 	// mu guards the run state and approval bookkeeping; every critical section
 	// under it is short and non-blocking.
-	mu          sync.Mutex
-	cancel      context.CancelFunc
-	running     bool
-	canceling   bool
-	autosaveWG  sync.WaitGroup
-	planMode    bool
-	goal        string
-	goalStatus  string
-	goalTurns   int
-	goalBlocks  int
-	goalBlock   string
+	mu         sync.Mutex
+	cancel     context.CancelFunc
+	running    bool
+	canceling  bool
+	autosaveWG sync.WaitGroup
+	planMode   bool
+	goal       string
+	goalStatus string
+	goalTurns  int
+	goalBlocks int
+	goalBlock  string
 	// goalInterceptMsg, when non-empty, overrides the generic goalContinueTurn prompt
 	// for the next continuation turn. Used by advanceGoalAfterTurn to inject specific
 	// feedback such as incomplete-todo reminders.
@@ -154,11 +154,11 @@ type Controller struct {
 	// injected for the current goal. On first [goal:complete] with all todos
 	// done, the agent is asked to self-verify before final completion.
 	goalSelfCheckDone bool
-	sessionPath string
-	approvals   map[string]pendingApproval
-	asks        map[string]pendingAsk
-	granted     map[string]bool
-	nextID      int
+	sessionPath       string
+	approvals         map[string]pendingApproval
+	asks              map[string]pendingAsk
+	granted           map[string]bool
+	nextID            int
 	// turn counts model turns this session, passed to hooks in their payload.
 	turn int
 	// approvedPlanAutoApproveTools auto-allows writer tool calls without prompting.
@@ -242,8 +242,8 @@ const (
 )
 
 const (
-	maxGoalAutoTurns = 50
-	goalContinueTurn = "Continue pursuing the active goal. If it is complete, provide the concise final result and end with [goal:complete]. If it is truly blocked on a user-owned decision after trying sensible defaults, end with [goal:blocked:<short reason>]. Otherwise do the next useful work and end with [goal:continue]."
+	maxGoalAutoTurns  = 50
+	goalContinueTurn  = "Continue pursuing the active goal. If it is complete, provide the concise final result and end with [goal:complete]. If it is truly blocked on a user-owned decision after trying sensible defaults, end with [goal:blocked:<short reason>]. Otherwise do the next useful work and end with [goal:continue]."
 	goalSelfCheckTurn = "The agent signaled goal completion and all tasks are marked done. Before finalizing, perform a brief quality self-check:\n1. Verify any changed files compile or parse correctly\n2. Run the relevant tests if applicable\n3. Confirm the original requirements are met\nIf everything checks out, signal [goal:complete]. If issues are found, fix them and signal [goal:complete] when done."
 )
 
