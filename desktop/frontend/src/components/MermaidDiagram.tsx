@@ -110,7 +110,7 @@ function sanitizeSvg(svg: string): string {
       }
       if (attr.name === "href" || attr.name === "xlink:href") {
         const val = attr.value.trim().toLowerCase();
-        if (val.startsWith("javascript:") || val.startsWith("data:")) {
+        if (/^(javascript|data|vbscript):/i.test(val)) {
           node.removeAttribute(attr.name);
         }
       }
