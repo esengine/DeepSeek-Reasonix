@@ -1,7 +1,9 @@
 package fileutil
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -9,6 +11,42 @@ var (
 	maxReplaceRetries = 8
 	replaceRetryBase  = 20 * time.Millisecond
 )
+
+// AtomicWriteFile writes data to path crash-safely: it writes to a sibling tmp
+// file, fsyncs it so the bytes reach disk (guarding against power loss, not just
+// process crash — see #4615), then atomically renames it onto path via
+// ReplaceFile. A crash or power cut at any point leaves either the old file or
+// the complete new file, never a truncated one. perm applies to the final file.
+func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create dir for %s: %w", path, err)
+	}
+	tmp, err := os.CreateTemp(dir, ".atomic-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create tmp for %s: %w", path, err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("write tmp for %s: %w", path, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("fsync tmp for %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close tmp for %s: %w", path, err)
+	}
+	if err := os.Chmod(tmpPath, perm); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("chmod tmp for %s: %w", path, err)
+	}
+	return ReplaceFile(tmpPath, path)
+}
 
 // ReplaceFile renames tmp onto dest, falling back to a copy when the rename
 // fails — Windows encryption-software filter drivers report a cross-device link

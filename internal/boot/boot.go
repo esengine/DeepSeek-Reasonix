@@ -110,6 +110,11 @@ type Options struct {
 	// artifacts left by a previous process. Nil uses the core physical-delete
 	// reconciler; frontends with different deletion semantics can override it.
 	CleanupPendingReconciler func(sessionDir string) error
+	// ApprovalTimeout bounds how long a tool-approval or ask prompt blocks for a
+	// user decision. Zero (default) waits forever — correct for an interactive
+	// terminal. Headless/bot frontends pass a positive value so an unanswered
+	// prompt can't wedge the session indefinitely (#4626, #4402).
+	ApprovalTimeout time.Duration
 }
 
 // Build loads config, resolves the model(s), and returns a Controller wrapping a
@@ -930,6 +935,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		DisableColdResumePrune: !cfg.ColdResumePruneEnabled(),
 		Shell:                  shell,
 		PlanModeAllowedTools:   cfg.Agent.PlanModeAllowedTools,
+		ApprovalTimeout:        opts.ApprovalTimeout,
 		OnRemember: func(rule string) control.RememberResult {
 			return rememberPermissionRule(root, rule)
 		},

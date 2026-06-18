@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -423,7 +424,15 @@ func migrateLegacyTOMLIfNeeded(dest, home string) (*MigrationResult, error) {
 		if err := cfg.WriteFile(dest); err != nil {
 			return nil, fmt.Errorf("write %s: %w", dest, err)
 		}
-		return &MigrationResult{From: src, To: dest, Plugins: len(cfg.Plugins)}, nil
+		res := &MigrationResult{From: src, To: dest, Plugins: len(cfg.Plugins)}
+		legacyDir := filepath.Dir(src)
+		newDir := filepath.Dir(dest)
+		if !samePath(legacyDir, newDir) {
+			if warnings := migrateSupportData(legacyDir, newDir); len(warnings) > 0 {
+				res.Warnings = append(res.Warnings, warnings...)
+			}
+		}
+		return res, nil
 	}
 	return nil, nil
 }
@@ -568,6 +577,87 @@ func writeCredentialsEnv(home string, lines []string) error {
 			return os.WriteFile(filepath.Join(home, ".env"), []byte(strings.Join(lines, "\n")+"\n"), 0o600)
 		}
 		return err
+	}
+	return nil
+}
+
+func migrateSupportData(legacyDir, newDir string) []string {
+	var warnings []string
+	items := []string{"sessions", "projects", "skills", "archive", "hooks.json"}
+	for _, item := range items {
+		src := filepath.Join(legacyDir, item)
+		fi, err := os.Stat(src)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			warnings = append(warnings, fmt.Sprintf("failed to read legacy item %s: %v", item, err))
+			continue
+		}
+		dst := filepath.Join(newDir, item)
+		if fi.IsDir() {
+			if err := copyDir(src, dst); err != nil {
+				warnings = append(warnings, fmt.Sprintf("failed to migrate directory %s: %v", item, err))
+			} else {
+				warnings = append(warnings, fmt.Sprintf("successfully migrated directory %s", item))
+			}
+		} else {
+			if err := copyFile(src, dst); err != nil {
+				warnings = append(warnings, fmt.Sprintf("failed to migrate file %s: %v", item, err))
+			} else {
+				warnings = append(warnings, fmt.Sprintf("successfully migrated file %s", item))
+			}
+		}
+	}
+	return warnings
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err = io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
+}
+
+func copyDir(src, dst string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			if err := copyFile(srcPath, dstPath); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

@@ -751,7 +751,21 @@ func (h *Host) Add(ctx context.Context, s Spec) ([]tool.Tool, error) {
 	return tools, err
 }
 
+// AddWithLifecycle connects one server live, allowing caller to specify separate
+// contexts for the subprocess lifecycle (lifeCtx, session-scoped) and the startup
+// handshake/list calls (callCtx, turn-scoped/timeout-bound).
+func (h *Host) AddWithLifecycle(lifeCtx, callCtx context.Context, s Spec) ([]tool.Tool, error) {
+	if h.has(s.Name) {
+		return nil, serverAlreadyConnectedError(s.Name)
+	}
+	return h.addConnectedWithLifecycle(lifeCtx, callCtx, s)
+}
+
 func (h *Host) addConnected(ctx context.Context, s Spec) ([]tool.Tool, error) {
+	return h.addConnectedWithLifecycle(ctx, ctx, s)
+}
+
+func (h *Host) addConnectedWithLifecycle(lifeCtx, callCtx context.Context, s Spec) ([]tool.Tool, error) {
 	h.mu.RLock()
 	if h.closed {
 		h.mu.RUnlock()
@@ -759,11 +773,11 @@ func (h *Host) addConnected(ctx context.Context, s Spec) ([]tool.Tool, error) {
 	}
 	h.mu.RUnlock()
 
-	c, err := start(ctx, ctx, s)
+	c, err := start(lifeCtx, callCtx, s)
 	if err != nil {
 		return nil, err
 	}
-	ts, err := c.listTools(ctx)
+	ts, err := c.listTools(callCtx)
 	if err != nil {
 		c.close()
 		return nil, fmt.Errorf("list tools: %w", err)
@@ -783,15 +797,15 @@ func (h *Host) addConnected(ctx context.Context, s Spec) ([]tool.Tool, error) {
 	h.clients = append(h.clients, c)
 	h.clearFailure(s.Name)
 	h.mu.Unlock()
-	// Prompts and resources stream in on the long ctx the caller passed (Host.Add
+	// Prompts and resources stream in on the long lifeCtx the caller passed (Host.Add
 	// uses the session-scoped PluginCtx, not a per-turn ctx), so the slow list
 	// calls cannot starve a /mcp add of its return value. nil sink keeps hot-add
 	// quiet — the chat UI re-queries Host.Prompts()/Resources() on demand.
 	if c.hasPrompts {
-		go h.fetchPrompts(ctx, c, nil)
+		go h.fetchPrompts(lifeCtx, c, nil)
 	}
 	if c.hasResources {
-		go h.fetchResources(ctx, c, nil)
+		go h.fetchResources(lifeCtx, c, nil)
 	}
 	return ts, nil
 }

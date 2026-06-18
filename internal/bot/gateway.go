@@ -22,6 +22,11 @@ type GatewayConfig struct {
 	Model              string
 	ToolApprovalMode   string
 	MaxSteps           int
+	// ApprovalTimeout bounds how long a tool-approval/ask prompt blocks a bot
+	// session waiting for a remote user's reply. Zero falls back to
+	// defaultBotApprovalTimeout so an abandoned prompt can't wedge the bot forever
+	// (#4626, #4402). A negative value disables the timeout (wait indefinitely).
+	ApprovalTimeout    time.Duration
 	WorkspaceRoot      string
 	Channels           map[Platform]ChannelConfig
 	ConnectionChannels map[string]ChannelConfig
@@ -845,12 +850,13 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	model, workspaceRoot, toolApprovalMode := gw.sessionOptionsForMessage(msg)
 	gw.logger.Info("bot session creating", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8], "model", model, "workspace_set", strings.TrimSpace(workspaceRoot) != "", "tool_approval_mode", normalizeBotToolApprovalMode(toolApprovalMode))
 	ctrl, err := boot.Build(ctx, boot.Options{
-		Model:         model,
-		MaxSteps:      gw.cfg.MaxSteps,
-		RequireKey:    true,
-		Sink:          sessionSink,
-		WorkspaceRoot: workspaceRoot,
-		SessionDir:    botSessionDir(workspaceRoot),
+		Model:           model,
+		MaxSteps:        gw.cfg.MaxSteps,
+		RequireKey:      true,
+		Sink:            sessionSink,
+		WorkspaceRoot:   workspaceRoot,
+		SessionDir:      botSessionDir(workspaceRoot),
+		ApprovalTimeout: gw.approvalTimeout(),
 	})
 	if err != nil {
 		gw.logger.Error("build controller failed", "err", err)
@@ -880,6 +886,25 @@ func ensureControllerSessionPath(ctrl *control.Controller) {
 		return
 	}
 	ctrl.SetSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
+}
+
+// defaultBotApprovalTimeout caps how long a bot session waits for a remote
+// user's approval/ask reply before treating it as denied, so an abandoned
+// prompt (or a dropped IM event) can't leave the session wedged forever
+// (#4626, #4402). 30 minutes is generous for a human reply yet bounded.
+const defaultBotApprovalTimeout = 30 * time.Minute
+
+// approvalTimeout resolves the configured bot approval wait: zero uses the
+// bounded default; a negative value opts out (wait indefinitely).
+func (gw *BotGateway) approvalTimeout() time.Duration {
+	switch {
+	case gw.cfg.ApprovalTimeout < 0:
+		return 0
+	case gw.cfg.ApprovalTimeout == 0:
+		return defaultBotApprovalTimeout
+	default:
+		return gw.cfg.ApprovalTimeout
+	}
 }
 
 func botSessionDir(workspaceRoot string) string {

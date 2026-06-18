@@ -826,25 +826,7 @@ func writeConfigFile(path, body string) error {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("save: empty config path")
 	}
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("save: create dir: %w", err)
-	}
-	tmp, err := os.CreateTemp(dir, ".reasonix.*.toml.tmp")
-	if err != nil {
-		return fmt.Errorf("save: create temp: %w", err)
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.WriteString(body); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("save: write: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("save: close temp: %w", err)
-	}
-	return fileutil.ReplaceFile(tmpPath, path)
+	return fileutil.AtomicWriteFile(path, []byte(body), 0o644)
 }
 
 func renderScopeForPath(path string) RenderScope {

@@ -753,3 +753,64 @@ func TestMigrateCustomBaseURLWarns(t *testing.T) {
 		}
 	}
 }
+
+func TestMigrateSupportData(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping since legacyOSSupportDir equals current reasonixHomeDir on Windows")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+
+	legacyConf := legacyUserConfigPath()
+	if legacyConf == "" {
+		t.Skip("skipping because legacy config path is empty")
+	}
+	legacyDir := filepath.Dir(legacyConf)
+
+	// Write data to the legacy support directory
+	filesToWrite := map[string]string{
+		"config.toml":                  "language = \"zh\"",
+		"hooks.json":                   `{"hook":"test"}`,
+		"sessions/s1.json":             `{"id":"s1"}`,
+		"projects/p1/sessions/s2.json": `{"id":"s2"}`,
+		"skills/custom.md":             `custom skill`,
+		"archive/a1.json":              `{"compacted": true}`,
+	}
+	for rel, content := range filesToWrite {
+		path := filepath.Join(legacyDir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	res, err := MigrateLegacyIfNeeded()
+	if err != nil {
+		t.Fatalf("MigrateLegacyIfNeeded failed: %v", err)
+	}
+	if res == nil {
+		t.Fatal("expected migration result, got nil")
+	}
+
+	newDir := filepath.Dir(userConfigPath())
+	for rel, expectedContent := range filesToWrite {
+		if rel == "config.toml" {
+			continue
+		}
+		newPath := filepath.Join(newDir, rel)
+		data, err := os.ReadFile(newPath)
+		if err != nil {
+			t.Errorf("expected file %s to be migrated, but got error: %v", rel, err)
+			continue
+		}
+		if string(data) != expectedContent {
+			t.Errorf("file %s content mismatch: got %q, want %q", rel, string(data), expectedContent)
+		}
+	}
+}
+

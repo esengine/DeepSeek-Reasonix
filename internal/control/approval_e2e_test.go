@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sync"
 	"testing"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/event"
@@ -88,5 +89,71 @@ func TestApprovalToolWideEndToEnd(t *testing.T) {
 	defer writer.mu.Unlock()
 	if len(writer.paths) != 2 || writer.paths[0] != "a.txt" || writer.paths[1] != "b.txt" {
 		t.Errorf("executed writes = %v, want both a.txt and b.txt", writer.paths)
+	}
+}
+
+// TestApprovalTimeoutDeniesWhenUnanswered verifies a positive ApprovalTimeout
+// turns an unanswered prompt into a denial (error) instead of blocking forever
+// (#4626, #4402). Ask shares the same wait context as tool-approval prompts.
+func TestApprovalTimeoutDeniesWhenUnanswered(t *testing.T) {
+	c := New(Options{
+		Policy:         permission.New("ask", nil, nil, nil),
+		Sink:           event.Discard,
+		ApprovalTimeout: 40 * time.Millisecond,
+	})
+	c.EnableInteractiveApproval()
+
+	start := time.Now()
+	_, err := c.Ask(context.Background(), []event.AskQuestion{{ID: "q1", Prompt: "pick one"}})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("Ask should error when the approval timeout elapses unanswered")
+	}
+	// Must return near the timeout, not hang. Allow generous slack for CI scheduling.
+	if elapsed > 2*time.Second {
+		t.Fatalf("Ask blocked for %v; timeout should have fired near 40ms", elapsed)
+	}
+}
+
+// TestApprovalTimeoutZeroWaitsIndefinitely confirms the default (zero) keeps the
+// interactive behavior: an unanswered Ask blocks rather than timing out, so a
+// human at a terminal is never cut off.
+func TestApprovalTimeoutZeroWaitsIndefinitely(t *testing.T) {
+	c := New(Options{
+		Policy: permission.New("ask", nil, nil, nil),
+		Sink:   event.Discard,
+		// ApprovalTimeout intentionally zero (default).
+	})
+	c.EnableInteractiveApproval()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.Ask(context.Background(), []event.AskQuestion{{ID: "q1", Prompt: "pick one"}})
+		done <- err
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("Ask with zero timeout must block until answered, not return on its own")
+	case <-time.After(120 * time.Millisecond):
+		// Good: still blocked, as expected for interactive use.
+	}
+
+	// Clean up so the goroutine doesn't linger: answer the prompt.
+	c.mu.Lock()
+	var ids []string
+	for id := range c.asks {
+		ids = append(ids, id)
+	}
+	c.mu.Unlock()
+
+	for _, id := range ids {
+		c.AnswerQuestion(id, []event.AskAnswer{{QuestionID: "q1", Selected: []string{"x"}}})
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Ask did not unblock after answering")
 	}
 }

@@ -222,10 +222,14 @@ func (lt *lazyTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 			return "", fmt.Errorf("MCP server %q is initializing on first use — call again on the next turn for its real tools", sp.spec.Name)
 		}
 		// Cache-hit: run the handshake synchronously so this one Execute can
-		// forward through.
+		// forward through. Bound it with a start timeout so a wedged or
+		// unreachable MCP server can't hang the whole turn indefinitely
+		// (#4806) — on timeout we fail this attempt and a later turn can retry.
 		sp.state = spawnInFlight
 		sp.mu.Unlock()
-		real, err := sp.host.Add(sp.ctx, sp.spec)
+		spawnCtx, cancel := context.WithTimeout(sp.ctx, defaultStartTimeout)
+		real, err := sp.host.AddWithLifecycle(sp.ctx, spawnCtx, sp.spec)
+		cancel()
 		sp.mu.Lock()
 		defer sp.mu.Unlock()
 		if err != nil {

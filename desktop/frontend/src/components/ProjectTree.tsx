@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { Archive, ArrowDown, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, ListCollapse, ListRestart, MessageSquare, Clock, Pin, MoreHorizontal, Minimize2, Maximize2 } from "lucide-react";
 import { asArray } from "../lib/array";
+import { useToast } from "../lib/toast";
 import { app } from "../lib/bridge";
 import type { ProjectNode, ProjectTopicStatus } from "../lib/types";
 import { topicActivityTime } from "../lib/session";
@@ -443,6 +444,7 @@ export function ProjectTree({
   onTimeFilterChange,
 }: ProjectTreeProps) {
   const t = useT();
+  const { showToast } = useToast();
   const compactTopics = variant === "workbench";
   const [tree, setTree] = useState<ProjectNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -738,8 +740,8 @@ export function ProjectTree({
       else await app.RenameTopic(topicId, title);
       await refresh();
       if (!onRenameTopic) await onTopicsChanged?.();
-    } catch {
-      /* ignore */
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error");
     }
   };
 
@@ -750,8 +752,8 @@ export function ProjectTree({
     try {
       await app.RenameProject(root, title);
       await refresh();
-    } catch {
-      /* ignore */
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error");
     }
   };
 
@@ -763,8 +765,8 @@ export function ProjectTree({
       setConfirmAction(null);
       await refresh();
       await onTopicsChanged?.();
-    } catch {
-      /* ignore */
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error");
     }
   };
 
@@ -775,8 +777,8 @@ export function ProjectTree({
       setMenuPoint(null);
       await refresh();
       await onTopicsChanged?.();
-    } catch {
-      /* ignore */
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error");
     }
   };
 
@@ -788,8 +790,8 @@ export function ProjectTree({
       setMenuPoint(null);
       await refresh();
       await onTopicsChanged?.();
-    } catch {
-      /* ignore */
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error");
     }
   };
 
@@ -810,8 +812,8 @@ export function ProjectTree({
       setMenuPoint(null);
       setConfirmRemoveProject(null);
       await refresh();
-    } catch {
-      /* ignore */
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error");
     }
   };
 

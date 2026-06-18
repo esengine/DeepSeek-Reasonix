@@ -54,6 +54,12 @@ import (
 // while one is already active in the same Controller.
 var ErrTurnRunning = errors.New("turn already running")
 
+// errNoSessionPath is returned by snapshot when a session has content to persist
+// but no resolved session path — a misconfiguration (e.g. an unresolvable data
+// dir in a bot deployment) that previously dropped conversations silently
+// (#4414). Callers log it and continue; it must never be swallowed quietly.
+var errNoSessionPath = errors.New("session has content but no session path; conversation cannot be persisted")
+
 // Controller drives one chat session. Construct with New; drive with the command
 // methods; observe through the Sink passed in Options.
 type Controller struct {
@@ -123,6 +129,13 @@ type Controller struct {
 	// writers run serially — but this keeps the contract explicit). Held across
 	// the blocking wait, so it must never be taken by the Approve/Answer paths.
 	promptMu sync.Mutex
+
+	// approvalTimeout bounds how long requestApproval/AnswerQuestion block waiting
+	// for a user decision. Zero (the default) means wait indefinitely, which is
+	// correct for an interactive terminal where the user is present. Bot/headless
+	// frontends set it so an unanswered approval can't wedge the session forever
+	// when the user has walked away (#4626, #4402).
+	approvalTimeout time.Duration
 
 	// mu guards the run state and approval bookkeeping; every critical section
 	// under it is short and non-blocking.
@@ -313,6 +326,11 @@ type Options struct {
 	// PlanModeAllowedTools names tools exempt from the plan-mode read-only gate.
 	// Passed through to the executor agent so user-configured exceptions work.
 	PlanModeAllowedTools []string
+	// ApprovalTimeout bounds how long a tool-approval or ask prompt blocks waiting
+	// for a user decision. Zero (default) waits forever — right for an interactive
+	// terminal. Bot/headless frontends set a positive value so an unanswered
+	// prompt can't wedge the session indefinitely (#4626, #4402).
+	ApprovalTimeout time.Duration
 }
 
 // New builds a Controller. A nil Sink is replaced with event.Discard.
@@ -362,6 +380,7 @@ func New(opts Options) *Controller {
 		pluginCtx:              pluginCtx,
 		cpRoot:                 opts.WorkspaceRoot,
 		toolApprovalMode:       ToolApprovalAsk,
+		approvalTimeout:        opts.ApprovalTimeout,
 		approvals:              map[string]pendingApproval{},
 		asks:                   map[string]pendingAsk{},
 		granted:                map[string]bool{},
@@ -1509,14 +1528,17 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 
 	c.sink.Emit(event.Event{Kind: event.AskRequest, Ask: event.Ask{ID: id, Questions: questions}})
 
+	waitCtx, cancelWait := c.approvalWaitContext(ctx)
+	defer cancelWait()
+
 	select {
 	case ans := <-reply:
 		return ans, nil
-	case <-ctx.Done():
+	case <-waitCtx.Done():
 		c.mu.Lock()
 		delete(c.asks, id)
 		c.mu.Unlock()
-		return nil, ctx.Err()
+		return nil, waitCtx.Err()
 	}
 }
 
@@ -2242,9 +2264,10 @@ func (c *Controller) maybeColdResumePrune(path string) {
 }
 
 // Snapshot writes the executor's conversation to the active session file. No-op
-// when persistence is unavailable or the session has never been used (no user
-// interaction). Called after every turn so a crash loses at most one in-flight
-// prompt.
+// when the executor is absent or the session has never been used (no user
+// interaction). Returns errNoSessionPath when there IS content but no resolved
+// path, so a misconfigured deployment surfaces instead of dropping data.
+// Called after every turn so a crash loses at most one in-flight prompt.
 func (c *Controller) Snapshot() error {
 	return c.snapshot(false)
 }
@@ -2287,12 +2310,22 @@ func (c *Controller) snapshot(markActivity bool) error {
 	path := c.sessionPath
 	modelRef := c.modelRef
 	c.mu.Unlock()
-	if c.executor == nil || path == "" {
+	if c.executor == nil {
 		return nil
 	}
 	s := c.executor.Session()
 	if !s.HasContent() {
+		// Nothing to persist yet (e.g. a fresh session with only a system
+		// prompt) — staying quiet here is correct, not a data-loss path.
 		return nil
+	}
+	if path == "" {
+		// There IS content but nowhere to write it: this silently dropped whole
+		// bot conversations (#4414). Surface it loudly instead of returning nil
+		// so the missing session path can be diagnosed and fixed at the source.
+		slog.Warn("controller: session has content but no session path; conversation will not be persisted",
+			"label", c.Label(), "session_dir", c.SessionDir())
+		return errNoSessionPath
 	}
 	if !markActivity {
 		if _, err := agent.EnsureBranchMeta(path); err != nil {
@@ -3512,6 +3545,17 @@ func parseRewind(args string, cps []checkpoint.Meta) (int, RewindScope, error) {
 	return turn, scope, nil
 }
 
+// approvalWaitContext returns the context the approval/ask wait blocks on. When
+// approvalTimeout is zero it just forwards ctx (interactive: wait forever). When
+// positive it layers a timeout so a headless/bot session can't hang on a prompt
+// nobody will answer (#4626, #4402); the caller treats expiry as a denial.
+func (c *Controller) approvalWaitContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if c.approvalTimeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, c.approvalTimeout)
+}
+
 // requestApproval emits an ApprovalRequest and blocks until Approve(ID, …)
 // answers or ctx is cancelled. A prior session grant for the same approval scope
 // short-circuits. promptMu serialises outstanding prompts.
@@ -3550,6 +3594,9 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string, 
 	// external channel (desktop notice, phone) while the run blocks on the reply.
 	go c.hooks.Notification(ctx, approvalNotificationText(tool, subject))
 
+	waitCtx, cancelWait := c.approvalWaitContext(ctx)
+	defer cancelWait()
+
 	select {
 	case r := <-reply:
 		// Plan approvals are one-shot — never persist a session grant for them, or
@@ -3564,11 +3611,11 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string, 
 			c.emitRememberResult(c.onRemember(permission.RememberRuleForScope(tool, subject)))
 		}
 		return r.allow, false, nil
-	case <-ctx.Done():
+	case <-waitCtx.Done():
 		c.mu.Lock()
 		delete(c.approvals, id)
 		c.mu.Unlock()
-		return false, false, ctx.Err()
+		return false, false, waitCtx.Err()
 	}
 }
 
