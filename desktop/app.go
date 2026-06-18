@@ -946,9 +946,6 @@ func (a *App) NewSession() error {
 	if err := ctrl.NewSession(); err != nil {
 		return err
 	}
-	a.mu.Lock()
-	tab.TopicTitle = defaultTopicTitle
-	a.mu.Unlock()
 	a.persistTabSessionPath(tab, ctrl.SessionPath())
 	a.invalidatePromptHistoryCache()
 	return nil
@@ -982,9 +979,6 @@ func (a *App) ClearSession() error {
 		return err
 	}
 	tab.resetTelemetry()
-	a.mu.Lock()
-	tab.TopicTitle = defaultTopicTitle
-	a.mu.Unlock()
 	a.persistTabSessionPath(tab, ctrl.SessionPath())
 	a.invalidatePromptHistoryCache()
 	return nil
@@ -1047,7 +1041,6 @@ func (a *App) clearActiveSessionRuntime(tab *WorkspaceTab, oldCtrl *control.Cont
 		tab.sink = newSink
 		tab.SessionPath = path
 		tab.Label = newCtrl.Label()
-		tab.TopicTitle = defaultTopicTitle
 		tab.Ready = true
 		tab.StartupErr = ""
 		a.saveTabsLocked()
