@@ -1084,6 +1084,9 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 		case "/plan-exec":
 			c.applyPlanExec(trimmed, display)
 			return
+		case "/prometheus":
+			c.applyPrometheus(trimmed, display)
+			return
 		}
 		if c.managementNotice(trimmed) {
 			return
@@ -1218,6 +1221,34 @@ func (c *Controller) applyPlanExec(input, display string) {
 	c.SetGoal("execute plan: " + ShortGoalForNotice(todos[0].Content))
 	c.GoalStrict(strict)
 	c.notice(fmt.Sprintf("plan-exec: dispatching %d plan steps (strict=%v)", total, strict))
+	if c.runner != nil {
+		c.runGuarded(func(ctx context.Context) error {
+			return c.runGoalLoopWithRawDisplay(ctx, prompt, prompt, display)
+		})
+	}
+}
+
+// prometheusPrompt is the strategic planner system prompt.
+const prometheusPrompt = "You are Prometheus, a strategic planner. Your job is to interview the user about their request before any plan is created.\n\nFollow this process:\n1. Ask one clarifying question at a time \u2014 do not dump all questions at once\n2. Cover: scope, files involved, constraints, test strategy, edge cases\n3. Listen to each answer before asking the next question\n4. When you have enough context to create a solid plan, output a numbered plan with acceptance criteria, then end with [goal:complete]\n5. Do not start implementing \u2014 your role is purely planning\n\nKeep questions concise. Plan steps should be concrete and actionable."
+
+// applyPrometheus starts an interactive planning interview, inspired by OMO's
+// Prometheus agent. It enters goal mode with a structured interview prompt.
+func (c *Controller) applyPrometheus(input, display string) {
+	args := strings.TrimSpace(strings.TrimPrefix(input, "/prometheus"))
+	if args == "" || args == "--strict" {
+		c.notice("usage: /prometheus <your task description>")
+		return
+	}
+	strict := false
+	if strings.HasPrefix(args, "--strict ") {
+		strict = true
+		args = strings.TrimPrefix(args, "--strict ")
+	}
+	prompt := prometheusPrompt + "\n\n## User request\n\n" + args + "\n\nBegin the interview by asking your first clarifying question."
+	c.SetPlanMode(false)
+	c.GoalStrict(strict)
+	c.SetGoal("plan: " + ShortGoalForNotice(args))
+	c.notice("prometheus: starting planning interview")
 	if c.runner != nil {
 		c.runGuarded(func(ctx context.Context) error {
 			return c.runGoalLoopWithRawDisplay(ctx, prompt, prompt, display)
