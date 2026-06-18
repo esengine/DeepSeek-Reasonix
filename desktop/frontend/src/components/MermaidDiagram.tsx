@@ -57,7 +57,7 @@ function queuedRender(
   definition: string,
   theme: "dark" | "default",
   signal: AbortSignal,
-): Promise<{ svg: string; bindFunctions: (element: Element) => void }> {
+): Promise<string> {
   const promise = renderQueue.then(async () => {
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
     mermaidModule!.default.initialize({
@@ -67,9 +67,9 @@ function queuedRender(
       securityLevel: "antiscript",
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
     });
-    const result = await mermaidModule!.default.render(svgId, definition);
+    const { svg } = await mermaidModule!.default.render(svgId, definition);
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-    return result as { svg: string; bindFunctions: (element: Element) => void };
+    return svg;
   });
   // Chain the error handler separately so one failure doesn't kill the queue.
   renderQueue = promise.then(() => {}, () => {});
@@ -162,7 +162,6 @@ function useMermaidTheme(): "dark" | "default" {
 
 export const MermaidDiagram = memo(function MermaidDiagram({ definition }: MermaidDiagramProps) {
   const [state, setState] = useState<DiagramState>({ status: "loading" });
-  const [bindFn, setBindFn] = useState<((el: Element) => void) | null>(null);
   const theme = useMermaidTheme();
   const instanceId = useId().replace(/[:.]/g, "-");
   const svgId = `mermaid-${instanceId}`;
@@ -171,7 +170,11 @@ export const MermaidDiagram = memo(function MermaidDiagram({ definition }: Merma
   useEffect(() => {
     mountedRef.current = true;
     const controller = new AbortController();
-    setBindFn(null);
+
+    // Reset to loading immediately so we never show stale state while
+    // the new render is in-flight (relevant for streaming updates and
+    // theme switches).
+    setState({ status: "loading" });
 
     (async () => {
       try {
@@ -183,14 +186,10 @@ export const MermaidDiagram = memo(function MermaidDiagram({ definition }: Merma
         await ensureMermaid();
         if (controller.signal.aborted || !mountedRef.current) return;
 
-        const result = await queuedRender(svgId, definition, theme, controller.signal);
+        const svg = sanitizeSvg(await queuedRender(svgId, definition, theme, controller.signal));
         if (controller.signal.aborted || !mountedRef.current) return;
 
-        const svg = sanitizeSvg(result.svg);
         setState({ status: "rendered", svg });
-        if (result.bindFunctions) {
-          setBindFn(() => result.bindFunctions);
-        }
       } catch (err) {
         // AbortError from our own AbortSignal is expected on unmount/update
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -238,51 +237,43 @@ export const MermaidDiagram = memo(function MermaidDiagram({ definition }: Merma
 
   return (
     <div className="mermaid-diagram mermaid-diagram--rendered">
-      <SvgWrapper svg={state.svg} bindFunctions={bindFn} />
+      <SvgWrapper svg={state.svg} />
       <CopyButton text={definition} className="code-block__copy" />
     </div>
   );
 });
 
 /**
- * Renders the SVG string returned by mermaid into the DOM via
- * dangerouslySetInnerHTML. Calls bindFunctions after the SVG is in the
- * DOM so Mermaid click interactions (click directives, tooltips) work.
- * Intercepts clicks on SVG `<a>` elements and routes them through
- * openExternal to avoid in-app navigation.
+ * Returns the href from an SVG `<a>` element, checking both the standard
+ * `href` attribute and the legacy `xlink:href` namespace attribute.
  */
-function SvgWrapper({
-  svg,
-  bindFunctions,
-}: {
-  svg: string;
-  bindFunctions: ((el: Element) => void) | null;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
+function getAnchorHref(anchor: Element): string | null {
+  return anchor.getAttribute("href") ?? anchor.getAttribute("xlink:href");
+}
 
-  // Call bindFunctions after the SVG content is in the DOM so that Mermaid
-  // click interactions (click directives, tooltips) are wired up.
-  useEffect(() => {
-    if (bindFunctions && ref.current) {
-      bindFunctions(ref.current);
-    }
-  }, [bindFunctions]);
-
+/**
+ * Renders the SVG string returned by mermaid into the DOM via
+ * dangerouslySetInnerHTML. Intercepts clicks on SVG `<a>` elements and
+ * routes them through openExternal to avoid in-app navigation.
+ * Note: Mermaid's bindFunctions (for click directives/tooltips) is NOT
+ * called here because chat content is untrusted — its native event
+ * listeners would bypass openExternal and the SVG sanitizer.
+ */
+function SvgWrapper({ svg }: { svg: string }) {
   const handleClick = useCallback((e: React.MouseEvent) => {
     const anchor = (e.target as Element).closest("a");
-    if (!anchor || !anchor.getAttribute("href")) return;
+    const href = anchor ? getAnchorHref(anchor) : null;
+    if (!href) return;
     e.preventDefault();
-    const href = anchor.getAttribute("href")!;
     openExternal(href);
   }, []);
 
   const handleAuxClick = useCallback((e: React.MouseEvent) => {
     const anchor = (e.target as Element).closest("a");
-    if (!anchor) return;
+    const href = anchor ? getAnchorHref(anchor) : null;
+    if (!anchor || !href) return;
     e.preventDefault();
-    if (anchor.getAttribute("href")) {
-      openExternal(anchor.getAttribute("href")!);
-    }
+    openExternal(href);
   }, []);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -294,7 +285,6 @@ function SvgWrapper({
 
   return (
     <div
-      ref={ref}
       className="mermaid-diagram__svg"
       dangerouslySetInnerHTML={{ __html: svg }}
       onClick={handleClick}
