@@ -385,6 +385,8 @@ func New(opts Options) *Controller {
 		})
 		c.executor.SetMemoryQueue(c)
 	}
+	// Check for persisted goal state and notify on session start.
+	c.notifyGoalState()
 	return c
 }
 
@@ -952,6 +954,36 @@ type goalState struct {
 	Todos        []evidence.TodoItem `json:"todos,omitempty"`
 }
 
+// notifyGoalState checks for a persisted goal state on session start and emits
+// a notice if an uncompleted goal exists.
+func (c *Controller) notifyGoalState() {
+	path := c.goalStatePath
+	if path == "" {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var state goalState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return
+	}
+	if state.Goal == "" {
+		return
+	}
+	switch state.Status {
+	case GoalStatusRunning:
+		c.notice(fmt.Sprintf("detected uncompleted goal: \"%s\" — /goal to view or /goal clear to discard", ShortGoalForNotice(state.Goal)))
+	case GoalStatusBlocked:
+		reason := state.Block
+		if reason == "" {
+			reason = "unknown"
+		}
+		c.notice(fmt.Sprintf("detected blocked goal: \"%s\" (blocked: %s) — /goal to view or /goal clear to discard", ShortGoalForNotice(state.Goal), reason))
+	}
+}
+
 // lastAssistantText returns the content of the most recent assistant message with
 // non-empty text — the model's final answer for the turn (its plan, in plan mode).
 func lastAssistantText(msgs []provider.Message) string {
@@ -1317,7 +1349,7 @@ func (c *Controller) applyPlanExec(input, display string) {
 	if len(modules) > 0 {
 		b.WriteString("## Project modules detected\n\n")
 		for _, m := range modules {
-			fmt.Fprintf(&b, "- %s/", m)
+			fmt.Fprintf(&b, "- %s/\n", m)
 		}
 		b.WriteString("\n\nRoute steps to the module they belong to. Steps in different modules can run in parallel.\n\n")
 	}
@@ -3869,17 +3901,21 @@ func (c *Controller) emitRememberResult(r RememberResult) {
 // detectProjectModules scans the workspace root for top-level source directories
 // to enable module-aware task routing in /plan-exec.
 func (c *Controller) detectProjectModules() []string {
-	root := c.sessionDir
-	for i := 0; i < 3 && root != ""; i++ {
-		if hasFile(root, "go.mod") || hasFile(root, "package.json") || hasFile(root, ".git") {
-			return listSourceDirs(root, 2)
-		}
-		root = filepath.Dir(root)
-		if root == filepath.Dir(root) {
-			break
+	// Use workspace root if available (set via Options.WorkspaceRoot).
+	root := c.WorkspaceRoot()
+	if root == "" {
+		root = c.sessionDir
+		for i := 0; i < 3 && root != ""; i++ {
+			if hasFile(root, "go.mod") || hasFile(root, "package.json") || hasFile(root, ".git") {
+				break
+			}
+			root = filepath.Dir(root)
+			if root == filepath.Dir(root) {
+				return nil
+			}
 		}
 	}
-	return nil
+	return listSourceDirs(root, 2)
 }
 
 func hasFile(dir, name string) bool {
