@@ -40,6 +40,10 @@ type ghRelease struct {
 	Assets  []ghAsset
 }
 
+// DevUpdateURL bypasses GitHub release checking with a local archive URL.
+// Set programmatically for testing; empty means normal GitHub path.
+var DevUpdateURL string
+
 // ghAsset is a single release asset.
 type ghAsset struct {
 	Name               string `json:"name"`
