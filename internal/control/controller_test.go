@@ -1291,8 +1291,8 @@ func TestApprovedPlanAutoApproveEndsWithExecutionTurn(t *testing.T) {
 			exec.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: "1. Create the file\n2. Update the file"})
 		},
 		func(input string) {
-			if input != planApprovedMessage {
-				t.Fatalf("approved execution input = %q, want planApprovedMessage", input)
+			if !strings.HasPrefix(input, planApprovedMessage) || !strings.HasSuffix(input, planApprovedHint) {
+				t.Fatalf("approved execution input = %q, want planApprovedMessage+planApprovedHint", input)
 			}
 			exec.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: "first step done; paused for review", ToolCalls: []provider.ToolCall{{
 				ID: "todo-1", Name: "todo_write", Arguments: `{"todos":[{"content":"Create the file","status":"completed"},{"content":"Update the file","status":"in_progress"}]}`,

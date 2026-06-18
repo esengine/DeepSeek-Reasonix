@@ -61,6 +61,20 @@ parallel_tasks(tasks=[
 
 每个子任务在独立 goroutine 中运行，工具调用会嵌套显示为独立卡片，结果聚合返回。
 
+### 任务依赖
+
+如果子任务之间有依赖关系，可以用 `depends_on` 指定：
+
+```
+parallel_tasks(tasks=[
+  {prompt: "写一个加法函数到 add.py", description: "add"},
+  {prompt: "写一个乘法函数到 mul.py", description: "mul"},
+  {prompt: "在 main.py 中调用 add 和 mul", description: "main", depends_on: [0, 1]},
+])
+```
+
+独立任务（add、mul）先并发执行；main 等前两个完成后再启动。
+
 ## 实现细节
 
 ### 证据审计门控
