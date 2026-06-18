@@ -828,7 +828,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 		// one grace round to produce a final answer from completed work.
 		if a.maxSteps > 0 && step+1 >= a.maxSteps {
 			graceRound = true
-			nudge := fmt.Sprintf("You have reached the tool-call round limit (%s). Based on the work completed and the results you already have, produce your final answer now without calling any more tools.", a.maxStepsKey)
+			nudge := fmt.Sprintf("Do not call any more tools — your tool-call round limit (%s) has been reached. Instead, synthesize a final answer from all the work already completed: summarize what was accomplished, what remains to be done, and any decisions the user should make. The user can increase %s or continue in the next turn if more work is needed.", a.maxStepsKey, a.maxStepsKey)
 			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withReasoningLanguage(nudge)})
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("budget (%s=%d) exhausted: one grace round to finalize", a.maxStepsKey, a.maxSteps)})
 		}
