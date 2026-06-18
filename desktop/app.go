@@ -1886,10 +1886,6 @@ func (a *App) closeRemainingRemovedSessionRuntimes(removed []removedSessionRunti
 	}
 }
 
-func (a *App) closeRemovedSessionRuntimesAfterDestroy(removed []removedSessionRuntime) {
-	a.closeRemainingRemovedSessionRuntimes(removed, map[*control.Controller]bool{}, true)
-}
-
 func (a *App) closeRemovedSessionRuntime(item removedSessionRuntime, closed map[*control.Controller]bool, afterDestroy bool) {
 	if item.tab != nil {
 		a.releaseTabSharedHost(item.tab)
