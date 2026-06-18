@@ -69,15 +69,42 @@ func (c *Controller) shouldAutoPlan(ctx context.Context, input string) bool {
 }
 
 // TaskWarrantsPlanner reports whether a task turn is worth a planner pass in
-// two-model mode. Empty input, slash commands, and low-risk informational asks
-// (explain / show / what / why / 解释 / 查一下 …) skip straight to the executor;
-// anything that reads like a work request — even a terse one — still gets planned.
+// two-model mode. Empty input, slash commands, low-risk informational asks
+// (explain / show / what / why / 解释 / 查一下 …), and synthetic system
+// messages (goal loop turns, readiness retries, compaction summaries, etc.)
+// skip straight to the executor; anything that reads like a work request —
+// even a terse one — still gets planned.
 func TaskWarrantsPlanner(input string) bool {
 	text := strings.TrimSpace(agent.StripTransientUserBlocks(input))
+	// Strip active-goal block injected by Compose for goal-mode turns.
+	text = stripActiveGoalBlock(text)
 	if text == "" || strings.HasPrefix(text, "/") || strings.HasPrefix(text, PlanModeMarker) {
 		return false
 	}
+	if IsSyntheticUserMessage(text) {
+		return false
+	}
 	return !isLowRiskQuestion(strings.ToLower(text))
+}
+
+// stripActiveGoalBlock removes the <active-goal>...</active-goal> wrapper that
+// Compose prepends to goal-mode user turns, so the remaining text can be
+// checked against synthetic message patterns.
+func stripActiveGoalBlock(text string) string {
+	open := "<active-goal>"
+	close := "</active-goal>"
+	if !strings.Contains(text, open) {
+		return text
+	}
+	if idx := strings.Index(text, open); idx >= 0 {
+		if end := strings.Index(text, close); end >= 0 {
+			after := strings.TrimSpace(text[end+len(close):])
+			if after != "" {
+				return after
+			}
+		}
+	}
+	return text
 }
 
 func autoPlanScore(input string) int {
