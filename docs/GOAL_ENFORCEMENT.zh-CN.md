@@ -75,6 +75,24 @@ parallel_tasks(tasks=[
 
 独立任务（add、mul）先并发执行；main 等前两个完成后再启动。
 
+## Prometheus 规划面试
+
+在写代码前，先让 AI 帮你理清需求：
+
+```
+/prometheus 重构用户认证模块，改成 JWT
+```
+
+Prometheus 会逐个问澄清问题：
+
+```
+1. 用户模块当前是 session 还是 token 认证？
+2. 需要支持 refresh token 吗？
+3. 现有用户表结构是什么样的？
+```
+
+回答完问题后，Prometheus 自动生成可执行的计划。然后你可以用 `/plan-exec` 来执行。
+
 ## 实现细节
 
 ### 证据审计门控
