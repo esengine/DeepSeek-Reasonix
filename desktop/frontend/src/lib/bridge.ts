@@ -26,6 +26,7 @@ import type {
   ContextInfo,
   ContextPanelInfo,
   DirEntry,
+  DesktopStartupSettingsView,
   DroppedItem,
   EffortInfo,
   FilePreview,
@@ -220,6 +221,7 @@ export interface AppBindings {
   ForgetForTab(tabID: string, name: string): Promise<void>;
   SaveDoc(path: string, body: string): Promise<string>;
   SaveDocForTab(tabID: string, path: string, body: string): Promise<string>;
+  DesktopStartupSettings(): Promise<DesktopStartupSettingsView>;
   Settings(): Promise<SettingsView>;
   HooksSettings(scope: string): Promise<HooksSettingsView>;
   SaveHooksSettings(scope: string, hooks: HookConfigView[]): Promise<void>;
@@ -2344,6 +2346,20 @@ function makeMockApp(): AppBindings {
     },
     async SaveDocForTab(_tabID: string, path: string, body: string) {
       return this.SaveDoc(path, body);
+    },
+    async DesktopStartupSettings() {
+      const { bot, desktopLanguage, desktopLayoutStyle, desktopTheme, desktopThemeStyle, displayMode, statusBarStyle, statusBarItems, checkUpdates } = settings;
+      return JSON.parse(JSON.stringify({
+        bot,
+        desktopLanguage,
+        desktopLayoutStyle,
+        desktopTheme,
+        desktopThemeStyle,
+        displayMode,
+        statusBarStyle,
+        statusBarItems,
+        checkUpdates,
+      })) as DesktopStartupSettingsView;
     },
     async Settings() {
       return JSON.parse(JSON.stringify(settings)) as SettingsView;

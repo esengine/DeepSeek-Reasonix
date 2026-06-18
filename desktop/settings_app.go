@@ -179,6 +179,21 @@ type SettingsView struct {
 	Bypass bool `json:"bypass"`
 }
 
+// DesktopStartupSettingsView is the lightweight Settings subset needed during
+// frontend startup. It deliberately excludes providers and credential state so
+// slow keychain/env resolution stays off the first-render path.
+type DesktopStartupSettingsView struct {
+	Bot                BotSettingsView `json:"bot"`
+	DesktopLanguage    string          `json:"desktopLanguage"`
+	DesktopLayoutStyle string          `json:"desktopLayoutStyle"`
+	DesktopTheme       string          `json:"desktopTheme"`
+	DesktopThemeStyle  string          `json:"desktopThemeStyle"`
+	DisplayMode        string          `json:"displayMode"`
+	StatusBarStyle     string          `json:"statusBarStyle"`
+	StatusBarItems     []string        `json:"statusBarItems"`
+	CheckUpdates       bool            `json:"checkUpdates"`
+}
+
 func nonNil(s []string) []string {
 	if s == nil {
 		return []string{}
@@ -339,6 +354,43 @@ func officialProviderAddedSet(cfg *config.Config) map[string]bool {
 		}
 	}
 	return out
+}
+
+func desktopStartupSettingsFromConfig(cfg *config.Config) DesktopStartupSettingsView {
+	if cfg == nil {
+		return DesktopStartupSettingsView{
+			Bot:                botSettingsView(config.BotConfig{}),
+			DesktopLayoutStyle: "workbench",
+			DesktopTheme:       "auto",
+			DesktopThemeStyle:  "graphite",
+			DisplayMode:        "standard",
+			StatusBarStyle:     "text",
+			StatusBarItems:     config.DefaultDesktopStatusBarItems(),
+			CheckUpdates:       true,
+		}
+	}
+	return DesktopStartupSettingsView{
+		Bot:                botSettingsView(cfg.Bot),
+		DesktopLanguage:    cfg.DesktopLanguage(),
+		DesktopLayoutStyle: cfg.DesktopLayoutStyle(),
+		DesktopTheme:       cfg.DesktopTheme(),
+		DesktopThemeStyle:  cfg.DesktopThemeStyle(),
+		DisplayMode:        cfg.DesktopDisplayMode(),
+		StatusBarStyle:     cfg.DesktopStatusBarStyle(),
+		StatusBarItems:     cfg.DesktopStatusBarItems(),
+		CheckUpdates:       cfg.DesktopCheckUpdates(),
+	}
+}
+
+// DesktopStartupSettings returns only the desktop chrome preferences needed at
+// app startup. Keep provider/key status in Settings(), where the Settings panel
+// actually needs it.
+func (a *App) DesktopStartupSettings() DesktopStartupSettingsView {
+	cfg, _, err := a.loadDesktopUserConfigForView()
+	if err != nil {
+		return desktopStartupSettingsFromConfig(nil)
+	}
+	return desktopStartupSettingsFromConfig(cfg)
 }
 
 // Settings returns the current configuration for the Settings panel.

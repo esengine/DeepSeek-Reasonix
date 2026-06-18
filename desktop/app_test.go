@@ -535,6 +535,101 @@ status_bar_items = ["cost", "balance"]
 	}
 }
 
+func TestDesktopStartupSettingsUsesUserDesktopPreferencesWithoutFullSettingsPayload(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	userCfg := config.LoadForEdit(config.UserConfigPath())
+	if err := userCfg.SetDesktopLanguage("en"); err != nil {
+		t.Fatalf("set desktop language: %v", err)
+	}
+	if err := userCfg.SetDesktopLayoutStyle("classic"); err != nil {
+		t.Fatalf("set desktop layout style: %v", err)
+	}
+	if err := userCfg.SetDesktopAppearance("dark", "graphite"); err != nil {
+		t.Fatalf("set desktop appearance: %v", err)
+	}
+	if err := userCfg.SetDesktopStatusBarStyle("icon"); err != nil {
+		t.Fatalf("set desktop status bar style: %v", err)
+	}
+	if err := userCfg.SetDesktopStatusBarItems([]string{"workspace", "git_branch", "model"}); err != nil {
+		t.Fatalf("set desktop status bar items: %v", err)
+	}
+	if err := userCfg.SetDesktopCheckUpdates(false); err != nil {
+		t.Fatalf("set desktop check updates: %v", err)
+	}
+	userCfg.Bot.Enabled = true
+	userCfg.Bot.Allowlist.Enabled = true
+	userCfg.Bot.Allowlist.QQUsers = []string{"alice"}
+	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save user config: %v", err)
+	}
+
+	got := NewApp().DesktopStartupSettings()
+	if got.DesktopLanguage != "en" || got.DesktopLayoutStyle != "classic" || got.DesktopTheme != "dark" || got.DesktopThemeStyle != "graphite" || got.DisplayMode != "standard" || got.StatusBarStyle != "icon" || got.CheckUpdates {
+		t.Fatalf("DesktopStartupSettings desktop prefs = %+v, want user-level startup prefs", got)
+	}
+	if want := []string{"workspace", "git_branch", "model"}; !reflect.DeepEqual(got.StatusBarItems, want) {
+		t.Fatalf("DesktopStartupSettings status bar items = %v, want %v", got.StatusBarItems, want)
+	}
+	if !got.Bot.Enabled || !got.Bot.Allowlist.Enabled || !reflect.DeepEqual(got.Bot.Allowlist.QQUsers, []string{"alice"}) {
+		t.Fatalf("DesktopStartupSettings bot settings = %+v, want lightweight bot snapshot", got.Bot)
+	}
+
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal DesktopStartupSettings: %v", err)
+	}
+	if strings.Contains(string(raw), "providers") || strings.Contains(string(raw), "officialProviders") || strings.Contains(string(raw), "providerKinds") {
+		t.Fatalf("DesktopStartupSettings must not include full Settings provider payload: %s", raw)
+	}
+}
+
+func BenchmarkDesktopSettingsPayloads(b *testing.B) {
+	home := b.TempDir()
+	xdg := filepath.Join(home, ".config")
+	appData := filepath.Join(home, "AppData")
+	for _, dir := range []string{xdg, appData} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.Setenv("HOME", home)
+	b.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	b.Setenv("USERPROFILE", home)
+	b.Setenv("XDG_CONFIG_HOME", xdg)
+	b.Setenv("REASONIX_STATE_HOME", filepath.Join(home, "state"))
+	b.Setenv("REASONIX_CACHE_HOME", filepath.Join(home, "cache"))
+	b.Setenv("AppData", appData)
+	b.Setenv("SHARED_PROVIDER_KEY", "sk-test")
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	for i := 0; i < 40; i++ {
+		cfg.Providers = append(cfg.Providers, config.ProviderEntry{
+			Name:      fmt.Sprintf("custom-%02d", i),
+			Kind:      "openai",
+			BaseURL:   "https://example.invalid/v1",
+			APIKeyEnv: "SHARED_PROVIDER_KEY",
+			Models:    []string{"model-a", "model-b"},
+			Default:   "model-a",
+		})
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		b.Fatalf("save config: %v", err)
+	}
+	app := NewApp()
+
+	b.Run("Settings", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_ = app.Settings()
+		}
+	})
+	b.Run("DesktopStartupSettings", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_ = app.DesktopStartupSettings()
+		}
+	})
+}
+
 func TestSettingsLoadsActiveWorkspaceCredentialsWithUserConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

@@ -64,6 +64,7 @@ import {
   type BotSettingsView,
   type CollaborationMode,
   type ComposerInsertRequest,
+  type DesktopStartupSettingsView,
   type Mode,
   type ProjectNode,
   type SessionMeta,
@@ -937,14 +938,14 @@ export default function App() {
 
   const reloadSidebarImConnections = useCallback(async () => {
     const [settings, runtimeStatus] = await Promise.all([
-      app.Settings(),
+      app.DesktopStartupSettings(),
       loadBotRuntimeStatus(),
     ]);
     setSidebarImConnections(sidebarImConnectionsFromBot(settings.bot, t, runtimeStatus));
     setImTopicSources(sidebarImTopicSourcesFromBot(settings.bot, t));
   }, [t]);
 
-  const refreshSidebarImConnectionsFromSettings = useCallback(async (settings: Pick<SettingsView, "bot">) => {
+  const refreshSidebarImConnectionsFromSettings = useCallback(async (settings: Pick<SettingsView | DesktopStartupSettingsView, "bot">) => {
     const runtimeStatus = await loadBotRuntimeStatus();
     setSidebarImConnections(sidebarImConnectionsFromBot(settings.bot, t, runtimeStatus));
     setImTopicSources(sidebarImTopicSourcesFromBot(settings.bot, t));
@@ -1057,7 +1058,7 @@ export default function App() {
         clearLegacyThemePreference();
       }
       const [settings, runtimeStatus] = await Promise.all([
-        app.Settings(),
+        app.DesktopStartupSettings(),
         loadBotRuntimeStatus(),
       ]);
       if (cancelled) return;
@@ -3000,7 +3001,7 @@ export default function App() {
               return;
             }
             void reloadSidebarImConnections().catch((e) => console.warn("bot sidebar refresh failed", e));
-            void app.Settings()
+            void app.DesktopStartupSettings()
               .then(applyDesktopPreferences)
               .catch((e) => console.warn("desktop preferences refresh failed", e));
           }}
