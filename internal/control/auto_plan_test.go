@@ -19,6 +19,11 @@ func TestTaskWarrantsPlanner(t *testing.T) {
 		{"fix the bug", true},        // terse, but a work request → still planned
 		{"add a login button", true}, // ditto
 		{"implement the new caching layer across the backend", true},
+		// Synthetic goal-loop messages should NOT trigger the planner.
+		{activeGoalBlock("execute plan: fix the parser", GoalResearchAuto) + "\n\n" + goalContinueTurn, false},
+		{activeGoalBlock("execute plan: fix the parser", GoalResearchAuto) + "\n\n" + goalSelfCheckTurn, false},
+		// Normal user input inside an active-goal block should still trigger.
+		{activeGoalBlock("implement the new caching layer", GoalResearchAuto) + "\n\nimplement the new caching layer across the backend", true},
 	}
 	for _, c := range cases {
 		if got := TaskWarrantsPlanner(c.input); got != c.want {
