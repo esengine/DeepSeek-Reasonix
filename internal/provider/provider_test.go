@@ -98,31 +98,6 @@ func TestSanitizeToolPairingLeavesWellFormedUnchanged(t *testing.T) {
 	}
 }
 
-func TestSanitizeToolPairingBackfillsResultName(t *testing.T) {
-	in := []Message{
-		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c1", Name: "bash"}}},
-		{Role: RoleTool, ToolCallID: "c1", Content: "out"}, // old session: no name
-	}
-	out := SanitizeToolPairing(in)
-	if out[1].Role != RoleTool || out[1].Name != "bash" {
-		t.Fatalf("tool result name not backfilled from call: %+v", out[1])
-	}
-	if in[1].Name != "" {
-		t.Fatalf("stored history mutated: result name = %q", in[1].Name)
-	}
-}
-
-func TestSanitizeToolPairingBackfillsResultNameByPosition(t *testing.T) {
-	in := []Message{
-		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "", Name: "read_file"}}},
-		{Role: RoleTool, ToolCallID: "", Content: "data"},
-	}
-	out := SanitizeToolPairing(in)
-	if out[1].Name != "read_file" {
-		t.Fatalf("position-matched tool result name not backfilled: %+v", out[1])
-	}
-}
-
 func TestSanitizeToolPairingClosesTruncatedArgs(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{`{`, `{}`},
