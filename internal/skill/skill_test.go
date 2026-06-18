@@ -24,6 +24,19 @@ func writeSkill(t *testing.T, base, rel, content string) string {
 	return full
 }
 
+// writeScript creates a file at base/rel with the given content.
+func writeScript(t *testing.T, base, rel, content string) string {
+	t.Helper()
+	full := filepath.Join(base, rel)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return full
+}
+
 func find(skills []Skill, name string) (Skill, bool) {
 	for _, s := range skills {
 		if s.Name == name {
@@ -355,6 +368,54 @@ func TestReferencesInlined(t *testing.T) {
 	}
 	if !strings.Contains(sk.Body, "first ref") || !strings.Contains(sk.Body, "second ref") {
 		t.Error("reference contents missing")
+	}
+}
+
+func TestScriptsAppended(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/withscripts/SKILL.md", "---\ndescription: r\n---\nmain body")
+	writeScript(t, home, ".reasonix/skills/withscripts/scripts/lint.py", "#!/usr/bin/env python3\nprint('ok')")
+	writeScript(t, home, ".reasonix/skills/withscripts/scripts/deploy.sh", "#!/usr/bin/env bash\necho ok")
+
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	sk, ok := st.Read("withscripts")
+	if !ok {
+		t.Fatal("skill not found")
+	}
+	if !strings.Contains(sk.Body, "main body") {
+		t.Error("main body missing")
+	}
+	if !strings.Contains(sk.Body, "## Scripts") {
+		t.Error("scripts section missing")
+	}
+	if !strings.Contains(sk.Body, "lint.py") || !strings.Contains(sk.Body, "deploy.sh") {
+		t.Error("script paths missing from body")
+	}
+}
+
+func TestNoScriptsWhenDirAbsent(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/noscripts/SKILL.md", "---\ndescription: r\n---\nmain body")
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	sk, ok := st.Read("noscripts")
+	if !ok {
+		t.Fatal("skill not found")
+	}
+	if strings.Contains(sk.Body, "## Scripts") {
+		t.Error("should not have scripts section when scripts/ missing")
+	}
+}
+
+func TestFlatSkillNoScripts(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/flat.md", "---\ndescription: r\n---\nmain body")
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	sk, ok := st.Read("flat")
+	if !ok {
+		t.Fatal("skill not found")
+	}
+	if strings.Contains(sk.Body, "## Scripts") {
+		t.Error("flat skill should not have scripts section")
 	}
 }
 

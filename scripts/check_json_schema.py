@@ -31,8 +31,15 @@ def main():
         print(f"FAILED: file not found: {filepath}")
         sys.exit(1)
 
-    with open(filepath, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"INVALID JSON: {e}")
+        sys.exit(2)
+    except FileNotFoundError:
+        print(f"MISSING: file not found: {filepath}")
+        sys.exit(1)
 
     string_fields = []
     int_fields = []
