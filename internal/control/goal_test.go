@@ -6,6 +6,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
@@ -147,5 +148,131 @@ func TestGoalRestartResetsBlockedAudit(t *testing.T) {
 	}
 	if got := c.GoalStatus(); got != GoalStatusComplete {
 		t.Fatalf("resumed GoalStatus() = %q, want complete; blocked audit should restart", got)
+	}
+}
+
+// TestIncompleteGoalTodos verifies that incompleteGoalTodos detects
+// unfinished tasks and returns a formatted reminder, and returns empty
+// when all todos are complete.
+func TestIncompleteGoalTodos(t *testing.T) {
+	prov := &scriptedTurns{turns: [][]provider.Chunk{textTurn("done")}}
+	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
+	c := New(Options{Runner: ag, Executor: ag, Sink: event.Discard})
+
+	// Seed with incomplete todos.
+	ag.SeedTodoState([]evidence.TodoItem{
+		{Content: "Fix the parser", Status: "in_progress"},
+		{Content: "Add tests", Status: "pending"},
+	})
+	msg := c.incompleteGoalTodos()
+	if msg == "" {
+		t.Fatal("incompleteGoalTodos() returned empty string, expected reminder")
+	}
+	if !strings.Contains(msg, "Fix the parser") {
+		t.Fatalf("reminder should mention 'Fix the parser', got: %q", msg)
+	}
+	if !strings.Contains(msg, "Add tests") {
+		t.Fatalf("reminder should mention 'Add tests', got: %q", msg)
+	}
+	if !strings.Contains(msg, "todo_write") {
+		t.Fatalf("reminder should suggest updating todos via todo_write, got: %q", msg)
+	}
+
+	// Mark all complete.
+	ag.ReplaceTodoState([]evidence.TodoItem{
+		{Content: "Fix the parser", Status: "completed"},
+		{Content: "Add tests", Status: "completed"},
+	})
+	if got := c.incompleteGoalTodos(); got != "" {
+		t.Fatalf("incompleteGoalTodos() with all-complete = %q, want empty", got)
+	}
+
+	// Empty todo list.
+	ag.ReplaceTodoState(nil)
+	if got := c.incompleteGoalTodos(); got != "" {
+		t.Fatalf("incompleteGoalTodos() with empty list = %q, want empty", got)
+	}
+}
+
+// TestGoalInterceptsCompleteWithIncompleteTodos verifies that when the
+// agent claims [goal:complete] but has unfinished canonical todos, the
+// goal loop intercepts the first claim, then lets a second consecutive
+// claim through as an override.
+func TestGoalInterceptsCompleteWithIncompleteTodos(t *testing.T) {
+	prov := &scriptedTurns{turns: [][]provider.Chunk{
+		textTurn("All done.\n\n[goal:complete]"),
+		textTurn("All done.\n\n[goal:complete]"),
+	}}
+	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
+	// Seed incomplete todos before starting.
+	ag.SeedTodoState([]evidence.TodoItem{
+		{Content: "Fix the parser", Status: "in_progress"},
+	})
+
+	notices := make(chan string, 64)
+	done := make(chan event.Event, 1)
+	c := New(Options{
+		Runner:   ag,
+		Executor: ag,
+		Sink: event.FuncSink(func(e event.Event) {
+			switch e.Kind {
+			case event.Notice:
+				notices <- e.Text
+			case event.TurnDone:
+				done <- e
+			}
+		}),
+	})
+
+	c.Submit("/goal fix everything")
+	<-done // wait for the entire goal loop to finish
+	close(notices)
+
+	// Collect all notices.
+	var allNotices []string
+	for n := range notices {
+		allNotices = append(allNotices, n)
+	}
+
+	// Should see an intercept notice and the goal should complete
+	// (second [goal:complete] overrides the intercept).
+	found := false
+	for _, n := range allNotices {
+		if strings.Contains(n, "goal intercept") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected a 'goal intercept' notice, got %v", allNotices)
+	}
+	if c.GoalStatus() != GoalStatusComplete {
+		t.Fatalf("GoalStatus() = %q, want complete (second [goal:complete] should override)", c.GoalStatus())
+	}
+}
+
+// TestStrictGoalBlocksRepeatedComplete verifies that in strict mode, every
+// [goal:complete] with incomplete todos is intercepted — no override allowed.
+func TestStrictGoalBlocksRepeatedComplete(t *testing.T) {
+	prov := &scriptedTurns{turns: [][]provider.Chunk{
+		textTurn("Done!\n\n[goal:complete]"),
+	}}
+	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
+	ag.SeedTodoState([]evidence.TodoItem{
+		{Content: "Fix the parser", Status: "in_progress"},
+	})
+
+	c := New(Options{Runner: ag, Executor: ag, Sink: event.Discard})
+
+	// Enable strict mode.
+	c.GoalStrict(true)
+	c.Submit("/goal fix everything")
+
+	// In strict mode the agent still has incomplete todos but only one
+	// turn was given (the provider recycles it). The goal loop keeps
+	// intercepting; when the turn-recycling hits maxGoalAutoTurns (50)
+	// the goal is blocked. Verify it's not "complete".
+	if c.GoalStatus() == GoalStatusComplete {
+		t.Fatal("strict mode should not allow goal completion with incomplete todos")
 	}
 }

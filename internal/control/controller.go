@@ -137,6 +137,23 @@ type Controller struct {
 	goalTurns   int
 	goalBlocks  int
 	goalBlock   string
+	// goalInterceptMsg, when non-empty, overrides the generic goalContinueTurn prompt
+	// for the next continuation turn. Used by advanceGoalAfterTurn to inject specific
+	// feedback such as incomplete-todo reminders.
+	goalInterceptMsg string
+	// goalIntercepts counts consecutive incomplete-todo intercepts for the current
+	// goal. After the first intercept, the agent is reminded to update its todo
+	// list if the work is actually done; a second consecutive claim of completion
+	// is treated as an override and let through.
+	goalIntercepts int
+	// goalStrict, when true, disables the override escape hatch: every
+	// [goal:complete] while todos are incomplete is intercepted, and the
+	// agent must actually finish or update all items before it can complete.
+	goalStrict bool
+	// goalSelfCheckDone tracks whether the quality self-check prompt has been
+	// injected for the current goal. On first [goal:complete] with all todos
+	// done, the agent is asked to self-verify before final completion.
+	goalSelfCheckDone bool
 	sessionPath string
 	approvals   map[string]pendingApproval
 	asks        map[string]pendingAsk
@@ -227,6 +244,7 @@ const (
 const (
 	maxGoalAutoTurns = 50
 	goalContinueTurn = "Continue pursuing the active goal. If it is complete, provide the concise final result and end with [goal:complete]. If it is truly blocked on a user-owned decision after trying sensible defaults, end with [goal:blocked:<short reason>]. Otherwise do the next useful work and end with [goal:continue]."
+	goalSelfCheckTurn = "The agent signaled goal completion and all tasks are marked done. Before finalizing, perform a brief quality self-check:\n1. Verify any changed files compile or parse correctly\n2. Run the relevant tests if applicable\n3. Confirm the original requirements are met\nIf everything checks out, signal [goal:complete]. If issues are found, fix them and signal [goal:complete] when done."
 )
 
 // RememberResult describes what happened when an approval rule was persisted.
@@ -646,7 +664,17 @@ func (c *Controller) continueGoal(ctx context.Context) error {
 			c.stopGoal(GoalStatusStopped)
 			return err
 		}
-		if err := c.runTurnWithRawDisplay(ctx, goalContinueTurn, goalContinueTurn, ""); err != nil {
+		turn := goalContinueTurn
+		c.mu.Lock()
+		if c.goalInterceptMsg != "" {
+			turn = c.goalInterceptMsg
+			c.goalInterceptMsg = ""
+			c.mu.Unlock()
+			c.notice("goal intercept: incomplete todos remain (override with a second [goal:complete])")
+		} else {
+			c.mu.Unlock()
+		}
+		if err := c.runTurnWithRawDisplay(ctx, turn, turn, ""); err != nil {
 			if ctx.Err() != nil {
 				c.stopGoal(GoalStatusStopped)
 			}
@@ -667,10 +695,28 @@ func (c *Controller) advanceGoalAfterTurn() bool {
 	c.goalTurns++
 	switch status {
 	case GoalStatusComplete:
+		if incomplete := c.incompleteGoalTodos(); len(incomplete) > 0 && (c.goalStrict || c.goalIntercepts == 0) {
+			// In strict mode every claim is blocked until todos are done;
+			// otherwise only the first consecutive claim is intercepted.
+			c.goalIntercepts++
+			c.goalInterceptMsg = incomplete
+			break
+		}
+		// Todos are all done — in strict mode run self-check before final
+		// completion. Non-strict mode completes immediately.
+		if c.goalStrict && !c.goalSelfCheckDone {
+			c.goalSelfCheckDone = true
+			c.goalInterceptMsg = goalSelfCheckTurn
+			break
+		}
+		// Self-check passed — complete the goal.
+		c.goalIntercepts = 0
+		c.goalSelfCheckDone = false
 		c.goal = ""
 		c.goalStatus = GoalStatusComplete
 		c.goalBlocks = 0
 		c.goalBlock = ""
+		c.goalInterceptMsg = ""
 		notice = "goal complete"
 	case GoalStatusBlocked:
 		reason = cleanGoalBlockReason(reason)
@@ -690,10 +736,15 @@ func (c *Controller) advanceGoalAfterTurn() bool {
 	default:
 		c.goalBlocks = 0
 		c.goalBlock = ""
+		c.goalIntercepts = 0
+		c.goalSelfCheckDone = false
 	}
 	if notice == "" && c.goalTurns >= maxGoalAutoTurns {
 		c.goalStatus = GoalStatusBlocked
 		c.goalBlock = "goal continuation limit reached"
+		c.goalIntercepts = 0
+		c.goalSelfCheckDone = false
+		c.goalInterceptMsg = ""
 		notice = c.goalBlock
 	}
 	cont := notice == ""
@@ -702,6 +753,48 @@ func (c *Controller) advanceGoalAfterTurn() bool {
 		c.notice(notice)
 	}
 	return cont
+}
+
+// incompleteGoalTodos checks the executor's canonical todo state and evidence
+// readiness (project checks) for anything that should block [goal:complete].
+// Returns a formatted reminder string, or empty if nothing is blocking.
+func (c *Controller) incompleteGoalTodos() string {
+	if c.executor == nil {
+		return ""
+	}
+	var parts []string
+
+	// 1. Check canonical todos.
+	todos := c.executor.CanonicalTodoState()
+	if len(todos) > 0 {
+		incomplete := evidence.IncompleteTodos(todos)
+		if len(incomplete) > 0 {
+			var b strings.Builder
+			b.WriteString("the following tasks are still incomplete:")
+			for _, t := range incomplete {
+				fmt.Fprintf(&b, "\n  - %s (%s)", t.Content, t.Status)
+			}
+			parts = append(parts, b.String())
+		}
+	}
+
+	// 2. Check evidence readiness (project checks from AGENTS.md).
+	if reason := c.executor.GoalReadinessFailure(); reason != "" {
+		parts = append(parts, reason)
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("The agent signaled goal completion but the following issues remain:\n")
+	for _, p := range parts {
+		b.WriteString(p)
+		b.WriteString("\n")
+	}
+	b.WriteString("\nIf the work is actually done, update your task list with todo_write or complete_step and run the required verification commands, then signal [goal:complete] again. Otherwise finish the remaining work.")
+	return b.String()
 }
 
 func parseGoalStatusMarker(text string) (status, reason string, ok bool) {
@@ -759,6 +852,9 @@ func (c *Controller) stopGoal(status string) {
 	if strings.TrimSpace(c.goal) != "" && c.goalStatus == GoalStatusRunning {
 		c.goalStatus = status
 	}
+	c.goalInterceptMsg = ""
+	c.goalIntercepts = 0
+	c.goalSelfCheckDone = false
 	c.mu.Unlock()
 }
 
@@ -987,6 +1083,7 @@ func (c *Controller) applyGoalCommand(input, display string) bool {
 	switch cmd.Action {
 	case GoalCommandSet:
 		c.SetPlanMode(false)
+		c.GoalStrict(cmd.Strict)
 		c.SetGoal(cmd.Text)
 		c.notice(fmt.Sprintf(i18n.M.GoalSetFmt, ShortGoalForNotice(cmd.Text)))
 		if c.runner != nil {
@@ -1439,6 +1536,15 @@ func (c *Controller) PlanMode() bool {
 	return c.planMode
 }
 
+// GoalStrict enables or disables strict goal mode. In strict mode the agent
+// cannot override an incomplete-todo intercept — it must actually finish or
+// update all items before [goal:complete] is accepted.
+func (c *Controller) GoalStrict(strict bool) {
+	c.mu.Lock()
+	c.goalStrict = strict
+	c.mu.Unlock()
+}
+
 // SetGoal stores a session-scoped active goal. Compose injects it into outgoing
 // user turns, not the system prompt or tool schema, so it does not disturb the
 // cache-stable prefix.
@@ -1462,6 +1568,10 @@ func (c *Controller) SetGoal(goal string) {
 	c.goalTurns = 0
 	c.goalBlocks = 0
 	c.goalBlock = ""
+	c.goalInterceptMsg = ""
+	c.goalIntercepts = 0
+	c.goalSelfCheckDone = false
+	c.goalStrict = false
 }
 
 func (c *Controller) ClearGoal() {

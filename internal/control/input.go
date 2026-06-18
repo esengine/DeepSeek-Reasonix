@@ -188,6 +188,7 @@ const (
 type GoalCommand struct {
 	Action GoalCommandAction
 	Text   string
+	Strict bool
 }
 
 func ParseGoalCommand(input string) (GoalCommand, bool) {
@@ -196,13 +197,27 @@ func ParseGoalCommand(input string) (GoalCommand, bool) {
 		return GoalCommand{}, false
 	}
 	args := strings.TrimSpace(trimmed[len("/goal"):])
-	switch strings.ToLower(args) {
+
+	// Parse --strict flag before checking action.
+	strict := false
+	fields := strings.Fields(args)
+	cleaned := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if f == "--strict" {
+			strict = true
+		} else {
+			cleaned = append(cleaned, f)
+		}
+	}
+	actionArgs := strings.Join(cleaned, " ")
+
+	switch strings.ToLower(actionArgs) {
 	case "", "status":
-		return GoalCommand{Action: GoalCommandStatus}, true
+		return GoalCommand{Action: GoalCommandStatus, Strict: strict}, true
 	case "clear", "off", "stop", "done":
-		return GoalCommand{Action: GoalCommandClear}, true
+		return GoalCommand{Action: GoalCommandClear, Strict: strict}, true
 	default:
-		return GoalCommand{Action: GoalCommandSet, Text: args}, true
+		return GoalCommand{Action: GoalCommandSet, Text: actionArgs, Strict: strict}, true
 	}
 }
 

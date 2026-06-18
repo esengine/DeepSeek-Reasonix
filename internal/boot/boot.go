@@ -459,13 +459,15 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			return "task tool is already enabled."
 		}
 		taskToolAdded = true
-		reg.Add(agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
+		tt := agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
 			entry.ContextWindow, cfg.Agent.RecentKeep, cfg.Agent.SoftCompactRatio, cfg.Agent.CompactRatio, cfg.Agent.CompactForceRatio,
 			cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate,
 			keepPolicy,
 			taskModel, taskEffort, resolveSubagentProvider).
 			WithTranscripts(subagentStore, root, modelName, entry.Effort).
-			WithTranscriptIdentityResolver(subagentIdentity))
+			WithTranscriptIdentityResolver(subagentIdentity)
+		reg.Add(tt)
+		reg.Add(agent.NewParallelTasksTool(tt, reg))
 		return "enabled task."
 	}
 	if !tokenEconomy {

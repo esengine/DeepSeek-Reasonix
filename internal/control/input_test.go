@@ -219,6 +219,36 @@ func TestGoalCommandSetsReportsAndClears(t *testing.T) {
 	}
 }
 
+func TestParseGoalCommandWithStrict(t *testing.T) {
+	tests := []struct {
+		input string
+		text  string
+		strict bool
+		ok    bool
+	}{
+		{"/goal --strict implement calculator", "implement calculator", true, true},
+		{"/goal implement calculator", "implement calculator", false, true},
+		{"/goal --strict", "", true, true}, // --strict shows status
+		{"/goal --strict status", "", true, true}, // --strict shows status
+	}
+	for _, tt := range tests {
+		cmd, ok := ParseGoalCommand(tt.input)
+		if ok != tt.ok {
+			t.Errorf("ParseGoalCommand(%q) ok = %v, want %v", tt.input, ok, tt.ok)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		if cmd.Text != tt.text {
+			t.Errorf("ParseGoalCommand(%q).Text = %q, want %q", tt.input, cmd.Text, tt.text)
+		}
+		if cmd.Strict != tt.strict {
+			t.Errorf("ParseGoalCommand(%q).Strict = %v, want %v", tt.input, cmd.Strict, tt.strict)
+		}
+	}
+}
+
 func TestComposeDrainsQueuedMemory(t *testing.T) {
 	c := New(Options{}) // no executor/memory — QueueMemory still queues a turn-tail note
 
