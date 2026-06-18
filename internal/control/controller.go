@@ -1274,6 +1274,11 @@ func (c *Controller) applyPlanExec(input, display string) {
 	}
 	prompt := b.String()
 
+	// Show module preview.
+	if len(modules) > 0 {
+		c.notice(fmt.Sprintf("plan-exec: detected %d modules — %s", len(modules), strings.Join(modules, ", ")))
+	}
+
 	c.SetPlanMode(false)
 	c.SetGoal("execute plan: " + ShortGoalForNotice(todos[0].Content))
 	c.GoalStrict(strict)
@@ -3763,7 +3768,7 @@ func (c *Controller) detectProjectModules() []string {
 	root := c.sessionDir
 	for i := 0; i < 3 && root != ""; i++ {
 		if hasFile(root, "go.mod") || hasFile(root, "package.json") || hasFile(root, ".git") {
-			return listSourceDirs(root)
+			return listSourceDirs(root, 2)
 		}
 		root = filepath.Dir(root)
 		if root == filepath.Dir(root) {
@@ -3778,27 +3783,46 @@ func hasFile(dir, name string) bool {
 	return err == nil
 }
 
-func listSourceDirs(root string) []string {
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return nil
-	}
-	var dirs []string
+
+
+
+func listSourceDirs(root string, maxDepth int) []string {
 	skip := map[string]bool{
 		".git": true, ".github": true, "node_modules": true,
 		"vendor": true, ".reasonix": true, "desktop": true,
-		"dist": true, "build": true, ".cache": true,
+		"dist": true, "build": true, ".cache": true, "bin": true,
+	}
+	var dirs []string
+	walkDir(root, "", skip, maxDepth, &dirs)
+	return dirs
+}
+
+func walkDir(root, rel string, skip map[string]bool, depth int, out *[]string) {
+	if depth <= 0 {
+		return
+	}
+	dir := root
+	if rel != "" {
+		dir = filepath.Join(root, rel)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
 	}
 	for _, e := range entries {
 		name := e.Name()
 		if !e.IsDir() || skip[name] || strings.HasPrefix(name, ".") {
 			continue
 		}
-		if hasSourceFiles(filepath.Join(root, name)) {
-			dirs = append(dirs, name)
+		childRel := name
+		if rel != "" {
+			childRel = rel + "/" + name
 		}
+		if hasSourceFiles(filepath.Join(root, childRel)) {
+			*out = append(*out, childRel)
+		}
+		walkDir(root, childRel, skip, depth-1, out)
 	}
-	return dirs
 }
 
 func hasSourceFiles(dir string) bool {

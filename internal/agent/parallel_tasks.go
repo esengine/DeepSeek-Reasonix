@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -142,17 +144,25 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 	allDone := make(chan struct{})
 
 	// Dispatcher goroutine: spawns tasks when their deps are satisfied,
-	// accumulating wisdom from completed tasks and passing it forward.
+	// accumulating wisdom from completed tasks as files on disk.
 	go func() {
 		spawned := 0
 		completed := 0
-		var wisdom strings.Builder
+		wisdomDir, _ := os.MkdirTemp("", "parallel-wisdom-*")
+		if wisdomDir != "" {
+			defer os.RemoveAll(wisdomDir)
+		}
 
 		makePrompt := func(t parallelTaskItem) string {
-			if wisdom.Len() == 0 || len(t.DependsOn) == 0 {
-				return t.Prompt
+			var prefix strings.Builder
+			if len(t.DependsOn) > 0 && wisdomDir != "" {
+				entries, _ := os.ReadDir(wisdomDir)
+				if len(entries) > 0 {
+					prefix.WriteString(fmt.Sprintf("Previous task results are available at %s. Read the relevant files with read_file before starting.\n\n", wisdomDir))
+				}
 			}
-			return "Previous task results:\n" + wisdom.String() + "\n\nNow do:\n" + t.Prompt
+			prefix.WriteString(t.Prompt)
+			return prefix.String()
 		}
 		makeLabel := func(t parallelTaskItem, idx int) string {
 			if t.Description != "" {
@@ -180,21 +190,15 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 			outputs[r.index] = r.output
 			errors[r.index] = r.err
 
-			// Accumulate wisdom from successful tasks.
-			if r.err == nil && r.output != "" {
-				summary := strings.TrimSpace(r.output)
-				if len(summary) > 200 {
-					summary = summary[:200] + "..."
-				}
-				if wisdom.Len() > 0 {
-					wisdom.WriteString("\n")
-				}
-				fmt.Fprintf(&wisdom, "- Task %d: %s", r.index+1, summary)
-			} else if r.err != nil {
-				if wisdom.Len() > 0 {
-					wisdom.WriteString("\n")
-				}
-				fmt.Fprintf(&wisdom, "- Task %d: FAILED - %s", r.index+1, r.err)
+			// Write wisdom to file instead of inlining in prompt.
+			if wisdomDir != "" && r.output != "" {
+				fname := filepath.Join(wisdomDir, fmt.Sprintf("task-%d.md", r.index+1))
+				summary := fmt.Sprintf("# Task %d Result\n\n%s", r.index+1, strings.TrimSpace(r.output))
+				_ = os.WriteFile(fname, []byte(summary), 0o644)
+			} else if wisdomDir != "" && r.err != nil {
+				fname := filepath.Join(wisdomDir, fmt.Sprintf("task-%d.md", r.index+1))
+				summary := fmt.Sprintf("# Task %d Result\n\nFAILED: %s", r.index+1, r.err)
+				_ = os.WriteFile(fname, []byte(summary), 0o644)
 			}
 
 			// Check if any waiting tasks are now unblocked.
