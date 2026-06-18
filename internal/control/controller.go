@@ -1237,6 +1237,17 @@ func (c *Controller) applyPlanExec(input, display string) {
 
 	var b strings.Builder
 	b.WriteString("You are the execution conductor. Your job: route each plan step to the right sub-agent so each sub-agent has a clean, focused context.\n\n")
+
+	// Detect project structure for module-aware routing.
+	modules := c.detectProjectModules()
+	if len(modules) > 0 {
+		b.WriteString("## Project modules detected\n\n")
+		for _, m := range modules {
+			fmt.Fprintf(&b, "- %s/", m)
+		}
+		b.WriteString("\n\nRoute steps to the module they belong to. Steps in different modules can run in parallel.\n\n")
+	}
+
 	b.WriteString("## Plan steps\n\n")
 	for _, t := range todos {
 		status := t.Status
@@ -3744,4 +3755,61 @@ func (c *Controller) emitRememberResult(r RememberResult) {
 	case strings.TrimSpace(r.CoveredBy) != "":
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(i18n.M.PermissionAlreadyAllowedFmt, r.Path, r.CoveredBy)})
 	}
+}
+
+// detectProjectModules scans the workspace root for top-level source directories
+// to enable module-aware task routing in /plan-exec.
+func (c *Controller) detectProjectModules() []string {
+	root := c.sessionDir
+	for i := 0; i < 3 && root != ""; i++ {
+		if hasFile(root, "go.mod") || hasFile(root, "package.json") || hasFile(root, ".git") {
+			return listSourceDirs(root)
+		}
+		root = filepath.Dir(root)
+		if root == filepath.Dir(root) {
+			break
+		}
+	}
+	return nil
+}
+
+func hasFile(dir, name string) bool {
+	_, err := os.Stat(filepath.Join(dir, name))
+	return err == nil
+}
+
+func listSourceDirs(root string) []string {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var dirs []string
+	skip := map[string]bool{
+		".git": true, ".github": true, "node_modules": true,
+		"vendor": true, ".reasonix": true, "desktop": true,
+		"dist": true, "build": true, ".cache": true,
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() || skip[name] || strings.HasPrefix(name, ".") {
+			continue
+		}
+		if hasSourceFiles(filepath.Join(root, name)) {
+			dirs = append(dirs, name)
+		}
+	}
+	return dirs
+}
+
+func hasSourceFiles(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+			return true
+		}
+	}
+	return false
 }
