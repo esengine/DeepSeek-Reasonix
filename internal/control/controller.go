@@ -133,6 +133,7 @@ type Controller struct {
 	mu               sync.Mutex
 	cancel           context.CancelFunc
 	running          bool
+	externalEditOpen bool
 	canceling        bool
 	autosaveWG       sync.WaitGroup
 	planMode         bool
@@ -167,6 +168,14 @@ type Controller struct {
 	asks          map[string]pendingAsk
 	granted       map[string]bool
 	nextID        int
+	goalTurns        int
+	goalBlocks       int
+	goalBlock        string
+	sessionPath      string
+	approvals        map[string]pendingApproval
+	asks             map[string]pendingAsk
+	granted          map[string]bool
+	nextID           int
 	// turn counts model turns this session, passed to hooks in their payload.
 	turn int
 	// approvedPlanAutoApproveTools auto-allows writer tool calls without prompting.
@@ -480,7 +489,7 @@ func (c *Controller) beginCheckpoint(input string) {
 // turn is already in flight.
 func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 	c.mu.Lock()
-	if c.running {
+	if c.running || c.externalEditOpen {
 		c.mu.Unlock()
 		return
 	}
@@ -561,7 +570,7 @@ func (c *Controller) runTurn(ctx context.Context, input string) error {
 func (c *Controller) RunTurn(ctx context.Context, input string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	c.mu.Lock()
-	if c.running {
+	if c.running || c.externalEditOpen {
 		c.mu.Unlock()
 		cancel()
 		return ErrTurnRunning

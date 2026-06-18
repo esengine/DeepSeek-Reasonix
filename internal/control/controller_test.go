@@ -3,8 +3,10 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -42,7 +44,21 @@ type appendingRunner struct {
 	session *agent.Session
 }
 
-func (r appendingRunner) Run(_ context.Context, input string) error {
+func (r *appendingRunner) Name() string        { return "append" }
+func (r *appendingRunner) Description() string { return "append input to session" }
+func (r *appendingRunner) Schema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"input":{"type":"string"}},"required":["input"]}`)
+}
+func (r *appendingRunner) Execute(_ context.Context, args json.RawMessage) (string, error) {
+	var params struct{ Input string }
+	if err := json.Unmarshal(args, &params); err != nil {
+		return "", err
+	}
+	r.session.Add(provider.Message{Role: provider.RoleUser, Content: params.Input})
+	return "appended", nil
+}
+func (r *appendingRunner) ReadOnly() bool { return true }
+func (r *appendingRunner) Run(_ context.Context, input string) error {
 	r.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
 	return nil
 }
@@ -240,7 +256,7 @@ func TestRunTurnSnapshotsActivityWhenTranscriptChanges(t *testing.T) {
 	sess := agent.NewSession("sys")
 	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
 	path := filepath.Join(dir, "session.jsonl")
-	c := New(Options{Runner: appendingRunner{session: sess}, Executor: exec, SessionDir: dir, SessionPath: path, Label: "test"})
+	c := New(Options{Runner: &appendingRunner{session: sess}, Executor: exec, SessionDir: dir, SessionPath: path, Label: "test"})
 
 	if err := c.runTurn(context.Background(), "hello"); err != nil {
 		t.Fatal(err)
@@ -1166,7 +1182,7 @@ func TestRunGuardedPanicEmitsTurnDone(t *testing.T) {
 	sess := agent.NewSession("sys")
 	events := make(chan event.Event, 4)
 	c := New(Options{
-		Runner: appendingRunner{session: sess},
+		Runner: &appendingRunner{session: sess},
 		Sink:   event.FuncSink(func(e event.Event) { events <- e }),
 	})
 
@@ -1201,7 +1217,7 @@ func TestRunGuardedPanicDoesNotDoubleEmitTurnDone(t *testing.T) {
 	var count int32
 	events := make(chan event.Event, 8)
 	c := New(Options{
-		Runner: appendingRunner{session: sess},
+		Runner: &appendingRunner{session: sess},
 		Sink: event.FuncSink(func(e event.Event) {
 			if e.Kind == event.TurnDone {
 				atomic.AddInt32(&count, 1)
@@ -1396,4 +1412,235 @@ func TestApprovedPlanDoesNotAutoApproveNonContinuationTurn(t *testing.T) {
 	if approvalPrompts != 2 {
 		t.Fatalf("non-continuation writer should prompt after plan approval, prompts=%d", approvalPrompts)
 	}
+}
+
+func TestRunExternalEditEmitsDiffAndPersistsHistory(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "session.jsonl")
+	file := filepath.Join(root, "a.go")
+	if err := os.WriteFile(file, []byte("package a\n\nfunc A() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	var events []event.Event
+	c := New(Options{
+		Executor:      exec,
+		Sink:          event.FuncSink(func(e event.Event) { events = append(events, e) }),
+		SessionDir:    root,
+		SessionPath:   path,
+		WorkspaceRoot: root,
+	})
+
+	err := c.RunExternalEdit(context.Background(), "apply_patch", []string{"a.go"}, func(context.Context) error {
+		return os.WriteFile(file, []byte("package a\n\nfunc A() int { return 1 }\n"), 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dispatch, result := findToolEvents(events, "apply_patch")
+	if dispatch == nil {
+		t.Fatal("missing synthetic ToolDispatch")
+	}
+	if dispatch.Tool.ReadOnly {
+		t.Fatal("external edit should be a writer tool event")
+	}
+	if dispatch.Tool.Added == 0 || dispatch.Tool.Removed == 0 || !strings.Contains(dispatch.Tool.Diff, "func A() int") {
+		t.Fatalf("dispatch diff = added %d removed %d diff:\n%s", dispatch.Tool.Added, dispatch.Tool.Removed, dispatch.Tool.Diff)
+	}
+	if result == nil || result.Tool.Err != "" || !strings.Contains(result.Tool.Output, "1 files changed") {
+		t.Fatalf("bad synthetic ToolResult: %+v", result)
+	}
+
+	msgs := c.History()
+	if len(msgs) < 3 {
+		t.Fatalf("history messages = %d, want system + synthetic tool pair", len(msgs))
+	}
+	call := msgs[len(msgs)-2].ToolCalls[0]
+	if call.Name != "apply_patch" || call.Diff == "" || call.Added == 0 || call.Removed == 0 {
+		t.Fatalf("history tool call missing diff metadata: %+v", call)
+	}
+	if got := c.ToolResult(call.ID); got == nil || !strings.Contains(got.Output, "applied apply_patch") {
+		t.Fatalf("ToolResult lookup = %+v", got)
+	}
+	checkpoints := c.Checkpoints()
+	if len(checkpoints) != 1 || len(checkpoints[0].Paths) != 1 || checkpoints[0].Paths[0] != "a.go" {
+		t.Fatalf("external edit checkpoint paths = %+v, want a.go", checkpoints)
+	}
+	if _, err := agent.LoadSession(path); err != nil {
+		t.Fatalf("synthetic external edit history was not saved: %v", err)
+	}
+}
+
+func TestRunExternalEditDiffIsScopedToSnapshot(t *testing.T) {
+	root := t.TempDir()
+	oldDirty := filepath.Join(root, "old.txt")
+	touched := filepath.Join(root, "new.txt")
+	if err := os.WriteFile(oldDirty, []byte("preexisting dirty content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(touched, []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	var events []event.Event
+	c := New(Options{
+		Executor:      exec,
+		Sink:          event.FuncSink(func(e event.Event) { events = append(events, e) }),
+		WorkspaceRoot: root,
+	})
+
+	err := c.RunExternalEdit(context.Background(), "apply_patch", []string{"new.txt"}, func(context.Context) error {
+		return os.WriteFile(touched, []byte("after\n"), 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dispatch, _ := findToolEvents(events, "apply_patch")
+	if dispatch == nil {
+		t.Fatal("missing synthetic ToolDispatch")
+	}
+	if strings.Contains(dispatch.Tool.Args, "old.txt") || strings.Contains(dispatch.Tool.Diff, "preexisting dirty content") {
+		t.Fatalf("external diff leaked old dirty file: args=%s diff=\n%s", dispatch.Tool.Args, dispatch.Tool.Diff)
+	}
+	if !strings.Contains(dispatch.Tool.Args, "new.txt") || !strings.Contains(dispatch.Tool.Diff, "after") {
+		t.Fatalf("external diff missed touched file: args=%s diff=\n%s", dispatch.Tool.Args, dispatch.Tool.Diff)
+	}
+}
+
+func TestRunExternalEditFailureDoesNotExposeDiff(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "a.txt")
+	if err := os.WriteFile(file, []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	var events []event.Event
+	c := New(Options{
+		Executor:      exec,
+		Sink:          event.FuncSink(func(e event.Event) { events = append(events, e) }),
+		WorkspaceRoot: root,
+	})
+	wantErr := errors.New("patch rejected")
+	err := c.RunExternalEdit(context.Background(), "apply_patch", []string{"a.txt"}, func(context.Context) error {
+		if werr := os.WriteFile(file, []byte("partial\n"), 0o644); werr != nil {
+			return werr
+		}
+		return wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("RunExternalEdit err = %v, want %v", err, wantErr)
+	}
+
+	dispatch, result := findToolEvents(events, "apply_patch")
+	if dispatch == nil || result == nil {
+		t.Fatalf("missing synthetic events: dispatch=%v result=%v", dispatch, result)
+	}
+	if dispatch.Tool.Diff != "" || dispatch.Tool.Added != 0 || dispatch.Tool.Removed != 0 {
+		t.Fatalf("failed external edit should not show diff: %+v", dispatch.Tool.FileDiff)
+	}
+	if result.Tool.Err == "" {
+		t.Fatal("failed external edit should emit ToolResult error")
+	}
+	if got := c.Checkpoints(); len(got) != 0 {
+		t.Fatalf("failed external edit should not create checkpoints, got %+v", got)
+	}
+}
+
+func TestRunExternalEditFallsBackToGitStatusWhenPathsUnknown(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	root := t.TempDir()
+	runGitIn(t, root, "init")
+	runGitIn(t, root, "config", "user.email", "test@example.com")
+	runGitIn(t, root, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(t, root, "add", "tracked.txt")
+	runGitIn(t, root, "commit", "-m", "init")
+
+	execAgent := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	var events []event.Event
+	c := New(Options{
+		Executor:      execAgent,
+		Sink:          event.FuncSink(func(e event.Event) { events = append(events, e) }),
+		WorkspaceRoot: root,
+	})
+
+	err := c.RunExternalEdit(context.Background(), "apply_patch", nil, func(context.Context) error {
+		return os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("new\n"), 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatch, _ := findToolEvents(events, "apply_patch")
+	if dispatch == nil {
+		t.Fatal("missing synthetic ToolDispatch")
+	}
+	if !strings.Contains(dispatch.Tool.Args, "tracked.txt") || !strings.Contains(dispatch.Tool.Diff, "-old") || !strings.Contains(dispatch.Tool.Diff, "+new") {
+		t.Fatalf("git fallback diff = args=%s diff=\n%s", dispatch.Tool.Args, dispatch.Tool.Diff)
+	}
+}
+
+func TestExternalEditBlocksForegroundTurnUntilEnd(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "a.txt")
+	if err := os.WriteFile(file, []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess := agent.NewSession("sys")
+	tools := tool.NewRegistry()
+	tools.Add(&appendingRunner{session: sess})
+	execAgent := agent.New(nil, tools, sess, agent.Options{}, event.Discard)
+	c := New(Options{
+		Executor:      execAgent,
+		Runner:        &appendingRunner{session: sess},
+		WorkspaceRoot: root,
+	})
+
+	edit := c.BeginExternalEdit("apply_patch", []string{"a.txt"})
+	if err := edit.BeginErr(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RunTurn(context.Background(), "normal turn"); !errors.Is(err, ErrTurnRunning) {
+		t.Fatalf("RunTurn during external edit err = %v, want ErrTurnRunning", err)
+	}
+	if err := os.WriteFile(file, []byte("after\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := edit.End(nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RunTurn(context.Background(), "normal turn"); err != nil {
+		t.Fatalf("RunTurn after external edit = %v", err)
+	}
+}
+
+func runGitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func findToolEvents(events []event.Event, name string) (*event.Event, *event.Event) {
+	var dispatch, result *event.Event
+	for i := range events {
+		if events[i].Tool.Name != name {
+			continue
+		}
+		switch events[i].Kind {
+		case event.ToolDispatch:
+			dispatch = &events[i]
+		case event.ToolResult:
+			result = &events[i]
+		}
+	}
+	return dispatch, result
 }

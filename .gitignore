@@ -58,4 +58,7 @@ Thumbs.db
 .vscode/
 /site/public/av/
 
+# Stray generated files
+null
+
 benchmarks/context-maintenance-e2e/run/

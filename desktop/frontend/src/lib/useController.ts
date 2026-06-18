@@ -883,6 +883,9 @@ export function useController() {
         app.EffortForTab(targetTabId).then((effort) => dispatchTo(targetTabId, { type: "effort", effort })).catch(() => {});
         void refreshCheckpoints(targetTabId);
       }
+      if (e.kind === "tool_result" && e.tool && (e.tool.diff || (e.tool.added ?? 0) > 0 || (e.tool.removed ?? 0) > 0)) {
+        void refreshCheckpoints(targetTabId);
+      }
       if (e.kind === "turn_done" || e.kind === "notice") {
         app.JobsForTab(targetTabId).then((jobs) => dispatchTo(targetTabId, { type: "jobs", jobs: asArray(jobs) })).catch(() => {});
       }

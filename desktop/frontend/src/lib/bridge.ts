@@ -122,6 +122,8 @@ export interface AppBindings {
   SubmitDisplayToTab(tabID: string, display: string, input: string): Promise<void>;
   RunShell(command: string): Promise<void>;
   RunShellForTab(tabID: string, command: string): Promise<void>;
+  BeginExternalEditForTab(tabID: string, label: string, paths: string[]): Promise<string>;
+  EndExternalEdit(id: string, errMessage: string): Promise<void>;
   Steer(text: string): Promise<void>;
   SteerForTab(tabID: string, text: string): Promise<void>;
   Cancel(): Promise<void>;
@@ -1572,6 +1574,10 @@ function makeMockApp(): AppBindings {
         async RunShellForTab(_tabID, command) {
           await withMockTabScope(_tabID, () => this.RunShell(command));
         },
+        async BeginExternalEditForTab(_tabID, _label, _paths) {
+          return "mock-external-edit";
+        },
+        async EndExternalEdit(_id, _errMessage) {},
         async Steer(_text) {
           // Mock: emit a steer event as confirmation in the transcript.
           emit({ kind: "steer", text: _text });

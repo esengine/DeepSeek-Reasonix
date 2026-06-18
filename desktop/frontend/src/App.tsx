@@ -2998,7 +2998,7 @@ export default function App() {
                   onPreviewModeChange={handleWorkspacePreviewModeChange}
                   onAddToChat={addWorkspaceTextToComposer}
                   onRequestPanelWidth={ensureWorkspacePanelWidth}
-                  refreshKey={dockRefreshKey}
+                  refreshKey={`${dockRefreshKey}:${state.checkpoints.length}`}
                   initialViewMode={rightDockMode === "changed" ? "changed" : "files"}
                   showViewTabs={false}
                 />

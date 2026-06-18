@@ -153,6 +153,20 @@ func (s *Store) Snapshot(ch diff.Change) {
 	s.persist(s.cur)
 }
 
+// Finish finalizes the current checkpoint so its touched paths are visible to
+// metadata consumers immediately. Agent turns usually finalize when the next
+// turn begins; host-side edits call this after their synthetic tool result.
+func (s *Store) Finish() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cur == nil {
+		return
+	}
+	s.done = append(s.done, s.cur)
+	s.cur = nil
+	s.seen = map[string]bool{}
+}
+
 func (s *Store) detectEncoding(p string) *fileenc.Kind {
 	abs, err := safePath(s.root, p)
 	if err != nil {
