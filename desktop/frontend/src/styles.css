@@ -4477,10 +4477,13 @@ a[href] {
   justify-content: center;
 }
 
-.mermaid-diagram--error > .code.hljs {
+.mermaid-diagram--error > .code.hljs,
+.mermaid-diagram__error-source {
   margin: 0;
   border: none;
   border-radius: 0;
+  max-height: 360px;
+  overflow: auto;
 }
 
 .mermaid-diagram__error-details {
