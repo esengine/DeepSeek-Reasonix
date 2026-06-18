@@ -337,6 +337,31 @@ func TestBuildRequestRoundTripsReasoningOnDeepSeekToolCalls(t *testing.T) {
 	}
 }
 
+// An old session (pre-adde2d3e) saved tool results without a name field. The
+// call still carries its name, so buildRequest must backfill the result name —
+// otherwise the wire omits it and DeepSeek 400s "missing field name" (#4773).
+func TestBuildRequestBackfillsToolResultNameForOldSession(t *testing.T) {
+	c := &client{model: "deepseek-v4", deepseek: true}
+	req := c.buildRequest(provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "count the go files"},
+			{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "c1", Name: "bash", Arguments: `{"command":"ls"}`}}},
+			{Role: provider.RoleTool, ToolCallID: "c1", Content: "14"},
+		},
+	})
+	tool := req.Messages[len(req.Messages)-1]
+	if tool.Role != "tool" {
+		t.Fatalf("last message role = %q, want tool", tool.Role)
+	}
+	b, err := json.Marshal(tool)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"name":"bash"`) {
+		t.Errorf("tool result must carry the backfilled name on the wire: %s", b)
+	}
+}
+
 func TestBuildRequestForwardsReasoningEffort(t *testing.T) {
 	c := &client{model: "mimo-v2", effort: "high"}
 	if got := c.buildRequest(provider.Request{}).ReasoningEffort; got != "high" {

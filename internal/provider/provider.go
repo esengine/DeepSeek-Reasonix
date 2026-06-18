@@ -111,11 +111,9 @@ func SanitizeToolPairing(msgs []Message) []Message {
 			for j < len(msgs) && msgs[j].Role == RoleTool {
 				j++
 			}
-			// Backfill empty tool-call names from the corresponding tool
-			// results so the model sees which tool was invoked (#4727).
-			// The wire-format fix (openai.go) ensures empty fields are
-			// never omitted, so this backfill is a UX improvement, not a
-			// correctness requirement.
+			// Cross-fill tool names both ways before pairing: old sessions
+			// can drop the call name or the result name, and DeepSeek 400s a
+			// tool message whose name is omitted on the wire (#4727, #4773).
 			calls := backfillToolCallNames(m.ToolCalls, msgs[i+1:j])
 			m2 := m
 			m2.ToolCalls = calls
@@ -230,6 +228,9 @@ func pairToolResults(calls []ToolCall, avail []Message) []Message {
 		}
 		for _, tc := range calls {
 			if r, ok := byID[tc.ID]; ok {
+				if r.Name == "" {
+					r.Name = tc.Name
+				}
 				out = append(out, r)
 			} else {
 				out = append(out, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tc.Name, Content: interruptedToolResult})
@@ -240,6 +241,9 @@ func pairToolResults(calls []ToolCall, avail []Message) []Message {
 	for k, tc := range calls {
 		if k < len(avail) {
 			r := avail[k]
+			if r.Name == "" {
+				r.Name = tc.Name
+			}
 			r.ToolCallID = tc.ID
 			out = append(out, r)
 		} else {
