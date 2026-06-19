@@ -385,8 +385,6 @@ func New(opts Options) *Controller {
 		})
 		c.executor.SetMemoryQueue(c)
 	}
-	// Check for persisted goal state and notify on session start.
-	c.notifyGoalState()
 	return c
 }
 
@@ -541,7 +539,7 @@ const planApprovalTool = "exit_plan_mode"
 
 // planApprovedMessage is the follow-up turn sent once the user approves a plan —
 // the in-context nudge to execute and keep the (already-seeded) task list honest.
-const planApprovedMessage = "Plan approved — plan mode is off; you’re cleared to make the changes without asking again. Implement the plan now. Use this serial workflow: 1) mark the first sub-step in_progress with todo_write (this establishes the task list); 2) execute the sub-step; 3) call complete_step with evidence — the host then marks that sub-step completed and moves the next one to in_progress for you. Repeat 2–3 for each remaining sub-step. You don’t need another todo_write to mark steps completed; each complete_step advances the list. Sign off one sub-step at a time — never batch multiple completions. Use parallel_tasks for independent steps."
+const planApprovedMessage = "Plan approved — plan mode is off; you’re cleared to make the changes without asking again. Implement the plan now. Use this serial workflow: 1) mark the first sub-step in_progress with todo_write (this establishes the task list); 2) execute the sub-step; 3) call complete_step with evidence — the host then marks that sub-step completed and moves the next one to in_progress for you. Repeat 2–3 for each remaining sub-step. You don’t need another todo_write to mark steps completed; each complete_step advances the list. Sign off one sub-step at a time — never batch multiple completions."
 
 // runTurn runs one model turn, then applies the plan-approval gate. This is the
 // single, frontend-agnostic plan flow: in plan mode the model just researches
@@ -954,36 +952,6 @@ type goalState struct {
 	Todos        []evidence.TodoItem `json:"todos,omitempty"`
 }
 
-// notifyGoalState checks for a persisted goal state on session start and emits
-// a notice if an uncompleted goal exists.
-func (c *Controller) notifyGoalState() {
-	path := c.goalStatePath
-	if path == "" {
-		return
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	var state goalState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return
-	}
-	if state.Goal == "" {
-		return
-	}
-	switch state.Status {
-	case GoalStatusRunning:
-		c.notice(fmt.Sprintf("detected uncompleted goal: \"%s\" — /goal to view or /goal clear to discard", ShortGoalForNotice(state.Goal)))
-	case GoalStatusBlocked:
-		reason := state.Block
-		if reason == "" {
-			reason = "unknown"
-		}
-		c.notice(fmt.Sprintf("detected blocked goal: \"%s\" (blocked: %s) — /goal to view or /goal clear to discard", ShortGoalForNotice(state.Goal), reason))
-	}
-}
-
 // lastAssistantText returns the content of the most recent assistant message with
 // non-empty text — the model's final answer for the turn (its plan, in plan mode).
 func lastAssistantText(msgs []provider.Message) string {
@@ -1178,15 +1146,6 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 		case "/prometheus":
 			c.applyPrometheus(trimmed, display)
 			return
-		case "/summarize":
-			c.notice("summarizing conversation...")
-			c.runGuarded(func(ctx context.Context) error {
-				if err := c.SummarizeFrom(ctx, 0); err != nil {
-					c.notice("summarize: " + err.Error())
-				}
-				return nil
-			})
-			return
 		}
 		if c.managementNotice(trimmed) {
 			return
@@ -1358,7 +1317,7 @@ func (c *Controller) applyPlanExec(input, display string) {
 	if len(modules) > 0 {
 		b.WriteString("## Project modules detected\n\n")
 		for _, m := range modules {
-			fmt.Fprintf(&b, "- %s/\n", m)
+			fmt.Fprintf(&b, "- %s/", m)
 		}
 		b.WriteString("\n\nRoute steps to the module they belong to. Steps in different modules can run in parallel.\n\n")
 	}
@@ -3910,21 +3869,17 @@ func (c *Controller) emitRememberResult(r RememberResult) {
 // detectProjectModules scans the workspace root for top-level source directories
 // to enable module-aware task routing in /plan-exec.
 func (c *Controller) detectProjectModules() []string {
-	// Use workspace root if available (set via Options.WorkspaceRoot).
-	root := c.WorkspaceRoot()
-	if root == "" {
-		root = c.sessionDir
-		for i := 0; i < 3 && root != ""; i++ {
-			if hasFile(root, "go.mod") || hasFile(root, "package.json") || hasFile(root, ".git") {
-				break
-			}
-			root = filepath.Dir(root)
-			if root == filepath.Dir(root) {
-				return nil
-			}
+	root := c.sessionDir
+	for i := 0; i < 3 && root != ""; i++ {
+		if hasFile(root, "go.mod") || hasFile(root, "package.json") || hasFile(root, ".git") {
+			return listSourceDirs(root, 2)
+		}
+		root = filepath.Dir(root)
+		if root == filepath.Dir(root) {
+			break
 		}
 	}
-	return listSourceDirs(root, 2)
+	return nil
 }
 
 func hasFile(dir, name string) bool {
