@@ -21,6 +21,7 @@ var skipDirNames = map[string]bool{
 	"build":  true,
 	"dist":   true,
 	"target": true,
+	"vendor": true,
 }
 
 var skipDirPaths = map[string]bool{
