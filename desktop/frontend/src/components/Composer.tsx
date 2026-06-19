@@ -480,6 +480,11 @@ export function Composer({
     [slashQuery, commands],
   );
 
+  const skillCommands = useMemo(
+    () => commands.filter((c) => c.kind === "skill" || c.kind === "custom"),
+    [commands],
+  );
+
   // --- slash argument completion ("/cmd <args>") --- mirrors the CLI: once past
   // the command word, the backend suggests sub-commands (/skill → list/show/…,
   // /mcp → add/remove, /model → refs). Fetched from app.SlashArgs. Debounced
@@ -2141,6 +2146,24 @@ export function Composer({
                 </Tooltip>
               )}
             </div>
+            {skillCommands.length > 0 && (
+              <div className="composer-meta__control composer-meta__control--quick">
+                {skillCommands.map(cmd => (
+                  <Tooltip key={cmd.name} label={cmd.description || cmd.name}>
+                    <button
+                      type="button"
+                      className="composer-quick-action"
+                      onClick={() => { setText(t => t + "/" + cmd.name + " "); taRef.current?.focus(); }}
+                      disabled={disabled || running}
+                      aria-label={cmd.name}
+                    >
+                      <List size={13} />
+                      <span className="composer-quick-action__label">{cmd.name}</span>
+                    </button>
+                  </Tooltip>
+                ))}
+              </div>
+            )}
             <div className="composer-meta__control composer-meta__control--approval">
               <div className="composer-modebar composer-modebar--approval" data-mode={toolApprovalMode} title={t("composer.accessMenuTitle")}>
                 <span className="composer-modebar__thumb" aria-hidden="true" />
