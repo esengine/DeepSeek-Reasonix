@@ -182,7 +182,9 @@ func isNoOpPlan(plan string) bool {
 	lower := strings.ToLower(strings.TrimSpace(plan))
 	noOp := []string{
 		"no changes needed",
+		"no changes are needed",
 		"no changes required",
+		"no changes are required",
 		"no action needed",
 		"no action required",
 		"nothing to change",
