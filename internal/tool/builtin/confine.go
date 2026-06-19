@@ -51,6 +51,12 @@ func ConfineWriters(roots []string) []tool.Tool {
 	}
 }
 
+// ConfineSystemController returns the system_control built-in with workspace
+// roots for its create_file action (open_url and run_command are unaffected).
+func ConfineSystemController(roots []string) tool.Tool {
+	return systemController{roots: realRoots(roots)}
+}
+
 // realRoots resolves each root to an absolute, symlink-free path, dropping any
 // that cannot be made absolute. Resolving here (once) means the per-call check
 // only has to resolve the target.
