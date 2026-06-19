@@ -40,10 +40,6 @@ type ghRelease struct {
 	Assets  []ghAsset
 }
 
-// DevUpdateURL bypasses GitHub release checking with a local archive URL.
-// Set programmatically for testing; empty means normal GitHub path.
-var DevUpdateURL string
-
 // ghAsset is a single release asset.
 type ghAsset struct {
 	Name               string `json:"name"`
@@ -372,9 +368,6 @@ func replaceBinary(newBin []byte) error {
 func commitWindows(target, newPath, base, dir string) error {
 	oldPath := filepath.Join(dir, fmt.Sprintf(".%s.old", base))
 
-	// Remove any leftover .old from a previous update.
-	_ = os.Remove(oldPath)
-
 	// Move the running executable aside.
 	if err := os.Rename(target, oldPath); err != nil {
 		os.Remove(newPath)
@@ -390,11 +383,7 @@ func commitWindows(target, newPath, base, dir string) error {
 		return fmt.Errorf("rename new binary: %w", err)
 	}
 
-	// Best-effort cleanup of the old binary.
-	if err := os.Remove(oldPath); err != nil {
-		// Windows may hold a lock; hide the file so it doesn't clutter the dir.
-		hideFileWindows(oldPath)
-	}
+	// Defer cleanup to next startup via upgradeCleanupOldBinary.
 	return nil
 }
 
