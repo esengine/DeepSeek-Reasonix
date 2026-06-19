@@ -95,6 +95,45 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 }
 
+func TestBuildRunsCleanupPendingReconciler(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`)
+	sessionDir := filepath.Join(t.TempDir(), "sessions")
+	called := false
+	ctrl, err := Build(context.Background(), Options{
+		SessionDir: sessionDir,
+		CleanupPendingReconciler: func(got string) error {
+			called = true
+			if filepath.Clean(got) != filepath.Clean(sessionDir) {
+				t.Fatalf("reconciler dir = %q, want %q", got, sessionDir)
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	if !called {
+		t.Fatal("cleanup-pending reconciler was not called")
+	}
+}
+
 func TestBuildRegistersUsableHistoryAndMemoryRetrievalTools(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)

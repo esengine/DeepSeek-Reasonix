@@ -125,6 +125,41 @@ func TestListSessionsOrdersByMTime(t *testing.T) {
 	}
 }
 
+func TestListSessionsSkipsCleanupPending(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pending.jsonl")
+	s := NewSession("")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "preview"})
+	if err := s.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := MarkCleanupPending(path, "delete"); err != nil {
+		t.Fatal(err)
+	}
+	if !IsCleanupPending(path) {
+		t.Fatal("session should be marked cleanup-pending")
+	}
+
+	got, err := ListSessions(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("cleanup-pending session should be hidden, got %+v", got)
+	}
+
+	if err := ClearCleanupPending(path); err != nil {
+		t.Fatal(err)
+	}
+	got, err = ListSessions(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Path != path {
+		t.Fatalf("session should be visible after clearing marker, got %+v", got)
+	}
+}
+
 func TestListSessionsOrdersByLastActivityMeta(t *testing.T) {
 	dir := t.TempDir()
 	aPath := filepath.Join(dir, "a.jsonl")

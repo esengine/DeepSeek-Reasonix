@@ -63,6 +63,28 @@ make hooks          # install git hooks (pre-push: go vet)
 make cross          # cross-compile for all 6 targets
 ```
 
+### Cache-first review gate
+
+Reasonix treats high prompt-cache hit rate as product behavior. Changes that
+touch provider-visible system prompt construction, memory prefix, output styles,
+skill index behavior, default tool surfaces, tool schemas, provider request
+serialization, compaction, or MCP/tool registration need explicit cache review.
+
+For these changes:
+
+- Keep system prompt changes low-frequency and require explicit review.
+- Fill the PR body `Cache-impact:` line with `none`, `low`, `medium`, or `high`
+  plus the reason.
+- Fill the PR body `Cache-guard:` line with the focused guard test/command added
+  or run, or explain why an existing guard covers the change.
+- Fill `System-prompt-review:` when system prompt, memory prefix, output style,
+  or skill index behavior changes.
+- Prefer focused guard tests near the changed surface; `scripts/cache-guard.sh`
+  remains the broader release-level cache-hit check.
+
+CI enforces this metadata for cache-sensitive paths so prompt/tool prefix churn
+is called out before review.
+
 ### Running tests
 
 ```bash

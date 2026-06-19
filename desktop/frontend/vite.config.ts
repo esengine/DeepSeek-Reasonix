@@ -98,6 +98,12 @@ const vendorHighlight = new RegExp(`${nodeModulePath}highlight\\.js(?:[\\/]|$)`)
 // base: "./" so built asset URLs are relative. Wails serves the embedded dist from
 // the app root over the wails:// scheme, where absolute "/assets/..." URLs 404.
 export default defineConfig({
+  // errorRecovery tells lightningcss to skip unparseable rules instead of
+  // failing the whole build. Vite 8 + lightningcss 1.32.0 can reject valid
+  // @keyframes in concatenated CSS bundles (heartbeat.css + styles.css).
+  css: {
+    lightningcss: { errorRecovery: true },
+  },
   plugins: [react(), stripCrossorigin(), archiveHiddenSourcemaps(commit), keepDistPlaceholder()],
   base: "./",
   define: { __BUILD_COMMIT__: JSON.stringify(commit), __BUILD_CHANNEL__: JSON.stringify(channel) },

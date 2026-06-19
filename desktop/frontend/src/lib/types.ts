@@ -904,6 +904,18 @@ export interface SettingsView {
   bypass: boolean; // legacy JSON key for live YOLO/full-access tool auto-approval
 }
 
+export interface DesktopStartupSettingsView {
+  bot: BotSettingsView;
+  desktopLanguage: string; // "" | "en" | "zh"; empty = auto
+  desktopLayoutStyle: string; // "classic" | "workbench"
+  desktopTheme: string; // "auto" | "dark" | "light"
+  desktopThemeStyle: string;
+  displayMode: string;   // "standard" | "compact"
+  statusBarStyle: string; // "icon" | "text"
+  statusBarItems: string[]; // ordered visible status bar item ids
+  checkUpdates: boolean; // check for new versions on startup
+}
+
 // Auto-updater payloads (desktop/updater.go). UpdateInfo drives the update banner;
 // UpdateProgress streams on the "updater:progress" event during download/install.
 export interface UpdateInfo {

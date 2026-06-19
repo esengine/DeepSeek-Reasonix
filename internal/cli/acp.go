@@ -74,13 +74,14 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 		return nil, fmt.Errorf("session cwd must be an absolute path: %s", root)
 	}
 	return boot.Build(ctx, boot.Options{
-		Model:          firstNonEmpty(p.Model, f.model),
-		RequireKey:     true,
-		Sink:           p.Sink,
-		EffortOverride: p.EffortOverride,
-		Stderr:         os.Stderr,
-		WorkspaceRoot:  root,
-		ExtraPlugins:   p.MCPServers,
+		Model:                    firstNonEmpty(p.Model, f.model),
+		RequireKey:               true,
+		Sink:                     p.Sink,
+		EffortOverride:           p.EffortOverride,
+		Stderr:                   os.Stderr,
+		WorkspaceRoot:            root,
+		ExtraPlugins:             p.MCPServers,
+		CleanupPendingReconciler: acp.ReconcileCleanupPending,
 	})
 }
 

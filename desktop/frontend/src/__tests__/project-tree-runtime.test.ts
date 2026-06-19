@@ -3,6 +3,7 @@
 import {
   projectTreeFolderDisclosure,
   defaultExpandedProjectTreeKeys,
+  activeSessionAncestorKeys,
   projectTreeTopicOpenRequest,
 } from "../components/ProjectTree";
 import type { ProjectNode } from "../lib/types";
@@ -62,8 +63,26 @@ const tree: ProjectNode[] = [
 
 eq(
   defaultExpandedProjectTreeKeys(tree),
+  [],
+  "without an active tab, no folders default to expanded",
+);
+
+eq(
+  defaultExpandedProjectTreeKeys(tree, "global", "", "topic-a", "/tmp/b.jsonl"),
   ["global_folder", "global_topic_topic-a"],
-  "runtime-session topic rows default to expanded so child sessions are visible",
+  "active session path expands only ancestor folders",
+);
+
+eq(
+  activeSessionAncestorKeys(tree, "global", "", "topic-a", "/tmp/b.jsonl"),
+  ["global_folder", "global_topic_topic-a"],
+  "activeSessionAncestorKeys matches defaultExpandedProjectTreeKeys for active session",
+);
+
+eq(
+  activeSessionAncestorKeys(tree, "global", "", "topic-b"),
+  ["global_folder"],
+  "active topic without runtime session rows expands only parent folders",
 );
 
 eq(

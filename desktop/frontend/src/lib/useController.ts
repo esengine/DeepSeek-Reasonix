@@ -1046,27 +1046,37 @@ export function useController() {
 
   const newSession = useCallback(async () => {
     const tabId = activeTabId;
-    if (tabId) bumpCheckpointRefreshSeq(tabId);
+    if (tabId) {
+      bumpCheckpointRefreshSeq(tabId);
+      bumpSessionLoadSeq(tabId);
+    }
     try {
       await app.NewSession();
     } catch {
+      if (tabId) void loadSessionDataForTab(tabId);
       return; // backend refused (workspace starting / failed) — keep the transcript
     }
+    if (tabId) bumpSessionLoadSeq(tabId);
     invalidateCache();
     if (tabId) dispatchTo(tabId, { type: "reset" });
-  }, [activeTabId, bumpCheckpointRefreshSeq, dispatchTo]);
+  }, [activeTabId, bumpCheckpointRefreshSeq, bumpSessionLoadSeq, dispatchTo, loadSessionDataForTab]);
 
   const clearSession = useCallback(async () => {
     const tabId = activeTabId;
-    if (tabId) bumpCheckpointRefreshSeq(tabId);
+    if (tabId) {
+      bumpCheckpointRefreshSeq(tabId);
+      bumpSessionLoadSeq(tabId);
+    }
     try {
       await app.ClearSession();
     } catch {
+      if (tabId) void loadSessionDataForTab(tabId);
       return;
     }
+    if (tabId) bumpSessionLoadSeq(tabId);
     invalidateCache();
     if (tabId) dispatchTo(tabId, { type: "reset" });
-  }, [activeTabId, bumpCheckpointRefreshSeq, dispatchTo]);
+  }, [activeTabId, bumpCheckpointRefreshSeq, bumpSessionLoadSeq, dispatchTo, loadSessionDataForTab]);
 
   const listSessions = useCallback(async (): Promise<SessionMeta[]> => asArray<SessionMeta>(await app.ListSessions().catch(() => [])), []);
   const listTrashedSessions = useCallback(async (): Promise<SessionMeta[]> => asArray<SessionMeta>(await app.ListTrashedSessions().catch(() => [])), []);

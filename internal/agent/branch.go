@@ -183,6 +183,9 @@ func ListBranches(dir string) ([]BranchInfo, error) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())
+		if !IsVisibleSession(path) {
+			continue
+		}
 		preview, turns := previewSession(path)
 		if turns == 0 {
 			continue

@@ -2,6 +2,8 @@ package history
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -148,6 +150,80 @@ func TestSearchDropsCommonWordNoise(t *testing.T) {
 	}
 }
 
+func TestSearchSkipsCleanupPending(t *testing.T) {
+	sessionDir := t.TempDir()
+	visiblePath := filepath.Join(sessionDir, "visible.jsonl")
+	pendingPath := filepath.Join(sessionDir, "pending.jsonl")
+	writeSession(t, visiblePath, []provider.Message{
+		{Role: provider.RoleUser, Content: "ordinary alpha visible decision"},
+	})
+	writeSession(t, pendingPath, []provider.Message{
+		{Role: provider.RoleUser, Content: "hidden alpha cleanup pending secret"},
+	})
+	if err := agent.MarkCleanupPending(pendingPath, "delete"); err != nil {
+		t.Fatal(err)
+	}
+
+	searcher := NewSearcher(Options{SessionDir: sessionDir})
+	hits, err := searcher.Search(context.Background(), SearchRequest{Query: "alpha", Limit: 5})
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(hits) != 1 || hits[0].SessionPath != visiblePath {
+		t.Fatalf("Search() hits = %+v, want only visible path %s", hits, visiblePath)
+	}
+	hits, err = searcher.Search(context.Background(), SearchRequest{Query: "cleanup pending secret", Limit: 5})
+	if err != nil {
+		t.Fatalf("Search() pending-only query error = %v", err)
+	}
+	if len(hits) != 0 {
+		t.Fatalf("Search() pending-only hits = %+v, want none", hits)
+	}
+}
+
+func TestAroundRejectsCleanupPending(t *testing.T) {
+	sessionDir := t.TempDir()
+	path := filepath.Join(sessionDir, "pending.jsonl")
+	writeSession(t, path, []provider.Message{{Role: provider.RoleUser, Content: "pending secret"}})
+	if err := agent.MarkCleanupPending(path, "delete"); err != nil {
+		t.Fatal(err)
+	}
+
+	searcher := NewSearcher(Options{SessionDir: sessionDir})
+	if _, err := searcher.Around(context.Background(), AroundRequest{SessionPath: path, MessageIndex: 0}); err == nil {
+		t.Fatal("Around() cleanup-pending error = nil, want rejection")
+	}
+}
+
+func TestHistorySkipsSubagentsOwnedByCleanupPendingParent(t *testing.T) {
+	sessionDir := t.TempDir()
+	parentPath := filepath.Join(sessionDir, "parent.jsonl")
+	writeSession(t, parentPath, []provider.Message{{Role: provider.RoleUser, Content: "parent prompt"}})
+	visibleParentPath := filepath.Join(sessionDir, "visible-parent.jsonl")
+	writeSession(t, visibleParentPath, []provider.Message{{Role: provider.RoleUser, Content: "visible parent prompt"}})
+
+	pendingSubagentPath := writeSubagentSession(t, sessionDir, "sa_pending", agent.BranchID(parentPath), "subagent hidden orchid result")
+	visibleSubagentPath := writeSubagentSession(t, sessionDir, "sa_visible", agent.BranchID(visibleParentPath), "subagent visible orchid result")
+	if err := agent.MarkCleanupPending(parentPath, "delete"); err != nil {
+		t.Fatal(err)
+	}
+
+	searcher := NewSearcher(Options{SessionDir: sessionDir})
+	hits, err := searcher.Search(context.Background(), SearchRequest{Query: "orchid result", Limit: 5})
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(hits) != 1 || hits[0].SessionPath != visibleSubagentPath {
+		t.Fatalf("Search() hits = %+v, want only visible subagent %s", hits, visibleSubagentPath)
+	}
+	if _, err := searcher.Around(context.Background(), AroundRequest{SessionPath: pendingSubagentPath, MessageIndex: 0}); err == nil {
+		t.Fatal("Around() cleanup-pending parent subagent error = nil, want rejection")
+	}
+	if _, err := searcher.Around(context.Background(), AroundRequest{SessionPath: visibleSubagentPath, MessageIndex: 0}); err != nil {
+		t.Fatalf("Around() visible subagent error = %v", err)
+	}
+}
+
 func TestAroundRequiresPathUnderHistoryRoots(t *testing.T) {
 	sessionDir := t.TempDir()
 	outside := t.TempDir()
@@ -194,4 +270,23 @@ func writeSession(t *testing.T, path string, msgs []provider.Message) {
 	if err := sess.Save(path); err != nil {
 		t.Fatalf("Save(%s) error = %v", path, err)
 	}
+}
+
+func writeSubagentSession(t *testing.T, sessionDir, ref, parentSession, content string) string {
+	t.Helper()
+	dir := filepath.Join(sessionDir, "subagents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, ref+".jsonl")
+	writeSession(t, path, []provider.Message{{Role: provider.RoleUser, Content: content}})
+	meta := agent.SubagentMeta{Ref: ref, ParentSession: parentSession}
+	b, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ref+".meta.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

@@ -310,9 +310,22 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   stops it, or the safety continuation limit is reached. Blocked-state matching
   is normalized for casing, whitespace, and punctuation so minor wording drift
   does not reset the audit; restarting a goal begins a fresh blocked audit.
-  `/goal clear` removes it. Switching into plan/normal mode clears the active
-  goal in the desktop UI so the collaboration mode remains one of the three
-  choices, while the underlying tool approval posture is preserved.
+  Goals that look like long-horizon research, debugging, optimization, or
+  implementation work automatically add an AutoResearch protocol to the same
+  transient active-goal user block. AutoResearch is a Goal strategy, not a
+  standalone global skill: it writes project-local state under
+  `.reasonix/autoresearch/YYYYMMDD-HHMMSS-slug/` and keeps dynamic run state out
+  of `REASONIX.md`, `AGENTS.md`, project memory, tool schemas, and the
+  cache-stable system prompt. `/goal --research <objective>` forces that
+  strategy; `/goal --simple <objective>` forces lightweight Goal. Outside goal
+  mode, an ordinary prompt with a very strong AutoResearch signal is upgraded by
+  the host into the equivalent of `/goal --research <original prompt>`; the
+  ordinary-prompt classifier is intentionally stricter than `/goal`'s internal
+  classification so weak words such as "long term", "optimize", "research", or
+  "verify" do not create durable task state by themselves. `/goal clear` removes
+  the active goal. Switching into plan/normal mode clears the active goal in the
+  desktop UI so the collaboration mode remains one of the three choices, while
+  the underlying tool approval posture is preserved.
 
 | Tool approval posture | Tool approvals | Plan approval | `ask` questions |
 | --- | --- | --- | --- |

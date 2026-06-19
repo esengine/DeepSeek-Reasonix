@@ -117,6 +117,9 @@ func TestApplyKnownOverridesPinsCodeGraphStdioToWorkspace(t *testing.T) {
 	if !got.ReadOnlyToolNames["codegraph_search"] {
 		t.Fatalf("codegraph read-only override missing: %+v", got.ReadOnlyToolNames)
 	}
+	if got.Env[codeGraphDaemonIdleTimeoutEnv] != codeGraphDaemonIdleTimeoutDefaultMS {
+		t.Fatalf("codegraph daemon idle timeout env = %q, want %s; env=%v", got.Env[codeGraphDaemonIdleTimeoutEnv], codeGraphDaemonIdleTimeoutDefaultMS, got.Env)
+	}
 
 	preset := ApplyKnownOverrides(Spec{Name: "codegraph", Dir: "/custom"}, "/workspace")
 	if preset.Dir != "/custom" {
@@ -127,10 +130,27 @@ func TestApplyKnownOverridesPinsCodeGraphStdioToWorkspace(t *testing.T) {
 	if httpSpec.Dir != "" {
 		t.Fatalf("http codegraph should not receive stdio Dir, got %q", httpSpec.Dir)
 	}
+	if _, ok := httpSpec.Env[codeGraphDaemonIdleTimeoutEnv]; ok {
+		t.Fatalf("http codegraph should not receive daemon idle env, got %+v", httpSpec.Env)
+	}
 
 	other := ApplyKnownOverrides(Spec{Name: "other"}, "/workspace")
 	if other.Dir != "" {
 		t.Fatalf("non-codegraph should not receive Dir, got %q", other.Dir)
+	}
+	if _, ok := other.Env[codeGraphDaemonIdleTimeoutEnv]; ok {
+		t.Fatalf("non-codegraph should not receive daemon idle env, got %+v", other.Env)
+	}
+}
+
+func TestApplyKnownOverridesPreservesConfiguredCodeGraphDaemonIdleTimeout(t *testing.T) {
+	got := ApplyKnownOverrides(Spec{
+		Name: "codegraph",
+		Env:  map[string]string{codeGraphDaemonIdleTimeoutEnv: "30000"},
+	}, "/workspace")
+
+	if got.Env[codeGraphDaemonIdleTimeoutEnv] != "30000" {
+		t.Fatalf("configured codegraph daemon idle timeout was overwritten: %+v", got.Env)
 	}
 }
 

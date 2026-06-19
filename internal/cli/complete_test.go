@@ -408,6 +408,18 @@ func TestSlashArgCompletionSwitchBranches(t *testing.T) {
 	if err := agent.SaveBranchMeta(childPath, agent.BranchMeta{Name: "experiment", ParentID: agent.BranchID(rootPath)}); err != nil {
 		t.Fatal(err)
 	}
+	pending := agent.NewSession("sys")
+	pending.Add(provider.Message{Role: provider.RoleUser, Content: "pending child prompt"})
+	pendingPath := filepath.Join(dir, "pending.jsonl")
+	if err := pending.Save(pendingPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.SaveBranchMeta(pendingPath, agent.BranchMeta{Name: "exp-pending", ParentID: agent.BranchID(rootPath)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.MarkCleanupPending(pendingPath, "delete"); err != nil {
+		t.Fatal(err)
+	}
 
 	m := newTestChatTUI()
 	m.ctrl = ctrl

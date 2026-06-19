@@ -52,6 +52,48 @@ func TestBranchAndSwitch(t *testing.T) {
 	}
 }
 
+func TestSwitchBranchRejectsCleanupPending(t *testing.T) {
+	dir := t.TempDir()
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	exec.Session().Add(provider.Message{Role: provider.RoleUser, Content: "root prompt"})
+	c := New(Options{Executor: exec, SessionDir: dir, Label: "test"})
+	c.SetSessionPath(filepath.Join(dir, "root.jsonl"))
+	if err := c.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	rootPath := c.SessionPath()
+	rootID := agent.BranchID(rootPath)
+
+	if _, err := c.Branch("pending experiment"); err != nil {
+		t.Fatal(err)
+	}
+	pendingPath := c.SessionPath()
+	pendingID := agent.BranchID(pendingPath)
+	if _, err := c.SwitchBranch(rootID); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.MarkCleanupPending(pendingPath, "delete"); err != nil {
+		t.Fatal(err)
+	}
+
+	tree := c.BranchTreeText()
+	if strings.Contains(tree, "pending experiment") || strings.Contains(tree, shortBranchID(pendingID)) {
+		t.Fatalf("tree leaked cleanup-pending branch:\n%s", tree)
+	}
+	if _, err := c.SwitchBranch(pendingID); err == nil {
+		t.Fatal("SwitchBranch cleanup-pending id error = nil, want not found")
+	}
+	if c.SessionPath() != rootPath {
+		t.Fatalf("session path changed to %q, want %q", c.SessionPath(), rootPath)
+	}
+	if _, err := c.SwitchBranch(pendingPath); err == nil {
+		t.Fatal("SwitchBranch cleanup-pending path error = nil, want not found")
+	}
+	if c.SessionPath() != rootPath {
+		t.Fatalf("session path changed to %q, want %q", c.SessionPath(), rootPath)
+	}
+}
+
 func TestBranchResetsTwoModelPlannerContext(t *testing.T) {
 	dir := t.TempDir()
 	planner := &recordingProvider{name: "planner", streams: [][]provider.Chunk{

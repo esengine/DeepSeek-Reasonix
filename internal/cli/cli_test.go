@@ -87,6 +87,57 @@ func TestModelForResumePathUsesStoredModelWhenAvailable(t *testing.T) {
 	}
 }
 
+func TestLoadResumableSessionRejectsCleanupPending(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pending.jsonl")
+	saveTestSession(t, path, "pending prompt")
+	if err := agent.MarkCleanupPending(path, "delete"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := loadResumableSession(path); err == nil || !strings.Contains(err.Error(), "pending cleanup") {
+		t.Fatalf("loadResumableSession cleanup-pending error = %v, want pending cleanup", err)
+	}
+}
+
+func TestRunResumeRejectsCleanupPending(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	path := filepath.Join(t.TempDir(), "pending-run.jsonl")
+	saveTestSession(t, path, "pending prompt")
+	if err := agent.MarkCleanupPending(path, "delete"); err != nil {
+		t.Fatal(err)
+	}
+
+	errOut := captureStderr(t, func() {
+		if rc := runAgent([]string{"--resume", path, "continue task"}); rc != 1 {
+			t.Fatalf("run --resume cleanup-pending rc = %d, want 1", rc)
+		}
+	})
+	if !strings.Contains(errOut, "pending cleanup") {
+		t.Fatalf("run --resume cleanup-pending stderr = %q, want pending cleanup", errOut)
+	}
+}
+
+func TestServeResumeRejectsCleanupPending(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	path := filepath.Join(t.TempDir(), "pending-serve.jsonl")
+	saveTestSession(t, path, "pending prompt")
+	if err := agent.MarkCleanupPending(path, "delete"); err != nil {
+		t.Fatal(err)
+	}
+
+	errOut := captureStderr(t, func() {
+		if rc := runServe([]string{"--resume", path, "--addr", "127.0.0.1:0"}); rc != 1 {
+			t.Fatalf("serve --resume cleanup-pending rc = %d, want 1", rc)
+		}
+	})
+	if !strings.Contains(errOut, "pending cleanup") {
+		t.Fatalf("serve --resume cleanup-pending stderr = %q, want pending cleanup", errOut)
+	}
+}
+
 func TestReserveNativeScrollbackFrameWritesOnlyNewlines(t *testing.T) {
 	var b bytes.Buffer
 	reserveNativeScrollbackFrame(&b, 3)

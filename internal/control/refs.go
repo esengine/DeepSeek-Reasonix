@@ -176,15 +176,12 @@ func resolveBareNames(refs []ref, workspaceRoot string) []ref {
 	var names []string
 	for i := range refs {
 		r := &refs[i]
-		if r.kind != refFile || strings.ContainsAny(r.raw, "/\\") {
+		if r.kind != refFile || r.path != "" || !isSafeBareRefName(r.raw) {
 			continue
 		}
 		if workspaceRoot != "" {
-			if _, ok := workspaceRefPath(r.raw, workspaceRoot); ok {
-				continue
-			}
-		} else {
-			if _, err := os.Stat(r.raw); err == nil {
+			if rel, ok := workspaceRefPath(r.raw, workspaceRoot); ok {
+				r.path = rel
 				continue
 			}
 		}
@@ -219,6 +216,16 @@ func resolveBareNames(refs []ref, workspaceRoot string) []ref {
 		return nil
 	})
 	return refs
+}
+
+func isSafeBareRefName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	if strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
+		return false
+	}
+	return filepath.Base(name) == name && filepath.IsLocal(name)
 }
 
 // FileRefLine reports whether a submitted line is nothing but a path to an

@@ -135,6 +135,59 @@ func TestNormalizeDesktopOfficialProviderAccessCanonicalizesLegacyIDs(t *testing
 	}
 }
 
+func TestNormalizeDesktopOfficialProviderAccessBackfillsOfficialContextWindow(t *testing.T) {
+	c := &Config{
+		Desktop: DesktopConfig{ProviderAccess: []string{"deepseek-flash", "mimo-api", "mimo-token-plan"}},
+		Providers: []ProviderEntry{
+			{
+				Name:      "deepseek-flash",
+				Kind:      "openai",
+				BaseURL:   "https://api.deepseek.com",
+				Model:     "deepseek-v4-flash",
+				APIKeyEnv: "DEEPSEEK_API_KEY",
+			},
+			{
+				Name:      "mimo-api",
+				Kind:      "openai",
+				BaseURL:   "https://api.xiaomimimo.com/v1",
+				Model:     "mimo-v2.5-pro",
+				APIKeyEnv: "MIMO_API_KEY",
+			},
+			{
+				Name:      "mimo-token-plan",
+				Kind:      "openai",
+				BaseURL:   "https://token-plan-cn.xiaomimimo.com/v1",
+				Model:     "mimo-v2.5-pro",
+				APIKeyEnv: "MIMO_API_KEY",
+			},
+		},
+	}
+
+	normalizeDesktopOfficialProviderAccess(c)
+
+	deepseek, ok := c.Provider("deepseek")
+	if !ok {
+		t.Fatal("deepseek provider missing")
+	}
+	if deepseek.ContextWindow != 1_000_000 {
+		t.Fatalf("deepseek context_window = %d, want official default", deepseek.ContextWindow)
+	}
+	mimoAPI, ok := c.Provider("mimo-api")
+	if !ok {
+		t.Fatal("mimo-api provider missing")
+	}
+	if mimoAPI.ContextWindow != 1_048_576 {
+		t.Fatalf("mimo-api context_window = %d, want official default", mimoAPI.ContextWindow)
+	}
+	mimoTokenPlan, ok := c.Provider("mimo-token-plan")
+	if !ok {
+		t.Fatal("mimo-token-plan provider missing")
+	}
+	if mimoTokenPlan.ContextWindow != 1_048_576 {
+		t.Fatalf("mimo-token-plan context_window = %d, want official default", mimoTokenPlan.ContextWindow)
+	}
+}
+
 func TestNormalizeDesktopOfficialProviderAccessKeepsCustomAlias(t *testing.T) {
 	c := &Config{
 		Desktop: DesktopConfig{ProviderAccess: []string{"deepseek-flash"}},

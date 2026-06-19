@@ -4,7 +4,7 @@
 // new topic.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Archive, ArrowDown, ChevronRight, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, ListCollapse, ListRestart, MessageSquare, Clock, Pin, MoreHorizontal, Minimize2, Maximize2 } from "lucide-react";
+import { Archive, ArrowDown, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, ListCollapse, ListRestart, MessageSquare, Clock, Pin, MoreHorizontal, Minimize2, Maximize2 } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import type { ProjectNode, ProjectTopicStatus } from "../lib/types";
@@ -90,6 +90,7 @@ export function projectTreeFolderDisclosure(hasChildren: boolean, isExpanded: bo
 function topicIsActive(node: ProjectNode, activeScope?: string, activeWorkspaceRoot?: string, activeTopicId?: string, activeSessionPath?: string): boolean {
   if (!isTopicNode(node) && !isRuntimeSessionNode(node)) return false;
   if (node.sessionPath) return Boolean(activeSessionPath && activeSessionPath === node.sessionPath);
+  if (activeSessionPath && asArray(node.children).some(isRuntimeSessionNode)) return false;
   const scope = node.kind === "global_topic" ? "global" : "project";
   return (
     activeTopicId === node.topicId &&
@@ -247,20 +248,36 @@ function collapsibleFolderKeys(nodes: ProjectNode[], depth = 0): string[] {
   return keys;
 }
 
-export function defaultExpandedProjectTreeKeys(nodes: ProjectNode[], depth = 0): string[] {
-  const keys: string[] = [];
-  for (const node of nodes) {
-    if (!node) continue;
-    const children = asArray(node.children);
-    if ((node.kind === "project" || node.kind === "global_folder") && children.length > 0) {
-      keys.push(projectNodeKey(node, depth));
+export function activeSessionAncestorKeys(
+  nodes: ProjectNode[],
+  activeScope?: string,
+  activeWorkspaceRoot?: string,
+  activeTopicId?: string,
+  activeSessionPath?: string,
+): string[] {
+  const walk = (nodeList: ProjectNode[], ancestors: string[]): string[] | null => {
+    for (const node of nodeList) {
+      if (!node) continue;
+      if (topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath)) return ancestors;
+      const children = asArray(node.children);
+      if (children.length > 0) {
+        const next = walk(children, [...ancestors, projectNodeKey(node, ancestors.length)]);
+        if (next) return next;
+      }
     }
-    if (isTopicNode(node) && children.some(isRuntimeSessionNode)) {
-      keys.push(projectNodeKey(node, depth));
-    }
-    keys.push(...defaultExpandedProjectTreeKeys(children, depth + 1));
-  }
-  return keys;
+    return null;
+  };
+  return walk(nodes, []) ?? [];
+}
+
+export function defaultExpandedProjectTreeKeys(
+  nodes: ProjectNode[],
+  activeScope?: string,
+  activeWorkspaceRoot?: string,
+  activeTopicId?: string,
+  activeSessionPath?: string,
+): string[] {
+  return activeSessionAncestorKeys(nodes, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath);
 }
 
 function reorderedProjectRoots(nodes: ProjectNode[], draggedRoot: string, targetRoot: string, position: ProjectDropPosition): string[] {
@@ -480,7 +497,7 @@ export function ProjectTree({
       setExpanded((prev) => {
         const next = new Set(prev);
         const collapsed = manuallyCollapsedRef.current;
-        for (const key of defaultExpandedProjectTreeKeys(list)) {
+        for (const key of defaultExpandedProjectTreeKeys(list, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath)) {
           if (!collapsed.has(key)) next.add(key);
         }
         return next;
@@ -488,7 +505,7 @@ export function ProjectTree({
     } catch {
       /* bridge unavailable */
     }
-  }, []);
+  }, [activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath]);
 
   useEffect(() => {
     manuallyCollapsedRef.current = manuallyCollapsed;
@@ -903,21 +920,10 @@ export function ProjectTree({
     };
   }, [clearProjectDrag, dragProjectRoot]);
 
-  const activeAncestorKeys = useMemo(() => {
-    const walk = (nodes: ProjectNode[], ancestors: string[]): string[] | null => {
-      for (const node of nodes) {
-        if (!node) continue;
-        if (topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath)) return ancestors;
-        const children = asArray(node.children);
-        if (children.length > 0) {
-          const next = walk(children, [...ancestors, projectNodeKey(node, ancestors.length)]);
-          if (next) return next;
-        }
-      }
-      return null;
-    };
-    return walk(tree, []) ?? [];
-  }, [activeScope, activeSessionPath, activeTopicId, activeWorkspaceRoot, tree]);
+  const activeAncestorKeys = useMemo(
+    () => activeSessionAncestorKeys(tree, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath),
+    [activeScope, activeSessionPath, activeTopicId, activeWorkspaceRoot, tree],
+  );
 
   useEffect(() => {
     if (activeAncestorKeys.length === 0) return;
@@ -1403,11 +1409,6 @@ export function ProjectTree({
             aria-expanded={folderDisclosure.ariaExpanded}
           >
             <span className={folderDisclosure.iconStackClassName}>
-              {folderDisclosure.canExpand && (
-                <span className={`project-tree__chevron project-tree__chevron--on-hover${folderDisclosure.isOpen ? " project-tree__chevron--open" : ""}`}>
-                  <ChevronRight size={16} strokeWidth={2} />
-                </span>
-              )}
               {folderDisclosure.isOpen ? <FolderOpen size={14} className="project-tree__folder-icon" /> : <Folder size={14} className="project-tree__folder-icon" />}
             </span>
             <span className="project-tree__folder-color" aria-hidden="true" />

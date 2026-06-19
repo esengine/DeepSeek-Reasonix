@@ -35,6 +35,7 @@ func TestSubagentToolRegistryFiltersUnavailableToolsAndWrapsBash(t *testing.T) {
 	parent := tool.NewRegistry()
 	for _, name := range []string{
 		"task",
+		"parallel_tasks",
 		"run_skill",
 		"read_skill",
 		"install_skill",
@@ -59,6 +60,7 @@ func TestSubagentToolRegistryFiltersUnavailableToolsAndWrapsBash(t *testing.T) {
 	sub := SubagentToolRegistry(parent, nil)
 	for _, hidden := range []string{
 		"task",
+		"parallel_tasks",
 		"run_skill",
 		"read_skill",
 		"install_skill",
@@ -100,6 +102,7 @@ func TestSubagentToolRegistryFiltersUnavailableToolsAndWrapsBash(t *testing.T) {
 func TestTaskToolBuildSubRegUsesSubagentToolRegistry(t *testing.T) {
 	parent := tool.NewRegistry()
 	parent.Add(subagentRegistryTool{name: "task"})
+	parent.Add(subagentRegistryTool{name: "parallel_tasks"})
 	parent.Add(subagentRegistryTool{name: "wait"})
 	parent.Add(subagentRegistryTool{
 		name:   "bash",
@@ -108,7 +111,7 @@ func TestTaskToolBuildSubRegUsesSubagentToolRegistry(t *testing.T) {
 	task := &TaskTool{parentReg: parent}
 
 	sub := task.buildSubReg(nil)
-	for _, hidden := range []string{"task", "wait"} {
+	for _, hidden := range []string{"task", "parallel_tasks", "wait"} {
 		if _, ok := sub.Get(hidden); ok {
 			t.Fatalf("task subagent registry should hide %q; got %v", hidden, sub.Names())
 		}

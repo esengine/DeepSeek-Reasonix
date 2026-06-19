@@ -527,6 +527,38 @@ func TestMainManagerFollowsTranscriptWithoutTopPadding(t *testing.T) {
 	}
 }
 
+func TestMarkdownDividerFitsTranscriptContentWidth(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	m = m0.(chatTUI)
+
+	wantW := transcriptContentWidth(80, false)
+	if m.viewport.Width() != wantW {
+		t.Fatalf("viewport width = %d, want transcript content width %d", m.viewport.Width(), wantW)
+	}
+	rule := strings.TrimRight(m.renderer.Render("---"), "\n")
+	lines := strings.Split(wrapTranscript(rule, m.viewport.Width()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("markdown divider wrapped into %d lines at width %d: %q", len(lines), m.viewport.Width(), lines)
+	}
+	if w := visibleWidth(lines[0]); w != m.viewport.Width() {
+		t.Fatalf("markdown divider width = %d, want %d: %q", w, m.viewport.Width(), lines[0])
+	}
+}
+
+func TestTranscriptContentWidthReservesScrollbarColumn(t *testing.T) {
+	if got := transcriptContentWidth(80, false); got != 79 {
+		t.Fatalf("transcriptContentWidth(80, false) = %d, want 79", got)
+	}
+	if got := transcriptContentWidth(80, true); got != 80 {
+		t.Fatalf("transcriptContentWidth(80, true) = %d, want 80", got)
+	}
+	if got := transcriptContentWidth(0, false); got != 1 {
+		t.Fatalf("transcriptContentWidth(0, false) = %d, want 1", got)
+	}
+}
+
 func TestModalPanelsHideComposerBox(t *testing.T) {
 	ask := event.Ask{
 		ID: "ask-1",

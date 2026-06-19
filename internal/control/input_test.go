@@ -190,6 +190,93 @@ func TestComposeIncludesActiveGoal(t *testing.T) {
 	}
 }
 
+func TestGoalAutoResearchTriggersForLongHorizonGoals(t *testing.T) {
+	c := New(Options{})
+	c.SetGoal("持续排查这个线上卡顿直到根因明确，并验证修复")
+
+	got := c.Compose("next step?")
+	for _, want := range []string{
+		"AutoResearch protocol",
+		".reasonix/autoresearch/<task-id>/",
+		"YYYYMMDD-HHMMSS-slug",
+		"state/task_spec.md",
+		"stale_count >= 2",
+		"durable strategy for this Goal",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("AutoResearch goal block missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestGoalAutoResearchCanBeForcedOrDisabled(t *testing.T) {
+	c := New(Options{})
+	c.SetGoalWithResearchMode("fix the typo and add a test", GoalResearchOn)
+	if got := c.Compose("start"); !strings.Contains(got, "AutoResearch protocol") {
+		t.Fatalf("forced research goal should include AutoResearch protocol:\n%s", got)
+	}
+
+	c.SetGoalWithResearchMode("持续排查这个线上卡顿直到根因明确", GoalResearchOff)
+	if got := c.Compose("start"); strings.Contains(got, "AutoResearch protocol") {
+		t.Fatalf("simple override should suppress AutoResearch protocol:\n%s", got)
+	}
+}
+
+func TestGoalCommandPreservesResearchModeFlags(t *testing.T) {
+	c := New(Options{})
+	if !c.applyGoalCommand("/goal --research fix the typo", "") {
+		t.Fatal("goal command was not parsed")
+	}
+	if got := c.Compose("start"); !strings.Contains(got, "AutoResearch protocol") {
+		t.Fatalf("/goal --research should force AutoResearch through command dispatch:\n%s", got)
+	}
+
+	c = New(Options{})
+	if !c.applyGoalCommand("/goal --simple 持续排查这个线上卡顿直到根因明确", "") {
+		t.Fatal("goal command was not parsed")
+	}
+	if got := c.Compose("start"); strings.Contains(got, "AutoResearch protocol") {
+		t.Fatalf("/goal --simple should suppress AutoResearch through command dispatch:\n%s", got)
+	}
+}
+
+func TestAutoStartResearchGoalUsesOnlyStrongSignals(t *testing.T) {
+	for _, input := range []string{
+		"持续排查这个线上卡顿直到根因明确，并验证修复",
+		"不要原地打转，把这个方向完整做成方案并验证",
+		"thoroughly implement, test, optimize, and document this feature",
+		"继续 .reasonix/autoresearch/20260618-224530-cache-audit/ 这个任务",
+	} {
+		if !shouldAutoStartResearchGoal(input) {
+			t.Fatalf("shouldAutoStartResearchGoal(%q) = false, want true", input)
+		}
+	}
+
+	for _, input := range []string{
+		"长期来看这个模块怎么优化？",
+		"研究一下这个函数怎么用",
+		"验证一下这个小修复",
+		"/goal 持续排查直到根因明确",
+		"!go test ./...",
+	} {
+		if shouldAutoStartResearchGoal(input) {
+			t.Fatalf("shouldAutoStartResearchGoal(%q) = true, want false", input)
+		}
+	}
+}
+
+func TestParseGoalCommandResearchFlags(t *testing.T) {
+	cmd, ok := ParseGoalCommand("/goal --research fix the typo")
+	if !ok || cmd.Action != GoalCommandSet || cmd.Text != "fix the typo" || cmd.ResearchMode != GoalResearchOn {
+		t.Fatalf("ParseGoalCommand --research = %+v ok=%v", cmd, ok)
+	}
+
+	cmd, ok = ParseGoalCommand("/goal --simple 持续排查直到根因明确")
+	if !ok || cmd.Action != GoalCommandSet || cmd.Text != "持续排查直到根因明确" || cmd.ResearchMode != GoalResearchOff {
+		t.Fatalf("ParseGoalCommand --simple = %+v ok=%v", cmd, ok)
+	}
+}
+
 func TestGoalCommandSetsReportsAndClears(t *testing.T) {
 	var notices []string
 	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
@@ -216,6 +303,61 @@ func TestGoalCommandSetsReportsAndClears(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("notices missing %q: %v", want, notices)
 		}
+	}
+}
+
+func TestParseGoalCommandWithStrict(t *testing.T) {
+	tests := []struct {
+		input  string
+		text   string
+		strict bool
+		ok     bool
+	}{
+		{"/goal --strict implement calculator", "implement calculator", true, true},
+		{"/goal implement calculator", "implement calculator", false, true},
+		{"/goal --strict", "", true, true},        // --strict shows status
+		{"/goal --strict status", "", true, true}, // --strict shows status
+	}
+	for _, tt := range tests {
+		cmd, ok := ParseGoalCommand(tt.input)
+		if ok != tt.ok {
+			t.Errorf("ParseGoalCommand(%q) ok = %v, want %v", tt.input, ok, tt.ok)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		if cmd.Text != tt.text {
+			t.Errorf("ParseGoalCommand(%q).Text = %q, want %q", tt.input, cmd.Text, tt.text)
+		}
+		if cmd.Strict != tt.strict {
+			t.Errorf("ParseGoalCommand(%q).Strict = %v, want %v", tt.input, cmd.Strict, tt.strict)
+		}
+	}
+}
+
+func TestParseGoalCommandStrictOnlyConsumesLeadingFlags(t *testing.T) {
+	structuredGoal := "implement parser\n\n  keep  spacing\nliteral --strict stays"
+	cmd, ok := ParseGoalCommand("/goal --strict " + structuredGoal)
+	if !ok {
+		t.Fatal("ParseGoalCommand returned ok=false")
+	}
+	if !cmd.Strict {
+		t.Fatal("leading --strict should enable strict mode")
+	}
+	if cmd.Text != structuredGoal {
+		t.Fatalf("goal text was rewritten:\nwant %q\ngot  %q", structuredGoal, cmd.Text)
+	}
+
+	cmd, ok = ParseGoalCommand("/goal implement parser --strict literally")
+	if !ok {
+		t.Fatal("ParseGoalCommand with literal --strict returned ok=false")
+	}
+	if cmd.Strict {
+		t.Fatal("non-leading --strict should remain part of the goal text")
+	}
+	if want := "implement parser --strict literally"; cmd.Text != want {
+		t.Fatalf("goal text = %q, want %q", cmd.Text, want)
 	}
 }
 
@@ -382,6 +524,30 @@ func TestSubmitUnknownSlashCommandStillReportsNotice(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for unknown-command notice")
+	}
+}
+
+func TestSubmitUserTurnBypassesCommandDispatch(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	events := make(chan event.Event, 4)
+	c := New(Options{
+		AutoPlan: "off",
+		Runner:   runner,
+		Sink: event.FuncSink(func(e event.Event) {
+			events <- e
+		}),
+	})
+
+	for _, input := range []string{"!echo should stay a prompt", "/clear"} {
+		c.SubmitUserTurn(input, input)
+		waitForTurnDone(t, events)
+	}
+
+	if len(runner.inputs) != 2 {
+		t.Fatalf("SubmitUserTurn should start model turns, inputs=%q", runner.inputs)
+	}
+	if runner.inputs[0] != "!echo should stay a prompt" || runner.inputs[1] != "/clear" {
+		t.Fatalf("SubmitUserTurn inputs = %q", runner.inputs)
 	}
 }
 

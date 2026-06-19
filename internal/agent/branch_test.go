@@ -54,6 +54,44 @@ func TestBranchMetaRoundTripAndList(t *testing.T) {
 	}
 }
 
+func TestListBranchesSkipsCleanupPending(t *testing.T) {
+	dir := t.TempDir()
+	visiblePath := filepath.Join(dir, "visible.jsonl")
+	pendingPath := filepath.Join(dir, "pending.jsonl")
+
+	visible := NewSession("sys")
+	visible.Add(provider.Message{Role: provider.RoleUser, Content: "visible prompt"})
+	if err := visible.Save(visiblePath); err != nil {
+		t.Fatal(err)
+	}
+	if err := TouchBranchMeta(visiblePath); err != nil {
+		t.Fatal(err)
+	}
+
+	pending := NewSession("sys")
+	pending.Add(provider.Message{Role: provider.RoleUser, Content: "pending prompt"})
+	if err := pending.Save(pendingPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveBranchMeta(pendingPath, BranchMeta{Name: "pending experiment"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := MarkCleanupPending(pendingPath, "delete"); err != nil {
+		t.Fatal(err)
+	}
+
+	branches, err := ListBranches(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(branches) != 1 {
+		t.Fatalf("branches = %d, want 1: %+v", len(branches), branches)
+	}
+	if branches[0].Path != visiblePath {
+		t.Fatalf("listed branch path = %q, want %q", branches[0].Path, visiblePath)
+	}
+}
+
 func TestSessionModelRoundTripPreservesActivity(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
