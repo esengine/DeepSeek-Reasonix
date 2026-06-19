@@ -208,6 +208,7 @@ export function ContextPanel({
   refreshKey,
 }: ContextPanelProps) {
   const { locale, t } = useI18n();
+  const [overviewOpen, setOverviewOpen] = useState(true);
   const [info, setInfo] = useState<ContextPanelInfo | null>(null);
   const refreshSeq = useRef(0);
 
@@ -290,7 +291,15 @@ export function ContextPanel({
       <div className="context-panel__body">
         <section className="context-panel__overview">
           <section className="context-panel__usage">
-            <SectionHeading title={t("context.windowTitle")} meta={t("context.windowSubtitle")} />
+            <header className="context-panel__section-head context-panel__section-head--collapsible" onClick={() => setOverviewOpen(o => !o)}>
+              <h3>{t("context.windowTitle")}</h3>
+              <button type="button" className="context-panel__collapse-btn" aria-label={overviewOpen ? t("common.collapse") : t("common.expand")}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: overviewOpen ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform 0.2s" }}>
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </button>
+            </header>
+            {overviewOpen && (<>
             <div className="context-panel__usage-visual">
               <div className="context-panel__donut" style={donutStyle}>
                 <div className="context-panel__donut-core">
@@ -310,6 +319,7 @@ export function ContextPanel({
                 <strong>{usedTokens.toLocaleString()} / {windowTokens.toLocaleString()}</strong>
               </div>
             </div>
+            </>)}
           </section>
           <section className="context-panel__section">
             <SectionHeading title={t("context.runtimeMetrics")} />
