@@ -850,6 +850,45 @@ func TestNewProviderAppliesConfiguredDefaultEffort(t *testing.T) {
 	}
 }
 
+func TestNewProviderHonorsCustomSupportedXHighEffort(t *testing.T) {
+	var gotReq map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	p, err := NewProvider(&config.ProviderEntry{
+		Name:              "custom",
+		Kind:              "openai",
+		BaseURL:           srv.URL,
+		Model:             "gpt-5.5",
+		ReasoningProtocol: "openai",
+		SupportedEfforts:  []string{"xhigh", "high"},
+		DefaultEffort:     "xhigh",
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+	}
+	if got := gotReq["reasoning_effort"]; got != "xhigh" {
+		t.Fatalf("reasoning_effort = %#v, want xhigh from custom default_effort", got)
+	}
+}
+
 func TestNewProviderAppliesModelReasoningProtocol(t *testing.T) {
 	var gotReq map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

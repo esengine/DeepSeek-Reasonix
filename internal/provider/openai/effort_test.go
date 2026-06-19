@@ -56,6 +56,26 @@ func TestEffortInvalidRejected(t *testing.T) {
 	}
 }
 
+func TestCustomSupportedEffortAllowsXHigh(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "p",
+		BaseURL: "https://proxy.example.com/v1",
+		Model:   "gpt-5.5",
+		APIKey:  "k",
+		Extra: map[string]any{
+			"effort":             "xhigh",
+			"reasoning_protocol": "openai",
+			"supported_efforts":  []string{"xhigh", "high"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New with custom xhigh effort: %v", err)
+	}
+	if got := p.(*client).effort; got != "xhigh" {
+		t.Fatalf("effort = %q, want xhigh", got)
+	}
+}
+
 func TestReasoningProtocolOverridesEndpointHeuristic(t *testing.T) {
 	p, err := New(provider.Config{
 		Name:    "deepseek-proxy",

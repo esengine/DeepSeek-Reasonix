@@ -7,7 +7,8 @@
 //   - api.minimaxi.com → emits thinking.type=adaptive|disabled (M3's binary
 //     knob) instead of reasoning_effort, since M3 has no level scale.
 //   - everything else (MiMo and other OpenAI-compatible gateways) uses the
-//     vanilla reasoning_effort scale (low/medium/high).
+//     vanilla reasoning_effort scale (low/medium/high), unless the provider
+//     config explicitly declares custom supported_efforts.
 package openai
 
 import (
@@ -60,6 +61,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if effort == "auto" {
 		effort = ""
 	}
+	supportedEfforts := normalizeSupportedEfforts(cfg.Extra["supported_efforts"])
 	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
 	protocol = normalizeReasoningProtocol(protocol)
 	vision, _ := cfg.Extra["vision"].(bool)
@@ -95,15 +97,22 @@ func New(cfg provider.Config) (provider.Provider, error) {
 			return nil, fmt.Errorf("openai: provider %q uses MiniMax thinking; effort must be adaptive or disabled", name)
 		}
 	case effort != "":
-		// Non-DeepSeek backends use OpenAI's reasoning_effort scale (low/medium/
-		// high); "max" is a DeepSeek-ism MiMo et al. reject with 400, so clamp it
-		// to the OpenAI ceiling and reject other values at boot, not at request time.
-		switch effort {
-		case "max":
-			effort = "high"
-		case "low", "medium", "high":
-		default:
-			return nil, fmt.Errorf("openai: provider %q: effort must be low, medium, or high", name)
+		// Non-DeepSeek backends default to OpenAI's reasoning_effort scale
+		// (low/medium/high). If the config explicitly declares custom supported
+		// efforts for a compatible gateway, trust that list and forward the
+		// selected value verbatim.
+		if len(supportedEfforts) > 0 {
+			if !containsString(supportedEfforts, effort) {
+				return nil, fmt.Errorf("openai: provider %q: effort must be one of supported_efforts: %s", name, strings.Join(supportedEfforts, ", "))
+			}
+		} else {
+			switch effort {
+			case "max":
+				effort = "high"
+			case "low", "medium", "high":
+			default:
+				return nil, fmt.Errorf("openai: provider %q: effort must be low, medium, or high", name)
+			}
 		}
 	}
 	httpClient, err := newHTTPClient(cfg)
@@ -125,6 +134,43 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		http:         httpClient,
 		idleTimeout:  defaultStreamIdleTimeout,
 	}, nil
+}
+
+func normalizeSupportedEfforts(raw any) []string {
+	var values []string
+	switch v := raw.(type) {
+	case []string:
+		values = v
+	case []any:
+		values = make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				values = append(values, s)
+			}
+		}
+	default:
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		level := strings.ToLower(strings.TrimSpace(value))
+		if level == "" || level == "auto" || seen[level] {
+			continue
+		}
+		seen[level] = true
+		out = append(out, level)
+	}
+	return out
+}
+
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func newHTTPClient(cfg provider.Config) (*http.Client, error) {
