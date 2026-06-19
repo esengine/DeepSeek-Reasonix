@@ -168,14 +168,6 @@ type Controller struct {
 	asks          map[string]pendingAsk
 	granted       map[string]bool
 	nextID        int
-	goalTurns        int
-	goalBlocks       int
-	goalBlock        string
-	sessionPath      string
-	approvals        map[string]pendingApproval
-	asks             map[string]pendingAsk
-	granted          map[string]bool
-	nextID           int
 	// turn counts model turns this session, passed to hooks in their payload.
 	turn int
 	// approvedPlanAutoApproveTools auto-allows writer tool calls without prompting.
