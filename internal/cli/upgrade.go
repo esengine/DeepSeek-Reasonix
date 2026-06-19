@@ -36,8 +36,13 @@ const (
 // ghRelease is the subset of the GitHub release API response we need.
 type ghRelease struct {
 	TagName string `json:"tag_name"`
+	Body    string `json:"body"`
 	Assets  []ghAsset
 }
+
+// DevUpdateURL bypasses GitHub release checking with a local archive URL.
+// Set programmatically for testing; empty means normal GitHub path.
+var DevUpdateURL string
 
 // ghAsset is a single release asset.
 type ghAsset struct {
@@ -102,9 +107,11 @@ func upgradeCommand(args []string, version string) int {
 	}
 
 	if *checkOnly {
+		if rel.Body != "" {
+			fmt.Printf("\n%s\n", strings.TrimSpace(rel.Body))
+		}
 		return 0
 	}
-
 	// 5. Find the asset for the current platform.
 	base := fmt.Sprintf("reasonix-%s-%s", runtime.GOOS, runtime.GOARCH)
 	var asset *ghAsset
@@ -413,5 +420,23 @@ func humanSize(b int64) string {
 		return fmt.Sprintf("%.1f KiB", float64(b)/float64(_KiB))
 	default:
 		return fmt.Sprintf("%d B", b)
+	}
+}
+
+// upgradeCleanupOldBinary removes a .old binary left by a previous upgrade.
+func upgradeCleanupOldBinary() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	resolved, err := resolveSymlinks(exe)
+	if err != nil {
+		resolved = exe
+	}
+	oldPath := filepath.Join(filepath.Dir(resolved), "."+filepath.Base(resolved)+".old")
+	if err := os.Remove(oldPath); err != nil {
+		if runtime.GOOS == "windows" {
+			hideFileWindows(oldPath)
+		}
 	}
 }
