@@ -86,6 +86,8 @@ var syntheticPrefixes = []string{
 	"Summary of earlier conversation (compacted up to here):",
 	"Continue pursuing the active goal.",
 	"The agent signaled goal completion",
+	"No tool calls in recent turns",
+	"Goal signaled complete but issues remain",
 }
 
 // Compose applies the plan-mode marker to a turn's text when plan mode is on,
