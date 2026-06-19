@@ -689,8 +689,9 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 	handoffNudges := 0
 	usedAnyTool := false
 	streamRecoveries := 0
+	graceRound := false
 	executorHandoff := a.executorHandoffGuard && strings.Contains(input, executorHandoffMarker)
-	for step := 0; a.maxSteps <= 0 || step < a.maxSteps; step++ {
+	for step := 0; a.maxSteps <= 0 || step < a.maxSteps || graceRound; step++ {
 		// Consume a queued steer and persist it to the session so it
 		// survives tab switches and history replay. The model sees it as
 		// guidance (with a prefix), not a new task. One cache miss per
@@ -803,6 +804,12 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 		emptyFinalBlocks = 0
 		usedAnyTool = true
 
+		// Grace round guard: if we already gave the model one extra response
+		// and it still wants to call tools, stop here.
+		if graceRound {
+			return fmt.Errorf("paused after %d tool-call rounds (%s) — the work so far is saved; send another message to continue, or set %s higher or to 0 for no limit", a.maxSteps, a.maxStepsKey, a.maxStepsKey)
+		}
+
 		results := a.executeBatch(ctx, calls)
 		for i, call := range calls {
 			a.session.Add(provider.Message{
@@ -816,6 +823,15 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 		// The prompt only grows from here; compact before the next turn so it
 		// stays within the model's window.
 		a.maybeCompact(ctx, usage)
+
+		// When the tool-call budget runs out this round, give the model
+		// one grace round to produce a final answer from completed work.
+		if a.maxSteps > 0 && step+1 >= a.maxSteps {
+			graceRound = true
+			nudge := fmt.Sprintf("Do not call any more tools — your tool-call round limit (%s) has been reached. Instead, synthesize a final answer from all the work already completed: summarize what was accomplished, what remains to be done, and any decisions the user should make. The user can increase %s or continue in the next turn if more work is needed.", a.maxStepsKey, a.maxStepsKey)
+			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withReasoningLanguage(nudge)})
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("budget (%s=%d) exhausted: one grace round to finalize", a.maxStepsKey, a.maxSteps)})
+		}
 	}
 	// Only reached when a positive maxSteps guard is configured. The work so far
 	// is already in the session, so the user can just send another message to pick
@@ -862,7 +878,7 @@ func (a *Agent) finalReadinessCheck() finalReadinessCheck {
 		if !hasTodos && a.evidence.HasAnySuccessfulReceipt() {
 			incomplete, hasTodos = a.incompleteCanonicalTodos()
 		}
-		if hasTodos && len(incomplete) > 0 && a.evidence.HasSuccessfulTodoProgressReceipt() {
+		if hasTodos && len(incomplete) > 0 {
 			out.applies = true
 			out.incompleteTodos = len(incomplete)
 			missing = append(missing, finalReadinessIncompleteTodos(incomplete))

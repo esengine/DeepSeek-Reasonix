@@ -250,7 +250,7 @@ func TestCoordinatorPlannerMaxStepsUsesPlannerConfigKey(t *testing.T) {
 	if strings.Contains(msg, "agent.max_steps") {
 		t.Fatalf("planner pause should not point at agent.max_steps: %q", msg)
 	}
-	if got := len(planner.requests); got != 2 {
+	if got := len(planner.requests); got != 3 {
 		t.Fatalf("planner requests = %d, want exactly the configured 2 rounds", got)
 	}
 	if len(exec.requests) != 0 {
