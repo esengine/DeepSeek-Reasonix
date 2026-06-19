@@ -18110,6 +18110,36 @@ a[href] {
   line-height: 1.2;
 }
 
+.context-panel__section-head--collapsible {
+  cursor: pointer;
+  user-select: none;
+}
+
+.context-panel__section-head--collapsible:hover {
+  color: var(--fg);
+}
+
+.context-panel__collapse-btn {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0;
+}
+
+.context-panel__collapse-btn:hover {
+  background: var(--pill-bg);
+  color: var(--fg);
+}
+
 .context-panel__usage-visual {
   display: flex;
   flex-direction: column;
