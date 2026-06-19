@@ -155,6 +155,7 @@ export function AskCard({
       titleId="ask-shelf-title"
       title={t("ask.title")}
       actionsWrap
+      metaWrap
       badges={
         <>
           {q.header && <PromptBadge>{q.header}</PromptBadge>}

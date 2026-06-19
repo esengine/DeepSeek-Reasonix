@@ -6001,6 +6001,10 @@ a[href] {
   min-width: 260px;
   flex: 0 1 300px;
 }
+.prompt-shelf--meta-wrap .prompt-shelf__summary {
+  min-width: 0;
+  flex: 1 1 100%;
+}
 .prompt-shelf__summary > svg {
   color: var(--accent);
   flex: 0 0 auto;
@@ -6049,6 +6053,12 @@ a[href] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.prompt-shelf--meta-wrap .prompt-shelf__meta {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .prompt-shelf__subject {
   color: var(--fg-faint);
 }
@@ -6063,6 +6073,9 @@ a[href] {
 .prompt-shelf--actions-wrap .prompt-shelf__actions {
   flex: 1 1 560px;
   flex-wrap: wrap;
+}
+.prompt-shelf--meta-wrap.prompt-shelf--actions-wrap .prompt-shelf__actions {
+  justify-content: flex-start;
 }
 .prompt-action,
 .prompt-detail-toggle {

@@ -12,6 +12,7 @@ export function PromptShelf({
   quickActions,
   barRef,
   actionsWrap = false,
+  metaWrap = false,
 }: {
   titleId: string;
   title: ReactNode;
@@ -23,9 +24,16 @@ export function PromptShelf({
   quickActions?: ReactNode;
   barRef?: RefObject<HTMLDivElement | null>;
   actionsWrap?: boolean;
+  metaWrap?: boolean;
 }) {
+  const classes = [
+    "prompt-shelf",
+    actionsWrap ? "prompt-shelf--actions-wrap" : "",
+    metaWrap ? "prompt-shelf--meta-wrap" : "",
+  ].filter(Boolean).join(" ");
+
   return (
-    <div className={`prompt-shelf${actionsWrap ? " prompt-shelf--actions-wrap" : ""}`} aria-live="polite">
+    <div className={classes} aria-live="polite">
       <div
         ref={barRef}
         className="prompt-shelf__bar"
