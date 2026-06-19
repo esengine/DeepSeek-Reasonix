@@ -15,11 +15,11 @@ import (
 	"reasonix/internal/provider"
 )
 
-// Save writes the session's messages to path in JSONL — one provider.Message
-// per line — so a user can resume the conversation later. The file is
-// rewritten in full on every save: chat sessions are small (kilobytes), and
-// append-only would have to be reconciled with the compaction pass that
-// mutates the middle of session.Messages.
+// Save writes the session's messages to path in JSONL. The first line is a
+// SessionHeader carrying the schema version, followed by one provider.Message
+// per line. The file is rewritten in full on every save: chat sessions are
+// small (kilobytes), and append-only would have to be reconciled with the
+// compaction pass that mutates the middle of session.Messages.
 func (s *Session) Save(path string) error {
 	if path == "" {
 		return fmt.Errorf("empty session path")
@@ -35,6 +35,12 @@ func (s *Session) Save(path string) error {
 	}
 	tmpPath := tmp.Name()
 	enc := json.NewEncoder(tmp)
+	// Write schema header as the first line.
+	if err := enc.Encode(SessionHeader{SchemaVersion: CurrentSchemaVersion}); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("encode header: %w", err)
+	}
 	for _, m := range s.Snapshot() { // copy under the lock — a turn may be appending
 		if err := enc.Encode(m); err != nil {
 			tmp.Close()
@@ -50,6 +56,8 @@ func (s *Session) Save(path string) error {
 }
 
 // LoadSession reads a JSONL file written by Save into a fresh Session value.
+// The first line may be a SessionHeader (schema version); if absent, the file
+// is treated as a legacy v0 session and all lines are decoded as messages.
 // Missing files surface as os.IsNotExist so callers can fall through to a
 // new session.
 func LoadSession(path string) (*Session, error) {
@@ -60,20 +68,40 @@ func LoadSession(path string) (*Session, error) {
 	defer f.Close()
 
 	s := &Session{}
+	schemaVersion := 0
+	firstLine := true
 	// Decode a stream of JSON values rather than scanning lines: a single
 	// message (e.g. a multi-MiB bash output) can exceed any line-buffer cap, and
 	// Save's json.Encoder has no such limit — a Scanner here made sessions that
 	// saved fine fail to reload.
 	dec := json.NewDecoder(f)
 	for {
-		var m provider.Message
-		if err := dec.Decode(&m); err != nil {
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
 			return nil, fmt.Errorf("decode %s: %w", path, err)
 		}
+		// Check whether the first line is a session header.
+		if firstLine {
+			firstLine = false
+			if isHeaderLine(raw) {
+				h := decodeHeader(raw)
+				schemaVersion = h.SchemaVersion
+				continue
+			}
+			// Legacy v0 file — no header; this line is a message.
+		}
+		var m provider.Message
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", path, err)
+		}
 		s.Messages = append(s.Messages, m)
+	}
+	// Upgrade messages from the file's schema version to the current one.
+	if schemaVersion < CurrentSchemaVersion {
+		s.Messages = migrateMessages(schemaVersion, s.Messages)
 	}
 	return s, nil
 }
@@ -219,10 +247,21 @@ func previewSession(path string) (string, int) {
 	dec := json.NewDecoder(f)
 	first := ""
 	turns := 0
+	firstLine := true
 	for {
-		var m provider.Message
-		if err := dec.Decode(&m); err != nil {
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
 			break // EOF or a malformed tail — return the preview gathered so far
+		}
+		if firstLine {
+			firstLine = false
+			if isHeaderLine(raw) {
+				continue // skip schema header
+			}
+		}
+		var m provider.Message
+		if err := json.Unmarshal(raw, &m); err != nil {
+			break
 		}
 		if m.Role == provider.RoleUser {
 			turns++

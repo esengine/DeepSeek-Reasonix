@@ -258,7 +258,7 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 	// Repair tool-call pairing before sending: an interrupted/resumed history can
 	// carry an assistant tool_calls turn whose results never landed, which DeepSeek
 	// rejects with a 400 ("must be followed by tool messages …").
-	src := provider.SanitizeToolPairing(req.Messages)
+	src := provider.ApplySanitize(req.Messages)
 	msgs := make([]chatMessage, len(src))
 	for i, m := range src {
 		cm := chatMessage{

@@ -201,7 +201,7 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 		msgs = append(msgs, anthMessage{Role: role, Content: blocks})
 	}
 
-	for _, m := range provider.SanitizeToolPairing(req.Messages) {
+	for _, m := range provider.ApplySanitize(req.Messages) {
 		switch m.Role {
 		case provider.RoleSystem:
 			if m.Content != "" {

@@ -246,3 +246,118 @@ func TestListSessionsMissingDir(t *testing.T) {
 		t.Errorf("missing dir = %v / %v, want nil/nil", got, err)
 	}
 }
+
+// --- Schema version header ---
+
+// TestSaveWritesSchemaHeader verifies that Save writes a schema_version header
+// as the first line of the JSONL file.
+func TestSaveWritesSchemaHeader(t *testing.T) {
+	s := NewSession("")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
+	path := filepath.Join(t.TempDir(), "hdr.jsonl")
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer f.Close()
+	dec := json.NewDecoder(f)
+	var raw json.RawMessage
+	if err := dec.Decode(&raw); err != nil {
+		t.Fatalf("Decode first line: %v", err)
+	}
+	if !isHeaderLine(raw) {
+		t.Fatalf("first line is not a header: %s", raw)
+	}
+	h := decodeHeader(raw)
+	if h.SchemaVersion != CurrentSchemaVersion {
+		t.Errorf("schema_version = %d, want %d", h.SchemaVersion, CurrentSchemaVersion)
+	}
+}
+
+// TestLoadSessionLegacyNoHeader verifies that LoadSession handles legacy v0
+// JSONL files (no schema header) correctly — all lines are decoded as messages.
+func TestLoadSessionLegacyNoHeader(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "legacy.jsonl")
+	// Write a legacy session (no header, just messages).
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc := json.NewEncoder(f)
+	msgs := []provider.Message{
+		{Role: provider.RoleUser, Content: "old question"},
+		{Role: provider.RoleAssistant, Content: "old answer"},
+	}
+	for _, m := range msgs {
+		if err := enc.Encode(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.Close()
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if len(loaded.Messages) != 2 {
+		t.Fatalf("message count = %d, want 2", len(loaded.Messages))
+	}
+	if loaded.Messages[0].Content != "old question" {
+		t.Errorf("msg[0] = %q, want %q", loaded.Messages[0].Content, "old question")
+	}
+}
+
+// TestLoadSessionWithHeader verifies round-trip: Save writes header, Load
+// skips it and returns only the messages.
+func TestLoadSessionWithHeader(t *testing.T) {
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "new question"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "new answer"})
+	path := filepath.Join(t.TempDir(), "hdr.jsonl")
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	// Save includes the system prompt as a message; verify count matches.
+	if len(loaded.Messages) != len(s.Messages) {
+		t.Fatalf("message count = %d, want %d", len(loaded.Messages), len(s.Messages))
+	}
+	for i, m := range s.Messages {
+		if loaded.Messages[i].Role != m.Role {
+			t.Errorf("msg[%d].Role = %q, want %q", i, loaded.Messages[i].Role, m.Role)
+		}
+		if loaded.Messages[i].Content != m.Content {
+			t.Errorf("msg[%d].Content = %q, want %q", i, loaded.Messages[i].Content, m.Content)
+		}
+	}
+}
+
+// TestIsHeaderLine verifies the header detection function.
+func TestIsHeaderLine(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{"header", `{"schema_version":1}`, true},
+		{"header_v2", `{"schema_version":2}`, true},
+		{"message", `{"role":"user","content":"hi"}`, false},
+		{"empty_object", `{}`, false},
+		{"array", `[1,2,3]`, false},
+		{"string", `"hello"`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isHeaderLine(json.RawMessage(tc.raw)); got != tc.want {
+				t.Errorf("isHeaderLine(%s) = %v, want %v", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
