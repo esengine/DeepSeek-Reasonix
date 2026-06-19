@@ -84,6 +84,72 @@ func TestDirectHostsBypassProxy(t *testing.T) {
 	}
 }
 
+func TestAutoProxyLogsWhenNoProxyResolved(t *testing.T) {
+	clearProxyEnv(t)
+
+	var systemCalls int
+	var gotMessage string
+	var gotArgs []any
+	pf := autoProxyFuncWithResolver(
+		func(_ *url.URL) (*url.URL, error) {
+			systemCalls++
+			return nil, nil
+		},
+		func(message string, args ...any) {
+			gotMessage = message
+			gotArgs = append([]any(nil), args...)
+		},
+	)
+
+	got, err := pf(&http.Request{URL: mustURL("https://api.deepseek.com/v1/models")})
+	if err != nil {
+		t.Fatalf("proxy lookup: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("proxy = %v, want nil", got)
+	}
+	if systemCalls != 1 {
+		t.Fatalf("system proxy calls = %d, want 1", systemCalls)
+	}
+	if gotMessage != "netclient: no proxy resolved for auto mode" {
+		t.Fatalf("debug message = %q", gotMessage)
+	}
+	if len(gotArgs) != 2 || gotArgs[0] != "host" || gotArgs[1] != "api.deepseek.com" {
+		t.Fatalf("debug args = %#v, want host api.deepseek.com", gotArgs)
+	}
+}
+
+func TestAutoProxyUsesEnvBeforeSystemProxy(t *testing.T) {
+	clearProxyEnv(t)
+	t.Setenv("HTTPS_PROXY", "http://proxy.example.com:8080")
+
+	var systemCalls int
+	var logCalls int
+	pf := autoProxyFuncWithResolver(
+		func(_ *url.URL) (*url.URL, error) {
+			systemCalls++
+			return nil, nil
+		},
+		func(string, ...any) {
+			logCalls++
+		},
+	)
+
+	got, err := pf(&http.Request{URL: mustURL("https://api.deepseek.com/v1/models")})
+	if err != nil {
+		t.Fatalf("proxy lookup: %v", err)
+	}
+	if got == nil || got.Host != "proxy.example.com:8080" {
+		t.Fatalf("proxy = %v, want proxy.example.com:8080", got)
+	}
+	if systemCalls != 0 {
+		t.Fatalf("system proxy calls = %d, want 0", systemCalls)
+	}
+	if logCalls != 0 {
+		t.Fatalf("debug calls = %d, want 0", logCalls)
+	}
+}
+
 func TestNoDirectHostsKeepsEveryoneProxied(t *testing.T) {
 	t.Setenv("HTTPS_PROXY", "http://proxy.example.com:8080")
 	t.Setenv("NO_PROXY", "")
@@ -558,6 +624,16 @@ func mustURL(s string) *url.URL {
 		panic(err)
 	}
 	return u
+}
+
+func clearProxyEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("HTTP_PROXY", "")
+	t.Setenv("http_proxy", "")
+	t.Setenv("HTTPS_PROXY", "")
+	t.Setenv("https_proxy", "")
+	t.Setenv("NO_PROXY", "")
+	t.Setenv("no_proxy", "")
 }
 
 func TestForceIPv4Dials(t *testing.T) {

@@ -3,6 +3,7 @@
 package sysproxy
 
 import (
+	"log/slog"
 	"net/url"
 	"strings"
 	"unsafe"
@@ -59,7 +60,8 @@ func ForURL(target *url.URL) (*url.URL, error) {
 		return nil, nil
 	}
 	var ie ieProxyConfig
-	if r, _, _ := procGetIEProxyConfig.Call(uintptr(unsafe.Pointer(&ie))); r == 0 {
+	if r, _, err := procGetIEProxyConfig.Call(uintptr(unsafe.Pointer(&ie))); r == 0 {
+		slog.Debug("sysproxy: Windows proxy configuration unavailable", "host", target.Hostname(), "err", err)
 		return nil, nil
 	}
 	defer globalFree(ie.lpszProxy)
@@ -88,8 +90,9 @@ func ForURL(target *url.URL) (*url.URL, error) {
 }
 
 func pacProxy(target *url.URL, autoConfigURL *uint16, scheme string) *url.URL {
-	session, _, _ := procOpen.Call(0, accessTypeNoProxy, 0, 0, 0)
+	session, _, err := procOpen.Call(0, accessTypeNoProxy, 0, 0, 0)
 	if session == 0 {
+		slog.Debug("sysproxy: WinHTTP session unavailable", "host", target.Hostname(), "err", err)
 		return nil
 	}
 	defer func() { _, _, _ = procCloseHandle.Call(session) }()
@@ -108,8 +111,9 @@ func pacProxy(target *url.URL, autoConfigURL *uint16, scheme string) *url.URL {
 		return nil
 	}
 	var info proxyInfo
-	r, _, _ := procGetProxyForURL.Call(session, uintptr(unsafe.Pointer(urlPtr)), uintptr(unsafe.Pointer(&opts)), uintptr(unsafe.Pointer(&info)))
+	r, _, err := procGetProxyForURL.Call(session, uintptr(unsafe.Pointer(urlPtr)), uintptr(unsafe.Pointer(&opts)), uintptr(unsafe.Pointer(&info)))
 	if r == 0 {
+		slog.Debug("sysproxy: PAC proxy resolution failed", "host", target.Hostname(), "err", err)
 		return nil
 	}
 	defer globalFree(info.lpszProxy)
