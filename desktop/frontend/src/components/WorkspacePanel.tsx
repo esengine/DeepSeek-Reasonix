@@ -27,9 +27,10 @@ import {
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { loadLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
-import type { DirEntry, FilePreview, GitCommitView, GitCommitDetailView, WorkspaceChangeView } from "../lib/types";
+import type { DirEntry, FilePreview, GitCommitView, GitCommitDetailView, WorkspaceChangesView } from "../lib/types";
 import { formatWorkspaceReference, WORKSPACE_REF_DRAG_TYPE } from "../lib/workspaceDrag";
 import { cleanGitDiff } from "../lib/diff";
+import { workspaceChangeRows, workspaceVisibleChangeCount } from "../lib/workspaceChanges";
 import { CodeViewer } from "./CodeViewer";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 import { FloatingMenu, FloatingMenuItems } from "./FloatingMenu";
@@ -241,7 +242,7 @@ export function WorkspacePanel({
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [viewMode, setViewMode] = useState<"files" | "changed">(initialViewMode);
   const [gitHistory, setGitHistory] = useState<GitCommitView[]>([]);
-  const [workspaceChanges, setWorkspaceChanges] = useState<WorkspaceChangeView[] | null>(null);
+  const [workspaceChanges, setWorkspaceChanges] = useState<WorkspaceChangesView | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null);
   const [commitDetail, setCommitDetail] = useState<GitCommitDetailView | null>(null);
@@ -307,7 +308,8 @@ export function WorkspacePanel({
     try {
       const result = await app.WorkspaceChanges(requestTabId);
       if (workspaceChangesRequestIdRef.current === requestId && lastWorkspaceTabIdRef.current === requestTabId) {
-        setWorkspaceChanges(result.files && result.files.length > 0 ? result.files : null);
+        const hasChanges = (result.files?.length ?? 0) > 0 || (result.records?.length ?? 0) > 0;
+        setWorkspaceChanges(hasChanges ? result : null);
       }
     } catch {
       if (workspaceChangesRequestIdRef.current === requestId && lastWorkspaceTabIdRef.current === requestTabId) {
@@ -705,10 +707,8 @@ export function WorkspacePanel({
 
   const breadcrumbDirs = selectedPath ? parentDirs(selectedPath) : [""];
   const pathParts = selectedPath?.split("/").filter(Boolean) ?? [];
-  const sessionChanges = useMemo(
-    () => workspaceChanges?.filter((c) => c.sources.includes("session")) ?? null,
-    [workspaceChanges],
-  );
+  const sessionChangeRows = useMemo(() => workspaceChangeRows(workspaceChanges, t), [workspaceChanges, t]);
+  const visibleChangeCount = useMemo(() => workspaceVisibleChangeCount(workspaceChanges), [workspaceChanges]);
 
   const changedMode = viewMode === "changed";
   const currentFileName = selectedPath ? basename(selectedPath) : t("workspace.noFile");
@@ -1237,18 +1237,18 @@ export function WorkspacePanel({
             </div>
           ) : viewMode === "changed" && !selectedPath ? (
             <div className="workspace-git-history">
-              {sessionChanges && sessionChanges.length > 0 && (
+              {sessionChangeRows.length > 0 && (
                 <div className="workspace-change-scope">
                   <div className="workspace-change-scope__head">
                     <span className="workspace-change-scope__title">{t("workspace.changedTab")}</span>
-                    <span className="workspace-change-scope__meta">{t("context.changedMeta", { count: sessionChanges.length })}</span>
+                    <span className="workspace-change-scope__meta">{t("context.changedMeta", { count: visibleChangeCount })}</span>
                   </div>
                   <div className="workspace-change-scope__list">
-                    {sessionChanges.map((change) => {
+                    {sessionChangeRows.map((change) => {
                       const dir = parentPath(change.path);
                       return (
                         <button
-                          key={change.path}
+                          key={change.key}
                           className="workspace-change"
                           type="button"
                           onClick={() => selectFile(change.path)}
@@ -1257,10 +1257,12 @@ export function WorkspacePanel({
                           <span className="workspace-change__body">
                             <span className="workspace-change__name">{basename(change.path)}</span>
                             {dir && <span className="workspace-change__path">{dir}</span>}
-                            {change.latestPrompt && <span className="workspace-change__detail">{change.latestPrompt}</span>}
+                            {change.detail && <span className="workspace-change__detail">{change.detail}</span>}
                           </span>
                           <span className="workspace-change__meta">
-                            {change.gitStatus && <span className="workspace-change__badge workspace-change__badge--git">{change.gitStatus}</span>}
+                            {change.badges.map((badge) => (
+                              <span className="workspace-change__badge workspace-change__badge--git" key={badge}>{badge}</span>
+                            ))}
                           </span>
                         </button>
                       );
@@ -1270,7 +1272,7 @@ export function WorkspacePanel({
               )}
               {loadingHistory ? (
                 <div className="workspace-empty">{t("workspace.loading")}</div>
-              ) : gitHistory.length === 0 && !(sessionChanges && sessionChanges.length > 0) ? (
+              ) : gitHistory.length === 0 && sessionChangeRows.length === 0 ? (
                 <div className="workspace-empty">{t("workspace.noChanges")}</div>
               ) : (
                 <div className="workspace-git-history__list">

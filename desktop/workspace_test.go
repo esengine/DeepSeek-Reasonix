@@ -839,6 +839,76 @@ func TestWorkspaceChangesUsesRequestedTabCheckpoints(t *testing.T) {
 	}
 }
 
+func TestWorkspaceChangesIncludesSessionRecordsPerTurn(t *testing.T) {
+	workspace := t.TempDir()
+	sessionDir := t.TempDir()
+	sessionPath := filepath.Join(sessionDir, "session.jsonl")
+	ckptDir := strings.TrimSuffix(sessionPath, ".jsonl") + ".ckpt"
+	if err := os.MkdirAll(ckptDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	content := "old"
+	now := time.Now()
+	seedCheckpoint(t, ckptDir, checkpoint.Checkpoint{
+		Turn:   0,
+		Time:   now,
+		Prompt: "first edit",
+		Files:  []checkpoint.FileSnap{{Path: "parse_ber.py", Content: &content}},
+	})
+	seedCheckpoint(t, ckptDir, checkpoint.Checkpoint{
+		Turn:   12,
+		Time:   now.Add(time.Minute),
+		Prompt: "thirteenth edit",
+		Files:  []checkpoint.FileSnap{{Path: "parse_ber.py", Content: &content}},
+	})
+
+	ctrl := control.New(control.Options{SessionDir: sessionDir, SessionPath: sessionPath, Label: "session"})
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"tab": {ID: "tab", Scope: "project", WorkspaceRoot: workspace, Ctrl: ctrl, Ready: true},
+		},
+		activeTabID: "tab",
+	}
+
+	got := app.WorkspaceChanges("tab")
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Files []struct {
+			Path  string `json:"path"`
+			Turns []int  `json:"turns"`
+		} `json:"files"`
+		Records []struct {
+			Key    string `json:"key"`
+			Path   string `json:"path"`
+			Turn   int    `json:"turn"`
+			Prompt string `json:"prompt"`
+			Time   int64  `json:"time"`
+		} `json:"records"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Files) != 1 || payload.Files[0].Path != "parse_ber.py" {
+		t.Fatalf("files = %+v, want one aggregated changed file", payload.Files)
+	}
+	if got := payload.Files[0].Turns; len(got) != 2 || got[0] != 0 || got[1] != 12 {
+		t.Fatalf("aggregated turns = %+v, want [0 12]", got)
+	}
+	if len(payload.Records) != 2 {
+		t.Fatalf("records = %+v, want one record per changed turn", payload.Records)
+	}
+	if payload.Records[0].Key == payload.Records[1].Key {
+		t.Fatalf("records must have stable unique keys: %+v", payload.Records)
+	}
+	if payload.Records[0].Prompt != "first edit" || payload.Records[1].Prompt != "thirteenth edit" {
+		t.Fatalf("records should preserve per-turn prompts: %+v", payload.Records)
+	}
+}
+
 func TestWorkspaceChangesGitStatus(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")

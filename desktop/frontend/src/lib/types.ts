@@ -456,8 +456,20 @@ export interface WorkspaceChangeView {
   latestTime?: number;
 }
 
+export interface WorkspaceChangeRecord {
+  key: string;
+  path: string;
+  oldPath?: string;
+  sources: string[];
+  gitStatus?: string;
+  turn: number;
+  prompt?: string;
+  time?: number;
+}
+
 export interface WorkspaceChangesView {
   files: WorkspaceChangeView[];
+  records?: WorkspaceChangeRecord[];
   gitAvailable: boolean;
   gitErr?: string;
   gitBranch?: string;

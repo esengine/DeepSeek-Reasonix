@@ -2191,6 +2191,33 @@ function makeMockApp(): AppBindings {
           { path: "README.md", sources: ["git"], gitStatus: "??" },
           { path: "internal/control/controller.go", sources: ["session"], turns: [1], latestTime: Date.now() - 120_000 },
         ],
+        records: [
+          {
+            key: "0:desktop/frontend/src/components/WorkspacePanel.tsx",
+            path: "desktop/frontend/src/components/WorkspacePanel.tsx",
+            sources: ["session", "git"],
+            gitStatus: "M",
+            turn: 0,
+            prompt: "Mock session edited the workspace panel.",
+            time: Date.now() - 60_000,
+          },
+          {
+            key: "2:desktop/frontend/src/components/WorkspacePanel.tsx",
+            path: "desktop/frontend/src/components/WorkspacePanel.tsx",
+            sources: ["session", "git"],
+            gitStatus: "M",
+            turn: 2,
+            prompt: "Mock session refined the changes view.",
+            time: Date.now() - 30_000,
+          },
+          {
+            key: "1:internal/control/controller.go",
+            path: "internal/control/controller.go",
+            sources: ["session"],
+            turn: 1,
+            time: Date.now() - 120_000,
+          },
+        ],
       };
     },
     async GitBranches() {

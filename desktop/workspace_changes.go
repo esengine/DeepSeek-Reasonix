@@ -27,7 +27,7 @@ type workspaceChangeAccumulator struct {
 }
 
 func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
-	out := WorkspaceChangesView{Files: []WorkspaceChangeView{}, GitAvailable: true}
+	out := WorkspaceChangesView{Files: []WorkspaceChangeView{}, Records: []WorkspaceChangeRecord{}, GitAvailable: true}
 	tabID = strings.TrimSpace(tabID)
 
 	workspaceRoot, ctrl, ok := a.workspaceChangesTarget(tabID)
@@ -47,6 +47,7 @@ func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
 	out.GitBranch = workspaceGitBranch(base)
 
 	changes := map[string]*workspaceChangeAccumulator{}
+	records := []WorkspaceChangeRecord{}
 	add := func(path string) *workspaceChangeAccumulator {
 		path = normalizeWorkspaceRelPath(base, path)
 		if path == "" {
@@ -61,6 +62,10 @@ func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
 	if ctrl != nil {
 		for _, meta := range ctrl.Checkpoints() {
 			for _, path := range meta.Paths {
+				path = normalizeWorkspaceRelPath(base, path)
+				if path == "" {
+					continue
+				}
 				acc := add(path)
 				if acc == nil {
 					continue
@@ -73,11 +78,20 @@ func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
 					acc.view.LatestPrompt = meta.Prompt
 					acc.view.LatestTime = meta.Time.UnixMilli()
 				}
+				records = append(records, WorkspaceChangeRecord{
+					Key:     workspaceChangeRecordKey(meta.Turn, path),
+					Path:    path,
+					Sources: []string{"session"},
+					Turn:    meta.Turn,
+					Prompt:  meta.Prompt,
+					Time:    meta.Time.UnixMilli(),
+				})
 			}
 		}
 	}
 
 	gitEntries, gitErr := workspaceGitStatus(base)
+	gitByPath := make(map[string]gitStatusEntry, len(gitEntries))
 	if gitErr != nil {
 		out.GitAvailable = false
 		out.GitErr = gitErr.Error()
@@ -90,7 +104,18 @@ func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
 		acc.hasGit = true
 		acc.view.GitStatus = entry.Status
 		acc.view.OldPath = normalizeWorkspaceRelPath(base, entry.OldPath)
+		gitByPath[entry.Path] = entry
 	}
+	for i := range records {
+		entry, ok := gitByPath[records[i].Path]
+		if !ok {
+			continue
+		}
+		records[i].Sources = append(records[i].Sources, "git")
+		records[i].GitStatus = entry.Status
+		records[i].OldPath = normalizeWorkspaceRelPath(base, entry.OldPath)
+	}
+	out.Records = records
 
 	out.Files = make([]WorkspaceChangeView, 0, len(changes))
 	for _, acc := range changes {
@@ -125,6 +150,10 @@ func (a *App) workspaceChangesTarget(tabID string) (string, control.SessionAPI, 
 		return "", nil, tabID == ""
 	}
 	return tab.WorkspaceRoot, tab.Ctrl, true
+}
+
+func workspaceChangeRecordKey(turn int, path string) string {
+	return fmt.Sprintf("%d:%s", turn, path)
 }
 
 func (a *App) workspaceBaseForTab(tabID string) (string, error) {

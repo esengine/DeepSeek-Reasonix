@@ -5534,11 +5534,25 @@ type WorkspaceChangeView struct {
 	LatestTime   int64    `json:"latestTime,omitempty"`
 }
 
+// WorkspaceChangeRecord is one session checkpoint's change to one file, used by
+// the desktop changes panel when a file is edited across multiple turns.
+type WorkspaceChangeRecord struct {
+	Key       string   `json:"key"`
+	Path      string   `json:"path"`
+	OldPath   string   `json:"oldPath,omitempty"`
+	Sources   []string `json:"sources"`
+	GitStatus string   `json:"gitStatus,omitempty"`
+	Turn      int      `json:"turn"`
+	Prompt    string   `json:"prompt,omitempty"`
+	Time      int64    `json:"time,omitempty"`
+}
+
 type WorkspaceChangesView struct {
-	Files        []WorkspaceChangeView `json:"files"`
-	GitAvailable bool                  `json:"gitAvailable"`
-	GitErr       string                `json:"gitErr,omitempty"`
-	GitBranch    string                `json:"gitBranch,omitempty"`
+	Files        []WorkspaceChangeView   `json:"files"`
+	Records      []WorkspaceChangeRecord `json:"records"`
+	GitAvailable bool                    `json:"gitAvailable"`
+	GitErr       string                  `json:"gitErr,omitempty"`
+	GitBranch    string                  `json:"gitBranch,omitempty"`
 }
 
 // workspaceNoiseNames are local cache/vendor entries hidden from the file tree

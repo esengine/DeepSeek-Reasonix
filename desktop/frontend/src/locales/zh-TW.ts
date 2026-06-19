@@ -124,6 +124,14 @@ export const zhTW: Record<DictKey, string> = {
   "workspace.gitUnavailable": "當前工作區不可讀取 Git 狀態。",
   "workspace.sourceSession": "會話",
   "workspace.sourceGit": "Git",
+  "workspace.gitStatusAdded": "新增",
+  "workspace.gitStatusCopied": "複製",
+  "workspace.gitStatusDeleted": "刪除",
+  "workspace.gitStatusModified": "修改",
+  "workspace.gitStatusRenamed": "重新命名",
+  "workspace.gitStatusUnmerged": "衝突",
+  "workspace.gitStatusUntracked": "未追蹤",
+  "workspace.turnBadge": "第 {turn} 輪",
   "workspace.deleted": "已刪除",
 
   // MCP 與技能抽屜
