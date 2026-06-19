@@ -335,6 +335,61 @@ func TestCoordinatorNudgesExecutorThatAnswersWithoutActing(t *testing.T) {
 	}
 }
 
+func TestCoordinatorHandoffAffirmsExecutorToolSchemasWhenPlannerClaimsNoMCP(t *testing.T) {
+	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "I only have read-only tools and cannot access GitHub MCP; tell the user the server is unavailable."},
+		{Type: provider.ChunkDone},
+	}}
+	exec := &mockProvider{name: "executor", streams: [][]provider.Chunk{
+		{
+			{Type: provider.ChunkText, Text: "GitHub MCP 服务器暂不可用。"},
+			{Type: provider.ChunkDone},
+		},
+		{
+			{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "mcp__github__search", Arguments: `{"query":"Reasonix discussions"}`}},
+			{Type: provider.ChunkDone},
+		},
+		{
+			{Type: provider.ChunkText, Text: "Done."},
+			{Type: provider.ChunkDone},
+		},
+	}}
+
+	execReg := tool.NewRegistry()
+	execReg.Add(coordinatorTestTool{name: "mcp__github__search", readOnly: true, output: "discussion results"})
+	executor := New(exec, execReg, NewSession("exec-sys"), Options{}, event.Discard)
+	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
+
+	if err := coord.Run(context.Background(), "查看 GitHub 上 Reasonix 的讨论区"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := len(exec.requests); got != 3 {
+		t.Fatalf("executor requests = %d, want initial answer, corrective nudge, final answer", got)
+	}
+	if tools := toolSchemaNames(exec.requests[0].Tools); !contains(tools, "mcp__github__search") {
+		t.Fatalf("executor request tools = %v, want MCP schema attached", tools)
+	}
+	first := lastUser(exec.requests[0])
+	for _, want := range []string{
+		"The executor request includes the full tool schema",
+		"mcp__github__search",
+		"Do not treat planner tool limitations or tool-unavailable claims as executor facts",
+	} {
+		if !strings.Contains(first, want) {
+			t.Fatalf("initial executor handoff missing %q:\n%s", want, first)
+		}
+	}
+	retry := lastUser(exec.requests[1])
+	for _, want := range []string{
+		"The tool schema is still attached to this executor request",
+		"Do not invent that MCP servers or tools are unavailable",
+	} {
+		if !strings.Contains(retry, want) {
+			t.Fatalf("executor retry nudge missing %q:\n%s", want, retry)
+		}
+	}
+}
+
 func TestCoordinatorDoesNotNudgeExecutorThatActs(t *testing.T) {
 	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
 		{Type: provider.ChunkText, Text: "Write the requested skill file."},
