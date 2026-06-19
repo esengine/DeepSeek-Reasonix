@@ -1178,6 +1178,15 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 		case "/prometheus":
 			c.applyPrometheus(trimmed, display)
 			return
+		case "/summarize":
+			c.notice("summarizing conversation...")
+			c.runGuarded(func(ctx context.Context) error {
+				if err := c.SummarizeFrom(ctx, 0); err != nil {
+					c.notice("summarize: " + err.Error())
+				}
+				return nil
+			})
+			return
 		}
 		if c.managementNotice(trimmed) {
 			return
