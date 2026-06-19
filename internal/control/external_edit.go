@@ -73,7 +73,7 @@ func (c *Controller) BeginExternalEdit(label string, paths []string) *ExternalEd
 	c.mu.Lock()
 	if c.running || c.externalEditOpen {
 		c.mu.Unlock()
-		return &ExternalEdit{controller: c, label: label, start: time.Now(), beginErr: ErrTurnRunning}
+		return &ExternalEdit{controller: nil, label: label, start: time.Now(), beginErr: ErrTurnRunning}
 	}
 	c.externalEditOpen = true
 	c.mu.Unlock()

@@ -237,6 +237,7 @@ type RuntimeStatus struct {
 	BackgroundJobs  int
 	CancelRequested bool
 	Cancellable     bool
+	ExternalEditOpen bool
 }
 
 const (
@@ -1587,14 +1588,16 @@ func (c *Controller) RuntimeStatus() RuntimeStatus {
 	running := c.running
 	pending := len(c.approvals) > 0 || len(c.asks) > 0
 	canceling := c.canceling
+	externalEditOpen := c.externalEditOpen
 	c.mu.Unlock()
 	backgroundJobs := len(c.Jobs())
 	return RuntimeStatus{
-		Running:         running,
-		PendingPrompt:   pending,
-		BackgroundJobs:  backgroundJobs,
-		CancelRequested: canceling,
-		Cancellable:     running || pending,
+		Running:          running,
+		PendingPrompt:    pending,
+		BackgroundJobs:   backgroundJobs,
+		CancelRequested:  canceling,
+		Cancellable:      running || pending,
+		ExternalEditOpen: externalEditOpen,
 	}
 }
 

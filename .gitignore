@@ -59,6 +59,6 @@ Thumbs.db
 /site/public/av/
 
 # Stray generated files
-null
+/null
 
 benchmarks/context-maintenance-e2e/run/
