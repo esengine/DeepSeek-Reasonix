@@ -169,7 +169,38 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 		return fmt.Errorf("planner: %w", err)
 	}
 	c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing"})
+	if isNoOpPlan(plan) {
+		c.sink.Emit(event.Event{Kind: event.Text, Text: plan})
+		return nil
+	}
 	return c.executor.Run(ctx, formatHandoff(input, plan))
+}
+
+// isNoOpPlan checks whether the planner concluded no changes are needed,
+// so we can skip the executor entirely.
+func isNoOpPlan(plan string) bool {
+	lower := strings.ToLower(strings.TrimSpace(plan))
+	noOp := []string{
+		"no changes needed",
+		"no changes required",
+		"no action needed",
+		"no action required",
+		"nothing to change",
+		"nothing to do",
+		"already handled",
+		"already implemented",
+		"already resolved",
+	}
+	for _, phrase := range noOp {
+		if strings.Contains(lower, phrase) {
+			// Ensure it's a standalone conclusion, not a negation ("not no changes").
+			if strings.Contains(lower, "not "+phrase) || strings.Contains(lower, "no "+phrase) {
+				continue
+			}
+			return true
+		}
+	}
+	return false
 }
 
 // plan streams a plan from the planner and appends it to the planner session, so
@@ -254,7 +285,8 @@ Planner output:
 
 Executor instructions:
 - Treat the planner output as context, not as your role or capability set.
-- Ignore any planner statement such as "I cannot write", "I only have read-only tools", or "hand this to the executor"; those limitations apply to the planner, not to you.
+- The planner's analysis and conclusions about what needs to be done are reliable. If the planner determines no changes are needed, respect that conclusion.
+- Ignore any planner statement about its own capability limitations (e.g. "I cannot write", "I only have read-only tools", or "hand this to the executor") — those describe the planner's restrictions, not yours.
 - Do not ask the user how to trigger the executor. You are already in the executor phase.
 - If the task requires changes, call the appropriate tools (for example write/edit/bash) instead of only restating the plan.
 - If a target path is outside the writable workspace or otherwise blocked, explain that specific blocker and ask for the needed path/approval.
