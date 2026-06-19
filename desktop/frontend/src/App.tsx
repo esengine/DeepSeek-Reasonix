@@ -1179,6 +1179,15 @@ export default function App() {
     const currentTabTurns = Math.max(state.checkpoints.length, visibleUserTurns);
     return currentTabTurns > 0 ? currentTabTurns : activeTopicTurns ?? 0;
   }, [activeTopicTurns, state.checkpoints.length, state.items]);
+  const phases = useMemo(() => {
+    const phaseItems = state.items.filter((i) => i.kind === "phase");
+    const n = phaseItems.length;
+    if (n === 0) return [];
+    return phaseItems.map((p, i) => ({
+      text: p.text,
+      state: i < n - 1 ? "done" as const : state.running ? "running" as const : "done" as const,
+    }));
+  }, [state.items, state.running]);
   const startupSplashHold = state.meta?.ready !== true && !state.meta?.startupErr;
   const backendActiveComposerProfile = useMemo(() => {
     if (state.meta) {
@@ -2982,6 +2991,7 @@ export default function App() {
                   sessionCurrency={state.sessionCurrency}
                   sessionGen={state.sessionGen}
                   refreshKey={dockRefreshKey}
+                  phases={phases}
                 />
               ) : (
                 <WorkspacePanel

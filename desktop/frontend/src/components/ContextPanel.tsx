@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { useI18n, type Translator } from "../lib/i18n";
+import { PhaseProgressBar } from "./PhaseProgressBar";
 import { formatMoneyLocalized } from "../lib/money";
 import type { DictKey } from "../locales/en";
 import type { ContextInfo, ContextPanelInfo, UsageSourceStats, WireUsage } from "../lib/types";
@@ -17,6 +18,7 @@ interface ContextPanelProps {
   sessionCurrency?: string;
   sessionGen?: number;
   refreshKey?: number;
+  phases?: { text: string; state: "done" | "running" | "waiting" | "failed" }[];
 }
 
 function fmtTokens(n: number): string {
@@ -206,6 +208,7 @@ export function ContextPanel({
   sessionCurrency,
   sessionGen,
   refreshKey,
+  phases,
 }: ContextPanelProps) {
   const { locale, t } = useI18n();
   const [overviewOpen, setOverviewOpen] = useState(true);
@@ -321,6 +324,11 @@ export function ContextPanel({
             </div>
             </>)}
           </section>
+          {phases && phases.length > 0 && (
+            <section className="context-panel__section">
+              <PhaseProgressBar phases={phases} collapsed={false} />
+            </section>
+          )}
           <section className="context-panel__section">
             <SectionHeading title={t("context.runtimeMetrics")} />
             <div className="context-panel__stats">
