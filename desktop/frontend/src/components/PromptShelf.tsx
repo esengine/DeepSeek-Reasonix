@@ -12,6 +12,7 @@ export function PromptShelf({
   quickActions,
   barRef,
   actionsWrap = false,
+  modifier,
 }: {
   titleId: string;
   title: ReactNode;
@@ -23,9 +24,16 @@ export function PromptShelf({
   quickActions?: ReactNode;
   barRef?: RefObject<HTMLDivElement | null>;
   actionsWrap?: boolean;
+  // Optional extra BEM-style modifier appended to the root class
+  // (e.g. "ask" → "prompt-shelf prompt-shelf--ask"). Keep it simple — used
+  // for one-off visual variants like the ask tool's decision shelf.
+  modifier?: string;
 }) {
+  const rootClass = `prompt-shelf${actionsWrap ? " prompt-shelf--actions-wrap" : ""}${
+    modifier ? ` prompt-shelf--${modifier}` : ""
+  }`;
   return (
-    <div className={`prompt-shelf${actionsWrap ? " prompt-shelf--actions-wrap" : ""}`} aria-live="polite">
+    <div className={rootClass} aria-live="polite">
       <div
         ref={barRef}
         className="prompt-shelf__bar"

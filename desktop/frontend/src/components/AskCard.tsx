@@ -154,6 +154,7 @@ export function AskCard({
       barRef={shelfRef}
       titleId="ask-shelf-title"
       title={t("ask.title")}
+      modifier="ask"
       actionsWrap
       badges={
         <>

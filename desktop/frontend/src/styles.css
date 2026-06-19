@@ -6122,6 +6122,31 @@ a[href] {
   color: var(--fg);
   background: var(--bg-soft);
 }
+/* ask tool: emphasize the "Details" toggle and demote the "Just chat"
+   dismissal so the primary action reads clearly. The ask shelf opts in
+   with the prompt-shelf--ask modifier; other shelves (e.g. the approval
+   modal) keep the neutral defaults above. */
+.prompt-shelf--ask .prompt-detail-toggle {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-soft));
+  background: var(--accent-soft);
+}
+.prompt-shelf--ask .prompt-detail-toggle:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-elev));
+}
+.prompt-shelf--ask .prompt-action--quiet {
+  color: var(--fg-faint);
+  border-color: transparent;
+  background: transparent;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.prompt-shelf--ask .prompt-action--quiet:hover {
+  color: var(--fg);
+  border-color: var(--border-soft);
+  background: var(--bg-soft);
+}
 .prompt-action__key {
   display: inline-flex;
   align-items: center;
