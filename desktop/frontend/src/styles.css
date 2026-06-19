@@ -4761,6 +4761,40 @@ a[href] {
   max-width: none;
 }
 
+.composer-meta__control--quick {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 0 4px;
+}
+
+.composer-quick-action {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border: 1px solid var(--pill-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-soft);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.composer-quick-action:hover {
+  color: var(--fg);
+  background: var(--pill-bg);
+  border-color: var(--pill-fg);
+}
+
+.composer-quick-action__label {
+  font-size: 11px;
+}
+
 .composer-meta__control--approval {
   flex: 0 0 232px;
   min-width: 216px;

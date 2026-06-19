@@ -2141,6 +2141,32 @@ export function Composer({
                 </Tooltip>
               )}
             </div>
+            <div className="composer-meta__control composer-meta__control--quick">
+              <Tooltip label={t("composer.quickParallelDesc")}>
+                <button
+                  type="button"
+                  className="composer-quick-action"
+                  onClick={() => { setText(t => t + "/plan-exec "); taRef.current?.focus(); }}
+                  disabled={disabled || running}
+                  aria-label={t("composer.quickParallel")}
+                >
+                  <List size={13} />
+                  <span className="composer-quick-action__label">{t("composer.quickParallel")}</span>
+                </button>
+              </Tooltip>
+              <Tooltip label={t("composer.quickSummaryDesc")}>
+                <button
+                  type="button"
+                  className="composer-quick-action"
+                  onClick={() => { setText(t => t + "/summarize "); taRef.current?.focus(); }}
+                  disabled={disabled || running}
+                  aria-label={t("composer.quickSummary")}
+                >
+                  <FileText size={13} />
+                  <span className="composer-quick-action__label">{t("composer.quickSummary")}</span>
+                </button>
+              </Tooltip>
+            </div>
             <div className="composer-meta__control composer-meta__control--approval">
               <div className="composer-modebar composer-modebar--approval" data-mode={toolApprovalMode} title={t("composer.accessMenuTitle")}>
                 <span className="composer-modebar__thumb" aria-hidden="true" />
