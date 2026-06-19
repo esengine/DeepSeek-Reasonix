@@ -419,6 +419,43 @@ func TestFlatSkillNoScripts(t *testing.T) {
 	}
 }
 
+func TestScriptsFilteredByExt(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/scriptscheck/SKILL.md", "---\ndescription: t\n---\nbody")
+	writeScript(t, home, ".reasonix/skills/scriptscheck/scripts/lint.py", "#!/usr/bin/env python3\nprint('ok')\n")
+	writeScript(t, home, ".reasonix/skills/scriptscheck/scripts/.hidden.py", "")
+	writeScript(t, home, ".reasonix/skills/scriptscheck/scripts/readme.md", "# readme")
+	writeScript(t, home, ".reasonix/skills/scriptscheck/scripts/deploy", "#!/bin/sh\necho ok")
+	writeScript(t, home, ".reasonix/skills/scriptscheck/scripts/.gitkeep", "")
+
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	sk, ok := st.Read("scriptscheck")
+	if !ok {
+		t.Fatal("skill not found")
+	}
+	body := sk.Body
+	// lint.py should be listed (recognized .py extension)
+	if !strings.Contains(body, "lint.py") {
+		t.Error("lint.py should be listed (recognized .py extension)")
+	}
+	// deploy (no extension) should be listed (bare executable)
+	if !strings.Contains(body, "deploy") {
+		t.Error("deploy (no extension) should be listed as bare executable")
+	}
+	// .hidden.py should NOT be listed (hidden file)
+	if strings.Contains(body, ".hidden.py") {
+		t.Error("hidden files should NOT be listed")
+	}
+	// readme.md should NOT be listed (documentation, not a script)
+	if strings.Contains(body, "readme.md") {
+		t.Error("non-script extensions should NOT be listed")
+	}
+	// .gitkeep should NOT be listed (hidden file)
+	if strings.Contains(body, ".gitkeep") {
+		t.Error(".gitkeep should NOT be listed")
+	}
+}
+
 func TestBuiltinInitIsInlineSkill(t *testing.T) {
 	// /init must resolve to a built-in inline skill (the model-driven AGENTS.md
 	// bootstrap), present even with no project/user skills on disk.

@@ -52,6 +52,13 @@ const (
 	SkillFile = "SKILL.md"
 )
 
+// scriptExts lists executable extensions recognized in scripts/ directories,
+// separated by dots for fast contains-check. No-extension files (bare
+// executables like lint, deploy) pass through regardless.
+const scriptExts = ".sh.py.js.ts.rb.pl.php.ps1"
+
+
+
 // Skill is a loaded playbook.
 type Skill struct {
 	Name        string // canonical identifier; matches the directory / filename stem
@@ -660,12 +667,13 @@ func loadBodyWithScripts(skillPath, body string) string {
 	}
 	var names []string
 	for _, e := range entries {
+		// Filter hidden files — bash should not see config dotfiles in scripts/.
 		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		// Only list files that look like scripts: no extension, or common script ext.
+		// Only list files that look like scripts: no extension, or recognized ext.
 		ext := strings.ToLower(filepath.Ext(e.Name()))
-		if ext != "" && ext != ".sh" && ext != ".py" && ext != ".js" && ext != ".ts" && ext != ".rb" && ext != ".pl" && ext != ".php" && ext != ".ps1" {
+		if ext != "" && !strings.Contains(scriptExts, ext) {
 			continue
 		}
 		names = append(names, e.Name())
@@ -676,7 +684,7 @@ func loadBodyWithScripts(skillPath, body string) string {
 	sort.Strings(names)
 	var b strings.Builder
 	b.WriteString(body)
-	b.WriteString("\n\n## Scripts\n\nThe skill has the following scripts. Run them with bash.\n\n")
+	b.WriteString("## Scripts\n\nRun with bash.\n\n")
 	for _, n := range names {
 		b.WriteString("- `" + filepath.Join(scriptsDir, n) + "`\n")
 	}
