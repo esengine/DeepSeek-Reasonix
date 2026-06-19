@@ -4,6 +4,7 @@ import type { CheckpointMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
 import { AssistantMessage, TurnActions, UserMessage } from "./Message";
 import { ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
+import { PhaseProgressBar } from "./PhaseProgressBar";
 import { ToolCard } from "./ToolCard";
 import { ChevronRight } from "lucide-react";
 import { Welcome } from "./Welcome";
@@ -543,6 +544,16 @@ export function Transcript({
   // Warm/cold zone is a separate memo'd WarmZone component so streaming tokens
   // don't rebuild it. The hot zone uses LiveAssistantMessage (reads live from
   // LiveStreamContext) so streaming updates are captured immediately.
+  const phases = useMemo(() => {
+    const phaseItems = items.filter((i) => i.kind === "phase");
+    const n = phaseItems.length;
+    if (n === 0) return [];
+    return phaseItems.map((p, i) => ({
+      text: p.text,
+      state: i < n - 1 ? "done" as const : running ? "running" as const : "done" as const,
+    }));
+  }, [items, running]);
+
   return (
     <div
       className={`transcript${empty ? " transcript--empty" : ""}`}
@@ -554,6 +565,8 @@ export function Transcript({
       {!empty && showQuestionNav && (
         <QuestionJumpBar questions={questions} onJump={handleJumpToQuestion} />
       )}
+
+      <PhaseProgressBar phases={phases} collapsed={phases.length > 5} />
 
       <LiveStreamContext.Provider value={live}>
         {turnGroups.length > HOT_TURNS && (

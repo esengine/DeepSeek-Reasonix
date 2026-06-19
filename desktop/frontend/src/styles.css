@@ -16093,6 +16093,119 @@ a[href] {
   --wails-draggable: no-drag;
 }
 
+/* ── Phase Progress Bar ─────────────────────────────────────────── */
+
+.phase-progress {
+  flex: 0 0 auto;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-faint);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.phase-progress__track {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.phase-progress__step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  white-space: nowrap;
+  padding: 2px 4px;
+  margin-right: 2px;
+}
+
+.phase-progress__step:not(:last-child)::after {
+  content: "";
+  display: block;
+  width: 24px;
+  height: 1.5px;
+  margin-left: 6px;
+  background: var(--border-faint);
+  transition: background 0.3s;
+}
+
+.phase-progress__step--done::after { background: var(--accent); }
+
+.phase-progress__dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--border-faint);
+  background: transparent;
+  transition: border-color 0.3s, background 0.3s;
+  flex-shrink: 0;
+}
+
+.phase-progress__step--done .phase-progress__dot {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.phase-progress__step--running .phase-progress__dot {
+  border-color: var(--accent);
+  animation: phase-pulse 1.5s ease-in-out infinite;
+}
+
+.phase-progress__step--failed .phase-progress__dot {
+  border-color: var(--err);
+  background: var(--err-soft);
+}
+
+@keyframes phase-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 30%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
+
+.phase-progress__label {
+  font-size: 11px;
+  color: var(--fg-soft);
+  transition: color 0.3s;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.phase-progress__step--done .phase-progress__label { color: var(--accent); font-weight: 500; }
+.phase-progress__step--running .phase-progress__label { color: var(--fg); font-weight: 600; }
+.phase-progress__step--failed .phase-progress__label { color: var(--err); }
+
+.phase-progress__pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  animation: phase-glow 1.5s ease-in-out infinite;
+}
+
+@keyframes phase-glow {
+  0%, 100% { background: color-mix(in srgb, var(--accent) 0%, transparent); }
+  50% { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+}
+
+.phase-progress__more {
+  font-size: 10px;
+  color: var(--fg-soft);
+  padding: 0 6px;
+}
+
+/* ── Layout variants ───────────────────────────────────────────── */
+
+.app--compact .phase-progress { height: 30px; padding: 0 12px; }
+.phase-progress:empty { display: none; }
+
 .topicbar__chrome-btn {
   flex: 0 0 auto;
   display: inline-flex;
