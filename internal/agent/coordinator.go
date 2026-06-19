@@ -156,10 +156,26 @@ func (c *Coordinator) SetPlanMode(v bool) {
 	}
 }
 
+// skipPlannerKey is a context key that marks synthetic user messages which
+// should bypass the planner entirely.
+type skipPlannerKey struct{}
+
+// WithSkipPlanner returns a context that instructs Coordinator.Run to skip
+// the planner and go directly to the executor.
+func WithSkipPlanner(ctx context.Context) context.Context {
+	return context.WithValue(ctx, skipPlannerKey{}, true)
+}
+
+// SkipPlanner reports whether the context carries the skip-planner flag.
+func SkipPlanner(ctx context.Context) bool {
+	v, _ := ctx.Value(skipPlannerKey{}).(bool)
+	return v
+}
+
 // Run plans with the planner model, then hands the plan to the executor.
 func (c *Coordinator) Run(ctx context.Context, input string) error {
 	c.sink.Emit(event.Event{Kind: event.TurnStarted})
-	if c.shouldPlan != nil && !c.shouldPlan(input) {
+	if SkipPlanner(ctx) || (c.shouldPlan != nil && !c.shouldPlan(input)) {
 		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing"})
 		return c.executor.Run(ctx, input)
 	}

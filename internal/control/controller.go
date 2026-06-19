@@ -591,7 +591,7 @@ func (c *Controller) runGoalLoopWithRaw(ctx context.Context, input, raw string) 
 }
 
 func (c *Controller) runGoalLoopWithRawDisplay(ctx context.Context, input, raw, display string) error {
-	if err := c.runTurnWithRawDisplay(ctx, input, raw, display); err != nil {
+	if err := c.runTurnWithRawDisplay(agent.WithSkipPlanner(ctx), input, raw, display); err != nil {
 		if ctx.Err() != nil {
 			c.stopGoal(GoalStatusStopped)
 		}
@@ -692,7 +692,7 @@ func (c *Controller) continueGoal(ctx context.Context) error {
 		} else {
 			c.mu.Unlock()
 		}
-		if err := c.runTurnWithRawDisplay(ctx, turn, turn, ""); err != nil {
+		if err := c.runTurnWithRawDisplay(agent.WithSkipPlanner(ctx), turn, turn, ""); err != nil {
 			if ctx.Err() != nil {
 				c.stopGoal(GoalStatusStopped)
 			}
