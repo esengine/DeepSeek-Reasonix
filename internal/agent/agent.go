@@ -1098,7 +1098,7 @@ func finalReadinessCheckSource(check instruction.VerifyCheck) string {
 }
 
 func finalReadinessRetryMessage(reason string) string {
-	return "Host final-answer readiness check failed. Before giving a final answer, address the missing host-observable receipts: " + reason + ". Run the required tool calls, then answer when readiness is satisfied."
+	return "Host final-answer readiness check failed. Before giving a final answer, address the missing host-observable receipts: " + reason + ". Run the required tool calls, then answer when readiness is satisfied. If the missing item depends on a user-owned choice or manual action, call the ask tool with concrete options so the UI can show a choice. Do not ask in prose, infer a choice from silence, or continue by choosing for the user; do not choose for the user."
 }
 
 func executorHandoffRetryMessage() string {
