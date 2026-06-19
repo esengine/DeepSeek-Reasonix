@@ -4777,7 +4777,7 @@ a[href] {
   border: 1px solid var(--pill-border);
   border-radius: 4px;
   background: transparent;
-  color: var(--fg-soft);
+  color: var(--fg-dim);
   cursor: pointer;
   font-size: 11px;
   line-height: 1.4;
@@ -16101,7 +16101,7 @@ a[href] {
   display: flex;
   align-items: center;
   padding: 0 16px;
-  border-bottom: 1px solid var(--border-faint);
+  border-bottom: 1px solid var(--border-soft);
   background: var(--bg);
   overflow: hidden;
 }
@@ -16131,7 +16131,7 @@ a[href] {
   width: 24px;
   height: 1.5px;
   margin-left: 6px;
-  background: var(--border-faint);
+  background: var(--border-soft);
   transition: background 0.3s;
 }
 
@@ -16144,7 +16144,7 @@ a[href] {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  border: 2px solid var(--border-faint);
+  border: 2px solid var(--border-soft);
   background: transparent;
   transition: border-color 0.3s, background 0.3s;
   flex-shrink: 0;
@@ -16162,7 +16162,7 @@ a[href] {
 
 .phase-progress__step--failed .phase-progress__dot {
   border-color: var(--err);
-  background: var(--err-soft);
+  background: color-mix(in srgb, var(--err) 14%, transparent);
 }
 
 @keyframes phase-pulse {
@@ -16172,7 +16172,7 @@ a[href] {
 
 .phase-progress__label {
   font-size: 11px;
-  color: var(--fg-soft);
+  color: var(--fg-dim);
   transition: color 0.3s;
   max-width: 120px;
   overflow: hidden;
@@ -16197,7 +16197,7 @@ a[href] {
 
 .phase-progress__more {
   font-size: 10px;
-  color: var(--fg-soft);
+  color: var(--fg-dim);
   padding: 0 6px;
 }
 
