@@ -173,6 +173,25 @@ function fmtTokens(n: number): string {
   return String(n);
 }
 
+// Cached canvas context for measuring label widths (used by skill overflow detection).
+let _measureCtx: CanvasRenderingContext2D | null = null;
+function getMeasureCtx(): CanvasRenderingContext2D | null {
+  if (!_measureCtx) {
+    const c = document.createElement("canvas");
+    _measureCtx = c.getContext("2d");
+  }
+  return _measureCtx;
+}
+
+function measureLabelWidth(text: string): number {
+  const ctx = getMeasureCtx();
+  if (!ctx) return text.length * 6.7;
+  const style = getComputedStyle(document.documentElement);
+  const fontFamily = style.getPropertyValue("--sans").trim() || "Inter, system-ui, -apple-system, sans-serif";
+  ctx.font = `11px ${fontFamily}`;
+  return ctx.measureText(text).width;
+}
+
 function fmtElapsed(ms: number): string {
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s`;
@@ -433,6 +452,13 @@ export function Composer({
   const moreMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const intentCloseTimerRef = useRef<number | null>(null);
   const moreCloseTimerRef = useRef<number | null>(null);
+  const quickBarRef = useRef<HTMLDivElement>(null);
+  const [moreSkillsOpen, setMoreSkillsOpen] = useState(false);
+  const [moreSkillsClosing, setMoreSkillsClosing] = useState(false);
+  const moreSkillsAnchorRef = useRef<HTMLButtonElement>(null);
+  const moreSkillsCloseTimerRef = useRef<number | null>(null);
+  const [hiddenSkills, setHiddenSkills] = useState<CommandInfo[]>([]);
+  const hiddenRef = useRef(false);
   const wasRunning = useRef(running);
   const composingRef = useRef(false);
   const lastCompositionEndAt = useRef(0);
@@ -484,6 +510,59 @@ export function Composer({
     () => commands.filter((c) => c.kind === "skill" || c.kind === "custom"),
     [commands],
   );
+
+  // --- Skill overflow detection ---
+  // Measure available width in the quick bar and calculate how many skill
+  // buttons fit; hide the rest behind a "+N" overflow button.
+  // Uses useLayoutEffect so the first measurement happens before paint (fix ③).
+  // Uses canvas.measureText for accurate CJK/Latin label widths (fix ①).
+  // Uses a ref to only subtract +N button width when it actually renders (fix ②).
+  useLayoutEffect(() => {
+    const el = quickBarRef.current;
+    if (!el || skillCommands.length === 0) {
+      setHiddenSkills([]);
+      hiddenRef.current = false;
+      return;
+    }
+
+    const measure = () => {
+      const hasHidden = hiddenRef.current;
+      const moreBtnPad = hasHidden ? 48 + 4 : 4; // +N button width + gap, only if rendered
+      const available = el.clientWidth - moreBtnPad;
+      if (available <= 0) {
+        setHiddenSkills([...skillCommands]);
+        hiddenRef.current = true;
+        return;
+      }
+
+      // Estimate each button's width: icon(13) + gap(3) + label + pad(12) + border(2) + gap(4)
+      let used = 0;
+      let splitAt = skillCommands.length;
+      for (let i = 0; i < skillCommands.length; i++) {
+        const labelW = measureLabelWidth(skillCommands[i].name);
+        const btnW = 13 + 3 + labelW + 12 + 2 + 4;
+        if (used + btnW > available) {
+          splitAt = i;
+          break;
+        }
+        used += btnW;
+      }
+
+      const hidden = skillCommands.slice(splitAt);
+      hiddenRef.current = hidden.length > 0;
+      setHiddenSkills((prev) => {
+        if (prev.length === hidden.length && prev.every((h, i) => h === hidden[i])) return prev;
+        return hidden;
+      });
+    };
+
+    // Synchronous first measurement — before paint, so no flash (fix ③)
+    measure();
+
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [skillCommands]);
 
   // --- slash argument completion ("/cmd <args>") --- mirrors the CLI: once past
   // the command word, the backend suggests sub-commands (/skill → list/show/…,
@@ -880,6 +959,34 @@ export function Composer({
   }, [clearMoreCloseTimer]);
 
   useEffect(() => () => clearMoreCloseTimer(), [clearMoreCloseTimer]);
+
+  // --- Skill overflow popover ---
+  const clearMoreSkillsCloseTimer = useCallback(() => {
+    if (moreSkillsCloseTimerRef.current !== null) {
+      clearTimeout(moreSkillsCloseTimerRef.current);
+      moreSkillsCloseTimerRef.current = null;
+    }
+  }, []);
+
+  const openMoreSkills = useCallback(() => {
+    clearMoreSkillsCloseTimer();
+    setMoreSkillsClosing(false);
+    setMoreSkillsOpen(true);
+  }, [clearMoreSkillsCloseTimer]);
+
+  const closeMoreSkills = useCallback((afterClose?: () => void) => {
+    clearMoreSkillsCloseTimer();
+    setMoreSkillsClosing(true);
+    window.requestAnimationFrame(() => setMoreSkillsOpen(false));
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    moreSkillsCloseTimerRef.current = window.setTimeout(() => {
+      moreSkillsCloseTimerRef.current = null;
+      setMoreSkillsClosing(false);
+      afterClose?.();
+    }, reduceMotion ? 0 : ANCHORED_POPOVER_CLOSE_MS);
+  }, [clearMoreSkillsCloseTimer]);
+
+  useEffect(() => () => clearMoreSkillsCloseTimer(), [clearMoreSkillsCloseTimer]);
 
   const fileDedupKey = async (file: File): Promise<AttachmentDedupKey> => ({
     hash: await sha256(file),
@@ -1759,6 +1866,35 @@ export function Composer({
           </div>
         )}
       </AnchoredPopover>
+      {hiddenSkills.length > 0 && (
+        <AnchoredPopover
+          open={moreSkillsOpen && !disabled && !running}
+          closing={moreSkillsClosing}
+          anchorRef={moreSkillsAnchorRef}
+          onClose={() => closeMoreSkills()}
+          className="composer-quick-menu"
+          align="end"
+        >
+          <div className="composer-access-menu__section">
+            <div className="composer-access-menu__label">{t("settings.tab.skills")}</div>
+            <div className="composer-more-menu__items" role="listbox" aria-label="More skills">
+              {hiddenSkills.map((cmd) => (
+                <button
+                  key={cmd.name}
+                  type="button"
+                  role="option"
+                  className="composer-quick-menu__item"
+                  onClick={() => { setText(t => t + "/" + cmd.name + " "); taRef.current?.focus(); closeMoreSkills(); }}
+                  disabled={running}
+                >
+                  <List size={14} />
+                  <span>{cmd.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </AnchoredPopover>
+      )}
       {menuMode === "slash" && (
         <SlashMenu items={slashMatches} activeIndex={active} onPick={pickCommand} onHover={setActive} />
       )}
@@ -2147,8 +2283,10 @@ export function Composer({
               )}
             </div>
             {skillCommands.length > 0 && (
-              <div className="composer-meta__control composer-meta__control--quick">
-                {skillCommands.map(cmd => (
+              <div ref={quickBarRef} className="composer-meta__control composer-meta__control--quick">
+                {skillCommands
+                  .filter(cmd => !hiddenSkills.includes(cmd))
+                  .map(cmd => (
                   <Tooltip key={cmd.name} label={cmd.description || cmd.name}>
                     <button
                       type="button"
@@ -2162,6 +2300,23 @@ export function Composer({
                     </button>
                   </Tooltip>
                 ))}
+                {hiddenSkills.length > 0 && (
+                  <Tooltip label={`+${hiddenSkills.length} more`}>
+                    <button
+                      ref={moreSkillsAnchorRef}
+                      type="button"
+                      className="composer-quick-action--overflow"
+                      onClick={() => (moreSkillsOpen || moreSkillsClosing ? closeMoreSkills() : openMoreSkills())}
+                      disabled={disabled || running}
+                      aria-haspopup="menu"
+                      aria-expanded={moreSkillsOpen && !moreSkillsClosing}
+                      aria-label={`+${hiddenSkills.length} more skills`}
+                    >
+                      <List size={13} />
+                      <span>+{hiddenSkills.length}</span>
+                    </button>
+                  </Tooltip>
+                )}
               </div>
             )}
             <div className="composer-meta__control composer-meta__control--approval">

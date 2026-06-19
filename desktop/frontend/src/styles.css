@@ -4767,6 +4767,8 @@ a[href] {
   gap: 4px;
   align-items: center;
   padding: 0 4px;
+  max-width: min(280px, 30vw);
+  overflow: hidden;
 }
 
 .composer-quick-action {
@@ -4793,6 +4795,61 @@ a[href] {
 
 .composer-quick-action__label {
   font-size: 11px;
+}
+
+/* Overflow skill button — "+N" pill that opens the skill overflow popover */
+.composer-quick-action--overflow {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px;
+  border: 1px solid var(--pill-border);
+  border-radius: 4px;
+  background: var(--bg-elev);
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.composer-quick-action--overflow:hover {
+  color: var(--fg);
+  background: var(--pill-bg);
+  border-color: var(--pill-fg);
+}
+
+/* Overflow skill popover menu */
+.composer-quick-menu {
+  min-width: 160px;
+  max-width: 280px;
+  padding: 6px;
+}
+
+.composer-quick-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.12s;
+}
+
+.composer-quick-menu__item:hover {
+  background: var(--bg-soft);
+  color: var(--fg);
 }
 
 .composer-meta__control--approval {
