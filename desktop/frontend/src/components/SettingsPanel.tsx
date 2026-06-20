@@ -1116,7 +1116,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   };
   return (
     <SettingsSection>
-      <SettingsField label={t("settings.language")}>
+      <SettingsField label={<><Globe size={13} /> {t("settings.language")}</>}>
         <div className="set-seg">
           {LANGUAGE_PREFS.map((pref) => (
             <button
@@ -3062,7 +3062,7 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
       {subtab === "usage" ? (
         <>
           <SettingsSection title={t("settings.modelUsage")}>
-            <SettingsField label={t("settings.defaultModel")}>
+            <SettingsField label={<><Cpu size={13} /> {t("settings.defaultModel")}</>}>
               <ModelPicker
                 s={s}
                 refs={refs}
@@ -3072,7 +3072,7 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
               />
             </SettingsField>
 
-            <SettingsField label={t("settings.plannerModel")}>
+            <SettingsField label={<><Brain size={13} /> {t("settings.plannerModel")}</>}>
               <ModelPicker
                 s={s}
                 refs={refs}
@@ -3083,7 +3083,7 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
               />
             </SettingsField>
 
-            <SettingsField label={t("settings.subagentModel")}>
+            <SettingsField label={<><Sparkles size={13} /> {t("settings.subagentModel")}</>}>
               <ModelPicker
                 s={s}
                 refs={refs}
@@ -3144,7 +3144,7 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
                 ))}
               </div>
             </SettingsField>
-            <SettingsField label={t("settings.reasoningLanguage")} hint={t("settings.reasoningLanguageHint")}>
+            <SettingsField label={<><Brain size={13} /> {t("settings.reasoningLanguage")}</>} hint={t("settings.reasoningLanguageHint")}>
               <div className="set-seg">
                 {(["auto", "zh", "en"] as const).map((lang) => (
                   <button
