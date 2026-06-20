@@ -1437,9 +1437,14 @@ func (c *Controller) applyPrometheus(input, display string) {
 // multiple sub-agents via parallel_tasks.
 func (c *Controller) applyOrchestrate(input, display string) {
 	args := strings.TrimSpace(strings.TrimPrefix(input, "/orchestrate"))
-	if args == "" {
+	if args == "" || args == "--strict" {
 		c.notice("usage: /orchestrate <project description>")
 		return
+	}
+	strict := false
+	if strings.HasPrefix(args, "--strict ") {
+		strict = true
+		args = strings.TrimPrefix(args, "--strict ")
 	}
 	c.mu.Lock()
 	hasGoal := c.goal != "" && c.goalStatus == GoalStatusRunning
@@ -1450,8 +1455,9 @@ func (c *Controller) applyOrchestrate(input, display string) {
 	}
 	prompt := orchestratePrompt + "\n\n## Project request\n\n" + args + "\n\nBegin by analyzing the request and dispatching sub-agents."
 	c.SetPlanMode(false)
+	c.GoalStrict(strict)
 	c.SetGoal("orchestrate: " + ShortGoalForNotice(args))
-	c.notice("orchestrate: starting project conductor mode")
+	c.notice(fmt.Sprintf("orchestrate: starting project conductor mode (strict=%v)", strict))
 	if c.runner != nil {
 		c.runGuarded(func(ctx context.Context) error {
 			return c.runGoalLoopWithRawDisplay(ctx, prompt, prompt, display)
