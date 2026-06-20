@@ -2668,6 +2668,12 @@ func projectTreeDiskCachePath() string {
 	return filepath.Join(desktopConfigDir(), projectTreeDiskCacheFile)
 }
 
+// projectTreeDiskCacheLoaded tracks whether we have already attempted the
+// disk cache. The stale-while-revalidate pattern only applies on cold startup;
+// once the tree has been built once in this process, all subsequent calls
+// skip the disk cache and rebuild directly.
+var projectTreeDiskCacheLoaded atomic.Bool
+
 // rebuildRequested flags that a background rebuild is needed. Set by
 // emitProjectTreeChanged; consumed by ListProjectTree.
 var rebuildRequested atomic.Bool
@@ -3830,8 +3836,10 @@ func (a *App) ListProjectTree() []ProjectNode {
 	buildStart := time.Now()
 
 	// Disk-cache path: on cold startup return the last-built tree instantly,
-	// then trigger a background rebuild.
-	if !rebuildRequested.Load() {
+	// then trigger a background rebuild. Only used once per process — after
+	// the first build, runtime status (Open/Running/Status) is always live.
+	if !projectTreeDiskCacheLoaded.Load() && !rebuildRequested.Load() {
+		projectTreeDiskCacheLoaded.Store(true)
 		if b, err := os.ReadFile(projectTreeDiskCachePath()); err == nil {
 			var cached []ProjectNode
 			if json.Unmarshal(b, &cached) == nil {
