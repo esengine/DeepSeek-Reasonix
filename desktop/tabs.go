@@ -2693,6 +2693,41 @@ var (
 
 const projectTreeCacheTTL = 2 * time.Second
 
+// --- Disk cache for instant cold-start sidebar -------------------------------
+
+const projectTreeDiskCacheFile = "desktop-project-tree-cache.json"
+
+func loadProjectTreeDiskCache() []ProjectNode {
+	path := filepath.Join(desktopConfigDir(), projectTreeDiskCacheFile)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var nodes []ProjectNode
+	if err := json.Unmarshal(b, &nodes); err != nil {
+		slog.Warn("loadProjectTreeDiskCache: corrupt", "path", path, "err", err)
+		return nil
+	}
+	return nodes
+}
+
+func saveProjectTreeDiskCache(nodes []ProjectNode) {
+	path := filepath.Join(desktopConfigDir(), projectTreeDiskCacheFile)
+	b, err := json.Marshal(nodes)
+	if err != nil {
+		slog.Warn("saveProjectTreeDiskCache: marshal error", "err", err)
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return
+	}
+	_ = os.WriteFile(path, b, 0o644)
+}
+
+// rebuildRequested flags that a background rebuild is needed. Set by
+// emitProjectTreeChanged; consumed by ListProjectTree.
+var rebuildRequested atomic.Bool
+
 func loadTopicTitles(workspaceRoot string) map[string]string {
 	m := map[string]string{}
 	b, err := readFileWithTimeout(topicTitlesPath(workspaceRoot), topicFileReadTimeout)
@@ -3607,6 +3642,11 @@ func (a *App) emitProjectTreeChanged() {
 
 	projectSessionCache.invalidate()
 
+	// Mark disk cache as stale: next ListProjectTree call that hits the
+	// disk cache will still return it instantly, but trigger a background
+	// rebuild to refresh the sidebar.
+	rebuildRequested.Store(true)
+
 	if a.projectTreeChangedHook != nil {
 		a.projectTreeChangedHook()
 		return
@@ -3849,7 +3889,7 @@ type topicSummary struct {
 func (a *App) ListProjectTree() []ProjectNode {
 	buildStart := time.Now()
 
-	// Fast path: return cached result if still valid (double-check pattern).
+	// Fast path: return in-memory cached result if still valid.
 	projectTreeCacheMu.Lock()
 	if len(projectTreeResultCache) > 0 && time.Now().Before(projectTreeCacheExpiry) {
 		result := projectTreeResultCache
@@ -3858,6 +3898,18 @@ func (a *App) ListProjectTree() []ProjectNode {
 		return result
 	}
 	projectTreeCacheMu.Unlock()
+
+	// Disk-cache path: on cold startup return the last-built tree instantly,
+	// then trigger a background rebuild. The user sees the sidebar without
+	// any perceived loading delay.
+	if !rebuildRequested.Load() {
+		if cached := loadProjectTreeDiskCache(); cached != nil {
+			rebuildRequested.Store(true)
+			go a.rebuildProjectTree()
+			slog.Info("ListProjectTree: disk cache hit", "nodes", len(cached), "elapsed", time.Since(buildStart).String())
+			return cached
+		}
+	}
 
 	// Serialize concurrent callers so only one full build runs at a time.
 	listProjectTreeMu.Lock()
@@ -3873,7 +3925,13 @@ func (a *App) ListProjectTree() []ProjectNode {
 	}
 	projectTreeCacheMu.Unlock()
 
-	slog.Info("ListProjectTree: start")
+	// No cache at all — first-ever run. Build synchronously.
+	return a.rebuildProjectTree()
+}
+
+func (a *App) rebuildProjectTree() []ProjectNode {
+	buildStart := time.Now()
+	slog.Info("rebuildProjectTree: start")
 	migrateLegacySessionsIntoGlobalTopics(config.SessionDir())
 	slog.Info("ListProjectTree: after migrateLegacy", "elapsed", time.Since(buildStart).String())
 	f := loadProjectsFile()
@@ -4177,13 +4235,18 @@ func (a *App) ListProjectTree() []ProjectNode {
 		out = append(out, node)
 	}
 
-	// Populate the short-lived result cache.
+	// Populate the short-lived in-memory cache.
 	ordered := applyPinnedProjectOrder(applyProjectTreeOrder(out, f.SidebarOrder), f.PinnedProjects)
 	projectTreeCacheMu.Lock()
 	projectTreeResultCache = ordered
 	projectTreeCacheExpiry = time.Now().Add(projectTreeCacheTTL)
 	projectTreeCacheMu.Unlock()
-	slog.Info("ListProjectTree: done", "projects", len(f.Projects), "out_nodes", len(ordered), "duration", time.Since(buildStart).String())
+
+	// Persist to disk so the next cold startup can return instantly.
+	saveProjectTreeDiskCache(ordered)
+	rebuildRequested.Store(false)
+
+	slog.Info("rebuildProjectTree: done", "projects", len(f.Projects), "out_nodes", len(ordered), "duration", time.Since(buildStart).String())
 	return ordered
 }
 
