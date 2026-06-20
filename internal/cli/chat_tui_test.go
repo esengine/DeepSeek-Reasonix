@@ -2081,3 +2081,50 @@ func TestShiftTabStillTogglesPlanUnderClassicShortcutLayout(t *testing.T) {
 		t.Fatalf("Shift+Tab changed approval mode to %q", got)
 	}
 }
+
+// TestForceGotoBottomScrollsToBottom verifies that when forceGotoBottom is set
+// (e.g., by replayActiveBranch after a session switch), the viewport always scrolls
+// to the bottom on the next Update call, even if the transcript content didn't
+// change in length. This prevents the bug where switching sessions with the same
+// number of lines leaves the viewport at an intermediate position.
+func TestForceGotoBottomScrollsToBottom(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	ch := make(chan event.Event, 1)
+	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
+	adv := func(m chatTUI, msg tea.Msg) chatTUI {
+		n, _ := m.Update(msg)
+		return n.(chatTUI)
+	}
+
+	// Set up a session with enough lines to overflow the viewport.
+	cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
+	for i := 0; i < 12; i++ {
+		cur = adv(cur, notice)
+	}
+	if !cur.viewport.AtBottom() {
+		t.Fatal("viewport should start at bottom")
+	}
+
+	// Scroll up to simulate reading history.
+	cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if cur.viewport.AtBottom() {
+		t.Fatal("wheel-up should break the bottom pin")
+	}
+
+	// Simulate what replayActiveBranch does: clear transcript and set forceGotoBottom.
+	// The new transcript happens to have the same length as before (12 lines).
+	cur.transcript = cur.transcript[:12] // keep same length
+	cur.transcriptDirty = true
+	cur.forceGotoBottom = true
+
+	// Trigger an Update with a no-op message (resize with same dimensions).
+	cur = adv(cur, tea.WindowSizeMsg{Width: 80, Height: 8})
+
+	// Viewport must be at bottom despite transcript length not changing.
+	if !cur.viewport.AtBottom() {
+		t.Error("forceGotoBottom should scroll viewport to bottom even when transcript length unchanged")
+	}
+	if cur.forceGotoBottom {
+		t.Error("forceGotoBottom should be cleared after scrolling")
+	}
+}
