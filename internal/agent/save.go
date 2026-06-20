@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -276,10 +277,13 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
+			slog.Debug("ListSessionOrder: dir does not exist", "dir", dir)
 			return nil, nil
 		}
+		slog.Warn("ListSessionOrder: read error", "dir", dir, "err", err)
 		return nil, err
 	}
+	slog.Debug("ListSessionOrder: reading dir", "dir", dir, "entries", len(entries))
 	var out []SessionOrderInfo
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
@@ -331,6 +335,7 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 			SchemaVersion:  schemaVersion,
 		})
 	}
+	slog.Debug("ListSessionOrder: found sessions", "dir", dir, "sessions", len(out))
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].LastActivityAt.Equal(out[j].LastActivityAt) {
 			return out[i].Path < out[j].Path
@@ -347,8 +352,10 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 func ListSessions(dir string) ([]SessionInfo, error) {
 	ordered, err := ListSessionOrder(dir)
 	if err != nil {
+		slog.Warn("ListSessions: ListSessionOrder error", "dir", dir, "err", err)
 		return nil, err
 	}
+	slog.Debug("ListSessions: ordered sessions", "dir", dir, "count", len(ordered))
 	var out []SessionInfo
 	for _, session := range ordered {
 		preview, turns := session.Preview, session.Turns
@@ -364,6 +371,7 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 		if turns == 0 {
 			// Never had user interaction — an empty conversation that should not
 			// appear in the history panel or the resume picker.
+			slog.Debug("ListSessions: skipping zero-turn session", "path", session.Path)
 			continue
 		}
 		out = append(out, SessionInfo{
@@ -378,6 +386,7 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 			TopicID:        session.TopicID,
 			TopicTitle:     session.TopicTitle,
 		})
+		slog.Debug("ListSessions: including session", "path", session.Path, "turns", turns, "scope", session.Scope, "topicID", session.TopicID)
 	}
 	return out, nil
 }

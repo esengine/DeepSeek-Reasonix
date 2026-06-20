@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -52,10 +53,26 @@ import (
 // `data:` frames.
 const eventChannel = "agent:event"
 
-// singleInstanceID is used by Wails to route a second desktop launch back to the
-// running instance. Keep it stable across releases so launcher/Dock/taskbar
-// reopen behavior remains predictable on every platform.
-const singleInstanceID = "com.reasonix.desktop"
+// singleInstanceID derives a lock ID from the binary's absolute path so that
+// binaries at different paths (e.g. a dev build vs. a packaged release .app)
+// get distinct single-instance locks and can run simultaneously. The driver is
+// `com.reasonix.desktop.<SHA256-of-path[:8]>` — the static prefix keeps the
+// names recognisable in system logs.
+//
+// When REASONIX_DEV is set, the lock is skipped entirely (see single_instance.go)
+// so contributors can run any number of dev instances without copying.
+func singleInstanceID() string {
+	abs, err := os.Executable()
+	if err != nil {
+		return "com.reasonix.desktop"
+	}
+	abs, err = filepath.EvalSymlinks(abs)
+	if err != nil {
+		abs, _ = filepath.Abs(abs)
+	}
+	h := sha256.Sum256([]byte(abs))
+	return "com.reasonix.desktop." + hex.EncodeToString(h[:8])
+}
 
 // PromptHistoryEntry is one user prompt extracted from a session JSONL file.
 // The frontend uses these for ↑/↓ prompt-history navigation.

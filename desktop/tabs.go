@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -2215,12 +2216,19 @@ func desktopMCPMigrationRoots(tabs desktopTabsFile) []string {
 
 func loadProjectsFile() desktopProjectFile {
 	path := filepath.Join(desktopConfigDir(), desktopProjectsFile)
-	b, err := os.ReadFile(path)
+	b, err := readFileWithTimeout(path, topicFileReadTimeout)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			slog.Warn("loadProjectsFile: read error (may be transient)", "path", path, "err", err)
+		}
 		return desktopProjectFile{}
 	}
 	var f desktopProjectFile
-	_ = json.Unmarshal(b, &f)
+	if err := json.Unmarshal(b, &f); err != nil {
+		slog.Warn("loadProjectsFile: corrupt JSON", "path", path, "err", err)
+		return desktopProjectFile{}
+	}
+	slog.Debug("loadProjectsFile: loaded", "path", path, "projects", len(f.Projects), "globalTopics", len(f.GlobalTopics))
 	return normalizeProjectsFile(f)
 }
 
@@ -2645,33 +2653,95 @@ func topicCreatedAtsPath(workspaceRoot string) string {
 	return filepath.Join(workspaceRoot, ".reasonix", topicCreatedAtsFile)
 }
 
+// readFileWithTimeout runs os.ReadFile in a goroutine with a timeout so that
+// cloud storage paths (Synology Drive, iCloud, etc.) or unmounted volumes
+// that block indefinitely do not hang the caller.
+func readFileWithTimeout(path string, timeout time.Duration) ([]byte, error) {
+	type result struct {
+		data []byte
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		data, err := os.ReadFile(path)
+		ch <- result{data, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.data, r.err
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("readFileWithTimeout: timed out after %v reading %s", timeout, path)
+	}
+}
+
+const topicFileReadTimeout = 200 * time.Millisecond
+
+// --- ListProjectTree optimizations --------------------------------------------
+
+// debounceEmitter fires a callback at most once per interval, merging multiple
+// triggers into a single call.
+type debounceEmitter struct {
+	mu       sync.Mutex
+	timer    *time.Timer
+	interval time.Duration
+}
+
+func newDebounceEmitter(interval time.Duration) *debounceEmitter {
+	return &debounceEmitter{interval: interval}
+}
+
+func (d *debounceEmitter) fire(fn func()) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.timer != nil {
+		d.timer.Stop()
+	}
+	d.timer = time.AfterFunc(d.interval, fn)
+}
+
+// projectTreeResultCache and related state for double-checked caching.
+var (
+	projectTreeCacheMu     sync.Mutex
+	projectTreeResultCache []ProjectNode
+	projectTreeCacheExpiry time.Time
+	listProjectTreeMu      sync.Mutex // serializes concurrent ListProjectTree builds
+)
+
+const projectTreeCacheTTL = 2 * time.Second
+
 func loadTopicTitles(workspaceRoot string) map[string]string {
 	m := map[string]string{}
-	b, err := os.ReadFile(topicTitlesPath(workspaceRoot))
+	b, err := readFileWithTimeout(topicTitlesPath(workspaceRoot), topicFileReadTimeout)
 	if err != nil {
+		slog.Debug("loadTopicTitles: error", "root", workspaceRoot, "err", err)
 		return m
 	}
 	_ = json.Unmarshal(b, &m)
+	slog.Debug("loadTopicTitles: loaded", "root", workspaceRoot, "topics", len(m))
 	return m
 }
 
 func loadTopicTitleSources(workspaceRoot string) map[string]string {
 	m := map[string]string{}
-	b, err := os.ReadFile(topicTitleSourcesPath(workspaceRoot))
+	b, err := readFileWithTimeout(topicTitleSourcesPath(workspaceRoot), topicFileReadTimeout)
 	if err != nil {
+		slog.Debug("loadTopicTitleSources: error", "root", workspaceRoot, "err", err)
 		return m
 	}
 	_ = json.Unmarshal(b, &m)
+	slog.Debug("loadTopicTitleSources: loaded", "root", workspaceRoot, "sources", len(m))
 	return m
 }
 
 func loadTopicCreatedAts(workspaceRoot string) map[string]int64 {
 	m := map[string]int64{}
-	b, err := os.ReadFile(topicCreatedAtsPath(workspaceRoot))
+	b, err := readFileWithTimeout(topicCreatedAtsPath(workspaceRoot), topicFileReadTimeout)
 	if err != nil {
+		slog.Debug("loadTopicCreatedAts: error", "root", workspaceRoot, "err", err)
 		return m
 	}
 	_ = json.Unmarshal(b, &m)
+	slog.Debug("loadTopicCreatedAts: loaded", "root", workspaceRoot, "topics", len(m))
 	return m
 }
 
@@ -2996,8 +3066,10 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 	// One-shot per dir: once the migration pass has completed, skip the full
 	// per-render session scan entirely.
 	if topicMigrationDone(dir) {
+		slog.Debug("migrateLegacy: already done", "dir", dir)
 		return nil
 	}
+	slog.Debug("migrateLegacy: starting", "dir", dir)
 	// Determine scope from the directory. The global session dir gets Global
 	// topics; a project session dir gets project-scoped topics under the
 	// matching workspace.
@@ -3138,6 +3210,7 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 	if !deferred {
 		markTopicMigrationDone(dir) // pass complete with nothing deferred
 	}
+	slog.Debug("migrateLegacy: done", "dir", dir, "migrated", len(migratedTopicIDs), "deferred", deferred)
 	return migratedTopicIDs
 }
 
@@ -3541,13 +3614,26 @@ func (a *App) setTabActivityStatus(tabID, status string) bool {
 	return true
 }
 
+var projectTreeDebouncer = newDebounceEmitter(200 * time.Millisecond)
+
 func (a *App) emitProjectTreeChanged() {
+	// Invalidate caches immediately so subsequent ListProjectTree calls
+	// return fresh data, even before the debounced event fires.
+	projectTreeCacheMu.Lock()
+	projectTreeResultCache = nil
+	projectTreeCacheExpiry = time.Time{}
+	projectTreeCacheMu.Unlock()
+
 	projectSessionCache.invalidate()
-	if a.projectTreeChangedHook != nil {
-		a.projectTreeChangedHook()
-		return
-	}
-	a.emitRuntimeEvent("project-tree:changed")
+
+	// Debounce only the event emission to prevent redundant frontend rebuilds.
+	projectTreeDebouncer.fire(func() {
+		if a.projectTreeChangedHook != nil {
+			a.projectTreeChangedHook()
+			return
+		}
+		a.emitRuntimeEvent("project-tree:changed")
+	})
 }
 
 func (a *App) emitRuntimeEvent(name string, payload ...interface{}) {
@@ -3783,7 +3869,35 @@ type topicSummary struct {
 }
 
 func (a *App) ListProjectTree() []ProjectNode {
+	buildStart := time.Now()
+
+	// Fast path: return cached result if still valid (double-check pattern).
+	projectTreeCacheMu.Lock()
+	if len(projectTreeResultCache) > 0 && time.Now().Before(projectTreeCacheExpiry) {
+		result := projectTreeResultCache
+		projectTreeCacheMu.Unlock()
+		slog.Info("ListProjectTree: cache hit (fast path)", "nodes", len(result))
+		return result
+	}
+	projectTreeCacheMu.Unlock()
+
+	// Serialize concurrent callers so only one full build runs at a time.
+	listProjectTreeMu.Lock()
+	defer listProjectTreeMu.Unlock()
+
+	// Double-check: another goroutine may have built the cache while we waited.
+	projectTreeCacheMu.Lock()
+	if len(projectTreeResultCache) > 0 && time.Now().Before(projectTreeCacheExpiry) {
+		result := projectTreeResultCache
+		projectTreeCacheMu.Unlock()
+		slog.Info("ListProjectTree: cache hit after mutex", "nodes", len(result))
+		return result
+	}
+	projectTreeCacheMu.Unlock()
+
+	slog.Info("ListProjectTree: start")
 	migrateLegacySessionsIntoGlobalTopics(config.SessionDir())
+	slog.Info("ListProjectTree: after migrateLegacy", "elapsed", time.Since(buildStart).String())
 	f := loadProjectsFile()
 	out := []ProjectNode{}
 	type runtimeSessionStatus struct {
@@ -3807,8 +3921,11 @@ func (a *App) ListProjectTree() []ProjectNode {
 		mergeMu sync.Mutex
 		wg      sync.WaitGroup
 	)
+	var timedOut atomic.Bool
+	knownDirs := a.knownSessionDirs()
+	slog.Info("ListProjectTree: knownSessionDirs", "count", len(knownDirs), "elapsed", time.Since(buildStart).String())
 	cacheToken := projectSessionCache.versionToken()
-	for _, dir := range a.knownSessionDirs() {
+	for _, dir := range knownDirs {
 		infos, titles, ok := projectSessionCache.get(dir)
 		if ok {
 			mergeMu.Lock()
@@ -3819,7 +3936,12 @@ func (a *App) ListProjectTree() []ProjectNode {
 		wg.Add(1)
 		dir := dir // capture
 		go func() {
-			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("ListProjectTree: goroutine panic", "dir", dir, "panic", r)
+				}
+				wg.Done()
+			}()
 
 			// Sidecar-backed listing: ListSessions reads turn count + preview from
 			// each session's .meta sidecar, so even large directories list in a few
@@ -3830,6 +3952,11 @@ func (a *App) ListProjectTree() []ProjectNode {
 				return
 			}
 			titles := loadSessionTitles(dir)
+
+			if timedOut.Load() {
+				return // discard late results to avoid shared-map race
+			}
+
 			projectSessionCache.put(dir, infos, titles, cacheToken)
 
 			mergeMu.Lock()
@@ -3837,7 +3964,22 @@ func (a *App) ListProjectTree() []ProjectNode {
 			mergeMu.Unlock()
 		}()
 	}
-	wg.Wait()
+	slog.Info("ListProjectTree: waiting for goroutines", "elapsed", time.Since(buildStart).String())
+	// wg.Wait with timeout: prevent cloud storage or unmounted volumes from
+	// blocking indefinitely. 5s is generous for local disk + cache hits.
+	wgDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(wgDone)
+	}()
+	select {
+	case <-wgDone:
+		slog.Info("ListProjectTree: goroutines done", "elapsed", time.Since(buildStart).String())
+	case <-time.After(5 * time.Second):
+		timedOut.Store(true)
+		slog.Warn("ListProjectTree: wg.Wait timed out after 5s, proceeding with partial results", "elapsed", time.Since(buildStart).String())
+	}
+	slog.Info("ListProjectTree: after wg.Wait", "elapsed", time.Since(buildStart).String())
 
 	runtimeSessionsByTopic := map[string][]runtimeSessionStatus{}
 	a.mu.RLock()
@@ -3969,6 +4111,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 	}
 
 	// Project sections.
+	slog.Info("ListProjectTree: processing projects", "elapsed", time.Since(buildStart).String(), "projects", len(f.Projects))
 	for _, p := range f.Projects {
 		title := p.Title
 		if title == "" {
@@ -3982,7 +4125,9 @@ func (a *App) ListProjectTree() []ProjectNode {
 		}
 
 		// Gather topics: explicit topic list + all known topic titles.
+		slog.Info("ListProjectTree: loadTopicTitles", "root", p.Root, "elapsed", time.Since(buildStart).String())
 		titleMap := loadTopicTitles(p.Root)
+		slog.Info("ListProjectTree: loadTopicCreatedAts", "root", p.Root, "titles", len(titleMap), "elapsed", time.Since(buildStart).String())
 		createdMap := loadTopicCreatedAts(p.Root)
 		topicIDs := pinnedTopicIDs(orderedTopicIDs(p.Topics, titleMap), p.PinnedTopics)
 
@@ -4018,7 +4163,14 @@ func (a *App) ListProjectTree() []ProjectNode {
 		out = append(out, node)
 	}
 
-	return applyPinnedProjectOrder(applyProjectTreeOrder(out, f.SidebarOrder), f.PinnedProjects)
+	// Populate the short-lived result cache.
+	ordered := applyPinnedProjectOrder(applyProjectTreeOrder(out, f.SidebarOrder), f.PinnedProjects)
+	projectTreeCacheMu.Lock()
+	projectTreeResultCache = ordered
+	projectTreeCacheExpiry = time.Now().Add(projectTreeCacheTTL)
+	projectTreeCacheMu.Unlock()
+	slog.Info("ListProjectTree: done", "projects", len(f.Projects), "out_nodes", len(ordered), "duration", time.Since(buildStart).String())
+	return ordered
 }
 
 func topicSummaryKey(scope, workspaceRoot, topicID string) string {
@@ -4465,37 +4617,42 @@ func (a *App) persistTabSessionPath(tab *WorkspaceTab, path string) {
 func (a *App) knownSessionDirs() []string {
 	seen := map[string]bool{}
 	out := []string{}
-	add := func(dir string) {
+	add := func(label, dir string) {
 		dir = strings.TrimSpace(dir)
 		if dir == "" {
+			slog.Debug("knownSessionDirs: skipping empty dir", "label", label)
 			return
 		}
 		if abs, err := filepath.Abs(dir); err == nil {
 			dir = abs
 		}
 		if seen[dir] {
+			slog.Debug("knownSessionDirs: duplicate", "label", label, "dir", dir)
 			return
 		}
 		seen[dir] = true
 		out = append(out, dir)
+		slog.Debug("knownSessionDirs: add", "label", label, "dir", dir)
 	}
-	add(config.SessionDir()) // legacy/global sessions from earlier desktop builds
-	add(desktopSessionDir(globalWorkspaceRoot()))
+	add("config.SessionDir()", config.SessionDir())
+	add("globalWorkspaceRoot", desktopSessionDir(globalWorkspaceRoot()))
 	for _, project := range loadProjectsFile().Projects {
 		dir := desktopSessionDir(project.Root)
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			slog.Debug("knownSessionDirs: project dir missing", "root", project.Root, "dir", dir)
 			continue // project dir removed or external volume unmounted
 		}
-		add(dir)
+		add("project:"+project.Root, dir)
 	}
 	a.mu.RLock()
 	for _, tab := range a.tabs {
-		add(tabSessionDir(tab))
+		add("tab:"+tab.ID, tabSessionDir(tab))
 	}
 	for _, tab := range a.detachedSessions {
-		add(tabSessionDir(tab))
+		add("detached:"+tab.ID, tabSessionDir(tab))
 	}
 	a.mu.RUnlock()
+	slog.Info("knownSessionDirs: result", "count", len(out), "dirs", out)
 	return out
 }
 
@@ -4568,8 +4725,10 @@ func (c *sessionListCache) get(dir string) ([]agent.SessionInfo, map[string]stri
 	defer c.mu.Unlock()
 	e, ok := c.byDir[dir]
 	if !ok {
+		slog.Debug("sessionListCache.get: miss", "dir", dir)
 		return nil, nil, false
 	}
+	slog.Debug("sessionListCache.get: hit", "dir", dir, "sessions", len(e.infos))
 	return e.infos, e.titles, true
 }
 
@@ -4579,14 +4738,17 @@ func (c *sessionListCache) versionToken() uint64 {
 
 func (c *sessionListCache) put(dir string, infos []agent.SessionInfo, titles map[string]string, token uint64) {
 	if c.version.Load() != token {
+		slog.Debug("sessionListCache.put: stale token", "dir", dir, "sessions", len(infos))
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.version.Load() != token {
+		slog.Debug("sessionListCache.put: stale token (post-lock)", "dir", dir, "sessions", len(infos))
 		return
 	}
 	c.byDir[dir] = sessionListCacheEntry{infos: infos, titles: titles}
+	slog.Debug("sessionListCache.put: cached", "dir", dir, "sessions", len(infos))
 }
 
 func (c *sessionListCache) invalidate() {
@@ -4594,6 +4756,7 @@ func (c *sessionListCache) invalidate() {
 	c.mu.Lock()
 	c.byDir = map[string]sessionListCacheEntry{}
 	c.mu.Unlock()
+	slog.Debug("sessionListCache: invalidated")
 }
 
 var projectSessionCache = &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
