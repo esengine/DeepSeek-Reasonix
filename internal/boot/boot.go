@@ -887,13 +887,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			plannerSess := agent.NewSession(agent.PlannerPromptWithContext(mem.Block()))
 			plannerTools := agent.PlannerToolRegistry(reg)
 			shouldPlan := control.TaskWarrantsPlanner
-		if classifier != nil {
-			cls := classifier
-			shouldPlan = func(input string) bool {
-				return control.TaskWarrantsPlannerClassified(ctx, input, cls)
+			if classifier != nil {
+				cls := classifier
+				shouldPlan = func(input string) bool {
+					return control.TaskWarrantsPlannerClassified(ctx, input, cls)
+				}
 			}
-		}
-		runner = agent.NewCoordinator(plannerProv, plannerSess, pe.Price, plannerTools, agent.Options{
+			runner = agent.NewCoordinator(plannerProv, plannerSess, pe.Price, plannerTools, agent.Options{
 				MaxSteps:          cfg.Agent.PlannerMaxSteps,
 				MaxStepsKey:       "agent.planner_max_steps",
 				Gate:              headlessGate,

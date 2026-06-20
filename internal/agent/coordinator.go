@@ -260,7 +260,6 @@ func plannerSink(sink event.Sink) event.Sink {
 	})
 }
 
-
 func formatHandoff(task, plan string) string {
 	return fmt.Sprintf(`# %s
 
