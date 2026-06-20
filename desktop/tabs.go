@@ -2066,12 +2066,15 @@ type desktopTabsFile struct {
 }
 
 func desktopConfigDir() string {
-	dir, err := os.UserConfigDir()
+	home, err := os.UserHomeDir()
 	if err != nil {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, ".reasonix")
+		dir, err := os.UserConfigDir()
+		if err != nil {
+			return filepath.Join(".", ".reasonix")
+		}
+		return filepath.Join(dir, "reasonix")
 	}
-	return filepath.Join(dir, "reasonix")
+	return filepath.Join(home, ".reasonix")
 }
 
 func (a *App) saveTabsLocked() {
@@ -2678,26 +2681,7 @@ const topicFileReadTimeout = 200 * time.Millisecond
 
 // --- ListProjectTree optimizations --------------------------------------------
 
-// debounceEmitter fires a callback at most once per interval, merging multiple
-// triggers into a single call.
-type debounceEmitter struct {
-	mu       sync.Mutex
-	timer    *time.Timer
-	interval time.Duration
-}
 
-func newDebounceEmitter(interval time.Duration) *debounceEmitter {
-	return &debounceEmitter{interval: interval}
-}
-
-func (d *debounceEmitter) fire(fn func()) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.timer != nil {
-		d.timer.Stop()
-	}
-	d.timer = time.AfterFunc(d.interval, fn)
-}
 
 // projectTreeResultCache and related state for double-checked caching.
 var (
@@ -3613,8 +3597,6 @@ func (a *App) setTabActivityStatus(tabID, status string) bool {
 	tab.ActivityStatus = status
 	return true
 }
-
-var projectTreeDebouncer = newDebounceEmitter(200 * time.Millisecond)
 
 func (a *App) emitProjectTreeChanged() {
 	// Invalidate caches so subsequent ListProjectTree calls return fresh data.
