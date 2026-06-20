@@ -1171,6 +1171,9 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 		case "/prometheus":
 			c.applyPrometheus(trimmed, display)
 			return
+		case "/orchestrate":
+			c.applyOrchestrate(trimmed, display)
+			return
 		}
 		if c.managementNotice(trimmed) {
 			return
@@ -1390,6 +1393,21 @@ func (c *Controller) applyPlanExec(input, display string) {
 // prometheusPrompt is the strategic planner system prompt.
 const prometheusPrompt = "You are Prometheus, a strategic planner. Interview the user one question at a time. Cover: scope, modules, files, constraints, tests. When ready, output a numbered plan with each step tagged by module. End with [goal:complete]. Do not implement.\n\nFor independent research directions, use parallel_tasks before planning."
 
+
+// orchestratePrompt is the system prompt for the project conductor mode.
+const orchestratePrompt = `You are the project conductor, coordinating a team of specialist sub-agents. Your model (Pro) handles planning and review; delegate execution to specialist sub-agents.
+
+Process:
+1. Analyze the user’s request and break it into independent work items
+2. For EACH independent item, dispatch a sub-agent using parallel_tasks
+3. Each sub-agent gets one clear goal and its relevant context
+4. After all sub-agents finish, review their outputs
+5. Summarize what was done, what needs follow-up, and end with [goal:complete]
+
+Key rules:
+- Delegate, don’t do it yourself — your job is coordination
+- One sub-agent per independent work item
+- Each sub-agent’s prompt must be self-contained (assume no shared context)`
 // applyPrometheus starts an interactive planning interview, inspired by OMO's
 // Prometheus agent. It enters goal mode with a structured interview prompt.
 func (c *Controller) applyPrometheus(input, display string) {
@@ -1408,6 +1426,32 @@ func (c *Controller) applyPrometheus(input, display string) {
 	c.SetGoal("plan: " + ShortGoalForNotice(args))
 	c.GoalStrict(strict)
 	c.notice("prometheus: starting planning interview")
+	if c.runner != nil {
+		c.runGuarded(func(ctx context.Context) error {
+			return c.runGoalLoopWithRawDisplay(ctx, prompt, prompt, display)
+		})
+	}
+}
+
+// applyOrchestrate starts a project conductor mode that delegates work to
+// multiple sub-agents via parallel_tasks.
+func (c *Controller) applyOrchestrate(input, display string) {
+	args := strings.TrimSpace(strings.TrimPrefix(input, "/orchestrate"))
+	if args == "" {
+		c.notice("usage: /orchestrate <project description>")
+		return
+	}
+	c.mu.Lock()
+	hasGoal := c.goal != "" && c.goalStatus == GoalStatusRunning
+	c.mu.Unlock()
+	if hasGoal {
+		c.notice("orchestrate: a goal is already running; use /goal clear first")
+		return
+	}
+	prompt := orchestratePrompt + "\n\n## Project request\n\n" + args + "\n\nBegin by analyzing the request and dispatching sub-agents."
+	c.SetPlanMode(false)
+	c.SetGoal("orchestrate: " + ShortGoalForNotice(args))
+	c.notice("orchestrate: starting project conductor mode")
 	if c.runner != nil {
 		c.runGuarded(func(ctx context.Context) error {
 			return c.runGoalLoopWithRawDisplay(ctx, prompt, prompt, display)
