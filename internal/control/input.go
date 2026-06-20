@@ -83,6 +83,12 @@ var syntheticPrefixes = []string{
 	"<compaction-summary>",
 	"Summary of the later conversation (compacted from here on):",
 	"Summary of earlier conversation (compacted up to here):",
+	// Goal loop synthetic messages — these are injected by the controller during
+	// goal continuation and should never trigger the planner in two-model mode.
+	"Continue pursuing the active goal.",
+	"The agent signaled goal completion and all tasks are marked done.",
+	"Goal signaled complete but issues remain:",
+	"No tool calls in recent turns.",
 }
 
 // Compose applies the plan-mode marker to a turn's text when plan mode is on,

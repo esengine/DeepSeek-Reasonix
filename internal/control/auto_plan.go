@@ -77,12 +77,18 @@ func TaskWarrantsPlanner(input string) bool {
 	if text == "" || strings.HasPrefix(text, "/") || strings.HasPrefix(text, PlanModeMarker) {
 		return false
 	}
+	if IsSyntheticUserMessage(text) {
+		return false
+	}
 	return !isLowRiskQuestion(strings.ToLower(text))
 }
 
 func autoPlanScore(input string) int {
 	text := strings.TrimSpace(input)
 	if text == "" || strings.HasPrefix(text, "/") || strings.HasPrefix(text, PlanModeMarker) {
+		return 0
+	}
+	if IsSyntheticUserMessage(text) {
 		return 0
 	}
 	lower := strings.ToLower(text)
