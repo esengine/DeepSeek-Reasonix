@@ -4149,7 +4149,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 		for _, tid := range topicIDs {
 			topicTitle := strings.TrimSpace(titleMap[tid])
 			if topicTitle == "" {
-				topicTitle = topicTitleForTab("project", p.Root, tid)
+				topicTitle = defaultTopicTitle
 			}
 			summary := topicSummaries[topicSummaryKey("project", p.Root, tid)]
 			open, running, status := topicRuntimeStatus(topicSummaryKey("project", p.Root, tid))
