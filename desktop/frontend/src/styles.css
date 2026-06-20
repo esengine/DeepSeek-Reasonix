@@ -18824,6 +18824,10 @@ a[href] {
   border-bottom-color: var(--border-soft);
 }
 
+:root[data-theme="light"] .topicbar {
+  background: #ffffff;
+}
+
 .app--darwin .app-chrome--tabs {
   padding-right: calc(var(--chrome-toggle-size) + var(--chrome-toggle-size) + 16px);
   background: color-mix(in srgb, var(--bg-soft) 90%, var(--bg-elev));
