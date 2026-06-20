@@ -1073,6 +1073,7 @@ command = "reasonix-missing-mockmcp"
 		"read_file",
 		"read_session",
 		"remember",
+		"search_sessions",
 		"slash_command",
 		"todo_write",
 		"wait",
