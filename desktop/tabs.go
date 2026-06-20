@@ -2179,8 +2179,7 @@ func (a *App) removeTabOrderLocked(tabID string) {
 }
 
 func loadTabsFile() desktopTabsFile {
-	path := filepath.Join(desktopConfigDir(), tabsFileName)
-	b, err := os.ReadFile(path)
+	b, err := readDesktopConfigFile(tabsFileName)
 	if err != nil {
 		return desktopTabsFile{}
 	}
@@ -2217,21 +2216,50 @@ func desktopMCPMigrationRoots(tabs desktopTabsFile) []string {
 	return roots
 }
 
+// readDesktopConfigFile reads a file from desktopConfigDir(), falling back to
+// the previous config location (~/Library/Application Support/reasonix/) for
+// backward compatibility. When a file is found at the old location it is copied
+// to the new location so subsequent reads go straight to the new path.
+func readDesktopConfigFile(name string) ([]byte, error) {
+	newPath := filepath.Join(desktopConfigDir(), name)
+	b, err := os.ReadFile(newPath)
+	if err == nil {
+		return b, nil
+	}
+	if !os.IsNotExist(err) {
+		return nil, err
+	}
+	// Try the legacy location.
+	oldDir, err := os.UserConfigDir()
+	if err != nil {
+		return nil, err
+	}
+	oldPath := filepath.Join(oldDir, "reasonix", name)
+	b, err = os.ReadFile(oldPath)
+	if err != nil {
+		return nil, err
+	}
+	// Found at old location — copy to new location so the next read skips this fallback.
+	if err := os.MkdirAll(desktopConfigDir(), 0o755); err == nil {
+		_ = os.WriteFile(newPath, b, 0o644)
+	}
+	return b, nil
+}
+
 func loadProjectsFile() desktopProjectFile {
-	path := filepath.Join(desktopConfigDir(), desktopProjectsFile)
-	b, err := readFileWithTimeout(path, topicFileReadTimeout)
+	b, err := readDesktopConfigFile(desktopProjectsFile)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			slog.Warn("loadProjectsFile: read error (may be transient)", "path", path, "err", err)
+			slog.Warn("loadProjectsFile: read error", "err", err)
 		}
 		return desktopProjectFile{}
 	}
 	var f desktopProjectFile
 	if err := json.Unmarshal(b, &f); err != nil {
-		slog.Warn("loadProjectsFile: corrupt JSON", "path", path, "err", err)
+		slog.Warn("loadProjectsFile: corrupt JSON", "err", err)
 		return desktopProjectFile{}
 	}
-	slog.Debug("loadProjectsFile: loaded", "path", path, "projects", len(f.Projects), "globalTopics", len(f.GlobalTopics))
+	slog.Debug("loadProjectsFile: loaded", "projects", len(f.Projects), "globalTopics", len(f.GlobalTopics))
 	return normalizeProjectsFile(f)
 }
 
@@ -2656,40 +2684,13 @@ func topicCreatedAtsPath(workspaceRoot string) string {
 	return filepath.Join(workspaceRoot, ".reasonix", topicCreatedAtsFile)
 }
 
-// readFileWithTimeout runs os.ReadFile in a goroutine with a timeout so that
-// cloud storage paths (Synology Drive, iCloud, etc.) or unmounted volumes
-// that block indefinitely do not hang the caller.
-func readFileWithTimeout(path string, timeout time.Duration) ([]byte, error) {
-	type result struct {
-		data []byte
-		err  error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		data, err := os.ReadFile(path)
-		ch <- result{data, err}
-	}()
-	select {
-	case r := <-ch:
-		return r.data, r.err
-	case <-time.After(timeout):
-		return nil, fmt.Errorf("readFileWithTimeout: timed out after %v reading %s", timeout, path)
-	}
-}
 
-const topicFileReadTimeout = 200 * time.Millisecond
 
 // --- ListProjectTree optimizations --------------------------------------------
 
-// projectTreeResultCache and related state for double-checked caching.
-var (
-	projectTreeCacheMu     sync.Mutex
-	projectTreeResultCache []ProjectNode
-	projectTreeCacheExpiry time.Time
-	listProjectTreeMu      sync.Mutex // serializes concurrent ListProjectTree builds
-)
+// --- ListProjectTree ---------------------------------------------------------
 
-const projectTreeCacheTTL = 2 * time.Second
+var listProjectTreeMu sync.Mutex // serializes concurrent ListProjectTree builds
 
 // --- Disk cache for instant cold-start sidebar -------------------------------
 
@@ -2728,7 +2729,7 @@ var rebuildRequested atomic.Bool
 
 func loadTopicTitles(workspaceRoot string) map[string]string {
 	m := map[string]string{}
-	b, err := readFileWithTimeout(topicTitlesPath(workspaceRoot), topicFileReadTimeout)
+	b, err := os.ReadFile(topicTitlesPath(workspaceRoot))
 	if err != nil {
 		slog.Debug("loadTopicTitles: error", "root", workspaceRoot, "err", err)
 		return m
@@ -2740,7 +2741,7 @@ func loadTopicTitles(workspaceRoot string) map[string]string {
 
 func loadTopicTitleSources(workspaceRoot string) map[string]string {
 	m := map[string]string{}
-	b, err := readFileWithTimeout(topicTitleSourcesPath(workspaceRoot), topicFileReadTimeout)
+	b, err := os.ReadFile(topicTitleSourcesPath(workspaceRoot))
 	if err != nil {
 		slog.Debug("loadTopicTitleSources: error", "root", workspaceRoot, "err", err)
 		return m
@@ -2752,7 +2753,7 @@ func loadTopicTitleSources(workspaceRoot string) map[string]string {
 
 func loadTopicCreatedAts(workspaceRoot string) map[string]int64 {
 	m := map[string]int64{}
-	b, err := readFileWithTimeout(topicCreatedAtsPath(workspaceRoot), topicFileReadTimeout)
+	b, err := os.ReadFile(topicCreatedAtsPath(workspaceRoot))
 	if err != nil {
 		slog.Debug("loadTopicCreatedAts: error", "root", workspaceRoot, "err", err)
 		return m
@@ -3632,12 +3633,8 @@ func (a *App) setTabActivityStatus(tabID, status string) bool {
 }
 
 func (a *App) emitProjectTreeChanged() {
-	// Invalidate caches so subsequent ListProjectTree calls return fresh data.
-	projectTreeCacheMu.Lock()
-	projectTreeResultCache = nil
-	projectTreeCacheExpiry = time.Time{}
-	projectTreeCacheMu.Unlock()
-
+	// Invalidate the session listing cache so the next rebuild picks up
+	// any newly created/deleted sessions.
 	projectSessionCache.invalidate()
 
 	// Mark disk cache as stale: next ListProjectTree call that hits the
@@ -3887,16 +3884,6 @@ type topicSummary struct {
 func (a *App) ListProjectTree() []ProjectNode {
 	buildStart := time.Now()
 
-	// Fast path: return in-memory cached result if still valid.
-	projectTreeCacheMu.Lock()
-	if len(projectTreeResultCache) > 0 && time.Now().Before(projectTreeCacheExpiry) {
-		result := projectTreeResultCache
-		projectTreeCacheMu.Unlock()
-		slog.Info("ListProjectTree: cache hit (fast path)", "nodes", len(result))
-		return result
-	}
-	projectTreeCacheMu.Unlock()
-
 	// Disk-cache path: on cold startup return the last-built tree instantly,
 	// then trigger a background rebuild. The user sees the sidebar without
 	// any perceived loading delay.
@@ -3912,16 +3899,6 @@ func (a *App) ListProjectTree() []ProjectNode {
 	// Serialize concurrent callers so only one full build runs at a time.
 	listProjectTreeMu.Lock()
 	defer listProjectTreeMu.Unlock()
-
-	// Double-check: another goroutine may have built the cache while we waited.
-	projectTreeCacheMu.Lock()
-	if len(projectTreeResultCache) > 0 && time.Now().Before(projectTreeCacheExpiry) {
-		result := projectTreeResultCache
-		projectTreeCacheMu.Unlock()
-		slog.Info("ListProjectTree: cache hit after mutex", "nodes", len(result))
-		return result
-	}
-	projectTreeCacheMu.Unlock()
 
 	// No cache at all — first-ever run. Build synchronously.
 	return a.rebuildProjectTree()
@@ -4235,10 +4212,6 @@ func (a *App) rebuildProjectTree() []ProjectNode {
 
 	// Populate the short-lived in-memory cache.
 	ordered := applyPinnedProjectOrder(applyProjectTreeOrder(out, f.SidebarOrder), f.PinnedProjects)
-	projectTreeCacheMu.Lock()
-	projectTreeResultCache = ordered
-	projectTreeCacheExpiry = time.Now().Add(projectTreeCacheTTL)
-	projectTreeCacheMu.Unlock()
 
 	// Persist to disk so the next cold startup can return instantly.
 	saveProjectTreeDiskCache(ordered)

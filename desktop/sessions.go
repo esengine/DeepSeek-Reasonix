@@ -50,7 +50,7 @@ func desktopSessionDir(root string) string {
 // loadSessionTitles reads the basename→title map (missing/corrupt → empty).
 func loadSessionTitles(dir string) map[string]string {
 	m := map[string]string{}
-	b, err := readFileWithTimeout(sessionTitlesPath(dir), topicFileReadTimeout)
+	b, err := os.ReadFile(sessionTitlesPath(dir))
 	if err != nil {
 		return m
 	}
