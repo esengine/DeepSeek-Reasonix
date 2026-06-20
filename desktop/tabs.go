@@ -2656,8 +2656,6 @@ func topicCreatedAtsPath(workspaceRoot string) string {
 	return filepath.Join(workspaceRoot, ".reasonix", topicCreatedAtsFile)
 }
 
-// --- ListProjectTree optimizations --------------------------------------------
-
 // --- ListProjectTree ---------------------------------------------------------
 
 var listProjectTreeMu sync.Mutex // serializes concurrent ListProjectTree builds
@@ -2666,31 +2664,8 @@ var listProjectTreeMu sync.Mutex // serializes concurrent ListProjectTree builds
 
 const projectTreeDiskCacheFile = "desktop-project-tree-cache.json"
 
-func loadProjectTreeDiskCache() []ProjectNode {
-	path := filepath.Join(desktopConfigDir(), projectTreeDiskCacheFile)
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	var nodes []ProjectNode
-	if err := json.Unmarshal(b, &nodes); err != nil {
-		slog.Warn("loadProjectTreeDiskCache: corrupt", "path", path, "err", err)
-		return nil
-	}
-	return nodes
-}
-
-func saveProjectTreeDiskCache(nodes []ProjectNode) {
-	path := filepath.Join(desktopConfigDir(), projectTreeDiskCacheFile)
-	b, err := json.Marshal(nodes)
-	if err != nil {
-		slog.Warn("saveProjectTreeDiskCache: marshal error", "err", err)
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return
-	}
-	_ = os.WriteFile(path, b, 0o644)
+func projectTreeDiskCachePath() string {
+	return filepath.Join(desktopConfigDir(), projectTreeDiskCacheFile)
 }
 
 // rebuildRequested flags that a background rebuild is needed. Set by
@@ -3855,14 +3830,16 @@ func (a *App) ListProjectTree() []ProjectNode {
 	buildStart := time.Now()
 
 	// Disk-cache path: on cold startup return the last-built tree instantly,
-	// then trigger a background rebuild. The user sees the sidebar without
-	// any perceived loading delay.
+	// then trigger a background rebuild.
 	if !rebuildRequested.Load() {
-		if cached := loadProjectTreeDiskCache(); cached != nil {
-			rebuildRequested.Store(true)
-			go a.rebuildProjectTree()
-			slog.Info("ListProjectTree: disk cache hit", "nodes", len(cached), "elapsed", time.Since(buildStart).String())
-			return cached
+		if b, err := os.ReadFile(projectTreeDiskCachePath()); err == nil {
+			var cached []ProjectNode
+			if json.Unmarshal(b, &cached) == nil {
+				rebuildRequested.Store(true)
+				go a.rebuildProjectTree()
+				slog.Info("ListProjectTree: disk cache hit", "nodes", len(cached), "elapsed", time.Since(buildStart).String())
+				return cached
+			}
 		}
 	}
 
@@ -3878,7 +3855,6 @@ func (a *App) rebuildProjectTree() []ProjectNode {
 	buildStart := time.Now()
 	slog.Info("rebuildProjectTree: start")
 	migrateLegacySessionsIntoGlobalTopics(config.SessionDir())
-	slog.Info("ListProjectTree: after migrateLegacy", "elapsed", time.Since(buildStart).String())
 	f := loadProjectsFile()
 	out := []ProjectNode{}
 	type runtimeSessionStatus struct {
@@ -3902,9 +3878,7 @@ func (a *App) rebuildProjectTree() []ProjectNode {
 		mergeMu sync.Mutex
 		wg      sync.WaitGroup
 	)
-	var timedOut atomic.Bool
 	knownDirs := a.knownSessionDirs()
-	slog.Info("ListProjectTree: knownSessionDirs", "count", len(knownDirs), "elapsed", time.Since(buildStart).String())
 	cacheToken := projectSessionCache.versionToken()
 	for _, dir := range knownDirs {
 		infos, titles, ok := projectSessionCache.get(dir)
@@ -3934,10 +3908,6 @@ func (a *App) rebuildProjectTree() []ProjectNode {
 			}
 			titles := loadSessionTitles(dir)
 
-			if timedOut.Load() {
-				return // discard late results to avoid shared-map race
-			}
-
 			projectSessionCache.put(dir, infos, titles, cacheToken)
 
 			mergeMu.Lock()
@@ -3945,22 +3915,7 @@ func (a *App) rebuildProjectTree() []ProjectNode {
 			mergeMu.Unlock()
 		}()
 	}
-	slog.Info("ListProjectTree: waiting for goroutines", "elapsed", time.Since(buildStart).String())
-	// wg.Wait with timeout: prevent cloud storage or unmounted volumes from
-	// blocking indefinitely. 5s is generous for local disk + cache hits.
-	wgDone := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(wgDone)
-	}()
-	select {
-	case <-wgDone:
-		slog.Info("ListProjectTree: goroutines done", "elapsed", time.Since(buildStart).String())
-	case <-time.After(5 * time.Second):
-		timedOut.Store(true)
-		slog.Warn("ListProjectTree: wg.Wait timed out after 5s, proceeding with partial results", "elapsed", time.Since(buildStart).String())
-	}
-	slog.Info("ListProjectTree: after wg.Wait", "elapsed", time.Since(buildStart).String())
+	wg.Wait()
 
 	runtimeSessionsByTopic := map[string][]runtimeSessionStatus{}
 	a.mu.RLock()
@@ -4092,7 +4047,6 @@ func (a *App) rebuildProjectTree() []ProjectNode {
 	}
 
 	// Project sections.
-	slog.Info("ListProjectTree: processing projects", "elapsed", time.Since(buildStart).String(), "projects", len(f.Projects))
 
 	// Load all project topic files concurrently since each is independent I/O
 	// and cloud storage paths (SynologyDrive, iCloud, etc.) may block or time
@@ -4184,7 +4138,11 @@ func (a *App) rebuildProjectTree() []ProjectNode {
 	ordered := applyPinnedProjectOrder(applyProjectTreeOrder(out, f.SidebarOrder), f.PinnedProjects)
 
 	// Persist to disk so the next cold startup can return instantly.
-	saveProjectTreeDiskCache(ordered)
+	if b, err := json.Marshal(ordered); err == nil {
+		path := projectTreeDiskCachePath()
+		_ = os.MkdirAll(filepath.Dir(path), 0o755)
+		_ = os.WriteFile(path, b, 0o644)
+	}
 	rebuildRequested.Store(false)
 
 	slog.Info("rebuildProjectTree: done", "projects", len(f.Projects), "out_nodes", len(ordered), "duration", time.Since(buildStart).String())
