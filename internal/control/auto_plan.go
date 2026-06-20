@@ -80,6 +80,21 @@ func TaskWarrantsPlanner(input string) bool {
 	return !isLowRiskQuestion(strings.ToLower(text))
 }
 
+func ShouldDelegateTask(input string) bool {
+	text := strings.TrimSpace(agent.StripTransientUserBlocks(input))
+	if text == "" || strings.HasPrefix(text, "/") || strings.HasPrefix(text, PlanModeMarker) {
+		return false
+	}
+	if IsSyntheticUserMessage(text) {
+		return false
+	}
+	words := strings.Fields(text)
+	if len(words) < 30 && !strings.Contains(text, "\n1.") && !strings.Contains(text, "\n- ") && !strings.Contains(text, "\n* ") {
+		return true
+	}
+	return false
+}
+
 func autoPlanScore(input string) int {
 	text := strings.TrimSpace(input)
 	if text == "" || strings.HasPrefix(text, "/") || strings.HasPrefix(text, PlanModeMarker) {

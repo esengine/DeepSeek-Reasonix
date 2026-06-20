@@ -265,7 +265,7 @@ const (
 const (
 	maxGoalAutoTurns  = 50
 	maxGoalIdleTurns  = 2
-	goalContinueTurn  = "Continue pursuing the active goal. If it is complete, provide the concise final result and end with [goal:complete]. If it is truly blocked on a user-owned decision after trying sensible defaults, end with [goal:blocked:<short reason>]. Otherwise do the next useful work and end with [goal:continue]."
+	goalContinueTurn  = "Continue pursuing the active goal. If it is complete, provide the concise final result and end with [goal:complete]. If it is truly blocked on a user-owned decision after trying sensible defaults, end with [goal:blocked:<short reason>]. Otherwise do the next useful work and end with [goal:continue]. Use parallel_tasks for independent sub-tasks; use deepseek-flash for simple changes."
 	goalSelfCheckTurn = "The agent signaled goal completion and all tasks are marked done. Before finalizing, perform a brief quality self-check:\n1. Verify any changed files compile or parse correctly\n2. Run the relevant tests if applicable\n3. Confirm the original requirements are met\nIf everything checks out, signal [goal:complete]. If issues are found, fix them and signal [goal:complete] when done."
 )
 
@@ -558,7 +558,7 @@ const planApprovalTool = "exit_plan_mode"
 
 // planApprovedMessage is the follow-up turn sent once the user approves a plan —
 // the in-context nudge to execute and keep the (already-seeded) task list honest.
-const planApprovedMessage = "Plan approved — plan mode is off; you’re cleared to make the changes without asking again. Implement the plan now. Use this serial workflow: 1) mark the first sub-step in_progress with todo_write (this establishes the task list); 2) execute the sub-step; 3) call complete_step with evidence — the host then marks that sub-step completed and moves the next one to in_progress for you. Repeat 2–3 for each remaining sub-step. You don’t need another todo_write to mark steps completed; each complete_step advances the list. Sign off one sub-step at a time — never batch multiple completions."
+const planApprovedMessage = "Plan approved — plan mode is off; you’re cleared to make the changes without asking again. Implement the plan now. Use this serial workflow: 1) mark the first sub-step in_progress with todo_write (this establishes the task list); 2) execute the sub-step; 3) call complete_step with evidence — the host then marks that sub-step completed and moves the next one to in_progress for you. Repeat 2–3 for each remaining sub-step. You don’t need another todo_write to mark steps completed; each complete_step advances the list. Sign off one sub-step at a time — never batch multiple completions. Use parallel_tasks for independent steps. For heavy cognitive work dispatch to deepseek-chat; for routine changes use deepseek-flash."
 
 // runTurn runs one model turn, then applies the plan-approval gate. This is the
 // single, frontend-agnostic plan flow: in plan mode the model just researches

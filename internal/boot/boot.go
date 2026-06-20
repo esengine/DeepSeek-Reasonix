@@ -897,6 +897,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				KeepPolicy:        keepPolicy,
 				ReasoningLanguage: cfg.ReasoningLanguage(),
 			}, executor, cfg.Agent.Temperature, sink, control.TaskWarrantsPlanner)
+			if cd, ok := runner.(interface{ SetShouldDelegate(func(string) bool) }); ok {
+				cd.SetShouldDelegate(control.ShouldDelegateTask)
+			}
 			label = entry.Model + " + planner " + pe.Model
 		}
 	}

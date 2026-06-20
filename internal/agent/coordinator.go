@@ -57,6 +57,7 @@ type Coordinator struct {
 	// trivial, non-work turn (a question, a greeting) skip straight to the
 	// executor instead of paying a planner round on it.
 	shouldPlan func(string) bool
+	shouldDelegate func(string) bool
 }
 
 // NewCoordinator wires a planner provider (with its own session) to an executor.
@@ -159,6 +160,11 @@ func (c *Coordinator) SetPlanMode(v bool) {
 // Run plans with the planner model, then hands the plan to the executor.
 func (c *Coordinator) Run(ctx context.Context, input string) error {
 	c.sink.Emit(event.Event{Kind: event.TurnStarted})
+	if c.shouldDelegate != nil && c.shouldDelegate(input) {
+		hint := "\n\nUse parallel_tasks with model=deepseek-flash for independent sub-tasks."
+		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · delegating"})
+		return c.executor.Run(ctx, input+hint)
+	}
 	if c.shouldPlan != nil && !c.shouldPlan(input) {
 		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing"})
 		return c.executor.Run(ctx, input)
@@ -170,6 +176,10 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 	}
 	c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing"})
 	return c.executor.Run(ctx, formatHandoff(input, plan))
+}
+
+func (c *Coordinator) SetShouldDelegate(fn func(string) bool) {
+	c.shouldDelegate = fn
 }
 
 // plan streams a plan from the planner and appends it to the planner session, so
