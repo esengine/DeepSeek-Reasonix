@@ -83,11 +83,11 @@ func (t *readSessionTool) Description() string {
 func (t *readSessionTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
   "type": "object",
-	"properties": {
-		"session": {
-			"type": "string",
-			"description": "Session file name (e.g. \"20260618-231556.000000000-gpt-4.jsonl\") or full path. Use list_sessions to see available sessions."
-		},
+  "properties": {
+    "session": {
+      "type": "string",
+      "description": "Session file name (e.g. "20260618-231556.000000000-gpt-4.jsonl") or full path. Use list_sessions to see available sessions."
+    },
     "max_turns": {
       "type": "integer",
       "description": "Maximum user-assistant turns to return (default 50). 0 = no limit."
