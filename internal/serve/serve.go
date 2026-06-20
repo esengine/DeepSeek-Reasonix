@@ -41,11 +41,18 @@ type Server struct {
 	titleProv  provider.Provider // lightweight flash provider for session titles
 	titlePrice *provider.Pricing
 	titles     *titleCache
+	auth       *authGate // nil when auth is disabled
 }
 
 // New builds a Server. bc must be the controller's event sink.
-func New(ctrl control.SessionAPI, bc *Broadcaster) *Server {
-	s := &Server{ctrl: ctrl, bc: bc, titles: newTitleCache(ctrl.SessionDir())}
+// serveCfg controls authentication (none, token, or password).
+func New(ctrl control.SessionAPI, bc *Broadcaster, serveCfg config.ServeConfig) *Server {
+	s := &Server{
+		ctrl:   ctrl,
+		bc:     bc,
+		titles: newTitleCache(ctrl.SessionDir()),
+		auth:   newAuthGate(serveCfg),
+	}
 	s.initTitleProvider()
 	return s
 }
@@ -56,6 +63,22 @@ func (s *Server) ctl() control.SessionAPI {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.ctrl
+}
+
+// AuthToken returns the pre-shared token when in token mode, or "" otherwise.
+func (s *Server) AuthToken() string {
+	if s.auth == nil {
+		return ""
+	}
+	return s.auth.Token()
+}
+
+// AuthMode returns the authentication mode: "none", "token", or "password".
+func (s *Server) AuthMode() string {
+	if s.auth == nil {
+		return "none"
+	}
+	return s.auth.Mode()
 }
 
 // initTitleProvider builds a lightweight flash-model provider used solely to
@@ -219,7 +242,7 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /sessions", s.sessions)
 	mux.HandleFunc("GET /skills", s.skills)
 	mux.HandleFunc("POST /delete-session", s.deleteSession)
-	return logMiddleware(csrfGuard(mux))
+	return logMiddleware(s.auth.middleware(csrfGuard(mux)))
 }
 
 // csrfGuard rejects state-changing requests that don't carry a JSON content type.
@@ -236,7 +259,7 @@ func csrfGuard(next http.Handler) http.Handler {
 			if i := strings.IndexByte(ct, ';'); i >= 0 {
 				ct = ct[:i]
 			}
-			if strings.TrimSpace(ct) != "application/json" {
+			if !strings.EqualFold(strings.TrimSpace(ct), "application/json") {
 				http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
 				return
 			}
