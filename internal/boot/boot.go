@@ -900,11 +900,6 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			if cd, ok := runner.(interface{ SetShouldDelegate(func(string) bool) }); ok {
 				cd.SetShouldDelegate(control.ShouldDelegateTask)
 			}
-			if cd, ok := runner.(interface{ SetSubAgentModel(string) }); ok {
-				if m := cfg.Agent.SubagentModel; m != "" {
-					cd.SetSubAgentModel(m)
-				}
-			}
 			label = entry.Model + " + planner " + pe.Model
 		}
 	}
