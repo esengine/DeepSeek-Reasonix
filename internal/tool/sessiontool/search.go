@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/provider"
@@ -155,23 +156,31 @@ func searchSession(msgs []provider.Message, query string) string {
 
 // matchContent checks if text contains the query and returns a truncated excerpt.
 func matchContent(text, query string) string {
+	query = strings.ToLower(query)
+	if query == "" {
+		return ""
+	}
+	// Use lowercased text for case-insensitive matching.
 	lower := strings.ToLower(text)
-	idx := strings.Index(lower, query)
-	if idx < 0 {
+	byteIdx := strings.Index(lower, query)
+	if byteIdx < 0 {
 		return ""
 	}
 
-	// Extract a window around the match
+	// Convert byte offset to rune position for correct slicing with multi-byte chars.
 	runes := []rune(text)
+	matchRune := utf8.RuneCountInString(lower[:byteIdx])
+
+	const windowRunes = 180 // total runes for the excerpt (~60 before + ~120 after)
 	start := 0
-	if idx > 60 {
-		start = idx - 60
-		// Find a word boundary
+	if matchRune > int(windowRunes/3) {
+		start = matchRune - int(windowRunes/3)
+		// Back up to a word boundary.
 		for start > 0 && runes[start] != ' ' {
 			start--
 		}
 	}
-	end := idx + len([]rune(query)) + 120
+	end := matchRune + len([]rune(query)) + int(windowRunes*2/3)
 	if end > len(runes) {
 		end = len(runes)
 	}

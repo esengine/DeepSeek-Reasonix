@@ -3,6 +3,7 @@ package sessiontool
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -349,5 +350,103 @@ func TestCleanupPendingContract(t *testing.T) {
 	_, err := tool.Execute(context.Background(), json.RawMessage(`{"session":"session.jsonl"}`))
 	if err == nil {
 		t.Fatal("read_session should reject cleanup-pending session created by agent.MarkCleanupPending")
+	}
+}
+
+func TestMatchContent_Ascii(t *testing.T) {
+	got := matchContent("Hello World, this is a test", "world")
+	if !strings.Contains(got, "World") {
+		t.Fatalf("expected excerpt containing 'World', got %q", got)
+	}
+}
+
+func TestMatchContent_Chinese(t *testing.T) {
+	text := "这是一个测试文本，用于验证中文搜索功能"
+	got := matchContent(text, "搜索")
+	if !strings.Contains(got, "搜索") {
+		t.Fatalf("expected excerpt containing '搜索', got %q", got)
+	}
+	if len([]rune(got)) <= len("搜索") {
+		t.Fatal("excerpt too short, context window missing")
+	}
+}
+
+func TestMatchContent_Emoji(t *testing.T) {
+	text := "Hello 🎉 World! This is a test with emoji 🚀 for search"
+	got := matchContent(text, "emoji")
+	if !strings.Contains(got, "emoji") {
+		t.Fatalf("expected excerpt containing 'emoji', got %q", got)
+	}
+}
+
+func TestMatchContent_NoMatch(t *testing.T) {
+	got := matchContent("Hello World", "golang")
+	if got != "" {
+		t.Fatalf("expected empty for no match, got %q", got)
+	}
+}
+
+func TestMatchContent_Boundary(t *testing.T) {
+	// Very long text where the match is near the end
+	prefix := ""
+	for i := 0; i < 50; i++ {
+		prefix += "word "
+	}
+	text := prefix + "needle" + prefix
+	got := matchContent(text, "needle")
+	if got == "" {
+		t.Fatal("expected match in long text")
+	}
+	if !strings.Contains(got, "...") {
+		t.Fatal("expected truncation markers for boundary match")
+	}
+}
+
+func TestSearchSession(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleUser, Content: "Hello, can you help me with my project?"},
+		{Role: provider.RoleAssistant, Content: "Sure! What kind of project is it? I can help with Go, Python, and more."},
+		{Role: provider.RoleUser, Content: "It's a Go backend project with database integration."},
+		{Role: provider.RoleAssistant, Content: "Great, I'd recommend using the standard library database/sql package."},
+		// Tool results should be excluded
+		{Role: provider.RoleTool, Content: "tool output here"},
+	}
+	result := searchSession(msgs, "database")
+	if result == "" {
+		t.Fatal("expected match for 'database'")
+	}
+	if strings.Contains(result, "tool output") {
+		t.Fatal("tool results should be excluded from search")
+	}
+}
+
+func TestSearchSession_LimitExcerpts(t *testing.T) {
+	var msgs []provider.Message
+	for i := 0; i < 10; i++ {
+		msgs = append(msgs, provider.Message{Role: provider.RoleUser, Content: fmt.Sprintf("message %d with keyword", i)})
+	}
+	result := searchSession(msgs, "keyword")
+	lines := strings.Count(result, "\n") + 1
+	if lines > 3 {
+		t.Fatalf("expected at most 3 excerpts, got %d", lines)
+	}
+}
+
+func TestSearchSession_NoMatch(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleUser, Content: "Hello world"},
+		{Role: provider.RoleAssistant, Content: "Hi there"},
+	}
+	result := searchSession(msgs, "golang")
+	if result != "" {
+		t.Fatalf("expected empty for no match, got %q", result)
+	}
+}
+
+func TestMatchContent_QueryLength(t *testing.T) {
+	// Query that's longer than the text itself
+	got := matchContent("short", "a very long query that should not be found")
+	if got != "" {
+		t.Fatalf("expected empty for non-matching long query, got %q", got)
 	}
 }
