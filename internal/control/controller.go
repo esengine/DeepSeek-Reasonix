@@ -953,16 +953,10 @@ func (c *Controller) saveGoalState() {
 	}
 	data, err := json.Marshal(state)
 	if err != nil {
-		slog.Warn("controller: marshal goal state", "err", err)
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(c.goalStatePath), 0o755); err != nil {
-		slog.Warn("controller: goal state dir", "err", err)
-		return
-	}
-	if err := os.WriteFile(c.goalStatePath, data, 0o644); err != nil {
-		slog.Warn("controller: write goal state", "err", err)
-	}
+	_ = os.MkdirAll(filepath.Dir(c.goalStatePath), 0o755)
+	_ = os.WriteFile(c.goalStatePath, data, 0o644)
 }
 
 // goalState is the serializable form of a running goal.
@@ -1170,6 +1164,9 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 			return
 		case "/prometheus":
 			c.applyPrometheus(trimmed, display)
+			return
+		case "/orchestrate":
+			c.applyOrchestrate(trimmed, display)
 			return
 		}
 		if c.managementNotice(trimmed) {
@@ -1390,6 +1387,21 @@ func (c *Controller) applyPlanExec(input, display string) {
 // prometheusPrompt is the strategic planner system prompt.
 const prometheusPrompt = "You are Prometheus, a strategic planner. Interview the user one question at a time. Cover: scope, modules, files, constraints, tests. When ready, output a numbered plan with each step tagged by module. End with [goal:complete]. Do not implement.\n\nFor independent research directions, use parallel_tasks before planning."
 
+// orchestratePrompt is the system prompt for the project conductor mode.
+const orchestratePrompt = `You are the project conductor, coordinating a team of specialist sub-agents. Your model (Pro) handles planning and review; delegate execution to sub-agents (Flash).
+
+Process:
+1. Analyze the user’s request and break it into independent work items
+2. For EACH independent item, dispatch a sub-agent using parallel_tasks with model="deepseek-flash"
+3. Each sub-agent gets one clear goal and its relevant context
+4. After all sub-agents finish, review their outputs
+5. Summarize what was done, what needs follow-up, and end with [goal:complete]
+
+Key rules:
+- Delegate, don’t do it yourself — your job is coordination
+- One sub-agent per independent work item
+- Each sub-agent’s prompt must be self-contained (assume no shared context)
+- If items have dependencies, use depends_on in parallel_tasks`
 // applyPrometheus starts an interactive planning interview, inspired by OMO's
 // Prometheus agent. It enters goal mode with a structured interview prompt.
 func (c *Controller) applyPrometheus(input, display string) {
@@ -1408,6 +1420,25 @@ func (c *Controller) applyPrometheus(input, display string) {
 	c.SetGoal("plan: " + ShortGoalForNotice(args))
 	c.GoalStrict(strict)
 	c.notice("prometheus: starting planning interview")
+	if c.runner != nil {
+		c.runGuarded(func(ctx context.Context) error {
+			return c.runGoalLoopWithRawDisplay(ctx, prompt, prompt, display)
+		})
+	}
+}
+
+// applyOrchestrate starts a project conductor mode that delegates work to
+// multiple sub-agents via parallel_tasks.
+func (c *Controller) applyOrchestrate(input, display string) {
+	args := strings.TrimSpace(strings.TrimPrefix(input, "/orchestrate"))
+	if args == "" {
+		c.notice("usage: /orchestrate <project description>")
+		return
+	}
+	prompt := orchestratePrompt + "\n\n## Project request\n\n" + args + "\n\nBegin by analyzing the request and dispatching sub-agents."
+	c.SetPlanMode(false)
+	c.SetGoal("orchestrate: " + ShortGoalForNotice(args))
+	c.notice("orchestrate: starting project conductor mode")
 	if c.runner != nil {
 		c.runGuarded(func(ctx context.Context) error {
 			return c.runGoalLoopWithRawDisplay(ctx, prompt, prompt, display)
@@ -2206,14 +2237,11 @@ func (c *Controller) forkNamed(turn int, name string, switchToFork bool) (string
 	if err := sess.Save(newPath); err != nil {
 		return "", c.rewindFail(err)
 	}
-	forkPreview, forkTurns := agent.SessionPreviewFromMessages(forked)
 	if err := agent.SaveBranchMeta(newPath, agent.BranchMeta{
 		Name:             strings.TrimSpace(name),
 		ParentID:         parentID,
 		ForkTurn:         turn,
 		ForkMessageIndex: boundary,
-		Preview:          forkPreview,
-		Turns:            forkTurns,
 	}); err != nil {
 		return "", c.rewindFail(err)
 	}
@@ -2276,14 +2304,11 @@ func (c *Controller) Branch(name string) (string, error) {
 	if err := sess.Save(newPath); err != nil {
 		return "", c.rewindFail(err)
 	}
-	branchPreview, branchTurns := agent.SessionPreviewFromMessages(branched)
 	if err := agent.SaveBranchMeta(newPath, agent.BranchMeta{
 		Name:             strings.TrimSpace(name),
 		ParentID:         parentID,
 		ForkTurn:         -1,
 		ForkMessageIndex: len(branched),
-		Preview:          branchPreview,
-		Turns:            branchTurns,
 	}); err != nil {
 		return "", c.rewindFail(err)
 	}
