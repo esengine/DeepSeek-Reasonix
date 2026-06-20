@@ -193,6 +193,11 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 // so we can skip the executor entirely.
 func isNoOpPlan(plan string) bool {
 	lower := strings.ToLower(strings.TrimSpace(plan))
+	if lower == "" {
+		return true
+	}
+
+	// Exact / prefix-matched no-op phrases (EN + ZH).
 	noOp := []string{
 		"no changes needed",
 		"no changes required",
@@ -204,6 +209,19 @@ func isNoOpPlan(plan string) bool {
 		"already implemented",
 		"already resolved",
 		"[no_changes]",
+		"无需改动",
+		"无需修改",
+		"不需要修改",
+		"不需要改",
+		"不用改",
+		"不用修改",
+		"不必改动",
+		"无需更改",
+		"没有问题",
+		"没有需要修改",
+		"已经正确处理",
+		"已经实现了",
+		"已经解决了",
 	}
 	for _, phrase := range noOp {
 		if strings.Contains(lower, phrase) {
