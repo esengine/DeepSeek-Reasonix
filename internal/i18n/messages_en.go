@@ -183,6 +183,7 @@ var English = Messages{
 	CmdLanguage:     "switch CLI language",
 	CmdSkill:        "manage skills",
 	CmdVerbose:      "toggle thinking text",
+	CmdReloadCmd:    "reload custom commands",
 	CmdDiffFold:     "toggle diff fold/expand",
 	CmdSandbox:      "show sandbox status",
 	CmdEffort:       "set reasoning effort",
