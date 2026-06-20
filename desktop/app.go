@@ -1452,6 +1452,30 @@ func (a *App) ListSessions() []SessionMeta {
 	return out
 }
 
+// SearchSessions filters listed sessions by keyword match on preview or title.
+func (a *App) SearchSessions(query string, maxResults int) []SessionMeta {
+	if query == "" {
+		return nil
+	}
+	if maxResults <= 0 {
+		maxResults = 10
+	}
+	all := a.ListSessions()
+	q := strings.ToLower(query)
+	var out []SessionMeta
+	for _, s := range all {
+		if len(out) >= maxResults {
+			break
+		}
+		preview := strings.ToLower(s.Preview)
+		title := strings.ToLower(s.Title)
+		if strings.Contains(preview, q) || strings.Contains(title, q) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // ListTrashedSessions returns sessions that were moved to the local trash,
 // newest-deleted first. These can be previewed, restored, or permanently purged.
 func (a *App) ListTrashedSessions() []SessionMeta {

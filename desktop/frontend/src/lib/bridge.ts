@@ -163,6 +163,7 @@ export interface AppBindings {
   DeleteSession(path: string): Promise<void>;
   RestoreSession(path: string): Promise<void>;
   PurgeTrashedSession(path: string): Promise<void>;
+  SearchSessions(query: string, maxResults?: number): Promise<SessionMeta[]>;
   RenameSession(path: string, title: string): Promise<void>;
   ScanPromptHistory(nonce: string): Promise<PromptHistoryResult>;
   ListWorkspaces(): Promise<WorkspaceView[]>;
@@ -1736,6 +1737,20 @@ function makeMockApp(): AppBindings {
     },
     async ListTrashedSessions() {
       return trashedSessions.map((s) => ({ ...s }));
+    },
+    async SearchSessions(query: string, maxResults?: number) {
+      const q = query.toLowerCase();
+      const limit = maxResults ?? 10;
+      const results: SessionMeta[] = [];
+      for (const s of sessions) {
+        if (results.length >= limit) break;
+        const preview = (s.preview ?? "").toLowerCase();
+        const title = (s.title ?? "").toLowerCase();
+        if (preview.includes(q) || title.includes(q)) {
+          results.push(s);
+        }
+      }
+      return results;
     },
     async ResumeSession(path: string) {
       sessions.forEach((s) => {
