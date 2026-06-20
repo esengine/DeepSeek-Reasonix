@@ -297,50 +297,43 @@ func TestCoordinatorPlannerMaxStepsZeroIsUnlimited(t *testing.T) {
 	}
 }
 
-func TestCoordinatorNudgesExecutorThatAnswersWithoutActing(t *testing.T) {
+func TestExecutorHandoffAcceptsTextOnlyFinalAnswer(t *testing.T) {
+	// Regression test for https://github.com/esengine/DeepSeek-Reasonix/issues/4867
+	// Executor handoff may be pure relay — guidance-only tasks don't require
+	// tool use. The executor should be able to give a text-only final answer
+	// without being nudged to use tools.
 	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
-		{Type: provider.ChunkText, Text: "Write the requested skill file."},
+		{Type: provider.ChunkText, Text: "Here is a step-by-step guide for the user."},
 		{Type: provider.ChunkDone},
 	}}
-	// The first turn is a plain final answer with no tool call and no
-	// planner-vocabulary — the nudge must fire on the missing action, not on words.
+	// Executor gives a text-only final answer (guidance relay) — no tool calls.
 	exec := &mockProvider{name: "executor", streams: [][]provider.Chunk{
 		{
-			{Type: provider.ChunkText, Text: "这个计划看起来没问题,应该很好实现。"},
-			{Type: provider.ChunkDone},
-		},
-		{
-			{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "write_file", Arguments: `{"path":"kan-tu.md"}`}},
-			{Type: provider.ChunkDone},
-		},
-		{
-			{Type: provider.ChunkText, Text: "Done."},
+			{Type: provider.ChunkText, Text: "Follow these steps: 1. Download the file. 2. Install it."},
 			{Type: provider.ChunkDone},
 		},
 	}}
 
 	execReg := tool.NewRegistry()
-	execReg.Add(coordinatorTestTool{name: "write_file", readOnly: false, output: "wrote file"})
 	executor := New(exec, execReg, NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "install the skill"); err != nil {
+	if err := coord.Run(context.Background(), "how do I install this?"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got := len(exec.requests); got != 3 {
-		t.Fatalf("executor requests = %d, want answer-without-acting, nudge tool call, final answer", got)
-	}
-	if got := lastUser(exec.requests[1]); !strings.Contains(got, "Use your available tools now to carry out the task") {
-		t.Fatalf("second executor request missing handoff nudge message: %q", got)
+	// Executor should only need one request — the text-only final answer.
+	// No nudge/retry should occur.
+	if got := len(exec.requests); got != 1 {
+		t.Fatalf("executor requests = %d, want 1 (text-only final answer, no nudge)", got)
 	}
 }
 
-func TestCoordinatorDoesNotNudgeExecutorThatActs(t *testing.T) {
+func TestCoordinatorExecutorToolUseThenFinalAnswer(t *testing.T) {
 	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
 		{Type: provider.ChunkText, Text: "Write the requested skill file."},
 		{Type: provider.ChunkDone},
 	}}
-	// Executor calls a tool on its first turn, then answers — no nudge expected.
+	// Executor calls a tool on its first turn, then gives a final answer.
 	exec := &mockProvider{name: "executor", streams: [][]provider.Chunk{
 		{
 			{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "write_file", Arguments: `{"path":"kan-tu.md"}`}},
@@ -361,12 +354,7 @@ func TestCoordinatorDoesNotNudgeExecutorThatActs(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := len(exec.requests); got != 2 {
-		t.Fatalf("executor requests = %d, want tool call + final answer with no nudge", got)
-	}
-	for i, req := range exec.requests {
-		if strings.Contains(lastUser(req), "Use your available tools now to carry out the task") {
-			t.Fatalf("request %d unexpectedly received a handoff nudge", i)
-		}
+		t.Fatalf("executor requests = %d, want tool call + final answer", got)
 	}
 }
 

@@ -843,11 +843,6 @@ func TestIsSyntheticUserMessage(t *testing.T) {
 			want:  true,
 		},
 		{
-			name:  "executor handoff",
-			input: "You are already in the executor phase. The planner's read-only limitations do not apply to you.",
-			want:  true,
-		},
-		{
 			name:  "regular user message",
 			input: "explain this function",
 			want:  false,

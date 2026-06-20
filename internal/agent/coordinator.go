@@ -78,9 +78,6 @@ func NewCoordinator(planner provider.Provider, plannerSession *Session, plannerP
 		plannerOptions.UsageSource = event.UsageSourcePlanner
 		plannerAgent = New(planner, plannerTools, plannerSession, plannerOptions, plannerSink(sink))
 	}
-	if executor != nil {
-		executor.executorHandoffGuard = true
-	}
 	return &Coordinator{
 		planner:        planner,
 		plannerSess:    plannerSession,

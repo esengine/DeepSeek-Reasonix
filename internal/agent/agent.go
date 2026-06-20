@@ -82,7 +82,6 @@ var planModeGoWriteOrExecArgs = map[string]bool{
 const maxFinalReadinessBlocks = 3
 const maxEmptyFinalBlocks = 3
 const maxStreamRecoveries = 1
-const maxExecutorHandoffNudges = 1
 
 // Renderer redraws the assistant's final-answer text as styled output. It is
 // applied only after a turn's text stream completes, so the user sees raw
@@ -204,19 +203,16 @@ type ToolHooks interface {
 // Agent drives a single task: a Provider, a tool Registry, and a Session wired
 // into the main loop.
 type Agent struct {
-	prov        provider.Provider
-	tools       *tool.Registry
-	session     *Session
-	sessMu      sync.Mutex // guards the session pointer for external Session()/SetSession
-	maxSteps    int
-	maxStepsKey string
-	// executorHandoffGuard is enabled by Coordinator for the executor agent. The
-	// per-turn marker check in Run keeps ordinary single-model turns unaffected.
-	executorHandoffGuard bool
-	temperature          float64
-	pricing              *provider.Pricing
-	usageSource          string
-	reasoningLanguage    atomic.Value // string: auto|zh|en
+	prov              provider.Provider
+	tools             *tool.Registry
+	session           *Session
+	sessMu            sync.Mutex // guards the session pointer for external Session()/SetSession
+	maxSteps          int
+	maxStepsKey       string
+	temperature       float64
+	pricing           *provider.Pricing
+	usageSource       string
+	reasoningLanguage atomic.Value // string: auto|zh|en
 
 	// sink receives the turn's typed event stream (reasoning/text deltas, tool
 	// dispatch/results, usage, notices). The agent no longer formats output
@@ -686,10 +682,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 
 	finalReadinessBlocks := 0
 	emptyFinalBlocks := 0
-	handoffNudges := 0
-	usedAnyTool := false
 	streamRecoveries := 0
-	executorHandoff := a.executorHandoffGuard && strings.Contains(input, executorHandoffMarker)
 	for step := 0; a.maxSteps <= 0 || step < a.maxSteps; step++ {
 		// Consume a queued steer and persist it to the session so it
 		// survives tab switches and history replay. The model sees it as
@@ -781,13 +774,10 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 				a.maybeCompact(ctx, usage)
 				continue
 			}
-			if executorHandoff && !usedAnyTool && handoffNudges < maxExecutorHandoffNudges {
-				handoffNudges++
-				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "executor answered without taking any action; nudging it to use its tools"})
-				a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withReasoningLanguage(executorHandoffRetryMessage())})
-				a.maybeCompact(ctx, usage)
-				continue
-			}
+			// Executor handoff may be pure relay — guidance-only tasks don't
+			// require tool use. Skip the nudge when we have a visible final
+			// answer; the executor correctly relayed the planner's instructions.
+			// See: https://github.com/esengine/DeepSeek-Reasonix/issues/4867
 			if readiness.applies {
 				event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessAllowed, finalReadinessBlocks > 0))
 			}
@@ -801,7 +791,6 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 			return nil // model gave a final answer
 		}
 		emptyFinalBlocks = 0
-		usedAnyTool = true
 
 		results := a.executeBatch(ctx, calls)
 		for i, call := range calls {
@@ -1099,13 +1088,6 @@ func finalReadinessCheckSource(check instruction.VerifyCheck) string {
 
 func finalReadinessRetryMessage(reason string) string {
 	return "Host final-answer readiness check failed. Before giving a final answer, address the missing host-observable receipts: " + reason + ". Run the required tool calls, then answer when readiness is satisfied."
-}
-
-func executorHandoffRetryMessage() string {
-	return `You are already in the executor phase. The planner's read-only limitations do not apply to you.
-
-Do not answer as the planner and do not ask how to trigger the executor.
-Use your available tools now to carry out the task. If a write or command is blocked by permissions or workspace boundaries, state that specific blocker and ask for the needed approval/path.`
 }
 
 func hasVisibleFinalAnswer(text string) bool {
