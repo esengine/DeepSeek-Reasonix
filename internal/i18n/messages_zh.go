@@ -48,6 +48,7 @@ var Chinese = Messages{
 	ChatStatusThinkingFmt:       "%s 思考中… (%d 秒 · Esc 取消)",
 	ChatToolWorkingFmt:          "%s 运行中 · %d 秒",
 	ChatStatusRetryingFmt:       "%s 正在重试 (%d/%d)… (Esc 取消)",
+	ChatStatusCancellingFmt:     "%s 正在停止… (%d 秒 · Ctrl+C 退出)",
 	ChatStatusIdle:              "就绪",
 	ChatStatusYoloIdle:          "已跳过工具批准",
 	ChatStatusCycleHint:         "shift+tab 切换计划 · ctrl+y yolo",

@@ -47,6 +47,7 @@ var English = Messages{
 	ChatStatusThinkingFmt:       "%s thinking… (%ds · Esc cancels)",
 	ChatToolWorkingFmt:          "%s working · %ds",
 	ChatStatusRetryingFmt:       "%s retrying (%d/%d)… (Esc cancels)",
+	ChatStatusCancellingFmt:     "%s stopping… (%ds · Ctrl+C exits)",
 	ChatStatusIdle:              "ready",
 	ChatStatusYoloIdle:          "tool approvals skipped",
 	ChatStatusCycleHint:         "shift+tab toggles plan · ctrl+y yolo",

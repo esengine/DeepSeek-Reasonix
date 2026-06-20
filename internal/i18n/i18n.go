@@ -73,6 +73,7 @@ type Messages struct {
 	ChatStatusThinkingFmt       string // "%s thinking… (%ds · <cancel hint>)" — %s = spinner, %d = elapsed s
 	ChatToolWorkingFmt          string // "%s working · %ds" under a running tool — %s = spinner, %d = elapsed s
 	ChatStatusRetryingFmt       string // "%s retrying (%d/%d)…" — %s = spinner, %d/%d = attempt/max
+	ChatStatusCancellingFmt     string // "%s stopping… (%ds · Ctrl+C exits)" — %s = spinner, %d = elapsed s
 	ChatStatusIdle              string // shortcuts hint when idle
 	ChatStatusYoloIdle          string // shortcuts hint when idle in YOLO/bypass mode
 	ChatStatusCycleHint         string // plan-toggle shortcut hint shown when no modal prompt owns the status row

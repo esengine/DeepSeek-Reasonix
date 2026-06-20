@@ -24,6 +24,11 @@ import (
 
 type blockingTurnRunner struct{ started chan struct{} }
 
+type stubbornTurnRunner struct {
+	started chan struct{}
+	release chan struct{}
+}
+
 func TestMain(m *testing.M) {
 	old := detectTermuxTerminal
 	detectTermuxTerminal = func() bool { return false }
@@ -35,6 +40,12 @@ func TestMain(m *testing.M) {
 func (r *blockingTurnRunner) Run(ctx context.Context, _ string) error {
 	close(r.started)
 	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (r *stubbornTurnRunner) Run(ctx context.Context, _ string) error {
+	close(r.started)
+	<-r.release
 	return ctx.Err()
 }
 
@@ -1653,6 +1664,55 @@ func TestDoubleCtrlCQuit(t *testing.T) {
 	// lastCtrlCAt should be refreshed to now.
 	if time.Since(m4.lastCtrlCAt) > time.Second {
 		t.Error("expired Ctrl+C should refresh lastCtrlCAt")
+	}
+}
+
+func TestSecondCtrlCQuitsAfterCancelIsAlreadyRequested(t *testing.T) {
+	r := &stubbornTurnRunner{started: make(chan struct{}), release: make(chan struct{})}
+	ctrl := control.New(control.Options{Runner: r, Sink: event.Discard, SessionDir: t.TempDir(), Label: "test"})
+	ctrl.Send("hi")
+	<-r.started
+	defer close(r.release)
+
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	m.state = tuiRunning
+	ctrlC := tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
+
+	_, firstCmd := m.Update(ctrlC)
+	if firstCmd != nil {
+		t.Fatal("first Ctrl+C while running should request cancel, not quit")
+	}
+	if st := ctrl.RuntimeStatus(); !st.Running || !st.CancelRequested {
+		t.Fatalf("first Ctrl+C status = %+v, want running cancel requested", st)
+	}
+
+	_, secondCmd := m.Update(ctrlC)
+	if secondCmd == nil {
+		t.Fatal("second Ctrl+C after cancel request should quit")
+	}
+	if msg := secondCmd(); msg != (tea.QuitMsg{}) {
+		t.Fatalf("second Ctrl+C command = %T, want tea.QuitMsg", msg)
+	}
+}
+
+func TestRunningStatusShowsCancelRequested(t *testing.T) {
+	r := &stubbornTurnRunner{started: make(chan struct{}), release: make(chan struct{})}
+	ctrl := control.New(control.Options{Runner: r, Sink: event.Discard, SessionDir: t.TempDir(), Label: "test"})
+	ctrl.Send("hi")
+	<-r.started
+	defer close(r.release)
+
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	m.state = tuiRunning
+	m.width = 80
+	m.height = 24
+	ctrl.Cancel()
+
+	view := ansi.Strip(m.View().Content)
+	if !strings.Contains(view, "stopping") {
+		t.Fatalf("running status after cancel should show stopping feedback:\n%s", view)
 	}
 }
 

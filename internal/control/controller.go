@@ -1627,6 +1627,13 @@ func (c *Controller) Running() bool {
 	return c.running
 }
 
+// CancelRequested reports whether Cancel has been requested for the active turn.
+func (c *Controller) CancelRequested() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.canceling
+}
+
 // PendingPrompt reports whether the current turn is blocked waiting for a user
 // approval, plan approval, memory approval, or ask-tool answer.
 func (c *Controller) PendingPrompt() bool {
