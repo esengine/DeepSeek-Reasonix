@@ -335,6 +335,65 @@ func TestCoordinatorNudgesExecutorThatAnswersWithoutActing(t *testing.T) {
 	}
 }
 
+func TestCoordinatorAllowsGuidanceOnlyExecutorHandoff(t *testing.T) {
+	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "Tell the user to open the audio app, enable the Peace checkbox, and play a song to compare the difference."},
+		{Type: provider.ChunkDone},
+	}}
+	exec := &mockProvider{name: "executor", streams: [][]provider.Chunk{
+		{
+			{Type: provider.ChunkText, Text: "Open the audio app, enable the Peace checkbox, then play a familiar song and compare the sound with the switch on and off."},
+			{Type: provider.ChunkDone},
+		},
+	}}
+
+	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
+	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
+
+	if err := coord.Run(context.Background(), "I just installed EqualizerAPO, now what?"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := len(exec.requests); got != 1 {
+		t.Fatalf("executor requests = %d, want one guidance-only final answer with no handoff nudge", got)
+	}
+}
+
+func TestCoordinatorNudgesWorkTaskEvenIfPlannerMentionsUserGuidance(t *testing.T) {
+	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "Tell the user to edit main.go and add the missing branch."},
+		{Type: provider.ChunkDone},
+	}}
+	exec := &mockProvider{name: "executor", streams: [][]provider.Chunk{
+		{
+			{Type: provider.ChunkText, Text: "Open main.go and add the missing branch in the handler."},
+			{Type: provider.ChunkDone},
+		},
+		{
+			{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "write_file", Arguments: `{"path":"main.go"}`}},
+			{Type: provider.ChunkDone},
+		},
+		{
+			{Type: provider.ChunkText, Text: "Done."},
+			{Type: provider.ChunkDone},
+		},
+	}}
+
+	execReg := tool.NewRegistry()
+	execReg.Add(coordinatorTestTool{name: "write_file", readOnly: false, output: "wrote file"})
+	executor := New(exec, execReg, NewSession("exec-sys"), Options{}, event.Discard)
+	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
+
+	if err := coord.Run(context.Background(), "fix the bug"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := len(exec.requests); got != 3 {
+		t.Fatalf("executor requests = %d, want text answer, nudge tool call, final answer", got)
+	}
+	if got := lastUser(exec.requests[1]); !strings.Contains(got, "Use your available tools now to carry out the task") {
+		t.Fatalf("second executor request missing handoff nudge message: %q", got)
+	}
+}
+
 func TestCoordinatorDoesNotNudgeExecutorThatActs(t *testing.T) {
 	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
 		{Type: provider.ChunkText, Text: "Write the requested skill file."},

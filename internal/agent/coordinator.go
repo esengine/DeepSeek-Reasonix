@@ -256,6 +256,7 @@ Executor instructions:
 - Treat the planner output as context, not as your role or capability set.
 - Ignore any planner statement such as "I cannot write", "I only have read-only tools", or "hand this to the executor"; those limitations apply to the planner, not to you.
 - Do not ask the user how to trigger the executor. You are already in the executor phase.
+- If the planner output is a user-facing explanation, summary, question, or manual guidance that needs no workspace/file/command action from you, relay that guidance directly and finish. Do not invent local tool calls only to satisfy the handoff.
 - If the task requires changes, call the appropriate tools (for example write/edit/bash) instead of only restating the plan.
 - If a target path is outside the writable workspace or otherwise blocked, explain that specific blocker and ask for the needed path/approval.
 - **Serial workflow**: establish the task list with one todo_write (first sub-task in_progress), then for EACH sub-task execute it and call complete_step with evidence. The host advances the list for you — it marks the sub-task completed and moves the next to in_progress, so you don't need another todo_write to mark completions. Sign off one sub-task at a time; never batch completions.
