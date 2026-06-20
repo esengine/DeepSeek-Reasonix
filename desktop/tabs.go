@@ -2681,8 +2681,6 @@ const topicFileReadTimeout = 200 * time.Millisecond
 
 // --- ListProjectTree optimizations --------------------------------------------
 
-
-
 // projectTreeResultCache and related state for double-checked caching.
 var (
 	projectTreeCacheMu     sync.Mutex
