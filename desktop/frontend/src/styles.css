@@ -10799,6 +10799,13 @@ a[href] {
   font-family: inherit;
 }
 
+.settings-center__navicon {
+  margin-right: 6px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
 .settings-center__content {
   min-width: 0;
   overflow-x: hidden;

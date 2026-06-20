@@ -1,5 +1,5 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
-import { Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, GripVertical, KeyRound, Loader2, Play, QrCode, RefreshCw, Send } from "lucide-react";
+import { Brain, Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, Command, Container, Cpu, Globe, GripVertical, KeyRound, Loader2, MessageSquare, Palette, Play, Plug, QrCode, RefreshCw, Send, Settings, Shield, Sparkles, Terminal } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { app } from "../lib/bridge";
@@ -172,7 +172,7 @@ export function SettingsPanel({
                 className={`settings-center__navitem${tab === id ? " settings-center__navitem--active" : ""}`}
                 onClick={() => setTab(id)}
               >
-                <span>{settingsTabLabel(id, t)}</span>
+                <span><span className="settings-center__navicon">{settingsTabIcon(id)}</span> {settingsTabLabel(id, t)}</span>
                 {s && <small>{settingsTabMeta(id, s, t)}</small>}
               </button>
             ))}
@@ -268,7 +268,7 @@ function SettingsPageShell({ s: _s, tab, children }: { s: SettingsView | null; t
   return (
     <div className={`settings-page settings-page--${settingsPageKind(tab)} settings-page--${tab}`}>
       <div className="settings-page__header">
-        <h2 className="settings-page__title">{settingsTabPageTitle(tab, t)}</h2>
+        <h2 className="settings-page__title"><span className="settings-center__navicon">{settingsTabIcon(tab)}</span> {settingsTabPageTitle(tab, t)}</h2>
         {typeof desc === "string" && desc !== `settings.pageDesc.${tab}` && <p className="settings-page__desc">{desc}</p>}
       </div>
       {children}
@@ -410,6 +410,26 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.appearance");
     case "updates":
       return t("settings.tab.updates");
+  }
+}
+
+function settingsTabIcon(id: SettingsTab): ReactNode {
+  const size = 14;
+  switch (id) {
+    case "general": return <Settings size={size} />;
+    case "models": return <Cpu size={size} />;
+    case "bots": return <MessageSquare size={size} />;
+    case "mcp": return <Plug size={size} />;
+    case "skills": return <Sparkles size={size} />;
+    case "memory": return <Brain size={size} />;
+    case "hooks": return <Terminal size={size} />;
+    case "shortcuts": return <Command size={size} />;
+    case "permissions": return <Shield size={size} />;
+    case "sandbox": return <Container size={size} />;
+    case "network": return <Globe size={size} />;
+    case "appearance": return <Palette size={size} />;
+    case "updates": return <RefreshCw size={size} />;
+    default: return null;
   }
 }
 
