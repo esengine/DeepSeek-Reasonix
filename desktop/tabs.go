@@ -3617,8 +3617,7 @@ func (a *App) setTabActivityStatus(tabID, status string) bool {
 var projectTreeDebouncer = newDebounceEmitter(200 * time.Millisecond)
 
 func (a *App) emitProjectTreeChanged() {
-	// Invalidate caches immediately so subsequent ListProjectTree calls
-	// return fresh data, even before the debounced event fires.
+	// Invalidate caches so subsequent ListProjectTree calls return fresh data.
 	projectTreeCacheMu.Lock()
 	projectTreeResultCache = nil
 	projectTreeCacheExpiry = time.Time{}
@@ -3626,14 +3625,11 @@ func (a *App) emitProjectTreeChanged() {
 
 	projectSessionCache.invalidate()
 
-	// Debounce only the event emission to prevent redundant frontend rebuilds.
-	projectTreeDebouncer.fire(func() {
-		if a.projectTreeChangedHook != nil {
-			a.projectTreeChangedHook()
-			return
-		}
-		a.emitRuntimeEvent("project-tree:changed")
-	})
+	if a.projectTreeChangedHook != nil {
+		a.projectTreeChangedHook()
+		return
+	}
+	a.emitRuntimeEvent("project-tree:changed")
 }
 
 func (a *App) emitRuntimeEvent(name string, payload ...interface{}) {
