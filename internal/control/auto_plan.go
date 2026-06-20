@@ -90,7 +90,10 @@ func ShouldDelegateTask(input string) bool {
 	}
 	words := strings.Fields(text)
 	if len(words) < 30 && !strings.Contains(text, "\n1.") && !strings.Contains(text, "\n- ") && !strings.Contains(text, "\n* ") {
-		return true
+		// Even short inputs with complex intent terms should go through planner.
+		if !isLowRiskQuestion(strings.ToLower(text)) && !containsAny(strings.ToLower(text), complexIntentTerms) {
+			return true
+		}
 	}
 	return false
 }

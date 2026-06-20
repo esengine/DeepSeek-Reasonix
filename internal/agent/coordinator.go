@@ -58,6 +58,9 @@ type Coordinator struct {
 	// executor instead of paying a planner round on it.
 	shouldPlan     func(string) bool
 	shouldDelegate func(string) bool
+	// subAgentModel is the model name used in delegation hints for sub-agent
+	// tasks. If empty, defaults to the executor's provider name.
+	subAgentModel string
 }
 
 // NewCoordinator wires a planner provider (with its own session) to an executor.
@@ -161,7 +164,11 @@ func (c *Coordinator) SetPlanMode(v bool) {
 func (c *Coordinator) Run(ctx context.Context, input string) error {
 	c.sink.Emit(event.Event{Kind: event.TurnStarted})
 	if c.shouldDelegate != nil && c.shouldDelegate(input) {
-		hint := "\n\nUse parallel_tasks with model=deepseek-flash for independent sub-tasks."
+		model := c.subAgentModel
+		if model == "" {
+			model = "deepseek-flash"
+		}
+		hint := "\n\nUse parallel_tasks with model=" + model + " for independent sub-tasks."
 		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · delegating"})
 		return c.executor.Run(ctx, input+hint)
 	}
@@ -180,6 +187,11 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 
 func (c *Coordinator) SetShouldDelegate(fn func(string) bool) {
 	c.shouldDelegate = fn
+}
+
+// SetSubAgentModel sets the model name used in delegation hints.
+func (c *Coordinator) SetSubAgentModel(name string) {
+	c.subAgentModel = name
 }
 
 // plan streams a plan from the planner and appends it to the planner session, so
