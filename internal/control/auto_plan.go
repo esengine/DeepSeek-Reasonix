@@ -79,6 +79,38 @@ func TaskWarrantsPlanner(input string) bool {
 	return !isLowRiskQuestion(strings.ToLower(text))
 }
 
+// TaskWarrantsPlannerClassified is like TaskWarrantsPlanner but delegates
+// borderline cases (score == 1) to the auto_plan_classifier LLM. The
+// classifier is capped at 3s to avoid blocking the main turn loop.
+func TaskWarrantsPlannerClassified(ctx context.Context, input string, classifier *ProviderAutoPlanClassifier) bool {
+	text := strings.TrimSpace(agent.StripTransientUserBlocks(input))
+	if text == "" || strings.HasPrefix(text, "/") || strings.HasPrefix(text, PlanModeMarker) {
+		return false
+	}
+	lower := strings.ToLower(text)
+	if isLowRiskQuestion(lower) {
+		return false
+	}
+	score := autoPlanScore(text)
+	if score >= 2 {
+		return true
+	}
+	if score <= 0 {
+		return false
+	}
+	// score == 1: borderline, use classifier.
+	if classifier == nil {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	needs, _, err := classifier.NeedsPlan(ctx, input, score)
+	if err != nil {
+		return true
+	}
+	return needs
+}
+
 func autoPlanScore(input string) int {
 	text := strings.TrimSpace(input)
 	if text == "" || strings.HasPrefix(text, "/") || strings.HasPrefix(text, PlanModeMarker) {

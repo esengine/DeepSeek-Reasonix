@@ -601,6 +601,17 @@ func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input, raw, disp
 	c.SetPlanMode(false)
 	todoArgs := c.seedPlanTodos(proposal)
 	execStart := c.sessionMessageCount()
+	// When the plan has more than one step AND we have a Coordinator
+	// (dual-model mode), auto-dispatch via plan-exec instead of single-turn
+	// serial execution. This avoids micro-stepping and cuts request count.
+	if nt := planTodoCount(todoArgs); nt > 1 {
+		if _, isCoordinator := c.runner.(interface {
+			SetVerify(func(context.Context) string)
+		}); isCoordinator {
+			c.approval.setPlanAutoApprove(false)
+			return c.doPlanExec(proposal, display)
+		}
+	}
 	// The plan is the go-ahead: don't re-prompt for each write of the approved
 	// work. Auto-approve writers for the duration of this execution turn only; a
 	// later turn (even "continue") falls back to the normal per-tool approval.
@@ -871,6 +882,9 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 				c.notice(err.Error())
 			}
 			return
+		case "/orchestrate":
+			c.applyOrchestrate(trimmed, display)
+			return
 		case "/plan-exec":
 			c.applyPlanExec(trimmed, display)
 			return
@@ -1056,7 +1070,7 @@ func (c *Controller) applyPlanExec(input, display string) {
 	}
 	b.WriteString("\n## Routing rules\n")
 	b.WriteString("1. Group steps by MODULE \u2014 same module = serial, different modules = parallel batches\n")
-	b.WriteString("2. Research/exploration across modules = use parallel_tasks\n")
+	b.WriteString("2. Research/exploration across modules = MUST use parallel_tasks (mandatory)\n")
 	b.WriteString("3. Dispatch each batch via parallel_tasks \u2014 each sub-agent gets one module\u2019s context\n")
 	b.WriteString("4. Verify each batch before the next\n")
 	b.WriteString("5. Failures: fix before moving on\n")
@@ -1108,6 +1122,130 @@ func (c *Controller) applyPrometheus(input, display string) {
 			return c.runGoalLoopWithRawDisplay(ctx, prompt, prompt, display)
 		})
 	}
+}
+
+// orchestratePrompt is the system prompt for the project conductor mode.
+const orchestratePrompt = `You are the project conductor, coordinating a team of specialist sub-agents. Your model handles planning and review; delegate execution to sub-agents.
+
+Process:
+1. Analyze the request and break it into independent work items
+2. For EACH independent item, dispatch a sub-agent using parallel_tasks
+3. Each sub-agent gets one clear goal and its relevant context
+4. After all sub-agents finish, review their outputs
+5. Summarize what was done, what needs follow-up, and end with [goal:complete]
+
+Key rules:
+- Delegate — your job is coordination. DO NOT execute steps yourself.
+- One sub-agent per independent work item. MUST use parallel_tasks.
+- Each sub-agent's prompt must be self-contained`
+
+// applyOrchestrate starts a project conductor mode that delegates work to
+// multiple sub-agents via parallel_tasks.
+func (c *Controller) applyOrchestrate(input, display string) {
+	args := strings.TrimSpace(strings.TrimPrefix(input, "/orchestrate"))
+	if args == "" || args == "--strict" {
+		c.notice("usage: /orchestrate <project description>")
+		return
+	}
+	strict := false
+	if strings.HasPrefix(args, "--strict ") {
+		strict = true
+		args = strings.TrimPrefix(args, "--strict ")
+	}
+	prompt := orchestratePrompt + "\n\n## Project request\n\n" + args + "\n\nBegin by analyzing the request and dispatching sub-agents."
+	c.SetPlanMode(false)
+	c.SetGoal("orchestrate: " + ShortGoalForNotice(args))
+	c.GoalStrict(strict)
+	c.notice("orchestrate: starting project conductor mode")
+	if c.runner != nil {
+		c.runGuarded(func(ctx context.Context) error {
+			return c.runGoalLoopWithRawDisplay(ctx, prompt, prompt, display)
+		})
+	}
+}
+
+// planTodoCount returns the number of todos encoded in plan-seed JSON args,
+// or 0 when parsing fails.
+func planTodoCount(todoArgs string) int {
+	if todoArgs == "" {
+		return 0
+	}
+	var p struct {
+		Todos []json.RawMessage `json:"todos"`
+	}
+	if err := json.Unmarshal([]byte(todoArgs), &p); err != nil {
+		return 0
+	}
+	return len(p.Todos)
+}
+
+// doPlanExec dispatches the plan via plan-exec goal loop, bypassing the
+// single-turn planApprovedMessage.
+func (c *Controller) doPlanExec(planText, display string) error {
+	todos := c.executor.CanonicalTodoState()
+	if len(todos) == 0 {
+		return nil
+	}
+	return c.applyPlanExecDirect(todos, display)
+}
+
+// applyPlanExecDirect starts a plan-exec goal loop from an existing todo list,
+// without requiring a slash command. Used by plan auto-dispatch.
+func (c *Controller) applyPlanExecDirect(todos []evidence.TodoItem, display string) error {
+	total := len(todos)
+	done := 0
+	for _, t := range todos {
+		if t.Status == "completed" {
+			done++
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("You are the execution conductor. Route each step to the right sub-agent by module.\n\n")
+
+	modules := c.detectProjectModules()
+	if len(modules) > 0 {
+		b.WriteString("## Project modules detected\n\n")
+		for _, m := range modules {
+			fmt.Fprintf(&b, "- %s/", m)
+		}
+		b.WriteString("\n\nRoute steps to the module they belong to. Steps in different modules can run in parallel.\n\n")
+	}
+
+	b.WriteString("## Plan steps\n\n")
+	for _, t := range todos {
+		status := t.Status
+		if status == "" {
+			status = "pending"
+		}
+		mark := " "
+		if status == "completed" {
+			mark = "x"
+		}
+		fmt.Fprintf(&b, "- [%s] %s (%s)\n", mark, t.Content, status)
+	}
+	b.WriteString("\n## Routing rules\n")
+	b.WriteString("1. Group steps by MODULE \u2014 same module = serial, different modules = parallel batches\n")
+	b.WriteString("2. Research/exploration across modules = MUST use parallel_tasks (mandatory)\n")
+	b.WriteString("3. Dispatch each batch via parallel_tasks \u2014 each sub-agent gets one module\u2019s context\n")
+	b.WriteString("4. Verify each batch before the next\n")
+	b.WriteString("5. Failures: fix before moving on\n")
+	b.WriteString("\nGoal: each sub-agent focuses on one module and does not carry irrelevant context.\n")
+	if done > 0 {
+		fmt.Fprintf(&b, "\nNote: %d/%d steps are already completed. Focus on the remaining %d steps.\n", done, total, total-done)
+	}
+	prompt := b.String()
+
+	if len(modules) > 0 {
+		c.notice(fmt.Sprintf("plan-exec: detected %d modules — %s", len(modules), strings.Join(modules, ", ")))
+	}
+	c.SetPlanMode(false)
+	c.SetGoal("execute plan: " + ShortGoalForNotice(todos[0].Content))
+	c.notice(fmt.Sprintf("plan-exec: auto-dispatching %d plan steps", total))
+	if c.runner != nil {
+		return c.runGoalLoopWithRawDisplay(context.Background(), prompt, prompt, display)
+	}
+	return nil
 }
 
 // shellTimeout is the maximum time a user-invoked "!command" may run. Matches
