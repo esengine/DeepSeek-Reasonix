@@ -56,7 +56,7 @@ type Coordinator struct {
 	// shouldPlan gates the planner pass per turn; nil plans every turn. Lets a
 	// trivial, non-work turn (a question, a greeting) skip straight to the
 	// executor instead of paying a planner round on it.
-	shouldPlan func(string) bool
+	shouldPlan     func(string) bool
 	shouldDelegate func(string) bool
 }
 
