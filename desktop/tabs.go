@@ -2179,7 +2179,8 @@ func (a *App) removeTabOrderLocked(tabID string) {
 }
 
 func loadTabsFile() desktopTabsFile {
-	b, err := readDesktopConfigFile(tabsFileName)
+	path := filepath.Join(desktopConfigDir(), tabsFileName)
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return desktopTabsFile{}
 	}
@@ -2216,38 +2217,9 @@ func desktopMCPMigrationRoots(tabs desktopTabsFile) []string {
 	return roots
 }
 
-// readDesktopConfigFile reads a file from desktopConfigDir(), falling back to
-// the previous config location (~/Library/Application Support/reasonix/) for
-// backward compatibility. When a file is found at the old location it is copied
-// to the new location so subsequent reads go straight to the new path.
-func readDesktopConfigFile(name string) ([]byte, error) {
-	newPath := filepath.Join(desktopConfigDir(), name)
-	b, err := os.ReadFile(newPath)
-	if err == nil {
-		return b, nil
-	}
-	if !os.IsNotExist(err) {
-		return nil, err
-	}
-	// Try the legacy location.
-	oldDir, err := os.UserConfigDir()
-	if err != nil {
-		return nil, err
-	}
-	oldPath := filepath.Join(oldDir, "reasonix", name)
-	b, err = os.ReadFile(oldPath)
-	if err != nil {
-		return nil, err
-	}
-	// Found at old location — copy to new location so the next read skips this fallback.
-	if err := os.MkdirAll(desktopConfigDir(), 0o755); err == nil {
-		_ = os.WriteFile(newPath, b, 0o644)
-	}
-	return b, nil
-}
-
 func loadProjectsFile() desktopProjectFile {
-	b, err := readDesktopConfigFile(desktopProjectsFile)
+	path := filepath.Join(desktopConfigDir(), desktopProjectsFile)
+	b, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			slog.Warn("loadProjectsFile: read error", "err", err)
