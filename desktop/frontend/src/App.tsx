@@ -1193,6 +1193,10 @@ export default function App() {
     const currentTabTurns = Math.max(state.checkpoints.length, visibleUserTurns);
     return currentTabTurns > 0 ? currentTabTurns : activeTopicTurns ?? 0;
   }, [activeTopicTurns, state.checkpoints.length, state.items]);
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
   const startupSplashHold = state.meta?.ready !== true && !state.meta?.startupErr;
   const backendActiveComposerProfile = useMemo(() => {
     if (state.meta) {
