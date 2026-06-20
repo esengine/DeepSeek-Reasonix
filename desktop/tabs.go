@@ -4108,7 +4108,47 @@ func (a *App) ListProjectTree() []ProjectNode {
 
 	// Project sections.
 	slog.Info("ListProjectTree: processing projects", "elapsed", time.Since(buildStart).String(), "projects", len(f.Projects))
-	for _, p := range f.Projects {
+
+	// Load all project topic files concurrently since each is independent I/O
+	// and cloud storage paths (SynologyDrive, iCloud, etc.) may block or time
+	// out for up to readFileTimeout (200ms). Sequential loading with 15+ projects
+	// would multiply worst-case latency by the number of cloud-stored projects.
+	type projectTopics struct {
+		titles     map[string]string
+		createdAts map[string]int64
+	}
+	projectTopicResults := make([]struct {
+		root string
+		p    desktopProject
+		res  projectTopics
+	}, len(f.Projects))
+	var topicLoadWg sync.WaitGroup
+	topicLoadWg.Add(len(f.Projects))
+	for i, p := range f.Projects {
+		i, p := i, p
+		go func() {
+			defer topicLoadWg.Done()
+			projectTopicResults[i] = struct {
+				root string
+				p    desktopProject
+				res  projectTopics
+			}{
+				root: p.Root,
+				p:    p,
+				res: projectTopics{
+					titles:     loadTopicTitles(p.Root),
+					createdAts: loadTopicCreatedAts(p.Root),
+				},
+			}
+		}()
+	}
+	topicLoadWg.Wait()
+
+	for _, pt := range projectTopicResults {
+		p := pt.p
+		titleMap := pt.res.titles
+		createdMap := pt.res.createdAts
+
 		title := p.Title
 		if title == "" {
 			title = workspaceName(p.Root)
@@ -4121,10 +4161,6 @@ func (a *App) ListProjectTree() []ProjectNode {
 		}
 
 		// Gather topics: explicit topic list + all known topic titles.
-		slog.Info("ListProjectTree: loadTopicTitles", "root", p.Root, "elapsed", time.Since(buildStart).String())
-		titleMap := loadTopicTitles(p.Root)
-		slog.Info("ListProjectTree: loadTopicCreatedAts", "root", p.Root, "titles", len(titleMap), "elapsed", time.Since(buildStart).String())
-		createdMap := loadTopicCreatedAts(p.Root)
 		topicIDs := pinnedTopicIDs(orderedTopicIDs(p.Topics, titleMap), p.PinnedTopics)
 
 		children := make([]ProjectNode, 0, len(topicIDs))
