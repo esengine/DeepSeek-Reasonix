@@ -1137,6 +1137,7 @@ Process:
 Key rules:
 - Delegate — your job is coordination. DO NOT execute steps yourself.
 - One sub-agent per independent work item. MUST use parallel_tasks.
+- Set model="deepseek-flash" (or your configured subagent model) for execution sub-agents.
 - Each sub-agent's prompt must be self-contained`
 
 // applyOrchestrate starts a project conductor mode that delegates work to

@@ -88,7 +88,18 @@ const (
 	// wrapper prefix), so a frontend can display it to the user as confirmation.
 	// Frontends use Steer to know a queued message has been delivered.
 	Steer
+	// SubAgentProgress carries a sub-agent's execution status (Text = label,
+	// Progress = Current, Total, Status). Frontends render it as a progress
+	// bar or checklist. Appended last to keep existing Kind values stable.
+	SubAgentProgress
 )
+
+// ProgressInfo describes sub-agent execution progress for SubAgentProgress events.
+type ProgressInfo struct {
+	Current int
+	Total   int
+	Status  string // "running" | "completed" | "failed"
+}
 
 // Level classifies a Notice so sinks can style or filter it.
 type Level int
@@ -226,15 +237,16 @@ type Event struct {
 	// session (Usage events only), so a frontend can show the aggregate hit-rate
 	// — which doesn't crater on a short turn or after compaction — alongside
 	// Usage's single-turn numbers.
-	SessionHit   int        // Usage: cumulative cache-hit prompt tokens this session
-	SessionMiss  int        // Usage: cumulative cache-miss prompt tokens this session
-	Level        Level      // Notice
-	Approval     Approval   // ApprovalRequest
-	Ask          Ask        // AskRequest
-	Err          error      // TurnDone: non-nil on failure
-	Compaction   Compaction // Compaction
-	RetryAttempt int        // Retrying: 1-based attempt about to be made
-	RetryMax     int        // Retrying: total attempts before giving up
+	SessionHit   int           // Usage: cumulative cache-hit prompt tokens this session
+	SessionMiss  int           // Usage: cumulative cache-miss prompt tokens this session
+	Level        Level         // Notice
+	Approval     Approval      // ApprovalRequest
+	Ask          Ask           // AskRequest
+	Err          error         // TurnDone: non-nil on failure
+	Compaction   Compaction    // Compaction
+	RetryAttempt int           // Retrying: 1-based attempt about to be made
+	RetryMax     int           // Retrying: total attempts before giving up
+	Progress     *ProgressInfo // SubAgentProgress: sub-task execution status
 }
 
 // ReadinessAuditSink is an optional sink capability. Sinks that do not care

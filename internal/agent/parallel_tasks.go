@@ -228,6 +228,7 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 
 				subID := fmt.Sprintf("%s/sub-%d", parentID, idx+1)
 				dispatchArgs, _ := json.Marshal(map[string]string{"prompt": prompt, "description": label})
+				emitProgress(sink, parentID, label, idx+1, n, "running")
 				sink.Emit(event.Event{
 					Kind: event.ToolDispatch,
 					Tool: event.Tool{
@@ -272,12 +273,14 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 				}, nested)
 
 				if runErr != nil {
+					emitProgress(sink, parentID, label, idx+1, n, "failed")
 					sink.Emit(event.Event{
 						Kind: event.ToolResult,
 						Tool: event.Tool{ID: subID, ParentID: parentID, Name: "task", Err: runErr.Error()},
 					})
 					doneCh <- subResult{index: idx, err: runErr}
 				} else {
+					emitProgress(sink, parentID, label, idx+1, n, "completed")
 					sink.Emit(event.Event{
 						Kind: event.ToolResult,
 						Tool: event.Tool{ID: subID, ParentID: parentID, Name: "task", Output: output},
@@ -454,4 +457,20 @@ func extractJobID(msg string) string {
 		return ""
 	}
 	return msg[quote+1 : quote+1+end]
+}
+
+// emitProgress sends a SubAgentProgress event for parallel task tracking.
+func emitProgress(sink event.Sink, parentID, label string, current, total int, status string) {
+	sink.Emit(event.Event{
+		Kind: event.SubAgentProgress,
+		Text: label,
+		Progress: &event.ProgressInfo{
+			Current: current,
+			Total:   total,
+			Status:  status,
+		},
+		Tool: event.Tool{
+			ParentID: parentID,
+		},
+	})
 }
