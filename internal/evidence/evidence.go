@@ -251,6 +251,24 @@ func (l *Ledger) HasSuccessfulTodoWrite() bool {
 	return false
 }
 
+// HasSuccessfulTodoProgressReceipt reports whether any successful receipt in
+// the turn reflects execution progress rather than read-only context gathering
+// or a bare todo snapshot.
+func (l *Ledger) HasSuccessfulTodoProgressReceipt() bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.receipts {
+		if !r.Success || r.ToolName == "todo_write" || r.Read {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 func (l *Ledger) IncompleteLatestTodos() ([]TodoStepMatch, bool) {
 	if l == nil {
 		return nil, false
@@ -561,10 +579,19 @@ func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, re
 
 	if isWriterTool(toolName) {
 		r.Write = true
-	} else if isReaderTool(toolName) || (readOnly && len(r.Paths) > 0) {
+	} else if isReadReceipt(toolName, readOnly) {
 		r.Read = true
 	}
 	return r
+}
+
+func isReadReceipt(name string, readOnly bool) bool {
+	switch name {
+	case "todo_write", "complete_step":
+		return false
+	default:
+		return isReaderTool(name) || readOnly
+	}
 }
 
 func isWriterTool(name string) bool {

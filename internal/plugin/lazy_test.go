@@ -184,6 +184,91 @@ func TestLazyCacheHitReusesExistingSharedHostClient(t *testing.T) {
 	}
 }
 
+func TestAddWithLifecycleCoalescesConcurrentSameServer(t *testing.T) {
+	spec := helperSpec()
+	spec.Env["GO_WANT_HELPER_INIT_MS"] = "200"
+
+	host := NewHost()
+	defer host.Close()
+	lifeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	start := make(chan struct{})
+	errs := make([]error, 2)
+	toolCounts := make([]int, 2)
+	var wg sync.WaitGroup
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			callCtx, cancelCall := context.WithTimeout(lifeCtx, 5*time.Second)
+			defer cancelCall()
+			tools, err := host.AddWithLifecycle(lifeCtx, callCtx, spec)
+			errs[i] = err
+			toolCounts[i] = len(tools)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("AddWithLifecycle call %d failed: %v (all errors: %v)", i, err, errs)
+		}
+		if toolCounts[i] != 2 {
+			t.Fatalf("AddWithLifecycle call %d returned %d tools, want 2", i, toolCounts[i])
+		}
+	}
+	if got := host.ServerNames(); len(got) != 1 || got[0] != "mock" {
+		t.Fatalf("host should contain exactly one connected server, got %v", got)
+	}
+}
+
+func TestLazyCacheHitStartupTimeoutCanRetry(t *testing.T) {
+	redirectCache(t)
+	spec := helperSpec()
+	spec.Env["GO_WANT_HELPER_INIT_MS"] = fmt.Sprint(int(defaultStartTimeout/time.Millisecond) + 200)
+	writeMockCache(t, spec)
+
+	cs, ok := LoadCachedSchema(spec.Name, SpecFingerprint(spec))
+	if !ok {
+		t.Fatal("LoadCachedSchema: miss right after save (sanity)")
+	}
+
+	host := NewHost()
+	defer host.Close()
+	reg := tool.NewRegistry()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	tools := LazyToolset(spec, cs, host, reg, ctx, false)
+	for _, lt := range tools {
+		reg.Add(lt)
+	}
+	echo, ok := reg.Get("mcp__mock__echo")
+	if !ok {
+		t.Fatal("registry missing mcp__mock__echo after LazyToolset")
+	}
+	lazyEcho, ok := echo.(*lazyTool)
+	if !ok {
+		t.Fatalf("pre-Execute echo should be a *lazyTool, got %T", echo)
+	}
+
+	if _, err := echo.Execute(ctx, json.RawMessage(`{"msg":"slow"}`)); err == nil || !strings.Contains(err.Error(), "startup timed out") {
+		t.Fatalf("first Execute error = %v, want startup timed out", err)
+	}
+
+	lazyEcho.shared.spec.Env["GO_WANT_HELPER_INIT_MS"] = "0"
+	out, err := echo.Execute(ctx, json.RawMessage(`{"msg":"retry"}`))
+	if err != nil {
+		t.Fatalf("second Execute after timeout should retry: %v", err)
+	}
+	if out != "echo: retry" {
+		t.Fatalf("Execute result = %q, want %q", out, "echo: retry")
+	}
+}
+
 func TestLazyToolsetAppliesSpecReadOnlyOverrideToCachedTools(t *testing.T) {
 	redirectCache(t)
 	spec := helperSpec()

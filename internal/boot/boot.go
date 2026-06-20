@@ -41,6 +41,7 @@ import (
 	"reasonix/internal/skill"
 	"reasonix/internal/tool"
 	"reasonix/internal/tool/builtin"
+	"reasonix/internal/tool/sessiontool"
 )
 
 // ErrUnknownModel is returned by Build when the configured model can't be
@@ -110,6 +111,11 @@ type Options struct {
 	// artifacts left by a previous process. Nil uses the core physical-delete
 	// reconciler; frontends with different deletion semantics can override it.
 	CleanupPendingReconciler func(sessionDir string) error
+	// ApprovalTimeout bounds how long a tool-approval or ask prompt blocks for a
+	// user decision. Zero (default) waits forever — correct for an interactive
+	// terminal. Headless/bot frontends pass a positive value so an unanswered
+	// prompt can't wedge the session indefinitely (#4626, #4402).
+	ApprovalTimeout time.Duration
 }
 
 // Build loads config, resolves the model(s), and returns a Controller wrapping a
@@ -557,6 +563,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// durable facts to the project's auto-memory store; `forget` prunes ones that
 	// turn out wrong. The saved index loads into the prefix on the next session.
 	reg.Add(history.NewTool(history.Options{SessionDir: sessionDir, GlobalSessionDir: config.SessionDir(), ArchiveDir: config.ArchiveDir()}))
+
+	// Session history tools let the AI discover and read past conversations.
+	// `list_sessions` returns all saved session files; `read_session` loads one
+	// and renders the full conversation as readable text.
+	reg.Add(sessiontool.NewListSessionsTool(sessionDir))
+	reg.Add(sessiontool.NewReadSessionTool(sessionDir))
+
 	reg.Add(memory.NewRecallTool(mem.Store))
 	reg.Add(memory.NewRememberTool(mem.Store))
 	reg.Add(memory.NewForgetTool(mem.Store))
@@ -930,6 +943,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		DisableColdResumePrune: !cfg.ColdResumePruneEnabled(),
 		Shell:                  shell,
 		PlanModeAllowedTools:   cfg.Agent.PlanModeAllowedTools,
+		ApprovalTimeout:        opts.ApprovalTimeout,
 		OnRemember: func(rule string) control.RememberResult {
 			return rememberPermissionRule(root, rule)
 		},

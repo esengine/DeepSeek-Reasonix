@@ -46,6 +46,12 @@ export const zhTW: Record<DictKey, string> = {
   "sidebar.expand": "展開側邊欄",
   "sidebar.expandBlocked": "關閉右側檔案面板後可展開側邊欄",
   "sidebar.resize": "調整側邊欄寬度",
+  "creation.sidebar.newChat": "新建對話",
+  "creation.sidebar.features": "功能",
+  "creation.sidebar.skills": "技能",
+  "creation.sidebar.messageChannels": "訊息通道",
+  "creation.reasoningLabel": "深度思考",
+  "creation.toolCallsLabel": "工具呼叫",
   "drawer.resize": "調整抽屜寬度",
 
   // 右側停靠區
@@ -221,6 +227,14 @@ export const zhTW: Record<DictKey, string> = {
   "welcome.ex1": "講講這個程式碼庫的架構",
   "welcome.ex2": "總結最近的 git 變更",
   "welcome.ex3": "智慧體的執行主循環在哪，它做了什麼？",
+  "welcome.creation.titlePrimary": "Hey，今天想創作什麼？",
+  "welcome.creation.titleSecondary": "從一個提問開始。",
+  "welcome.creation.explainTitle": "幫我構思策劃方案",
+  "welcome.creation.explainBody": "梳理目標和路徑。",
+  "welcome.creation.gitTitle": "修改HTML設計",
+  "welcome.creation.gitBody": "調整頁面和互動。",
+  "welcome.creation.bugTitle": "問你一些哲學問題",
+  "welcome.creation.bugBody": "把問題聊清楚。",
 
   // 輸入框
   "composer.placeholder": "給 Reasonix 發訊息…  ( / 命令 · @ 檔案 )",
@@ -578,6 +592,7 @@ export const zhTW: Record<DictKey, string> = {
   "settings.desktopLayoutStyle": "桌面風格",
   "settings.desktopLayoutStyle.classic": "經典",
   "settings.desktopLayoutStyle.workbench": "工作臺",
+  "settings.desktopLayoutStyle.creation": "創作",
   "settings.manageProviders": "管理模型服務",
   "settings.activeProvider": "當前模型服務",
   "settings.plannerStatus": "規劃方式",
@@ -846,6 +861,9 @@ export const zhTW: Record<DictKey, string> = {
   // 待辦欄
   "todo.title": "待辦",
   "todo.dismiss": "關閉待辦列表",
+  "todo.pending": "待處理",
+  "todo.inProgress": "進行中",
+  "todo.completed": "已完成",
 
   // 斜線選單標籤
   "slash.project": "專案",
@@ -991,11 +1009,11 @@ export const zhTW: Record<DictKey, string> = {
   "context.healthManyFilesBody": "已讀取 {count} 條檔案記錄，可檢視依據檔案確認是否仍相關。",
   "context.healthLowCache": "快取命中偏低",
   "context.healthLowCacheBody": "當前快取命中 {pct}%，後續長任務可關注上下文穩定性。",
-  "context.prompt": "Prompt",
-  "context.completion": "Completion",
-  "context.reasoning": "Reasoning",
-  "context.other": "Other",
-  "context.total": "Total",
+  "context.prompt": "提示詞",
+  "context.completion": "回覆",
+  "context.reasoning": "推理",
+  "context.other": "其他",
+  "context.total": "總計",
   "context.cacheHit": "快取命中",
   "context.sessionCost": "本次費用",
   "context.requests": "請求數",

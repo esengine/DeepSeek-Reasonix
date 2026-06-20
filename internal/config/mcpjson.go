@@ -172,7 +172,10 @@ func parseLegacyMCPSpec(raw string) (PluginEntry, bool) {
 	if !ok || len(parts) == 0 {
 		return PluginEntry{}, false
 	}
-	return PluginEntry{Name: name, Command: parts[0], Args: parts[1:]}, true
+	if shouldSplitPluginCommand(body, parts[0]) {
+		return PluginEntry{Name: name, Command: parts[0], Args: parts[1:]}, true
+	}
+	return PluginEntry{Name: name, Command: body}, true
 }
 
 // anonymousMCPName names a v0.x spec that carried no name= prefix (its tools
@@ -450,5 +453,9 @@ func writeMCPJSON(path string, root map[string]json.RawMessage) error {
 		os.Remove(tmpPath)
 		return fmt.Errorf("mcp config %s: close temp: %w", path, err)
 	}
-	return fileutil.ReplaceFile(tmpPath, path)
+	if err := fileutil.ReplaceFile(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }

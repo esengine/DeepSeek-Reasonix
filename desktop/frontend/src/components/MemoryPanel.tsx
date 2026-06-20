@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import type { MemoryArchive, MemoryFact, MemorySuggestion, MemorySuggestionsView, MemoryView, SkillSuggestion, TabMeta } from "../lib/types";
+import { AnchoredPopover } from "./AnchoredPopover";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
 import { ModalCloseButton } from "./ModalCloseButton";
@@ -774,11 +775,6 @@ export function MemorySettingsPage() {
 	const autoSuggestionsRequested = useRef(false);
 	const factRefs = useRef<Record<string, HTMLElement | null>>({});
 
-	const reload = useCallback(async () => {
-		const tabId = selectedTabId;
-		setView(tabId ? await app.MemoryForTab(tabId).catch(() => null) : await app.Memory().catch(() => null));
-	}, [selectedTabId]);
-
 	useEffect(() => {
 		app.ListTabs().then((tabList) => {
 			setTabs(tabList);
@@ -789,15 +785,99 @@ export function MemorySettingsPage() {
 		}).catch(() => {});
 	}, []);
 
+	// Deduplicate tabs by workspace: multiple conversations in the same project
+	// should appear as a single entry in the memory workspace selector.
+	const uniqueWorkspaceTabs = useMemo(() => {
+		const byWorkspace = new Map<string, TabMeta>();
+		for (const tb of tabs) {
+			const key = tb.workspaceRoot || `${tb.scope}:global`;
+			if (!byWorkspace.has(key)) byWorkspace.set(key, tb);
+		}
+		return [...byWorkspace.values()];
+	}, [tabs]);
+
+	// Ensure selectedTabId always points to a valid entry in uniqueWorkspaceTabs.
+	// On initial load the active tab is picked; if dedup removed it, fall back to first.
+	const effectiveTabId = useMemo(() => {
+		if (uniqueWorkspaceTabs.some((tb) => tb.id === selectedTabId)) return selectedTabId;
+		return uniqueWorkspaceTabs[0]?.id ?? null;
+	}, [selectedTabId, uniqueWorkspaceTabs]);
+
+	// Sync effectiveTabId back to selectedTabId when it changes
+	useEffect(() => {
+		if (effectiveTabId && effectiveTabId !== selectedTabId) {
+			setSelectedTabId(effectiveTabId);
+		}
+	}, [effectiveTabId]);
+
+	const reload = useCallback(async () => {
+		const tabId = effectiveTabId;
+		// Clear view immediately so stale data from the previous workspace
+		// doesn't persist while the new workspace loads.
+		setView((prev) => {
+			if (prev && tabId) return { ...prev, facts: [], archives: [], docs: [] };
+			return prev;
+		});
+		setView(tabId ? await app.MemoryForTab(tabId).catch(() => null) : await app.Memory().catch(() => null));
+	}, [effectiveTabId]);
+
 	useEffect(() => { void reload(); }, [reload]);
+
+	// Workspace selector: custom styled dropdown matching settings-subtab height
+	const wsTriggerRef = useRef<HTMLButtonElement>(null);
+	const [wsOpen, setWsOpen] = useState(false);
+	const selectedWs = uniqueWorkspaceTabs.find((tb) => tb.id === effectiveTabId);
+
+	const wsSelector = uniqueWorkspaceTabs.length > 0 ? (
+		<div className="mem-ws-select">
+			{uniqueWorkspaceTabs.length > 1 ? (
+				<>
+					<button
+						ref={wsTriggerRef}
+						type="button"
+						className="mem-ws-select__trigger"
+						onClick={() => setWsOpen((v) => !v)}
+					>
+						<span className="mem-ws-select__label">{selectedWs?.workspaceName || selectedWs?.label || ""}</span>
+						<ChevronDown size={13} className={"mem-ws-select__chev" + (wsOpen ? " mem-ws-select__chev--open" : "")} />
+					</button>
+					<AnchoredPopover
+						open={wsOpen}
+						anchorRef={wsTriggerRef}
+						onClose={() => setWsOpen(false)}
+						className="mem-ws-select__menu"
+						placement="bottom"
+					>
+						<div className="mem-ws-select__list" role="listbox">
+							{uniqueWorkspaceTabs.map((tb) => (
+								<button
+									key={tb.id}
+									type="button"
+									role="option"
+									aria-selected={tb.id === effectiveTabId}
+									className={"mem-ws-select__option" + (tb.id === effectiveTabId ? " mem-ws-select__option--selected" : "")}
+									onClick={() => { setSelectedTabId(tb.id); setWsOpen(false); }}
+								>
+									<span>{tb.workspaceName || tb.label || tb.scope || tb.id}</span>
+									{tb.id === effectiveTabId && <Check size={13} />}
+								</button>
+							))}
+						</div>
+					</AnchoredPopover>
+				</>
+			) : (
+				<span className="mem-ws-select__label mem-ws-select__label--single">{selectedWs?.workspaceName || selectedWs?.label || ""}</span>
+			)}
+		</div>
+	) : null;
 
 	const refreshSuggestions = useCallback(async () => {
 		if (suggestionBusy) return;
 		setSuggestionBusy(true);
 		setError(null);
 		try {
-			const next = selectedTabId
-				? await app.MemorySuggestionsForTab(selectedTabId)
+			const next = effectiveTabId
+				? await app.MemorySuggestionsForTab(effectiveTabId)
 				: await app.MemorySuggestions();
 			setSuggestions({
 				memories: next.memories ?? [],
@@ -812,7 +892,7 @@ export function MemorySettingsPage() {
 		} finally {
 			setSuggestionBusy(false);
 		}
-	}, [selectedTabId, suggestionBusy]);
+	}, [effectiveTabId, suggestionBusy]);
 
 	const setAutoSuggestionsPreference = useCallback((enabled: boolean) => {
 		autoSuggestionsRequested.current = false;
@@ -902,7 +982,7 @@ export function MemorySettingsPage() {
 		setBusy(true);
 		setError(null);
 		try {
-			if (selectedTabId) await app.ForgetForTab(selectedTabId, name);
+			if (effectiveTabId) await app.ForgetForTab(effectiveTabId, name);
 			else await app.Forget(name);
 			await reload();
 			if (expanded === name) setExpanded(null);
@@ -912,7 +992,7 @@ export function MemorySettingsPage() {
 		} finally {
 			setBusy(false);
 		}
-	}, [busy, expanded, reload, selectedTabId]);
+	}, [busy, expanded, reload, effectiveTabId]);
 
 	const scopes = view?.scopes ?? [];
 	const activeScope =
@@ -924,7 +1004,7 @@ export function MemorySettingsPage() {
 		setBusy(true);
 		setError(null);
 		try {
-			if (selectedTabId) await app.RememberForTab(selectedTabId, activeScope, trimmed);
+			if (effectiveTabId) await app.RememberForTab(effectiveTabId, activeScope, trimmed);
 			else await app.Remember(activeScope, trimmed);
 			await reload();
 			setNote("");
@@ -934,7 +1014,7 @@ export function MemorySettingsPage() {
 		} finally {
 			setBusy(false);
 		}
-	}, [note, busy, activeScope, reload, selectedTabId]);
+	}, [note, busy, activeScope, reload, effectiveTabId]);
 
 	const startEdit = useCallback((path: string, body: string) => {
 		setEditingPath(path);
@@ -946,7 +1026,7 @@ export function MemorySettingsPage() {
 		setBusy(true);
 		setError(null);
 		try {
-			if (selectedTabId) await app.SaveDocForTab(selectedTabId, editingPath, draft);
+			if (effectiveTabId) await app.SaveDocForTab(effectiveTabId, editingPath, draft);
 			else await app.SaveDoc(editingPath, draft);
 			await reload();
 			setEditingPath(null);
@@ -955,15 +1035,15 @@ export function MemorySettingsPage() {
 		} finally {
 			setBusy(false);
 		}
-	}, [editingPath, busy, draft, reload, selectedTabId]);
+	}, [editingPath, busy, draft, reload, effectiveTabId]);
 
 	const acceptMemorySuggestion = useCallback(async (candidate: MemorySuggestion) => {
 		if (busy) return;
 		setBusy(true);
 		setError(null);
 		try {
-			const path = selectedTabId
-				? await app.AcceptMemorySuggestionForTab(selectedTabId, candidate)
+			const path = effectiveTabId
+				? await app.AcceptMemorySuggestionForTab(effectiveTabId, candidate)
 				: await app.AcceptMemorySuggestion(candidate);
 			setAcceptedSuggestions((prev) => ({ ...prev, [candidate.id]: path || candidate.name }));
 			await reload();
@@ -972,15 +1052,15 @@ export function MemorySettingsPage() {
 		} finally {
 			setBusy(false);
 		}
-	}, [busy, reload, selectedTabId]);
+	}, [busy, reload, effectiveTabId]);
 
 	const acceptSkillSuggestion = useCallback(async (candidate: SkillSuggestion) => {
 		if (busy) return;
 		setBusy(true);
 		setError(null);
 		try {
-			const path = selectedTabId
-				? await app.AcceptSkillSuggestionForTab(selectedTabId, candidate)
+			const path = effectiveTabId
+				? await app.AcceptSkillSuggestionForTab(effectiveTabId, candidate)
 				: await app.AcceptSkillSuggestion(candidate);
 			setAcceptedSuggestions((prev) => ({ ...prev, [candidate.id]: path || candidate.name }));
 		} catch (err) {
@@ -988,26 +1068,12 @@ export function MemorySettingsPage() {
 		} finally {
 			setBusy(false);
 		}
-	}, [busy, selectedTabId]);
+	}, [busy, effectiveTabId]);
 
 	if (!view?.available) {
 		return (
 			<>
-				{tabs.length > 1 && (
-					<div className="mem-tab-selector">
-						<select
-							className="mem-tab-select"
-							value={selectedTabId ?? ""}
-							onChange={(e) => setSelectedTabId(e.target.value || null)}
-						>
-							{tabs.map((tb) => (
-								<option key={tb.id} value={tb.id}>
-									{tb.label || tb.workspaceName || tb.scope || tb.id}
-								</option>
-							))}
-						</select>
-					</div>
-				)}
+				{wsSelector}
 				<div className="empty">{t("memory.unavailable")}</div>
 			</>
 		);
@@ -1068,6 +1134,8 @@ export function MemorySettingsPage() {
 						<span>{t("memory.instructionFiles")}</span>
 					</button>
 				</div>
+				<div className="memory-tabs-row__spacer" />
+				{wsSelector}
 				<button
 					className={"memory-suggestion-tab" + (tab === "suggestions" ? " memory-suggestion-tab--active" : "")}
 					role="tab"
@@ -1080,21 +1148,6 @@ export function MemorySettingsPage() {
 					{suggestionTotal(suggestions) > 0 && <span className="settings-subtab__count">{suggestionTotal(suggestions)}</span>}
 				</button>
 			</div>
-			{tabs.length > 1 && (
-				<div className="mem-tab-selector">
-					<select
-						className="mem-tab-select"
-						value={selectedTabId ?? ""}
-						onChange={(e) => setSelectedTabId(e.target.value || null)}
-					>
-						{tabs.map((tb) => (
-							<option key={tb.id} value={tb.id}>
-								{tb.label || tb.workspaceName || tb.scope}
-							</option>
-						))}
-					</select>
-				</div>
-			)}
 
 			{tab === "saved" && <section className="mem-section">
 				<div className="mem-section__head">

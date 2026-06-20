@@ -116,6 +116,116 @@ func writeLegacyEventSession(t *testing.T, dir, name, prompt, reply string, modT
 	return path
 }
 
+func TestSessionListCacheRefillsAfterInvalidate(t *testing.T) {
+	cache := &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
+	dir := t.TempDir()
+	first := []agent.SessionInfo{{Path: filepath.Join(dir, "first.jsonl")}}
+	second := []agent.SessionInfo{{Path: filepath.Join(dir, "second.jsonl")}}
+
+	token := cache.versionToken()
+	cache.put(dir, first, map[string]string{"first.jsonl": "First"}, token)
+	if infos, titles, ok := cache.get(dir); !ok || len(infos) != 1 || filepath.Base(infos[0].Path) != "first.jsonl" || titles["first.jsonl"] != "First" {
+		t.Fatalf("initial cache entry = %+v, %+v, %v", infos, titles, ok)
+	}
+
+	cache.invalidate()
+	if _, _, ok := cache.get(dir); ok {
+		t.Fatalf("cache entry survived invalidate")
+	}
+	cache.put(dir, first, map[string]string{"first.jsonl": "stale"}, token)
+	if _, _, ok := cache.get(dir); ok {
+		t.Fatalf("stale token repopulated cache after invalidate")
+	}
+
+	token = cache.versionToken()
+	cache.put(dir, second, map[string]string{"second.jsonl": "Second"}, token)
+	if infos, titles, ok := cache.get(dir); !ok || len(infos) != 1 || filepath.Base(infos[0].Path) != "second.jsonl" || titles["second.jsonl"] != "Second" {
+		t.Fatalf("refilled cache entry = %+v, %+v, %v", infos, titles, ok)
+	}
+}
+
+func TestSessionDiskCachePersistsDirectorySignatures(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "project-session-cache.json")
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "one.jsonl")
+	signature := []topicSessionFileSignature{{
+		Name:    "one.jsonl",
+		Size:    42,
+		ModTime: time.Now().UnixNano(),
+	}}
+	session := agent.SessionInfo{
+		Path:           sessionPath,
+		CreatedAt:      time.Now().Add(-time.Minute),
+		LastActivityAt: time.Now(),
+		Preview:        "hello",
+		Turns:          1,
+		Scope:          "project",
+		WorkspaceRoot:  dir,
+		TopicID:        "topic-cache",
+		TopicTitle:     "Cache",
+	}
+
+	writer := &sessionDiskCache{path: cachePath}
+	if err := writer.putDir(dir, signature, []agent.SessionInfo{session}, map[string]string{"one.jsonl": "One"}); err != nil {
+		t.Fatalf("putDir: %v", err)
+	}
+	raw, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatalf("read cache: %v", err)
+	}
+	if text := string(raw); !strings.Contains(text, `"name": "one.jsonl"`) {
+		t.Fatalf("signature was not persisted with exported fields: %s", text)
+	}
+
+	reader := &sessionDiskCache{path: cachePath}
+	entry, ok := reader.getDir(dir, signature)
+	if !ok {
+		t.Fatalf("expected disk cache hit after reload")
+	}
+	if len(entry.Sessions) != 1 || entry.Sessions[0].Path != sessionPath || entry.Titles["one.jsonl"] != "One" {
+		t.Fatalf("disk cache entry = %+v", entry)
+	}
+	changed := append([]topicSessionFileSignature(nil), signature...)
+	changed[0].Size++
+	if _, ok := reader.getDir(dir, changed); ok {
+		t.Fatalf("disk cache hit with changed signature")
+	}
+}
+
+func TestRenameSessionInvalidatesProjectTreeCache(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	oldProjectCache := projectSessionCache
+	oldDiskCache := sessionDiskCacher
+	projectSessionCache = &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
+	sessionDiskCacher = &sessionDiskCache{path: filepath.Join(t.TempDir(), "project-session-cache.json")}
+	t.Cleanup(func() {
+		projectSessionCache = oldProjectCache
+		sessionDiskCacher = oldDiskCache
+	})
+
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "rename-me.jsonl")
+	if err := os.WriteFile(sessionPath, []byte(`{"role":"user","content":"hello"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: sessionPath, Label: "test"})
+	defer ctrl.Close()
+	app := NewApp()
+	app.setTestCtrl(ctrl, "")
+
+	token := projectSessionCache.versionToken()
+	projectSessionCache.put(dir, []agent.SessionInfo{{Path: sessionPath}}, map[string]string{"rename-me.jsonl": "old"}, token)
+	if _, _, ok := projectSessionCache.get(dir); !ok {
+		t.Fatalf("expected primed project tree cache")
+	}
+	if err := app.RenameSession(sessionPath, "new title"); err != nil {
+		t.Fatalf("RenameSession: %v", err)
+	}
+	if _, _, ok := projectSessionCache.get(dir); ok {
+		t.Fatalf("RenameSession should invalidate project tree cache")
+	}
+}
+
 func TestDeleteTopicKeepsSessionHistory(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

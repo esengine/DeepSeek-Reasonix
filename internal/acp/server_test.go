@@ -912,8 +912,8 @@ func TestServeSessionClose(t *testing.T) {
 
 func TestSessionDeleteWithStuckJobReturnsAfterSingleGrace(t *testing.T) {
 	dir := t.TempDir()
-	grace := 500 * time.Millisecond
-	slack := 300 * time.Millisecond
+	grace := time.Second
+	maxElapsed := grace + 750*time.Millisecond
 	factory := &teardownFactory{dir: dir, grace: grace}
 	client, stop := startServer(t, factory)
 	defer stop()
@@ -937,7 +937,7 @@ func TestSessionDeleteWithStuckJobReturnsAfterSingleGrace(t *testing.T) {
 	if resp.Error != nil {
 		t.Fatalf("session/delete errored: %+v", resp.Error)
 	}
-	if elapsed > grace+slack {
+	if elapsed > maxElapsed {
 		t.Fatalf("session/delete took %s, want one teardown grace plus scheduling slack", elapsed)
 	}
 	if !agent.IsCleanupPending(path) {

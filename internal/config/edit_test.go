@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -161,6 +162,8 @@ func TestDesktopLayoutStyleNormalizes(t *testing.T) {
 		{"classic", "classic", false},
 		{" workbench ", "workbench", false},
 		{"workspace", "workbench", false},
+		{"creation", "creation", false},
+		{" Creation ", "creation", false},
 		{"later", "workbench", true},
 	} {
 		c := Default()
@@ -949,6 +952,11 @@ func TestSaveToScopesUserAndProjectFiles(t *testing.T) {
 	if !strings.Contains(string(userBody), "[desktop]") {
 		t.Fatalf("user config should include desktop preferences:\n%s", userBody)
 	}
+	if info, err := os.Stat(userPath); err != nil {
+		t.Fatalf("stat user config: %v", err)
+	} else if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		t.Fatalf("user config mode = %o, want 600", info.Mode().Perm())
+	}
 
 	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
 	if err := c.SaveTo(projectPath); err != nil {
@@ -960,6 +968,11 @@ func TestSaveToScopesUserAndProjectFiles(t *testing.T) {
 	}
 	if strings.Contains(string(projectBody), "[desktop]") || strings.Contains(string(projectBody), "close_behavior") {
 		t.Fatalf("project config should not include desktop preferences:\n%s", projectBody)
+	}
+	if info, err := os.Stat(projectPath); err != nil {
+		t.Fatalf("stat project config: %v", err)
+	} else if runtime.GOOS != "windows" && info.Mode().Perm() != 0o644 {
+		t.Fatalf("project config mode = %o, want 644", info.Mode().Perm())
 	}
 }
 

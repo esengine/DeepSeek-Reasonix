@@ -102,6 +102,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Desktop.Theme = "dark"
 	orig.Desktop.ThemeStyle = "graphite"
 	orig.Desktop.CloseBehavior = "background"
+	orig.Desktop.DisplayMode = "compact"
 	orig.Desktop.StatusBarStyle = "text"
 	orig.Desktop.StatusBarItems = []string{"model", "balance", "cache"}
 	orig.Desktop.CheckUpdates = boolPtr(false)
@@ -222,6 +223,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if got.Desktop.CloseBehavior != "background" {
 		t.Errorf("desktop.close_behavior = %q, want background", got.Desktop.CloseBehavior)
+	}
+	if got.DesktopDisplayMode() != "compact" {
+		t.Errorf("desktop.display_mode = %q, want compact", got.DesktopDisplayMode())
 	}
 	if got.Desktop.StatusBarStyle != "text" {
 		t.Errorf("desktop.status_bar_style = %q, want text", got.Desktop.StatusBarStyle)
@@ -359,6 +363,24 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if strings.Contains(rendered, "\ntier") {
 		t.Errorf("rendered config should not contain MCP tier fields:\n%s", rendered)
+	}
+}
+
+func TestRenderTOMLCreationLayoutStyle(t *testing.T) {
+	c := Default()
+	if err := c.SetDesktopLayoutStyle("creation"); err != nil {
+		t.Fatalf("SetDesktopLayoutStyle: %v", err)
+	}
+	rendered := RenderTOML(c)
+	var got Config
+	if _, err := toml.Decode(rendered, &got); err != nil {
+		t.Fatalf("rendered TOML does not parse: %v\n---\n%s", err, rendered)
+	}
+	if got.Desktop.LayoutStyle != "creation" {
+		t.Errorf("desktop.layout_style = %q, want creation", got.Desktop.LayoutStyle)
+	}
+	if got.DesktopLayoutStyle() != "creation" {
+		t.Errorf("DesktopLayoutStyle() = %q, want creation", got.DesktopLayoutStyle())
 	}
 }
 
@@ -609,6 +631,24 @@ func TestRenderTOMLRoundTripsVisionModels(t *testing.T) {
 func boolPtr(v bool) *bool { return &v }
 
 func intPtr(v int) *int { return &v }
+
+func TestRenderTOMLPreservesDesktopDisplayMode(t *testing.T) {
+	c := Default()
+	if err := c.SetDesktopDisplayMode("compact"); err != nil {
+		t.Fatalf("SetDesktopDisplayMode: %v", err)
+	}
+	rendered := RenderTOMLForScope(c, RenderScopeUser)
+	if !strings.Contains(rendered, `display_mode = "compact"`) {
+		t.Fatalf("rendered user config missing display_mode:\n%s", rendered)
+	}
+	var got Config
+	if _, err := toml.Decode(rendered, &got); err != nil {
+		t.Fatalf("rendered TOML does not parse: %v\n---\n%s", err, rendered)
+	}
+	if got.DesktopDisplayMode() != "compact" {
+		t.Fatalf("display_mode after round trip = %q, want compact", got.DesktopDisplayMode())
+	}
+}
 
 func TestRenderTOMLDefaultStepsCommentedOut(t *testing.T) {
 	isolateUserConfigHome(t)

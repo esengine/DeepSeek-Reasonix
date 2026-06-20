@@ -21,6 +21,11 @@ func ApplyKnownOverrides(s Spec, workspaceRoot string) Spec {
 			}
 			s.Env = mergeDefaultEnv(s.Env, codeGraphDaemonIdleTimeoutEnv, codeGraphDaemonIdleTimeoutDefaultMS)
 		}
+		// CodeGraph does full-tree indexing + file-watching; run it below normal
+		// scheduling priority so a background indexer can never starve the user's
+		// machine (#3797, #2992). The proc-level mechanism already exists but was
+		// never wired to the spec, so it stayed disabled.
+		s.LowPriority = true
 	}
 	return s
 }

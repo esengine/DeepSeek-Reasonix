@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "../lib/i18n";
 import type { QuestionAnswer, WireAsk, WireAskQuestion } from "../lib/types";
-import { PromptAction, PromptBadge, PromptDetailToggle, PromptShelf } from "./PromptShelf";
+import { PromptAction, PromptHeaderAction, PromptShelf } from "./PromptShelf";
 import { playAttentionChime } from "../lib/sound";
 
 // AskCard renders the `ask` tool as a compact prompt shelf near the composer. It
@@ -23,7 +23,6 @@ export function AskCard({
   const [sel, setSel] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [active, setActive] = useState(0);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const shelfRef = useRef<HTMLDivElement | null>(null);
   const advanceTimer = useRef<number | null>(null);
 
@@ -38,7 +37,6 @@ export function AskCard({
     setSel({});
     setCustom({});
     setActive(0);
-    setDetailsOpen(false);
     if (advanceTimer.current != null) window.clearTimeout(advanceTimer.current);
     playAttentionChime();
   }, [ask.id]);
@@ -68,6 +66,7 @@ export function AskCard({
     (sel[question.id]?.length ?? 0) > 0 || (custom[question.id]?.trim() ?? "") !== "";
 
   const currentAnswered = q ? answered(q) : false;
+  const showSubmitAction = q ? q.multi || Boolean(custom[q.id]?.trim()) : false;
 
   const finishOrAdvance = (nextSel = sel, nextCustom = custom) => {
     if (advanceTimer.current != null) {
@@ -78,7 +77,6 @@ export function AskCard({
       onAnswer(ask.id, answersFrom(nextSel, nextCustom));
       return;
     }
-    setDetailsOpen(false);
     setActive((i) => Math.min(i + 1, questions.length - 1));
   };
 
@@ -108,7 +106,6 @@ export function AskCard({
       window.clearTimeout(advanceTimer.current);
       advanceTimer.current = null;
     }
-    setDetailsOpen(false);
     setActive((i) => Math.max(0, i - 1));
   };
 
@@ -154,107 +151,80 @@ export function AskCard({
       barRef={shelfRef}
       titleId="ask-shelf-title"
       title={t("ask.title")}
-      actionsWrap
       badges={
-        <>
-          {q.header && <PromptBadge>{q.header}</PromptBadge>}
-          {hasMultipleQuestions && <PromptBadge>{t("ask.questionProgress", { progress })}</PromptBadge>}
-        </>
+        <span className="ask-shelf__header-meta">
+          {q.header && <span className="ask-shelf__header-text">{q.header}</span>}
+          {hasMultipleQuestions && (
+            <span className="ask-shelf__header-text ask-shelf__header-text--progress">
+              {t("ask.questionProgress", { progress })}
+            </span>
+          )}
+        </span>
       }
       meta={q.prompt}
+      headerActions={
+        <>
+          <PromptHeaderAction onClick={onDismiss}>{t("ask.justChat")}</PromptHeaderAction>
+          <PromptHeaderAction onClick={onStop} ariaLabel={t("composer.stopShort")}>Esc</PromptHeaderAction>
+        </>
+      }
       actions={
         <>
-          {active > 0 && (
-            <button className="prompt-action prompt-action--quiet" onClick={goBack}>
-              <span className="prompt-action__label">{t("ask.back")}</span>
-            </button>
-          )}
           {q.options.map((o, index) => {
             const on = (sel[q.id] ?? []).includes(o.label);
             return (
               <PromptAction
                 key={o.label}
-                keyLabel={String(index + 1)}
+                keyLabel={q.options.length <= 9 ? String(index + 1) : ""}
                 label={o.label}
+                description={o.description}
                 onClick={() => toggle(q, o.label)}
                 selected={on}
               />
             );
           })}
-          {q.multi && (
-            <button className="prompt-action prompt-action--selected" onClick={() => finishOrAdvance()} disabled={!currentAnswered}>
-              <span className="prompt-action__label">{isLast ? t("common.submit") : t("ask.next")}</span>
-            </button>
+        </>
+      }
+      quickActions={
+        <>
+          {active > 0 && (
+            <PromptAction keyLabel="" label={t("ask.back")} onClick={goBack} quiet />
           )}
-          <PromptDetailToggle
-            open={detailsOpen}
-            label={t("ask.details")}
-            openLabel={t("ask.hideDetails")}
-            onClick={() => setDetailsOpen((open) => !open)}
-          />
-          <button className="prompt-action prompt-action--quiet" onClick={onDismiss}>
-            <span className="prompt-action__label">{t("ask.justChat")}</span>
-          </button>
-          <button className="prompt-action prompt-action--quiet" onClick={onStop}>
-            <span className="prompt-action__key">Esc</span>
-            <span className="prompt-action__label">{t("composer.stopShort")}</span>
-          </button>
+          {showSubmitAction && (
+            <PromptAction
+              keyLabel=""
+              label={isLast ? t("common.submit") : t("ask.next")}
+              onClick={() => finishOrAdvance()}
+              primary
+              disabled={!currentAnswered}
+            />
+          )}
         </>
       }
       crumbs={
         answeredSummary.length > 0 && (
-        <div className="ask-shelf__crumbs">
-          {answeredSummary.map((answer, index) => (
-            <span className="ask-shelf__crumb" key={`${index}-${answer}`}>
-              {index + 1}. {answer}
-            </span>
-          ))}
-        </div>
+          <div className="ask-shelf__crumbs">
+            {answeredSummary.map((answer, index) => (
+              <span className="ask-shelf__crumb" key={`${index}-${answer}`}>
+                {index + 1}. {answer}
+              </span>
+            ))}
+          </div>
         )
       }
     >
-      {detailsOpen && (
-        <>
-          <div className="ask-shelf__detail-list">
-            {q.options.map((o) => (
-              <div className="ask-shelf__detail" key={o.label}>
-                <span className="ask-shelf__detail-label">{o.label}</span>
-                {o.description && <span className="ask-shelf__detail-desc">{o.description}</span>}
-              </div>
-            ))}
-          </div>
-          <div className="ask-shelf__custom-row">
-            <input
-              className="ask-shelf__custom"
-              placeholder={t("ask.customPlaceholder")}
-              value={custom[q.id] ?? ""}
-              onChange={(e) => setTyped(q, e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && currentAnswered) finishOrAdvance();
-                e.stopPropagation();
-              }}
-            />
-            <div className="ask-shelf__panel-actions">
-              {active > 0 && (
-                <button className="btn" onClick={goBack}>
-                  {t("ask.back")}
-                </button>
-              )}
-              <button className="btn" onClick={onDismiss}>
-                {t("ask.justChat")}
-              </button>
-              <button className="btn" onClick={onStop}>
-                {t("composer.stopShort")}
-              </button>
-              {(q.multi || custom[q.id]?.trim()) && (
-                <button className="btn btn--primary" onClick={() => finishOrAdvance()} disabled={!currentAnswered}>
-                  {isLast ? t("common.submit") : t("ask.next")}
-                </button>
-              )}
-            </div>
-          </div>
-        </>
-      )}
+      <div className="ask-shelf__custom-row">
+        <input
+          className="ask-shelf__custom"
+          placeholder={t("ask.customPlaceholder")}
+          value={custom[q.id] ?? ""}
+          onChange={(e) => setTyped(q, e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && currentAnswered) finishOrAdvance();
+            e.stopPropagation();
+          }}
+        />
+      </div>
     </PromptShelf>
   );
 }

@@ -57,6 +57,12 @@ export const en = {
   "sidebar.resize": "Resize navigation",
   "sidebar.im": "Bots",
   "sidebar.imAdd": "Add bot",
+  "creation.sidebar.newChat": "New Chat",
+  "creation.sidebar.features": "Features",
+  "creation.sidebar.skills": "Skills",
+  "creation.sidebar.messageChannels": "Message channels",
+  "creation.reasoningLabel": "Deep thinking",
+  "creation.toolCallsLabel": "Tool calls",
   "sidebar.imEmpty": "Connect QQ / Feishu / Lark / WeChat",
   "sidebar.imOnlineCount": "{n} online",
   "sidebar.imConnectionCount": "{n} connections",
@@ -307,6 +313,14 @@ export const en = {
   "welcome.ex2": "Summarize the recent git changes",
   "welcome.ex3": "Where is the agent run loop, and what does it do?",
   "welcome.ex4": "Find and fix a bug in this project",
+  "welcome.creation.titlePrimary": "Hey, what do you want to create today?",
+  "welcome.creation.titleSecondary": "Start with one question.",
+  "welcome.creation.explainTitle": "Help me shape a plan",
+  "welcome.creation.explainBody": "Clarify the goal and path.",
+  "welcome.creation.gitTitle": "Edit an HTML design",
+  "welcome.creation.gitBody": "Tune the page and interaction.",
+  "welcome.creation.bugTitle": "Ask you some philosophy questions",
+  "welcome.creation.bugBody": "Make the question clear.",
 
   // composer
   "composer.placeholder": "Message Reasonix…  ( / commands · @ files · ! shell )",
@@ -800,6 +814,7 @@ export const en = {
   "settings.desktopLayoutStyle": "Desktop style",
   "settings.desktopLayoutStyle.classic": "Classic",
   "settings.desktopLayoutStyle.workbench": "Workbench",
+  "settings.desktopLayoutStyle.creation": "Creation",
   "settings.displayMode": "Transcript display mode",
   "settings.displayMode.standard": "Standard",
   "settings.displayMode.compact": "Compact",
@@ -1387,6 +1402,9 @@ export const en = {
   // todo bar
   "todo.title": "To-dos",
   "todo.dismiss": "Dismiss the task list",
+  "todo.pending": "Pending",
+  "todo.inProgress": "In progress",
+  "todo.completed": "Completed",
 
   // slash menu tags
   "slash.project": "project",

@@ -222,13 +222,25 @@ func (lt *lazyTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 			return "", fmt.Errorf("MCP server %q is initializing on first use — call again on the next turn for its real tools", sp.spec.Name)
 		}
 		// Cache-hit: run the handshake synchronously so this one Execute can
-		// forward through.
+		// forward through. Bound it with a start timeout so a wedged or
+		// unreachable MCP server can't hang the whole turn indefinitely
+		// (#4806) — on timeout we fail this attempt and a later turn can retry.
 		sp.state = spawnInFlight
 		sp.mu.Unlock()
-		real, err := sp.host.Add(sp.ctx, sp.spec)
+		spawnCtx, cancel := context.WithTimeout(sp.ctx, defaultStartTimeout)
+		real, err := sp.host.AddWithLifecycle(sp.ctx, spawnCtx, sp.spec)
+		cancel()
 		sp.mu.Lock()
 		defer sp.mu.Unlock()
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				// A slow cold start can succeed on a later turn after npm/node
+				// caches warm up or a remote MCP endpoint responds. Do not pin
+				// the session into spawnFailed for a transient startup budget miss.
+				sp.state = spawnIdle
+				sp.spawnErr = nil
+				return "", fmt.Errorf("MCP server %q startup timed out — retry this tool on a later turn", sp.spec.Name)
+			}
 			if errors.Is(err, ErrSpawningInFlight) {
 				// Another tab is already spawning this server on the shared
 				// host, but this lazySpawn has no goroutine that can publish

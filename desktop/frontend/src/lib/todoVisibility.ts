@@ -15,10 +15,16 @@ export function shouldShowTodoPanel(
   dismissedTodoKey: string | null,
   todos: Todo[],
 ): boolean {
-  return !!todoKey && todoKey !== dismissedTodoKey && todos.some((todo) => todoStatus(todo.status) !== "completed");
+  if (!todoKey || todos.length === 0) return false;
+  if (hasIncompleteTodos(todos)) return true;
+  return todoKey !== dismissedTodoKey;
 }
 
 function todoStatus(status: unknown): string {
   const normalized = String(status ?? "").trim();
   return normalized || "pending";
+}
+
+function hasIncompleteTodos(todos: Todo[]): boolean {
+  return todos.some((todo) => todoStatus(todo.status) !== "completed");
 }

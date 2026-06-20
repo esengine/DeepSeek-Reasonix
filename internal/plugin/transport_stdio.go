@@ -50,13 +50,29 @@ type stdioTransport struct {
 	pending map[int]chan rpcResponse
 	readErr error // set once the reader goroutine exits; further calls fail fast
 
-	waitOnce sync.Once
+	waitOnce    sync.Once
+	releaseSlot func() // returns a bounded instance slot (e.g. CodeGraph) on close; nil when unbounded
 }
 
 func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	if strings.TrimSpace(s.Command) == "" {
 		return nil, fmt.Errorf("stdio plugin %q: command is required", s.Name)
 	}
+	var releaseSlot func()
+	if isCodeGraphSpecName(s.Name) {
+		release, err := acquireCodeGraphSlot()
+		if err != nil {
+			return nil, err
+		}
+		releaseSlot = release
+	}
+	defer func() {
+		// Release the reserved slot if construction fails before the transport
+		// takes ownership of it (set to nil on the success path below).
+		if releaseSlot != nil {
+			releaseSlot()
+		}
+	}()
 	env := mergeEnv(os.Environ(), s.Env)
 	exe, env, err := resolveStdioExecutable(ctx, s, env)
 	if err != nil {
@@ -93,14 +109,16 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 		proc.LowPriorityStarted(cmd)
 	}
 	t := &stdioTransport{
-		name:    s.Name,
-		cmd:     cmd,
-		job:     job,
-		stdin:   stdin,
-		stdout:  bufio.NewReader(stdout),
-		stderr:  stderr,
-		pending: map[int]chan rpcResponse{},
+		name:        s.Name,
+		cmd:         cmd,
+		job:         job,
+		stdin:       stdin,
+		stdout:      bufio.NewReader(stdout),
+		stderr:      stderr,
+		pending:     map[int]chan rpcResponse{},
+		releaseSlot: releaseSlot,
 	}
+	releaseSlot = nil // ownership transferred to t; close() releases it
 	go t.readLoop()
 	return t, nil
 }
@@ -551,6 +569,9 @@ func (t *stdioTransport) wait() {
 // blocking forever) and reaps it under a budget so one wedged server can never
 // stall a boot or a turn teardown.
 func (t *stdioTransport) close() {
+	if t.releaseSlot != nil {
+		t.releaseSlot() // idempotent; frees the bounded CodeGraph instance slot
+	}
 	if t.stdin != nil {
 		_ = t.stdin.Close()
 	}

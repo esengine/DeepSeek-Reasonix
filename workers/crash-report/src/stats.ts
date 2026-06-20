@@ -3,11 +3,25 @@ import { type User, userNav } from "./auth";
 
 type Daily = { date: string; users: number; opens: number };
 type MetricRow = { signal: string; bucket: string; total: number };
+type BarRow = { label: string; users: number };
+type BarListOptions = {
+  limit?: number;
+  className?: string;
+  labelFormatter?: (label: string) => string;
+};
 
-function last30Days(rows: Daily[]): Daily[] {
+type OverviewCounts = {
+  latestAdoptionPct: number | null;
+  openReports: number;
+  newLatestReports: number;
+  regressedReports: number;
+  criticalOpenReports: number;
+};
+
+function lastDays(rows: Daily[], count: 7 | 30): Daily[] {
   const byDate = new Map(rows.map((r) => [r.date, r]));
   const out: Daily[] = [];
-  for (let i = 29; i >= 0; i--) {
+  for (let i = count - 1; i >= 0; i--) {
     const date = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
     out.push(byDate.get(date) ?? { date, users: 0, opens: 0 });
   }
@@ -75,15 +89,76 @@ ${label}</g>`;
 ${grid}${bars}</svg>`;
 }
 
-function listBars(rows: { label: string; users: number }[]): string {
-  if (!rows.length) return `<div class="empty">${i18n("No data in the last 7 days", "近 7 天暂无数据")}</div>`;
+function bucketDisplayLabel(signal: string, bucket: string): string {
+  if (signal.includes("_model") && bucket.startsWith("custom_")) {
+    const model = bucket.slice("custom_".length).replace(/_/g, " ");
+    return `<span class="bucket-prefix">custom</span><span class="bucket-main">${esc(model)}</span>`;
+  }
+  return esc(bucket);
+}
+
+function barRow(r: BarRow, max: number, labelFormatter?: (label: string) => string): string {
+  const label = labelFormatter ? labelFormatter(r.label) : esc(r.label);
+  return `<div class="row" title="${esc(r.label)}"><span class="row-label">${label}</span><div class="row-bar"><div class="bar" style="width:${Math.max(3, Math.round((r.users / max) * 100))}%"></div></div><span class="n">${r.users}</span></div>`;
+}
+
+function listBars(rows: BarRow[], options: BarListOptions = {}): string {
+  if (!rows.length) return `<div class="empty">${i18n("No data in this window", "当前时间窗口暂无数据")}</div>`;
   const max = Math.max(1, ...rows.map((r) => r.users));
-  return rows
-    .map(
-      (r) =>
-        `<div class="row"><span>${esc(r.label)}</span><div><div class="bar" style="width:${Math.max(3, Math.round((r.users / max) * 100))}%"></div></div><span class="n">${r.users}</span></div>`,
-    )
-    .join("");
+  const limit = options.limit ?? 5;
+  const visible = limit > 0 ? rows.slice(0, limit) : rows;
+  const hidden = limit > 0 ? rows.slice(limit) : [];
+  const className = options.className ? ` ${esc(options.className)}` : "";
+  const visibleRows = visible.map((r) => barRow(r, max, options.labelFormatter)).join("");
+  if (!hidden.length) return `<div class="bars-list${className}">${visibleRows}</div>`;
+  return `<div class="bars-list${className}">${visibleRows}<details class="bars-more"><summary>${i18nHTML(`More ${hidden.length}`, `更多 ${hidden.length}`)}</summary><div class="bars-more-list">${hidden
+    .map((r) => barRow(r, max, options.labelFormatter))
+    .join("")}</div></details></div>`;
+}
+
+function labelizeBucket(bucket: string): string {
+  return bucket.replace(/^n_/, "").replace(/_/g, " ");
+}
+
+function sumMetric(rows: MetricRow[], signal: string): number {
+  return rows.filter((r) => r.signal === signal).reduce((sum, r) => sum + r.total, 0);
+}
+
+function topMetricBucket(rows: MetricRow[], signal: string): string {
+  const row = rows.filter((r) => r.signal === signal).sort((a, b) => b.total - a.total)[0];
+  return row ? `${labelizeBucket(row.bucket)} · ${row.total}` : "none";
+}
+
+function cacheHitRate(rows: MetricRow[]): number | null {
+  const cacheRows = rows.filter((r) => r.signal === "cache_hit");
+  const total = cacheRows.reduce((sum, r) => sum + r.total, 0);
+  if (!total) return null;
+  const weighted = cacheRows.reduce((sum, r) => {
+    const m = r.bucket.match(/^(\d+)_(\d+)$/);
+    const midpoint = m ? (Number(m[1]) + Number(m[2])) / 2 : 0;
+    return sum + midpoint * r.total;
+  }, 0);
+  return weighted / total;
+}
+
+function pct(n: number | null): string {
+  if (n === null || !Number.isFinite(n)) return "n/a";
+  return `${Math.round(n)}%`;
+}
+
+function ratioPer100(rows: MetricRow[], signal: string): number | null {
+  const turns = sumMetric(rows, "turns");
+  if (!turns) return null;
+  return (sumMetric(rows, signal) / turns) * 100;
+}
+
+function deltaLabel(current: number | null, previous: number | null, suffix = ""): string {
+  if (current === null || previous === null) return "new";
+  const delta = current - previous;
+  if (Math.abs(delta) < 0.05) return "flat";
+  const sign = delta > 0 ? "+" : "";
+  const rounded = Math.abs(delta) >= 10 ? Math.round(delta) : Number(delta.toFixed(1));
+  return `${sign}${rounded}${suffix}`;
 }
 
 const METRIC_SIGNAL_LABELS: Record<string, { en: string; zh: string }> = {
@@ -131,6 +206,7 @@ const METRIC_SIGNAL_LABELS: Record<string, { en: string; zh: string }> = {
 };
 
 const AGENT_METRIC_SIGNALS = ["finish_reason", "empty_final", "provider_error", "cache_hit", "tool_error", "compaction", "turns"];
+const DEFAULT_OPEN_SETTING_GROUPS = new Set(["Client", "Models", "Providers"]);
 
 const SETTINGS_METRIC_GROUPS: { en: string; zh: string; signals: string[] }[] = [
   {
@@ -208,10 +284,17 @@ function metricsBySignal(rows: MetricRow[]): Map<string, { label: string; users:
   return bySignal;
 }
 
-function metricBlocks(bySignal: Map<string, { label: string; users: number }[]>, signals: string[]): string {
+function metricBlocks(bySignal: Map<string, BarRow[]>, signals: string[], options: { barLimit?: number } = {}): string {
   return signals
     .filter((signal) => bySignal.has(signal))
-    .map((signal) => `<div class="metric-block"><h3>${metricSignalLabel(signal)}</h3>${listBars(bySignal.get(signal) ?? [])}</div>`)
+    .map((signal) => {
+      const rows = bySignal.get(signal) ?? [];
+      return `<div class="metric-block"><h3>${metricSignalLabel(signal)}<span>${rows.length}</span></h3>${listBars(rows, {
+        limit: options.barLimit ?? 5,
+        className: "metric-bars",
+        labelFormatter: (label) => bucketDisplayLabel(signal, label),
+      })}</div>`;
+    })
     .join("");
 }
 
@@ -220,20 +303,93 @@ function metricsCards(rows: MetricRow[], signals = AGENT_METRIC_SIGNALS): string
     return `<div class="empty">${i18n("No metrics yet — flows in once an opt-in build ships", "暂无运行指标 — 等 opt-in 版本发布后有数据")}</div>`;
   const bySignal = metricsBySignal(rows);
   const blocks = metricBlocks(bySignal, signals);
-  return blocks ? `<div class="metrics">${blocks}</div>` : `<div class="empty">${i18n("No data in the last 7 days", "近 7 天暂无数据")}</div>`;
+  return blocks ? `<div class="metrics">${blocks}</div>` : `<div class="empty">${i18n("No data in this window", "当前时间窗口暂无数据")}</div>`;
 }
 
-function settingsDashboard(rows: MetricRow[]): string {
+function settingsDashboard(rows: MetricRow[], options: { collapseSections?: boolean } = {}): string {
   const bySignal = metricsBySignal(rows);
   const sections = SETTINGS_METRIC_GROUPS.map((group) => {
+    const availableSignals = group.signals.filter((signal) => bySignal.has(signal));
     const blocks = metricBlocks(bySignal, group.signals);
     if (!blocks) return "";
-    return `<section class="pref-section"><h3>${i18n(group.en, group.zh)}</h3><div class="metrics pref-metrics">${blocks}</div></section>`;
+    const heading = `<h3>${i18n(group.en, group.zh)}<span>${i18nHTML(`${availableSignals.length} metrics`, `${availableSignals.length} 项指标`)}</span></h3>`;
+    if (options.collapseSections && !DEFAULT_OPEN_SETTING_GROUPS.has(group.en)) {
+      return `<details class="pref-section pref-section-collapsed"><summary>${heading}</summary><div class="metrics pref-metrics">${blocks}</div></details>`;
+    }
+    return `<section class="pref-section">${heading}<div class="metrics pref-metrics">${blocks}</div></section>`;
   })
     .filter(Boolean)
     .join("");
   if (!sections) return `<div class="empty">${i18n("No settings preference metrics yet", "暂无设置偏好指标")}</div>`;
   return `<div class="preference-dashboard">${sections}</div>`;
+}
+
+function healthLevel(kind: "cache" | "rate", value: number | null): "good" | "warn" | "bad" | "unknown" {
+  if (value === null) return "unknown";
+  if (kind === "cache") {
+    if (value >= 80) return "good";
+    if (value >= 50) return "warn";
+    return "bad";
+  }
+  if (value <= 1) return "good";
+  if (value <= 5) return "warn";
+  return "bad";
+}
+
+function levelText(level: "good" | "warn" | "bad" | "unknown"): string {
+  if (level === "good") return i18n("Good", "健康");
+  if (level === "warn") return i18n("Watch", "关注");
+  if (level === "bad") return i18n("Risk", "风险");
+  return i18n("No data", "暂无数据");
+}
+
+function healthCard(
+  label: { en: string; zh: string },
+  value: string,
+  level: "good" | "warn" | "bad" | "unknown",
+  deltaHTML: string,
+  detailHTML: string,
+): string {
+  return `<div class="health-card ${level}"><div class="health-top"><span>${i18n(label.en, label.zh)}</span><b>${levelText(level)}</b></div>
+<strong>${esc(value)}</strong><small>${deltaHTML}</small><p>${detailHTML}</p></div>`;
+}
+
+function healthDeltaHTML(value: string): string {
+  return i18nHTML(`${esc(value)} vs previous window`, `${esc(value)} 较上一窗口`);
+}
+
+function healthDetailHTML(rows: MetricRow[], signal: string): string {
+  return i18nHTML(`${esc(topMetricBucket(rows, signal))} top bucket`, `主要分桶：${esc(topMetricBucket(rows, signal))}`);
+}
+
+function agentHealth(rows: MetricRow[], previousRows: MetricRow[]): string {
+  if (!rows.length) return `<div class="empty">${i18n("No agent health metrics yet", "暂无运行健康指标")}</div>`;
+  const cache = cacheHitRate(rows);
+  const prevCache = cacheHitRate(previousRows);
+  const rateCard = (signal: string, en: string, zh: string) => {
+    const value = ratioPer100(rows, signal);
+    const prev = ratioPer100(previousRows, signal);
+    return healthCard(
+      { en, zh },
+      value === null ? "n/a" : `${Number(value.toFixed(value < 10 ? 1 : 0))}/100`,
+      healthLevel("rate", value),
+      healthDeltaHTML(deltaLabel(value, prev, "/100")),
+      healthDetailHTML(rows, signal),
+    );
+  };
+  return `<div class="health-grid">
+${healthCard(
+  { en: "Cache hit rate", zh: "缓存命中率" },
+  pct(cache),
+  healthLevel("cache", cache),
+  healthDeltaHTML(deltaLabel(cache, prevCache, "pp")),
+  healthDetailHTML(rows, "cache_hit"),
+)}
+${rateCard("provider_error", "Provider errors", "Provider 错误")}
+${rateCard("tool_error", "Tool errors", "工具错误")}
+${rateCard("empty_final", "Empty final guard", "空回复拦截")}
+${rateCard("compaction", "Compactions", "压缩")}
+</div>`;
 }
 
 function statusPill(status: string): string {
@@ -269,26 +425,52 @@ function filterTab(label: string, zhLabel: string, href: string, active: boolean
   return `<a class="filter-tab${active ? " active" : ""}" href="${esc(href)}">${i18n(label, zhLabel)}</a>`;
 }
 
-function facetChips(rows: { label: string; users: number }[], active: string, hrefFor: (label: string) => string): string {
-  if (!rows.length) return `<span class="filter-empty">${i18n("none", "暂无")}</span>`;
-  return rows
-    .map((r) => {
-      const label = r.label || "legacy";
-      return `<a class="facet-chip${active === r.label ? " active" : ""}" href="${esc(hrefFor(r.label))}" title="${esc(label)}"><span class="facet-label">${esc(label)}</span><b>${r.users}</b></a>`;
-    })
-    .join("");
+function facetChip(row: { label: string; users: number }, active: string, hrefFor: (label: string) => string): string {
+  const label = row.label || "legacy";
+  return `<a class="facet-chip${active === row.label ? " active" : ""}" href="${esc(hrefFor(row.label))}" title="${esc(label)}"><span class="facet-label">${esc(label)}</span><b>${row.users}</b></a>`;
 }
 
-function reportGroups(rows: CrashRow[]): string {
+function facetChips(rows: { label: string; users: number }[], active: string, hrefFor: (label: string) => string, limit = 5): string {
+  if (!rows.length) return `<span class="filter-empty">${i18n("none", "暂无")}</span>`;
+  const visible = rows.slice(0, limit);
+  const activeRow = active ? rows.find((r) => r.label === active) : undefined;
+  if (activeRow && !visible.some((r) => r.label === activeRow.label)) visible.push(activeRow);
+  const visibleKeys = new Set(visible.map((r) => r.label));
+  const hidden = rows.filter((r) => !visibleKeys.has(r.label));
+  const chips = visible.map((r) => facetChip(r, active, hrefFor)).join("");
+  if (!hidden.length) return chips;
+  return `${chips}<details class="facet-more"><summary>${i18nHTML(`More ${hidden.length}`, `更多 ${hidden.length}`)}</summary><div class="facet-more-list">${hidden
+    .map((r) => facetChip(r, active, hrefFor))
+    .join("")}</div></details>`;
+}
+
+function statCard(label: { en: string; zh: string }, value: string, note: string, href: string, tone = ""): string {
+  return `<a class="overview-card ${tone}" href="${esc(href)}"><span>${i18n(label.en, label.zh)}</span><strong>${esc(value)}</strong><small>${note}</small></a>`;
+}
+
+function latestVersionShare(adoptionPct: number | null): string {
+  return adoptionPct === null ? "n/a" : `${Math.round(adoptionPct)}%`;
+}
+
+function topSeverityTone(openReports: number, regressedReports: number, criticalOpenReports: number): string {
+  if (criticalOpenReports || regressedReports) return "bad";
+  if (openReports) return "warn";
+  return "good";
+}
+
+function moduleLink(href: string, label: { en: string; zh: string }, value: string, note: { en: string; zh: string }): string {
+  return `<a class="module-link" href="${esc(href)}"><span>${i18n(label.en, label.zh)}</span><b>${esc(value)}</b><small>${i18n(note.en, note.zh)}</small></a>`;
+}
+
+function reportGroups(rows: CrashRow[], compact = false): string {
   if (!rows.length) return `<div class="empty">${i18n("No diagnostic reports yet — that's the good kind of empty", "还没有诊断报告，这是好消息")}</div>`;
-  return `<div class="crash-list"><div class="crash-head"><span>${i18n("fingerprint", "指纹")}</span><span>${i18n("summary", "摘要")}</span><span>${i18n("scope", "范围")}</span><span>${i18n("health", "状态")}</span><span>${i18n("count", "次数")}</span></div>${rows
+  return `<div class="crash-list${compact ? " compact" : ""}"><div class="crash-head"><span>${i18n("summary", "摘要")}</span><span>${i18n("scope", "范围")}</span><span>${i18n("health", "状态")}</span><span>${i18n("count", "次数")}</span></div>${rows
     .map((c) => {
       const platform = [c.last_os, c.last_arch].filter(Boolean).join("/");
       const versions = `${c.first_version || "?"} → ${c.last_version || "?"}`;
       const title = c.title || c.error_type || c.top_frame || c.fingerprint;
       return `<a class="crash-item" href="/stats/group/${esc(c.fingerprint)}" title="${esc(title)}">
-<span class="crash-fingerprint"><b>${esc(c.fingerprint.slice(0, 8))}</b><small>${esc(c.seen)}</small></span>
-<span class="crash-summary"><span>${c.title ? esc(clip(c.title, 112)) : `<span class="muted">${i18n("No summary captured", "暂无摘要")}</span>`}</span>${
+<span class="crash-summary"><span>${c.title ? esc(clip(c.title, compact ? 88 : 120)) : `<span class="muted">${i18n("No summary captured", "暂无摘要")}</span>`}</span><small>${esc(c.fingerprint.slice(0, 8))} · ${esc(c.seen)}</small>${
         c.regressed_at ? `<em>${i18nHTML(`regressed ${esc(c.regressed_at.slice(0, 10))}`, `回归 ${esc(c.regressed_at.slice(0, 10))}`)}</em>` : ""
       }</span>
 <span class="crash-scope"><small>${esc(c.source || "legacy")}</small><small>${esc(versions)}</small><small>${platform ? esc(platform) : "unknown platform"}</small></span>
@@ -306,19 +488,38 @@ export function renderStats(
     platforms: { label: string; users: number }[];
     crashes: CrashRow[];
     metrics: MetricRow[];
+    previousMetrics: MetricRow[];
     metricUsers: MetricRow[];
     sources: { label: string; users: number }[];
+    overview: OverviewCounts;
     latestVersion: string;
-    filters: { status: string; source: string; version: string; os: string; platform: string; newLatest: boolean; regressed: boolean };
+    filters: {
+      status: string;
+      source: string;
+      version: string;
+      os: string;
+      platform: string;
+      newLatest: boolean;
+      regressed: boolean;
+      windowDays: 7 | 30;
+      preferenceMode: "users" | "opens";
+    };
   },
   user: User,
 ): string {
-  const days = last30Days(data.daily);
+  const days = lastDays(data.daily, data.filters.windowDays);
+  const range = data.filters.windowDays;
+  const rangeText = `${range}d`;
   const totalUsers = days.at(-1)?.users ?? 0;
   const anyPing = days.some((d) => d.opens > 0);
   const agentMetrics = data.metrics.filter((r) => AGENT_METRIC_SIGNALS.includes(r.signal));
+  const previousAgentMetrics = data.previousMetrics.filter((r) => AGENT_METRIC_SIGNALS.includes(r.signal));
   const settingsMetrics = data.metrics.filter((r) => r.signal === "client_surface" || r.signal === "client_version" || r.signal.startsWith("settings_"));
   const settingsMetricUsers = data.metricUsers.filter((r) => r.signal === "client_surface" || r.signal === "client_version" || r.signal.startsWith("settings_"));
+  const cache = cacheHitRate(agentMetrics);
+  const providerRate = ratioPer100(agentMetrics, "provider_error");
+  const toolRate = ratioPer100(agentMetrics, "tool_error");
+  const healthWatchCount = [healthLevel("cache", cache), healthLevel("rate", providerRate), healthLevel("rate", toolRate)].filter((v) => v === "warn" || v === "bad").length;
   const filterQS = (patch: Record<string, string>) => {
     const params = new URLSearchParams();
     const put = (k: string, v: string) => {
@@ -331,6 +532,8 @@ export function renderStats(
     put("platform", data.filters.platform);
     if (data.filters.newLatest) params.set("new", "latest");
     if (data.filters.regressed) params.set("regressed", "1");
+    if (data.filters.windowDays === 30) params.set("window", "30d");
+    if (data.filters.preferenceMode === "opens") params.set("prefs", "opens");
     for (const [k, v] of Object.entries(patch)) {
       if (v) params.set(k, v);
       else params.delete(k);
@@ -338,12 +541,36 @@ export function renderStats(
     const qs = params.toString();
     return qs ? `/stats?${qs}` : "/stats";
   };
+  const clearFiltersHref = filterQS({ status: "", source: "", version: "", os: "", platform: "", new: "", regressed: "" });
   const hasFilters = Boolean(
     data.filters.status || data.filters.source || data.filters.version || data.filters.os || data.filters.platform || data.filters.newLatest || data.filters.regressed,
   );
-  const filters = `<div class="card full filter-card"><div class="filter-head"><h2>${i18n("Report filters", "诊断筛选")}</h2><span>${i18nHTML(`latest ${esc(data.latestVersion || "n/a")}`, `最新 ${esc(data.latestVersion || "n/a")}`)}</span></div>
+  const windowControls = `<div class="segmented" aria-label="Time window">
+<a class="${range === 7 ? "active" : ""}" href="${esc(filterQS({ window: "7d" }))}">7d</a>
+<a class="${range === 30 ? "active" : ""}" href="${esc(filterQS({ window: "30d" }))}">30d</a>
+</div>`;
+  const preferenceControls = `<div class="segmented" aria-label="Preference metric mode">
+<a class="${data.filters.preferenceMode === "users" ? "active" : ""}" href="${esc(filterQS({ prefs: "" }))}">${i18n("Installs", "按安装")}</a>
+<a class="${data.filters.preferenceMode === "opens" ? "active" : ""}" href="${esc(filterQS({ prefs: "opens" }))}">${i18n("Opens", "按启动")}</a>
+</div>`;
+  const overviewTone = topSeverityTone(data.overview.openReports, data.overview.regressedReports, data.overview.criticalOpenReports);
+  const overview = `<section class="overview-grid">
+${statCard({ en: "Active today", zh: "今日活跃" }, String(totalUsers), i18n("anonymous installs", "匿名安装"), "#usage")}
+${statCard({ en: "Latest adoption", zh: "最新版本占比" }, latestVersionShare(data.overview.latestAdoptionPct), i18nHTML(`latest ${esc(data.latestVersion || "n/a")}`, `最新 ${esc(data.latestVersion || "n/a")}`), "#usage")}
+${statCard({ en: "Open reports", zh: "未处理报告" }, String(data.overview.openReports), i18n("needs triage", "需要分诊"), "#diagnostics", overviewTone)}
+${statCard({ en: "New in latest", zh: "最新新增" }, String(data.overview.newLatestReports), i18n("first seen on latest", "首次出现在最新版"), "#diagnostics", data.overview.newLatestReports ? "warn" : "good")}
+${statCard({ en: "Regressions", zh: "回归问题" }, String(data.overview.regressedReports), i18n("previously resolved", "曾经解决后复现"), "#diagnostics", data.overview.regressedReports ? "bad" : "good")}
+${statCard({ en: "Agent health", zh: "运行健康" }, healthWatchCount ? String(healthWatchCount) : "OK", i18nHTML(`${pct(cache)} cache · ${providerRate === null ? "n/a" : Number(providerRate.toFixed(1))}/100 provider`, `${pct(cache)} 缓存 · ${providerRate === null ? "n/a" : Number(providerRate.toFixed(1))}/100 Provider`), "#health", healthWatchCount ? "warn" : "good")}
+</section>`;
+  const modules = `<nav class="module-nav" aria-label="Stats modules">
+${moduleLink("#diagnostics", { en: "Diagnostics", zh: "诊断分诊" }, String(data.crashes.length), { en: "prioritized report groups", zh: "按优先级排列的报告分组" })}
+${moduleLink("#usage", { en: "Usage", zh: "使用分布" }, rangeText, { en: "activity, versions, platforms", zh: "活跃、版本和平台" })}
+${moduleLink("#preferences", { en: "Preferences", zh: "设置偏好" }, data.filters.preferenceMode === "opens" ? "opens" : "installs", { en: "deduped and launch snapshots", zh: "安装去重与启动快照" })}
+${moduleLink("#health", { en: "Agent Health", zh: "运行健康" }, healthWatchCount ? String(healthWatchCount) : "OK", { en: "cache and error signals", zh: "缓存与错误信号" })}
+</nav>`;
+  const filters = `<div class="filter-card"><div class="filter-head"><h2>${i18n("Report filters", "诊断筛选")}</h2><span>${i18nHTML(`latest ${esc(data.latestVersion || "n/a")}`, `最新 ${esc(data.latestVersion || "n/a")}`)}</span></div>
 <div class="filter-tabs">
-${filterTab("All", "全部", "/stats", !hasFilters)}
+${filterTab("All", "全部", clearFiltersHref, !hasFilters)}
 ${filterTab("Open", "未处理", filterQS({ status: "open" }), data.filters.status === "open")}
 ${filterTab("Resolved", "已解决", filterQS({ status: "resolved" }), data.filters.status === "resolved")}
 ${filterTab("Ignored", "已忽略", filterQS({ status: "ignored" }), data.filters.status === "ignored")}
@@ -351,28 +578,46 @@ ${filterTab("New in latest", "最新新增", filterQS({ new: data.filters.newLat
 ${filterTab("Regressed", "回归", filterQS({ regressed: data.filters.regressed ? "" : "1" }), data.filters.regressed)}
 </div>
 <div class="facet-grid">
-<section><h3>${i18n("Source", "来源")}</h3><div class="facet-list">${facetChips(data.sources, data.filters.source, (label) => filterQS({ source: label }))}</div></section>
-<section><h3>${i18n("Version", "版本")}</h3><div class="facet-list">${facetChips(data.versions.slice(0, 8), data.filters.version, (label) => filterQS({ version: label }))}</div></section>
-<section><h3>${i18n("Platform", "平台")}</h3><div class="facet-list">${facetChips(data.platforms, data.filters.platform, (label) => filterQS({ platform: label }))}</div></section>
+<section><h3>${i18n("Source", "来源")}</h3><div class="facet-list">${facetChips(data.sources, data.filters.source, (label) => filterQS({ source: label }), 4)}</div></section>
+<section><h3>${i18n("Version", "版本")}</h3><div class="facet-list">${facetChips(data.versions, data.filters.version, (label) => filterQS({ version: label }), 5)}</div></section>
+<section><h3>${i18n("Platform", "平台")}</h3><div class="facet-list">${facetChips(data.platforms, data.filters.platform, (label) => filterQS({ platform: label }), 4)}</div></section>
 </div></div>`;
+  const usageModule = `<section id="usage" class="card full module-card"><div class="module-head"><div><span>${i18n("Module", "模块")}</span><h2>${i18n("Usage distribution", "使用分布")}</h2></div>${windowControls}</div>
+<div class="module-panel wide"><h3>${i18nHTML(`Daily active installs <b>— ${rangeText}</b> (solid: users, faded: opens)`, `每日活跃 <b>— ${rangeText}</b>（实线：用户，淡色：打开次数）`)}</h3>
+${anyPing ? dailyChart(days) : `<div class="empty">${i18n("No pings yet — data starts flowing once a telemetry-enabled build ships", "暂无启动 ping — 等带统计的版本发布后这里开始有数据")}</div>`}</div>
+<div class="module-split">
+<section class="module-panel"><h3>${i18nHTML(`Versions <b>— ${rangeText}</b>`, `版本分布 <b>— ${rangeText}</b>`)}</h3>${listBars(data.versions)}</section>
+<section class="module-panel"><h3>${i18nHTML(`Platforms <b>— ${rangeText}</b>`, `平台分布 <b>— ${rangeText}</b>`)}</h3>${listBars(data.platforms)}</section>
+</div></section>`;
+  const diagnosticsModule = `<section id="diagnostics" class="card full module-card"><div class="module-head"><div><span>${i18n("Module", "模块")}</span><h2>${i18n("Diagnostic triage", "诊断分诊")}</h2></div><a class="module-action" href="#top">${i18n("Back to overview", "回到概览")}</a></div>
+<section class="module-panel"><h3>${i18nHTML("Needs attention <b>— top 10 prioritized diagnostics</b>", "优先处理 <b>— 最需要看的 10 条诊断</b>")}</h3>${reportGroups(data.crashes.slice(0, 10), true)}</section>
+${filters}
+<section class="module-panel"><h3>${i18nHTML("All report groups <b>— open, regression, severity, count, recency</b>", "全部诊断分组 <b>— 未处理、回归、严重性、次数和最近出现</b>")}</h3>${reportGroups(data.crashes)}</section>
+</section>`;
+  const preferencesModule = `<section id="preferences" class="card full module-card"><div class="module-head"><div><span>${i18n("Module", "模块")}</span><h2>${i18n("Settings preferences", "设置偏好")}</h2></div>${preferenceControls}</div>
+<div class="module-split wide">
+<section class="module-panel"><h3>${i18nHTML(`Deduplicated installs <b>— ${rangeText}</b>`, `按安装去重 <b>— ${rangeText}</b>`)}</h3>${settingsDashboard(settingsMetricUsers, { collapseSections: true })}</section>
+<section class="module-panel"><h3>${i18nHTML(`Launch/open snapshots <b>— ${rangeText}</b>`, `启动/开启快照 <b>— ${rangeText}</b>`)}</h3>${settingsDashboard(settingsMetrics, { collapseSections: true })}</section>
+</div></section>`;
+  const healthModule = `<section id="health" class="card full module-card"><div class="module-head"><div><span>${i18n("Module", "模块")}</span><h2>${i18n("Agent health", "运行健康")}</h2></div><a class="module-action" href="#preferences">${i18n("Preferences", "设置偏好")}</a></div>
+<section class="module-panel"><h3>${i18nHTML(`Health summary <b>— ${rangeText}, compared with previous window</b>`, `健康摘要 <b>— ${rangeText}，对比上一窗口</b>`)}</h3>${agentHealth(agentMetrics, previousAgentMetrics)}</section>
+<section class="module-panel"><h3>${i18nHTML(`Signal distributions <b>— ${rangeText}, opt-in aggregate</b>`, `信号分布 <b>— ${rangeText}，opt-in 汇总</b>`)}</h3>${metricsCards(agentMetrics)}</section>
+</section>`;
 
   return page(
-    "Reasonix · Stats",
-    "stats",
-    `<h1>${i18n("Desktop stats", "桌面端统计")}</h1><p class="sub">${i18nHTML(
-      `Today: <b>${totalUsers}</b> active installs · anonymous launch pings and user-sent diagnostic reports only`,
-      `今日：<b>${totalUsers}</b> 个活跃安装 · 仅包含匿名启动 ping 和用户发送的诊断报告`,
-    )}</p>
+    "Reasonix · Crash & Telemetry",
+    "health",
+    `<div id="top" class="hero-line"><div><h1>${i18n("Crash & Telemetry", "桌面端健康看板")}</h1><p class="sub">${i18nHTML(
+      `${rangeText} window · anonymous launch pings, opt-in aggregate metrics, and user-sent diagnostic reports only`,
+      `${rangeText} 时间窗口 · 仅包含匿名启动 ping、opt-in 汇总指标和用户发送的诊断报告`,
+    )}</p></div>${windowControls}</div>
+${overview}
+${modules}
 <div class="grid">
-<div class="card full"><h2>${i18nHTML("Daily active installs <b>— 30 days</b> (solid: users, faded: opens)", "每日活跃 <b>— 30 天</b>（实线：用户，淡色：打开次数）")}</h2>
-${anyPing ? dailyChart(days) : `<div class="empty">${i18n("No pings yet — data starts flowing once a telemetry-enabled build ships", "暂无启动 ping — 等带统计的版本发布后这里开始有数据")}</div>`}</div>
-<div class="card"><h2>${i18nHTML("Versions <b>— 7 days</b>", "版本分布 <b>— 7 天</b>")}</h2>${listBars(data.versions)}</div>
-<div class="card"><h2>${i18nHTML("Platforms <b>— 7 days</b>", "平台分布 <b>— 7 天</b>")}</h2>${listBars(data.platforms)}</div>
-<div class="card full"><h2>${i18nHTML("Settings preference DAU <b>— 7 days, deduplicated by install</b>", "设置偏好 DAU <b>— 7 天，按安装去重</b>")}</h2>${settingsDashboard(settingsMetricUsers)}</div>
-<div class="card full"><h2>${i18nHTML("Settings preference snapshots <b>— 7 days, launch/open counts</b>", "设置偏好快照 <b>— 7 天，启动/开启次数</b>")}</h2>${settingsDashboard(settingsMetrics)}</div>
-<div class="card full"><h2>${i18nHTML("Agent signals <b>— 7 days, opt-in aggregate</b>", "运行指标 <b>— 7 天，opt-in 汇总</b>")}</h2>${metricsCards(agentMetrics)}</div>
-${filters}
-<div class="card full crash-card"><h2>${i18nHTML("Report groups <b>— select a row for stack samples</b>", "诊断分组 <b>— 选择一行查看堆栈样本</b>")}</h2>${reportGroups(data.crashes)}</div>
+${diagnosticsModule}
+${usageModule}
+${preferencesModule}
+${healthModule}
 </div>`,
     userNav(user),
   );
@@ -461,27 +706,24 @@ function breadcrumbsList(json: string): string {
   }
 }
 
-function sampleReports(reports: ReportSample[]): string {
-  if (!reports.length) return `<div class="empty">${i18n("No raw samples stored for this group", "这个分组没有保存原始样本")}</div>`;
-  return `<div class="sample-list">${reports
-    .map((r, i) => {
-      const dev = fmtDevice(r.device);
-      const platform = [r.os, r.arch].filter(Boolean).join("/");
-      const title = r.error_message || r.message.split("\n").find((line) => line.trim()) || r.error_type || "sample";
-      const structured = [
-        r.source && [i18n("source", "来源"), r.source],
-        r.label && [i18n("label", "标签"), r.label],
-        r.error_type && [i18n("type", "类型"), r.error_type],
-        r.top_frame && [i18n("top", "顶层"), r.top_frame],
-        r.build_commit && [i18n("build", "构建"), r.build_commit],
-        r.channel && [i18n("channel", "渠道"), r.channel],
-        r.view && [i18n("view", "视图"), r.view],
-      ]
-        .filter(Boolean)
-        .map(([label, value]) => `<span><b>${label}</b>${esc(value)}</span>`)
-        .join("");
-      const stack = r.stack || r.component_stack;
-      return `<details class="sample" ${i === 0 ? "open" : ""}><summary>
+function sampleReport(r: ReportSample, i: number): string {
+  const dev = fmtDevice(r.device);
+  const platform = [r.os, r.arch].filter(Boolean).join("/");
+  const title = r.error_message || r.message.split("\n").find((line) => line.trim()) || r.error_type || "sample";
+  const structured = [
+    r.source && [i18n("source", "来源"), r.source],
+    r.label && [i18n("label", "标签"), r.label],
+    r.error_type && [i18n("type", "类型"), r.error_type],
+    r.top_frame && [i18n("top", "顶层"), r.top_frame],
+    r.build_commit && [i18n("build", "构建"), r.build_commit],
+    r.channel && [i18n("channel", "渠道"), r.channel],
+    r.view && [i18n("view", "视图"), r.view],
+  ]
+    .filter(Boolean)
+    .map(([label, value]) => `<span><b>${label}</b>${esc(value)}</span>`)
+    .join("");
+  const stack = r.stack || r.component_stack;
+  return `<details class="sample" ${i === 0 ? "open" : ""}><summary>
 <span class="sample-id"><b>${esc(r.version)}</b><small>${esc(platform || "unknown platform")}</small></span>
 <span class="sample-title">${esc(clip(title, 110))}</span>
 <span class="sample-time">${esc((r.occurred_at || r.created_at).slice(0, 19).replace("T", " "))}</span>
@@ -489,16 +731,28 @@ function sampleReports(reports: ReportSample[]): string {
 <div class="sample-body">
 <div class="sample-meta">${dev ? `<span><b>${i18n("device", "设备")}</b>${esc(dev)}</span>` : ""}${structured}</div>
 <div class="sample-actions"><button class="btn ghost sm copy-btn" type="button" data-copy="${esc(r.message)}"><span class="copy-label">${i18n("Copy message", "复制消息")}</span></button>${
-        stack
-          ? `<button class="btn ghost sm copy-btn" type="button" data-copy="${esc(stack)}"><span class="copy-label">${i18n("Copy stack", "复制堆栈")}</span></button>`
-          : ""
-      }</div>
+    stack
+      ? `<button class="btn ghost sm copy-btn" type="button" data-copy="${esc(stack)}"><span class="copy-label">${i18n("Copy stack", "复制堆栈")}</span></button>`
+      : ""
+  }</div>
 <pre>${esc(r.message)}</pre>
 ${stack ? `<details class="sample-nested"><summary>${i18n("stack", "堆栈")}</summary><pre>${esc(stack)}</pre></details>` : ""}
 ${breadcrumbsList(r.breadcrumbs)}
 </div></details>`;
-    })
-    .join("")}</div>`;
+}
+
+function sampleReports(reports: ReportSample[], options: { limit?: number } = {}): string {
+  if (!reports.length) return `<div class="empty">${i18n("No raw samples stored for this group", "这个分组没有保存原始样本")}</div>`;
+  const limit = options.limit ?? 10;
+  const visible = reports.slice(0, limit);
+  const hidden = reports.slice(limit);
+  const visibleSamples = visible.map((r, i) => sampleReport(r, i)).join("");
+  const hiddenSamples = hidden.map((r, i) => sampleReport(r, i + limit)).join("");
+  const history =
+    hidden.length > 0
+      ? `<details class="sample-more"><summary>${i18nHTML(`Historical samples ${hidden.length}`, `历史样本 ${hidden.length}`)}</summary><div class="sample-more-list">${hiddenSamples}</div></details>`
+      : "";
+  return `<div class="sample-list">${visibleSamples}${history}</div>`;
 }
 
 export function renderGroup(

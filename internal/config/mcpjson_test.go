@@ -63,6 +63,13 @@ func TestNormalizePluginCommandLine(t *testing.T) {
 			wantChanged: true,
 		},
 		{
+			name:        "custom command pasted with args",
+			in:          PluginEntry{Name: "custom", Command: "custom-mcp --stdio"},
+			wantCommand: "custom-mcp",
+			wantArgs:    []string{"--stdio"},
+			wantChanged: true,
+		},
+		{
 			name:        "quoted command path",
 			in:          PluginEntry{Name: "quoted", Command: `"C:\Program Files\nodejs\npx.cmd" -y @example/mcp`},
 			wantCommand: `C:\Program Files\nodejs\npx.cmd`,
@@ -102,6 +109,16 @@ func TestNormalizePluginCommandLine(t *testing.T) {
 				t.Fatalf("args = %v, want %v", got.Args, tc.wantArgs)
 			}
 		})
+	}
+}
+
+func TestParseLegacyMCPSpecSplitsCustomCommandArgs(t *testing.T) {
+	got, ok := parseLegacyMCPSpec("fs=custom-mcp --stdio")
+	if !ok {
+		t.Fatal("parseLegacyMCPSpec returned false")
+	}
+	if got.Name != "fs" || got.Command != "custom-mcp" || strings.Join(got.Args, "\x00") != "--stdio" {
+		t.Fatalf("legacy custom MCP spec = %+v, want name fs command custom-mcp args [--stdio]", got)
 	}
 }
 

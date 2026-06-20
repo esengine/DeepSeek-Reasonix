@@ -91,10 +91,50 @@ func TestSanitizeToolPairingLeavesWellFormedUnchanged(t *testing.T) {
 	if len(out) != len(in) {
 		t.Fatalf("well-formed history changed length: %d -> %d", len(in), len(out))
 	}
+	if &out[0] != &in[0] {
+		t.Fatalf("well-formed history should return the input slice without allocating")
+	}
 	for i := range in {
 		if out[i].Role != in[i].Role || out[i].Content != in[i].Content || out[i].ToolCallID != in[i].ToolCallID {
 			t.Fatalf("well-formed message %d mutated: %+v -> %+v", i, in[i], out[i])
 		}
+	}
+}
+
+func TestNormalizeSessionMessagesPreservesStandaloneToolMessage(t *testing.T) {
+	in := []Message{
+		{Role: RoleSystem, Content: "sys"},
+		{Role: RoleUser, Content: "run it"},
+		{Role: RoleTool, ToolCallID: "c1", Name: "bash", Content: "large output"},
+	}
+	out := NormalizeSessionMessages(in)
+	if len(out) != len(in) {
+		t.Fatalf("session normalization changed length: %d -> %d", len(in), len(out))
+	}
+	if &out[0] != &in[0] {
+		t.Fatalf("session-safe orphan tool should keep the input slice unchanged")
+	}
+	if out[2].Role != RoleTool || out[2].Content != "large output" {
+		t.Fatalf("standalone tool message was not preserved: %+v", out)
+	}
+}
+
+func TestNormalizeSessionMessagesPreservesExtraToolResult(t *testing.T) {
+	in := []Message{
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c1", Name: "bash"}}},
+		{Role: RoleTool, ToolCallID: "c1", Name: "bash", Content: "ok"},
+		{Role: RoleTool, ToolCallID: "ghost", Name: "bash", Content: "saved extra output"},
+	}
+	out := NormalizeSessionMessages(in)
+	if len(out) != len(in) {
+		t.Fatalf("session normalization changed length: %d -> %d", len(in), len(out))
+	}
+	if out[2].ToolCallID != "ghost" || out[2].Content != "saved extra output" {
+		t.Fatalf("extra stored tool result was not preserved: %+v", out)
+	}
+	wire := SanitizeToolPairing(in)
+	if len(wire) != 2 {
+		t.Fatalf("wire sanitize should still drop the extra orphan result, got %+v", wire)
 	}
 }
 

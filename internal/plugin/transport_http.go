@@ -69,7 +69,15 @@ func (t *httpTransport) call(ctx context.Context, method string, params any) (js
 
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("plugin %q: %s: http %d: %s", t.name, method, resp.StatusCode, strings.TrimSpace(string(b)))
+		msg := strings.TrimSpace(string(b))
+		if isHTTPSessionExpiredResponse(resp.StatusCode, b) {
+			t.session = ""
+			return nil, fmt.Errorf("plugin %q: %s: %w", t.name, method, &httpSessionExpiredError{
+				status: resp.StatusCode,
+				body:   msg,
+			})
+		}
+		return nil, fmt.Errorf("plugin %q: %s: http %d: %s", t.name, method, resp.StatusCode, msg)
 	}
 
 	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
@@ -125,6 +133,29 @@ func (t *httpTransport) captureSession(resp *http.Response) {
 	if sid := resp.Header.Get("Mcp-Session-Id"); sid != "" {
 		t.session = sid
 	}
+}
+
+type httpSessionExpiredError struct {
+	status int
+	body   string
+}
+
+func (e *httpSessionExpiredError) Error() string {
+	if e.body == "" {
+		return fmt.Sprintf("http %d: MCP session expired", e.status)
+	}
+	return fmt.Sprintf("http %d: %s", e.status, e.body)
+}
+
+func isHTTPSessionExpiredResponse(status int, body []byte) bool {
+	if status != http.StatusNotFound {
+		return false
+	}
+	var resp rpcResponse
+	if err := json.Unmarshal(bytes.TrimSpace(body), &resp); err != nil || resp.Error == nil {
+		return false
+	}
+	return resp.Error.Code == -32001 && strings.Contains(strings.ToLower(resp.Error.Message), "session not found")
 }
 
 // readSSEResponse scans an SSE stream for the JSON-RPC response matching id,

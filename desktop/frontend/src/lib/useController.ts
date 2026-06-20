@@ -74,6 +74,8 @@ export type Item =
       profile?: { model?: string; effort?: string }; // subagent model/effort from tool event
     };
 
+type ToolItem = Extract<Item, { kind: "tool" }>;
+
 interface State {
   items: Item[];
   running: boolean;
@@ -211,6 +213,40 @@ export function isReadOnlyTool(name: string): boolean {
     default:
       return false;
   }
+}
+
+const ARCHIVED_TOOL_ARG_LIMIT = 200;
+
+function archivedToolArgs(_name: string, args: string): string {
+  return args && args.length > ARCHIVED_TOOL_ARG_LIMIT ? args.slice(0, ARCHIVED_TOOL_ARG_LIMIT) + "…" : args;
+}
+
+function isCanonicalTodoTool(tool: ToolItem): boolean {
+  return tool.name === "todo_write" && !tool.parentId && tool.status === "done" && !tool.error;
+}
+
+function latestCanonicalTodoToolIndex(items: Item[]): number {
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const item = items[i];
+    if (item.kind === "tool" && isCanonicalTodoTool(item)) return i;
+  }
+  return -1;
+}
+
+function compactArchivedToolItems(items: Item[]): Item[] {
+  const canonicalTodoIndex = latestCanonicalTodoToolIndex(items);
+  return items.map((item, index) => {
+    if (item.kind !== "tool" || item.status === "running") return item;
+    const preserveArgs = index === canonicalTodoIndex;
+    const nextArgs = preserveArgs ? item.args : archivedToolArgs(item.name, item.args);
+    if (nextArgs === item.args && item.output === undefined && item.dataArchived === true) return item;
+    return {
+      ...item,
+      args: nextArgs,
+      output: undefined,
+      dataArchived: true,
+    };
+  });
 }
 
 type Action =
@@ -498,12 +534,19 @@ function applyEvent(s: State, e: WireEvent): State {
           // subject (from args). Drop output entirely; full data is loaded on
           // demand via app.ToolResultForTab when the card is expanded.
           const existing = it;
-          const shortArgs = existing.args && existing.args.length > 200 ? existing.args.slice(0, 200) + "…" : existing.args;
           const summary = t.err ? undefined : existing.summary || summarize(existing.name, existing.args, t.output);
-          next[idx] = { ...existing, status: t.err ? "error" : "done", args: shortArgs, output: undefined, error: t.err, truncated: t.truncated, durationMs: t.durationMs, dataArchived: true, summary };
+          next[idx] = {
+            ...existing,
+            status: t.err ? "error" : "done",
+            output: t.output,
+            error: t.err,
+            truncated: t.truncated,
+            durationMs: t.durationMs,
+            summary,
+          };
         }
       }
-      return { ...s, items: next };
+      return { ...s, items: compactArchivedToolItems(next) };
     }
     case "tool_progress": {
       const t = e.tool;
@@ -654,17 +697,7 @@ export function reducer(s: State, a: Action): State {
     case "message_action_done": return { ...s, messageAction: undefined };
     case "history": {
       const { items, seq } = historyMessagesToItems(a.messages, "h", s.seq);
-      // Archive all tool items loaded from history: collapsed cards only need
-      // tool name + command; full data is loaded on demand from the backend.
-      const archived = items.map((it) => {
-        if (it.kind !== "tool") return it;
-        const t = it;
-        if (t.name === "todo_write") return it;
-        const shortArgs = t.args && t.args.length > 200 ? t.args.slice(0, 200) + "…" : t.args;
-        if (shortArgs === t.args && (t.output === undefined || t.output === "")) return it;
-        return { ...t, args: shortArgs, output: undefined, dataArchived: true };
-      });
-      return { ...s, items: archived, seq };
+      return { ...s, items: compactArchivedToolItems(items), seq };
     }
     case "local_notice": return { ...s, running: false, turnActive: false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: a.level, text: a.text }] };
     case "clearApproval": return { ...s, approval: undefined, pendingPrompt: false };

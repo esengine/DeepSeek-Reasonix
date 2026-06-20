@@ -660,9 +660,14 @@ func loadBodyWithScripts(skillPath, body string) string {
 	}
 	var names []string
 	for _, e := range entries {
-		if !e.IsDir() {
-			names = append(names, e.Name())
+		// Filter hidden files — bash should not see config dotfiles in scripts/.
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
 		}
+		if !isScriptExt(filepath.Ext(e.Name())) {
+			continue
+		}
+		names = append(names, e.Name())
 	}
 	if len(names) == 0 {
 		return body
@@ -670,12 +675,20 @@ func loadBodyWithScripts(skillPath, body string) string {
 	sort.Strings(names)
 	var b strings.Builder
 	b.WriteString(body)
-	b.WriteString("\n\n## Scripts\n\n")
-	b.WriteString("The skill has the following scripts. Run them with bash, for example `python " + filepath.Join(scriptsDir, "<name>") + "`. Read a script with read_file before running if unsure.\n\n")
+	b.WriteString("\n\n## Scripts\n\nRun a listed script with bash using the exact path shown below; quote the path if it contains spaces.\n\n")
 	for _, n := range names {
 		b.WriteString("- `" + filepath.Join(scriptsDir, n) + "`\n")
 	}
 	return b.String()
+}
+
+func isScriptExt(ext string) bool {
+	switch strings.ToLower(ext) {
+	case "", ".sh", ".py", ".js", ".ts", ".rb", ".pl", ".php", ".ps1":
+		return true
+	default:
+		return false
+	}
 }
 
 // parseAllowedTools splits a comma-separated `allowed-tools` value into trimmed,

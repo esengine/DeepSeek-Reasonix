@@ -29,8 +29,8 @@ const activeTodos = [
 
 assert.equal(
   shouldShowTodoPanel("todo-final", null, completedTodos),
-  false,
-  "the final all-completed todo_write must auto-collapse",
+  true,
+  "a completed todo list stays visible in collapsed form until the user dismisses it",
 );
 assert.equal(
   shouldShowTodoPanel("todo-active", null, [{ content: "Run tests", status: "in_progress" }]),
@@ -53,8 +53,8 @@ assert.equal(
 );
 assert.equal(
   shouldShowTodoPanel(activeKey, activeKey, activeTodos),
-  false,
-  "a user dismissal hides the same restored todo list",
+  true,
+  "an incomplete restored todo list must reappear even after a stale local dismissal",
 );
 assert.notEqual(
   activeKey,
@@ -65,7 +65,7 @@ assert.notEqual(
 const iterations = 200_000;
 const started = performance.now();
 for (let i = 0; i < iterations; i += 1) {
-  if (shouldShowTodoPanel("todo-perf", null, completedTodos)) {
+  if (shouldShowTodoPanel("todo-perf", "todo-perf", completedTodos)) {
     throw new Error("unexpected visible todo panel during performance loop");
   }
 }

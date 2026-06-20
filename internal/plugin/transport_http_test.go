@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -121,6 +122,115 @@ func runHTTPTransportTest(t *testing.T, sse bool) {
 func TestHTTPTransportJSON(t *testing.T) { runHTTPTransportTest(t, false) }
 func TestHTTPTransportSSE(t *testing.T)  { runHTTPTransportTest(t, true) }
 
+func TestHTTPTransportReinitializesExpiredSession(t *testing.T) {
+	var initializeCount atomic.Int32
+	var toolCallCount atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID     *int            `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad body", http.StatusBadRequest)
+			return
+		}
+
+		if req.Method == "initialize" {
+			n := initializeCount.Add(1)
+			w.Header().Set("Mcp-Session-Id", fmt.Sprintf("sess-%d", n))
+			writeHTTPRPCResult(w, req.ID, map[string]any{
+				"protocolVersion": protocolVersion,
+				"serverInfo":      map[string]any{"name": "h", "version": "0"},
+			})
+			return
+		}
+
+		expectedSession := fmt.Sprintf("sess-%d", initializeCount.Load())
+		if got := r.Header.Get("Mcp-Session-Id"); got != expectedSession {
+			http.Error(w, "missing session id", http.StatusBadRequest)
+			return
+		}
+
+		if req.ID == nil { // notifications/initialized
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+
+		switch req.Method {
+		case "tools/list":
+			writeHTTPRPCResult(w, req.ID, map[string]any{"tools": []map[string]any{{
+				"name":        "greet",
+				"description": "Greet someone.",
+				"inputSchema": map[string]any{"type": "object"},
+			}}})
+		case "tools/call":
+			n := toolCallCount.Add(1)
+			if n == 1 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"error":{"code":-32001,"message":"Session not found"}}`, *req.ID)
+				return
+			}
+			if got := r.Header.Get("Mcp-Session-Id"); got != "sess-2" {
+				http.Error(w, "retry did not use the new session", http.StatusBadRequest)
+				return
+			}
+			writeHTTPRPCResult(w, req.ID, map[string]any{
+				"content": []map[string]any{{"type": "text", "text": "hello retry"}},
+			})
+		default:
+			http.Error(w, "unknown method", http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	host, tools, err := StartAll(ctx, []Spec{{Name: "h", Type: "http", URL: srv.URL}})
+	if err != nil {
+		t.Fatalf("StartAll: %v", err)
+	}
+	defer host.Close()
+	host.mu.RLock()
+	client := host.clients[0]
+	host.mu.RUnlock()
+
+	done := make(chan struct{})
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(readerDone)
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				_, _ = client.hasPrompts, client.hasResources
+			}
+		}
+	}()
+	defer func() {
+		close(done)
+		<-readerDone
+	}()
+
+	got, err := tools[0].Execute(ctx, json.RawMessage(`{"name":"sam"}`))
+	if err != nil {
+		t.Fatalf("Execute after expired session: %v", err)
+	}
+	if got != "hello retry" {
+		t.Errorf("Execute = %q, want %q", got, "hello retry")
+	}
+	if got := initializeCount.Load(); got != 2 {
+		t.Errorf("initialize count = %d, want 2", got)
+	}
+	if got := toolCallCount.Load(); got != 2 {
+		t.Errorf("tools/call count = %d, want 2", got)
+	}
+}
+
 // TestHTTPTransportRPCError checks a JSON-RPC error response surfaces as an
 // error rather than an empty result.
 func TestHTTPTransportRPCError(t *testing.T) {
@@ -152,6 +262,16 @@ func TestSSETransportUnsupported(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "http") {
 		t.Fatalf("sse should error pointing to http, got %v", err)
 	}
+}
+
+func writeHTTPRPCResult(w http.ResponseWriter, id *int, result any) {
+	if id == nil {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+	resp := map[string]any{"jsonrpc": "2.0", "id": *id, "result": result}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func names(ts []tool.Tool) []string {

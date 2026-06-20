@@ -542,10 +542,13 @@ type StatsFilters = {
   platform: string;
   newLatest: boolean;
   regressed: boolean;
+  windowDays: 7 | 30;
+  preferenceMode: "users" | "opens";
 };
 
 function statsFilters(url: URL): StatsFilters {
   const status = url.searchParams.get("status") ?? "";
+  const windowParam = url.searchParams.get("window") ?? "";
   return {
     status: ["open", "resolved", "ignored"].includes(status) ? status : "",
     source: (url.searchParams.get("source") ?? "").slice(0, 32),
@@ -554,6 +557,8 @@ function statsFilters(url: URL): StatsFilters {
     platform: (url.searchParams.get("platform") ?? "").slice(0, 80),
     newLatest: url.searchParams.get("new") === "latest",
     regressed: url.searchParams.get("regressed") === "1",
+    windowDays: windowParam === "30d" ? 30 : 7,
+    preferenceMode: url.searchParams.get("prefs") === "opens" ? "opens" : "users",
   };
 }
 
@@ -571,10 +576,22 @@ async function crashGroups(env: Env, filters: StatsFilters, latestVersion: strin
   if (filters.platform) add("last_os || ' ' || last_arch = ?", filters.platform);
   if (filters.newLatest && latestVersion) add("first_version = ?", latestVersion);
   if (filters.regressed) where.push("regressed_at <> ''");
+  let latestOrder = "";
+  if (latestVersion) {
+    latestOrder = `CASE WHEN first_version = ?${binds.length + 1} THEN 0 ELSE 1 END,`;
+    binds.push(latestVersion);
+  }
   const sql = `SELECT fingerprint, kind, count, first_version, last_version, substr(last_seen, 1, 10) AS seen,
       status, title, source, label, error_type, top_frame, severity, last_os, last_arch, regressed_at
     FROM groups ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-    ORDER BY last_seen DESC LIMIT 50`;
+    ORDER BY
+      CASE WHEN status = 'open' THEN 0 ELSE 1 END,
+      CASE WHEN regressed_at <> '' THEN 0 ELSE 1 END,
+      ${latestOrder}
+      CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+      count DESC,
+      last_seen DESC
+    LIMIT 50`;
   const stmt = env.DB.prepare(sql);
   const query = binds.length ? stmt.bind(...binds) : stmt;
   return query.all<{
@@ -641,10 +658,88 @@ async function latestObservedVersion(env: Env): Promise<string> {
   return newestReleaseVersion(rows.results.map((r) => r.version));
 }
 
-async function metricUserRows(env: Env): Promise<{ signal: string; bucket: string; total: number }[]> {
+type OverviewCounts = {
+  latestAdoptionPct: number | null;
+  openReports: number;
+  newLatestReports: number;
+  regressedReports: number;
+  criticalOpenReports: number;
+};
+
+async function latestAdoptionPct(env: Env, latestVersion: string, days: 7 | 30): Promise<number | null> {
+  if (!latestVersion) return null;
+  const row = await env.DB.prepare(
+    `SELECT
+      COUNT(DISTINCT install_id) AS total_installs,
+      COUNT(DISTINCT CASE WHEN version = ?1 THEN install_id END) AS latest_installs
+    FROM pings WHERE date >= date('now', '${currentWindowSince(days)}')`,
+  )
+    .bind(latestVersion)
+    .first<{ total_installs: number; latest_installs: number }>();
+  const total = Number(row?.total_installs ?? 0);
+  if (!total) return null;
+  return (Number(row?.latest_installs ?? 0) / total) * 100;
+}
+
+async function diagnosticOverview(env: Env, latestVersion: string, days: 7 | 30): Promise<OverviewCounts> {
+  const diagnosticCounts = latestVersion
+    ? env.DB.prepare(
+        `SELECT
+          SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open_reports,
+          SUM(CASE WHEN first_version = ?1 THEN 1 ELSE 0 END) AS new_latest_reports,
+          SUM(CASE WHEN regressed_at <> '' THEN 1 ELSE 0 END) AS regressed_reports,
+          SUM(CASE WHEN status = 'open' AND severity IN ('critical', 'high') THEN 1 ELSE 0 END) AS critical_open_reports
+        FROM groups`,
+      )
+        .bind(latestVersion)
+        .first<{ open_reports: number; new_latest_reports: number; regressed_reports: number; critical_open_reports: number }>()
+    : env.DB.prepare(
+        `SELECT
+          SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open_reports,
+          0 AS new_latest_reports,
+          SUM(CASE WHEN regressed_at <> '' THEN 1 ELSE 0 END) AS regressed_reports,
+          SUM(CASE WHEN status = 'open' AND severity IN ('critical', 'high') THEN 1 ELSE 0 END) AS critical_open_reports
+        FROM groups`,
+      ).first<{ open_reports: number; new_latest_reports: number; regressed_reports: number; critical_open_reports: number }>();
+  const [row, adoptionPct] = await Promise.all([
+    diagnosticCounts,
+    latestAdoptionPct(env, latestVersion, days),
+  ]);
+  return {
+    latestAdoptionPct: adoptionPct,
+    openReports: Number(row?.open_reports ?? 0),
+    newLatestReports: Number(row?.new_latest_reports ?? 0),
+    regressedReports: Number(row?.regressed_reports ?? 0),
+    criticalOpenReports: Number(row?.critical_open_reports ?? 0),
+  };
+}
+
+function currentWindowSince(days: 7 | 30): string {
+  return `-${days - 1} day`;
+}
+
+function previousWindowSince(days: 7 | 30): string {
+  return `-${days * 2 - 1} day`;
+}
+
+function previousWindowUntil(days: 7 | 30): string {
+  return currentWindowSince(days);
+}
+
+async function metricRows(env: Env, days: 7 | 30, previous = false): Promise<{ signal: string; bucket: string; total: number }[]> {
+  const where = previous
+    ? `date >= date('now', '${previousWindowSince(days)}') AND date < date('now', '${previousWindowUntil(days)}')`
+    : `date >= date('now', '${currentWindowSince(days)}')`;
+  const rows = await env.DB.prepare(
+    `SELECT signal, bucket, SUM(count) AS total FROM metrics WHERE ${where} GROUP BY signal, bucket ORDER BY signal, total DESC`,
+  ).all<{ signal: string; bucket: string; total: number }>();
+  return rows.results;
+}
+
+async function metricUserRows(env: Env, days: 7 | 30): Promise<{ signal: string; bucket: string; total: number }[]> {
   try {
     const rows = await env.DB.prepare(
-      "SELECT signal, bucket, COUNT(*) AS total FROM metric_users WHERE date >= date('now', '-6 day') GROUP BY signal, bucket ORDER BY signal, total DESC",
+      `SELECT signal, bucket, COUNT(DISTINCT install_id) AS total FROM metric_users WHERE date >= date('now', '${currentWindowSince(days)}') GROUP BY signal, bucket ORDER BY signal, total DESC`,
     ).all<{ signal: string; bucket: string; total: number }>();
     return rows.results;
   } catch (err) {
@@ -657,22 +752,23 @@ async function handleStats(request: Request, env: Env, user: User): Promise<Resp
   const url = new URL(request.url);
   const filters = statsFilters(url);
   const latestVersion = await latestObservedVersion(env);
-  const [daily, versions, platforms, crashes, metrics, metricUsers, sources] = await Promise.all([
+  const days = filters.windowDays;
+  const [daily, versions, platforms, crashes, metrics, previousMetrics, metricUsers, sources, overview] = await Promise.all([
     env.DB.prepare(
-      "SELECT date, COUNT(*) AS users, SUM(opens) AS opens FROM pings WHERE date >= date('now', '-29 day') GROUP BY date",
+      `SELECT date, COUNT(*) AS users, SUM(opens) AS opens FROM pings WHERE date >= date('now', '${currentWindowSince(days)}') GROUP BY date`,
     ).all<{ date: string; users: number; opens: number }>(),
     env.DB.prepare(
-      "SELECT version AS label, COUNT(DISTINCT install_id) AS users FROM pings WHERE date >= date('now', '-6 day') GROUP BY label ORDER BY users DESC LIMIT 15",
+      `SELECT version AS label, COUNT(DISTINCT install_id) AS users FROM pings WHERE date >= date('now', '${currentWindowSince(days)}') GROUP BY label ORDER BY users DESC LIMIT 15`,
     ).all<{ label: string; users: number }>(),
     env.DB.prepare(
-      "SELECT os || ' ' || arch AS label, COUNT(DISTINCT install_id) AS users FROM pings WHERE date >= date('now', '-6 day') GROUP BY label ORDER BY users DESC",
+      `SELECT os || ' ' || arch AS label, COUNT(DISTINCT install_id) AS users FROM pings WHERE date >= date('now', '${currentWindowSince(days)}') GROUP BY label ORDER BY users DESC`,
     ).all<{ label: string; users: number }>(),
     crashGroups(env, filters, latestVersion),
-    env.DB.prepare(
-      "SELECT signal, bucket, SUM(count) AS total FROM metrics WHERE date >= date('now', '-6 day') GROUP BY signal, bucket ORDER BY signal, total DESC",
-    ).all<{ signal: string; bucket: string; total: number }>(),
-    metricUserRows(env),
+    metricRows(env, days),
+    metricRows(env, days, true),
+    metricUserRows(env, days),
     env.DB.prepare("SELECT source AS label, COUNT(*) AS users FROM groups GROUP BY source ORDER BY users DESC").all<{ label: string; users: number }>(),
+    diagnosticOverview(env, latestVersion, days),
   ]);
   return html(
     renderStats(
@@ -681,9 +777,11 @@ async function handleStats(request: Request, env: Env, user: User): Promise<Resp
         versions: versions.results,
         platforms: platforms.results,
         crashes: crashes.results,
-        metrics: metrics.results,
+        metrics,
+        previousMetrics,
         metricUsers,
         sources: sources.results,
+        overview,
         latestVersion,
         filters,
       },

@@ -335,7 +335,11 @@ func TestTaskToolBackgroundPanicPersistsFailedMetadata(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	ref := subagentRefFromOutput(t, out)
-	res := jm.Wait(context.Background(), nil, 5)
+	jobID := extractJobID(out)
+	if jobID == "" {
+		t.Fatalf("no background job id in output:\n%s", out)
+	}
+	res := jm.WaitForSession(context.Background(), "parent-session", []string{jobID}, 5)
 	if len(res) != 1 || res[0].Status != jobs.Failed {
 		t.Fatalf("background job result = %+v, want failed", res)
 	}

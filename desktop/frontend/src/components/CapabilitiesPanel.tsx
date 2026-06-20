@@ -1101,13 +1101,12 @@ function EditServerForm({
   const ready = isStdio ? command.trim() !== "" : url.trim() !== "";
 
   const submit = () => {
-    const parts = command.trim().split(/\s+/).filter(Boolean);
     const envText = env.trim();
     onSave({
       name: s.name,
       transport,
-      command: isStdio ? (parts[0] ?? "") : "",
-      args: isStdio ? parts.slice(1) : [],
+      command: isStdio ? command.trim() : "",
+      args: [],
       url: isStdio ? "" : url.trim(),
       env: envText === "" ? null : parseEnvText(envText),
     });
@@ -1407,7 +1406,6 @@ function AddServerForm({
   const ready = name.trim() !== "" && (isStdio ? command.trim() !== "" : url.trim() !== "");
 
   const submit = () => {
-    const parts = command.trim().split(/\s+/).filter(Boolean);
     const envMap: Record<string, string> = {};
     for (const line of env.split("\n")) {
       const eq = line.indexOf("=");
@@ -1416,8 +1414,8 @@ function AddServerForm({
     onAdd({
       name: name.trim(),
       transport,
-      command: isStdio ? (parts[0] ?? "") : "",
-      args: isStdio ? parts.slice(1) : [],
+      command: isStdio ? command.trim() : "",
+      args: [],
       url: isStdio ? "" : url.trim(),
       env: envMap,
     });

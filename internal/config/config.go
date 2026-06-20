@@ -17,6 +17,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"reasonix/internal/fileutil"
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 )
@@ -85,7 +86,7 @@ type UIConfig struct {
 // language, terminal colours, or provider-visible prompt/request data.
 type DesktopConfig struct {
 	Language       string   `toml:"language"`         // auto|en|zh; empty/auto = browser/OS auto-detect
-	LayoutStyle    string   `toml:"layout_style"`     // classic|workbench; desktop layout style
+	LayoutStyle    string   `toml:"layout_style"`     // classic|workbench|creation; desktop layout style
 	Theme          string   `toml:"theme"`            // auto|dark|light; empty resolves to auto
 	ThemeStyle     string   `toml:"theme_style"`      // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 	CloseBehavior  string   `toml:"close_behavior"`   // quit|background; desktop window close behavior
@@ -152,6 +153,8 @@ func normalizeDesktopLayoutStyle(style string) string {
 		return "classic"
 	case "workbench", "workspace":
 		return "workbench"
+	case "creation":
+		return "creation"
 	default:
 		return "workbench"
 	}
@@ -2778,9 +2781,12 @@ func SourcePathForRoot(root string) string {
 	return ""
 }
 
-// WriteFile writes the configuration to path as annotated TOML.
+// WriteFile writes the configuration to path as annotated TOML. The write is
+// atomic + fsynced so an interrupted write or power loss can never truncate the
+// main config into an unparseable state that leaves the app with no usable
+// models (#4615, #4708).
 func (c *Config) WriteFile(path string) error {
-	return os.WriteFile(path, []byte(RenderTOMLForScope(c, renderScopeForPath(path))), 0o644)
+	return fileutil.AtomicWriteFile(path, []byte(RenderTOMLForScope(c, renderScopeForPath(path))), configFilePerm(path))
 }
 
 // Provider returns the named provider entry.

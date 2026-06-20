@@ -2592,7 +2592,7 @@ function makeMockApp(): AppBindings {
           settings.desktopThemeStyle = style;
         },
         async SetDesktopLayoutStyle(style: string) {
-          settings.desktopLayoutStyle = style === "workbench" ? "workbench" : "classic";
+          settings.desktopLayoutStyle = style === "workbench" || style === "creation" ? style : "classic";
         },
         async SetDesktopCheckUpdates(enabled: boolean) {
           settings.checkUpdates = enabled;

@@ -28,6 +28,14 @@ type BranchMeta struct {
 	TopicID          string    `json:"topic_id,omitempty"`
 	TopicTitle       string    `json:"topic_title,omitempty"`
 	Model            string    `json:"model,omitempty"`
+	// Turns and Preview are listing-only fields the desktop sidebar and CLI
+	// pickers show ("5 turns · 'help me debug…'") without decoding the whole
+	// .jsonl. The autosave path (Controller.snapshot) keeps them fresh from the
+	// in-memory conversation, so ListSessions stays O(1) per session instead of
+	// O(file size). Turns == 0 means "not recorded yet" — listing falls back to a
+	// one-time decode and backfills these.
+	Turns   int    `json:"turns,omitempty"`
+	Preview string `json:"preview,omitempty"`
 }
 
 func (m BranchMeta) DefaultScope() string {
@@ -134,7 +142,11 @@ func saveBranchMeta(sessionPath string, m BranchMeta, touchUpdated bool) error {
 		os.Remove(tmpPath)
 		return err
 	}
-	return fileutil.ReplaceFile(tmpPath, metaPath)
+	if err := fileutil.ReplaceFile(tmpPath, metaPath); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 func EnsureBranchMeta(sessionPath string) (BranchMeta, error) {
@@ -262,4 +274,25 @@ func SetBranchModelPreserveUpdated(sessionPath, model string) error {
 	}
 	meta.Model = strings.TrimSpace(model)
 	return SaveBranchMetaPreserveUpdated(sessionPath, meta)
+}
+
+// UpdateSessionMeta refreshes the listing-only sidecar fields (model, preview,
+// user-turn count) the sidebar and pickers read without decoding the .jsonl.
+// markActivity bumps UpdatedAt (the autosave path passes true on a real turn);
+// false preserves it (used to backfill legacy sessions during a read). An empty
+// model leaves the stored model untouched.
+func UpdateSessionMeta(sessionPath, model, preview string, turns int, markActivity bool) error {
+	if sessionPath == "" {
+		return fmt.Errorf("empty session path")
+	}
+	m, err := EnsureBranchMeta(sessionPath)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(model) != "" {
+		m.Model = strings.TrimSpace(model)
+	}
+	m.Preview = preview
+	m.Turns = turns
+	return saveBranchMeta(sessionPath, m, markActivity)
 }
