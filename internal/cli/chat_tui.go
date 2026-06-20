@@ -967,7 +967,13 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// queueEditCursor to decide whether to save an edit or enqueue.
 		default:
 			m.resetSubmittedInputRecall()
-			m.resetQueueNavigation()
+			// Preserve queue navigation while the user is editing a queued
+			// item — only reset when they're not browsing the queue, so that
+			// typing replacement text keeps queueEditCursor alive for the
+			// Enter handler to save the edit in-place. (#4877)
+			if m.queueEditCursor < 0 {
+				m.resetQueueNavigation()
+			}
 		}
 		switch msg.String() {
 		case "esc":

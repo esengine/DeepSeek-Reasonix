@@ -1337,12 +1337,68 @@ func TestQueueNavigationResetOnNonUpDownKey(t *testing.T) {
 		t.Fatalf("cursor should be 0 after up, got %d", m.queueEditCursor)
 	}
 
-	// A regular key should reset the queue navigation cursor.
+	// A regular key while editing a queued item should preserve the cursor
+	// so the user can type replacement text. (#4877)
 	letter := tea.KeyPressMsg{Code: 'a'}
 	model, _ = m.Update(letter)
 	m = model.(chatTUI)
+	if m.queueEditCursor != 0 {
+		t.Fatalf("cursor should stay at 0 while editing queued item, got %d", m.queueEditCursor)
+	}
+}
+
+func TestQueueEditTypingDoesNotResetCursor(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.pendingInterject = []string{"first", "second"}
+
+	// Navigate up to select the last item.
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	model, _ := m.Update(up)
+	m = model.(chatTUI)
+	if m.queueEditCursor != 1 {
+		t.Fatalf("cursor should be 1 after up, got %d", m.queueEditCursor)
+	}
+
+	// Type several characters — cursor must survive each keystroke.
+	for _, c := range "hello" {
+		letter := tea.KeyPressMsg{Code: c}
+		model, _ = m.Update(letter)
+		m = model.(chatTUI)
+	}
+	if m.queueEditCursor != 1 {
+		t.Fatalf("cursor should stay at 1 after typing, got %d", m.queueEditCursor)
+	}
+}
+
+func TestQueueEditReplaceOnEnter(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.pendingInterject = []string{"hello"}
+
+	// Navigate up to select the item.
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	model, _ := m.Update(up)
+	m = model.(chatTUI)
+	if m.queueEditCursor != 0 {
+		t.Fatalf("cursor should be 0 after up, got %d", m.queueEditCursor)
+	}
+
+	// Simulate real typing: clear input, send key presses through Update.
+	m.input.SetValue("")
+	m.input.SetValue("world")
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	model, _ = m.Update(enter)
+	m = model.(chatTUI)
+
+	if len(m.pendingInterject) != 1 {
+		t.Fatalf("queue should still have 1 item, got %d", len(m.pendingInterject))
+	}
+	if m.pendingInterject[0] != "world" {
+		t.Fatalf("queue[0] should be %q, got %q", "world", m.pendingInterject[0])
+	}
 	if m.queueEditCursor != -1 {
-		t.Fatalf("cursor should reset on non-up/down key, got %d", m.queueEditCursor)
+		t.Fatalf("cursor should reset after enter, got %d", m.queueEditCursor)
 	}
 }
 
