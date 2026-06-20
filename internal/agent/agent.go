@@ -804,6 +804,11 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 		usedAnyTool = true
 
 		results := a.executeBatch(ctx, calls)
+		// If the context was cancelled during tool execution, return immediately
+		// so the caller can detect the cancellation instead of continuing the loop.
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		for i, call := range calls {
 			a.session.Add(provider.Message{
 				Role:       provider.RoleTool,
@@ -1296,10 +1301,37 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 	for _, batch := range partitionToolCalls(a.tools, calls) {
 		if batch.parallel && batch.end-batch.start > 1 {
 			runParallel(batch.start, batch.end, run)
+			// After parallel execution completes, check if context was cancelled.
+			// The individual tool executions should have detected ctx.Done(), but
+			// we verify here to ensure we don't continue to subsequent batches.
+			if ctx.Err() != nil {
+				break
+			}
 			continue
 		}
 		for i := batch.start; i < batch.end; i++ {
+			// Before executing the next tool, check if context was cancelled.
+			// This prevents starting new tools when a previous tool's execution
+			// triggered cancellation.
+			if ctx.Err() != nil {
+				// Fill remaining results so the session message count stays consistent
+				for j := i; j < len(calls); j++ {
+					results[j] = "cancelled: context cancelled before execution"
+				}
+				break
+			}
 			run(i)
+			// After each tool execution, also check if the context was cancelled.
+			// If so, stop executing remaining tools and return immediately so
+			// the agent loop can detect the cancellation and exit.
+			if ctx.Err() != nil {
+				// Fill remaining results with empty strings so the session
+				// message count stays consistent, but don't execute them.
+				for j := i + 1; j < len(calls); j++ {
+					results[j] = "cancelled: context cancelled before execution"
+				}
+				break
+			}
 		}
 	}
 
