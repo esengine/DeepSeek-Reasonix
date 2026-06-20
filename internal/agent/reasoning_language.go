@@ -26,7 +26,7 @@ func NormalizeReasoningLanguage(lang string) string {
 func ReasoningLanguageBlock(lang string) string {
 	switch NormalizeReasoningLanguage(lang) {
 	case "zh":
-		return "<reasoning-language>\nVisible reasoning/thinking text preference: use Simplified Chinese when the provider exposes reasoning text. Keep code, identifiers, file paths, shell commands, and untranslated technical terms in their original form. This preference does not override an explicit user request for the final answer language.\n</reasoning-language>"
+		return "<reasoning-language>\n可见推理/思考文本的语言偏好：当提供方暴露推理文本时，请使用简体中文进行思考和推理。代码、标识符、文件路径、Shell 命令以及未翻译的技术术语保持原样。此偏好不会覆盖用户对最终回答语言的明确要求。\n</reasoning-language>"
 	case "en":
 		return "<reasoning-language>\nVisible reasoning/thinking text preference: use English when the provider exposes reasoning text. Keep code, identifiers, file paths, shell commands, and untranslated technical terms in their original form. This preference does not override an explicit user request for the final answer language.\n</reasoning-language>"
 	default:

@@ -58,7 +58,7 @@ func TestRunPrefixesReasoningLanguageOnSyntheticRetry(t *testing.T) {
 	}
 	for i, req := range prov.requests {
 		got := lastUser(req)
-		if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "Simplified Chinese") {
+		if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "简体中文") {
 			t.Fatalf("request %d last user = %q, want reasoning-language prefix", i, got)
 		}
 	}

@@ -536,7 +536,7 @@ func TestSetReasoningLanguageUpdatesLiveTabControllers(t *testing.T) {
 	}
 
 	userComposed := userCtrl.Compose("hi")
-	if !strings.Contains(userComposed, "Simplified Chinese") {
+	if !strings.Contains(userComposed, "简体中文") {
 		t.Fatalf("user-level tab Compose = %q, want zh reasoning language", userComposed)
 	}
 	projectComposed := projectCtrl.Compose("hi")

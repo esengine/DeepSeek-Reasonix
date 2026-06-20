@@ -118,7 +118,7 @@ func TestComposeReasoningLanguagePreference(t *testing.T) {
 
 	zh := New(Options{ReasoningLanguage: "zh"})
 	got := zh.Compose("hi")
-	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "Simplified Chinese") || !strings.HasSuffix(got, "hi") {
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "简体中文") || !strings.HasSuffix(got, "hi") {
 		t.Fatalf("zh reasoning language should ride the user turn, got %q", got)
 	}
 	if stripped := StripComposePrefixes(got); stripped != "hi" {
@@ -137,7 +137,7 @@ func TestRunComposesReasoningLanguagePreference(t *testing.T) {
 		t.Fatalf("runner inputs = %d, want 1", len(runner.inputs))
 	}
 	got := runner.inputs[0]
-	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "Simplified Chinese") || !strings.HasSuffix(got, "hi") {
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "简体中文") || !strings.HasSuffix(got, "hi") {
 		t.Fatalf("headless Run should compose the reasoning language preference, got %q", got)
 	}
 }
@@ -161,7 +161,7 @@ func TestComposeSyntheticReasoningLanguagePreference(t *testing.T) {
 	c := New(Options{ReasoningLanguage: "zh"})
 
 	got := c.ComposeSynthetic(planApprovedMessage)
-	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "Simplified Chinese") || !strings.HasSuffix(got, planApprovedMessage) {
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "简体中文") || !strings.HasSuffix(got, planApprovedMessage) {
 		t.Fatalf("ComposeSynthetic should prefix reasoning language, got %q", got)
 	}
 	if !IsSyntheticUserMessage(got) {
