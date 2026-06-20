@@ -1405,7 +1405,7 @@ func (c *Controller) applyPlanExec(input, display string) {
 	}
 	b.WriteString("\n## Routing rules\n")
 	b.WriteString("1. Group steps by MODULE \u2014 same module = serial, different modules = parallel batches\n")
-	b.WriteString("2. Research/exploration across modules = use parallel_tasks\n")
+	b.WriteString("2. Research/exploration across modules = MUST use parallel_tasks (mandatory)\n")
 	b.WriteString("3. Dispatch each batch via parallel_tasks \u2014 each sub-agent gets one module\u2019s context\n")
 	b.WriteString("4. Verify each batch before the next\n")
 	b.WriteString("5. Failures: fix before moving on\n")
@@ -1493,7 +1493,7 @@ func (c *Controller) applyPlanExecDirect(todos []evidence.TodoItem, display stri
 	}
 	b.WriteString("\n## Routing rules\n")
 	b.WriteString("1. Group steps by MODULE \u2014 same module = serial, different modules = parallel batches\n")
-	b.WriteString("2. Research/exploration across modules = use parallel_tasks\n")
+	b.WriteString("2. Research/exploration across modules = MUST use parallel_tasks (mandatory)\n")
 	b.WriteString("3. Dispatch each batch via parallel_tasks \u2014 each sub-agent gets one module\u2019s context\n")
 	b.WriteString("4. Verify each batch before the next\n")
 	b.WriteString("5. Failures: fix before moving on\n")
@@ -1529,8 +1529,8 @@ Process:
 5. Summarize what was done, what needs follow-up, and end with [goal:complete]
 
 Key rules:
-- Delegate — your job is coordination
-- One sub-agent per independent work item
+- Delegate — your job is coordination. DO NOT execute steps yourself.
+- One sub-agent per independent work item. MUST use parallel_tasks.
 - Each sub-agent's prompt must be self-contained`
 
 // applyPrometheus starts an interactive planning interview, inspired by OMO's
