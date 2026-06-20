@@ -1392,29 +1392,19 @@ func providerNames(cfg *config.Config) string {
 }
 
 // buildCoordinatorVerify returns a post-execution function that runs
-// go build and go test in the workspace root. It is best-effort
-// advisory only — the returned string is a notice, not an error.
+// go build in the workspace root. It is best-effort advisory only — the
+// returned string is a notice, not an error. Full go test is intentionally
+// omitted here to keep per-turn overhead low; the model can run tests
+// explicitly when needed.
 func buildCoordinatorVerify(workspaceRoot string) func(ctx context.Context) string {
 	root := workspaceRoot
 	if root == "" {
 		return nil
 	}
 	return func(ctx context.Context) string {
-		// go build first (fast, catches most issues).
 		cmd := exec.CommandContext(ctx, "go", "build", "./...")
 		cmd.Dir = root
 		out, err := cmd.CombinedOutput()
-		if err != nil {
-			out = bytes.TrimSpace(out)
-			if idx := bytes.IndexByte(out, '\n'); idx >= 0 {
-				out = out[:idx]
-			}
-			return string(out)
-		}
-		// go test (slower; skip if build already failed).
-		cmd = exec.CommandContext(ctx, "go", "test", "./...", "-count=1", "-timeout", "120s")
-		cmd.Dir = root
-		out, err = cmd.CombinedOutput()
 		if err != nil {
 			out = bytes.TrimSpace(out)
 			if idx := bytes.IndexByte(out, '\n'); idx >= 0 {

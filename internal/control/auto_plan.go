@@ -102,6 +102,8 @@ func TaskWarrantsPlannerClassified(ctx context.Context, input string, classifier
 	if classifier == nil {
 		return true // err on side of planning
 	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	needs, _, err := classifier.NeedsPlan(ctx, input, score)
 	if err != nil {
 		return true // err on side of planning
