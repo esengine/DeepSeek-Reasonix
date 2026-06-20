@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"reasonix/internal/agent"
@@ -45,6 +46,14 @@ func (t *searchSessionsTool) Schema() json.RawMessage {
     "model": {
       "type": "string",
       "description": "Optional model name filter (e.g. \"deepseek-chat\"). Only search sessions using this model."
+    },
+    "since": {
+      "type": "string",
+      "description": "Optional date filter (ISO 8601). Only sessions active on or after this date. Example: \"2026-06-01\"."
+    },
+    "until": {
+      "type": "string",
+      "description": "Optional date filter (ISO 8601). Only sessions active on or before this date. Example: \"2026-06-20\"."
     }
   },
   "required": ["query"]
@@ -56,6 +65,8 @@ func (t *searchSessionsTool) Execute(_ context.Context, args json.RawMessage) (s
 		Query      string `json:"query"`
 		MaxResults *int   `json:"max_results"`
 		Model      string `json:"model"`
+		Since      string `json:"since"`
+		Until      string `json:"until"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return "", fmt.Errorf("search_sessions: invalid args: %w", err)
@@ -80,12 +91,41 @@ func (t *searchSessionsTool) Execute(_ context.Context, args json.RawMessage) (s
 		return "", fmt.Errorf("search_sessions: %w", err)
 	}
 
+	// Parse date filters once
+	var sinceTime, untilTime time.Time
+	hasSince := false
+	hasUntil := false
+	if params.Since != "" {
+		sinceTime, err = time.Parse("2006-01-02", params.Since)
+		if err != nil {
+			return "", fmt.Errorf("search_sessions: invalid 'since' format, use YYYY-MM-DD: %w", err)
+		}
+		hasSince = true
+	}
+	if params.Until != "" {
+		untilTime, err = time.Parse("2006-01-02", params.Until)
+		if err != nil {
+			return "", fmt.Errorf("search_sessions: invalid 'until' format, use YYYY-MM-DD: %w", err)
+		}
+		// Set to end of day
+		untilTime = untilTime.Add(24*time.Hour - time.Second)
+		hasUntil = true
+	}
+
 	var b strings.Builder
 	results := 0
 
 	for _, s := range ordered {
 		if results >= maxResults {
 			break
+		}
+
+		// Filter by date range
+		if hasSince && s.LastActivityAt.Before(sinceTime) {
+			continue
+		}
+		if hasUntil && s.LastActivityAt.After(untilTime) {
+			continue
 		}
 
 		// Filter by model if specified
