@@ -2684,8 +2684,6 @@ func topicCreatedAtsPath(workspaceRoot string) string {
 	return filepath.Join(workspaceRoot, ".reasonix", topicCreatedAtsFile)
 }
 
-
-
 // --- ListProjectTree optimizations --------------------------------------------
 
 // --- ListProjectTree ---------------------------------------------------------
