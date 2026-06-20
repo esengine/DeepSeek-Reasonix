@@ -1002,7 +1002,13 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 			}
 			if sessionRuntimeKey(tab.currentSessionPath()) == targetKey {
 				if activate {
+					wasActive := a.activeTabID == tab.ID
 					a.activeTabID = tab.ID
+					// Reset planner session when switching to a different tab to
+					// prevent cross-session contamination in dual-model mode (#4926).
+					if !wasActive && tab.Ctrl != nil {
+						tab.Ctrl.ResetPlannerSession()
+					}
 				}
 				meta := a.tabMeta(tab, tab.ID == a.activeTabID)
 				a.saveTabsLocked()
@@ -1014,6 +1020,7 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 
 	for _, tab := range a.tabs {
 		if tabMatchesTopicTarget(tab, scope, workspaceRoot, topicID) {
+			wasActive := a.activeTabID == tab.ID
 			if activate {
 				a.activeTabID = tab.ID
 			}
@@ -1022,6 +1029,11 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 			a.saveTabsLocked()
 			a.mu.Unlock()
 			if sameSession {
+				// Reset planner session when switching to a different tab to
+				// prevent cross-session contamination in dual-model mode (#4926).
+				if activate && !wasActive && tab.Ctrl != nil {
+					tab.Ctrl.ResetPlannerSession()
+				}
 				return enrichTabMeta(meta), nil
 			}
 			if err := a.rebindTabToSessionPath(tab, sessionPath); err != nil {
@@ -1362,8 +1374,18 @@ func (a *App) SetActiveTab(tabID string) error {
 		return nil
 	}
 	a.activeTabID = tabID
+	tab := a.tabs[tabID]
 	dir, entries, activeID, version := a.saveTabsCollectLocked()
 	a.mu.Unlock()
+
+	// Reset the planner session when switching tabs to prevent cross-session
+	// contamination in dual-model (Plan+Execute) mode. Each tab's planner
+	// history should be scoped to that tab's conversation; without this reset,
+	// stale planner output from a previously active tab could leak into the
+	// newly active tab's executor handoff (#4926).
+	if tab != nil && tab.Ctrl != nil {
+		tab.Ctrl.ResetPlannerSession()
+	}
 
 	// I/O outside the lock — disk writes can block for hundreds of ms on
 	// Windows when antivirus or the search indexer briefly locks the file.
@@ -1432,6 +1454,11 @@ func (a *App) CloseTab(tabID string) error {
 				nextIndex = len(a.tabOrder) - 1
 			}
 			a.activeTabID = a.tabOrder[nextIndex]
+			// Reset planner session on the newly active tab to prevent
+			// cross-session contamination in dual-model mode (#4926).
+			if nextTab := a.tabs[a.activeTabID]; nextTab != nil && nextTab.Ctrl != nil {
+				nextTab.Ctrl.ResetPlannerSession()
+			}
 		}
 	}
 	a.saveTabsLocked()

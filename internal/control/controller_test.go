@@ -551,6 +551,43 @@ func TestResumeResetsTwoModelPlannerContext(t *testing.T) {
 	}
 }
 
+func TestResetPlannerSessionClearsPlannerHistory(t *testing.T) {
+	dir := t.TempDir()
+	planner := &recordingProvider{name: "planner", streams: [][]provider.Chunk{
+		textTurn("FIRST PLAN: inspect alpha.go"),
+		textTurn("SECOND PLAN: inspect beta.go"),
+	}}
+	execProv := &recordingProvider{name: "executor", streams: [][]provider.Chunk{
+		textTurn("first done"),
+		textTurn("second done"),
+	}}
+	exec := agent.New(execProv, tool.NewRegistry(), agent.NewSession("exec sys"), agent.Options{}, event.Discard)
+	plannerSess := agent.NewSession("planner sys")
+	coord := agent.NewCoordinator(planner, plannerSess, nil, tool.NewRegistry(), agent.Options{}, exec, 0, event.Discard, nil)
+	path := filepath.Join(dir, "session.jsonl")
+	c := New(Options{Runner: coord, Executor: exec, SystemPrompt: "exec sys", SessionDir: dir, SessionPath: path, Label: "test"})
+
+	if err := c.Run(context.Background(), "first task"); err != nil {
+		t.Fatal(err)
+	}
+	// Explicitly reset the planner session (simulates a tab switch).
+	c.ResetPlannerSession()
+	if err := c.Run(context.Background(), "second task"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(planner.requests) != 2 {
+		t.Fatalf("planner requests = %d, want 2", len(planner.requests))
+	}
+	second := requestMessagesText(planner.requests[1].Messages)
+	if strings.Contains(second, "first task") || strings.Contains(second, "FIRST PLAN") {
+		t.Fatalf("planner request after reset leaked previous session context:\n%s", second)
+	}
+	if !strings.Contains(second, "second task") {
+		t.Fatalf("planner request after reset missing current task:\n%s", second)
+	}
+}
+
 func TestSubmitClearDiscardsCurrentContextWithoutSavingTranscript(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSession("sys")
