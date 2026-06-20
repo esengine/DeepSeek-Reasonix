@@ -908,7 +908,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			}, executor, cfg.Agent.Temperature, sink, shouldPlan)
 			// Wire post-execution verification when a planner is configured.
 			if cd, ok := runner.(*agent.Coordinator); ok {
-				cd.SetVerify(buildCoordinatorVerify(root))
+				cd.SetVerify(buildCoordinatorVerify(root, false))
 			}
 			label = entry.Model + " + planner " + pe.Model
 		}
@@ -1392,11 +1392,9 @@ func providerNames(cfg *config.Config) string {
 }
 
 // buildCoordinatorVerify returns a post-execution function that runs
-// go build in the workspace root. It is best-effort advisory only — the
-// returned string is a notice, not an error. Full go test is intentionally
-// omitted here to keep per-turn overhead low; the model can run tests
-// explicitly when needed.
-func buildCoordinatorVerify(workspaceRoot string) func(ctx context.Context) string {
+// go build in the workspace root (best-effort advisory). When fullVerify
+// is true it also runs go test ./... (opt-in, heavier).
+func buildCoordinatorVerify(workspaceRoot string, fullVerify bool) func(ctx context.Context) string {
 	root := workspaceRoot
 	if root == "" {
 		return nil
@@ -1411,6 +1409,18 @@ func buildCoordinatorVerify(workspaceRoot string) func(ctx context.Context) stri
 				out = out[:idx]
 			}
 			return string(out)
+		}
+		if fullVerify {
+			cmd = exec.CommandContext(ctx, "go", "test", "./...", "-count=1", "-timeout", "120s")
+			cmd.Dir = root
+			out, err = cmd.CombinedOutput()
+			if err != nil {
+				out = bytes.TrimSpace(out)
+				if idx := bytes.IndexByte(out, '\n'); idx >= 0 {
+					out = out[:idx]
+				}
+				return string(out)
+			}
 		}
 		return ""
 	}

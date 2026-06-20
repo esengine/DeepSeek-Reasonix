@@ -99,6 +99,8 @@ func TaskWarrantsPlannerClassified(ctx context.Context, input string, classifier
 		return false
 	}
 	// score == 1: borderline, use classifier.
+	// The classifier must be fast so we cap it at 3s to avoid blocking the
+	// main turn loop; on timeout or error we fall back to planning (safe side).
 	if classifier == nil {
 		return true // err on side of planning
 	}
