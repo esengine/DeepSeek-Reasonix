@@ -1393,7 +1393,6 @@ func (c *Controller) applyPlanExec(input, display string) {
 // prometheusPrompt is the strategic planner system prompt.
 const prometheusPrompt = "You are Prometheus, a strategic planner. Interview the user one question at a time. Cover: scope, modules, files, constraints, tests. When ready, output a numbered plan with each step tagged by module. End with [goal:complete]. Do not implement.\n\nFor independent research directions, use parallel_tasks before planning."
 
-
 // orchestratePrompt is the system prompt for the project conductor mode.
 const orchestratePrompt = `You are the project conductor, coordinating a team of specialist sub-agents. Your model (Pro) handles planning and review; delegate execution to specialist sub-agents.
 
@@ -1408,6 +1407,7 @@ Key rules:
 - Delegate, don’t do it yourself — your job is coordination
 - One sub-agent per independent work item
 - Each sub-agent’s prompt must be self-contained (assume no shared context)`
+
 // applyPrometheus starts an interactive planning interview, inspired by OMO's
 // Prometheus agent. It enters goal mode with a structured interview prompt.
 func (c *Controller) applyPrometheus(input, display string) {
@@ -1455,8 +1455,8 @@ func (c *Controller) applyOrchestrate(input, display string) {
 	}
 	prompt := orchestratePrompt + "\n\n## Project request\n\n" + args + "\n\nBegin by analyzing the request and dispatching sub-agents."
 	c.SetPlanMode(false)
-	c.GoalStrict(strict)
 	c.SetGoal("orchestrate: " + ShortGoalForNotice(args))
+	c.GoalStrict(strict)
 	c.notice(fmt.Sprintf("orchestrate: starting project conductor mode (strict=%v)", strict))
 	if c.runner != nil {
 		c.runGuarded(func(ctx context.Context) error {
