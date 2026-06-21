@@ -2217,6 +2217,7 @@ export default function App() {
     if (activeTabId) void handleTabClose(activeTabId);
   }, [activeTabId, handleTabClose], Boolean(activeTabId));
   useGlobalShortcut("shortcuts.show", () => setShortcutsOpen(true));
+  useGlobalShortcut("sidebar.toggle", toggleSidebar, [toggleSidebar]);
 
   const paletteItems = useMemo<PaletteItem[]>(() => {
     const cmds: PaletteItem[] = [

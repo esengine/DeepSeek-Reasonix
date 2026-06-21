@@ -9,6 +9,7 @@ export type ShortcutAction =
   | "settings.open"
   | "tab.close"
   | "shell.toggle"
+  | "sidebar.toggle"
   | "textSize.increase"
   | "textSize.decrease"
   | "textSize.reset"
@@ -82,6 +83,18 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
     section: "view",
     labelKey: "shortcuts.action.shellToggle",
     descriptionKey: "shortcuts.desc.shellToggle",
+    defaults: {
+      darwin: { key: "b", meta: true, shift: true },
+      windows: { key: "b", ctrl: true, shift: true },
+      linux: { key: "b", ctrl: true, shift: true },
+    },
+    preventDefault: true,
+  },
+  {
+    action: "sidebar.toggle",
+    section: "view",
+    labelKey: "shortcuts.action.sidebarToggle",
+    descriptionKey: "shortcuts.desc.sidebarToggle",
     defaults: modCombo("b"),
     preventDefault: true,
   },
