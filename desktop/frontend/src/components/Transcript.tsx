@@ -5,7 +5,7 @@ import { useT } from "../lib/i18n";
 import { AssistantMessage, TurnActions, UserMessage } from "./Message";
 import { ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
-import { ChevronRight } from "lucide-react";
+import { ArrowDown, ChevronRight } from "lucide-react";
 import { Welcome } from "./Welcome";
 import { ReadOnlyBatch } from "./ReadOnlyBatch";
 import { getDisplayMode, onDisplayModeChange, type DisplayMode } from "../lib/displayMode";
@@ -109,7 +109,9 @@ export function Transcript({
     scrollRef,
     stick,
     onScroll,
+    isAtBottom,
     smoothScrollTo,
+    scrollToBottomAfterLayout,
     trackQuestions,
     repinIfWasPinned,
     resizeFrame,
@@ -117,6 +119,7 @@ export function Transcript({
     lastFooterHeight,
   } = useScrollManager();
   const autoScrollFrame = useRef<number | null>(null);
+  const pendingTabBottomScroll = useRef(false);
   const sessionKey = useMemo(() => `${items[0]?.id ?? ""}|${items[items.length - 1]?.id ?? ""}`, [items]);
   const entranceRef = useEntranceAnimation<HTMLDivElement>(sessionKey, items.length);
 
@@ -144,7 +147,17 @@ export function Transcript({
   // disables auto-scroll when the user had scrolled up in the old tab (#4584).
   useEffect(() => {
     stick.current = true;
+    pendingTabBottomScroll.current = true;
   }, [tabId]);
+
+  useEffect(() => {
+    if (!pendingTabBottomScroll.current || items.length === 0) return;
+    pendingTabBottomScroll.current = false;
+    const frame = requestAnimationFrame(() => {
+      scrollToBottomAfterLayout(5);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [tabId, items.length, scrollToBottomAfterLayout]);
 
   // Auto-scroll to bottom during streaming. Coalesce fast token/reasoning
   // updates into one layout read/write per animation frame.
@@ -549,51 +562,65 @@ export function Transcript({
   // don't rebuild it. The hot zone uses LiveAssistantMessage (reads live from
   // LiveStreamContext) so streaming updates are captured immediately.
   return (
-    <div
-      className={`transcript${empty ? " transcript--empty" : ""}`}
-      ref={scrollRef}
-      onScroll={onScroll}
-    >
-      {empty && <Welcome onPrompt={onPrompt} variant={welcomeVariant} />}
+    <div className="transcript-shell">
+      <div
+        className={`transcript${empty ? " transcript--empty" : ""}`}
+        ref={scrollRef}
+        onScroll={onScroll}
+      >
+        {empty && <Welcome onPrompt={onPrompt} variant={welcomeVariant} />}
 
-      {!empty && showQuestionNav && (
-        <QuestionJumpBar questions={questions} onJump={handleJumpToQuestion} />
-      )}
-
-      <LiveStreamContext.Provider value={live}>
-        {turnGroups.length > HOT_TURNS && (
-          <WarmZone
-            turnGroups={turnGroups}
-            expandedWarmTurns={expandedWarmTurns}
-            shownWarmStart={shownWarmStart}
-            coldTurnCount={coldTurnCount}
-            scrollRef={scrollRef}
-            warmItems={items}
-            warmSubcalls={subcallsByParent}
-            warmUserTurn={userTurn}
-            warmCheckpoints={checkpointsByTurn}
-            warmOpenAction={openAction}
-            warmActionPending={actionPending}
-            warmRewindDisabled={rewindDisabled}
-            warmActionHoverMenus={actionHoverMenus}
-            warmOnRewind={onRewind}
-            warmSetOpenAction={setOpenAction}
-            warmOnEdit={onEditPrompt}
-            tabId={tabId}
-            onToggleColdPage={() => setColdPage((p) => p + 1)}
-            onToggleWarmTurn={(g, expand) => {
-              setExpandedWarmTurns((prev) => {
-                const next = new Set(prev);
-                if (expand) next.add(g); else next.delete(g);
-                return next;
-              });
-            }}
-          />
+        {!empty && showQuestionNav && (
+          <QuestionJumpBar questions={questions} onJump={handleJumpToQuestion} />
         )}
-        <div ref={entranceRef}>
-          {hotZoneNodes}
-        </div>
-      </LiveStreamContext.Provider>
+
+        <LiveStreamContext.Provider value={live}>
+          {turnGroups.length > HOT_TURNS && (
+            <WarmZone
+              turnGroups={turnGroups}
+              expandedWarmTurns={expandedWarmTurns}
+              shownWarmStart={shownWarmStart}
+              coldTurnCount={coldTurnCount}
+              scrollRef={scrollRef}
+              warmItems={items}
+              warmSubcalls={subcallsByParent}
+              warmUserTurn={userTurn}
+              warmCheckpoints={checkpointsByTurn}
+              warmOpenAction={openAction}
+              warmActionPending={actionPending}
+              warmRewindDisabled={rewindDisabled}
+              warmActionHoverMenus={actionHoverMenus}
+              warmOnRewind={onRewind}
+              warmSetOpenAction={setOpenAction}
+              warmOnEdit={onEditPrompt}
+              tabId={tabId}
+              onToggleColdPage={() => setColdPage((p) => p + 1)}
+              onToggleWarmTurn={(g, expand) => {
+                setExpandedWarmTurns((prev) => {
+                  const next = new Set(prev);
+                  if (expand) next.add(g); else next.delete(g);
+                  return next;
+                });
+              }}
+            />
+          )}
+          <div ref={entranceRef}>
+            {hotZoneNodes}
+          </div>
+        </LiveStreamContext.Provider>
+      </div>
+
+      {!empty && !isAtBottom && (
+        <button
+          type="button"
+          className="transcript__jump-bottom"
+          onClick={() => scrollToBottomAfterLayout(2)}
+          aria-label="Jump to bottom"
+          title="Jump to bottom"
+        >
+          <ArrowDown size={18} strokeWidth={2.2} aria-hidden="true" />
+        </button>
+      )}
     </div>
   );
 }
