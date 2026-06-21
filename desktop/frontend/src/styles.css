@@ -6198,7 +6198,8 @@ a[href] {
   text-overflow: ellipsis;
 }
 .modelsw__provider {
-  display: block;
+  /* 使用 inline 避免 display:block 导致文字越界，同时让 text-overflow 生效 */
+  display: inline;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -23782,11 +23783,17 @@ a[href] {
   gap: 5px;
   padding: 0 10px;
   font-size: 12px;
+  /* 限制按钮最大宽度，防止文字越界 */
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .app--creation .composer-meta .modelsw,
 :root[data-theme-style] .app--creation .composer-meta .modelsw {
   width: auto;
+  /* 防止内部按钮文字溢出容器 */
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .app--creation .composer-meta .modelsw__kind,
