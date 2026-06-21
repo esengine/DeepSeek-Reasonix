@@ -4252,7 +4252,7 @@ function ProviderEditor({
 }) {
   const t = useT();
   const [name, setName] = useState(initial?.name ?? "");
-  const [kind, setKind] = useState(initial?.kind ?? kinds[0] ?? "openai");
+  const [kind, setKind] = useState(initial?.kind ?? "openai");
   const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? "");
   const [models, setModels] = useState((initial?.models ?? []).join(", "));
   const [visionModels, setVisionModels] = useState((initial?.visionModels ?? []).join(", "));
@@ -4322,7 +4322,7 @@ function ProviderEditor({
         name: name.trim() || t("settings.newProviderDraftName"),
         builtIn: initial?.builtIn ?? false,
         added: initial?.added ?? true,
-        kind: kind.trim() || kinds[0] || "openai",
+        kind: kind.trim() || "openai",
         baseUrl: baseUrl.trim(),
         modelsUrl,
         models: [],
@@ -4431,9 +4431,11 @@ function ProviderEditor({
       ))}
     </select>
   ) : (
-    <div className="provider-readonly-field provider-readonly-field--stacked" aria-readonly="true">
-      <strong>{t("settings.providerProtocolOpenAI")}</strong>
-      <span>{t("settings.providerProtocolOpenAIHint")}</span>
+    <div>
+      <select className="mem-select" disabled value="openai">
+        <option value="openai">{t("settings.providerProtocolOpenAI")}</option>
+      </select>
+      <div className="mem-hint">{t("settings.providerProtocolOpenAIHint")}</div>
     </div>
   );
 
