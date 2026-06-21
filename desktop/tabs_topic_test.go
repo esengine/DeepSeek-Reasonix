@@ -1390,6 +1390,29 @@ func TestAutoTitleTopicStripsReasoningLanguagePrefix(t *testing.T) {
 	}
 }
 
+func TestAutoTitleTopicStripsReferencedContextPrefix(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topic, err := NewApp().CreateTopic("project", projectRoot, "")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	prompt := "Referenced context:\n\n<file path=\"README.md\">\n# Reasonix\n</file>\n\n总结这个文件"
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(sessionPath, []byte(`{"role":"user","content":`+strconv.Quote(prompt)+`}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+
+	title, updated := autoTitleTopicFromSession(projectRoot, topic.ID, sessionPath)
+	if !updated {
+		t.Fatal("auto title should update")
+	}
+	if title != "总结这个文件" {
+		t.Fatalf("generated title = %q", title)
+	}
+}
+
 func TestAutoTitleDoesNotOverrideManualTopicTitle(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
