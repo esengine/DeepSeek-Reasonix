@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent/testutil"
+	"reasonix/internal/event"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
@@ -48,14 +49,22 @@ func (slowTool) Execute(ctx context.Context, args json.RawMessage) (string, erro
 }
 
 // trackingTool is a tool that records when it was executed and can simulate delays.
-type trackingTool struct{}
+type trackingTool struct {
+	name     string
+	readOnly bool
+}
 
-func (trackingTool) Name() string        { return "tracking" }
+func (t trackingTool) Name() string {
+	if t.name != "" {
+		return t.name
+	}
+	return "tracking"
+}
 func (trackingTool) Description() string { return "Tracks execution" }
 func (trackingTool) Schema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"},"delay_ms":{"type":"number"},"should_fail":{"type":"boolean"}},"required":["name"]}`)
 }
-func (trackingTool) ReadOnly() bool { return false }
+func (t trackingTool) ReadOnly() bool { return t.readOnly }
 func (trackingTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		Name       string `json:"name"`
@@ -238,5 +247,75 @@ func TestCancelDuringBatchStopsRemainingTools(t *testing.T) {
 	}
 	if !foundTool2Cancelled {
 		t.Log("Note: tool2 may have completed or been cancelled - check timing")
+	}
+}
+
+// TestCancelBeforeParallelBatchSkipsTheWholeRemainingBatch verifies that a
+// cancellation in a serial writer segment prevents the next read-only parallel
+// segment from starting.
+func TestCancelBeforeParallelBatchSkipsTheWholeRemainingBatch(t *testing.T) {
+	executedMu.Lock()
+	executed = nil
+	executedMu.Unlock()
+
+	reg := tool.NewRegistry()
+	reg.Add(trackingTool{})
+	reg.Add(trackingTool{name: "readonly_tracking", readOnly: true})
+
+	mp := testutil.NewMock("m",
+		testutil.Turn{
+			Text: "",
+			ToolCalls: []provider.ToolCall{
+				{ID: "call-1", Name: "tracking", Arguments: `{"name": "writer", "delay_ms": 5000}`},
+				{ID: "call-2", Name: "readonly_tracking", Arguments: `{"name": "read1", "delay_ms": 50}`},
+				{ID: "call-3", Name: "readonly_tracking", Arguments: `{"name": "read2", "delay_ms": 50}`},
+			},
+		},
+	)
+
+	sink := &recordSink{}
+	a := New(mp, reg, NewSession(""), Options{}, sink)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- a.Run(ctx, "test cancel before parallel batch")
+	}()
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		cancel()
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Run returned nil, want context cancellation")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not complete within 5s")
+	}
+
+	executedMu.Lock()
+	executedCopy := append([]string(nil), executed...)
+	executedMu.Unlock()
+	for _, name := range executedCopy {
+		if strings.HasPrefix(name, "read") {
+			t.Fatalf("read-only parallel batch should not start after cancel, executed: %v", executedCopy)
+		}
+	}
+
+	results := sink.kinds(event.ToolResult)
+	if len(results) != 3 {
+		t.Fatalf("ToolResult events = %d, want 3", len(results))
+	}
+	for _, e := range results[1:] {
+		if e.Tool.Err == "" {
+			t.Fatalf("cancelled unstarted tool result should carry an error: %+v", e.Tool)
+		}
+		if !strings.Contains(e.Tool.Output, "cancelled") {
+			t.Fatalf("cancelled unstarted tool result should explain cancellation: %+v", e.Tool)
+		}
 	}
 }

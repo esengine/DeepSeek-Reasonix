@@ -1297,14 +1297,32 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 		durations[i] = time.Since(start).Milliseconds()
 		results[i] = outcomes[i].output
 	}
+	cancelled := false
+	markCancelled := func(start int) {
+		errMsg := context.Canceled.Error()
+		if err := ctx.Err(); err != nil {
+			errMsg = err.Error()
+		}
+		output := "cancelled: context cancelled before execution"
+		for j := start; j < len(calls); j++ {
+			results[j] = output
+			outcomes[j] = toolOutcome{output: output, errMsg: errMsg}
+		}
+		cancelled = true
+	}
 
 	for _, batch := range partitionToolCalls(a.tools, calls) {
+		if ctx.Err() != nil {
+			markCancelled(batch.start)
+			break
+		}
 		if batch.parallel && batch.end-batch.start > 1 {
 			runParallel(batch.start, batch.end, run)
 			// After parallel execution completes, check if context was cancelled.
 			// The individual tool executions should have detected ctx.Done(), but
 			// we verify here to ensure we don't continue to subsequent batches.
 			if ctx.Err() != nil {
+				markCancelled(batch.end)
 				break
 			}
 			continue
@@ -1314,10 +1332,7 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 			// This prevents starting new tools when a previous tool's execution
 			// triggered cancellation.
 			if ctx.Err() != nil {
-				// Fill remaining results so the session message count stays consistent
-				for j := i; j < len(calls); j++ {
-					results[j] = "cancelled: context cancelled before execution"
-				}
+				markCancelled(i)
 				break
 			}
 			run(i)
@@ -1325,13 +1340,12 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 			// If so, stop executing remaining tools and return immediately so
 			// the agent loop can detect the cancellation and exit.
 			if ctx.Err() != nil {
-				// Fill remaining results with empty strings so the session
-				// message count stays consistent, but don't execute them.
-				for j := i + 1; j < len(calls); j++ {
-					results[j] = "cancelled: context cancelled before execution"
-				}
+				markCancelled(i + 1)
 				break
 			}
+		}
+		if cancelled {
+			break
 		}
 	}
 
@@ -1352,7 +1366,9 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: o.truncMsg})
 		}
 	}
-	a.applyStormBreaker(calls, outcomes, results)
+	if !cancelled {
+		a.applyStormBreaker(calls, outcomes, results)
+	}
 	return results
 }
 
