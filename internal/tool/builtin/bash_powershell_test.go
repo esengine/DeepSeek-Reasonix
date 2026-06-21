@@ -103,8 +103,23 @@ func TestBashPowerShellOutputIsUTF8(t *testing.T) {
 
 func TestBashDescriptionReflectsShell(t *testing.T) {
 	ps := bash{shell: sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: "powershell"}}
-	if !strings.Contains(ps.Description(), "PowerShell") {
-		t.Errorf("powershell description should warn about PowerShell: %q", ps.Description())
+	psDesc := ps.Description()
+	if !strings.Contains(psDesc, "Windows PowerShell") {
+		t.Errorf("powershell description should name Windows PowerShell: %q", psDesc)
+	}
+	if !strings.Contains(psDesc, "'&&' and '||' are NOT parsed") {
+		t.Errorf("powershell description should warn about unsupported chaining: %q", psDesc)
+	}
+	pwsh := bash{shell: sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: "pwsh"}}
+	pwshDesc := pwsh.Description()
+	if !strings.Contains(pwshDesc, "PowerShell 7 (pwsh)") {
+		t.Errorf("pwsh description should name PowerShell 7: %q", pwshDesc)
+	}
+	if !strings.Contains(pwshDesc, "'&&' and '||' are parsed") {
+		t.Errorf("pwsh description should allow conditional chaining: %q", pwshDesc)
+	}
+	if strings.Contains(pwshDesc, "NOT parsed") {
+		t.Errorf("pwsh description should not reuse the Windows PowerShell chaining warning: %q", pwshDesc)
 	}
 	sh := bash{shell: sandbox.Shell{Kind: sandbox.ShellBash, Path: "bash"}}
 	if strings.Contains(sh.Description(), "PowerShell") {
