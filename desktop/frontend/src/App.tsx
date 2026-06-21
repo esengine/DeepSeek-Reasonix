@@ -2237,12 +2237,6 @@ export default function App() {
       if (!isMod) return;
       const num = parseInt(event.key, 10);
       if (isNaN(num) || num < 1 || num > 10) return;
-      // Skip if focus is inside an editable element
-      const target = event.target;
-      if (target instanceof HTMLElement) {
-        const tag = target.tagName.toLowerCase();
-        if (target.isContentEditable || tag === "input" || tag === "textarea" || tag === "select") return;
-      }
       event.preventDefault();
       const topics = visibleTopicsRef.current;
       const idx = num === 10 ? 0 : num - 1;
