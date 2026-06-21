@@ -4261,6 +4261,11 @@ func currentTabCollaborationMode(tab *WorkspaceTab) string {
 	if tab.Ctrl != nil && tab.Ctrl.PlanMode() {
 		return "plan"
 	}
+	// controller 未就绪时，从持久化的 tab.mode 回退读取，避免计划模式按钮在
+	// 切换工作区或 controller 重建期间丢失 (#4940)
+	if tabModeHasPlan(tab.mode) {
+		return "plan"
+	}
 	if strings.TrimSpace(currentTabGoal(tab)) != "" && currentTabGoalStatus(tab) == control.GoalStatusRunning {
 		return "goal"
 	}

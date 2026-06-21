@@ -446,6 +446,32 @@ func TestSetBypassPreservesPlanMode(t *testing.T) {
 	}
 }
 
+// TestCurrentTabCollaborationModeFallsBackToTabMode 验证 controller 不可用时，
+// currentTabCollaborationMode 从持久化的 tab.mode 回退读取计划模式，
+// 避免切换工作区或 controller 重建期间前端计划按钮丢失 (#4940)。
+func TestCurrentTabCollaborationModeFallsBackToTabMode(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	tab := &WorkspaceTab{
+		ID:    "plan-fallback",
+		Scope: "project",
+		mode:  "plan",
+	}
+	if got := currentTabCollaborationMode(tab); got != "plan" {
+		t.Fatalf("collaboration mode without Ctrl = %q, want plan", got)
+	}
+
+	tab.mode = "plan-yolo"
+	if got := currentTabCollaborationMode(tab); got != "plan" {
+		t.Fatalf("collaboration mode plan-yolo without Ctrl = %q, want plan", got)
+	}
+
+	tab.mode = "normal"
+	if got := currentTabCollaborationMode(tab); got != "normal" {
+		t.Fatalf("collaboration mode normal without Ctrl = %q, want normal", got)
+	}
+}
+
 func userConfigPathForTest() string {
 	if dir, err := os.UserConfigDir(); err == nil {
 		return dir + "/reasonix/reasonix.toml"
