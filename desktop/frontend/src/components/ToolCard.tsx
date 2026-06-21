@@ -12,7 +12,17 @@ import { ReadOnlyBatch } from "./ReadOnlyBatch";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
-const SUBAGENT_TOOLS = new Set(["task", "run_skill", "explore", "research", "review", "security_review"]);
+const SUBAGENT_TOOLS = new Set(["task", "run_skill", "explore", "research", "review", "security_review", "parallel_tasks"]);
+
+const SUBAGENT_ICONS: Record<string, string> = {
+  task: "\u26A1",          // ⚡ execution
+  run_skill: "\uD83E\uDDE0", // 🧠 skill
+  explore: "\uD83D\uDD0D",   // 🔍 explore
+  research: "\uD83D\uDD0D",  // 🔍 research
+  review: "\uD270",         // ✐ review
+  security_review: "\uD83D\uDEE1", // 🛡 security
+  parallel_tasks: "\uD83D\uDD01",  // 🔁 parallel
+};
 
 /** Lines shown by default in a shell output block before the "show all" button. */
 const SHELL_PREVIEW_LINES = 10;
@@ -127,11 +137,11 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId }: { item
         aria-expanded={hasBody ? open : undefined}
       >
         <span className="tool__label-group">
-          {hasNested && <span className="tool__nested-count">⊞{nested.length}</span>}
+          {hasNested && <span className="tool__nested-badge">{nested.length}</span>}
           {item.status === "error" && <span className="tool__status-icon tool__status-icon--err">✗</span>}
           {item.status === "done" && <span className="tool__status-icon tool__status-icon--ok">✓</span>}
           {item.status === "stopped" && <span className="tool__status-icon tool__status-icon--stopped">—</span>}
-          <span className="tool__name">{item.name}</span>
+          <span className="tool__name">{isSubagent && SUBAGENT_ICONS[item.name] ? <span className="tool__subagent-icon">{SUBAGENT_ICONS[item.name]}</span> : null}{item.name}</span>
           {subject && <span className="tool__subject">{subject}</span>}
         </span>
         {profileText && <span className="tool__profile">{profileText}</span>}

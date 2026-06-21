@@ -4616,10 +4616,20 @@ a[href] {
   white-space: nowrap;
   min-width: 0;
 }
-.tool__nested-count {
+.tool__nested-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--accent-text);
   font-family: var(--mono);
-  font-size: 11px;
-  color: var(--accent);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1;
   flex-shrink: 0;
 }
 .tool__status-icon {
@@ -14709,15 +14719,24 @@ a[href] {
    tool__body already provides border-left + 12px padding, so subagent just
    needs left indent for hierarchy.  Expanded padding is handled by
    .tool--open .tool__body. */
+.tool--subagent > .tool__head {
+  border-left: 3px solid var(--accent);
+}
 .tool--subagent .tool__body {
   padding-left: 24px;
+}
+.tool__subagent-icon {
+  margin-right: 4px;
+  font-size: 12px;
+  line-height: 1;
 }
 .tool__nested {
   margin: 8px 0;
   padding-left: 16px;
+  border-left: 2px solid var(--border);
 }
 .tool__nested .tool__nested {
-  border-left: 2px solid var(--border);
+  border-left: 2px solid var(--border-soft);
   margin-left: 16px;
 }
 
