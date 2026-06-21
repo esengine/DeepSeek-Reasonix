@@ -1216,7 +1216,6 @@ export const zh: Record<DictKey, string> = {
   "shortcuts.action.topicGoto7": "转到聊天 7",
   "shortcuts.action.topicGoto8": "转到聊天 8",
   "shortcuts.action.topicGoto9": "转到聊天 9",
-  "shortcuts.action.topicGoto0": "转到聊天 10",
   "shortcuts.desc.topicGoto": "跳转到侧边栏中对应的对话。",
   "settings.textSize": "界面字号",
   "settings.textSizeSmall": "小",

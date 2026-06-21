@@ -960,7 +960,7 @@ export function ProjectTree({
     });
   }, [activeAncestorKeys, manuallyCollapsed]);
 
-  const renderNode = (node: ProjectNode | null | undefined, depth: number, section: "pinned" | "projects" = "projects") => {
+  const renderNode = (node: ProjectNode | null | undefined, depth: number, section: "pinned" | "projects" = "projects", isVisible = true) => {
     if (!node) return null;
     const key = projectNodeKey(node, depth);
     const children = asArray(node.children);
@@ -1052,10 +1052,10 @@ export function ProjectTree({
           </div>
         );
       }
-      const shortcutIndex = showShortcutBadges && topicIndexRef.current < 10 ? topicIndexRef.current + 1 : 0;
+      const shortcutIndex = showShortcutBadges && isVisible && topicIndexRef.current < 9 ? topicIndexRef.current + 1 : 0;
       if (shortcutIndex > 0) topicIndexRef.current++;
       // Collect visible topics in render order for shortcut navigation
-      if (openRequest) {
+      if (openRequest && isVisible) {
         visibleTopicsCollectorRef.current.push({
           scope: openRequest.scope,
           workspaceRoot: openRequest.workspaceRoot,
@@ -1166,7 +1166,7 @@ export function ProjectTree({
           )}
           {shortcutIndex > 0 && (
             <span className="project-tree__topic-shortcut" aria-hidden="true">
-              ⌘{shortcutIndex === 10 ? 0 : shortcutIndex}
+              ⌘{shortcutIndex}
             </span>
           )}
         </div>
@@ -1177,7 +1177,7 @@ export function ProjectTree({
           {hasChildren && (
             <div className={`project-tree__children${isExpanded ? " project-tree__children--expanded" : ""}`}>
               <div className="project-tree__children-inner">
-                {children.map((child) => renderNode(child, depth + 1, section))}
+                {children.map((child) => renderNode(child, depth + 1, section, isVisible && isExpanded))}
               </div>
             </div>
           )}
@@ -1408,7 +1408,7 @@ export function ProjectTree({
           {hasChildren && (
             <div className={`project-tree__children${isExpanded ? " project-tree__children--expanded" : ""}`}>
               <div className="project-tree__children-inner">
-                {children.map((child) => renderNode(child, depth + 1, section))}
+                {children.map((child) => renderNode(child, depth + 1, section, isVisible && isExpanded))}
               </div>
             </div>
           )}
@@ -1496,7 +1496,7 @@ export function ProjectTree({
         {hasChildren && (
           <div className={`project-tree__children${isExpanded ? " project-tree__children--expanded" : ""}`}>
             <div className="project-tree__children-inner">
-              {children.map((child) => renderNode(child, depth + 1, section))}
+              {children.map((child) => renderNode(child, depth + 1, section, isVisible && isExpanded))}
             </div>
           </div>
         )}

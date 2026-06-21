@@ -2236,7 +2236,7 @@ export default function App() {
       const isMod = event.metaKey || event.ctrlKey;
       if (!isMod) return;
       const num = parseInt(event.key, 10);
-      if (isNaN(num) || num < 1 || num > 10) return;
+      if (isNaN(num) || num < 1 || num > 9) return;
       event.preventDefault();
       const topics = visibleTopicsRef.current;
       const idx = num === 10 ? 0 : num - 1;

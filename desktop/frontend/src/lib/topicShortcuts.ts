@@ -44,12 +44,6 @@ export function useTopicShortcuts(
 
     const onKeydown = (event: globalThis.KeyboardEvent) => {
       if (!isModifier(event.key)) return;
-      // Ignore if focus is in an editable element
-      const target = event.target;
-      if (target instanceof HTMLElement) {
-        const tag = target.tagName.toLowerCase();
-        if (target.isContentEditable || tag === "input" || tag === "textarea" || tag === "select") return;
-      }
       if (heldRef.current) return; // already tracking
       heldRef.current = true;
       clearTimer();

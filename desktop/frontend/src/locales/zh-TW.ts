@@ -1548,7 +1548,6 @@ export const zhTW: Record<DictKey, string> = {
   "shortcuts.action.topicGoto7": "轉到聊天 7",
   "shortcuts.action.topicGoto8": "轉到聊天 8",
   "shortcuts.action.topicGoto9": "轉到聊天 9",
-  "shortcuts.action.topicGoto0": "轉到聊天 10",
   "shortcuts.desc.topicGoto": "跳轉到側邊欄中對應的對話。",
   "settings.fontFamilyCustom": "自定義",
   "settings.fontFamilyCustomName": "自定義字型",

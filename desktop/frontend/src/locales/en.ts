@@ -1214,7 +1214,6 @@ export const en = {
   "shortcuts.action.topicGoto7": "Go to chat 7",
   "shortcuts.action.topicGoto8": "Go to chat 8",
   "shortcuts.action.topicGoto9": "Go to chat 9",
-  "shortcuts.action.topicGoto0": "Go to chat 10",
   "shortcuts.desc.topicGoto": "Jump to the corresponding chat in the sidebar.",
   "settings.textSize": "Interface text size",
   "settings.textSizeSmall": "Small",

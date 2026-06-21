@@ -22,8 +22,7 @@ export type ShortcutAction =
   | "topic.goto.6"
   | "topic.goto.7"
   | "topic.goto.8"
-  | "topic.goto.9"
-  | "topic.goto.0";
+  | "topic.goto.9";
 
 type KeyboardShortcutEvent = Pick<globalThis.KeyboardEvent, "key"> &
   Partial<Pick<globalThis.KeyboardEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "target">>;
@@ -219,15 +218,6 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
     labelKey: "shortcuts.action.topicGoto9",
     descriptionKey: "shortcuts.desc.topicGoto",
     defaults: modCombo("9"),
-    preventDefault: true,
-    configurable: false,
-  },
-  {
-    action: "topic.goto.0",
-    section: "session",
-    labelKey: "shortcuts.action.topicGoto0",
-    descriptionKey: "shortcuts.desc.topicGoto",
-    defaults: modCombo("0"),
     preventDefault: true,
     configurable: false,
   },
