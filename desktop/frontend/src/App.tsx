@@ -2237,8 +2237,6 @@ export default function App() {
       if (!isMod) return;
       const num = parseInt(event.key, 10);
       if (isNaN(num) || num < 1 || num > 10) return;
-      // Only handle if badges are visible (Cmd is held)
-      if (!showTopicBadges) return;
       // Skip if focus is inside an editable element
       const target = event.target;
       if (target instanceof HTMLElement) {
@@ -2254,7 +2252,7 @@ export default function App() {
     };
     document.addEventListener("keydown", onKeydown, { capture: true });
     return () => document.removeEventListener("keydown", onKeydown, { capture: true });
-  }, [sidebarCollapsed, showTopicBadges, handleNavigateTopic]);
+  }, [sidebarCollapsed, handleNavigateTopic]);
 
   const paletteItems = useMemo<PaletteItem[]>(() => {
     const cmds: PaletteItem[] = [
