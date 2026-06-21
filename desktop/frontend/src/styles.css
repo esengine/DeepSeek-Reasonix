@@ -25022,6 +25022,12 @@ a[href] {
   transform: translateY(-50%) translateX(4px);
 }
 
+/* In creation mode, hide the time/side when shortcuts are shown */
+.app--creation .project-tree__topic--show-shortcut .project-tree__topic-side {
+  opacity: 0;
+  transform: translateX(-3px);
+}
+
 /* In classic mode, hide the meta line when shortcuts are shown */
 .project-tree__topic--show-shortcut .project-tree__topic-meta {
   opacity: 0;
