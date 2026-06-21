@@ -474,6 +474,14 @@ export interface GitCommitDetailView {
   files?: string[];
 }
 
+export interface WorkspaceChangeDetailView {
+  diff?: string;
+  source?: string;
+  added?: number;
+  removed?: number;
+  binary?: boolean;
+}
+
 export interface ComposerInsertRequest {
   id: number;
   text: string;

@@ -27,7 +27,7 @@ import {
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { loadLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
-import type { DirEntry, FilePreview, GitCommitView, GitCommitDetailView, WorkspaceChangeView } from "../lib/types";
+import type { DirEntry, FilePreview, GitCommitView, GitCommitDetailView, WorkspaceChangeDetailView, WorkspaceChangeView } from "../lib/types";
 import { formatWorkspaceReference, WORKSPACE_REF_DRAG_TYPE } from "../lib/workspaceDrag";
 import { cleanGitDiff } from "../lib/diff";
 import { CodeViewer } from "./CodeViewer";
@@ -242,6 +242,8 @@ export function WorkspacePanel({
   const [viewMode, setViewMode] = useState<"files" | "changed">(initialViewMode);
   const [gitHistory, setGitHistory] = useState<GitCommitView[]>([]);
   const [workspaceChanges, setWorkspaceChanges] = useState<WorkspaceChangeView[] | null>(null);
+  const [changeDetail, setChangeDetail] = useState<WorkspaceChangeDetailView | null>(null);
+  const [loadingChangeDetail, setLoadingChangeDetail] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null);
   const [commitDetail, setCommitDetail] = useState<GitCommitDetailView | null>(null);
@@ -267,6 +269,7 @@ export function WorkspacePanel({
   const dismissedChangeListRequestIdRef = useRef<number | null>(null);
   const lastWorkspaceTabIdRef = useRef(tabId ?? "");
   const workspaceChangesRequestIdRef = useRef(0);
+  const changeDetailRequestIdRef = useRef(0);
   const gitHistoryRequestIdRef = useRef(0);
   const commitDetailRequestIdRef = useRef(0);
   const recentAnchorRef = useRef<HTMLButtonElement>(null);
@@ -315,6 +318,44 @@ export function WorkspacePanel({
       }
     }
   }, [tabId]);
+
+  const loadWorkspaceChangeDetail = useCallback(async () => {
+    const requestId = ++changeDetailRequestIdRef.current;
+    const requestTabId = tabId ?? "";
+    const requestPath = selectedPath ?? "";
+    if (!requestPath) {
+      setChangeDetail(null);
+      setLoadingChangeDetail(false);
+      return;
+    }
+    setLoadingChangeDetail(true);
+    try {
+      const result = await app.WorkspaceChangeDetail(requestTabId, requestPath);
+      if (
+        changeDetailRequestIdRef.current === requestId &&
+        lastWorkspaceTabIdRef.current === requestTabId &&
+        selectedPath === requestPath
+      ) {
+        setChangeDetail(result || null);
+      }
+    } catch {
+      if (
+        changeDetailRequestIdRef.current === requestId &&
+        lastWorkspaceTabIdRef.current === requestTabId &&
+        selectedPath === requestPath
+      ) {
+        setChangeDetail(null);
+      }
+    } finally {
+      if (
+        changeDetailRequestIdRef.current === requestId &&
+        lastWorkspaceTabIdRef.current === requestTabId &&
+        selectedPath === requestPath
+      ) {
+        setLoadingChangeDetail(false);
+      }
+    }
+  }, [selectedPath, tabId]);
 
   const toggleCommit = useCallback((hash: string) => {
     setExpandedCommit((prev) => {
@@ -388,6 +429,8 @@ export function WorkspacePanel({
     setOpenTabs([]);
     setPreview(null);
     setGitHistory([]);
+    setChangeDetail(null);
+    setLoadingChangeDetail(false);
     setExpandedCommit(null);
     setCommitDetail(null);
     setSelectionMenu(null);
@@ -405,9 +448,12 @@ export function WorkspacePanel({
     if (lastWorkspaceTabIdRef.current === nextTabId) return;
     lastWorkspaceTabIdRef.current = nextTabId;
     workspaceChangesRequestIdRef.current += 1;
+    changeDetailRequestIdRef.current += 1;
     gitHistoryRequestIdRef.current += 1;
     commitDetailRequestIdRef.current += 1;
     setWorkspaceChanges(null);
+    setChangeDetail(null);
+    setLoadingChangeDetail(false);
     setGitHistory([]);
     setExpandedCommit(null);
     setCommitDetail(null);
@@ -428,6 +474,8 @@ export function WorkspacePanel({
     setViewMode(initialViewMode);
     setExpandedCommit(null);
     setCommitDetail(null);
+    setChangeDetail(null);
+    setLoadingChangeDetail(false);
     setSelectionMenu(null);
     setTreeMenu(null);
     setRecentOpen(false);
@@ -436,6 +484,8 @@ export function WorkspacePanel({
       setSelectedPath(null);
       setOpenTabs([]);
       setPreview(null);
+      setChangeDetail(null);
+      setLoadingChangeDetail(false);
       return;
     }
     setScopedChangeRows(null);
@@ -583,17 +633,24 @@ export function WorkspacePanel({
     if (viewMode === "changed") {
       void loadGitHistory();
       void loadWorkspaceChanges();
+      if (selectedPath) void loadWorkspaceChangeDetail();
+      else {
+        changeDetailRequestIdRef.current += 1;
+        setChangeDetail(null);
+        setLoadingChangeDetail(false);
+      }
     }
-  }, [selectedPath, viewMode, loadGitHistory, loadWorkspaceChanges, open]);
+  }, [selectedPath, viewMode, loadGitHistory, loadWorkspaceChanges, loadWorkspaceChangeDetail, open]);
 
   useEffect(() => {
     if (!open || !refreshKey) return;
     if (viewMode === "changed") {
       void loadGitHistory();
       void loadWorkspaceChanges();
+      if (selectedPath) void loadWorkspaceChangeDetail();
     }
     openDirsRef.current.forEach((dir) => void loadDir(dir));
-  }, [loadGitHistory, loadWorkspaceChanges, loadDir, open, refreshKey, viewMode]);
+  }, [loadGitHistory, loadWorkspaceChanges, loadWorkspaceChangeDetail, loadDir, open, refreshKey, selectedPath, viewMode]);
 
   useEffect(() => {
     if (!selectionMenu && !treeMenu) return;
@@ -709,6 +766,7 @@ export function WorkspacePanel({
     () => workspaceChanges?.filter((c) => c.sources.includes("session")) ?? null,
     [workspaceChanges],
   );
+  const hasChangeDetail = Boolean(changeDetail?.diff || changeDetail?.binary);
 
   const changedMode = viewMode === "changed";
   const currentFileName = selectedPath ? basename(selectedPath) : t("workspace.noFile");
@@ -1321,11 +1379,20 @@ export function WorkspacePanel({
             </div>
           ) : viewMode === "changed" && selectedPath ? (
             <div className="workspace-git-history">
+              {loadingChangeDetail ? (
+                <div className="workspace-empty">{t("workspace.loadingChanges")}</div>
+              ) : changeDetail?.diff ? (
+                <div className="workspace-git-history__detail">
+                  <CodeViewer value={cleanGitDiff(changeDetail.diff)} language="diff" />
+                </div>
+              ) : changeDetail?.binary ? (
+                <div className="workspace-empty">{t("workspace.binary")}</div>
+              ) : null}
               {loadingHistory ? (
                 <div className="workspace-empty">{t("workspace.loading")}</div>
-              ) : gitHistory.length === 0 ? (
+              ) : gitHistory.length === 0 && !hasChangeDetail ? (
                 <div className="workspace-empty">{t("workspace.noChanges")}</div>
-              ) : (
+              ) : gitHistory.length > 0 ? (
                 <div className="workspace-git-history__list">
                   {gitHistory.map((commit) => (
                     <div key={commit.hash} className={`workspace-git-history__item${expandedCommit === commit.hash ? " workspace-git-history__item--expanded" : ""}`}>
@@ -1358,7 +1425,7 @@ export function WorkspacePanel({
                     </div>
                   ))}
                 </div>
-              )}
+              ) : null}
             </div>
           ) : !selectedPath ? (
             <div className="workspace-empty">{t("workspace.pickFile")}</div>

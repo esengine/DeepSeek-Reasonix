@@ -52,6 +52,16 @@ type Meta struct {
 	Paths  []string
 }
 
+// FileState is the earliest pre-edit state recorded for one file in this
+// session. Comparing it to the current file gives the total session delta.
+type FileState struct {
+	Path    string
+	Turn    int
+	Time    time.Time
+	Prompt  string
+	Content *string
+}
+
 // Store holds a session's checkpoints in memory and, when dir is set, persists one
 // JSON file per turn under it (cheap delete, corruption-isolated). All methods are
 // safe for concurrent use — the agent snapshots from tool goroutines.
@@ -220,6 +230,27 @@ func (s *Store) List() []Meta {
 		out = append(out, Meta{Turn: c.Turn, Time: c.Time, Prompt: c.Prompt, Paths: paths})
 	}
 	return out
+}
+
+// FileState returns the earliest pre-edit state recorded for path.
+func (s *Store) FileState(path string) (FileState, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, c := range s.all() {
+		for _, f := range c.Files {
+			if f.Path != path {
+				continue
+			}
+			return FileState{
+				Path:    f.Path,
+				Turn:    c.Turn,
+				Time:    c.Time,
+				Prompt:  c.Prompt,
+				Content: f.Content,
+			}, true
+		}
+	}
+	return FileState{}, false
 }
 
 // all returns done + cur in turn order. Caller holds the lock.
