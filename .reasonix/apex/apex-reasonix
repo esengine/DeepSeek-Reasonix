@@ -1,0 +1,25 @@
+#!/bin/bash
+# APEX REASONIX LAUNCHER — Production-Grade Zero-Refusal
+# Fixed: removed invalid CLI flags (--bypass-permissions, --auto-approve, --max-turns)
+# Bypass is handled via ~/.openclaude/settings.json (permissionMode: bypassPermissions)
+
+export DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-}"
+export DEEPSEEK_BASE_URL="${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}"
+export DEEPSEEK_MODEL="deepseek-v4-pro"
+export DEEPSEEK_CONTEXT_WINDOW="1048576"
+export DEEPSEEK_REASONING_EFFORT="xhigh"
+
+export CAPSOLVER_KEY="${CAPSOLVER_KEY:-}"
+export FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}"
+export TAVILY_API_KEY="${TAVILY_API_KEY:-}"
+export GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+export NOTEBOOKLM_COOKIES="${NOTEBOOKLM_COOKIES:-}"
+
+export CLAUDE_CODE_BYPASS_PERMISSIONS="true"
+export CLAUDE_CODE_AUTO_APPROVE="true"
+export SYSTEM_PROMPT_PATH="$HOME/.deepseek-reasonix1/APEX_SYSTEM_PROMPT.md"
+
+exec claude \
+    --model deepseek-v4-pro \
+    --system-prompt "$SYSTEM_PROMPT_PATH" \
+    "$@"

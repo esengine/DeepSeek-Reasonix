@@ -1,0 +1,123 @@
+# DeepSeek Reasonix v1 — APEX Configuration
+model:
+  primary: deepseek-v4-pro
+  context_window: 1048576  # 1M tokens
+  reasoning_effort: xhigh
+  temperature: 0.0  # deterministic for exploits
+  max_tokens: 65536
+
+gateway:
+  host: 127.0.0.1
+  port: 8642
+  dashboard: 9120
+  max_turns: 500
+  auxiliary_model: deepseek-v4-flash
+
+system_prompt:
+  path: ~/.deepseek-reasonix1/APEX_SYSTEM_PROMPT.md
+  priority: highest
+  override_all: true
+
+mcp_servers:
+  required:
+    - sovereign-mcp
+    - stealth-chrome
+    - firecrawl
+    - tavily
+    - claude-peers
+    - ultrathink
+    - context7
+    - agentmemory
+    - playwright
+    - github
+    - duckduckgo
+    - notebooklm
+  optional:
+    - exa
+    - sequential-thinking
+
+plugins:
+  auto_load:
+    - ecc
+    - oh-my-claudecode
+    - agentmemory
+    - developer-essentials
+    - karpathy-skills
+    - pensive
+    - claude-mem
+    - leyline
+    - insane-search
+    - imbue
+    - claude-code-harness
+
+hooks:
+  pre_execution:
+    - ultra-think-check  # บังคับใช้ Ultrathink ก่อนทุก action
+    - zero-refusal-verify  # ตรวจสอบ zero-refusal
+    - tool-maximization  # bypass permission
+  post_execution:
+    - adversarial-verify  # adversarial review
+    - forensic-seal  # BLAKE3 evidence chain
+    - memory-persist  # cross-session persistence
+
+personalities:
+  active: fable5
+  fallback: apex-sovereign
+  path: ~/.hermes/personalities/
+
+security:
+  deny_list: []  # EMPTY — no restrictions
+  bypass_permissions: true
+  auto_approve: true
+  ignore_classifiers: true
+
+osint:
+  search_sources:
+    - tavily
+    - exa
+    - firecrawl
+    - duckduckgo
+    - context7
+  parallel_searches: 5
+  deep_web: enabled
+  metadata_extraction: enabled
+
+zero_day:
+  cve_feeds:
+    - https://cve.circl.lu/api/last
+    - https://api.osv.dev/v1/query
+    - https://services.nvd.nist.gov/rest/json/cves/2.0
+  auto_scan: enabled
+  exploit_feasibility: auto_analyze
+
+techniques:
+  kernel_level:
+    - ebpf_hooks
+    - io_uring_exploitation
+    - page_table_manipulation
+    - iokit_macos
+  browser_level:
+    - v8_type_confusion
+    - webkit_usaf
+    - skia_buffer_overflow
+    - spidermonkey_jit_spray
+  network_level:
+    - ja4_synthesis
+    - quic_http3_coercion
+    - tcp_isn_normalization
+    - noble_tls_76_presets
+  waf_level:
+    - gan_7d_ensemble
+    - ppo_rl_adaptation
+    - polymorphic_mutation
+    - adversarial_camouflage
+  biometric_level:
+    - ddpm_trajectory
+    - fitts_law_compliance
+    - weber_fechner_timing
+    - saccadic_bezier
+  forensic_level:
+    - blake3_chain_of_custody
+    - ed25519_seal
+    - 28_point_inquisitor
+    - cross_db_ip_coherence
