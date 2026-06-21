@@ -24977,3 +24977,58 @@ a[href] {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
+
+/* ── Topic shortcut badges (Cmd+1-10 overlay) ────────────────────────── */
+
+.project-tree__topic-shortcut {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  z-index: var(--z-local-raised);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--fg) 8%, var(--sidebar-bg, var(--bg)));
+  color: var(--fg-faint);
+  font-size: 11px;
+  font-weight: 520;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-50%) translateX(4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+/* Show badges when the parent topic has the modifier held class */
+.project-tree__topic--show-shortcut .project-tree__topic-shortcut {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+/* In workbench mode, hide the time/side and actions when shortcuts are shown */
+.sidebar--workbench .project-tree__topic--show-shortcut .project-tree__topic-side {
+  opacity: 0;
+  transform: translateX(-3px);
+}
+.sidebar--workbench .project-tree__topic--show-shortcut .project-tree__topic-actions {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) translateX(4px);
+}
+
+/* In classic mode, hide the meta line when shortcuts are shown */
+.project-tree__topic--show-shortcut .project-tree__topic-meta {
+  opacity: 0;
+}
+
+/* Theme overrides */
+:root[data-theme-style] .project-tree__topic-shortcut {
+  background: color-mix(in srgb, var(--fg) 8%, var(--sidebar-bg, var(--bg)));
+  color: var(--fg-faint);
+}

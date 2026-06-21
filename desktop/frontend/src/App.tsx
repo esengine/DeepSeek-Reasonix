@@ -115,6 +115,8 @@ import { applyTextSize, DEFAULT_TEXT_SIZE, getTextSize, nextTextSize } from "./l
 import { useViewportHeightVar, useWindowStatePersistence } from "./lib/windowState";
 import { availableWorkspacePanelWidth, resolveWorkspacePanelWidth, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
 import { useGlobalShortcut } from "./lib/keyboardShortcuts";
+import { useTopicShortcuts, flattenVisibleTopics } from "./lib/topicShortcuts";
+import type { TopicShortcutEntry } from "./lib/topicShortcuts";
 import logoWordmark from "./assets/logo-wordmark.svg";
 
 const HistoryPanel = lazy(() => import("./components/HistoryPanel").then((module) => ({ default: module.HistoryPanel })));
@@ -2218,6 +2220,41 @@ export default function App() {
   }, [activeTabId, handleTabClose], Boolean(activeTabId));
   useGlobalShortcut("shortcuts.show", () => setShortcutsOpen(true));
 
+  // --- Topic shortcut navigation (Cmd+1-10) ---
+  const handleNavigateTopic = useCallback((entry: TopicShortcutEntry) => {
+    void handleOpenTopic(entry.scope, entry.workspaceRoot, entry.topicId, entry.sessionPath);
+  }, [handleOpenTopic]);
+  const { showBadges: showTopicBadges } = useTopicShortcuts(!sidebarCollapsed);
+
+  // Register Cmd+1-10 shortcuts for topic navigation
+  useEffect(() => {
+    if (sidebarCollapsed) return;
+    const onKeydown = (event: globalThis.KeyboardEvent) => {
+      const isMod = event.metaKey || event.ctrlKey;
+      if (!isMod) return;
+      const num = parseInt(event.key, 10);
+      if (isNaN(num) || num < 1 || num > 10) return;
+      // Only handle if badges are visible (Cmd is held)
+      if (!showTopicBadges) return;
+      event.preventDefault();
+      // Get visible topics from the sidebar tree
+      void (async () => {
+        try {
+          const tree = await app.ListProjectTree();
+          const topics = flattenVisibleTopics(asArray(tree));
+          const idx = num === 10 ? 0 : num - 1;
+          if (idx < topics.length) {
+            handleNavigateTopic(topics[idx]);
+          }
+        } catch (err) {
+          console.warn("topic shortcut navigation failed", err);
+        }
+      })();
+    };
+    document.addEventListener("keydown", onKeydown, { capture: true });
+    return () => document.removeEventListener("keydown", onKeydown, { capture: true });
+  }, [sidebarCollapsed, showTopicBadges, handleNavigateTopic]);
+
   const paletteItems = useMemo<PaletteItem[]>(() => {
     const cmds: PaletteItem[] = [
       { id: "cmd-new", group: t("palette.group.commands"), title: t("palette.cmd.newSession"), icon: <SquarePen size={15} />, compact: true, keywords: ["new", "新建"], run: () => void handleNewTab() },
@@ -2579,6 +2616,7 @@ export default function App() {
               variant={sidebarWorkbench ? "workbench" : sidebarCreation ? "creation" : "classic"}
               searchExpanded={!sidebarCreation || sidebarSearchOpen}
               searchFocusSignal={sidebarSearchFocusSignal}
+              showShortcutBadges={showTopicBadges}
             />
           </section>
 

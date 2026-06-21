@@ -33,6 +33,7 @@ interface ProjectTreeProps {
   onTimeFilterChange: (filter: "all" | "10" | "20" | "1h" | "3h" | "5h" | "1d") => void;
   searchExpanded?: boolean;
   searchFocusSignal?: number;
+  showShortcutBadges?: boolean;
 }
 
 type ProjectTreeImTopicSource = {
@@ -446,6 +447,7 @@ export function ProjectTree({
   onTimeFilterChange,
   searchExpanded = true,
   searchFocusSignal = 0,
+  showShortcutBadges = false,
 }: ProjectTreeProps) {
   const t = useT();
   const { showToast } = useToast();
@@ -476,6 +478,7 @@ export function ProjectTree({
   const filterRef = useRef<HTMLDivElement>(null);
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const topicIndexRef = useRef(0);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const creatingRef = useRef(false);
   const manuallyCollapsedRef = useRef(manuallyCollapsed);
@@ -1046,9 +1049,11 @@ export function ProjectTree({
           </div>
         );
       }
+      const shortcutIndex = showShortcutBadges && topicIndexRef.current < 10 ? topicIndexRef.current + 1 : 0;
+      if (shortcutIndex > 0) topicIndexRef.current++;
       const row = (
         <div
-          className={`project-tree__topic${scopeClass}${isSessionNode ? " project-tree__topic--session" : ""}${active ? " project-tree__topic--active" : ""}${node.running ? " project-tree__topic--running" : ""}${status ? ` project-tree__topic--status-${status}` : ""}${!isSessionNode && pinned ? " project-tree__topic--pinned" : ""}${topicMenuOpen ? " project-tree__topic--menu-open" : ""}${sideTimeVisible && (timeLabel || showStatusInSide) ? " project-tree__topic--with-side" : meta ? " project-tree__topic--has-meta" : ""}${imSource ? " project-tree__topic--im-source" : ""}`}
+          className={`project-tree__topic${scopeClass}${isSessionNode ? " project-tree__topic--session" : ""}${active ? " project-tree__topic--active" : ""}${node.running ? " project-tree__topic--running" : ""}${status ? ` project-tree__topic--status-${status}` : ""}${!isSessionNode && pinned ? " project-tree__topic--pinned" : ""}${topicMenuOpen ? " project-tree__topic--menu-open" : ""}${sideTimeVisible && (timeLabel || showStatusInSide) ? " project-tree__topic--with-side" : meta ? " project-tree__topic--has-meta" : ""}${imSource ? " project-tree__topic--im-source" : ""}${shortcutIndex > 0 ? " project-tree__topic--show-shortcut" : ""}`}
           style={accentStyle}
           onContextMenu={isSessionNode ? undefined : openTopicMenu}
         >
@@ -1146,6 +1151,11 @@ export function ProjectTree({
               ariaLabel={t("projectTree.topicActions")}
               onClose={closeMenu}
             />
+          )}
+          {shortcutIndex > 0 && (
+            <span className="project-tree__topic-shortcut" aria-hidden="true">
+              ⌘{shortcutIndex === 10 ? 0 : shortcutIndex}
+            </span>
           )}
         </div>
       );
@@ -1825,6 +1835,9 @@ export function ProjectTree({
   };
 
   const hasWorkbenchRows = workbenchTreeSections.pinned.length > 0 || workbenchTreeSections.projects.length > 0;
+
+  // Reset topic index counter before each render so shortcut badges get sequential numbers.
+  topicIndexRef.current = 0;
 
   return (
     <div className="project-tree">
