@@ -2205,7 +2205,7 @@ export default function App() {
   useGlobalShortcut("commandPalette.open", () => {
     setPaletteOpen((current) => {
       if (!current) void openPalette();
-      return current;
+      return !current; // ← fix: toggle the state so the palette actually opens/closes
     });
   }, [openPalette]);
   useGlobalShortcut("app.newSession", () => void handleNewTab(), [handleNewTab]);
