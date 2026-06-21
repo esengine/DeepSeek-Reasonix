@@ -6,10 +6,6 @@
 // Cmd+1-10 while the badges are visible navigates to the matching topic.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ProjectNode } from "./types";
-import { asArray } from "./array";
-
-export const MAX_SHORTCUT_TOPICS = 10;
 
 /** Delay (ms) before showing badges after modifier is held. */
 const SHOW_DELAY_MS = 250;
@@ -20,36 +16,6 @@ type TopicShortcutEntry = {
   topicId: string;
   sessionPath?: string;
 };
-
-/**
- * Flatten the visible topic tree into an ordered list (breadth-first) so we
- * can assign shortcut numbers 1-10 matching visual order.
- */
-export function flattenVisibleTopics(nodes: ProjectNode[]): TopicShortcutEntry[] {
-  const result: TopicShortcutEntry[] = [];
-  const queue: ProjectNode[] = [...nodes];
-  while (queue.length > 0 && result.length < MAX_SHORTCUT_TOPICS) {
-    const node = queue.shift();
-    if (!node) continue;
-    const isTopic = node.kind === "topic" || node.kind === "global_topic";
-    const isSession = node.kind === "session" || node.kind === "global_session";
-    if (isTopic || isSession) {
-      const scope = node.kind === "global_topic" || node.kind === "global_session" ? "global" : "project";
-      result.push({
-        scope,
-        workspaceRoot: scope === "global" ? "" : node.root ?? "",
-        topicId: node.topicId ?? "",
-        sessionPath: node.sessionPath,
-      });
-    }
-    // Enqueue children (folders and their contents)
-    const children = asArray(node.children);
-    for (const child of children) {
-      if (child) queue.push(child);
-    }
-  }
-  return result;
-}
 
 export function useTopicShortcuts(
   enabled = true,

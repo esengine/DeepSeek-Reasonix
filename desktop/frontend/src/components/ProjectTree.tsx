@@ -34,7 +34,7 @@ interface ProjectTreeProps {
   searchExpanded?: boolean;
   searchFocusSignal?: number;
   showShortcutBadges?: boolean;
-  onVisibleTopicsChange?: (topics: Array<{ scope: "global" | "project"; workspaceRoot: string; topicId: string; sessionPath?: string }>) => void;
+  onVisibleTopicsChange?: (topics: import("../lib/topicShortcuts").TopicShortcutEntry[]) => void;
 }
 
 type ProjectTreeImTopicSource = {
@@ -481,7 +481,7 @@ export function ProjectTree({
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const topicIndexRef = useRef(0);
-  const visibleTopicsCollectorRef = useRef<Array<{ scope: "global" | "project"; workspaceRoot: string; topicId: string; sessionPath?: string }>>([]);
+  const visibleTopicsCollectorRef = useRef<import("../lib/topicShortcuts").TopicShortcutEntry[]>([]);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const creatingRef = useRef(false);
   const manuallyCollapsedRef = useRef(manuallyCollapsed);

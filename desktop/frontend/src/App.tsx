@@ -115,7 +115,7 @@ import { applyTextSize, DEFAULT_TEXT_SIZE, getTextSize, nextTextSize } from "./l
 import { useViewportHeightVar, useWindowStatePersistence } from "./lib/windowState";
 import { availableWorkspacePanelWidth, resolveWorkspacePanelWidth, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
 import { useGlobalShortcut } from "./lib/keyboardShortcuts";
-import { useTopicShortcuts } from "./lib/topicShortcuts";
+import { useTopicShortcuts, type TopicShortcutEntry } from "./lib/topicShortcuts";
 import logoWordmark from "./assets/logo-wordmark.svg";
 
 const HistoryPanel = lazy(() => import("./components/HistoryPanel").then((module) => ({ default: module.HistoryPanel })));
@@ -2220,11 +2220,11 @@ export default function App() {
   useGlobalShortcut("shortcuts.show", () => setShortcutsOpen(true));
 
   // --- Topic shortcut navigation (Cmd+1-10) ---
-  const visibleTopicsRef = useRef<Array<{ scope: "global" | "project"; workspaceRoot: string; topicId: string; sessionPath?: string }>>([]);
-  const handleVisibleTopicsChange = useCallback((topics: Array<{ scope: "global" | "project"; workspaceRoot: string; topicId: string; sessionPath?: string }>) => {
+  const visibleTopicsRef = useRef<TopicShortcutEntry[]>([]);
+  const handleVisibleTopicsChange = useCallback((topics: TopicShortcutEntry[]) => {
     visibleTopicsRef.current = topics;
   }, []);
-  const handleNavigateTopic = useCallback((entry: { scope: "global" | "project"; workspaceRoot: string; topicId: string; sessionPath?: string }) => {
+  const handleNavigateTopic = useCallback((entry: TopicShortcutEntry) => {
     void handleOpenTopic(entry.scope, entry.workspaceRoot, entry.topicId, entry.sessionPath);
   }, [handleOpenTopic]);
   const { showBadges: showTopicBadges } = useTopicShortcuts(!sidebarCollapsed);
@@ -2239,6 +2239,12 @@ export default function App() {
       if (isNaN(num) || num < 1 || num > 10) return;
       // Only handle if badges are visible (Cmd is held)
       if (!showTopicBadges) return;
+      // Skip if focus is inside an editable element
+      const target = event.target;
+      if (target instanceof HTMLElement) {
+        const tag = target.tagName.toLowerCase();
+        if (target.isContentEditable || tag === "input" || tag === "textarea" || tag === "select") return;
+      }
       event.preventDefault();
       const topics = visibleTopicsRef.current;
       const idx = num === 10 ? 0 : num - 1;
