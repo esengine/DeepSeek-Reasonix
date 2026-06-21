@@ -13,7 +13,17 @@ export type ShortcutAction =
   | "textSize.decrease"
   | "textSize.reset"
   | "toolApproval.yolo"
-  | "shortcuts.show";
+  | "shortcuts.show"
+  | "topic.goto.1"
+  | "topic.goto.2"
+  | "topic.goto.3"
+  | "topic.goto.4"
+  | "topic.goto.5"
+  | "topic.goto.6"
+  | "topic.goto.7"
+  | "topic.goto.8"
+  | "topic.goto.9"
+  | "topic.goto.0";
 
 type KeyboardShortcutEvent = Pick<globalThis.KeyboardEvent, "key"> &
   Partial<Pick<globalThis.KeyboardEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "target">>;
@@ -130,6 +140,96 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
     descriptionKey: "shortcuts.desc.showShortcuts",
     defaults: allPlatforms({ key: "?", shift: true }),
     preventDefault: true,
+  },
+  {
+    action: "topic.goto.1",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto1",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("1"),
+    preventDefault: true,
+    configurable: false,
+  },
+  {
+    action: "topic.goto.2",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto2",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("2"),
+    preventDefault: true,
+    configurable: false,
+  },
+  {
+    action: "topic.goto.3",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto3",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("3"),
+    preventDefault: true,
+    configurable: false,
+  },
+  {
+    action: "topic.goto.4",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto4",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("4"),
+    preventDefault: true,
+    configurable: false,
+  },
+  {
+    action: "topic.goto.5",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto5",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("5"),
+    preventDefault: true,
+    configurable: false,
+  },
+  {
+    action: "topic.goto.6",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto6",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("6"),
+    preventDefault: true,
+    configurable: false,
+  },
+  {
+    action: "topic.goto.7",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto7",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("7"),
+    preventDefault: true,
+    configurable: false,
+  },
+  {
+    action: "topic.goto.8",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto8",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("8"),
+    preventDefault: true,
+    configurable: false,
+  },
+  {
+    action: "topic.goto.9",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto9",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("9"),
+    preventDefault: true,
+    configurable: false,
+  },
+  {
+    action: "topic.goto.0",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto0",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("0"),
+    preventDefault: true,
+    configurable: false,
   },
 ] as const;
 

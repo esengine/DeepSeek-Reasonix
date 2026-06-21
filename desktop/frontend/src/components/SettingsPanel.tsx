@@ -534,8 +534,9 @@ function ShortcutsSection() {
               </div>
               <div className="shortcuts-settings__control">
                 <button
-                  className={`shortcuts-settings__key${isRecording ? " shortcuts-settings__key--recording" : ""}`}
+                  className={`shortcuts-settings__key${isRecording ? " shortcuts-settings__key--recording" : ""}${definition.configurable === false ? " shortcuts-settings__key--locked" : ""}`}
                   type="button"
+                  disabled={definition.configurable === false}
                   aria-label={isRecording ? t("settings.shortcutsRecording") : display}
                   aria-pressed={isRecording}
                   onClick={() => {
