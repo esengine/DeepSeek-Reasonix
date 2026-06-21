@@ -34,6 +34,7 @@ interface ProjectTreeProps {
   searchExpanded?: boolean;
   searchFocusSignal?: number;
   showShortcutBadges?: boolean;
+  onVisibleTopicsChange?: (topics: Array<{ scope: "global" | "project"; workspaceRoot: string; topicId: string; sessionPath?: string }>) => void;
 }
 
 type ProjectTreeImTopicSource = {
@@ -448,6 +449,7 @@ export function ProjectTree({
   searchExpanded = true,
   searchFocusSignal = 0,
   showShortcutBadges = false,
+  onVisibleTopicsChange,
 }: ProjectTreeProps) {
   const t = useT();
   const { showToast } = useToast();
@@ -479,6 +481,7 @@ export function ProjectTree({
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const topicIndexRef = useRef(0);
+  const visibleTopicsCollectorRef = useRef<Array<{ scope: "global" | "project"; workspaceRoot: string; topicId: string; sessionPath?: string }>>([]);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const creatingRef = useRef(false);
   const manuallyCollapsedRef = useRef(manuallyCollapsed);
@@ -1051,6 +1054,15 @@ export function ProjectTree({
       }
       const shortcutIndex = showShortcutBadges && topicIndexRef.current < 10 ? topicIndexRef.current + 1 : 0;
       if (shortcutIndex > 0) topicIndexRef.current++;
+      // Collect visible topics in render order for shortcut navigation
+      if (openRequest) {
+        visibleTopicsCollectorRef.current.push({
+          scope: openRequest.scope,
+          workspaceRoot: openRequest.workspaceRoot,
+          topicId: openRequest.topicId,
+          sessionPath: openRequest.sessionPath,
+        });
+      }
       const row = (
         <div
           className={`project-tree__topic${scopeClass}${isSessionNode ? " project-tree__topic--session" : ""}${active ? " project-tree__topic--active" : ""}${node.running ? " project-tree__topic--running" : ""}${status ? ` project-tree__topic--status-${status}` : ""}${!isSessionNode && pinned ? " project-tree__topic--pinned" : ""}${topicMenuOpen ? " project-tree__topic--menu-open" : ""}${sideTimeVisible && (timeLabel || showStatusInSide) ? " project-tree__topic--with-side" : meta ? " project-tree__topic--has-meta" : ""}${imSource ? " project-tree__topic--im-source" : ""}${shortcutIndex > 0 ? " project-tree__topic--show-shortcut" : ""}`}
@@ -1836,8 +1848,15 @@ export function ProjectTree({
 
   const hasWorkbenchRows = workbenchTreeSections.pinned.length > 0 || workbenchTreeSections.projects.length > 0;
 
-  // Reset topic index counter before each render so shortcut badges get sequential numbers.
+  // Report visible topics to parent after render so shortcuts match sidebar order.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    onVisibleTopicsChange?.(visibleTopicsCollectorRef.current);
+  });
+
+  // Reset topic index counter and visible topics collector before each render.
   topicIndexRef.current = 0;
+  visibleTopicsCollectorRef.current = [];
 
   return (
     <div className="project-tree">

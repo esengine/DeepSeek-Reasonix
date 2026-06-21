@@ -115,8 +115,7 @@ import { applyTextSize, DEFAULT_TEXT_SIZE, getTextSize, nextTextSize } from "./l
 import { useViewportHeightVar, useWindowStatePersistence } from "./lib/windowState";
 import { availableWorkspacePanelWidth, resolveWorkspacePanelWidth, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
 import { useGlobalShortcut } from "./lib/keyboardShortcuts";
-import { useTopicShortcuts, flattenVisibleTopics } from "./lib/topicShortcuts";
-import type { TopicShortcutEntry } from "./lib/topicShortcuts";
+import { useTopicShortcuts } from "./lib/topicShortcuts";
 import logoWordmark from "./assets/logo-wordmark.svg";
 
 const HistoryPanel = lazy(() => import("./components/HistoryPanel").then((module) => ({ default: module.HistoryPanel })));
@@ -2221,7 +2220,11 @@ export default function App() {
   useGlobalShortcut("shortcuts.show", () => setShortcutsOpen(true));
 
   // --- Topic shortcut navigation (Cmd+1-10) ---
-  const handleNavigateTopic = useCallback((entry: TopicShortcutEntry) => {
+  const visibleTopicsRef = useRef<Array<{ scope: "global" | "project"; workspaceRoot: string; topicId: string; sessionPath?: string }>>([]);
+  const handleVisibleTopicsChange = useCallback((topics: Array<{ scope: "global" | "project"; workspaceRoot: string; topicId: string; sessionPath?: string }>) => {
+    visibleTopicsRef.current = topics;
+  }, []);
+  const handleNavigateTopic = useCallback((entry: { scope: "global" | "project"; workspaceRoot: string; topicId: string; sessionPath?: string }) => {
     void handleOpenTopic(entry.scope, entry.workspaceRoot, entry.topicId, entry.sessionPath);
   }, [handleOpenTopic]);
   const { showBadges: showTopicBadges } = useTopicShortcuts(!sidebarCollapsed);
@@ -2237,19 +2240,11 @@ export default function App() {
       // Only handle if badges are visible (Cmd is held)
       if (!showTopicBadges) return;
       event.preventDefault();
-      // Get visible topics from the sidebar tree
-      void (async () => {
-        try {
-          const tree = await app.ListProjectTree();
-          const topics = flattenVisibleTopics(asArray(tree));
-          const idx = num === 10 ? 0 : num - 1;
-          if (idx < topics.length) {
-            handleNavigateTopic(topics[idx]);
-          }
-        } catch (err) {
-          console.warn("topic shortcut navigation failed", err);
-        }
-      })();
+      const topics = visibleTopicsRef.current;
+      const idx = num === 10 ? 0 : num - 1;
+      if (idx < topics.length) {
+        handleNavigateTopic(topics[idx]);
+      }
     };
     document.addEventListener("keydown", onKeydown, { capture: true });
     return () => document.removeEventListener("keydown", onKeydown, { capture: true });
@@ -2617,6 +2612,7 @@ export default function App() {
               searchExpanded={!sidebarCreation || sidebarSearchOpen}
               searchFocusSignal={sidebarSearchFocusSignal}
               showShortcutBadges={showTopicBadges}
+              onVisibleTopicsChange={handleVisibleTopicsChange}
             />
           </section>
 
