@@ -1996,7 +1996,9 @@ func topicTitleFromSession(path string) string {
 			return ""
 		}
 		if msg.Role == "user" {
-			return topicTitleFromText(control.StripComposePrefixes(agent.HandoffTask(msg.Content)))
+			content := control.StripComposePrefixes(agent.HandoffTask(msg.Content))
+			content = control.StripReferencedContextPrefix(content)
+			return topicTitleFromText(content)
 		}
 	}
 }

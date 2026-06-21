@@ -49,6 +49,48 @@ func StripComposePrefixes(content string) string {
 	return s
 }
 
+// StripReferencedContextPrefix removes the "Referenced context:" preamble and
+// the trailing XML reference blocks (<file>, <dir>, <resource>, <image>) that
+// controller.ResolveRefs injects when the user @-references files or resources.
+// The user's actual input follows the reference blocks after a blank line.
+// Used for title generation and previews so the displayed text matches what
+// the user typed, not the injected context preamble (#4954).
+func StripReferencedContextPrefix(content string) string {
+	const preamble = "Referenced context:"
+	s := strings.TrimSpace(content)
+	if !strings.HasPrefix(s, preamble) {
+		return content
+	}
+	// Skip past the preamble.
+	s = strings.TrimSpace(s[len(preamble):])
+	// Skip past all XML reference blocks: <file ...>...</file>, <dir ...>...</dir>,
+	// <resource ...>...</resource>, <image ...>...</image>.
+	for {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return ""
+		}
+		// Check for a reference block start.
+		if !strings.HasPrefix(s, "<file ") && !strings.HasPrefix(s, "<dir ") &&
+			!strings.HasPrefix(s, "<resource ") && !strings.HasPrefix(s, "<image ") {
+			break
+		}
+		// Find the matching close tag.
+		tagEnd := strings.IndexByte(s, ' ')
+		if tagEnd < 0 {
+			break
+		}
+		tagName := s[1:tagEnd]
+		closeTag := "</" + tagName + ">"
+		closeIdx := strings.Index(s, closeTag)
+		if closeIdx < 0 {
+			break
+		}
+		s = strings.TrimSpace(s[closeIdx+len(closeTag):])
+	}
+	return s
+}
+
 // IsSyntheticUserMessage returns true if the content matches one of the known
 // synthetic user messages injected by the controller or agent loop (plan
 // approval, stream recovery, readiness retry, etc.). These should not be shown
