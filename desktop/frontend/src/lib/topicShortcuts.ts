@@ -61,12 +61,12 @@ export function useTopicShortcuts(
     // If the window loses focus, hide badges
     const onBlur = () => hideBadges();
 
-    document.addEventListener("keydown", onKeydown, { capture: true });
-    document.addEventListener("keyup", onKeyup, { capture: true });
+    document.addEventListener("keydown", onKeydown);
+    document.addEventListener("keyup", onKeyup);
     window.addEventListener("blur", onBlur);
     return () => {
-      document.removeEventListener("keydown", onKeydown, { capture: true });
-      document.removeEventListener("keyup", onKeyup, { capture: true });
+      document.removeEventListener("keydown", onKeydown);
+      document.removeEventListener("keyup", onKeyup);
       window.removeEventListener("blur", onBlur);
       clearTimer();
     };

@@ -2244,8 +2244,8 @@ export default function App() {
         handleNavigateTopic(topics[idx]);
       }
     };
-    document.addEventListener("keydown", onKeydown, { capture: true });
-    return () => document.removeEventListener("keydown", onKeydown, { capture: true });
+    document.addEventListener("keydown", onKeydown);
+    return () => document.removeEventListener("keydown", onKeydown);
   }, [sidebarCollapsed, handleNavigateTopic]);
 
   const paletteItems = useMemo<PaletteItem[]>(() => {
