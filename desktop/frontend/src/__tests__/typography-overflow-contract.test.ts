@@ -128,11 +128,14 @@ for (const selector of [
   ".context-panel__metric span",
   ".context-panel__metric strong",
   ".topbar__model",
+  ".modelsw__label",
+  ".modelsw__provider",
   ".composer-modebar__item span",
   ".composer-more-menu__item span",
 ]) {
   clipsSingleLine(selector);
 }
+eq(finalDeclaration(".modelsw__provider", "display"), "inline", "model switcher provider does not force a new line");
 
 eq(finalDeclaration(".composer-modebar", "overflow"), "hidden", "chat mode switcher contains enlarged labels");
 eq(finalDeclaration(".md table", "overflow-x"), "auto", "markdown tables scroll horizontally");
