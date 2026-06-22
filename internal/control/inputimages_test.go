@@ -63,3 +63,16 @@ func TestControllerInputImagesResolvesAbsoluteWorkspaceImage(t *testing.T) {
 		t.Errorf("resolved url = %q, want a png data URL", urls[0])
 	}
 }
+
+func TestControllerInputImagesRequiresWorkspaceForFileImageRefs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "diagram.png")
+	if err := os.WriteFile(path, mustBase64(t, tinyPNG), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	urls := New(Options{}).inputImages("look at @" + path)
+	if len(urls) != 0 {
+		t.Fatalf("inputImages without a workspace = %v, want no file image refs", urls)
+	}
+}

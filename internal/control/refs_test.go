@@ -175,6 +175,9 @@ func TestReadFileRef(t *testing.T) {
 	if got, _, err := readFileRef(imagePath, ""); err != nil || !strings.Contains(got, "image file") {
 		t.Errorf("image file = (%q, %v), want an image note", got, err)
 	}
+	if got, _, err := readFileRef(imagePath, ""); err != nil || !strings.Contains(got, "not attached as model image input") || strings.Contains(got, "attached to this turn as model image input") {
+		t.Errorf("unscoped image file = (%q, %v), want a non-attached image note", got, err)
+	}
 
 	// Large file: truncated with a marker.
 	if got, _, err := readFileRef(bigPath, ""); err != nil || !strings.Contains(got, "truncated") {
@@ -586,6 +589,22 @@ func TestWorkspaceImageRefsAlsoAttachAsModelImages(t *testing.T) {
 	}
 	if urls := c.inputImages("see @" + diagram); len(urls) != 1 || !strings.HasPrefix(urls[0], "data:image/png;base64,") {
 		t.Fatalf("workspace png inputImages = %v, want one png data URL", urls)
+	}
+}
+
+func TestResolveRefsWithoutWorkspaceDoesNotClaimImageAttachment(t *testing.T) {
+	dir := t.TempDir()
+	imagePath := filepath.Join(dir, "shot.png")
+	if err := os.WriteFile(imagePath, []byte("\x89PNG\r\n\x1a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	block, errs := New(Options{}).ResolveRefs(context.Background(), "see @"+imagePath)
+	if len(errs) != 0 {
+		t.Fatalf("ResolveRefs errors = %v", errs)
+	}
+	if !strings.Contains(block, "not attached as model image input") || strings.Contains(block, "attached to this turn as model image input") {
+		t.Fatalf("unscoped image ref should not claim model image attachment:\n%s", block)
 	}
 }
 

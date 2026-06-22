@@ -182,13 +182,7 @@ func visionFileImageDataURL(path, baseDir string) (string, error) {
 		return "", os.ErrNotExist
 	}
 	if absBase == "" {
-		return visionFileImageDataURLUnscoped(absPath)
-	}
-
-	if info, err := os.Lstat(absPath); err != nil {
-		return "", err
-	} else if info.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("image path must not be a symlink")
+		return "", fmt.Errorf("workspace root is required for file image references")
 	}
 
 	root, err := os.OpenRoot(absBase)
@@ -201,23 +195,8 @@ func visionFileImageDataURL(path, baseDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	info, err := root.Stat(rel)
-	if err != nil {
-		return "", err
-	}
-	if info.IsDir() || info.Size() <= 0 || info.Size() > maxImageAttachmentBytes {
-		return "", fmt.Errorf("image must be between 1 byte and 10 MB")
-	}
-	f, err := root.Open(rel)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	return dataURLFromImageReader(f, path)
-}
 
-func visionFileImageDataURLUnscoped(path string) (string, error) {
-	info, err := os.Lstat(path)
+	info, err := root.Lstat(rel)
 	if err != nil {
 		return "", err
 	}
@@ -227,11 +206,18 @@ func visionFileImageDataURLUnscoped(path string) (string, error) {
 	if info.IsDir() || info.Size() <= 0 || info.Size() > maxImageAttachmentBytes {
 		return "", fmt.Errorf("image must be between 1 byte and 10 MB")
 	}
-	f, err := os.Open(path)
+	f, err := root.Open(rel)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	if !os.SameFile(info, opened) {
+		return "", fmt.Errorf("image changed while opening")
+	}
 	return dataURLFromImageReader(f, path)
 }
 
@@ -550,7 +536,7 @@ func readFileRef(path, baseDir string) (content string, isDir bool, err error) {
 	data := buf[:n]
 
 	if mime := imageMime(data, rel); mime != "" {
-		return fmt.Sprintf("[image file %s, mime=%s, %d bytes — attached to this turn as model image input when the selected model supports vision; no local extraction tool is needed for direct visual understanding.]", displayPath, mime, info.Size()), false, nil
+		return imageFileRefNote(displayPath, mime, info.Size(), true), false, nil
 	}
 	if bytes.IndexByte(data[:min(n, 8192)], 0) >= 0 {
 		return fmt.Sprintf("[binary file %s, %d bytes — not shown]", displayPath, info.Size()), false, nil
@@ -627,7 +613,7 @@ func readFileRefUnscoped(path string) (content string, isDir bool, err error) {
 	data := buf[:n]
 
 	if mime := imageMime(data, path); mime != "" {
-		return fmt.Sprintf("[image file %s, mime=%s, %d bytes — attached to this turn as model image input when the selected model supports vision; no local extraction tool is needed for direct visual understanding.]", path, mime, info.Size()), false, nil
+		return imageFileRefNote(path, mime, info.Size(), false), false, nil
 	}
 	if bytes.IndexByte(data[:min(n, 8192)], 0) >= 0 {
 		return fmt.Sprintf("[binary file %s, %d bytes — not shown]", path, info.Size()), false, nil
@@ -636,6 +622,13 @@ func readFileRefUnscoped(path string) (content string, isDir bool, err error) {
 		return string(data[:maxFileRefBytes]) + fmt.Sprintf("\n…[truncated; file is %d bytes]…", info.Size()), false, nil
 	}
 	return string(data), false, nil
+}
+
+func imageFileRefNote(displayPath, mime string, size int64, attached bool) string {
+	if attached {
+		return fmt.Sprintf("[image file %s, mime=%s, %d bytes — attached to this turn as model image input when the selected model supports vision; no local extraction tool is needed for direct visual understanding.]", displayPath, mime, size)
+	}
+	return fmt.Sprintf("[image file %s, mime=%s, %d bytes — not attached as model image input because no workspace root is available. Use a workspace-scoped file reference or image attachment to send it to a vision-capable model.]", displayPath, mime, size)
 }
 
 // walkRootDir walks a directory under a sandboxed *os.Root and writes each
