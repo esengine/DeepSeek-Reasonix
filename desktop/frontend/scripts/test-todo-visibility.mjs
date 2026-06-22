@@ -16,7 +16,13 @@ const transpiled = ts.transpileModule(source, {
 }).outputText;
 
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(transpiled).toString("base64")}`;
-const { shouldShowTodoPanel, todoDismissalKey } = await import(moduleUrl);
+const {
+  dismissedTodoKeyForScope,
+  scopedTodoDismissalKey,
+  shouldShowTodoPanel,
+  todoDismissalKey,
+  todoDismissalScope,
+} = await import(moduleUrl);
 
 const completedTodos = [
   { content: "Inspect the report", status: "completed" },
@@ -41,6 +47,54 @@ assert.equal(
   shouldShowTodoPanel("todo-final", "todo-final", completedTodos),
   false,
   "a user dismissal still hides that exact todo list",
+);
+
+const completedKey = todoDismissalKey(completedTodos);
+const dismissedBySession = new Set([scopedTodoDismissalKey("session:a", completedKey)]);
+assert.equal(
+  shouldShowTodoPanel(completedKey, dismissedTodoKeyForScope("session:a", dismissedBySession, completedKey), completedTodos),
+  false,
+  "a completed todo dismissal hides the list in the session where it was closed",
+);
+assert.equal(
+  shouldShowTodoPanel(completedKey, dismissedTodoKeyForScope("session:b", dismissedBySession, completedKey), completedTodos),
+  true,
+  "a completed todo dismissal in one session does not hide another session's list",
+);
+dismissedBySession.add(scopedTodoDismissalKey("session:b", completedKey));
+assert.equal(
+  shouldShowTodoPanel(completedKey, dismissedTodoKeyForScope("session:a", dismissedBySession, completedKey), completedTodos),
+  false,
+  "closing another session's todo does not forget the first session dismissal",
+);
+assert.equal(
+  todoDismissalScope({
+    activeTabId: "tab-a",
+    activeTab: {
+      id: "tab-a",
+      scope: "project",
+      workspaceRoot: "/repo",
+      topicId: "topic-a",
+      sessionPath: "/sessions/a.jsonl",
+    },
+  }),
+  "session:/sessions/a.jsonl",
+  "a restored history session uses its session path as the dismissal scope",
+);
+assert.equal(
+  todoDismissalScope({
+    activeTabId: "tab-b",
+    activeTab: {
+      id: "tab-a",
+      scope: "project",
+      workspaceRoot: "/repo",
+      topicId: "topic-a",
+      sessionPath: "/sessions/a.jsonl",
+    },
+    eventChannel: "desktop-events",
+  }),
+  "tab:tab-b",
+  "a stale active-tab fallback must not scope dismissal to the previous session",
 );
 assert.equal(shouldShowTodoPanel(null, null, completedTodos), false, "no canonical todo item means no panel");
 assert.equal(shouldShowTodoPanel("todo-empty", null, []), false, "empty todo lists do not render a panel");
