@@ -1184,6 +1184,10 @@ func Default() *Config {
 		Providers: []ProviderEntry{
 			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: deepSeekV4FlashPrice()},
 			{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: deepSeekV4ProPrice()},
+			// Zhipu (智谱) GLM via the OpenAI-compatible endpoint. Same thinking
+			// protocol as DeepSeek (auto-detected in the openai provider), so
+			// reasoning streams out of the box. Set ZHIPU_API_KEY to use.
+			{Name: "zhipu", Kind: "openai", BaseURL: "https://open.bigmodel.cn/api/coding/paas/v4", Models: []string{"glm-4.7", "glm-5.2"}, Default: "glm-4.7", APIKeyEnv: "ZHIPU_API_KEY", ContextWindow: 1_000_000, NoProxy: true},
 		},
 	}
 }

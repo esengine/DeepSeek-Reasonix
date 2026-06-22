@@ -161,6 +161,9 @@ function providerLabel(provider: string, t: ReturnType<typeof useT>): string {
     case "deepseek-flash":
     case "deepseek-pro":
       return t("settings.providerLabel.deepseek");
+    case "zhipu":
+    case "glm":
+      return t("settings.providerLabel.zhipu");
     default:
       return provider;
   }

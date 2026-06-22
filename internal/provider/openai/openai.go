@@ -1,9 +1,10 @@
 // Package openai implements the OpenAI-compatible /chat/completions provider.
-// It self-registers under the "openai" kind, so DeepSeek, MiMo, MiniMax-M3, and
-// any other OpenAI-compatible endpoint are just config instances rather than
-// code. Each instance picks the wire shape from its base URL:
-//   - api.deepseek.com → emits thinking.type=enabled (DeepSeek-flavor CoT) plus
-//     reasoning_effort as a depth hint.
+// It self-registers under the "openai" kind, so DeepSeek, MiMo, MiniMax-M3,
+// Zhipu GLM, and any other OpenAI-compatible endpoint are just config instances
+// rather than code. Each instance picks the wire shape from its base URL:
+//   - api.deepseek.com and open.bigmodel.cn (Zhipu GLM) → emits
+//     thinking.type=enabled (DeepSeek-flavor CoT) plus reasoning_effort as a
+//     depth hint.
 //   - api.minimaxi.com → emits thinking.type=adaptive|disabled (M3's binary
 //     knob) instead of reasoning_effort, since M3 has no level scale.
 //   - everything else (MiMo and other OpenAI-compatible gateways) uses the
@@ -68,7 +69,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if visionDetail != "low" && visionDetail != "high" {
 		visionDetail = "" // auto — omit the field
 	}
-	deepseek := protocol == "deepseek" || (protocol == "" && IsDeepSeek(cfg.BaseURL))
+	deepseek := protocol == "deepseek" || (protocol == "" && (IsDeepSeek(cfg.BaseURL) || IsZhipu(cfg.BaseURL)))
 	minimax := protocol == "" && IsMiniMax(cfg.BaseURL)
 	switch {
 	case protocol == "none":

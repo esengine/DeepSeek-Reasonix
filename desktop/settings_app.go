@@ -237,6 +237,10 @@ func officialProviderKindFromEntry(p config.ProviderEntry) string {
 		if host == "api.deepseek.com" {
 			return "deepseek"
 		}
+	case "zhipu":
+		if host == "open.bigmodel.cn" {
+			return "zhipu"
+		}
 	}
 	return ""
 }
@@ -332,7 +336,7 @@ func officialProviderViewsForRootWithResolver(added map[string]bool, pricingLang
 	if resolver == nil {
 		resolver = config.NewCredentialResolverForRoot(root)
 	}
-	for _, kind := range []string{"deepseek"} {
+	for _, kind := range []string{"deepseek", "zhipu"} {
 		entries, _, err := officialProviderTemplate(kind, pricingLanguage)
 		if err != nil {
 			continue
@@ -1116,6 +1120,17 @@ func officialProviderTemplate(kind, pricingLanguage string) ([]config.ProviderEn
 			ContextWindow: 1_000_000,
 			Prices:        config.DeepSeekV4PricesForLanguage(pricingLanguage),
 		}}, "DEEPSEEK_API_KEY", nil
+	case "zhipu", "glm", "zhipuai":
+		return []config.ProviderEntry{{
+			Name:          "zhipu",
+			Kind:          "openai",
+			BaseURL:       "https://open.bigmodel.cn/api/coding/paas/v4",
+			Models:        []string{"glm-4.7", "glm-5.2"},
+			Default:       "glm-4.7",
+			APIKeyEnv:     "ZHIPU_API_KEY",
+			ContextWindow: 1_000_000,
+			NoProxy:       true,
+		}}, "ZHIPU_API_KEY", nil
 	default:
 		return nil, "", fmt.Errorf("unknown official provider template %q", kind)
 	}

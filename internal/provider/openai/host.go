@@ -44,3 +44,12 @@ func IsDeepSeek(baseURL string) bool {
 func IsMiniMax(baseURL string) bool {
 	return matchesVendorHost(baseURL, "minimaxi.com", "api.minimaxi.com")
 }
+
+// IsZhipu reports whether baseURL points at Zhipu's (智谱) OpenAI-compatible
+// endpoint (open.bigmodel.cn or any *.bigmodel.cn subdomain). GLM uses the
+// same thinking protocol as DeepSeek — thinking.type=enabled with the
+// chain-of-thought streamed on reasoning_content — so it shares DeepSeek's
+// wire shape.
+func IsZhipu(baseURL string) bool {
+	return matchesVendorHost(baseURL, "bigmodel.cn", "open.bigmodel.cn")
+}

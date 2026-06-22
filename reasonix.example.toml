@@ -82,6 +82,26 @@ effort      = "high"
 # supported_efforts = ["low", "medium", "high"]
 # default_effort    = "high"
 
+# Zhipu (智谱) GLM — OpenAI-compatible endpoint. GLM uses the same thinking
+# protocol as DeepSeek (thinking.type=enabled + reasoning_content), auto-detected
+# from the host, so reasoning streams out of the box. glm-4.7 / glm-5.2 are
+# seeded as built-in defaults; this block is for reference / customization.
+[[providers]]
+name           = "glm-4.7"
+kind           = "openai"
+base_url       = "https://open.bigmodel.cn/api/coding/paas/v4"   # /coding/paas/v4 = GLM Coding Plan endpoint (draws from plan quota); use /paas/v4 for pay-as-you-go balance instead.
+model          = "glm-4.7"
+api_key_env    = "ZHIPU_API_KEY"
+context_window = 1000000
+# A second model behind the same endpoint (switching reuses the connection):
+# [[providers]]
+# name           = "glm-5.2"
+# kind           = "openai"
+# base_url       = "https://open.bigmodel.cn/api/paas/v4"
+# model          = "glm-5.2"
+# api_key_env    = "ZHIPU_API_KEY"
+# context_window = 1000000
+
 # Anthropic (Claude) — the "anthropic" kind speaks the Messages API directly (no
 # OpenAI shim). base_url is optional (defaults to https://api.anthropic.com). Note:
 # this provider does not enable extended thinking and does not send temperature —

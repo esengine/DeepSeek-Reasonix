@@ -3668,10 +3668,11 @@ type ProviderModelDraft = {
 };
 
 type AddProviderMode = null | "official" | "custom";
-type OfficialProviderKind = "deepseek";
+type OfficialProviderKind = "deepseek" | "zhipu";
 
 const OFFICIAL_PROVIDER_CHOICES: Array<{ kind: OfficialProviderKind; labelKey: DictKey; descKey: DictKey; keyEnv: string }> = [
   { kind: "deepseek", labelKey: "settings.addProvider.official.deepseek", descKey: "settings.addProvider.official.deepseekDesc", keyEnv: "DEEPSEEK_API_KEY" },
+  { kind: "zhipu", labelKey: "settings.addProvider.official.zhipu", descKey: "settings.addProvider.official.zhipuDesc", keyEnv: "ZHIPU_API_KEY" },
 ];
 
 function AddProviderPanel({
