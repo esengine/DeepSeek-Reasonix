@@ -111,17 +111,17 @@ func TestMatchGlobQuestionMark(t *testing.T) {
 // --- Subject edge cases ---
 
 func TestSubjectNestedJSON(t *testing.T) {
-	// Array values should not match.
+	// Array values should return nonStringSubject sentinel.
 	got := Subject(json.RawMessage(`{"command": ["array", "value"]}`))
-	if got != "" {
-		t.Errorf("array command should return empty, got %q", got)
+	if got != nonStringSubject {
+		t.Errorf("array command should return nonStringSubject, got %q", got)
 	}
 }
 
 func TestSubjectNullValue(t *testing.T) {
 	got := Subject(json.RawMessage(`{"command": null}`))
-	if got != "" {
-		t.Errorf("null command should return empty, got %q", got)
+	if got != nonStringSubject {
+		t.Errorf("null command should return nonStringSubject, got %q", got)
 	}
 }
 

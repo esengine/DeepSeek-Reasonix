@@ -276,31 +276,46 @@ func Subjects(args json.RawMessage) []string {
 	if err := json.Unmarshal(args, &m); err != nil {
 		return nil
 	}
-	src := stringArg(m, "source_path")
-	dst := stringArg(m, "destination_path")
-	if src != "" && dst != "" {
-		out := []string{src}
-		if dst != src {
-			out = append(out, dst)
+	srcVal, srcOK := stringArg(m, "source_path")
+	dstVal, dstOK := stringArg(m, "destination_path")
+	if srcOK && dstOK {
+		// Both source_path and destination_path present — return both.
+		if srcVal == "" && dstVal == "" {
+			return []string{nonStringSubject}
 		}
-		return out
+		if srcVal == "" {
+			srcVal = dstVal
+		}
+		if dstVal == "" || dstVal == srcVal {
+			return []string{srcVal}
+		}
+		return []string{srcVal, dstVal}
 	}
 	for _, k := range subjectKeys {
-		if s := stringArg(m, k); s != "" {
-			return []string{s}
+		if v, ok := stringArg(m, k); ok {
+			if v == "" || v == "-" {
+				return []string{nonStringSubject}
+			}
+			return []string{v}
 		}
 	}
 	return nil
 }
 
-func stringArg(m map[string]any, key string) string {
+func stringArg(m map[string]any, key string) (string, bool) {
 	if v, ok := m[key]; ok {
-		if s, ok := v.(string); ok && s != "" {
-			return s
+		if s, ok := v.(string); ok {
+			return s, s != "" // (value, non-empty)
 		}
+		return "-", true // key exists but value is not a string
 	}
-	return ""
+	return "", false // key does not exist
 }
+
+// nonStringSubject is returned by Subjects when a subject key exists but its
+// value is not a string. This sentinel prevents bare "Tool" rules from
+// accidentally matching a call whose subject cannot be extracted for approval.
+const nonStringSubject = "\x00non-string\x00"
 
 // matchGlob reports whether name matches pattern, where '*' matches any run of
 // characters (including separators) and '?' matches exactly one. Unlike
@@ -521,6 +536,9 @@ func canonicalRuleTool(toolName string) string {
 }
 
 func ruleSubjectMatches(rule Rule, subject string) bool {
+	if subject == nonStringSubject {
+		return false
+	}
 	if rule.Subject == "" {
 		return true
 	}
