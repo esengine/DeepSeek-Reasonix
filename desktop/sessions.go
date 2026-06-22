@@ -15,7 +15,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/fileutil"
-	"reasonix/internal/jobs"
+	"reasonix/internal/store"
 )
 
 // sessions.go holds the desktop-only session-management state that the shared
@@ -125,6 +125,42 @@ type trashedSessionMeta struct {
 	DeletedAt int64  `json:"deletedAt"`
 }
 
+type sessionTrashArtifact struct {
+	src  string
+	name string
+}
+
+func sessionTelemetryPath(sessionPath string) string {
+	if strings.TrimSpace(sessionPath) == "" {
+		return ""
+	}
+	return sessionPath + ".telemetry.json"
+}
+
+func sessionTrashArtifacts(sessionPath, key string) []sessionTrashArtifact {
+	stem := strings.TrimSuffix(key, ".jsonl")
+	return []sessionTrashArtifact{
+		{src: sessionPath, name: key},
+		{src: store.SessionMeta(sessionPath), name: key + ".meta"},
+		{src: store.SessionGoalState(sessionPath), name: stem + ".goal-state.json"},
+		{src: sessionTelemetryPath(sessionPath), name: key + ".telemetry.json"},
+		{src: store.SessionCheckpointDir(sessionPath), name: stem + ".ckpt"},
+		{src: store.SessionJobsDir(sessionPath), name: stem + ".jobs"},
+	}
+}
+
+func sessionOwnedArtifactPaths(sessionPath string) []string {
+	key := filepath.Base(sessionPath)
+	artifacts := sessionTrashArtifacts(sessionPath, key)
+	paths := make([]string, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		if strings.TrimSpace(artifact.src) != "" {
+			paths = append(paths, artifact.src)
+		}
+	}
+	return paths
+}
+
 func trashSessionArtifacts(dir, sessionPath, key string) error {
 	return trashSessionArtifactsBeforeMove(dir, sessionPath, key, nil)
 }
@@ -147,19 +183,10 @@ func reconcileDesktopTrashSessionArtifacts(dir, sessionPath, key string) error {
 	if err := os.MkdirAll(itemDir, 0o755); err != nil {
 		return err
 	}
-	if err := movePathIfExists(sessionPath, filepath.Join(itemDir, key)); err != nil {
-		return err
-	}
-	if err := movePathIfExists(sessionPath+".meta", filepath.Join(itemDir, key+".meta")); err != nil {
-		return err
-	}
-	ckptName := strings.TrimSuffix(key, ".jsonl") + ".ckpt"
-	if err := movePathIfExists(strings.TrimSuffix(sessionPath, ".jsonl")+".ckpt", filepath.Join(itemDir, ckptName)); err != nil {
-		return err
-	}
-	jobsName := strings.TrimSuffix(key, ".jsonl") + ".jobs"
-	if err := movePathIfExists(jobs.ArtifactDir(sessionPath), filepath.Join(itemDir, jobsName)); err != nil {
-		return err
+	for _, artifact := range sessionTrashArtifacts(sessionPath, key) {
+		if err := movePathIfExists(artifact.src, filepath.Join(itemDir, artifact.name)); err != nil {
+			return err
+		}
 	}
 	if err := trashSubagentArtifacts(dir, sessionPath, itemDir); err != nil {
 		return err
@@ -206,19 +233,10 @@ func trashSessionArtifactsBeforeMove(dir, sessionPath, key string, beforeMove fu
 	if beforeMove != nil {
 		beforeMove()
 	}
-	if err := movePathIfExists(sessionPath, filepath.Join(itemDir, key)); err != nil {
-		return err
-	}
-	if err := movePathIfExists(sessionPath+".meta", filepath.Join(itemDir, key+".meta")); err != nil {
-		return err
-	}
-	ckptName := strings.TrimSuffix(key, ".jsonl") + ".ckpt"
-	if err := movePathIfExists(strings.TrimSuffix(sessionPath, ".jsonl")+".ckpt", filepath.Join(itemDir, ckptName)); err != nil {
-		return err
-	}
-	jobsName := strings.TrimSuffix(key, ".jsonl") + ".jobs"
-	if err := movePathIfExists(jobs.ArtifactDir(sessionPath), filepath.Join(itemDir, jobsName)); err != nil {
-		return err
+	for _, artifact := range sessionTrashArtifacts(sessionPath, key) {
+		if err := movePathIfExists(artifact.src, filepath.Join(itemDir, artifact.name)); err != nil {
+			return err
+		}
 	}
 	if err := trashSubagentArtifacts(dir, sessionPath, itemDir); err != nil {
 		return err
@@ -280,7 +298,7 @@ func trashedSessionDeletedAt(path string) int64 {
 }
 
 func restoreTrashedSessionFile(dir, path string) error {
-	trashPath, key, itemDir, err := validateTrashedSessionPath(dir, path)
+	_, key, itemDir, err := validateTrashedSessionPath(dir, path)
 	if err != nil {
 		return err
 	}
@@ -296,19 +314,10 @@ func restoreTrashedSessionFile(dir, path string) error {
 	if err := checkRestoreSubagentConflicts(dir, itemDir); err != nil {
 		return err
 	}
-	if err := movePathIfExists(trashPath, target); err != nil {
-		return err
-	}
-	if err := movePathIfExists(trashPath+".meta", target+".meta"); err != nil {
-		return err
-	}
-	ckptName := strings.TrimSuffix(key, ".jsonl") + ".ckpt"
-	if err := movePathIfExists(filepath.Join(itemDir, ckptName), filepath.Join(dir, ckptName)); err != nil {
-		return err
-	}
-	jobsName := strings.TrimSuffix(key, ".jsonl") + ".jobs"
-	if err := movePathIfExists(filepath.Join(itemDir, jobsName), filepath.Join(dir, jobsName)); err != nil {
-		return err
+	for _, artifact := range sessionTrashArtifacts(target, key) {
+		if err := movePathIfExists(filepath.Join(itemDir, artifact.name), artifact.src); err != nil {
+			return err
+		}
 	}
 	if err := restoreSubagentArtifacts(dir, itemDir); err != nil {
 		return err

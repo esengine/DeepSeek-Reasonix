@@ -39,7 +39,6 @@ import (
 	"reasonix/internal/fileref"
 	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/i18n"
-	"reasonix/internal/jobs"
 	"reasonix/internal/mcpdiag"
 	"reasonix/internal/memory"
 	"reasonix/internal/plugin"
@@ -1123,14 +1122,7 @@ func removeDesktopSessionArtifacts(path string) error {
 	if strings.TrimSpace(path) == "" {
 		return nil
 	}
-	if err := jobs.RemoveArtifacts(path); err != nil {
-		return err
-	}
-	paths := []string{path, agent.BranchMetaPath(path)}
-	if strings.HasSuffix(path, ".jsonl") {
-		paths = append(paths, strings.TrimSuffix(path, ".jsonl")+".ckpt")
-	}
-	for _, p := range paths {
+	for _, p := range sessionOwnedArtifactPaths(path) {
 		if strings.TrimSpace(p) == "" {
 			continue
 		}

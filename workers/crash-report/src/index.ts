@@ -4,7 +4,7 @@
 import { z } from "zod";
 import type { Env } from "./env";
 import { html, redirect } from "./shell";
-import { renderGroup, renderStats, type Group } from "./stats";
+import { renderGroup, renderStats, type Group, type StatsModule } from "./stats";
 import { renderLogin, renderRegister, renderAccount } from "./auth_pages";
 import { renderUsers, renderAudit, type UserRow, type AuditRow } from "./admin";
 import {
@@ -748,7 +748,7 @@ async function metricUserRows(env: Env, days: 7 | 30): Promise<{ signal: string;
   }
 }
 
-async function handleStats(request: Request, env: Env, user: User): Promise<Response> {
+async function handleStats(request: Request, env: Env, user: User, activeModule: StatsModule): Promise<Response> {
   const url = new URL(request.url);
   const filters = statsFilters(url);
   const latestVersion = await latestObservedVersion(env);
@@ -786,6 +786,7 @@ async function handleStats(request: Request, env: Env, user: User): Promise<Resp
         filters,
       },
       user,
+      activeModule,
     ),
   );
 }
@@ -945,7 +946,9 @@ export default {
       return user ? handleAccountPassword(request, env, user) : redirect("/login");
 
     const groupMatch = path.match(/^\/stats\/group\/([0-9a-f]{64})$/);
-    if (path === "/stats" && method === "GET") return requireViewer(user) ?? handleStats(request, env, user as User);
+    const statsModuleMatch = path.match(/^\/stats\/(diagnostics|usage|preferences|health)$/);
+    if ((path === "/stats" || statsModuleMatch) && method === "GET")
+      return requireViewer(user) ?? handleStats(request, env, user as User, (statsModuleMatch?.[1] as StatsModule | undefined) ?? "usage");
     if (groupMatch && method === "GET") return requireViewer(user) ?? handleGroup(env, groupMatch[1], user as User);
     if (groupMatch && method === "POST") {
       if (user?.role !== "admin") return new Response("forbidden", { status: 403 });
