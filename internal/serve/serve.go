@@ -223,9 +223,15 @@ func (s *Server) handler() http.Handler {
 }
 
 // tokenAuth is an optional Bearer-token authentication guard. It checks
-// Authorization: Bearer <token> on every request, with a ?token=<token> query-
-// parameter fallback so the SSE /events endpoint works with the browser's
-// EventSource API (which cannot set custom headers).
+// three sources in order:
+//
+//  1. Authorization: Bearer <token> header
+//  2. ?token=<token> query parameter (for browser EventSource /events)
+//  3. reasonix_token cookie (persisted from a prior successful auth)
+//
+// When auth succeeds via header or query parameter, a reasonix_token cookie is
+// set on the response so the browser remembers the token. Subsequent requests
+// from that browser can skip the header/query — the cookie alone suffices.
 //
 // Enable by setting the REASONIX_AUTH_TOKEN environment variable. When the
 // variable is empty or unset, tokenAuth passes all requests through — zero
@@ -240,7 +246,26 @@ func tokenAuth(next http.Handler) http.Handler {
 		if got == "" {
 			got = r.URL.Query().Get("token")
 		}
+		if got == "" {
+			if c, err := r.Cookie("reasonix_token"); err == nil {
+				got = c.Value
+			}
+		}
 		if got == "Bearer "+token || got == token {
+			// Persist the token as a cookie so the browser doesn't need the
+			// query param or custom header on subsequent requests. Only set it
+			// when auth came from header/query (not from an existing cookie) to
+			// avoid a redundant Set-Cookie on every request.
+			if r.Header.Get("Authorization") != "" || r.URL.Query().Get("token") != "" {
+				http.SetCookie(w, &http.Cookie{
+					Name:     "reasonix_token",
+					Value:    token,
+					Path:     "/",
+					HttpOnly: true,
+					SameSite: http.SameSiteLaxMode,
+					MaxAge:   2592000, // 30 days — persist across browser restarts
+				})
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
