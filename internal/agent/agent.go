@@ -1319,7 +1319,7 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 	ch, err := a.prov.Stream(ctx, provider.Request{
 		Messages:    a.session.Messages,
 		Tools:       a.tools.Schemas(),
-		Temperature: a.temperature,
+		Temperature: provider.OptionalTemperature(a.temperature),
 	})
 	if err != nil {
 		return "", "", "", nil, nil, false, false, err

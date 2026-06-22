@@ -323,7 +323,10 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 	case c.deepseek:
 		// DeepSeek's CoT is controlled by `thinking` (always on) plus
 		// `reasoning_effort` for depth. We never disable thinking for DeepSeek.
+		// DeepSeek reasoning models require temperature=1; any other value
+		// degrades output quality or triggers API errors.
 		out.Thinking = &thinkingMode{Type: "enabled"}
+		out.Temperature = provider.TemperaturePtr(1.0)
 	case c.minimax:
 		// M3 uses a single `thinking.type` field with two valid values:
 		// "adaptive" (default, thinking on) and "disabled" (off). Reasoning
@@ -566,7 +569,7 @@ type chatRequest struct {
 	Tools           []chatTool     `json:"tools,omitempty"`
 	Stream          bool           `json:"stream"`
 	StreamOptions   *streamOptions `json:"stream_options,omitempty"`
-	Temperature     float64        `json:"temperature,omitempty"`
+	Temperature     *float64       `json:"temperature,omitempty"`
 	MaxTokens       int            `json:"max_tokens,omitempty"`
 	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
 	Thinking        *thinkingMode  `json:"thinking,omitempty"`

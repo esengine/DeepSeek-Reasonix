@@ -610,7 +610,7 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 			{Role: provider.RoleSystem, Content: sys},
 			{Role: provider.RoleUser, Content: renderTranscript(region)},
 		},
-		Temperature: a.temperature,
+		Temperature: provider.OptionalTemperature(a.temperature),
 	})
 	if err != nil {
 		return "", err

@@ -95,8 +95,22 @@ type ToolSchema struct {
 type Request struct {
 	Messages    []Message
 	Tools       []ToolSchema
-	Temperature float64
+	Temperature *float64 // nil = omit (use API default); non-nil = send the value, including 0
 	MaxTokens   int
+}
+
+// TemperaturePtr wraps v in a pointer so callers that explicitly want a
+// specific temperature (including 0 for deterministic output) can distinguish
+// that intent from "not set, use API default".
+func TemperaturePtr(v float64) *float64 { return &v }
+
+// OptionalTemperature returns nil when v is zero (meaning "not configured,
+// let the API decide") and a pointer otherwise.
+func OptionalTemperature(v float64) *float64 {
+	if v == 0 {
+		return nil
+	}
+	return &v
 }
 
 // interruptedToolResult stands in for a tool result that never landed — an
