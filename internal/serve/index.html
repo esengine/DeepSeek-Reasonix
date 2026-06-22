@@ -257,6 +257,37 @@ input,textarea{font:inherit;color:inherit}
 .stat-card__value.ok{color:var(--success)}
 .stat-card--wide{grid-column:1/-1}
 .sidebar__item--danger{color:var(--danger)}
+
+/* ── mobile drawer ── */
+.mobile-hamburger{display:none}
+.sidebar-overlay{display:none}
+
+@media(max-width:768px){
+  .mobile-hamburger{
+    display:inline-flex;align-items:center;
+    justify-content:center;width:32px;height:32px;
+    border-radius:6px;cursor:pointer;color:var(--fg-2);
+    flex-shrink:0
+  }
+  .mobile-hamburger:hover{background:var(--panel);color:var(--fg)}
+
+  .sidebar{
+    display:flex!important;
+    position:fixed;top:0;left:0;z-index:300;
+    width:280px;max-width:85vw;height:100vh;
+    transform:translateX(-100%);
+    transition:transform .25s ease;
+    box-shadow:var(--shadow-lg)
+  }
+  .sidebar.open{transform:translateX(0)}
+
+  .sidebar-overlay{
+    display:block;position:fixed;inset:0;z-index:299;
+    background:oklch(0% 0 0/.5);
+    opacity:0;pointer-events:none;transition:opacity .25s ease
+  }
+  .sidebar-overlay.open{opacity:1;pointer-events:auto}
+}
 </style>
 </head>
 <body>
@@ -352,6 +383,9 @@ input,textarea{font:inherit;color:inherit}
       <div class="toolbar__spacer"></div>
       <div class="status" id="turn-info"></div>
       <div class="status" id="balance-info"></div>
+      <button class="mobile-hamburger" id="btn-menu" aria-label="Menu">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
     </div>
     <div class="composer">
       <span class="composer__caret">&#8250;</span>
@@ -1164,6 +1198,24 @@ $$('.welcome__ex').forEach(btn=>{btn.onclick=()=>{input.value=btn.dataset.prompt
 
 // initial fetch
 fetchStatus();
+
+// ── mobile drawer toggle ──
+function toggleSidebar(open){
+  const s=document.querySelector('.sidebar');
+  const o=document.getElementById('sidebar-overlay');
+  if(!s||!o)return;
+  s.classList.toggle('open',open);
+  o.classList.toggle('open',open);
+}
+document.getElementById('btn-menu')?.addEventListener('click',()=>toggleSidebar(true));
+document.getElementById('sidebar-overlay')?.addEventListener('click',()=>toggleSidebar(false));
+document.querySelector('.sidebar__nav')?.addEventListener('click',()=>toggleSidebar(false));
+document.getElementById('session-list')?.addEventListener('click',()=>toggleSidebar(false));
+// click on non-interactive sidebar area (brand, status, gaps) also closes
+document.querySelector('.sidebar')?.addEventListener('click',e=>{
+  if(!e.target.closest('.sidebar__item,.session-item,button,a,input,textarea,.session-del'))toggleSidebar(false);
+});
 </script>
+<div class="sidebar-overlay" id="sidebar-overlay"></div>
 </body>
 </html>
