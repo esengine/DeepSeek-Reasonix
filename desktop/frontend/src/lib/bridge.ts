@@ -1734,7 +1734,7 @@ function makeMockApp(): AppBindings {
         async ClearSession() {},
     async Checkpoints() {
       return [
-        { turn: 0, prompt: "你好呀", files: ["src/App.tsx"], time: Date.now() - 30_000, canCode: true, canConversation: true },
+        { turn: 0, prompt: "你好呀", files: ["src/App.tsx"], turnFileCount: 1, time: Date.now() - 30_000, canCode: true, canConversation: true },
       ];
     },
     async CheckpointsForTab() {

@@ -1140,8 +1140,9 @@ func removeDesktopSessionArtifacts(path string) error {
 type CheckpointMeta struct {
 	Turn            int      `json:"turn"`
 	Prompt          string   `json:"prompt"`
-	Files           []string `json:"files"` // paths changed during the turn
-	Time            int64    `json:"time"`  // unix milliseconds
+	Files           []string `json:"files"`         // cumulative files RestoreCode would affect from this turn
+	TurnFileCount   int      `json:"turnFileCount"` // files changed in THIS specific turn only
+	Time            int64    `json:"time"`          // unix milliseconds
 	CanCode         bool     `json:"canCode"`
 	CanConversation bool     `json:"canConversation"`
 }
@@ -1168,6 +1169,7 @@ func (a *App) CheckpointsForTab(tabID string) []CheckpointMeta {
 			Turn:            m.Turn,
 			Prompt:          m.Prompt,
 			Files:           m.Paths,
+			TurnFileCount:   len(m.Paths),
 			Time:            m.Time.UnixMilli(),
 			CanCode:         len(m.Paths) > 0,
 			CanConversation: ctrl.CheckpointHasBoundary(m.Turn),

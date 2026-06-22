@@ -1467,6 +1467,7 @@ export const en = {
   "rewind.disabledNoCode": "No code changes were captured after this message",
   "rewind.disabledNoEarlier": "There is nothing before this message to summarize",
   "rewind.filesChanged": "{count} files",
+  "rewind.turnFiles": "{count} this turn",
   "rewind.both": "Rewind code and conversation",
   "rewind.conversation": "Rewind conversation only",
   "rewind.code": "Rewind code only",

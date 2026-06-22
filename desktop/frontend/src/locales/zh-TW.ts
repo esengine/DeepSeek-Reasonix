@@ -911,6 +911,7 @@ export const zhTW: Record<DictKey, string> = {
   "rewind.disabledNoCode": "這條訊息之後沒有捕獲到程式碼變更",
   "rewind.disabledNoEarlier": "這條訊息之前沒有可總結內容",
   "rewind.filesChanged": "{count} 個檔案",
+  "rewind.turnFiles": "本轮 {count} 個",
   "rewind.both": "回滾程式碼和對話",
   "rewind.conversation": "僅回滾對話",
   "rewind.code": "僅回滾程式碼",

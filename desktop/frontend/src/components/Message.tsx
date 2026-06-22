@@ -421,7 +421,12 @@ export function TurnActions({
   };
   const actionMeta = (scope: MessageActionScope): string => {
     if ((scope === "code" || scope === "both") && checkpoint?.files?.length) {
-      return t("rewind.filesChanged", { count: checkpoint.files.length });
+      const total = checkpoint.files.length;
+      const turnCount = checkpoint.turnFileCount ?? 0;
+      if (turnCount > 0 && turnCount < total) {
+        return t("rewind.filesChanged", { count: total }) + " (" + t("rewind.turnFiles", { count: turnCount }) + ")";
+      }
+      return t("rewind.filesChanged", { count: total });
     }
     return "";
   };

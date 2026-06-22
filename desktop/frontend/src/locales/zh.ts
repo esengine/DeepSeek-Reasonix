@@ -1469,6 +1469,7 @@ export const zh: Record<DictKey, string> = {
   "rewind.disabledNoCode": "这条消息之后没有捕获到代码改动",
   "rewind.disabledNoEarlier": "这条消息之前没有可总结内容",
   "rewind.filesChanged": "{count} 个文件",
+  "rewind.turnFiles": "本轮 {count} 个",
   "rewind.both": "回滚代码和对话",
   "rewind.conversation": "仅回滚对话",
   "rewind.code": "仅回滚代码",

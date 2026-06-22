@@ -284,6 +284,7 @@ export interface CheckpointMeta {
   turn: number;
   prompt: string;
   files: string[];
+  turnFileCount: number;
   time: number; // unix ms
   canCode?: boolean;
   canConversation?: boolean;
