@@ -689,10 +689,13 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		wrapped := wrapTranscript(strings.Join(cm.transcript, "\n"), contentW)
 		cm.viewport.SetContent(wrapped)
 		cm.wrappedLines = strings.Split(wrapped, "\n")
-		if wasAtBottom || cm.forceGotoBottom {
+		if wasAtBottom {
 			cm.viewport.GotoBottom() // tail-follow: stay pinned to newest output
-			cm.forceGotoBottom = false
 		}
+	}
+	if cm.forceGotoBottom {
+		cm.viewport.GotoBottom()
+		cm.forceGotoBottom = false
 	}
 	cm.transcriptDirty = false
 	// Any viewport scroll (wheel, PgUp/PgDn, edge auto-scroll, or tail-follow to
