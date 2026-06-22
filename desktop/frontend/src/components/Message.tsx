@@ -544,6 +544,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   expandWhileStreaming = true,
   truncateStreamingReasoning = false,
   creationMode = false,
+  onFileLinkClick,
 }: {
   item: AssistantItem;
   defaultExpanded?: boolean;
@@ -552,6 +553,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   /** Opt-in for compact mode to keep live DeepSeek reasoning from growing an unbounded DOM. */
   truncateStreamingReasoning?: boolean;
   creationMode?: boolean;
+  onFileLinkClick?: (path: string) => void;
 }) {
   const t = useT();
   const reasoningBodyRef = useRef<HTMLDivElement>(null);
@@ -630,7 +632,7 @@ export const AssistantMessage = memo(function AssistantMessage({
       )}
       {hasText && (
         <div className="msg__body">
-          <Markdown text={item.text} plainStatusBlocks={creationMode} />
+          <Markdown text={item.text} plainStatusBlocks={creationMode} onFileLinkClick={onFileLinkClick} />
         </div>
       )}
     </div>

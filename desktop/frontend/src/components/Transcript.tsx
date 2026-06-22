@@ -29,12 +29,14 @@ const LiveAssistantMessage = memo(function LiveAssistantMessage({
   expandWhileStreaming = true,
   truncateStreamingReasoning = false,
   creationMode = false,
+  onFileLinkClick,
 }: {
   item: AssistantItem;
   defaultExpanded?: boolean;
   expandWhileStreaming?: boolean;
   truncateStreamingReasoning?: boolean;
   creationMode?: boolean;
+  onFileLinkClick?: (path: string) => void;
 }) {
   const live = useContext(LiveStreamContext);
   const shown = useMemo(
@@ -51,6 +53,7 @@ const LiveAssistantMessage = memo(function LiveAssistantMessage({
       expandWhileStreaming={expandWhileStreaming}
       truncateStreamingReasoning={truncateStreamingReasoning}
       creationMode={creationMode}
+      onFileLinkClick={onFileLinkClick}
     />
   );
 });
@@ -93,6 +96,7 @@ export function Transcript({
   creationMode = false,
   actionHoverMenus = false,
   rewindSignal = 0,
+  onFileLinkClick,
 }: {
   items: Item[];
   live?: LiveStream;
@@ -110,6 +114,7 @@ export function Transcript({
   creationMode?: boolean;
   actionHoverMenus?: boolean;
   rewindSignal?: number;
+  onFileLinkClick?: (path: string) => void;
 }) {
   const {
     scrollRef,
@@ -396,6 +401,7 @@ export function Transcript({
             subcalls={subcallsByParent}
             tabId={tabId}
             creationMode={creationMode}
+            onFileLinkClick={onFileLinkClick}
           />,
         );
         collapseBatch = [];
@@ -452,6 +458,7 @@ export function Transcript({
               subcalls={subcallsByParent}
               tabId={tabId}
               creationMode={creationMode}
+              onFileLinkClick={onFileLinkClick}
             />,
           );
         } else if (nonAssistantItems.length > 0) {
@@ -475,6 +482,7 @@ export function Transcript({
               expandWhileStreaming={false}
               truncateStreamingReasoning={true}
               creationMode={creationMode}
+              onFileLinkClick={onFileLinkClick}
             />,
           );
           if (!it.streaming && it.text.trim() !== "") {
@@ -549,7 +557,7 @@ export function Transcript({
             break;
           }
           case "assistant":
-            out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={false} creationMode={creationMode} />);
+            out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={false} creationMode={creationMode} onFileLinkClick={onFileLinkClick} />);
             if (!it.streaming && it.text.trim() !== "") {
               actionText = it.text;
               actionReady = true;
@@ -571,7 +579,7 @@ export function Transcript({
       if (!running) pushTurnActions();
     }
     return out;
-  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, running, onEditPrompt, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, stepGroups, tabId, actionHoverMenus, creationMode]);
+  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, running, onEditPrompt, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, stepGroups, tabId, actionHoverMenus, creationMode, onFileLinkClick]);
 
   // ── Assemble rendered output ──────────────────────────────────────────────
   // Warm/cold zone is a separate memo'd WarmZone component so streaming tokens
@@ -610,6 +618,7 @@ export function Transcript({
             warmOnEdit={onEditPrompt}
             tabId={tabId}
             creationMode={creationMode}
+            onFileLinkClick={onFileLinkClick}
             onToggleColdPage={() => setColdPage((p) => p + 1)}
             onToggleWarmTurn={(g, expand) => {
               setExpandedWarmTurns((prev) => {
@@ -653,6 +662,7 @@ const WarmZone = memo(function WarmZone({
   creationMode,
   onToggleColdPage,
   onToggleWarmTurn,
+  onFileLinkClick,
 }: {
   turnGroups: TurnGroup[];
   expandedWarmTurns: ReadonlySet<number>;
@@ -674,6 +684,7 @@ const WarmZone = memo(function WarmZone({
   creationMode?: boolean;
   onToggleColdPage: () => void;
   onToggleWarmTurn: (g: number, expand: boolean) => void;
+  onFileLinkClick?: (path: string) => void;
 }) {
   const t = useT();
   const out: React.ReactNode[] = [];
@@ -730,6 +741,7 @@ const WarmZone = memo(function WarmZone({
               onEdit={warmOnEdit}
               tabId={tabId}
               creationMode={creationMode}
+              onFileLinkClick={onFileLinkClick}
             />
           </WarmTurnCard>,
         );
@@ -777,6 +789,7 @@ function WarmTurnItems({
   onEdit,
   tabId,
   creationMode = false,
+  onFileLinkClick,
 }: {
   startIdx: number;
   endIdx: number;
@@ -793,6 +806,7 @@ function WarmTurnItems({
   onEdit?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
   tabId?: string;
   creationMode?: boolean;
+  onFileLinkClick?: (path: string) => void;
 }) {
   const nodes: React.ReactNode[] = [];
   let actionText = "";
@@ -881,7 +895,7 @@ function WarmTurnItems({
         break;
       }
       case "assistant": {
-        nodes.push(<AssistantMessage key={it.id} item={it} defaultExpanded={false} creationMode={creationMode} />);
+        nodes.push(<AssistantMessage key={it.id} item={it} defaultExpanded={false} creationMode={creationMode} onFileLinkClick={onFileLinkClick} />);
         if (!it.streaming && it.text.trim() !== "") {
           actionText = it.text;
           actionReady = true;
@@ -973,9 +987,10 @@ type TurnCollapseProps = {
   subcalls: Map<string, ToolItem[]>;
   tabId?: string;
   creationMode?: boolean;
+  onFileLinkClick?: (path: string) => void;
 };
 
-function TurnCollapse({ items, durationMs, mode, subcalls, tabId, creationMode = false }: TurnCollapseProps) {
+function TurnCollapse({ items, durationMs, mode, subcalls, tabId, creationMode = false, onFileLinkClick }: TurnCollapseProps) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -1054,7 +1069,7 @@ function TurnCollapse({ items, durationMs, mode, subcalls, tabId, creationMode =
       case "phase": body.push(<PhaseCard key={it.id} text={it.text} />); break;
       case "assistant": {
         const displayItem = it;
-        body.push(<AssistantMessage key={it.id} item={displayItem as AssistantItem} creationMode={creationMode} />);
+        body.push(<AssistantMessage key={it.id} item={displayItem as AssistantItem} creationMode={creationMode} onFileLinkClick={onFileLinkClick} />);
         break;
       }
     }

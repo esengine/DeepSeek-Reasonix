@@ -959,6 +959,8 @@ export default function App() {
   const appRef = useRef<HTMLDivElement>(null);
   const sidebarTogglePressTimerRef = useRef<number | null>(null);
   const workspaceTogglePressTimerRef = useRef<number | null>(null);
+  const fileLinkRevealIdRef = useRef(0);
+  const [fileLinkReveal, setFileLinkReveal] = useState<{ id: number; path: string } | null>(null);
 
   // Persist window geometry across launches.
   useWindowStatePersistence();
@@ -966,6 +968,12 @@ export default function App() {
   useEffect(() => {
     document.documentElement.setAttribute("data-platform", desktopPlatform);
   }, [desktopPlatform]);
+
+  // Clear stale file reveal requests when the active tab changes, so an
+  // old reveal from a different tab doesn't re-trigger in the new context.
+  useEffect(() => {
+    setFileLinkReveal(null);
+  }, [activeTabId]);
 
   const closeTransientOverlays = useCallback(() => {
     setTransientOverlayDismissSignal((signal) => signal + 1);
@@ -1912,6 +1920,12 @@ export default function App() {
       closeWorkspacePanel();
     }
   }, [closeWorkspacePanel, openWorkspacePanel]);
+
+  const handleFileLinkClick = useCallback((path: string) => {
+    fileLinkRevealIdRef.current += 1;
+    setFileLinkReveal({ id: fileLinkRevealIdRef.current, path });
+    openWorkspacePanel("files");
+  }, [openWorkspacePanel]);
 
   const addWorkspaceTextToComposer = useCallback((text: string) => {
     setComposerInsertRequest({ id: Date.now(), text });
@@ -2996,6 +3010,7 @@ export default function App() {
                 creationMode={sidebarCreation}
                 actionHoverMenus={sidebarCreation}
                 rewindSignal={rewindSignal}
+                onFileLinkClick={handleFileLinkClick}
               />
             )}
           </main>
@@ -3209,6 +3224,7 @@ export default function App() {
                   refreshKey={dockRefreshKey}
                   initialViewMode={rightDockMode === "changed" ? "changed" : "files"}
                   showViewTabs={false}
+                  revealPathRequest={fileLinkReveal}
                 />
               )}
             </div>
