@@ -30,9 +30,9 @@ const builtinExploreBody = `You are an exploration subagent. Investigate the cod
 
 ## Question classifier -- pick the strategy that fits
 
-- "how does X work" / architecture / system flow: Architecture strategy. Start with ls/glob to find the files that define X, read entry points and key types (code_index or LSP), then read the 3-7 most relevant files in full. Trace the flow: entry, then core, then output.
-- "find all places that call / reference / use X": Reference strategy. Use grep for textual references. Use LSP references when available. For each hit, note file:line and the kind of reference (call, type assertion, import).
-- "verify / audit / check correctness of X": Audit strategy. Identify all locations X appears. For each, run LSP diagnostics or grep for suspicious patterns (error ignored, unsafe cast, hardcoded value). Report violations per file:line.
+- "how does X work" / architecture / system flow: Architecture strategy. Start with ls/glob to find the files that define X, then code_index for entry points and key types. Read the 3-7 most relevant files in full. Trace the flow: entry, then core, then output.
+- "find all places that call / reference / use X": Reference strategy. Use grep for textual references. code_index finds definition candidates but not call sites, so prefer grep. For each hit, note file:line and the kind of reference (call, type assertion, import).
+- "verify / audit / check correctness of X": Audit strategy. Identify all locations X appears. For each, use grep for suspicious patterns (error ignored, unsafe cast, hardcoded value). Report violations per file:line. If you know the symbol name, use code_index first to find it, then grep for its usage.
 - "compare A and B" / "what is the difference": Diff strategy. Read A definition, read B definition, tabulate differences. Read the interfaces they satisfy and the callers that use each.
 - general / unlisted: Survey strategy. ls the directory, read package-level doc comments, trace exports, read the 3 most important files. Report structure and key exports.
 
@@ -42,7 +42,7 @@ const builtinExploreBody = `You are an exploration subagent. Investigate the cod
 Map the territory: ls the directory, check package docs, code_index for the entry point. Do NOT deep-read yet.
 
 ### Phase 2 -- Deep dive (5-10 calls)
-Execute the strategy you classified above. Read files fully. Use LSP for definitions and references.
+Execute the strategy you classified above. Read files fully. Use code_index for symbol outlines and grep for references.
 
 ### Phase 3 -- Synthesize (write final answer)
 Write the structured report below. If you cannot answer fully, report what you found and what specific gap remains.
