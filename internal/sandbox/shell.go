@@ -226,16 +226,16 @@ func windowsPowerShellCandidates() []string {
 	return out
 }
 
-// nulRedirect matches a cmd.exe-style redirect to the "nul" device (>nul,
-// 2>nul, 1>>nul, &>nul …) where nul is a complete token. bash and PowerShell
-// treat "nul" as an ordinary filename, not the null device, so the redirect
-// would create an undeletable file named "nul" (a Windows reserved name) in the
-// working directory. #4252. Group 2 captures the trailing delimiter (RE2 has no
-// lookahead) so it can be re-emitted unchanged.
-var nulRedirect = regexp.MustCompile(`(?i)((?:\d+|&)?>>?)\s*nul([\s;&|<>)]|$)`)
+// nulRedirect matches common null-device redirects (>nul, 2>null,
+// 1>>/dev/null, &>nul ...) where the target is a complete token. bash and
+// PowerShell otherwise treat at least some of these as ordinary filenames, so
+// the redirect can create stray nul/null files in the working directory. #4252.
+// Group 2 captures the trailing delimiter (RE2 has no lookahead) so it can be
+// re-emitted unchanged.
+var nulRedirect = regexp.MustCompile(`(?i)((?:\d+|&)?>>?)\s*(?:nul|null|/dev/null)([\s;&|<>)]|$)`)
 
-// normalizeNulRedirect rewrites those nul redirects to sink ("/dev/null" for
-// bash, "$null" for PowerShell), so the command discards output as intended.
+// normalizeNulRedirect rewrites those redirects to sink ("/dev/null" for bash,
+// "$null" for PowerShell), so the command discards output as intended.
 func normalizeNulRedirect(command, sink string) string {
 	return nulRedirect.ReplaceAllStringFunc(command, func(m string) string {
 		sub := nulRedirect.FindStringSubmatch(m)

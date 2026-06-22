@@ -14,13 +14,18 @@ func TestNormalizeNulRedirect(t *testing.T) {
 		{"go test 1>>NUL", bash, "go test 1>>/dev/null"},
 		{"x > nul", bash, "x >/dev/null"},
 		{"x >nul", "$null", "x >$null"},
+		{"x > null", bash, "x >/dev/null"},
+		{"x >null", "$null", "x >$null"},
+		{"x 2> /dev/null", "$null", "x 2>$null"},
 		{"probe &>nul", bash, "probe &>/dev/null"},
 		// Not a nul redirect — leave untouched.
 		{"echo nul", bash, "echo nul"},
 		{"grep nul file.txt", bash, "grep nul file.txt"},
 		{"cat nul.txt", bash, "cat nul.txt"},
+		{"cat null.txt", bash, "cat null.txt"},
 		{"run 2>&1", bash, "run 2>&1"},
 		{"rm nul", bash, "rm nul"},
+		{"rm null", bash, "rm null"},
 		{"echo nullish", bash, "echo nullish"},
 	}
 	for _, c := range cases {
