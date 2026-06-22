@@ -330,6 +330,14 @@ func normalizedMCPMigrationRoots(roots []string) []string {
 
 func migrateLegacyCredentialsIfNeeded() error {
 	missing := map[string]string{}
+	for _, key := range credentialEnvNamesForRoot(".") {
+		if credentialCurrentStoreHasKey(key) {
+			continue
+		}
+		if value, ok := legacyKeyringCredentialValueLookup(key); ok {
+			missing[key] = value
+		}
+	}
 	for _, src := range legacyCredentialsPaths() {
 		if src == "" {
 			continue

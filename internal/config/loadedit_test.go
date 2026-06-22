@@ -73,7 +73,8 @@ model = "m"
 	}
 }
 
-func TestLoadForEditLoadsDotEnvNextToEditedProjectConfig(t *testing.T) {
+func TestLoadForEditUsesGlobalCredentialsNotProjectDotEnv(t *testing.T) {
+	isolateTestCredentials(t)
 	project := t.TempDir()
 	launch := t.TempDir()
 	path := filepath.Join(project, "reasonix.toml")
@@ -91,6 +92,7 @@ api_key_env = "PROJECT_ONLY_KEY"
 	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("PROJECT_ONLY_KEY=from-project\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	setTestCredential(t, "PROJECT_ONLY_KEY", "from-global")
 	t.Chdir(launch)
 	t.Setenv("PROJECT_ONLY_KEY", "")
 	os.Unsetenv("PROJECT_ONLY_KEY")
@@ -101,9 +103,9 @@ api_key_env = "PROJECT_ONLY_KEY"
 		t.Fatalf("provider missing from edited config: %+v", cfg.Providers)
 	}
 	if !provider.Configured() {
-		t.Fatalf("provider should resolve api_key_env from project .env next to edited config")
+		t.Fatalf("provider should resolve api_key_env from Reasonix global .env")
 	}
-	if got := ResolveCredentialForRoot(project, "PROJECT_ONLY_KEY"); !got.Set || got.Value != "from-project" {
-		t.Fatalf("credential = %+v, want project .env value", got)
+	if got := ResolveCredentialForRootGlobalFirst(project, "PROJECT_ONLY_KEY"); !got.Set || got.Value != "from-global" {
+		t.Fatalf("credential = %+v, want global .env value", got)
 	}
 }

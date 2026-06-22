@@ -7,30 +7,18 @@ import (
 	"strings"
 )
 
-// loadDotEnv loads KEY=value files into the process environment without
-// overriding variables that are already set (first file to set a key wins).
-// Order: configured Reasonix credential store (where `reasonix setup` writes
-// keys, so they resolve from any directory), then a project ./.env as a
-// read-only back-compat fallback, then ~/.env as a legacy fallback. Existing
-// environment variables always win over all credential sources.
+// loadDotEnv loads Reasonix's global .env into the process environment.
+// Reasonix-owned credentials intentionally override inherited env vars so a key
+// saved through setup/settings is the key used after restart.
 func loadDotEnv() {
 	loadDotEnvForRoot(".")
 }
 
-// loadDotEnvForRoot loads Reasonix global credentials before a root's .env file
-// (if present) and the home .env fallback. When root is "." it behaves like
-// loadDotEnv().
+// loadDotEnvForRoot loads only Reasonix's global .env. The root argument is kept
+// for callers that already pass workspace roots, but provider credentials are no
+// longer resolved from project or home .env files.
 func loadDotEnvForRoot(root string) {
-	dotEnvPath := ".env"
-	if root != "" && root != "." {
-		dotEnvPath = filepath.Join(root, ".env")
-	}
 	loadCredentialStoreForRoot(root)
-	loadDotEnvFileAs(dotEnvPath, CredentialSource{Kind: CredentialSourceProjectEnv, Path: dotEnvPath})
-	if home, err := os.UserHomeDir(); err == nil {
-		homeEnv := filepath.Join(home, ".env")
-		loadDotEnvFileAs(homeEnv, CredentialSource{Kind: CredentialSourceHomeEnv, Path: homeEnv})
-	}
 }
 
 func legacyCredentialsPaths() []string {
@@ -52,6 +40,9 @@ func legacyCredentialsPaths() []string {
 		paths = append(paths, path)
 	}
 	if dir := legacyOSSupportDir(); dir != "" {
+		add(filepath.Join(dir, "credentials"))
+	}
+	if dir := userSupportDir(); dir != "" {
 		add(filepath.Join(dir, "credentials"))
 	}
 	for _, cfg := range legacyXDGConfigPaths() {
@@ -83,7 +74,7 @@ func loadDotEnvFileAs(path string, source CredentialSource) {
 		if key == "" {
 			continue
 		}
-		if _, exists := os.LookupEnv(key); exists {
+		if _, exists := os.LookupEnv(key); exists && source.Kind != CredentialSourceCredentials {
 			recordExistingCredentialSource(key)
 			continue
 		}

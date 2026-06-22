@@ -19,7 +19,7 @@ var English = Messages{
 	StepSetKey:      "set API key",
 
 	InitHint:       "Project memory (AGENTS.md) is generated in-session: run `reasonix`, then `/init` — the model analyzes the codebase and writes it. For configuration, use `reasonix setup`.",
-	StepSetKeyHint: "run `reasonix setup`, or export DEEPSEEK_API_KEY=…",
+	StepSetKeyHint: "run `reasonix setup` to save DEEPSEEK_API_KEY",
 	StepChatDesc:   "interactive session",
 	StepRunDesc:    "one-shot task",
 	HelpFooter:     "reasonix help · all commands",
@@ -267,7 +267,7 @@ var English = Messages{
 	SetupComplete:         "Setup complete.",
 	SetupCancelled:        "setup cancelled.",
 	TryHintFmt:            "Try: %s",
-	NextHint:              "Next: set your API key (run `reasonix setup` or export DEEPSEEK_API_KEY=...), then run `reasonix run \"your task\"`.",
+	NextHint:              "Next: set your API key with `reasonix setup`, then run `reasonix run \"your task\"`.",
 	ConfirmReconfigureFmt: "%s already exists. Reconfigure and overwrite?",
 	KeepingExisting:       "Keeping existing config.",
 	NotOverwritingFmt:     "%s already exists; not overwriting",

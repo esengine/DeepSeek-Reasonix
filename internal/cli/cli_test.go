@@ -180,6 +180,16 @@ func isolateCLIConfigHome(t *testing.T) string {
 	return home
 }
 
+func setCLITestCredential(t *testing.T, key, value string) {
+	t.Helper()
+	if _, err := config.SetCredential(key, value); err != nil {
+		t.Fatalf("SetCredential(%s): %v", key, err)
+	}
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("Unsetenv(%s): %v", key, err)
+	}
+}
+
 func TestMCPMigrationWaitsForCLIWorkspace(t *testing.T) {
 	isolateCLIConfigHome(t)
 	cwd := mustGetwd(t)

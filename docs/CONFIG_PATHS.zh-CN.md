@@ -17,7 +17,7 @@
 | 数据 | 路径 |
 | --- | --- |
 | 全局配置 | `<Reasonix home>/config.toml` |
-| 全局 credentials 文件 fallback | `<Reasonix home>/credentials` |
+| 全局 credentials `.env` | `<Reasonix home>/.env` |
 | 全局斜杠命令 | `<Reasonix home>/commands/` |
 | 全局 skills | `<Reasonix home>/skills/` |
 | 全局 hooks | `<Reasonix home>/settings.json` |
@@ -26,14 +26,10 @@
 | 归档 | `<Reasonix home>/archive/` |
 | 记忆 | `<Reasonix home>/memory/` 与 `<Reasonix home>/projects/` |
 
-全局 credentials 默认使用 `credentials_store = "auto"`。在 auto 模式下，
-Reasonix 会优先尝试系统密钥库；如果 keyring 不可用，再 fallback 到
-`<Reasonix home>/credentials`。设置 `credentials_store = "keyring"` 可强制使用系统密钥库；
-设置 `credentials_store = "file"` 可始终使用文件 fallback。`REASONIX_CREDENTIALS_STORE`
-可在 CI、测试或便携安装中覆盖该模式。
-
-setup 向导、桌面端或 CLI 缺 key 提示保存的新 API key 都会写入上面的凭据存储。
-项目 `.env` 仍会优先读取，用于兼容旧项目或用户主动做项目级覆盖；但 Reasonix 不会把新密钥写入项目 `.env`。
+setup 向导、桌面端或 CLI 缺 key 提示保存的新 API key 都会写入
+`<Reasonix home>/.env`。这个全局 `.env` 是 provider credentials 的唯一运行时来源：
+项目 `.env`、home `.env`、继承的 shell 环境变量和 Windows 环境变量都不会覆盖
+Reasonix 保存的 key。`credentials_store` 已弃用，仅作为旧配置字段保留。
 
 缓存仍放在系统缓存目录，例如 macOS 的 `~/Library/Caches/reasonix`、
 Linux 的 `$XDG_CACHE_HOME/reasonix` 或 `~/.cache/reasonix`、Windows 的
@@ -71,7 +67,9 @@ Windows:     %APPDATA%\reasonix\config.toml
 ~/.reasonix/config.json
 ```
 
-旧 credentials、memory 文件和 sessions 也会在新目标不存在时导入到配置的 credential store / Reasonix home。若新的全局配置已经存在，则新配置优先；旧配置只作为兼容 fallback 保留。
+旧 credentials 文件或旧 keyring 里的密钥会在新目标尚未包含该 key 时导入到
+`<Reasonix home>/.env`。旧 memory 文件和 sessions 会在新目标不存在时导入到
+Reasonix home。若新的全局配置已经存在，则新配置优先；旧配置只作为兼容 fallback 保留。
 
 从 **v1.9.1** 开始，Reasonix 还会在升级时把已知旧路径、legacy `config.json`、
 桌面端已登记项目和恢复 tabs 对应项目里的 MCP 配置汇总补齐到全局

@@ -9,9 +9,7 @@ import (
 	"reasonix/internal/fileutil"
 )
 
-// credentialsPath is the file fallback for the reasonix-owned global credential
-// store. The settings panel writes through config.SetCredential instead, so
-// systems with a usable keyring do not need to store secrets in this file.
+// credentialsPath is the reasonix-owned global .env used for provider keys.
 func credentialsPath() string {
 	if p := config.UserCredentialsPath(); p != "" {
 		return p
@@ -22,8 +20,8 @@ func credentialsPath() string {
 	return ".env"
 }
 
-// upsertDotEnv stores KEY=value in the configured global credential store and
-// applies it to the running process so a rebuild picks it up without a restart.
+// upsertDotEnv stores KEY=value in Reasonix's global .env and applies it to the
+// running process so a rebuild picks it up without a restart.
 func upsertDotEnv(key, value string) error {
 	_, err := config.SetCredential(key, value)
 	return err
@@ -145,12 +143,9 @@ func removeEnvFile(path, key string) error {
 	return os.Unsetenv(key)
 }
 
-// promoteProviderKeysToCredentials copies any configured provider api_key_env that
-// currently resolves (from a project .env, ~/.env, or the OS env) into the global
-// credential store when it isn't there yet, so a key set for one workspace follows
-// the user across every project. Promoted keys are then stripped from ~/.env so the
-// credential store is the single source of truth; a project's own .env is
-// user-owned and left untouched.
+// promoteProviderKeysToCredentials copies any already-loaded provider api_key_env
+// into Reasonix's global .env when it isn't there yet. This is only a legacy
+// desktop upgrade bridge; normal runtime credential resolution uses global .env.
 func promoteProviderKeysToCredentials(cfg *config.Config) {
 	for _, p := range cfg.Providers {
 		env := strings.TrimSpace(p.APIKeyEnv)

@@ -2681,18 +2681,17 @@ func LegacyUserConfigPaths() []string {
 // Windows.
 func ReasonixHomeDir() string { return reasonixHomeDir() }
 
-// UserCredentialsPath is the reasonix-owned global secrets file under Reasonix
-// home. It holds KEY=value lines loaded into the environment by loadDotEnv. The
-// setup wizard writes API keys here, deliberately NOT named .env: keys never
-// land in a project's own .env (which can't be selectively gitignored), never
-// get committed, and resolve from any working directory. "" when Reasonix home
-// can't be resolved.
+// UserCredentialsPath is the reasonix-owned global .env file under Reasonix
+// home. It is the single source for provider credentials saved by Reasonix, so
+// stale shell, Windows, project, or home env vars cannot silently override keys
+// the user saved through setup or settings. "" when Reasonix home can't be
+// resolved.
 func UserCredentialsPath() string {
 	dir := userSupportDir()
 	if dir == "" {
 		return ""
 	}
-	return filepath.Join(dir, "credentials")
+	return filepath.Join(dir, ".env")
 }
 
 // ArchiveDir is where compacted conversation history is archived for
@@ -2953,7 +2952,11 @@ func (e *ProviderEntry) APIKey() string {
 	if e.APIKeyEnv == "" {
 		return ""
 	}
-	return os.Getenv(e.APIKeyEnv)
+	value, _, ok := storedCredentialValue(e.APIKeyEnv)
+	if !ok {
+		return ""
+	}
+	return value
 }
 
 // RequiresAPIKey reports whether this provider should be hidden/validated when

@@ -71,7 +71,7 @@ func TestACPInitializesWithoutAPIKey(t *testing.T) {
 
 func TestACPFactoryLoadsSessionCwdProjectConfig(t *testing.T) {
 	home := isolateCLIConfigHome(t)
-	t.Setenv("REASONIX_TEST_KEY", "test-key")
+	setCLITestCredential(t, "REASONIX_TEST_KEY", "test-key")
 	project := t.TempDir()
 	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
 default_model = "local"
@@ -112,7 +112,7 @@ api_key_env = "REASONIX_TEST_KEY"
 
 func TestACPFactoryClearsEffortOverrideForUnsupportedModel(t *testing.T) {
 	isolateCLIConfigHome(t)
-	t.Setenv("REASONIX_TEST_KEY", "test-key")
+	setCLITestCredential(t, "REASONIX_TEST_KEY", "test-key")
 	project := t.TempDir()
 	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
 default_model = "reasoner/reasoning-model"

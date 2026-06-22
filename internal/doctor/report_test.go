@@ -10,6 +10,15 @@ import (
 	"reasonix/internal/config"
 )
 
+func isolateDoctorConfigHome(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+}
+
 func TestRedactHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)        // os.UserHomeDir on unix
@@ -80,6 +89,7 @@ func TestCollectReportRedactsSecrets(t *testing.T) {
 }
 
 func TestCollectReportDoesNotRequireAPIKey(t *testing.T) {
+	isolateDoctorConfigHome(t)
 	t.Setenv("DEEPSEEK_API_KEY", "")
 
 	cfg := config.Default()

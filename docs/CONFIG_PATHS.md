@@ -20,7 +20,7 @@ installations. Normal users should not need it.
 | Data | Path |
 | --- | --- |
 | Global config | `<Reasonix home>/config.toml` |
-| Global credentials file fallback | `<Reasonix home>/credentials` |
+| Global credentials `.env` | `<Reasonix home>/.env` |
 | Global slash commands | `<Reasonix home>/commands/` |
 | Global skills | `<Reasonix home>/skills/` |
 | Global hooks | `<Reasonix home>/settings.json` |
@@ -29,17 +29,12 @@ installations. Normal users should not need it.
 | Archives | `<Reasonix home>/archive/` |
 | Memory | `<Reasonix home>/memory/` and `<Reasonix home>/projects/` |
 
-Global credentials use `credentials_store = "auto"` by default. In auto mode,
-Reasonix tries the OS credential store first and falls back to
-`<Reasonix home>/credentials` when the keyring is unavailable. Set
-`credentials_store = "keyring"` to require the OS credential store, or
-`credentials_store = "file"` to always use the file fallback. `REASONIX_CREDENTIALS_STORE`
-can override the mode for CI, tests, or portable installs.
-
-New API keys saved by the setup wizard, the desktop app, or an interactive
-missing-key prompt are written to the configured credential store above. Project
-`.env` files are still loaded first for compatibility and deliberate per-project
-overrides, but Reasonix does not write new keys into a project `.env`.
+Provider API keys saved by the setup wizard, the desktop app, or an interactive
+missing-key prompt are written to `<Reasonix home>/.env`. This global `.env` is
+the single runtime source for provider credentials: project `.env`, home `.env`,
+inherited shell variables, and Windows environment variables do not override the
+keys saved through Reasonix. The old `credentials_store` option is ignored for
+new writes and remains only as a deprecated config field.
 
 Caches remain in the OS cache directory, for example
 `~/Library/Caches/reasonix` on macOS, `$XDG_CACHE_HOME/reasonix` or
@@ -81,10 +76,12 @@ Legacy config sources include:
 ~/.reasonix/config.json
 ```
 
-Legacy credentials, memory files, and sessions are also imported into the
-configured credential store / Reasonix home when the new destination does not
-already exist. If the new global config already exists, it wins and legacy
-config files are only kept as compatibility fallbacks.
+Legacy credentials from older Reasonix credential files or the former keyring
+store are imported into `<Reasonix home>/.env` when the new destination does not
+already contain that key. Legacy memory files and sessions are imported into
+Reasonix home when the new destination does not already exist. If the new global
+config already exists, it wins and legacy config files are only kept as
+compatibility fallbacks.
 
 Starting in **v1.9.1**, Reasonix also backfills MCP servers from known legacy
 paths, legacy `config.json`, desktop-registered projects, and restored tab

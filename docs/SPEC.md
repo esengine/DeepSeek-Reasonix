@@ -450,12 +450,11 @@ at `~/.reasonix/config.toml` on macOS/Linux and
 [Configuration paths](./CONFIG_PATHS.md) for migration and related data paths.
 Fields marked user/global only, including agent step limits, are not overridden
 by project `reasonix.toml`.
-Secrets come from the environment via `api_key_env` and are never stored in
-config files. `credentials_store = "auto"` prefers the OS credential store and
-falls back to the file under Reasonix home. A `.env` in the working directory is
-loaded if present for compatibility and explicit per-project overrides, but
-Reasonix-created API keys are written to the configured credential store rather
-than a project `.env`. Step-limit preferences belong in the user config.
+Secrets are referenced by `api_key_env` and are never stored in config files.
+Reasonix-created API keys are written to and loaded from the single global
+`<Reasonix home>/.env` file. Project `.env`, home `.env`, and inherited
+environment variables do not override saved provider keys. Step-limit
+preferences belong in the user config.
 Project `reasonix.toml` does not override `agent.max_steps` or
 `agent.planner_max_steps`.
 

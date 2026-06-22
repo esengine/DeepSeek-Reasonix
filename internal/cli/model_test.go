@@ -12,9 +12,9 @@ import (
 // provider/model refs (built-in defaults when no reasonix.toml is present), and
 // only those whose provider API key is set.
 func TestModelRefsFromConfig(t *testing.T) {
-	t.Chdir(t.TempDir()) // no reasonix.toml → built-in default providers
+	isolateCLIConfigHome(t) // no reasonix.toml → built-in default providers
 	// Only DeepSeek keyed → MiMo refs must be filtered out.
-	t.Setenv("DEEPSEEK_API_KEY", "test-key")
+	setCLITestCredential(t, "DEEPSEEK_API_KEY", "test-key")
 	t.Setenv("MIMO_API_KEY", "")
 	refs := modelRefs()
 	if len(refs) == 0 {
@@ -33,7 +33,7 @@ func TestModelRefsFromConfig(t *testing.T) {
 // TestModelRefsSkipsUnconfigured verifies that with no provider keys set, the
 // picker offers nothing rather than listing models the user can't select.
 func TestModelRefsSkipsUnconfigured(t *testing.T) {
-	t.Chdir(t.TempDir())
+	isolateCLIConfigHome(t)
 	t.Setenv("DEEPSEEK_API_KEY", "")
 	t.Setenv("MIMO_API_KEY", "")
 	if refs := modelRefs(); len(refs) != 0 {
@@ -44,8 +44,8 @@ func TestModelRefsSkipsUnconfigured(t *testing.T) {
 // TestModelArgCompletion verifies "/model " completes to the configured refs
 // through the shared completion path.
 func TestModelArgCompletion(t *testing.T) {
-	t.Chdir(t.TempDir())
-	t.Setenv("DEEPSEEK_API_KEY", "test-key")
+	isolateCLIConfigHome(t)
+	setCLITestCredential(t, "DEEPSEEK_API_KEY", "test-key")
 	m := newTestChatTUI()
 	items, _, ok := m.slashArgItems("/model ")
 	if !ok || len(items) == 0 {
@@ -60,7 +60,7 @@ func TestModelArgCompletion(t *testing.T) {
 // next startup read the global default.
 func TestPersistModelWritesDefaultModel(t *testing.T) {
 	isolateUserConfig(t)
-	t.Setenv("DEEPSEEK_API_KEY", "test-key")
+	setCLITestCredential(t, "DEEPSEEK_API_KEY", "test-key")
 	t.Setenv("MIMO_API_KEY", "")
 
 	m := newTestChatTUI()
@@ -83,7 +83,7 @@ func TestPersistModelWritesDefaultModel(t *testing.T) {
 // memory switch still goes through.
 func TestPersistModelRejectsUnknownRef(t *testing.T) {
 	isolateUserConfig(t)
-	t.Setenv("DEEPSEEK_API_KEY", "test-key")
+	setCLITestCredential(t, "DEEPSEEK_API_KEY", "test-key")
 
 	m := newTestChatTUI()
 	m.persistModel("ghost/never-existed")

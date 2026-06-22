@@ -1166,12 +1166,12 @@ func NewProvider(e *config.ProviderEntry) (provider.Provider, error) {
 // NewProviderWithProxy builds a provider.Provider with the configured ordinary
 // network proxy settings.
 func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (provider.Provider, error) {
-	keyResolution := config.ResolveCredential(e.APIKeyEnv)
+	keyResolution := config.ResolveCredentialForRootGlobalFirst(".", e.APIKeyEnv)
 	return provider.New(e.Kind, provider.Config{
 		Name:    e.Name,
 		BaseURL: e.BaseURL,
 		Model:   e.Model,
-		APIKey:  e.APIKey(),
+		APIKey:  keyResolution.Value,
 		// Pass the key's env var so auth failures can name where to fix it, plus
 		// provider-kind-specific knobs. EffectiveEffort applies a configured
 		// default_effort when the user has not explicitly selected /effort.

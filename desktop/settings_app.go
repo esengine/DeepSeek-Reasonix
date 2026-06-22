@@ -20,7 +20,7 @@ import (
 // resolved config and applies edits through internal/config/edit.go (the
 // purpose-built mutation API), then rebuilds the controller so the change takes
 // effect live — the same snapshot→reload→resume pattern as SetModel. Secrets are
-// the exception: they go to the global credential store (upsertDotEnv), since
+// the exception: they go to Reasonix's global .env (upsertDotEnv), since
 // config stores only the env-var name, not the key.
 
 // --- read ---
@@ -181,7 +181,7 @@ type SettingsView struct {
 
 // DesktopStartupSettingsView is the lightweight Settings subset needed during
 // frontend startup. It deliberately excludes providers and credential state so
-// slow keychain/env resolution stays off the first-render path.
+// credential file resolution stays off the first-render path.
 type DesktopStartupSettingsView struct {
 	Bot                BotSettingsView `json:"bot"`
 	DesktopLanguage    string          `json:"desktopLanguage"`
@@ -819,18 +819,6 @@ func (a *App) saveProviderCredential(apiKeyEnv, value string) (string, error) {
 }
 
 func providerCredentialShadowWarning(apiKeyEnv, value, root string, before config.CredentialResolution, beforeEnvSet bool, beforeEnvValue string) string {
-	if beforeEnvSet && beforeEnvValue != value {
-		return fmt.Sprintf("saved %s to Reasonix credentials, but an existing environment variable with the same name can override it after restart; update or remove that environment variable", apiKeyEnv)
-	}
-	if before.Set && before.Source.Kind == config.CredentialSourceEnvironment && before.Value != value {
-		return fmt.Sprintf("saved %s to Reasonix credentials, but an existing environment variable with the same name can override it after restart; update or remove that environment variable", apiKeyEnv)
-	}
-	current := config.ResolveCredentialForRoot(root, apiKeyEnv)
-	for _, source := range current.Shadowed {
-		if source.Kind == config.CredentialSourceProjectEnv {
-			return fmt.Sprintf("saved %s to Reasonix credentials, but this workspace's project .env also defines %s and can override it after restart; update or remove that project .env entry", apiKeyEnv, apiKeyEnv)
-		}
-	}
 	return ""
 }
 
@@ -1502,7 +1490,7 @@ func (a *App) deleteProviderAndRetargetTabs(name string) error {
 	return nil
 }
 
-// SetProviderKey writes a secret to the global credential store under the given
+// SetProviderKey writes a secret to Reasonix's global .env under the given
 // env-var name (the one a provider's api_key_env points at) and rebuilds so it
 // resolves immediately.
 func (a *App) SetProviderKey(apiKeyEnv, value string) (string, error) {
@@ -1576,7 +1564,7 @@ func (a *App) ensureProviderAccessForKey(apiKeyEnv string) error {
 	return cfg.SaveTo(path)
 }
 
-// ClearProviderKey removes a provider secret from the global credential store
+// ClearProviderKey removes a provider secret from Reasonix's global .env
 // and rebuilds so the provider immediately becomes unauthenticated.
 func (a *App) ClearProviderKey(apiKeyEnv string) error {
 	if strings.TrimSpace(apiKeyEnv) == "" {

@@ -7,7 +7,8 @@ import (
 
 func testModelFallbackConfig(t *testing.T) *Config {
 	t.Helper()
-	t.Setenv("REASONIX_TEST_KEY", "sk-test")
+	isolateTestCredentials(t)
+	setTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
 	t.Setenv("REASONIX_TEST_EMPTY", "")
 
 	c := Default()

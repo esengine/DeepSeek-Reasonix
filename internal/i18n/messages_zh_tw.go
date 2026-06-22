@@ -20,7 +20,7 @@ var ChineseTraditional = Messages{
 	StepSetKey:      "設定 API key",
 
 	InitHint:       "專案記憶（AGENTS.md）在會話內由模型生成：執行 `reasonix`，然後 `/init` —— 模型會分析程式碼庫並寫入。設定請用 `reasonix setup`。",
-	StepSetKeyHint: "執行 `reasonix setup`，或 export DEEPSEEK_API_KEY=…",
+	StepSetKeyHint: "執行 `reasonix setup` 儲存 DEEPSEEK_API_KEY",
 	StepChatDesc:   "互動式會話",
 	StepRunDesc:    "執行單次任務",
 	HelpFooter:     "reasonix help · 檢視全部命令",
@@ -249,7 +249,7 @@ var ChineseTraditional = Messages{
 	SetupComplete:         "設定完成。",
 	SetupCancelled:        "設定已取消。",
 	TryHintFmt:            "試試: %s",
-	NextHint:              "下一步：設定 API key（執行 `reasonix setup` 或 export DEEPSEEK_API_KEY=...），然後執行 `reasonix run \"你的任務\"`。",
+	NextHint:              "下一步：執行 `reasonix setup` 設定 API key，然後執行 `reasonix run \"你的任務\"`。",
 	ConfirmReconfigureFmt: "%s 已存在。重新設定並覆蓋？",
 	KeepingExisting:       "保留原設定不變。",
 	NotOverwritingFmt:     "%s 已存在，不覆蓋",

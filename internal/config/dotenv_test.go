@@ -6,10 +6,9 @@ import (
 	"testing"
 )
 
-// TestLoadDotEnvFallsBackToHome proves the unified-key behaviour: the working
-// directory's .env is still read as a fallback, and a key only present in ~/.env
-// is picked up too. Existing env vars beat file-backed credential sources.
-func TestLoadDotEnvFallsBackToHome(t *testing.T) {
+// TestLoadDotEnvIgnoresProjectAndHomeEnv proves provider credentials come only
+// from Reasonix's global .env, not project or home .env fallbacks.
+func TestLoadDotEnvIgnoresProjectAndHomeEnv(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 
@@ -24,25 +23,42 @@ func TestLoadDotEnvFallsBackToHome(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Setenv("USERPROFILE", home) // os.UserHomeDir reads HOME on Unix and USERPROFILE on Windows.
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
 
-	// Start clean so the file values are what land (Setenv auto-restores).
+	cred := UserCredentialsPath()
+	if cred == "" {
+		t.Skip("user config dir unresolved on this platform")
+	}
+	if err := os.MkdirAll(filepath.Dir(cred), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cred, []byte("KEY_GLOBAL=from_global\nKEY_SHARED=global_wins\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
 	t.Setenv("KEY_CWD", "")
 	os.Unsetenv("KEY_CWD")
 	t.Setenv("KEY_HOME", "")
 	os.Unsetenv("KEY_HOME")
+	t.Setenv("KEY_GLOBAL", "")
+	os.Unsetenv("KEY_GLOBAL")
 	t.Setenv("KEY_SHARED", "")
 	os.Unsetenv("KEY_SHARED")
 
 	loadDotEnv()
 
-	if got := os.Getenv("KEY_CWD"); got != "from_cwd" {
-		t.Errorf("cwd-only key not loaded: KEY_CWD=%q", got)
+	if got := os.Getenv("KEY_GLOBAL"); got != "from_global" {
+		t.Errorf("global key not loaded: KEY_GLOBAL=%q want from_global", got)
 	}
-	if got := os.Getenv("KEY_HOME"); got != "from_home" {
-		t.Errorf("~/.env fallback failed: KEY_HOME=%q want from_home", got)
+	if got := os.Getenv("KEY_CWD"); got != "" {
+		t.Errorf("project .env should be ignored: KEY_CWD=%q", got)
 	}
-	if got := os.Getenv("KEY_SHARED"); got != "cwd_wins" {
-		t.Errorf("cwd .env should take precedence over ~/.env: KEY_SHARED=%q want cwd_wins", got)
+	if got := os.Getenv("KEY_HOME"); got != "" {
+		t.Errorf("home .env should be ignored: KEY_HOME=%q", got)
+	}
+	if got := os.Getenv("KEY_SHARED"); got != "global_wins" {
+		t.Errorf("global .env should be the only active shared key: KEY_SHARED=%q want global_wins", got)
 	}
 }
 
@@ -76,8 +92,7 @@ func TestLoadDotEnvReadsGlobalCredentials(t *testing.T) {
 
 	t.Setenv("KEY_GLOBAL", "")
 	os.Unsetenv("KEY_GLOBAL")
-	t.Setenv("KEY_SHARED", "")
-	os.Unsetenv("KEY_SHARED")
+	t.Setenv("KEY_SHARED", "from_env")
 
 	loadDotEnv()
 
@@ -85,7 +100,7 @@ func TestLoadDotEnvReadsGlobalCredentials(t *testing.T) {
 		t.Errorf("global credentials not loaded: KEY_GLOBAL=%q want from_credentials", got)
 	}
 	if got := os.Getenv("KEY_SHARED"); got != "global_wins" {
-		t.Errorf("global credentials should win over project .env: KEY_SHARED=%q want global_wins", got)
+		t.Errorf("global credentials should win over inherited env and project .env: KEY_SHARED=%q want global_wins", got)
 	}
 }
 
@@ -388,23 +403,26 @@ func TestProjectConfigCannotOverrideCredentialStoreMode(t *testing.T) {
 	}
 }
 
-// TestLoadDotEnvDoesNotOverrideEnv confirms an already-set environment variable
-// beats both .env files (the documented first-wins contract).
-func TestLoadDotEnvDoesNotOverrideEnv(t *testing.T) {
-	cwd := t.TempDir()
-	if err := os.WriteFile(filepath.Join(cwd, ".env"), []byte("PINNED=from_file\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(cwd)
+// TestLoadDotEnvOverridesStaleEnv confirms the Reasonix global .env is the
+// source of truth even when the process inherited a stale environment variable.
+func TestLoadDotEnvOverridesStaleEnv(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	if err := os.MkdirAll(filepath.Dir(UserCredentialsPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(UserCredentialsPath(), []byte("PINNED=from_file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("PINNED", "from_env")
 
 	loadDotEnv()
 
-	if got := os.Getenv("PINNED"); got != "from_env" {
-		t.Errorf("env var must win over .env: PINNED=%q want from_env", got)
+	if got := os.Getenv("PINNED"); got != "from_file" {
+		t.Errorf("global .env must win over inherited env: PINNED=%q want from_file", got)
 	}
 }

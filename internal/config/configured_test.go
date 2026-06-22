@@ -6,7 +6,8 @@ import "testing"
 // selected. Providers with no api_key_env are explicit no-auth providers; if an
 // env var is configured, it must resolve to a non-empty value.
 func TestProviderConfigured(t *testing.T) {
-	t.Setenv("REASONIX_TEST_KEY", "secret")
+	isolateTestCredentials(t)
+	setTestCredential(t, "REASONIX_TEST_KEY", "secret")
 	t.Setenv("REASONIX_TEST_EMPTY", "")
 
 	cases := []struct {

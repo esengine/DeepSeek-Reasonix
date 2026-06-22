@@ -30,11 +30,10 @@ built-in defaults**. Starting with **Reasonix v1.8.1**, the user config lives at
 [Configuration paths](./CONFIG_PATHS.md) for migration and related data paths.
 Fields marked user/global only, including agent step limits, are not overridden
 by `./reasonix.toml`.
-Secrets come from the environment via `api_key_env` and are never stored in
-config files. Credentials default to `credentials_store = "auto"`, which prefers
-the OS credential store and falls back to the file under Reasonix home. New keys
-saved by Reasonix are not written to a project `.env`; project `.env` files are
-only read for compatibility and explicit per-project overrides.
+Secrets are referenced by `api_key_env` and are never stored in config files.
+Reasonix loads provider keys from the single global `<Reasonix home>/.env` file
+that setup/settings maintain. Project `.env`, home `.env`, and inherited
+environment variables do not override saved provider keys.
 
 For the desktop and CLI usage of visible reasoning language, see
 [Reasoning language](./REASONING_LANGUAGE.md).

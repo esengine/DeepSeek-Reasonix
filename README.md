@@ -89,8 +89,7 @@ make cross      # -> dist/ (darwin|linux|windows × amd64|arm64)
 ## Quick start
 
 ```sh
-reasonix setup                      # config wizard → ./reasonix.toml
-export DEEPSEEK_API_KEY=sk-...      # or let setup save it to the credential store
+reasonix setup                      # config wizard; saves API keys to Reasonix home .env
 reasonix                            # then run /init to generate AGENTS.md (project memory)
 reasonix run "implement the TODOs in main.go"
 reasonix run --model deepseek-pro "add unit tests for this function"
@@ -116,10 +115,10 @@ Resolution order is **flag > `./reasonix.toml` > the user config file >
 built-in defaults**; starting with **Reasonix v1.8.1**, the user file lives at
 `~/.reasonix/config.toml` on macOS/Linux and
 `%AppData%\reasonix\config.toml` on Windows. See
-**[Configuration paths](./docs/CONFIG_PATHS.md)** for migration details. Secrets come from the environment via `api_key_env`, are
-never written to config files, and new keys default to the OS credential store
-with a Reasonix-owned file fallback. Project `.env` files are read as a
-compatibility override, but Reasonix does not write new keys there. Permissions, the sandbox, plugins (MCP), slash
+**[Configuration paths](./docs/CONFIG_PATHS.md)** for migration details. Secrets are referenced by `api_key_env`, are
+never written to config files, and are loaded from the single global
+`<Reasonix home>/.env` file that setup/settings maintain. Project `.env`, home
+`.env`, and inherited environment variables do not override saved provider keys. Permissions, the sandbox, plugins (MCP), slash
 commands, `@` references, and two-model setup are all in the
 **[Guide](./docs/GUIDE.md)**.
 

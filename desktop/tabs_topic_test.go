@@ -714,7 +714,12 @@ func TestBuildTabControllerUsesPinnedSessionMetaWorkspace(t *testing.T) {
 
 func TestBuildTabControllerIgnoresStaleSessionModelWhenTabModelResolves(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	t.Setenv("REASONIX_TEST_KEY", "sk-test")
+	if _, err := config.SetCredential("REASONIX_TEST_KEY", "sk-test"); err != nil {
+		t.Fatalf("SetCredential: %v", err)
+	}
+	if err := os.Unsetenv("REASONIX_TEST_KEY"); err != nil {
+		t.Fatalf("Unsetenv: %v", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
