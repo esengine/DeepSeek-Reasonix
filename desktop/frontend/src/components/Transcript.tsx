@@ -113,6 +113,7 @@ export function Transcript({
   rewindSignal?: number;
   revealSignal?: number;
 }) {
+  const t = useT();
   const {
     scrollRef,
     stick,
@@ -647,8 +648,8 @@ export function Transcript({
           type="button"
           className="transcript__jump-bottom"
           onClick={() => scrollToBottomAfterLayout(2)}
-          aria-label="Jump to bottom"
-          title="Jump to bottom"
+          aria-label={t("transcript.jumpToBottom")}
+          title={t("transcript.jumpToBottom")}
         >
           <ArrowDown size={18} strokeWidth={2.2} aria-hidden="true" />
         </button>

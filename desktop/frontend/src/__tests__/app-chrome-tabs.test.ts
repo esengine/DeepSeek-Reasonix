@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const testDir = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
 const appChromeSource = readFileSync(resolve(testDir, "../components/AppChrome.tsx"), "utf8");
+const transcriptSource = readFileSync(resolve(testDir, "../components/Transcript.tsx"), "utf8");
 const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 
 let passed = 0;
@@ -110,13 +111,32 @@ ok(
 );
 
 ok(
-  /\{!workbenchChromeHidden && \(/.test(appSource),
+  /\{!appChromeHidden && \(/.test(appSource),
   "workbench skips rendering the top AppChrome row",
 );
 
 ok(
   /topicbar__chrome-btn/.test(appSource),
   "workbench keeps chrome controls in the topic bar",
+);
+
+ok(
+  /const \[transcriptRevealSignal, setTranscriptRevealSignal\] = useState\(0\);/.test(appSource) &&
+    /revealActiveSignal=\{tabRevealSignal\}/.test(appSource) &&
+    /revealSignal=\{transcriptRevealSignal\}/.test(appSource),
+  "transcript bottom reveal is decoupled from tab-strip reveal",
+);
+
+const tabsReorderBlock = appSource.match(/const handleTabsReorder = useCallback\([\s\S]*?\n  \}, \[refreshTabMetas, reorderTabs\]\);/)?.[0] ?? "";
+ok(
+  /setTabRevealSignal/.test(tabsReorderBlock) && !/setTranscriptRevealSignal/.test(tabsReorderBlock),
+  "tab reordering refreshes the tab strip without snapping the transcript",
+);
+
+ok(
+  /aria-label=\{t\("transcript\.jumpToBottom"\)\}/.test(transcriptSource) &&
+    /title=\{t\("transcript\.jumpToBottom"\)\}/.test(transcriptSource),
+  "jump-to-bottom affordance uses localized transcript text",
 );
 
 for (const selector of [

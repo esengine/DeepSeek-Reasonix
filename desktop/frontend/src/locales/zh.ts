@@ -1446,6 +1446,7 @@ export const zh: Record<DictKey, string> = {
   "msg.folderReference": "文件夹 · 工作区引用",
   "turnActions.summary": "总结",
   "turnActions.rewind": "回溯",
+  "transcript.jumpToBottom": "跳到底部",
   "transcript.showEarlierHistory": "展开前 {n} 轮对话",
   "transcript.toolCount": "{n} 个工具",
   "transcript.processed": "已处理",

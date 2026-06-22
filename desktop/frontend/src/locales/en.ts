@@ -1444,6 +1444,7 @@ export const en = {
   "msg.folderReference": "Folder · Workspace reference",
   "turnActions.summary": "Summary",
   "turnActions.rewind": "Rewind",
+  "transcript.jumpToBottom": "Jump to bottom",
   "transcript.showEarlierHistory": "Show {n} earlier turns",
   "transcript.toolCount": "{n} tools",
   "transcript.processed": "Processed",
