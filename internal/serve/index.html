@@ -443,6 +443,7 @@ input,textarea{font:inherit;color:inherit}
     </div>
   </div>
 </div>
+<div class="sidebar-overlay" id="sidebar-overlay"></div>
 <script>
 // ── i18n ──
 const __LANG_PREF = '__LANG__';
@@ -1216,6 +1217,5 @@ document.querySelector('.sidebar')?.addEventListener('click',e=>{
   if(!e.target.closest('.sidebar__item,.session-item,button,a,input,textarea,.session-del'))toggleSidebar(false);
 });
 </script>
-<div class="sidebar-overlay" id="sidebar-overlay"></div>
 </body>
 </html>
