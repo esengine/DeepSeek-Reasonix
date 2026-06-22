@@ -70,6 +70,16 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	}
 	deepseek := protocol == "deepseek" || (protocol == "" && IsDeepSeek(cfg.BaseURL))
 	minimax := protocol == "" && IsMiniMax(cfg.BaseURL)
+	// Read thinking mode from config for generic providers.
+	thinkingRaw, _ := cfg.Extra["thinking"].(string)
+	thinkingType := strings.ToLower(strings.TrimSpace(thinkingRaw))
+	switch thinkingType {
+	case "enabled", "disabled":
+	case "adaptive":
+		thinkingType = "" // omit for generic providers
+	default:
+		thinkingType = "" // unrecognised → no override
+	}
 	switch {
 	case protocol == "none":
 		effort = ""
@@ -77,9 +87,12 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		switch effort {
 		case "", "off": // "off" is a retired level (disabled thinking); fall back to the default depth
 			effort = "high"
+		case "disabled":
+			effort = ""
+			thinkingType = "disabled"
 		case "high", "max":
 		default:
-			return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort must be high or max", name)
+			return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort must be high, max, or disabled", name)
 		}
 	case minimax:
 		// M3's knob is binary. The config effort layer normalises user input
@@ -150,6 +163,7 @@ type client struct {
 	vision       bool          // model accepts image input — embed attached images as image_url parts
 	visionDetail string        // image_url detail hint (low|high); "" = auto/omit
 	effort       string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
+	thinkingType string        // "enabled"/"disabled"/"" for generic OpenAI-compatible; "" = no override
 	idleTimeout  time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
 	authed       atomic.Bool   // a request has succeeded — gate transient-401 retry
 }
@@ -308,8 +322,13 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 	switch {
 	case c.deepseek:
 		// DeepSeek's CoT is controlled by `thinking` (always on) plus
-		// `reasoning_effort` for depth. We never disable thinking for DeepSeek.
-		out.Thinking = &thinkingMode{Type: "enabled"}
+		// `reasoning_effort` for depth. When `effort=disabled` or
+		// `thinking=disabled` is configured, disable thinking.
+		if c.thinkingType == "disabled" {
+			out.Thinking = &thinkingMode{Type: "disabled"}
+		} else {
+			out.Thinking = &thinkingMode{Type: "enabled"}
+		}
 	case c.minimax:
 		// M3 uses a single `thinking.type` field with two valid values:
 		// "adaptive" (default, thinking on) and "disabled" (off). Reasoning
@@ -320,6 +339,10 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		}
 		out.Thinking = &thinkingMode{Type: t}
 		out.ReasoningEffort = ""
+	case c.thinkingType != "" && !c.deepseek:
+		// Generic OpenAI-compatible provider with configured thinking mode
+		// (e.g. Zhipu GLM, opencode.ai). DeepSeek is handled above.
+		out.Thinking = &thinkingMode{Type: c.thinkingType}
 	}
 	return out
 }
