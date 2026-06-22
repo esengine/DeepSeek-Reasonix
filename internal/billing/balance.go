@@ -21,12 +21,18 @@ import (
 
 // BalanceEntry configures a provider-specific wallet balance query.
 // Empty Method/ResponsePath falls back to the legacy DeepSeek GET /user/balance.
+// Transform applies a post-extraction operation:
+//
+//	"divide:<n>"          — divide the extracted value by n (e.g. "divide:10000")
+//	"subtract"            — subtract UsagePath value from ResponsePath value (needs UsagePath)
 type BalanceEntry struct {
 	URL          string            // e.g. "https://api.deepseek.com/user/balance"
 	Method       string            // HTTP method; "GET" (default) or "POST"
 	Body         string            // optional JSON body for POST requests
 	Headers      map[string]string // optional custom headers
-	ResponsePath string            // JSONPath expression to extract balance value, e.g. "$.balance_infos[0].total_balance"
+	ResponsePath string            // JSONPath expression to extract balance value
+	UsagePath    string            // optional; for subtract transform, path to usage/consumed value
+	Transform    string            // optional: "divide:<n>" or "subtract"
 	Currency     string            // Currency label for display; "CNY" (default), "USD", etc.
 }
 
@@ -158,9 +164,19 @@ func newFetchWithClient(ctx context.Context, client *http.Client, apiKey string,
 		return decodeDeepSeek(body)
 	}
 	// Extract balance value via simple dot-notation path.
-	val, err := extractJSONPath(body, entry.ResponsePath)
+	valStr, err := extractJSONPath(body, entry.ResponsePath)
 	if err != nil {
 		return nil, fmt.Errorf("balance: extract: %w", err)
+	}
+	val, err := parseFloat(valStr)
+	if err != nil {
+		return nil, fmt.Errorf("balance: parse balance %q: %w", valStr, err)
+	}
+	if entry.Transform != "" || entry.UsagePath != "" {
+		val, err = applyTransform(val, entry.Transform, entry.UsagePath, body)
+		if err != nil {
+			return nil, fmt.Errorf("balance: transform: %w", err)
+		}
 	}
 	currency := entry.Currency
 	if currency == "" {
@@ -169,7 +185,7 @@ func newFetchWithClient(ctx context.Context, client *http.Client, apiKey string,
 	b := &Balance{Available: true}
 	b.Infos = append(b.Infos, Info{
 		Currency:     currency,
-		TotalBalance: val,
+		TotalBalance: formatBalance(val),
 	})
 	return b, nil
 }
@@ -258,6 +274,56 @@ func extractJSONPath(body []byte, path string) (string, error) {
 		b, _ := json.Marshal(v)
 		return string(b), nil
 	}
+}
+
+// applyTransform applies a post-extraction transform to a balance value.
+// Supported transforms:
+//
+//	"divide:<n>" — divide value by n (e.g. "divide:10000")
+//	"subtract"   — subtract usage at usagePath from value (needs non-empty usagePath)
+func applyTransform(val float64, transform, usagePath string, body []byte) (float64, error) {
+	switch {
+	case strings.HasPrefix(transform, "divide:"):
+		divisorStr := strings.TrimPrefix(transform, "divide:")
+		var divisor float64
+		if _, err := fmt.Sscanf(divisorStr, "%f", &divisor); err != nil || divisor == 0 {
+			return 0, fmt.Errorf("invalid divisor %q", divisorStr)
+		}
+		return val / divisor, nil
+
+	case transform == "subtract":
+		if usagePath == "" {
+			return 0, fmt.Errorf("subtract transform requires usage_path")
+		}
+		usageStr, err := extractJSONPath(body, usagePath)
+		if err != nil {
+			return 0, fmt.Errorf("extract usage: %w", err)
+		}
+		usage, err := parseFloat(usageStr)
+		if err != nil {
+			return 0, fmt.Errorf("parse usage %q: %w", usageStr, err)
+		}
+		remaining := val - usage
+		if remaining < 0 {
+			remaining = 0
+		}
+		return remaining, nil
+
+	default:
+		return val, nil
+	}
+}
+
+func parseFloat(s string) (float64, error) {
+	var v float64
+	if _, err := fmt.Sscanf(s, "%f", &v); err != nil {
+		return 0, fmt.Errorf("parse float: %w", err)
+	}
+	return v, nil
+}
+
+func formatBalance(v float64) string {
+	return fmt.Sprintf("%.2f", v)
 }
 
 // symbol maps an ISO currency code to a compact symbol; an unknown code passes

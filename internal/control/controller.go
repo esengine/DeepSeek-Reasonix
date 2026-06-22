@@ -108,6 +108,8 @@ type Controller struct {
 	balanceBody         string
 	balanceResponsePath string
 	balanceCurrency     string
+	balanceTransform    string
+	balanceUsagePath    string
 	balanceHeaders      map[string]string
 	balanceClient       *http.Client
 
@@ -260,6 +262,8 @@ type Options struct {
 	BalanceBody         string
 	BalanceResponsePath string
 	BalanceCurrency     string
+	BalanceTransform    string
+	BalanceUsagePath    string
 	BalanceHeaders      map[string]string
 	BalanceClient       *http.Client
 	// Jobs is the session-scoped background-job manager (nil disables background jobs).
@@ -343,6 +347,8 @@ func New(opts Options) *Controller {
 		balanceBody:            opts.BalanceBody,
 		balanceResponsePath:    opts.BalanceResponsePath,
 		balanceCurrency:        opts.BalanceCurrency,
+		balanceTransform:       opts.BalanceTransform,
+		balanceUsagePath:       opts.BalanceUsagePath,
 		balanceHeaders:         opts.BalanceHeaders,
 		balanceClient:          opts.BalanceClient,
 		jobs:                   opts.Jobs,
@@ -2412,6 +2418,8 @@ func (c *Controller) Balance(ctx context.Context) (*billing.Balance, error) {
 			Body:         c.balanceBody,
 			Headers:      c.balanceHeaders,
 			ResponsePath: c.balanceResponsePath,
+			Transform:    c.balanceTransform,
+			UsagePath:    c.balanceUsagePath,
 			Currency:     c.balanceCurrency,
 		})
 	}

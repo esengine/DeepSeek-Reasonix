@@ -298,3 +298,61 @@ func TestNewFetchPOST(t *testing.T) {
 		t.Fatalf("balance: got %q, want 200.00", b.Infos[0].TotalBalance)
 	}
 }
+
+func TestNewFetchDivideTransform(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"availableBalance": 50000000}`))
+	}))
+	defer srv.Close()
+	b, err := newFetchWithClient(context.Background(), nil, "key", BalanceEntry{
+		URL:          srv.URL,
+		ResponsePath: "$.availableBalance",
+		Transform:    "divide:10000",
+		Currency:     "USD",
+	})
+	if err != nil {
+		t.Fatalf("NewFetch divide: %v", err)
+	}
+	if b.Infos[0].TotalBalance != "5000.00" {
+		t.Fatalf("balance: got %q, want 5000.00", b.Infos[0].TotalBalance)
+	}
+}
+
+func TestNewFetchSubtractTransform(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"total_credits": 100.00, "total_usage": 35.50}`))
+	}))
+	defer srv.Close()
+	b, err := newFetchWithClient(context.Background(), nil, "key", BalanceEntry{
+		URL:          srv.URL,
+		ResponsePath: "$.total_credits",
+		Transform:    "subtract",
+		UsagePath:    "$.total_usage",
+		Currency:     "USD",
+	})
+	if err != nil {
+		t.Fatalf("NewFetch subtract: %v", err)
+	}
+	if b.Infos[0].TotalBalance != "64.50" {
+		t.Fatalf("balance: got %q, want 64.50", b.Infos[0].TotalBalance)
+	}
+}
+
+func TestNewFetchSubtractNegativeIsZero(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"total": 10.00, "used": 99.00}`))
+	}))
+	defer srv.Close()
+	b, err := newFetchWithClient(context.Background(), nil, "key", BalanceEntry{
+		URL:          srv.URL,
+		ResponsePath: "$.total",
+		Transform:    "subtract",
+		UsagePath:    "$.used",
+	})
+	if err != nil {
+		t.Fatalf("NewFetch negative: %v", err)
+	}
+	if b.Infos[0].TotalBalance != "0.00" {
+		t.Fatalf("balance: got %q, want 0.00", b.Infos[0].TotalBalance)
+	}
+}

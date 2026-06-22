@@ -286,6 +286,12 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 				if p.BalanceCurrency != "" && p.BalanceCurrency != "CNY" {
 					fmt.Fprintf(&b, "balance_currency = %q   # optional; \"CNY\" (default), \"USD\", etc.\n", p.BalanceCurrency)
 				}
+				if p.BalanceTransform != "" {
+					fmt.Fprintf(&b, "balance_transform = %q   # optional; \"divide:<n>\" or \"subtract\"\n", p.BalanceTransform)
+				}
+				if p.BalanceUsagePath != "" {
+					fmt.Fprintf(&b, "balance_usage_path = %q   # optional; for subtract transform, JSONPath to usage\n", p.BalanceUsagePath)
+				}
 			}
 			if p.ContextWindow > 0 {
 				fmt.Fprintf(&b, "context_window = %d   # tokens; compaction triggers near this limit\n", p.ContextWindow)
