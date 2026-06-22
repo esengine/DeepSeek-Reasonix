@@ -43,9 +43,12 @@ func TestVerificationTokenValidRequiresConfiguredToken(t *testing.T) {
 		t.Fatal("matching token should be accepted")
 	}
 
+	// An unconfigured verification token is always rejected (fail-closed).
+	// Webhook mode refuses to start without token, this path is dead in
+	// practice; the function never grant access when token is absent.
 	a.cfg.VerificationToken = ""
-	if !a.verificationTokenValid("") {
-		t.Fatal("empty configured verification token should preserve unauthenticated mode")
+	if a.verificationTokenValid("") {
+		t.Fatal("unconfigured verification token should deny all callers (fail-closed)")
 	}
 }
 

@@ -10,6 +10,7 @@ package feishu
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -417,7 +418,10 @@ func cardActionToast(toastType, content string) *callback.CardActionTriggerRespo
 }
 
 func (a *adapter) verificationTokenValid(token string) bool {
-	return a.cfg.VerificationToken == "" || token == a.cfg.VerificationToken
+	if a.cfg.VerificationToken == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(token), []byte(a.cfg.VerificationToken)) == 1
 }
 
 func firstNonEmpty(vals ...string) string {
