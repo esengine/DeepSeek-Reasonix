@@ -59,7 +59,13 @@ import { HeartbeatPanel } from "./custom/features/heartbeat/HeartbeatPanel";
 import "./custom/features/heartbeat/heartbeat.css";
 import { CopyButton } from "./components/CopyButton";
 import { parseTodos } from "./lib/tools";
-import { shouldShowTodoPanel, todoDismissalKey } from "./lib/todoVisibility";
+import {
+  dismissedTodoKeyForScope,
+  scopedTodoDismissalKey,
+  shouldShowTodoPanel,
+  todoDismissalKey,
+  todoDismissalScope,
+} from "./lib/todoVisibility";
 import {
   type BotConnectionView,
   type BotRuntimeStatusView,
@@ -1380,9 +1386,24 @@ export default function App() {
   }, [state.items]);
   const todoItem = todoEntry?.item ?? null;
   const todos = useMemo(() => (todoItem ? parseTodos(todoItem.args) : []), [todoItem]);
-  const [dismissedTodo, setDismissedTodo] = useState<string | null>(null);
+  const [dismissedTodoKeys, setDismissedTodoKeys] = useState<Set<string>>(() => new Set());
   const todoKey = useMemo(() => todoDismissalKey(todos), [todos]);
+  const todoScope = useMemo(
+    () => todoDismissalScope({ activeTab, activeTabId, eventChannel: state.meta?.eventChannel }),
+    [activeTab, activeTabId, state.meta?.eventChannel],
+  );
+  const scopedTodoKey = useMemo(() => scopedTodoDismissalKey(todoScope, todoKey), [todoKey, todoScope]);
+  const dismissedTodo = dismissedTodoKeyForScope(todoScope, dismissedTodoKeys, todoKey);
   const showTodos = shouldShowTodoPanel(todoKey, dismissedTodo, todos);
+  const dismissTodos = useCallback(() => {
+    if (!scopedTodoKey) return;
+    setDismissedTodoKeys((current) => {
+      if (current.has(scopedTodoKey)) return current;
+      const next = new Set(current);
+      next.add(scopedTodoKey);
+      return next;
+    });
+  }, [scopedTodoKey]);
 
   const sessionTitle = topicTitle(activeTab);
   const sessionHasContent = state.items.length > 0 || Boolean(state.live?.text || state.live?.reasoning);
@@ -3083,7 +3104,7 @@ export default function App() {
 
           {!sidebarImDetailConnection && (
           <footer className="footer" ref={footerRef}>
-            {showTodos && <TodoPanel todos={todos} onDismiss={() => setDismissedTodo(todoKey)} />}
+            {showTodos && <TodoPanel todos={todos} onDismiss={dismissTodos} />}
             {rewindState && (
               <UndoRewindBanner
                 meta={{
