@@ -17,6 +17,7 @@ import (
 const (
 	maxGoalAutoTurns  = 50
 	maxGoalIdleTurns  = 2
+	maxSelfCheckRounds = 3
 	goalContinueTurn  = "Continue pursuing the active goal. If it is complete, provide the concise final result and end with [goal:complete]. If it is truly blocked on a user-owned decision after trying sensible defaults, end with [goal:blocked:<short reason>]. Otherwise do the next useful work and end with [goal:continue]."
 	goalSelfCheckTurn = "The agent signaled goal completion and all tasks are marked done. Before finalizing, perform a brief quality self-check:\n1. Verify any changed files compile or parse correctly\n2. Run the relevant tests if applicable\n3. Confirm the original requirements are met\nIf everything checks out, signal [goal:complete]. If issues are found, fix them and signal [goal:complete] when done."
 )
@@ -42,6 +43,7 @@ type goalMachine struct {
 	intercepts    int
 	strict        bool
 	selfCheckDone bool
+	selfCheckCount int
 	idleTurns     int
 
 	// statePath is the persisted goal-state sidecar; empty disables persistence.
@@ -137,7 +139,7 @@ func (g *goalMachine) set(goal string, mode GoalResearchMode, todos []evidence.T
 	}
 	g.turns, g.blocks, g.block = 0, 0, ""
 	g.interceptMsg, g.intercepts = "", 0
-	g.selfCheckDone, g.idleTurns, g.strict = false, 0, false
+	g.selfCheckDone, g.selfCheckCount, g.idleTurns, g.strict = false, 0, 0, false
 	if goal == "" {
 		g.goal, g.status, g.researchMode = "", GoalStatusStopped, GoalResearchAuto
 	} else {
@@ -164,6 +166,7 @@ func (g *goalMachine) stop(status string, todos []evidence.TodoItem) (string, []
 	g.interceptMsg = ""
 	g.intercepts = 0
 	g.selfCheckDone = false
+	g.selfCheckCount = 0
 	g.idleTurns = 0
 	return g.buildStateLocked(todos)
 }
@@ -203,11 +206,24 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 		// Todos are all done — in strict mode run self-check before final
 		// completion. Non-strict mode completes immediately.
 		if g.strict && !g.selfCheckDone {
+			// First self-check attempt.
 			g.selfCheckDone = true
+			g.selfCheckCount++
 			g.interceptMsg = goalSelfCheckTurn
 			break
 		}
-		// Self-check passed — complete the goal.
+		if g.strict && g.selfCheckDone && g.selfCheckCount < maxSelfCheckRounds {
+			// Goal re-completed after self-check. If self-check already ran
+			// (selfCheckDone=true, count >= 1), the agent had its chance to
+			// fix issues — let it complete now. Only re-trigger self-check if
+			// the counter says there are rounds left (should not reach here
+			// since selfCheckDone stays true, but guard for safety).
+		}
+		if g.strict && g.selfCheckCount >= maxSelfCheckRounds {
+			// Hit the self-check limit — force complete.
+			notice = "goal complete (self-check limit reached)"
+		}
+		// Self-check passed or skipped — complete the goal.
 		g.intercepts = 0
 		g.selfCheckDone = false
 		g.idleTurns = 0
@@ -236,7 +252,6 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 		g.blocks = 0
 		g.block = ""
 		g.intercepts = 0
-		g.selfCheckDone = false
 		g.idleTurns = 0
 	}
 	// Idle detection: if the agent went multiple turns without any tool calls,
