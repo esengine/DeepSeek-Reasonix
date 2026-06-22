@@ -610,7 +610,13 @@ function applyEvent(s: State, e: WireEvent): State {
         return it;
       });
       let items: Item[] = e.err ? [...finalized, { kind: "notice", id: `e${s.seq}`, level: "warn", text: e.err }] : finalized;
-      return { ...s, items, live: undefined, running: false, turnActive: false, pendingPrompt: false, cancelRequested: false, cancellable: false, currentAssistant: undefined, approval: undefined, ask: undefined, seq: s.seq + 1 };
+      // In plan mode the controller emits TurnDone during plan generation, then
+      // ApprovalRequest for the plan gate. On Windows the Wails bridge may deliver
+      // events out of order. If ApprovalRequest arrives before TurnDone, clearing
+      // approval here would make the confirm button disappear and the system hang
+      // waiting for a response that the frontend can no longer send (#5032).
+      const keepPlanApproval = s.approval?.tool === "exit_plan_mode";
+      return { ...s, items, live: undefined, running: false, turnActive: false, pendingPrompt: false, cancelRequested: false, cancellable: false, currentAssistant: undefined, approval: keepPlanApproval ? s.approval : undefined, ask: undefined, seq: s.seq + 1 };
     }
     default: return s;
   }

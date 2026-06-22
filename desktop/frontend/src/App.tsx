@@ -2055,6 +2055,17 @@ export default function App() {
       return;
     }
 
+    // Summarize only compresses the conversation log — no files touched,
+    // no optimistic UI needed. Execute immediately like code-only rewind.
+    if (scope === "summ-from" || scope === "summ-upto") {
+      rewind(turn, scope).then((ok) => {
+        if (!ok) return;
+        setDockRefreshKey((v) => v + 1);
+        setProjectRevision((v) => v + 1);
+      });
+      return;
+    }
+
     const items = state.items;
     // Find the boundary: index of the Nth user message where N = turn.
     let boundaryIdx = 0;
