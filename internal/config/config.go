@@ -783,18 +783,22 @@ type AgentConfig struct {
 // token budget; the harness compacts older history as a turn's prompt approaches
 // it (see agent compaction). 0 disables compaction for the instance.
 type ProviderEntry struct {
-	Name          string                       `toml:"name"`
-	Kind          string                       `toml:"kind"`
-	BaseURL       string                       `toml:"base_url"`
-	Model         string                       `toml:"model"`      // a single model (back-compat)
-	Models        []string                     `toml:"models"`     // a vendor's model list (one base_url/key, many models)
-	ModelsURL     string                       `toml:"models_url"` // auto-fetch models from this URL on startup
-	Default       string                       `toml:"default"`    // default model when Models is set (else Models[0])
-	APIKeyEnv     string                       `toml:"api_key_env"`
-	BalanceURL    string                       `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
-	ContextWindow int                          `toml:"context_window"`
-	Price         *provider.Pricing            `toml:"price"`  // legacy/provider-wide fallback
-	Prices        map[string]*provider.Pricing `toml:"prices"` // optional per-model prices; keys are model ids
+	Name                string                       `toml:"name"`
+	Kind                string                       `toml:"kind"`
+	BaseURL             string                       `toml:"base_url"`
+	Model               string                       `toml:"model"`      // a single model (back-compat)
+	Models              []string                     `toml:"models"`     // a vendor's model list (one base_url/key, many models)
+	ModelsURL           string                       `toml:"models_url"` // auto-fetch models from this URL on startup
+	Default             string                       `toml:"default"`    // default model when Models is set (else Models[0])
+	APIKeyEnv           string                       `toml:"api_key_env"`
+	BalanceURL          string                       `toml:"balance_url"`                     // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
+	BalanceMethod       string                       `toml:"balance_method,omitempty"`        // "GET" (default) or "POST"
+	BalanceBody         string                       `toml:"balance_body,omitempty"`          // optional JSON body for POST requests
+	BalanceResponsePath string                       `toml:"balance_response_path,omitempty"` // JSONPath extractor, e.g. "$.balance_infos[0].total_balance"
+	BalanceCurrency     string                       `toml:"balance_currency,omitempty"`      // "CNY" (default), "USD", etc.
+	ContextWindow       int                          `toml:"context_window"`
+	Price               *provider.Pricing            `toml:"price"`  // legacy/provider-wide fallback
+	Prices              map[string]*provider.Pricing `toml:"prices"` // optional per-model prices; keys are model ids
 	// Thinking / Effort are provider-kind-specific knobs forwarded to the provider
 	// via Config.Extra. The anthropic provider reads Thinking="adaptive" to enable
 	// extended thinking and Effort ("low".."max") to tune depth. The

@@ -100,9 +100,15 @@ type Controller struct {
 	// balanceURL/balanceKey target the active provider's optional wallet-balance
 	// endpoint (empty when the provider declares none). Captured at build so a
 	// model/key switch — which rebuilds the controller — refreshes them.
-	balanceURL    string
-	balanceKey    string
-	balanceClient *http.Client
+	// balanceMethod/balanceBody/balanceResponsePath/balanceCurrency customize the
+	// query for providers with non-DeepSeek balance APIs.
+	balanceURL          string
+	balanceKey          string
+	balanceMethod       string
+	balanceBody         string
+	balanceResponsePath string
+	balanceCurrency     string
+	balanceClient       *http.Client
 
 	// jobs is the session-scoped background-job manager. The agent's background
 	// tools spawn into it; Compose drains its completion notes into the next turn;
@@ -245,9 +251,15 @@ type Options struct {
 	Cleanup       func()
 	// BalanceURL/BalanceKey wire the active provider's optional wallet-balance
 	// endpoint and bearer key; empty when the provider declares no balance_url.
-	BalanceURL    string
-	BalanceKey    string
-	BalanceClient *http.Client
+	// Extra BalanceMethod/BalanceBody/BalanceResponsePath/BalanceCurrency enable
+	// custom balance query APIs that don't follow DeepSeek's /user/balance shape.
+	BalanceURL          string
+	BalanceKey          string
+	BalanceMethod       string
+	BalanceBody         string
+	BalanceResponsePath string
+	BalanceCurrency     string
+	BalanceClient       *http.Client
 	// Jobs is the session-scoped background-job manager (nil disables background jobs).
 	Jobs *jobs.Manager
 	// Registry is the executor's live tool set, and PluginCtx the session-scoped
@@ -2386,6 +2398,15 @@ func (c *Controller) Balance(ctx context.Context) (*billing.Balance, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
+	if c.balanceResponsePath != "" || c.balanceMethod != "" {
+		return billing.NewFetch(ctx, c.balanceKey, billing.BalanceEntry{
+			URL:          c.balanceURL,
+			Method:       c.balanceMethod,
+			Body:         c.balanceBody,
+			ResponsePath: c.balanceResponsePath,
+			Currency:     c.balanceCurrency,
+		})
+	}
 	return billing.FetchWithClient(ctx, c.balanceClient, c.balanceURL, c.balanceKey)
 }
 

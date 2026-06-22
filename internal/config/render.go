@@ -274,6 +274,18 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			fmt.Fprintf(&b, "api_key_env = %q\n", p.APIKeyEnv)
 			if p.BalanceURL != "" {
 				fmt.Fprintf(&b, "balance_url = %q   # optional; wallet-balance endpoint shown in the status bar\n", p.BalanceURL)
+				if p.BalanceMethod != "" && p.BalanceMethod != "GET" {
+					fmt.Fprintf(&b, "balance_method = %q   # optional; \"GET\" (default) or \"POST\"\n", p.BalanceMethod)
+				}
+				if p.BalanceBody != "" {
+					fmt.Fprintf(&b, "balance_body = %q   # optional; JSON body for POST requests\n", p.BalanceBody)
+				}
+				if p.BalanceResponsePath != "" {
+					fmt.Fprintf(&b, "balance_response_path = %q   # optional; JSONPath to extract balance, e.g. \"$.data.balance\"\n", p.BalanceResponsePath)
+				}
+				if p.BalanceCurrency != "" && p.BalanceCurrency != "CNY" {
+					fmt.Fprintf(&b, "balance_currency = %q   # optional; \"CNY\" (default), \"USD\", etc.\n", p.BalanceCurrency)
+				}
 			}
 			if p.ContextWindow > 0 {
 				fmt.Fprintf(&b, "context_window = %d   # tokens; compaction triggers near this limit\n", p.ContextWindow)
