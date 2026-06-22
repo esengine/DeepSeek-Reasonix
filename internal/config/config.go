@@ -1161,6 +1161,9 @@ func Default() *Config {
 		// Mode "ask" with no rules keeps `reasonix run` autonomous (no TTY → ask
 		// resolves to allow) while `reasonix` prompts before writers. Users add
 		// deny/allow rules to harden or quiet specific tools.
+		// Memory tools (remember/forget) follow the normal policy flow — prompted
+		// in ask mode, auto-allowed in auto/yolo. Add to ask to always require
+		// manual review.
 		Permissions: PermissionsConfig{Mode: "ask"},
 		// Sandbox on by default: bash is jailed (macOS), network allowed so
 		// builds/downloads work. Set bash = "off" to disable. Network=true here

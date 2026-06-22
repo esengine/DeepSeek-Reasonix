@@ -271,7 +271,7 @@ func normalizeToolApprovalMode(mode string) string {
 
 func requiresFreshApprovalTool(tool string) bool {
 	switch tool {
-	case planApprovalTool, memoryRememberTool, memoryForgetTool:
+	case planApprovalTool:
 		return true
 	default:
 		return false
