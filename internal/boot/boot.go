@@ -881,7 +881,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		if !ok {
 			return nil, fmt.Errorf("planner_model %q is not a configured provider", pm)
 		}
-		if pe.Model != entry.Model {
+		// Different provider instance or different model → two-model mode.
+		// The old pe.Model != entry.Model only compared model IDs, missing the
+		// case where the same model name is served by different providers (e.g.
+		// DeepSeek official vs opencode.ai gateway).
+		if pe.Name != entry.Name || pe.Model != entry.Model {
 			plannerProv, err := NewProviderWithProxy(pe, proxySpec)
 			if err != nil {
 				return nil, fmt.Errorf("planner %q: %w", pm, err)
