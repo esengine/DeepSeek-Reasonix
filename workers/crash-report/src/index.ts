@@ -557,7 +557,7 @@ function statsFilters(url: URL): StatsFilters {
     platform: (url.searchParams.get("platform") ?? "").slice(0, 80),
     newLatest: url.searchParams.get("new") === "latest",
     regressed: url.searchParams.get("regressed") === "1",
-    windowDays: windowParam === "30d" ? 30 : 7,
+    windowDays: windowParam === "7d" ? 7 : 30,
     preferenceMode: url.searchParams.get("prefs") === "opens" ? "opens" : "users",
   };
 }

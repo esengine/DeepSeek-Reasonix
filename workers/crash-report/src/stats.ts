@@ -544,7 +544,7 @@ export function renderStats(
     put("platform", data.filters.platform);
     if (data.filters.newLatest) params.set("new", "latest");
     if (data.filters.regressed) params.set("regressed", "1");
-    if (data.filters.windowDays === 30) params.set("window", "30d");
+    if (data.filters.windowDays === 7) params.set("window", "7d");
     if (module === "preferences" && data.filters.preferenceMode === "opens") params.set("prefs", "opens");
     for (const [k, v] of Object.entries(patch)) {
       if (v) params.set(k, v);
@@ -560,7 +560,7 @@ export function renderStats(
   );
   const windowControls = `<div class="segmented" aria-label="Time window">
 <a class="${range === 7 ? "active" : ""}"${range === 7 ? ` aria-current="true"` : ""} href="${esc(filterQS({ window: "7d" }))}">7d</a>
-<a class="${range === 30 ? "active" : ""}"${range === 30 ? ` aria-current="true"` : ""} href="${esc(filterQS({ window: "30d" }))}">30d</a>
+<a class="${range === 30 ? "active" : ""}"${range === 30 ? ` aria-current="true"` : ""} href="${esc(filterQS({ window: "" }))}">30d</a>
 </div>`;
   const preferenceControls = `<div class="segmented" aria-label="Preference metric mode">
 <a class="${data.filters.preferenceMode === "users" ? "active" : ""}"${data.filters.preferenceMode === "users" ? ` aria-current="true"` : ""} href="${esc(
