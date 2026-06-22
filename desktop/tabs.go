@@ -147,6 +147,8 @@ func cloneStringPtr(v *string) *string {
 func cloneServerViewMap(in map[string]ServerView) map[string]ServerView {
 	out := make(map[string]ServerView, len(in))
 	for name, view := range in {
+		view.EnvKeys = append([]string(nil), view.EnvKeys...)
+		view.HeaderKeys = append([]string(nil), view.HeaderKeys...)
 		out[name] = view
 	}
 	return out

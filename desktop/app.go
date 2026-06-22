@@ -3834,6 +3834,7 @@ type ServerView struct {
 	Args           []string   `json:"args,omitempty"`
 	URL            string     `json:"url,omitempty"`
 	EnvKeys        []string   `json:"envKeys,omitempty"`
+	HeaderKeys     []string   `json:"headerKeys,omitempty"`
 	Tools          int        `json:"tools"`
 	Prompts        int        `json:"prompts"`
 	Resources      int        `json:"resources"`
@@ -4094,12 +4095,21 @@ func withPluginConfig(v ServerView, p config.PluginEntry) ServerView {
 	v.Args = append([]string(nil), p.Args...)
 	v.URL = p.URL
 	v.AuthConfigured = mcpdiag.HasAuthConfig(p.Headers, p.Env, p.URL)
+	v.EnvKeys = nil
+	v.HeaderKeys = nil
 	if len(p.Env) > 0 {
 		v.EnvKeys = make([]string, 0, len(p.Env))
 		for k := range p.Env {
 			v.EnvKeys = append(v.EnvKeys, k)
 		}
 		sort.Strings(v.EnvKeys)
+	}
+	if len(p.Headers) > 0 {
+		v.HeaderKeys = make([]string, 0, len(p.Headers))
+		for k := range p.Headers {
+			v.HeaderKeys = append(v.HeaderKeys, k)
+		}
+		sort.Strings(v.HeaderKeys)
 	}
 	auth := mcpdiag.DiagnoseAuth(v.Transport, v.Status, v.Error, v.URL, v.AuthConfigured)
 	v.AuthStatus = auth.Status
@@ -4443,6 +4453,7 @@ type MCPServerInput struct {
 	Args      []string          `json:"args"`
 	URL       string            `json:"url"`
 	Env       map[string]string `json:"env"`
+	Headers   map[string]string `json:"headers"`
 }
 
 // AddMCPServer connects a server live and persists it to config (Customize → MCP →
@@ -4462,6 +4473,7 @@ func (a *App) AddMCPServer(in MCPServerInput) (int, error) {
 		Args:    in.Args,
 		URL:     in.URL,
 		Env:     in.Env,
+		Headers: in.Headers,
 	}
 	entry, _ = config.NormalizePluginCommandLine(entry)
 	if err := a.saveDesktopMCPServer(entry); err != nil {
@@ -4497,6 +4509,9 @@ func (a *App) UpdateMCPServer(name string, in MCPServerInput) error {
 	updated.Tier = ""
 	if in.Env != nil {
 		updated.Env = in.Env
+	}
+	if in.Headers != nil {
+		updated.Headers = in.Headers
 	}
 	updated, _ = config.NormalizePluginCommandLine(updated)
 	if updated.Type == "stdio" {

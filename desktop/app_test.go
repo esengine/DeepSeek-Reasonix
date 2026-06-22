@@ -3437,6 +3437,61 @@ func TestUpdateMCPServerEditsProjectMCPJSONEntry(t *testing.T) {
 	}
 }
 
+func TestAddMCPServerPersistsRemoteHeaders(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	t.Setenv("STRIPE_TOKEN", "stripe-test-token")
+	srv := desktopMCPHTTPServer(t)
+	defer srv.Close()
+
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
+	defer app.activeCtrl().Close()
+
+	tools, err := app.AddMCPServer(MCPServerInput{
+		Name:      "stripe",
+		Transport: "http",
+		URL:       srv.URL,
+		Headers: map[string]string{
+			"Authorization": "Bearer ${STRIPE_TOKEN}",
+			"X-Org":         "team",
+		},
+	})
+	if err != nil {
+		t.Fatalf("AddMCPServer(stripe): %v", err)
+	}
+	if tools != 1 {
+		t.Fatalf("tools = %d, want 1", tools)
+	}
+
+	cfg, err := config.LoadForRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, ok := findPluginEntry(cfg.Plugins, "stripe")
+	if !ok {
+		t.Fatalf("stripe plugin missing from config: %+v", cfg.Plugins)
+	}
+	if p.Type != "http" || p.URL != srv.URL {
+		t.Fatalf("stripe plugin transport = %q url = %q", p.Type, p.URL)
+	}
+	if p.Headers["Authorization"] != "Bearer ${STRIPE_TOKEN}" || p.Headers["X-Org"] != "team" {
+		t.Fatalf("stripe headers = %+v", p.Headers)
+	}
+
+	view := app.MCPServers()
+	for _, s := range view {
+		if s.Name == "stripe" {
+			if !reflect.DeepEqual(s.HeaderKeys, []string{"Authorization", "X-Org"}) {
+				t.Fatalf("stripe header keys = %+v", s.HeaderKeys)
+			}
+			return
+		}
+	}
+	t.Fatalf("stripe MCP missing from view: %+v", view)
+}
+
 func TestCapabilitiesMarksBackgroundRemoteMCPAuthPossible(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)

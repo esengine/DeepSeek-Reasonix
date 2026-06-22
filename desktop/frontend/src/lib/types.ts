@@ -496,6 +496,7 @@ export interface ServerView {
   args?: string[];
   url?: string;
   envKeys?: string[];
+  headerKeys?: string[];
   tools: number;
   prompts: number;
   resources: number;
@@ -549,6 +550,7 @@ export interface MCPServerInput {
   args: string[];
   url: string;
   env?: Record<string, string> | null;
+  headers?: Record<string, string> | null;
 }
 
 export interface ModelInfo {
