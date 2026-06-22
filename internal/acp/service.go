@@ -408,6 +408,7 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 		if replay {
 			newUpdateSink(s.conn, id).replay(sess.ctrl.History())
 		}
+		sess.ctrl.ReplayPendingPrompts()
 		cfgState, err := s.configStateForSession(ctx, sess)
 		if err != nil {
 			return SessionConfigState{}, &RPCError{Code: ErrInternal, Message: method + ": " + err.Error()}

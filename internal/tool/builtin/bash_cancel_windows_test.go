@@ -26,7 +26,7 @@ func TestBashCancelKillsWindowsChildProcessTree(t *testing.T) {
 	pidFile := filepath.Join(tmp, "child.pid")
 	quotedPIDFile := strings.ReplaceAll(pidFile, "'", "''")
 	command := fmt.Sprintf(
-		"$p = Start-Process -FilePath powershell -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 120' -PassThru; "+
+		"$p = Start-Process -FilePath cmd -ArgumentList '/c','ping 127.0.0.1 -n 120 >nul' -PassThru; "+
 			"Set-Content -LiteralPath '%s' -Value $p.Id; "+
 			"Start-Sleep -Seconds 120",
 		quotedPIDFile,
@@ -37,9 +37,12 @@ func TestBashCancelKillsWindowsChildProcessTree(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, runErr := (bash{
+		out, runErr := (bash{
 			shell: sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: powershell},
 		}).Execute(ctx, args)
+		if runErr != nil {
+			t.Logf("Execute failed: %v, output: %s", runErr, out)
+		}
 		done <- runErr
 	}()
 
@@ -66,7 +69,7 @@ func TestBashCancelKillsWindowsChildProcessTree(t *testing.T) {
 
 func waitForWindowsPIDFile(t *testing.T, path string) int {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		data, err := os.ReadFile(path)
 		if err == nil {

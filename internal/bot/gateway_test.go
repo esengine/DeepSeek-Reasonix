@@ -367,8 +367,9 @@ func TestGatewayNormalizesNumericAskShortcutOnlyForSingleChoicePendingAsk(t *tes
 	if !ok || got != "/answer ask-1 2" {
 		t.Fatalf("normalize 2 = %q,%v; want /answer ask-1 2,true", got, ok)
 	}
-	if _, ok := gw.normalizeAskShortcut(key, "1;2"); ok {
-		t.Fatal("compound numeric text should stay a normal message")
+	got, ok = gw.normalizeAskShortcut(key, "1;2")
+	if !ok || got != "/answer ask-1 1;2" {
+		t.Fatalf("normalize 1;2 = %q,%v; want /answer ask-1 1;2,true", got, ok)
 	}
 
 	gw.controllers[key].pendingAsks["ask-2"] = []event.AskQuestion{
@@ -376,8 +377,13 @@ func TestGatewayNormalizesNumericAskShortcutOnlyForSingleChoicePendingAsk(t *tes
 		{ID: "q2", Prompt: "Second", Options: []event.AskOption{{Label: "B"}}},
 	}
 	gw.controllers[key].lastAskID = "ask-2"
-	if _, ok := gw.normalizeAskShortcut(key, "1"); ok {
-		t.Fatal("numeric shortcut should not answer multi-question asks")
+	got, ok = gw.normalizeAskShortcut(key, "1")
+	if !ok || got != "/answer ask-2 1" {
+		t.Fatalf("normalize 1 on multi-question = %q,%v; want /answer ask-2 1,true", got, ok)
+	}
+
+	if _, ok := gw.normalizeAskShortcut(key, "/stop"); ok {
+		t.Fatal("slash commands should not be normalized/routed by ask shortcut")
 	}
 }
 

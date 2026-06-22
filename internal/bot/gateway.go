@@ -452,15 +452,38 @@ func (gw *BotGateway) forgetPendingApproval(key, id string) {
 }
 
 func (gw *BotGateway) normalizeAskShortcut(key, text string) (string, bool) {
-	answer, ok := askShortcutAnswer(text)
-	if !ok {
+	if strings.HasPrefix(text, "/") {
 		return "", false
 	}
-	askID := gw.currentPendingAskID(key)
+	gw.mu.Lock()
+	state, ok := gw.controllers[key]
+	if !ok || len(state.pendingAsks) == 0 {
+		gw.mu.Unlock()
+		return "", false
+	}
+	askID := state.lastAskID
+	if askID == "" {
+		for id := range state.pendingAsks {
+			askID = id
+			break
+		}
+	}
+	gw.mu.Unlock()
+
 	if askID == "" {
 		return "", false
 	}
-	return "/answer " + askID + " " + answer, true
+
+	if answer, ok := askShortcutAnswer(text); ok {
+		gw.mu.Lock()
+		questions := state.pendingAsks[askID]
+		gw.mu.Unlock()
+		if askQuestionsSupportNumericShortcut(questions) {
+			return "/answer " + askID + " " + answer, true
+		}
+	}
+
+	return "/answer " + askID + " " + text, true
 }
 
 func askShortcutAnswer(text string) (string, bool) {

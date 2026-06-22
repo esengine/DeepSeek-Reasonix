@@ -72,7 +72,7 @@ func TestCommandPowerShell(t *testing.T) {
 	if wrapped {
 		t.Error("non-enforce should not wrap")
 	}
-	want := []string{"powershell", "-NoProfile", "-NonInteractive", "-Command", psUTF8Prologue + "Get-ChildItem"}
+	want := []string{"powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psUTF8Prologue + "Get-ChildItem"}
 	if len(cmd) != len(want) {
 		t.Fatalf("argv = %v, want %v", cmd, want)
 	}
