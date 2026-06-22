@@ -60,9 +60,24 @@ type PastedBlock = {
   text: string;
 };
 
+type ComposerDraft = {
+  text: string;
+  attachments: Attachment[];
+  workspaceRefs: WorkspaceReference[];
+  pastedBlocks: PastedBlock[];
+  openPastedLabels: string[];
+  sessionRefs: SessionReference[];
+  attachmentDedupKeys: Record<string, AttachmentDedupKey>;
+  nextPasteId: number;
+  historyIndex: number;
+  savedText: string;
+};
+
 type WebkitFileEntry = {
   isDirectory?: boolean;
 };
+
+const DEFAULT_COMPOSER_DRAFT_KEY = "__default_composer_draft__";
 
 function lineCount(s: string): number {
   if (s === "") return 0;
@@ -109,6 +124,44 @@ function sortComposerAttachments(items: Attachment[]): Attachment[] {
 
 function workspaceReferenceKey(ref: WorkspaceReference): string {
   return `${ref.isDir ? "dir" : "file"}:${ref.path}`;
+}
+
+function emptyComposerDraft(): ComposerDraft {
+  return {
+    text: "",
+    attachments: [],
+    workspaceRefs: [],
+    pastedBlocks: [],
+    openPastedLabels: [],
+    sessionRefs: [],
+    attachmentDedupKeys: {},
+    nextPasteId: 1,
+    historyIndex: -1,
+    savedText: "",
+  };
+}
+
+function cloneComposerDraft(draft: ComposerDraft): ComposerDraft {
+  return {
+    text: draft.text,
+    attachments: [...draft.attachments],
+    workspaceRefs: [...draft.workspaceRefs],
+    pastedBlocks: [...draft.pastedBlocks],
+    openPastedLabels: [...draft.openPastedLabels],
+    sessionRefs: [...draft.sessionRefs],
+    attachmentDedupKeys: { ...draft.attachmentDedupKeys },
+    nextPasteId: draft.nextPasteId,
+    historyIndex: draft.historyIndex,
+    savedText: draft.savedText,
+  };
+}
+
+function attachmentDedupFromKeys(keys: Record<string, AttachmentDedupKey>): DedupIndex {
+  const index = new DedupIndex();
+  for (const key of Object.values(keys)) {
+    index.add(key.hash, key.source);
+  }
+  return index;
 }
 
 function fileKey(file: File): string {
@@ -447,6 +500,73 @@ export function Composer({
   cwdRef.current = cwd;
   const attachmentDedupRef = useRef(new DedupIndex());
   const attachmentDedupKeysRef = useRef<Record<string, AttachmentDedupKey>>({});
+  const draftKey = tabId || DEFAULT_COMPOSER_DRAFT_KEY;
+  const draftsByTabRef = useRef<Record<string, ComposerDraft>>({});
+  const activeDraftKeyRef = useRef(draftKey);
+  const textRef = useRef(text);
+  const attachmentsRef = useRef(attachments);
+  const workspaceRefsRef = useRef(workspaceRefs);
+  const openPastedLabelsRef = useRef(openPastedLabels);
+  const sessionRefsRef = useRef(sessionRefs);
+  textRef.current = text;
+  attachmentsRef.current = attachments;
+  workspaceRefsRef.current = workspaceRefs;
+  pastedBlocksRef.current = pastedBlocks;
+  openPastedLabelsRef.current = openPastedLabels;
+  sessionRefsRef.current = sessionRefs;
+
+  const snapshotComposerDraft = (): ComposerDraft => ({
+    text: textRef.current,
+    attachments: [...attachmentsRef.current],
+    workspaceRefs: [...workspaceRefsRef.current],
+    pastedBlocks: [...pastedBlocksRef.current],
+    openPastedLabels: [...openPastedLabelsRef.current],
+    sessionRefs: [...sessionRefsRef.current],
+    attachmentDedupKeys: { ...attachmentDedupKeysRef.current },
+    nextPasteId: nextPasteId.current,
+    historyIndex: historyIndexRef.current,
+    savedText: savedTextRef.current,
+  });
+
+  const restoreComposerDraft = (draft: ComposerDraft) => {
+    const next = cloneComposerDraft(draft);
+    setText(next.text);
+    setAttachments(next.attachments);
+    setWorkspaceRefs(next.workspaceRefs);
+    pastedBlocksRef.current = next.pastedBlocks;
+    setPastedBlocks(next.pastedBlocks);
+    setOpenPastedLabels(next.openPastedLabels);
+    setSessionRefs(next.sessionRefs);
+    attachmentDedupKeysRef.current = next.attachmentDedupKeys;
+    attachmentDedupRef.current = attachmentDedupFromKeys(next.attachmentDedupKeys);
+    nextPasteId.current = next.nextPasteId;
+    historyIndexRef.current = next.historyIndex;
+    savedTextRef.current = next.savedText;
+    setHistoryIndex(next.historyIndex);
+    lastSelectionRef.current = { start: next.text.length, end: next.text.length };
+    setComposerPrompt(null);
+    setShowPastChats(false);
+    setPastChatQuery("");
+    setActive(0);
+    setIntentMenuOpen(false);
+    setIntentMenuClosing(false);
+    setMoreMenuOpen(false);
+    setMoreMenuClosing(false);
+  };
+
+  useLayoutEffect(() => {
+    const previousKey = activeDraftKeyRef.current;
+    if (previousKey === draftKey) return;
+    draftsByTabRef.current[previousKey] = snapshotComposerDraft();
+    activeDraftKeyRef.current = draftKey;
+    restoreComposerDraft(draftsByTabRef.current[draftKey] ?? emptyComposerDraft());
+  }, [draftKey]);
+
+  useEffect(() => {
+    return () => {
+      draftsByTabRef.current[activeDraftKeyRef.current] = snapshotComposerDraft();
+    };
+  }, []);
 
   const clearNativeClipboardPasteTimer = () => {
     if (nativeClipboardPasteTimerRef.current === null) return;
