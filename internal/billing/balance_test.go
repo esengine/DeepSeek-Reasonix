@@ -272,6 +272,9 @@ func TestNewFetchPOST(t *testing.T) {
 		if r.Method != "POST" {
 			t.Fatalf("expected POST, got %s", r.Method)
 		}
+		if r.Header.Get("X-Custom") != "test-value" {
+			t.Fatalf("expected X-Custom header")
+		}
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
 		if body["action"] != "query_balance" {
@@ -284,6 +287,7 @@ func TestNewFetchPOST(t *testing.T) {
 		URL:          srv.URL,
 		Method:       "POST",
 		Body:         `{"action": "query_balance"}`,
+		Headers:      map[string]string{"X-Custom": "test-value"},
 		ResponsePath: "$.remaining",
 		Currency:     "CNY",
 	})

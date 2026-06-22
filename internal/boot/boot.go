@@ -929,6 +929,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		BalanceBody:            entry.BalanceBody,
 		BalanceResponsePath:    entry.BalanceResponsePath,
 		BalanceCurrency:        entry.BalanceCurrency,
+		BalanceHeaders:         entry.BalanceHeaders,
 		BalanceClient:          balanceClient,
 		Jobs:                   jm,
 		Registry:               reg,

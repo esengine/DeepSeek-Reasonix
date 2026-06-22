@@ -22,11 +22,12 @@ import (
 // BalanceEntry configures a provider-specific wallet balance query.
 // Empty Method/ResponsePath falls back to the legacy DeepSeek GET /user/balance.
 type BalanceEntry struct {
-	URL          string // e.g. "https://api.deepseek.com/user/balance"
-	Method       string // HTTP method; "GET" (default) or "POST"
-	Body         string // optional JSON body for POST requests
-	ResponsePath string // JSONPath expression to extract balance value, e.g. "$.balance_infos[0].total_balance"
-	Currency     string // Currency label for display; "CNY" (default), "USD", etc.
+	URL          string            // e.g. "https://api.deepseek.com/user/balance"
+	Method       string            // HTTP method; "GET" (default) or "POST"
+	Body         string            // optional JSON body for POST requests
+	Headers      map[string]string // optional custom headers
+	ResponsePath string            // JSONPath expression to extract balance value, e.g. "$.balance_infos[0].total_balance"
+	Currency     string            // Currency label for display; "CNY" (default), "USD", etc.
 }
 
 // Balance is a wallet balance normalized for display.
@@ -137,6 +138,9 @@ func newFetchWithClient(ctx context.Context, client *http.Client, apiKey string,
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
+	for k, v := range entry.Headers {
+		req.Header.Set(k, v)
+	}
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}

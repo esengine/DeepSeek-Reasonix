@@ -108,6 +108,7 @@ type Controller struct {
 	balanceBody         string
 	balanceResponsePath string
 	balanceCurrency     string
+	balanceHeaders      map[string]string
 	balanceClient       *http.Client
 
 	// jobs is the session-scoped background-job manager. The agent's background
@@ -259,6 +260,7 @@ type Options struct {
 	BalanceBody         string
 	BalanceResponsePath string
 	BalanceCurrency     string
+	BalanceHeaders      map[string]string
 	BalanceClient       *http.Client
 	// Jobs is the session-scoped background-job manager (nil disables background jobs).
 	Jobs *jobs.Manager
@@ -337,6 +339,11 @@ func New(opts Options) *Controller {
 		onRemember:             opts.OnRemember,
 		balanceURL:             opts.BalanceURL,
 		balanceKey:             opts.BalanceKey,
+		balanceMethod:          opts.BalanceMethod,
+		balanceBody:            opts.BalanceBody,
+		balanceResponsePath:    opts.BalanceResponsePath,
+		balanceCurrency:        opts.BalanceCurrency,
+		balanceHeaders:         opts.BalanceHeaders,
 		balanceClient:          opts.BalanceClient,
 		jobs:                   opts.Jobs,
 		reg:                    opts.Registry,
@@ -2398,11 +2405,12 @@ func (c *Controller) Balance(ctx context.Context) (*billing.Balance, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
-	if c.balanceResponsePath != "" || c.balanceMethod != "" {
+	if c.balanceResponsePath != "" || c.balanceMethod != "" || len(c.balanceHeaders) > 0 {
 		return billing.NewFetch(ctx, c.balanceKey, billing.BalanceEntry{
 			URL:          c.balanceURL,
 			Method:       c.balanceMethod,
 			Body:         c.balanceBody,
+			Headers:      c.balanceHeaders,
 			ResponsePath: c.balanceResponsePath,
 			Currency:     c.balanceCurrency,
 		})

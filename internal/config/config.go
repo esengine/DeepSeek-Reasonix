@@ -796,6 +796,7 @@ type ProviderEntry struct {
 	BalanceBody         string                       `toml:"balance_body,omitempty"`          // optional JSON body for POST requests
 	BalanceResponsePath string                       `toml:"balance_response_path,omitempty"` // JSONPath extractor, e.g. "$.balance_infos[0].total_balance"
 	BalanceCurrency     string                       `toml:"balance_currency,omitempty"`      // "CNY" (default), "USD", etc.
+	BalanceHeaders      map[string]string            `toml:"balance_headers,omitempty"`       // optional custom headers for balance query
 	ContextWindow       int                          `toml:"context_window"`
 	Price               *provider.Pricing            `toml:"price"`  // legacy/provider-wide fallback
 	Prices              map[string]*provider.Pricing `toml:"prices"` // optional per-model prices; keys are model ids
