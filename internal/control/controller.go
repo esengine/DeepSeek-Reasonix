@@ -73,7 +73,7 @@ type Controller struct {
 	systemPrompt  string
 	sessionDir    string
 	host          *plugin.Host
-	commands      []command.Command
+	commands      atomic.Pointer[[]command.Command]
 	skills        []skill.Skill
 	allSkills     []skill.Skill
 	skillStore    *skill.Store
@@ -309,7 +309,7 @@ func New(opts Options) *Controller {
 		sessionDir:             opts.SessionDir,
 		sessionPath:            opts.SessionPath,
 		host:                   opts.Host,
-		commands:               opts.Commands,
+		commands:               atomic.Pointer[[]command.Command]{},
 		skills:                 opts.Skills,
 		allSkills:              opts.AllSkills,
 		skillStore:             opts.SkillStore,
@@ -335,6 +335,8 @@ func New(opts Options) *Controller {
 	// Checkpoints: bind a store to the session and route writer pre-edits into it.
 	c.rebindCheckpoints(opts.SessionPath)
 	c.setActiveJobSession(opts.SessionPath)
+	cmdsInit := opts.Commands
+	c.commands.Store(&cmdsInit)
 	if c.executor != nil {
 		c.executor.SetPreEditHook(func(ch diff.Change) {
 			if c.cp != nil {
@@ -2392,7 +2394,49 @@ func (c *Controller) Balance(ctx context.Context) (*billing.Balance, error) {
 func (c *Controller) Host() *plugin.Host { return c.host }
 
 // Commands returns the loaded custom slash commands.
-func (c *Controller) Commands() []command.Command { return c.commands }
+func (c *Controller) Commands() []command.Command {
+	if p := c.commands.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
+
+// ReloadCommands rescans all command directories and hot-swaps the slash_command
+// tool and the internal command slice — no MCP restart, no hook rerun.
+func (c *Controller) ReloadCommands(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	cmds, loadErr := command.Load(config.CommandDirsForRoot(c.cpRoot)...)
+	cmdSkills := c.Skills()
+
+	entries := make([]command.SlashEntry, 0, len(cmdSkills)+len(cmds))
+	for _, sk := range cmdSkills {
+		sk := sk
+		entries = append(entries, command.SlashEntry{
+			Name:        sk.Name,
+			Description: sk.Description,
+			Render:      func(args []string) string { return skill.Render(sk, strings.Join(args, " ")) },
+		})
+	}
+	for _, cmd := range cmds {
+		cmd := cmd
+		entries = append(entries, command.SlashEntry{
+			Name:        cmd.Name,
+			Description: cmd.Description,
+			ArgHint:     cmd.ArgHint,
+			Render:      func(args []string) string { return cmd.Render(args) },
+		})
+	}
+	if c.reg != nil {
+		c.reg.Add(command.NewSlashCommandTool(entries))
+	}
+	cmdSlice := cmds
+	c.commands.Store(&cmdSlice)
+	return loadErr
+}
 
 // Skills returns the discoverable skills (for the slash menu and `/skills`).
 // When a live Store is available, scan it on demand so skills installed during

@@ -1,8 +1,10 @@
 package control
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"reasonix/internal/config"
@@ -397,6 +399,16 @@ func (c *Controller) managementNotice(trimmed string) bool {
 			return true
 		}
 		c.notice(c.skillListText())
+	case "/reload-cmd":
+		if c.Running() {
+			c.notice("wait for the current turn to finish, then retry /reload-cmd")
+			return true
+		}
+		if err := c.ReloadCommands(context.Background()); err != nil {
+			c.notice("reload-cmd: " + err.Error())
+		} else {
+			c.notice("commands reloaded (" + strconv.Itoa(len(c.Commands())) + " available)")
+		}
 	case "/hooks":
 		sub := ""
 		if len(fields) >= 2 {

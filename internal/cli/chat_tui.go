@@ -3545,6 +3545,26 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	case "/hooks":
 		m.echoLocalCommand(input)
 		m.runHooksSubcommand(input)
+	case "/reload-cmd":
+		m.echoLocalCommand(input)
+		if m.ctrl == nil {
+			m.notice("controller not ready")
+			return nil
+		}
+		if m.ctrl.Running() {
+			m.notice("wait for the current turn to finish, then retry /reload-cmd")
+			return nil
+		}
+		prev := len(m.commands)
+		err := m.ctrl.ReloadCommands(context.Background())
+		m.commands = m.ctrl.Commands()
+		m.updateCompletion()
+		if err != nil {
+			m.notice("reload-cmd: " + err.Error())
+			return nil
+		}
+		m.notice(fmt.Sprintf("commands reloaded: %d → %d commands", prev, len(m.commands)))
+
 	case "/paste-image":
 		return pasteClipboardImage()
 	case "/output-style", "/output-styles":

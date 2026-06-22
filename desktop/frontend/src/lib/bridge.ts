@@ -191,6 +191,7 @@ export interface AppBindings {
   AddSkillPath(path: string): Promise<void>;
   RemoveSkillPath(path: string): Promise<void>;
   RefreshSkills(): Promise<void>;
+  ReloadCommands(): Promise<void>;
   SetSkillEnabled(name: string, enabled: boolean): Promise<void>;
   SetMCPServerEnabled(name: string, enabled: boolean): Promise<void>;
   SetMCPServerTier(name: string, tier: string): Promise<void>;
@@ -2034,6 +2035,7 @@ function makeMockApp(): AppBindings {
       }
     },
     async RefreshSkills() {},
+    async ReloadCommands() {},
     async SetSkillEnabled(name: string, enabled: boolean) {
       const skill = capSkills.find((s) => s.name === name);
       if (skill) skill.enabled = enabled;

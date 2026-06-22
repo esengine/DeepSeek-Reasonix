@@ -185,6 +185,7 @@ var Chinese = Messages{
 	CmdLanguage:     "切换 CLI 语言",
 	CmdSkill:        "管理 skills",
 	CmdVerbose:      "切换 thinking 原文显示",
+	CmdReloadCmd:    "重载自定义命令",
 	CmdDiffFold:     "切换 diff 折叠/展开",
 	CmdSandbox:      "查看沙箱状态",
 	CmdEffort:       "设置推理强度",

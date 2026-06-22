@@ -132,6 +132,7 @@ type MemoryControl interface {
 type Capabilities interface {
 	Host() *plugin.Host
 	Commands() []command.Command
+	ReloadCommands(ctx context.Context) error
 	Skills() []skill.Skill
 	AllSkills() []skill.Skill
 	DisabledSkills() []skill.Skill

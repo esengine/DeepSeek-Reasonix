@@ -173,6 +173,7 @@ var ChineseTraditional = Messages{
 	CmdLanguage:     "切換 CLI 語言",
 	CmdSkill:        "管理 skills",
 	CmdVerbose:      "切換 thinking 原文顯示",
+	CmdReloadCmd:    "重載自定義命令",
 	CmdSandbox:      "檢視沙箱狀態",
 	CmdEffort:       "設定推理強度",
 	CmdAutoPlan:     "設定自動計畫模式",

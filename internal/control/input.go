@@ -460,7 +460,7 @@ func (c *Controller) CustomCommand(input string) (sent string, found bool) {
 		return "", false
 	}
 	name := strings.TrimPrefix(fields[0], "/")
-	for _, cmd := range c.commands {
+	for _, cmd := range c.Commands() {
 		if cmd.Name == name {
 			return cmd.Render(fields[1:]), true
 		}
