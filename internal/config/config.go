@@ -97,8 +97,10 @@ type DesktopConfig struct {
 	CheckUpdates   *bool    `toml:"check_updates"`    // startup update checks; nil keeps the default enabled
 	Telemetry      *bool    `toml:"telemetry"`        // anonymous launch ping (install id + version + OS); nil keeps the default enabled
 	Metrics        *bool    `toml:"metrics"`          // aggregate desktop metrics (anonymous signal/bucket counts; no content); nil keeps the default enabled
-	ProviderAccess []string `toml:"provider_access"`  // desktop-only list of provider entries shown in Settings > Model > Access
-	ExpandThinking bool     `toml:"expand_thinking"`  // true = show reasoning text expanded by default; false = collapsed
+	ProviderAccess  []string `toml:"provider_access"`   // desktop-only list of provider entries shown in Settings > Model > Access
+	ExpandThinking  bool     `toml:"expand_thinking"`   // true = show reasoning text expanded by default; false = collapsed
+	Autostart       *bool    `toml:"autostart"`         // launch at login; nil keeps the default disabled
+	MinimizeToTray  *bool    `toml:"minimize_to_tray"`  // minimize to system tray on startup; nil keeps the default disabled
 }
 
 // NotificationsConfig controls optional system notifications for CLI chat/run.
@@ -227,6 +229,18 @@ func (c *Config) DesktopCloseBehavior() string {
 // UICloseBehavior is the legacy name for DesktopCloseBehavior.
 func (c *Config) UICloseBehavior() string {
 	return c.DesktopCloseBehavior()
+}
+
+// DesktopAutostart returns whether the desktop app should launch at login.
+// Nil/undefined defaults to false.
+func (c *Config) DesktopAutostart() bool {
+	return c.Desktop.Autostart != nil && *c.Desktop.Autostart
+}
+
+// DesktopMinimizeToTray returns whether the desktop app should minimize to
+// system tray on startup. Nil/undefined defaults to false.
+func (c *Config) DesktopMinimizeToTray() bool {
+	return c.Desktop.MinimizeToTray != nil && *c.Desktop.MinimizeToTray
 }
 
 // DesktopDisplayMode normalizes the transcript display mode. Default is

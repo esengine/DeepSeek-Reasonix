@@ -904,6 +904,9 @@ export interface SettingsView {
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
   autoApproveTools: boolean;
   bypass: boolean; // legacy JSON key for live YOLO/full-access tool auto-approval
+  autostart: boolean; // launch at login
+  minimizeToTray: boolean; // minimize to system tray on startup
+  autostartSupported: boolean; // whether the platform supports autostart
 }
 
 export interface DesktopStartupSettingsView {
@@ -916,6 +919,7 @@ export interface DesktopStartupSettingsView {
   statusBarStyle: string; // "icon" | "text"
   statusBarItems: string[]; // ordered visible status bar item ids
   checkUpdates: boolean; // check for new versions on startup
+  minimizeToTray: boolean; // minimize to system tray on startup
 }
 
 // Auto-updater payloads (desktop/updater.go). UpdateInfo drives the update banner;

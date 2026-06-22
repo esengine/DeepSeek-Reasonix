@@ -5417,6 +5417,32 @@ function UpdatesSection({
           onChange={(enabled) => void applySettings(() => app.SetDesktopMetrics(enabled))}
         />
       </SettingsField>
+      {settings.autostartSupported && (
+        <>
+          <SettingsField
+            className="settings-field--wide-copy"
+            label={t("settings.autostartLabel")}
+            hint={t("settings.autostartHint")}
+          >
+            <ToggleSegment
+              value={settings.autostart}
+              disabled={settingsBusy}
+              onChange={(enabled) => void applySettings(() => app.SetAutostart(enabled))}
+            />
+          </SettingsField>
+          <SettingsField
+            className="settings-field--wide-copy"
+            label={t("settings.minimizeToTrayLabel")}
+            hint={t("settings.minimizeToTrayHint")}
+          >
+            <ToggleSegment
+              value={settings.minimizeToTray}
+              disabled={settingsBusy}
+              onChange={(enabled) => void applySettings(() => app.SetMinimizeToTray(enabled))}
+            />
+          </SettingsField>
+        </>
+      )}
       <SettingsField label={t("updater.currentVersion", { v: version || "…" })}>
         <button className="btn btn--small" disabled={updaterBusy} onClick={() => void check()}>
           {status.kind === "checking" ? t("updater.checking") : t("updater.checkButton")}

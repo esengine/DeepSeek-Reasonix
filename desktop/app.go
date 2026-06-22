@@ -390,6 +390,7 @@ func (a *App) showMainWindow() {
 }
 
 func (a *App) secondInstanceLaunch() {
+	// If we're minimized to tray, show the window
 	a.showMainWindow()
 }
 
@@ -587,6 +588,10 @@ func (a *App) shutdown(context.Context) {
 // position and size, then calls WindowShow so the user never sees the default
 // size/position flash.
 func (a *App) domReady(_ context.Context) {
+	// Check if we should minimize to tray on startup
+	cfg, _, err := a.loadDesktopUserConfigForView()
+	minimizeToTray := err == nil && cfg.DesktopMinimizeToTray()
+
 	state, ok := loadWindowState()
 	if ok {
 		// Validate saved position against current screens. Wails v2 doesn't
@@ -623,6 +628,11 @@ func (a *App) domReady(_ context.Context) {
 
 	if ok && state.Maximised {
 		runtime.WindowMaximise(a.ctx)
+	}
+
+	// If minimize to tray is enabled, don't show the window - just start the tray
+	if minimizeToTray {
+		return
 	}
 
 	runtime.WindowShow(a.ctx)
