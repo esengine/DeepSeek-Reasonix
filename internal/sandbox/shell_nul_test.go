@@ -17,7 +17,24 @@ func TestNormalizeNulRedirect(t *testing.T) {
 		{"x > null", bash, "x >/dev/null"},
 		{"x >null", "$null", "x >$null"},
 		{"x 2> /dev/null", "$null", "x 2>$null"},
+		{"x 2> \"null\"", "$null", "x 2>$null"},
+		{"x 2> '/dev/null'", bash, "x 2>/dev/null"},
+		{"x *> null", "$null", "x *>$null"},
 		{"probe &>nul", bash, "probe &>/dev/null"},
+		// Redirect at the end of a backtick command substitution: the trailing
+		// delimiter is the backtick, which used to fall outside the matcher and
+		// leak "nul" through unrewritten (#4252 regression). Both `...` and
+		// $(...) forms are exercised, across all three targets (nul/null/
+		// /dev/null) since they share one trailing-delimiter class.
+		{"x=`where git 2>nul`", bash, "x=`where git 2>/dev/null`"},
+		{"x=`where git 2>null`", bash, "x=`where git 2>/dev/null`"},
+		{"x=`where git 2>/dev/null`", bash, "x=`where git 2>/dev/null`"},
+		{"x=$(where git 2>nul)", bash, "x=$(where git 2>/dev/null)"},
+		{"x=$(where git 2>null)", bash, "x=$(where git 2>/dev/null)"},
+		{"x=$(where git 2>/dev/null)", bash, "x=$(where git 2>/dev/null)"},
+		{"x=`where git 2>nul`", "$null", "x=`where git 2>$null`"},
+		{"x=`where git 2>null`", "$null", "x=`where git 2>$null`"},
+		{"x=`where git 2>/dev/null`", "$null", "x=`where git 2>$null`"},
 		// Not a nul redirect — leave untouched.
 		{"echo nul", bash, "echo nul"},
 		{"grep nul file.txt", bash, "grep nul file.txt"},
@@ -27,6 +44,10 @@ func TestNormalizeNulRedirect(t *testing.T) {
 		{"rm nul", bash, "rm nul"},
 		{"rm null", bash, "rm null"},
 		{"echo nullish", bash, "echo nullish"},
+		// Quoted "2>nul" is a literal argument, not a redirect — left alone.
+		{"echo '2>nul'", bash, "echo '2>nul'"},
+		{"echo '2>null '", "$null", "echo '2>null '"},
+		{"echo \"2>nul;\"", bash, "echo \"2>nul;\""},
 	}
 	for _, c := range cases {
 		if got := normalizeNulRedirect(c.in, c.sink); got != c.want {

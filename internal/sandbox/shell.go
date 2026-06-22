@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -226,21 +225,155 @@ func windowsPowerShellCandidates() []string {
 	return out
 }
 
-// nulRedirect matches common null-device redirects (>nul, 2>null,
-// 1>>/dev/null, &>nul ...) where the target is a complete token. bash and
-// PowerShell otherwise treat at least some of these as ordinary filenames, so
-// the redirect can create stray nul/null files in the working directory. #4252.
-// Group 2 captures the trailing delimiter (RE2 has no lookahead) so it can be
-// re-emitted unchanged.
-var nulRedirect = regexp.MustCompile(`(?i)((?:\d+|&)?>>?)\s*(?:nul|null|/dev/null)([\s;&|<>)]|$)`)
-
-// normalizeNulRedirect rewrites those redirects to sink ("/dev/null" for bash,
-// "$null" for PowerShell), so the command discards output as intended.
+// normalizeNulRedirect rewrites null-device redirects in command to sink
+// ("/dev/null" for bash, "$null" for PowerShell). On PowerShell and
+// bash-on-Windows the targets "nul", "null", and "/dev/null" are ordinary
+// filenames, so a bare `2>nul` would otherwise create a stray file. #4252.
+//
+// This is a small quote-aware scanner, not a full shell parser: it skips
+// quoted regions (so `echo "2>nul"` is left alone) and rewrites redirect
+// operators (`>`, `>>`, `N>`, `&>`, `*>`) whose target is a null-device name.
 func normalizeNulRedirect(command, sink string) string {
-	return nulRedirect.ReplaceAllStringFunc(command, func(m string) string {
-		sub := nulRedirect.FindStringSubmatch(m)
-		return sub[1] + sink + sub[2]
-	})
+	var out strings.Builder
+	copied := 0
+	for i := 0; i < len(command); {
+		if command[i] == '\'' || command[i] == '"' {
+			i = skipQuoted(command, i)
+			continue
+		}
+		opStart, opEnd, targetEnd, ok := nullRedirectAt(command, i)
+		if !ok {
+			i++
+			continue
+		}
+		out.WriteString(command[copied:opStart])
+		out.WriteString(command[opStart:opEnd])
+		out.WriteString(sink)
+		copied = targetEnd
+		i = targetEnd
+	}
+	if copied == 0 {
+		return command
+	}
+	out.WriteString(command[copied:])
+	return out.String()
+}
+
+// skipQuoted advances past a quoted region beginning at the quote byte s[i]
+// and returns the index after the closing quote. Double quotes honour bash
+// backslash/backtick escapes; single quotes are literal except for `”`.
+func skipQuoted(s string, i int) int {
+	quote := s[i]
+	for i++; i < len(s); i++ {
+		if quote == '"' && (s[i] == '\\' || s[i] == '`') && i+1 < len(s) {
+			i++
+			continue
+		}
+		if quote == '\'' && i+1 < len(s) && s[i] == '\'' && s[i+1] == '\'' {
+			i++
+			continue
+		}
+		if s[i] == quote {
+			return i + 1
+		}
+	}
+	return len(s)
+}
+
+// nullRedirectAt reports whether a null-device redirect begins at s[i]. If so
+// it returns the operator span [opStart, opEnd) and the end of the target
+// token; otherwise ok is false.
+func nullRedirectAt(s string, i int) (opStart, opEnd, targetEnd int, ok bool) {
+	opStart = i
+	prefixLen := redirectOpPrefixLen(s, i)
+	if prefixLen == noRedirectPrefix {
+		return 0, 0, 0, false
+	}
+	i += prefixLen
+	if i >= len(s) || s[i] != '>' {
+		return 0, 0, 0, false
+	}
+	i++
+	if i < len(s) && s[i] == '>' {
+		i++
+	}
+	opEnd = i
+	for i < len(s) && isShellSpace(s[i]) {
+		i++
+	}
+	target, end, found := redirectTarget(s, i)
+	if !found || !isNullDeviceTarget(target) {
+		return 0, 0, 0, false
+	}
+	return opStart, opEnd, end, true
+}
+
+const noRedirectPrefix = -1
+
+// redirectOpPrefixLen returns the length of the prefix before the `>` at s[i]
+// (0 for `>`/`&>`/`*>`, or the digit count for an fd prefix like `2>`).
+// noRedirectPrefix if s[i] starts no recognised prefix.
+func redirectOpPrefixLen(s string, i int) int {
+	if i >= len(s) {
+		return noRedirectPrefix
+	}
+	switch s[i] {
+	case '>', '&', '*':
+		return 0
+	}
+	if s[i] >= '0' && s[i] <= '9' {
+		n := 0
+		for i+n < len(s) && s[i+n] >= '0' && s[i+n] <= '9' {
+			n++
+		}
+		return n
+	}
+	return noRedirectPrefix
+}
+
+// redirectTarget extracts the redirect target token at s[i], stripping one
+// layer of quotes if present, and returns it with the index past the token.
+func redirectTarget(s string, i int) (token string, end int, ok bool) {
+	if i >= len(s) {
+		return "", i, false
+	}
+	if s[i] == '\'' || s[i] == '"' {
+		quote := s[i]
+		start := i + 1
+		end := skipQuoted(s, i)
+		if end <= start || end > len(s) || s[end-1] != quote {
+			return "", i, false
+		}
+		return s[start : end-1], end, true
+	}
+	start := i
+	for i < len(s) && !isRedirectTargetDelimiter(s[i]) {
+		i++
+	}
+	if i == start {
+		return "", i, false
+	}
+	return s[start:i], i, true
+}
+
+// isNullDeviceTarget recognizes the null-device spellings the model commonly emits.
+func isNullDeviceTarget(token string) bool {
+	return strings.EqualFold(token, "nul") ||
+		strings.EqualFold(token, "null") ||
+		strings.EqualFold(token, "/dev/null")
+}
+
+func isRedirectTargetDelimiter(c byte) bool {
+	return isShellSpace(c) || strings.ContainsRune(";&|<>)`", rune(c))
+}
+
+func isShellSpace(c byte) bool {
+	switch c {
+	case ' ', '\t', '\r', '\n':
+		return true
+	default:
+		return false
+	}
 }
 
 // argv builds the exec argv that runs command under this shell.
