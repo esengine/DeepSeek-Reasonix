@@ -219,7 +219,33 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /sessions", s.sessions)
 	mux.HandleFunc("GET /skills", s.skills)
 	mux.HandleFunc("POST /delete-session", s.deleteSession)
-	return logMiddleware(csrfGuard(mux))
+	return logMiddleware(csrfGuard(tokenAuth(mux)))
+}
+
+// tokenAuth is an optional Bearer-token authentication guard. It checks
+// Authorization: Bearer <token> on every request, with a ?token=<token> query-
+// parameter fallback so the SSE /events endpoint works with the browser's
+// EventSource API (which cannot set custom headers).
+//
+// Enable by setting the REASONIX_AUTH_TOKEN environment variable. When the
+// variable is empty or unset, tokenAuth passes all requests through — zero
+// behavioural change for existing deployments.
+func tokenAuth(next http.Handler) http.Handler {
+	token := os.Getenv("REASONIX_AUTH_TOKEN")
+	if token == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := r.Header.Get("Authorization")
+		if got == "" {
+			got = r.URL.Query().Get("token")
+		}
+		if got == "Bearer "+token || got == token {
+			next.ServeHTTP(w, r)
+			return
+		}
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+	})
 }
 
 // csrfGuard rejects state-changing requests that don't carry a JSON content type.
