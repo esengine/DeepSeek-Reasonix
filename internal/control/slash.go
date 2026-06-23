@@ -528,18 +528,19 @@ func (c *Controller) providerSwitchText(name string) string {
 }
 
 func (c *Controller) memoryListText() string {
-	if c.mem == nil {
+	mem := c.memory.current()
+	if mem == nil {
 		return i18n.M.ListMemoryNone
 	}
-	saved := c.mem.Store.List()
-	archived := c.mem.Store.ListArchived()
-	if len(c.mem.Docs) == 0 && len(saved) == 0 && len(archived) == 0 {
+	saved := mem.Store.List()
+	archived := mem.Store.ListArchived()
+	if len(mem.Docs) == 0 && len(saved) == 0 && len(archived) == 0 {
 		return i18n.M.ListMemoryNone
 	}
 	var b strings.Builder
-	if len(c.mem.Docs) > 0 {
+	if len(mem.Docs) > 0 {
 		b.WriteString(i18n.M.ListMemoryHeader + "\n")
-		for _, d := range c.mem.Docs {
+		for _, d := range mem.Docs {
 			fmt.Fprintf(&b, "  (%s) %s\n", d.Scope, d.Path)
 		}
 	}
