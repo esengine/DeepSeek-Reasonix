@@ -8,12 +8,18 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"reasonix/internal/event"
 	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
+
+// maxSubAgentTimeout is the maximum wall-clock duration a single sub-agent task
+// may run. Tasks exceeding this are cancelled and returned as errors, preventing
+// the dispatcher from hanging on a hung provider call.
+const maxSubAgentTimeout = 10 * time.Minute
 
 // ParallelTasksTool dispatches multiple sub-agent tasks concurrently and
 // collects all results. Each sub-task runs as a foreground sub-agent in its
@@ -256,7 +262,9 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 				}
 
 				sess := NewSession("")
-				output, runErr := RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, Options{
+				taskCtx, taskCancel := context.WithTimeout(ctx, maxSubAgentTimeout)
+				defer taskCancel()
+				output, runErr := RunSubAgentWithSession(taskCtx, prov, subReg, sess, prompt, Options{
 					MaxSteps:          max,
 					Temperature:       p.taskTool.temperature,
 					Pricing:           pricing,
