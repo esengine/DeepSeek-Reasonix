@@ -1955,9 +1955,9 @@ func (a *App) maybeAutoTitleTopic(tab *WorkspaceTab) bool {
 	if sessionPath == "" {
 		return false
 	}
-	nextTitle, updated := autoTitleTopicFromSession(titleRoot, tab.TopicID, sessionPath)
+	nextTitle, updated, retry := autoTitleTopicFromSession(titleRoot, tab.TopicID, sessionPath, loadTopicTitle(titleRoot, tab.TopicID))
 	if !updated {
-		return false
+		return retry
 	}
 	a.updateOpenTopicTitle(tab.TopicID, nextTitle)
 	a.updateTopicSessionTitles(tab.TopicID, nextTitle)
@@ -1965,18 +1965,24 @@ func (a *App) maybeAutoTitleTopic(tab *WorkspaceTab) bool {
 	return true
 }
 
-func autoTitleTopicFromSession(workspaceRoot, topicID, sessionPath string) (string, bool) {
+func autoTitleTopicFromSession(workspaceRoot, topicID, sessionPath, currentTitle string) (title string, updated bool, retry bool) {
 	if source := loadTopicTitleSource(workspaceRoot, topicID); source != topicTitleSourceAuto {
-		return "", false
+		return "", false, false
 	}
 	nextTitle := topicTitleFromSession(sessionPath)
-	if nextTitle == "" || nextTitle == loadTopicTitle(workspaceRoot, topicID) {
-		return "", false
+	if nextTitle == "" || nextTitle == currentTitle {
+		// If the title is still the default, the first user message may not
+		// have been persisted yet — signal the caller to retry on the next
+		// snapshot rather than giving up permanently.
+		if currentTitle == "" || currentTitle == defaultTopicTitle {
+			return "", false, true
+		}
+		return "", false, false
 	}
 	if err := setTopicTitleWithSource(workspaceRoot, topicID, nextTitle, topicTitleSourceAuto); err != nil {
-		return "", false
+		return "", false, false
 	}
-	return nextTitle, true
+	return nextTitle, true, false
 }
 
 func topicTitleFromSession(path string) string {
