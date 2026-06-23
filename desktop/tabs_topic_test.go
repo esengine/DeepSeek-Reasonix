@@ -1352,7 +1352,7 @@ func TestAutoTitleTopicFromFirstUserMessage(t *testing.T) {
 		t.Fatalf("write session: %v", err)
 	}
 
-	title, updated := autoTitleTopicFromSession(projectRoot, topic.ID, sessionPath)
+	title, updated, _ := autoTitleTopicFromSession(projectRoot, topic.ID, sessionPath, "")
 	if !updated {
 		t.Fatal("auto title should update")
 	}
@@ -1407,7 +1407,7 @@ func TestAutoTitleDoesNotOverrideManualTopicTitle(t *testing.T) {
 		t.Fatalf("write session: %v", err)
 	}
 
-	if title, updated := autoTitleTopicFromSession(projectRoot, topic.ID, sessionPath); updated || title != "" {
+	if title, updated, _ := autoTitleTopicFromSession(projectRoot, topic.ID, sessionPath, "手动标题"); updated || title != "" {
 		t.Fatalf("manual title should not auto-update, title=%q updated=%v", title, updated)
 	}
 	if got := loadTopicTitle(projectRoot, topic.ID); got != "手动标题" {
