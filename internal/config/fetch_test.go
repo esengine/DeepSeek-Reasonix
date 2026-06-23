@@ -87,8 +87,7 @@ func TestProviderFetchModelsFallsBackToV1Models(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	t.Setenv("FETCH_MODELS_TEST_KEY", "test-key")
-	p := ProviderEntry{Name: "test", BaseURL: srv.URL, APIKeyEnv: "FETCH_MODELS_TEST_KEY"}
+	p := ProviderEntry{Name: "test", BaseURL: srv.URL, APIKeyEnv: "FETCH_MODELS_TEST_KEY", resolvedAPIKey: "test-key"}
 	got, err := p.FetchModels(context.Background())
 	if err != nil {
 		t.Fatalf("FetchModels: %v", err)

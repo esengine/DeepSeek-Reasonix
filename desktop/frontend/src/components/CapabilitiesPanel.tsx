@@ -320,6 +320,7 @@ function normalizeServerViews(servers: ServerView[] | null | undefined): ServerV
       ...server,
       args: asArray(server.args),
       envKeys: asArray(server.envKeys),
+      headerKeys: asArray(server.headerKeys),
       toolList: asArray(server.toolList),
     })),
   );
@@ -1030,6 +1031,12 @@ function ServerDetails({
             <span className="cap-detail__value">{s.envKeys.join(", ")}</span>
           </div>
         )}
+        {s.headerKeys && s.headerKeys.length > 0 && (
+          <div className="cap-detail cap-detail--wide">
+            <span className="cap-detail__label">{t("caps.headerKeys")}</span>
+            <span className="cap-detail__value">{s.headerKeys.join(", ")}</span>
+          </div>
+        )}
       </div>
       <div className="cap-detail-actions">
         {canConnectNow && (
@@ -1107,19 +1114,22 @@ function EditServerForm({
   const [transport, setTransport] = useState(initialTransport);
   const [command, setCommand] = useState(initialTransport === "stdio" ? serverCommand(s) : "");
   const [url, setUrl] = useState(initialTransport === "stdio" ? "" : s.url || serverCommand(s));
+  const [headers, setHeaders] = useState("");
   const [env, setEnv] = useState("");
   const isStdio = transport === "stdio";
   const ready = isStdio ? command.trim() !== "" : url.trim() !== "";
 
   const submit = () => {
     const envText = env.trim();
+    const headerText = headers.trim();
     onSave({
       name: s.name,
       transport,
       command: isStdio ? command.trim() : "",
       args: [],
       url: isStdio ? "" : url.trim(),
-      env: envText === "" ? null : parseEnvText(envText),
+      env: envText === "" ? null : parseKeyValueText(envText),
+      headers: isStdio || headerText === "" ? null : parseKeyValueText(headerText),
     });
   };
 
@@ -1148,6 +1158,19 @@ function EditServerForm({
             <span className="cap-detail__label">{t("caps.url")}</span>
             <input className="mem-input" value={url} disabled={busy} onChange={(e) => setUrl(e.target.value)} placeholder={t("caps.urlPlaceholder")} />
           </label>
+        )}
+        {!isStdio && (
+          <label className="cap-detail cap-detail--wide">
+            <span className="cap-detail__label">{t("caps.headersLabel")}</span>
+            <textarea className="mem-textarea cap-config-edit__env" value={headers} disabled={busy} onChange={(e) => setHeaders(e.target.value)} placeholder={t("caps.headersPlaceholder")} spellCheck={false} />
+          </label>
+        )}
+        {!isStdio && s.headerKeys && s.headerKeys.length > 0 && (
+          <div className="cap-detail cap-detail--wide">
+            <span className="cap-detail__label">{t("caps.headerKeys")}</span>
+            <span className="cap-detail__value">{s.headerKeys.join(", ")}</span>
+            <span className="cap-edit-hint">{t("caps.headersPreserveHint")}</span>
+          </div>
         )}
         <label className="cap-detail cap-detail--wide">
           <span className="cap-detail__label">{t("caps.envLabel")}</span>
@@ -1182,13 +1205,15 @@ function normalizeTransportValue(transport: string): string {
   return transport === "http" || transport === "sse" ? transport : "stdio";
 }
 
-function parseEnvText(env: string): Record<string, string> {
-  const envMap: Record<string, string> = {};
-  for (const line of env.split("\n")) {
+function parseKeyValueText(text: string): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
     const eq = line.indexOf("=");
-    if (eq > 0) envMap[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+    if (eq > 0) values[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
   }
-  return envMap;
+  return values;
 }
 
 function serverStatusLabel(s: ServerView, t: ReturnType<typeof useT>): string {
@@ -1415,24 +1440,23 @@ function AddServerForm({
   const [transport, setTransport] = useState("stdio");
   const [command, setCommand] = useState("");
   const [url, setUrl] = useState("");
+  const [headers, setHeaders] = useState("");
   const [env, setEnv] = useState("");
 
   const isStdio = transport === "stdio";
   const ready = name.trim() !== "" && (isStdio ? command.trim() !== "" : url.trim() !== "");
 
   const submit = () => {
-    const envMap: Record<string, string> = {};
-    for (const line of env.split("\n")) {
-      const eq = line.indexOf("=");
-      if (eq > 0) envMap[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
-    }
+    const envText = env.trim();
+    const headerText = headers.trim();
     onAdd({
       name: name.trim(),
       transport,
       command: isStdio ? command.trim() : "",
       args: [],
       url: isStdio ? "" : url.trim(),
-      env: envMap,
+      env: envText === "" ? null : parseKeyValueText(envText),
+      headers: isStdio || headerText === "" ? null : parseKeyValueText(headerText),
     });
   };
 
@@ -1449,6 +1473,12 @@ function AddServerForm({
         <input className="mem-input" placeholder={t("caps.commandPlaceholder")} value={command} onChange={(e) => setCommand(e.target.value)} />
       ) : (
         <input className="mem-input" placeholder={t("caps.urlPlaceholder")} value={url} onChange={(e) => setUrl(e.target.value)} />
+      )}
+      {!isStdio && (
+        <>
+          <label className="set-label">{t("caps.headersLabel")}</label>
+          <textarea className="mem-textarea" value={headers} onChange={(e) => setHeaders(e.target.value)} placeholder={t("caps.headersPlaceholder")} spellCheck={false} />
+        </>
       )}
       <label className="set-label">{t("caps.envLabel")}</label>
       <textarea className="mem-textarea" value={env} onChange={(e) => setEnv(e.target.value)} placeholder={t("caps.envPlaceholder")} spellCheck={false} />

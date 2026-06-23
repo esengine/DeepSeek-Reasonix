@@ -122,6 +122,41 @@ func TestRunRecoversInterruptedStreamAfterPartialText(t *testing.T) {
 	}
 }
 
+func TestRunRecoversRepeatedInterruptedStreams(t *testing.T) {
+	interrupted := &provider.StreamInterruptedError{Err: errors.New("deepseek-flash: read stream: unexpected EOF")}
+	mp := testutil.NewMock("m",
+		testutil.Turn{Text: "first ", ChunkError: interrupted},
+		testutil.Turn{Text: "second ", ChunkError: interrupted},
+		testutil.Turn{Text: "done"},
+	)
+	sink := &recordSink{}
+	a := New(mp, echoRegistry(), NewSession(""), Options{}, sink)
+
+	if err := a.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run should recover repeated interrupted streams, got %v", err)
+	}
+	if mp.CallCount() != 3 {
+		t.Fatalf("provider calls = %d, want 3", mp.CallCount())
+	}
+
+	var streamed strings.Builder
+	for _, e := range sink.kinds(event.Text) {
+		streamed.WriteString(e.Text)
+	}
+	if streamed.String() != "first second done" {
+		t.Fatalf("streamed text = %q, want repeated partials plus final text", streamed.String())
+	}
+	retries := sink.kinds(event.Retrying)
+	if len(retries) != 2 || retries[0].RetryAttempt != 1 || retries[1].RetryAttempt != 2 {
+		t.Fatalf("retry events = %+v, want attempts 1 and 2", retries)
+	}
+	for _, retry := range retries {
+		if retry.RetryMax != maxStreamRecoveries {
+			t.Fatalf("retry max = %d, want %d", retry.RetryMax, maxStreamRecoveries)
+		}
+	}
+}
+
 func TestRunRecoversInterruptedPartialToolCallWithoutExecutingIt(t *testing.T) {
 	interrupted := &provider.StreamInterruptedError{Err: errors.New("deepseek-flash: read stream: unexpected EOF")}
 	mp := testutil.NewMock("m",

@@ -783,18 +783,20 @@ type AgentConfig struct {
 // token budget; the harness compacts older history as a turn's prompt approaches
 // it (see agent compaction). 0 disables compaction for the instance.
 type ProviderEntry struct {
-	Name          string                       `toml:"name"`
-	Kind          string                       `toml:"kind"`
-	BaseURL       string                       `toml:"base_url"`
-	Model         string                       `toml:"model"`      // a single model (back-compat)
-	Models        []string                     `toml:"models"`     // a vendor's model list (one base_url/key, many models)
-	ModelsURL     string                       `toml:"models_url"` // auto-fetch models from this URL on startup
-	Default       string                       `toml:"default"`    // default model when Models is set (else Models[0])
-	APIKeyEnv     string                       `toml:"api_key_env"`
-	BalanceURL    string                       `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
-	ContextWindow int                          `toml:"context_window"`
-	Price         *provider.Pricing            `toml:"price"`  // legacy/provider-wide fallback
-	Prices        map[string]*provider.Pricing `toml:"prices"` // optional per-model prices; keys are model ids
+	Name           string   `toml:"name"`
+	Kind           string   `toml:"kind"`
+	BaseURL        string   `toml:"base_url"`
+	Model          string   `toml:"model"`      // a single model (back-compat)
+	Models         []string `toml:"models"`     // a vendor's model list (one base_url/key, many models)
+	ModelsURL      string   `toml:"models_url"` // auto-fetch models from this URL on startup
+	Default        string   `toml:"default"`    // default model when Models is set (else Models[0])
+	APIKeyEnv      string   `toml:"api_key_env"`
+	resolvedAPIKey string
+	resolvedSource CredentialSource
+	BalanceURL     string                       `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
+	ContextWindow  int                          `toml:"context_window"`
+	Price          *provider.Pricing            `toml:"price"`  // legacy/provider-wide fallback
+	Prices         map[string]*provider.Pricing `toml:"prices"` // optional per-model prices; keys are model ids
 	// Thinking / Effort are provider-kind-specific knobs forwarded to the provider
 	// via Config.Extra. The anthropic provider reads Thinking="adaptive" to enable
 	// extended thinking and Effort ("low".."max") to tune depth. The
@@ -1111,19 +1113,16 @@ const DefaultSystemPrompt = `You are Reasonix, a coding agent focused on executi
 Use the provided tools to read and write files and run shell commands.
 Principles: understand the request before acting; verify with tools instead of
 guessing; keep changes minimal and correct; briefly summarize what you did.
-When the request leaves a real choice to the user — which approach or library,
-the scope, or a consequential or ambiguous decision — call the ask tool to offer
-2-4 concrete options rather than guessing or burying the question in prose. Skip
-it when there's an obvious default; don't ask just to confirm. Approval-bypass
-modes do not answer ask questions or approve plans for the user. If no
-interactive user is available, the ask tool returns a model-assumption fallback;
-state the assumption you made before proceeding.
 For multi-step work, track progress with the todo_write tool: lay out the steps,
 keep exactly one in_progress, and flip each to completed as you finish it — update
 the list as you go, not just at the end.
 In plan mode the harness blocks writer tools: do read-only research, then write a
 concise plan as your reply and stop. The user is asked to approve before anything
 is changed; once approved, work through the steps, updating the task list as you go.`
+
+// UserDecisionPolicy is appended to every system prompt, including user-custom
+// prompts, so custom personas cannot accidentally remove the `ask` UI contract.
+const UserDecisionPolicy = `User-owned choices: when a real decision belongs to the user — scope, approach, library, risk, manual validation, or any ambiguous or consequential path — and there is no obvious safe default, call the ask tool with 2-4 concrete options so the UI shows a choice. Do not ask in prose, infer a choice from silence, or continue by choosing for the user; do not choose for the user. Tool-approval bypass modes do not answer ask questions or approve plans. If no interactive user is available, the ask tool returns a model-assumption fallback; state that assumption and choose the safest reversible path.`
 
 // LanguagePolicy is the auto fallback appended to the system prompt when no
 // concrete UI language is resolved. It is static English text, so it stays part
@@ -1388,8 +1387,8 @@ func samePricing(a, b *provider.Pricing) bool {
 
 // Load builds the configuration: defaults, then user config, then project
 // config, then MCP servers from Claude Code's .mcp.json, then (lowest priority)
-// the v0.x ~/.reasonix/config.json's mcpServers. A .env in the working directory
-// is loaded first so api_key_env can resolve.
+// the v0.x ~/.reasonix/config.json's mcpServers. Provider api_key_env values
+// resolve from Reasonix's global .env, not from project .env files.
 func Load() (*Config, error) {
 	return LoadForRoot(".")
 }
@@ -1397,8 +1396,8 @@ func Load() (*Config, error) {
 // LoadForRoot builds the configuration with project files resolved from root
 // instead of the current working directory. When root is "" or ".", it behaves
 // like Load(). This is the workspace-aware entry point: desktop tabs use it so
-// each project's reasonix.toml + .env + .mcp.json are resolved independently
-// without changing the process cwd.
+// each project's reasonix.toml + .mcp.json are resolved independently without
+// changing the process cwd, while provider keys stay rooted in Reasonix home.
 func LoadForRoot(root string) (*Config, error) {
 	root = resolveRoot(root)
 	loadDotEnvForRoot(root)
@@ -1480,6 +1479,7 @@ func LoadForRoot(root string) (*Config, error) {
 	backfillDeepSeekPro(cfg)
 	cfg.Agent.AutoPlan = userAutoPlanMode()
 	cfg.CredentialsStore = credentialsStoreMode()
+	resolveProviderCredentialsForRoot(root, cfg)
 	return cfg, nil
 }
 
@@ -1712,8 +1712,8 @@ func mergeTOMLProviderAccess(paths []string) ([]string, bool, error) {
 // LoadForEdit returns a config to seed the `reasonix setup` wizard when reconfiguring:
 // the built-in defaults with the file at path (if present) decoded on top, so a
 // reconfigure preserves the user's existing providers and agent settings instead
-// of resetting to defaults. .env is loaded so api_key_env resolution works while
-// the wizard decides which keys are still missing.
+// of resetting to defaults. Reasonix's global .env is loaded so api_key_env
+// resolution works while the wizard decides which keys are still missing.
 func LoadForEdit(path string) *Config {
 	cfg, err := loadForEditStrict(path, true)
 	if err == nil {
@@ -2681,18 +2681,17 @@ func LegacyUserConfigPaths() []string {
 // Windows.
 func ReasonixHomeDir() string { return reasonixHomeDir() }
 
-// UserCredentialsPath is the reasonix-owned global secrets file under Reasonix
-// home. It holds KEY=value lines loaded into the environment by loadDotEnv. The
-// setup wizard writes API keys here, deliberately NOT named .env: keys never
-// land in a project's own .env (which can't be selectively gitignored), never
-// get committed, and resolve from any working directory. "" when Reasonix home
-// can't be resolved.
+// UserCredentialsPath is the reasonix-owned global .env file under Reasonix
+// home. It is the single source for provider credentials saved by Reasonix, so
+// stale shell, Windows, project, or home env vars cannot silently override keys
+// the user saved through setup or settings. "" when Reasonix home can't be
+// resolved.
 func UserCredentialsPath() string {
 	dir := userSupportDir()
 	if dir == "" {
 		return ""
 	}
-	return filepath.Join(dir, "credentials")
+	return filepath.Join(dir, ".env")
 }
 
 // ArchiveDir is where compacted conversation history is archived for
@@ -2950,10 +2949,30 @@ func (c *Config) ResolveModelWithFallback(ref string) (resolvedRef string, fallb
 
 // APIKey resolves the entry's API key from its api_key_env.
 func (e *ProviderEntry) APIKey() string {
+	if e == nil {
+		return ""
+	}
+	if e.resolvedAPIKey != "" {
+		return e.resolvedAPIKey
+	}
 	if e.APIKeyEnv == "" {
 		return ""
 	}
-	return os.Getenv(e.APIKeyEnv)
+	value, _, ok := storedCredentialValue(e.APIKeyEnv)
+	if !ok {
+		return ""
+	}
+	return value
+}
+
+func (e *ProviderEntry) APIKeySourceLabel() string {
+	if e == nil || strings.TrimSpace(e.APIKeyEnv) == "" {
+		return ""
+	}
+	if e.resolvedAPIKey != "" {
+		return credentialSourceLabel(e.resolvedSource)
+	}
+	return ResolveCredentialForRootGlobalFirst(".", e.APIKeyEnv).Source.Label
 }
 
 // RequiresAPIKey reports whether this provider should be hidden/validated when

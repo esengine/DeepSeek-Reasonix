@@ -17,7 +17,8 @@
 | 数据 | 路径 |
 | --- | --- |
 | 全局配置 | `<Reasonix home>/config.toml` |
-| 全局 credentials 文件 fallback | `<Reasonix home>/credentials` |
+| 全局 provider 凭据 | `<Reasonix home>/.env` |
+| 旧 credentials 导入来源 | `<Reasonix home>/credentials` |
 | 全局斜杠命令 | `<Reasonix home>/commands/` |
 | 全局 skills | `<Reasonix home>/skills/` |
 | 全局 hooks | `<Reasonix home>/settings.json` |
@@ -26,14 +27,74 @@
 | 归档 | `<Reasonix home>/archive/` |
 | 记忆 | `<Reasonix home>/memory/` 与 `<Reasonix home>/projects/` |
 
-全局 credentials 默认使用 `credentials_store = "auto"`。在 auto 模式下，
-Reasonix 会优先尝试系统密钥库；如果 keyring 不可用，再 fallback 到
-`<Reasonix home>/credentials`。设置 `credentials_store = "keyring"` 可强制使用系统密钥库；
-设置 `credentials_store = "file"` 可始终使用文件 fallback。`REASONIX_CREDENTIALS_STORE`
-可在 CI、测试或便携安装中覆盖该模式。
+全局用户配置文件名是 `config.toml`。项目本地配置文件仍叫 `reasonix.toml`。
+如果有人说“全局 reasonix.toml”，通常指的是 `<Reasonix home>/config.toml`。
 
-setup 向导、桌面端或 CLI 缺 key 提示保存的新 API key 都会写入上面的凭据存储。
-项目 `.env` 仍会优先读取，用于兼容旧项目或用户主动做项目级覆盖；但 Reasonix 不会把新密钥写入项目 `.env`。
+## 全局 `config.toml`
+
+`<Reasonix home>/config.toml` 存放 CLI 与桌面端共用的非密钥配置。它可以包含
+Reasonix 写入用户配置的 provider、plugin、UI、desktop、tool、skill、sandbox、
+bot 和 agent 设置。Provider 条目只保存 `api_key_env` 里的凭据变量名，不保存真实密钥值。
+
+示例：
+
+```toml
+config_version = 1
+default_model = "deepseek/deepseek-v4-flash"
+language = "zh"
+credentials_store = "auto"   # 旧兼容字段；provider key 保存在 .env
+
+[ui]
+theme = "auto"
+
+[desktop]
+provider_access = ["deepseek"]
+
+[agent]
+auto_plan = "off"
+max_steps = 0
+
+[[providers]]
+name        = "deepseek"
+kind        = "openai"
+base_url    = "https://api.deepseek.com"
+models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
+default     = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[[plugins]]
+name    = "example"
+command = "example-mcp-server"
+```
+
+不要把 API key 的真实值写进 `config.toml`。这个文件是普通配置：可以查看、编辑、
+迁移，也可以在常规脱敏后用于诊断。密钥值属于下面的全局 `.env`。
+
+## 全局 `.env`
+
+`<Reasonix home>/.env` 是 Reasonix 保存的 provider API key 的唯一运行时来源。
+setup 向导、桌面端设置页、CLI 缺 key 提示以及删除 provider key 的操作，都会通过同一套凭据 helper 读写这个文件。
+
+结构：
+
+```dotenv
+DEEPSEEK_API_KEY=sk-...
+GEMINI_API_KEY=...
+ANTHROPIC_API_KEY=...
+```
+
+规则：
+
+- 每行一个 `KEY=value`；
+- 空行和 `#` 注释会被忽略；
+- 读取时接受 `export KEY=value` 和带引号的值；
+- Reasonix 写入时会拒绝多行值；
+- key 必须是类似 `DEEPSEEK_API_KEY` 的 shell 风格变量名；
+- 在操作系统支持的情况下，Reasonix 会用受限权限写入该文件。
+
+Provider 请求只会从这个全局 `.env` 解析 key。项目 `.env`、home `.env`、继承的 shell
+环境变量、旧 `credentials` 文件和系统 keyring 都不再作为运行时 provider key fallback。
+旧 `credentials` 文件和旧 keyring 条目只会在新全局 `.env` 缺少对应 key 时作为非破坏性迁移来源读取。
 
 缓存仍放在系统缓存目录，例如 macOS 的 `~/Library/Caches/reasonix`、
 Linux 的 `$XDG_CACHE_HOME/reasonix` 或 `~/.cache/reasonix`、Windows 的
@@ -71,7 +132,8 @@ Windows:     %APPDATA%\reasonix\config.toml
 ~/.reasonix/config.json
 ```
 
-旧 credentials、memory 文件和 sessions 也会在新目标不存在时导入到配置的 credential store / Reasonix home。若新的全局配置已经存在，则新配置优先；旧配置只作为兼容 fallback 保留。
+旧 credentials、memory 文件和 sessions 也会在新目标不存在时导入到 Reasonix home。
+旧 provider key 只会在 `<Reasonix home>/.env` 尚未包含同名 key 时复制进去。若新的全局配置已经存在，则新配置优先；旧配置只作为兼容 fallback 保留。
 
 从 **v1.9.1** 开始，Reasonix 还会在升级时把已知旧路径、legacy `config.json`、
 桌面端已登记项目和恢复 tabs 对应项目里的 MCP 配置汇总补齐到全局

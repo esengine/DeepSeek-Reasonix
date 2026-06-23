@@ -1,7 +1,8 @@
 # Reasonix configuration.
-# Resolution order: flag > ./reasonix.toml > ~/.config/reasonix/config.toml > built-in defaults.
+# Resolution order: flag > ./reasonix.toml > ~/.reasonix/config.toml > built-in defaults.
 # Fields marked user/global only are not overridden by ./reasonix.toml.
-# Secrets come from the environment via api_key_env; never put keys here.
+# Provider entries name secrets via api_key_env; saved key values live in
+# Reasonix's global ~/.reasonix/.env. Never put API key values here.
 
 default_model = "deepseek"   # a provider name (→ its default model) or "provider/model"
 # language      = "zh"   # ui language; empty = auto-detect from $LANG / $REASONIX_LANG

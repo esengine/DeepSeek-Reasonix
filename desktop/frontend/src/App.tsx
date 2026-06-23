@@ -2000,13 +2000,14 @@ export default function App() {
     prompt: string;        // user message text for composer fill
   };
   const [rewindState, setRewindState] = useState<RewindState | null>(null);
+  const [rewindCommitting, setRewindCommitting] = useState(false);
   const rewindStateRef = useRef(rewindState);
   rewindStateRef.current = rewindState;
 
   // Display items: truncated when an optimistic rewind is pending.
   const displayItems = useMemo(() => {
     if (!rewindState) return state.items;
-    return state.items.slice(0, rewindState.boundaryIdx);
+    return state.items.slice(0, rewindState.boundaryIdx).filter((it) => it.kind !== "compaction");
   }, [state.items, rewindState]);
 
   // send wrapper: commits any pending optimistic rewind before sending.
@@ -2014,12 +2015,19 @@ export default function App() {
     if (activeTab?.readOnly) return;
     const rs = rewindStateRef.current;
     if (rs) {
+      rewindStateRef.current = null;
       setRewindState(null);
-      const ok = await rewind(rs.turn, rs.scope);
+      setRewindCommitting(true);
+      let ok = false;
+      try {
+        ok = await rewind(rs.turn, rs.scope);
+      } finally {
+        setRewindCommitting(false);
+      }
       if (!ok) {
-        // Rewind failed: the Go conversation is intact, so the cleared
-        // optimistic state already shows the full transcript. Don't send —
-        // the controller emits a notice with the reason.
+        // Rewind failed: the Go conversation is intact. Do not send; the
+        // controller emits a notice with the reason.
+        setRewindState(null);
         return;
       }
       setRewindSignal((v) => v + 1);
@@ -2047,6 +2055,17 @@ export default function App() {
     // Code-only rewind only affects files — no message truncation,
     // no optimistic UI needed.  Execute immediately.
     if (scope === "code") {
+      rewind(turn, scope).then((ok) => {
+        if (!ok) return;
+        setDockRefreshKey((v) => v + 1);
+        setProjectRevision((v) => v + 1);
+      });
+      return;
+    }
+
+    // Summarize only compresses the conversation log — no files touched,
+    // no optimistic UI needed. Execute immediately like code-only rewind.
+    if (scope === "summ-from" || scope === "summ-upto") {
       rewind(turn, scope).then((ok) => {
         if (!ok) return;
         setDockRefreshKey((v) => v + 1);
@@ -2236,13 +2255,13 @@ export default function App() {
   const handleNavigateTopic = useCallback((entry: TopicShortcutEntry) => {
     void handleOpenTopic(entry.scope, entry.workspaceRoot, entry.topicId, entry.sessionPath);
   }, [handleOpenTopic]);
-  const { showBadges: showTopicBadges } = useTopicShortcuts(!sidebarCollapsed);
+  const { showBadges: showTopicBadges } = useTopicShortcuts(!sidebarCollapsed, desktopPlatform);
 
   // Register Cmd/Ctrl+1-9 shortcuts for topic navigation
   useEffect(() => {
     if (sidebarCollapsed) return;
     const onKeydown = (event: globalThis.KeyboardEvent) => {
-      const idx = topicShortcutIndexFromEvent(event);
+      const idx = topicShortcutIndexFromEvent(event, desktopPlatform);
       if (idx === null) return;
       event.preventDefault();
       const topics = visibleTopicsRef.current;
@@ -2252,7 +2271,7 @@ export default function App() {
     };
     document.addEventListener("keydown", onKeydown);
     return () => document.removeEventListener("keydown", onKeydown);
-  }, [sidebarCollapsed, handleNavigateTopic]);
+  }, [sidebarCollapsed, desktopPlatform, handleNavigateTopic]);
 
   const paletteItems = useMemo<PaletteItem[]>(() => {
     const cmds: PaletteItem[] = [
@@ -2286,17 +2305,24 @@ export default function App() {
   const onDeleteSession = useCallback(
     async (path: string) => {
       if (state.running) return;
-      await deleteSession(path);
-      const sessions = await listSessions();
+      try {
+        await deleteSession(path);
+      } catch {
+        // If the backend could not delete the session (validation, snapshot,
+        // or I/O failure), keep it in the history panel.  The old
+        // listSessions() refresh masked this by re-reading disk; with local
+        // state removal we must let the error propagate.
+        return;
+      }
+      // Local state removal: filter the deleted session out of the current
+      // history view instead of re-fetching the full list from the backend.
       setHistView((cur) =>
-        cur === null
-          ? null
-          : cur.kind === "history"
-            ? { ...cur, sessions: cur.source === "scope" ? sessionsForScope(sessions, cur.filter) : sessions }
-            : cur,
+        cur === null || cur.kind !== "history"
+          ? cur
+          : { ...cur, sessions: cur.sessions.filter((s) => s.path !== path) },
       );
     },
-    [state.running, deleteSession, listSessions],
+    [state.running, deleteSession],
   );
   const onRenameSession = useCallback(
     async (path: string, title: string) => {
@@ -2616,6 +2642,7 @@ export default function App() {
               searchExpanded={!sidebarCreation || sidebarSearchOpen}
               searchFocusSignal={sidebarSearchFocusSignal}
               showShortcutBadges={showTopicBadges}
+              shortcutPlatform={desktopPlatform}
               onVisibleTopicsChange={handleVisibleTopicsChange}
             />
           </section>
@@ -2998,8 +3025,8 @@ export default function App() {
                 onRewind={handleMessageAction}
                 checkpoints={state.checkpoints}
                 actionPending={state.messageAction != null}
-                rewindDisabled={Boolean(activeTab?.readOnly) || rewindState != null || state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
-                running={state.running}
+                rewindDisabled={Boolean(activeTab?.readOnly) || rewindState != null || rewindCommitting || state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
+                running={state.running || rewindCommitting}
                 welcomeVariant={sidebarCreation ? "creation" : "default"}
                 creationMode={sidebarCreation}
                 actionHoverMenus={sidebarCreation}
@@ -3068,7 +3095,7 @@ export default function App() {
               />
             )}
             <Composer
-              running={state.running}
+              running={state.running || rewindCommitting}
               collaborationMode={collaborationMode}
               toolApprovalMode={toolApprovalMode}
               tokenMode={tokenMode}
@@ -3090,8 +3117,8 @@ export default function App() {
               onSetTokenMode={applyTokenMode}
               insertRequest={composerInsertRequest}
               readOnly={Boolean(activeTab?.readOnly)}
-              disabled={state.meta?.ready === false || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
-              decisionPending={state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
+              disabled={state.meta?.ready === false || rewindCommitting || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
+              decisionPending={rewindCommitting || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
               ready={state.meta?.ready === true}
               turnStartAt={state.turnStartAt}
               turnTokens={state.turnTokens}
@@ -3103,7 +3130,7 @@ export default function App() {
               usage={state.usage}
               balance={state.balance}
               jobs={state.jobs}
-              running={state.running}
+              running={state.running || rewindCommitting}
               collaborationMode={collaborationMode}
               toolApprovalMode={toolApprovalMode}
               sessionTurns={sessionTurns}

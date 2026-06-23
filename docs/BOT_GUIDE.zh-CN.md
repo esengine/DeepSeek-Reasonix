@@ -236,8 +236,8 @@ YOLO 的边界很重要：
 绑定信息保存在用户配置目录，而不是 app 包内：
 
 - Bot 连接、远端 ID、白名单、模型和审批模式保存在用户配置文件。
-- 飞书和 Lark 的密钥保存在 Reasonix 配置的凭据存储中；默认优先使用系统凭据存储，
-  不可用时才 fallback 到 Reasonix 管理的凭据文件。
+- 飞书和 Lark 的密钥保存在 CLI 与桌面端共用的 Reasonix 全局
+  `<Reasonix home>/.env`。
 - 微信扫码后的账号 token 保存在 Reasonix 的用户数据目录。
 
 需要重新扫码的情况：

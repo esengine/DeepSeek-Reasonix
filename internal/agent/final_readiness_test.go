@@ -97,3 +97,18 @@ func TestFinalReadinessCheckAuditsIncompleteTodos(t *testing.T) {
 		t.Fatalf("audit.IncompleteTodos = %d, want 1", audit.IncompleteTodos)
 	}
 }
+
+func TestFinalReadinessRetryMessageKeepsUserChoicesInteractive(t *testing.T) {
+	msg := finalReadinessRetryMessage("latest successful todo_write still has incomplete items: Ask user to review the doc: in_progress")
+	lower := strings.ToLower(msg)
+	for _, want := range []string{
+		"ask tool",
+		"wait for its tool result",
+		"do not ask in prose",
+		"do not claim the user answered",
+	} {
+		if !strings.Contains(lower, want) {
+			t.Fatalf("finalReadinessRetryMessage() missing %q:\n%s", want, msg)
+		}
+	}
+}

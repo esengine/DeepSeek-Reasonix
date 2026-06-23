@@ -65,17 +65,15 @@ func TestRemoveEnvFileDeletesKeyAndUnsetsProcessEnv(t *testing.T) {
 	}
 }
 
-// TestPromoteProviderKeysLiftsProjectKeyAndStripsHomeEnv proves a provider key
-// that resolves only from a project .env / ~/.env is copied into the global
-// credentials store, removed from ~/.env, and that unrelated env vars are ignored.
-func TestPromoteProviderKeysLiftsProjectKeyAndStripsHomeEnv(t *testing.T) {
+// TestPromoteProviderKeysLiftsHomeEnvKey proves a provider key left in the
+// legacy ~/.env bridge is copied into Reasonix's global .env, removed from
+// ~/.env, and that unrelated env vars are ignored.
+func TestPromoteProviderKeysLiftsHomeEnvKey(t *testing.T) {
 	home := isolateDesktopUserDirs(t)
 	homeEnv := filepath.Join(home, ".env")
 	if err := os.WriteFile(homeEnv, []byte("DEEPSEEK_API_KEY=sk-test\nNPM_TOKEN=secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
-	t.Setenv("NPM_TOKEN", "secret")
 
 	promoteProviderKeysToCredentials(config.Default())
 
@@ -99,8 +97,19 @@ func TestPromoteProviderKeysLiftsProjectKeyAndStripsHomeEnv(t *testing.T) {
 	}
 }
 
+func TestPromoteProviderKeysIgnoresInheritedEnv(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-inherited")
+
+	promoteProviderKeysToCredentials(config.Default())
+
+	if data, err := os.ReadFile(config.UserCredentialsPath()); err == nil && strings.Contains(string(data), "DEEPSEEK_API_KEY") {
+		t.Errorf("inherited env var must not be promoted:\n%s", data)
+	}
+}
+
 // TestPromoteProviderKeysLeavesExistingCredentialsKey proves promotion never
-// overwrites a key already in the credentials store and leaves ~/.env untouched.
+// overwrites a key already in Reasonix's global .env and leaves ~/.env untouched.
 func TestPromoteProviderKeysLeavesExistingCredentialsKey(t *testing.T) {
 	home := isolateDesktopUserDirs(t)
 	if err := os.MkdirAll(filepath.Dir(config.UserCredentialsPath()), 0o755); err != nil {

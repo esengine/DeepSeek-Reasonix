@@ -614,6 +614,31 @@ func TestBuildRequestContentNullForAssistantToolCalls(t *testing.T) {
 	}
 }
 
+func TestBuildRequestOmitsResponseOnlyToolCallIndex(t *testing.T) {
+	c := &client{name: "x", model: "m", baseURL: "https://api.example.com/v1"}
+	req := provider.Request{
+		Messages: []provider.Message{{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{{
+				ID:        "call_1",
+				Name:      "bash",
+				Arguments: `{"cmd":"ls"}`,
+			}},
+		}},
+	}
+	body, err := json.Marshal(c.buildRequest(req))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(body)
+	if !strings.Contains(s, `"tool_calls"`) {
+		t.Fatalf("request body missing tool call: %s", s)
+	}
+	if strings.Contains(s, `"index"`) {
+		t.Fatalf("request body contains response-only tool_call index: %s", s)
+	}
+}
+
 func TestBuildRequestOmitsEmptyToolDescriptionAndParameters(t *testing.T) {
 	c := &client{name: "x", model: "m", baseURL: "https://api.example.com/v1"}
 	req := provider.Request{

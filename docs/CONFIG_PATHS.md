@@ -20,7 +20,8 @@ installations. Normal users should not need it.
 | Data | Path |
 | --- | --- |
 | Global config | `<Reasonix home>/config.toml` |
-| Global credentials file fallback | `<Reasonix home>/credentials` |
+| Global provider credentials | `<Reasonix home>/.env` |
+| Legacy credentials import source | `<Reasonix home>/credentials` |
 | Global slash commands | `<Reasonix home>/commands/` |
 | Global skills | `<Reasonix home>/skills/` |
 | Global hooks | `<Reasonix home>/settings.json` |
@@ -29,17 +30,83 @@ installations. Normal users should not need it.
 | Archives | `<Reasonix home>/archive/` |
 | Memory | `<Reasonix home>/memory/` and `<Reasonix home>/projects/` |
 
-Global credentials use `credentials_store = "auto"` by default. In auto mode,
-Reasonix tries the OS credential store first and falls back to
-`<Reasonix home>/credentials` when the keyring is unavailable. Set
-`credentials_store = "keyring"` to require the OS credential store, or
-`credentials_store = "file"` to always use the file fallback. `REASONIX_CREDENTIALS_STORE`
-can override the mode for CI, tests, or portable installs.
+The global user config is named `config.toml`. Project-local config files keep
+the name `reasonix.toml`. If someone says "global reasonix.toml", they usually
+mean `<Reasonix home>/config.toml`.
 
-New API keys saved by the setup wizard, the desktop app, or an interactive
-missing-key prompt are written to the configured credential store above. Project
-`.env` files are still loaded first for compatibility and deliberate per-project
-overrides, but Reasonix does not write new keys into a project `.env`.
+## Global `config.toml`
+
+`<Reasonix home>/config.toml` stores non-secret configuration shared by the CLI
+and desktop app. It may contain the same provider, plugin, UI, desktop, tool,
+skill, sandbox, bot, and agent settings that Reasonix renders into user config.
+Provider entries store the name of the credential variable in `api_key_env`, not
+the secret value.
+
+Example:
+
+```toml
+config_version = 1
+default_model = "deepseek/deepseek-v4-flash"
+language = "zh"
+credentials_store = "auto"   # legacy compatibility; provider keys are in .env
+
+[ui]
+theme = "auto"
+
+[desktop]
+provider_access = ["deepseek"]
+
+[agent]
+auto_plan = "off"
+max_steps = 0
+
+[[providers]]
+name        = "deepseek"
+kind        = "openai"
+base_url    = "https://api.deepseek.com"
+models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
+default     = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[[plugins]]
+name    = "example"
+command = "example-mcp-server"
+```
+
+Do not put API key values in `config.toml`. This file is regular configuration:
+it is safe to inspect, edit, migrate, and include in diagnostics after standard
+redaction. Secrets belong in the global `.env` below.
+
+## Global `.env`
+
+`<Reasonix home>/.env` is the single runtime source for provider API keys saved
+by Reasonix. The setup wizard, desktop settings, CLI missing-key prompts, and
+provider-key delete actions all read or write this file through the same
+credential helpers.
+
+Structure:
+
+```dotenv
+DEEPSEEK_API_KEY=sk-...
+GEMINI_API_KEY=...
+ANTHROPIC_API_KEY=...
+```
+
+Rules:
+
+- one `KEY=value` assignment per line;
+- blank lines and `#` comments are ignored;
+- `export KEY=value` and quoted values are accepted when reading;
+- multiline values are rejected by Reasonix writes;
+- keys must use shell-style names such as `DEEPSEEK_API_KEY`;
+- Reasonix writes this file with restricted permissions where the OS supports
+  them.
+
+For provider requests, Reasonix resolves only this global `.env`. Project `.env`
+files, home `.env` files, inherited shell environment variables, the old
+`credentials` file, and the OS keyring do not act as runtime provider-key
+fallbacks. The old `credentials` file and old keyring entries are read only as
+non-destructive migration sources when the new global `.env` is missing a key.
 
 Caches remain in the OS cache directory, for example
 `~/Library/Caches/reasonix` on macOS, `$XDG_CACHE_HOME/reasonix` or
@@ -81,10 +148,11 @@ Legacy config sources include:
 ~/.reasonix/config.json
 ```
 
-Legacy credentials, memory files, and sessions are also imported into the
-configured credential store / Reasonix home when the new destination does not
-already exist. If the new global config already exists, it wins and legacy
-config files are only kept as compatibility fallbacks.
+Legacy credentials, memory files, and sessions are also imported into Reasonix
+home when the new destination does not already exist. Legacy provider keys are
+copied into `<Reasonix home>/.env` only when that file does not already contain
+the same key. If the new global config already exists, it wins and legacy config
+files are only kept as compatibility fallbacks.
 
 Starting in **v1.9.1**, Reasonix also backfills MCP servers from known legacy
 paths, legacy `config.json`, desktop-registered projects, and restored tab

@@ -79,13 +79,10 @@ type Controller struct {
 	skillStore    *skill.Store
 	allSkillStore *skill.Store
 	hooks         *hook.Runner // session hook runner; nil-safe (no hooks configured)
-	mem           *memory.Set
-	// memMu serializes memory mutations (QuickAdd/SaveDoc/SaveMemory/ForgetMemory/
-	// QueueMemory) so each write+reload+swap is atomic with respect to the others,
-	// WITHOUT holding c.mu across the disk I/O. c.mu is taken only briefly — to read
-	// the snapshot pointer and to swap the reloaded snapshot in — never around a
-	// filesystem walk, so a memory-panel save can't stall an approval or status poll.
-	memMu             sync.Mutex
+	// memory owns the loaded memory snapshot, the pending turn-tail notes queue,
+	// and write serialization behind its own locks, off c.mu — so a memory-panel
+	// save never stalls an approval or status poll. See memory.go.
+	memory            memoryManager
 	cleanup           func()
 	autoPlan          string
 	reasoningLanguage string
@@ -121,19 +118,19 @@ type Controller struct {
 	// stalls an approval or status poll on c.mu. See goal.go.
 	goals goalMachine
 
-	// Checkpoints (snapshot-based rewind). cp is the per-session store rebound when
-	// the session path changes; cpRoot is the workspace root used to guard restore
-	// writes. cpTurn is the monotonic turn counter (decoupled from the store so it
-	// never collides after a restructure); cpBound[turn] records len(Session.Messages)
-	// at that turn's start — the truncation boundary for a conversation rewind/fork.
-	// Boundaries are persisted in each checkpoint and rebuilt from the store on
-	// resume (so a reopened session can still rewind conversation / fork), but
-	// dropped after a summarize restructures the log so those operations report
-	// "unavailable" rather than mis-truncating; code rewind (file-based) is unaffected.
-	cp      *checkpoint.Store
-	cpRoot  string
-	cpTurn  int
-	cpBound map[int]int
+	// workspaceRoot is the workspace root: the base for resolving @-refs and slash
+	// path refs, the working directory for user "!" shell commands and custom
+	// command discovery, and the guard root for checkpoint restore writes. It is
+	// surfaced to frontends via WorkspaceRoot().
+	workspaceRoot string
+
+	// checkpoints owns the snapshot-based rewind bookkeeping (the per-session
+	// store, the monotonic turn counter, and the conversation-rewind boundary map)
+	// behind its own lock, off c.mu — so a boundary read for a rewind/fork never
+	// contends on the run-state lock. The Controller keeps the rewind/fork/summarize
+	// orchestration (truncating the session, restoring code, emitting events). See
+	// checkpoint.go.
+	checkpoints checkpointManager
 
 	// approval owns the approval/ask prompt bookkeeping and the runtime approval
 	// posture (ask/auto/yolo, session grants, the just-approved-plan window)
@@ -153,13 +150,6 @@ type Controller struct {
 	sessionPath string
 	// turn counts model turns this session, passed to hooks in their payload.
 	turn int
-
-	// pendingMemory holds memory notes added mid-session (via "#" quick-add or a
-	// memory edit) that haven't yet been folded into a turn. Compose drains it
-	// onto the next outgoing turn — never into the cache-stable system prefix — so
-	// a fresh memory takes effect this session without busting the prompt cache;
-	// it joins the prefix naturally on the next session.
-	pendingMemory []string
 
 	displayRecorder func(content, display string)
 }
@@ -315,7 +305,7 @@ func New(opts Options) *Controller {
 		skillStore:             opts.SkillStore,
 		allSkillStore:          opts.AllSkillStore,
 		hooks:                  opts.Hooks,
-		mem:                    opts.Memory,
+		memory:                 newMemoryManager(opts.Memory),
 		cleanup:                opts.Cleanup,
 		autoPlan:               normalizeAutoPlan(opts.AutoPlan),
 		reasoningLanguage:      config.NormalizeReasoningLanguage(opts.ReasoningLanguage),
@@ -329,7 +319,7 @@ func New(opts Options) *Controller {
 		jobs:                   opts.Jobs,
 		reg:                    opts.Registry,
 		pluginCtx:              pluginCtx,
-		cpRoot:                 opts.WorkspaceRoot,
+		workspaceRoot:          opts.WorkspaceRoot,
 		approval:               newApprovalManager(opts.Policy, ToolApprovalAsk, opts.ApprovalTimeout),
 	}
 	// Checkpoints: bind a store to the session and route writer pre-edits into it.
@@ -339,9 +329,7 @@ func New(opts Options) *Controller {
 	c.commands.Store(&cmdsInit)
 	if c.executor != nil {
 		c.executor.SetPreEditHook(func(ch diff.Change) {
-			if c.cp != nil {
-				c.cp.Snapshot(ch)
-			}
+			c.checkpoints.snapshot(ch)
 		})
 		c.executor.SetMemoryQueue(c)
 	}
@@ -394,31 +382,18 @@ func ckptDir(sessionPath string) string {
 // checkpoints already on disk, and resets the turn boundaries. Called on
 // construction and whenever the session path changes (NewSession/Resume/SetSessionPath).
 func (c *Controller) rebindCheckpoints(sessionPath string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.goals.setStatePath(goalStatePath(sessionPath))
-	c.cp = checkpoint.New(ckptDir(sessionPath), c.cpRoot)
-	c.cpTurn = c.cp.NextTurn() // continue numbering past any checkpoints on disk
-	c.cpBound = c.cp.Bounds()  // rebuilt from persisted checkpoints so a resumed
-	if c.cpBound == nil {      // session can still rewind conversation / fork
-		c.cpBound = map[int]int{}
-	}
+	c.checkpoints.rebind(ckptDir(sessionPath), c.workspaceRoot)
 }
 
 // beginCheckpoint opens a checkpoint for the turn about to run, recording the
 // current message count as the conversation-rewind boundary. Called at the top of
 // runTurn, before the user message is appended.
 func (c *Controller) beginCheckpoint(input string) {
-	if c.cp == nil || c.executor == nil {
+	if c.executor == nil {
 		return
 	}
-	c.mu.Lock()
-	turn := c.cpTurn
-	c.cpTurn++
-	msgIndex := len(c.executor.Session().Messages)
-	c.cpBound[turn] = msgIndex
-	c.mu.Unlock()
-	c.cp.Begin(turn, input, msgIndex)
+	c.checkpoints.begin(input, len(c.executor.Session().Messages))
 }
 
 // --- commands (frontend → controller) ---
@@ -824,7 +799,7 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 			runRefTurn(ref, display)
 			return
 		}
-		if ref, ok := SlashPathLineRef(trimmed, c.cpRoot); ok {
+		if ref, ok := SlashPathLineRef(trimmed, c.workspaceRoot); ok {
 			runRefTurnWithRefs(input, ref, display)
 			return
 		}
@@ -1166,7 +1141,7 @@ func (c *Controller) RunShell(command string) {
 		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 		setShellKillTree(cmd)
 		cmd.WaitDelay = shellWaitDelay
-		cmd.Dir = c.cpRoot
+		cmd.Dir = c.workspaceRoot
 		var buf bytes.Buffer
 		w := io.MultiWriter(&buf, &shellWriter{emit: func(chunk string) {
 			c.sink.Emit(event.Event{
@@ -1693,10 +1668,7 @@ const (
 
 // Checkpoints lists the session's rewind points (one per user turn), oldest first.
 func (c *Controller) Checkpoints() []checkpoint.Meta {
-	if c.cp == nil {
-		return nil
-	}
-	return c.cp.List()
+	return c.checkpoints.list()
 }
 
 // rewindFail emits the error as a Warn notice (so a frontend that swallows the
@@ -1714,19 +1686,16 @@ func (c *Controller) rewindFail(err error) error {
 // unavailable for turns inherited from a resumed session (code rewind still works).
 // Frontends re-render their transcript from History after the call.
 func (c *Controller) Rewind(turn int, scope RewindScope) error {
-	if c.cp == nil || c.executor == nil {
+	if !c.checkpoints.enabled() || c.executor == nil {
 		return c.rewindFail(fmt.Errorf("checkpoints unavailable"))
 	}
-	c.mu.Lock()
-	running := c.running
-	boundary, hasBound := c.cpBound[turn]
-	c.mu.Unlock()
-	if running {
+	if c.Running() {
 		return c.rewindFail(fmt.Errorf("cannot rewind while a turn is running"))
 	}
+	boundary, hasBound := c.checkpoints.boundary(turn)
 
 	if scope == RewindCode || scope == RewindBoth {
-		written, deleted, err := c.cp.RestoreCode(turn)
+		written, deleted, err := c.checkpoints.restoreCode(turn)
 		if err != nil {
 			return c.rewindFail(fmt.Errorf("rewind code: %w", err))
 		}
@@ -1747,14 +1716,7 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 			return c.rewindFail(fmt.Errorf("conversation rewind unavailable for turn %d: the conversation was compacted past this point", turn))
 		}
 		s.Messages = s.Messages[:boundary]
-		c.mu.Lock()
-		c.cpTurn = turn // renumber future turns from here; later turns are gone
-		for k := range c.cpBound {
-			if k >= turn {
-				delete(c.cpBound, k)
-			}
-		}
-		c.mu.Unlock()
+		c.checkpoints.truncateFrom(turn) // renumber future turns from here; later turns are gone
 		if err := c.Snapshot(); err != nil {
 			slog.Warn("controller: snapshot after rewind", "err", err)
 		}
@@ -1791,13 +1753,10 @@ func (c *Controller) forkNamed(turn int, name string, switchToFork bool) (string
 	if c.sessionDir == "" {
 		return "", c.rewindFail(fmt.Errorf("fork needs session persistence, which is disabled"))
 	}
-	c.mu.Lock()
-	running := c.running
-	boundary, hasBound := c.cpBound[turn]
-	c.mu.Unlock()
-	if running {
+	if c.Running() {
 		return "", c.rewindFail(fmt.Errorf("cannot fork while a turn is running"))
 	}
+	boundary, hasBound := c.checkpoints.boundary(turn)
 	if !hasBound {
 		return "", c.rewindFail(fmt.Errorf("fork unavailable for turn %d (resumed session)", turn))
 	}
@@ -1848,9 +1807,7 @@ func (c *Controller) forkNamed(turn int, name string, switchToFork bool) (string
 }
 
 func (c *Controller) CheckpointHasBoundary(turn int) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	boundary, ok := c.cpBound[turn]
+	boundary, ok := c.checkpoints.boundary(turn)
 	if !ok {
 		return false
 	}
@@ -2019,13 +1976,10 @@ func (c *Controller) summarizeAt(ctx context.Context, turn int, from bool) error
 	if c.executor == nil {
 		return c.rewindFail(fmt.Errorf("checkpoints unavailable"))
 	}
-	c.mu.Lock()
-	running := c.running
-	boundary, hasBound := c.cpBound[turn]
-	c.mu.Unlock()
-	if running {
+	if c.Running() {
 		return c.rewindFail(fmt.Errorf("cannot summarize while a turn is running"))
 	}
+	boundary, hasBound := c.checkpoints.boundary(turn)
 	if !hasBound {
 		return c.rewindFail(fmt.Errorf("summarize unavailable for turn %d (resumed session)", turn))
 	}
@@ -2039,11 +1993,9 @@ func (c *Controller) summarizeAt(ctx context.Context, turn int, from bool) error
 		return c.rewindFail(err)
 	}
 	// The log was restructured; existing boundaries no longer map. Drop them (keep
-	// cpTurn monotonic so new turns don't collide with the store) — conversation
-	// rewind degrades to "unavailable" until fresh turns rebuild boundaries.
-	c.mu.Lock()
-	c.cpBound = map[int]int{}
-	c.mu.Unlock()
+	// the turn counter monotonic so new turns don't collide with the store) —
+	// conversation rewind degrades to "unavailable" until fresh turns rebuild them.
+	c.checkpoints.clearBounds()
 	if err := c.Snapshot(); err != nil {
 		slog.Warn("controller: post-summarize snapshot", "err", err)
 	}
@@ -2409,7 +2361,7 @@ func (c *Controller) ReloadCommands(ctx context.Context) error {
 		return ctx.Err()
 	default:
 	}
-	cmds, loadErr := command.Load(config.CommandDirsForRoot(c.cpRoot)...)
+	cmds, loadErr := command.Load(config.CommandDirsForRoot(c.workspaceRoot)...)
 	cmdSkills := c.Skills()
 
 	entries := make([]command.SlashEntry, 0, len(cmdSkills)+len(cmds))
@@ -2745,7 +2697,7 @@ func (c *Controller) Label() string { return c.label }
 // WorkspaceRoot returns the workspace root for this controller's session
 // (the directory that file-writers and @-references are scoped to).
 // Empty means no scoping is in effect.
-func (c *Controller) WorkspaceRoot() string { return c.cpRoot }
+func (c *Controller) WorkspaceRoot() string { return c.workspaceRoot }
 
 // InheritLifecycleFrom carries same-session lifecycle state across controller
 // rebuilds, such as model switches that preserve the conversation.
@@ -2886,94 +2838,34 @@ func (c *Controller) Bypass() bool {
 
 // --- memory ---
 //
-// c.mem is an immutable snapshot: reads take c.mu briefly and return the pointer.
-// Writes are serialized by memMu and do their disk I/O (the doc/store write plus
-// the memory.Load re-discovery) OFF c.mu, taking c.mu only to read the snapshot
-// pointer and to swap the freshly discovered snapshot in — so a write never holds
-// c.mu across a filesystem walk. A turn-tail note is queued for each write so the
-// change applies this session without disturbing the cache-stable system prefix
-// (it folds into the prefix on the next session). All of these are no-ops
-// returning "" when memory is disabled.
+// The memory snapshot, the pending turn-tail notes queue, and write serialization
+// live in c.memory (a memoryManager) behind its own locks, off c.mu — so a
+// memory-panel save never stalls an approval or status poll. These methods are
+// the SessionAPI surface; each is a thin delegation. See memory.go.
 
 // QuickAdd appends a one-line note to the doc-memory file for scope (project
 // REASONIX.md by default) — the write side of "#<note>". Returns the file written.
 func (c *Controller) QuickAdd(scope memory.Scope, note string) (string, error) {
-	c.memMu.Lock()
-	defer c.memMu.Unlock()
-	mem := c.memSnapshot()
-	if mem == nil {
-		return "", nil
-	}
-	path := mem.DocPath(scope)
-	if path == "" {
-		return "", fmt.Errorf("no target file for memory scope %q", scope)
-	}
-	if err := memory.AppendDoc(path, note); err != nil {
-		return "", err
-	}
-	c.applyMemoryWrite(mem, note)
-	return path, nil
+	return c.memory.quickAdd(scope, note)
 }
 
 // SaveDoc overwrites a recognized memory doc with body — the save side of the
 // desktop panel's in-place editor. Returns the file written.
 func (c *Controller) SaveDoc(path, body string) (string, error) {
-	c.memMu.Lock()
-	defer c.memMu.Unlock()
-	mem := c.memSnapshot()
-	if mem == nil {
-		return "", nil
-	}
-	written, err := mem.WriteDoc(path, body)
-	if err != nil {
-		return "", err
-	}
-	// Inject the new content once on the next turn: the cached prefix still holds
-	// the pre-edit version this session, so handing the model the current text
-	// avoids a stale-guidance gap until the next session re-folds it into the
-	// prefix. Trimmed to a single tail note (drained by Compose), not per-turn.
-	c.applyMemoryWrite(mem,
-		"Memory file "+written+" was just edited. Its current contents:\n"+strings.TrimSpace(body))
-	return written, nil
+	return c.memory.saveDoc(path, body)
 }
 
 // SaveMemory writes an active auto-memory fact and refreshes the in-session
 // snapshot. It is the explicit user-confirmed counterpart to the model-owned
 // remember tool, used by management surfaces that preview a candidate first.
 func (c *Controller) SaveMemory(m memory.Memory) (string, error) {
-	c.memMu.Lock()
-	defer c.memMu.Unlock()
-	mem := c.memSnapshot()
-	if mem == nil {
-		return "", nil
-	}
-	path, err := mem.Store.Save(m)
-	if err != nil {
-		return "", err
-	}
-	c.applyMemoryWrite(mem,
-		"Saved memory \""+m.Name+"\": "+strings.Join(strings.Fields(m.Description), " "))
-	return path, nil
+	return c.memory.saveMemory(m)
 }
 
 // ForgetMemory removes a saved auto-memory by name — the panel/TUI forget action,
-// the manual counterpart to the model's `forget` tool. It queues a turn-tail note
-// so the removal applies this session (the cached prefix still lists the fact
-// until the next session re-folds the index). The file is archived for
-// traceability by Store.Delete.
+// the manual counterpart to the model's `forget` tool.
 func (c *Controller) ForgetMemory(name string) error {
-	c.memMu.Lock()
-	defer c.memMu.Unlock()
-	mem := c.memSnapshot()
-	if mem == nil {
-		return nil
-	}
-	if err := mem.Store.Delete(name); err != nil {
-		return err
-	}
-	c.applyMemoryWrite(mem,
-		"Forgot memory \""+name+"\" — disregard its line still shown in the saved-memories index until next session.")
-	return nil
+	return c.memory.forget(name)
 }
 
 // QueueMemory implements memory.Queue: when the model runs the remember/forget
@@ -2981,50 +2873,14 @@ func (c *Controller) ForgetMemory(name string) error {
 // applies this session without touching the cache-stable prefix. It also
 // refreshes the snapshot a memory panel reads.
 func (c *Controller) QueueMemory(note string) {
-	c.memMu.Lock()
-	defer c.memMu.Unlock()
-	if mem := c.memSnapshot(); mem != nil {
-		c.applyMemoryWrite(mem, note)
-		return
-	}
-	// Memory disabled — still queue the turn-tail note; there's no snapshot to
-	// re-discover.
-	c.mu.Lock()
-	c.pendingMemory = append(c.pendingMemory, note)
-	c.mu.Unlock()
+	c.memory.queue(note)
 }
 
 // Memory returns the loaded memory snapshot (nil when memory is disabled), for
 // frontends that surface a memory panel or the /memory command. The returned
 // *Set is immutable — mutations go through QuickAdd / SaveDoc.
 func (c *Controller) Memory() *memory.Set {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.mem
-}
-
-// memSnapshot returns the current memory snapshot under a brief c.mu, so callers
-// can do the doc/store write and re-discovery off-lock. Holding memMu keeps the
-// returned pointer current until the matching applyMemoryWrite swaps it in.
-func (c *Controller) memSnapshot() *memory.Set {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.mem
-}
-
-// applyMemoryWrite re-discovers memory from disk (off-lock, the expensive part)
-// then, under a brief c.mu, swaps the fresh snapshot in and queues the turn-tail
-// note so a later Memory() reflects the just-applied write. mem is the snapshot
-// taken at the start of the memMu-serialized write and supplies the discovery
-// roots. Callers hold memMu.
-func (c *Controller) applyMemoryWrite(mem *memory.Set, note string) {
-	reloaded := memory.Load(memory.Options{CWD: mem.CWD, UserDir: mem.UserDir})
-	c.mu.Lock()
-	if note != "" {
-		c.pendingMemory = append(c.pendingMemory, note)
-	}
-	c.mem = reloaded
-	c.mu.Unlock()
+	return c.memory.current()
 }
 
 // --- approval bridge (agent gate → events) ---

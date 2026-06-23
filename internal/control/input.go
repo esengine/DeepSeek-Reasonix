@@ -138,9 +138,8 @@ func (c *Controller) Compose(text string) string {
 	c.mu.Lock()
 	plan := c.planMode
 	reasoningLanguage := c.reasoningLanguage
-	notes := c.pendingMemory
-	c.pendingMemory = nil
 	c.mu.Unlock()
+	notes := c.memory.drainPending()
 	goal, goalStatus, goalResearchMode := c.goals.snapshot()
 
 	if strings.TrimSpace(goal) != "" && goalStatus == GoalStatusRunning {

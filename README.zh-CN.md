@@ -86,7 +86,7 @@ make cross      # -> dist/（darwin|linux|windows × amd64|arm64）
 
 ```sh
 reasonix setup                      # 配置向导 → ./reasonix.toml
-export DEEPSEEK_API_KEY=sk-...      # 也可以让 setup 保存到凭据存储
+export DEEPSEEK_API_KEY=sk-...      # 也可以让 setup 保存到 Reasonix 全局 .env
 reasonix                            # 然后在会话里运行 /init 生成 AGENTS.md（项目记忆）
 reasonix run "把 main.go 里的 TODO 实现掉"
 reasonix run --model deepseek-pro "给这个函数补单元测试"
@@ -111,10 +111,10 @@ api_key_env = "DEEPSEEK_API_KEY"
 优先级为 **flag > `./reasonix.toml` > 用户配置文件 > 内置默认值**；从
 **Reasonix v1.8.1** 开始，用户配置位于 macOS/Linux 的 `~/.reasonix/config.toml`，
 Windows 为 `%AppData%\reasonix\config.toml`。迁移细节见
-**[配置路径](./docs/CONFIG_PATHS.zh-CN.md)**。
-密钥经环境变量通过 `api_key_env` 注入，绝不写入配置文件；新密钥默认优先保存到系统凭据存储，
-不可用时才 fallback 到 Reasonix 管理的凭据文件。项目 `.env` 只作为兼容覆盖读取，
-Reasonix 不会把新密钥写入项目 `.env`。权限、沙盒、插件(MCP)、
+**[配置路径](./docs/CONFIG_PATHS.zh-CN.md)**，其中也说明了全局 `config.toml`
+和 `.env` 的完整结构。Provider 通过 `api_key_env` 命名密钥，真实密钥值保存在
+CLI 与桌面端共用的 Reasonix 全局 `<Reasonix home>/.env`；项目 `.env` 不再作为
+provider key 的运行时 fallback。权限、沙盒、插件(MCP)、
 斜杠命令、`@` 引用与双模型设置,全部在 **[指南](./docs/GUIDE.zh-CN.md)** 里。
 
 ## 文档

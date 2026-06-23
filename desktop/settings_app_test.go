@@ -169,7 +169,7 @@ func TestProviderViewFromEntryExposesNoAuthAvailability(t *testing.T) {
 	}
 }
 
-func TestSetProviderKeyWarnsWhenProjectEnvWillShadowSavedKey(t *testing.T) {
+func TestSetProviderKeyDoesNotWarnWhenProjectEnvAlsoDefinesSavedKey(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	project := t.TempDir()
 	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("TEST_PROVIDER_SHADOW=old-key\n"), 0o600); err != nil {
@@ -186,8 +186,8 @@ func TestSetProviderKeyWarnsWhenProjectEnvWillShadowSavedKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetProviderKey: %v", err)
 	}
-	if !strings.Contains(warning, "project .env") {
-		t.Fatalf("SetProviderKey warning = %q, want project .env shadow warning", warning)
+	if warning != "" {
+		t.Fatalf("SetProviderKey warning = %q, want no warning because provider keys use global credentials only", warning)
 	}
 	data, readErr := os.ReadFile(config.UserCredentialsPath())
 	if readErr != nil {
@@ -198,7 +198,7 @@ func TestSetProviderKeyWarnsWhenProjectEnvWillShadowSavedKey(t *testing.T) {
 	}
 }
 
-func TestSetProviderKeyWarnsWhenEmptyEnvironmentWillShadowSavedKey(t *testing.T) {
+func TestSetProviderKeyDoesNotWarnWhenEnvironmentAlsoDefinesSavedKey(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	t.Setenv("TEST_PROVIDER_EMPTY_ENV", "")
 
@@ -207,8 +207,8 @@ func TestSetProviderKeyWarnsWhenEmptyEnvironmentWillShadowSavedKey(t *testing.T)
 	if err != nil {
 		t.Fatalf("SetProviderKey: %v", err)
 	}
-	if !strings.Contains(warning, "environment variable") {
-		t.Fatalf("SetProviderKey warning = %q, want environment variable shadow warning", warning)
+	if warning != "" {
+		t.Fatalf("SetProviderKey warning = %q, want no warning because provider keys use global credentials only", warning)
 	}
 	data, readErr := os.ReadFile(config.UserCredentialsPath())
 	if readErr != nil {
@@ -219,7 +219,7 @@ func TestSetProviderKeyWarnsWhenEmptyEnvironmentWillShadowSavedKey(t *testing.T)
 	}
 }
 
-func TestSetProviderKeyWarnsWhenEmptyProjectEnvWillShadowSavedKey(t *testing.T) {
+func TestSetProviderKeyDoesNotWarnWhenEmptyProjectEnvAlsoDefinesSavedKey(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	project := t.TempDir()
 	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("TEST_PROVIDER_EMPTY_PROJECT=\n"), 0o600); err != nil {
@@ -236,13 +236,16 @@ func TestSetProviderKeyWarnsWhenEmptyProjectEnvWillShadowSavedKey(t *testing.T) 
 	if err != nil {
 		t.Fatalf("SetProviderKey: %v", err)
 	}
-	if !strings.Contains(warning, "project .env") {
-		t.Fatalf("SetProviderKey warning = %q, want project .env shadow warning", warning)
+	if warning != "" {
+		t.Fatalf("SetProviderKey warning = %q, want no warning because provider keys use global credentials only", warning)
 	}
 }
 
 func TestFetchProviderModelsFiltersNonChatModels(t *testing.T) {
-	t.Setenv("TEST_PROVIDER_KEY", "test-key")
+	isolateDesktopUserDirs(t)
+	if _, err := config.SetCredential("TEST_PROVIDER_KEY", "test-key"); err != nil {
+		t.Fatalf("SetCredential: %v", err)
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/models" {
 			http.NotFound(w, r)
@@ -274,6 +277,48 @@ func TestFetchProviderModelsFiltersNonChatModels(t *testing.T) {
 	want := []string{"mimo-v2.5-pro"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("FetchProviderModels = %v, want %v", got, want)
+	}
+}
+
+func TestFetchProviderModelsUsesSavedCredentialBeforeEnvironment(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	const keyEnv = "TEST_PROVIDER_FETCH_KEY"
+	if _, err := config.SetCredential(keyEnv, "saved-key"); err != nil {
+		t.Fatalf("SetCredential: %v", err)
+	}
+	t.Setenv(keyEnv, "stale-env-key")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer saved-key" {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data": []map[string]string{
+				{"id": "model-a", "object": "model"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	got, err := NewApp().FetchProviderModels(ProviderView{
+		Name:      "custom",
+		BaseURL:   srv.URL,
+		APIKeyEnv: keyEnv,
+	})
+	if err != nil {
+		t.Fatalf("FetchProviderModels: %v", err)
+	}
+	if want := []string{"model-a"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("FetchProviderModels = %v, want %v", got, want)
+	}
+	if got := os.Getenv(keyEnv); got != "stale-env-key" {
+		t.Fatalf("process env = %q, want stale env left untouched", got)
 	}
 }
 

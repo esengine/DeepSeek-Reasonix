@@ -7,6 +7,9 @@ import { fileURLToPath } from "node:url";
 const testDir = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
 const appChromeSource = readFileSync(resolve(testDir, "../components/AppChrome.tsx"), "utf8");
+const commandPaletteSource = readFileSync(resolve(testDir, "../components/CommandPalette.tsx"), "utf8");
+const projectTreeSource = readFileSync(resolve(testDir, "../components/ProjectTree.tsx"), "utf8");
+const topicShortcutsSource = readFileSync(resolve(testDir, "../lib/topicShortcuts.ts"), "utf8");
 const transcriptSource = readFileSync(resolve(testDir, "../components/Transcript.tsx"), "utf8");
 const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 
@@ -137,6 +140,36 @@ ok(
   /aria-label=\{t\("transcript\.jumpToBottom"\)\}/.test(transcriptSource) &&
     /title=\{t\("transcript\.jumpToBottom"\)\}/.test(transcriptSource),
   "jump-to-bottom affordance uses localized transcript text",
+);
+
+ok(
+  /setActive\(items\.length > 0 \? 0 : -1\)/.test(commandPaletteSource),
+  "command palette highlights the first item when opened with an empty query",
+);
+
+ok(
+  /topicShortcutIndexFromEvent\(event, desktopPlatform\)/.test(appSource) &&
+    /useTopicShortcuts\(!sidebarCollapsed, desktopPlatform\)/.test(appSource),
+  "topic shortcuts use the resolved desktop platform",
+);
+
+ok(
+  /topicShortcutLabel\(shortcutIndex, shortcutPlatform\)/.test(projectTreeSource),
+  "topic shortcut badges render the platform-specific modifier",
+);
+
+ok(
+  /if \(!enabled\) hideBadges\(\);/.test(topicShortcutsSource) &&
+    /if \(heldRef\.current\) hideBadges\(\);/.test(topicShortcutsSource) &&
+    /window\.removeEventListener\("blur", onBlur\);\s*hideBadges\(\);/.test(topicShortcutsSource),
+  "topic shortcut badge state is cleared when disabled, interrupted, or cleaned up",
+);
+
+ok(
+  /const \[rewindCommitting, setRewindCommitting\] = useState\(false\);/.test(appSource) &&
+    /rewindStateRef\.current = null;/.test(appSource) &&
+    /setRewindCommitting\(true\);/.test(appSource),
+  "committing optimistic rewind clears undo state before awaiting the backend",
 );
 
 for (const selector of [

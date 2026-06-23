@@ -1467,7 +1467,9 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 		base = sys[:i]
 	}
 	// The language policy is always appended at boot; strip it so this assertion
-	// is purely about whether project/ancestor memory leaked into the base.
+	// is purely about whether project/ancestor memory leaked into the base. The
+	// user-decision policy is another fixed boot policy and is stripped for the
+	// same reason.
 	base = stripLanguagePolicy(base)
 	if base != "JUST THE BASE" {
 		t.Fatalf("expected untouched base prompt, got:\n%s", sys)
@@ -1503,6 +1505,41 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 }
 
+func TestBuildAppendsUserDecisionPolicyToCustomSystemPrompt(t *testing.T) {
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`)
+
+	ctrl, err := Build(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	sys := systemMessage(ctrl.History())
+	for _, want := range []string{
+		"User-owned choices",
+		"call the ask tool",
+		"Do not ask in prose",
+	} {
+		if !strings.Contains(sys, want) {
+			t.Fatalf("user decision policy missing %q from custom system prompt:\n%s", want, sys)
+		}
+	}
+}
+
 func systemMessage(msgs []provider.Message) string {
 	for _, m := range msgs {
 		if m.Role == provider.RoleSystem {
@@ -1516,6 +1553,7 @@ func stripLanguagePolicy(s string) string {
 	s = strings.TrimSpace(s)
 	for _, policy := range []string{
 		config.LanguagePolicy,
+		config.UserDecisionPolicy,
 	} {
 		s = strings.TrimSpace(strings.TrimSuffix(s, policy))
 	}

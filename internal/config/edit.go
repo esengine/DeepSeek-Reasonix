@@ -779,8 +779,17 @@ func validatePlugin(e PluginEntry) error {
 // writes a sibling temp file then renames, so a crash mid-write can't leave a
 // half-written reasonix.toml that fails to parse on next load. Parent directories
 // are created as needed.
+//
+// For project configs (./reasonix.toml) the write is incremental: only sections
+// and fields that differ from built-in defaults are written, so the file never
+// accumulates fields that override the user's global config. User configs still
+// write the full annotated template since they are the user's own settings store.
 func (c *Config) SaveTo(path string) error {
-	return c.SaveToScope(path, renderScopeForPath(path))
+	scope := renderScopeForPath(path)
+	if scope == RenderScopeProject {
+		return c.saveProjectIncremental(path)
+	}
+	return c.SaveToScope(path, scope)
 }
 
 func (c *Config) SaveToScope(path string, scope RenderScope) error {
@@ -788,6 +797,119 @@ func (c *Config) SaveToScope(path string, scope RenderScope) error {
 		return fmt.Errorf("save: empty config path")
 	}
 	return writeConfigFile(path, RenderTOMLForScope(c, scope))
+}
+
+// saveProjectIncremental merges only the delta (non-default sections/fields)
+// into the existing project config file, preserving all other content verbatim.
+func (c *Config) saveProjectIncremental(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("save: empty config path")
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		raw = nil
+	}
+
+	body := string(raw)
+	isNew := body == ""
+
+	if isNew {
+		return writeConfigFile(path, RenderTOMLForScope(c, RenderScopeProject))
+	}
+
+	delta := RenderTOMLProjectDelta(c)
+	if tomlBodyHasTopLevelKey(body, "config_version") && !tomlBodyHasTopLevelKey(delta, "config_version") {
+		delta = fmt.Sprintf("config_version = %d\n", configVersion(c)) + delta
+	}
+	removePlugins := len(c.Plugins) == 0 && tomlBodyHasSection(body, "plugins")
+	if strings.TrimSpace(delta) == "" && !removePlugins {
+		return nil // no changes to write
+	}
+
+	// Parse delta into section blocks and merge each into body
+	if strings.TrimSpace(delta) != "" {
+		body = mergeTOMLDelta(body, delta)
+	}
+	if removePlugins {
+		body = removeTOMLSection(body, "plugins")
+	}
+	return writeConfigFile(path, body)
+}
+
+// mergeTOMLDelta parses delta into named TOML blocks and merges each into body
+// via replaceTOMLSection. Consecutive array-of-tables entries ([[plugins]],
+// [[providers]]) with the same name are merged into a single block so the
+// replacement doesn't lose entries.
+func mergeTOMLDelta(body, delta string) string {
+	lines := strings.Split(delta, "\n")
+	type section struct {
+		name    string
+		content string
+		isArray bool
+	}
+	var topLevel strings.Builder
+	var sections []section
+	var curName string
+	var curBuf strings.Builder
+	curIsArray := false
+
+	flush := func() {
+		if curName == "" {
+			return
+		}
+		content := curBuf.String()
+		if curIsArray && len(sections) > 0 && sections[len(sections)-1].isArray && sections[len(sections)-1].name == curName {
+			sections[len(sections)-1].content += content
+		} else {
+			sections = append(sections, section{curName, content, curIsArray})
+		}
+		curBuf.Reset()
+	}
+
+	for _, line := range lines {
+		if name, isArray, ok := tomlEditSectionHeader(line); ok {
+			flush()
+			curName = name
+			curIsArray = isArray
+			curBuf.WriteString(line + "\n")
+			continue
+		}
+		if curName != "" {
+			curBuf.WriteString(line + "\n")
+			continue
+		}
+		if strings.TrimSpace(line) != "" {
+			topLevel.WriteString(line + "\n")
+		}
+	}
+	flush()
+
+	if top := strings.TrimSpace(topLevel.String()); top != "" {
+		body = mergeTOMLTopLevelFields(body, top+"\n")
+	}
+	for _, s := range sections {
+		body = replaceTOMLSection(body, s.name, s.content)
+	}
+	return body
+}
+
+func mergeTOMLTopLevelFields(body, fields string) string {
+	for _, line := range strings.Split(fields, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		key, ok := tomlTopLevelKey(line)
+		if !ok {
+			continue
+		}
+		body = replaceTOMLTopLevelField(body, key, line+"\n")
+	}
+	return body
 }
 
 // SaveMinimalProjectReasoningLanguage writes a new project config that only
@@ -818,6 +940,205 @@ func configFilePerm(path string) os.FileMode {
 		return 0o600
 	}
 	return 0o644
+}
+
+// WritePermissionsSection replaces or creates the [permissions] section in a
+// TOML file, preserving all other sections verbatim. When the file doesn't
+// exist yet, it creates one containing only the permissions section.
+func WritePermissionsSection(path string, allow []string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("write permissions: empty config path")
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		raw = nil
+	}
+
+	newBlock := fmt.Sprintf("[permissions]\nallow = %s\n", renderStringArray(allow))
+
+	body := string(raw)
+	if body == "" {
+		return writeConfigFile(path, newBlock)
+	}
+
+	body = replaceTOMLSection(body, "permissions", newBlock)
+	return writeConfigFile(path, body)
+}
+
+// replaceTOMLSection replaces the content of a named TOML section (including
+// its header line) with newContent. It handles both [section] and [[section]]
+// array-of-tables headers. If the section doesn't exist, newContent is appended
+// at the end.
+func replaceTOMLSection(body, sectionName, newContent string) string {
+	spans := tomlLineSpans(body)
+	arrayIdx := -1
+	for i, span := range spans {
+		name, isArray, ok := tomlEditSectionHeader(span.text)
+		if ok && isArray && name == sectionName {
+			arrayIdx = i
+			break
+		}
+	}
+	if arrayIdx >= 0 {
+		start := spans[arrayIdx].start
+		end := len(body)
+		for i := arrayIdx + 1; i < len(spans); i++ {
+			name, isArray, ok := tomlEditSectionHeader(spans[i].text)
+			if !ok {
+				continue
+			}
+			if (isArray && name == sectionName) || strings.HasPrefix(name, sectionName+".") {
+				continue
+			}
+			end = spans[i].start
+			break
+		}
+		return body[:start] + strings.TrimRight(newContent, "\n") + "\n" + body[end:]
+	}
+
+	for _, span := range spans {
+		name, isArray, ok := tomlEditSectionHeader(span.text)
+		if !ok || isArray || name != sectionName {
+			continue
+		}
+		end := len(body)
+		for _, next := range spans {
+			if next.start <= span.start {
+				continue
+			}
+			if _, _, ok := tomlEditSectionHeader(next.text); ok {
+				end = next.start
+				break
+			}
+		}
+		return body[:span.start] + newContent + body[end:]
+	}
+	return strings.TrimRight(body, "\n") + "\n\n" + newContent
+}
+
+func removeTOMLSection(body, sectionName string) string {
+	spans := tomlLineSpans(body)
+	for i, span := range spans {
+		name, isArray, ok := tomlEditSectionHeader(span.text)
+		if !ok || name != sectionName {
+			continue
+		}
+		end := len(body)
+		for j := i + 1; j < len(spans); j++ {
+			nextName, nextIsArray, ok := tomlEditSectionHeader(spans[j].text)
+			if !ok {
+				continue
+			}
+			if (isArray && nextIsArray && nextName == sectionName) || strings.HasPrefix(nextName, sectionName+".") {
+				continue
+			}
+			end = spans[j].start
+			break
+		}
+		return strings.TrimRight(body[:span.start], "\n") + "\n" + body[end:]
+	}
+	return body
+}
+
+type tomlLineSpan struct {
+	start int
+	end   int
+	text  string
+}
+
+func tomlLineSpans(body string) []tomlLineSpan {
+	if body == "" {
+		return nil
+	}
+	var spans []tomlLineSpan
+	for start := 0; start < len(body); {
+		end := len(body)
+		if idx := strings.IndexByte(body[start:], '\n'); idx >= 0 {
+			end = start + idx + 1
+		}
+		spans = append(spans, tomlLineSpan{start: start, end: end, text: body[start:end]})
+		start = end
+	}
+	return spans
+}
+
+func tomlEditSectionHeader(line string) (string, bool, bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return "", false, false
+	}
+	if before, _, ok := strings.Cut(trimmed, "#"); ok {
+		trimmed = strings.TrimSpace(before)
+	}
+	if strings.HasPrefix(trimmed, "[[") && strings.HasSuffix(trimmed, "]]") {
+		name := strings.TrimSpace(trimmed[2 : len(trimmed)-2])
+		return name, true, name != ""
+	}
+	if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+		name := strings.TrimSpace(trimmed[1 : len(trimmed)-1])
+		return name, false, name != ""
+	}
+	return "", false, false
+}
+
+func replaceTOMLTopLevelField(body, key, newLine string) string {
+	spans := tomlLineSpans(body)
+	insertAt := len(body)
+	for _, span := range spans {
+		if _, _, ok := tomlEditSectionHeader(span.text); ok {
+			insertAt = span.start
+			break
+		}
+		if got, ok := tomlTopLevelKey(span.text); ok && got == key {
+			return body[:span.start] + newLine + body[span.end:]
+		}
+	}
+	return body[:insertAt] + newLine + body[insertAt:]
+}
+
+func tomlTopLevelKey(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return "", false
+	}
+	if before, _, ok := strings.Cut(trimmed, "#"); ok {
+		trimmed = strings.TrimSpace(before)
+	}
+	key, _, ok := strings.Cut(trimmed, "=")
+	if !ok {
+		return "", false
+	}
+	key = strings.TrimSpace(key)
+	if key == "" || strings.Contains(key, ".") {
+		return "", false
+	}
+	return key, true
+}
+
+func tomlBodyHasTopLevelKey(body, key string) bool {
+	for _, span := range tomlLineSpans(body) {
+		if _, _, ok := tomlEditSectionHeader(span.text); ok {
+			return false
+		}
+		if got, ok := tomlTopLevelKey(span.text); ok && got == key {
+			return true
+		}
+	}
+	return false
+}
+
+func tomlBodyHasSection(body, sectionName string) bool {
+	for _, span := range tomlLineSpans(body) {
+		name, _, ok := tomlEditSectionHeader(span.text)
+		if ok && name == sectionName {
+			return true
+		}
+	}
+	return false
 }
 
 func renderScopeForPath(path string) RenderScope {
@@ -863,8 +1184,9 @@ func (c *Config) Save() error {
 	return c.SaveTo(path)
 }
 
-// SaveForRoot saves the config to root's reasonix.toml, falling back to the
-// user's global config when root has no existing reasonix.toml.
+// SaveForRoot saves root's project config when it exists, falling back to the
+// user's global config when root has no reasonix.toml. Existing project files
+// are edited from their own TOML only, never from a runtime user+project merge.
 func (c *Config) SaveForRoot(root string) error {
 	root = resolveRoot(root)
 	projectTOML := "reasonix.toml"
@@ -872,7 +1194,8 @@ func (c *Config) SaveForRoot(root string) error {
 		projectTOML = filepath.Join(root, "reasonix.toml")
 	}
 	if _, err := os.Stat(projectTOML); err == nil {
-		return c.SaveTo(projectTOML)
+		projectCfg := LoadForEditWithoutCredentials(projectTOML)
+		return projectCfg.SaveTo(projectTOML)
 	}
 	if uc := userConfigPath(); uc != "" {
 		if err := os.MkdirAll(filepath.Dir(uc), 0o755); err != nil {

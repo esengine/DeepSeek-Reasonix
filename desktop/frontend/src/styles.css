@@ -6470,7 +6470,10 @@ a[href] {
   color: var(--fg-dim);
   font-size: 11.5px;
   line-height: 1.4;
+  overflow: visible;
+  text-overflow: clip;
   white-space: normal;
+  overflow-wrap: anywhere;
 }
 .prompt-shelf__header-actions,
 .prompt-shelf__quick-actions {
@@ -25101,6 +25104,72 @@ a[href] {
   font-family: "Source Han Sans CN", "Source Han Sans SC", "Noto Sans CJK SC",
     "Noto Sans SC", "Source Han Sans", "思源黑体", "Microsoft YaHei UI",
     "Microsoft YaHei", sans-serif;
+}
+
+/* 工具错误信息：Creation 下去掉醒目的红底块（base 用 --del-bg），
+   改为左对齐纯文本，与命令输出同起点（base 有 30px 左缩进，这里清零）。
+   仅 .app--creation 作用域，classic/workbench 的红底错误框保持不变。 */
+.app--creation .tool__err,
+:root[data-theme-style] .app--creation .tool__err {
+  margin: 4px 0 8px;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+  text-align: left;
+}
+
+/* 工具体内代码块（命令参数/输出/diff）底部的横向滚动条：Creation 下隐藏滑道，
+   只留一条 4px 细滑块（默认半透明，hover 略加深）。所有工具通用，不只 shell。
+   仅作用于 .app--creation .tool__body .code，不碰全局 --scrollbar-* token，
+   classic/workbench 的 10px 滚动条保持不变。
+   真因（之前没生效的原因）：全局 `* { scrollbar-width: thin }` 给每个元素都设了
+   标准属性，WebView2(Chromium M121+) 下只要 scrollbar-width 非 auto，
+   ::-webkit-scrollbar 伪元素就被整体忽略。所以必须先把 .code 的 scrollbar-width
+   重置为 auto 重新激活 webkit 伪元素，再用带 !important 的 webkit 规则覆盖尺寸/滑道，
+   写法对齐已能工作的 .transcript 滚动条（见上方 24381 区域）。 */
+.app--creation .tool__body .code,
+:root[data-theme-style] .app--creation .tool__body .code {
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+
+.app--creation .tool__body .code::-webkit-scrollbar,
+:root[data-theme-style] .app--creation .tool__body .code::-webkit-scrollbar {
+  width: 4px !important;
+  height: 4px !important;
+  background: transparent !important;
+}
+
+.app--creation .tool__body .code::-webkit-scrollbar-track,
+.app--creation .tool__body .code::-webkit-scrollbar-track-piece,
+.app--creation .tool__body .code::-webkit-scrollbar-corner,
+:root[data-theme-style] .app--creation .tool__body .code::-webkit-scrollbar-track,
+:root[data-theme-style] .app--creation .tool__body .code::-webkit-scrollbar-track-piece,
+:root[data-theme-style] .app--creation .tool__body .code::-webkit-scrollbar-corner {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.app--creation .tool__body .code::-webkit-scrollbar-button,
+:root[data-theme-style] .app--creation .tool__body .code::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+}
+
+.app--creation .tool__body .code::-webkit-scrollbar-thumb,
+:root[data-theme-style] .app--creation .tool__body .code::-webkit-scrollbar-thumb {
+  border: 0 !important;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg-faint) 38%, transparent) !important;
+  background-clip: border-box !important;
+}
+
+.app--creation .tool__body .code::-webkit-scrollbar-thumb:hover,
+:root[data-theme-style] .app--creation .tool__body .code::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--fg-dim) 52%, transparent) !important;
 }
 
 .app--creation .tool__name,

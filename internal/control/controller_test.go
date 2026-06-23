@@ -149,6 +149,15 @@ func requestMessagesText(messages []provider.Message) string {
 	return b.String()
 }
 
+func lastUserMessage(messages []provider.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == provider.RoleUser {
+			return messages[i].Content
+		}
+	}
+	return ""
+}
+
 func TestNewTreatsTypedNilSinkAsDiscard(t *testing.T) {
 	var sink *typedNilControllerSink
 	c := New(Options{Sink: sink})
@@ -588,6 +597,43 @@ func TestResetPlannerSessionClearsPlannerHistory(t *testing.T) {
 	}
 	if !strings.Contains(second, "second task") {
 		t.Fatalf("planner request after reset missing current task:\n%s", second)
+	}
+}
+
+func TestTwoModelShortChoiceReplySkipsPlanner(t *testing.T) {
+	dir := t.TempDir()
+	planner := &recordingProvider{name: "planner", streams: [][]provider.Chunk{
+		textTurn("planner should not run for a context-dependent choice reply"),
+	}}
+	execProv := &recordingProvider{name: "executor", streams: [][]provider.Chunk{
+		textTurn("selected option 1"),
+	}}
+	execSess := agent.NewSession("exec sys")
+	execSess.Add(provider.Message{Role: provider.RoleUser, Content: "先给我两个执行方案"})
+	execSess.Add(provider.Message{Role: provider.RoleAssistant, Content: "两个执行方式可选：\n\n1. Subagent-Driven（推荐）\n2. 当前会话执行\n\n你选哪种？"})
+	exec := agent.New(execProv, tool.NewRegistry(), execSess, agent.Options{}, event.Discard)
+	coord := agent.NewCoordinator(planner, agent.NewSession("planner sys"), nil, tool.NewRegistry(), agent.Options{}, exec, 0, event.Discard, NewPlannerGate(nil))
+	c := New(Options{Runner: coord, Executor: exec, SystemPrompt: "exec sys", SessionDir: dir, SessionPath: filepath.Join(dir, "session.jsonl"), Label: "test"})
+
+	if err := c.Run(context.Background(), "1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(planner.requests) != 0 {
+		t.Fatalf("planner requests = %d, want 0 for a short context-dependent choice reply", len(planner.requests))
+	}
+	if len(execProv.requests) != 1 {
+		t.Fatalf("executor requests = %d, want 1", len(execProv.requests))
+	}
+	reqText := requestMessagesText(execProv.requests[0].Messages)
+	if !strings.Contains(reqText, "1. Subagent-Driven") {
+		t.Fatalf("executor request lost the previous assistant options:\n%s", reqText)
+	}
+	if strings.Contains(reqText, "Reasonix executor handoff") {
+		t.Fatalf("short choice reply should not be wrapped as a planner handoff:\n%s", reqText)
+	}
+	if got := lastUserMessage(execProv.requests[0].Messages); got != "1" {
+		t.Fatalf("executor last user = %q, want raw choice reply", got)
 	}
 }
 

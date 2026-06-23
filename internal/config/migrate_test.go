@@ -662,6 +662,33 @@ func TestMigrateImportsLegacyCredentialsEvenWhenPrimaryConfigExists(t *testing.T
 	}
 }
 
+func TestMigrateImportsLegacyKeyringCredentials(t *testing.T) {
+	legacyHome(t)
+	old := legacyKeyringCredentialValueLookup
+	legacyKeyringCredentialValueLookup = func(key string) (string, bool) {
+		if key == "DEEPSEEK_API_KEY" {
+			return "sk-old-keyring", true
+		}
+		return "", false
+	}
+	t.Cleanup(func() { legacyKeyringCredentialValueLookup = old })
+
+	res, err := MigrateLegacyIfNeeded()
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if res != nil {
+		t.Fatalf("no config migration should be needed, got %+v", res)
+	}
+	data, err := os.ReadFile(UserCredentialsPath())
+	if err != nil {
+		t.Fatalf("read migrated credentials: %v", err)
+	}
+	if string(data) != "DEEPSEEK_API_KEY=sk-old-keyring\n" {
+		t.Fatalf("migrated credentials = %q", data)
+	}
+}
+
 func TestMigrateSkipsLegacyCredentialsAlreadyInCurrentAutoStore(t *testing.T) {
 	_, dest, _ := legacyHome(t)
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "")

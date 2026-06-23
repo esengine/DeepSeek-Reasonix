@@ -6,10 +6,9 @@ import (
 	"testing"
 )
 
-// TestLoadDotEnvFallsBackToHome proves the unified-key behaviour: the working
-// directory's .env is still read as a fallback, and a key only present in ~/.env
-// is picked up too. Existing env vars beat file-backed credential sources.
-func TestLoadDotEnvFallsBackToHome(t *testing.T) {
+// TestLoadDotEnvIgnoresProjectAndHomeEnv proves provider credentials now come
+// only from Reasonix's global .env, not project or home .env files.
+func TestLoadDotEnvIgnoresProjectAndHomeEnv(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 
@@ -35,14 +34,14 @@ func TestLoadDotEnvFallsBackToHome(t *testing.T) {
 
 	loadDotEnv()
 
-	if got := os.Getenv("KEY_CWD"); got != "from_cwd" {
-		t.Errorf("cwd-only key not loaded: KEY_CWD=%q", got)
+	if got := os.Getenv("KEY_CWD"); got != "" {
+		t.Errorf("project .env key was loaded: KEY_CWD=%q", got)
 	}
-	if got := os.Getenv("KEY_HOME"); got != "from_home" {
-		t.Errorf("~/.env fallback failed: KEY_HOME=%q want from_home", got)
+	if got := os.Getenv("KEY_HOME"); got != "" {
+		t.Errorf("home .env key was loaded: KEY_HOME=%q", got)
 	}
-	if got := os.Getenv("KEY_SHARED"); got != "cwd_wins" {
-		t.Errorf("cwd .env should take precedence over ~/.env: KEY_SHARED=%q want cwd_wins", got)
+	if got := os.Getenv("KEY_SHARED"); got != "" {
+		t.Errorf("project/home .env shared key was loaded: KEY_SHARED=%q", got)
 	}
 }
 
@@ -86,6 +85,99 @@ func TestLoadDotEnvReadsGlobalCredentials(t *testing.T) {
 	}
 	if got := os.Getenv("KEY_SHARED"); got != "global_wins" {
 		t.Errorf("global credentials should win over project .env: KEY_SHARED=%q want global_wins", got)
+	}
+}
+
+func TestLoadForRootResolvesProviderCredentialsOverInheritedEnv(t *testing.T) {
+	project := t.TempDir()
+	cfgHome := t.TempDir()
+	key := "KEY_PROVIDER_GLOBAL_PRIORITY"
+
+	t.Setenv("HOME", cfgHome)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	t.Setenv("USERPROFILE", cfgHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(cfgHome, ".config"))
+	t.Setenv("AppData", filepath.Join(cfgHome, "AppData"))
+	t.Setenv(key, "from_env")
+
+	cred := UserCredentialsPath()
+	if cred == "" {
+		t.Skip("user config dir unresolved on this platform")
+	}
+	if err := os.MkdirAll(filepath.Dir(cred), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cred, []byte(key+"=from_credentials\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+default_model = "custom/m"
+[[providers]]
+name = "custom"
+kind = "openai"
+base_url = "https://example.invalid/v1"
+model = "m"
+api_key_env = "`+key+`"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadForRoot(project)
+	if err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
+	}
+	provider, ok := cfg.Provider("custom")
+	if !ok {
+		t.Fatalf("provider missing: %+v", cfg.Providers)
+	}
+	if got := provider.APIKey(); got != "from_credentials" {
+		t.Fatalf("provider API key = %q, want credentials value", got)
+	}
+	if got := os.Getenv(key); got != "from_credentials" {
+		t.Fatalf("process env = %q, want credentials value pinned over inherited env", got)
+	}
+}
+
+func TestLoadForRootIgnoresProjectProviderEnvAndInheritedEnv(t *testing.T) {
+	project := t.TempDir()
+	cfgHome := t.TempDir()
+	key := "KEY_PROVIDER_PROJECT_PRIORITY"
+
+	t.Setenv("HOME", cfgHome)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	t.Setenv("USERPROFILE", cfgHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(cfgHome, ".config"))
+	t.Setenv("AppData", filepath.Join(cfgHome, "AppData"))
+	t.Setenv(key, "from_env")
+
+	if err := os.WriteFile(filepath.Join(project, ".env"), []byte(key+"=from_project\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+default_model = "custom/m"
+[[providers]]
+name = "custom"
+kind = "openai"
+base_url = "https://example.invalid/v1"
+model = "m"
+api_key_env = "`+key+`"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadForRoot(project)
+	if err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
+	}
+	provider, ok := cfg.Provider("custom")
+	if !ok {
+		t.Fatalf("provider missing: %+v", cfg.Providers)
+	}
+	if got := provider.APIKey(); got != "" {
+		t.Fatalf("provider API key = %q, want no key without global credentials", got)
+	}
+	if got := os.Getenv(key); got != "from_env" {
+		t.Fatalf("process env = %q, want inherited env left untouched", got)
 	}
 }
 
@@ -388,23 +480,26 @@ func TestProjectConfigCannotOverrideCredentialStoreMode(t *testing.T) {
 	}
 }
 
-// TestLoadDotEnvDoesNotOverrideEnv confirms an already-set environment variable
-// beats both .env files (the documented first-wins contract).
-func TestLoadDotEnvDoesNotOverrideEnv(t *testing.T) {
-	cwd := t.TempDir()
-	if err := os.WriteFile(filepath.Join(cwd, ".env"), []byte("PINNED=from_file\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(cwd)
+// TestLoadDotEnvGlobalCredentialsOverrideEnv confirms Reasonix-owned global
+// credentials beat inherited environment variables.
+func TestLoadDotEnvGlobalCredentialsOverrideEnv(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	t.Setenv("PINNED", "from_env")
+	if err := os.MkdirAll(filepath.Dir(UserCredentialsPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(UserCredentialsPath(), []byte("PINNED=from_credentials\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	loadDotEnv()
 
-	if got := os.Getenv("PINNED"); got != "from_env" {
-		t.Errorf("env var must win over .env: PINNED=%q want from_env", got)
+	if got := os.Getenv("PINNED"); got != "from_credentials" {
+		t.Errorf("global credentials must win over inherited env: PINNED=%q want from_credentials", got)
 	}
 }

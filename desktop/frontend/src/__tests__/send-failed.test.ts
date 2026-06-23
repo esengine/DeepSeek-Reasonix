@@ -51,6 +51,19 @@ const unsent = reducer(sent, { type: "unsend" });
 eq(unsent.pendingUser, undefined, "unsend clears the pending marker");
 eq(unsent.discardTurn, true, "unsend discards the in-flight turn");
 
+const planApprovalFirst = reducer(
+  { ...initialState },
+  { type: "event", e: { kind: "approval_request", approval: { id: "plan-1", tool: "exit_plan_mode", subject: "Approve plan" } } as WireEvent },
+);
+const planTurnDoneAfter = reducer(planApprovalFirst, { type: "event", e: { kind: "turn_done" } as WireEvent });
+eq(
+  planTurnDoneAfter.approval?.id,
+  "plan-1",
+  "turn_done preserves out-of-order plan approval",
+);
+eq(planTurnDoneAfter.running, true, "preserved plan approval keeps the tab running");
+eq(planTurnDoneAfter.pendingPrompt, true, "preserved plan approval keeps the prompt gate active");
+
 let replayCalls = 0;
 replayPendingPromptsForActiveTab(undefined, () => {
   replayCalls += 1;

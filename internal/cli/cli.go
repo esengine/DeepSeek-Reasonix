@@ -660,7 +660,7 @@ func reserveNativeScrollbackFrame(w io.Writer, rows int) {
 }
 
 // setupTargets is where the wizard writes: the TOML config and the credential
-// store. Keys always go to the reasonix-owned global credential store so they
+// store. Keys always go to Reasonix's global .env so they
 // never land in a project's own .env; only the config location is project-local
 // under --local.
 type setupTargets struct {
@@ -678,7 +678,7 @@ func defaultConfigTarget() string {
 }
 
 // defaultEnvTarget is the display target for the reasonix-owned global
-// credential store.
+// Reasonix global .env.
 func defaultEnvTarget() string {
 	return config.CredentialsTargetDescription()
 }
@@ -709,8 +709,7 @@ func displayPath(p string) string {
 
 // setupConfig runs the configuration wizard (the `reasonix setup` command),
 // writing config.toml to the user-global dir (or ./reasonix.toml under --local)
-// and API keys to the reasonix-owned global credential store — never a project's
-// own .env.
+// and API keys to Reasonix's global .env — never a project's own .env.
 // Project memory is a separate concern — the in-session `/init` skill generates
 // AGENTS.md (see initHint).
 func setupConfig(args []string) int {
@@ -766,7 +765,7 @@ func initHint() int {
 }
 
 // interactiveSetup runs the setup wizard, then writes the config to configPath
-// and any entered API keys to the configured global credential store. The wizard
+// and any entered API keys to Reasonix's global .env. The wizard
 // is intentionally minimal: pick language, pick
 // provider, enter API keys. Language is asked first so every subsequent prompt
 // is already in the user's language even when env auto-detection got it wrong.
@@ -1011,7 +1010,7 @@ func familyStaticModels(providers []config.ProviderEntry, idxs []int) []string {
 // ensureProbeKey prompts once for the family's API key when it isn't already in
 // the environment, so the /models probe can run and return the live SKU list.
 // The value is set in the env for the probe; configureKeys returns the same key
-// for the credential store later and skips re-asking. A blank entry is fine —
+// for Reasonix's global .env later and skips re-asking. A blank entry is fine —
 // the static fallback covers it.
 func ensureProbeKey(probe *config.ProviderEntry, famName string) {
 	if probe.APIKeyEnv == "" || os.Getenv(probe.APIKeyEnv) != "" {
@@ -1245,7 +1244,7 @@ func promptCustomProviderManual() ([]config.ProviderEntry, error) {
 // Pre-filled values (baseURL, keyEnv, apiKey) are reused as-is when non-empty
 // so the URL-fetch flow can fall through to manual entry without re-asking
 // the user for information they've already typed. An empty apiKey is allowed
-// — the key step happens later in the wizard and the credential store is updated then.
+// — the key step happens later in the wizard and Reasonix's global .env is updated then.
 func promptCustomProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKey string) ([]config.ProviderEntry, error) {
 	fmt.Println()
 	if baseURL == "" {
@@ -1524,8 +1523,8 @@ func providersWithMissingKeys(cfg *config.Config) []config.ProviderEntry {
 // setup asks whether to re-enter it; Enter keeps and re-pins the existing value.
 // Otherwise the user is asked once per env var (deduped across providers that
 // share one, e.g. both DeepSeek models). Returns KEY=value lines for the
-// configured credential store. Re-pinning matters because loadDotEnv is first-wins, so a stale key left
-// earlier in the credentials file would otherwise keep shadowing the fresh value.
+// Reasonix global .env. Re-pinning keeps hand-edited or previously saved values
+// aligned with the user's latest setup choice.
 func configureKeys(selected []config.ProviderEntry, r io.Reader, w io.Writer) []string {
 	in := bufio.NewScanner(r)
 	fmt.Fprintln(w, "\n"+i18n.M.EnterAPIKeysHeader)
@@ -1588,8 +1587,7 @@ func isTTY(f *os.File) bool {
 // appendEnv merges KEY=value lines into a .env file. Existing assignments of
 // any key that's about to be written are dropped first, then the new values
 // are appended — so re-running `reasonix setup` with a corrected key replaces the
-// stale one instead of stacking duplicates (loadDotEnv is first-wins, so a
-// naive append would leave the old key in effect). The new values are also
+// stale one instead of stacking duplicates. The new values are also
 // pinned into the current process env so a chat session started right after
 // init picks up the fresh keys without a restart.
 func appendEnv(path string, lines []string) error {

@@ -485,13 +485,15 @@ function isModifierKey(key: string): boolean {
   return key === "Meta" || key === "Control" || key === "Alt" || key === "Shift";
 }
 
-function isEditableTarget(target: EventTarget | null): boolean {
+export function isEditableTarget(target: EventTarget | null): boolean {
+  if (typeof HTMLElement === "undefined") return false;
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
   const tag = target.tagName.toLowerCase();
   return tag === "input" || tag === "textarea" || tag === "select";
 }
 
-function isShortcutRecorderTarget(target: EventTarget | null): boolean {
+export function isShortcutRecorderTarget(target: EventTarget | null): boolean {
+  if (typeof HTMLElement === "undefined") return false;
   return target instanceof HTMLElement && Boolean(target.closest(".shortcuts-settings__key--recording"));
 }

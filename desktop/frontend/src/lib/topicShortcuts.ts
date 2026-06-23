@@ -1,11 +1,21 @@
 // useTopicShortcuts - Cmd/Ctrl hold detection plus 1-9 sidebar topic navigation.
 //
 // When the user holds Cmd (macOS) or Ctrl (Windows/Linux) for a brief moment
-// without pressing another key, shortcut badges (⌘1 ... ⌘9) appear over the
-// sidebar topic list. Releasing the modifier hides them immediately. Pressing
-// Cmd/Ctrl+1-9 navigates to the matching topic.
+// without pressing another key, shortcut badges appear over the sidebar topic
+// list. Releasing the modifier hides them immediately. Pressing Cmd/Ctrl+1-9
+// navigates to the matching topic.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  defaultShortcutCombo,
+  detectShortcutPlatform,
+  formatShortcutCombo,
+  isEditableTarget,
+  isShortcutRecorderTarget,
+  matchesShortcut,
+  type ShortcutAction,
+  type ShortcutPlatform,
+} from "./keyboardShortcuts";
 
 /** Delay (ms) before showing badges after modifier is held. */
 const SHOW_DELAY_MS = 250;
@@ -17,17 +27,40 @@ type TopicShortcutEntry = {
   sessionPath?: string;
 };
 
-type TopicShortcutKeyboardEvent = Pick<globalThis.KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "defaultPrevented">;
+type TopicShortcutKeyboardEvent = Pick<globalThis.KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "defaultPrevented" | "target">;
 
-export function topicShortcutIndexFromEvent(event: TopicShortcutKeyboardEvent): number | null {
+function topicShortcutAction(index: number): ShortcutAction {
+  return `topic.goto.${index}` as ShortcutAction;
+}
+
+function isPlatformModifierKey(key: string, platform: ShortcutPlatform): boolean {
+  return platform === "darwin" ? key === "Meta" : key === "Control";
+}
+
+function hasOnlyPlatformModifier(event: TopicShortcutKeyboardEvent, platform: ShortcutPlatform): boolean {
+  if (platform === "darwin") return Boolean(event.metaKey) && !event.ctrlKey && !event.altKey && !event.shiftKey;
+  return Boolean(event.ctrlKey) && !event.metaKey && !event.altKey && !event.shiftKey;
+}
+
+export function topicShortcutLabel(index: number, platform: ShortcutPlatform = detectShortcutPlatform()): string {
+  return formatShortcutCombo(defaultShortcutCombo(topicShortcutAction(index), platform), platform);
+}
+
+export function topicShortcutIndexFromEvent(
+  event: TopicShortcutKeyboardEvent,
+  platform: ShortcutPlatform = detectShortcutPlatform(),
+): number | null {
   if (event.defaultPrevented) return null;
-  if (!event.metaKey && !event.ctrlKey) return null;
-  if (!/^[1-9]$/.test(event.key)) return null;
-  return Number(event.key) - 1;
+  if (isShortcutRecorderTarget(event.target ?? null) || isEditableTarget(event.target ?? null)) return null;
+  for (let index = 1; index <= 9; index += 1) {
+    if (matchesShortcut(event, topicShortcutAction(index), platform)) return index - 1;
+  }
+  return null;
 }
 
 export function useTopicShortcuts(
   enabled = true,
+  platform: ShortcutPlatform = detectShortcutPlatform(),
 ) {
   const [showBadges, setShowBadges] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -47,12 +80,21 @@ export function useTopicShortcuts(
   }, [clearTimer]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) hideBadges();
+  }, [enabled, hideBadges]);
 
-    const isModifier = (key: string) => key === "Meta" || key === "Control";
+  useEffect(() => {
+    if (!enabled) return undefined;
 
     const onKeydown = (event: globalThis.KeyboardEvent) => {
-      if (!isModifier(event.key)) return;
+      if (!isPlatformModifierKey(event.key, platform)) {
+        if (heldRef.current) hideBadges();
+        return;
+      }
+      if (!hasOnlyPlatformModifier(event, platform)) {
+        hideBadges();
+        return;
+      }
       if (heldRef.current) return; // already tracking
       heldRef.current = true;
       clearTimer();
@@ -63,7 +105,7 @@ export function useTopicShortcuts(
     };
 
     const onKeyup = (event: globalThis.KeyboardEvent) => {
-      if (!isModifier(event.key)) return;
+      if (!isPlatformModifierKey(event.key, platform)) return;
       hideBadges();
     };
 
@@ -77,9 +119,9 @@ export function useTopicShortcuts(
       document.removeEventListener("keydown", onKeydown);
       document.removeEventListener("keyup", onKeyup);
       window.removeEventListener("blur", onBlur);
-      clearTimer();
+      hideBadges();
     };
-  }, [enabled, clearTimer, hideBadges]);
+  }, [enabled, platform, clearTimer, hideBadges]);
 
   return { showBadges, hideBadges };
 }
