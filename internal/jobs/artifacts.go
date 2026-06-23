@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"reasonix/internal/store"
 )
 
 const (
@@ -17,11 +19,7 @@ const (
 
 // ArtifactDir returns the sidecar directory for a persistent session transcript.
 func ArtifactDir(sessionPath string) string {
-	sessionPath = strings.TrimSpace(sessionPath)
-	if sessionPath == "" {
-		return ""
-	}
-	return strings.TrimSuffix(sessionPath, ".jsonl") + ".jobs"
+	return store.SessionJobsDir(sessionPath)
 }
 
 // RemoveArtifacts removes the job sidecar for a session transcript.

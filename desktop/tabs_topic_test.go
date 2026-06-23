@@ -116,6 +116,111 @@ func writeLegacyEventSession(t *testing.T, dir, name, prompt, reply string, modT
 	return path
 }
 
+func TestSessionListCacheRefillsAfterInvalidate(t *testing.T) {
+	cache := &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
+	dir := t.TempDir()
+	first := []agent.SessionInfo{{Path: filepath.Join(dir, "first.jsonl")}}
+	second := []agent.SessionInfo{{Path: filepath.Join(dir, "second.jsonl")}}
+
+	token := cache.versionToken()
+	cache.put(dir, first, map[string]string{"first.jsonl": "First"}, token)
+	if infos, titles, ok := cache.get(dir); !ok || len(infos) != 1 || filepath.Base(infos[0].Path) != "first.jsonl" || titles["first.jsonl"] != "First" {
+		t.Fatalf("initial cache entry = %+v, %+v, %v", infos, titles, ok)
+	}
+
+	cache.invalidate()
+	if _, _, ok := cache.get(dir); ok {
+		t.Fatalf("cache entry survived invalidate")
+	}
+	cache.put(dir, first, map[string]string{"first.jsonl": "stale"}, token)
+	if _, _, ok := cache.get(dir); ok {
+		t.Fatalf("stale token repopulated cache after invalidate")
+	}
+
+	token = cache.versionToken()
+	cache.put(dir, second, map[string]string{"second.jsonl": "Second"}, token)
+	if infos, titles, ok := cache.get(dir); !ok || len(infos) != 1 || filepath.Base(infos[0].Path) != "second.jsonl" || titles["second.jsonl"] != "Second" {
+		t.Fatalf("refilled cache entry = %+v, %+v, %v", infos, titles, ok)
+	}
+}
+
+func TestRenameSessionInvalidatesProjectTreeCache(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	oldProjectCache := projectSessionCache
+	projectSessionCache = &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
+	t.Cleanup(func() {
+		projectSessionCache = oldProjectCache
+	})
+
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "rename-me.jsonl")
+	if err := os.WriteFile(sessionPath, []byte(`{"role":"user","content":"hello"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: sessionPath, Label: "test"})
+	defer ctrl.Close()
+	app := NewApp()
+	app.setTestCtrl(ctrl, "")
+
+	token := projectSessionCache.versionToken()
+	projectSessionCache.put(dir, []agent.SessionInfo{{Path: sessionPath}}, map[string]string{"rename-me.jsonl": "old"}, token)
+	if _, _, ok := projectSessionCache.get(dir); !ok {
+		t.Fatalf("expected primed project tree cache")
+	}
+	if err := app.RenameSession(sessionPath, "new title"); err != nil {
+		t.Fatalf("RenameSession: %v", err)
+	}
+	if _, _, ok := projectSessionCache.get(dir); ok {
+		t.Fatalf("RenameSession should invalidate project tree cache")
+	}
+}
+
+func TestTopicMetadataUpdatesPreserveExistingEntriesWhenTimedReadSlotsFull(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	if err := saveTopicTitles(projectRoot, map[string]string{"old": "Old"}); err != nil {
+		t.Fatalf("save old title: %v", err)
+	}
+	if err := saveTopicTitleSources(projectRoot, map[string]string{"old": topicTitleSourceManual}); err != nil {
+		t.Fatalf("save old source: %v", err)
+	}
+	if err := saveTopicCreatedAts(projectRoot, map[string]int64{"old": 100}); err != nil {
+		t.Fatalf("save old created-at: %v", err)
+	}
+
+	release := occupyReadFileWithTimeoutSlots(t)
+	if err := setTopicTitleWithSource(projectRoot, "new", "New", topicTitleSourceAuto); err != nil {
+		t.Fatalf("setTopicTitleWithSource: %v", err)
+	}
+	if err := setTopicCreatedAt(projectRoot, "new", 200); err != nil {
+		t.Fatalf("setTopicCreatedAt: %v", err)
+	}
+	release()
+
+	titles := loadTopicTitles(projectRoot)
+	if got := titles["old"]; got != "Old" {
+		t.Fatalf("old title = %q, want Old (all titles: %v)", got, titles)
+	}
+	if got := titles["new"]; got != "New" {
+		t.Fatalf("new title = %q, want New (all titles: %v)", got, titles)
+	}
+	sources := loadTopicTitleSources(projectRoot)
+	if got := sources["old"]; got != topicTitleSourceManual {
+		t.Fatalf("old source = %q, want %q (all sources: %v)", got, topicTitleSourceManual, sources)
+	}
+	if got := sources["new"]; got != topicTitleSourceAuto {
+		t.Fatalf("new source = %q, want %q (all sources: %v)", got, topicTitleSourceAuto, sources)
+	}
+	created := loadTopicCreatedAts(projectRoot)
+	if got := created["old"]; got != 100 {
+		t.Fatalf("old created-at = %d, want 100 (all created: %v)", got, created)
+	}
+	if got := created["new"]; got != 200 {
+		t.Fatalf("new created-at = %d, want 200 (all created: %v)", got, created)
+	}
+}
+
 func TestDeleteTopicKeepsSessionHistory(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -354,6 +459,54 @@ func TestLegacySessionsMigrateIntoGlobalTopics(t *testing.T) {
 	nodes = NewApp().ListProjectTree()
 	if got := len(nodes[0].Children); got != 2 {
 		t.Fatalf("migration should be idempotent, global topics = %d", got)
+	}
+}
+
+func TestTopicMigrationMarkerRescansWhenSessionFileChanges(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	writeLegacySession(t, dir, "first.jsonl", "first legacy prompt", time.Now().Add(-time.Hour))
+
+	// First render migrates the legacy session and, with nothing deferred, stamps
+	// the one-shot marker so later renders can skip the scan.
+	NewApp().ListProjectTree()
+	if _, err := os.Stat(filepath.Join(dir, topicMigrationMarker)); err != nil {
+		t.Fatalf("expected migration marker after a complete pass: %v", err)
+	}
+
+	// A CLI-created session added after the marker invalidates the lightweight
+	// gate and gets a fresh migration pass.
+	time.Sleep(10 * time.Millisecond)
+	second := writeLegacySession(t, dir, "second.jsonl", "second legacy prompt", time.Now())
+	NewApp().ListProjectTree()
+	meta, ok, err := agent.LoadBranchMeta(second)
+	if err != nil {
+		t.Fatalf("load second meta: %v", err)
+	}
+	if !ok || strings.TrimSpace(meta.TopicID) != legacySessionTopicID(second) {
+		t.Fatalf("new session after marker should be migrated, got ok=%v meta=%+v", ok, meta)
+	}
+}
+
+func TestTopicMigrationDefersEmptyLegacySession(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	// An empty legacy session (no user turns) is not migratable yet but could gain
+	// content later, so the pass must NOT mark the dir done — otherwise the gate
+	// would hide it forever.
+	if err := os.WriteFile(filepath.Join(dir, "empty.jsonl"), nil, 0o644); err != nil {
+		t.Fatalf("write empty session: %v", err)
+	}
+
+	NewApp().ListProjectTree()
+	if _, err := os.Stat(filepath.Join(dir, topicMigrationMarker)); err == nil {
+		t.Fatal("an empty legacy session must defer marking, but the dir was marked done")
 	}
 }
 
@@ -1688,6 +1841,86 @@ func TestLegacyMigrationSkipsProjectScopedSessions(t *testing.T) {
 	}
 	if got.Scope != "project" || got.WorkspaceRoot != meta.WorkspaceRoot {
 		t.Fatalf("project-scoped legacy session must not be forced into Global: %+v", got)
+	}
+}
+
+func TestProjectTreeMigratesCLISessionFromProjectDir(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	dir := config.ProjectSessionDir(projectRoot)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionPath := writeLegacySession(t, dir, "cli-project.jsonl", "cli project prompt", time.Now())
+	wantTopicID := legacySessionTopicID(sessionPath)
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || nodes[0].Kind != "project" || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != wantTopicID {
+		t.Fatalf("project CLI session should appear in project tree, got %#v; want topic %q", nodes, wantTopicID)
+	}
+}
+
+func TestProjectTreeMigratesNewCLISessionAfterProjectDirMarker(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	dir := config.ProjectSessionDir(projectRoot)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	first := writeLegacySession(t, dir, "first-cli-project.jsonl", "first cli project prompt", time.Now().Add(-time.Hour))
+	firstTopicID := legacySessionTopicID(first)
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || nodes[0].Kind != "project" || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != firstTopicID {
+		t.Fatalf("first project CLI session should appear in project tree, got %#v; want topic %q", nodes, firstTopicID)
+	}
+	if _, err := os.Stat(filepath.Join(dir, topicMigrationMarker)); err != nil {
+		t.Fatalf("expected migration marker after first project pass: %v", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	second := writeLegacySession(t, dir, "second-cli-project.jsonl", "second cli project prompt", time.Now())
+	secondTopicID := legacySessionTopicID(second)
+
+	nodes = NewApp().ListProjectTree()
+	if len(nodes) != 1 || nodes[0].Kind != "project" || len(nodes[0].Children) != 2 {
+		t.Fatalf("second project CLI session should trigger re-scan, got %#v", nodes)
+	}
+	if nodes[0].Children[0].TopicID != secondTopicID || nodes[0].Children[1].TopicID != firstTopicID {
+		t.Fatalf("project CLI topics = %#v, want newest %q then %q", nodes[0].Children, secondTopicID, firstTopicID)
+	}
+}
+
+func TestProjectTreeMigratesCLISessionFromGlobalWorkspaceDir(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	globalRoot := globalWorkspaceRoot()
+	dir := desktopSessionDir(globalRoot)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionPath := writeLegacySession(t, dir, "cli-global.jsonl", "cli global prompt", time.Now())
+	if err := agent.SaveBranchMetaPreserveUpdated(sessionPath, agent.BranchMeta{
+		CreatedAt:     time.Now().Add(-time.Minute),
+		UpdatedAt:     time.Now(),
+		Scope:         "global",
+		WorkspaceRoot: globalRoot,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	wantTopicID := legacySessionTopicID(sessionPath)
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || nodes[0].Kind != "global_folder" || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != wantTopicID {
+		t.Fatalf("global workspace CLI session should appear in Global, got %#v; want topic %q", nodes, wantTopicID)
 	}
 }
 

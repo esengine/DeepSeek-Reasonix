@@ -108,6 +108,104 @@ func TestSkillRootsViewMarksEnvConfiguredCustomRoot(t *testing.T) {
 	t.Fatalf("custom skill root %q not found in %+v", root, roots)
 }
 
+func TestSkillRootsViewDedupesConfiguredConventionRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	project := t.TempDir()
+	root := filepath.Join(home, ".reasonix", "skills")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "global.md"), []byte("---\ndescription: global\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, []byte("[skills]\npaths = [\"~/.reasonix/skills\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(wd)
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+
+	roots := skillRootsView()
+	want := realTestPath(root)
+	var matches []SkillRootView
+	for _, r := range roots {
+		if realTestPath(r.Dir) == want {
+			matches = append(matches, r)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("skill root %q appears %d times, want once: %+v", root, len(matches), matches)
+	}
+	if !matches[0].Configured || matches[0].Skills != 1 || len(matches[0].SkillItems) != 1 {
+		t.Fatalf("deduped root should keep configured metadata and skills, got %+v", matches[0])
+	}
+}
+
+func TestSkillRootsViewDedupesConfiguredProjectConventionRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	project := t.TempDir()
+	root := filepath.Join(project, ".reasonix", "skills")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "project.md"), []byte("---\ndescription: project\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(wd)
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root = filepath.Join(cwd, ".reasonix", "skills")
+	cfgPath := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, []byte("[skills]\npaths = [\""+root+"\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	roots := skillRootsView()
+	want := realTestPath(root)
+	var matches []SkillRootView
+	for _, r := range roots {
+		if realTestPath(r.Dir) == want {
+			matches = append(matches, r)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("project skill root %q appears %d times, want once: %+v", root, len(matches), matches)
+	}
+	if !matches[0].Configured || matches[0].Skills != 1 || len(matches[0].SkillItems) != 1 {
+		t.Fatalf("deduped project root should keep configured metadata and skills, got %+v", matches[0])
+	}
+	if matches[0].Status == "inactive" {
+		t.Fatalf("deduped project root should stay active, got %+v", matches[0])
+	}
+}
+
 func TestSkillRootsViewOmitsExcludedConventionRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

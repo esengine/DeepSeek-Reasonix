@@ -1,12 +1,11 @@
-// Lazy-tier MCP placeholder tools. A "lazy" plugin registers cheap placeholder
-// entries in the tool registry at boot — using the on-disk schema cache when
-// it exists — and defers the actual subprocess spawn / handshake to the first
-// model call. A "background" plugin is identical except it also kicks the
-// spawn off at boot so by the time the model calls, the swap is already done.
+// MCP placeholder tools. Background startup registers cheap placeholder entries
+// in the tool registry at boot — using the on-disk schema cache when it exists —
+// and kicks the real subprocess spawn / handshake immediately. By the time the
+// model calls a tool, the swap is usually already done.
 //
-// Why the indirection: a lazy/background server still needs stable placeholder
-// tools before the real handshake finishes. Once it does finish, lazySpawn swaps
-// the placeholders for real tools through tool.Registry's own lock, so the next
+// Why the indirection: a background server still needs stable placeholder tools
+// before the real handshake finishes. Once it does finish, lazySpawn swaps the
+// placeholders for real tools through tool.Registry's own lock, so the next
 // model request sees the real schemas without waiting for another placeholder
 // Execute call.
 package plugin
@@ -66,8 +65,8 @@ type lazySpawn struct {
 	removePrefix string
 }
 
-// kick starts the spawn if it has not yet started. Used by background-tier
-// registration; lazy-tier kicks on first call instead.
+// kick starts the spawn if it has not yet started. Background registration calls
+// this immediately; tests may leave it idle to exercise the placeholder path.
 func (s *lazySpawn) kick() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -90,14 +89,15 @@ func (s *lazySpawn) kick() {
 // reacquires mu to publish the result.
 func (s *lazySpawn) run() {
 	real, err := s.host.Add(s.ctx, s.spec)
+	var cacheTools []tool.Tool
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err != nil {
 		if errors.Is(err, ErrSpawningInFlight) {
 			// Another tab is already spawning this server; reset to idle so
 			// the next call retries instead of recording a spurious failure.
 			s.state = spawnIdle
 			s.spawnErr = nil
+			s.mu.Unlock()
 			return
 		}
 		if IsServerAlreadyConnected(err) {
@@ -111,17 +111,22 @@ func (s *lazySpawn) run() {
 				}
 				s.state = spawnReady
 				s.trySwap()
+				cacheTools = tools
+				s.mu.Unlock()
+				saveLazyCachedSchema(s.spec, cacheTools)
 				return
 			}
 			// ToolsFor failed — still not a real failure; just mark failed
 			// without recording it so /mcp status stays clean.
 			s.state = spawnFailed
 			s.spawnErr = err
+			s.mu.Unlock()
 			return
 		}
 		s.state = spawnFailed
 		s.spawnErr = err
 		s.host.RecordFailure(s.spec, err)
+		s.mu.Unlock()
 		return
 	}
 	s.real = make(map[string]tool.Tool, len(real))
@@ -130,6 +135,17 @@ func (s *lazySpawn) run() {
 	}
 	s.state = spawnReady
 	s.trySwap()
+	cacheTools = real
+	s.mu.Unlock()
+	saveLazyCachedSchema(s.spec, cacheTools)
+}
+
+func saveLazyCachedSchema(spec Spec, real []tool.Tool) {
+	_ = SaveCachedSchema(spec.Name, CachedSchema{
+		SpecHash:     SpecFingerprint(spec),
+		Capabilities: map[string]bool{},
+		Tools:        cacheableToolsOf(real),
+	})
 }
 
 // trySwap installs the real tools into reg if the spawn is ready and the
@@ -222,13 +238,25 @@ func (lt *lazyTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 			return "", fmt.Errorf("MCP server %q is initializing on first use — call again on the next turn for its real tools", sp.spec.Name)
 		}
 		// Cache-hit: run the handshake synchronously so this one Execute can
-		// forward through.
+		// forward through. Bound it with a start timeout so a wedged or
+		// unreachable MCP server can't hang the whole turn indefinitely
+		// (#4806) — on timeout we fail this attempt and a later turn can retry.
 		sp.state = spawnInFlight
 		sp.mu.Unlock()
-		real, err := sp.host.Add(sp.ctx, sp.spec)
+		spawnCtx, cancel := context.WithTimeout(sp.ctx, defaultStartTimeout)
+		real, err := sp.host.AddWithLifecycle(sp.ctx, spawnCtx, sp.spec)
+		cancel()
 		sp.mu.Lock()
 		defer sp.mu.Unlock()
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				// A slow cold start can succeed on a later turn after npm/node
+				// caches warm up or a remote MCP endpoint responds. Do not pin
+				// the session into spawnFailed for a transient startup budget miss.
+				sp.state = spawnIdle
+				sp.spawnErr = nil
+				return "", fmt.Errorf("MCP server %q startup timed out — retry this tool on a later turn", sp.spec.Name)
+			}
 			if errors.Is(err, ErrSpawningInFlight) {
 				// Another tab is already spawning this server on the shared
 				// host, but this lazySpawn has no goroutine that can publish
@@ -284,16 +312,16 @@ func (lt *lazyTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 	}
 
 	sp.mu.Unlock()
-	return "", fmt.Errorf("lazy plugin %q in unexpected state", sp.spec.Name)
+	return "", fmt.Errorf("deferred plugin %q in unexpected state", sp.spec.Name)
 }
 
-// LazyToolset returns the placeholder tools to register for one lazy/background
-// spec. When cs is non-nil (cache hit) the returned slice has one lazyTool per
-// cached tool, carrying the cached schema so the model can pass real args;
-// the first Execute runs the handshake synchronously and swaps in real tools.
-// When cs is nil (cache miss) the returned slice has a single stub named
-// "mcp__<server>__connect": the model can call it to drive the spawn, and the
-// real tools surface on the next turn.
+// LazyToolset returns the placeholder tools to register for one background spec.
+// The name is historical: when cs is non-nil (cache hit) the returned slice has
+// one lazyTool per cached tool, carrying the cached schema so the model can pass
+// real args. If the background handshake is still pending, Execute waits for it
+// and swaps in real tools. When cs is nil (cache miss) the returned slice has a
+// single stub named "mcp__<server>__connect": the model can call it to wait for
+// the spawn, and the real tools surface on the next turn.
 //
 // kick=true (background tier) also fires off the spawn immediately, so an
 // idle session warms up without waiting for the first model call.

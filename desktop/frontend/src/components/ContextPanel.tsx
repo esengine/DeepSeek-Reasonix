@@ -6,7 +6,7 @@ import { app } from "../lib/bridge";
 import { useI18n, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
 import type { DictKey } from "../locales/en";
-import type { ContextInfo, ContextPanelInfo, UsageSourceStats, WireUsage } from "../lib/types";
+import type { BalanceInfo, ContextInfo, ContextPanelInfo, UsageSourceStats, WireUsage } from "../lib/types";
 
 interface ContextPanelProps {
   tabId?: string;
@@ -15,6 +15,10 @@ interface ContextPanelProps {
   sessionTokens?: number;
   sessionCost?: number;
   sessionCurrency?: string;
+  sessionTurns?: number;
+  turnTokens?: number;
+  turnCost?: number;
+  balance?: BalanceInfo;
   sessionGen?: number;
   refreshKey?: number;
 }
@@ -31,6 +35,30 @@ function fmtDuration(ms: number, t: Translator): string {
   const seconds = totalSeconds % 60;
   if (minutes <= 0) return t("context.durationSeconds", { seconds });
   return t("context.durationMinutesSeconds", { minutes, seconds });
+}
+
+function fmtOptionalTokens(tokens?: number): string {
+  if (typeof tokens !== "number" || tokens <= 0) return "-";
+  return tokens.toLocaleString();
+}
+
+function fmtTurns(turns: number | undefined, t: Translator): string {
+  if (typeof turns !== "number" || turns < 0) return "-";
+  return t(turns === 1 ? "history.turnOne" : "history.turnOther", { n: turns });
+}
+
+function fmtUsageCacheRate(usage?: WireUsage): string {
+  if (!usage) return "-";
+  const denom = usage.cacheHitTokens + usage.cacheMissTokens || usage.promptTokens;
+  if (denom <= 0) return "-";
+  return `${((usage.cacheHitTokens / denom) * 100).toFixed(2)}%`;
+}
+
+function fmtSessionCacheRate(usage?: WireUsage): string {
+  if (!usage) return "-";
+  const denom = usage.sessionCacheHitTokens + usage.sessionCacheMissTokens;
+  if (denom <= 0) return "-";
+  return `${((usage.sessionCacheHitTokens / denom) * 100).toFixed(2)}%`;
 }
 
 export function formatCacheHitRate(hitTokens: number, missTokens: number): string {
@@ -204,6 +232,10 @@ export function ContextPanel({
   sessionTokens,
   sessionCost,
   sessionCurrency,
+  sessionTurns,
+  turnTokens,
+  turnCost,
+  balance,
   sessionGen,
   refreshKey,
 }: ContextPanelProps) {
@@ -284,6 +316,9 @@ export function ContextPanel({
   const derivedRequestCount = Math.max(readFiles.length + changedFiles.length, 0);
   const requestCount = info?.requestCount && info.requestCount > 0 ? info.requestCount : derivedRequestCount;
   const health = contextHealth(usagePct, Math.round(cachePct), readFiles.length);
+  const balanceLabel = balance?.available && balance.display ? balance.display : "-";
+  const turnCostLabel = formatMoneyLocalized(turnCost, sessionCurrency, { locale, empty: "dash" });
+  const sessionCostLabel = formatMoneyLocalized(sessionCost, sessionCurrency, { locale, empty: "dash" });
 
   return (
     <div className="context-panel">
@@ -300,6 +335,21 @@ export function ContextPanel({
               </div>
               <div className="context-panel__percent">{usagePct}%</div>
             </div>
+            <div className="context-panel__usage-progress" aria-label={t("context.windowSubtitle")}>
+              <div className="context-panel__progress-head">
+                <strong>{fmtTokens(usedTokens)} / {fmtTokens(windowTokens)}</strong>
+                <span>{usagePct}%</span>
+              </div>
+              <div className="context-panel__progress-track" aria-hidden="true">
+                <span className="context-panel__progress-fill" style={{ width: `${usagePct}%` }} />
+              </div>
+            </div>
+            <div className="context-panel__summary-rows">
+              <MiniStat label={t("status.compactLabel")} value={compactPct > 0 ? `${compactPct}%` : "-"} />
+              <MiniStat label={t("status.cacheAvgLabel")} value={fmtSessionCacheRate(usage)} />
+              <MiniStat label={t("context.sessionCost")} value={sessionCostLabel} />
+              <MiniStat label={t("status.sessionTurnsLabel")} value={fmtTurns(sessionTurns, t)} />
+            </div>
             <div className="context-panel__breakdown">
               <TokenLegend label={t("context.prompt")} value={breakdown.promptTokens} color="prompt" />
               <TokenLegend label={t("context.completion")} value={breakdown.completionTokens} color="completion" />
@@ -310,6 +360,14 @@ export function ContextPanel({
                 <strong>{usedTokens.toLocaleString()} / {windowTokens.toLocaleString()}</strong>
               </div>
             </div>
+          </section>
+          <section className="context-panel__creation-grid" aria-label={t("context.overview")}>
+            <MetricCard label={t("context.time")} value={fmtDuration(elapsed, t)} />
+            <MetricCard label={t("context.requests")} value={requestCount > 0 ? String(requestCount) : "-"} />
+            <MetricCard label={t("status.cacheLabel")} value={fmtUsageCacheRate(usage)} tone="accent" />
+            <MetricCard label={t("status.turnTokensLabel")} value={fmtOptionalTokens(turnTokens)} />
+            <MetricCard label={t("status.turnCostLabel")} value={turnCostLabel} />
+            <MetricCard label={t("status.balanceLabel")} value={balanceLabel} tone="accent" />
           </section>
           <section className="context-panel__section">
             <SectionHeading title={t("context.runtimeMetrics")} />
@@ -366,6 +424,15 @@ function TokenLegend({ label, value, color }: { label: string; value: number; co
       <span className={`context-panel__legend-dot context-panel__legend-dot--${color}`} />
       <span>{label}</span>
       <strong>{value.toLocaleString()}</strong>
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="context-panel__mini-stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
     </div>
   );
 }

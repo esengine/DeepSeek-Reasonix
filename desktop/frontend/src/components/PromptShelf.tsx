@@ -1,5 +1,4 @@
 import type { ReactNode, RefObject } from "react";
-import { ChevronDown, ChevronUp, PauseCircle } from "lucide-react";
 
 export function PromptShelf({
   titleId,
@@ -10,45 +9,47 @@ export function PromptShelf({
   children,
   crumbs,
   quickActions,
+  headerActions,
   barRef,
-  actionsWrap = false,
+  role = "dialog",
 }: {
   titleId: string;
   title: ReactNode;
   badges?: ReactNode;
-  meta: ReactNode;
-  actions: ReactNode;
+  meta?: ReactNode;
+  actions?: ReactNode;
   children?: ReactNode;
   crumbs?: ReactNode;
   quickActions?: ReactNode;
+  headerActions?: ReactNode;
   barRef?: RefObject<HTMLDivElement | null>;
-  actionsWrap?: boolean;
+  role?: "dialog" | "region";
 }) {
   return (
-    <div className={`prompt-shelf${actionsWrap ? " prompt-shelf--actions-wrap" : ""}`} aria-live="polite">
+    <div className="prompt-shelf" aria-live="polite">
       <div
         ref={barRef}
-        className="prompt-shelf__bar"
-        role="dialog"
-        aria-modal="false"
+        className="prompt-shelf__card"
+        role={role}
+        aria-modal={role === "dialog" ? "false" : undefined}
         aria-labelledby={titleId}
         tabIndex={-1}
       >
-        <div className="prompt-shelf__summary">
-          <PauseCircle size={16} aria-hidden="true" />
+        <div className="prompt-shelf__header">
           <div className="prompt-shelf__copy">
             <div id={titleId} className="prompt-shelf__title">
               <span className="prompt-shelf__heading">{title}</span>
               {badges && <span className="prompt-shelf__badges">{badges}</span>}
             </div>
-            <div className="prompt-shelf__meta">{meta}</div>
+            {meta && <div className="prompt-shelf__meta">{meta}</div>}
           </div>
+          {headerActions && <div className="prompt-shelf__header-actions">{headerActions}</div>}
         </div>
-        <div className="prompt-shelf__actions">{actions}</div>
+        {crumbs}
+        {children && <div className="prompt-shelf__body">{children}</div>}
+        {actions && <div className="prompt-shelf__actions">{actions}</div>}
+        {quickActions && <div className="prompt-shelf__quick-actions">{quickActions}</div>}
       </div>
-      {crumbs}
-      {children && <div className="prompt-shelf__panel">{children}</div>}
-      {quickActions}
     </div>
   );
 }
@@ -57,42 +58,73 @@ export function PromptBadge({ children }: { children: ReactNode }) {
   return <span className="prompt-shelf__badge">{children}</span>;
 }
 
-export function PromptAction({
-  keyLabel,
-  label,
+export function PromptHeaderAction({
+  children,
   onClick,
-  primary = false,
-  selected = false,
+  ariaLabel,
+  disabled = false,
 }: {
-  keyLabel: string;
-  label: ReactNode;
+  children: ReactNode;
   onClick: () => void;
-  primary?: boolean;
-  selected?: boolean;
+  ariaLabel?: string;
+  disabled?: boolean;
 }) {
   return (
-    <button className={`prompt-action${primary || selected ? " prompt-action--selected" : ""}`} onClick={onClick}>
-      <span className="prompt-action__key">{keyLabel}</span>
-      <span className="prompt-action__label">{label}</span>
+    <button
+      className="prompt-shelf__header-button"
+      type="button"
+      onClick={onClick}
+      aria-label={ariaLabel}
+      disabled={disabled}
+    >
+      {children}
     </button>
   );
 }
 
-export function PromptDetailToggle({
-  open,
+export function PromptAction({
+  keyLabel,
   label,
-  openLabel = label,
+  description,
   onClick,
+  ariaLabel,
+  primary = false,
+  selected = false,
+  quiet = false,
+  disabled = false,
 }: {
-  open: boolean;
-  label: ReactNode;
-  openLabel?: ReactNode;
+  keyLabel: string;
+  label?: ReactNode;
+  description?: ReactNode;
   onClick: () => void;
+  ariaLabel?: string;
+  primary?: boolean;
+  selected?: boolean;
+  quiet?: boolean;
+  disabled?: boolean;
 }) {
+  const hasCopy = description != null || (label != null && label !== "");
   return (
-    <button className="prompt-detail-toggle" onClick={onClick}>
-      <span>{open ? openLabel : label}</span>
-      {open ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+    <button
+      type="button"
+      className={[
+        "prompt-action",
+        primary || selected ? " prompt-action--selected" : "",
+        quiet ? " prompt-action--quiet" : "",
+        description ? " prompt-action--descriptive" : "",
+        !hasCopy ? " prompt-action--key-only" : "",
+      ].join("")}
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={ariaLabel}
+    >
+      {keyLabel && <span className="prompt-action__key">{keyLabel}</span>}
+      {hasCopy && (
+        <span className="prompt-action__copy">
+          {label != null && label !== "" && <span className="prompt-action__label">{label}</span>}
+          {description && <span className="prompt-action__desc">{description}</span>}
+        </span>
+      )}
     </button>
   );
 }

@@ -9,21 +9,8 @@ import (
 	"reasonix/internal/fileutil"
 )
 
-// credentialsPath is the file fallback for the reasonix-owned global credential
-// store. The settings panel writes through config.SetCredential instead, so
-// systems with a usable keyring do not need to store secrets in this file.
-func credentialsPath() string {
-	if p := config.UserCredentialsPath(); p != "" {
-		return p
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".env")
-	}
-	return ".env"
-}
-
-// upsertDotEnv stores KEY=value in the configured global credential store and
-// applies it to the running process so a rebuild picks it up without a restart.
+// upsertDotEnv stores KEY=value in Reasonix's global .env and applies it to the
+// running process so a rebuild picks it up without a restart.
 func upsertDotEnv(key, value string) error {
 	_, err := config.SetCredential(key, value)
 	return err
@@ -143,59 +130,4 @@ func removeEnvFile(path, key string) error {
 		return err
 	}
 	return os.Unsetenv(key)
-}
-
-// promoteProviderKeysToCredentials copies any configured provider api_key_env that
-// currently resolves (from a project .env, ~/.env, or the OS env) into the global
-// credential store when it isn't there yet, so a key set for one workspace follows
-// the user across every project. Promoted keys are then stripped from ~/.env so the
-// credential store is the single source of truth; a project's own .env is
-// user-owned and left untouched.
-func promoteProviderKeysToCredentials(cfg *config.Config) {
-	for _, p := range cfg.Providers {
-		env := strings.TrimSpace(p.APIKeyEnv)
-		if env == "" || config.CredentialStored(env) {
-			continue
-		}
-		val := os.Getenv(env)
-		if val == "" {
-			continue
-		}
-		if _, err := config.SetCredential(env, val); err != nil {
-			continue
-		}
-		removeHomeEnvKey(env)
-	}
-}
-
-// removeHomeEnvKey deletes a single KEY=value assignment from ~/.env (the legacy
-// fallback the old migration wrote to), leaving every other line intact. No-op when
-// ~/.env is absent or the credentials store resolves to ~/.env itself.
-func removeHomeEnvKey(key string) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	path := filepath.Join(home, ".env")
-	if sameConfigPath(path, credentialsPath()) {
-		return
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	var kept []string
-	removed := false
-	for _, raw := range strings.Split(string(data), "\n") {
-		check := strings.TrimPrefix(strings.TrimSpace(raw), "export ")
-		if k, _, ok := strings.Cut(check, "="); ok && strings.TrimSpace(k) == key {
-			removed = true
-			continue
-		}
-		kept = append(kept, raw)
-	}
-	if !removed {
-		return
-	}
-	_ = os.WriteFile(path, []byte(strings.Join(kept, "\n")), 0o600)
 }

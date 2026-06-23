@@ -17,6 +17,7 @@ export type EventKind =
   | "turn_done"
   | "compaction_started"
   | "compaction_done"
+  | "mcp_surface_ready"
   | "retrying"
   | "steer";
 
@@ -49,6 +50,18 @@ export interface WireTool {
   profile?: WireProfile; // subagent model/effort resolved for this call
 }
 
+export interface WireCacheDiagnostics {
+  prefixHash: string;
+  prefixChanged: boolean;
+  prefixChangeReasons?: string[];
+  systemHash: string;
+  toolsHash: string;
+  logRewriteVersion: number;
+  toolSchemaTokens: number;
+  cacheMissTokens: number;
+  cacheHitTokens: number;
+}
+
 export interface WireUsage {
   promptTokens: number;
   completionTokens: number;
@@ -57,6 +70,7 @@ export interface WireUsage {
   cacheMissTokens: number;
   reasoningTokens?: number;
   source?: string;
+  cacheDiagnostics?: WireCacheDiagnostics;
   // Session-cumulative cache tokens — the status bar shows the aggregate
   // hit-rate (Σhit/Σ(hit+miss)), steadier than the single-turn cacheHitTokens.
   sessionCacheHitTokens: number;
@@ -91,6 +105,14 @@ export interface WireAsk {
   questions: WireAskQuestion[];
 }
 
+export interface WireSubagent {
+  id?: string;
+  skill?: string;
+  alias?: string;
+  state?: string;
+  error?: string;
+}
+
 // QuestionAnswer is the reply for one question, sent back via AnswerQuestion.
 export interface QuestionAnswer {
   questionId: string;
@@ -102,6 +124,7 @@ export interface WireEvent {
   text?: string;
   reasoning?: string;
   level?: "info" | "warn";
+  subagent?: WireSubagent;
   tool?: WireTool;
   usage?: WireUsage;
   approval?: WireApproval;
@@ -284,6 +307,7 @@ export interface CheckpointMeta {
   turn: number;
   prompt: string;
   files: string[];
+  turnFileCount?: number;
   time: number; // unix ms
   canCode?: boolean;
   canConversation?: boolean;
@@ -486,14 +510,17 @@ export interface ServerView {
   name: string;
   transport: string;
   status: "connected" | "deferred" | "failed" | "initializing" | "disabled";
+  startIntent?: "off" | "automatic" | string;
+  runtimeState?: "idle" | "connecting" | "ready" | "issue" | string;
   builtIn?: boolean;
   configured?: boolean;
   autoStart: boolean;
-  tier?: "lazy" | "background" | "eager" | string;
+  tier?: "background" | "eager" | string;
   command?: string;
   args?: string[];
   url?: string;
   envKeys?: string[];
+  headerKeys?: string[];
   tools: number;
   prompts: number;
   resources: number;
@@ -547,6 +574,7 @@ export interface MCPServerInput {
   args: string[];
   url: string;
   env?: Record<string, string> | null;
+  headers?: Record<string, string> | null;
 }
 
 export interface ModelInfo {
@@ -888,7 +916,7 @@ export interface SettingsView {
   agent: AgentView;
   bot: BotSettingsView;
   desktopLanguage: string; // "" | "en" | "zh"; empty = auto
-  desktopLayoutStyle: string; // "classic" | "workbench"
+  desktopLayoutStyle: string; // "classic" | "workbench" | "creation"
   desktopTheme: string; // "auto" | "dark" | "light"
   desktopThemeStyle: string;
   closeBehavior: string; // "background" | "quit"

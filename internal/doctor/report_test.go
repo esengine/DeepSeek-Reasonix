@@ -80,6 +80,7 @@ func TestCollectReportRedactsSecrets(t *testing.T) {
 }
 
 func TestCollectReportDoesNotRequireAPIKey(t *testing.T) {
+	t.Setenv("REASONIX_HOME", filepath.Join(t.TempDir(), "reasonix"))
 	t.Setenv("DEEPSEEK_API_KEY", "")
 
 	cfg := config.Default()

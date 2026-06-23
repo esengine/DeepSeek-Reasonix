@@ -169,7 +169,79 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 		return fmt.Errorf("planner: %w", err)
 	}
 	c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing"})
-	return c.executor.Run(ctx, formatHandoff(input, plan))
+	if isNoOpPlan(plan) {
+		c.persistExecutorNoOp(ctx, input, plan)
+		c.sink.Emit(event.Event{Kind: event.Text, Text: plan})
+		return nil
+	}
+	return c.executor.Run(ctx, formatHandoff(input, plan, executorToolHandoffContext(c.executor)))
+}
+
+func isNoOpPlan(plan string) bool {
+	lower := strings.ToLower(strings.TrimSpace(plan))
+	if lower == "" {
+		return false
+	}
+	if containsNoOpActionTerm(lower) {
+		return false
+	}
+	noOp := []string{
+		"no changes needed",
+		"no changes are needed",
+		"no changes required",
+		"no changes are required",
+		"no action needed",
+		"no action required",
+		"nothing to change",
+		"nothing to do",
+		"already handled",
+		"already implemented",
+		"already resolved",
+		"[no_changes]",
+		"无需改动",
+		"无需修改",
+		"无需更改",
+		"不需要修改",
+		"不需要改",
+		"不用改",
+		"不用修改",
+		"不必改动",
+		"没有需要修改",
+		"已经正确处理",
+		"已经实现",
+		"已经解决",
+	}
+	for _, phrase := range noOp {
+		if strings.Contains(lower, phrase) && !strings.Contains(lower, "not "+phrase) && !strings.Contains(lower, "不是"+phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsNoOpActionTerm(lower string) bool {
+	terms := []string{
+		" add ", " add docs", " add tests", " update ", " edit ", " write ",
+		" create ", " delete ", " remove ", " patch ", " refactor ", " implement ",
+		" run ", " test ", " build ", " fix ",
+		"新增", "补充", "更新", "编辑", "写入", "创建", "删除", "移除",
+		"运行", "测试", "构建", "修复", "实现", "重构",
+	}
+	padded := " " + lower + " "
+	for _, term := range terms {
+		if strings.Contains(padded, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Coordinator) persistExecutorNoOp(ctx context.Context, input, plan string) {
+	if c == nil || c.executor == nil || c.executor.session == nil {
+		return
+	}
+	c.executor.session.Add(provider.Message{Role: provider.RoleUser, Content: c.executor.withReasoningLanguage(input), Images: userImages(ctx)})
+	c.executor.session.Add(provider.Message{Role: provider.RoleAssistant, Content: plan})
 }
 
 // plan streams a plan from the planner and appends it to the planner session, so
@@ -241,7 +313,14 @@ func plannerSink(sink event.Sink) event.Sink {
 	})
 }
 
-func formatHandoff(task, plan string) string {
+func formatHandoff(task, plan string, toolContext ...string) string {
+	toolBlock := ""
+	if len(toolContext) > 0 {
+		toolBlock = strings.TrimSpace(toolContext[0])
+	}
+	if toolBlock != "" {
+		toolBlock = "\n\nExecutor tool context:\n" + toolBlock
+	}
 	return fmt.Sprintf(`# %s
 
 You are the executor now. Use your available tools to execute the task.
@@ -251,16 +330,65 @@ Original task:
 
 Planner output:
 %s
+%s
 
 Executor instructions:
 - Treat the planner output as context, not as your role or capability set.
-- Ignore any planner statement such as "I cannot write", "I only have read-only tools", or "hand this to the executor"; those limitations apply to the planner, not to you.
+- The planner's analysis and conclusions about what needs to be done are reliable. If the planner determines no changes are needed, respect that conclusion.
+- Ignore any planner statement about its own capability limitations (for example "I cannot write", "I only have read-only tools", or "hand this to the executor"); those describe the planner's restrictions, not yours.
+- Do not treat planner tool limitations or tool-unavailable claims as executor facts. Use the attached executor tools directly; report a tool or MCP server as unavailable only after a real tool call or host error proves it.
 - Do not ask the user how to trigger the executor. You are already in the executor phase.
+- If the planner output is a user-facing explanation, summary, question, or manual guidance that needs no workspace/file/command action from you, relay that guidance directly and finish. Do not invent local tool calls only to satisfy the handoff.
 - If the task requires changes, call the appropriate tools (for example write/edit/bash) instead of only restating the plan.
 - If a target path is outside the writable workspace or otherwise blocked, explain that specific blocker and ask for the needed path/approval.
 - **Serial workflow**: establish the task list with one todo_write (first sub-task in_progress), then for EACH sub-task execute it and call complete_step with evidence. The host advances the list for you — it marks the sub-task completed and moves the next to in_progress, so you don't need another todo_write to mark completions. Sign off one sub-task at a time; never batch completions.
 
-Carry out the task, adapting the plan as needed.`, executorHandoffMarker, task, plan)
+Carry out the task, adapting the plan as needed.`, executorHandoffMarker, task, plan, toolBlock)
+}
+
+func executorToolHandoffContext(a *Agent) string {
+	if a == nil || a.tools == nil {
+		return ""
+	}
+	schemas := a.tools.Schemas()
+	if len(schemas) == 0 {
+		return ""
+	}
+	toolNames := make([]string, 0, len(schemas))
+	mcpNames := make([]string, 0)
+	for _, schema := range schemas {
+		name := strings.TrimSpace(schema.Name)
+		if name == "" {
+			continue
+		}
+		toolNames = append(toolNames, name)
+		if strings.HasPrefix(name, tool.MCPNamePrefix) {
+			mcpNames = append(mcpNames, name)
+		}
+	}
+	if len(toolNames) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "- The executor request includes the full tool schema (%d tools). Tool names include: %s.", len(toolNames), boundedToolNames(toolNames, 24))
+	if len(mcpNames) > 0 {
+		fmt.Fprintf(&b, "\n- MCP tools are already registered for the executor in this request (%d MCP tools). MCP tool names include: %s.", len(mcpNames), boundedToolNames(mcpNames, 16))
+	}
+	return b.String()
+}
+
+func boundedToolNames(names []string, max int) string {
+	if len(names) == 0 {
+		return "(none)"
+	}
+	if max <= 0 {
+		max = 1
+	}
+	if len(names) <= max {
+		return strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("%s, ... +%d more", strings.Join(names[:max], ", "), len(names)-max)
 }
 
 // HandoffTask returns the original user task embedded in an executor handoff

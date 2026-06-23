@@ -13,3 +13,6 @@ wailsjs
 
 # Wails dev install-checksum cache
 package.json.md5
+
+# This project uses pnpm (see wails.json `frontend:install`); reject the npm lockfile.
+package-lock.json

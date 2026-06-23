@@ -255,9 +255,8 @@ Bindings are stored in the user's Reasonix data, not inside the app bundle:
 
 - Bot connections, remote IDs, allowlists, model choices, and approval modes are
   stored in the user config.
-- Feishu and Lark secrets are stored in the configured Reasonix credential
-  store. By default this prefers the OS credential store and falls back to the
-  Reasonix-owned credentials file.
+- Feishu and Lark secrets are stored in Reasonix's global
+  `<Reasonix home>/.env`, shared by CLI and desktop.
 - The WeChat scanned account token is stored in the Reasonix user data
   directory.
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
   CSSProperties,
   DragEvent as ReactDragEvent,
@@ -179,6 +180,15 @@ function formatCommitDate(dateStr: string): string {
   const hours = String(d.getHours()).padStart(2, "0");
   const minutes = String(d.getMinutes()).padStart(2, "0");
   return `${day} ${month} ${year} ${hours}:${minutes}`;
+}
+interface TreeRow {
+  key: string;
+  path: string;
+  depth: number;
+  entry: DirEntry;
+  active: boolean;
+  isOpen?: boolean;
+  isSearch?: boolean;
 }
 
 export function WorkspacePanel({
@@ -730,6 +740,48 @@ export function WorkspacePanel({
       .sort((a, b) => a.path.localeCompare(b.path));
   }, [entriesByDir, filter, scopedFilePaths]);
 
+  const treeRows = useMemo<TreeRow[]>(() => {
+    if (flattened) {
+      return flattened.map(({ path, entry }) => ({
+        key: path,
+        path,
+        depth: 0,
+        entry,
+        active: selectedPath === path,
+        isSearch: true,
+      }));
+    }
+    const acc: TreeRow[] = [];
+    const build = (dir: string, depth: number) => {
+      const entries = entriesByDir[dir] ?? [];
+      for (const entry of entries) {
+        const path = entryPath(dir, entry);
+        const isOpen = openDirs.has(path);
+        const active = selectedPath === path;
+        acc.push({
+          key: path,
+          path,
+          depth,
+          entry,
+          active,
+          isOpen,
+        });
+        if (entry.isDir && isOpen) {
+          build(path, depth + 1);
+        }
+      }
+    };
+    build("", 0);
+    return acc;
+  }, [flattened, entriesByDir, openDirs, selectedPath]);
+
+  const virtualizer = useVirtualizer({
+    count: treeRows.length,
+    getScrollElement: () => treeRef.current,
+    estimateSize: () => 24,
+    overscan: 10,
+  });
+
   const searchPlaceholder = t(scopedFilePaths ? "workspace.filterReferencedFiles" : changedMode ? "workspace.filterChanges" : "workspace.filter");
 
   const effectiveTreeWidth = useMemo(() => clampWorkspaceTreeWidth(treeWidth, panelWidth), [panelWidth, treeWidth]);
@@ -747,13 +799,11 @@ export function WorkspacePanel({
 
   useEffect(() => {
     if (!selectedPath || !actualTreeVisible) return;
-    const frame = window.requestAnimationFrame(() => {
-      const row = Array.from(treeRef.current?.querySelectorAll<HTMLElement>("[data-workspace-path]") ?? [])
-        .find((element) => element.dataset.workspacePath === selectedPath);
-      row?.scrollIntoView({ block: "nearest", inline: "nearest" });
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [actualTreeVisible, entriesByDir, filter, selectedPath]);
+    const selectedIndex = treeRows.findIndex((row) => row.path === selectedPath);
+    if (selectedIndex !== -1) {
+      virtualizer.scrollToIndex(selectedIndex, { align: "auto" });
+    }
+  }, [selectedPath, actualTreeVisible, treeRows, virtualizer]);
 
   const panelStyle = useMemo(
     () =>
@@ -920,53 +970,85 @@ export function WorkspacePanel({
     void app.RevealWorkspacePath(treeMenu.path).catch(() => {});
   };
 
-  const renderRows = (dir: string, depth: number): ReactElement[] => {
-    const entries = entriesByDir[dir] ?? [];
-    return entries.flatMap((entry) => {
-      const path = entryPath(dir, entry);
-      const isOpen = openDirs.has(path);
-      const active = selectedPath === path;
-      const row = (
-        <button
-          key={path}
-          className={`workspace-tree__row${active ? " workspace-tree__row--active" : ""}`}
-          data-workspace-path={path}
-          draggable
-          onDragStart={(event) => startTreeDrag(event, path, entry.isDir)}
-          onClick={() => {
-            if (entry.isDir) {
-              toggleDir(path);
+  const renderNormalRow = (row: TreeRow) => {
+    const { path, depth, entry, isOpen, active } = row;
+    return (
+      <button
+        key={path}
+        className={`workspace-tree__row${active ? " workspace-tree__row--active" : ""}`}
+        data-workspace-path={path}
+        draggable
+        onDragStart={(event) => startTreeDrag(event, path, entry.isDir)}
+        onClick={() => {
+          if (entry.isDir) {
+            toggleDir(path);
+          } else {
+            if (selectedPath === path) {
+              setSelectedPath(null);
             } else {
-              if (selectedPath === path) {
-                setSelectedPath(null);
-              } else {
-                selectFile(path);
-              }
+              selectFile(path);
             }
-          }}
-          onContextMenu={(event) => openTreeMenu(event, path, entry.isDir)}
-          style={{ paddingLeft: 8 + depth * 14 }}
-        >
-          {entry.isDir ? (
-            isOpen ? (
-              <ChevronDown size={13} className="workspace-tree__chev" />
-            ) : (
-              <ChevronRight size={13} className="workspace-tree__chev" />
-            )
-          ) : (
-            <span className="workspace-tree__chev" />
-          )}
-          {entry.isDir ? (
-            <Folder size={14} className="workspace-tree__icon workspace-tree__icon--dir" />
-          ) : (
-            <FileText size={14} className="workspace-tree__icon" />
-          )}
-          <span className="workspace-tree__name">{entry.name}</span>
-        </button>
-      );
-      if (!entry.isDir || !isOpen) return [row];
-      return [row, ...renderRows(path, depth + 1)];
-    });
+          }
+        }}
+        onContextMenu={(event) => openTreeMenu(event, path, entry.isDir)}
+        style={{ paddingLeft: 8 + depth * 14 }}
+      >
+        {entry.isDir ? (
+          <ChevronRight
+            size={13}
+            className={`workspace-tree__chev ${isOpen ? "workspace-tree__chev--open" : ""}`}
+            style={{
+              transition: "transform 0.15s ease",
+              transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
+            }}
+          />
+        ) : (
+          <span className="workspace-tree__chev" />
+        )}
+        {entry.isDir ? (
+          <Folder size={14} className="workspace-tree__icon workspace-tree__icon--dir" />
+        ) : (
+          <FileText size={14} className="workspace-tree__icon" />
+        )}
+        <span className="workspace-tree__name">{entry.name}</span>
+      </button>
+    );
+  };
+
+  const renderSearchRow = (row: TreeRow) => {
+    const { path, entry, active } = row;
+    const dir = parentPath(path);
+    return (
+      <button
+        key={path}
+        className={`workspace-tree__row workspace-tree__row--search${active ? " workspace-tree__row--active" : ""}`}
+        data-workspace-path={path}
+        draggable
+        onDragStart={(event) => startTreeDrag(event, path, entry.isDir)}
+        onClick={() => {
+          if (entry.isDir) {
+            toggleDir(path);
+          } else {
+            if (selectedPath === path) {
+              setSelectedPath(null);
+            } else {
+              selectFile(path);
+            }
+          }
+        }}
+        onContextMenu={(event) => openTreeMenu(event, path, entry.isDir)}
+      >
+        {entry.isDir ? (
+          <Folder size={14} className="workspace-tree__icon workspace-tree__icon--dir" />
+        ) : (
+          <FileText size={14} className="workspace-tree__icon" />
+        )}
+        <span className="workspace-tree__result">
+          <span className="workspace-tree__result-name">{basename(path)}</span>
+          {dir && <span className="workspace-tree__result-dir">{dir}</span>}
+        </span>
+      </button>
+    );
   };
 
   const isMarkdown = selectedPath?.toLowerCase().endsWith(".md") ?? false;
@@ -1414,43 +1496,47 @@ export function WorkspacePanel({
             </Tooltip>
           </div>
         )}
-        <div className="workspace-tree" ref={treeRef} onContextMenu={openTreeBlankMenu}>
-          {flattened
-            ? flattened.map(({ path, entry }) => {
-                const dir = parentPath(path);
+        <div
+          className="workspace-tree"
+          ref={treeRef}
+          onContextMenu={openTreeBlankMenu}
+          style={{
+            height: "100%",
+            overflow: "auto",
+            position: "relative",
+          }}
+        >
+          {treeRows.length > 0 ? (
+            <div
+              className="workspace-tree__sizer"
+              style={{
+                height: virtualizer.getTotalSize(),
+                width: "100%",
+                position: "relative",
+              }}
+            >
+              {virtualizer.getVirtualItems().map((row) => {
+                const item = treeRows[row.index];
+                if (!item) return null;
                 return (
-                  <button
-                    key={path}
-                    className={`workspace-tree__row workspace-tree__row--search${selectedPath === path ? " workspace-tree__row--active" : ""}`}
-                    data-workspace-path={path}
-                    draggable
-                    onDragStart={(event) => startTreeDrag(event, path, entry.isDir)}
-                    onClick={() => {
-                      if (entry.isDir) {
-                        toggleDir(path);
-                      } else {
-                        if (selectedPath === path) {
-                          setSelectedPath(null);
-                        } else {
-                          selectFile(path);
-                        }
-                      }
+                  <div
+                    key={item.key}
+                    data-index={row.index}
+                    ref={virtualizer.measureElement}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${row.start}px)`,
                     }}
-                    onContextMenu={(event) => openTreeMenu(event, path, entry.isDir)}
                   >
-                    {entry.isDir ? (
-                      <Folder size={14} className="workspace-tree__icon workspace-tree__icon--dir" />
-                    ) : (
-                      <FileText size={14} className="workspace-tree__icon" />
-                    )}
-                    <span className="workspace-tree__result">
-                      <span className="workspace-tree__result-name">{basename(path)}</span>
-                      {dir && <span className="workspace-tree__result-dir">{dir}</span>}
-                    </span>
-                  </button>
+                    {item.isSearch ? renderSearchRow(item) : renderNormalRow(item)}
+                  </div>
                 );
-              })
-            : renderRows("", 0)}
+              })}
+            </div>
+          ) : null}
         </div>
       </section>
       {treeMenu && (

@@ -55,8 +55,8 @@
 
 - **Config-driven.** Providers, the agent, enabled tools, and plugins are all
   declared in `reasonix.toml`. No hardcoded models.
-- **Multi-model & composable.** DeepSeek (flash/pro) and MiMo ship as presets;
-  any OpenAI-compatible endpoint is a config entry, not new code. Optionally run
+- **Multi-model & composable.** DeepSeek ships as a preset; any
+  OpenAI-compatible endpoint is a config entry, not new code. Optionally run
   two models together (executor + planner) in separate, cache-stable sessions.
 - **Plugin-driven.** External tools run as subprocesses over stdio JSON-RPC
   (MCP-compatible). Built-in tools self-register at compile time.
@@ -90,10 +90,10 @@ make cross      # -> dist/ (darwin|linux|windows × amd64|arm64)
 
 ```sh
 reasonix setup                      # config wizard → ./reasonix.toml
-export DEEPSEEK_API_KEY=sk-...      # or let setup save it to the credential store
+export DEEPSEEK_API_KEY=sk-...      # or let setup save it to Reasonix home .env
 reasonix                            # then run /init to generate AGENTS.md (project memory)
 reasonix run "implement the TODOs in main.go"
-reasonix run --model mimo-pro "add unit tests for this function"
+reasonix run --model deepseek-pro "add unit tests for this function"
 echo "explain this code" | reasonix run
 ```
 
@@ -116,10 +116,13 @@ Resolution order is **flag > `./reasonix.toml` > the user config file >
 built-in defaults**; starting with **Reasonix v1.8.1**, the user file lives at
 `~/.reasonix/config.toml` on macOS/Linux and
 `%AppData%\reasonix\config.toml` on Windows. See
-**[Configuration paths](./docs/CONFIG_PATHS.md)** for migration details. Secrets come from the environment via `api_key_env`, are
-never written to config files, and new keys default to the OS credential store
-with a Reasonix-owned file fallback. Project `.env` files are read as a
-compatibility override, but Reasonix does not write new keys there. Permissions, the sandbox, plugins (MCP), slash
+**[Configuration paths](./docs/CONFIG_PATHS.md)** for migration details and the
+full `config.toml` / `.env` structure. Provider entries name secrets with
+`api_key_env`; the secret values themselves live in Reasonix's global
+`<Reasonix home>/.env`, shared by CLI and desktop. Project `.env` files are not
+provider-key runtime fallbacks, but still feed workspace-scoped, non-provider
+`${VAR}` expansion for MCP/plugin settings without importing Reasonix control
+variables. Permissions, the sandbox, plugins (MCP), slash
 commands, `@` references, and two-model setup are all in the
 **[Guide](./docs/GUIDE.md)**.
 

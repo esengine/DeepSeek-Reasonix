@@ -3,6 +3,7 @@ package control
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -110,10 +111,8 @@ func (c *Controller) detectRefs(line string) []ref {
 
 func (c *Controller) detectRefsMode(line string, scopedOnly bool) []ref {
 	known := map[string]bool{}
-	if c.host != nil {
-		for _, n := range c.host.ServerNames() {
-			known[n] = true
-		}
+	for _, n := range c.mcp.serverNames() {
+		known[n] = true
 	}
 
 	var refs []ref
@@ -122,8 +121,8 @@ func (c *Controller) detectRefsMode(line string, scopedOnly bool) []ref {
 			refs = append(refs, ref{kind: refResource, server: tok[:i], uri: tok[i+1:], raw: tok})
 			continue
 		}
-		if c.cpRoot != "" {
-			if rel, ok := workspaceRefPath(tok, c.cpRoot); ok {
+		if c.workspaceRoot != "" {
+			if rel, ok := workspaceRefPath(tok, c.workspaceRoot); ok {
 				kind := refFile
 				if isAttachmentRef(rel) && isImageAttachmentRef(rel) {
 					kind = refImage
@@ -151,20 +150,89 @@ func (c *Controller) HasRefs(line string) bool {
 	return len(c.detectRefs(line)) > 0
 }
 
-// inputImages resolves image @-attachments in the turn input to data URLs so the
-// turn can carry them to a vision-capable model. Best-effort: an unreadable
-// attachment is skipped — the @image ref still lands as text via ResolveRefs.
+// inputImages resolves image @-references in the turn input to data URLs so the
+// turn can carry them to a vision-capable model. Best-effort: an unreadable image
+// is skipped — the @ref still lands as text via ResolveRefs.
 func (c *Controller) inputImages(line string) []string {
 	var urls []string
 	for _, r := range c.detectRefs(line) {
-		if r.kind != refImage {
-			continue
-		}
-		if url, err := visionImageDataURL(r.path); err == nil {
+		if url, err := visionRefImageDataURL(r, c.workspaceRoot); err == nil {
 			urls = append(urls, url)
 		}
 	}
 	return urls
+}
+
+func visionRefImageDataURL(r ref, baseDir string) (string, error) {
+	switch r.kind {
+	case refImage:
+		return visionImageDataURL(r.path)
+	case refFile:
+		return visionFileImageDataURL(r.path, baseDir)
+	default:
+		return "", fmt.Errorf("reference is not an image")
+	}
+}
+
+func visionFileImageDataURL(path, baseDir string) (string, error) {
+	absPath, absBase, ok := resolveAbsRef(path, baseDir)
+	if !ok {
+		return "", os.ErrNotExist
+	}
+	if absBase == "" {
+		return "", fmt.Errorf("workspace root is required for file image references")
+	}
+
+	root, err := os.OpenRoot(absBase)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+
+	rel, err := filepath.Rel(absBase, absPath)
+	if err != nil {
+		return "", err
+	}
+
+	info, err := root.Lstat(rel)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("image path must not be a symlink")
+	}
+	if info.IsDir() || info.Size() <= 0 || info.Size() > maxImageAttachmentBytes {
+		return "", fmt.Errorf("image must be between 1 byte and 10 MB")
+	}
+	f, err := root.Open(rel)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	if !os.SameFile(info, opened) {
+		return "", fmt.Errorf("image changed while opening")
+	}
+	return dataURLFromImageReader(f, path)
+}
+
+func dataURLFromImageReader(r io.Reader, path string) (string, error) {
+	raw, err := io.ReadAll(io.LimitReader(r, maxImageAttachmentBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if len(raw) == 0 || len(raw) > maxImageAttachmentBytes {
+		return "", fmt.Errorf("image must be between 1 byte and 10 MB")
+	}
+	mime := detectedImageMime(raw)
+	if mime == "" {
+		return "", fmt.Errorf("%s is not a supported image", path)
+	}
+	raw, mime = compressForVision(raw, mime)
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(raw), nil
 }
 
 // resolveBareNames batch-resolves simple filenames (no path separator) that
@@ -363,19 +431,19 @@ func (c *Controller) ResolveScopedRefs(ctx context.Context, line string) (block 
 
 func (c *Controller) resolveRefs(ctx context.Context, line string, scopedOnly bool) (block string, errs []string) {
 	refs := c.detectRefsMode(line, scopedOnly)
-	refs = resolveBareNames(refs, c.cpRoot)
+	refs = resolveBareNames(refs, c.workspaceRoot)
 	var b strings.Builder
 	for _, r := range refs {
 		switch r.kind {
 		case refResource:
-			text, err := c.host.ReadResource(ctx, r.server, r.uri)
+			text, err := c.mcp.readResource(ctx, r.server, r.uri)
 			if err != nil {
 				errs = append(errs, "@"+r.raw+" — "+err.Error())
 				continue
 			}
 			appendRefBlock(&b, "resource", `ref="@`+r.raw+`"`, text)
 		case refFile:
-			text, isDir, err := readFileRef(r.path, c.cpRoot)
+			text, isDir, err := readFileRef(r.path, c.workspaceRoot)
 			if err != nil {
 				errs = append(errs, "@"+r.raw+" — "+err.Error())
 				continue
@@ -386,7 +454,7 @@ func (c *Controller) resolveRefs(ctx context.Context, line string, scopedOnly bo
 			}
 			appendRefBlock(&b, tag, `path="`+r.path+`"`, text)
 		case refImage:
-			appendRefBlock(&b, "image", `path="`+r.path+`"`, "[image attachment available at @"+r.path+"; use an image/OCR/vision MCP tool if visual understanding is needed]")
+			appendRefBlock(&b, "image", `path="`+r.path+`"`, "[image attachment available at @"+r.path+" and attached to this turn as model image input when the selected model supports vision; no local extraction tool is needed for direct visual understanding]")
 		}
 	}
 	return b.String(), errs
@@ -466,7 +534,7 @@ func readFileRef(path, baseDir string) (content string, isDir bool, err error) {
 	data := buf[:n]
 
 	if mime := imageMime(data, rel); mime != "" {
-		return fmt.Sprintf("[image file %s, mime=%s, %d bytes — image bytes are not inlined. Use an available MCP image/OCR/vision tool with this path when visual understanding is needed.]", displayPath, mime, info.Size()), false, nil
+		return imageFileRefNote(displayPath, mime, info.Size(), true), false, nil
 	}
 	if bytes.IndexByte(data[:min(n, 8192)], 0) >= 0 {
 		return fmt.Sprintf("[binary file %s, %d bytes — not shown]", displayPath, info.Size()), false, nil
@@ -543,7 +611,7 @@ func readFileRefUnscoped(path string) (content string, isDir bool, err error) {
 	data := buf[:n]
 
 	if mime := imageMime(data, path); mime != "" {
-		return fmt.Sprintf("[image file %s, mime=%s, %d bytes — image bytes are not inlined. Use an available MCP image/OCR/vision tool with this path when visual understanding is needed.]", path, mime, info.Size()), false, nil
+		return imageFileRefNote(path, mime, info.Size(), false), false, nil
 	}
 	if bytes.IndexByte(data[:min(n, 8192)], 0) >= 0 {
 		return fmt.Sprintf("[binary file %s, %d bytes — not shown]", path, info.Size()), false, nil
@@ -552,6 +620,13 @@ func readFileRefUnscoped(path string) (content string, isDir bool, err error) {
 		return string(data[:maxFileRefBytes]) + fmt.Sprintf("\n…[truncated; file is %d bytes]…", info.Size()), false, nil
 	}
 	return string(data), false, nil
+}
+
+func imageFileRefNote(displayPath, mime string, size int64, attached bool) string {
+	if attached {
+		return fmt.Sprintf("[image file %s, mime=%s, %d bytes — attached to this turn as model image input when the selected model supports vision; no local extraction tool is needed for direct visual understanding.]", displayPath, mime, size)
+	}
+	return fmt.Sprintf("[image file %s, mime=%s, %d bytes — not attached as model image input because no workspace root is available. Use a workspace-scoped file reference or image attachment to send it to a vision-capable model.]", displayPath, mime, size)
 }
 
 // walkRootDir walks a directory under a sandboxed *os.Root and writes each

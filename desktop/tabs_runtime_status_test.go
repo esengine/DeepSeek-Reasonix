@@ -245,7 +245,7 @@ func TestBackgroundJobNoticeForcesProjectTreeRefresh(t *testing.T) {
 	}
 }
 
-func waitNoJobs(t *testing.T, ctrl *control.Controller) {
+func waitNoJobs(t *testing.T, ctrl control.SessionAPI) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	for len(ctrl.Jobs()) > 0 {

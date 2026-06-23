@@ -274,22 +274,23 @@ func TestGoalRestartResetsBlockedAudit(t *testing.T) {
 	}
 }
 
-// TestIncompleteGoalTodos verifies that incompleteGoalTodos detects
+// TestIncompleteGoalTodos verifies that formatIncompleteTodos detects
 // unfinished tasks and returns a formatted reminder, and returns empty
 // when all todos are complete.
 func TestIncompleteGoalTodos(t *testing.T) {
 	prov := &scriptedTurns{turns: [][]provider.Chunk{textTurn("done")}}
 	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
 	c := New(Options{Runner: ag, Executor: ag, Sink: event.Discard})
+	reminder := func() string { return formatIncompleteTodos(c.goalTodos(), ag.GoalReadinessFailure()) }
 
 	// Seed with incomplete todos.
 	ag.SeedTodoState([]evidence.TodoItem{
 		{Content: "Fix the parser", Status: "in_progress"},
 		{Content: "Add tests", Status: "pending"},
 	})
-	msg := c.incompleteGoalTodos()
+	msg := reminder()
 	if msg == "" {
-		t.Fatal("incompleteGoalTodos() returned empty string, expected reminder")
+		t.Fatal("formatIncompleteTodos() returned empty string, expected reminder")
 	}
 	if !strings.Contains(msg, "Fix the parser") {
 		t.Fatalf("reminder should mention 'Fix the parser', got: %q", msg)
@@ -306,14 +307,14 @@ func TestIncompleteGoalTodos(t *testing.T) {
 		{Content: "Fix the parser", Status: "completed"},
 		{Content: "Add tests", Status: "completed"},
 	})
-	if got := c.incompleteGoalTodos(); got != "" {
-		t.Fatalf("incompleteGoalTodos() with all-complete = %q, want empty", got)
+	if got := reminder(); got != "" {
+		t.Fatalf("formatIncompleteTodos() with all-complete = %q, want empty", got)
 	}
 
 	// Empty todo list.
 	ag.ReplaceTodoState(nil)
-	if got := c.incompleteGoalTodos(); got != "" {
-		t.Fatalf("incompleteGoalTodos() with empty list = %q, want empty", got)
+	if got := reminder(); got != "" {
+		t.Fatalf("formatIncompleteTodos() with empty list = %q, want empty", got)
 	}
 }
 

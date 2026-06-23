@@ -1,8 +1,10 @@
 package control
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"reasonix/internal/command"
@@ -436,6 +438,16 @@ func (c *Controller) managementNotice(trimmed string) bool {
 			return true
 		}
 		c.notice(c.skillListText())
+	case "/reload-cmd":
+		if c.Running() {
+			c.notice("wait for the current turn to finish, then retry /reload-cmd")
+			return true
+		}
+		if err := c.ReloadCommands(context.Background()); err != nil {
+			c.notice("reload-cmd: " + err.Error())
+		} else {
+			c.notice("commands reloaded (" + strconv.Itoa(len(c.Commands())) + " available)")
+		}
 	case "/hooks":
 		sub := ""
 		if len(fields) >= 2 {
@@ -445,7 +457,7 @@ func (c *Controller) managementNotice(trimmed string) bool {
 		case "", "list", "ls":
 			c.notice(c.hookListText())
 		case "trust":
-			root := c.cpRoot
+			root := c.workspaceRoot
 			if root == "" {
 				root, _ = os.Getwd()
 			}
@@ -557,18 +569,19 @@ func (c *Controller) providerSwitchText(name string) string {
 }
 
 func (c *Controller) memoryListText() string {
-	if c.mem == nil {
+	mem := c.memory.current()
+	if mem == nil {
 		return i18n.M.ListMemoryNone
 	}
-	saved := c.mem.Store.List()
-	archived := c.mem.Store.ListArchived()
-	if len(c.mem.Docs) == 0 && len(saved) == 0 && len(archived) == 0 {
+	saved := mem.Store.List()
+	archived := mem.Store.ListArchived()
+	if len(mem.Docs) == 0 && len(saved) == 0 && len(archived) == 0 {
 		return i18n.M.ListMemoryNone
 	}
 	var b strings.Builder
-	if len(c.mem.Docs) > 0 {
+	if len(mem.Docs) > 0 {
 		b.WriteString(i18n.M.ListMemoryHeader + "\n")
-		for _, d := range c.mem.Docs {
+		for _, d := range mem.Docs {
 			fmt.Fprintf(&b, "  (%s) %s\n", d.Scope, d.Path)
 		}
 	}
@@ -662,12 +675,13 @@ func (c *Controller) subagentsText(fields []string) string {
 }
 
 func (c *Controller) skillListText() string {
-	if len(c.skills) == 0 {
+	skills := c.skills.discovered()
+	if len(skills) == 0 {
 		return i18n.M.ListSkillsNone
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, i18n.M.ListSkillsHeaderFmt+"\n", len(c.skills))
-	for _, s := range c.skills {
+	fmt.Fprintf(&b, i18n.M.ListSkillsHeaderFmt+"\n", len(skills))
+	for _, s := range skills {
 		tag := ""
 		if s.RunAs == "subagent" {
 			tag = " 🧬"
@@ -695,17 +709,18 @@ func (c *Controller) hookListText() string {
 }
 
 func (c *Controller) mcpListText() string {
-	if c.host == nil || (len(c.host.ServerNames()) == 0 && len(c.host.Failures()) == 0) {
+	names := c.mcp.serverNames()
+	if len(names) == 0 && len(c.mcp.failures()) == 0 {
 		return i18n.M.ListMcpNone
 	}
 	var b strings.Builder
-	if len(c.host.ServerNames()) > 0 {
+	if len(names) > 0 {
 		b.WriteString(i18n.M.ListMcpHeader + "\n")
-		for _, name := range c.host.ServerNames() {
+		for _, name := range names {
 			fmt.Fprintf(&b, "  %s\n", name)
 		}
 	}
-	if failures := c.host.Failures(); len(failures) > 0 {
+	if failures := c.mcp.failures(); len(failures) > 0 {
 		if b.Len() > 0 {
 			b.WriteString("\n")
 		}

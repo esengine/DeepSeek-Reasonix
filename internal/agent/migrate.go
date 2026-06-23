@@ -840,7 +840,7 @@ func copyFileIfExists(src, dst string) error {
 	}
 	if _, err := os.Stat(dst); err == nil {
 		return nil
-	} else if err != nil && !os.IsNotExist(err) {
+	} else if !os.IsNotExist(err) {
 		return err
 	}
 	b, err := os.ReadFile(src)

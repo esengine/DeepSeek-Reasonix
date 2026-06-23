@@ -20,8 +20,8 @@ import (
 // resolved config and applies edits through internal/config/edit.go (the
 // purpose-built mutation API), then rebuilds the controller so the change takes
 // effect live — the same snapshot→reload→resume pattern as SetModel. Secrets are
-// the exception: they go to the global credential store (upsertDotEnv), since
-// config stores only the env-var name, not the key.
+// the exception: they go to Reasonix's global .env (upsertDotEnv), since config
+// stores only the env-var name, not the key.
 
 // --- read ---
 
@@ -237,14 +237,6 @@ func officialProviderKindFromEntry(p config.ProviderEntry) string {
 		if host == "api.deepseek.com" {
 			return "deepseek"
 		}
-	case "mimo-api":
-		if host == "api.xiaomimimo.com" {
-			return "mimo-api"
-		}
-	case "mimo-token-plan":
-		if host == "token-plan-cn.xiaomimimo.com" {
-			return "mimo-token-plan"
-		}
 	}
 	return ""
 }
@@ -340,7 +332,7 @@ func officialProviderViewsForRootWithResolver(added map[string]bool, pricingLang
 	if resolver == nil {
 		resolver = config.NewCredentialResolverForRoot(root)
 	}
-	for _, kind := range []string{"deepseek", "mimo-api", "mimo-token-plan"} {
+	for _, kind := range []string{"deepseek"} {
 		entries, _, err := officialProviderTemplate(kind, pricingLanguage)
 		if err != nil {
 			continue
@@ -422,7 +414,7 @@ func (a *App) Settings() SettingsView {
 				Deny:  []string{},
 			},
 			Sandbox:            SandboxView{Bash: "enforce", AllowWrite: []string{}, Shell: "auto"},
-			Agent:              AgentView{PlannerMaxSteps: 12, ColdResumePrune: true, ReasoningLanguage: "auto"},
+			Agent:              AgentView{PlannerMaxSteps: 0, ColdResumePrune: true, ReasoningLanguage: "auto"},
 			Bot:                botSettingsView(config.BotConfig{}),
 			AutoPlan:           "off",
 			DesktopLayoutStyle: "workbench",
@@ -641,7 +633,9 @@ func (a *App) loadDesktopUserConfigForEdit() (*config.Config, string, error) {
 	}
 	if _, err := os.Stat(userPath); err == nil {
 		cfg := config.LoadForEdit(userPath)
-		normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath)
+		if err := normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath); err != nil {
+			return nil, "", err
+		}
 		if err := a.migrateLegacyBotConfigToUser(cfg, userPath); err != nil {
 			return nil, "", err
 		}
@@ -650,11 +644,15 @@ func (a *App) loadDesktopUserConfigForEdit() (*config.Config, string, error) {
 	cfg := config.LoadForEdit(userPath)
 	legacyPath := config.SourcePathForRoot(a.activeWorkspaceRoot())
 	if legacyPath == "" || sameConfigPath(legacyPath, userPath) {
-		normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath)
+		if err := normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath); err != nil {
+			return nil, "", err
+		}
 		return cfg, userPath, nil
 	}
 	legacyCfg := config.LoadForEdit(legacyPath)
-	normalizeLegacyDesktopProviderAccessForSettings(legacyCfg, legacyPath)
+	if err := normalizeLegacyDesktopProviderAccessForSettings(legacyCfg, legacyPath); err != nil {
+		return nil, "", err
+	}
 	legacyCfg.ConfigVersion = config.Default().ConfigVersion
 	if err := migrateLegacyBotConfigToUser(cfg, legacyCfg, userPath); err != nil {
 		return nil, "", err
@@ -669,7 +667,9 @@ func (a *App) loadDesktopUserConfigForView() (*config.Config, string, error) {
 	}
 	if _, err := os.Stat(userPath); err == nil {
 		cfg := config.LoadForEditWithoutCredentials(userPath)
-		normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath)
+		if err := normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath); err != nil {
+			return nil, "", err
+		}
 		legacyPath := config.SourcePathForRoot(a.activeWorkspaceRoot())
 		if legacyPath != "" && !sameConfigPath(legacyPath, userPath) {
 			legacyCfg := config.LoadForEditWithoutCredentials(legacyPath)
@@ -682,11 +682,15 @@ func (a *App) loadDesktopUserConfigForView() (*config.Config, string, error) {
 	cfg := config.LoadForEditWithoutCredentials(userPath)
 	legacyPath := config.SourcePathForRoot(a.activeWorkspaceRoot())
 	if legacyPath == "" || sameConfigPath(legacyPath, userPath) {
-		normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath)
+		if err := normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath); err != nil {
+			return nil, "", err
+		}
 		return cfg, userPath, nil
 	}
 	legacyCfg := config.LoadForEditWithoutCredentials(legacyPath)
-	normalizeLegacyDesktopProviderAccessForSettings(legacyCfg, legacyPath)
+	if err := normalizeLegacyDesktopProviderAccessForSettings(legacyCfg, legacyPath); err != nil {
+		return nil, "", err
+	}
 	legacyCfg.ConfigVersion = config.Default().ConfigVersion
 	if err := migrateLegacyBotConfigToUser(cfg, legacyCfg, userPath); err != nil {
 		return nil, "", err
@@ -755,11 +759,21 @@ func desktopBotConfigConfigured(bot config.BotConfig) bool {
 	return false
 }
 
-func normalizeLegacyDesktopProviderAccessForSettings(cfg *config.Config, path string) {
+func normalizeLegacyDesktopProviderAccessForSettings(cfg *config.Config, path string) error {
 	if cfg == nil || len(cfg.Desktop.ProviderAccess) > 0 || configDeclaresProviderAccess(path) {
-		return
+		return nil
 	}
 	config.NormalizeLegacyDesktopProviderAccess(cfg)
+	if len(cfg.Desktop.ProviderAccess) == 0 || strings.TrimSpace(path) == "" {
+		return nil
+	}
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return cfg.SaveTo(path)
 }
 
 func configDeclaresProviderAccess(path string) bool {
@@ -795,28 +809,13 @@ func (a *App) activeWorkspaceRoot() string {
 func (a *App) saveProviderCredential(apiKeyEnv, value string) (string, error) {
 	apiKeyEnv = strings.TrimSpace(apiKeyEnv)
 	value = strings.TrimSpace(value)
-	root := a.activeWorkspaceRoot()
-	before := config.ResolveCredentialForRoot(root, apiKeyEnv)
-	beforeEnvValue, beforeEnvSet := os.LookupEnv(apiKeyEnv)
 	if err := upsertDotEnv(apiKeyEnv, value); err != nil {
 		return "", err
 	}
-	return providerCredentialShadowWarning(apiKeyEnv, value, root, before, beforeEnvSet, beforeEnvValue), nil
+	return providerCredentialSourceNotice(apiKeyEnv, value), nil
 }
 
-func providerCredentialShadowWarning(apiKeyEnv, value, root string, before config.CredentialResolution, beforeEnvSet bool, beforeEnvValue string) string {
-	if beforeEnvSet && beforeEnvValue != value {
-		return fmt.Sprintf("saved %s to Reasonix credentials, but an existing environment variable with the same name can override it after restart; update or remove that environment variable", apiKeyEnv)
-	}
-	if before.Set && before.Source.Kind == config.CredentialSourceEnvironment && before.Value != value {
-		return fmt.Sprintf("saved %s to Reasonix credentials, but an existing environment variable with the same name can override it after restart; update or remove that environment variable", apiKeyEnv)
-	}
-	current := config.ResolveCredentialForRoot(root, apiKeyEnv)
-	for _, source := range current.Shadowed {
-		if source.Kind == config.CredentialSourceProjectEnv {
-			return fmt.Sprintf("saved %s to Reasonix credentials, but this workspace's project .env also defines %s and can override it after restart; update or remove that project .env entry", apiKeyEnv, apiKeyEnv)
-		}
-	}
+func providerCredentialSourceNotice(apiKeyEnv, value string) string {
 	return ""
 }
 
@@ -1037,7 +1036,24 @@ func (a *App) SetSubagentEffort(level string) error {
 
 // SetAutoPlan updates the automatic plan-mode gate (off|on).
 func (a *App) SetAutoPlan(mode string) error {
-	return a.applyConfigChange(func(c *config.Config) error { return c.SetAutoPlan(mode) })
+	if err := a.ensureLiveControllersRuntimeMutationAllowed("auto-plan"); err != nil {
+		return err
+	}
+	cfg, path, err := a.loadDesktopUserConfigForEdit()
+	if err != nil {
+		return err
+	}
+	if err := cfg.SetAutoPlan(mode); err != nil {
+		return err
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		return err
+	}
+	a.applyAutoPlanToLiveControllers(cfg.Agent.AutoPlan)
+	if desktopAutoPlanMode(cfg.Agent.AutoPlan) == "on" && strings.TrimSpace(cfg.Agent.AutoPlanClassifier) != "" {
+		return a.rebuild()
+	}
+	return nil
 }
 
 func desktopAutoPlanMode(mode string) string {
@@ -1046,6 +1062,28 @@ func desktopAutoPlanMode(mode string) string {
 		return "on"
 	default:
 		return "off"
+	}
+}
+
+func (a *App) applyAutoPlanToLiveControllers(fallback string) {
+	type liveTab struct {
+		root string
+		ctrl control.SessionAPI
+	}
+	var tabs []liveTab
+	a.mu.RLock()
+	for _, tab := range a.tabs {
+		if tab != nil && tab.Ctrl != nil {
+			tabs = append(tabs, liveTab{root: tab.WorkspaceRoot, ctrl: tab.Ctrl})
+		}
+	}
+	a.mu.RUnlock()
+	for _, tab := range tabs {
+		mode := fallback
+		if cfg, err := config.LoadForRoot(tab.root); err == nil {
+			mode = cfg.Agent.AutoPlan
+		}
+		tab.ctrl.SetAutoPlan(mode)
 	}
 }
 
@@ -1063,41 +1101,6 @@ func officialProviderTemplate(kind, pricingLanguage string) ([]config.ProviderEn
 			ContextWindow: 1_000_000,
 			Prices:        config.DeepSeekV4PricesForLanguage(pricingLanguage),
 		}}, "DEEPSEEK_API_KEY", nil
-	case "mimo-api", "xiaomi-mimo", "xiaomi_mimo":
-		models := []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"}
-		return []config.ProviderEntry{{
-			Name:          "mimo-api",
-			Kind:          "openai",
-			BaseURL:       "https://api.xiaomimimo.com/v1",
-			Models:        models,
-			VisionModels:  []string{"mimo-v2.5", "mimo-v2-omni"},
-			Default:       "mimo-v2.5-pro",
-			APIKeyEnv:     "MIMO_API_KEY",
-			ContextWindow: 1_048_576,
-			Prices: map[string]*provider.Pricing{
-				"mimo-v2.5-pro": &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"},
-				"mimo-v2.5":     &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"},
-				"mimo-v2-omni":  &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"},
-			},
-			NoProxy: true,
-		}}, "MIMO_API_KEY", nil
-	case "mimo-token-plan", "xiaomi-mimo-token-plan", "xiaomi_mimo_token_plan":
-		models := []string{"mimo-v2.5-pro", "mimo-v2.5"}
-		return []config.ProviderEntry{{
-			Name:          "mimo-token-plan",
-			Kind:          "openai",
-			BaseURL:       "https://token-plan-cn.xiaomimimo.com/v1",
-			Models:        models,
-			VisionModels:  []string{"mimo-v2.5"},
-			Default:       "mimo-v2.5-pro",
-			APIKeyEnv:     "MIMO_API_KEY",
-			ContextWindow: 1_048_576,
-			Prices: map[string]*provider.Pricing{
-				"mimo-v2.5-pro": &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"},
-				"mimo-v2.5":     &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"},
-			},
-			NoProxy: true,
-		}}, "MIMO_API_KEY", nil
 	default:
 		return nil, "", fmt.Errorf("unknown official provider template %q", kind)
 	}
@@ -1244,6 +1247,7 @@ func (a *App) FetchProviderModels(p ProviderView) ([]string, error) {
 		ModelsURL: p.ModelsURL,
 		APIKeyEnv: p.APIKeyEnv,
 	}
+	e.ResolveAPIKeyForRoot(a.activeWorkspaceRoot())
 	ctx, cancel := context.WithTimeout(a.reqCtx(), 15*time.Second)
 	defer cancel()
 	models, err := e.FetchModels(ctx)
@@ -1280,7 +1284,7 @@ func (a *App) RemoveProviderAccess(name string) error {
 
 type providerRemovalTab struct {
 	id       string
-	ctrl     *control.Controller
+	ctrl     control.SessionAPI
 	readOnly bool
 }
 
@@ -1484,7 +1488,7 @@ func (a *App) deleteProviderAndRetargetTabs(name string) error {
 	return nil
 }
 
-// SetProviderKey writes a secret to the global credential store under the given
+// SetProviderKey writes a secret to Reasonix's global .env under the given
 // env-var name (the one a provider's api_key_env points at) and rebuilds so it
 // resolves immediately.
 func (a *App) SetProviderKey(apiKeyEnv, value string) (string, error) {
@@ -1558,7 +1562,7 @@ func (a *App) ensureProviderAccessForKey(apiKeyEnv string) error {
 	return cfg.SaveTo(path)
 }
 
-// ClearProviderKey removes a provider secret from the global credential store
+// ClearProviderKey removes a provider secret from Reasonix's global .env
 // and rebuilds so the provider immediately becomes unauthenticated.
 func (a *App) ClearProviderKey(apiKeyEnv string) error {
 	if strings.TrimSpace(apiKeyEnv) == "" {
@@ -1745,7 +1749,20 @@ func (a *App) SetDesktopAppearance(theme, style string) error {
 // SetDesktopLayoutStyle updates only the desktop layout style. It does not
 // rebuild the active controller and must stay out of provider-visible requests.
 func (a *App) SetDesktopLayoutStyle(style string) error {
-	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopLayoutStyle(style) })
+	normalized := ""
+	if err := a.applyConfigOnly(func(c *config.Config) error {
+		if err := c.SetDesktopLayoutStyle(style); err != nil {
+			return err
+		}
+		normalized = c.DesktopLayoutStyle()
+		return nil
+	}); err != nil {
+		return err
+	}
+	if singleSurfaceLayoutStyle(normalized) {
+		return a.applySingleSurfaceTabPolicy()
+	}
+	return nil
 }
 
 // SetDesktopCheckUpdates updates only the desktop startup update-check
@@ -1839,7 +1856,7 @@ func (a *App) SetReasoningLanguage(lang string) error {
 func (a *App) applyReasoningLanguageToLiveControllers(fallback string) {
 	type liveTab struct {
 		root string
-		ctrl *control.Controller
+		ctrl control.SessionAPI
 	}
 	var tabs []liveTab
 	a.mu.RLock()

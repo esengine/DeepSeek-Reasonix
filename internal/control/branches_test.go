@@ -38,6 +38,11 @@ func TestBranchAndSwitch(t *testing.T) {
 	if meta.ParentID != rootID || meta.Name != "try something" {
 		t.Fatalf("child meta = %+v, want parent %q and name", meta, rootID)
 	}
+	// Branch must seed the listing-only sidecar fields at creation, so the
+	// sidebar never has to decode the new .jsonl to show its turn count/preview.
+	if meta.Turns != 1 || meta.Preview != "root prompt" {
+		t.Fatalf("child meta should carry turns/preview from creation: turns=%d preview=%q", meta.Turns, meta.Preview)
+	}
 
 	if _, err := c.SwitchBranch(rootID); err != nil {
 		t.Fatal(err)
@@ -190,9 +195,9 @@ func TestSubmitBranchHonorsNumericTurnTarget(t *testing.T) {
 	}
 	rootPath := c.SessionPath()
 
-	c.mu.Lock()
-	c.cpBound[1] = 3 // displayed turn 2 starts before "second prompt"
-	c.mu.Unlock()
+	c.checkpoints.mu.Lock()
+	c.checkpoints.bound[1] = 3 // displayed turn 2 starts before "second prompt"
+	c.checkpoints.mu.Unlock()
 
 	c.Submit("/branch 2 experiment")
 	if c.SessionPath() == rootPath {

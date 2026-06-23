@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { asArray } from "../lib/array";
 import { app, openExternal } from "../lib/bridge";
 import { useT } from "../lib/i18n";
-import { mcpServerLifecycleActions } from "../lib/mcpServerLifecycle";
+import { mcpServerLifecycleActions, mcpServerRetryableFromAvailableList } from "../lib/mcpServerLifecycle";
 import type { CapabilitiesView, MCPServerInput, ServerView, SkillRootSkillView, SkillRootView, SkillsSettingsView, SkillView, TabMeta } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { ResizableDrawer } from "./ResizableDrawer";
@@ -108,6 +108,7 @@ export function CapabilitiesPanel({
       active: servers.filter((s) => s.status !== "failed"),
     };
   }, [view]);
+  const retryableActiveServerNames = useMemo(() => retryableAvailableServerNames(serverGroups.active), [serverGroups.active]);
   const toggleSkill = useCallback((name: string) => {
     setExpandedSkills((prev) => {
       const next = new Set(prev);
@@ -213,7 +214,17 @@ export function CapabilitiesPanel({
                 )}
                 {serverGroups.active.length > 0 && (
                   <div className="cap-server-section">
-                    <div className="cap-server-section__title">{t("caps.availableServers")}</div>
+                    <div className="cap-server-section__head">
+                      <div className="cap-server-section__title">{t("caps.availableServers")}</div>
+                      <button
+                        className="btn btn--small"
+                        disabled={busy || retryableActiveServerNames.length === 0}
+                        type="button"
+                        onClick={() => void mutate(() => Promise.allSettled(retryableActiveServerNames.map((name) => app.ReconnectMCPServer(name))))}
+                      >
+                        {t("caps.retryAll")}
+                      </button>
+                    </div>
                     <ServerGroup
                       busy={busy}
                       servers={serverGroups.active}
@@ -309,6 +320,7 @@ function normalizeServerViews(servers: ServerView[] | null | undefined): ServerV
       ...server,
       args: asArray(server.args),
       envKeys: asArray(server.envKeys),
+      headerKeys: asArray(server.headerKeys),
       toolList: asArray(server.toolList),
     })),
   );
@@ -1019,6 +1031,12 @@ function ServerDetails({
             <span className="cap-detail__value">{s.envKeys.join(", ")}</span>
           </div>
         )}
+        {s.headerKeys && s.headerKeys.length > 0 && (
+          <div className="cap-detail cap-detail--wide">
+            <span className="cap-detail__label">{t("caps.headerKeys")}</span>
+            <span className="cap-detail__value">{s.headerKeys.join(", ")}</span>
+          </div>
+        )}
       </div>
       <div className="cap-detail-actions">
         {canConnectNow && (
@@ -1096,20 +1114,22 @@ function EditServerForm({
   const [transport, setTransport] = useState(initialTransport);
   const [command, setCommand] = useState(initialTransport === "stdio" ? serverCommand(s) : "");
   const [url, setUrl] = useState(initialTransport === "stdio" ? "" : s.url || serverCommand(s));
+  const [headers, setHeaders] = useState("");
   const [env, setEnv] = useState("");
   const isStdio = transport === "stdio";
   const ready = isStdio ? command.trim() !== "" : url.trim() !== "";
 
   const submit = () => {
-    const parts = command.trim().split(/\s+/).filter(Boolean);
     const envText = env.trim();
+    const headerText = headers.trim();
     onSave({
       name: s.name,
       transport,
-      command: isStdio ? (parts[0] ?? "") : "",
-      args: isStdio ? parts.slice(1) : [],
+      command: isStdio ? command.trim() : "",
+      args: [],
       url: isStdio ? "" : url.trim(),
-      env: envText === "" ? null : parseEnvText(envText),
+      env: envText === "" ? null : parseKeyValueText(envText),
+      headers: isStdio || headerText === "" ? null : parseKeyValueText(headerText),
     });
   };
 
@@ -1138,6 +1158,19 @@ function EditServerForm({
             <span className="cap-detail__label">{t("caps.url")}</span>
             <input className="mem-input" value={url} disabled={busy} onChange={(e) => setUrl(e.target.value)} placeholder={t("caps.urlPlaceholder")} />
           </label>
+        )}
+        {!isStdio && (
+          <label className="cap-detail cap-detail--wide">
+            <span className="cap-detail__label">{t("caps.headersLabel")}</span>
+            <textarea className="mem-textarea cap-config-edit__env" value={headers} disabled={busy} onChange={(e) => setHeaders(e.target.value)} placeholder={t("caps.headersPlaceholder")} spellCheck={false} />
+          </label>
+        )}
+        {!isStdio && s.headerKeys && s.headerKeys.length > 0 && (
+          <div className="cap-detail cap-detail--wide">
+            <span className="cap-detail__label">{t("caps.headerKeys")}</span>
+            <span className="cap-detail__value">{s.headerKeys.join(", ")}</span>
+            <span className="cap-edit-hint">{t("caps.headersPreserveHint")}</span>
+          </div>
         )}
         <label className="cap-detail cap-detail--wide">
           <span className="cap-detail__label">{t("caps.envLabel")}</span>
@@ -1172,13 +1205,15 @@ function normalizeTransportValue(transport: string): string {
   return transport === "http" || transport === "sse" ? transport : "stdio";
 }
 
-function parseEnvText(env: string): Record<string, string> {
-  const envMap: Record<string, string> = {};
-  for (const line of env.split("\n")) {
+function parseKeyValueText(text: string): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
     const eq = line.indexOf("=");
-    if (eq > 0) envMap[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+    if (eq > 0) values[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
   }
-  return envMap;
+  return values;
 }
 
 function serverStatusLabel(s: ServerView, t: ReturnType<typeof useT>): string {
@@ -1271,6 +1306,10 @@ function canBulkRemoveFailure(server: ServerView): boolean {
   if (server.builtIn || !server.configured) return false;
   const kind = failureKind(server);
   return kind === "missing-command" || kind === "command-unavailable";
+}
+
+function retryableAvailableServerNames(servers: ServerView[]): string[] {
+  return servers.filter(mcpServerRetryableFromAvailableList).map((s) => s.name);
 }
 
 function serverActionLabel(s: ServerView, t: ReturnType<typeof useT>): string {
@@ -1401,25 +1440,23 @@ function AddServerForm({
   const [transport, setTransport] = useState("stdio");
   const [command, setCommand] = useState("");
   const [url, setUrl] = useState("");
+  const [headers, setHeaders] = useState("");
   const [env, setEnv] = useState("");
 
   const isStdio = transport === "stdio";
   const ready = name.trim() !== "" && (isStdio ? command.trim() !== "" : url.trim() !== "");
 
   const submit = () => {
-    const parts = command.trim().split(/\s+/).filter(Boolean);
-    const envMap: Record<string, string> = {};
-    for (const line of env.split("\n")) {
-      const eq = line.indexOf("=");
-      if (eq > 0) envMap[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
-    }
+    const envText = env.trim();
+    const headerText = headers.trim();
     onAdd({
       name: name.trim(),
       transport,
-      command: isStdio ? (parts[0] ?? "") : "",
-      args: isStdio ? parts.slice(1) : [],
+      command: isStdio ? command.trim() : "",
+      args: [],
       url: isStdio ? "" : url.trim(),
-      env: envMap,
+      env: envText === "" ? null : parseKeyValueText(envText),
+      headers: isStdio || headerText === "" ? null : parseKeyValueText(headerText),
     });
   };
 
@@ -1436,6 +1473,12 @@ function AddServerForm({
         <input className="mem-input" placeholder={t("caps.commandPlaceholder")} value={command} onChange={(e) => setCommand(e.target.value)} />
       ) : (
         <input className="mem-input" placeholder={t("caps.urlPlaceholder")} value={url} onChange={(e) => setUrl(e.target.value)} />
+      )}
+      {!isStdio && (
+        <>
+          <label className="set-label">{t("caps.headersLabel")}</label>
+          <textarea className="mem-textarea" value={headers} onChange={(e) => setHeaders(e.target.value)} placeholder={t("caps.headersPlaceholder")} spellCheck={false} />
+        </>
       )}
       <label className="set-label">{t("caps.envLabel")}</label>
       <textarea className="mem-textarea" value={env} onChange={(e) => setEnv(e.target.value)} placeholder={t("caps.envPlaceholder")} spellCheck={false} />
@@ -1511,6 +1554,7 @@ export function MCPServersSettingsPage() {
 			active: sorted.filter((s) => s.status !== "failed"),
 		};
 	}, [servers]);
+	const retryableActiveServerNames = useMemo(() => retryableAvailableServerNames(serverGroups.active), [serverGroups.active]);
 	const toggleError = useCallback((name: string) => {
 		setExpandedErrors((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
 	}, []);
@@ -1563,7 +1607,17 @@ export function MCPServersSettingsPage() {
 			)}
 			{serverGroups.active.length > 0 && (
 				<div className="cap-server-section">
-					<div className="cap-server-section__title">{t("caps.availableServers")}</div>
+					<div className="cap-server-section__head">
+						<div className="cap-server-section__title">{t("caps.availableServers")}</div>
+						<button
+							className="btn btn--small"
+							disabled={actionBusy || retryableActiveServerNames.length === 0}
+							type="button"
+							onClick={() => void mutate(() => Promise.allSettled(retryableActiveServerNames.map((name) => app.ReconnectMCPServer(name))))}
+						>
+							{t("caps.retryAll")}
+						</button>
+					</div>
 						<ServerGroup
 							busy={actionBusy}
 							servers={serverGroups.active}

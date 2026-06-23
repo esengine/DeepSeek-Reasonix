@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -21,6 +22,7 @@ import (
 	"reasonix/internal/jobs"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
+	"reasonix/internal/store"
 )
 
 // SessionParams is everything a Factory needs to assemble one ACP session's
@@ -130,12 +132,25 @@ type service struct {
 	sessions map[string]*acpSession
 }
 
+// acpController is the slice of the controller's driving port the ACP transport
+// drives: session lifecycle + persistence, turn execution, interactive approval,
+// and the capability surface (commands/skills/MCP prompts). ACP never touches
+// goals, checkpoints, or memory, so it depends on those sub-ports only — not the
+// concrete *control.Controller.
+type acpController interface {
+	control.Lifecycle
+	control.TurnControl
+	control.Approvals
+	control.Capabilities
+	control.SessionPersistence
+}
+
 // acpSession is one open session: its controller, the on-disk transcript path
 // (empty when persistence is off), and the cancel func of the in-flight turn
 // (nil when idle) so session/cancel can abort it.
 type acpSession struct {
 	id         string
-	ctrl       *control.Controller
+	ctrl       acpController
 	sink       *updateSink
 	transcript string
 	cwd        string
@@ -525,6 +540,11 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 		sess.finish()
 		if err := s.applyPendingSessionConfig(ctx, sess); err != nil {
 			sess.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "session config switch failed after turn: " + err.Error()})
+			if isSessionConfigActiveWorkError(err) {
+				if current, stateErr := s.configStateForSession(ctx, sess); stateErr == nil {
+					sess.sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: current.ConfigOptions})
+				}
+			}
 		}
 		cancel()
 	}()
@@ -643,14 +663,18 @@ func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState
 		sess.mu.Unlock()
 		return &RPCError{Code: ErrInvalidRequest, Message: "session config: session is deleted"}
 	}
-	if sess.running || sess.ctrl.Running() {
+	status := sess.ctrl.RuntimeStatus()
+	if status.PendingPrompt {
+		sess.mu.Unlock()
+		return sessionConfigActiveWorkError("answer pending prompts before switching config")
+	}
+	if !sess.running && !status.Running && status.BackgroundJobs > 0 {
+		sess.mu.Unlock()
+		return sessionConfigActiveWorkError("stop background jobs before switching config")
+	}
+	if sess.running || status.Running {
 		pending := cloneSessionConfigState(cfgState)
-		sess.model = cfgState.Model
-		sess.effortOverride = cloneStringPtr(cfgState.EffortOverride)
 		sess.pendingConfig = &pending
-		if sess.transcript != "" && sessionFileExists(sess.transcript) {
-			_ = saveACPMeta(sess.transcript, sess.metaLocked())
-		}
 		sess.mu.Unlock()
 		sess.sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: cfgState.ConfigOptions})
 		return nil
@@ -687,7 +711,12 @@ func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState
 	} else if prevPath != "" {
 		newCtrl.SetSessionPath(prevPath)
 	}
-	newCtrl.InheritLifecycleFrom(cur)
+	// InheritLifecycleFrom wires two concrete controllers' turn/hook state; it's a
+	// construction concern, not part of the driving port. cur is always the
+	// *control.Controller the factory built for this session, so this is safe.
+	if prev, ok := cur.(*control.Controller); ok {
+		newCtrl.InheritLifecycleFrom(prev)
+	}
 
 	sess.ctrl = newCtrl
 	sess.model = cfgState.Model
@@ -717,15 +746,36 @@ func (s *service) applyPendingSessionConfig(ctx context.Context, sess *acpSessio
 	sess.mu.Unlock()
 
 	if err := s.rebuildSession(ctx, sess, cfgState); err != nil {
-		sess.mu.Lock()
-		if !sess.deleted && sess.pendingConfig == nil {
-			pending := cloneSessionConfigState(cfgState)
-			sess.pendingConfig = &pending
+		if !isSessionConfigActiveWorkError(err) {
+			sess.mu.Lock()
+			if !sess.deleted && sess.pendingConfig == nil {
+				pending := cloneSessionConfigState(cfgState)
+				sess.pendingConfig = &pending
+			}
+			sess.mu.Unlock()
 		}
-		sess.mu.Unlock()
 		return err
 	}
 	return nil
+}
+
+type activeSessionConfigWorkError struct {
+	*RPCError
+}
+
+func (e *activeSessionConfigWorkError) Unwrap() error {
+	return e.RPCError
+}
+
+func sessionConfigActiveWorkError(message string) error {
+	return &activeSessionConfigWorkError{
+		RPCError: &RPCError{Code: ErrInvalidRequest, Message: "session config: " + message},
+	}
+}
+
+func isSessionConfigActiveWorkError(err error) bool {
+	var activeErr *activeSessionConfigWorkError
+	return errors.As(err, &activeErr)
 }
 
 // sessionClose releases an active session. Unknown sessions are accepted as a
@@ -1102,7 +1152,7 @@ func (s *service) sendAvailableCommands(sess *acpSession) {
 	})
 }
 
-func availableCommandsFor(ctrl *control.Controller) []AvailableCommand {
+func availableCommandsFor(ctrl acpController) []AvailableCommand {
 	if ctrl == nil {
 		return nil
 	}
@@ -1423,7 +1473,7 @@ func parseSessionUpdatedAt(s string) time.Time {
 func deleteSessionFiles(sessionPath string) error {
 	paths := []string{
 		sessionPath,
-		sessionPath + ".meta",
+		store.SessionMeta(sessionPath),
 		acpMetaPath(sessionPath),
 	}
 	for _, path := range paths {
@@ -1469,10 +1519,7 @@ func delayedDeleteSessionFiles(sessionPath string, destroy control.SessionDestro
 }
 
 func checkpointPath(sessionPath string) string {
-	if sessionPath == "" {
-		return ""
-	}
-	return strings.TrimSuffix(sessionPath, ".jsonl") + ".ckpt"
+	return store.SessionCheckpointDir(sessionPath)
 }
 
 // mcpSpecs converts ACP MCP server declarations to plugin.Spec.

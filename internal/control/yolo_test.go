@@ -771,7 +771,7 @@ func TestAskSerializesBehindPromptLockEvenWithAutoApproveTools(t *testing.T) {
 		},
 	}}
 
-	c.promptMu.Lock()
+	c.approval.promptMu.Lock()
 	started := make(chan struct{})
 	done := make(chan []event.AskAnswer, 1)
 	errs := make(chan error, 1)
@@ -804,7 +804,7 @@ func TestAskSerializesBehindPromptLockEvenWithAutoApproveTools(t *testing.T) {
 	}
 
 	// Release the lock — Ask proceeds but must still emit an AskRequest.
-	c.promptMu.Unlock()
+	c.approval.promptMu.Unlock()
 
 	var ask event.Ask
 	select {
@@ -851,7 +851,7 @@ func TestAskSerializesBehindPromptLockEvenWithBypass(t *testing.T) {
 		},
 	}}
 
-	c.promptMu.Lock()
+	c.approval.promptMu.Lock()
 	done := make(chan []event.AskAnswer, 1)
 	errs := make(chan error, 1)
 	go func() {
@@ -875,7 +875,7 @@ func TestAskSerializesBehindPromptLockEvenWithBypass(t *testing.T) {
 	// Enable bypass while Ask is queued behind promptMu.
 	c.SetBypass(true)
 	// Release the lock — Ask proceeds but must still emit an AskRequest.
-	c.promptMu.Unlock()
+	c.approval.promptMu.Unlock()
 
 	// Post-unlock assertion: Ask must emit AskRequest now that it holds the lock.
 	var ask event.Ask

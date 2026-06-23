@@ -137,7 +137,7 @@ func (*installSourceTool) Schema() json.RawMessage {
   "args":{"type":"array","items":{"type":"string"},"description":"Optional stdio MCP args override."},
   "env":{"type":"object","additionalProperties":{"type":"string"},"description":"Environment variables for stdio MCP servers."},
   "headers":{"type":"object","additionalProperties":{"type":"string"},"description":"HTTP headers for remote MCP servers. Prefer ${VAR} placeholders for secrets."},
-  "tier":{"type":"string","enum":["lazy","background","eager"],"description":"Persisted MCP startup tier. Defaults to background."},
+  "tier":{"type":"string","enum":["background","eager"],"description":"Persisted MCP startup tier. Defaults to background."},
   "replace":{"type":"boolean","description":"Allow replacing an existing MCP config entry with the same name. Skills still refuse to overwrite existing files."},
   "strict":{"type":"boolean","description":"Skill install strictness. true (default) requires name+description frontmatter; false copies the file as-is (use only for files you trust)."},
   "planId":{"type":"string","description":"Optional. Echoed from a previous planned response to confirm the host is approving the same plan."}

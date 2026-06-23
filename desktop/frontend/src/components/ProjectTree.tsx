@@ -6,11 +6,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { Archive, ArrowDown, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, ListCollapse, ListRestart, MessageSquare, Clock, Pin, MoreHorizontal, Minimize2, Maximize2 } from "lucide-react";
 import { asArray } from "../lib/array";
+import { useToast } from "../lib/toast";
 import { app } from "../lib/bridge";
 import type { ProjectNode, ProjectTopicStatus } from "../lib/types";
 import { topicActivityTime } from "../lib/session";
 import { getLocale, useT, type DictKey, type Translator } from "../lib/i18n";
 import { PROJECT_COLOR_OPTIONS, projectColorValue } from "../lib/projectColors";
+import { topicShortcutLabel, type TopicShortcutEntry } from "../lib/topicShortcuts";
+import type { ShortcutPlatform } from "../lib/keyboardShortcuts";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 import { Tooltip } from "./Tooltip";
 
@@ -20,7 +23,7 @@ interface ProjectTreeProps {
   activeTopicId?: string;
   activeSessionPath?: string;
   imTopicSources?: Record<string, ProjectTreeImTopicSource>;
-  variant?: "classic" | "workbench";
+  variant?: "classic" | "workbench" | "creation";
   onOpenTopic: (scope: string, workspaceRoot: string, topicId: string, sessionPath?: string) => Promise<void> | void;
   onOpenProjectHistory: (scope: "global" | "project", workspaceRoot: string) => Promise<void> | void;
   onAddProject: () => Promise<void>;
@@ -30,6 +33,11 @@ interface ProjectTreeProps {
   refreshSignal?: number;
   timeFilter: "all" | "10" | "20" | "1h" | "3h" | "5h" | "1d";
   onTimeFilterChange: (filter: "all" | "10" | "20" | "1h" | "3h" | "5h" | "1d") => void;
+  searchExpanded?: boolean;
+  searchFocusSignal?: number;
+  showShortcutBadges?: boolean;
+  shortcutPlatform?: ShortcutPlatform;
+  onVisibleTopicsChange?: (topics: TopicShortcutEntry[]) => void;
 }
 
 type ProjectTreeImTopicSource = {
@@ -441,9 +449,16 @@ export function ProjectTree({
   refreshSignal,
   timeFilter,
   onTimeFilterChange,
+  searchExpanded = true,
+  searchFocusSignal = 0,
+  showShortcutBadges = false,
+  shortcutPlatform,
+  onVisibleTopicsChange,
 }: ProjectTreeProps) {
   const t = useT();
+  const { showToast } = useToast();
   const compactTopics = variant === "workbench";
+  const creationTopics = variant === "creation";
   const [tree, setTree] = useState<ProjectNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [manuallyCollapsed, setManuallyCollapsed] = useState<Set<string>>(new Set());
@@ -468,6 +483,9 @@ export function ProjectTree({
   const [workbenchSortMode, setWorkbenchSortMode] = useState<WorkbenchSortMode>(loadWorkbenchSortMode);
   const filterRef = useRef<HTMLDivElement>(null);
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const topicIndexRef = useRef(0);
+  const visibleTopicsCollectorRef = useRef<TopicShortcutEntry[]>([]);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const creatingRef = useRef(false);
   const manuallyCollapsedRef = useRef(manuallyCollapsed);
@@ -510,6 +528,13 @@ export function ProjectTree({
   useEffect(() => {
     manuallyCollapsedRef.current = manuallyCollapsed;
   }, [manuallyCollapsed]);
+
+  const searchVisible = searchExpanded || query.trim().length > 0;
+
+  useEffect(() => {
+    if (!searchVisible || searchFocusSignal <= 0) return;
+    searchInputRef.current?.focus();
+  }, [searchFocusSignal, searchVisible]);
 
   useEffect(() => {
     void refresh();
@@ -738,8 +763,8 @@ export function ProjectTree({
       else await app.RenameTopic(topicId, title);
       await refresh();
       if (!onRenameTopic) await onTopicsChanged?.();
-    } catch {
-      /* ignore */
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error");
     }
   };
 
@@ -750,8 +775,8 @@ export function ProjectTree({
     try {
       await app.RenameProject(root, title);
       await refresh();
-    } catch {
-      /* ignore */
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error");
     }
   };
 
@@ -763,8 +788,8 @@ export function ProjectTree({
       setConfirmAction(null);
       await refresh();
       await onTopicsChanged?.();
-    } catch {
-      /* ignore */
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error");
     }
   };
 
@@ -775,8 +800,8 @@ export function ProjectTree({
       setMenuPoint(null);
       await refresh();
       await onTopicsChanged?.();
-    } catch {
-      /* ignore */
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error");
     }
   };
 
@@ -788,8 +813,8 @@ export function ProjectTree({
       setMenuPoint(null);
       await refresh();
       await onTopicsChanged?.();
-    } catch {
-      /* ignore */
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error");
     }
   };
 
@@ -810,8 +835,8 @@ export function ProjectTree({
       setMenuPoint(null);
       setConfirmRemoveProject(null);
       await refresh();
-    } catch {
-      /* ignore */
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error");
     }
   };
 
@@ -939,7 +964,7 @@ export function ProjectTree({
     });
   }, [activeAncestorKeys, manuallyCollapsed]);
 
-  const renderNode = (node: ProjectNode | null | undefined, depth: number, section: "pinned" | "projects" = "projects") => {
+  const renderNode = (node: ProjectNode | null | undefined, depth: number, section: "pinned" | "projects" = "projects", isVisible = true) => {
     if (!node) return null;
     const key = projectNodeKey(node, depth);
     const children = asArray(node.children);
@@ -956,8 +981,9 @@ export function ProjectTree({
       const active = topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath);
       const label = (node.label || node.topicId || "Untitled").replace(/^●\s*/, "");
       const activityAt = node.lastActivityAt || node.createdAt || 0;
-      const timeLabel = compactTopics && activityAt ? topicActivityLabel(activityAt, t, true) : "";
-      const exactTimeLabel = compactTopics && activityAt ? topicActivityDateLabel(activityAt) : "";
+      const sideTimeVisible = compactTopics || creationTopics;
+      const timeLabel = sideTimeVisible && activityAt ? topicActivityLabel(activityAt, t, true) : "";
+      const exactTimeLabel = sideTimeVisible && activityAt ? topicActivityDateLabel(activityAt) : "";
       const meta = topicMetaLine(node, t, compactTopics);
       const status = topicStatus(node);
       const statusLabel = topicStatusLabel(node, t);
@@ -1030,9 +1056,20 @@ export function ProjectTree({
           </div>
         );
       }
+      const shortcutIndex = showShortcutBadges && isVisible && topicIndexRef.current < 9 ? topicIndexRef.current + 1 : 0;
+      if (shortcutIndex > 0) topicIndexRef.current++;
+      // Collect visible topics in render order for shortcut navigation
+      if (openRequest && isVisible) {
+        visibleTopicsCollectorRef.current.push({
+          scope: openRequest.scope,
+          workspaceRoot: openRequest.workspaceRoot,
+          topicId: openRequest.topicId,
+          sessionPath: openRequest.sessionPath,
+        });
+      }
       const row = (
         <div
-          className={`project-tree__topic${scopeClass}${isSessionNode ? " project-tree__topic--session" : ""}${active ? " project-tree__topic--active" : ""}${node.running ? " project-tree__topic--running" : ""}${status ? ` project-tree__topic--status-${status}` : ""}${!isSessionNode && pinned ? " project-tree__topic--pinned" : ""}${topicMenuOpen ? " project-tree__topic--menu-open" : ""}${compactTopics && (timeLabel || showStatusInSide) ? " project-tree__topic--with-side" : meta ? " project-tree__topic--has-meta" : ""}${imSource ? " project-tree__topic--im-source" : ""}`}
+          className={`project-tree__topic${scopeClass}${isSessionNode ? " project-tree__topic--session" : ""}${active ? " project-tree__topic--active" : ""}${node.running ? " project-tree__topic--running" : ""}${status ? ` project-tree__topic--status-${status}` : ""}${!isSessionNode && pinned ? " project-tree__topic--pinned" : ""}${topicMenuOpen ? " project-tree__topic--menu-open" : ""}${sideTimeVisible && (timeLabel || showStatusInSide) ? " project-tree__topic--with-side" : meta ? " project-tree__topic--has-meta" : ""}${imSource ? " project-tree__topic--im-source" : ""}${shortcutIndex > 0 ? " project-tree__topic--show-shortcut" : ""}`}
           style={accentStyle}
           onContextMenu={isSessionNode ? undefined : openTopicMenu}
         >
@@ -1065,13 +1102,13 @@ export function ProjectTree({
                 )}
                 {!compactTopics && statusLabel && <span className={`project-tree__topic-status project-tree__topic-status--${status}`}>{statusLabel}</span>}
               </span>
-              {!compactTopics && meta && (
+              {!compactTopics && !creationTopics && meta && (
                 <span className="project-tree__topic-meta">
                   <span className="project-tree__topic-meta-text">{meta}</span>
                 </span>
               )}
             </span>
-            {compactTopics && (
+            {sideTimeVisible && (
               <span className={`project-tree__topic-side${!timeLabel && !showStatusInSide ? " project-tree__topic-side--empty" : ""}`} aria-hidden="true">
                 {showStatusInSide && <span className={`project-tree__topic-state project-tree__topic-state--${status}`} title={statusLabel} />}
                 {timeLabel && <span className="project-tree__topic-time">{timeLabel}</span>}
@@ -1131,6 +1168,11 @@ export function ProjectTree({
               onClose={closeMenu}
             />
           )}
+          {shortcutIndex > 0 && (
+            <span className="project-tree__topic-shortcut" aria-hidden="true">
+              {topicShortcutLabel(shortcutIndex, shortcutPlatform)}
+            </span>
+          )}
         </div>
       );
       return (
@@ -1139,7 +1181,7 @@ export function ProjectTree({
           {hasChildren && (
             <div className={`project-tree__children${isExpanded ? " project-tree__children--expanded" : ""}`}>
               <div className="project-tree__children-inner">
-                {children.map((child) => renderNode(child, depth + 1, section))}
+                {children.map((child) => renderNode(child, depth + 1, section, isVisible && isExpanded))}
               </div>
             </div>
           )}
@@ -1370,7 +1412,7 @@ export function ProjectTree({
           {hasChildren && (
             <div className={`project-tree__children${isExpanded ? " project-tree__children--expanded" : ""}`}>
               <div className="project-tree__children-inner">
-                {children.map((child) => renderNode(child, depth + 1, section))}
+                {children.map((child) => renderNode(child, depth + 1, section, isVisible && isExpanded))}
               </div>
             </div>
           )}
@@ -1458,7 +1500,7 @@ export function ProjectTree({
         {hasChildren && (
           <div className={`project-tree__children${isExpanded ? " project-tree__children--expanded" : ""}`}>
             <div className="project-tree__children-inner">
-              {children.map((child) => renderNode(child, depth + 1, section))}
+              {children.map((child) => renderNode(child, depth + 1, section, isVisible && isExpanded))}
             </div>
           </div>
         )}
@@ -1810,16 +1852,29 @@ export function ProjectTree({
 
   const hasWorkbenchRows = workbenchTreeSections.pinned.length > 0 || workbenchTreeSections.projects.length > 0;
 
+  // Report visible topics to parent after render so shortcuts match sidebar order.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    onVisibleTopicsChange?.(visibleTopicsCollectorRef.current);
+  });
+
+  // Reset topic index counter and visible topics collector before each render.
+  topicIndexRef.current = 0;
+  visibleTopicsCollectorRef.current = [];
+
   return (
     <div className="project-tree">
-      <label className="project-tree__search">
-        <Search size={14} />
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder={t("projectTree.searchPlaceholder")}
-        />
-      </label>
+      {searchVisible && (
+        <label className="project-tree__search">
+          <Search size={14} />
+          <input
+            ref={searchInputRef}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t("projectTree.searchPlaceholder")}
+          />
+        </label>
+      )}
       {compactTopics ? (
         <>
           {renderProjectHeader("workbench")}

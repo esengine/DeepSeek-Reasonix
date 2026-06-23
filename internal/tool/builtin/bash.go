@@ -75,15 +75,22 @@ type bash struct {
 func (bash) Name() string { return "bash" }
 
 func (b bash) Description() string {
-	if b.resolved().Kind == sandbox.ShellPowerShell {
-		return "Execute a command in the shell and return combined stdout/stderr. " +
-			"NOTE: bash is not available on this host — commands run under Windows PowerShell, so write PowerShell, not bash:\n" +
-			"  - chaining: ';' runs both regardless; 'if ($?) { ... }' is conditional. '&&' and '||' are NOT parsed.\n" +
-			"  - redirect/vars: $null not /dev/null; $env:VAR not $VAR; '2>$null' drops stderr.\n" +
-			"  - file ops: Get-ChildItem (ls), Get-Content (cat), Remove-Item -Recurse -Force (rm -rf), Copy-Item (cp), Select-String (grep).\n" +
-			"  - no head/tail/which/touch: use Select-Object -First/-Last N, (Get-Command x).Source, New-Item.\n" +
-			"  - multi-line text to a native exe (e.g. git commit -m): use a single-quoted here-string @'...'@ (closing '@ at column 0)." +
-			bashToolSteer
+	sh := b.resolved()
+	if sh.Kind == sandbox.ShellPowerShell {
+		shellName := "Windows PowerShell"
+		chaining := "';' runs both regardless; 'if ($?) { ... }' is conditional. '&&' and '||' are NOT parsed."
+		if sh.SupportsChaining() {
+			shellName = "PowerShell 7 (pwsh)"
+			chaining = "'&&' and '||' are parsed for conditional chaining; ';' runs both regardless."
+		}
+		return fmt.Sprintf("Execute a command in the shell and return combined stdout/stderr. "+
+			"NOTE: bash is not available on this host — commands run under %s, so write PowerShell, not bash:\n"+
+			"  - chaining: %s\n"+
+			"  - redirect/vars: $null not /dev/null; $env:VAR not $VAR; '2>$null' drops stderr.\n"+
+			"  - file ops: Get-ChildItem (ls), Get-Content (cat), Remove-Item -Recurse -Force (rm -rf), Copy-Item (cp), Select-String (grep).\n"+
+			"  - no head/tail/which/touch: use Select-Object -First/-Last N, (Get-Command x).Source, New-Item.\n"+
+			"  - multi-line text to a native exe (e.g. git commit -m): use a single-quoted here-string @'...'@ (closing '@ at column 0)."+
+			bashToolSteer, shellName, chaining)
 	}
 	return "Execute a command in the shell and return combined stdout/stderr." + bashToolSteer
 }

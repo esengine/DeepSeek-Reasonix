@@ -491,7 +491,7 @@ func TestPlanMCPJSONUnknownTierProducesWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseMCPJSON: %v", err)
 	}
-	if len(entries) != 1 || entries[0].Tier != "lazy" {
+	if len(entries) != 1 || entries[0].Tier != "background" {
 		t.Fatalf("entries = %+v", entries)
 	}
 	found := false
@@ -522,12 +522,12 @@ func TestPlanMCPJSONDefaultTierIsBackground(t *testing.T) {
 	}
 }
 
-func TestNormalizeTierDefaultBackgroundUnknownLazy(t *testing.T) {
+func TestNormalizeTierDefaultBackgroundUnknownBackground(t *testing.T) {
 	if got, ok := normalizeTier(""); got != "background" || !ok {
 		t.Fatalf("normalizeTier(empty) = %q, %v; want background, true", got, ok)
 	}
-	if got, ok := normalizeTier("absurd"); got != "lazy" || ok {
-		t.Fatalf("normalizeTier(absurd) = %q, %v; want lazy, false", got, ok)
+	if got, ok := normalizeTier("absurd"); got != "background" || ok {
+		t.Fatalf("normalizeTier(absurd) = %q, %v; want background, false", got, ok)
 	}
 }
 

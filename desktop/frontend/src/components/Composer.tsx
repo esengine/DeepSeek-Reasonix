@@ -342,6 +342,7 @@ export function Composer({
   onSetTokenMode,
   insertRequest,
   disabled,
+  submitDisabled = false,
   readOnly = false,
   decisionPending = false,
   ready,
@@ -374,6 +375,7 @@ export function Composer({
   onSetTokenMode: (mode: TokenMode) => void;
   insertRequest?: ComposerInsertRequest | null;
   disabled?: boolean;
+  submitDisabled?: boolean;
   readOnly?: boolean;
   decisionPending?: boolean;
   // ready/cwd/running re-trigger the command fetch: Commands() returns only
@@ -887,7 +889,7 @@ export function Composer({
   const tokenModeOn = tokenMode === "economy";
 
   const submit = async () => {
-    if (disabled || readOnly || submittingRef.current) return;
+    if (disabled || submitDisabled || readOnly || submittingRef.current) return;
     const trimmedText = text.trim();
     if (pendingPaste > 0) return;
     if (!trimmedText && attachments.length === 0 && workspaceRefs.length === 0) {
@@ -1996,7 +1998,7 @@ export function Composer({
         </div>
       )}
       <div
-        className={`composer-card${composerHeight !== null ? " composer-card--resized" : ""}${composerAutoExpanded ? " composer-card--autosized" : ""}${composerResizing ? " composer-card--resizing" : ""}`}
+        className={`composer-card${composerHeight !== null ? " composer-card--resized" : ""}${composerAutoExpanded ? " composer-card--autosized" : ""}${composerResizing ? " composer-card--resizing" : ""}${running ? " composer-card--running" : ""}`}
         ref={composerCardRef}
         style={composerCardStyle}
       >
@@ -2055,7 +2057,7 @@ export function Composer({
               <button
                 className="composer__btn composer__btn--send"
                 onClick={submit}
-                disabled={submitting || pendingPaste > 0 || ((!text.trim() && attachments.length === 0 && workspaceRefs.length === 0) && !(goalModeOn && !activeGoal)) || disabled || readOnly}
+                disabled={submitting || pendingPaste > 0 || ((!text.trim() && attachments.length === 0 && workspaceRefs.length === 0) && !(goalModeOn && !activeGoal)) || disabled || submitDisabled || readOnly}
               >
                 <ArrowUp size={16} />
               </button>

@@ -9,11 +9,21 @@ export type ShortcutAction =
   | "settings.open"
   | "tab.close"
   | "shell.toggle"
+  | "sidebar.toggle"
   | "textSize.increase"
   | "textSize.decrease"
   | "textSize.reset"
   | "toolApproval.yolo"
-  | "shortcuts.show";
+  | "shortcuts.show"
+  | "topic.goto.1"
+  | "topic.goto.2"
+  | "topic.goto.3"
+  | "topic.goto.4"
+  | "topic.goto.5"
+  | "topic.goto.6"
+  | "topic.goto.7"
+  | "topic.goto.8"
+  | "topic.goto.9";
 
 type KeyboardShortcutEvent = Pick<globalThis.KeyboardEvent, "key"> &
   Partial<Pick<globalThis.KeyboardEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "target">>;
@@ -82,6 +92,18 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
     section: "view",
     labelKey: "shortcuts.action.shellToggle",
     descriptionKey: "shortcuts.desc.shellToggle",
+    defaults: {
+      darwin: { key: "b", meta: true, shift: true },
+      windows: { key: "b", ctrl: true, shift: true },
+      linux: { key: "b", ctrl: true, shift: true },
+    },
+    preventDefault: true,
+  },
+  {
+    action: "sidebar.toggle",
+    section: "view",
+    labelKey: "shortcuts.action.sidebarToggle",
+    descriptionKey: "shortcuts.desc.sidebarToggle",
     defaults: modCombo("b"),
     preventDefault: true,
   },
@@ -130,6 +152,87 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
     descriptionKey: "shortcuts.desc.showShortcuts",
     defaults: allPlatforms({ key: "?", shift: true }),
     preventDefault: true,
+  },
+  {
+    action: "topic.goto.1",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto1",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("1"),
+    preventDefault: true,
+    configurable: false,
+  },
+  {
+    action: "topic.goto.2",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto2",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("2"),
+    preventDefault: true,
+    configurable: false,
+  },
+  {
+    action: "topic.goto.3",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto3",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("3"),
+    preventDefault: true,
+    configurable: false,
+  },
+  {
+    action: "topic.goto.4",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto4",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("4"),
+    preventDefault: true,
+    configurable: false,
+  },
+  {
+    action: "topic.goto.5",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto5",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("5"),
+    preventDefault: true,
+    configurable: false,
+  },
+  {
+    action: "topic.goto.6",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto6",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("6"),
+    preventDefault: true,
+    configurable: false,
+  },
+  {
+    action: "topic.goto.7",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto7",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("7"),
+    preventDefault: true,
+    configurable: false,
+  },
+  {
+    action: "topic.goto.8",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto8",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("8"),
+    preventDefault: true,
+    configurable: false,
+  },
+  {
+    action: "topic.goto.9",
+    section: "session",
+    labelKey: "shortcuts.action.topicGoto9",
+    descriptionKey: "shortcuts.desc.topicGoto",
+    defaults: modCombo("9"),
+    preventDefault: true,
+    configurable: false,
   },
 ] as const;
 
@@ -382,13 +485,15 @@ function isModifierKey(key: string): boolean {
   return key === "Meta" || key === "Control" || key === "Alt" || key === "Shift";
 }
 
-function isEditableTarget(target: EventTarget | null): boolean {
+export function isEditableTarget(target: EventTarget | null): boolean {
+  if (typeof HTMLElement === "undefined") return false;
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
   const tag = target.tagName.toLowerCase();
   return tag === "input" || tag === "textarea" || tag === "select";
 }
 
-function isShortcutRecorderTarget(target: EventTarget | null): boolean {
+export function isShortcutRecorderTarget(target: EventTarget | null): boolean {
+  if (typeof HTMLElement === "undefined") return false;
   return target instanceof HTMLElement && Boolean(target.closest(".shortcuts-settings__key--recording"));
 }

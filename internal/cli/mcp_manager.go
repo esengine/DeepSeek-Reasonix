@@ -93,7 +93,7 @@ type mcpExternalDoneMsg struct {
 	err    error
 }
 
-var mcpTierChoices = []string{"background", "eager", "lazy"}
+var mcpTierChoices = []string{"background", "eager"}
 
 func (m *chatTUI) openMCPManager(name string) {
 	m.mcp = &mcpManager{stage: mcpStageList, snapshot: m.buildMCPSnapshot()}
@@ -334,6 +334,17 @@ func (m chatTUI) buildMCPSnapshot() mcpSnapshot {
 			snap.servers = append(snap.servers, v)
 			seen[f.Name] = true
 		}
+		for _, name := range m.host.ConnectingServers() {
+			if seen[name] {
+				continue
+			}
+			v := mcpServerView{Name: name, Status: "initializing"}
+			if p, ok := configured[name]; ok {
+				v = withMCPPluginConfig(v, p)
+			}
+			snap.servers = append(snap.servers, v)
+			seen[name] = true
+		}
 	}
 	for _, p := range configuredEntries {
 		if seen[p.Name] {
@@ -343,8 +354,6 @@ func (m chatTUI) buildMCPSnapshot() mcpSnapshot {
 		switch {
 		case m.mcpDisabled[p.Name] || !p.ShouldAutoStart():
 			v.Status = "disabled"
-		case p.ResolvedTier() == "background" || p.ResolvedTier() == "eager":
-			v.Status = "initializing"
 		default:
 			v.Status = "deferred"
 		}

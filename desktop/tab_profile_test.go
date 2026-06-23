@@ -166,6 +166,40 @@ func TestSaveTabsPersistsModelAndEffort(t *testing.T) {
 	}
 }
 
+func TestBuildTabControllerMigratesPersistedBareMimoModel(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	root := t.TempDir()
+	configBody := `default_model = "deepseek-flash"
+[[providers]]
+name = "deepseek-flash"
+kind = "openai"
+base_url = "https://example.invalid/v1"
+model = "deepseek-v4-flash"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`
+	if err := os.WriteFile(filepath.Join(root, "reasonix.toml"), []byte(configBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.readyHook = func() {}
+	tab := testTab("mimo", root)
+	tab.model = "mimo-v2.5-pro"
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	app.buildTabController(tab)
+	if tab.StartupErr != "" {
+		t.Fatalf("tab startup error = %q", tab.StartupErr)
+	}
+	defer tab.Ctrl.Close()
+	if tab.model != "mimo-pro/mimo-v2.5-pro" {
+		t.Fatalf("tab model = %q, want migrated MiMo provider ref", tab.model)
+	}
+}
+
 func TestSaveTabsPersistsTokenModeOnlyWhenEconomy(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

@@ -112,7 +112,7 @@ func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
 	return out
 }
 
-func (a *App) workspaceChangesTarget(tabID string) (string, *control.Controller, bool) {
+func (a *App) workspaceChangesTarget(tabID string) (string, control.SessionAPI, bool) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	var tab *WorkspaceTab

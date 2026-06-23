@@ -162,8 +162,8 @@ func TestRenderMCPManagerListGroupsRuntimeAndConfiguredServers(t *testing.T) {
 		configPath: "reasonix.toml",
 		servers: []mcpServerView{
 			{Name: "managed-search", Transport: "stdio", Status: "connected", BuiltIn: true, Tools: 4},
-			{Name: "github", Transport: "stdio", Status: "deferred", Configured: true, Tier: "lazy", Tools: 12},
-			{Name: "figma", Transport: "http", Status: "failed", Configured: true, Tier: "lazy", URL: "https://mcp.figma.com", Error: "connect: 401 unauthorized"},
+			{Name: "github", Transport: "stdio", Status: "deferred", Configured: true, Tier: "background", Tools: 12},
+			{Name: "figma", Transport: "http", Status: "failed", Configured: true, Tier: "background", URL: "https://mcp.figma.com", Error: "connect: 401 unauthorized"},
 		},
 	}}
 	got := p.renderList(120)
@@ -175,7 +175,7 @@ func TestRenderMCPManagerListGroupsRuntimeAndConfiguredServers(t *testing.T) {
 		"managed-search",
 		"connected",
 		"github",
-		"connect on use",
+		"preparing in background",
 		"figma",
 		"needs authentication",
 	} {
@@ -187,7 +187,7 @@ func TestRenderMCPManagerListGroupsRuntimeAndConfiguredServers(t *testing.T) {
 
 func TestRenderMCPManagerListCompactsLongNames(t *testing.T) {
 	p := &mcpManager{snapshot: mcpSnapshot{servers: []mcpServerView{
-		{Name: "@modelcontextprotocol/server-sequential-thinking", Transport: "stdio", Status: "deferred", Configured: true, Tier: "lazy"},
+		{Name: "@modelcontextprotocol/server-sequential-thinking", Transport: "stdio", Status: "deferred", Configured: true, Tier: "background"},
 	}}}
 	got := p.renderList(80)
 	for _, line := range strings.Split(got, "\n") {
@@ -208,7 +208,7 @@ func TestRenderMCPManagerAuthFailureActions(t *testing.T) {
 			configPath: "reasonix.toml",
 			servers: []mcpServerView{{
 				Name: "figma", Transport: "http", Status: "failed", Configured: true,
-				Tier: "lazy", URL: "https://mcp.figma.com", Error: "connect: 401 unauthorized",
+				Tier: "background", URL: "https://mcp.figma.com", Error: "connect: 401 unauthorized",
 			}},
 		},
 	}
@@ -240,7 +240,7 @@ func TestRenderMCPManagerClearAuthConfirmation(t *testing.T) {
 		snapshot: mcpSnapshot{
 			servers: []mcpServerView{{
 				Name: "figma", Transport: "http", Status: "failed", Configured: true,
-				Tier: "lazy", URL: "https://mcp.figma.com", Error: "connect: 401 unauthorized",
+				Tier: "background", URL: "https://mcp.figma.com", Error: "connect: 401 unauthorized",
 			}},
 		},
 	}
@@ -267,20 +267,23 @@ func TestRenderMCPManagerRemoteDeferredAuthHint(t *testing.T) {
 			configPath: "reasonix.toml",
 			servers: []mcpServerView{{
 				Name: "dida", Transport: "http", Status: "deferred", Configured: true,
-				Tier: "lazy", URL: "https://mcp.dida365.com",
+				Tier: "background", URL: "https://mcp.dida365.com",
 			}},
 		},
 	}
 	got := p.renderDetail(100)
 	for _, want := range []string{
-		"connect on use",
+		"preparing in background",
 		"Auth:",
 		"may need authorization",
-		"Connect now",
+		"Reconnect",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("rendered deferred remote details missing %q:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "Connect now") {
+		t.Fatalf("automatic background MCP should not expose manual connect:\n%s", got)
 	}
 	if strings.Contains(got, "Authenticate") {
 		t.Fatalf("possible auth should not replace connect action before a failure:\n%s", got)
@@ -295,7 +298,7 @@ func TestRenderMCPManagerDetailCompactsConfigPath(t *testing.T) {
 			configPath: "/Users/example/Library/Application Support/reasonix/config.toml",
 			servers: []mcpServerView{{
 				Name: "github", Transport: "stdio", Status: "deferred", Configured: true,
-				Tier: "lazy", Command: "npx", Args: []string{"-y", "@modelcontextprotocol/server-github"},
+				Tier: "background", Command: "npx", Args: []string{"-y", "@modelcontextprotocol/server-github"},
 			}},
 		},
 	}
@@ -396,7 +399,7 @@ func TestApplyMCPModeDropsLegacyTier(t *testing.T) {
 		stage: mcpStageMode,
 		name:  "github",
 		snapshot: mcpSnapshot{configPath: "reasonix.toml", servers: []mcpServerView{{
-			Name: "github", Transport: "stdio", Status: "deferred", Configured: true, Tier: "lazy",
+			Name: "github", Transport: "stdio", Status: "deferred", Configured: true, Tier: "background",
 		}}},
 	}
 	_, _ = m.applyMCPMode("background")
@@ -421,7 +424,7 @@ func TestApplyMCPModeRecordsPluginConnectFailure(t *testing.T) {
 	isolateUserConfig(t)
 	t.Setenv("PATH", "")
 	cfg := config.Default()
-	cfg.Plugins = []config.PluginEntry{{Name: "broken", Command: "definitely-missing-reasonix-mcp", Tier: "lazy"}}
+	cfg.Plugins = []config.PluginEntry{{Name: "broken", Command: "definitely-missing-reasonix-mcp", Tier: "background"}}
 	if err := cfg.SaveTo("reasonix.toml"); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
@@ -434,7 +437,7 @@ func TestApplyMCPModeRecordsPluginConnectFailure(t *testing.T) {
 		stage: mcpStageMode,
 		name:  "broken",
 		snapshot: mcpSnapshot{configPath: "reasonix.toml", servers: []mcpServerView{{
-			Name: "broken", Transport: "stdio", Status: "deferred", Configured: true, Tier: "lazy",
+			Name: "broken", Transport: "stdio", Status: "deferred", Configured: true, Tier: "background",
 		}}},
 	}
 

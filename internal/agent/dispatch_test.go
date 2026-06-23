@@ -45,8 +45,8 @@ func TestEarlyToolDispatch(t *testing.T) {
 			}
 		}
 	}
-	if partial != 1 {
-		t.Errorf("want 1 partial (early) dispatch, got %d", partial)
+	if partial != 2 {
+		t.Errorf("want 2 partial (early) dispatches (original + grace-round replay), got %d", partial)
 	}
 	if full != 1 {
 		t.Errorf("want 1 full dispatch, got %d", full)

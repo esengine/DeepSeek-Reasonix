@@ -458,6 +458,9 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return emitted, err
+	}
 	if stalled.Load() {
 		return emitted, fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped", c.name, idleTimeout)
 	}
@@ -588,12 +591,12 @@ type chatTool struct {
 
 type chatFunction struct {
 	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Parameters  json.RawMessage `json:"parameters"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
 }
 
 type chatToolCall struct {
-	Index    int    `json:"index"`
+	Index    int    `json:"index,omitempty"`
 	ID       string `json:"id,omitempty"`
 	Type     string `json:"type,omitempty"`
 	Function struct {

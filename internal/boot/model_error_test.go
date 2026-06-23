@@ -12,14 +12,14 @@ import (
 )
 
 // TestBuildUnknownModelErrorIsActionable: a default_model that doesn't resolve
-// (e.g. a preset name after [[providers]] replaced the built-in presets) must
+// (e.g. a stale preset name after [[providers]] replaced the built-in presets) must
 // fail with a message that names the model, lists what IS configured, and hints
 // at the [[providers]] trap — not a silent empty model.
 func TestBuildUnknownModelErrorIsActionable(t *testing.T) {
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", `
-default_model = "mimo"
+default_model = "legacy-missing"
 
 [[providers]]
 name = "deepseek-flash"
@@ -34,10 +34,34 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 		t.Fatal("expected an error for an unresolvable default_model")
 	}
 	msg := err.Error()
-	for _, want := range []string{`"mimo"`, "deepseek-flash", "[[providers]]"} {
+	for _, want := range []string{`"legacy-missing"`, "deepseek-flash", "[[providers]]"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("error %q should mention %q", msg, want)
 		}
+	}
+}
+
+func TestBuildMigratesLegacyBareMimoModelOverride(t *testing.T) {
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "deepseek-flash"
+
+[[providers]]
+name = "deepseek-flash"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "deepseek-v4-flash"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, Model: "mimo-v2.5-pro"})
+	if err != nil {
+		t.Fatalf("Build should migrate legacy bare MiMo model override: %v", err)
+	}
+	defer ctrl.Close()
+	if ctrl.Label() != "mimo-v2.5-pro" {
+		t.Fatalf("controller label = %q, want mimo-v2.5-pro", ctrl.Label())
 	}
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,15 @@ import (
 	"reasonix/internal/hook"
 	"reasonix/internal/provider"
 )
+
+type captureTurnRunner struct {
+	inputs []string
+}
+
+func (r *captureTurnRunner) Run(_ context.Context, input string) error {
+	r.inputs = append(r.inputs, input)
+	return nil
+}
 
 func TestWithFreshSystemPromptReplacesExistingSystemMessage(t *testing.T) {
 	msgs := []provider.Message{
@@ -159,7 +169,7 @@ func TestProviderViewFromEntryExposesNoAuthAvailability(t *testing.T) {
 	}
 }
 
-func TestSetProviderKeyWarnsWhenProjectEnvWillShadowSavedKey(t *testing.T) {
+func TestSetProviderKeyDoesNotWarnWhenProjectEnvAlsoDefinesSavedKey(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	project := t.TempDir()
 	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("TEST_PROVIDER_SHADOW=old-key\n"), 0o600); err != nil {
@@ -176,8 +186,8 @@ func TestSetProviderKeyWarnsWhenProjectEnvWillShadowSavedKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetProviderKey: %v", err)
 	}
-	if !strings.Contains(warning, "project .env") {
-		t.Fatalf("SetProviderKey warning = %q, want project .env shadow warning", warning)
+	if warning != "" {
+		t.Fatalf("SetProviderKey warning = %q, want no warning because provider keys use global credentials only", warning)
 	}
 	data, readErr := os.ReadFile(config.UserCredentialsPath())
 	if readErr != nil {
@@ -188,7 +198,7 @@ func TestSetProviderKeyWarnsWhenProjectEnvWillShadowSavedKey(t *testing.T) {
 	}
 }
 
-func TestSetProviderKeyWarnsWhenEmptyEnvironmentWillShadowSavedKey(t *testing.T) {
+func TestSetProviderKeyDoesNotWarnWhenEnvironmentAlsoDefinesSavedKey(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	t.Setenv("TEST_PROVIDER_EMPTY_ENV", "")
 
@@ -197,8 +207,8 @@ func TestSetProviderKeyWarnsWhenEmptyEnvironmentWillShadowSavedKey(t *testing.T)
 	if err != nil {
 		t.Fatalf("SetProviderKey: %v", err)
 	}
-	if !strings.Contains(warning, "environment variable") {
-		t.Fatalf("SetProviderKey warning = %q, want environment variable shadow warning", warning)
+	if warning != "" {
+		t.Fatalf("SetProviderKey warning = %q, want no warning because provider keys use global credentials only", warning)
 	}
 	data, readErr := os.ReadFile(config.UserCredentialsPath())
 	if readErr != nil {
@@ -209,7 +219,7 @@ func TestSetProviderKeyWarnsWhenEmptyEnvironmentWillShadowSavedKey(t *testing.T)
 	}
 }
 
-func TestSetProviderKeyWarnsWhenEmptyProjectEnvWillShadowSavedKey(t *testing.T) {
+func TestSetProviderKeyDoesNotWarnWhenEmptyProjectEnvAlsoDefinesSavedKey(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	project := t.TempDir()
 	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("TEST_PROVIDER_EMPTY_PROJECT=\n"), 0o600); err != nil {
@@ -226,13 +236,16 @@ func TestSetProviderKeyWarnsWhenEmptyProjectEnvWillShadowSavedKey(t *testing.T) 
 	if err != nil {
 		t.Fatalf("SetProviderKey: %v", err)
 	}
-	if !strings.Contains(warning, "project .env") {
-		t.Fatalf("SetProviderKey warning = %q, want project .env shadow warning", warning)
+	if warning != "" {
+		t.Fatalf("SetProviderKey warning = %q, want no warning because provider keys use global credentials only", warning)
 	}
 }
 
 func TestFetchProviderModelsFiltersNonChatModels(t *testing.T) {
-	t.Setenv("TEST_PROVIDER_KEY", "test-key")
+	isolateDesktopUserDirs(t)
+	if _, err := config.SetCredential("TEST_PROVIDER_KEY", "test-key"); err != nil {
+		t.Fatalf("SetCredential: %v", err)
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/models" {
 			http.NotFound(w, r)
@@ -264,6 +277,48 @@ func TestFetchProviderModelsFiltersNonChatModels(t *testing.T) {
 	want := []string{"mimo-v2.5-pro"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("FetchProviderModels = %v, want %v", got, want)
+	}
+}
+
+func TestFetchProviderModelsUsesSavedCredentialBeforeEnvironment(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	const keyEnv = "TEST_PROVIDER_FETCH_KEY"
+	if _, err := config.SetCredential(keyEnv, "saved-key"); err != nil {
+		t.Fatalf("SetCredential: %v", err)
+	}
+	t.Setenv(keyEnv, "stale-env-key")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer saved-key" {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data": []map[string]string{
+				{"id": "model-a", "object": "model"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	got, err := NewApp().FetchProviderModels(ProviderView{
+		Name:      "custom",
+		BaseURL:   srv.URL,
+		APIKeyEnv: keyEnv,
+	})
+	if err != nil {
+		t.Fatalf("FetchProviderModels: %v", err)
+	}
+	if want := []string{"model-a"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("FetchProviderModels = %v, want %v", got, want)
+	}
+	if got := os.Getenv(keyEnv); got != "stale-env-key" {
+		t.Fatalf("process env = %q, want stale env left untouched", got)
 	}
 }
 
@@ -410,34 +465,9 @@ func TestSaveProviderPreservesExplicitEmptyVisionModels(t *testing.T) {
 	}
 }
 
-func TestOfficialMimoAPITemplateIncludesVisionModels(t *testing.T) {
-	entries, keyEnv, err := officialProviderTemplate("mimo-api", "en")
-	if err != nil {
-		t.Fatalf("officialProviderTemplate: %v", err)
-	}
-	if keyEnv != "MIMO_API_KEY" || len(entries) != 1 {
-		t.Fatalf("template = %v/%q, want one MIMO_API_KEY entry", entries, keyEnv)
-	}
-	got := entries[0]
-	for _, model := range []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"} {
-		if !got.HasModel(model) {
-			t.Fatalf("mimo-api models = %v, missing %s", got.ModelList(), model)
-		}
-	}
-	if got.DefaultModel() != "mimo-v2.5-pro" {
-		t.Fatalf("mimo-api default = %q, want mimo-v2.5-pro", got.DefaultModel())
-	}
-	if got.Prices["mimo-v2.5-pro"] == nil || got.Prices["mimo-v2.5-pro"].Currency != "¥" || got.Prices["mimo-v2.5-pro"].Output != 6 {
-		t.Fatalf("mimo-v2.5-pro price = %+v, want RMB domestic pricing", got.Prices["mimo-v2.5-pro"])
-	}
-	if got.Prices["mimo-v2.5"] == nil || got.Prices["mimo-v2.5"].Currency != "¥" || got.Prices["mimo-v2.5"].Output != 2 {
-		t.Fatalf("mimo-v2.5 price = %+v, want RMB domestic pricing", got.Prices["mimo-v2.5"])
-	}
-	if got.Prices["mimo-v2-omni"] == nil || got.Prices["mimo-v2-omni"].Currency != "¥" || got.Prices["mimo-v2-omni"].Output != 2 {
-		t.Fatalf("mimo-v2-omni price = %+v, want RMB domestic pricing", got.Prices["mimo-v2-omni"])
-	}
-	if want := []string{"mimo-v2.5", "mimo-v2-omni"}; !reflect.DeepEqual(got.VisionModels, want) {
-		t.Fatalf("mimo-api vision_models = %v, want %v", got.VisionModels, want)
+func TestOfficialMimoAPITemplateRemoved(t *testing.T) {
+	if entries, keyEnv, err := officialProviderTemplate("mimo-api", "en"); err == nil {
+		t.Fatalf("officialProviderTemplate(mimo-api) = entries=%v key=%q nil error, want unknown template", entries, keyEnv)
 	}
 }
 
@@ -542,6 +572,139 @@ func TestSetReasoningLanguageUpdatesLiveTabControllers(t *testing.T) {
 	projectComposed := projectCtrl.Compose("hi")
 	if !strings.Contains(projectComposed, "use English") {
 		t.Fatalf("project override tab Compose = %q, want en reasoning language", projectComposed)
+	}
+}
+
+func TestSetAutoPlanUpdatesLiveTabControllers(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	userRunner := &captureTurnRunner{}
+	projectRunner := &captureTurnRunner{}
+	userCtrl := control.New(control.Options{AutoPlan: "on", Runner: userRunner})
+	projectCtrl := control.New(control.Options{AutoPlan: "on", Runner: projectRunner})
+	app.tabs = map[string]*WorkspaceTab{
+		"user": {
+			ID:          "user",
+			Scope:       "global",
+			Ctrl:        userCtrl,
+			Ready:       true,
+			disabledMCP: map[string]ServerView{},
+		},
+		"project": {
+			ID:            "project",
+			Scope:         "project",
+			WorkspaceRoot: t.TempDir(),
+			Ctrl:          projectCtrl,
+			Ready:         true,
+			disabledMCP:   map[string]ServerView{},
+		},
+	}
+	app.activeTabID = "user"
+
+	if err := app.SetAutoPlan("off"); err != nil {
+		t.Fatalf("SetAutoPlan: %v", err)
+	}
+
+	input := "实现 GitHub issue #2395：\n- 新增配置项\n- 自动判断复杂任务\n- 补测试和文档"
+	if err := userCtrl.RunTurn(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	if err := projectCtrl.RunTurn(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	if len(userRunner.inputs) != 1 || strings.HasPrefix(userRunner.inputs[0], control.PlanModeMarker) {
+		t.Fatalf("user tab should use updated auto_plan=off, inputs=%q", userRunner.inputs)
+	}
+	if len(projectRunner.inputs) != 1 || strings.HasPrefix(projectRunner.inputs[0], control.PlanModeMarker) {
+		t.Fatalf("project tab without override should use updated auto_plan=off, inputs=%q", projectRunner.inputs)
+	}
+}
+
+func TestSetAutoPlanIgnoresProjectOverrideForLiveTab(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	projectRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectRoot, "reasonix.toml"), []byte("[agent]\nauto_plan = \"on\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	userRunner := &captureTurnRunner{}
+	projectRunner := &captureTurnRunner{}
+	userCtrl := control.New(control.Options{AutoPlan: "on", Runner: userRunner})
+	projectCtrl := control.New(control.Options{AutoPlan: "on", Runner: projectRunner})
+	app.tabs = map[string]*WorkspaceTab{
+		"user": {
+			ID:          "user",
+			Scope:       "global",
+			Ctrl:        userCtrl,
+			Ready:       true,
+			disabledMCP: map[string]ServerView{},
+		},
+		"project": {
+			ID:            "project",
+			Scope:         "project",
+			WorkspaceRoot: projectRoot,
+			Ctrl:          projectCtrl,
+			Ready:         true,
+			disabledMCP:   map[string]ServerView{},
+		},
+	}
+	app.activeTabID = "user"
+
+	if err := app.SetAutoPlan("off"); err != nil {
+		t.Fatalf("SetAutoPlan: %v", err)
+	}
+
+	input := "实现 GitHub issue #2395：\n- 新增配置项\n- 自动判断复杂任务\n- 补测试和文档"
+	if err := userCtrl.RunTurn(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	if err := projectCtrl.RunTurn(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	if len(userRunner.inputs) != 1 || strings.HasPrefix(userRunner.inputs[0], control.PlanModeMarker) {
+		t.Fatalf("user tab should use updated auto_plan=off, inputs=%q", userRunner.inputs)
+	}
+	if len(projectRunner.inputs) != 1 || strings.HasPrefix(projectRunner.inputs[0], control.PlanModeMarker) {
+		t.Fatalf("project auto_plan should be ignored, inputs=%q", projectRunner.inputs)
+	}
+}
+
+func TestSetAutoPlanEnablingClassifierRebuildsActiveController(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	cfg.Agent.AutoPlan = "off"
+	cfg.Agent.AutoPlanClassifier = "deepseek-flash"
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	old := control.New(control.Options{AutoPlan: "off", Label: "old-controller"})
+	app.setTestCtrl(old, "deepseek-flash/deepseek-v4-flash")
+	defer func() {
+		if c := app.activeCtrl(); c != nil {
+			c.Close()
+		}
+	}()
+
+	if err := app.SetAutoPlan("on"); err != nil {
+		t.Fatalf("SetAutoPlan(on): %v", err)
+	}
+	if c := app.activeCtrl(); c == nil {
+		t.Fatal("SetAutoPlan should leave a rebuilt controller")
+	}
+	if c := app.activeCtrl(); c == old {
+		t.Fatal("SetAutoPlan should rebuild when enabling a configured classifier")
+	}
+
+	got := config.LoadForEdit(config.UserConfigPath())
+	if got.Agent.AutoPlan != "on" {
+		t.Fatalf("saved auto_plan = %q, want on", got.Agent.AutoPlan)
 	}
 }
 

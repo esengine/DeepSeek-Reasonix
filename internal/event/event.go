@@ -88,6 +88,9 @@ const (
 	// wrapper prefix), so a frontend can display it to the user as confirmation.
 	// Frontends use Steer to know a queued message has been delivered.
 	Steer
+	// KindCount is a sentinel one past the last real Kind. New event kinds must
+	// be inserted above it so completeness tests cover them automatically.
+	KindCount
 )
 
 // Level classifies a Notice so sinks can style or filter it.

@@ -532,7 +532,7 @@ func TestForegroundSubagentPreEditHookSnapshotsCheckpoint(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for foreground writer turn")
 	}
-	if c.cp == nil {
+	if !c.checkpoints.enabled() {
 		t.Fatal("foreground subagent should keep checkpoint store bound")
 	}
 }

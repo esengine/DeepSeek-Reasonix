@@ -90,7 +90,7 @@ func (a *App) MemorySuggestionsForTab(tabID string) MemorySuggestionsView {
 
 	a.mu.RLock()
 	tab := a.tabByIDLocked(tabID)
-	var ctrl *control.Controller
+	var ctrl control.SessionAPI
 	workspaceRoot := ""
 	sessionDir := ""
 	if tab != nil {

@@ -68,4 +68,13 @@ func TestCheckpointsCanCodePropagatesToEarlierTurns(t *testing.T) {
 	if got[2] {
 		t.Error("turn 2 is after the last file-bearing turn, should NOT allow code rewind")
 	}
+	if metas[0].TurnFileCount != 0 {
+		t.Fatalf("turn 0 file count = %d, want 0 for this turn", metas[0].TurnFileCount)
+	}
+	if metas[1].TurnFileCount != 1 {
+		t.Fatalf("turn 1 file count = %d, want 1 for this turn", metas[1].TurnFileCount)
+	}
+	if len(metas[0].Files) != 1 || metas[0].Files[0] != "a.txt" {
+		t.Fatalf("turn 0 cumulative files = %#v, want [a.txt]", metas[0].Files)
+	}
 }

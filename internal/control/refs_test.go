@@ -175,6 +175,9 @@ func TestReadFileRef(t *testing.T) {
 	if got, _, err := readFileRef(imagePath, ""); err != nil || !strings.Contains(got, "image file") {
 		t.Errorf("image file = (%q, %v), want an image note", got, err)
 	}
+	if got, _, err := readFileRef(imagePath, ""); err != nil || !strings.Contains(got, "not attached as model image input") || strings.Contains(got, "attached to this turn as model image input") {
+		t.Errorf("unscoped image file = (%q, %v), want a non-attached image note", got, err)
+	}
 
 	// Large file: truncated with a marker.
 	if got, _, err := readFileRef(bigPath, ""); err != nil || !strings.Contains(got, "truncated") {
@@ -510,12 +513,12 @@ func TestDetectRefsUsesWorkspaceRootNotProcessCWD(t *testing.T) {
 		}
 	})
 
-	refs := (&Controller{cpRoot: workspace}).detectRefs("see @cwd-only.txt and @workspace.txt")
+	refs := (&Controller{workspaceRoot: workspace}).detectRefs("see @cwd-only.txt and @workspace.txt")
 	if len(refs) != 1 || refs[0].raw != "workspace.txt" {
 		t.Fatalf("detectRefs should only see workspace files, got %+v", refs)
 	}
 
-	block, errs := (&Controller{cpRoot: workspace}).ResolveRefs(context.Background(), "see @cwd-only.txt")
+	block, errs := (&Controller{workspaceRoot: workspace}).ResolveRefs(context.Background(), "see @cwd-only.txt")
 	if block != "" || len(errs) != 0 {
 		t.Fatalf("cwd-only file should not be treated as a ref, block=%q errs=%v", block, errs)
 	}
@@ -531,7 +534,7 @@ func TestResolveRefsWithWorkspaceRootStoresRelativePath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := &Controller{cpRoot: workspace}
+	c := &Controller{workspaceRoot: workspace}
 	refs := c.detectRefs("see @" + absPath)
 	if len(refs) != 1 {
 		t.Fatalf("detectRefs absolute workspace path = %+v, want 1 ref", refs)
@@ -548,7 +551,7 @@ func TestResolveRefsWithWorkspaceRootStoresRelativePath(t *testing.T) {
 	}
 }
 
-func TestWorkspaceImageRefsOnlyTreatAttachmentsAsImages(t *testing.T) {
+func TestWorkspaceImageRefsAlsoAttachAsModelImages(t *testing.T) {
 	workspace := t.TempDir()
 	diagram := filepath.Join(workspace, "docs", "diagram.png")
 	if err := os.MkdirAll(filepath.Dir(diagram), 0o755); err != nil {
@@ -565,7 +568,7 @@ func TestWorkspaceImageRefsOnlyTreatAttachmentsAsImages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := &Controller{cpRoot: workspace}
+	c := &Controller{workspaceRoot: workspace}
 	refs := c.detectRefs("see @" + diagram + " @" + attachment)
 	if len(refs) != 2 {
 		t.Fatalf("detectRefs = %+v, want two refs", refs)
@@ -581,8 +584,27 @@ func TestWorkspaceImageRefsOnlyTreatAttachmentsAsImages(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("ResolveRefs errors = %v", errs)
 	}
-	if !strings.Contains(block, `<file path="docs/diagram.png">`) || !strings.Contains(block, "image file docs/diagram.png") {
-		t.Fatalf("workspace png should resolve as image-file metadata:\n%s", block)
+	if !strings.Contains(block, `<file path="docs/diagram.png">`) || !strings.Contains(block, "attached to this turn as model image input") || strings.Contains(block, "OCR") {
+		t.Fatalf("workspace png should resolve as attached image-file metadata without OCR guidance:\n%s", block)
+	}
+	if urls := c.inputImages("see @" + diagram); len(urls) != 1 || !strings.HasPrefix(urls[0], "data:image/png;base64,") {
+		t.Fatalf("workspace png inputImages = %v, want one png data URL", urls)
+	}
+}
+
+func TestResolveRefsWithoutWorkspaceDoesNotClaimImageAttachment(t *testing.T) {
+	dir := t.TempDir()
+	imagePath := filepath.Join(dir, "shot.png")
+	if err := os.WriteFile(imagePath, []byte("\x89PNG\r\n\x1a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	block, errs := New(Options{}).ResolveRefs(context.Background(), "see @"+imagePath)
+	if len(errs) != 0 {
+		t.Fatalf("ResolveRefs errors = %v", errs)
+	}
+	if !strings.Contains(block, "not attached as model image input") || strings.Contains(block, "attached to this turn as model image input") {
+		t.Fatalf("unscoped image ref should not claim model image attachment:\n%s", block)
 	}
 }
 

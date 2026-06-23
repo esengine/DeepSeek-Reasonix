@@ -122,6 +122,11 @@ func TestReceiptFromToolCallExtractsEvidenceFields(t *testing.T) {
 	if !read.Read || len(read.Paths) != 1 {
 		t.Fatalf("read receipt not extracted: %+v", read)
 	}
+
+	glob := ReceiptFromToolCall("glob", json.RawMessage(`{"pattern":"**/*.go"}`), true, true)
+	if !glob.Read {
+		t.Fatalf("generic read-only tool should be treated as read context: %+v", glob)
+	}
 }
 
 func TestReceiptFromToolCallExtractsTodoWriteItems(t *testing.T) {
@@ -150,6 +155,9 @@ func TestReceiptFromToolCallExtractsCompleteStep(t *testing.T) {
 
 	if receipt.Step != "Add parser" {
 		t.Fatalf("complete_step step = %q", receipt.Step)
+	}
+	if receipt.Read {
+		t.Fatalf("complete_step should not be treated as read-only context: %+v", receipt)
 	}
 }
 

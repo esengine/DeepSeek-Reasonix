@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,7 +17,6 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/agent"
@@ -45,7 +42,7 @@ import (
 // prevents taps from raising the soft keyboard, so it stays in the normal buffer
 // and commits finalized output to native scrollback via tea.Println.
 type chatTUI struct {
-	ctrl    *control.Controller
+	ctrl    control.SessionAPI
 	label   string
 	missing string // missing-key warning surfaced once in the banner, "" when ready
 
@@ -304,7 +301,7 @@ type chatTUI struct {
 	// and kills plugin subprocesses, both of which corrupt the terminal's
 	// raw mode). Instead they are closed at process exit when the terminal
 	// is already being restored.
-	oldControllers []*control.Controller
+	oldControllers []control.SessionAPI
 
 	// completion is the live autocomplete menu (slash commands; @-refs later).
 	completion completion
@@ -400,8 +397,8 @@ func (m chatTUI) refreshGitStatus() tea.Cmd {
 // mode that would occur if Close() were called from the build goroutine.
 type modelSwitchMsg struct {
 	ref      string
-	ctrl     *control.Controller
-	oldCtrl  *control.Controller
+	ctrl     control.SessionAPI
+	oldCtrl  control.SessionAPI
 	label    string
 	commands []command.Command
 	skills   []skill.Skill
@@ -412,7 +409,7 @@ type modelSwitchMsg struct {
 // fetchBalance queries the provider's wallet balance off the event loop. It's a
 // no-op readout ("") when the provider declares no balance_url or the fetch
 // fails, so the status line stays quiet rather than surfacing an error.
-func fetchBalance(ctrl *control.Controller) tea.Cmd {
+func fetchBalance(ctrl control.Status) tea.Cmd {
 	return func() tea.Msg {
 		b, err := ctrl.Balance(context.Background())
 		if err != nil || b == nil {
@@ -456,7 +453,7 @@ type clipboardPasteMsg struct {
 // with an event sink that feeds eventCh; the TUI issues commands to it and
 // renders the events it emits. Label, history, host, and commands are read from
 // the controller, so a resumed session pre-populates scrollback.
-func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Event, termW int) chatTUI {
+func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Event, termW int) chatTUI {
 	ti := textarea.New()
 	configureChatTextarea(&ti)
 
@@ -695,10 +692,13 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		wrapped := wrapTranscript(strings.Join(cm.transcript, "\n"), contentW)
 		cm.viewport.SetContent(wrapped)
 		cm.wrappedLines = strings.Split(wrapped, "\n")
-		if wasAtBottom || cm.forceGotoBottom {
+		if wasAtBottom {
 			cm.viewport.GotoBottom() // tail-follow: stay pinned to newest output
-			cm.forceGotoBottom = false
 		}
+	}
+	if cm.forceGotoBottom {
+		cm.viewport.GotoBottom()
+		cm.forceGotoBottom = false
 	}
 	cm.transcriptDirty = false
 	// Any viewport scroll (wheel, PgUp/PgDn, edge auto-scroll, or tail-follow to
@@ -1032,6 +1032,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if m.bubblePending {
 					m.unsendPending() // server not yet replied — restore text, leave no trace
+				} else if m.cancelRequested() {
+					m.ctrl.Cancel()
+					return m, tea.Quit
 				} else {
 					m.ctrl.Cancel()
 				}
@@ -2184,6 +2187,46 @@ var (
 	workingStyle        lipgloss.Style
 )
 
+func (m chatTUI) cancelRequested() bool {
+	if m.state != tuiRunning || m.ctrl == nil {
+		return false
+	}
+	return m.ctrl.CancelRequested()
+}
+
+func (m chatTUI) runningWorkingLine(cancelRequested, styled bool) string {
+	if m.state != tuiRunning {
+		return ""
+	}
+	if m.retryAttempt > 0 && !cancelRequested {
+		return fmt.Sprintf("  "+i18n.M.ChatStatusRetryingFmt, m.spinner.View(), m.retryAttempt, m.retryMax)
+	}
+
+	var working string
+	if cancelRequested {
+		working = fmt.Sprintf("  "+i18n.M.ChatStatusCancellingFmt, m.spinner.View(), m.elapsed)
+	} else {
+		working = fmt.Sprintf("  "+i18n.M.ChatStatusThinkingFmt, m.spinner.View(), m.elapsed)
+	}
+	if m.turnTokens > 0 {
+		working += " · ↓" + shortTokens(m.turnTokens)
+	}
+	if n := len(m.pendingInterject); n > 0 {
+		var queued string
+		if n == 1 {
+			queued = " · ✎ feedback queued"
+		} else {
+			queued = fmt.Sprintf(" · ✎ %d queued", n)
+		}
+		if styled {
+			working += dim(queued)
+		} else {
+			working += queued
+		}
+	}
+	return working
+}
+
 func (m chatTUI) View() tea.View {
 	if m.subagentPicker != nil && m.subagentPicker.detail != nil {
 		v := tea.NewView(m.renderSubagentDetailScreen())
@@ -2198,6 +2241,7 @@ func (m chatTUI) View() tea.View {
 	}
 	hideComposer := m.hideComposer()
 	shellMode := strings.HasPrefix(strings.TrimSpace(m.input.Value()), "!")
+	cancelRequested := m.cancelRequested()
 	var box string
 	if !hideComposer {
 		style := inputBoxStyle.Width(boxW)
@@ -2255,6 +2299,8 @@ func (m chatTUI) View() tea.View {
 		status = "  " + modeTag + " · " + i18n.M.ChatStatusPlanApproval
 	case m.pendingApproval != nil:
 		status = "  " + modeTag + " · " + i18n.M.ChatStatusToolApproval
+	case cancelRequested:
+		status = "  " + modeTag + " · " + i18n.M.CtrlCQuitHint
 	case shellMode:
 		status = "  " + modeTag + " · " + i18n.M.ShellModeHint
 	case m.ctrl.AutoApproveTools():
@@ -2271,24 +2317,7 @@ func (m chatTUI) View() tea.View {
 	// The spinning "thinking…" indicator is its own line ABOVE the input box (shown
 	// only while a turn runs); the status/data rows stay below. This mirrors Claude
 	// Code: live progress over the composer, shortcuts + stats under it.
-	var working string
-	if m.state == tuiRunning {
-		if m.retryAttempt > 0 {
-			working = fmt.Sprintf("  "+i18n.M.ChatStatusRetryingFmt, m.spinner.View(), m.retryAttempt, m.retryMax)
-		} else {
-			working = fmt.Sprintf("  "+i18n.M.ChatStatusThinkingFmt, m.spinner.View(), m.elapsed)
-			if m.turnTokens > 0 {
-				working += " · ↓" + shortTokens(m.turnTokens)
-			}
-			if n := len(m.pendingInterject); n > 0 {
-				if n == 1 {
-					working += dim(" · ✎ feedback queued")
-				} else {
-					working += dim(fmt.Sprintf(" · ✎ %d queued", n))
-				}
-			}
-		}
-	}
+	working := m.runningWorkingLine(cancelRequested, true)
 	// Second status row: the live data (model, git, effort, context gauge, cache
 	// rates, jobs, balance). It lives on its own row so it's always visible; if it
 	// exceeds the terminal width it wraps to additional rows instead of being
@@ -2721,6 +2750,7 @@ func (m chatTUI) computeStatusLineCount(width int) int {
 		return 2 // safe default for tests without a real controller
 	}
 	shellMode := strings.HasPrefix(strings.TrimSpace(m.input.Value()), "!")
+	cancelRequested := m.cancelRequested()
 
 	// Replicate the first status line (mode tag + state) from View().
 	// ModeTag is rendered with Padding(0,1) in View() — add the same padding
@@ -2747,6 +2777,8 @@ func (m chatTUI) computeStatusLineCount(width int) int {
 		status += " · " + i18n.M.ChatStatusPlanApproval
 	case m.pendingApproval != nil:
 		status += " · " + i18n.M.ChatStatusToolApproval
+	case cancelRequested:
+		status += " · " + i18n.M.CtrlCQuitHint
 	case shellMode:
 		status += " · " + i18n.M.ShellModeHint
 	case m.ctrl.AutoApproveTools():
@@ -2784,24 +2816,7 @@ func (m chatTUI) computeStatusLineCount(width int) int {
 	}
 
 	// Replicate the working (spinner) line from View(), shown only while a turn runs.
-	var working string
-	if m.state == tuiRunning {
-		if m.retryAttempt > 0 {
-			working = fmt.Sprintf("  "+i18n.M.ChatStatusRetryingFmt, m.spinner.View(), m.retryAttempt, m.retryMax)
-		} else {
-			working = fmt.Sprintf("  "+i18n.M.ChatStatusThinkingFmt, m.spinner.View(), m.elapsed)
-			if m.turnTokens > 0 {
-				working += " · ↓" + shortTokens(m.turnTokens)
-			}
-			if n := len(m.pendingInterject); n > 0 {
-				if n == 1 {
-					working += " · ✎ feedback queued"
-				} else {
-					working += fmt.Sprintf(" · ✎ %d queued", n)
-				}
-			}
-		}
-	}
+	working := m.runningWorkingLine(cancelRequested, false)
 
 	// Count wrapped rows for every piece that View() renders as wrapped.
 	var lines int
@@ -2826,93 +2841,8 @@ type pastedBlock struct {
 	image bool // an image attachment: expands to its bare @ref, not a wrapped block
 }
 
-func pastedLineCount(s string) int {
-	if s == "" {
-		return 0
-	}
-	return strings.Count(strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n"), "\n") + 1
-}
-
-func foldedPasteLabel(id, lines int) string {
-	return fmt.Sprintf("[Pasted text #%d · %d lines]", id, lines)
-}
-
-func renderFoldedPasteBlock(block pastedBlock) string {
-	return fmt.Sprintf("%s\n\n--- Begin %s ---\n%s\n--- End %s ---", block.label, block.label, block.text, block.label)
-}
-
-func shouldFoldPastedText(s string) bool {
-	return len([]rune(s)) >= foldedPasteMinChars || pastedLineCount(s) >= foldedPasteMinLines
-}
-
 func (m *chatTUI) chooserTyping() bool {
 	return m.chooser != nil && m.chooser.typing
-}
-
-func (m *chatTUI) shouldFoldPaste(s string) bool {
-	return shouldFoldPastedText(s)
-}
-
-func (m *chatTUI) insertFoldedPaste(s string) {
-	label := foldedPasteLabel(m.nextPasteID, pastedLineCount(s))
-	m.nextPasteID++
-	m.pastedBlocks = append(m.pastedBlocks, pastedBlock{label: label, text: s})
-	m.input.InsertString(label + " ")
-}
-
-// insertImageRef puts a deletable [image #N] token in the input box (mapped to
-// the saved attachment's @ref, expanded on submit) so a dragged/pasted image is
-// edited and removed like any other text, not stranded in a separate tray.
-func (m *chatTUI) insertImageRef(path string) {
-	label := fmt.Sprintf("[image #%d]", m.nextPasteID)
-	m.nextPasteID++
-	m.pastedBlocks = append(m.pastedBlocks, pastedBlock{label: label, text: "@" + path, image: true})
-	m.input.InsertString(label + " ")
-	m.growInputToFit()
-	m.updateCompletion()
-}
-
-func (m *chatTUI) expandPastedBlocks(displayed string) string {
-	sent := displayed
-	for _, block := range m.pastedBlocks {
-		if !strings.Contains(sent, block.label) {
-			continue
-		}
-		repl := renderFoldedPasteBlock(block)
-		if block.image {
-			repl = block.text
-		}
-		sent = strings.ReplaceAll(sent, block.label, repl)
-	}
-	return sent
-}
-
-func (m *chatTUI) pasteLabelsIn(s string) []string {
-	var labels []string
-	for _, block := range m.pastedBlocks {
-		if strings.Contains(s, block.label) {
-			labels = append(labels, block.label)
-		}
-	}
-	return labels
-}
-
-func (m *chatTUI) clearSubmittedPastes() {
-	if len(m.pendingPastes) == 0 {
-		return
-	}
-	submitted := make(map[string]bool, len(m.pendingPastes))
-	for _, label := range m.pendingPastes {
-		submitted[label] = true
-	}
-	kept := m.pastedBlocks[:0]
-	for _, block := range m.pastedBlocks {
-		if !submitted[block.label] {
-			kept = append(kept, block)
-		}
-	}
-	m.pastedBlocks = kept
-	m.pendingPastes = nil
 }
 
 func (m *chatTUI) growInputToFit() {
@@ -2929,179 +2859,6 @@ func (m *chatTUI) growInputToFit() {
 	if lines != m.input.Height() {
 		m.input.SetHeight(lines)
 	}
-}
-
-func pasteClipboardImage() tea.Cmd {
-	return func() tea.Msg {
-		path, err := control.SaveClipboardImage()
-		return clipboardImageMsg{path: path, err: err}
-	}
-}
-
-func pasteClipboard() tea.Cmd {
-	return func() tea.Msg {
-		path, imageErr := control.SaveClipboardImage()
-		if imageErr == nil {
-			return clipboardPasteMsg{path: path}
-		}
-		text, textErr := clipboard.ReadAll()
-		if textErr == nil && text != "" {
-			return clipboardPasteMsg{text: text}
-		}
-		if textErr != nil {
-			return clipboardPasteMsg{err: fmt.Errorf("%v; text paste failed: %w", imageErr, textErr)}
-		}
-		return clipboardPasteMsg{err: imageErr}
-	}
-}
-
-func (m *chatTUI) attachPastedImages(text string) bool {
-	sources, ok := pastedImageSources(text)
-	if !ok {
-		return false
-	}
-	for _, src := range sources {
-		path, err := savePastedImageSource(src)
-		if err != nil {
-			m.notice("paste image: " + err.Error())
-			continue
-		}
-		m.insertImageRef(path)
-	}
-	return true
-}
-
-var markdownImageSourceRe = regexp.MustCompile(`!\[[^\]]*\]\(([^)]+)\)`)
-
-func pastedImageSources(text string) ([]string, bool) {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return nil, false
-	}
-	if isDataImage(trimmed) {
-		return []string{trimmed}, true
-	}
-	if matches := markdownImageSourceRe.FindAllStringSubmatch(trimmed, -1); len(matches) > 0 {
-		rest := strings.TrimSpace(markdownImageSourceRe.ReplaceAllString(trimmed, ""))
-		if rest == "" {
-			sources := make([]string, 0, len(matches))
-			for _, m := range matches {
-				sources = append(sources, m[1])
-			}
-			return sources, true
-		}
-	}
-
-	lines := nonEmptyPasteLines(trimmed)
-	if len(lines) > 0 && allImageSources(lines) {
-		return lines, true
-	}
-	fields := strings.Fields(trimmed)
-	if len(fields) > 1 && allImageSources(fields) {
-		return fields, true
-	}
-	return nil, false
-}
-
-func nonEmptyPasteLines(text string) []string {
-	var out []string
-	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			out = append(out, line)
-		}
-	}
-	return out
-}
-
-func allImageSources(sources []string) bool {
-	if len(sources) == 0 {
-		return false
-	}
-	for _, src := range sources {
-		if !looksLikeImageSource(src) {
-			return false
-		}
-	}
-	return true
-}
-
-func looksLikeImageSource(src string) bool {
-	if isDataImage(strings.TrimSpace(src)) {
-		return true
-	}
-	path, ok := pastedImagePath(src)
-	if !ok {
-		return false
-	}
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
-		return true
-	}
-	return false
-}
-
-func savePastedImageSource(src string) (string, error) {
-	src = strings.TrimSpace(src)
-	if isDataImage(src) {
-		return control.SaveImageDataURL(src)
-	}
-	path, ok := pastedImagePath(src)
-	if !ok {
-		return "", fmt.Errorf("unsupported pasted image source")
-	}
-	return control.SaveImageFile(path)
-}
-
-func isDataImage(src string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(src)), "data:image/")
-}
-
-func pastedImagePath(src string) (string, bool) {
-	src = strings.TrimSpace(src)
-	src = strings.TrimPrefix(src, "@")
-	quoted := (strings.HasPrefix(src, `"`) && strings.HasSuffix(src, `"`)) || (strings.HasPrefix(src, `'`) && strings.HasSuffix(src, `'`))
-	src = strings.Trim(src, "\"'")
-	if src == "" {
-		return "", false
-	}
-	if !quoted && strings.ContainsAny(src, " \t\r\n") {
-		return "", false
-	}
-	lower := strings.ToLower(src)
-	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
-		return "", false
-	}
-	if strings.HasPrefix(lower, "file://") {
-		u, err := url.Parse(src)
-		if err != nil || u.Path == "" {
-			return "", false
-		}
-		src = u.Path
-	}
-	if strings.HasPrefix(src, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil && home != "" {
-			src = filepath.Join(home, strings.TrimPrefix(src, "~/"))
-		}
-	}
-	return filepath.Clean(src), true
-}
-
-// pastedFileRef turns a dragged/pasted non-image file path into an @reference so
-// it attaches instead of landing as literal text (and, for a POSIX path, being
-// misread as a slash command). Images are handled earlier; only path-shaped
-// content (a separator) that points at a real file qualifies, so an ordinary
-// pasted word is left alone.
-func pastedFileRef(content string) (string, bool) {
-	path, ok := pastedImagePath(content)
-	if !ok || !strings.ContainsAny(path, `/\`) {
-		return "", false
-	}
-	if info, err := os.Stat(path); err != nil || info.IsDir() {
-		return "", false
-	}
-	return "@" + path, true
 }
 
 // cycleMode handles the Shift+Tab mode gesture. It toggles Plan only; tool
@@ -3664,6 +3421,26 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	case "/hooks":
 		m.echoLocalCommand(input)
 		m.runHooksSubcommand(input)
+	case "/reload-cmd":
+		m.echoLocalCommand(input)
+		if m.ctrl == nil {
+			m.notice("controller not ready")
+			return nil
+		}
+		if m.ctrl.Running() {
+			m.notice("wait for the current turn to finish, then retry /reload-cmd")
+			return nil
+		}
+		prev := len(m.commands)
+		err := m.ctrl.ReloadCommands(context.Background())
+		m.commands = m.ctrl.Commands()
+		m.updateCompletion()
+		if err != nil {
+			m.notice("reload-cmd: " + err.Error())
+			return nil
+		}
+		m.notice(fmt.Sprintf("commands reloaded: %d → %d commands", prev, len(m.commands)))
+
 	case "/paste-image":
 		return pasteClipboardImage()
 	case "/output-style", "/output-styles":

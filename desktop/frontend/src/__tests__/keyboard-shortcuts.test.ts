@@ -9,6 +9,7 @@ import {
   shortcutConflict,
   type ShortcutPlatform,
 } from "../lib/keyboardShortcuts";
+import { topicShortcutIndexFromEvent, topicShortcutLabel } from "../lib/topicShortcuts";
 
 let passed = 0;
 let failed = 0;
@@ -23,13 +24,15 @@ function eq(a: unknown, b: unknown, label: string) {
   }
 }
 
-function event(key: string, modifiers: { ctrlKey?: boolean; metaKey?: boolean } = {}) {
+function event(key: string, modifiers: { ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean; defaultPrevented?: boolean } = {}) {
   return {
     key,
     ctrlKey: modifiers.ctrlKey ?? false,
     metaKey: modifiers.metaKey ?? false,
-    altKey: false,
-    shiftKey: false,
+    altKey: modifiers.altKey ?? false,
+    shiftKey: modifiers.shiftKey ?? false,
+    defaultPrevented: modifiers.defaultPrevented ?? false,
+    target: null,
   };
 }
 
@@ -44,7 +47,7 @@ eq(isCloseTabShortcut(event("w", { ctrlKey: true }), "linux"), true, "Ctrl+W clo
 
 for (const platform of ["darwin", "windows", "linux"] satisfies ShortcutPlatform[]) {
   eq(isCloseTabShortcut(event("k", { ctrlKey: true, metaKey: true }), platform), false, `${platform} ignores non-W keys`);
-eq(isCloseTabShortcut(event("w"), platform), false, `${platform} requires the platform modifier`);
+  eq(isCloseTabShortcut(event("w"), platform), false, `${platform} requires the platform modifier`);
 }
 
 eq(matchesShortcut(event("k", { metaKey: true }), "commandPalette.open", "darwin"), true, "Cmd+K opens the palette on macOS");
@@ -56,6 +59,15 @@ eq(JSON.stringify(formatShortcutComboParts(defaultShortcutCombo("settings.open",
 eq(formatShortcutCombo(defaultShortcutCombo("settings.open", "windows"), "windows"), "Ctrl+,", "formats Windows settings shortcut");
 eq(JSON.stringify(formatShortcutComboParts(defaultShortcutCombo("settings.open", "windows"), "windows")), JSON.stringify(["Ctrl", ","]), "splits Windows settings shortcut for display");
 eq(shortcutConflict("settings.open", defaultShortcutCombo("commandPalette.open", "darwin"), "darwin")?.action, "commandPalette.open", "detects shortcut conflicts");
+eq(topicShortcutIndexFromEvent(event("1", { metaKey: true }), "darwin"), 0, "Cmd+1 maps to the first topic shortcut on macOS");
+eq(topicShortcutIndexFromEvent(event("1", { ctrlKey: true }), "darwin"), null, "Ctrl+1 is not a topic shortcut on macOS");
+eq(topicShortcutIndexFromEvent(event("9", { ctrlKey: true }), "windows"), 8, "Ctrl+9 maps to the ninth topic shortcut on Windows");
+eq(topicShortcutIndexFromEvent(event("9", { metaKey: true }), "windows"), null, "Meta+9 is not a topic shortcut on Windows");
+eq(topicShortcutIndexFromEvent(event("1", { ctrlKey: true, shiftKey: true }), "linux"), null, "topic shortcuts reject extra modifiers");
+eq(topicShortcutIndexFromEvent(event("0", { metaKey: true }), "darwin"), null, "Cmd+0 is not a topic shortcut");
+eq(topicShortcutIndexFromEvent(event("1", { metaKey: true, defaultPrevented: true }), "darwin"), null, "topic shortcuts yield to already-handled custom shortcuts");
+eq(topicShortcutLabel(1, "darwin"), "⌘1", "topic badge uses the macOS command glyph");
+eq(topicShortcutLabel(1, "windows"), "Ctrl+1", "topic badge uses the Windows control modifier");
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

@@ -12,6 +12,7 @@
 ## Contents
 
 - [Configuration](#configuration)
+- [Serve web frontend](#serve-web-frontend)
 - [Configuration paths](./CONFIG_PATHS.md)
 - [Reasoning language](./REASONING_LANGUAGE.md)
 - [Keyboard shortcuts](#keyboard-shortcuts)
@@ -28,11 +29,17 @@ built-in defaults**. Starting with **Reasonix v1.8.1**, the user config lives at
 `~/.reasonix/config.toml` on macOS/Linux and
 `%AppData%\reasonix\config.toml` on Windows; see
 [Configuration paths](./CONFIG_PATHS.md) for migration and related data paths.
-Secrets come from the environment via `api_key_env` and are never stored in
-config files. Credentials default to `credentials_store = "auto"`, which prefers
-the OS credential store and falls back to the file under Reasonix home. New keys
-saved by Reasonix are not written to a project `.env`; project `.env` files are
-only read for compatibility and explicit per-project overrides.
+Fields marked user/global only, including agent step limits, are not overridden
+by `./reasonix.toml`.
+Provider entries name secrets with `api_key_env`, while the secret values live in
+Reasonix's global `<Reasonix home>/.env`, shared by CLI and desktop. Project
+`.env`, home `.env`, inherited shell environment variables, legacy credentials,
+and the OS keyring are not provider-key runtime fallbacks; legacy credentials are
+only migration sources. Project `.env` still feeds workspace-scoped,
+non-provider `${VAR}` expansion for MCP/plugin settings without importing
+provider keys or Reasonix control variables. See
+[Configuration paths](./CONFIG_PATHS.md) for the full `config.toml` and `.env`
+structure.
 
 For the desktop and CLI usage of visible reasoning language, see
 [Reasoning language](./REASONING_LANGUAGE.md).
@@ -45,13 +52,13 @@ default_model = "deepseek-flash"   # executor; set [agent].planner_model to add 
 # shortcut_layout = "desktop"      # classic|desktop; compatibility setting
 
 [agent]
-max_steps = 0                    # executor tool-call rounds; 0 = no limit
-planner_max_steps = 12           # planner read-only tool-call rounds; 0 = no limit
+max_steps = 0                    # user/global only; executor tool-call rounds; 0 = no limit
+planner_max_steps = 0            # user/global only; planner read-only tool-call rounds; 0 = no limit
 reasoning_language = "auto"      # visible reasoning text: auto|zh|en
-# planner_model = "mimo-pro"          # optional low-frequency planner
+# planner_model = "deepseek-pro"      # optional low-frequency planner
 # subagent_model = "deepseek-pro"     # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
-auto_plan = "off"                  # off|on; off keeps plan mode manual
+auto_plan = "off"                  # user-level only; off|on; off keeps plan mode manual
 # auto_plan_classifier = "deepseek-flash"   # optional; only borderline tasks call it
 
 [[providers]]
@@ -60,7 +67,7 @@ kind        = "openai"
 base_url    = "https://api.deepseek.com"
 model       = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
-# also preset: deepseek-pro, mimo-pro (mimo-v2.5-pro), mimo-flash (mimo-v2.5) @ token-plan-cn.xiaomimimo.com/v1
+# also preset: deepseek-pro
 
 [tools]
 enabled = []   # omit/empty = all built-ins
@@ -80,12 +87,62 @@ allow = ["Bash(go test:*)"]                  # never prompted
 # workspace_root = ""          # file-writers confined here; empty = current dir
 # allow_write    = ["/tmp"]    # extra dirs write_file/edit_file/multi_edit/move_file may touch
 
+[serve]
+auth_mode = "none"             # none|token|password; use auth before binding beyond localhost
+# token = ""                   # optional fixed token; empty token mode generates one at startup
+# password_hash = ""           # bcrypt hash generated with reasonix serve --hash-password --password '...'
+# behind_proxy = false         # true only behind a trusted reverse proxy
+
 [[plugins]]
 name    = "example"
 command = "reasonix-plugin-example"
 ```
 
 For the full schema and every field's contract, see [`SPEC.md` §5](./SPEC.md#5-configuration-toml).
+
+## Serve web frontend
+
+`reasonix serve` starts the same local engine behind a browser UI. Use it when
+you want a desktop-style surface without installing the desktop app, when running
+Reasonix on a remote development box through a tunnel, or when you want a
+shareable view of a live session.
+
+```bash
+cd your-project
+reasonix serve
+# open http://127.0.0.1:8787
+```
+
+By default it listens on `127.0.0.1:8787` with `auth_mode = "none"`. Keep that
+default for local-only use. If you bind outside loopback, expose it through a
+tunnel, or put it behind a reverse proxy, enable authentication before sharing
+the URL:
+
+```bash
+reasonix serve --auth token
+reasonix serve --addr 0.0.0.0:8787 --auth token
+reasonix serve --auth password --password 'temporary-password'
+```
+
+Token mode prints a share URL with `?token=...`; pass `--token` or set
+`[serve].token` to reuse a stable token. Password mode requires either
+`--password` at startup or a stored bcrypt hash:
+
+```bash
+reasonix serve --hash-password --password 'strong-password'
+
+# ~/.reasonix/config.toml
+[serve]
+auth_mode = "password" # none|token|password
+password_hash = "$2a$12$..."
+behind_proxy = true    # only behind a trusted reverse proxy
+```
+
+The web UI exposes chat, tool approvals, session history, rewind/fork/summarize,
+model and reasoning-effort controls, Goal, a live todo panel fed by the
+`todo_write` tool, and provider balance when configured. Use `--model`,
+`--max-steps`, or `--resume` for one-off launches; otherwise `serve` uses the
+user-global `default_model`.
 
 ## Keyboard shortcuts
 
@@ -109,10 +166,12 @@ Global shortcuts:
 
 | Key or control | What it does | Notes |
 | --- | --- | --- |
-| `Cmd+K` on macOS, `Ctrl+K` on Windows/Linux | Opens the command palette | `Esc` closes the palette. |
+| `Cmd+K` on macOS, `Ctrl+K` on Windows/Linux | Toggles the command palette | The palette focuses search when it opens; `Esc` closes it. |
 | `Cmd+,` on macOS, `Ctrl+,` on Windows/Linux | Opens Settings | Use **Shortcuts** in Settings to customize desktop bindings. |
 | `Cmd+W` on macOS, `Ctrl+W` on Windows/Linux | Closes the active top tab | The last tab is kept by the normal close-tab guard. |
-| `Cmd+B` / `Ctrl+B` | Expands or collapses the most recent shell output | Same action as clicking the collapsed shell-output hint. |
+| `Cmd+B` / `Ctrl+B` | Shows or hides the left sidebar | Same action as clicking the sidebar toggle. |
+| `Cmd+Shift+B` / `Ctrl+Shift+B` | Expands or collapses the most recent shell output | Same action as clicking the collapsed shell-output hint. |
+| `Cmd+1`-`Cmd+9` on macOS, `Ctrl+1`-`Ctrl+9` elsewhere | Jumps to the matching visible chat in the sidebar | Hold `Cmd`/`Ctrl` briefly to reveal the numbered badges. Existing custom shortcuts that already use the same key take precedence. |
 | `Cmd++`, `Cmd+-`, `Cmd+0` on macOS; `Ctrl++`, `Ctrl+-`, `Ctrl+0` elsewhere | Increases, decreases, or resets text size | `=` is accepted for the plus key on keyboards that report it that way. |
 | `?` | Opens the keyboard shortcuts sheet | The sheet shows the current effective desktop bindings. |
 
@@ -377,7 +436,6 @@ separate cache-stable sessions) is a one-line edit afterwards — set
 ```toml
 [agent]
 planner_model = "deepseek-pro"   # used as the low-frequency planner
-planner_max_steps = 12           # read-only tool-call rounds before pausing
 ```
 
 The planner sees loaded `REASONIX.md` / `AGENTS.md` memory and a small read-only
@@ -386,9 +444,8 @@ executor. Writer and workflow tools remain executor-only. `max_steps` limits the
 executor; `planner_max_steps` limits only the planner, and either can be set to
 `0` for no round limit.
 
-Keep personal step-limit preferences in the user config. Add them to a project's
-`./reasonix.toml` only when that repository needs a shared override, such as a
-larger planner limit for a very large codebase.
+Keep step-limit preferences in the user config. Project `./reasonix.toml` files
+do not override `max_steps` or `planner_max_steps`.
 
 Subagent skills inherit the executor model by default. Set `subagent_model` to
 run them on another configured model, or use `subagent_models` to override only
@@ -401,11 +458,12 @@ before editing or running side-effecting commands. `auto_plan_classifier` can
 name a cheap provider such as `deepseek-flash`; it is only called for borderline
 inputs and falls back to the heuristic if classification fails. Use
 `/auto-plan off|on` inside `reasonix` to change the user-level setting, or
-`reasonix config auto-plan off|on` from a shell/script. The visible reasoning
-language uses the same shape: `/reasoning-language auto|zh|en` in the session, or
-`reasonix config reasoning-language auto|zh|en` in a shell/script. Pass
-`--local` to the shell command only when you intentionally want a project-local
-override.
+`reasonix config auto-plan off|on` from a shell/script. Auto-plan is user-level
+only; `agent.auto_plan` in a project `reasonix.toml` is ignored. The visible
+reasoning language uses a similar shape: `/reasoning-language auto|zh|en` in the
+session, or `reasonix config reasoning-language auto|zh|en` in a shell/script.
+Pass `--local` to the reasoning-language shell command only when you
+intentionally want a project-local override.
 
 The why behind separate sessions (keeping each model's prefix cache-stable) is in
 [`SPEC.md` §3.5](./SPEC.md#35-two-model-collaboration-coordinator).

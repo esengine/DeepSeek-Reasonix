@@ -4,6 +4,15 @@ All notable changes to the Go line (Reasonix 1.0+) are recorded here. The legacy
 `0.x` TypeScript history lives on the [`v1`](https://github.com/esengine/DeepSeek-Reasonix/tree/v1)
 branch.
 
+## Unreleased
+
+### Changed
+
+- Agent runtime defaults now leave both executor and dedicated planner tool-call
+  rounds unlimited (`max_steps = 0`, `planner_max_steps = 0`). Step limits now
+  come from the user/global config only; project `reasonix.toml` does not
+  override them.
+
 ## [1.0.0] — 2026-06-03
 
 First stable release — a **ground-up rewrite in Go**. Not an upgrade of the `0.x`

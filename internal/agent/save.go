@@ -13,6 +13,7 @@ import (
 
 	"reasonix/internal/fileutil"
 	"reasonix/internal/provider"
+	"reasonix/internal/store"
 )
 
 const cleanupPendingExt = ".cleanup-pending.json"
@@ -48,7 +49,11 @@ func (s *Session) Save(path string) error {
 		os.Remove(tmpPath)
 		return err
 	}
-	return fileutil.ReplaceFile(tmpPath, path)
+	if err := fileutil.ReplaceFile(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 // LoadSession reads a JSONL file written by Save into a fresh Session value.
@@ -77,6 +82,20 @@ func LoadSession(path string) (*Session, error) {
 		}
 		s.Messages = append(s.Messages, m)
 	}
+	// Repair persisted-history-safe issues before anything reads the session.
+	// Old sessions (pre adde2d3e) and interrupted turns can carry empty tool-call
+	// names, dangling tool_calls, or half-streamed argument JSON that DeepSeek
+	// rejects with a 400 on replay. Wire-only cleanup, such as dropping orphan
+	// tool messages, stays in the provider send path so Save/LoadSession keeps
+	// its round-trip contract. The fast path returns the input slice unchanged
+	// for a well-formed history, so we detect an actual repair by comparing
+	// slice headers: when NormalizeSession allocated a new backing array, the
+	// session is marked dirty so the next Save persists the fix.
+	normalized := NormalizeSession(s.Messages)
+	if len(normalized) != len(s.Messages) || (len(s.Messages) > 0 && &normalized[0] != &s.Messages[0]) {
+		s.normalizedDirty = true
+	}
+	s.Messages = normalized
 	return s, nil
 }
 
@@ -108,6 +127,12 @@ type SessionOrderInfo struct {
 	WorkspaceRoot  string
 	TopicID        string
 	TopicTitle     string
+	// Turns and Preview are the cached listing fields from the sidecar; SchemaVersion
+	// >= agent.BranchMetaCountsVersion means they were recorded from content and can
+	// be trusted (even Turns == 0). ListSessions uses them to skip the whole-file decode.
+	Turns         int
+	Preview       string
+	SchemaVersion int
 }
 
 // CleanupPendingMeta records that a session was logically removed but still has
@@ -127,11 +152,7 @@ type CleanupPendingInfo struct {
 
 // CleanupPendingPath returns the durable marker path for a session transcript.
 func CleanupPendingPath(sessionPath string) string {
-	sessionPath = strings.TrimSpace(sessionPath)
-	if sessionPath == "" {
-		return ""
-	}
-	return strings.TrimSuffix(sessionPath, ".jsonl") + cleanupPendingExt
+	return store.SessionCleanupPending(sessionPath)
 }
 
 // MarkCleanupPending hides a logically removed session from resume/list surfaces
@@ -275,6 +296,9 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 		workspaceRoot := ""
 		topicID := ""
 		topicTitle := ""
+		turns := 0
+		preview := ""
+		schemaVersion := 0
 		if meta, ok, err := LoadBranchMeta(full); err == nil && ok {
 			if !meta.CreatedAt.IsZero() {
 				createdAt = meta.CreatedAt
@@ -286,6 +310,9 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 			workspaceRoot = meta.WorkspaceRoot
 			topicID = meta.TopicID
 			topicTitle = meta.TopicTitle
+			turns = meta.Turns
+			preview = meta.Preview
+			schemaVersion = meta.SchemaVersion
 		}
 		out = append(out, SessionOrderInfo{
 			Path:           full,
@@ -296,6 +323,9 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 			WorkspaceRoot:  workspaceRoot,
 			TopicID:        topicID,
 			TopicTitle:     topicTitle,
+			Turns:          turns,
+			Preview:        preview,
+			SchemaVersion:  schemaVersion,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -318,11 +348,19 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 	}
 	var out []SessionInfo
 	for _, session := range ordered {
-		preview, turns := previewSession(session.Path)
+		preview, turns := session.Preview, session.Turns
+		if session.SchemaVersion < BranchMetaCountsVersion {
+			// The sidecar's counts weren't recorded from content (a legacy session
+			// from before they were persisted). Decode the .jsonl once, then backfill
+			// + stamp the sidecar so every later listing is O(1) — and so a genuinely
+			// empty session is recorded once instead of being re-decoded forever.
+			preview, turns = previewSession(session.Path)
+			// Best-effort: a failure here just means we decode again next time.
+			_ = UpdateSessionMeta(session.Path, "", preview, turns, false)
+		}
 		if turns == 0 {
-			// Skip sessions that have never had user interaction — they are
-			// empty conversations that should not appear in the history panel
-			// or the resume picker.
+			// Never had user interaction — an empty conversation that should not
+			// appear in the history panel or the resume picker.
 			continue
 		}
 		out = append(out, SessionInfo{
@@ -347,6 +385,25 @@ func SessionPreview(path string) (string, int) {
 	return previewSession(path)
 }
 
+// SessionPreviewFromMessages computes the same preview line and user-turn count
+// as previewSession, but from an in-memory message slice. Session.Save writes
+// exactly these messages to the .jsonl, so this is byte-for-byte equivalent to
+// decoding the file — letting the autosave path persist the counts into the
+// sidecar without a disk read.
+func SessionPreviewFromMessages(msgs []provider.Message) (string, int) {
+	first := ""
+	turns := 0
+	for _, m := range msgs {
+		if m.Role == provider.RoleUser {
+			turns++
+			if first == "" {
+				first = truncatePreview(UserPreviewText(m.Content))
+			}
+		}
+	}
+	return first, turns
+}
+
 // previewSession returns the first user message (truncated) and the number of
 // user-role messages so the picker can show "5 turns · 'help me debug the…'".
 // Errors are swallowed — a malformed file just shows up with an empty preview.
@@ -367,15 +424,20 @@ func previewSession(path string) (string, int) {
 		if m.Role == provider.RoleUser {
 			turns++
 			if first == "" {
-				s := UserPreviewText(m.Content)
-				if r := []rune(s); len(r) > 80 {
-					s = string(r[:77]) + "…"
-				}
-				first = s
+				first = truncatePreview(UserPreviewText(m.Content))
 			}
 		}
 	}
 	return first, turns
+}
+
+// truncatePreview clamps a preview line to 80 runes with an ellipsis, matching
+// what the pickers render.
+func truncatePreview(s string) string {
+	if r := []rune(s); len(r) > 80 {
+		return string(r[:77]) + "…"
+	}
+	return s
 }
 
 // ContinueSessionPath returns where a conversation carried into a rebuilt

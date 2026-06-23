@@ -19,6 +19,7 @@ function ok(cond: boolean, label: string) {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
+const settingsSource = readFileSync(resolve(here, "../components/SettingsPanel.tsx"), "utf8");
 const markdownSource = readFileSync(resolve(here, "../components/Markdown.tsx"), "utf8");
 
 console.log("\nbundle contract");
@@ -40,6 +41,24 @@ ok(
   appSource.includes('import("./components/SettingsPanel")') &&
     appSource.includes('import("./components/HistoryPanel")'),
   "App loads secondary drawers on demand",
+);
+ok(
+  !/import\s+\{[^}]*\b(?:MCPServersSettingsPage|SkillsSettingsPage)\b[^}]*\}\s+from\s+["']\.\/CapabilitiesPanel["']/.test(settingsSource) &&
+    !/import\s+\{[^}]*\bMemorySettingsPage\b[^}]*\}\s+from\s+["']\.\/MemoryPanel["']/.test(settingsSource),
+  "SettingsPanel keeps secondary settings pages out of the first settings chunk",
+);
+ok(
+  settingsSource.includes('import("./CapabilitiesPanel")') &&
+    settingsSource.includes('import("./MemoryPanel")'),
+  "SettingsPanel loads secondary settings pages on demand",
+);
+ok(
+  !/from\s+["']qrcode\.react["']/.test(settingsSource),
+  "SettingsPanel keeps QR rendering code out of the first settings chunk",
+);
+ok(
+  settingsSource.includes('import("qrcode.react")'),
+  "SettingsPanel loads QR rendering code on demand",
 );
 ok(
   !/from\s+["']react-markdown["']/.test(markdownSource) &&

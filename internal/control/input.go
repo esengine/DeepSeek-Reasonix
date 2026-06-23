@@ -62,6 +62,48 @@ func StripComposePrefixes(content string) string {
 	return s
 }
 
+// StripReferencedContextPrefix removes the "Referenced context:" preamble and
+// the trailing XML reference blocks (<file>, <dir>, <resource>, <image>) that
+// controller.ResolveRefs injects when the user @-references files or resources.
+// The user's actual input follows the reference blocks after a blank line.
+// Used for title generation and previews so the displayed text matches what
+// the user typed, not the injected context preamble (#4954).
+func StripReferencedContextPrefix(content string) string {
+	const preamble = "Referenced context:"
+	s := strings.TrimSpace(content)
+	if !strings.HasPrefix(s, preamble) {
+		return content
+	}
+	// Skip past the preamble.
+	s = strings.TrimSpace(s[len(preamble):])
+	// Skip past all XML reference blocks: <file ...>...</file>, <dir ...>...</dir>,
+	// <resource ...>...</resource>, <image ...>...</image>.
+	for {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return ""
+		}
+		// Check for a reference block start.
+		if !strings.HasPrefix(s, "<file ") && !strings.HasPrefix(s, "<dir ") &&
+			!strings.HasPrefix(s, "<resource ") && !strings.HasPrefix(s, "<image ") {
+			break
+		}
+		// Find the matching close tag.
+		tagEnd := strings.IndexByte(s, ' ')
+		if tagEnd < 0 {
+			break
+		}
+		tagName := s[1:tagEnd]
+		closeTag := "</" + tagName + ">"
+		closeIdx := strings.Index(s, closeTag)
+		if closeIdx < 0 {
+			break
+		}
+		s = strings.TrimSpace(s[closeIdx+len(closeTag):])
+	}
+	return s
+}
+
 // IsSyntheticUserMessage returns true if the content matches one of the known
 // synthetic user messages injected by the controller or agent loop (plan
 // approval, stream recovery, readiness retry, etc.). These should not be shown
@@ -80,7 +122,7 @@ func IsSyntheticUserMessage(content string) bool {
 }
 
 // syntheticPrefixes must be kept in sync with the synthetic user messages
-// injected by the controller (planApprovedMessage), agent loop
+// injected by the controller (planApprovedMessage, goal loop turns), agent loop
 // (streamRecoveryMessage, finalReadinessRetryMessage, emptyFinalRetryMessage,
 // executorHandoffRetryMessage in internal/agent/agent.go), and compaction
 // folds (internal/agent/compact.go), which store summaries as user-role
@@ -96,6 +138,10 @@ var syntheticPrefixes = []string{
 	"<compaction-summary>",
 	"Summary of the later conversation (compacted from here on):",
 	"Summary of earlier conversation (compacted up to here):",
+	"Continue pursuing the active goal.",
+	"The agent signaled goal completion and all tasks are marked done.",
+	"Goal signaled complete but issues remain:",
+	"No tool calls in recent turns.",
 }
 
 // Compose applies controller-owned context to a parent turn's text, returning
@@ -104,13 +150,10 @@ var syntheticPrefixes = []string{
 func (c *Controller) Compose(text string) string {
 	c.mu.Lock()
 	plan := c.planMode
-	goal := c.goal
-	goalStatus := c.goalStatus
-	goalResearchMode := c.goalResearchMode
 	reasoningLanguage := c.reasoningLanguage
-	notes := c.pendingMemory
-	c.pendingMemory = nil
 	c.mu.Unlock()
+	notes := c.memory.drainPending()
+	goal, goalStatus, goalResearchMode := c.goals.snapshot()
 
 	text = composeStableContext(text, plan, goal, goalStatus, goalResearchMode, reasoningLanguage)
 
@@ -142,11 +185,9 @@ func (c *Controller) Compose(text string) string {
 func (c *Controller) composeWithoutParentDrains(text string) string {
 	c.mu.Lock()
 	plan := c.planMode
-	goal := c.goal
-	goalStatus := c.goalStatus
-	goalResearchMode := c.goalResearchMode
 	reasoningLanguage := c.reasoningLanguage
 	c.mu.Unlock()
+	goal, goalStatus, goalResearchMode := c.goals.snapshot()
 	return composeStableContext(text, plan, goal, goalStatus, goalResearchMode, reasoningLanguage)
 }
 
@@ -444,7 +485,7 @@ func (c *Controller) CustomCommand(input string) (sent string, found bool) {
 		return "", false
 	}
 	name := strings.TrimPrefix(fields[0], "/")
-	for _, cmd := range c.commands {
+	for _, cmd := range c.Commands() {
 		if cmd.Name == name {
 			return cmd.Render(fields[1:]), true
 		}
@@ -461,7 +502,7 @@ func (c *Controller) ResolveSkill(input string) (sk skill.Skill, args string, fo
 		return skill.Skill{}, "", false
 	}
 	name := strings.TrimPrefix(fields[0], "/")
-	if sk, ok := c.skillByName(name); ok {
+	if sk, ok := c.skills.byName(name); ok {
 		return sk, rawSlashArgs(input), true
 	}
 	return skill.Skill{}, "", false
@@ -478,33 +519,18 @@ func (c *Controller) RunSkill(input string) (sent string, found bool) {
 	return skill.Render(sk, args), true
 }
 
-func (c *Controller) skillByName(name string) (skill.Skill, bool) {
-	if c.skillStore != nil {
-		return c.skillStore.Read(name)
-	}
-	for _, sk := range c.skills {
-		if sk.Name == name {
-			return sk, true
-		}
-	}
-	return skill.Skill{}, false
-}
-
 // MCPPrompt resolves a "/mcp__server__prompt args…" line: it maps the positional
 // args onto the prompt's declared arguments and fetches the rendered prompt from
 // the MCP server (an async prompts/get). found is false when no such prompt
 // exists; err carries a fetch failure. Honours ctx.
 func (c *Controller) MCPPrompt(ctx context.Context, input string) (sent string, found bool, err error) {
-	if c.host == nil {
-		return "", false, nil
-	}
-	fields := slashFields(input)
+	fields := strings.Fields(input)
 	if len(fields) == 0 {
 		return "", false, nil
 	}
 	name := strings.TrimPrefix(fields[0], "/")
 
-	prompts := c.host.Prompts()
+	prompts := c.mcp.prompts()
 	idx := -1
 	for i := range prompts {
 		if prompts[i].Name == name {

@@ -5,6 +5,7 @@ import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import type { ModelInfo } from "../lib/types";
 import { AnchoredPopover } from "./AnchoredPopover";
+import { Tooltip } from "./Tooltip";
 
 // ModelSwitcher opens an upward popover listing configured providers. Selecting
 // one switches the active model while the current conversation continues.
@@ -79,6 +80,7 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
     const cur = models.find((m) => m.current) ?? models.find((m) => m.model === label || m.ref === label);
     return cur ? providerLabel(cur.provider, t) : null;
   }, [label, models, t]);
+  const triggerLabel = currentProvider ? `${label} · ${currentProvider}` : label;
 
   const pick = (name: string) => {
     setModels((prev) => prev.map((m) => ({ ...m, current: m.ref === name })));
@@ -88,17 +90,20 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
 
   return (
     <div className="modelsw">
-      <button
-        ref={triggerRef}
-        type="button"
-        className="modelsw__trigger"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <Brain size={13} className="modelsw__kind" />
-        <span className="modelsw__label">{label}{currentProvider ? ` · ${currentProvider}` : ""}</span>
-        <ChevronsUpDown size={11} />
-      </button>
+      <Tooltip label={triggerLabel} fill>
+        <button
+          ref={triggerRef}
+          type="button"
+          className="modelsw__trigger"
+          aria-label={triggerLabel}
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <Brain size={13} className="modelsw__kind" />
+          <span className="modelsw__label">{label}</span>
+          <ChevronsUpDown size={11} />
+        </button>
+      </Tooltip>
       <AnchoredPopover
         open={open}
         anchorRef={triggerRef}
@@ -156,14 +161,6 @@ function providerLabel(provider: string, t: ReturnType<typeof useT>): string {
     case "deepseek-flash":
     case "deepseek-pro":
       return t("settings.providerLabel.deepseek");
-    case "mimo-api":
-    case "mimo":
-    case "xiaomi-mimo":
-      return t("settings.providerLabel.mimoApi");
-    case "mimo-token-plan":
-    case "mimo-pro":
-    case "mimo-flash":
-      return t("settings.providerLabel.mimoTokenPlan");
     default:
       return provider;
   }

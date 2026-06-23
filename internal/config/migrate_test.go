@@ -30,7 +30,6 @@ func writeLegacy(t *testing.T, src, body string) {
 		t.Fatal(err)
 	}
 }
-
 func TestMigrateImportsKeyPluginsAndLang(t *testing.T) {
 	src, dest, home := legacyHome(t)
 	writeLegacy(t, src, `{
@@ -663,6 +662,115 @@ func TestMigrateImportsLegacyCredentialsEvenWhenPrimaryConfigExists(t *testing.T
 	}
 }
 
+func TestMigrateImportsLegacyKeyringCredentials(t *testing.T) {
+	legacyHome(t)
+	old := legacyKeyringCredentialValueLookup
+	legacyKeyringCredentialValueLookup = func(key string) (string, bool) {
+		if key == "DEEPSEEK_API_KEY" {
+			return "sk-old-keyring", true
+		}
+		return "", false
+	}
+	t.Cleanup(func() { legacyKeyringCredentialValueLookup = old })
+
+	res, err := MigrateLegacyIfNeeded()
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if res != nil {
+		t.Fatalf("no config migration should be needed, got %+v", res)
+	}
+	data, err := os.ReadFile(UserCredentialsPath())
+	if err != nil {
+		t.Fatalf("read migrated credentials: %v", err)
+	}
+	if string(data) != "DEEPSEEK_API_KEY=sk-old-keyring\n" {
+		t.Fatalf("migrated credentials = %q", data)
+	}
+}
+
+func TestMigrateLegacyCredentialsUsesWorkspaceRootForKeyring(t *testing.T) {
+	_, dest, _ := legacyHome(t)
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte(`default_model = "deepseek-flash/deepseek-chat"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+default_model = "custom/m"
+[[providers]]
+name = "custom"
+kind = "openai"
+base_url = "https://example.invalid/v1"
+model = "m"
+api_key_env = "WORKSPACE_ONLY_KEY"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := legacyKeyringCredentialValueLookup
+	legacyKeyringCredentialValueLookup = func(key string) (string, bool) {
+		if key == "WORKSPACE_ONLY_KEY" {
+			return "sk-workspace", true
+		}
+		return "", false
+	}
+	t.Cleanup(func() { legacyKeyringCredentialValueLookup = old })
+
+	if err := MigrateLegacyCredentialsForRoot(project); err != nil {
+		t.Fatalf("MigrateLegacyCredentialsForRoot: %v", err)
+	}
+	data, err := os.ReadFile(UserCredentialsPath())
+	if err != nil {
+		t.Fatalf("read migrated credentials: %v", err)
+	}
+	if string(data) != "WORKSPACE_ONLY_KEY=sk-workspace\n" {
+		t.Fatalf("migrated credentials = %q", data)
+	}
+}
+
+func TestMigrateLegacyCredentialsDoesNotReimportClearedKey(t *testing.T) {
+	_, dest, _ := legacyHome(t)
+	legacy := legacyUserConfigPath()
+	if legacy == "" {
+		t.Skip("legacy OS config path matches primary path on this platform")
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte(`default_model = "deepseek-flash/deepseek-chat"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	legacyCred := filepath.Join(filepath.Dir(legacy), "credentials")
+	if err := os.MkdirAll(filepath.Dir(legacyCred), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyCred, []byte("DEEPSEEK_API_KEY=sk-old-creds\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := MigrateLegacyCredentialsForRoot("."); err != nil {
+		t.Fatalf("initial migrate: %v", err)
+	}
+	if err := RemoveCredential("DEEPSEEK_API_KEY"); err != nil {
+		t.Fatalf("RemoveCredential: %v", err)
+	}
+	if err := MigrateLegacyCredentialsForRoot("."); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+	data, err := os.ReadFile(UserCredentialsPath())
+	if err != nil {
+		t.Fatalf("read current credentials: %v", err)
+	}
+	if strings.Contains(string(data), "sk-old-creds") || CredentialStored("DEEPSEEK_API_KEY") {
+		t.Fatalf("cleared key was re-imported:\n%s", data)
+	}
+	if !strings.Contains(string(data), credentialClearedPrefix+"DEEPSEEK_API_KEY") {
+		t.Fatalf("cleared marker missing:\n%s", data)
+	}
+}
+
 func TestMigrateSkipsLegacyCredentialsAlreadyInCurrentAutoStore(t *testing.T) {
 	_, dest, _ := legacyHome(t)
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "")
@@ -750,6 +858,95 @@ func TestMigrateCustomBaseURLWarns(t *testing.T) {
 		p, ok := cfg.Provider(name)
 		if !ok || p.BaseURL != "https://my-proxy.example/v1" {
 			t.Fatalf("%s base_url was not migrated: %+v", name, p)
+		}
+	}
+}
+
+func TestMigrateSupportData(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping since legacyOSSupportDir equals current reasonixHomeDir on Windows")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+
+	legacyConf := legacyUserConfigPath()
+	if legacyConf == "" {
+		t.Skip("skipping because legacy config path is empty")
+	}
+	legacyDir := filepath.Dir(legacyConf)
+
+	// Write data to the legacy support directory
+	filesToWrite := map[string]string{
+		"config.toml":                  "language = \"zh\"",
+		"hooks.json":                   `{"hook":"test"}`,
+		"sessions/s1.json":             `{"id":"s1"}`,
+		"projects/p1/sessions/s2.json": `{"id":"s2"}`,
+		"skills/custom.md":             `custom skill`,
+		"archive/a1.json":              `{"compacted": true}`,
+	}
+	for rel, content := range filesToWrite {
+		path := filepath.Join(legacyDir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(filepath.Join(legacyDir, "sessions"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(filepath.Join(legacyDir, "sessions", "s1.json"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(filepath.Join(legacyDir, "hooks.json"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	res, err := MigrateLegacyIfNeeded()
+	if err != nil {
+		t.Fatalf("MigrateLegacyIfNeeded failed: %v", err)
+	}
+	if res == nil {
+		t.Fatal("expected migration result, got nil")
+	}
+
+	newDir := filepath.Dir(userConfigPath())
+	for rel, expectedContent := range filesToWrite {
+		if rel == "config.toml" {
+			continue
+		}
+		newPath := filepath.Join(newDir, rel)
+		data, err := os.ReadFile(newPath)
+		if err != nil {
+			t.Errorf("expected file %s to be migrated, but got error: %v", rel, err)
+			continue
+		}
+		if string(data) != expectedContent {
+			t.Errorf("file %s content mismatch: got %q, want %q", rel, string(data), expectedContent)
+		}
+	}
+	if runtime.GOOS != "windows" {
+		for _, check := range []struct {
+			rel  string
+			perm os.FileMode
+		}{
+			{rel: "sessions", perm: 0o700},
+			{rel: "sessions/s1.json", perm: 0o600},
+			{rel: "hooks.json", perm: 0o600},
+		} {
+			info, err := os.Stat(filepath.Join(newDir, check.rel))
+			if err != nil {
+				t.Fatalf("stat migrated %s: %v", check.rel, err)
+			}
+			if got := info.Mode().Perm(); got != check.perm {
+				t.Fatalf("migrated %s mode = %o, want %o", check.rel, got, check.perm)
+			}
 		}
 	}
 }

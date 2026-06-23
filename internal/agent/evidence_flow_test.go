@@ -412,6 +412,62 @@ func TestFinalReadinessStopsAfterRepeatedBlocks(t *testing.T) {
 	}
 }
 
+func TestTodoWriteOnlyTurnMayEndWithIncompleteTodos(t *testing.T) {
+	todoWrite, ok := tool.LookupBuiltin("todo_write")
+	if !ok {
+		t.Fatal("todo_write builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(todoWrite)
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{
+			toolCallChunk("c1", "todo_write", `{"todos":[{"content":"Draft plan","status":"in_progress"},{"content":"Implement","status":"pending"}]}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "here is the task list"}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+
+	if err := a.Run(context.Background(), "create a todo list only"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if prov.call != 2 {
+		t.Fatalf("provider calls = %d, want 2 without readiness retry", prov.call)
+	}
+	if got := lastToolResult(a.session, "todo_write"); !strings.Contains(got, "Todos updated") {
+		t.Fatalf("todo_write result = %q, want successful todo update", got)
+	}
+}
+
+func TestReadOnlyContextAndTodoTurnMayEndWithIncompleteTodos(t *testing.T) {
+	todoWrite, ok := tool.LookupBuiltin("todo_write")
+	if !ok {
+		t.Fatal("todo_write builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "read_file", readOnly: true})
+	reg.Add(todoWrite)
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{
+			toolCallChunk("c1", "read_file", `{"path":"README.md"}`),
+			toolCallChunk("c2", "todo_write", `{"todos":[{"content":"Draft plan","status":"in_progress"},{"content":"Implement","status":"pending"}]}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "I reviewed the context and wrote the list."}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+
+	if err := a.Run(context.Background(), "read context and only draft a todo list"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if prov.call != 2 {
+		t.Fatalf("provider calls = %d, want 2 without readiness retry", prov.call)
+	}
+	if got := lastToolResult(a.session, "todo_write"); !strings.Contains(got, "Todos updated") {
+		t.Fatalf("todo_write result = %q, want successful todo update", got)
+	}
+}
+
 func TestFinalReadinessAuditRecordsTerminalError(t *testing.T) {
 	todoWrite, ok := tool.LookupBuiltin("todo_write")
 	if !ok {

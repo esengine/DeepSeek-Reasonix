@@ -113,13 +113,13 @@ func TestNormalizeLegacyProviderModelsLeavesCustomProviderUntouched(t *testing.T
 	}
 }
 
-func TestNormalizeDesktopOfficialProviderAccessCanonicalizesLegacyIDs(t *testing.T) {
+func TestNormalizeDesktopOfficialProviderAccessCanonicalizesOnlyDeepSeekIDs(t *testing.T) {
 	c := Default()
 	c.DefaultModel = "deepseek-flash/deepseek-v4-pro"
 	c.Desktop.ProviderAccess = []string{"deepseek-flash", "mimo-pro"}
 	normalizeDesktopOfficialProviderAccess(c)
-	if len(c.Desktop.ProviderAccess) != 2 || c.Desktop.ProviderAccess[0] != "deepseek" || c.Desktop.ProviderAccess[1] != "mimo-token-plan" {
-		t.Fatalf("provider_access = %+v, want canonical official ids", c.Desktop.ProviderAccess)
+	if len(c.Desktop.ProviderAccess) != 2 || c.Desktop.ProviderAccess[0] != "deepseek" || c.Desktop.ProviderAccess[1] != "mimo-pro" {
+		t.Fatalf("provider_access = %+v, want only DeepSeek canonicalized", c.Desktop.ProviderAccess)
 	}
 	if c.DefaultModel != "deepseek/deepseek-v4-pro" {
 		t.Fatalf("default_model = %q, want deepseek/deepseek-v4-pro", c.DefaultModel)
@@ -127,11 +127,8 @@ func TestNormalizeDesktopOfficialProviderAccessCanonicalizesLegacyIDs(t *testing
 	if _, ok := c.Provider("deepseek"); !ok {
 		t.Fatal("canonical deepseek provider missing")
 	}
-	if _, ok := c.Provider("mimo-token-plan"); !ok {
-		t.Fatal("canonical mimo-token-plan provider missing")
-	}
-	if p, _ := c.Provider("mimo-token-plan"); p.Price != nil {
-		t.Fatalf("mimo-token-plan mixed-model price = %+v, want nil", p.Price)
+	if _, ok := c.Provider("mimo-token-plan"); ok {
+		t.Fatal("mimo-token-plan should not be injected as an official provider")
 	}
 }
 
@@ -177,14 +174,14 @@ func TestNormalizeDesktopOfficialProviderAccessBackfillsOfficialContextWindow(t 
 		t.Fatal("mimo-api provider missing")
 	}
 	if mimoAPI.ContextWindow != 1_048_576 {
-		t.Fatalf("mimo-api context_window = %d, want official default", mimoAPI.ContextWindow)
+		t.Fatalf("mimo-api context_window = %d, want migrated MiMo default", mimoAPI.ContextWindow)
 	}
 	mimoTokenPlan, ok := c.Provider("mimo-token-plan")
 	if !ok {
 		t.Fatal("mimo-token-plan provider missing")
 	}
 	if mimoTokenPlan.ContextWindow != 1_048_576 {
-		t.Fatalf("mimo-token-plan context_window = %d, want official default", mimoTokenPlan.ContextWindow)
+		t.Fatalf("mimo-token-plan context_window = %d, want migrated MiMo default", mimoTokenPlan.ContextWindow)
 	}
 }
 
@@ -257,11 +254,13 @@ func TestNormalizeOfficialDeepSeekModelsLeavesExternalEndpointUntouched(t *testi
 	}
 }
 
-func TestNormalizeDesktopOfficialProviderAccessEnsuresMimoAPI(t *testing.T) {
+func TestNormalizeLegacyMimoCustomProvidersEnsuresReferencedMimoAPI(t *testing.T) {
 	c := Default()
 	c.DefaultModel = "mimo-api/mimo-v2.5-pro"
 	c.Desktop.ProviderAccess = []string{"mimo-api"}
-	normalizeDesktopOfficialProviderAccess(c)
+	if !normalizeLegacyMimoCustomProviders(c) {
+		t.Fatal("legacy MiMo migration did not report a change")
+	}
 	p, ok := c.Provider("mimo-api")
 	if !ok {
 		t.Fatal("mimo-api paid provider missing")
@@ -269,8 +268,54 @@ func TestNormalizeDesktopOfficialProviderAccessEnsuresMimoAPI(t *testing.T) {
 	if !p.HasModel("mimo-v2.5") || !p.HasModel("mimo-v2-omni") {
 		t.Fatalf("mimo-api models = %v, want vision-capable MiMo models", p.ModelList())
 	}
+	normalizeDesktopOfficialProviderAccess(c)
 	if got := c.Desktop.ProviderAccess; len(got) != 1 || got[0] != "mimo-api" {
 		t.Fatalf("provider_access = %+v, want mimo-api", got)
+	}
+}
+
+func TestNormalizeLegacyMimoCustomProvidersRecognizesBareModelRefs(t *testing.T) {
+	c := Default()
+	c.DefaultModel = "mimo-v2.5-pro"
+	if !normalizeLegacyMimoCustomProviders(c) {
+		t.Fatal("legacy bare MiMo model migration did not report a change")
+	}
+	p, ok := c.Provider("mimo-pro")
+	if !ok {
+		t.Fatal("mimo-pro provider missing")
+	}
+	if p.Model != "mimo-v2.5-pro" {
+		t.Fatalf("mimo-pro model = %q, want mimo-v2.5-pro", p.Model)
+	}
+	if e, ok := c.ResolveModel("mimo-v2.5-pro"); !ok || e.Name != "mimo-pro" {
+		t.Fatalf("bare MiMo model resolved to %+v/%v, want mimo-pro", e, ok)
+	}
+}
+
+func TestNormalizeLegacyMimoCustomProvidersScansBotRefs(t *testing.T) {
+	c := Default()
+	c.Bot.Model = "mimo-pro"
+	c.Bot.Connections = []BotConnectionConfig{{Model: "mimo-flash"}}
+	if !normalizeLegacyMimoCustomProviders(c) {
+		t.Fatal("legacy bot MiMo migration did not report a change")
+	}
+	if _, ok := c.Provider("mimo-pro"); !ok {
+		t.Fatal("mimo-pro provider missing")
+	}
+	if _, ok := c.Provider("mimo-flash"); !ok {
+		t.Fatal("mimo-flash provider missing")
+	}
+}
+
+func TestNormalizeLegacyDesktopProviderAccessIncludesUnconfiguredMimoRefs(t *testing.T) {
+	c := Default()
+	c.DefaultModel = "mimo-pro"
+	c.Bot.Connections = []BotConnectionConfig{{Model: "mimo-flash"}}
+	normalizeLegacyMimoCustomProviders(c)
+	NormalizeLegacyDesktopProviderAccess(c)
+	access := desktopProviderAccessMap(c.Desktop.ProviderAccess)
+	if !access["mimo-pro"] || !access["mimo-flash"] {
+		t.Fatalf("provider_access = %+v, want unconfigured migrated MiMo refs visible", c.Desktop.ProviderAccess)
 	}
 }
 
@@ -446,11 +491,8 @@ func TestResetOfficialProviderPricingOnUpgradeRunsOnce(t *testing.T) {
 	if !ok {
 		t.Fatal("mimo-api provider missing")
 	}
-	if mimo.Price != nil {
-		t.Fatalf("mimo provider-wide price = %+v, want nil after reset", mimo.Price)
-	}
-	if p := mimo.Prices["mimo-v2.5-pro"]; p == nil || p.Currency != "¥" || p.Output != 6 {
-		t.Fatalf("mimo pro price = %+v, want RMB default", p)
+	if mimo.Price == nil || mimo.Price.Currency != "$" || mimo.Price.Output != 7 {
+		t.Fatalf("mimo provider-wide price = %+v, want custom price preserved", mimo.Price)
 	}
 
 	deepseek.Prices["deepseek-v4-flash"] = &provider.Pricing{CacheHit: 4, Input: 4, Output: 4, Currency: "$"}
@@ -503,7 +545,7 @@ func TestResolveModelUsesPerModelPricing(t *testing.T) {
 	}
 }
 
-func TestNormalizeDesktopOfficialProviderAccessBackfillsExistingMimoAPIModels(t *testing.T) {
+func TestNormalizeLegacyMimoProviderCatalogsBackfillsOfficialMimoAPIStub(t *testing.T) {
 	c := &Config{
 		DefaultModel: "mimo-api/mimo-v2.5-pro",
 		Desktop:      DesktopConfig{ProviderAccess: []string{"mimo-api"}},
@@ -522,14 +564,15 @@ func TestNormalizeDesktopOfficialProviderAccessBackfillsExistingMimoAPIModels(t 
 	if !ok {
 		t.Fatal("mimo-api provider missing")
 	}
-	if !p.HasModel("mimo-v2.5-pro") || !p.HasModel("mimo-v2.5") || !p.HasModel("mimo-v2-omni") {
-		t.Fatalf("mimo-api models = %v, want curated MiMo API models", p.ModelList())
+	wantModels := []string{"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni"}
+	if !reflect.DeepEqual(p.ModelList(), wantModels) {
+		t.Fatalf("mimo-api models = %v, want %v", p.ModelList(), wantModels)
 	}
 	if p.Default != "mimo-v2.5-pro" {
 		t.Fatalf("mimo-api default = %q, want mimo-v2.5-pro", p.Default)
 	}
-	if want := []string{"mimo-v2.5", "mimo-v2-omni"}; !reflect.DeepEqual(p.VisionModels, want) {
-		t.Fatalf("mimo-api vision_models = %v, want %v", p.VisionModels, want)
+	if !reflect.DeepEqual(p.VisionModels, []string{"mimo-v2.5", "mimo-v2-omni"}) {
+		t.Fatalf("mimo-api vision_models = %v, want vision-capable MiMo models", p.VisionModels)
 	}
 }
 
@@ -555,7 +598,7 @@ func TestNormalizeDesktopOfficialProviderAccessDoesNotBackfillCustomNamedMimoAPI
 	}
 }
 
-func TestNormalizeDesktopOfficialProviderAccessBackfillsExistingMimoTokenPlanAndClearsPrice(t *testing.T) {
+func TestNormalizeLegacyMimoProviderCatalogsBackfillsOfficialMimoTokenPlanStub(t *testing.T) {
 	c := &Config{
 		Desktop: DesktopConfig{ProviderAccess: []string{"mimo-token-plan"}},
 		Providers: []ProviderEntry{{
@@ -574,20 +617,14 @@ func TestNormalizeDesktopOfficialProviderAccessBackfillsExistingMimoTokenPlanAnd
 	if !ok {
 		t.Fatal("mimo-token-plan provider missing")
 	}
-	if !p.HasModel("mimo-v2.5-pro") || !p.HasModel("mimo-v2.5") {
-		t.Fatalf("mimo-token-plan models = %v, want pro and flash models", p.ModelList())
+	if !reflect.DeepEqual(p.ModelList(), []string{"mimo-v2.5-pro", "mimo-v2.5"}) {
+		t.Fatalf("mimo-token-plan models = %v, want token plan catalog", p.ModelList())
 	}
-	if p.Price != nil {
-		t.Fatalf("mimo-token-plan mixed-model price = %+v, want nil", p.Price)
+	if p.Price == nil || p.Price.Currency != "CNY" {
+		t.Fatalf("mimo-token-plan price = %+v, want preserved custom provider-wide price", p.Price)
 	}
-	if p.Prices["mimo-v2.5-pro"] == nil || p.Prices["mimo-v2.5-pro"].Currency != "¥" || p.Prices["mimo-v2.5-pro"].Output != 6 {
-		t.Fatalf("mimo-v2.5-pro price = %+v, want RMB domestic pricing", p.Prices["mimo-v2.5-pro"])
-	}
-	if p.Prices["mimo-v2.5"] == nil || p.Prices["mimo-v2.5"].Currency != "¥" || p.Prices["mimo-v2.5"].Output != 2 {
-		t.Fatalf("mimo-v2.5 price = %+v, want RMB domestic pricing", p.Prices["mimo-v2.5"])
-	}
-	if want := []string{"mimo-v2.5"}; !reflect.DeepEqual(p.VisionModels, want) {
-		t.Fatalf("mimo-token-plan vision_models = %v, want %v", p.VisionModels, want)
+	if !reflect.DeepEqual(p.VisionModels, []string{"mimo-v2.5"}) {
+		t.Fatalf("mimo-token-plan vision_models = %v, want token plan vision metadata", p.VisionModels)
 	}
 }
 

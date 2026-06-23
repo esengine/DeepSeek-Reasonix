@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -87,7 +88,11 @@ func (r *MigrationResult) Notice() string {
 // modifies or deletes the legacy files. Returns nil when there is nothing to
 // migrate, or when the current user config already exists.
 func MigrateLegacyIfNeeded() (*MigrationResult, error) {
-	credErr := migrateLegacyCredentialsIfNeeded()
+	return MigrateLegacyIfNeededForRoot(".")
+}
+
+func MigrateLegacyIfNeededForRoot(root string) (*MigrationResult, error) {
+	credErr := migrateLegacyCredentialsIfNeededForRoot(root)
 	dest := userConfigPath()
 	if dest == "" {
 		return nil, credErr
@@ -160,6 +165,10 @@ func MigrateLegacyIfNeeded() (*MigrationResult, error) {
 		}
 	}
 	return res, credErr
+}
+
+func MigrateLegacyCredentialsForRoot(root string) error {
+	return migrateLegacyCredentialsIfNeededForRoot(root)
 }
 
 // MigrateMCPToUserConfigOnUpgrade runs a one-time best-effort backfill for the
@@ -327,8 +336,19 @@ func normalizedMCPMigrationRoots(roots []string) []string {
 	return out
 }
 
-func migrateLegacyCredentialsIfNeeded() error {
+func migrateLegacyCredentialsIfNeededForRoot(root string) error {
 	missing := map[string]string{}
+	skip := func(key string) bool {
+		return credentialCurrentStoreHasKey(key) || credentialCurrentStoreClearedKey(key)
+	}
+	for _, key := range credentialEnvNamesForRoot(root) {
+		if skip(key) {
+			continue
+		}
+		if value, ok := legacyKeyringCredentialValueLookup(key); ok {
+			missing[key] = value
+		}
+	}
 	for _, src := range legacyCredentialsPaths() {
 		if src == "" {
 			continue
@@ -339,7 +359,7 @@ func migrateLegacyCredentialsIfNeeded() error {
 		}
 		assignments := parseCredentialLines(strings.Split(string(data), "\n"))
 		for key, value := range assignments {
-			if _, exists := missing[key]; !exists && !credentialCurrentStoreHasKey(key) {
+			if _, exists := missing[key]; !exists && !skip(key) {
 				missing[key] = value
 			}
 		}
@@ -423,7 +443,15 @@ func migrateLegacyTOMLIfNeeded(dest, home string) (*MigrationResult, error) {
 		if err := cfg.WriteFile(dest); err != nil {
 			return nil, fmt.Errorf("write %s: %w", dest, err)
 		}
-		return &MigrationResult{From: src, To: dest, Plugins: len(cfg.Plugins)}, nil
+		res := &MigrationResult{From: src, To: dest, Plugins: len(cfg.Plugins)}
+		legacyDir := filepath.Dir(src)
+		newDir := filepath.Dir(dest)
+		if !samePath(legacyDir, newDir) {
+			if warnings := migrateSupportData(legacyDir, newDir); len(warnings) > 0 {
+				res.Warnings = append(res.Warnings, warnings...)
+			}
+		}
+		return res, nil
 	}
 	return nil, nil
 }
@@ -557,7 +585,7 @@ func mergeEnv(base, overlay map[string]string) map[string]string {
 	return out
 }
 
-// writeCredentialsEnv merges lines into the configured global credential store
+// writeCredentialsEnv merges lines into Reasonix's global .env
 // and pins them into the current process env so the just-built session resolves
 // the key without a restart. Falls back to ~/.env only when Reasonix home can't
 // be resolved — never a project .env, so a migration keeps secrets out of the
@@ -568,6 +596,113 @@ func writeCredentialsEnv(home string, lines []string) error {
 			return os.WriteFile(filepath.Join(home, ".env"), []byte(strings.Join(lines, "\n")+"\n"), 0o600)
 		}
 		return err
+	}
+	return nil
+}
+
+func migrateSupportData(legacyDir, newDir string) []string {
+	var warnings []string
+	items := []string{"sessions", "projects", "skills", "archive", "hooks.json"}
+	for _, item := range items {
+		src := filepath.Join(legacyDir, item)
+		fi, err := os.Stat(src)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			warnings = append(warnings, fmt.Sprintf("failed to read legacy item %s: %v", item, err))
+			continue
+		}
+		dst := filepath.Join(newDir, item)
+		if fi.IsDir() {
+			if err := copyDir(src, dst); err != nil {
+				warnings = append(warnings, fmt.Sprintf("failed to migrate directory %s: %v", item, err))
+			} else {
+				warnings = append(warnings, fmt.Sprintf("successfully migrated directory %s", item))
+			}
+		} else {
+			if err := copyFile(src, dst); err != nil {
+				warnings = append(warnings, fmt.Sprintf("failed to migrate file %s: %v", item, err))
+			} else {
+				warnings = append(warnings, fmt.Sprintf("successfully migrated file %s", item))
+			}
+		}
+	}
+	return warnings
+}
+
+func copyFile(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	parentMode := os.FileMode(0o755)
+	if info.Mode().Perm()&0o077 == 0 {
+		parentMode = 0o700
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), parentMode); err != nil {
+		return err
+	}
+
+	perm := info.Mode().Perm()
+	if perm == 0 {
+		perm = 0o600
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err = io.Copy(out, in); err != nil {
+		return err
+	}
+	if err := out.Sync(); err != nil {
+		return err
+	}
+	return os.Chmod(dst, perm)
+}
+
+func copyDir(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	perm := info.Mode().Perm()
+	if perm == 0 {
+		perm = 0o700
+	}
+	if err := os.MkdirAll(dst, perm); err != nil {
+		return err
+	}
+	if err := os.Chmod(dst, perm); err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			if err := copyFile(srcPath, dstPath); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

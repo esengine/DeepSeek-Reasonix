@@ -141,6 +141,28 @@ func TestRebuildTodoStateRequiresToolResults(t *testing.T) {
 	}
 }
 
+func TestRebuildTodoStateHonorsEmptyTodoWriteClear(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID:        "t1",
+			Name:      "todo_write",
+			Arguments: `{"todos":[{"content":"a","status":"in_progress"}]}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: "t1", Name: "todo_write", Content: "Todos updated"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID:        "t2",
+			Name:      "todo_write",
+			Arguments: `{"todos":[]}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: "t2", Name: "todo_write", Content: "Todos updated"},
+	}
+	a := &Agent{}
+	a.rebuildTodoState(msgs)
+	if len(a.todoState) != 0 {
+		t.Fatalf("empty todo_write should clear rebuilt canonical state: %+v", a.todoState)
+	}
+}
+
 func TestSeedTodoState(t *testing.T) {
 	a := &Agent{sink: event.Discard}
 	todos := []evidence.TodoItem{

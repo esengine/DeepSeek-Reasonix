@@ -143,6 +143,35 @@ func TestApplyKnownOverridesPinsCodeGraphStdioToWorkspace(t *testing.T) {
 	}
 }
 
+func TestApplyKnownOverridesPinsCodebaseMemoryToWorkspace(t *testing.T) {
+	got := ApplyKnownOverrides(Spec{Name: "codebase-memory-mcp"}, "/workspace")
+	if got.Dir != "/workspace" {
+		t.Fatalf("codebase-memory-mcp stdio Dir = %q, want workspace root", got.Dir)
+	}
+	if !got.LowPriority {
+		t.Fatalf("codebase-memory-mcp should run at low priority")
+	}
+
+	preset := ApplyKnownOverrides(Spec{Name: "codebase-memory-mcp", Dir: "/custom"}, "/workspace")
+	if preset.Dir != "/custom" {
+		t.Fatalf("existing Dir should be preserved, got %q", preset.Dir)
+	}
+
+	httpSpec := ApplyKnownOverrides(Spec{Name: "codebase-memory-mcp", Type: "http"}, "/workspace")
+	if httpSpec.Dir != "" {
+		t.Fatalf("http codebase-memory-mcp should not receive stdio Dir, got %q", httpSpec.Dir)
+	}
+
+	npxSpec := ApplyKnownOverrides(Spec{
+		Name:    "custom",
+		Command: "npx",
+		Args:    []string{"-y", "codebase-memory-mcp@latest"},
+	}, "/workspace")
+	if npxSpec.Dir != "/workspace" || !npxSpec.LowPriority {
+		t.Fatalf("npx codebase-memory-mcp override missing: %+v", npxSpec)
+	}
+}
+
 func TestApplyKnownOverridesPreservesConfiguredCodeGraphDaemonIdleTimeout(t *testing.T) {
 	got := ApplyKnownOverrides(Spec{
 		Name: "codegraph",

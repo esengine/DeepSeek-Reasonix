@@ -6,10 +6,7 @@ import (
 	"testing"
 )
 
-// TestLoadDotEnvFallsBackToHome proves the unified-key behaviour: the working
-// directory's .env is still read as a fallback, and a key only present in ~/.env
-// is picked up too. Existing env vars beat file-backed credential sources.
-func TestLoadDotEnvFallsBackToHome(t *testing.T) {
+func TestLoadDotEnvDoesNotImportProjectOrHomeEnv(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 
@@ -35,14 +32,14 @@ func TestLoadDotEnvFallsBackToHome(t *testing.T) {
 
 	loadDotEnv()
 
-	if got := os.Getenv("KEY_CWD"); got != "from_cwd" {
-		t.Errorf("cwd-only key not loaded: KEY_CWD=%q", got)
+	if got := os.Getenv("KEY_CWD"); got != "" {
+		t.Errorf("project .env key was imported into process env: KEY_CWD=%q", got)
 	}
-	if got := os.Getenv("KEY_HOME"); got != "from_home" {
-		t.Errorf("~/.env fallback failed: KEY_HOME=%q want from_home", got)
+	if got := os.Getenv("KEY_HOME"); got != "" {
+		t.Errorf("home .env key was loaded: KEY_HOME=%q", got)
 	}
-	if got := os.Getenv("KEY_SHARED"); got != "cwd_wins" {
-		t.Errorf("cwd .env should take precedence over ~/.env: KEY_SHARED=%q want cwd_wins", got)
+	if got := os.Getenv("KEY_SHARED"); got != "" {
+		t.Errorf("project/home .env shared key was imported: KEY_SHARED=%q", got)
 	}
 }
 
@@ -86,6 +83,251 @@ func TestLoadDotEnvReadsGlobalCredentials(t *testing.T) {
 	}
 	if got := os.Getenv("KEY_SHARED"); got != "global_wins" {
 		t.Errorf("global credentials should win over project .env: KEY_SHARED=%q want global_wins", got)
+	}
+}
+
+func TestLoadForRootExpandsPluginAuthFromProjectDotEnv(t *testing.T) {
+	project := t.TempDir()
+	cfgHome := t.TempDir()
+
+	t.Setenv("HOME", cfgHome)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	t.Setenv("USERPROFILE", cfgHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(cfgHome, ".config"))
+	t.Setenv("AppData", filepath.Join(cfgHome, "AppData"))
+	t.Setenv("STRIPE_KEY", "")
+	os.Unsetenv("STRIPE_KEY")
+
+	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("STRIPE_KEY=project-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, ".mcp.json"), []byte(`{
+  "mcpServers": {
+    "stripe": {
+      "type": "http",
+      "url": "https://mcp.example.test",
+      "headers": { "Authorization": "Bearer ${STRIPE_KEY}" }
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadForRoot(project)
+	if err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
+	}
+	if len(cfg.Plugins) != 1 {
+		t.Fatalf("plugins = %+v", cfg.Plugins)
+	}
+	got := cfg.Plugins[0].ExpandedPlugin().Headers["Authorization"]
+	if got != "Bearer project-token" {
+		t.Fatalf("expanded auth header = %q, want project token", got)
+	}
+	if got := os.Getenv("STRIPE_KEY"); got != "" {
+		t.Fatalf("project .env leaked into process env: STRIPE_KEY=%q", got)
+	}
+}
+
+func TestLoadForRootScopesProjectDotEnvPerWorkspace(t *testing.T) {
+	home := t.TempDir()
+	projectA := t.TempDir()
+	projectB := t.TempDir()
+
+	t.Setenv("HOME", home)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Setenv("SHARED_TOKEN", "")
+	os.Unsetenv("SHARED_TOKEN")
+
+	for _, tc := range []struct {
+		root  string
+		value string
+	}{
+		{projectA, "token-a"},
+		{projectB, "token-b"},
+	} {
+		if err := os.WriteFile(filepath.Join(tc.root, ".env"), []byte("SHARED_TOKEN="+tc.value+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tc.root, ".mcp.json"), []byte(`{
+  "mcpServers": {
+    "svc": {
+      "type": "http",
+      "url": "https://mcp.example.test",
+      "headers": { "Authorization": "Bearer ${SHARED_TOKEN}" }
+    }
+  }
+}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfgA, err := LoadForRoot(projectA)
+	if err != nil {
+		t.Fatalf("LoadForRoot A: %v", err)
+	}
+	cfgB, err := LoadForRoot(projectB)
+	if err != nil {
+		t.Fatalf("LoadForRoot B: %v", err)
+	}
+	if got := cfgA.Plugins[0].ExpandedPlugin().Headers["Authorization"]; got != "Bearer token-a" {
+		t.Fatalf("project A auth = %q, want token-a", got)
+	}
+	if got := cfgB.Plugins[0].ExpandedPlugin().Headers["Authorization"]; got != "Bearer token-b" {
+		t.Fatalf("project B auth = %q, want token-b", got)
+	}
+	if got := os.Getenv("SHARED_TOKEN"); got != "" {
+		t.Fatalf("project token leaked into process env: %q", got)
+	}
+}
+
+func TestLoadForRootFiltersProjectDotEnvControlVars(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	redirect := filepath.Join(project, "state")
+
+	t.Setenv("HOME", home)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Setenv("REASONIX_STATE_HOME", "")
+	os.Unsetenv("REASONIX_STATE_HOME")
+
+	wantCred := UserCredentialsPath()
+	if wantCred == "" {
+		t.Skip("user credentials path unavailable")
+	}
+	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("REASONIX_STATE_HOME="+redirect+"\nPLUGIN_TOKEN=project-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, ".mcp.json"), []byte(`{
+  "mcpServers": {
+    "svc": {
+      "type": "http",
+      "url": "https://mcp.example.test",
+      "headers": {
+        "Authorization": "Bearer ${PLUGIN_TOKEN}",
+        "State": "${REASONIX_STATE_HOME:-default-state}"
+      }
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadForRoot(project)
+	if err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
+	}
+	headers := cfg.Plugins[0].ExpandedPlugin().Headers
+	if got := headers["Authorization"]; got != "Bearer project-token" {
+		t.Fatalf("plugin token = %q, want project token", got)
+	}
+	if got := headers["State"]; got != "default-state" {
+		t.Fatalf("control var expansion = %q, want default-state", got)
+	}
+	if got := UserCredentialsPath(); got != wantCred {
+		t.Fatalf("project .env redirected credentials path: %q want %q", got, wantCred)
+	}
+	if got := os.Getenv("REASONIX_STATE_HOME"); got != "" {
+		t.Fatalf("project control var leaked into process env: %q", got)
+	}
+}
+
+func TestLoadForRootResolvesProviderCredentialsOverInheritedEnv(t *testing.T) {
+	project := t.TempDir()
+	cfgHome := t.TempDir()
+	key := "KEY_PROVIDER_GLOBAL_PRIORITY"
+
+	t.Setenv("HOME", cfgHome)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	t.Setenv("USERPROFILE", cfgHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(cfgHome, ".config"))
+	t.Setenv("AppData", filepath.Join(cfgHome, "AppData"))
+	t.Setenv(key, "from_env")
+
+	cred := UserCredentialsPath()
+	if cred == "" {
+		t.Skip("user config dir unresolved on this platform")
+	}
+	if err := os.MkdirAll(filepath.Dir(cred), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cred, []byte(key+"=from_credentials\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+default_model = "custom/m"
+[[providers]]
+name = "custom"
+kind = "openai"
+base_url = "https://example.invalid/v1"
+model = "m"
+api_key_env = "`+key+`"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadForRoot(project)
+	if err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
+	}
+	provider, ok := cfg.Provider("custom")
+	if !ok {
+		t.Fatalf("provider missing: %+v", cfg.Providers)
+	}
+	if got := provider.APIKey(); got != "from_credentials" {
+		t.Fatalf("provider API key = %q, want credentials value", got)
+	}
+	if got := os.Getenv(key); got != "from_credentials" {
+		t.Fatalf("process env = %q, want credentials value pinned over inherited env", got)
+	}
+}
+
+func TestLoadForRootIgnoresProjectProviderEnvAndInheritedEnv(t *testing.T) {
+	project := t.TempDir()
+	cfgHome := t.TempDir()
+	key := "KEY_PROVIDER_PROJECT_PRIORITY"
+
+	t.Setenv("HOME", cfgHome)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	t.Setenv("USERPROFILE", cfgHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(cfgHome, ".config"))
+	t.Setenv("AppData", filepath.Join(cfgHome, "AppData"))
+	t.Setenv(key, "from_env")
+
+	if err := os.WriteFile(filepath.Join(project, ".env"), []byte(key+"=from_project\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+default_model = "custom/m"
+[[providers]]
+name = "custom"
+kind = "openai"
+base_url = "https://example.invalid/v1"
+model = "m"
+api_key_env = "`+key+`"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadForRoot(project)
+	if err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
+	}
+	provider, ok := cfg.Provider("custom")
+	if !ok {
+		t.Fatalf("provider missing: %+v", cfg.Providers)
+	}
+	if got := provider.APIKey(); got != "" {
+		t.Fatalf("provider API key = %q, want no key without global credentials", got)
+	}
+	if got := os.Getenv(key); got != "from_env" {
+		t.Fatalf("process env = %q, want inherited env left untouched", got)
 	}
 }
 
@@ -317,6 +559,37 @@ func TestStoreCredentialLinesFileMode(t *testing.T) {
 	}
 }
 
+func TestRemoveCredentialMarksClearedAndSetRemovesMarker(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+
+	if _, err := SetCredential("KEY_REMOVE_MARKER", "old"); err != nil {
+		t.Fatalf("SetCredential old: %v", err)
+	}
+	if err := RemoveCredential("KEY_REMOVE_MARKER"); err != nil {
+		t.Fatalf("RemoveCredential: %v", err)
+	}
+	if CredentialStored("KEY_REMOVE_MARKER") {
+		t.Fatal("removed key should not be stored")
+	}
+	if !credentialCurrentStoreClearedKey("KEY_REMOVE_MARKER") {
+		t.Fatal("removed key should leave a cleared marker")
+	}
+	if _, err := SetCredential("KEY_REMOVE_MARKER", "new"); err != nil {
+		t.Fatalf("SetCredential new: %v", err)
+	}
+	data, err := os.ReadFile(UserCredentialsPath())
+	if err != nil {
+		t.Fatalf("read credentials: %v", err)
+	}
+	if got := string(data); got != "KEY_REMOVE_MARKER=new\n" {
+		t.Fatalf("credentials after re-set = %q", got)
+	}
+}
+
 func TestStoreCredentialLinesRejectsUnsafeFileLines(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -388,23 +661,26 @@ func TestProjectConfigCannotOverrideCredentialStoreMode(t *testing.T) {
 	}
 }
 
-// TestLoadDotEnvDoesNotOverrideEnv confirms an already-set environment variable
-// beats both .env files (the documented first-wins contract).
-func TestLoadDotEnvDoesNotOverrideEnv(t *testing.T) {
-	cwd := t.TempDir()
-	if err := os.WriteFile(filepath.Join(cwd, ".env"), []byte("PINNED=from_file\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(cwd)
+// TestLoadDotEnvGlobalCredentialsOverrideEnv confirms Reasonix-owned global
+// credentials beat inherited environment variables.
+func TestLoadDotEnvGlobalCredentialsOverrideEnv(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	t.Setenv("PINNED", "from_env")
+	if err := os.MkdirAll(filepath.Dir(UserCredentialsPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(UserCredentialsPath(), []byte("PINNED=from_credentials\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	loadDotEnv()
 
-	if got := os.Getenv("PINNED"); got != "from_env" {
-		t.Errorf("env var must win over .env: PINNED=%q want from_env", got)
+	if got := os.Getenv("PINNED"); got != "from_credentials" {
+		t.Errorf("global credentials must win over inherited env: PINNED=%q want from_credentials", got)
 	}
 }
