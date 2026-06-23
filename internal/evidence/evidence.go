@@ -34,16 +34,17 @@ type TodoStepMatch struct {
 // Receipt is the host-runtime record of one tool call. It stays in memory for
 // the current agent turn and is not serialized into prompts or session state.
 type Receipt struct {
-	ToolName string          `json:"tool_name"`
-	Args     json.RawMessage `json:"args,omitempty"`
-	Success  bool            `json:"success"`
-	Command  string          `json:"command,omitempty"`
-	Step     string          `json:"step,omitempty"`
-	TodoStep *TodoStepMatch  `json:"todo_step,omitempty"`
-	Paths    []string        `json:"paths,omitempty"`
-	Read     bool            `json:"read,omitempty"`
-	Write    bool            `json:"write,omitempty"`
-	Todos    []TodoItem      `json:"todos,omitempty"`
+	ToolName  string          `json:"tool_name"`
+	Args      json.RawMessage `json:"args,omitempty"`
+	Success   bool            `json:"success"`
+	Command   string          `json:"command,omitempty"`
+	Step      string          `json:"step,omitempty"`
+	StepProof bool            `json:"step_proof,omitempty"`
+	TodoStep  *TodoStepMatch  `json:"todo_step,omitempty"`
+	Paths     []string        `json:"paths,omitempty"`
+	Read      bool            `json:"read,omitempty"`
+	Write     bool            `json:"write,omitempty"`
+	Todos     []TodoItem      `json:"todos,omitempty"`
 }
 
 // Ledger stores the receipts available to complete_step for the current turn.
@@ -82,7 +83,7 @@ func (l *Ledger) Record(r Receipt) {
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if r.Success && r.ToolName == "complete_step" && r.Step != "" && r.TodoStep == nil {
+	if r.ToolName == "complete_step" && r.Step != "" && r.TodoStep == nil {
 		if match := latestTodoStep(r.Step, l.receipts); match.Found {
 			r.TodoStep = &match
 		}
@@ -423,12 +424,14 @@ func (l *Ledger) UnverifiedCompletedTodos(current []TodoItem) (missing []TodoSte
 	l.mu.Unlock()
 
 	var previous []TodoItem
+	baseline := -1
 	for i := len(receipts) - 1; i >= 0; i-- {
 		r := receipts[i]
 		if !r.Success || r.ToolName != "todo_write" {
 			continue
 		}
 		previous = r.Todos
+		baseline = i
 		hasBaseline = true
 		break
 	}
@@ -447,6 +450,9 @@ func (l *Ledger) UnverifiedCompletedTodos(current []TodoItem) (missing []TodoSte
 		if hasSuccessfulCompleteStepForTodo(receipts, index, current) {
 			continue
 		}
+		if hasFailedCompleteStepRecoveryForTodo(receipts, baseline, index, current) {
+			continue
+		}
 		missing = append(missing, TodoStepMatch{
 			Found:      true,
 			Index:      index,
@@ -456,6 +462,45 @@ func (l *Ledger) UnverifiedCompletedTodos(current []TodoItem) (missing []TodoSte
 		})
 	}
 	return missing, true
+}
+
+func hasFailedCompleteStepRecoveryForTodo(receipts []Receipt, baseline int, index int, current []TodoItem) bool {
+	if !hasSuccessfulProgressAfterTodoBaseline(receipts, baseline) {
+		return false
+	}
+	for i := baseline + 1; i < len(receipts); i++ {
+		r := receipts[i]
+		if r.Success || r.ToolName != "complete_step" || strings.TrimSpace(r.Step) == "" || !r.StepProof {
+			continue
+		}
+		if r.TodoStep != nil && r.TodoStep.Found {
+			if index < 1 || index > len(current) {
+				continue
+			}
+			if sameTodoMatch(current[index-1], *r.TodoStep) {
+				return true
+			}
+			if !todoContentRelates(current[index-1], *r.TodoStep) {
+				continue
+			}
+		}
+		match := matchTodoStep(r.Step, current)
+		if match.Found && match.Index == index {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSuccessfulProgressAfterTodoBaseline(receipts []Receipt, baseline int) bool {
+	for i := baseline + 1; i < len(receipts); i++ {
+		r := receipts[i]
+		if !r.Success || r.ToolName == "todo_write" || r.ToolName == "complete_step" || r.Read {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func (l *Ledger) hasSuccessfulPaths(paths []string, accept func(Receipt) bool) bool {
@@ -570,6 +615,7 @@ func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, re
 		}
 		if toolName == "complete_step" {
 			r.Step = stringField(fields, "step")
+			r.StepProof = completeStepHasProof(fields)
 		}
 		if toolName == "todo_write" {
 			r.Todos = todoItemsField(fields, "todos")
@@ -659,6 +705,26 @@ func todoItemsField(fields map[string]json.RawMessage, key string) []TodoItem {
 		return nil
 	}
 	return normalizeTodos(todos)
+}
+
+func completeStepHasProof(fields map[string]json.RawMessage) bool {
+	raw, ok := fields["evidence"]
+	if !ok {
+		return false
+	}
+	var items []struct {
+		Kind    string `json:"kind"`
+		Summary string `json:"summary"`
+	}
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return false
+	}
+	for _, item := range items {
+		if strings.TrimSpace(item.Kind) != "" && strings.TrimSpace(item.Summary) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeTodos(todos []TodoItem) []TodoItem {

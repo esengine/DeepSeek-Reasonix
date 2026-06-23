@@ -663,6 +663,49 @@ func TestEvidenceFlowRejectsTodoCompletionWithoutCompleteStep(t *testing.T) {
 	}
 }
 
+func TestEvidenceFlowRecoversTodoCompletionAfterFailedCompleteStepWithProgress(t *testing.T) {
+	todoWrite, ok := tool.LookupBuiltin("todo_write")
+	if !ok {
+		t.Fatal("todo_write builtin not registered")
+	}
+	completeStep, ok := tool.LookupBuiltin("complete_step")
+	if !ok {
+		t.Fatal("complete_step builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(todoWrite)
+	reg.Add(fakeTool{name: "bash", readOnly: false})
+	reg.Add(completeStep)
+
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{
+			toolCallChunk("c1", "todo_write", `{"todos":[{"content":"Run project script","status":"in_progress"}]}`),
+			toolCallChunk("c2", "bash", `{"command":"python \"script.py\""}`),
+			toolCallChunk("c3", "complete_step", `{
+				"step":"Run project script",
+				"result":"script ran",
+				"evidence":[{"kind":"verification","summary":"script completed","command":"python other.py"}]
+			}`),
+			toolCallChunk("c4", "todo_write", `{"todos":[{"content":"Run project script","status":"completed"}]}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
+	}}
+
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+	if err := a.Run(context.Background(), "recover after a failed complete_step"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	stepResult := lastToolResult(a.session, "complete_step")
+	if !strings.Contains(stepResult, "no matching successful bash receipt") {
+		t.Fatalf("complete_step result = %q, want the sign-off attempt to fail first", stepResult)
+	}
+	if got := lastToolResult(a.session, "todo_write"); !strings.Contains(got, "1 completed") {
+		t.Fatalf("todo_write result = %q, want completion recovery accepted", got)
+	}
+}
+
 func TestEvidenceFlowRecoversAfterBatchTodoCompletionRejection(t *testing.T) {
 	todoWrite, ok := tool.LookupBuiltin("todo_write")
 	if !ok {

@@ -1801,9 +1801,9 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	result, err := t.Execute(cctx, json.RawMessage(call.Arguments))
 	if a.evidence != nil {
 		if call.Name == "complete_step" {
+			rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, t.ReadOnly())
+			a.evidence.Record(rec)
 			if err == nil {
-				rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), true, t.ReadOnly())
-				a.evidence.Record(rec)
 				a.advanceCanonicalTodo(rec.Step)
 			}
 		} else {

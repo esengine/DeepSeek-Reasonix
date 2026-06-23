@@ -156,8 +156,20 @@ func TestReceiptFromToolCallExtractsCompleteStep(t *testing.T) {
 	if receipt.Step != "Add parser" {
 		t.Fatalf("complete_step step = %q", receipt.Step)
 	}
+	if !receipt.StepProof {
+		t.Fatalf("complete_step evidence proof not extracted: %+v", receipt)
+	}
 	if receipt.Read {
 		t.Fatalf("complete_step should not be treated as read-only context: %+v", receipt)
+	}
+
+	emptyProof := ReceiptFromToolCall("complete_step", json.RawMessage(`{
+		"step":"Add parser",
+		"result":"parser added",
+		"evidence":[]
+	}`), false, true)
+	if emptyProof.StepProof {
+		t.Fatalf("empty complete_step evidence should not count as proof: %+v", emptyProof)
 	}
 }
 
