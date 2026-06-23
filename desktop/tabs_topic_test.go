@@ -1381,7 +1381,7 @@ func TestAutoTitleTopicStripsReasoningLanguagePrefix(t *testing.T) {
 		t.Fatalf("write session: %v", err)
 	}
 
-	title, updated := autoTitleTopicFromSession(projectRoot, topic.ID, sessionPath)
+	title, updated, _ := autoTitleTopicFromSession(projectRoot, topic.ID, sessionPath, "")
 	if !updated {
 		t.Fatal("auto title should update")
 	}
