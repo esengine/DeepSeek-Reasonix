@@ -281,13 +281,16 @@ func TestLedgerRequiresCompleteStepForNewCompletedTodos(t *testing.T) {
 		t.Fatalf("missing = %+v, want only Add parser", missing)
 	}
 
+	// A failed complete_step that matches the step still authorizes completion:
+	// the model acted in good faith and shouldn't deadlock on a technicality
+	// like command quoting. See #5128.
 	ledger.Record(Receipt{ToolName: "complete_step", Success: false, Step: "Add parser"})
 	missing, hasBaseline = ledger.UnverifiedCompletedTodos(current)
 	if !hasBaseline {
 		t.Fatal("expected prior todo_write baseline after failed complete_step")
 	}
-	if len(missing) != 1 || missing[0].Content != "Add parser" {
-		t.Fatalf("failed complete_step should not authorize completion, missing = %+v", missing)
+	if len(missing) != 0 {
+		t.Fatalf("attempted complete_step should authorize completion despite failure, missing = %+v", missing)
 	}
 
 	ledger.Record(Receipt{ToolName: "complete_step", Success: true, Step: "Add parser"})

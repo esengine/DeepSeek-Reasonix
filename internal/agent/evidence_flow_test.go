@@ -532,7 +532,7 @@ func TestEvidenceFlowRejectsUncitedCommand(t *testing.T) {
 	}
 
 	got := toolResult(a.session, "complete_step")
-	if !strings.Contains(got, "no matching successful bash receipt") {
+	if !strings.Contains(got, "has no matching successful receipt") {
 		t.Fatalf("complete_step result = %q, want the uncited command rejected", got)
 	}
 	if strings.Contains(got, "host-verified") {

@@ -447,6 +447,12 @@ func (l *Ledger) UnverifiedCompletedTodos(current []TodoItem) (missing []TodoSte
 		if hasSuccessfulCompleteStepForTodo(receipts, index, current) {
 			continue
 		}
+		// If a complete_step was attempted for this step but failed on a
+		// technicality (e.g. command mismatch), the model acted in good faith.
+		// Allow the todo_write completion so a mismatch doesn't cause deadlock.
+		if hasAttemptedCompleteStepForTodo(receipts, index, current) {
+			continue
+		}
 		missing = append(missing, TodoStepMatch{
 			Found:      true,
 			Index:      index,
@@ -711,8 +717,34 @@ func hasSuccessfulCompleteStepForTodo(receipts []Receipt, index int, current []T
 			if sameTodoMatch(current[index-1], *r.TodoStep) {
 				return true
 			}
-			// Content changed: allow the index/text fallback only when old and
-			// new overlap, so a replaced todo can't reuse an old receipt.
+			if !todoContentRelates(current[index-1], *r.TodoStep) {
+				continue
+			}
+		}
+		match := matchTodoStep(r.Step, current)
+		if match.Found && match.Index == index {
+			return true
+		}
+	}
+	return false
+}
+
+// hasAttemptedCompleteStepForTodo is like hasSuccessfulCompleteStepForTodo but
+// accepts failed complete_step receipts too. A model that attempted to sign off
+// with evidence but hit a technical mismatch (e.g. command quoting) acted in
+// good faith and shouldn't be deadlocked. See #5128.
+func hasAttemptedCompleteStepForTodo(receipts []Receipt, index int, current []TodoItem) bool {
+	for _, r := range receipts {
+		if r.ToolName != "complete_step" || strings.TrimSpace(r.Step) == "" {
+			continue
+		}
+		if r.TodoStep != nil && r.TodoStep.Found {
+			if index < 1 || index > len(current) {
+				continue
+			}
+			if sameTodoMatch(current[index-1], *r.TodoStep) {
+				return true
+			}
 			if !todoContentRelates(current[index-1], *r.TodoStep) {
 				continue
 			}

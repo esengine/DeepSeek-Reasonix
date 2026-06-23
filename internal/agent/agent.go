@@ -1801,9 +1801,14 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	result, err := t.Execute(cctx, json.RawMessage(call.Arguments))
 	if a.evidence != nil {
 		if call.Name == "complete_step" {
-			if err == nil {
-				rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), true, t.ReadOnly())
-				a.evidence.Record(rec)
+			// Record even failed complete_step receipts: a model that tried to
+			// sign off with evidence but hit a technical mismatch (command
+			// quoting, etc.) acted in good faith and shouldn't be deadlocked
+			// when it falls back to todo_write. See #5128.
+			success := err == nil
+			rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), success, t.ReadOnly())
+			a.evidence.Record(rec)
+			if success {
 				a.advanceCanonicalTodo(rec.Step)
 			}
 		} else {
