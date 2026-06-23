@@ -1139,7 +1139,9 @@ func (a *App) RemoveWorkspace(dir string) error {
 
 	for _, tab := range workspaceTabs {
 		if tab.Ctrl != nil {
-			tab.Ctrl.Snapshot()
+			if err := tab.Ctrl.Snapshot(); err != nil {
+				return err
+			}
 			tab.Ctrl.Close()
 		}
 		if tab.sink != nil {
@@ -1170,7 +1172,9 @@ func (a *App) RemoveWorkspace(dir string) error {
 		// is not left in a headless state.
 		if len(a.tabs) == 0 {
 			a.mu.Unlock()
-			a.OpenGlobalTab("")
+			if _, err := a.OpenGlobalTab(""); err != nil {
+				return err
+			}
 			a.mu.Lock()
 		}
 		a.saveTabsLocked()
