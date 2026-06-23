@@ -1470,6 +1470,90 @@ func (a *App) CloseTab(tabID string) error {
 	return nil
 }
 
+func (a *App) removeWorkspaceTabs(root string) {
+	root = normalizeProjectRoot(root)
+	if root == "" {
+		return
+	}
+
+	var removed []*WorkspaceTab
+	var fallback *WorkspaceTab
+	a.mu.Lock()
+	for id, tab := range a.tabs {
+		if tab == nil || tab.Scope != "project" || !sameDesktopPath(tab.WorkspaceRoot, root) {
+			continue
+		}
+		if tab.Ctrl != nil && !tab.ReadOnly {
+			_ = tab.Ctrl.Snapshot()
+		}
+		removed = append(removed, tab)
+		delete(a.tabs, id)
+	}
+	if len(removed) == 0 {
+		a.mu.Unlock()
+		return
+	}
+
+	nextOrder := a.tabOrder[:0]
+	for _, id := range a.tabOrder {
+		if _, ok := a.tabs[id]; ok {
+			nextOrder = append(nextOrder, id)
+		}
+	}
+	a.tabOrder = nextOrder
+	if _, ok := a.tabs[a.activeTabID]; !ok {
+		a.activeTabID = ""
+		if len(a.tabOrder) > 0 {
+			a.activeTabID = a.tabOrder[0]
+		}
+	}
+	if len(a.tabs) == 0 {
+		fallback = &WorkspaceTab{
+			ID:               a.newUniqueTabIDLocked(),
+			Scope:            "global",
+			WorkspaceRoot:    globalTabWorkspaceRoot(),
+			TopicTitle:       "Global",
+			tokenMode:        boot.TokenModeFull,
+			mode:             "normal",
+			toolApprovalMode: control.ToolApprovalAsk,
+			disabledMCP:      map[string]ServerView{},
+		}
+		fallback.sink = &tabEventSink{tabID: fallback.ID, app: a, ctx: a.ctx}
+		a.tabs[fallback.ID] = fallback
+		a.tabOrder = append(a.tabOrder, fallback.ID)
+		a.activeTabID = fallback.ID
+	}
+	dir, entries, activeID, version := a.saveTabsCollectLocked()
+	a.mu.Unlock()
+
+	a.saveTabsWrite(dir, entries, activeID, version)
+	for _, tab := range removed {
+		a.closeRemovedWorkspaceTab(tab)
+	}
+	if fallback != nil && a.ctx != nil {
+		a.startTabControllerBuild(fallback)
+	}
+}
+
+func (a *App) closeRemovedWorkspaceTab(tab *WorkspaceTab) {
+	if tab == nil {
+		return
+	}
+	if tab.Ctrl != nil {
+		if tab.hasActiveRuntimeWork() && a.detachSessionRuntime(tab) {
+			return
+		}
+		tab.Ctrl.SetSessionPath("")
+		a.quiesceTabAutosave(tab)
+		tab.Ctrl.Cancel()
+		tab.Ctrl.Close()
+		a.releaseTabSharedHost(tab)
+	}
+	if tab.sink != nil {
+		tab.sink.clearContext()
+	}
+}
+
 // buildTabController assembles a controller for a tab in the background, the
 // same way buildController works for the single-controller App. On success it
 // wires the controller and flips Ready; on failure it stores StartupErr.
@@ -2611,7 +2695,7 @@ func removeProject(root string) error {
 	f := loadProjectsFile()
 	projects := make([]desktopProject, 0, len(f.Projects))
 	for _, p := range f.Projects {
-		if p.Root != root {
+		if !sameDesktopPath(p.Root, root) {
 			projects = append(projects, p)
 		}
 	}

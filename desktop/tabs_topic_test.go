@@ -996,6 +996,7 @@ func TestRemoveWorkspaceUsesSharedProjectRegistryForCurrentProject(t *testing.T)
 	app.tabs[tab.ID] = tab
 	app.tabOrder = []string{tab.ID}
 	app.activeTabID = tab.ID
+	app.saveTabsLocked()
 
 	if err := app.RemoveWorkspace(projectRoot); err != nil {
 		t.Fatalf("remove current project: %v", err)
@@ -1005,6 +1006,15 @@ func TestRemoveWorkspaceUsesSharedProjectRegistryForCurrentProject(t *testing.T)
 	}
 	if got := app.ListProjectTree(); len(got) != 1 || got[0].Kind != "global_folder" || len(got[0].Children) != 0 {
 		t.Fatalf("project tree after remove = %+v, want empty Global folder", got)
+	}
+	saved := loadTabsFile()
+	if len(saved.Tabs) != 1 || saved.Tabs[0].Scope != "global" {
+		t.Fatalf("saved tabs after remove = %+v, want one Global fallback tab", saved.Tabs)
+	}
+	for _, entry := range saved.Tabs {
+		if normalizeProjectRoot(entry.WorkspaceRoot) == normalizeProjectRoot(projectRoot) {
+			t.Fatalf("removed project tab still persisted after remove: %+v", entry)
+		}
 	}
 }
 

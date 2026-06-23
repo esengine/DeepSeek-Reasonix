@@ -2785,9 +2785,10 @@ func (a *App) RemoveWorkspace(dir string) error {
 	if err := removeProject(dir); err != nil {
 		return err
 	}
+	a.removeWorkspaceTabs(dir)
 	// If the removed workspace was the active one, clear the pointer
 	// so we don't leave a stale reference to a deleted project.
-	if loadWorkspace() == dir {
+	if sameDesktopPath(loadWorkspace(), dir) {
 		if remaining := loadProjectsFile(); len(remaining.Projects) > 0 {
 			// Fall back to the first remaining project
 			saveWorkspace(remaining.Projects[0].Root)
