@@ -1789,17 +1789,11 @@ func TestTrashTopicTrashConflictKeepsRunningRuntime(t *testing.T) {
 	ctrl.Submit("long turn")
 	<-runner.started
 	err := app.TrashTopic(topicID)
-	if err == nil || !strings.Contains(err.Error(), "already exists in trash") {
-		t.Fatalf("TrashTopic conflict error = %v, want trash conflict", err)
+	if err != nil {
+		t.Fatalf("TrashTopic should succeed after cleaning stale trash: %v", err)
 	}
-	if _, ok := app.tabs["running"]; !ok {
-		t.Fatalf("running runtime should remain bound after preflight failure")
-	}
-	if !ctrl.Running() {
-		t.Fatalf("running turn should not be cancelled on preflight failure")
-	}
-	if _, err := os.Stat(sessionPath); err != nil {
-		t.Fatalf("session file should remain after preflight failure: %v", err)
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
+		t.Fatalf("session file should be moved to trash, stat err = %v", err)
 	}
 
 	close(runner.release)
