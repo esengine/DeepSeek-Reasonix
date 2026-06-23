@@ -104,6 +104,23 @@ func estimateTokens(s string) int {
 	return len(s) / 4
 }
 
+// estimateSessionTokens returns a rough estimate of the current prompt size
+// by summing the length-estimated tokens of every message in the session.
+// This is used to detect compaction urgency after large tool results are
+// written but before the next API usage report arrives.
+func (a *Agent) estimateSessionTokens() int {
+	total := 0
+	for _, m := range a.Session().Messages {
+		total += estimateTokens(m.Content)
+		if len(m.ToolCalls) > 0 {
+			for _, tc := range m.ToolCalls {
+				total += estimateTokens(tc.Name) + estimateTokens(tc.Arguments)
+			}
+		}
+	}
+	return total
+}
+
 // SchemaTokenCosts returns per-tool token cost estimates for display.
 func SchemaTokenCosts(schemas []provider.ToolSchema) []ToolSchemaCost {
 	out := make([]ToolSchemaCost, 0, len(schemas))

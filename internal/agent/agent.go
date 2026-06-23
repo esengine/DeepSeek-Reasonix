@@ -825,6 +825,17 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 			return ctx.Err()
 		}
 
+		// Tool results (especially from parallel_tasks) can add thousands of tokens
+		// to the session after the last API usage was reported. Estimate the actual
+		// prompt size now and force-compact if it exceeds the force ratio, so the
+		// next turn does not hit the model's context window limit.
+		if a.contextWindow > 0 && a.compactForceRatio > 0 {
+			est := a.estimateSessionTokens()
+			if est >= int(float64(a.contextWindow)*a.compactForceRatio) {
+				a.maybeCompact(ctx, &provider.Usage{PromptTokens: a.contextWindow})
+			}
+		}
+
 		// The prompt only grows from here; compact before the next turn so it
 		// stays within the model's window.
 		a.maybeCompact(ctx, usage)
