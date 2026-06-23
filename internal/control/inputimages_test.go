@@ -39,7 +39,7 @@ func TestControllerInputImagesResolvesWorkspaceImage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	urls := (&Controller{cpRoot: workspace}).inputImages("look at @docs/diagram.png")
+	urls := (&Controller{workspaceRoot: workspace}).inputImages("look at @docs/diagram.png")
 	if len(urls) != 1 {
 		t.Fatalf("inputImages = %v, want one resolved data URL", urls)
 	}
@@ -55,7 +55,7 @@ func TestControllerInputImagesResolvesAbsoluteWorkspaceImage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	urls := (&Controller{cpRoot: workspace}).inputImages("look at @" + path)
+	urls := (&Controller{workspaceRoot: workspace}).inputImages("look at @" + path)
 	if len(urls) != 1 {
 		t.Fatalf("inputImages = %v, want one resolved data URL", urls)
 	}

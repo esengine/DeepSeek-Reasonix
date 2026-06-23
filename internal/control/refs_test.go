@@ -513,12 +513,12 @@ func TestDetectRefsUsesWorkspaceRootNotProcessCWD(t *testing.T) {
 		}
 	})
 
-	refs := (&Controller{cpRoot: workspace}).detectRefs("see @cwd-only.txt and @workspace.txt")
+	refs := (&Controller{workspaceRoot: workspace}).detectRefs("see @cwd-only.txt and @workspace.txt")
 	if len(refs) != 1 || refs[0].raw != "workspace.txt" {
 		t.Fatalf("detectRefs should only see workspace files, got %+v", refs)
 	}
 
-	block, errs := (&Controller{cpRoot: workspace}).ResolveRefs(context.Background(), "see @cwd-only.txt")
+	block, errs := (&Controller{workspaceRoot: workspace}).ResolveRefs(context.Background(), "see @cwd-only.txt")
 	if block != "" || len(errs) != 0 {
 		t.Fatalf("cwd-only file should not be treated as a ref, block=%q errs=%v", block, errs)
 	}
@@ -534,7 +534,7 @@ func TestResolveRefsWithWorkspaceRootStoresRelativePath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := &Controller{cpRoot: workspace}
+	c := &Controller{workspaceRoot: workspace}
 	refs := c.detectRefs("see @" + absPath)
 	if len(refs) != 1 {
 		t.Fatalf("detectRefs absolute workspace path = %+v, want 1 ref", refs)
@@ -568,7 +568,7 @@ func TestWorkspaceImageRefsAlsoAttachAsModelImages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := &Controller{cpRoot: workspace}
+	c := &Controller{workspaceRoot: workspace}
 	refs := c.detectRefs("see @" + diagram + " @" + attachment)
 	if len(refs) != 2 {
 		t.Fatalf("detectRefs = %+v, want two refs", refs)

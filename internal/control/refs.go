@@ -123,8 +123,8 @@ func (c *Controller) detectRefsMode(line string, scopedOnly bool) []ref {
 			refs = append(refs, ref{kind: refResource, server: tok[:i], uri: tok[i+1:], raw: tok})
 			continue
 		}
-		if c.cpRoot != "" {
-			if rel, ok := workspaceRefPath(tok, c.cpRoot); ok {
+		if c.workspaceRoot != "" {
+			if rel, ok := workspaceRefPath(tok, c.workspaceRoot); ok {
 				kind := refFile
 				if isAttachmentRef(rel) && isImageAttachmentRef(rel) {
 					kind = refImage
@@ -158,7 +158,7 @@ func (c *Controller) HasRefs(line string) bool {
 func (c *Controller) inputImages(line string) []string {
 	var urls []string
 	for _, r := range c.detectRefs(line) {
-		if url, err := visionRefImageDataURL(r, c.cpRoot); err == nil {
+		if url, err := visionRefImageDataURL(r, c.workspaceRoot); err == nil {
 			urls = append(urls, url)
 		}
 	}
@@ -433,7 +433,7 @@ func (c *Controller) ResolveScopedRefs(ctx context.Context, line string) (block 
 
 func (c *Controller) resolveRefs(ctx context.Context, line string, scopedOnly bool) (block string, errs []string) {
 	refs := c.detectRefsMode(line, scopedOnly)
-	refs = resolveBareNames(refs, c.cpRoot)
+	refs = resolveBareNames(refs, c.workspaceRoot)
 	var b strings.Builder
 	for _, r := range refs {
 		switch r.kind {
@@ -445,7 +445,7 @@ func (c *Controller) resolveRefs(ctx context.Context, line string, scopedOnly bo
 			}
 			appendRefBlock(&b, "resource", `ref="@`+r.raw+`"`, text)
 		case refFile:
-			text, isDir, err := readFileRef(r.path, c.cpRoot)
+			text, isDir, err := readFileRef(r.path, c.workspaceRoot)
 			if err != nil {
 				errs = append(errs, "@"+r.raw+" — "+err.Error())
 				continue

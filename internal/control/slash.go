@@ -418,7 +418,7 @@ func (c *Controller) managementNotice(trimmed string) bool {
 		case "", "list", "ls":
 			c.notice(c.hookListText())
 		case "trust":
-			root := c.cpRoot
+			root := c.workspaceRoot
 			if root == "" {
 				root, _ = os.Getwd()
 			}
