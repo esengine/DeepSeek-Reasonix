@@ -5,7 +5,7 @@
 # Reasonix's global ~/.reasonix/.env. Never put API key values here.
 
 default_model = "deepseek"   # a provider name (→ its default model) or "provider/model"
-# language      = "zh"   # ui language; empty = auto-detect from $LANG / $REASONIX_LANG
+# language      = "zh"   # UI and default reply language; empty = auto-detect/follow current user message
 
 [ui]
 theme = "auto"   # auto|dark|light; controls CLI colors only; REASONIX_THEME can override per run

@@ -46,7 +46,7 @@ For the desktop and CLI usage of visible reasoning language, see
 
 ```toml
 default_model = "deepseek-flash"   # executor; set [agent].planner_model to add a planner
-# language    = "zh"               # ui language; empty = auto-detect from $LANG / $REASONIX_LANG
+# language    = "zh"               # UI and default reply language; empty = auto-detect/follow current user message
 
 [ui]
 # shortcut_layout = "desktop"      # classic|desktop; compatibility setting

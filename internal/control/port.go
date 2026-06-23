@@ -186,6 +186,7 @@ type Input interface {
 
 // Settings covers runtime session settings that don't fit a richer domain.
 type Settings interface {
+	SetResponseLanguage(lang string)
 	SetReasoningLanguage(lang string)
 	SetDisplayRecorder(fn func(content, display string))
 }

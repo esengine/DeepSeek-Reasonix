@@ -269,6 +269,7 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 					CompactForceRatio: p.taskTool.compactForceRatio,
 					ArchiveDir:        p.taskTool.archiveDir,
 					KeepPolicy:        p.taskTool.keepPolicy,
+					ResponseLanguage:  ResponseLanguageFromContext(ctx),
 				}, nested)
 
 				if runErr != nil {

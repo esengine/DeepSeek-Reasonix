@@ -84,6 +84,7 @@ type Controller struct {
 	memory            memoryManager
 	cleanup           func()
 	autoPlan          string
+	responseLanguage  string
 	reasoningLanguage string
 	// disableColdResumePrune skips stale-tool-result elision on cold resume.
 	// Zero value keeps the prune on (the cheaper default).
@@ -247,6 +248,10 @@ type Options struct {
 	// no confinement). Frontends pass the cwd they launched the session in.
 	WorkspaceRoot string
 	AutoPlan      string
+	// ResponseLanguage controls final-answer language preference. Empty/auto
+	// means no transient injection because the stable language policy follows the
+	// current user turn.
+	ResponseLanguage string
 	// ReasoningLanguage controls visible reasoning language preference. Empty/auto
 	// means no transient injection because the stable language policy already
 	// follows the conversation language.
@@ -303,6 +308,7 @@ func New(opts Options) *Controller {
 		memory:                 newMemoryManager(opts.Memory),
 		cleanup:                opts.Cleanup,
 		autoPlan:               normalizeAutoPlan(opts.AutoPlan),
+		responseLanguage:       config.NormalizeLanguage(opts.ResponseLanguage),
 		reasoningLanguage:      config.NormalizeReasoningLanguage(opts.ReasoningLanguage),
 		disableColdResumePrune: opts.DisableColdResumePrune,
 		shell:                  opts.Shell,
@@ -1455,6 +1461,20 @@ func (c *Controller) SetReasoningLanguage(lang string) {
 		setter.SetReasoningLanguage(mode)
 	} else if c.executor != nil {
 		c.executor.SetReasoningLanguage(mode)
+	}
+}
+
+// SetResponseLanguage updates the final-answer language preference for
+// subsequent turns.
+func (c *Controller) SetResponseLanguage(lang string) {
+	mode := config.NormalizeLanguage(lang)
+	c.mu.Lock()
+	c.responseLanguage = mode
+	c.mu.Unlock()
+	if setter, ok := c.runner.(interface{ SetResponseLanguage(string) }); ok {
+		setter.SetResponseLanguage(mode)
+	} else if c.executor != nil {
+		c.executor.SetResponseLanguage(mode)
 	}
 }
 

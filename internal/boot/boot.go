@@ -650,6 +650,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			RecentKeep:        cfg.Agent.RecentKeep,
 			ArchiveDir:        config.ArchiveDir(),
 			KeepPolicy:        keepPolicy,
+			ResponseLanguage:  agent.ResponseLanguageFromContext(sctx),
 			ReasoningLanguage: agent.ReasoningLanguageFromContext(sctx),
 		}, agent.NestedSink(sctx, event.Discard))
 		if err != nil {
@@ -852,6 +853,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		RecentKeep:           cfg.Agent.RecentKeep,
 		ArchiveDir:           config.ArchiveDir(),
 		KeepPolicy:           keepPolicy,
+		ResponseLanguage:     cfg.ResponseLanguage(),
 		ReasoningLanguage:    cfg.ReasoningLanguage(),
 		PlanModeAllowedTools: cfg.Agent.PlanModeAllowedTools,
 	}, sink)
@@ -900,6 +902,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				RecentKeep:        cfg.Agent.RecentKeep,
 				ArchiveDir:        config.ArchiveDir(),
 				KeepPolicy:        keepPolicy,
+				ResponseLanguage:  cfg.ResponseLanguage(),
 				ReasoningLanguage: cfg.ReasoningLanguage(),
 			}, executor, cfg.Agent.Temperature, sink, control.NewPlannerGate(classifier))
 			label = entry.Model + " + planner " + pe.Model
@@ -932,6 +935,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		PluginCtx:              ctx,
 		WorkspaceRoot:          root,
 		AutoPlan:               cfg.Agent.AutoPlan,
+		ResponseLanguage:       cfg.ResponseLanguage(),
 		ReasoningLanguage:      cfg.ReasoningLanguage(),
 		DisableColdResumePrune: !cfg.ColdResumePruneEnabled(),
 		Shell:                  shell,

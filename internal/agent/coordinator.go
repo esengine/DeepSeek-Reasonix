@@ -140,6 +140,19 @@ func (c *Coordinator) SetReasoningLanguage(lang string) {
 	}
 }
 
+// SetResponseLanguage updates both agents in two-model mode.
+func (c *Coordinator) SetResponseLanguage(lang string) {
+	if c == nil {
+		return
+	}
+	if c.plannerAgent != nil {
+		c.plannerAgent.SetResponseLanguage(lang)
+	}
+	if c.executor != nil {
+		c.executor.SetResponseLanguage(lang)
+	}
+}
+
 // SetPlanMode propagates the read-only gate to both planner and executor agents
 // in two-model mode. Callers that only set the controller's executor would miss
 // the planner agent inside the Coordinator, causing stale plan-mode state after
@@ -240,7 +253,7 @@ func (c *Coordinator) persistExecutorNoOp(ctx context.Context, input, plan strin
 	if c == nil || c.executor == nil || c.executor.session == nil {
 		return
 	}
-	c.executor.session.Add(provider.Message{Role: provider.RoleUser, Content: c.executor.withReasoningLanguage(input), Images: userImages(ctx)})
+	c.executor.session.Add(provider.Message{Role: provider.RoleUser, Content: c.executor.withTurnPreferences(input), Images: userImages(ctx)})
 	c.executor.session.Add(provider.Message{Role: provider.RoleAssistant, Content: plan})
 }
 

@@ -21,6 +21,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/agent/testutil"
 	"reasonix/internal/config"
+	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/memory"
 	"reasonix/internal/netclient"
@@ -1502,6 +1503,39 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	sys := systemMessage(ctrl.History())
 	if !strings.Contains(sys, config.LanguagePolicy) {
 		t.Fatalf("language policy missing from system prompt:\n%s", sys)
+	}
+}
+
+func TestBuildUsesConfiguredLanguageForResponsePreference(t *testing.T) {
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	writeFile(t, dir, "reasonix.toml", `
+language = "en"
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`)
+
+	ctrl, err := Build(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	got := ctrl.Compose("解释这个函数")
+	if !strings.Contains(got, "<response-language>") || !strings.Contains(got, "use English") {
+		t.Fatalf("configured language should ride the next user turn, got %q", got)
+	}
+	if stripped := control.StripComposePrefixes(got); stripped != "解释这个函数" {
+		t.Fatalf("StripComposePrefixes = %q, want raw user text", stripped)
 	}
 }
 

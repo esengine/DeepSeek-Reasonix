@@ -38,7 +38,7 @@ Reasonix 全局 `<Reasonix home>/.env`。项目 `.env`、home `.env`、继承的
 
 ```toml
 default_model = "deepseek-flash"   # 执行器；设 [agent].planner_model 可加规划器
-# language    = "zh"               # 界面语言；为空则按 $LANG / $REASONIX_LANG 自动检测
+# language    = "zh"               # 界面与默认回复语言；为空则自动检测/跟随当前用户消息
 
 [ui]
 # shortcut_layout = "desktop"      # classic|desktop；兼容旧配置

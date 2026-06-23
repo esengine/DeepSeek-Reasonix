@@ -1412,6 +1412,7 @@ export const en = {
   "settings.bashEnforceShort": "Jailed bash",
   "settings.bashOffShort": "Unconfined",
   "settings.language": "Language",
+  "settings.languageHint": "Controls the desktop UI and the default language for model replies. Auto follows the current user message.",
   "settings.langAuto": "Auto (system)",
   "settings.config": "config: {path}",
   "settings.generativeMusic": "Generative background music",

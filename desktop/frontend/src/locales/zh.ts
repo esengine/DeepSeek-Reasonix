@@ -1414,6 +1414,7 @@ export const zh: Record<DictKey, string> = {
   "settings.bashEnforceShort": "强制隔离",
   "settings.bashOffShort": "不受限运行",
   "settings.language": "语言",
+  "settings.languageHint": "控制桌面界面与模型回复的默认语言。自动模式跟随当前用户消息。",
   "settings.langAuto": "自动（跟随系统）",
   "settings.config": "配置文件：{path}",
   "settings.generativeMusic": "生成式背景音乐",

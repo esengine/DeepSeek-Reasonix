@@ -868,6 +868,7 @@ export const zhTW: Record<DictKey, string> = {
   "settings.bashEnforceShort": "強制隔離",
   "settings.bashOffShort": "不受限執行",
   "settings.language": "語言",
+  "settings.languageHint": "控制桌面介面與模型回覆的預設語言。自動模式會跟隨目前使用者訊息。",
   "settings.langAuto": "自動（跟隨系統）",
   "settings.config": "設定檔：{path}",
 

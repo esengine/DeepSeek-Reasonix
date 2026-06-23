@@ -1097,7 +1097,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   };
   return (
     <SettingsSection>
-      <SettingsField label={t("settings.language")}>
+      <SettingsField label={t("settings.language")} hint={t("settings.languageHint")}>
         <div className="set-seg">
           {LANGUAGE_PREFS.map((pref) => (
             <button

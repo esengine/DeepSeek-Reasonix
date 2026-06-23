@@ -462,7 +462,7 @@ Project `reasonix.toml` does not override `agent.max_steps` or
 
 ```toml
 default_model = "deepseek"   # provider name (→ its default model) or "provider/model"
-# language    = "zh"                # ui language tag; empty = auto-detect from $LANG / $REASONIX_LANG
+# language    = "zh"                # UI and default reply language; empty = auto-detect/follow current user message
 
 [agent]
 system_prompt = "You are Reasonix, a coding agent..."  # or system_prompt_file = "..."
