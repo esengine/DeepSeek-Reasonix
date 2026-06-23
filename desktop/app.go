@@ -2781,6 +2781,64 @@ func (a *App) RemoveWorkspace(dir string) error {
 		return fmt.Errorf("workspace path is required")
 	}
 	dir = normalizeProjectRoot(dir)
+
+	// Close all tabs belonging to this workspace so that saveTabsLocked does
+	// not persist them. On the next startup restoreOrBuildTabs would otherwise
+	// re-create the tabs and ensureTopicIndexed would re-add the project to
+	// desktop-projects.json, making the removed workspace reappear.
+	a.mu.RLock()
+	var workspaceTabs []*WorkspaceTab
+	for _, tab := range a.tabs {
+		if tab.WorkspaceRoot == dir {
+			workspaceTabs = append(workspaceTabs, tab)
+		}
+	}
+	a.mu.RUnlock()
+
+	for _, tab := range workspaceTabs {
+		if tab.Ctrl != nil {
+			if err := tab.Ctrl.Snapshot(); err != nil {
+				return err
+			}
+			tab.Ctrl.Close()
+		}
+		if tab.sink != nil {
+			tab.sink.ctx = nil
+		}
+	}
+
+	if len(workspaceTabs) > 0 {
+		a.mu.Lock()
+		removedActive := false
+		for _, tab := range workspaceTabs {
+			if a.tabs[tab.ID] != tab {
+				continue
+			}
+			if a.activeTabID == tab.ID {
+				removedActive = true
+			}
+			delete(a.tabs, tab.ID)
+			a.removeTabOrderLocked(tab.ID)
+		}
+		if removedActive {
+			a.activeTabID = ""
+			if len(a.tabOrder) > 0 {
+				a.activeTabID = a.tabOrder[0]
+			}
+		}
+		// If all tabs were removed, create a fallback global tab so the app
+		// is not left in a headless state.
+		if len(a.tabs) == 0 {
+			a.mu.Unlock()
+			if _, err := a.OpenGlobalTab(""); err != nil {
+				return err
+			}
+			a.mu.Lock()
+		}
+		a.saveTabsLocked()
+		a.mu.Unlock()
+	}
+
 	forgetWorkspace(dir)
 	if err := removeProject(dir); err != nil {
 		return err
