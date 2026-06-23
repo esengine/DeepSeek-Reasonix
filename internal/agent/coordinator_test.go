@@ -250,7 +250,7 @@ func TestCoordinatorPlannerMaxStepsUsesPlannerConfigKey(t *testing.T) {
 	if strings.Contains(msg, "agent.max_steps") {
 		t.Fatalf("planner pause should not point at agent.max_steps: %q", msg)
 	}
-	if got := len(planner.requests); got != 2 {
+	if got := len(planner.requests); got != 3 {
 		t.Fatalf("planner requests = %d, want exactly the configured 2 rounds", got)
 	}
 	if len(exec.requests) != 0 {
@@ -332,6 +332,21 @@ func TestCoordinatorNudgesExecutorThatAnswersWithoutActing(t *testing.T) {
 	}
 	if got := lastUser(exec.requests[1]); !strings.Contains(got, "Use your available tools now to carry out the task") {
 		t.Fatalf("second executor request missing handoff nudge message: %q", got)
+	}
+}
+
+func TestExecutorHandoffRetryMessageKeepsUserChoicesInteractive(t *testing.T) {
+	msg := executorHandoffRetryMessage()
+	lower := strings.ToLower(msg)
+	for _, want := range []string{
+		"ask tool",
+		"wait for its tool result",
+		"do not ask in prose",
+		"do not claim the user answered",
+	} {
+		if !strings.Contains(lower, want) {
+			t.Fatalf("executorHandoffRetryMessage() missing %q:\n%s", want, msg)
+		}
 	}
 }
 

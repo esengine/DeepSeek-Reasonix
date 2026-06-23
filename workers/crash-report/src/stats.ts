@@ -18,6 +18,8 @@ type OverviewCounts = {
   criticalOpenReports: number;
 };
 
+export type StatsModule = "diagnostics" | "usage" | "preferences" | "health";
+
 function lastDays(rows: Daily[], count: 7 | 30): Daily[] {
   const byDate = new Map(rows.map((r) => [r.date, r]));
   const out: Daily[] = [];
@@ -111,7 +113,10 @@ function listBars(rows: BarRow[], options: BarListOptions = {}): string {
   const className = options.className ? ` ${esc(options.className)}` : "";
   const visibleRows = visible.map((r) => barRow(r, max, options.labelFormatter)).join("");
   if (!hidden.length) return `<div class="bars-list${className}">${visibleRows}</div>`;
-  return `<div class="bars-list${className}">${visibleRows}<details class="bars-more"><summary>${i18nHTML(`More ${hidden.length}`, `更多 ${hidden.length}`)}</summary><div class="bars-more-list">${hidden
+  return `<div class="bars-list${className}">${visibleRows}<details class="bars-more"><summary><span class="more-closed">${i18nHTML(
+    `Show ${hidden.length} more`,
+    `展开 ${hidden.length} 项`,
+  )}</span><span class="more-open">${i18nHTML(`Hide ${hidden.length}`, `收起 ${hidden.length} 项`)}</span></summary><div class="bars-more-list">${hidden
     .map((r) => barRow(r, max, options.labelFormatter))
     .join("")}</div></details></div>`;
 }
@@ -458,8 +463,13 @@ function topSeverityTone(openReports: number, regressedReports: number, critical
   return "good";
 }
 
-function moduleLink(href: string, label: { en: string; zh: string }, value: string, note: { en: string; zh: string }): string {
-  return `<a class="module-link" href="${esc(href)}"><span>${i18n(label.en, label.zh)}</span><b>${esc(value)}</b><small>${i18n(note.en, note.zh)}</small></a>`;
+function navLink(href: string, label: { en: string; zh: string }, active = false): string {
+  return `<a${active ? ` class="active" aria-current="page"` : ""} href="${esc(href)}">${i18n(label.en, label.zh)}</a>`;
+}
+
+function preferencePanel(title: string, body: string, active: boolean): string {
+  return `<section class="module-panel preference-panel${active ? " active" : ""}"${active ? ` aria-current="true"` : ""}>
+<h3>${title}</h3>${body}</section>`;
 }
 
 function reportGroups(rows: CrashRow[], compact = false): string {
@@ -506,6 +516,7 @@ export function renderStats(
     };
   },
   user: User,
+  activeModule: StatsModule = "usage",
 ): string {
   const days = lastDays(data.daily, data.filters.windowDays);
   const range = data.filters.windowDays;
@@ -520,7 +531,8 @@ export function renderStats(
   const providerRate = ratioPer100(agentMetrics, "provider_error");
   const toolRate = ratioPer100(agentMetrics, "tool_error");
   const healthWatchCount = [healthLevel("cache", cache), healthLevel("rate", providerRate), healthLevel("rate", toolRate)].filter((v) => v === "warn" || v === "bad").length;
-  const filterQS = (patch: Record<string, string>) => {
+  const modulePath = (module: StatsModule) => (module === "usage" ? "/stats" : `/stats/${module}`);
+  const filterQS = (patch: Record<string, string>, module: StatsModule = activeModule) => {
     const params = new URLSearchParams();
     const put = (k: string, v: string) => {
       if (v) params.set(k, v);
@@ -532,41 +544,47 @@ export function renderStats(
     put("platform", data.filters.platform);
     if (data.filters.newLatest) params.set("new", "latest");
     if (data.filters.regressed) params.set("regressed", "1");
-    if (data.filters.windowDays === 30) params.set("window", "30d");
-    if (data.filters.preferenceMode === "opens") params.set("prefs", "opens");
+    if (data.filters.windowDays === 7) params.set("window", "7d");
+    if (module === "preferences" && data.filters.preferenceMode === "opens") params.set("prefs", "opens");
     for (const [k, v] of Object.entries(patch)) {
       if (v) params.set(k, v);
       else params.delete(k);
     }
     const qs = params.toString();
-    return qs ? `/stats?${qs}` : "/stats";
+    const path = modulePath(module);
+    return qs ? `${path}?${qs}` : path;
   };
   const clearFiltersHref = filterQS({ status: "", source: "", version: "", os: "", platform: "", new: "", regressed: "" });
   const hasFilters = Boolean(
     data.filters.status || data.filters.source || data.filters.version || data.filters.os || data.filters.platform || data.filters.newLatest || data.filters.regressed,
   );
   const windowControls = `<div class="segmented" aria-label="Time window">
-<a class="${range === 7 ? "active" : ""}" href="${esc(filterQS({ window: "7d" }))}">7d</a>
-<a class="${range === 30 ? "active" : ""}" href="${esc(filterQS({ window: "30d" }))}">30d</a>
+<a class="${range === 7 ? "active" : ""}"${range === 7 ? ` aria-current="true"` : ""} href="${esc(filterQS({ window: "7d" }))}">7d</a>
+<a class="${range === 30 ? "active" : ""}"${range === 30 ? ` aria-current="true"` : ""} href="${esc(filterQS({ window: "" }))}">30d</a>
 </div>`;
   const preferenceControls = `<div class="segmented" aria-label="Preference metric mode">
-<a class="${data.filters.preferenceMode === "users" ? "active" : ""}" href="${esc(filterQS({ prefs: "" }))}">${i18n("Installs", "按安装")}</a>
-<a class="${data.filters.preferenceMode === "opens" ? "active" : ""}" href="${esc(filterQS({ prefs: "opens" }))}">${i18n("Opens", "按启动")}</a>
+<a class="${data.filters.preferenceMode === "users" ? "active" : ""}"${data.filters.preferenceMode === "users" ? ` aria-current="true"` : ""} href="${esc(
+    filterQS({ prefs: "" }, "preferences"),
+  )}">${i18n("Installs", "按安装")}</a>
+<a class="${data.filters.preferenceMode === "opens" ? "active" : ""}"${data.filters.preferenceMode === "opens" ? ` aria-current="true"` : ""} href="${esc(
+    filterQS({ prefs: "opens" }, "preferences"),
+  )}">${i18n("Opens", "按启动")}</a>
 </div>`;
   const overviewTone = topSeverityTone(data.overview.openReports, data.overview.regressedReports, data.overview.criticalOpenReports);
   const overview = `<section class="overview-grid">
-${statCard({ en: "Active today", zh: "今日活跃" }, String(totalUsers), i18n("anonymous installs", "匿名安装"), "#usage")}
-${statCard({ en: "Latest adoption", zh: "最新版本占比" }, latestVersionShare(data.overview.latestAdoptionPct), i18nHTML(`latest ${esc(data.latestVersion || "n/a")}`, `最新 ${esc(data.latestVersion || "n/a")}`), "#usage")}
-${statCard({ en: "Open reports", zh: "未处理报告" }, String(data.overview.openReports), i18n("needs triage", "需要分诊"), "#diagnostics", overviewTone)}
-${statCard({ en: "New in latest", zh: "最新新增" }, String(data.overview.newLatestReports), i18n("first seen on latest", "首次出现在最新版"), "#diagnostics", data.overview.newLatestReports ? "warn" : "good")}
-${statCard({ en: "Regressions", zh: "回归问题" }, String(data.overview.regressedReports), i18n("previously resolved", "曾经解决后复现"), "#diagnostics", data.overview.regressedReports ? "bad" : "good")}
-${statCard({ en: "Agent health", zh: "运行健康" }, healthWatchCount ? String(healthWatchCount) : "OK", i18nHTML(`${pct(cache)} cache · ${providerRate === null ? "n/a" : Number(providerRate.toFixed(1))}/100 provider`, `${pct(cache)} 缓存 · ${providerRate === null ? "n/a" : Number(providerRate.toFixed(1))}/100 Provider`), "#health", healthWatchCount ? "warn" : "good")}
+${statCard({ en: "Active today", zh: "今日活跃" }, String(totalUsers), i18n("anonymous installs", "匿名安装"), filterQS({}, "usage"))}
+${statCard({ en: "Latest adoption", zh: "最新版本占比" }, latestVersionShare(data.overview.latestAdoptionPct), i18nHTML(`latest ${esc(data.latestVersion || "n/a")}`, `最新 ${esc(data.latestVersion || "n/a")}`), filterQS({}, "usage"))}
+${statCard({ en: "Open reports", zh: "未处理报告" }, String(data.overview.openReports), i18n("needs triage", "需要分诊"), filterQS({}, "diagnostics"), overviewTone)}
+${statCard({ en: "New in latest", zh: "最新新增" }, String(data.overview.newLatestReports), i18n("first seen on latest", "首次出现在最新版"), filterQS({}, "diagnostics"), data.overview.newLatestReports ? "warn" : "good")}
+${statCard({ en: "Regressions", zh: "回归问题" }, String(data.overview.regressedReports), i18n("previously resolved", "曾经解决后复现"), filterQS({}, "diagnostics"), data.overview.regressedReports ? "bad" : "good")}
+${statCard({ en: "Agent health", zh: "运行健康" }, healthWatchCount ? String(healthWatchCount) : "OK", i18nHTML(`${pct(cache)} cache · ${providerRate === null ? "n/a" : Number(providerRate.toFixed(1))}/100 provider`, `${pct(cache)} 缓存 · ${providerRate === null ? "n/a" : Number(providerRate.toFixed(1))}/100 Provider`), filterQS({}, "health"), healthWatchCount ? "warn" : "good")}
 </section>`;
-  const modules = `<nav class="module-nav" aria-label="Stats modules">
-${moduleLink("#diagnostics", { en: "Diagnostics", zh: "诊断分诊" }, String(data.crashes.length), { en: "prioritized report groups", zh: "按优先级排列的报告分组" })}
-${moduleLink("#usage", { en: "Usage", zh: "使用分布" }, rangeText, { en: "activity, versions, platforms", zh: "活跃、版本和平台" })}
-${moduleLink("#preferences", { en: "Preferences", zh: "设置偏好" }, data.filters.preferenceMode === "opens" ? "opens" : "installs", { en: "deduped and launch snapshots", zh: "安装去重与启动快照" })}
-${moduleLink("#health", { en: "Agent Health", zh: "运行健康" }, healthWatchCount ? String(healthWatchCount) : "OK", { en: "cache and error signals", zh: "缓存与错误信号" })}
+  const pageOverview = activeModule === "usage" ? overview : "";
+  const dashboardNav = `<nav class="site-nav" aria-label="Stats navigation">
+${navLink(filterQS({}, "usage"), { en: "Home", zh: "主页" }, activeModule === "usage")}
+${navLink(filterQS({}, "diagnostics"), { en: "Diagnostics", zh: "诊断分诊" }, activeModule === "diagnostics")}
+${navLink(filterQS({}, "preferences"), { en: "Preferences", zh: "设置偏好" }, activeModule === "preferences")}
+${navLink(filterQS({}, "health"), { en: "Agent Health", zh: "运行健康" }, activeModule === "health")}
 </nav>`;
   const filters = `<div class="filter-card"><div class="filter-head"><h2>${i18n("Report filters", "诊断筛选")}</h2><span>${i18nHTML(`latest ${esc(data.latestVersion || "n/a")}`, `最新 ${esc(data.latestVersion || "n/a")}`)}</span></div>
 <div class="filter-tabs">
@@ -582,7 +600,7 @@ ${filterTab("Regressed", "回归", filterQS({ regressed: data.filters.regressed 
 <section><h3>${i18n("Version", "版本")}</h3><div class="facet-list">${facetChips(data.versions, data.filters.version, (label) => filterQS({ version: label }), 5)}</div></section>
 <section><h3>${i18n("Platform", "平台")}</h3><div class="facet-list">${facetChips(data.platforms, data.filters.platform, (label) => filterQS({ platform: label }), 4)}</div></section>
 </div></div>`;
-  const usageModule = `<section id="usage" class="card full module-card"><div class="module-head"><div><span>${i18n("Module", "模块")}</span><h2>${i18n("Usage distribution", "使用分布")}</h2></div>${windowControls}</div>
+  const usageModule = `<section id="usage" class="card full module-card"><div class="module-head"><div><span>${i18n("Module", "模块")}</span><h2>${i18n("Usage distribution", "使用分布")}</h2></div></div>
 <div class="module-panel wide"><h3>${i18nHTML(`Daily active installs <b>— ${rangeText}</b> (solid: users, faded: opens)`, `每日活跃 <b>— ${rangeText}</b>（实线：用户，淡色：打开次数）`)}</h3>
 ${anyPing ? dailyChart(days) : `<div class="empty">${i18n("No pings yet — data starts flowing once a telemetry-enabled build ships", "暂无启动 ping — 等带统计的版本发布后这里开始有数据")}</div>`}</div>
 <div class="module-split">
@@ -594,30 +612,41 @@ ${anyPing ? dailyChart(days) : `<div class="empty">${i18n("No pings yet — data
 ${filters}
 <section class="module-panel"><h3>${i18nHTML("All report groups <b>— open, regression, severity, count, recency</b>", "全部诊断分组 <b>— 未处理、回归、严重性、次数和最近出现</b>")}</h3>${reportGroups(data.crashes)}</section>
 </section>`;
-  const preferencesModule = `<section id="preferences" class="card full module-card"><div class="module-head"><div><span>${i18n("Module", "模块")}</span><h2>${i18n("Settings preferences", "设置偏好")}</h2></div>${preferenceControls}</div>
-<div class="module-split wide">
-<section class="module-panel"><h3>${i18nHTML(`Deduplicated installs <b>— ${rangeText}</b>`, `按安装去重 <b>— ${rangeText}</b>`)}</h3>${settingsDashboard(settingsMetricUsers, { collapseSections: true })}</section>
-<section class="module-panel"><h3>${i18nHTML(`Launch/open snapshots <b>— ${rangeText}</b>`, `启动/开启快照 <b>— ${rangeText}</b>`)}</h3>${settingsDashboard(settingsMetrics, { collapseSections: true })}</section>
-</div></section>`;
-  const healthModule = `<section id="health" class="card full module-card"><div class="module-head"><div><span>${i18n("Module", "模块")}</span><h2>${i18n("Agent health", "运行健康")}</h2></div><a class="module-action" href="#preferences">${i18n("Preferences", "设置偏好")}</a></div>
+  const installsPanel = preferencePanel(
+    i18nHTML(`Deduplicated installs <b>— ${rangeText}</b>`, `按安装去重 <b>— ${rangeText}</b>`),
+    settingsDashboard(settingsMetricUsers, { collapseSections: true }),
+    data.filters.preferenceMode === "users",
+  );
+  const opensPanel = preferencePanel(
+    i18nHTML(`Launch/open snapshots <b>— ${rangeText}</b>`, `启动/开启快照 <b>— ${rangeText}</b>`),
+    settingsDashboard(settingsMetrics, { collapseSections: true }),
+    data.filters.preferenceMode === "opens",
+  );
+  const preferencePanels = data.filters.preferenceMode === "opens" ? `${opensPanel}${installsPanel}` : `${installsPanel}${opensPanel}`;
+  const preferencesModule = `<section id="preferences" class="card full module-card"><div class="module-head"><div><span>${i18n("Module", "模块")}</span><h2>${i18n("Settings preferences", "设置偏好")}</h2></div><div class="module-actions">${preferenceControls}</div></div>
+<div class="preference-compare">${preferencePanels}</div></section>`;
+  const healthModule = `<section id="health" class="card full module-card"><div class="module-head"><div><span>${i18n("Module", "模块")}</span><h2>${i18n("Agent health", "运行健康")}</h2></div><div class="module-actions"><a class="module-action" href="${esc(filterQS({}, "preferences"))}">${i18n("Preferences", "设置偏好")}</a></div></div>
 <section class="module-panel"><h3>${i18nHTML(`Health summary <b>— ${rangeText}, compared with previous window</b>`, `健康摘要 <b>— ${rangeText}，对比上一窗口</b>`)}</h3>${agentHealth(agentMetrics, previousAgentMetrics)}</section>
 <section class="module-panel"><h3>${i18nHTML(`Signal distributions <b>— ${rangeText}, opt-in aggregate</b>`, `信号分布 <b>— ${rangeText}，opt-in 汇总</b>`)}</h3>${metricsCards(agentMetrics)}</section>
 </section>`;
+  const activeModuleHTML: Record<StatsModule, string> = {
+    diagnostics: diagnosticsModule,
+    usage: usageModule,
+    preferences: preferencesModule,
+    health: healthModule,
+  };
 
   return page(
     "Reasonix · Crash & Telemetry",
     "health",
-    `<div id="top" class="hero-line"><div><h1>${i18n("Crash & Telemetry", "桌面端健康看板")}</h1><p class="sub">${i18nHTML(
+    `${dashboardNav}
+<div id="top" class="hero-line"><div><h1>${i18n("Crash & Telemetry", "桌面端健康看板")}</h1><p class="sub">${i18nHTML(
       `${rangeText} window · anonymous launch pings, opt-in aggregate metrics, and user-sent diagnostic reports only`,
       `${rangeText} 时间窗口 · 仅包含匿名启动 ping、opt-in 汇总指标和用户发送的诊断报告`,
     )}</p></div>${windowControls}</div>
-${overview}
-${modules}
+${pageOverview}
 <div class="grid">
-${diagnosticsModule}
-${usageModule}
-${preferencesModule}
-${healthModule}
+${activeModuleHTML[activeModule]}
 </div>`,
     userNav(user),
   );

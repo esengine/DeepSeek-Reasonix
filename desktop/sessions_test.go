@@ -8,6 +8,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/jobs"
+	"reasonix/internal/store"
 )
 
 func occupyReadFileWithTimeoutSlots(t *testing.T) func() {
@@ -161,6 +162,10 @@ func TestDeleteSessionFile(t *testing.T) {
 	os.WriteFile(sessionPath, []byte("data"), 0o644)
 	metaPath := sessionPath + ".meta"
 	os.WriteFile(metaPath, []byte("{}"), 0o644)
+	goalPath := store.SessionGoalState(sessionPath)
+	os.WriteFile(goalPath, []byte(`{"goal":"ship"}`), 0o644)
+	telemetryPath := sessionTelemetryPath(sessionPath)
+	os.WriteFile(telemetryPath, []byte(`{"version":2,"readFiles":[]}`), 0o644)
 	ckptDir := filepath.Join(dir, "session.ckpt")
 	if err := os.MkdirAll(ckptDir, 0o755); err != nil {
 		t.Fatalf("mkdir ckpt: %v", err)
@@ -185,6 +190,8 @@ func TestDeleteSessionFile(t *testing.T) {
 	}
 	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
 	trashMetaPath := trashPath + ".meta"
+	trashGoalPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.goal-state.json")
+	trashTelemetryPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl.telemetry.json")
 	trashCkptDir := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.ckpt")
 	trashJobsDir := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jobs")
 
@@ -194,6 +201,12 @@ func TestDeleteSessionFile(t *testing.T) {
 	}
 	if _, err := os.Stat(metaPath); !os.IsNotExist(err) {
 		t.Error("session meta should be removed from active sessions")
+	}
+	if _, err := os.Stat(goalPath); !os.IsNotExist(err) {
+		t.Error("session goal state should be removed from active sessions")
+	}
+	if _, err := os.Stat(telemetryPath); !os.IsNotExist(err) {
+		t.Error("session telemetry should be removed from active sessions")
 	}
 	if _, err := os.Stat(ckptDir); !os.IsNotExist(err) {
 		t.Error("session checkpoints should be removed from active sessions")
@@ -206,6 +219,12 @@ func TestDeleteSessionFile(t *testing.T) {
 	}
 	if _, err := os.Stat(trashMetaPath); err != nil {
 		t.Fatalf("session meta should be in trash: %v", err)
+	}
+	if _, err := os.Stat(trashGoalPath); err != nil {
+		t.Fatalf("session goal state should be in trash: %v", err)
+	}
+	if _, err := os.Stat(trashTelemetryPath); err != nil {
+		t.Fatalf("session telemetry should be in trash: %v", err)
 	}
 	if _, err := os.Stat(trashCkptDir); err != nil {
 		t.Fatalf("session checkpoints should be in trash: %v", err)
@@ -292,6 +311,14 @@ func TestReconcileDesktopCleanupPendingDeleteMovesRemainingSidecars(t *testing.T
 	if err := os.WriteFile(sessionPath+".meta", []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	goalPath := store.SessionGoalState(sessionPath)
+	if err := os.WriteFile(goalPath, []byte(`{"goal":"finish"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	telemetryPath := sessionTelemetryPath(sessionPath)
+	if err := os.WriteFile(telemetryPath, []byte(`{"version":2,"readFiles":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	ckptDir := filepath.Join(dir, "sidecars.ckpt")
 	if err := os.MkdirAll(ckptDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -324,6 +351,8 @@ func TestReconcileDesktopCleanupPendingDeleteMovesRemainingSidecars(t *testing.T
 
 	for _, p := range []string{
 		filepath.Join(itemDir, "sidecars.jsonl.meta"),
+		filepath.Join(itemDir, "sidecars.goal-state.json"),
+		filepath.Join(itemDir, "sidecars.jsonl.telemetry.json"),
 		filepath.Join(itemDir, "sidecars.ckpt", "1.json"),
 		filepath.Join(itemDir, "sidecars.jobs", "job.log"),
 		filepath.Join(itemDir, "subagents", ref+".jsonl"),
@@ -335,6 +364,8 @@ func TestReconcileDesktopCleanupPendingDeleteMovesRemainingSidecars(t *testing.T
 	}
 	for _, p := range []string{
 		sessionPath + ".meta",
+		goalPath,
+		telemetryPath,
 		ckptDir,
 		jobs.ArtifactDir(sessionPath),
 		filepath.Join(dir, "subagents", ref+".jsonl"),
@@ -406,6 +437,14 @@ func TestRestoreTrashedSessionFile(t *testing.T) {
 	if err := os.WriteFile(sessionPath+".meta", []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	goalPath := store.SessionGoalState(sessionPath)
+	if err := os.WriteFile(goalPath, []byte(`{"goal":"restore"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	telemetryPath := sessionTelemetryPath(sessionPath)
+	if err := os.WriteFile(telemetryPath, []byte(`{"version":2,"readFiles":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	ckptDir := filepath.Join(dir, "session.ckpt")
 	if err := os.MkdirAll(ckptDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -437,6 +476,12 @@ func TestRestoreTrashedSessionFile(t *testing.T) {
 	}
 	if _, err := os.Stat(sessionPath + ".meta"); err != nil {
 		t.Fatalf("session meta should be restored: %v", err)
+	}
+	if _, err := os.Stat(goalPath); err != nil {
+		t.Fatalf("session goal state should be restored: %v", err)
+	}
+	if _, err := os.Stat(telemetryPath); err != nil {
+		t.Fatalf("session telemetry should be restored: %v", err)
 	}
 	if _, err := os.Stat(ckptDir); err != nil {
 		t.Fatalf("session checkpoints should be restored: %v", err)
@@ -511,6 +556,10 @@ func TestPurgeTrashedSessionFile(t *testing.T) {
 	dir := t.TempDir()
 	sessionPath := filepath.Join(dir, "session.jsonl")
 	os.WriteFile(sessionPath, []byte("data"), 0o644)
+	goalPath := store.SessionGoalState(sessionPath)
+	os.WriteFile(goalPath, []byte(`{"goal":"purge"}`), 0o644)
+	telemetryPath := sessionTelemetryPath(sessionPath)
+	os.WriteFile(telemetryPath, []byte(`{"version":2,"readFiles":[]}`), 0o644)
 	jobsDir := jobs.ArtifactDir(sessionPath)
 	if err := os.MkdirAll(jobsDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -536,6 +585,12 @@ func TestPurgeTrashedSessionFile(t *testing.T) {
 	}
 	if _, err := os.Stat(jobsDir); !os.IsNotExist(err) {
 		t.Fatalf("session jobs should be removed after purge, stat err = %v", err)
+	}
+	if _, err := os.Stat(goalPath); !os.IsNotExist(err) {
+		t.Fatalf("session goal state should be removed after purge, stat err = %v", err)
+	}
+	if _, err := os.Stat(telemetryPath); !os.IsNotExist(err) {
+		t.Fatalf("session telemetry should be removed after purge, stat err = %v", err)
 	}
 	if _, ok := loadSessionTitles(dir)["session.jsonl"]; ok {
 		t.Fatal("title should be removed after purge")
@@ -592,6 +647,52 @@ func TestDeleteSessionFileMissing(t *testing.T) {
 	}
 }
 
+func TestRemoveDesktopSessionArtifactsRemovesOwnedSidecars(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session.jsonl")
+	for _, p := range []string{
+		sessionPath,
+		store.SessionMeta(sessionPath),
+		store.SessionGoalState(sessionPath),
+		sessionTelemetryPath(sessionPath),
+	} {
+		if err := os.WriteFile(p, []byte("{}"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", p, err)
+		}
+	}
+	ckptDir := store.SessionCheckpointDir(sessionPath)
+	if err := os.MkdirAll(ckptDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ckptDir, "1.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	jobsDir := jobs.ArtifactDir(sessionPath)
+	if err := os.MkdirAll(jobsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(jobsDir, "job.log"), []byte("output"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := removeDesktopSessionArtifacts(sessionPath); err != nil {
+		t.Fatalf("removeDesktopSessionArtifacts: %v", err)
+	}
+
+	for _, p := range []string{
+		sessionPath,
+		store.SessionMeta(sessionPath),
+		store.SessionGoalState(sessionPath),
+		sessionTelemetryPath(sessionPath),
+		ckptDir,
+		jobsDir,
+	} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("%s should be removed, stat err = %v", p, err)
+		}
+	}
+}
+
 func TestDeleteSessionFileRejectsOutsideDir(t *testing.T) {
 	dir := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "outside.jsonl")
@@ -632,6 +733,98 @@ func TestDeleteSessionFileRejectsSymlinkEscape(t *testing.T) {
 	}
 	if _, err := os.Stat(outside); err != nil {
 		t.Fatalf("outside target should remain: %v", err)
+	}
+}
+
+func TestMovePathIfExistsCopyFallback(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "dst.txt")
+
+	// Test normal move.
+	if err := movePathIfExists(src, dst); err != nil {
+		t.Fatalf("move: %v", err)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatal("src should be removed")
+	}
+	if got, err := os.ReadFile(dst); err != nil || string(got) != "hello" {
+		t.Fatalf("dst content = %q, err = %v", got, err)
+	}
+
+	// Test non-existent source is no-op.
+	if err := movePathIfExists(filepath.Join(dir, "missing.txt"), filepath.Join(dir, "other.txt")); err != nil {
+		t.Fatalf("move missing: %v", err)
+	}
+}
+
+func TestCopyAndRemoveDirectory(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "src")
+	if err := os.MkdirAll(filepath.Join(srcDir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "a.txt"), []byte("file a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "sub", "b.txt"), []byte("file b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dstDir := filepath.Join(dir, "dst")
+
+	if err := copyAndRemove(srcDir, dstDir); err != nil {
+		t.Fatalf("copyAndRemove: %v", err)
+	}
+	if _, err := os.Stat(srcDir); !os.IsNotExist(err) {
+		t.Fatal("src dir should be removed")
+	}
+	if got, err := os.ReadFile(filepath.Join(dstDir, "a.txt")); err != nil || string(got) != "file a" {
+		t.Fatalf("dst a.txt = %q, err = %v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dstDir, "sub", "b.txt")); err != nil || string(got) != "file b" {
+		t.Fatalf("dst sub/b.txt = %q, err = %v", got, err)
+	}
+}
+
+func TestCopyAndRemoveDirectoryPreservesSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(dir, "src")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(srcDir, "link.txt")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	dstDir := filepath.Join(dir, "dst")
+
+	if err := copyAndRemove(srcDir, dstDir); err != nil {
+		t.Fatalf("copyAndRemove: %v", err)
+	}
+	if _, err := os.Stat(srcDir); !os.IsNotExist(err) {
+		t.Fatal("src dir should be removed")
+	}
+	dstLink := filepath.Join(dstDir, "link.txt")
+	info, err := os.Lstat(dstLink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("dst link should remain a symlink, mode=%v", info.Mode())
+	}
+	target, err := os.Readlink(dstLink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != outside {
+		t.Fatalf("dst link target = %q, want %q", target, outside)
 	}
 }
 

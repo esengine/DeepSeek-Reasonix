@@ -1254,6 +1254,105 @@ api_key_env = "PROJECT_KEY"
 	}
 }
 
+func TestSaveToExistingProjectPersistsTopLevelDelta(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("[permissions]\nallow = [\"Bash(go test:*)\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	cfg.ConfigVersion = 2
+	if err := cfg.SetDefaultModel("deepseek-pro"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatalf("read project config: %v", err)
+	}
+	if !strings.Contains(string(body), `default_model = "deepseek-pro"`) {
+		t.Fatalf("project config dropped top-level default_model delta:\n%s", body)
+	}
+	if !strings.Contains(string(body), "config_version = 2") {
+		t.Fatalf("project config dropped top-level config_version delta:\n%s", body)
+	}
+	var got Config
+	if _, err := toml.DecodeFile(projectPath, &got); err != nil {
+		t.Fatalf("saved project config does not parse: %v", err)
+	}
+	if got.DefaultModel != "deepseek-pro" {
+		t.Fatalf("default_model = %q, want deepseek-pro", got.DefaultModel)
+	}
+	if got.ConfigVersion != 2 {
+		t.Fatalf("config_version = %d, want 2", got.ConfigVersion)
+	}
+}
+
+func TestSaveToExistingProjectRemovesPluginDelta(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	cfg := Default()
+	if err := cfg.UpsertPlugin(PluginEntry{Name: "ed", Type: "http", URL: "https://mcp.example.com/mcp", Headers: map[string]string{"Authorization": "Bearer token"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("initial SaveTo: %v", err)
+	}
+	if !cfg.RemovePlugin("ed") {
+		t.Fatal("RemovePlugin should report changed")
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("SaveTo after remove: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatalf("read project config: %v", err)
+	}
+	if strings.Contains(string(body), "[[plugins]]") || strings.Contains(string(body), "[plugins.headers]") || strings.Contains(string(body), "Authorization") {
+		t.Fatalf("removed plugin should not remain in project config:\n%s", body)
+	}
+	var got Config
+	if _, err := toml.DecodeFile(projectPath, &got); err != nil {
+		t.Fatalf("saved project config does not parse: %v", err)
+	}
+	if len(got.Plugins) != 0 {
+		t.Fatalf("plugins = %+v, want none", got.Plugins)
+	}
+}
+
+func TestSaveForRootDoesNotWriteUserAgentSettingsIntoProjectConfig(t *testing.T) {
+	isolateUserConfigHome(t)
+	root := t.TempDir()
+	userPath := UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPath, []byte("[agent]\ntemperature = 0.42\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(root, "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("[permissions]\nallow = [\"Bash(go test:*)\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadForRoot(root)
+	if err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
+	}
+	if cfg.Agent.Temperature != 0.42 {
+		t.Fatalf("runtime temperature = %v, want merged user config", cfg.Agent.Temperature)
+	}
+	if err := cfg.SaveForRoot(root); err != nil {
+		t.Fatalf("SaveForRoot: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatalf("read project config: %v", err)
+	}
+	if strings.Contains(string(body), "temperature") {
+		t.Fatalf("user agent setting leaked into project config:\n%s", body)
+	}
+}
+
 func TestSetNetworkRejectsIncompleteCustomProxy(t *testing.T) {
 	c := Default()
 	if err := c.SetNetwork(NetworkConfig{ProxyMode: "custom"}); err == nil {

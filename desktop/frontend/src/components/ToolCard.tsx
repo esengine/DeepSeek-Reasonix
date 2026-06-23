@@ -41,7 +41,7 @@ function splitPreview(text: string, n: number): { preview: string; total: number
 // ToolCard renders one tool call. `subcalls` are sub-agent calls nested under a
 // `task` card (their ParentID points at this call); they render inline, live, so
 // the sub-agent's work is visible as it happens.
-export const ToolCard = memo(function ToolCard({ item, subcalls, tabId }: { item: ToolItem; subcalls?: ToolItem[]; tabId?: string }) {
+export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayName }: { item: ToolItem; subcalls?: ToolItem[]; tabId?: string; displayName?: string }) {
   const t = useT();
   const nested = subcalls ?? [];
   const hasNested = nested.length > 0;
@@ -131,7 +131,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId }: { item
           {item.status === "error" && <span className="tool__status-icon tool__status-icon--err">✗</span>}
           {item.status === "done" && <span className="tool__status-icon tool__status-icon--ok">✓</span>}
           {item.status === "stopped" && <span className="tool__status-icon tool__status-icon--stopped">—</span>}
-          <span className="tool__name">{item.name}</span>
+          <span className="tool__name">{displayName ?? item.name}</span>
           {subject && <span className="tool__subject">{subject}</span>}
         </span>
         {profileText && <span className="tool__profile">{profileText}</span>}
@@ -141,6 +141,12 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId }: { item
           <span className={`tool__chevron${open ? " tool__chevron--open" : ""}`}>
             <ChevronRight size={12} />
           </span>
+        )}
+        {item.status !== "running" && (
+          <span
+            className={`tool__dot${item.status === "done" ? " tool__dot--ok" : ""}${item.status === "error" ? " tool__dot--err" : ""}${item.status === "stopped" ? " tool__dot--stopped" : ""}`}
+            aria-hidden="true"
+          />
         )}
       </button>
 

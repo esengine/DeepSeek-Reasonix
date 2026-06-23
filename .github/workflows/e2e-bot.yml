@@ -42,7 +42,7 @@ jobs:
 
       # Default-branch checkout: this is where the harness (cmd/e2ebench), the
       # suite, and a run --metrics-capable agent live.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

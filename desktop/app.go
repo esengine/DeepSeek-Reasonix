@@ -39,7 +39,6 @@ import (
 	"reasonix/internal/fileref"
 	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/i18n"
-	"reasonix/internal/jobs"
 	"reasonix/internal/mcpdiag"
 	"reasonix/internal/memory"
 	"reasonix/internal/plugin"
@@ -1123,14 +1122,7 @@ func removeDesktopSessionArtifacts(path string) error {
 	if strings.TrimSpace(path) == "" {
 		return nil
 	}
-	if err := jobs.RemoveArtifacts(path); err != nil {
-		return err
-	}
-	paths := []string{path, agent.BranchMetaPath(path)}
-	if strings.HasSuffix(path, ".jsonl") {
-		paths = append(paths, strings.TrimSuffix(path, ".jsonl")+".ckpt")
-	}
-	for _, p := range paths {
+	for _, p := range sessionOwnedArtifactPaths(path) {
 		if strings.TrimSpace(p) == "" {
 			continue
 		}
@@ -1148,8 +1140,9 @@ func removeDesktopSessionArtifacts(path string) error {
 type CheckpointMeta struct {
 	Turn            int      `json:"turn"`
 	Prompt          string   `json:"prompt"`
-	Files           []string `json:"files"` // paths changed during the turn
-	Time            int64    `json:"time"`  // unix milliseconds
+	Files           []string `json:"files"`         // cumulative files RestoreCode would affect from this turn
+	TurnFileCount   int      `json:"turnFileCount"` // files changed during this turn only
+	Time            int64    `json:"time"`          // unix milliseconds
 	CanCode         bool     `json:"canCode"`
 	CanConversation bool     `json:"canConversation"`
 }
@@ -1176,6 +1169,7 @@ func (a *App) CheckpointsForTab(tabID string) []CheckpointMeta {
 			Turn:            m.Turn,
 			Prompt:          m.Prompt,
 			Files:           m.Paths,
+			TurnFileCount:   len(m.Paths),
 			Time:            m.Time.UnixMilli(),
 			CanCode:         len(m.Paths) > 0,
 			CanConversation: ctrl.CheckpointHasBoundary(m.Turn),
@@ -1711,8 +1705,10 @@ func (a *App) removeSessionRuntimeBindings(dir, sessionPath string) ([]removedSe
 		a.activeTabID = a.tabOrder[0]
 	}
 	fallback.needs = len(removed) > 0 && len(a.tabs) == 0
-	a.saveTabsLocked()
+	dir, entries, activeID, version := a.saveTabsCollectLocked()
 	a.mu.Unlock()
+
+	a.saveTabsWrite(dir, entries, activeID, version)
 
 	return removed, fallback
 }
@@ -1754,8 +1750,10 @@ func (a *App) removeTopicRuntimeBindings(topicID string) ([]removedSessionRuntim
 		a.activeTabID = a.tabOrder[0]
 	}
 	fallback.needs = len(removed) > 0 && len(a.tabs) == 0
-	a.saveTabsLocked()
+	dir, entries, activeID, version := a.saveTabsCollectLocked()
 	a.mu.Unlock()
+
+	a.saveTabsWrite(dir, entries, activeID, version)
 
 	return removed, fallback
 }
@@ -3721,6 +3719,7 @@ func (a *App) Commands() []CommandInfo {
 		{Name: "hooks", Description: i18n.M.CmdHooks, Kind: "builtin"},
 		{Name: "theme", Description: i18n.M.CmdTheme, Kind: "builtin"},
 		{Name: "skill", Description: i18n.M.CmdSkill, Kind: "builtin"},
+		{Name: "reload-cmd", Description: i18n.M.CmdReloadCmd, Kind: "builtin"},
 	}
 	a.mu.RLock()
 	ctrl := a.activeCtrlLocked()
@@ -3841,6 +3840,7 @@ type ServerView struct {
 	Args           []string   `json:"args,omitempty"`
 	URL            string     `json:"url,omitempty"`
 	EnvKeys        []string   `json:"envKeys,omitempty"`
+	HeaderKeys     []string   `json:"headerKeys,omitempty"`
 	Tools          int        `json:"tools"`
 	Prompts        int        `json:"prompts"`
 	Resources      int        `json:"resources"`
@@ -4101,12 +4101,21 @@ func withPluginConfig(v ServerView, p config.PluginEntry) ServerView {
 	v.Args = append([]string(nil), p.Args...)
 	v.URL = p.URL
 	v.AuthConfigured = mcpdiag.HasAuthConfig(p.Headers, p.Env, p.URL)
+	v.EnvKeys = nil
+	v.HeaderKeys = nil
 	if len(p.Env) > 0 {
 		v.EnvKeys = make([]string, 0, len(p.Env))
 		for k := range p.Env {
 			v.EnvKeys = append(v.EnvKeys, k)
 		}
 		sort.Strings(v.EnvKeys)
+	}
+	if len(p.Headers) > 0 {
+		v.HeaderKeys = make([]string, 0, len(p.Headers))
+		for k := range p.Headers {
+			v.HeaderKeys = append(v.HeaderKeys, k)
+		}
+		sort.Strings(v.HeaderKeys)
 	}
 	auth := mcpdiag.DiagnoseAuth(v.Transport, v.Status, v.Error, v.URL, v.AuthConfigured)
 	v.AuthStatus = auth.Status
@@ -4191,6 +4200,7 @@ func skillRootsViewFrom(cwd string, cfg, userCfg *config.Config) []SkillRootView
 		}
 	}
 	out := []SkillRootView{}
+	seenRoots := map[string]int{}
 	for _, r := range roots {
 		dir := config.CanonicalSkillPath(r.Dir)
 		view := SkillRootView{
@@ -4203,6 +4213,11 @@ func skillRootsViewFrom(cwd string, cfg, userCfg *config.Config) []SkillRootView
 			Skills:     counts[dir],
 			SkillItems: skillItems[dir],
 		}
+		if idx, ok := seenRoots[dir]; ok {
+			out[idx] = mergeDuplicateSkillRootView(out[idx], view)
+			continue
+		}
+		seenRoots[dir] = len(out)
 		out = append(out, view)
 	}
 	if userCfg != nil {
@@ -4221,6 +4236,22 @@ func skillRootsViewFrom(cwd string, cfg, userCfg *config.Config) []SkillRootView
 		}
 	}
 	return out
+}
+
+func mergeDuplicateSkillRootView(existing, duplicate SkillRootView) SkillRootView {
+	existing.Configured = existing.Configured || duplicate.Configured
+	existing.Removable = existing.Removable || duplicate.Removable
+	if existing.Status != "ok" && duplicate.Status == "ok" {
+		existing.Status = duplicate.Status
+	}
+	if existing.Skills == 0 && duplicate.Skills > 0 {
+		existing.Skills = duplicate.Skills
+		existing.SkillItems = duplicate.SkillItems
+	}
+	if existing.Warning == "" {
+		existing.Warning = duplicate.Warning
+	}
+	return existing
 }
 
 func skillRootsCacheKey(cwd string, cfg, userCfg *config.Config) string {
@@ -4268,7 +4299,7 @@ func cloneSkillRootViews(in []SkillRootView) []SkillRootView {
 func rootActive(roots []SkillRootView, path string) bool {
 	want := config.CanonicalSkillPath(path)
 	for _, r := range roots {
-		if r.Scope == string(skill.ScopeCustom) && config.CanonicalSkillPath(r.Dir) == want {
+		if config.CanonicalSkillPath(r.Dir) == want {
 			return true
 		}
 	}
@@ -4331,6 +4362,22 @@ func (a *App) RemoveSkillPath(path string) error {
 func (a *App) RefreshSkills() error {
 	a.invalidateSkillRootsCache()
 	return a.rebuild()
+}
+
+// ReloadCommands rescans command directories and hot-swaps without restarting
+// the controller — no MCP disconnect, no hook rerun.
+func (a *App) ReloadCommands() error {
+	if a.ctx == nil {
+		return nil
+	}
+	tab := a.activeTab()
+	if tab == nil || tab.Ctrl == nil {
+		return fmt.Errorf("no active session")
+	}
+	if tab.Ctrl.Running() {
+		return fmt.Errorf("wait for the current turn to finish, then retry")
+	}
+	return tab.Ctrl.ReloadCommands(a.ctx)
 }
 
 // SetSkillEnabled persists a skill toggle and rebuilds the controller so the
@@ -4434,6 +4481,7 @@ type MCPServerInput struct {
 	Args      []string          `json:"args"`
 	URL       string            `json:"url"`
 	Env       map[string]string `json:"env"`
+	Headers   map[string]string `json:"headers"`
 }
 
 // AddMCPServer connects a server live and persists it to config (Customize → MCP →
@@ -4453,6 +4501,7 @@ func (a *App) AddMCPServer(in MCPServerInput) (int, error) {
 		Args:    in.Args,
 		URL:     in.URL,
 		Env:     in.Env,
+		Headers: in.Headers,
 	}
 	entry, _ = config.NormalizePluginCommandLine(entry)
 	if err := a.saveDesktopMCPServer(entry); err != nil {
@@ -4488,6 +4537,9 @@ func (a *App) UpdateMCPServer(name string, in MCPServerInput) error {
 	updated.Tier = ""
 	if in.Env != nil {
 		updated.Env = in.Env
+	}
+	if in.Headers != nil {
+		updated.Headers = in.Headers
 	}
 	updated, _ = config.NormalizePluginCommandLine(updated)
 	if updated.Type == "stdio" {

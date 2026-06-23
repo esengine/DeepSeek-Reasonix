@@ -610,7 +610,23 @@ function applyEvent(s: State, e: WireEvent): State {
         return it;
       });
       let items: Item[] = e.err ? [...finalized, { kind: "notice", id: `e${s.seq}`, level: "warn", text: e.err }] : finalized;
-      return { ...s, items, live: undefined, running: false, turnActive: false, pendingPrompt: false, cancelRequested: false, cancellable: false, currentAssistant: undefined, approval: undefined, ask: undefined, seq: s.seq + 1 };
+      // Plan approval can arrive before turn_done on some Wails event paths.
+      // Keep that gate visible instead of clearing the only UI that can answer it.
+      const keepPlanApproval = s.approval?.tool === "exit_plan_mode";
+      return {
+        ...s,
+        items,
+        live: undefined,
+        running: keepPlanApproval,
+        turnActive: keepPlanApproval,
+        pendingPrompt: keepPlanApproval,
+        cancelRequested: false,
+        cancellable: keepPlanApproval,
+        currentAssistant: undefined,
+        approval: keepPlanApproval ? s.approval : undefined,
+        ask: undefined,
+        seq: s.seq + 1,
+      };
     }
     default: return s;
   }
@@ -867,6 +883,9 @@ export function useController() {
       cancelRequested: Boolean(tab.cancelRequested),
       cancellable: foregroundRunning,
     });
+    // backend_status reconciliation can clear a live prompt from frontend state.
+    // If the backend is still blocked, ask it to replay the approval/ask event.
+    if (tab.pendingPrompt) replayPendingPromptsForActiveTab(tabId);
     if (needsInitialLoad || missedTurnDone) {
       await loadSessionDataForTab(tabId, missedTurnDone);
       return tabs;
@@ -1141,7 +1160,7 @@ export function useController() {
   }, [dispatchTo, refreshCheckpoints, waitForTabReady]);
 
   const previewSession = useCallback(async (path: string): Promise<HistoryMessage[]> => asArray<HistoryMessage>(await app.PreviewSession(path).catch(() => [])), []);
-  const deleteSession = useCallback((path: string) => app.DeleteSession(path).catch(() => {}).finally(() => invalidateCache()), []);
+  const deleteSession = useCallback((path: string) => app.DeleteSession(path).finally(() => invalidateCache()), []);
   const restoreSession = useCallback((path: string) => app.RestoreSession(path).catch(() => {}).finally(() => invalidateCache()), []);
   const purgeTrashedSession = useCallback((path: string) => app.PurgeTrashedSession(path).catch(() => {}).finally(() => invalidateCache()), []);
   const renameSession = useCallback((path: string, title: string) => app.RenameSession(path, title).catch(() => {}).finally(() => invalidateCache()), []);

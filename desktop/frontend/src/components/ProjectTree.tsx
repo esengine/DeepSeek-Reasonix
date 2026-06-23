@@ -12,6 +12,8 @@ import type { ProjectNode, ProjectTopicStatus } from "../lib/types";
 import { topicActivityTime } from "../lib/session";
 import { getLocale, useT, type DictKey, type Translator } from "../lib/i18n";
 import { PROJECT_COLOR_OPTIONS, projectColorValue } from "../lib/projectColors";
+import { topicShortcutLabel, type TopicShortcutEntry } from "../lib/topicShortcuts";
+import type { ShortcutPlatform } from "../lib/keyboardShortcuts";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 import { Tooltip } from "./Tooltip";
 
@@ -34,7 +36,8 @@ interface ProjectTreeProps {
   searchExpanded?: boolean;
   searchFocusSignal?: number;
   showShortcutBadges?: boolean;
-  onVisibleTopicsChange?: (topics: import("../lib/topicShortcuts").TopicShortcutEntry[]) => void;
+  shortcutPlatform?: ShortcutPlatform;
+  onVisibleTopicsChange?: (topics: TopicShortcutEntry[]) => void;
 }
 
 type ProjectTreeImTopicSource = {
@@ -449,6 +452,7 @@ export function ProjectTree({
   searchExpanded = true,
   searchFocusSignal = 0,
   showShortcutBadges = false,
+  shortcutPlatform,
   onVisibleTopicsChange,
 }: ProjectTreeProps) {
   const t = useT();
@@ -481,7 +485,7 @@ export function ProjectTree({
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const topicIndexRef = useRef(0);
-  const visibleTopicsCollectorRef = useRef<import("../lib/topicShortcuts").TopicShortcutEntry[]>([]);
+  const visibleTopicsCollectorRef = useRef<TopicShortcutEntry[]>([]);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const creatingRef = useRef(false);
   const manuallyCollapsedRef = useRef(manuallyCollapsed);
@@ -1166,7 +1170,7 @@ export function ProjectTree({
           )}
           {shortcutIndex > 0 && (
             <span className="project-tree__topic-shortcut" aria-hidden="true">
-              ⌘{shortcutIndex}
+              {topicShortcutLabel(shortcutIndex, shortcutPlatform)}
             </span>
           )}
         </div>

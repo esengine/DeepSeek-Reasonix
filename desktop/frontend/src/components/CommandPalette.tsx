@@ -75,10 +75,10 @@ export function CommandPalette({
   useLayoutEffect(() => {
     if (open) {
       setQuery("");
-      setActive(-1);
+      setActive(items.length > 0 ? 0 : -1);
       inputRef.current?.focus();
     }
-  }, [open]);
+  }, [open, items.length]);
 
   // Callback ref: when the input element mounts while the palette is open,
   // focus it immediately. This handles the case where the DOM element

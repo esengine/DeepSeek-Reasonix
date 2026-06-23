@@ -147,6 +147,8 @@ func cloneStringPtr(v *string) *string {
 func cloneServerViewMap(in map[string]ServerView) map[string]ServerView {
 	out := make(map[string]ServerView, len(in))
 	for name, view := range in {
+		view.EnvKeys = append([]string(nil), view.EnvKeys...)
+		view.HeaderKeys = append([]string(nil), view.HeaderKeys...)
 		out[name] = view
 	}
 	return out
@@ -1996,7 +1998,9 @@ func topicTitleFromSession(path string) string {
 			return ""
 		}
 		if msg.Role == "user" {
-			return topicTitleFromText(control.StripComposePrefixes(agent.HandoffTask(msg.Content)))
+			content := control.StripComposePrefixes(agent.HandoffTask(msg.Content))
+			content = control.StripReferencedContextPrefix(content)
+			return topicTitleFromText(content)
 		}
 	}
 }
@@ -3049,10 +3053,10 @@ func activityStatusForTab(tab *WorkspaceTab) string {
 var legacyMigrationMu sync.Mutex
 
 // topicMigrationMarker, once written into a session dir, records that the
-// pre-topic → Global-topic migration pass completed for that dir, so the
-// per-render ListProjectTree call can skip the full session scan instead of
-// re-reading every .jsonl + sidecar only to find nothing left to migrate. New
-// sessions are born with a TopicID, so no fresh legacy files appear afterwards.
+// pre-topic → Global-topic migration pass completed for that dir. Later
+// ListProjectTree calls can skip the full session decode while the marker is
+// newer than the directory's session files, but a newly-created CLI session
+// invalidates the marker and gets a bounded re-scan.
 // It is stamped only when the pass left nothing deferred (an empty legacy
 // session that could gain content later keeps the dir unmarked), so the gate
 // never hides a session that should still be migrated.
@@ -3063,8 +3067,32 @@ func topicMigrationDone(dir string) bool {
 	if dir == "" {
 		return false
 	}
-	_, err := os.Stat(filepath.Join(dir, topicMigrationMarker))
-	return err == nil
+	markerInfo, err := os.Stat(filepath.Join(dir, topicMigrationMarker))
+	if err != nil {
+		return false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return true
+	}
+	markerTime := markerInfo.ModTime()
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if filepath.Ext(name) != ".jsonl" && !strings.HasSuffix(name, ".jsonl.meta") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return false
+		}
+		if info.ModTime().After(markerTime) {
+			return false
+		}
+	}
+	return true
 }
 
 func markTopicMigrationDone(dir string) {
@@ -3087,25 +3115,9 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 	if topicMigrationDone(dir) {
 		return nil
 	}
-	// Determine scope from the directory. The global session dir gets Global
-	// topics; a project session dir gets project-scoped topics under the
-	// matching workspace.
-	scope := "global"
-	workspaceRoot := ""
-	topicTitleRoot := "" // workspace root for topic-title persistence
-	if dir != config.SessionDir() {
-		f := loadProjectsFile()
-		for _, p := range f.Projects {
-			if config.ProjectSessionDir(p.Root) == dir {
-				scope = "project"
-				workspaceRoot = p.Root
-				topicTitleRoot = p.Root
-				break
-			}
-		}
-		if scope != "project" {
-			return nil // not a recognized project dir; skip
-		}
+	scope, workspaceRoot, topicTitleRoot, ok := legacyMigrationTargetForDir(dir)
+	if !ok {
+		return nil
 	}
 	legacyMigrationMu.Lock()
 	defer legacyMigrationMu.Unlock()
@@ -3135,7 +3147,7 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 		if meta, ok, err := agent.LoadBranchMeta(info.Path); err != nil {
 			deferred = true
 			continue
-		} else if ok && (meta.Scope != "" || strings.TrimSpace(meta.WorkspaceRoot) != "" || strings.TrimSpace(meta.TopicID) != "") {
+		} else if ok && !legacySessionMetaMatchesMigrationTarget(meta, scope, workspaceRoot) {
 			continue
 		}
 		topicID := legacySessionTopicID(info.Path)
@@ -3173,9 +3185,9 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 			deferred = true
 			continue
 		}
-		// Skip sessions that already have a scope or workspace — they were
-		// already assigned by a previous run or by the user.
-		if meta.Scope != "" || strings.TrimSpace(meta.WorkspaceRoot) != "" {
+		// Preserve scoped sessions only when their existing ownership matches
+		// the directory being migrated.
+		if !legacySessionMetaMatchesMigrationTarget(meta, scope, workspaceRoot) {
 			continue
 		}
 		meta.Scope = scope
@@ -3224,10 +3236,65 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 		_ = saveTopicTitleSources(topicTitleRoot, topicSources)
 	}
 	invalidateTopicSessionIndex(dir)
+	projectSessionCache.invalidate()
 	if !deferred {
 		markTopicMigrationDone(dir) // pass complete with nothing deferred
 	}
 	return migratedTopicIDs
+}
+
+func legacyMigrationTargetForDir(dir string) (scope, workspaceRoot, topicTitleRoot string, ok bool) {
+	dir = cleanDesktopPath(dir)
+	if dir == "" {
+		return "", "", "", false
+	}
+	if sameDesktopPath(dir, config.SessionDir()) || sameDesktopPath(dir, desktopSessionDir(globalWorkspaceRoot())) {
+		return "global", "", "", true
+	}
+	for _, p := range loadProjectsFile().Projects {
+		if sameDesktopPath(config.ProjectSessionDir(p.Root), dir) {
+			return "project", p.Root, p.Root, true
+		}
+	}
+	return "", "", "", false
+}
+
+func legacySessionMetaMatchesMigrationTarget(meta agent.BranchMeta, scope, workspaceRoot string) bool {
+	if strings.TrimSpace(meta.TopicID) != "" {
+		return false
+	}
+	metaScope := strings.TrimSpace(meta.Scope)
+	if metaScope != "" && metaScope != scope {
+		return false
+	}
+	metaRoot := normalizeProjectRoot(meta.WorkspaceRoot)
+	if scope == "project" {
+		return metaRoot == "" || normalizeProjectRoot(workspaceRoot) == metaRoot
+	}
+	return metaRoot == "" || normalizeProjectRoot(globalWorkspaceRoot()) == metaRoot
+}
+
+func cleanDesktopPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	return filepath.Clean(path)
+}
+
+func sameDesktopPath(a, b string) bool {
+	a = cleanDesktopPath(a)
+	b = cleanDesktopPath(b)
+	if a == "" || b == "" {
+		return false
+	}
+	if os.PathSeparator == '\\' {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 func restoreSessionTopicIndex(dir, sessionPath string) error {
@@ -3900,7 +3967,10 @@ func (a *App) ListProjectTree() []ProjectNode {
 	listProjectTreeMu.Lock()
 	defer listProjectTreeMu.Unlock()
 
-	migrateLegacySessionsIntoGlobalTopics(config.SessionDir())
+	knownDirs := a.knownSessionDirs()
+	for _, dir := range knownDirs {
+		migrateLegacySessionsIntoGlobalTopics(dir)
+	}
 	f := loadProjectsFile()
 	out := []ProjectNode{}
 	type runtimeSessionStatus struct {
@@ -3927,7 +3997,6 @@ func (a *App) ListProjectTree() []ProjectNode {
 		titles map[string]string
 		ok     bool
 	}
-	knownDirs := a.knownSessionDirs()
 	results := make(chan sessionDirLoadResult, len(knownDirs))
 	pendingLoads := 0
 	for _, dir := range knownDirs {

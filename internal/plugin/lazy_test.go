@@ -72,6 +72,19 @@ func waitForServer(t *testing.T, host *Host, name string, timeout time.Duration)
 	t.Fatalf("server %q never appeared in host.ServerNames() within %v (got %v)", name, timeout, host.ServerNames())
 }
 
+func waitForCachedSchema(t *testing.T, spec Spec, timeout time.Duration) *CachedSchema {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cs, ok := LoadCachedSchema(spec.Name, SpecFingerprint(spec)); ok {
+			return cs
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("cached schema for %q never appeared within %v", spec.Name, timeout)
+	return nil
+}
+
 // TestLazyCacheHitSyncSpawn drives the cache-hit branch end-to-end: cache is
 // pre-populated, the model can see real schemas before any spawn, and the
 // first Execute synchronously handshakes, swaps the placeholder for the real
@@ -457,6 +470,35 @@ func TestLazyBackgroundKick(t *testing.T) {
 	// One spawn, not two — kick + Execute must collapse onto the same run.
 	if names := host.ServerNames(); len(names) != 1 {
 		t.Fatalf("host.ServerNames() = %v, want exactly one 'mock'", names)
+	}
+}
+
+func TestLazyBackgroundCacheMissPersistsSchema(t *testing.T) {
+	redirectCache(t)
+	spec := helperSpec()
+
+	host := NewHost()
+	defer host.Close()
+	reg := tool.NewRegistry()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	tools := LazyToolset(spec, nil, host, reg, ctx, true) // cache miss + background kick
+	for _, lt := range tools {
+		reg.Add(lt)
+	}
+
+	waitForServer(t, host, "mock", 5*time.Second)
+	cs := waitForCachedSchema(t, spec, 5*time.Second)
+	if len(cs.Tools) != 2 {
+		t.Fatalf("cached schema has %d tools, want 2", len(cs.Tools))
+	}
+	got := map[string]bool{}
+	for _, ct := range cs.Tools {
+		got[ct.Name] = true
+	}
+	if !got["echo"] || !got["zed"] {
+		t.Fatalf("cached tools = %v, want echo and zed", got)
 	}
 }
 

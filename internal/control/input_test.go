@@ -806,6 +806,63 @@ func TestStripComposePrefixes(t *testing.T) {
 	}
 }
 
+func TestStripReferencedContextPrefix(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "plain user message unchanged",
+			input: "explain this function",
+			want:  "explain this function",
+		},
+		{
+			name:  "file reference stripped",
+			input: "Referenced context:\n\n<file path=\"main.go\">\nfunc main() {}\n</file>\n\nexplain this function",
+			want:  "explain this function",
+		},
+		{
+			name:  "multiple file references stripped",
+			input: "Referenced context:\n\n<file path=\"a.go\">\npackage a\n</file>\n\n<file path=\"b.go\">\npackage b\n</file>\n\ncompare these files",
+			want:  "compare these files",
+		},
+		{
+			name:  "dir reference stripped",
+			input: "Referenced context:\n\n<dir path=\"src\">\nmain.go\nutil.go\n</dir>\n\nlist the files",
+			want:  "list the files",
+		},
+		{
+			name:  "resource reference stripped",
+			input: "Referenced context:\n\n<resource ref=\"@server/res\">\ndata\n</resource>\n\nanalyze this",
+			want:  "analyze this",
+		},
+		{
+			name:  "image reference stripped",
+			input: "Referenced context:\n\n<image path=\"screenshot.png\">\n[image attachment available at @screenshot.png]\n</image>\n\nwhat is in this image",
+			want:  "what is in this image",
+		},
+		{
+			name:  "only reference no user text",
+			input: "Referenced context:\n\n<file path=\"main.go\">\nfunc main() {}\n</file>\n\n",
+			want:  "",
+		},
+		{
+			name:  "empty input",
+			input: "",
+			want:  "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := StripReferencedContextPrefix(tt.input)
+			if got != tt.want {
+				t.Errorf("StripReferencedContextPrefix() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsSyntheticUserMessage(t *testing.T) {
 	tests := []struct {
 		name  string

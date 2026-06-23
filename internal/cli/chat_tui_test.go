@@ -1507,6 +1507,42 @@ func TestEmptyEnterScrollsToBottom(t *testing.T) {
 	})
 }
 
+// TestForceGotoBottomScrollsWithoutTranscriptChange keeps the force-bottom
+// contract independent from transcript length, width, or dirty-state changes.
+func TestForceGotoBottomScrollsWithoutTranscriptChange(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	ch := make(chan event.Event, 1)
+	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
+	adv := func(m chatTUI, msg tea.Msg) chatTUI {
+		n, _ := m.Update(msg)
+		return n.(chatTUI)
+	}
+
+	cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
+	for i := 0; i < 12; i++ {
+		cur = adv(cur, notice)
+	}
+	if !cur.viewport.AtBottom() {
+		t.Fatal("new output while pinned should keep the viewport at the bottom")
+	}
+
+	cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if cur.viewport.AtBottom() {
+		t.Fatal("wheel-up should break the bottom pin")
+	}
+
+	cur.forceGotoBottom = true
+	cur.transcriptDirty = false
+	cur = adv(cur, tea.WindowSizeMsg{Width: 80, Height: 8})
+
+	if !cur.viewport.AtBottom() {
+		t.Fatalf("forceGotoBottom should scroll without transcript changes, YOffset=%d", cur.viewport.YOffset())
+	}
+	if cur.forceGotoBottom {
+		t.Fatal("forceGotoBottom should be cleared after scrolling")
+	}
+}
+
 func TestFoldedPasteUsesPlaceholderAndExpandsOnSend(t *testing.T) {
 	m := newTestChatTUI()
 	pasted := "{\n  \"a\": 1,\n  \"b\": 2,\n  \"c\": 3,\n  \"d\": 4\n}"

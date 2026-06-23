@@ -78,6 +78,7 @@ func builtinHelpItems() []compItem {
 		{label: "/language", hint: i18n.M.CmdLanguage},
 		{label: "/auto-plan", hint: i18n.M.CmdAutoPlan},
 		{label: "/reasoning-language", hint: i18n.M.CmdReasonLang},
+		{label: "/reload-cmd", hint: i18n.M.CmdReloadCmd},
 		{label: "/help", hint: i18n.M.CmdHelp},
 	}
 }

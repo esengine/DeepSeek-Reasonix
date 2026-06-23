@@ -3069,10 +3069,57 @@ a[href] {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
+.transcript-shell {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
 .transcript > * {
   max-width: var(--maxw);
   margin-left: auto;
   margin-right: auto;
+}
+.transcript__jump-bottom {
+  --wails-draggable: no-drag;
+  position: absolute;
+  left: 50%;
+  bottom: 34px;
+  z-index: var(--z-inline-sticky);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elev) 92%, var(--accent-soft));
+  color: var(--fg);
+  box-shadow: var(--shadow-2);
+  cursor: pointer;
+  pointer-events: auto;
+  transform: translateX(-50%);
+  transition:
+    transform 0.12s ease,
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease,
+    box-shadow 0.12s ease,
+    opacity 0.12s ease;
+}
+.transcript__jump-bottom:hover {
+  transform: translate(-50%, -1px);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--bg-elev-2) 88%, var(--accent-soft));
+  color: var(--accent);
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.transcript__jump-bottom:focus-visible {
+  outline: none;
+  box-shadow:
+    var(--focus-ring),
+    var(--shadow-2);
 }
 .transcript--empty {
   container-type: size;
@@ -4296,6 +4343,9 @@ a[href] {
   background: var(--bg-soft);
   font-weight: var(--font-weight-strong);
 }
+.md-status-list {
+  display: none;
+}
 
 /* ── code (editor seam fallback) ─────────────────────────────────────────── */
 .code {
@@ -4635,6 +4685,10 @@ a[href] {
 }
 .tool__status-icon--stopped {
   color: var(--fg-faint);
+}
+/* 圆点状态指示（Creation 用）；classic/workbench 默认隐藏，无影响。 */
+.tool__dot {
+  display: none;
 }
 .tool__meta {
   margin-left: auto;
@@ -6197,14 +6251,6 @@ a[href] {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.modelsw__provider {
-  display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--fg-faint);
-  font-size: 11px;
-}
 .modelsw__check {
   flex-shrink: 0;
 }
@@ -6424,7 +6470,10 @@ a[href] {
   color: var(--fg-dim);
   font-size: 11.5px;
   line-height: 1.4;
+  overflow: visible;
+  text-overflow: clip;
   white-space: normal;
+  overflow-wrap: anywhere;
 }
 .prompt-shelf__header-actions,
 .prompt-shelf__quick-actions {
@@ -21490,7 +21539,6 @@ a[href] {
   background: var(--accent-soft);
 }
 
-:root[data-theme-style] .modelsw__provider,
 :root[data-theme-style] .modelsw__empty {
   color: var(--fg-faint);
 }
@@ -22679,9 +22727,9 @@ a[href] {
 .app--creation .settings-modal-backdrop,
 :root[data-theme-style] .app--creation .settings-modal-backdrop {
   padding: clamp(24px, 5vh, 48px) clamp(32px, 6vw, 72px);
-  background: rgba(18, 20, 26, 0.16);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
+  background: rgba(18, 20, 26, 0.36);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
 .app--creation .settings-modal,
@@ -22690,7 +22738,7 @@ a[href] {
   height: min(690px, calc(100vh - 112px));
   border-color: color-mix(in srgb, var(--fg-faint) 18%, transparent);
   border-radius: 18px;
-  background: color-mix(in srgb, var(--bg-elev) 78%, transparent);
+  background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
   backdrop-filter: blur(18px) saturate(1.08);
   -webkit-backdrop-filter: blur(18px) saturate(1.08);
   box-shadow: 0 24px 72px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.06);
@@ -23793,9 +23841,7 @@ a[href] {
 }
 
 .app--creation .composer-meta .modelsw__kind,
-.app--creation .composer-meta .modelsw__provider,
-:root[data-theme-style] .app--creation .composer-meta .modelsw__kind,
-:root[data-theme-style] .app--creation .composer-meta .modelsw__provider {
+:root[data-theme-style] .app--creation .composer-meta .modelsw__kind {
   display: none;
 }
 
@@ -24449,6 +24495,315 @@ a[href] {
   margin-bottom: 0;
 }
 
+.app--creation .msg--assistant .msg__body,
+:root[data-theme-style] .app--creation .msg--assistant .msg__body {
+  color: color-mix(in srgb, var(--fg) 96%, var(--bg));
+  font-family: "Source Han Sans CN", "Source Han Sans SC", "Noto Sans CJK SC",
+    "Source Han Sans", "思源黑体", "Source Han Sans HC", "Microsoft YaHei UI",
+    "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  line-height: 1.74;
+  letter-spacing: 0.005em;
+}
+
+:root[data-theme="light"] .app--creation .msg--assistant .msg__body {
+  color: color-mix(in srgb, var(--fg) 90%, var(--bg));
+}
+
+.app--creation .md,
+:root[data-theme-style] .app--creation .md {
+  font-family: "Source Han Sans CN", "Source Han Sans SC", "Noto Sans CJK SC",
+    "Source Han Sans", "思源黑体", "Source Han Sans HC", "Microsoft YaHei UI",
+    "Microsoft YaHei", sans-serif;
+}
+
+.app--creation .md p,
+:root[data-theme-style] .app--creation .md p {
+  margin: 0 0 10px;
+}
+
+.app--creation .md h1,
+.app--creation .md h2,
+.app--creation .md h3,
+.app--creation .md h4,
+:root[data-theme-style] .app--creation .md h1,
+:root[data-theme-style] .app--creation .md h2,
+:root[data-theme-style] .app--creation .md h3,
+:root[data-theme-style] .app--creation .md h4 {
+  margin: 18px 0 8px;
+  color: color-mix(in srgb, var(--fg) 92%, var(--bg));
+  font-weight: 650;
+  line-height: 1.36;
+}
+
+.app--creation .md ul,
+.app--creation .md ol,
+:root[data-theme-style] .app--creation .md ul,
+:root[data-theme-style] .app--creation .md ol {
+  margin: 0 0 10px;
+  padding-left: 20px;
+}
+
+.app--creation .md li,
+:root[data-theme-style] .app--creation .md li {
+  margin: 2px 0;
+}
+
+.app--creation .msg--assistant .md .code-block,
+:root[data-theme-style] .app--creation .msg--assistant .md .code-block {
+  margin: 10px 0 16px;
+}
+
+.app--creation .msg--assistant .md .md-plain-block--split > .code-block,
+:root[data-theme-style] .app--creation .msg--assistant .md .md-plain-block--split > .code-block {
+  display: none;
+}
+
+.app--creation .msg--assistant .md .md-plain-block__diagram,
+:root[data-theme-style] .app--creation .msg--assistant .md .md-plain-block__diagram {
+  margin: 10px 0 8px;
+}
+
+.app--creation .msg--assistant .md .md-plain-block__diagram .code:not([data-lang]),
+:root[data-theme-style] .app--creation .msg--assistant .md .md-plain-block__diagram .code:not([data-lang]) {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  letter-spacing: 0;
+  line-height: 1.58;
+  white-space: pre;
+  word-break: normal;
+}
+
+.app--creation .msg--assistant .md .md-status-list,
+:root[data-theme-style] .app--creation .msg--assistant .md .md-status-list {
+  display: grid;
+  gap: 7px;
+  margin: 10px 0 16px;
+  padding: 2px 0 2px 2px;
+}
+
+.app--creation .msg--assistant .md .md-status-list__item,
+:root[data-theme-style] .app--creation .msg--assistant .md .md-status-list__item {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr);
+  gap: 11px;
+  align-items: start;
+  color: color-mix(in srgb, var(--fg) 92%, var(--bg));
+  font-family: "Source Han Sans CN", "Source Han Sans SC", "Noto Sans CJK SC",
+    "Source Han Sans", "思源黑体", "Source Han Sans HC", "Microsoft YaHei UI",
+    "Microsoft YaHei", sans-serif;
+  font-size: 13.25px;
+  font-weight: 500;
+  letter-spacing: 0.006em;
+  line-height: 1.58;
+}
+
+.app--creation .msg--assistant .md .md-status-list__dot,
+:root[data-theme-style] .app--creation .msg--assistant .md .md-status-list__dot {
+  width: 6px;
+  height: 6px;
+  margin-top: 0.68em;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 11%, transparent);
+}
+
+.app--creation .msg--assistant .md .md-status-list__text,
+:root[data-theme-style] .app--creation .msg--assistant .md .md-status-list__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.app--creation .msg--assistant .md .code:not([data-lang]),
+:root[data-theme-style] .app--creation .msg--assistant .md .code:not([data-lang]) {
+  width: max-content;
+  max-width: 100%;
+  margin: 0;
+  padding: 8px 0 8px 15px;
+  border: 0;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-radius: 0;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 7%, transparent),
+    color-mix(in srgb, var(--bg) 0%, transparent) 78%
+  );
+  color: color-mix(in srgb, var(--fg) 92%, var(--bg));
+  font-family: "Source Han Sans CN", "Source Han Sans SC", "Noto Sans CJK SC",
+    "Source Han Sans", "思源黑体", "Source Han Sans HC", "Microsoft YaHei UI",
+    "Microsoft YaHei", sans-serif;
+  font-size: 12.75px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1.52;
+  box-shadow: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.app--creation .msg--assistant .md .code:not([data-lang]) .code-block__copy,
+:root[data-theme-style] .app--creation .msg--assistant .md .code:not([data-lang]) .code-block__copy {
+  top: 2px;
+  right: 2px;
+  color: color-mix(in srgb, var(--fg-faint) 58%, var(--bg));
+  border-color: transparent;
+  background: transparent;
+}
+
+.app--creation .msg--assistant .md .code:not([data-lang]) code,
+.app--creation .msg--assistant .md .code:not([data-lang]) span,
+:root[data-theme-style] .app--creation .msg--assistant .md .code:not([data-lang]) code,
+:root[data-theme-style] .app--creation .msg--assistant .md .code:not([data-lang]) span {
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.app--creation .msg--assistant .md .code[data-lang="bash"],
+.app--creation .msg--assistant .md .code[data-lang="shell"],
+.app--creation .msg--assistant .md .code[data-lang="sh"],
+.app--creation .msg--assistant .md .code[data-lang="powershell"],
+.app--creation .msg--assistant .md .code[data-lang="pwsh"],
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="bash"],
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="shell"],
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="sh"],
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="powershell"],
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="pwsh"] {
+  width: max-content;
+  max-width: 100%;
+  margin: 7px 0 13px;
+  padding: 9px 13px 9px 31px;
+  border: 1px solid color-mix(in srgb, var(--border) 58%, var(--bg));
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 5%, var(--bg-elev)),
+    color-mix(in srgb, var(--bg-elev) 52%, var(--bg))
+  );
+  color: color-mix(in srgb, var(--fg) 89%, var(--bg));
+  font-size: 12.5px;
+  line-height: 1.6;
+  box-shadow: none;
+}
+
+.app--creation .msg--assistant .md .code[data-lang="bash"]::before,
+.app--creation .msg--assistant .md .code[data-lang="shell"]::before,
+.app--creation .msg--assistant .md .code[data-lang="sh"]::before,
+.app--creation .msg--assistant .md .code[data-lang="powershell"]::before,
+.app--creation .msg--assistant .md .code[data-lang="pwsh"]::before,
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="bash"]::before,
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="shell"]::before,
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="sh"]::before,
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="powershell"]::before,
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="pwsh"]::before {
+  content: "$";
+  position: absolute;
+  top: 9px;
+  left: 13px;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.app--creation .msg--assistant .md .code[data-lang="powershell"]::before,
+.app--creation .msg--assistant .md .code[data-lang="pwsh"]::before,
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="powershell"]::before,
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="pwsh"]::before {
+  content: ">";
+}
+
+.app--creation .msg--assistant .md .code[data-lang="bash"] .code-block__copy,
+.app--creation .msg--assistant .md .code[data-lang="shell"] .code-block__copy,
+.app--creation .msg--assistant .md .code[data-lang="sh"] .code-block__copy,
+.app--creation .msg--assistant .md .code[data-lang="powershell"] .code-block__copy,
+.app--creation .msg--assistant .md .code[data-lang="pwsh"] .code-block__copy,
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="bash"] .code-block__copy,
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="shell"] .code-block__copy,
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="sh"] .code-block__copy,
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="powershell"] .code-block__copy,
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="pwsh"] .code-block__copy {
+  top: 5px;
+  right: 5px;
+  color: color-mix(in srgb, var(--fg-faint) 58%, var(--bg));
+  border-color: color-mix(in srgb, var(--border-soft) 58%, var(--bg));
+  background: color-mix(in srgb, var(--bg-elev-2) 28%, var(--bg));
+}
+
+.app--creation .md blockquote,
+:root[data-theme-style] .app--creation .md blockquote {
+  margin: 2px 0 12px;
+  padding: 2px 12px;
+  border-left-color: color-mix(in srgb, var(--border) 74%, var(--bg));
+  color: color-mix(in srgb, var(--fg-dim) 88%, var(--bg));
+}
+
+.app--creation .md table,
+:root[data-theme-style] .app--creation .md table {
+  display: table;
+  width: 100%;
+  max-width: 100%;
+  table-layout: fixed;
+  margin: 12px 0 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, var(--bg));
+  border-radius: 10px;
+  border-spacing: 0;
+  border-collapse: separate;
+  overflow-x: auto;
+  background: color-mix(in srgb, var(--bg-elev) 72%, var(--bg));
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.app--creation .md th,
+.app--creation .md td,
+:root[data-theme-style] .app--creation .md th,
+:root[data-theme-style] .app--creation .md td {
+  border: 0;
+  border-right: 1px solid color-mix(in srgb, var(--border-soft) 84%, var(--bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--border-soft) 84%, var(--bg));
+  padding: 7px 11px;
+  color: color-mix(in srgb, var(--fg-dim) 92%, var(--bg));
+  vertical-align: top;
+  white-space: normal;
+}
+
+.app--creation .md th:first-child,
+.app--creation .md td:first-child,
+:root[data-theme-style] .app--creation .md th:first-child,
+:root[data-theme-style] .app--creation .md td:first-child {
+  width: 108px;
+}
+
+.app--creation .md th .md-code,
+.app--creation .md td .md-code,
+:root[data-theme-style] .app--creation .md th .md-code,
+:root[data-theme-style] .app--creation .md td .md-code {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.app--creation .md th,
+:root[data-theme-style] .app--creation .md th {
+  background: color-mix(in srgb, var(--bg-elev-2) 62%, var(--bg));
+  color: color-mix(in srgb, var(--fg) 88%, var(--bg));
+  font-weight: 650;
+}
+
+.app--creation .md tr:last-child > th,
+.app--creation .md tr:last-child > td,
+:root[data-theme-style] .app--creation .md tr:last-child > th,
+:root[data-theme-style] .app--creation .md tr:last-child > td {
+  border-bottom: 0;
+}
+
+.app--creation .md tr > :last-child,
+:root[data-theme-style] .app--creation .md tr > :last-child {
+  border-right: 0;
+}
+
 .app--creation .reasoning__head,
 :root[data-theme-style] .app--creation .reasoning__head {
   gap: 4px;
@@ -24504,6 +24859,332 @@ a[href] {
 :root[data-theme-style] .app--creation .readonly-batch > .reasoning__head > .reasoning__chevron,
 :root[data-theme-style] .app--creation .turn-collapse > .reasoning__head > .reasoning__chevron {
   order: 2;
+}
+
+/* ── Creation: 工具信息流 ───────────────────────────────────────────────────
+   状态圆点替代左侧文字图标（done=绿 / error=红 / stopped=橙 / running 无点）；
+   圆点置于工具头最右端（折叠箭头之后）。classic/workbench 下圆点默认隐藏，
+   左侧文字图标不变，零影响。 */
+
+.app--creation .tool-group,
+:root[data-theme-style] .app--creation .tool-group {
+  margin: 8px auto 6px;
+  color: var(--fg-faint);
+}
+
+.app--creation .tool-group__head,
+:root[data-theme-style] .app--creation .tool-group__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.app--creation .tool-group__title,
+:root[data-theme-style] .app--creation .tool-group__title {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--fg) 82%, transparent);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.app--creation .tool-group__summary,
+:root[data-theme-style] .app--creation .tool-group__summary {
+  min-width: 0;
+  color: color-mix(in srgb, var(--fg-faint) 86%, transparent);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app--creation .tool-group__chevron,
+:root[data-theme-style] .app--creation .tool-group__chevron {
+  flex: 0 0 auto;
+  color: var(--fg-faint);
+  transition: transform 0.16s;
+}
+
+.app--creation .tool-group__chevron--open,
+:root[data-theme-style] .app--creation .tool-group__chevron--open {
+  transform: rotate(90deg);
+}
+
+.app--creation .tool-group__body,
+:root[data-theme-style] .app--creation .tool-group__body {
+  overflow: hidden;
+  padding: 8px 0 0 26px;
+}
+
+.app--creation .tool-group__body > .tool,
+:root[data-theme-style] .app--creation .tool-group__body > .tool {
+  margin: 2px 0;
+  contain-intrinsic-size: 1px 28px;
+}
+
+.app--creation .tool-group__body .tool__head,
+:root[data-theme-style] .app--creation .tool-group__body .tool__head {
+  min-height: 28px;
+  color: color-mix(in srgb, var(--fg-dim) 64%, transparent);
+}
+
+.app--creation .tool-group__body .tool__head:hover,
+:root[data-theme-style] .app--creation .tool-group__body .tool__head:hover {
+  color: var(--fg);
+}
+
+.app--creation .tool-group__body .tool__name,
+:root[data-theme-style] .app--creation .tool-group__body .tool__name {
+  color: color-mix(in srgb, var(--fg) 82%, transparent);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.app--creation .tool-group__body .tool__subject,
+.app--creation .tool-group__body .tool__profile,
+:root[data-theme-style] .app--creation .tool-group__body .tool__subject,
+:root[data-theme-style] .app--creation .tool-group__body .tool__profile {
+  color: color-mix(in srgb, var(--fg-dim) 68%, transparent);
+}
+
+.app--creation .reasoning__body,
+:root[data-theme-style] .app--creation .reasoning__body {
+  font-family: "Source Han Sans CN", "Source Han Sans SC", "Noto Sans CJK SC",
+    "Source Han Sans", "思源黑体", "Source Han Sans HC", "Microsoft YaHei UI",
+    "Microsoft YaHei", sans-serif;
+  font-style: normal;
+}
+
+.app--creation .tool__status-icon,
+:root[data-theme-style] .app--creation .tool__status-icon {
+  display: none;
+}
+
+.app--creation .tool__dot,
+:root[data-theme-style] .app--creation .tool__dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--fg-faint);
+}
+
+.app--creation .tool__dot--ok,
+:root[data-theme-style] .app--creation .tool__dot--ok {
+  background: var(--ok);
+}
+
+.app--creation .tool__dot--err,
+:root[data-theme-style] .app--creation .tool__dot--err {
+  background: var(--err);
+}
+
+.app--creation .tool__dot--stopped,
+:root[data-theme-style] .app--creation .tool__dot--stopped {
+  background: var(--warn);
+}
+
+/* 工具头与深度思考头对齐：reasoning__head 在 Creation 下 padding:0（flush），
+   tool__head 默认 padding:3px 8px 会比思考头左右各多 8px，导致层级错位。
+   Creation 下统一为 0，与 reasoning__head 同起点。 */
+.app--creation .tool__head,
+:root[data-theme-style] .app--creation .tool__head {
+  padding: 0;
+}
+
+/* 移除非思考卡片的左侧竖线（思考模式 .reasoning__body 保留）。
+   readonly-batch__body / turn-collapse__body / tool__body 的 border-left 统一去掉。 */
+.app--creation .tool__body,
+.app--creation .readonly-batch__body,
+.app--creation .turn-collapse__body,
+:root[data-theme-style] .app--creation .tool__body,
+:root[data-theme-style] .app--creation .readonly-batch__body,
+:root[data-theme-style] .app--creation .turn-collapse__body {
+  border-left: none;
+  padding-left: 0;
+}
+
+/* 限制工具头标题宽度，给右侧 meta（耗时/箭头/圆点）留出可见空间。
+   Bash 等命令常超长，不限宽会把箭头和圆点挤出视野。仅 Creation 作用域。
+   summary 在 Creation 下直接隐藏——它对 bash 只是"N 行"摘要，信息量低，
+   留着反而挤占右侧关键元素。 */
+.app--creation .tool__subject,
+:root[data-theme-style] .app--creation .tool__subject {
+  flex: 0 1 auto;
+  max-width: 55ch;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app--creation .tool__summary,
+:root[data-theme-style] .app--creation .tool__summary {
+  display: none;
+}
+
+/* 工具信息流统一思源黑体：工具头全部元素 + 工具体代码/文本。
+   仅 .app--creation 作用域，不改全局 --font-ui token。 */
+.app--creation .tool,
+.app--creation .tool__head,
+.app--creation .tool__name,
+.app--creation .tool__subject,
+.app--creation .tool__summary,
+.app--creation .tool__duration,
+.app--creation .tool__profile,
+.app--creation .tool__nested-count,
+.app--creation .tool__body,
+.app--creation .tool-group,
+.app--creation .tool-group__head,
+.app--creation .tool-group__title,
+.app--creation .tool-group__summary,
+.app--creation .tool-group__body,
+.app--creation .readonly-batch,
+.app--creation .readonly-batch__label,
+.app--creation .turn-collapse,
+.app--creation .turn-collapse__label,
+.app--creation .phase,
+.app--creation .notice-line,
+.app--creation .compaction,
+:root[data-theme-style] .app--creation .tool,
+:root[data-theme-style] .app--creation .tool__head,
+:root[data-theme-style] .app--creation .tool__name,
+:root[data-theme-style] .app--creation .tool__subject,
+:root[data-theme-style] .app--creation .tool__summary,
+:root[data-theme-style] .app--creation .tool__duration,
+:root[data-theme-style] .app--creation .tool__profile,
+:root[data-theme-style] .app--creation .tool__nested-count,
+:root[data-theme-style] .app--creation .tool__body,
+:root[data-theme-style] .app--creation .tool-group,
+:root[data-theme-style] .app--creation .tool-group__head,
+:root[data-theme-style] .app--creation .tool-group__title,
+:root[data-theme-style] .app--creation .tool-group__summary,
+:root[data-theme-style] .app--creation .tool-group__body,
+:root[data-theme-style] .app--creation .readonly-batch,
+:root[data-theme-style] .app--creation .readonly-batch__label,
+:root[data-theme-style] .app--creation .turn-collapse,
+:root[data-theme-style] .app--creation .turn-collapse__label,
+:root[data-theme-style] .app--creation .phase,
+:root[data-theme-style] .app--creation .notice-line,
+:root[data-theme-style] .app--creation .compaction {
+  font-family: "Source Han Sans CN", "Source Han Sans SC", "Noto Sans CJK SC",
+    "Source Han Sans", "思源黑体", "Source Han Sans HC", "Microsoft YaHei UI",
+    "Microsoft YaHei", sans-serif;
+}
+
+/* 工具卡片内的代码块（命令参数/输出/diff）与 diff 标签、错误/提示统一思源黑体。
+   注意：思源黑体为比例字体，代码列对齐会丢失，但字体风格绝对统一。
+   Noto Sans SC 是思源黑体的开源同源版本，系统已装。 */
+.app--creation .tool__body .code,
+.app--creation .tool__body .code-block,
+.app--creation .tool__difflabel,
+.app--creation .tool__err,
+.app--creation .tool__note,
+.app--creation .tool__showall,
+:root[data-theme-style] .app--creation .tool__body .code,
+:root[data-theme-style] .app--creation .tool__body .code-block,
+:root[data-theme-style] .app--creation .tool__difflabel,
+:root[data-theme-style] .app--creation .tool__err,
+:root[data-theme-style] .app--creation .tool__note,
+:root[data-theme-style] .app--creation .tool__showall {
+  font-family: "Source Han Sans CN", "Source Han Sans SC", "Noto Sans CJK SC",
+    "Noto Sans SC", "Source Han Sans", "思源黑体", "Microsoft YaHei UI",
+    "Microsoft YaHei", sans-serif;
+}
+
+/* 工具错误信息：Creation 下去掉醒目的红底块（base 用 --del-bg），
+   改为左对齐纯文本，与命令输出同起点（base 有 30px 左缩进，这里清零）。
+   仅 .app--creation 作用域，classic/workbench 的红底错误框保持不变。 */
+.app--creation .tool__err,
+:root[data-theme-style] .app--creation .tool__err {
+  margin: 4px 0 8px;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+  text-align: left;
+}
+
+/* 工具体内代码块（命令参数/输出/diff）底部的横向滚动条：Creation 下隐藏滑道，
+   只留一条 4px 细滑块（默认半透明，hover 略加深）。所有工具通用，不只 shell。
+   仅作用于 .app--creation .tool__body .code，不碰全局 --scrollbar-* token，
+   classic/workbench 的 10px 滚动条保持不变。
+   真因（之前没生效的原因）：全局 `* { scrollbar-width: thin }` 给每个元素都设了
+   标准属性，WebView2(Chromium M121+) 下只要 scrollbar-width 非 auto，
+   ::-webkit-scrollbar 伪元素就被整体忽略。所以必须先把 .code 的 scrollbar-width
+   重置为 auto 重新激活 webkit 伪元素，再用带 !important 的 webkit 规则覆盖尺寸/滑道，
+   写法对齐已能工作的 .transcript 滚动条（见上方 24381 区域）。 */
+.app--creation .tool__body .code,
+:root[data-theme-style] .app--creation .tool__body .code {
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+
+.app--creation .tool__body .code::-webkit-scrollbar,
+:root[data-theme-style] .app--creation .tool__body .code::-webkit-scrollbar {
+  width: 4px !important;
+  height: 4px !important;
+  background: transparent !important;
+}
+
+.app--creation .tool__body .code::-webkit-scrollbar-track,
+.app--creation .tool__body .code::-webkit-scrollbar-track-piece,
+.app--creation .tool__body .code::-webkit-scrollbar-corner,
+:root[data-theme-style] .app--creation .tool__body .code::-webkit-scrollbar-track,
+:root[data-theme-style] .app--creation .tool__body .code::-webkit-scrollbar-track-piece,
+:root[data-theme-style] .app--creation .tool__body .code::-webkit-scrollbar-corner {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.app--creation .tool__body .code::-webkit-scrollbar-button,
+:root[data-theme-style] .app--creation .tool__body .code::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+}
+
+.app--creation .tool__body .code::-webkit-scrollbar-thumb,
+:root[data-theme-style] .app--creation .tool__body .code::-webkit-scrollbar-thumb {
+  border: 0 !important;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg-faint) 38%, transparent) !important;
+  background-clip: border-box !important;
+}
+
+.app--creation .tool__body .code::-webkit-scrollbar-thumb:hover,
+:root[data-theme-style] .app--creation .tool__body .code::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--fg-dim) 52%, transparent) !important;
+}
+
+.app--creation .tool__name,
+.app--creation .tool__summary,
+.app--creation .tool__duration,
+.app--creation .tool__profile,
+.app--creation .tool__nested-count,
+:root[data-theme-style] .app--creation .tool__name,
+:root[data-theme-style] .app--creation .tool__summary,
+:root[data-theme-style] .app--creation .tool__duration,
+:root[data-theme-style] .app--creation .tool__profile,
+:root[data-theme-style] .app--creation .tool__nested-count {
+  font-family: "Source Han Sans CN", "Source Han Sans SC", "Noto Sans CJK SC",
+    "Source Han Sans", "思源黑体", "Source Han Sans HC", "Microsoft YaHei UI",
+    "Microsoft YaHei", sans-serif;
 }
 
 .app--creation .turn-actions,

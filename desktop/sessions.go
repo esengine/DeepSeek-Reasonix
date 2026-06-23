@@ -4,16 +4,18 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/fileutil"
-	"reasonix/internal/jobs"
+	"reasonix/internal/store"
 )
 
 // sessions.go holds the desktop-only session-management state that the shared
@@ -123,6 +125,42 @@ type trashedSessionMeta struct {
 	DeletedAt int64  `json:"deletedAt"`
 }
 
+type sessionTrashArtifact struct {
+	src  string
+	name string
+}
+
+func sessionTelemetryPath(sessionPath string) string {
+	if strings.TrimSpace(sessionPath) == "" {
+		return ""
+	}
+	return sessionPath + ".telemetry.json"
+}
+
+func sessionTrashArtifacts(sessionPath, key string) []sessionTrashArtifact {
+	stem := strings.TrimSuffix(key, ".jsonl")
+	return []sessionTrashArtifact{
+		{src: sessionPath, name: key},
+		{src: store.SessionMeta(sessionPath), name: key + ".meta"},
+		{src: store.SessionGoalState(sessionPath), name: stem + ".goal-state.json"},
+		{src: sessionTelemetryPath(sessionPath), name: key + ".telemetry.json"},
+		{src: store.SessionCheckpointDir(sessionPath), name: stem + ".ckpt"},
+		{src: store.SessionJobsDir(sessionPath), name: stem + ".jobs"},
+	}
+}
+
+func sessionOwnedArtifactPaths(sessionPath string) []string {
+	key := filepath.Base(sessionPath)
+	artifacts := sessionTrashArtifacts(sessionPath, key)
+	paths := make([]string, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		if strings.TrimSpace(artifact.src) != "" {
+			paths = append(paths, artifact.src)
+		}
+	}
+	return paths
+}
+
 func trashSessionArtifacts(dir, sessionPath, key string) error {
 	return trashSessionArtifactsBeforeMove(dir, sessionPath, key, nil)
 }
@@ -145,19 +183,10 @@ func reconcileDesktopTrashSessionArtifacts(dir, sessionPath, key string) error {
 	if err := os.MkdirAll(itemDir, 0o755); err != nil {
 		return err
 	}
-	if err := movePathIfExists(sessionPath, filepath.Join(itemDir, key)); err != nil {
-		return err
-	}
-	if err := movePathIfExists(sessionPath+".meta", filepath.Join(itemDir, key+".meta")); err != nil {
-		return err
-	}
-	ckptName := strings.TrimSuffix(key, ".jsonl") + ".ckpt"
-	if err := movePathIfExists(strings.TrimSuffix(sessionPath, ".jsonl")+".ckpt", filepath.Join(itemDir, ckptName)); err != nil {
-		return err
-	}
-	jobsName := strings.TrimSuffix(key, ".jsonl") + ".jobs"
-	if err := movePathIfExists(jobs.ArtifactDir(sessionPath), filepath.Join(itemDir, jobsName)); err != nil {
-		return err
+	for _, artifact := range sessionTrashArtifacts(sessionPath, key) {
+		if err := movePathIfExists(artifact.src, filepath.Join(itemDir, artifact.name)); err != nil {
+			return err
+		}
 	}
 	if err := trashSubagentArtifacts(dir, sessionPath, itemDir); err != nil {
 		return err
@@ -204,19 +233,10 @@ func trashSessionArtifactsBeforeMove(dir, sessionPath, key string, beforeMove fu
 	if beforeMove != nil {
 		beforeMove()
 	}
-	if err := movePathIfExists(sessionPath, filepath.Join(itemDir, key)); err != nil {
-		return err
-	}
-	if err := movePathIfExists(sessionPath+".meta", filepath.Join(itemDir, key+".meta")); err != nil {
-		return err
-	}
-	ckptName := strings.TrimSuffix(key, ".jsonl") + ".ckpt"
-	if err := movePathIfExists(strings.TrimSuffix(sessionPath, ".jsonl")+".ckpt", filepath.Join(itemDir, ckptName)); err != nil {
-		return err
-	}
-	jobsName := strings.TrimSuffix(key, ".jsonl") + ".jobs"
-	if err := movePathIfExists(jobs.ArtifactDir(sessionPath), filepath.Join(itemDir, jobsName)); err != nil {
-		return err
+	for _, artifact := range sessionTrashArtifacts(sessionPath, key) {
+		if err := movePathIfExists(artifact.src, filepath.Join(itemDir, artifact.name)); err != nil {
+			return err
+		}
 	}
 	if err := trashSubagentArtifacts(dir, sessionPath, itemDir); err != nil {
 		return err
@@ -278,7 +298,7 @@ func trashedSessionDeletedAt(path string) int64 {
 }
 
 func restoreTrashedSessionFile(dir, path string) error {
-	trashPath, key, itemDir, err := validateTrashedSessionPath(dir, path)
+	_, key, itemDir, err := validateTrashedSessionPath(dir, path)
 	if err != nil {
 		return err
 	}
@@ -294,19 +314,10 @@ func restoreTrashedSessionFile(dir, path string) error {
 	if err := checkRestoreSubagentConflicts(dir, itemDir); err != nil {
 		return err
 	}
-	if err := movePathIfExists(trashPath, target); err != nil {
-		return err
-	}
-	if err := movePathIfExists(trashPath+".meta", target+".meta"); err != nil {
-		return err
-	}
-	ckptName := strings.TrimSuffix(key, ".jsonl") + ".ckpt"
-	if err := movePathIfExists(filepath.Join(itemDir, ckptName), filepath.Join(dir, ckptName)); err != nil {
-		return err
-	}
-	jobsName := strings.TrimSuffix(key, ".jsonl") + ".jobs"
-	if err := movePathIfExists(filepath.Join(itemDir, jobsName), filepath.Join(dir, jobsName)); err != nil {
-		return err
+	for _, artifact := range sessionTrashArtifacts(target, key) {
+		if err := movePathIfExists(filepath.Join(itemDir, artifact.name), artifact.src); err != nil {
+			return err
+		}
 	}
 	if err := restoreSubagentArtifacts(dir, itemDir); err != nil {
 		return err
@@ -342,7 +353,7 @@ func purgeTrashedSessionFile(dir, path string) error {
 }
 
 func movePathIfExists(src, dst string) error {
-	if _, err := os.Stat(src); os.IsNotExist(err) {
+	if _, err := os.Lstat(src); os.IsNotExist(err) {
 		return nil
 	} else if err != nil {
 		return err
@@ -350,7 +361,116 @@ func movePathIfExists(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	return os.Rename(src, dst)
+	// Try os.Rename first — it's atomic and fast when it works.
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	} else if !isRenameCrossDeviceOrBusy(err) {
+		return err
+	}
+	// Fallback: copy then remove. This handles cross-device moves and the
+	// Windows case where a directory rename fails because a handle is briefly
+	// held open (e.g. antivirus scan, indexing, or a just-closed file).
+	return copyAndRemove(src, dst)
+}
+
+// isRenameCrossDeviceOrBusy reports whether err is a cross-device rename or
+// a "file busy" error that a copy+remove fallback can recover from.
+func isRenameCrossDeviceOrBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Cross-device link.
+	if le, ok := err.(*os.LinkError); ok {
+		if le.Err == syscall.EXDEV {
+			return true
+		}
+		// Windows: "The process cannot access the file because it is being used by another process."
+		if errno, ok := le.Err.(syscall.Errno); ok {
+			return errno == 32 // ERROR_SHARING_VIOLATION
+		}
+	}
+	return false
+}
+
+// copyAndRemove recursively copies src to dst, then removes src. Used as a
+// fallback when os.Rename fails (cross-device or Windows file-lock races).
+func copyAndRemove(src, dst string) error {
+	if err := copyPath(src, dst); err != nil {
+		return err
+	}
+	// On Windows, wait briefly for any file handle release.
+	time.Sleep(10 * time.Millisecond)
+	return os.RemoveAll(src)
+}
+
+func copyPath(src, dst string) error {
+	info, err := os.Lstat(src)
+	if err != nil {
+		return err
+	}
+	mode := info.Mode()
+	switch {
+	case mode&os.ModeSymlink != 0:
+		return copySymlink(src, dst)
+	case mode.IsDir():
+		return copyDir(src, dst, mode.Perm())
+	case mode.IsRegular():
+		return copyFile(src, dst, mode.Perm())
+	default:
+		return fmt.Errorf("unsupported file type in rename fallback: %s", src)
+	}
+}
+
+func copyDir(src, dst string, mode os.FileMode) error {
+	if err := os.MkdirAll(dst, mode); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		srcPath := filepath.Join(src, e.Name())
+		dstPath := filepath.Join(dst, e.Name())
+		if err := copyPath(srcPath, dstPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyFile(src, dst string, mode os.FileMode) error {
+	// Open source file.
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	// Create destination file.
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err != nil {
+		in.Close()
+		return err
+	}
+	// Copy content.
+	_, err = io.Copy(out, in)
+	// Close both files before any removal.
+	closeErr := out.Close()
+	in.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return nil
+}
+
+func copySymlink(src, dst string) error {
+	target, err := os.Readlink(src)
+	if err != nil {
+		return err
+	}
+	return os.Symlink(target, dst)
 }
 
 func trashSubagentArtifacts(dir, sessionPath, itemDir string) error {

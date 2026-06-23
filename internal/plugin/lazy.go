@@ -89,14 +89,15 @@ func (s *lazySpawn) kick() {
 // reacquires mu to publish the result.
 func (s *lazySpawn) run() {
 	real, err := s.host.Add(s.ctx, s.spec)
+	var cacheTools []tool.Tool
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err != nil {
 		if errors.Is(err, ErrSpawningInFlight) {
 			// Another tab is already spawning this server; reset to idle so
 			// the next call retries instead of recording a spurious failure.
 			s.state = spawnIdle
 			s.spawnErr = nil
+			s.mu.Unlock()
 			return
 		}
 		if IsServerAlreadyConnected(err) {
@@ -110,17 +111,22 @@ func (s *lazySpawn) run() {
 				}
 				s.state = spawnReady
 				s.trySwap()
+				cacheTools = tools
+				s.mu.Unlock()
+				saveLazyCachedSchema(s.spec, cacheTools)
 				return
 			}
 			// ToolsFor failed — still not a real failure; just mark failed
 			// without recording it so /mcp status stays clean.
 			s.state = spawnFailed
 			s.spawnErr = err
+			s.mu.Unlock()
 			return
 		}
 		s.state = spawnFailed
 		s.spawnErr = err
 		s.host.RecordFailure(s.spec, err)
+		s.mu.Unlock()
 		return
 	}
 	s.real = make(map[string]tool.Tool, len(real))
@@ -129,6 +135,17 @@ func (s *lazySpawn) run() {
 	}
 	s.state = spawnReady
 	s.trySwap()
+	cacheTools = real
+	s.mu.Unlock()
+	saveLazyCachedSchema(s.spec, cacheTools)
+}
+
+func saveLazyCachedSchema(spec Spec, real []tool.Tool) {
+	_ = SaveCachedSchema(spec.Name, CachedSchema{
+		SpecHash:     SpecFingerprint(spec),
+		Capabilities: map[string]bool{},
+		Tools:        cacheableToolsOf(real),
+	})
 }
 
 // trySwap installs the real tools into reg if the spawn is ready and the
