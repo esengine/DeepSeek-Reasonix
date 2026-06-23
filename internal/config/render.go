@@ -333,6 +333,18 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	b.WriteString("[tools.background_jobs]\n")
 	fmt.Fprintf(&b, "stalled_warning_seconds = %d   # warn once per background job after this many quiet seconds; 0 disables\n\n", c.BackgroundJobStalledWarningSeconds())
 
+	b.WriteString("[tools.shell]\n")
+	if c.Tools.Shell.Prefer != "" {
+		fmt.Fprintf(&b, "prefer = %q   # auto|bash|powershell|pwsh; empty/default = auto-detect\n", c.Tools.Shell.Prefer)
+	} else {
+		b.WriteString("# prefer = \"auto\"   # auto|bash|powershell|pwsh; empty/default = auto-detect\n")
+	}
+	if c.Tools.Shell.Path != "" {
+		fmt.Fprintf(&b, "path   = %q   # absolute path to the shell executable; empty = PATH lookup\n\n", c.Tools.Shell.Path)
+	} else {
+		b.WriteString("# path   = \"/opt/homebrew/bin/bash\"   # absolute path to the shell executable; empty = PATH lookup\n\n")
+	}
+
 	renderLSPConfig(&b, c.LSP)
 
 	b.WriteString("[skills]\n")

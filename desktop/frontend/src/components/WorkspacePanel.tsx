@@ -250,6 +250,7 @@ export function WorkspacePanel({
   const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(null);
   const [treeBlankMenuPoint, setTreeBlankMenuPoint] = useState<ContextMenuPoint | null>(null);
   const [filter, setFilter] = useState("");
+  const [searchResults, setSearchResults] = useState<DirEntry[] | null>(null);
   const [scopedFilePaths, setScopedFilePaths] = useState<string[] | null>(null);
   const [scopedChangeRows, setScopedChangeRows] = useState<WorkspaceChangeListEntry[] | null>(null);
   const [treeVisible, setTreeVisible] = useState(true);
@@ -720,6 +721,25 @@ export function WorkspacePanel({
     ? scopedChangeRows ? t("context.changedMeta", { count: scopedChangeRows.length }) : shortCwd(cwd) || t("workspace.title")
     : currentFileDir;
   const recentFiles = useMemo(() => [...openTabs].reverse(), [openTabs]);
+
+  // When the user types a filter, also run a recursive file search on the
+  // backend so deeply nested files (which may not have been loaded into the
+  // local entriesByDir tree yet) can be found.
+  useEffect(() => {
+    const q = filter.trim();
+    if (!open || viewMode === "changed" || !q || scopedFilePaths) {
+      setSearchResults(null);
+      return;
+    }
+    let cancelled = false;
+    app.SearchFileRefs(q).then((results) => {
+      if (!cancelled) setSearchResults(results);
+    }).catch(() => {
+      if (!cancelled) setSearchResults(null);
+    });
+    return () => { cancelled = true; };
+  }, [filter, viewMode, scopedFilePaths, open]);
+
   const flattened = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (scopedFilePaths) {
@@ -734,11 +754,22 @@ export function WorkspacePanel({
         rows.push({ path: entryPath(dir, entry), entry });
       }
     }
+    // Merge recursive search results from the backend (fileref.Search)
+    // so deeply nested files not yet loaded into entriesByDir are found.
+    if (q && searchResults) {
+      const seen = new Set(rows.map((r) => r.path));
+      for (const sr of searchResults) {
+        if (!seen.has(sr.name)) {
+          rows.push({ path: sr.name, entry: { name: basename(sr.name), isDir: sr.isDir } });
+          seen.add(sr.name);
+        }
+      }
+    }
     if (!q) return null;
     return rows
       .filter((row) => row.path.toLowerCase().includes(q))
       .sort((a, b) => a.path.localeCompare(b.path));
-  }, [entriesByDir, filter, scopedFilePaths]);
+  }, [entriesByDir, filter, scopedFilePaths, searchResults]);
 
   const treeRows = useMemo<TreeRow[]>(() => {
     if (flattened) {
