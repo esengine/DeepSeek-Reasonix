@@ -884,6 +884,7 @@ export default function App() {
   const t = useT();
   const [composerProfilesByTab, setComposerProfilesByTab] = useState<Record<string, ComposerProfile>>({});
   const yoloRestoreToolApprovalModesRef = useRef<Record<string, RestorableToolApprovalMode>>({});
+  const userPlanModeRef = useRef(false);
   const [tabMetas, setTabMetas] = useState<TabMeta[]>([]);
   const [tabOrderIds, setTabOrderIds] = useState<string[]>([]);
   const [tabRevealSignal, setTabRevealSignal] = useState(0);
@@ -1298,6 +1299,7 @@ export default function App() {
   );
   const applyCollaborationMode = useCallback(
     (m: CollaborationMode): Promise<void> => {
+      userPlanModeRef.current = m === "plan";
       if (m === "goal") {
         patchActiveComposerProfile({ collaborationMode: "normal", goalDraftMode: true, goal: "" }, ["collaborationMode", "goal"]);
         return setControllerCollaborationMode("normal");
@@ -1604,11 +1606,19 @@ export default function App() {
       if (e.kind !== "turn_done") return;
       window.setTimeout(() => {
         setProjectRevision((value) => value + 1);
-        void refreshTabMetas();
+        refreshTabMetas().then(() => {
+          // After a turn completes, the backend exits plan mode (plan was approved
+          // and executed). If the user had manually selected plan mode, re-enter it
+          // so their next message is also preceded by a plan.
+          if (userPlanModeRef.current) {
+            patchActiveComposerProfile({ collaborationMode: "plan" }, ["collaborationMode"]);
+            setControllerCollaborationMode("plan");
+          }
+        });
       }, 250);
     });
     return unsub;
-  }, [refreshTabMetas]);
+  }, [refreshTabMetas, patchActiveComposerProfile, setControllerCollaborationMode]);
 
   const blankSessionTarget = useCallback(() => {
     const activeWorkspaceRoot = activeTab?.scope === "project" ? activeTab.workspaceRoot || "" : "";
