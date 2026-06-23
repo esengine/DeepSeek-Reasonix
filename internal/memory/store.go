@@ -175,11 +175,22 @@ func (s Store) Path(name string) string {
 	return p
 }
 
+// maxActiveMemories is the hard cap on active (non-archived) memories per store.
+// When Save would exceed this cap, the oldest active memory is automatically
+// archived (LRU by last-modified time) to stay within the limit. This prevents
+// MEMORY.md from growing without bound and breaking the prompt prefix cache.
+const maxActiveMemories = 50
+
 // Save writes (or overwrites) a memory file and refreshes its MEMORY.md index
 // line. It is the single mutation entry point — the `remember` tool, the desktop
 // editor, and any future importer all go through here so the index never drifts
-// from the files. Returns the path written.
+// from the files. When the store already holds maxActiveMemories and the memory
+// being saved is new (not an overwrite), the one with the oldest last-modified
+// time is automatically archived first. Returns the path written.
 func (s Store) Save(m Memory) (string, error) {
+	if err := s.evictIfFull(m); err != nil {
+		return "", err
+	}
 	dir := s.DirFor(m.Type)
 	if dir == "" {
 		return "", fmt.Errorf("memory store unavailable (no user config dir)")
@@ -377,6 +388,47 @@ func repairOwnerWrite(root *os.Root, path string, dir bool) {
 		need = 0o700
 	}
 	_ = root.Chmod(path, info.Mode().Perm()|need)
+}
+
+// evictIfFull checks whether saving a new memory (one that does not already
+// exist) would exceed maxActiveMemories. If so, it archives the oldest active
+// memory by last-modified time to free a slot. Non-existent stores or stores
+// with room are silently skipped.
+func (s Store) evictIfFull(m Memory) error {
+	name := slug(m.Name)
+	if name == "" {
+		return nil
+	}
+	// If this memory already exists, it's an overwrite — no eviction needed.
+	if _, err := os.Stat(s.Path(m.Name)); err == nil {
+		return nil
+	}
+	all := s.List()
+	if len(all) < maxActiveMemories {
+		return nil
+	}
+	// Find the oldest memory (by last-modified time) for eviction.
+	oldest := -1
+	var oldestMod time.Time
+	for i, mem := range all {
+		path := s.Path(mem.Name)
+		if path == "" {
+			continue
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		if oldest < 0 || info.ModTime().Before(oldestMod) {
+			oldest = i
+			oldestMod = info.ModTime()
+		}
+	}
+	if oldest < 0 {
+		return nil
+	}
+	_, err := s.Archive(all[oldest].Name)
+	return err
 }
 
 // render serializes a memory to frontmatter + body. The frontmatter mirrors the
