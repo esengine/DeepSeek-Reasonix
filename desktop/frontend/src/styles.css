@@ -1656,6 +1656,7 @@ a[href] {
 }
 .code-block {
   position: relative;
+  overflow: hidden;
 }
 .code-block__copy {
   position: absolute;
