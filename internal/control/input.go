@@ -502,16 +502,13 @@ func (c *Controller) skillByName(name string) (skill.Skill, bool) {
 // the MCP server (an async prompts/get). found is false when no such prompt
 // exists; err carries a fetch failure. Honours ctx.
 func (c *Controller) MCPPrompt(ctx context.Context, input string) (sent string, found bool, err error) {
-	if c.host == nil {
-		return "", false, nil
-	}
 	fields := strings.Fields(input)
 	if len(fields) == 0 {
 		return "", false, nil
 	}
 	name := strings.TrimPrefix(fields[0], "/")
 
-	prompts := c.host.Prompts()
+	prompts := c.mcp.prompts()
 	idx := -1
 	for i := range prompts {
 		if prompts[i].Name == name {
