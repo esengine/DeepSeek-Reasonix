@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/control"
@@ -667,6 +668,99 @@ func TestGatewaySessionOptionsPreferConnectionOverride(t *testing.T) {
 	}
 	if mode != "ask" {
 		t.Fatalf("lark tool approval mode = %q, want ask", mode)
+	}
+}
+
+// blockingApprovalController emits an approval request, then blocks in RunTurn
+// until Approve is called — the exact shape of an interactive tool approval.
+type blockingApprovalController struct {
+	botController // nil embed: unused methods would panic; the turn path calls none of them
+	emit          func(event.Event)
+	emitted       chan struct{} // closed once the approval request has been emitted
+	approved      chan struct{} // closed by Approve to release the turn
+	done          chan struct{} // closed when RunTurn returns
+	once          sync.Once
+}
+
+func (c *blockingApprovalController) RunTurn(ctx context.Context, input string) error {
+	c.emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: "appr-1", Tool: "bash", Subject: "rm -rf /"}})
+	close(c.emitted)
+	select {
+	case <-c.approved:
+		close(c.done)
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *blockingApprovalController) Approve(id string, allow, session, persist bool) {
+	c.once.Do(func() { close(c.approved) })
+}
+
+// TestGatewayApprovalReplyUnblocksWedgedTurn reproduces #4701/#4863/#4402: a tool
+// approval over a bot must be answerable by a follow-up message. Before the fix
+// runTurn ran inline on the dispatch goroutine, so the /approve reply could never
+// be read while RunTurn blocked, deadlocking the session. With the turn on its own
+// goroutine the dispatch loop stays free to deliver the reply.
+func TestGatewayApprovalReplyUnblocksWedgedTurn(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{Allowlist: AllowlistConfig{AllowAll: true}}, nil, logger)
+	adapter := newFakeAdapter(PlatformFeishu, "fake-feishu")
+	binding := AdapterBinding{ID: "feishu", Platform: PlatformFeishu, Adapter: adapter}
+
+	msg := InboundMessage{
+		Platform:     PlatformFeishu,
+		ConnectionID: "feishu",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+		Text:         "delete everything",
+	}
+	key := BuildSessionKey(msg.Session())
+
+	sink := &sessionEventSink{}
+	ctrl := &blockingApprovalController{
+		emit:     sink.Emit,
+		emitted:  make(chan struct{}),
+		approved: make(chan struct{}),
+		done:     make(chan struct{}),
+	}
+	gw.controllers[key] = &sessionState{
+		ctrl:             ctrl,
+		sink:             sink,
+		pendingApprovals: make(map[string]event.Approval),
+		pendingAsks:      make(map[string][]event.AskQuestion),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go gw.dispatchLoop(ctx, binding)
+
+	// Turn message: acquires the session and blocks in RunTurn awaiting approval.
+	adapter.msgCh <- msg
+	select {
+	case <-ctrl.emitted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("approval request was never emitted — turn did not start")
+	}
+
+	// The card click / text reply. If the dispatch loop were wedged inside the
+	// blocked RunTurn, this would never be processed and done would never close.
+	adapter.msgCh <- InboundMessage{
+		Platform:     PlatformFeishu,
+		ConnectionID: "feishu",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+		Text:         "/approve appr-1",
+	}
+
+	select {
+	case <-ctrl.done:
+		// RunTurn returned: the reply reached Approve and unblocked the turn.
+	case <-time.After(2 * time.Second):
+		t.Fatal("deadlock: /approve reply was not delivered while the turn blocked on approval")
 	}
 }
 
