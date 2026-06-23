@@ -25596,10 +25596,9 @@ a[href] {
 
 .app--creation .context-panel__mini-stat {
   min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: baseline;
-  gap: 12px;
+  gap: 8px;
   color: color-mix(in srgb, var(--fg-dim) 84%, transparent);
   font-size: 12px;
   line-height: 1.2;
@@ -25614,6 +25613,12 @@ a[href] {
 }
 
 .app--creation .context-panel__mini-stat strong {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--fg);
   font-weight: 600;
   font-variant-numeric: tabular-nums;

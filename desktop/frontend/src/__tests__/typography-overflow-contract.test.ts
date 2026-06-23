@@ -127,12 +127,24 @@ for (const selector of [
   ".context-panel__section-head span",
   ".context-panel__metric span",
   ".context-panel__metric strong",
+  ".app--creation .context-panel__mini-stat span",
+  ".app--creation .context-panel__mini-stat strong",
   ".topbar__model",
   ".composer-modebar__item span",
   ".composer-more-menu__item span",
 ]) {
   clipsSingleLine(selector);
 }
+
+eq(
+  finalDeclaration(".app--creation .context-panel__mini-stat", "display"),
+  "flex",
+  "creation overview rows keep values next to their labels",
+);
+ok(
+  finalDeclaration(".app--creation .context-panel__mini-stat", "justify-content") !== "space-between",
+  "creation overview rows avoid edge-pinned value alignment",
+);
 
 eq(finalDeclaration(".composer-modebar", "overflow"), "hidden", "chat mode switcher contains enlarged labels");
 eq(finalDeclaration(".md table", "overflow-x"), "auto", "markdown tables scroll horizontally");
