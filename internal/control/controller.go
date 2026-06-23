@@ -68,16 +68,16 @@ type Controller struct {
 	sink     event.Sink
 	policy   permission.Policy
 
-	label         string
-	modelRef      string
-	systemPrompt  string
-	sessionDir    string
-	commands      atomic.Pointer[[]command.Command]
-	skills        []skill.Skill
-	allSkills     []skill.Skill
-	skillStore    *skill.Store
-	allSkillStore *skill.Store
-	hooks         *hook.Runner // session hook runner; nil-safe (no hooks configured)
+	label        string
+	modelRef     string
+	systemPrompt string
+	sessionDir   string
+	commands     atomic.Pointer[[]command.Command]
+	// skills owns the session's discovered skills (enabled subset, full set, and
+	// the reloadable stores) — the skills slice of the Capabilities concern. See
+	// skill.go.
+	skills skillSet
+	hooks  *hook.Runner // session hook runner; nil-safe (no hooks configured)
 	// memory owns the loaded memory snapshot, the pending turn-tail notes queue,
 	// and write serialization behind its own locks, off c.mu — so a memory-panel
 	// save never stalls an approval or status poll. See memory.go.
@@ -298,10 +298,7 @@ func New(opts Options) *Controller {
 		sessionDir:             opts.SessionDir,
 		sessionPath:            opts.SessionPath,
 		commands:               atomic.Pointer[[]command.Command]{},
-		skills:                 opts.Skills,
-		allSkills:              opts.AllSkills,
-		skillStore:             opts.SkillStore,
-		allSkillStore:          opts.AllSkillStore,
+		skills:                 newSkillSet(opts.Skills, opts.AllSkills, opts.SkillStore, opts.AllSkillStore),
 		hooks:                  opts.Hooks,
 		memory:                 newMemoryManager(opts.Memory),
 		cleanup:                opts.Cleanup,
@@ -2389,22 +2386,13 @@ func (c *Controller) ReloadCommands(ctx context.Context) error {
 // When a live Store is available, scan it on demand so skills installed during
 // this session appear without rewriting the cache-stable system prompt.
 func (c *Controller) Skills() []skill.Skill {
-	if c.skillStore != nil {
-		return c.skillStore.List()
-	}
-	return c.skills
+	return c.skills.list()
 }
 
 // AllSkills returns every discoverable skill, including disabled ones, for
 // management surfaces that need to re-enable a hidden skill.
 func (c *Controller) AllSkills() []skill.Skill {
-	if c.allSkillStore != nil {
-		return c.allSkillStore.List()
-	}
-	if len(c.allSkills) > 0 {
-		return c.allSkills
-	}
-	return c.skills
+	return c.skills.listAll()
 }
 
 // DisabledSkills returns all discoverable skills that are disabled in config.

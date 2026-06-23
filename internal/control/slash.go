@@ -581,12 +581,13 @@ func memoryOneLine(s string) string {
 }
 
 func (c *Controller) skillListText() string {
-	if len(c.skills) == 0 {
+	skills := c.skills.discovered()
+	if len(skills) == 0 {
 		return i18n.M.ListSkillsNone
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, i18n.M.ListSkillsHeaderFmt+"\n", len(c.skills))
-	for _, s := range c.skills {
+	fmt.Fprintf(&b, i18n.M.ListSkillsHeaderFmt+"\n", len(skills))
+	for _, s := range skills {
 		tag := ""
 		if s.RunAs == "subagent" {
 			tag = " 🧬"
