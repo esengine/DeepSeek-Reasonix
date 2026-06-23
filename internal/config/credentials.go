@@ -19,6 +19,7 @@ const (
 	CredentialsStoreFile    = "file"
 
 	credentialsKeyringService = "reasonix"
+	credentialClearedPrefix   = "# reasonix-cleared "
 )
 
 const (
@@ -250,7 +251,7 @@ func SetCredential(key, value string) (string, error) {
 
 func RemoveCredential(key string) error {
 	key = strings.TrimSpace(key)
-	if key == "" {
+	if key == "" || !isCredentialKey(key) {
 		return nil
 	}
 	if path := UserCredentialsPath(); path != "" {
@@ -274,7 +275,7 @@ func CredentialStored(key string) bool {
 	if key == "" {
 		return false
 	}
-	return envFileHasKey(UserCredentialsPath(), key)
+	return envFileHasValue(UserCredentialsPath(), key)
 }
 
 func credentialCurrentStoreHasKey(key string) bool {
@@ -282,7 +283,15 @@ func credentialCurrentStoreHasKey(key string) bool {
 	if key == "" {
 		return false
 	}
-	return envFileHasKey(UserCredentialsPath(), key)
+	return envFileHasValue(UserCredentialsPath(), key)
+}
+
+func credentialCurrentStoreClearedKey(key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false
+	}
+	return envFileHasClearedKey(UserCredentialsPath(), key)
 }
 
 func CredentialsTargetDescription() string {
@@ -493,6 +502,16 @@ func storeCredentialsInFile(path string, assignments map[string]string) error {
 	if err != nil {
 		return err
 	}
+	filtered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if key, ok := credentialClearedLineKey(line); ok {
+			if _, hit := assignments[key]; hit {
+				continue
+			}
+		}
+		filtered = append(filtered, line)
+	}
+	lines = filtered
 	replaced := map[string]bool{}
 	for i, line := range lines {
 		key, ok := credentialLineKey(line)
@@ -527,8 +546,12 @@ func removeCredentialFromFile(path, key string) error {
 		if k, ok := credentialLineKey(line); ok && k == key {
 			continue
 		}
+		if k, ok := credentialClearedLineKey(line); ok && k == key {
+			continue
+		}
 		out = append(out, line)
 	}
+	out = append(out, credentialClearedPrefix+key)
 	return writeCredentialFileLines(path, out)
 }
 
@@ -596,6 +619,15 @@ func credentialLineKey(line string) (string, bool) {
 	return key, ok && isCredentialKey(key)
 }
 
+func credentialClearedLineKey(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, credentialClearedPrefix) {
+		return "", false
+	}
+	key := strings.TrimSpace(strings.TrimPrefix(trimmed, credentialClearedPrefix))
+	return key, isCredentialKey(key)
+}
+
 func isCredentialKey(key string) bool {
 	if key == "" {
 		return false
@@ -609,7 +641,15 @@ func isCredentialKey(key string) bool {
 	return true
 }
 
-func envFileHasKey(path, key string) bool {
+func envFileHasValue(path, key string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	value, ok := envFileValue(path, key)
+	return ok && strings.TrimSpace(value) != ""
+}
+
+func envFileHasClearedKey(path, key string) bool {
 	if strings.TrimSpace(path) == "" {
 		return false
 	}
@@ -618,7 +658,7 @@ func envFileHasKey(path, key string) bool {
 		return false
 	}
 	for _, line := range lines {
-		if k, ok := credentialLineKey(line); ok && k == key {
+		if k, ok := credentialClearedLineKey(line); ok && k == key {
 			return true
 		}
 	}

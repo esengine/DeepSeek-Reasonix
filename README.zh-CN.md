@@ -114,7 +114,7 @@ Windows 为 `%AppData%\reasonix\config.toml`。迁移细节见
 **[配置路径](./docs/CONFIG_PATHS.zh-CN.md)**，其中也说明了全局 `config.toml`
 和 `.env` 的完整结构。Provider 通过 `api_key_env` 命名密钥，真实密钥值保存在
 CLI 与桌面端共用的 Reasonix 全局 `<Reasonix home>/.env`；项目 `.env` 不再作为
-provider key 的运行时 fallback。权限、沙盒、插件(MCP)、
+provider key 的运行时 fallback，但仍会作为当前 workspace 范围内的 MCP/plugin 非 provider `${VAR}` 展开来源，不导入 Reasonix 控制变量。权限、沙盒、插件(MCP)、
 斜杠命令、`@` 引用与双模型设置,全部在 **[指南](./docs/GUIDE.zh-CN.md)** 里。
 
 ## 文档

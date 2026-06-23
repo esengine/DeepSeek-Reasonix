@@ -428,6 +428,7 @@ const __T = {
     'balance': 'Balance',
     'ready': 'Ready',
     'thinking': 'Thinking...',
+    'retrying_status': 'Retrying ({attempt}/{max})...',
     'stats': 'Stats',
     'statistics': 'Statistics',
     'model': 'Model',
@@ -523,6 +524,7 @@ const __T = {
     'balance': '余额',
     'ready': '就绪',
     'thinking': '思考中...',
+    'retrying_status': '正在重试 ({attempt}/{max})...',
     'stats': '统计',
     'statistics': '统计',
     'model': '模型',
@@ -655,7 +657,7 @@ const slashAnchor = $('#slash-menu-anchor');
 // ── state ──
 let running = false, planMode = false, bypassMode = false, toolApprovalMode = 'ask', yoloRestoreMode = 'ask';
 let currentMsg = null, currentText = null, currentReasoning = null;
-let turnStartAt = 0, turnTokens = 0, tickTimer = null;
+let turnStartAt = 0, turnTokens = 0, tickTimer = null, retryStatus = null;
 let toolCards = {};
 let escTimer = null;
 
@@ -696,6 +698,7 @@ function el(tag,cls,text) { const e=document.createElement(tag); if(cls)e.classN
 
 function setRunning(on) {
   running=on;
+  retryStatus=null;
   btnSend.style.display=on?'none':'';
   btnStop.style.display=on?'':'none';
   statusDot.className=on?'status__dot status__dot--busy':'status__dot';
@@ -705,6 +708,19 @@ function setRunning(on) {
     const ms=Date.now()-turnStartAt; const tok=turnTokens>0?' · ↓ '+fmtTok(turnTokens)+' tok':'';
     turnInfo.textContent=fmtElapsed(ms)+tok;
   },1000);} else {clearInterval(tickTimer);turnInfo.textContent='';}
+}
+
+function setRetrying(attempt,max) {
+  retryStatus={attempt:attempt||0,max:max||0};
+  statusDot.className='status__dot status__dot--busy';
+  statusDotSidebar.className=statusDot.className;
+  statusText.textContent=__('retrying_status').replace('{attempt}',retryStatus.attempt).replace('{max}',retryStatus.max);
+}
+
+function clearRetrying() {
+  if(!retryStatus)return;
+  retryStatus=null;
+  if(running)statusText.textContent=__('thinking');
 }
 
 function setConnState(state) {
@@ -953,6 +969,7 @@ const es=new EventSource('/events');
 es.onopen=()=>{setConnState('connected');};
 es.onmessage=ev=>{setConnState('connected');
   const e=JSON.parse(ev.data);
+  if(e.kind!=='retrying')clearRetrying();
   switch(e.kind){
     case 'turn_started': setRunning(true); finalizeMsg(); toolCards={}; break;
     case 'reasoning': appendReasoning(e.reasoning||e.text||''); break;
@@ -982,6 +999,7 @@ es.onmessage=ev=>{setConnState('connected');
     case 'ask_request': if(e.ask)showAsk(e.ask); break;
     case 'compaction_started': showCompaction({trigger:e.compaction?.trigger}); break;
     case 'compaction_done': showCompaction(e.compaction||{}); break;
+    case 'retrying': setRetrying(e.retryAttempt,e.retryMax); break;
     case 'turn_done': finalizeMsg(); setRunning(false); if(e.err){log.appendChild(el('div','msg--error','✗ '+e.err));scrollDown();} fetchStatus(); break;
   }
 };

@@ -453,8 +453,10 @@ by project `reasonix.toml`.
 Provider entries name secrets with `api_key_env`; saved key values live in
 Reasonix's global `<Reasonix home>/.env`, shared by CLI and desktop. Project
 `.env`, home `.env`, inherited shell environment variables, legacy credentials,
-and the OS keyring are not provider-key runtime fallbacks. Step-limit preferences
-belong in the user config.
+and the OS keyring are not provider-key runtime fallbacks. Project `.env` still
+feeds workspace-scoped, non-provider `${VAR}` expansion for MCP/plugin settings
+without importing provider keys or Reasonix control variables. Step-limit
+preferences belong in the user config.
 Project `reasonix.toml` does not override `agent.max_steps` or
 `agent.planner_max_steps`.
 

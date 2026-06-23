@@ -97,6 +97,31 @@ func TestProviderFetchModelsFallsBackToV1Models(t *testing.T) {
 	}
 }
 
+func TestProviderFetchModelsUsesSetupProbeEnv(t *testing.T) {
+	const key = "FETCH_MODELS_PROBE_KEY"
+	t.Setenv(key, "probe-key")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer probe-key" {
+			http.Error(w, "bad key", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]string{{"id": "probe-model"}},
+		})
+	}))
+	defer srv.Close()
+
+	p := ProviderEntry{Name: "probe", BaseURL: srv.URL, APIKeyEnv: key}
+	p.ResolveAPIKeyFromProcessEnvForProbe()
+	got, err := p.FetchModels(context.Background())
+	if err != nil {
+		t.Fatalf("FetchModels: %v", err)
+	}
+	if len(got) != 1 || got[0] != "probe-model" {
+		t.Fatalf("models = %v, want [probe-model]", got)
+	}
+}
+
 func TestProviderFetchModelsAllowsNoAuthEndpoint(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "" {

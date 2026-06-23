@@ -65,72 +65,21 @@ func TestRemoveEnvFileDeletesKeyAndUnsetsProcessEnv(t *testing.T) {
 	}
 }
 
-// TestPromoteProviderKeysLiftsHomeEnvKey proves a provider key left in the
-// legacy ~/.env bridge is copied into Reasonix's global .env, removed from
-// ~/.env, and that unrelated env vars are ignored.
-func TestPromoteProviderKeysLiftsHomeEnvKey(t *testing.T) {
+func TestLegacyHomeEnvProviderKeyIsNotPromoted(t *testing.T) {
 	home := isolateDesktopUserDirs(t)
 	homeEnv := filepath.Join(home, ".env")
 	if err := os.WriteFile(homeEnv, []byte("DEEPSEEK_API_KEY=sk-test\nNPM_TOKEN=secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	promoteProviderKeysToCredentials(config.Default())
-
-	cred, err := os.ReadFile(config.UserCredentialsPath())
-	if err != nil {
-		t.Fatalf("credentials not written: %v", err)
+	if _, err := config.LoadForRoot(t.TempDir()); err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
 	}
-	if !strings.Contains(string(cred), "DEEPSEEK_API_KEY=sk-test") {
-		t.Errorf("provider key not promoted to credentials:\n%s", cred)
-	}
-	if strings.Contains(string(cred), "NPM_TOKEN") {
-		t.Errorf("non-provider env var must not be promoted:\n%s", cred)
-	}
-
-	rest, _ := os.ReadFile(homeEnv)
-	if strings.Contains(string(rest), "DEEPSEEK_API_KEY") {
-		t.Errorf("promoted key must be stripped from ~/.env:\n%s", rest)
-	}
-	if !strings.Contains(string(rest), "NPM_TOKEN=secret") {
-		t.Errorf("unrelated ~/.env line must survive:\n%s", rest)
-	}
-}
-
-func TestPromoteProviderKeysIgnoresInheritedEnv(t *testing.T) {
-	isolateDesktopUserDirs(t)
-	t.Setenv("DEEPSEEK_API_KEY", "sk-inherited")
-
-	promoteProviderKeysToCredentials(config.Default())
-
 	if data, err := os.ReadFile(config.UserCredentialsPath()); err == nil && strings.Contains(string(data), "DEEPSEEK_API_KEY") {
-		t.Errorf("inherited env var must not be promoted:\n%s", data)
+		t.Errorf("legacy ~/.env provider key must not be imported:\n%s", data)
 	}
-}
-
-// TestPromoteProviderKeysLeavesExistingCredentialsKey proves promotion never
-// overwrites a key already in Reasonix's global .env and leaves ~/.env untouched.
-func TestPromoteProviderKeysLeavesExistingCredentialsKey(t *testing.T) {
-	home := isolateDesktopUserDirs(t)
-	if err := os.MkdirAll(filepath.Dir(config.UserCredentialsPath()), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(config.UserCredentialsPath(), []byte("DEEPSEEK_API_KEY=sk-global\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	homeEnv := filepath.Join(home, ".env")
-	if err := os.WriteFile(homeEnv, []byte("DEEPSEEK_API_KEY=sk-stale\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("DEEPSEEK_API_KEY", "sk-global")
-
-	promoteProviderKeysToCredentials(config.Default())
-
-	cred, _ := os.ReadFile(config.UserCredentialsPath())
-	if !strings.Contains(string(cred), "DEEPSEEK_API_KEY=sk-global") {
-		t.Errorf("existing credentials key was changed:\n%s", cred)
-	}
-	if data, err := os.Stat(homeEnv); err != nil || data.Size() == 0 {
-		t.Errorf("~/.env should be untouched when key already global, err=%v", err)
+	rest, _ := os.ReadFile(homeEnv)
+	if !strings.Contains(string(rest), "DEEPSEEK_API_KEY=sk-test") || !strings.Contains(string(rest), "NPM_TOKEN=secret") {
+		t.Errorf("legacy ~/.env should be left untouched:\n%s", rest)
 	}
 }

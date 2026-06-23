@@ -68,17 +68,16 @@ type Controller struct {
 	sink     event.Sink
 	policy   permission.Policy
 
-	label         string
-	modelRef      string
-	systemPrompt  string
-	sessionDir    string
-	host          *plugin.Host
-	commands      atomic.Pointer[[]command.Command]
-	skills        []skill.Skill
-	allSkills     []skill.Skill
-	skillStore    *skill.Store
-	allSkillStore *skill.Store
-	hooks         *hook.Runner // session hook runner; nil-safe (no hooks configured)
+	label        string
+	modelRef     string
+	systemPrompt string
+	sessionDir   string
+	commands     atomic.Pointer[[]command.Command]
+	// skills owns the session's discovered skills (enabled subset, full set, and
+	// the reloadable stores) — the skills slice of the Capabilities concern. See
+	// skill.go.
+	skills skillSet
+	hooks  *hook.Runner // session hook runner; nil-safe (no hooks configured)
 	// memory owns the loaded memory snapshot, the pending turn-tail notes queue,
 	// and write serialization behind its own locks, off c.mu — so a memory-panel
 	// save never stalls an approval or status poll. See memory.go.
@@ -106,12 +105,12 @@ type Controller struct {
 	// Close cancels its still-running jobs.
 	jobs *jobs.Manager
 
-	// reg is the live tool registry the executor reads each turn; pluginCtx is the
-	// session-scoped context a hot-added stdio server binds its subprocess to.
-	// Together they let AddMCPServer connect a server mid-session and have its tools
-	// available on the next turn (see AddMCPServer / RemoveMCPServer).
-	reg       *tool.Registry
-	pluginCtx context.Context
+	// mcp owns the session's live tool/plugin surface — the MCP plugin Host, the
+	// tool registry the executor reads each turn, and the session-scoped context a
+	// hot-added stdio server binds its subprocess to — behind its own lock, off
+	// c.mu. The Controller keeps the config-facing orchestration (persisting
+	// reasonix.toml on add/remove, building specs from entries). See mcp.go.
+	mcp mcpManager
 
 	// goals owns the active goal's FSM (status, intercepts, idle/turn counters)
 	// and its persistence, behind its own mutex so a per-turn goal save never
@@ -298,12 +297,8 @@ func New(opts Options) *Controller {
 		systemPrompt:           opts.SystemPrompt,
 		sessionDir:             opts.SessionDir,
 		sessionPath:            opts.SessionPath,
-		host:                   opts.Host,
 		commands:               atomic.Pointer[[]command.Command]{},
-		skills:                 opts.Skills,
-		allSkills:              opts.AllSkills,
-		skillStore:             opts.SkillStore,
-		allSkillStore:          opts.AllSkillStore,
+		skills:                 newSkillSet(opts.Skills, opts.AllSkills, opts.SkillStore, opts.AllSkillStore),
 		hooks:                  opts.Hooks,
 		memory:                 newMemoryManager(opts.Memory),
 		cleanup:                opts.Cleanup,
@@ -317,8 +312,7 @@ func New(opts Options) *Controller {
 		balanceKey:             opts.BalanceKey,
 		balanceClient:          opts.BalanceClient,
 		jobs:                   opts.Jobs,
-		reg:                    opts.Registry,
-		pluginCtx:              pluginCtx,
+		mcp:                    newMcpManager(opts.Host, opts.Registry, pluginCtx),
 		workspaceRoot:          opts.WorkspaceRoot,
 		approval:               newApprovalManager(opts.Policy, ToolApprovalAsk, opts.ApprovalTimeout),
 	}
@@ -2343,7 +2337,7 @@ func (c *Controller) Balance(ctx context.Context) (*billing.Balance, error) {
 
 // Host returns the running MCP host (nil when no plugins), for frontends that
 // list servers / resolve MCP prompts.
-func (c *Controller) Host() *plugin.Host { return c.host }
+func (c *Controller) Host() *plugin.Host { return c.mcp.hostRef() }
 
 // Commands returns the loaded custom slash commands.
 func (c *Controller) Commands() []command.Command {
@@ -2382,9 +2376,7 @@ func (c *Controller) ReloadCommands(ctx context.Context) error {
 			Render:      func(args []string) string { return cmd.Render(args) },
 		})
 	}
-	if c.reg != nil {
-		c.reg.Add(command.NewSlashCommandTool(entries))
-	}
+	c.mcp.registerTool(command.NewSlashCommandTool(entries))
 	cmdSlice := cmds
 	c.commands.Store(&cmdSlice)
 	return loadErr
@@ -2394,22 +2386,13 @@ func (c *Controller) ReloadCommands(ctx context.Context) error {
 // When a live Store is available, scan it on demand so skills installed during
 // this session appear without rewriting the cache-stable system prompt.
 func (c *Controller) Skills() []skill.Skill {
-	if c.skillStore != nil {
-		return c.skillStore.List()
-	}
-	return c.skills
+	return c.skills.list()
 }
 
 // AllSkills returns every discoverable skill, including disabled ones, for
 // management surfaces that need to re-enable a hidden skill.
 func (c *Controller) AllSkills() []skill.Skill {
-	if c.allSkillStore != nil {
-		return c.allSkillStore.List()
-	}
-	if len(c.allSkills) > 0 {
-		return c.allSkills
-	}
-	return c.skills
+	return c.skills.listAll()
 }
 
 // DisabledSkills returns all discoverable skills that are disabled in config.
@@ -2492,9 +2475,11 @@ func (c *Controller) ConnectMCPServer(e config.PluginEntry) (int, error) {
 	return c.connectMCPServer(e)
 }
 
+// connectMCPServer expands an entry's ${VARS}, applies the known-server
+// overrides scoped to the workspace, and connects it live via the mcp manager.
 func (c *Controller) connectMCPServer(e config.PluginEntry) (int, error) {
 	exp := e.ExpandedPlugin()
-	return c.connectMCPSpec(plugin.ApplyKnownOverrides(plugin.Spec{
+	return c.mcp.connectSpec(plugin.ApplyKnownOverrides(plugin.Spec{
 		Name:    exp.Name,
 		Type:    exp.Type,
 		Command: exp.Command,
@@ -2503,32 +2488,6 @@ func (c *Controller) connectMCPServer(e config.PluginEntry) (int, error) {
 		URL:     exp.URL,
 		Headers: exp.Headers,
 	}, c.WorkspaceRoot()))
-}
-
-func (c *Controller) connectMCPSpec(s plugin.Spec) (int, error) {
-	if c.host == nil {
-		c.host = plugin.NewHost()
-	}
-	tools, err := c.host.Add(c.pluginCtx, s)
-	if err != nil {
-		if !plugin.IsServerAlreadyConnected(err) {
-			return 0, err
-		}
-		toolsCtx, cancel := context.WithTimeout(c.pluginCtx, 5*time.Second)
-		defer cancel()
-		tools, err = c.host.ToolsFor(toolsCtx, s.Name)
-		if err != nil {
-			return 0, err
-		}
-	}
-	if c.reg != nil {
-		c.reg.ResumePrefix(plugin.ToolPrefix(s.Name))
-		c.reg.RemovePrefix(plugin.ToolPrefix(s.Name))
-		for _, t := range tools {
-			c.reg.Add(t)
-		}
-	}
-	return len(tools), nil
 }
 
 // ImportMCPEntries persists selected MCP entries and attempts to connect them
@@ -2558,7 +2517,7 @@ func (c *Controller) ImportMCPEntries(entries []config.PluginEntry) (total, adde
 		return 0, 0, 0, 0, 0, 0, err
 	}
 	for _, e := range entries {
-		if c.host != nil && containsString(c.host.ServerNames(), e.Name) {
+		if c.mcp.hasServer(e.Name) {
 			skipped++
 			continue
 		}
@@ -2569,15 +2528,6 @@ func (c *Controller) ImportMCPEntries(entries []config.PluginEntry) (total, adde
 		connected++
 	}
 	return len(entries), added, updated, connected, failed, skipped, nil
-}
-
-func containsString(ss []string, want string) bool {
-	for _, s := range ss {
-		if s == want {
-			return true
-		}
-	}
-	return false
 }
 
 func (c *Controller) ConfiguredMCPNames() []string {
@@ -2598,10 +2548,8 @@ func (c *Controller) DisconnectedMCPNames() []string {
 		return nil
 	}
 	connected := map[string]bool{}
-	if c.host != nil {
-		for _, name := range c.host.ServerNames() {
-			connected[name] = true
-		}
+	for _, name := range c.mcp.serverNames() {
+		connected[name] = true
 	}
 	var names []string
 	for _, p := range cfg.Plugins {
@@ -2631,22 +2579,15 @@ func (c *Controller) ConnectConfiguredMCPServer(name string) (int, error) {
 // the config save fails). A server declared in .mcp.json disconnects for this
 // session but returns on the next start, since that file isn't ours to edit.
 func (c *Controller) RemoveMCPServer(name string) (disconnected bool, err error) {
-	if c.host != nil {
-		if prefix, ok := c.host.Remove(name); ok {
-			disconnected = true
-			if c.reg != nil {
-				c.reg.RemovePrefix(prefix)
-			}
-		}
-	}
+	disconnected = c.mcp.disconnect(name)
 	cfg, lerr := config.Load()
 	if lerr != nil {
 		return disconnected, lerr
 	}
 	inConfig := cfg.RemovePlugin(name)
 	if inConfig {
-		if !disconnected && c.reg != nil {
-			c.reg.RemovePrefix(plugin.ToolPrefix(name))
+		if !disconnected {
+			c.mcp.removeToolPrefix(name)
 		}
 		if serr := cfg.Save(); serr != nil {
 			return disconnected, serr
@@ -2663,18 +2604,10 @@ func (c *Controller) RemoveMCPServer(name string) (disconnected bool, err error)
 // on the next session start, or now via ConnectConfiguredMCPServer (the "on").
 // Reports whether a live server was actually disconnected.
 func (c *Controller) DisconnectMCPServer(name string) bool {
-	disconnected := false
-	if c.host != nil {
-		if prefix, ok := c.host.Remove(name); ok {
-			disconnected = true
-			if c.reg != nil {
-				c.reg.RemovePrefix(prefix)
-			}
-		}
-	}
+	disconnected := c.mcp.disconnect(name)
 	removedPlaceholder := 0
-	if !disconnected && c.reg != nil {
-		removedPlaceholder = c.reg.RemovePrefix(plugin.ToolPrefix(name))
+	if !disconnected {
+		removedPlaceholder = c.mcp.removeToolPrefix(name)
 	}
 	return disconnected || removedPlaceholder > 0
 }
@@ -2684,11 +2617,7 @@ func (c *Controller) DisconnectMCPServer(name string) bool {
 // shared client stays alive for sibling tabs, while this session's registry drops
 // the server's provider-visible tools before the next turn.
 func (c *Controller) UnregisterMCPServerTools(name string) bool {
-	if c.reg == nil {
-		return false
-	}
-	c.reg.SuspendPrefix(plugin.ToolPrefix(name))
-	return true
+	return c.mcp.suspendToolPrefix(name)
 }
 
 // Label returns the human-readable model label, e.g. "deepseek-flash".

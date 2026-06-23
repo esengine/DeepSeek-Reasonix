@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Command, Search } from "lucide-react";
+import { useT } from "../lib/i18n";
 import { useMountTransition } from "../lib/useMountTransition";
 
 // CommandPalette is a ⌘K / Ctrl+K modal that surfaces the desktop app's
@@ -57,6 +58,7 @@ export function CommandPalette({
   placeholder: string;
   emptyText: string;
 }) {
+  const t = useT();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -161,6 +163,8 @@ export function CommandPalette({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
+      const closeButtonHasFocus = e.target instanceof HTMLElement && Boolean(e.target.closest("[data-palette-close]"));
+      if (closeButtonHasFocus && (e.key === "Enter" || e.key === " ")) return;
       if (e.key === "Escape") {
         e.preventDefault();
         onClose();
@@ -213,7 +217,16 @@ export function CommandPalette({
             spellCheck={false}
             autoComplete="off"
           />
-          <kbd className="palette__esc">esc</kbd>
+          <button
+            className="palette__esc"
+            type="button"
+            onClick={onClose}
+            aria-label={t("common.close")}
+            title={t("common.close")}
+            data-palette-close
+          >
+            esc
+          </button>
         </div>
         <div className="palette__list" role="listbox">
           {flat.length === 0 ? (

@@ -877,8 +877,10 @@ export default function App() {
     closeTab,
     reorderTabs,
     openTopicSession,
+    activateTopic,
     syncActiveTab,
     ensureBlankTab,
+    ensureBlankSurface,
   } = useController();
   const { locale, setPref: setLocalePref } = useI18n();
   const t = useT();
@@ -895,6 +897,7 @@ export default function App() {
   const [settingsTarget, setSettingsTarget] = useState<SettingsTab | null>(null);
   const [settingsFocus, setSettingsFocus] = useState<SettingsInitialFocus | null>(null);
   const [desktopLayoutStyle, setDesktopLayoutStyle] = useState<DesktopLayoutStyle>("workbench");
+  const singleSurfaceLayout = desktopLayoutStyle === "workbench" || desktopLayoutStyle === "creation";
   const [startupUpdateChecksEnabled, setStartupUpdateChecksEnabled] = useState<boolean | null>(null);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -1195,7 +1198,16 @@ export default function App() {
     const currentTabTurns = Math.max(state.checkpoints.length, visibleUserTurns);
     return currentTabTurns > 0 ? currentTabTurns : activeTopicTurns ?? 0;
   }, [activeTopicTurns, state.checkpoints.length, state.items]);
-  const startupSplashHold = state.meta?.ready !== true && !state.meta?.startupErr;
+  const startupSplashHold = !activeTabId && state.meta?.ready !== true && !state.meta?.startupErr;
+  const hydrateStatusLabel = state.hydrating
+    ? state.hydrateReason === "switch-tab"
+      ? t("status.hydrateSwitch")
+      : state.hydrateReason === "resume-session"
+        ? t("status.hydrateResume")
+        : state.hydrateReason === "new-session"
+          ? t("status.hydrateNewSession")
+          : t("status.hydrateSync")
+    : undefined;
   const backendActiveComposerProfile = useMemo(() => {
     if (state.meta) {
       return composerProfileFromMeta(state.meta, activeTab ? composerProfileMode(composerProfileFromTab(activeTab)) : undefined);
@@ -1209,7 +1221,7 @@ export default function App() {
   const collaborationMode = displayedComposerProfileCollaborationMode(composerProfile);
   const toolApprovalMode = composerProfile.toolApprovalMode;
   const tokenMode: TokenMode = composerProfile.tokenMode;
-  const controllerReady = state.meta?.ready === true;
+  const controllerReady = state.meta?.ready === true && !state.backendActivationPending;
   const patchActiveComposerProfile = useCallback(
     (patch: Partial<Omit<ComposerProfile, "pending">>, pendingFields: ComposerProfileField[]) => {
       if (!activeTabId) return;
@@ -1530,10 +1542,12 @@ export default function App() {
         } else if (["clear", "off", "stop", "done"].includes(displayGoal.toLowerCase())) {
           applyGoal("");
         }
+        if (!controllerReady) return;
         commitThenSend(trimmed, submitText.trim());
         return;
       }
       if (collaborationMode === "goal" && !goal.trim()) {
+        if (!controllerReady) return;
         applyGoal(trimmed);
         commitThenSend(trimmed, `/goal ${submitText.trim()}`);
         return;
@@ -1573,12 +1587,13 @@ export default function App() {
         return;
       }
       if (runningRef.current) { steer(submitText.trim()); return; }
+      if (!controllerReady) return;
       await setControllerCollaborationMode(controllerComposerProfileCollaborationMode(composerProfile));
       await setControllerToolApprovalMode(toolApprovalMode);
       if (goal.trim()) await setControllerGoal(goal);
       commitThenSend(trimmed, submitText.trim());
     },
-    [applyGoal, closeTransientOverlays, collaborationMode, composerProfile, goal, send, runShell, notice, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, steer, switchModel, t, toolApprovalMode, showToast],
+    [applyGoal, closeTransientOverlays, collaborationMode, composerProfile, controllerReady, goal, send, runShell, notice, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, steer, switchModel, t, toolApprovalMode, showToast],
   );
 
   const refreshTabMetas = useCallback(async (): Promise<TabMeta[]> => {
@@ -1605,12 +1620,16 @@ export default function App() {
   }, [activeTab?.scope, activeTab?.workspaceRoot]);
 
   const openBlankSession = useCallback(async (scope: string, workspaceRoot: string) => {
-    await ensureBlankTab(scope, scope === "project" ? workspaceRoot : "");
+    if (singleSurfaceLayout) {
+      await ensureBlankSurface(scope, scope === "project" ? workspaceRoot : "");
+    } else {
+      await ensureBlankTab(scope, scope === "project" ? workspaceRoot : "");
+    }
     setProjectRevision((value) => value + 1);
     await refreshTabMetas();
     setTabRevealSignal((signal) => signal + 1);
     setTranscriptRevealSignal((signal) => signal + 1);
-  }, [ensureBlankTab, refreshTabMetas]);
+  }, [ensureBlankSurface, ensureBlankTab, refreshTabMetas, singleSurfaceLayout]);
 
   useEffect(() => {
     void refreshTabMetas();
@@ -1919,12 +1938,13 @@ export default function App() {
     setComposerInsertRequest({ id: Date.now(), text });
   }, []);
 
-  const handleTabChange = useCallback(async (id: string) => {
+  const handleTabChange = useCallback((id: string) => {
     closeTransientOverlays();
-    const tabs = await switchTab(id);
-    if (tabs) setTabMetas(tabs);
+    const selected = tabMetas.find((tab) => tab.id === id);
+    setTabMetas((current) => current.map((tab) => ({ ...tab, active: tab.id === id })));
+    void switchTab(id, selected).then(() => refreshTabMetas());
     setTabRevealSignal((signal) => signal + 1);
-  }, [closeTransientOverlays, switchTab]);
+  }, [closeTransientOverlays, refreshTabMetas, switchTab, tabMetas]);
 
   const handleTabClose = useCallback(async (id: string) => {
     closeTransientOverlays();
@@ -1959,7 +1979,9 @@ export default function App() {
       await closeTab(id);
     }
     if (nextActiveTabId && currentIds.includes(nextActiveTabId)) {
-      await switchTab(nextActiveTabId);
+      const selected = tabMetas.find((tab) => tab.id === nextActiveTabId);
+      setTabMetas((current) => current.map((tab) => ({ ...tab, active: tab.id === nextActiveTabId })));
+      void switchTab(nextActiveTabId, selected);
     }
     await refreshTabMetas();
     setTabRevealSignal((signal) => signal + 1);
@@ -2013,6 +2035,7 @@ export default function App() {
   // send wrapper: commits any pending optimistic rewind before sending.
   const commitThenSend = useCallback(async (displayText: string, submitText?: string) => {
     if (activeTab?.readOnly) return;
+    if (!controllerReady) return;
     const rs = rewindStateRef.current;
     if (rs) {
       rewindStateRef.current = null;
@@ -2038,7 +2061,12 @@ export default function App() {
       }
     }
     send(displayText, submitText);
-  }, [activeTab?.readOnly, send, rewind]);
+  }, [activeTab?.readOnly, controllerReady, send, rewind]);
+
+  const handleTranscriptPrompt = useCallback((text: string) => {
+    if (!controllerReady) return;
+    void commitThenSend(text);
+  }, [commitThenSend, controllerReady]);
 
   const handleMessageAction = useCallback((turn: number, scope: string) => {
     if (activeTab?.readOnly) return;
@@ -2109,7 +2137,7 @@ export default function App() {
 
   const handleEditPrompt = useCallback(async (turn: number, displayText: string, submitText?: string): Promise<boolean> => {
     const sourceTabId = activeTabId;
-    if (!sourceTabId || activeTab?.readOnly || rewindStateRef.current || state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending) return false;
+    if (!sourceTabId || activeTab?.readOnly || !controllerReady || rewindStateRef.current || state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending) return false;
     const next = displayText.trim();
     if (!next) return false;
     const submit = (submitText ?? displayText).trim();
@@ -2118,12 +2146,14 @@ export default function App() {
     setRewindSignal((v) => v + 1);
     sendToTab(sourceTabId, next, submit);
     return true;
-  }, [activeTab?.readOnly, activeTabId, clearContextPending, sendToTab, state.approval, state.ask, state.messageAction, state.running, rewind]);
+  }, [activeTab?.readOnly, activeTabId, clearContextPending, controllerReady, sendToTab, state.approval, state.ask, state.messageAction, state.running, rewind]);
 
   const handleOpenTopic = useCallback(async (scope: string, workspaceRoot: string, topicId: string, sessionPath?: string) => {
     closeTransientOverlays();
     setSidebarImDetailConnectionId("");
-    if (sessionPath) {
+    if (singleSurfaceLayout) {
+      await activateTopic(scope, workspaceRoot, topicId, sessionPath || "");
+    } else if (sessionPath) {
       await openTopicSession(scope, workspaceRoot, topicId, sessionPath);
     } else if (scope === "global") {
       await openGlobalTab(topicId);
@@ -2133,7 +2163,7 @@ export default function App() {
     await refreshTabMetas();
     setTabRevealSignal((signal) => signal + 1);
     setTranscriptRevealSignal((signal) => signal + 1);
-  }, [closeTransientOverlays, openGlobalTab, openProjectTab, openTopicSession, refreshTabMetas]);
+  }, [activateTopic, closeTransientOverlays, openGlobalTab, openProjectTab, openTopicSession, refreshTabMetas, singleSurfaceLayout]);
 
   const openSidebarImConnectionSession = useCallback(async (connection: SidebarImConnection) => {
     const target = sidebarImSessionTarget(connection);
@@ -2144,15 +2174,21 @@ export default function App() {
     setSidebarImDetailConnectionId("");
     try {
       if (connection.sessionSource === "auto" && target.kind === "path") {
-        const tab = await ensureBlankTab(connection.scope, connection.scope === "project" ? connection.workspaceRoot : "");
+        const tab = singleSurfaceLayout
+          ? await ensureBlankSurface(connection.scope, connection.scope === "project" ? connection.workspaceRoot : "")
+          : await ensureBlankTab(connection.scope, connection.scope === "project" ? connection.workspaceRoot : "");
         await openChannelSession(target.value, tab.id);
       } else if (target.kind === "path") {
-        const tab = await ensureBlankTab(connection.scope, connection.scope === "project" ? connection.workspaceRoot : "");
+        const tab = singleSurfaceLayout
+          ? await ensureBlankSurface(connection.scope, connection.scope === "project" ? connection.workspaceRoot : "")
+          : await ensureBlankTab(connection.scope, connection.scope === "project" ? connection.workspaceRoot : "");
         await resumeSession(target.value, tab.id);
       } else if (connection.scope === "project") {
-        await openProjectTab(connection.workspaceRoot, target.value);
+        if (singleSurfaceLayout) await activateTopic("project", connection.workspaceRoot, target.value);
+        else await openProjectTab(connection.workspaceRoot, target.value);
       } else {
-        await openGlobalTab(target.value);
+        if (singleSurfaceLayout) await activateTopic("global", "", target.value);
+        else await openGlobalTab(target.value);
       }
       await refreshTabMetas();
       setTabRevealSignal((value) => value + 1);
@@ -2162,7 +2198,7 @@ export default function App() {
       console.warn("bot sidebar open failed", err);
       showToast(t("sidebar.imOpenFailed", { name: connection.title }));
     }
-  }, [ensureBlankTab, openChannelSession, openGlobalTab, openProjectTab, refreshTabMetas, resumeSession, showToast, t]);
+  }, [activateTopic, ensureBlankSurface, ensureBlankTab, openChannelSession, openGlobalTab, openProjectTab, refreshTabMetas, resumeSession, showToast, singleSurfaceLayout, t]);
 
   // History drawer: project menus can open a scoped saved-session list. Idle row
   // clicks resume; running row clicks only preview through PreviewSession.
@@ -2186,24 +2222,30 @@ export default function App() {
 
   const onResumeSession = useCallback(
     async (session: SessionMeta) => {
-      if (state.running) return;
+      if (state.running && !singleSurfaceLayout) return;
       const scope = session.scope || (session.workspaceRoot ? "project" : "global");
       try {
         let targetTab: TabMeta;
         if (isChannelSession(session)) {
-          targetTab = await ensureBlankTab(scope === "project" ? "project" : "global", scope === "project" ? session.workspaceRoot || "" : "");
+          targetTab = singleSurfaceLayout
+            ? await ensureBlankSurface(scope === "project" ? "project" : "global", scope === "project" ? session.workspaceRoot || "" : "")
+            : await ensureBlankTab(scope === "project" ? "project" : "global", scope === "project" ? session.workspaceRoot || "" : "");
           await openChannelSession(session.path, targetTab.id);
         } else if (scope === "project" && session.workspaceRoot && session.topicId) {
-          targetTab = await openProjectTab(session.workspaceRoot, session.topicId);
+          targetTab = singleSurfaceLayout
+            ? await activateTopic("project", session.workspaceRoot, session.topicId, session.path)
+            : await openProjectTab(session.workspaceRoot, session.topicId);
         } else if (scope === "global" && session.topicId) {
-          targetTab = await openGlobalTab(session.topicId);
+          targetTab = singleSurfaceLayout
+            ? await activateTopic("global", "", session.topicId, session.path)
+            : await openGlobalTab(session.topicId);
         } else {
           throw new Error(scope === "global" && !session.topicId
             ? t("history.failedOpenSession")
             : (session.topicId ? "Missing workspaceRoot" : t("history.failedOpenSession")));
         }
         setHistView(null);
-        if (!isChannelSession(session)) {
+        if (!isChannelSession(session) && !singleSurfaceLayout) {
           await resumeSession(session.path, targetTab.id);
         }
         await refreshTabMetas();
@@ -2219,7 +2261,7 @@ export default function App() {
         }
       }
     },
-    [ensureBlankTab, openChannelSession, openGlobalTab, openProjectTab, refreshTabMetas, state.running, resumeSession, t, showToast],
+    [activateTopic, ensureBlankSurface, ensureBlankTab, openChannelSession, openGlobalTab, openProjectTab, refreshTabMetas, state.running, resumeSession, singleSurfaceLayout, t, showToast],
   );
 
   // Command palette: ⌘K / Ctrl+K opens a fuzzy navigator over commands and
@@ -3009,23 +3051,18 @@ export default function App() {
                 onManageAllowlist={() => openBotAllowlistSettings(sidebarImDetailConnection.connectionId)}
                 onOpenSession={() => void openSidebarImConnectionSession(sidebarImDetailConnection)}
               />
-            ) : state.meta?.ready === false && !state.meta?.startupErr ? (
-              <div className="loading-screen">
-                <div className="loading-screen__spinner" />
-                <span className="loading-screen__text">{t("common.loading")}</span>
-              </div>
             ) : (
               <Transcript
                 items={displayItems}
                 live={state.live}
                 tabId={activeTabId}
                 footerHeight={footerHeight}
-                onPrompt={commitThenSend}
+                onPrompt={handleTranscriptPrompt}
                 onEditPrompt={handleEditPrompt}
                 onRewind={handleMessageAction}
                 checkpoints={state.checkpoints}
                 actionPending={state.messageAction != null}
-                rewindDisabled={Boolean(activeTab?.readOnly) || rewindState != null || rewindCommitting || state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
+                rewindDisabled={Boolean(activeTab?.readOnly) || !controllerReady || rewindState != null || rewindCommitting || state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
                 running={state.running || rewindCommitting}
                 welcomeVariant={sidebarCreation ? "creation" : "default"}
                 creationMode={sidebarCreation}
@@ -3117,9 +3154,10 @@ export default function App() {
               onSetTokenMode={applyTokenMode}
               insertRequest={composerInsertRequest}
               readOnly={Boolean(activeTab?.readOnly)}
-              disabled={state.meta?.ready === false || rewindCommitting || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
+              disabled={rewindCommitting || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
+              submitDisabled={!controllerReady}
               decisionPending={rewindCommitting || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
-              ready={state.meta?.ready === true}
+              ready={controllerReady}
               turnStartAt={state.turnStartAt}
               turnTokens={state.turnTokens}
               retry={state.retry}
@@ -3145,6 +3183,7 @@ export default function App() {
               workspacePath={state.meta?.workspacePath || state.meta?.workspaceRoot || state.meta?.cwd}
               workspaceName={state.meta?.workspaceName}
               gitBranch={state.meta?.gitBranch}
+              hydrationLabel={hydrateStatusLabel}
             />
           </footer>
           )}
@@ -3318,7 +3357,9 @@ export default function App() {
       {needsOnboarding && <OnboardingOverlay onComplete={() => setNeedsOnboarding(false)} />}
 
       <HeartbeatPanel open={heartbeatOpen} onClose={() => setHeartbeatOpen(false)} onOpenTopic={(scope, workspaceRoot, topicId) => {
-        if (scope === "project" && workspaceRoot) {
+        if (singleSurfaceLayout) {
+          activateTopic(scope, workspaceRoot, topicId);
+        } else if (scope === "project" && workspaceRoot) {
           openProjectTab(workspaceRoot, topicId);
         } else {
           openGlobalTab(topicId);

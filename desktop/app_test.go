@@ -114,6 +114,35 @@ func setDesktopTestCredential(t *testing.T, key, value string) {
 	}
 }
 
+func TestNeedsOnboardingIgnoresInheritedEnv(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv(onboardingKeyEnv, "inherited-key")
+
+	app := NewApp()
+	if !app.NeedsOnboarding() {
+		t.Fatal("NeedsOnboarding should require a key saved in Reasonix global .env")
+	}
+	setDesktopTestCredential(t, onboardingKeyEnv, "saved-key")
+	if app.NeedsOnboarding() {
+		t.Fatal("NeedsOnboarding should be false after saving the global credential")
+	}
+}
+
+func TestNeedsOnboardingTreatsBlankSavedKeyAsMissing(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	if err := os.MkdirAll(filepath.Dir(config.UserCredentialsPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.UserCredentialsPath(), []byte(onboardingKeyEnv+"=\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	if !app.NeedsOnboarding() {
+		t.Fatal("NeedsOnboarding should require a non-empty saved credential")
+	}
+}
+
 func providerNamesFromView(providers []ProviderView) []string {
 	out := make([]string, 0, len(providers))
 	for _, p := range providers {

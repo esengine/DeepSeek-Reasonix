@@ -63,6 +63,7 @@ type Config struct {
 
 	providerSources          map[string]providerSourceScope
 	shadowedProjectProviders []ProviderEntry
+	expansionEnv             map[string]string
 }
 
 type providerSourceScope string
@@ -529,13 +530,13 @@ type NetworkProxyConfig struct {
 func (c *Config) NetworkProxySpec() netclient.ProxySpec {
 	return netclient.ProxySpec{
 		Mode:        c.Network.ProxyMode,
-		URL:         ExpandVars(c.Network.ProxyURL),
-		NoProxy:     ExpandVars(c.Network.NoProxy),
+		URL:         c.expandVars(c.Network.ProxyURL),
+		NoProxy:     c.expandVars(c.Network.NoProxy),
 		Type:        c.Network.Proxy.Type,
-		Server:      ExpandVars(c.Network.Proxy.Server),
+		Server:      c.expandVars(c.Network.Proxy.Server),
 		Port:        c.Network.Proxy.Port,
-		Username:    ExpandVars(c.Network.Proxy.Username),
-		Password:    ExpandVars(c.Network.Proxy.Password),
+		Username:    c.expandVars(c.Network.Proxy.Username),
+		Password:    c.expandVars(c.Network.Proxy.Password),
 		DirectHosts: c.directProxyHosts(),
 	}
 }
@@ -595,7 +596,7 @@ type SkillsConfig struct {
 func (c *Config) SkillCustomPaths() []string {
 	var out []string
 	for _, p := range c.Skills.Paths {
-		if p = ExpandVars(p); strings.TrimSpace(p) != "" {
+		if p = c.expandVars(p); strings.TrimSpace(p) != "" {
 			out = append(out, p)
 		}
 	}
@@ -607,7 +608,7 @@ func (c *Config) SkillCustomPaths() []string {
 func (c *Config) SkillExcludedPaths() []string {
 	var out []string
 	for _, p := range c.Skills.ExcludedPaths {
-		if p = ExpandVars(p); strings.TrimSpace(p) != "" {
+		if p = c.expandVars(p); strings.TrimSpace(p) != "" {
 			out = append(out, p)
 		}
 	}
@@ -699,7 +700,7 @@ func (c *Config) WriteRoots() []string {
 // config doesn't explicitly set a workspace_root. Desktop tabs pass their
 // project root here so tool confinement is correct without changing cwd.
 func (c *Config) WriteRootsForRoot(fallbackRoot string) []string {
-	root := ExpandVars(c.Sandbox.WorkspaceRoot)
+	root := c.expandVars(c.Sandbox.WorkspaceRoot)
 	if root == "" {
 		root = fallbackRoot
 		if root == "" || root == "." {
@@ -712,7 +713,7 @@ func (c *Config) WriteRootsForRoot(fallbackRoot string) []string {
 	}
 	roots := []string{root}
 	for _, d := range c.Sandbox.AllowWrite {
-		if d = ExpandVars(d); d != "" {
+		if d = c.expandVars(d); d != "" {
 			roots = append(roots, d)
 		}
 	}
@@ -1071,7 +1072,8 @@ type PluginEntry struct {
 	//                  swap happens once the spawn finishes.
 	// Empty defaults to "background" so enabled MCPs connect automatically
 	// without blocking chat. Unknown non-empty values fall back to "background".
-	Tier string `toml:"tier"`
+	Tier         string `toml:"tier"`
+	expansionEnv map[string]string
 }
 
 func (e PluginEntry) ShouldAutoStart() bool {
@@ -1400,8 +1402,9 @@ func Load() (*Config, error) {
 // changing the process cwd, while provider keys stay rooted in Reasonix home.
 func LoadForRoot(root string) (*Config, error) {
 	root = resolveRoot(root)
-	loadDotEnvForRoot(root)
+	expansionEnv := loadDotEnvForRoot(root)
 	cfg := Default()
+	cfg.setExpansionEnv(expansionEnv)
 	cfg.CredentialsStore = credentialsStoreMode()
 
 	projectTOML := "reasonix.toml"
@@ -1479,8 +1482,30 @@ func LoadForRoot(root string) (*Config, error) {
 	backfillDeepSeekPro(cfg)
 	cfg.Agent.AutoPlan = userAutoPlanMode()
 	cfg.CredentialsStore = credentialsStoreMode()
+	cfg.setExpansionEnv(expansionEnv)
 	resolveProviderCredentialsForRoot(root, cfg)
 	return cfg, nil
+}
+
+func (c *Config) setExpansionEnv(env map[string]string) {
+	if c == nil {
+		return
+	}
+	c.expansionEnv = cloneStringMap(env)
+	for i := range c.Plugins {
+		c.Plugins[i].expansionEnv = c.expansionEnv
+	}
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func userAutoPlanMode() string {
@@ -2963,6 +2988,26 @@ func (e *ProviderEntry) APIKey() string {
 		return ""
 	}
 	return value
+}
+
+// ResolveAPIKeyFromProcessEnvForProbe pins a setup-time, user-entered key onto
+// this entry for an immediate connectivity probe. Normal runtime resolution does
+// not call this; loaded provider entries still resolve only from Reasonix's
+// global .env.
+func (e *ProviderEntry) ResolveAPIKeyFromProcessEnvForProbe() {
+	if e == nil {
+		return
+	}
+	key := strings.TrimSpace(e.APIKeyEnv)
+	if key == "" {
+		return
+	}
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return
+	}
+	e.resolvedAPIKey = value
+	e.resolvedSource = CredentialSource{Kind: CredentialSourceEnvironment, Label: "setup prompt"}
 }
 
 func (e *ProviderEntry) APIKeySourceLabel() string {

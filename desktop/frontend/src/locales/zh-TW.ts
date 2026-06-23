@@ -291,6 +291,10 @@ export const zhTW: Record<DictKey, string> = {
 
   // 狀態欄
   "status.connecting": "連線中…",
+  "status.hydrateSwitch": "正在同步會話…",
+  "status.hydrateResume": "正在恢復歷史…",
+  "status.hydrateNewSession": "正在建立新會話…",
+  "status.hydrateSync": "正在同步…",
   "status.plan": "計畫",
   "status.switchModel": "切換模型",
   "modelSwitcher.searchPlaceholder": "搜尋模型…",

@@ -5968,6 +5968,23 @@ a[href] {
   background: var(--accent);
   animation: pulse 1.2s ease-in-out infinite;
 }
+.statusbar__group--hydrate {
+  max-width: 190px;
+  overflow: hidden;
+}
+.statusbar__hydrate {
+  color: var(--accent);
+  max-width: 190px;
+}
+.statusbar__hydrate svg {
+  flex: 0 0 auto;
+  animation: spin 1s linear infinite;
+}
+.statusbar__hydrate span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 @keyframes pulse {
   50% {
     opacity: 0.35;
@@ -7986,12 +8003,25 @@ a[href] {
 }
 .palette__esc {
   flex: none;
+  display: inline-flex;
+  align-items: center;
   font-family: var(--mono);
   font-size: 10px;
   color: var(--fg-faint);
+  background: transparent;
   border: 1px solid var(--border);
   border-radius: 5px;
   padding: 3px 6px;
+  line-height: 1;
+  cursor: pointer;
+}
+.palette__esc:hover {
+  color: var(--fg);
+  background: var(--bg-soft);
+}
+.palette__esc:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .palette__list {
   flex: 1;

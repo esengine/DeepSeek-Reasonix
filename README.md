@@ -120,7 +120,9 @@ built-in defaults**; starting with **Reasonix v1.8.1**, the user file lives at
 full `config.toml` / `.env` structure. Provider entries name secrets with
 `api_key_env`; the secret values themselves live in Reasonix's global
 `<Reasonix home>/.env`, shared by CLI and desktop. Project `.env` files are not
-provider-key runtime fallbacks. Permissions, the sandbox, plugins (MCP), slash
+provider-key runtime fallbacks, but still feed workspace-scoped, non-provider
+`${VAR}` expansion for MCP/plugin settings without importing Reasonix control
+variables. Permissions, the sandbox, plugins (MCP), slash
 commands, `@` references, and two-model setup are all in the
 **[Guide](./docs/GUIDE.md)**.
 

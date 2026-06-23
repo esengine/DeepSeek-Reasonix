@@ -689,6 +689,88 @@ func TestMigrateImportsLegacyKeyringCredentials(t *testing.T) {
 	}
 }
 
+func TestMigrateLegacyCredentialsUsesWorkspaceRootForKeyring(t *testing.T) {
+	_, dest, _ := legacyHome(t)
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte(`default_model = "deepseek-flash/deepseek-chat"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+default_model = "custom/m"
+[[providers]]
+name = "custom"
+kind = "openai"
+base_url = "https://example.invalid/v1"
+model = "m"
+api_key_env = "WORKSPACE_ONLY_KEY"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := legacyKeyringCredentialValueLookup
+	legacyKeyringCredentialValueLookup = func(key string) (string, bool) {
+		if key == "WORKSPACE_ONLY_KEY" {
+			return "sk-workspace", true
+		}
+		return "", false
+	}
+	t.Cleanup(func() { legacyKeyringCredentialValueLookup = old })
+
+	if err := MigrateLegacyCredentialsForRoot(project); err != nil {
+		t.Fatalf("MigrateLegacyCredentialsForRoot: %v", err)
+	}
+	data, err := os.ReadFile(UserCredentialsPath())
+	if err != nil {
+		t.Fatalf("read migrated credentials: %v", err)
+	}
+	if string(data) != "WORKSPACE_ONLY_KEY=sk-workspace\n" {
+		t.Fatalf("migrated credentials = %q", data)
+	}
+}
+
+func TestMigrateLegacyCredentialsDoesNotReimportClearedKey(t *testing.T) {
+	_, dest, _ := legacyHome(t)
+	legacy := legacyUserConfigPath()
+	if legacy == "" {
+		t.Skip("legacy OS config path matches primary path on this platform")
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte(`default_model = "deepseek-flash/deepseek-chat"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	legacyCred := filepath.Join(filepath.Dir(legacy), "credentials")
+	if err := os.MkdirAll(filepath.Dir(legacyCred), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyCred, []byte("DEEPSEEK_API_KEY=sk-old-creds\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := MigrateLegacyCredentialsForRoot("."); err != nil {
+		t.Fatalf("initial migrate: %v", err)
+	}
+	if err := RemoveCredential("DEEPSEEK_API_KEY"); err != nil {
+		t.Fatalf("RemoveCredential: %v", err)
+	}
+	if err := MigrateLegacyCredentialsForRoot("."); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+	data, err := os.ReadFile(UserCredentialsPath())
+	if err != nil {
+		t.Fatalf("read current credentials: %v", err)
+	}
+	if strings.Contains(string(data), "sk-old-creds") || CredentialStored("DEEPSEEK_API_KEY") {
+		t.Fatalf("cleared key was re-imported:\n%s", data)
+	}
+	if !strings.Contains(string(data), credentialClearedPrefix+"DEEPSEEK_API_KEY") {
+		t.Fatalf("cleared marker missing:\n%s", data)
+	}
+}
+
 func TestMigrateSkipsLegacyCredentialsAlreadyInCurrentAutoStore(t *testing.T) {
 	_, dest, _ := legacyHome(t)
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "")

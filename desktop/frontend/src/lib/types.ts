@@ -17,6 +17,7 @@ export type EventKind =
   | "turn_done"
   | "compaction_started"
   | "compaction_done"
+  | "mcp_surface_ready"
   | "retrying"
   | "steer";
 
@@ -49,6 +50,18 @@ export interface WireTool {
   profile?: WireProfile; // subagent model/effort resolved for this call
 }
 
+export interface WireCacheDiagnostics {
+  prefixHash: string;
+  prefixChanged: boolean;
+  prefixChangeReasons?: string[];
+  systemHash: string;
+  toolsHash: string;
+  logRewriteVersion: number;
+  toolSchemaTokens: number;
+  cacheMissTokens: number;
+  cacheHitTokens: number;
+}
+
 export interface WireUsage {
   promptTokens: number;
   completionTokens: number;
@@ -57,6 +70,7 @@ export interface WireUsage {
   cacheMissTokens: number;
   reasoningTokens?: number;
   source?: string;
+  cacheDiagnostics?: WireCacheDiagnostics;
   // Session-cumulative cache tokens — the status bar shows the aggregate
   // hit-rate (Σhit/Σ(hit+miss)), steadier than the single-turn cacheHitTokens.
   sessionCacheHitTokens: number;

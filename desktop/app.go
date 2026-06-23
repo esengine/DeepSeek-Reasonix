@@ -464,12 +464,17 @@ func (a *App) restoreOrBuildTabs() {
 	// Load i18n from the first available config.
 	// Prefer DesktopLanguage (desktop UI setting) over Language (CLI setting),
 	// so the user's language choice in desktop settings takes effect.
-	if cfg, err := config.Load(); err == nil {
+	startupCfg, cfgErr := config.Load()
+	if cfgErr == nil {
+		cfg := startupCfg
 		lang := cfg.DesktopLanguage()
 		if lang == "" {
 			lang = cfg.Language
 		}
 		i18n.DetectLanguage(lang)
+	}
+	if cfgErr != nil || singleSurfaceLayoutStyle(startupCfg.DesktopLayoutStyle()) {
+		f = singleSurfaceTabsFile(f)
 	}
 
 	if len(f.Tabs) > 0 {
@@ -512,6 +517,7 @@ func (a *App) restoreOrBuildTabs() {
 				a.activeTabID = ordered[0]
 			}
 		}
+		a.saveTabsLocked()
 		a.mu.Unlock()
 		for _, tab := range toBuild {
 			a.startTabControllerBuild(tab)
@@ -1941,7 +1947,9 @@ func (a *App) openFallbackRuntime(target fallbackRuntimeTarget) error {
 		topicID = topic.ID
 	}
 	var err error
-	if scope == "global" {
+	if a.singleSurfaceLayoutEnabled() {
+		_, err = a.ActivateTopic(scope, root, topicID, "")
+	} else if scope == "global" {
 		_, err = a.OpenGlobalTab(topicID)
 	} else {
 		_, err = a.OpenProjectTab(root, topicID)
@@ -2781,6 +2789,70 @@ func (a *App) RemoveWorkspace(dir string) error {
 		return fmt.Errorf("workspace path is required")
 	}
 	dir = normalizeProjectRoot(dir)
+
+	var closeTabs []*WorkspaceTab
+	var closeDetached []*WorkspaceTab
+	var fallback *WorkspaceTab
+	a.mu.Lock()
+	for _, tab := range a.tabs {
+		if tabInWorkspace(tab, dir) && tab.hasActiveRuntimeWork() {
+			a.mu.Unlock()
+			return fmt.Errorf("workspace has running sessions; stop them before removing")
+		}
+	}
+	for _, tab := range a.detachedSessions {
+		if tabInWorkspace(tab, dir) && tab.hasActiveRuntimeWork() {
+			a.mu.Unlock()
+			return fmt.Errorf("workspace has running sessions; stop them before removing")
+		}
+	}
+	for id, tab := range a.tabs {
+		if !tabInWorkspace(tab, dir) {
+			continue
+		}
+		if tab.Ctrl != nil && !tab.ReadOnly {
+			_ = tab.Ctrl.Snapshot()
+		}
+		a.markTabRemovedLocked(tab)
+		closeTabs = append(closeTabs, tab)
+		delete(a.tabs, id)
+		a.removeTabOrderLocked(id)
+		if a.activeTabID == id {
+			a.activeTabID = ""
+		}
+	}
+	for key, tab := range a.detachedSessions {
+		if !tabInWorkspace(tab, dir) {
+			continue
+		}
+		closeDetached = append(closeDetached, tab)
+		delete(a.detachedSessions, key)
+	}
+	if len(a.tabs) == 0 {
+		fallback = a.createTabEntry("global", globalTabWorkspaceRoot(), "")
+		fallback.TopicTitle = "Global"
+		fallback.sink = &tabEventSink{tabID: fallback.ID, app: a, ctx: a.ctx}
+		a.tabs[fallback.ID] = fallback
+		a.tabOrder = append(a.tabOrder, fallback.ID)
+		a.activeTabID = fallback.ID
+	} else if a.activeTabID == "" {
+		if ordered := a.orderedTabIDsLocked(); len(ordered) > 0 {
+			a.activeTabID = ordered[0]
+		}
+	}
+	a.saveTabsLocked()
+	a.mu.Unlock()
+
+	for _, tab := range closeTabs {
+		a.closeTabRuntime(tab)
+	}
+	for _, tab := range closeDetached {
+		a.closeTabRuntime(tab)
+	}
+	if fallback != nil {
+		a.startTabControllerBuild(fallback)
+	}
+
 	forgetWorkspace(dir)
 	if err := removeProject(dir); err != nil {
 		return err
@@ -2866,11 +2938,24 @@ func (a *App) SwitchWorkspace(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	meta, err := a.OpenProjectTab(dir, topic.ID)
+	var meta TabMeta
+	if a.singleSurfaceLayoutEnabled() {
+		meta, err = a.ActivateTopic("project", dir, topic.ID, "")
+	} else {
+		meta, err = a.OpenProjectTab(dir, topic.ID)
+	}
 	if err != nil {
 		return "", err
 	}
 	return meta.WorkspaceRoot, nil
+}
+
+func (a *App) singleSurfaceLayoutEnabled() bool {
+	cfg, _, err := a.loadDesktopUserConfigForView()
+	if err != nil {
+		return true
+	}
+	return singleSurfaceLayoutStyle(cfg.DesktopLayoutStyle())
 }
 
 // HistoryMessage is one prior turn, for the frontend to repopulate its transcript
@@ -6360,7 +6445,7 @@ func (a *App) ConfirmAction(req NativeConfirmRequest) (bool, error) {
 }
 
 func (a *App) NeedsOnboarding() bool {
-	return strings.TrimSpace(os.Getenv(onboardingKeyEnv)) == ""
+	return !config.CredentialStored(onboardingKeyEnv)
 }
 
 // ConnectKey validates apiKey against the balance endpoint, persists it to

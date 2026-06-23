@@ -81,6 +81,7 @@ setup 向导、桌面端设置页、CLI 缺 key 提示以及删除 provider key 
 DEEPSEEK_API_KEY=sk-...
 GEMINI_API_KEY=...
 ANTHROPIC_API_KEY=...
+# reasonix-cleared OLD_API_KEY
 ```
 
 规则：
@@ -90,11 +91,13 @@ ANTHROPIC_API_KEY=...
 - 读取时接受 `export KEY=value` 和带引号的值；
 - Reasonix 写入时会拒绝多行值；
 - key 必须是类似 `DEEPSEEK_API_KEY` 的 shell 风格变量名；
+- `# reasonix-cleared KEY` 是删除 key 后写入的非密钥标记，用来防止旧存储把它静默迁回；
 - 在操作系统支持的情况下，Reasonix 会用受限权限写入该文件。
 
 Provider 请求只会从这个全局 `.env` 解析 key。项目 `.env`、home `.env`、继承的 shell
-环境变量、旧 `credentials` 文件和系统 keyring 都不再作为运行时 provider key fallback。
+环境变量、旧 `credentials` 文件和系统 keyring 都不再作为运行时 provider key fallback。项目 `.env`、home `.env` 和继承的 shell 环境变量不会自动导入到全局凭据文件。
 旧 `credentials` 文件和旧 keyring 条目只会在新全局 `.env` 缺少对应 key 时作为非破坏性迁移来源读取。
+项目 `.env` 仍会作为当前 workspace 范围内的非 provider 变量展开来源，例如 MCP/plugin 的 env、headers、URL、command 和 args 中的 `${VAR}`；这些值不会写入进程环境，`REASONIX_HOME`、`REASONIX_STATE_HOME`、`XDG_CONFIG_HOME` 等 Reasonix 控制变量也会被忽略。
 
 缓存仍放在系统缓存目录，例如 macOS 的 `~/Library/Caches/reasonix`、
 Linux 的 `$XDG_CACHE_HOME/reasonix` 或 `~/.cache/reasonix`、Windows 的

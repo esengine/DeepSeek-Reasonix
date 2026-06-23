@@ -111,10 +111,8 @@ func (c *Controller) detectRefs(line string) []ref {
 
 func (c *Controller) detectRefsMode(line string, scopedOnly bool) []ref {
 	known := map[string]bool{}
-	if c.host != nil {
-		for _, n := range c.host.ServerNames() {
-			known[n] = true
-		}
+	for _, n := range c.mcp.serverNames() {
+		known[n] = true
 	}
 
 	var refs []ref
@@ -438,7 +436,7 @@ func (c *Controller) resolveRefs(ctx context.Context, line string, scopedOnly bo
 	for _, r := range refs {
 		switch r.kind {
 		case refResource:
-			text, err := c.host.ReadResource(ctx, r.server, r.uri)
+			text, err := c.mcp.readResource(ctx, r.server, r.uri)
 			if err != nil {
 				errs = append(errs, "@"+r.raw+" — "+err.Error())
 				continue

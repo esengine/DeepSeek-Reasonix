@@ -90,6 +90,7 @@ Structure:
 DEEPSEEK_API_KEY=sk-...
 GEMINI_API_KEY=...
 ANTHROPIC_API_KEY=...
+# reasonix-cleared OLD_API_KEY
 ```
 
 Rules:
@@ -99,14 +100,22 @@ Rules:
 - `export KEY=value` and quoted values are accepted when reading;
 - multiline values are rejected by Reasonix writes;
 - keys must use shell-style names such as `DEEPSEEK_API_KEY`;
+- `# reasonix-cleared KEY` comments are non-secret tombstones written after a key
+  is deleted so legacy stores do not silently re-import it;
 - Reasonix writes this file with restricted permissions where the OS supports
   them.
 
 For provider requests, Reasonix resolves only this global `.env`. Project `.env`
 files, home `.env` files, inherited shell environment variables, the old
 `credentials` file, and the OS keyring do not act as runtime provider-key
-fallbacks. The old `credentials` file and old keyring entries are read only as
-non-destructive migration sources when the new global `.env` is missing a key.
+fallbacks. Project `.env`, home `.env`, and inherited shell environment values
+are not imported into the global credentials file. The old `credentials` file
+and old keyring entries are read only as non-destructive migration sources when
+the new global `.env` is missing a key. Project `.env` files are still read as
+workspace-scoped, non-provider expansion sources for `${VAR}` references in
+MCP/plugin env, headers, URLs, commands, and args; those values are not written
+into the process environment, and Reasonix control variables such as
+`REASONIX_HOME`, `REASONIX_STATE_HOME`, and `XDG_CONFIG_HOME` are ignored there.
 
 Caches remain in the OS cache directory, for example
 `~/Library/Caches/reasonix` on macOS, `$XDG_CACHE_HOME/reasonix` or

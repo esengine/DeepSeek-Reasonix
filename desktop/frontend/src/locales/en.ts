@@ -416,6 +416,10 @@ export const en = {
 
   // status bar
   "status.connecting": "connecting…",
+  "status.hydrateSwitch": "Syncing session…",
+  "status.hydrateResume": "Restoring history…",
+  "status.hydrateNewSession": "Starting new session…",
+  "status.hydrateSync": "Syncing…",
   "status.ctxLabel": "ctx",
   "status.ctxTitle": "Share of the context window currently used by this session",
   "status.sessionTurnsLabel": "session",

@@ -417,6 +417,10 @@ export const zh: Record<DictKey, string> = {
 
   // 状态栏
   "status.connecting": "连接中…",
+  "status.hydrateSwitch": "正在同步会话…",
+  "status.hydrateResume": "正在恢复历史…",
+  "status.hydrateNewSession": "正在创建新会话…",
+  "status.hydrateSync": "正在同步…",
   "status.ctxLabel": "上下文",
   "status.ctxTitle": "当前会话已占用的上下文窗口比例",
   "status.sessionTurnsLabel": "当前会话",

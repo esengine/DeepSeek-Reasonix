@@ -150,6 +150,7 @@ export function StatusBar({
   workspacePath,
   workspaceName,
   gitBranch,
+  hydrationLabel,
 }: {
   context: ContextInfo;
   usage?: WireUsage;
@@ -170,6 +171,7 @@ export function StatusBar({
   workspacePath?: string;
   workspaceName?: string;
   gitBranch?: string;
+  hydrationLabel?: string;
 }) {
   const { locale, t } = useI18n();
   const pct = context.window ? Math.min(100, Math.round((context.used / context.window) * 100)) : null;
@@ -326,6 +328,14 @@ export function StatusBar({
 
   return (
     <div className={`statusbar statusbar--${metricLabelStyle}`}>
+      {hydrationLabel && (
+        <div className="statusbar__group statusbar__group--hydrate">
+          <span className="stat statusbar__hydrate" role="status">
+            <RefreshCw size={12} />
+            <span>{hydrationLabel}</span>
+          </span>
+        </div>
+      )}
       <div className="statusbar__group statusbar__group--items">
         {renderedItems.map(({ id, node }) => (
           <span className="statusbar__item" data-statusbar-item={id} key={id}>

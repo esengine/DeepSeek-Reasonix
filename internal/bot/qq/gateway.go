@@ -106,26 +106,16 @@ type wsClient struct {
 }
 
 func (a *adapter) gatewayLoop(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
+	bot.RunWithRetry(ctx, a.logger, "qq gateway", bot.RetryConfig{}, func(ctx context.Context) error {
 		token, err := a.getAccessToken(ctx)
 		if err != nil {
-			a.logger.Error("get access token failed", "err", err)
-			time.Sleep(5 * time.Second)
-			continue
+			return err
 		}
-
-		if err := a.connectGateway(ctx, token); err != nil {
-			a.logger.Error("gateway connection failed", "err", err)
-			time.Sleep(5 * time.Second)
-			continue
-		}
-	}
+		// connectGateway blocks for the connection's lifetime, returning on
+		// disconnect or error; RunWithRetry handles the cancellation-aware
+		// backoff and reconnect.
+		return a.connectGateway(ctx, token)
+	})
 }
 
 func (a *adapter) getAccessToken(ctx context.Context) (string, error) {

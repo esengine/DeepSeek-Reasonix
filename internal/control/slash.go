@@ -581,12 +581,13 @@ func memoryOneLine(s string) string {
 }
 
 func (c *Controller) skillListText() string {
-	if len(c.skills) == 0 {
+	skills := c.skills.discovered()
+	if len(skills) == 0 {
 		return i18n.M.ListSkillsNone
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, i18n.M.ListSkillsHeaderFmt+"\n", len(c.skills))
-	for _, s := range c.skills {
+	fmt.Fprintf(&b, i18n.M.ListSkillsHeaderFmt+"\n", len(skills))
+	for _, s := range skills {
 		tag := ""
 		if s.RunAs == "subagent" {
 			tag = " 🧬"
@@ -614,17 +615,18 @@ func (c *Controller) hookListText() string {
 }
 
 func (c *Controller) mcpListText() string {
-	if c.host == nil || (len(c.host.ServerNames()) == 0 && len(c.host.Failures()) == 0) {
+	names := c.mcp.serverNames()
+	if len(names) == 0 && len(c.mcp.failures()) == 0 {
 		return i18n.M.ListMcpNone
 	}
 	var b strings.Builder
-	if len(c.host.ServerNames()) > 0 {
+	if len(names) > 0 {
 		b.WriteString(i18n.M.ListMcpHeader + "\n")
-		for _, name := range c.host.ServerNames() {
+		for _, name := range names {
 			fmt.Fprintf(&b, "  %s\n", name)
 		}
 	}
-	if failures := c.host.Failures(); len(failures) > 0 {
+	if failures := c.mcp.failures(); len(failures) > 0 {
 		if b.Len() > 0 {
 			b.WriteString("\n")
 		}

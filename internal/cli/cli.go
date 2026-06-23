@@ -1014,6 +1014,7 @@ func familyStaticModels(providers []config.ProviderEntry, idxs []int) []string {
 // the static fallback covers it.
 func ensureProbeKey(probe *config.ProviderEntry, famName string) {
 	if probe.APIKeyEnv == "" || os.Getenv(probe.APIKeyEnv) != "" {
+		probe.ResolveAPIKeyFromProcessEnvForProbe()
 		return
 	}
 	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.FamilyKeyPromptFmt, famName)))
@@ -1021,6 +1022,7 @@ func ensureProbeKey(probe *config.ProviderEntry, famName string) {
 	if key := strings.TrimSpace(ask(in, os.Stdout, "  "+probe.APIKeyEnv, "")); key != "" {
 		os.Setenv(probe.APIKeyEnv, key)
 	}
+	probe.ResolveAPIKeyFromProcessEnvForProbe()
 }
 
 // fetchOrFallback tries the OpenAI-compatible GET /models endpoint

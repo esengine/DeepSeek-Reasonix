@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/eventwire"
 	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
 )
@@ -58,7 +59,7 @@ func TestServeSubmitRunsAndBroadcastsTurnDone(t *testing.T) {
 	for {
 		select {
 		case data := <-sub:
-			var w wireEvent
+			var w eventwire.Event
 			if err := json.Unmarshal(data, &w); err == nil && w.Kind == "turn_done" {
 				return
 			}
@@ -278,6 +279,20 @@ func TestServeIndexDefinesQueryHelpers(t *testing.T) {
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("serve index missing query helper %q", want)
+		}
+	}
+}
+
+func TestServeIndexHandlesRetryingEvents(t *testing.T) {
+	html := string(indexHTML)
+	for _, want := range []string{
+		"case 'retrying': setRetrying(e.retryAttempt,e.retryMax); break;",
+		"if(e.kind!=='retrying')clearRetrying();",
+		"'retrying_status': 'Retrying ({attempt}/{max})...'",
+		"'retrying_status': '正在重试 ({attempt}/{max})...'",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("serve index missing retrying support %q", want)
 		}
 	}
 }

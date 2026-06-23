@@ -34,8 +34,11 @@ Provider entries name secrets with `api_key_env`, while the secret values live i
 Reasonix's global `<Reasonix home>/.env`, shared by CLI and desktop. Project
 `.env`, home `.env`, inherited shell environment variables, legacy credentials,
 and the OS keyring are not provider-key runtime fallbacks; legacy credentials are
-only migration sources. See [Configuration paths](./CONFIG_PATHS.md) for the full
-`config.toml` and `.env` structure.
+only migration sources. Project `.env` still feeds workspace-scoped,
+non-provider `${VAR}` expansion for MCP/plugin settings without importing
+provider keys or Reasonix control variables. See
+[Configuration paths](./CONFIG_PATHS.md) for the full `config.toml` and `.env`
+structure.
 
 For the desktop and CLI usage of visible reasoning language, see
 [Reasoning language](./REASONING_LANGUAGE.md).

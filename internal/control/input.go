@@ -479,22 +479,10 @@ func (c *Controller) RunSkill(input string) (sent string, found bool) {
 		return "", false
 	}
 	name := strings.TrimPrefix(fields[0], "/")
-	if sk, ok := c.skillByName(name); ok {
+	if sk, ok := c.skills.byName(name); ok {
 		return skill.Render(sk, strings.Join(fields[1:], " ")), true
 	}
 	return "", false
-}
-
-func (c *Controller) skillByName(name string) (skill.Skill, bool) {
-	if c.skillStore != nil {
-		return c.skillStore.Read(name)
-	}
-	for _, sk := range c.skills {
-		if sk.Name == name {
-			return sk, true
-		}
-	}
-	return skill.Skill{}, false
 }
 
 // MCPPrompt resolves a "/mcp__server__prompt args…" line: it maps the positional
@@ -502,16 +490,13 @@ func (c *Controller) skillByName(name string) (skill.Skill, bool) {
 // the MCP server (an async prompts/get). found is false when no such prompt
 // exists; err carries a fetch failure. Honours ctx.
 func (c *Controller) MCPPrompt(ctx context.Context, input string) (sent string, found bool, err error) {
-	if c.host == nil {
-		return "", false, nil
-	}
 	fields := strings.Fields(input)
 	if len(fields) == 0 {
 		return "", false, nil
 	}
 	name := strings.TrimPrefix(fields[0], "/")
 
-	prompts := c.host.Prompts()
+	prompts := c.mcp.prompts()
 	idx := -1
 	for i := range prompts {
 		if prompts[i].Name == name {
