@@ -2462,24 +2462,63 @@ func TestDeleteSessionTrashConflictKeepsRuntime(t *testing.T) {
 	<-runner.started
 
 	err := app.DeleteSession(filepath.Base(path))
-	if err == nil || !strings.Contains(err.Error(), "already exists in trash") {
-		t.Fatalf("DeleteSession conflict error = %v, want trash conflict", err)
+	if err != nil {
+		t.Fatalf("DeleteSession should succeed after cleaning stale trash: %v", err)
 	}
-	if app.activeCtrl() != ctrl {
-		t.Fatalf("active runtime should remain bound after preflight failure")
+	if _, ok := app.tabs["test"]; ok {
+		t.Fatalf("deleted session runtime should be removed from tabs")
 	}
-	if !ctrl.Running() {
-		t.Fatalf("running turn should not be cancelled on preflight failure")
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("session file should be moved out of active history, stat err = %v", err)
 	}
-	if _, ok := app.tabs["test"]; !ok {
-		t.Fatalf("tab should remain after preflight failure")
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("active session file should remain: %v", err)
+	trashPath := filepath.Join(dir, sessionTrashDir, filepath.Base(path), filepath.Base(path))
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("session should be moved to trash: %v", err)
 	}
 
 	close(runner.release)
 	waitNotRunning(t, ctrl)
+}
+
+func TestDeleteSessionTrashConflictNonRunning(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	path := filepath.Join(dir, "stale-trash.jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"user","content":"hello"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, sessionTrashDir, filepath.Base(path)), 0o755); err != nil {
+		t.Fatalf("create trash conflict: %v", err)
+	}
+
+	// Set up an active tab so activeSessionDir returns the expected dir.
+	activePath := filepath.Join(dir, "active.jsonl")
+	if err := os.WriteFile(activePath, []byte(`{"role":"user","content":"active"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write active session: %v", err)
+	}
+	activeCtrl := control.New(control.Options{SessionDir: dir, SessionPath: activePath, Label: "active"})
+	defer activeCtrl.Close()
+
+	app := &App{
+		tabs:        map[string]*WorkspaceTab{"active": {ID: "active", Scope: "global", Ctrl: activeCtrl, Ready: true}},
+		activeTabID: "active",
+		tabOrder:    []string{"active"},
+	}
+
+	if err := app.DeleteSession(filepath.Base(path)); err != nil {
+		t.Fatalf("DeleteSession should succeed after cleaning stale trash: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("session file should be moved out of active history, stat err = %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, filepath.Base(path), filepath.Base(path))
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("session should be moved to trash: %v", err)
+	}
 }
 
 func TestDeleteSessionCancelsInactiveOpenRuntime(t *testing.T) {

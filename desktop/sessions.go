@@ -210,7 +210,12 @@ func validateSessionTrashTarget(dir, sessionPath, key string) error {
 	}
 	itemDir := filepath.Join(sessionTrashPath(dir), key)
 	if _, err := os.Stat(itemDir); err == nil {
-		return fmt.Errorf("session already exists in trash: %s", key)
+		// Stale trash dir from a prior interrupted deletion — remove it
+		// so the current deletion can proceed cleanly.
+		if err := os.RemoveAll(itemDir); err != nil {
+			return err
+		}
+		return nil
 	} else if !os.IsNotExist(err) {
 		return err
 	}
