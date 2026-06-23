@@ -2794,18 +2794,9 @@ func (a *App) RemoveWorkspace(dir string) error {
 	var closeDetached []*WorkspaceTab
 	var fallback *WorkspaceTab
 	a.mu.Lock()
-	for _, tab := range a.tabs {
-		if tabInWorkspace(tab, dir) && tab.hasActiveRuntimeWork() {
-			a.mu.Unlock()
-			return fmt.Errorf("workspace has running sessions; stop them before removing")
-		}
-	}
-	for _, tab := range a.detachedSessions {
-		if tabInWorkspace(tab, dir) && tab.hasActiveRuntimeWork() {
-			a.mu.Unlock()
-			return fmt.Errorf("workspace has running sessions; stop them before removing")
-		}
-	}
+	// Force-remove even when a tab has active runtime work: closeTabRuntime
+	// snapshots before cancelling, so the session is preserved without
+	// blocking the removal.
 	for id, tab := range a.tabs {
 		if !tabInWorkspace(tab, dir) {
 			continue
@@ -2859,7 +2850,7 @@ func (a *App) RemoveWorkspace(dir string) error {
 	}
 	// If the removed workspace was the active one, clear the pointer
 	// so we don't leave a stale reference to a deleted project.
-	if loadWorkspace() == dir {
+	if sameDesktopPath(loadWorkspace(), dir) {
 		if remaining := loadProjectsFile(); len(remaining.Projects) > 0 {
 			// Fall back to the first remaining project
 			saveWorkspace(remaining.Projects[0].Root)

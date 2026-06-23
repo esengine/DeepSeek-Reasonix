@@ -353,7 +353,7 @@ func TestRemoveWorkspaceSnapshotsProjectTabBeforeRemovingBinding(t *testing.T) {
 	}
 }
 
-func TestRemoveWorkspaceRejectsRunningProjectRuntime(t *testing.T) {
+func TestRemoveWorkspaceForceCancelsRunningProjectRuntime(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	projectRoot := t.TempDir()
 	if err := addProject(projectRoot, "Project"); err != nil {
@@ -386,18 +386,31 @@ func TestRemoveWorkspaceRejectsRunningProjectRuntime(t *testing.T) {
 		activeTabID:      "project",
 		detachedSessions: map[string]*WorkspaceTab{},
 	}
+	app.mu.Lock()
+	app.saveTabsLocked()
+	app.mu.Unlock()
 
 	ctrl.Submit("block")
 	<-runner.started
-	if err := app.RemoveWorkspace(projectRoot); err == nil {
-		t.Fatal("RemoveWorkspace succeeded with a running project session")
+	// A running session used to abort RemoveWorkspace silently — the frontend
+	// swallowed the error and the project resurrected after a restart. Now the
+	// runtime is force-cancelled and the project is removed for real.
+	if err := app.RemoveWorkspace(projectRoot); err != nil {
+		t.Fatalf("RemoveWorkspace with running session: %v", err)
 	}
-	if got := app.ListWorkspaces(); len(got) != 1 || got[0].Path != normalizeProjectRoot(projectRoot) {
-		t.Fatalf("workspaces after rejected remove = %+v, want project retained", got)
-	}
-
-	close(runner.release)
 	waitNotRunning(t, ctrl)
+	close(runner.release)
+
+	assertTabIDs(t, app.ListTabs(), "global")
+	if got := app.ListWorkspaces(); len(got) != 0 {
+		t.Fatalf("workspaces after force remove = %+v, want none", got)
+	}
+	if got := loadProjectsFile().Projects; len(got) != 0 {
+		t.Fatalf("projects after force remove = %+v, want none", got)
+	}
+	if got := loadTabsFile(); len(got.Tabs) != 1 || got.Tabs[0].ID != "global" {
+		t.Fatalf("persisted tabs after force remove = %+v, want only global", got)
+	}
 	ctrl.Close()
 }
 

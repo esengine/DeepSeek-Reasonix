@@ -134,7 +134,7 @@ func forgetWorkspace(dir string) {
 		if abs, err := filepath.Abs(path); err == nil {
 			path = abs
 		}
-		if path != dir {
+		if !sameDesktopPath(path, dir) {
 			paths = append(paths, path)
 		}
 	}
