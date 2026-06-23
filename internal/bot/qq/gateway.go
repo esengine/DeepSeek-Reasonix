@@ -1,4 +1,4 @@
-package qq
+﻿package qq
 
 import (
 	"bytes"
@@ -9,7 +9,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"mime/multipart"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -77,21 +79,32 @@ type properties struct {
 	Device  string `json:"$device"`
 }
 
+// dispatchAttachment QQ 消息中的附件（图片/文件）。
+type dispatchAttachment struct {
+	URL         string `json:"url"`
+	ContentType string `json:"content_type"`
+	Filename    string `json:"filename,omitempty"`
+	Size        int    `json:"size,omitempty"`
+	Height      int    `json:"height,omitempty"`
+	Width       int    `json:"width,omitempty"`
+}
+
 type dispatchEvent struct {
-	ID        string `json:"id"`
-	Type      string `json:"type"`
-	Content   string `json:"content"`
-	Timestamp string `json:"timestamp"`
-	Author    struct {
+	ID          string               `json:"id"`
+	Type        string               `json:"type"`
+	Content     string               `json:"content"`
+	Timestamp   string               `json:"timestamp"`
+	Author      struct {
 		ID           string `json:"id"`
 		UserOpenID   string `json:"user_openid"`
 		MemberOpenID string `json:"member_openid"`
 		UnionOpenID  string `json:"union_openid"`
 		Username     string `json:"username"`
 	} `json:"author"`
-	ChannelID   string `json:"channel_id"`
-	GuildID     string `json:"guild_id"`
-	GroupOpenID string `json:"group_openid"`
+	ChannelID        string               `json:"channel_id"`
+	GuildID          string               `json:"guild_id"`
+	GroupOpenID      string               `json:"group_openid"`
+	Attachments      []dispatchAttachment `json:"attachments,omitempty"`
 }
 
 // wsClient 管理 QQ WebSocket 连接。
@@ -464,12 +477,21 @@ func (a *adapter) handleDispatch(msg gatewayPayload) {
 		return
 	}
 
+	// 解析附件（图片/文件）到 MediaURLs
+	var mediaURLs []string
+	for _, att := range evt.Attachments {
+		if att.URL != "" {
+			mediaURLs = append(mediaURLs, att.URL)
+		}
+	}
+
 	ib := bot.InboundMessage{
 		Platform:  bot.PlatformQQ,
 		UserID:    qqAuthorID(evt),
 		UserName:  evt.Author.Username,
 		Text:      evt.Content,
 		MessageID: evt.ID,
+		MediaURLs: mediaURLs,
 	}
 
 	switch msg.T {
@@ -514,6 +536,24 @@ func qqAuthorID(evt dispatchEvent) string {
 
 // sendMessage 使用 QQ REST API 发送消息。
 func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot.SendResult, error) {
+	// 如果有媒体附件，上传并发送图片
+	if len(msg.MediaURLs) > 0 {
+		for _, mediaPath := range msg.MediaURLs {
+			seq := a.nextMessageSeq(msg.ReplyToMsgID)
+			fileInfo, err := a.uploadQQMedia(ctx, mediaPath, msg.ChatID, msg.ChatType)
+			if err != nil {
+				a.logger.Warn("qq media upload failed", "path", mediaPath, "err", err)
+				continue
+			}
+			result, err := a.sendImageMessage(ctx, msg, fileInfo, seq)
+			if err != nil {
+				a.logger.Warn("qq image send failed", "err", err)
+				continue
+			}
+			return result, nil
+		}
+		// 所有媒体发送失败时降级到文本
+	}
 	text := normalizeQQMarkdownReply(msg.Text)
 	chunks := splitQQMessage(text, qqMaxChunkBytes)
 	if len(chunks) == 0 {
@@ -555,6 +595,80 @@ func (a *adapter) sendPlainMessageChunk(ctx context.Context, msg bot.OutboundMes
 		"content":  text,
 		"msg_type": 0,
 	}, seq)
+}
+
+// uploadQQMedia 上传文件到 QQ 媒体服务器，返回 file_info。
+func (a *adapter) uploadQQMedia(ctx context.Context, filePath string, chatID string, chatType bot.ChatType) (string, error) {
+	base := a.apiBaseURL()
+	var uploadURL string
+	switch chatType {
+	case bot.ChatGroup:
+		uploadURL = fmt.Sprintf("%s/v2/groups/%s/files", base, url.PathEscape(chatID))
+	default:
+		uploadURL = fmt.Sprintf("%s/v2/users/%s/files", base, url.PathEscape(chatID))
+	}
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", fmt.Errorf("open media file: %w", err)
+	}
+	defer file.Close()
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	part, err := writer.CreateFormFile("file", filepath.Base(filePath))
+	if err != nil {
+		return "", fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		return "", fmt.Errorf("copy file: %w", err)
+	}
+	writer.Close()
+
+	req, err := http.NewRequestWithContext(ctx, "POST", uploadURL, &buf)
+	if err != nil {
+		return "", fmt.Errorf("create upload request: %w", err)
+	}
+
+	token, err := a.getAccessToken(ctx)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "QQBot "+token)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("X-Union-Appid", a.appID())
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("upload request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("qq upload error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		FileUUID string `json:"file_uuid"`
+		FileInfo string `json:"file_info"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("decode upload response: %w", err)
+	}
+	if result.FileInfo == "" {
+		result.FileInfo = result.FileUUID
+	}
+	return result.FileInfo, nil
+}
+
+// sendImageMessage 发送图片消息（msg_type: 7）。
+func (a *adapter) sendImageMessage(ctx context.Context, msg bot.OutboundMessage, fileInfo string, seq int) (bot.SendResult, error) {
+	payload := map[string]any{
+		"msg_type": 7,
+		"media":    map[string]string{"file_info": fileInfo},
+	}
+	return a.sendMessagePayload(ctx, msg, payload, seq)
 }
 
 func (a *adapter) sendMessageChunk(ctx context.Context, msg bot.OutboundMessage, text string, seq int) (bot.SendResult, error) {

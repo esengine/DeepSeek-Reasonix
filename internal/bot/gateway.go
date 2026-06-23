@@ -1,10 +1,16 @@
-package bot
+﻿package bot
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,6 +43,9 @@ type GatewayConfig struct {
 	// The gateway updates the live session and in-memory defaults first; this
 	// callback lets desktop save the chosen connection mode to user config.
 	OnToolApprovalModeChange func(InboundMessage, string) error
+	// Plugins are MCP servers to load into bot sessions, mirroring the
+	// desktop/CLI plugin system so bot sessions have the same tools.
+	Plugins []config.PluginEntry
 }
 
 // ChannelConfig overrides gateway defaults for one IM channel.
@@ -320,6 +329,29 @@ func (gw *BotGateway) handleMessage(ctx context.Context, binding AdapterBinding,
 		// 正在处理中且非 bypass 命令，已在 TryAcquire 中入队
 		gw.logger.Debug("session busy, queued", "session", key[:8])
 		return
+	}
+
+	// download media for AI context
+	if len(msg.MediaURLs) > 0 {
+		mediaDir := filepath.Join(os.TempDir(), "reasonix-bot-media")
+		os.MkdirAll(mediaDir, 0755)
+		var mediaRefs []string
+		for _, mediaURL := range msg.MediaURLs {
+			localPath, err := gw.downloadMedia(ctx, mediaURL, mediaDir)
+			if err != nil {
+				gw.logger.Warn("media download failed", "url", hashID(mediaURL), "err", err)
+				continue
+			}
+			mediaRefs = append(mediaRefs, localPath)
+		}
+		if len(mediaRefs) > 0 {
+			prefix := "[File](" + strings.Join(mediaRefs, ", ") + ")"
+			if msg.Text != "" {
+				msg.Text = prefix + " " + msg.Text
+			} else {
+				msg.Text = prefix
+			}
+		}
 	}
 
 	gw.runTurn(ctx, binding.Adapter, key, msg)
@@ -772,9 +804,7 @@ func (gw *BotGateway) runTurn(ctx context.Context, adapter Adapter, key string, 
 		_ = gw.sendText(ctx, adapter, msg, "内部错误：无法创建会话。")
 		return
 	}
-	gw.rememberSessionReady(msg, state.ctrl)
-
-	// 发送"正在输入"状态
+		// 发送"正在输入"状态
 	_ = adapter.SendTyping(ctx, msg.ChatID)
 
 	// 创建事件渲染 sink
@@ -825,6 +855,9 @@ func (gw *BotGateway) runTurn(ctx context.Context, adapter Adapter, key string, 
 	sink.Emit(event.Event{Kind: event.TurnDone, Err: err})
 	if err != nil {
 		gw.logger.Warn("turn error", "session", key[:8], "err", err)
+		// 离线降级：AI 不可用时发送 fallback 回复
+		fallbackText := "抱歉，我的大脑暂时不在线（AI 服务不可用）。请稍后再试。"
+		gw.sendText(ctx, adapter, msg, fallbackText)
 		return
 	}
 	gw.logger.Info("bot turn completed", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8])
@@ -844,6 +877,8 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	sessionSink := &sessionEventSink{}
 	model, workspaceRoot, toolApprovalMode := gw.sessionOptionsForMessage(msg)
 	gw.logger.Info("bot session creating", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8], "model", model, "workspace_set", strings.TrimSpace(workspaceRoot) != "", "tool_approval_mode", normalizeBotToolApprovalMode(toolApprovalMode))
+	// convert configured plugins to plugin specs for boot
+	pluginSpecs := boot.PluginSpecs(gw.cfg.Plugins)
 	ctrl, err := boot.Build(ctx, boot.Options{
 		Model:         model,
 		MaxSteps:      gw.cfg.MaxSteps,
@@ -851,6 +886,7 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 		Sink:          sessionSink,
 		WorkspaceRoot: workspaceRoot,
 		SessionDir:    botSessionDir(workspaceRoot),
+		ExtraPlugins:  pluginSpecs,
 	})
 	if err != nil {
 		gw.logger.Error("build controller failed", "err", err)
@@ -858,7 +894,24 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	}
 	ctrl.EnableInteractiveApproval()
 	ctrl.SetToolApprovalMode(toolApprovalMode)
-	ensureControllerSessionPath(ctrl)
+	// 使用持久化 session 文件（按 user key，不按时间戳），保证断开后能接续
+	sessionDir := ctrl.SessionDir()
+	if sessionDir != "" {
+		persistentPath := botPersistentSessionPath(sessionDir, key)
+		ctrl.SetSessionPath(persistentPath)
+	}
+
+	// 接续历史会话：bot 会话使用固定文件，断开后重连能读到历史
+	if sessionPath := ctrl.SessionPath(); sessionPath != "" {
+		if loaded, err := agent.LoadSession(sessionPath); err == nil {
+			if loaded.HasContent() {
+				ctrl.Resume(loaded, sessionPath)
+				gw.logger.Info("bot session resumed", "path", sessionPath, "messages", len(loaded.Snapshot()))
+			}
+		} else if !os.IsNotExist(err) {
+			gw.logger.Warn("bot session load failed", "path", sessionPath, "err", err)
+		}
+	}
 
 	gw.mu.Lock()
 	gw.controllers[key] = &sessionState{
@@ -872,7 +925,13 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	gw.mu.Unlock()
 
 	gw.logger.Info("bot session created", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8])
+gw.rememberSessionReady(msg, ctrl)
 	return state
+}
+
+func botPersistentSessionPath(sessionDir, sessionKey string) string {
+	h := sha256.Sum256([]byte(sessionKey))
+	return filepath.Join(sessionDir, "bot-"+hex.EncodeToString(h[:8])+".jsonl")
 }
 
 func ensureControllerSessionPath(ctrl *control.Controller) {
@@ -985,6 +1044,56 @@ func (gw *BotGateway) sendText(ctx context.Context, adapter Adapter, msg Inbound
 	}
 	gw.logger.Info("bot send completed", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "reply_to", hashID(msg.MessageID), "message", hashID(result.MessageID))
 	return err
+}
+
+// downloadMedia downloads a media file to local disk.
+func (gw *BotGateway) downloadMedia(ctx context.Context, url string, dir string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("create download request: %w", err)
+	}
+	downloadCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req = req.WithContext(downloadCtx)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("download request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("download error %d", resp.StatusCode)
+	}
+
+	ext := ".dat"
+	ct := resp.Header.Get("Content-Type")
+	if strings.Contains(ct, "image/jpeg") || strings.Contains(ct, "image/jpg") {
+		ext = ".jpg"
+	} else if strings.Contains(ct, "image/png") {
+		ext = ".png"
+	} else if strings.Contains(ct, "image/gif") {
+		ext = ".gif"
+	} else if strings.Contains(ct, "image/webp") {
+		ext = ".webp"
+	}
+
+	h := sha256.Sum256([]byte(url + time.Now().String()))
+	filename := "media-" + hex.EncodeToString(h[:8]) + ext
+	localPath := filepath.Join(dir, filename)
+
+	out, err := os.Create(localPath)
+	if err != nil {
+		return "", fmt.Errorf("create local file: %w", err)
+	}
+	defer out.Close()
+
+	written, err := io.Copy(out, resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("save file: %w", err)
+	}
+	gw.logger.Info("media downloaded", "path", localPath, "bytes", written, "type", ct)
+	return localPath, nil
 }
 
 func parseAskAnswers(questions []event.AskQuestion, raw string) []event.AskAnswer {

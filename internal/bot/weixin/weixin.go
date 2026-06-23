@@ -1,4 +1,4 @@
-// Package weixin 实现微信 iLink Bot 适配器。
+﻿// Package weixin 实现微信 iLink Bot 适配器。
 // 参考 Hermes Agent 的 weixin adapter：
 // - getupdates 长轮询
 // - sendmessage / sendtyping
@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -76,6 +77,12 @@ type ilinkMessage struct {
 		TextItem struct {
 			Text string `json:"text"`
 		} `json:"text_item"`
+		ImageItem struct {
+			URL      string `json:"url"`
+			MD5      string `json:"md5,omitempty"`
+			FileName string `json:"file_name,omitempty"`
+			Size     int    `json:"size,omitempty"`
+		} `json:"image_item"`
 	} `json:"item_list"`
 }
 
@@ -461,7 +468,18 @@ func (a *adapter) handleIlinkMessage(m ilinkMessage) {
 		return
 	}
 	text := extractIlinkText(m.ItemList)
-	if text == "" {
+	// extract images from non-text items
+	var mediaURLs []string
+	for _, item := range m.ItemList {
+		if item.Type == weixinItemText {
+			continue
+		}
+		if item.ImageItem.URL != "" {
+			mediaURLs = append(mediaURLs, item.ImageItem.URL)
+		}
+	}
+	// 只有纯文本才跳过，有图片时即使 text 为空也要继续
+	if text == "" && len(mediaURLs) == 0 {
 		a.logger.Info("weixin message ignored", "reason", "empty_text", "from", logHash(m.FromUserID), "message", logHash(string(m.MessageID)))
 		return
 	}
@@ -481,6 +499,7 @@ func (a *adapter) handleIlinkMessage(m ilinkMessage) {
 		UserName:  m.FromUserID,
 		Text:      text,
 		MessageID: string(m.MessageID),
+		MediaURLs: mediaURLs,
 	}
 	select {
 	case a.msgCh <- ib:
@@ -503,6 +522,12 @@ func extractIlinkText(items []struct {
 	TextItem struct {
 		Text string `json:"text"`
 	} `json:"text_item"`
+	ImageItem struct {
+		URL      string `json:"url"`
+		MD5      string `json:"md5,omitempty"`
+		FileName string `json:"file_name,omitempty"`
+		Size     int    `json:"size,omitempty"`
+	} `json:"image_item"`
 }) string {
 	var out []string
 	for _, item := range items {
@@ -551,6 +576,99 @@ func firstNonEmptyString(vals ...string) string {
 	return ""
 }
 
+// uploadWeixinMedia 上传文件到微信媒体服务器，返回可访问的 URL。
+func (a *adapter) uploadWeixinMedia(ctx context.Context, filePath string) (string, error) {
+	tok := a.token()
+	if tok == "" {
+		return "", a.tokenMissingError()
+	}
+
+	// 1. 获取上传 URL
+	getURL := a.apiBase() + uploadMediaPath
+	req, err := http.NewRequestWithContext(ctx, "POST", getURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("create getuploadurl request: %w", err)
+	}
+	setIlinkHeaders(req, tok, nil)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("getuploadurl request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	var uploadResp struct {
+		Ret       int    `json:"ret"`
+		Errcode   int    `json:"errcode"`
+		Errmsg    string `json:"errmsg"`
+		UploadURL string `json:"url"`
+		MediaID   string `json:"media_id"`
+	}
+	if err := json.Unmarshal(respBody, &uploadResp); err != nil {
+		return "", fmt.Errorf("decode getuploadurl response: %w", err)
+	}
+	if uploadResp.Ret != 0 || uploadResp.Errcode != 0 {
+		return "", fmt.Errorf("getuploadurl error ret=%d errcode=%d: %s", uploadResp.Ret, uploadResp.Errcode, uploadResp.Errmsg)
+	}
+
+	uploadURL := uploadResp.UploadURL
+	if uploadURL == "" {
+		return "", fmt.Errorf("getuploadurl returned empty url")
+	}
+
+	// 2. 上传文件
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", fmt.Errorf("open media file: %w", err)
+	}
+	defer file.Close()
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	part, err := writer.CreateFormFile("file", filepath.Base(filePath))
+	if err != nil {
+		return "", fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		return "", fmt.Errorf("copy file: %w", err)
+	}
+	writer.Close()
+
+	uploadReq, err := http.NewRequestWithContext(ctx, "POST", uploadURL, &buf)
+	if err != nil {
+		return "", fmt.Errorf("create upload request: %w", err)
+	}
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+
+	uploadResp2, err := http.DefaultClient.Do(uploadReq)
+	if err != nil {
+		return "", fmt.Errorf("upload file request: %w", err)
+	}
+	defer uploadResp2.Body.Close()
+
+	uploadBody, _ := io.ReadAll(uploadResp2.Body)
+	if uploadResp2.StatusCode >= 400 {
+		return "", fmt.Errorf("upload file error %d: %s", uploadResp2.StatusCode, string(uploadBody))
+	}
+
+	// 返回媒体 URL
+	var uploadResult struct {
+		URL     string `json:"url"`
+		MediaID string `json:"media_id"`
+	}
+	if err := json.Unmarshal(uploadBody, &uploadResult); err == nil {
+		if uploadResult.URL != "" {
+			return uploadResult.URL, nil
+		}
+		if uploadResult.MediaID != "" {
+			return uploadResult.MediaID, nil
+		}
+	}
+
+	return strings.TrimSpace(string(uploadBody)), nil
+}
+
 // sendMessage 使用微信 iLink sendmessage API 发送消息。
 func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot.SendResult, error) {
 	tok := a.token()
@@ -560,6 +678,49 @@ func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot
 
 	url := a.apiBase() + sendMessagePath
 
+	// 构造消息 item_list
+	var itemList []map[string]interface{}
+
+	// 如果有媒体附件（图片），先上传
+	if len(msg.MediaURLs) > 0 {
+		for _, mediaPath := range msg.MediaURLs {
+			mediaURL, err := a.uploadWeixinMedia(ctx, mediaPath)
+			if err != nil {
+				a.logger.Warn("weixin media upload failed", "path", mediaPath, "err", err)
+				continue
+			}
+			// detect media type from file extension
+			ext := strings.ToLower(filepath.Ext(mediaPath))
+			if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp" || ext == ".bmp" {
+				itemList = append(itemList, map[string]interface{}{
+					"type":       3,
+					"image_item": map[string]string{"url": mediaURL},
+				})
+			} else {
+				// non-image: send as file item (type 4)
+				itemList = append(itemList, map[string]interface{}{
+					"type":       4,
+					"file_item": map[string]interface{}{"url": mediaURL, "name": filepath.Base(mediaPath)},
+				})
+			}
+		}
+	}
+
+	// 文本内容
+	if msg.Text != "" {
+		itemList = append(itemList, map[string]interface{}{
+			"type":      weixinItemText,
+			"text_item": map[string]string{"text": msg.Text},
+		})
+	}
+
+	// 如果没有有效内容，发空文本
+	if len(itemList) == 0 {
+		itemList = []map[string]interface{}{
+			{"type": weixinItemText, "text_item": map[string]string{"text": ""}},
+		}
+	}
+
 	payload := map[string]interface{}{
 		"base_info": map[string]string{"channel_version": ilinkChannelVersion},
 		"msg": map[string]interface{}{
@@ -568,9 +729,7 @@ func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot
 			"client_id":     fmt.Sprintf("reasonix-%d", time.Now().UnixNano()),
 			"message_type":  weixinMsgTypeBot,
 			"message_state": weixinMsgStateDone,
-			"item_list": []map[string]interface{}{
-				{"type": weixinItemText, "text_item": map[string]string{"text": msg.Text}},
-			},
+			"item_list":     itemList,
 		},
 	}
 	if contextToken := a.contextToken(msg.ChatID); contextToken != "" {

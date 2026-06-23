@@ -118,6 +118,7 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 		OnInbound:                botruntime.NewRemoteRememberer(logger),
 		OnSessionReady:           botruntime.NewSessionRemembererWithWorkspace(logger, workspaceRoot),
 		OnToolApprovalModeChange: onToolApprovalModeChange,
+		Plugins:                  cfg.AutoStartPlugins(),
 	}
 	bindings := botruntime.AdapterBindings(cfg, plan.Enabled, nil, logger)
 	if len(bindings) == 0 {
