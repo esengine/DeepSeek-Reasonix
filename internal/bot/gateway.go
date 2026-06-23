@@ -877,14 +877,26 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	ensureControllerSessionPath(ctrl)
 
 	gw.mu.Lock()
-	gw.controllers[key] = &sessionState{
+	// Re-check under the lock: while we were off-lock in boot.Build, a second
+	// message for the same key may have built and registered its own session.
+	// The first writer wins; close the controller we just built (releasing its
+	// jobs/plugin host) and reuse the existing one, so a near-simultaneous pair
+	// of opening messages can't leak a controller.
+	if existing, ok := gw.controllers[key]; ok {
+		existing.lastActive = time.Now()
+		gw.mu.Unlock()
+		ctrl.Close()
+		gw.logger.Info("bot session built concurrently; discarding duplicate", "platform", msg.Platform, "chat", hashID(msg.ChatID), "session", key[:8])
+		return existing
+	}
+	state := &sessionState{
 		ctrl:        ctrl,
 		sink:        sessionSink,
 		pendingAsks: make(map[string][]event.AskQuestion),
 		createdAt:   time.Now(),
 		lastActive:  time.Now(),
 	}
-	state := gw.controllers[key]
+	gw.controllers[key] = state
 	gw.mu.Unlock()
 
 	gw.logger.Info("bot session created", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8])
