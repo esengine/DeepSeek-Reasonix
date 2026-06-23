@@ -309,7 +309,7 @@ body.how-flat .how-track { height: auto; }
 body.how-flat .how-stage { position: static; min-height: 0; display: block; }
 
 /* steps */
-.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; }
+.steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; }
 .step { padding: 6px 40px 6px 0; }
 .step + .step { padding-left: 40px; border-left: 1px solid var(--line); }
 .step .num {
@@ -626,7 +626,8 @@ body.how-flat .how-stage { position: static; min-height: 0; display: block; }
   background: var(--bg-soft);
 }
 .tui-panel .desktop-feature-list { margin-top: 10px !important; }
-.desktop-panel {
+.desktop-panel,
+.web-panel {
   margin: 20px 0 8px; padding: 24px;
   border: 1px solid color-mix(in oklch, var(--accent) 18%, var(--line));
   border-radius: var(--radius-sm);
@@ -638,7 +639,8 @@ body.how-flat .how-stage { position: static; min-height: 0; display: block; }
   font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--accent);
 }
-.docs-main .desktop-panel h3 {
+.docs-main .desktop-panel h3,
+.docs-main .web-panel h3 {
   margin: 0 0 8px; font-size: 21px; line-height: 1.25;
   letter-spacing: -0.012em; color: var(--ink);
 }

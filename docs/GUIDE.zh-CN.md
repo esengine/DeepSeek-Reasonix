@@ -12,6 +12,7 @@
 ## 目录
 
 - [配置](#配置)
+- [Serve Web 前端](#serve-web-前端)
 - [配置路径](./CONFIG_PATHS.zh-CN.md)
 - [思考语言](./REASONING_LANGUAGE.zh-CN.md)
 - [桌面端 Hooks](./DESKTOP_HOOKS.zh-CN.md)
@@ -78,12 +79,56 @@ allow = ["Bash(go test:*)"]                  # 从不询问
 # workspace_root = ""          # 文件写工具被限制在此目录；留空 = 当前目录
 # allow_write    = ["/tmp"]    # write_file/edit_file/multi_edit/move_file 额外可写的目录
 
+[serve]
+auth_mode = "none"             # none|token|password；绑定到非 localhost 前请先开启认证
+# token = ""                   # 可选固定 token；token 模式为空时启动时自动生成
+# password_hash = ""           # 用 reasonix serve --hash-password --password '...' 生成
+# behind_proxy = false         # 只在可信反向代理后方设为 true
+
 [[plugins]]
 name    = "example"
 command = "reasonix-plugin-example"
 ```
 
 完整 schema 与每个字段的契约见 [`SPEC.md` §5](./SPEC.md#5-configuration-toml)。
+
+## Serve Web 前端
+
+`reasonix serve` 会用同一个本地 Reasonix 引擎启动浏览器 UI。适合不安装桌面端但想用可视化界面、
+在远程开发机上通过 tunnel 使用，或把当前会话临时共享给浏览器查看的场景。
+
+```bash
+cd your-project
+reasonix serve
+# 打开 http://127.0.0.1:8787
+```
+
+默认监听 `127.0.0.1:8787`，认证模式是 `auth_mode = "none"`。这个默认值只适合本机使用。
+如果要绑定到非 loopback 地址、通过 tunnel 暴露，或放到反向代理后面，请先开启认证再分享 URL：
+
+```bash
+reasonix serve --auth token
+reasonix serve --addr 0.0.0.0:8787 --auth token
+reasonix serve --auth password --password 'temporary-password'
+```
+
+Token 模式会在终端打印带 `?token=...` 的分享链接；可通过 `--token` 或 `[serve].token`
+复用固定 token。Password 模式必须在启动时传 `--password`，或在配置里保存 bcrypt hash：
+
+```bash
+reasonix serve --hash-password --password 'strong-password'
+
+# ~/.reasonix/config.toml
+[serve]
+auth_mode = "password" # none|token|password
+password_hash = "$2a$12$..."
+behind_proxy = true    # 仅可信反向代理后方使用
+```
+
+Web UI 提供聊天、工具审批、会话历史、rewind/fork/summarize、模型与 reasoning effort 控件、
+Goal、由 `todo_write` 工具驱动的实时 Todo 面板，以及已配置 provider 的余额显示。临时启动可用
+`--model`、`--max-steps` 或 `--resume`；不传 `--model` 时，`serve` 使用用户全局
+`default_model`。
 
 ## 快捷键
 

@@ -2280,6 +2280,15 @@ func (c *Controller) SessionCache() (hit, miss int) {
 	return c.executor.SessionCache()
 }
 
+// Todos returns a copy of the canonical task list (the latest todo_write state
+// merged with complete_step advances) so frontends can render a live task panel.
+func (c *Controller) Todos() []evidence.TodoItem {
+	if c.executor == nil {
+		return nil
+	}
+	return c.executor.CanonicalTodoState()
+}
+
 // ToolResultData holds the full arguments and output for one tool call, loaded
 // on demand when a frontend expands a collapsed tool card.
 type ToolResultData struct {

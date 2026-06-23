@@ -402,13 +402,66 @@ func runServe(args []string) int {
 	maxSteps := fs.Int("max-steps", 0, "max tool-call rounds (0 = use config/default)")
 	addr := fs.String("addr", "127.0.0.1:8787", "listen address")
 	resume := fs.String("resume", "", "resume a saved session file")
+	auth := fs.String("auth", "", "auth mode: none, token, or password (default: none)")
+	token := fs.String("token", "", "pre-shared token for auth=token (auto-generated if empty)")
+	password := fs.String("password", "", "password for auth=password (use --hash-password to store a hash instead)")
+	hashPassword := fs.Bool("hash-password", false, "print a bcrypt hash of --password and exit")
+	behindProxy := fs.Bool("behind-proxy", false, "trust X-Forwarded-For / X-Forwarded-Proto headers from a reverse proxy")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+
+	// --hash-password: generate a bcrypt hash and exit.
+	if *hashPassword {
+		if *password == "" {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--hash-password requires --password")
+			return 1
+		}
+		h, err := serve.HashPassword(*password)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		fmt.Println(h)
+		return 0
 	}
 
 	ctx := context.Background()
 	bc := serve.NewBroadcaster()
 	cfg, _ := config.Load()
+
+	// Build serve config, merging CLI flags over config file.
+	serveCfg := cfg.Serve
+	if *auth != "" {
+		serveCfg.AuthMode = *auth
+	}
+	if *token != "" {
+		serveCfg.Token = *token
+	}
+	if *behindProxy {
+		serveCfg.BehindProxy = true
+	}
+	mode, err := serve.NormalizeAuthMode(serveCfg.AuthMode)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 1
+	}
+	serveCfg.AuthMode = mode
+	if *password != "" && serveCfg.AuthMode == "password" {
+		// Hash the password at startup so the config never stores plaintext.
+		// If a PasswordHash is already set in config, the CLI password overrides it.
+		h, err := serve.HashPassword(*password)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "failed to hash password:", err)
+			return 1
+		}
+		serveCfg.PasswordHash = h
+	}
+	if serveCfg.AuthMode == "password" && strings.TrimSpace(serveCfg.PasswordHash) == "" {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "auth mode password requires --password or serve.password_hash")
+		return 1
+	}
+
 	var resumeSession *agent.Session
 	if *resume != "" {
 		var err error
@@ -419,6 +472,16 @@ func runServe(args []string) int {
 		}
 	}
 	*model = modelForResumePath(*model, *resume, cfg)
+	// Serve always uses the user's global default_model, ignoring any
+	// project-level override, so the model choice stays consistent across
+	// projects and matches the user's account-level preference.
+	if *model == "" {
+		if uc := config.UserConfigPath(); uc != "" {
+			if userCfg := config.LoadForEdit(uc); userCfg != nil && userCfg.DefaultModel != "" {
+				*model = userCfg.DefaultModel
+			}
+		}
+	}
 	ctrl, err := setup(ctx, *model, *maxSteps, true, bc)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -433,11 +496,27 @@ func runServe(args []string) int {
 		ctrl.SetSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
 	}
 
+	srv := serve.New(ctrl, bc, serveCfg)
 	fmt.Printf("reasonix serve — %s on http://%s\n", ctrl.Label(), *addr)
+	if srv.AuthMode() == "token" {
+		fmt.Printf("  auth: token\n")
+		fmt.Printf("  share: http://%s/?token=%s\n", *addr, srv.AuthToken())
+	} else if srv.AuthMode() == "password" {
+		fmt.Printf("  auth: password (login at http://%s/login)\n", *addr)
+	}
+	// Diagnostic: check whether balance endpoint is reachable
+	if b, err := ctrl.Balance(context.Background()); err != nil {
+		fmt.Fprintf(os.Stderr, "  balance: error — %v\n", err)
+	} else if b == nil {
+		fmt.Fprintf(os.Stderr, "  balance: not configured (no balance_url for this provider)\n")
+	} else {
+		fmt.Printf("  balance: %s\n", b.Display())
+	}
+
 	// Use graceful shutdown so SIGINT/SIGTERM drain active connections.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := serve.New(ctrl, bc).RunGraceful(ctx, *addr); err != nil {
+	if err := srv.RunGraceful(ctx, *addr); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
 	}

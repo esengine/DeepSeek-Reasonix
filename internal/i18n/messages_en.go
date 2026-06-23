@@ -370,7 +370,7 @@ Usage:
   reasonix [--model NAME] [-c|--continue] [--resume] [--yolo] [--dir PATH]   interactive session (multi-turn; -c resumes the latest, --resume picks one)
   reasonix run  [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] <task>   run one task and exit
   reasonix review [--base BRANCH] [--commit SHA] [--model NAME]  AI-powered code review on local diffs
-  reasonix serve [--model NAME] [--addr HOST:PORT]      serve the session over HTTP+SSE (browser client at /)
+  reasonix serve [--model NAME] [--addr HOST:PORT] [--auth none|token|password] [--token STR] [--password STR] [--hash-password]  serve over HTTP+SSE (with optional auth)
   reasonix acp [--model NAME]                           serve Agent Client Protocol over stdio (also: reasonix --acp)
   reasonix setup [path]                                 interactive config wizard; writes reasonix.toml (+ .env)
   reasonix config auto-plan [off|on]                    configure automatic plan mode

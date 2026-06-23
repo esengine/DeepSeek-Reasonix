@@ -50,6 +50,7 @@ const R2_DESKTOP = `https://dl.reasonix.io/desktop-${desktopVersion}`;
         <a href="#desktop"><span class="l-en">Desktop app</span><span class="l-zh">桌面端下载</span></a>
         <a href="#macos-quarantine"><span class="l-en">macOS warning</span><span class="l-zh">macOS 拦截处理</span></a>
         <a href="#quickstart"><span class="l-en">Quick start</span><span class="l-zh">快速上手</span></a>
+        <a href="#serve"><span class="l-en">Web frontend</span><span class="l-zh">Web 前端</span></a>
         <a href="#config"><span class="l-en">Configuration</span><span class="l-zh">配置</span></a>
       </div>
       <div class="side-group">
@@ -145,6 +146,34 @@ reasonix</div>
 <span class="a">›</span> why is the worker leaking memory?</div>
       <p><span class="l-en">Run <code>/init</code> when you want project memory, then leave the session running — context is append-only, so every new turn starts from a cache hit instead of a cold start.</span><span class="l-zh">需要项目记忆时运行 <code>/init</code>,然后让会话持续运行——上下文只追加,每一轮都从缓存命中开始,而不是冷启动。</span></p>
 
+      <h2 id="serve"><span class="l-en">Web frontend</span><span class="l-zh">Web 前端</span></h2>
+      <p><span class="l-en"><code>reasonix serve</code> starts the same local Reasonix engine behind a browser UI. Use it when you want a desktop-style surface without installing the desktop app, when running Reasonix on a remote development box through a tunnel, or when you want a shareable view of a live session.</span><span class="l-zh"><code>reasonix serve</code> 会用同一个本地 Reasonix 引擎启动浏览器 UI。适合不安装桌面端但想用可视化界面、在远程开发机上通过 tunnel 使用,或把当前会话临时共享给浏览器查看。</span></p>
+      <div class="codeblock"><button data-copy="cd your-project && reasonix serve">Copy</button>cd your-project
+reasonix serve
+<span class="c"># open http://127.0.0.1:8787</span></div>
+      <div class="web-panel">
+        <span class="desktop-kicker"><span class="l-en">Browser UI</span><span class="l-zh">浏览器界面</span></span>
+        <h3><span class="l-en">Chat, approvals, goals, todos, and balance</span><span class="l-zh">聊天、审批、Goal、Todo 与余额</span></h3>
+        <ul class="desktop-feature-list">
+          <li><span class="l-en">Use chat, tool approvals, session history, rewind, fork, summarize, model switching, and reasoning-effort controls from the browser.</span><span class="l-zh">在浏览器里使用聊天、工具审批、会话历史、rewind、fork、summarize、模型切换与 reasoning effort 控件。</span></li>
+          <li><span class="l-en">Start or inspect Goal work, and follow the live todo panel fed by the <code>todo_write</code> tool.</span><span class="l-zh">启动或查看 Goal,并跟随由 <code>todo_write</code> 工具驱动的实时 Todo 面板。</span></li>
+          <li><span class="l-en">Show provider balance when configured; pass <code>--model</code>, <code>--max-steps</code>, or <code>--resume</code> for one-off launches.</span><span class="l-zh">已配置 provider 时显示余额；临时启动可传 <code>--model</code>、<code>--max-steps</code> 或 <code>--resume</code>。</span></li>
+        </ul>
+      </div>
+      <p><span class="l-en">The default listen address is <code>127.0.0.1:8787</code> with <code>auth_mode = "none"</code>. Keep that for local-only use. If the server is reachable from another machine, enable auth before sharing the URL.</span><span class="l-zh">默认监听 <code>127.0.0.1:8787</code>,认证模式是 <code>auth_mode = "none"</code>。这个默认值只适合本机使用；如果其他机器能访问,请先开启认证再分享 URL。</span></p>
+      <div class="codeblock"><button data-copy="reasonix serve --auth token">Copy</button><span class="c"># token auth prints a share URL with ?token=...</span>
+reasonix serve --auth token
+reasonix serve --addr 0.0.0.0:8787 --auth token
+
+<span class="c"># password auth can use a startup password or a stored bcrypt hash</span>
+reasonix serve --auth password --password 'temporary-password'
+reasonix serve --hash-password --password 'strong-password'</div>
+      <div class="codeblock"><span class="c"># ~/.reasonix/config.toml</span>
+[serve]
+auth_mode = "password" <span class="c"># none|token|password</span>
+password_hash = "$2a$12$..."
+behind_proxy = true    <span class="c"># only behind a trusted reverse proxy</span></div>
+
       <h2 id="config"><span class="l-en">Configuration</span><span class="l-zh">配置</span></h2>
       <p><span class="l-en">Reasonix talks directly to configured OpenAI-compatible providers such as DeepSeek or MiMo with your own API keys. Config files name an environment variable through <code>api_key_env</code>; new keys saved by Reasonix go to the OS credential store when available, with a Reasonix-owned file fallback.</span><span class="l-zh">Reasonix 使用你自己的 API Key 直连配置好的 OpenAI-compatible provider,例如 DeepSeek 或 MiMo。配置文件通过 <code>api_key_env</code> 指定环境变量；Reasonix 保存的新密钥优先进入系统密钥库,不可用时使用 Reasonix 自己的文件 fallback。</span></p>
       <div class="codeblock"><button data-copy="export DEEPSEEK_API_KEY=sk-...">Copy</button>export DEEPSEEK_API_KEY=sk-...</div>
@@ -181,6 +210,7 @@ headers = &#123; Authorization = "Bearer $&#123;STRIPE_KEY&#125;" &#125;</div>
       <div class="codeblock">reasonix setup            <span class="c"># first-run: pick provider + keys</span>
 reasonix                  <span class="c"># interactive session, prompts before writes</span>
 reasonix run "&lt;task&gt;"     <span class="c"># autonomous run, honours deny rules</span>
+reasonix serve            <span class="c"># browser UI at 127.0.0.1:8787</span>
 reasonix bot doctor       <span class="c"># check saved IM bot connections</span></div>
       <p><span class="l-en">Inside a session, slash commands run locally — <code>/help</code> lists them all:</span><span class="l-zh">会话中,斜杠命令在本地运行——<code>/help</code> 列出全部:</span></p>
       <div class="codeblock">/compact   /new      /clear    /rewind   /tree
@@ -221,6 +251,10 @@ allow = ["Bash(go test:*)"]
 
 [sandbox]
 workspace_root = ""                          <span class="c"># empty = current dir</span>
+
+[serve]
+auth_mode = "none"                           <span class="c"># none|token|password</span>
+behind_proxy = false                         <span class="c"># true only behind trusted proxy</span>
 
 [[plugins]]
 name    = "example"

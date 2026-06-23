@@ -179,3 +179,10 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # account_id = "default"
 # token_env = "WEIXIN_BOT_TOKEN"
 # api_base  = "https://ilinkai.weixin.qq.com"   # Tencent iLink Bot API base URL
+
+[serve]
+# Authentication for the HTTP serve frontend (reasonix serve).
+# auth_mode = "none"      # none | token | password
+# token      = ""          # pre-shared token for auth_mode = "token" (auto-generated if empty)
+# password_hash = ""       # bcrypt hash for auth_mode = "password". Generate with: reasonix serve --hash-password <password>
+# behind_proxy = false      # set true when behind a trusted reverse proxy (nginx, Caddy, etc.) that sets X-Forwarded-* headers

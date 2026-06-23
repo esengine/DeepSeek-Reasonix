@@ -138,6 +138,32 @@ func TestServeResumeRejectsCleanupPending(t *testing.T) {
 	}
 }
 
+func TestServeRejectsUnknownAuthMode(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	errOut := captureStderr(t, func() {
+		if rc := runServe([]string{"--auth", "tokne", "--addr", "127.0.0.1:0"}); rc != 1 {
+			t.Fatalf("serve --auth tokne rc = %d, want 1", rc)
+		}
+	})
+	if !strings.Contains(errOut, "auth mode must be none, token, or password") {
+		t.Fatalf("serve --auth tokne stderr = %q, want auth mode validation", errOut)
+	}
+}
+
+func TestServePasswordAuthRequiresPasswordMaterial(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	errOut := captureStderr(t, func() {
+		if rc := runServe([]string{"--auth", "password", "--addr", "127.0.0.1:0"}); rc != 1 {
+			t.Fatalf("serve --auth password without password rc = %d, want 1", rc)
+		}
+	})
+	if !strings.Contains(errOut, "auth mode password requires --password or serve.password_hash") {
+		t.Fatalf("serve --auth password stderr = %q, want password material validation", errOut)
+	}
+}
+
 func TestReserveNativeScrollbackFrameWritesOnlyNewlines(t *testing.T) {
 	var b bytes.Buffer
 	reserveNativeScrollbackFrame(&b, 3)

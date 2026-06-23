@@ -12,6 +12,7 @@
 ## Contents
 
 - [Configuration](#configuration)
+- [Serve web frontend](#serve-web-frontend)
 - [Configuration paths](./CONFIG_PATHS.md)
 - [Reasoning language](./REASONING_LANGUAGE.md)
 - [Keyboard shortcuts](#keyboard-shortcuts)
@@ -86,12 +87,62 @@ allow = ["Bash(go test:*)"]                  # never prompted
 # workspace_root = ""          # file-writers confined here; empty = current dir
 # allow_write    = ["/tmp"]    # extra dirs write_file/edit_file/multi_edit/move_file may touch
 
+[serve]
+auth_mode = "none"             # none|token|password; use auth before binding beyond localhost
+# token = ""                   # optional fixed token; empty token mode generates one at startup
+# password_hash = ""           # bcrypt hash generated with reasonix serve --hash-password --password '...'
+# behind_proxy = false         # true only behind a trusted reverse proxy
+
 [[plugins]]
 name    = "example"
 command = "reasonix-plugin-example"
 ```
 
 For the full schema and every field's contract, see [`SPEC.md` §5](./SPEC.md#5-configuration-toml).
+
+## Serve web frontend
+
+`reasonix serve` starts the same local engine behind a browser UI. Use it when
+you want a desktop-style surface without installing the desktop app, when running
+Reasonix on a remote development box through a tunnel, or when you want a
+shareable view of a live session.
+
+```bash
+cd your-project
+reasonix serve
+# open http://127.0.0.1:8787
+```
+
+By default it listens on `127.0.0.1:8787` with `auth_mode = "none"`. Keep that
+default for local-only use. If you bind outside loopback, expose it through a
+tunnel, or put it behind a reverse proxy, enable authentication before sharing
+the URL:
+
+```bash
+reasonix serve --auth token
+reasonix serve --addr 0.0.0.0:8787 --auth token
+reasonix serve --auth password --password 'temporary-password'
+```
+
+Token mode prints a share URL with `?token=...`; pass `--token` or set
+`[serve].token` to reuse a stable token. Password mode requires either
+`--password` at startup or a stored bcrypt hash:
+
+```bash
+reasonix serve --hash-password --password 'strong-password'
+
+# ~/.reasonix/config.toml
+[serve]
+auth_mode = "password" # none|token|password
+password_hash = "$2a$12$..."
+behind_proxy = true    # only behind a trusted reverse proxy
+```
+
+The web UI exposes chat, tool approvals, session history, rewind/fork/summarize,
+model and reasoning-effort controls, Goal, a live todo panel fed by the
+`todo_write` tool, and provider balance when configured. Use `--model`,
+`--max-steps`, or `--resume` for one-off launches; otherwise `serve` uses the
+user-global `default_model`.
 
 ## Keyboard shortcuts
 
