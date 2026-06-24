@@ -4363,7 +4363,7 @@ a[href] {
   transition: opacity 0.12s;
 }
 .code-block__copy:hover,
-.code:hover .code-block__copy {
+.code-block__wrap:hover .code-block__copy {
   opacity: 1;
 }
 .code-block__wrap {
@@ -24603,8 +24603,8 @@ a[href] {
   word-break: break-word;
 }
 
-.app--creation .msg--assistant .md .code:not([data-lang]) .code-block__copy,
-:root[data-theme-style] .app--creation .msg--assistant .md .code:not([data-lang]) .code-block__copy {
+.app--creation .msg--assistant .md .code:not([data-lang]) + .code-block__copy,
+:root[data-theme-style] .app--creation .msg--assistant .md .code:not([data-lang]) + .code-block__copy {
   top: 2px;
   right: 2px;
   color: color-mix(in srgb, var(--fg-faint) 58%, var(--bg));
@@ -24672,16 +24672,16 @@ a[href] {
   content: ">";
 }
 
-.app--creation .msg--assistant .md .code[data-lang="bash"] .code-block__copy,
-.app--creation .msg--assistant .md .code[data-lang="shell"] .code-block__copy,
-.app--creation .msg--assistant .md .code[data-lang="sh"] .code-block__copy,
-.app--creation .msg--assistant .md .code[data-lang="powershell"] .code-block__copy,
-.app--creation .msg--assistant .md .code[data-lang="pwsh"] .code-block__copy,
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="bash"] .code-block__copy,
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="shell"] .code-block__copy,
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="sh"] .code-block__copy,
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="powershell"] .code-block__copy,
-:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="pwsh"] .code-block__copy {
+.app--creation .msg--assistant .md .code[data-lang="bash"] + .code-block__copy,
+.app--creation .msg--assistant .md .code[data-lang="shell"] + .code-block__copy,
+.app--creation .msg--assistant .md .code[data-lang="sh"] + .code-block__copy,
+.app--creation .msg--assistant .md .code[data-lang="powershell"] + .code-block__copy,
+.app--creation .msg--assistant .md .code[data-lang="pwsh"] + .code-block__copy,
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="bash"] + .code-block__copy,
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="shell"] + .code-block__copy,
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="sh"] + .code-block__copy,
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="powershell"] + .code-block__copy,
+:root[data-theme-style] .app--creation .msg--assistant .md .code[data-lang="pwsh"] + .code-block__copy {
   top: 5px;
   right: 5px;
   color: color-mix(in srgb, var(--fg-faint) 58%, var(--bg));
