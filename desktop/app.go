@@ -141,6 +141,8 @@ type App struct {
 
 	metrics atomic.Pointer[metricsAggregator] // non-nil only when desktop.metrics is opted in; swapped live by SetDesktopMetrics
 
+	usageTracker atomic.Pointer[DesktopUsageTracker] // always-on usage recorder
+
 	runtimeEvents asyncRuntimeEmitter
 
 	// promptHistoryTape is a lazy, cursor-addressed view of prompt history. It
@@ -360,6 +362,13 @@ func (a *App) startup(ctx context.Context) {
 	if cfg, err := config.Load(); err == nil && cfg.DesktopMetrics() && version != "dev" {
 		a.metrics.Store(newMetricsAggregator(config.MemoryUserDir()))
 		a.recordSettingsMetricsSnapshot(cfg)
+	}
+
+	// Always-on usage tracker
+	if t, err := newDesktopUsageTracker(); err == nil {
+		a.usageTracker.Store(t)
+	} else {
+		slog.Error("[desktop] usage tracker failed", "err", err)
 	}
 
 	a.heartbeat = newHeartbeatEngine(a)
@@ -645,6 +654,9 @@ func (a *App) snapshotAllTabs() {
 func (a *App) shutdown(context.Context) {
 	if a.heartbeat != nil {
 		a.heartbeat.Stop()
+	}
+	if t := a.usageTracker.Load(); t != nil {
+		t.Close()
 	}
 	a.stopBotRuntime()
 	a.stopTray()
@@ -1474,6 +1486,7 @@ func (a *App) clearActiveSessionRuntime(tab *WorkspaceTab, oldCtrl control.Sessi
 		TokenMode:                currentTabTokenMode(tab),
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
+		UsageStore:               a.usageStoreForBoot(),
 	})
 	if err != nil {
 		if teardownTimedOut {
@@ -6563,6 +6576,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 		TokenMode:                currentTabTokenMode(tab),
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
+		UsageStore:               a.usageStoreForBoot(),
 	})
 	if err != nil {
 		return err
@@ -6665,6 +6679,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 		TokenMode:                currentTabTokenMode(tab),
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
+		UsageStore:               a.usageStoreForBoot(),
 	})
 	if err != nil {
 		return err
@@ -6743,6 +6758,7 @@ func (a *App) SetTokenModeForTab(tabID, mode string) error {
 		TokenMode:                mode,
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
+		UsageStore:               a.usageStoreForBoot(),
 	})
 	if err != nil {
 		return err

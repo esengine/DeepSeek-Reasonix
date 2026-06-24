@@ -715,6 +715,10 @@ func (s *tabEventSink) Emit(e event.Event) {
 		case event.TurnDone:
 			s.recordTurnDone()
 		}
+		// Usage tracker (SQLite-backed, always on)
+		if t := s.app.usageTracker.Load(); t != nil {
+			t.Observe(e, s.tabID)
+		}
 		if m := s.app.metrics.Load(); m != nil {
 			m.observe(e)
 			if e.Kind == event.TurnDone {
@@ -2276,6 +2280,7 @@ func (a *App) buildTabControllerWithContext(tab *WorkspaceTab, loadedSession loa
 		TokenMode:                currentTabTokenMode(tab),
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
+		UsageStore:               a.usageStoreForBoot(),
 	})
 	if err != nil {
 		a.mu.Lock()
