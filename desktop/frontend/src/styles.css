@@ -23297,6 +23297,14 @@ a[href] {
   grid-row: 1;
 }
 
+/* Opening the right dock must not animate the workspace column from 0 width;
+   WebKit can mount the overview panel at zero inline-size and leave stat text
+   permanently invisible until the next full reload. */
+.app--creation .layout.layout--workspace-open,
+.app--creation .layout.layout--workspace-open.layout--sidebar-collapsed {
+  transition: grid-template-columns 0s, min-width 0s;
+}
+
 .app--creation .layout--creation-chrome-hidden .sidebar-resizer,
 :root[data-theme-style] .app--creation .layout--creation-chrome-hidden .sidebar-resizer {
   top: 0;
@@ -23957,7 +23965,7 @@ a[href] {
 .app--creation .sidebar,
 :root[data-theme-style] .app--creation .sidebar {
   --project-tree-row-radius: 9px;
-  padding: 18px 12px 14px;
+  padding: 38px 12px 14px;
   border-right: 0;
   background:
     radial-gradient(110% 70% at 18% 0%, color-mix(in srgb, var(--accent) 5%, transparent) 0%, transparent 52%),
@@ -24466,8 +24474,8 @@ a[href] {
 
 .app--creation .transcript::-webkit-scrollbar,
 :root[data-theme-style] .app--creation .transcript::-webkit-scrollbar {
-  width: 2px !important;
-  height: 2px !important;
+  width: 6px !important;
+  height: 6px !important;
   background: transparent !important;
 }
 
@@ -25550,6 +25558,7 @@ a[href] {
 
 .app--creation .context-panel__overview {
   gap: 10px;
+  min-width: 0;
 }
 
 .app--creation .context-panel__usage,
@@ -25557,13 +25566,14 @@ a[href] {
 :root[data-theme-style] .app--creation .context-panel__usage,
 :root[data-theme-style] .app--creation .context-panel__section {
   gap: 12px;
+  min-width: 0;
   padding: 11px;
+  overflow: hidden;
   border: 1px solid var(--creation-panel-border);
   border-radius: 12px;
   background: var(--creation-panel-card);
   box-shadow: var(--creation-panel-shadow);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  animation: none;
 }
 
 .app--creation .context-panel__section {
@@ -25644,7 +25654,7 @@ a[href] {
 .app--creation .context-panel__mini-stat {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
   align-items: baseline;
   gap: 12px;
   color: color-mix(in srgb, var(--fg-dim) 84%, transparent);
@@ -25661,6 +25671,12 @@ a[href] {
 }
 
 .app--creation .context-panel__mini-stat strong {
+  min-width: 0;
+  max-width: 100%;
+  justify-self: end;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--fg);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -25708,8 +25724,6 @@ a[href] {
   border-radius: 10px;
   background: var(--creation-panel-card);
   box-shadow: var(--creation-panel-shadow);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
 }
 
 .app--creation .context-panel__metric span,
