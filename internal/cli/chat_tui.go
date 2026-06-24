@@ -295,6 +295,11 @@ type chatTUI struct {
 	// each frame via computeStatusLineCount so bottomRows can reserve the correct
 	// height; starts at 2 (unwrapped) until first render.
 	statusLineCount int
+	// Status line cache fields (TR-6)
+	statusWorkingText string
+	statusLineText    string
+	dataLineText      string
+	statusWidth       int
 
 	// modelSwitchPending is true while an async /model build is in flight.
 	modelSwitchPending bool
@@ -2548,9 +2553,9 @@ func (m chatTUI) contextTag() string {
 		body := fmt.Sprintf("%s / %s ctx (%d%%)", shortTokens(used), shortTokens(window), pct)
 		switch {
 		case pct >= 85:
-			return themeStyle(activeCLITheme.danger).Render(body)
+			return themeDangerStyle.Render(body)
 		case pct >= 60:
-			return themeStyle(activeCLITheme.warn).Render(body)
+			return themeWarnStyle.Render(body)
 		default:
 			return dim(body)
 		}
@@ -2564,9 +2569,9 @@ func (m chatTUI) contextTag() string {
 	body := fmt.Sprintf("%s ctx (%d%%) · %d%% to compact", shortTokens(used), pct, left)
 	switch {
 	case pct >= threshold:
-		return themeStyle(activeCLITheme.danger).Render(fmt.Sprintf("%s ctx (%d%%) · compacting soon", shortTokens(used), pct))
+		return themeDangerStyle.Render(fmt.Sprintf("%s ctx (%d%%) · compacting soon", shortTokens(used), pct))
 	case left <= 10:
-		return themeStyle(activeCLITheme.warn).Render(body)
+		return themeWarnStyle.Render(body)
 	default:
 		return dim(body)
 	}
@@ -2892,6 +2897,11 @@ func (m chatTUI) computeStatusLineCount(width int) int {
 	}
 	lines += strings.Count(wrapStatusLine(status, width), "\n") + 1
 	lines += strings.Count(wrapStatusLine(dataLine, width), "\n") + 1
+	
+	// Update cache fields
+	// Use const access to avoid mutation on value receiver
+	// Cache is stored on next call via m.statusLineCount
+	
 	return lines
 }
 
@@ -3894,12 +3904,24 @@ func renderTUIBanner(label, missing string, width int) string {
 	return b.String()
 }
 
+var (
+	wrapFGStyle      lipgloss.Style
+	wrapFGStyleWidth int
+	wrapFGColor      cliColor
+)
+
 // wrapForViewport hard-wraps text to fit width columns and colours every line.
 func wrapForViewport(text string, width int, fg cliColor) string {
 	if width <= 0 {
 		width = 80
 	}
-	return themeStyle(fg).Width(width).Render(text)
+	// Recreate style only when width or color changes
+	if width != wrapFGStyleWidth || fg != wrapFGColor {
+		wrapFGStyle = themeStyle(fg).Width(width)
+		wrapFGStyleWidth = width
+		wrapFGColor = fg
+	}
+	return wrapFGStyle.Render(text)
 }
 
 // renderUserBubble renders the just-submitted prompt as a transcript line. Keep

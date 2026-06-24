@@ -2800,33 +2800,44 @@ func desktopMCPMigrationRoots(tabs desktopTabsFile) []string {
 var (
 	projectsCache     desktopProjectFile
 	projectsCacheTime time.Time
+	projectsCacheMu   sync.RWMutex
 )
 
 func loadProjectsFile() desktopProjectFile {
 	// Use cached value if it's fresh (5 seconds expiry)
+	projectsCacheMu.RLock()
 	if !projectsCacheTime.IsZero() && time.Since(projectsCacheTime) < 5*time.Second {
-		return projectsCache
+		cached := projectsCache
+		projectsCacheMu.RUnlock()
+		return cached
 	}
+	projectsCacheMu.RUnlock()
 
 	path := filepath.Join(desktopConfigDir(), desktopProjectsFile)
 	b, err := os.ReadFile(path)
 	if err != nil {
 		// Clear cache on error
+		projectsCacheMu.Lock()
 		projectsCache = desktopProjectFile{}
 		projectsCacheTime = time.Time{}
+		projectsCacheMu.Unlock()
 		return desktopProjectFile{}
 	}
 	var f desktopProjectFile
 	if err := json.Unmarshal(b, &f); err != nil {
 		// Clear cache on invalid JSON
+		projectsCacheMu.Lock()
 		projectsCache = desktopProjectFile{}
 		projectsCacheTime = time.Time{}
+		projectsCacheMu.Unlock()
 		return desktopProjectFile{}
 	}
 	normalized := normalizeProjectsFile(f)
 	// Update cache
+	projectsCacheMu.Lock()
 	projectsCache = normalized
 	projectsCacheTime = time.Now()
+	projectsCacheMu.Unlock()
 	return normalized
 }
 

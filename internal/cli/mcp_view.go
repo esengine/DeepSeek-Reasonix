@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mattn/go-runewidth"
+
 	"reasonix/internal/plugin"
 )
 
@@ -166,7 +168,7 @@ func compactEnd(s string, maxWidth int) string {
 	var out strings.Builder
 	totalWidth := 0
 	for _, r := range s {
-		w := visibleWidth(string(r))
+		w := runewidth.RuneWidth(r)
 		if totalWidth + w > maxWidth {
 			break
 		}
@@ -195,7 +197,7 @@ func takeLeftWidth(s string, maxWidth int) string {
 	var out strings.Builder
 	totalWidth := 0
 	for _, r := range s {
-		w := visibleWidth(string(r))
+		w := runewidth.RuneWidth(r)
 		if totalWidth + w > maxWidth {
 			break
 		}
@@ -211,7 +213,7 @@ func takeRightWidth(s string, maxWidth int) string {
 	runes := []rune(s)
 	for i := len(runes)-1; i >= 0; i-- {
 		r := runes[i]
-		w := visibleWidth(string(r))
+		w := runewidth.RuneWidth(r)
 		if totalWidth + w > maxWidth {
 			break
 		}
