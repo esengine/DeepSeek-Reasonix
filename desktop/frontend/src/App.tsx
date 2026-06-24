@@ -1123,6 +1123,13 @@ export default function App() {
     () => tabMetas.find((tab) => tab.id === activeTabId) ?? tabMetas.find((tab) => tab.active),
     [activeTabId, tabMetas],
   );
+  // Derive a session key that changes whenever the session changes, even
+  // on the same tab (single-surface workbench/creation mode).
+  const sessionKey = useMemo(() => {
+    if (!activeTab) return activeTabId ?? "";
+    return activeTab.sessionPath || activeTab.topicId || activeTab.id;
+  }, [activeTab]);
+
   const sidebarImDetailConnection = useMemo(
     () => sidebarImConnections.find((connection) => connection.id === sidebarImDetailConnectionId) ?? null,
     [sidebarImConnections, sidebarImDetailConnectionId],
@@ -3115,6 +3122,7 @@ export default function App() {
               turnTokens={state.turnTokens}
               retry={state.retry}
               transientDismissSignal={transientOverlayDismissSignal}
+              sessionKey={sessionKey}
             />
             <StatusBar
               context={state.context}

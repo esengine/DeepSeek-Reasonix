@@ -43,6 +43,14 @@ interface WorkspaceReference {
   isDir?: boolean;
 }
 
+/** Full pending state saved per session: text + context attachments */
+interface PendingDraft {
+  text: string;
+  attachments: Attachment[];
+  workspaceRefs: WorkspaceReference[];
+  sessionRefs: SessionReference[];
+}
+
 const LONG_PASTE_MIN_CHARS = 2000;
 const LONG_PASTE_MIN_LINES = 20;
 const COMPOSER_MIN_HEIGHT = 104;
@@ -350,6 +358,7 @@ export function Composer({
   turnTokens,
   retry,
   transientDismissSignal,
+  sessionKey,
 }: {
   running: boolean;
   collaborationMode: CollaborationMode;
@@ -387,6 +396,7 @@ export function Composer({
   turnTokens?: number;
   retry?: { attempt: number; max: number };
   transientDismissSignal?: number;
+  sessionKey?: string;
 }) {
   const { t, locale } = useI18n();
   const { showToast } = useToast();
@@ -449,6 +459,14 @@ export function Composer({
   cwdRef.current = cwd;
   const attachmentDedupRef = useRef(new DedupIndex());
   const attachmentDedupKeysRef = useRef<Record<string, AttachmentDedupKey>>({});
+  // Per-session draft persistence: save input text per session so switching
+  // away and back preserves what the user was typing (issue #4902).
+  // Uses sessionKey (topicId/sessionPath) so it works in all three layout
+  // modes: classic (multi-tab), workbench & creation (single-surface).
+  const draftsByTabRef = useRef<Record<string, PendingDraft>>({});
+  const prevSessionKeyRef = useRef<string | undefined>(sessionKey);
+  const textRef = useRef(text);
+  textRef.current = text;
 
   const clearNativeClipboardPasteTimer = () => {
     if (nativeClipboardPasteTimerRef.current === null) return;
@@ -466,6 +484,37 @@ export function Composer({
     }
     wasRunning.current = running;
   }, [running, text]);
+
+  // Per-session draft persistence: save text + context attachments for the
+  // outgoing session and restore them for the incoming session whenever
+  // sessionKey changes.
+  // sessionKey changes on tab switch (classic) AND topic switch on the
+  // same tab (workbench/creation single-surface mode).
+  useEffect(() => {
+    const prev = prevSessionKeyRef.current;
+    if (prev === sessionKey) return;
+    if (prev !== undefined) {
+      draftsByTabRef.current[prev] = { text: textRef.current, attachments, workspaceRefs, sessionRefs };
+    }
+    if (sessionKey !== undefined) {
+      const draft = draftsByTabRef.current[sessionKey];
+      if (draft !== undefined) {
+        setTextCaretEnd(draft.text);
+        setAttachments(draft.attachments);
+        setWorkspaceRefs(draft.workspaceRefs);
+        setSessionRefs(draft.sessionRefs);
+      } else if (prev !== undefined) {
+        setTextCaretEnd("");
+        setAttachments([]);
+        setWorkspaceRefs([]);
+        setSessionRefs([]);
+      }
+    }
+    prevSessionKeyRef.current = sessionKey;
+    // deps: setTextCaretEnd only uses setText (stable) and taRef (ref),
+    // so excluding it from deps is safe.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionKey]);
 
   // --- slash commands (whole-input "/token") ---
   const [commands, setCommands] = useState<CommandInfo[]>([]);
