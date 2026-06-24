@@ -2,7 +2,7 @@
   "witch_self_save_n1": true,
   "guard_witch_overlap_lethal": false,
   "reveal_role_on_death": false,
-  "wolf_explode": false,
+  "wolf_explode": true,
   "wolf_self_kill": false,
   "hunter_active_shot": false,
   "mechanical_wolf": false,
@@ -13,5 +13,6 @@
   "role_witch": true,
   "role_hunter": true,
   "role_guard": true,
-  "role_idiot": true
+  "role_idiot": true,
+  "role_wolf_king": true
 }
