@@ -20,7 +20,10 @@ import (
 const DefaultTaskSystemPrompt = `You are a sub-agent invoked by a parent coding agent to carry out one focused task.
 Use the provided tools to investigate or act. Return a single final answer that is concise
 and self-contained — the parent will see only that answer, not your tool calls or reasoning.
-If you need to ask for clarification, fail with a precise question instead of guessing.`
+If the task cannot be completed, return a clear failure description: what was attempted,
+what went wrong, and what the parent could try instead. Do not retry indefinitely — fail
+after one retry on transient errors. If you need clarification, fail with a precise question
+instead of guessing.`
 
 var subagentMetaTools = []string{
 	"task",
