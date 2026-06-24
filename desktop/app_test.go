@@ -2390,6 +2390,111 @@ func TestDeleteSessionCancelsActiveRuntime(t *testing.T) {
 	}
 }
 
+func TestDeleteLastTopicSessionFallbackDoesNotReuseDeletedTopic(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_delete_last"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "Delete last"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	path := writeTopicSession(t, dir, "delete-last.jsonl", topicID, "Delete last", projectRoot)
+	ctrl := controllerWithContent(t, path)
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"only": {
+				ID:            "only",
+				Scope:         "project",
+				WorkspaceRoot: projectRoot,
+				TopicID:       topicID,
+				TopicTitle:    "Delete last",
+				Ctrl:          ctrl,
+				Ready:         true,
+				disabledMCP:   map[string]ServerView{},
+			},
+		},
+		tabOrder:    []string{"only"},
+		activeTabID: "only",
+	}
+
+	if err := app.DeleteSession(path); err != nil {
+		t.Fatalf("DeleteSession(last topic session): %v", err)
+	}
+
+	if _, ok := app.tabs["only"]; ok {
+		t.Fatalf("deleted topic session tab should be removed")
+	}
+	for id, tab := range app.tabs {
+		if tab.TopicID == topicID {
+			t.Fatalf("fallback tab %q reused deleted topic %q", id, topicID)
+		}
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "delete-last.jsonl", "delete-last.jsonl")
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("deleted session should be moved to trash: %v", err)
+	}
+}
+
+func TestDeleteSessionFallbackKeepsTopicWithRemainingHistory(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_delete_keep_history"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "Keep history"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	path := writeTopicSession(t, dir, "delete-one.jsonl", topicID, "Keep history", projectRoot)
+	remainingPath := writeTopicSessionWithPrompt(t, dir, "remaining.jsonl", topicID, "Keep history", projectRoot, "remaining turn", time.Now().Add(-time.Minute))
+	ctrl := controllerWithContent(t, path)
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"only": {
+				ID:            "only",
+				Scope:         "project",
+				WorkspaceRoot: projectRoot,
+				TopicID:       topicID,
+				TopicTitle:    "Keep history",
+				Ctrl:          ctrl,
+				Ready:         true,
+				disabledMCP:   map[string]ServerView{},
+			},
+		},
+		tabOrder:    []string{"only"},
+		activeTabID: "only",
+	}
+
+	if err := app.DeleteSession(path); err != nil {
+		t.Fatalf("DeleteSession(topic with remaining history): %v", err)
+	}
+
+	found := false
+	for _, tab := range app.tabs {
+		if tab.TopicID == topicID {
+			found = true
+			if got := filepath.Clean(tab.currentSessionPath()); got != filepath.Clean(remainingPath) {
+				t.Fatalf("fallback session path = %q, want remaining history %q", got, remainingPath)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("fallback should keep topic %q when another session remains", topicID)
+	}
+}
+
 func TestDeleteSessionWithStuckJobReturnsAfterSingleGrace(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
