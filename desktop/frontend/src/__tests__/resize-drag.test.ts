@@ -75,6 +75,27 @@ try {
   eq(flushed[flushed.length - 1]?.[1], "600px", "pending final resize waits for animation frame before flush");
   flushUpdater.flush();
   eq(flushed[flushed.length - 1]?.[1], "420px", "flush applies the final resize before React state commits");
+
+  frames.length = 0;
+  const appliedValues: number[] = [];
+  const callbackUpdater = createRafResizeUpdater({
+    target: {
+      style: {
+        setProperty() {
+          // CSS write is covered above; this block checks the synchronized callback contract.
+        },
+      },
+    },
+    cssVar: "--pane-width",
+    onApply(value) {
+      appliedValues.push(value);
+    },
+  });
+  callbackUpdater.schedule(279.7);
+  callbackUpdater.schedule(300.2);
+  eq(appliedValues.length, 0, "live resize callback waits for animation frame");
+  frames[0](0);
+  eq(appliedValues.join(","), "300", "live resize callback receives the applied rounded value");
 } finally {
   globalThis.requestAnimationFrame = originalRequestAnimationFrame;
   globalThis.cancelAnimationFrame = originalCancelAnimationFrame;

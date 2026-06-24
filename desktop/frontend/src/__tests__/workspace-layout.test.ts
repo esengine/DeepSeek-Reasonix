@@ -2,6 +2,7 @@
 
 import {
   availableWorkspacePanelWidth,
+  resolveLiveWorkspacePanelWidth,
   resolveWorkspacePanelWidth,
   workspacePanelAriaMinWidth,
 } from "../lib/workspaceLayout";
@@ -24,6 +25,7 @@ const SIDEBAR_WIDTH = 264;
 const RESIZER_WIDTH = 8;
 const PREVIEW_MIN_WIDTH = 420;
 const PREVIEW_DEFAULT_WIDTH = 660;
+const CHAT_COMFORT_MIN_WIDTH = 560;
 
 console.log("\nworkspace dock layout");
 
@@ -106,6 +108,38 @@ eq(
   }),
   PREVIEW_DEFAULT_WIDTH,
   "maximized panel preserves the saved preferred width",
+);
+
+eq(
+  resolveLiveWorkspacePanelWidth({
+    viewportWidth: 1268,
+    sidebarCollapsed: false,
+    sidebarWidth: 400,
+    chatMinWidth: CHAT_COMFORT_MIN_WIDTH,
+    resizerWidth: RESIZER_WIDTH,
+    open: true,
+    maximized: false,
+    preferredWidth: PREVIEW_MIN_WIDTH,
+    minWidth: PREVIEW_MIN_WIDTH,
+  }),
+  300,
+  "live dock drag clamps the hard minimum to the available dock width",
+);
+
+eq(
+  resolveLiveWorkspacePanelWidth({
+    viewportWidth: 1280,
+    sidebarCollapsed: false,
+    sidebarWidth: 500,
+    chatMinWidth: CHAT_COMFORT_MIN_WIDTH,
+    resizerWidth: RESIZER_WIDTH,
+    open: true,
+    maximized: false,
+    preferredWidth: PREVIEW_DEFAULT_WIDTH,
+    minWidth: PREVIEW_MIN_WIDTH,
+  }),
+  212,
+  "live sidebar drag recomputes dock width from the dragged sidebar width",
 );
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
