@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """roles.py — 狼人杀角色定义、配置加载、角色分配"""
 
-import json, random, shutil
+import json, random
 from pathlib import Path
 
 ROLES = {
@@ -51,21 +51,29 @@ def is_final_battle(s, cfg=None):
     return False, "normal"
 
 DEFAULT_CONFIG = {
-    "witch_self_save_n1": True,
-    "guard_witch_overlap_lethal": False,
-    "wolf_self_kill": False,
-    "wolf_explode": False,
-    "hunter_active_shot": False,
-    "mechanical_wolf": False,
-    "mimic_wolf": False,
-    "double_kill_after_explode": False,
-    "reveal_role_on_death": False,
-    "night_kill_last_words": False,
+    # ── 女巫 ──
+    "witch_self_save_n1": True,          # 首夜可自救
+    # ── 守卫 ──
+    "guard_witch_overlap_lethal": False, # 同守同救不死
+    # ── 狼队 ──
+    "wolf_self_kill": False,             # 狼自刀
+    "wolf_explode": True,                # 狼王自爆
+    "double_kill_after_explode": False,  # 自爆后双刀
+    # ── 猎人 ──
+    "hunter_active_shot": False,         # 主动开枪
+    # ── 机械狼 ──
+    "mechanical_wolf": False,            # 机械狼角色
+    "mimic_wolf": False,                 # 机械狼模仿
+    # ── 通用 ──
+    "reveal_role_on_death": False,       # 死亡翻牌
+    "night_kill_last_words": False,      # 夜死遗言
+    # ── 角色启用 ──
     "role_seer": True,
     "role_witch": True,
     "role_hunter": True,
     "role_guard": True,
     "role_idiot": True,
+    "role_wolf_king": True,              # 狼王
 }
 
 ROLE_CONFIG_MAP = {
@@ -87,7 +95,6 @@ STANDARD_SETUPS = {
 }
 
 CONFIG_FILE = "werewolf_config.json"
-DEFAULT_CONFIG_PATH = Path(__file__).parent / "werewolf_config.json"
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
 
 
@@ -95,15 +102,11 @@ def load_config():
     """加载配置文件，不存在则创建。"""
     path = PROJECT_ROOT / CONFIG_FILE
     if not path.exists():
-        if DEFAULT_CONFIG_PATH.exists():
-            shutil.copy2(str(DEFAULT_CONFIG_PATH), str(path))
-            print(f"[CFG] 已创建默认配置 {CONFIG_FILE}")
-        else:
-            path.write_text(
-                json.dumps(DEFAULT_CONFIG, ensure_ascii=False, indent=2),
-                encoding="utf-8"
-            )
-            print(f"[CFG] 已创建默认配置 {CONFIG_FILE}")
+        path.write_text(
+            json.dumps(DEFAULT_CONFIG, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+        print(f"[CFG] 已创建默认配置 {CONFIG_FILE}")
     try:
         cfg = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
