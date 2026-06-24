@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/buildinfo"
 	"reasonix/internal/provider"
 )
 
@@ -116,8 +115,8 @@ func TestMapStopReason(t *testing.T) {
 }
 
 // TestStreamSendsReasonixUserAgent verifies outbound Messages API requests carry
-// an identifying User-Agent (Reasonix/<version>) so an upstream gateway can
-// attribute the traffic to Reasonix instead of Go's default UA (#5226).
+// an identifying User-Agent so an upstream gateway can attribute the traffic to
+// Reasonix instead of Go's default UA (#5226).
 func TestStreamSendsReasonixUserAgent(t *testing.T) {
 	var gotUA string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -138,11 +137,8 @@ func TestStreamSendsReasonixUserAgent(t *testing.T) {
 	for range ch { // drain
 	}
 
-	if want := buildinfo.UserAgent(); gotUA != want {
-		t.Errorf("User-Agent = %q, want %q", gotUA, want)
-	}
-	if !strings.HasPrefix(gotUA, "Reasonix/") {
-		t.Errorf("User-Agent = %q, want a Reasonix/ prefix", gotUA)
+	if gotUA != "Reasonix" {
+		t.Errorf("User-Agent = %q, want %q", gotUA, "Reasonix")
 	}
 }
 
