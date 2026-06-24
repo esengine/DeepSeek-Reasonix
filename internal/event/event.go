@@ -262,27 +262,18 @@ type Event struct {
 	Err          error      // TurnDone: non-nil on failure
 	Compaction   Compaction // Compaction
 	Guardian     GuardianResult
-	RetryAttempt int // Retrying: 1-based attempt about to be made
-	RetryMax     int // Retrying: total attempts before giving up
-}
+	RetryAttempt int        // Retrying: 1-based attempt about to be made
+	RetryMax     int        // Retrying: total attempts before giving up
 
-// MemoryCompilerStats is intentionally limited to counts and estimated token
-// sizes. It must never carry memory text, prompts, tool output, paths, or IDs.
-type MemoryCompilerStats struct {
-	Injected         bool
-	UsefulIR         bool
-	CompiledTokens   int
-	IROverheadTokens int
-	MemoryReferences int
-	Constraints      int
-	RiskNotes        int
-	ExecutionSteps   int
-	TotalNodes       int
-	HighSignalNodes  int
-	ToolResultNodes  int
-	DecisionNodes    int
-	StrategyCount    int
-	LearningCount    int
+	// The following optional fields are populated by usage.EnrichSink for
+	// Usage events so that downstream consumers (usage tracker, desktop
+	// telemetry) can identify the model, latency, and session without
+	// additional plumbing. Zero values mean "not set" and do not affect
+	// existing sinks.
+	ProviderName string // provider name (e.g. "deepseek"); enrichSink injects
+	ModelName    string // model name (e.g. "deepseek-reasoner"); enrichSink injects
+	LatencyMS    int64  // turn latency in ms (TurnStarted → Usage); enrichSink injects
+	SessionID    string // session path (the .jsonl file); enrichSink injects
 }
 
 // ReadinessAuditSink is an optional sink capability. Sinks that do not care
