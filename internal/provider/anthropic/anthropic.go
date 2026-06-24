@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"reasonix/internal/buildinfo"
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 )
@@ -166,6 +167,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 		httpReq.Header.Set("Accept", "text/event-stream")
 		httpReq.Header.Set("x-api-key", c.apiKey)
 		httpReq.Header.Set("anthropic-version", anthropicVersion)
+		httpReq.Header.Set("User-Agent", buildinfo.UserAgent())
 		return httpReq, nil
 	}
 	resp, err := provider.SendWithRetry(ctx, c.http, c.sendOpts(), newReq)

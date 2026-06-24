@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"reasonix/internal/buildinfo"
 	"reasonix/internal/provider"
 )
 
@@ -110,6 +112,37 @@ func TestMapStopReason(t *testing.T) {
 		if got := mapStopReason(in); got != want {
 			t.Errorf("mapStopReason(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestStreamSendsReasonixUserAgent verifies outbound Messages API requests carry
+// an identifying User-Agent (Reasonix/<version>) so an upstream gateway can
+// attribute the traffic to Reasonix instead of Go's default UA (#5226).
+func TestStreamSendsReasonixUserAgent(t *testing.T) {
+	var gotUA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer srv.Close()
+
+	p, err := New(provider.Config{Name: "anthropic", BaseURL: srv.URL, Model: "claude-opus-4-8", APIKey: "k"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for range ch { // drain
+	}
+
+	if want := buildinfo.UserAgent(); gotUA != want {
+		t.Errorf("User-Agent = %q, want %q", gotUA, want)
+	}
+	if !strings.HasPrefix(gotUA, "Reasonix/") {
+		t.Errorf("User-Agent = %q, want a Reasonix/ prefix", gotUA)
 	}
 }
 

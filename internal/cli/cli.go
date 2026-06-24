@@ -23,6 +23,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
+	"reasonix/internal/buildinfo"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -44,6 +45,9 @@ var (
 
 // Run is the CLI entry point; it returns a process exit code.
 func Run(args []string, version string) int {
+	// Record the build version once so outbound provider requests can carry an
+	// identifying User-Agent (Reasonix/<version>).
+	buildinfo.SetVersion(version)
 	// Pick the UI language up front so even pre-config paths (the first-run
 	// welcome banner) come through localized. Env-only first; if a config
 	// exists and pins a language, that wins.

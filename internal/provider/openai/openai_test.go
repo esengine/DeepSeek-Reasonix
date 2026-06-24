@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/buildinfo"
 	"reasonix/internal/provider"
 )
 
@@ -122,6 +123,37 @@ func TestStreamAuthError(t *testing.T) {
 	}
 	if msg := authErr.Error(); !strings.Contains(msg, "DEEPSEEK_API_KEY") || strings.Contains(msg, "ae54") {
 		t.Errorf("message should name the env var and not dump the raw body: %q", msg)
+	}
+}
+
+// TestStreamSendsReasonixUserAgent verifies outbound requests carry an
+// identifying User-Agent (Reasonix/<version>) so an upstream gateway can
+// attribute the traffic to Reasonix instead of seeing Go's default UA (#5226).
+func TestStreamSendsReasonixUserAgent(t *testing.T) {
+	var gotUA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	p, err := New(provider.Config{Name: "deepseek", BaseURL: srv.URL, Model: "deepseek-v4", APIKey: "k"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for range ch { // drain
+	}
+
+	if want := buildinfo.UserAgent(); gotUA != want {
+		t.Errorf("User-Agent = %q, want %q", gotUA, want)
+	}
+	if !strings.HasPrefix(gotUA, "Reasonix/") {
+		t.Errorf("User-Agent = %q, want a Reasonix/ prefix", gotUA)
 	}
 }
 
