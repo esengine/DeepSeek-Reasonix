@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"reasonix/internal/control"
+	"reasonix/internal/diff"
 	"reasonix/internal/proc"
 )
 
@@ -298,6 +300,14 @@ type GitCommitDetailView struct {
 	Files []string `json:"files,omitempty"`
 }
 
+type WorkspaceChangeDetailView struct {
+	Diff    *string `json:"diff,omitempty"`
+	Source  string  `json:"source,omitempty"`
+	Added   int     `json:"added,omitempty"`
+	Removed int     `json:"removed,omitempty"`
+	Binary  bool    `json:"binary,omitempty"`
+}
+
 func (a *App) WorkspaceGitHistory(tabID string, path string) ([]GitCommitView, error) {
 	base, err := a.workspaceBaseForTab(tabID)
 	if err != nil {
@@ -361,4 +371,116 @@ func (a *App) WorkspaceGitCommitDetail(tabID string, hash string, path string) (
 		}
 	}
 	return GitCommitDetailView{Files: files}, nil
+}
+
+func (a *App) WorkspaceChangeDetail(tabID, path string) (WorkspaceChangeDetailView, error) {
+	workspaceRoot, ctrl, ok := a.workspaceChangesTarget(tabID)
+	if !ok {
+		return WorkspaceChangeDetailView{}, fmt.Errorf("tab %q not found", strings.TrimSpace(tabID))
+	}
+	base, err := workspaceBaseFromRoot(workspaceRoot)
+	if err != nil {
+		return WorkspaceChangeDetailView{}, err
+	}
+	rel := normalizeWorkspaceRelPath(base, path)
+	if rel == "" {
+		return WorkspaceChangeDetailView{}, os.ErrInvalid
+	}
+
+	if detail, ok := workspaceGitWorkingDiff(base, rel); ok {
+		return detail, nil
+	}
+	if ctrl != nil {
+		if detail, ok := workspaceSessionChangeDiff(base, ctrl, rel); ok {
+			return detail, nil
+		}
+	}
+	return WorkspaceChangeDetailView{}, nil
+}
+
+func workspaceGitWorkingDiff(base, rel string) (WorkspaceChangeDetailView, bool) {
+	for i, args := range [][]string{
+		{"-C", base, "diff", "--relative", "HEAD", "--", rel},
+		{"-C", base, "diff", "--relative", "--", rel},
+		{"-C", base, "diff", "--relative", "--cached", "--", rel},
+	} {
+		raw, err := workspaceGit(args...).Output()
+		if err != nil {
+			if i == 0 {
+				continue
+			}
+			return WorkspaceChangeDetailView{}, false
+		}
+		diffText := strings.TrimSpace(string(raw))
+		if diffText != "" {
+			return WorkspaceChangeDetailView{Diff: &diffText, Source: "git"}, true
+		}
+	}
+
+	entries, err := workspaceGitStatus(base)
+	if err != nil {
+		return WorkspaceChangeDetailView{}, false
+	}
+	for _, entry := range entries {
+		if entry.Path != rel || entry.Status != "??" {
+			continue
+		}
+		abs, ok, err := workspacePathForBase(base, rel)
+		if err != nil || !ok {
+			return WorkspaceChangeDetailView{}, false
+		}
+		raw, err := os.ReadFile(abs)
+		if err != nil {
+			return WorkspaceChangeDetailView{}, false
+		}
+		change := diff.Build(rel, "", string(raw), diff.Create)
+		diffText := strings.TrimSpace(change.Diff)
+		return WorkspaceChangeDetailView{
+			Diff:    &diffText,
+			Source:  "git",
+			Added:   change.Added,
+			Removed: change.Removed,
+			Binary:  change.Binary,
+		}, diffText != "" || change.Binary
+	}
+	return WorkspaceChangeDetailView{}, false
+}
+
+func workspaceSessionChangeDiff(base string, ctrl control.SessionAPI, rel string) (WorkspaceChangeDetailView, bool) {
+	state, ok := ctrl.CheckpointFileState(rel)
+	if !ok {
+		return WorkspaceChangeDetailView{}, false
+	}
+	oldText := ""
+	kind := diff.Create
+	if state.Content != nil {
+		oldText = *state.Content
+		kind = diff.Modify
+	}
+	abs, ok, err := workspacePathForBase(base, rel)
+	if err != nil || !ok {
+		return WorkspaceChangeDetailView{}, false
+	}
+	raw, err := os.ReadFile(abs)
+	newText := ""
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return WorkspaceChangeDetailView{}, false
+		}
+		if state.Content == nil {
+			return WorkspaceChangeDetailView{}, false
+		}
+		kind = diff.Delete
+	} else {
+		newText = string(raw)
+	}
+	change := diff.Build(rel, oldText, newText, kind)
+	diffText := strings.TrimSpace(change.Diff)
+	return WorkspaceChangeDetailView{
+		Diff:    &diffText,
+		Source:  "session",
+		Added:   change.Added,
+		Removed: change.Removed,
+		Binary:  change.Binary,
+	}, diffText != "" || change.Binary
 }

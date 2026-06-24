@@ -1665,6 +1665,13 @@ func (c *Controller) Checkpoints() []checkpoint.Meta {
 	return c.checkpoints.list()
 }
 
+func (c *Controller) CheckpointFileState(path string) (checkpoint.FileState, bool) {
+	if c.cp == nil {
+		return checkpoint.FileState{}, false
+	}
+	return c.cp.FileState(path)
+}
+
 // rewindFail emits the error as a Warn notice (so a frontend that swallows the
 // returned error — e.g. the desktop bridge's .catch — still shows the user why
 // the rewind did nothing) and returns it.

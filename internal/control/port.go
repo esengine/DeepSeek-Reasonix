@@ -103,6 +103,7 @@ type Goals interface {
 // operations (compact, summarize).
 type SessionHistory interface {
 	Checkpoints() []checkpoint.Meta
+	CheckpointFileState(path string) (checkpoint.FileState, bool)
 	CheckpointHasBoundary(turn int) bool
 	Rewind(turn int, scope RewindScope) error
 	Fork(turn int) (string, error)

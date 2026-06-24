@@ -1158,6 +1158,83 @@ func TestWorkspaceGitCommitDetail(t *testing.T) {
 	}
 }
 
+func TestWorkspaceChangeDetailShowsUncommittedGitDiff(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "init")
+	runGit(t, "config", "user.email", "test@example.com")
+	runGit(t, "config", "user.name", "Test User")
+	if err := os.WriteFile("file.txt", []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "add", "file.txt")
+	runGit(t, "commit", "-m", "init")
+	if err := os.WriteFile("file.txt", []byte("middle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "add", "file.txt")
+	if err := os.WriteFile("file.txt", []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	detail, err := (&App{}).WorkspaceChangeDetail("", "file.txt")
+	if err != nil {
+		t.Fatalf("WorkspaceChangeDetail err = %v", err)
+	}
+	if detail.Diff == nil || !strings.Contains(*detail.Diff, "-old") || !strings.Contains(*detail.Diff, "+new") {
+		t.Fatalf("expected uncommitted git diff, got %+v", detail)
+	}
+	if detail.Source != "git" {
+		t.Fatalf("source = %q, want git", detail.Source)
+	}
+}
+
+func TestWorkspaceChangeDetailShowsSessionCheckpointDiff(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "file.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionDir := t.TempDir()
+	sessionPath := filepath.Join(sessionDir, "a.jsonl")
+	ckptDir := strings.TrimSuffix(sessionPath, ".jsonl") + ".ckpt"
+	if err := os.MkdirAll(ckptDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := "old\n"
+	seedCheckpoint(t, ckptDir, checkpoint.Checkpoint{
+		Turn:   0,
+		Time:   time.Now(),
+		Prompt: "edit file",
+		Files:  []checkpoint.FileSnap{{Path: "file.txt", Content: &old}},
+	})
+	ctrl := control.New(control.Options{SessionDir: sessionDir, SessionPath: sessionPath, WorkspaceRoot: workspace, Label: "a"})
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"a": {ID: "a", Scope: "project", WorkspaceRoot: workspace, Ctrl: ctrl, Ready: true},
+		},
+		activeTabID: "a",
+	}
+
+	detail, err := app.WorkspaceChangeDetail("a", "file.txt")
+	if err != nil {
+		t.Fatalf("WorkspaceChangeDetail err = %v", err)
+	}
+	if detail.Diff == nil || !strings.Contains(*detail.Diff, "-old") || !strings.Contains(*detail.Diff, "+new") {
+		t.Fatalf("expected checkpoint diff, got %+v", detail)
+	}
+	if detail.Source != "session" {
+		t.Fatalf("source = %q, want session", detail.Source)
+	}
+}
+
 func runGit(t *testing.T, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

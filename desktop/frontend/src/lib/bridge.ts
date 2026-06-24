@@ -61,6 +61,7 @@ import type {
   UpdateProgress,
   WireEvent,
   WorkspaceChangesView,
+  WorkspaceChangeDetailView,
   GitCommitView,
   GitCommitDetailView,
   WorkspaceView,
@@ -200,6 +201,7 @@ export interface AppBindings {
   SearchFileRefs(query: string): Promise<DirEntry[]>;
   ReadFile(rel: string): Promise<FilePreview>;
   WorkspaceChanges(tabID: string): Promise<WorkspaceChangesView>;
+  WorkspaceChangeDetail(tabID: string, path: string): Promise<WorkspaceChangeDetailView>;
   GitBranches(): Promise<string[]>;
   GitCheckout(branch: string): Promise<void>;
   WorkspaceGitHistory(tabID: string, path: string): Promise<GitCommitView[]>;
@@ -2191,6 +2193,14 @@ function makeMockApp(): AppBindings {
           { path: "README.md", sources: ["git"], gitStatus: "??" },
           { path: "internal/control/controller.go", sources: ["session"], turns: [1], latestTime: Date.now() - 120_000 },
         ],
+      };
+    },
+    async WorkspaceChangeDetail(_tabID: string, path: string) {
+      return {
+        source: "session",
+        diff: `--- a/${path}\n+++ b/${path}\n@@ -1,1 +1,1 @@\n-old mock\n+new mock`,
+        added: 1,
+        removed: 1,
       };
     },
     async GitBranches() {
