@@ -210,6 +210,15 @@ func validateSessionTrashTarget(dir, sessionPath, key string) error {
 	}
 	itemDir := filepath.Join(sessionTrashPath(dir), key)
 	if _, err := os.Stat(itemDir); err == nil {
+		// The trash directory already exists. If the corresponding session
+		// file is still pending cleanup from a previous delete (teardown
+		// timed out → delayed trash), allow the operation to proceed by
+		// removing the stale trash entry so the new delete can recreate
+		// it. (#5215)
+		if agent.IsCleanupPending(sessionPath) {
+			_ = os.RemoveAll(itemDir)
+			return nil
+		}
 		return fmt.Errorf("session already exists in trash: %s", key)
 	} else if !os.IsNotExist(err) {
 		return err

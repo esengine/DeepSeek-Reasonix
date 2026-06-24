@@ -1047,6 +1047,18 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 
 	tabID := a.newUniqueTabIDLocked()
 	topicTitle := topicTitleForTab(scope, workspaceRoot, topicID)
+	// Pre-create an empty session file when sessionPath is empty so the tab
+	// is immediately deletable even before the async controller build finishes
+	// (fixes #5215 — newly created blank sessions were not deletable until
+	// buildTabControllerWithContext completed).
+	if sessionPath == "" {
+		sessionDir := desktopSessionDir(actualRoot)
+		prePath := agent.NewSessionPath(sessionDir, "")
+		if f, err := os.OpenFile(prePath, os.O_RDONLY|os.O_CREATE, 0o644); err == nil {
+			f.Close()
+		}
+		sessionPath = prePath
+	}
 	tab := &WorkspaceTab{
 		ID:               tabID,
 		Scope:            scope,
@@ -1255,6 +1267,14 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 		a.tabs[tabID] = created
 		a.tabOrder = append(a.tabOrder, tabID)
 		a.activeTabID = tabID
+		// Pre-create an empty session file so the tab is immediately
+		// deletable even before the async controller build finishes (#5215).
+		preDir := desktopSessionDir(actualRoot)
+		prePath := agent.NewSessionPath(preDir, inheritedModel)
+		if f, err := os.OpenFile(prePath, os.O_RDONLY|os.O_CREATE, 0o644); err == nil {
+			f.Close()
+		}
+		created.SessionPath = prePath
 		a.saveTabsLocked()
 		meta := a.tabMeta(created, true)
 		a.mu.Unlock()
@@ -1303,6 +1323,14 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 	a.tabs[tabID] = created
 	a.tabOrder = append(a.tabOrder, tabID)
 	a.activeTabID = tabID
+	// Pre-create an empty session file so the tab is immediately
+	// deletable even before the async controller build finishes (#5215).
+	preDir := desktopSessionDir(actualRoot)
+	prePath := agent.NewSessionPath(preDir, inheritedModel)
+	if f, err := os.OpenFile(prePath, os.O_RDONLY|os.O_CREATE, 0o644); err == nil {
+		f.Close()
+	}
+	created.SessionPath = prePath
 	a.saveTabsLocked()
 	meta := a.tabMeta(created, true)
 	a.mu.Unlock()
