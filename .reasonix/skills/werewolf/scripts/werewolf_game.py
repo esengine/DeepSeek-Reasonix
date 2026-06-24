@@ -157,6 +157,7 @@ if __name__ == "__main__":
 
     p_replay = sub.add_parser("replay")
     p_replay.add_argument("--output", default="replay.md", help="输出文件名 (默认: replay.md)")
+    p_replay.add_argument("--annotate", action="store_true", help="带策略标注的详细复盘")
 
     p_log_raw = sub.add_parser("log-raw")
     p_log_raw.add_argument("type", choices=["speech","vote","wolf_kill","witch","seer","guard","sheriff","mimic","hunter","last_words","wolf_strategy","wolf_adjust"])
