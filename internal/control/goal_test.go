@@ -88,6 +88,22 @@ func TestGoalModeSkipsAutoPlanApproval(t *testing.T) {
 	}
 }
 
+func TestCancelStopsIdleGoalWithIncompleteTodos(t *testing.T) {
+	ag := agent.New(nil, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
+	ag.SeedTodoState([]evidence.TodoItem{
+		{Content: "Writing the Python MCP bridge", Status: "in_progress"},
+		{Content: "Install the bridge as an MCP server", Status: "pending"},
+	})
+	c := New(Options{Executor: ag, Sink: event.Discard})
+	c.SetGoalWithResearchMode("Wire the Python MCP bridge", GoalResearchAuto)
+
+	c.Cancel()
+
+	if got := c.GoalStatus(); got != GoalStatusStopped {
+		t.Fatalf("GoalStatus() = %q, want stopped", got)
+	}
+}
+
 func TestPlainInputWithStrongResearchSignalAutoStartsGoal(t *testing.T) {
 	prov := &scriptedTurns{turns: [][]provider.Chunk{
 		textTurn("AutoResearch started and completed.\n\n[goal:complete]"),

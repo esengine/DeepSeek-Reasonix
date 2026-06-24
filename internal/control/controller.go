@@ -1131,6 +1131,10 @@ func (c *Controller) Cancel() {
 	if cancel != nil {
 		c.approval.clearAll()
 		cancel()
+		return
+	}
+	if c.goals.active() {
+		c.stopGoal(GoalStatusStopped)
 	}
 }
 

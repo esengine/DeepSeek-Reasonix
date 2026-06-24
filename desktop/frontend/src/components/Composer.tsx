@@ -1144,6 +1144,7 @@ export function Composer({
   // replied, the just-sent text is handed back so we drop it back into the input.
   const handleCancel = () => {
     const restored = onCancel();
+    if (goalModeOn && activeGoal) onClearGoal();
     if (typeof restored === "string") setTextCaretEnd(restored);
   };
 
