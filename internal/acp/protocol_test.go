@@ -71,6 +71,7 @@ func TestToolKindFor(t *testing.T) {
 		"glob":                  "read",
 		"grep":                  "search",
 		"edit_file":             "edit",
+		"move_file":             "edit",
 		"multiedit":             "edit",
 		"write_file":            "edit",
 		"bash":                  "execute",
@@ -140,16 +141,17 @@ func TestMcpSpecsNil(t *testing.T) {
 
 func TestMcpSpecsConversion(t *testing.T) {
 	in := []MCPServerSpec{
-		{Name: "codegraph", Command: "codegraph", Args: []string{"--stdio"}, Env: MCPEnv{"HOME": "/tmp"}},
+		{Name: "search", Command: "search-mcp", Args: []string{"--stdio"}, Env: MCPEnv{"HOME": "/tmp"}},
+		{Name: "remote", Type: "http", URL: "https://mcp.example.test", Headers: map[string]string{"Authorization": "Bearer token"}},
 	}
 	got, err := mcpSpecs(in, "/workspace")
 	if err != nil {
 		t.Fatalf("mcpSpecs: %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("len = %d, want 1", len(got))
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
 	}
-	if got[0].Name != "codegraph" || got[0].Type != "stdio" || got[0].Command != "codegraph" {
+	if got[0].Name != "search" || got[0].Type != "stdio" || got[0].Command != "search-mcp" {
 		t.Errorf("spec = %+v", got[0])
 	}
 	if got[0].Args[0] != "--stdio" {
@@ -160,6 +162,12 @@ func TestMcpSpecsConversion(t *testing.T) {
 	}
 	if got[0].Dir != "/workspace" {
 		t.Errorf("dir = %q, want /workspace", got[0].Dir)
+	}
+	if got[1].Name != "remote" || got[1].Type != "http" || got[1].URL != "https://mcp.example.test" {
+		t.Errorf("http spec = %+v", got[1])
+	}
+	if got[1].Headers["Authorization"] != "Bearer token" {
+		t.Errorf("headers = %v", got[1].Headers)
 	}
 }
 
@@ -187,9 +195,13 @@ func TestMCPEnvAcceptsOfficialArrayShape(t *testing.T) {
 }
 
 func TestMcpSpecsRejectsUnsupportedTransport(t *testing.T) {
-	_, err := mcpSpecs([]MCPServerSpec{{Name: "remote", Type: "http", Command: "ignored"}}, "/tmp")
+	_, err := mcpSpecs([]MCPServerSpec{{Name: "remote", Type: "sse", URL: "https://example.test/sse"}}, "/tmp")
 	if err == nil || !strings.Contains(err.Error(), "unsupported transport") {
 		t.Fatalf("mcpSpecs unsupported transport err = %v", err)
+	}
+	_, err = mcpSpecs([]MCPServerSpec{{Name: "remote", Type: "http"}}, "/tmp")
+	if err == nil || !strings.Contains(err.Error(), "url is required") {
+		t.Fatalf("mcpSpecs missing url err = %v", err)
 	}
 }
 

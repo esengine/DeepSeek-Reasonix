@@ -408,6 +408,18 @@ func TestSlashArgCompletionSwitchBranches(t *testing.T) {
 	if err := agent.SaveBranchMeta(childPath, agent.BranchMeta{Name: "experiment", ParentID: agent.BranchID(rootPath)}); err != nil {
 		t.Fatal(err)
 	}
+	pending := agent.NewSession("sys")
+	pending.Add(provider.Message{Role: provider.RoleUser, Content: "pending child prompt"})
+	pendingPath := filepath.Join(dir, "pending.jsonl")
+	if err := pending.Save(pendingPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.SaveBranchMeta(pendingPath, agent.BranchMeta{Name: "exp-pending", ParentID: agent.BranchID(rootPath)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.MarkCleanupPending(pendingPath, "delete"); err != nil {
+		t.Fatal(err)
+	}
 
 	m := newTestChatTUI()
 	m.ctrl = ctrl
@@ -449,6 +461,23 @@ func TestSlashArgCompletionAutoPlan(t *testing.T) {
 	}
 	if hasLabel(m.completion.items, "ask") {
 		t.Fatalf("/auto-plan completion should not include legacy ask: %v", labels(m.completion.items))
+	}
+}
+
+func TestSlashArgCompletionReasoningLanguage(t *testing.T) {
+	m := newTestChatTUI()
+	m.input.SetValue("/reasoning-language ")
+	m.updateCompletion()
+	if !m.completion.active || m.completion.kind != compSlashArg {
+		t.Fatalf("/reasoning-language should open arg completion: %+v", m.completion)
+	}
+	for _, want := range []string{"auto", "zh", "en"} {
+		if !hasLabel(m.completion.items, want) {
+			t.Fatalf("/reasoning-language completion missing %q: %v", want, labels(m.completion.items))
+		}
+	}
+	if hasLabel(m.completion.items, "中文") {
+		t.Fatalf("/reasoning-language completion should expose only auto|zh|en: %v", labels(m.completion.items))
 	}
 }
 

@@ -23,7 +23,6 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
-	"reasonix/internal/builtinmcp"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -36,6 +35,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"
+)
+
+var (
+	runInteractiveSession = chatREPL
+	cliIsInteractive      = isInteractive
 )
 
 // Run is the CLI entry point; it returns a process exit code.
@@ -51,8 +55,8 @@ func Run(args []string, version string) int {
 	if cmd == "--acp" {
 		cmd = "acp"
 	}
-	if cmd == "builtin-mcp" {
-		return builtinmcp.RunCommand(args[1:], os.Stdin, os.Stdout, os.Stderr, version)
+	if len(args) > 0 && isDefaultInteractiveFlag(cmd) {
+		cmd = ""
 	}
 	if shouldMigrateLegacyConfigForCLI(cmd) {
 		migrateLegacyConfigForCLI()
@@ -63,9 +67,16 @@ func Run(args []string, version string) int {
 		}
 	}
 
+	if len(args) == 0 && cliIsInteractive() {
+		return runInteractiveSession(nil)
+	}
 	if len(args) == 0 {
 		configureCLIThemeFromConfigForTTYOutput()
-		return welcome(version)
+		usage()
+		return 0
+	}
+	if cmd == "" {
+		return runInteractiveSession(args)
 	}
 
 	rest := args[1:]
@@ -73,7 +84,7 @@ func Run(args []string, version string) int {
 	case "run":
 		return runAgent(rest)
 	case "chat", "code": // "code" is the v0.x name for the interactive session
-		return chatREPL(rest)
+		return runInteractiveSession(rest)
 	case "serve":
 		return runServe(rest)
 	case "setup":
@@ -94,9 +105,6 @@ func Run(args []string, version string) int {
 	case "mcp":
 		configureCLIThemeFromConfigNoProbe()
 		return mcpCommand(rest)
-	case "codegraph":
-		configureCLIThemeFromConfigNoProbe()
-		return codegraphCommand(rest)
 	case "doctor":
 		configureCLIThemeFromConfigNoProbe()
 		return doctorCommand(rest, version)
@@ -122,9 +130,20 @@ func Run(args []string, version string) int {
 	}
 }
 
+func isDefaultInteractiveFlag(arg string) bool {
+	switch arg {
+	case "--model", "--max-steps", "--continue", "-c", "--resume", "--dangerously-skip-permissions", "--yolo", "--dir":
+		return true
+	}
+	if name, _, ok := strings.Cut(arg, "="); ok && isDefaultInteractiveFlag(name) {
+		return true
+	}
+	return false
+}
+
 func shouldMigrateLegacyConfigForCLI(cmd string) bool {
 	switch cmd {
-	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "codegraph", "doctor", "bot", "upgrade", "update":
+	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "doctor", "bot", "upgrade", "update":
 		return true
 	default:
 		return false
@@ -134,6 +153,14 @@ func shouldMigrateLegacyConfigForCLI(cmd string) bool {
 func migrateLegacyConfigForCLI() {
 	if _, err := config.MigrateLegacyIfNeeded(); err != nil {
 		fmt.Fprintln(os.Stderr, "warning: config migration failed:", err)
+	}
+}
+
+func migrateMCPConfigForCLIWorkspace() {
+	if wd, err := os.Getwd(); err == nil {
+		if _, err := config.MigrateMCPToUserConfigOnUpgrade([]string{wd}); err != nil {
+			fmt.Fprintln(os.Stderr, "warning: MCP config migration failed:", err)
+		}
 	}
 }
 
@@ -166,12 +193,28 @@ func configureCLIThemeFromConfigNoProbe() {
 // the agent's typed event stream — runAgent passes a TextSink that renders to
 // stdout, the TUI passes an event-channel sink so events become tea.Msgs.
 func setup(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink) (*control.Controller, error) {
+	migrateMCPConfigForCLIWorkspace()
 	return boot.Build(ctx, boot.Options{
 		Model:      modelName,
 		MaxSteps:   maxStepsOverride,
 		RequireKey: requireKey,
 		Sink:       sink,
+		SessionDir: resolveCLISessionDir(),
 	})
+}
+
+// resolveCLISessionDir returns the session dir for CLI invocations. When the
+// current working directory maps to a project session dir, the project dir is
+// used so /resume shows project history. Falls back to the global session dir.
+func resolveCLISessionDir() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return config.SessionDir()
+	}
+	if projDir := config.ProjectSessionDir(cwd); projDir != "" && projDir != config.SessionDir() {
+		return projDir
+	}
+	return config.SessionDir()
 }
 
 // setupQuiet is like setup but suppresses plugin subprocess stderr output.
@@ -199,6 +242,30 @@ func chdirTo(dir string) int {
 		return 2
 	}
 	return 0
+}
+
+func modelForResumePath(modelName, resumePath string, cfg *config.Config) string {
+	if strings.TrimSpace(modelName) != "" || strings.TrimSpace(resumePath) == "" {
+		return modelName
+	}
+	sessionModel, ok := agent.LoadSessionModel(resumePath)
+	if !ok {
+		return modelName
+	}
+	if cfg == nil {
+		return sessionModel
+	}
+	if _, ok := cfg.ResolveModel(sessionModel); !ok {
+		return modelName
+	}
+	return sessionModel
+}
+
+func loadResumableSession(path string) (*agent.Session, error) {
+	if agent.IsCleanupPending(path) {
+		return nil, fmt.Errorf("session is pending cleanup")
+	}
+	return agent.LoadSession(path)
 }
 
 var newNotificationSender = func() notify.Sender { return notify.NewPlatformSender() }
@@ -239,6 +306,16 @@ func runAgent(args []string) int {
 		return 2
 	}
 
+	var resumeSession *agent.Session
+	if *resume != "" {
+		var err error
+		resumeSession, err = loadResumableSession(*resume)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
@@ -262,6 +339,13 @@ func runAgent(args []string) int {
 		sink = metrics
 	}
 	sink = withNotifications(sink, cfg)
+	if *resume != "" {
+		*model = modelForResumePath(*model, *resume, cfg)
+	} else if *cont {
+		if sessions, err := agent.ListSessions(resolveCLISessionDir()); err == nil && len(sessions) > 0 {
+			*model = modelForResumePath(*model, sessions[0].Path, cfg)
+		}
+	}
 	ctrl, err := setup(ctx, *model, *maxSteps, true, sink)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -274,19 +358,10 @@ func runAgent(args []string) int {
 	// precedence over --continue.
 	// --continue: resume the most recent saved session.
 	if *resume != "" {
-		loaded, err := agent.LoadSession(*resume)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		ctrl.Resume(loaded, *resume)
+		ctrl.Resume(resumeSession, *resume)
 	} else if *cont {
-		sessions, err := agent.ListSessions(config.SessionDir())
-		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		if len(sessions) == 0 {
+		sessions, err := agent.ListSessions(ctrl.SessionDir())
+		if err != nil || len(sessions) == 0 {
 			fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
 			return 1
 		}
@@ -327,12 +402,86 @@ func runServe(args []string) int {
 	maxSteps := fs.Int("max-steps", 0, "max tool-call rounds (0 = use config/default)")
 	addr := fs.String("addr", "127.0.0.1:8787", "listen address")
 	resume := fs.String("resume", "", "resume a saved session file")
+	auth := fs.String("auth", "", "auth mode: none, token, or password (default: none)")
+	token := fs.String("token", "", "pre-shared token for auth=token (auto-generated if empty)")
+	password := fs.String("password", "", "password for auth=password (use --hash-password to store a hash instead)")
+	hashPassword := fs.Bool("hash-password", false, "print a bcrypt hash of --password and exit")
+	behindProxy := fs.Bool("behind-proxy", false, "trust X-Forwarded-For / X-Forwarded-Proto headers from a reverse proxy")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
+	// --hash-password: generate a bcrypt hash and exit.
+	if *hashPassword {
+		if *password == "" {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--hash-password requires --password")
+			return 1
+		}
+		h, err := serve.HashPassword(*password)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		fmt.Println(h)
+		return 0
+	}
+
 	ctx := context.Background()
 	bc := serve.NewBroadcaster()
+	cfg, _ := config.Load()
+
+	// Build serve config, merging CLI flags over config file.
+	serveCfg := cfg.Serve
+	if *auth != "" {
+		serveCfg.AuthMode = *auth
+	}
+	if *token != "" {
+		serveCfg.Token = *token
+	}
+	if *behindProxy {
+		serveCfg.BehindProxy = true
+	}
+	mode, err := serve.NormalizeAuthMode(serveCfg.AuthMode)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 1
+	}
+	serveCfg.AuthMode = mode
+	if *password != "" && serveCfg.AuthMode == "password" {
+		// Hash the password at startup so the config never stores plaintext.
+		// If a PasswordHash is already set in config, the CLI password overrides it.
+		h, err := serve.HashPassword(*password)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "failed to hash password:", err)
+			return 1
+		}
+		serveCfg.PasswordHash = h
+	}
+	if serveCfg.AuthMode == "password" && strings.TrimSpace(serveCfg.PasswordHash) == "" {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "auth mode password requires --password or serve.password_hash")
+		return 1
+	}
+
+	var resumeSession *agent.Session
+	if *resume != "" {
+		var err error
+		resumeSession, err = loadResumableSession(*resume)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+	}
+	*model = modelForResumePath(*model, *resume, cfg)
+	// Serve always uses the user's global default_model, ignoring any
+	// project-level override, so the model choice stays consistent across
+	// projects and matches the user's account-level preference.
+	if *model == "" {
+		if uc := config.UserConfigPath(); uc != "" {
+			if userCfg := config.LoadForEdit(uc); userCfg != nil && userCfg.DefaultModel != "" {
+				*model = userCfg.DefaultModel
+			}
+		}
+	}
 	ctrl, err := setup(ctx, *model, *maxSteps, true, bc)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -342,21 +491,31 @@ func runServe(args []string) int {
 
 	// Auto-save target: reuse the resumed file, else a fresh one — same as chat.
 	if *resume != "" {
-		loaded, err := agent.LoadSession(*resume)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		ctrl.Resume(loaded, *resume)
-	} else if ctrl.SessionDir() != "" {
-		ctrl.SetSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
+		ctrl.Resume(resumeSession, *resume)
+	}
+	ctrl.EnsureSessionPath()
+
+	srv := serve.New(ctrl, bc, serveCfg)
+	fmt.Printf("reasonix serve — %s on http://%s\n", ctrl.Label(), *addr)
+	if srv.AuthMode() == "token" {
+		fmt.Printf("  auth: token\n")
+		fmt.Printf("  share: http://%s/?token=%s\n", *addr, srv.AuthToken())
+	} else if srv.AuthMode() == "password" {
+		fmt.Printf("  auth: password (login at http://%s/login)\n", *addr)
+	}
+	// Diagnostic: check whether balance endpoint is reachable
+	if b, err := ctrl.Balance(context.Background()); err != nil {
+		fmt.Fprintf(os.Stderr, "  balance: error — %v\n", err)
+	} else if b == nil {
+		fmt.Fprintf(os.Stderr, "  balance: not configured (no balance_url for this provider)\n")
+	} else {
+		fmt.Printf("  balance: %s\n", b.Display())
 	}
 
-	fmt.Printf("reasonix serve — %s on http://%s\n", ctrl.Label(), *addr)
 	// Use graceful shutdown so SIGINT/SIGTERM drain active connections.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := serve.New(ctrl, bc).RunGraceful(ctx, *addr); err != nil {
+	if err := srv.RunGraceful(ctx, *addr); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
 	}
@@ -367,7 +526,7 @@ func runServe(args []string) int {
 // prompt loop that keeps conversation context across turns. Exit with
 // 'exit'/'quit' or Ctrl-D.
 func chatREPL(args []string) int {
-	fs := flag.NewFlagSet("chat", flag.ContinueOnError)
+	fs := flag.NewFlagSet("reasonix", flag.ContinueOnError)
 	model := fs.String("model", "", "provider name (default: config default_model)")
 	maxSteps := fs.Int("max-steps", 0, "max tool-call rounds (0 = use config/default)")
 	cont := fs.Bool("continue", false, "resume the most recent saved session")
@@ -398,12 +557,8 @@ func chatREPL(args []string) int {
 		}
 		resumePath = path
 	case *cont:
-		sessions, err := agent.ListSessions(config.SessionDir())
-		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		if len(sessions) == 0 {
+		sessions, err := agent.ListSessions(resolveCLISessionDir())
+		if err != nil || len(sessions) == 0 {
 			fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
 			return 1
 		}
@@ -411,6 +566,7 @@ func chatREPL(args []string) int {
 	}
 
 	ctx := context.Background()
+	*model = modelForResumePath(*model, resumePath, cfg)
 
 	// Plumb the controller's typed event stream through a channel so each event
 	// can become a tea.Msg inside the TUI's update loop. Buffered generously:
@@ -440,15 +596,14 @@ func chatREPL(args []string) int {
 	// file so closing/reopening keeps appending to the same history; a fresh
 	// session lands in a new file stamped with the model name.
 	if resumePath != "" {
-		if loaded, err := agent.LoadSession(resumePath); err != nil {
+		loaded, err := agent.LoadSession(resumePath)
+		if err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
-		} else {
-			ctrl.Resume(loaded, resumePath)
 		}
-	} else if ctrl.SessionDir() != "" {
-		ctrl.SetSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
+		ctrl.Resume(loaded, resumePath)
 	}
+	ctrl.EnsureSessionPath()
 
 	// Surface a missing-key warning inside the TUI banner so the first message
 	// failing is at least pre-announced; the user can still enter chat.
@@ -500,11 +655,7 @@ func chatREPL(args []string) int {
 		// Keep the carried conversation in its existing file so the switch doesn't
 		// orphan a duplicate (#2807).
 		path := agent.ContinueSessionPath(resumePath, c.SessionDir(), c.Label())
-		if len(carry) > 0 {
-			c.Resume(&agent.Session{Messages: carry}, path)
-		} else if path != "" {
-			c.SetSessionPath(path)
-		}
+		c.AdoptHistory(carry, path)
 		c.EnableInteractiveApproval()
 		if *yolo {
 			c.SetAutoApproveTools(true)
@@ -523,7 +674,7 @@ func chatREPL(args []string) int {
 	m.refreshEffortStatus()
 
 	if m.nativeScrollback {
-		reserveNativeScrollbackFrame(os.Stdout, m.bottomRows())
+		prepareNativeScrollback(os.Stdout, m.bottomRows())
 	}
 
 	// Non-Termux terminals use an alt-screen transcript viewport. Termux stays
@@ -567,15 +718,24 @@ func chatREPL(args []string) int {
 	return 0
 }
 
+func prepareNativeScrollback(w io.Writer, rows int) {
+	// Clear the terminal's scrollback history so a reopened chat starts
+	// with a clean slate (Termux stays in the normal buffer, so prior
+	// output would otherwise remain visible above the banner).
+	fmt.Fprint(w, "\x1B[3J\x1B[2J\x1B[H")
+	reserveNativeScrollbackFrame(w, rows)
+}
+
 func reserveNativeScrollbackFrame(w io.Writer, rows int) {
 	for i := 0; i < rows; i++ {
 		fmt.Fprintln(w)
 	}
 }
 
-// setupTargets is where the wizard writes: the TOML config and the secrets file.
-// Keys always go to the reasonix-owned global credentials file so they never land
-// in a project's own .env; only the config location is project-local under --local.
+// setupTargets is where the wizard writes: the TOML config and the credential
+// store. Keys always go to Reasonix's global .env so they
+// never land in a project's own .env; only the config location is project-local
+// under --local.
 type setupTargets struct {
 	config string
 	env    string
@@ -590,13 +750,10 @@ func defaultConfigTarget() string {
 	return "reasonix.toml"
 }
 
-// defaultEnvTarget is the reasonix-owned global credentials file, falling back to
-// a project-local .env only when the user config dir can't be resolved.
+// defaultEnvTarget is the display target for the reasonix-owned global
+// Reasonix global .env.
 func defaultEnvTarget() string {
-	if p := config.UserCredentialsPath(); p != "" {
-		return p
-	}
-	return ".env"
+	return config.CredentialsTargetDescription()
 }
 
 // resolveSetupTargets picks where `reasonix setup` writes. Keys always go to the
@@ -625,7 +782,7 @@ func displayPath(p string) string {
 
 // setupConfig runs the configuration wizard (the `reasonix setup` command),
 // writing config.toml to the user-global dir (or ./reasonix.toml under --local)
-// and API keys to the reasonix-owned global .env — never a project's own .env.
+// and API keys to Reasonix's global .env — never a project's own .env.
 // Project memory is a separate concern — the in-session `/init` skill generates
 // AGENTS.md (see initHint).
 func setupConfig(args []string) int {
@@ -648,7 +805,7 @@ func setupConfig(args []string) int {
 	if isInteractive() {
 		rc := interactiveSetup(t.config, t.env)
 		if rc == 0 {
-			fmt.Printf(i18n.M.TryHintFmt+"\n", bold("reasonix chat"))
+			fmt.Printf(i18n.M.TryHintFmt+"\n", bold("reasonix"))
 		}
 		return rc
 	}
@@ -662,9 +819,6 @@ func confirmReconfigureExistingConfig(path string, in *bufio.Scanner, w io.Write
 
 func writeDefaultConfig(path string) int {
 	c := config.Default()
-	// A freshly scaffolded config starts without the codegraph daemon; existing
-	// configs (which never wrote [codegraph]) keep it on via the built-in default.
-	c.Codegraph.Enabled = false
 	if err := c.SaveTo(path); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.WriteConfigErr, err)
 		return 1
@@ -684,8 +838,8 @@ func initHint() int {
 }
 
 // interactiveSetup runs the setup wizard, then writes the config to configPath
-// and any entered API keys to envPath (the reasonix-owned global .env, never a
-// project's own). The wizard is intentionally minimal: pick language, pick
+// and any entered API keys to Reasonix's global .env. The wizard
+// is intentionally minimal: pick language, pick
 // provider, enter API keys. Language is asked first so every subsequent prompt
 // is already in the user's language even when env auto-detection got it wrong.
 // Two-model collaboration is left as a manual config edit (planner_model) so
@@ -694,15 +848,8 @@ func interactiveSetup(configPath, envPath string) int {
 	// Seed from the existing config when reconfiguring, so a re-run to fix a key
 	// preserves the user's providers / agent settings instead of resetting to
 	// defaults. First run (no file) falls back to the built-in defaults.
-	_, statErr := os.Stat(configPath)
-	isNewConfig := statErr != nil
 	cfg := config.LoadForEdit(configPath)
 	prevDefault := cfg.DefaultModel
-	if isNewConfig {
-		// Brand-new user: start without the codegraph daemon. A reconfigure of an
-		// existing config keeps whatever the user already had.
-		cfg.Codegraph.Enabled = false
-	}
 
 	lang, err := selectLanguage()
 	if err != nil {
@@ -710,6 +857,7 @@ func interactiveSetup(configPath, envPath string) int {
 		return 1
 	}
 	cfg.Language = lang
+	cfg.ApplyDeepSeekOfficialDefaultPricing()
 	i18n.DetectLanguage(lang)
 
 	// Now that the catalogue matches the user's choice, show the welcome banner
@@ -722,7 +870,7 @@ func interactiveSetup(configPath, envPath string) int {
 	}))
 	fmt.Println()
 
-	enabled, err := selectEnabledProviders(cfg.Providers)
+	enabled, err := selectEnabledProviders(cfg.Providers, cfg.DeepSeekOfficialPricingLanguage())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "\n"+i18n.M.SetupCancelled)
 		return 1
@@ -748,11 +896,15 @@ func interactiveSetup(configPath, envPath string) int {
 	fmt.Printf("\n%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, displayPath(configPath)))
 
 	if len(envLines) > 0 {
-		if err := appendEnv(envPath, envLines); err != nil {
+		target, err := config.StoreCredentialLines(envLines)
+		if err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.WriteEnvErr, err)
 			return 1
 		}
-		fmt.Printf("%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, displayPath(envPath)))
+		if target == "" {
+			target = envPath
+		}
+		fmt.Printf("%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, displayPath(target)))
 	}
 
 	fmt.Printf("\n%s %s\n", accent("◆"), i18n.M.SetupComplete)
@@ -764,12 +916,8 @@ func interactiveSetup(configPath, envPath string) int {
 // message so the user can pick one. Returns the chosen path and a process
 // exit code (non-zero when there's nothing to pick or the user cancelled).
 func pickSessionToResume() (string, int) {
-	sessions, err := agent.ListSessions(config.SessionDir())
-	if err != nil {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-		return "", 1
-	}
-	if len(sessions) == 0 {
+	sessions, err := agent.ListSessions(resolveCLISessionDir())
+	if err != nil || len(sessions) == 0 {
 		fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
 		return "", 1
 	}
@@ -820,7 +968,7 @@ func selectLanguage() (string, error) {
 }
 
 // selectEnabledProviders prompts a single multi-select of provider families
-// (DeepSeek / MiMo / custom / …) and returns one ProviderEntry per chosen
+// (DeepSeek / custom / …) and returns one ProviderEntry per chosen
 // family, carrying the models the user picked. Built-in families try the
 // OpenAI-compatible GET /models endpoint first (so the user sees the real
 // list, not a stale hard-coded one) and fall back to the preset's static
@@ -828,12 +976,12 @@ func selectLanguage() (string, error) {
 // vendor that doesn't expose /models. All paths funnel through the same
 // fetchOrFallback / buildFamilyEntry helpers, so adding a new family only
 // requires a familyOf case.
-func selectEnabledProviders(providers []config.ProviderEntry) ([]config.ProviderEntry, error) {
+func selectEnabledProviders(providers []config.ProviderEntry, pricingLanguage string) ([]config.ProviderEntry, error) {
 	providers, stale := filterStaleCustomEntries(providers)
 	for _, s := range stale {
 		fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.SkipStaleCustomEntryFmt, s.Name, s.BaseURL)))
 	}
-	providers = withBuiltinFamilies(providers)
+	providers = withBuiltinFamiliesForLanguage(providers, pricingLanguage)
 
 	famOrder, famMembers, famInfo := groupByFamily(providers)
 
@@ -934,10 +1082,12 @@ func familyStaticModels(providers []config.ProviderEntry, idxs []int) []string {
 
 // ensureProbeKey prompts once for the family's API key when it isn't already in
 // the environment, so the /models probe can run and return the live SKU list.
-// The value is set in the env for the probe; configureKeys persists it to .env
-// later and skips re-asking. A blank entry is fine — the static fallback covers it.
+// The value is set in the env for the probe; configureKeys returns the same key
+// for Reasonix's global .env later and skips re-asking. A blank entry is fine —
+// the static fallback covers it.
 func ensureProbeKey(probe *config.ProviderEntry, famName string) {
 	if probe.APIKeyEnv == "" || os.Getenv(probe.APIKeyEnv) != "" {
+		probe.ResolveAPIKeyFromProcessEnvForProbe()
 		return
 	}
 	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.FamilyKeyPromptFmt, famName)))
@@ -945,6 +1095,7 @@ func ensureProbeKey(probe *config.ProviderEntry, famName string) {
 	if key := strings.TrimSpace(ask(in, os.Stdout, "  "+probe.APIKeyEnv, "")); key != "" {
 		os.Setenv(probe.APIKeyEnv, key)
 	}
+	probe.ResolveAPIKeyFromProcessEnvForProbe()
 }
 
 // fetchOrFallback tries the OpenAI-compatible GET /models endpoint
@@ -1128,8 +1279,7 @@ func providerSlug(kind, baseURL string) string {
 
 // providerFamily is a wizard-only grouping of provider SKUs by vendor; it does
 // not exist in config because users editing reasonix.toml deal with SKU names
-// directly. Keys mirror the SKU name prefix (deepseek-*, mimo) so adding a new
-// preset only requires a familyOf case.
+// directly.
 type providerFamily struct {
 	key  string
 	name string
@@ -1140,8 +1290,6 @@ func familyOf(name string) providerFamily {
 	switch {
 	case strings.HasPrefix(name, "deepseek"):
 		return providerFamily{key: "deepseek", name: "DeepSeek", desc: "fast & cheap, plus a stronger Pro SKU"}
-	case strings.HasPrefix(name, "mimo"):
-		return providerFamily{key: "mimo", name: "MiMo (Xiaomi)", desc: "long-horizon agentic"}
 	default:
 		return providerFamily{key: name, name: name}
 	}
@@ -1171,7 +1319,7 @@ func promptCustomProviderManual() ([]config.ProviderEntry, error) {
 // Pre-filled values (baseURL, keyEnv, apiKey) are reused as-is when non-empty
 // so the URL-fetch flow can fall through to manual entry without re-asking
 // the user for information they've already typed. An empty apiKey is allowed
-// — the key step happens later in the wizard and .env is updated then.
+// — the key step happens later in the wizard and Reasonix's global .env is updated then.
 func promptCustomProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKey string) ([]config.ProviderEntry, error) {
 	fmt.Println()
 	if baseURL == "" {
@@ -1374,57 +1522,37 @@ func groupByFamily(providers []config.ProviderEntry) ([]string, map[string][]int
 	return order, members, info
 }
 
-// withBuiltinFamilies guarantees the wizard always offers the built-in provider
-// families (DeepSeek, MiMo) even when the loaded config replaced them — a
-// reasonix.toml that defines only [[providers]] for deepseek otherwise hides
-// MiMo from setup, since [[providers]] replaces the presets wholesale. Families
-// already present are left untouched (the user's customizations win); only the
-// missing built-in families get their default entries appended.
+// withBuiltinFamilies guarantees the wizard always offers the built-in DeepSeek
+// family even when the loaded config replaced the defaults.
+// Built-in entries whose exact name already exists in the user's config are
+// kept as-is (preserving customizations); missing built-in entries within an
+// existing family are appended so the model picker always shows the full
+// catalogue rather than only the previously selected subset.
 func withBuiltinFamilies(providers []config.ProviderEntry) []config.ProviderEntry {
-	have := map[string]bool{}
+	return withBuiltinFamiliesForLanguage(providers, "")
+}
+
+func withBuiltinFamiliesForLanguage(providers []config.ProviderEntry, pricingLanguage string) []config.ProviderEntry {
+	haveName := map[string]bool{}
 	for _, p := range providers {
-		have[familyOf(p.Name).key] = true
+		haveName[p.Name] = true
 	}
-	for _, bp := range config.Default().Providers {
-		if k := familyOf(bp.Name).key; !have[k] {
+	defaults := config.Default()
+	defaults.Language = pricingLanguage
+	defaults.ApplyDeepSeekOfficialDefaultPricing()
+	for _, bp := range defaults.Providers {
+		if !haveName[bp.Name] {
 			providers = append(providers, bp)
 		}
 	}
 	return providers
 }
 
-// promptMissingKeys re-runs the wizard's key-entry step for model refs that are
-// actually active and whose api_key_env is unset. Newly entered values are
-// appended to the reasonix-owned global .env so the chat session that follows
-// picks them up via config.Load. The user can hit Enter to skip — the chat
-// banner falls back to a one-line warning so they still see what's missing.
-// Returns a non-zero exit code only when writing the env file fails.
-func promptMissingKeys(cfg *config.Config) int {
-	missing := providersWithMissingKeys(cfg)
-	if len(missing) == 0 {
-		return 0
-	}
-	fmt.Println()
-	fmt.Println(dim("  " + i18n.M.MissingKeyIntro))
-	envLines := configureKeys(missing, os.Stdin, os.Stdout)
-	if len(envLines) == 0 {
-		return 0
-	}
-	envPath := defaultEnvTarget()
-	if err := appendEnv(envPath, envLines); err != nil {
-		fmt.Fprintln(os.Stderr, i18n.M.WriteEnvErr, err)
-		return 1
-	}
-	fmt.Printf("%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, displayPath(envPath)))
-	return 0
-}
-
 // providersWithMissingKeys returns the providers the active configuration
 // actually references (default/planner/subagent models) whose api_key_env is
-// declared but not set. Merely-available presets stay silent — a DeepSeek-only
-// user must not be prompted for MIMO_API_KEY (#3939); the chat banner still
-// warns if they later switch to a model whose key is missing. configureKeys
-// dedupes shared envs, so duplicates are fine to leave in.
+// declared but not set. Merely-available providers stay silent; the chat banner
+// still warns if users later switch to a model whose key is missing.
+// configureKeys dedupes shared envs, so duplicates are fine to leave in.
 func providersWithMissingKeys(cfg *config.Config) []config.ProviderEntry {
 	if cfg == nil {
 		return nil
@@ -1469,9 +1597,9 @@ func providersWithMissingKeys(cfg *config.Config) []config.ProviderEntry {
 // environment. For every distinct api_key_env: if the variable is already set,
 // setup asks whether to re-enter it; Enter keeps and re-pins the existing value.
 // Otherwise the user is asked once per env var (deduped across providers that
-// share one, e.g. both DeepSeek models). Returns KEY=value lines to append to
-// .env. Re-pinning matters because loadDotEnv is first-wins, so a stale key left
-// earlier in the credentials file would otherwise keep shadowing the fresh value.
+// share one, e.g. both DeepSeek models). Returns KEY=value lines for the
+// Reasonix global .env. Re-pinning keeps hand-edited or previously saved values
+// aligned with the user's latest setup choice.
 func configureKeys(selected []config.ProviderEntry, r io.Reader, w io.Writer) []string {
 	in := bufio.NewScanner(r)
 	fmt.Fprintln(w, "\n"+i18n.M.EnterAPIKeysHeader)
@@ -1534,8 +1662,7 @@ func isTTY(f *os.File) bool {
 // appendEnv merges KEY=value lines into a .env file. Existing assignments of
 // any key that's about to be written are dropped first, then the new values
 // are appended — so re-running `reasonix setup` with a corrected key replaces the
-// stale one instead of stacking duplicates (loadDotEnv is first-wins, so a
-// naive append would leave the old key in effect). The new values are also
+// stale one instead of stacking duplicates. The new values are also
 // pinned into the current process env so a chat session started right after
 // init picks up the fresh keys without a restart.
 func appendEnv(path string, lines []string) error {
@@ -1595,107 +1722,6 @@ func readStdin() string {
 	return strings.TrimSpace(string(data))
 }
 
-// welcome is the zero-arg landing screen: it reports config and key readiness,
-// then guides the user to the next concrete step.
-func welcome(version string) int {
-	src := config.SourcePath()
-
-	// Load early for the welcome/status view. config.Load also succeeds with the
-	// built-in defaults, so SourcePath is the actual "user has configured" signal.
-	cfg, cfgErr := config.Load()
-	if cfgErr != nil {
-		cfg = config.Default()
-	}
-
-	// First run on an interactive terminal: actively guide setup rather than
-	// printing a static screen and exiting. interactiveSetup owns the language
-	// prompt and welcome banner so every prompt the user sees is already
-	// localized to their choice.
-	if src == "" && isInteractive() {
-		if rc := interactiveSetup(defaultConfigTarget(), defaultEnvTarget()); rc != 0 {
-			return rc
-		}
-		// Config just written; reload so .env (and any pinned language) is
-		// picked up. If the chosen provider's key is ready, drop into chat.
-		if cfg, err := config.Load(); err == nil && cfg.Validate(cfg.DefaultModel) == nil {
-			if cfg.Language != "" {
-				i18n.DetectLanguage(cfg.Language)
-			}
-			fmt.Printf("\n"+i18n.M.StartingChatFmt+"\n\n", bold("reasonix chat"))
-			return chatREPL(nil)
-		}
-		fmt.Println("\n" + i18n.M.SetKeyHint)
-		return 0
-	}
-
-	// A real config source exists (cwd-local or user-global) on a terminal: go into
-	// chat. If any enabled provider's key isn't set yet, re-run the wizard's key-entry
-	// step inline — first run already chose language and providers, so we don't
-	// re-ask those. Skipping the prompts is still fine; the chat banner falls back
-	// to a one-line warning. Do not do this for the built-in defaults alone: that
-	// would ask for every default provider key even though the user has not opted
-	// into those providers yet.
-	if welcomeShouldPromptMissingKeys(src, cfgErr) && isInteractive() {
-		if rc := promptMissingKeys(cfg); rc != 0 {
-			return rc
-		}
-		return chatREPL(nil)
-	}
-
-	var b strings.Builder
-	b.WriteString(boxed([]string{
-		accent("◆") + " " + bold("reasonix") + "  " + dim(version),
-		dim(i18n.M.Subtitle),
-	}))
-
-	switch {
-	case src == "":
-		fmt.Fprintf(&b, "\n  %s %s\n", padRight(i18n.M.ConfigLabel, 8), dim(i18n.M.ConfigNotFound))
-	case cfgErr != nil:
-		fmt.Fprintf(&b, "\n  %s %s\n", padRight(i18n.M.ConfigLabel, 8), yellow(fmt.Sprintf(i18n.M.ConfigErrorFmt, src, cfgErr)))
-	default:
-		fmt.Fprintf(&b, "\n  %s %s\n", padRight(i18n.M.ConfigLabel, 8), src)
-	}
-
-	ready := 0
-	for i, p := range cfg.Providers {
-		label := i18n.M.ModelsLabel
-		if i > 0 {
-			label = ""
-		}
-		dot, status := yellow("●"), dim(i18n.M.NoKey)
-		if p.APIKey() != "" {
-			dot, status = green("●"), green(i18n.M.Ready)
-			ready++
-		}
-		fmt.Fprintf(&b, "  %s %s %s%s\n", padRight(label, 8), dot, padRight(p.Name, 16), status)
-	}
-
-	fmt.Fprintf(&b, "\n  %s %s\n", accent("▌"), bold(i18n.M.GetStarted))
-	n := 1
-	step := func(cmd, desc string) {
-		fmt.Fprintf(&b, "    %s  %s %s\n", accent(fmt.Sprint(n)), padRight(cmd, 16), dim(desc))
-		n++
-	}
-	if src == "" {
-		step("reasonix setup", i18n.M.StepScaffold)
-	}
-	if ready == 0 {
-		step(i18n.M.StepSetKey, i18n.M.StepSetKeyHint)
-	}
-	step("reasonix chat", i18n.M.StepChatDesc)
-	step(`reasonix run "task"`, i18n.M.StepRunDesc)
-
-	fmt.Fprintf(&b, "\n  %s\n", dim(i18n.M.HelpFooter))
-
-	fmt.Print(b.String())
-	return 0
-}
-
-func welcomeShouldPromptMissingKeys(src string, cfgErr error) bool {
-	return strings.TrimSpace(src) != "" && cfgErr == nil
-}
-
 func usage() {
 	fmt.Print(i18n.M.UsageBody)
 }
@@ -1708,6 +1734,8 @@ func configCommand(args []string) int {
 	switch args[0] {
 	case "auto-plan":
 		return configAutoPlanCommand(args[1:])
+	case "reasoning-language":
+		return configReasoningLanguageCommand(args[1:])
 	default:
 		configUsage()
 		return 2
@@ -1716,8 +1744,12 @@ func configCommand(args []string) int {
 
 func configAutoPlanCommand(args []string) int {
 	fs := flag.NewFlagSet("config auto-plan", flag.ContinueOnError)
-	local := fs.Bool("local", false, "write ./reasonix.toml instead of the user config")
+	local := fs.Bool("local", false, "unsupported; auto-plan is user-level only")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *local {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "auto-plan is user-level only; --local is not supported")
 		return 2
 	}
 	rest := fs.Args()
@@ -1737,31 +1769,9 @@ func configAutoPlanCommand(args []string) int {
 		return 0
 	}
 	path := config.UserConfigPath()
-	if *local {
-		path = "reasonix.toml"
-	}
 	if path == "" {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "cannot resolve config path")
 		return 1
-	}
-	if *local {
-		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-			probe := config.Default()
-			if err := probe.SetAutoPlan(rest[0]); err != nil {
-				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-				return 2
-			}
-			mode, err := config.SaveMinimalProjectAutoPlan(path, rest[0])
-			if err != nil {
-				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-				return 1
-			}
-			fmt.Printf("auto_plan = %q (%s)\n", mode, displayPath(path))
-			return 0
-		} else if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
 	}
 	cfg := config.LoadForEdit(path)
 	if err := cfg.SetAutoPlan(rest[0]); err != nil {
@@ -1776,14 +1786,81 @@ func configAutoPlanCommand(args []string) int {
 	return 0
 }
 
+func configReasoningLanguageCommand(args []string) int {
+	fs := flag.NewFlagSet("config reasoning-language", flag.ContinueOnError)
+	local := fs.Bool("local", false, "write ./reasonix.toml instead of the user config")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	rest := fs.Args()
+	if len(rest) > 1 {
+		configReasoningLanguageUsage()
+		return 2
+	}
+	if len(rest) == 0 {
+		cfg, err := config.Load()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		fmt.Printf("reasoning_language = %q\n", cliReasoningLanguageMode(cfg.ReasoningLanguage()))
+		return 0
+	}
+	mode, err := parseCLIReasoningLanguage(rest[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	path := config.UserConfigPath()
+	if *local {
+		path = "reasonix.toml"
+	}
+	if path == "" {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "cannot resolve config path")
+		return 1
+	}
+	if *local {
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			lang, err := config.SaveMinimalProjectReasoningLanguage(path, mode)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+				return 1
+			}
+			fmt.Printf("reasoning_language = %q (%s)\n", lang, displayPath(path))
+			return 0
+		} else if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+	}
+	cfg := config.LoadForEdit(path)
+	if err := cfg.SetReasoningLanguage(mode); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 1
+	}
+	fmt.Printf("reasoning_language = %q (%s)\n", cfg.ReasoningLanguage(), displayPath(path))
+	return 0
+}
+
 func configUsage() {
 	fmt.Print(`Usage:
-  reasonix config auto-plan [--local] [off|on]
+  reasonix config auto-plan [off|on]
+  reasonix config reasoning-language [--local] [auto|zh|en]
 `)
 }
 
 func configAutoPlanUsage() {
 	fmt.Print(`Usage:
-  reasonix config auto-plan [--local] [off|on]
+  reasonix config auto-plan [off|on]
+`)
+}
+
+func configReasoningLanguageUsage() {
+	fmt.Print(`Usage:
+  reasonix config reasoning-language [--local] [auto|zh|en]
 `)
 }

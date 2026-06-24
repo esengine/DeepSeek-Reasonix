@@ -91,10 +91,50 @@ func TestSanitizeToolPairingLeavesWellFormedUnchanged(t *testing.T) {
 	if len(out) != len(in) {
 		t.Fatalf("well-formed history changed length: %d -> %d", len(in), len(out))
 	}
+	if &out[0] != &in[0] {
+		t.Fatalf("well-formed history should return the input slice without allocating")
+	}
 	for i := range in {
 		if out[i].Role != in[i].Role || out[i].Content != in[i].Content || out[i].ToolCallID != in[i].ToolCallID {
 			t.Fatalf("well-formed message %d mutated: %+v -> %+v", i, in[i], out[i])
 		}
+	}
+}
+
+func TestNormalizeSessionMessagesPreservesStandaloneToolMessage(t *testing.T) {
+	in := []Message{
+		{Role: RoleSystem, Content: "sys"},
+		{Role: RoleUser, Content: "run it"},
+		{Role: RoleTool, ToolCallID: "c1", Name: "bash", Content: "large output"},
+	}
+	out := NormalizeSessionMessages(in)
+	if len(out) != len(in) {
+		t.Fatalf("session normalization changed length: %d -> %d", len(in), len(out))
+	}
+	if &out[0] != &in[0] {
+		t.Fatalf("session-safe orphan tool should keep the input slice unchanged")
+	}
+	if out[2].Role != RoleTool || out[2].Content != "large output" {
+		t.Fatalf("standalone tool message was not preserved: %+v", out)
+	}
+}
+
+func TestNormalizeSessionMessagesPreservesExtraToolResult(t *testing.T) {
+	in := []Message{
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c1", Name: "bash"}}},
+		{Role: RoleTool, ToolCallID: "c1", Name: "bash", Content: "ok"},
+		{Role: RoleTool, ToolCallID: "ghost", Name: "bash", Content: "saved extra output"},
+	}
+	out := NormalizeSessionMessages(in)
+	if len(out) != len(in) {
+		t.Fatalf("session normalization changed length: %d -> %d", len(in), len(out))
+	}
+	if out[2].ToolCallID != "ghost" || out[2].Content != "saved extra output" {
+		t.Fatalf("extra stored tool result was not preserved: %+v", out)
+	}
+	wire := SanitizeToolPairing(in)
+	if len(wire) != 2 {
+		t.Fatalf("wire sanitize should still drop the extra orphan result, got %+v", wire)
 	}
 }
 
@@ -123,6 +163,63 @@ func TestSanitizeToolPairingClosesTruncatedArgs(t *testing.T) {
 		if in[0].ToolCalls[0].Arguments != c.in {
 			t.Errorf("stored history mutated for %q: %q", c.in, in[0].ToolCalls[0].Arguments)
 		}
+	}
+}
+
+func TestBackfillToolCallNamesByID(t *testing.T) {
+	calls := []ToolCall{{ID: "c1"}, {ID: "c2", Name: "grep"}}
+	results := []Message{
+		{Role: RoleTool, ToolCallID: "c2", Name: "grep"},
+		{Role: RoleTool, ToolCallID: "c1", Name: "ls"}, // returned out of call order
+	}
+	out := backfillToolCallNames(calls, results)
+	if out[0].Name != "ls" {
+		t.Fatalf("empty name not backfilled by id: got %q want ls", out[0].Name)
+	}
+	if out[1].Name != "grep" {
+		t.Fatalf("non-empty name clobbered: got %q want grep", out[1].Name)
+	}
+	if calls[0].Name != "" {
+		t.Fatalf("input slice mutated: %+v", calls)
+	}
+}
+
+func TestBackfillToolCallNamesPositional(t *testing.T) {
+	// Empty ids defeat idDistinct, so names pair by position instead.
+	calls := []ToolCall{{}, {}}
+	results := []Message{{Role: RoleTool, Name: "ls"}, {Role: RoleTool, Name: "cat"}}
+	out := backfillToolCallNames(calls, results)
+	if out[0].Name != "ls" || out[1].Name != "cat" {
+		t.Fatalf("positional backfill wrong: %+v", out)
+	}
+}
+
+func TestBackfillToolCallNamesUnpairedStaysEmpty(t *testing.T) {
+	out := backfillToolCallNames([]ToolCall{{ID: "c1"}}, nil)
+	if out[0].Name != "" {
+		t.Fatalf("unpaired call should keep its empty name, got %q", out[0].Name)
+	}
+}
+
+func TestBackfillToolCallNamesNoEmptyReturnsInput(t *testing.T) {
+	calls := []ToolCall{{ID: "c1", Name: "ls"}, {ID: "c2", Name: "grep"}}
+	out := backfillToolCallNames(calls, []Message{{Role: RoleTool, ToolCallID: "c1", Name: "x"}})
+	if &out[0] != &calls[0] {
+		t.Fatalf("no empty names: want the input slice back without copying")
+	}
+}
+
+func TestSanitizeToolPairingBackfillsEmptyName(t *testing.T) {
+	in := []Message{
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c1"}}}, // old session: name lost
+		{Role: RoleTool, ToolCallID: "c1", Name: "ls", Content: "main.go"},
+	}
+	out := SanitizeToolPairing(in)
+	if out[0].ToolCalls[0].Name != "ls" {
+		t.Fatalf("empty tool-call name not backfilled on replay: %+v", out[0].ToolCalls)
+	}
+	if in[0].ToolCalls[0].Name != "" {
+		t.Fatalf("stored history mutated: %+v", in[0].ToolCalls)
 	}
 }
 
@@ -165,6 +262,14 @@ func TestPricingCostCalculation(t *testing.T) {
 	got := p.Cost(u)
 	if got != 3.5 {
 		t.Errorf("Cost = %f, want 3.5", got)
+	}
+}
+
+func TestPricingCostFallsBackToPromptTokensAsMiss(t *testing.T) {
+	p := &Pricing{Input: 2.0, Output: 10.0}
+	u := &Usage{PromptTokens: 500_000, CompletionTokens: 100_000}
+	if got := p.Cost(u); got != 2.0 {
+		t.Errorf("Cost = %f, want 2.0", got)
 	}
 }
 

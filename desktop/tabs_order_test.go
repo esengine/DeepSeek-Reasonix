@@ -1,8 +1,17 @@
 package main
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"reasonix/internal/config"
+	"reasonix/internal/control"
+	"reasonix/internal/event"
 )
 
 func testAppWithOrderedTabs(t *testing.T, active string, ids ...string) *App {
@@ -43,6 +52,27 @@ func assertTabIDs(t *testing.T, got []TabMeta, want ...string) {
 	}
 }
 
+type resetCountingSession struct {
+	control.SessionAPI
+	resets int
+}
+
+func (s *resetCountingSession) ResetPlannerSession() {
+	s.resets++
+}
+
+type snapshotObservingSession struct {
+	control.SessionAPI
+	onSnapshot func()
+}
+
+func (s *snapshotObservingSession) Snapshot() error {
+	if s.onSnapshot != nil {
+		s.onSnapshot()
+	}
+	return nil
+}
+
 func TestListTabsKeepsExplicitOrderWhenActiveChanges(t *testing.T) {
 	app := testAppWithOrderedTabs(t, "b", "a", "b", "c")
 
@@ -53,6 +83,370 @@ func TestListTabsKeepsExplicitOrderWhenActiveChanges(t *testing.T) {
 	assertTabIDs(t, app.ListTabs(), "a", "b", "c")
 	if got := app.activeTabID; got != "c" {
 		t.Fatalf("active tab = %q, want c", got)
+	}
+}
+
+func TestSetActiveTabDoesNotResetPlannerSession(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	ctrlA := &resetCountingSession{SessionAPI: control.New(control.Options{Label: "a"})}
+	ctrlB := &resetCountingSession{SessionAPI: control.New(control.Options{Label: "b"})}
+	defer ctrlA.Close()
+	defer ctrlB.Close()
+	app := testAppWithOrderedTabs(t, "a", "a", "b")
+	app.tabs["a"].Ctrl = ctrlA
+	app.tabs["b"].Ctrl = ctrlB
+
+	if err := app.SetActiveTab("b"); err != nil {
+		t.Fatalf("SetActiveTab: %v", err)
+	}
+	if ctrlA.resets != 0 || ctrlB.resets != 0 {
+		t.Fatalf("planner resets on tab activation = active:%d inactive:%d, want 0", ctrlA.resets, ctrlB.resets)
+	}
+}
+
+func TestSingleSurfaceTabsFileKeepsActiveEntry(t *testing.T) {
+	f := desktopTabsFile{
+		Tabs: []desktopTabEntry{
+			{ID: "a", Scope: "global", TopicID: "topic-a"},
+			{ID: "b", Scope: "project", WorkspaceRoot: "/tmp/project", TopicID: "topic-b"},
+			{ID: "c", Scope: "global", TopicID: "topic-c"},
+		},
+		ActiveTab: "b",
+	}
+
+	got := singleSurfaceTabsFile(f)
+	if len(got.Tabs) != 1 || got.Tabs[0].ID != "b" || got.ActiveTab != "b" {
+		t.Fatalf("single-surface tabs = %+v, want only active b", got)
+	}
+}
+
+func TestSetDesktopLayoutStyleAppliesPolicyAfterWorkspaceAlias(t *testing.T) {
+	app := testAppWithOrderedTabs(t, "b", "a", "b", "c")
+
+	if err := app.SetDesktopLayoutStyle("workspace"); err != nil {
+		t.Fatalf("SetDesktopLayoutStyle(workspace): %v", err)
+	}
+
+	assertTabIDs(t, app.ListTabs(), "b")
+	if got := loadTabsFile(); len(got.Tabs) != 1 || got.Tabs[0].ID != "b" || got.ActiveTab != "b" {
+		t.Fatalf("persisted tabs after workspace alias = %+v, want only active b", got)
+	}
+}
+
+func TestKeepOnlyVisibleTabDetachesRunningHiddenTab(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := filepath.Join(dir, "running.jsonl")
+	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	ctrl := control.New(control.Options{Runner: runner, SessionDir: dir, SessionPath: path, Label: "running", Sink: event.Discard})
+	running := &WorkspaceTab{
+		ID:            "running",
+		Scope:         "global",
+		WorkspaceRoot: globalTabWorkspaceRoot(),
+		SessionPath:   path,
+		Ctrl:          ctrl,
+		Ready:         true,
+		sink:          &tabEventSink{tabID: "running"},
+		disabledMCP:   map[string]ServerView{},
+	}
+	target := &WorkspaceTab{ID: "target", Scope: "global", Ready: true, disabledMCP: map[string]ServerView{}}
+	app := &App{
+		tabs:             map[string]*WorkspaceTab{"running": running, "target": target},
+		tabOrder:         []string{"running", "target"},
+		activeTabID:      "running",
+		detachedSessions: map[string]*WorkspaceTab{},
+	}
+
+	ctrl.Submit("block")
+	<-runner.started
+	if _, err := app.keepOnlyVisibleTab("target"); err != nil {
+		t.Fatalf("keepOnlyVisibleTab: %v", err)
+	}
+	assertTabIDs(t, app.ListTabs(), "target")
+	if !ctrl.Running() {
+		t.Fatal("single-surface pruning cancelled a running controller")
+	}
+	if _, ok := app.detachedSessions[sessionRuntimeKey(path)]; !ok {
+		t.Fatalf("detached runtime missing for %q", path)
+	}
+	if got := loadTabsFile(); len(got.Tabs) != 1 || got.Tabs[0].ID != "target" {
+		t.Fatalf("persisted tabs after pruning = %+v, want only target", got)
+	}
+
+	close(runner.release)
+	waitNotRunning(t, ctrl)
+	ctrl.Close()
+}
+
+func TestKeepOnlyVisibleTabCancelsBuildingHiddenTab(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	cancelled := false
+	building := &WorkspaceTab{
+		ID:          "building",
+		Scope:       "global",
+		Ready:       false,
+		buildCancel: func() { cancelled = true },
+		sink:        &tabEventSink{tabID: "building"},
+		disabledMCP: map[string]ServerView{},
+	}
+	target := &WorkspaceTab{ID: "target", Scope: "global", Ready: true, disabledMCP: map[string]ServerView{}}
+	app := &App{
+		tabs:        map[string]*WorkspaceTab{"building": building, "target": target},
+		tabOrder:    []string{"building", "target"},
+		activeTabID: "building",
+	}
+
+	if _, err := app.keepOnlyVisibleTab("target"); err != nil {
+		t.Fatalf("keepOnlyVisibleTab: %v", err)
+	}
+
+	assertTabIDs(t, app.ListTabs(), "target")
+	if !cancelled {
+		t.Fatal("building tab build was not cancelled")
+	}
+	if !building.removed {
+		t.Fatal("building tab was not marked removed")
+	}
+}
+
+func TestClearTabBuildCancelKeepsSuccessfulControllerContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tab := &WorkspaceTab{ID: "tab", buildGeneration: 1, buildCancel: cancel}
+	app := &App{}
+
+	app.clearTabBuildCancel(tab, 1, cancel, true)
+
+	if tab.buildCancel != nil {
+		t.Fatal("build cancel was not cleared")
+	}
+	select {
+	case <-ctx.Done():
+		t.Fatal("successful tab build context was cancelled")
+	default:
+	}
+}
+
+func TestClearTabBuildCancelCancelsAbandonedBuildContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	tab := &WorkspaceTab{ID: "tab", buildGeneration: 1, buildCancel: cancel}
+	app := &App{}
+
+	app.clearTabBuildCancel(tab, 1, cancel, false)
+
+	if tab.buildCancel != nil {
+		t.Fatal("build cancel was not cleared")
+	}
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("abandoned tab build context was not cancelled")
+	}
+}
+
+func TestAttachExistingSessionRuntimeSkipsRemovedTab(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := filepath.Join(dir, "detached.jsonl")
+	key := sessionRuntimeKey(path)
+	detachedCtrl := control.New(control.Options{SessionDir: dir, SessionPath: path, Label: "detached", Sink: event.Discard})
+	defer detachedCtrl.Close()
+	detached := &WorkspaceTab{
+		ID:            "detached",
+		Scope:         "global",
+		SessionPath:   path,
+		Ctrl:          detachedCtrl,
+		Ready:         true,
+		SharedHostKey: "detached-host",
+		sink:          &tabEventSink{tabID: "detached"},
+		disabledMCP:   map[string]ServerView{},
+	}
+	target := &WorkspaceTab{
+		ID:          "target",
+		Scope:       "global",
+		SessionPath: path,
+		removed:     true,
+		sink:        &tabEventSink{tabID: "target"},
+		disabledMCP: map[string]ServerView{},
+	}
+	app := &App{
+		tabs:             map[string]*WorkspaceTab{},
+		detachedSessions: map[string]*WorkspaceTab{key: detached},
+	}
+
+	if app.attachExistingSessionRuntime(target, path, nil) {
+		t.Fatal("removed tab reattached a detached runtime")
+	}
+	if app.detachedSessions[key] != detached {
+		t.Fatal("detached runtime was removed")
+	}
+	if target.Ctrl != nil || target.Ready {
+		t.Fatal("removed target tab was mutated")
+	}
+}
+
+func TestRemoveWorkspaceDropsVisibleTabsAndPersistedEntries(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	projectRoot := t.TempDir()
+	if err := addProject(projectRoot, "Project"); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"project": {ID: "project", Scope: "project", WorkspaceRoot: projectRoot, TopicID: "topic-project", Ready: true, disabledMCP: map[string]ServerView{}},
+			"global":  {ID: "global", Scope: "global", WorkspaceRoot: globalTabWorkspaceRoot(), TopicID: "topic-global", Ready: true, disabledMCP: map[string]ServerView{}},
+		},
+		tabOrder:         []string{"project", "global"},
+		activeTabID:      "project",
+		detachedSessions: map[string]*WorkspaceTab{},
+	}
+	app.mu.Lock()
+	app.saveTabsLocked()
+	app.mu.Unlock()
+
+	if err := app.RemoveWorkspace(projectRoot); err != nil {
+		t.Fatalf("RemoveWorkspace: %v", err)
+	}
+	assertTabIDs(t, app.ListTabs(), "global")
+	if got := app.ListWorkspaces(); len(got) != 0 {
+		t.Fatalf("workspaces after remove = %+v, want none", got)
+	}
+	if got := loadTabsFile(); len(got.Tabs) != 1 || got.Tabs[0].ID != "global" {
+		t.Fatalf("persisted tabs after workspace remove = %+v, want only global", got)
+	}
+}
+
+func TestRemoveWorkspaceSnapshotsProjectTabBeforeRemovingBinding(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	projectRoot := t.TempDir()
+	if err := addProject(projectRoot, "Project"); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"project": {ID: "project", Scope: "project", WorkspaceRoot: projectRoot, TopicID: "topic-project", Ready: true, disabledMCP: map[string]ServerView{}},
+			"global":  {ID: "global", Scope: "global", WorkspaceRoot: globalTabWorkspaceRoot(), TopicID: "topic-global", Ready: true, disabledMCP: map[string]ServerView{}},
+		},
+		tabOrder:         []string{"project", "global"},
+		activeTabID:      "project",
+		detachedSessions: map[string]*WorkspaceTab{},
+	}
+	sawBindingDuringSnapshot := false
+	app.tabs["project"].Ctrl = &snapshotObservingSession{
+		SessionAPI: control.New(control.Options{Label: "project"}),
+		onSnapshot: func() {
+			sawBindingDuringSnapshot = app.tabs["project"] != nil
+		},
+	}
+
+	if err := app.RemoveWorkspace(projectRoot); err != nil {
+		t.Fatalf("RemoveWorkspace: %v", err)
+	}
+	if !sawBindingDuringSnapshot {
+		t.Fatal("project tab was removed from app.tabs before Snapshot")
+	}
+}
+
+func TestRemoveWorkspaceRejectsRunningProjectRuntime(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	projectRoot := t.TempDir()
+	if err := addProject(projectRoot, "Project"); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	dir := desktopSessionDir(projectRoot)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir project sessions: %v", err)
+	}
+	path := filepath.Join(dir, "running.jsonl")
+	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	ctrl := control.New(control.Options{Runner: runner, SessionDir: dir, SessionPath: path, Label: "running", Sink: event.Discard})
+	project := &WorkspaceTab{
+		ID:            "project",
+		Scope:         "project",
+		WorkspaceRoot: projectRoot,
+		TopicID:       "topic-project",
+		SessionPath:   path,
+		Ctrl:          ctrl,
+		Ready:         true,
+		sink:          &tabEventSink{tabID: "project"},
+		disabledMCP:   map[string]ServerView{},
+	}
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"project": project,
+			"global":  {ID: "global", Scope: "global", WorkspaceRoot: globalTabWorkspaceRoot(), Ready: true, disabledMCP: map[string]ServerView{}},
+		},
+		tabOrder:         []string{"project", "global"},
+		activeTabID:      "project",
+		detachedSessions: map[string]*WorkspaceTab{},
+	}
+
+	ctrl.Submit("block")
+	<-runner.started
+	if err := app.RemoveWorkspace(projectRoot); err == nil {
+		t.Fatal("RemoveWorkspace succeeded with a running project session")
+	}
+	if got := app.ListWorkspaces(); len(got) != 1 || got[0].Path != normalizeProjectRoot(projectRoot) {
+		t.Fatalf("workspaces after rejected remove = %+v, want project retained", got)
+	}
+
+	close(runner.release)
+	waitNotRunning(t, ctrl)
+	ctrl.Close()
+}
+
+func TestListTabsRepairsStaleOrderWithoutRacing(t *testing.T) {
+	app := testAppWithOrderedTabs(t, "a", "a", "b", "c")
+	app.tabOrder = []string{"a"}
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	errs := make(chan string, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 100; j++ {
+				if got := strings.Join(tabIDs(app.ListTabs()), ","); got != "a,b,c" {
+					errs <- got
+					return
+				}
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for got := range errs {
+		t.Fatalf("tab ids = %q, want a,b,c", got)
+	}
+
+	if got := strings.Join(app.tabOrder, ","); got != "a,b,c" {
+		t.Fatalf("repaired tab order = %q, want a,b,c", got)
+	}
+}
+
+func TestSaveTabsSkipsOlderSnapshot(t *testing.T) {
+	app := testAppWithOrderedTabs(t, "a", "a", "b")
+
+	app.mu.Lock()
+	dir, oldEntries, oldActiveID, oldVersion := app.saveTabsCollectLocked()
+	app.activeTabID = "b"
+	_, newEntries, newActiveID, newVersion := app.saveTabsCollectLocked()
+	app.mu.Unlock()
+
+	app.saveTabsWrite(dir, newEntries, newActiveID, newVersion)
+	app.saveTabsWrite(dir, oldEntries, oldActiveID, oldVersion)
+
+	if got := loadTabsFile().ActiveTab; got != "b" {
+		t.Fatalf("persisted active tab = %q, want b", got)
 	}
 }
 
@@ -85,6 +479,224 @@ func TestCloseActiveTabChoosesNeighborByOrder(t *testing.T) {
 	if got := app.activeTabID; got != "a" {
 		t.Fatalf("active tab after closing last = %q, want a", got)
 	}
+}
+
+func TestCloseActiveTabDoesNotResetSurvivorPlannerSession(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	ctrlClosed := control.New(control.Options{Label: "closed"})
+	ctrlSurvivor := &resetCountingSession{SessionAPI: control.New(control.Options{Label: "survivor"})}
+	defer ctrlSurvivor.Close()
+	app := testAppWithOrderedTabs(t, "a", "a", "b")
+	app.tabs["a"].Ctrl = ctrlClosed
+	app.tabs["b"].Ctrl = ctrlSurvivor
+
+	if err := app.CloseTab("a"); err != nil {
+		t.Fatalf("CloseTab: %v", err)
+	}
+	if ctrlSurvivor.resets != 0 {
+		t.Fatalf("survivor planner resets = %d, want 0", ctrlSurvivor.resets)
+	}
+}
+
+func TestCloseRunningTabDetachesSessionRuntime(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := filepath.Join(dir, "running.jsonl")
+	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	ctrl := control.New(control.Options{Runner: runner, SessionDir: dir, SessionPath: path, Label: "running", Sink: event.Discard})
+	tab := &WorkspaceTab{
+		ID:            "running",
+		Scope:         "global",
+		WorkspaceRoot: globalTabWorkspaceRoot(),
+		SessionPath:   path,
+		Ctrl:          ctrl,
+		Ready:         true,
+		sink:          &tabEventSink{tabID: "running"},
+		disabledMCP:   map[string]ServerView{},
+	}
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"running": tab,
+			"other":   {ID: "other", Scope: "global", Ready: true, disabledMCP: map[string]ServerView{}},
+		},
+		tabOrder:         []string{"running", "other"},
+		activeTabID:      "running",
+		detachedSessions: map[string]*WorkspaceTab{},
+	}
+
+	ctrl.Submit("block")
+	<-runner.started
+	if err := app.CloseTab("running"); err != nil {
+		t.Fatalf("CloseTab(running): %v", err)
+	}
+	if !ctrl.Running() {
+		t.Fatal("closing a visible tab cancelled its running controller")
+	}
+	if _, ok := app.detachedSessions[sessionRuntimeKey(path)]; !ok {
+		t.Fatalf("detached runtime missing for %q", path)
+	}
+	if tab.sink.ctx != nil {
+		t.Fatal("detached tab sink should stop emitting to the closed view")
+	}
+
+	close(runner.release)
+	waitNotRunning(t, ctrl)
+	ctrl.Close()
+}
+
+func TestBuildTabControllerReattachesDetachedSessionRuntime(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := desktopSessionDir(globalTabWorkspaceRoot())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := filepath.Join(dir, "reattach.jsonl")
+	oldSink := &tabEventSink{tabID: "old"}
+	oldCtrl := control.New(control.Options{SessionDir: dir, SessionPath: path, Label: "detached", Sink: oldSink})
+	defer oldCtrl.Close()
+	app := NewApp()
+	app.detachedSessions[sessionRuntimeKey(path)] = &WorkspaceTab{
+		ID:            "old",
+		Scope:         "global",
+		WorkspaceRoot: globalTabWorkspaceRoot(),
+		SessionPath:   path,
+		Ctrl:          oldCtrl,
+		Label:         "detached",
+		Ready:         true,
+		sink:          oldSink,
+		model:         "detached-model",
+		disabledMCP:   map[string]ServerView{},
+	}
+	tab := app.createTabEntryWithID("global", globalTabWorkspaceRoot(), "", "new")
+	tab.SessionPath = path
+	tab.sink = &tabEventSink{tabID: "new", app: app}
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	app.buildTabController(tab)
+	if tab.Ctrl != oldCtrl {
+		t.Fatalf("reattached controller = %p, want detached %p", tab.Ctrl, oldCtrl)
+	}
+	if tab.sink != oldSink {
+		t.Fatalf("reattached sink = %p, want detached %p", tab.sink, oldSink)
+	}
+	if oldSink.tabID != "new" {
+		t.Fatalf("sink tab id = %q, want new", oldSink.tabID)
+	}
+	if _, ok := app.detachedSessions[sessionRuntimeKey(path)]; ok {
+		t.Fatal("detached runtime was not removed after reattach")
+	}
+}
+
+func TestBuildTabControllerReusesOpenSessionPathRuntime(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := desktopSessionDir(globalTabWorkspaceRoot())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := filepath.Join(dir, "open-runtime.jsonl")
+	oldSink := &tabEventSink{tabID: "old"}
+	oldCtrl := control.New(control.Options{SessionDir: dir, SessionPath: path, Label: "open", Sink: oldSink})
+	defer oldCtrl.Close()
+	app := NewApp()
+	oldTab := &WorkspaceTab{
+		ID:            "old",
+		Scope:         "global",
+		WorkspaceRoot: globalTabWorkspaceRoot(),
+		SessionPath:   path,
+		Ctrl:          oldCtrl,
+		Label:         "open",
+		Ready:         true,
+		sink:          oldSink,
+		disabledMCP:   map[string]ServerView{},
+	}
+	tab := app.createTabEntryWithID("global", globalTabWorkspaceRoot(), "", "new")
+	tab.SessionPath = path
+	tab.sink = &tabEventSink{tabID: "new", app: app}
+	app.tabs[oldTab.ID] = oldTab
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{oldTab.ID, tab.ID}
+	app.activeTabID = tab.ID
+
+	app.buildTabController(tab)
+	if tab.Ctrl != oldCtrl {
+		t.Fatalf("reused controller = %p, want open %p", tab.Ctrl, oldCtrl)
+	}
+	if oldSink.tabID != "new" {
+		t.Fatalf("sink tab id = %q, want new", oldSink.tabID)
+	}
+	if _, ok := app.tabs[oldTab.ID]; ok {
+		t.Fatal("source tab for reused runtime should be removed")
+	}
+}
+
+func TestOpenGlobalTabResolvesTopicToLatestSessionRuntime(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := desktopSessionDir(globalTabWorkspaceRoot())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	topicID := "topic_multi_session"
+	topicTitle := "Multi session topic"
+	oldPath := writeTopicSessionWithPrompt(t, dir, "old.jsonl", topicID, topicTitle, "", "old session prompt", time.Now().Add(-2*time.Hour))
+	newPath := writeTopicSessionWithPrompt(t, dir, "new.jsonl", topicID, topicTitle, "", "new session prompt", time.Now().Add(-time.Hour))
+
+	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	oldSink := &tabEventSink{tabID: "topic-tab"}
+	oldCtrl := control.New(control.Options{Runner: runner, SessionDir: dir, SessionPath: oldPath, Label: "old", Sink: oldSink})
+	defer oldCtrl.Close()
+	app := NewApp()
+	oldSink.app = app
+	oldTab := &WorkspaceTab{
+		ID:            "topic-tab",
+		Scope:         "global",
+		WorkspaceRoot: globalTabWorkspaceRoot(),
+		TopicID:       topicID,
+		TopicTitle:    topicTitle,
+		SessionPath:   oldPath,
+		Ctrl:          oldCtrl,
+		Ready:         true,
+		sink:          oldSink,
+		disabledMCP:   map[string]ServerView{},
+	}
+	app.tabs[oldTab.ID] = oldTab
+	app.tabOrder = []string{oldTab.ID}
+	app.activeTabID = oldTab.ID
+
+	oldCtrl.Submit("keep old runtime running")
+	<-runner.started
+
+	meta, err := app.OpenGlobalTab(topicID)
+	if err != nil {
+		t.Fatalf("OpenGlobalTab: %v", err)
+	}
+	if meta.ID != oldTab.ID {
+		t.Fatalf("OpenGlobalTab reused tab %q, want %q", meta.ID, oldTab.ID)
+	}
+	if !oldCtrl.Running() {
+		t.Fatal("old session runtime was cancelled while selecting topic")
+	}
+	if detached := app.detachedSessions[sessionRuntimeKey(oldPath)]; detached == nil || detached.Ctrl != oldCtrl {
+		t.Fatalf("old runtime was not detached under its session path: %+v", detached)
+	}
+	visible := app.tabs[oldTab.ID]
+	if visible == nil || visible.Ctrl == nil {
+		t.Fatalf("visible tab was not rebuilt: %+v", visible)
+	}
+	if got := filepath.Clean(visible.Ctrl.SessionPath()); got != filepath.Clean(newPath) {
+		t.Fatalf("visible session path = %q, want %q", got, newPath)
+	}
+	history := visible.Ctrl.History()
+	if len(history) == 0 || history[0].Content != "new session prompt" {
+		t.Fatalf("visible history = %+v, want latest session prompt", history)
+	}
+
+	close(runner.release)
+	waitNotRunning(t, oldCtrl)
 }
 
 func TestReorderTabsRejectsInvalidOrder(t *testing.T) {

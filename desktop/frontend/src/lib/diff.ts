@@ -1,4 +1,9 @@
-export type DiffRow = { type: "ctx" | "add" | "del"; text: string };
+export type DiffRow = {
+  type: "ctx" | "add" | "del";
+  text: string;
+  oldLine?: number;
+  newLine?: number;
+};
 
 // diffLines is a classic LCS line diff. Used by the diff seam to render edit-tool
 // before/after; a real editor (Monaco/CodeMirror merge) would replace the
@@ -17,21 +22,77 @@ export function diffLines(a: string, b: string): DiffRow[] {
   const rows: DiffRow[] = [];
   let i = 0;
   let j = 0;
+  let oldLine = 1;
+  let newLine = 1;
   while (i < n && j < m) {
     if (x[i] === y[j]) {
-      rows.push({ type: "ctx", text: x[i] });
+      rows.push({ type: "ctx", text: x[i], oldLine, newLine });
       i++;
       j++;
+      oldLine++;
+      newLine++;
     } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-      rows.push({ type: "del", text: x[i] });
+      rows.push({ type: "del", text: x[i], oldLine });
       i++;
+      oldLine++;
     } else {
-      rows.push({ type: "add", text: y[j] });
+      rows.push({ type: "add", text: y[j], newLine });
       j++;
+      newLine++;
     }
   }
-  while (i < n) rows.push({ type: "del", text: x[i++] });
-  while (j < m) rows.push({ type: "add", text: y[j++] });
+  while (i < n) {
+    rows.push({ type: "del", text: x[i++], oldLine });
+    oldLine++;
+  }
+  while (j < m) {
+    rows.push({ type: "add", text: y[j++], newLine });
+    newLine++;
+  }
+  return rows;
+}
+
+const hunkHeader = /^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/;
+
+// diffRowsFromUnifiedDiff renders an already-computed unified diff while keeping
+// the real hunk line numbers. This is used when the backend previewed a writer
+// tool against the whole file, so the UI does not have to re-diff tiny args
+// snippets and accidentally restart line numbers at 1.
+export function diffRowsFromUnifiedDiff(diff: string): DiffRow[] {
+  const rows: DiffRow[] = [];
+  let oldLine = 0;
+  let newLine = 0;
+  let inHunk = false;
+
+  const lines = diff.endsWith("\n") ? diff.slice(0, -1).split("\n") : diff.split("\n");
+  for (const line of lines) {
+    const header = hunkHeader.exec(line);
+    if (header) {
+      oldLine = Number(header[1]);
+      newLine = Number(header[2]);
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk) continue;
+    if (line.startsWith("\\ No newline")) continue;
+
+    const marker = line[0];
+    const text = marker === " " || marker === "+" || marker === "-" ? line.slice(1) : line;
+    if (marker === "+") {
+      rows.push({ type: "add", text, newLine });
+      newLine++;
+      continue;
+    }
+    if (marker === "-") {
+      rows.push({ type: "del", text, oldLine });
+      oldLine++;
+      continue;
+    }
+    rows.push({ type: "ctx", text, oldLine, newLine });
+    oldLine++;
+    newLine++;
+  }
+
   return rows;
 }
 

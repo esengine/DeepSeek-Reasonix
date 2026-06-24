@@ -15,6 +15,8 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/eventwire"
+	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
 )
 
@@ -29,7 +31,7 @@ func TestServeSubmitRunsAndBroadcastsTurnDone(t *testing.T) {
 	bc := NewBroadcaster()
 	got := make(chan string, 1)
 	ctrl := control.New(control.Options{Runner: fakeRunner{got: got}, Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	sub, cancel := bc.Subscribe() // observe the broadcast deterministically
@@ -57,7 +59,7 @@ func TestServeSubmitRunsAndBroadcastsTurnDone(t *testing.T) {
 	for {
 		select {
 		case data := <-sub:
-			var w wireEvent
+			var w eventwire.Event
 			if err := json.Unmarshal(data, &w); err == nil && w.Kind == "turn_done" {
 				return
 			}
@@ -70,7 +72,7 @@ func TestServeSubmitRunsAndBroadcastsTurnDone(t *testing.T) {
 func TestServeEndpoints(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc}) // no runner needed for these
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	if resp, err := http.Get(srv.URL + "/history"); err != nil || resp.StatusCode != 200 {
@@ -114,6 +116,28 @@ func TestServeEndpoints(t *testing.T) {
 	}
 }
 
+func TestServeSubmitRejectsShellShortcut(t *testing.T) {
+	bc := NewBroadcaster()
+	got := make(chan string, 1)
+	ctrl := control.New(control.Options{Runner: fakeRunner{got: got}, Sink: bc})
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/submit", "application/json", strings.NewReader(`{"input":"!echo nope"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("shell submit status = %d, want 403", resp.StatusCode)
+	}
+	select {
+	case in := <-got:
+		t.Fatalf("runner should not run shell submit, got %q", in)
+	default:
+	}
+}
+
 func TestHistoryMessagesPreserveToolDetails(t *testing.T) {
 	got := historyMessages([]provider.Message{
 		{Role: provider.RoleUser, Content: "run command"},
@@ -137,10 +161,28 @@ func TestHistoryMessagesPreserveToolDetails(t *testing.T) {
 	}
 }
 
+func TestPreviewSessionFileStripsTransientReasoningLanguageBlock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	s := agent.NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "<reasoning-language>\nVisible reasoning/thinking text preference: use English.\n</reasoning-language>\n\nExplain this module"})
+	if err := s.Save(path); err != nil {
+		t.Fatal(err)
+	}
+
+	preview, turns := previewSessionFile(path)
+	if turns != 1 {
+		t.Errorf("turns = %d, want 1", turns)
+	}
+	if preview != "Explain this module" {
+		t.Errorf("preview = %q, want user prompt", preview)
+	}
+}
+
 func TestServeCancelEndpoint(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	resp, err := http.Post(srv.URL+"/cancel", "application/json", nil)
@@ -156,7 +198,7 @@ func TestServeCancelEndpoint(t *testing.T) {
 func TestServeApproveMissingID(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	// Missing id should return 400.
@@ -180,7 +222,7 @@ func TestServeApproveMissingID(t *testing.T) {
 func TestServeNewSessionEndpoint(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	resp, err := http.Post(srv.URL+"/new", "application/json", nil)
@@ -196,7 +238,7 @@ func TestServeNewSessionEndpoint(t *testing.T) {
 func TestServeCompactEndpoint(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	resp, err := http.Post(srv.URL+"/compact", "application/json", nil)
@@ -212,7 +254,7 @@ func TestServeCompactEndpoint(t *testing.T) {
 func TestServeIndexPage(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/")
@@ -241,6 +283,20 @@ func TestServeIndexDefinesQueryHelpers(t *testing.T) {
 	}
 }
 
+func TestServeIndexHandlesRetryingEvents(t *testing.T) {
+	html := string(indexHTML)
+	for _, want := range []string{
+		"case 'retrying': setRetrying(e.retryAttempt,e.retryMax); break;",
+		"if(e.kind!=='retrying')clearRetrying();",
+		"'retrying_status': 'Retrying ({attempt}/{max})...'",
+		"'retrying_status': '正在重试 ({attempt}/{max})...'",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("serve index missing retrying support %q", want)
+		}
+	}
+}
+
 func TestServeIndexPagePassesLanguagePreferenceToClient(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -249,7 +305,7 @@ func TestServeIndexPagePassesLanguagePreferenceToClient(t *testing.T) {
 
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/")
@@ -294,6 +350,120 @@ func TestServeIndexPagePassesLanguagePreferenceToClient(t *testing.T) {
 	}
 }
 
+func TestResumeRequiresSessionPathInsideSessionDir(t *testing.T) {
+	dir := t.TempDir()
+	active := filepath.Join(dir, "active.jsonl")
+	inside := filepath.Join(dir, "inside.jsonl")
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "outside.jsonl")
+	for _, path := range []string{active, inside, outside} {
+		if err := os.WriteFile(path, []byte(`{"role":"user","content":"hi"}`+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc, SessionDir: dir, SessionPath: active})
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	defer srv.Close()
+
+	post := func(path string) int {
+		body, err := json.Marshal(map[string]string{"path": path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.Post(srv.URL+"/resume", "application/json", strings.NewReader(string(body)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := post(outside); got != http.StatusForbidden {
+		t.Fatalf("outside resume status = %d, want 403", got)
+	}
+	if got := post(inside); got != http.StatusNoContent {
+		t.Fatalf("inside resume status = %d, want 204", got)
+	}
+	want, err := filepath.EvalSymlinks(inside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := filepath.Clean(ctrl.SessionPath()); got != filepath.Clean(want) {
+		t.Fatalf("session path = %q, want %q", got, want)
+	}
+}
+
+func TestResumeRejectsCleanupPendingSession(t *testing.T) {
+	dir := t.TempDir()
+	active := filepath.Join(dir, "active.jsonl")
+	pending := filepath.Join(dir, "pending.jsonl")
+	for _, path := range []string{active, pending} {
+		if err := os.WriteFile(path, []byte(`{"role":"user","content":"hi"}`+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := agent.MarkCleanupPending(pending, "delete"); err != nil {
+		t.Fatal(err)
+	}
+
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc, SessionDir: dir, SessionPath: active})
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	defer srv.Close()
+
+	body, err := json.Marshal(map[string]string{"path": pending})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(srv.URL+"/resume", "application/json", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("cleanup-pending resume status = %d, want 400", resp.StatusCode)
+	}
+	if got := filepath.Clean(ctrl.SessionPath()); got != filepath.Clean(active) {
+		t.Fatalf("session path after rejected resume = %q, want active %q", got, active)
+	}
+}
+
+func TestSessionsSkipsCleanupPending(t *testing.T) {
+	dir := t.TempDir()
+	active := filepath.Join(dir, "active.jsonl")
+	pending := filepath.Join(dir, "pending.jsonl")
+	for _, path := range []string{active, pending} {
+		if err := os.WriteFile(path, []byte(`{"role":"user","content":"hi"}`+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := agent.MarkCleanupPending(pending, "delete"); err != nil {
+		t.Fatal(err)
+	}
+
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc, SessionDir: dir, SessionPath: active})
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/sessions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var got []struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "active" || filepath.Clean(got[0].Path) != filepath.Clean(active) {
+		t.Fatalf("/sessions = %+v, want only active session", got)
+	}
+}
+
 func TestDeleteSessionRequiresSessionNameInsideSessionDir(t *testing.T) {
 	dir := t.TempDir()
 	active := filepath.Join(dir, "active.jsonl")
@@ -305,6 +475,13 @@ func TestDeleteSessionRequiresSessionNameInsideSessionDir(t *testing.T) {
 	}
 	ref := "sa_20260102_030405_000000000_aabbccddeeff"
 	writeServeSubagentArtifact(t, dir, ref, agent.BranchID(old))
+	oldJobsDir := jobs.ArtifactDir(old)
+	if err := os.MkdirAll(oldJobsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(oldJobsDir, "bash-1.log"), []byte("output"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	sibling := dir + "-other"
 	if err := os.MkdirAll(sibling, 0o755); err != nil {
 		t.Fatal(err)
@@ -316,7 +493,7 @@ func TestDeleteSessionRequiresSessionNameInsideSessionDir(t *testing.T) {
 
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc, SessionDir: dir, SessionPath: active})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	post := func(body string) int {
@@ -351,6 +528,9 @@ func TestDeleteSessionRequiresSessionNameInsideSessionDir(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "subagents", ref+".meta.json")); !os.IsNotExist(err) {
 		t.Fatalf("old session subagent meta still exists or stat failed unexpectedly: %v", err)
 	}
+	if _, err := os.Stat(oldJobsDir); !os.IsNotExist(err) {
+		t.Fatalf("old session jobs sidecar still exists or stat failed unexpectedly: %v", err)
+	}
 }
 
 func writeServeSubagentArtifact(t *testing.T, dir, ref, parentSession string) {
@@ -380,7 +560,7 @@ func writeServeSubagentArtifact(t *testing.T, dir, ref, parentSession string) {
 func TestServeSubmitMalformedJSON(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	resp, err := http.Post(srv.URL+"/submit", "application/json", strings.NewReader(`{not json`))
@@ -396,7 +576,7 @@ func TestServeSubmitMalformedJSON(t *testing.T) {
 func TestServePlanMalformedJSON(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	resp, err := http.Post(srv.URL+"/plan", "application/json", strings.NewReader(`{bad`))
@@ -412,7 +592,7 @@ func TestServePlanMalformedJSON(t *testing.T) {
 func TestServeContextEndpoint(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/context")

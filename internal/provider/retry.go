@@ -31,6 +31,7 @@ const maxAuthRetries = 2
 type SendOptions struct {
 	Provider   string // provider instance name, surfaced in errors
 	KeyEnv     string // api_key_env the key is read from, when known
+	KeySource  string // human-readable source of KeyEnv, when known
 	KeyPresent bool   // a non-empty key is being sent — separates "rejected" from "missing"
 	RetryAuth  bool   // the key has authenticated before — retry transient 401s instead of failing fast
 }
@@ -193,7 +194,7 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 		resp.Body.Close()
 
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			authErr := &AuthError{Provider: opts.Provider, KeyEnv: opts.KeyEnv, Status: resp.StatusCode, HasKey: opts.KeyPresent}
+			authErr := &AuthError{Provider: opts.Provider, KeyEnv: opts.KeyEnv, KeySource: opts.KeySource, Status: resp.StatusCode, HasKey: opts.KeyPresent}
 			if opts.RetryAuth && authRetries < maxAuthRetries {
 				authRetries++
 				lastErr = authErr

@@ -87,13 +87,59 @@ func TestProviderFetchModelsFallsBackToV1Models(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	t.Setenv("FETCH_MODELS_TEST_KEY", "test-key")
-	p := ProviderEntry{Name: "test", BaseURL: srv.URL, APIKeyEnv: "FETCH_MODELS_TEST_KEY"}
+	p := ProviderEntry{Name: "test", BaseURL: srv.URL, APIKeyEnv: "FETCH_MODELS_TEST_KEY", resolvedAPIKey: "test-key"}
 	got, err := p.FetchModels(context.Background())
 	if err != nil {
 		t.Fatalf("FetchModels: %v", err)
 	}
 	if len(got) != 2 || got[0] != "model-a" || got[1] != "model-b" {
 		t.Fatalf("got %v, want [model-a model-b]", got)
+	}
+}
+
+func TestProviderFetchModelsUsesSetupProbeEnv(t *testing.T) {
+	const key = "FETCH_MODELS_PROBE_KEY"
+	t.Setenv(key, "probe-key")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer probe-key" {
+			http.Error(w, "bad key", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]string{{"id": "probe-model"}},
+		})
+	}))
+	defer srv.Close()
+
+	p := ProviderEntry{Name: "probe", BaseURL: srv.URL, APIKeyEnv: key}
+	p.ResolveAPIKeyFromProcessEnvForProbe()
+	got, err := p.FetchModels(context.Background())
+	if err != nil {
+		t.Fatalf("FetchModels: %v", err)
+	}
+	if len(got) != 1 || got[0] != "probe-model" {
+		t.Fatalf("models = %v, want [probe-model]", got)
+	}
+}
+
+func TestProviderFetchModelsAllowsNoAuthEndpoint(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			http.Error(w, "unexpected auth header", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]string{{"id": "local-b"}, {"id": "local-a"}},
+		})
+	}))
+	defer srv.Close()
+
+	p := ProviderEntry{Name: "local", BaseURL: srv.URL}
+	got, err := p.FetchModels(context.Background())
+	if err != nil {
+		t.Fatalf("FetchModels no-auth: %v", err)
+	}
+	if len(got) != 2 || got[0] != "local-a" || got[1] != "local-b" {
+		t.Fatalf("got %v, want [local-a local-b]", got)
 	}
 }

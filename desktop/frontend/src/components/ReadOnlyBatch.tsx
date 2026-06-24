@@ -10,9 +10,10 @@ type ToolItem = Extract<Item, { kind: "tool" }>;
 type ReadOnlyBatchProps = {
   items: ToolItem[];
   subcalls: ReadonlyMap<string, ToolItem[]>;
+  tabId?: string;
 };
 
-export const ReadOnlyBatch = memo(function ReadOnlyBatch({ items, subcalls }: ReadOnlyBatchProps) {
+export const ReadOnlyBatch = memo(function ReadOnlyBatch({ items, subcalls, tabId }: ReadOnlyBatchProps) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -34,11 +35,11 @@ export const ReadOnlyBatch = memo(function ReadOnlyBatch({ items, subcalls }: Re
     <div className={`readonly-batch${open ? " readonly-batch--open" : ""}`} data-entrance={items[0]?.id}>
       <button type="button" className="reasoning__head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />
-        <span className="readonly-batch__label">{label}</span>
+        <span className="readonly-batch__label" data-creation-label={t("creation.toolCallsLabel")}>{label}</span>
       </button>
       <div ref={bodyRef} className="readonly-batch__body">
         {items.map((it) => (
-          <ToolCard key={it.id} item={it} subcalls={subcalls.get(it.id)} />
+          <ToolCard key={it.id} item={it} subcalls={subcalls.get(it.id)} tabId={tabId} />
         ))}
       </div>
     </div>

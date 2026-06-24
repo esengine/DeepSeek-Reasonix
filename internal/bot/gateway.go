@@ -11,15 +11,21 @@ import (
 	"time"
 
 	"reasonix/internal/boot"
+	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 )
 
 // GatewayConfig 是 BotGateway 的配置。
 type GatewayConfig struct {
-	Model              string
-	ToolApprovalMode   string
-	MaxSteps           int
+	Model            string
+	ToolApprovalMode string
+	MaxSteps         int
+	// ApprovalTimeout bounds how long a tool-approval/ask prompt blocks a bot
+	// session waiting for a remote user's reply. Zero falls back to
+	// defaultBotApprovalTimeout so an abandoned prompt can't wedge the bot forever
+	// (#4626, #4402). A negative value disables the timeout (wait indefinitely).
+	ApprovalTimeout    time.Duration
 	WorkspaceRoot      string
 	Channels           map[Platform]ChannelConfig
 	ConnectionChannels map[string]ChannelConfig
@@ -27,6 +33,10 @@ type GatewayConfig struct {
 	Enabled            map[Platform]bool
 	Debounce           time.Duration
 	OnInbound          func(InboundMessage)
+	// OnSessionReady notifies the host after the bot has created or reused the
+	// controller for an inbound remote. Hosts may persist the concrete session ID
+	// or keep the remote as a read-only channel.
+	OnSessionReady func(InboundMessage, string) error
 	// OnToolApprovalModeChange persists a remote IM request such as /yolo on.
 	// The gateway updates the live session and in-memory defaults first; this
 	// callback lets desktop save the chosen connection mode to user config.
@@ -74,8 +84,18 @@ type BotGateway struct {
 	logger *slog.Logger
 }
 
+// botController is the slice of the controller's driving port the gateway needs:
+// session lifecycle, turn execution, and approval/ask handling. The bot never
+// touches goals, checkpoints, or memory, so it depends on those sub-ports only —
+// not the concrete *control.Controller and its ~99 methods.
+type botController interface {
+	control.Lifecycle
+	control.TurnControl
+	control.Approvals
+}
+
 type sessionState struct {
-	ctrl             *control.Controller
+	ctrl             botController
 	sink             *sessionEventSink
 	cancel           context.CancelFunc
 	pendingAsks      map[string][]event.AskQuestion
@@ -510,6 +530,7 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 			if err := state.ctrl.NewSession(); err != nil {
 				gw.logger.Warn("new session failed", "err", err)
 			}
+			gw.rememberSessionReady(msg, state.ctrl)
 		}
 		gw.sessions.ForceRelease(key)
 		_ = gw.sendText(ctx, adapter, msg, "已开始新会话。")
@@ -660,7 +681,7 @@ func parseToolApprovalModeArg(arg string) (mode string, statusOnly bool, ok bool
 
 func (gw *BotGateway) setToolApprovalModeForMessage(key string, msg InboundMessage, mode string) error {
 	mode = normalizeBotToolApprovalMode(mode)
-	var ctrl *control.Controller
+	var ctrl botController
 
 	gw.mu.Lock()
 	if state, ok := gw.controllers[key]; ok {
@@ -701,7 +722,7 @@ func (gw *BotGateway) updateToolApprovalModeDefaultLocked(msg InboundMessage, mo
 }
 
 func (gw *BotGateway) currentToolApprovalMode(key string, msg InboundMessage) string {
-	var ctrl *control.Controller
+	var ctrl botController
 	gw.mu.Lock()
 	if state, ok := gw.controllers[key]; ok {
 		ctrl = state.ctrl
@@ -765,6 +786,7 @@ func (gw *BotGateway) runTurn(ctx context.Context, adapter Adapter, key string, 
 		_ = gw.sendText(ctx, adapter, msg, "内部错误：无法创建会话。")
 		return
 	}
+	gw.rememberSessionReady(msg, state.ctrl)
 
 	// 发送"正在输入"状态
 	_ = adapter.SendTyping(ctx, msg.ChatID)
@@ -837,11 +859,13 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	model, workspaceRoot, toolApprovalMode := gw.sessionOptionsForMessage(msg)
 	gw.logger.Info("bot session creating", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8], "model", model, "workspace_set", strings.TrimSpace(workspaceRoot) != "", "tool_approval_mode", normalizeBotToolApprovalMode(toolApprovalMode))
 	ctrl, err := boot.Build(ctx, boot.Options{
-		Model:         model,
-		MaxSteps:      gw.cfg.MaxSteps,
-		RequireKey:    true,
-		Sink:          sessionSink,
-		WorkspaceRoot: workspaceRoot,
+		Model:           model,
+		MaxSteps:        gw.cfg.MaxSteps,
+		RequireKey:      true,
+		Sink:            sessionSink,
+		WorkspaceRoot:   workspaceRoot,
+		SessionDir:      botSessionDir(workspaceRoot),
+		ApprovalTimeout: gw.approvalTimeout(),
 	})
 	if err != nil {
 		gw.logger.Error("build controller failed", "err", err)
@@ -849,20 +873,83 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	}
 	ctrl.EnableInteractiveApproval()
 	ctrl.SetToolApprovalMode(toolApprovalMode)
+	ctrl.EnsureSessionPath()
 
 	gw.mu.Lock()
-	gw.controllers[key] = &sessionState{
+	// Re-check under the lock: while we were off-lock in boot.Build, a second
+	// message for the same key may have built and registered its own session.
+	// The first writer wins; close the controller we just built (releasing its
+	// jobs/plugin host) and reuse the existing one, so a near-simultaneous pair
+	// of opening messages can't leak a controller.
+	if existing, ok := gw.controllers[key]; ok {
+		existing.lastActive = time.Now()
+		gw.mu.Unlock()
+		ctrl.Close()
+		gw.logger.Info("bot session built concurrently; discarding duplicate", "platform", msg.Platform, "chat", hashID(msg.ChatID), "session", key[:8])
+		return existing
+	}
+	state := &sessionState{
 		ctrl:        ctrl,
 		sink:        sessionSink,
 		pendingAsks: make(map[string][]event.AskQuestion),
 		createdAt:   time.Now(),
 		lastActive:  time.Now(),
 	}
-	state := gw.controllers[key]
+	gw.controllers[key] = state
 	gw.mu.Unlock()
 
 	gw.logger.Info("bot session created", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8])
 	return state
+}
+
+// defaultBotApprovalTimeout caps how long a bot session waits for a remote
+// user's approval/ask reply before treating it as denied, so an abandoned
+// prompt (or a dropped IM event) can't leave the session wedged forever
+// (#4626, #4402). 30 minutes is generous for a human reply yet bounded.
+const defaultBotApprovalTimeout = 30 * time.Minute
+
+// approvalTimeout resolves the configured bot approval wait: zero uses the
+// bounded default; a negative value opts out (wait indefinitely).
+func (gw *BotGateway) approvalTimeout() time.Duration {
+	switch {
+	case gw.cfg.ApprovalTimeout < 0:
+		return 0
+	case gw.cfg.ApprovalTimeout == 0:
+		return defaultBotApprovalTimeout
+	default:
+		return gw.cfg.ApprovalTimeout
+	}
+}
+
+func botSessionDir(workspaceRoot string) string {
+	if strings.TrimSpace(workspaceRoot) == "" {
+		return config.SessionDir()
+	}
+	if dir := config.ProjectSessionDir(workspaceRoot); dir != "" {
+		return dir
+	}
+	return config.SessionDir()
+}
+
+func (gw *BotGateway) rememberSessionReady(msg InboundMessage, ctrl botController) {
+	if gw.cfg.OnSessionReady == nil || ctrl == nil {
+		return
+	}
+	sessionID := botSessionTarget(ctrl.SessionPath())
+	if sessionID == "" {
+		return
+	}
+	if err := gw.cfg.OnSessionReady(msg, sessionID); err != nil {
+		gw.logger.Warn("remember bot session failed", "platform", msg.Platform, "connection", msg.ConnectionID, "err", err)
+	}
+}
+
+func botSessionTarget(sessionPath string) string {
+	sessionPath = strings.TrimSpace(sessionPath)
+	if sessionPath == "" {
+		return ""
+	}
+	return "path:" + sessionPath
 }
 
 func (gw *BotGateway) sessionOptionsForMessage(msg InboundMessage) (model string, workspaceRoot string, toolApprovalMode string) {

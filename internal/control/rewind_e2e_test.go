@@ -44,12 +44,12 @@ func runTwoTurns(t *testing.T) (*Controller, *agent.Agent, *[]event.Event) {
 func TestRewindConversationFailsLoudlyAfterCompaction(t *testing.T) {
 	c, ag, events := runTwoTurns(t)
 
-	c.mu.Lock()
-	lastTurn := c.cpTurn - 1
-	boundary := c.cpBound[lastTurn]
-	c.mu.Unlock()
+	c.checkpoints.mu.Lock()
+	lastTurn := c.checkpoints.turn - 1
+	boundary := c.checkpoints.bound[lastTurn]
+	c.checkpoints.mu.Unlock()
 	if boundary <= 1 {
-		t.Fatalf("expected the latest turn's boundary above 1, got cpBound=%v", c.cpBound)
+		t.Fatalf("expected the latest turn's boundary above 1, got bound=%v", c.checkpoints.bound)
 	}
 
 	// Auto-compaction replaces the prefix with a summary, shrinking the log below
@@ -77,10 +77,10 @@ func TestRewindConversationFailsLoudlyAfterCompaction(t *testing.T) {
 func TestRewindConversationSucceedsWithLiveBoundary(t *testing.T) {
 	c, ag, events := runTwoTurns(t)
 
-	c.mu.Lock()
-	lastTurn := c.cpTurn - 1
-	boundary := c.cpBound[lastTurn]
-	c.mu.Unlock()
+	c.checkpoints.mu.Lock()
+	lastTurn := c.checkpoints.turn - 1
+	boundary := c.checkpoints.bound[lastTurn]
+	c.checkpoints.mu.Unlock()
 
 	*events = nil
 	if err := c.Rewind(lastTurn, RewindConversation); err != nil {

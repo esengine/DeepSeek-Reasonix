@@ -7,6 +7,9 @@ import (
 	"time"
 	"unicode"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
@@ -73,6 +76,12 @@ type workflowCategory struct {
 // MemorySuggestions scans recent local history and returns draft memory/skill
 // candidates. It does not modify memory, skills, sessions, or model context.
 func (a *App) MemorySuggestions() MemorySuggestionsView {
+	return a.MemorySuggestionsForTab("")
+}
+
+// MemorySuggestionsForTab scans recent local history for the selected tab's
+// session directory and workspace, instead of whichever tab is currently active.
+func (a *App) MemorySuggestionsForTab(tabID string) MemorySuggestionsView {
 	view := MemorySuggestionsView{
 		Memories:    []MemorySuggestion{},
 		Skills:      []SkillSuggestion{},
@@ -80,8 +89,8 @@ func (a *App) MemorySuggestions() MemorySuggestionsView {
 	}
 
 	a.mu.RLock()
-	tab := a.activeTabLocked()
-	var ctrl *control.Controller
+	tab := a.tabByIDLocked(tabID)
+	var ctrl control.SessionAPI
 	workspaceRoot := ""
 	sessionDir := ""
 	if tab != nil {
@@ -108,9 +117,13 @@ func (a *App) MemorySuggestions() MemorySuggestionsView {
 
 // AcceptMemorySuggestion persists a previously previewed memory candidate.
 func (a *App) AcceptMemorySuggestion(in MemorySuggestion) (string, error) {
-	a.mu.RLock()
-	ctrl := a.activeCtrlLocked()
-	a.mu.RUnlock()
+	return a.AcceptMemorySuggestionForTab("", in)
+}
+
+// AcceptMemorySuggestionForTab persists a memory candidate into the selected
+// tab's memory store, matching the tab used to generate suggestions.
+func (a *App) AcceptMemorySuggestionForTab(tabID string, in MemorySuggestion) (string, error) {
+	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return "", nil
 	}
@@ -133,8 +146,14 @@ func (a *App) AcceptMemorySuggestion(in MemorySuggestion) (string, error) {
 // skill store so name validation, scope handling, and no-overwrite behavior stay
 // centralized.
 func (a *App) AcceptSkillSuggestion(in SkillSuggestion) (string, error) {
+	return a.AcceptSkillSuggestionForTab("", in)
+}
+
+// AcceptSkillSuggestionForTab writes a skill candidate into the selected tab's
+// workspace/global skill store, matching the tab used to generate suggestions.
+func (a *App) AcceptSkillSuggestionForTab(tabID string, in SkillSuggestion) (string, error) {
 	a.mu.RLock()
-	tab := a.activeTabLocked()
+	tab := a.tabByIDLocked(tabID)
 	workspaceRoot := ""
 	if tab != nil {
 		workspaceRoot = tab.WorkspaceRoot
@@ -431,7 +450,7 @@ func workflowEvidence(cat workflowCategory, sessions []suggestionSession) []stri
 func skillCandidateBody(cat workflowCategory, evidence []string) string {
 	var b strings.Builder
 	title := strings.TrimPrefix(strings.ReplaceAll(cat.Name, "-", " "), "reasonix ")
-	b.WriteString("# " + strings.Title(title) + "\n\n")
+	b.WriteString("# " + cases.Title(language.Und).String(title) + "\n\n")
 	b.WriteString("Use this skill when the user asks for this repeated Reasonix workflow.\n\n")
 	b.WriteString("## Evidence\n\n")
 	for _, ev := range evidence {

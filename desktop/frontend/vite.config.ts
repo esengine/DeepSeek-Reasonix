@@ -1,7 +1,7 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { execSync } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,6 +19,10 @@ function buildCommit(): string {
   }
 }
 
+function buildChannel(): string {
+  return process.env.REASONIX_CHANNEL || "stable";
+}
+
 // On macOS ≤ 12 (Safari 15 WebKit) a crossorigin module/stylesheet fetched over the
 // wails:// scheme is CORS-blocked (no Access-Control-Allow-Origin from the handler),
 // so the bundle never loads and the window paints blank; newer WebKit tolerates it.
@@ -27,6 +31,42 @@ function stripCrossorigin(): Plugin {
     name: "strip-crossorigin",
     enforce: "post",
     transformIndexHtml: (html) => html.replace(/\s+crossorigin(?==["']|[\s/>])/g, ""),
+  };
+}
+
+function archiveHiddenSourcemaps(commit: string): Plugin {
+  async function collectMapFiles(dir: string): Promise<string[]> {
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+    const files: string[] = [];
+    for (const entry of entries) {
+      const p = resolve(dir, entry.name);
+      if (entry.isDirectory()) files.push(...(await collectMapFiles(p)));
+      else if (entry.isFile() && entry.name.endsWith(".map")) files.push(p);
+    }
+    return files;
+  }
+
+  return {
+    name: "archive-hidden-sourcemaps",
+    apply: "build",
+    closeBundle: async () => {
+      const distDir = resolve(configDir, "dist");
+      const maps = await collectMapFiles(distDir);
+      if (!maps.length) return;
+
+      const archiveDir = resolve(configDir, "sourcemaps", commit);
+      await mkdir(archiveDir, { recursive: true });
+      await Promise.all(
+        maps.map(async (mapPath) => {
+          const rel = mapPath.slice(distDir.length + 1).replace(/[\\/]+/g, "__");
+          await rename(mapPath, resolve(archiveDir, rel));
+        }),
+      );
+      await writeFile(
+        resolve(archiveDir, "manifest.json"),
+        JSON.stringify({ commit, channel: buildChannel(), archivedAt: new Date().toISOString() }, null, 2) + "\n",
+      );
+    },
   };
 }
 
@@ -45,15 +85,32 @@ function keepDistPlaceholder(): Plugin {
   };
 }
 
+const commit = buildCommit();
+const channel = buildChannel();
+
+const nodeModulePath = String.raw`[\\/]node_modules[\\/](?:\.pnpm[\\/][^\\/]+[\\/]node_modules[\\/])?`;
+const vendorReact = new RegExp(`${nodeModulePath}(?:react|react-dom)(?:[\\/]|$)`);
+const vendorMarkdown = new RegExp(
+  `${nodeModulePath}(?:react-markdown|remark-gfm|remark-math|rehype-katex|katex)(?:[\\/]|$)`,
+);
+const vendorHighlight = new RegExp(`${nodeModulePath}highlight\\.js(?:[\\/]|$)`);
+
 // base: "./" so built asset URLs are relative. Wails serves the embedded dist from
 // the app root over the wails:// scheme, where absolute "/assets/..." URLs 404.
 export default defineConfig({
-  plugins: [react(), stripCrossorigin(), keepDistPlaceholder()],
+  // errorRecovery tells lightningcss to skip unparseable rules instead of
+  // failing the whole build. Vite 8 + lightningcss 1.32.0 can reject valid
+  // @keyframes in concatenated CSS bundles (heartbeat.css + styles.css).
+  css: {
+    lightningcss: { errorRecovery: true },
+  },
+  plugins: [react(), stripCrossorigin(), archiveHiddenSourcemaps(commit), keepDistPlaceholder()],
   base: "./",
-  define: { __BUILD_COMMIT__: JSON.stringify(buildCommit()) },
+  define: { __BUILD_COMMIT__: JSON.stringify(commit), __BUILD_CHANNEL__: JSON.stringify(channel) },
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    sourcemap: "hidden",
     target: "es2021",
     // Use terser for smaller output (esbuild is faster to build but produces
     // larger bundles). Disabled for dev builds via the default.
@@ -68,22 +125,18 @@ export default defineConfig({
       keep_classnames: true,
       keep_fnames: true,
     },
-    rollupOptions: {
+    rolldownOptions: {
       output: {
         // Manual chunk splitting: keep the heavy markdown/math/code pipeline
         // in a separate chunk so it can be cached independently from the
         // app shell. The vendor chunk splits react+react-dom (stable, rarely
         // changes) from the markdown stack (changes more often).
-        manualChunks: {
-          "vendor-react": ["react", "react-dom"],
-          "vendor-markdown": [
-            "react-markdown",
-            "remark-gfm",
-            "remark-math",
-            "rehype-katex",
-            "katex",
+        codeSplitting: {
+          groups: [
+            { name: "vendor-react", test: vendorReact },
+            { name: "vendor-markdown", test: vendorMarkdown },
+            { name: "vendor-highlight", test: vendorHighlight },
           ],
-          "vendor-highlight": ["highlight.js"],
         },
       },
     },

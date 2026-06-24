@@ -9,8 +9,11 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/provider"
+	"reasonix/internal/tool"
 )
 
 // fakeAdapter 是一个内存中的假适配器，用于测试 BotGateway。
@@ -76,6 +79,16 @@ func (f *fakeAdapter) sentMessages() []OutboundMessage {
 type fakeReactionAdapter struct {
 	*fakeAdapter
 	reactions []string
+}
+
+type gatewayFakeProvider struct{}
+
+func (gatewayFakeProvider) Name() string { return "fake" }
+
+func (gatewayFakeProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	ch := make(chan provider.Chunk)
+	close(ch)
+	return ch, nil
 }
 
 func (f *fakeReactionAdapter) AddPendingReaction(ctx context.Context, messageID string) error {
@@ -443,6 +456,45 @@ func TestGatewayApproveWithoutSessionSendsGuidance(t *testing.T) {
 	}
 }
 
+func TestGatewayNewSessionRemembersRotatedSessionPath(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	var remembered string
+	gw := NewGateway(GatewayConfig{
+		OnSessionReady: func(msg InboundMessage, sessionID string) error {
+			remembered = sessionID
+			return nil
+		},
+	}, nil, logger)
+	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
+	msg := InboundMessage{
+		Platform:     PlatformWeixin,
+		ConnectionID: "weixin-weixin",
+		Domain:       "weixin",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+		Text:         "/new",
+	}
+	key := BuildSessionKey(msg.Session())
+	sessionDir := t.TempDir()
+	oldPath := agent.NewSessionPath(sessionDir, "old-model")
+	exec := agent.New(gatewayFakeProvider{}, tool.NewRegistry(), agent.NewSession("system"), agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{Executor: exec, SessionDir: sessionDir, SessionPath: oldPath, Label: "fake-model"})
+	gw.controllers[key] = &sessionState{ctrl: ctrl}
+
+	gw.handleSlashCommand(context.Background(), adapter, key, msg)
+
+	if remembered == "" || !strings.HasPrefix(remembered, "path:") {
+		t.Fatalf("remembered session = %q, want path target", remembered)
+	}
+	if remembered == "path:"+oldPath {
+		t.Fatalf("remembered session = %q, want rotated path", remembered)
+	}
+	if ctrl.SessionPath() == oldPath {
+		t.Fatalf("controller session path was not rotated")
+	}
+}
+
 func TestGatewayYoloCommandUpdatesCurrentSessionAndConnectionDefault(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	var persistedMode string
@@ -615,5 +667,13 @@ func TestGatewaySessionOptionsPreferConnectionOverride(t *testing.T) {
 	}
 	if mode != "ask" {
 		t.Fatalf("lark tool approval mode = %q, want ask", mode)
+	}
+}
+
+func TestBotSessionDirUsesProjectWorkspaceRoot(t *testing.T) {
+	root := t.TempDir()
+	got := botSessionDir(root)
+	if got == "" || got == botSessionDir("") {
+		t.Fatalf("project session dir = %q, want project-specific dir", got)
 	}
 }

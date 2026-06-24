@@ -40,7 +40,7 @@ reasonix/
     ├── provider/            # Provider interface + types + kind→factory registry
     │   └── openai/          # OpenAI-compatible impl; init() registers "openai"
     ├── tool/                # Tool interface + Registry
-    │   └── builtin/         # read_file/write_file/edit_file/bash/ls/glob/grep
+    │   └── builtin/         # read_file/write_file/edit_file/move_file/bash/ls/glob/grep
     ├── permission/          # per-call Policy: allow/ask/deny rules → Decision
     ├── command/             # custom slash commands loaded from .reasonix/commands/*.md
     ├── plugin/              # stdio JSON-RPC (MCP) client; adapts remote tools
@@ -80,7 +80,7 @@ type Config struct {
 ```
 
 - The `openai` kind is an OpenAI-compatible `/chat/completions` implementation.
-- **DeepSeek and MiMo are not code — they are config instances** of `kind = "openai"`,
+- **OpenAI-compatible vendors are config instances** of `kind = "openai"`,
   differing only in `base_url` / `model` / `api_key_env`. Adding another OpenAI-
   compatible model is a config edit, not a code change.
 - **A provider is a vendor endpoint** (one `base_url` + `api_key_env`) that offers
@@ -252,7 +252,9 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
 - **Rule syntax.** A rule is `Tool` (matches any call in that tool family) or
   `Tool(specifier)` (matches when the call's *subject* matches the specifier).
   Bash and file mutation approvals use Claude Code-style families such as
-  `Bash(npm run build)`, `Bash(npm run test:*)`, and `Edit(docs/**)`. Legacy
+  `Bash(npm run build)`, `Bash(npm run test:*)`, and `Edit(docs/**)`. Built-in
+  file mutations include writes, edits, notebook edits, symbol/range deletes,
+  and `move_file` renames/moves. Legacy
   lowercase tool IDs and `tool=literal` rules still load for compatibility. The
   `:*` suffix marks a Bash command-prefix approval; generated prefix rules also
   reject later commands that introduce shell operators, so `Bash(go test:*)`
@@ -308,9 +310,22 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   stops it, or the safety continuation limit is reached. Blocked-state matching
   is normalized for casing, whitespace, and punctuation so minor wording drift
   does not reset the audit; restarting a goal begins a fresh blocked audit.
-  `/goal clear` removes it. Switching into plan/normal mode clears the active
-  goal in the desktop UI so the collaboration mode remains one of the three
-  choices, while the underlying tool approval posture is preserved.
+  Goals that look like long-horizon research, debugging, optimization, or
+  implementation work automatically add an AutoResearch protocol to the same
+  transient active-goal user block. AutoResearch is a Goal strategy, not a
+  standalone global skill: it writes project-local state under
+  `.reasonix/autoresearch/YYYYMMDD-HHMMSS-slug/` and keeps dynamic run state out
+  of `REASONIX.md`, `AGENTS.md`, project memory, tool schemas, and the
+  cache-stable system prompt. `/goal --research <objective>` forces that
+  strategy; `/goal --simple <objective>` forces lightweight Goal. Outside goal
+  mode, an ordinary prompt with a very strong AutoResearch signal is upgraded by
+  the host into the equivalent of `/goal --research <original prompt>`; the
+  ordinary-prompt classifier is intentionally stricter than `/goal`'s internal
+  classification so weak words such as "long term", "optimize", "research", or
+  "verify" do not create durable task state by themselves. `/goal clear` removes
+  the active goal. Switching into plan/normal mode clears the active goal in the
+  desktop UI so the collaboration mode remains one of the three choices, while
+  the underlying tool approval posture is preserved.
 
 | Tool approval posture | Tool approvals | Plan approval | `ask` questions |
 | --- | --- | --- | --- |
@@ -320,7 +335,7 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
 | Approved-plan execution window | Approved plan's tool calls auto-allowed unless denied | Future plans still wait | Waits for user |
 
 Out of the box (`mode = "ask"`, no rules) `reasonix run` behaves exactly as before
-(writers resolve `Ask`→allow with no TTY), while `reasonix chat` now prompts before
+(writers resolve `Ask`→allow with no TTY), while `reasonix` now prompts before
 each writer/bash call. `deny` rules harden both modes.
 
 ### 3.8 Slash commands (`internal/command`)
@@ -333,7 +348,7 @@ The chat TUI accepts `/command` input. Three kinds share one dispatch:
   confirmation, then discards the current context without saving it; it does not
   delete project memory.
 - **Custom commands** are Markdown files under `.reasonix/commands/` (project) and
-  `reasonix/commands/` in your OS config dir (user; see §5); the project dir overrides the user dir on a
+  the user config dir, e.g. `~/.reasonix/commands/` on macOS/Linux; the project dir overrides the user dir on a
   name clash. A file `review.md` becomes `/review`; a subdirectory namespaces it
   (`git/commit.md` → `/git:commit`). Invoking one renders its body and sends the
   result as the next user turn.
@@ -429,13 +444,21 @@ type Chunk struct {
 ## 5. Configuration (TOML)
 
 Resolution order: **flag > project `./reasonix.toml` > the user config file
-> built-in defaults**. The user config lives in your OS config dir — `~/.config/reasonix/`
-on Linux, `~/Library/Application Support/reasonix/` on macOS, `%AppData%\reasonix\` on
-Windows. Secrets come from the environment via `api_key_env` and
-are never stored in config files. A `.env` in the working directory is loaded if
-present. Step-limit preferences usually belong in the user config; project
-`reasonix.toml` should override them only when the repository needs shared
-runtime bounds.
+> built-in defaults**. Starting with **Reasonix v1.8.1**, the user config lives
+at `~/.reasonix/config.toml` on macOS/Linux and
+`%AppData%\reasonix\config.toml` on Windows. See
+[Configuration paths](./CONFIG_PATHS.md) for migration and related data paths.
+Fields marked user/global only, including agent step limits, are not overridden
+by project `reasonix.toml`.
+Provider entries name secrets with `api_key_env`; saved key values live in
+Reasonix's global `<Reasonix home>/.env`, shared by CLI and desktop. Project
+`.env`, home `.env`, inherited shell environment variables, legacy credentials,
+and the OS keyring are not provider-key runtime fallbacks. Project `.env` still
+feeds workspace-scoped, non-provider `${VAR}` expansion for MCP/plugin settings
+without importing provider keys or Reasonix control variables. Step-limit
+preferences belong in the user config.
+Project `reasonix.toml` does not override `agent.max_steps` or
+`agent.planner_max_steps`.
 
 ```toml
 default_model = "deepseek"   # provider name (→ its default model) or "provider/model"
@@ -443,10 +466,11 @@ default_model = "deepseek"   # provider name (→ its default model) or "provide
 
 [agent]
 system_prompt = "You are Reasonix, a coding agent..."  # or system_prompt_file = "..."
-max_steps         = 0    # executor tool-call rounds; 0 = no limit
-planner_max_steps = 12   # planner read-only tool-call rounds; 0 = no limit
+max_steps         = 0    # user/global only; executor tool-call rounds; 0 = no limit
+planner_max_steps = 0    # user/global only; planner read-only tool-call rounds; 0 = no limit
 temperature       = 0.0
-# planner_model = "mimo"   # optional: two-model collaboration (low-frequency planner)
+reasoning_language = "auto"       # visible reasoning text: auto|zh|en
+# planner_model = "deepseek-pro"   # optional: two-model collaboration (low-frequency planner)
 # subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
 
@@ -460,20 +484,7 @@ default        = "deepseek-v4-flash"   # optional; defaults to models[0]
 api_key_env    = "DEEPSEEK_API_KEY"
 context_window = 1000000   # tokens; harness compacts older history near this limit (0 disables)
 
-# A single-model entry (use when a model needs its own base_url/context_window/price).
-[[providers]]
-name        = "mimo-pro"
-kind        = "openai"
-base_url    = "https://token-plan-cn.xiaomimimo.com/v1"
-model       = "mimo-v2.5-pro"
-api_key_env = "MIMO_API_KEY"
-
-[[providers]]
-name        = "mimo-flash"
-kind        = "openai"
-base_url    = "https://token-plan-cn.xiaomimimo.com/v1"
-model       = "mimo-v2.5"
-api_key_env = "MIMO_API_KEY"
+# A single-model entry still works for custom OpenAI-compatible endpoints.
 
 [tools]
 enabled = []   # omit/empty = all built-ins
@@ -495,8 +506,14 @@ allow = ["Bash(go test:*)", "Bash(git status:*)"]  # never prompted
 ask   = []                                 # force a prompt even if otherwise allowed
 
 [sandbox]
-# workspace_root = ""          # file-writers confined here; empty = cwd (writes stay in-project)
-# allow_write    = ["/tmp"]    # extra dirs write_file/edit_file/multi_edit may modify
+# workspace_root = ""          # file-writers confined here; empty = cwd
+# allow_write    = ["/tmp"]    # extra dirs write_file/edit_file/multi_edit/move_file may modify
+
+[serve]
+auth_mode = "none"             # none|token|password; use auth before binding beyond localhost
+# token = ""                   # optional fixed token; empty token mode generates one at startup
+# password_hash = ""           # bcrypt hash generated with reasonix serve --hash-password --password '...'
+# behind_proxy = false         # trust X-Forwarded-* only behind a trusted reverse proxy
 
 [[plugins]]
 name    = "example"            # type defaults to "stdio"
@@ -512,6 +529,13 @@ args    = []
 ```
 
 `reasonix setup` writes this default config so the CLI is usable out of the box.
+`[serve]` controls the HTTP browser frontend used by `reasonix serve`. The
+default `auth_mode = "none"` is intended for the loopback default
+`127.0.0.1:8787`; deployments reachable from another machine must use `token` or
+`password`. Password mode requires either a startup `--password` or a stored
+bcrypt `password_hash`. `behind_proxy` must stay false unless the server is
+behind a trusted proxy that owns the `X-Forwarded-For` and `X-Forwarded-Proto`
+headers.
 
 MCP servers may also be declared in a project-root `.mcp.json` using Claude
 Code's exact `mcpServers` schema (`command`/`args`/`env`, `type`/`url`/`headers`,
@@ -529,14 +553,15 @@ Reasonix unchanged.
 
 `[sandbox]` is the *enforcement* layer beneath permissions (which are *policy*).
 Phase 0 confines the file-writing built-ins (`write_file`, `edit_file`,
-`multi_edit`) to `workspace_root` (default cwd) plus `allow_write`: a write whose
-target — resolved to an absolute, symlink-free path so a symlinked dir or `..`
-cannot tunnel out — falls outside every root is refused, and the error is fed
-back to the model. Confinement is on by default (root = cwd), so edits stay in
-the project; reads are unrestricted. `bash` is itself jailed on macOS by default
-(`[sandbox] bash = "enforce"`, Seatbelt): each command runs under sandbox-exec
-allowed to write only the same roots (+ temp and toolchain caches) and to reach
-the network only when `network = true`. Unsupported platforms fall back to
+`multi_edit`, `move_file`) to `workspace_root` (default cwd), the Reasonix user
+config dir, plus `allow_write`: a write whose target — resolved to an absolute,
+symlink-free path so a symlinked dir or `..` cannot tunnel out — falls outside
+every root is refused, and the error is fed back to the model. Confinement is on
+by default (root = cwd), so edits stay in the project while the agent can still
+update its own global config; reads are unrestricted. `bash` is itself jailed on
+macOS by default (`[sandbox] bash = "enforce"`, Seatbelt): each command runs
+under sandbox-exec allowed to write only the same roots (+ temp and toolchain
+caches) and to reach the network only when `network = true`. Unsupported platforms fall back to
 running unconfined. The escape-prompt and Linux support are Phase 1's remainder (§9).
 
 ## 6. Error Handling

@@ -19,6 +19,20 @@ import (
 	"reasonix/internal/tool"
 )
 
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "reasonix-installsource-test-*")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	_ = os.Setenv("HOME", dir)
+	_ = os.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, ".config"))
+	_ = os.Setenv("AppData", filepath.Join(dir, "AppData"))
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
+}
+
 // --- shared helpers ---------------------------------------------------------
 
 // execInstall marshals args, calls Execute, and unmarshals the response.
@@ -433,8 +447,38 @@ func TestPlanLocalMCPJSON(t *testing.T) {
 	if resp.Actions[1].Name != "remote" || resp.Actions[1].Transport != "http" {
 		t.Fatalf("second action = %+v", resp.Actions[1])
 	}
+	for _, action := range resp.Actions {
+		if action.Scope != "global" || action.ConfigPath != config.UserConfigPath() {
+			t.Fatalf("local .mcp.json outside project action scope/path = %q %q, want global %q", action.Scope, action.ConfigPath, config.UserConfigPath())
+		}
+	}
 	if resp.Kinds.MCP != 2 {
 		t.Errorf("Kinds.MCP = %d, want 2", resp.Kinds.MCP)
+	}
+}
+
+func TestPlanProjectMCPJSONDefaultsProject(t *testing.T) {
+	project := t.TempDir()
+	home := t.TempDir()
+	mcpPath := filepath.Join(project, ".mcp.json")
+	writeFile(t, mcpPath, `{
+  "mcpServers": {
+    "projectfs": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "."] }
+  }
+}`)
+
+	tl := NewTool(Options{ProjectRoot: project, HomeDir: home})
+	resp := execInstall(t, tl, map[string]any{
+		"source": mcpPath,
+		"kind":   "mcp",
+	})
+
+	if !resp.OK || len(resp.Actions) != 1 {
+		t.Fatalf("response = %+v", resp)
+	}
+	wantPath := filepath.Join(project, "reasonix.toml")
+	if resp.Scope != "project" || resp.Actions[0].Scope != "project" || resp.Actions[0].ConfigPath != wantPath {
+		t.Fatalf("project .mcp.json scope/path = response %q action %q path %q, want project %q", resp.Scope, resp.Actions[0].Scope, resp.Actions[0].ConfigPath, wantPath)
 	}
 }
 
@@ -447,7 +491,7 @@ func TestPlanMCPJSONUnknownTierProducesWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseMCPJSON: %v", err)
 	}
-	if len(entries) != 1 || entries[0].Tier != "lazy" {
+	if len(entries) != 1 || entries[0].Tier != "background" {
 		t.Fatalf("entries = %+v", entries)
 	}
 	found := false
@@ -458,6 +502,32 @@ func TestPlanMCPJSONUnknownTierProducesWarning(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected warning about unknown tier, got %v", warnings)
+	}
+}
+
+func TestPlanMCPJSONDefaultTierIsBackground(t *testing.T) {
+	entries, warnings, err := parseMCPJSON([]byte(`{
+  "mcpServers": {
+    "x": { "command": "node" }
+  }
+}`))
+	if err != nil {
+		t.Fatalf("parseMCPJSON: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	if len(entries) != 1 || entries[0].Tier != "background" {
+		t.Fatalf("entries = %+v, want default tier background", entries)
+	}
+}
+
+func TestNormalizeTierDefaultBackgroundUnknownBackground(t *testing.T) {
+	if got, ok := normalizeTier(""); got != "background" || !ok {
+		t.Fatalf("normalizeTier(empty) = %q, %v; want background, true", got, ok)
+	}
+	if got, ok := normalizeTier("absurd"); got != "background" || ok {
+		t.Fatalf("normalizeTier(absurd) = %q, %v; want background, false", got, ok)
 	}
 }
 
@@ -549,6 +619,36 @@ func TestApplyRemoteMCPURLConnectsAndPersists(t *testing.T) {
 	}
 }
 
+func TestApplyRemoteMCPURLDefaultsGlobal(t *testing.T) {
+	project := t.TempDir()
+	home := t.TempDir()
+	stub := &stubConnector{toolCount: 1}
+	tl := NewTool(Options{
+		ProjectRoot: project,
+		HomeDir:     home,
+		ConnectMCP:  stub.connector(),
+	})
+
+	resp := execInstall(t, tl, map[string]any{
+		"source": "https://global.example.com/mcp",
+		"kind":   "mcp",
+		"apply":  true,
+		"name":   "global-default",
+	})
+
+	if !resp.OK || resp.Scope != "global" || resp.Actions[0].ConfigPath != config.UserConfigPath() {
+		t.Fatalf("response = %+v, want global user config %q", resp, config.UserConfigPath())
+	}
+	userCfg := config.LoadForEdit(config.UserConfigPath())
+	if p, ok := findPlugin(userCfg.Plugins, "global-default"); !ok || p.URL != "https://global.example.com/mcp" {
+		t.Fatalf("global config plugins = %+v, want global-default", userCfg.Plugins)
+	}
+	projectCfg := config.LoadForEdit(filepath.Join(project, "reasonix.toml"))
+	if _, ok := findPlugin(projectCfg.Plugins, "global-default"); ok {
+		t.Fatalf("project config should not receive default-global MCP: %+v", projectCfg.Plugins)
+	}
+}
+
 func TestApplyMCPRejectsDuplicateByDefault(t *testing.T) {
 	project := t.TempDir()
 	home := t.TempDir()
@@ -569,6 +669,7 @@ func TestApplyMCPRejectsDuplicateByDefault(t *testing.T) {
 		"kind":   "mcp",
 		"apply":  true,
 		"name":   "dup",
+		"scope":  "project",
 	})
 
 	if resp.OK {
@@ -599,6 +700,7 @@ func TestApplyMCPReplaceOverwritesExisting(t *testing.T) {
 		"apply":   true,
 		"replace": true,
 		"name":    "editable",
+		"scope":   "project",
 	})
 
 	if !resp.OK {
@@ -652,6 +754,7 @@ func TestApplyMCPReplaceDisconnectsLiveServerBeforeConnect(t *testing.T) {
 		"apply":   true,
 		"replace": true,
 		"name":    "live",
+		"scope":   "project",
 	})
 
 	if !resp.OK {
@@ -689,6 +792,7 @@ func TestApplyMCPRollsBackOnSaveFailure(t *testing.T) {
 		"kind":   "mcp",
 		"apply":  true,
 		"name":   "ghost",
+		"scope":  "project",
 	})
 
 	if resp.OK {
@@ -710,6 +814,7 @@ func TestApplyConnectFailureDoesNotPersist(t *testing.T) {
 		"kind":   "mcp",
 		"apply":  true,
 		"name":   "broken",
+		"scope":  "project",
 	})
 
 	if resp.OK {
@@ -739,6 +844,9 @@ func TestPackageActionUsesNpx(t *testing.T) {
 	if len(resp.Actions[0].Args) != 2 || resp.Actions[0].Args[0] != "-y" || resp.Actions[0].Args[1] != "@example/mcp-pkg" {
 		t.Errorf("args = %v, want [-y @example/mcp-pkg]", resp.Actions[0].Args)
 	}
+	if resp.Actions[0].Scope != "global" || resp.Actions[0].ConfigPath != config.UserConfigPath() {
+		t.Errorf("scope/path = %q %q, want global %q", resp.Actions[0].Scope, resp.Actions[0].ConfigPath, config.UserConfigPath())
+	}
 }
 
 func TestPlanURLBlobRewritesToRaw(t *testing.T) {
@@ -761,6 +869,9 @@ func TestPlanURLRemoteEndpointAuto(t *testing.T) {
 	}
 	if resp.Actions[0].Transport != "http" {
 		t.Errorf("transport = %q, want http", resp.Actions[0].Transport)
+	}
+	if resp.Actions[0].Scope != "global" || resp.Actions[0].ConfigPath != config.UserConfigPath() {
+		t.Errorf("scope/path = %q %q, want global %q", resp.Actions[0].Scope, resp.Actions[0].ConfigPath, config.UserConfigPath())
 	}
 }
 
@@ -902,6 +1013,27 @@ func TestFetchTextAppliesTimeoutAndUA(t *testing.T) {
 	_, err := tl.fetchText(ctx, "http://example.invalid")
 	if !errors.Is(err, ErrSourceUnreadable) {
 		t.Errorf("expected ErrSourceUnreadable, got %v", err)
+	}
+}
+
+func TestGlobalSkillInstallRootUsesReasonixHome(t *testing.T) {
+	home := t.TempDir()
+	reasonixHome := filepath.Join(t.TempDir(), "rx-home")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("REASONIX_HOME", reasonixHome)
+	oldUserHomeDir := userHomeDir
+	userHomeDir = func() (string, error) { return home, nil }
+	t.Cleanup(func() { userHomeDir = oldUserHomeDir })
+
+	tl := NewTool(Options{ProjectRoot: t.TempDir()}).(*installSourceTool)
+	root, err := tl.skillInstallRoot("global")
+	if err != nil {
+		t.Fatalf("skillInstallRoot: %v", err)
+	}
+	want := filepath.Join(reasonixHome, skill.SkillsDirname)
+	if root != want {
+		t.Fatalf("global skill root = %q, want %q", root, want)
 	}
 }
 
@@ -1048,6 +1180,75 @@ func TestUninstallRemovesMCPAndDisconnects(t *testing.T) {
 	reloaded := config.LoadForEdit(filepath.Join(project, "reasonix.toml"))
 	if len(reloaded.Plugins) != 0 {
 		t.Errorf("plugin should be removed, got %+v", reloaded.Plugins)
+	}
+}
+
+func TestUninstallWithoutScopePrefersProjectSkill(t *testing.T) {
+	project := t.TempDir()
+	home := t.TempDir()
+	projectTarget := filepath.Join(project, ".reasonix", "skills", "dupe.md")
+	globalTarget := filepath.Join(home, ".reasonix", "skills", "dupe.md")
+	writeFile(t, projectTarget, "---\nname: dupe\ndescription: Project\n---\nbody")
+	writeFile(t, globalTarget, "---\nname: dupe\ndescription: Global\n---\nbody")
+
+	tl := NewTool(Options{ProjectRoot: project, HomeDir: home})
+	resp := execInstall(t, tl, map[string]any{
+		"op":   "uninstall",
+		"name": "dupe",
+	})
+
+	if !resp.OK || resp.Scope != "project" {
+		t.Fatalf("response = %+v, want project uninstall", resp)
+	}
+	if _, err := os.Lstat(projectTarget); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("project skill should be gone, lstat err = %v", err)
+	}
+	if _, err := os.Lstat(globalTarget); err != nil {
+		t.Errorf("global skill should remain when project matched first, lstat err = %v", err)
+	}
+}
+
+func TestUninstallWithoutScopeFallsBackToGlobalMCP(t *testing.T) {
+	project := t.TempDir()
+	home := t.TempDir()
+	name := "global-fallback"
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if err := cfg.UpsertPlugin(config.PluginEntry{Name: name, Type: "http", URL: "https://global.example.com/mcp"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanup := config.LoadForEdit(config.UserConfigPath())
+		if cleanup.RemovePlugin(name) {
+			_ = cleanup.SaveTo(config.UserConfigPath())
+		}
+	})
+
+	var disconnects atomic.Int32
+	tl := NewTool(Options{
+		ProjectRoot: project,
+		HomeDir:     home,
+		OnDisconnect: func(string) bool {
+			disconnects.Add(1)
+			return true
+		},
+	})
+	resp := execInstall(t, tl, map[string]any{
+		"op":   "uninstall",
+		"name": name,
+	})
+
+	if !resp.OK || resp.Scope != "global" {
+		t.Fatalf("response = %+v, want global fallback uninstall", resp)
+	}
+	if disconnects.Load() != 1 {
+		t.Errorf("OnDisconnect should fire once, got %d", disconnects.Load())
+	}
+	reloaded := config.LoadForEdit(config.UserConfigPath())
+	if _, ok := findPlugin(reloaded.Plugins, name); ok {
+		t.Fatalf("global MCP should be removed, got %+v", reloaded.Plugins)
 	}
 }
 
@@ -1215,6 +1416,23 @@ func TestComputePlanIDStable(t *testing.T) {
 	}
 }
 
+func TestPlanIDUsesResolvedActionScope(t *testing.T) {
+	reqOmitted := request{Op: "install", Source: "https://mcp.example.com/mcp", Kind: "mcp"}
+	reqGlobal := request{Op: "install", Source: "https://mcp.example.com/mcp", Kind: "mcp", Scope: "global", scopeExplicit: true}
+	actions := []action{{
+		Kind:       "mcp",
+		Action:     "install_mcp_server",
+		Name:       "example",
+		URL:        "https://mcp.example.com/mcp",
+		Transport:  "http",
+		Scope:      "global",
+		ConfigPath: config.UserConfigPath(),
+	}}
+	if got, want := computePlanID(reqOmitted, actions), computePlanID(reqGlobal, actions); got != want {
+		t.Fatalf("planId with omitted scope = %q, explicit global = %q; want same resolved plan", got, want)
+	}
+}
+
 // --- local executable -------------------------------------------------------
 
 func TestPlanLocalExecutableDetected(t *testing.T) {
@@ -1267,10 +1485,20 @@ func TestApplyLocalExecutableHonorsCommandOverride(t *testing.T) {
 	if len(stub.connected) != 1 || stub.connected[0].Command != "node" || len(stub.connected[0].Args) != 1 || stub.connected[0].Args[0] != server {
 		t.Fatalf("connected entry = %+v, want node [%s]", stub.connected, server)
 	}
-	cfg := config.LoadForEdit(filepath.Join(project, "reasonix.toml"))
-	if len(cfg.Plugins) != 1 || cfg.Plugins[0].Command != "node" || len(cfg.Plugins[0].Args) != 1 || cfg.Plugins[0].Args[0] != server {
-		t.Fatalf("persisted plugins = %+v, want node [%s]", cfg.Plugins, server)
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	p, ok := findPlugin(cfg.Plugins, "wrapped")
+	if !ok || p.Command != "node" || len(p.Args) != 1 || p.Args[0] != server {
+		t.Fatalf("persisted plugins = %+v, want wrapped node [%s]", cfg.Plugins, server)
 	}
+}
+
+func findPlugin(entries []config.PluginEntry, name string) (config.PluginEntry, bool) {
+	for _, entry := range entries {
+		if entry.Name == name {
+			return entry, true
+		}
+	}
+	return config.PluginEntry{}, false
 }
 
 func writeLocalExecutable(t *testing.T, dir, name string) string {

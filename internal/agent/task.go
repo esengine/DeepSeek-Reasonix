@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime/debug"
 	"strings"
 
 	"reasonix/internal/event"
@@ -23,6 +24,7 @@ If you need to ask for clarification, fail with a precise question instead of gu
 
 var subagentMetaTools = []string{
 	"task",
+	"parallel_tasks",
 	"run_skill",
 	"read_skill",
 	"install_skill",
@@ -33,6 +35,14 @@ var subagentMetaTools = []string{
 	"security_review",
 }
 
+var subagentJobTools = []string{
+	"wait",
+	"bash_output",
+	"kill_shell",
+}
+
+const subagentToolBoundarySummary = "Recursive agent/skill tools and unsupported background job tools (wait, bash_output, kill_shell) are excluded; bash is exposed as foreground-only inside subagents."
+
 // SubagentMetaTools returns the tool names that spawned agents should not inherit
 // from the parent registry unless a future call site deliberately opts into a
 // different boundary. They can spawn or author more agent work, so excluding them
@@ -42,6 +52,54 @@ func SubagentMetaTools() []string {
 	copy(out, subagentMetaTools)
 	return out
 }
+
+// SubagentToolRegistry returns the tool set exposed inside spawned sub-agents:
+// the requested whitelist (or every parent tool), minus meta tools that would
+// spawn more agent work and job tools whose runtime manager is not injected into
+// sub-agents. When bash is present, it is wrapped to advertise and allow only
+// foreground execution.
+func SubagentToolRegistry(parent *tool.Registry, names []string) *tool.Registry {
+	exclude := append(SubagentMetaTools(), subagentJobTools...)
+	sub := FilterRegistry(parent, names, exclude...)
+	if bash, ok := sub.Get("bash"); ok {
+		sub.Add(foregroundOnlyBash{inner: bash})
+	}
+	return sub
+}
+
+type foregroundOnlyBash struct {
+	inner tool.Tool
+}
+
+func (b foregroundOnlyBash) Name() string { return "bash" }
+
+func (b foregroundOnlyBash) Description() string {
+	desc := strings.TrimSpace(b.inner.Description())
+	if desc == "" {
+		desc = "Execute a command in the shell and return combined stdout/stderr."
+	}
+	desc = strings.Replace(desc, "Execute a command in the shell", "Execute a foreground command in the shell", 1)
+	return desc + " Background execution is unavailable inside subagents."
+}
+
+func (foregroundOnlyBash) Schema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute in the foreground"}},"required":["command"]}`)
+}
+
+func (b foregroundOnlyBash) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var p struct {
+		RunInBackground bool `json:"run_in_background"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return "", fmt.Errorf("invalid args: %w", err)
+	}
+	if p.RunInBackground {
+		return "", fmt.Errorf("background bash is unavailable in subagents; run a foreground command or ask the parent agent to start a background job")
+	}
+	return b.inner.Execute(ctx, args)
+}
+
+func (b foregroundOnlyBash) ReadOnly() bool { return b.inner.ReadOnly() }
 
 // TaskTool spawns a sub-agent in its own session for a focused sub-task. The
 // sub-agent runs with a filtered tool whitelist and the same step budget shape
@@ -60,8 +118,10 @@ type TaskTool struct {
 	softCompactRatio  float64
 	compactRatio      float64
 	compactForceRatio float64
+	recentKeep        int
 	temperature       float64
 	archiveDir        string
+	keepPolicy        KeepPolicy
 	sysPrompt         string
 	gate              Gate
 	subagentModel     string
@@ -81,8 +141,8 @@ type TaskTool struct {
 // deny rules still bite while autonomous sub-agents are never blocked on an
 // interactive prompt (there is no UI to answer one).
 func NewTaskTool(prov provider.Provider, pricing *provider.Pricing, parentReg *tool.Registry,
-	maxSteps, contextWindow int, softCompactRatio, compactRatio, compactForceRatio, temperature float64, archiveDir, sysPrompt string, gate Gate,
-	subagentModel, subagentEffort string, resolveProvider func(string, string) (provider.Provider, *provider.Pricing, int, error)) *TaskTool {
+	maxSteps, contextWindow, recentKeep int, softCompactRatio, compactRatio, compactForceRatio, temperature float64, archiveDir, sysPrompt string, gate Gate,
+	keepPolicy KeepPolicy, subagentModel, subagentEffort string, resolveProvider func(string, string) (provider.Provider, *provider.Pricing, int, error)) *TaskTool {
 	if sysPrompt == "" {
 		sysPrompt = DefaultTaskSystemPrompt
 	}
@@ -92,11 +152,13 @@ func NewTaskTool(prov provider.Provider, pricing *provider.Pricing, parentReg *t
 		parentReg:         parentReg,
 		maxSteps:          maxSteps,
 		contextWindow:     contextWindow,
+		recentKeep:        recentKeep,
 		softCompactRatio:  softCompactRatio,
 		compactRatio:      compactRatio,
 		compactForceRatio: compactForceRatio,
 		temperature:       temperature,
 		archiveDir:        archiveDir,
+		keepPolicy:        keepPolicy,
 		sysPrompt:         sysPrompt,
 		gate:              gate,
 		subagentModel:     subagentModel,
@@ -124,7 +186,7 @@ func (t *TaskTool) WithTranscriptIdentityResolver(resolve func(modelRef, effort 
 func (t *TaskTool) Name() string { return "task" }
 
 func (t *TaskTool) Description() string {
-	return "Spawn a sub-agent for a focused sub-task. The sub-agent runs in its own session with the same provider and a filtered tool list (defaults to every parent tool except subagent/skill meta-tools, so delegation stays one layer deep). Only its final answer is returned. Use this to (a) keep long exploration sequences out of the parent's context budget, or (b) delegate self-contained work like 'find every place that calls X and summarise the patterns'."
+	return "Spawn a sub-agent for a focused sub-task. The sub-agent runs in its own session with the same provider and a filtered tool list (defaults to every parent tool, then applies the subagent boundary: " + subagentToolBoundarySummary + "). Only its final answer is returned. Use this to (a) keep long exploration sequences out of the parent's context budget, or (b) delegate self-contained work like 'find every place that calls X and summarise the patterns'."
 }
 
 func (t *TaskTool) Schema() json.RawMessage {
@@ -133,7 +195,7 @@ func (t *TaskTool) Schema() json.RawMessage {
 "properties":{
   "prompt":{"type":"string","description":"What the sub-agent should accomplish. Be specific about the deliverable — the sub-agent does not see this conversation."},
   "description":{"type":"string","description":"Short label for the sub-task (3-7 words). Surfaced in the dispatch line so the user sees what's running."},
-  "tools":{"type":"array","items":{"type":"string"},"description":"Optional tool whitelist. Subagent/skill meta-tools are still excluded so delegation stays one layer deep."},
+  "tools":{"type":"array","items":{"type":"string"},"description":"Optional tool whitelist. ` + subagentToolBoundarySummary + `"},
   "max_steps":{"type":"integer","description":"Optional cap on tool-call rounds. Defaults to half the parent's cap (min 5).","minimum":1},
   "run_in_background":{"type":"boolean","description":"Run the sub-agent asynchronously: returns a job id immediately and keeps working across turns. Collect its final answer with wait, and you'll be notified when it finishes. Use for long, independent sub-tasks you don't need to block on right now."},
   "model":{"type":"string","description":"Optional model override for the sub-agent (a configured provider/model name)."},
@@ -248,8 +310,15 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 				return "", err
 			}
 		}
-		job := jm.Start("task", label, func(jobCtx context.Context, _ io.Writer) (string, error) {
+		job := jm.StartForSession(jobs.SessionFromContext(ctx), "task", label, func(jobCtx context.Context, _ io.Writer) (result string, err error) {
 			defer run.Release()
+			defer func() {
+				if r := recover(); r != nil {
+					panicErr := fmt.Errorf("internal error: panic: %v\n%s", r, debug.Stack())
+					result = FormatSubagentResult("", run.Ref, true)
+					err = errors.Join(panicErr, t.transcripts.SaveFailed(run))
+				}
+			}()
 			answer, err := t.runSubSession(jobCtx, p.Prompt, subReg, nested, maxSteps, prov, pricing, ctxWin, run.Session)
 			if err != nil {
 				return FormatSubagentResult("", run.Ref, true), errors.Join(err, t.transcripts.SaveFailed(run))
@@ -344,10 +413,9 @@ func (t *TaskTool) effectiveEffortIdentity(effort string) string {
 }
 
 // buildSubReg returns the sub-agent's tool set: the named whitelist (minus
-// subagent/skill meta-tools, to bar recursive nesting), or every parent tool
-// except those meta-tools.
+// unavailable sub-agent tools), or every parent tool except those tools.
 func (t *TaskTool) buildSubReg(names []string) *tool.Registry {
-	return FilterRegistry(t.parentReg, names, SubagentMetaTools()...)
+	return SubagentToolRegistry(t.parentReg, names)
 }
 
 // FilterRegistry builds a sub-registry from parent: the named whitelist (empty =
@@ -355,11 +423,14 @@ func (t *TaskTool) buildSubReg(names []string) *tool.Registry {
 // sub-agent — a `task` sub-agent or a subagent skill — may call, e.g. excluding
 // `task` to bar recursive nesting, or restricting to a skill's allowed-tools.
 func FilterRegistry(parent *tool.Registry, names []string, exclude ...string) *tool.Registry {
+	sub := tool.NewRegistry()
+	if parent == nil {
+		return sub
+	}
 	ex := make(map[string]bool, len(exclude))
 	for _, e := range exclude {
 		ex[e] = true
 	}
-	sub := tool.NewRegistry()
 	src := names
 	if len(src) == 0 {
 		src = parent.Names()
@@ -434,12 +505,16 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 		MaxSteps:          maxSteps,
 		Temperature:       t.temperature,
 		Pricing:           pricing,
+		UsageSource:       event.UsageSourceSubagent,
 		Gate:              t.gate,
 		ContextWindow:     ctxWin,
+		RecentKeep:        t.recentKeep,
 		SoftCompactRatio:  t.softCompactRatio,
 		CompactRatio:      t.compactRatio,
 		CompactForceRatio: t.compactForceRatio,
 		ArchiveDir:        t.archiveDir,
+		KeepPolicy:        t.keepPolicy,
+		ReasoningLanguage: ReasoningLanguageFromContext(ctx),
 	}, sink)
 }
 
@@ -491,14 +566,22 @@ func NestedSink(ctx context.Context, fallback event.Sink) event.Sink {
 	return subSinkFor(parentID, parent)
 }
 
-// subSink forwards a sub-agent's tool dispatch/result events to the parent's
-// event stream, tagged with the parent task call's ID so a frontend nests them
-// under it. The sub-agent's own turn/usage/text/reasoning events are dropped —
-// only its tool activity (the part worth seeing live) and its final answer
-// (returned by Execute) reach the parent. The forwarded call IDs are namespaced
-// with the parent ID so a sub-agent call can never collide with a parent call in
-// the frontend's dispatch→result matching. Falls back to Discard when there's no
-// parent stream (the headless run loop, or a direct Execute in tests).
+// subSink forwards a sub-agent's tool dispatch/result events and billable usage
+// to the parent's event stream. Only tool activity is nested visually; the
+// sub-agent's text/reasoning stays isolated and only its final answer is returned.
+//
+// The sub-agent's own turn/text/reasoning events are dropped — forwarding them
+// would make the parent transcript noisy and could imply they belong to the
+// parent model context, which they do not.
+//
+// Usage events are observability only, so forwarding them preserves billing
+// totals without polluting the parent provider-visible prefix.
+//
+// Tool events are tagged with the parent task call's ID so a frontend nests them
+// under it. The forwarded call IDs are namespaced with the parent ID so a
+// sub-agent call can never collide with a parent call in the frontend's
+// dispatch→result matching. Falls back to Discard when there's no parent stream
+// (the headless run loop, or a direct Execute in tests).
 func subSink(ctx context.Context) event.Sink {
 	parentID, parent, _, ok := CallContext(ctx)
 	if !ok || parent == nil {
@@ -519,6 +602,11 @@ func subSinkFor(parentID string, parent event.Sink) event.Sink {
 		case event.ToolDispatch, event.ToolResult:
 			e.Tool.ParentID = parentID
 			e.Tool.ID = parentID + "/" + e.Tool.ID
+			parent.Emit(e)
+		case event.Usage:
+			if e.UsageSource == "" {
+				e.UsageSource = event.UsageSourceSubagent
+			}
 			parent.Emit(e)
 		}
 	})

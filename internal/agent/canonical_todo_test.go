@@ -111,3 +111,96 @@ func TestRebuildTodoStateSkipsFailedCompleteStep(t *testing.T) {
 		t.Fatalf("a failed complete_step must not advance canonical state: %+v", a.todoState[0])
 	}
 }
+
+func TestRebuildTodoStateRequiresToolResults(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "t1", Name: "todo_write",
+			Arguments: `{"todos":[{"content":"a","status":"in_progress"}]}`,
+		}}},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "c1", Name: "complete_step", Arguments: `{"step":"a"}`,
+		}}},
+	}
+	a := &Agent{}
+	a.rebuildTodoState(msgs)
+	if len(a.todoState) != 0 {
+		t.Fatalf("todo_write without tool result rebuilt canonical state: %+v", a.todoState)
+	}
+
+	msgs = append(msgs[:1],
+		provider.Message{Role: provider.RoleTool, ToolCallID: "t1", Name: "todo_write", Content: "Todos updated"},
+		msgs[1],
+	)
+	a.rebuildTodoState(msgs)
+	if len(a.todoState) != 1 {
+		t.Fatalf("successful todo_write did not rebuild canonical state: %+v", a.todoState)
+	}
+	if got := a.todoState[0].Status; got != "in_progress" {
+		t.Fatalf("complete_step without tool result changed status to %q", got)
+	}
+}
+
+func TestRebuildTodoStateHonorsEmptyTodoWriteClear(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID:        "t1",
+			Name:      "todo_write",
+			Arguments: `{"todos":[{"content":"a","status":"in_progress"}]}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: "t1", Name: "todo_write", Content: "Todos updated"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID:        "t2",
+			Name:      "todo_write",
+			Arguments: `{"todos":[]}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: "t2", Name: "todo_write", Content: "Todos updated"},
+	}
+	a := &Agent{}
+	a.rebuildTodoState(msgs)
+	if len(a.todoState) != 0 {
+		t.Fatalf("empty todo_write should clear rebuilt canonical state: %+v", a.todoState)
+	}
+}
+
+func TestSeedTodoState(t *testing.T) {
+	a := &Agent{sink: event.Discard}
+	todos := []evidence.TodoItem{
+		{Content: "step 1", Status: "in_progress"},
+		{Content: "step 2", Status: "pending"},
+	}
+	a.SeedTodoState(todos)
+	if len(a.todoState) != 2 {
+		t.Fatalf("SeedTodoState: got %d items, want 2", len(a.todoState))
+	}
+	if a.todoState[0].Status != "in_progress" {
+		t.Fatalf("SeedTodoState: first item status = %q, want in_progress", a.todoState[0].Status)
+	}
+}
+
+func TestSeedTodoStateReplacesExisting(t *testing.T) {
+	a := &Agent{sink: event.Discard, todoState: []evidence.TodoItem{
+		{Content: "existing", Status: "in_progress"},
+	}}
+	a.SeedTodoState([]evidence.TodoItem{
+		{Content: "new", Status: "in_progress"},
+	})
+	if len(a.todoState) != 1 || a.todoState[0].Content != "new" {
+		t.Fatalf("SeedTodoState did not replace existing state: %+v", a.todoState)
+	}
+}
+
+func TestSeedTodoStateAllowsAdvanceAfterSeed(t *testing.T) {
+	a := &Agent{sink: event.Discard}
+	a.SeedTodoState([]evidence.TodoItem{
+		{Content: "step 1", Status: "in_progress"},
+		{Content: "step 2", Status: "pending"},
+	})
+	a.advanceCanonicalTodo("step 1")
+	if a.todoState[0].Status != "completed" {
+		t.Fatalf("advance after seed: item 0 status = %q, want completed", a.todoState[0].Status)
+	}
+	if a.todoState[1].Status != "in_progress" {
+		t.Fatalf("advance after seed: item 1 status = %q, want in_progress", a.todoState[1].Status)
+	}
+}

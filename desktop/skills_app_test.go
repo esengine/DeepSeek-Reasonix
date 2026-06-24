@@ -108,6 +108,104 @@ func TestSkillRootsViewMarksEnvConfiguredCustomRoot(t *testing.T) {
 	t.Fatalf("custom skill root %q not found in %+v", root, roots)
 }
 
+func TestSkillRootsViewDedupesConfiguredConventionRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	project := t.TempDir()
+	root := filepath.Join(home, ".reasonix", "skills")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "global.md"), []byte("---\ndescription: global\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, []byte("[skills]\npaths = [\"~/.reasonix/skills\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(wd)
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+
+	roots := skillRootsView()
+	want := realTestPath(root)
+	var matches []SkillRootView
+	for _, r := range roots {
+		if realTestPath(r.Dir) == want {
+			matches = append(matches, r)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("skill root %q appears %d times, want once: %+v", root, len(matches), matches)
+	}
+	if !matches[0].Configured || matches[0].Skills != 1 || len(matches[0].SkillItems) != 1 {
+		t.Fatalf("deduped root should keep configured metadata and skills, got %+v", matches[0])
+	}
+}
+
+func TestSkillRootsViewDedupesConfiguredProjectConventionRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	project := t.TempDir()
+	root := filepath.Join(project, ".reasonix", "skills")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "project.md"), []byte("---\ndescription: project\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(wd)
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root = filepath.Join(cwd, ".reasonix", "skills")
+	cfgPath := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, []byte("[skills]\npaths = [\""+root+"\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	roots := skillRootsView()
+	want := realTestPath(root)
+	var matches []SkillRootView
+	for _, r := range roots {
+		if realTestPath(r.Dir) == want {
+			matches = append(matches, r)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("project skill root %q appears %d times, want once: %+v", root, len(matches), matches)
+	}
+	if !matches[0].Configured || matches[0].Skills != 1 || len(matches[0].SkillItems) != 1 {
+		t.Fatalf("deduped project root should keep configured metadata and skills, got %+v", matches[0])
+	}
+	if matches[0].Status == "inactive" {
+		t.Fatalf("deduped project root should stay active, got %+v", matches[0])
+	}
+}
+
 func TestSkillRootsViewOmitsExcludedConventionRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -214,18 +312,78 @@ func TestCapabilitiesIncludesDisabledSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	view := a.Capabilities()
-	states := map[string]bool{}
-	for _, sk := range view.Skills {
-		states[sk.Name] = sk.Enabled
+	settingsView := a.SkillsSettings()
+	assertSkillStates := func(t *testing.T, skills []SkillView) {
+		t.Helper()
+		states := map[string]bool{}
+		for _, sk := range skills {
+			states[sk.Name] = sk.Enabled
+		}
+		if states["explore"] != true {
+			t.Fatalf("explore should be enabled in skills view: %+v", skills)
+		}
+		enabled, ok := states["review"]
+		if !ok || enabled {
+			t.Fatalf("review should be disabled but present in skills view: %+v", skills)
+		}
 	}
-	if states["explore"] != true {
-		t.Fatalf("explore should be enabled in capabilities: %+v", view.Skills)
+	assertSkillStates(t, settingsView.Skills)
+	assertSkillStates(t, a.Capabilities().Skills)
+}
+
+func TestSkillsSettingsRefreshInvalidatesSkillRootsCache(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	project := t.TempDir()
+	root := filepath.Join(project, ".reasonix", "skills")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	enabled, ok := states["review"]
-	if !ok || enabled {
-		t.Fatalf("review should be disabled but present in capabilities: %+v", view.Skills)
+	if err := os.WriteFile(filepath.Join(root, "one.md"), []byte("---\ndescription: one\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
 	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(wd)
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+	a := NewApp()
+	a.setTestCtrl(control.New(control.Options{}), "")
+	defer a.activeCtrl().Close()
+
+	first := a.SkillsSettings()
+	if got := skillRootCount(first.SkillRoots, root); got != 1 {
+		t.Fatalf("initial project skill count = %d, want 1; roots=%+v", got, first.SkillRoots)
+	}
+	if err := os.WriteFile(filepath.Join(root, "two.md"), []byte("---\ndescription: two\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cached := a.SkillsSettings()
+	if got := skillRootCount(cached.SkillRoots, root); got != 1 {
+		t.Fatalf("cached project skill count = %d, want 1 before refresh; roots=%+v", got, cached.SkillRoots)
+	}
+	if err := a.RefreshSkills(); err != nil {
+		t.Fatalf("RefreshSkills: %v", err)
+	}
+	refreshed := a.SkillsSettings()
+	if got := skillRootCount(refreshed.SkillRoots, root); got != 2 {
+		t.Fatalf("refreshed project skill count = %d, want 2; roots=%+v", got, refreshed.SkillRoots)
+	}
+}
+
+func skillRootCount(roots []SkillRootView, path string) int {
+	want := realTestPath(path)
+	for _, r := range roots {
+		if realTestPath(r.Dir) == want {
+			return r.Skills
+		}
+	}
+	return -1
 }
 
 func realTestPath(path string) string {

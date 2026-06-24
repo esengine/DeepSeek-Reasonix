@@ -15,10 +15,11 @@ import (
 // caller decides whether apply=true actually runs cfg.UpsertPlugin +
 // SaveTo + connectMCP.
 func (t *installSourceTool) mcpEntryAction(req request, e config.PluginEntry, source string) action {
+	scope := t.installScope(req, "mcp", source)
 	var normalizedCommand bool
 	e, normalizedCommand = config.NormalizePluginCommandLine(e)
 	// Tier comes from the call (req.Tier) or the entry; either way we
-	// validate. An unrecognised tier is silently downgraded to "lazy" by
+	// validate. An unrecognised tier is silently downgraded to "background" by
 	// normalizeTier — we capture the original value to surface a warning.
 	desired := firstNonEmpty(req.Tier, e.Tier)
 	norm, ok := normalizeTier(desired)
@@ -28,8 +29,8 @@ func (t *installSourceTool) mcpEntryAction(req request, e config.PluginEntry, so
 		Action:     "install_mcp_server",
 		Name:       e.Name,
 		Source:     source,
-		ConfigPath: t.configPath(req.Scope),
-		Scope:      req.Scope,
+		ConfigPath: t.configPath(scope),
+		Scope:      scope,
 		Transport:  pluginTransport(e),
 		URL:        e.URL,
 		Command:    e.Command,
@@ -39,7 +40,7 @@ func (t *installSourceTool) mcpEntryAction(req request, e config.PluginEntry, so
 		entry:      e,
 	}
 	if !ok && strings.TrimSpace(desired) != "" {
-		a.RiskReasons = append(a.RiskReasons, fmt.Sprintf("tier %q is unknown; treating as lazy", desired))
+		a.RiskReasons = append(a.RiskReasons, fmt.Sprintf("tier %q is unknown; treating as background", desired))
 	}
 	if normalizedCommand {
 		a.RiskReasons = append(a.RiskReasons, "split a pasted MCP command line into command and args")
@@ -205,7 +206,7 @@ func parseMCPJSON(b []byte) ([]config.PluginEntry, []string, error) {
 		}
 		tier, ok := normalizeTier(s.Tier)
 		if !ok && strings.TrimSpace(s.Tier) != "" {
-			warnings = append(warnings, fmt.Sprintf("%s: tier %q is unknown; treating as lazy", name, s.Tier))
+			warnings = append(warnings, fmt.Sprintf("%s: tier %q is unknown; treating as background", name, s.Tier))
 		}
 		e := config.PluginEntry{
 			Name:      name,

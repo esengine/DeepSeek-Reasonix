@@ -7,37 +7,87 @@ import (
 	"strings"
 )
 
-// loadDotEnv loads KEY=value files into the process environment without
-// overriding variables that are already set (first file to set a key wins).
-// Order: a project ./.env (read-only back-compat, so a manual project override
-// takes precedence), then the reasonix-owned global credentials file in the user
-// config dir (where `reasonix setup` writes keys, so they resolve from any
-// directory without ever touching a project's own .env), then ~/.env as a legacy
-// fallback (the desktop app writes there). Existing environment variables always
-// win over all three.
+// loadDotEnv loads Reasonix's global .env for provider credentials. The
+// workspace .env values returned by loadDotEnvForRoot are ignored here because
+// loadDotEnv has no Config to carry a workspace-scoped expansion environment.
 func loadDotEnv() {
 	loadDotEnvForRoot(".")
 }
 
-// loadDotEnvForRoot loads a root's .env file (if present) before the home .env
-// fallback. When root is "." it behaves like loadDotEnv().
-func loadDotEnvForRoot(root string) {
-	dotEnvPath := ".env"
-	if root != "" && root != "." {
-		dotEnvPath = filepath.Join(root, ".env")
+// loadDotEnvForRoot returns workspace .env values for scoped plugin/MCP/proxy
+// expansion, then loads Reasonix's global .env for provider credentials.
+// Workspace .env values are deliberately not written into the process
+// environment, so multiple desktop/ACP workspaces cannot leak tokens into each
+// other and project files cannot redirect Reasonix's own config/credential
+// paths.
+func loadDotEnvForRoot(root string) map[string]string {
+	projectEnv := loadProjectDotEnvForExpansion(root)
+	loadCredentialStoreForRoot(root)
+	return projectEnv
+}
+
+func loadProjectDotEnvForExpansion(root string) map[string]string {
+	root = resolveRoot(root)
+	path := ".env"
+	if root != "." {
+		path = filepath.Join(root, ".env")
 	}
-	loadDotEnvFile(dotEnvPath)
-	if p := UserCredentialsPath(); p != "" {
-		loadDotEnvFile(p)
+	if current := UserCredentialsPath(); current != "" && samePath(path, current) {
+		return nil
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		loadDotEnvFile(filepath.Join(home, ".env"))
+	return readDotEnvFileMap(path, func(key string) bool {
+		return !isProjectDotEnvControlKey(key)
+	})
+}
+
+func isProjectDotEnvControlKey(key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return true
+	}
+	upper := strings.ToUpper(key)
+	if strings.HasPrefix(upper, "REASONIX_") {
+		return true
+	}
+	switch upper {
+	case "HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME":
+		return true
+	default:
+		return false
 	}
 }
 
-// loadDotEnvFile reads one .env file (if present) and sets any keys not already
-// present in the environment. Lenient, zero-dependency parsing.
-func loadDotEnvFile(path string) {
+func legacyCredentialsPaths() []string {
+	current := UserCredentialsPath()
+	seen := map[string]bool{}
+	var paths []string
+	add := func(path string) {
+		if path == "" {
+			return
+		}
+		path = filepath.Clean(path)
+		if current != "" && samePath(path, current) {
+			return
+		}
+		if seen[path] {
+			return
+		}
+		seen[path] = true
+		paths = append(paths, path)
+	}
+	if dir := legacyOSSupportDir(); dir != "" {
+		add(filepath.Join(dir, "credentials"))
+	}
+	if dir := userSupportDir(); dir != "" {
+		add(filepath.Join(dir, "credentials"))
+	}
+	for _, cfg := range legacyXDGConfigPaths() {
+		add(filepath.Join(filepath.Dir(cfg), "credentials"))
+	}
+	return paths
+}
+
+func loadDotEnvFileAs(path string, source CredentialSource) {
 	f, err := os.Open(path)
 	if err != nil {
 		return
@@ -60,8 +110,72 @@ func loadDotEnvFile(path string) {
 		if key == "" {
 			continue
 		}
-		if _, exists := os.LookupEnv(key); !exists {
-			os.Setenv(key, val)
+		if _, exists := os.LookupEnv(key); exists && source.Kind != CredentialSourceCredentials {
+			recordExistingCredentialSource(key)
+			continue
+		}
+		if err := os.Setenv(key, val); err == nil && source.Kind != "" {
+			source.Path = path
+			recordCredentialSource(key, val, source)
 		}
 	}
+}
+
+func readDotEnvFileMap(path string, allow func(string) bool) map[string]string {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	out := map[string]string{}
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		if key == "" || allow != nil && !allow(key) {
+			continue
+		}
+		out[key] = strings.Trim(strings.TrimSpace(val), `"'`)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func envFileValue(path, wantKey string) (string, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		if key != wantKey {
+			continue
+		}
+		val = strings.Trim(strings.TrimSpace(val), `"'`)
+		return val, true
+	}
+	return "", false
 }

@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -39,5 +40,89 @@ func TestStdioCallReturnsOnContextCancel(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("stdio call did not return within 2s of ctx cancel — a hung server hangs the turn")
+	}
+}
+
+func TestStdioCallTimesOutWithoutDeadline(t *testing.T) {
+	tr := &stdioTransport{
+		name:        "slow-server",
+		stdin:       discardWriteCloser{},
+		pending:     map[int]chan rpcResponse{},
+		callTimeout: 100 * time.Millisecond,
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := tr.call(context.Background(), "tools/call", map[string]any{})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("timed-out call returned nil error")
+		}
+		if !strings.Contains(err.Error(), "context deadline exceeded") {
+			t.Fatalf("expected deadline exceeded error, got: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("stdio call did not return within 2s")
+	}
+}
+
+func TestStdioCallRespectsExistingDeadline(t *testing.T) {
+	tr := &stdioTransport{
+		name:        "server",
+		stdin:       discardWriteCloser{},
+		pending:     map[int]chan rpcResponse{},
+		callTimeout: 10 * time.Second,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := tr.call(ctx, "tools/call", map[string]any{})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("timed-out call returned nil error")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("stdio call did not return within caller deadline")
+	}
+}
+
+func TestStdioCallCancelOverridesTimeout(t *testing.T) {
+	tr := &stdioTransport{
+		name:        "slow-server",
+		stdin:       discardWriteCloser{},
+		pending:     map[int]chan rpcResponse{},
+		callTimeout: 500 * time.Millisecond,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := tr.call(ctx, "tools/call", map[string]any{})
+		done <- err
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("cancelled call returned nil error")
+		}
+		if err != context.Canceled {
+			t.Fatalf("expected context.Canceled, got: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("stdio call did not return within 2s of cancel")
 	}
 }

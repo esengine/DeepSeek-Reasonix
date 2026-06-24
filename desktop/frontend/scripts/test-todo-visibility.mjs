@@ -16,17 +16,21 @@ const transpiled = ts.transpileModule(source, {
 }).outputText;
 
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(transpiled).toString("base64")}`;
-const { shouldShowTodoPanel } = await import(moduleUrl);
+const { shouldShowTodoPanel, todoDismissalKey } = await import(moduleUrl);
 
 const completedTodos = [
   { content: "Inspect the report", status: "completed" },
   { content: "Ship the fix", status: "completed" },
 ];
+const activeTodos = [
+  { content: "Inspect the report", status: "in_progress" },
+  { content: "Ship the fix", status: "pending" },
+];
 
 assert.equal(
   shouldShowTodoPanel("todo-final", null, completedTodos),
   true,
-  "the final all-completed todo_write must remain visible",
+  "a completed todo list stays visible in collapsed form until the user dismisses it",
 );
 assert.equal(
   shouldShowTodoPanel("todo-active", null, [{ content: "Run tests", status: "in_progress" }]),
@@ -41,11 +45,28 @@ assert.equal(
 assert.equal(shouldShowTodoPanel(null, null, completedTodos), false, "no canonical todo item means no panel");
 assert.equal(shouldShowTodoPanel("todo-empty", null, []), false, "empty todo lists do not render a panel");
 
+const activeKey = todoDismissalKey(activeTodos);
+assert.equal(
+  activeKey,
+  todoDismissalKey(activeTodos.map((todo) => ({ ...todo }))),
+  "the same task list keeps a stable dismissal key across restored event ids",
+);
+assert.equal(
+  shouldShowTodoPanel(activeKey, activeKey, activeTodos),
+  true,
+  "an incomplete restored todo list must reappear even after a stale local dismissal",
+);
+assert.notEqual(
+  activeKey,
+  todoDismissalKey([{ ...activeTodos[0], status: "completed" }, { ...activeTodos[1], status: "in_progress" }]),
+  "real progress produces a fresh dismissal key",
+);
+
 const iterations = 200_000;
 const started = performance.now();
 for (let i = 0; i < iterations; i += 1) {
-  if (!shouldShowTodoPanel("todo-perf", null, completedTodos)) {
-    throw new Error("unexpected hidden todo panel during performance loop");
+  if (shouldShowTodoPanel("todo-perf", "todo-perf", completedTodos)) {
+    throw new Error("unexpected visible todo panel during performance loop");
   }
 }
 const elapsed = performance.now() - started;

@@ -64,12 +64,18 @@ export function InlineDiff({
         </button>
       </header>
       <pre className="inline-diff__body">
-        {visible.map((r, i) => (
-          <div key={i} className={`inline-diff__row inline-diff__row--${r.type}`}>
-            <span className="inline-diff__sign">{r.type === "add" ? "+" : r.type === "del" ? "−" : " "}</span>
-            <span className="inline-diff__text">{r.text || " "}</span>
-          </div>
-        ))}
+        <span className="inline-diff__table">
+          {visible.map((r, i) => (
+            <span key={i} className={`inline-diff__row inline-diff__row--${r.type}`}>
+              <span className="inline-diff__gutter">
+                <span className="inline-diff__line">{r.oldLine ?? ""}</span>
+                <span className="inline-diff__line">{r.newLine ?? ""}</span>
+                <span className="inline-diff__sign">{r.type === "add" ? "+" : r.type === "del" ? "−" : " "}</span>
+              </span>
+              <span className="inline-diff__text">{r.text || " "}</span>
+            </span>
+          ))}
+        </span>
       </pre>
       {hidden > 0 && (
         <button

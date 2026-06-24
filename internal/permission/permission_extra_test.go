@@ -140,6 +140,13 @@ func TestSubjectPriority(t *testing.T) {
 	}
 }
 
+func TestSubjectMoveFilePaths(t *testing.T) {
+	got := Subject(json.RawMessage(`{"source_path":"a.md","destination_path":"docs/a.md"}`))
+	if got != "a.md" {
+		t.Errorf("move_file subject = %q, want source path", got)
+	}
+}
+
 // --- rememberRule ---
 
 func TestRememberRuleWithBashSubjectUsesPrefixWhenAvailable(t *testing.T) {
@@ -216,7 +223,7 @@ func TestPersistedEditRuleIsToolWide(t *testing.T) {
 		t.Fatalf("persisted rule = %q, want tool-wide Edit (no path restriction)", rule)
 	}
 	// The tool-wide Edit rule matches any file-mutation tool on any file.
-	allMutationTools := []string{"write_file", "edit_file", "multi_edit", "notebook_edit", "delete_range", "delete_symbol"}
+	allMutationTools := []string{"write_file", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol"}
 	for _, tm := range allMutationTools {
 		if !RuleMatchesString(rule, tm, "any/path/at/all.txt") {
 			t.Errorf("tool-wide Edit should match %s on any path", tm)

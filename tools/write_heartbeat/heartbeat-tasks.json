@@ -1,0 +1,20 @@
+{
+  "tasks": [
+    {
+      "id": "greeting_hello_001",
+      "title": "打个招呼",
+      "prompt": "你好！请用一段友好的话介绍一下你自己，然后用中文打个招呼。",
+      "interval": "2m",
+      "enabled": true,
+      "createdAt": 1718550000000
+    },
+    {
+      "id": "daily_check_002",
+      "title": "每日检查",
+      "prompt": "检查当前项目的最新改动和状态，总结需要关注的事项。",
+      "interval": "1h",
+      "enabled": true,
+      "createdAt": 1718550000000
+    }
+  ]
+}

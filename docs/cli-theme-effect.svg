@@ -16,9 +16,9 @@
   <circle cx="110" cy="75" r="6" fill="#ff5f56"/>
   <circle cx="130" cy="75" r="6" fill="#ffbd2e"/>
   <circle cx="150" cy="75" r="6" fill="#27c93f"/>
-  <text x="460" y="80" fill="#8a8a93" text-anchor="middle" class="sans" font-size="13">reasonix chat</text>
+  <text x="460" y="80" fill="#8a8a93" text-anchor="middle" class="sans" font-size="13">reasonix</text>
 
-  <text x="112" y="132" fill="#d97757" class="mono" font-size="16">◆ reasonix chat</text>
+  <text x="112" y="132" fill="#d97757" class="mono" font-size="16">◆ reasonix</text>
   <text x="300" y="132" fill="#777780" class="mono" font-size="16">· deepseek/deepseek-reasoner</text>
 
   <text x="112" y="178" fill="#34c3a6" class="mono" font-size="15">/theme</text>

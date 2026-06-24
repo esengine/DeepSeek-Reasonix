@@ -409,6 +409,128 @@ func TestFeishuRegistrationQRCodeURLAddsSDKMetadata(t *testing.T) {
 	}
 }
 
+func TestDiagnoseBotConnectionBuildsReportDetailForMissingSecret(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("FEISHU_BOT_APP_SECRET_PRIVATE", "")
+	app := NewApp()
+	if _, err := app.upsertBotConnection(config.BotConnectionConfig{
+		ID:            "feishu-lark",
+		Provider:      "feishu",
+		Domain:        "lark",
+		Label:         "Lark",
+		Enabled:       true,
+		Status:        "connected",
+		WorkspaceRoot: "/Users/alice/work/reasonix",
+		Credential: config.BotConnectionCredential{
+			AppID:        "cli-private",
+			AppSecretEnv: "FEISHU_BOT_APP_SECRET_PRIVATE",
+		},
+		SessionMappings: []config.BotConnectionSessionMapping{{
+			RemoteID:      "ou-private",
+			SessionID:     "session-private",
+			Scope:         "project",
+			WorkspaceRoot: "/Users/alice/work/reasonix",
+		}},
+	}, nil); err != nil {
+		t.Fatalf("upsert connection: %v", err)
+	}
+
+	diag, err := app.DiagnoseBotConnection("feishu-lark")
+	if err != nil {
+		t.Fatalf("DiagnoseBotConnection: %v", err)
+	}
+	if diag.Status != "warning" || diag.Phase != "credential" || diag.Code != "secret_missing" || diag.ReportKind != "bot" || diag.ReportDetail == "" {
+		t.Fatalf("diagnostic = %+v, want warning credential report", diag)
+	}
+	for _, leaked := range []string{"FEISHU_BOT_APP_SECRET_PRIVATE", "/Users/alice", "ou-private", "session-private"} {
+		if strings.Contains(diag.ReportDetail, leaked) {
+			t.Fatalf("diagnostic report leaked %q in %s", leaked, diag.ReportDetail)
+		}
+	}
+	var payload frontendCrashPayload
+	if err := json.Unmarshal([]byte(diag.ReportDetail), &payload); err != nil {
+		t.Fatalf("report detail is not structured JSON: %v", err)
+	}
+	if payload.Kind != "bot" || payload.Source != "bot.runtime" || payload.Label != "bot.feishu.lark.credential" {
+		t.Fatalf("payload = %+v, want bot runtime credential label", payload)
+	}
+	for _, want := range []string{
+		"app_secret_env_configured: true",
+		"secret_available: false",
+		"workspace_scope: project",
+		"session_mappings: 1",
+		"summary: required bot credential is not available",
+	} {
+		if !strings.Contains(payload.Message, want) {
+			t.Fatalf("payload message = %q, want it to contain %q", payload.Message, want)
+		}
+	}
+	report, err := crashReportFromDetail(diag.ReportKind, diag.ReportDetail)
+	if err != nil {
+		t.Fatalf("crashReportFromDetail: %v", err)
+	}
+	if report.Kind != "bot" || report.Source != "bot.runtime" || report.ErrorType != "BotConnectionDiagnostic" {
+		t.Fatalf("report = %+v, want accepted bot report", report)
+	}
+}
+
+func TestBotConnectionSendFailureReportRedactsEnvNames(t *testing.T) {
+	conn := config.BotConnectionConfig{
+		ID:       "feishu-lark",
+		Provider: "feishu",
+		Domain:   "lark",
+		Label:    "Lark",
+		Enabled:  true,
+		Status:   "connected",
+		Credential: config.BotConnectionCredential{
+			AppSecretEnv: "FEISHU_BOT_APP_SECRET_PRIVATE",
+		},
+	}
+	diag := botConnectionDiagnostic(&conn, conn.ID, "error", "send", "test_send_failed", "feishu app_id or FEISHU_BOT_APP_SECRET_PRIVATE is not configured", true)
+	if diag.ReportKind != "bot" || diag.ReportDetail == "" {
+		t.Fatalf("diagnostic = %+v, want reportable bot diagnostic", diag)
+	}
+	if strings.Contains(diag.ReportDetail, "FEISHU_BOT_APP_SECRET_PRIVATE") {
+		t.Fatalf("diagnostic report leaked env name in %s", diag.ReportDetail)
+	}
+	var payload frontendCrashPayload
+	if err := json.Unmarshal([]byte(diag.ReportDetail), &payload); err != nil {
+		t.Fatalf("report detail is not structured JSON: %v", err)
+	}
+	if !strings.Contains(payload.ErrorMessage, "[redacted-env]") {
+		t.Fatalf("payload errorMessage = %q, want redacted env marker", payload.ErrorMessage)
+	}
+}
+
+func TestDiagnoseWeixinConnectionDetectsMissingSavedAccountWithoutTokenEnv(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	app := NewApp()
+	if _, err := app.upsertBotConnection(config.BotConnectionConfig{
+		ID:       "weixin-weixin",
+		Provider: "weixin",
+		Domain:   "weixin",
+		Label:    "微信",
+		Enabled:  true,
+		Status:   "connected",
+		Credential: config.BotConnectionCredential{
+			AccountID: "missing-account",
+		},
+	}, nil); err != nil {
+		t.Fatalf("upsert connection: %v", err)
+	}
+
+	diag, err := app.DiagnoseBotConnection("weixin-weixin")
+	if err != nil {
+		t.Fatalf("DiagnoseBotConnection: %v", err)
+	}
+	if diag.Status != "warning" || diag.Phase != "credential" || diag.Code != "secret_missing" || diag.ReportKind != "bot" || diag.ReportDetail == "" {
+		t.Fatalf("diagnostic = %+v, want missing local credential warning", diag)
+	}
+	if strings.Contains(diag.ReportDetail, "missing-account") {
+		t.Fatalf("diagnostic report leaked account id in %s", diag.ReportDetail)
+	}
+}
+
 func TestRememberBotConnectionRemoteStoresStableScope(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	app := NewApp()

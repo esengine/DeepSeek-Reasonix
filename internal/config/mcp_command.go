@@ -8,8 +8,9 @@ import (
 
 // NormalizePluginCommandLine repairs the common MCP copy/paste mistake where a
 // tutorial's full command line is placed in command while args is left empty.
-// Valid commands that are just paths with spaces are left untouched unless they
-// are quoted or start with a known MCP runner such as npx/uvx/node.
+// Valid commands that are just paths with spaces are left untouched when they
+// look path-like; ordinary custom commands such as "custom-mcp --stdio" still
+// split so the executable and arguments survive GUI/legacy normalization.
 func NormalizePluginCommandLine(e PluginEntry) (PluginEntry, bool) {
 	if pluginEntryTransport(e) != "stdio" || len(e.Args) > 0 {
 		e.Command = strings.TrimSpace(e.Command)
@@ -56,7 +57,11 @@ func shouldSplitPluginCommand(original, first string) bool {
 	if strings.HasPrefix(trimmed, `"`) || strings.HasPrefix(trimmed, `'`) {
 		return true
 	}
-	return knownMCPCommandRunner(first)
+	return knownMCPCommandRunner(first) || !hasPathSeparator(first)
+}
+
+func hasPathSeparator(s string) bool {
+	return strings.ContainsAny(s, `/\`)
 }
 
 func knownMCPCommandRunner(command string) bool {

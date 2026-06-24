@@ -17,6 +17,12 @@ type Session struct {
 	mu             sync.RWMutex
 	Messages       []provider.Message
 	rewriteVersion int // bumped each time the log is rewritten (compact/fold)
+	// normalizedDirty is set when LoadSession repaired the history on the way in
+	// (empty tool-call names, dangling calls, truncated args, …). The repair
+	// already lives in Messages, so the next Save persists it automatically as
+	// part of the usual full rewrite; the flag exists for observability and to
+	// let callers opt out of work that a dirty session would make redundant.
+	normalizedDirty bool
 }
 
 // NewSession initializes a session with an optional system prompt.

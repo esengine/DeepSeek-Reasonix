@@ -188,6 +188,35 @@ input,textarea{font:inherit;color:inherit}
 .composer__btn--send:disabled{background:var(--panel-2);color:var(--muted);cursor:default;transform:none}
 .composer__btn--stop{background:var(--panel-2);color:var(--danger)}
 .composer__btn--stop:hover{background:var(--danger-soft)}
+/* goal chip */
+.goal-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:99px;background:var(--accent-soft);border:1px solid var(--accent);font-size:12px;color:var(--accent);font-weight:500;cursor:pointer;transition:all .18s ease;max-width:320px;overflow:hidden}
+.goal-chip:hover{background:oklch(68% .16 38/.25)}
+.goal-chip__icon{flex-shrink:0;width:12px;height:12px}
+.goal-chip__text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.goal-chip__close{flex-shrink:0;margin-left:2px;opacity:.6;font-size:14px;line-height:1}
+.goal-chip__close:hover{opacity:1}
+/* todo panel */
+.todos{max-width:760px;margin:0 auto 8px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--panel);overflow:hidden;animation:msg-in .2s ease;display:none}
+.todos--visible{display:block}
+.todos__head{display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;user-select:none;font-size:13px;color:var(--fg-2);transition:background .15s ease}
+.todos__head:hover{background:var(--card-hover)}
+.todos__title{font-weight:600;color:var(--fg);font-size:12.5px}
+.todos__badge{font-family:var(--mono);font-size:11px;color:var(--accent);background:var(--accent-soft);padding:1px 7px;border-radius:99px}
+.todos__summary{flex:1;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.todos__chev{color:var(--muted-2);transition:transform .15s;display:inline-flex}
+.todos--collapsed .todos__chev{transform:rotate(-90deg)}
+.todos--collapsed .todos__list{display:none}
+.todos__list{list-style:none;margin:0;padding:0 12px 8px;display:grid;gap:5px;max-height:220px;overflow-y:auto;border-top:1px solid var(--border);padding-top:8px}
+.todos__item{display:grid;grid-template-columns:auto 1fr;align-items:flex-start;gap:8px;font-size:12.5px;line-height:1.5;padding:3px 0}
+.todos__item--sub{padding-left:16px}
+.todos__status{display:inline-flex;align-items:center;justify-content:center;padding:1px 7px;border:1px solid var(--border);border-radius:99px;background:var(--bg-2);color:var(--muted);font-size:10.5px;line-height:1.35;white-space:nowrap;min-width:0}
+.todos__status--completed{border-color:var(--success-soft);color:var(--success);background:var(--success-soft)}
+.todos__status--in_progress{border-color:var(--accent-soft);color:var(--accent);background:var(--accent-soft)}
+.todos__text{min-width:0;color:var(--fg-2)}
+.todos__item--completed .todos__text{color:var(--muted-2);text-decoration:line-through}
+.todos__item--in_progress .todos__text{color:var(--fg);font-weight:500}
+.todos__dismiss{flex-shrink:0;padding:2px 6px;color:var(--muted-2);font-size:14px;line-height:1;cursor:pointer;border-radius:4px}
+.todos__dismiss:hover{color:var(--danger);background:var(--danger-soft)}
 .composer__btn svg{width:17px;height:17px}
 
 /* toolbar */
@@ -197,6 +226,8 @@ input,textarea{font:inherit;color:inherit}
 .toolbar__btn--active{background:var(--accent-soft);color:var(--accent);border-color:transparent}
 .toolbar__btn--ok{background:var(--success-soft);color:var(--success);border-color:transparent}
 .toolbar__btn--danger{background:var(--danger-soft);color:var(--danger);border-color:transparent}
+.toolbar__btn--goal{background:var(--violet-soft);color:var(--violet);border-color:transparent}
+.toolbar__btn--goal-active{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
 .toolbar__sep{width:1px;height:16px;background:var(--border)}
 .toolbar__spacer{flex:1}
 .status{font-family:var(--mono);font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px}
@@ -237,9 +268,18 @@ input,textarea{font:inherit;color:inherit}
 
 @media(max-width:768px){
   .app{grid-template-columns:1fr}
-  .sidebar{display:none}
+  .sidebar{position:fixed;inset:0 auto 0 0;width:260px;z-index:100;transform:translateX(-100%);transition:transform .25s ease;box-shadow:var(--shadow-lg)}
+  .sidebar--open{transform:translateX(0)}
+  .sidebar-overlay{position:fixed;inset:0;background:oklch(0% 0 0/.45);z-index:99;opacity:0;pointer-events:none;transition:opacity .25s ease}
+  .sidebar-overlay--visible{opacity:1;pointer-events:auto}
+  .menu-btn{display:flex;align-items:center;justify-content:center;position:fixed;top:8px;left:8px;z-index:98;width:34px;height:34px;border-radius:var(--radius);background:var(--panel);border:1px solid var(--border);color:var(--fg-2);transition:background .15s}
+  .menu-btn:hover{background:var(--card-hover);color:var(--fg)}
+  .menu-btn svg{width:16px;height:16px}
   .footer{padding:10px 16px 12px}
   .transcript{padding:16px}
+}
+@media(min-width:769px){
+  .menu-btn,.sidebar-overlay{display:none}
 }
 
 /* stats modal */
@@ -260,6 +300,10 @@ input,textarea{font:inherit;color:inherit}
 </style>
 </head>
 <body>
+<button class="menu-btn" id="menu-btn" aria-label="Toggle sidebar">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+</button>
+<div class="sidebar-overlay" id="sidebar-overlay"></div>
 <div class="app">
   <aside class="sidebar">
     <div class="sidebar__brand">
@@ -331,6 +375,23 @@ input,textarea{font:inherit;color:inherit}
 
   <footer class="footer">
     <div id="slash-menu-anchor"></div>
+    <div id="goal-active-bar" style="margin-bottom:6px;display:none">
+      <span class="goal-chip" id="goal-chip" title="__('goal_exit')">
+        <svg class="goal-chip__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/></svg>
+        <span class="goal-chip__text" id="goal-chip-text"></span>
+        <span class="goal-chip__close">&times;</span>
+      </span>
+    </div>
+    <div id="todo-panel" class="todos">
+      <div class="todos__head" id="todos-head">
+        <span class="todos__title" id="todos-title">To-dos</span>
+        <span class="todos__badge" id="todos-badge"></span>
+        <span class="todos__summary" id="todos-summary"></span>
+        <span class="todos__dismiss" id="todos-dismiss" title="Close" style="display:none">&times;</span>
+        <span class="todos__chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></span>
+      </div>
+      <ul class="todos__list" id="todos-list"></ul>
+    </div>
     <div class="toolbar">
       <button class="toolbar__btn toolbar__btn--ok" id="btn-auto" title="__('auto_mode')">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/></svg>
@@ -343,6 +404,10 @@ input,textarea{font:inherit;color:inherit}
       <button class="toolbar__btn" id="btn-bypass" title="__('yolo_mode')">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
         __('yolo')
+      </button>
+      <button class="toolbar__btn" id="btn-goal" title="__('goal_mode_desc')">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/><line x1="2" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22" y2="12"/></svg>
+        __('goal_btn')
       </button>
       <div class="toolbar__sep"></div>
       <div class="status">
@@ -428,6 +493,7 @@ const __T = {
     'balance': 'Balance',
     'ready': 'Ready',
     'thinking': 'Thinking...',
+    'retrying_status': 'Retrying ({attempt}/{max})...',
     'stats': 'Stats',
     'statistics': 'Statistics',
     'model': 'Model',
@@ -454,6 +520,7 @@ const __T = {
     'cmd_hooks': 'Hooks',
     'cmd_memory': 'Show memory',
     'cmd_forget': 'Forget memory',
+    'cmd_goal': 'Set a goal for the agent to pursue autonomously',
     'cmd_thinking': 'Thinking effort',
     'cmd_verbose': 'Toggle reasoning',
     'cmd_help': 'Help',
@@ -473,8 +540,14 @@ const __T = {
     'auto_mode': 'Auto mode (auto-approve fallback approvals)',
     'plan_mode': 'Plan mode (read-only)',
     'yolo_mode': 'YOLO mode (auto-approve tool approvals; ask and plan still wait)',
+    'goal_mode_desc': 'Goal mode — type a task for the agent to pursue autonomously',
+    'goal_mode': 'Goal mode',
+    'goal_placeholder': 'Describe your goal...',
+    'goal_active': 'Active goal',
+    'goal_exit': 'Exit goal mode',
     'auto': 'Auto',
     'plan': 'Plan',
+    'goal_btn': 'Goal',
     'yolo': 'YOLO',
     'send': 'Send (Enter)',
     'cancel': 'Cancel (Esc)',
@@ -523,6 +596,7 @@ const __T = {
     'balance': '余额',
     'ready': '就绪',
     'thinking': '思考中...',
+    'retrying_status': '正在重试 ({attempt}/{max})...',
     'stats': '统计',
     'statistics': '统计',
     'model': '模型',
@@ -549,6 +623,7 @@ const __T = {
     'cmd_hooks': '钩子',
     'cmd_memory': '显示记忆',
     'cmd_forget': '忘记记忆',
+    'cmd_goal': '设置目标让代理自主执行',
     'cmd_thinking': '思考努力',
     'cmd_verbose': '切换推理显示',
     'cmd_help': '帮助',
@@ -568,8 +643,14 @@ const __T = {
     'auto_mode': '自动模式（自动批准兜底审批）',
     'plan_mode': '计划模式（只读）',
     'yolo_mode': 'YOLO 模式（自动批准工具权限；ask 和计划仍会等待）',
+    'goal_mode_desc': '目标模式 — 输入任务让代理自主执行',
+    'goal_mode': '目标模式',
+    'goal_placeholder': '描述你的目标...',
+    'goal_active': '活跃目标',
+    'goal_exit': '退出目标模式',
     'auto': '自动',
     'plan': '计划',
+    'goal_btn': '目标',
     'yolo': 'YOLO',
     'send': '发送 (Enter)',
     'cancel': '取消 (Esc)',
@@ -654,8 +735,9 @@ const slashAnchor = $('#slash-menu-anchor');
 
 // ── state ──
 let running = false, planMode = false, bypassMode = false, toolApprovalMode = 'ask', yoloRestoreMode = 'ask';
+let goalMode = false, goalActive = false, goalText = '';
 let currentMsg = null, currentText = null, currentReasoning = null;
-let turnStartAt = 0, turnTokens = 0, tickTimer = null;
+let turnStartAt = 0, turnTokens = 0, tickTimer = null, retryStatus = null;
 let toolCards = {};
 let escTimer = null;
 
@@ -675,6 +757,7 @@ const SLASH_CMDS = [
   {cmd:'hooks',desc:__('cmd_hooks')},
   {cmd:'memory',desc:__('cmd_memory')},
   {cmd:'forget',desc:__('cmd_forget')},
+  {cmd:'goal',desc:__('cmd_goal')},
   {cmd:'thinking',desc:__('cmd_thinking')},
   {cmd:'verbose',desc:__('cmd_verbose')},
   {cmd:'help',desc:__('cmd_help')},
@@ -696,15 +779,29 @@ function el(tag,cls,text) { const e=document.createElement(tag); if(cls)e.classN
 
 function setRunning(on) {
   running=on;
+  retryStatus=null;
   btnSend.style.display=on?'none':'';
   btnStop.style.display=on?'':'none';
   statusDot.className=on?'status__dot status__dot--busy':'status__dot';
   statusDotSidebar.className=statusDot.className;
-  statusText.textContent=on?__('thinking'):__('ready');
+  statusText.textContent=on?(goalActive?__('goal_active')+' · ':'')+__('thinking'):__('ready');
   if(on){turnStartAt=Date.now();turnTokens=0;tickTimer=setInterval(()=>{
     const ms=Date.now()-turnStartAt; const tok=turnTokens>0?' · ↓ '+fmtTok(turnTokens)+' tok':'';
     turnInfo.textContent=fmtElapsed(ms)+tok;
   },1000);} else {clearInterval(tickTimer);turnInfo.textContent='';}
+}
+
+function setRetrying(attempt,max) {
+  retryStatus={attempt:attempt||0,max:max||0};
+  statusDot.className='status__dot status__dot--busy';
+  statusDotSidebar.className=statusDot.className;
+  statusText.textContent=__('retrying_status').replace('{attempt}',retryStatus.attempt).replace('{max}',retryStatus.max);
+}
+
+function clearRetrying() {
+  if(!retryStatus)return;
+  retryStatus=null;
+  if(running)statusText.textContent=__('thinking');
 }
 
 function setConnState(state) {
@@ -761,12 +858,12 @@ function approvalPersistentLabel(a) {
 }
 function approvalSessionRule(a) {
   if (a.tool === 'bash' && a.subject) return 'Bash('+String(a.subject).trim()+')';
-  if (['write_file','edit_file','multi_edit','notebook_edit','delete_range','delete_symbol'].includes(a.tool)) return 'Edit';
+  if (['write_file','edit_file','multi_edit','move_file','notebook_edit','delete_range','delete_symbol'].includes(a.tool)) return 'Edit';
   return a.tool;
 }
 function approvalPersistentRule(a) {
   if (a.tool === 'bash' && a.subject) return 'Bash('+String(a.subject).trim()+')';
-  if (['write_file','edit_file','multi_edit','notebook_edit','delete_range','delete_symbol'].includes(a.tool)) return a.subject ? 'Edit('+String(a.subject).trim()+')' : 'Edit';
+  if (['write_file','edit_file','multi_edit','move_file','notebook_edit','delete_range','delete_symbol'].includes(a.tool)) return a.subject ? 'Edit('+String(a.subject).trim()+')' : 'Edit';
   return a.tool;
 }
 function bashCommandPrefix(subject) {
@@ -950,16 +1047,17 @@ function acceptSlash(){if(!slashOpen)return;const c=slashFiltered[slashIndex];if
 
 // ── SSE ──
 const es=new EventSource('/events');
-es.onopen=()=>{setConnState('connected');};
+es.onopen=()=>{setConnState('connected');fetchStatus();fetchTodos();};
 es.onmessage=ev=>{setConnState('connected');
   const e=JSON.parse(ev.data);
+  if(e.kind!=='retrying')clearRetrying();
   switch(e.kind){
-    case 'turn_started': setRunning(true); finalizeMsg(); toolCards={}; break;
+    case 'turn_started': setRunning(true); finalizeMsg(); toolCards={}; todosDismissed=false; break;
     case 'reasoning': appendReasoning(e.reasoning||e.text||''); break;
     case 'text': currentReasoning=null; appendText(e.text||''); break;
     case 'message': finalizeMsg(); break;
     case 'tool_dispatch': if(e.tool)renderToolDispatch(e.tool); break;
-    case 'tool_result': if(e.tool)renderToolResult(e.tool); break;
+    case 'tool_result': if(e.tool){renderToolResult(e.tool);if(e.tool.name==='todo_write'&&!e.tool.parentId&&!e.tool.err){try{const ts=parseTodos(e.tool.args);if(ts.length){todosState=ts;renderTodoPanel();}}catch{}}} break;
     case 'tool_progress': if(e.tool)renderToolProgress(e.tool); break;
     case 'usage':
       if(e.usage){turnTokens=e.usage.completionTokens||0;
@@ -982,7 +1080,8 @@ es.onmessage=ev=>{setConnState('connected');
     case 'ask_request': if(e.ask)showAsk(e.ask); break;
     case 'compaction_started': showCompaction({trigger:e.compaction?.trigger}); break;
     case 'compaction_done': showCompaction(e.compaction||{}); break;
-    case 'turn_done': finalizeMsg(); setRunning(false); if(e.err){log.appendChild(el('div','msg--error','✗ '+e.err));scrollDown();} fetchStatus(); break;
+    case 'retrying': setRetrying(e.retryAttempt,e.retryMax); break;
+    case 'turn_done': finalizeMsg(); setRunning(false); if(e.err){log.appendChild(el('div','msg--error','✗ '+e.err));scrollDown();} fetchStatus(); fetchTodos(); break;
   }
 };
 es.onerror=()=>{
@@ -1001,13 +1100,17 @@ function fetchStatus(){
     if(!bypassMode&&toolApprovalMode==='auto')yoloRestoreMode='auto';
     updateModeButtons();
     if(s.window){const pct=Math.min(100,Math.round(s.used/s.window*100));ctxFill.style.width=pct+'%';ctxFill.style.background=pct>85?'var(--warning)':pct>95?'var(--danger)':'var(--accent)';ctxUsed.textContent=fmtTok(s.used)+' tok';ctxWindow.textContent=fmtTok(s.window)+' tok';}
+    // goal state
+    goalText=(s.goal||'').trim();
+    goalActive=goalText!==''&&(s.goalStatus||'')==='running';
+    updateGoalUI();
     // sidebar metrics
     const cacheTotal=(s.cacheHit||0)+(s.cacheMiss||0);
     $('#sm-cache').textContent=cacheTotal>0?Math.round((s.cacheHit||0)/cacheTotal*100)+'%':'—';
     const lastCost=s.lastUsage?.cost??s.lastUsage?.costUsd??s.lastUsage?.totalCost;
     if(typeof lastCost==='number')$('#sm-cost').textContent=fmtMoney(lastCost,s.lastUsage?.currency);
-    if(s.balance?.display)$('#sm-balance').textContent=s.balance.display;
-    if(s.balance?.display)balanceInfo.textContent='💰 '+s.balance.display;
+    if(s.balance){$('#sm-balance').textContent=s.balance.display||'--';}
+    if(s.balance)balanceInfo.textContent='💰 '+(s.balance.display||'--');
   }).catch(()=>{});
 }
 setInterval(fetchStatus,30000);
@@ -1045,7 +1148,7 @@ function renderHistoryMessages(ms){
   });
   currentMsg=null;currentText=null;currentReasoning=null; scrollDown();
 }
-fetch('/history').then(r=>r.json()).then(renderHistoryMessages).catch(()=>{});
+fetch('/history').then(r=>r.json()).then(msgs=>{renderHistoryMessages(msgs);fetchTodos();}).catch(()=>{});
 
 // ── session list ──
 let sessionCount=0;
@@ -1062,7 +1165,7 @@ function loadSessions(){
       const title=s.title||name.replace(/^\w+-/,'').replace(/T/,' ').replace(/[-_]/g,' ').slice(0,30);
       const meta=s.turns?s.turns+' turns':'';
 	      item.innerHTML='<svg class="session-item__icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><div class="session-item__body"><div class="session-item__title">'+escHtml(title)+'</div><div class="session-item__meta">'+escHtml(meta)+'</div></div><button type="button" class="session-del" data-name="'+escAttr(s.name)+'" title="'+escAttr(__('delete_confirm'))+'">&times;</button>';
-      item.onclick=()=>{if(running||s.current)return;post('/resume',{path:s.path}).then(()=>{log.innerHTML='';log.appendChild(welcome);welcome.style.display='';loadSessions();setTimeout(()=>fetch('/history').then(r=>r.json()).then(renderHistoryMessages),300);});};
+      item.onclick=()=>{if(running||s.current)return;post('/resume',{path:s.path}).then(()=>{log.innerHTML='';log.appendChild(welcome);welcome.style.display='';todosDismissed=false;loadSessions();setTimeout(()=>fetch('/history').then(r=>r.json()).then(msgs=>{renderHistoryMessages(msgs);fetchTodos();}),300);});};
       list.appendChild(item);
     });
   }).catch(()=>{const list=$('#session-list');if(list)list.innerHTML='<div style="padding:10px;color:var(--muted-2);font-size:12px">'+__('error_loading')+'</div>';});
@@ -1073,8 +1176,26 @@ loadSessions();
 async function syncModeBeforeSubmit(){
   await post('/plan',{on:planMode});
     await post('/tool-approval-mode',{mode:bypassMode?'yolo':toolApprovalMode});
+  // If goalMode is on, we'll send as /goal command — no separate POST needed
 }
-async function send(){ const v=input.value.trim(); if(!v)return; await syncModeBeforeSubmit(); addUserMsg(v); post('/submit',{input:v}).then(r=>{if(r.ok&&r.status===204){fetchStatus();loadSessions();}}); input.value='';input.style.height='';closeSlashMenu(); }
+async function send(){
+  const v=input.value.trim(); if(!v)return;
+  await syncModeBeforeSubmit();
+  let submitInput=v;
+  if(goalMode && !v.startsWith('/goal')){
+    // Send as /goal command for goal-draft mode
+    submitInput='/goal '+v;
+    goalMode=false;
+    updateGoalUI();
+  } else if(goalMode){
+    // User typed /goal manually, exit goal-draft mode
+    goalMode=false;
+    updateGoalUI();
+  }
+  addUserMsg(v);
+  post('/submit',{input:submitInput}).then(r=>{if(r.ok&&r.status===204){fetchStatus();loadSessions();}});
+  input.value='';input.style.height='';closeSlashMenu();
+}
 
 input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,140)+'px';updateSlashMenu();});
 input.addEventListener('keydown',e=>{
@@ -1088,6 +1209,7 @@ input.addEventListener('keydown',e=>{
   // main keys
   if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();return;}
   if(e.key==='Escape'){
+    if(goalMode&&!running){goalMode=false;updateGoalUI();input.value='';closeSlashMenu();return;}
     if(running){post('/cancel');return;}
     // double-Esc for rewind
     if(input.value===''){if(escTimer){clearTimeout(escTimer);escTimer=null;openRewindPicker();}else{escTimer=setInterval(()=>escTimer=null,600);}return;}
@@ -1107,12 +1229,86 @@ function updateModeButtons(){
   $('#btn-auto').classList.toggle('toolbar__btn--ok',auto);
   $('#btn-plan').classList.toggle('toolbar__btn--active',planMode);
   $('#btn-bypass').classList.toggle('toolbar__btn--danger',bypassMode);
+  $('#btn-goal').classList.toggle('toolbar__btn--goal',goalMode&&!goalActive);
+  $('#btn-goal').classList.toggle('toolbar__btn--goal-active',goalActive);
+}
+function updateGoalUI(){
+  updateModeButtons();
+  const bar=$('#goal-active-bar');
+  if(goalActive&&goalText){
+    bar.style.display='';
+    $('#goal-chip-text').textContent=goalText;
+  } else {
+    bar.style.display='none';
+  }
+  input.placeholder=goalMode?__('goal_placeholder'):__('placeholder');
 }
 async function setToolApprovalMode(mode){toolApprovalMode=mode;bypassMode=mode==='yolo';updateModeButtons();await post('/tool-approval-mode',{mode});}
 async function setPlan(on){planMode=on;updateModeButtons();await post('/plan',{on});}
-async function cycleMode(){await setPlan(!planMode);setTimeout(fetchStatus,200);}
+async function cycleMode(){if(goalMode){goalMode=false;updateGoalUI();return;}await setPlan(!planMode);setTimeout(fetchStatus,200);}
 async function toggleYolo(){if(bypassMode){const restore=yoloRestoreMode==='auto'?'auto':'ask';await setToolApprovalMode(restore);}else{yoloRestoreMode=toolApprovalMode==='auto'?'auto':'ask';await setToolApprovalMode('yolo');}setTimeout(fetchStatus,200);}
-async function setMode(m){if(m==='auto')await setToolApprovalMode('auto');else if(m==='plan')await setPlan(!planMode);else if(m==='yolo')await toggleYolo();}
+async function setMode(m){if(m==='auto')await setToolApprovalMode('auto');else if(m==='plan')await setPlan(!planMode);else if(m==='yolo')await toggleYolo();else if(m==='goal')toggleGoalMode();}
+function toggleGoalMode(){
+  if(goalActive){
+    // Clear active goal
+    post('/goal',{goal:''}).then(()=>{goalActive=false;goalText='';updateGoalUI();fetchStatus();});
+    return;
+  }
+  if(goalMode){
+    goalMode=false;
+    updateGoalUI();
+  } else {
+    goalMode=true;
+    updateGoalUI();
+    input.focus();
+  }
+}
+
+// ── todo panel ──
+let todosState=[],todosDismissed=false;
+function parseTodos(args){
+  try{const a=JSON.parse(args);return Array.isArray(a.todos)?a.todos:[];}
+  catch{return[];}
+}
+function todoStatusLabel(s){
+  switch(String(s||'').trim()){
+    case'completed':return '✓';
+    case'in_progress':return '▶';
+    default:return '○';
+  }
+}
+function hasIncompleteTodos(ts){return ts.some(t=>String(t.status||'').trim()!=='completed');}
+function renderTodoPanel(){
+  const panel=$('#todo-panel'),list=$('#todos-list'),badge=$('#todos-badge');
+  const summary=$('#todos-summary'),dismiss=$('#todos-dismiss'),title=$('#todos-title');
+  if(!panel||todosDismissed){panel&&(panel.classList.remove('todos--visible'));return;}
+  if(!todosState.length){panel.classList.remove('todos--visible');return;}
+  const done=todosState.filter(t=>String(t.status||'').trim()==='completed').length;
+  const total=todosState.length;
+  const current=todosState.find(t=>String(t.status||'').trim()==='in_progress');
+  const allDone=done===total;
+  badge.textContent=done+'/'+total;
+  summary.textContent=(current?.activeForm||current?.content||todosState[todosState.length-1]?.content||'').slice(0,60);
+  dismiss.style.display=allDone?'':'none';
+  if(allDone)panel.classList.add('todos--collapsed');
+  list.innerHTML='';
+  todosState.forEach((t,i)=>{
+    const st=String(t.status||'').trim();
+    const li=el('li','todos__item todos__item--'+st+(t.level?' todos__item--sub':''));
+    li.innerHTML='<span class="todos__status todos__status--'+st+'">'+todoStatusLabel(st)+'</span><span class="todos__text">'+escHtml((st==='in_progress'&&t.activeForm)?t.activeForm:t.content)+'</span>';
+    list.appendChild(li);
+  });
+  panel.classList.add('todos--visible');
+}
+function fetchTodos(){
+  fetch('/todos').then(r=>r.json()).then(ts=>{
+    if(Array.isArray(ts)){todosState=ts;renderTodoPanel();}
+  }).catch(()=>{});
+}
+$('#todos-head').onclick=function(e){
+  if(e.target.closest('.todos__dismiss')){todosDismissed=true;renderTodoPanel();return;}
+  const panel=$('#todo-panel');panel.classList.toggle('todos--collapsed');
+};
 
 // toolbar buttons
 btnSend.onclick=()=>void send();
@@ -1120,11 +1316,21 @@ btnStop.onclick=()=>post('/cancel');
 $('#btn-auto').onclick=()=>void setMode('auto');
 $('#btn-plan').onclick=()=>void setPlan(!planMode);
 $('#btn-bypass').onclick=()=>void toggleYolo();
-$('#btn-new').onclick=()=>{if(running)return;post('/new').then(()=>{log.innerHTML='';log.appendChild(welcome);welcome.style.display='';loadSessions();});};
+$('#btn-goal').onclick=()=>toggleGoalMode();
+$('#goal-chip').onclick=()=>toggleGoalMode();
+$('#btn-new').onclick=()=>{if(running)return;post('/new').then(()=>{log.innerHTML='';log.appendChild(welcome);welcome.style.display='';todosState=[];todosDismissed=false;renderTodoPanel();loadSessions();});};
 $('#btn-compact').onclick=()=>{if(!running)post('/compact');};
 $('#btn-rewind').onclick=()=>openRewindPicker();
 $('#btn-tree').onclick=()=>{post('/submit',{input:'/tree'});};
 $('#btn-stats').onclick=()=>openStats();
+
+// ── mobile sidebar toggle ──
+const sidebar=$('.sidebar'), overlay=$('#sidebar-overlay'), menuBtn=$('#menu-btn');
+function openSidebar(){sidebar.classList.add('sidebar--open');overlay.classList.add('sidebar-overlay--visible');menuBtn.style.opacity='0';}
+function closeSidebar(){sidebar.classList.remove('sidebar--open');overlay.classList.remove('sidebar-overlay--visible');menuBtn.style.opacity='';}
+menuBtn.onclick=()=>openSidebar();
+overlay.onclick=()=>closeSidebar();
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&sidebar.classList.contains('sidebar--open'))closeSidebar();});
 
 // ── cumulative stats ──
 let cumulativeTokens=0, cumulativeCost=0, cumulativeCacheHit=0, cumulativeCacheMiss=0;

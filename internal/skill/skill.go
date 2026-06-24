@@ -6,8 +6,10 @@
 // enter the cache-stable system-prompt index (see index.go) — bodies load on
 // demand. Discovery scans several conventions (.reasonix / .agents / .agent /
 // .claude under the project root and the home dir — see config.ConventionDirs) so
-// skills authored for other agent tools migrate in unchanged, and follows
-// symlinks, so a linked skill directory or flat <name>.md is picked up like a real one.
+// skills authored for other agent tools migrate in unchanged. Directory skills
+// use <name>/SKILL.md; flat <name>.md files from Claude roots are loaded only
+// when they carry skill frontmatter. Discovery follows symlinks, so linked
+// skills are picked up like real ones.
 package skill
 
 import (
@@ -70,8 +72,11 @@ func IsValidName(name string) bool { return config.IsValidSkillName(name) }
 
 // Options configure a Store. ProjectRoot "" reads only the global + custom
 // scopes. HomeDir "" resolves to the OS home dir (tests point it at a tmpdir).
+// ReasonixHomeDir overrides the canonical Reasonix home; empty uses
+// config.ReasonixHomeDir(), or HomeDir/.reasonix when HomeDir is explicitly set.
 type Options struct {
 	HomeDir         string
+	ReasonixHomeDir string
 	ProjectRoot     string
 	CustomPaths     []string
 	ExcludedPaths   []string
@@ -87,6 +92,7 @@ type Options struct {
 // Store resolves skills across the configured roots.
 type Store struct {
 	homeDir         string
+	reasonixHomeDir string
 	projectRoot     string
 	customPaths     []string
 	excludedPaths   map[string]bool
@@ -103,6 +109,14 @@ func New(opts Options) *Store {
 	if home == "" {
 		if h, err := os.UserHomeDir(); err == nil {
 			home = h
+		}
+	}
+	reasonixHome := opts.ReasonixHomeDir
+	if reasonixHome == "" {
+		if opts.HomeDir != "" {
+			reasonixHome = filepath.Join(home, ".reasonix")
+		} else {
+			reasonixHome = config.ReasonixHomeDir()
 		}
 	}
 	root := opts.ProjectRoot
@@ -128,6 +142,7 @@ func New(opts Options) *Store {
 	}
 	return &Store{
 		homeDir:         home,
+		reasonixHomeDir: reasonixHome,
 		projectRoot:     root,
 		customPaths:     custom,
 		excludedPaths:   excluded,
@@ -159,39 +174,62 @@ type Root struct {
 	Status   PathStatus
 }
 
+type discoveryRoot struct {
+	Root
+	requireFlatMarker bool
+}
+
 // roots returns the discovery directories, highest priority first: the
 // convention dirs (config.ConventionDirs: .reasonix / .agents / .agent / .claude)
-// under the project root → custom paths → the same convention dirs under the home
-// dir. A later root never overrides an earlier one.
-func (s *Store) roots() []Root {
+// under the project root → custom paths → the Reasonix home skills dir → other
+// home-dir convention dirs. A later root never overrides an earlier one.
+func (s *Store) roots() []discoveryRoot {
 	type de struct {
-		dir   string
-		scope Scope
+		dir               string
+		scope             Scope
+		requireFlatMarker bool
 	}
 	var dirs []de
 	if s.projectRoot != "" {
 		for _, c := range config.ConventionDirs {
-			dirs = append(dirs, de{filepath.Join(s.projectRoot, c, SkillsDirname), ScopeProject})
+			dirs = append(dirs, de{filepath.Join(s.projectRoot, c, SkillsDirname), ScopeProject, c == ".claude"})
 		}
 	}
 	for _, d := range s.customPaths {
-		dirs = append(dirs, de{d, ScopeCustom})
+		dirs = append(dirs, de{d, ScopeCustom, false})
+	}
+	if s.reasonixHomeDir != "" {
+		dirs = append(dirs, de{filepath.Join(s.reasonixHomeDir, SkillsDirname), ScopeGlobal, false})
 	}
 	for _, c := range config.ConventionDirs {
-		dirs = append(dirs, de{filepath.Join(s.homeDir, c, SkillsDirname), ScopeGlobal})
+		dir := filepath.Join(s.homeDir, c, SkillsDirname)
+		if s.reasonixHomeDir != "" && config.CanonicalSkillPath(filepath.Dir(dir)) == config.CanonicalSkillPath(s.reasonixHomeDir) {
+			continue
+		}
+		dirs = append(dirs, de{dir, ScopeGlobal, c == ".claude"})
 	}
-	out := make([]Root, 0, len(dirs))
+	out := make([]discoveryRoot, 0, len(dirs))
 	for _, d := range dirs {
 		if s.excludedPaths[config.CanonicalSkillPath(d.dir)] {
 			continue
 		}
-		out = append(out, Root{Dir: d.dir, Scope: d.scope, Priority: len(out), Status: pathStatus(d.dir)})
+		out = append(out, discoveryRoot{
+			Root:              Root{Dir: d.dir, Scope: d.scope, Priority: len(out), Status: pathStatus(d.dir)},
+			requireFlatMarker: d.requireFlatMarker,
+		})
 	}
 	return out
 }
 
 // Roots exposes the discovery directories with their status for `/skill paths`.
-func (s *Store) Roots() []Root { return s.roots() }
+func (s *Store) Roots() []Root {
+	roots := s.roots()
+	out := make([]Root, 0, len(roots))
+	for _, r := range roots {
+		out = append(out, r.Root)
+	}
+	return out
+}
 
 func disabledNameSet(names []string) map[string]bool {
 	out := map[string]bool{}
@@ -298,13 +336,13 @@ func (s *Store) Read(name string) (Skill, bool) {
 	return Skill{}, false
 }
 
-func (s *Store) discoverRoot(r Root) []Skill {
+func (s *Store) discoverRoot(r discoveryRoot) []Skill {
 	var out []Skill
-	s.scanDir(r.Dir, r.Scope, 1, map[string]bool{}, &out)
+	s.scanDir(r.Dir, r.Scope, r.requireFlatMarker, 1, map[string]bool{}, &out)
 	return out
 }
 
-func (s *Store) scanDir(dir string, scope Scope, depth int, seen map[string]bool, out *[]Skill) {
+func (s *Store) scanDir(dir string, scope Scope, requireFlatMarker bool, depth int, seen map[string]bool, out *[]Skill) {
 	key := filepath.Clean(dir)
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
 		key = filepath.Clean(resolved)
@@ -319,7 +357,7 @@ func (s *Store) scanDir(dir string, scope Scope, depth int, seen map[string]bool
 		return
 	}
 	for _, e := range entries {
-		sk, ok := s.readEntry(dir, scope, e)
+		sk, ok := s.readEntry(dir, scope, requireFlatMarker, e)
 		if ok {
 			if depth == 1 || strings.TrimSpace(sk.Description) != "" {
 				*out = append(*out, sk)
@@ -329,7 +367,7 @@ func (s *Store) scanDir(dir string, scope Scope, depth int, seen map[string]bool
 		if depth >= s.maxDepth || !s.canScanChildDir(dir, e) {
 			continue
 		}
-		s.scanDir(filepath.Join(dir, e.Name()), scope, depth+1, seen, out)
+		s.scanDir(filepath.Join(dir, e.Name()), scope, requireFlatMarker, depth+1, seen, out)
 	}
 }
 
@@ -338,15 +376,18 @@ func (s *Store) canScanChildDir(dir string, e os.DirEntry) bool {
 	if shouldSkipScanDir(name) {
 		return false
 	}
-	full := filepath.Join(dir, name)
 	if e.IsDir() {
 		return true
 	}
-	if e.Type()&os.ModeSymlink == 0 {
+	if !shouldStatEntryTarget(e.Type()) {
 		return false
 	}
-	info, err := os.Stat(full)
+	info, err := os.Stat(filepath.Join(dir, name))
 	return err == nil && info.IsDir()
+}
+
+func shouldStatEntryTarget(mode os.FileMode) bool {
+	return mode&os.ModeSymlink != 0 || mode&os.ModeIrregular != 0
 }
 
 func shouldSkipScanDir(name string) bool {
@@ -361,17 +402,17 @@ func shouldSkipScanDir(name string) bool {
 	}
 }
 
-// readEntry turns one directory entry into a skill. It resolves symlinks via
-// os.Stat (os.ReadDir reports a symlink's own type, not its target's), so a
-// linked skill directory or a linked flat <name>.md is discovered like a real
-// one; a broken link fails Stat and is skipped.
-func (s *Store) readEntry(dir string, scope Scope, e os.DirEntry) (Skill, bool) {
+// readEntry turns one directory entry into a skill. It resolves symlink and
+// Windows reparse-style entries via os.Stat (os.ReadDir can report the link's
+// own type, not its target's), so a linked skill directory or flat <name>.md is
+// discovered like a real one; a broken link fails Stat and is skipped.
+func (s *Store) readEntry(dir string, scope Scope, requireFlatMarker bool, e os.DirEntry) (Skill, bool) {
 	name := e.Name()
 	full := filepath.Join(dir, name)
 
 	isDir := e.IsDir()
 	isFile := e.Type().IsRegular()
-	if e.Type()&os.ModeSymlink != 0 {
+	if !isDir && !isFile && shouldStatEntryTarget(e.Type()) {
 		info, err := os.Stat(full) // follows the link
 		if err != nil {
 			return Skill{}, false // broken link
@@ -395,7 +436,7 @@ func (s *Store) readEntry(dir string, scope Scope, e os.DirEntry) (Skill, bool) 
 		if !IsValidName(stem) {
 			return Skill{}, false
 		}
-		return s.parse(full, stem, scope)
+		return s.parseFlat(full, stem, scope, requireFlatMarker)
 	}
 	return Skill{}, false
 }
@@ -404,32 +445,110 @@ func (s *Store) readEntry(dir string, scope Scope, e os.DirEntry) (Skill, bool) 
 // filename stem when valid; a missing `description:` is a warning, not a failure
 // (the skill loads but won't appear in the model's index).
 func (s *Store) parse(path, stem string, scope Scope) (Skill, bool) {
+	return s.parseSkill(path, stem, scope, false)
+}
+
+// parseFlat reads a flat <name>.md skill candidate. Claude skill roots can also
+// contain ordinary documentation, so those flat files need explicit skill
+// frontmatter before they are treated as skills.
+func (s *Store) parseFlat(path, stem string, scope Scope, requireSkillMarker bool) (Skill, bool) {
+	return s.parseSkill(path, stem, scope, requireSkillMarker)
+}
+
+func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bool) (Skill, bool) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return Skill{}, false
 	}
 	content := strings.TrimPrefix(strings.ReplaceAll(string(b), "\r\n", "\n"), "\uFEFF")
 	fm, body := splitFrontmatter(content)
+	if requireSkillMarker && !hasSkillMarker(content, fm) {
+		return Skill{}, false
+	}
 
 	name := stem
-	if v := fm["name"]; v != "" && IsValidName(v) {
+	if v := fm[skillFrontmatterName]; v != "" && IsValidName(v) {
 		name = v
 	}
-	desc := strings.TrimSpace(fm["description"])
+	desc := strings.TrimSpace(fm[skillFrontmatterDescription])
 	if desc == "" {
 		fmt.Fprintf(s.stderr, "warning: skill %q at %s has no description: — it will load but won't appear in the skills index\n", name, path)
 	}
 	return Skill{
 		Name:         name,
 		Description:  desc,
-		Body:         loadBodyWithReferences(path, strings.TrimSpace(body)),
+		Body:         loadBodyWithScripts(path, loadBodyWithReferences(path, strings.TrimSpace(body))),
 		Scope:        scope,
 		Path:         path,
-		AllowedTools: parseAllowedTools(fm["allowed-tools"]),
-		RunAs:        parseRunAs(fm["runas"], fm["context"], fm["agent"]),
-		Model:        strings.TrimSpace(fm["model"]),
-		Effort:       strings.TrimSpace(fm["effort"]),
+		AllowedTools: parseAllowedTools(fm[skillFrontmatterAllowedTools]),
+		RunAs:        parseRunAs(fm[skillFrontmatterRunAs], fm[skillFrontmatterContext], fm[skillFrontmatterAgent]),
+		Model:        strings.TrimSpace(fm[skillFrontmatterModel]),
+		Effort:       strings.TrimSpace(fm[skillFrontmatterEffort]),
 	}, true
+}
+
+const (
+	skillFrontmatterDescription  = "description"
+	skillFrontmatterName         = "name"
+	skillFrontmatterRunAs        = "runas"
+	skillFrontmatterContext      = "context"
+	skillFrontmatterAgent        = "agent"
+	skillFrontmatterAllowedTools = "allowed-tools"
+	skillFrontmatterModel        = "model"
+	skillFrontmatterEffort       = "effort"
+)
+
+var skillMarkerFrontmatterKeys = []string{
+	skillFrontmatterDescription,
+	skillFrontmatterName,
+	skillFrontmatterRunAs,
+	skillFrontmatterContext,
+	skillFrontmatterAgent,
+	skillFrontmatterAllowedTools,
+	skillFrontmatterModel,
+	skillFrontmatterEffort,
+}
+
+func hasSkillMarker(content string, fm map[string]string) bool {
+	for _, key := range skillMarkerFrontmatterKeys {
+		if strings.TrimSpace(fm[key]) != "" {
+			return true
+		}
+	}
+	return frontmatterHasSkillMarkerKey(content)
+}
+
+func frontmatterHasSkillMarkerKey(content string) bool {
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return false
+	}
+	end := -1
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			end = i
+			break
+		}
+	}
+	if end < 0 {
+		return false
+	}
+	for _, line := range lines[1:end] {
+		key, _, ok := strings.Cut(line, ":")
+		if ok && isSkillMarkerFrontmatterKey(strings.ToLower(strings.TrimSpace(key))) {
+			return true
+		}
+	}
+	return false
+}
+
+func isSkillMarkerFrontmatterKey(key string) bool {
+	for _, marker := range skillMarkerFrontmatterKeys {
+		if key == marker {
+			return true
+		}
+	}
+	return false
 }
 
 // Create scaffolds a new skill stub at the chosen scope. Refuses to overwrite.
@@ -452,7 +571,7 @@ func (s *Store) CreateWithContent(name string, scope Scope, content string) (str
 		}
 		root = filepath.Join(s.projectRoot, ".reasonix", SkillsDirname)
 	default:
-		root = filepath.Join(s.homeDir, ".reasonix", SkillsDirname)
+		root = s.globalSkillsRoot()
 	}
 	flat := filepath.Join(root, name+".md")
 	folder := filepath.Join(root, name, SkillFile)
@@ -478,6 +597,13 @@ func (s *Store) CreateWithContent(name string, scope Scope, content string) (str
 		return "", err
 	}
 	return folder, nil
+}
+
+func (s *Store) globalSkillsRoot() string {
+	if s.reasonixHomeDir != "" {
+		return filepath.Join(s.reasonixHomeDir, SkillsDirname)
+	}
+	return filepath.Join(s.homeDir, ".reasonix", SkillsDirname)
 }
 
 // loadBodyWithReferences appends a directory-layout skill's sibling
@@ -518,6 +644,51 @@ func loadBodyWithReferences(skillPath, body string) string {
 		b.WriteString("\n\n## Reference: " + slug + "\n\n" + trimmed)
 	}
 	return b.String()
+}
+
+// loadBodyWithScripts appends a directory-layout skill's sibling scripts/
+// directory listing to the body, so the model knows what scripts are
+// available and can run them via bash (inheriting sandbox, gate, hooks).
+func loadBodyWithScripts(skillPath, body string) string {
+	if filepath.Base(skillPath) != SkillFile {
+		return body
+	}
+	scriptsDir := filepath.Join(filepath.Dir(skillPath), "scripts")
+	entries, err := os.ReadDir(scriptsDir)
+	if err != nil {
+		return body
+	}
+	var names []string
+	for _, e := range entries {
+		// Filter hidden files — bash should not see config dotfiles in scripts/.
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if !isScriptExt(filepath.Ext(e.Name())) {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	if len(names) == 0 {
+		return body
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	b.WriteString(body)
+	b.WriteString("\n\n## Scripts\n\nRun a listed script with bash using the exact path shown below; quote the path if it contains spaces.\n\n")
+	for _, n := range names {
+		b.WriteString("- `" + filepath.Join(scriptsDir, n) + "`\n")
+	}
+	return b.String()
+}
+
+func isScriptExt(ext string) bool {
+	switch strings.ToLower(ext) {
+	case "", ".sh", ".py", ".js", ".ts", ".rb", ".pl", ".php", ".ps1":
+		return true
+	default:
+		return false
+	}
 }
 
 // parseAllowedTools splits a comma-separated `allowed-tools` value into trimmed,

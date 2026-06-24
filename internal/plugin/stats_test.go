@@ -10,16 +10,13 @@ import (
 )
 
 // withTempCache redirects config.CacheDir() at t.TempDir for the duration of a
-// test by overriding the knobs os.UserConfigDir reads: HOME/XDG_CONFIG_HOME on
-// unix, APPDATA on Windows (without it the tests write the real user cache).
+// test (without it the tests write the real user cache).
 // Returns the directory that will hold the cache subtree so callers can assert
 // paths inside it.
 func withTempCache(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv("HOME", dir)
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	t.Setenv("APPDATA", dir)
+	t.Setenv("REASONIX_CACHE_HOME", dir)
 	return dir
 }
 
@@ -191,15 +188,15 @@ func TestRecommendOldFailuresFadeOut(t *testing.T) {
 // can rely on it. We assert the path sits under config.CacheDir()/mcp and that
 // the slug strips raw separators — exact slug rule lives in cache.go.
 func TestStatsPathLayout(t *testing.T) {
-	withTempCache(t)
+	root := withTempCache(t)
 
 	p := statsPath("server/with spaces")
 	if p == "" {
 		t.Fatal("statsPath returned empty")
 	}
-	wantSuffix := filepath.Join("reasonix", "cache", "mcp")
-	if got := filepath.Dir(p); !strings.HasSuffix(got, wantSuffix) {
-		t.Fatalf("parent = %q, want suffix %q", got, wantSuffix)
+	wantParent := filepath.Join(root, "mcp")
+	if got := filepath.Dir(p); got != wantParent {
+		t.Fatalf("parent = %q, want %q", got, wantParent)
 	}
 	base := filepath.Base(p)
 	if filepath.Ext(base) != ".json" {

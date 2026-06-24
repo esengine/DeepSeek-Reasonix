@@ -1,0 +1,296 @@
+// Run: tsx src/__tests__/app-chrome-tabs.test.ts
+
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const testDir = dirname(fileURLToPath(import.meta.url));
+const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
+const appChromeSource = readFileSync(resolve(testDir, "../components/AppChrome.tsx"), "utf8");
+const commandPaletteSource = readFileSync(resolve(testDir, "../components/CommandPalette.tsx"), "utf8");
+const projectTreeSource = readFileSync(resolve(testDir, "../components/ProjectTree.tsx"), "utf8");
+const topicShortcutsSource = readFileSync(resolve(testDir, "../lib/topicShortcuts.ts"), "utf8");
+const transcriptSource = readFileSync(resolve(testDir, "../components/Transcript.tsx"), "utf8");
+const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+
+let passed = 0;
+let failed = 0;
+
+function ok(value: unknown, label: string) {
+  if (value) {
+    process.stdout.write(`  PASS  ${label}\n`);
+    passed += 1;
+  } else {
+    process.stdout.write(`  FAIL  ${label}\n`);
+    failed += 1;
+  }
+}
+
+function matchingBlocks(selector: string): string[] {
+  const blocks: string[] = [];
+  const rule = /([^{}]+)\{([^{}]*)\}/g;
+  let match: RegExpExecArray | null;
+  while ((match = rule.exec(stylesSource)) !== null) {
+    const selectors = match[1].split(",").map((part) => part.trim());
+    if (selectors.includes(selector)) blocks.push(match[2]);
+  }
+  return blocks;
+}
+
+function finalDeclaration(selector: string, property: string): string | undefined {
+  let value: string | undefined;
+  for (const block of matchingBlocks(selector)) {
+    const declaration = new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+)`, "g");
+    let match: RegExpExecArray | null;
+    while ((match = declaration.exec(block)) !== null) {
+      value = match[1].trim();
+    }
+  }
+  return value;
+}
+
+console.log("\napp chrome tabs");
+
+ok(
+  /import \{ TabBar \} from "\.\/TabBar";/.test(appChromeSource),
+  "AppChrome keeps the classic top session tab strip implementation",
+);
+
+for (const propName of ["onTabChange", "onTabClose", "onTabsClose", "onTabsReorder", "onNewTab"]) {
+  ok(
+    new RegExp(`\\b${propName}\\b`).test(appChromeSource),
+    `AppChrome exposes ${propName} for classic tabs`,
+  );
+}
+
+ok(
+  /app-chrome__tab-strip/.test(appChromeSource),
+  "AppChrome markup includes classic tab strip containers",
+);
+
+ok(
+  finalDeclaration(".app-chrome__tab-strip", "overflow") === "hidden",
+  "AppChrome tab strip clips tabs to the available chrome width",
+);
+
+ok(
+  finalDeclaration(".app-chrome__tab-strip", "min-width") === "0",
+  "AppChrome tab strip can shrink beside the right dock",
+);
+
+ok(
+  finalDeclaration(":root[data-theme-style] .app-chrome--tabs .tabbar__tabs", "max-width")?.includes("--chrome-panel-control-size"),
+  "themed AppChrome tab lists reserve a flowing new-tab button slot",
+);
+
+ok(
+  finalDeclaration(":root[data-theme-style] .app-chrome--tabs .tabbar__tabs", "flex") === "0 1 auto",
+  "themed AppChrome tab lists size to tab content before shrinking",
+);
+
+ok(
+  finalDeclaration(":root[data-theme-style] .app-chrome--tabs .tabbar__tabs", "width") === "max-content",
+  "themed AppChrome tab lists keep the new-tab button next to the last tab",
+);
+
+ok(
+  finalDeclaration(":root[data-theme-style] .app-chrome--tabs .tabbar > .tooltip-trigger:has(.tabbar__new)", "flex")?.includes("--chrome-panel-control-size"),
+  "themed AppChrome new-tab button keeps a stable slot beside the tabs",
+);
+
+ok(
+  /workbenchChrome \? \(\s*<span className="app-chrome__spacer" aria-hidden="true" \/>/s.test(appChromeSource),
+  "AppChrome workbench branch skips the tab strip",
+);
+
+ok(
+  /app-chrome__tools--fixed/.test(appChromeSource),
+  "AppChrome renders the command search as a fixed chrome tool",
+);
+
+ok(
+  /workbenchChromeHidden\s*=\s*sidebarWorkbench/.test(appSource),
+  "workbench chrome is hidden for every desktop platform",
+);
+
+ok(
+  /\{!appChromeHidden && \(/.test(appSource),
+  "workbench skips rendering the top AppChrome row",
+);
+
+ok(
+  /topicbar__chrome-btn/.test(appSource),
+  "workbench keeps chrome controls in the topic bar",
+);
+
+ok(
+  /const \[transcriptRevealSignal, setTranscriptRevealSignal\] = useState\(0\);/.test(appSource) &&
+    /revealActiveSignal=\{tabRevealSignal\}/.test(appSource) &&
+    /revealSignal=\{transcriptRevealSignal\}/.test(appSource),
+  "transcript bottom reveal is decoupled from tab-strip reveal",
+);
+
+const tabsReorderBlock = appSource.match(/const handleTabsReorder = useCallback\([\s\S]*?\n  \}, \[refreshTabMetas, reorderTabs\]\);/)?.[0] ?? "";
+ok(
+  /setTabRevealSignal/.test(tabsReorderBlock) && !/setTranscriptRevealSignal/.test(tabsReorderBlock),
+  "tab reordering refreshes the tab strip without snapping the transcript",
+);
+
+ok(
+  /aria-label=\{t\("transcript\.jumpToBottom"\)\}/.test(transcriptSource) &&
+    /title=\{t\("transcript\.jumpToBottom"\)\}/.test(transcriptSource),
+  "jump-to-bottom affordance uses localized transcript text",
+);
+
+ok(
+  /setActive\(items\.length > 0 \? 0 : -1\)/.test(commandPaletteSource),
+  "command palette highlights the first item when opened with an empty query",
+);
+
+ok(
+  /topicShortcutIndexFromEvent\(event, desktopPlatform\)/.test(appSource) &&
+    /useTopicShortcuts\(!sidebarCollapsed, desktopPlatform\)/.test(appSource),
+  "topic shortcuts use the resolved desktop platform",
+);
+
+ok(
+  /topicShortcutLabel\(shortcutIndex, shortcutPlatform\)/.test(projectTreeSource),
+  "topic shortcut badges render the platform-specific modifier",
+);
+
+ok(
+  /if \(!enabled\) hideBadges\(\);/.test(topicShortcutsSource) &&
+    /if \(heldRef\.current\) hideBadges\(\);/.test(topicShortcutsSource) &&
+    /window\.removeEventListener\("blur", onBlur\);\s*hideBadges\(\);/.test(topicShortcutsSource),
+  "topic shortcut badge state is cleared when disabled, interrupted, or cleaned up",
+);
+
+ok(
+  /const \[rewindCommitting, setRewindCommitting\] = useState\(false\);/.test(appSource) &&
+    /rewindStateRef\.current = null;/.test(appSource) &&
+    /setRewindCommitting\(true\);/.test(appSource),
+  "committing optimistic rewind clears undo state before awaiting the backend",
+);
+
+ok(
+  /const controllerReady = state\.meta\?\.ready === true && !state\.backendActivationPending;/.test(appSource) &&
+    /if \(!controllerReady\) return;\s*void commitThenSend\(text\);/s.test(appSource) &&
+    /onPrompt=\{handleTranscriptPrompt\}/.test(appSource) &&
+    /submitDisabled=\{!controllerReady\}/.test(appSource),
+  "welcome prompts and composer submit share the controller readiness gate",
+);
+
+for (const selector of [
+  ".app--darwin .app-chrome--tabs",
+  ":root[data-theme-style] .app--darwin .app-chrome--tabs",
+]) {
+  const rightSpace = finalDeclaration(selector, "padding-right") ?? finalDeclaration(selector, "padding") ?? "";
+  ok(
+    rightSpace.includes("--chrome-toggle-size") && !rightSpace.includes("--chrome-right-toggle-offset"),
+    `${selector} reserves fixed chrome tool width without shrinking for the right dock`,
+  );
+}
+
+for (const selector of [
+  ".app--windows .app-chrome--native-tabs",
+  ".app--linux .app-chrome--native-tabs",
+  ":root[data-theme-style] .app--windows .app-chrome--native-tabs",
+  ":root[data-theme-style] .app--linux .app-chrome--native-tabs",
+]) {
+  const rightSpace = finalDeclaration(selector, "padding-right") ?? finalDeclaration(selector, "padding") ?? "";
+  ok(
+    rightSpace.includes("--chrome-right-toggle-offset"),
+    `${selector} reserves right-dock width before rendering tabs`,
+  );
+}
+
+for (const selector of [
+  ".layout--workbench-chrome-hidden",
+  ":root[data-theme-style] .layout--workbench-chrome-hidden",
+]) {
+  ok(
+    finalDeclaration(selector, "--app-chrome-height") === "0px" &&
+      finalDeclaration(selector, "grid-template-rows") === "minmax(0, 1fr)" &&
+      finalDeclaration(selector, "background") === "var(--bg)",
+    `${selector} removes the workbench chrome row`,
+  );
+}
+
+ok(
+  finalDeclaration(":root[data-theme-style] .app--darwin .layout--workbench-chrome-hidden", "--app-chrome-height") === "0px" &&
+    finalDeclaration(".app--darwin .layout--workbench-chrome-hidden .sidebar--workbench", "padding-top") === "46px" &&
+    finalDeclaration(".app--darwin .layout--workbench-chrome-hidden.layout--sidebar-collapsed .topicbar", "padding-left") === "96px",
+  "macOS workbench leaves safe space for inset window controls",
+);
+
+ok(
+  finalDeclaration(".app--darwin .layout--workbench-chrome-hidden.layout--workspace-maximized .workbench-dock__tools", "padding-left") === "96px",
+  "macOS maximized workbench dock leaves safe space for inset window controls",
+);
+
+ok(
+  /@media \(max-width: 820px\) \{[\s\S]*\.app--darwin \.layout--workbench-chrome-hidden \.topicbar\s*\{[\s\S]*padding-left:\s*96px;/.test(stylesSource) &&
+    /@media \(max-width: 820px\) \{[\s\S]*\.app--darwin \.layout--workbench-chrome-hidden\.layout--workspace-maximized \.workbench-dock__tools\s*\{[\s\S]*padding-left:\s*96px;/.test(stylesSource),
+  "macOS workbench keeps safe space when responsive CSS hides the sidebar",
+);
+
+ok(
+  finalDeclaration(".workbench-dock__tools", "--wails-draggable") === "drag" &&
+    finalDeclaration(".workbench-dock__tabs", "--wails-draggable") === "no-drag" &&
+    finalDeclaration(".workbench-dock__tab", "--wails-draggable") === "no-drag",
+  "maximized workbench dock keeps a draggable title region while tabs remain clickable",
+);
+
+for (const selector of [
+  ":root[data-theme-style] .layout--workbench-chrome-hidden .topicbar",
+  ":root[data-theme-style] .layout--workbench-chrome-hidden .topicbar__chrome-btn",
+  ":root[data-theme-style] .layout--workbench-chrome-hidden .topicbar__icon-btn",
+  ":root[data-theme-style] .layout--workbench-chrome-hidden .topicbar__action-btn",
+]) {
+  ok(
+    finalDeclaration(selector, "box-shadow") === "none",
+    `${selector} stays flat after removing the workbench chrome row`,
+  );
+}
+
+ok(
+  finalDeclaration(":root[data-theme-style] .layout--workbench-chrome-hidden .topicbar", "background") === "var(--bg-elev)",
+  "workbench topic bar uses elevated background for light-mode white",
+);
+
+for (const selector of [
+  ":root[data-theme-style] .layout--workbench-chrome-hidden .topicbar__identity",
+  ":root[data-theme-style] .layout--workbench-chrome-hidden .topicbar__title-row",
+  ":root[data-theme-style] .layout--workbench-chrome-hidden .topicbar__title-row h1",
+  ":root[data-theme-style] .layout--workbench-chrome-hidden .tooltip-trigger:has(.topicbar__icon-btn)",
+]) {
+  ok(
+    finalDeclaration(selector, "background") === "transparent" &&
+      finalDeclaration(selector, "box-shadow") === "none" &&
+      finalDeclaration(selector, "filter") === "none",
+    `${selector} cannot paint residual title-row shadows in workbench mode`,
+  );
+}
+
+for (const selector of [
+  ":root[data-theme-style] .layout--workbench-chrome-hidden .topicbar__icon-btn",
+  ":root[data-theme-style] .layout--workbench-chrome-hidden .topicbar__chrome-btn",
+  ":root[data-theme-style] .layout--workbench-chrome-hidden .topicbar__icon-btn:hover",
+  ":root[data-theme-style] .layout--workbench-chrome-hidden .topicbar__icon-btn:focus-visible",
+  ":root[data-theme-style] .layout--workbench-chrome-hidden .topicbar__chrome-btn:hover:not(.topicbar__chrome-btn--blocked)",
+  ":root[data-theme-style] .layout--workbench-chrome-hidden .topicbar__chrome-btn:focus-visible:not(.topicbar__chrome-btn--blocked)",
+]) {
+  ok(
+    finalDeclaration(selector, "background") === "transparent",
+    `${selector} does not paint a hover block in workbench mode`,
+  );
+}
+
+ok(
+  finalDeclaration(".skip-to-composer", "box-shadow") === "none" &&
+    finalDeclaration(".skip-to-composer:focus-visible", "box-shadow")?.includes("0 12px 28px"),
+  "offscreen skip link does not leak its focus shadow into the workbench title area",
+);
+
+console.log(`\n${passed} passed, ${failed} failed`);
+if (failed > 0) process.exit(1);

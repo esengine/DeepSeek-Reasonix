@@ -42,10 +42,6 @@ func TestLoadForEditMigratesLegacyMCPTiers(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "reasonix.toml")
 	body := `
-[codegraph]
-enabled = true
-tier = "eager"
-
 [[plugins]]
 name = "playwright"
 command = "npx"
@@ -62,9 +58,6 @@ model = "m"
 	}
 
 	cfg := LoadForEdit(path)
-	if cfg.Codegraph.Tier != "" {
-		t.Fatalf("codegraph tier = %q, want migrated empty", cfg.Codegraph.Tier)
-	}
 	if len(cfg.Plugins) != 1 || cfg.Plugins[0].Tier != "" {
 		t.Fatalf("plugins after migration = %+v, want empty tier", cfg.Plugins)
 	}
@@ -75,7 +68,47 @@ model = "m"
 	if strings.Contains(string(updated), "\ntier") {
 		t.Fatalf("legacy tier lines should be removed from file:\n%s", updated)
 	}
-	if !strings.Contains(string(updated), `command = "npx"`) || !strings.Contains(string(updated), `[codegraph]`) {
+	if !strings.Contains(string(updated), `command = "npx"`) || !strings.Contains(string(updated), `name = "local"`) {
 		t.Fatalf("migration should preserve ordinary config:\n%s", updated)
+	}
+}
+
+func TestLoadForEditIgnoresProjectDotEnvForProviderCredentials(t *testing.T) {
+	project := t.TempDir()
+	launch := t.TempDir()
+	home := t.TempDir()
+	path := filepath.Join(project, "reasonix.toml")
+	body := `default_model = "custom/m"
+[[providers]]
+name = "custom"
+kind = "openai"
+base_url = "https://example.invalid/v1"
+model = "m"
+api_key_env = "PROJECT_ONLY_KEY"
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("PROJECT_ONLY_KEY=from-project\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(launch)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Setenv("PROJECT_ONLY_KEY", "")
+	os.Unsetenv("PROJECT_ONLY_KEY")
+
+	cfg := LoadForEdit(path)
+	provider, ok := cfg.Provider("custom")
+	if !ok {
+		t.Fatalf("provider missing from edited config: %+v", cfg.Providers)
+	}
+	if provider.Configured() {
+		t.Fatalf("provider should not resolve api_key_env from project .env next to edited config")
+	}
+	if got := ResolveCredentialForRootGlobalFirst(project, "PROJECT_ONLY_KEY"); got.Set {
+		t.Fatalf("credential = %+v, want project .env ignored for provider key", got)
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/event"
+	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
@@ -42,6 +44,23 @@ func TestTaskToolReturnsSubAgentFinalAnswer(t *testing.T) {
 	}
 	if got := lastUser(sub.lastReq); got != "find callers of Foo" {
 		t.Errorf("sub-agent user = %q, want the prompt verbatim", got)
+	}
+}
+
+func TestTaskToolInheritsReasoningLanguageFromContext(t *testing.T) {
+	sub := &mockProvider{name: "sub", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "done"},
+		{Type: provider.ChunkDone},
+	}}
+	task := newTestTaskTool(t, sub, tool.NewRegistry(), "sys", "", "", nil)
+
+	ctx := WithReasoningLanguagePreference(testTaskContext(), "zh")
+	if _, err := task.Execute(ctx, []byte(`{"prompt":"inspect auth"}`)); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	got := lastUser(sub.lastReq)
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "Simplified Chinese") || !strings.HasSuffix(got, "inspect auth") {
+		t.Fatalf("sub-agent user = %q, want reasoning-language-prefixed prompt", got)
 	}
 }
 
@@ -157,7 +176,7 @@ func TestTaskToolRequiresTranscriptStore(t *testing.T) {
 		{Type: provider.ChunkText, Text: "answer"},
 		{Type: provider.ChunkDone},
 	}}
-	task := NewTaskTool(sub, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0.0, "", "sys", nil, "", "", nil)
+	task := NewTaskTool(sub, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil)
 
 	_, err := task.Execute(testTaskContext(), []byte(`{"prompt":"x"}`))
 	if err == nil || !strings.Contains(err.Error(), "transcript store is required") {
@@ -265,7 +284,7 @@ func TestTaskToolFailedForegroundContinuationPersistsAndRejectsReuse(t *testing.
 	store := NewSubagentStore(t.TempDir())
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "read_file", readOnly: true})
-	task := NewTaskTool(sub, nil, reg, 20, 0, 0, 0, 0, 0.0, "", "sys", nil, "", "", nil).
+	task := NewTaskTool(sub, nil, reg, 20, 0, 0, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil).
 		WithTranscripts(store, t.TempDir(), "base-model", "base-effort")
 
 	first, err := task.Execute(testTaskContext(), []byte(`{"prompt":"first task"}`))
@@ -295,6 +314,47 @@ func TestTaskToolFailedForegroundContinuationPersistsAndRejectsReuse(t *testing.
 	}
 	if _, err := task.Execute(testTaskContext(), []byte(`{"prompt":"third task","continue_from":"`+ref+`"}`)); err == nil || !strings.Contains(err.Error(), "failed and cannot be continued") {
 		t.Fatalf("reuse error = %v, want failed ref rejection", err)
+	}
+}
+
+func TestTaskToolBackgroundPanicPersistsFailedMetadata(t *testing.T) {
+	sub := panicProvider{name: "panic-sub"}
+	store := NewSubagentStore(t.TempDir())
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "read_file", readOnly: true})
+	task := NewTaskTool(sub, nil, reg, 20, 0, 0, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil).
+		WithTranscripts(store, t.TempDir(), "base-model", "base-effort")
+
+	jm := jobs.NewManager(event.Discard)
+	defer jm.Close()
+	ctx := testTaskContext()
+	ctx = jobs.WithSession(ctx, "parent-session")
+	ctx = jobs.WithManager(ctx, jm)
+	out, err := task.Execute(ctx, []byte(`{"prompt":"panic task","run_in_background":true}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	ref := subagentRefFromOutput(t, out)
+	jobID := extractJobID(out)
+	if jobID == "" {
+		t.Fatalf("no background job id in output:\n%s", out)
+	}
+	res := jm.WaitForSession(context.Background(), "parent-session", []string{jobID}, 5)
+	if len(res) != 1 || res[0].Status != jobs.Failed {
+		t.Fatalf("background job result = %+v, want failed", res)
+	}
+	if !strings.Contains(res[0].Output, "Subagent reference (failed): "+ref) {
+		t.Fatalf("job output = %q, want failed subagent ref %s", res[0].Output, ref)
+	}
+	meta, err := store.LoadMeta(ref)
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	if meta.Status != SubagentFailed {
+		t.Fatalf("status = %q, want failed", meta.Status)
+	}
+	if _, err := task.Execute(testTaskContext(), []byte(`{"prompt":"again","continue_from":"`+ref+`"}`)); err == nil || !strings.Contains(err.Error(), "failed and cannot be continued") {
+		t.Fatalf("reuse error = %v, want failed continuation rejection", err)
 	}
 }
 
@@ -328,8 +388,38 @@ func subagentRefFromOutput(t *testing.T, out string) string {
 	return ""
 }
 
+func TestSubSinkForwardsUsageToParent(t *testing.T) {
+	var got []event.Event
+	parent := event.FuncSink(func(e event.Event) {
+		got = append(got, e)
+	})
+	subSinkFor("task_1", parent).Emit(event.Event{
+		Kind:        event.Usage,
+		Usage:       &provider.Usage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12},
+		UsageSource: event.UsageSourceSubagent,
+	})
+	if len(got) != 1 || got[0].Usage == nil || got[0].UsageSource != event.UsageSourceSubagent {
+		t.Fatalf("forwarded events = %+v, want subagent usage", got)
+	}
+}
+
+func TestTaskToolCarriesRecentKeepIntoSubsessions(t *testing.T) {
+	task := NewTaskTool(&mockProvider{name: "sub"}, nil, tool.NewRegistry(), 20, 0, 7, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil)
+	if task.recentKeep != 7 {
+		t.Fatalf("recentKeep = %d, want 7", task.recentKeep)
+	}
+}
+
 func newTestTaskTool(t *testing.T, prov provider.Provider, reg *tool.Registry, sysPrompt, subagentModel, subagentEffort string, resolve func(string, string) (provider.Provider, *provider.Pricing, int, error)) *TaskTool {
 	t.Helper()
-	return NewTaskTool(prov, nil, reg, 20, 0, 0, 0, 0, 0.0, "", sysPrompt, nil, subagentModel, subagentEffort, resolve).
+	return NewTaskTool(prov, nil, reg, 20, 0, 0, 0, 0, 0, 0.0, "", sysPrompt, nil, 0, subagentModel, subagentEffort, resolve).
 		WithTranscripts(NewSubagentStore(t.TempDir()), t.TempDir(), "base-model", "base-effort")
+}
+
+type panicProvider struct{ name string }
+
+func (p panicProvider) Name() string { return p.name }
+
+func (p panicProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	panic("subagent boom")
 }

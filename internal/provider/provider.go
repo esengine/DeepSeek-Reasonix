@@ -67,6 +67,9 @@ type ToolCall struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
+	Diff      string `json:"diff,omitempty"`
+	Added     int    `json:"added,omitempty"`
+	Removed   int    `json:"removed,omitempty"`
 }
 
 // ToolSchema is a tool definition exposed to the model. Parameters is JSON Schema.
@@ -91,15 +94,49 @@ type Request struct {
 // responding to each 'tool_call_id'".
 const interruptedToolResult = "[no result: the previous turn was interrupted before this tool call completed]"
 
-// SanitizeToolPairing repairs a history so it satisfies the tool-call contract the
-// OpenAI-compatible and Anthropic APIs enforce: every assistant tool_calls entry
-// must be answered by a following tool message for its id, and a tool message must
-// follow such a call. It backfills a placeholder result for any unanswered call
-// (so the turn stays intact), drops orphan tool messages, and closes truncated
-// call-argument JSON (DeepSeek 400s on replayed half-streamed args, #3953).
-// Well-formed histories pass through unchanged (results stay in call order).
-// Callers send the result; the stored session keeps the original.
-func SanitizeToolPairing(msgs []Message) []Message {
+// SanitizeToolPairing is the provider-side alias for NormalizeMessages. It repairs
+// a history so it satisfies the tool-call contract the OpenAI-compatible and
+// Anthropic APIs enforce (every assistant tool_calls answered, no orphan tool
+// messages, truncated args closed) right before sending it to the wire — without
+// touching the stored session. Kept as a distinct name so call sites read as
+// "defensive wire prep" rather than "session mutation".
+func SanitizeToolPairing(msgs []Message) []Message { return NormalizeMessages(msgs) }
+
+// NormalizeMessages repairs a conversation history so it satisfies the tool-call
+// contract the OpenAI-compatible and Anthropic APIs enforce: every assistant
+// tool_calls entry must be answered by a following tool message for its id, and a
+// tool message must follow such a call. It backfills a placeholder result for any
+// unanswered call (so the turn stays intact), drops orphan tool messages,
+// backfills empty tool-call names from their results (#4727 — old sessions saved
+// before adde2d3e can carry an empty name), and closes truncated call-argument
+// JSON (DeepSeek 400s on replayed half-streamed args, #3953).
+//
+// This is the wire-safe entry point for provider requests. Stored session loads
+// use NormalizeSessionMessages so they can share the assistant-turn repairs
+// without deleting standalone tool messages that must round-trip through
+// reasonix --resume.
+//
+// A well-formed history — no unanswered calls, no orphan results, no empty tool-
+// call names, no truncated args — returns the input slice unchanged (same backing
+// array, zero allocation). This keeps the prefix-cache key stable for healthy
+// sessions and makes repeated normalization cheap.
+func NormalizeMessages(msgs []Message) []Message {
+	return normalizeMessages(msgs, true)
+}
+
+// NormalizeSessionMessages applies only repairs that are safe to persist in a
+// saved session. It shares assistant-turn repairs with NormalizeMessages, but
+// preserves existing tool messages instead of dropping or reordering them so
+// Save/LoadSession remains a byte-for-byte conversation round trip for histories
+// that were already on disk.
+func NormalizeSessionMessages(msgs []Message) []Message {
+	return normalizeMessages(msgs, false)
+}
+
+func normalizeMessages(msgs []Message, dropOrphanTools bool) []Message {
+	if normalized, ok := tryNormalizeFastPath(msgs, dropOrphanTools); ok {
+		return normalized // well-formed: pass through without allocating
+	}
 	out := make([]Message, 0, len(msgs))
 	for i := 0; i < len(msgs); {
 		m := msgs[i]
@@ -108,19 +145,85 @@ func SanitizeToolPairing(msgs []Message) []Message {
 			for j < len(msgs) && msgs[j].Role == RoleTool {
 				j++
 			}
+			// Backfill empty tool-call names from the corresponding tool
+			// results so the model sees which tool was invoked (#4727).
+			// The wire-format fix (openai.go) ensures empty fields are
+			// never omitted, so this backfill is a UX improvement, not a
+			// correctness requirement.
+			calls := backfillToolCallNames(m.ToolCalls, msgs[i+1:j])
+			m.ToolCalls = calls
 			out = append(out, repairToolCallArgs(m))
-			out = append(out, pairToolResults(m.ToolCalls, msgs[i+1:j])...)
-			i = j // tool messages consumed here; any non-matching ones are orphans, dropped
+			if dropOrphanTools {
+				out = append(out, pairToolResults(calls, msgs[i+1:j])...)
+			} else {
+				out = append(out, sessionToolResults(calls, msgs[i+1:j])...)
+			}
+			i = j
 			continue
 		}
 		if m.Role == RoleTool {
-			i++ // orphan tool message (no preceding assistant tool_calls) — drop
+			if !dropOrphanTools {
+				out = append(out, m)
+			}
+			// Orphan tool message: provider sends drop it; session loads preserve it.
+			i++
 			continue
 		}
 		out = append(out, m)
 		i++
 	}
 	return out
+}
+
+// tryNormalizeFastPath reports whether msgs needs no repair and, if so, returns
+// it as-is so the caller can skip allocating. Healthy tool-call/tool-result
+// turns pass through unchanged; malformed turns take the slow path.
+func tryNormalizeFastPath(msgs []Message, dropOrphanTools bool) ([]Message, bool) {
+	for i := 0; i < len(msgs); {
+		m := msgs[i]
+		if m.Role == RoleAssistant && len(m.ToolCalls) > 0 {
+			j := i + 1
+			for j < len(msgs) && msgs[j].Role == RoleTool {
+				j++
+			}
+			if !toolTurnWellFormed(m.ToolCalls, msgs[i+1:j]) || needsToolCallArgRepair(m.ToolCalls) {
+				return nil, false
+			}
+			i = j
+			continue
+		}
+		if m.Role == RoleTool && dropOrphanTools {
+			return nil, false
+		}
+		i++
+	}
+	return msgs, true
+}
+
+func toolTurnWellFormed(calls []ToolCall, results []Message) bool {
+	if len(calls) != len(results) {
+		return false
+	}
+	for _, tc := range calls {
+		if tc.Name == "" {
+			return false
+		}
+	}
+	for k, tc := range calls {
+		if results[k].ToolCallID != tc.ID {
+			return false
+		}
+	}
+	return true
+}
+
+func needsToolCallArgRepair(calls []ToolCall) bool {
+	for _, tc := range calls {
+		if tc.Arguments != "" && !json.Valid([]byte(tc.Arguments)) {
+			return true
+		}
+	}
+	return false
 }
 
 // repairToolCallArgs returns m with any undecodable tool-call Arguments closed
@@ -238,6 +341,75 @@ func pairToolResults(calls []ToolCall, avail []Message) []Message {
 	return out
 }
 
+// sessionToolResults preserves every stored tool result and appends placeholders
+// only for calls that have no recorded answer. Load-time normalization must not
+// drop or reorder user history; provider sends can still use pairToolResults for
+// strict wire formatting.
+func sessionToolResults(calls []ToolCall, avail []Message) []Message {
+	out := append([]Message(nil), avail...)
+	if idDistinct(calls) {
+		answered := make(map[string]struct{}, len(avail))
+		for _, r := range avail {
+			answered[r.ToolCallID] = struct{}{}
+		}
+		for _, tc := range calls {
+			if _, ok := answered[tc.ID]; !ok {
+				out = append(out, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tc.Name, Content: interruptedToolResult})
+			}
+		}
+		return out
+	}
+	for k := len(avail); k < len(calls); k++ {
+		tc := calls[k]
+		out = append(out, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tc.Name, Content: interruptedToolResult})
+	}
+	return out
+}
+
+// backfillToolCallNames returns calls with any empty Name filled in from the
+// matching tool result (by id, then by position). Old sessions (#4727) may have
+// saved assistant tool-calls with an empty name; backfilling gives the model
+// useful context during replay. The common case (no empty names) returns the
+// input unchanged without allocating. Unpaired calls keep their empty name,
+// which the wire-format fix (openai.go) handles gracefully.
+func backfillToolCallNames(calls []ToolCall, results []Message) []ToolCall {
+	missing := false
+	for _, c := range calls {
+		if c.Name == "" {
+			missing = true
+			break
+		}
+	}
+	if !missing {
+		return calls
+	}
+	out := make([]ToolCall, len(calls))
+	copy(out, calls)
+	if idDistinct(calls) {
+		byID := make(map[string]string, len(results))
+		for _, r := range results {
+			if r.Name != "" {
+				byID[r.ToolCallID] = r.Name
+			}
+		}
+		for k := range out {
+			if out[k].Name == "" {
+				if n, ok := byID[out[k].ID]; ok {
+					out[k].Name = n
+				}
+			}
+		}
+		return out
+	}
+	// Fallback: positional pairing (same order as pairToolResults).
+	for k := range out {
+		if out[k].Name == "" && k < len(results) {
+			out[k].Name = results[k].Name
+		}
+	}
+	return out
+}
+
 // idDistinct reports whether every call carries a non-empty id unique within the
 // batch — the condition under which id-keyed pairing is safe.
 func idDistinct(calls []ToolCall) bool {
@@ -298,8 +470,15 @@ func (p *Pricing) Cost(u *Usage) float64 {
 	if p == nil || u == nil {
 		return 0
 	}
-	return (float64(u.CacheHitTokens)*p.CacheHit +
-		float64(u.CacheMissTokens)*p.Input +
+	hit := u.CacheHitTokens
+	miss := u.CacheMissTokens
+	if hit+miss == 0 && u.PromptTokens > 0 {
+		miss = u.PromptTokens
+	} else if miss == 0 && hit > 0 && u.PromptTokens > hit {
+		miss = u.PromptTokens - hit
+	}
+	return (float64(hit)*p.CacheHit +
+		float64(miss)*p.Input +
 		float64(u.CompletionTokens)*p.Output) / 1e6
 }
 
@@ -420,16 +599,20 @@ type Config struct {
 // surface it verbatim instead of dumping a raw status body. Providers should
 // return this (rather than a generic status error) for auth failures.
 type AuthError struct {
-	Provider string // the provider instance name, e.g. "deepseek"
-	KeyEnv   string // the api_key_env the key is read from, when known
-	Status   int    // the HTTP status (401 or 403)
-	HasKey   bool   // a non-empty key was sent — the server rejected it, vs. no key configured at all
+	Provider  string // the provider instance name, e.g. "deepseek"
+	KeyEnv    string // the api_key_env the key is read from, when known
+	KeySource string // human-readable source of KeyEnv, when known
+	Status    int    // the HTTP status (401 or 403)
+	HasKey    bool   // a non-empty key was sent — the server rejected it, vs. no key configured at all
 }
 
 func (e *AuthError) Error() string {
 	key := "the API key"
 	if e.KeyEnv != "" {
 		key = e.KeyEnv
+	}
+	if e.KeySource != "" {
+		key += " from " + e.KeySource
 	}
 	return fmt.Sprintf("authentication failed for provider %q (HTTP %d): %s is invalid or expired — update it (in .env or your environment) and retry, or run `reasonix setup`",
 		e.Provider, e.Status, key)

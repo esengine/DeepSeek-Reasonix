@@ -68,5 +68,8 @@ the `release` environment deployment.
 - Canary version numbers use the workflow `run_number`, so the desktop and CLI canary
   numbers differ (e.g. `canary.11` vs `canary.2`). Only monotonicity per channel matters.
 - A stable `-rc` tag (e.g. `npm-v1.4.0-rc.1`) still ships under `next`, not `canary`.
-- macOS canary self-update is manual (no notarization); testers download the canary
-  build from its R2 link (canary is not on the GitHub releases page).
+- Desktop in-app updates use R2 first. Stable has a GitHub release fallback; canary is
+  R2-only and never appears on the GitHub releases page.
+- Windows and Linux apply downloaded, minisign-verified artifacts in place. macOS
+  applies in-app only for Developer ID signed and notarized builds; ad-hoc/local
+  builds fall back to the download page.

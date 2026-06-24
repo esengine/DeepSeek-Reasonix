@@ -54,6 +54,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		name = "openai"
 	}
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
+	keySource, _ := cfg.Extra["api_key_source"].(string)
 	effort, _ := cfg.Extra["effort"].(string)
 	effort = strings.ToLower(strings.TrimSpace(effort))
 	if effort == "auto" {
@@ -113,6 +114,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		name:         name,
 		apiKey:       cfg.APIKey,
 		keyEnv:       keyEnv,
+		keySource:    keySource,
 		baseURL:      strings.TrimRight(cfg.BaseURL, "/"),
 		model:        cfg.Model,
 		deepseek:     deepseek,
@@ -139,6 +141,7 @@ type client struct {
 	name         string
 	apiKey       string
 	keyEnv       string // api_key_env name, surfaced in auth errors
+	keySource    string // source of keyEnv, surfaced in auth errors
 	baseURL      string
 	model        string
 	http         *http.Client
@@ -157,6 +160,7 @@ func (c *client) sendOpts() provider.SendOptions {
 	return provider.SendOptions{
 		Provider:   c.name,
 		KeyEnv:     c.keyEnv,
+		KeySource:  c.keySource,
 		KeyPresent: c.apiKey != "",
 		RetryAuth:  c.authed.Load(),
 	}
@@ -196,7 +200,9 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 			return nil, err
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+		if c.apiKey != "" {
+			httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+		}
 		httpReq.Header.Set("Accept", "text/event-stream")
 		return httpReq, nil
 	}
@@ -452,6 +458,9 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return emitted, err
+	}
 	if stalled.Load() {
 		return emitted, fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped", c.name, idleTimeout)
 	}
@@ -582,17 +591,17 @@ type chatTool struct {
 
 type chatFunction struct {
 	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Parameters  json.RawMessage `json:"parameters"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
 }
 
 type chatToolCall struct {
-	Index    int    `json:"index"`
+	Index    int    `json:"index,omitempty"`
 	ID       string `json:"id,omitempty"`
 	Type     string `json:"type,omitempty"`
 	Function struct {
-		Name      string `json:"name,omitempty"`
-		Arguments string `json:"arguments,omitempty"`
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
 	} `json:"function"`
 }
 

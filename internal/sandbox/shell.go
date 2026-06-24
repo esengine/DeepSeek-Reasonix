@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -48,14 +49,14 @@ type Shell struct {
 // warning to warn and falling back to auto-detection if the forced one is
 // missing — so a typo or an uninstalled shell can never leave the tool broken.
 func ResolveShell(prefer, path string, warn io.Writer) Shell {
-	return resolveShell(prefer, path, warn, runtime.GOOS, exec.LookPath, fileExists, windowsBashCandidates(), probeBash, isWindowsWSLBash)
+	return resolveShell(prefer, path, warn, runtime.GOOS, exec.LookPath, fileExists, windowsBashCandidates(), windowsPowerShellCandidates(), probeBash, isWindowsWSLBash)
 }
 
 // resolveShell is ResolveShell with its environment lookups injected — including
 // the Git-for-Windows bash candidates, which derive from %ProgramFiles% and so
 // are empty off Windows — so the decision table is deterministically testable on
 // any host.
-func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath func(string) (string, error), exists func(string) bool, winBashCandidates []string, probe func(string) bool, isWSL func(string) bool) Shell {
+func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath func(string) (string, error), exists func(string) bool, winBashCandidates []string, winPowerShellCandidates []string, probe func(string) bool, isWSL func(string) bool) Shell {
 	findBash := func() (Shell, bool) {
 		if p, err := lookPath("bash"); err == nil && !isWSL(p) && probe(p) {
 			return Shell{Kind: ShellBash, Path: p}, true
@@ -69,6 +70,15 @@ func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath fun
 	}
 	findPowerShell := func(order []string) (Shell, bool) {
 		for _, name := range order {
+			for _, p := range winPowerShellCandidates {
+				base := strings.ToLower(pathBase(p))
+				if base != strings.ToLower(name) && strings.TrimSuffix(base, ".exe") != strings.ToLower(name) {
+					continue
+				}
+				if exists(p) {
+					return Shell{Kind: ShellPowerShell, Path: p}, true
+				}
+			}
 			if p, err := lookPath(name); err == nil {
 				return Shell{Kind: ShellPowerShell, Path: p}, true
 			}
@@ -166,6 +176,13 @@ func fileExists(p string) bool {
 	return err == nil && !fi.IsDir()
 }
 
+func pathBase(p string) string {
+	if i := strings.LastIndexAny(p, `/\\`); i >= 0 {
+		return p[i+1:]
+	}
+	return p
+}
+
 // windowsBashCandidates lists the bash.exe paths a Git-for-Windows install
 // ships, across the usual program-files roots and a per-user install.
 func windowsBashCandidates() []string {
@@ -188,6 +205,44 @@ func windowsBashCandidates() []string {
 	return out
 }
 
+// windowsPowerShellCandidates lists common PowerShell executables that are not
+// always present on PATH, especially PowerShell 7's default MSI install path.
+func windowsPowerShellCandidates() []string {
+	var roots []string
+	for _, env := range []string{"ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"} {
+		if v := os.Getenv(env); v != "" {
+			roots = append(roots, v)
+		}
+	}
+	var out []string
+	for _, r := range roots {
+		out = append(out, filepath.Join(r, "PowerShell", "7", "pwsh.exe"))
+	}
+	if v := os.Getenv("SystemRoot"); v != "" {
+		out = append(out, filepath.Join(v, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"))
+	} else if v := os.Getenv("windir"); v != "" {
+		out = append(out, filepath.Join(v, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"))
+	}
+	return out
+}
+
+// nulRedirect matches a cmd.exe-style redirect to the "nul" device (>nul,
+// 2>nul, 1>>nul, &>nul …) where nul is a complete token. bash and PowerShell
+// treat "nul" as an ordinary filename, not the null device, so the redirect
+// would create an undeletable file named "nul" (a Windows reserved name) in the
+// working directory. #4252. Group 2 captures the trailing delimiter (RE2 has no
+// lookahead) so it can be re-emitted unchanged.
+var nulRedirect = regexp.MustCompile(`(?i)((?:\d+|&)?>>?)\s*nul([\s;&|<>)]|$)`)
+
+// normalizeNulRedirect rewrites those nul redirects to sink ("/dev/null" for
+// bash, "$null" for PowerShell), so the command discards output as intended.
+func normalizeNulRedirect(command, sink string) string {
+	return nulRedirect.ReplaceAllStringFunc(command, func(m string) string {
+		sub := nulRedirect.FindStringSubmatch(m)
+		return sub[1] + sink + sub[2]
+	})
+}
+
 // argv builds the exec argv that runs command under this shell.
 func (s Shell) argv(command string) []string {
 	path := s.Path
@@ -195,9 +250,9 @@ func (s Shell) argv(command string) []string {
 		path = s.Kind.String()
 	}
 	if s.Kind == ShellPowerShell {
-		return []string{path, "-NoProfile", "-NonInteractive", "-Command", psUTF8Prologue + command}
+		return []string{path, "-NoProfile", "-NonInteractive", "-Command", psUTF8Prologue + normalizeNulRedirect(command, "$null")}
 	}
-	return []string{path, "-c", command}
+	return []string{path, "-c", normalizeNulRedirect(command, "/dev/null")}
 }
 
 // SupportsChaining reports whether the shell parses '&&' / '||'. bash does;
@@ -206,9 +261,6 @@ func (s Shell) SupportsChaining() bool {
 	if s.Kind != ShellPowerShell {
 		return true
 	}
-	base := strings.ToLower(s.Path)
-	if i := strings.LastIndexAny(base, `/\`); i >= 0 {
-		base = base[i+1:] // Windows path; split on either separator off-Windows too
-	}
+	base := strings.ToLower(pathBase(s.Path))
 	return base == "pwsh" || base == "pwsh.exe"
 }

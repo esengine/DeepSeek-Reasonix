@@ -1,9 +1,17 @@
 package skill
 
+import (
+	"sort"
+	"strings"
+
+	"reasonix/internal/tool"
+)
+
 // Built-in skills ship with Reasonix and back the dedicated subagent tools
-// (explore / research / review / security_review) plus the inline `test`
-// playbook. A user/project file with the same name overrides the built-in (see
-// Store.List / Store.Read). Tool names in the bodies match internal/tool/builtin.
+// (explore / research / review / security_review) plus inline playbooks such as
+// test. A user/project file with the same name overrides the
+// built-in (see Store.List / Store.Read). Tool names in the bodies match
+// internal/tool/builtin.
 
 // negativeClaimRule keeps subagents honest about "found nothing" answers.
 const negativeClaimRule = `When you claim something does NOT exist (no caller, no usage, not implemented), say which searches you ran to reach that conclusion — a negative claim is only as trustworthy as the search behind it.`
@@ -11,13 +19,15 @@ const negativeClaimRule = `When you claim something does NOT exist (no caller, n
 // tuiFormatting nudges concise, terminal-friendly output.
 const tuiFormatting = `Keep the final answer compact and terminal-friendly: short paragraphs or bullets, no walls of text, no restating the question.`
 
+const optionalCodeGraphHint = `Optional installed code graph MCP tools are available in this session. Choose the semantic tool that fits the task: use LSP for language semantics (definitions, references, hover, diagnostics), use code graph tools first for call graph, impact analysis, and architecture relationships, use code_index only as the built-in outline/definition-candidate fallback, and verify textual or negative claims with read_file or grep.`
+
 const builtinExploreBody = `You are running as an exploration subagent. Investigate the codebase the parent pointed you at, then return one focused, distilled answer.
 
 How to operate:
-- Use codegraph tools (codegraph_context, codegraph_search, codegraph_callers, codegraph_callees, codegraph_trace) as your PRIMARY tools for symbol/code-structure questions. Fall back to read_file, grep, glob, ls for content search (comments, strings, config) or when codegraph tools are not available. Stay read-only.
-- codegraph_context is the best starting point for "how does X work" / architecture questions — it returns entry points + related symbols + key code in one call.
-- For "find all places that call / reference / use X" questions: use codegraph_callers (preferred) or ` + "`grep`" + ` (content search) — NOT ` + "`glob`" + ` (which only matches file names). Using the wrong one gives empty results and wastes your budget.
-- Cast a wide net first (codegraph_search for symbols, grep for content references, ls/glob for structure) to map the territory; then read the 3-10 most relevant files in full.
+- For code intelligence, choose the best semantic tool for the task. Prefer LSP for language semantics (definitions, references, hover, diagnostics). If LSP is unavailable or insufficient, use code_index for file outlines and symbol definition candidates, then verify important claims with read_file or grep. Stay read-only.
+- For "how does X work" / architecture questions, start with the strongest available structure tool, then read the key files in full.
+- For "find all places that call / reference / use X" questions: use LSP references when available or ` + "`grep`" + ` (content search) — NOT ` + "`glob`" + ` (which only matches file names). code_index finds definitions/candidates, not full textual references.
+- Cast a wide net first (LSP/code_index for symbols, grep for references, ls/glob for structure) to map the territory; then read the 3-10 most relevant files in full.
 - Don't read every file — be selective. Breadth on the first pass, depth only where the question demands it.
 - Stop exploring as soon as you can answer. The parent doesn't see your tool calls, so over-exploration is pure waste.
 
@@ -35,8 +45,8 @@ The 'task' the parent gave you is the question you must answer. Treat any other 
 const builtinResearchBody = `You are running as a research subagent. Gather information from code AND the web, synthesize it, and return one focused conclusion.
 
 How to operate:
-- Combine code reading (codegraph tools + read_file, grep, glob) with web_fetch as appropriate. (There is no dedicated web-search tool — fetch the canonical doc/spec URL directly when you know it.)
-- For "how does X work" questions: use codegraph_context first for symbol-level understanding, then read_file for full context.
+- Combine code reading (LSP for language semantics; code_index as the local symbol fallback; read_file, grep, glob for verification) with web_fetch as appropriate. (There is no dedicated web-search tool — fetch the canonical doc/spec URL directly when you know it.)
+- For "how does X work" questions: use symbol/reference lookup first when available; otherwise use code_index, then read_file for full context.
 - For "is Y supported" questions: fetch the canonical reference, then verify against the local code.
 - For "what's our policy on Z" / "where do we use Q": local code first, web only to compare against external standards.
 - Cap yourself at ~10 tool calls. If you can't converge, return what you have plus a note on what's missing.
@@ -68,6 +78,7 @@ Operate as an installer, not as a shell-script guesser:
 7. After apply=true, report what was installed, where it was persisted, and whether it is usable in the current session. For skills, prefer actions[].canonicalPath, actions[].installRoot, actions[].discoverable, and actions[].indexed over guessing from the source path. The plan's kinds field tells you how many skills vs MCP servers were touched.
 
 Defaults:
+- MCP installs default to global so the server is available in every project; use scope="project" only for project-specific servers, tokens, or commands. A project-root .mcp.json import stays project-scoped by default.
 - A folder containing many skills should be registered as a skill root, not copied.
 - A single SKILL.md, <name>.md, or <name>/SKILL.md should be copied unless the user asked to link/register. The installer writes canonical <skill-name>/SKILL.md paths by default; flat <name>.md is compatibility input, not the preferred output.
 - A local SKILL.md source may have references/, scripts/, assets/, or other sibling files. Treat its parent directory as the skill package so those files remain available after install.
@@ -88,7 +99,7 @@ How to operate:
 - Default scope: the current branch's diff vs the default branch. If the task names a specific commit range or files, honor that instead.
 - Discover scope first: ` + "`bash git status`" + `, ` + "`git diff --stat`" + `, ` + "`git log --oneline`" + `. Then ` + "`git diff`" + ` (or ` + "`git diff <base>...HEAD`" + `) for the hunks.
 - Read touched files (read_file) when the diff alone lacks context — signatures, surrounding invariants, callers.
-- For "any callers depending on this?" questions: use codegraph_callers or codegraph_impact (preferred) or grep the symbol BEFORE asserting impact.
+- For "any callers depending on this?" questions: use LSP references/call hierarchy when available or grep the symbol BEFORE asserting impact. Use code_index only to find definition candidates/outline, not as proof of no callers.
 - Stay read-only. Never commit, never write files, never propose edits as applied changes. The parent decides whether to act.
 - Cap yourself at ~12 tool calls. If the diff is too big, pick the riskiest 2-3 files and say so.
 
@@ -116,7 +127,7 @@ const builtinSecurityReviewBody = `You are running as a security-review subagent
 How to operate:
 - Default scope: the current branch's diff vs the default branch. Honor a named range or directory if given.
 - Discover scope first: ` + "`bash git status`" + `, ` + "`git diff --stat`" + `, ` + "`git diff <base>...HEAD`" + `. Read touched files (read_file) when the diff lacks security context — auth checks, input validation, the handler that calls the changed code.
-- Use codegraph_callers or codegraph_impact (preferred) or grep to verify "is this user-controlled input ever sanitized later?" / "what other call sites depend on this validation?" before asserting impact.
+- Use LSP references/call hierarchy when available or grep to verify "is this user-controlled input ever sanitized later?" / "what other call sites depend on this validation?" before asserting impact. Use code_index only to find definition candidates/outline, not as proof of no callers.
 - Stay read-only. Never write, never run destructive commands. The parent decides what to act on.
 - Cap yourself at ~12 tool calls. If the diff is too big, focus on the riskiest 2-3 files and say so.
 
@@ -179,19 +190,98 @@ Rules:
 - Don't fabricate conventions the code doesn't demonstrate.
 - After writing, summarize in one or two lines what you captured and tell the user to review and edit it.`
 
-// extraReadTools holds additional tool names (e.g. codegraph tools) injected at
-// boot time so subagent skills can use them without hardcoding MCP-prefixed names.
-var extraReadTools []string
+// CodeGraphReadTools returns read-only tool names that look like an installed
+// codegraph MCP surface. Writable or untrusted tools stay out of subagents.
+func CodeGraphReadTools(reg *tool.Registry) []string {
+	if reg == nil {
+		return nil
+	}
+	var names []string
+	for _, name := range reg.Names() {
+		if !looksLikeCodeGraphTool(name) {
+			continue
+		}
+		tl, ok := reg.Get(name)
+		if !ok || !tl.ReadOnly() {
+			continue
+		}
+		names = append(names, name)
+	}
+	return normalizeExtraToolNames(names)
+}
 
-// SetExtraReadTools registers additional read-only tool names that subagent
-// skills (explore, research, review, security-review) are allowed to use. Call
-// from boot after plugin tools are registered.
-func SetExtraReadTools(names []string) { extraReadTools = names }
+func looksLikeCodeGraphTool(name string) bool {
+	return strings.HasPrefix(name, "codegraph_") ||
+		strings.HasPrefix(name, tool.MCPNamePrefix+"codegraph__")
+}
+
+func normalizeExtraToolNames(names []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func withOptionalCodeGraphHint(body string, enabled bool) string {
+	if !enabled {
+		return body
+	}
+	if strings.Contains(body, optionalCodeGraphHint) {
+		return body
+	}
+	return body + "\n\n" + optionalCodeGraphHint
+}
+
+// WithCodeGraphTools enables user-installed codegraph MCP tools for built-in
+// code-reading subagent skills. The caller passes names discovered from its live
+// registry so desktop tabs/sessions never share mutable skill state.
+func WithCodeGraphTools(sk Skill, names []string) Skill {
+	names = normalizeExtraToolNames(names)
+	if len(names) == 0 || sk.Scope != ScopeBuiltin || !codeReadingBuiltin(sk.Name) {
+		return sk
+	}
+	sk.AllowedTools = appendUniqueToolNames(sk.AllowedTools, names...)
+	sk.Body = withOptionalCodeGraphHint(sk.Body, true)
+	return sk
+}
+
+func codeReadingBuiltin(name string) bool {
+	switch name {
+	case "explore", "research", "review", "security-review":
+		return true
+	default:
+		return false
+	}
+}
+
+func appendUniqueToolNames(base []string, extra ...string) []string {
+	out := append([]string(nil), base...)
+	seen := make(map[string]bool, len(out)+len(extra))
+	for _, name := range out {
+		seen[name] = true
+	}
+	for _, name := range extra {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
+}
 
 // builtinSkills returns the shipped skills. A fresh slice each call so callers
 // can't mutate the shared set.
 func builtinSkills() []Skill {
-	readCodeTools := append([]string{"read_file", "ls", "glob", "grep"}, extraReadTools...)
+	readCodeTools := []string{"read_file", "ls", "glob", "grep", "code_index"}
 	reviewTools := append(append([]string(nil), readCodeTools...), "bash")
 	return []Skill{
 		{

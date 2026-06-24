@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Play } from "lucide-react";
 import { AnchoredPopover } from "./AnchoredPopover";
 import { useT } from "../lib/i18n";
 import type { DictKey } from "../lib/i18n";
@@ -49,9 +49,11 @@ export function SoundSelect({
           className={`sound-select__chev${open ? " sound-select__chev--open" : ""}`}
         />
       </button>
-      <button className="chip" type="button" title={t("settings.notificationSoundPreview")} onClick={onPreview} disabled={previewDisabled}>
-        &#x25B6;
-      </button>
+      {!previewDisabled && (
+        <button className="chip chip--icon" type="button" title={t("settings.notificationSoundPreview")} aria-label={t("settings.notificationSoundPreview")} onClick={onPreview}>
+          <Play size={13} aria-hidden="true" />
+        </button>
+      )}
       <AnchoredPopover
         open={open}
         anchorRef={triggerRef}

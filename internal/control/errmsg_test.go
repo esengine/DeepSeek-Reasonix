@@ -2,6 +2,7 @@ package control
 
 import (
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -35,6 +36,11 @@ func TestExplainError(t *testing.T) {
 		t.Errorf("401 should still name the key env: %q", rejected.Error())
 	}
 
+	sourced := explainError(&provider.AuthError{Provider: "deepseek", KeyEnv: "DEEPSEEK_API_KEY", KeySource: "project .env", Status: 401, HasKey: true})
+	if !strings.Contains(sourced.Error(), "DEEPSEEK_API_KEY from project .env") {
+		t.Errorf("401 should name the key source: %q", sourced.Error())
+	}
+
 	for _, status := range []int{400, 422, 429, 500, 503} {
 		got := explainError(&provider.APIError{Provider: "p", Status: status})
 		if got.Error() == "" || got.Error() == (&provider.APIError{Provider: "p", Status: status}).Error() {
@@ -55,6 +61,16 @@ func TestExplainError(t *testing.T) {
 	noLeak := explainError(&provider.APIError{Provider: "deepseek", Status: 429, Body: `{"error":{"message":"slow down"}}`})
 	if noLeak.Error() != i18n.M.ProviderErrRateLimited {
 		t.Errorf("429 body must not leak into the message, got %q", noLeak.Error())
+	}
+
+	interrupted := explainError(&provider.StreamInterruptedError{Err: io.ErrUnexpectedEOF})
+	if !strings.Contains(interrupted.Error(), "model stream interrupted") || !strings.Contains(interrupted.Error(), "continue") {
+		t.Errorf("stream interruption should be actionable, got %q", interrupted.Error())
+	}
+
+	disconnected := explainError(io.ErrUnexpectedEOF)
+	if !strings.Contains(disconnected.Error(), "model stream disconnected") || !strings.Contains(disconnected.Error(), "retry") {
+		t.Errorf("connection reset should be actionable, got %q", disconnected.Error())
 	}
 
 	plain := errors.New("some other failure")

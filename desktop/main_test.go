@@ -5,15 +5,20 @@ import (
 	"testing"
 )
 
-// TestMain isolates os.UserConfigDir() for the whole package. On Windows it
-// reads %AppData%, which the per-test HOME / XDG_CONFIG_HOME overrides do not
-// cover — without this, tests that persist desktop state (saveWorkspace,
-// session/cache writes) leak into the developer's real Reasonix config dir.
+// TestMain isolates user config/state/cache dirs for the whole package. Without
+// this, tests that persist desktop state, sessions, cache, or CLI-style config
+// can leak into the developer's real Reasonix directories.
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "reasonix-desktop-test")
 	if err != nil {
 		os.Exit(1)
 	}
+	os.Setenv("HOME", dir)
+	os.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	os.Setenv("USERPROFILE", dir)
+	os.Setenv("XDG_CONFIG_HOME", dir+"/config")
+	os.Setenv("REASONIX_STATE_HOME", dir+"/state")
+	os.Setenv("REASONIX_CACHE_HOME", dir+"/cache")
 	os.Setenv("AppData", dir)
 	code := m.Run()
 	os.RemoveAll(dir)

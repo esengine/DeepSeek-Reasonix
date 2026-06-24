@@ -50,11 +50,7 @@ export function ClearContextCard({
         </>
       }
     >
-      <div className="ask-shelf__detail-list">
-        <div className="ask-shelf__detail clear-context-card__detail">
-          <span className="ask-shelf__detail-desc">{t("clearContext.detail")}</span>
-        </div>
-      </div>
+      <p className="prompt-shelf__note">{t("clearContext.detail")}</p>
     </PromptShelf>
   );
 }

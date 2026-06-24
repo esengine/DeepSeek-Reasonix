@@ -33,8 +33,8 @@ func TestBoundArrayPayloadsAreNonNilBeforeStartup(t *testing.T) {
 	if got := app.SlashArgs("/skill "); got.Items == nil {
 		t.Fatal("SlashArgs().Items is nil; frontend expects []")
 	}
-	if got := app.WorkspaceChanges(); got.Files == nil {
-		t.Fatal("WorkspaceChanges().Files is nil; frontend expects []")
+	if got := app.WorkspaceChanges(""); got.Files == nil {
+		t.Fatal(`WorkspaceChanges("").Files is nil; frontend expects []`)
 	}
 	if got := app.ContextPanel("missing"); got.ReadFiles == nil || got.ChangedFiles == nil {
 		t.Fatalf("ContextPanel(missing) arrays = read:%v changed:%v, want non-nil", got.ReadFiles, got.ChangedFiles)
@@ -48,6 +48,11 @@ func TestBoundArrayPayloadsAreNonNilBeforeStartup(t *testing.T) {
 		got.Bot.Allowlist.QQUsers == nil || got.Bot.Allowlist.FeishuUsers == nil || got.Bot.Allowlist.WeixinUsers == nil ||
 		got.Bot.Allowlist.QQGroups == nil || got.Bot.Allowlist.FeishuGroups == nil || got.Bot.Allowlist.WeixinGroups == nil {
 		t.Fatalf("Settings() contains nil array fields: %+v", got)
+	}
+	if got := app.DesktopStartupSettings(); got.StatusBarItems == nil ||
+		got.Bot.Allowlist.QQUsers == nil || got.Bot.Allowlist.FeishuUsers == nil || got.Bot.Allowlist.WeixinUsers == nil ||
+		got.Bot.Allowlist.QQGroups == nil || got.Bot.Allowlist.FeishuGroups == nil || got.Bot.Allowlist.WeixinGroups == nil {
+		t.Fatalf("DesktopStartupSettings() contains nil array fields: %+v", got)
 	}
 }
 

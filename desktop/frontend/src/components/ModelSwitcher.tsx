@@ -1,96 +1,153 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Brain, Check, ChevronsUpDown } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Brain, Check, ChevronsUpDown, Search } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import type { ModelInfo } from "../lib/types";
-import { ANCHORED_POPOVER_CLOSE_MS, AnchoredPopover } from "./AnchoredPopover";
+import { AnchoredPopover } from "./AnchoredPopover";
+import { Tooltip } from "./Tooltip";
 
 // ModelSwitcher opens an upward popover listing configured providers. Selecting
 // one switches the active model while the current conversation continues.
 export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?: string; onPick: (name: string) => void }) {
   const t = useT();
   const [open, setOpen] = useState(false);
-  const [closing, setClosing] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [query, setQuery] = useState("");
+  const [triggerWidth, setTriggerWidth] = useState<number | undefined>(undefined);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const closeTimerRef = useRef<number | null>(null);
-  const triggerWidth = triggerRef.current?.getBoundingClientRect().width;
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const clearCloseTimer = useCallback(() => {
-    if (closeTimerRef.current === null) return;
-    window.clearTimeout(closeTimerRef.current);
-    closeTimerRef.current = null;
+  // Measure trigger width off the render path to avoid forced layout
+  useEffect(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const measure = () => setTriggerWidth(el.getBoundingClientRect().width);
+    measure();
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(el);
+    return () => observer.disconnect();
   }, []);
 
-  const openMenu = useCallback(() => {
-    clearCloseTimer();
-    setClosing(false);
-    setOpen(true);
-  }, [clearCloseTimer]);
+  const loadModels = useCallback(() => {
+    return (tabId ? app.ModelsForTab(tabId) : app.Models()).then((next) => setModels(asArray(next))).catch(() => {});
+  }, [tabId]);
 
-  const closeMenu = useCallback((afterClose?: () => void) => {
-    clearCloseTimer();
-    setClosing(true);
-    window.requestAnimationFrame(() => setOpen(false));
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    closeTimerRef.current = window.setTimeout(() => {
-      closeTimerRef.current = null;
-      setClosing(false);
-      afterClose?.();
-    }, reduceMotion ? 0 : ANCHORED_POPOVER_CLOSE_MS);
-  }, [clearCloseTimer]);
+  useEffect(() => {
+    void loadModels();
+  }, [loadModels]);
 
   useEffect(() => {
     if (open) {
-      (tabId ? app.ModelsForTab(tabId) : app.Models()).then((next) => setModels(asArray(next))).catch(() => {});
+      setQuery("");
+      void loadModels();
+      window.requestAnimationFrame(() => inputRef.current?.focus());
     }
-  }, [open, tabId]);
+  }, [loadModels, open]);
 
-  useEffect(() => () => clearCloseTimer(), [clearCloseTimer]);
+  const keyword = query.trim().toLowerCase();
+  const filtered = useMemo(
+    () => keyword
+      ? models.filter((m) => m.model.toLowerCase().includes(keyword) || m.provider.toLowerCase().includes(keyword))
+      : models,
+    [models, keyword],
+  );
+
+  // Group by provider, with the current model's group first
+  const groups = useMemo(() => {
+    const map = new Map<string, ModelInfo[]>();
+    let currentProvider = "";
+    for (const m of filtered) {
+      if (m.current) currentProvider = m.provider;
+      const list = map.get(m.provider);
+      if (list) list.push(m);
+      else map.set(m.provider, [m]);
+    }
+    return [...map.entries()]
+      .sort(([a], [b]) => {
+        if (a === currentProvider) return -1;
+        if (b === currentProvider) return 1;
+        return providerLabel(a, t).localeCompare(providerLabel(b, t));
+      })
+      .map(([provider, items]) => ({
+        provider,
+        label: providerLabel(provider, t),
+        items,
+      }));
+  }, [filtered, t]);
+
+  const currentProvider = useMemo(() => {
+    const cur = models.find((m) => m.current) ?? models.find((m) => m.model === label || m.ref === label);
+    return cur ? providerLabel(cur.provider, t) : null;
+  }, [label, models, t]);
+  const triggerLabel = currentProvider ? `${label} · ${currentProvider}` : label;
 
   const pick = (name: string) => {
-    closeMenu(() => onPick(name));
+    setModels((prev) => prev.map((m) => ({ ...m, current: m.ref === name })));
+    setOpen(false);
+    onPick(name);
   };
 
   return (
     <div className="modelsw">
-      <button
-        ref={triggerRef}
-        type="button"
-        className="modelsw__trigger"
-        aria-expanded={open && !closing}
-        onClick={() => (open || closing ? closeMenu() : openMenu())}
-      >
-        <Brain size={13} className="modelsw__kind" />
-        <span className="modelsw__label">{label}</span>
-        <ChevronsUpDown size={11} />
-      </button>
+      <Tooltip label={triggerLabel} fill>
+        <button
+          ref={triggerRef}
+          type="button"
+          className="modelsw__trigger"
+          aria-label={triggerLabel}
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <Brain size={13} className="modelsw__kind" />
+          <span className="modelsw__label">{label}</span>
+          <ChevronsUpDown size={11} />
+        </button>
+      </Tooltip>
       <AnchoredPopover
         open={open}
-        closing={closing}
         anchorRef={triggerRef}
-        onClose={() => closeMenu()}
+        onClose={() => setOpen(false)}
         className="modelsw__menu modelsw__menu--portal"
-        style={{ minWidth: triggerWidth ? Math.max(triggerWidth, 160) : undefined, maxWidth: 400 }}
+        style={{ minWidth: Math.max(triggerWidth || 200, 200), maxWidth: "min(90vw, 480px)" }}
       >
         <div role="listbox">
+          <div className="modelsw__search" role="presentation">
+            <Search size={13} />
+            <input
+              ref={inputRef}
+              type="text"
+              className="modelsw__search-input"
+              placeholder={t("modelSwitcher.searchPlaceholder")}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setOpen(false);
+                if (e.key === "Enter" && filtered.length === 1) pick(filtered[0].ref);
+              }}
+            />
+          </div>
           {models.length === 0 && <div className="modelsw__empty">{t("status.noModels")}</div>}
-          {models.map((m) => (
-            <button
-              key={m.ref}
-              type="button"
-              role="option"
-              aria-selected={m.current}
-              className={`modelsw__item ${m.current ? "modelsw__item--current" : ""}`}
-              onClick={() => pick(m.ref)}
-            >
-              <span className="modelsw__copy">
-                <span className="modelsw__model" title={m.model}>{m.model}</span>
-                <span className="modelsw__provider" title={providerLabel(m.provider, t)}>{providerLabel(m.provider, t)}</span>
-              </span>
-              {m.current && <Check size={13} className="modelsw__check" />}
-            </button>
+          {models.length > 0 && filtered.length === 0 && query && <div className="modelsw__empty">{t("modelSwitcher.noMatches")}</div>}
+          {groups.map((g) => (
+            <div key={g.provider} role="group" aria-label={g.label} className="modelsw__group">
+              <div className="modelsw__group-label" role="presentation"><Brain size={11} />{g.label}</div>
+              {g.items.map((m) => (
+                <button
+                  key={m.ref}
+                  type="button"
+                  role="option"
+                  aria-selected={m.current}
+                  className={`modelsw__item ${m.current ? "modelsw__item--current" : ""}`}
+                  onClick={() => pick(m.ref)}
+                >
+                  <span className="modelsw__copy">
+                    <span className="modelsw__model">{m.model}</span>
+                  </span>
+                  {m.current && <Check size={13} className="modelsw__check" />}
+                </button>
+              ))}
+            </div>
           ))}
         </div>
       </AnchoredPopover>
@@ -104,14 +161,6 @@ function providerLabel(provider: string, t: ReturnType<typeof useT>): string {
     case "deepseek-flash":
     case "deepseek-pro":
       return t("settings.providerLabel.deepseek");
-    case "mimo-api":
-    case "mimo":
-    case "xiaomi-mimo":
-      return t("settings.providerLabel.mimoApi");
-    case "mimo-token-plan":
-    case "mimo-pro":
-    case "mimo-flash":
-      return t("settings.providerLabel.mimoTokenPlan");
     default:
       return provider;
   }

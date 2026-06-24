@@ -3,7 +3,7 @@
   <desc id="desc">Mock terminal view showing grouped slash command help, branch tree, and output style listings.</desc>
   <rect width="1180" height="760" rx="18" fill="#343443"/>
   <rect x="34" y="34" width="1112" height="692" rx="14" fill="#3d3d4f"/>
-  <text x="64" y="82" fill="#f0b07f" font-family="Menlo, Consolas, monospace" font-size="27" font-weight="700">◆ reasonix chat</text>
+  <text x="64" y="82" fill="#f0b07f" font-family="Menlo, Consolas, monospace" font-size="27" font-weight="700">◆ reasonix</text>
   <text x="314" y="82" fill="#a9a9bf" font-family="Menlo, Consolas, monospace" font-size="27">· deepseek-v4-flash</text>
 
   <g font-family="Menlo, Consolas, monospace" font-size="24">

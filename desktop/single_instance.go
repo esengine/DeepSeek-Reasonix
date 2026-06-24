@@ -13,7 +13,7 @@ func singleInstanceLock(app *App) *options.SingleInstanceLock {
 		return nil
 	}
 	return &options.SingleInstanceLock{
-		UniqueId: singleInstanceID,
+		UniqueId: singleInstanceID(),
 		OnSecondInstanceLaunch: func(options.SecondInstanceData) {
 			app.secondInstanceLaunch()
 		},

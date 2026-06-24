@@ -209,12 +209,12 @@ func TestToolProgressStreamsThenCollapses(t *testing.T) {
 }
 
 // TestToolWorkingLineThenClears proves a dispatched tool that streams no output
-// (e.g. codegraph_context) shows a live "working · Ns" line so it doesn't look
+// (e.g. symbol_context) shows a live "working · Ns" line so it doesn't look
 // frozen, and that the line clears on the result instead of collapsing to
 // "0 lines".
 func TestToolWorkingLineThenClears(t *testing.T) {
 	m := newTestChatTUI()
-	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "c1", Name: "codegraph_context", Args: `{"q":"x"}`}})
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "c1", Name: "symbol_context", Args: `{"q":"x"}`}})
 
 	m.tickToolRunning() // one elapsed tick fills the placeholder
 	joined := strings.Join(m.transcript, "\n")
@@ -222,7 +222,7 @@ func TestToolWorkingLineThenClears(t *testing.T) {
 		t.Fatalf("a running tool should show a 'working' progress line:\n%s", joined)
 	}
 
-	m.ingestEvent(event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "c1", Name: "codegraph_context"}})
+	m.ingestEvent(event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "c1", Name: "symbol_context"}})
 	joined = strings.Join(m.transcript, "\n")
 	if strings.Contains(joined, "working") {
 		t.Fatalf("working line should clear after the result:\n%s", joined)

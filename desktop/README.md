@@ -62,6 +62,18 @@ In a plain browser the native bindings are absent, so `bridge.ts` falls back to 
 exact same event contract — so layout, streaming, markdown, tool cards, and the
 diff seam can all be built without rebuilding Go.
 
+### Frontend UI review checklist
+
+For anchored menus, dropdowns, tooltips, and other portaled UI, review both the
+component code and the CSS positioning contract:
+
+- If a component uses `createPortal` plus `getBoundingClientRect()`, it must
+  handle scrollable ancestors, window resize, and `visualViewport` changes.
+- Add a focused regression test when changing shared positioning primitives such
+  as `AnchoredPopover`, not only the specific menu that exposed the bug.
+- Exercise at least one scrollable container path, such as Settings content, when
+  manually checking dropdown or popover changes.
+
 ## Build
 
 ```sh
@@ -220,5 +232,11 @@ includes conversations, API keys, file contents, or paths.
 
 Opt out any time: Settings > Updates > "Anonymous usage ping", or set
 `telemetry = false` under `[desktop]` in the global config. Dev builds
-never ping. Crash reports are separate and only ever sent when the user
-clicks "Send report" on the crash screen.
+never ping. Crash and performance-pressure reports are separate and only
+ever sent when the user clicks "Send report" on the diagnostic UI.
+
+Aggregate quality metrics are also enabled by default and can be disabled from
+Settings > Updates > "Share aggregate quality metrics", or by setting
+`metrics = false` under `[desktop]`. These metrics are anonymous signal/bucket
+counts and preference buckets; they never include conversations, prompts, keys,
+paths, base URLs, or file contents.

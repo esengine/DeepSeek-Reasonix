@@ -70,6 +70,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		baseURL = defaultBaseURL
 	}
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
+	keySource, _ := cfg.Extra["api_key_source"].(string)
 	thinking, _ := cfg.Extra["thinking"].(string)
 	effort, _ := cfg.Extra["effort"].(string)
 	vision, _ := cfg.Extra["vision"].(bool)
@@ -96,6 +97,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		name:        name,
 		apiKey:      cfg.APIKey,
 		keyEnv:      keyEnv,
+		keySource:   keySource,
 		baseURL:     root,
 		model:       cfg.Model,
 		thinking:    thinking,
@@ -115,6 +117,7 @@ type client struct {
 	name        string
 	apiKey      string
 	keyEnv      string // api_key_env name, surfaced in auth errors
+	keySource   string // source of keyEnv, surfaced in auth errors
 	baseURL     string
 	model       string
 	thinking    string // "adaptive" enables extended thinking; "" = off (config-driven)
@@ -131,6 +134,7 @@ func (c *client) sendOpts() provider.SendOptions {
 	return provider.SendOptions{
 		Provider:   c.name,
 		KeyEnv:     c.keyEnv,
+		KeySource:  c.keySource,
 		KeyPresent: c.apiKey != "",
 		RetryAuth:  c.authed.Load(),
 	}

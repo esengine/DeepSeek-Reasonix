@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -98,6 +99,102 @@ func TestEnsureBlankTabCreatesOneBlankPerProject(t *testing.T) {
 	}
 	if tabs := app.ListTabs(); len(tabs) != 1 {
 		t.Fatalf("ListTabs length = %d, want 1: %+v", len(tabs), tabs)
+	}
+}
+
+func TestEnsureBlankTabResetsReusableAutoTopicTitle(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	app := NewApp()
+	topic, err := app.CreateTopic("project", projectRoot, "")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	if err := setTopicTitleWithSource(projectRoot, topic.ID, "Old auto title", topicTitleSourceAuto); err != nil {
+		t.Fatalf("set stale auto title: %v", err)
+	}
+	tab := app.createTabEntryWithID("project", projectRoot, topic.ID, "tab1")
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	meta, err := app.EnsureBlankTab("project", projectRoot)
+	if err != nil {
+		t.Fatalf("EnsureBlankTab: %v", err)
+	}
+	if got := meta.TopicTitle; got != defaultTopicTitle {
+		t.Fatalf("reused auto topic title = %q, want %q", got, defaultTopicTitle)
+	}
+	if got := loadTopicTitle(projectRoot, topic.ID); got != defaultTopicTitle {
+		t.Fatalf("stored title = %q, want %q", got, defaultTopicTitle)
+	}
+	if got := loadTopicTitleSource(projectRoot, topic.ID); got != topicTitleSourceAuto {
+		t.Fatalf("title source = %q, want auto", got)
+	}
+}
+
+func TestEnsureBlankTabPreservesReusableManualTopicTitle(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	app := NewApp()
+	topic, err := app.CreateTopic("project", projectRoot, "Manual title")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	tab := app.createTabEntryWithID("project", projectRoot, topic.ID, "tab1")
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	meta, err := app.EnsureBlankTab("project", projectRoot)
+	if err != nil {
+		t.Fatalf("EnsureBlankTab: %v", err)
+	}
+	if got := meta.TopicTitle; got != "Manual title" {
+		t.Fatalf("reused manual topic title = %q, want Manual title", got)
+	}
+	if got := loadTopicTitle(projectRoot, topic.ID); got != "Manual title" {
+		t.Fatalf("stored title = %q, want Manual title", got)
+	}
+	if got := loadTopicTitleSource(projectRoot, topic.ID); got != topicTitleSourceManual {
+		t.Fatalf("title source = %q, want manual", got)
+	}
+}
+
+func TestEnsureBlankTabKeepsActiveTabWhenTitleResetFails(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	app := NewApp()
+	topic, err := app.CreateTopic("project", projectRoot, "")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	if err := setTopicTitleWithSource(projectRoot, topic.ID, "Old auto title", topicTitleSourceAuto); err != nil {
+		t.Fatalf("set stale auto title: %v", err)
+	}
+	activeTab := app.createTabEntryWithID("global", globalTabWorkspaceRoot(), "", "active-tab")
+	reusableTab := app.createTabEntryWithID("project", projectRoot, topic.ID, "reusable-tab")
+	app.tabs[activeTab.ID] = activeTab
+	app.tabs[reusableTab.ID] = reusableTab
+	app.tabOrder = []string{activeTab.ID, reusableTab.ID}
+	app.activeTabID = activeTab.ID
+
+	titlePath := topicTitlesPath(projectRoot)
+	if err := os.Remove(titlePath); err != nil {
+		t.Fatalf("remove title file: %v", err)
+	}
+	if err := os.Mkdir(titlePath, 0o755); err != nil {
+		t.Fatalf("replace title file with directory: %v", err)
+	}
+
+	if _, err := app.EnsureBlankTab("project", projectRoot); err == nil {
+		t.Fatal("EnsureBlankTab succeeded, want title reset error")
+	}
+	if got := app.activeTabID; got != activeTab.ID {
+		t.Fatalf("active tab after failed title reset = %q, want %q", got, activeTab.ID)
 	}
 }
 

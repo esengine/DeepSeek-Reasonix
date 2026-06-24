@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,12 @@ import (
 )
 
 const closeWaitBudget = 5 * time.Second
+
+// defaultCallTimeout is the per-call deadline applied when the caller's context
+// carries no deadline of its own. Without this a slow or hung MCP server blocks
+// the agent's turn indefinitely because the turn context is normally cancelled
+// only by explicit user action.
+const defaultCallTimeout = 60 * time.Second
 
 // stdioTransport speaks newline-delimited JSON-RPC 2.0 over a subprocess's
 // stdin/stdout — the MCP stdio convention (one JSON message per line, no
@@ -35,20 +42,37 @@ type stdioTransport struct {
 	stdout *bufio.Reader
 	stderr *tailBuffer
 
-	callMu sync.Mutex // one in-flight request/response at a time over the shared pipe
+	callMu      sync.Mutex    // one in-flight request/response at a time over the shared pipe
+	callTimeout time.Duration // per-call deadline when ctx has no deadline; 0 means defaultCallTimeout
 
 	mu      sync.Mutex
 	nextID  int
 	pending map[int]chan rpcResponse
 	readErr error // set once the reader goroutine exits; further calls fail fast
 
-	waitOnce sync.Once
+	waitOnce    sync.Once
+	releaseSlot func() // returns a bounded instance slot (e.g. CodeGraph) on close; nil when unbounded
 }
 
 func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	if strings.TrimSpace(s.Command) == "" {
 		return nil, fmt.Errorf("stdio plugin %q: command is required", s.Name)
 	}
+	var releaseSlot func()
+	if isCodeGraphSpecName(s.Name) {
+		release, err := acquireCodeGraphSlot()
+		if err != nil {
+			return nil, err
+		}
+		releaseSlot = release
+	}
+	defer func() {
+		// Release the reserved slot if construction fails before the transport
+		// takes ownership of it (set to nil on the success path below).
+		if releaseSlot != nil {
+			releaseSlot()
+		}
+	}()
 	env := mergeEnv(os.Environ(), s.Env)
 	exe, env, err := resolveStdioExecutable(ctx, s, env)
 	if err != nil {
@@ -85,21 +109,50 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 		proc.LowPriorityStarted(cmd)
 	}
 	t := &stdioTransport{
-		name:    s.Name,
-		cmd:     cmd,
-		job:     job,
-		stdin:   stdin,
-		stdout:  bufio.NewReader(stdout),
-		stderr:  stderr,
-		pending: map[int]chan rpcResponse{},
+		name:        s.Name,
+		cmd:         cmd,
+		job:         job,
+		stdin:       stdin,
+		stdout:      bufio.NewReader(stdout),
+		stderr:      stderr,
+		pending:     map[int]chan rpcResponse{},
+		releaseSlot: releaseSlot,
 	}
+	releaseSlot = nil // ownership transferred to t; close() releases it
 	go t.readLoop()
 	return t, nil
 }
 
-var stdioShellPATH = defaultStdioShellPATH
+var stdioShellPATH = cachedShellPATH(defaultStdioShellPATH)
+
+// cachedShellPATH memoizes the first non-empty shell-PATH probe: the user's
+// interactive PATH is stable for the process, and resolveStdioExecutable now
+// probes for every stdio plugin, so caching avoids a login shell per server.
+func cachedShellPATH(probe func(context.Context) string) func(context.Context) string {
+	var (
+		mu     sync.Mutex
+		cached string
+		done   bool
+	)
+	return func(ctx context.Context) string {
+		mu.Lock()
+		defer mu.Unlock()
+		if done {
+			return cached
+		}
+		if p := probe(ctx); p != "" {
+			cached, done = p, true
+		}
+		return cached
+	}
+}
 
 func resolveStdioExecutable(ctx context.Context, s Spec, env []string) (string, []string, error) {
+	// Unconditionally enrich PATH with the user's shell PATH so every
+	// subprocess—including wrapper scripts that invoke npx, uvx, etc.—
+	// inherits the expected tool locations even under a GUI launch.
+	env = enrichStdioShellPATH(ctx, env)
+
 	if hasPathSeparator(s.Command) {
 		return s.Command, env, nil
 	}
@@ -108,17 +161,6 @@ func resolveStdioExecutable(ctx context.Context, s Spec, env []string) (string, 
 	}
 
 	currentPath, _ := envValue(env, "PATH")
-	if shellPath := strings.TrimSpace(stdioShellPATH(ctx)); shellPath != "" {
-		fallbackPath := mergePathLists(shellPath, currentPath)
-		if fallbackPath != currentPath {
-			fallbackEnv := setEnvValue(env, "PATH", fallbackPath)
-			if exe, ok := lookPathInEnv(s.Command, fallbackEnv); ok {
-				return exe, fallbackEnv, nil
-			}
-			env = fallbackEnv
-			currentPath = fallbackPath
-		}
-	}
 	if runtime.GOOS == "windows" {
 		fallbackPath := mergePathLists(windowsStdioFallbackPATH(env), currentPath)
 		if fallbackPath != currentPath {
@@ -133,6 +175,20 @@ func resolveStdioExecutable(ctx context.Context, s Spec, env []string) (string, 
 
 	return "", env, fmt.Errorf("stdio plugin %q: command %q not found on PATH; GUI launches and non-interactive sessions may not inherit your shell PATH. Use an absolute command path or set PATH in the MCP server env. PATH=%q",
 		s.Name, s.Command, currentPath)
+}
+
+// enrichStdioShellPATH probes the user's interactive login shell for its PATH
+// and prepends those directories to the current environment. The result is the
+// subprocess environment with a PATH that matches what the user sees in their
+// terminal, even when Reasonix was launched from the Finder / Dock / open(1).
+func enrichStdioShellPATH(ctx context.Context, env []string) []string {
+	currentPath, _ := envValue(env, "PATH")
+	if shellPath := strings.TrimSpace(stdioShellPATH(ctx)); shellPath != "" {
+		if fallbackPath := mergePathLists(shellPath, currentPath); fallbackPath != currentPath {
+			env = setEnvValue(env, "PATH", fallbackPath)
+		}
+	}
+	return env
 }
 
 func hasPathSeparator(s string) bool {
@@ -442,8 +498,23 @@ func (t *stdioTransport) call(ctx context.Context, method string, params any) (j
 		return nil, fmt.Errorf("plugin %q: write %s: %w", t.name, method, err)
 	}
 
+	var appliedTimeout time.Duration
+	if _, ok := ctx.Deadline(); !ok {
+		appliedTimeout = t.callTimeout
+		if appliedTimeout <= 0 {
+			appliedTimeout = defaultCallTimeout
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, appliedTimeout)
+		defer cancel()
+	}
+
 	select {
 	case <-ctx.Done():
+		if ctx.Err() == context.DeadlineExceeded {
+			slog.Warn("plugin: MCP call timed out",
+				"server", t.name, "method", method, "timeout", appliedTimeout)
+		}
 		return nil, ctx.Err()
 	case resp, ok := <-ch:
 		if !ok {
@@ -498,6 +569,9 @@ func (t *stdioTransport) wait() {
 // blocking forever) and reaps it under a budget so one wedged server can never
 // stall a boot or a turn teardown.
 func (t *stdioTransport) close() {
+	if t.releaseSlot != nil {
+		t.releaseSlot() // idempotent; frees the bounded CodeGraph instance slot
+	}
 	if t.stdin != nil {
 		_ = t.stdin.Close()
 	}

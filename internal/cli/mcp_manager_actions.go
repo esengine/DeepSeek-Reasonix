@@ -50,20 +50,6 @@ func (m chatTUI) connectSelectedMCP(v mcpServerView) (tea.Model, tea.Cmd) {
 		m.notice("mcp: no active session")
 		return m, nil
 	}
-	if v.BuiltIn && v.Name == "codegraph" {
-		cfg, err := config.Load()
-		if err != nil {
-			m.notice("mcp connect: " + err.Error())
-			return m, nil
-		}
-		if !cfg.Codegraph.Enabled {
-			cfg.Codegraph.Enabled = true
-			if err := cfg.Save(); err != nil {
-				m.notice("mcp connect: " + err.Error())
-				return m, nil
-			}
-		}
-	}
 	if v.Status == "connected" {
 		m.ctrl.DisconnectMCPServer(v.Name)
 	}
@@ -91,22 +77,6 @@ func (m chatTUI) disableSelectedMCP(v mcpServerView) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	persisted := false
-	if v.BuiltIn && v.Name == "codegraph" {
-		cfg, err := config.Load()
-		if err != nil {
-			m.notice("mcp disable: " + err.Error())
-			return m, nil
-		}
-		cfg.Codegraph.Enabled = false
-		if err := cfg.Save(); err != nil {
-			m.notice("mcp disable: " + err.Error())
-			return m, nil
-		}
-		persisted = true
-		if h := m.ctrl.Host(); h != nil {
-			h.ClearFailure(v.Name)
-		}
-	}
 	if m.mcpDisabled == nil {
 		m.mcpDisabled = map[string]bool{}
 	}
@@ -169,31 +139,6 @@ func (m chatTUI) applyMCPMode(tier string) (tea.Model, tea.Cmd) {
 		m.notice("mcp mode: " + err.Error())
 		return m, nil
 	}
-	if v.BuiltIn && v.Name == "codegraph" {
-		cfg.Codegraph.Enabled = true
-		cfg.Codegraph.Tier = ""
-		if err := cfg.Save(); err != nil {
-			m.notice("mcp mode: " + err.Error())
-			return m, nil
-		}
-		if m.mcpDisabled != nil {
-			delete(m.mcpDisabled, v.Name)
-		}
-		if m.ctrl != nil && !mcpConnected(m.ctrl, v.Name) {
-			if _, err := m.ctrl.ConnectConfiguredMCPServer(v.Name); err != nil {
-				recordMCPModeCodegraphFailure(m.ctrl, cfg.Codegraph, err)
-				m.notice("saved connection mode, but connect failed: " + err.Error())
-			}
-			m.host = m.ctrl.Host()
-		}
-		m.refreshMCPManager()
-		if m.mcp != nil {
-			m.mcp.stage = mcpStageDetail
-			m.mcp.selectName(v.Name)
-		}
-		m.notice("updated connection mode for " + v.Name)
-		return m, nil
-	}
 	found := false
 	var selected config.PluginEntry
 	for i := range cfg.Plugins {
@@ -218,7 +163,7 @@ func (m chatTUI) applyMCPMode(tier string) (tea.Model, tea.Cmd) {
 	if m.mcpDisabled != nil {
 		delete(m.mcpDisabled, v.Name)
 	}
-	if tier != "lazy" && m.ctrl != nil && !mcpConnected(m.ctrl, v.Name) {
+	if m.ctrl != nil && !mcpConnected(m.ctrl, v.Name) {
 		if _, err := m.ctrl.ConnectConfiguredMCPServer(v.Name); err != nil {
 			recordMCPModePluginFailure(m.ctrl, selected, err)
 			m.notice("saved connection mode, but connect failed: " + err.Error())
@@ -234,7 +179,7 @@ func (m chatTUI) applyMCPMode(tier string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func recordMCPModePluginFailure(ctrl *control.Controller, e config.PluginEntry, err error) {
+func recordMCPModePluginFailure(ctrl control.Capabilities, e config.PluginEntry, err error) {
 	if ctrl == nil || ctrl.Host() == nil || err == nil {
 		return
 	}
@@ -247,22 +192,6 @@ func recordMCPModePluginFailure(ctrl *control.Controller, e config.PluginEntry, 
 		Env:     exp.Env,
 		URL:     exp.URL,
 		Headers: exp.Headers,
-	}, err)
-}
-
-func recordMCPModeCodegraphFailure(ctrl *control.Controller, c config.CodegraphConfig, err error) {
-	if ctrl == nil || ctrl.Host() == nil || err == nil {
-		return
-	}
-	cmd := strings.TrimSpace(c.Path)
-	if cmd == "" {
-		cmd = "codegraph"
-	}
-	ctrl.Host().RecordFailure(plugin.Spec{
-		Name:    "codegraph",
-		Type:    "stdio",
-		Command: cmd,
-		Args:    []string{"serve", "--mcp"},
 	}, err)
 }
 
@@ -319,7 +248,7 @@ func (m chatTUI) clearSelectedMCPAuthentication() (tea.Model, tea.Cmd) {
 
 func (m chatTUI) clearMCPAuthentication(v mcpServerView) (tea.Model, tea.Cmd) {
 	if v.BuiltIn {
-		m.notice("codegraph is built in; it has no stored MCP authentication")
+		m.notice("managed MCP servers do not store authentication")
 		return m, nil
 	}
 	_, changed, _, err := config.ClearPluginAuthenticationInSource(v.Name)
@@ -361,12 +290,12 @@ func normalizeMCPTierForCLI(tier string) string {
 	switch strings.ToLower(strings.TrimSpace(tier)) {
 	case "eager":
 		return "eager"
-	case "background":
+	case "background", "lazy":
 		return "background"
 	case "":
 		return "background"
 	default:
-		return "lazy"
+		return "background"
 	}
 }
 
@@ -476,7 +405,7 @@ func mcpCanClearAuth(v mcpServerView) bool {
 	return mcpdiag.IsRemoteTransport(v.Transport)
 }
 
-func mcpConnected(ctrl *control.Controller, name string) bool {
+func mcpConnected(ctrl control.Capabilities, name string) bool {
 	if ctrl == nil || ctrl.Host() == nil {
 		return false
 	}

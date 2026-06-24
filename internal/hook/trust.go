@@ -21,9 +21,10 @@ type trustFile struct {
 	Projects map[string]bool `json:"projects"`
 }
 
-// TrustPath is ~/.reasonix/trust.json (homeDir overrides ~).
+// TrustPath is <Reasonix home>/trust.json (homeDir overrides ~ for tests and
+// legacy callers).
 func TrustPath(homeDir string) string {
-	return filepath.Join(home(homeDir), SettingsDirname, TrustFilename)
+	return filepath.Join(reasonixHome(homeDir), TrustFilename)
 }
 
 // IsTrusted reports whether projectRoot has been trusted to run its hooks.
@@ -56,8 +57,17 @@ func absRoot(root string) string {
 
 func readTrust(homeDir string) trustFile {
 	var tf trustFile
-	b, err := os.ReadFile(TrustPath(homeDir))
+	path := TrustPath(homeDir)
+	b, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			if legacy := legacyTrustPath(homeDir); legacy != "" {
+				if legacyBytes, legacyErr := os.ReadFile(legacy); legacyErr == nil {
+					_ = json.Unmarshal(legacyBytes, &tf)
+					return tf
+				}
+			}
+		}
 		return tf
 	}
 	_ = json.Unmarshal(b, &tf) // malformed → empty (untrusted), don't crash

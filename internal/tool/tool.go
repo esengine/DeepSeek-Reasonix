@@ -98,15 +98,16 @@ func LookupBuiltin(name string) (Tool, bool) {
 
 // Registry is a per-run set of tools: enabled built-ins plus plugin tools.
 type Registry struct {
-	mu    sync.RWMutex
-	tools map[string]Tool
-	order []string
-	canon map[string]json.RawMessage
+	mu        sync.RWMutex
+	tools     map[string]Tool
+	order     []string
+	canon     map[string]json.RawMessage
+	suspended map[string]bool
 }
 
 // NewRegistry returns an empty registry.
 func NewRegistry() *Registry {
-	return &Registry{tools: map[string]Tool{}, canon: map[string]json.RawMessage{}}
+	return &Registry{tools: map[string]Tool{}, canon: map[string]json.RawMessage{}, suspended: map[string]bool{}}
 }
 
 // Add inserts (or replaces) a tool, preserving first-seen order. The schema is
@@ -117,6 +118,11 @@ func (r *Registry) Add(t Tool) {
 	defer r.mu.Unlock()
 
 	name := t.Name()
+	for prefix := range r.suspended {
+		if strings.HasPrefix(name, prefix) {
+			return
+		}
+	}
 	if _, ok := r.tools[name]; !ok {
 		r.order = append(r.order, name)
 	}
@@ -163,6 +169,37 @@ func (r *Registry) RemovePrefix(prefix string) int {
 	}
 	r.order = kept
 	return removed
+}
+
+// SuspendPrefix unregisters matching tools and prevents future Add calls for
+// that prefix until ResumePrefix is called. It is used for per-session MCP
+// disables where an in-flight background handshake may otherwise swap tools back
+// into this registry after the user turned the server off.
+func (r *Registry) SuspendPrefix(prefix string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.suspended[prefix] = true
+	kept := r.order[:0]
+	removed := 0
+	for _, name := range r.order {
+		if strings.HasPrefix(name, prefix) {
+			delete(r.tools, name)
+			delete(r.canon, name)
+			removed++
+			continue
+		}
+		kept = append(kept, name)
+	}
+	r.order = kept
+	return removed
+}
+
+// ResumePrefix allows future Add calls for a previously suspended prefix.
+func (r *Registry) ResumePrefix(prefix string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.suspended, prefix)
 }
 
 // Get looks up a tool by name.

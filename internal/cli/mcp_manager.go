@@ -93,7 +93,7 @@ type mcpExternalDoneMsg struct {
 	err    error
 }
 
-var mcpTierChoices = []string{"background", "eager", "lazy"}
+var mcpTierChoices = []string{"background", "eager"}
 
 func (m *chatTUI) openMCPManager(name string) {
 	m.mcp = &mcpManager{stage: mcpStageList, snapshot: m.buildMCPSnapshot()}
@@ -303,9 +303,7 @@ func (m chatTUI) buildMCPSnapshot() mcpSnapshot {
 	}
 	configured := map[string]config.PluginEntry{}
 	var configuredEntries []config.PluginEntry
-	var loadedCfg *config.Config
 	if cfg != nil {
-		loadedCfg = cfg
 		configuredEntries = append(configuredEntries, cfg.Plugins...)
 		for _, p := range configuredEntries {
 			configured[p.Name] = p
@@ -316,14 +314,11 @@ func (m chatTUI) buildMCPSnapshot() mcpSnapshot {
 		for _, s := range m.host.Servers() {
 			v := mcpServerView{
 				Name: s.Name, Transport: fallbackText(s.Transport, "stdio"), Status: "connected",
-				BuiltIn: s.Name == "codegraph",
-				Tools:   s.Tools, Prompts: s.Prompts, Resources: s.Resources,
+				Tools: s.Tools, Prompts: s.Prompts, Resources: s.Resources,
 				ToolList: append([]plugin.ToolInfo(nil), s.ToolList...),
 			}
 			if p, ok := configured[s.Name]; ok {
 				v = withMCPPluginConfig(v, p)
-			} else if s.Name == "codegraph" && loadedCfg != nil {
-				v = withMCPCodegraphConfig(v, loadedCfg.Codegraph)
 			}
 			snap.servers = append(snap.servers, v)
 			seen[s.Name] = true
@@ -331,16 +326,24 @@ func (m chatTUI) buildMCPSnapshot() mcpSnapshot {
 		for _, f := range m.host.Failures() {
 			v := mcpServerView{
 				Name: f.Name, Transport: fallbackText(f.Transport, "stdio"), Status: "failed",
-				BuiltIn: f.Name == "codegraph",
-				Error:   f.Error,
+				Error: f.Error,
 			}
 			if p, ok := configured[f.Name]; ok {
 				v = withMCPPluginConfig(v, p)
-			} else if f.Name == "codegraph" && loadedCfg != nil {
-				v = withMCPCodegraphConfig(v, loadedCfg.Codegraph)
 			}
 			snap.servers = append(snap.servers, v)
 			seen[f.Name] = true
+		}
+		for _, name := range m.host.ConnectingServers() {
+			if seen[name] {
+				continue
+			}
+			v := mcpServerView{Name: name, Status: "initializing"}
+			if p, ok := configured[name]; ok {
+				v = withMCPPluginConfig(v, p)
+			}
+			snap.servers = append(snap.servers, v)
+			seen[name] = true
 		}
 	}
 	for _, p := range configuredEntries {
@@ -351,23 +354,12 @@ func (m chatTUI) buildMCPSnapshot() mcpSnapshot {
 		switch {
 		case m.mcpDisabled[p.Name] || !p.ShouldAutoStart():
 			v.Status = "disabled"
-		case p.ResolvedTier() == "background" || p.ResolvedTier() == "eager":
-			v.Status = "initializing"
 		default:
 			v.Status = "deferred"
 		}
 		v = withMCPPluginConfig(v, p)
 		snap.servers = append(snap.servers, v)
 		seen[p.Name] = true
-	}
-	if loadedCfg != nil && !seen["codegraph"] {
-		status := "initializing"
-		if m.mcpDisabled["codegraph"] || !loadedCfg.Codegraph.Enabled {
-			status = "disabled"
-		}
-		snap.servers = append(snap.servers, withMCPCodegraphConfig(mcpServerView{
-			Name: "codegraph", Status: status,
-		}, loadedCfg.Codegraph))
 	}
 	return snap
 }
@@ -395,17 +387,6 @@ func withMCPPluginConfig(v mcpServerView, p config.PluginEntry) mcpServerView {
 	auth := mcpdiag.DiagnoseAuth(v.Transport, v.Status, v.Error, v.URL, v.authConfigured)
 	v.AuthStatus = auth.Status
 	v.AuthURL = auth.URL
-	return v
-}
-
-func withMCPCodegraphConfig(v mcpServerView, c config.CodegraphConfig) mcpServerView {
-	v.Name = "codegraph"
-	v.Transport = "stdio"
-	v.BuiltIn = true
-	v.Configured = true
-	v.AutoStart = c.ShouldAutoStart()
-	v.Tier = c.ResolvedTier()
-	v.AuthStatus = mcpdiag.AuthNone
 	return v
 }
 

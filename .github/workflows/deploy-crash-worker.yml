@@ -1,0 +1,34 @@
+name: Deploy crash worker
+
+on:
+  push:
+    branches: [main-v2]
+    paths:
+      - 'workers/crash-report/**'
+      - '.github/workflows/deploy-crash-worker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-crash-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: workers/crash-report/package-lock.json
+      - name: Deploy
+        working-directory: workers/crash-report
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          npm ci
+          npx wrangler deploy

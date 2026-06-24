@@ -1,6 +1,6 @@
 // Run: tsx src/__tests__/send-failed.test.ts
 
-import { initialState, reducer } from "../lib/useController";
+import { initialState, reducer, replayPendingPromptsForActiveTab } from "../lib/useController";
 import type { WireEvent } from "../lib/types";
 
 let passed = 0;
@@ -24,6 +24,13 @@ eq(sent.items[0].kind === "user" && sent.items[0].text, "hello", "bubble carries
 eq(sent.running, true, "submit marks the turn running");
 eq(sent.pendingUser, "hello", "submit tracks the optimistic bubble");
 
+const hiddenSubmit = reducer({ ...initialState }, { type: "user", text: "display prompt", submitText: "hidden context\ndisplay prompt", seq: 0 });
+eq(
+  hiddenSubmit.items[0].kind === "user" && hiddenSubmit.items[0].submitText,
+  "hidden context\ndisplay prompt",
+  "optimistic user bubble preserves submit-only context",
+);
+
 const confirmed = reducer(sent, { type: "event", e: { kind: "text", text: "hi" } as WireEvent });
 eq(confirmed.items.filter((it) => it.kind === "user").length, 1, "first backend event confirms without duplicating");
 eq(confirmed.pendingUser, undefined, "confirmation clears the pending marker");
@@ -43,6 +50,39 @@ eq(lateFailure, confirmed, "send_failed after backend confirmation is a no-op");
 const unsent = reducer(sent, { type: "unsend" });
 eq(unsent.pendingUser, undefined, "unsend clears the pending marker");
 eq(unsent.discardTurn, true, "unsend discards the in-flight turn");
+
+const planApprovalFirst = reducer(
+  { ...initialState },
+  { type: "event", e: { kind: "approval_request", approval: { id: "plan-1", tool: "exit_plan_mode", subject: "Approve plan" } } as WireEvent },
+);
+const planTurnDoneAfter = reducer(planApprovalFirst, { type: "event", e: { kind: "turn_done" } as WireEvent });
+eq(
+  planTurnDoneAfter.approval?.id,
+  "plan-1",
+  "turn_done preserves out-of-order plan approval",
+);
+eq(planTurnDoneAfter.running, true, "preserved plan approval keeps the tab running");
+eq(planTurnDoneAfter.pendingPrompt, true, "preserved plan approval keeps the prompt gate active");
+
+let replayCalls = 0;
+replayPendingPromptsForActiveTab(undefined, () => {
+  replayCalls += 1;
+  return Promise.resolve();
+});
+eq(replayCalls, 0, "no active tab does not replay pending prompts");
+
+replayPendingPromptsForActiveTab("tab-a", () => {
+  replayCalls += 1;
+  return Promise.resolve();
+});
+eq(replayCalls, 1, "active tab switch replays pending prompts");
+
+replayPendingPromptsForActiveTab("tab-b", () => {
+  replayCalls += 1;
+  return Promise.reject(new Error("bridge unavailable"));
+});
+await new Promise((resolve) => setTimeout(resolve, 0));
+eq(replayCalls, 2, "replay bridge failures are swallowed by the tab-switch effect");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

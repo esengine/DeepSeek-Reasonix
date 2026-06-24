@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"reasonix/internal/control"
 	"reasonix/internal/proc"
 )
 
@@ -23,9 +26,18 @@ type workspaceChangeAccumulator struct {
 	hasGit     bool
 }
 
-func (a *App) WorkspaceChanges() WorkspaceChangesView {
-	out := WorkspaceChangesView{GitAvailable: true}
-	base, err := a.activeWorkspaceBase()
+func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
+	out := WorkspaceChangesView{Files: []WorkspaceChangeView{}, GitAvailable: true}
+	tabID = strings.TrimSpace(tabID)
+
+	workspaceRoot, ctrl, ok := a.workspaceChangesTarget(tabID)
+	if !ok {
+		out.GitAvailable = false
+		out.GitErr = fmt.Sprintf("tab %q not found", tabID)
+		return out
+	}
+
+	base, err := workspaceBaseFromRoot(workspaceRoot)
 	if err != nil {
 		out.GitAvailable = false
 		out.GitErr = err.Error()
@@ -46,9 +58,6 @@ func (a *App) WorkspaceChanges() WorkspaceChangesView {
 		return changes[path]
 	}
 
-	a.mu.RLock()
-	ctrl := a.activeCtrlLocked()
-	a.mu.RUnlock()
 	if ctrl != nil {
 		for _, meta := range ctrl.Checkpoints() {
 			for _, path := range meta.Paths {
@@ -103,11 +112,39 @@ func (a *App) WorkspaceChanges() WorkspaceChangesView {
 	return out
 }
 
+func (a *App) workspaceChangesTarget(tabID string) (string, control.SessionAPI, bool) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	var tab *WorkspaceTab
+	if tabID == "" {
+		tab = a.activeTabLocked()
+	} else {
+		tab = a.tabs[tabID]
+	}
+	if tab == nil {
+		return "", nil, tabID == ""
+	}
+	return tab.WorkspaceRoot, tab.Ctrl, true
+}
+
+func (a *App) workspaceBaseForTab(tabID string) (string, error) {
+	tabID = strings.TrimSpace(tabID)
+	workspaceRoot, _, ok := a.workspaceChangesTarget(tabID)
+	if !ok {
+		return "", fmt.Errorf("tab %q not found", tabID)
+	}
+	return workspaceBaseFromRoot(workspaceRoot)
+}
+
 // workspaceGit builds a console-hidden git probe: CREATE_NO_WINDOW so git's own
 // children inherit the invisible console, fsmonitor/auto-maintenance off so a
 // probe never spawns a background daemon that opens a console of its own (#3906).
 func workspaceGit(args ...string) *exec.Cmd {
-	cmd := exec.Command("git", append([]string{"-c", "core.fsmonitor=false", "-c", "maintenance.auto=false"}, args...)...)
+	return workspaceGitCommand(context.Background(), args...)
+}
+
+func workspaceGitCommand(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-c", "core.fsmonitor=false", "-c", "maintenance.auto=false"}, args...)...)
 	proc.HideWindow(cmd)
 	return cmd
 }
@@ -192,7 +229,10 @@ func workspaceRelPathFromGitStatus(repoRoot, base, path string) string {
 // at base, or an empty string when base is not inside a git repository or when
 // git is unavailable.
 func workspaceGitBranch(base string) string {
-	cmd := workspaceGit("-C", base, "branch", "--show-current")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cmd := workspaceGitCommand(ctx, "-C", base, "branch", "--show-current")
 	raw, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -201,7 +241,7 @@ func workspaceGitBranch(base string) string {
 		return branch
 	}
 
-	headCmd := workspaceGit("-C", base, "rev-parse", "--short", "HEAD")
+	headCmd := workspaceGitCommand(ctx, "-C", base, "rev-parse", "--short", "HEAD")
 	raw, err = headCmd.Output()
 	if err != nil {
 		return ""
@@ -258,8 +298,8 @@ type GitCommitDetailView struct {
 	Files []string `json:"files,omitempty"`
 }
 
-func (a *App) WorkspaceGitHistory(path string) ([]GitCommitView, error) {
-	base, err := a.activeWorkspaceBase()
+func (a *App) WorkspaceGitHistory(tabID string, path string) ([]GitCommitView, error) {
+	base, err := a.workspaceBaseForTab(tabID)
 	if err != nil {
 		return nil, err
 	}
@@ -289,8 +329,8 @@ func (a *App) WorkspaceGitHistory(path string) ([]GitCommitView, error) {
 	return out, nil
 }
 
-func (a *App) WorkspaceGitCommitDetail(hash string, path string) (GitCommitDetailView, error) {
-	base, err := a.activeWorkspaceBase()
+func (a *App) WorkspaceGitCommitDetail(tabID string, hash string, path string) (GitCommitDetailView, error) {
+	base, err := a.workspaceBaseForTab(tabID)
 	if err != nil {
 		return GitCommitDetailView{}, err
 	}

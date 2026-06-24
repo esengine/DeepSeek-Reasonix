@@ -159,6 +159,69 @@ func TestResumeDispatchSwitchesAndReplays(t *testing.T) {
 	}
 }
 
+// TestResumeWhileScrolledUpPinsViewportToBottom covers the session-switch
+// regression where a stale scroll offset was preserved if the user had read
+// back in the old transcript before resuming another session.
+func TestResumeWhileScrolledUpPinsViewportToBottom(t *testing.T) {
+	dir := t.TempDir()
+	active := agent.NewSession("sys")
+	for i := 0; i < 18; i++ {
+		active.Add(provider.Message{Role: provider.RoleUser, Content: "active prompt " + strconv.Itoa(i)})
+	}
+	exec := agent.New(nil, nil, active, agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{Executor: exec, SessionDir: dir, Label: "test"})
+	activePath := filepath.Join(dir, "active.jsonl")
+	ctrl.SetSessionPath(activePath)
+	if err := ctrl.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+
+	otherPath := filepath.Join(dir, "other.jsonl")
+	saveTestSession(t, otherPath, "OTHER-SESSION-PROMPT")
+
+	target := 0
+	for i, s := range recentSessions(dir) {
+		if s.Path == otherPath {
+			target = i + 1
+		}
+	}
+	if target == 0 {
+		t.Fatal("other session not listed by recentSessions")
+	}
+
+	adv := func(m chatTUI, msg tea.Msg) chatTUI {
+		n, _ := m.Update(msg)
+		return n.(chatTUI)
+	}
+
+	cur := adv(newChatTUI(ctrl, "", make(chan event.Event, 1), 80), tea.WindowSizeMsg{Width: 80, Height: 8})
+	if !cur.viewport.AtBottom() {
+		t.Fatal("initial resumed history should start at the bottom")
+	}
+
+	cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if cur.viewport.AtBottom() {
+		t.Fatal("wheel-up should move the old transcript away from the bottom")
+	}
+
+	cur.input.SetValue("/resume " + strconv.Itoa(target))
+	cur = adv(cur, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if got := ctrl.SessionPath(); got != otherPath {
+		t.Fatalf("session path = %q, want %q", got, otherPath)
+	}
+	out := strings.Join(cur.transcript, "\n")
+	if !strings.Contains(out, "OTHER-SESSION-PROMPT") {
+		t.Fatalf("transcript should replay the resumed session:\n%s", out)
+	}
+	if strings.Contains(out, "active prompt") {
+		t.Fatalf("transcript should not retain the previous session after resume:\n%s", out)
+	}
+	if !cur.viewport.AtBottom() {
+		t.Fatalf("resume while scrolled up should pin to bottom, AtBottom=%v, YOffset=%d", cur.viewport.AtBottom(), cur.viewport.YOffset())
+	}
+}
+
 func saveTestSession(t *testing.T, path, prompt string) {
 	t.Helper()
 	s := agent.NewSession("sys")

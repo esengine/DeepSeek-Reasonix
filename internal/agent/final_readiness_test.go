@@ -19,6 +19,7 @@ func readinessLedger(receipts ...evidence.Receipt) *evidence.Ledger {
 func TestFinalReadinessFailureBranches(t *testing.T) {
 	check := instruction.VerifyCheck{Command: "go test ./...", SourcePath: "AGENTS.md", Line: 3}
 	writer := evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Paths: []string{"a.go"}}
+	readOnly := evidence.Receipt{ToolName: "read_file", Success: true, Read: true, Paths: []string{"a.go"}}
 	checkAfter := evidence.Receipt{ToolName: "bash", Success: true, Command: "go test ./..."}
 	todo := evidence.Receipt{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{{Content: "edit", Status: "in_progress"}}}
 	completeAfter := evidence.Receipt{ToolName: "complete_step", Success: true, Step: "edit"}
@@ -33,7 +34,8 @@ func TestFinalReadinessFailureBranches(t *testing.T) {
 	}{
 		{"nil evidence never gates", []instruction.VerifyCheck{check}, nil, true, ""},
 		{"no writer never gates", []instruction.VerifyCheck{check}, readinessLedger(checkAfter), true, ""},
-		{"incomplete todo without writer is reported", nil, readinessLedger(todo), false, "latest successful todo_write"},
+		{"todo-only turn may end with incomplete list", nil, readinessLedger(todo), true, ""},
+		{"read-only context plus todo may end with incomplete list", nil, readinessLedger(readOnly, todo), true, ""},
 		{"completed todo without writer satisfies", nil, readinessLedger(doneTodo), true, ""},
 		{"writer without checks or todo never gates", nil, readinessLedger(writer), true, ""},
 		{"missing project check after writer is reported", []instruction.VerifyCheck{check}, readinessLedger(checkAfter, writer), false, "go test ./..."},
@@ -77,7 +79,8 @@ func TestFinalReadinessAllowsIncompleteTodosInPlanMode(t *testing.T) {
 
 func TestFinalReadinessCheckAuditsIncompleteTodos(t *testing.T) {
 	todo := evidence.Receipt{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{{Content: "edit", Status: "in_progress"}}}
-	a := &Agent{evidence: readinessLedger(todo)}
+	writer := evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Paths: []string{"a.go"}}
+	a := &Agent{evidence: readinessLedger(writer, todo)}
 
 	got := a.finalReadinessCheck()
 	if !got.applies {
@@ -92,5 +95,20 @@ func TestFinalReadinessCheckAuditsIncompleteTodos(t *testing.T) {
 	audit := got.audit(evidence.ReadinessBlocked, false)
 	if audit.IncompleteTodos != 1 {
 		t.Fatalf("audit.IncompleteTodos = %d, want 1", audit.IncompleteTodos)
+	}
+}
+
+func TestFinalReadinessRetryMessageKeepsUserChoicesInteractive(t *testing.T) {
+	msg := finalReadinessRetryMessage("latest successful todo_write still has incomplete items: Ask user to review the doc: in_progress")
+	lower := strings.ToLower(msg)
+	for _, want := range []string{
+		"ask tool",
+		"wait for its tool result",
+		"do not ask in prose",
+		"do not claim the user answered",
+	} {
+		if !strings.Contains(lower, want) {
+			t.Fatalf("finalReadinessRetryMessage() missing %q:\n%s", want, msg)
+		}
 	}
 }

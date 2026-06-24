@@ -1,14 +1,21 @@
 # Reasonix configuration.
-# Resolution order: flag > ./reasonix.toml > ~/.config/reasonix/config.toml > built-in defaults.
-# Secrets come from the environment via api_key_env; never put keys here.
+# Resolution order: flag > ./reasonix.toml > ~/.reasonix/config.toml > built-in defaults.
+# Fields marked user/global only are not overridden by ./reasonix.toml.
+# Provider entries name secrets via api_key_env; saved key values live in
+# Reasonix's global ~/.reasonix/.env. Never put API key values here.
 
 default_model = "deepseek"   # a provider name (→ its default model) or "provider/model"
 # language      = "zh"   # ui language; empty = auto-detect from $LANG / $REASONIX_LANG
 
 [ui]
 theme = "auto"   # auto|dark|light; controls CLI colors only; REASONIX_THEME can override per run
-# theme_style = "graphite"   # graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
+# theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 # shortcut_layout = "desktop"   # classic|desktop; compatibility setting; Shift+Tab toggles Plan, Ctrl+Y toggles YOLO
+
+[desktop]
+layout_style = "classic"   # classic|workbench|creation; desktop layout style
+# theme = "auto"   # desktop only: auto|dark|light
+# theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 
 [notifications]
 enabled = false   # system notifications for CLI chat/run; default off
@@ -23,15 +30,16 @@ Use the provided tools to read and write files and run shell commands.
 Principles: understand the request before acting; verify with tools instead of
 guessing; keep changes minimal and correct; briefly summarize what you did."""
 # system_prompt_file = "prompts/system.md"   # overrides system_prompt when set
-max_steps         = 0    # executor tool-call rounds; 0 = no limit
-planner_max_steps = 12   # planner read-only tool-call rounds; 0 = no limit
+max_steps         = 0    # user/global only; executor tool-call rounds; 0 = no limit
+planner_max_steps = 0    # user/global only; planner read-only tool-call rounds; 0 = no limit
 temperature       = 0.0
-auto_plan         = "off"   # off|on; off keeps plan mode manual
+auto_plan         = "off"   # user-level only; ignored in project reasonix.toml
+# reasoning_language = "auto"   # visible reasoning text: auto|zh|en
 # auto_plan_classifier = "deepseek-flash"   # optional; only used for borderline tasks
 soft_compact_ratio  = 0.5   # notice only; keeps the cache-first prefix intact
 compact_ratio       = 0.8   # try compacting when prompt reaches this fraction
 compact_force_ratio = 0.9   # force compacting at this high-water mark
-# planner_model = "mimo-pro"   # optional: enable two-model collaboration
+# planner_model = "deepseek-pro"   # optional: enable two-model collaboration
 # subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }   # per-skill overrides
 # output_style = "explanatory"   # persona/tone folded into the prompt: explanatory | learning | concise,
@@ -48,30 +56,14 @@ models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default     = "deepseek-v4-flash"   # optional; defaults to the first of `models`
 api_key_env = "DEEPSEEK_API_KEY"
 context_window = 1000000
-price       = { cache_hit = 0.02, input = 1, output = 2, currency = "¥" }   # per 1M tokens
+# Official DeepSeek providers seed RMB prices by default.
+# Set prices explicitly only when you want to pin a currency/rate.
+# prices = { "deepseek-v4-flash" = { cache_hit = 0.02, input = 1, output = 2, currency = "¥" }, "deepseek-v4-pro" = { cache_hit = 0.025, input = 3, output = 6, currency = "¥" } }   # per 1M tokens
 # DeepSeek thinking is always on; effort: high | max. Omit for auto (provider default).
 effort      = "high"
 
-# A single-model provider still works (use `model = "..."`) — pick this form when a
-# model needs its own base_url / context_window / price (e.g. the two MiMo SKUs
-# below have different context windows).
-price       = { cache_hit = 0.025, input = 3, output = 6, currency = "¥" }   # per 1M tokens
-
-[[providers]]
-name           = "mimo-pro"
-kind           = "openai"
-base_url       = "https://api.xiaomimimo.com/v1"
-model          = "mimo-v2.5-pro"   # thinking-mode on by default; reasoning_content rendered dim above the answer
-api_key_env    = "MIMO_API_KEY"
-context_window = 1000000
-
-[[providers]]
-name           = "mimo-flash"
-kind           = "openai"
-base_url       = "https://api.xiaomimimo.com/v1"
-model          = "mimo-v2-flash"   # thinking-mode off by default; cheaper / faster
-api_key_env    = "MIMO_API_KEY"
-context_window = 65536
+# A single-model provider still works (use `model = "..."`) — pick this form when
+# a model needs its own base_url / context_window / price.
 
 # Custom /effort levels for a provider. When supported_efforts is set, the
 # /effort command exposes these levels; default_effort is what "/effort auto"
@@ -79,14 +71,14 @@ context_window = 65536
 # (DeepSeek models: high|max; Anthropic: low|medium|high|xhigh|max). DeepSeek
 # models behind a proxy are detected by model name; set reasoning_protocol =
 # "none" to disable that or "openai" to force ordinary reasoning_effort.
-# Other kinds (e.g. mimo-pro) don't expose /effort unless you opt in here.
+# Other OpenAI-compatible providers don't expose /effort unless you opt in here.
 #
 # [[providers]]
-# name           = "mimo-custom"
+# name           = "openai-compatible-custom"
 # kind           = "openai"
-# base_url       = "https://token-plan-cn.xiaomimimo.com/v1"
-# model          = "mimo-v2.5-pro"
-# api_key_env    = "MIMO_API_KEY"
+# base_url       = "https://api.example.com/v1"
+# model          = "example-reasoning-model"
+# api_key_env    = "EXAMPLE_API_KEY"
 # reasoning_protocol = "openai"   # auto|deepseek|openai|none
 # supported_efforts = ["low", "medium", "high"]
 # default_effort    = "high"
@@ -111,16 +103,8 @@ effort         = "high"
 enabled = []   # empty = all built-in tools
 bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
 
-# CodeGraph code intelligence (symbol/call-graph search via tree-sitter + SQLite),
-# a built-in MCP server giving the agent codegraph_* search / context / explore /
-# trace / node tools. Off by default for first-run sessions. Once enabled, the
-# runtime is fetched into a per-version cache when missing (auto_install);
-# .codegraph/ is then initialised (fast) and CodeGraph's daemon indexes in the
-# background once enabled.
-# [codegraph]
-# enabled      = false
-# auto_install = true
-# path         = ""   # empty = cache, then PATH, then a bundle beside reasonix
+[tools.background_jobs]
+stalled_warning_seconds = 900   # warn once per background job after this many quiet seconds; 0 disables
 
 # Skills are invokable playbooks (SKILL.md / <name>.md with frontmatter), found
 # under .reasonix/skills, .agents/skills, .agent/skills, .claude/skills (project)
@@ -133,13 +117,14 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # disabled_skills = ["review"]                  # hide from prompt, slash invocation, and skill tools
 
 # Hooks run shell commands around the loop (PreToolUse / PostToolUse /
-# UserPromptSubmit / Stop). They are NOT configured here — put them in
+# PermissionRequest / UserPromptSubmit / Stop). They are NOT configured here — put them in
 # settings.json: ~/.reasonix/settings.json (global, always on) and
 # <project>/.reasonix/settings.json (project, runs only after `/hooks trust`).
 # Exit 0 = pass, exit 2 = block (PreToolUse / UserPromptSubmit only). Example
 # ~/.reasonix/settings.json:
 #   { "hooks": {
 #       "PreToolUse":  [ { "match": "bash", "command": "my-guard.sh" } ],
+#       "PermissionRequest": [ { "match": "bash", "command": "notify-send 'approval needed'" } ],
 #       "PostToolUse": [ { "match": ".*file", "command": "gofmt -w ." } ],
 #       "Stop":        [ { "command": "notify-send 'turn done'" } ] } }
 
@@ -178,6 +163,7 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # enabled        = false
 # app_id         = ""
 # app_secret_env  = "QQ_BOT_APP_SECRET"
+# sandbox        = false   # true 使用 QQ 沙箱 API / gateway
 #
 # [bot.feishu]
 # enabled             = false
@@ -193,3 +179,10 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # account_id = "default"
 # token_env = "WEIXIN_BOT_TOKEN"
 # api_base  = "https://ilinkai.weixin.qq.com"   # Tencent iLink Bot API base URL
+
+[serve]
+# Authentication for the HTTP serve frontend (reasonix serve).
+# auth_mode = "none"      # none | token | password
+# token      = ""          # pre-shared token for auth_mode = "token" (auto-generated if empty)
+# password_hash = ""       # bcrypt hash for auth_mode = "password". Generate with: reasonix serve --hash-password <password>
+# behind_proxy = false      # set true when behind a trusted reverse proxy (nginx, Caddy, etc.) that sets X-Forwarded-* headers

@@ -240,6 +240,34 @@ func TestStoreArchiveReturnsArchivePath(t *testing.T) {
 	}
 }
 
+func TestStoreArchiveFlushesStaleIndexWithoutFile(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if _, err := s.Save(Memory{Name: "beta", Description: "keep", Type: TypeProject, Body: "body"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := flushIndexIn(s.Dir, map[string]string{
+		"alpha": "- [alpha](alpha.md) — stale",
+		"beta":  "- [beta](beta.md) — keep",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	archive, err := s.Archive("alpha")
+	if err != nil {
+		t.Fatalf("Archive stale index: %v", err)
+	}
+	if archive != "" {
+		t.Fatalf("Archive should return no path for missing file, got %q", archive)
+	}
+	idx := s.Index()
+	if strings.Contains(idx, "alpha.md") {
+		t.Fatalf("stale index line should be removed:\n%s", idx)
+	}
+	if !strings.Contains(idx, "beta.md") {
+		t.Fatalf("unrelated index line should remain:\n%s", idx)
+	}
+}
+
 func TestStoreListArchivedNewestFirst(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
 	dir := filepath.Join(s.Dir, ".archive")
@@ -295,7 +323,7 @@ func TestNormalizeType(t *testing.T) {
 
 // TestStoreForSlug ensures the project path becomes one filesystem-safe segment.
 func TestStoreForSlug(t *testing.T) {
-	s := StoreFor("/home/me/.config/reasonix", "/Users/me/proj")
+	s := StoreFor("/home/me/.reasonix", "/Users/me/proj")
 	if strings.Count(filepath.Base(filepath.Dir(s.Dir)), "/") != 0 {
 		t.Fatalf("slug should have no separators: %s", s.Dir)
 	}
@@ -313,5 +341,378 @@ func TestDisabledStoreIsNoOp(t *testing.T) {
 	}
 	if _, err := s.Save(Memory{Name: "x", Description: "d", Body: "b"}); err == nil {
 		t.Fatal("disabled store Save should error, not silently drop")
+	}
+}
+
+// TestStoreGlobalAndProject verifies that TypeUser/TypeFeedback memories are
+// routed to GlobalDir, TypeProject/TypeReference stay in Dir, List() merges
+// both, and Delete() removes from the correct directory.
+func TestStoreGlobalAndProject(t *testing.T) {
+	dir := t.TempDir()
+	s := Store{
+		Dir:       filepath.Join(dir, "project", "memory"),
+		GlobalDir: filepath.Join(dir, "global"),
+	}
+
+	// TypeUser → GlobalDir
+	pUser, err := s.Save(Memory{Name: "prefers-tabs", Description: "user pref", Type: TypeUser, Body: "use tabs"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(pUser, s.GlobalDir) {
+		t.Fatalf("TypeUser should go to GlobalDir, got %s", pUser)
+	}
+
+	// TypeProject → Dir
+	pProj, err := s.Save(Memory{Name: "build-target", Description: "build target", Type: TypeProject, Body: "go build"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(pProj, s.Dir) {
+		t.Fatalf("TypeProject should go to Dir, got %s", pProj)
+	}
+
+	// TypeFeedback → GlobalDir
+	pFb, err := s.Save(Memory{Name: "no-emoji", Description: "no emoji", Type: TypeFeedback, Body: "skip emoji"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(pFb, s.GlobalDir) {
+		t.Fatalf("TypeFeedback should go to GlobalDir, got %s", pFb)
+	}
+
+	// TypeReference → Dir
+	pRef, err := s.Save(Memory{Name: "api-docs", Description: "api docs", Type: TypeReference, Body: "see docs"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(pRef, s.Dir) {
+		t.Fatalf("TypeReference should go to Dir, got %s", pRef)
+	}
+
+	// List merges both directories
+	list := s.List()
+	if len(list) != 4 {
+		t.Fatalf("want 4 memories, got %d", len(list))
+	}
+
+	// Index merges both directories
+	idx := s.Index()
+	if !strings.Contains(idx, "prefers-tabs") || !strings.Contains(idx, "build-target") {
+		t.Fatalf("index should contain both global and project memories:\n%s", idx)
+	}
+
+	// Delete removes from the correct directory
+	if err := s.Delete("prefers-tabs"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(pUser); !os.IsNotExist(err) {
+		t.Fatal("global memory file should be gone after delete")
+	}
+
+	// List after delete
+	list2 := s.List()
+	if len(list2) != 3 {
+		t.Fatalf("want 3 memories after delete, got %d", len(list2))
+	}
+
+	// Index should not duplicate # Memory headers (Block() adds its own).
+	idx2 := s.Index()
+	if strings.Count(idx2, "# Memory") != 0 {
+		t.Fatalf("Index should have 0 # Memory headers (Block() adds one), got %d:\n%s", strings.Count(idx2, "# Memory"), idx2)
+	}
+}
+
+func TestStoreSaveRemovesStaleCopyWhenScopeChanges(t *testing.T) {
+	dir := t.TempDir()
+	s := Store{
+		Dir:       filepath.Join(dir, "project", "memory"),
+		GlobalDir: filepath.Join(dir, "global"),
+	}
+
+	globalPath, err := s.Save(Memory{Name: "same-name", Description: "old global", Type: TypeUser, Body: "old body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectPath, err := s.Save(Memory{Name: "same-name", Description: "new project", Type: TypeProject, Body: "new body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(projectPath, s.Dir) {
+		t.Fatalf("project-scoped rewrite should land in project dir, got %s", projectPath)
+	}
+	if _, err := os.Stat(globalPath); !os.IsNotExist(err) {
+		t.Fatalf("old global active file should be archived away, stat err = %v", err)
+	}
+	globalIndex, err := os.ReadFile(filepath.Join(s.GlobalDir, indexFile))
+	if err != nil {
+		t.Fatalf("read global index: %v", err)
+	}
+	if strings.Contains(string(globalIndex), "same-name.md") {
+		t.Fatalf("old global index line should be removed:\n%s", globalIndex)
+	}
+
+	list := s.List()
+	if len(list) != 1 {
+		t.Fatalf("List() = %+v, want one active copy", list)
+	}
+	if list[0].Type != TypeProject || !strings.Contains(list[0].Body, "new body") {
+		t.Fatalf("active copy = %+v, want new project body", list[0])
+	}
+	idx := s.Index()
+	if strings.Contains(idx, "old global") || !strings.Contains(idx, "new project") {
+		t.Fatalf("merged index should reflect new scope only:\n%s", idx)
+	}
+}
+
+// TestStoreForInitializesGlobalDir ensures StoreFor sets GlobalDir alongside Dir.
+func TestStoreForInitializesGlobalDir(t *testing.T) {
+	s := StoreFor("/home/me/.reasonix", "/Users/me/proj")
+	if s.GlobalDir == "" {
+		t.Fatal("StoreFor should set GlobalDir")
+	}
+	if !strings.Contains(s.GlobalDir, "memory") || !strings.Contains(s.GlobalDir, "global") {
+		t.Fatalf("unexpected GlobalDir: %s", s.GlobalDir)
+	}
+	if s.GlobalDir == s.Dir {
+		t.Fatal("GlobalDir and Dir should be different paths")
+	}
+}
+
+// TestDirForRoutesCorrectly verifies DirFor routes user/feedback to GlobalDir
+// and everything else to Dir.
+func TestDirForRoutesCorrectly(t *testing.T) {
+	dir := t.TempDir()
+	s := Store{
+		Dir:       filepath.Join(dir, "project", "memory"),
+		GlobalDir: filepath.Join(dir, "global"),
+	}
+	if got := s.DirFor(TypeUser); got != s.GlobalDir {
+		t.Errorf("TypeUser: got %q, want %q", got, s.GlobalDir)
+	}
+	if got := s.DirFor(TypeFeedback); got != s.GlobalDir {
+		t.Errorf("TypeFeedback: got %q, want %q", got, s.GlobalDir)
+	}
+	if got := s.DirFor(TypeProject); got != s.Dir {
+		t.Errorf("TypeProject: got %q, want %q", got, s.Dir)
+	}
+	if got := s.DirFor(TypeReference); got != s.Dir {
+		t.Errorf("TypeReference: got %q, want %q", got, s.Dir)
+	}
+}
+
+// TestDirForFallsBackWhenNoGlobalDir ensures DirFor falls back to Dir when
+// GlobalDir is empty.
+func TestDirForFallsBackWhenNoGlobalDir(t *testing.T) {
+	dir := t.TempDir()
+	s := Store{Dir: filepath.Join(dir, "memory")}
+	if got := s.DirFor(TypeUser); got != s.Dir {
+		t.Errorf("TypeUser without GlobalDir should fall back to Dir, got %q", got)
+	}
+}
+
+// TestStoreDeleteRemovesFromAllDirs verifies that after a type-routing migration
+// (same name in both GlobalDir and Dir), Delete removes both copies so the
+// memory truly disappears.
+func TestStoreDeleteRemovesFromAllDirs(t *testing.T) {
+	dir := t.TempDir()
+	s := Store{
+		Dir:       filepath.Join(dir, "project", "memory"),
+		GlobalDir: filepath.Join(dir, "global"),
+	}
+
+	// Simulate migration: write a TypeUser memory directly into both dirs.
+	name := "prefers-tabs"
+	for _, d := range []string{s.Dir, s.GlobalDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		m := Memory{Name: name, Description: "user pref", Type: TypeUser, Body: "use tabs"}
+		if err := os.WriteFile(filepath.Join(d, name+".md"), []byte(render(m, name)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := reindexIn(d, name, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Both copies should appear, but deduplicated.
+	list := s.List()
+	if len(list) != 1 {
+		t.Fatalf("want 1 deduplicated memory, got %d", len(list))
+	}
+
+	// Delete should remove from BOTH directories.
+	if err := s.Delete(name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(s.GlobalDir, name+".md")); !os.IsNotExist(err) {
+		t.Fatal("global copy should be gone after delete")
+	}
+	if _, err := os.Stat(filepath.Join(s.Dir, name+".md")); !os.IsNotExist(err) {
+		t.Fatal("project copy should be gone after delete")
+	}
+
+	list2 := s.List()
+	if len(list2) != 0 {
+		t.Fatalf("want 0 memories after delete, got %d", len(list2))
+	}
+	if idx := s.Index(); idx != "" {
+		t.Fatalf("Index() should be empty after deleting all entries, got:\n%s", idx)
+	}
+}
+
+// TestStoreIndexDeduplicatesAcrossDirs verifies Index() does not emit duplicate
+// lines when the same memory name exists in both GlobalDir and Dir.
+func TestStoreIndexDeduplicatesAcrossDirs(t *testing.T) {
+	dir := t.TempDir()
+	s := Store{
+		Dir:       filepath.Join(dir, "project", "memory"),
+		GlobalDir: filepath.Join(dir, "global"),
+	}
+
+	// Write the same memory into both dirs (migration scenario).
+	name := "prefers-tabs"
+	for _, d := range []string{s.GlobalDir, s.Dir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		m := Memory{Name: name, Description: "user pref", Type: TypeUser, Body: "use tabs"}
+		if err := os.WriteFile(filepath.Join(d, name+".md"), []byte(render(m, name)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := reindexIn(d, name, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	idx := s.Index()
+	count := strings.Count(idx, name+".md")
+	if count != 1 {
+		t.Fatalf("want exactly 1 index line for %s, got %d:\n%s", name, count, idx)
+	}
+	if strings.Count(idx, "# Memory") != 0 {
+		t.Fatalf("merged index should have 0 # Memory headers (Block() adds one), got %d:\n%s", strings.Count(idx, "# Memory"), idx)
+	}
+}
+
+// TestStoreSaveVerifiesIndexDir verifies that Save writes the MEMORY.md
+// index to the correct directory for the memory type.
+func TestStoreSaveVerifiesIndexDir(t *testing.T) {
+	dir := t.TempDir()
+	s := Store{
+		Dir:       filepath.Join(dir, "project", "memory"),
+		GlobalDir: filepath.Join(dir, "global"),
+	}
+
+	// TypeUser → GlobalDir
+	if _, err := s.Save(Memory{Name: "user-pref", Description: "d", Type: TypeUser, Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	gb, _ := os.ReadFile(filepath.Join(s.GlobalDir, indexFile))
+	pb, _ := os.ReadFile(filepath.Join(s.Dir, indexFile))
+	if !strings.Contains(string(gb), "user-pref") {
+		t.Fatal("GlobalDir MEMORY.md should contain user-pref")
+	}
+	if strings.Contains(string(pb), "user-pref") {
+		t.Fatal("Dir MEMORY.md should NOT contain user-pref (it went to GlobalDir)")
+	}
+
+	// TypeProject → Dir
+	if _, err := s.Save(Memory{Name: "build-cmd", Description: "d", Type: TypeProject, Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	pb2, _ := os.ReadFile(filepath.Join(s.Dir, indexFile))
+	if !strings.Contains(string(pb2), "build-cmd") {
+		t.Fatal("Dir MEMORY.md should contain build-cmd")
+	}
+	gb2, _ := os.ReadFile(filepath.Join(s.GlobalDir, indexFile))
+	if strings.Contains(string(gb2), "build-cmd") {
+		t.Fatal("GlobalDir MEMORY.md should NOT contain build-cmd (it went to Dir)")
+	}
+}
+
+// TestStoreDeleteFlushesIndexPerDir verifies that Delete calls flushIndexIn
+// for each directory where the memory file existed.
+func TestStoreDeleteFlushesIndexPerDir(t *testing.T) {
+	dir := t.TempDir()
+	s := Store{
+		Dir:       filepath.Join(dir, "project", "memory"),
+		GlobalDir: filepath.Join(dir, "global"),
+	}
+
+	// Write to both dirs manually (migration scenario).
+	name := "prefers-tabs"
+	for _, d := range []string{s.GlobalDir, s.Dir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		m := Memory{Name: name, Description: "d", Type: TypeUser, Body: "b"}
+		if err := os.WriteFile(filepath.Join(d, name+".md"), []byte(render(m, name)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := reindexIn(d, name, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := s.Delete(name); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify both MEMORY.md files have the entry removed.
+	gb, _ := os.ReadFile(filepath.Join(s.GlobalDir, indexFile))
+	pb, _ := os.ReadFile(filepath.Join(s.Dir, indexFile))
+	if strings.Contains(string(gb), name+".md") {
+		t.Fatalf("GlobalDir MEMORY.md should not reference %s after delete:\n%s", name, gb)
+	}
+	if strings.Contains(string(pb), name+".md") {
+		t.Fatalf("Dir MEMORY.md should not reference %s after delete:\n%s", name, pb)
+	}
+
+	// Index() should return "" (no entries, no orphaned header).
+	idx := s.Index()
+	if idx != "" {
+		t.Fatalf("Index() should return empty after deleting all entries, got:\n%s", idx)
+	}
+}
+
+// TestStorePathWithGlobalDir verifies Path() checks GlobalDir first and
+// falls back to Dir for new files.
+func TestStorePathWithGlobalDir(t *testing.T) {
+	dir := t.TempDir()
+	s := Store{
+		Dir:       filepath.Join(dir, "project", "memory"),
+		GlobalDir: filepath.Join(dir, "global"),
+	}
+
+	// No files yet → defaults to Dir.
+	p := s.Path("new-fact")
+	if !strings.HasPrefix(p, s.Dir) {
+		t.Fatalf("Path for new file should default to Dir, got %s", p)
+	}
+
+	// Write a file to GlobalDir.
+	if err := os.MkdirAll(s.GlobalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.GlobalDir, "existing.md"), []byte("body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p2 := s.Path("existing")
+	if !strings.HasPrefix(p2, s.GlobalDir) {
+		t.Fatalf("Path for file in GlobalDir should return GlobalDir path, got %s", p2)
+	}
+
+	// Write a file to Dir (not GlobalDir).
+	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.Dir, "proj-fact.md"), []byte("body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p3 := s.Path("proj-fact")
+	if !strings.HasPrefix(p3, s.Dir) {
+		t.Fatalf("Path for file only in Dir should return Dir path, got %s", p3)
 	}
 }

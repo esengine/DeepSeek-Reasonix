@@ -14,6 +14,7 @@
 
 - [What the bot does](#what-the-bot-does)
 - [Connect the three channels](#connect-the-three-channels)
+- [Run the bot headlessly](#run-the-bot-headlessly)
 - [Usage flow](#usage-flow)
 - [Channel interaction differences](#channel-interaction-differences)
 - [Command quick reference](#command-quick-reference)
@@ -86,6 +87,46 @@ approval modes.
 
 WeChat does not provide interactive card buttons here, so approvals and Ask
 questions are handled through text commands.
+
+## Run the bot headlessly
+
+The desktop app is the easiest way to create and test bot connections, but the
+runtime itself can also run as a long-lived headless gateway:
+
+```sh
+reasonix bot doctor
+reasonix bot start --channels feishu,lark,weixin --dir /path/to/project
+```
+
+Use `--channels` to choose which configured IM inputs to accept. `feishu` and
+`lark` select the matching Feishu-family connection; `weixin` selects the saved
+WeChat iLink account; `qq` selects the configured QQ bot. Use `--dir` to attach
+incoming messages to a project workspace and `--model` to override the default
+model for this process.
+
+The headless gateway uses the same config records as the desktop app:
+
+- `[[bot.connections]]` identifies each IM input. `provider` is the adapter
+  family (`feishu`, `weixin`, or `qq`), while `domain` distinguishes variants
+  such as Feishu vs Lark.
+- `credential.app_id`, `credential.app_secret_env`, `credential.account_id`,
+  and `credential.token_env` point to app IDs, app secrets, saved accounts, and
+  tokens. Secrets stay in environment variables or the Reasonix user credentials
+  store.
+- `workspace_root`, `model`, and `tool_approval_mode` can be set per
+  connection. This lets different IM channels route to different local projects
+  or approval postures.
+- `session_mappings` are filled from inbound messages with the remote chat ID
+  and scope. The desktop UI can open the matching conversation once the mapping
+  also has a local `session_id` target, such as a saved `path:` session target
+  from a desktop-managed bot runtime or a manually configured mapping.
+
+Access control is still mandatory. Either enable an allowlist under
+`[bot.allowlist]` with at least one relevant platform user ID, or set
+`allow_all = true` deliberately. Group IDs are optional additional scoping for
+group chats; they do not replace the required user allowlist. Remote users go
+through the same controller, permission policy, tool approval mode, and sandbox
+rules as local desktop or CLI turns.
 
 ## Usage flow
 
@@ -214,7 +255,8 @@ Bindings are stored in the user's Reasonix data, not inside the app bundle:
 
 - Bot connections, remote IDs, allowlists, model choices, and approval modes are
   stored in the user config.
-- Feishu and Lark secrets are stored in the Reasonix user credentials file.
+- Feishu and Lark secrets are stored in Reasonix's global
+  `<Reasonix home>/.env`, shared by CLI and desktop.
 - The WeChat scanned account token is stored in the Reasonix user data
   directory.
 

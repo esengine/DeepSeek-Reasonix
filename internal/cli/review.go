@@ -76,14 +76,8 @@ func reviewCommand(args []string) int {
 		return 1
 	}
 
-	// 5. Build tool registry scoped to the review skill's allowed tools
-	// (read_file, ls, glob, grep, bash).
-	reg := tool.NewRegistry()
-	for _, name := range reviewSk.AllowedTools {
-		if tl, ok := tool.LookupBuiltin(name); ok {
-			reg.Add(tl)
-		}
-	}
+	// 5. Build a review-scoped sub-agent registry.
+	reg := buildReviewSubagentRegistry(reviewSk)
 
 	// 6. Prepare the review prompt.
 	task := buildReviewTask(diff, *instructions)
@@ -103,6 +97,19 @@ func reviewCommand(args []string) int {
 
 	fmt.Print(result)
 	return 0
+}
+
+func buildReviewSubagentRegistry(reviewSk skill.Skill) *tool.Registry {
+	// The shared helper strips subagent-unavailable background capabilities while
+	// preserving foreground bash. This direct CLI path does not go through boot,
+	// so it first builds the small parent set from the review skill allow-list.
+	parentReg := tool.NewRegistry()
+	for _, name := range reviewSk.AllowedTools {
+		if tl, ok := tool.LookupBuiltin(name); ok {
+			parentReg.Add(tl)
+		}
+	}
+	return agent.SubagentToolRegistry(parentReg, reviewSk.AllowedTools)
 }
 
 // getReviewDiff runs the appropriate git diff command and returns its output.

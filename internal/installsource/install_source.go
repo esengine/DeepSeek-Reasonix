@@ -61,6 +61,7 @@ type Options struct {
 type installSourceTool struct {
 	root         string
 	home         string
+	reasonixHome string
 	httpClient   *http.Client
 	connectMCP   MCPConnector
 	onDisconnect OnDisconnectFunc
@@ -86,6 +87,14 @@ func NewTool(opts Options) tool.Tool {
 			home = h
 		}
 	}
+	reasonixHome := ""
+	if opts.HomeDir != "" {
+		reasonixHome = filepath.Join(home, ".reasonix")
+	} else if dir := config.ReasonixHomeDir(); dir != "" {
+		reasonixHome = dir
+	} else if home != "" {
+		reasonixHome = filepath.Join(home, ".reasonix")
+	}
 	client := opts.HTTPClient
 	if client == nil {
 		client = &http.Client{}
@@ -97,6 +106,7 @@ func NewTool(opts Options) tool.Tool {
 	return &installSourceTool{
 		root:         root,
 		home:         home,
+		reasonixHome: reasonixHome,
 		httpClient:   client,
 		connectMCP:   opts.ConnectMCP,
 		onDisconnect: opts.OnDisconnect,
@@ -119,7 +129,7 @@ func (*installSourceTool) Schema() json.RawMessage {
   "source":{"type":"string","description":"URL, local file/folder path, .mcp.json path, or package name to install from. Ignored when op=uninstall (use name instead)."},
   "kind":{"type":"string","enum":["auto","skill","mcp"],"description":"Capability kind. Defaults to auto."},
   "apply":{"type":"boolean","description":"false (default) only returns an install plan; true performs the planned writes/connects. Ignored for op=uninstall."},
-  "scope":{"type":"string","enum":["project","global"],"description":"Where to persist config or copy skills. Defaults to project when a workspace exists, otherwise global."},
+  "scope":{"type":"string","enum":["project","global"],"description":"Where to persist config or copy skills. MCP installs default to global so every project can use them; project-root .mcp.json imports default to project; skills default to project when a workspace exists, otherwise global."},
   "mode":{"type":"string","enum":["auto","copy","link","register"],"description":"Skill install mode. auto registers multi-skill roots and copies single skills into the canonical <skill-name>/SKILL.md layout; copy copies skill files/folders; link creates symlinks; register adds a skill root to [skills].paths."},
   "name":{"type":"string","description":"Optional override for the installed MCP server or single skill name. Required for op=uninstall when removing by name."},
   "transport":{"type":"string","enum":["auto","stdio","http","sse"],"description":"MCP transport override. URL sources default to http unless --sse-like; package sources default to stdio."},
@@ -127,7 +137,7 @@ func (*installSourceTool) Schema() json.RawMessage {
   "args":{"type":"array","items":{"type":"string"},"description":"Optional stdio MCP args override."},
   "env":{"type":"object","additionalProperties":{"type":"string"},"description":"Environment variables for stdio MCP servers."},
   "headers":{"type":"object","additionalProperties":{"type":"string"},"description":"HTTP headers for remote MCP servers. Prefer ${VAR} placeholders for secrets."},
-  "tier":{"type":"string","enum":["lazy","background","eager"],"description":"Persisted MCP startup tier. Defaults to lazy."},
+  "tier":{"type":"string","enum":["background","eager"],"description":"Persisted MCP startup tier. Defaults to background."},
   "replace":{"type":"boolean","description":"Allow replacing an existing MCP config entry with the same name. Skills still refuse to overwrite existing files."},
   "strict":{"type":"boolean","description":"Skill install strictness. true (default) requires name+description frontmatter; false copies the file as-is (use only for files you trust)."},
   "planId":{"type":"string","description":"Optional. Echoed from a previous planned response to confirm the host is approving the same plan."}
@@ -158,7 +168,7 @@ func (t *installSourceTool) Execute(ctx context.Context, raw json.RawMessage) (s
 		return "", errors.New("install_source: op=uninstall requires a non-empty name")
 	}
 	req.Kind = normalizeKind(req.Kind)
-	req.Scope = t.normalizeScope(req.Scope)
+	req.Scope, req.scopeExplicit = t.normalizeScope(req.Scope)
 	req.Mode = normalizeMode(req.Mode)
 	req.Transport = normalizeTransport(req.Transport)
 	if norm, ok := normalizeTier(req.Tier); ok {
@@ -195,6 +205,7 @@ func (t *installSourceTool) Execute(ctx context.Context, raw json.RawMessage) (s
 		for i := range actions {
 			actions[i].Status = "planned"
 		}
+		scope := commonActionScope(actions)
 		out := response{
 			OK:       true,
 			Status:   "planned",
@@ -203,7 +214,7 @@ func (t *installSourceTool) Execute(ctx context.Context, raw json.RawMessage) (s
 			Source:   req.Source,
 			Kind:     summarizeKind(actions),
 			Kinds:    kindCounts(actions),
-			Scope:    req.Scope,
+			Scope:    scope,
 			Mode:     req.Mode,
 			PlanID:   planID,
 			Actions:  publicActions(actions),
@@ -278,7 +289,7 @@ func (t *installSourceTool) executeApply(ctx context.Context, req request, actio
 		Source:   req.Source,
 		Kind:     summarizeKind(actions),
 		Kinds:    kindCounts(actions),
-		Scope:    req.Scope,
+		Scope:    commonActionScope(actions),
 		Mode:     req.Mode,
 		PlanID:   planID,
 		Actions:  publicActions(actions),
@@ -293,48 +304,22 @@ func (t *installSourceTool) executeApply(ctx context.Context, req request, actio
 // uninstall: the user already named the entry, and removal is the inverse
 // of the install they authorized.
 func (t *installSourceTool) executeUninstall(req request) string {
-	scope := req.Scope
 	actions := []action{}
-	cfgPath := t.configPath(scope)
-	cfg := config.LoadForEdit(cfgPath)
-
-	// Skills: try the flat file, then the directory layout, in the chosen
-	// scope. We don't require a kind — "name" disambiguates.
-	if path, ok := t.resolveSkillPath(req.Name, scope); ok {
-		actions = append(actions, action{
-			Kind:       "skill",
-			Action:     "remove_skill",
-			Name:       req.Name,
-			Target:     path,
-			Scope:      scope,
-			ConfigPath: cfgPath,
-			RiskLevel:  RiskLow,
-		})
-	} else if rootAction, ok := t.resolveRegisteredSkillRoot(req.Name, scope, cfgPath, cfg); ok {
-		actions = append(actions, rootAction)
-	}
-
-	// MCP: scan the chosen config for the named plugin.
-	for _, p := range cfg.Plugins {
-		if p.Name == req.Name {
-			actions = append(actions, action{
-				Kind:       "mcp",
-				Action:     "remove_mcp_server",
-				Name:       p.Name,
-				Target:     p.URL,
-				Scope:      scope,
-				Transport:  pluginTransport(p),
-				ConfigPath: cfgPath,
-				RiskLevel:  RiskMedium,
-				RiskReasons: []string{
-					"disconnects a running server and drops its tools from the active session",
-				},
-			})
+	scopes := t.uninstallSearchScopes(req)
+	for _, scope := range scopes {
+		actions = t.uninstallActionsForScope(req.Name, scope)
+		if len(actions) > 0 {
 			break
 		}
 	}
 
+	scope := commonActionScope(actions)
 	if len(actions) == 0 {
+		if len(scopes) == 1 {
+			scope = scopes[0]
+		} else {
+			scope = strings.Join(scopes, "/")
+		}
 		return marshalJSON(response{
 			OK:      false,
 			Status:  "blocked",
@@ -384,6 +369,60 @@ func (t *installSourceTool) executeUninstall(req request) string {
 	})
 }
 
+func (t *installSourceTool) uninstallSearchScopes(req request) []string {
+	if req.scopeExplicit && req.Scope != "" {
+		return []string{req.Scope}
+	}
+	scopes := []string{}
+	if strings.TrimSpace(t.root) != "" {
+		scopes = append(scopes, "project")
+	}
+	return append(scopes, "global")
+}
+
+func (t *installSourceTool) uninstallActionsForScope(name, scope string) []action {
+	var actions []action
+	cfgPath := t.configPath(scope)
+	cfg := config.LoadForEdit(cfgPath)
+
+	// Skills: try the flat file, then the directory layout, in the chosen
+	// scope. We don't require a kind — "name" disambiguates.
+	if path, ok := t.resolveSkillPath(name, scope); ok {
+		actions = append(actions, action{
+			Kind:       "skill",
+			Action:     "remove_skill",
+			Name:       name,
+			Target:     path,
+			Scope:      scope,
+			ConfigPath: cfgPath,
+			RiskLevel:  RiskLow,
+		})
+	} else if rootAction, ok := t.resolveRegisteredSkillRoot(name, scope, cfgPath, cfg); ok {
+		actions = append(actions, rootAction)
+	}
+
+	// MCP: scan the chosen config for the named plugin.
+	for _, p := range cfg.Plugins {
+		if p.Name == name {
+			actions = append(actions, action{
+				Kind:       "mcp",
+				Action:     "remove_mcp_server",
+				Name:       p.Name,
+				Target:     p.URL,
+				Scope:      scope,
+				Transport:  pluginTransport(p),
+				ConfigPath: cfgPath,
+				RiskLevel:  RiskMedium,
+				RiskReasons: []string{
+					"disconnects a running server and drops its tools from the active session",
+				},
+			})
+			break
+		}
+	}
+	return actions
+}
+
 // resolveSkillPath finds the on-disk location of a previously installed
 // skill of the given name in the chosen scope. The bool reports whether
 // the path is a real install (Lstat succeeded). Both flat (<name>.md) and
@@ -394,10 +433,10 @@ func (t *installSourceTool) resolveSkillPath(name, scope string) (string, bool) 
 	}
 	var root string
 	if scope == "global" {
-		if t.home == "" {
+		if t.reasonixHome == "" {
 			return "", false
 		}
-		root = filepath.Join(t.home, ".reasonix", skill.SkillsDirname)
+		root = filepath.Join(t.reasonixHome, skill.SkillsDirname)
 	} else {
 		root = filepath.Join(t.root, ".reasonix", skill.SkillsDirname)
 	}
@@ -461,16 +500,64 @@ func (t *installSourceTool) configPath(scope string) string {
 	return filepath.Join(t.root, "reasonix.toml")
 }
 
-func (t *installSourceTool) normalizeScope(scope string) string {
+func (t *installSourceTool) normalizeScope(scope string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(scope)) {
+	case "project":
+		return "project", true
 	case "global":
-		return "global"
+		return "global", true
 	default:
-		if strings.TrimSpace(t.root) != "" {
+		return "", false
+	}
+}
+
+func (t *installSourceTool) installScope(req request, kind, source string) string {
+	if req.scopeExplicit && req.Scope != "" {
+		return req.Scope
+	}
+	if kind == "mcp" {
+		if t.isProjectMCPJSONSource(source) {
 			return "project"
 		}
 		return "global"
 	}
+	if strings.TrimSpace(t.root) != "" {
+		return "project"
+	}
+	return "global"
+}
+
+func (t *installSourceTool) isProjectMCPJSONSource(source string) bool {
+	if isURL(source) || !strings.EqualFold(filepath.Base(source), ".mcp.json") {
+		return false
+	}
+	root := strings.TrimSpace(t.root)
+	if root == "" {
+		return false
+	}
+	sourceAbs, sourceErr := filepath.Abs(source)
+	rootAbs, rootErr := filepath.Abs(root)
+	if sourceErr != nil || rootErr != nil {
+		return false
+	}
+	rel, err := filepath.Rel(filepath.Clean(rootAbs), filepath.Clean(sourceAbs))
+	if err != nil {
+		return false
+	}
+	return rel == ".mcp.json" || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..")
+}
+
+func commonActionScope(actions []action) string {
+	if len(actions) == 0 {
+		return ""
+	}
+	scope := actions[0].Scope
+	for _, action := range actions[1:] {
+		if action.Scope != scope {
+			return "mixed"
+		}
+	}
+	return scope
 }
 
 func (t *installSourceTool) resolvePath(p string) string {
@@ -519,7 +606,7 @@ func computePlanID(req request, actions []action) string {
 		Op:        req.Op,
 		Source:    req.Source,
 		Kind:      req.Kind,
-		Scope:     req.Scope,
+		Scope:     commonActionScope(actions),
 		Mode:      req.Mode,
 		Name:      req.Name,
 		Transport: req.Transport,
