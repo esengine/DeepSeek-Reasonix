@@ -32,6 +32,7 @@ import (
 	"reasonix/internal/provider"
 	"reasonix/internal/provider/openai"
 	"reasonix/internal/serve"
+	usageutil "reasonix/internal/usage"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -118,6 +119,9 @@ func Run(args []string, version string) int {
 	case "upgrade", "update":
 		configureCLIThemeFromConfigNoProbe()
 		return upgradeCommand(rest, version)
+	case "usage":
+		configureCLIThemeFromConfigNoProbe()
+		return usageCommand(rest)
 	case "version", "--version", "-v":
 		fmt.Println("reasonix", version)
 		return 0
@@ -144,7 +148,7 @@ func isDefaultInteractiveFlag(arg string) bool {
 
 func shouldMigrateLegacyConfigForCLI(cmd string) bool {
 	switch cmd {
-	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "doctor", "bot", "upgrade", "update":
+	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "doctor", "bot", "upgrade", "update", "usage":
 		return true
 	default:
 		return false
@@ -195,15 +199,19 @@ func configureCLIThemeFromConfigNoProbe() {
 // passes false so the session UI is reachable before a key is set. sink receives
 // the agent's typed event stream — runAgent passes a TextSink that renders to
 // stdout, the TUI passes an event-channel sink so events become tea.Msgs.
-func setup(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink) (*control.Controller, error) {
+func setup(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, usageStores ...*usageutil.Store) (*control.Controller, error) {
 	migrateMCPConfigForCLIWorkspace()
-	return boot.Build(ctx, boot.Options{
+	opts := boot.Options{
 		Model:      modelName,
 		MaxSteps:   maxStepsOverride,
 		RequireKey: requireKey,
 		Sink:       sink,
 		SessionDir: resolveCLISessionDir(),
-	})
+	}
+	if len(usageStores) > 0 && usageStores[0] != nil {
+		opts.UsageStore = usageStores[0]
+	}
+	return boot.Build(ctx, opts)
 }
 
 // resolveCLISessionDir returns the session dir for CLI invocations. When the
@@ -341,6 +349,14 @@ func runAgent(args []string) int {
 		metrics = &metricsSink{inner: textSink}
 		sink = metrics
 	}
+
+	// --- usage tracker ---
+	usageStore, sink := setupUsageTracker(sink)
+	if usageStore != nil {
+		defer usageStore.Close()
+	}
+	// --- end usage tracker ---
+
 	sink = withNotifications(sink, cfg)
 	if *resume != "" {
 		*model = modelForResumePath(*model, *resume, cfg)
@@ -349,7 +365,7 @@ func runAgent(args []string) int {
 			*model = modelForResumePath(*model, sessions[0].Path, cfg)
 		}
 	}
-	ctrl, err := setup(ctx, *model, *maxSteps, true, sink)
+	ctrl, err := setup(ctx, *model, *maxSteps, true, sink, usageStore)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
@@ -485,7 +501,13 @@ func runServe(args []string) int {
 			}
 		}
 	}
-	ctrl, err := setup(ctx, *model, *maxSteps, true, bc)
+	// --- usage tracker ---
+	usageStore, sink := setupUsageTracker(bc)
+	if usageStore != nil {
+		defer usageStore.Close()
+	}
+	// --- end usage tracker ---
+	ctrl, err := setup(ctx, *model, *maxSteps, true, sink, usageStore)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
@@ -498,7 +520,7 @@ func runServe(args []string) int {
 	}
 	ctrl.EnsureSessionPath()
 
-	srv := serve.New(ctrl, bc, serveCfg)
+	srv := serve.New(ctrl, bc, serveCfg, usageStore)
 	fmt.Printf("reasonix serve — %s on http://%s\n", ctrl.Label(), *addr)
 	if srv.AuthMode() == "token" {
 		fmt.Printf("  auth: token\n")
@@ -579,8 +601,16 @@ func chatREPL(args []string) int {
 	eventCh := make(chan event.Event, 1024)
 
 	var sink event.Sink = &eventSink{ch: eventCh}
+
+	// --- usage tracker ---
+	usageStore, sink := setupUsageTracker(sink)
+	if usageStore != nil {
+		defer usageStore.Close()
+	}
+	// --- end usage tracker ---
+
 	sink = withNotifications(sink, cfg)
-	ctrl, err := setup(ctx, *model, *maxSteps, false, sink)
+	ctrl, err := setup(ctx, *model, *maxSteps, false, sink, usageStore)
 	if err != nil && errors.Is(err, boot.ErrUnknownModel) && isInteractive() && config.SourcePath() == "" {
 		// True first run whose default model can't resolve: guide setup, then retry.
 		// With a config present, fall through to the descriptive error — re-running
@@ -589,7 +619,7 @@ func chatREPL(args []string) int {
 		if rc := interactiveSetup(defaultConfigTarget(), defaultEnvTarget()); rc != 0 {
 			return rc
 		}
-		ctrl, err = setup(ctx, *model, *maxSteps, false, sink)
+		ctrl, err = setup(ctx, *model, *maxSteps, false, sink, usageStore)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
