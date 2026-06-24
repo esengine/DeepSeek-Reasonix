@@ -1,0 +1,86 @@
+{
+  "description": "不同玩家数量下的策略配置",
+  "configs": {
+    "6": {
+      "sheriff_ideal": 2,
+      "wolf_sheriff_max": 1,
+      "god_strategy": "hide",
+      "small_game": true,
+      "notes": "小局：发言简洁，隐藏身份，避免暴露神职"
+    },
+    "7": {
+      "sheriff_ideal": 2,
+      "wolf_sheriff_max": 1,
+      "god_strategy": "hide",
+      "small_game": true,
+      "notes": "小局：发言简洁，隐藏身份，避免暴露神职"
+    },
+    "8": {
+      "sheriff_ideal": 3,
+      "wolf_sheriff_max": 1,
+      "god_strategy": "flexible",
+      "small_game": false,
+      "notes": "中局：可灵活选择隐藏或带队"
+    },
+    "9": {
+      "sheriff_ideal": 3,
+      "wolf_sheriff_max": 2,
+      "god_strategy": "flexible",
+      "small_game": false,
+      "notes": "中局：可灵活选择隐藏或带队"
+    },
+    "10": {
+      "sheriff_ideal": 4,
+      "wolf_sheriff_max": 2,
+      "god_strategy": "standard",
+      "small_game": false,
+      "notes": "大局：标准打法，神职可跳可藏"
+    },
+    "11": {
+      "sheriff_ideal": 5,
+      "wolf_sheriff_max": 2,
+      "god_strategy": "standard",
+      "small_game": false,
+      "notes": "大局：标准打法，神职可跳可藏"
+    },
+    "12": {
+      "sheriff_ideal": 5,
+      "wolf_sheriff_max": 2,
+      "god_strategy": "standard",
+      "small_game": false,
+      "notes": "大局：标准打法，神职可跳可藏"
+    }
+  },
+  "role_strategies": {
+    "wolf": {
+      "6-7人": "1狼上警悍跳，其余倒钩深水",
+      "8-9人": "1-2狼上警，其余倒钩或冲锋",
+      "10-12人": "2狼上警悍跳，其余倒钩深水"
+    },
+    "seer": {
+      "6-7人": "隐藏为主，跟票站边",
+      "8-9人": "可选择跳或藏",
+      "10-12人": "标准打法，可跳归票"
+    },
+    "witch": {
+      "6-7人": "隐藏，救人为主",
+      "8-9人": "灵活选择",
+      "10-12人": "标准打法"
+    },
+    "hunter": {
+      "6-7人": "隐藏，被动开枪",
+      "8-9人": "可穿衣服挡刀",
+      "10-12人": "标准打法"
+    },
+    "guard": {
+      "6-7人": "隐藏，守关键人",
+      "8-9人": "灵活选择",
+      "10-12人": "标准打法"
+    },
+    "villager": {
+      "6-7人": "跟票站边，不暴露",
+      "8-9人": "可分析发言",
+      "10-12人": "标准打法"
+    }
+  }
+}
