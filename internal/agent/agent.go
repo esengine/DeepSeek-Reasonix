@@ -21,6 +21,7 @@ import (
 	"reasonix/internal/nilutil"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
+	"reasonix/internal/worker"
 )
 
 // maxToolOutputBytes caps a single tool result before it goes into the model's
@@ -274,6 +275,8 @@ type Agent struct {
 	// run_in_background, task run_in_background, bash_output/kill_shell/wait) can
 	// reach it. nil leaves those tools to degrade gracefully.
 	jobs *jobs.Manager
+
+	workerMgr *worker.Manager
 
 	// steerQueue holds mid-turn user messages queued while the agent is
 	// running. Each is consumed once per loop iteration, persisted to the
@@ -571,6 +574,8 @@ type Options struct {
 	// Jobs is the session's background-job manager (nil disables background tools).
 	Jobs *jobs.Manager
 
+	WorkerManager *worker.Manager
+
 	// ProjectChecks are host-observable structured checks extracted during boot.
 	ProjectChecks []instruction.VerifyCheck
 
@@ -642,6 +647,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		gate:                 gate,
 		hooks:                hooks,
 		jobs:                 opts.Jobs,
+		workerMgr:            opts.WorkerManager,
 		evidence:             evidence.NewLedger(),
 		projectChecks:        append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
 		contextWindow:        opts.ContextWindow,
@@ -1785,6 +1791,9 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	}
 	if a.jobs != nil {
 		cctx = jobs.WithManager(cctx, a.jobs)
+	}
+	if a.workerMgr != nil {
+		cctx = worker.WithManager(cctx, a.workerMgr)
 	}
 	if v := a.reasoningLanguage.Load(); v != nil {
 		if lang, ok := v.(string); ok {

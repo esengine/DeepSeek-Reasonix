@@ -42,6 +42,7 @@ import (
 	"reasonix/internal/tool"
 	"reasonix/internal/tool/builtin"
 	"reasonix/internal/tool/sessiontool"
+	"reasonix/internal/worker"
 )
 
 // ErrUnknownModel is returned by Build when the configured model can't be
@@ -182,6 +183,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		sink.Emit(event.Event{Kind: event.Notice, Text: fmt.Sprintf("model %q is selected but its API key %s is not set — requests will fail until you set it", modelName, entry.APIKeyEnv)})
 	}
 	jm := jobs.NewManager(sink, jobs.WithStalledWarningAfter(time.Duration(cfg.BackgroundJobStalledWarningSeconds())*time.Second))
+	wm := worker.NewManager(worker.ResolveReasonix())
 	sessionDir := opts.SessionDir
 	if sessionDir == "" {
 		sessionDir = config.SessionDir()
@@ -844,6 +846,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Gate:                 headlessGate,
 		Hooks:                hookRunner,
 		Jobs:                 jm,
+		WorkerManager:        wm,
 		ProjectChecks:        projectChecks,
 		ContextWindow:        entry.ContextWindow,
 		SoftCompactRatio:     cfg.Agent.SoftCompactRatio,
@@ -928,6 +931,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		BalanceKey:             entry.APIKey(),
 		BalanceClient:          balanceClient,
 		Jobs:                   jm,
+		WorkerManager:          wm,
 		Registry:               reg,
 		PluginCtx:              ctx,
 		WorkspaceRoot:          root,

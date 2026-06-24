@@ -48,6 +48,7 @@ import (
 	"reasonix/internal/skill"
 	"reasonix/internal/store"
 	"reasonix/internal/tool"
+	"reasonix/internal/worker"
 )
 
 // ErrTurnRunning reports that a caller tried to start a second foreground turn
@@ -104,6 +105,8 @@ type Controller struct {
 	// tools spawn into it; Compose drains its completion notes into the next turn;
 	// Close cancels its still-running jobs.
 	jobs *jobs.Manager
+
+	workerMgr *worker.Manager
 
 	// mcp owns the session's live tool/plugin surface — the MCP plugin Host, the
 	// tool registry the executor reads each turn, and the session-scoped context a
@@ -239,6 +242,9 @@ type Options struct {
 	BalanceClient *http.Client
 	// Jobs is the session-scoped background-job manager (nil disables background jobs).
 	Jobs *jobs.Manager
+
+	// WorkerManager is the manager for spawning background Reasonix workers.
+	WorkerManager *worker.Manager
 	// Registry is the executor's live tool set, and PluginCtx the session-scoped
 	// context; both are needed for hot-adding MCP servers via AddMCPServer.
 	Registry  *tool.Registry
@@ -312,6 +318,7 @@ func New(opts Options) *Controller {
 		balanceKey:             opts.BalanceKey,
 		balanceClient:          opts.BalanceClient,
 		jobs:                   opts.Jobs,
+		workerMgr:              opts.WorkerManager,
 		mcp:                    newMcpManager(opts.Host, opts.Registry, pluginCtx),
 		workspaceRoot:          opts.WorkspaceRoot,
 		approval:               newApprovalManager(opts.Policy, ToolApprovalAsk, opts.ApprovalTimeout),
