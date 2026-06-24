@@ -3424,6 +3424,48 @@ func TestRemoveMCPServerDeletesProjectMCPJSONEntry(t *testing.T) {
 	}
 }
 
+func TestRemoveMCPServerClearsFailedStatusRow(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+[[plugins]]
+name = "local-rest"
+type = "http"
+url = "http://127.0.0.1:41234/mcp"
+tier = "lazy"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	host := plugin.NewHost()
+	host.RecordFailure(plugin.Spec{Name: "local-rest", Type: "http", URL: "http://127.0.0.1:41234/mcp"}, errors.New("connect: refused"))
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{Host: host}), "")
+	defer app.activeCtrl().Close()
+
+	view := app.MCPServers()
+	if len(view) != 1 || view[0].Name != "local-rest" || view[0].Status != "failed" {
+		t.Fatalf("precondition MCPServers() = %+v, want failed local-rest row", view)
+	}
+	if err := app.RemoveMCPServer("local-rest"); err != nil {
+		t.Fatalf("RemoveMCPServer(local-rest): %v", err)
+	}
+	if failures := host.Failures(); len(failures) != 0 {
+		t.Fatalf("failure row should be cleared after remove: %+v", failures)
+	}
+	cfg, err := config.LoadForRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := findPluginEntry(cfg.Plugins, "local-rest"); ok {
+		t.Fatalf("local-rest plugin still configured after remove: %+v", cfg.Plugins)
+	}
+	if view := app.MCPServers(); len(view) != 0 {
+		t.Fatalf("MCPServers() = %+v, want removed server hidden after reload", view)
+	}
+}
+
 func TestUpdateMCPServerEditsProjectMCPJSONEntry(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)

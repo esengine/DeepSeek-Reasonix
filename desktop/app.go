@@ -4672,6 +4672,9 @@ func (a *App) RemoveMCPServer(name string) error {
 		return err
 	}
 	if disconnected || removed {
+		if h := tab.Ctrl.Host(); h != nil {
+			h.ClearFailure(name)
+		}
 		a.mu.Lock()
 		delete(tab.disabledMCP, name)
 		tab.mcpOrder = removeServerOrder(tab.mcpOrder, name)
