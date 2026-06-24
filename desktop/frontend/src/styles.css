@@ -7227,11 +7227,16 @@ a[href] {
 }
 .workspace-preview__body--code {
   display: flex;
+  flex-direction: column;
   overflow: hidden;
   padding: 0;
 }
 .workspace-panel--embedded .workspace-preview__body--code {
   padding: 0;
+}
+.workspace-preview__body--code .workspace-note {
+  flex: 0 0 auto;
+  margin: 10px 14px 8px;
 }
 .workspace-preview__body--code .code-block {
   flex: 1 1 auto;

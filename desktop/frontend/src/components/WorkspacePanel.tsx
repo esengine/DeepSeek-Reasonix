@@ -31,8 +31,10 @@ import {
   initialWorkspaceSplitTreeWidth,
   resolveWorkspaceSplitTreeWidth,
   type WorkspaceSplitTreeWidthMode,
+  workspaceSplitCanFit,
   workspaceSplitTreeWidthFromPointer,
 } from "../lib/workspaceSplit";
+import { closeWorkspacePreviewTab } from "../lib/workspacePreviewTabs";
 import type { DirEntry, FilePreview, GitCommitView, GitCommitDetailView, WorkspaceChangeView } from "../lib/types";
 import { formatWorkspaceReference, WORKSPACE_REF_DRAG_TYPE } from "../lib/workspaceDrag";
 import { cleanGitDiff } from "../lib/diff";
@@ -769,8 +771,18 @@ export function WorkspacePanel({
   const filePreviewActive = openTabs.length > 0 || selectedPath !== null;
   const changeDetailActive = changedMode && expandedCommit !== null;
   const previewVisible = changedMode || filePreviewActive;
-  const actualTreeVisible = changedMode ? false : treeVisible;
   const showTreeRail = previewVisible && !changedMode;
+  const splitPanesFit = useMemo(
+    () =>
+      workspaceSplitCanFit({
+        panelWidth,
+        railWidth: WORKSPACE_TREE_RAIL_WIDTH,
+        treeMinWidth: WORKSPACE_TREE_MIN_WIDTH,
+        previewMinWidth: WORKSPACE_PREVIEW_MIN_WIDTH,
+      }),
+    [panelWidth],
+  );
+  const actualTreeVisible = changedMode ? false : treeVisible && (!previewVisible || splitPanesFit);
   const previewModeActive = open && (filePreviewActive || changeDetailActive);
   const embeddedDockMode = !showViewTabs;
   const showFileTools = showViewTabs || filePreviewActive;
@@ -853,14 +865,15 @@ export function WorkspacePanel({
     if (lastChangeRevealRequestIdRef.current === changeRevealRequest?.id) {
       dismissedChangeRevealRequestIdRef.current = changeRevealRequest.id;
     }
-    setSelectedPath(null);
-    setOpenTabs([]);
+    const nextPreviewTabs = closeWorkspacePreviewTab(openTabs, selectedPath);
+    setSelectedPath(nextPreviewTabs.selectedPath);
+    setOpenTabs(nextPreviewTabs.openTabs);
     setPreview(null);
     setSelectionMenu(null);
     setTreeMenu(null);
     setRecentOpen(false);
     setTreeVisible(true);
-  }, [changeRevealRequest, revealPathRequest]);
+  }, [changeRevealRequest, openTabs, revealPathRequest, selectedPath]);
 
   const setSavedTreeWidth = useCallback(
     (width: number) => {

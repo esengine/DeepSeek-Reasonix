@@ -78,6 +78,23 @@ export function resolveWorkspaceSplitTreeWidth({
   });
 }
 
+export function workspaceSplitCanFit({
+  panelWidth,
+  railWidth = 0,
+  treeMinWidth,
+  previewMinWidth,
+}: {
+  panelWidth?: number;
+  railWidth?: number;
+  treeMinWidth: number;
+  previewMinWidth: number;
+}): boolean {
+  if (typeof panelWidth !== "number" || !Number.isFinite(panelWidth)) {
+    return true;
+  }
+  return Math.round(panelWidth) >= Math.round(railWidth) + Math.round(treeMinWidth) + Math.round(previewMinWidth);
+}
+
 export function workspaceSplitTreeWidthFromPointer({
   clientX,
   panelLeft,

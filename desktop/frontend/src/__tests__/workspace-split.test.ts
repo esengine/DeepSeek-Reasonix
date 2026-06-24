@@ -3,9 +3,11 @@
 import {
   initialWorkspaceSplitTreeWidth,
   resolveWorkspaceSplitTreeWidth,
+  workspaceSplitCanFit,
   workspaceSplitTreeWidthFromPointer,
 } from "../lib/workspaceSplit";
 import { resolveWorkspacePanelWidth } from "../lib/workspaceLayout";
+import { closeWorkspacePreviewTab } from "../lib/workspacePreviewTabs";
 
 let passed = 0;
 let failed = 0;
@@ -113,6 +115,43 @@ eq(
   228,
   "outer file area can still shrink below split target width",
 );
+
+eq(
+  workspaceSplitCanFit({
+    panelWidth: 323,
+    railWidth: TREE_RAIL_WIDTH,
+    treeMinWidth: TREE_MIN_WIDTH,
+    previewMinWidth: PREVIEW_MIN_WIDTH,
+  }),
+  false,
+  "file tree collapses before rail tree and preview would overflow a narrow panel",
+);
+
+eq(
+  workspaceSplitCanFit({
+    panelWidth: 324,
+    railWidth: TREE_RAIL_WIDTH,
+    treeMinWidth: TREE_MIN_WIDTH,
+    previewMinWidth: PREVIEW_MIN_WIDTH,
+  }),
+  true,
+  "file tree remains available at the exact split minimum width",
+);
+
+eq(
+  workspaceSplitCanFit({
+    panelWidth: undefined,
+    railWidth: TREE_RAIL_WIDTH,
+    treeMinWidth: TREE_MIN_WIDTH,
+    previewMinWidth: PREVIEW_MIN_WIDTH,
+  }),
+  true,
+  "file tree stays visible until the measured panel width is known",
+);
+
+const closedRecentPreview = closeWorkspacePreviewTab(["a.ts", "b.ts", "c.ts"], "c.ts");
+eq(closedRecentPreview.selectedPath, "b.ts", "closing the current preview falls back to the previous recent file");
+eq(closedRecentPreview.openTabs.join(","), "a.ts,b.ts", "closing one preview preserves the other recent files");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

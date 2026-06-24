@@ -58,6 +58,7 @@ console.log("\nworkspace preview css");
 
 eq(finalDeclaration(".workspace-preview__body--code", "overflow"), "hidden", "code preview body does not create a nested scroller");
 eq(finalDeclaration(".workspace-preview__body--code", "display"), "flex", "code preview body hosts an editor-like viewport");
+eq(finalDeclaration(".workspace-preview__body--code", "flex-direction"), "column", "truncated code notes stack above the code viewport");
 eq(
   computedDeclaration(
     `<html data-theme-style="default"><head></head><body><aside class="workspace-panel workspace-panel--embedded"><div class="workspace-preview__body workspace-preview__body--code"></div></aside></body></html>`,
@@ -67,6 +68,7 @@ eq(
   "0px",
   "code preview body keeps zero padding under embedded and themed cascade",
 );
+eq(finalDeclaration(".workspace-preview__body--code .workspace-note", "flex"), "0 0 auto", "code truncation note keeps its own row");
 eq(finalDeclaration(".workspace-preview__body--code .code-block", "display"), "flex", "code block fills the preview viewport");
 eq(finalDeclaration(".workspace-preview__body--code .code", "overflow"), "auto", "code viewport owns horizontal and vertical scrolling");
 eq(finalDeclaration(".workspace-preview__body--code .code", "min-height"), "0", "code viewport can shrink inside the preview pane");
