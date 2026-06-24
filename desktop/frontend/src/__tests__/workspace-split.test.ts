@@ -9,6 +9,7 @@ import {
 } from "../lib/workspaceSplit";
 import { resolveWorkspacePanelWidth } from "../lib/workspaceLayout";
 import { closeWorkspacePreviewTab } from "../lib/workspacePreviewTabs";
+import { shouldScrollWorkspaceTreeSelection } from "../lib/workspaceTreeReveal";
 
 let passed = 0;
 let failed = 0;
@@ -192,6 +193,39 @@ eq(
   }),
   effectiveEvenTreeWidth,
   "entering manual resize from even split keeps the currently rendered tree width",
+);
+
+eq(
+  shouldScrollWorkspaceTreeSelection({
+    selectedPath: "src/App.tsx",
+    pendingRevealPath: "src/App.tsx",
+    actualTreeVisible: true,
+    selectedIndex: 42,
+  }),
+  true,
+  "pending file reveal scrolls once the selected row is present",
+);
+
+eq(
+  shouldScrollWorkspaceTreeSelection({
+    selectedPath: "src/App.tsx",
+    pendingRevealPath: null,
+    actualTreeVisible: true,
+    selectedIndex: 42,
+  }),
+  false,
+  "manual folder changes do not re-scroll to the previous selected file",
+);
+
+eq(
+  shouldScrollWorkspaceTreeSelection({
+    selectedPath: "src/App.tsx",
+    pendingRevealPath: "src/App.tsx",
+    actualTreeVisible: true,
+    selectedIndex: -1,
+  }),
+  false,
+  "pending file reveal waits until async directory loading exposes the row",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -37,6 +37,7 @@ import {
 } from "../lib/workspaceSplit";
 import { createRafResizeUpdater } from "../lib/resizeDrag";
 import { closeWorkspacePreviewTab } from "../lib/workspacePreviewTabs";
+import { shouldScrollWorkspaceTreeSelection } from "../lib/workspaceTreeReveal";
 import type { DirEntry, FilePreview, GitCommitView, GitCommitDetailView, WorkspaceChangeView } from "../lib/types";
 import { formatWorkspaceReference, WORKSPACE_REF_DRAG_TYPE } from "../lib/workspaceDrag";
 import { cleanGitDiff } from "../lib/diff";
@@ -274,6 +275,7 @@ export function WorkspacePanel({
   const commitDetailRequestIdRef = useRef(0);
   const recentAnchorRef = useRef<HTMLButtonElement>(null);
   const openDirsRef = useRef(openDirs);
+  const pendingTreeRevealPathRef = useRef<string | null>(null);
 
   useEffect(() => {
     openDirsRef.current = openDirs;
@@ -376,6 +378,7 @@ export function WorkspacePanel({
         }));
         setTreeWidthMode("even");
       }
+      pendingTreeRevealPathRef.current = path;
       setSelectedPath(path);
       setScopedFilePaths((current) => {
         if (current) dismissedFileListRequestIdRef.current = lastFileListRequestIdRef.current;
@@ -812,11 +815,16 @@ export function WorkspacePanel({
   );
 
   useEffect(() => {
-    if (!selectedPath || !actualTreeVisible) return;
-    const selectedIndex = treeRows.findIndex((row) => row.path === selectedPath);
-    if (selectedIndex !== -1) {
-      virtualizer.scrollToIndex(selectedIndex, { align: "auto" });
+    const pendingRevealPath = pendingTreeRevealPathRef.current;
+    if (!pendingRevealPath) return;
+    if (!selectedPath || pendingRevealPath !== selectedPath) {
+      pendingTreeRevealPathRef.current = null;
+      return;
     }
+    const selectedIndex = treeRows.findIndex((row) => row.path === selectedPath);
+    if (!shouldScrollWorkspaceTreeSelection({ selectedPath, pendingRevealPath, actualTreeVisible, selectedIndex })) return;
+    virtualizer.scrollToIndex(selectedIndex, { align: "auto" });
+    pendingTreeRevealPathRef.current = null;
   }, [selectedPath, actualTreeVisible, treeRows, virtualizer]);
 
   const panelStyle = useMemo(
