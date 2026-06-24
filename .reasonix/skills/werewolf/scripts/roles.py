@@ -10,11 +10,13 @@ ROLES = {
     "wolf": "狼人", "villager": "村民",
     "guard": "守卫", "idiot": "白痴",
     "mech_wolf": "机械狼", "wolf_king": "狼王",
+    "white_wolf_king": "白狼王", "curse_fox": "咒狐", "hybrid": "混血儿",
 }
 ROLE_ICONS = {
     "wolf": "[W]", "seer": "[S]", "witch": "[Wi]",
     "hunter": "[H]", "villager": "[V]", "guard": "[G]", "idiot": "[I]",
     "mech_wolf": "[Mw]", "wolf_king": "[Wk]",
+    "white_wolf_king": "[WW]", "curse_fox": "[CF]", "hybrid": "[Hy]",
 }
 
 
@@ -33,7 +35,7 @@ def is_final_battle(s, cfg=None):
         cfg = {}
     
     al = [n for n, p in s["players"].items() if p["alive"]]
-    wc = sum(1 for n in al if s["players"][n]["role"] in ("wolf", "mech_wolf"))
+    wc = sum(1 for n in al if is_wolf_role(s["players"][n]["role"]))
     gc = len(al) - wc
     
     # 狼人必胜
@@ -74,11 +76,15 @@ DEFAULT_CONFIG = {
     "role_guard": True,
     "role_idiot": True,
     "role_wolf_king": True,              # 狼王
+    "role_white_wolf_king": False,       # 白狼王（被投带两人）
+    "role_curse_fox": False,             # 咒狐（被验出局，独赢）
+    "role_hybrid": False,                # 混血儿（首夜选榜样）
 }
 
 ROLE_CONFIG_MAP = {
     "seer": "role_seer", "witch": "role_witch",
     "hunter": "role_hunter", "guard": "role_guard", "idiot": "role_idiot",
+    "curse_fox": "role_curse_fox", "hybrid": "role_hybrid",
 }
 ALL_GOD_ROLES = ["seer", "witch", "hunter", "guard", "idiot"]
 
@@ -124,14 +130,14 @@ def alive(s):
 
 
 def wolves(s, cfg=None):
-    """所有存活的狼人阵营（含机械狼，不含模仿中的机械狼）。"""
+    """所有存活的狼人阵营（含机械狼/白狼王，不含模仿中的机械狼）。"""
     if cfg is None:
         cfg = load_config()
     result = []
     for n, p in s["players"].items():
         if not p["alive"]:
             continue
-        if p["role"] == "wolf":
+        if p["role"] in ("wolf", "mech_wolf", "wolf_king", "white_wolf_king"):
             result.append(n)
         elif p["role"] == "mech_wolf":
             if not cfg.get("mimic_wolf"):
@@ -145,7 +151,7 @@ def find_player(s, role):
 
 
 def is_wolf_role(role):
-    return role in ("wolf", "mech_wolf")
+    return role in ("wolf", "mech_wolf", "wolf_king", "white_wolf_king")
 
 
 def pick_roles(player_count, cfg):

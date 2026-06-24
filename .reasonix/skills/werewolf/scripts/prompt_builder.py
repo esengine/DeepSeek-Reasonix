@@ -104,9 +104,10 @@ ROLE_LABELS = {
     "villager": "村民", "seer": "预言家", "witch": "女巫",
     "hunter": "猎人", "guard": "守卫", "idiot": "白痴",
     "wolf": "狼人", "mech_wolf": "机械狼", "wolf_king": "狼王",
+    "white_wolf_king": "白狼王", "curse_fox": "咒狐", "hybrid": "混血儿",
 }
 
-WOLF_ROLES = {"wolf", "mech_wolf", "wolf_king"}
+WOLF_ROLES = {"wolf", "mech_wolf", "wolf_king", "white_wolf_king"}
 GOD_ROLES = {"seer", "witch", "hunter", "guard", "idiot"}
 
 # action → 模板文件名映射

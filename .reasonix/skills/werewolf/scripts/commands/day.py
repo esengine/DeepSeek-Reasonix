@@ -94,6 +94,19 @@ def cmd_vote(args):
                 if mw_t and mw_t in alive(s):
                     s["players"][mw_t]["alive"] = False
                     print(f"[Mw] 机械狼被处决，带走了 {mw_t}")
+            if s["players"][t]["role"] == "white_wolf_king" and cfg.get("role_white_wolf_king"):
+                ww_targets = getattr(args, 'white_wolf_targets', None) or []
+                if len(ww_targets) < 2:
+                    print(f"[!] 白狼王 {t} 被处决！需带两人，但只提供了 {len(ww_targets)} 个目标")
+                    print(f"[!] 正确: day-auto 或 vote 加 --white-wolf 目标1 目标2")
+                else:
+                    for ww_t in ww_targets[:2]:
+                        if ww_t in alive(s):
+                            s["players"][ww_t]["alive"] = False
+                            print(f"[WW] 白狼王带走了 {ww_t}")
+                            s["log"].append(f"白狼王 {t} 被处决带走了 {ww_t}")
+                    if not s.get("witch_poison_used"):
+                        pass  # 不需要额外处理
     else:
         print(f"[J] 平票 ({' '.join(executed)})")
         if not s.get("vote_round"):
@@ -240,6 +253,17 @@ def cmd_day(args):
                     if args.mechwolf_target and args.mechwolf_target in alive(s):
                         s["players"][args.mechwolf_target]["alive"] = False
                         print(f"[Mw] 机械狼被处决，带走了 {args.mechwolf_target}")
+                if s["players"][t]["role"] == "white_wolf_king" and cfg.get("role_white_wolf_king"):
+                    ww_targets = getattr(args, 'white_wolf_targets', None) or getattr(args, 'white_wolf_target', None) or []
+                    if len(ww_targets) < 2:
+                        print(f"[!] 白狼王 {t} 被处决！需带两人，但只提供了 {len(ww_targets)} 个目标")
+                        print(f"[!] 正确: vote 加 --white-wolf 目标1 目标2")
+                    else:
+                        for ww_t in ww_targets[:2]:
+                            if ww_t in alive(s):
+                                s["players"][ww_t]["alive"] = False
+                                print(f"[WW] 白狼王带走了 {ww_t}")
+                                s["log"].append(f"白狼王 {t} 被处决带走了 {ww_t}")
         else:
             print(f"[J] 平票 ({' '.join(executed)})，")
             if not s.get("vote_round"):
@@ -329,12 +353,19 @@ def cmd_day_auto(args):
             t = extract_name(args.mechwolf, al)
             if t:
                 mechwolf_target = t
+    white_wolf_targets = []
+    if args.white_wolf and cfg.get("role_white_wolf_king"):
+        for name in args.white_wolf:
+            t = extract_name(name, al)
+            if t:
+                white_wolf_targets.append(t)
     vote_args = [f"{v}:{t}" for v, t in vote_pairs]
     import argparse
     ns = argparse.Namespace(
         speech=speeches, vote=vote_args,
         hunter_target=hunter_target,
         mechwolf_target=mechwolf_target,
+        white_wolf_targets=white_wolf_targets,
         last_words=args.last_words,
         pass_sheriff=args.pass_sheriff,
         no_sheriff_confirm=args.no_sheriff_confirm,

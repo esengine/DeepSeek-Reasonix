@@ -87,12 +87,14 @@ if __name__ == "__main__":
     p_day.add_argument("--idiot-reveal", action="store_true", help="白痴被投时选择翻牌")
     p_day.add_argument("--no-sheriff", action="store_true", help="确认第1天不选警长，直接投票")
     p_day.add_argument("--start-from", choices=["左", "右"], help="警长决定发言起始方向")
+    p_day.add_argument("--white-wolf-target", nargs="*", default=[], help="白狼王被投带走目标 目标1 目标2")
 
     p_day_auto = sub.add_parser("day-auto")
     p_day_auto.add_argument("--speech", nargs="*", default=[])
     p_day_auto.add_argument("--vote", nargs="*", default=[])
     p_day_auto.add_argument("--hunter")
     p_day_auto.add_argument("--mechwolf")
+    p_day_auto.add_argument("--white-wolf", nargs="*", default=[], help="白狼王被投带走目标 目标1 目标2")
     p_day_auto.add_argument("--last-words", nargs="*", default=[])
     p_day_auto.add_argument("--pass-sheriff", help="警长被处决时传给谁")
     p_day_auto.add_argument("--no-sheriff-confirm", action="store_true", help="跳过警长传位确认")
@@ -109,6 +111,7 @@ if __name__ == "__main__":
     p_vote.add_argument("--pass-sheriff", help="警长被处决时传给谁")
     p_vote.add_argument("--no-sheriff-confirm", action="store_true", help="跳过警长传位确认")
     p_vote.add_argument("--start-from", choices=["左", "右"], help="警长决定发言起始方向")
+    p_vote.add_argument("--white-wolf", nargs="*", default=[], help="白狼王被投带走目标 目标1 目标2")
 
     p_explode = sub.add_parser("explode")
     p_explode.add_argument("name")

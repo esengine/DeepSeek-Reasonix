@@ -200,6 +200,13 @@ def cmd_night(args):
             s["log"].append(f"预言家查验 {target} = {shown}")
             log_event("seer_check", {"round": s["round"], "seer": seer, "target": target, "result": shown})
 
+            # 咒狐：被验出局
+            if role == "curse_fox":
+                s["players"][target]["alive"] = False
+                print(f"  ☠️ 咒狐 {target} 被预言家查验，咒杀出局！")
+                s["log"].append(f"咒狐 {target} 被预言家查验反噬而死")
+                log_event("curse_fox_death", {"round": s["round"], "target": target})
+
     sheriff = s.get("sheriff")
     if sheriff and not s["players"].get(sheriff, {}).get("alive", True):
         if not args.pass_sheriff:
