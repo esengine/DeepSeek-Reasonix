@@ -45,14 +45,15 @@ func PlannerPromptWithContext(context string) string {
 // executor (a full tool-using Agent) carries it out. The sessions never mix, so
 // neither model's prefix is disturbed by the other's turns.
 type Coordinator struct {
-	planner        provider.Provider
-	plannerSess    *Session
-	plannerSystem  string
-	plannerPricing *provider.Pricing
-	plannerAgent   *Agent
-	executor       *Agent
-	temperature    float64
-	sink           event.Sink
+	planner           provider.Provider
+	plannerSess       *Session
+	plannerSystem     string
+	plannerPricing    *provider.Pricing
+	plannerAgent      *Agent
+	plannerModelName  string // for usage tracking
+	executor          *Agent
+	temperature       float64
+	sink              event.Sink
 	// shouldPlan gates the planner pass per turn; nil plans every turn. Lets a
 	// trivial, non-work turn (a question, a greeting) skip straight to the
 	// executor instead of paying a planner round on it.
@@ -63,7 +64,7 @@ type Coordinator struct {
 // sink receives the planner's phase/text/usage events; the executor emits its
 // own events to its own sink (the CLI wires the same sink into both). A nil
 // sink is replaced with event.Discard.
-func NewCoordinator(planner provider.Provider, plannerSession *Session, plannerPricing *provider.Pricing, plannerTools *tool.Registry, plannerOptions Options, executor *Agent, temperature float64, sink event.Sink, shouldPlan func(string) bool) *Coordinator {
+func NewCoordinator(planner provider.Provider, plannerSession *Session, plannerPricing *provider.Pricing, plannerTools *tool.Registry, plannerOptions Options, executor *Agent, temperature float64, sink event.Sink, shouldPlan func(string) bool, plannerModelName string) *Coordinator {
 	if nilutil.IsNil(sink) {
 		sink = event.Discard
 	}
@@ -82,12 +83,13 @@ func NewCoordinator(planner provider.Provider, plannerSession *Session, plannerP
 		executor.executorHandoffGuard = true
 	}
 	return &Coordinator{
-		planner:        planner,
-		plannerSess:    plannerSession,
-		plannerSystem:  plannerSystem,
-		plannerPricing: plannerPricing,
-		plannerAgent:   plannerAgent,
-		executor:       executor,
+		planner:           planner,
+		plannerSess:       plannerSession,
+		plannerSystem:     plannerSystem,
+		plannerPricing:    plannerPricing,
+		plannerAgent:      plannerAgent,
+		plannerModelName:  plannerModelName,
+		executor:          executor,
 		temperature:    temperature,
 		sink:           sink,
 		shouldPlan:     shouldPlan,
@@ -302,7 +304,14 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 	}
 	// Closes the planner's raw text block (no markdown redraw) and prints its
 	// usage line, mirroring the old Fprintln + printUsage tail.
-	c.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: c.plannerPricing, Source: event.UsageSourcePlanner, UsageSource: event.UsageSourcePlanner})
+	c.sink.Emit(event.Event{
+		Kind:         event.Usage,
+		Usage:        usage,
+		Pricing:      c.plannerPricing,
+		UsageSource:  event.UsageSourcePlanner,
+		ProviderName: c.planner.Name(),
+		ModelName:    c.plannerModelName,
+	})
 
 	plan := text.String()
 	c.plannerSess.Add(provider.Message{Role: provider.RoleAssistant, Content: plan})
