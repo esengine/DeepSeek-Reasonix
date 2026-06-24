@@ -2143,6 +2143,7 @@ func (m *chatTUI) commitPending() {
 	m.pending.Reset()
 	m.answerIdx = -1
 	m.answerFlushed = 0
+	m.lastParagraphBreak = 0
 }
 
 // flushableMarkdownPrefix returns the longest prefix of buf made of complete
@@ -2188,13 +2189,19 @@ func flushableMarkdownPrefix(buf string, lastBreak *int) string {
 	}
 
 	if boundary < 0 {
-		if lastBreak != nil && *lastBreak > 0 {
+		if lastBreak != nil && *lastBreak > 0 && *lastBreak <= len(buf) {
 			return buf[:*lastBreak]
 		}
 		return ""
 	}
 	if lastBreak != nil {
+		if boundary > len(buf) {
+			boundary = len(buf)
+		}
 		*lastBreak = boundary
+	}
+	if boundary > len(buf) {
+		boundary = len(buf)
 	}
 	return buf[:boundary]
 }
