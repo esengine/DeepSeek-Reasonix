@@ -1165,7 +1165,7 @@ func tabMatchesTopicTarget(tab *WorkspaceTab, scope, workspaceRoot, topicID stri
 func tabInWorkspace(tab *WorkspaceTab, workspaceRoot string) bool {
 	return tab != nil &&
 		tab.Scope == "project" &&
-		normalizeProjectRoot(tab.WorkspaceRoot) == normalizeProjectRoot(workspaceRoot)
+		sameDesktopPath(tab.WorkspaceRoot, workspaceRoot)
 }
 
 // EnsureBlankTab activates the existing blank tab for the target scope, or
@@ -2967,7 +2967,7 @@ func removeProject(root string) error {
 	f := loadProjectsFile()
 	projects := make([]desktopProject, 0, len(f.Projects))
 	for _, p := range f.Projects {
-		if p.Root != root {
+		if !sameDesktopPath(p.Root, root) {
 			projects = append(projects, p)
 		}
 	}

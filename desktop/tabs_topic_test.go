@@ -1008,6 +1008,50 @@ func TestRemoveWorkspaceUsesSharedProjectRegistryForCurrentProject(t *testing.T)
 	}
 }
 
+func TestRemoveWorkspaceRemovesWindowsPathCaseVariantsFromPersistentRegistries(t *testing.T) {
+	if os.PathSeparator != '\\' {
+		t.Skip("Windows path comparison regression")
+	}
+	isolateDesktopUserDirs(t)
+
+	storedRoot := `C:\Workspace\GamePlatform`
+	removeRoot := `c:\workspace\gameplatform`
+	if err := addProject(storedRoot, "GamePlatform"); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	rememberWorkspace(storedRoot)
+	saveWorkspace(storedRoot)
+
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"project": {ID: "project", Scope: "project", WorkspaceRoot: storedRoot, TopicID: "topic-project", Ready: true, disabledMCP: map[string]ServerView{}},
+			"global":  {ID: "global", Scope: "global", WorkspaceRoot: globalTabWorkspaceRoot(), Ready: true, disabledMCP: map[string]ServerView{}},
+		},
+		tabOrder:         []string{"project", "global"},
+		activeTabID:      "project",
+		detachedSessions: map[string]*WorkspaceTab{},
+	}
+	app.mu.Lock()
+	app.saveTabsLocked()
+	app.mu.Unlock()
+
+	if err := app.RemoveWorkspace(removeRoot); err != nil {
+		t.Fatalf("RemoveWorkspace: %v", err)
+	}
+	if got := loadProjectsFile().Projects; len(got) != 0 {
+		t.Fatalf("projects after case-variant remove = %+v, want none", got)
+	}
+	if got := loadWorkspaces(); len(got) != 0 {
+		t.Fatalf("legacy workspaces after case-variant remove = %+v, want none", got)
+	}
+	if got := loadWorkspace(); got != "" {
+		t.Fatalf("active workspace after case-variant remove = %q, want empty", got)
+	}
+	if got := loadTabsFile(); len(got.Tabs) != 1 || got.Tabs[0].ID != "global" {
+		t.Fatalf("persisted tabs after case-variant remove = %+v, want only global", got)
+	}
+}
+
 func TestRestoredProjectTabUsesStoredTopicTitle(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
