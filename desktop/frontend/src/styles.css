@@ -15123,6 +15123,33 @@ a[href] {
 .composer-context__item--session .composer-context__label > svg {
   color: var(--accent);
 }
+/* @ file reference — blue highlight chip variant */
+.composer-context__item--atfile {
+  border-color: #93c5fd;
+  background: linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%);
+  box-shadow: none;
+}
+.composer-context__item--atfile:hover {
+  border-color: #3b82f6;
+  background: linear-gradient(135deg, #bfdbfe 0%, #dbeafe 100%);
+}
+.composer-context__item--atfile .composer-context__label > svg {
+  color: #2563eb;
+}
+@media (prefers-color-scheme: dark) {
+  .composer-context__item--atfile {
+    border-color: #3b82f6;
+    background: linear-gradient(135deg, #1e3a5f 0%, #172554 100%);
+    box-shadow: none;
+  }
+  .composer-context__item--atfile:hover {
+    border-color: #60a5fa;
+    background: linear-gradient(135deg, #1e40af 0%, #1e3a5f 100%);
+  }
+  .composer-context__item--atfile .composer-context__label > svg {
+    color: #60a5fa;
+  }
+}
 .slashmenu__item--special {
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--accent) 5%, var(--panel));

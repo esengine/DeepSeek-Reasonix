@@ -395,6 +395,7 @@ export function Composer({
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [workspaceRefs, setWorkspaceRefs] = useState<WorkspaceReference[]>([]);
+  const [atFileRefs, setAtFileRefs] = useState<string[]>([]);
   const [pastedBlocks, setPastedBlocks] = useState<PastedBlock[]>([]);
   const [openPastedLabels, setOpenPastedLabels] = useState<string[]>([]);
   const [pendingPaste, setPendingPaste] = useState(0);
@@ -564,6 +565,7 @@ export function Composer({
     setLoadingPastChats(false);
     setActive(0);
     setDismissed(false);
+    setAtFileRefs([]);
   }, [cwd]);
 
   useEffect(() => {
@@ -892,7 +894,7 @@ export function Composer({
     if (disabled || submitDisabled || readOnly || submittingRef.current) return;
     const trimmedText = text.trim();
     if (pendingPaste > 0) return;
-    if (!trimmedText && attachments.length === 0 && workspaceRefs.length === 0) {
+    if (!trimmedText && attachments.length === 0 && workspaceRefs.length === 0 && atFileRefs.length === 0) {
       if (goalModeOn && !activeGoal) {
         setComposerPrompt(t("composer.goalInputRequired"));
         requestAnimationFrame(() => taRef.current?.focus());
@@ -906,10 +908,12 @@ export function Composer({
     const orderedAttachments = sortComposerAttachments(attachments);
     const refs = [
       ...workspaceRefs.map((ref) => formatWorkspaceReference(ref.path, ref.isDir)),
+      ...atFileRefs.map((f) => `@${f}`),
       ...orderedAttachments.map((a) => `@${a.path}`),
     ].join(" ");
     const displayRefs = [
       ...workspaceRefs.map((ref) => formatWorkspaceReference(ref.path, ref.isDir)),
+      ...atFileRefs.map((f) => `@${f}`),
       ...orderedAttachments.map(formatAttachmentDisplayReference),
     ].join(" ");
     const displayText = [trimmedText, displayRefs].filter(Boolean).join(trimmedText && displayRefs ? " " : "");
@@ -927,6 +931,7 @@ export function Composer({
     clearAttachments();
     setWorkspaceRefs([]);
     setSessionRefs([]);
+    setAtFileRefs([]);
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -1286,11 +1291,37 @@ export function Composer({
     saveComposerHeight(height);
   };
 
+  /**
+   * pickEntry — handles selection from the @ file dropdown.
+   * Directories keep the menu open (trailing "/" to browse deeper);
+   * files are added to atFileRefs as chips and the @token is removed.
+   */
   const pickEntry = (e: DirEntry) => {
-    const atPos = text.length - (atRaw?.length ?? 0) - 1; // index of '@'
-    const prefix = text.slice(0, atPos);
-    // A directory keeps the menu open (trailing "/"); a file completes it (space).
-    setTextCaretEnd(prefix + "@" + atDir + e.name + (e.isDir ? "/" : " "));
+    if (e.isDir) {
+      // Directory: keep original behaviour — append "/" and stay open.
+      const atPos = text.length - (atRaw?.length ?? 0) - 1; // index of '@'
+      const prefix = text.slice(0, atPos);
+      setTextCaretEnd(prefix + "@" + atDir + e.name + "/");
+    } else {
+      // File: add as a blue chip instead of plain text.
+      const fullPath = atDir + e.name;
+      setAtFileRefs((prev) => {
+        if (prev.includes(fullPath)) return prev;
+        return [...prev, fullPath];
+      });
+      // Remove the @token from the textarea.
+      const atPos = text.length - (atRaw?.length ?? 0) - 1;
+      const prefix = text.slice(0, atPos);
+      setTextCaretEnd(prefix.trimEnd());
+      // Close the dropdown menu.
+      setDismissed(true);
+    }
+  };
+
+  /** removeAtFileRef — removes a single @ file reference chip. */
+  const removeAtFileRef = (path: string) => {
+    setAtFileRefs((prev) => prev.filter((p) => p !== path));
+    requestAnimationFrame(() => taRef.current?.focus());
   };
 
   // --- past:chats session reference ---
@@ -1909,10 +1940,10 @@ export function Composer({
           </div>
         </div>
       )}
-      {(attachments.length > 0 || workspaceRefs.length > 0 || sessionRefs.length > 0) && (
+      {(attachments.length > 0 || workspaceRefs.length > 0 || atFileRefs.length > 0 || sessionRefs.length > 0) && (
         <div className="composer-context" aria-label={t("composer.contextItems")}>
           {sortComposerAttachments(attachments).map((a) => {
-            const imageOnly = Boolean(a.previewUrl) && attachments.every((item) => item.previewUrl) && workspaceRefs.length === 0 && sessionRefs.length === 0;
+            const imageOnly = Boolean(a.previewUrl) && attachments.every((item) => item.previewUrl) && workspaceRefs.length === 0 && atFileRefs.length === 0 && sessionRefs.length === 0;
             return (
               <ComposerContextCard
                 key={a.path}
@@ -1937,6 +1968,28 @@ export function Composer({
               folder={Boolean(ref.isDir)}
               label={ref.isDir ? `${baseName(ref.path)}/` : baseName(ref.path)}
             />
+          ))}
+          {atFileRefs.map((filePath) => (
+            <div
+              className="composer-context__item composer-context__item--atfile"
+              key={filePath}
+            >
+              <Tooltip label={filePath}>
+                <span className="composer-context__label">
+                  <FileText size={15} />
+                  <span>{baseName(filePath)}</span>
+                </span>
+              </Tooltip>
+              <Tooltip label={t("composer.removeReference")} className="composer-context__remove-trigger">
+                <button
+                  className="composer-context__remove"
+                  type="button"
+                  onClick={() => removeAtFileRef(filePath)}
+                >
+                  <X size={13} />
+                </button>
+              </Tooltip>
+            </div>
           ))}
           {sessionRefs.map((ref) => (
             <div
