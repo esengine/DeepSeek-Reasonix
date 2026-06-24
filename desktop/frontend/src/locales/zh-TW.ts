@@ -1056,8 +1056,11 @@ export const zhTW: Record<DictKey, string> = {
   "context.sessionCost": "本次費用",
   "context.requests": "請求數",
   "context.time": "耗時",
-  "context.durationSeconds": "{seconds}秒",
-  "context.durationMinutesSeconds": "{minutes}分{seconds}秒",
+  "context.durationSeparator": "",
+  "context.durationPartDays": "{days}天",
+  "context.durationPartHours": "{hours}時",
+  "context.durationPartMinutes": "{minutes}分",
+  "context.durationPartSeconds": "{seconds}秒",
 
   // 崩潰兜底頁
   "crash.title": "Reasonix 遇到錯誤 —— 請截圖傳送",

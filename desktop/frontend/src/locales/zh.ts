@@ -1642,8 +1642,11 @@ export const zh: Record<DictKey, string> = {
   "context.requests": "请求数",
   "context.time": "耗时",
   "context.compaction": "压缩状态",
-  "context.durationSeconds": "{seconds}秒",
-  "context.durationMinutesSeconds": "{minutes}分{seconds}秒",
+  "context.durationSeparator": "",
+  "context.durationPartDays": "{days}天",
+  "context.durationPartHours": "{hours}时",
+  "context.durationPartMinutes": "{minutes}分",
+  "context.durationPartSeconds": "{seconds}秒",
 
   // 崩溃兜底页
   "crash.title": "Reasonix 遇到错误 —— 可以一键发送报告，或复制后反馈",

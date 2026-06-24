@@ -18716,6 +18716,12 @@ a[href] {
   overflow: hidden;
 }
 
+.context-panel__metric-tooltip-target {
+  min-width: 0;
+  display: block;
+  outline: none;
+}
+
 .context-panel__metric span {
   min-width: 0;
   overflow: hidden;

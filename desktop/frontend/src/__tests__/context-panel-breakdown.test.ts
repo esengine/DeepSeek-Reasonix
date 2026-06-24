@@ -1,6 +1,12 @@
 // Run: tsx src/__tests__/context-panel-breakdown.test.ts
 
-import { contextBreakdown, contextCostDisplay, formatCacheHitRate } from "../components/ContextPanel";
+import {
+  contextBreakdown,
+  contextCostDisplay,
+  formatCacheHitRate,
+  formatDurationCompact,
+  formatDurationDetailed,
+} from "../components/ContextPanel";
 import { currencySymbol, formatMoney, formatMoneyLocalized } from "../lib/money";
 
 let passed = 0;
@@ -25,6 +31,20 @@ function ok(condition: boolean, label: string) {
     failed += 1;
   }
 }
+
+const durationTokens = {
+  "context.durationSeparator": " ",
+  "context.durationPartDays": "{days}d",
+  "context.durationPartHours": "{hours}h",
+  "context.durationPartMinutes": "{minutes}m",
+  "context.durationPartSeconds": "{seconds}s",
+} as const;
+
+const enT = (key: string, vars?: Record<string, string | number>) => {
+  const template = durationTokens[key as keyof typeof durationTokens];
+  if (!template) return key.replace(/^context\./, "").replace(/[A-Z]/g, (m) => m.toLowerCase()) + JSON.stringify(vars ?? {});
+  return template.replace(/\{(\w+)\}/g, (_, name) => String(vars?.[name] ?? `{${name}}`));
+};
 
 console.log("\ncontext panel breakdown");
 
@@ -101,6 +121,20 @@ console.log("\ncontext panel cache rate");
 eq(formatCacheHitRate(99_950, 50), "99.95%", "cache hit rate preserves two decimal places");
 eq(formatCacheHitRate(0, 10_000), "0.00%", "cache hit rate shows zero when usage data exists");
 eq(formatCacheHitRate(0, 0), "-", "cache hit rate stays empty before usage data exists");
+
+console.log("\ncontext panel compact duration");
+
+eq(formatDurationCompact(42_000, enT as never), "42s", "sub-minute duration stays in seconds");
+eq(formatDurationCompact(90_000, enT as never), "1m 30s", "minute-scale duration keeps minute and second units");
+eq(formatDurationCompact(3_721_000, enT as never), "1h 2m", "hour-scale duration switches to compact hour/minute form");
+eq(formatDurationCompact(190_800_000, enT as never), "2d 5h", "day-scale duration switches to compact day/hour form");
+
+console.log("\ncontext panel detailed duration");
+
+eq(formatDurationDetailed(42_000, enT as never), "42s", "detailed duration keeps seconds-only output for short runs");
+eq(formatDurationDetailed(90_000, enT as never), "1m 30s", "detailed duration includes minute and second units");
+eq(formatDurationDetailed(3_721_000, enT as never), "1h 2m 1s", "detailed duration includes trailing seconds for hour-scale runs");
+eq(formatDurationDetailed(190_800_000, enT as never), "2d 5h", "detailed duration omits lower zero-value units");
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);
