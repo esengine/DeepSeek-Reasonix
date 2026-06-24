@@ -926,7 +926,7 @@ function reasoningProtocolLabel(protocol: string, t: ReturnType<typeof useT>): s
 
 function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agentRunning: boolean }) {
   const { t, setPref } = useI18n();
-  const closeBehavior = normalizeCloseBehavior(s.closeBehavior);
+  const [closeBehavior, setCloseBehavior] = useState(() => normalizeCloseBehavior(s.closeBehavior));
   const [displayMode, setDisplayMode] = useState<DisplayMode>(() => normalizeDisplayMode(getDisplayMode()));
   const [statusBarItemsExpanded, setStatusBarItemsExpanded] = useState(false);
   const [draggingStatusBarItem, setDraggingStatusBarItem] = useState<StatusBarItemId | null>(null);
@@ -938,14 +938,14 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   const statusBarItemsPanelId = useId();
   useEffect(() => onDisplayModeChange((mode) => setDisplayMode(mode)), []);
   useEffect(() => () => mouseDragCleanupRef.current?.(), []);
-  const autoPlan = normalizeAutoPlan(s.autoPlan);
+  const [autoPlan, setAutoPlan] = useState(() => normalizeAutoPlan(s.autoPlan));
   const languagePref = normalizeLangPref(s.desktopLanguage);
-  const desktopLayoutStyle = normalizeDesktopLayoutStyle(s.desktopLayoutStyle);
+  const [localDesktopLayoutStyle, setLocalDesktopLayoutStyle] = useState(() => normalizeDesktopLayoutStyle(s.desktopLayoutStyle));
   const [genMusicPreset, setGenMusicPreset] = useState<GenerativePreset>(getGenerativePreset());
   const [soundPref, setSoundPref] = useState<SoundWavPref>(getSuccessPreference());
   const [attentionPref, setAttentionPref] = useState<SoundWavPref>(getAttentionPreference());
   const [soundExpanded, setSoundExpanded] = useState(false);
-  const statusBarStyle = normalizeStatusBarStyle(s.statusBarStyle);
+  const [statusBarStyle, setStatusBarStyle] = useState(() => normalizeStatusBarStyle(s.statusBarStyle));
   const statusBarItems = normalizeStatusBarItems(s.statusBarItems);
   const soundStatus = summarizeSoundStatus(genMusicPreset, soundPref, attentionPref);
   const visibleStatusItems = new Set<StatusBarItemId>(statusBarItems);
@@ -1116,9 +1116,9 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           {(["classic", "workbench", "creation"] as const).map((style) => (
             <button
               key={style}
-              className={`set-seg__btn${desktopLayoutStyle === style ? " set-seg__btn--on" : ""}`}
+              className={`set-seg__btn${localDesktopLayoutStyle === style ? " set-seg__btn--on" : ""}`}
               disabled={busy}
-              onClick={() => void apply(() => app.SetDesktopLayoutStyle(style))}
+              onClick={() => { setLocalDesktopLayoutStyle(style); void apply(() => app.SetDesktopLayoutStyle(style)); }}
             >
               {desktopLayoutStyleLabel(style, t)}
             </button>
@@ -1132,7 +1132,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
               key={mode}
               className={`set-seg__btn${closeBehavior === mode ? " set-seg__btn--on" : ""}`}
               disabled={busy}
-              onClick={() => void apply(() => app.SetCloseBehavior(mode))}
+              onClick={() => { setCloseBehavior(mode); void apply(() => app.SetCloseBehavior(mode)); }}
             >
               {closeBehaviorLabel(mode, t)}
             </button>
@@ -1163,7 +1163,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
               key={mode}
               className={`set-seg__btn${autoPlan === mode ? " set-seg__btn--on" : ""}`}
               disabled={busy}
-              onClick={() => void apply(() => app.SetAutoPlan(mode))}
+              onClick={() => { setAutoPlan(mode); void apply(() => app.SetAutoPlan(mode)); }}
             >
               {t(`settings.autoPlan.${mode}`)}
             </button>
@@ -1250,7 +1250,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
               key={style}
               className={`set-seg__btn${statusBarStyle === style ? " set-seg__btn--on" : ""}`}
               disabled={busy}
-              onClick={() => void apply(() => app.SetStatusBarStyle(style))}
+              onClick={() => { setStatusBarStyle(style); void apply(() => app.SetStatusBarStyle(style)); }}
             >
               {t(`settings.statusBarStyle.${style}`)}
             </button>
@@ -5374,6 +5374,9 @@ function UpdatesSection({
 }) {
   const t = useT();
   const { status, check, download: downloadUpdate, install: installUpdate } = useUpdater();
+  const [localCheckUpdates, setLocalCheckUpdates] = useState(checkUpdates);
+  const [localTelemetry, setLocalTelemetry] = useState(telemetry);
+  const [localMetrics, setLocalMetrics] = useState(metrics);
   const [version, setVersion] = useState("");
   useEffect(() => {
     app.Version().then(setVersion).catch(() => {});
@@ -5390,9 +5393,9 @@ function UpdatesSection({
         hint={t("updater.autoCheckHint")}
       >
         <ToggleSegment
-          value={checkUpdates}
+          value={localCheckUpdates}
           disabled={settingsBusy}
-          onChange={(enabled) => void applySettings(() => app.SetDesktopCheckUpdates(enabled))}
+          onChange={(enabled) => { setLocalCheckUpdates(enabled); void applySettings(() => app.SetDesktopCheckUpdates(enabled)); }}
         />
       </SettingsField>
       <SettingsField
@@ -5401,9 +5404,9 @@ function UpdatesSection({
         hint={t("settings.telemetryHint")}
       >
         <ToggleSegment
-          value={telemetry}
+          value={localTelemetry}
           disabled={settingsBusy}
-          onChange={(enabled) => void applySettings(() => app.SetDesktopTelemetry(enabled))}
+          onChange={(enabled) => { setLocalTelemetry(enabled); void applySettings(() => app.SetDesktopTelemetry(enabled)); }}
         />
       </SettingsField>
       <SettingsField
@@ -5412,9 +5415,9 @@ function UpdatesSection({
         hint={t("settings.metricsHint")}
       >
         <ToggleSegment
-          value={metrics}
+          value={localMetrics}
           disabled={settingsBusy}
-          onChange={(enabled) => void applySettings(() => app.SetDesktopMetrics(enabled))}
+          onChange={(enabled) => { setLocalMetrics(enabled); void applySettings(() => app.SetDesktopMetrics(enabled)); }}
         />
       </SettingsField>
       <SettingsField label={t("updater.currentVersion", { v: version || "…" })}>
