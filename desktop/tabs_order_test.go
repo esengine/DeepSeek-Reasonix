@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/config"
-	"reasonix/internal/control"
-	"reasonix/internal/event"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/event"
 )
 
 func testAppWithOrderedTabs(t *testing.T, active string, ids ...string) *App {

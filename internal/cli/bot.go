@@ -11,10 +11,10 @@ import (
 	"syscall"
 	"time"
 
-	"reasonix/internal/bot"
-	"reasonix/internal/bot/weixin"
-	"reasonix/internal/botruntime"
-	"reasonix/internal/config"
+	"qiaotongagent/internal/bot"
+	"qiaotongagent/internal/bot/weixin"
+	"qiaotongagent/internal/botruntime"
+	"qiaotongagent/internal/config"
 )
 
 func botCommand(args []string, version string) int {
@@ -135,7 +135,7 @@ func botStart(args []string, version string) int {
 		gw.Stop()
 	}()
 
-	fmt.Fprintf(os.Stderr, "reasonix bot starting (model: %s, channels: %s)...\n", modelName, *channels)
+	fmt.Fprintf(os.Stderr, "qiaotongagent bot starting (model: %s, channels: %s)...\n", modelName, *channels)
 	fmt.Fprintf(os.Stderr, "version: %s\n", version)
 
 	if err := gw.Start(ctx); err != nil {
@@ -241,7 +241,7 @@ func botDoctor(args []string) int {
 		} else if weixin.HasSavedAccount(bc.Weixin.AccountID) {
 			addCheck("bot.weixin.token", "ok", "saved iLink account is available")
 		} else {
-			addCheck("bot.weixin.token", "missing", bc.Weixin.TokenEnv+" is not set; run `reasonix bot weixin-login` to save an iLink account")
+			addCheck("bot.weixin.token", "missing", bc.Weixin.TokenEnv+" is not set; run `qiaotongagent bot weixin-login` to save an iLink account")
 		}
 	} else {
 		addCheck("bot.weixin", "disabled", "")
@@ -335,7 +335,7 @@ func botWeixinLogin(args []string) int {
 		return 1
 	}
 	fmt.Printf("\n微信登录成功: account_id=%s user_id=%s base_url=%s\n", result.AccountID, result.UserID, result.BaseURL)
-	fmt.Println("凭据已保存到 Reasonix 用户配置目录；也可以把 [bot.weixin] account_id 设置为该 account_id。")
+	fmt.Println("凭据已保存到 QiaotongAgent 用户配置目录；也可以把 [bot.weixin] account_id 设置为该 account_id。")
 
 	return 0
 }
@@ -370,12 +370,12 @@ func botConfigIsUserOwned(bc config.BotConfig) bool {
 }
 
 func botUsage() {
-	fmt.Print(`reasonix bot — multi-channel IM bot gateway (QQ / Feishu / WeChat)
+	fmt.Print(`qiaotongagent bot — multi-channel IM bot gateway (QQ / Feishu / WeChat)
 
 Usage:
-  reasonix bot start   [--channels qq,feishu,lark,weixin] [--dir PATH] [--model NAME]
-  reasonix bot doctor  [--json]
-  reasonix bot weixin-login [--timeout SECONDS]
+  qiaotongagent bot start   [--channels qq,feishu,lark,weixin] [--dir PATH] [--model NAME]
+  qiaotongagent bot doctor  [--json]
+  qiaotongagent bot weixin-login [--timeout SECONDS]
 
 Subcommands:
   start         启动 bot 网关
@@ -383,12 +383,12 @@ Subcommands:
   weixin-login  微信 iLink 二维码登录
 
 Examples:
-  reasonix bot start --channels qq,feishu
-  reasonix bot start --dir /path/to/project --model deepseek-pro
-  reasonix bot doctor --json
+  qiaotongagent bot start --channels qq,feishu
+  qiaotongagent bot start --dir /path/to/project --model deepseek-pro
+  qiaotongagent bot doctor --json
 
 Configuration:
-  Edit reasonix.toml:
+  Edit qiaotongagent.toml:
     [bot]           enabled / model / max_steps
     [bot.allowlist]  enabled / qq_users / feishu_users / weixin_users
     [bot.qq]         enabled / app_id / app_secret_env

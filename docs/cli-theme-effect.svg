@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="920" height="500" viewBox="0 0 920 500" role="img" aria-labelledby="title desc">
-  <title id="title">Reasonix CLI theme switching preview</title>
+  <title id="title">QiaotongAgent CLI theme switching preview</title>
   <desc id="desc">A terminal preview showing the /theme command listing styles and switching to aurora.</desc>
   <defs>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
@@ -16,9 +16,9 @@
   <circle cx="110" cy="75" r="6" fill="#ff5f56"/>
   <circle cx="130" cy="75" r="6" fill="#ffbd2e"/>
   <circle cx="150" cy="75" r="6" fill="#27c93f"/>
-  <text x="460" y="80" fill="#8a8a93" text-anchor="middle" class="sans" font-size="13">reasonix chat</text>
+  <text x="460" y="80" fill="#8a8a93" text-anchor="middle" class="sans" font-size="13">qiaotongagent chat</text>
 
-  <text x="112" y="132" fill="#d97757" class="mono" font-size="16">◆ reasonix chat</text>
+  <text x="112" y="132" fill="#d97757" class="mono" font-size="16">◆ qiaotongagent chat</text>
   <text x="300" y="132" fill="#777780" class="mono" font-size="16">· deepseek/deepseek-reasoner</text>
 
   <text x="112" y="178" fill="#34c3a6" class="mono" font-size="15">/theme</text>
@@ -35,7 +35,7 @@
   <text x="112" y="392" fill="#a3a3ab" class="mono" font-size="15">  · theme switched to aurora</text>
 
   <rect x="110" y="414" width="700" height="1.5" fill="#34c3a6"/>
-  <text x="126" y="440" fill="#ededef" class="mono" font-size="15">Ask Reasonix...</text>
+  <text x="126" y="440" fill="#ededef" class="mono" font-size="15">Ask QiaotongAgent...</text>
   <rect x="110" y="454" width="700" height="1.5" fill="#34c3a6"/>
 
   <rect x="590" y="172" width="180" height="32" rx="8" fill="#d97757" fill-opacity="0.18" stroke="#d97757"/>

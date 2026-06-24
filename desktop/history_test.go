@@ -8,10 +8,10 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/control"
-	"reasonix/internal/event"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/provider"
 )
 
 func TestHistoryMessagesIncludeAssistantReasoning(t *testing.T) {

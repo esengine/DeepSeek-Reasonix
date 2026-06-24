@@ -15,11 +15,11 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"reasonix/internal/config"
-	"reasonix/internal/event"
-	"reasonix/internal/i18n"
-	"reasonix/internal/notify"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/i18n"
+	"qiaotongagent/internal/notify"
+	"qiaotongagent/internal/provider"
 )
 
 func TestChdirTo(t *testing.T) {
@@ -100,7 +100,7 @@ func TestMetadataCommandsDoNotProbeTerminalTheme(t *testing.T) {
 			t.Fatalf("version rc = %d, want 0", rc)
 		}
 	})
-	if !strings.Contains(out, "reasonix test-version") {
+	if !strings.Contains(out, "qiaotongagent test-version") {
 		t.Fatalf("version output = %q", out)
 	}
 
@@ -112,7 +112,7 @@ func TestMetadataCommandsDoNotProbeTerminalTheme(t *testing.T) {
 	if !strings.Contains(out, "Usage:") && !strings.Contains(out, "用法：") {
 		t.Fatalf("help output missing usage:\n%s", out)
 	}
-	if !strings.Contains(out, "reasonix run  [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] <task>") {
+	if !strings.Contains(out, "qiaotongagent run  [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] <task>") {
 		t.Fatalf("help output missing run resume flags:\n%s", out)
 	}
 }
@@ -133,7 +133,7 @@ func TestRunDispatchesACPLongFlagAlias(t *testing.T) {
 
 func TestRunMigratesLegacyConfigBeforeConfigOnlyCommands(t *testing.T) {
 	isolateCLIConfigHome(t)
-	legacyPath := filepath.Join(filepath.Dir(config.UserConfigPath()), "reasonix.toml")
+	legacyPath := filepath.Join(filepath.Dir(config.UserConfigPath()), "qiaotongagent.toml")
 	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ command = "legacy-bin"
 
 func TestRunMetadataCommandsDoNotMigrateLegacyConfig(t *testing.T) {
 	isolateCLIConfigHome(t)
-	legacyPath := filepath.Join(filepath.Dir(config.UserConfigPath()), "reasonix.toml")
+	legacyPath := filepath.Join(filepath.Dir(config.UserConfigPath()), "qiaotongagent.toml")
 	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestRunMetadataCommandsDoNotMigrateLegacyConfig(t *testing.T) {
 			t.Fatalf("version rc = %d, want 0", rc)
 		}
 	})
-	if !strings.Contains(out, "reasonix test-version") {
+	if !strings.Contains(out, "qiaotongagent test-version") {
 		t.Fatalf("version output = %q", out)
 	}
 	if _, err := os.Stat(config.UserConfigPath()); !os.IsNotExist(err) {
@@ -225,7 +225,7 @@ func TestConfigAutoPlanLocalCreatesMinimalProjectOverride(t *testing.T) {
 		t.Fatalf("config auto-plan --local output = %q", out)
 	}
 
-	body, err := os.ReadFile("reasonix.toml")
+	body, err := os.ReadFile("qiaotongagent.toml")
 	if err != nil {
 		t.Fatalf("read project config: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestConfigReasoningLanguageLocalCreatesMinimalProjectOverride(t *testing.T)
 		t.Fatalf("config reasoning-language --local output = %q", out)
 	}
 
-	body, err := os.ReadFile("reasonix.toml")
+	body, err := os.ReadFile("qiaotongagent.toml")
 	if err != nil {
 		t.Fatalf("read project config: %v", err)
 	}
@@ -323,10 +323,10 @@ func TestWelcomePromptMissingKeysRequiresConfigSource(t *testing.T) {
 	if welcomeShouldPromptMissingKeys("", nil) {
 		t.Fatal("built-in defaults without a config source should not prompt for missing provider keys")
 	}
-	if welcomeShouldPromptMissingKeys("reasonix.toml", errors.New("bad config")) {
+	if welcomeShouldPromptMissingKeys("qiaotongagent.toml", errors.New("bad config")) {
 		t.Fatal("invalid config should not enter the missing-key prompt path")
 	}
-	if !welcomeShouldPromptMissingKeys("reasonix.toml", nil) {
+	if !welcomeShouldPromptMissingKeys("qiaotongagent.toml", nil) {
 		t.Fatal("valid config source should enter the missing-key prompt path")
 	}
 }
@@ -625,10 +625,10 @@ func TestFetchOrFallback(t *testing.T) {
 	})
 
 	t.Run("no key set returns static list (offline first-run)", func(t *testing.T) {
-		t.Setenv("REASONIX_FETCH_TEST_KEY", "")
+		t.Setenv("QIAOTONGAGENT_FETCH_TEST_KEY", "")
 		probe := config.ProviderEntry{
 			BaseURL:   "http://127.0.0.1:1", // unreachable, no listener
-			APIKeyEnv: "REASONIX_FETCH_TEST_KEY",
+			APIKeyEnv: "QIAOTONGAGENT_FETCH_TEST_KEY",
 			Models:    []string{"preset-a"},
 		}
 		got := fetchOrFallback(&probe, "Test")
@@ -879,7 +879,7 @@ func TestProviderSlug(t *testing.T) {
 
 // TestFilterStaleCustomEntries covers the wizard's auto-cleanup of legacy
 // "custom" / "anthropic" magic-name entries that previous versions wrote
-// into reasonix.toml. These collide with the wizard's own menu items, so
+// into qiaotongagent.toml. These collide with the wizard's own menu items, so
 // they're dropped from the providers list before grouping — but the caller
 // still gets them back in the dropped slice to surface a warning.
 func TestFilterStaleCustomEntries(t *testing.T) {
@@ -927,7 +927,7 @@ func TestFilterStaleCustomEntries(t *testing.T) {
 }
 
 func TestWithBuiltinFamiliesAddsMissingMiMo(t *testing.T) {
-	// The user's case: a reasonix.toml that defines only deepseek providers.
+	// The user's case: a qiaotongagent.toml that defines only deepseek providers.
 	cfg := []config.ProviderEntry{
 		{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com"},
 		{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com"},
@@ -952,7 +952,7 @@ func groupByFamilyKeys(ps []config.ProviderEntry, key string) []int {
 }
 
 func TestWriteDefaultConfigDisablesCodegraph(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "reasonix.toml")
+	path := filepath.Join(t.TempDir(), "qiaotongagent.toml")
 	if rc := writeDefaultConfig(path); rc != 0 {
 		t.Fatalf("writeDefaultConfig rc = %d", rc)
 	}

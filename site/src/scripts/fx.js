@@ -1,4 +1,4 @@
-// Reasonix — motion & FX layer (all effects respect data-motion + prefers-reduced-motion)
+// QiaotongAgent — motion & FX layer (all effects respect data-motion + prefers-reduced-motion)
 (function () {
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const rich = () => document.body.dataset.motion === "rich" && !reduced;

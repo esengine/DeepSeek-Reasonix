@@ -1,6 +1,6 @@
 # 会话引用功能架构文档
 
-> GitHub Issue: https://github.com/esengine/DeepSeek-Reasonix/issues/3185
+> GitHub Issue: https://github.com/esengine/DeepSeek-QiaotongAgent/issues/3185
 
 ## 1. 功能需求
 

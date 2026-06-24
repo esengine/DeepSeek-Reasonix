@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"reasonix/internal/config"
-	"reasonix/internal/control"
-	"reasonix/internal/skill"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/skill"
 )
 
 func TestNormalizeSkillPathDirectoryLayout(t *testing.T) {
@@ -31,7 +31,7 @@ func TestSkillRootsViewCountsProjectSkills(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	project := t.TempDir()
-	root := filepath.Join(project, ".reasonix", "skills")
+	root := filepath.Join(project, ".qiaotongagent", "skills")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -77,12 +77,12 @@ func TestSkillRootsViewMarksEnvConfiguredCustomRoot(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "custom.md"), []byte("---\ndescription: custom\n---\nbody"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("REASONIX_TEST_SKILL_ROOT", root)
+	t.Setenv("QIAOTONGAGENT_TEST_SKILL_ROOT", root)
 	cfgPath := config.UserConfigPath()
 	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(cfgPath, []byte("[skills]\npaths = [\"${REASONIX_TEST_SKILL_ROOT}\"]\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte("[skills]\npaths = [\"${QIAOTONGAGENT_TEST_SKILL_ROOT}\"]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	wd, err := os.Getwd()

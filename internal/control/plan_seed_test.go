@@ -3,8 +3,8 @@ package control
 import (
 	"testing"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/event"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/event"
 )
 
 func TestParsePlanTodos(t *testing.T) {

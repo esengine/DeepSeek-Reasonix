@@ -3,7 +3,7 @@ package cli
 import (
 	"testing"
 
-	"reasonix/internal/command"
+	"qiaotongagent/internal/command"
 )
 
 func TestChatCommandNames(t *testing.T) {

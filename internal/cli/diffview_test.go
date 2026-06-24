@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/event"
+	"qiaotongagent/internal/event"
 )
 
 func TestDiffBodyDropsHeadersKeepsLineNumbers(t *testing.T) {

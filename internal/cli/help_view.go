@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"reasonix/internal/command"
-	"reasonix/internal/i18n"
-	"reasonix/internal/plugin"
-	"reasonix/internal/skill"
+	"qiaotongagent/internal/command"
+	"qiaotongagent/internal/i18n"
+	"qiaotongagent/internal/plugin"
+	"qiaotongagent/internal/skill"
 )
 
 const helpMaxDynamicItems = 8

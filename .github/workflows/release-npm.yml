@@ -11,10 +11,10 @@ name: Release npm
 #   git push origin <tag>
 #
 # A manual workflow_dispatch with base_version publishes an opt-in canary to the
-# `canary` dist-tag (npm i reasonix@canary) from the current ref; it never moves
+# `canary` dist-tag (npm i qiaotongagent@canary) from the current ref; it never moves
 # `next`/`latest`. build.mjs decides the dist-tag: 0.x stable is `latest`; a
 # `-canary.` build is `canary`; the 1.x line and rc prereleases are `next`. Promote
-# a 1.x stable to the default install with `npm dist-tag add reasonix@X.Y.Z latest`.
+# a 1.x stable to the default install with `npm dist-tag add qiaotongagent@X.Y.Z latest`.
 on:
   push:
     tags: ['npm-v*']

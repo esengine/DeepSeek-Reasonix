@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/proc"
+	"qiaotongagent/internal/proc"
 )
 
 // TestReapTreeKillsGroupStragglers covers #3702: a foreground command that

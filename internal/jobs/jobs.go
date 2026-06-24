@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"reasonix/internal/event"
-	"reasonix/internal/nilutil"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/nilutil"
 )
 
 // Status is a job's lifecycle state.

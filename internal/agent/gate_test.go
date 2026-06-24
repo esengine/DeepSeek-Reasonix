@@ -3,12 +3,12 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"reasonix/internal/event"
+	"qiaotongagent/internal/event"
 	"strings"
 	"testing"
 
-	"reasonix/internal/provider"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/tool"
 )
 
 // stubGate denies any call whose tool name is in deny; everything else allows.

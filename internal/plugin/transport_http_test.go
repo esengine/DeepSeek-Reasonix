@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/tool"
 )
 
 // mcpHTTPServer is a minimal Streamable HTTP MCP server for tests. When sse is

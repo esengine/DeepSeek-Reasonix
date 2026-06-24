@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/tool"
 )
 
 const (

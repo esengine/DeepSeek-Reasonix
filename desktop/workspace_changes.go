@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"reasonix/internal/proc"
+	"qiaotongagent/internal/proc"
 )
 
 type gitStatusEntry struct {

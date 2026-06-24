@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"reasonix/internal/event"
+	"qiaotongagent/internal/event"
 )
 
 func TestBroadcasterFanOut(t *testing.T) {

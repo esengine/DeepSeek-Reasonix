@@ -2,8 +2,8 @@
 // PreToolUse / PostToolUse fire around each tool call, PermissionRequest fires
 // before a tool approval prompt is shown, UserPromptSubmit before a turn, Stop
 // after it. Hooks come from settings.json — a project
-// (.reasonix/settings.json, only when the project is trusted) and a global
-// (~/.reasonix/settings.json) file. A hook's exit
+// (.qiaotongagent/settings.json, only when the project is trusted) and a global
+// (~/.qiaotongagent/settings.json) file. A hook's exit
 // code is its verdict: 0 = pass, 2 = block (only on the gating events), other =
 // warn. The payload is delivered as JSON on stdin; output is captured (capped)
 // and surfaced to the user. This package only loads, matches, and runs hooks;
@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"reasonix/internal/proc"
+	"qiaotongagent/internal/proc"
 )
 
 // Event is a point in the agent loop a hook can fire at.
@@ -125,16 +125,16 @@ func (h ResolvedHook) timeout() time.Duration {
 
 // SettingsDirname / SettingsFilename locate a scope's settings.json.
 const (
-	SettingsDirname  = ".reasonix"
+	SettingsDirname  = ".qiaotongagent"
 	SettingsFilename = "settings.json"
 )
 
-// GlobalSettingsPath is ~/.reasonix/settings.json (homeDir overrides ~).
+// GlobalSettingsPath is ~/.qiaotongagent/settings.json (homeDir overrides ~).
 func GlobalSettingsPath(homeDir string) string {
 	return filepath.Join(home(homeDir), SettingsDirname, SettingsFilename)
 }
 
-// ProjectSettingsPath is <root>/.reasonix/settings.json.
+// ProjectSettingsPath is <root>/.qiaotongagent/settings.json.
 func ProjectSettingsPath(projectRoot string) string {
 	return filepath.Join(projectRoot, SettingsDirname, SettingsFilename)
 }

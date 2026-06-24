@@ -4,7 +4,7 @@ set -euo pipefail
 root="$(git rev-parse --show-toplevel)"
 desktop_dir="$root/desktop"
 
-vite_port="${REASONIX_DESKTOP_VITE_PORT:-}"
+vite_port="${QIAOTONGAGENT_DESKTOP_VITE_PORT:-}"
 if [[ $# -gt 0 && "$1" =~ ^[0-9]+$ ]]; then
   vite_port="$1"
   shift
@@ -25,15 +25,15 @@ if (( vite_port < 1024 || vite_port > 36000 )); then
   exit 2
 fi
 
-wails_port="${REASONIX_DESKTOP_WAILS_PORT:-$((vite_port + 29000))}"
+wails_port="${QIAOTONGAGENT_DESKTOP_WAILS_PORT:-$((vite_port + 29000))}"
 
-export REASONIX_DESKTOP_VITE_PORT="$vite_port"
-export REASONIX_DEV=1
+export QIAOTONGAGENT_DESKTOP_VITE_PORT="$vite_port"
+export QIAOTONGAGENT_DEV=1
 # pnpm honors npm_config_* not PNPM_CONFIG_*; suppress headless TTY purge prompt + age gate.
 export npm_config_confirm_modules_purge=false
 export npm_config_minimum_release_age=0
 
-echo "Reasonix desktop dev"
+echo "QiaotongAgent desktop dev"
 echo "  worktree: $root"
 echo "  vite:     http://127.0.0.1:$vite_port"
 echo "  wails:    127.0.0.1:$wails_port"

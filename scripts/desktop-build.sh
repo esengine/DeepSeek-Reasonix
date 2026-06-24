@@ -5,12 +5,12 @@
 #
 # Output lands in <repo>/dist/ with stable, platform-keyed names that
 # desktop/cmd/sign's `manifest` subcommand maps back to update.PlatformKey:
-#   macOS:   Reasonix-darwin-<arch>.zip                  (ditto archive; updater channel)
-#            Reasonix-darwin-universal.dmg               (drag-to-install; human download)
-#   Windows: Reasonix-windows-<arch>-installer.exe       (NSIS per-user installer; updater channel)
-#            Reasonix-windows-<arch>.zip                 (portable human download)
-#   Linux:   Reasonix-linux-<arch>.tar.gz                (bare binary; updater channel)
-#            Reasonix-linux-<arch>.deb                   (Debian/Ubuntu package; human download)
+#   macOS:   QiaotongAgent-darwin-<arch>.zip                  (ditto archive; updater channel)
+#            QiaotongAgent-darwin-universal.dmg               (drag-to-install; human download)
+#   Windows: QiaotongAgent-windows-<arch>-installer.exe       (NSIS per-user installer; updater channel)
+#            QiaotongAgent-windows-<arch>.zip                 (portable human download)
+#   Linux:   QiaotongAgent-linux-<arch>.tar.gz                (bare binary; updater channel)
+#            QiaotongAgent-linux-<arch>.deb                   (Debian/Ubuntu package; human download)
 #
 # Usage: scripts/desktop-build.sh <os/arch> <version> [channel]
 #   e.g. scripts/desktop-build.sh darwin/arm64 v1.1.0
@@ -25,8 +25,8 @@ os="${PLATFORM%/*}"
 arch="${PLATFORM#*/}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APPNAME="Reasonix"            # wails.json productName -> Reasonix.app
-BINNAME="reasonix-desktop"    # wails.json outputfilename -> linux binary name
+APPNAME="QiaotongAgent"            # wails.json productName -> QiaotongAgent.app
+BINNAME="qiaotongagent-desktop"    # wails.json outputfilename -> linux binary name
 
 cd "$ROOT/desktop"
 
@@ -52,11 +52,11 @@ mkdir -p "$ROOT/dist"
 
 case "$os" in
 darwin)
-	# Wails names the bundle after outputfilename (reasonix-desktop.app); repackage
-	# it as Reasonix.app for a clean user-facing name.
+	# Wails names the bundle after outputfilename (qiaotongagent-desktop.app); repackage
+	# it as QiaotongAgent.app for a clean user-facing name.
 	staging=$(mktemp -d)
 	app="$staging/${APPNAME}.app"
-	cp -R "build/bin/reasonix-desktop.app" "$app"
+	cp -R "build/bin/qiaotongagent-desktop.app" "$app"
 
 	# Two signing paths, selected by HAS_APPLE_CERT (set by release-desktop.yml when
 	# the APPLE_* secrets are present). With a real Developer ID cert + notarization

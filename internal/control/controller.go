@@ -29,27 +29,27 @@ import (
 	"time"
 	"unicode"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/billing"
-	"reasonix/internal/builtinmcp"
-	"reasonix/internal/checkpoint"
-	"reasonix/internal/codegraph"
-	"reasonix/internal/command"
-	"reasonix/internal/config"
-	"reasonix/internal/diff"
-	"reasonix/internal/event"
-	"reasonix/internal/evidence"
-	"reasonix/internal/hook"
-	"reasonix/internal/i18n"
-	"reasonix/internal/jobs"
-	"reasonix/internal/memory"
-	"reasonix/internal/nilutil"
-	"reasonix/internal/permission"
-	"reasonix/internal/plugin"
-	"reasonix/internal/provider"
-	"reasonix/internal/sandbox"
-	"reasonix/internal/skill"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/billing"
+	"qiaotongagent/internal/builtinmcp"
+	"qiaotongagent/internal/checkpoint"
+	"qiaotongagent/internal/codegraph"
+	"qiaotongagent/internal/command"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/diff"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/evidence"
+	"qiaotongagent/internal/hook"
+	"qiaotongagent/internal/i18n"
+	"qiaotongagent/internal/jobs"
+	"qiaotongagent/internal/memory"
+	"qiaotongagent/internal/nilutil"
+	"qiaotongagent/internal/permission"
+	"qiaotongagent/internal/plugin"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/sandbox"
+	"qiaotongagent/internal/skill"
+	"qiaotongagent/internal/tool"
 )
 
 // ErrTurnRunning reports that a caller tried to start a second foreground turn
@@ -1126,7 +1126,7 @@ func (c *Controller) notice(text string) {
 }
 
 // Run executes a turn synchronously, returning the agent's error. Used by the
-// headless `reasonix run` path, where the Sink renders to stdout and the caller
+// headless `qiaotongagent run` path, where the Sink renders to stdout and the caller
 // just needs the exit status — no TurnDone event, no cancel bookkeeping.
 func (c *Controller) Run(ctx context.Context, input string) error {
 	c.maybeSessionStart(ctx)
@@ -2318,7 +2318,7 @@ func (c *Controller) AddMCPServer(e config.PluginEntry) (int, error) {
 
 // ConnectMCPServer connects an MCP server entry for this session without writing
 // it to config. Desktop owns config placement so it can keep user-level settings
-// out of project reasonix.toml while preserving the CLI AddMCPServer semantics.
+// out of project qiaotongagent.toml while preserving the CLI AddMCPServer semantics.
 func (c *Controller) ConnectMCPServer(e config.PluginEntry) (int, error) {
 	return c.connectMCPServer(e)
 }
@@ -2721,7 +2721,7 @@ func (c *Controller) Bypass() bool {
 // is disabled.
 
 // QuickAdd appends a one-line note to the doc-memory file for scope (project
-// REASONIX.md by default) — the write side of "#<note>". Returns the file written.
+// QIAOTONGAGENT.md by default) — the write side of "#<note>". Returns the file written.
 func (c *Controller) QuickAdd(scope memory.Scope, note string) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

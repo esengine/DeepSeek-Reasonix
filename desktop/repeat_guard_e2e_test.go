@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/agent"
-	agenttest "reasonix/internal/agent/testutil"
-	"reasonix/internal/control"
-	"reasonix/internal/event"
-	"reasonix/internal/provider"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/agent"
+	agenttest "qiaotongagent/internal/agent/testutil"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/tool"
 )
 
 type desktopCountingTool struct {

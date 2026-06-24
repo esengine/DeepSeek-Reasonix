@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/provider"
 )
 
 func TestBuildRequestEmbedsImagesForVisionModel(t *testing.T) {

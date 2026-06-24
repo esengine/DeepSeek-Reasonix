@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/event"
-	"reasonix/internal/provider"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/tool"
 )
 
 func testTaskContext() context.Context {
@@ -183,7 +183,7 @@ func TestTaskToolRequiresTranscriptStore(t *testing.T) {
 	}
 }
 
-// TestTaskToolRunsEphemerallyWithoutParentSession mirrors headless `reasonix run`:
+// TestTaskToolRunsEphemerallyWithoutParentSession mirrors headless `qiaotongagent run`:
 // the store is wired but the context carries no parent session, so the sub-agent
 // must run without persistence and return its plain answer (no transcript ref).
 func TestTaskToolRunsEphemerallyWithoutParentSession(t *testing.T) {

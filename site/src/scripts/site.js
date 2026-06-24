@@ -1,4 +1,4 @@
-// Reasonix site — vanilla interactions
+// QiaotongAgent site — vanilla interactions
 (function () {
   const motionOK = () =>
     document.body.dataset.motion === "rich" &&
@@ -96,7 +96,7 @@
   });
 
   /* language switch */
-  const LANG_KEY = "reasonix-lang";
+  const LANG_KEY = "qiaotongagent-lang";
   const langBtns = Array.from(document.querySelectorAll(".lang-switch button"));
   const setLang = (l) => {
     document.body.dataset.lang = l;
@@ -144,7 +144,7 @@
   });
 
   /* refresh the Go-preview version from the published manifest between rebuilds */
-  fetch("https://dl.reasonix.io/latest/latest.json", { cache: "no-cache" })
+  fetch("https://dl.qiaotongagent.io/latest/latest.json", { cache: "no-cache" })
     .then((r) => (r.ok ? r.json() : null))
     .then((d) => {
       const v = String((d && d.version) || "").replace(/^v/, "");

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
   <title id="title">Feishu bot approval interaction</title>
-  <desc id="desc">A synthetic Feishu chat showing a Reasonix bot approval card with allow and deny buttons.</desc>
+  <desc id="desc">A synthetic Feishu chat showing a QiaotongAgent bot approval card with allow and deny buttons.</desc>
   <defs>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#111827" flood-opacity="0.14"/>
@@ -12,7 +12,7 @@
   </defs>
   <rect width="1280" height="720" rx="0" fill="#f6f4ef"/>
   <text x="72" y="82" fill="#15171a" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="750">Feishu approval card</text>
-  <text x="72" y="118" fill="#69707d" font-family="Inter, Arial, sans-serif" font-size="18">When a sensitive tool needs permission, Reasonix sends a card with clear actions.</text>
+  <text x="72" y="118" fill="#69707d" font-family="Inter, Arial, sans-serif" font-size="18">When a sensitive tool needs permission, QiaotongAgent sends a card with clear actions.</text>
 
   <rect x="72" y="160" width="736" height="480" rx="24" fill="#ffffff" filter="url(#shadow)"/>
   <rect x="72" y="160" width="736" height="58" rx="24" fill="#f4f7ff"/>

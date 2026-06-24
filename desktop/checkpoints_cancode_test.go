@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/checkpoint"
-	"reasonix/internal/control"
-	"reasonix/internal/event"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/checkpoint"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/event"
 )
 
 func seedCheckpoint(t *testing.T, ckptDir string, c checkpoint.Checkpoint) {

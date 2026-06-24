@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/control"
-	"reasonix/internal/memory"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/memory"
+	"qiaotongagent/internal/provider"
 )
 
 func TestMemorySuggestionsReturnsNonNilArraysBeforeStartup(t *testing.T) {
@@ -131,11 +131,11 @@ func TestMemorySuggestionsForTabUsesSelectedTab(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AcceptSkillSuggestionForTab: %v", err)
 	}
-	wantSkillPath := filepath.Join(selectedCwd, ".reasonix", "skills", "selected-workflow", "SKILL.md")
+	wantSkillPath := filepath.Join(selectedCwd, ".qiaotongagent", "skills", "selected-workflow", "SKILL.md")
 	if skillPath != wantSkillPath {
 		t.Fatalf("skill path = %q, want %q", skillPath, wantSkillPath)
 	}
-	if _, err := os.Stat(filepath.Join(activeCwd, ".reasonix", "skills", "selected-workflow", "SKILL.md")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(activeCwd, ".qiaotongagent", "skills", "selected-workflow", "SKILL.md")); !os.IsNotExist(err) {
 		t.Fatalf("active workspace should not receive selected skill, stat err = %v", err)
 	}
 	body, err := os.ReadFile(skillPath)
@@ -172,19 +172,19 @@ func TestMemorySuggestionsAcceptSkillCandidate(t *testing.T) {
 	view := app.MemorySuggestions()
 	var candidate SkillSuggestion
 	for _, item := range view.Skills {
-		if item.Name == "reasonix-pr-followup" {
+		if item.Name == "qiaotongagent-pr-followup" {
 			candidate = item
 			break
 		}
 	}
 	if candidate.Name == "" {
-		t.Fatalf("MemorySuggestions() skills = %+v, want reasonix-pr-followup", view.Skills)
+		t.Fatalf("MemorySuggestions() skills = %+v, want qiaotongagent-pr-followup", view.Skills)
 	}
 	path, err := app.AcceptSkillSuggestion(candidate)
 	if err != nil {
 		t.Fatalf("AcceptSkillSuggestion: %v", err)
 	}
-	wantSuffix := filepath.Join(".reasonix", "skills", "reasonix-pr-followup", "SKILL.md")
+	wantSuffix := filepath.Join(".qiaotongagent", "skills", "qiaotongagent-pr-followup", "SKILL.md")
 	if !strings.HasSuffix(path, wantSuffix) {
 		t.Fatalf("skill path = %q, want suffix %q", path, wantSuffix)
 	}
@@ -192,7 +192,7 @@ func TestMemorySuggestionsAcceptSkillCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read skill: %v", err)
 	}
-	if !strings.Contains(string(body), "Review or update a Reasonix GitHub PR") {
+	if !strings.Contains(string(body), "Review or update a QiaotongAgent GitHub PR") {
 		t.Fatalf("skill body missing description: %s", body)
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/provider"
 )
 
 func newClient(t *testing.T, baseURL, effort string) *client {

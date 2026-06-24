@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/event"
-	"reasonix/internal/permission"
-	"reasonix/internal/provider"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/permission"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/tool"
 )
 
 // TestAutoApproveToolsStillAutoPlansAndRequiresPlanApproval drives the same

@@ -11,15 +11,15 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"reasonix/internal/diff"
-	"reasonix/internal/event"
-	"reasonix/internal/evidence"
-	"reasonix/internal/instruction"
-	"reasonix/internal/jobs"
-	"reasonix/internal/memory"
-	"reasonix/internal/nilutil"
-	"reasonix/internal/provider"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/diff"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/evidence"
+	"qiaotongagent/internal/instruction"
+	"qiaotongagent/internal/jobs"
+	"qiaotongagent/internal/memory"
+	"qiaotongagent/internal/nilutil"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/tool"
 )
 
 // maxToolOutputBytes caps a single tool result before it goes into the model's
@@ -310,7 +310,7 @@ func (a *Agent) SetReasoningLanguage(lang string) {
 	a.reasoningLanguage.Store(NormalizeReasoningLanguage(lang))
 }
 
-// SetGate installs the per-call permission gate. Used by `reasonix chat` to swap the
+// SetGate installs the per-call permission gate. Used by `qiaotongagent chat` to swap the
 // headless gate built in setup for an interactive one that prompts the user;
 // nil disables gating. Safe to call before the run loop starts.
 func (a *Agent) SetGate(g Gate) {
@@ -357,7 +357,7 @@ func (a *Agent) Session() *Session {
 }
 
 // SetSession replaces the agent's conversation wholesale. Used by
-// `reasonix chat --resume` to load a saved JSONL transcript before the first turn,
+// `qiaotongagent chat --resume` to load a saved JSONL transcript before the first turn,
 // so the model picks up exactly where it left off. Callers serialise it against a
 // running turn (it only fires while idle); sessMu guards the pointer swap itself.
 func (a *Agent) SetSession(s *Session) {

@@ -26,7 +26,7 @@ func TestComposeEmptyIsIdentity(t *testing.T) {
 // so the base stays a valid cache prefix even as memory changes between sessions.
 func TestComposeAppendsAfterBase(t *testing.T) {
 	base := "BASE PROMPT"
-	set := &Set{Docs: []Source{{Path: "/p/REASONIX.md", Scope: ScopeProject, Body: "Use tabs."}}}
+	set := &Set{Docs: []Source{{Path: "/p/QIAOTONGAGENT.md", Scope: ScopeProject, Body: "Use tabs."}}}
 	got := Compose(base, set)
 	if !strings.HasPrefix(got, base) {
 		t.Fatalf("base is not the prefix of the composed prompt:\n%q", got)
@@ -47,9 +47,9 @@ func TestDiscoverPrecedenceOrder(t *testing.T) {
 	// Make proj a git root so discovery stops there.
 	mustMkdir(t, filepath.Join(proj, ".git"))
 
-	mustWrite(t, filepath.Join(user, "REASONIX.md"), "USER LEVEL")
-	mustWrite(t, filepath.Join(proj, "REASONIX.md"), "PROJECT LEVEL")
-	mustWrite(t, filepath.Join(proj, "REASONIX.local.md"), "LOCAL LEVEL")
+	mustWrite(t, filepath.Join(user, "QIAOTONGAGENT.md"), "USER LEVEL")
+	mustWrite(t, filepath.Join(proj, "QIAOTONGAGENT.md"), "PROJECT LEVEL")
+	mustWrite(t, filepath.Join(proj, "QIAOTONGAGENT.local.md"), "LOCAL LEVEL")
 
 	set := Load(Options{CWD: proj, UserDir: user})
 	if len(set.Docs) != 3 {
@@ -74,7 +74,7 @@ func TestImportResolution(t *testing.T) {
 	proj := t.TempDir()
 	mustMkdir(t, filepath.Join(proj, ".git"))
 	mustWrite(t, filepath.Join(proj, "shared.md"), "SHARED CONTENT")
-	mustWrite(t, filepath.Join(proj, "REASONIX.md"), "Top line\n@shared.md\nBottom line")
+	mustWrite(t, filepath.Join(proj, "QIAOTONGAGENT.md"), "Top line\n@shared.md\nBottom line")
 
 	set := Load(Options{CWD: proj})
 	if len(set.Docs) != 1 {
@@ -95,7 +95,7 @@ func TestImportCycleDoesNotHang(t *testing.T) {
 	mustMkdir(t, filepath.Join(proj, ".git"))
 	mustWrite(t, filepath.Join(proj, "a.md"), "A\n@b.md")
 	mustWrite(t, filepath.Join(proj, "b.md"), "B\n@a.md")
-	mustWrite(t, filepath.Join(proj, "REASONIX.md"), "@a.md")
+	mustWrite(t, filepath.Join(proj, "QIAOTONGAGENT.md"), "@a.md")
 
 	set := Load(Options{CWD: proj}) // must return, not loop forever
 	body := set.Docs[0].Body
@@ -146,7 +146,7 @@ func TestImportDiamondAndCycle(t *testing.T) {
 	mustWrite(t, filepath.Join(proj, "shared.md"), "SHARED CONTENT")
 	mustWrite(t, filepath.Join(proj, "a.md"), "A\n@shared.md")
 	mustWrite(t, filepath.Join(proj, "b.md"), "B\n@shared.md")
-	mustWrite(t, filepath.Join(proj, "REASONIX.md"), "@a.md\n@b.md")
+	mustWrite(t, filepath.Join(proj, "QIAOTONGAGENT.md"), "@a.md\n@b.md")
 
 	set := Load(Options{CWD: proj})
 	if len(set.Docs) != 1 {
@@ -166,7 +166,7 @@ func TestImportDiamondAndCycle(t *testing.T) {
 	mustMkdir(t, filepath.Join(projCycle, ".git"))
 	mustWrite(t, filepath.Join(projCycle, "cycle1.md"), "CYCLE1\n@cycle2.md")
 	mustWrite(t, filepath.Join(projCycle, "cycle2.md"), "CYCLE2\n@cycle1.md")
-	mustWrite(t, filepath.Join(projCycle, "REASONIX.md"), "@cycle1.md")
+	mustWrite(t, filepath.Join(projCycle, "QIAOTONGAGENT.md"), "@cycle1.md")
 
 	setCycle := Load(Options{CWD: projCycle})
 	if len(setCycle.Docs) != 1 {

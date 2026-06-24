@@ -1,7 +1,7 @@
 package codegraph
 
 // releaseAssetSHA256 holds the upstream SHA256SUMS values for Version. These
-// are baked into the reasonix binary so downloaded CodeGraph archives are
+// are baked into the qiaotongagent binary so downloaded CodeGraph archives are
 // verified against trusted metadata instead of trusting whichever mirror served
 // the bytes.
 var releaseAssetSHA256 = map[string]string{

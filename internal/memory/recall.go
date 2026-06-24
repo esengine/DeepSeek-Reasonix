@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"reasonix/internal/retrieval"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/retrieval"
+	"qiaotongagent/internal/tool"
 )
 
 const (

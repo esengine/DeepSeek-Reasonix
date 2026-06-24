@@ -6,7 +6,7 @@
 // would need.
 //
 // CodeGraph is fetched on first use into a per-version cache (see Install) rather
-// than shipped in the reasonix binary, which keeps installs small. Resolve finds
+// than shipped in the qiaotongagent binary, which keeps installs small. Resolve finds
 // the cached launcher; an explicit config path, a system-installed `codegraph` on
 // PATH, and a bundle placed beside the executable are also honored. boot injects
 // the resolved launcher as one more stdio plugin, pinned to the project root via
@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	"reasonix/internal/proc"
+	"qiaotongagent/internal/proc"
 )
 
 const initTimeout = 30 * time.Second
@@ -35,10 +35,10 @@ const daemonProbeTimeout = 300 * time.Millisecond
 // DaemonIdleTimeoutEnv is CodeGraph's own root-scoped daemon idle timeout knob.
 const DaemonIdleTimeoutEnv = "CODEGRAPH_DAEMON_IDLE_TIMEOUT_MS"
 
-// ReasonixDaemonIdleTimeoutMS keeps Reasonix-launched daemons short-lived after
+// QiaotongAgentDaemonIdleTimeoutMS keeps QiaotongAgent-launched daemons short-lived after
 // the last client disconnects while still preserving CodeGraph's shared-client
 // refcount semantics.
-const ReasonixDaemonIdleTimeoutMS = "1000"
+const QiaotongAgentDaemonIdleTimeoutMS = "1000"
 
 type daemonInfo struct {
 	PID        int    `json:"pid"`
@@ -65,7 +65,7 @@ You have codegraph tools for symbol-level code intelligence. For architecture qu
 - mcp__codegraph__status — code-intelligence index build/health status
 Use grep/read_file for content search (comments, strings, config values) and when codegraph is not available.`
 
-// BundleDirName is the optional directory, beside the reasonix executable, where
+// BundleDirName is the optional directory, beside the qiaotongagent executable, where
 // an operator can place an unpacked CodeGraph bundle for offline use. Its
 // launcher lives at <BundleDirName>/bin/codegraph, with the bundled node runtime
 // and lib/ beside it; the launcher resolves those relative to itself, so the
@@ -98,7 +98,7 @@ func Resolve(override string) (string, bool) {
 	return "", false
 }
 
-// bundled looks for the CodeGraph launcher unpacked beside the reasonix binary.
+// bundled looks for the CodeGraph launcher unpacked beside the qiaotongagent binary.
 // The executable path is symlink-resolved first so a launcher installed via a
 // symlink (e.g. a package manager's bin shim) still points at the real bundle.
 func bundled() (string, bool) {
@@ -258,7 +258,7 @@ func readDaemonInfo(root string) (daemonInfo, bool) {
 // recorded PID still answers on the daemon socket as the same CodeGraph process.
 // This is intentionally for explicit cleanup paths such as tests/diagnostics:
 // CodeGraph daemons are root-scoped and may be shared by other MCP clients, so a
-// normal Reasonix controller close must only close its proxy connection and let
+// normal QiaotongAgent controller close must only close its proxy connection and let
 // CodeGraph's own refcount/idle timer own daemon lifetime.
 func KillDaemon(root string) {
 	info, ok := readDaemonInfo(root)

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/provider"
 )
 
 // TodoItem mirrors the todo_write item shape the host needs for step matching.

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"reasonix/internal/mcpdiag"
+	"qiaotongagent/internal/mcpdiag"
 )
 
 func (m chatTUI) renderMCPManager() string {
@@ -212,7 +212,7 @@ func (p *mcpManager) renderConfirmRemove(width int) string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Remove MCP server %q?\n", v.Name)
-	b.WriteString(viewMeta("This removes it from Reasonix config. It cannot be undone from this panel.") + "\n\n")
+	b.WriteString(viewMeta("This removes it from QiaotongAgent config. It cannot be undone from this panel.") + "\n\n")
 	b.WriteString(rowLine(p.confirm == 0, 1, "", "Confirm remove", false) + "\n")
 	b.WriteString(rowLine(p.confirm == 1, 2, "", "Cancel", false) + "\n")
 	return strings.TrimRight(b.String(), "\n")

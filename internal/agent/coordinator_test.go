@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reasonix/internal/event"
+	"qiaotongagent/internal/event"
 	"strings"
 	"testing"
 
-	"reasonix/internal/provider"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/tool"
 )
 
 // mockProvider replays preset chunks and records the last request it received.
@@ -94,7 +94,7 @@ func TestHandoffTaskRecoversOriginalInput(t *testing.T) {
 	if got := HandoffTask(formatHandoff(multi, "plan")); got != multi {
 		t.Errorf("HandoffTask(multi-line) = %q, want %q", got, multi)
 	}
-	for _, plain := range []string{"ordinary input", "", "# Reasonix executor handoff with no sections"} {
+	for _, plain := range []string{"ordinary input", "", "# QiaotongAgent executor handoff with no sections"} {
 		if got := HandoffTask(plain); got != plain {
 			t.Errorf("HandoffTask(%q) = %q, want unchanged", plain, got)
 		}
@@ -149,7 +149,7 @@ func (t coordinatorTestTool) ReadOnly() bool { return t.readOnly }
 func TestCoordinatorPlannerUsesReadOnlyResearchTools(t *testing.T) {
 	planner := &mockProvider{name: "planner", streams: [][]provider.Chunk{
 		{
-			{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "read_file", Arguments: `{"path":"REASONIX.md"}`}},
+			{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "read_file", Arguments: `{"path":"QIAOTONGAGENT.md"}`}},
 			{Type: provider.ChunkDone},
 		},
 		{
@@ -223,7 +223,7 @@ func TestCoordinatorSetReasoningLanguageClearsPlannerAgent(t *testing.T) {
 
 func TestCoordinatorPlannerMaxStepsUsesPlannerConfigKey(t *testing.T) {
 	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
-		{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "read_file", Arguments: `{"path":"REASONIX.md"}`}},
+		{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "read_file", Arguments: `{"path":"QIAOTONGAGENT.md"}`}},
 		{Type: provider.ChunkDone},
 	}}
 	exec := &mockProvider{name: "executor", chunks: []provider.Chunk{

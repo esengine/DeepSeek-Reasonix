@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.svg" alt="Reasonix" width="640"/>
+  <img src="docs/logo.svg" alt="QiaotongAgent" width="640"/>
 </p>
 
 <p align="center">
@@ -11,32 +11,32 @@
   &nbsp;·&nbsp;
   <a href="./docs/SPEC.md">Spec</a>
   &nbsp;·&nbsp;
-  <a href="https://esengine.github.io/DeepSeek-Reasonix/">Website</a>
+  <a href="https://esengine.github.io/DeepSeek-QiaotongAgent/">Website</a>
   &nbsp;·&nbsp;
   <strong><a href="https://discord.gg/XF78rEME2D">Discord</a></strong>
 </p>
 
 > [!IMPORTANT]
-> **Reasonix 1.0 is a ground-up rewrite in Go** — this branch (`main-v2`) is the new default and where development happens now.
-> The earlier `0.x` TypeScript releases are **legacy**, living on the [`v1`](https://github.com/esengine/DeepSeek-Reasonix/tree/v1) branch (maintenance only).
-> See the **[migration guide](./docs/MIGRATING.md)**. `npm i -g reasonix` stays the install command — `1.0.0`+ delivers the Go binary, `0.x` is the legacy TS build.
+> **QiaotongAgent 1.0 is a ground-up rewrite in Go** — this branch (`main-v2`) is the new default and where development happens now.
+> The earlier `0.x` TypeScript releases are **legacy**, living on the [`v1`](https://github.com/esengine/DeepSeek-QiaotongAgent/tree/v1) branch (maintenance only).
+> See the **[migration guide](./docs/MIGRATING.md)**. `npm i -g qiaotongagent` stays the install command — `1.0.0`+ delivers the Go binary, `0.x` is the legacy TS build.
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/v/reasonix.svg?style=flat-square&color=cb3837&labelColor=161b22&logo=npm&logoColor=white" alt="npm version"/></a>
-  <a href="https://github.com/esengine/DeepSeek-Reasonix/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/esengine/DeepSeek-Reasonix/ci.yml?style=flat-square&label=ci&labelColor=161b22&logo=githubactions&logoColor=white" alt="CI"/></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/reasonix.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
-  <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/dm/reasonix.svg?style=flat-square&color=3fb950&labelColor=161b22&label=downloads" alt="downloads"/></a>
-  <a href="https://github.com/esengine/DeepSeek-Reasonix/stargazers"><img src="https://img.shields.io/github/stars/esengine/DeepSeek-Reasonix.svg?style=flat-square&color=dbab09&labelColor=161b22&logo=github&logoColor=white" alt="GitHub stars"/></a>
-  <a href="https://atomgit.com/esengine/DeepSeek-Reasonix"><img src="https://atomgit.com/esengine/DeepSeek-Reasonix/star/badge.svg" alt="AtomGit stars"/></a>
-  <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors"><img src="https://img.shields.io/github/contributors/esengine/DeepSeek-Reasonix.svg?style=flat-square&color=bc8cff&labelColor=161b22&logo=github&logoColor=white" alt="contributors"/></a>
-  <a href="https://github.com/esengine/DeepSeek-Reasonix/discussions"><img src="https://img.shields.io/github/discussions/esengine/DeepSeek-Reasonix.svg?style=flat-square&color=58a6ff&labelColor=161b22&logo=github&logoColor=white" alt="Discussions"/></a>
+  <a href="https://www.npmjs.com/package/qiaotongagent"><img src="https://img.shields.io/npm/v/qiaotongagent.svg?style=flat-square&color=cb3837&labelColor=161b22&logo=npm&logoColor=white" alt="npm version"/></a>
+  <a href="https://github.com/esengine/DeepSeek-QiaotongAgent/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/esengine/DeepSeek-QiaotongAgent/ci.yml?style=flat-square&label=ci&labelColor=161b22&logo=githubactions&logoColor=white" alt="CI"/></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/qiaotongagent.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
+  <a href="https://www.npmjs.com/package/qiaotongagent"><img src="https://img.shields.io/npm/dm/qiaotongagent.svg?style=flat-square&color=3fb950&labelColor=161b22&label=downloads" alt="downloads"/></a>
+  <a href="https://github.com/esengine/DeepSeek-QiaotongAgent/stargazers"><img src="https://img.shields.io/github/stars/esengine/DeepSeek-QiaotongAgent.svg?style=flat-square&color=dbab09&labelColor=161b22&logo=github&logoColor=white" alt="GitHub stars"/></a>
+  <a href="https://atomgit.com/esengine/DeepSeek-QiaotongAgent"><img src="https://atomgit.com/esengine/DeepSeek-QiaotongAgent/star/badge.svg" alt="AtomGit stars"/></a>
+  <a href="https://github.com/esengine/DeepSeek-QiaotongAgent/graphs/contributors"><img src="https://img.shields.io/github/contributors/esengine/DeepSeek-QiaotongAgent.svg?style=flat-square&color=bc8cff&labelColor=161b22&logo=github&logoColor=white" alt="contributors"/></a>
+  <a href="https://github.com/esengine/DeepSeek-QiaotongAgent/discussions"><img src="https://img.shields.io/github/discussions/esengine/DeepSeek-QiaotongAgent.svg?style=flat-square&color=58a6ff&labelColor=161b22&logo=github&logoColor=white" alt="Discussions"/></a>
   <a href="https://discord.gg/XF78rEME2D"><img src="https://img.shields.io/badge/discord-join-5865F2.svg?style=flat-square&labelColor=161b22&logo=discord&logoColor=white" alt="Discord"/></a>
 </p>
 
 <p align="center">
-  <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/9e931d80-2050-4b10-902e-44970cc133ad.svg" alt="oosmetrics — Top 2 in Agents by velocity"/></a>
-  <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/556d94b3-61b7-486b-baf2-888b9327deab.svg" alt="oosmetrics — Top 3 in LLMs by velocity"/></a>
-  <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/0f457d4c-efca-4d15-ad2b-139691ff342c.svg" alt="oosmetrics — Top 3 in CLI by velocity"/></a>
+  <a href="https://oosmetrics.com/repo/esengine/qiaotongagent"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/9e931d80-2050-4b10-902e-44970cc133ad.svg" alt="oosmetrics — Top 2 in Agents by velocity"/></a>
+  <a href="https://oosmetrics.com/repo/esengine/qiaotongagent"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/556d94b3-61b7-486b-baf2-888b9327deab.svg" alt="oosmetrics — Top 3 in LLMs by velocity"/></a>
+  <a href="https://oosmetrics.com/repo/esengine/qiaotongagent"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/0f457d4c-efca-4d15-ad2b-139691ff342c.svg" alt="oosmetrics — Top 3 in CLI by velocity"/></a>
 </p>
 
 <br/>
@@ -54,7 +54,7 @@
 ## Features
 
 - **Config-driven.** Providers, the agent, enabled tools, and plugins are all
-  declared in `reasonix.toml`. No hardcoded models.
+  declared in `qiaotongagent.toml`. No hardcoded models.
 - **Multi-model & composable.** DeepSeek (flash/pro) and MiMo ship as presets;
   any OpenAI-compatible endpoint is a config entry, not new code. Optionally run
   two models together (executor + planner) in separate, cache-stable sessions.
@@ -66,12 +66,12 @@
 ## Install
 
 ```sh
-npm i -g reasonix                  # any OS; pulls the prebuilt native binary
-brew install esengine/reasonix/reasonix   # macOS
+npm i -g qiaotongagent                  # any OS; pulls the prebuilt native binary
+brew install esengine/qiaotongagent/qiaotongagent   # macOS
 ```
 
 Prebuilt archives (`darwin|linux|windows × amd64|arm64`) and `SHA256SUMS` are on
-every [GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases).
+every [GitHub release](https://github.com/esengine/DeepSeek-QiaotongAgent/releases).
 
 ### Code signing
 
@@ -82,24 +82,24 @@ Windows builds are code-signed with a free certificate provided by the
 ### Build from source
 
 ```sh
-make build      # -> bin/reasonix(.exe)
+make build      # -> bin/qiaotongagent(.exe)
 make cross      # -> dist/ (darwin|linux|windows × amd64|arm64)
 ```
 
 ## Quick start
 
 ```sh
-reasonix setup                      # config wizard → ./reasonix.toml
+qiaotongagent setup                      # config wizard → ./qiaotongagent.toml
 export DEEPSEEK_API_KEY=sk-...  # or put it in .env (see .env.example)
-reasonix chat                       # then run /init to generate AGENTS.md (project memory)
-reasonix run "implement the TODOs in main.go"
-reasonix run --model mimo-pro "add unit tests for this function"
-echo "explain this code" | reasonix run
+qiaotongagent chat                       # then run /init to generate AGENTS.md (project memory)
+qiaotongagent run "implement the TODOs in main.go"
+qiaotongagent run --model mimo-pro "add unit tests for this function"
+echo "explain this code" | qiaotongagent run
 ```
 
 ## Configuration
 
-A minimal `reasonix.toml` — one provider and a default model — is enough to start:
+A minimal `qiaotongagent.toml` — one provider and a default model — is enough to start:
 
 ```toml
 default_model = "deepseek-flash"
@@ -112,9 +112,9 @@ model       = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
 ```
 
-Resolution order is **flag > `./reasonix.toml` > the user config file >
-built-in defaults**; the user file lives in your OS config dir — `~/.config/reasonix/`
-on Linux, `~/Library/Application Support/reasonix/` on macOS, `%AppData%\reasonix\` on
+Resolution order is **flag > `./qiaotongagent.toml` > the user config file >
+built-in defaults**; the user file lives in your OS config dir — `~/.config/qiaotongagent/`
+on Linux, `~/Library/Application Support/qiaotongagent/` on macOS, `%AppData%\qiaotongagent\` on
 Windows. Secrets come from the environment via `api_key_env` and are
 never written to config files. Permissions, the sandbox, plugins (MCP), slash
 commands, `@` references, and two-model setup are all in the
@@ -137,11 +137,11 @@ commands, `@` references, and two-model setup are all in the
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=esengine%2FDeepSeek-Reasonix&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=esengine%2FDeepSeek-QiaotongAgent&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=esengine/DeepSeek-Reasonix&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=esengine/DeepSeek-Reasonix&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=esengine/DeepSeek-Reasonix&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=esengine/DeepSeek-QiaotongAgent&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=esengine/DeepSeek-QiaotongAgent&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=esengine/DeepSeek-QiaotongAgent&type=date&legend=top-left" />
  </picture>
 </a>
 
@@ -149,7 +149,7 @@ commands, `@` references, and two-model setup are all in the
 
 ## Support
 
-If Reasonix has been useful and you'd like to say thanks, you can. It stays a coffee, not a contract — donations don't buy feature priority or change how issues get triaged.
+If QiaotongAgent has been useful and you'd like to say thanks, you can. It stays a coffee, not a contract — donations don't buy feature priority or change how issues get triaged.
 
 - **International** — PayPal: [paypal.me/yuhuahui](https://paypal.me/yuhuahui)
 - **国内** — 微信支付（扫码）
@@ -162,10 +162,10 @@ If Reasonix has been useful and you'd like to say thanks, you can. It stays a co
 
 ## Acknowledgments
 
-A small list of folks whose work has shaped Reasonix the most — measured
+A small list of folks whose work has shaped QiaotongAgent the most — measured
 by both commit count and code volume. **Listed alphabetically, no ordering
 of importance.** The full contributor graph is on
-[GitHub](https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors).
+[GitHub](https://github.com/esengine/DeepSeek-QiaotongAgent/graphs/contributors).
 
 - [**ctharvey**](https://github.com/ctharvey)
 - [**dimasd-angga**](https://github.com/dimasd-angga) (Dimas D. Angga)
@@ -182,8 +182,8 @@ for designing the project logo, and to
 [AIGC Link](https://xhslink.com/m/80ngts127cA) for promoting the project on XiaoHongShu.
 
 <p align="center">
-  <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">
-    <img src="https://contrib.rocks/image?repo=esengine/DeepSeek-Reasonix&max=100&columns=12" alt="Contributors to esengine/DeepSeek-Reasonix" width="860"/>
+  <a href="https://github.com/esengine/DeepSeek-QiaotongAgent/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=esengine/DeepSeek-QiaotongAgent&max=100&columns=12" alt="Contributors to esengine/DeepSeek-QiaotongAgent" width="860"/>
   </a>
 </p>
 
@@ -194,5 +194,5 @@ for designing the project logo, and to
 <p align="center">
   <sub>MIT — see <a href="./LICENSE">LICENSE</a></sub>
   <br/>
-  <sub>Built by the community at <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">esengine/DeepSeek-Reasonix</a></sub>
+  <sub>Built by the community at <a href="https://github.com/esengine/DeepSeek-QiaotongAgent/graphs/contributors">esengine/DeepSeek-QiaotongAgent</a></sub>
 </p>

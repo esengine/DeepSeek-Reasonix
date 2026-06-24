@@ -1,8 +1,8 @@
 package codegraph
 
-import "reasonix/internal/plugin"
+import "qiaotongagent/internal/plugin"
 
-// MCPSpec returns the built-in CodeGraph MCP plugin spec used by every Reasonix
+// MCPSpec returns the built-in CodeGraph MCP plugin spec used by every QiaotongAgent
 // launch path. Keeping this in one place prevents lifecycle env overrides from
 // drifting between boot, token-economy on-demand enablement, and manual MCP
 // reconnects.
@@ -13,7 +13,7 @@ func MCPSpec(bin, root string) plugin.Spec {
 		Command:        bin,
 		Args:           []string{"serve", "--mcp"},
 		Env: map[string]string{
-			DaemonIdleTimeoutEnv: ReasonixDaemonIdleTimeoutMS,
+			DaemonIdleTimeoutEnv: QiaotongAgentDaemonIdleTimeoutMS,
 		},
 		Dir:               root,
 		ReadOnlyToolNames: ReadOnlyToolNames(),

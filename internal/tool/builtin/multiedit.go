@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/tool"
 )
 
 func init() { tool.RegisterBuiltin(multiEdit{}) }

@@ -1,6 +1,6 @@
 -- One-time: add structured crash/exception fields and sample-retention metadata.
 -- Apply once before deploying the matching worker:
--- wrangler d1 execute reasonix-crash --remote --file=migrate-structured-reports.sql
+-- wrangler d1 execute qiaotongagent-crash --remote --file=migrate-structured-reports.sql
 
 ALTER TABLE groups ADD COLUMN first_version TEXT NOT NULL DEFAULT '';
 ALTER TABLE groups ADD COLUMN source TEXT NOT NULL DEFAULT 'legacy';

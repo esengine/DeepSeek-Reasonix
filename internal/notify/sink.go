@@ -1,8 +1,8 @@
 package notify
 
 import (
-	"reasonix/internal/config"
-	"reasonix/internal/event"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/event"
 )
 
 // Message is the user-visible payload sent to the platform notifier.
@@ -51,17 +51,17 @@ func message(cfg config.NotificationsConfig, e event.Event) (Message, bool) {
 	case event.TurnDone:
 		if cfg.TurnDone {
 			if e.Err != nil {
-				return Message{Title: "Reasonix", Body: "Turn failed"}, true
+				return Message{Title: "QiaotongAgent", Body: "Turn failed"}, true
 			}
-			return Message{Title: "Reasonix", Body: "Turn finished"}, true
+			return Message{Title: "QiaotongAgent", Body: "Turn finished"}, true
 		}
 	case event.ApprovalRequest:
 		if cfg.ApprovalRequest {
-			return Message{Title: "Reasonix", Body: "Approval needed"}, true
+			return Message{Title: "QiaotongAgent", Body: "Approval needed"}, true
 		}
 	case event.AskRequest:
 		if cfg.AskRequest {
-			return Message{Title: "Reasonix", Body: "Question needs your answer"}, true
+			return Message{Title: "QiaotongAgent", Body: "Question needs your answer"}, true
 		}
 	}
 	return Message{}, false

@@ -42,8 +42,8 @@ const LEGACY_STYLE_MAP: Record<string, ThemeStyle> = {
 const DEFAULT_THEME_STYLE: ThemeStyle = "graphite";
 const DEFAULT_THEME: Theme = "light";
 
-const THEME_KEY = "reasonix-theme";
-const STYLE_KEY = "reasonix-theme-style";
+const THEME_KEY = "qiaotongagent-theme";
+const STYLE_KEY = "qiaotongagent-theme-style";
 let currentTheme: Theme = DEFAULT_THEME;
 let currentThemeStyle: ThemeStyle = DEFAULT_THEME_STYLE;
 

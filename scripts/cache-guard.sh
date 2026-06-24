@@ -5,7 +5,7 @@ tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 
 set +e
-REASONIX_RELEASE_CACHE_GUARD=1 go test ./internal/agent -run '^TestReleaseCacheHitGuard$' -v -count=1 2>&1 | tee "$tmp"
+QIAOTONGAGENT_RELEASE_CACHE_GUARD=1 go test ./internal/agent -run '^TestReleaseCacheHitGuard$' -v -count=1 2>&1 | tee "$tmp"
 status=${PIPESTATUS[0]}
 set -e
 
@@ -26,5 +26,5 @@ fi
 
 while IFS= read -r line; do
   msg=${line#*CACHE_GUARD_WARNING: }
-  echo "::warning title=Reasonix cache guard::$msg"
+  echo "::warning title=QiaotongAgent cache guard::$msg"
 done < <(grep 'CACHE_GUARD_WARNING:' "$tmp" || true)

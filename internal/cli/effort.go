@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"reasonix/internal/config"
+	"qiaotongagent/internal/config"
 )
 
 func (m *chatTUI) runEffortCommand(input string) tea.Cmd {

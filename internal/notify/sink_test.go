@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"reasonix/internal/config"
-	"reasonix/internal/event"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/event"
 )
 
 var errTestFailure = errors.New("failed")

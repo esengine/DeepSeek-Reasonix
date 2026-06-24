@@ -7,12 +7,12 @@ import (
 	"os"
 	"strings"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/boot"
-	"reasonix/internal/config"
-	"reasonix/internal/event"
-	"reasonix/internal/skill"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/boot"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/skill"
+	"qiaotongagent/internal/tool"
 )
 
 func reviewCommand(args []string) int {

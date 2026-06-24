@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1180" height="760" viewBox="0 0 1180 760" role="img" aria-labelledby="title desc">
-  <title id="title">Reasonix slash command view refresh</title>
+  <title id="title">QiaotongAgent slash command view refresh</title>
   <desc id="desc">Mock terminal view showing grouped slash command help, branch tree, and output style listings.</desc>
   <rect width="1180" height="760" rx="18" fill="#343443"/>
   <rect x="34" y="34" width="1112" height="692" rx="14" fill="#3d3d4f"/>
-  <text x="64" y="82" fill="#f0b07f" font-family="Menlo, Consolas, monospace" font-size="27" font-weight="700">◆ reasonix chat</text>
+  <text x="64" y="82" fill="#f0b07f" font-family="Menlo, Consolas, monospace" font-size="27" font-weight="700">◆ qiaotongagent chat</text>
   <text x="314" y="82" fill="#a9a9bf" font-family="Menlo, Consolas, monospace" font-size="27">· deepseek-v4-flash</text>
 
   <g font-family="Menlo, Consolas, monospace" font-size="24">
@@ -42,7 +42,7 @@
     <text x="640" y="370" fill="#a9a9bf">› /skill paths</text>
     <text x="640" y="415" fill="#f0b07f">skill paths</text>
     <text x="665" y="455" fill="#dce1ff">1. project  missing</text>
-    <text x="940" y="455" fill="#9b9bb0">.../.reasonix/skills</text>
+    <text x="940" y="455" fill="#9b9bb0">.../.qiaotongagent/skills</text>
     <text x="665" y="495" fill="#dce1ff">6. global   ok</text>
     <text x="940" y="495" fill="#9b9bb0">~/.agents/skills</text>
   </g>

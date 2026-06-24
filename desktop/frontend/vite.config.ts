@@ -5,13 +5,13 @@ import { mkdir, readdir, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const devPort = Number(process.env.REASONIX_DESKTOP_VITE_PORT || "5173");
+const devPort = Number(process.env.QIAOTONGAGENT_DESKTOP_VITE_PORT || "5173");
 const configDir = dirname(fileURLToPath(import.meta.url));
 
 // Stamps the build commit into the bundle so a minified crash stack can be mapped
 // back to the sourcemap of the exact build. Falls back to "dev" off a git checkout.
 function buildCommit(): string {
-  if (process.env.REASONIX_COMMIT) return process.env.REASONIX_COMMIT;
+  if (process.env.QIAOTONGAGENT_COMMIT) return process.env.QIAOTONGAGENT_COMMIT;
   try {
     return execSync("git rev-parse --short HEAD", { cwd: configDir }).toString().trim();
   } catch {
@@ -20,7 +20,7 @@ function buildCommit(): string {
 }
 
 function buildChannel(): string {
-  return process.env.REASONIX_CHANNEL || "stable";
+  return process.env.QIAOTONGAGENT_CHANNEL || "stable";
 }
 
 // On macOS ≤ 12 (Safari 15 WebKit) a crossorigin module/stylesheet fetched over the

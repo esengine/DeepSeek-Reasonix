@@ -60,7 +60,7 @@ jobs:
         # its own grader or tests. The agent is rebuilt from the PR head below; this
         # main-v2 build is only the fallback for heads that predate `run --metrics`.
         run: |
-          go build -o "$RUNNER_TEMP/reasonix-base" ./cmd/reasonix
+          go build -o "$RUNNER_TEMP/qiaotongagent-base" ./cmd/qiaotongagent
           go build -o "$RUNNER_TEMP/e2ebench" ./cmd/e2ebench
           cp -r benchmarks/e2e "$RUNNER_TEMP/suite"
 
@@ -81,11 +81,11 @@ jobs:
         # run --metrics-capable binary (build break or predates the flag).
         id: agent
         run: |
-          bin="$RUNNER_TEMP/reasonix-base"
+          bin="$RUNNER_TEMP/qiaotongagent-base"
           src="main-v2 fallback (PR head lacks run --metrics)"
-          if go build -o "$RUNNER_TEMP/reasonix-pr" ./cmd/reasonix \
-            && "$RUNNER_TEMP/reasonix-pr" run -h 2>&1 | grep -q -- '-metrics'; then
-            bin="$RUNNER_TEMP/reasonix-pr"
+          if go build -o "$RUNNER_TEMP/qiaotongagent-pr" ./cmd/qiaotongagent \
+            && "$RUNNER_TEMP/qiaotongagent-pr" run -h 2>&1 | grep -q -- '-metrics'; then
+            bin="$RUNNER_TEMP/qiaotongagent-pr"
             src="PR head ($(git rev-parse --short HEAD))"
           fi
           echo "bin=$bin" >> "$GITHUB_OUTPUT"
@@ -96,23 +96,23 @@ jobs:
         # User config covers suite tasks (they run in temp dirs); the repo-root copy
         # covers diff mode (the agent runs in the repo root, where project config wins).
         run: |
-          mkdir -p ~/.config/reasonix
-          cat > /tmp/reasonix-e2e.toml <<EOF
+          mkdir -p ~/.config/qiaotongagent
+          cat > /tmp/qiaotongagent-e2e.toml <<EOF
           default_model = "e2e"
 
           [[providers]]
           name = "e2e"
           kind = "openai"
-          base_url = "${{ vars.REASONIX_E2E_BASE_URL || 'https://api.deepseek.com' }}"
-          model = "${{ vars.REASONIX_E2E_MODEL || 'deepseek-v4-flash' }}"
+          base_url = "${{ vars.QIAOTONGAGENT_E2E_BASE_URL || 'https://api.deepseek.com' }}"
+          model = "${{ vars.QIAOTONGAGENT_E2E_MODEL || 'deepseek-v4-flash' }}"
           api_key_env = "DEEPSEEK_API_KEY"
           context_window = 20000   # small so the suite actually exercises compaction + cache churn
 
           [providers.price]
-          cache_hit = ${{ vars.REASONIX_E2E_PRICE_CACHE_HIT || '0.02' }}
-          input = ${{ vars.REASONIX_E2E_PRICE_INPUT || '1' }}
-          output = ${{ vars.REASONIX_E2E_PRICE_OUTPUT || '2' }}
-          currency = "${{ vars.REASONIX_E2E_PRICE_CURRENCY || '¥' }}"
+          cache_hit = ${{ vars.QIAOTONGAGENT_E2E_PRICE_CACHE_HIT || '0.02' }}
+          input = ${{ vars.QIAOTONGAGENT_E2E_PRICE_INPUT || '1' }}
+          output = ${{ vars.QIAOTONGAGENT_E2E_PRICE_OUTPUT || '2' }}
+          currency = "${{ vars.QIAOTONGAGENT_E2E_PRICE_CURRENCY || '¥' }}"
 
           [permissions]
           mode = "allow"
@@ -120,8 +120,8 @@ jobs:
           [codegraph]
           enabled = false
           EOF
-          cp /tmp/reasonix-e2e.toml ~/.config/reasonix/config.toml
-          cp /tmp/reasonix-e2e.toml ./reasonix.toml
+          cp /tmp/qiaotongagent-e2e.toml ~/.config/qiaotongagent/config.toml
+          cp /tmp/qiaotongagent-e2e.toml ./qiaotongagent.toml
 
       - name: Run e2e
         env:

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/tool"
 )
 
 // SlashEntry is one invocable slash command exposed to the model through the

@@ -6,11 +6,11 @@ import (
 	"sync"
 	"time"
 
-	"reasonix/internal/bot"
-	"reasonix/internal/bot/feishu"
-	"reasonix/internal/bot/qq"
-	"reasonix/internal/bot/weixin"
-	"reasonix/internal/config"
+	"qiaotongagent/internal/bot"
+	"qiaotongagent/internal/bot/feishu"
+	"qiaotongagent/internal/bot/qq"
+	"qiaotongagent/internal/bot/weixin"
+	"qiaotongagent/internal/config"
 )
 
 var rememberPersistMu sync.Mutex

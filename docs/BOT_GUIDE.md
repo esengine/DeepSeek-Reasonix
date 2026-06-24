@@ -1,4 +1,4 @@
-# Reasonix Bot Guide
+# QiaotongAgent Bot Guide
 
 <a href="../README.md">README</a>
 &nbsp;·&nbsp;
@@ -7,7 +7,7 @@
 <a href="./GUIDE.md">General guide</a>
 
 > For desktop users. This guide explains how to connect Feishu, Lark, and WeChat
-> bots, how to use Reasonix from IM, and how approvals, Ask questions, YOLO, and
+> bots, how to use QiaotongAgent from IM, and how approvals, Ask questions, YOLO, and
 > bot commands work.
 
 ## Contents
@@ -24,13 +24,13 @@
 
 ## What the bot does
 
-After a bot is connected, you can send Reasonix messages from Feishu, Lark, or
+After a bot is connected, you can send QiaotongAgent messages from Feishu, Lark, or
 WeChat. The desktop app handles the model, tools, permissions, sandboxing, and
 local context, then sends progress and results back to the IM channel.
 
 Common uses:
 
-- Ask Reasonix to inspect code, read docs, explain errors, or summarize findings.
+- Ask QiaotongAgent to inspect code, read docs, explain errors, or summarize findings.
 - Trigger tool calls from IM and receive progress or final results in the chat.
 - Approve or deny sensitive actions such as file writes or shell commands.
 - Enable YOLO for trusted temporary work so ordinary tool approvals are skipped.
@@ -39,7 +39,7 @@ Common uses:
 
 ## Connect the three channels
 
-Open the Reasonix desktop app and go to **Settings -> Bots**. In **Add IM Bot**,
+Open the QiaotongAgent desktop app and go to **Settings -> Bots**. In **Add IM Bot**,
 choose a channel and scan the QR code.
 
 ```mermaid
@@ -94,8 +94,8 @@ The desktop app is the easiest way to create and test bot connections, but the
 runtime itself can also run as a long-lived headless gateway:
 
 ```sh
-reasonix bot doctor
-reasonix bot start --channels feishu,lark,weixin --dir /path/to/project
+qiaotongagent bot doctor
+qiaotongagent bot start --channels feishu,lark,weixin --dir /path/to/project
 ```
 
 Use `--channels` to choose which configured IM inputs to accept. `feishu` and
@@ -111,7 +111,7 @@ The headless gateway uses the same config records as the desktop app:
   such as Feishu vs Lark.
 - `credential.app_id`, `credential.app_secret_env`, `credential.account_id`,
   and `credential.token_env` point to app IDs, app secrets, saved accounts, and
-  tokens. Secrets stay in environment variables or the Reasonix user credentials
+  tokens. Secrets stay in environment variables or the QiaotongAgent user credentials
   store.
 - `workspace_root`, `model`, and `tool_approval_mode` can be set per
   connection. This lets different IM channels route to different local projects
@@ -134,7 +134,7 @@ rules as local desktop or CLI turns.
 sequenceDiagram
   participant U as "User"
   participant IM as "Feishu / Lark / WeChat"
-  participant R as "Reasonix desktop"
+  participant R as "QiaotongAgent desktop"
   participant T as "Local tools and model"
 
   U->>IM: "Send a request"
@@ -213,7 +213,7 @@ Shortcut replies:
 
 ## Approvals and YOLO
 
-Reasonix bots use the same permission system as the desktop app. Ask mode is the
+QiaotongAgent bots use the same permission system as the desktop app. Ask mode is the
 default: sensitive tool calls such as file writes and shell commands request
 confirmation first.
 
@@ -248,20 +248,20 @@ Recommendations:
 
 ## Do upgrades require rebinding?
 
-No. A normal Reasonix app upgrade or overwrite install does not require
+No. A normal QiaotongAgent app upgrade or overwrite install does not require
 rebinding.
 
-Bindings are stored in the user's Reasonix data, not inside the app bundle:
+Bindings are stored in the user's QiaotongAgent data, not inside the app bundle:
 
 - Bot connections, remote IDs, allowlists, model choices, and approval modes are
   stored in the user config.
-- Feishu and Lark secrets are stored in the Reasonix user credentials file.
-- The WeChat scanned account token is stored in the Reasonix user data
+- Feishu and Lark secrets are stored in the QiaotongAgent user credentials file.
+- The WeChat scanned account token is stored in the QiaotongAgent user data
   directory.
 
 You may need to bind again if:
 
-- The Reasonix user config directory was deleted.
+- The QiaotongAgent user config directory was deleted.
 - You changed machines or OS users.
 - Authorization was revoked on the platform side.
 - The WeChat token expired.
@@ -272,7 +272,7 @@ You may need to bind again if:
 | Symptom | What to check |
 | --- | --- |
 | QR code says the link expired | Generate a new QR code in Settings; QR codes expire. |
-| Connected but no reply | Make sure the Reasonix desktop app is running, the bot connection is enabled, and the sender ID is allowlisted or access is open. |
+| Connected but no reply | Make sure the QiaotongAgent desktop app is running, the bot connection is enabled, and the sender ID is allowlisted or access is open. |
 | Feishu or Lark button action fails | Send the text command from the card, such as `/approve <id>` or `/deny <id>`. |
 | WeChat reply `1` does nothing | Numeric shortcuts only work when an approval or single-choice Ask is pending; use the full command if needed. |
 | Need to confirm the current mode | Send `/status` or `/yolo status`. |

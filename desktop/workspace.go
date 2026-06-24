@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"reasonix/internal/config"
+	"qiaotongagent/internal/config"
 )
 
 // The desktop is a GUI app: launched from Finder or `open`, it starts with the
@@ -17,9 +17,9 @@ import (
 // cwd isn't writable.
 
 // workspaceStatePath is where the last working folder is remembered (under the
-// user config dir, shared with the rest of Reasonix's state).
+// user config dir, shared with the rest of QiaotongAgent's state).
 func workspaceStatePath() string {
-	dir := config.MemoryUserDir() // …/reasonix
+	dir := config.MemoryUserDir() // …/qiaotongagent
 	if dir == "" {
 		return ""
 	}
@@ -175,7 +175,7 @@ func cwdWritable() bool {
 	if err != nil {
 		return false
 	}
-	f, err := os.CreateTemp(cwd, ".reasonix-wtest-*")
+	f, err := os.CreateTemp(cwd, ".qiaotongagent-wtest-*")
 	if err != nil {
 		return false
 	}

@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/event"
+	"qiaotongagent/internal/event"
 )
 
 func TestRunSkillInline(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/note.md", "---\ndescription: take a note\n---\nDo the thing.")
+	writeSkill(t, home, ".qiaotongagent/skills/note.md", "---\ndescription: take a note\n---\nDo the thing.")
 	tl := NewRunSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), nil)
 
 	out, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"note","arguments":"with args"}`))
@@ -38,7 +38,7 @@ func TestRunSkillUnknown(t *testing.T) {
 
 func TestRunSkillSubagentNeedsRunner(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
+	writeSkill(t, home, ".qiaotongagent/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
 	tl := NewRunSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), nil) // nil runner
 	if _, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"dig","arguments":"go"}`)); err == nil {
 		t.Error("subagent skill with no runner should error, not silently inline")
@@ -47,7 +47,7 @@ func TestRunSkillSubagentNeedsRunner(t *testing.T) {
 
 func TestRunSkillSubagentRuns(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
+	writeSkill(t, home, ".qiaotongagent/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
 	var gotTask string
 	runner := func(_ context.Context, sk Skill, task string, _ SubagentRunOptions) (string, error) {
 		gotTask = task
@@ -68,7 +68,7 @@ func TestRunSkillSubagentRuns(t *testing.T) {
 
 func TestRunSkillSubagentResolvesProfile(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/deep.md", "---\ndescription: deep\nrunAs: subagent\nmodel: deepseek-pro\neffort: max\n---\nbody")
+	writeSkill(t, home, ".qiaotongagent/skills/deep.md", "---\ndescription: deep\nrunAs: subagent\nmodel: deepseek-pro\neffort: max\n---\nbody")
 	tl := NewRunSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), nil)
 
 	pr, ok := tl.(interface {
@@ -85,7 +85,7 @@ func TestRunSkillSubagentResolvesProfile(t *testing.T) {
 
 func TestRunSkillSubagentRequiresArgs(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
+	writeSkill(t, home, ".qiaotongagent/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
 	runner := func(_ context.Context, _ Skill, _ string, _ SubagentRunOptions) (string, error) {
 		return "x", nil
 	}
@@ -210,14 +210,14 @@ func TestInstallSkill(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &res); err != nil {
 		t.Fatalf("result JSON: %v", err)
 	}
-	wantPath := filepath.Join(home, ".reasonix", "skills", "deploy", SkillFile)
+	wantPath := filepath.Join(home, ".qiaotongagent", "skills", "deploy", SkillFile)
 	if res.Path != wantPath {
 		t.Fatalf("install_skill should report canonical path %s, got %s", wantPath, res.Path)
 	}
 	if _, err := os.Stat(wantPath); err != nil {
 		t.Fatalf("install_skill should write canonical SKILL.md: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".reasonix", "skills", "deploy.md")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(home, ".qiaotongagent", "skills", "deploy.md")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("install_skill should not write legacy flat deploy.md, stat err=%v", err)
 	}
 	// Round-trips through the store with the frontmatter we wrote.
@@ -242,7 +242,7 @@ func TestInstallSkill(t *testing.T) {
 
 func TestReadSkillLoadsInlineAndIsReadOnly(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/note.md", "---\ndescription: take a note\n---\nDo the thing.")
+	writeSkill(t, home, ".qiaotongagent/skills/note.md", "---\ndescription: take a note\n---\nDo the thing.")
 	tl := NewReadSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}))
 
 	if !tl.ReadOnly() {
@@ -259,7 +259,7 @@ func TestReadSkillLoadsInlineAndIsReadOnly(t *testing.T) {
 
 func TestReadSkillRejectsSubagent(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
+	writeSkill(t, home, ".qiaotongagent/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
 	tl := NewReadSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}))
 
 	if _, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"dig"}`)); err == nil || !strings.Contains(err.Error(), "run_skill") {

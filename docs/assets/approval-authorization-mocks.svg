@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1900" viewBox="0 0 1600 1900" role="img" aria-labelledby="title desc">
-  <title id="title">Reasonix approval authorization mock states</title>
+  <title id="title">QiaotongAgent approval authorization mock states</title>
   <desc id="desc">Mock UI states for exact command approval, command-prefix approval, file mutation approval, dangerous command approval, and persisted permission notices.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
@@ -31,7 +31,7 @@
   </defs>
 
   <rect width="1600" height="1900" fill="url(#bg)"/>
-  <text x="80" y="88" class="page-title">Reasonix 授权交互 Mock</text>
+  <text x="80" y="88" class="page-title">QiaotongAgent 授权交互 Mock</text>
   <text x="80" y="126" class="page-sub">展示规则可见化、命令前缀授权、文件编辑共享授权、危险命令降级、持久化 Notice 与去重覆盖提示。</text>
 
   <!-- Mock 1 -->
@@ -170,7 +170,7 @@
     <rect x="28" y="112" width="664" height="92" rx="12" fill="#15251b" stroke="#4a9860"/>
     <circle cx="60" cy="158" r="18" fill="#76d083"/>
     <text x="54" y="165" class="key">i</text>
-    <text x="88" y="150" class="notice">授权已保存到 /workspace/reasonix.toml</text>
+    <text x="88" y="150" class="notice">授权已保存到 /workspace/qiaotongagent.toml</text>
     <text x="88" y="178" class="notice-rule">Bash(go test:*)</text>
     <rect x="28" y="246" width="664" height="84" rx="12" fill="#101316" stroke="#333942"/>
     <text x="48" y="280" class="mono-small">[permissions]</text>
@@ -186,7 +186,7 @@
     <rect x="28" y="112" width="664" height="92" rx="12" fill="#17212a" stroke="#4b708f"/>
     <circle cx="60" cy="158" r="18" fill="#80b7e8"/>
     <text x="54" y="165" class="key">i</text>
-    <text x="88" y="150" class="notice">授权已由 /workspace/reasonix.toml 中的规则覆盖</text>
+    <text x="88" y="150" class="notice">授权已由 /workspace/qiaotongagent.toml 中的规则覆盖</text>
     <text x="88" y="178" class="notice-rule">Bash(go test:*)</text>
     <rect x="28" y="246" width="664" height="84" rx="12" fill="#101316" stroke="#333942"/>
     <text x="48" y="280" class="mono-small">新请求：Bash(go test ./internal/control)</text>

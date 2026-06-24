@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/control"
+	"qiaotongagent/internal/control"
 )
 
 // TestServeRejectsNonJSONPost guards the CSRF defense: a state-changing POST that

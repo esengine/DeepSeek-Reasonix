@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"reasonix/internal/command"
-	"reasonix/internal/config"
-	"reasonix/internal/tool"
-	_ "reasonix/internal/tool/builtin" // self-register built-ins for LookupBuiltin
+	"qiaotongagent/internal/command"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/tool"
+	_ "qiaotongagent/internal/tool/builtin" // self-register built-ins for LookupBuiltin
 )
 
 // fakeTool is a minimal Tool for registry projection tests. It never implements

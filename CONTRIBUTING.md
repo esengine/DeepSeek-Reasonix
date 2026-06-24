@@ -1,6 +1,6 @@
-# Contributing to Reasonix
+# Contributing to QiaotongAgent
 
-Thank you for your interest in contributing to Reasonix! This guide covers
+Thank you for your interest in contributing to QiaotongAgent! This guide covers
 everything you need to get started.
 
 ## Prerequisites
@@ -12,9 +12,9 @@ everything you need to get started.
 ## Getting started
 
 ```bash
-git clone https://github.com/esengine/DeepSeek-Reasonix.git
-cd DeepSeek-Reasonix
-go build ./cmd/reasonix    # builds the CLI binary
+git clone https://github.com/esengine/DeepSeek-QiaotongAgent.git
+cd DeepSeek-QiaotongAgent
+go build ./cmd/qiaotongagent    # builds the CLI binary
 go test ./...              # runs the full test suite
 ```
 
@@ -22,7 +22,7 @@ go test ./...              # runs the full test suite
 
 | Directory | Purpose |
 |-----------|---------|
-| `cmd/reasonix` | CLI entry point |
+| `cmd/qiaotongagent` | CLI entry point |
 | `internal/agent` | Agent loop, session, coordinator |
 | `internal/cli` | TUI, subcommands, setup wizard |
 | `internal/control` | Transport-agnostic controller |
@@ -33,7 +33,7 @@ go test ./...              # runs the full test suite
 | `internal/plugin` | MCP client (stdio + HTTP) |
 | `internal/event` | Typed event stream |
 | `internal/hook` | Shell hooks (PreToolUse, …) |
-| `internal/memory` | REASONIX.md hierarchy + auto-memory |
+| `internal/memory` | QIAOTONGAGENT.md hierarchy + auto-memory |
 | `internal/skill` | Skill discovery from Markdown |
 | `internal/sandbox` | OS-level sandboxing |
 | `internal/serve` | HTTP/SSE server frontend |

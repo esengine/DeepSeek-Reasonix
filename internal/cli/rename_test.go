@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"reasonix/internal/agent"
+	"qiaotongagent/internal/agent"
 )
 
 func TestRenameSessionUpdatesTopicTitle(t *testing.T) {

@@ -9,9 +9,9 @@ import (
 	"sort"
 	"strings"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/provider"
-	"reasonix/internal/retrieval"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/retrieval"
 )
 
 // Kind identifies the part of a saved message indexed for retrieval.

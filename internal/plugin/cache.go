@@ -21,8 +21,8 @@ import (
 	"strings"
 	"time"
 
-	"reasonix/internal/config"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/tool"
 )
 
 // cacheableToolsOf extracts the persistable subset of remote tools so Start()

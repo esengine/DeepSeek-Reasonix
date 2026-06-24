@@ -12,10 +12,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"reasonix/internal/config"
-	"reasonix/internal/control"
-	"reasonix/internal/mcpdiag"
-	"reasonix/internal/plugin"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/mcpdiag"
+	"qiaotongagent/internal/plugin"
 )
 
 func (m chatTUI) applyMCPAction(v mcpServerView, action mcpAction) (tea.Model, tea.Cmd) {
@@ -380,7 +380,7 @@ func mcpConfigLocation() string {
 	if path := config.UserConfigPath(); path != "" {
 		return path
 	}
-	return "reasonix.toml"
+	return "qiaotongagent.toml"
 }
 
 type mcpEditConfigLaunch struct {

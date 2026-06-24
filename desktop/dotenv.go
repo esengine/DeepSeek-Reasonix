@@ -5,12 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"reasonix/internal/config"
-	"reasonix/internal/fileutil"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/fileutil"
 )
 
-// credentialsPath is the reasonix-owned global secrets file the settings panel
-// writes API keys to — the same file `reasonix setup` writes and config.loadDotEnv
+// credentialsPath is the qiaotongagent-owned global secrets file the settings panel
+// writes API keys to — the same file `qiaotongagent setup` writes and config.loadDotEnv
 // reads, so a key set in the desktop app resolves for the CLI from any directory.
 // Never a project .env: keys stay out of the user's project tree. Falls back to
 // ~/.env only when the user config dir can't be resolved.

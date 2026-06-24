@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/event"
+	"qiaotongagent/internal/event"
 )
 
 // 3 parallel Bash(ls) in one turn, ids "call_<n>" (no "shell-" prefix), each

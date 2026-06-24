@@ -17,7 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"reasonix/internal/bot"
+	"qiaotongagent/internal/bot"
 
 	"golang.org/x/net/websocket"
 )
@@ -270,8 +270,8 @@ func (a *adapter) connectGateway(ctx context.Context, token string) error {
 		Shard:   [2]int{0, 1},
 		Properties: properties{
 			OS:      "linux",
-			Browser: "reasonix",
-			Device:  "reasonix-bot",
+			Browser: "qiaotongagent",
+			Device:  "qiaotongagent-bot",
 		},
 	}
 	identifyJSON, _ := json.Marshal(identify)

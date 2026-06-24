@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/provider"
 )
 
 // legacyEvent is the subset of the v0.x typed event stream (<name>.events.jsonl)
@@ -73,7 +73,7 @@ func MigrateLegacySessions(srcDir, globalDest string, projectDir func(workspaceR
 
 // MigrateLegacySessionsFromConfigDir imports v0.x event-log sessions found in
 // the current user config session directory. It uses an independent marker so a
-// previous ~/.reasonix import marker cannot hide sessions from a redirected
+// previous ~/.qiaotongagent import marker cannot hide sessions from a redirected
 // config root on Windows/macOS.
 func MigrateLegacySessionsFromConfigDir(srcDir, globalDest string, projectDir func(workspaceRoot string) string) (int, error) {
 	return migrateLegacySessions(srcDir, globalDest, legacyRoutedConfigImportMarker, projectDir)
@@ -215,7 +215,7 @@ func migrateLegacySessions(srcDir, globalDest, marker string, projectDir func(st
 	}
 
 	// Pass 3 — recurse into subdirectories that look like project session dirs
-	// (e.g. Users_Yuki_git_polytone-audio-engine/ under ~/.reasonix/sessions/).
+	// (e.g. Users_Yuki_git_polytone-audio-engine/ under ~/.qiaotongagent/sessions/).
 	// The TS version nested project-scoped sessions under a workspace slug.
 	for _, e := range entries {
 		if !e.IsDir() {

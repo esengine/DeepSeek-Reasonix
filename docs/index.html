@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Reasonix — DeepSeek-native coding agent for your terminal</title>
+<title>QiaotongAgent — DeepSeek-native coding agent for your terminal</title>
 <meta name="description" content="Open-source AI coding agent for your terminal, engineered around DeepSeek's byte-stable prefix cache. Long sessions hold 90%+ cache hit and input-token cost collapses to ~1/5. A single Go binary. npm · Homebrew · desktop. MIT." />
-<link rel="canonical" href="https://esengine.github.io/DeepSeek-Reasonix/" />
+<link rel="canonical" href="https://esengine.github.io/DeepSeek-QiaotongAgent/" />
 <link rel="icon" href="favicon.svg" type="image/svg+xml" />
-<meta property="og:title" content="Reasonix — DeepSeek-native coding agent" />
+<meta property="og:title" content="QiaotongAgent — DeepSeek-native coding agent" />
 <meta property="og:description" content="Cache-first AI coding agent for your terminal. A single Go binary. npm · Homebrew · desktop. MIT." />
-<meta property="og:url" content="https://esengine.github.io/DeepSeek-Reasonix/" />
+<meta property="og:url" content="https://esengine.github.io/DeepSeek-QiaotongAgent/" />
 <style>
   :root{
     --bg:#f7f6f3; --paper:#fdfdfc; --ink:#16171a; --body:#3c3e44; --muted:#74777e; --faint:#9b9ea5;
@@ -135,12 +135,12 @@
 <body>
 <nav>
   <div class="wrap nav">
-    <a class="brand" href="#top"><span class="mk">R</span>Reasonix</a>
+    <a class="brand" href="#top"><span class="mk">R</span>QiaotongAgent</a>
     <div class="nav-links">
       <a href="#install" data-en>Install</a><a href="#install" data-zh>安装</a>
       <a href="#features" data-en>Features</a><a href="#features" data-zh>特性</a>
       <a href="#why" data-en>Why DeepSeek</a><a href="#why" data-zh>为何 DeepSeek</a>
-      <a href="https://github.com/esengine/DeepSeek-Reasonix">GitHub</a>
+      <a href="https://github.com/esengine/DeepSeek-QiaotongAgent">GitHub</a>
     </div>
     <div class="nav-right">
       <button class="lang" id="lang">中文</button>
@@ -162,17 +162,17 @@
   </p>
   <div class="cta">
     <a class="btn btn-dark" href="#install"><span data-en>Get started</span><span data-zh>开始使用</span></a>
-    <a class="btn btn-line" href="https://github.com/esengine/DeepSeek-Reasonix"><span data-en>View on GitHub</span><span data-zh>在 GitHub 查看</span></a>
+    <a class="btn btn-line" href="https://github.com/esengine/DeepSeek-QiaotongAgent"><span data-en>View on GitHub</span><span data-zh>在 GitHub 查看</span></a>
   </div>
   <div class="install">
-    <span><span class="p">$ </span>npm i -g reasonix</span>
-    <button class="cp" data-copy="npm i -g reasonix"><span data-en>Copy</span><span data-zh>复制</span></button>
+    <span><span class="p">$ </span>npm i -g qiaotongagent</span>
+    <button class="cp" data-copy="npm i -g qiaotongagent"><span data-en>Copy</span><span data-zh>复制</span></button>
   </div>
 
   <div class="term">
-    <div class="tbar"><i></i><i></i><i></i><span>~/app — reasonix chat</span></div>
-    <div class="tbody"><span class="u">$</span> reasonix chat
-<span class="i">reasonix v1.0.0 · model deepseek-v4-flash · ~/app</span>
+    <div class="tbar"><i></i><i></i><i></i><span>~/app — qiaotongagent chat</span></div>
+    <div class="tbody"><span class="u">$</span> qiaotongagent chat
+<span class="i">qiaotongagent v1.0.0 · model deepseek-v4-flash · ~/app</span>
 <span class="d">cache 94.2% hit · session 18m · cost $0.043</span>
 <span class="u">›</span> add retry with backoff to the http client
 <span class="e">edit</span>  internal/net/client.go        <span class="c">+24 −3</span>
@@ -194,30 +194,30 @@
     <button class="tab" data-tab="desk"><span data-en>Desktop</span><span data-zh>桌面端</span></button>
   </div>
   <div class="panel on" data-panel="npm">
-    <div class="block"><button class="cp" data-copy="npm i -g reasonix
-reasonix setup
-reasonix chat"><span data-en>Copy</span><span data-zh>复制</span></button><pre><span class="p">$</span> npm i -g reasonix
-<span class="p">$</span> reasonix setup        <span class="c"># config wizard → ./reasonix.toml</span>
-<span class="p">$</span> reasonix chat         <span class="c"># or: reasonix run "implement the TODOs"</span></pre></div>
+    <div class="block"><button class="cp" data-copy="npm i -g qiaotongagent
+qiaotongagent setup
+qiaotongagent chat"><span data-en>Copy</span><span data-zh>复制</span></button><pre><span class="p">$</span> npm i -g qiaotongagent
+<span class="p">$</span> qiaotongagent setup        <span class="c"># config wizard → ./qiaotongagent.toml</span>
+<span class="p">$</span> qiaotongagent chat         <span class="c"># or: qiaotongagent run "implement the TODOs"</span></pre></div>
     <p class="undertext"><span data-en>Any OS · macOS, Linux, Windows × amd64/arm64. Short alias <code>dsnix</code> too.</span><span data-zh>任意系统 · macOS、Linux、Windows × amd64/arm64。</span></p>
   </div>
   <div class="panel" data-panel="brew">
-    <div class="block"><button class="cp" data-copy="brew install esengine/reasonix/reasonix"><span data-en>Copy</span><span data-zh>复制</span></button><pre><span class="p">$</span> brew install esengine/reasonix/reasonix</pre></div>
+    <div class="block"><button class="cp" data-copy="brew install esengine/qiaotongagent/qiaotongagent"><span data-en>Copy</span><span data-zh>复制</span></button><pre><span class="p">$</span> brew install esengine/qiaotongagent/qiaotongagent</pre></div>
     <p class="undertext"><span data-en>macOS. The cask pulls the archive from the latest release.</span><span data-zh>macOS。cask 从最新 release 拉取归档。</span></p>
   </div>
   <div class="panel" data-panel="desk">
     <div class="dls">
-      <a class="dl" href="https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev/latest/Reasonix-darwin-arm64.zip" download>
-        <span class="os">macOS</span><span class="fn">Reasonix-darwin-arm64.zip</span><span class="ar" data-en>universal · Intel + Apple Silicon</span><span class="ar" data-zh>通用 · Intel + Apple Silicon</span><span class="go">↓</span>
+      <a class="dl" href="https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev/latest/QiaotongAgent-darwin-arm64.zip" download>
+        <span class="os">macOS</span><span class="fn">QiaotongAgent-darwin-arm64.zip</span><span class="ar" data-en>universal · Intel + Apple Silicon</span><span class="ar" data-zh>通用 · Intel + Apple Silicon</span><span class="go">↓</span>
       </a>
-      <a class="dl" href="https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev/latest/Reasonix-windows-amd64-installer.exe" download>
-        <span class="os">Windows</span><span class="fn">Reasonix-windows-amd64-installer.exe</span><span class="ar" data-en>installer · x64</span><span class="ar" data-zh>安装器 · x64</span><span class="go">↓</span>
+      <a class="dl" href="https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev/latest/QiaotongAgent-windows-amd64-installer.exe" download>
+        <span class="os">Windows</span><span class="fn">QiaotongAgent-windows-amd64-installer.exe</span><span class="ar" data-en>installer · x64</span><span class="ar" data-zh>安装器 · x64</span><span class="go">↓</span>
       </a>
-      <a class="dl" href="https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev/latest/Reasonix-linux-amd64.tar.gz" download>
-        <span class="os">Linux</span><span class="fn">Reasonix-linux-amd64.tar.gz</span><span class="ar" data-en>x64</span><span class="ar" data-zh>x64</span><span class="go">↓</span>
+      <a class="dl" href="https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev/latest/QiaotongAgent-linux-amd64.tar.gz" download>
+        <span class="os">Linux</span><span class="fn">QiaotongAgent-linux-amd64.tar.gz</span><span class="ar" data-en>x64</span><span class="ar" data-zh>x64</span><span class="go">↓</span>
       </a>
     </div>
-    <p class="undertext"><span data-en>Served from the R2 CDN (fast worldwide). Or browse <a href="https://github.com/esengine/DeepSeek-Reasonix/releases/latest">all releases on GitHub</a>.</span><span data-zh>经 R2 CDN 分发(全球加速)。或在 <a href="https://github.com/esengine/DeepSeek-Reasonix/releases/latest">GitHub releases</a> 浏览全部。</span></p>
+    <p class="undertext"><span data-en>Served from the R2 CDN (fast worldwide). Or browse <a href="https://github.com/esengine/DeepSeek-QiaotongAgent/releases/latest">all releases on GitHub</a>.</span><span data-zh>经 R2 CDN 分发(全球加速)。或在 <a href="https://github.com/esengine/DeepSeek-QiaotongAgent/releases/latest">GitHub releases</a> 浏览全部。</span></p>
   </div>
 </section>
 
@@ -241,7 +241,7 @@ reasonix chat"><span data-en>Copy</span><span data-zh>复制</span></button><pre
     <div>
       <div class="lab" data-en>Why DeepSeek</div><div class="lab" data-zh>为何 DeepSeek</div>
       <h2><span data-en>The cheapness is the point.</span><span data-zh>便宜,就是核心。</span></h2>
-      <p class="sub"><span data-en>Most agents pay full price for the same growing prompt every turn. Reasonix keeps the prefix byte-identical so DeepSeek's cache does the heavy lifting.</span><span data-zh>多数 agent 每回合都为同一段不断增长的 prompt 付全价。Reasonix 让前缀逐字节稳定,让 DeepSeek 的缓存替你扛下来。</span></p>
+      <p class="sub"><span data-en>Most agents pay full price for the same growing prompt every turn. QiaotongAgent keeps the prefix byte-identical so DeepSeek's cache does the heavy lifting.</span><span data-zh>多数 agent 每回合都为同一段不断增长的 prompt 付全价。QiaotongAgent 让前缀逐字节稳定,让 DeepSeek 的缓存替你扛下来。</span></p>
     </div>
     <div class="nums">
       <div class="num"><div class="v">90%+</div><div class="l"><span data-en>cache hit on long sessions</span><span data-zh>长会话缓存命中</span></div></div>
@@ -253,12 +253,12 @@ reasonix chat"><span data-en>Copy</span><span data-zh>复制</span></button><pre
 
 <footer>
   <div class="wrap foot">
-    <div>© 2026 Reasonix · <span data-en>MIT licensed</span><span data-zh>MIT 许可</span></div>
+    <div>© 2026 QiaotongAgent · <span data-en>MIT licensed</span><span data-zh>MIT 许可</span></div>
     <div class="foot-links">
-      <a href="https://github.com/esengine/DeepSeek-Reasonix">GitHub</a>
-      <a href="https://www.npmjs.com/package/reasonix">npm</a>
+      <a href="https://github.com/esengine/DeepSeek-QiaotongAgent">GitHub</a>
+      <a href="https://www.npmjs.com/package/qiaotongagent">npm</a>
       <a href="https://platform.deepseek.com" target="_blank" rel="noreferrer">DeepSeek</a>
-      <a href="https://github.com/esengine/DeepSeek-Reasonix/releases/latest"><span data-en>Releases</span><span data-zh>下载</span></a>
+      <a href="https://github.com/esengine/DeepSeek-QiaotongAgent/releases/latest"><span data-en>Releases</span><span data-zh>下载</span></a>
     </div>
   </div>
 </footer>

@@ -1,7 +1,7 @@
 // Package frontmatter provides a minimal, dependency-free parser for the
 // ---fenced "key: value" blocks that prefix skill, command, and memory files.
 // It mirrors the YAML-like frontmatter convention without pulling in a YAML
-// library, keeping Reasonix's single-(TOML)-dependency promise.
+// library, keeping QiaotongAgent's single-(TOML)-dependency promise.
 package frontmatter
 
 import "strings"

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"sync"
 
-	"reasonix/internal/config"
-	"reasonix/internal/event"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/event"
 )
 
 // metrics_app.go is the opt-in aggregate agent-metrics flush: anonymous
@@ -20,7 +20,7 @@ import (
 // launch. Never carries content, keys, prompts, or paths — only enumerated
 // integer counts. Gated on config desktop.metrics (default off), dev-skipped.
 
-var metricsEndpoint = "https://crash.reasonix.io/v1/metrics"
+var metricsEndpoint = "https://crash.qiaotongagent.io/v1/metrics"
 
 const metricsPendingFile = "metrics-pending.json"
 

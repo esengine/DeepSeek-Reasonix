@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/event"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/provider"
 )
 
 // --- toWire ---

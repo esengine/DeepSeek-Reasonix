@@ -1,13 +1,13 @@
-# Deploy: wrangler d1 create reasonix-crash → paste database_id → wrangler deploy.
-name = "reasonix-crash-report"
+# Deploy: wrangler d1 create qiaotongagent-crash → paste database_id → wrangler deploy.
+name = "qiaotongagent-crash-report"
 main = "src/index.ts"
 compatibility_date = "2026-06-01"
 
-routes = [{ pattern = "crash.reasonix.io", custom_domain = true }]
+routes = [{ pattern = "crash.qiaotongagent.io", custom_domain = true }]
 
 [[d1_databases]]
 binding = "DB"
-database_name = "reasonix-crash"
+database_name = "qiaotongagent-crash"
 database_id = "54825184-366f-4877-80fc-924efab0239b"
 
 [[unsafe.bindings]]

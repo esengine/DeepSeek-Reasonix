@@ -7,9 +7,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"reasonix/internal/config"
-	"reasonix/internal/mcpdiag"
-	"reasonix/internal/plugin"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/mcpdiag"
+	"qiaotongagent/internal/plugin"
 )
 
 const (

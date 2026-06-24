@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/event"
-	"reasonix/internal/provider"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/tool"
 )
 
 // scriptedTurns is a provider that replays a distinct chunk set per Stream call,

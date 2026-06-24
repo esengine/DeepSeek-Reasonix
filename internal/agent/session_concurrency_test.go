@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/provider"
 )
 
 // TestSessionConcurrentAddAndRead models the real hazard: the run loop appends

@@ -10,10 +10,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/control"
-	"reasonix/internal/event"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/provider"
 )
 
 // TestResumeDispatchOpensPicker proves bare "/resume" writes the session list

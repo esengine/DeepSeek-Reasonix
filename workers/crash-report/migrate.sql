@@ -1,5 +1,5 @@
--- One-time upgrade of the live reasonix-crash DB to the account system.
--- Apply once: wrangler d1 execute reasonix-crash --remote --file=migrate.sql
+-- One-time upgrade of the live qiaotongagent-crash DB to the account system.
+-- Apply once: wrangler d1 execute qiaotongagent-crash --remote --file=migrate.sql
 -- The ALTERs are not idempotent; the CREATEs are. Fresh installs use schema.sql.
 ALTER TABLE groups ADD COLUMN status TEXT NOT NULL DEFAULT 'open';
 ALTER TABLE groups ADD COLUMN note TEXT NOT NULL DEFAULT '';

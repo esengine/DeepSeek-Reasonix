@@ -3,8 +3,8 @@ import Base from '../layouts/Base.astro';
 import community from '../data/community.json';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
-const R2 = 'https://dl.reasonix.io/latest';
-const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
+const R2 = 'https://dl.qiaotongagent.io/latest';
+const repo = 'https://github.com/esengine/DeepSeek-QiaotongAgent';
 
 let goVer = '1.1.0';
 try {
@@ -22,9 +22,9 @@ const desc = "Open-source AI coding agent for your terminal, engineered around D
 const ld = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
-  name: 'Reasonix',
+  name: 'QiaotongAgent',
   description: desc,
-  url: 'https://reasonix.io/',
+  url: 'https://qiaotongagent.io/',
   applicationCategory: 'DeveloperApplication',
   operatingSystem: 'macOS, Windows, Linux',
   softwareVersion: goVer,
@@ -34,16 +34,16 @@ const ld = {
 };
 ---
 <Base
-  title="Reasonix — DeepSeek-native coding agent for your terminal"
-  titleEn="Reasonix — DeepSeek-native coding agent for your terminal"
-  titleZh="Reasonix — DeepSeek 原生的终端编码 Agent"
+  title="QiaotongAgent — DeepSeek-native coding agent for your terminal"
+  titleEn="QiaotongAgent — DeepSeek-native coding agent for your terminal"
+  titleZh="QiaotongAgent — DeepSeek 原生的终端编码 Agent"
   description={desc}>
 
   <script type="application/ld+json" set:html={JSON.stringify(ld)} slot="head" is:inline />
 
   <header class="nav">
     <div class="nav-inner">
-      <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="Reasonix logo" /><span>Reasonix</span></a>
+      <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="QiaotongAgent logo" /><span>QiaotongAgent</span></a>
       <nav class="nav-links">
         <a href="#features"><span class="l-en">Features</span><span class="l-zh">特性</span></a>
         <a href="#how"><span class="l-en">How it works</span><span class="l-zh">工作原理</span></a>
@@ -74,7 +74,7 @@ const ld = {
       </p>
       <div class="hero-cta reveal" style="--d:0.18s">
         <a class="btn btn-dark" data-os-dl data-goto="desktop" href="#start"><span class="l-en">Download for <span class="os-name">macOS</span></span><span class="l-zh">下载 <span class="os-name">macOS</span> 版</span></a>
-        <span class="install"><span class="ps1">$</span>npm i -g reasonix@next<button data-copy="npm i -g reasonix@next">Copy</button></span>
+        <span class="install"><span class="ps1">$</span>npm i -g qiaotongagent@next<button data-copy="npm i -g qiaotongagent@next">Copy</button></span>
         <a class="btn btn-ghost" href="#how"><span class="l-en">How it works ↓</span><span class="l-zh">工作原理 ↓</span></a>
       </div>
       <div class="also reveal" style="--d:0.22s"><span class="l-en">Also via <a href="#start" data-goto="brew">Homebrew</a> and <a href="#start" data-goto="desktop">desktop apps</a> · macOS / Windows / Linux</span><span class="l-zh">也可通过 <a href="#start" data-goto="brew">Homebrew</a> 与<a href="#start" data-goto="desktop">桌面端</a>安装 · macOS / Windows / Linux</span></div>
@@ -82,8 +82,8 @@ const ld = {
       <div class="term-stage reveal" style="--d:0.26s">
         <div class="fig"><span class="l-en">fig. 01 — a live session, cache still warm</span><span class="l-zh">图 01 —— 一场实时会话,缓存依然温热</span></div>
         <div class="term">
-          <div class="term-bar"><i></i><i></i><i></i><span class="title">~/app — reasonix chat</span></div>
-          <div class="term-body"><span class="tl"><span class="t-acc">◆</span> reasonix <span class="t-dim">v<span class="rxv">{goVer}</span> · deepseek-v4-flash · ~/app</span></span><span class="tl"><span class="t-vio">›</span> add retry with backoff to the http client</span><span class="tl"><span class="t-ok">✓</span> edit <span class="t-dim">internal/net/client.go</span>  <span class="t-add">+24 −3</span></span><span class="tl"><span class="t-ok">✓</span> edit <span class="t-dim">internal/net/client_test.go</span>  <span class="t-add">+41 −0</span></span><span class="tl"><span class="t-ok">✓</span> run <span class="t-dim">go test ./internal/net/</span>  <span class="t-ok">ok</span> <span class="t-dim">(0.21s)</span></span><span class="tl"><span class="t-warm">●</span> <span class="t-dim">2 files · cache 94.2% → 95.1%</span></span><span class="tl"><span class="t-vio">›</span> <span class="caret"></span></span></div>
+          <div class="term-bar"><i></i><i></i><i></i><span class="title">~/app — qiaotongagent chat</span></div>
+          <div class="term-body"><span class="tl"><span class="t-acc">◆</span> qiaotongagent <span class="t-dim">v<span class="rxv">{goVer}</span> · deepseek-v4-flash · ~/app</span></span><span class="tl"><span class="t-vio">›</span> add retry with backoff to the http client</span><span class="tl"><span class="t-ok">✓</span> edit <span class="t-dim">internal/net/client.go</span>  <span class="t-add">+24 −3</span></span><span class="tl"><span class="t-ok">✓</span> edit <span class="t-dim">internal/net/client_test.go</span>  <span class="t-add">+41 −0</span></span><span class="tl"><span class="t-ok">✓</span> run <span class="t-dim">go test ./internal/net/</span>  <span class="t-ok">ok</span> <span class="t-dim">(0.21s)</span></span><span class="tl"><span class="t-warm">●</span> <span class="t-dim">2 files · cache 94.2% → 95.1%</span></span><span class="tl"><span class="t-vio">›</span> <span class="caret"></span></span></div>
           <div class="term-stat"><span>cache <b data-cnt="95.1" data-dec="1" data-suf="% hit">95.1% hit</b></span><span>session <b data-cnt="18" data-suf="m">18m</b></span><span>model <b>deepseek-v4-flash</b></span><span>cost <b data-cnt="0.043" data-dec="3" data-pre="$">$0.043</b></span></div>
         </div>
       </div>
@@ -95,7 +95,7 @@ const ld = {
       <div class="sec-head split reveal">
         <span class="kicker"><span class="l-en">Features</span><span class="l-zh">特性</span></span>
         <h2><span class="l-en">Built for long, <span class="em">cheap</span> sessions.</span><span class="l-zh">为长会话、<span class="em">低成本</span>而生。</span></h2>
-        <p><span class="l-en">Most agents pay full price for the same growing prompt every turn. Reasonix keeps the prefix byte-identical so DeepSeek's cache does the heavy lifting — and everything else follows.</span><span class="l-zh">多数 agent 每回合都为同一段不断增长的 prompt 付全价。Reasonix 让前缀逐字节稳定,让 DeepSeek 的缓存替你扛下来——其余一切由此而来。</span></p>
+        <p><span class="l-en">Most agents pay full price for the same growing prompt every turn. QiaotongAgent keeps the prefix byte-identical so DeepSeek's cache does the heavy lifting — and everything else follows.</span><span class="l-zh">多数 agent 每回合都为同一段不断增长的 prompt 付全价。QiaotongAgent 让前缀逐字节稳定,让 DeepSeek 的缓存替你扛下来——其余一切由此而来。</span></p>
       </div>
       <div class="feat-grid">
         <div class="feat reveal">
@@ -129,7 +129,7 @@ const ld = {
           <span class="tag">06 / terminal</span>
           <h3><span class="l-en">Terminal-native</span><span class="l-zh">终端原生</span></h3>
           <p><span class="l-en">Not another IDE plugin. <code>git diff</code> handles diffs, <code>ls</code> handles trees — the terminal is the workspace.</span><span class="l-zh">不是又一个 IDE 插件。diff 交给 <code>git diff</code>,树交给 <code>ls</code> —— 终端就是工作面板。</span></p>
-          <code class="feat-chip">$ ssh build-box → reasonix code</code>
+          <code class="feat-chip">$ ssh build-box → qiaotongagent code</code>
         </div>
       </div>
     </div>
@@ -180,13 +180,13 @@ const ld = {
           <span class="num">01</span>
           <h3><span class="l-en">Install</span><span class="l-zh">安装</span></h3>
           <p><span class="l-en">One command. macOS, Linux, Windows, and WSL.</span><span class="l-zh">一条命令,支持 macOS、Linux、Windows 与 WSL。</span></p>
-          <code>npm i -g reasonix@next</code>
+          <code>npm i -g qiaotongagent@next</code>
         </div>
         <div class="step reveal" style="--d:0.08s">
           <span class="num">02</span>
           <h3><span class="l-en">Point it at a repo</span><span class="l-zh">指向你的仓库</span></h3>
-          <p><span class="l-en">Reasonix maps the codebase once, then keeps that map in the warm prefix.</span><span class="l-zh">Reasonix 只做一次代码库测绘,然后把这份地图常驻在温热的前缀缓存里。</span></p>
-          <code>cd your-project &amp;&amp; reasonix code</code>
+          <p><span class="l-en">QiaotongAgent maps the codebase once, then keeps that map in the warm prefix.</span><span class="l-zh">QiaotongAgent 只做一次代码库测绘,然后把这份地图常驻在温热的前缀缓存里。</span></p>
+          <code>cd your-project &amp;&amp; qiaotongagent code</code>
         </div>
         <div class="step reveal" style="--d:0.16s">
           <span class="num">03</span>
@@ -205,7 +205,7 @@ const ld = {
       <div class="sec-head split reveal">
         <span class="kicker"><span class="l-en">Community</span><span class="l-zh">社区共建</span></span>
         <h2><span class="l-en">Built in the open, with <span class="em">{community.contributors} contributors.</span></span><span class="l-zh">开源共建,感谢 <span class="em">{community.contributors} 位贡献者。</span></span></h2>
-        <p><span class="l-en">Reasonix is MIT-licensed and developed in public. Every issue, every PR, every late-night review made it what it is — thank you.</span><span class="l-zh">Reasonix 采用 MIT 许可,开放开发。每一个 issue、每一条 PR、每一次深夜 review,成就了今天的它——谢谢你们。</span></p>
+        <p><span class="l-en">QiaotongAgent is MIT-licensed and developed in public. Every issue, every PR, every late-night review made it what it is — thank you.</span><span class="l-zh">QiaotongAgent 采用 MIT 许可,开放开发。每一个 issue、每一条 PR、每一次深夜 review,成就了今天的它——谢谢你们。</span></p>
       </div>
     </div>
     <div class="crew reveal" aria-hidden="false">
@@ -250,15 +250,15 @@ const ld = {
       </div>
 
       <div class="dl-pane active" data-pane="npm">
-        <span class="install"><span class="ps1">$</span>npm i -g reasonix@next<button data-copy="npm i -g reasonix@next">Copy</button></span>
+        <span class="install"><span class="ps1">$</span>npm i -g qiaotongagent@next<button data-copy="npm i -g qiaotongagent@next">Copy</button></span>
         <div class="chan">
           <div class="chan-row rec">
-            <code>npm i -g reasonix@next</code><span class="v">v<span class="rxv">{goVer}</span></span>
+            <code>npm i -g qiaotongagent@next</code><span class="v">v<span class="rxv">{goVer}</span></span>
             <span class="s"><span class="l-en">Go rewrite · one binary · no Node · actively developed</span><span class="l-zh">Go 重写 · 单二进制 · 无需 Node · 主力开发中</span></span>
             <span class="chan-badge"><span class="l-en">recommended</span><span class="l-zh">推荐</span></span>
           </div>
           <div class="chan-row">
-            <code>npm i -g reasonix</code><span class="v">v0.53</span>
+            <code>npm i -g qiaotongagent</code><span class="v">v0.53</span>
             <span class="s"><span class="l-en">deprecated 0.x line · no longer maintained</span><span class="l-zh">已废弃的 0.x 线 · 不再维护</span></span>
             <span class="chan-badge pre"><span class="l-en">deprecated</span><span class="l-zh">已废弃</span></span>
           </div>
@@ -267,7 +267,7 @@ const ld = {
       </div>
 
       <div class="dl-pane" data-pane="brew">
-        <span class="install"><span class="ps1">$</span>brew install esengine/reasonix/reasonix<button data-copy="brew install esengine/reasonix/reasonix">Copy</button></span>
+        <span class="install"><span class="ps1">$</span>brew install esengine/qiaotongagent/qiaotongagent<button data-copy="brew install esengine/qiaotongagent/qiaotongagent">Copy</button></span>
         <div class="dl-note"><span class="l-en">v<span class="rxv">{goVer}</span> (Go rewrite) · macOS &amp; Linux · update with <span class="mono">brew upgrade</span></span><span class="l-zh">v<span class="rxv">{goVer}</span>(Go 重写)· macOS 与 Linux · 通过 <span class="mono">brew upgrade</span> 更新</span></div>
       </div>
 
@@ -276,17 +276,17 @@ const ld = {
           <div class="os-card" data-os="mac">
             <h4>macOS</h4>
             <span class="meta">.dmg · universal (Apple Silicon &amp; Intel)</span>
-            <a class="btn btn-light" href={`${R2}/Reasonix-darwin-universal.dmg`} download><span class="l-en">Download · v<span class="rxv">{goVer}</span></span><span class="l-zh">下载 · v<span class="rxv">{goVer}</span></span></a>
+            <a class="btn btn-light" href={`${R2}/QiaotongAgent-darwin-universal.dmg`} download><span class="l-en">Download · v<span class="rxv">{goVer}</span></span><span class="l-zh">下载 · v<span class="rxv">{goVer}</span></span></a>
           </div>
           <div class="os-card" data-os="win">
             <h4>Windows</h4>
             <span class="meta">.exe installer · x64 · Windows 10+</span>
-            <a class="btn btn-light" href={`${R2}/Reasonix-windows-amd64-installer.exe`} download><span class="l-en">Download · v<span class="rxv">{goVer}</span></span><span class="l-zh">下载 · v<span class="rxv">{goVer}</span></span></a>
+            <a class="btn btn-light" href={`${R2}/QiaotongAgent-windows-amd64-installer.exe`} download><span class="l-en">Download · v<span class="rxv">{goVer}</span></span><span class="l-zh">下载 · v<span class="rxv">{goVer}</span></span></a>
           </div>
           <div class="os-card" data-os="linux">
             <h4>Linux</h4>
             <span class="meta">.tar.gz · amd64</span>
-            <a class="btn btn-light" href={`${R2}/Reasonix-linux-amd64.tar.gz`} download><span class="l-en">Download · v<span class="rxv">{goVer}</span></span><span class="l-zh">下载 · v<span class="rxv">{goVer}</span></span></a>
+            <a class="btn btn-light" href={`${R2}/QiaotongAgent-linux-amd64.tar.gz`} download><span class="l-en">Download · v<span class="rxv">{goVer}</span></span><span class="l-zh">下载 · v<span class="rxv">{goVer}</span></span></a>
           </div>
         </div>
         <div class="dl-note"><span class="l-en">v<span class="rxv">{goVer}</span> · built-in auto-updates · same engine as the CLI · <a href={`${repo}/releases`}>all releases →</a></span><span class="l-zh">v<span class="rxv">{goVer}</span> · 内置自动更新 · 与 CLI 同一引擎 · <a href={`${repo}/releases`}>全部版本 →</a></span></div>
@@ -297,15 +297,15 @@ const ld = {
 
   <footer>
     <div class="foot-inner">
-      <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="Reasonix logo" /><span>Reasonix</span></a>
-      <span><span class="l-en">© 2026 Reasonix · MIT licensed · built to be left running.</span><span class="l-zh">© 2026 Reasonix · MIT 许可 · 为常驻运行而生。</span></span>
+      <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="QiaotongAgent logo" /><span>QiaotongAgent</span></a>
+      <span><span class="l-en">© 2026 QiaotongAgent · MIT licensed · built to be left running.</span><span class="l-zh">© 2026 QiaotongAgent · MIT 许可 · 为常驻运行而生。</span></span>
       <nav class="foot-links">
         <a href={repo}>GitHub</a>
-        <a href="https://www.npmjs.com/package/reasonix">npm</a>
+        <a href="https://www.npmjs.com/package/qiaotongagent">npm</a>
         <a href="https://platform.deepseek.com" target="_blank" rel="noreferrer">DeepSeek</a>
         <a href={`${base}/docs/`}><span class="l-en">Docs</span><span class="l-zh">文档</span></a>
         <a href="#start"><span class="l-en">Install</span><span class="l-zh">安装</span></a>
-        <a href="https://crash.reasonix.io/stats" rel="nofollow"><span class="l-en">Stats</span><span class="l-zh">统计</span></a>
+        <a href="https://crash.qiaotongagent.io/stats" rel="nofollow"><span class="l-en">Stats</span><span class="l-zh">统计</span></a>
       </nav>
     </div>
     <div class="foot-sub">

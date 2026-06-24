@@ -11,20 +11,20 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/event"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/tool"
 )
 
-// buildExamplePlugin compiles cmd/reasonix-plugin-example into a temp binary and
+// buildExamplePlugin compiles cmd/qiaotongagent-plugin-example into a temp binary and
 // returns its path. Building from inside the module lets `go build` resolve the
 // import path regardless of the test's working directory.
 func buildExamplePlugin(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "reasonix-plugin-example")
+	bin := filepath.Join(t.TempDir(), "qiaotongagent-plugin-example")
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
-	out, err := exec.Command("go", "build", "-o", bin, "reasonix/cmd/reasonix-plugin-example").CombinedOutput()
+	out, err := exec.Command("go", "build", "-o", bin, "qiaotongagent/cmd/qiaotongagent-plugin-example").CombinedOutput()
 	if err != nil {
 		t.Fatalf("build example plugin: %v\n%s", err, out)
 	}

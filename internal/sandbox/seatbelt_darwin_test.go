@@ -179,12 +179,12 @@ func TestSandboxEnforcesWrites(t *testing.T) {
 	if err != nil {
 		t.Skipf("no home dir: %v", err)
 	}
-	workRoot, err := os.MkdirTemp(home, ".reasonix-sbtest-work-*")
+	workRoot, err := os.MkdirTemp(home, ".qiaotongagent-sbtest-work-*")
 	if err != nil {
 		t.Skipf("cannot create work dir under home: %v", err)
 	}
 	t.Cleanup(func() { os.RemoveAll(workRoot) })
-	outside, err := os.MkdirTemp(home, ".reasonix-sbtest-out-*")
+	outside, err := os.MkdirTemp(home, ".qiaotongagent-sbtest-out-*")
 	if err != nil {
 		t.Skipf("cannot create outside dir under home: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestGoBuildUnderSandbox(t *testing.T) {
 	if err != nil {
 		t.Skipf("no home dir: %v", err)
 	}
-	work, err := os.MkdirTemp(home, ".reasonix-sbtest-go-*")
+	work, err := os.MkdirTemp(home, ".qiaotongagent-sbtest-go-*")
 	if err != nil {
 		t.Skipf("cannot create work dir under home: %v", err)
 	}

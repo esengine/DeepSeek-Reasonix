@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/event"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/provider"
 )
 
 // renderUsage drives a Usage event through a fresh TextSink (no renderer) and

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"reasonix/internal/bot"
-	"reasonix/internal/config"
+	"qiaotongagent/internal/bot"
+	"qiaotongagent/internal/config"
 )
 
 func TestRemoteRemembererKeepsDistinctGroupUsers(t *testing.T) {

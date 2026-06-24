@@ -17,7 +17,7 @@ func TestCommandMatches(t *testing.T) {
 		{"quote style drift", `test -f test-tools.md && echo 'still exists' || echo 'deleted'`,
 			`test -f test-tools.md && echo "still exists" || echo "deleted"`, true},
 		{"pipe tail dropped", "go test ./internal/tool/... -count=1 -timeout 60s",
-			"cd /f/Reasonix && go test ./internal/tool/... -count=1 -timeout 60s 2>&1 | tail -10", true},
+			"cd /f/QiaotongAgent && go test ./internal/tool/... -count=1 -timeout 60s 2>&1 | tail -10", true},
 		{"whitespace collapse", "go  test   ./...", "go test ./...", true},
 		{"different command rejected", "go test ./...", "go vet ./...", false},
 		{"extra cited token rejected", "go test ./a/... ./b/...", "go test ./a/...", false},

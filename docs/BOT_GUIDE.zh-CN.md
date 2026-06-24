@@ -1,4 +1,4 @@
-# Reasonix 机器人使用指南
+# QiaotongAgent 机器人使用指南
 
 <a href="../README.zh-CN.md">README</a>
 &nbsp;·&nbsp;
@@ -7,7 +7,7 @@
 <a href="./GUIDE.zh-CN.md">通用指南</a>
 
 > 面向桌面端用户。本文说明如何连接飞书、Lark 和微信机器人，如何在 IM
-> 里使用 Reasonix，以及审批、问答、YOLO 和常用命令的交互方式。
+> 里使用 QiaotongAgent，以及审批、问答、YOLO 和常用命令的交互方式。
 
 ## 目录
 
@@ -23,12 +23,12 @@
 
 ## 能做什么
 
-连接机器人后，你可以在飞书、Lark 或微信里给 Reasonix 发消息，让桌面端
-Reasonix 在本机执行同一套模型、工具、权限与沙盒逻辑。
+连接机器人后，你可以在飞书、Lark 或微信里给 QiaotongAgent 发消息，让桌面端
+QiaotongAgent 在本机执行同一套模型、工具、权限与沙盒逻辑。
 
 典型场景：
 
-- 让 Reasonix 查代码、读文档、解释错误、整理结论。
+- 让 QiaotongAgent 查代码、读文档、解释错误、整理结论。
 - 在 IM 中触发工具调用，并把执行过程和结果回传到聊天窗口。
 - 遇到写文件、执行命令等敏感操作时，在 IM 中审批或拒绝。
 - 对临时测试任务开启 YOLO，跳过普通工具审批。
@@ -36,7 +36,7 @@ Reasonix 在本机执行同一套模型、工具、权限与沙盒逻辑。
 
 ## 连接三个渠道
 
-打开桌面端 Reasonix，进入 **设置 -> 机器人**。在 **添加 IM Bot** 区域选择
+打开桌面端 QiaotongAgent，进入 **设置 -> 机器人**。在 **添加 IM Bot** 区域选择
 渠道并扫码。
 
 ```mermaid
@@ -89,8 +89,8 @@ flowchart LR
 无界面网关启动：
 
 ```sh
-reasonix bot doctor
-reasonix bot start --channels feishu,lark,weixin --dir /path/to/project
+qiaotongagent bot doctor
+qiaotongagent bot start --channels feishu,lark,weixin --dir /path/to/project
 ```
 
 `--channels` 用来选择接受哪些已配置的 IM 输入。`feishu` 和 `lark` 会选择对应
@@ -104,7 +104,7 @@ Bot。`--dir` 用来把远端消息绑定到某个项目工作区，`--model` �
   （`feishu`、`weixin` 或 `qq`），`domain` 用来区分飞书和 Lark 等变体。
 - `credential.app_id`、`credential.app_secret_env`、`credential.account_id`
   和 `credential.token_env` 指向应用 ID、应用密钥、保存的账号或 token。
-  密钥仍保存在环境变量或 Reasonix 用户凭据中。
+  密钥仍保存在环境变量或 QiaotongAgent 用户凭据中。
 - `workspace_root`、`model` 和 `tool_approval_mode` 可以按连接单独设置，
   因此不同 IM 渠道可以路由到不同本地项目或审批模式。
 - `session_mappings` 会根据收到的远端消息自动填充远端 chat ID 和作用域。
@@ -114,7 +114,7 @@ Bot。`--dir` 用来把远端消息绑定到某个项目工作区，`--model` �
 
 访问控制仍然是必需项。你需要在 `[bot.allowlist]` 下为对应平台至少配置一个
 用户 ID，或者有意设置 `allow_all = true`。群 ID 是群聊里的额外收窄条件，
-不能替代用户白名单。远端用户进入的是同一个 Reasonix controller、权限策略、
+不能替代用户白名单。远端用户进入的是同一个 QiaotongAgent controller、权限策略、
 工具审批模式和沙盒边界，和本地桌面端或 CLI 回合一致。
 
 ## 使用流程
@@ -123,7 +123,7 @@ Bot。`--dir` 用来把远端消息绑定到某个项目工作区，`--model` �
 sequenceDiagram
   participant U as "用户"
   participant IM as "飞书 / Lark / 微信"
-  participant R as "Reasonix 桌面端"
+  participant R as "QiaotongAgent 桌面端"
   participant T as "本机工具与模型"
 
   U->>IM: "发送需求"
@@ -198,7 +198,7 @@ sequenceDiagram
 
 ## 审批与 YOLO
 
-Reasonix 的机器人沿用桌面端权限系统。默认是询问模式：写文件、执行命令等
+QiaotongAgent 的机器人沿用桌面端权限系统。默认是询问模式：写文件、执行命令等
 敏感工具调用会先请求确认。
 
 ```mermaid
@@ -231,17 +231,17 @@ YOLO 的边界很重要：
 
 ## 升级后是否需要重新绑定
 
-正常升级或覆盖安装 Reasonix app 后，不需要重新绑定。
+正常升级或覆盖安装 QiaotongAgent app 后，不需要重新绑定。
 
 绑定信息保存在用户配置目录，而不是 app 包内：
 
 - Bot 连接、远端 ID、白名单、模型和审批模式保存在用户配置文件。
-- 飞书和 Lark 的密钥保存在 Reasonix 的用户凭据文件。
-- 微信扫码后的账号 token 保存在 Reasonix 的用户数据目录。
+- 飞书和 Lark 的密钥保存在 QiaotongAgent 的用户凭据文件。
+- 微信扫码后的账号 token 保存在 QiaotongAgent 的用户数据目录。
 
 需要重新扫码的情况：
 
-- 删除了 Reasonix 用户配置目录。
+- 删除了 QiaotongAgent 用户配置目录。
 - 换了 macOS 用户或换了机器。
 - 平台侧撤销授权。
 - 微信 token 失效。
@@ -252,7 +252,7 @@ YOLO 的边界很重要：
 | 现象 | 可以检查 |
 | --- | --- |
 | 扫码提示链接失效 | 回到设置页重新生成二维码；二维码有有效期。 |
-| 已连接但没有回复 | 确认桌面端 Reasonix 正在运行，Bot 连接已开启，用户 ID 在白名单内或允许所有人。 |
+| 已连接但没有回复 | 确认桌面端 QiaotongAgent 正在运行，Bot 连接已开启，用户 ID 在白名单内或允许所有人。 |
 | 飞书或 Lark 按钮提示失败 | 直接发送卡片里的命令，例如 `/approve <id>` 或 `/deny <id>`。 |
 | 微信回复 `1` 没反应 | 只有存在待审批或单选 Ask 时数字快捷回复才生效；也可以使用完整命令。 |
 | 想确认当前模式 | 发送 `/status` 或 `/yolo status`。 |

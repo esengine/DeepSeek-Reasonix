@@ -4,7 +4,7 @@ package main
 
 /*
 #cgo darwin LDFLAGS: -framework Cocoa
-void installReasonixSystemQuitHook(void);
+void installQiaotongAgentSystemQuitHook(void);
 */
 import "C"
 
@@ -14,11 +14,11 @@ var installSystemQuitHookOnce sync.Once
 
 func installSystemQuitHook() {
 	installSystemQuitHookOnce.Do(func() {
-		C.installReasonixSystemQuitHook()
+		C.installQiaotongAgentSystemQuitHook()
 	})
 }
 
-//export ReasonixMarkSystemQuit
-func ReasonixMarkSystemQuit() {
+//export QiaotongAgentMarkSystemQuit
+func QiaotongAgentMarkSystemQuit() {
 	markSystemQuitRequested()
 }

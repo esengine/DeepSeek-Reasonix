@@ -19,7 +19,7 @@ import (
 // without reintroducing the flake.
 func robustTempDir(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "reasonix-test-*")
+	dir, err := os.MkdirTemp("", "qiaotongagent-test-*")
 	if err != nil {
 		t.Fatalf("robustTempDir: %v", err)
 	}

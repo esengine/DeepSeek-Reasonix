@@ -3,8 +3,8 @@ package boot
 import (
 	"testing"
 
-	"reasonix/internal/config"
-	"reasonix/internal/skill"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/skill"
 )
 
 func TestSubagentModelRefUsesConfiguredDefault(t *testing.T) {

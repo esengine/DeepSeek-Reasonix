@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"reasonix/internal/diff"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/diff"
+	"qiaotongagent/internal/tool"
 )
 
 func init() { tool.RegisterBuiltin(deleteRange{}) }

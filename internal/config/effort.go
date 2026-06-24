@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"reasonix/internal/provider/openai"
+	"qiaotongagent/internal/provider/openai"
 )
 
 const (

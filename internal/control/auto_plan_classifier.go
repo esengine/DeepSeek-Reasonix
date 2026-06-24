@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"reasonix/internal/event"
-	"reasonix/internal/nilutil"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/nilutil"
+	"qiaotongagent/internal/provider"
 )
 
 const autoPlanClassifierPrompt = `You classify whether a coding-agent user request should first enter read-only planning mode.

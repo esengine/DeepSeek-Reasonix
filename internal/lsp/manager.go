@@ -75,7 +75,7 @@ func (m *Manager) Close() {
 }
 
 // DefaultSpecs maps a language key to its conventional server. Commands are tried
-// on PATH; nothing here ships with reasonix. Extensions drive file routing, so a
+// on PATH; nothing here ships with qiaotongagent. Extensions drive file routing, so a
 // user can override any entry or add a new language entirely from config.
 func DefaultSpecs() map[string]ServerSpec {
 	return map[string]ServerSpec{

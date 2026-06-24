@@ -7,7 +7,7 @@
 # $DEB_VERSION and $DEB_ARCH are exported by desktop-build.sh. DEB_VERSION is the tag
 # minus a leading "v" and any prerelease suffix (a strict X.Y.Z that dpkg accepts);
 # DEB_ARCH is the Go arch name, which already matches Debian's (amd64, arm64).
-name: "reasonix-desktop"
+name: "qiaotongagent-desktop"
 arch: "${DEB_ARCH}"
 platform: "linux"
 version: "${DEB_VERSION}"
@@ -15,9 +15,9 @@ section: "utils"
 priority: "optional"
 maintainer: "esengine <esengine@users.noreply.github.com>"
 description: |
-  Reasonix desktop — a Wails shell around the Go kernel.
-vendor: "Reasonix Contributors"
-homepage: "https://github.com/esengine/DeepSeek-Reasonix"
+  QiaotongAgent desktop — a Wails shell around the Go kernel.
+vendor: "QiaotongAgent Contributors"
+homepage: "https://github.com/esengine/DeepSeek-QiaotongAgent"
 license: "MIT"
 # Runtime libraries the WebKitGTK 4.1 build links against (-tags webkit2_41); apt
 # pulls them in on install. These package names ship from Ubuntu 22.04 / Debian 12 on.
@@ -25,17 +25,17 @@ depends:
   - libgtk-3-0
   - libwebkit2gtk-4.1-0
 contents:
-  - src: ./build/bin/reasonix-desktop
-    dst: /usr/bin/reasonix-desktop
+  - src: ./build/bin/qiaotongagent-desktop
+    dst: /usr/bin/qiaotongagent-desktop
     file_info:
       mode: 0755
-  - src: ./build/linux/reasonix.desktop
-    dst: /usr/share/applications/reasonix.desktop
+  - src: ./build/linux/qiaotongagent.desktop
+    dst: /usr/share/applications/qiaotongagent.desktop
     file_info:
       mode: 0644
   # appicon.png is 1024x1024 — not a standard hicolor size dir, so install it under
-  # the size-agnostic pixmaps path that the .desktop's `Icon=reasonix-desktop` finds.
+  # the size-agnostic pixmaps path that the .desktop's `Icon=qiaotongagent-desktop` finds.
   - src: ./build/appicon.png
-    dst: /usr/share/pixmaps/reasonix-desktop.png
+    dst: /usr/share/pixmaps/qiaotongagent-desktop.png
     file_info:
       mode: 0644

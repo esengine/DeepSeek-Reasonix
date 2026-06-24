@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/provider"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/tool"
 )
 
 func TestSubagentStoreContinueLoadsSavedTranscript(t *testing.T) {

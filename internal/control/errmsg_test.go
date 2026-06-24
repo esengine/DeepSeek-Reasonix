@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/i18n"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/i18n"
+	"qiaotongagent/internal/provider"
 )
 
 func TestExplainError(t *testing.T) {

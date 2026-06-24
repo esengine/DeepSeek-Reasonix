@@ -9,11 +9,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/command"
-	"reasonix/internal/control"
-	"reasonix/internal/event"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/command"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/provider"
 )
 
 // writeAt creates dir/rel (with parents) holding content, for fs-backed tests.

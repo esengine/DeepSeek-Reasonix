@@ -17,13 +17,13 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/boot"
-	"reasonix/internal/config"
-	"reasonix/internal/control"
-	"reasonix/internal/event"
-	"reasonix/internal/fileutil"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/boot"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/fileutil"
+	"qiaotongagent/internal/provider"
 )
 
 // --- WorkspaceTab -----------------------------------------------------------
@@ -990,7 +990,7 @@ func (a *App) openTopicTab(scope, workspaceRoot, topicID, sessionPath string) (T
 }
 
 // OpenGlobalTab opens a new global-scope tab (no project root). The global
-// workspace root is the reasonix user config directory.
+// workspace root is the qiaotongagent user config directory.
 func (a *App) OpenGlobalTab(topicID string) (TabMeta, error) {
 	globalRoot := globalWorkspaceRoot()
 	if err := os.MkdirAll(globalRoot, 0o755); err != nil {
@@ -1825,9 +1825,9 @@ func desktopConfigDir() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		home, _ := os.UserHomeDir()
-		return filepath.Join(home, ".reasonix")
+		return filepath.Join(home, ".qiaotongagent")
 	}
-	return filepath.Join(dir, "reasonix")
+	return filepath.Join(dir, "qiaotongagent")
 }
 
 func (a *App) saveTabsLocked() {
@@ -2356,21 +2356,21 @@ func topicTitlesPath(workspaceRoot string) string {
 	if workspaceRoot == "" {
 		return filepath.Join(desktopConfigDir(), "global", topicTitlesFile)
 	}
-	return filepath.Join(workspaceRoot, ".reasonix", topicTitlesFile)
+	return filepath.Join(workspaceRoot, ".qiaotongagent", topicTitlesFile)
 }
 
 func topicTitleSourcesPath(workspaceRoot string) string {
 	if workspaceRoot == "" {
 		return filepath.Join(desktopConfigDir(), "global", topicTitleSourcesFile)
 	}
-	return filepath.Join(workspaceRoot, ".reasonix", topicTitleSourcesFile)
+	return filepath.Join(workspaceRoot, ".qiaotongagent", topicTitleSourcesFile)
 }
 
 func topicCreatedAtsPath(workspaceRoot string) string {
 	if workspaceRoot == "" {
 		return filepath.Join(desktopConfigDir(), "global", topicCreatedAtsFile)
 	}
-	return filepath.Join(workspaceRoot, ".reasonix", topicCreatedAtsFile)
+	return filepath.Join(workspaceRoot, ".qiaotongagent", topicCreatedAtsFile)
 }
 
 func loadTopicTitles(workspaceRoot string) map[string]string {
@@ -3978,9 +3978,9 @@ func globalWorkspaceRoot() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		home, _ := os.UserHomeDir()
-		return filepath.Join(home, ".reasonix", "global-workspace")
+		return filepath.Join(home, ".qiaotongagent", "global-workspace")
 	}
-	return filepath.Join(dir, "reasonix", "global-workspace")
+	return filepath.Join(dir, "qiaotongagent", "global-workspace")
 }
 
 func ensureGlobalWorkspaceRoot() (string, error) {

@@ -5,7 +5,7 @@ import (
 	"io"
 	"testing"
 
-	"reasonix/internal/event"
+	"qiaotongagent/internal/event"
 )
 
 // TestOutputSurfacesResultForBufferlessJob probes a task-style job: its run func

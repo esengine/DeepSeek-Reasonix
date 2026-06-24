@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/config"
+	"qiaotongagent/internal/config"
 )
 
 // TestUpsertEnvFile proves a new key is appended, an existing key is replaced in

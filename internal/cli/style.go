@@ -32,7 +32,7 @@ const (
 	ansiCyan    = "\033[38;5;44m"
 	ansiMagenta = "\033[38;5;176m"
 	ansiReverse = "\033[7m"
-	// ansiAccent is the dark theme fallback for Reasonix's warm copper brand
+	// ansiAccent is the dark theme fallback for QiaotongAgent's warm copper brand
 	// colour. accent() uses the active CLI theme, but tests and legacy callers can
 	// still refer to this concrete escape sequence.
 	ansiAccent = "\033[38;5;173m"

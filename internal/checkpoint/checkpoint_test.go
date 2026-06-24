@@ -10,8 +10,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"reasonix/internal/diff"
-	fileenc "reasonix/internal/fileutil/encoding"
+	"qiaotongagent/internal/diff"
+	fileenc "qiaotongagent/internal/fileutil/encoding"
 )
 
 func write(t *testing.T, p, s string) {

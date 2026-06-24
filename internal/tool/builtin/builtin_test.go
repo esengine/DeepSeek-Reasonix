@@ -16,7 +16,7 @@ import (
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/tool"
 )
 
 // argsJSON marshals m into the JSON form a tool expects. Tests must not build
@@ -182,8 +182,8 @@ func TestEditFile(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "a.txt")
 	os.WriteFile(f, []byte("hello world\n"), 0o644)
 
-	runTool(t, editFile{}, map[string]any{"path": f, "old_string": "world", "new_string": "reasonix"})
-	if b, _ := os.ReadFile(f); string(b) != "hello reasonix\n" {
+	runTool(t, editFile{}, map[string]any{"path": f, "old_string": "world", "new_string": "qiaotongagent"})
+	if b, _ := os.ReadFile(f); string(b) != "hello qiaotongagent\n" {
 		t.Fatalf("after edit = %q", b)
 	}
 
@@ -208,14 +208,14 @@ func TestMultiEdit(t *testing.T) {
 		"path": f,
 		"edits": []map[string]any{
 			{"old_string": "package old", "new_string": "package new"},
-			{"old_string": "old", "new_string": "reasonix", "replace_all": true},
+			{"old_string": "old", "new_string": "qiaotongagent", "replace_all": true},
 		},
 	})
 	if !strings.Contains(out, "multi_edit") || !strings.Contains(out, "2 edits applied") {
 		t.Errorf("summary unexpected: %q", out)
 	}
 	got, _ := os.ReadFile(f)
-	want := "package new\n\nfunc reasonix() {\n\treasonix()\n}\n"
+	want := "package new\n\nfunc qiaotongagent() {\n\tqiaotongagent()\n}\n"
 	if string(got) != want {
 		t.Errorf("after multi_edit = %q\n          want = %q", got, want)
 	}
@@ -451,13 +451,13 @@ func TestMultiEditGB18030RoundTrip(t *testing.T) {
 		"path": f,
 		"edits": []map[string]any{
 			{"old_string": "package old", "new_string": "package new"},
-			{"old_string": "old", "new_string": "reasonix", "replace_all": true},
+			{"old_string": "old", "new_string": "qiaotongagent", "replace_all": true},
 		},
 	})
 
 	got, _ := os.ReadFile(f)
 	dec, _ := simplifiedchinese.GB18030.NewDecoder().Bytes(got)
-	want := "package new\n\nfunc reasonix() {\n\treasonix()\n}\n"
+	want := "package new\n\nfunc qiaotongagent() {\n\tqiaotongagent()\n}\n"
 	if string(dec) != want {
 		t.Errorf("after multi_edit = %q (decoded), want %q", dec, want)
 	}

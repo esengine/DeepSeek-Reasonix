@@ -3,7 +3,7 @@ package acp
 import (
 	"testing"
 
-	"reasonix/internal/event"
+	"qiaotongagent/internal/event"
 )
 
 // TestUpdateSinkSkipsPartialDispatch probes the ACP adapter against the early

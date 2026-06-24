@@ -79,7 +79,7 @@ function isLocalFontAvailable(fontName: string): boolean {
   const ctx = canvas.getContext("2d");
   if (!ctx) return false;
 
-  const sample = "Reasonix 字体检测 0123456789";
+  const sample = "QiaotongAgent 字体检测 0123456789";
   const size = "72px";
   const fallbacks = ["monospace", "serif", "sans-serif"] as const;
   return fallbacks.some((fallback) => {

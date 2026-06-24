@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a local production-style Reasonix desktop package from this checkout.
+# Build a local production-style QiaotongAgent desktop package from this checkout.
 #
 # This is intentionally worktree-relative: run ./prod_test from any clone or
 # git worktree and it will package that exact tree, including dirty local changes.

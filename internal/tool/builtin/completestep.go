@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"reasonix/internal/evidence"
-	"reasonix/internal/instruction"
-	"reasonix/internal/provider"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/evidence"
+	"qiaotongagent/internal/instruction"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/tool"
 )
 
 func init() { tool.RegisterBuiltin(completeStep{}) }

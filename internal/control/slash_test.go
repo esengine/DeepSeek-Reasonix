@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/hook"
-	"reasonix/internal/memory"
-	"reasonix/internal/skill"
+	"qiaotongagent/internal/hook"
+	"qiaotongagent/internal/memory"
+	"qiaotongagent/internal/skill"
 )
 
 func labelsOf(items []SlashItem) []string {

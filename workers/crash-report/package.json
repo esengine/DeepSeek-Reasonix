@@ -1,5 +1,5 @@
 {
-  "name": "reasonix-crash-report",
+  "name": "qiaotongagent-crash-report",
   "private": true,
   "type": "module",
   "scripts": {

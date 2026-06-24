@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/boot"
-	"reasonix/internal/config"
-	"reasonix/internal/control"
-	"reasonix/internal/event"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/boot"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/event"
 )
 
 // GatewayConfig 是 BotGateway 的配置。
@@ -29,7 +29,7 @@ type GatewayConfig struct {
 	Enabled            map[Platform]bool
 	Debounce           time.Duration
 	OnInbound          func(InboundMessage)
-	// OnSessionReady persists the concrete Reasonix session ID after the bot
+	// OnSessionReady persists the concrete QiaotongAgent session ID after the bot
 	// has created or reused the controller for an inbound remote.
 	OnSessionReady func(InboundMessage, string) error
 	// OnToolApprovalModeChange persists a remote IM request such as /yolo on.
@@ -63,7 +63,7 @@ type AllowlistConfig struct {
 	Groups   map[Platform][]string
 }
 
-// BotGateway 是 reasonix bot 消息网关，管理 Controller 生命周期、session 并发、
+// BotGateway 是 qiaotongagent bot 消息网关，管理 Controller 生命周期、session 并发、
 // 事件渲染和平台适配器。
 type BotGateway struct {
 	cfg      GatewayConfig

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
   <title id="title">Lark bot YOLO mode interaction</title>
-  <desc id="desc">A synthetic Lark chat showing the user enabling YOLO and Reasonix confirming that ordinary tool approvals are skipped.</desc>
+  <desc id="desc">A synthetic Lark chat showing the user enabling YOLO and QiaotongAgent confirming that ordinary tool approvals are skipped.</desc>
   <defs>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#111827" flood-opacity="0.15"/>

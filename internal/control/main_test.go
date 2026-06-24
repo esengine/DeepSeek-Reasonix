@@ -8,7 +8,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	if os.Getenv("REASONIX_TEST_CODEGRAPH_MCP") == "1" {
+	if os.Getenv("QIAOTONGAGENT_TEST_CODEGRAPH_MCP") == "1" {
 		runCodegraphMCPHelper()
 		os.Exit(0)
 	}

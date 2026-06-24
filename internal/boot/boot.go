@@ -19,29 +19,29 @@ import (
 	"strings"
 	"time"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/builtinmcp"
-	"reasonix/internal/codegraph"
-	"reasonix/internal/command"
-	"reasonix/internal/config"
-	"reasonix/internal/control"
-	"reasonix/internal/event"
-	"reasonix/internal/history"
-	"reasonix/internal/hook"
-	"reasonix/internal/installsource"
-	"reasonix/internal/instruction"
-	"reasonix/internal/jobs"
-	"reasonix/internal/lsp"
-	"reasonix/internal/memory"
-	"reasonix/internal/netclient"
-	"reasonix/internal/outputstyle"
-	"reasonix/internal/permission"
-	"reasonix/internal/plugin"
-	"reasonix/internal/provider"
-	"reasonix/internal/sandbox"
-	"reasonix/internal/skill"
-	"reasonix/internal/tool"
-	"reasonix/internal/tool/builtin"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/builtinmcp"
+	"qiaotongagent/internal/codegraph"
+	"qiaotongagent/internal/command"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/history"
+	"qiaotongagent/internal/hook"
+	"qiaotongagent/internal/installsource"
+	"qiaotongagent/internal/instruction"
+	"qiaotongagent/internal/jobs"
+	"qiaotongagent/internal/lsp"
+	"qiaotongagent/internal/memory"
+	"qiaotongagent/internal/netclient"
+	"qiaotongagent/internal/outputstyle"
+	"qiaotongagent/internal/permission"
+	"qiaotongagent/internal/plugin"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/sandbox"
+	"qiaotongagent/internal/skill"
+	"qiaotongagent/internal/tool"
+	"qiaotongagent/internal/tool/builtin"
 )
 
 // ErrUnknownModel is returned by Build when the configured model can't be
@@ -76,7 +76,7 @@ type Options struct {
 	WorkspaceRoot string
 	// ExtraPlugins are session-scoped MCP servers supplied by a host transport
 	// (for example ACP session/new). They are connected eagerly for this
-	// controller but are not persisted to reasonix.toml.
+	// controller but are not persisted to qiaotongagent.toml.
 	ExtraPlugins []plugin.Spec
 	// TokenMode selects how much optional context/tool surface this session exposes
 	// at boot. Empty/full preserves the normal capability surface. "economy" keeps
@@ -114,7 +114,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	tokenEconomy := tokenMode == TokenModeEconomy
 	entry, ok := cfg.ResolveModel(modelName)
 	if !ok {
-		return nil, fmt.Errorf("%w %q (configured: %s); note: defining [[providers]] replaces the built-in presets, so add a [[providers]] entry for it or use a configured name, or run `reasonix setup` to reconfigure", ErrUnknownModel, modelName, providerNames(cfg))
+		return nil, fmt.Errorf("%w %q (configured: %s); note: defining [[providers]] replaces the built-in presets, so add a [[providers]] entry for it or use a configured name, or run `qiaotongagent setup` to reconfigure", ErrUnknownModel, modelName, providerNames(cfg))
 	}
 	if opts.EffortOverride != nil {
 		entry.Effort = *opts.EffortOverride
@@ -135,7 +135,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	sink := event.Sync(opts.Sink)
 
 	if migErr != nil {
-		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "config migration from ~/.reasonix failed: " + migErr.Error()})
+		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "config migration from ~/.qiaotongagent failed: " + migErr.Error()})
 	} else if migrated != nil {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: migrated.Notice()})
 	}
@@ -182,7 +182,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		sysPrompt += "\n\n" + tokenEconomyPrompt
 	}
 
-	// Persistent memory (REASONIX.md / AGENTS.md hierarchy + auto-memory index)
+	// Persistent memory (QIAOTONGAGENT.md / AGENTS.md hierarchy + auto-memory index)
 	// folds into the system prompt exactly here, once: it becomes part of the
 	// durable, cache-stable prefix every turn reuses, so memory costs nothing per
 	// turn. Mid-session changes never touch this prefix — they ride the
@@ -324,7 +324,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			}
 		default:
 			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
-				Text: "codegraph: not installed — run `reasonix codegraph install` to enable symbol-graph tools"})
+				Text: "codegraph: not installed — run `qiaotongagent codegraph install` to enable symbol-graph tools"})
 		}
 	}
 	if !tokenEconomy {
@@ -435,7 +435,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 
 	// Permission policy gates every tool call. The headless gate (no Approver)
-	// resolves "ask" to allow — preserving `reasonix run` autonomy — while deny
+	// resolves "ask" to allow — preserving `qiaotongagent run` autonomy — while deny
 	// rules hard-block in every mode. Interactive frontends (chat, desktop) swap
 	// in an interactive gate later via Controller.EnableInteractiveApproval.
 	// Sub-agents always run headless: they have no UI to answer a prompt, so they
@@ -553,7 +553,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		parentSession := agent.ParentSession(sctx)
 		var run *agent.SubagentRun
 		if subagentStore == nil || parentSession == "" {
-			// Headless runs (e.g. `reasonix run`) have no persistent session to
+			// Headless runs (e.g. `qiaotongagent run`) have no persistent session to
 			// own a transcript. Run the skill sub-agent ephemerally, as before
 			// persisted transcripts existed, instead of failing. Continuation and
 			// fork need a persisted owner, so they error here.
@@ -619,7 +619,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 		return &event.Profile{Model: model, Effort: effort}
 	}
-	// Custom slash commands (.reasonix/commands + user dir). Best-effort: a malformed
+	// Custom slash commands (.qiaotongagent/commands + user dir). Best-effort: a malformed
 	// file is skipped, and a load error never blocks the session.
 	cmds, _ := command.Load(config.CommandDirsForRoot(root)...)
 	addSlashCommandTool := func(includeSkills bool) {
@@ -923,8 +923,8 @@ func migrateLegacySessionSources(sink event.Sink) {
 	var sources []legacySource
 	if home, herr := os.UserHomeDir(); herr == nil {
 		sources = append(sources, legacySource{
-			dir:     filepath.Join(home, ".reasonix", "sessions"),
-			label:   "~/.reasonix/sessions",
+			dir:     filepath.Join(home, ".qiaotongagent", "sessions"),
+			label:   "~/.qiaotongagent/sessions",
 			migrate: agent.MigrateLegacySessions,
 		})
 	}
@@ -979,11 +979,11 @@ func rememberPermissionRule(workspaceRoot, rule string) control.RememberResult {
 func rememberPermissionConfigPath(workspaceRoot string) string {
 	workspaceRoot = strings.TrimSpace(workspaceRoot)
 	if workspaceRoot != "" {
-		return filepath.Join(workspaceRoot, "reasonix.toml")
+		return filepath.Join(workspaceRoot, "qiaotongagent.toml")
 	}
 	path := config.SourcePath()
 	if path == "" {
-		path = "reasonix.toml" // match Config.Save() fallback
+		path = "qiaotongagent.toml" // match Config.Save() fallback
 	}
 	return path
 }

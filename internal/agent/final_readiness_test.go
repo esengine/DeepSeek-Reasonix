@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/evidence"
-	"reasonix/internal/instruction"
+	"qiaotongagent/internal/evidence"
+	"qiaotongagent/internal/instruction"
 )
 
 func readinessLedger(receipts ...evidence.Receipt) *evidence.Ledger {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/event"
+	"qiaotongagent/internal/event"
 )
 
 // TestCompactionCardLines locks the finished-compaction card: a header naming

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"reasonix/internal/doctor"
+	"qiaotongagent/internal/doctor"
 )
 
 func doctorCommand(args []string, version string) int {

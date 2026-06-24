@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"reasonix/internal/diff"
-	fileenc "reasonix/internal/fileutil/encoding"
+	"qiaotongagent/internal/diff"
+	fileenc "qiaotongagent/internal/fileutil/encoding"
 )
 
 // preview.go gives the file-writing built-ins the optional tool.Previewer

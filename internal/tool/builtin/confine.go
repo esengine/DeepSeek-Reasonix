@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"reasonix/internal/netclient"
-	"reasonix/internal/sandbox"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/netclient"
+	"qiaotongagent/internal/sandbox"
+	"qiaotongagent/internal/tool"
 )
 
 // ConfineBash returns the bash built-in bound to an OS-sandbox spec, overriding
@@ -26,7 +26,7 @@ func ConfineBash(spec sandbox.Spec, timeout ...time.Duration) tool.Tool {
 	return b
 }
 
-// ConfineWebFetch returns the web_fetch built-in bound to Reasonix proxy
+// ConfineWebFetch returns the web_fetch built-in bound to QiaotongAgent proxy
 // settings while preserving its SSRF-guarded dialer.
 func ConfineWebFetch(proxySpec netclient.ProxySpec) tool.Tool {
 	return webFetch{proxySpec: proxySpec}
@@ -82,7 +82,7 @@ func confine(roots []string, target string) error {
 		}
 	}
 	return fmt.Errorf("path %q is outside the workspace (writes are confined to %s); "+
-		"write inside it, or widen [sandbox] workspace_root / allow_write in reasonix.toml",
+		"write inside it, or widen [sandbox] workspace_root / allow_write in qiaotongagent.toml",
 		target, strings.Join(roots, ", "))
 }
 

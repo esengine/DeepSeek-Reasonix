@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sort"
 
-	"reasonix/internal/event"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/provider"
 )
 
 // PrefixShape hashes the portions of the request prefix that influence

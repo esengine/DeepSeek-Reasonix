@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/control"
-	"reasonix/internal/event"
-	"reasonix/internal/jobs"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/jobs"
 )
 
 func TestProjectTreeShowsDetachedRuntimeStatus(t *testing.T) {

@@ -28,8 +28,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"reasonix/internal/netclient"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/netclient"
+	"qiaotongagent/internal/provider"
 )
 
 // defaultStreamIdleTimeout caps how long a started SSE stream may go silent before

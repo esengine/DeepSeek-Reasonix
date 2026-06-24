@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/provider"
 )
 
 func TestMockProviderStreamHonorsCanceledContext(t *testing.T) {

@@ -2,7 +2,7 @@ package codegraph
 
 import "testing"
 
-func TestMCPSpecSetsReasonixDaemonIdleTimeout(t *testing.T) {
+func TestMCPSpecSetsQiaotongAgentDaemonIdleTimeout(t *testing.T) {
 	spec := MCPSpec("/tmp/codegraph", "/tmp/project")
 	if spec.Name != "codegraph" {
 		t.Fatalf("Name = %q, want codegraph", spec.Name)
@@ -10,8 +10,8 @@ func TestMCPSpecSetsReasonixDaemonIdleTimeout(t *testing.T) {
 	if spec.StripRawPrefix != "codegraph_" {
 		t.Fatalf("StripRawPrefix = %q, want codegraph_", spec.StripRawPrefix)
 	}
-	if got := spec.Env[DaemonIdleTimeoutEnv]; got != ReasonixDaemonIdleTimeoutMS {
-		t.Fatalf("%s = %q, want %q", DaemonIdleTimeoutEnv, got, ReasonixDaemonIdleTimeoutMS)
+	if got := spec.Env[DaemonIdleTimeoutEnv]; got != QiaotongAgentDaemonIdleTimeoutMS {
+		t.Fatalf("%s = %q, want %q", DaemonIdleTimeoutEnv, got, QiaotongAgentDaemonIdleTimeoutMS)
 	}
 	if !spec.LowPriority {
 		t.Fatal("LowPriority = false, want true")

@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"reasonix/internal/config"
+	"qiaotongagent/internal/config"
 )
 
 // mcpEntryAction assembles the DTO for a single MCP server install. The

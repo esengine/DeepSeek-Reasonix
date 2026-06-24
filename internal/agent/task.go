@@ -8,10 +8,10 @@ import (
 	"io"
 	"strings"
 
-	"reasonix/internal/event"
-	"reasonix/internal/jobs"
-	"reasonix/internal/provider"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/jobs"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/tool"
 )
 
 // DefaultTaskSystemPrompt steers a sub-agent toward focused, terse delivery —
@@ -290,7 +290,7 @@ func (t *TaskTool) prepareTranscriptRun(subReg *tool.Registry, modelRef, effortR
 	if t.transcripts == nil {
 		return nil, fmt.Errorf("subagent transcript store is required")
 	}
-	// Headless runs (e.g. `reasonix run`) never mint a session path, so there is
+	// Headless runs (e.g. `qiaotongagent run`) never mint a session path, so there is
 	// no parent session to own a transcript. Run the sub-agent ephemerally —
 	// exactly as before persisted transcripts existed — instead of failing the
 	// call. Continuation/fork need a persisted owner, so they error here.

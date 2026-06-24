@@ -201,7 +201,7 @@ func RuleMatchesString(rule, toolName, subject string) bool {
 }
 
 // RuleCoversString reports whether every call represented by candidate is
-// already covered by existing. It intentionally proves only the cases Reasonix
+// already covered by existing. It intentionally proves only the cases QiaotongAgent
 // creates automatically: exact rules covered by broader globs or bare tool
 // rules, exact duplicate globs, and bare tool rules covering subject rules.
 func RuleCoversString(existing, candidate string) bool {

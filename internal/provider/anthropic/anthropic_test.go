@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/provider"
 )
 
 // TestBuildRequest covers the protocol conversion: system lift, tool_use /

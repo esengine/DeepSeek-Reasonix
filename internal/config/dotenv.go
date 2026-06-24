@@ -10,8 +10,8 @@ import (
 // loadDotEnv loads KEY=value files into the process environment without
 // overriding variables that are already set (first file to set a key wins).
 // Order: a project ./.env (read-only back-compat, so a manual project override
-// takes precedence), then the reasonix-owned global credentials file in the user
-// config dir (where `reasonix setup` writes keys, so they resolve from any
+// takes precedence), then the qiaotongagent-owned global credentials file in the user
+// config dir (where `qiaotongagent setup` writes keys, so they resolve from any
 // directory without ever touching a project's own .env), then ~/.env as a legacy
 // fallback (the desktop app writes there). Existing environment variables always
 // win over all three.

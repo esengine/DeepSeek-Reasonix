@@ -8,7 +8,7 @@ var ChineseTraditional = Messages{
 	WelcomeTitleFmt: "歡迎使用 %s",
 	NoConfigYet:     "還沒有設定 — 現在來設定一下吧。",
 	StartingChatFmt: "正在啟動 %s…",
-	SetKeyHint:      "設定好 API key 後執行 `reasonix chat`。",
+	SetKeyHint:      "設定好 API key 後執行 `qiaotongagent chat`。",
 	ConfigLabel:     "設定",
 	ModelsLabel:     "模型",
 	ConfigNotFound:  "未找到 — 使用內建預設值",
@@ -16,18 +16,18 @@ var ChineseTraditional = Messages{
 	NoKey:           "未設定 key",
 	Ready:           "已就緒",
 	GetStarted:      "開始使用",
-	StepScaffold:    "生成 reasonix.toml",
+	StepScaffold:    "生成 qiaotongagent.toml",
 	StepSetKey:      "設定 API key",
 
-	InitHint:       "專案記憶（AGENTS.md）在會話內由模型生成：執行 `reasonix chat`，然後 `/init` —— 模型會分析程式碼庫並寫入。設定請用 `reasonix setup`。",
-	StepSetKeyHint: "執行 `reasonix setup`，或 export DEEPSEEK_API_KEY=…",
+	InitHint:       "專案記憶（AGENTS.md）在會話內由模型生成：執行 `qiaotongagent chat`，然後 `/init` —— 模型會分析程式碼庫並寫入。設定請用 `qiaotongagent setup`。",
+	StepSetKeyHint: "執行 `qiaotongagent setup`，或 export DEEPSEEK_API_KEY=…",
 	StepChatDesc:   "互動式會話",
 	StepRunDesc:    "執行單次任務",
-	HelpFooter:     "reasonix help · 檢視全部命令",
+	HelpFooter:     "qiaotongagent help · 檢視全部命令",
 
 	ChatTip:           "對話上下文將跨輪保留。輸入 'exit' 或按 Ctrl-D 退出。",
 	TurnCancelled:     "已取消 — 回到提示符",
-	NoSessionToResume: "沒有可恢復的會話 — 用 `reasonix chat` 開一個新的",
+	NoSessionToResume: "沒有可恢復的會話 — 用 `qiaotongagent chat` 開一個新的",
 	ResumeRequiresTTY: "--resume 需要互動式終端；用 --continue 直接恢復最近一次",
 	PickSessionLabel:  "恢復哪個會話？",
 
@@ -73,7 +73,7 @@ var ChineseTraditional = Messages{
 
 	OutputStyleNone:    "沒有可用的輸出風格",
 	OutputStyleHeader:  "輸出風格：",
-	OutputStyleHint:    "在 reasonix.toml 設定 agent.output_style 即可啟用（下次會話生效）",
+	OutputStyleHint:    "在 qiaotongagent.toml 設定 agent.output_style 即可啟用（下次會話生效）",
 	ThemeHeader:        "主題：",
 	ThemeHint:          "使用 /theme <auto|light|dark|style> 切換",
 	ThemeChangedFmt:    "已切換主題為 %s / %s",
@@ -142,7 +142,7 @@ var ChineseTraditional = Messages{
 	SkillPickerStatusNotDir:      "非目錄",
 	SkillPickerStatusUnreadable:  "無權限",
 	SlashPromptEmpty:             "該 MCP prompt 沒有返回可傳送的內容",
-	SlashMCPNone:                 "沒有設定 MCP 伺服器 — 在 reasonix.toml 加一個 [[plugins]] 條目",
+	SlashMCPNone:                 "沒有設定 MCP 伺服器 — 在 qiaotongagent.toml 加一個 [[plugins]] 條目",
 	CtrlCQuitHint:                "再按一次 Ctrl+C 退出",
 	CompHintSlash:                "↑/↓ 移動 · Tab/Enter 選中 · Esc 關閉",
 	CompHintFile:                 "↑/↓ 移動 · Tab/Enter 進入資料夾或選中檔案 · Esc 關閉",
@@ -196,7 +196,7 @@ var ChineseTraditional = Messages{
 	ArgEffortXHigh:  "超高推理",
 	ArgEffortMax:    "最高推理",
 	ArgThemeCurrent: "當前",
-	ArgLanguageAuto: "從 REASONIX_LANG / 系統 locale 自動偵測",
+	ArgLanguageAuto: "從 QIAOTONGAGENT_LANG / 系統 locale 自動偵測",
 	ArgLanguageEn:   "English",
 	ArgLanguageZh:   "中文",
 
@@ -207,11 +207,11 @@ var ChineseTraditional = Messages{
 	ListSkillsHeaderFmt: "skills（%d 個）",
 	ListSkillsNone:      "暫無 skill — 呼叫內建的（如 /init），或用 install_skill 建立一個",
 	ListHooksHeaderFmt:  "hooks（生效 %d 個）",
-	ListHooksNone:       "無生效 hooks — 在 .reasonix/settings.json（專案，需信任後）或 ~/.reasonix/settings.json（全域）設定",
+	ListHooksNone:       "無生效 hooks — 在 .qiaotongagent/settings.json（專案，需信任後）或 ~/.qiaotongagent/settings.json（全域）設定",
 	ListMcpHeader:       "MCP 伺服器",
-	ListMcpNone:         "未連線 MCP 伺服器 — 在 reasonix.toml（[[plugins]]）或專案 .mcp.json 中新增",
+	ListMcpNone:         "未連線 MCP 伺服器 — 在 qiaotongagent.toml（[[plugins]]）或專案 .mcp.json 中新增",
 
-	MemoryNone:             "還沒有載入任何記憶 — 輸入 “/remember 內容” 可快速記錄，也可以在專案根目錄建立 REASONIX.md",
+	MemoryNone:             "還沒有載入任何記憶 — 輸入 “/remember 內容” 可快速記錄，也可以在專案根目錄建立 QIAOTONGAGENT.md",
 	MemoryLoaded:           "當前已載入的記憶：",
 	MemorySavedHeader:      "  已記錄的條目（用 “/forget <name>” 刪除）：",
 	MemoryStoredUnderFmt:   "  存放於 %s",
@@ -241,12 +241,12 @@ var ChineseTraditional = Messages{
 
 	SelectProvidersLabel:  "選擇要啟用的 provider",
 	EnterAPIKeysHeader:    "輸入 API key（Enter 跳過、稍後再設）：",
-	MissingKeyIntro:       "reasonix.toml 已設定好 — 只差一個 API key 就可以開始。",
+	MissingKeyIntro:       "qiaotongagent.toml 已設定好 — 只差一個 API key 就可以開始。",
 	WroteFileFmt:          "已寫入 %s",
 	SetupComplete:         "設定完成。",
 	SetupCancelled:        "設定已取消。",
 	TryHintFmt:            "試試: %s",
-	NextHint:              "下一步：設定 API key（執行 `reasonix setup` 或 export DEEPSEEK_API_KEY=...），然後執行 `reasonix run \"你的任務\"`。",
+	NextHint:              "下一步：設定 API key（執行 `qiaotongagent setup` 或 export DEEPSEEK_API_KEY=...），然後執行 `qiaotongagent run \"你的任務\"`。",
 	ConfirmReconfigureFmt: "%s 已存在。重新設定並覆蓋？",
 	KeepingExisting:       "保留原設定不變。",
 	NotOverwritingFmt:     "%s 已存在，不覆蓋",
@@ -261,7 +261,7 @@ var ChineseTraditional = Messages{
 	NoModelsAvailableFmt:       "%s: 沒有可用模型，跳過",
 	CustomFetchEmpty:           "/models 返回為空，回退到手動輸入",
 	AnthropicFetchEmpty:        "/models 返回為空 — Anthropic 相容服務通常不提供此端點，回退到手動輸入",
-	SkipStaleCustomEntryFmt:    "跳過 reasonix.toml 裡的舊 %q 條目（指向 %s）— 請手動從 [[providers]] 裡刪除",
+	SkipStaleCustomEntryFmt:    "跳過 qiaotongagent.toml 裡的舊 %q 條目（指向 %s）— 請手動從 [[providers]] 裡刪除",
 	APIKeyAlreadySetFmt:        "復用已設定的 %s",
 	APIKeyResetPromptFmt:       "重新輸入 %s？",
 
@@ -294,14 +294,14 @@ var ChineseTraditional = Messages{
 	AnthropicSelectModelsLabel:     "選擇要啟用的 %s 模型",
 
 	UnknownCommandFmt:         "未知命令 %q",
-	UsageRunHint:              "用法：reasonix run [--model NAME] <task>",
+	UsageRunHint:              "用法：qiaotongagent run [--model NAME] <task>",
 	ErrorPrefix:               "錯誤：",
 	ReconfigureOnUnknownModel: "設定的模型已不可用 —— 重新執行引導設定。",
 	WriteConfigErr:            "寫入設定失敗：",
 	WriteEnvErr:               "寫入 .env 失敗：",
 
 	ProviderErrBadRequest:          "請求格式錯誤 (HTTP 400)：請求體被拒絕，通常是程式缺陷。若持續出現請回報。",
-	ProviderErrAuth:                "認證失敗 (HTTP 401)：API key 缺失、錯誤或已過期。請檢查 .env 中的金鑰，或執行 `reasonix setup`。",
+	ProviderErrAuth:                "認證失敗 (HTTP 401)：API key 缺失、錯誤或已過期。請檢查 .env 中的金鑰，或執行 `qiaotongagent setup`。",
 	ProviderErrInsufficientBalance: "餘額不足 (HTTP 402)：帳戶餘額不足，請前往儲值後重試。",
 	ProviderErrUnprocessable:       "參數錯誤 (HTTP 422)：某個請求參數被拒絕，通常是程式缺陷。若持續出現請回報。",
 	ProviderErrRateLimited:         "請求速率達到上限 (HTTP 429)：請求過於頻繁 (TPM/RPM)。已退避重試，請放慢速率或稍後再試。",
@@ -311,32 +311,32 @@ var ChineseTraditional = Messages{
 	SelectOneHint:  "(↑/↓ · Enter · q 取消)",
 	SelectManyHint: "(↑/↓ · Space · Enter · q)",
 
-	UsageBody: `reasonix — 由設定和插件驅動的 coding agent（多模型）
+	UsageBody: `qiaotongagent — 由設定和插件驅動的 coding agent（多模型）
 
 用法：
-  reasonix chat [--model NAME] [-c|--continue] [--resume]   互動式會話（多輪；-c 恢復最近一次，--resume 選擇一個）
-  reasonix run  [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] <task>   執行單次任務後退出
-  reasonix serve [--model NAME] [--addr HOST:PORT]      透過 HTTP+SSE 提供會話（瀏覽器客戶端在 /）
-  reasonix acp [--model NAME]                           透過 stdio 提供 Agent Client Protocol（也可用：reasonix --acp）
-  reasonix setup [path]                                 互動式設定精靈；生成 reasonix.toml（及 .env）
-  reasonix config auto-plan [off|on]                    設定自動計畫模式
-  reasonix config reasoning-language [auto|zh|en]        設定可見思考語言
-  reasonix mcp <add|remove|list>                        管理 reasonix.toml 裡的 MCP 伺服器
-  reasonix doctor [--json]                              輸出脫敏的本機診斷資訊
-  reasonix version
-  reasonix help
+  qiaotongagent chat [--model NAME] [-c|--continue] [--resume]   互動式會話（多輪；-c 恢復最近一次，--resume 選擇一個）
+  qiaotongagent run  [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] <task>   執行單次任務後退出
+  qiaotongagent serve [--model NAME] [--addr HOST:PORT]      透過 HTTP+SSE 提供會話（瀏覽器客戶端在 /）
+  qiaotongagent acp [--model NAME]                           透過 stdio 提供 Agent Client Protocol（也可用：qiaotongagent --acp）
+  qiaotongagent setup [path]                                 互動式設定精靈；生成 qiaotongagent.toml（及 .env）
+  qiaotongagent config auto-plan [off|on]                    設定自動計畫模式
+  qiaotongagent config reasoning-language [auto|zh|en]        設定可見思考語言
+  qiaotongagent mcp <add|remove|list>                        管理 qiaotongagent.toml 裡的 MCP 伺服器
+  qiaotongagent doctor [--json]                              輸出脫敏的本機診斷資訊
+  qiaotongagent version
+  qiaotongagent help
 
 範例：
-  reasonix chat
-  reasonix chat --continue
-  reasonix run "把 main.go 裡的 TODO 實現掉"
-  reasonix run --model mimo-pro "給這個函式補單元測試"
-  echo "解釋這段程式碼" | reasonix run
+  qiaotongagent chat
+  qiaotongagent chat --continue
+  qiaotongagent run "把 main.go 裡的 TODO 實現掉"
+  qiaotongagent run --model mimo-pro "給這個函式補單元測試"
+  echo "解釋這段程式碼" | qiaotongagent run
 
 設定：
-  優先順序：flag > ./reasonix.toml > ~/.config/reasonix/config.toml > 內建預設值
+  優先順序：flag > ./qiaotongagent.toml > ~/.config/qiaotongagent/config.toml > 內建預設值
   金鑰透過 api_key_env 從環境變數注入（如 DEEPSEEK_API_KEY）。
-  執行 'reasonix setup' 生成設定；詳見 docs/SPEC.md。
+  執行 'qiaotongagent setup' 生成設定；詳見 docs/SPEC.md。
 `,
 	RenameUsage:                "用法：/rename <新名稱>  或  /rename <序號> <新名稱>",
 	RenameNoSession:            "當前沒有活躍會話可重新命名",
@@ -356,7 +356,7 @@ var ChineseTraditional = Messages{
 	GoalCurrentFmt:             "目標：%s",
 	GoalSetFmt:                 "目標已設定 → %s",
 	GoalCleared:                "目標已清除",
-	ProviderErrAuthRejected:    "認證失敗 (HTTP 401)：服務端拒絕了你的 API key。可能是 key 錯誤或已過期，也可能是服務端出現瞬時鑑權/額度問題——已退避重試仍失敗。請稍後再試，或檢查 .env 中的金鑰 / 執行 `reasonix setup`。",
+	ProviderErrAuthRejected:    "認證失敗 (HTTP 401)：服務端拒絕了你的 API key。可能是 key 錯誤或已過期，也可能是服務端出現瞬時鑑權/額度問題——已退避重試仍失敗。請稍後再試，或檢查 .env 中的金鑰 / 執行 `qiaotongagent setup`。",
 	SelectMoreAboveFmt:         "  ↑ 上方還有 %d 個",
 	SelectMoreBelowFmt:         "  ↓ 下方還有 %d 個",
 	SelectSearchHint:           "/ 搜尋 · 輸入關鍵詞過濾 · Esc 取消搜尋",

@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/tool"
 )
 
 func init() { tool.RegisterBuiltin(moveFile{}) }
@@ -101,7 +101,7 @@ func (m moveFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 }
 
 func renameSameFileDestination(src, dst string) error {
-	tmp, err := os.CreateTemp(filepath.Dir(src), ".reasonix-move-*")
+	tmp, err := os.CreateTemp(filepath.Dir(src), ".qiaotongagent-move-*")
 	if err != nil {
 		return err
 	}

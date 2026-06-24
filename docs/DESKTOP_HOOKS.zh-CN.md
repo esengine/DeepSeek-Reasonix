@@ -6,7 +6,7 @@
 &nbsp;·&nbsp;
 <a href="./SPEC.md">规格</a>
 
-Hooks 让 Reasonix 在会话、用户输入、工具调用、模型返回、压缩上下文等节点执行本地 shell 命令。桌面端在“设置 -> Hooks”里提供图形化编辑入口，本质上读写同一份 `settings.json`。
+Hooks 让 QiaotongAgent 在会话、用户输入、工具调用、模型返回、压缩上下文等节点执行本地 shell 命令。桌面端在“设置 -> Hooks”里提供图形化编辑入口，本质上读写同一份 `settings.json`。
 
 > Hook 命令会在本机执行 shell。全局 hooks 默认可信；项目 hooks 必须显式信任项目后才会加载。
 
@@ -14,8 +14,8 @@ Hooks 让 Reasonix 在会话、用户输入、工具调用、模型返回、压�
 
 1. 打开桌面端“设置 -> Hooks”。
 2. 选择范围：
-   - “全局”：保存到 `~/.reasonix/settings.json`，始终加载。
-   - “项目”：保存到当前工作区的 `.reasonix/settings.json`，必须点击“信任此工作区”后才会加载。
+   - “全局”：保存到 `~/.qiaotongagent/settings.json`，始终加载。
+   - “项目”：保存到当前工作区的 `.qiaotongagent/settings.json`，必须点击“信任此工作区”后才会加载。
 3. 在 JSON 配置框里编辑 `hooks`。
 4. 保存后，重启桌面端，让新配置进入会话。`/new` 只开启新对话，不会重新读取 hooks 配置。
 
@@ -27,14 +27,14 @@ Hooks 让 Reasonix 在会话、用户输入、工具调用、模型返回、压�
     "PreToolUse": [
       {
         "match": "bash",
-        "command": "node .reasonix/hooks/check-bash.js",
+        "command": "node .qiaotongagent/hooks/check-bash.js",
         "description": "Block dangerous shell commands",
         "timeout": 5000
       }
     ],
     "Stop": [
       {
-        "command": "echo Reasonix turn finished"
+        "command": "echo QiaotongAgent turn finished"
       }
     ]
   }
@@ -45,10 +45,10 @@ Hooks 让 Reasonix 在会话、用户输入、工具调用、模型返回、压�
 
 | 范围 | 文件 | 是否需要信任 | 加载顺序 |
 | --- | --- | --- | --- |
-| 全局 | `~/.reasonix/settings.json` | 不需要 | 项目 hooks 之后 |
-| 项目 | `<workspace>/.reasonix/settings.json` | 需要 | 全局 hooks 之前 |
+| 全局 | `~/.qiaotongagent/settings.json` | 不需要 | 项目 hooks 之后 |
+| 项目 | `<workspace>/.qiaotongagent/settings.json` | 需要 | 全局 hooks 之前 |
 
-项目 hooks 的信任状态不写在项目文件里，而是写在用户自己的 `~/.reasonix/trust.json`。这样克隆来的仓库不能靠提交 `.reasonix/settings.json` 自动执行命令。
+项目 hooks 的信任状态不写在项目文件里，而是写在用户自己的 `~/.qiaotongagent/trust.json`。这样克隆来的仓库不能靠提交 `.qiaotongagent/settings.json` 自动执行命令。
 
 同一个事件下，项目 hooks 先运行，全局 hooks 后运行；同一范围内按数组顺序运行。阻塞型事件遇到第一个阻塞 hook 后，会停止继续执行后面的 hook。
 
@@ -60,13 +60,13 @@ Hooks 让 Reasonix 在会话、用户输入、工具调用、模型返回、压�
 {
   "hooks": {
     "PreToolUse": [
-      { "match": "bash", "command": "node .reasonix/hooks/pre-tool.js" }
+      { "match": "bash", "command": "node .qiaotongagent/hooks/pre-tool.js" }
     ],
     "UserPromptSubmit": [
-      { "command": "node ~/.reasonix/hooks/check-prompt.js" }
+      { "command": "node ~/.qiaotongagent/hooks/check-prompt.js" }
     ],
     "Stop": [
-      { "command": "osascript -e 'display notification \"Turn done\" with title \"Reasonix\"'" }
+      { "command": "osascript -e 'display notification \"Turn done\" with title \"QiaotongAgent\"'" }
     ]
   }
 }
@@ -77,7 +77,7 @@ Hooks 让 Reasonix 在会话、用户输入、工具调用、模型返回、压�
 ```json
 {
   "PreToolUse": [
-    { "match": "bash", "command": "node .reasonix/hooks/pre-tool.js" }
+    { "match": "bash", "command": "node .qiaotongagent/hooks/pre-tool.js" }
   ],
   "Stop": [
     { "command": "echo done" }
@@ -87,7 +87,7 @@ Hooks 让 Reasonix 在会话、用户输入、工具调用、模型返回、压�
 
 ```json
 [
-  { "event": "PreToolUse", "match": "bash", "command": "node .reasonix/hooks/pre-tool.js" },
+  { "event": "PreToolUse", "match": "bash", "command": "node .qiaotongagent/hooks/pre-tool.js" },
   { "event": "Stop", "command": "echo done" }
 ]
 ```
@@ -104,7 +104,7 @@ Hooks 让 Reasonix 在会话、用户输入、工具调用、模型返回、压�
 
 `match` 是锚定正则：`"file"` 不会匹配 `read_file`，需要写成 `".*file"`。正则非法时该 hook 不会触发。
 
-`command` 会通过平台 shell 执行：macOS/Linux 使用 `sh -c`，Windows 使用 `cmd /c`。stdin 是 Reasonix 写入的一行 JSON，见下面的 payload 表。
+`command` 会通过平台 shell 执行：macOS/Linux 使用 `sh -c`，Windows 使用 `cmd /c`。stdin 是 QiaotongAgent 写入的一行 JSON，见下面的 payload 表。
 
 ## 配置里的事件 key
 
@@ -127,7 +127,7 @@ Hooks 让 Reasonix 在会话、用户输入、工具调用、模型返回、压�
 
 ## Hook 命令收到的 payload
 
-Reasonix 会把一行 JSON 写入 hook 命令的 stdin。所有 payload 都至少有：
+QiaotongAgent 会把一行 JSON 写入 hook 命令的 stdin。所有 payload 都至少有：
 
 | key | 类型 | 说明 |
 | --- | --- | --- |
@@ -165,13 +165,13 @@ stdout 和 stderr 会被捕获、去掉首尾空白，并限制单路输出最�
 
 特殊 stdout 行为：
 
-- `PostLLMCall`：exit 0 且 stdout 非空时，stdout 会替换用户看到的 reasoning。若 provider 的 reasoning 带签名，Reasonix 会保留原始 signed reasoning 用于后续请求，同时仍展示 hook 转换后的文本。
+- `PostLLMCall`：exit 0 且 stdout 非空时，stdout 会替换用户看到的 reasoning。若 provider 的 reasoning 带签名，QiaotongAgent 会保留原始 signed reasoning 用于后续请求，同时仍展示 hook 转换后的文本。
 - `PreCompact`：所有非空 stdout 会按换行拼接，作为本次压缩摘要的额外指导。
 - 其它事件：stdout 只在非通过结果中作为提示文本使用，不会自动进入模型上下文。
 
 ## 示例：阻止危险 bash 命令
 
-`.reasonix/settings.json`：
+`.qiaotongagent/settings.json`：
 
 ```json
 {
@@ -179,7 +179,7 @@ stdout 和 stderr 会被捕获、去掉首尾空白，并限制单路输出最�
     "PreToolUse": [
       {
         "match": "bash",
-        "command": "node .reasonix/hooks/block-dangerous-bash.js",
+        "command": "node .qiaotongagent/hooks/block-dangerous-bash.js",
         "description": "Block risky bash commands",
         "timeout": 3000
       }
@@ -188,7 +188,7 @@ stdout 和 stderr 会被捕获、去掉首尾空白，并限制单路输出最�
 }
 ```
 
-`.reasonix/hooks/block-dangerous-bash.js`：
+`.qiaotongagent/hooks/block-dangerous-bash.js`：
 
 ```js
 const fs = require("fs");

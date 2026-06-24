@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"strings"
 
-	"reasonix/internal/config"
+	"qiaotongagent/internal/config"
 )
 
 // packageNameRe matches valid npm package-name segments. Pinned by [a-z0-9._-]

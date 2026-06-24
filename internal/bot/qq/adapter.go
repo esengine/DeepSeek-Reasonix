@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"reasonix/internal/bot"
-	"reasonix/internal/config"
+	"qiaotongagent/internal/bot"
+	"qiaotongagent/internal/config"
 )
 
 // New 创建 QQ Bot 适配器。

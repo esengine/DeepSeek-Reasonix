@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/boot"
-	"reasonix/internal/config"
-	"reasonix/internal/control"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/boot"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/provider"
 )
 
 // settings_app.go is the desktop Settings panel's command surface: it reads the
@@ -483,7 +483,7 @@ func botDomainOrDefault(domain string) string {
 // applyConfigChange mutates the user-global config and rebuilds the controller so
 // the change takes effect this session. Desktop settings such as providers and
 // keys are account-level, not per-project: writing them to the global config
-// rather than the cwd's reasonix.toml is what lets them survive a workspace switch.
+// rather than the cwd's qiaotongagent.toml is what lets them survive a workspace switch.
 func (a *App) applyConfigChange(mutate func(*config.Config) error) error {
 	if err := a.ensureActiveTabRebuildAllowed("settings"); err != nil {
 		return err
@@ -654,9 +654,9 @@ func (a *App) activeWorkspaceRoot() string {
 
 func projectConfigPathForRoot(root string) string {
 	if strings.TrimSpace(root) == "" || root == "." {
-		return "reasonix.toml"
+		return "qiaotongagent.toml"
 	}
-	return filepath.Join(root, "reasonix.toml")
+	return filepath.Join(root, "qiaotongagent.toml")
 }
 
 func sameConfigPath(a, b string) bool {

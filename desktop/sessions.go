@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/config"
-	"reasonix/internal/control"
-	"reasonix/internal/fileutil"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/fileutil"
 )
 
 // sessions.go holds the desktop-only session-management state that the shared

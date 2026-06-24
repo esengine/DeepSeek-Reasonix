@@ -110,7 +110,7 @@ import { useWindowStatePersistence } from "./lib/windowState";
 import { availableWorkspacePanelWidth, resolveWorkspacePanelWidth, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
 import logoWordmark from "./assets/logo-wordmark.svg";
 
-const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
+const SIDEBAR_COLLAPSED_KEY = "qiaotongagent.sidebar.collapsed";
 const SIDEBAR_DEFAULT_WIDTH = 264;
 const SIDEBAR_MIN_WIDTH = 264;
 const SIDEBAR_MAX_WIDTH = 300;
@@ -118,6 +118,9 @@ const SIDEBAR_VIEWPORT_RATIO = 0.18;
 const CHAT_MIN_WIDTH = 400;
 const CHAT_COMFORT_MIN_WIDTH = 560;
 const WORKSPACE_RESIZER_WIDTH = 8;
+// Temporarily disable startup update checks while QiaotongAgent release manifests
+// are not published. Manual checks in Settings still call the updater explicitly.
+const STARTUP_UPDATE_CHECKS_TEMP_DISABLED = true;
 
 function isThemeMode(value: string): value is Theme {
   return value === "auto" || value === "light" || value === "dark";
@@ -712,7 +715,7 @@ function fence(label: string, value: string): string {
 }
 
 function sessionItemsToMarkdown(title: string, items: Item[], live?: LiveStream): string {
-  const lines: string[] = [`# ${title.trim() || "Reasonix session"}`, ""];
+  const lines: string[] = [`# ${title.trim() || "QiaotongAgent session"}`, ""];
   for (const item of materializeLiveItems(items, live)) {
     switch (item.kind) {
       case "user":
@@ -771,7 +774,7 @@ function sessionItemsToJson(title: string, items: Item[], live?: LiveStream): st
 
 function safeFilename(name: string): string {
   const cleaned = name.trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").slice(0, 80);
-  return cleaned || "reasonix-session";
+  return cleaned || "qiaotongagent-session";
 }
 
 /** Global hotkey handler for shell-expand toggle (Ctrl/Cmd+B). */
@@ -1101,7 +1104,7 @@ export default function App() {
     };
     void syncDesktopPreferences().catch((e) => {
       console.warn("desktop preferences sync failed", e);
-      setStartupUpdateChecksEnabled(true);
+      setStartupUpdateChecksEnabled(!STARTUP_UPDATE_CHECKS_TEMP_DISABLED);
     });
     return () => {
       cancelled = true;
@@ -2569,7 +2572,7 @@ export default function App() {
             <>
               <div className="sidebar__head" aria-hidden={sidebarCollapsed}>
                 <div className="sidebar__brand sidebar__brand--workbench">
-                  <img src={logoWordmark} alt="Reasonix" className="sidebar__brand-logo sidebar__brand-logo--workbench" draggable={false} />
+                  <img src={logoWordmark} alt="QiaotongAgent" className="sidebar__brand-logo sidebar__brand-logo--workbench" draggable={false} />
                 </div>
               </div>
 
@@ -2589,7 +2592,7 @@ export default function App() {
           ) : (
             <>
               <div className="sidebar__brand" aria-hidden={sidebarCollapsed}>
-                <img src={logoWordmark} alt="Reasonix" className="sidebar__brand-logo" draggable={false} />
+                <img src={logoWordmark} alt="QiaotongAgent" className="sidebar__brand-logo" draggable={false} />
               </div>
 
               <button
@@ -2846,7 +2849,7 @@ export default function App() {
             <div className="banner banner--error">{t("topbar.startupError", { msg: state.meta.startupErr })}</div>
           )}
 
-          <UpdateBanner enabled={startupUpdateChecksEnabled === true} />
+          <UpdateBanner enabled={!STARTUP_UPDATE_CHECKS_TEMP_DISABLED && startupUpdateChecksEnabled === true} />
 
           <main className="main">
             {sidebarImDetailConnection ? (

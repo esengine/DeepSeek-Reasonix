@@ -11,10 +11,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"reasonix/internal/event"
-	"reasonix/internal/provider"
-	"reasonix/internal/tool"
-	_ "reasonix/internal/tool/builtin"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/tool"
+	_ "qiaotongagent/internal/tool/builtin"
 )
 
 // TestTruncateToolOutputUnderCap leaves small payloads alone — the cap should

@@ -1,7 +1,7 @@
-// Package memory implements Reasonix's persistent memory. It mirrors Claude
-// Code's two-layer model while honoring Reasonix's cache-first architecture:
+// Package memory implements QiaotongAgent's persistent memory. It mirrors Claude
+// Code's two-layer model while honoring QiaotongAgent's cache-first architecture:
 //
-//   - Hierarchical doc memory: REASONIX.md / AGENTS.md files discovered from the
+//   - Hierarchical doc memory: QIAOTONGAGENT.md / AGENTS.md files discovered from the
 //     user config dir and up the project tree, with "@path" imports. This is the
 //     analog of CLAUDE.md.
 //   - Auto-memory store: per-project fact files with frontmatter plus a MEMORY.md
@@ -27,22 +27,22 @@ import (
 type Scope string
 
 const (
-	ScopeUser     Scope = "user"     // ~/.config/reasonix/REASONIX.md
-	ScopeAncestor Scope = "ancestor" // a REASONIX.md above the project root
-	ScopeProject  Scope = "project"  // ./REASONIX.md (committed, shared)
-	ScopeLocal    Scope = "local"    // ./REASONIX.local.md (personal, git-ignored)
+	ScopeUser     Scope = "user"     // ~/.config/qiaotongagent/QIAOTONGAGENT.md
+	ScopeAncestor Scope = "ancestor" // a QIAOTONGAGENT.md above the project root
+	ScopeProject  Scope = "project"  // ./QIAOTONGAGENT.md (committed, shared)
+	ScopeLocal    Scope = "local"    // ./QIAOTONGAGENT.local.md (personal, git-ignored)
 )
 
 // docNames are the recognized memory filenames at each level, in load order.
-// REASONIX.md is ours; AGENTS.md and CLAUDE.md are the cross-tool conventions.
+// QIAOTONGAGENT.md is ours; AGENTS.md and CLAUDE.md are the cross-tool conventions.
 // When several distinct files exist in one directory, all load (each labeled with
 // its source path), so a repo already carrying an AGENTS.md / CLAUDE.md is picked
 // up without renaming. New docs are created as AGENTS.md (the universal
 // convention) — see defaultDocName / Set.DocPath.
-var docNames = []string{"REASONIX.md", "AGENTS.md", "CLAUDE.md"}
+var docNames = []string{"QIAOTONGAGENT.md", "AGENTS.md", "CLAUDE.md"}
 
 // localNames are the personal, git-ignored overrides, highest precedence.
-var localNames = []string{"REASONIX.local.md", "AGENTS.local.md", "CLAUDE.local.md"}
+var localNames = []string{"QIAOTONGAGENT.local.md", "AGENTS.local.md", "CLAUDE.local.md"}
 
 // defaultDocName / defaultLocalName are the filenames a fresh doc is created as
 // when a directory has none yet: AGENTS.md is the widely-shared convention, so a

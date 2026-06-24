@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="170" viewBox="0 0 760 170" role="img" aria-label="Reasonix — DeepSeek-native agent framework">
-  <title>Reasonix</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="170" viewBox="0 0 760 170" role="img" aria-label="QiaotongAgent — DeepSeek-native agent framework">
+  <title>QiaotongAgent</title>
   <defs>
     <!-- Signature cyan → violet → fuchsia gradient used across the TUI wordmark
          and the brand mark. Renders well on both GitHub dark and light bg. -->
@@ -70,7 +70,7 @@
     </g>
   </g>
 
-  <!-- REASONIX wordmark with shifting gradient. The x1 offset animates
+  <!-- QIAOTONGAGENT wordmark with shifting gradient. The x1 offset animates
        so the gradient crawls left-to-right across the letters — a
        slow rainbow sweep that gives the logo life without being noisy. -->
   <text x="170" y="102"
@@ -78,7 +78,7 @@
         font-size="68"
         font-weight="800"
         fill="url(#rx-grad)"
-        letter-spacing="6">REASONIX
+        letter-spacing="6">QIAOTONGAGENT
     <animate attributeName="opacity"
              values="0.9;1;0.9"
              dur="3.2s"

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/config"
+	"qiaotongagent/internal/config"
 )
 
 func writeSkill(t *testing.T, base, rel, content string) string {
@@ -34,9 +34,9 @@ func find(skills []Skill, name string) (Skill, bool) {
 func TestListPrecedenceProjectOverGlobal(t *testing.T) {
 	home := t.TempDir()
 	proj := t.TempDir()
-	writeSkill(t, proj, ".reasonix/skills/greet.md", "---\nname: greet\ndescription: project greet\n---\nproject body")
-	writeSkill(t, home, ".reasonix/skills/greet.md", "---\ndescription: global greet\n---\nglobal body")
-	writeSkill(t, home, ".reasonix/skills/onlyglobal.md", "---\ndescription: only global\n---\nbody")
+	writeSkill(t, proj, ".qiaotongagent/skills/greet.md", "---\nname: greet\ndescription: project greet\n---\nproject body")
+	writeSkill(t, home, ".qiaotongagent/skills/greet.md", "---\ndescription: global greet\n---\nglobal body")
+	writeSkill(t, home, ".qiaotongagent/skills/onlyglobal.md", "---\ndescription: only global\n---\nbody")
 
 	st := New(Options{HomeDir: home, ProjectRoot: proj, DisableBuiltins: true})
 	list := st.List()
@@ -55,8 +55,8 @@ func TestListPrecedenceProjectOverGlobal(t *testing.T) {
 
 func TestFlatAndDirLayout(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/flat.md", "---\ndescription: flat\n---\nflat body")
-	writeSkill(t, home, ".reasonix/skills/dir/SKILL.md", "---\ndescription: dir\n---\ndir body")
+	writeSkill(t, home, ".qiaotongagent/skills/flat.md", "---\ndescription: flat\n---\nflat body")
+	writeSkill(t, home, ".qiaotongagent/skills/dir/SKILL.md", "---\ndescription: dir\n---\ndir body")
 
 	st := New(Options{HomeDir: home, DisableBuiltins: true})
 	list := st.List()
@@ -70,9 +70,9 @@ func TestFlatAndDirLayout(t *testing.T) {
 
 func TestNestedSkillsDiscoveredByDefault(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/superpower/skill-a.md", "---\ndescription: nested flat\n---\nflat body")
-	writeSkill(t, home, ".reasonix/skills/superpower/tool-a/SKILL.md", "---\ndescription: nested dir\n---\ndir body")
-	writeSkill(t, home, ".reasonix/skills/superpower/references/notes.md", "---\ndescription: not a skill\n---\nnotes")
+	writeSkill(t, home, ".qiaotongagent/skills/superpower/skill-a.md", "---\ndescription: nested flat\n---\nflat body")
+	writeSkill(t, home, ".qiaotongagent/skills/superpower/tool-a/SKILL.md", "---\ndescription: nested dir\n---\ndir body")
+	writeSkill(t, home, ".qiaotongagent/skills/superpower/references/notes.md", "---\ndescription: not a skill\n---\nnotes")
 
 	st := New(Options{HomeDir: home, DisableBuiltins: true})
 	list := st.List()
@@ -92,8 +92,8 @@ func TestNestedSkillsDiscoveredByDefault(t *testing.T) {
 
 func TestMaxDepthOnePreservesRootOnlyDiscovery(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/superpower/skill-a.md", "---\ndescription: nested flat\n---\nflat body")
-	writeSkill(t, home, ".reasonix/skills/superpower/tool-a/SKILL.md", "---\ndescription: nested dir\n---\ndir body")
+	writeSkill(t, home, ".qiaotongagent/skills/superpower/skill-a.md", "---\ndescription: nested flat\n---\nflat body")
+	writeSkill(t, home, ".qiaotongagent/skills/superpower/tool-a/SKILL.md", "---\ndescription: nested dir\n---\ndir body")
 
 	st := New(Options{HomeDir: home, MaxDepth: 1, DisableBuiltins: true})
 	if _, ok := find(st.List(), "skill-a"); ok {
@@ -106,9 +106,9 @@ func TestMaxDepthOnePreservesRootOnlyDiscovery(t *testing.T) {
 
 func TestNestedSkillsRequireDescription(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/root.md", "---\n---\nroot body")
-	writeSkill(t, home, ".reasonix/skills/superpower/draft.md", "---\n---\ndraft body")
-	writeSkill(t, home, ".reasonix/skills/superpower/tool/SKILL.md", "---\n---\ntool body")
+	writeSkill(t, home, ".qiaotongagent/skills/root.md", "---\n---\nroot body")
+	writeSkill(t, home, ".qiaotongagent/skills/superpower/draft.md", "---\n---\ndraft body")
+	writeSkill(t, home, ".qiaotongagent/skills/superpower/tool/SKILL.md", "---\n---\ntool body")
 
 	st := New(Options{HomeDir: home, DisableBuiltins: true})
 	list := st.List()
@@ -128,8 +128,8 @@ func TestNestedSkillsRequireDescription(t *testing.T) {
 
 func TestNestedDirectorySkillStopsTraversal(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/pack/SKILL.md", "---\ndescription: pack\n---\npack body")
-	writeSkill(t, home, ".reasonix/skills/pack/child.md", "---\ndescription: child\n---\nchild body")
+	writeSkill(t, home, ".qiaotongagent/skills/pack/SKILL.md", "---\ndescription: pack\n---\npack body")
+	writeSkill(t, home, ".qiaotongagent/skills/pack/child.md", "---\ndescription: child\n---\nchild body")
 
 	st := New(Options{HomeDir: home, MaxDepth: 3, DisableBuiltins: true})
 	if _, ok := find(st.List(), "pack"); !ok {
@@ -156,7 +156,7 @@ func TestConventionDirsDiscovered(t *testing.T) {
 
 func TestExcludedPathsHideConventionRoots(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/keep.md", "---\ndescription: keep\n---\nb")
+	writeSkill(t, home, ".qiaotongagent/skills/keep.md", "---\ndescription: keep\n---\nb")
 	writeSkill(t, home, ".agents/skills/noisy.md", "---\ndescription: noisy\n---\nb")
 	excluded := filepath.Join(home, ".agents", "skills")
 	st := New(Options{HomeDir: home, ExcludedPaths: []string{excluded}, DisableBuiltins: true})
@@ -176,10 +176,10 @@ func TestExcludedPathsHideConventionRoots(t *testing.T) {
 
 func TestFrontmatterFields(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/sub.md",
+	writeSkill(t, home, ".qiaotongagent/skills/sub.md",
 		"---\ndescription: a sub\nrunAs: subagent\nallowed-tools: read_file, grep\nmodel: deepseek-pro\n---\nbody")
-	writeSkill(t, home, ".reasonix/skills/fork.md", "---\ndescription: f\ncontext: fork\n---\nbody")
-	writeSkill(t, home, ".reasonix/skills/plain.md", "---\ndescription: p\n---\nbody")
+	writeSkill(t, home, ".qiaotongagent/skills/fork.md", "---\ndescription: f\ncontext: fork\n---\nbody")
+	writeSkill(t, home, ".qiaotongagent/skills/plain.md", "---\ndescription: p\n---\nbody")
 
 	st := New(Options{HomeDir: home, DisableBuiltins: true})
 	sub, _ := st.Read("sub")
@@ -202,9 +202,9 @@ func TestFrontmatterFields(t *testing.T) {
 
 func TestReferencesInlined(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/withrefs/SKILL.md", "---\ndescription: r\n---\nmain body")
-	writeSkill(t, home, ".reasonix/skills/withrefs/references/b.md", "second ref")
-	writeSkill(t, home, ".reasonix/skills/withrefs/references/a.md", "first ref")
+	writeSkill(t, home, ".qiaotongagent/skills/withrefs/SKILL.md", "---\ndescription: r\n---\nmain body")
+	writeSkill(t, home, ".qiaotongagent/skills/withrefs/references/b.md", "second ref")
+	writeSkill(t, home, ".qiaotongagent/skills/withrefs/references/a.md", "first ref")
 
 	st := New(Options{HomeDir: home, DisableBuiltins: true})
 	sk, ok := st.Read("withrefs")
@@ -275,7 +275,7 @@ func TestBuiltinsPresentAndOverridable(t *testing.T) {
 	}
 	// A user file named after a built-in overrides it.
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/explore.md", "---\ndescription: mine\nrunAs: inline\n---\nbody")
+	writeSkill(t, home, ".qiaotongagent/skills/explore.md", "---\ndescription: mine\nrunAs: inline\n---\nbody")
 	st2 := New(Options{HomeDir: home})
 	ex, _ := st2.Read("explore")
 	if ex.Scope == ScopeBuiltin || ex.Description != "mine" {
@@ -311,8 +311,8 @@ func TestInstallCapabilityBuiltinIsInlineWithExpectedMetadata(t *testing.T) {
 
 func TestDisabledSkillsAreFilteredFromListAndRead(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/active.md", "---\ndescription: active\n---\nbody")
-	writeSkill(t, home, ".reasonix/skills/hidden.md", "---\ndescription: hidden\n---\nbody")
+	writeSkill(t, home, ".qiaotongagent/skills/active.md", "---\ndescription: active\n---\nbody")
+	writeSkill(t, home, ".qiaotongagent/skills/hidden.md", "---\ndescription: hidden\n---\nbody")
 
 	st := New(Options{HomeDir: home, DisabledNames: []string{"hidden", "review"}})
 	if _, ok := find(st.List(), "active"); !ok {
@@ -355,7 +355,7 @@ func containsString(ss []string, want string) bool {
 
 func TestInvalidNamesSkipped(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/bad name.md", "---\ndescription: x\n---\nb") // space → invalid
+	writeSkill(t, home, ".qiaotongagent/skills/bad name.md", "---\ndescription: x\n---\nb") // space → invalid
 	st := New(Options{HomeDir: home, DisableBuiltins: true})
 	if len(st.List()) != 0 {
 		t.Errorf("invalid-named skill should be skipped, got %d", len(st.List()))
@@ -372,7 +372,7 @@ func TestSymlinkedDirAndFile(t *testing.T) {
 	writeSkill(t, target, "realdir/SKILL.md", "---\ndescription: linked dir\n---\nb")
 	writeSkill(t, target, "realflat.md", "---\ndescription: linked flat\n---\nb")
 
-	skillsRoot := filepath.Join(home, ".reasonix", "skills")
+	skillsRoot := filepath.Join(home, ".qiaotongagent", "skills")
 	if err := os.MkdirAll(skillsRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -450,14 +450,14 @@ func TestCreateRefusesOverwrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if !strings.HasSuffix(path, filepath.Join(".reasonix", "skills", "mine", SkillFile)) {
+	if !strings.HasSuffix(path, filepath.Join(".qiaotongagent", "skills", "mine", SkillFile)) {
 		t.Errorf("unexpected path %q", path)
 	}
 	if _, err := st.Create("mine", ScopeGlobal); err == nil {
 		t.Error("second create should refuse to overwrite")
 	}
 
-	writeSkill(t, home, ".reasonix/skills/legacy.md", "---\ndescription: legacy\n---\nbody")
+	writeSkill(t, home, ".qiaotongagent/skills/legacy.md", "---\ndescription: legacy\n---\nbody")
 	if _, err := st.Create("legacy", ScopeGlobal); err == nil {
 		t.Error("create should refuse to shadow an existing legacy flat skill")
 	}

@@ -1,6 +1,6 @@
 // Package acp implements the Agent Client Protocol (https://agentclientprotocol.com)
 // transport: a stdio JSON-RPC 2.0 agent that editors and other host clients speak
-// to drive Reasonix. Many tools integrated with the v1 (main-branch) agent over
+// to drive QiaotongAgent. Many tools integrated with the v1 (main-branch) agent over
 // ACP, so v2 keeps the wire contract identical — the wire types in this file are a
 // faithful port of main's src/acp/protocol.ts (ACP protocol version 1).
 //
@@ -109,7 +109,7 @@ type MCPServerSpec struct {
 }
 
 // MCPEnv accepts ACP's official EnvVariable[] shape while still accepting the
-// older map shape that Reasonix v1 clients used.
+// older map shape that QiaotongAgent v1 clients used.
 type MCPEnv map[string]string
 
 // EnvVariable is one official ACP MCP environment variable entry.
@@ -251,7 +251,7 @@ type SessionListParams struct {
 	Cursor string `json:"cursor,omitempty"`
 }
 
-// SessionListResult is the first and only page of sessions Reasonix currently
+// SessionListResult is the first and only page of sessions QiaotongAgent currently
 // returns. NextCursor is omitted because the in-process list is unpaged.
 type SessionListResult struct {
 	Sessions   []SessionInfo `json:"sessions"`

@@ -10,7 +10,7 @@ import (
 
 	"aead.dev/minisign"
 
-	"reasonix/desktop/internal/update"
+	"qiaotongagent/desktop/internal/update"
 )
 
 // TestSignFiles signs a file with a throwaway key pair (injected via env, exactly
@@ -29,7 +29,7 @@ func TestSignFiles(t *testing.T) {
 	t.Setenv("MINISIGN_PASSWORD", "pw")
 
 	dir := t.TempDir()
-	artifact := filepath.Join(dir, "Reasonix-linux-amd64.tar.gz")
+	artifact := filepath.Join(dir, "QiaotongAgent-linux-amd64.tar.gz")
 	payload := []byte("pretend this is a release tarball")
 	if err := os.WriteFile(artifact, payload, 0o644); err != nil {
 		t.Fatal(err)
@@ -53,23 +53,23 @@ func TestSignFiles(t *testing.T) {
 func TestGenManifest(t *testing.T) {
 	dir := t.TempDir()
 	names := []string{
-		"Reasonix-darwin-arm64.zip",
-		"Reasonix-darwin-amd64.zip",
-		"Reasonix-windows-amd64-installer.exe",
-		"Reasonix-windows-amd64.zip", // portable download, not the updater channel
-		"Reasonix-windows-arm64-installer.exe",
-		"Reasonix-windows-arm64.zip", // portable download, not the updater channel
-		"Reasonix-linux-amd64.tar.gz",
-		"Reasonix-linux-amd64.deb",            // human download, not the updater channel
-		"Reasonix-linux-amd64.tar.gz.minisig", // must be skipped
-		"README.txt",                          // unmatched, must be skipped
+		"QiaotongAgent-darwin-arm64.zip",
+		"QiaotongAgent-darwin-amd64.zip",
+		"QiaotongAgent-windows-amd64-installer.exe",
+		"QiaotongAgent-windows-amd64.zip", // portable download, not the updater channel
+		"QiaotongAgent-windows-arm64-installer.exe",
+		"QiaotongAgent-windows-arm64.zip", // portable download, not the updater channel
+		"QiaotongAgent-linux-amd64.tar.gz",
+		"QiaotongAgent-linux-amd64.deb",            // human download, not the updater channel
+		"QiaotongAgent-linux-amd64.tar.gz.minisig", // must be skipped
+		"README.txt", // unmatched, must be skipped
 	}
 	for _, n := range names {
 		if err := os.WriteFile(filepath.Join(dir, n), []byte(n), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("GITHUB_REPOSITORY", "esengine/reasonix")
+	t.Setenv("GITHUB_REPOSITORY", "esengine/qiaotongagent")
 
 	if err := genManifest(dir, "v1.2.0", "desktop-v1.2.0"); err != nil {
 		t.Fatalf("genManifest: %v", err)
@@ -92,7 +92,7 @@ func TestGenManifest(t *testing.T) {
 	if !ok {
 		t.Fatal("windows-amd64 missing")
 	}
-	wantURL := "https://github.com/esengine/reasonix/releases/download/desktop-v1.2.0/Reasonix-windows-amd64-installer.exe"
+	wantURL := "https://github.com/esengine/qiaotongagent/releases/download/desktop-v1.2.0/QiaotongAgent-windows-amd64-installer.exe"
 	if win.URL != wantURL {
 		t.Fatalf("windows url = %q, want %q", win.URL, wantURL)
 	}
@@ -108,7 +108,7 @@ func TestGenManifest(t *testing.T) {
 	if !ok {
 		t.Fatal("windows-arm64 missing")
 	}
-	if !strings.HasSuffix(arm.URL, "/Reasonix-windows-arm64-installer.exe") {
+	if !strings.HasSuffix(arm.URL, "/QiaotongAgent-windows-arm64-installer.exe") {
 		t.Fatalf("windows-arm64 url = %q, want the installer, not the portable zip", arm.URL)
 	}
 	// The Linux updater channel must stay the .tar.gz; the co-located .deb is a
@@ -117,7 +117,7 @@ func TestGenManifest(t *testing.T) {
 	if !ok {
 		t.Fatal("linux-amd64 missing")
 	}
-	if !strings.HasSuffix(lin.URL, "/Reasonix-linux-amd64.tar.gz") {
+	if !strings.HasSuffix(lin.URL, "/QiaotongAgent-linux-amd64.tar.gz") {
 		t.Fatalf("linux-amd64 url = %q, want the .tar.gz, not the .deb", lin.URL)
 	}
 }

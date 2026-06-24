@@ -11,7 +11,7 @@ import (
 // gets a Notes section, and a second note joins the same section rather than
 // scattering.
 func TestAppendDocCreatesAndAppends(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "REASONIX.md")
+	path := filepath.Join(t.TempDir(), "QIAOTONGAGENT.md")
 
 	if err := AppendDoc(path, "first note"); err != nil {
 		t.Fatal(err)
@@ -40,7 +40,7 @@ func TestAppendDocCreatesAndAppends(t *testing.T) {
 // TestAppendDocPreservesExistingContent verifies a hand-written file keeps its
 // content and the note lands under a Notes section appended to the end.
 func TestAppendDocPreservesExistingContent(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "REASONIX.md")
+	path := filepath.Join(t.TempDir(), "QIAOTONGAGENT.md")
 	original := "# My project\n\nSome existing guidance the user wrote.\n"
 	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
 		t.Fatal(err)
@@ -62,7 +62,7 @@ func TestAppendDocPreservesExistingContent(t *testing.T) {
 // TestAppendDocNormalizesNote ensures a multi-line note can't corrupt the
 // single-line bullet format.
 func TestAppendDocNormalizesNote(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "REASONIX.md")
+	path := filepath.Join(t.TempDir(), "QIAOTONGAGENT.md")
 	if err := AppendDoc(path, "line one\nline two\t with   spaces"); err != nil {
 		t.Fatal(err)
 	}

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/config"
-	"reasonix/internal/plugin"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/plugin"
+	"qiaotongagent/internal/tool"
 )
 
 func TestConnectCodegraphMCPServerForRootPinsRootAndStripsPrefix(t *testing.T) {
@@ -24,8 +24,8 @@ func TestConnectCodegraphMCPServerForRootPinsRootAndStripsPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	cwdLog := filepath.Join(t.TempDir(), "cwd")
-	t.Setenv("REASONIX_TEST_CODEGRAPH_MCP", "1")
-	t.Setenv("REASONIX_TEST_CODEGRAPH_CWD_FILE", cwdLog)
+	t.Setenv("QIAOTONGAGENT_TEST_CODEGRAPH_MCP", "1")
+	t.Setenv("QIAOTONGAGENT_TEST_CODEGRAPH_CWD_FILE", cwdLog)
 
 	cfg := config.Default()
 	cfg.Codegraph.Enabled = true
@@ -66,7 +66,7 @@ func TestConnectCodegraphMCPServerForRootPinsRootAndStripsPrefix(t *testing.T) {
 }
 
 func runCodegraphMCPHelper() {
-	if path := os.Getenv("REASONIX_TEST_CODEGRAPH_CWD_FILE"); path != "" {
+	if path := os.Getenv("QIAOTONGAGENT_TEST_CODEGRAPH_CWD_FILE"); path != "" {
 		if cwd, err := os.Getwd(); err == nil {
 			_ = os.WriteFile(path, []byte(cwd+"\n"), 0o644)
 		}

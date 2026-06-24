@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"sync"
 
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/provider"
 )
 
 // Turn describes one expected Stream call: the text, optional reasoning,

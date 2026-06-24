@@ -10,9 +10,9 @@ import (
 	"sort"
 	"strings"
 
-	"reasonix/internal/config"
-	"reasonix/internal/frontmatter"
-	"reasonix/internal/skill"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/frontmatter"
+	"qiaotongagent/internal/skill"
 )
 
 const (
@@ -99,9 +99,9 @@ func (t *installSourceTool) skillInstallRoot(scope string) (string, error) {
 		if t.home == "" {
 			return "", newErr(ErrSourceUnreadable, "global skill install requires a home directory")
 		}
-		return filepath.Join(t.home, ".reasonix", skill.SkillsDirname), nil
+		return filepath.Join(t.home, ".qiaotongagent", skill.SkillsDirname), nil
 	}
-	return filepath.Join(t.root, ".reasonix", skill.SkillsDirname), nil
+	return filepath.Join(t.root, ".qiaotongagent", skill.SkillsDirname), nil
 }
 
 // skillCanonicalPath computes the canonical install destination:
@@ -123,7 +123,7 @@ func (t *installSourceTool) skillCanonicalPath(name, scope string) (string, erro
 func (t *installSourceTool) verifySkill(scope, name string, act *action) error {
 	custom := []string(nil)
 	if scope == "project" {
-		cfg := config.LoadForEdit(filepath.Join(t.root, "reasonix.toml"))
+		cfg := config.LoadForEdit(filepath.Join(t.root, "qiaotongagent.toml"))
 		custom = cfg.SkillCustomPaths()
 	} else {
 		cfg := config.LoadForEdit(t.configPath(scope))

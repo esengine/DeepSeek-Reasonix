@@ -3,7 +3,7 @@ package serve
 import (
 	"testing"
 
-	"reasonix/internal/config"
+	"qiaotongagent/internal/config"
 )
 
 func TestApplyEffortEditUpsertsMissingProvider(t *testing.T) {

@@ -1,4 +1,4 @@
-// Package builtinmcp defines MCP servers that ship with Reasonix without
+// Package builtinmcp defines MCP servers that ship with QiaotongAgent without
 // requiring user configuration.
 package builtinmcp
 
@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/exec"
 
-	"reasonix/internal/config"
+	"qiaotongagent/internal/config"
 )
 
 const (
@@ -40,7 +40,7 @@ func executablePath() string {
 	if path, err := currentExecutable(); err == nil && path != "" {
 		return path
 	}
-	return "reasonix"
+	return "qiaotongagent"
 }
 
 func context7Entry() config.PluginEntry {
@@ -77,7 +77,7 @@ func Entry(name string) (config.PluginEntry, bool) {
 	return config.PluginEntry{}, false
 }
 
-// IsBuiltIn reports whether name is a Reasonix-shipped MCP server.
+// IsBuiltIn reports whether name is a QiaotongAgent-shipped MCP server.
 func IsBuiltIn(name string) bool {
 	_, ok := Entry(name)
 	return ok

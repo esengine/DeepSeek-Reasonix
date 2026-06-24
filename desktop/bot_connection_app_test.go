@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/config"
+	"qiaotongagent/internal/config"
 )
 
 func TestNormalizeBotInstallTarget(t *testing.T) {
@@ -420,7 +420,7 @@ func TestDiagnoseBotConnectionBuildsReportDetailForMissingSecret(t *testing.T) {
 		Label:         "Lark",
 		Enabled:       true,
 		Status:        "connected",
-		WorkspaceRoot: "/Users/alice/work/reasonix",
+		WorkspaceRoot: "/Users/alice/work/qiaotongagent",
 		Credential: config.BotConnectionCredential{
 			AppID:        "cli-private",
 			AppSecretEnv: "FEISHU_BOT_APP_SECRET_PRIVATE",
@@ -429,7 +429,7 @@ func TestDiagnoseBotConnectionBuildsReportDetailForMissingSecret(t *testing.T) {
 			RemoteID:      "ou-private",
 			SessionID:     "session-private",
 			Scope:         "project",
-			WorkspaceRoot: "/Users/alice/work/reasonix",
+			WorkspaceRoot: "/Users/alice/work/qiaotongagent",
 		}},
 	}, nil); err != nil {
 		t.Fatalf("upsert connection: %v", err)
@@ -559,7 +559,7 @@ func TestRememberBotConnectionRemoteStoresStableScope(t *testing.T) {
 		Label:         "project",
 		Enabled:       true,
 		Status:        "connected",
-		WorkspaceRoot: "/tmp/reasonix-project",
+		WorkspaceRoot: "/tmp/qiaotongagent-project",
 	}, nil); err != nil {
 		t.Fatalf("upsert project connection: %v", err)
 	}
@@ -573,7 +573,7 @@ func TestRememberBotConnectionRemoteStoresStableScope(t *testing.T) {
 			projectMapping = conn.SessionMappings[0]
 		}
 	}
-	if projectMapping.Scope != "project" || projectMapping.WorkspaceRoot != "/tmp/reasonix-project" || projectMapping.RemoteID != "wxid_project" {
+	if projectMapping.Scope != "project" || projectMapping.WorkspaceRoot != "/tmp/qiaotongagent-project" || projectMapping.RemoteID != "wxid_project" {
 		t.Fatalf("project mapping = %+v, want project scope and workspace", projectMapping)
 	}
 }

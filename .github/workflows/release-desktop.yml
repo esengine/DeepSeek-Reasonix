@@ -223,7 +223,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          args=(--title "Reasonix Desktop ${{ steps.ver.outputs.version }}" --generate-notes)
+          args=(--title "QiaotongAgent Desktop ${{ steps.ver.outputs.version }}" --generate-notes)
           [ "${{ steps.ver.outputs.prerelease }}" = "true" ] && args+=(--prerelease)
           gh release create "${{ steps.ver.outputs.tag }}" dist/* "${args[@]}"
 
@@ -282,7 +282,7 @@ jobs:
       - name: Rewrite latest.json URLs to R2
         if: env.HAS_R2 == 'true'
         env:
-          R2_PUBLIC_BASE: https://dl.reasonix.io
+          R2_PUBLIC_BASE: https://dl.qiaotongagent.io
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
           f=assets/latest.json

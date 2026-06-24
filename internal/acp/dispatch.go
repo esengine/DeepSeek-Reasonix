@@ -9,9 +9,9 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"reasonix/internal/event"
-	"reasonix/internal/permission"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/permission"
+	"qiaotongagent/internal/provider"
 )
 
 // notifier is the slice of Conn the dispatch sink depends on: it pushes

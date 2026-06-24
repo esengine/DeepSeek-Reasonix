@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"reasonix/internal/control"
+	"qiaotongagent/internal/control"
 )
 
 // TestControllerAccessorIsRaceSafe guards the switchModel concurrency contract:

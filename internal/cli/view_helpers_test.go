@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/command"
-	"reasonix/internal/hook"
-	"reasonix/internal/memory"
-	"reasonix/internal/outputstyle"
-	"reasonix/internal/plugin"
-	"reasonix/internal/skill"
+	"qiaotongagent/internal/command"
+	"qiaotongagent/internal/hook"
+	"qiaotongagent/internal/memory"
+	"qiaotongagent/internal/outputstyle"
+	"qiaotongagent/internal/plugin"
+	"qiaotongagent/internal/skill"
 )
 
 func TestRenderSkillListUsesSharedVisualLanguage(t *testing.T) {
@@ -60,11 +60,11 @@ func TestRenderMemoryGroupsDocsAndStore(t *testing.T) {
 		t.Fatalf("save memory: %v", err)
 	}
 	got := renderMemory(width, &memory.Set{
-		Docs:  []memory.Source{{Path: "/Users/me/project/REASONIX.md", Scope: memory.ScopeProject}},
+		Docs:  []memory.Source{{Path: "/Users/me/project/QIAOTONGAGENT.md", Scope: memory.ScopeProject}},
 		Store: store,
 		Index: store.Index(),
 	})
-	for _, want := range []string{"memory", "docs", "(project)", "REASONIX.md", "saved memories", "saved-fact", "Saved Fact", "doc edits apply next session"} {
+	for _, want := range []string{"memory", "docs", "(project)", "QIAOTONGAGENT.md", "saved memories", "saved-fact", "Saved Fact", "doc edits apply next session"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("memory view missing %q:\n%s", want, got)
 		}
@@ -151,7 +151,7 @@ func TestRenderHelpGroupsCommands(t *testing.T) {
 func TestRenderSkillPathsStaysWithinWidth(t *testing.T) {
 	width := 72
 	got := renderSkillPaths(width, []skill.Root{{
-		Dir:      "/Users/me/projects/really/deep/path/to/.reasonix/skills",
+		Dir:      "/Users/me/projects/really/deep/path/to/.qiaotongagent/skills",
 		Scope:    skill.ScopeProject,
 		Priority: 0,
 		Status:   skill.StatusMissing,

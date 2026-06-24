@@ -16,8 +16,8 @@ import (
 
 	"golang.org/x/net/proxy"
 
-	"reasonix/internal/netclient"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/netclient"
+	"qiaotongagent/internal/tool"
 )
 
 func init() { tool.RegisterBuiltin(webFetch{}) }
@@ -258,7 +258,7 @@ func (wf webFetch) Execute(ctx context.Context, args json.RawMessage) (string, e
 	}
 	// A plain UA + Accept tip the server toward returning text/HTML rather
 	// than minified asset bundles or binary content.
-	req.Header.Set("User-Agent", "reasonix-web-fetch/1.0")
+	req.Header.Set("User-Agent", "qiaotongagent-web-fetch/1.0")
 	req.Header.Set("Accept", "text/html,text/plain,text/markdown,application/json,*/*;q=0.5")
 
 	resp, err := ssrfGuardedClient(wf.proxyURLFor).Do(req)

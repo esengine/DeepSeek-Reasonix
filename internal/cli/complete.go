@@ -9,10 +9,10 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"reasonix/internal/control"
-	"reasonix/internal/fileref"
-	"reasonix/internal/i18n"
-	"reasonix/internal/skill"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/fileref"
+	"qiaotongagent/internal/i18n"
+	"qiaotongagent/internal/skill"
 )
 
 // compKind distinguishes the two completion menus.

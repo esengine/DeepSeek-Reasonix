@@ -1,5 +1,5 @@
 set -e
-# Exercises a fresh `task` sub-agent delegation in the headless `reasonix run`
+# Exercises a fresh `task` sub-agent delegation in the headless `qiaotongagent run`
 # path: 17 + 28 + 41 = 86. The numbers are arbitrary so the answer can only be
 # produced by actually reading the three seed files (the prompt mandates doing
 # that via the `task` tool). Before sub-agents could run without a parent

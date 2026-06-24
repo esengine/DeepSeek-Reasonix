@@ -6,9 +6,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"reasonix/internal/event"
-	"reasonix/internal/provider"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/tool"
 )
 
 func TestRepeatGuardBlocksRepeatedSuccessfulBashFileWrite(t *testing.T) {

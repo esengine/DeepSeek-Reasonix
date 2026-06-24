@@ -3,7 +3,7 @@ package installsource
 import (
 	"encoding/json"
 
-	"reasonix/internal/config"
+	"qiaotongagent/internal/config"
 )
 
 // request mirrors the public schema. Fields stay exported because Execute

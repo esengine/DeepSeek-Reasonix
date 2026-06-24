@@ -16,9 +16,9 @@ import (
 
 	"golang.org/x/text/transform"
 
-	fileenc "reasonix/internal/fileutil/encoding"
-	"reasonix/internal/proc"
-	"reasonix/internal/tool"
+	fileenc "qiaotongagent/internal/fileutil/encoding"
+	"qiaotongagent/internal/proc"
+	"qiaotongagent/internal/tool"
 )
 
 const (

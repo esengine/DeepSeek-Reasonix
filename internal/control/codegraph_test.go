@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/codegraph"
-	"reasonix/internal/plugin"
+	"qiaotongagent/internal/codegraph"
+	"qiaotongagent/internal/plugin"
 )
 
 func TestConnectConfiguredCodegraphSetsShortDaemonIdleTimeout(t *testing.T) {
@@ -19,8 +19,8 @@ func TestConnectConfiguredCodegraphSetsShortDaemonIdleTimeout(t *testing.T) {
 	t.Chdir(dir)
 	launcher := writeControlCodegraphHelper(t, dir)
 	envOut := filepath.Join(dir, "codegraph-idle-env")
-	t.Setenv("REASONIX_CODEGRAPH_HELPER_ENV_OUT", envOut)
-	writeControlFile(t, dir, "reasonix.toml", `
+	t.Setenv("QIAOTONGAGENT_CODEGRAPH_HELPER_ENV_OUT", envOut)
+	writeControlFile(t, dir, "qiaotongagent.toml", `
 [codegraph]
 enabled = true
 path = "`+escapeTOMLPath(launcher)+`"
@@ -36,8 +36,8 @@ path = "`+escapeTOMLPath(launcher)+`"
 	if err != nil {
 		t.Fatalf("read codegraph idle timeout env: %v", err)
 	}
-	if string(got) != codegraph.ReasonixDaemonIdleTimeoutMS {
-		t.Fatalf("%s = %q; want %q", codegraph.DaemonIdleTimeoutEnv, got, codegraph.ReasonixDaemonIdleTimeoutMS)
+	if string(got) != codegraph.QiaotongAgentDaemonIdleTimeoutMS {
+		t.Fatalf("%s = %q; want %q", codegraph.DaemonIdleTimeoutEnv, got, codegraph.QiaotongAgentDaemonIdleTimeoutMS)
 	}
 	if !ctrl.DisconnectMCPServer("codegraph") {
 		t.Fatal("DisconnectMCPServer(codegraph) returned false")
@@ -85,7 +85,7 @@ func main() {
 		return
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "serve" {
-		if out := os.Getenv("REASONIX_CODEGRAPH_HELPER_ENV_OUT"); out != "" {
+		if out := os.Getenv("QIAOTONGAGENT_CODEGRAPH_HELPER_ENV_OUT"); out != "" {
 			_ = os.WriteFile(out, []byte(os.Getenv("CODEGRAPH_DAEMON_IDLE_TIMEOUT_MS")), 0o644)
 		}
 	}

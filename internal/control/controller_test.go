@@ -10,15 +10,15 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/checkpoint"
-	"reasonix/internal/event"
-	"reasonix/internal/hook"
-	"reasonix/internal/jobs"
-	"reasonix/internal/permission"
-	"reasonix/internal/plugin"
-	"reasonix/internal/provider"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/checkpoint"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/hook"
+	"qiaotongagent/internal/jobs"
+	"qiaotongagent/internal/permission"
+	"qiaotongagent/internal/plugin"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/tool"
 )
 
 type typedNilControllerSink struct{}
@@ -287,7 +287,7 @@ func TestDisconnectMCPServerRemovesLazyPlaceholder(t *testing.T) {
 func TestRemoveMCPServerRemovesUnconnectedLazyPlaceholder(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	if err := os.WriteFile("reasonix.toml", []byte(`
+	if err := os.WriteFile("qiaotongagent.toml", []byte(`
 [[plugins]]
 name = "mock"
 command = "mock-mcp"
@@ -716,7 +716,7 @@ func TestApprovalPersistentBashPrefixRememberRule(t *testing.T) {
 		}),
 		OnRemember: func(rule string) RememberResult {
 			remembered = rule
-			return RememberResult{Rule: rule, Path: "reasonix.toml", Saved: true}
+			return RememberResult{Rule: rule, Path: "qiaotongagent.toml", Saved: true}
 		},
 	})
 	go func() {
@@ -730,7 +730,7 @@ func TestApprovalPersistentBashPrefixRememberRule(t *testing.T) {
 	if remembered != "Bash(go test:*)" {
 		t.Fatalf("remembered rule = %q, want Bash(go test:*)", remembered)
 	}
-	if len(notices) != 1 || !strings.Contains(notices[0], "Bash(go test:*)") || !strings.Contains(notices[0], "reasonix.toml") {
+	if len(notices) != 1 || !strings.Contains(notices[0], "Bash(go test:*)") || !strings.Contains(notices[0], "qiaotongagent.toml") {
 		t.Fatalf("notices = %v, want saved rule notice", notices)
 	}
 }

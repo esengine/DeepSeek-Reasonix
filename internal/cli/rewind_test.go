@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/checkpoint"
-	"reasonix/internal/i18n"
+	"qiaotongagent/internal/checkpoint"
+	"qiaotongagent/internal/i18n"
 )
 
 func TestOneLine(t *testing.T) {

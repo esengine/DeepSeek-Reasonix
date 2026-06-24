@@ -3,8 +3,8 @@
 /dist/
 /stage/
 /npm/.stage/
-/reasonix
-/reasonix.exe
+/qiaotongagent
+/qiaotongagent.exe
 
 # Website (Astro) build output
 /site/dist/
@@ -30,23 +30,23 @@ mem.prof
 /desktop/frontend/wailsjs/
 /desktop/frontend/package.json.md5
 
-# Environment / local config (reasonix.example.toml is the shared template)
+# Environment / local config (qiaotongagent.example.toml is the shared template)
 .env
 .env.local
 *.local
-/reasonix.toml
+/qiaotongagent.toml
 /desktop/.env
-/desktop/reasonix.toml
+/desktop/qiaotongagent.toml
 
 # Node / frontend dependencies and caches
 node_modules/
 .pnpm-store/
 .npm/
 
-# Project-local Reasonix state; keep the checked-in review command.
-/.reasonix/*
-!/.reasonix/commands/
-!/.reasonix/commands/review.md
+# Project-local QiaotongAgent state; keep the checked-in review command.
+/.qiaotongagent/*
+!/.qiaotongagent/commands/
+!/.qiaotongagent/commands/review.md
 
 # CodeGraph per-project index (rebuilt locally; never committed)
 .codegraph/

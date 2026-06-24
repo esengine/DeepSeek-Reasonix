@@ -122,7 +122,7 @@ re-render uniformly.
 - **bash / external side effects** (`rm`, `mv`, DB writes, deploys) are not
   tracked — rewind cannot undo them (Claude Code parity).
 - **External edits between turns**: a snapshot holds the file's turn-start
-  content, so restoring overwrites edits made outside reasonix in the meantime.
+  content, so restoring overwrites edits made outside qiaotongagent in the meantime.
 - **Deletions**: an edit-tool deletion is restorable (snapshot has the content); a
   `bash rm` is not.
 - **Large files**: full snapshots — retention cleanup bounds disk; revisit dedup

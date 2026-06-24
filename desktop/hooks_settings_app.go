@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"reasonix/internal/hook"
+	"qiaotongagent/internal/hook"
 )
 
 type HookConfigView struct {

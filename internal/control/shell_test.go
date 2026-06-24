@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/event"
-	"reasonix/internal/sandbox"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/sandbox"
 )
 
 // collectSink returns a Sink that collects events and a channel that receives

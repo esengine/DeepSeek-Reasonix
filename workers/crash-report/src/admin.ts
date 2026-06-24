@@ -44,7 +44,7 @@ export function renderUsers(viewer: User, users: UserRow[], n?: { kind: "err" | 
     })
     .join("");
   return page(
-    "Reasonix · Users",
+    "QiaotongAgent · Users",
     "admin / users",
     `<h1>Users</h1><p class="sub"><b>${users.length}</b> accounts · <b>${pending}</b> awaiting approval · set a role to grant or revoke access</p>
 ${n ? `<div class="notice ${n.kind}">${esc(n.text)}</div>` : ""}
@@ -65,7 +65,7 @@ export function renderAudit(viewer: User, rows: AuditRow[]): string {
         .join("")}</tbody></table>`
     : `<div class="empty">No actions logged yet</div>`;
   return page(
-    "Reasonix · Audit",
+    "QiaotongAgent · Audit",
     "admin / audit",
     `<h1>Audit log</h1><p class="sub">Permission and report-data changes, newest first</p>
 <div class="card full">${body}</div>

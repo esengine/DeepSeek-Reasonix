@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/agent"
+	"qiaotongagent/internal/agent"
 
-	"reasonix/internal/command"
-	"reasonix/internal/event"
-	"reasonix/internal/memory"
-	"reasonix/internal/skill"
+	"qiaotongagent/internal/command"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/memory"
+	"qiaotongagent/internal/skill"
 )
 
 type fakeAutoPlanClassifier struct {
@@ -71,7 +71,7 @@ func TestSkillsReflectStoreChangesAfterControllerBuild(t *testing.T) {
 	if _, ok := c.RunSkill("/hot now"); ok {
 		t.Fatal("skill should not exist before it is written")
 	}
-	writeControlSkill(t, project, ".reasonix/skills/hot/SKILL.md", "---\nname: hot\ndescription: Hot install\n---\nHot body")
+	writeControlSkill(t, project, ".qiaotongagent/skills/hot/SKILL.md", "---\nname: hot\ndescription: Hot install\n---\nHot body")
 
 	if skills := c.Skills(); len(skills) != 1 || skills[0].Name != "hot" {
 		t.Fatalf("Skills() = %+v, want newly installed hot skill", skills)

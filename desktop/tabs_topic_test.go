@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/config"
-	"reasonix/internal/control"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/control"
 )
 
 func waitForTabReady(t *testing.T, app *App, tabID string) *WorkspaceTab {
@@ -360,7 +360,7 @@ func TestLegacySessionsMigrateIntoGlobalTopics(t *testing.T) {
 func TestV05LegacyEventSessionsImportIntoGlobalTopic(t *testing.T) {
 	home := isolateDesktopUserDirs(t)
 
-	legacyDir := filepath.Join(home, ".reasonix", "sessions")
+	legacyDir := filepath.Join(home, ".qiaotongagent", "sessions")
 	destDir := config.SessionDir()
 	writeLegacyEventSession(t, legacyDir, "v053-chat.events.jsonl", "hello from v0.53", "hi from v0.53", time.Now().Add(-time.Hour))
 

@@ -1,4 +1,4 @@
-// Package checkpoint is reasonix's snapshot-based edit safety net. Before a writer
+// Package checkpoint is qiaotongagent's snapshot-based edit safety net. Before a writer
 // tool changes a file, the agent records the file's pre-edit content here, keyed
 // to the current user turn; a frontend can then rewind the workspace (and, via the
 // controller, the conversation) to an earlier turn.
@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"reasonix/internal/diff"
-	fileenc "reasonix/internal/fileutil/encoding"
+	"qiaotongagent/internal/diff"
+	fileenc "qiaotongagent/internal/fileutil/encoding"
 )
 
 // FileSnap is one file's state at the moment it was first touched in a turn.

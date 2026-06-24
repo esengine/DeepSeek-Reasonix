@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/boot"
-	"reasonix/internal/control"
+	"qiaotongagent/internal/boot"
+	"qiaotongagent/internal/control"
 )
 
 func testTab(id, root string) *WorkspaceTab {
@@ -78,7 +78,7 @@ model = "deepseek-v4-flash"
 api_key_env = "PROJECT_API_KEY"
 effort = "max"
 `
-	if err := os.WriteFile(filepath.Join(projectRoot, "reasonix.toml"), []byte(configBody), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectRoot, "qiaotongagent.toml"), []byte(configBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -107,7 +107,7 @@ base_url = "https://proxy.example.com/v1"
 model = "deepseek-v4-flash"
 api_key_env = "PROJECT_API_KEY"
 `
-	if err := os.WriteFile(filepath.Join(projectRoot, "reasonix.toml"), []byte(configBody), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectRoot, "qiaotongagent.toml"), []byte(configBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -448,7 +448,7 @@ func TestSetBypassPreservesPlanMode(t *testing.T) {
 
 func userConfigPathForTest() string {
 	if dir, err := os.UserConfigDir(); err == nil {
-		return dir + "/reasonix/reasonix.toml"
+		return dir + "/qiaotongagent/qiaotongagent.toml"
 	}
 	return ""
 }

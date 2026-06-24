@@ -10,7 +10,7 @@ import (
 )
 
 func TestEntries(t *testing.T) {
-	currentExecutable = func() (string, error) { return "reasonix", nil }
+	currentExecutable = func() (string, error) { return "qiaotongagent", nil }
 	lookPath = func(file string) (string, error) {
 		if file == "npx" {
 			return "/usr/bin/npx", nil
@@ -36,7 +36,7 @@ func TestEntries(t *testing.T) {
 			t.Fatalf("unexpected built-in MCP entry: %+v", e)
 		}
 		wantCommand := map[string]string{
-			TimeName:     "reasonix",
+			TimeName:     "qiaotongagent",
 			Context7Name: "npx",
 		}[e.Name]
 		if e.Type != "stdio" || e.Command != wantCommand || e.Tier != "lazy" {

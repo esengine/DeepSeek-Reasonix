@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"reasonix/internal/bot"
-	"reasonix/internal/botruntime"
-	"reasonix/internal/config"
+	"qiaotongagent/internal/bot"
+	"qiaotongagent/internal/botruntime"
+	"qiaotongagent/internal/config"
 )
 
 type BotRuntimeStatusView struct {

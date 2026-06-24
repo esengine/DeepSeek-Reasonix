@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://reasonix.io/sitemap-index.xml
+Sitemap: https://qiaotongagent.io/sitemap-index.xml

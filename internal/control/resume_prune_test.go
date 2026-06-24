@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/event"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/provider"
 )
 
 func coldResumeFixture(t *testing.T, threshold time.Duration) (*agent.Session, string) {

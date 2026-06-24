@@ -52,7 +52,7 @@ jobs:
           # Run the prompt-cache prefix-stability guard (TestCacheHit*) in CI: a
           # regression there silently tanks the cache hit rate the project is
           # built around.
-          REASONIX_RELEASE_CACHE_GUARD: "1"
+          QIAOTONGAGENT_RELEASE_CACHE_GUARD: "1"
         run: go test ./...
 
   race:
@@ -70,7 +70,7 @@ jobs:
       # ship without race coverage.
       - name: test -race
         env:
-          REASONIX_RELEASE_CACHE_GUARD: "1"
+          QIAOTONGAGENT_RELEASE_CACHE_GUARD: "1"
         run: go test -race ./...
 
   desktop:

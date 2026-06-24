@@ -4,7 +4,7 @@
 
 ## 环境
 
-- 工作目录：`C:\codes-internal\DeepSeek-Reasonix`
+- 工作目录：`C:\codes-internal\DeepSeek-QiaotongAgent`
 - Go：`go1.26.4 windows/amd64`
 - Node：`v24.10.0`
 - npm：`11.6.1`
@@ -31,14 +31,14 @@ Windows 下不要直接依赖 `Makefile` 里的 Unix 风格环境变量写法，
 $version = (git describe --tags --always 2>$null)
 if (-not $version) { $version = 'dev' }
 New-Item -ItemType Directory -Force -Path bin | Out-Null
-go build -ldflags "-s -w -X main.version=$version" -o bin\reasonix.exe .\cmd\reasonix
-go build -ldflags "-s -w -X main.version=$version" -o bin\reasonix-plugin-example.exe .\cmd\reasonix-plugin-example
+go build -ldflags "-s -w -X main.version=$version" -o bin\qiaotongagent.exe .\cmd\qiaotongagent
+go build -ldflags "-s -w -X main.version=$version" -o bin\qiaotongagent-plugin-example.exe .\cmd\qiaotongagent-plugin-example
 ```
 
 成功产物：
 
-- `bin\reasonix.exe`
-- `bin\reasonix-plugin-example.exe`
+- `bin\qiaotongagent.exe`
+- `bin\qiaotongagent-plugin-example.exe`
 
 ## 桌面前端编译
 
@@ -52,14 +52,14 @@ Cannot find module '../../wailsjs/runtime/runtime'
 先生成绑定：
 
 ```powershell
-cd C:\codes-internal\DeepSeek-Reasonix\desktop
+cd C:\codes-internal\DeepSeek-QiaotongAgent\desktop
 & "$((go env GOPATH).Trim())\bin\wails.exe" generate module
 ```
 
 再编译前端：
 
 ```powershell
-cd C:\codes-internal\DeepSeek-Reasonix\desktop\frontend
+cd C:\codes-internal\DeepSeek-QiaotongAgent\desktop\frontend
 pnpm install
 pnpm build
 ```
@@ -71,18 +71,18 @@ pnpm build
 桌面端完整构建命令：
 
 ```powershell
-cd C:\codes-internal\DeepSeek-Reasonix\desktop
+cd C:\codes-internal\DeepSeek-QiaotongAgent\desktop
 & "$((go env GOPATH).Trim())\bin\wails.exe" build
 ```
 
 成功产物：
 
-- `desktop\build\bin\reasonix-desktop.exe`
+- `desktop\build\bin\qiaotongagent-desktop.exe`
 
 ## 站点构建
 
 ```powershell
-cd C:\codes-internal\DeepSeek-Reasonix\site
+cd C:\codes-internal\DeepSeek-QiaotongAgent\site
 npm ci
 npm run build
 ```
@@ -92,7 +92,7 @@ npm run build
 ## Worker Typecheck
 
 ```powershell
-cd C:\codes-internal\DeepSeek-Reasonix\workers\crash-report
+cd C:\codes-internal\DeepSeek-QiaotongAgent\workers\crash-report
 npm ci
 npm run typecheck
 ```
@@ -104,14 +104,14 @@ npm run typecheck
 根模块：
 
 ```powershell
-cd C:\codes-internal\DeepSeek-Reasonix
+cd C:\codes-internal\DeepSeek-QiaotongAgent
 go test ./...
 ```
 
 桌面嵌套模块：
 
 ```powershell
-cd C:\codes-internal\DeepSeek-Reasonix\desktop
+cd C:\codes-internal\DeepSeek-QiaotongAgent\desktop
 go test ./...
 ```
 
@@ -130,29 +130,29 @@ go test ./...
 $version = (git describe --tags --always 2>$null)
 if (-not $version) { $version = 'dev' }
 New-Item -ItemType Directory -Force -Path bin | Out-Null
-go build -ldflags "-s -w -X main.version=$version" -o bin\reasonix.exe .\cmd\reasonix
-go build -ldflags "-s -w -X main.version=$version" -o bin\reasonix-plugin-example.exe .\cmd\reasonix-plugin-example
+go build -ldflags "-s -w -X main.version=$version" -o bin\qiaotongagent.exe .\cmd\qiaotongagent
+go build -ldflags "-s -w -X main.version=$version" -o bin\qiaotongagent-plugin-example.exe .\cmd\qiaotongagent-plugin-example
 
 # 桌面前端与 Wails 桌面程序
-cd C:\codes-internal\DeepSeek-Reasonix\desktop
+cd C:\codes-internal\DeepSeek-QiaotongAgent\desktop
 & "$((go env GOPATH).Trim())\bin\wails.exe" generate module
 & "$((go env GOPATH).Trim())\bin\wails.exe" build
 
 # 根模块测试
-cd C:\codes-internal\DeepSeek-Reasonix
+cd C:\codes-internal\DeepSeek-QiaotongAgent
 go test ./...
 
 # 桌面模块测试
-cd C:\codes-internal\DeepSeek-Reasonix\desktop
+cd C:\codes-internal\DeepSeek-QiaotongAgent\desktop
 go test ./...
 
 # 站点
-cd C:\codes-internal\DeepSeek-Reasonix\site
+cd C:\codes-internal\DeepSeek-QiaotongAgent\site
 npm ci
 npm run build
 
 # Worker
-cd C:\codes-internal\DeepSeek-Reasonix\workers\crash-report
+cd C:\codes-internal\DeepSeek-QiaotongAgent\workers\crash-report
 npm ci
 npm run typecheck
 ```

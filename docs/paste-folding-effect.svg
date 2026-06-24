@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-label="Paste folding effect in Reasonix CLI and desktop">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-label="Paste folding effect in QiaotongAgent CLI and desktop">
   <rect width="1200" height="675" fill="#313242"/>
-  <text x="48" y="58" fill="#d8dcf2" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="28" font-weight="700">Reasonix pasted text folding</text>
+  <text x="48" y="58" fill="#d8dcf2" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="28" font-weight="700">QiaotongAgent pasted text folding</text>
   <text x="48" y="94" fill="#aab0ce" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="18">Long JSON stays compact while editing, then expands for the model and transcript.</text>
 
   <rect x="48" y="132" width="520" height="430" rx="10" fill="#242633" stroke="#5b6078"/>

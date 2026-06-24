@@ -10,19 +10,19 @@ import (
 	"strings"
 	"time"
 
-	"reasonix/internal/acp"
-	"reasonix/internal/boot"
-	"reasonix/internal/config"
-	"reasonix/internal/control"
-	"reasonix/internal/i18n"
-	"reasonix/internal/netclient"
-	"reasonix/internal/provider"
-	"reasonix/internal/sandbox"
-	"reasonix/internal/tool"
-	"reasonix/internal/tool/builtin"
+	"qiaotongagent/internal/acp"
+	"qiaotongagent/internal/boot"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/i18n"
+	"qiaotongagent/internal/netclient"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/sandbox"
+	"qiaotongagent/internal/tool"
+	"qiaotongagent/internal/tool/builtin"
 )
 
-// acpCommand runs Reasonix as an Agent Client Protocol agent: a stdio JSON-RPC
+// acpCommand runs QiaotongAgent as an Agent Client Protocol agent: a stdio JSON-RPC
 // server that editors and other host clients drive (initialize, session/new,
 // session/prompt, session/cancel). It keeps v2 wire-compatible with the many
 // tools that integrated with v1 over ACP.
@@ -41,7 +41,7 @@ func acpCommand(args []string, version string) int {
 	defer stop()
 
 	factory := &acpFactory{model: *model}
-	info := acp.AgentInfo{Name: "reasonix", Version: version}
+	info := acp.AgentInfo{Name: "qiaotongagent", Version: version}
 	if err := acp.Serve(ctx, os.Stdin, os.Stdout, factory, info); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1

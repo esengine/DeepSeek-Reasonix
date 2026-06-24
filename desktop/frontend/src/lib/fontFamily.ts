@@ -7,10 +7,10 @@ export type MonoFontFamily = (typeof MONO_FONT_FAMILIES)[number];
 export const DEFAULT_FONT_FAMILY: FontFamily = "system";
 export const DEFAULT_MONO_FONT_FAMILY: MonoFontFamily = "system";
 
-const FONT_FAMILY_KEY = "reasonix-font-family";
-const CUSTOM_FONT_KEY = "reasonix-font-family-custom";
-const MONO_FONT_FAMILY_KEY = "reasonix-mono-font-family";
-const CUSTOM_MONO_FONT_KEY = "reasonix-mono-font-family-custom";
+const FONT_FAMILY_KEY = "qiaotongagent-font-family";
+const CUSTOM_FONT_KEY = "qiaotongagent-font-family-custom";
+const MONO_FONT_FAMILY_KEY = "qiaotongagent-mono-font-family";
+const CUSTOM_MONO_FONT_KEY = "qiaotongagent-mono-font-family-custom";
 
 export function isFontFamily(value: unknown): value is FontFamily {
   return typeof value === "string" && (FONT_FAMILIES as readonly string[]).includes(value);

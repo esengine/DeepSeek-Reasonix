@@ -14,7 +14,7 @@ import (
 // crash_app.go is the crash/feedback/performance reporting surface. Reports are
 // sent only on an explicit user click in the frontend UI — never automatically.
 
-var crashEndpoint = "https://crash.reasonix.io/v1/report"
+var crashEndpoint = "https://crash.qiaotongagent.io/v1/report"
 
 const maxCrashDetailBytes = 16 << 10
 const maxCrashStackBytes = 8 << 10

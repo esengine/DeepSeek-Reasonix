@@ -11,7 +11,7 @@ function authShell(title: string, crumb: string, body: string): string {
 
 export function renderLogin(n?: { kind: "err" | "ok"; text: string }): string {
   return authShell(
-    "Reasonix · Sign in",
+    "QiaotongAgent · Sign in",
     "sign in",
     `<h1>Sign in</h1><p class="sub">Diagnostic reports &amp; telemetry dashboard</p>${notice(n)}
 <form method="post" action="/login">
@@ -25,7 +25,7 @@ export function renderLogin(n?: { kind: "err" | "ok"; text: string }): string {
 
 export function renderRegister(n?: { kind: "err" | "ok"; text: string }): string {
   return authShell(
-    "Reasonix · Register",
+    "QiaotongAgent · Register",
     "register",
     `<h1>Create account</h1><p class="sub">New accounts start with no access until an admin approves them.</p>${notice(n)}
 <form method="post" action="/register">
@@ -43,7 +43,7 @@ export function renderAccount(user: User, n?: { kind: "err" | "ok"; text: string
     ? `<div class="notice err">Your account is awaiting approval. An admin needs to grant you access before the diagnostic reports dashboard becomes visible.</div>`
     : `<div class="notice ok">You have <b>${esc(user.role)}</b> access. <a href="/stats">Open the dashboard →</a></div>`;
   return page(
-    "Reasonix · Account",
+    "QiaotongAgent · Account",
     "account",
     `<h1>Account</h1><p class="sub">${esc(user.email)} · joined ${esc(user.created_at.slice(0, 10))}</p>
 ${notice(n)}${status}

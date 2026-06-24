@@ -47,10 +47,10 @@ func TestGitStatusRenderRepoUsesSuppliedRepoStyle(t *testing.T) {
 }
 
 func TestGitStatusRenderWithinCompactsRepoBeforeBranch(t *testing.T) {
-	status := gitStatus{Repo: "VeryLongDeepSeekReasonixWorkspace", Branch: "codex/cli-tui-status-row"}
+	status := gitStatus{Repo: "VeryLongDeepSeekQiaotongAgentWorkspace", Branch: "codex/cli-tui-status-row"}
 
 	full := ansi.Strip(status.RenderWithin(80, statusAutoColor))
-	if full != "VeryLongDeepSeekReasonixWorkspace@codex/cli-tui-status-row" {
+	if full != "VeryLongDeepSeekQiaotongAgentWorkspace@codex/cli-tui-status-row" {
 		t.Fatalf("wide RenderWithin = %q", full)
 	}
 
@@ -68,7 +68,7 @@ func TestGitStatusRenderWithinCompactsRepoBeforeBranch(t *testing.T) {
 
 func TestGitStatusRenderWithinKeepsDirtySuffix(t *testing.T) {
 	status := gitStatus{
-		Repo:      "VeryLongDeepSeekReasonixWorkspace",
+		Repo:      "VeryLongDeepSeekQiaotongAgentWorkspace",
 		Branch:    "codex/cli-tui-status-row",
 		Added:     12,
 		Removed:   3,
@@ -94,8 +94,8 @@ func TestLoadGitStatus(t *testing.T) {
 
 	root := t.TempDir()
 	runGitForTest(t, root, "init")
-	runGitForTest(t, root, "config", "user.email", "reasonix@example.invalid")
-	runGitForTest(t, root, "config", "user.name", "Reasonix Test")
+	runGitForTest(t, root, "config", "user.email", "qiaotongagent@example.invalid")
+	runGitForTest(t, root, "config", "user.name", "QiaotongAgent Test")
 	writeFileForTest(t, filepath.Join(root, "tracked.txt"), "one\ntwo\n")
 	runGitForTest(t, root, "add", "tracked.txt")
 	runGitForTest(t, root, "commit", "-m", "initial")

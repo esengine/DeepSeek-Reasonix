@@ -46,7 +46,7 @@ func LoadCCSwitchMCPCandidates() ([]MCPImportCandidate, error) {
 }
 
 // LoadCCSwitchMCP reads MCP servers enabled for Codex from cc-switch and maps
-// them to Reasonix plugin entries. Newer cc-switch stores servers in SQLite;
+// them to QiaotongAgent plugin entries. Newer cc-switch stores servers in SQLite;
 // older installs kept them in config.json(.migrated/.bak), so we support both.
 func LoadCCSwitchMCP() ([]PluginEntry, error) {
 	home, err := os.UserHomeDir()
@@ -90,7 +90,7 @@ func ImportCCSwitchMCPEntries(entries []PluginEntry) (total, added, updated int,
 }
 
 // ImportCCSwitchMCP upserts cc-switch's Codex-enabled MCP servers into the
-// active Reasonix config and saves it.
+// active QiaotongAgent config and saves it.
 func ImportCCSwitchMCP() (total, added, updated int, err error) {
 	entries, err := LoadCCSwitchMCP()
 	if err != nil {

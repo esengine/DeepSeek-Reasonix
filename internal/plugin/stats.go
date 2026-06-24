@@ -1,4 +1,4 @@
-// Per-plugin startup latency tracking for MCP servers. Reasonix uses these
+// Per-plugin startup latency tracking for MCP servers. QiaotongAgent uses these
 // samples to decide whether a chronically slow plugin should be demoted from
 // "eager" to "lazy" loading for the rest of a session — see Recommend.
 //
@@ -18,7 +18,7 @@ import (
 	"sort"
 	"time"
 
-	"reasonix/internal/config"
+	"qiaotongagent/internal/config"
 )
 
 const (

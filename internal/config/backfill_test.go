@@ -3,7 +3,7 @@ package config
 import (
 	"testing"
 
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/provider"
 )
 
 func hasModel(c *Config, model string) *ProviderEntry {

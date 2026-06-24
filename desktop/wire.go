@@ -1,6 +1,6 @@
 package main
 
-import "reasonix/internal/event"
+import "qiaotongagent/internal/event"
 
 // wireEvent is the JSON shape an event.Event takes when emitted to the webview.
 // It mirrors the serve transport's SSE wire form field-for-field on purpose: both

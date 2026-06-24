@@ -4,7 +4,7 @@
 &nbsp;·&nbsp;
 <a href="./REASONING_LANGUAGE.md">English</a>
 
-`agent.reasoning_language` 控制模型服务暴露“可见思考过程”时，Reasonix 希望它优先使用哪种语言。
+`agent.reasoning_language` 控制模型服务暴露“可见思考过程”时，QiaotongAgent 希望它优先使用哪种语言。
 
 它不设置最终回答语言，不翻译代码、标识符或文件路径，也不改变模型内部不可见推理。用户在单次提问里明确要求的最终回答语言，仍然优先。
 
@@ -26,25 +26,25 @@
 设置 -> 模型 -> 使用 -> Agent 运行 -> 思考语言
 ```
 
-桌面端设置会写入用户级默认值。项目仍然可以通过 `./reasonix.toml` 覆盖。
+桌面端设置会写入用户级默认值。项目仍然可以通过 `./qiaotongagent.toml` 覆盖。
 
 ## CLI 与 TUI
 
 在 shell 或脚本里修改：
 
 ```bash
-reasonix config reasoning-language auto
-reasonix config reasoning-language zh
-reasonix config reasoning-language en
+qiaotongagent config reasoning-language auto
+qiaotongagent config reasoning-language zh
+qiaotongagent config reasoning-language en
 ```
 
 默认写入用户配置。要写入当前项目的覆盖配置：
 
 ```bash
-reasonix config reasoning-language --local zh
+qiaotongagent config reasoning-language --local zh
 ```
 
-在 `reasonix chat` 内可以用斜杠命令：
+在 `qiaotongagent chat` 内可以用斜杠命令：
 
 ```text
 /reasoning-language auto
@@ -52,12 +52,12 @@ reasonix config reasoning-language --local zh
 /reasoning-language en
 ```
 
-斜杠命令会写入用户级设置，并立即更新当前 chat controller，后续 turn 生效。它不会改写当前项目的 `reasonix.toml`；如果要写项目级覆盖，请使用带 `--local` 的 shell 命令。
+斜杠命令会写入用户级设置，并立即更新当前 chat controller，后续 turn 生效。它不会改写当前项目的 `qiaotongagent.toml`；如果要写项目级覆盖，请使用带 `--local` 的 shell 命令。
 
 单次 headless 运行也会读取同一设置：
 
 ```bash
-reasonix run "解释这个模块"
+qiaotongagent run "解释这个模块"
 ```
 
 ## 配置文件
@@ -72,7 +72,7 @@ reasoning_language = "auto" # auto|zh|en
 这个设置的配置优先级是：
 
 ```text
-./reasonix.toml > 用户 config.toml > 内置默认值
+./qiaotongagent.toml > 用户 config.toml > 内置默认值
 ```
 
 目前没有为它提供命令行 flag。它更像用户偏好或项目偏好，不适合作为每次运行都传一次的任务参数。
@@ -81,7 +81,7 @@ reasoning_language = "auto" # auto|zh|en
 
 `auto` 对缓存最友好。它不会注入任何额外内容，只复用已有的稳定语言策略。
 
-当设置为 `zh` 或 `en` 时，Reasonix 会把一个很小的 `<reasoning-language>` 临时 block 放进本次 user turn。它不会改变：
+当设置为 `zh` 或 `en` 时，QiaotongAgent 会把一个很小的 `<reasoning-language>` 临时 block 放进本次 user turn。它不会改变：
 
 - system prompt
 - 工具 schema 的字节或顺序

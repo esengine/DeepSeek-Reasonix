@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"reasonix/internal/event"
+	"qiaotongagent/internal/event"
 )
 
 // TestMathStreamingEndToEnd drives the real streaming path (ingestEvent →

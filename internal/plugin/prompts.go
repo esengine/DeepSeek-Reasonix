@@ -19,7 +19,7 @@ type Prompt struct {
 	client      *Client
 }
 
-// PromptArg is one declared prompt argument. Reasonix maps space-separated
+// PromptArg is one declared prompt argument. QiaotongAgent maps space-separated
 // positional command arguments onto these in order, matching Claude Code.
 type PromptArg struct {
 	Name        string `json:"name"`

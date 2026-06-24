@@ -22,9 +22,9 @@ import (
 	"github.com/minio/selfupdate"
 	"golang.org/x/mod/semver"
 
-	"reasonix/desktop/internal/update"
-	"reasonix/internal/config"
-	"reasonix/internal/netclient"
+	"qiaotongagent/desktop/internal/update"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/netclient"
 )
 
 // updater.go is the transport-free core of the desktop auto-updater: manifest
@@ -36,8 +36,8 @@ import (
 // fallback. The build channel picks the rolling pointer so a canary build polls
 // the canary line and a stable build polls latest; the two never cross.
 const (
-	r2Base         = "https://dl.reasonix.io"
-	ghReleasesBase = "https://github.com/esengine/reasonix/releases"
+	r2Base         = "https://dl.qiaotongagent.io"
+	ghReleasesBase = "https://github.com/esengine/qiaotongagent/releases"
 	httpTimeout    = 15 * time.Second
 )
 
@@ -357,7 +357,7 @@ func extractBinary(targz []byte, name string) ([]byte, error) {
 // applyLinux replaces the running binary with the one inside the downloaded
 // tar.gz; the caller relaunches afterwards.
 func applyLinux(targz []byte) error {
-	bin, err := extractBinary(targz, "reasonix-desktop")
+	bin, err := extractBinary(targz, "qiaotongagent-desktop")
 	if err != nil {
 		return err
 	}
@@ -371,7 +371,7 @@ func applyLinux(targz []byte) error {
 // overwrites in place instead of landing a second copy at the per-user default —
 // this also covers upgrades from builds that predate the registry InstallLocation.
 func applyWindows(installer []byte) error {
-	f, err := os.CreateTemp("", "reasonix-update-*.exe")
+	f, err := os.CreateTemp("", "qiaotongagent-update-*.exe")
 	if err != nil {
 		return err
 	}

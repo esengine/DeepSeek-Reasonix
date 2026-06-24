@@ -1,7 +1,7 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "reasonix-desktop",
-  "outputfilename": "reasonix-desktop",
+  "name": "qiaotongagent-desktop",
+  "outputfilename": "qiaotongagent-desktop",
   "frontend:install": "pnpm install",
   "frontend:build": "pnpm build",
   "frontend:dev:watcher": "pnpm dev",
@@ -10,10 +10,10 @@
     "name": "esengine"
   },
   "info": {
-    "companyName": "Reasonix",
-    "productName": "Reasonix",
+    "companyName": "QiaotongAgent",
+    "productName": "QiaotongAgent",
     "productVersion": "0.0.0",
-    "copyright": "Copyright © 2026 Reasonix Contributors",
-    "comments": "Reasonix desktop — a Wails shell around the Go kernel."
+    "copyright": "Copyright © 2026 QiaotongAgent Contributors",
+    "comments": "QiaotongAgent desktop — a Wails shell around the Go kernel."
   }
 }

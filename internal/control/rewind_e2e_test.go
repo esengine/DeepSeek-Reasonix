@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/event"
-	"reasonix/internal/provider"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/tool"
 )
 
 func runTwoTurns(t *testing.T) (*Controller, *agent.Agent, *[]event.Event) {

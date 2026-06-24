@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"reasonix/internal/proc"
+	"qiaotongagent/internal/proc"
 )
 
 const closeWaitBudget = 5 * time.Second
@@ -154,7 +154,7 @@ func resolveStdioExecutable(ctx context.Context, s Spec, env []string) (string, 
 // enrichStdioShellPATH probes the user's interactive login shell for its PATH
 // and prepends those directories to the current environment. The result is the
 // subprocess environment with a PATH that matches what the user sees in their
-// terminal, even when Reasonix was launched from the Finder / Dock / open(1).
+// terminal, even when QiaotongAgent was launched from the Finder / Dock / open(1).
 func enrichStdioShellPATH(ctx context.Context, env []string) []string {
 	currentPath, _ := envValue(env, "PATH")
 	if shellPath := strings.TrimSpace(stdioShellPATH(ctx)); shellPath != "" {
@@ -279,7 +279,7 @@ func defaultStdioShellPATH(ctx context.Context) string {
 	if shell == "" {
 		return ""
 	}
-	const marker = "__REASONIX_PATH__="
+	const marker = "__QIAOTONGAGENT_PATH__="
 	script := "printf '\\n" + marker + "%s\\n' \"$PATH\""
 	for _, args := range [][]string{
 		{"-l", "-i", "-c", script},

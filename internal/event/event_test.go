@@ -4,8 +4,8 @@ import (
 	"sync"
 	"testing"
 
-	"reasonix/internal/evidence"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/evidence"
+	"qiaotongagent/internal/provider"
 )
 
 // --- Kind constants ---

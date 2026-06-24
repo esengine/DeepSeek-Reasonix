@@ -9,7 +9,7 @@ gate for agent-written memory.
 
 - Bring useful past-session context back without injecting dynamic history into
   the stable system prompt.
-- Keep Reasonix cache-first: stable prompt bytes stay stable across turns, while
+- Keep QiaotongAgent cache-first: stable prompt bytes stay stable across turns, while
   history and saved facts are fetched on demand.
 - Avoid a heavy retrieval dependency. The implementation is pure Go and does not
   introduce SQLite, CGO, a vector database, or an embedding model.
@@ -101,7 +101,7 @@ the detailed body when the agent knows a rare phrase from the saved fact.
 
 ## Memory as Synthesis Cache
 
-Reasonix treats saved memory as a synthesis cache rather than as a raw transcript
+QiaotongAgent treats saved memory as a synthesis cache rather than as a raw transcript
 cache.
 
 The intended workflow is:

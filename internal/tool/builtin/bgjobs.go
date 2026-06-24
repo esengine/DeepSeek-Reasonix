@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"strings"
 
-	"reasonix/internal/jobs"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/jobs"
+	"qiaotongagent/internal/tool"
 )
 
 // bash_output / kill_shell / wait operate the background jobs registered by

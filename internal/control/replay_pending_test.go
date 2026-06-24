@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"reasonix/internal/event"
+	"qiaotongagent/internal/event"
 )
 
 // TestReplayPendingPromptsReEmitsBlockedApproval proves a tool approval that is

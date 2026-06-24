@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/config"
-	"reasonix/internal/control"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/provider"
 )
 
 // fakeRunner stands in for an agent.Runner: it records the composed input and

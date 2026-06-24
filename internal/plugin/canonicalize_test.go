@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/tool"
 )
 
 func TestCanonicalizeSchemaStable(t *testing.T) {

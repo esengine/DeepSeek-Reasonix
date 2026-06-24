@@ -4,13 +4,13 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/event"
+	"qiaotongagent/internal/event"
 )
 
 // TestTextSinkSkipsPartialDispatch probes the headless sink against the early
 // (Partial) ToolDispatch the agent emits when a call begins streaming. The chat
 // TUI skips it; if TextSink prints it too, every tool call shows a duplicate
-// "-> name" line (the first with empty args) in piped / `reasonix run` output.
+// "-> name" line (the first with empty args) in piped / `qiaotongagent run` output.
 func TestTextSinkSkipsPartialDispatch(t *testing.T) {
 	var b strings.Builder
 	s := NewTextSink(&b, nil, 80)

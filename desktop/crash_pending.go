@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 
-	"reasonix/internal/config"
+	"qiaotongagent/internal/config"
 )
 
 // crash_pending.go captures Go-side panics to disk and ships them on the next

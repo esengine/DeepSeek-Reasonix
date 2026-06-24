@@ -1,5 +1,5 @@
 // Package installsource implements the `install_source` tool: a two-phase
-// installer for Reasonix skills and MCP servers. A single call resolves a
+// installer for QiaotongAgent skills and MCP servers. A single call resolves a
 // source (URL, local file/folder, .mcp.json, package name, or local executable)
 // into a deterministic plan. When the caller sets apply=true, any registered
 // ApprovalFunc may still deny that exact plan before writes or MCP connects run.

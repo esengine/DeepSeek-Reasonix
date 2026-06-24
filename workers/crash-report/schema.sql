@@ -1,4 +1,4 @@
--- Apply: wrangler d1 execute reasonix-crash --remote --file=schema.sql
+-- Apply: wrangler d1 execute qiaotongagent-crash --remote --file=schema.sql
 CREATE TABLE IF NOT EXISTS groups (
   fingerprint TEXT PRIMARY KEY,
   kind TEXT NOT NULL,

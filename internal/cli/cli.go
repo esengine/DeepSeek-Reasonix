@@ -1,4 +1,4 @@
-// Package cli implements reasonix's command-line entry: subcommand routing, flag
+// Package cli implements qiaotongagent's command-line entry: subcommand routing, flag
 // parsing, assembly from config, and exit codes. The core is config-driven —
 // providers and tools are resolved from configuration, not hardcoded.
 package cli
@@ -21,17 +21,17 @@ import (
 	"strings"
 	"syscall"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/boot"
-	"reasonix/internal/builtinmcp"
-	"reasonix/internal/config"
-	"reasonix/internal/control"
-	"reasonix/internal/event"
-	"reasonix/internal/i18n"
-	"reasonix/internal/notify"
-	"reasonix/internal/provider"
-	"reasonix/internal/provider/openai"
-	"reasonix/internal/serve"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/boot"
+	"qiaotongagent/internal/builtinmcp"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/i18n"
+	"qiaotongagent/internal/notify"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/provider/openai"
+	"qiaotongagent/internal/serve"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -85,7 +85,7 @@ func Run(args []string, version string) int {
 	case "init":
 		// Project memory (AGENTS.md) is model-generated in-session — `/init` runs
 		// the codebase analysis. This CLI entry just points there (and to `setup`
-		// for config), so `reasonix init` isn't a dead end.
+		// for config), so `qiaotongagent init` isn't a dead end.
 		configureCLIThemeFromConfigNoProbe()
 		return initHint()
 	case "acp":
@@ -110,7 +110,7 @@ func Run(args []string, version string) int {
 		configureCLIThemeFromConfigNoProbe()
 		return upgradeCommand(rest, version)
 	case "version", "--version", "-v":
-		fmt.Println("reasonix", version)
+		fmt.Println("qiaotongagent", version)
 		return 0
 	case "help", "--help", "-h":
 		usage()
@@ -363,7 +363,7 @@ func runServe(args []string) int {
 		ctrl.SetSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
 	}
 
-	fmt.Printf("reasonix serve — %s on http://%s\n", ctrl.Label(), *addr)
+	fmt.Printf("qiaotongagent serve — %s on http://%s\n", ctrl.Label(), *addr)
 	// Use graceful shutdown so SIGINT/SIGTERM drain active connections.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -581,7 +581,7 @@ func reserveNativeScrollbackFrame(w io.Writer, rows int) {
 }
 
 // setupTargets is where the wizard writes: the TOML config and the secrets file.
-// Keys always go to the reasonix-owned global credentials file so they never land
+// Keys always go to the qiaotongagent-owned global credentials file so they never land
 // in a project's own .env; only the config location is project-local under --local.
 type setupTargets struct {
 	config string
@@ -589,15 +589,15 @@ type setupTargets struct {
 }
 
 // defaultConfigTarget is the user-global config file, falling back to a
-// project-local reasonix.toml only when the user config dir can't be resolved.
+// project-local qiaotongagent.toml only when the user config dir can't be resolved.
 func defaultConfigTarget() string {
 	if p := config.UserConfigPath(); p != "" {
 		return p
 	}
-	return "reasonix.toml"
+	return "qiaotongagent.toml"
 }
 
-// defaultEnvTarget is the reasonix-owned global credentials file, falling back to
+// defaultEnvTarget is the qiaotongagent-owned global credentials file, falling back to
 // a project-local .env only when the user config dir can't be resolved.
 func defaultEnvTarget() string {
 	if p := config.UserCredentialsPath(); p != "" {
@@ -606,15 +606,15 @@ func defaultEnvTarget() string {
 	return ".env"
 }
 
-// resolveSetupTargets picks where `reasonix setup` writes. Keys always go to the
-// global env. The config goes to the user-global dir by default, to ./reasonix.toml
+// resolveSetupTargets picks where `qiaotongagent setup` writes. Keys always go to the
+// global env. The config goes to the user-global dir by default, to ./qiaotongagent.toml
 // under --local, or to an explicit path argument when given.
 func resolveSetupTargets(args []string) setupTargets {
 	t := setupTargets{config: defaultConfigTarget(), env: defaultEnvTarget()}
 	for _, a := range args {
 		switch a {
 		case "--local", "-l":
-			t.config = "reasonix.toml"
+			t.config = "qiaotongagent.toml"
 		default:
 			t.config = a
 		}
@@ -630,9 +630,9 @@ func displayPath(p string) string {
 	return p
 }
 
-// setupConfig runs the configuration wizard (the `reasonix setup` command),
-// writing config.toml to the user-global dir (or ./reasonix.toml under --local)
-// and API keys to the reasonix-owned global .env — never a project's own .env.
+// setupConfig runs the configuration wizard (the `qiaotongagent setup` command),
+// writing config.toml to the user-global dir (or ./qiaotongagent.toml under --local)
+// and API keys to the qiaotongagent-owned global .env — never a project's own .env.
 // Project memory is a separate concern — the in-session `/init` skill generates
 // AGENTS.md (see initHint).
 func setupConfig(args []string) int {
@@ -655,7 +655,7 @@ func setupConfig(args []string) int {
 	if isInteractive() {
 		rc := interactiveSetup(t.config, t.env)
 		if rc == 0 {
-			fmt.Printf(i18n.M.TryHintFmt+"\n", bold("reasonix chat"))
+			fmt.Printf(i18n.M.TryHintFmt+"\n", bold("qiaotongagent chat"))
 		}
 		return rc
 	}
@@ -681,17 +681,17 @@ func writeDefaultConfig(path string) int {
 	return 0
 }
 
-// initHint handles `reasonix init`. Unlike a config scaffold, project memory is
+// initHint handles `qiaotongagent init`. Unlike a config scaffold, project memory is
 // model-generated by analyzing the codebase, so it lives as the in-session
 // `/init` skill rather than a CLI command. This entry just points the user there
-// (and to `reasonix setup` for config) so the verb isn't a dead end.
+// (and to `qiaotongagent setup` for config) so the verb isn't a dead end.
 func initHint() int {
 	fmt.Println(i18n.M.InitHint)
 	return 0
 }
 
 // interactiveSetup runs the setup wizard, then writes the config to configPath
-// and any entered API keys to envPath (the reasonix-owned global .env, never a
+// and any entered API keys to envPath (the qiaotongagent-owned global .env, never a
 // project's own). The wizard is intentionally minimal: pick language, pick
 // provider, enter API keys. Language is asked first so every subsequent prompt
 // is already in the user's language even when env auto-detection got it wrong.
@@ -723,7 +723,7 @@ func interactiveSetup(configPath, envPath string) int {
 	// in their language before any substantive prompt.
 	fmt.Println()
 	fmt.Print(boxed([]string{
-		accent("◆") + " " + fmt.Sprintf(i18n.M.WelcomeTitleFmt, bold("reasonix")),
+		accent("◆") + " " + fmt.Sprintf(i18n.M.WelcomeTitleFmt, bold("qiaotongagent")),
 		"",
 		dim(i18n.M.NoConfigYet),
 	}))
@@ -1072,12 +1072,12 @@ func containsString(xs []string, v string) bool {
 
 // filterStaleCustomEntries drops the wizard's own magic-name entries
 // (Name="custom" with Kind="openai" or Name="anthropic" with Kind="anthropic")
-// that older versions of the wizard wrote into reasonix.toml. They collide
+// that older versions of the wizard wrote into qiaotongagent.toml. They collide
 // with the wizard's "custom" / "anthropic" menu items on re-run, showing up
 // as duplicate broken entries. The new wizard writes host-derived slugs
 // (e.g. "custom-token-sensenova-cn") so a hit on the magic name is
 // unambiguously stale. The returned slice is the dropped set so the caller
-// can warn the user to clean up reasonix.toml by hand.
+// can warn the user to clean up qiaotongagent.toml by hand.
 func filterStaleCustomEntries(providers []config.ProviderEntry) (kept, dropped []config.ProviderEntry) {
 	for _, p := range providers {
 		if p.Name == "custom" && p.Kind == "openai" {
@@ -1098,9 +1098,9 @@ func filterStaleCustomEntries(providers []config.ProviderEntry) (kept, dropped [
 // "custom-token-sensenova-cn" or "anthropic-api-anthropic-com". We can't
 // reuse the wizard's menu-item labels ("custom" / "anthropic") because
 // those would collide with the menu item itself and end up rendered as
-// duplicate provider entries on subsequent re-runs of `reasonix setup`.
+// duplicate provider entries on subsequent re-runs of `qiaotongagent setup`.
 // The host-based slug also gives users a meaningful name to grep for in
-// reasonix.toml. Falls back to a short sha1 of the raw URL when the URL
+// qiaotongagent.toml. Falls back to a short sha1 of the raw URL when the URL
 // doesn't parse, so even malformed input still produces a unique name.
 func providerSlug(kind, baseURL string) string {
 	var host string
@@ -1130,7 +1130,7 @@ func providerSlug(kind, baseURL string) string {
 }
 
 // providerFamily is a wizard-only grouping of provider SKUs by vendor; it does
-// not exist in config because users editing reasonix.toml deal with SKU names
+// not exist in config because users editing qiaotongagent.toml deal with SKU names
 // directly. Keys mirror the SKU name prefix (deepseek-*, mimo) so adding a new
 // preset only requires a familyOf case.
 type providerFamily struct {
@@ -1379,7 +1379,7 @@ func groupByFamily(providers []config.ProviderEntry) ([]string, map[string][]int
 
 // withBuiltinFamilies guarantees the wizard always offers the built-in provider
 // families (DeepSeek, MiMo) even when the loaded config replaced them — a
-// reasonix.toml that defines only [[providers]] for deepseek otherwise hides
+// qiaotongagent.toml that defines only [[providers]] for deepseek otherwise hides
 // MiMo from setup, since [[providers]] replaces the presets wholesale. Families
 // already present are left untouched (the user's customizations win); only the
 // missing built-in families get their default entries appended.
@@ -1398,7 +1398,7 @@ func withBuiltinFamilies(providers []config.ProviderEntry) []config.ProviderEntr
 
 // promptMissingKeys re-runs the wizard's key-entry step for model refs that are
 // actually active and whose api_key_env is unset. Newly entered values are
-// appended to the reasonix-owned global .env so the chat session that follows
+// appended to the qiaotongagent-owned global .env so the chat session that follows
 // picks them up via config.Load. The user can hit Enter to skip — the chat
 // banner falls back to a one-line warning so they still see what's missing.
 // Returns a non-zero exit code only when writing the env file fails.
@@ -1536,7 +1536,7 @@ func isTTY(f *os.File) bool {
 
 // appendEnv merges KEY=value lines into a .env file. Existing assignments of
 // any key that's about to be written are dropped first, then the new values
-// are appended — so re-running `reasonix setup` with a corrected key replaces the
+// are appended — so re-running `qiaotongagent setup` with a corrected key replaces the
 // stale one instead of stacking duplicates (loadDotEnv is first-wins, so a
 // naive append would leave the old key in effect). The new values are also
 // pinned into the current process env so a chat session started right after
@@ -1624,7 +1624,7 @@ func welcome(version string) int {
 			if cfg.Language != "" {
 				i18n.DetectLanguage(cfg.Language)
 			}
-			fmt.Printf("\n"+i18n.M.StartingChatFmt+"\n\n", bold("reasonix chat"))
+			fmt.Printf("\n"+i18n.M.StartingChatFmt+"\n\n", bold("qiaotongagent chat"))
 			return chatREPL(nil)
 		}
 		fmt.Println("\n" + i18n.M.SetKeyHint)
@@ -1647,7 +1647,7 @@ func welcome(version string) int {
 
 	var b strings.Builder
 	b.WriteString(boxed([]string{
-		accent("◆") + " " + bold("reasonix") + "  " + dim(version),
+		accent("◆") + " " + bold("qiaotongagent") + "  " + dim(version),
 		dim(i18n.M.Subtitle),
 	}))
 
@@ -1681,13 +1681,13 @@ func welcome(version string) int {
 		n++
 	}
 	if src == "" {
-		step("reasonix setup", i18n.M.StepScaffold)
+		step("qiaotongagent setup", i18n.M.StepScaffold)
 	}
 	if ready == 0 {
 		step(i18n.M.StepSetKey, i18n.M.StepSetKeyHint)
 	}
-	step("reasonix chat", i18n.M.StepChatDesc)
-	step(`reasonix run "task"`, i18n.M.StepRunDesc)
+	step("qiaotongagent chat", i18n.M.StepChatDesc)
+	step(`qiaotongagent run "task"`, i18n.M.StepRunDesc)
 
 	fmt.Fprintf(&b, "\n  %s\n", dim(i18n.M.HelpFooter))
 
@@ -1721,7 +1721,7 @@ func configCommand(args []string) int {
 
 func configAutoPlanCommand(args []string) int {
 	fs := flag.NewFlagSet("config auto-plan", flag.ContinueOnError)
-	local := fs.Bool("local", false, "write ./reasonix.toml instead of the user config")
+	local := fs.Bool("local", false, "write ./qiaotongagent.toml instead of the user config")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -1743,7 +1743,7 @@ func configAutoPlanCommand(args []string) int {
 	}
 	path := config.UserConfigPath()
 	if *local {
-		path = "reasonix.toml"
+		path = "qiaotongagent.toml"
 	}
 	if path == "" {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "cannot resolve config path")
@@ -1783,7 +1783,7 @@ func configAutoPlanCommand(args []string) int {
 
 func configReasoningLanguageCommand(args []string) int {
 	fs := flag.NewFlagSet("config reasoning-language", flag.ContinueOnError)
-	local := fs.Bool("local", false, "write ./reasonix.toml instead of the user config")
+	local := fs.Bool("local", false, "write ./qiaotongagent.toml instead of the user config")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -1808,7 +1808,7 @@ func configReasoningLanguageCommand(args []string) int {
 	}
 	path := config.UserConfigPath()
 	if *local {
-		path = "reasonix.toml"
+		path = "qiaotongagent.toml"
 	}
 	if path == "" {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "cannot resolve config path")
@@ -1843,19 +1843,19 @@ func configReasoningLanguageCommand(args []string) int {
 
 func configUsage() {
 	fmt.Print(`Usage:
-  reasonix config auto-plan [--local] [off|on]
-  reasonix config reasoning-language [--local] [auto|zh|en]
+  qiaotongagent config auto-plan [--local] [off|on]
+  qiaotongagent config reasoning-language [--local] [auto|zh|en]
 `)
 }
 
 func configAutoPlanUsage() {
 	fmt.Print(`Usage:
-  reasonix config auto-plan [--local] [off|on]
+  qiaotongagent config auto-plan [--local] [off|on]
 `)
 }
 
 func configReasoningLanguageUsage() {
 	fmt.Print(`Usage:
-  reasonix config reasoning-language [--local] [auto|zh|en]
+  qiaotongagent config reasoning-language [--local] [auto|zh|en]
 `)
 }

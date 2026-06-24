@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/control"
-	"reasonix/internal/event"
-	"reasonix/internal/hook"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/hook"
+	"qiaotongagent/internal/provider"
 )
 
 // --- fakes: a Factory wrapping a behavior-driven runner in a real Controller ---
@@ -252,7 +252,7 @@ func startServer(t *testing.T, factory Factory) (*rpcClient, func()) {
 	outR, outW := io.Pipe()
 	done := make(chan struct{})
 	go func() {
-		_ = Serve(context.Background(), inR, outW, factory, AgentInfo{Name: "reasonix-test", Version: "0"})
+		_ = Serve(context.Background(), inR, outW, factory, AgentInfo{Name: "qiaotongagent-test", Version: "0"})
 		close(done)
 	}()
 	client := newRPCClient(inW, outR)

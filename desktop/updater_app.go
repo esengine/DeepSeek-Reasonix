@@ -8,7 +8,7 @@ import (
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"reasonix/desktop/internal/update"
+	"qiaotongagent/desktop/internal/update"
 )
 
 // updater_app.go is the auto-updater's bound command surface — the App methods the

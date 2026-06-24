@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/provider"
 )
 
 // touch sets a file's mtime to t. Used by the listing-order test so it
@@ -17,12 +17,12 @@ func touch(path string, t time.Time) error {
 	return os.Chtimes(path, t, t)
 }
 
-// TestSaveLoadRoundTrip is the contract `reasonix chat --resume` depends on: a
+// TestSaveLoadRoundTrip is the contract `qiaotongagent chat --resume` depends on: a
 // session written to disk reloads byte-for-byte, including tool calls and
 // reasoning content (which the model wants to keep across resumes for cache
 // hits on thinking-mode providers).
 func TestSaveLoadRoundTrip(t *testing.T) {
-	s := NewSession("you are reasonix")
+	s := NewSession("you are qiaotongagent")
 	s.Add(provider.Message{Role: provider.RoleUser, Content: "find the bug"})
 	s.Add(provider.Message{
 		Role:             provider.RoleAssistant,
@@ -90,7 +90,7 @@ func TestSaveLoadLargeMessage(t *testing.T) {
 
 // TestListSessionsOrdersByMTime makes sure the picker shows the most
 // recently used conversation first — that's what users reach for when they
-// hit `reasonix chat --continue`.
+// hit `qiaotongagent chat --continue`.
 func TestListSessionsOrdersByMTime(t *testing.T) {
 	dir := t.TempDir()
 	// Write two sessions with explicit mtimes so the order is deterministic.

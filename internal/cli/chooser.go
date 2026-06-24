@@ -7,8 +7,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"reasonix/internal/event"
-	"reasonix/internal/i18n"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/i18n"
 )
 
 // chooser is the in-chat multiple-choice prompt the `ask` tool raises — the CLI's

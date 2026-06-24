@@ -256,7 +256,7 @@ func TestCreateProjectScopeRequiresRoot(t *testing.T) {
 
 func TestCreateDirectoryLayoutSkill(t *testing.T) {
 	home := t.TempDir()
-	skillsRoot := filepath.Join(home, ".reasonix", "skills", "existing", "SKILL.md")
+	skillsRoot := filepath.Join(home, ".qiaotongagent", "skills", "existing", "SKILL.md")
 	os.MkdirAll(filepath.Dir(skillsRoot), 0o755)
 	os.WriteFile(skillsRoot, []byte("---\ndescription: exists\n---\nbody"), 0o644)
 	st := New(Options{HomeDir: home, DisableBuiltins: true})

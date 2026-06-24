@@ -1,14 +1,14 @@
 version: 2
-project_name: reasonix
+project_name: qiaotongagent
 
 before:
   hooks:
     - go mod download
 
 builds:
-  - id: reasonix
-    main: ./cmd/reasonix
-    binary: reasonix
+  - id: qiaotongagent
+    main: ./cmd/qiaotongagent
+    binary: qiaotongagent
     env:
       - CGO_ENABLED=0
     flags:
@@ -19,9 +19,9 @@ builds:
     goarch: [amd64, arm64]
 
 archives:
-  - id: reasonix
-    ids: [reasonix]
-    name_template: "reasonix-{{ .Os }}-{{ .Arch }}"
+  - id: qiaotongagent
+    ids: [qiaotongagent]
+    name_template: "qiaotongagent-{{ .Os }}-{{ .Arch }}"
     formats: [tar.gz]
     format_overrides:
       - goos: windows
@@ -32,8 +32,8 @@ checksum:
   algorithm: sha256
 
 homebrew_casks:
-  - name: reasonix
-    ids: [reasonix]
+  - name: qiaotongagent
+    ids: [qiaotongagent]
     # Prereleases (v*-rc*) must not update the stable tap; brew has no separate
     # prerelease channel, so a pushed rc cask becomes the default `brew install`.
     # npm is a separate line (release-npm.yml, `npm-v*`), so an npm prerelease no
@@ -41,21 +41,21 @@ homebrew_casks:
     skip_upload: "auto"
     repository:
       owner: esengine
-      name: homebrew-reasonix
+      name: homebrew-qiaotongagent
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    homepage: "https://github.com/esengine/DeepSeek-Reasonix"
+    homepage: "https://github.com/esengine/DeepSeek-QiaotongAgent"
     description: "Cache-first DeepSeek coding agent for the terminal."
     commit_author:
-      name: reasonix
-      email: reasonix@deepseek.com
+      name: qiaotongagent
+      email: qiaotongagent@deepseek.com
     hooks:
       post:
         install: |
           if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/reasonix"]
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/qiaotongagent"]
           end
 
 release:
   prerelease: auto
-  name_template: "Reasonix CLI {{ .Tag }}"
+  name_template: "QiaotongAgent CLI {{ .Tag }}"

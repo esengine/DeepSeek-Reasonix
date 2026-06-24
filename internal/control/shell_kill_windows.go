@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strconv"
 
-	"reasonix/internal/proc"
+	"qiaotongagent/internal/proc"
 )
 
 // setShellKillTree hides the child's console and makes a cancelled command kill

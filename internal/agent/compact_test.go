@@ -5,12 +5,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"reasonix/internal/event"
+	"qiaotongagent/internal/event"
 	"strings"
 	"testing"
 
-	"reasonix/internal/provider"
-	"reasonix/internal/tool"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/tool"
 )
 
 // fakeProvider returns a fixed reply and records the messages it was asked to

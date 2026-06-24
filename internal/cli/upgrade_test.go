@@ -39,36 +39,36 @@ func TestVerifyChecksum(t *testing.T) {
 	hash := hex.EncodeToString(sum[:])
 
 	t.Run("match", func(t *testing.T) {
-		checksumFile := []byte(fmt.Sprintf("%s  reasonix-linux-amd64.tar.gz\n", hash))
-		if err := verifyChecksum(content, "reasonix-linux-amd64.tar.gz", checksumFile); err != nil {
+		checksumFile := []byte(fmt.Sprintf("%s  qiaotongagent-linux-amd64.tar.gz\n", hash))
+		if err := verifyChecksum(content, "qiaotongagent-linux-amd64.tar.gz", checksumFile); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})
 
 	t.Run("mismatch", func(t *testing.T) {
-		checksumFile := []byte(fmt.Sprintf("%s  reasonix-linux-amd64.tar.gz\n", "0000000000000000000000000000000000000000000000000000000000000000"))
-		if err := verifyChecksum(content, "reasonix-linux-amd64.tar.gz", checksumFile); err == nil {
+		checksumFile := []byte(fmt.Sprintf("%s  qiaotongagent-linux-amd64.tar.gz\n", "0000000000000000000000000000000000000000000000000000000000000000"))
+		if err := verifyChecksum(content, "qiaotongagent-linux-amd64.tar.gz", checksumFile); err == nil {
 			t.Error("expected checksum mismatch error")
 		}
 	})
 
 	t.Run("not found", func(t *testing.T) {
-		checksumFile := []byte(fmt.Sprintf("%s  reasonix-darwin-arm64.tar.gz\n", hash))
-		if err := verifyChecksum(content, "reasonix-linux-amd64.tar.gz", checksumFile); err == nil {
+		checksumFile := []byte(fmt.Sprintf("%s  qiaotongagent-darwin-arm64.tar.gz\n", hash))
+		if err := verifyChecksum(content, "qiaotongagent-linux-amd64.tar.gz", checksumFile); err == nil {
 			t.Error("expected not-found error")
 		}
 	})
 }
 
 func TestExtractFromTarGz(t *testing.T) {
-	// Build a .tar.gz in memory containing a "reasonix" entry.
+	// Build a .tar.gz in memory containing a "qiaotongagent" entry.
 	var buf bytes.Buffer
 	gw := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gw)
 
 	body := []byte("fake binary content")
 	if err := tw.WriteHeader(&tar.Header{
-		Name: "reasonix",
+		Name: "qiaotongagent",
 		Mode: 0o755,
 		Size: int64(len(body)),
 	}); err != nil {
@@ -84,7 +84,7 @@ func TestExtractFromTarGz(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := extractFromTarGz(buf.Bytes(), "reasonix")
+	got, err := extractFromTarGz(buf.Bytes(), "qiaotongagent")
 	if err != nil {
 		t.Fatalf("extractFromTarGz: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestExtractFromTarGz_Nested(t *testing.T) {
 
 	body := []byte("nested binary")
 	if err := tw.WriteHeader(&tar.Header{
-		Name: "reasonix-linux-amd64/reasonix",
+		Name: "qiaotongagent-linux-amd64/qiaotongagent",
 		Mode: 0o755,
 		Size: int64(len(body)),
 	}); err != nil {
@@ -117,7 +117,7 @@ func TestExtractFromTarGz_Nested(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := extractFromTarGz(buf.Bytes(), "reasonix")
+	got, err := extractFromTarGz(buf.Bytes(), "qiaotongagent")
 	if err != nil {
 		t.Fatalf("extractFromTarGz: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestExtractFromTarGz_NotFound(t *testing.T) {
 	tw.Close()
 	gw.Close()
 
-	_, err := extractFromTarGz(buf.Bytes(), "reasonix")
+	_, err := extractFromTarGz(buf.Bytes(), "qiaotongagent")
 	if err == nil {
 		t.Error("expected error for missing binary")
 	}
@@ -202,7 +202,7 @@ func TestPickCLIRelease(t *testing.T) {
 	}
 
 	// The 1.x line ships as rc on npm @next, so a newer prerelease must be
-	// selected, not skipped — `reasonix upgrade` always moves to the newest 1.x.
+	// selected, not skipped — `qiaotongagent upgrade` always moves to the newest 1.x.
 	withRC := []ghRelease{
 		{TagName: "v1.7.0-rc.1"},
 		{TagName: "v1.6.0"},

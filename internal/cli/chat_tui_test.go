@@ -13,13 +13,13 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/ansi"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/checkpoint"
-	"reasonix/internal/config"
-	"reasonix/internal/control"
-	"reasonix/internal/event"
-	"reasonix/internal/i18n"
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/checkpoint"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/i18n"
+	"qiaotongagent/internal/provider"
 )
 
 type blockingTurnRunner struct{ started chan struct{} }
@@ -496,14 +496,14 @@ func TestMainManagerFollowsTranscriptWithoutTopPadding(t *testing.T) {
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	m = m0.(chatTUI)
-	m.wrappedLines = []string{"reasonix chat", "› /mcp"}
+	m.wrappedLines = []string{"qiaotongagent chat", "› /mcp"}
 
 	out := ansi.Strip(m.renderTranscriptWithMainManager("Manage MCP servers\n1 servers"))
 	lines := strings.Split(out, "\n")
 	if len(lines) < 4 {
 		t.Fatalf("rendered manager area too short:\n%s", out)
 	}
-	if !strings.Contains(lines[0], "reasonix chat") || !strings.Contains(lines[1], "/mcp") {
+	if !strings.Contains(lines[0], "qiaotongagent chat") || !strings.Contains(lines[1], "/mcp") {
 		t.Fatalf("transcript lines should stay above manager:\n%s", out)
 	}
 	if strings.TrimSpace(lines[2]) != "" {
@@ -970,7 +970,7 @@ func TestAutoPlanCommandPersistsAndUpdatesController(t *testing.T) {
 
 func TestAutoPlanCommandWritesUserConfigNotProjectConfig(t *testing.T) {
 	isolateUserConfig(t)
-	projectPath := filepath.Join(mustGetwd(t), "reasonix.toml")
+	projectPath := filepath.Join(mustGetwd(t), "qiaotongagent.toml")
 	if err := os.WriteFile(projectPath, []byte("[agent]\nauto_plan = \"off\"\n"), 0o644); err != nil {
 		t.Fatalf("write project config: %v", err)
 	}
@@ -1019,7 +1019,7 @@ func TestReasoningLanguageCommandPersistsAndUpdatesController(t *testing.T) {
 
 func TestReasoningLanguageCommandWritesUserConfigNotProjectConfig(t *testing.T) {
 	isolateUserConfig(t)
-	projectPath := filepath.Join(mustGetwd(t), "reasonix.toml")
+	projectPath := filepath.Join(mustGetwd(t), "qiaotongagent.toml")
 	if err := os.WriteFile(projectPath, []byte("[agent]\nreasoning_language = \"en\"\n"), 0o644); err != nil {
 		t.Fatalf("write project config: %v", err)
 	}
@@ -1081,7 +1081,7 @@ func TestLanguageCommandAutoClearsPinnedLanguage(t *testing.T) {
 
 func TestLanguageCommandAutoClearsLowerPriorityUserOverride(t *testing.T) {
 	isolateUserConfig(t)
-	t.Setenv("REASONIX_LANG", "")
+	t.Setenv("QIAOTONGAGENT_LANG", "")
 	t.Setenv("LC_ALL", "")
 	t.Setenv("LC_MESSAGES", "")
 	t.Setenv("LANG", "")
@@ -1097,7 +1097,7 @@ func TestLanguageCommandAutoClearsLowerPriorityUserOverride(t *testing.T) {
 		t.Fatalf("save user config: %v", err)
 	}
 	projectCfg := config.Default()
-	if err := projectCfg.SaveTo("reasonix.toml"); err != nil {
+	if err := projectCfg.SaveTo("qiaotongagent.toml"); err != nil {
 		t.Fatalf("save project config: %v", err)
 	}
 

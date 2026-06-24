@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/event"
+	"qiaotongagent/internal/event"
 )
 
 type recordingSink struct {

@@ -7,16 +7,16 @@ import (
 	"runtime"
 	"strings"
 
-	"reasonix/internal/fileutil"
-	"reasonix/internal/mcpdiag"
-	"reasonix/internal/netclient"
-	"reasonix/internal/permission"
+	"qiaotongagent/internal/fileutil"
+	"qiaotongagent/internal/mcpdiag"
+	"qiaotongagent/internal/netclient"
+	"qiaotongagent/internal/permission"
 )
 
 // edit.go is the programmatic mutation surface a settings UI drives: change the
 // default model, add/remove a provider, set the planner, edit permission rules,
 // add/remove an MCP server — each validated, then persisted with SaveTo. It is
-// separate from the `reasonix setup` wizard (cli) so a GUI can apply one setting at a
+// separate from the `qiaotongagent setup` wizard (cli) so a GUI can apply one setting at a
 // time without replaying the whole interactive flow. Every mutator works on the
 // in-memory *Config; nothing writes to disk until SaveTo/Save is called, so a UI
 // can stage several changes and commit once. Mutations round-trip through
@@ -121,7 +121,7 @@ func (c *Config) SetProviderEffort(name, effort string) error {
 	return fmt.Errorf("set provider effort: no provider %q", name)
 }
 
-// SetLanguage pins the CLI UI/model language; empty/auto clears the override so runtime detection falls back to REASONIX_LANG / locale.
+// SetLanguage pins the CLI UI/model language; empty/auto clears the override so runtime detection falls back to QIAOTONGAGENT_LANG / locale.
 func (c *Config) SetLanguage(lang string) error {
 	switch strings.ToLower(strings.TrimSpace(lang)) {
 	case "", "auto":
@@ -711,7 +711,7 @@ func (c *Config) ClearPluginAuthentication(name string) (PluginEntry, bool, erro
 // ClearPluginAuthenticationInSource clears auth material in the file that actually
 // owns the MCP server. Load() merges user/project TOML and project .mcp.json into
 // one Config, so callers must not mutate that merged view and Save() it back: a
-// .mcp.json-only server would otherwise be serialized into reasonix.toml or the
+// .mcp.json-only server would otherwise be serialized into qiaotongagent.toml or the
 // user config. Source priority mirrors Load(): project TOML, user TOML, then the
 // project .mcp.json entry if TOML did not define that server.
 func ClearPluginAuthenticationInSource(name string) (PluginEntry, bool, string, error) {
@@ -736,7 +736,7 @@ func ClearPluginAuthenticationInSource(name string) (PluginEntry, bool, string, 
 }
 
 func pluginTOMLSourcePath(name string) string {
-	for _, path := range []string{"reasonix.toml", userConfigPath()} {
+	for _, path := range []string{"qiaotongagent.toml", userConfigPath()} {
 		if strings.TrimSpace(path) == "" {
 			continue
 		}
@@ -772,7 +772,7 @@ func validatePlugin(e PluginEntry) error {
 
 // SaveTo writes the configuration to path as annotated TOML, atomically: it
 // writes a sibling temp file then renames, so a crash mid-write can't leave a
-// half-written reasonix.toml that fails to parse on next load. Parent directories
+// half-written qiaotongagent.toml that fails to parse on next load. Parent directories
 // are created as needed.
 func (c *Config) SaveTo(path string) error {
 	return c.SaveToScope(path, renderScopeForPath(path))
@@ -794,7 +794,7 @@ func SaveMinimalProjectAutoPlan(path, mode string) (string, error) {
 	if err := cfg.SetAutoPlan(mode); err != nil {
 		return "", err
 	}
-	body := fmt.Sprintf(`# Reasonix project configuration.
+	body := fmt.Sprintf(`# QiaotongAgent project configuration.
 # Project-local overrides are merged over the user config.
 
 [agent]
@@ -810,7 +810,7 @@ func SaveMinimalProjectReasoningLanguage(path, lang string) (string, error) {
 	if err := cfg.SetReasoningLanguage(lang); err != nil {
 		return "", err
 	}
-	body := fmt.Sprintf(`# Reasonix project configuration.
+	body := fmt.Sprintf(`# QiaotongAgent project configuration.
 # Project-local overrides are merged over the user config.
 
 [agent]
@@ -827,7 +827,7 @@ func writeConfigFile(path, body string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("save: create dir: %w", err)
 	}
-	tmp, err := os.CreateTemp(dir, ".reasonix.*.toml.tmp")
+	tmp, err := os.CreateTemp(dir, ".qiaotongagent.*.toml.tmp")
 	if err != nil {
 		return fmt.Errorf("save: create temp: %w", err)
 	}
@@ -866,23 +866,23 @@ func isUserConfigPath(path string) bool {
 }
 
 // Save writes the configuration back to the file it was loaded from
-// (SourcePath), or to ./reasonix.toml when none exists yet — the conventional
+// (SourcePath), or to ./qiaotongagent.toml when none exists yet — the conventional
 // project-local target a fresh GUI session would create.
 func (c *Config) Save() error {
 	path := SourcePath()
 	if path == "" {
-		path = "reasonix.toml"
+		path = "qiaotongagent.toml"
 	}
 	return c.SaveTo(path)
 }
 
-// SaveForRoot saves the config to root's reasonix.toml, falling back to the
-// user's global config when root has no existing reasonix.toml.
+// SaveForRoot saves the config to root's qiaotongagent.toml, falling back to the
+// user's global config when root has no existing qiaotongagent.toml.
 func (c *Config) SaveForRoot(root string) error {
 	root = resolveRoot(root)
-	projectTOML := "reasonix.toml"
+	projectTOML := "qiaotongagent.toml"
 	if root != "." {
-		projectTOML = filepath.Join(root, "reasonix.toml")
+		projectTOML = filepath.Join(root, "qiaotongagent.toml")
 	}
 	if _, err := os.Stat(projectTOML); err == nil {
 		return c.SaveTo(projectTOML)

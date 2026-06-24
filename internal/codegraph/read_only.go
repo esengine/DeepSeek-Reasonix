@@ -1,6 +1,6 @@
 package codegraph
 
-// ReadOnlyToolNames returns the CodeGraph MCP tools Reasonix treats as readers
+// ReadOnlyToolNames returns the CodeGraph MCP tools QiaotongAgent treats as readers
 // when older CodeGraph runtimes omit MCP annotations.readOnlyHint metadata.
 func ReadOnlyToolNames() map[string]bool {
 	return map[string]bool{

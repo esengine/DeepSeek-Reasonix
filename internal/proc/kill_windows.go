@@ -34,7 +34,7 @@ func KillTree(cmd *exec.Cmd) {
 // StartTracked starts cmd inside a new Job Object whose KILL_ON_JOB_CLOSE flag
 // fells the whole tree — including a launcher's detached grandchild (cmd.exe →
 // node.exe, as the CodeGraph daemon re-parents itself off the launcher) — when
-// the handle closes via KillTracked or an abrupt reasonix exit. The child is
+// the handle closes via KillTracked or an abrupt qiaotongagent exit. The child is
 // created suspended and assigned to the job before it runs, so a fast shim can
 // no longer exec its grandchild and exit before assignment, orphaning a node
 // the job never captured (#3747). It is always resumed before returning, even

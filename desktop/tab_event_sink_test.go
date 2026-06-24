@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"reasonix/internal/event"
+	"qiaotongagent/internal/event"
 )
 
 func TestTabEventSinkDoesNotBlockOnRuntimeEventsEmit(t *testing.T) {

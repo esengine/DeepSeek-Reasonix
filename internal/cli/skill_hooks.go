@@ -8,9 +8,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"reasonix/internal/config"
-	"reasonix/internal/hook"
-	"reasonix/internal/skill"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/hook"
+	"qiaotongagent/internal/skill"
 )
 
 func (m *chatTUI) runSkillSubcommand(input string) {
@@ -62,7 +62,7 @@ func (m *chatTUI) skillList() {
 		skills = m.ctrl.AllSkills()
 	}
 	if len(skills) == 0 {
-		m.notice("no skills found. Add SKILL.md / <name>.md under .reasonix/skills (project) or ~/.reasonix/skills (global); .agents/.agent/.claude skills dirs also work. Invoke with /<name> or run_skill.")
+		m.notice("no skills found. Add SKILL.md / <name>.md under .qiaotongagent/skills (project) or ~/.qiaotongagent/skills (global); .agents/.agent/.claude skills dirs also work. Invoke with /<name> or run_skill.")
 		return
 	}
 	m.commitLine(renderSkillList(m.width, sortedSkills(skills), m.disabledSkillNames()))
@@ -251,7 +251,7 @@ func (m *chatTUI) runHooksSubcommand(input string) {
 			m.notice("hooks trust: " + err.Error())
 			return
 		}
-		m.notice("trusted this project's hooks — restart Reasonix to load them")
+		m.notice("trusted this project's hooks — restart QiaotongAgent to load them")
 	default:
 		m.notice("unknown /hooks subcommand " + args[1] + " — try: /hooks, /hooks trust")
 	}

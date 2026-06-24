@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a bug in DeepSeek-Reasonix
+description: Report a bug in DeepSeek-QiaotongAgent
 title: "[Bug]: "
 labels: ["bug"]
 body:
@@ -22,7 +22,7 @@ body:
     id: version
     attributes:
       label: Exact version
-      description: Output of `reasonix --version`.
+      description: Output of `qiaotongagent --version`.
       placeholder: e.g. 1.0.0
     validations:
       required: true

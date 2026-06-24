@@ -3,7 +3,7 @@ package cli
 import (
 	"testing"
 
-	"reasonix/internal/skill"
+	"qiaotongagent/internal/skill"
 )
 
 // TestSlashItemsIncludesSkills proves every loaded skill is offered in the slash

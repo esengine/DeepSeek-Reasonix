@@ -1,7 +1,7 @@
 export type DisplayMode = "standard" | "compact";
 
-const DISPLAY_MODE_KEY = "reasonix-display-mode";
-const DISPLAY_MODE_EVENT = "reasonix:display-mode";
+const DISPLAY_MODE_KEY = "qiaotongagent-display-mode";
+const DISPLAY_MODE_EVENT = "qiaotongagent:display-mode";
 
 export function getDisplayMode(): DisplayMode {
   if (typeof localStorage === "undefined") return "standard";

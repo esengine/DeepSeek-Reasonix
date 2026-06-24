@@ -5,10 +5,10 @@ import (
 	"os"
 	"strings"
 
-	"reasonix/internal/config"
-	"reasonix/internal/hook"
-	"reasonix/internal/i18n"
-	"reasonix/internal/skill"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/hook"
+	"qiaotongagent/internal/i18n"
+	"qiaotongagent/internal/skill"
 )
 
 // SlashItem is one slash-completion suggestion. Insert is the token text placed
@@ -396,7 +396,7 @@ func (c *Controller) managementNotice(trimmed string) bool {
 			if err := hook.Trust(root, ""); err != nil {
 				c.notice("hooks trust: " + err.Error())
 			} else {
-				c.notice("trusted this project's hooks — restart Reasonix to load them")
+				c.notice("trusted this project's hooks — restart QiaotongAgent to load them")
 			}
 		default:
 			c.notice("unknown /hooks subcommand " + fields[1] + " — try: /hooks, /hooks trust")

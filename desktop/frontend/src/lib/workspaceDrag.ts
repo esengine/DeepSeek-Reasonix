@@ -1,4 +1,4 @@
-export const WORKSPACE_REF_DRAG_TYPE = "application/x-reasonix-workspace-ref";
+export const WORKSPACE_REF_DRAG_TYPE = "application/x-qiaotongagent-workspace-ref";
 
 export interface WorkspaceRefDragPayload {
   path: string;

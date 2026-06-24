@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"reasonix/internal/provider"
+	"qiaotongagent/internal/provider"
 )
 
 func TestBranchMetaRoundTripAndList(t *testing.T) {

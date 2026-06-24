@@ -27,24 +27,24 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/billing"
-	"reasonix/internal/boot"
-	"reasonix/internal/builtinmcp"
-	"reasonix/internal/codegraph"
-	"reasonix/internal/config"
-	"reasonix/internal/control"
-	"reasonix/internal/event"
-	"reasonix/internal/evidence"
-	"reasonix/internal/fileref"
-	fileenc "reasonix/internal/fileutil/encoding"
-	"reasonix/internal/i18n"
-	"reasonix/internal/mcpdiag"
-	"reasonix/internal/memory"
-	"reasonix/internal/netclient"
-	"reasonix/internal/plugin"
-	"reasonix/internal/provider"
-	"reasonix/internal/skill"
+	"qiaotongagent/internal/agent"
+	"qiaotongagent/internal/billing"
+	"qiaotongagent/internal/boot"
+	"qiaotongagent/internal/builtinmcp"
+	"qiaotongagent/internal/codegraph"
+	"qiaotongagent/internal/config"
+	"qiaotongagent/internal/control"
+	"qiaotongagent/internal/event"
+	"qiaotongagent/internal/evidence"
+	"qiaotongagent/internal/fileref"
+	fileenc "qiaotongagent/internal/fileutil/encoding"
+	"qiaotongagent/internal/i18n"
+	"qiaotongagent/internal/mcpdiag"
+	"qiaotongagent/internal/memory"
+	"qiaotongagent/internal/netclient"
+	"qiaotongagent/internal/plugin"
+	"qiaotongagent/internal/provider"
+	"qiaotongagent/internal/skill"
 )
 
 // eventChannel is the Wails runtime event name the frontend subscribes to for the
@@ -56,7 +56,7 @@ const eventChannel = "agent:event"
 // singleInstanceID is used by Wails to route a second desktop launch back to the
 // running instance. Keep it stable across releases so launcher/Dock/taskbar
 // reopen behavior remains predictable on every platform.
-const singleInstanceID = "com.reasonix.desktop"
+const singleInstanceID = "com.qiaotongagent.desktop"
 
 var updateBuiltInCodegraph = codegraph.UpdateWithClient
 
@@ -244,13 +244,13 @@ func (a *App) ensureMediaTokenStore() *mediaTokenStore {
 }
 
 // workspaceMediaMiddleware returns an HTTP middleware that intercepts
-// /__reasonix_workspace_media/{token}/{filename} requests and serves the
+// /__qiaotongagent_workspace_media/{token}/{filename} requests and serves the
 // corresponding workspace file. All other paths pass through to the Wails
 // default asset handler unchanged.
 func (a *App) workspaceMediaMiddleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			prefix := "/__reasonix_workspace_media/"
+			prefix := "/__qiaotongagent_workspace_media/"
 			if !strings.HasPrefix(r.URL.Path, prefix) {
 				next.ServeHTTP(w, r)
 				return
@@ -3273,7 +3273,7 @@ type CommandInfo struct {
 }
 
 // Commands lists the slash commands available this session — built-in actions,
-// custom commands (.reasonix/commands), and MCP prompts — for the composer's "/"
+// custom commands (.qiaotongagent/commands), and MCP prompts — for the composer's "/"
 // autocomplete menu.
 func (a *App) Commands() []CommandInfo {
 	out := []CommandInfo{
@@ -5254,7 +5254,7 @@ func (a *App) ReadFile(rel string) FilePreview {
 		token := a.ensureMediaTokenStore().create(path, info.Name(), mime, kind, info.Size(), info.ModTime())
 		out.Kind = kind
 		out.Mime = mime
-		out.URL = "/__reasonix_workspace_media/" + token + "/" + url.PathEscape(info.Name())
+		out.URL = "/__qiaotongagent_workspace_media/" + token + "/" + url.PathEscape(info.Name())
 		return out
 	}
 	f, err := os.Open(path)
@@ -5489,7 +5489,7 @@ func (a *App) withActiveWorkspaceDo(fn func() error) error {
 }
 
 // SavePastedImage stores a browser clipboard image data URL under the active
-// tab's workspace .reasonix/attachments and returns the relative @-reference path.
+// tab's workspace .qiaotongagent/attachments and returns the relative @-reference path.
 func (a *App) SavePastedImage(dataURL string) (string, error) {
 	return a.withActiveWorkspace(func() (string, error) {
 		return control.SaveImageDataURL(dataURL)
@@ -5497,14 +5497,14 @@ func (a *App) SavePastedImage(dataURL string) (string, error) {
 }
 
 // SaveClipboardImage reads the native OS clipboard image under the active tab's
-// workspace .reasonix/attachments and returns the relative @-reference path.
+// workspace .qiaotongagent/attachments and returns the relative @-reference path.
 func (a *App) SaveClipboardImage() (string, error) {
 	return a.withActiveWorkspace(control.SaveClipboardImage)
 }
 
 // SavePastedFile stores a dropped non-image file (the browser exposes its bytes
 // as a data URL but not a real path) under the active tab's workspace
-// .reasonix/attachments and returns the relative @-reference path.
+// .qiaotongagent/attachments and returns the relative @-reference path.
 func (a *App) SavePastedFile(name, dataURL string) (string, error) {
 	return a.withActiveWorkspace(func() (string, error) {
 		return control.SaveAttachmentDataURL(name, dataURL)
@@ -5560,7 +5560,7 @@ func (a *App) SaveExportFile(path, payload string, base64Encoded bool) error {
 func safeExportFilename(name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return "reasonix-session.md"
+		return "qiaotongagent-session.md"
 	}
 	return filepath.Base(name)
 }
@@ -5591,7 +5591,7 @@ func (a *App) AttachmentDataURL(path string) (string, error) {
 
 // DroppedItem is one OS-dropped file resolved into a composer context entry: an
 // in-tree file becomes a workspace @reference (read in place, no copy), while an
-// image or out-of-tree file is copied into .reasonix/attachments.
+// image or out-of-tree file is copied into .qiaotongagent/attachments.
 type DroppedItem struct {
 	Kind       string `json:"kind"` // "workspace" | "attachment"
 	Path       string `json:"path"`
@@ -5602,7 +5602,7 @@ type DroppedItem struct {
 // AttachDropped turns an absolute path from the native file-drop bridge into a
 // composer context entry. Images are stored as attachments so the chip shows a
 // thumbnail; other in-workspace files are referenced relatively (no copy); files
-// outside the workspace are copied into .reasonix/attachments.
+// outside the workspace are copied into .qiaotongagent/attachments.
 func (a *App) AttachDropped(path string) (DroppedItem, error) {
 	var item DroppedItem
 	err := a.withActiveWorkspaceDo(func() error {
@@ -5714,7 +5714,7 @@ type MemoryView struct {
 // writableScopes are the quick-add targets the panel offers, broad → specific.
 var writableScopes = []memory.Scope{memory.ScopeUser, memory.ScopeProject, memory.ScopeLocal}
 
-// Memory returns the loaded memory for the panel: the REASONIX.md hierarchy,
+// Memory returns the loaded memory for the panel: the QIAOTONGAGENT.md hierarchy,
 // active/archived auto-memories, and the writable scopes. Read-only; mutations
 // go through Remember / SaveDoc.
 func (a *App) Memory() MemoryView {
