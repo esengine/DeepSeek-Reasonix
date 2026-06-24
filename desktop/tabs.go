@@ -1257,6 +1257,17 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 		a.activeTabID = tabID
 		a.saveTabsLocked()
 		meta := a.tabMeta(created, true)
+		// Pre-create an empty session file so the tab is immediately
+		// deletable even before the async controller build finishes
+		// (fixes #5215 — newly created blank sessions were not
+		// deletable until buildTabControllerWithContext completed).
+		sessionDir := desktopSessionDir(actualRoot)
+		prePath := agent.NewSessionPath(sessionDir, inheritedModel)
+		if f, err := os.OpenFile(prePath, os.O_RDONLY|os.O_CREATE, 0o644); err == nil {
+			f.Close()
+		}
+		created.SessionPath = prePath
+
 		a.mu.Unlock()
 
 		a.startTabControllerBuild(created)
@@ -1305,6 +1316,17 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 	a.activeTabID = tabID
 	a.saveTabsLocked()
 	meta := a.tabMeta(created, true)
+	// Pre-create an empty session file so the tab is immediately
+	// deletable even before the async controller build finishes
+	// (fixes #5215 — newly created blank sessions were not
+	// deletable until buildTabControllerWithContext completed).
+	sessionDir := desktopSessionDir(actualRoot)
+	prePath := agent.NewSessionPath(sessionDir, inheritedModel)
+	if f, err := os.OpenFile(prePath, os.O_RDONLY|os.O_CREATE, 0o644); err == nil {
+		f.Close()
+	}
+	created.SessionPath = prePath
+
 	a.mu.Unlock()
 
 	a.startTabControllerBuild(created)

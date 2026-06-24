@@ -1672,10 +1672,11 @@ type removedSessionRuntime struct {
 }
 
 type fallbackRuntimeTarget struct {
-	needs         bool
-	scope         string
-	workspaceRoot string
-	topicID       string
+	needs             bool
+	scope             string
+	workspaceRoot     string
+	topicID           string
+	skipTopicCreation bool // when true (e.g. after TrashTopic), openFallbackRuntime should not CreateTopic
 }
 
 func (a *App) removeSessionRuntimeBindings(dir, sessionPath string) ([]removedSessionRuntime, fallbackRuntimeTarget) {
@@ -1731,7 +1732,7 @@ func (a *App) removeTopicRuntimeBindings(topicID string) ([]removedSessionRuntim
 		sessionDir := tabSessionDir(tab)
 		sessionPath := canonicalTabSessionPath(tab.currentSessionPath())
 		if len(removed) == 0 {
-			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot}
+			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot, skipTopicCreation: true}
 		}
 		removed = append(removed, removedRuntimeFromTab(tab, sessionDir, sessionPath))
 		delete(a.tabs, id)
@@ -1747,7 +1748,7 @@ func (a *App) removeTopicRuntimeBindings(topicID string) ([]removedSessionRuntim
 		sessionDir := tabSessionDir(tab)
 		sessionPath := canonicalTabSessionPath(tab.currentSessionPath())
 		if len(removed) == 0 {
-			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot}
+			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot, skipTopicCreation: true}
 		}
 		removed = append(removed, removedRuntimeFromTab(tab, sessionDir, sessionPath))
 		delete(a.detachedSessions, key)
@@ -1939,7 +1940,7 @@ func (a *App) openFallbackRuntime(target fallbackRuntimeTarget) error {
 	if scope == "global" {
 		root = ""
 	}
-	if topicID == "" {
+	if topicID == "" && !target.skipTopicCreation {
 		topic, err := a.CreateTopic(scope, root, "")
 		if err != nil {
 			return err
