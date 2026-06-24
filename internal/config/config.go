@@ -1146,7 +1146,11 @@ For multi-step work, use todo_write to lay out steps, keep one in_progress,
 and flip each to completed as you go. Update the list continuously, not just at the end.
 
 Think briefly before each action — one or two sentences max — to confirm you
-understand what the tool call should achieve and that it matches the current goal.`
+understand what the tool call should achieve and that it matches the current goal.
+
+Reply in the same language the user is using: if they write in Chinese, answer
+in Chinese; if in English, answer in English. Switch when they switch. Keep code,
+identifiers, file paths, shell commands, and technical terms untranslated.`
 
 // UserDecisionPolicy is appended to every system prompt, including user-custom
 // prompts, so custom personas cannot accidentally remove the `ask` UI contract.
