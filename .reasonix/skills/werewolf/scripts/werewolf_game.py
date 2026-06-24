@@ -143,6 +143,7 @@ if __name__ == "__main__":
         help="追加历史事件/发言/投票记录（同轮子agent共享前缀，触发缓存命中）")
 
     p_stats = sub.add_parser("stats")
+    p_stats.add_argument("--pretty", action="store_true", help="详细统计面板")
 
     p_hint = sub.add_parser("hint")
     p_hint.add_argument("role", help="角色: wolf/seer/witch/hunter/guard/idiot/villager/mech_wolf")

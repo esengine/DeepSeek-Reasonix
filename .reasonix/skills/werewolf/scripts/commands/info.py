@@ -115,23 +115,101 @@ def cmd_summary(args):
 
 
 def cmd_stats(args):
-    """显示胜率统计。"""
+    """显示对局统计。支持 --pretty 详细面板。"""
     if not Path(STATS_FILE).exists():
-        print("暂无对局记录"); return
+        _empty_stats(); return
     try:
-        stats = json.loads(Path(STATS_FILE).read_text(encoding="utf-8"))
+        records = json.loads(Path(STATS_FILE).read_text(encoding="utf-8"))
     except Exception:
-        print("统计文件损坏"); return
-    total = len(stats)
-    good = sum(1 for s in stats if s.get("winner") == "good")
-    evil = sum(1 for s in stats if s.get("winner") == "evil")
-    draw = sum(1 for s in stats if s.get("winner") == "draw")
-    print(f"总对局: {total}")
-    if total:
-        print(f"好人胜: {good} ({good*100//total}%)")
-        print(f"狼人胜: {evil} ({evil*100//total}%)")
-        print(f"平局: {draw}")
-        print(f"平均轮次: {sum(s.get('rounds',0) for s in stats)//total}")
+        print("[!] 统计文件损坏"); return
+    total = len(records)
+    if total == 0:
+        _empty_stats(); return
+    if args.pretty:
+        _show_pretty_stats(records)
+    else:
+        _show_basic_stats(records)
+
+
+def _empty_stats():
+    print("暂无对局记录")
+
+
+def _show_basic_stats(records):
+    total = len(records)
+    good = sum(1 for r in records if r.get("winner") == "good")
+    evil = sum(1 for r in records if r.get("winner") == "evil")
+    draw = total - good - evil
+    print("=" * 36)
+    print(f"  总对局 : {total}")
+    print(f"  好人胜 : {good} ({good*100//total}%)")
+    print(f"  狼人胜 : {evil} ({evil*100//total}%)")
+    if draw:
+        print(f"  平局   : {draw}")
+    print(f"  平均轮次: {sum(r.get('rounds',0) for r in records)//total}")
+    print("=" * 36)
+
+
+def _show_pretty_stats(records):
+    total = len(records)
+    good = sum(1 for r in records if r.get("winner") == "good")
+    evil = sum(1 for r in records if r.get("winner") == "evil")
+    draw = total - good - evil
+
+    # 角色登场次数 & 阵营胜率
+    role_stats = {}  # role -> {"count": n, "wins": n}
+    avg_rounds_by_winner = {"good": [], "evil": [], "draw": []}
+    player_ranks = {}  # player -> {"count": n, "good_wins": n, "evil_wins": n}
+
+    for r in records:
+        w = r.get("winner", "draw")
+        avg_rounds_by_winner.setdefault(w, []).append(r.get("rounds", 0))
+        roles = r.get("roles", {})
+        survivors = set(r.get("survivors", []))
+        for player, role in roles.items():
+            if role not in role_stats:
+                role_stats[role] = {"count": 0, "wins": 0, "total": 0}
+            role_stats[role]["count"] += 1
+            role_stats[role]["total"] += 1
+            if w == "good" and player in survivors:
+                role_stats[role]["wins"] += 1
+            if w == "evil" and player not in survivors:
+                role_stats[role]["wins"] += 1
+            elif w == "evil":
+                role_stats[role]["wins"] += 1
+
+    # 标题
+    print()
+    print("=" * 50)
+    print("  🎲  狼人杀对局统计面板")
+    print("=" * 50)
+
+    # 基本统计
+    print(f"\n  📊  总对局: {total}")
+    print(f"  {'好人胜':>8}: {good:>3} ({good*100//total:>2}%)  "
+          f"{'狼人胜':>8}: {evil:>3} ({evil*100//total:>2}%)"
+          + (f"  平局: {draw}" if draw else ""))
+    all_rounds = [r.get("rounds", 0) for r in records]
+    print(f"  平均轮次: {sum(all_rounds)//total}  "
+          f"(最快: {min(all_rounds)} 最慢: {max(all_rounds)})")
+
+    # 角色胜率
+    if role_stats:
+        print(f"\n  {'─'*46}")
+        print(f"  {'角色胜率':^44}")
+        print(f"  {'─'*46}")
+        print(f"  {'角色':<12} {'登场':>6} {'胜局':>6} {'胜率':>7}")
+        print(f"  {'─'*46}")
+        for role in sorted(role_stats, key=lambda r: -role_stats[r]["count"]):
+            rs = role_stats[role]
+            name = ROLES.get(role, role)
+            win_rate = rs["wins"] * 100 // max(rs["total"], 1)
+            bar = "█" * (win_rate // 10) + "░" * (10 - win_rate // 10)
+            print(f"  {name:<12} {rs['count']:>6} {rs['wins']:>6}  {win_rate:>3}% {bar}")
+        print(f"  {'─'*46}")
+
+    print()
+    print("=" * 50)
 
 
 def cmd_hint(args):
