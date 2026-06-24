@@ -56,13 +56,14 @@ import { getSuccessPreference, setSuccessPreference, getAttentionPreference, set
 import { ModalCloseButton } from "./ModalCloseButton";
 import { ShortcutComboDisplay } from "./ShortcutComboDisplay";
 
-const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "hooks", "shortcuts", "permissions", "sandbox", "network", "appearance", "updates"];
+const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "hooks", "shortcuts", "permissions", "sandbox", "network", "appearance", "usage", "updates"];
 export type SettingsInitialFocus = { target: "bot-allowlist"; connectionId?: string };
 type DesktopPlatform = "darwin" | "windows" | "linux";
 
 const MCPServersSettingsPage = lazy(() => import("./CapabilitiesPanel").then((module) => ({ default: module.MCPServersSettingsPage })));
 const SkillsSettingsPage = lazy(() => import("./CapabilitiesPanel").then((module) => ({ default: module.SkillsSettingsPage })));
 const MemorySettingsPage = lazy(() => import("./MemoryPanel").then((module) => ({ default: module.MemorySettingsPage })));
+const UsageSettingsPage = lazy(() => import("./UsagePanel").then((module) => ({ default: module.UsageSettingsPage })));
 const QRCodeSVG = lazy(() => import("qrcode.react").then((module) => ({ default: module.QRCodeSVG })));
 
 // SettingsPanel is the desktop settings centre — a centred modal with left
@@ -278,6 +279,7 @@ export function SettingsPanel({
                     />
                   </SettingsPageShell>
                 )}
+                {tab === "usage" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><UsageSettingsPage /></Suspense></SettingsPageShell>}
                 {tab === "updates" && s && (
                   <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}>
                     <UpdatesSection
@@ -446,6 +448,8 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.sandbox");
     case "appearance":
       return t("settings.tab.appearance");
+    case "usage":
+      return "Usage";
     case "updates":
       return t("settings.tab.updates");
   }
@@ -479,6 +483,8 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
       return sandboxModeLabel(s.sandbox.bash, t);
     case "appearance":
       return t("settings.appearanceMeta");
+    case "usage":
+      return "Token usage & cost";
     case "updates":
       return t("settings.updatesMeta");
   }
