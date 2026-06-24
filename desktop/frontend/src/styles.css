@@ -18518,9 +18518,8 @@ a[href] {
 
 .terminal-panel__body {
   flex: 1 1 auto;
-  min-height: 0;
   overflow: hidden;
-  background: var(--bg-elev);
+  background: var(--bg);
 }
 
 .terminal-panel__body .xterm {
@@ -18529,9 +18528,8 @@ a[href] {
 }
 
 .terminal-panel__body .xterm-viewport,
-.terminal-panel__body .xterm-screen,
-.terminal-panel__body .xterm-rows {
-  background: var(--bg-elev) !important;
+.terminal-panel__body .xterm-screen {
+  background: var(--bg) !important;
 }
 
 .workbench-dock__body > .workspace-panel {

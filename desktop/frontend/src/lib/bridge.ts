@@ -2227,45 +2227,20 @@ function makeMockApp(): AppBindings {
       console.info("mock RevealPath", path);
     },
     async OpenTerminal() {
-      console.info("[Reasonix Dev] OpenTerminal() — would open system terminal at workspace root");
-      if (typeof window !== "undefined") {
-        // Give visible feedback in browser dev mode
-        const el = document.createElement("div");
-        el.style.cssText = "position:fixed;bottom:20px;right:20px;background:#1a1a2e;color:#e0e0e0;padding:12px 18px;border-radius:8px;font-size:13px;z-index:99999;border:1px solid #333;pointer-events:none;opacity:0;transition:opacity 0.3s";
-        el.textContent = "🖥️ Terminal would open here at the workspace root (only available in desktop app)";
-        document.body.appendChild(el);
-        requestAnimationFrame(() => { el.style.opacity = "1"; });
-        setTimeout(() => { el.style.opacity = "0"; setTimeout(() => el.remove(), 300); }, 2500);
-      }
+      console.info("mock OpenTerminal");
     },
     async OpenTerminalAt(rel: string) {
-      console.info("[Reasonix Dev] OpenTerminalAt", rel, "— would open system terminal at this path");
-      if (typeof window !== "undefined") {
-        const el = document.createElement("div");
-        el.style.cssText = "position:fixed;bottom:20px;right:20px;background:#1a1a2e;color:#e0e0e0;padding:12px 18px;border-radius:8px;font-size:13px;z-index:99999;border:1px solid #333;pointer-events:none;opacity:0;transition:opacity 0.3s";
-        el.textContent = `🖥️ Terminal would open at: ${rel} (only available in desktop app)`;
-        document.body.appendChild(el);
-        requestAnimationFrame(() => { el.style.opacity = "1"; });
-        setTimeout(() => { el.style.opacity = "0"; setTimeout(() => el.remove(), 300); }, 2500);
-      }
+      console.info("mock OpenTerminalAt", rel);
     },
     async StartTerminal() {
-      console.info("[Reasonix Dev] StartTerminal");
       return "mock-term-1";
     },
     async StartTerminalAt(rel: string) {
-      console.info("[Reasonix Dev] StartTerminalAt", rel);
       return "mock-term-" + rel.replace(/[^a-z0-9]/gi, "-");
     },
-    async TerminalInput(sessionID: string, _data: string) {
-      console.info("[Reasonix Dev] TerminalInput", sessionID);
-    },
-    async StopTerminal(sessionID: string) {
-      console.info("[Reasonix Dev] StopTerminal", sessionID);
-    },
-    async TerminalResize(_sessionID: string, _cols: number, _rows: number) {
-      // no-op in mock
-    },
+    async TerminalInput(_sessionID: string, _data: string) {},
+    async StopTerminal(_sessionID: string) {},
+    async TerminalResize(_sessionID: string, _cols: number, _rows: number) {},
     async SavePastedImage(_dataUrl: string) {
       return ".reasonix/attachments/mock.png";
     },

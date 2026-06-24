@@ -74,17 +74,6 @@ func (ts *terminalSessions) stop(id string) {
 	ts.remove(id)
 }
 
-func (ts *terminalSessions) stopAll() {
-	ts.mu.Lock()
-	defer ts.mu.Unlock()
-	for _, s := range ts.sessions {
-		if s.cancel != nil {
-			s.cancel()
-		}
-	}
-	ts.sessions = map[string]*terminalSession{}
-}
-
 // startTerminalAt launches a shell PTY at the given directory and returns its session ID.
 func (a *App) startTerminalAt(dir string) (string, error) {
 	shell := os.Getenv("SHELL")
