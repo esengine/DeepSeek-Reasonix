@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/charmbracelet/x/ansi"
@@ -13,6 +14,14 @@ import (
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
 	"github.com/yuin/goldmark/util"
+)
+
+// Cache for markdown renderers by width
+var rendererCache = sync.Map{}
+
+// Pre-defined markdown extensions
+var (
+	markdownTableExtension = extension.Table
 )
 
 // mdRenderer turns the model's markdown answer into ANSI-styled terminal text
@@ -30,17 +39,23 @@ func newMarkdownRenderer(width int) *mdRenderer {
 	if width <= 0 {
 		width = 80
 	}
-	// Enable the GFM table extension so | header | rows | get parsed into
-	// a Table node rather than falling through as a literal text block.
-	return &mdRenderer{
-		md: goldmark.New(
-			goldmark.WithExtensions(extension.Table),
-			goldmark.WithParserOptions(
-				parser.WithInlineParsers(util.Prioritized(&mathParser{}, 150)),
-			),
+	// Check cache first
+	if r, ok := rendererCache.Load(width); ok {
+		return r.(*mdRenderer)
+	}
+	// Create new renderer with pre-defined extensions
+	md := goldmark.New(
+		goldmark.WithExtensions(markdownTableExtension),
+		goldmark.WithParserOptions(
+			parser.WithInlineParsers(util.Prioritized(&mathParser{}, 150)),
 		),
+	)
+	r := &mdRenderer{
+		md:    md,
 		width: width,
 	}
+	rendererCache.Store(width, r)
+	return r
 }
 
 func italic(s string) string {

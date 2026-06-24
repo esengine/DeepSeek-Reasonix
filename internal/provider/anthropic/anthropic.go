@@ -50,6 +50,9 @@ const (
 	// it, so this is the de-facto cap. Generous (you only pay for tokens actually
 	// produced) and within every catalog model's limit (Sonnet/Haiku 64K, Opus 128K).
 	defaultMaxTokens = 32768
+	// SSE protocol constants
+	dataPrefix = "data:"
+	doneMarker = "[DONE]"
 )
 
 func init() {
@@ -360,19 +363,20 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		case activity <- struct{}{}:
 		default:
 		}
-		line := strings.TrimSpace(scanner.Text())
+		lineBytes := scanner.Bytes()
+		lineBytes = bytes.TrimSpace(lineBytes)
 		// SSE carries `event:` and `data:` lines; the data JSON's own `type` field
 		// is authoritative, so we only need the data payloads.
-		if !strings.HasPrefix(line, "data:") {
+		if !bytes.HasPrefix(lineBytes, []byte(dataPrefix)) {
 			continue
 		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "" {
+		dataBytes := bytes.TrimSpace(bytes.TrimPrefix(lineBytes, []byte(dataPrefix)))
+		if len(dataBytes) == 0 {
 			continue
 		}
 
 		var ev streamEvent
-		if err := json.Unmarshal([]byte(data), &ev); err != nil {
+		if err := json.Unmarshal(dataBytes, &ev); err != nil {
 			send(provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s: decode stream: %w", c.name, err)})
 			return
 		}

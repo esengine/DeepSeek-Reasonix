@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { Activity, CircleDollarSign, CircleGauge, Database, Folder, GitBranch, Layers, Percent, RefreshCw, Wallet, Zap } from "lucide-react";
 import { Tooltip } from "./Tooltip";
 import { useI18n, type Translator } from "../lib/i18n";
@@ -130,7 +130,7 @@ function workspaceTooltip(t: Translator, displayPath: string, workspacePath?: st
   return `${t("status.workspaceTitle")}: ${workspace}`;
 }
 
-export function StatusBar({
+export const StatusBar = memo(function StatusBar({
   context,
   usage,
   balance,
@@ -351,4 +351,4 @@ export function StatusBar({
       )}
     </div>
   );
-}
+});

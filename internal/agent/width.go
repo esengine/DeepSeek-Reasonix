@@ -2,7 +2,6 @@ package agent
 
 import (
 	"regexp"
-	"strings"
 
 	"github.com/mattn/go-runewidth"
 )
@@ -11,14 +10,6 @@ import (
 // measurement strips these so styled streamed text still gets counted by its
 // visible column footprint.
 var ansiSGR = regexp.MustCompile("\x1b\\[[0-9;]*m")
-
-// visibleWidth returns the column count of s after stripping ANSI SGR codes.
-// Delegates to go-runewidth so emoji, fullwidth forms, and ZWJ sequences all
-// measure correctly — a hand-rolled CJK-only table missed every emoji range
-// and made the streamed-text row count drift on emoji-heavy answers.
-func visibleWidth(s string) int {
-	return runewidth.StringWidth(ansiSGR.ReplaceAllString(s, ""))
-}
 
 // streamedRows counts how many rows the cursor has descended after raw text
 // of length s was printed at the given terminal width. Used by the markdown
@@ -30,12 +21,39 @@ func streamedRows(s string, width int) int {
 	if width <= 0 {
 		width = 80
 	}
-	rows := 0
-	for _, line := range strings.Split(s, "\n") {
-		if w := visibleWidth(line); w > 0 {
-			rows += (w - 1) / width
+	
+	var rows int
+	var currentLineWidth int
+	var inEscape bool
+	
+	for _, r := range s {
+		switch {
+		case r == '\n':
+			// End of current line
+			if currentLineWidth > 0 {
+				rows += (currentLineWidth - 1) / width
+				currentLineWidth = 0
+			}
+			rows++
+		case r == '\x1b':
+			// Start of ANSI escape sequence
+			inEscape = true
+		case inEscape && r == 'm':
+			// End of ANSI escape sequence
+			inEscape = false
+		default:
+			if !inEscape {
+				// Only count visible characters
+				w := runewidth.RuneWidth(r)
+				currentLineWidth += w
+			}
 		}
 	}
-	rows += strings.Count(s, "\n")
+	
+	// Add remaining line
+	if currentLineWidth > 0 {
+		rows += (currentLineWidth - 1) / width
+	}
+	
 	return rows
 }

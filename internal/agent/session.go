@@ -49,6 +49,19 @@ func (s *Session) Replace(msgs []provider.Message) {
 	s.Messages = msgs
 }
 
+// MessageCount returns the number of non-system messages in the session.
+func (s *Session) MessageCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := 0
+	for _, m := range s.Messages {
+		if m.Role != provider.RoleSystem {
+			count++
+		}
+	}
+	return count
+}
+
 // Snapshot returns a copy of the messages, safe to read from another goroutine
 // while a turn appends. Frontends (History, Save) use it instead of touching the
 // live slice.

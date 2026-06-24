@@ -167,16 +167,16 @@ func TestStreamAnswerFlushesCompletedParagraphs(t *testing.T) {
 // so it never renders mangled, while prose before the fence does flush.
 func TestFlushableMarkdownPrefixKeepsOpenFence(t *testing.T) {
 	open := "intro line\n\n```go\nfunc f() {\n\n\t// still typing"
-	if got := flushableMarkdownPrefix(open); got != "intro line" {
+	if got := flushableMarkdownPrefix(open, nil); got != "intro line" {
 		t.Errorf("open fence: flushable prefix = %q, want %q", got, "intro line")
 	}
 
 	closed := "```go\ncode\n\nmore\n```\n\ntrailing"
-	if got := flushableMarkdownPrefix(closed); got != "```go\ncode\n\nmore\n```" {
+	if got := flushableMarkdownPrefix(closed, nil); got != "```go\ncode\n\nmore\n```" {
 		t.Errorf("closed fence: flushable prefix = %q", got)
 	}
 
-	if got := flushableMarkdownPrefix("no boundary yet"); got != "" {
+	if got := flushableMarkdownPrefix("no boundary yet", nil); got != "" {
 		t.Errorf("no blank line should flush nothing, got %q", got)
 	}
 }

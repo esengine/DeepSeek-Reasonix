@@ -28,6 +28,12 @@ import (
 	"reasonix/internal/provider"
 )
 
+// SSE protocol constants
+const (
+	dataPrefix       = "data:"
+	doneMarker       = "[DONE]"
+)
+
 // defaultStreamIdleTimeout caps how long a started SSE stream may go without any
 // bytes before it's treated as a dropped connection. A half-open TCP connection
 // (e.g. a proxy switched mid-stream) sends no RST, so scanner.Scan() would block
@@ -401,18 +407,19 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		case activity <- struct{}{}:
 		default:
 		}
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || !strings.HasPrefix(line, "data:") {
+		lineBytes := scanner.Bytes()
+		lineBytes = bytes.TrimSpace(lineBytes)
+		if len(lineBytes) == 0 || !bytes.HasPrefix(lineBytes, []byte(dataPrefix)) {
 			continue
 		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "[DONE]" {
+		dataBytes := bytes.TrimSpace(bytes.TrimPrefix(lineBytes, []byte(dataPrefix)))
+		if bytes.Equal(dataBytes, []byte(doneMarker)) {
 			sawDone = true
 			break
 		}
 
 		var sr streamResponse
-		if err := json.Unmarshal([]byte(data), &sr); err != nil {
+		if err := json.Unmarshal(dataBytes, &sr); err != nil {
 			return emitted, fmt.Errorf("%s: decode stream: %w", c.name, err)
 		}
 		if sr.Error != nil {

@@ -95,6 +95,9 @@ var (
 	}
 	activeCLITheme                  = applyCLIThemeStyle(cliDarkTheme, cliThemeStyles[0])
 	queryTerminalBackgroundForTheme = queryTerminalBackground
+	// Cached theme styles
+	themeDangerStyle lipgloss.Style
+	themeWarnStyle   lipgloss.Style
 )
 
 func configureCLITheme(mode string) {
@@ -397,6 +400,9 @@ func refreshCLIStyles() {
 		PaddingLeft(1)
 	scrollThumbStyle = themeStyle(activeCLITheme.accent)
 	scrollTrackStyle = themeStyle(activeCLITheme.faint)
+	// Cache danger and warn styles
+	themeDangerStyle = themeStyle(activeCLITheme.danger)
+	themeWarnStyle = themeStyle(activeCLITheme.warn)
 }
 
 func applyTextareaTheme(ti *textarea.Model) {

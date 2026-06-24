@@ -320,7 +320,7 @@ func ToWireCacheDiagnostics(d *event.CacheDiagnostics) *CacheDiagnostics {
 	}
 }
 
-var kindNames = map[event.Kind]string{
+var kindNames = [event.KindCount]string{
 	event.TurnStarted:              "turn_started",
 	event.Reasoning:                "reasoning",
 	event.Text:                     "text",

@@ -76,7 +76,7 @@ const WARM_PAGE_SIZE = 20; // cold-zone pagination batch
 
 // ── Transcript component ──────────────────────────────────────────────────────
 
-export function Transcript({
+export const Transcript = memo(function Transcript({
   items,
   live,
   tabId,
@@ -680,7 +680,7 @@ export function Transcript({
       )}
     </div>
   );
-}
+});
 
 // ── WarmZone sub-component (React.memo for streaming isolation) ────────────
 // Receives structural props only; reads streaming state (items, live) via refs

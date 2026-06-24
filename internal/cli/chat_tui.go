@@ -119,6 +119,9 @@ type chatTUI struct {
 	renderer      *mdRenderer
 	showReasoning bool // Ctrl+O / /verbose: show raw thinking text in the CLI
 	cfg           *config.Config
+	// lastParagraphBreak tracks the last complete paragraph boundary position in
+	// pending, so flushableMarkdownPrefix can avoid re-scanning the entire buffer.
+	lastParagraphBreak int
 	// reasoningLineIdx is the transcript index of the live "▎ thinking…" marker
 	// while a reasoning block streams; it's rewritten to "▎ thought for Ns" when
 	// the block closes. -1 when no block is open. transcriptDirty forces a
@@ -2096,7 +2099,7 @@ func (m *chatTUI) streamAnswer() {
 	if m.nativeScrollback {
 		return
 	}
-	prefix := flushableMarkdownPrefix(m.pending.String())
+	prefix := flushableMarkdownPrefix(m.pending.String(), &m.lastParagraphBreak)
 	if len(prefix) <= m.answerFlushed {
 		return
 	}
@@ -2146,24 +2149,54 @@ func (m *chatTUI) commitPending() {
 // markdown blocks — text up to the last blank line outside any open fenced code
 // block. A blank line inside a ``` / ~~~ fence isn't a boundary, so a half-written
 // code block stays buffered until it closes.
-func flushableMarkdownPrefix(buf string) string {
-	lines := strings.Split(buf, "\n")
-	inFence := false
-	boundary := -1
-	for i, ln := range lines {
-		t := strings.TrimSpace(ln)
-		if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
-			inFence = !inFence
-			continue
-		}
-		if !inFence && t == "" {
-			boundary = i
-		}
-	}
-	if boundary <= 0 {
+// When lastBreak is non-nil, it tracks the last paragraph break byte position for
+// incremental reuse, avoiding full re-scan of already-processed portions.
+func flushableMarkdownPrefix(buf string, lastBreak *int) string {
+	if buf == "" {
 		return ""
 	}
-	return strings.Join(lines[:boundary], "\n")
+	start := 0
+	if lastBreak != nil && *lastBreak > 0 && *lastBreak <= len(buf) {
+		start = *lastBreak
+	}
+	tail := buf[start:]
+
+	inFence := false
+	boundary := -1 // line index of last blank line (in the full lines slice)
+
+	lineStart := 0
+	for pos := 0; pos <= len(tail); pos++ {
+		if pos == len(tail) || tail[pos] == '\n' {
+			// Line is tail[lineStart:pos]
+			if lineStart <= pos || pos == len(tail) {
+				line := tail[lineStart:pos]
+				t := strings.TrimSpace(line)
+				if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
+					inFence = !inFence
+				} else if !inFence && t == "" {
+					// Blank line found — boundary is the position right before this line
+					// (the \n that ends the previous content line, which serves as the
+					// separator between the last included line and the first excluded blank)
+					boundary = start + lineStart - 1
+					if boundary < 0 {
+						boundary = 0
+					}
+				}
+			}
+			lineStart = pos + 1
+		}
+	}
+
+	if boundary < 0 {
+		if lastBreak != nil && *lastBreak > 0 {
+			return buf[:*lastBreak]
+		}
+		return ""
+	}
+	if lastBreak != nil {
+		*lastBreak = boundary
+	}
+	return buf[:boundary]
 }
 
 // planApprovalTool is the Tool name the controller puts on the ApprovalRequest it

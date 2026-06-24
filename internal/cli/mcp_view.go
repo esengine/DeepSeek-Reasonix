@@ -164,12 +164,14 @@ func compactEnd(s string, maxWidth int) string {
 		return "…"
 	}
 	var out strings.Builder
+	totalWidth := 0
 	for _, r := range s {
-		next := out.String() + string(r)
-		if visibleWidth(next)+1 > maxWidth {
+		w := visibleWidth(string(r))
+		if totalWidth + w > maxWidth {
 			break
 		}
 		out.WriteRune(r)
+		totalWidth += w
 	}
 	return out.String() + "…"
 }
@@ -191,27 +193,32 @@ func compactMiddle(s string, maxWidth int) string {
 
 func takeLeftWidth(s string, maxWidth int) string {
 	var out strings.Builder
+	totalWidth := 0
 	for _, r := range s {
-		next := out.String() + string(r)
-		if visibleWidth(next) > maxWidth {
+		w := visibleWidth(string(r))
+		if totalWidth + w > maxWidth {
 			break
 		}
 		out.WriteRune(r)
+		totalWidth += w
 	}
 	return out.String()
 }
 
 func takeRightWidth(s string, maxWidth int) string {
 	var out []rune
-	width := 0
-	for _, r := range reverseRunes([]rune(s)) {
+	totalWidth := 0
+	runes := []rune(s)
+	for i := len(runes)-1; i >= 0; i-- {
+		r := runes[i]
 		w := visibleWidth(string(r))
-		if width+w > maxWidth {
+		if totalWidth + w > maxWidth {
 			break
 		}
 		out = append(out, r)
-		width += w
+		totalWidth += w
 	}
+	// Reverse to get correct order
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
 	}

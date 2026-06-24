@@ -9,6 +9,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// wrapStyle caches the lipgloss style for transcript wrapping
+var wrapStyle lipgloss.Style
+var wrapStyleWidth int
+
 // wrapTranscript wraps the joined transcript to width for the viewport, keeping
 // SGR balanced across wrap points. ansi.Hardwrap leaves a style that spans a
 // break open at the line end (e.g. a wrapped dim link tail), which bleeds the
@@ -18,7 +22,12 @@ func wrapTranscript(s string, width int) string {
 	if width <= 0 {
 		return s
 	}
-	return lipgloss.NewStyle().Width(width).Render(s)
+	// Recreate style only when width changes
+	if width != wrapStyleWidth {
+		wrapStyle = lipgloss.NewStyle().Width(width)
+		wrapStyleWidth = width
+	}
+	return wrapStyle.Render(s)
 }
 
 // copyToClipboard writes text through the terminal via OSC 52. That targets the

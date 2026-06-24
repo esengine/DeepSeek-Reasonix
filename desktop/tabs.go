@@ -2797,15 +2797,37 @@ func desktopMCPMigrationRoots(tabs desktopTabsFile) []string {
 	return roots
 }
 
+var (
+	projectsCache     desktopProjectFile
+	projectsCacheTime time.Time
+)
+
 func loadProjectsFile() desktopProjectFile {
+	// Use cached value if it's fresh (5 seconds expiry)
+	if !projectsCacheTime.IsZero() && time.Since(projectsCacheTime) < 5*time.Second {
+		return projectsCache
+	}
+
 	path := filepath.Join(desktopConfigDir(), desktopProjectsFile)
 	b, err := os.ReadFile(path)
 	if err != nil {
+		// Clear cache on error
+		projectsCache = desktopProjectFile{}
+		projectsCacheTime = time.Time{}
 		return desktopProjectFile{}
 	}
 	var f desktopProjectFile
-	_ = json.Unmarshal(b, &f)
-	return normalizeProjectsFile(f)
+	if err := json.Unmarshal(b, &f); err != nil {
+		// Clear cache on invalid JSON
+		projectsCache = desktopProjectFile{}
+		projectsCacheTime = time.Time{}
+		return desktopProjectFile{}
+	}
+	normalized := normalizeProjectsFile(f)
+	// Update cache
+	projectsCache = normalized
+	projectsCacheTime = time.Now()
+	return normalized
 }
 
 func saveProjectsFile(f desktopProjectFile) error {
