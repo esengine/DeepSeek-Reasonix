@@ -10,10 +10,12 @@ import { CopyButton } from "../CopyButton";
 const HljsCode = memo(function HljsCode({ value, language, maxHeight }: EditorProps) {
   const html = useMemo(() => highlightToHtml(value, language), [value, language]);
   return (
-    <pre className="code hljs" data-lang={language} style={maxHeight ? { maxHeight } : undefined}>
-      <code dangerouslySetInnerHTML={{ __html: html }} />
+    <div className="code-block__wrap">
+      <pre className="code hljs" data-lang={language} style={maxHeight ? { maxHeight } : undefined}>
+        <code dangerouslySetInnerHTML={{ __html: html }} />
+      </pre>
       <CopyButton text={value} className="code-block__copy" />
-    </pre>
+    </div>
   );
 });
 
