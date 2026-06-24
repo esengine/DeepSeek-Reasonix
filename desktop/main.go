@@ -18,6 +18,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 
+	"reasonix/internal/config"
 	// Blank imports wire compile-time built-ins into their registries, exactly as
 	// cmd/reasonix does — boot.Build resolves providers/tools from these registries.
 	_ "reasonix/internal/provider/anthropic"
@@ -73,6 +74,25 @@ func windowsWebview2GPUDisabled() bool {
 func main() {
 	app := NewApp()
 
+	// Check for --minimized flag (used by autostart)
+	startMinimized := false
+	for _, arg := range os.Args[1:] {
+		if arg == "--minimized" {
+			startMinimized = true
+			break
+		}
+	}
+
+	// If --minimized flag is set, check if MinimizeToTray is enabled in config
+	if startMinimized {
+		if cfg, err := config.Load(); err == nil && cfg.DesktopMinimizeToTray() {
+			// MinimizeToTray is enabled, will be handled in domReady
+		} else {
+			// MinimizeToTray is not enabled, don't start minimized
+			startMinimized = false
+		}
+	}
+
 	// Restore saved window size, or fall back to the default.
 	width, height := 1240, 720
 	if saved, ok := loadWindowState(); ok {
@@ -103,6 +123,7 @@ func main() {
 
 		// Start hidden — domReady positions and shows the window after restoring
 		// geometry, so the user never sees the default size/position flash.
+		// Also starts hidden if --minimized flag is set (for autostart).
 		StartHidden: true,
 
 		// Native application menu (File > Settings, Edit, Window).

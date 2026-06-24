@@ -301,6 +301,19 @@ func (c *Config) SetDesktopMetrics(enabled bool) error {
 	return nil
 }
 
+// SetDesktopAutostart sets whether the desktop app launches at login.
+func (c *Config) SetDesktopAutostart(enabled bool) error {
+	c.Desktop.Autostart = &enabled
+	return nil
+}
+
+// SetDesktopMinimizeToTray sets whether the desktop app minimizes to system tray
+// on startup. UI-only; must not affect CLI or provider-visible data.
+func (c *Config) SetDesktopMinimizeToTray(enabled bool) error {
+	c.Desktop.MinimizeToTray = &enabled
+	return nil
+}
+
 // SetUICloseBehavior is kept for callers compiled against the old edit API.
 func (c *Config) SetUICloseBehavior(mode string) error {
 	return c.SetDesktopCloseBehavior(mode)

@@ -166,6 +166,8 @@ type SettingsView struct {
 	Telemetry          bool            `json:"telemetry"`
 	Metrics            bool            `json:"metrics"`
 	ExpandThinking     bool            `json:"expandThinking"`
+	Autostart          bool            `json:"autostart"`
+	MinimizeToTray     bool            `json:"minimizeToTray"`
 	ConfigPath         string          `json:"configPath"`
 	// ProviderKinds lists the provider implementations the kernel actually
 	// registered (provider.Kinds()), so the editor's "kind" picker offers only
@@ -177,6 +179,8 @@ type SettingsView struct {
 	AutoApproveTools bool `json:"autoApproveTools"`
 	// Bypass is the legacy JSON key for the same live state.
 	Bypass bool `json:"bypass"`
+	// AutostartSupported indicates whether the platform supports autostart.
+	AutostartSupported bool `json:"autostartSupported"`
 }
 
 // DesktopStartupSettingsView is the lightweight Settings subset needed during
@@ -192,6 +196,7 @@ type DesktopStartupSettingsView struct {
 	StatusBarStyle     string          `json:"statusBarStyle"`
 	StatusBarItems     []string        `json:"statusBarItems"`
 	CheckUpdates       bool            `json:"checkUpdates"`
+	MinimizeToTray     bool            `json:"minimizeToTray"`
 }
 
 func nonNil(s []string) []string {
@@ -385,6 +390,7 @@ func desktopStartupSettingsFromConfig(cfg *config.Config) DesktopStartupSettings
 		StatusBarStyle:     cfg.DesktopStatusBarStyle(),
 		StatusBarItems:     cfg.DesktopStatusBarItems(),
 		CheckUpdates:       cfg.DesktopCheckUpdates(),
+		MinimizeToTray:     cfg.DesktopMinimizeToTray(),
 	}
 }
 
@@ -484,10 +490,13 @@ func (a *App) Settings() SettingsView {
 		Telemetry:          cfg.DesktopTelemetry(),
 		Metrics:            cfg.DesktopMetrics(),
 		ExpandThinking:     cfg.Desktop.ExpandThinking,
+		Autostart:          cfg.DesktopAutostart(),
+		MinimizeToTray:     cfg.DesktopMinimizeToTray(),
 		ConfigPath:         cfgPath,
 		ProviderKinds:      nonNil(provider.Kinds()),
 		AutoApproveTools:   ctrl != nil && ctrl.AutoApproveTools(),
 		Bypass:             ctrl != nil && ctrl.AutoApproveTools(),
+		AutostartSupported: autostartSupported(),
 	}
 	added := providerAccessSet(cfg.Desktop.ProviderAccess)
 	root := a.activeWorkspaceRoot()
@@ -1798,6 +1807,25 @@ func (a *App) SetDesktopMetrics(enabled bool) error {
 // the desktop. It is desktop-only and does not rebuild the controller.
 func (a *App) SetExpandThinking(on bool) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetExpandThinking(on) })
+}
+
+// SetAutostart enables or disables launch at login. It updates both the config
+// and the system autostart entry (registry/task scheduler on Windows).
+func (a *App) SetAutostart(enabled bool) error {
+	if err := a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopAutostart(enabled) }); err != nil {
+		return err
+	}
+	// Sync to system autostart (best-effort, don't fail config save)
+	if autostartSupported() {
+		_ = setAutostart(enabled)
+	}
+	return nil
+}
+
+// SetMinimizeToTray enables or disables minimizing to system tray on startup.
+// UI-only; does not rebuild the controller.
+func (a *App) SetMinimizeToTray(enabled bool) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopMinimizeToTray(enabled) })
 }
 
 // MigrateDesktopPreferences imports old browser-local desktop preferences into
