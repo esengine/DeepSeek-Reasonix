@@ -31,6 +31,7 @@ import (
 	"reasonix/internal/hook"
 	"reasonix/internal/installsource"
 	"reasonix/internal/instruction"
+	"reasonix/internal/usage"
 	"reasonix/internal/jobs"
 	"reasonix/internal/lsp"
 	"reasonix/internal/memory"
@@ -121,6 +122,11 @@ type Options struct {
 	// terminal. Headless/bot frontends pass a positive value so an unanswered
 	// prompt can't wedge the session indefinitely (#4626, #4402).
 	ApprovalTimeout time.Duration
+	// UsageStore, when non-nil, enables usage tracking. boot.Build wraps the sink
+	// with an EnrichSink that injects ProviderName/ModelName/LatencyMS/
+	// SessionID into every Usage event. The caller owns the *usage.Store and is
+	// responsible for closing it.
+	UsageStore *usage.Store
 }
 
 // Build loads config, resolves the model(s), and returns a Controller wrapping a
@@ -172,6 +178,21 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// outlive a turn and are cancelled by Controller.Close.
 	sink := event.Sync(opts.Sink)
 
+	// Wrap with enrichSink early so the agent (constructed below) also receives
+	// enriched events with ProviderName/ModelName/LatencyMS/SessionID.
+	var enrichRef *usage.EnrichSink
+	if opts.UsageStore != nil {
+		enrichRef = &usage.EnrichSink{
+			Inner:        sink,
+			ProviderName: entry.Name,
+			ModelName:    entry.Model,
+		}
+		sink = enrichRef
+		slog.Info("[boot] enrichSink ON", "provider", entry.Name, "model", entry.Model)
+	} else {
+		slog.Debug("[boot] enrichSink OFF — UsageStore is nil")
+	}
+
 	if ignored := (planmode.Policy{AllowedTools: cfg.Agent.PlanModeAllowedTools}).IgnoredAllowedTools(); len(ignored) > 0 {
 		sink.Emit(event.Event{
 			Kind:  event.Notice,
@@ -179,6 +200,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			Text:  fmt.Sprintf("plan_mode_allowed_tools ignored known blocked entries: %s; this setting only declares extra read-only custom tools and cannot unlock known blocked tools or unsafe bash", strings.Join(ignored, ", ")),
 		})
 	}
+
 	if migErr != nil {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "config migration from ~/.reasonix failed: " + migErr.Error()})
 	} else if migrated != nil {
@@ -746,6 +768,21 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				steps = 5
 			}
 		}
+		subSink := agent.NestedSink(sctx, event.Discard)
+		if opts.UsageStore != nil {
+			subProvName := prov.Name()
+			subModelName := entry.Model
+			if modelRef != "" {
+				if resolved, ok := cfg.ResolveModel(modelRef); ok {
+					subModelName = resolved.Model
+				}
+			}
+			subSink = &usage.EnrichSink{
+				Inner:        subSink,
+				ProviderName: subProvName,
+				ModelName:    subModelName,
+			}
+		}
 		answer, err := agent.RunSubAgentWithSession(sctx, prov, subReg, run.Session, task, agent.Options{
 			MaxSteps:          steps,
 			Temperature:       cfg.Agent.Temperature,
@@ -757,7 +794,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			ArchiveDir:        config.ArchiveDir(),
 			KeepPolicy:        keepPolicy,
 			ReasoningLanguage: agent.ReasoningLanguageFromContext(sctx),
-		}, agent.NestedSink(sctx, event.Discard))
+		}, subSink)
 		if err != nil {
 			return "", errors.Join(err, subagentStore.SaveFailed(run))
 		}
@@ -998,7 +1035,17 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		if !ok {
 			return nil, fmt.Errorf("auto_plan_classifier %q is not a configured provider", cm)
 		}
-		classifierProv, err := NewProviderWithProxy(ce, proxySpec)
+		classifierProv, err := provider.New(ce.Kind, provider.Config{
+			Name:    ce.Name,
+			BaseURL: ce.BaseURL,
+			Model:   ce.Model,
+			APIKey:  ce.APIKey(),
+			Extra: map[string]any{
+				"api_key_env":        ce.APIKeyEnv,
+				"reasoning_protocol": "none",
+				"proxy_spec":         proxySpec,
+			},
+		})
 		if err != nil {
 			return nil, fmt.Errorf("auto_plan_classifier %q: %w", cm, err)
 		}
@@ -1034,7 +1081,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				ArchiveDir:          config.ArchiveDir(),
 				KeepPolicy:          keepPolicy,
 				ReasoningLanguage:   cfg.ReasoningLanguage(),
-			}, executor, cfg.Agent.Temperature, sink, control.NewPlannerGate(classifier))
+			}, executor, cfg.Agent.Temperature, sink, control.NewPlannerGate(classifier), pe.Model)
 			label = entry.Model + " + planner " + pe.Model
 		}
 	}
@@ -1102,7 +1149,15 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if classifier != nil {
 		ctrlOpts.Classifier = classifier
 	}
-	return control.New(ctrlOpts), nil
+	ctrl := control.New(ctrlOpts)
+
+	// Wire the controller's session path into the enrichSink so Usage events
+	// carry the session ID. This must happen after the controller is created.
+	if enrichRef != nil {
+		enrichRef.SessionID = func() string { return ctrl.SessionPath() }
+	}
+
+	return ctrl, nil
 }
 
 func rememberPermissionRule(workspaceRoot, rule string) control.RememberResult {
