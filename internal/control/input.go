@@ -45,6 +45,7 @@ func StripComposePrefixes(content string) string {
 	s := agent.StripTransientUserBlocks(content)
 	s = strings.TrimPrefix(s, PlanModeMarker+"\n\n")
 	s = strings.TrimPrefix(s, PlanModeMarker)
+	s = agent.StripInjectedContext(s)
 	s = strings.TrimSpace(s)
 	return s
 }
