@@ -24,6 +24,11 @@ const STATUS_MARKER_GLOBAL_RE = /(?:✅|☑|☒|✔️?|✓|\[[xX ]\])/g;
 const BULLET_RE = /^[-*•]\s+\S/;
 const DIVIDER_RE = /^[\s\-_=─━—]+$/;
 
+// Module-level plugin constants (DR-3): avoid allocating new arrays on every
+// render. react-markdown only reads these arrays, never mutates them.
+const REMARK_PLUGINS = [remarkGfm, remarkMath];
+const REHYPE_PLUGINS = [rehypeKatex];
+
 function splitStatusLine(line: string): string[] {
   const parts = (line.match(STATUS_MARKER_GLOBAL_RE) ?? []).length > 1
     ? line.split(/(?=(?:✅|☑|☒|✔️?|✓|\[[xX ]\]))/)
@@ -132,8 +137,8 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
   return (
     <div className="md" ref={containerRef}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
         components={components}
       >
         {mathContent}

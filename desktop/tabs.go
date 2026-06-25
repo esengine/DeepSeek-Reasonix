@@ -656,6 +656,11 @@ type tabEventSink struct {
 	mu            sync.RWMutex
 	ctx           context.Context
 	runtimeEvents asyncRuntimeEmitter
+	// coalesceBuf buffers consecutive Text/Reasoning deltas so they can be
+	// merged before hitting the Wails bridge (DG-1). Any non-Text/Reasoning
+	// event flushes the buffer first. Accessed from Emit (serial per Sink
+	// contract) and clearContext (under mu).
+	coalesceBuf []event.Event
 }
 
 func (s *tabEventSink) Emit(e event.Event) {
@@ -679,7 +684,17 @@ func (s *tabEventSink) Emit(e event.Event) {
 			s.flushPlannerDisplay()
 		}
 	}
-	s.emitRuntimeEvent(eventChannel, toWireTab(e, s.tabID))
+	// Coalesce consecutive Text/Reasoning deltas before the Wails bridge (DG-1).
+	// All other events — including flush triggers TurnDone/ApprovalRequest/
+	// AskRequest — flush any pending buffer first, then emit immediately.
+	if e.Kind == event.Text || e.Kind == event.Reasoning {
+		s.mu.Lock()
+		s.coalesceBuf = append(s.coalesceBuf, e)
+		s.mu.Unlock()
+	} else {
+		s.flushCoalesced()
+		s.emitRuntimeEvent(eventChannel, toWireTab(e, s.tabID))
+	}
 	if s.app != nil {
 		if status, update := topicActivityStatusFromEvent(e); update {
 			changed := s.app.setTabActivityStatus(s.tabID, status)
@@ -701,6 +716,44 @@ func (s *tabEventSink) Emit(e event.Event) {
 	}
 }
 
+// flushCoalesced drains the coalesce buffer, merges consecutive same-kind
+// deltas, and emits each merged event to the Wails bridge. Called on any
+// non-Text/Reasoning event (DG-1).
+func (s *tabEventSink) flushCoalesced() {
+	s.mu.Lock()
+	buf := s.coalesceBuf
+	s.coalesceBuf = nil
+	s.mu.Unlock()
+	if len(buf) == 0 {
+		return
+	}
+	if len(buf) == 1 {
+		s.emitRuntimeEvent(eventChannel, toWireTab(buf[0], s.tabID))
+		return
+	}
+	for _, e := range coalesceEventDeltas(buf) {
+		s.emitRuntimeEvent(eventChannel, toWireTab(e, s.tabID))
+	}
+}
+
+// coalesceEventDeltas merges consecutive Text/Reasoning deltas (DG-1). Both
+// carry their delta in the Text field; concatenating reduces the number of
+// Wails runtime events emitted to the frontend during streaming.
+func coalesceEventDeltas(events []event.Event) []event.Event {
+	if len(events) <= 1 {
+		return events
+	}
+	out := make([]event.Event, 0, len(events))
+	for _, e := range events {
+		if len(out) > 0 && out[len(out)-1].Kind == e.Kind {
+			out[len(out)-1].Text += e.Text
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
 func (s *tabEventSink) setContext(ctx context.Context) {
 	s.mu.Lock()
 	s.ctx = ctx
@@ -710,6 +763,7 @@ func (s *tabEventSink) setContext(ctx context.Context) {
 func (s *tabEventSink) clearContext() {
 	s.mu.Lock()
 	s.ctx = nil
+	s.coalesceBuf = nil
 	s.mu.Unlock()
 	s.runtimeEvents.Clear()
 }
@@ -743,6 +797,11 @@ type runtimeEventEnvelope struct {
 // emission. runtime.EventsEmit can block when the single webview event channel
 // backs up; callers enqueue in-order work and return without holding the
 // agent's event.Sync lock.
+//
+// Backpressure (DG-1): the queue is capped at asyncEmitterMaxQueue pending
+// events. If the webview event channel backs up and the queue fills, the
+// oldest events are dropped to prevent unbounded memory growth (matching the
+// Broadcaster's drop policy).
 type asyncRuntimeEmitter struct {
 	mu      sync.Mutex
 	emit    runtimeEventEmitFunc
@@ -750,6 +809,10 @@ type asyncRuntimeEmitter struct {
 	head    int
 	running bool
 }
+
+// asyncEmitterMaxQueue caps the pending event queue. When exceeded, the oldest
+// events are dropped (DG-1 backpressure).
+const asyncEmitterMaxQueue = 1024
 
 func (e *asyncRuntimeEmitter) Emit(ctx context.Context, name string, payload ...interface{}) {
 	if ctx == nil {
@@ -761,6 +824,24 @@ func (e *asyncRuntimeEmitter) Emit(ctx context.Context, name string, payload ...
 		payload: append([]interface{}(nil), payload...),
 	}
 	e.mu.Lock()
+	// Backpressure: cap the pending queue. If the webview event channel backs
+	// up and the queue fills, drop the oldest quarter to amortize the cost
+	// (DG-1).
+	pending := len(e.queue) - e.head
+	if pending >= asyncEmitterMaxQueue {
+		drop := pending / 4
+		if drop < 1 {
+			drop = 1
+		}
+		end := e.head + drop
+		if end > len(e.queue) {
+			end = len(e.queue)
+		}
+		for i := e.head; i < end; i++ {
+			e.queue[i] = runtimeEventEnvelope{}
+		}
+		e.head = end
+	}
 	e.queue = append(e.queue, item)
 	if !e.running {
 		e.running = true

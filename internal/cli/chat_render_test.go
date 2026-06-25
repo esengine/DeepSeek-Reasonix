@@ -17,7 +17,7 @@ func newTestChatTUI() chatTUI {
 	configureChatTextarea(&ti)
 	ti.SetWidth(80)
 	shellIdx := map[string]int{}
-	shellOut := map[string]string{}
+	shellOut := map[string]*strings.Builder{}
 	shellExp := map[string]bool{}
 	return chatTUI{
 		input:                ti,
@@ -38,6 +38,7 @@ func newTestChatTUI() chatTUI {
 		shellExpanded:        shellExp,
 		shellTranscriptIdx:   shellIdx,
 		toolLineCountByID:    map[string]int{},
+		wrapDirtyFrom:        -1,
 	}
 }
 
@@ -327,7 +328,7 @@ func TestRepeatedShellCommandDoesNotAccumulateOutput(t *testing.T) {
 		m.ingestEvent(event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: id, Name: "bash", Output: out}})
 	}
 
-	if got := m.shellOutputs[id]; got != out {
+	if got, ok := m.shellOutputString(id); !ok || got != out {
 		t.Fatalf("a re-run must not accumulate prior output: shellOutputs[%q] = %q, want %q", id, got, out)
 	}
 }
@@ -340,7 +341,9 @@ func TestCollapsedShellHintUsesKeyboardShortcutOnly(t *testing.T) {
 		lines[i] = "line"
 	}
 	output := strings.Join(lines, "\n") + "\n"
-	m.shellOutputs[id] = output
+	b := &strings.Builder{}
+	b.WriteString(output)
+	m.shellOutputs[id] = b
 	m.transcript = []string{""}
 
 	m.collapseShellSlot(id, 0, output)

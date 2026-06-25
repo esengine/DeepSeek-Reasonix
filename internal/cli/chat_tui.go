@@ -157,8 +157,9 @@ type chatTUI struct {
 	toolLineCount int
 	// shellOutputs stores the full accumulated output of each shell command
 	// (tool IDs with "shell-" prefix), so the first 10 lines can be shown after
-	// collapse and Ctrl+B can toggle the complete output.
-	shellOutputs  map[string]string
+	// collapse and Ctrl+B can toggle the complete output. Uses *strings.Builder
+	// for amortized O(1) appends (TM-7) instead of O(n) string concatenation.
+	shellOutputs  map[string]*strings.Builder
 	shellExpanded map[string]bool
 	// shellTranscriptIdx maps a shell tool ID to the transcript index of its
 	// collapsed output block, so Ctrl+B can rewrite it in place.
@@ -172,6 +173,14 @@ type chatTUI struct {
 	toolStreamStart time.Time
 	toolStreamFrame int
 	transcriptDirty bool
+	// wrapDirtyFrom is the first transcript line index whose wrapped output is
+	// stale (-1 = clean). Set by markTranscriptDirty; consumed by wrapIncremental
+	// to re-wrap only the dirty tail instead of the full transcript (TR-1).
+	wrapDirtyFrom int
+	// lineWrapCounts[i] is the number of visual rows that transcript[i] occupies
+	// after wrapping. Used by wrapIncremental to compute the splice offset into
+	// wrappedLines without re-wrapping the clean prefix.
+	lineWrapCounts []int
 	// forceGotoBottom is set by replayActiveBranch and resetFreshContextView to
 	// pin the viewport to the bottom after a session / branch / clear switch
 	// regardless of the previous wasAtBottom state (#4584).
@@ -503,7 +512,7 @@ func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Even
 		renderer:             newMarkdownRenderer(renderW),
 		diffMaxLines:         diffFoldLimit,
 		showReasoning:        nativeScrollback,
-		shellOutputs:         make(map[string]string),
+		shellOutputs:         make(map[string]*strings.Builder),
 		shellExpanded:        make(map[string]bool),
 		shellTranscriptIdx:   make(map[string]int),
 		toolLineCountByID:    make(map[string]int),
@@ -514,6 +523,7 @@ func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Even
 		skills:               ctrl.Skills(),
 		viewport:             viewport.New(viewport.WithWidth(termW)),
 		statusLineCount:      2,
+		wrapDirtyFrom:        -1,
 	}
 }
 
@@ -650,8 +660,6 @@ func (m chatTUI) renderQueueIndicator() string {
 	if m.state != tuiRunning || len(m.pendingInterject) == 0 {
 		return ""
 	}
-	queueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240")) // dim grey
-	highlightStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
 	var lines []string
 	for i, msg := range m.pendingInterject {
 		preview := msg
@@ -664,7 +672,7 @@ func (m chatTUI) renderQueueIndicator() string {
 		style := queueStyle
 		if m.queueEditCursor == i {
 			cursor = "▸"
-			style = highlightStyle
+			style = queueHighlightStyle
 		}
 		lines = append(lines, style.Render(fmt.Sprintf("  %s [%d] %s", cursor, i+1, preview)))
 	}
@@ -705,16 +713,36 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	contentW := transcriptContentWidth(cm.width, cm.nativeScrollback)
 	cm.viewport.SetWidth(contentW)
 	// Recompute the wrapped status-line count so bottomRows reserves the right
-	// height for the viewport. Use cm.width (same as boxW in View()) so the
-	// wrapping width matches what View() actually renders.
-	cm.statusLineCount = cm.computeStatusLineCount(cm.width)
+	// height for the viewport. Build the status block once and cache the text
+	// so View() can render without recomputing (TR-6). Use the same clamped
+	// width (boxW) that View() uses for wrapping.
+	boxW := cm.width
+	if boxW < 10 {
+		boxW = 10
+	}
+	sl := cm.buildStatusLines(boxW)
+	cm.statusWorkingText = sl.working
+	cm.statusLineText = sl.status
+	cm.dataLineText = sl.dataLine
+	cm.statusWidth = boxW
+	cm.statusLineCount = sl.wrappedLines
 	cm.viewport.SetHeight(cm.transcriptHeight())
 	// Re-feed only when the content grew or the width changed (re-wrapping is
 	// the expensive part); a bare scroll or spinner tick keeps the offset.
 	if len(cm.transcript) != prevLines || cm.width != prevWidth || cm.transcriptDirty {
-		wrapped := wrapTranscript(strings.Join(cm.transcript, "\n"), contentW)
-		cm.viewport.SetContent(wrapped)
-		cm.wrappedLines = strings.Split(wrapped, "\n")
+		// If lines were appended without an explicit dirty mark (commitLine),
+		// mark the new tail as dirty so wrapIncremental picks it up.
+		if len(cm.transcript) > prevLines && cm.wrapDirtyFrom < 0 {
+			cm.wrapDirtyFrom = prevLines
+		}
+		if cm.width != prevWidth {
+			// Width changed: every line must be re-wrapped.
+			cm.wrapAllLines(contentW)
+		} else {
+			// Incremental: re-wrap only the dirty tail (TR-1).
+			cm.wrapIncremental(contentW)
+		}
+		cm.viewport.SetContent(strings.Join(cm.wrappedLines, "\n"))
 		if wasAtBottom {
 			cm.viewport.GotoBottom() // tail-follow: stay pinned to newest output
 		}
@@ -724,6 +752,7 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cm.forceGotoBottom = false
 	}
 	cm.transcriptDirty = false
+	cm.wrapDirtyFrom = -1 // ensure clean state after wrapping
 	// Any viewport scroll (wheel, PgUp/PgDn, edge auto-scroll, or tail-follow to
 	// newest output) shifts the whole window. Some terminals (Warp) mishandle
 	// the renderer's scroll/insert-line optimization and strand stale rows, so
@@ -1507,6 +1536,85 @@ func (m *chatTUI) commitLine(s string) {
 	m.transcript = append(m.transcript, s)
 }
 
+// markTranscriptDirty flags the wrapped-lines cache as stale starting from
+// fromIdx. When fromIdx < wrapDirtyFrom (or wrapDirtyFrom is clean), the dirty
+// range is extended downward so wrapIncremental re-wraps the minimum set.
+func (m *chatTUI) markTranscriptDirty(fromIdx int) {
+	m.transcriptDirty = true
+	if fromIdx < 0 {
+		fromIdx = 0
+	}
+	if m.wrapDirtyFrom < 0 || fromIdx < m.wrapDirtyFrom {
+		m.wrapDirtyFrom = fromIdx
+	}
+}
+
+// wrapAllLines re-wraps the entire transcript from scratch, rebuilding both
+// wrappedLines and lineWrapCounts. Used on width change, truncation, or cache
+// invalidation.
+func (m *chatTUI) wrapAllLines(contentW int) {
+	if len(m.transcript) == 0 {
+		m.wrappedLines = nil
+		m.lineWrapCounts = nil
+		m.wrapDirtyFrom = -1
+		return
+	}
+	// Pre-allocate: each transcript line yields at least 1 visual row.
+	m.wrappedLines = make([]string, 0, len(m.transcript))
+	m.lineWrapCounts = make([]int, len(m.transcript))
+	for i, line := range m.transcript {
+		wrapped := wrapTranscript(line, contentW)
+		lines := strings.Split(wrapped, "\n")
+		m.wrappedLines = append(m.wrappedLines, lines...)
+		m.lineWrapCounts[i] = len(lines)
+	}
+	m.wrapDirtyFrom = -1
+}
+
+// wrapIncremental re-wraps only the dirty tail of the transcript (from
+// wrapDirtyFrom to the end), splicing the result into the existing
+// wrappedLines. Falls back to wrapAllLines if the cache is inconsistent.
+func (m *chatTUI) wrapIncremental(contentW int) {
+	if m.wrapDirtyFrom < 0 {
+		return
+	}
+	// Truncation or cache mismatch: full re-wrap.
+	if len(m.lineWrapCounts) > len(m.transcript) || m.lineWrapCounts == nil {
+		m.wrapAllLines(contentW)
+		return
+	}
+	// Appends: extend lineWrapCounts to match transcript length.
+	if len(m.lineWrapCounts) < len(m.transcript) {
+		m.lineWrapCounts = append(m.lineWrapCounts, make([]int, len(m.transcript)-len(m.lineWrapCounts))...)
+	}
+	if m.wrapDirtyFrom >= len(m.transcript) {
+		m.wrapDirtyFrom = -1
+		return
+	}
+	// Compute the visual-row offset of the first dirty transcript line.
+	offset := 0
+	for i := 0; i < m.wrapDirtyFrom; i++ {
+		offset += m.lineWrapCounts[i]
+	}
+	// Re-wrap from wrapDirtyFrom to end.
+	var newWrapped []string
+	for i := m.wrapDirtyFrom; i < len(m.transcript); i++ {
+		wrapped := wrapTranscript(m.transcript[i], contentW)
+		lines := strings.Split(wrapped, "\n")
+		newWrapped = append(newWrapped, lines...)
+		m.lineWrapCounts[i] = len(lines)
+	}
+	// Splice into wrappedLines, preserving the clean prefix.
+	if offset <= len(m.wrappedLines) {
+		m.wrappedLines = append(m.wrappedLines[:offset], newWrapped...)
+	} else {
+		// Offset mismatch (shouldn't happen): fall back to full wrap.
+		m.wrapAllLines(contentW)
+		return
+	}
+	m.wrapDirtyFrom = -1
+}
+
 // commitSpacer separates the next block (a thinking marker or a tool line) from
 // the previous one with a single blank line, skipping it at the top of the
 // transcript or when a blank already trails so spacers never double up.
@@ -1689,7 +1797,7 @@ func (m *chatTUI) streamReasoning(chunk string) {
 		m.reasoningView = m.reasoningView[:copy(m.reasoningView, m.reasoningView[drop:])]
 	}
 	m.transcript[m.reasoningTextIdx] = reasoningBlock(string(m.reasoningView), m.width, reasoningTailLines)
-	m.transcriptDirty = true
+	m.markTranscriptDirty(m.reasoningTextIdx)
 }
 
 // reasoningBlock renders raw thinking text as dim, width-wrapped lines under a
@@ -1776,7 +1884,12 @@ func (m *chatTUI) streamToolOutput(id, chunk string) {
 	}
 	// Accumulate full output for shell commands so Ctrl+B can expand it.
 	if strings.HasPrefix(id, "shell-") {
-		m.shellOutputs[id] += chunk
+		b := m.shellOutputs[id]
+		if b == nil {
+			b = &strings.Builder{}
+			m.shellOutputs[id] = b
+		}
+		b.WriteString(chunk)
 	}
 	// Fold completed lines into the bounded tail; keep the trailing partial.
 	data := m.toolPartial + chunk
@@ -1802,7 +1915,7 @@ func (m *chatTUI) streamToolOutput(id, chunk string) {
 		lines[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
 	}
 	m.transcript[m.toolStreamIdx] = connectorBlock(lines)
-	m.transcriptDirty = true
+	m.markTranscriptDirty(m.toolStreamIdx)
 }
 
 // pushToolLine appends a completed output line to the bounded tail, dropping the
@@ -1814,6 +1927,16 @@ func (m *chatTUI) pushToolLine(line string) {
 		copy(m.toolTail, m.toolTail[1:])
 		m.toolTail = m.toolTail[:toolStreamTailLines]
 	}
+}
+
+// shellOutputString returns the accumulated full output for a shell tool ID,
+// or "" + false if none was recorded. Wraps the *strings.Builder lookup so
+// callers don't need to handle the pointer indirection (TM-7).
+func (m *chatTUI) shellOutputString(id string) (string, bool) {
+	if b := m.shellOutputs[id]; b != nil {
+		return b.String(), true
+	}
+	return "", false
 }
 
 // collapseToolOutput replaces a finished tool's live block with a dim
@@ -1832,7 +1955,7 @@ func (m *chatTUI) collapseToolOutput(id, resultOutput string) {
 			n++
 		}
 		if n > 0 {
-			if full, ok := m.shellOutputs[id]; ok {
+			if full, ok := m.shellOutputString(id); ok {
 				lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
 				total := len(lines)
 				if total > shellPreviewLines {
@@ -1884,7 +2007,7 @@ func (m *chatTUI) collapseToolOutput(id, resultOutput string) {
 // sources, in order: live streaming state, shellOutputs ("shell-" ids only),
 // the per-id count stashed by streamToolOutput, then the ToolResult's output.
 func (m *chatTUI) collapseShellSlot(id string, idx int, resultOutput string) {
-	m.transcriptDirty = true
+	m.markTranscriptDirty(idx)
 	n := -1
 	if id == m.toolStreamID {
 		// Prefer the larger of the live count and resultOutput: resultOutput
@@ -1901,7 +2024,7 @@ func (m *chatTUI) collapseShellSlot(id string, idx int, resultOutput string) {
 		}
 	}
 	if n < 0 {
-		if full, ok := m.shellOutputs[id]; ok {
+		if full, ok := m.shellOutputString(id); ok {
 			n = len(strings.Split(strings.TrimRight(full, "\n"), "\n"))
 		} else if c, ok := m.toolLineCountByID[id]; ok {
 			n = c
@@ -1920,7 +2043,7 @@ func (m *chatTUI) collapseShellSlot(id string, idx int, resultOutput string) {
 		m.transcript[idx] = ""
 		return
 	}
-	if full, ok := m.shellOutputs[id]; ok {
+	if full, ok := m.shellOutputString(id); ok {
 		// Shell command: show first N lines + hint.
 		lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
 		total := len(lines)
@@ -1960,7 +2083,7 @@ func (m *chatTUI) toggleShellOutput() {
 	if lastID == "" {
 		return
 	}
-	full, ok := m.shellOutputs[lastID]
+	full, ok := m.shellOutputString(lastID)
 	if !ok {
 		return
 	}
@@ -1998,7 +2121,7 @@ func (m *chatTUI) toggleShellOutput() {
 		}
 		m.transcript[lastIdx] = connectorBlock(rendered)
 	}
-	m.transcriptDirty = true
+	m.markTranscriptDirty(lastIdx)
 	if m.nativeScrollback {
 		m.commitLine(m.transcript[lastIdx])
 	}
@@ -2052,7 +2175,7 @@ func (m *chatTUI) tickToolRunning() {
 	frame := toolWorkingFrames[m.toolStreamFrame%len(toolWorkingFrames)]
 	secs := int(time.Since(m.toolStreamStart).Seconds())
 	m.transcript[m.toolStreamIdx] = connectorBlock([]string{dim(fmt.Sprintf(i18n.M.ChatToolWorkingFmt, frame, secs))})
-	m.transcriptDirty = true
+	m.markTranscriptDirty(m.toolStreamIdx)
 }
 
 // commitReasoning closes the live thinking block: the "▎ thinking…" marker is
@@ -2087,7 +2210,14 @@ func (m *chatTUI) commitReasoning() {
 			m.transcript = append(m.transcript[:m.reasoningTextIdx], m.transcript[m.reasoningTextIdx+1:]...)
 		}
 	}
-	m.transcriptDirty = true
+	// The reasoning line index is the earlier of reasoningLineIdx/reasoningTextIdx;
+	// if a line was removed (append-shift above), all subsequent indices shift,
+	// so mark dirty from the earlier index for a correct incremental re-wrap.
+	dirtyFrom := m.reasoningLineIdx
+	if m.reasoningTextIdx >= 0 && m.reasoningTextIdx < dirtyFrom {
+		dirtyFrom = m.reasoningTextIdx
+	}
+	m.markTranscriptDirty(dirtyFrom)
 	m.reasoning.Reset()
 	m.reasoningView = m.reasoningView[:0]
 	m.reasoningLineIdx = -1
@@ -2119,7 +2249,7 @@ func (m *chatTUI) streamAnswer() {
 		m.commitLine(block)
 	} else {
 		m.transcript[m.answerIdx] = block
-		m.transcriptDirty = true
+		m.markTranscriptDirty(m.answerIdx)
 	}
 }
 
@@ -2143,7 +2273,7 @@ func (m *chatTUI) commitPending() {
 		m.commitLine(block)
 	} else {
 		m.transcript[m.answerIdx] = block
-		m.transcriptDirty = true
+		m.markTranscriptDirty(m.answerIdx)
 	}
 	m.pending.Reset()
 	m.answerIdx = -1
@@ -2311,7 +2441,6 @@ func (m chatTUI) View() tea.View {
 	}
 	hideComposer := m.hideComposer()
 	shellMode := strings.HasPrefix(strings.TrimSpace(m.input.Value()), "!")
-	cancelRequested := m.cancelRequested()
 	var box string
 	if !hideComposer {
 		style := inputBoxStyle.Width(boxW)
@@ -2321,96 +2450,21 @@ func (m chatTUI) View() tea.View {
 		box = style.Render(m.input.View())
 	}
 
-	var modeTag string
-	if shellMode {
-		modeTag = lipgloss.NewStyle().
-			Background(lipgloss.Color(statusShellColor.hex)).
-			Foreground(lipgloss.Color("#ffffff")).
-			Bold(true).
-			Padding(0, 1).
-			Render("Shell")
+	// Read cached status lines (populated by Update via buildStatusLines, TR-6).
+	// contextTag() and all tag builders run exactly once inside buildStatusLines;
+	// View() only wraps the cached text with lipgloss styles. Fall back to
+	// building on-the-fly for the initial render (before the first Update) or
+	// when the cached width doesn't match the current viewport width.
+	var working, status, dataLine string
+	if m.statusWidth == boxW && m.statusWidth > 0 {
+		working = m.statusWorkingText
+		status = m.statusLineText
+		dataLine = m.dataLineText
 	} else {
-		color := statusAutoColor
-		foreground := "#111827"
-		switch {
-		case m.ctrl.AutoApproveTools():
-			color = statusYoloColor
-			foreground = "#ffffff"
-		case m.planMode:
-			color = statusPlanColor
-			foreground = "#ffffff"
-		}
-		modeTag = lipgloss.NewStyle().
-			Background(lipgloss.Color(color.hex)).
-			Foreground(lipgloss.Color(foreground)).
-			Bold(true).
-			Padding(0, 1).
-			Render(m.modeTagText())
-	}
-
-	ctxTag := m.contextTag()
-	var status string
-	switch {
-	case m.rewind != nil:
-		status = "  " + modeTag + " · ⟲ rewind"
-	case m.mcpImport != nil:
-		status = "  " + modeTag + " · MCP import"
-	case m.resumePick != nil:
-		status = "  " + modeTag + " · " + i18n.M.StatusResumePicker
-	case m.mcp != nil:
-		status = "  " + modeTag + " · MCP"
-	case m.skillPick != nil:
-		status = "  " + modeTag + " · " + i18n.M.SkillPickerStatusLabel
-	case m.chooser != nil:
-		status = "  " + modeTag + " · " + i18n.M.ChatStatusQuestion
-	case m.pendingApproval != nil && m.pendingApproval.Tool == planApprovalTool:
-		status = "  " + modeTag + " · " + i18n.M.ChatStatusPlanApproval
-	case m.pendingApproval != nil:
-		status = "  " + modeTag + " · " + i18n.M.ChatStatusToolApproval
-	case cancelRequested:
-		status = "  " + modeTag + " · " + i18n.M.CtrlCQuitHint
-	case shellMode:
-		status = "  " + modeTag + " · " + i18n.M.ShellModeHint
-	case m.ctrl.AutoApproveTools():
-		status = "  " + modeTag + " · " + i18n.M.ChatStatusYoloIdle + " " + dim("("+m.cycleHint()+")")
-	default:
-		status = "  " + modeTag + " · " + i18n.M.ChatStatusIdle + " " + dim("("+m.cycleHint()+")")
-	}
-	if et := m.effortTag(); et != "" {
-		status += " · " + et
-	}
-	if gt := m.gitTag(); gt != "" {
-		status += " · " + gt
-	}
-	// The spinning "thinking…" indicator is its own line ABOVE the input box (shown
-	// only while a turn runs); the status/data rows stay below. This mirrors Claude
-	// Code: live progress over the composer, shortcuts + stats under it.
-	working := m.runningWorkingLine(cancelRequested, true)
-	// Second status row: the live data (model, git, effort, context gauge, cache
-	// rates, jobs, balance). It lives on its own row so it's always visible; if it
-	// exceeds the terminal width it wraps to additional rows instead of being
-	// truncated. Wrapping is safe in the alt-screen view — there's no scrollback
-	// to strand — and computeStatusLineCount reserves the correct height.
-	var data []string
-	if mt := m.modelTag(); mt != "" {
-		data = append(data, mt)
-	}
-	if cache := m.cacheTag(); cache != "" {
-		data = append(data, cache)
-	}
-	if ctxTag != "" {
-		data = append(data, ctxTag)
-	}
-	if jt := m.jobsTag(); jt != "" {
-		data = append(data, jt)
-	}
-	if m.balance != "" {
-		data = append(data, dim(m.balance))
-	}
-	dataLine := "  " + strings.Join(data, " · ")
-	// A configured custom status line replaces the built-in data row entirely.
-	if m.statuslineCmd != "" && m.statuslineOut != "" {
-		dataLine = "  " + m.statuslineOut
+		sl := m.buildStatusLines(boxW)
+		working = sl.working
+		status = sl.status
+		dataLine = sl.dataLine
 	}
 
 	// Bottom region pinned under the transcript viewport: optional panels, the
@@ -2811,51 +2865,84 @@ func wrapStatusLine(s string, width int) string {
 	return ansi.Hardwrap(s, width, true)
 }
 
-// computeStatusLineCount returns the number of terminal rows the status block
-// (working line + first status line + data line) will occupy after wrapping to
-// `width`. It mirrors the construction in View() so the reserved height matches
-// the rendered height exactly — the load-bearing invariant for bottomRows().
-// Use the same width (m.width) that View() passes to wrapStatusLine.
-func (m chatTUI) computeStatusLineCount(width int) int {
+// statusLines holds the built status block text and its wrapped line count.
+// Computed once per frame by buildStatusLines and cached on the model
+// (statusWorkingText/statusLineText/dataLineText/statusWidth) so View()
+// can render without recomputing. contextTag() is called exactly once per
+// buildStatusLines invocation.
+type statusLines struct {
+	working      string // styled working (spinner) line, empty when idle
+	status       string // styled first status line (mode tag + state)
+	dataLine     string // styled data line (model/git/ctx/cache/jobs/balance)
+	wrappedLines int    // total wrapped rows across all three lines
+}
+
+// buildStatusLines constructs the three status block lines (working spinner,
+// mode+state line, data line) in one pass and counts their wrapped height.
+// Both View() and computeStatusLineCount() use this to avoid duplicating the
+// construction logic; contextTag() is called exactly once here per invocation.
+func (m chatTUI) buildStatusLines(width int) statusLines {
 	if m.ctrl == nil {
-		return 2 // safe default for tests without a real controller
+		return statusLines{wrappedLines: 2}
 	}
 	shellMode := strings.HasPrefix(strings.TrimSpace(m.input.Value()), "!")
 	cancelRequested := m.cancelRequested()
 
-	// Replicate the first status line (mode tag + state) from View().
-	// ModeTag is rendered with Padding(0,1) in View() — add the same padding
-	// here so the visible width matches exactly.
-	modeTag := " " + m.modeTagText() + " "
+	// --- mode tag (styled) ---
+	var modeTag string
 	if shellMode {
-		modeTag = " Shell "
+		modeTag = lipgloss.NewStyle().
+			Background(lipgloss.Color(statusShellColor.hex)).
+			Foreground(lipgloss.Color("#ffffff")).
+			Bold(true).
+			Padding(0, 1).
+			Render("Shell")
+	} else {
+		color := statusAutoColor
+		foreground := "#111827"
+		switch {
+		case m.ctrl.AutoApproveTools():
+			color = statusYoloColor
+			foreground = "#ffffff"
+		case m.planMode:
+			color = statusPlanColor
+			foreground = "#ffffff"
+		}
+		modeTag = lipgloss.NewStyle().
+			Background(lipgloss.Color(color.hex)).
+			Foreground(lipgloss.Color(foreground)).
+			Bold(true).
+			Padding(0, 1).
+			Render(m.modeTagText())
 	}
-	status := "  " + modeTag
+
+	// --- first status line: mode + state ---
+	var status string
 	switch {
 	case m.rewind != nil:
-		status += " · ⟲ rewind"
+		status = "  " + modeTag + " · ⟲ rewind"
 	case m.mcpImport != nil:
-		status += " · MCP import"
+		status = "  " + modeTag + " · MCP import"
 	case m.resumePick != nil:
-		status += " · " + i18n.M.StatusResumePicker
+		status = "  " + modeTag + " · " + i18n.M.StatusResumePicker
 	case m.mcp != nil:
-		status += " · MCP"
+		status = "  " + modeTag + " · MCP"
 	case m.skillPick != nil:
-		status += " · " + i18n.M.SkillPickerStatusLabel
+		status = "  " + modeTag + " · " + i18n.M.SkillPickerStatusLabel
 	case m.chooser != nil:
-		status += " · " + i18n.M.ChatStatusQuestion
+		status = "  " + modeTag + " · " + i18n.M.ChatStatusQuestion
 	case m.pendingApproval != nil && m.pendingApproval.Tool == planApprovalTool:
-		status += " · " + i18n.M.ChatStatusPlanApproval
+		status = "  " + modeTag + " · " + i18n.M.ChatStatusPlanApproval
 	case m.pendingApproval != nil:
-		status += " · " + i18n.M.ChatStatusToolApproval
+		status = "  " + modeTag + " · " + i18n.M.ChatStatusToolApproval
 	case cancelRequested:
-		status += " · " + i18n.M.CtrlCQuitHint
+		status = "  " + modeTag + " · " + i18n.M.CtrlCQuitHint
 	case shellMode:
-		status += " · " + i18n.M.ShellModeHint
+		status = "  " + modeTag + " · " + i18n.M.ShellModeHint
 	case m.ctrl.AutoApproveTools():
-		status += " · " + i18n.M.ChatStatusYoloIdle + " (" + m.cycleHint() + ")"
+		status = "  " + modeTag + " · " + i18n.M.ChatStatusYoloIdle + " " + dim("("+m.cycleHint()+")")
 	default:
-		status += " · " + i18n.M.ChatStatusIdle + " (" + m.cycleHint() + ")"
+		status = "  " + modeTag + " · " + i18n.M.ChatStatusIdle + " " + dim("("+m.cycleHint()+")")
 	}
 	if et := m.effortTag(); et != "" {
 		status += " · " + et
@@ -2864,7 +2951,8 @@ func (m chatTUI) computeStatusLineCount(width int) int {
 		status += " · " + gt
 	}
 
-	// Replicate the data line from View().
+	// --- data line: model/git/ctx/cache/jobs/balance ---
+	ctxTag := m.contextTag() // called exactly once per buildStatusLines
 	var data []string
 	if mt := m.modelTag(); mt != "" {
 		data = append(data, mt)
@@ -2872,37 +2960,45 @@ func (m chatTUI) computeStatusLineCount(width int) int {
 	if cache := m.cacheTag(); cache != "" {
 		data = append(data, cache)
 	}
-	if ct := m.contextTag(); ct != "" {
-		data = append(data, ct)
+	if ctxTag != "" {
+		data = append(data, ctxTag)
 	}
 	if jt := m.jobsTag(); jt != "" {
 		data = append(data, jt)
 	}
 	if m.balance != "" {
-		data = append(data, m.balance)
+		data = append(data, dim(m.balance))
 	}
 	dataLine := "  " + strings.Join(data, " · ")
 	if m.statuslineCmd != "" && m.statuslineOut != "" {
 		dataLine = "  " + m.statuslineOut
 	}
 
-	// Replicate the working (spinner) line from View(), shown only while a turn runs.
-	working := m.runningWorkingLine(cancelRequested, false)
+	// --- working (spinner) line ---
+	working := m.runningWorkingLine(cancelRequested, true)
 
-	// Count wrapped rows for every piece that View() renders as wrapped.
+	// --- count wrapped rows ---
 	var lines int
 	if m.state == tuiRunning {
-		// working (spinner) line — wraps independently of the status block below.
 		lines += strings.Count(wrapStatusLine(working, width), "\n") + 1
 	}
 	lines += strings.Count(wrapStatusLine(status, width), "\n") + 1
 	lines += strings.Count(wrapStatusLine(dataLine, width), "\n") + 1
-	
-	// Update cache fields
-	// Use const access to avoid mutation on value receiver
-	// Cache is stored on next call via m.statusLineCount
-	
-	return lines
+
+	return statusLines{
+		working:      working,
+		status:       status,
+		dataLine:     dataLine,
+		wrappedLines: lines,
+	}
+}
+
+// computeStatusLineCount returns the number of terminal rows the status block
+// (working line + first status line + data line) will occupy after wrapping to
+// `width`. Delegates to buildStatusLines so the reserved height always matches
+// what View() renders.
+func (m chatTUI) computeStatusLineCount(width int) int {
+	return m.buildStatusLines(width).wrappedLines
 }
 
 // growInputToFit resizes the textarea to the number of lines its value spans,
@@ -3095,7 +3191,7 @@ func (m *chatTUI) unsendPending() {
 	m.input.SetValue(m.pendingRestore)
 	m.growInputToFit()
 	m.transcript = m.transcript[:m.bubbleStartIdx]
-	m.transcriptDirty = true
+	m.markTranscriptDirty(m.bubbleStartIdx)
 	m.bubblePending = false
 	m.pendingRestore = ""
 	m.pendingPastes = nil

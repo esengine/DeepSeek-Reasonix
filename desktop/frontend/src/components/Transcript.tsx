@@ -335,6 +335,20 @@ export const Transcript = memo(function Transcript({
     jumpToQuestion(question);
   }, [turnGroups.length, warmLayerSessionKey]);
 
+  // Stable callbacks for WarmZone (DR-1): inline arrow functions would defeat
+  // WarmZone's memo() wrapper by creating a new function identity each render.
+  // These only use setState updaters, so they have no dependencies and are stable.
+  const handleToggleColdPage = useCallback(() => {
+    setColdPage((p) => p + 1);
+  }, []);
+  const handleToggleWarmTurn = useCallback((g: number, expand: boolean) => {
+    setExpandedWarmTurns((prev) => {
+      const next = new Set(prev);
+      if (expand) next.add(g); else next.delete(g);
+      return next;
+    });
+  }, []);
+
   // ── Hot zone: fully rendered from hotStartIdx to end ─────────────────────
   // Memoized separately from the assembly so streaming tokens don't rebuild
   // the warm/cold zone JSX trees. Uses LiveStreamContext for streaming data
@@ -651,10 +665,8 @@ export const Transcript = memo(function Transcript({
               warmOnEdit={onEditPrompt}
               tabId={tabId}
               creationMode={creationMode}
-              onToggleColdPage={() => setWarmLayerState((prev) => warmLayerWithNextColdPage(prev, warmLayerSessionKey))}
-              onToggleWarmTurn={(g, expand) => {
-                setWarmLayerState((prev) => warmLayerWithExpandedTurn(prev, warmLayerSessionKey, g, expand));
-              }}
+onToggleColdPage={handleToggleColdPage}
+              onToggleWarmTurn={handleToggleWarmTurn}
             />
           )}
           <div ref={entranceRef}>

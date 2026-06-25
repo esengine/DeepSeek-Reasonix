@@ -98,6 +98,9 @@ var (
 	// Cached theme styles
 	themeDangerStyle lipgloss.Style
 	themeWarnStyle   lipgloss.Style
+	// Cached queue indicator styles (TR-5)
+	queueStyle         lipgloss.Style
+	queueHighlightStyle lipgloss.Style
 )
 
 func configureCLITheme(mode string) {
@@ -403,6 +406,9 @@ func refreshCLIStyles() {
 	// Cache danger and warn styles
 	themeDangerStyle = themeStyle(activeCLITheme.danger)
 	themeWarnStyle = themeStyle(activeCLITheme.warn)
+	// Cache queue indicator styles (TR-5)
+	queueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	queueHighlightStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
 }
 
 func applyTextareaTheme(ti *textarea.Model) {

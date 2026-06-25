@@ -84,6 +84,15 @@ var (
 	selStyle         = lipgloss.NewStyle().Reverse(true)
 	scrollThumbStyle lipgloss.Style
 	scrollTrackStyle lipgloss.Style
+	// TM-6: package-level buffers reused across renderTranscript frames to
+	// avoid per-frame make([]string, h) allocations. Safe because Bubbletea is
+	// single-threaded (View runs on the program goroutine, one TUI at a time).
+	renderRowsBuf []string
+	renderBarBuf  []string
+	// blankRow caches the content-width blank line (TM-6); rebuilt only when
+	// the viewport width changes instead of strings.Repeat every frame.
+	blankRow      string
+	blankRowWidth int
 )
 
 // renderTranscript draws the viewport's visible window with a scrollbar in the
@@ -101,10 +110,27 @@ func (m chatTUI) renderTranscript() string {
 	yoff := m.viewport.YOffset()
 	start, end := m.sel.ordered()
 	thumbStart, thumbSize := scrollbarThumb(h, yoff, total)
-	blank := strings.Repeat(" ", cw)
 
-	rows := make([]string, h)
-	bar := make([]string, h)
+	// Reuse blank row cache (TM-6).
+	if cw != blankRowWidth || (cw > 0 && blankRow == "") {
+		blankRow = strings.Repeat(" ", cw)
+		blankRowWidth = cw
+	}
+	blank := blankRow
+
+	// Reuse row/bar buffers (TM-6): grow if needed, slice to h.
+	if cap(renderRowsBuf) < h {
+		renderRowsBuf = make([]string, h)
+	} else {
+		renderRowsBuf = renderRowsBuf[:h]
+	}
+	if cap(renderBarBuf) < h {
+		renderBarBuf = make([]string, h)
+	} else {
+		renderBarBuf = renderBarBuf[:h]
+	}
+	rows := renderRowsBuf
+	bar := renderBarBuf
 	for r := 0; r < h; r++ {
 		idx := yoff + r
 		line := blank // off-content rows fill to width
@@ -119,7 +145,19 @@ func (m chatTUI) renderTranscript() string {
 		rows[r] = line
 		bar[r] = scrollbarCell(r, total, h, thumbStart, thumbSize)
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(rows, "\n"), strings.Join(bar, "\n"))
+	// Build the final output with strings.Builder (TM-6): avoids the
+	// intermediate strings.Join + JoinHorizontal allocations. Each row is
+	// already cw visual columns wide, so simple concatenation with the
+	// 1-column scrollbar cell is equivalent to JoinHorizontal(Top, …).
+	var b strings.Builder
+	for r := 0; r < h; r++ {
+		if r > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(rows[r])
+		b.WriteString(bar[r])
+	}
+	return b.String()
 }
 
 // selSpan returns the [lo, hi) visual-column span of the selection on content
