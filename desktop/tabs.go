@@ -2269,6 +2269,8 @@ func (a *App) buildTabControllerWithContext(tab *WorkspaceTab, loadedSession loa
 	}
 	tab.SharedHostKey = rootKey
 	sharedHost := a.acquireSharedHost(rootKey)
+	store0 := a.usageStoreForBoot()
+	enrichDebugf("[boot.Build#0 buildTab] tab=%s model=%s store=%v", tab.ID, model, store0 != nil)
 
 	ctrl, err := boot.Build(buildCtx, boot.Options{
 		Model:                    model,
@@ -2280,7 +2282,7 @@ func (a *App) buildTabControllerWithContext(tab *WorkspaceTab, loadedSession loa
 		TokenMode:                currentTabTokenMode(tab),
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
-		UsageStore:               a.usageStoreForBoot(),
+		UsageStore:               store0,
 	})
 	if err != nil {
 		a.mu.Lock()
