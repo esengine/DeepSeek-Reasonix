@@ -1,8 +1,8 @@
 // Package control is the transport-agnostic session driver. A Controller owns
 // the agent run loop and session lifecycle, takes commands (Send/Cancel/Approve/
-// SetPlanMode/Compact/NewSession/…), and emits everything that happens —
-// reasoning, tool calls, approvals, turn completion — as a typed event stream to
-// a single event.Sink.
+// SetPlanMode/Compact/NewSession/…), and emits foreground reasoning, tool
+// calls, approvals, and turn completion as a typed event stream to event.Sink.
+// Ephemeral side-conversation events use a separate side sink.
 //
 // The point is one orchestration layer behind every frontend: a terminal TUI, a
 // desktop webview, or an HTTP/SSE server each drive the Controller identically
@@ -64,10 +64,12 @@ var errNoSessionPath = errors.New("session has content but no session path; conv
 // Controller drives one chat session. Construct with New; drive with the command
 // methods; observe through the Sink passed in Options.
 type Controller struct {
-	runner   agent.Runner
-	executor *agent.Agent
-	sink     event.Sink
-	policy   permission.Policy
+	runner      agent.Runner
+	executor    *agent.Agent
+	sink        event.Sink
+	sideFactory SideFactory
+	sideSink    event.Sink
+	policy      permission.Policy
 
 	label        string
 	modelRef     string
@@ -152,6 +154,8 @@ type Controller struct {
 	turn int
 
 	displayRecorder func(content, display string)
+
+	side *sideState
 }
 
 type approvalReply struct {
@@ -218,6 +222,8 @@ type Options struct {
 	Runner        agent.Runner
 	Executor      *agent.Agent
 	Sink          event.Sink
+	SideFactory   SideFactory
+	SideSink      event.Sink
 	Policy        permission.Policy
 	Label         string
 	ModelRef      string
@@ -274,11 +280,15 @@ type Options struct {
 	ApprovalTimeout time.Duration
 }
 
-// New builds a Controller. A nil Sink is replaced with event.Discard.
+// New builds a Controller. A nil Sink or SideSink is replaced with event.Discard.
 func New(opts Options) *Controller {
 	sink := opts.Sink
 	if nilutil.IsNil(sink) {
 		sink = event.Discard
+	}
+	sideSink := opts.SideSink
+	if nilutil.IsNil(sideSink) {
+		sideSink = event.Discard
 	}
 	classifier := opts.Classifier
 	if nilutil.IsNil(classifier) {
@@ -292,6 +302,8 @@ func New(opts Options) *Controller {
 		runner:                 opts.Runner,
 		executor:               opts.Executor,
 		sink:                   sink,
+		sideFactory:            opts.SideFactory,
+		sideSink:               sideSink,
 		policy:                 opts.Policy,
 		label:                  opts.Label,
 		modelRef:               opts.ModelRef,
@@ -2584,6 +2596,7 @@ const (
 )
 
 func (c *Controller) close(fireSessionEnd bool, jobsMode closeJobsMode) {
+	c.ReturnFromSide()
 	c.mu.Lock()
 	started := c.startedOnce
 	c.mu.Unlock()

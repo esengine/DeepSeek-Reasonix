@@ -61,6 +61,7 @@ const (
 // built-in verbs, custom commands, skills (each as "/<name>"), and MCP prompts.
 func (m *chatTUI) slashItems() []compItem {
 	items := []compItem{
+		{label: "/btw", insert: "/btw ", hint: "start a side conversation"},
 		{label: "/compact", insert: "/compact ", hint: i18n.M.CmdCompact},
 		{label: "/new", insert: "/new ", hint: i18n.M.CmdNew},
 		{label: "/clear", insert: "/clear", hint: i18n.M.CmdClear},
@@ -127,6 +128,10 @@ func (m *chatTUI) updateCompletion() {
 	}
 
 	if strings.HasPrefix(val, "/") {
+		if !m.activeCaps().slashCompletion {
+			m.completion = completion{}
+			return
+		}
 		if items, from, ok := m.explicitSubcommandItems(val); ok && len(items) > 0 {
 			m.setCompletion(compSlashArg, items, from)
 			return

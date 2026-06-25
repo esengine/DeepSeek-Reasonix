@@ -20,6 +20,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
+	"reasonix/internal/tool"
 )
 
 type blockingTurnRunner struct{ started chan struct{} }
@@ -75,6 +76,54 @@ func (r *recordingTurnRunner) Run(_ context.Context, input string) error {
 	return nil
 }
 
+type cliSideTestProvider struct {
+	started chan string
+	release chan struct{}
+	text    string
+}
+
+func (p *cliSideTestProvider) Name() string { return "side-test" }
+
+func (p *cliSideTestProvider) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	if p.started != nil {
+		for i := len(req.Messages) - 1; i >= 0; i-- {
+			if req.Messages[i].Role == provider.RoleUser {
+				p.started <- req.Messages[i].Content
+				break
+			}
+		}
+	}
+	if p.release != nil {
+		select {
+		case <-p.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	text := p.text
+	if text == "" {
+		text = "side answer"
+	}
+	ch := make(chan provider.Chunk, 1)
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: text}
+	close(ch)
+	return ch, nil
+}
+
+func newBtwTestController(t *testing.T, sideSink event.Sink, started chan string) *control.Controller {
+	t.Helper()
+	mainSess := agent.NewSession("sys")
+	mainSess.Add(provider.Message{Role: provider.RoleUser, Content: "main context"})
+	mainExec := agent.New(nil, tool.NewRegistry(), mainSess, agent.Options{}, event.Discard)
+	return control.New(control.Options{
+		Executor: mainExec,
+		SideSink: sideSink,
+		SideFactory: func(ctx context.Context, sess *agent.Session, sink event.Sink) (*agent.Agent, error) {
+			return agent.New(&cliSideTestProvider{started: started}, tool.NewRegistry(), sess, agent.Options{}, sink), nil
+		},
+	})
+}
+
 func waitForCLIEvent(t *testing.T, ch <-chan event.Event, kind event.Kind) {
 	t.Helper()
 	deadline := time.After(2 * time.Second)
@@ -87,6 +136,547 @@ func waitForCLIEvent(t *testing.T, ch <-chan event.Event, kind event.Kind) {
 		case <-deadline:
 			t.Fatalf("timed out waiting for event %v", kind)
 		}
+	}
+}
+
+func TestBtwSlashCommandStartsSideSurface(t *testing.T) {
+	sideEvents := make(chan event.Event, 8)
+	started := make(chan string, 1)
+	ctrl := newBtwTestController(t, &eventSink{ch: sideEvents}, started)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 8), 80, sideEvents)
+	m.input.SetValue("/btw explain this")
+
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(chatTUI)
+	if cmd == nil {
+		t.Fatal("/btw should schedule a side event wait")
+	}
+	if m.surface != tuiSurfaceSide {
+		t.Fatalf("surface = %v, want side", m.surface)
+	}
+	sideText := strings.Join(m.conversation(tuiSurfaceSide).transcript, "\n")
+	if strings.Contains(sideText, "/btw explain this") {
+		t.Fatalf("side transcript should show the side prompt, not the slash command: %q", sideText)
+	}
+	if !strings.Contains(sideText, "explain this") {
+		t.Fatalf("side transcript should echo side prompt, got %q", sideText)
+	}
+	if !strings.Contains(ansi.Strip(sideText), "› explain this") {
+		t.Fatalf("side prompt should reuse user bubble rendering, got %q", sideText)
+	}
+	select {
+	case got := <-started:
+		if got != "explain this" {
+			t.Fatalf("side prompt = %q, want explain this", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("side turn did not start")
+	}
+}
+
+func TestBtwSlashCommandStartsWhileMainRunning(t *testing.T) {
+	sideEvents := make(chan event.Event, 8)
+	started := make(chan string, 1)
+	ctrl := newBtwTestController(t, &eventSink{ch: sideEvents}, started)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 8), 80, sideEvents)
+	m.state = tuiRunning
+	m.input.SetValue("/btw explain while main runs")
+
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(chatTUI)
+	if cmd == nil {
+		t.Fatal("/btw while main runs should schedule a side event wait")
+	}
+	if m.surface != tuiSurfaceSide {
+		t.Fatalf("surface = %v, want side", m.surface)
+	}
+	if len(m.pendingInterject) != 0 {
+		t.Fatalf("/btw should not be queued as main feedback: %v", m.pendingInterject)
+	}
+	select {
+	case got := <-started:
+		if got != "explain while main runs" {
+			t.Fatalf("side prompt = %q, want explain while main runs", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("side turn did not start")
+	}
+}
+
+func TestBtwSlashCommandRejectedOnSideSurface(t *testing.T) {
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{})
+	m.surface = tuiSurfaceSide
+	m.input.SetValue("/btw nested")
+
+	next, _ := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(chatTUI)
+	if m.surface != tuiSurfaceSide {
+		t.Fatalf("surface = %v, want side", m.surface)
+	}
+	got := strings.Join(m.conversation(tuiSurfaceSide).transcript, "\n")
+	if !strings.Contains(got, "/btw is only available from the main conversation") {
+		t.Fatalf("side rejection notice missing: %q", got)
+	}
+	if len(m.transcript) != 0 {
+		t.Fatalf("main transcript should not change for side /btw rejection, got %v", m.transcript)
+	}
+}
+
+func TestBtwSideInputUsesSideControllerAndTranscript(t *testing.T) {
+	sideEvents := make(chan event.Event, 8)
+	started := make(chan string, 2)
+	ctrl := newBtwTestController(t, &eventSink{ch: sideEvents}, started)
+	if err := ctrl.StartSide(""); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+	m := newChatTUI(ctrl, "", make(chan event.Event, 8), 80, sideEvents)
+	m.surface = tuiSurfaceSide
+	m.input.SetValue("side followup")
+
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(chatTUI)
+	if cmd == nil {
+		t.Fatal("side enter should schedule a side event wait")
+	}
+	if len(m.transcript) != 0 {
+		t.Fatalf("side input should not write main transcript, got %v", m.transcript)
+	}
+	if !strings.Contains(strings.Join(m.conversation(tuiSurfaceSide).transcript, "\n"), "side followup") {
+		t.Fatalf("side transcript should echo side input, got %v", m.conversation(tuiSurfaceSide).transcript)
+	}
+	select {
+	case got := <-started:
+		if got != "side followup" {
+			t.Fatalf("side input = %q, want side followup", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("side input did not submit")
+	}
+}
+
+func TestBtwSideInputUsesUserBubbleRenderer(t *testing.T) {
+	prevColor := colorEnabled
+	colorEnabled = true
+	defer func() { colorEnabled = prevColor }()
+
+	m := newTestChatTUI()
+	m.surface = tuiSurfaceSide
+
+	m.startSideTurn("side followup", "side followup", "side followup")
+
+	transcript := m.conversation(tuiSurfaceSide).transcript
+	if len(transcript) != 2 {
+		t.Fatalf("side transcript = %v, want spacer + user bubble", transcript)
+	}
+	if plain := ansi.Strip(strings.Join(transcript, "\n")); !strings.Contains(plain, "› side followup") {
+		t.Fatalf("side input should use main user bubble chrome: %q", plain)
+	}
+}
+
+func TestBtwSideTurnDoneClearsOnlySideRunningState(t *testing.T) {
+	m := newTestChatTUI()
+	m.surface = tuiSurfaceSide
+	side := m.conversation(tuiSurfaceSide)
+	side.running = true
+	m.state = tuiRunning
+
+	m.ingestEventFor(side, event.Event{Kind: event.TurnDone})
+
+	if side.running {
+		t.Fatal("side turn should stop on side TurnDone")
+	}
+	if m.state != tuiRunning {
+		t.Fatal("main running state should not be cleared by side TurnDone")
+	}
+}
+
+func TestBtwSideToolWorkingLineTicks(t *testing.T) {
+	m := newTestChatTUI()
+	m.surface = tuiSurfaceSide
+	side := m.conversation(tuiSurfaceSide)
+	side.running = true
+
+	m.ingestEventFor(side, event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "side-tool", Name: "symbol_context", Args: `{"q":"x"}`}})
+	before := strings.Join(side.transcript, "\n")
+
+	next, _ := m.update(elapsedTickMsg{})
+	m = next.(chatTUI)
+	after := strings.Join(m.conversation(tuiSurfaceSide).transcript, "\n")
+
+	if before == after {
+		t.Fatalf("side tool working line should update on elapsed tick:\n%s", after)
+	}
+	if !strings.Contains(after, "working") {
+		t.Fatalf("side working line missing after tick:\n%s", after)
+	}
+}
+
+func TestBtwSideSurfaceHidesMainPanels(t *testing.T) {
+	ctrl := newBtwTestController(t, event.Discard, nil)
+	if err := ctrl.StartSide(""); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 60)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 18})
+	m = next.(chatTUI)
+	m.surface = tuiSurfaceSide
+	m.conversation(tuiSurfaceSide).transcript = []string{"side transcript"}
+	m.state = tuiRunning
+	m.pendingInterject = []string{"queued main"}
+	m.todoArgs = `{"todos":[{"content":"main task","status":"in_progress"}]}`
+	m.pendingApproval = &event.Approval{ID: "approval-1", Tool: "bash", Subject: "echo main"}
+	m.chooser = newChooser(event.Ask{
+		ID: "ask-1",
+		Questions: []event.AskQuestion{{
+			ID:     "q1",
+			Prompt: "Pick main option",
+			Options: []event.AskOption{{
+				Label: "main option",
+			}},
+		}},
+	})
+	m.completion = completion{active: true, kind: compSlash, items: []compItem{{label: "/main-only"}}, sel: 0}
+	m.statusLineCount = m.computeStatusLineCount(m.width)
+
+	view := ansi.Strip(m.View().Content)
+	for _, leak := range []string{"main task", "echo main", "Pick main option", "main option", "/main-only", "queued main"} {
+		if strings.Contains(view, leak) {
+			t.Fatalf("side surface leaked main panel content %q:\n%s", leak, view)
+		}
+	}
+	if got := len(strings.Split(view, "\n")); got != m.height {
+		t.Fatalf("side view height = %d, want %d:\n%s", got, m.height, view)
+	}
+	if got, want := m.bottomRows(), m.input.Height()+2+m.statusLineCount; got != want {
+		t.Fatalf("side bottomRows = %d, want composer + status only = %d", got, want)
+	}
+}
+
+func TestBtwSideInputIgnoresMainChooser(t *testing.T) {
+	sideEvents := make(chan event.Event, 8)
+	started := make(chan string, 1)
+	ctrl := newBtwTestController(t, &eventSink{ch: sideEvents}, started)
+	if err := ctrl.StartSide(""); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+	m := newChatTUI(ctrl, "", make(chan event.Event, 8), 80, sideEvents)
+	m.surface = tuiSurfaceSide
+	m.chooser = newChooser(event.Ask{
+		ID: "ask-1",
+		Questions: []event.AskQuestion{{
+			ID:     "q1",
+			Prompt: "Pick main option",
+			Options: []event.AskOption{{
+				Label: "main option",
+			}},
+		}},
+	})
+	m.input.SetValue("side followup")
+
+	next, _ := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(chatTUI)
+	if !strings.Contains(strings.Join(m.conversation(tuiSurfaceSide).transcript, "\n"), "side followup") {
+		t.Fatalf("side input should render in side transcript, got %v", m.conversation(tuiSurfaceSide).transcript)
+	}
+	select {
+	case got := <-started:
+		if got != "side followup" {
+			t.Fatalf("side input = %q, want side followup", got)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("main chooser intercepted side input")
+	}
+}
+
+func TestBtwCtrlCReturnsFromSide(t *testing.T) {
+	ctrl := newBtwTestController(t, event.Discard, nil)
+	if err := ctrl.StartSide(""); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+	m := newChatTUI(ctrl, "", make(chan event.Event, 8), 80, make(chan event.Event, 8))
+	m.surface = tuiSurfaceSide
+	m.conversation(tuiSurfaceSide).transcript = []string{"side text"}
+
+	next, cmd := m.update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	m = next.(chatTUI)
+	if cmd != nil {
+		if _, ok := cmd().(tea.QuitMsg); ok {
+			t.Fatal("Ctrl+C on side surface should not quit")
+		}
+	}
+	if m.surface != tuiSurfaceMain {
+		t.Fatalf("surface = %v, want main", m.surface)
+	}
+	if got := m.conversation(tuiSurfaceSide).transcript; len(got) != 0 {
+		t.Fatalf("side transcript should be cleared on return, got %v", got)
+	}
+	if ctrl.SideState().Active {
+		t.Fatal("controller should leave side mode")
+	}
+	if !strings.Contains(strings.Join(m.transcript, "\n"), "returned to main conversation") {
+		t.Fatalf("main transcript should notice return, got %v", m.transcript)
+	}
+}
+
+func TestBtwSideInputRejectedWhileSideTurnRuns(t *testing.T) {
+	sideEvents := make(chan event.Event, 8)
+	started := make(chan string, 1)
+	release := make(chan struct{})
+	mainSess := agent.NewSession("sys")
+	mainSess.Add(provider.Message{Role: provider.RoleUser, Content: "main context"})
+	mainExec := agent.New(nil, tool.NewRegistry(), mainSess, agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{
+		Executor: mainExec,
+		SideSink: &eventSink{ch: sideEvents},
+		SideFactory: func(ctx context.Context, sess *agent.Session, sink event.Sink) (*agent.Agent, error) {
+			return agent.New(&cliSideTestProvider{started: started, release: release}, tool.NewRegistry(), sess, agent.Options{}, sink), nil
+		},
+	})
+	if err := ctrl.StartSide("hold"); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+	<-started
+	defer close(release)
+
+	m := newChatTUI(ctrl, "", make(chan event.Event, 8), 80, sideEvents)
+	m.surface = tuiSurfaceSide
+	m.input.SetValue("dropped if submitted")
+
+	next, _ := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(chatTUI)
+	if got := m.input.Value(); got != "dropped if submitted" {
+		t.Fatalf("side input should remain editable while running, got %q", got)
+	}
+	joined := strings.Join(m.conversation(tuiSurfaceSide).transcript, "\n")
+	if strings.Contains(joined, "dropped if submitted") {
+		t.Fatalf("running side input should not be echoed as submitted: %q", joined)
+	}
+	if !strings.Contains(joined, "side turn is still running") {
+		t.Fatalf("missing running notice: %q", joined)
+	}
+}
+
+func TestBtwCtrlCCopiesSelectionOnSideSurface(t *testing.T) {
+	var copied string
+	clipboardWriteAll = func(text string) error { copied = text; return nil }
+	defer func() { clipboardWriteAll = clipboard.WriteAll }()
+
+	m := newTestChatTUI()
+	m.surface = tuiSurfaceSide
+	m.wrappedLines = []string{"selected side text"}
+	m.sel = selection{active: true, anchor: selPos{line: 0, col: 0}, head: selPos{line: 0, col: 8}}
+
+	next, cmd := m.update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	m = next.(chatTUI)
+	if m.surface != tuiSurfaceSide {
+		t.Fatalf("selection copy should stay on side surface, got %v", m.surface)
+	}
+	if cmd == nil {
+		t.Fatal("expected clipboard command")
+	}
+	_ = cmd()
+	if copied != "selected" {
+		t.Fatalf("copied = %q, want selected", copied)
+	}
+}
+
+func TestBtwCtrlCReleasesSideEventWait(t *testing.T) {
+	sideEvents := make(chan event.Event, 8)
+	ctrl := newBtwTestController(t, &eventSink{ch: sideEvents}, nil)
+	if err := ctrl.StartSide(""); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+	m := newChatTUI(ctrl, "", make(chan event.Event, 8), 80, sideEvents)
+	m.surface = tuiSurfaceSide
+	m.sideEventWait = true
+	m.sideReleaseCh = make(chan struct{})
+	waitCmd := waitForSideEvent(sideEvents, m.sideReleaseCh, m.sideGeneration)
+
+	next, _ := m.update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	m = next.(chatTUI)
+	if m.surface != tuiSurfaceMain {
+		t.Fatalf("surface = %v, want main", m.surface)
+	}
+	if _, ok := waitCmd().(sideWaitReleaseMsg); !ok {
+		t.Fatal("side wait should release with sideWaitReleaseMsg")
+	}
+
+	started := make(chan string, 1)
+	ctrl = newBtwTestController(t, &eventSink{ch: sideEvents}, started)
+	m.ctrl = ctrl
+	m.input.SetValue("/btw next side")
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(chatTUI)
+	if cmd == nil {
+		t.Fatal("new /btw should schedule a fresh side wait after return")
+	}
+	select {
+	case got := <-started:
+		if got != "next side" {
+			t.Fatalf("side prompt = %q, want next side", got)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("new side turn did not start")
+	}
+}
+
+func TestBtwStaleSideEventMessagesAreIgnored(t *testing.T) {
+	ctrl := newBtwTestController(t, event.Discard, nil)
+	if err := ctrl.StartSide(""); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+	m := newChatTUI(ctrl, "", make(chan event.Event, 8), 80, make(chan event.Event, 8))
+	m.surface = tuiSurfaceSide
+	m.sideGeneration = 2
+	m.sideEventWait = true
+
+	next, _ := m.update(sideEventMsg{
+		generation: 1,
+		event:      event.Event{Kind: event.Text, Text: "old side text"},
+	})
+	m = next.(chatTUI)
+	if !m.sideEventWait {
+		t.Fatal("stale side event should not clear the current side wait")
+	}
+	if strings.Contains(strings.Join(m.conversation(tuiSurfaceSide).transcript, "\n"), "old side text") {
+		t.Fatalf("stale side event was rendered: %v", m.conversation(tuiSurfaceSide).transcript)
+	}
+
+	next, _ = m.update(sideWaitReleaseMsg{generation: 1})
+	m = next.(chatTUI)
+	if !m.sideEventWait {
+		t.Fatal("stale side release should not clear the current side wait")
+	}
+}
+
+func TestBtwReturnAndStartDrainOldSideEvents(t *testing.T) {
+	sideEvents := make(chan event.Event, 8)
+	ctrl := newBtwTestController(t, &eventSink{ch: sideEvents}, nil)
+	if err := ctrl.StartSide(""); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+	m := newChatTUI(ctrl, "", make(chan event.Event, 8), 80, sideEvents)
+	m.surface = tuiSurfaceSide
+	sideEvents <- event.Event{Kind: event.Text, Text: "old buffered side text"}
+
+	next, _ := m.update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	m = next.(chatTUI)
+	select {
+	case e := <-sideEvents:
+		t.Fatalf("old side event should be drained on return, got %+v", e)
+	default:
+	}
+
+	sideEvents <- event.Event{Kind: event.Text, Text: "older buffered side text"}
+	m.input.SetValue("/btw")
+	next, _ = m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(chatTUI)
+	if m.surface != tuiSurfaceSide {
+		t.Fatalf("surface = %v, want side", m.surface)
+	}
+	select {
+	case e := <-sideEvents:
+		t.Fatalf("old side event should be drained before start, got %+v", e)
+	default:
+	}
+	if strings.Contains(strings.Join(m.conversation(tuiSurfaceSide).transcript, "\n"), "older buffered side text") {
+		t.Fatalf("old side event was rendered after restart: %v", m.conversation(tuiSurfaceSide).transcript)
+	}
+}
+
+func TestBtwSideToolResultFitsTranscriptContentWidth(t *testing.T) {
+	ctrl := newBtwTestController(t, event.Discard, nil)
+	if err := ctrl.StartSide(""); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m.surface = tuiSurfaceSide
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
+	m = next.(chatTUI)
+	next, _ = m.Update(sideEventMsg{
+		generation: m.sideGeneration,
+		event: event.Event{
+			Kind: event.ToolResult,
+			Tool: event.Tool{Name: "bash", Output: strings.Repeat("x", 120)},
+		},
+	})
+	m = next.(chatTUI)
+
+	wantW := transcriptContentWidth(80, false)
+	if len(m.wrappedLines) != 1 {
+		t.Fatalf("side tool result wrapped into %d lines at width %d: %q", len(m.wrappedLines), wantW, m.wrappedLines)
+	}
+	if got := visibleWidth(m.wrappedLines[0]); got != wantW {
+		t.Fatalf("side tool result width = %d, want %d: %q", got, wantW, m.wrappedLines[0])
+	}
+}
+
+func TestBtwSideTextUsesMarkdownWidth(t *testing.T) {
+	ctrl := newBtwTestController(t, event.Discard, nil)
+	if err := ctrl.StartSide(""); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 30)
+	m.surface = tuiSurfaceSide
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 30, Height: 12})
+	m = next.(chatTUI)
+	for _, chunk := range []string{"> The ", "user ", "is ", "in ", "a ", "side ", "conversation ", "and ", "wants ", "to ", "test ", "some ", "related ", "content. ", "They ", "have ", "not ", "specified ", "exactly ", "what ", "to ", "test."} {
+		next, _ = m.Update(sideEventMsg{
+			generation: m.sideGeneration,
+			event: event.Event{
+				Kind: event.Text,
+				Text: chunk,
+			},
+		})
+		m = next.(chatTUI)
+	}
+
+	if len(m.wrappedLines) > 8 {
+		t.Fatalf("side markdown text wrapped into %d narrow lines, want <= 8: %q", len(m.wrappedLines), m.wrappedLines)
+	}
+}
+
+func TestBtwSideReasoningStreamsIntoWidthBoundBlock(t *testing.T) {
+	ctrl := newBtwTestController(t, event.Discard, nil)
+	if err := ctrl.StartSide(""); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 30)
+	m.surface = tuiSurfaceSide
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 30, Height: 12})
+	m = next.(chatTUI)
+	for _, chunk := range []string{"The ", "user ", "is ", "in ", "a ", "side ", "conversation ", "and ", "wants ", "to ", "test ", "some ", "related ", "content. ", "They ", "have ", "not ", "specified ", "exactly ", "what ", "to ", "test."} {
+		next, _ = m.Update(sideEventMsg{
+			generation: m.sideGeneration,
+			event: event.Event{
+				Kind: event.Reasoning,
+				Text: chunk,
+			},
+		})
+		m = next.(chatTUI)
+	}
+
+	if got := m.conversation(tuiSurfaceSide).transcript; len(got) > 2 {
+		t.Fatalf("side reasoning should rewrite one live block, got %d transcript entries: %q", len(got), got)
+	}
+	if len(m.wrappedLines) > reasoningTailLines+1 {
+		t.Fatalf("side reasoning kept %d wrapped lines, want <= %d: %q", len(m.wrappedLines), reasoningTailLines+1, m.wrappedLines)
+	}
+}
+
+func TestBtwUnavailableGuidesMainMessageFirst(t *testing.T) {
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{})
+	m.input.SetValue("/btw explain")
+
+	next, _ := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(chatTUI)
+	if !strings.Contains(strings.Join(m.transcript, "\n"), "send a main-thread message") {
+		t.Fatalf("missing no-main-history guidance: %v", m.transcript)
 	}
 }
 

@@ -1,6 +1,8 @@
 VERSION := $(shell git describe --tags --always 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 GOEXE := $(shell go env GOEXE)
+TEST_TIMEOUT ?= 30s
+TEST_PKGS ?= ./...
 
 .PHONY: build vet fmt test hooks cross clean
 
@@ -15,7 +17,7 @@ fmt:
 	gofmt -w .
 
 test:
-	go test ./...
+	go test -timeout=$(TEST_TIMEOUT) $(TEST_PKGS)
 
 hooks:
 	@git config core.hooksPath .githooks

@@ -201,6 +201,11 @@ type Agent struct {
 	// the outside via SetPlanMode.
 	planMode atomic.Bool
 
+	// sideReadOnly, when true, refuses any non-ReadOnly tool call with side-mode
+	// wording. It reuses the same bash read-only classifier as plan mode without
+	// making the side agent behave like plan mode.
+	sideReadOnly atomic.Bool
+
 	// gate, when non-nil, is the per-call permission gate consulted after the
 	// plan-mode check. nil disables gating entirely.
 	gate Gate
@@ -324,6 +329,10 @@ const (
 // running it. The cache-friendly bits — system prompt, tools schema, message
 // history — are left untouched, so the toggle costs nothing in cache hits.
 func (a *Agent) SetPlanMode(v bool) { a.planMode.Store(v) }
+
+// SetSideReadOnly flips the read-only gate used by ephemeral side conversations.
+// It does not alter prompt composition, tool schemas, or plan-mode state.
+func (a *Agent) SetSideReadOnly(v bool) { a.sideReadOnly.Store(v) }
 
 // SetTools replaces the agent's tool registry. The next API call picks up the
 // new tool schema; tools already cached in the provider prefix are unaffected
@@ -1772,6 +1781,15 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 			errMsg:  "blocked by loop guard",
 		}
 	}
+	if a.sideReadOnly.Load() {
+		if blocked, msg := a.sideReadOnlyBlocked(call.Name, t.ReadOnly(), json.RawMessage(call.Arguments)); blocked {
+			return toolOutcome{
+				output:  msg,
+				blocked: true,
+				errMsg:  "blocked: side read-only mode",
+			}
+		}
+	}
 	if a.planMode.Load() {
 		// Translate the tool's optional plan-mode self-report into the policy's
 		// tri-state. Mirrors the t.(tool.Previewer) assertion precedent below.
@@ -1917,9 +1935,34 @@ func (a *Agent) planModeBlocked(toolName string, readOnly, untrusted bool, safet
 	return decision.Blocked, decision.Message
 }
 
+func (a *Agent) sideReadOnlyBlocked(toolName string, readOnly bool, args json.RawMessage) (blocked bool, message string) {
+	if readOnly {
+		return false, ""
+	}
+	if toolName == "bash" {
+		if blocked, msg := sideReadOnlyBashBlocked(args); blocked {
+			return true, msg
+		}
+		return false, ""
+	}
+	return true, fmt.Sprintf("blocked: %q is a writer tool and side read-only mode is active. Return to the main thread for file or workspace changes.", toolName)
+}
+
 func planModeBashBlocked(args json.RawMessage) (bool, string) {
 	decision := planmode.Policy{}.Decide(planmode.Call{Name: "bash", Args: args})
 	return decision.Blocked, decision.Message
+}
+
+func sideReadOnlyBashBlocked(args json.RawMessage) (bool, string) {
+	decision := planmode.Policy{}.Decide(planmode.Call{Name: "bash", Args: args})
+	if !decision.Blocked {
+		return false, ""
+	}
+	msg := strings.ReplaceAll(decision.Message, "plan mode", "side read-only mode")
+	msg = strings.ReplaceAll(msg, "exit side read-only mode", "return to the main thread")
+	msg = strings.ReplaceAll(msg, "background execution", "run_in_background")
+	msg = strings.ReplaceAll(msg, "while planning", "in side mode")
+	return true, msg
 }
 
 func (a *Agent) repeatedSuccessBlock(call provider.ToolCall, t tool.Tool) (string, bool) {

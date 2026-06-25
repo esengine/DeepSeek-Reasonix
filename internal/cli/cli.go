@@ -193,12 +193,17 @@ func configureCLIThemeFromConfigNoProbe() {
 // the agent's typed event stream — runAgent passes a TextSink that renders to
 // stdout, the TUI passes an event-channel sink so events become tea.Msgs.
 func setup(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink) (*control.Controller, error) {
+	return setupWithSideSink(ctx, modelName, maxStepsOverride, requireKey, sink, event.Discard)
+}
+
+func setupWithSideSink(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink, sideSink event.Sink) (*control.Controller, error) {
 	migrateMCPConfigForCLIWorkspace()
 	return boot.Build(ctx, boot.Options{
 		Model:      modelName,
 		MaxSteps:   maxStepsOverride,
 		RequireKey: requireKey,
 		Sink:       sink,
+		SideSink:   sideSink,
 		SessionDir: resolveCLISessionDir(),
 	})
 }
@@ -217,15 +222,13 @@ func resolveCLISessionDir() string {
 	return config.SessionDir()
 }
 
-// setupQuiet is like setup but suppresses plugin subprocess stderr output.
-// Used during model switch inside a bubbletea session to prevent plugin logs
-// from corrupting the TUI's terminal raw mode.
-func setupQuiet(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink) (*control.Controller, error) {
+func setupQuietWithSideSink(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink, sideSink event.Sink) (*control.Controller, error) {
 	return boot.Build(ctx, boot.Options{
 		Model:      modelName,
 		MaxSteps:   maxStepsOverride,
 		RequireKey: requireKey,
 		Sink:       sink,
+		SideSink:   sideSink,
 		Stderr:     io.Discard,
 	})
 }
@@ -573,10 +576,12 @@ func chatREPL(args []string) int {
 	// streaming bursts (tool results, long answers) shouldn't backpressure the
 	// agent goroutine.
 	eventCh := make(chan event.Event, 1024)
+	sideEventCh := make(chan event.Event, 1024)
 
 	var sink event.Sink = &eventSink{ch: eventCh}
+	var sideSink event.Sink = &eventSink{ch: sideEventCh}
 	sink = withNotifications(sink, cfg)
-	ctrl, err := setup(ctx, *model, *maxSteps, false, sink)
+	ctrl, err := setupWithSideSink(ctx, *model, *maxSteps, false, sink, sideSink)
 	if err != nil && errors.Is(err, boot.ErrUnknownModel) && isInteractive() && config.SourcePath() == "" {
 		// True first run whose default model can't resolve: guide setup, then retry.
 		// With a config present, fall through to the descriptive error — re-running
@@ -585,7 +590,7 @@ func chatREPL(args []string) int {
 		if rc := interactiveSetup(defaultConfigTarget(), defaultEnvTarget()); rc != 0 {
 			return rc
 		}
-		ctrl, err = setup(ctx, *model, *maxSteps, false, sink)
+		ctrl, err = setupWithSideSink(ctx, *model, *maxSteps, false, sink, sideSink)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -635,7 +640,7 @@ func chatREPL(args []string) int {
 		ctrl.SetAutoApproveTools(true)
 	}
 
-	m := newChatTUI(ctrl, missing, eventCh, termW)
+	m := newChatTUI(ctrl, missing, eventCh, termW, sideEventCh)
 	if cfg, err := config.Load(); err == nil {
 		m.outputStyle = cfg.Agent.OutputStyle    // shown as the active entry in /output-style
 		m.statuslineCmd = cfg.Statusline.Command // custom status-line command, "" = built-in row
@@ -648,7 +653,7 @@ func chatREPL(args []string) int {
 	// runModelSubcommand performs the swap on the live copy. The same stable sink
 	// feeds the new controller, so events keep flowing to this TUI.
 	m.buildController = func(ref string, carry []provider.Message, resumePath string) (*control.Controller, error) {
-		c, err := setupQuiet(ctx, ref, *maxSteps, false, sink)
+		c, err := setupQuietWithSideSink(ctx, ref, *maxSteps, false, sink, sideSink)
 		if err != nil {
 			return nil, err
 		}
