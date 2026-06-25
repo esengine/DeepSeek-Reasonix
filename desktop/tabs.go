@@ -74,6 +74,13 @@ type WorkspaceTab struct {
 	usageTelemetry sessionUsageStats
 	telemMu        sync.Mutex
 
+	// plannerDisplay keeps display-only planner output for the in-flight turn.
+	// The executor session remains the model-facing transcript; this sidecar
+	// lets frontend history restore the planner cards after a rebuild/reload.
+	plannerDisplay      []HistoryMessage
+	plannerDisplayTools map[string]string
+	plannerDisplayMu    sync.Mutex
+
 	model            string // active model ref (for meta)
 	effort           *string
 	tokenMode        string
@@ -498,6 +505,145 @@ func (t *WorkspaceTab) resetTelemetry() {
 	t.telemMu.Unlock()
 }
 
+func (t *WorkspaceTab) resetPlannerDisplayTurn() {
+	t.plannerDisplayMu.Lock()
+	if len(t.plannerDisplay) == 0 {
+		t.plannerDisplayTools = nil
+	}
+	t.plannerDisplayMu.Unlock()
+}
+
+func (t *WorkspaceTab) recordPlannerDisplayEvent(e event.Event) {
+	if strings.TrimSpace(e.Source) != event.UsageSourcePlanner {
+		return
+	}
+	t.plannerDisplayMu.Lock()
+	defer t.plannerDisplayMu.Unlock()
+	switch e.Kind {
+	case event.Phase:
+		if strings.TrimSpace(e.Text) != "" {
+			t.plannerDisplay = append(t.plannerDisplay, HistoryMessage{Role: "phase", Content: e.Text})
+		}
+	case event.Reasoning:
+		if e.Text != "" {
+			hm := t.ensurePlannerAssistantLocked()
+			hm.Reasoning += e.Text
+		}
+	case event.Text:
+		if e.Text != "" {
+			hm := t.ensurePlannerAssistantLocked()
+			hm.Content += e.Text
+		}
+	case event.Message:
+		if e.Text != "" || e.Reasoning != "" || len(e.MemoryCitations) > 0 {
+			hm := t.ensurePlannerAssistantLocked()
+			if e.Text != "" {
+				hm.Content = e.Text
+			}
+			if e.Reasoning != "" {
+				hm.Reasoning = e.Reasoning
+			}
+			if len(e.MemoryCitations) > 0 {
+				hm.MemoryCitations = append([]provider.MemoryCitation(nil), e.MemoryCitations...)
+			}
+		}
+	case event.ToolDispatch:
+		if e.Tool.Partial || strings.TrimSpace(e.Tool.Name) == "" {
+			return
+		}
+		hm := t.ensurePlannerAssistantForToolLocked()
+		call := HistoryToolCall{
+			ID:        e.Tool.ID,
+			Name:      e.Tool.Name,
+			Arguments: e.Tool.Args,
+			Subject:   historyToolSubject(e.Tool.Name, e.Tool.Args),
+			Summary:   historyToolSummary(e.Tool.Name, e.Tool.Args, ""),
+			Diff:      e.Tool.Diff,
+			Added:     e.Tool.Added,
+			Removed:   e.Tool.Removed,
+		}
+		replaced := false
+		if call.ID != "" {
+			for i := range hm.ToolCalls {
+				if hm.ToolCalls[i].ID == call.ID {
+					hm.ToolCalls[i] = call
+					replaced = true
+					break
+				}
+			}
+			if t.plannerDisplayTools == nil {
+				t.plannerDisplayTools = map[string]string{}
+			}
+			t.plannerDisplayTools[call.ID] = call.Name
+		}
+		if !replaced {
+			hm.ToolCalls = append(hm.ToolCalls, call)
+		}
+	case event.ToolResult:
+		callID := strings.TrimSpace(e.Tool.ID)
+		content := firstNonEmpty(e.Tool.Output, e.Tool.Err)
+		display, errPreview := plannerToolResultDisplay(content, e.Tool.Err != "")
+		if callID != "" {
+			updateHistoryToolCallSummary(t.plannerDisplay, callID, content)
+		}
+		toolName := e.Tool.Name
+		if toolName == "" && t.plannerDisplayTools != nil {
+			toolName = t.plannerDisplayTools[callID]
+		}
+		t.plannerDisplay = append(t.plannerDisplay, HistoryMessage{
+			Role:            "tool",
+			ToolCallID:      callID,
+			ToolName:        toolName,
+			Content:         display,
+			ToolResultError: errPreview,
+		})
+	case event.Notice:
+		if strings.TrimSpace(e.Text) != "" {
+			level := "info"
+			if e.Level == event.LevelWarn {
+				level = "warn"
+			}
+			t.plannerDisplay = append(t.plannerDisplay, HistoryMessage{Role: "notice", Level: level, Content: e.Text})
+		}
+	}
+}
+
+func (t *WorkspaceTab) ensurePlannerAssistantLocked() *HistoryMessage {
+	if n := len(t.plannerDisplay); n > 0 && t.plannerDisplay[n-1].Role == "assistant" {
+		return &t.plannerDisplay[n-1]
+	}
+	t.plannerDisplay = append(t.plannerDisplay, HistoryMessage{Role: "assistant"})
+	return &t.plannerDisplay[len(t.plannerDisplay)-1]
+}
+
+func (t *WorkspaceTab) ensurePlannerAssistantForToolLocked() *HistoryMessage {
+	if n := len(t.plannerDisplay); n > 0 && t.plannerDisplay[n-1].Role == "assistant" && strings.TrimSpace(t.plannerDisplay[n-1].Content) == "" {
+		return &t.plannerDisplay[n-1]
+	}
+	t.plannerDisplay = append(t.plannerDisplay, HistoryMessage{Role: "assistant"})
+	return &t.plannerDisplay[len(t.plannerDisplay)-1]
+}
+
+func plannerToolResultDisplay(content string, failed bool) (display, errPreview string) {
+	if strings.TrimSpace(content) == "" {
+		return "", ""
+	}
+	if failed || historyToolResultFailed(content) {
+		display = clipHistoryToolPreview(strings.TrimSpace(content))
+		return display, display
+	}
+	return "", ""
+}
+
+func (t *WorkspaceTab) takePlannerDisplayTurn() []HistoryMessage {
+	t.plannerDisplayMu.Lock()
+	defer t.plannerDisplayMu.Unlock()
+	out := cloneHistoryMessages(t.plannerDisplay)
+	t.plannerDisplay = nil
+	t.plannerDisplayTools = nil
+	return out
+}
+
 // tabEventSink wraps a parent event.Sink and prepends a tabId to every wire
 // event so the frontend can route it to the correct tab's reducer.
 type tabEventSink struct {
@@ -512,6 +658,7 @@ func (s *tabEventSink) Emit(e event.Event) {
 	if s.app != nil {
 		switch e.Kind {
 		case event.TurnStarted:
+			s.resetPlannerDisplayTurn()
 			s.recordTurnStarted()
 		case event.Usage:
 			s.recordUsageTelemetry(e)
@@ -538,8 +685,12 @@ func (s *tabEventSink) Emit(e event.Event) {
 	if e.Kind == event.ToolResult && e.Tool.Name == "read_file" && e.Tool.Err == "" {
 		s.recordReadTelemetry(e)
 	}
+	if s.app != nil {
+		s.recordPlannerDisplay(e)
+	}
 	// Persist after each turn so a force-kill loses at most the in-flight prompt.
 	if e.Kind == event.TurnDone && s.app != nil {
+		s.flushPlannerDisplay()
 		s.app.scheduleTabSnapshot(s.tabID)
 	}
 }
@@ -781,6 +932,62 @@ func (s *tabEventSink) recordUsageTelemetry(e event.Event) {
 	if sp != "" {
 		_ = saveTelemetry(sp+".telemetry.json", tab.telemetrySnapshot())
 	}
+}
+
+func (s *tabEventSink) resetPlannerDisplayTurn() {
+	tab, _ := s.eventTabAndController()
+	if tab != nil {
+		tab.resetPlannerDisplayTurn()
+	}
+}
+
+func (s *tabEventSink) recordPlannerDisplay(e event.Event) {
+	tab, _ := s.eventTabAndController()
+	if tab != nil {
+		tab.recordPlannerDisplayEvent(e)
+	}
+}
+
+func (s *tabEventSink) flushPlannerDisplay() {
+	tab, ctrl := s.eventTabAndController()
+	if tab == nil || ctrl == nil {
+		return
+	}
+	messages := tab.takePlannerDisplayTurn()
+	if len(messages) == 0 {
+		return
+	}
+	sessionPath := ctrl.SessionPath()
+	if sessionPath == "" {
+		return
+	}
+	userContent := lastUserMessageContent(ctrl.History())
+	if strings.TrimSpace(userContent) == "" {
+		return
+	}
+	_ = recordSessionPlannerDisplay(controllerSessionDir(ctrl), sessionPath, userContent, messages)
+}
+
+func (s *tabEventSink) eventTabAndController() (*WorkspaceTab, control.SessionAPI) {
+	if s.app == nil {
+		return nil, nil
+	}
+	s.app.mu.RLock()
+	defer s.app.mu.RUnlock()
+	tab := s.app.tabByEventSinkIDLocked(s.tabID)
+	if tab == nil {
+		return nil, nil
+	}
+	return tab, tab.Ctrl
+}
+
+func lastUserMessageContent(msgs []provider.Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == provider.RoleUser {
+			return msgs[i].Content
+		}
+	}
+	return ""
 }
 
 func (s *tabEventSink) telemetryTab() (*WorkspaceTab, string) {

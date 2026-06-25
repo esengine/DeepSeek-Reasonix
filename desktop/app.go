@@ -3041,13 +3041,20 @@ func (a *App) HistoryForTab(tabID string) []HistoryMessage {
 		return []HistoryMessage{}
 	}
 	msgs := ctrl.History()
-	return historyMessages(msgs, sessionDisplayResolver(controllerSessionDir(ctrl), ctrl.SessionPath()))
+	dir := controllerSessionDir(ctrl)
+	path := ctrl.SessionPath()
+	return historyMessagesWithPlannerDisplays(msgs, sessionDisplayResolver(dir, path), sessionPlannerDisplayTurns(dir, path))
 }
 
 func historyMessages(msgs []provider.Message, resolveUserContent func(string) string) []HistoryMessage {
+	return historyMessagesWithPlannerDisplays(msgs, resolveUserContent, nil)
+}
+
+func historyMessagesWithPlannerDisplays(msgs []provider.Message, resolveUserContent func(string) string, plannerTurns []plannerDisplayTurn) []HistoryMessage {
 	out := make([]HistoryMessage, 0, len(msgs))
 	replayedTodoArgs := historyTodoArgsWithCompleteSteps(msgs)
 	toolResults := historyToolResultsByID(msgs)
+	plannerByUserHash := plannerTurnsByUserHash(plannerTurns)
 	for _, m := range msgs {
 		content := m.Content
 		if m.Role == provider.RoleUser {
@@ -3095,6 +3102,40 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 			hm.Content, hm.ToolResultArchived, hm.ToolResultError = historyToolResultContent(m.Content, m.ToolCallID != "")
 		}
 		out = append(out, hm)
+		if m.Role == provider.RoleUser {
+			if turns := plannerByUserHash[messageDisplayKey(m.Content)]; len(turns) > 0 {
+				out = append(out, cloneHistoryMessages(turns[0].Messages)...)
+				plannerByUserHash[messageDisplayKey(m.Content)] = turns[1:]
+			}
+		}
+	}
+	return out
+}
+
+func plannerTurnsByUserHash(turns []plannerDisplayTurn) map[string][]plannerDisplayTurn {
+	out := map[string][]plannerDisplayTurn{}
+	for _, turn := range turns {
+		if strings.TrimSpace(turn.UserHash) == "" || len(turn.Messages) == 0 {
+			continue
+		}
+		out[turn.UserHash] = append(out[turn.UserHash], turn)
+	}
+	return out
+}
+
+func cloneHistoryMessages(in []HistoryMessage) []HistoryMessage {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]HistoryMessage, len(in))
+	copy(out, in)
+	for i := range out {
+		if len(in[i].MemoryCitations) > 0 {
+			out[i].MemoryCitations = append([]provider.MemoryCitation(nil), in[i].MemoryCitations...)
+		}
+		if len(in[i].ToolCalls) > 0 {
+			out[i].ToolCalls = append([]HistoryToolCall(nil), in[i].ToolCalls...)
+		}
 	}
 	return out
 }
@@ -3408,7 +3449,11 @@ func previewSessionMessages(sessionDir, path string) ([]HistoryMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return historyMessages(loaded.Snapshot(), sessionDisplayResolver(sessionDir, sessionPath)), nil
+	return historyMessagesWithPlannerDisplays(
+		loaded.Snapshot(),
+		sessionDisplayResolver(sessionDir, sessionPath),
+		sessionPlannerDisplayTurns(sessionDir, sessionPath),
+	), nil
 }
 
 type previewEventRecord struct {

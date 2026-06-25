@@ -27,6 +27,7 @@ import (
 
 const sessionTitlesFile = ".titles.json"
 const sessionDisplayFile = ".display.json"
+const sessionPlannerDisplayFile = ".planner-display.json"
 const sessionTrashDir = ".trash"
 const sessionTrashMetaFile = ".trash-meta.json"
 
@@ -728,6 +729,13 @@ func validateTrashedSessionPath(dir, sessionPath string) (string, string, string
 
 type sessionDisplayMap map[string]map[string]string
 
+type sessionPlannerDisplayMap map[string][]plannerDisplayTurn
+
+type plannerDisplayTurn struct {
+	UserHash string           `json:"userHash"`
+	Messages []HistoryMessage `json:"messages"`
+}
+
 func messageDisplayKey(content string) string {
 	sum := sha256.Sum256([]byte(content))
 	return fmt.Sprintf("%x", sum[:])
@@ -741,6 +749,83 @@ func loadSessionDisplays(dir string) sessionDisplayMap {
 	}
 	_ = json.Unmarshal(b, &m)
 	return m
+}
+
+func sessionPlannerDisplayPath(dir string) string {
+	return filepath.Join(dir, sessionPlannerDisplayFile)
+}
+
+func loadSessionPlannerDisplays(dir string) sessionPlannerDisplayMap {
+	m := sessionPlannerDisplayMap{}
+	if strings.TrimSpace(dir) == "" {
+		return m
+	}
+	b, err := os.ReadFile(sessionPlannerDisplayPath(dir))
+	if err != nil {
+		return m
+	}
+	_ = json.Unmarshal(b, &m)
+	return m
+}
+
+func saveSessionPlannerDisplays(dir string, m sessionPlannerDisplayMap) error {
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".planner-display.*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return fileutil.ReplaceFile(tmpPath, sessionPlannerDisplayPath(dir))
+}
+
+func recordSessionPlannerDisplay(dir, sessionPath, userContent string, messages []HistoryMessage) error {
+	if strings.TrimSpace(sessionPath) == "" || strings.TrimSpace(userContent) == "" || len(messages) == 0 {
+		return nil
+	}
+	m := loadSessionPlannerDisplays(dir)
+	key := filepath.Base(sessionPath)
+	turn := plannerDisplayTurn{
+		UserHash: messageDisplayKey(userContent),
+		Messages: cloneHistoryMessages(messages),
+	}
+	m[key] = append(m[key], turn)
+	return saveSessionPlannerDisplays(dir, m)
+}
+
+func sessionPlannerDisplayTurns(dir, sessionPath string) []plannerDisplayTurn {
+	if strings.TrimSpace(dir) == "" || strings.TrimSpace(sessionPath) == "" {
+		return nil
+	}
+	turns := loadSessionPlannerDisplays(dir)[filepath.Base(sessionPath)]
+	if len(turns) == 0 {
+		return nil
+	}
+	out := make([]plannerDisplayTurn, 0, len(turns))
+	for _, turn := range turns {
+		if strings.TrimSpace(turn.UserHash) == "" || len(turn.Messages) == 0 {
+			continue
+		}
+		out = append(out, plannerDisplayTurn{
+			UserHash: turn.UserHash,
+			Messages: cloneHistoryMessages(turn.Messages),
+		})
+	}
+	return out
 }
 
 func saveSessionDisplays(dir string, m sessionDisplayMap) error {

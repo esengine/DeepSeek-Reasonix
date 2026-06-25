@@ -247,6 +247,7 @@ type Event struct {
 	Tool             Tool                      // ToolDispatch / ToolResult
 	Usage            *provider.Usage           // Usage
 	Pricing          *provider.Pricing         // Usage: for cost display (nil = omit cost)
+	Source           string                    // optional display/event source (executor, planner, subagent, ...)
 	UsageSource      string                    // Usage: billable call source; empty means executor for compatibility
 	CacheDiagnostics *CacheDiagnostics         // Usage: cache-churn attribution (nil = N/A)
 	// SessionHit/SessionMiss carry cumulative cache tokens across the whole
