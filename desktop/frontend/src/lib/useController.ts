@@ -947,10 +947,14 @@ export function useController() {
     tabId: string,
     reset = false,
     reason: HydrateReason = "startup",
-    options: { skipHistory?: boolean; placeholderItems?: Item[] } = {},
+    options: { skipHistory?: boolean; placeholderItems?: Item[]; preserveCachedHistory?: boolean } = {},
   ) => {
     const seq = bumpSessionLoadSeq(tabId);
     const hydrateStartedAt = Date.now();
+    const skipHistory = Boolean(
+      options.skipHistory ||
+      (options.preserveCachedHistory && !reset && (statesRef.current.get(tabId)?.items.length ?? 0) > 0),
+    );
     addBreadcrumb("tab.hydrate", `start ${reason} ${tabId}`);
     dispatchTo(tabId, { type: "hydrate_start", reason, placeholderItems: options.placeholderItems });
     if (reset && sessionLoadCurrent(tabId, seq)) dispatchTo(tabId, { type: "reset" });
@@ -966,14 +970,14 @@ export function useController() {
     // without waiting for slower ancillary calls (e.g. BalanceForTab network).
     const [meta, history] = await Promise.all([
       app.MetaForTab(tabId).catch((err) => { noteFailure("meta", err); return undefined; }),
-      options.skipHistory
+      skipHistory
         ? Promise.resolve(undefined)
         : app.HistoryForTab(tabId).catch((err) => { noteFailure("history", err); return undefined; }),
     ]);
 
     if (!stillCurrent()) return;
     if (meta !== undefined) dispatchTo(tabId, { type: "meta", meta });
-    if (!options.skipHistory && history !== undefined) {
+    if (!skipHistory && history !== undefined) {
       const messages = asArray(history);
       dispatchTo(tabId, { type: "history", messages });
       addBreadcrumb(
@@ -986,8 +990,9 @@ export function useController() {
           `history-done ${tabId} count=${messages.length} ms=${Date.now() - historyStartedAt}`,
         );
       }
-    } else if (options.skipHistory) {
-      addBreadcrumb("tab.hydrate", `history skipped ${tabId} reason=cached-live-turn`);
+    } else if (skipHistory) {
+      const skipReason = options.skipHistory ? "cached-live-turn" : "cached-transcript";
+      addBreadcrumb("tab.hydrate", `history skipped ${tabId} reason=${skipReason}`);
       if (reason === "switch-tab") {
         addBreadcrumb("tab.switch", `history-done ${tabId} skipped ms=${Date.now() - historyStartedAt}`);
       }
@@ -1149,7 +1154,7 @@ export function useController() {
     const offReady = onReady(() => {
       const readyTabId = activeTabIdRef.current;
       if (readyTabId) {
-        void loadSessionDataForTab(readyTabId, false, "startup");
+        void loadSessionDataForTab(readyTabId, false, "startup", { preserveCachedHistory: true });
         return;
       }
       void syncActiveTabFromBackend(false, true);

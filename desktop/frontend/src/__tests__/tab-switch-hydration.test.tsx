@@ -5,7 +5,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { AppBindings } from "../lib/bridge";
 import { useController } from "../lib/useController";
-import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, JobView, Meta, TabMeta } from "../lib/types";
+import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, JobView, Meta, TabMeta, WireEvent } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -138,13 +138,19 @@ let setActiveCalls = 0;
 let newSessionCalls = 0;
 const runningTabs = new Set<string>();
 const tabsById = new Map([tabA, tabB, tabC, tabD].map((tab) => [tab.id, tab]));
+const eventHandlers: Array<(e: WireEvent) => void> = [];
+const readyHandlers: Array<() => void> = [];
 
 function currentTabs(): TabMeta[] {
   return [tabA, tabB, tabC, tabD].map((tab) => ({ ...tab, active: tab.id === backendActiveId, running: runningTabs.has(tab.id) }));
 }
 
 window.runtime = {
-  EventsOn: () => () => {},
+  EventsOn: (name: string, cb: (...data: unknown[]) => void) => {
+    if (name === "agent:event") eventHandlers.push(cb as (e: WireEvent) => void);
+    if (name === "agent:ready") readyHandlers.push(cb as () => void);
+    return () => {};
+  },
   BrowserOpenURL: () => {},
 };
 window.go = {
@@ -249,6 +255,24 @@ await act(async () => {
 eq(controller?.activeTabId, "tab-a", "late history for another tab does not change the active tab");
 ok(controller?.state.items.some((item) => item.kind === "user" && item.text === "cached A") ?? false, "late history for another tab does not overwrite the active transcript");
 ok(!(controller?.state.items.some((item) => item.kind === "user" && item.text === "late B") ?? false), "late history stays scoped to its tab state");
+
+await act(async () => {
+  for (const handler of eventHandlers) handler({ kind: "phase", text: "Planner is thinking", tabId: "tab-a" });
+  for (const handler of eventHandlers) handler({ kind: "message", text: "Planner kept", reasoning: "Planner notes", tabId: "tab-a" });
+  await flushPromises();
+});
+await waitFor("cached planner transcript", () =>
+  controller?.state.items.some((item) => item.kind === "assistant" && item.text === "Planner kept" && item.reasoning === "Planner notes") ?? false
+);
+const historyCallsBeforeReady = historyCalls.length;
+await act(async () => {
+  for (const handler of readyHandlers) handler();
+  await flushPromises();
+});
+await waitFor("ready hydration settled", () => controller?.state.hydrating === false);
+eq(historyCalls.length, historyCallsBeforeReady, "agent ready with cached transcript skips executor-only history hydration");
+ok(controller?.state.items.some((item) => item.kind === "phase" && item.text === "Planner is thinking") ?? false, "agent ready keeps cached planner phase");
+ok(controller?.state.items.some((item) => item.kind === "assistant" && item.text === "Planner kept" && item.reasoning === "Planner notes") ?? false, "agent ready keeps cached planner answer");
 
 await act(async () => {
   controller?.sendToTab("tab-c", "streaming C");
