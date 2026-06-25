@@ -18,6 +18,22 @@ func TestObserveClassifiesEvents(t *testing.T) {
 		{Kind: event.Usage, Usage: &provider.Usage{FinishReason: "tool_calls", CacheHitTokens: 60, CacheMissTokens: 40}},
 		{Kind: event.ToolResult, Tool: event.Tool{Name: "bash", Err: "blocked by permission policy"}},
 		{Kind: event.CompactionDone},
+		{Kind: event.MemoryCompilerStatsEvent, MemoryCompiler: &event.MemoryCompilerStats{
+			Injected:         true,
+			UsefulIR:         true,
+			CompiledTokens:   1100,
+			IROverheadTokens: 300,
+			MemoryReferences: 3,
+			Constraints:      2,
+			RiskNotes:        1,
+			ExecutionSteps:   4,
+			TotalNodes:       42,
+			HighSignalNodes:  11,
+			ToolResultNodes:  7,
+			DecisionNodes:    5,
+			StrategyCount:    3,
+			LearningCount:    6,
+		}},
 		{Kind: event.Notice, Text: "empty final answer blocked: model returned no visible answer text; retrying"},
 		{Kind: event.TurnDone, Err: errors.New("deepseek-flash: status 429: rate limited")},
 		{Kind: event.TurnDone},
@@ -27,13 +43,28 @@ func TestObserveClassifiesEvents(t *testing.T) {
 	}
 
 	want := map[string]map[string]int{
-		"finish_reason":  {"stop": 1, "tool_calls": 1},
-		"cache_hit":      {"99_100": 1, "50_80": 1},
-		"tool_error":     {"permission": 1},
-		"compaction":     {"total": 1},
-		"empty_final":    {"total": 1},
-		"provider_error": {"http_429": 1},
-		"turns":          {"total": 2},
+		"finish_reason":                      {"stop": 1, "tool_calls": 1},
+		"cache_hit":                          {"99_100": 1, "50_80": 1},
+		"tool_error":                         {"permission": 1},
+		"compaction":                         {"total": 1},
+		"memory_compiler_turn":               {"total": 1},
+		"memory_compiler_injected":           {"on": 1},
+		"memory_compiler_useful_ir":          {"on": 1},
+		"memory_compiler_compiled_tokens":    {"t_751_1500": 1},
+		"memory_compiler_ir_overhead_tokens": {"t_251_750": 1},
+		"memory_compiler_memory_refs":        {"n_2_3": 1},
+		"memory_compiler_constraints":        {"n_2_3": 1},
+		"memory_compiler_risk_notes":         {"n_1": 1},
+		"memory_compiler_execution_steps":    {"n_4_5": 1},
+		"memory_compiler_nodes":              {"n_21_50": 1},
+		"memory_compiler_high_signal_nodes":  {"n_6_20": 1},
+		"memory_compiler_tool_result_nodes":  {"n_6_20": 1},
+		"memory_compiler_decisions":          {"n_1_5": 1},
+		"memory_compiler_strategies":         {"n_1_5": 1},
+		"memory_compiler_learnings":          {"n_6_20": 1},
+		"empty_final":                        {"total": 1},
+		"provider_error":                     {"http_429": 1},
+		"turns":                              {"total": 2},
 	}
 	for sig, buckets := range want {
 		for b, n := range buckets {
@@ -113,6 +144,7 @@ func TestObserveSettingsSnapshotUsesSafeBuckets(t *testing.T) {
 		"settings_close_behavior":          "quit",
 		"settings_display_mode":            "compact",
 		"settings_auto_plan":               "on",
+		"settings_memory_compiler":         "on",
 		"settings_status_bar_style":        "icon",
 		"settings_status_bar_items_count":  "n_3",
 		"settings_check_updates":           "off",
@@ -136,6 +168,9 @@ func TestObserveSettingsSnapshotUsesSafeBuckets(t *testing.T) {
 func TestObserveSettingsSnapshotCountsDisabledPlannerAsOff(t *testing.T) {
 	cfg := config.Default()
 	cfg.Agent.PlannerModel = ""
+	if err := cfg.SetMemoryCompilerEnabled(false); err != nil {
+		t.Fatalf("SetMemoryCompilerEnabled(false): %v", err)
+	}
 
 	m := newMetricsAggregator(t.TempDir())
 	m.observeSettingsSnapshot(cfg)
@@ -145,6 +180,9 @@ func TestObserveSettingsSnapshotCountsDisabledPlannerAsOff(t *testing.T) {
 	}
 	if got := m.c["settings_planner_model"][safeModelBucket(cfg, cfg.DefaultModel)]; got != 0 {
 		t.Fatalf("disabled planner should not count the default model, got %d", got)
+	}
+	if got := m.c["settings_memory_compiler"]["off"]; got != 1 {
+		t.Fatalf("settings_memory_compiler/off = %d, want 1", got)
 	}
 }
 

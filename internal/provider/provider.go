@@ -37,10 +37,22 @@ type Message struct {
 	// replayed on the next turn when a tool call followed thinking; providers
 	// without signed reasoning (e.g. the openai-compatible ones) leave it empty.
 	// Round-tripped alongside ReasoningContent.
-	ReasoningSignature string     `json:"reasoning_signature,omitempty"`
-	ToolCalls          []ToolCall `json:"tool_calls,omitempty"`   // set by assistant
-	ToolCallID         string     `json:"tool_call_id,omitempty"` // links a tool result to its call
-	Name               string     `json:"name,omitempty"`         // tool message: tool name
+	ReasoningSignature string           `json:"reasoning_signature,omitempty"`
+	ToolCalls          []ToolCall       `json:"tool_calls,omitempty"`      // set by assistant
+	ToolCallID         string           `json:"tool_call_id,omitempty"`    // links a tool result to its call
+	Name               string           `json:"name,omitempty"`            // tool message: tool name
+	MemoryCitations    []MemoryCitation `json:"memoryCitations,omitempty"` // local UI metadata; provider requests ignore it
+}
+
+// MemoryCitation is local display metadata for memories that influenced an
+// assistant turn. Provider implementations must not forward it to model APIs.
+type MemoryCitation struct {
+	ID        string `json:"id,omitempty"`
+	Source    string `json:"source"`
+	LineStart int    `json:"lineStart,omitempty"`
+	LineEnd   int    `json:"lineEnd,omitempty"`
+	Note      string `json:"note,omitempty"`
+	Kind      string `json:"kind,omitempty"`
 }
 
 // ParseImageDataURL splits a `data:<media-type>;base64,<payload>` URL into its

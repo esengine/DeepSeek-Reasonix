@@ -541,16 +541,23 @@ func (a *App) createTabEntry(scope, workspaceRoot, topicID string) *WorkspaceTab
 	return a.createTabEntryWithID(scope, workspaceRoot, topicID, newTabID())
 }
 
+func desktopNewSessionDefaults() (string, string) {
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	return strings.TrimSpace(cfg.DefaultModel), normalizeToolApprovalMode(cfg.DesktopDefaultToolApprovalMode())
+}
+
 func (a *App) createTabEntryWithID(scope, workspaceRoot, topicID, id string) *WorkspaceTab {
+	model, toolApprovalMode := desktopNewSessionDefaults()
 	return &WorkspaceTab{
 		ID:               id,
 		Scope:            scope,
 		WorkspaceRoot:    workspaceRoot,
 		TopicID:          topicID,
 		TopicTitle:       topicTitleForTab(scope, workspaceRoot, topicID),
+		model:            model,
 		tokenMode:        boot.TokenModeFull,
-		mode:             "normal",
-		toolApprovalMode: control.ToolApprovalAsk,
+		mode:             tabModeFromAxes(false, toolApprovalMode == control.ToolApprovalYolo),
+		toolApprovalMode: toolApprovalMode,
 		disabledMCP:      map[string]ServerView{},
 	}
 }
@@ -640,22 +647,25 @@ func (a *App) domReady(_ context.Context) {
 
 // Submit runs raw user input as a turn; slash commands and @-references are
 // resolved by the controller. Output arrives asynchronously on eventChannel.
-func (a *App) Submit(input string) {
-	a.SubmitToTab("", input)
+func (a *App) Submit(input string) error {
+	return a.SubmitToTab("", input)
 }
 
-func (a *App) SubmitToTab(tabID, input string) {
-	if a.tabReadOnly(tabID) {
-		return
+func (a *App) SubmitToTab(tabID, input string) error {
+	tab, ctrl := a.tabAndCtrlByID(tabID)
+	if tab != nil && tab.ReadOnly {
+		return readOnlyChannelErr()
 	}
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "/effort" || strings.HasPrefix(trimmed, "/effort ") {
 		a.runEffortCommandForTab(tabID, trimmed)
-		return
+		return nil
 	}
-	if ctrl := a.ctrlByTabID(tabID); ctrl != nil {
-		ctrl.SubmitDisplay(input, input)
+	if ctrl == nil {
+		return workspaceNotReadyErr(tab)
 	}
+	ctrl.SubmitDisplay(input, input)
+	return nil
 }
 
 func (a *App) submitUserTurnToTab(tabID, input string) bool {
@@ -672,34 +682,38 @@ func (a *App) submitUserTurnToTab(tabID, input string) bool {
 
 // RunShell executes a shell command directly (bypassing the model) and streams
 // output as events on eventChannel.
-func (a *App) RunShell(command string) {
-	a.RunShellForTab("", command)
+func (a *App) RunShell(command string) error {
+	return a.RunShellForTab("", command)
 }
 
-func (a *App) RunShellForTab(tabID, command string) {
-	if a.tabReadOnly(tabID) {
-		return
+func (a *App) RunShellForTab(tabID, command string) error {
+	tab, ctrl := a.tabAndCtrlByID(tabID)
+	if tab != nil && tab.ReadOnly {
+		return readOnlyChannelErr()
 	}
-	if ctrl := a.ctrlByTabID(tabID); ctrl != nil {
-		ctrl.RunShell(command)
+	if ctrl == nil {
+		return workspaceNotReadyErr(tab)
 	}
+	ctrl.RunShell(command)
+	return nil
 }
 
 // SubmitDisplay runs input as a turn while recording a shorter UI-only display
 // string for the saved desktop transcript. The model still receives input.
-func (a *App) SubmitDisplay(display, input string) {
-	a.SubmitDisplayToTab("", display, input)
+func (a *App) SubmitDisplay(display, input string) error {
+	return a.SubmitDisplayToTab("", display, input)
 }
 
-func (a *App) SubmitDisplayToTab(tabID, display, input string) {
-	if a.tabReadOnly(tabID) {
-		return
+func (a *App) SubmitDisplayToTab(tabID, display, input string) error {
+	tab, ctrl := a.tabAndCtrlByID(tabID)
+	if tab != nil && tab.ReadOnly {
+		return readOnlyChannelErr()
 	}
-	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
-		return
+		return workspaceNotReadyErr(tab)
 	}
 	ctrl.SubmitDisplay(display, input)
+	return nil
 }
 
 func (a *App) bindControllerDisplayRecorder(ctrl control.SessionAPI) {
@@ -727,23 +741,36 @@ func (a *App) CancelTab(tabID string) {
 }
 
 // Steer sends mid-turn guidance to the agent without interrupting the in-flight request.
-func (a *App) Steer(text string) {
-	a.SteerForTab("", text)
+func (a *App) Steer(text string) error {
+	return a.SteerForTab("", text)
 }
 
 // SteerForTab sends mid-turn guidance to a specific tab's agent.
-func (a *App) SteerForTab(tabID, text string) {
-	if a.tabReadOnly(tabID) {
-		return
+func (a *App) SteerForTab(tabID, text string) error {
+	tab, ctrl := a.tabAndCtrlByID(tabID)
+	if tab != nil && tab.ReadOnly {
+		return readOnlyChannelErr()
 	}
-	if ctrl := a.ctrlByTabID(tabID); ctrl != nil {
-		ctrl.Steer(text)
+	if ctrl == nil {
+		return workspaceNotReadyErr(tab)
 	}
+	ctrl.Steer(text)
+	return nil
 }
 
 func (a *App) tabReadOnly(tabID string) bool {
 	tab := a.tabByID(tabID)
 	return tab != nil && tab.ReadOnly
+}
+
+func (a *App) tabAndCtrlByID(tabID string) (*WorkspaceTab, control.SessionAPI) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	tab := a.tabByIDLocked(tabID)
+	if tab == nil {
+		return nil, nil
+	}
+	return tab, tab.Ctrl
 }
 
 func readOnlyChannelErr() error {
@@ -1000,9 +1027,41 @@ func (a *App) NewSession() error {
 	if err := ctrl.NewSession(); err != nil {
 		return err
 	}
+	a.assignFreshSessionTopic(tab)
 	a.persistTabSessionPath(tab, ctrl.SessionPath())
 	a.invalidatePromptHistoryCache()
+	a.emitProjectTreeChanged()
 	return nil
+}
+
+func (a *App) assignFreshSessionTopic(tab *WorkspaceTab) {
+	if tab == nil {
+		return
+	}
+	scope := tab.Scope
+	workspaceRoot := tab.WorkspaceRoot
+	if strings.TrimSpace(scope) == "global" {
+		workspaceRoot = ""
+	} else {
+		workspaceRoot = normalizeProjectRoot(workspaceRoot)
+	}
+	topicID := newTopicID()
+	a.mu.Lock()
+	if current := a.tabs[tab.ID]; current == tab {
+		tab.TopicID = topicID
+		tab.TopicTitle = defaultTopicTitle
+		a.saveTabsLocked()
+	} else {
+		tab.TopicID = topicID
+		tab.TopicTitle = defaultTopicTitle
+	}
+	a.mu.Unlock()
+	// NewSession already rotated the runtime to a fresh session. If the sidebar
+	// topic index repair fails here, keep the session usable and let persisted
+	// session metadata repair the topic index later instead of surfacing a false
+	// "new session failed" error to the frontend.
+	_ = ensureTopicIndexed(scope, workspaceRoot, topicID, defaultTopicTitle, topicTitleSourceAuto)
+	_ = setTopicCreatedAt(topicTitleRoot(scope, workspaceRoot), topicID, time.Now().UnixMilli())
 }
 
 func messagesHaveConversationContent(messages []provider.Message) bool {
@@ -1128,6 +1187,7 @@ func removeDesktopSessionArtifacts(path string) error {
 	if strings.TrimSpace(path) == "" {
 		return nil
 	}
+	defer invalidateTopicSessionIndexForPath(path)
 	for _, p := range sessionOwnedArtifactPaths(path) {
 		if strings.TrimSpace(p) == "" {
 			continue
@@ -1650,6 +1710,7 @@ func (a *App) DeleteSession(path string) error {
 	}
 	a.closeRemainingRemovedSessionRuntimesAfterDestroy(removed, closedRemoved)
 	if fallback.needs {
+		fallback = a.sessionDeleteFallbackTarget(fallback)
 		if err := a.openFallbackRuntime(fallback); err != nil {
 			return err
 		}
@@ -1691,6 +1752,7 @@ func (a *App) removeSessionRuntimeBindings(dir, sessionPath string) ([]removedSe
 			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot, topicID: tab.TopicID}
 		}
 		removed = append(removed, removedRuntimeFromTab(tab, dir, sessionPath))
+		a.markTabRemovedLocked(tab)
 		delete(a.tabs, id)
 		a.removeTabOrderLocked(id)
 		if a.activeTabID == id {
@@ -1705,6 +1767,7 @@ func (a *App) removeSessionRuntimeBindings(dir, sessionPath string) ([]removedSe
 			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot, topicID: tab.TopicID}
 		}
 		removed = append(removed, removedRuntimeFromTab(tab, dir, sessionPath))
+		a.markTabRemovedLocked(tab)
 		delete(a.detachedSessions, key)
 	}
 	if a.activeTabID == "" && len(a.tabOrder) > 0 {
@@ -1717,6 +1780,18 @@ func (a *App) removeSessionRuntimeBindings(dir, sessionPath string) ([]removedSe
 	a.saveTabsWrite(dir, entries, activeID, version)
 
 	return removed, fallback
+}
+
+func (a *App) sessionDeleteFallbackTarget(target fallbackRuntimeTarget) fallbackRuntimeTarget {
+	topicID := strings.TrimSpace(target.topicID)
+	if topicID == "" {
+		return target
+	}
+	if path, _ := a.findTopicContentSessionForTarget(target.scope, target.workspaceRoot, topicID); path != "" {
+		return target
+	}
+	target.topicID = ""
+	return target
 }
 
 func (a *App) removeTopicRuntimeBindings(topicID string) ([]removedSessionRuntime, fallbackRuntimeTarget) {
@@ -1734,6 +1809,7 @@ func (a *App) removeTopicRuntimeBindings(topicID string) ([]removedSessionRuntim
 			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot}
 		}
 		removed = append(removed, removedRuntimeFromTab(tab, sessionDir, sessionPath))
+		a.markTabRemovedLocked(tab)
 		delete(a.tabs, id)
 		a.removeTabOrderLocked(id)
 		if a.activeTabID == id {
@@ -1750,6 +1826,7 @@ func (a *App) removeTopicRuntimeBindings(topicID string) ([]removedSessionRuntim
 			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot}
 		}
 		removed = append(removed, removedRuntimeFromTab(tab, sessionDir, sessionPath))
+		a.markTabRemovedLocked(tab)
 		delete(a.detachedSessions, key)
 	}
 	if a.activeTabID == "" && len(a.tabOrder) > 0 {
@@ -2018,6 +2095,9 @@ func (a *App) RestoreSession(path string) error {
 	if a.sessionDestroying(dir, target) {
 		return fmt.Errorf("session cleanup is still in progress: %s", key)
 	}
+	if a.sessionOpen(dir, target) {
+		return fmt.Errorf("session is open: %s", key)
+	}
 	if err := restoreTrashedSessionFile(dir, path); err != nil {
 		return err
 	}
@@ -2037,6 +2117,17 @@ func (a *App) sessionDestroying(dir, sessionPath string) bool {
 			continue
 		}
 		if tab.Ctrl.IsDestroyingSession(sessionPath) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) sessionOpen(dir, sessionPath string) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	for _, tab := range a.runtimeTabsLocked() {
+		if tabMatchesSession(tab, dir, sessionPath) {
 			return true
 		}
 	}
@@ -2961,21 +3052,22 @@ func (a *App) singleSurfaceLayoutEnabled() bool {
 // HistoryMessage is one prior turn, for the frontend to repopulate its transcript
 // after a reload.
 type HistoryMessage struct {
-	Role               string            `json:"role"`
-	Content            string            `json:"content"`
-	SubmitText         string            `json:"submitText,omitempty"`
-	Reasoning          string            `json:"reasoning,omitempty"`
-	Level              string            `json:"level,omitempty"`
-	ToolCalls          []HistoryToolCall `json:"toolCalls,omitempty"`
-	ToolCallID         string            `json:"toolCallId,omitempty"`
-	ToolName           string            `json:"toolName,omitempty"`
-	ToolResultArchived bool              `json:"toolResultArchived,omitempty"`
-	ToolResultError    string            `json:"toolResultError,omitempty"`
-	Pending            bool              `json:"pending,omitempty"`
-	Trigger            string            `json:"trigger,omitempty"`
-	Messages           int               `json:"messages,omitempty"`
-	Summary            string            `json:"summary,omitempty"`
-	Archive            string            `json:"archive,omitempty"`
+	Role               string                    `json:"role"`
+	Content            string                    `json:"content"`
+	SubmitText         string                    `json:"submitText,omitempty"`
+	Reasoning          string                    `json:"reasoning,omitempty"`
+	MemoryCitations    []provider.MemoryCitation `json:"memoryCitations,omitempty"`
+	Level              string                    `json:"level,omitempty"`
+	ToolCalls          []HistoryToolCall         `json:"toolCalls,omitempty"`
+	ToolCallID         string                    `json:"toolCallId,omitempty"`
+	ToolName           string                    `json:"toolName,omitempty"`
+	ToolResultArchived bool                      `json:"toolResultArchived,omitempty"`
+	ToolResultError    string                    `json:"toolResultError,omitempty"`
+	Pending            bool                      `json:"pending,omitempty"`
+	Trigger            string                    `json:"trigger,omitempty"`
+	Messages           int                       `json:"messages,omitempty"`
+	Summary            string                    `json:"summary,omitempty"`
+	Archive            string                    `json:"archive,omitempty"`
 }
 
 type HistoryToolCall struct {
@@ -3001,13 +3093,20 @@ func (a *App) HistoryForTab(tabID string) []HistoryMessage {
 		return []HistoryMessage{}
 	}
 	msgs := ctrl.History()
-	return historyMessages(msgs, sessionDisplayResolver(controllerSessionDir(ctrl), ctrl.SessionPath()))
+	dir := controllerSessionDir(ctrl)
+	path := ctrl.SessionPath()
+	return historyMessagesWithPlannerDisplays(msgs, sessionDisplayResolver(dir, path), sessionPlannerDisplayTurns(dir, path))
 }
 
 func historyMessages(msgs []provider.Message, resolveUserContent func(string) string) []HistoryMessage {
+	return historyMessagesWithPlannerDisplays(msgs, resolveUserContent, nil)
+}
+
+func historyMessagesWithPlannerDisplays(msgs []provider.Message, resolveUserContent func(string) string, plannerTurns []plannerDisplayTurn) []HistoryMessage {
 	out := make([]HistoryMessage, 0, len(msgs))
 	replayedTodoArgs := historyTodoArgsWithCompleteSteps(msgs)
 	toolResults := historyToolResultsByID(msgs)
+	plannerByUserHash := plannerTurnsByUserHash(plannerTurns)
 	for _, m := range msgs {
 		content := m.Content
 		if m.Role == provider.RoleUser {
@@ -3031,6 +3130,9 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 			reasoning = m.ReasoningContent
 		}
 		hm := HistoryMessage{Role: string(m.Role), Content: content, Reasoning: reasoning}
+		if m.Role == provider.RoleAssistant && len(m.MemoryCitations) > 0 {
+			hm.MemoryCitations = append([]provider.MemoryCitation(nil), m.MemoryCitations...)
+		}
 		if m.Role == provider.RoleUser && content != m.Content {
 			hm.SubmitText = m.Content
 		}
@@ -3052,6 +3154,40 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 			hm.Content, hm.ToolResultArchived, hm.ToolResultError = historyToolResultContent(m.Content, m.ToolCallID != "")
 		}
 		out = append(out, hm)
+		if m.Role == provider.RoleUser {
+			if turns := plannerByUserHash[messageDisplayKey(m.Content)]; len(turns) > 0 {
+				out = append(out, cloneHistoryMessages(turns[0].Messages)...)
+				plannerByUserHash[messageDisplayKey(m.Content)] = turns[1:]
+			}
+		}
+	}
+	return out
+}
+
+func plannerTurnsByUserHash(turns []plannerDisplayTurn) map[string][]plannerDisplayTurn {
+	out := map[string][]plannerDisplayTurn{}
+	for _, turn := range turns {
+		if strings.TrimSpace(turn.UserHash) == "" || len(turn.Messages) == 0 {
+			continue
+		}
+		out[turn.UserHash] = append(out[turn.UserHash], turn)
+	}
+	return out
+}
+
+func cloneHistoryMessages(in []HistoryMessage) []HistoryMessage {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]HistoryMessage, len(in))
+	copy(out, in)
+	for i := range out {
+		if len(in[i].MemoryCitations) > 0 {
+			out[i].MemoryCitations = append([]provider.MemoryCitation(nil), in[i].MemoryCitations...)
+		}
+		if len(in[i].ToolCalls) > 0 {
+			out[i].ToolCalls = append([]HistoryToolCall(nil), in[i].ToolCalls...)
+		}
 	}
 	return out
 }
@@ -3365,35 +3501,40 @@ func previewSessionMessages(sessionDir, path string) ([]HistoryMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return historyMessages(loaded.Snapshot(), sessionDisplayResolver(sessionDir, sessionPath)), nil
+	return historyMessagesWithPlannerDisplays(
+		loaded.Snapshot(),
+		sessionDisplayResolver(sessionDir, sessionPath),
+		sessionPlannerDisplayTurns(sessionDir, sessionPath),
+	), nil
 }
 
 type previewEventRecord struct {
-	Kind             string             `json:"kind"`
-	Type             string             `json:"type"`
-	Role             string             `json:"role"`
-	Time             json.RawMessage    `json:"time"`
-	Timestamp        json.RawMessage    `json:"timestamp"`
-	CreatedAt        json.RawMessage    `json:"createdAt"`
-	CreatedAtSnake   json.RawMessage    `json:"created_at"`
-	UpdatedAt        json.RawMessage    `json:"updatedAt"`
-	UpdatedAtSnake   json.RawMessage    `json:"updated_at"`
-	Text             string             `json:"text"`
-	Content          string             `json:"content"`
-	Reasoning        string             `json:"reasoning"`
-	ReasoningContent string             `json:"reasoningContent"`
-	Level            string             `json:"level"`
-	ToolCalls        []previewToolCall  `json:"toolCalls"`
-	CallID           string             `json:"callId"`
-	ToolCallID       string             `json:"toolCallId"`
-	ToolName         string             `json:"toolName"`
-	Name             string             `json:"name"`
-	Output           string             `json:"output"`
-	Compaction       *previewCompaction `json:"compaction"`
-	Trigger          string             `json:"trigger"`
-	Messages         int                `json:"messages"`
-	Summary          string             `json:"summary"`
-	Archive          string             `json:"archive"`
+	Kind             string                    `json:"kind"`
+	Type             string                    `json:"type"`
+	Role             string                    `json:"role"`
+	Time             json.RawMessage           `json:"time"`
+	Timestamp        json.RawMessage           `json:"timestamp"`
+	CreatedAt        json.RawMessage           `json:"createdAt"`
+	CreatedAtSnake   json.RawMessage           `json:"created_at"`
+	UpdatedAt        json.RawMessage           `json:"updatedAt"`
+	UpdatedAtSnake   json.RawMessage           `json:"updated_at"`
+	Text             string                    `json:"text"`
+	Content          string                    `json:"content"`
+	Reasoning        string                    `json:"reasoning"`
+	ReasoningContent string                    `json:"reasoningContent"`
+	MemoryCitations  []provider.MemoryCitation `json:"memoryCitations"`
+	Level            string                    `json:"level"`
+	ToolCalls        []previewToolCall         `json:"toolCalls"`
+	CallID           string                    `json:"callId"`
+	ToolCallID       string                    `json:"toolCallId"`
+	ToolName         string                    `json:"toolName"`
+	Name             string                    `json:"name"`
+	Output           string                    `json:"output"`
+	Compaction       *previewCompaction        `json:"compaction"`
+	Trigger          string                    `json:"trigger"`
+	Messages         int                       `json:"messages"`
+	Summary          string                    `json:"summary"`
+	Archive          string                    `json:"archive"`
 }
 
 type previewToolCall struct {
@@ -3450,6 +3591,9 @@ func previewEventSessionMessages(path string) ([]HistoryMessage, bool, error) {
 			}
 		case "model.final":
 			hm := HistoryMessage{Role: "assistant", Content: rec.Content, Reasoning: firstNonEmpty(rec.Reasoning, rec.ReasoningContent)}
+			if len(rec.MemoryCitations) > 0 {
+				hm.MemoryCitations = append([]provider.MemoryCitation(nil), rec.MemoryCitations...)
+			}
 			for _, tc := range rec.ToolCalls {
 				id := tc.ID
 				name := firstNonEmpty(tc.Name, tc.Function.Name)

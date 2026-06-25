@@ -519,6 +519,45 @@ model = "x"
 	}
 }
 
+func TestBuildUsesConfiguredLanguageForResponsePreference(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootSubagentTestProvider()
+	prov := &bootSubagentTestProvider{}
+	setBootSubagentTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+language = "en"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-subagent-test"
+model = "x"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	if err := ctrl.Run(context.Background(), "first review"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.requestsSnapshot()
+	if len(reqs) == 0 {
+		t.Fatal("provider requests = 0, want at least one")
+	}
+	if got := bootLastUser(reqs[0]); !strings.Contains(got, "<response-language>") || !strings.Contains(got, "use English") {
+		t.Fatalf("first user turn = %q, want English response preference", got)
+	}
+}
+
 func TestBuildSubagentSkillGetsForegroundOnlyBash(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)
@@ -562,7 +601,7 @@ model = "x"
 	if !requestToolSchemaContains(parentReq, "bash", "run_in_background") {
 		t.Fatalf("parent bash schema should include run_in_background")
 	}
-	for _, hidden := range []string{"task", "run_skill", "read_skill", "install_skill", "install_source", "explore", "research", "review", "security_review", "wait", "bash_output", "kill_shell"} {
+	for _, hidden := range []string{"task", "run_skill", "read_only_skill", "read_skill", "install_skill", "install_source", "explore", "research", "review", "security_review", "wait", "bash_output", "kill_shell"} {
 		if requestHasTool(subReq, hidden) {
 			t.Fatalf("skill subagent request should hide %q; tools=%v", hidden, toolSchemaNames(subReq.Tools))
 		}
@@ -1087,7 +1126,7 @@ command = "reasonix-missing-mockmcp"
 		}
 	}
 	for _, forbidden := range []string{
-		"web_fetch", "task", "run_skill", "read_skill", "install_skill", "install_source",
+		"web_fetch", "task", "read_only_task", "read_only_skill", "run_skill", "read_skill", "install_skill", "install_source",
 		"explore", "research", "review", "security_review",
 		"lsp_definition", "lsp_references", "lsp_hover", "lsp_diagnostics",
 	} {
@@ -1200,6 +1239,380 @@ model = "x"
 	}
 }
 
+func TestBuildTokenEconomyPlanModeCanConnectReadOnlyTask(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("token-economy",
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "source-1", Name: "connect_tool_source", Arguments: `{"source":"read_only_subagent"}`},
+		}},
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "readonly-1", Name: "read_only_task", Arguments: `{"prompt":"inspect safely"}`},
+		}},
+		testutil.Turn{Text: "read-only findings"},
+		testutil.Turn{Text: "done"},
+	)
+	setBootTokenProfileTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	ctrl.SetPlanMode(true)
+	if err := ctrl.Run(context.Background(), "connect read-only subagent while planning"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) != 4 {
+		t.Fatalf("requests = %d, want 4", len(reqs))
+	}
+	if !requestHasTool(reqs[1], "read_only_task") {
+		t.Fatalf("second request should expose read_only_task in plan economy mode; tools=%v", toolSchemaNames(reqs[1].Tools))
+	}
+	if requestHasTool(reqs[1], "task") {
+		t.Fatalf("read_only_task source should not expose writer-capable task; tools=%v", toolSchemaNames(reqs[1].Tools))
+	}
+	subReq := reqs[2]
+	if !requestHasTool(subReq, "bash") || !requestHasTool(subReq, "read_file") {
+		t.Fatalf("read_only_task child request should keep read-only research tools; tools=%v", toolSchemaNames(subReq.Tools))
+	}
+	if requestToolSchemaContains(subReq, "bash", "run_in_background") {
+		t.Fatalf("read_only_task child bash schema should not advertise run_in_background")
+	}
+	for _, forbidden := range []string{
+		"connect_tool_source", "task", "read_only_task", "parallel_tasks",
+		"install_source", "run_skill", "read_only_skill", "read_skill", "install_skill", "remember", "forget",
+		"write_file", "edit_file", "multi_edit", "move_file", "complete_step",
+	} {
+		if requestHasTool(subReq, forbidden) {
+			t.Fatalf("read_only_task child request should hide %q; tools=%v", forbidden, toolSchemaNames(subReq.Tools))
+		}
+	}
+	for _, msg := range ctrl.History() {
+		if msg.Role == provider.RoleTool && msg.Name == "connect_tool_source" && strings.Contains(msg.Content, "blocked:") {
+			t.Fatalf("connect_tool_source should not block read_only_task in plan mode, got:\n%s", msg.Content)
+		}
+	}
+}
+
+func TestBuildTokenEconomyPlanModeCanConnectReadOnlySkill(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("token-economy",
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "source-1", Name: "connect_tool_source", Arguments: `{"source":"read_only_skill"}`},
+		}},
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "skill-1", Name: "read_only_skill", Arguments: `{"name":"readonlydig","arguments":"inspect safely"}`},
+		}},
+		testutil.Turn{Text: "skill findings"},
+		testutil.Turn{Text: "done"},
+	)
+	setBootTokenProfileTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+	writeFile(t, dir, ".reasonix/skills/readonlydig/SKILL.md", `---
+description: read-only dig
+runAs: subagent
+allowed-tools: read_file, bash, write_file, connect_tool_source, read_only_skill
+---
+READ ONLY SKILL BODY`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	ctrl.SetPlanMode(true)
+	if err := ctrl.Run(context.Background(), "connect read-only skill while planning"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) != 4 {
+		t.Fatalf("requests = %d, want 4", len(reqs))
+	}
+	if !requestHasTool(reqs[1], "read_only_skill") {
+		t.Fatalf("second request should expose read_only_skill in plan economy mode; tools=%v", toolSchemaNames(reqs[1].Tools))
+	}
+	for _, forbidden := range []string{"run_skill", "read_skill", "install_skill", "task", "review", "install_source"} {
+		if requestHasTool(reqs[1], forbidden) {
+			t.Fatalf("read_only_skill source should not expose %q; tools=%v", forbidden, toolSchemaNames(reqs[1].Tools))
+		}
+	}
+	subReq := reqs[2]
+	if !strings.Contains(systemMessage(subReq.Messages), "READ ONLY SKILL BODY") {
+		t.Fatalf("read_only_skill child should use the skill body as system prompt:\n%s", systemMessage(subReq.Messages))
+	}
+	if !requestHasTool(subReq, "bash") || !requestHasTool(subReq, "read_file") {
+		t.Fatalf("read_only_skill child request should keep read-only research tools; tools=%v", toolSchemaNames(subReq.Tools))
+	}
+	if requestToolSchemaContains(subReq, "bash", "run_in_background") {
+		t.Fatalf("read_only_skill child bash schema should not advertise run_in_background")
+	}
+	for _, forbidden := range []string{
+		"connect_tool_source", "task", "read_only_task", "read_only_skill", "parallel_tasks",
+		"install_source", "run_skill", "read_skill", "install_skill", "remember", "forget",
+		"write_file", "edit_file", "multi_edit", "move_file", "complete_step",
+	} {
+		if requestHasTool(subReq, forbidden) {
+			t.Fatalf("read_only_skill child request should hide %q; tools=%v", forbidden, toolSchemaNames(subReq.Tools))
+		}
+	}
+	var toolOutput string
+	for _, msg := range ctrl.History() {
+		if msg.Role == provider.RoleTool && msg.Name == "connect_tool_source" {
+			toolOutput += msg.Content
+			if strings.Contains(msg.Content, "blocked:") {
+				t.Fatalf("connect_tool_source should not block read_only_skill in plan mode, got:\n%s", msg.Content)
+			}
+		}
+	}
+	if !strings.Contains(toolOutput, "readonlydig") || !strings.Contains(toolOutput, "# Skills") {
+		t.Fatalf("read_only_skill source result should include the skill index, got:\n%s", toolOutput)
+	}
+}
+
+func TestBuildTokenEconomyPlanModeCanConnectAllowedMCPSource(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("token-economy",
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "source-1", Name: "connect_tool_source", Arguments: `{"source":"mcp","name":"mockmcp"}`},
+		}},
+		testutil.Turn{Text: "done"},
+	)
+	setBootTokenProfileTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", fmt.Sprintf(`
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+plan_mode_allowed_tools = ["mcp__mockmcp__echo"]
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+
+[[plugins]]
+name = "mockmcp"
+command = %q
+args = ["-test.run=TestHelperProcess", "--"]
+env = { GO_WANT_HELPER_PROCESS = "1" }
+`, os.Args[0]))
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	ctrl.SetPlanMode(true)
+	if err := ctrl.Run(context.Background(), "connect allowed mcp while planning"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	reqs := prov.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("requests = %d, want 2", len(reqs))
+	}
+	if !requestHasTool(reqs[1], "mcp__mockmcp__echo") {
+		t.Fatalf("second request should expose allowed MCP source in plan economy mode; tools=%v", toolSchemaNames(reqs[1].Tools))
+	}
+	for _, msg := range ctrl.History() {
+		if msg.Role == provider.RoleTool && msg.Name == "connect_tool_source" {
+			if strings.Contains(msg.Content, "blocked:") {
+				t.Fatalf("connect_tool_source should not block allowed MCP in plan mode, got:\n%s", msg.Content)
+			}
+			if !strings.Contains(msg.Content, `enabled MCP server "mockmcp" tools: mcp__mockmcp__echo`) {
+				t.Fatalf("connect_tool_source should report enabled MCP tools, got:\n%s", msg.Content)
+			}
+		}
+	}
+}
+
+func TestPlanModeAllowsMCPServerRequiresConcreteToolName(t *testing.T) {
+	if planModeAllowsMCPServer([]string{"mcp__mockmcp__"}, "mockmcp") {
+		t.Fatal("bare MCP namespace prefix should not allow a server in plan mode")
+	}
+	if !planModeAllowsMCPServer([]string{"mcp__mockmcp__echo"}, "mockmcp") {
+		t.Fatal("concrete MCP tool name should allow its server in plan mode")
+	}
+}
+
+func TestBuildTokenEconomyPlanModeBlocksSourcesWithPolicy(t *testing.T) {
+	tests := []struct {
+		source          string
+		args            string
+		forbiddenTools  []string
+		forbiddenPrefix string
+	}{
+		{
+			source:         "task",
+			args:           `{"source":"task"}`,
+			forbiddenTools: []string{"task"},
+		},
+		{
+			source:         "install_source",
+			args:           `{"source":"install_source"}`,
+			forbiddenTools: []string{"install_source"},
+		},
+		{
+			source: "skills",
+			args:   `{"source":"skills"}`,
+			forbiddenTools: []string{
+				"run_skill", "read_only_skill", "read_skill", "install_skill",
+				"explore", "research", "review", "security_review",
+			},
+		},
+		{
+			source:          "mcp",
+			args:            `{"source":"mcp","name":"mockmcp"}`,
+			forbiddenPrefix: "mcp__mockmcp",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.source, func(t *testing.T) {
+			isolateConfigHome(t)
+			dir := robustTempDir(t)
+			t.Chdir(dir)
+
+			registerBootTokenProfileTestProvider()
+			prov := testutil.NewMock("token-economy",
+				testutil.Turn{ToolCalls: []provider.ToolCall{
+					{ID: "source-1", Name: "connect_tool_source", Arguments: tt.args},
+				}},
+				testutil.Turn{Text: "done"},
+			)
+			setBootTokenProfileTestProvider(t, prov)
+			writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+
+[[plugins]]
+name = "mockmcp"
+command = "reasonix-missing-mockmcp"
+`)
+
+			ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			defer ctrl.Close()
+			ctrl.SetPlanMode(true)
+			if err := ctrl.Run(context.Background(), "connect blocked source while planning"); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			reqs := prov.Requests()
+			if len(reqs) != 2 {
+				t.Fatalf("requests = %d, want 2", len(reqs))
+			}
+			var toolOutput string
+			for _, msg := range ctrl.History() {
+				if msg.Role == provider.RoleTool && msg.Name == "connect_tool_source" {
+					toolOutput += msg.Content
+				}
+			}
+			if strings.TrimSpace(toolOutput) == "" {
+				t.Fatalf("connect_tool_source(%s) returned empty tool output", tt.source)
+			}
+			if !strings.Contains(toolOutput, "blocked:") || !strings.Contains(toolOutput, "plan mode") {
+				t.Fatalf("connect_tool_source(%s) output = %q, want visible plan-mode block", tt.source, toolOutput)
+			}
+			for _, forbidden := range tt.forbiddenTools {
+				if requestHasTool(reqs[1], forbidden) {
+					t.Fatalf("blocked source %s should not expose %q; tools=%v", tt.source, forbidden, toolSchemaNames(reqs[1].Tools))
+				}
+			}
+			if tt.forbiddenPrefix != "" && requestHasToolPrefix(reqs[1], tt.forbiddenPrefix) {
+				t.Fatalf("blocked source %s should not expose tools with prefix %q; tools=%v", tt.source, tt.forbiddenPrefix, toolSchemaNames(reqs[1].Tools))
+			}
+		})
+	}
+}
+
+func TestBuildWarnsIgnoredPlanModeAllowedTools(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("plan-mode-allowed-tools", testutil.Turn{Text: "done"})
+	setBootTokenProfileTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+plan_mode_allowed_tools = ["bash", "custom_reader"]
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+
+	var notices []event.Event
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice {
+			notices = append(notices, e)
+		}
+	})
+
+	ctrl, err := Build(context.Background(), Options{Sink: sink})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	for _, notice := range notices {
+		if notice.Level == event.LevelWarn && strings.Contains(notice.Text, "plan_mode_allowed_tools") && strings.Contains(notice.Text, "bash") {
+			if strings.Contains(notice.Text, "custom_reader") {
+				t.Fatalf("warning should name ignored entries only, got %q", notice.Text)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing ignored plan_mode_allowed_tools warning; got %+v", notices)
+}
+
 func TestBuildTokenEconomyWebFetchConnectorHonorsDisabledBuiltin(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)
@@ -1292,7 +1705,7 @@ model = "x"
 	if len(reqs) != 2 {
 		t.Fatalf("requests = %d, want 2", len(reqs))
 	}
-	for _, name := range []string{"run_skill", "read_skill", "explore"} {
+	for _, name := range []string{"run_skill", "read_only_skill", "read_skill", "explore"} {
 		if requestHasTool(reqs[0], name) {
 			t.Fatalf("first request should hide %q; tools=%v", name, toolSchemaNames(reqs[0].Tools))
 		}

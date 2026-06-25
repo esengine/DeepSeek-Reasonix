@@ -25,6 +25,7 @@ func (o *turnOrchestrator) runTurnWithRawDisplay(ctx context.Context, input, raw
 	ctx = agent.WithParentSession(ctx, parentSession)
 	ctx = jobs.WithSession(ctx, parentSession)
 	ctx = agent.WithUserImages(ctx, c.inputImages(input))
+	ctx = agent.WithMemoryCompilerSourceInput(ctx, raw)
 	input = c.Compose(input)
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)
@@ -32,6 +33,9 @@ func (o *turnOrchestrator) runTurnWithRawDisplay(ctx context.Context, input, raw
 	// Open a checkpoint for this turn before the user message is appended, so the
 	// recorded message boundary precedes it and pre-edit snapshots land here.
 	c.beginCheckpoint(input)
+	if c.guardianSess != nil {
+		c.guardianSess.ResetTurn()
+	}
 	// UserPromptSubmit / Stop hooks bracket the whole turn (incl. the plan
 	// research + approved-execution sub-turns below): a gating UserPromptSubmit
 	// aborts before any model call; Stop fires once when the turn returns.
@@ -43,7 +47,7 @@ func (o *turnOrchestrator) runTurnWithRawDisplay(ctx context.Context, input, raw
 		if block, _ := c.hooks.PromptSubmit(ctx, input, turn); block {
 			return nil // the hook's notify callback already surfaced the reason
 		}
-		defer func() { c.hooks.Stop(ctx, lastAssistantText(c.History()), turn) }()
+		defer func() { c.hooks.Stop(context.Background(), lastAssistantText(c.History()), turn) }()
 	}
 	if err := c.runner.Run(ctx, input); err != nil {
 		return err

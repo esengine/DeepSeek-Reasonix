@@ -70,6 +70,15 @@ func (r *sessionContextRunner) Run(ctx context.Context, input string) error {
 	return nil
 }
 
+type cancelingRunner struct {
+	cancel context.CancelFunc
+}
+
+func (r cancelingRunner) Run(_ context.Context, _ string) error {
+	r.cancel()
+	return nil
+}
+
 type fakeControlTool struct{ name string }
 
 func (t fakeControlTool) Name() string { return t.name }
@@ -291,6 +300,39 @@ func TestRunInjectsParentSessionForJobs(t *testing.T) {
 	}
 	if runner.jobSession != want {
 		t.Fatalf("jobs session = %q, want %q", runner.jobSession, want)
+	}
+}
+
+func TestRunStopHookIgnoresCanceledCallerContext(t *testing.T) {
+	runCtx, cancel := context.WithCancel(context.Background())
+	var stopCalls int
+	var stopErr error
+	hooks := hook.NewRunner([]hook.ResolvedHook{{
+		HookConfig: hook.HookConfig{Command: "record-stop"},
+		Event:      hook.Stop,
+		Scope:      hook.ScopeProject,
+	}}, "", func(ctx context.Context, in hook.SpawnInput) hook.SpawnResult {
+		stopCalls++
+		stopErr = ctx.Err()
+		return hook.SpawnResult{ExitCode: 0}
+	}, nil)
+	c := New(Options{
+		Runner: cancelingRunner{cancel: cancel},
+		Hooks:  hooks,
+	})
+
+	if err := c.Run(runCtx, "hello"); err != nil {
+		t.Fatal(err)
+	}
+
+	if runCtx.Err() != context.Canceled {
+		t.Fatalf("caller context err = %v, want %v", runCtx.Err(), context.Canceled)
+	}
+	if stopCalls != 1 {
+		t.Fatalf("Stop hook calls = %d, want 1", stopCalls)
+	}
+	if stopErr != nil {
+		t.Fatalf("Stop hook context err = %v, want nil", stopErr)
 	}
 }
 

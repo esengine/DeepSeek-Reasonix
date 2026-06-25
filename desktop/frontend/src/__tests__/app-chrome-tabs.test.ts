@@ -11,6 +11,7 @@ const commandPaletteSource = readFileSync(resolve(testDir, "../components/Comman
 const projectTreeSource = readFileSync(resolve(testDir, "../components/ProjectTree.tsx"), "utf8");
 const topicShortcutsSource = readFileSync(resolve(testDir, "../lib/topicShortcuts.ts"), "utf8");
 const transcriptSource = readFileSync(resolve(testDir, "../components/Transcript.tsx"), "utf8");
+const layoutStoreSource = readFileSync(resolve(testDir, "../store/layout.ts"), "utf8");
 const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 
 let passed = 0;
@@ -66,6 +67,12 @@ for (const propName of ["onTabChange", "onTabClose", "onTabsClose", "onTabsReord
 ok(
   /app-chrome__tab-strip/.test(appChromeSource),
   "AppChrome markup includes classic tab strip containers",
+);
+
+ok(
+  /const WORKSPACE_PANEL_DEFAULT_OPEN = false;/.test(layoutStoreSource) &&
+    /workspacePanelOpen:\s*WORKSPACE_PANEL_DEFAULT_OPEN/.test(layoutStoreSource),
+  "right dock starts collapsed on launch",
 );
 
 ok(
@@ -178,6 +185,23 @@ ok(
     /onPrompt=\{handleTranscriptPrompt\}/.test(appSource) &&
     /submitDisabled=\{!controllerReady\}/.test(appSource),
   "welcome prompts and composer submit share the controller readiness gate",
+);
+
+ok(
+  /const transcriptHydrating = state\.hydrating && !state\.hydrateHistoryLoaded;/.test(appSource) &&
+    /hydrating=\{transcriptHydrating\}/.test(appSource),
+  "Welcome is suppressed only until transcript history has loaded",
+);
+
+const openTopicBlock = appSource.match(/const handleOpenTopic = useCallback\([\s\S]*?\n  \}, \[[^\]]*seedActiveTabMeta[^\]]*\]\);/)?.[0] ?? "";
+ok(
+  /let openedTab: TabMeta;/.test(openTopicBlock) &&
+    /openedTab = await activateTopic/.test(openTopicBlock) &&
+    /openedTab = await openTopicSession/.test(openTopicBlock) &&
+    /openedTab = await openGlobalTab/.test(openTopicBlock) &&
+    /openedTab = await openProjectTab/.test(openTopicBlock) &&
+    /seedActiveTabMeta\(openedTab\);[\s\S]*void refreshTabMetas\(\);/.test(openTopicBlock),
+  "opening topics seeds active tab metadata before background refresh",
 );
 
 for (const selector of [

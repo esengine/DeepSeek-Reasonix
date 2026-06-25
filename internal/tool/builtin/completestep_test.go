@@ -365,9 +365,9 @@ func TestCompleteStepIgnoresFailedTodoReceipt(t *testing.T) {
 	}
 }
 
-func TestCompleteStepReadOnly(t *testing.T) {
+func TestCompleteStepReadOnlyForPermissionLayer(t *testing.T) {
 	if !(completeStep{}).ReadOnly() {
-		t.Fatal("complete_step must be ReadOnly so it stays available and needs no approval")
+		t.Fatal("complete_step stays ReadOnly so permission policy need not prompt; plan mode blocks it as an execution-only workflow")
 	}
 }
 

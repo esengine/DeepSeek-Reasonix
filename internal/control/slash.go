@@ -45,7 +45,8 @@ type ArgData struct {
 // (everything after the command word). It returns the suggestions filtered by
 // the token being typed and the byte offset where that token begins, so a caller
 // replaces just that token. Only structured commands participate (/mcp /model
-// /skills /hooks /effort /auto-plan /goal /reasoning-language /theme /language);
+// /skills /hooks /effort /auto-plan /goal /reasoning-language /memory-v5
+// /theme /language);
 // others yield nil. Single source of truth for CLI + desktop.
 func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 	cmdEnd := strings.IndexAny(line, " \t")
@@ -75,6 +76,8 @@ func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 		raw = goalArgItems(prior)
 	case "/reasoning-language":
 		raw = reasoningLanguageArgItems(prior)
+	case "/memory-v5":
+		raw = memoryV5ArgItems(prior)
 	case "/theme":
 		raw = themeArgItems(prior)
 	case "/language":
@@ -115,6 +118,17 @@ func reasoningLanguageArgItems(prior []string) []SlashItem {
 		{Label: "auto", Insert: "auto", Hint: "follow conversation language"},
 		{Label: "zh", Insert: "zh", Hint: "prefer Chinese visible reasoning"},
 		{Label: "en", Insert: "en", Hint: "prefer English visible reasoning"},
+	}
+}
+
+func memoryV5ArgItems(prior []string) []SlashItem {
+	if len(prior) > 1 {
+		return nil
+	}
+	return []SlashItem{
+		{Label: "status", Insert: "status", Hint: "show current Memory v5 state"},
+		{Label: "off", Insert: "off", Hint: "disable Memory v5 for future turns"},
+		{Label: "on", Insert: "on", Hint: "enable Memory v5 for future turns"},
 	}
 }
 
@@ -380,6 +394,8 @@ func (c *Controller) managementNotice(trimmed string) bool {
 		}
 	case "/memory":
 		c.notice(c.memoryListText())
+	case "/memory-v5":
+		c.memoryV5Notice(fields)
 	case "/migrate", "/migration":
 		migration.RunLegacyRescue(c.sink)
 	case "/skill", "/skills":
@@ -445,6 +461,65 @@ func (c *Controller) managementNotice(trimmed string) bool {
 		return false
 	}
 	return true
+}
+
+func (c *Controller) memoryV5Notice(fields []string) {
+	if len(fields) > 2 {
+		c.notice("usage: /memory-v5 off|on|status")
+		return
+	}
+	if len(fields) < 2 || strings.EqualFold(fields[1], "status") {
+		cfg, err := config.Load()
+		if err != nil {
+			c.notice("memory-v5: " + err.Error())
+			return
+		}
+		c.notice(fmt.Sprintf("memory-v5: %s (usage: /memory-v5 off|on|status)", memoryV5Mode(cfg.MemoryCompilerEnabled())))
+		return
+	}
+	if c.Running() {
+		c.notice("finish or cancel the current turn before changing memory-v5")
+		return
+	}
+	enabled, err := parseMemoryV5Mode(fields[1])
+	if err != nil {
+		c.notice("memory-v5: " + err.Error())
+		return
+	}
+	path := config.UserConfigPath()
+	if path == "" {
+		c.notice("memory-v5: cannot resolve config path")
+		return
+	}
+	edit := config.LoadForEdit(path)
+	if err := edit.SetMemoryCompilerEnabled(enabled); err != nil {
+		c.notice("memory-v5: " + err.Error())
+		return
+	}
+	if err := edit.SaveTo(path); err != nil {
+		c.notice("memory-v5: " + err.Error())
+		return
+	}
+	c.SetMemoryCompilerEnabled(enabled)
+	c.notice(fmt.Sprintf("memory-v5 set to %s", memoryV5Mode(enabled)))
+}
+
+func parseMemoryV5Mode(mode string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "on":
+		return true, nil
+	case "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("memory-v5 %q: must be off|on|status", mode)
+	}
+}
+
+func memoryV5Mode(enabled bool) string {
+	if enabled {
+		return "on"
+	}
+	return "off"
 }
 
 func (c *Controller) modelListText() string {

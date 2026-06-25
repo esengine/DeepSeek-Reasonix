@@ -313,6 +313,28 @@ func TestBuildRequestDropsReasoningOnPlainAssistantTurn(t *testing.T) {
 	}
 }
 
+func TestBuildRequestDropsMemoryCitations(t *testing.T) {
+	c := &client{model: "deepseek-chat", deepseek: true}
+	req := c.buildRequest(provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "continue"},
+			{Role: provider.RoleAssistant, Content: "done", MemoryCitations: []provider.MemoryCitation{{
+				ID: "mem-1", Source: "MEMORY.md", LineStart: 116, LineEnd: 123, Note: "workflow",
+			}}},
+		},
+	})
+	b, err := json.Marshal(req.Messages)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), "memoryCitations") || strings.Contains(string(b), "MEMORY.md") {
+		t.Fatalf("local memory citations leaked into OpenAI-compatible request: %s", b)
+	}
+	if !strings.Contains(string(b), "done") {
+		t.Fatalf("assistant content was dropped with local metadata: %s", b)
+	}
+}
+
 // DeepSeek thinking mode 400s a tool_calls turn whose reasoning_content was
 // dropped on a cache-miss replay, so it must be round-tripped — but only on the
 // turn that carries tool calls, and only for the DeepSeek protocol.

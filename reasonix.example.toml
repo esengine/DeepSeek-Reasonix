@@ -34,6 +34,7 @@ max_steps         = 0    # user/global only; executor tool-call rounds; 0 = no l
 planner_max_steps = 0    # user/global only; planner read-only tool-call rounds; 0 = no limit
 temperature       = 0.0
 auto_plan         = "off"   # user-level only; ignored in project reasonix.toml
+memory_compiler = { enabled = true }   # user-level only; Memory v5 execution compiler
 # reasoning_language = "auto"   # visible reasoning text: auto|zh|en
 # auto_plan_classifier = "deepseek-flash"   # optional; only used for borderline tasks
 soft_compact_ratio  = 0.5   # notice only; keeps the cache-first prefix intact

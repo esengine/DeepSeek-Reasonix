@@ -1734,6 +1734,8 @@ func configCommand(args []string) int {
 	switch args[0] {
 	case "auto-plan":
 		return configAutoPlanCommand(args[1:])
+	case "memory-v5":
+		return configMemoryV5Command(args[1:])
 	case "reasoning-language":
 		return configReasoningLanguageCommand(args[1:])
 	default:
@@ -1783,6 +1785,53 @@ func configAutoPlanCommand(args []string) int {
 		return 1
 	}
 	fmt.Printf("auto_plan = %q (%s)\n", cfg.Agent.AutoPlan, displayPath(path))
+	return 0
+}
+
+func configMemoryV5Command(args []string) int {
+	fs := flag.NewFlagSet("config memory-v5", flag.ContinueOnError)
+	local := fs.Bool("local", false, "unsupported; Memory v5 is user-level only")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *local {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "memory-v5 is user-level only; --local is not supported")
+		return 2
+	}
+	rest := fs.Args()
+	if len(rest) > 1 {
+		configMemoryV5Usage()
+		return 2
+	}
+	if len(rest) == 0 || strings.EqualFold(rest[0], "status") {
+		cfg, err := config.Load()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		fmt.Printf("memory_compiler.enabled = %v\n", cfg.MemoryCompilerEnabled())
+		return 0
+	}
+	enabled, err := parseCLIMemoryV5Mode(rest[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	path := config.UserConfigPath()
+	if path == "" {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "cannot resolve config path")
+		return 1
+	}
+	cfg := config.LoadForEdit(path)
+	if err := cfg.SetMemoryCompilerEnabled(enabled); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 1
+	}
+	fmt.Printf("memory_compiler.enabled = %v (%s)\n", cfg.MemoryCompilerEnabled(), displayPath(path))
 	return 0
 }
 
@@ -1849,6 +1898,7 @@ func configReasoningLanguageCommand(args []string) int {
 func configUsage() {
 	fmt.Print(`Usage:
   reasonix config auto-plan [off|on]
+  reasonix config memory-v5 [off|on|status]
   reasonix config reasoning-language [--local] [auto|zh|en]
 `)
 }
@@ -1856,6 +1906,12 @@ func configUsage() {
 func configAutoPlanUsage() {
 	fmt.Print(`Usage:
   reasonix config auto-plan [off|on]
+`)
+}
+
+func configMemoryV5Usage() {
+	fmt.Print(`Usage:
+  reasonix config memory-v5 [off|on|status]
 `)
 }
 

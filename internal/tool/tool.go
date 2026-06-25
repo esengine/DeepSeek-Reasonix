@@ -60,6 +60,33 @@ func PreviewChange(t Tool, args json.RawMessage) (diff.Change, bool) {
 	return ch, true
 }
 
+// PlanModeClassifier is an optional capability a Tool may implement to declare
+// its stance on running during the planning phase. It is deliberately distinct
+// from ReadOnly(): a tool can be side-effect-free yet belong only to the
+// post-approval execution phase (complete_step reports ReadOnly()==true but must
+// not run while planning), or be a delegation that is safe only in a read-only
+// variant (read_only_task). Plan mode is fail-closed — a tool that does not
+// implement this and is not on the audited read-only whitelist is refused — so
+// implement it to opt a non-obvious tool explicitly in (PlanModeSafe()==true) or
+// out (false). Type-assert a Tool to PlanModeClassifier to discover support;
+// most tools do not implement it.
+type PlanModeClassifier interface {
+	PlanModeSafe() bool
+}
+
+// PlanModeUntrustedReadOnly marks a tool whose ReadOnly() flag is asserted by an
+// external, untrusted source — an MCP server's readOnlyHint — rather than by
+// first-party code. Plan mode must not take such a flag at face value: a tool
+// reporting true here is gated like a writer (it runs while planning only via an
+// explicit plan_mode_allowed_tools declaration or a PlanModeClassifier
+// self-report) and is excluded from read-only research sub-agents. Built-ins, and
+// MCP tools trusted via a first-party Spec.ReadOnlyToolNames override, do not
+// implement this (or return false) and are trusted normally. Type-assert a Tool
+// to discover support; only externally-sourced tools implement it.
+type PlanModeUntrustedReadOnly interface {
+	PlanModeUntrustedReadOnly() bool
+}
+
 // --- process-global built-in set (populated by builtin subpackage init) ---
 
 var builtins = map[string]Tool{}

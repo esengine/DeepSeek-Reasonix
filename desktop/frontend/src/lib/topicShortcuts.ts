@@ -10,7 +10,6 @@ import {
   defaultShortcutCombo,
   detectShortcutPlatform,
   formatShortcutCombo,
-  isEditableTarget,
   isShortcutRecorderTarget,
   matchesShortcut,
   type ShortcutAction,
@@ -51,7 +50,11 @@ export function topicShortcutIndexFromEvent(
   platform: ShortcutPlatform = detectShortcutPlatform(),
 ): number | null {
   if (event.defaultPrevented) return null;
-  if (isShortcutRecorderTarget(event.target ?? null) || isEditableTarget(event.target ?? null)) return null;
+  // Allow Cmd/Ctrl+1-9 even when focus is in an editable element (input/textarea)
+  // because these are application-level navigation shortcuts, not editor keys
+  // like Cmd+C/V/Z. Only block during shortcut-recording mode. Matches CodeX
+  // behavior where topic shortcuts work regardless of input focus state.
+  if (isShortcutRecorderTarget(event.target ?? null)) return null;
   for (let index = 1; index <= 9; index += 1) {
     if (matchesShortcut(event, topicShortcutAction(index), platform)) return index - 1;
   }

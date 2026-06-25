@@ -76,13 +76,13 @@ func (a *approvalManager) preApproved(tool, subject string) bool {
 
 // register allocates an approval ID, records the pending prompt, and returns the
 // reply channel the resolve path will signal.
-func (a *approvalManager) register(tool, subject string) (string, chan approvalReply) {
+func (a *approvalManager) register(tool, subject, reason string) (string, chan approvalReply) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.nextID++
 	id := strconv.Itoa(a.nextID)
 	reply := make(chan approvalReply, 1)
-	a.approvals[id] = pendingApproval{tool: tool, subject: subject, autoDrain: a.autoApprovalWouldAllowLocked(tool, subject), reply: reply}
+	a.approvals[id] = pendingApproval{tool: tool, subject: subject, reason: reason, autoDrain: a.autoApprovalWouldAllowLocked(tool, subject), reply: reply}
 	return id, reply
 }
 
@@ -199,7 +199,7 @@ func (a *approvalManager) snapshotPrompts() ([]event.Approval, []event.Ask) {
 	defer a.mu.Unlock()
 	approvals := make([]event.Approval, 0, len(a.approvals))
 	for id, p := range a.approvals {
-		approvals = append(approvals, event.Approval{ID: id, Tool: p.tool, Subject: p.subject})
+		approvals = append(approvals, event.Approval{ID: id, Tool: p.tool, Subject: p.subject, Reason: p.reason})
 	}
 	asks := make([]event.Ask, 0, len(a.asks))
 	for id, p := range a.asks {

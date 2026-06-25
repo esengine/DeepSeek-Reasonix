@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -58,6 +59,25 @@ func TestVerifyChecksum(t *testing.T) {
 			t.Error("expected not-found error")
 		}
 	})
+}
+
+func TestUpgradeSuccessMessageIncludesCurrentAndLatestVersions(t *testing.T) {
+	cur := "v1.10.0"
+	latest := "v1.11.0"
+
+	got := upgradeSuccessMessage(cur, latest)
+	if !strings.Contains(got, cur) {
+		t.Fatalf("success message %q does not include current version %q", got, cur)
+	}
+	if !strings.Contains(got, latest) {
+		t.Fatalf("success message %q does not include latest version %q", got, latest)
+	}
+	if strings.Index(got, cur) > strings.Index(got, latest) {
+		t.Fatalf("success message %q should report current version before latest version", got)
+	}
+	if strings.Contains(got, "%!") {
+		t.Fatalf("success message %q contains a missing fmt argument marker", got)
+	}
 }
 
 func TestExtractFromTarGz(t *testing.T) {

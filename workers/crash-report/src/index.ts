@@ -245,12 +245,37 @@ export function crashTitle(message: string): string {
   return head.slice(0, 200);
 }
 
+type SeverityInput = {
+  kind: string;
+  source: string;
+  label: string;
+  errorType: string;
+  errorMessage: string;
+  topFrame: string;
+};
+
+export function isOpaqueScriptErrorReport(input: SeverityInput): boolean {
+  return (
+    input.kind === "crash" &&
+    input.source === "frontend.global" &&
+    input.label === "window.error" &&
+    input.errorType === "string" &&
+    input.errorMessage.trim() === "Script error." &&
+    input.topFrame.trim() === ""
+  );
+}
+
 function severityForKind(kind: string): string {
   if (kind === "crash") return "high";
   if (kind === "performance") return "medium";
   if (kind === "bot") return "medium";
   if (kind === "exception") return "medium";
   return "low";
+}
+
+export function severityForReport(input: SeverityInput): string {
+  if (isOpaqueScriptErrorReport(input)) return "low";
+  return severityForKind(input.kind);
 }
 
 async function sha256Hex(s: string): Promise<string> {
@@ -308,7 +333,7 @@ async function handleReport(request: Request, env: Env): Promise<Response> {
   const errorType = r.errorType ?? "";
   const buildCommit = r.buildCommit ?? "";
   const channel = r.channel ?? "";
-  const severity = severityForKind(r.kind);
+  const severity = severityForReport({ kind: r.kind, source, label, errorType, errorMessage, topFrame });
   const prior = await env.DB.prepare("SELECT status FROM groups WHERE fingerprint = ?1")
     .bind(fingerprint)
     .first<{ status: string }>();

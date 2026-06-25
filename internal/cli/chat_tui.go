@@ -38,9 +38,9 @@ import (
 )
 
 // chatTUI is a bubbletea Model that normally owns the terminal with an
-// alt-screen transcript viewport. Termux is the exception: enabling mouse mode
-// prevents taps from raising the soft keyboard, so it stays in the normal buffer
-// and commits finalized output to native scrollback via tea.Println.
+// alt-screen transcript viewport. Termux is the exception: it stays in the
+// normal buffer and commits finalized output to native scrollback via
+// tea.Println so taps can still focus the soft keyboard.
 type chatTUI struct {
 	ctrl    control.SessionAPI
 	label   string
@@ -48,8 +48,8 @@ type chatTUI struct {
 
 	width  int
 	height int
-	// nativeScrollback keeps Termux out of alt-screen/mouse mode so taps still
-	// focus the textarea and raise the soft keyboard.
+	// nativeScrollback keeps Termux out of alt-screen mode so taps still focus
+	// the textarea and raise the soft keyboard.
 	nativeScrollback bool
 
 	input   textarea.Model
@@ -1375,8 +1375,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // finalize drains the committed-line queue and batches the turn's commands. In
 // the default alt-screen path the queue is already mirrored in m.transcript. In
-// Termux we cannot enable mouse mode without breaking soft-keyboard focus, so
-// finalized lines are also emitted into the terminal's native scrollback.
+// Termux finalized lines are also emitted into the terminal's native scrollback.
 func finalize(m chatTUI, cmds []tea.Cmd) tea.Cmd {
 	if m.nativeScrollback && len(*m.pendingCommit) > 0 {
 		out := strings.TrimRight(clampWidth(strings.Join(*m.pendingCommit, "\n"), m.width), "\n")
@@ -1870,7 +1869,7 @@ func (m *chatTUI) collapseShellSlot(id string, idx int, resultOutput string) {
 			for i := 0; i < shellPreviewLines; i++ {
 				preview[i] = dim(clampPlain(lines[i], m.width-len([]rune(connector))))
 			}
-			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (click/Ctrl+B)", total-shellPreviewLines))
+			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
 			m.transcript[idx] = connectorBlock(preview)
 		} else {
 			rendered := make([]string, total)
@@ -1920,7 +1919,7 @@ func (m *chatTUI) toggleShellOutput() {
 			for i := 0; i < shellPreviewLines; i++ {
 				preview[i] = dim(clampPlain(lines[i], innerW))
 			}
-			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (click/Ctrl+B)", total-shellPreviewLines))
+			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
 			m.transcript[lastIdx] = connectorBlock(preview)
 		}
 	} else {
@@ -2399,7 +2398,6 @@ func (m chatTUI) View() tea.View {
 	}
 	v := tea.NewView(mainArea + "\n" + strings.Join(parts, "\n"))
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion // wheel scrolls the transcript
 	// Anchor the real terminal cursor at the textarea's insertion point only when
 	// the composer is visible. input.Cursor() is relative to the textarea; offset
 	// by the viewport height + rows above + the box's top border row (+1 column
@@ -2582,6 +2580,9 @@ func (m chatTUI) renderApprovalBanner() string {
 		choices = fmt.Sprintf(i18n.M.BashPrefixChoices, prefixRule, prefixRule)
 	}
 	text := fmt.Sprintf(i18n.M.ToolApprovalPromptFmt, name, subj, detail, choices)
+	if reason := strings.TrimSpace(m.pendingApproval.Reason); reason != "" {
+		text += " · " + truncateSubject(reason, w)
+	}
 	return approvalBannerStyle.Width(w).Render("⏸ " + text)
 }
 
@@ -3119,6 +3120,28 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		m.finalizeStreamed()
 		m.commitLine(fmt.Sprintf("  %s %s", glyph, e.Text))
 
+	case event.GuardianAssessment:
+		m.finalizeStreamed()
+		g := e.Guardian
+		line := fmt.Sprintf("Guardian %s · %s", g.Outcome, g.Tool)
+		if g.Subject != "" {
+			line += " · " + truncateSubject(g.Subject, m.width)
+		}
+		if g.RiskLevel != "" {
+			line += " · risk=" + g.RiskLevel
+		}
+		if g.UserAuthorization != "" {
+			line += " · authorization=" + g.UserAuthorization
+		}
+		if g.Rationale != "" {
+			line += " · " + g.Rationale
+		}
+		if g.Outcome == "deny" {
+			m.commitLine("  ! " + line)
+		} else {
+			m.commitLine("  · " + line)
+		}
+
 	case event.CompactionStarted:
 		m.finalizeStreamed()
 		m.commitLine(dim("  ⋯ " + i18n.M.CompactionWorking))
@@ -3251,6 +3274,9 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	case "/reasoning-language":
 		m.echoLocalCommand(input)
 		m.runReasoningLanguageCommand(input)
+	case "/memory-v5":
+		m.echoLocalCommand(input)
+		m.runMemoryV5Command(input)
 	case "/rewind":
 		m.echoLocalCommand(input)
 		m.openRewind()

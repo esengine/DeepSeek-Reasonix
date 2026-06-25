@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"reasonix/internal/tool"
 )
 
 func TestHistoryMessagesIncludeAssistantReasoning(t *testing.T) {
@@ -19,6 +20,8 @@ func TestHistoryMessagesIncludeAssistantReasoning(t *testing.T) {
 		{Role: provider.RoleUser, Content: "expanded prompt"},
 		{Role: provider.RoleAssistant, Content: "answer", ReasoningContent: "thinking trace", ToolCalls: []provider.ToolCall{{
 			ID: "call_1", Name: "bash", Arguments: `{"command":"pwd"}`,
+		}}, MemoryCitations: []provider.MemoryCitation{{
+			ID: "mem-1", Source: "Memory v5", Note: "use previous bash failure", Kind: "constraint",
 		}}},
 		{Role: provider.RoleTool, Name: "bash", ToolCallID: "call_1", Content: "tool output", ReasoningContent: "ignored by frontend filter"},
 		{Role: provider.RoleAssistant, ReasoningContent: "tool-call-only thinking"},
@@ -43,6 +46,9 @@ func TestHistoryMessagesIncludeAssistantReasoning(t *testing.T) {
 	if got[1].Reasoning != "thinking trace" {
 		t.Fatalf("assistant reasoning = %q, want thinking trace", got[1].Reasoning)
 	}
+	if len(got[1].MemoryCitations) != 1 || got[1].MemoryCitations[0].Note != "use previous bash failure" {
+		t.Fatalf("assistant memory citations not preserved: %+v", got[1].MemoryCitations)
+	}
 	if len(got[1].ToolCalls) != 1 || got[1].ToolCalls[0].ID != "call_1" || got[1].ToolCalls[0].Name != "bash" {
 		t.Fatalf("assistant tool calls not preserved: %+v", got[1].ToolCalls)
 	}
@@ -57,6 +63,68 @@ func TestHistoryMessagesIncludeAssistantReasoning(t *testing.T) {
 	}
 	if got[3].Reasoning != "tool-call-only thinking" {
 		t.Fatalf("empty-content assistant reasoning = %q, want tool-call-only thinking", got[3].Reasoning)
+	}
+}
+
+func TestHistoryForTabRestoresPlannerDisplayAfterReload(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	handoff := strings.Join([]string{
+		"# Reasonix executor handoff",
+		"",
+		"You are the executor now.",
+		"",
+		"Original task:",
+		"fix the sandbox reload bug",
+		"",
+		"Planner output:",
+		"inspect settings rebuild and preserve planner display",
+		"",
+		"Executor instructions:",
+		"- apply the fix",
+	}, "\n")
+
+	sess := agent.NewSession("system")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: handoff})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "executor kept working"})
+	ag := agent.New(stubProvider{}, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{Executor: ag, SessionDir: dir, SessionPath: path, Sink: event.Discard})
+	if err := recordSessionDisplay(dir, path, handoff, "fix the sandbox reload bug"); err != nil {
+		t.Fatalf("recordSessionDisplay: %v", err)
+	}
+
+	app := &App{
+		tabs:        map[string]*WorkspaceTab{},
+		activeTabID: "planner_tab",
+	}
+	tab := &WorkspaceTab{ID: "planner_tab", Scope: "global", Ctrl: ctrl, Ready: true, disabledMCP: map[string]ServerView{}}
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	app.tabs[tab.ID] = tab
+
+	tab.sink.Emit(event.Event{Kind: event.TurnStarted})
+	tab.sink.Emit(event.Event{Kind: event.Phase, Text: "deepseek-v4-pro · planning", Source: event.UsageSourcePlanner})
+	tab.sink.Emit(event.Event{Kind: event.Reasoning, Text: "planner thinking\n", Source: event.UsageSourcePlanner})
+	tab.sink.Emit(event.Event{Kind: event.Text, Text: "planner visible plan", Source: event.UsageSourcePlanner})
+	tab.sink.Emit(event.Event{Kind: event.Message, Text: "planner visible plan", Reasoning: "planner thinking\n", Source: event.UsageSourcePlanner})
+	tab.sink.Emit(event.Event{Kind: event.TurnStarted})
+	tab.sink.Emit(event.Event{Kind: event.TurnDone})
+	waitForAutosaveIdle(t, tab)
+
+	got := app.HistoryForTab(tab.ID)
+	if len(got) != 5 {
+		t.Fatalf("history length = %d, want user + planner phase + planner answer + executor answer (plus system skipped later by UI): %+v", len(got), got)
+	}
+	if got[1].Content != "fix the sandbox reload bug" {
+		t.Fatalf("user display content = %q, want original prompt", got[1].Content)
+	}
+	if got[2].Role != "phase" || !strings.Contains(got[2].Content, "planning") {
+		t.Fatalf("planner phase missing after reload: %+v", got)
+	}
+	if got[3].Role != "assistant" || got[3].Content != "planner visible plan" || got[3].Reasoning != "planner thinking\n" {
+		t.Fatalf("planner assistant display missing after reload: %+v", got[3])
+	}
+	if got[4].Role != "assistant" || got[4].Content != "executor kept working" {
+		t.Fatalf("executor answer missing after reload: %+v", got[4])
 	}
 }
 

@@ -1,7 +1,9 @@
 // Run: tsx src/__tests__/use-controller-meta.test.ts
 
-import { foregroundRunningFromRuntimeMeta, initialState, reducer, sameMeta, shouldReconcileStaleTurn } from "../lib/useController";
-import type { Meta, WireUsage } from "../lib/types";
+import { foregroundRunningFromRuntimeMeta, initialState, metaFromTab, reducer, sameMeta, shouldReconcileStaleTurn } from "../lib/useController";
+import type { Meta, TabMeta, WireUsage } from "../lib/types";
+
+type LooseTabMeta = Omit<TabMeta, "toolApprovalMode"> & { toolApprovalMode?: TabMeta["toolApprovalMode"] | "" };
 
 let passed = 0;
 let failed = 0;
@@ -37,6 +39,31 @@ function meta(overrides: Partial<Meta> = {}): Meta {
   };
 }
 
+function tab(overrides: Partial<LooseTabMeta> = {}): TabMeta {
+  return {
+    id: "tab-1",
+    scope: "project",
+    workspaceRoot: "/repo",
+    workspaceName: "repo",
+    workspacePath: "/repo",
+    gitBranch: "main",
+    topicId: "topic-1",
+    topicTitle: "Topic",
+    label: "DeepSeek-R1",
+    ready: true,
+    running: false,
+    mode: "normal",
+    collaborationMode: "normal",
+    toolApprovalMode: "ask",
+    tokenMode: "full",
+    goal: "",
+    goalStatus: "stopped",
+    active: true,
+    cwd: "/repo",
+    ...overrides,
+  } as TabMeta;
+}
+
 function usage(source: string): WireUsage {
   return {
     promptTokens: 100,
@@ -59,6 +86,12 @@ console.log("\nuse controller meta");
   eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "plan" })), false, "collaboration mode changes invalidate meta equality");
   eq(sameMeta(meta({ workspacePath: "/repo" }), meta({ workspacePath: "/other" })), false, "workspace path changes invalidate meta equality");
   eq(sameMeta(meta({ gitBranch: "main" }), meta({ gitBranch: "feature" })), false, "git branch changes invalidate meta equality");
+}
+
+{
+  const preserved = metaFromTab(tab({ toolApprovalMode: "" }), meta({ toolApprovalMode: "auto", autoApproveTools: false }));
+  eq(preserved.toolApprovalMode, "auto", "blank tab snapshot preserves explicit auto approval mode");
+  eq(preserved.autoApproveTools, false, "blank tab snapshot does not silently resurrect yolo approval");
 }
 
 {

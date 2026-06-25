@@ -77,6 +77,28 @@ func (c *Config) SetAutoPlan(mode string) error {
 	return nil
 }
 
+// SetDesktopDefaultToolApprovalMode sets the Ask/Auto/YOLO posture used only
+// for newly-created desktop sessions.
+func (c *Config) SetDesktopDefaultToolApprovalMode(mode string) error {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "ask":
+		c.Desktop.DefaultToolApprovalMode = "ask"
+	case "auto":
+		c.Desktop.DefaultToolApprovalMode = "auto"
+	case "yolo", "full", "full-access", "bypass":
+		c.Desktop.DefaultToolApprovalMode = "yolo"
+	default:
+		return fmt.Errorf("default_tool_approval_mode %q: must be ask|auto|yolo", mode)
+	}
+	return nil
+}
+
+// SetMemoryCompilerEnabled toggles the v5 execution-memory compiler.
+func (c *Config) SetMemoryCompilerEnabled(enabled bool) error {
+	c.Agent.MemoryCompiler.Enabled = &enabled
+	return nil
+}
+
 // SetUIShortcutLayout selects the CLI keyboard shortcut layout. "classic" keeps
 // historical behavior; "desktop" enables the two-axis desktop-style shortcuts.
 func (c *Config) SetUIShortcutLayout(layout string) error {

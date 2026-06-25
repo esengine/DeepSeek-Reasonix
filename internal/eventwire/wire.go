@@ -1,27 +1,36 @@
 // Package eventwire defines the shared frontend JSON contract for event.Event.
 package eventwire
 
-import "reasonix/internal/event"
+import (
+	"reasonix/internal/event"
+	"reasonix/internal/provider"
+)
 
 // Event is the JSON-friendly form shared by event frontends.
 type Event struct {
-	Kind         string      `json:"kind"`
-	Text         string      `json:"text,omitempty"`
-	Reasoning    string      `json:"reasoning,omitempty"`
-	Level        string      `json:"level,omitempty"`
-	Tool         *Tool       `json:"tool,omitempty"`
-	Usage        *Usage      `json:"usage,omitempty"`
-	Approval     *Approval   `json:"approval,omitempty"`
-	Ask          *Ask        `json:"ask,omitempty"`
-	Compaction   *Compaction `json:"compaction,omitempty"`
-	Err          string      `json:"err,omitempty"`
-	RetryAttempt int         `json:"retryAttempt,omitempty"`
-	RetryMax     int         `json:"retryMax,omitempty"`
+	Kind            string           `json:"kind"`
+	Text            string           `json:"text,omitempty"`
+	Reasoning       string           `json:"reasoning,omitempty"`
+	MemoryCitations []MemoryCitation `json:"memoryCitations,omitempty"`
+	MemoryCompiler  *MemoryCompiler  `json:"memoryCompiler,omitempty"`
+	Level           string           `json:"level,omitempty"`
+	Tool            *Tool            `json:"tool,omitempty"`
+	Usage           *Usage           `json:"usage,omitempty"`
+	Approval        *Approval        `json:"approval,omitempty"`
+	Ask             *Ask             `json:"ask,omitempty"`
+	Compaction      *Compaction      `json:"compaction,omitempty"`
+	Guardian        *Guardian        `json:"guardian,omitempty"`
+	Err             string           `json:"err,omitempty"`
+	RetryAttempt    int              `json:"retryAttempt,omitempty"`
+	RetryMax        int              `json:"retryMax,omitempty"`
 }
 
 // ToWire converts a typed runtime event into the shared frontend JSON contract.
 func ToWire(e event.Event) Event {
 	w := Event{Kind: kindNames[e.Kind], Text: e.Text, Reasoning: e.Reasoning}
+	if len(e.MemoryCitations) > 0 {
+		w.MemoryCitations = ToWireMemoryCitations(e.MemoryCitations)
+	}
 	switch e.Kind {
 	case event.Notice:
 		if e.Level == event.LevelWarn {
@@ -61,8 +70,27 @@ func ToWire(e event.Event) Event {
 				w.Usage.CostUSD = cost
 			}
 		}
+	case event.MemoryCompilerStatsEvent:
+		if m := e.MemoryCompiler; m != nil {
+			w.MemoryCompiler = &MemoryCompiler{
+				Injected:         m.Injected,
+				UsefulIR:         m.UsefulIR,
+				CompiledTokens:   m.CompiledTokens,
+				IROverheadTokens: m.IROverheadTokens,
+				MemoryReferences: m.MemoryReferences,
+				Constraints:      m.Constraints,
+				RiskNotes:        m.RiskNotes,
+				ExecutionSteps:   m.ExecutionSteps,
+				TotalNodes:       m.TotalNodes,
+				HighSignalNodes:  m.HighSignalNodes,
+				ToolResultNodes:  m.ToolResultNodes,
+				DecisionNodes:    m.DecisionNodes,
+				StrategyCount:    m.StrategyCount,
+				LearningCount:    m.LearningCount,
+			}
+		}
 	case event.ApprovalRequest:
-		w.Approval = &Approval{ID: e.Approval.ID, Tool: e.Approval.Tool, Subject: e.Approval.Subject}
+		w.Approval = &Approval{ID: e.Approval.ID, Tool: e.Approval.Tool, Subject: e.Approval.Subject, Reason: e.Approval.Reason}
 	case event.AskRequest:
 		w.Ask = ToWireAsk(e.Ask)
 	case event.CompactionStarted, event.CompactionDone:
@@ -70,6 +98,8 @@ func ToWire(e event.Event) Event {
 			Trigger: e.Compaction.Trigger, Messages: e.Compaction.Messages,
 			Summary: e.Compaction.Summary, Archive: e.Compaction.Archive,
 		}
+	case event.GuardianAssessment:
+		w.Guardian = ToWireGuardian(e.Guardian)
 	case event.TurnDone:
 		if e.Err != nil {
 			w.Err = e.Err.Error()
@@ -79,6 +109,53 @@ func ToWire(e event.Event) Event {
 		w.RetryMax = e.RetryMax
 	}
 	return w
+}
+
+// MemoryCitation is the JSON form of provider.MemoryCitation.
+type MemoryCitation struct {
+	ID        string `json:"id,omitempty"`
+	Source    string `json:"source"`
+	LineStart int    `json:"lineStart,omitempty"`
+	LineEnd   int    `json:"lineEnd,omitempty"`
+	Note      string `json:"note,omitempty"`
+	Kind      string `json:"kind,omitempty"`
+}
+
+// MemoryCompiler is the JSON form of content-free Memory v5 usage metrics.
+type MemoryCompiler struct {
+	Injected         bool `json:"injected"`
+	UsefulIR         bool `json:"usefulIR"`
+	CompiledTokens   int  `json:"compiledTokens"`
+	IROverheadTokens int  `json:"irOverheadTokens"`
+	MemoryReferences int  `json:"memoryReferences"`
+	Constraints      int  `json:"constraints"`
+	RiskNotes        int  `json:"riskNotes"`
+	ExecutionSteps   int  `json:"executionSteps"`
+	TotalNodes       int  `json:"totalNodes"`
+	HighSignalNodes  int  `json:"highSignalNodes"`
+	ToolResultNodes  int  `json:"toolResultNodes"`
+	DecisionNodes    int  `json:"decisionNodes"`
+	StrategyCount    int  `json:"strategyCount"`
+	LearningCount    int  `json:"learningCount"`
+}
+
+// ToWireMemoryCitations converts local memory references into frontend JSON.
+func ToWireMemoryCitations(in []provider.MemoryCitation) []MemoryCitation {
+	out := make([]MemoryCitation, 0, len(in))
+	for _, c := range in {
+		if c.Source == "" && c.ID == "" && c.Note == "" {
+			continue
+		}
+		out = append(out, MemoryCitation{
+			ID:        c.ID,
+			Source:    c.Source,
+			LineStart: c.LineStart,
+			LineEnd:   c.LineEnd,
+			Note:      c.Note,
+			Kind:      c.Kind,
+		})
+	}
+	return out
 }
 
 // Compaction is the JSON form of an event.Compaction.
@@ -171,6 +248,48 @@ type Approval struct {
 	ID      string `json:"id"`
 	Tool    string `json:"tool"`
 	Subject string `json:"subject"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// Guardian is the JSON form of an event.GuardianResult.
+type Guardian struct {
+	ID                string `json:"id"`
+	Tool              string `json:"tool"`
+	Subject           string `json:"subject"`
+	Outcome           string `json:"outcome"`
+	RiskLevel         string `json:"risk_level,omitempty"`
+	UserAuthorization string `json:"user_authorization,omitempty"`
+	Rationale         string `json:"rationale,omitempty"`
+	DurationMs        int64  `json:"duration_ms,omitempty"`
+	Usage             *Usage `json:"usage,omitempty"`
+}
+
+// ToWireGuardian converts an event.GuardianResult into its JSON wire form.
+func ToWireGuardian(g event.GuardianResult) *Guardian {
+	out := &Guardian{
+		ID:                g.ID,
+		Tool:              g.Tool,
+		Subject:           g.Subject,
+		Outcome:           g.Outcome,
+		RiskLevel:         g.RiskLevel,
+		UserAuthorization: g.UserAuthorization,
+		Rationale:         g.Rationale,
+		DurationMs:        g.DurationMs,
+	}
+	if u := g.Usage; u != nil {
+		out.Usage = &Usage{
+			PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens,
+			TotalTokens: u.TotalTokens, CacheHitTokens: u.CacheHitTokens,
+			CacheMissTokens: u.CacheMissTokens, ReasoningTokens: u.ReasoningTokens,
+		}
+		if g.Pricing != nil {
+			cost := g.Pricing.Cost(u)
+			out.Usage.Cost = cost
+			out.Usage.Currency = g.Pricing.Symbol()
+			out.Usage.CostUSD = cost
+		}
+	}
+	return out
 }
 
 // ToWireAsk converts an event.Ask into its JSON wire form.
@@ -202,22 +321,24 @@ func ToWireCacheDiagnostics(d *event.CacheDiagnostics) *CacheDiagnostics {
 }
 
 var kindNames = map[event.Kind]string{
-	event.TurnStarted:       "turn_started",
-	event.Reasoning:         "reasoning",
-	event.Text:              "text",
-	event.Message:           "message",
-	event.ToolDispatch:      "tool_dispatch",
-	event.ToolResult:        "tool_result",
-	event.Usage:             "usage",
-	event.Notice:            "notice",
-	event.Phase:             "phase",
-	event.ApprovalRequest:   "approval_request",
-	event.AskRequest:        "ask_request",
-	event.TurnDone:          "turn_done",
-	event.CompactionStarted: "compaction_started",
-	event.CompactionDone:    "compaction_done",
-	event.ToolProgress:      "tool_progress",
-	event.MCPSurfaceReady:   "mcp_surface_ready",
-	event.Retrying:          "retrying",
-	event.Steer:             "steer",
+	event.TurnStarted:              "turn_started",
+	event.Reasoning:                "reasoning",
+	event.Text:                     "text",
+	event.Message:                  "message",
+	event.ToolDispatch:             "tool_dispatch",
+	event.ToolResult:               "tool_result",
+	event.Usage:                    "usage",
+	event.Notice:                   "notice",
+	event.Phase:                    "phase",
+	event.ApprovalRequest:          "approval_request",
+	event.AskRequest:               "ask_request",
+	event.TurnDone:                 "turn_done",
+	event.CompactionStarted:        "compaction_started",
+	event.CompactionDone:           "compaction_done",
+	event.ToolProgress:             "tool_progress",
+	event.MCPSurfaceReady:          "mcp_surface_ready",
+	event.Retrying:                 "retrying",
+	event.Steer:                    "steer",
+	event.MemoryCompilerStatsEvent: "memory_compiler_stats",
+	event.GuardianAssessment:       "guardian_assessment",
 }

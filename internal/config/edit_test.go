@@ -323,6 +323,43 @@ func TestSetAutoPlan(t *testing.T) {
 	}
 }
 
+func TestSetDesktopDefaultToolApprovalMode(t *testing.T) {
+	c := Default()
+	for _, mode := range []string{"ask", "auto", "yolo"} {
+		if err := c.SetDesktopDefaultToolApprovalMode(mode); err != nil {
+			t.Fatalf("SetDesktopDefaultToolApprovalMode(%q): %v", mode, err)
+		}
+		if c.DesktopDefaultToolApprovalMode() != mode {
+			t.Fatalf("desktop default tool approval mode = %q, want %q", c.DesktopDefaultToolApprovalMode(), mode)
+		}
+	}
+	if err := c.SetDesktopDefaultToolApprovalMode("full-access"); err != nil {
+		t.Fatalf("legacy full-access should be accepted: %v", err)
+	}
+	if c.DesktopDefaultToolApprovalMode() != "yolo" {
+		t.Fatalf("legacy full-access should save as yolo, got %q", c.DesktopDefaultToolApprovalMode())
+	}
+	if err := c.SetDesktopDefaultToolApprovalMode("maybe"); err == nil {
+		t.Fatal("expected error for invalid desktop default tool approval mode")
+	}
+}
+
+func TestSetMemoryCompilerEnabled(t *testing.T) {
+	c := Default()
+	if err := c.SetMemoryCompilerEnabled(false); err != nil {
+		t.Fatalf("SetMemoryCompilerEnabled(false): %v", err)
+	}
+	if c.MemoryCompilerEnabled() {
+		t.Fatal("memory compiler explicit false = true, want false")
+	}
+	if err := c.SetMemoryCompilerEnabled(true); err != nil {
+		t.Fatalf("SetMemoryCompilerEnabled(true): %v", err)
+	}
+	if !c.MemoryCompilerEnabled() {
+		t.Fatal("memory compiler explicit true = false, want true")
+	}
+}
+
 func TestSetUIShortcutLayout(t *testing.T) {
 	c := Default()
 	if got := c.UIShortcutLayout(); got != "classic" {
@@ -967,7 +1004,9 @@ func TestSaveToScopesUserAndProjectFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read project config: %v", err)
 	}
-	if strings.Contains(string(projectBody), "[desktop]") || strings.Contains(string(projectBody), "close_behavior") {
+	if strings.Contains(string(projectBody), "[desktop]") ||
+		strings.Contains(string(projectBody), "close_behavior") ||
+		strings.Contains(string(projectBody), "default_tool_approval_mode") {
 		t.Fatalf("project config should not include desktop preferences:\n%s", projectBody)
 	}
 	if info, err := os.Stat(projectPath); err != nil {

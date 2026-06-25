@@ -19,7 +19,9 @@ export type EventKind =
   | "compaction_done"
   | "mcp_surface_ready"
   | "retrying"
-  | "steer";
+  | "steer"
+  | "memory_compiler_stats"
+  | "guardian_assessment";
 
 export interface WireCompaction {
   trigger?: string; // "auto" | "manual"
@@ -85,6 +87,19 @@ export interface WireApproval {
   id: string;
   tool: string;
   subject: string;
+  reason?: string;
+}
+
+export interface WireGuardian {
+  id: string;
+  tool: string;
+  subject: string;
+  outcome: string;
+  risk_level?: string;
+  user_authorization?: string;
+  rationale?: string;
+  duration_ms?: number;
+  usage?: WireUsage;
 }
 
 export interface WireAskOption {
@@ -111,16 +126,45 @@ export interface QuestionAnswer {
   selected: string[];
 }
 
+export interface MemoryCitation {
+  id?: string;
+  source: string;
+  lineStart?: number;
+  lineEnd?: number;
+  note?: string;
+  kind?: string;
+}
+
+export interface MemoryCompilerStats {
+  injected: boolean;
+  usefulIR: boolean;
+  compiledTokens: number;
+  irOverheadTokens: number;
+  memoryReferences: number;
+  constraints: number;
+  riskNotes: number;
+  executionSteps: number;
+  totalNodes: number;
+  highSignalNodes: number;
+  toolResultNodes: number;
+  decisionNodes: number;
+  strategyCount: number;
+  learningCount: number;
+}
+
 export interface WireEvent {
   kind: EventKind;
   text?: string;
   reasoning?: string;
+  memoryCitations?: MemoryCitation[];
+  memoryCompiler?: MemoryCompilerStats;
   level?: "info" | "warn";
   tool?: WireTool;
   usage?: WireUsage;
   approval?: WireApproval;
   ask?: WireAsk;
   compaction?: WireCompaction;
+  guardian?: WireGuardian;
   err?: string;
   retryAttempt?: number;
   retryMax?: number;
@@ -254,6 +298,7 @@ export interface HistoryMessage {
   submitText?: string;
   createdAt?: number;
   reasoning?: string;
+  memoryCitations?: MemoryCitation[];
   level?: "info" | "warn";
   toolCalls?: HistoryToolCall[];
   toolCallId?: string;
@@ -384,9 +429,16 @@ export function normalizeCollaborationMode(mode?: string, goal?: string, legacyM
   return "normal";
 }
 
-export function normalizeToolApprovalMode(mode?: string, legacyMode?: Mode, legacyAutoApproveTools?: boolean): ToolApprovalMode {
-  if (mode === "auto" || mode === "yolo" || mode === "ask") return mode;
+export function normalizeToolApprovalMode(
+  mode?: string,
+  legacyMode?: Mode,
+  legacyAutoApproveTools?: boolean,
+  fallbackMode?: ToolApprovalMode,
+): ToolApprovalMode {
+  const normalized = typeof mode === "string" ? mode.trim().toLowerCase() : "";
+  if (normalized === "auto" || normalized === "yolo" || normalized === "ask") return normalized as ToolApprovalMode;
   if (legacyAutoApproveTools || (legacyMode && modeHasAutoApproveTools(legacyMode))) return "yolo";
+  if (fallbackMode === "auto" && normalized === "") return "auto";
   return "ask";
 }
 
@@ -914,9 +966,11 @@ export interface SettingsView {
   displayMode: string;   // "standard" | "compact"
   statusBarStyle: string; // "icon" | "text"
   statusBarItems: string[]; // ordered visible status bar item ids
+  defaultToolApprovalMode: ToolApprovalMode | string; // default for newly-created sessions
   checkUpdates: boolean; // check for new versions on startup
   telemetry: boolean; // anonymous launch ping (install id + version + OS)
   metrics: boolean; // aggregate desktop metrics (anonymous signal/bucket counts)
+  memoryCompilerEnabled: boolean; // Memory v5 execution compiler
   configPath: string;
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
   autoApproveTools: boolean;

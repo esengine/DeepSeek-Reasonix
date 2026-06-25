@@ -85,19 +85,20 @@ type UIConfig struct {
 // separate from top-level language and [ui] so desktop choices do not affect CLI
 // language, terminal colours, or provider-visible prompt/request data.
 type DesktopConfig struct {
-	Language       string   `toml:"language"`         // auto|en|zh; empty/auto = browser/OS auto-detect
-	LayoutStyle    string   `toml:"layout_style"`     // classic|workbench|creation; desktop layout style
-	Theme          string   `toml:"theme"`            // auto|dark|light; empty resolves to auto
-	ThemeStyle     string   `toml:"theme_style"`      // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
-	CloseBehavior  string   `toml:"close_behavior"`   // quit|background; desktop window close behavior
-	DisplayMode    string   `toml:"display_mode"`     // standard|compact (legacy "minimal" maps to compact); transcript display mode
-	StatusBarStyle string   `toml:"status_bar_style"` // icon|text; desktop status bar metric labels
-	StatusBarItems []string `toml:"status_bar_items"` // ordered visible desktop status bar items
-	CheckUpdates   *bool    `toml:"check_updates"`    // startup update checks; nil keeps the default enabled
-	Telemetry      *bool    `toml:"telemetry"`        // anonymous launch ping (install id + version + OS); nil keeps the default enabled
-	Metrics        *bool    `toml:"metrics"`          // aggregate desktop metrics (anonymous signal/bucket counts; no content); nil keeps the default enabled
-	ProviderAccess []string `toml:"provider_access"`  // desktop-only list of provider entries shown in Settings > Model > Access
-	ExpandThinking bool     `toml:"expand_thinking"`  // true = show reasoning text expanded by default; false = collapsed
+	Language                string   `toml:"language"`                   // auto|en|zh; empty/auto = browser/OS auto-detect
+	LayoutStyle             string   `toml:"layout_style"`               // classic|workbench|creation; desktop layout style
+	Theme                   string   `toml:"theme"`                      // auto|dark|light; empty resolves to auto
+	ThemeStyle              string   `toml:"theme_style"`                // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
+	CloseBehavior           string   `toml:"close_behavior"`             // quit|background; desktop window close behavior
+	DisplayMode             string   `toml:"display_mode"`               // standard|compact (legacy "minimal" maps to compact); transcript display mode
+	StatusBarStyle          string   `toml:"status_bar_style"`           // icon|text; desktop status bar metric labels
+	StatusBarItems          []string `toml:"status_bar_items"`           // ordered visible desktop status bar items
+	DefaultToolApprovalMode string   `toml:"default_tool_approval_mode"` // ask|auto|yolo; default for newly-created desktop sessions
+	CheckUpdates            *bool    `toml:"check_updates"`              // startup update checks; nil keeps the default enabled
+	Telemetry               *bool    `toml:"telemetry"`                  // anonymous launch ping (install id + version + OS); nil keeps the default enabled
+	Metrics                 *bool    `toml:"metrics"`                    // aggregate desktop metrics (anonymous signal/bucket counts; no content); nil keeps the default enabled
+	ProviderAccess          []string `toml:"provider_access"`            // desktop-only list of provider entries shown in Settings > Model > Access
+	ExpandThinking          bool     `toml:"expand_thinking"`            // true = show reasoning text expanded by default; false = collapsed
 }
 
 // NotificationsConfig controls optional system notifications for CLI chat/run.
@@ -241,6 +242,29 @@ func (c *Config) DesktopDisplayMode() string {
 	}
 }
 
+// NormalizeToolApprovalMode returns the canonical desktop/session tool approval
+// posture. Unknown or missing values fall back to ask for safety.
+func NormalizeToolApprovalMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "auto":
+		return "auto"
+	case "yolo", "full", "full-access", "bypass":
+		return "yolo"
+	default:
+		return "ask"
+	}
+}
+
+// DesktopDefaultToolApprovalMode is the Ask/Auto/YOLO default used only when
+// creating a new desktop session. Existing tabs and restored sessions keep their
+// own persisted runtime state.
+func (c *Config) DesktopDefaultToolApprovalMode() string {
+	if c == nil {
+		return "ask"
+	}
+	return NormalizeToolApprovalMode(c.Desktop.DefaultToolApprovalMode)
+}
+
 // DesktopStatusBarStyle normalizes the desktop status bar metric label style.
 // Default is "text"; explicit "icon" preserves the user's compact choice.
 func (c *Config) DesktopStatusBarStyle() string {
@@ -327,6 +351,29 @@ func (c *Config) ColdResumePruneEnabled() bool {
 		return true
 	}
 	return *c.Agent.ColdResumePrune
+}
+
+// ResponseLanguage normalizes the top-level language preference for final
+// answers. Empty means auto: replies follow the current user turn.
+func (c *Config) ResponseLanguage() string {
+	if c == nil {
+		return "auto"
+	}
+	return NormalizeLanguage(c.Language)
+}
+
+// NormalizeLanguage returns one of auto|zh|en for UI/default reply language settings.
+func NormalizeLanguage(lang string) string {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "", "auto", "detect", "default":
+		return "auto"
+	case "zh", "cn", "chinese", "中文":
+		return "zh"
+	case "en", "english":
+		return "en"
+	default:
+		return "auto"
+	}
 }
 
 // ReasoningLanguage normalizes agent.reasoning_language. Empty means auto:
@@ -755,16 +802,18 @@ func (c *Config) BashMode() string {
 // each model's prompt prefix stays cache-stable). SubagentModel is the optional
 // default for runAs=subagent skills; SubagentModels overrides it per skill name.
 type AgentConfig struct {
-	SystemPrompt     string            `toml:"system_prompt"`
-	SystemPromptFile string            `toml:"system_prompt_file"`
-	MaxSteps         int               `toml:"max_steps"`         // tool-call rounds per turn; 0 = unlimited
-	PlannerMaxSteps  int               `toml:"planner_max_steps"` // planner read-only tool-call rounds; 0 = unlimited
-	Temperature      float64           `toml:"temperature"`
-	PlannerModel     string            `toml:"planner_model"`
-	SubagentModel    string            `toml:"subagent_model"`
-	SubagentModels   map[string]string `toml:"subagent_models"`
-	SubagentEffort   string            `toml:"subagent_effort"`
-	SubagentEfforts  map[string]string `toml:"subagent_efforts"`
+	SystemPrompt        string            `toml:"system_prompt"`
+	SystemPromptFile    string            `toml:"system_prompt_file"`
+	MaxSteps            int               `toml:"max_steps"`         // tool-call rounds per turn; 0 = unlimited
+	PlannerMaxSteps     int               `toml:"planner_max_steps"` // planner read-only tool-call rounds; 0 = unlimited
+	Temperature         float64           `toml:"temperature"`
+	PlannerModel        string            `toml:"planner_model"`
+	GuardianModel       string            `toml:"guardian_model"`
+	GuardianTemperature float64           `toml:"guardian_temperature"`
+	SubagentModel       string            `toml:"subagent_model"`
+	SubagentModels      map[string]string `toml:"subagent_models"`
+	SubagentEffort      string            `toml:"subagent_effort"`
+	SubagentEfforts     map[string]string `toml:"subagent_efforts"`
 	// OutputStyle selects a persona/tone block folded into the system prompt at
 	// startup (a built-in like "explanatory"/"learning"/"concise", or a custom
 	// .reasonix/output-styles/<name>.md). Empty = the unmodified prompt.
@@ -792,11 +841,27 @@ type AgentConfig struct {
 	// ColdResumePrune elides stale tool results when a session reopens past the
 	// provider cache window. nil = default enabled.
 	ColdResumePrune *bool `toml:"cold_resume_prune"`
-	// PlanModeAllowedTools names tools that are exempt from the plan-mode read-only
-	// gate. When a tool named here is called while in plan mode, it executes without
-	// the "plan mode is read-only" block. Use sparingly — prefer the built-in safe
-	// bash commands for read-only exploration.
+	// PlanModeAllowedTools names extra custom tools the plan-mode policy may treat
+	// as read-only. It cannot unlock known blocked tools or unsafe bash commands.
 	PlanModeAllowedTools []string `toml:"plan_mode_allowed_tools"`
+	// MemoryCompiler controls the v5 execution-memory compiler. Missing configs
+	// default to enabled so users get the self-improving planner unless they opt
+	// out explicitly.
+	MemoryCompiler MemoryCompilerConfig `toml:"memory_compiler"`
+}
+
+// MemoryCompilerConfig controls the v5 execution-memory compiler.
+type MemoryCompilerConfig struct {
+	Enabled *bool `toml:"enabled"`
+}
+
+// MemoryCompilerEnabled reports whether the v5 execution-memory compiler should
+// participate in future turns. Missing config defaults to true.
+func (c *Config) MemoryCompilerEnabled() bool {
+	if c == nil || c.Agent.MemoryCompiler.Enabled == nil {
+		return true
+	}
+	return *c.Agent.MemoryCompiler.Enabled
 }
 
 // ProviderEntry declares a model provider instance. ContextWindow is the model's

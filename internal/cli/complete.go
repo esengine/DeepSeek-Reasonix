@@ -84,6 +84,7 @@ func (m *chatTUI) slashItems() []compItem {
 		{label: "/effort", insert: "/effort ", hint: i18n.M.CmdEffort, descend: true},
 		{label: "/auto-plan", insert: "/auto-plan ", hint: i18n.M.CmdAutoPlan, descend: true},
 		{label: "/reasoning-language", insert: "/reasoning-language ", hint: i18n.M.CmdReasonLang, descend: true},
+		{label: "/memory-v5", insert: "/memory-v5 ", hint: i18n.M.CmdMemoryV5, descend: true},
 		{label: "/theme", insert: "/theme ", hint: i18n.M.CmdTheme, descend: true},
 		{label: "/language", insert: "/language ", hint: i18n.M.CmdLanguage, descend: true},
 		{label: "/help", insert: "/help ", hint: i18n.M.CmdHelp},

@@ -88,6 +88,12 @@ const (
 	// wrapper prefix), so a frontend can display it to the user as confirmation.
 	// Frontends use Steer to know a queued message has been delivered.
 	Steer
+	// MemoryCompilerStatsEvent carries content-free Memory v5 participation metrics
+	// for the current turn. Appended last to keep earlier Kind values stable.
+	MemoryCompilerStatsEvent
+	// GuardianAssessment reports the outcome of a guardian sub-agent safety review.
+	// Carries GuardianResult payload (Outcome, RiskLevel, Rationale, etc.).
+	GuardianAssessment
 	// KindCount is a sentinel one past the last real Kind. New event kinds must
 	// be inserted above it so completeness tests cover them automatically.
 	KindCount
@@ -147,6 +153,7 @@ type Approval struct {
 	ID      string
 	Tool    string
 	Subject string
+	Reason  string // optional annotation explaining why approval is needed
 }
 
 // AskOption is one choice the user can pick for an AskQuestion.
@@ -181,6 +188,21 @@ type Compaction struct {
 	Messages int    // Done: how many messages were folded into the summary
 	Summary  string // Done: the briefing the agent keeps relying on
 	Archive  string // Done: path the dropped originals were archived to ("" if none)
+}
+
+// GuardianResult carries the outcome of a guardian sub-agent safety review.
+// Emitted with Kind=GuardianAssessment after each review completes.
+type GuardianResult struct {
+	ID                string            // unique review id
+	Tool              string            // tool being reviewed (e.g. "bash")
+	Subject           string            // call subject (e.g. "rm -rf /tmp/build")
+	Outcome           string            // "allow" | "deny"
+	RiskLevel         string            // "low" | "medium" | "high" | "critical"
+	UserAuthorization string            // "unknown" | "low" | "medium" | "high"
+	Rationale         string            // one-sentence reason
+	DurationMs        int64             // wall-clock review time
+	Usage             *provider.Usage   // guardian review token telemetry
+	Pricing           *provider.Pricing // for cost display (nil = omit cost)
 }
 
 // AskAnswer is the user's reply to one AskQuestion: the chosen option label(s)
@@ -218,13 +240,16 @@ const (
 // for Kind; the others are zero.
 type Event struct {
 	Kind             Kind
-	Text             string            // Reasoning / Text / Message / Notice / Phase
-	Reasoning        string            // Message: the full reasoning chain
-	Tool             Tool              // ToolDispatch / ToolResult
-	Usage            *provider.Usage   // Usage
-	Pricing          *provider.Pricing // Usage: for cost display (nil = omit cost)
-	UsageSource      string            // Usage: billable call source; empty means executor for compatibility
-	CacheDiagnostics *CacheDiagnostics // Usage: cache-churn attribution (nil = N/A)
+	Text             string                    // Reasoning / Text / Message / Notice / Phase
+	Reasoning        string                    // Message: the full reasoning chain
+	MemoryCitations  []provider.MemoryCitation // Message: local memory references displayed by rich frontends
+	MemoryCompiler   *MemoryCompilerStats      // MemoryCompilerStats: content-free Memory v5 usage counters
+	Tool             Tool                      // ToolDispatch / ToolResult
+	Usage            *provider.Usage           // Usage
+	Pricing          *provider.Pricing         // Usage: for cost display (nil = omit cost)
+	Source           string                    // optional display/event source (executor, planner, subagent, ...)
+	UsageSource      string                    // Usage: billable call source; empty means executor for compatibility
+	CacheDiagnostics *CacheDiagnostics         // Usage: cache-churn attribution (nil = N/A)
 	// SessionHit/SessionMiss carry cumulative cache tokens across the whole
 	// session (Usage events only), so a frontend can show the aggregate hit-rate
 	// — which doesn't crater on a short turn or after compaction — alongside
@@ -236,8 +261,28 @@ type Event struct {
 	Ask          Ask        // AskRequest
 	Err          error      // TurnDone: non-nil on failure
 	Compaction   Compaction // Compaction
-	RetryAttempt int        // Retrying: 1-based attempt about to be made
-	RetryMax     int        // Retrying: total attempts before giving up
+	Guardian     GuardianResult
+	RetryAttempt int // Retrying: 1-based attempt about to be made
+	RetryMax     int // Retrying: total attempts before giving up
+}
+
+// MemoryCompilerStats is intentionally limited to counts and estimated token
+// sizes. It must never carry memory text, prompts, tool output, paths, or IDs.
+type MemoryCompilerStats struct {
+	Injected         bool
+	UsefulIR         bool
+	CompiledTokens   int
+	IROverheadTokens int
+	MemoryReferences int
+	Constraints      int
+	RiskNotes        int
+	ExecutionSteps   int
+	TotalNodes       int
+	HighSignalNodes  int
+	ToolResultNodes  int
+	DecisionNodes    int
+	StrategyCount    int
+	LearningCount    int
 }
 
 // ReadinessAuditSink is an optional sink capability. Sinks that do not care

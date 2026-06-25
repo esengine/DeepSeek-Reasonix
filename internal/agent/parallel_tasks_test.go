@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -97,6 +98,51 @@ func TestParallelTasksForegroundCompletesAndClosesWorkers(t *testing.T) {
 	}
 }
 
+func TestParallelTasksCancelReturnsPartialAggregate(t *testing.T) {
+	task := newTestTaskTool(t, promptRoutingProvider{}, tool.NewRegistry(), "sys", "", "", nil)
+	parallel := NewParallelTasksTool(task, tool.NewRegistry())
+
+	ctx, cancel := context.WithCancel(withCallContext(context.Background(), "parallel-call", event.Discard, nil, false))
+	defer cancel()
+	done := make(chan struct {
+		out string
+		err error
+	}, 1)
+	go func() {
+		out, err := parallel.Execute(ctx, json.RawMessage(`{
+			"tasks": [
+				{"prompt": "done child"},
+				{"prompt": "stuck child"}
+			]
+		}`))
+		done <- struct {
+			out string
+			err error
+		}{out: out, err: err}
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	select {
+	case got := <-done:
+		if !errors.Is(got.err, context.Canceled) {
+			t.Fatalf("Execute error = %v, want context cancellation", got.err)
+		}
+		if strings.Contains(got.out, "Completed 2 parallel tasks") {
+			t.Fatalf("cancelled aggregate reported full completion:\n%s", got.out)
+		}
+		if !strings.Contains(got.out, "done child ok") {
+			t.Fatalf("cancelled aggregate lost completed child output:\n%s", got.out)
+		}
+		if !strings.Contains(strings.ToLower(got.out), "cancelled") {
+			t.Fatalf("cancelled aggregate did not mark unfinished child:\n%s", got.out)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("parallel_tasks did not return promptly after cancellation")
+	}
+}
+
 type parallelStaticProvider struct{}
 
 func (parallelStaticProvider) Name() string { return "parallel-static" }
@@ -104,6 +150,21 @@ func (parallelStaticProvider) Name() string { return "parallel-static" }
 func (parallelStaticProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
 	ch := make(chan provider.Chunk, 2)
 	ch <- provider.Chunk{Type: provider.ChunkText, Text: "ok"}
+	ch <- provider.Chunk{Type: provider.ChunkDone}
+	close(ch)
+	return ch, nil
+}
+
+type promptRoutingProvider struct{}
+
+func (promptRoutingProvider) Name() string { return "prompt-routing" }
+
+func (promptRoutingProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	if strings.Contains(lastUser(req), "stuck") {
+		return make(chan provider.Chunk), nil
+	}
+	ch := make(chan provider.Chunk, 2)
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: lastUser(req) + " ok"}
 	ch <- provider.Chunk{Type: provider.ChunkDone}
 	close(ch)
 	return ch, nil

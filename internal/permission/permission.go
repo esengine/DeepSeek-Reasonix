@@ -343,6 +343,12 @@ type Approver interface {
 	Approve(ctx context.Context, toolName, subject string, args json.RawMessage) (allow, remember bool, err error)
 }
 
+// ReasonedApprover is the optional extension used by frontends that can return
+// a denial reason to feed back to the model.
+type ReasonedApprover interface {
+	ApproveWithReason(ctx context.Context, toolName, subject string, args json.RawMessage) (allow, remember bool, reason string, err error)
+}
+
 // Gate is what the agent consults at execute time: a Policy plus an optional
 // Approver. It satisfies the agent's Gate interface structurally.
 type Gate struct {
@@ -375,12 +381,16 @@ func (g *Gate) Check(ctx context.Context, toolName string, args json.RawMessage,
 			return true, "", nil // non-interactive: preserve autonomy
 		}
 		subject := Subject(args)
-		allow, remember, err := g.Approver.Approve(ctx, toolName, subject, args)
+		allow, remember, approverReason, err := g.approve(ctx, toolName, subject, args)
 		if err != nil {
 			return false, "approval aborted", err
 		}
 		if !allow {
-			return false, "the user declined this tool call — do not retry it; ask how they would like to proceed or choose another approach.", nil
+			reason := "the user declined this tool call — do not retry it; ask how they would like to proceed or choose another approach."
+			if approverReason != "" {
+				reason = approverReason
+			}
+			return false, reason, nil
 		}
 		if remember && g.OnRemember != nil {
 			// "Always allow" is tool-wide: persist the bare tool name so any
@@ -400,6 +410,14 @@ func (g *Gate) Check(ctx context.Context, toolName string, args json.RawMessage,
 	default:
 		return true, "", nil
 	}
+}
+
+func (g *Gate) approve(ctx context.Context, toolName, subject string, args json.RawMessage) (bool, bool, string, error) {
+	if a, ok := g.Approver.(ReasonedApprover); ok {
+		return a.ApproveWithReason(ctx, toolName, subject, args)
+	}
+	allow, remember, err := g.Approver.Approve(ctx, toolName, subject, args)
+	return allow, remember, "", err
 }
 
 // rememberRule builds the rule string persisted when the user picks "always

@@ -498,6 +498,48 @@ func TestConfigAutoPlanLocalIsRejected(t *testing.T) {
 	}
 }
 
+func TestConfigMemoryV5CommandWritesUserConfig(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	out := captureStdout(t, func() {
+		if rc := Run([]string{"config", "memory-v5", "off"}, "test-version"); rc != 0 {
+			t.Fatalf("config memory-v5 rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, "memory_compiler.enabled = false") {
+		t.Fatalf("config memory-v5 output = %q", out)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if cfg.MemoryCompilerEnabled() {
+		t.Fatalf("saved memory_compiler.enabled = true, want false")
+	}
+
+	out = captureStdout(t, func() {
+		if rc := Run([]string{"config", "memory-v5", "status"}, "test-version"); rc != 0 {
+			t.Fatalf("config memory-v5 status rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, "memory_compiler.enabled = false") {
+		t.Fatalf("config memory-v5 status output = %q", out)
+	}
+}
+
+func TestConfigMemoryV5LocalIsRejected(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	errOut := captureStderr(t, func() {
+		if rc := Run([]string{"config", "memory-v5", "--local", "off"}, "test-version"); rc != 2 {
+			t.Fatalf("config memory-v5 --local rc = %d, want 2", rc)
+		}
+	})
+	if !strings.Contains(errOut, "--local is not supported") {
+		t.Fatalf("config memory-v5 --local stderr = %q", errOut)
+	}
+	if _, err := os.Stat("reasonix.toml"); !os.IsNotExist(err) {
+		t.Fatalf("reasonix.toml should not be written, stat err=%v", err)
+	}
+}
+
 func TestConfigAutoPlanIgnoresProjectConfig(t *testing.T) {
 	isolateCLIConfigHome(t)
 

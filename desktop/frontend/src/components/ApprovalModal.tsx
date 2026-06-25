@@ -196,6 +196,7 @@ export function ApprovalModal({
           </>
         }
       >
+        {approval.reason && <div className="approval-reason">{approval.reason}</div>}
         {subject && (
           <pre className="approval-subject">{subject}</pre>
         )}

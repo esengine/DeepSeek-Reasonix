@@ -47,6 +47,7 @@ func LoadForRoot(root string) (*Config, error) {
 	}
 	globalMaxSteps := cfg.Agent.MaxSteps
 	globalPlannerMaxSteps := cfg.Agent.PlannerMaxSteps
+	globalMemoryCompiler := cfg.Agent.MemoryCompiler
 
 	tomlSources = append(tomlSources, projectTOML)
 	if err := mergeRuntimeTOMLFile(cfg, projectTOML); err != nil {
@@ -57,6 +58,7 @@ func LoadForRoot(root string) (*Config, error) {
 	// the user's execution and planner round limits.
 	cfg.Agent.MaxSteps = globalMaxSteps
 	cfg.Agent.PlannerMaxSteps = globalPlannerMaxSteps
+	cfg.Agent.MemoryCompiler = globalMemoryCompiler
 	// toml.DecodeFile replaces [[plugins]] wholesale, so cfg.Plugins now holds
 	// only the last file's. Re-merge by name across all sources (later wins) so a
 	// project reasonix.toml doesn't drop the global config's MCP servers.

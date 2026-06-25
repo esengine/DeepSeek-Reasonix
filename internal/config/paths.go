@@ -291,6 +291,20 @@ func ProjectSessionDir(workspaceRoot string) string {
 	return filepath.Join(base, "projects", WorkspaceSlug(root), "sessions")
 }
 
+// MemoryCompilerDir is the project-scoped state directory for the Memory v5
+// execution compiler. Empty means persistent compiler state is unavailable.
+func MemoryCompilerDir(workspaceRoot string) string {
+	base := MemoryUserDir()
+	root := strings.TrimSpace(workspaceRoot)
+	if base == "" || root == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	return filepath.Join(base, "projects", WorkspaceSlug(root), "memory", "compiler")
+}
+
 // WorkspaceSlug flattens an absolute workspace path into the directory name
 // used under <config root>/projects.
 func WorkspaceSlug(absPath string) string {

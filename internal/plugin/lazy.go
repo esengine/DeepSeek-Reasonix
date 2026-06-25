@@ -172,6 +172,10 @@ type lazyTool struct {
 	desc     string
 	schema   json.RawMessage
 	readOnly bool
+	// readOnlyTrusted mirrors remoteTool: true only for a first-party
+	// ReadOnlyToolNames override, so plan mode can tell trusted first-party
+	// read-only from an untrusted server readOnlyHint.
+	readOnlyTrusted bool
 	// hasCache true → schema is trusted, so Execute runs the handshake
 	// synchronously and forwards in one turn. false → schema is empty, so we
 	// can't honour the model's call; we kick the spawn async and ask for a
@@ -183,6 +187,12 @@ type lazyTool struct {
 func (lt *lazyTool) Name() string        { return lt.name }
 func (lt *lazyTool) Description() string { return lt.desc }
 func (lt *lazyTool) ReadOnly() bool      { return lt.readOnly }
+
+// PlanModeUntrustedReadOnly mirrors remoteTool: true when ReadOnly() is true only
+// from an untrusted server readOnlyHint, false for a first-party override.
+func (lt *lazyTool) PlanModeUntrustedReadOnly() bool {
+	return lt.readOnly && !lt.readOnlyTrusted
+}
 func (lt *lazyTool) Schema() json.RawMessage {
 	if len(lt.schema) == 0 {
 		return json.RawMessage(`{"type":"object"}`)
@@ -357,12 +367,13 @@ func LazyToolset(spec Spec, cs *CachedSchema, host *Host, reg *tool.Registry, se
 				visibleName = strings.TrimPrefix(visibleName, spec.StripRawPrefix)
 			}
 			out = append(out, &lazyTool{
-				shared:   shared,
-				name:     toolName(spec.Name, visibleName),
-				desc:     ct.Description,
-				schema:   ct.Schema,
-				readOnly: spec.toolReadOnly(ct.Name, ct.ReadOnly),
-				hasCache: true,
+				shared:          shared,
+				name:            toolName(spec.Name, visibleName),
+				desc:            ct.Description,
+				schema:          ct.Schema,
+				readOnly:        spec.toolReadOnly(ct.Name, ct.ReadOnly),
+				readOnlyTrusted: spec.ReadOnlyToolNames[ct.Name],
+				hasCache:        true,
 			})
 		}
 	}

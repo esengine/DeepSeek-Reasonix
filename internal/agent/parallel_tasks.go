@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -73,6 +74,16 @@ type parallelTaskItem struct {
 	DependsOn   []int    `json:"depends_on"`
 }
 
+type parallelTaskStatus string
+
+const (
+	parallelTaskPending   parallelTaskStatus = "pending"
+	parallelTaskCompleted parallelTaskStatus = "completed"
+	parallelTaskFailed    parallelTaskStatus = "failed"
+	parallelTaskCancelled parallelTaskStatus = "cancelled"
+	parallelTaskSkipped   parallelTaskStatus = "skipped"
+)
+
 func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var params struct {
 		Tasks []parallelTaskItem `json:"tasks"`
@@ -109,199 +120,263 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 	running := make([]bool, n)
 	done := make([]bool, n)
 	outputs := make([]string, n)
-	errors := make([]error, n)
+	taskErrs := make([]error, n)
+	statuses := make([]parallelTaskStatus, n)
 	for i, t := range params.Tasks {
 		remaining[i] = len(t.DependsOn)
-		running[i] = false
-		done[i] = false
+		statuses[i] = parallelTaskPending
 	}
 
-	// Channels for task completion signals and for spawning tasks.
-	type runRequest struct {
-		idx      int
-		prompt   string
-		label    string
-		tools    []string
-		maxSteps int
-		model    string
-		effort   string
-	}
-	spawnCh := make(chan runRequest, n)
 	doneCh := make(chan subResult, n)
-	allDone := make(chan struct{})
-
-	// Dispatcher goroutine: spawns tasks when their deps are satisfied,
-	// accumulating wisdom from completed tasks as files on disk.
-	go func() {
-		spawned := 0
-		completed := 0
-		wisdomDir, _ := os.MkdirTemp("", "parallel-wisdom-*")
-		if wisdomDir != "" {
-			defer os.RemoveAll(wisdomDir)
-		}
-
-		makePrompt := func(t parallelTaskItem) string {
-			var prefix strings.Builder
-			if len(t.DependsOn) > 0 && wisdomDir != "" {
-				entries, _ := os.ReadDir(wisdomDir)
-				if len(entries) > 0 {
-					fmt.Fprintf(&prefix, "Previous task results are available at %s. Read the relevant files with read_file before starting.\n\n", wisdomDir)
-				}
-			}
-			prefix.WriteString(t.Prompt)
-			return prefix.String()
-		}
-		makeLabel := func(t parallelTaskItem, idx int) string {
-			if t.Description != "" {
-				return t.Description
-			}
-			return fmt.Sprintf("task-%d", idx+1)
-		}
-
-		// Seed: spawn all tasks with no dependencies.
-		for i, t := range params.Tasks {
-			if remaining[i] == 0 && !running[i] && !done[i] {
-				running[i] = true
-				spawnCh <- runRequest{
-					idx: i, prompt: makePrompt(t), label: makeLabel(t, i),
-					tools: t.Tools, maxSteps: t.MaxSteps, model: t.Model, effort: t.Effort,
-				}
-				spawned++
-			}
-		}
-
-		for completed < n {
-			r := <-doneCh
-			completed++
-			done[r.index] = true
-			outputs[r.index] = r.output
-			errors[r.index] = r.err
-
-			// Write wisdom to file instead of inlining in prompt.
-			if wisdomDir != "" && r.output != "" {
-				fname := filepath.Join(wisdomDir, fmt.Sprintf("task-%d.md", r.index+1))
-				summary := fmt.Sprintf("# Task %d Result\n\n%s", r.index+1, strings.TrimSpace(r.output))
-				_ = os.WriteFile(fname, []byte(summary), 0o644)
-			} else if wisdomDir != "" && r.err != nil {
-				fname := filepath.Join(wisdomDir, fmt.Sprintf("task-%d.md", r.index+1))
-				summary := fmt.Sprintf("# Task %d Result\n\nFAILED: %s", r.index+1, r.err)
-				_ = os.WriteFile(fname, []byte(summary), 0o644)
-			}
-
-			// Check if any waiting tasks are now unblocked.
-			for i, t := range params.Tasks {
-				if remaining[i] > 0 && !running[i] && !done[i] {
-					for _, dep := range t.DependsOn {
-						if dep == r.index {
-							remaining[i]--
-						}
-					}
-					if remaining[i] == 0 {
-						running[i] = true
-						spawnCh <- runRequest{
-							idx: i, prompt: makePrompt(t), label: makeLabel(t, i),
-							tools: t.Tools, maxSteps: t.MaxSteps, model: t.Model, effort: t.Effort,
-						}
-						spawned++
-					}
-				}
-			}
-		}
-		close(spawnCh)
-		close(allDone)
-	}()
-
-	// Worker pool: goroutines that pick up spawn requests and run sub-tasks.
 	var wg sync.WaitGroup
-	for w := 0; w < n; w++ {
+
+	wisdomDir, _ := os.MkdirTemp("", "parallel-wisdom-*")
+	if wisdomDir != "" {
+		defer os.RemoveAll(wisdomDir)
+	}
+	makePrompt := func(t parallelTaskItem) string {
+		var prefix strings.Builder
+		if len(t.DependsOn) > 0 && wisdomDir != "" {
+			entries, _ := os.ReadDir(wisdomDir)
+			if len(entries) > 0 {
+				fmt.Fprintf(&prefix, "Previous task results are available at %s. Read the relevant files with read_file before starting.\n\n", wisdomDir)
+			}
+		}
+		prefix.WriteString(t.Prompt)
+		return prefix.String()
+	}
+	makeLabel := func(t parallelTaskItem, idx int) string {
+		if t.Description != "" {
+			return t.Description
+		}
+		return fmt.Sprintf("task-%d", idx+1)
+	}
+	writeWisdom := func(r subResult) {
+		if wisdomDir == "" {
+			return
+		}
+		fname := filepath.Join(wisdomDir, fmt.Sprintf("task-%d.md", r.index+1))
+		switch {
+		case r.output != "":
+			summary := fmt.Sprintf("# Task %d Result\n\n%s", r.index+1, strings.TrimSpace(r.output))
+			_ = os.WriteFile(fname, []byte(summary), 0o644)
+		case r.err != nil:
+			summary := fmt.Sprintf("# Task %d Result\n\nFAILED: %s", r.index+1, r.err)
+			_ = os.WriteFile(fname, []byte(summary), 0o644)
+		}
+	}
+	startTask := func(idx int) {
+		t := params.Tasks[idx]
+		running[idx] = true
+		prompt := makePrompt(t)
+		label := makeLabel(t, idx)
+		subID := fmt.Sprintf("%s/sub-%d", parentID, idx+1)
+		dispatchArgs, _ := json.Marshal(map[string]string{"prompt": prompt, "description": label})
+		sink.Emit(event.Event{
+			Kind: event.ToolDispatch,
+			Tool: event.Tool{
+				ID: subID, ParentID: parentID, Name: "task",
+				Args: string(dispatchArgs), ReadOnly: true,
+			},
+		})
+
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for req := range spawnCh {
-				idx := req.idx
-				prompt := req.prompt
-				label := req.label
-				tools := req.tools
-				maxSteps := req.maxSteps
-				model := req.model
-				effort := req.effort
+			nested := subSinkFor(subID, sink)
+			modelRef, effortRef := p.taskTool.effectiveProfile(t.Model, t.Effort)
+			subReg := p.taskTool.buildSubReg(t.Tools)
 
-				subID := fmt.Sprintf("%s/sub-%d", parentID, idx+1)
-				dispatchArgs, _ := json.Marshal(map[string]string{"prompt": prompt, "description": label})
-				sink.Emit(event.Event{
-					Kind: event.ToolDispatch,
-					Tool: event.Tool{
-						ID: subID, ParentID: parentID, Name: "task",
-						Args: string(dispatchArgs), ReadOnly: true,
-					},
-				})
-
-				nested := subSinkFor(subID, sink)
-				modelRef, effortRef := p.taskTool.effectiveProfile(model, effort)
-				subReg := p.taskTool.buildSubReg(tools)
-
-				max := maxSteps
-				if max <= 0 {
-					max = 20
-				}
-
-				prov, pricing, ctxWin, err := resolveSubagentProvider(p.taskTool, modelRef, effortRef)
-				if err != nil {
-					sink.Emit(event.Event{
-						Kind: event.ToolResult,
-						Tool: event.Tool{ID: subID, ParentID: parentID, Name: "task", Err: err.Error()},
-					})
-					doneCh <- subResult{index: idx, err: err}
-					continue
-				}
-
-				sess := NewSession("")
-				output, runErr := RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, Options{
-					MaxSteps:          max,
-					Temperature:       p.taskTool.temperature,
-					Pricing:           pricing,
-					UsageSource:       event.UsageSourceSubagent,
-					Gate:              p.taskTool.gate,
-					ContextWindow:     ctxWin,
-					RecentKeep:        p.taskTool.recentKeep,
-					SoftCompactRatio:  p.taskTool.softCompactRatio,
-					CompactRatio:      p.taskTool.compactRatio,
-					CompactForceRatio: p.taskTool.compactForceRatio,
-					ArchiveDir:        p.taskTool.archiveDir,
-					KeepPolicy:        p.taskTool.keepPolicy,
-				}, nested)
-
-				if runErr != nil {
-					sink.Emit(event.Event{
-						Kind: event.ToolResult,
-						Tool: event.Tool{ID: subID, ParentID: parentID, Name: "task", Err: runErr.Error()},
-					})
-					doneCh <- subResult{index: idx, err: runErr}
-				} else {
-					sink.Emit(event.Event{
-						Kind: event.ToolResult,
-						Tool: event.Tool{ID: subID, ParentID: parentID, Name: "task", Output: output},
-					})
-					doneCh <- subResult{index: idx, output: output}
-				}
+			max := t.MaxSteps
+			if max <= 0 {
+				max = 20
 			}
+
+			prov, pricing, ctxWin, err := resolveSubagentProvider(p.taskTool, modelRef, effortRef)
+			if err != nil {
+				sink.Emit(event.Event{
+					Kind: event.ToolResult,
+					Tool: event.Tool{ID: subID, ParentID: parentID, Name: "task", Err: err.Error()},
+				})
+				doneCh <- subResult{index: idx, err: err}
+				return
+			}
+
+			sess := NewSession("")
+			output, runErr := RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, Options{
+				MaxSteps:          max,
+				Temperature:       p.taskTool.temperature,
+				Pricing:           pricing,
+				UsageSource:       event.UsageSourceSubagent,
+				Gate:              p.taskTool.gate,
+				ContextWindow:     ctxWin,
+				RecentKeep:        p.taskTool.recentKeep,
+				SoftCompactRatio:  p.taskTool.softCompactRatio,
+				CompactRatio:      p.taskTool.compactRatio,
+				CompactForceRatio: p.taskTool.compactForceRatio,
+				ArchiveDir:        p.taskTool.archiveDir,
+				KeepPolicy:        p.taskTool.keepPolicy,
+			}, nested)
+
+			if ctx.Err() != nil && runErr == nil {
+				runErr = ctx.Err()
+			}
+			if runErr != nil {
+				errText := runErr.Error()
+				if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
+					errText = "cancelled: " + errText
+				}
+				sink.Emit(event.Event{
+					Kind: event.ToolResult,
+					Tool: event.Tool{ID: subID, ParentID: parentID, Name: "task", Err: errText},
+				})
+				doneCh <- subResult{index: idx, err: runErr}
+				return
+			}
+			sink.Emit(event.Event{
+				Kind: event.ToolResult,
+				Tool: event.Tool{ID: subID, ParentID: parentID, Name: "task", Output: output},
+			})
+			doneCh <- subResult{index: idx, output: output}
 		}()
 	}
 
-	<-allDone
-	wg.Wait()
-
-	// Collect in order.
-	var b strings.Builder
-	fmt.Fprintf(&b, "Completed %d parallel tasks:\n", n)
-	for i := 0; i < n; i++ {
-		if errors[i] != nil {
-			fmt.Fprintf(&b, "── task-%d ──\n[FAILED] %s\n", i+1, errors[i])
-		} else {
-			fmt.Fprintf(&b, "── task-%d ──\n%s\n", i+1, strings.TrimSpace(outputs[i]))
+	startReady := func() {
+		if ctx.Err() != nil {
+			return
+		}
+		for i := range params.Tasks {
+			if remaining[i] == 0 && !running[i] && !done[i] {
+				startTask(i)
+			}
 		}
 	}
-	return b.String(), nil
+	markCancelled := func(err error) {
+		for i := range params.Tasks {
+			if done[i] {
+				continue
+			}
+			done[i] = true
+			if running[i] {
+				statuses[i] = parallelTaskCancelled
+				taskErrs[i] = err
+				continue
+			}
+			statuses[i] = parallelTaskSkipped
+			taskErrs[i] = err
+		}
+	}
+
+	completed := 0
+	startReady()
+	processResult := func(r subResult, schedule bool) {
+		if done[r.index] {
+			return
+		}
+		completed++
+		done[r.index] = true
+		outputs[r.index] = r.output
+		taskErrs[r.index] = r.err
+		switch {
+		case r.err == nil:
+			statuses[r.index] = parallelTaskCompleted
+		case errors.Is(r.err, context.Canceled), errors.Is(r.err, context.DeadlineExceeded):
+			statuses[r.index] = parallelTaskCancelled
+		default:
+			statuses[r.index] = parallelTaskFailed
+		}
+		writeWisdom(r)
+
+		for i, t := range params.Tasks {
+			if remaining[i] > 0 && !running[i] && !done[i] {
+				for _, dep := range t.DependsOn {
+					if dep == r.index {
+						remaining[i]--
+					}
+				}
+			}
+		}
+		if schedule {
+			startReady()
+		}
+	}
+	for completed < n {
+		select {
+		case r := <-doneCh:
+			processResult(r, true)
+		case <-ctx.Done():
+			err := ctx.Err()
+		drain:
+			for {
+				select {
+				case r := <-doneCh:
+					processResult(r, false)
+				default:
+					break drain
+				}
+			}
+			markCancelled(err)
+			return formatParallelTasksAggregate(outputs, taskErrs, statuses, true), err
+		}
+	}
+	wg.Wait()
+	if parallelTasksWereCancelled(statuses) {
+		err := ctx.Err()
+		if err == nil {
+			err = context.Canceled
+		}
+		return formatParallelTasksAggregate(outputs, taskErrs, statuses, true), err
+	}
+	return formatParallelTasksAggregate(outputs, taskErrs, statuses, false), nil
+}
+
+func parallelTasksWereCancelled(statuses []parallelTaskStatus) bool {
+	for _, st := range statuses {
+		if st == parallelTaskCancelled || st == parallelTaskSkipped {
+			return true
+		}
+	}
+	return false
+}
+
+func formatParallelTasksAggregate(outputs []string, errs []error, statuses []parallelTaskStatus, cancelled bool) string {
+	n := len(statuses)
+	var b strings.Builder
+	if cancelled {
+		completed := 0
+		for _, st := range statuses {
+			if st == parallelTaskCompleted {
+				completed++
+			}
+		}
+		fmt.Fprintf(&b, "Cancelled parallel tasks after completing %d of %d tasks:\n", completed, n)
+	} else {
+		fmt.Fprintf(&b, "Completed %d parallel tasks:\n", n)
+	}
+	for i, st := range statuses {
+		fmt.Fprintf(&b, "── task-%d ──\n", i+1)
+		switch st {
+		case parallelTaskCompleted:
+			fmt.Fprintf(&b, "%s\n", strings.TrimSpace(outputs[i]))
+		case parallelTaskCancelled:
+			if errs[i] != nil {
+				fmt.Fprintf(&b, "[CANCELLED] %s\n", errs[i])
+			} else {
+				b.WriteString("[CANCELLED]\n")
+			}
+		case parallelTaskSkipped:
+			if errs[i] != nil {
+				fmt.Fprintf(&b, "[SKIPPED] cancelled before start: %s\n", errs[i])
+			} else {
+				b.WriteString("[SKIPPED] cancelled before start\n")
+			}
+		case parallelTaskFailed:
+			fmt.Fprintf(&b, "[FAILED] %s\n", errs[i])
+		default:
+			b.WriteString("[PENDING]\n")
+		}
+	}
+	return b.String()
 }
 
 // runAsBackgroundJobs is the fallback path when no event sink is available.
