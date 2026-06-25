@@ -465,12 +465,12 @@ func (l *Ledger) UnverifiedCompletedTodos(current []TodoItem) (missing []TodoSte
 }
 
 func hasFailedCompleteStepRecoveryForTodo(receipts []Receipt, baseline int, index int, current []TodoItem) bool {
-	if !hasSuccessfulProgressAfterTodoBaseline(receipts, baseline) {
-		return false
-	}
 	for i := baseline + 1; i < len(receipts); i++ {
 		r := receipts[i]
 		if r.Success || r.ToolName != "complete_step" || strings.TrimSpace(r.Step) == "" || !r.StepProof {
+			continue
+		}
+		if !hasSuccessfulProgressBeforeReceipt(receipts, baseline, i) {
 			continue
 		}
 		if r.TodoStep != nil && r.TodoStep.Found {
@@ -492,8 +492,14 @@ func hasFailedCompleteStepRecoveryForTodo(receipts []Receipt, baseline int, inde
 	return false
 }
 
-func hasSuccessfulProgressAfterTodoBaseline(receipts []Receipt, baseline int) bool {
-	for i := baseline + 1; i < len(receipts); i++ {
+// Recovery only trusts progress that happened before the failed sign-off.
+// Later unrelated work must not retroactively authorize an earlier completion.
+func hasSuccessfulProgressBeforeReceipt(receipts []Receipt, baseline int, before int) bool {
+	start := baseline + 1
+	if start < 0 {
+		start = 0
+	}
+	for i := start; i < before && i < len(receipts); i++ {
 		r := receipts[i]
 		if !r.Success || r.ToolName == "todo_write" || r.ToolName == "complete_step" || r.Read {
 			continue
@@ -707,24 +713,46 @@ func todoItemsField(fields map[string]json.RawMessage, key string) []TodoItem {
 	return normalizeTodos(todos)
 }
 
+// A failed complete_step can unlock todo recovery only when the payload had the
+// same structural proof shape Execute expects before host verification runs.
 func completeStepHasProof(fields map[string]json.RawMessage) bool {
+	if strings.TrimSpace(stringField(fields, "result")) == "" {
+		return false
+	}
 	raw, ok := fields["evidence"]
 	if !ok {
 		return false
 	}
 	var items []struct {
-		Kind    string `json:"kind"`
-		Summary string `json:"summary"`
+		Kind    string   `json:"kind"`
+		Summary string   `json:"summary"`
+		Command string   `json:"command"`
+		Paths   []string `json:"paths"`
 	}
-	if err := json.Unmarshal(raw, &items); err != nil {
+	if err := json.Unmarshal(raw, &items); err != nil || len(items) == 0 {
 		return false
 	}
 	for _, item := range items {
-		if strings.TrimSpace(item.Kind) != "" && strings.TrimSpace(item.Summary) != "" {
-			return true
+		kind := strings.TrimSpace(item.Kind)
+		if kind == "" || strings.TrimSpace(item.Summary) == "" {
+			return false
+		}
+		switch kind {
+		case "verification":
+			if strings.TrimSpace(item.Command) == "" {
+				return false
+			}
+		case "diff", "files":
+			if len(normalizePaths(item.Paths)) == 0 {
+				return false
+			}
+		case "manual":
+			// Summary is enough for manual evidence.
+		default:
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func normalizeTodos(todos []TodoItem) []TodoItem {

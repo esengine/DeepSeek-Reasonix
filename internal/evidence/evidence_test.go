@@ -163,6 +163,23 @@ func TestReceiptFromToolCallExtractsCompleteStep(t *testing.T) {
 		t.Fatalf("complete_step should not be treated as read-only context: %+v", receipt)
 	}
 
+	missingResult := ReceiptFromToolCall("complete_step", json.RawMessage(`{
+		"step":"Add parser",
+		"evidence":[{"kind":"manual","summary":"checked manually"}]
+	}`), false, true)
+	if missingResult.StepProof {
+		t.Fatalf("complete_step without result should not count as proof: %+v", missingResult)
+	}
+
+	missingCommand := ReceiptFromToolCall("complete_step", json.RawMessage(`{
+		"step":"Add parser",
+		"result":"parser added",
+		"evidence":[{"kind":"verification","summary":"checked manually"}]
+	}`), false, true)
+	if missingCommand.StepProof {
+		t.Fatalf("verification evidence without command should not count as proof: %+v", missingCommand)
+	}
+
 	emptyProof := ReceiptFromToolCall("complete_step", json.RawMessage(`{
 		"step":"Add parser",
 		"result":"parser added",
