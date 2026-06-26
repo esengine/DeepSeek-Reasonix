@@ -39,7 +39,7 @@ func TestTabEventSinkDoesNotBlockOnRuntimeEventsEmit(t *testing.T) {
 	}
 
 	// Use Notice events (non-coalescable) so they go through the async emitter
-	// immediately. Text/Reasoning events are buffered by DG-1 coalescing and
+	// immediately. Text/Reasoning events are buffered by the coalescer and
 	// would not reach runtime.EventsEmit until a flush trigger arrives.
 	wrapped := event.Sync(sink)
 	wrapped.Emit(event.Event{Kind: event.Notice, Text: "one"})
@@ -125,7 +125,7 @@ func TestEmitProjectTreeChangedDoesNotBlockOnRuntimeEventsEmit(t *testing.T) {
 
 // TestTabEventSinkCoalescesTextDeltas verifies that consecutive Text/Reasoning
 // deltas are buffered and coalesced into fewer events before hitting the Wails
-// bridge (DG-1). A non-Text/Reasoning event flushes the buffer.
+// bridge. A non-Text/Reasoning event flushes the buffer.
 func TestTabEventSinkCoalescesTextDeltas(t *testing.T) {
 	var mu sync.Mutex
 	var delivered []string

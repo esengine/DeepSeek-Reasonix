@@ -83,11 +83,9 @@ type chatTUI struct {
 	// pinned just above the input (see renderTodoPanel). "" when there's no list.
 	// Persists across turns until the work completes or a new session starts.
 	todoArgs string
-	// todoParsedArgs / todoParsedTodos cache the result of json.Unmarshal of
-	// todoArgs (TM-4). renderTodoPanel is called every frame from bottomRows +
-	// View, but todoArgs only changes on todo_write tool results and /todo
-	// clear. Cache the parse and invalidate by string compare so we don't
-	// re-decode the JSON on every render.
+	// todoParsedArgs / todoParsedTodos cache the json.Unmarshal of todoArgs,
+	// invalidated by string compare so renderTodoPanel doesn't re-decode
+	// every frame.
 	todoParsedArgs  string
 	todoParsedTodos []todoPanelTodo
 
@@ -165,7 +163,7 @@ type chatTUI struct {
 	// shellOutputs stores the full accumulated output of each shell command
 	// (tool IDs with "shell-" prefix), so the first 10 lines can be shown after
 	// collapse and Ctrl+B can toggle the complete output. Uses *strings.Builder
-	// for amortized O(1) appends (TM-7) instead of O(n) string concatenation.
+	// for amortized O(1) appends instead of O(n) string concatenation.
 	shellOutputs  map[string]*strings.Builder
 	shellExpanded map[string]bool
 	// shellTranscriptIdx maps a shell tool ID to the transcript index of its
@@ -317,7 +315,7 @@ type chatTUI struct {
 	dataLineText      string
 	statusWidth       int
 
-	// Bottom panel row-count cache (TM-5). bottomRows() previously called
+	// Bottom panel row-count cache. bottomRows() previously called
 	// renderTodoPanel/renderApprovalBanner/renderChooser/renderRewind/
 	// renderMCPImport/renderResumePicker/renderCompletion/renderMainManager/
 	// renderMainManagerFooter each frame JUST to count newlines via
@@ -746,7 +744,7 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cm.dataLineText = sl.dataLine
 	cm.statusWidth = boxW
 	cm.statusLineCount = sl.wrappedLines
-	// TM-5: render all bottom panels once and cache the total row count so
+	// Render all bottom panels once and cache the total row count so
 	// bottomRows() doesn't re-render them just to count newlines. View()
 	// still renders the panels for display; the cache eliminates the second
 	// render that previously happened inside bottomRows each frame.
@@ -1657,7 +1655,7 @@ func (m *chatTUI) commitSpacer() {
 func (m chatTUI) bottomRows() int {
 	rows := 0
 	if m.bottomPanelsRowsWidth > 0 && m.bottomPanelsRowsWidth == m.width {
-		// TM-5: use the cached panel row count populated by Update() via
+		// Use the cached panel row count populated by Update() via
 		// buildBottomPanelsRowCount. This avoids re-rendering every bottom
 		// panel here just to count newlines — View() still renders them for
 		// display, so the cache cuts the per-frame panel render count from
@@ -1697,10 +1695,10 @@ func (m chatTUI) bottomRows() int {
 }
 
 // buildBottomPanelsRowCount renders every bottom panel once and caches the
-// total row count (TM-5). Update() calls this after state has settled so
-// bottomRows() can read m.bottomPanelsRows instead of re-rendering each panel
-// for line counting. The pointer receiver is fine — Update() holds an
-// addressable local copy of chatTUI.
+// total row count. Update() calls this after state has settled so bottomRows()
+// can read m.bottomPanelsRows instead of re-rendering each panel for line
+// counting. The pointer receiver is fine — Update() holds an addressable
+// local copy of chatTUI.
 func (m *chatTUI) buildBottomPanelsRowCount() {
 	m.bottomPanelsRowsWidth = m.width
 	rows := 0
@@ -1994,7 +1992,7 @@ func (m *chatTUI) pushToolLine(line string) {
 
 // shellOutputString returns the accumulated full output for a shell tool ID,
 // or "" + false if none was recorded. Wraps the *strings.Builder lookup so
-// callers don't need to handle the pointer indirection (TM-7).
+// callers don't need to handle the pointer indirection.
 func (m *chatTUI) shellOutputString(id string) (string, bool) {
 	if b := m.shellOutputs[id]; b != nil {
 		return b.String(), true
@@ -2837,8 +2835,8 @@ type todoPanelTodo struct {
 // pending ones muted. It returns "" when there's no list or every item is done,
 // so the panel appears while work is outstanding and clears itself when finished.
 func (m chatTUI) renderTodoPanel() string {
-	// TM-4: skip json.Unmarshal when the cached parse matches m.todoArgs. The
-	// cache is refreshed in update() whenever todoArgs is set (setTodoArgs /
+	// Skip json.Unmarshal when the cached parse matches m.todoArgs. The cache
+	// is refreshed in update() whenever todoArgs is set (setTodoArgs /
 	// refreshTodoCache); the inline fallback below covers the initial frame
 	// and any path that bypasses the setter.
 	var todos []todoPanelTodo
@@ -2896,18 +2894,18 @@ func (m chatTUI) renderTodoPanel() string {
 	return todoPanelStyle.Width(max(m.width, 10)).Render(strings.TrimRight(b.String(), "\n"))
 }
 
-// setTodoArgs updates m.todoArgs and refreshes the parsed-todo cache (TM-4).
-// Always use this instead of assigning m.todoArgs directly so renderTodoPanel
-// can skip json.Unmarshal on every frame. The pointer receiver is fine because
+// setTodoArgs updates m.todoArgs and refreshes the parsed-todo cache. Always
+// use this instead of assigning m.todoArgs directly so renderTodoPanel can
+// skip json.Unmarshal on every frame. The pointer receiver is fine because
 // update() holds an addressable local copy of chatTUI.
 func (m *chatTUI) setTodoArgs(args string) {
 	m.todoArgs = args
 	m.refreshTodoCache()
 }
 
-// refreshTodoCache re-parses m.todoArgs into m.todoParsedTodos (TM-4). Call
-// after any direct mutation of m.todoArgs. On parse error the cache is
-// invalidated (todoParsedTodos = nil) so renderTodoPanel falls back to "".
+// refreshTodoCache re-parses m.todoArgs into m.todoParsedTodos. Call after
+// any direct mutation of m.todoArgs. On parse error the cache is invalidated
+// (todoParsedTodos = nil) so renderTodoPanel falls back to "".
 func (m *chatTUI) refreshTodoCache() {
 	m.todoParsedArgs = m.todoArgs
 	if m.todoArgs == "" {

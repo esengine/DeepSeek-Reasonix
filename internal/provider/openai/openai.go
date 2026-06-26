@@ -393,8 +393,8 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	}()
 
 	acc := map[int]*provider.ToolCall{}
-	// argsBuilders accumulates streamed tool-call argument fragments per index
-	// (PV-2). Writing into a strings.Builder per call avoids the O(n²) string
+	// argsBuilders accumulates streamed tool-call argument fragments per index.
+	// Writing into a strings.Builder per call avoids the O(n²) string
 	// concatenation that cur.Arguments += delta would incur for long tool
 	// argument streams (e.g. large edit_file patches). The concatenated string
 	// is materialised once when the call is finalised below.
@@ -481,9 +481,9 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			if tc.Function.Name != "" {
 				cur.Name = tc.Function.Name
 			}
-			// PV-2: accumulate argument fragments into a per-index strings.Builder
-			// instead of cur.Arguments += delta. The concatenated value is set on
-			// cur.Arguments just before the final ChunkToolCall is emitted below.
+			// Accumulate argument fragments into a per-index strings.Builder
+			// instead of cur.Arguments += delta. The concatenated value is set
+			// on cur.Arguments just before the final ChunkToolCall below.
 			if tc.Function.Arguments != "" {
 				b, ok := argsBuilders[tc.Index]
 				if !ok {
@@ -538,7 +538,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	for _, idx := range order {
 		tc := acc[idx]
 		if b := argsBuilders[idx]; b != nil {
-			// PV-2: materialise the accumulated argument fragments once per call.
+			// Materialise the accumulated argument fragments once per call.
 			tc.Arguments = b.String()
 		}
 		if tc.ID == "" {

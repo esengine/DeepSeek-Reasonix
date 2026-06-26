@@ -657,9 +657,9 @@ type tabEventSink struct {
 	ctx           context.Context
 	runtimeEvents asyncRuntimeEmitter
 	// coalesceBuf buffers consecutive Text/Reasoning deltas so they can be
-	// merged before hitting the Wails bridge (DG-1). Any non-Text/Reasoning
-	// event flushes the buffer first. Accessed from Emit (serial per Sink
-	// contract) and clearContext (under mu).
+	// merged before hitting the Wails bridge. Any non-Text/Reasoning event
+	// flushes the buffer first. Accessed from Emit (serial per Sink contract)
+	// and clearContext (under mu).
 	coalesceBuf []event.Event
 }
 
@@ -684,7 +684,7 @@ func (s *tabEventSink) Emit(e event.Event) {
 			s.flushPlannerDisplay()
 		}
 	}
-	// Coalesce consecutive Text/Reasoning deltas before the Wails bridge (DG-1).
+	// Coalesce consecutive Text/Reasoning deltas before the Wails bridge.
 	// All other events — including flush triggers TurnDone/ApprovalRequest/
 	// AskRequest — flush any pending buffer first, then emit immediately.
 	if e.Kind == event.Text || e.Kind == event.Reasoning {
@@ -718,7 +718,7 @@ func (s *tabEventSink) Emit(e event.Event) {
 
 // flushCoalesced drains the coalesce buffer, merges consecutive same-kind
 // deltas, and emits each merged event to the Wails bridge. Called on any
-// non-Text/Reasoning event (DG-1).
+// non-Text/Reasoning event.
 func (s *tabEventSink) flushCoalesced() {
 	s.mu.Lock()
 	buf := s.coalesceBuf
@@ -736,17 +736,9 @@ func (s *tabEventSink) flushCoalesced() {
 	}
 }
 
-// coalesceEventDeltas merges consecutive Text/Reasoning deltas (DG-1). Both
-// carry their delta in the Text field; concatenating reduces the number of
-// Wails runtime events emitted to the frontend during streaming.
-//
-// DG-2 refinement: the per-run merge uses a strings.Builder instead of
-// out[i].Text += e.Text. The += form is O(n²) over a long run of same-kind
-// deltas — each append copies the accumulated text plus the new delta. A long
-// streaming response between flushes (no non-Text/Reasoning events) can grow
-// the buffer to hundreds of deltas, making the cumulative copy cost
-// significant. The Builder accumulates fragments at O(1) amortised per append
-// and materialises the concatenated string once when the run ends.
+// coalesceEventDeltas merges consecutive Text/Reasoning deltas so the Wails
+// bridge receives fewer events during streaming. Same-kind runs are accumulated
+// via a strings.Builder to keep long runs O(n), not O(n²).
 func coalesceEventDeltas(events []event.Event) []event.Event {
 	if len(events) <= 1 {
 		return events
@@ -830,9 +822,9 @@ type runtimeEventEnvelope struct {
 // backs up; callers enqueue in-order work and return without holding the
 // agent's event.Sync lock.
 //
-// Backpressure (DG-1): the queue is capped at asyncEmitterMaxQueue pending
-// events. If the webview event channel backs up and the queue fills, the
-// oldest events are dropped to prevent unbounded memory growth (matching the
+// Backpressure: the queue is capped at asyncEmitterMaxQueue pending events.
+// If the webview event channel backs up and the queue fills, the oldest
+// events are dropped to prevent unbounded memory growth (matching the
 // Broadcaster's drop policy).
 type asyncRuntimeEmitter struct {
 	mu      sync.Mutex
@@ -843,7 +835,7 @@ type asyncRuntimeEmitter struct {
 }
 
 // asyncEmitterMaxQueue caps the pending event queue. When exceeded, the oldest
-// events are dropped (DG-1 backpressure).
+// events are dropped.
 const asyncEmitterMaxQueue = 1024
 
 func (e *asyncRuntimeEmitter) Emit(ctx context.Context, name string, payload ...interface{}) {
@@ -857,8 +849,7 @@ func (e *asyncRuntimeEmitter) Emit(ctx context.Context, name string, payload ...
 	}
 	e.mu.Lock()
 	// Backpressure: cap the pending queue. If the webview event channel backs
-	// up and the queue fills, drop the oldest quarter to amortize the cost
-	// (DG-1).
+	// up and the queue fills, drop the oldest quarter to amortize the cost.
 	pending := len(e.queue) - e.head
 	if pending >= asyncEmitterMaxQueue {
 		drop := pending / 4
@@ -2913,26 +2904,28 @@ func desktopMCPMigrationRoots(tabs desktopTabsFile) []string {
 var (
 	projectsCache     desktopProjectFile
 	projectsCacheTime time.Time
+	projectsCachePath string
 	projectsCacheMu   sync.RWMutex
 )
 
 func loadProjectsFile() desktopProjectFile {
-	// Use cached value if it's fresh (5 seconds expiry)
+	path := filepath.Join(desktopConfigDir(), desktopProjectsFile)
+	// Cache hit only when the path matches and the entry is fresh (5s).
 	projectsCacheMu.RLock()
-	if !projectsCacheTime.IsZero() && time.Since(projectsCacheTime) < 5*time.Second {
+	if projectsCachePath == path && !projectsCacheTime.IsZero() && time.Since(projectsCacheTime) < 5*time.Second {
 		cached := projectsCache
 		projectsCacheMu.RUnlock()
 		return cached
 	}
 	projectsCacheMu.RUnlock()
 
-	path := filepath.Join(desktopConfigDir(), desktopProjectsFile)
 	b, err := os.ReadFile(path)
 	if err != nil {
 		// Clear cache on error
 		projectsCacheMu.Lock()
 		projectsCache = desktopProjectFile{}
 		projectsCacheTime = time.Time{}
+		projectsCachePath = ""
 		projectsCacheMu.Unlock()
 		return desktopProjectFile{}
 	}
@@ -2942,6 +2935,7 @@ func loadProjectsFile() desktopProjectFile {
 		projectsCacheMu.Lock()
 		projectsCache = desktopProjectFile{}
 		projectsCacheTime = time.Time{}
+		projectsCachePath = ""
 		projectsCacheMu.Unlock()
 		return desktopProjectFile{}
 	}
@@ -2950,6 +2944,7 @@ func loadProjectsFile() desktopProjectFile {
 	projectsCacheMu.Lock()
 	projectsCache = normalized
 	projectsCacheTime = time.Now()
+	projectsCachePath = path
 	projectsCacheMu.Unlock()
 	return normalized
 }
@@ -2969,7 +2964,16 @@ func saveProjectsFile(f desktopProjectFile) error {
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
-	return fileutil.ReplaceFile(tmp, path)
+	if err := fileutil.ReplaceFile(tmp, path); err != nil {
+		return err
+	}
+	// Invalidate the loadProjectsFile cache so the next read sees fresh data.
+	projectsCacheMu.Lock()
+	projectsCache = desktopProjectFile{}
+	projectsCacheTime = time.Time{}
+	projectsCachePath = ""
+	projectsCacheMu.Unlock()
+	return nil
 }
 
 func normalizeProjectRoot(root string) string {

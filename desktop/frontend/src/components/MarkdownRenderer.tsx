@@ -24,8 +24,8 @@ const STATUS_MARKER_GLOBAL_RE = /(?:✅|☑|☒|✔️?|✓|\[[xX ]\])/g;
 const BULLET_RE = /^[-*•]\s+\S/;
 const DIVIDER_RE = /^[\s\-_=─━—]+$/;
 
-// Module-level plugin constants (DR-3): avoid allocating new arrays on every
-// render. react-markdown only reads these arrays, never mutates them.
+// Module-level plugin constants: avoid allocating new arrays on every render.
+// react-markdown only reads these arrays, never mutates them.
 const REMARK_PLUGINS = [remarkGfm, remarkMath];
 const REHYPE_PLUGINS = [rehypeKatex];
 
@@ -132,11 +132,8 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
   plainStatusBlocks?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  // DR-3: defer the markdown source during streaming so the react-markdown
-  // pass (which is expensive — remark/rehype parse + KaTeX) runs at lower
-  // priority and doesn't block urgent updates (composer input, scroll) while
-  // tokens are arriving every frame. The deferred value lags slightly behind
-  // the latest `text` but converges to it when the stream pauses or ends.
+  // Defer the markdown source so the expensive react-markdown pass doesn't
+  // block urgent updates while tokens arrive every frame.
   const deferredText = useDeferredValue(text);
   const mathContent = useMemo(() => normalizeMath(deferredText), [deferredText]);
   const components = useMemo(() => createComponents(plainStatusBlocks), [plainStatusBlocks]);

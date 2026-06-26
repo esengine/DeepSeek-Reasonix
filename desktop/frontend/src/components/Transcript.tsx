@@ -335,7 +335,7 @@ export const Transcript = memo(function Transcript({
     jumpToQuestion(question);
   }, [turnGroups.length, warmLayerSessionKey]);
 
-  // Stable callbacks for WarmZone (DR-1): inline arrow functions would defeat
+  // Stable callbacks for WarmZone: inline arrow functions would defeat
   // WarmZone's memo() wrapper by creating a new function identity each render.
   // These only use setState updaters, so they have no dependencies and are stable.
   const handleToggleColdPage = useCallback(() => {
