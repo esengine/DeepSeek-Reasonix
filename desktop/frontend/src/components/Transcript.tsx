@@ -489,7 +489,7 @@ export function Transcript({
             <LiveAssistantMessage
               key={it.id}
               item={it as AssistantItem}
-              defaultExpanded={false}
+              defaultExpanded={true}
               expandWhileStreaming={false}
               truncateStreamingReasoning={true}
               creationMode={creationMode}
