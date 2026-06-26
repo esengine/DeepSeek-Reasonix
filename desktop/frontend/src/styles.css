@@ -25959,3 +25959,48 @@ a[href] {
   background: color-mix(in srgb, var(--fg) 8%, var(--sidebar-bg, var(--bg)));
   color: var(--fg-faint);
 }
+
+/* Memory v5 compiler collapsible block */
+.memory-compiler-fold {
+  margin: 6px 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-soft);
+}
+.memory-compiler-fold__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  background: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+.memory-compiler-fold__toggle:hover {
+  background: var(--sidebar-hover);
+}
+.memory-compiler-fold__chevron {
+  margin-left: auto;
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+.memory-compiler-fold__chevron--open {
+  transform: rotate(90deg);
+}
+.memory-compiler-fold__body {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border-soft);
+  max-height: 200px;
+  overflow-y: auto;
+}
+

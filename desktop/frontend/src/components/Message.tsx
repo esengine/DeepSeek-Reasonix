@@ -54,6 +54,30 @@ function parseImSourceMessage(text: string): ImSourceMessage | null {
   };
 }
 
+
+const MEMORY_COMPILER_EXECUTION_RE = /<memory-compiler-execution>[\s\S]*?<\/memory-compiler-execution>\s*/g;
+
+/** Extract a <memory-compiler-execution> block from text. Returns the cleaned
+ *  text (block removed) and the raw block content. When no block is present,
+ *  block is null and cleaned equals the original text. */
+function extractMemoryCompilerExecution(text: string): { cleaned: string; block: string | null } {
+  const match = MEMORY_COMPILER_EXECUTION_RE.exec(text);
+  if (!match) return { cleaned: text, block: null };
+  MEMORY_COMPILER_EXECUTION_RE.lastIndex = 0;
+  return {
+    cleaned: text.replace(MEMORY_COMPILER_EXECUTION_RE, "").trimStart(),
+    block: match[0].trim(),
+  };
+}
+
+/** Strips the <memory-compiler-execution> block that the Memory v5 compiler
+ *  injects into user turns for model-internal planning. The block is not
+ *  user-facing text and should be hidden from the transcript display. */
+function stripMemoryCompilerExecution(text: string): string {
+  return extractMemoryCompilerExecution(text).cleaned;
+}
+
+
 function imSourceLabel(source: ImSourceMessage, t: ReturnType<typeof useT>): string {
   if (source.label.trim()) return source.label.trim();
   const provider = source.provider.trim().toLowerCase();
@@ -144,6 +168,27 @@ function formatMessageTime(date: Date): string {
   return `${hours}:${minutes}`;
 }
 
+/** Collapsible display for a <memory-compiler-execution> block. */
+function CollapsibleMemoryCompiler({ content }: { content: string }) {
+  const [open, setOpen] = useState(false);
+  const t = useT();
+  return (
+    <div className="memory-compiler-fold">
+      <button
+        type="button"
+        className="memory-compiler-fold__toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <BrainCircuit size={13} />
+        <span>{t("msg.memoryCompilerContext")}</span>
+        <span className={`memory-compiler-fold__chevron${open ? " memory-compiler-fold__chevron--open" : ""}`}>▸</span>
+      </button>
+      {open && <pre className="memory-compiler-fold__body">{content}</pre>}
+    </div>
+  );
+}
+
 export function UserMessage({
   text,
   submitText,
@@ -167,8 +212,9 @@ export function UserMessage({
 }) {
   const t = useT();
   const imSource = parseImSourceMessage(text);
-  const actionText = stripMemoryCompilerExecution(imSource?.text ?? text);
-  const hasMemoryCompiler = Boolean(submitText?.includes("<memory-compiler-execution>"));
+  const { cleaned: memFreeText, block: memoryCompilerBlock } = extractMemoryCompilerExecution(imSource?.text ?? text);
+  const actionText = memFreeText;
+  const hasMemoryCompiler = Boolean(memoryCompilerBlock || submitText?.includes("<memory-compiler-execution>"));
   const { text: displayText, attachments } = parseAttachmentRefsForDisplay(actionText);
   const orderedAttachments = sortDisplayAttachments(attachments);
   const sourceLabel = imSource ? imSourceLabel(imSource, t) : "";
@@ -354,8 +400,10 @@ export function UserMessage({
             )}
           </div>
         ) : (
-          displayText && <div className="msg__text">{displayText}</div>
-        )}
+          <>
+            {memoryCompilerBlock && <CollapsibleMemoryCompiler content={memoryCompilerBlock} />}
+            {displayText && <div className="msg__text">{displayText}</div>}
+          </>
         {failed && <div className="msg__send-failed">{t("msg.sendFailed")}</div>}
         {orderedAttachments.length > 0 && (
           <div className="msg-attachments" aria-label={t("msg.attachments")}>

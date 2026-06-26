@@ -1485,6 +1485,7 @@ export const en = {
   "msg.memoryCitationsCount": "{n} memory references",
   "msg.memoryCompilerCitationsCount": "{n} Memory v5 compiler references",
   "msg.memoryCompilerApplied": "Memory v5 compiler applied to this message",
+  "msg.memoryCompilerContext": "Memory v5 context",
   "msg.memoryCitationLine": "line {line}",
   "msg.memoryCitationLineRange": "lines {start}-{end}",
   "msg.copy": "Copy",
