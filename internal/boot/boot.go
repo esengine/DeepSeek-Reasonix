@@ -236,7 +236,16 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// (RequireKey is false so the UI stays reachable) and then fail silently on the
 	// first request, showing as an empty/dead model. Surface the cause up front.
 	if !opts.RequireKey && entry.RequiresAPIKey() && entry.APIKey() == "" {
-		sink.Emit(event.Event{Kind: event.Notice, Text: "Selected model is missing its API key.", Detail: fmt.Sprintf("model %q is selected but its API key %s is not set — requests will fail until you set it", modelName, entry.APIKeyEnv)})
+		if entry.LooksLikeLiteralAPIKeyValue() {
+			// Before 1.11, api_key_env tolerated a literal key value placed
+			// directly in the field; that fallback was removed for security.
+			// A config carried over from 1.10 (or written assuming the field
+			// took the key itself) now resolves empty — point the user at the
+			// migration rather than the generic "not set" message.
+			sink.Emit(event.Event{Kind: event.Notice, Text: fmt.Sprintf("model %q: api_key_env looks like a raw key value, not an environment-variable or credential name. Since 1.11, api_key_env must name an env var or a credentials entry (the literal key is no longer accepted in config). Move the value into your credentials file under a name like %s and set api_key_env to that name.", modelName, suggestAPIKeyEnvName(entry.APIKeyEnv))})
+		} else {
+			sink.Emit(event.Event{Kind: event.Notice, Text: "Selected model is missing its API key.", Detail: fmt.Sprintf("model %q is selected but its API key %s is not set — requests will fail until you set it", modelName, entry.APIKeyEnv)})
+		}
 	}
 	jm := jobs.NewManager(sink, jobs.WithStalledWarningAfter(time.Duration(cfg.BackgroundJobStalledWarningSeconds())*time.Second))
 	sessionDir := opts.SessionDir
@@ -2001,4 +2010,45 @@ func providerNames(cfg *config.Config) string {
 		names[i] = p.Name
 	}
 	return strings.Join(names, "/")
+}
+
+// suggestAPIKeyEnvName derives a plausible credential/env-var name from a
+// literal key value or provider name, so the migration notice can recommend a
+// concrete target instead of just "rename it". Prefixed with the provider name
+// when known, upper-snake-cased.
+func suggestAPIKeyEnvName(providerName string) string {
+	base := strings.TrimSpace(providerName)
+	if base == "" {
+		base = "REASONIX_API_KEY"
+	}
+	// If the name already looks like an env var (UPPER_SNAKE), keep it.
+	if strings.ToUpper(base) == base && strings.ContainsAny(base, "_") {
+		return base
+	}
+	var b strings.Builder
+	for _, r := range base {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r - 32)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			if b.Len() > 0 && strings.LastIndexByte(b.String(), '_') != b.Len()-1 {
+				b.WriteByte('_')
+			}
+		}
+	}
+	out := b.String()
+	if out == "" {
+		return "REASONIX_API_KEY"
+	}
+	if !strings.HasPrefix(out, "REASONIX_") {
+		out = "PROVIDER_" + out
+	}
+	if !strings.HasSuffix(out, "_API_KEY") {
+		out = out + "_API_KEY"
+	}
+	return out
 }

@@ -189,3 +189,60 @@ api_key_env = "`+keyEnv+`"
 		}
 	}
 }
+
+// TestBuildNoticesLiteralAPIKeyValue: a config carried over from before 1.11
+// (or written assuming api_key_env took the key itself) places a raw key value
+// in the field. It must resolve empty and emit the targeted migration hint
+// (naming the 1.11 change and a suggested credential name), not the generic
+// "key not set" notice. See issue #5325.
+func TestBuildNoticesLiteralAPIKeyValue(t *testing.T) {
+	const literalKey = "sk-ant-api03-1234567890abcdefghijklmnopqrstuv1234567890"
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "x"
+
+[[providers]]
+name = "x"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "m"
+api_key_env = "`+literalKey+`"
+`)
+
+	var notices []string
+	ctrl, err := Build(context.Background(), Options{
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices = append(notices, e.Text)
+			}
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Build should succeed with RequireKey=false even with a literal key value: %v", err)
+	}
+	defer ctrl.Close()
+
+	var hint string
+	for _, n := range notices {
+		if strings.Contains(n, "looks like a raw key value") {
+			hint = n
+			break
+		}
+	}
+	if hint == "" {
+		t.Fatalf("expected the literal-value migration hint; got %v", notices)
+	}
+	// Must NOT be the generic message — that is the whole point of the detection.
+	for _, substr := range []string{"is not set", "requests will fail until you set it"} {
+		if strings.Contains(hint, substr) {
+			t.Fatalf("literal-value hint should not include the generic %q; got %q", substr, hint)
+		}
+	}
+	// Must reference the 1.11 migration and suggest a credential name.
+	for _, want := range []string{"1.11", "credentials"} {
+		if !strings.Contains(hint, want) {
+			t.Fatalf("literal-value hint should mention %q; got %q", want, hint)
+		}
+	}
+}

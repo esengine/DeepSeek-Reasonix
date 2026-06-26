@@ -1730,6 +1730,55 @@ func (e *ProviderEntry) APIKey() string {
 	return value
 }
 
+// looksLikeLiteralAPIKeyValue reports whether the configured api_key_env looks
+// like a raw API key value rather than an environment-variable or credential
+// name. Reasonix resolves api_key_env as a *name* looked up in credentials/.env;
+// before 1.11 it also tolerated a literal value placed directly in the field.
+// That fallback was removed to keep the secret out of the config file, so a
+// config carried over from 1.10 or earlier (or written by a user who assumed
+// the field took the key itself) now resolves to an empty APIKey and surfaces
+// only a generic "key not set" notice. Detecting this case lets callers emit a
+// targeted migration hint instead of the generic message.
+//
+// Heuristics, intentionally conservative so a legitimate env-var name is never
+// misclassified: a real secret is long and usually carries a provider prefix,
+// while env-var names are short and UPPER_SNAKE_CASE. Pure digits or a single
+// short token are not enough.
+func (e *ProviderEntry) LooksLikeLiteralAPIKeyValue() bool {
+	if e == nil {
+		return false
+	}
+	v := strings.TrimSpace(e.APIKeyEnv)
+	if len(v) < 32 {
+		return false
+	}
+	// Env-var names are conventionally UPPER_SNAKE_CASE; a value mixing case or
+	// containing lowercase letters/dashes past a short prefix is not one.
+	hasLower := false
+	for _, r := range v {
+		if r >= 'a' && r <= 'z' || r == '-' || r == '.' {
+			hasLower = true
+			break
+		}
+	}
+	if !hasLower {
+		return false
+	}
+	// Common provider key prefixes; absence does not rule out a literal value,
+	// but presence is strong evidence.
+	for _, p := range []string{"sk-", "sk_", "AIza", "cr_", "hf_", "xai-", "ANTHROPIC"} {
+		if strings.HasPrefix(v, p) {
+			return true
+		}
+	}
+	// A long, mixed-case string with a dot or slash (e.g. service-account JSON
+	// fragments, JWT-like blobs) is not an env-var name.
+	if strings.ContainsAny(v, "./=") && len(v) >= 40 {
+		return true
+	}
+	return false
+}
+
 // ResolveAPIKeyFromProcessEnvForProbe pins a setup-time, user-entered key onto
 // this entry for an immediate connectivity probe. Normal runtime resolution does
 // not call this; loaded provider entries still resolve only from Reasonix's
