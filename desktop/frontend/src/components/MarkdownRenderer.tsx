@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef } from "react";
+import { memo, useDeferredValue, useMemo, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -132,7 +132,13 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
   plainStatusBlocks?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mathContent = useMemo(() => normalizeMath(text), [text]);
+  // DR-3: defer the markdown source during streaming so the react-markdown
+  // pass (which is expensive — remark/rehype parse + KaTeX) runs at lower
+  // priority and doesn't block urgent updates (composer input, scroll) while
+  // tokens are arriving every frame. The deferred value lags slightly behind
+  // the latest `text` but converges to it when the stream pauses or ends.
+  const deferredText = useDeferredValue(text);
+  const mathContent = useMemo(() => normalizeMath(deferredText), [deferredText]);
   const components = useMemo(() => createComponents(plainStatusBlocks), [plainStatusBlocks]);
   return (
     <div className="md" ref={containerRef}>

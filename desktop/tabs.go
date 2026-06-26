@@ -739,17 +739,49 @@ func (s *tabEventSink) flushCoalesced() {
 // coalesceEventDeltas merges consecutive Text/Reasoning deltas (DG-1). Both
 // carry their delta in the Text field; concatenating reduces the number of
 // Wails runtime events emitted to the frontend during streaming.
+//
+// DG-2 refinement: the per-run merge uses a strings.Builder instead of
+// out[i].Text += e.Text. The += form is O(n²) over a long run of same-kind
+// deltas — each append copies the accumulated text plus the new delta. A long
+// streaming response between flushes (no non-Text/Reasoning events) can grow
+// the buffer to hundreds of deltas, making the cumulative copy cost
+// significant. The Builder accumulates fragments at O(1) amortised per append
+// and materialises the concatenated string once when the run ends.
 func coalesceEventDeltas(events []event.Event) []event.Event {
 	if len(events) <= 1 {
 		return events
 	}
 	out := make([]event.Event, 0, len(events))
+	// builder accumulates the current same-kind run; builderKind tracks which
+	// event.Kind it belongs to. The builder is flushed (String() + Reset) when
+	// the run ends or at function exit.
+	var builder strings.Builder
+	builderKind := event.Kind(-1)
 	for _, e := range events {
-		if len(out) > 0 && out[len(out)-1].Kind == e.Kind {
-			out[len(out)-1].Text += e.Text
+		if builderKind == e.Kind {
+			builder.WriteString(e.Text)
 			continue
 		}
-		out = append(out, e)
+		// Run ended: flush previous run. The base event for the previous run
+		// is the first event of that run, already appended to `out`
+		// provisionally with an empty Text. Replace its Text with the builder
+		// output.
+		if builderKind != event.Kind(-1) {
+			out[len(out)-1].Text = builder.String()
+			builder.Reset()
+		}
+		// Start new run. Append a placeholder event with empty Text; we'll
+		// fill it in when the run ends. Use the current event as the base so
+		// non-Text fields (e.g. Signature for reasoning) are preserved.
+		builderKind = e.Kind
+		base := e
+		base.Text = ""
+		out = append(out, base)
+		builder.WriteString(e.Text)
+	}
+	// Flush the final run.
+	if builderKind != event.Kind(-1) && len(out) > 0 {
+		out[len(out)-1].Text = builder.String()
 	}
 	return out
 }

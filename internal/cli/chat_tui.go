@@ -83,6 +83,13 @@ type chatTUI struct {
 	// pinned just above the input (see renderTodoPanel). "" when there's no list.
 	// Persists across turns until the work completes or a new session starts.
 	todoArgs string
+	// todoParsedArgs / todoParsedTodos cache the result of json.Unmarshal of
+	// todoArgs (TM-4). renderTodoPanel is called every frame from bottomRows +
+	// View, but todoArgs only changes on todo_write tool results and /todo
+	// clear. Cache the parse and invalidate by string compare so we don't
+	// re-decode the JSON on every render.
+	todoParsedArgs  string
+	todoParsedTodos []todoPanelTodo
 
 	// planMode mirrors the agent's read-only gate (Shift+Tab toggles it). The
 	// marker rides in outgoing user messages so the cache-stable prompt prefix is
@@ -309,6 +316,19 @@ type chatTUI struct {
 	statusLineText    string
 	dataLineText      string
 	statusWidth       int
+
+	// Bottom panel row-count cache (TM-5). bottomRows() previously called
+	// renderTodoPanel/renderApprovalBanner/renderChooser/renderRewind/
+	// renderMCPImport/renderResumePicker/renderCompletion/renderMainManager/
+	// renderMainManagerFooter each frame JUST to count newlines via
+	// strings.Count — View() then re-rendered the same panels for display,
+	// so every active panel was rendered twice per frame. Update() now
+	// renders them once via buildBottomPanelsRowCount and caches the total;
+	// bottomRows() reads the cached count. Width is tracked to invalidate
+	// on resize. Zero width = stale cache (initial frame / before first
+	// Update), so bottomRows falls back to on-the-fly rendering.
+	bottomPanelsRowsWidth int
+	bottomPanelsRows      int
 
 	// modelSwitchPending is true while an async /model build is in flight.
 	modelSwitchPending bool
@@ -726,6 +746,11 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cm.dataLineText = sl.dataLine
 	cm.statusWidth = boxW
 	cm.statusLineCount = sl.wrappedLines
+	// TM-5: render all bottom panels once and cache the total row count so
+	// bottomRows() doesn't re-render them just to count newlines. View()
+	// still renders the panels for display; the cache eliminates the second
+	// render that previously happened inside bottomRows each frame.
+	cm.buildBottomPanelsRowCount()
 	cm.viewport.SetHeight(cm.transcriptHeight())
 	// Re-feed only when the content grew or the width changed (re-wrapping is
 	// the expensive part); a bare scroll or spinner tick keeps the offset.
@@ -1631,6 +1656,54 @@ func (m *chatTUI) commitSpacer() {
 // scrollback mode they join the bottom rail because there is no main viewport.
 func (m chatTUI) bottomRows() int {
 	rows := 0
+	if m.bottomPanelsRowsWidth > 0 && m.bottomPanelsRowsWidth == m.width {
+		// TM-5: use the cached panel row count populated by Update() via
+		// buildBottomPanelsRowCount. This avoids re-rendering every bottom
+		// panel here just to count newlines — View() still renders them for
+		// display, so the cache cuts the per-frame panel render count from
+		// two to one.
+		rows = m.bottomPanelsRows
+	} else {
+		// Fallback for tests / initial frame (before first Update).
+		for _, s := range []string{
+			m.renderTodoPanel(),
+			m.renderApprovalBanner(),
+			m.renderChooser(),
+			m.renderRewind(),
+			m.renderMCPImport(),
+			m.renderResumePicker(),
+			m.renderCompletion(),
+		} {
+			if s != "" {
+				rows += strings.Count(s, "\n") + 1
+			}
+		}
+		if m.nativeScrollback {
+			if main := m.renderMainManager(); main != "" {
+				rows += strings.Count(main, "\n") + 1
+			}
+		}
+		if footer := m.renderMainManagerFooter(); footer != "" {
+			rows += strings.Count(footer, "\n") + 1
+		}
+	}
+	if !m.hideComposer() {
+		rows += m.input.Height() + 2
+	}
+	if m.statusLineCount > 0 {
+		return rows + m.statusLineCount
+	}
+	return rows + 2 // fallback for tests that don't set statusLineCount
+}
+
+// buildBottomPanelsRowCount renders every bottom panel once and caches the
+// total row count (TM-5). Update() calls this after state has settled so
+// bottomRows() can read m.bottomPanelsRows instead of re-rendering each panel
+// for line counting. The pointer receiver is fine — Update() holds an
+// addressable local copy of chatTUI.
+func (m *chatTUI) buildBottomPanelsRowCount() {
+	m.bottomPanelsRowsWidth = m.width
+	rows := 0
 	for _, s := range []string{
 		m.renderTodoPanel(),
 		m.renderApprovalBanner(),
@@ -1645,10 +1718,6 @@ func (m chatTUI) bottomRows() int {
 			rows += strings.Count(s, "\n") + 1
 		}
 	}
-	// Remove the hardcoded working-line increment — it is counted inside
-	// statusLineCount via computeStatusLineCount, which also accounts for
-	// wrapping. The fallback to 2 (unwrapped) covers the initial frame and
-	// tests that don't call Update first.
 	if m.nativeScrollback {
 		if main := m.renderMainManager(); main != "" {
 			rows += strings.Count(main, "\n") + 1
@@ -1657,13 +1726,7 @@ func (m chatTUI) bottomRows() int {
 	if footer := m.renderMainManagerFooter(); footer != "" {
 		rows += strings.Count(footer, "\n") + 1
 	}
-	if !m.hideComposer() {
-		rows += m.input.Height() + 2
-	}
-	if m.statusLineCount > 0 {
-		return rows + m.statusLineCount
-	}
-	return rows + 2 // fallback for tests that don't set statusLineCount
+	m.bottomPanelsRows = rows
 }
 
 // hideComposer is the single ownership gate for the bottom composer.
@@ -2774,29 +2837,42 @@ type todoPanelTodo struct {
 // pending ones muted. It returns "" when there's no list or every item is done,
 // so the panel appears while work is outstanding and clears itself when finished.
 func (m chatTUI) renderTodoPanel() string {
-	var p struct {
-		Todos []todoPanelTodo `json:"todos"`
+	// TM-4: skip json.Unmarshal when the cached parse matches m.todoArgs. The
+	// cache is refreshed in update() whenever todoArgs is set (setTodoArgs /
+	// refreshTodoCache); the inline fallback below covers the initial frame
+	// and any path that bypasses the setter.
+	var todos []todoPanelTodo
+	if m.todoParsedArgs == m.todoArgs {
+		todos = m.todoParsedTodos
+	} else {
+		var p struct {
+			Todos []todoPanelTodo `json:"todos"`
+		}
+		if err := json.Unmarshal([]byte(m.todoArgs), &p); err != nil || len(p.Todos) == 0 {
+			return ""
+		}
+		todos = p.Todos
 	}
-	if err := json.Unmarshal([]byte(m.todoArgs), &p); err != nil || len(p.Todos) == 0 {
+	if len(todos) == 0 {
 		return ""
 	}
 	done := 0
-	for _, t := range p.Todos {
+	for _, t := range todos {
 		if t.Status == "completed" {
 			done++
 		}
 	}
-	if done == len(p.Todos) {
+	if done == len(todos) {
 		return "" // all finished — clear the panel
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s %s\n", accent("To-dos"), dim(fmt.Sprintf("%d/%d", done, len(p.Todos))))
-	start, end := todoPanelWindow(p.Todos)
+	fmt.Fprintf(&b, "%s %s\n", accent("To-dos"), dim(fmt.Sprintf("%d/%d", done, len(todos))))
+	start, end := todoPanelWindow(todos)
 	if start > 0 {
 		b.WriteString(dim(fmt.Sprintf("  +%d above", start)) + "\n")
 	}
-	for _, t := range p.Todos[start:end] {
+	for _, t := range todos[start:end] {
 		indent := "  "
 		if t.Level >= 1 {
 			indent = "      " // sub-steps sit under their phase
@@ -2814,10 +2890,38 @@ func (m chatTUI) renderTodoPanel() string {
 			b.WriteString(indent + dim("○ "+t.Content) + "\n")
 		}
 	}
-	if end < len(p.Todos) {
-		b.WriteString(dim(fmt.Sprintf("  +%d more", len(p.Todos)-end)) + "\n")
+	if end < len(todos) {
+		b.WriteString(dim(fmt.Sprintf("  +%d more", len(todos)-end)) + "\n")
 	}
 	return todoPanelStyle.Width(max(m.width, 10)).Render(strings.TrimRight(b.String(), "\n"))
+}
+
+// setTodoArgs updates m.todoArgs and refreshes the parsed-todo cache (TM-4).
+// Always use this instead of assigning m.todoArgs directly so renderTodoPanel
+// can skip json.Unmarshal on every frame. The pointer receiver is fine because
+// update() holds an addressable local copy of chatTUI.
+func (m *chatTUI) setTodoArgs(args string) {
+	m.todoArgs = args
+	m.refreshTodoCache()
+}
+
+// refreshTodoCache re-parses m.todoArgs into m.todoParsedTodos (TM-4). Call
+// after any direct mutation of m.todoArgs. On parse error the cache is
+// invalidated (todoParsedTodos = nil) so renderTodoPanel falls back to "".
+func (m *chatTUI) refreshTodoCache() {
+	m.todoParsedArgs = m.todoArgs
+	if m.todoArgs == "" {
+		m.todoParsedTodos = nil
+		return
+	}
+	var p struct {
+		Todos []todoPanelTodo `json:"todos"`
+	}
+	if err := json.Unmarshal([]byte(m.todoArgs), &p); err != nil {
+		m.todoParsedTodos = nil
+		return
+	}
+	m.todoParsedTodos = p.Todos
 }
 
 func todoPanelWindow(todos []todoPanelTodo) (int, int) {
@@ -3299,7 +3403,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		// count when the live state was already reset by a back-to-back tool.
 		m.collapseToolOutput(e.Tool.ID, e.Tool.Output)
 		if e.Tool.Name == "todo_write" && e.Tool.Err == "" {
-			m.todoArgs = e.Tool.Args
+			m.setTodoArgs(e.Tool.Args)
 		}
 		if e.Tool.Err != "" {
 			m.finalizeStreamed()
@@ -3462,7 +3566,7 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	case "/todo":
 		m.echoLocalCommand(input)
 		// Dismiss the pinned task list; a later todo_write brings it back.
-		m.todoArgs = ""
+		m.setTodoArgs("")
 		m.notice(i18n.M.SlashTodoCleared)
 	case "/verbose":
 		m.toggleVerboseReasoning(true)

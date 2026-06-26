@@ -351,6 +351,12 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	}
 
 	tools := map[int]*provider.ToolCall{} // tool_use blocks, keyed by content index
+	// argsBuilders accumulates streamed input_json_delta fragments per content
+	// index (PV-2). Writing into a strings.Builder per call avoids the O(n²)
+	// string concatenation that tc.Arguments += delta would incur for long
+	// tool argument streams. The concatenated value is materialised once when
+	// the block closes (content_block_stop) before the final ChunkToolCall.
+	argsBuilders := map[int]*strings.Builder{}
 	var inTok, outTok, cacheCreate, cacheRead int
 	var stopReason string
 	haveUsage := false
@@ -421,12 +427,23 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 					}
 				}
 			case "input_json_delta":
-				if tc := tools[ev.Index]; tc != nil {
-					tc.Arguments += ev.Delta.PartialJSON
+				if tc := tools[ev.Index]; tc != nil && ev.Delta.PartialJSON != "" {
+					// PV-2: accumulate fragments in a per-index strings.Builder
+					// instead of tc.Arguments += delta. Materialised once at
+					// content_block_stop below.
+					b, ok := argsBuilders[ev.Index]
+					if !ok {
+						b = &strings.Builder{}
+						argsBuilders[ev.Index] = b
+					}
+					b.WriteString(ev.Delta.PartialJSON)
 				}
 			}
 		case "content_block_stop":
 			if tc := tools[ev.Index]; tc != nil {
+				if b := argsBuilders[ev.Index]; b != nil {
+					tc.Arguments = b.String()
+				}
 				if !send(provider.Chunk{Type: provider.ChunkToolCall, ToolCall: tc}) {
 					return
 				}

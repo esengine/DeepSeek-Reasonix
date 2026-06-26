@@ -30,8 +30,8 @@ import (
 
 // SSE protocol constants
 const (
-	dataPrefix       = "data:"
-	doneMarker       = "[DONE]"
+	dataPrefix = "data:"
+	doneMarker = "[DONE]"
 )
 
 // defaultStreamIdleTimeout caps how long a started SSE stream may go without any
@@ -393,6 +393,12 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	}()
 
 	acc := map[int]*provider.ToolCall{}
+	// argsBuilders accumulates streamed tool-call argument fragments per index
+	// (PV-2). Writing into a strings.Builder per call avoids the O(n²) string
+	// concatenation that cur.Arguments += delta would incur for long tool
+	// argument streams (e.g. large edit_file patches). The concatenated string
+	// is materialised once when the call is finalised below.
+	argsBuilders := map[int]*strings.Builder{}
 	started := map[int]bool{}
 	var order []int
 	var lastFinishReason string
@@ -475,7 +481,17 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			if tc.Function.Name != "" {
 				cur.Name = tc.Function.Name
 			}
-			cur.Arguments += tc.Function.Arguments
+			// PV-2: accumulate argument fragments into a per-index strings.Builder
+			// instead of cur.Arguments += delta. The concatenated value is set on
+			// cur.Arguments just before the final ChunkToolCall is emitted below.
+			if tc.Function.Arguments != "" {
+				b, ok := argsBuilders[tc.Index]
+				if !ok {
+					b = &strings.Builder{}
+					argsBuilders[tc.Index] = b
+				}
+				b.WriteString(tc.Function.Arguments)
+			}
 			// Signal the call's start the moment its name is known, so a frontend
 			// can show the tool card immediately rather than only after its
 			// (possibly large) arguments finish streaming.
@@ -521,6 +537,10 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	sort.Ints(order)
 	for _, idx := range order {
 		tc := acc[idx]
+		if b := argsBuilders[idx]; b != nil {
+			// PV-2: materialise the accumulated argument fragments once per call.
+			tc.Arguments = b.String()
+		}
 		if tc.ID == "" {
 			// Some OpenAI-compatible gateways stream tool calls by index with no id.
 			// Synthesize a stable one so the result can be paired back to its call —
