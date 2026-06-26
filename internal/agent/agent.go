@@ -681,7 +681,9 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		memoryCompilerInput = sourceInput
 	}
 	input = a.withTurnPreferences(rawInput)
-	if memCompiler := a.memoryCompilerRuntime(); memCompiler != nil {
+	memoryCompilerDisplayInput := strings.TrimSpace(StripTransientUserBlocks(rawInput))
+	skipMemoryCompiler := strings.HasPrefix(memoryCompilerDisplayInput, "Continue pursuing the active goal.")
+	if memCompiler := a.memoryCompilerRuntime(); memCompiler != nil && !skipMemoryCompiler {
 		if compiledInput, turn := memCompiler.StartTurn(ctx, memoryCompilerInput, a.session.Snapshot()); turn != nil {
 			a.compilerTurn = turn
 			a.emitMemoryCompilerStats(turn)

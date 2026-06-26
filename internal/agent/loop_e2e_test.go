@@ -91,6 +91,32 @@ func TestRunUsesMemoryCompilerContractAsUserTurn(t *testing.T) {
 	}
 }
 
+func TestRunSkipsMemoryCompilerForGoalContinuationTurn(t *testing.T) {
+	rt := memorycompiler.New(t.TempDir())
+	_, seed := rt.StartTurn(context.Background(), "fix a bug", nil)
+	seed.RecordToolResults([]memorycompiler.ToolRecord{
+		{Name: "bash", Error: "exit status 1"},
+		{Name: "bash", Error: "exit status 1"},
+	})
+	seed.Finish(nil)
+
+	goalContinue := "Continue pursuing the active goal. If it is complete, provide the concise final result and end with [goal:complete]. Otherwise do the next useful work and end with [goal:continue]."
+	mp := testutil.NewMock("m", testutil.Turn{Text: "done"})
+	a := New(mp, echoRegistry(), NewSession(""), Options{MemoryCompiler: rt}, event.Discard)
+	if err := a.Run(context.Background(), goalContinue); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	req := mp.Requests()[0]
+	user := req.Messages[len(req.Messages)-1]
+	if strings.Contains(user.Content, "<memory-compiler-execution>") {
+		t.Fatalf("synthetic goal continuation turn was compiled:\n%s", user.Content)
+	}
+	if !strings.HasPrefix(user.Content, "Continue pursuing the active goal.") {
+		t.Fatalf("goal continuation source was not preserved:\n%s", user.Content)
+	}
+}
+
 func TestRunCompilesMemoryGoalFromRawInputBeforeReasoningLanguage(t *testing.T) {
 	rt := memorycompiler.New(t.TempDir())
 	_, seed := rt.StartTurn(context.Background(), "fix a bug", nil)

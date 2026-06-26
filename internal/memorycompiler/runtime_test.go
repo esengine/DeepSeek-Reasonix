@@ -156,6 +156,22 @@ func TestSuccessTraceFeedsReusableStrategyAndGraph(t *testing.T) {
 	assertEdge(t, st.Edges, "derived_from")
 }
 
+func TestGoalContinuationDoesNotMatchUIBySubstring(t *testing.T) {
+	goal := "Continue pursuing the active goal. If it is complete, provide the concise final result and end with [goal:complete]."
+	if got := classifyStrategy(goal); got == "frontend-visual-verify" {
+		t.Fatalf("classifyStrategy(%q) = %q; pursuing must not match the ui strategy", goal, got)
+	}
+
+	ranked := rankStrategies(goal, []Strategy{
+		{ID: "frontend-visual-verify", Successes: 61, Failures: 0, Preconditions: []string{"frontend", "ui", "desktop", "前端"}},
+		{ID: "general"},
+	})
+	pick := selectStrategy(goal, ranked, 0)
+	if pick.Selected == "frontend-visual-verify" {
+		t.Fatalf("selectStrategy picked frontend for synthetic goal continuation: %+v", pick)
+	}
+}
+
 func TestGraphTraversalFiltersCorruptedMemoryAndExpandsConnectedNodes(t *testing.T) {
 	now := time.Now().UTC()
 	st := state{
