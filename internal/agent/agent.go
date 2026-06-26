@@ -290,6 +290,12 @@ type Agent struct {
 	memoryCompiler   *memorycompiler.Runtime
 	compilerTurn     *memorycompiler.Turn
 
+	// Memory v5 compiler injection guards.
+	lastCompilerInjectedAt  time.Time
+	compilerInjectionCount  int
+	compilerInjectionMax    int
+	compilerInjectCooldown  time.Duration
+
 	// planModeAllowedTools declares extra custom tools that the centralized
 	// plan-mode policy may treat as read-only. Known blocked tools still lose.
 	// Populated from Options.PlanModeAllowedTools during construction.
@@ -395,6 +401,32 @@ func (a *Agent) memoryCompilerRuntime() *memorycompiler.Runtime {
 	a.memoryCompilerMu.RLock()
 	defer a.memoryCompilerMu.RUnlock()
 	return a.memoryCompiler
+}
+
+// shouldInjectCompiler returns true when the Memory v5 compiler may inject an
+// execution contract for this turn. It enforces:
+//   - Session cap: no more than compilerInjectionMax total injections
+//   - Genuine input: non-empty and not system-generated (starts with '<')
+//   - Cooldown: at least compilerInjectCooldown since the last injection
+func (a *Agent) shouldInjectCompiler(input string) bool {
+	if a.compilerInjectionMax <= 0 {
+		return false
+	}
+	if strings.TrimSpace(input) == "" || strings.HasPrefix(strings.TrimSpace(input), "<") {
+		return false
+	}
+	if a.compilerInjectionCount >= a.compilerInjectionMax {
+		return false
+	}
+	if time.Since(a.lastCompilerInjectedAt) < a.compilerInjectCooldown {
+		return false
+	}
+	return true
+}
+
+func (a *Agent) markCompilerInjected() {
+	a.lastCompilerInjectedAt = time.Now()
+	a.compilerInjectionCount++
 }
 
 // SetGate installs the per-call permission gate. Used by interactive CLI sessions to swap the
@@ -684,6 +716,8 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		keepPolicy:            opts.KeepPolicy,
 		planModeAllowedTools:  append([]string(nil), opts.PlanModeAllowedTools...),
 		memoryCompiler:        opts.MemoryCompiler,
+		compilerInjectionMax:     5,
+		compilerInjectCooldown:   30 * time.Second,
 	}
 	a.SetResponseLanguage(opts.ResponseLanguage)
 	a.SetReasoningLanguage(opts.ReasoningLanguage)
@@ -720,18 +754,22 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		memoryCompilerInput = sourceInput
 	}
 	input = a.withTurnPreferences(rawInput)
+<<<<<<< HEAD
 	if memCompiler := a.memoryCompilerRuntime(); memCompiler != nil && !MemoryCompilerSkipFromContext(ctx) {
-		if compiledInput, turn := memCompiler.StartTurn(ctx, memoryCompilerInput, a.session.Snapshot()); turn != nil {
-			a.compilerTurn = turn
-			a.emitMemoryCompilerStats(turn)
-			defer func() {
-				turn.Finish(runErr)
-				if a.compilerTurn == turn {
-					a.compilerTurn = nil
+		if a.shouldInjectCompiler(memoryCompilerInput) {
+			if compiledInput, turn := memCompiler.StartTurn(ctx, memoryCompilerInput, a.session.Snapshot()); turn != nil {
+				a.markCompilerInjected()
+				a.compilerTurn = turn
+				a.emitMemoryCompilerStats(turn)
+				defer func() {
+					turn.Finish(runErr)
+					if a.compilerTurn == turn {
+						a.compilerTurn = nil
+					}
+				}()
+				if strings.TrimSpace(compiledInput) != "" {
+					input = a.withTurnPreferences(compiledInput)
 				}
-			}()
-			if strings.TrimSpace(compiledInput) != "" {
-				input = a.withTurnPreferences(compiledInput)
 			}
 		}
 	}
