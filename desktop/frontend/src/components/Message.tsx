@@ -651,15 +651,20 @@ export const AssistantMessage = memo(function AssistantMessage({
   const [reasoningOpen, setReasoningOpen] = useState((expandWhileStreaming && item.streaming) || defaultExpanded);
   const userOverridden = useRef(false);
   const prevStreamingRef = useRef(item.streaming);
+  const prevReasoningCompleteRef = useRef(item.reasoningComplete ?? false);
   useGSAPCollapse(reasoningBodyRef, reasoningOpen);
 
   // Follow the current display mode while streaming unless the user manually
-  // toggled this message; keep reasoning visible after stream ends
-  // (no auto-close) to avoid jarring transcript layout jumps.
+  // toggled this message; auto-close at stream end — but thanks to 240px
+  // max-height the layout jump is small and much less jarring.
   useEffect(() => {
     const wasStreaming = prevStreamingRef.current;
     const nowStreaming = item.streaming;
     prevStreamingRef.current = nowStreaming;
+
+    const wasRC = prevReasoningCompleteRef.current;
+    const nowRC = item.reasoningComplete ?? false;
+    prevReasoningCompleteRef.current = nowRC;
 
     if (nowStreaming) {
       if (!wasStreaming) userOverridden.current = false;
@@ -668,11 +673,18 @@ export const AssistantMessage = memo(function AssistantMessage({
       } else if (!userOverridden.current) {
         setReasoningOpen(expandWhileStreaming);
       }
+    } else if (nowRC && !wasRC) {
+      // Reasoning just finished — auto-close while we wait for text.
+      if (!defaultExpanded && !userOverridden.current) {
+        setReasoningOpen(false);
+      }
     } else if (wasStreaming) {
-      // Stream fully ended — keep reasoning visible
-      // (no auto-close to avoid jarring transcript jump)
+      // Stream fully ended — auto-close if user didn't interact.
+      if (!defaultExpanded && !userOverridden.current) {
+        setReasoningOpen(false);
+      }
     }
-  }, [item.streaming, defaultExpanded, expandWhileStreaming]);
+  }, [item.streaming, item.reasoningComplete, defaultExpanded, expandWhileStreaming]);
 
   // Auto-scroll reasoning body to the latest content during streaming.
   useEffect(() => {
