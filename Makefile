@@ -1,8 +1,10 @@
 VERSION := $(shell git describe --tags --always 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 GOEXE := $(shell go env GOEXE)
+PREFIX ?= $(HOME)/.local
+INSTALLDIR := $(PREFIX)/bin
 
-.PHONY: build vet fmt test hooks cross clean
+.PHONY: build vet fmt test hooks cross clean install
 
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/reasonix$(GOEXE) ./cmd/reasonix
@@ -31,3 +33,23 @@ cross:
 
 clean:
 	rm -rf bin dist
+
+install: build
+	@if [ -f "$(INSTALLDIR)/reasonix$(GOEXE)" ]; then \
+		if [ "$(FORCE)" != "1" ]; then \
+			echo "error: $(INSTALLDIR)/reasonix$(GOEXE) already exists."; \
+			echo "To overwrite, run: make install FORCE=1"; \
+			exit 1; \
+		fi; \
+		echo "warning: overwriting existing installation (FORCE=1)"; \
+	fi
+	@mkdir -p "$(INSTALLDIR)"
+	cp bin/reasonix$(GOEXE) "$(INSTALLDIR)/reasonix$(GOEXE)"
+	chmod 0755 "$(INSTALLDIR)/reasonix$(GOEXE)"
+	cp bin/reasonix-plugin-example$(GOEXE) "$(INSTALLDIR)/reasonix-plugin-example$(GOEXE)"
+	chmod 0755 "$(INSTALLDIR)/reasonix-plugin-example$(GOEXE)"
+	@echo "installed: $(INSTALLDIR)/reasonix$(GOEXE)"
+	@echo "installed: $(INSTALLDIR)/reasonix-plugin-example$(GOEXE)"
+	@echo ""
+	@echo "Make sure $(INSTALLDIR) is in your PATH."
+	@echo "Then run: reasonix setup"

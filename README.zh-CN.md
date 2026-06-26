@@ -79,6 +79,8 @@ Windows 构建使用 [SignPath 基金会](https://signpath.org/) 提供的免费
 
 ```sh
 make build      # -> bin/reasonix(.exe)
+make install    # 构建 + 安装到 $(PREFIX)/bin（默认 ~/.local/bin）
+make install FORCE=1  # 强制覆盖已安装版本
 make cross      # -> dist/（darwin|linux|windows × amd64|arm64）
 ```
 
