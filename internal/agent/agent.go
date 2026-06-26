@@ -358,6 +358,15 @@ func (a *Agent) SetResponseLanguage(lang string) {
 // It is safe for desktop settings to call while other tabs are idle or running;
 // an already-started turn keeps its own Turn handle and future turns observe the
 // new runtime.
+// isGoalLoopContinue detects synthetic goal continuation turns so the
+// Memory v5 compiler can skip them — re-compiling the same synthetic
+// "Continue pursuing the active goal..." instruction on every loop
+// produces the same execution contract JSON, which some models echo back
+// as text, creating an infinite loop (#5325).
+func isGoalLoopContinue(input string) bool {
+	return strings.HasPrefix(strings.TrimSpace(input), "Continue pursuing the active goal")
+}
+
 func (a *Agent) SetMemoryCompiler(rt *memorycompiler.Runtime) {
 	if a == nil {
 		return
@@ -682,17 +691,24 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	input = a.withTurnPreferences(rawInput)
 	if memCompiler := a.memoryCompilerRuntime(); memCompiler != nil {
-		if compiledInput, turn := memCompiler.StartTurn(ctx, memoryCompilerInput, a.session.Snapshot()); turn != nil {
-			a.compilerTurn = turn
-			a.emitMemoryCompilerStats(turn)
-			defer func() {
-				turn.Finish(runErr)
-				if a.compilerTurn == turn {
-					a.compilerTurn = nil
+		// Skip the Memory v5 compiler on goal continuation turns: the
+		// synthetic "Continue pursuing the active goal..." instruction is
+		// not a user-authored task and re-compiling it on every loop
+		// produces the same execution contract JSON, causing the model to
+		// echo the contract format back in an infinite loop (#5325).
+		if !isGoalLoopContinue(rawInput) {
+			if compiledInput, turn := memCompiler.StartTurn(ctx, memoryCompilerInput, a.session.Snapshot()); turn != nil {
+				a.compilerTurn = turn
+				a.emitMemoryCompilerStats(turn)
+				defer func() {
+					turn.Finish(runErr)
+					if a.compilerTurn == turn {
+						a.compilerTurn = nil
+					}
+				}()
+				if strings.TrimSpace(compiledInput) != "" {
+					input = a.withTurnPreferences(compiledInput)
 				}
-			}()
-			if strings.TrimSpace(compiledInput) != "" {
-				input = a.withTurnPreferences(compiledInput)
 			}
 		}
 	}
