@@ -936,10 +936,10 @@ func TestMemoryApprovalSubjectsAndNotifications(t *testing.T) {
 	if forgetSubject != `Archive memory "wrong-memory"` {
 		t.Fatalf("forget approval subject = %q", forgetSubject)
 	}
-	if got := approvalNotificationText("remember", "Save/update memory with private details"); got != "approval needed: remember" {
+	if got := approvalNotificationText("remember", "Save/update memory with private details"); got != "approval needed: remember Save/update memory with private details" {
 		t.Fatalf("remember notification = %q", got)
 	}
-	if got := approvalNotificationText("forget", `Archive memory "wrong-memory"`); got != "approval needed: forget" {
+	if got := approvalNotificationText("forget", `Archive memory "wrong-memory"`); got != `approval needed: forget Archive memory "wrong-memory"` {
 		t.Fatalf("forget notification = %q", got)
 	}
 	if got := approvalNotificationText("bash", "go test ./..."); got != "approval needed: bash go test ./..." {

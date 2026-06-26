@@ -1226,10 +1226,9 @@ func (c *Controller) newInteractiveGate() *permission.Gate {
 	default:
 		policy.Mode = permission.Ask
 	}
-	policy.Ask = append(policy.Ask,
-		permission.Rule{Tool: memoryRememberTool},
-		permission.Rule{Tool: memoryForgetTool},
-	)
+	// Memory tools (remember/forget) follow the normal policy flow:
+	// prompted in ask mode (Mode fallback), auto-allowed in auto/yolo.
+	// Add to Ask rules in config to always require manual review.
 	gate := permission.NewGate(policy, gateApprover{c})
 	gate.OnRemember = func(rule string) {
 		if c.onRemember != nil {
