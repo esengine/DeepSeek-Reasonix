@@ -722,7 +722,7 @@ export const AssistantMessage = memo(function AssistantMessage({
             <ChevronRight className={`reasoning__chevron${reasoningOpen ? " reasoning__chevron--open" : ""}`} size={12} />
           </button>
           {reasoningOpen && (
-            <div ref={reasoningBodyRef} className="reasoning__body">{visibleReasoning}</div>
+            <div ref={reasoningBodyRef} className={`reasoning__body${item.streaming ? " reasoning__body--live" : ""}`}>{visibleReasoning}</div>
           )}
         </div>
       )}

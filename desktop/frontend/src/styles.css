@@ -4325,8 +4325,7 @@ a[href] {
   background: var(--fg-faint);
 }
 .reasoning__body {
-  overflow-y: auto;
-  max-height: 240px;
+  overflow: hidden;
   border-left: 2px solid var(--border);
   padding-left: 12px;
   color: var(--fg-dim);
@@ -4336,24 +4335,28 @@ a[href] {
   line-height: 1.7;
   white-space: pre-wrap;
 }
-/* ── reasoning scrollbar ─────────────────────────────────────────── */
-.reasoning__body {
+/* ── reasoning live-stream scroll ────────────────────────────────── */
+.reasoning__body--live {
+  overflow-y: auto;
+  max-height: 240px;
+}
+.reasoning__body--live {
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
-.reasoning__body::-webkit-scrollbar {
+.reasoning__body--live::-webkit-scrollbar {
   width: 4px;
 }
-.reasoning__body::-webkit-scrollbar-thumb {
+.reasoning__body--live::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--fg-faint) 30%, transparent);
   border-radius: 2px;
   opacity: 0;
   transition: opacity 0.15s;
 }
-.reasoning__body:hover::-webkit-scrollbar-thumb {
+.reasoning__body--live:hover::-webkit-scrollbar-thumb {
   opacity: 1;
 }
-.reasoning__body:hover {
+.reasoning__body--live:hover {
   scrollbar-color: color-mix(in srgb, var(--fg-faint) 30%, transparent) transparent;
 }
 /* ── markdown prose ──────────────────────────────────────────────────────── */

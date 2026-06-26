@@ -489,7 +489,7 @@ export function Transcript({
             <LiveAssistantMessage
               key={it.id}
               item={it as AssistantItem}
-              defaultExpanded={true}
+              defaultExpanded={false}
               expandWhileStreaming={false}
               truncateStreamingReasoning={true}
               creationMode={creationMode}
@@ -567,7 +567,7 @@ export function Transcript({
             break;
           }
           case "assistant":
-            out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={true} creationMode={creationMode} />);
+            out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={false} creationMode={creationMode} />);
             if (!it.streaming && it.text.trim() !== "") {
               actionText = it.text;
               actionReady = true;
@@ -913,7 +913,7 @@ function WarmTurnItems({
         break;
       }
       case "assistant": {
-        nodes.push(<AssistantMessage key={it.id} item={it} defaultExpanded={true} creationMode={creationMode} />);
+        nodes.push(<AssistantMessage key={it.id} item={it} defaultExpanded={false} creationMode={creationMode} />);
         if (!it.streaming && it.text.trim() !== "") {
           actionText = it.text;
           actionReady = true;
