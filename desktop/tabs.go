@@ -26,6 +26,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/eventwire"
 	"reasonix/internal/fileutil"
+	"reasonix/internal/notify"
 	"reasonix/internal/provider"
 )
 
@@ -2128,10 +2129,16 @@ func (a *App) buildTabControllerWithContext(tab *WorkspaceTab, loadedSession loa
 	tab.SharedHostKey = rootKey
 	sharedHost := a.acquireSharedHost(rootKey)
 
+	// Wrap tab.sink with OS notifications when enabled.
+	sink := event.Sink(tab.sink)
+	if cfg.Notifications.Enabled && a.notificationSender != nil {
+		sink = notify.NewSink(tab.sink, a.notificationSender, cfg.Notifications)
+	}
+
 	ctrl, err := boot.Build(buildCtx, boot.Options{
 		Model:                    model,
 		RequireKey:               false,
-		Sink:                     tab.sink,
+		Sink:                     sink,
 		WorkspaceRoot:            root,
 		SessionDir:               sessionDir,
 		EffortOverride:           cloneStringPtr(tab.effort),

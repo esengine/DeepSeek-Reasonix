@@ -41,6 +41,7 @@ import (
 	"reasonix/internal/i18n"
 	"reasonix/internal/mcpdiag"
 	"reasonix/internal/memory"
+	"reasonix/internal/notify"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/skill"
@@ -138,6 +139,10 @@ type App struct {
 	botRuntime  *desktopBotRuntime
 
 	metrics atomic.Pointer[metricsAggregator] // non-nil only when desktop.metrics is opted in; swapped live by SetDesktopMetrics
+
+	// notificationSender delivers Windows Toast notifications; nil until startup.
+	// Set when NotificationsConfig.Enabled is true, used to wrap tab sinks.
+	notificationSender notify.Sender
 
 	runtimeEvents asyncRuntimeEmitter
 
@@ -362,6 +367,11 @@ func (a *App) startup(ctx context.Context) {
 
 	a.heartbeat = newHeartbeatEngine(a)
 	a.heartbeat.Start()
+
+	// Initialize system notification sender if enabled in config.
+	if cfg, err := config.Load(); err == nil && cfg.Notifications.Enabled {
+		a.notificationSender = notify.NewPlatformSender()
+	}
 
 	go a.restoreOrBuildTabs()
 	a.goSafe("refreshBotRuntime", a.refreshBotRuntime)
