@@ -1226,9 +1226,12 @@ export function Composer({
         if (attachmentSeenInDraft(sourceDraftKey, key)) continue;
         const item = await app.AttachDropped(path);
         if (item.kind === "folder") {
-          // Dropped directories become plain text paths in the composer input
-          const sep = text.length > 0 && !text.endsWith(" ") ? " " : "";
-          setTextCaretEnd(text + sep + item.path + " ");
+          // Dropped directories become plain text paths appended to the composer input.
+          // Read from the live textarea DOM value to avoid stale closure (the
+          // onFilesDropped callback captures attachDroppedPaths from first render).
+          const currentText = taRef.current?.value ?? text;
+          const sep = currentText.length > 0 && !currentText.endsWith(" ") ? " " : "";
+          setTextCaretEnd(currentText + sep + item.path + " ");
         } else if (item.kind === "workspace") {
           addWorkspaceReferenceToDraft(sourceDraftKey, { path: item.path, isDir: item.isDir });
         } else {
