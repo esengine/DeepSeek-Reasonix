@@ -337,17 +337,12 @@ export const Transcript = memo(function Transcript({
 
   // Stable callbacks for WarmZone: inline arrow functions would defeat
   // WarmZone's memo() wrapper by creating a new function identity each render.
-  // These only use setState updaters, so they have no dependencies and are stable.
   const handleToggleColdPage = useCallback(() => {
-    setColdPage((p) => p + 1);
-  }, []);
+    setWarmLayerState((prev) => warmLayerWithNextColdPage(prev, warmLayerSessionKey));
+  }, [warmLayerSessionKey]);
   const handleToggleWarmTurn = useCallback((g: number, expand: boolean) => {
-    setExpandedWarmTurns((prev) => {
-      const next = new Set(prev);
-      if (expand) next.add(g); else next.delete(g);
-      return next;
-    });
-  }, []);
+    setWarmLayerState((prev) => warmLayerWithExpandedTurn(prev, warmLayerSessionKey, g, expand));
+  }, [warmLayerSessionKey]);
 
   // ── Hot zone: fully rendered from hotStartIdx to end ─────────────────────
   // Memoized separately from the assembly so streaming tokens don't rebuild
@@ -665,7 +660,7 @@ export const Transcript = memo(function Transcript({
               warmOnEdit={onEditPrompt}
               tabId={tabId}
               creationMode={creationMode}
-onToggleColdPage={handleToggleColdPage}
+              onToggleColdPage={handleToggleColdPage}
               onToggleWarmTurn={handleToggleWarmTurn}
             />
           )}
