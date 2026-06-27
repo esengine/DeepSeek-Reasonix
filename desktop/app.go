@@ -6399,7 +6399,7 @@ func (a *App) AttachmentDataURL(path string) (string, error) {
 // image or out-of-tree file is copied into .reasonix/attachments. A directory
 // dropped from outside the workspace is returned as "folder" for text insertion.
 type DroppedItem struct {
-	Kind       string `json:"kind"` // "workspace" | "attachment"
+	Kind       string `json:"kind"` // "workspace" | "attachment" | "folder"
 	Path       string `json:"path"`
 	IsDir      bool   `json:"isDir,omitempty"`
 	PreviewURL string `json:"previewUrl,omitempty"`
@@ -6429,8 +6429,9 @@ func (a *App) AttachDropped(path string) (DroppedItem, error) {
 			return nil
 		}
 		if info.IsDir() {
-			// Return the absolute path for direct text insertion in the composer
-			item = DroppedItem{Kind: "folder", Path: path}
+			// Return the normalized absolute path for direct text insertion
+			// in the composer; filepath.ToSlash ensures Windows compatibility.
+			item = DroppedItem{Kind: "folder", Path: filepath.ToSlash(path), IsDir: true}
 			return nil
 		}
 		rel, err := control.SaveAttachmentFile(path)

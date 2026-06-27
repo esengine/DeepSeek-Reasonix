@@ -1226,12 +1226,15 @@ export function Composer({
         if (attachmentSeenInDraft(sourceDraftKey, key)) continue;
         const item = await app.AttachDropped(path);
         if (item.kind === "folder") {
-          // Dropped directories become plain text paths appended to the composer input.
-          // Read from the live textarea DOM value to avoid stale closure (the
-          // onFilesDropped callback captures attachDroppedPaths from first render).
-          const currentText = taRef.current?.value ?? text;
+          // Dropped directories become plain text paths appended to the composer
+          // input. Use textRef (synced with text state) instead of the stale
+          // closure `text` or DOM value to avoid race conditions when multiple
+          // drops arrive before React re-renders.
+          const currentText = textRef.current;
           const sep = currentText.length > 0 && !currentText.endsWith(" ") ? " " : "";
-          setTextCaretEnd(currentText + sep + item.path + " ");
+          const next = currentText + sep + item.path + " ";
+          textRef.current = next;
+          setTextCaretEnd(next);
         } else if (item.kind === "workspace") {
           addWorkspaceReferenceToDraft(sourceDraftKey, { path: item.path, isDir: item.isDir });
         } else {

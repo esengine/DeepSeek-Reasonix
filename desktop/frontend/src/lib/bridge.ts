@@ -2321,6 +2321,11 @@ function makeMockApp(): AppBindings {
     },
     async AttachDropped(path: string) {
       const name = path.split(/[/\\]/).filter(Boolean).pop() ?? path;
+      // Rough heuristic for dev mock: paths without a file extension are treated as folders
+      const hasExt = /\.\w{1,6}$/i.test(name);
+      if (!hasExt) {
+        return { kind: "folder" as const, path };
+      }
       return { kind: "attachment" as const, path: `.reasonix/attachments/mock-${name}` };
     },
     async AttachmentDataURL(_path: string) {
