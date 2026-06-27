@@ -3262,7 +3262,7 @@ export default function App() {
                 onRewind={handleMessageAction}
                 checkpoints={state.checkpoints}
                 actionPending={state.messageAction != null}
-                rewindDisabled={Boolean(activeTab?.readOnly) || !controllerReady || hydratePlaceholderActive || (rewindState != null && rewindState.tabId === activeTabId) || rewindCommitting || state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
+                rewindDisabled={Boolean(activeTab?.readOnly) || !controllerReady || hydratePlaceholderActive || rewindState != null || rewindCommitting || state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
                 running={state.running || rewindCommitting}
                 welcomeVariant={sidebarCreation ? "creation" : "default"}
                 creationMode={sidebarCreation}
