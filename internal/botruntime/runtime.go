@@ -1,4 +1,4 @@
-package botruntime
+﻿package botruntime
 
 import (
 	"log/slog"
@@ -8,6 +8,7 @@ import (
 
 	"reasonix/internal/bot"
 	"reasonix/internal/bot/feishu"
+	"reasonix/internal/bot/napcat"
 	"reasonix/internal/bot/qq"
 	"reasonix/internal/bot/weixin"
 	"reasonix/internal/config"
@@ -117,7 +118,7 @@ func ChannelConfigs(connections []config.BotConnectionConfig, includeModel bool,
 		}
 		plat := bot.Platform(strings.TrimSpace(conn.Provider))
 		switch plat {
-		case bot.PlatformQQ, bot.PlatformFeishu, bot.PlatformWeixin:
+		case bot.PlatformQQ, bot.PlatformFeishu, bot.PlatformWeixin, bot.PlatformNapCat:
 		default:
 			continue
 		}
@@ -229,6 +230,9 @@ func AdapterBindings(cfg *config.Config, enabled map[bot.Platform]bool, feishuDo
 			bindings = append(bindings, bot.AdapterBinding{ID: id, Domain: strings.TrimSpace(conn.Domain), Platform: platform, Adapter: weixin.New(weixinCfg, logger)})
 			hasConnection[platform] = true
 		}
+	}
+	if enabled[bot.PlatformNapCat] {
+		bindings = append(bindings, bot.AdapterBinding{ID: string(bot.PlatformNapCat), Platform: bot.PlatformNapCat, Adapter: napcat.NewAdapter(logger)})
 	}
 	if enabled[bot.PlatformQQ] && !hasConnection[bot.PlatformQQ] {
 		bindings = append(bindings, bot.AdapterBinding{ID: string(bot.PlatformQQ), Platform: bot.PlatformQQ, Adapter: qq.New(cfg.Bot.QQ, logger)})
