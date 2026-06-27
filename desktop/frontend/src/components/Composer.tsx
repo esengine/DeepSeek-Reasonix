@@ -1230,6 +1230,9 @@ export function Composer({
           // input. Use textRef (synced with text state) instead of the stale
           // closure `text` or DOM value to avoid race conditions when multiple
           // drops arrive before React re-renders.
+          // Skip insertion if the user switched drafts while we were awaiting
+          // AttachDropped — the path would land in the wrong input.
+          if (activeDraftKeyRef.current !== sourceDraftKey) continue;
           const currentText = textRef.current;
           const sep = currentText.length > 0 && !currentText.endsWith(" ") ? " " : "";
           const next = currentText + sep + item.path + " ";

@@ -249,7 +249,7 @@ func TestAttachDroppedOutsideWorkspaceDirReturnsFolder(t *testing.T) {
 	if got.Kind != "folder" {
 		t.Fatalf("got kind=%q, want %q", got.Kind, "folder")
 	}
-	if got.Path != outsideDir {
-		t.Fatalf("got path=%q, want %q (the original absolute path)", got.Path, outsideDir)
+	if got.Path != filepath.ToSlash(outsideDir) {
+		t.Fatalf("got path=%q, want %q (the normalized absolute path)", got.Path, filepath.ToSlash(outsideDir))
 	}
 }
