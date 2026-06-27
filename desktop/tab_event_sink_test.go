@@ -136,7 +136,7 @@ func TestTabEventSinkCoalescesTextDeltas(t *testing.T) {
 			return
 		}
 		mu.Lock()
-		delivered = append(delivered, wire.Event.Kind+":"+wire.Text)
+		delivered = append(delivered, wire.Kind+":"+wire.Text)
 		mu.Unlock()
 	}
 

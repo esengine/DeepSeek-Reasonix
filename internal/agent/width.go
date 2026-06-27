@@ -1,15 +1,8 @@
 package agent
 
 import (
-	"regexp"
-
 	"github.com/mattn/go-runewidth"
 )
-
-// ansiSGR matches ANSI Select-Graphic-Rendition sequences (\e[…m). Width
-// measurement strips these so styled streamed text still gets counted by its
-// visible column footprint.
-var ansiSGR = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 // streamedRows counts how many rows the cursor has descended after raw text
 // of length s was printed at the given terminal width. Used by the markdown
@@ -21,11 +14,11 @@ func streamedRows(s string, width int) int {
 	if width <= 0 {
 		width = 80
 	}
-	
+
 	var rows int
 	var currentLineWidth int
 	var inEscape bool
-	
+
 	for _, r := range s {
 		switch {
 		case r == '\n':
@@ -52,11 +45,11 @@ func streamedRows(s string, width int) int {
 			}
 		}
 	}
-	
+
 	// Add remaining line
 	if currentLineWidth > 0 {
 		rows += (currentLineWidth - 1) / width
 	}
-	
+
 	return rows
 }

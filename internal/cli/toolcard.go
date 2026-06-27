@@ -29,7 +29,7 @@ func connectorBlock(lines []string) string {
 		totalLen += 1 + indentLen + len(ln)
 	}
 	out.Grow(totalLen)
-	
+
 	out.WriteString(dim(connector) + lines[0])
 	for _, ln := range lines[1:] {
 		out.WriteByte('\n')

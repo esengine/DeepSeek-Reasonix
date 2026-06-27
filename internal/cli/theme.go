@@ -99,7 +99,7 @@ var (
 	themeDangerStyle lipgloss.Style
 	themeWarnStyle   lipgloss.Style
 	// Cached queue indicator styles (TR-5)
-	queueStyle         lipgloss.Style
+	queueStyle          lipgloss.Style
 	queueHighlightStyle lipgloss.Style
 )
 
