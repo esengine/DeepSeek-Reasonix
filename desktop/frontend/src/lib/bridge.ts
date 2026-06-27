@@ -366,6 +366,8 @@ export interface AppBindings {
   UsageLogs(limit: number, days: number, provider: string, model: string): Promise<unknown>;
   UsageProviders(): Promise<string[]>;
   UsageModelNames(): Promise<string[]>;
+  UsageDiskUsage(): Promise<number>;
+  DeleteUsageData(): Promise<boolean>;
   SaveFile(filename: string, content: string): Promise<string>;
 }
 
@@ -3342,6 +3344,8 @@ function makeMockApp(): AppBindings {
     },
     async UsageProviders() { return ["mock"]; },
     async UsageModelNames() { return ["mock-model"]; },
+    async UsageDiskUsage() { return 0; },
+    async DeleteUsageData() { return true; },
     async SaveFile(_filename: string, _content: string) { return ""; },
   };
 }
