@@ -27773,6 +27773,12 @@ body > .mermaid-diagram--fullscreen {
 .usage-toolbar__actions {
   display: flex;
   gap: 6px;
+  align-items: center;
+}
+.usage-toolbar__disk {
+  font-size: 12px;
+  opacity: 0.6;
+  margin-right: 4px;
 }
 
 .usage-kpi-grid {

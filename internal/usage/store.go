@@ -82,6 +82,19 @@ func (s *Store) Close() {
 // Dir returns the store directory path.
 func (s *Store) Dir() string { return s.dir }
 
+// Reset closes the current file handle so the next flush re-opens the file.
+// Call this after deleting usage files on disk to avoid writing to a stale
+// (unlinked) inode.
+func (s *Store) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.file != nil {
+		s.file.Close()
+		s.file = nil
+	}
+	s.fileDate = ""
+}
+
 // writer runs in a background goroutine. It drains the channel, accumulates
 // records into a batch, and flushes to disk every 5 seconds or when the batch
 // reaches 50 records — whichever comes first.

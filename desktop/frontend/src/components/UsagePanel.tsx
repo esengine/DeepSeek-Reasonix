@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Download } from "lucide-react";
+import { Download, Trash2 } from "lucide-react";
 import { app } from "../lib/bridge";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -83,6 +83,13 @@ function progressBar(ratio: number, width: number): string {
   return "█".repeat(filled) + "░".repeat(width - filled);
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export function UsageSettingsPage() {
@@ -90,21 +97,30 @@ export function UsageSettingsPage() {
   const [data, setData] = useState<UsageOverviewData | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [diskUsage, setDiskUsage] = useState(0);
 
   const refresh = useCallback(async () => {
     try {
-      const [ov, tr, lg] = await Promise.all([
+      const [ov, tr, lg, du] = await Promise.all([
         app.UsageOverview(days) as Promise<UsageOverviewData>,
         app.UsageTrend(days) as Promise<TrendPoint[]>,
         app.UsageLogs(100, days, "", "") as Promise<{ entries: LogEntry[] }>,
+        app.UsageDiskUsage() as Promise<number>,
       ]);
       setData(ov);
       setTrend(tr ?? []);
       setLogs(lg?.entries ?? []);
+      setDiskUsage(du ?? 0);
     } catch { /* silent */ }
   }, [days]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  const handleDelete = useCallback(async () => {
+    if (!confirm("Delete all usage data? This cannot be undone.")) return;
+    await app.DeleteUsageData();
+    refresh();
+  }, [refresh]);
 
   const ov = data?.overview;
   const models = data?.models ?? [];
@@ -128,7 +144,7 @@ export function UsageSettingsPage() {
 
   return (
     <>
-      {/* Toolbar: date range + export */}
+      {/* Toolbar: date range + export + delete */}
       <div className="usage-toolbar">
         <div className="usage-toolbar__range">
           {[0, 7, 30, 90].map((d) => (
@@ -142,11 +158,17 @@ export function UsageSettingsPage() {
           ))}
         </div>
         <div className="usage-toolbar__actions">
+          <span className="usage-toolbar__disk" title="Local disk usage">
+            {formatBytes(diskUsage)}
+          </span>
           <button className="btn btn--small" onClick={() => handleExport("csv")}>
             <Download size={13} /> CSV
           </button>
           <button className="btn btn--small" onClick={() => handleExport("json")}>
             <Download size={13} /> JSON
+          </button>
+          <button className="btn btn--small btn--danger" onClick={handleDelete} title="Delete all usage data">
+            <Trash2 size={13} /> Delete
           </button>
         </div>
       </div>

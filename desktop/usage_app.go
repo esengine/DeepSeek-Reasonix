@@ -178,3 +178,46 @@ func (a *App) SaveFile(filename, content string) string {
 	}
 	return path
 }
+
+// UsageDiskUsage returns the total bytes occupied by usage JSONL files.
+func (a *App) UsageDiskUsage() int64 {
+	t := a.usageTracker.Load()
+	if t == nil {
+		return 0
+	}
+	var total int64
+	entries, err := os.ReadDir(t.dir)
+	if err != nil {
+		return 0
+	}
+	for _, e := range entries {
+		if info, err := e.Info(); err == nil {
+			total += info.Size()
+		}
+	}
+	return total
+}
+
+// DeleteUsageData deletes all usage JSONL files and resets the store so new
+// writes create fresh files. Returns true on success.
+func (a *App) DeleteUsageData() bool {
+	t := a.usageTracker.Load()
+	if t == nil {
+		return false
+	}
+	// Close the current file handle first so we don't write to a deleted inode.
+	t.store.Reset()
+	entries, err := os.ReadDir(t.dir)
+	if err != nil {
+		return false
+	}
+	ok := true
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".jsonl" {
+			if err := os.Remove(filepath.Join(t.dir, e.Name())); err != nil {
+				ok = false
+			}
+		}
+	}
+	return ok
+}
