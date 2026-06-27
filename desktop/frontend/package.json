@@ -21,6 +21,7 @@
     "highlight.js": "^11.10.0",
     "katex": "^0.17.0",
     "lucide-react": "^1.21.0",
+    "mermaid": "^11.16.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -28,6 +29,7 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.0",
     "remark-math": "^6.0.0",
+    "svg-pan-zoom": "^3.6.2",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

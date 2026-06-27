@@ -25959,3 +25959,329 @@ a[href] {
   background: color-mix(in srgb, var(--fg) 8%, var(--sidebar-bg, var(--bg)));
   color: var(--fg-faint);
 }
+
+/* ── Mermaid diagram ─────────────────────────────────────────────────────── */
+.mermaid-diagram {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border-radius: 8px;
+  margin: 8px 0;
+  overflow: hidden;
+}
+
+/* ── Toolbar ────────────────────────────────────────────────────────────── */
+.mermaid-diagram__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  background: var(--bg-elev-2);
+  border-bottom: 1px solid var(--border-soft);
+  height: 38px;
+  box-sizing: border-box;
+}
+
+.mermaid-diagram__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+
+.mermaid-diagram__title-icon {
+  color: var(--fg-faint);
+  flex-shrink: 0;
+}
+
+.mermaid-diagram__title-text {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--fg-dim);
+}
+
+.mermaid-diagram__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mermaid-diagram__icon-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.mermaid-diagram__icon-btn:hover {
+  background: var(--sidebar-hover);
+  color: var(--fg-dim);
+}
+
+.mermaid-diagram__icon-btn--active {
+  background: var(--bg-soft);
+  color: var(--fg);
+}
+
+/* Override custom CopyButton styles inside the toolbar */
+.mermaid-diagram__copy-btn.copybtn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--fg-faint);
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.mermaid-diagram__copy-btn.copybtn:hover {
+  background: var(--sidebar-hover);
+  color: var(--fg-dim);
+}
+
+.mermaid-diagram__copy-btn.copybtn--copied {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* ── Body ───────────────────────────────────────────────────────────────── */
+.mermaid-diagram__preview-wrapper {
+  position: relative;
+  min-width: 0;
+}
+
+.mermaid-diagram__preview {
+  height: min(560px, 70vh);
+  width: 100%;
+  min-width: 0;
+  background: #ffffff;
+  cursor: grab;
+  overflow: hidden;
+  user-select: none;
+}
+
+.mermaid-diagram__preview:active {
+  cursor: grabbing;
+}
+
+html[data-theme="dark"] .mermaid-diagram__preview {
+  background: #18181b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .mermaid-diagram__preview {
+    background: #18181b;
+  }
+}
+
+/* svg-pan-zoom injects cursor styles on the SVG element */
+.mermaid-diagram__preview svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  cursor: grab;
+}
+
+.mermaid-diagram__preview svg:active,
+.mermaid-diagram__preview .svg-pan-zoom_viewport:active {
+  cursor: grabbing;
+}
+
+/* Code tab */
+.mermaid-diagram__code {
+  margin: 0;
+  padding: 12px 16px;
+  font-size: var(--font-code);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+/* Error state */
+.mermaid-diagram--error .mermaid-diagram__error-msg {
+  padding: 12px 16px;
+}
+
+.mermaid-diagram__error-label {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--fg-faint);
+  margin-bottom: 8px;
+}
+
+.mermaid-diagram__source {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: var(--font-code);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--fg-dim);
+  background: var(--bg-soft);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+/* Loading */
+.mermaid-diagram__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  font-size: var(--text-sm);
+  color: var(--fg-faint);
+}
+
+/* ── Fullscreen (portal into chat-pane) ────────────────────────────────── */
+.mermaid-diagram--fullscreen {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-onboarding);
+  background: #ffffff; /* 行业标准浅色画布：纯白色 */
+  display: flex;
+  flex-direction: column;
+}
+
+.mermaid-diagram--fullscreen__inner {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.mermaid-diagram--fullscreen .mermaid-diagram__toolbar {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-elev-2);
+}
+
+.mermaid-diagram--fullscreen .mermaid-diagram__title-text,
+.mermaid-diagram--fullscreen .mermaid-diagram__icon-btn {
+  color: var(--fg-dim);
+}
+
+.mermaid-diagram--fullscreen .mermaid-diagram__icon-btn:hover {
+  background: var(--sidebar-hover);
+  color: var(--fg);
+}
+
+.mermaid-diagram--fullscreen .mermaid-diagram__icon-btn--active {
+  background: var(--bg-soft);
+  color: var(--fg);
+}
+
+.mermaid-diagram--fullscreen__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff; /* 行业标准浅色画布：纯白色 */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .mermaid-diagram--fullscreen,
+  :root:not([data-theme="light"]) .mermaid-diagram--fullscreen__body {
+    background: #111319; /* 暗色画布：深色 slate */
+  }
+}
+
+html[data-theme="dark"] .mermaid-diagram--fullscreen,
+html[data-theme="dark"] .mermaid-diagram--fullscreen__body {
+  background: #111319; /* 暗色画布：深色 slate */
+}
+
+.mermaid-diagram--fullscreen .mermaid-diagram__preview-wrapper {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mermaid-diagram--fullscreen .mermaid-diagram__preview {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+html[data-theme="dark"] .mermaid-diagram--fullscreen .mermaid-diagram__preview {
+  background: #111319;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .mermaid-diagram--fullscreen .mermaid-diagram__preview {
+    background: #111319;
+  }
+}
+
+/* Zoom in fullscreen */
+.mermaid-diagram--fullscreen .mermaid-diagram__zoom {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: var(--z-floating-menu);
+}
+
+/* Placeholder shown inline while fullscreen portal is active */
+.mermaid-diagram__fullscreen-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  font-size: var(--text-sm);
+  color: var(--fg-faint);
+}
+
+/* ── Zoom controls (bottom-right) ──────────────────────────────────────── */
+.mermaid-diagram__zoom {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 2px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  cursor: default;
+  user-select: none;
+}
+
+.mermaid-diagram__zoom-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1;
+  transition: background 0.15s, color 0.15s;
+}
+
+.mermaid-diagram__zoom-btn:hover {
+  background: var(--sidebar-hover);
+  color: var(--fg);
+}

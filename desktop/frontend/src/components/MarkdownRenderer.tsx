@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef } from "react";
+import { lazy, memo, Suspense, useMemo, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -8,6 +8,8 @@ import "katex/dist/katex.min.css";
 import { CodeViewer } from "./CodeViewer";
 import { normalizeMath } from "./mathNormalize";
 import { openExternal } from "../lib/bridge";
+
+const MermaidDiagram = lazy(() => import("./MermaidDiagram"));
 
 // Markdown rendering via react-markdown + remark-gfm (tables, task lists,
 // strike, autolinks) and remark-math + rehype-katex for $/$$ KaTeX math.
@@ -94,7 +96,17 @@ function createComponents(plainStatusBlocks: boolean): Components {
       const isBlock = match !== null || text.includes("\n");
       if (isBlock) {
         if (!match && plainStatusBlocks) return <PlainMarkdownBlock text={text.replace(/\n$/, "")} />;
-        return <CodeViewer value={text.replace(/\n$/, "")} language={match?.[1]} maxHeight={360} />;
+        const lang = match?.[1];
+        if (lang === "mermaid") {
+          return (
+            <div className="code-block">
+              <Suspense fallback={<pre className="code code--loading"><code>{text}</code></pre>}>
+                <MermaidDiagram text={text.replace(/\n$/, "")} />
+              </Suspense>
+            </div>
+          );
+        }
+        return <CodeViewer value={text.replace(/\n$/, "")} language={lang} maxHeight={360} />;
       }
       return <code className="md-code">{children}</code>;
     },
