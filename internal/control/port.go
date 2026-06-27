@@ -194,6 +194,12 @@ type Settings interface {
 	SetDisplayRecorder(fn func(content, display string))
 }
 
+// PersonaControl covers selecting and querying the active persona.
+type PersonaControl interface {
+	ActivePersona() string
+	SetPersona(ctx context.Context, name string) error
+}
+
 // SessionAPI is the full driving port — the composition of every sub-port. A
 // rich frontend (the HTTP server, the desktop app, the TUI) depends on this;
 // leaner frontends (bot, acp) depend on just the sub-ports they use.
@@ -209,6 +215,7 @@ type SessionAPI interface {
 	SessionPersistence
 	Input
 	Settings
+	PersonaControl
 }
 
 // Compile-time proof that the concrete controller satisfies each sub-port and
@@ -226,5 +233,6 @@ var (
 	_ SessionPersistence = (*Controller)(nil)
 	_ Input              = (*Controller)(nil)
 	_ Settings           = (*Controller)(nil)
+	_ PersonaControl     = (*Controller)(nil)
 	_ SessionAPI         = (*Controller)(nil)
 )

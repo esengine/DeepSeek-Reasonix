@@ -36,6 +36,7 @@ import (
 	"reasonix/internal/diff"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
+	"reasonix/internal/fileutil"
 	"reasonix/internal/guardian"
 	"reasonix/internal/hook"
 	"reasonix/internal/i18n"
@@ -44,6 +45,7 @@ import (
 	"reasonix/internal/memorycompiler"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/permission"
+	"reasonix/internal/persona"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
@@ -153,6 +155,12 @@ type Controller struct {
 	autosaveWG  sync.WaitGroup
 	planMode    bool
 	sessionPath string
+	// activePersona tracks the currently active persona name ("" = none).
+	activePersona string
+	// rebuildFn is set by the boot package to rebuild this controller with
+	// different model/persona options. Used by SetPersona for model-switching
+	// rebuilds that preserve conversation history.
+	rebuildFn func(ctx context.Context, model, personaName string) (*Controller, error)
 	// turn counts model turns this session, passed to hooks in their payload.
 	turn int
 
@@ -2844,6 +2852,90 @@ func (c *Controller) AutoApproveTools() bool {
 // Bypass is the legacy name for AutoApproveTools.
 func (c *Controller) Bypass() bool {
 	return c.AutoApproveTools()
+}
+
+// --- persona ---
+//
+// ActivePersona returns the currently active persona name, or "" for none.
+func (c *Controller) ActivePersona() string {
+	return c.activePersona
+}
+
+// SetPersona activates a persona by name. Empty, "default", or "none" clears
+// the persona. When the persona specifies a different model the controller
+// is rebuilt to switch models while preserving the conversation history.
+func (c *Controller) SetPersona(ctx context.Context, name string) error {
+	dirs := persona.Dirs()
+	if name == "" || strings.EqualFold(name, "default") || strings.EqualFold(name, "none") {
+		return c.clearPersona(ctx)
+	}
+	p, ok := persona.Resolve(name, dirs)
+	if !ok {
+		return fmt.Errorf("persona %q not found", name)
+	}
+	return c.rebuildWithPersona(ctx, p)
+}
+
+func (c *Controller) clearPersona(ctx context.Context) error {
+	if c.activePersona == "" {
+		return nil
+	}
+	return c.rebuildWithPersona(ctx, persona.Persona{})
+}
+
+func (c *Controller) rebuildWithPersona(ctx context.Context, p persona.Persona) error {
+	if c.rebuildFn == nil {
+		return fmt.Errorf("rebuild function not set — SetPersona requires boot.Build")
+	}
+	history := c.History()
+	sessionPath := c.SessionPath()
+
+	newCtrl, err := c.rebuildFn(ctx, p.Model, p.Name)
+	if err != nil {
+		return fmt.Errorf("rebuild with persona %q: %w", p.Name, err)
+	}
+
+	c.Close()
+	newCtrl.AdoptHistory(history, sessionPath)
+
+	*c = *newCtrl
+	c.activePersona = p.Name
+	c.persistPersona(p.Name)
+	return nil
+}
+
+func (c *Controller) persistPersona(name string) {
+	path := c.SessionPath()
+	if path == "" || name == "" {
+		return
+	}
+	metaPath := path + ".meta"
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		meta := agent.BranchMeta{
+			PersonaName: name,
+			UpdatedAt:   time.Now(),
+		}
+		updated, _ := json.Marshal(meta)
+		tmp := metaPath + ".tmp"
+		if err := os.WriteFile(tmp, updated, 0o644); err != nil {
+			return
+		}
+		_ = fileutil.ReplaceFile(tmp, metaPath)
+		return
+	}
+	var meta agent.BranchMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return
+	}
+	meta.PersonaName = name
+	meta.UpdatedAt = time.Now()
+	updated, _ := json.Marshal(meta)
+	tmp := metaPath + ".tmp"
+	if err := os.WriteFile(tmp, updated, 0o644); err != nil {
+		return
+	}
+	_ = fileutil.ReplaceFile(tmp, metaPath)
 }
 
 // --- memory ---

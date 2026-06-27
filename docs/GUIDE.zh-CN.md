@@ -327,7 +327,7 @@ headers = { Authorization = "Bearer ${STRIPE_KEY}" }
 
 ## 斜杠命令
 
-交互式 `reasonix` 会话里，内置命令（`/compact`、`/new`、`/clear`、`/rewind`、`/tree`、`/branch`、`/switch`、`/todo`、`/model`、`/mcp`、`/skills`、`/hooks`、`/memory`、`/memory-v5`、`/goal`、`/output-style`、`/sandbox`、`/language`、`/auto-plan`、`/reasoning-language`、`/help`）在本地执行——`/help` 可列出全部。
+交互式 `reasonix` 会话里，内置命令（`/compact`、`/new`、`/clear`、`/rewind`、`/tree`、`/branch`、`/switch`、`/todo`、`/model`、`/persona`、`/mcp`、`/skills`、`/hooks`、`/memory`、`/memory-v5`、`/goal`、`/output-style`、`/sandbox`、`/language`、`/auto-plan`、`/reasoning-language`、`/help`）在本地执行——`/help` 可列出全部。
 `/new` 会开启新会话，同时保存之前的 transcript 供历史记录和恢复使用；`/clear` 会二次确认，确认后丢弃当前上下文且不保存。
 `/tree` 查看已保存的对话分支，`/branch [name]` 从当前对话末端分支，`/branch <turn> [name]`
 从较早的 checkpoint 轮次分支，`/switch <id|name>` 切换到另一个分支。**自定义命令**
@@ -380,6 +380,62 @@ Review the staged diff. Focus on $ARGUMENTS, list bugs with file:line.
 
 `$ARGUMENTS` 展开为全部空格分隔参数，`$1`…`$N` 为位置参数。MCP prompts 也以
 `/mcp__<server>__<prompt>` 形式出现在这里。
+
+
+## 角色人设（Persona）
+
+Persona 系统让你定义命名的角色人设——自定义 system prompt、可选模型绑定、可选工具限制——用 `/persona <name>` 一键切换。适用于在不同编码任务之间快速切换身份（如前端开发、安全审查、测试编写）。
+
+### 定义人设
+
+在 `.reasonix/personas/`（项目级）或 `~/.reasonix/personas/`（用户全局）下创建 Markdown 文件：
+
+```markdown
+---
+name: 安全审查员
+description: OWASP 安全审查，只读不写
+model: deepseek-pro
+tools:
+  - read_file
+  - grep
+  - glob
+  - bash
+---
+
+你是一名资深安全工程师，专注于 OWASP Top 10 代码安全审查。
+- 发现漏洞时先解释风险再建议修复
+- 按 Critical / High / Medium / Low 列出
+- 只出报告，不修改代码
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `name` | ✅ | 显示名称，作为 `/persona <name>` 的参数 |
+| `description` | ✅ | `/persona` 列表时显示 |
+| `model` | ❌ | 切换时自动切换模型 |
+| `tools` | ❌ | 限制到此列表中的工具（空=全部可用） |
+| 正文 | ✅ | 追加到 system prompt 末尾的角色指令 |
+
+### 切换人设
+
+```
+/persona              → 列出所有可用人设
+/persona <name>       → 切换到指定人设
+/persona none         → 清除人设，回到无人设状态
+```
+
+列表中使用 `(current)` 标记当前激活的人设。
+
+### 默认人设
+
+在 `reasonix.toml` 中设置 `agent.default_persona`，每次新建会话自动激活：
+
+```toml
+[agent]
+default_persona = "安全审查员"
+```
+
+人设正文追加在 system prompt 最末尾（在 Memory 和 Skills 之后），利用 LLM 的 recency bias 确保角色约束具有最高优先级。
 
 ## Goal 与 AutoResearch
 

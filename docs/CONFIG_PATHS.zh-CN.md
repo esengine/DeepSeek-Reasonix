@@ -21,6 +21,7 @@
 | 旧 credentials 导入来源 | `<Reasonix home>/credentials` |
 | 全局斜杠命令 | `<Reasonix home>/commands/` |
 | 全局 skills | `<Reasonix home>/skills/` |
+| 全局角色人设 | `<Reasonix home>/personas/` 及项目 `.reasonix/personas/` |
 | 全局 hooks | `<Reasonix home>/settings.json` |
 | hooks 信任状态 | `<Reasonix home>/trust.json` |
 | 会话 | `<Reasonix home>/sessions/` |

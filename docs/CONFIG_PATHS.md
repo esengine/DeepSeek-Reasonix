@@ -24,6 +24,7 @@ installations. Normal users should not need it.
 | Legacy credentials import source | `<Reasonix home>/credentials` |
 | Global slash commands | `<Reasonix home>/commands/` |
 | Global skills | `<Reasonix home>/skills/` |
+| Global personas | `<Reasonix home>/personas/` and project `.reasonix/personas/` |
 | Global hooks | `<Reasonix home>/settings.json` |
 | Hook trust store | `<Reasonix home>/trust.json` |
 | Sessions | `<Reasonix home>/sessions/` |

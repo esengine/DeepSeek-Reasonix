@@ -4004,6 +4004,7 @@ func (a *App) Commands() []CommandInfo {
 		{Name: "theme", Description: i18n.M.CmdTheme, Kind: "builtin"},
 		{Name: "skill", Description: i18n.M.CmdSkill, Kind: "builtin"},
 		{Name: "reload-cmd", Description: i18n.M.CmdReloadCmd, Kind: "builtin"},
+		{Name: "persona", Description: i18n.M.CmdPersona, Kind: "builtin"},
 	}
 	a.mu.RLock()
 	ctrl := a.activeCtrlLocked()
@@ -4066,6 +4067,7 @@ func (a *App) SlashArgs(input string) SlashArgsResult {
 		ConfiguredMCP:   ctrl.ConfiguredMCPNames(),
 		DisconnectedMCP: ctrl.DisconnectedMCPNames(),
 		CurrentModel:    model,
+		CurrentPersona:  ctrl.ActivePersona(),
 	}
 	seen := map[string]bool{}
 	for _, m := range a.Models() {

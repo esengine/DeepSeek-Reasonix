@@ -369,7 +369,7 @@ convenient.
 ## Slash commands
 
 In an interactive `reasonix` session, built-in commands (`/compact`, `/new`, `/clear`, `/rewind`,
-`/tree`, `/branch`, `/switch`, `/todo`, `/model`, `/mcp`, `/skills`, `/hooks`,
+`/tree`, `/branch`, `/switch`, `/todo`, `/model`, `/persona`, `/mcp`, `/skills`, `/hooks`,
 `/memory`, `/memory-v5`, `/goal`, `/output-style`, `/sandbox`, `/language`,
 `/auto-plan`, `/reasoning-language`, `/help`) run
 locally — `/help` lists them all. `/new` starts a new session while saving the
@@ -443,6 +443,68 @@ Review the staged diff. Focus on $ARGUMENTS, list bugs with file:line.
 MCP prompts also appear here as `/mcp__<server>__<prompt>`.
 
 ## Goal and AutoResearch
+
+## Personas
+
+Personas let you define named role profiles — a system prompt, an optional model,
+and an optional tool allow-list — and switch between them at runtime with
+`/persona <name>`. This is useful for context-switching between different
+coding tasks (e.g. frontend development, security review, test writing).
+
+### Defining a persona
+
+Create a Markdown file under `.reasonix/personas/` (project) or
+`~/.reasonix/personas/` (user global):
+
+```markdown
+---
+name: 安全审查员
+description: OWASP 安全审查，只读不写
+model: deepseek-pro
+tools:
+  - read_file
+  - grep
+  - glob
+  - bash
+---
+
+你是一名资深安全工程师，专注于 OWASP Top 10 代码安全审查。
+- 发现漏洞时先解释风险再建议修复
+- 按 Critical / High / Medium / Low 列出
+- 只出报告，不修改代码
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | ✅ | Display name, used as `/persona <name>` argument |
+| `description` | ✅ | Shown in the `/persona` listing |
+| `model` | ❌ | Switch model when activating this persona |
+| `tools` | ❌ | Restrict to these tools only (empty = all tools) |
+| Body | ✅ | Role instructions appended at the end of system prompt |
+
+### Switching personas
+
+```
+/persona              → list all available personas
+/persona <name>       → switch to a persona
+/persona none         → clear persona, back to no persona
+```
+
+The active persona is shown with a `(current)` marker in the listing.
+
+### Default persona
+
+Set `agent.default_persona` in `reasonix.toml` to auto-activate a persona on
+every new session:
+
+```toml
+[agent]
+default_persona = "安全审查员"
+```
+
+The persona is appended at the very end of the system prompt, after Memory and
+Skills, so its instructions have the highest priority (recency bias).
+
 
 Goal is the unified runtime for long-running objectives. Ordinary `/goal`
 objectives stay lightweight: Reasonix keeps working until the goal is complete,

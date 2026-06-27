@@ -37,6 +37,7 @@ import (
 	"reasonix/internal/netclient"
 	"reasonix/internal/outputstyle"
 	"reasonix/internal/permission"
+	"reasonix/internal/persona"
 	"reasonix/internal/planmode"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
@@ -119,6 +120,10 @@ type Options struct {
 	// terminal. Headless/bot frontends pass a positive value so an unanswered
 	// prompt can't wedge the session indefinitely (#4626, #4402).
 	ApprovalTimeout time.Duration
+	// PersonaName selects a named persona whose role instructions are appended
+	// at the very end of the system prompt, after Memory and Skills.
+	// Empty means no persona is active.
+	PersonaName string
 }
 
 // Build loads config, resolves the model(s), and returns a Controller wrapping a
@@ -126,6 +131,7 @@ type Options struct {
 // returned controller owns plugin subprocesses; call Close (via Controller.Close)
 // to release them.
 func Build(ctx context.Context, opts Options) (*control.Controller, error) {
+	var toolFilter []string
 	stderr := opts.Stderr
 	if stderr == nil {
 		stderr = os.Stderr
@@ -260,6 +266,25 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	allSkills := allSkillStore.List()
 	if !tokenEconomy {
 		sysPrompt = skill.ApplyIndex(sysPrompt, skills)
+	}
+
+	// Persona: append role instructions at the very end of the system prompt.
+	// Placed last so recency bias gives persona the highest priority,
+	// and #1-#7 remain cache-stable across persona switches.
+	personaName := opts.PersonaName
+	if personaName == "" {
+		personaName = cfg.Agent.DefaultPersona
+	}
+	if personaName != "" {
+		if p, ok := persona.Resolve(personaName, persona.Dirs()); ok {
+			sysPrompt = persona.Apply(sysPrompt, p)
+			if p.Model != "" {
+				entry.Model = p.Model
+			}
+			if len(p.Tools) > 0 {
+				toolFilter = p.Tools
+			}
+		}
 	}
 
 	reg := tool.NewRegistry()
@@ -931,6 +956,23 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		})
 	}
 
+	// Persona tool filter: if the selected persona specifies a whitelist of
+	// allowed tools, restrict the registry to only those tools.
+	if len(toolFilter) > 0 {
+		// Ensure ask tool is always available (required by UserDecisionPolicy).
+		hasAsk := false
+		for _, t := range toolFilter {
+			if t == "ask" {
+				hasAsk = true
+				break
+			}
+		}
+		if !hasAsk {
+			toolFilter = append(toolFilter, "ask")
+		}
+		reg = agent.FilterRegistry(reg, toolFilter)
+	}
+
 	execSess := agent.NewSession(sysPrompt)
 	var memCompiler *memorycompiler.Runtime
 	if cfg.MemoryCompilerEnabled() {
@@ -1038,6 +1080,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Shell:                  shell,
 		PlanModeAllowedTools:   cfg.Agent.PlanModeAllowedTools,
 		ApprovalTimeout:        opts.ApprovalTimeout,
+		PersonaName:            personaName,
 		OnRemember: func(rule string) control.RememberResult {
 			return rememberPermissionRule(root, rule)
 		},
@@ -1068,7 +1111,18 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if classifier != nil {
 		ctrlOpts.Classifier = classifier
 	}
-	return control.New(ctrlOpts), nil
+	ctrl := control.New(ctrlOpts)
+	// Wire up the rebuild function so SetPersona can rebuild the controller
+	// with a different persona or model while preserving conversation history.
+	ctrl.SetRebuildFn(func(ctx context.Context, model, personaName string) (*control.Controller, error) {
+		buildOpts := opts
+		buildOpts.PersonaName = personaName
+		if model != "" {
+			buildOpts.Model = model
+		}
+		return Build(ctx, buildOpts)
+	})
+	return ctrl, nil
 }
 
 func rememberPermissionRule(workspaceRoot, rule string) control.RememberResult {

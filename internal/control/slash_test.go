@@ -130,6 +130,33 @@ func TestSlashArgItems(t *testing.T) {
 	if len(items) != 2 {
 		t.Errorf("/provider de should filter to 2 deepseek providers; got %v", labelsOf(items))
 	}
+	// /persona → "no persona" first, then persona names from disk; current marked when set
+	data.CurrentPersona = ""
+	items, _ = SlashArgItems("/persona ", data)
+	if len(items) == 0 || items[0].Label != "no persona" {
+		t.Errorf("/persona should offer 'no persona' as first item; got %v", labelsOf(items))
+	}
+	// when no persona is active, "no persona" should be marked current
+	if len(items) > 0 && items[0].Hint != "current" {
+		t.Errorf("no-persona item should be hinted 'current' when no persona active; got %q", items[0].Hint)
+	}
+	data.CurrentPersona = "安全审查员"
+	items, _ = SlashArgItems("/persona ", data)
+	if len(items) == 0 || items[0].Label != "no persona" {
+		t.Errorf("/persona should offer 'no persona' as first item even with active persona; got %v", labelsOf(items))
+	}
+	// when a persona is active, "no persona" should NOT be marked current
+	if len(items) > 0 && items[0].Hint == "current" {
+		t.Errorf("no-persona item should not be hinted 'current' when a persona is active")
+	}
+	for _, it := range items {
+		if strings.EqualFold(it.Label, data.CurrentPersona) && it.Hint != "current" {
+			t.Errorf("active persona %q should be hinted 'current', got %q", it.Label, it.Hint)
+		}
+		if !strings.EqualFold(it.Label, data.CurrentPersona) && it.Hint == "current" {
+			t.Errorf("inactive persona %q should not be hinted 'current'", it.Label)
+		}
+	}
 	// /hooks
 	items, _ = SlashArgItems("/hooks ", data)
 	if !has(items, "list") || !has(items, "trust") {
