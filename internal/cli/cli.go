@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 	"unicode/utf16"
 
 	"reasonix/internal/agent"
@@ -33,7 +34,6 @@ import (
 	"reasonix/internal/provider/openai"
 	"reasonix/internal/serve"
 	usageutil "reasonix/internal/usage"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"

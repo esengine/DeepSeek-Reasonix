@@ -48,20 +48,6 @@ import (
 	"reasonix/internal/skill"
 )
 
-// enrichDebugf writes a debug line to ~/.reasonix/enrich-debug.log for diagnosing
-// enrichment pipeline issues. Safe to leave in production — writes are tiny and
-// the file is only created when debugging is needed.
-func enrichDebugf(format string, args ...any) {
-	home, _ := os.UserHomeDir()
-	path := filepath.Join(home, ".reasonix", "enrich-debug.log")
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	fmt.Fprintf(f, time.Now().Format("15:04:05.000 ") + format + "\n", args...)
-	f.Close()
-}
-
 // eventChannel is the Wails runtime event name the frontend subscribes to for the
 // agent's typed event stream. One channel carries every event kind; the payload's
 // `kind` field discriminates — the desktop analogue of the serve transport's SSE
@@ -381,10 +367,8 @@ func (a *App) startup(ctx context.Context) {
 	// Always-on usage tracker
 	if t, err := newDesktopUsageTracker(); err == nil {
 		a.usageTracker.Store(t)
-		enrichDebugf("[startup] tracker created: store=%v", t.store != nil)
 	} else {
 		slog.Error("[desktop] usage tracker failed", "err", err)
-		enrichDebugf("[startup] tracker FAILED: %v", err)
 	}
 
 	a.heartbeat = newHeartbeatEngine(a)
@@ -1493,7 +1477,6 @@ func (a *App) clearActiveSessionRuntime(tab *WorkspaceTab, oldCtrl control.Sessi
 	newSink := &tabEventSink{tabID: tab.ID, app: a, ctx: a.ctx}
 	sharedHost := a.lookupSharedHost(tab.SharedHostKey)
 	store := a.usageStoreForBoot()
-	enrichDebugf("[boot.Build#1 clearSession] tab=%s model=%s store=%v", tab.ID, tab.model, store != nil)
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:                    tab.model,
 		RequireKey:               false,
@@ -6584,7 +6567,6 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	// stays in the same workspace root, so MCP processes must not be restarted.
 	sharedHost := a.lookupSharedHost(tab.SharedHostKey)
 	store2 := a.usageStoreForBoot()
-	enrichDebugf("[boot.Build#2 setModel] tab=%s model=%s store=%v", tab.ID, name, store2 != nil)
 
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:                    name,
@@ -6690,7 +6672,6 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 	}
 	sharedHost := a.lookupSharedHost(tab.SharedHostKey)
 	store3 := a.usageStoreForBoot()
-	enrichDebugf("[boot.Build#3 setEffort] tab=%s model=%s store=%v", tab.ID, modelRef, store3 != nil)
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:                    modelRef,
 		RequireKey:               false,
@@ -6771,7 +6752,6 @@ func (a *App) SetTokenModeForTab(tabID, mode string) error {
 	}
 	sharedHost := a.lookupSharedHost(tab.SharedHostKey)
 	store4 := a.usageStoreForBoot()
-	enrichDebugf("[boot.Build#4 setTokenMode] tab=%s model=%s store=%v", tab.ID, modelRef, store4 != nil)
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:                    modelRef,
 		RequireKey:               false,

@@ -715,7 +715,7 @@ func (s *tabEventSink) Emit(e event.Event) {
 		case event.TurnDone:
 			s.recordTurnDone()
 		}
-		// Usage tracker (SQLite-backed, always on)
+		// Usage tracker (JSONL-backed, always on)
 		if t := s.app.usageTracker.Load(); t != nil {
 			t.Observe(e, s.tabID)
 		}
@@ -2270,7 +2270,6 @@ func (a *App) buildTabControllerWithContext(tab *WorkspaceTab, loadedSession loa
 	tab.SharedHostKey = rootKey
 	sharedHost := a.acquireSharedHost(rootKey)
 	store0 := a.usageStoreForBoot()
-	enrichDebugf("[boot.Build#0 buildTab] tab=%s model=%s store=%v", tab.ID, model, store0 != nil)
 
 	ctrl, err := boot.Build(buildCtx, boot.Options{
 		Model:                    model,

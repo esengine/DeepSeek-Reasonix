@@ -35,9 +35,10 @@ func newDesktopUsageTracker() (*DesktopUsageTracker, error) {
 // if the tracker is not initialized.
 func (a *App) usageStoreForBoot() *usage.Store {
 	t := a.usageTracker.Load()
-	store := t.store
-	enrichDebugf("[usageStoreForBoot] tracker=%v store=%v", t != nil, store != nil)
-	return store
+	if t == nil {
+		return nil
+	}
+	return t.store
 }
 
 // Observe records a usage event. Called from tabEventSink.Emit for every
@@ -46,7 +47,6 @@ func (t *DesktopUsageTracker) Observe(e event.Event, sessionID string) {
 	if e.Kind != event.Usage || e.Usage == nil {
 		return
 	}
-	enrichDebugf("[observe] src=%s prov=%q model=%q sid=%s", e.UsageSource, e.ProviderName, e.ModelName, sessionID)
 	r := usage.Record{
 		TS:               time.Now(),
 		Provider:         e.ProviderName,

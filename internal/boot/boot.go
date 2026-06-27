@@ -31,7 +31,6 @@ import (
 	"reasonix/internal/hook"
 	"reasonix/internal/installsource"
 	"reasonix/internal/instruction"
-	"reasonix/internal/usage"
 	"reasonix/internal/jobs"
 	"reasonix/internal/lsp"
 	"reasonix/internal/memory"
@@ -48,6 +47,7 @@ import (
 	"reasonix/internal/tool"
 	"reasonix/internal/tool/builtin"
 	"reasonix/internal/tool/sessiontool"
+	"reasonix/internal/usage"
 )
 
 // ErrUnknownModel is returned by Build when the configured model can't be
@@ -189,16 +189,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 		sink = enrichRef
 		slog.Info("[boot] enrichSink ON", "provider", entry.Name, "model", entry.Model)
-		if df, err := os.OpenFile(filepath.Join(os.Getenv("HOME"), ".reasonix", "enrich-debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-			fmt.Fprintf(df, time.Now().Format("15:04:05.000 ")+"[boot] enrichSink ON provider=%s model=%s\n", entry.Name, entry.Model)
-			df.Close()
-		}
 	} else {
 		slog.Debug("[boot] enrichSink OFF — UsageStore is nil")
-		if df, err := os.OpenFile(filepath.Join(os.Getenv("HOME"), ".reasonix", "enrich-debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-			fmt.Fprint(df, time.Now().Format("15:04:05.000 ")+"[boot] enrichSink OFF\n")
-			df.Close()
-		}
 	}
 
 	if ignored := (planmode.Policy{AllowedTools: cfg.Agent.PlanModeAllowedTools}).IgnoredAllowedTools(); len(ignored) > 0 {
