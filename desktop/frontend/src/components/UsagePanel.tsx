@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Download, Trash2 } from "lucide-react";
 import { app } from "../lib/bridge";
+import { useToast } from "../lib/toast";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -116,11 +117,23 @@ export function UsageSettingsPage() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const { showToast } = useToast();
+
   const handleDelete = useCallback(async () => {
-    if (!confirm("Delete all usage data? This cannot be undone.")) return;
-    await app.DeleteUsageData();
-    refresh();
-  }, [refresh]);
+    if (!deleteConfirm) {
+      setDeleteConfirm(true);
+      return;
+    }
+    const ok = await app.DeleteUsageData();
+    setDeleteConfirm(false);
+    if (ok) {
+      showToast("Usage data deleted", "info");
+      refresh();
+    } else {
+      showToast("Failed to delete usage data", "error");
+    }
+  }, [deleteConfirm, refresh, showToast]);
 
   const ov = data?.overview;
   const models = data?.models ?? [];
@@ -167,8 +180,13 @@ export function UsageSettingsPage() {
           <button className="btn btn--small" onClick={() => handleExport("json")}>
             <Download size={13} /> JSON
           </button>
-          <button className="btn btn--small btn--danger" onClick={handleDelete} title="Delete all usage data">
-            <Trash2 size={13} /> Delete
+          <button
+            className={`btn btn--small ${deleteConfirm ? "btn--danger" : "btn--ghost"}`}
+            onClick={handleDelete}
+            onBlur={() => setDeleteConfirm(false)}
+            title="Delete all usage data"
+          >
+            <Trash2 size={13} /> {deleteConfirm ? "Confirm Delete" : "Delete"}
           </button>
         </div>
       </div>
