@@ -1,4 +1,4 @@
-// Package boot assembles a ready-to-drive control.Controller from configuration:
+﻿// Package boot assembles a ready-to-drive control.Controller from configuration:
 // it loads config, resolves the model(s), builds the tool registry (built-ins +
 // plugins), wires the permission gate, and constructs the executor — optionally
 // wrapping it in a two-model Coordinator. It is the one place that turns "what the
@@ -101,6 +101,8 @@ type Options struct {
 	// SessionDir overrides where persisted chat transcripts are written. When
 	// empty, the shared CLI/global session directory is used.
 	SessionDir string
+	// SystemPromptOverride replaces the default Reasonix base prompt entirely.
+	SystemPromptOverride string
 }
 
 // Build loads config, resolves the model(s), and returns a Controller wrapping a
@@ -186,6 +188,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 
 	sysPrompt, err := cfg.ResolveSystemPromptForRoot(root)
+	if opts.SystemPromptOverride != "" {
+		sysPrompt = opts.SystemPromptOverride
+	}
 	if err != nil {
 		return nil, err
 	}

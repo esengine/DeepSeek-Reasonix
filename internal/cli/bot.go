@@ -1,4 +1,4 @@
-package cli
+﻿package cli
 
 import (
 	"context"
@@ -116,6 +116,7 @@ func botStart(args []string, version string) int {
 				bot.PlatformWeixin: cfg.Bot.Allowlist.WeixinGroups,
 			},
 		},
+		SystemPrompt:      cfg.Bot.SystemPrompt,
 		Debounce:       time.Duration(cfg.Bot.DebounceMs) * time.Millisecond,
 		OnInbound:      rememberInboundRemote,
 		OnSessionReady: botruntime.NewSessionRemembererWithWorkspace(logger, workspaceRoot),

@@ -34,6 +34,7 @@ type GatewayConfig struct {
 	Allowlist          AllowlistConfig
 	Enabled            map[Platform]bool
 	Debounce           time.Duration
+	SystemPrompt       string
 	OnInbound          func(InboundMessage)
 	// OnSessionReady notifies the host after the bot has created or reused the
 	// controller for an inbound remote. Hosts may persist the concrete session ID
@@ -886,6 +887,7 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 		Sink:          sessionSink,
 		WorkspaceRoot: workspaceRoot,
 		SessionDir:    botSessionDir(workspaceRoot),
+		SystemPromptOverride: gw.cfg.SystemPrompt,
 		ExtraPlugins:  pluginSpecs,
 	})
 	if err != nil {

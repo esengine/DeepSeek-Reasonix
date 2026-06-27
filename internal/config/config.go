@@ -402,6 +402,7 @@ type StatuslineConfig struct {
 // BotConfig 控制多渠道 IM bot 消息网关。
 type BotConfig struct {
 	Enabled          bool                  `toml:"enabled"`
+	SystemPrompt     string                `toml:"system_prompt"`
 	Model            string                `toml:"model"` // 用于 bot 的模型名，空则用 default_model
 	ToolApprovalMode string                `toml:"tool_approval_mode"`
 	MaxSteps         int                   `toml:"max_steps"`
