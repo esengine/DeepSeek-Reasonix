@@ -45,15 +45,15 @@ func PlannerPromptWithContext(context string) string {
 // executor (a full tool-using Agent) carries it out. The sessions never mix, so
 // neither model's prefix is disturbed by the other's turns.
 type Coordinator struct {
-	planner           provider.Provider
-	plannerSess       *Session
-	plannerSystem     string
-	plannerPricing    *provider.Pricing
-	plannerAgent      *Agent
-	plannerModelName  string // for usage tracking
-	executor          *Agent
-	temperature       float64
-	sink              event.Sink
+	planner          provider.Provider
+	plannerSess      *Session
+	plannerSystem    string
+	plannerPricing   *provider.Pricing
+	plannerAgent     *Agent
+	plannerModelName string // for usage tracking
+	executor         *Agent
+	temperature      float64
+	sink             event.Sink
 	// shouldPlan gates the planner pass per turn; nil plans every turn. Lets a
 	// trivial, non-work turn (a question, a greeting) skip straight to the
 	// executor instead of paying a planner round on it.
@@ -83,16 +83,16 @@ func NewCoordinator(planner provider.Provider, plannerSession *Session, plannerP
 		executor.executorHandoffGuard = true
 	}
 	return &Coordinator{
-		planner:           planner,
-		plannerSess:       plannerSession,
-		plannerSystem:     plannerSystem,
-		plannerPricing:    plannerPricing,
-		plannerAgent:      plannerAgent,
-		plannerModelName:  plannerModelName,
-		executor:          executor,
-		temperature:    temperature,
-		sink:           sink,
-		shouldPlan:     shouldPlan,
+		planner:          planner,
+		plannerSess:      plannerSession,
+		plannerSystem:    plannerSystem,
+		plannerPricing:   plannerPricing,
+		plannerAgent:     plannerAgent,
+		plannerModelName: plannerModelName,
+		executor:         executor,
+		temperature:      temperature,
+		sink:             sink,
+		shouldPlan:       shouldPlan,
 	}
 }
 

@@ -97,7 +97,7 @@ func runUsageJSON(storeDir string, days int, provider, model string, trend bool,
 		data, err = usageutil.QueryLogs(storeDir, tail, provider, model, 0)
 	default:
 		type overviewResult struct {
-			Overview usageutil.Overview  `json:"overview"`
+			Overview usageutil.Overview   `json:"overview"`
 			Models   []usageutil.ModelRow `json:"models"`
 		}
 		ov, e1 := usageutil.QueryOverview(storeDir, days)
@@ -144,4 +144,3 @@ func setupUsageTracker(sink event.Sink) (*usageutil.Store, event.Sink) {
 	}
 	return store, usageutil.NewSink(sink, store)
 }
-

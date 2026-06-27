@@ -79,7 +79,7 @@ func (t *DesktopUsageTracker) Close() {
 
 // UsageOverviewData is the JSON shape returned to the frontend.
 type UsageOverviewData struct {
-	Overview usage.Overview  `json:"overview"`
+	Overview usage.Overview   `json:"overview"`
 	Models   []usage.ModelRow `json:"models"`
 }
 

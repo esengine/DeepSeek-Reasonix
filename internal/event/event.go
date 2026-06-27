@@ -262,8 +262,8 @@ type Event struct {
 	Err          error      // TurnDone: non-nil on failure
 	Compaction   Compaction // Compaction
 	Guardian     GuardianResult
-	RetryAttempt int        // Retrying: 1-based attempt about to be made
-	RetryMax     int        // Retrying: total attempts before giving up
+	RetryAttempt int // Retrying: 1-based attempt about to be made
+	RetryMax     int // Retrying: total attempts before giving up
 
 	// The following optional fields are populated by usage.EnrichSink for
 	// Usage events so that downstream consumers (usage tracker, desktop

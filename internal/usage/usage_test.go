@@ -302,15 +302,15 @@ func TestCostCalculation(t *testing.T) {
 	enriched.Emit(event.Event{
 		Kind: event.Usage,
 		Usage: &provider.Usage{
-			CacheHitTokens:  600,
-			CacheMissTokens: 400,
+			CacheHitTokens:   600,
+			CacheMissTokens:  400,
 			CompletionTokens: 200,
-			TotalTokens:     1200,
+			TotalTokens:      1200,
 		},
 		Pricing: &provider.Pricing{
-			CacheHit: 0.5,  // 0.5 per million
-			Input:    2.0,  // 2.0 per million
-			Output:   8.0,  // 8.0 per million
+			CacheHit: 0.5, // 0.5 per million
+			Input:    2.0, // 2.0 per million
+			Output:   8.0, // 8.0 per million
 			Currency: "¥",
 		},
 	})

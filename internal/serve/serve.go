@@ -36,16 +36,16 @@ var indexHTML []byte
 // Server wires a controller to its HTTP surface. The Broadcaster must be the
 // same sink the controller was constructed with, so events reach SSE clients.
 type Server struct {
-	mu         sync.RWMutex // guards ctrl, which switchModel swaps at runtime
-	ctrl       control.SessionAPI
-	bc         *Broadcaster
+	mu             sync.RWMutex // guards ctrl, which switchModel swaps at runtime
+	ctrl           control.SessionAPI
+	bc             *Broadcaster
 	titleProv      provider.Provider // lightweight flash provider for session titles
 	titleProvName  string            // provider name for usage records
 	titleProvModel string            // model name for usage records
 	titlePrice     *provider.Pricing
 	titles         *titleCache
 	usageStore     *usageutil.Store // optional; writes title Usage events directly
-	auth           *authGate // nil when auth is disabled
+	auth           *authGate        // nil when auth is disabled
 }
 
 // New builds a Server. bc must be the controller's event sink.

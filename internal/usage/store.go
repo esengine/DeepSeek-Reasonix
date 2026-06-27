@@ -21,8 +21,8 @@ type Store struct {
 	mu       sync.Mutex
 	ch       chan Record
 	done     chan struct{}
-	file     *os.File  // current open file handle
-	fileDate string    // date of the currently open file (YYYY-MM-DD)
+	file     *os.File // current open file handle
+	fileDate string   // date of the currently open file (YYYY-MM-DD)
 }
 
 // Record is one usage event, serialised as a single JSON line.
@@ -183,5 +183,3 @@ func (s *Store) rotate(day string) error {
 	s.fileDate = day
 	return nil
 }
-
-
