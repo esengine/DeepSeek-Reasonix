@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 
 	"reasonix/internal/plugin"
@@ -194,6 +195,7 @@ func compactMiddle(s string, maxWidth int) string {
 }
 
 func takeLeftWidth(s string, maxWidth int) string {
+	s = ansi.Strip(s)
 	var out strings.Builder
 	totalWidth := 0
 	for _, r := range s {

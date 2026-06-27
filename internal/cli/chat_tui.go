@@ -2371,14 +2371,21 @@ func flushableMarkdownPrefix(buf string, lastBreak *int) string {
 				if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
 					inFence = !inFence
 				} else if !inFence && t == "" {
-					// Blank line found — boundary is the position right before this line
-					// (the \n that ends the previous content line, which serves as the
-					// separator between the last included line and the first excluded blank)
-					boundary = start + lineStart - 1
-					if boundary < 0 {
-						boundary = 0
-					}
+				// Blank line found — boundary is the position right before this line
+				// (the \n that ends the previous content line, which serves as the
+				// separator between the last included line and the first excluded blank)
+				newBoundary := start + lineStart - 1
+				if newBoundary < 0 {
+					newBoundary = 0
 				}
+				// Skip the leading empty line in the incremental tail — it's the
+				// same blank line we already found in a previous scan, not a new
+				// boundary. Without this guard the boundary goes backwards
+				// (start-1), truncating the last char of the prior flush.
+				if start == 0 || newBoundary >= start {
+					boundary = newBoundary
+				}
+			}
 			}
 			lineStart = pos + 1
 		}

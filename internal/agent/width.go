@@ -38,8 +38,11 @@ func streamedRows(s string, width int) int {
 		case r == '\x1b':
 			// Start of ANSI escape sequence
 			inEscape = true
-		case inEscape && r == 'm':
-			// End of ANSI escape sequence
+		case inEscape && (r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z'):
+			// End of ANSI CSI escape sequence — any letter is a valid final
+			// byte per X3.64, not just 'm' (SGR). Without this, non-SGR
+			// sequences like \x1b[K or \x1b[A keep inEscape stuck true,
+			// suppressing visible-character counting for the rest of the stream.
 			inEscape = false
 		default:
 			if !inEscape {
