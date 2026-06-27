@@ -196,7 +196,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	} else {
 		slog.Debug("[boot] enrichSink OFF — UsageStore is nil")
 		if df, err := os.OpenFile(filepath.Join(os.Getenv("HOME"), ".reasonix", "enrich-debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-			fmt.Fprintf(df, time.Now().Format("15:04:05.000 ")+"[boot] enrichSink OFF\n")
+			fmt.Fprint(df, time.Now().Format("15:04:05.000 ")+"[boot] enrichSink OFF\n")
 			df.Close()
 		}
 	}
