@@ -165,6 +165,11 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # # Optional pre-seeded read-only trust. Interactive sessions can also remember
 # # audited third-party readers when you choose "always allow" from the trust prompt.
 # # trusted_read_only_tools = ["search"]
+# # Filter out specific tools the MCP server exposes — they never enter the
+# # model context, never appear in /mcp, and never count toward tokens.
+# # Names are the raw tool names from tools/list (e.g. "write_file"), not
+# # the namespaced "mcp__<server>__<tool>" form.
+# # disabled_tools = ["write_file", "delete_file"]
 # # Enabled MCP servers connect automatically in the background after session
 # # start. Use /mcp or the desktop MCP panel to refresh, reconnect, or disable.
 
