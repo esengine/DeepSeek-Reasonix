@@ -60,7 +60,6 @@ func New(ctrl control.SessionAPI, bc *Broadcaster, serveCfg config.ServeConfig, 
 	if len(usageStore) > 0 {
 		s.usageStore = usageStore[0]
 	}
-	}
 	s.initTitleProvider()
 	return s
 }

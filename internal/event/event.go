@@ -276,6 +276,25 @@ type Event struct {
 	SessionID    string // session path (the .jsonl file); enrichSink injects
 }
 
+// MemoryCompilerStats is intentionally limited to counts and estimated token
+// sizes. It must never carry memory text, prompts, tool output, paths, or IDs.
+type MemoryCompilerStats struct {
+	Injected         bool
+	UsefulIR         bool
+	CompiledTokens   int
+	IROverheadTokens int
+	MemoryReferences int
+	Constraints      int
+	RiskNotes        int
+	ExecutionSteps   int
+	TotalNodes       int
+	HighSignalNodes  int
+	ToolResultNodes  int
+	DecisionNodes    int
+	StrategyCount    int
+	LearningCount    int
+}
+
 // ReadinessAuditSink is an optional sink capability. Sinks that do not care
 // about readiness audit receipts can implement only Sink and will ignore them.
 type ReadinessAuditSink interface {
