@@ -55,6 +55,52 @@ func TestBackgroundJobStalledWarningSecondsDefault(t *testing.T) {
 	}
 }
 
+func TestPluginEntryTOMLDisabledTools(t *testing.T) {
+	cfg := Default()
+	input := `[[plugins]]
+name = "test"
+command = "test-cmd"
+disabled_tools = ["write_file", "delete_file"]
+`
+	if _, err := toml.Decode(input, cfg); err != nil {
+		t.Fatalf("decode plugin with disabled_tools: %v", err)
+	}
+	if len(cfg.Plugins) != 1 {
+		t.Fatalf("want 1 plugin, got %d", len(cfg.Plugins))
+	}
+	got := cfg.Plugins[0].DisabledTools
+	want := []string{"write_file", "delete_file"}
+	if len(got) != len(want) {
+		t.Fatalf("DisabledTools = %v (len=%d), want %v (len=%d)", got, len(got), want, len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("DisabledTools[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestPluginEntryTOMLDisabledToolsEmpty(t *testing.T) {
+	cfg := Default()
+	input := `[[plugins]]
+name = "test"
+command = "test-cmd"
+disabled_tools = []
+`
+	if _, err := toml.Decode(input, cfg); err != nil {
+		t.Fatalf("decode plugin with empty disabled_tools: %v", err)
+	}
+	if len(cfg.Plugins) != 1 {
+		t.Fatalf("want 1 plugin, got %d", len(cfg.Plugins))
+	}
+	if cfg.Plugins[0].DisabledTools == nil {
+		t.Fatal("empty [] decoded as nil, want non-nil empty slice")
+	}
+	if len(cfg.Plugins[0].DisabledTools) != 0 {
+		t.Fatalf("DisabledTools = %v, want empty", cfg.Plugins[0].DisabledTools)
+	}
+}
+
 func TestBackgroundJobStalledWarningSecondsAllowsExplicitZero(t *testing.T) {
 	cfg := Default()
 	cfg.Tools.BackgroundJobs.StalledWarningSeconds = intPtr(0)

@@ -95,6 +95,9 @@ func SpecFingerprint(s Spec) string {
 	if len(s.ReadOnlyModelToolNames) > 0 {
 		writeBoolKV(h, "read_only_model_tool", s.ReadOnlyModelToolNames)
 	}
+	if len(s.DisabledTools) > 0 {
+		writeBoolKV(h, "disabled_tool", s.DisabledTools)
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 

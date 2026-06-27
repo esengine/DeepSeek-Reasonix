@@ -1150,6 +1150,12 @@ type PluginEntry struct {
 	// AutoStart controls whether the server connects during session startup.
 	// Nil preserves historical behavior: configured servers start automatically.
 	AutoStart *bool `toml:"auto_start"`
+	// DisabledTools lists raw MCP tool names (as reported by the server in
+	// tools/list) to exclude from registration. Disabled tools never enter the
+	// model context, never count toward token budgets, and never appear in
+	// /mcp output. Names use the raw form ("read_file"), not the namespaced
+	// "mcp__<server>__<tool>" form. Empty/nil = no filtering (backward compat).
+	DisabledTools []string `toml:"disabled_tools"`
 	// Tier is a legacy compatibility field. New config rendering omits it; enabled
 	// MCP servers connect automatically in the background unless auto_start=false.
 	// Historical values are accepted for old files:

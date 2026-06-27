@@ -1428,6 +1428,15 @@ func PluginSpecsForRootWithPlanModeAllowedTools(entries []config.PluginEntry, wo
 
 func pluginSpecFromEntry(e config.PluginEntry, workspaceRoot string) plugin.Spec {
 	e = e.ExpandedPlugin() // resolve ${VAR} / ${VAR:-default} from the environment
+	var disabled map[string]bool
+	if len(e.DisabledTools) > 0 {
+		disabled = make(map[string]bool, len(e.DisabledTools))
+		for _, name := range e.DisabledTools {
+			if name = strings.TrimSpace(name); name != "" {
+				disabled[name] = true
+			}
+		}
+	}
 	return plugin.ApplyKnownOverrides(plugin.Spec{
 		Name:              e.Name,
 		Type:              e.Type,
@@ -1437,6 +1446,7 @@ func pluginSpecFromEntry(e config.PluginEntry, workspaceRoot string) plugin.Spec
 		URL:               e.URL,
 		Headers:           e.Headers,
 		ReadOnlyToolNames: trustedRawReadOnlyToolNames(e.TrustedReadOnlyTools),
+		DisabledTools:     disabled,
 	}, workspaceRoot)
 }
 
