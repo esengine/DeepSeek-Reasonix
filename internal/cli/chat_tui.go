@@ -1670,6 +1670,7 @@ func (m chatTUI) bottomRows() int {
 			m.renderRewind(),
 			m.renderMCPImport(),
 			m.renderResumePicker(),
+			m.renderCopyPicker(),
 			m.renderCompletion(),
 		} {
 			if s != "" {
@@ -2365,12 +2366,11 @@ func flushableMarkdownPrefix(buf string, lastBreak *int) string {
 	for pos := 0; pos <= len(tail); pos++ {
 		if pos == len(tail) || tail[pos] == '\n' {
 			// Line is tail[lineStart:pos]
-			if lineStart <= pos || pos == len(tail) {
-				line := tail[lineStart:pos]
-				t := strings.TrimSpace(line)
-				if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
-					inFence = !inFence
-				} else if !inFence && t == "" {
+			line := tail[lineStart:pos]
+			t := strings.TrimSpace(line)
+			if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
+				inFence = !inFence
+			} else if !inFence && t == "" {
 				// Blank line found — boundary is the position right before this line
 				// (the \n that ends the previous content line, which serves as the
 				// separator between the last included line and the first excluded blank)
@@ -2385,7 +2385,6 @@ func flushableMarkdownPrefix(buf string, lastBreak *int) string {
 				if start == 0 || newBoundary >= start {
 					boundary = newBoundary
 				}
-			}
 			}
 			lineStart = pos + 1
 		}

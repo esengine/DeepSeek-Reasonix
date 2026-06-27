@@ -170,7 +170,7 @@ func compactEnd(s string, maxWidth int) string {
 	totalWidth := 0
 	for _, r := range s {
 		w := runewidth.RuneWidth(r)
-		if totalWidth + w > maxWidth {
+		if totalWidth+w+1 > maxWidth {
 			break
 		}
 		out.WriteRune(r)
@@ -200,7 +200,7 @@ func takeLeftWidth(s string, maxWidth int) string {
 	totalWidth := 0
 	for _, r := range s {
 		w := runewidth.RuneWidth(r)
-		if totalWidth + w > maxWidth {
+		if totalWidth+w > maxWidth {
 			break
 		}
 		out.WriteRune(r)
@@ -210,13 +210,14 @@ func takeLeftWidth(s string, maxWidth int) string {
 }
 
 func takeRightWidth(s string, maxWidth int) string {
+	s = ansi.Strip(s)
 	var out []rune
 	totalWidth := 0
 	runes := []rune(s)
-	for i := len(runes)-1; i >= 0; i-- {
+	for i := len(runes) - 1; i >= 0; i-- {
 		r := runes[i]
 		w := runewidth.RuneWidth(r)
-		if totalWidth + w > maxWidth {
+		if totalWidth+w > maxWidth {
 			break
 		}
 		out = append(out, r)
@@ -227,12 +228,4 @@ func takeRightWidth(s string, maxWidth int) string {
 		out[i], out[j] = out[j], out[i]
 	}
 	return string(out)
-}
-
-func reverseRunes(in []rune) []rune {
-	out := append([]rune(nil), in...)
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
-	}
-	return out
 }

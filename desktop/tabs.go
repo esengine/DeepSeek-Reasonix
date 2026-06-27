@@ -661,6 +661,9 @@ type tabEventSink struct {
 	// flushes the buffer first. Accessed from Emit (serial per Sink contract)
 	// and clearContext (under mu).
 	coalesceBuf []event.Event
+	// flushStop signals the periodic flush goroutine to exit. It is created
+	// in setContext and closed in clearContext.
+	flushStop chan struct{}
 }
 
 func (s *tabEventSink) Emit(e event.Event) {
@@ -781,14 +784,43 @@ func coalesceEventDeltas(events []event.Event) []event.Event {
 func (s *tabEventSink) setContext(ctx context.Context) {
 	s.mu.Lock()
 	s.ctx = ctx
+	// Start a periodic flush goroutine so coalesced Text/Reasoning deltas
+	// are delivered incrementally during pure-text streaming (where no
+	// non-Text event arrives to trigger a flush until the stream closes).
+	// The goroutine exits when flushStop is closed (in clearContext).
+	if s.flushStop == nil {
+		s.flushStop = make(chan struct{})
+		stop := s.flushStop
+		go func() {
+			ticker := time.NewTicker(50 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					s.flushCoalesced()
+				case <-stop:
+					return
+				}
+			}
+		}()
+	}
 	s.mu.Unlock()
 }
 
 func (s *tabEventSink) clearContext() {
+	// Flush any buffered deltas before clearing the context so the frontend
+	// receives the final coalesced text instead of losing it. flushCoalesced
+	// needs a non-nil ctx to emit, so we flush first, then nil out ctx.
+	s.flushCoalesced()
 	s.mu.Lock()
 	s.ctx = nil
 	s.coalesceBuf = nil
+	stop := s.flushStop
+	s.flushStop = nil
 	s.mu.Unlock()
+	if stop != nil {
+		close(stop)
+	}
 	s.runtimeEvents.Clear()
 }
 
