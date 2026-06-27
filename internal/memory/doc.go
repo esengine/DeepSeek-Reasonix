@@ -245,19 +245,30 @@ func importTarget(line string) (string, bool) {
 	return p, true
 }
 
-// resolvePath turns an import token into a filesystem path: ~ expands to home,
-// absolute paths pass through, everything else is relative to baseDir.
+// resolvePath turns an import token into a filesystem path. Home-relative ("~")
+// and absolute imports are refused so a memory can't read sensitive files
+// outside the project tree (e.g. ~/.ssh/id_rsa). Only paths relative to
+// baseDir are allowed, and the resolved target must stay inside baseDir's
+// subtree; an import that escapes returns "" so the caller skips it.
 func resolvePath(p, baseDir string) string {
-	if strings.HasPrefix(p, "~") {
-		if home, err := os.UserHomeDir(); err == nil {
-			rest := strings.TrimLeft(p[1:], "/\\")
-			return filepath.Join(home, rest)
-		}
+	cleaned := strings.TrimSpace(p)
+	if cleaned == "" || strings.HasPrefix(cleaned, "~") || filepath.IsAbs(cleaned) {
+		return ""
 	}
-	if filepath.IsAbs(p) {
-		return p
+	joined := filepath.Join(baseDir, cleaned)
+	abs, err := filepath.Abs(joined)
+	if err != nil {
+		return joined
 	}
-	return filepath.Join(baseDir, p)
+	baseAbs, err := filepath.Abs(baseDir)
+	if err != nil {
+		return abs
+	}
+	rel, err := filepath.Rel(baseAbs, abs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	return abs
 }
 
 // absOf returns the absolute form of p, falling back to a cleaned p on error so

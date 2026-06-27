@@ -582,22 +582,40 @@ func retainMemoryNodes(nodes []MemoryNode, limit int, nowArg ...time.Time) []Mem
 	if len(nowArg) > 0 && !nowArg[0].IsZero() {
 		now = nowArg[0].UTC()
 	}
-	out := append([]MemoryNode(nil), nodes...)
-	sort.SliceStable(out, func(i, j int) bool {
-		pi := memoryNodeCompressionPriority(out[i], now)
-		pj := memoryNodeCompressionPriority(out[j], now)
-		if pi != pj {
-			return pi < pj
+	// TruthLocked nodes record immutable tool results and must never be
+	// evicted by compression. Reserve them first, then allocate the remaining
+	// quota to non-locked nodes by priority.
+	locked := make([]MemoryNode, 0)
+	rest := make([]MemoryNode, 0, len(nodes))
+	for _, n := range nodes {
+		if n.TruthLocked {
+			locked = append(locked, n)
+		} else {
+			rest = append(rest, n)
 		}
-		if out[i].Confidence != out[j].Confidence {
-			return out[i].Confidence > out[j].Confidence
-		}
-		if !out[i].Timestamp.Equal(out[j].Timestamp) {
-			return out[i].Timestamp.After(out[j].Timestamp)
-		}
-		return out[i].ID < out[j].ID
-	})
-	out = out[:limit]
+	}
+	remaining := limit - len(locked)
+	if remaining < 0 {
+		remaining = 0
+	}
+	if len(rest) > remaining {
+		sort.SliceStable(rest, func(i, j int) bool {
+			pi := memoryNodeCompressionPriority(rest[i], now)
+			pj := memoryNodeCompressionPriority(rest[j], now)
+			if pi != pj {
+				return pi < pj
+			}
+			if rest[i].Confidence != rest[j].Confidence {
+				return rest[i].Confidence > rest[j].Confidence
+			}
+			if !rest[i].Timestamp.Equal(rest[j].Timestamp) {
+				return rest[i].Timestamp.After(rest[j].Timestamp)
+			}
+			return rest[i].ID < rest[j].ID
+		})
+		rest = rest[:remaining]
+	}
+	out := append(append([]MemoryNode(nil), locked...), rest...)
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Timestamp.Equal(out[j].Timestamp) {
 			return out[i].ID < out[j].ID

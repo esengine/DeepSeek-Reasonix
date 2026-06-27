@@ -90,14 +90,24 @@ func TestSlug(t *testing.T) {
 		{"  spaces  ", "spaces"},
 		{"CamelCase", "camelcase"},
 		{"with/slash", "with-slash"},
-		{"", ""},
-		{"---", ""},
 		{"hello_world", "hello-world"},
+		// Non-ASCII letters and digits are preserved, not stripped.
+		{"中文标题", "中文标题"},
+		{"HÉLLO", "héllo"},
+		{"日本語123", "日本語123"},
 	}
 	for _, c := range cases {
 		got := slug(c.input)
 		if got != c.want {
 			t.Errorf("slug(%q) = %q, want %q", c.input, got, c.want)
+		}
+	}
+	// Empty or punctuation-only inputs fall back to a unique "memory-<ts>"
+	// stem so the file write never produces a bare ".md".
+	for _, input := range []string{"", "---"} {
+		got := slug(input)
+		if !strings.HasPrefix(got, "memory-") {
+			t.Errorf("slug(%q) = %q, want prefix %q", input, got, "memory-")
 		}
 	}
 }

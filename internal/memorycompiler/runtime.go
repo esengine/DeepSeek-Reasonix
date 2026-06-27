@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"sort"
@@ -2238,8 +2239,11 @@ func applyDriftControl(st state, now time.Time, traceID string) (state, DriftRep
 		if node.TruthLocked || node.Quality == QualityCorrupted {
 			continue
 		}
+		// Compute decayed confidence for immediate use only; do NOT write it
+		// back. Writing back compounds the decay every turn because
+		// node.Timestamp is never advanced here, collapsing all
+		// non-TruthLocked memories to ~0 confidence within weeks.
 		decayed := decayedConfidence(*node, now)
-		node.Confidence = decayed
 		if decayed < staleConfidenceThreshold {
 			node.Quality = QualityNoise
 			report.StaleMemoryNodes = append(report.StaleMemoryNodes, node.ID)
@@ -2789,7 +2793,9 @@ func stripReferencedContext(content string) string {
 }
 
 func traceID(t time.Time) string {
-	return t.UTC().Format("20060102T150405.000000000")
+	// Append a random suffix so high-frequency traces don't collide on
+	// platforms with coarse clocks (Windows ~15ms timer resolution).
+	return fmt.Sprintf("%s-%x", t.UTC().Format("20060102T150405.000000000"), rand.Int63())
 }
 
 func firstLine(s string) string {
@@ -2808,11 +2814,15 @@ func (r *Runtime) loadState() state {
 
 func (r *Runtime) loadStateLocked() state {
 	var st state
-	b, err := os.ReadFile(filepath.Join(r.dir, stateFile))
+	path := filepath.Join(r.dir, stateFile)
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return state{NoisyRefs: map[string]int{}}
 	}
 	if err := json.Unmarshal(b, &st); err != nil {
+		// Back up the corrupt file before the next save overwrites it, so
+		// learning history isn't silently lost.
+		_ = os.WriteFile(fmt.Sprintf("%s.corrupt-%d", path, time.Now().UnixNano()), b, 0o600)
 		return state{NoisyRefs: map[string]int{}}
 	}
 	if st.NoisyRefs == nil {

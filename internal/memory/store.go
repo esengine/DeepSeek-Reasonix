@@ -184,10 +184,10 @@ func (s Store) Save(m Memory) (string, error) {
 	if dir == "" {
 		return "", fmt.Errorf("memory store unavailable (no user config dir)")
 	}
-	name := slug(m.Name)
-	if name == "" {
+	if strings.TrimSpace(m.Name) == "" {
 		return "", fmt.Errorf("memory needs a name")
 	}
+	name := slug(m.Name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -401,7 +401,7 @@ func render(m Memory, name string) string {
 // indexLineRe matches a managed index line so reindex/Delete can target the line
 // for one memory by its filename without disturbing the rest of a hand-edited
 // MEMORY.md.
-var indexLineRe = regexp.MustCompile(`\]\(([^)]+)\.md\)`)
+var indexLineRe = regexp.MustCompile(`(?m)^\s*-\s\[.+?\]\(([^)]+)\.md\)\s*—\s.*$`)
 
 // indexLinesExceptIn returns the managed MEMORY.md lines keyed by filename stem
 // in the given directory, dropping the entry for name (a missing index → empty map).
@@ -430,21 +430,64 @@ func indexContainsIn(dir, name string) bool {
 }
 
 // flushIndexIn rewrites MEMORY.md in the given directory from the managed lines,
-// sorted by filename.
+// preserving any hand-written content. Managed lines (matched by indexLineRe)
+// are updated from the lines map; lines that don't match (headings, prose,
+// blank lines) are kept verbatim. Managed entries missing from the lines map
+// are dropped (the memory was deleted). New managed entries not already in the
+// file are appended at the end, sorted by filename, so user notes are never
+// silently clobbered.
 func flushIndexIn(dir string, lines map[string]string) error {
-	names := make([]string, 0, len(lines))
-	for n := range lines {
-		names = append(names, n)
+	path := filepath.Join(dir, indexFile)
+	existing, _ := os.ReadFile(path)
+	processed := map[string]bool{}
+
+	var preserved strings.Builder
+	preservedEmpty := true
+	for _, line := range strings.Split(string(existing), "\n") {
+		trimmed := strings.TrimRight(line, "\r")
+		if mt := indexLineRe.FindStringSubmatch(trimmed); mt != nil {
+			name := mt[1]
+			if fresh, ok := lines[name]; ok {
+				preserved.WriteString(fresh)
+				preserved.WriteString("\n")
+				processed[name] = true
+				preservedEmpty = false
+				continue
+			}
+			// Managed line with no fresh entry: drop it (memory was deleted).
+			continue
+		}
+		// Preserve hand-written content verbatim.
+		preserved.WriteString(trimmed)
+		preserved.WriteString("\n")
+		if strings.TrimSpace(trimmed) != "" {
+			preservedEmpty = false
+		}
 	}
-	sort.Strings(names)
+
+	pending := make([]string, 0, len(lines))
+	for n := range lines {
+		if !processed[n] {
+			pending = append(pending, n)
+		}
+	}
+	sort.Strings(pending)
 
 	var b strings.Builder
-	b.WriteString("# Memory\n\n")
-	for _, n := range names {
+	if preservedEmpty && len(pending) > 0 {
+		b.WriteString("# Memory\n\n")
+	} else {
+		b.WriteString(preserved.String())
+	}
+	for _, n := range pending {
 		b.WriteString(lines[n])
 		b.WriteString("\n")
 	}
-	return os.WriteFile(filepath.Join(dir, indexFile), []byte(b.String()), 0o644)
+	result := strings.TrimRight(b.String(), "\n")
+	if result == "" {
+		return os.WriteFile(path, []byte(""), 0o644)
+	}
+	return os.WriteFile(path, []byte(result+"\n"), 0o644)
 }
 
 // reindexIn rewrites the MEMORY.md line for name in the given directory,
@@ -577,12 +620,20 @@ func splitFrontmatter(s string) (map[string]string, string) {
 	return frontmatter.Split(s)
 }
 
-// slugRe strips everything but lowercase alphanumerics and dashes.
-var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
+// slugRe strips everything but Unicode letters and digits so non-ASCII titles
+// (Chinese, Japanese, accented Latin) survive slugification instead of
+// collapsing to an empty stem.
+var slugRe = regexp.MustCompile(`[^\p{L}\p{N}]+`)
 
-// slug normalises a name into a kebab-case, filesystem-safe stem.
+// slug normalises a name into a kebab-case, filesystem-safe stem. Non-ASCII
+// letters and digits are preserved; an all-punctuation/empty input falls back
+// to a unique stem so the file write never produces a bare ".md".
 func slug(s string) string {
-	return strings.Trim(slugRe.ReplaceAllString(strings.ToLower(strings.TrimSpace(s)), "-"), "-")
+	out := strings.Trim(slugRe.ReplaceAllString(strings.ToLower(strings.TrimSpace(s)), "-"), "-")
+	if out == "" {
+		return fmt.Sprintf("memory-%d", time.Now().UnixNano())
+	}
+	return out
 }
 
 // oneLine collapses whitespace so a description can't break the single-line

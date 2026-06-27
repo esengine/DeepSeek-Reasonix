@@ -316,6 +316,7 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 				}
 			}
 			markCancelled(err)
+			wg.Wait() // ensure spawned goroutines exit before returning (was leak on ctx cancel)
 			return formatParallelTasksAggregate(outputs, taskErrs, statuses, true), err
 		}
 	}

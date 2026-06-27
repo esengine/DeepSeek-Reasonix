@@ -214,9 +214,12 @@ func TestTruthLockedImportanceDecaysForCompressionPriority(t *testing.T) {
 		Confidence: 0.95,
 		Quality:    QualityHighSignal,
 	}
+	// TruthLocked nodes are unconditionally retained even when stale, so the
+	// old truth survives the limit-1 retention (the fresh high-signal node is
+	// the one evicted). The stale truth is still reported as decaying.
 	retained := retainMemoryNodes([]MemoryNode{oldTruth, newSignal}, 1, now)
-	if len(retained) != 1 || retained[0].ID != "new-signal" {
-		t.Fatalf("stale truth lock dominated high-signal node: %+v", retained)
+	if len(retained) != 1 || retained[0].ID != "old-truth" {
+		t.Fatalf("truth-locked node was evicted: %+v", retained)
 	}
 	memory := compressMemoryGraph(state{Nodes: []MemoryNode{oldTruth, newSignal}}, now)
 	if !containsString(memory.TruthLockDecay, "old-truth") {

@@ -19,7 +19,7 @@ var ReadOnlyCommands = map[string]bool{
 	"grep": true, "egrep": true, "fgrep": true, "rg": true,
 	"echo": true, "printf": true,
 	"pwd": true, "cd": true, "whoami": true, "id": true, "uname": true, "hostname": true,
-	"date": true, "env": true, "printenv": true,
+	"date": true, "printenv": true,
 	"wc": true, "sort": true, "uniq": true, "cut": true, "tr": true,
 	"stat": true, "file": true, "du": true, "df": true,
 	"ps": true, "top": true, "htop": true,
