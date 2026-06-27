@@ -496,7 +496,7 @@ export interface DirEntry {
 }
 
 export interface DroppedItem {
-  kind: "workspace" | "attachment";
+  kind: "workspace" | "attachment" | "folder";
   path: string;
   isDir?: boolean;
   previewUrl?: string;

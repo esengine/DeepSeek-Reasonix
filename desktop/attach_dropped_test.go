@@ -225,3 +225,31 @@ func TestAttachDroppedImageStoresThumbnail(t *testing.T) {
 		t.Fatalf("preview = %q, want png data URL", got.PreviewURL)
 	}
 }
+
+func TestAttachDroppedOutsideWorkspaceDirReturnsFolder(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	outside := t.TempDir()
+	// Create a subdirectory inside the temp dir
+	outsideDir := filepath.Join(outside, "myfolder")
+	if err := os.MkdirAll(outsideDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := (&App{}).AttachDropped(outsideDir)
+	if err != nil {
+		t.Fatalf("AttachDropped: %v", err)
+	}
+	if got.Kind != "folder" {
+		t.Fatalf("got kind=%q, want %q", got.Kind, "folder")
+	}
+	if got.Path != outsideDir {
+		t.Fatalf("got path=%q, want %q (the original absolute path)", got.Path, outsideDir)
+	}
+}

@@ -6396,7 +6396,8 @@ func (a *App) AttachmentDataURL(path string) (string, error) {
 
 // DroppedItem is one OS-dropped file resolved into a composer context entry: an
 // in-tree file becomes a workspace @reference (read in place, no copy), while an
-// image or out-of-tree file is copied into .reasonix/attachments.
+// image or out-of-tree file is copied into .reasonix/attachments. A directory
+// dropped from outside the workspace is returned as "folder" for text insertion.
 type DroppedItem struct {
 	Kind       string `json:"kind"` // "workspace" | "attachment"
 	Path       string `json:"path"`
@@ -6407,7 +6408,8 @@ type DroppedItem struct {
 // AttachDropped turns an absolute path from the native file-drop bridge into a
 // composer context entry. Images are stored as attachments so the chip shows a
 // thumbnail; other in-workspace files are referenced relatively (no copy); files
-// outside the workspace are copied into .reasonix/attachments.
+// outside the workspace are copied into .reasonix/attachments; directories
+// outside the workspace are returned as "folder" for direct path insertion.
 func (a *App) AttachDropped(path string) (DroppedItem, error) {
 	var item DroppedItem
 	err := a.withActiveWorkspaceDo(func() error {
@@ -6427,7 +6429,9 @@ func (a *App) AttachDropped(path string) (DroppedItem, error) {
 			return nil
 		}
 		if info.IsDir() {
-			return fmt.Errorf("can only attach files from outside the workspace")
+			// Return the absolute path for direct text insertion in the composer
+			item = DroppedItem{Kind: "folder", Path: path}
+			return nil
 		}
 		rel, err := control.SaveAttachmentFile(path)
 		if err != nil {

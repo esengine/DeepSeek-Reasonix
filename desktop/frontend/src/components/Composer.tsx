@@ -1216,7 +1216,7 @@ export function Composer({
 
   // OS file drops arrive as absolute paths through the native bridge (the webview
   // withholds them from the HTML drop event); the kernel resolves each into a
-  // workspace @reference or a stored attachment.
+  // workspace @reference or a stored attachment; directories are inserted as text.
   const attachDroppedPaths = async (paths: string[], sourceDraftKey = activeDraftKeyRef.current) => {
     setDragOver(false);
     for (const path of paths) {
@@ -1225,7 +1225,11 @@ export function Composer({
         const key = { hash: "", source: `path:${path}` };
         if (attachmentSeenInDraft(sourceDraftKey, key)) continue;
         const item = await app.AttachDropped(path);
-        if (item.kind === "workspace") {
+        if (item.kind === "folder") {
+          // Dropped directories become plain text paths in the composer input
+          const sep = text.length > 0 && !text.endsWith(" ") ? " " : "";
+          setTextCaretEnd(text + sep + item.path + " ");
+        } else if (item.kind === "workspace") {
           addWorkspaceReferenceToDraft(sourceDraftKey, { path: item.path, isDir: item.isDir });
         } else {
           addAttachmentToDraft(sourceDraftKey, { path: item.path, previewUrl: item.previewUrl, displayName: baseName(path) }, key);
