@@ -48,6 +48,7 @@ func botStart(args []string, version string) int {
 	channels := fs.String("channels", "", "启用的平台，逗号分隔：qq,feishu,lark,weixin")
 	dir := fs.String("dir", "", "工作目录")
 	model := fs.String("model", "", "模型名（空则用 default_model）")
+	force := fs.Bool("force", false, "ignore [bot] enabled check")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -62,8 +63,8 @@ func botStart(args []string, version string) int {
 		return 1
 	}
 
-	if !cfg.Bot.Enabled {
-		fmt.Fprintln(os.Stderr, "error: bot is not enabled in config — set [bot] enabled = true")
+	if !cfg.Bot.Enabled && !*force {
+		fmt.Fprintln(os.Stderr, "error: bot is not enabled in config — set [bot] enabled = true, or use --force")
 		return 1
 	}
 	if !cfg.Bot.Allowlist.AllowAll && (!cfg.Bot.Allowlist.Enabled || botruntime.AllowlistUserCount(cfg.Bot.Allowlist) == 0) {
