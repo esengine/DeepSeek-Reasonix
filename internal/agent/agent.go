@@ -291,10 +291,10 @@ type Agent struct {
 	compilerTurn     *memorycompiler.Turn
 
 	// Memory v5 compiler injection guards.
-	lastCompilerInjectedAt  time.Time
-	compilerInjectionCount  int
-	compilerInjectionMax    int
-	compilerInjectCooldown  time.Duration
+	lastCompilerInjectedAt time.Time
+	compilerInjectionCount int
+	compilerInjectionMax   int
+	compilerInjectCooldown time.Duration
 
 	// planModeAllowedTools declares extra custom tools that the centralized
 	// plan-mode policy may treat as read-only. Known blocked tools still lose.
@@ -692,32 +692,32 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		maxStepsKey = "agent.max_steps"
 	}
 	a := &Agent{
-		prov:                  prov,
-		tools:                 tools,
-		session:               session,
-		maxSteps:              opts.MaxSteps,
-		maxStepsKey:           maxStepsKey,
-		temperature:           opts.Temperature,
-		pricing:               opts.Pricing,
-		usageSource:           usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
-		sink:                  sink,
-		gate:                  gate,
-		planModeReadOnlyTrust: planModeReadOnlyTrust,
-		hooks:                 hooks,
-		jobs:                  opts.Jobs,
-		evidence:              evidence.NewLedger(),
-		projectChecks:         append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
-		contextWindow:         opts.ContextWindow,
-		softCompactRatio:      opts.SoftCompactRatio,
-		compactRatio:          opts.CompactRatio,
-		compactForceRatio:     opts.CompactForceRatio,
-		recentKeep:            opts.RecentKeep,
-		archiveDir:            opts.ArchiveDir,
-		keepPolicy:            opts.KeepPolicy,
-		planModeAllowedTools:  append([]string(nil), opts.PlanModeAllowedTools...),
-		memoryCompiler:        opts.MemoryCompiler,
-		compilerInjectionMax:     5,
-		compilerInjectCooldown:   30 * time.Second,
+		prov:                   prov,
+		tools:                  tools,
+		session:                session,
+		maxSteps:               opts.MaxSteps,
+		maxStepsKey:            maxStepsKey,
+		temperature:            opts.Temperature,
+		pricing:                opts.Pricing,
+		usageSource:            usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
+		sink:                   sink,
+		gate:                   gate,
+		planModeReadOnlyTrust:  planModeReadOnlyTrust,
+		hooks:                  hooks,
+		jobs:                   opts.Jobs,
+		evidence:               evidence.NewLedger(),
+		projectChecks:          append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
+		contextWindow:          opts.ContextWindow,
+		softCompactRatio:       opts.SoftCompactRatio,
+		compactRatio:           opts.CompactRatio,
+		compactForceRatio:      opts.CompactForceRatio,
+		recentKeep:             opts.RecentKeep,
+		archiveDir:             opts.ArchiveDir,
+		keepPolicy:             opts.KeepPolicy,
+		planModeAllowedTools:   append([]string(nil), opts.PlanModeAllowedTools...),
+		memoryCompiler:         opts.MemoryCompiler,
+		compilerInjectionMax:   5,
+		compilerInjectCooldown: 30 * time.Second,
 	}
 	a.SetResponseLanguage(opts.ResponseLanguage)
 	a.SetReasoningLanguage(opts.ReasoningLanguage)
@@ -754,7 +754,6 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		memoryCompilerInput = sourceInput
 	}
 	input = a.withTurnPreferences(rawInput)
-<<<<<<< HEAD
 	if memCompiler := a.memoryCompilerRuntime(); memCompiler != nil && !MemoryCompilerSkipFromContext(ctx) {
 		if a.shouldInjectCompiler(memoryCompilerInput) {
 			if compiledInput, turn := memCompiler.StartTurn(ctx, memoryCompilerInput, a.session.Snapshot()); turn != nil {
