@@ -13,7 +13,7 @@ import { useT } from "../lib/i18n";
 import { Tooltip } from "./Tooltip";
 import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import { displayReasoningText } from "../lib/reasoningDisplay";
-import { stripMemoryCompilerExecution } from "../lib/memoryCompilerDisplay";
+import { extractMemoryCompilerExecution } from "../lib/memoryCompilerDisplay";
 import type { Item, MessageActionScope } from "../lib/useController";
 import type { CheckpointMeta, MemoryCitation } from "../lib/types";
 
@@ -54,28 +54,6 @@ function parseImSourceMessage(text: string): ImSourceMessage | null {
   };
 }
 
-
-const MEMORY_COMPILER_EXECUTION_RE = /<memory-compiler-execution>[\s\S]*?<\/memory-compiler-execution>\s*/g;
-
-/** Extract a <memory-compiler-execution> block from text. Returns the cleaned
- *  text (block removed) and the raw block content. When no block is present,
- *  block is null and cleaned equals the original text. */
-function extractMemoryCompilerExecution(text: string): { cleaned: string; block: string | null } {
-  const match = MEMORY_COMPILER_EXECUTION_RE.exec(text);
-  if (!match) return { cleaned: text, block: null };
-  MEMORY_COMPILER_EXECUTION_RE.lastIndex = 0;
-  return {
-    cleaned: text.replace(MEMORY_COMPILER_EXECUTION_RE, "").trimStart(),
-    block: match[0].trim(),
-  };
-}
-
-/** Strips the <memory-compiler-execution> block that the Memory v5 compiler
- *  injects into user turns for model-internal planning. The block is not
- *  user-facing text and should be hidden from the transcript display. */
-function stripMemoryCompilerExecution(text: string): string {
-  return extractMemoryCompilerExecution(text).cleaned;
-}
 
 
 function imSourceLabel(source: ImSourceMessage, t: ReturnType<typeof useT>): string {
@@ -404,6 +382,7 @@ export function UserMessage({
             {memoryCompilerBlock && <CollapsibleMemoryCompiler content={memoryCompilerBlock} />}
             {displayText && <div className="msg__text">{displayText}</div>}
           </>
+        )}
         {failed && <div className="msg__send-failed">{t("msg.sendFailed")}</div>}
         {orderedAttachments.length > 0 && (
           <div className="msg-attachments" aria-label={t("msg.attachments")}>
