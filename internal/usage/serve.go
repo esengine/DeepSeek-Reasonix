@@ -115,9 +115,9 @@ func (s *dashboardServer) handleExport(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/csv")
 		w.Header().Set("Content-Disposition", "attachment; filename=usage.csv")
 		cw := csv.NewWriter(w)
-		cw.Write([]string{"ts", "provider", "model", "usage_source", "prompt_tokens", "completion_tokens", "cache_hit_tokens", "cache_miss_tokens", "reasoning_tokens", "total_tokens", "cost", "currency", "latency_ms"})
+		_ = cw.Write([]string{"ts", "provider", "model", "usage_source", "prompt_tokens", "completion_tokens", "cache_hit_tokens", "cache_miss_tokens", "reasoning_tokens", "total_tokens", "cost", "currency", "latency_ms"})
 		for _, e := range filtered {
-			cw.Write([]string{
+			_ = cw.Write([]string{
 				e.TS.Format(time.RFC3339), e.Provider, e.Model, e.UsageSource,
 				strconv.Itoa(e.PromptTokens), strconv.Itoa(e.CompletionTokens),
 				strconv.Itoa(e.CacheHitTokens), strconv.Itoa(e.CacheMissTokens),
@@ -145,5 +145,5 @@ func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	enc.Encode(v)
+	_ = enc.Encode(v)
 }

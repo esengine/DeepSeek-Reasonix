@@ -153,7 +153,7 @@ func (s *Store) flush(batch []Record) {
 	}
 
 	if s.file != nil {
-		s.file.Sync()
+		_ = s.file.Sync()
 	}
 }
 
@@ -163,7 +163,7 @@ func (s *Store) writeRecord(r Record) {
 	if err != nil {
 		return
 	}
-	s.file.Write(append(b, '\n'))
+	_, _ = s.file.Write(append(b, '\n'))
 }
 
 // rotate opens a new file for the given date if the current handle is stale.

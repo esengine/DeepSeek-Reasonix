@@ -42,7 +42,6 @@ type Server struct {
 	titleProv      provider.Provider // lightweight flash provider for session titles
 	titleProvName  string            // provider name for usage records
 	titleProvModel string            // model name for usage records
-	titlePrice     *provider.Pricing
 	titles         *titleCache
 	usageStore     *usageutil.Store // optional; writes title Usage events directly
 	auth           *authGate        // nil when auth is disabled
