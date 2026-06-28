@@ -2307,6 +2307,7 @@ export function Composer({
                 className="composer__btn composer__btn--send"
                 onClick={submit}
                 disabled={submitting || pendingPaste > 0 || ((!text.trim() && attachments.length === 0 && workspaceRefs.length === 0) && !(goalModeOn && !activeGoal)) || disabled || submitDisabled || readOnly}
+                aria-label={t("composer.sendAriaLabel")}
               >
                 <ArrowUp size={16} />
               </button>

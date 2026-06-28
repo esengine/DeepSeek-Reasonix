@@ -412,6 +412,7 @@ export const zh: Record<DictKey, string> = {
   "composer.removeCurrentProjectDisabled": "不能移除当前项目",
   "composer.resize": "拖动调整输入区高度，双击重置",
   "composer.send": "发送（Enter）",
+  "composer.sendAriaLabel": "发送消息",
   "composer.shellMode": "Shell 模式：给输入前加 !",
   "composer.shellModeOn": "Shell 模式已开：点击移除 !",
   "composer.stop": "停止（Esc）",

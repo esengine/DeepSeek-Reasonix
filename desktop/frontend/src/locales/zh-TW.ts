@@ -290,6 +290,7 @@ export const zhTW: Record<DictKey, string> = {
   "composer.removeCurrentProjectDisabled": "不能移除當前專案",
   "composer.resize": "拖動調整輸入區高度，雙擊重置",
   "composer.send": "傳送（Enter）",
+  "composer.sendAriaLabel": "傳送訊息",
   "composer.stop": "停止（Esc）",
   "composer.stopShort": "停止",
   "composer.pastedLabel": "[已貼上文字 #{id} · {lines} 行]",
