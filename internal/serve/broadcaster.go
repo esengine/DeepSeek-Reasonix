@@ -39,7 +39,7 @@ func (b *Broadcaster) Emit(e event.Event) {
 		select {
 		case ch <- data:
 		default: // subscriber is behind; drop this frame for it
-				b.dropped.Add(1)
+			b.dropped.Add(1)
 		}
 	}
 }
