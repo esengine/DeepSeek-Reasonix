@@ -3,6 +3,7 @@ package serve
 import (
 	"encoding/json"
 	"sync"
+	"sync/atomic"
 
 	"reasonix/internal/event"
 	"reasonix/internal/eventwire"
@@ -14,8 +15,9 @@ import (
 // agent goroutine — a browser that can't keep up loses intermediate frames, not
 // the whole session (it can refetch /history).
 type Broadcaster struct {
-	mu   sync.Mutex
-	subs map[chan []byte]struct{}
+	mu      sync.Mutex
+	subs    map[chan []byte]struct{}
+	dropped atomic.Int64
 }
 
 // NewBroadcaster returns an empty Broadcaster ready to accept subscribers.
@@ -37,8 +39,15 @@ func (b *Broadcaster) Emit(e event.Event) {
 		select {
 		case ch <- data:
 		default: // subscriber is behind; drop this frame for it
+				b.dropped.Add(1)
 		}
 	}
+}
+
+// Dropped returns the number of frames dropped across all subscribers since
+// the Broadcaster was created. Useful for monitoring slow-client backpressure.
+func (b *Broadcaster) Dropped() int64 {
+	return b.dropped.Load()
 }
 
 // Subscribe registers a new SSE client and returns its channel plus an
