@@ -5,12 +5,14 @@ import { useT } from "../lib/i18n";
 import { AssistantMessage, TurnActions, UserMessage } from "./Message";
 import { ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
+import { TurnChangesSummary } from "./TurnChangesSummary";
 import { ArrowDown, ChevronRight } from "lucide-react";
 import { Welcome } from "./Welcome";
 import { ReadOnlyBatch } from "./ReadOnlyBatch";
 import { ToolGroup, isCreationGroupableTool, toolGroupKind, type ToolGroupKind } from "./ToolGroup";
 import { getDisplayMode, onDisplayModeChange, type DisplayMode } from "../lib/displayMode";
 import { isReadOnlyTool } from "../lib/useController";
+import { summarizeTurnChanges, type TurnChangeSummary } from "../lib/turnChanges";
 import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import { useEntranceAnimation } from "../lib/useEntranceAnimation";
 import { useScrollManager } from "../lib/useScrollManager";
@@ -306,6 +308,17 @@ export function Transcript({
 
   const userTurn = useMemo(() => questionTurnsById(questions), [questions]);
   const checkpointsByTurn = useMemo(() => new Map(checkpoints.map((checkpoint) => [checkpoint.turn, checkpoint])), [checkpoints]);
+  const turnChangesByTurn = useMemo(() => {
+    const out = new Map<number, TurnChangeSummary>();
+    for (const group of turnGroups) {
+      if (group.userItem.kind !== "user") continue;
+      const turn = userTurn.get(group.userItem.id);
+      if (turn == null) continue;
+      const summary = summarizeTurnChanges(items, group.startIdx, group.endIdx);
+      if (summary) out.set(turn, summary);
+    }
+    return out;
+  }, [items, turnGroups, userTurn]);
 
   // ── JumpBar integration ───────────────────────────────────────────────────
   const jumpToQuestion = (question: QuestionAnchor) => {
@@ -397,26 +410,30 @@ export function Transcript({
     let actionReady = false;
     let activeTurn: number | undefined;
     const pushTurnActions = () => {
-      if (activeTurn == null || !actionReady || actionText.trim() === "") return;
+      if (activeTurn == null) return;
       const turn = activeTurn;
-      const openMenu = openAction && openAction.turn === turn ? openAction.menu : null;
-      out.push(
-        <TurnActions
-          key={`ta-${turn}`}
-          text={actionText}
-          turn={turn}
-          openMenu={openMenu}
-          onOpenMenu={(menu) => setOpenAction(menu ? { turn, menu } : null)}
-          checkpoint={checkpointsByTurn.get(turn)}
-          actionPending={actionPending}
-          rewindDisabled={rewindDisabled}
-          hoverMenus={actionHoverMenus}
-          onRewind={(targetTurn, scope) => {
-            onRewind?.(targetTurn, scope);
-            setOpenAction(null);
-          }}
-        />,
-      );
+      if (actionReady && actionText.trim() !== "") {
+        const openMenu = openAction && openAction.turn === turn ? openAction.menu : null;
+        out.push(
+          <TurnActions
+            key={`ta-${turn}`}
+            text={actionText}
+            turn={turn}
+            openMenu={openMenu}
+            onOpenMenu={(menu) => setOpenAction(menu ? { turn, menu } : null)}
+            checkpoint={checkpointsByTurn.get(turn)}
+            actionPending={actionPending}
+            rewindDisabled={rewindDisabled}
+            hoverMenus={actionHoverMenus}
+            onRewind={(targetTurn, scope) => {
+              onRewind?.(targetTurn, scope);
+              setOpenAction(null);
+            }}
+          />,
+        );
+      }
+      const turnChanges = turnChangesByTurn.get(turn);
+      if (turnChanges) out.push(<TurnChangesSummary key={`tc-${turn}`} summary={turnChanges} />);
       actionText = "";
       actionReady = false;
     };
@@ -614,7 +631,7 @@ export function Transcript({
       if (!running) pushTurnActions();
     }
     return out;
-  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, running, onEditPrompt, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, stepGroups, tabId, actionHoverMenus, creationMode]);
+  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, running, onEditPrompt, onRewind, subcallsByParent, userTurn, checkpointsByTurn, turnChangesByTurn, displayMode, stepGroups, tabId, actionHoverMenus, creationMode]);
 
   // ── Assemble rendered output ──────────────────────────────────────────────
   // Warm/cold zone is a separate memo'd WarmZone component so streaming tokens
@@ -642,6 +659,7 @@ export function Transcript({
               warmSubcalls={subcallsByParent}
               warmUserTurn={userTurn}
               warmCheckpoints={checkpointsByTurn}
+              warmTurnChanges={turnChangesByTurn}
               warmOpenAction={openAction}
               warmActionPending={actionPending}
               warmRewindDisabled={rewindDisabled}
@@ -697,6 +715,7 @@ const WarmZone = memo(function WarmZone({
   warmSubcalls,
   warmUserTurn,
   warmCheckpoints,
+  warmTurnChanges,
   warmOpenAction,
   warmActionPending,
   warmRewindDisabled,
@@ -719,6 +738,7 @@ const WarmZone = memo(function WarmZone({
   warmSubcalls: ReadonlyMap<string, ToolItem[]>;
   warmUserTurn: ReadonlyMap<string, number>;
   warmCheckpoints: ReadonlyMap<number, CheckpointMeta>;
+  warmTurnChanges: ReadonlyMap<number, TurnChangeSummary>;
   warmOpenAction: OpenTurnAction | null;
   warmActionPending: boolean;
   warmRewindDisabled: boolean;
@@ -775,6 +795,7 @@ const WarmZone = memo(function WarmZone({
               subcalls={warmSubcalls}
               userTurnMap={warmUserTurn}
               checkpoints={warmCheckpoints}
+              turnChanges={warmTurnChanges}
               openAction={warmOpenAction}
               actionPending={warmActionPending}
               rewindDisabled={warmRewindDisabled}
@@ -822,6 +843,7 @@ function WarmTurnItems({
   subcalls,
   userTurnMap,
   checkpoints,
+  turnChanges,
   openAction,
   actionPending,
   rewindDisabled,
@@ -838,6 +860,7 @@ function WarmTurnItems({
   subcalls: ReadonlyMap<string, ToolItem[]>;
   userTurnMap: ReadonlyMap<string, number>;
   checkpoints: ReadonlyMap<number, CheckpointMeta>;
+  turnChanges: ReadonlyMap<number, TurnChangeSummary>;
   openAction: OpenTurnAction | null;
   actionPending: boolean;
   rewindDisabled: boolean;
@@ -853,26 +876,30 @@ function WarmTurnItems({
   let actionReady = false;
   let activeTurn: number | undefined;
   const pushTurnActions = () => {
-    if (activeTurn == null || !actionReady || actionText.trim() === "") return;
+    if (activeTurn == null) return;
     const turn = activeTurn;
-    const openMenu = openAction && openAction.turn === turn ? openAction.menu : null;
-    nodes.push(
-      <TurnActions
-        key={`ta-${turn}`}
-        text={actionText}
-        turn={turn}
-        openMenu={openMenu}
-        onOpenMenu={(menu) => setOpenAction(menu ? { turn, menu } : null)}
-        checkpoint={checkpoints.get(turn)}
-        actionPending={actionPending}
-        rewindDisabled={rewindDisabled}
-        hoverMenus={actionHoverMenus}
-        onRewind={(targetTurn, scope) => {
-          onRewind?.(targetTurn, scope);
-          setOpenAction(null);
-        }}
-      />,
-    );
+    if (actionReady && actionText.trim() !== "") {
+      const openMenu = openAction && openAction.turn === turn ? openAction.menu : null;
+      nodes.push(
+        <TurnActions
+          key={`ta-${turn}`}
+          text={actionText}
+          turn={turn}
+          openMenu={openMenu}
+          onOpenMenu={(menu) => setOpenAction(menu ? { turn, menu } : null)}
+          checkpoint={checkpoints.get(turn)}
+          actionPending={actionPending}
+          rewindDisabled={rewindDisabled}
+          hoverMenus={actionHoverMenus}
+          onRewind={(targetTurn, scope) => {
+            onRewind?.(targetTurn, scope);
+            setOpenAction(null);
+          }}
+        />,
+      );
+    }
+    const turnChangeSummary = turnChanges.get(turn);
+    if (turnChangeSummary) nodes.push(<TurnChangesSummary key={`tc-${turn}`} summary={turnChangeSummary} />);
     actionText = "";
     actionReady = false;
   };
