@@ -563,6 +563,15 @@ func underRoot(path, root string) bool {
 	if err != nil {
 		return false
 	}
+	// Resolve symlinks so a path that escapes the root via a symlinked entry
+	// is detected. EvalSymlinks fails on a non-existing path; fall back to the
+	// absolute path so the lexical check still applies.
+	if real, err := filepath.EvalSymlinks(absPath); err == nil {
+		absPath = real
+	}
+	if real, err := filepath.EvalSymlinks(absRoot); err == nil {
+		absRoot = real
+	}
 	rel, err := filepath.Rel(absRoot, absPath)
 	if err != nil {
 		return false

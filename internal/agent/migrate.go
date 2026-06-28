@@ -587,6 +587,10 @@ func transformAndCopyJsonl(src, dst string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	// os.Rename is atomic on POSIX. On Windows it fails if dst is held open
+	// by another process (TOCTOU); the session store is the sole writer, so
+	// this is acceptable here. Replace with an atomic-replace helper if the
+	// migration ever runs against live targets.
 	if err := os.Rename(tmpPath, dst); err != nil {
 		return err
 	}

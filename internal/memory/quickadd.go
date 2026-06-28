@@ -4,12 +4,20 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // quickAddHeading marks the section quick-added notes accumulate under, so
 // repeated "#" additions group together instead of scattering through a
 // hand-written file.
 const quickAddHeading = "## Notes"
+
+// quickAddMu serializes AppendDoc within the process so two concurrent
+// quick-adds don't read-modify-write past each other. It does NOT protect
+// across processes — if a separate process edits the file, the last writer
+// still wins. Cross-process locking would need flock/LockFileEx, which is
+// out of scope for the in-process agent.
+var quickAddMu sync.Mutex
 
 // AppendDoc appends a one-line note as a bullet under a "## Notes" section in
 // the doc-memory file at path, creating the file (and section) when absent. The
@@ -21,6 +29,8 @@ func AppendDoc(path, note string) error {
 	if note == "" {
 		return nil
 	}
+	quickAddMu.Lock()
+	defer quickAddMu.Unlock()
 	if dir := filepath.Dir(path); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
@@ -74,7 +84,7 @@ func insertUnderHeading(body, heading, bullet string) string {
 	}
 	end := len(lines)
 	for i := start + 1; i < len(lines); i++ {
-		if strings.HasPrefix(strings.TrimSpace(lines[i]), "#") {
+		if isATXHeading(lines[i]) {
 			end = i
 			break
 		}
@@ -88,4 +98,21 @@ func insertUnderHeading(body, heading, bullet string) string {
 	out = append(out, bullet)
 	out = append(out, lines[insert:]...)
 	return strings.Join(out, "\n")
+}
+
+// isATXHeading reports whether line is a Markdown ATX heading: 1-6 '#'
+// followed by whitespace (or end of line). This avoids mistaking "#tag",
+// "#123", or "#!/bin/bash" for headings — only true section boundaries
+// like "## Section" match.
+func isATXHeading(line string) bool {
+	s := strings.TrimSpace(line)
+	n := 0
+	for n < len(s) && s[n] == '#' {
+		n++
+	}
+	if n == 0 || n > 6 {
+		return false
+	}
+	// "#tag" has no whitespace after the #'s, so it's not a heading.
+	return n == len(s) || s[n] == ' ' || s[n] == '\t'
 }

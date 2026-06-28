@@ -232,7 +232,7 @@ func windowsPowerShellCandidates() []string {
 // would create an undeletable file named "nul" (a Windows reserved name) in the
 // working directory. #4252. Group 2 captures the trailing delimiter (RE2 has no
 // lookahead) so it can be re-emitted unchanged.
-var nulRedirect = regexp.MustCompile(`(?i)((?:\d+|&)?>>?)\s*nul([\s;&|<>)]|$)`)
+var nulRedirect = regexp.MustCompile(`(?i)((?:\d+|&)?>>?)\s*nul([\s;&|<>)` + "`" + `]|$)`)
 
 // normalizeNulRedirect rewrites those nul redirects to sink ("/dev/null" for
 // bash, "$null" for PowerShell), so the command discards output as intended.

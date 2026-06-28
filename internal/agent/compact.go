@@ -735,6 +735,9 @@ func archiveMessages(dir string, msgs []provider.Message) (string, error) {
 	enc := json.NewEncoder(f)
 	for _, m := range msgs {
 		if err := enc.Encode(m); err != nil {
+			// Remove the partially written archive so a truncated file does
+			// not linger in the archive directory.
+			_ = os.Remove(path)
 			return "", err
 		}
 	}

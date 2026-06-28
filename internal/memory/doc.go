@@ -18,6 +18,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -98,7 +99,7 @@ func loadFrom(dir string, names []string, scope Scope, seen *docSeen) []Source {
 	var out []Source
 	for _, name := range names {
 		path := filepath.Join(dir, name)
-		body, info, ok := readDoc(path)
+		body, info, ok := readDoc(path, dir)
 		if !ok {
 			continue
 		}
@@ -114,8 +115,20 @@ func loadFrom(dir string, names []string, scope Scope, seen *docSeen) []Source {
 // readDoc opens path once and returns both its trimmed body and file identity.
 // The shared file handle keeps the content and identity tied to the same target,
 // which matters when a discovered memory path is a symlink.
-func readDoc(path string) (string, os.FileInfo, bool) {
-	f, err := os.Open(path)
+//
+// baseDir is the directory the doc was discovered in. Symlinks are resolved
+// first and the real target must stay within baseDir's subtree; otherwise a
+// memory file could be a symlink to something outside the project (e.g.
+// ~/.ssh/id_rsa) and silently leak into the prompt.
+func readDoc(path, baseDir string) (string, os.FileInfo, bool) {
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", nil, false
+	}
+	if !withinBase(real, baseDir) {
+		return "", nil, false
+	}
+	f, err := os.Open(real)
 	if err != nil {
 		return "", nil, false
 	}
@@ -133,6 +146,32 @@ func readDoc(path string) (string, os.FileInfo, bool) {
 		return "", nil, false
 	}
 	return body, info, true
+}
+
+// withinBase reports whether target is inside baseDir's subtree. Both inputs
+// may be relative or absolute; they are made absolute and cleaned before the
+// Rel check. An empty baseDir disables the check (caller could not supply a
+// scope to bound).
+func withinBase(target, baseDir string) bool {
+	if baseDir == "" {
+		return true
+	}
+	baseAbs, err := filepath.Abs(baseDir)
+	if err != nil {
+		return false
+	}
+	targetAbs, err := filepath.Abs(target)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(baseAbs, targetAbs)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // docSeen tracks physical files already loaded during discovery. Paths are not
@@ -280,5 +319,19 @@ func absOf(p string) string {
 	return filepath.Clean(p)
 }
 
-// sameDir reports whether two paths denote the same directory.
-func sameDir(a, b string) bool { return absOf(a) == absOf(b) }
+// sameDir reports whether two paths denote the same directory. On Windows
+// the comparison is case-insensitive after cleaning, so C:\Users and
+// c:\users are recognized as the same directory.
+func sameDir(a, b string) bool {
+	return samePath(absOf(a), absOf(b))
+}
+
+// samePath reports whether two already-absolute paths are equal, accounting
+// for case-insensitive filesystems on Windows and macOS.
+func samePath(a, b string) bool {
+	aa, ba := filepath.Clean(a), filepath.Clean(b)
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return strings.EqualFold(aa, ba)
+	}
+	return aa == ba
+}

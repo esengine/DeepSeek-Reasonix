@@ -33,12 +33,6 @@ func hasUnsafeReadOnlyArgs(base string, args []string) bool {
 	switch base {
 	case "find":
 		return hasAnyArg(args, "-exec", "-execdir", "-delete", "-ok", "-okdir", "-fls", "-fprint", "-fprintf")
-	case "sed":
-		for _, arg := range args {
-			if strings.HasPrefix(arg, "-i") || strings.HasPrefix(arg, "--in-place") {
-				return true
-			}
-		}
 	case "sort":
 		return hasArgWithPrefix(args, "-o") || hasAnyArg(args, "--output") || hasArgWithPrefix(args, "--output=")
 	}

@@ -2254,7 +2254,37 @@ func applyDriftControl(st state, now time.Time, traceID string) (state, DriftRep
 		st.Edges = appendEdge(st.Edges, edge)
 	}
 	if len(st.Edges) > 600 {
-		st.Edges = st.Edges[len(st.Edges)-600:]
+		// Protect edges that touch a TruthLocked node so important causal
+		// relationships survive the size cap. Only the oldest non-protected
+		// edges are trimmed to stay within budget; protected edges are kept
+		// regardless of count, so a TruthLocked fact can't be orphaned from
+		// its contradictions just because the graph grew.
+		truthLocked := make(map[string]bool)
+		for _, n := range st.Nodes {
+			if n.TruthLocked {
+				truthLocked[n.ID] = true
+			}
+		}
+		var regularIdx []int
+		for i, e := range st.Edges {
+			if !truthLocked[e.From] && !truthLocked[e.To] {
+				regularIdx = append(regularIdx, i)
+			}
+		}
+		if len(regularIdx) > 600 {
+			dropCount := len(regularIdx) - 600
+			drop := make(map[int]bool, dropCount)
+			for _, idx := range regularIdx[:dropCount] {
+				drop[idx] = true
+			}
+			kept := make([]MemoryEdge, 0, len(st.Edges)-dropCount)
+			for i, e := range st.Edges {
+				if !drop[i] {
+					kept = append(kept, e)
+				}
+			}
+			st.Edges = kept
+		}
 	}
 	report.ConflictingFacts = conflicts
 	report.OverusedStrategies = limitStrings(canonicalStrings(report.OverusedStrategies), 10)
@@ -2812,18 +2842,28 @@ func (r *Runtime) loadState() state {
 	return r.loadStateLocked()
 }
 
+// emptyState returns a zero-value state with all map fields allocated so callers
+// can write to them without nil checks. Slices stay nil: nil slices append fine
+// and serialize as omitted via their `omitempty` tags, so an empty state
+// round-trips through JSON as `{}`. Keep this as the single source of truth for
+// "what a fresh state looks like" so the two error paths in loadStateLocked and
+// any future caller stay consistent.
+func emptyState() state {
+	return state{NoisyRefs: map[string]int{}}
+}
+
 func (r *Runtime) loadStateLocked() state {
 	var st state
 	path := filepath.Join(r.dir, stateFile)
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return state{NoisyRefs: map[string]int{}}
+		return emptyState()
 	}
 	if err := json.Unmarshal(b, &st); err != nil {
 		// Back up the corrupt file before the next save overwrites it, so
 		// learning history isn't silently lost.
 		_ = os.WriteFile(fmt.Sprintf("%s.corrupt-%d", path, time.Now().UnixNano()), b, 0o600)
-		return state{NoisyRefs: map[string]int{}}
+		return emptyState()
 	}
 	if st.NoisyRefs == nil {
 		st.NoisyRefs = map[string]int{}

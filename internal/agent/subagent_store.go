@@ -525,6 +525,13 @@ func (s *SubagentStore) SaveCompleted(run *SubagentRun) error {
 		return nil
 	}
 	if err := run.Session.Save(s.sessionPath(run.Ref)); err != nil {
+		// Session persistence failed; mark the transcript failed so it does
+		// not linger in the running state.
+		failed := run.Meta
+		failed.Status = SubagentFailed
+		failed.UpdatedAt = time.Now().UTC()
+		run.Meta = failed
+		_ = s.saveMeta(failed)
 		return err
 	}
 	meta := run.Meta

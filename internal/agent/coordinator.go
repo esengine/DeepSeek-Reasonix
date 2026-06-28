@@ -289,15 +289,24 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 
 	var text strings.Builder
 	var usage *provider.Usage
-	for chunk := range ch {
-		switch chunk.Type {
-		case provider.ChunkText:
-			text.WriteString(chunk.Text)
-			c.sink.Emit(event.Event{Kind: event.Text, Text: chunk.Text, Source: event.UsageSourcePlanner})
-		case provider.ChunkUsage:
-			usage = chunk.Usage
-		case provider.ChunkError:
-			return "", chunk.Err
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case chunk, ok := <-ch:
+			if !ok {
+				break loop
+			}
+			switch chunk.Type {
+			case provider.ChunkText:
+				text.WriteString(chunk.Text)
+				c.sink.Emit(event.Event{Kind: event.Text, Text: chunk.Text, Source: event.UsageSourcePlanner})
+			case provider.ChunkUsage:
+				usage = chunk.Usage
+			case provider.ChunkError:
+				return "", chunk.Err
+			}
 		}
 	}
 	// Closes the planner's raw text block (no markdown redraw) and prints its

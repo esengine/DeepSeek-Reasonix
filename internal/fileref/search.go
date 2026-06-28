@@ -129,6 +129,12 @@ func Search(root, query string, limit int) []SearchResult {
 	if nDirs > dirQuota {
 		nDirs = dirQuota
 	}
+	// dirQuota caps directories so files are not crowded out, but the result
+	// must never exceed limit: when limit < dirQuota, truncate the dir slice
+	// to limit as well.
+	if nDirs > limit {
+		nDirs = limit
+	}
 	out = append(out, dirHits[:nDirs]...)
 	remaining := limit - len(out)
 	if remaining > 0 {
