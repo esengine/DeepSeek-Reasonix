@@ -40,11 +40,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  const infoToasts = toasts.filter((t) => t.level === "info");
+  const urgentToasts = toasts.filter((t) => t.level === "warn" || t.level === "error");
+
   return (
     <ToastContext.Provider value={{ toasts, showToast }}>
       {children}
       <div className="toast-container" role="status" aria-live="polite">
-        {toasts.map((t) => (
+        {infoToasts.map((t) => (
+          <div key={t.id} className={`toast toast--${t.level}`} onClick={() => dismissToast(t.id)}>
+            <span className="toast__text">{t.text}</span>
+          </div>
+        ))}
+      </div>
+      <div className="toast-container" role="alert" aria-live="assertive">
+        {urgentToasts.map((t) => (
           <div key={t.id} className={`toast toast--${t.level}`} onClick={() => dismissToast(t.id)}>
             {t.level === "warn" && <span className="toast__icon">⚠️</span>}
             {t.level === "error" && <span className="toast__icon">❌</span>}
