@@ -23,13 +23,18 @@ function bytesToHex(bytes: Uint8Array): string {
 // "") would silently disable dedup, which is worse than no dedup
 // at all. The caller checks the empty-string return and skips the
 // dedup step in that case.
+let sha256Warned = false;
 export async function sha256(blob: Blob): Promise<string> {
-  if (typeof crypto === "undefined" || !crypto.subtle) return "";
+  if (typeof crypto === "undefined" || !crypto.subtle) {
+    if (!sha256Warned) { sha256Warned = true; console.warn("[attachDedup] Web Crypto API unavailable — hash-based dedup disabled, falling back to path-only"); }
+    return "";
+  }
   try {
     const buf = await blob.arrayBuffer();
     const digest = await crypto.subtle.digest("SHA-256", buf);
     return bytesToHex(new Uint8Array(digest));
-  } catch {
+  } catch (err) {
+    if (!sha256Warned) { sha256Warned = true; console.warn("[attachDedup] SHA-256 digest failed — hash-based dedup disabled, falling back to path-only", err); }
     return "";
   }
 }
