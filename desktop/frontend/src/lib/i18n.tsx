@@ -58,7 +58,12 @@ export function detectLocale(pref: LangPref): Locale {
 }
 
 function readPref(): LangPref {
-  return "";
+  try {
+    const v = typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
+    return normalizeLangPref(v);
+  } catch {
+    return "";
+  }
 }
 
 export function normalizeLangPref(v: unknown): LangPref {
