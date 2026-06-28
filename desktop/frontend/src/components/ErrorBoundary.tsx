@@ -13,6 +13,20 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { crashed:
   }
 
   render() {
-    return this.state.crashed ? null : this.props.children;
+    if (this.state.crashed) {
+      return (
+        <div className="error-boundary-fallback" role="alert">
+          <p className="error-boundary-fallback__message">Something went wrong rendering this section.</p>
+          <button
+            className="error-boundary-fallback__retry"
+            type="button"
+            onClick={() => this.setState({ crashed: false })}
+          >
+            Try again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
   }
 }

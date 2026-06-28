@@ -2503,6 +2503,35 @@ a[href] {
   background: var(--chat-bg);
 }
 
+/* ── error boundary fallback ─────────────────────────────────────────────── */
+.error-boundary-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 16px;
+  color: var(--fg-dim);
+  text-align: center;
+}
+.error-boundary-fallback__message {
+  margin: 0;
+  font-size: 13px;
+}
+.error-boundary-fallback__retry {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.error-boundary-fallback__retry:hover {
+  background: var(--bg-elev-2);
+}
+
 /* ── top bar (drag region) ───────────────────────────────────────────────── */
 .topbar {
   position: relative;
