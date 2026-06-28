@@ -519,6 +519,7 @@ export function Composer({
   const intentCloseTimerRef = useRef<number | null>(null);
   const moreCloseTimerRef = useRef<number | null>(null);
   const wasRunning = useRef(running);
+  const mountedRef = useRef(true);
   const composingRef = useRef(false);
   const lastCompositionEndAt = useRef(0);
   const lastSelectionRef = useRef({ start: 0, end: 0 });
@@ -607,6 +608,7 @@ export function Composer({
   };
 
   useEffect(() => () => clearNativeClipboardPasteTimer(), []);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   useEffect(() => {
     if (wasRunning.current && !running && text.trim() === "") {
@@ -1152,7 +1154,9 @@ export function Composer({
       showToast(error instanceof Error ? error.message : String(error), "warn");
     } finally {
       submittingRef.current = false;
-      setSubmitting(false);
+      // Guard against setState on unmounted component when the user switches
+      // tabs or closes the panel while onSend is still in flight.
+      if (mountedRef.current) setSubmitting(false);
     }
   };
 
