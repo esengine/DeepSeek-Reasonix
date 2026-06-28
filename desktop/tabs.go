@@ -744,6 +744,7 @@ type runtimeEventEnvelope struct {
 // backs up; callers enqueue in-order work and return without holding the
 // agent's event.Sync lock.
 type asyncRuntimeEmitter struct {
+	ctx     context.Context
 	mu      sync.Mutex
 	emit    runtimeEventEmitFunc
 	queue   []runtimeEventEnvelope
@@ -779,6 +780,21 @@ func (e *asyncRuntimeEmitter) Clear() {
 
 func (e *asyncRuntimeEmitter) run() {
 	for {
+		// Check whether the owning context has been cancelled (app shutdown)
+		// before acquiring the lock, to avoid keeping the goroutine alive.
+		if e.ctx != nil {
+			select {
+			case <-e.ctx.Done():
+				e.mu.Lock()
+				clear(e.queue)
+				e.queue = nil
+				e.head = 0
+				e.running = false
+				e.mu.Unlock()
+				return
+			default:
+			}
+		}
 		e.mu.Lock()
 		if e.head >= len(e.queue) {
 			clear(e.queue)
@@ -1280,7 +1296,7 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 		toolApprovalMode: control.ToolApprovalAsk,
 		disabledMCP:      map[string]ServerView{},
 	}
-	tab.sink = &tabEventSink{tabID: tabID, app: a}
+	tab.sink = &tabEventSink{tabID: tabID, app: a, ctx: a.ctx}
 
 	a.tabs[tabID] = tab
 	a.tabOrder = append(a.tabOrder, tabID)
