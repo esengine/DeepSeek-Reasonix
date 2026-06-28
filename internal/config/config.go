@@ -851,6 +851,12 @@ type AgentConfig struct {
 	// startup (a built-in like "explanatory"/"learning"/"concise", or a custom
 	// .reasonix/output-styles/<name>.md). Empty = the unmodified prompt.
 	OutputStyle string `toml:"output_style"`
+	// DefaultPersona selects a named persona to activate by default on every
+	// new session. Overridden by /persona at runtime or session metadata.
+	// Empty = no persona.
+	DefaultPersona string `toml:"default_persona"`
+	// new session. Overridden by /persona at runtime or session metadata.
+	// Empty = no persona.
 	// AutoPlan controls whether interactive turns that look multi-step start in
 	// plan mode automatically: "off" keeps plan mode manual, "on" enables the
 	// approval gate. Legacy "ask" is treated as "on".

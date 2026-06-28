@@ -177,6 +177,12 @@ type Messages struct {
 	CmdSkill            string // /skills
 	CmdVerbose          string // /verbose
 	CmdReloadCmd        string // /reload-cmd
+	CmdPersona          string // /persona
+	ArgPersonaDefaultHint string // "clear persona, back to no persona"
+	ArgPersonaSwitch string // "switch to this persona"
+	PersonaNoneFound string // "no personas found"
+	PersonaSwitched string // "switched to persona: %s"
+	ArgPersonaDefault    string // default hint for persona arg
 	CmdDiffFold         string // /diff-fold
 	CmdSandbox          string // /sandbox
 	CmdEffort           string // /effort

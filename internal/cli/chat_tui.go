@@ -31,6 +31,7 @@ import (
 	"reasonix/internal/migration"
 	"reasonix/internal/outputstyle"
 	"reasonix/internal/permission"
+	"reasonix/internal/persona"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
@@ -3399,6 +3400,26 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 			m.notice(i18n.M.OutputStyleNone)
 		} else {
 			m.commitLine(renderOutputStyles(m.width, styles, m.outputStyle))
+		}
+	case "/persona", "/personas":
+		m.echoLocalCommand(input)
+		parts := strings.Fields(input)
+		if len(parts) <= 1 {
+			dirs := persona.Dirs()
+			list := persona.List(dirs)
+			if len(list) == 0 {
+				m.notice(i18n.M.PersonaNoneFound)
+			} else {
+				active := m.ctrl.ActivePersona()
+				m.commitLine(persona.DescribeList(list, active))
+			}
+			return nil
+		}
+		name := strings.Join(parts[1:], " ")
+		if err := m.ctrl.SetPersona(context.Background(), name); err != nil {
+			m.notice(fmt.Sprintf(i18n.M.PersonaSwitchErr, err))
+		} else {
+			m.notice(fmt.Sprintf(i18n.M.PersonaSwitched, name))
 		}
 	case "/diff-fold":
 		m.echoLocalCommand(input)

@@ -46,6 +46,9 @@ type BranchMeta struct {
 	// genuinely-empty session is recorded once and never re-decoded.
 	Turns   int    `json:"turns,omitempty"`
 	Preview string `json:"preview,omitempty"`
+	// PersonaName records the active persona for this session.
+	// Restored on session reload so the persona persists across restarts.
+	PersonaName string `json:"persona_name,omitempty"`
 }
 
 // BranchMetaCountsVersion is stamped into BranchMeta.SchemaVersion whenever a

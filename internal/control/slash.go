@@ -11,6 +11,7 @@ import (
 	"reasonix/internal/hook"
 	"reasonix/internal/i18n"
 	"reasonix/internal/migration"
+	"reasonix/internal/persona"
 	"reasonix/internal/skill"
 )
 
@@ -39,6 +40,7 @@ type ArgData struct {
 	CurrentModel    string
 	ProviderNames   []string
 	CurrentProvider string
+	CurrentPersona  string // active persona name, "" = none
 }
 
 // SlashArgItems completes the arguments of a management slash command
@@ -66,6 +68,8 @@ func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 		raw = providerArgItems(prior, d)
 	case "/skill", "/skills":
 		raw = skillArgItems(prior, d)
+	case "/persona", "/personas":
+		raw = personaArgItems(prior, d)
 	case "/hooks":
 		raw = hooksArgItems(prior)
 	case "/effort":
@@ -342,6 +346,27 @@ func skillArgItems(prior []string, d ArgData) []SlashItem {
 	return nil
 }
 
+func personaArgItems(prior []string, d ArgData) []SlashItem {
+	if len(prior) <= 1 {
+		defaultHint := i18n.M.ArgPersonaDefaultHint
+		if d.CurrentPersona == "" {
+			defaultHint = i18n.M.ArgModelCurrent
+		}
+		items := []SlashItem{
+			{Label: i18n.M.ArgPersonaDefault, Insert: "default", Hint: defaultHint},
+		}
+		for _, p := range persona.List(persona.Dirs()) {
+			hint := i18n.M.ArgPersonaSwitch
+			if d.CurrentPersona != "" && strings.EqualFold(p.Name, d.CurrentPersona) {
+				hint = i18n.M.ArgModelCurrent
+			}
+			items = append(items, SlashItem{Label: p.Name, Insert: p.Name, Hint: hint})
+		}
+		return items
+	}
+	return nil
+}
+
 func hooksArgItems(prior []string) []SlashItem {
 	if len(prior) <= 1 {
 		return []SlashItem{
@@ -425,6 +450,23 @@ func (c *Controller) managementNotice(trimmed string) bool {
 			c.notice("reload-cmd: " + err.Error())
 		} else {
 			c.notice("commands reloaded (" + strconv.Itoa(len(c.Commands())) + " available)")
+		}
+	case "/persona", "/personas":
+		dirs := persona.Dirs()
+		if len(fields) <= 1 {
+			list := persona.List(dirs)
+			if len(list) == 0 {
+				c.notice(i18n.M.PersonaNoneFound)
+			} else {
+				c.notice(persona.DescribeList(list, c.activePersona))
+			}
+			return true
+		}
+		name := strings.Join(fields[1:], " ")
+		if err := c.SetPersona(context.Background(), name); err != nil {
+			c.notice("persona: " + err.Error())
+		} else {
+			c.notice(fmt.Sprintf(i18n.M.PersonaSwitched, name))
 		}
 	case "/hooks":
 		sub := ""

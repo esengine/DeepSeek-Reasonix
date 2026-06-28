@@ -77,6 +77,7 @@ func (m *chatTUI) slashItems() []compItem {
 		{label: "/reload-cmd", insert: "/reload-cmd", hint: i18n.M.CmdReloadCmd},
 		{label: "/hooks", insert: "/hooks ", hint: i18n.M.CmdHooks, descend: true},
 		{label: "/paste-image", insert: "/paste-image", hint: i18n.M.CmdPasteImage},
+		{label: "/persona", insert: "/persona ", hint: i18n.M.CmdPersona, descend: true},
 		{label: "/output-style", insert: "/output-style", hint: i18n.M.CmdOutputStyle},
 		{label: "/verbose", insert: "/verbose", hint: i18n.M.CmdVerbose},
 		{label: "/diff-fold", insert: "/diff-fold", hint: i18n.M.CmdDiffFold},
@@ -195,6 +196,7 @@ func (m *chatTUI) slashArgData() control.ArgData {
 		data.DisabledSkills = m.ctrl.DisabledSkills()
 		data.ConfiguredMCP = m.ctrl.ConfiguredMCPNames()
 		data.DisconnectedMCP = m.ctrl.DisconnectedMCPNames()
+		data.CurrentPersona = m.ctrl.ActivePersona()
 	}
 	if m.host != nil {
 		data.ServerNames = m.host.ServerNames()
