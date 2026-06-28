@@ -499,6 +499,7 @@ export function Composer({
   const [pastChatQuery, setPastChatQuery] = useState("");
   const [sessionRefs, setSessionRefs] = useState<SessionReference[]>([]);
   const [loadingPastChats, setLoadingPastChats] = useState(false);
+  const [pastChatsError, setPastChatsError] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [composerPrompt, setComposerPrompt] = useState<string | null>(null);
   // Prompt history navigation (plain ↑/↓)
@@ -1542,6 +1543,7 @@ export function Composer({
     setActive(0);
     setPastChatQuery("");
     setLoadingPastChats(true);
+    setPastChatsError(false);
     try {
       const sessions = await app.ListSessions();
       // Discard stale response if workspace changed while the request was in-flight.
@@ -1558,6 +1560,7 @@ export function Composer({
     } catch {
       if (cwdRef.current !== snapshotCwd) return;
       setPastChats([]);
+      setPastChatsError(true);
     } finally {
       if (cwdRef.current === snapshotCwd) setLoadingPastChats(false);
     }
@@ -2012,6 +2015,13 @@ export function Composer({
             {loadingPastChats ? (
               <div className="slashmenu__item slashmenu__item--empty">
                 <span className="slashmenu__name">正在加载历史会话...</span>
+              </div>
+            ) : pastChatsError ? (
+              <div className="slashmenu__item slashmenu__item--empty">
+                <span className="slashmenu__name">{t("composer.pastChatsError")}</span>
+                <button className="slashmenu__retry-btn" type="button" onClick={openPastChats}>
+                  {t("composer.pastChatsRetry")}
+                </button>
               </div>
             ) : pastChats.length === 0 ? (
               <div className="slashmenu__item slashmenu__item--empty">

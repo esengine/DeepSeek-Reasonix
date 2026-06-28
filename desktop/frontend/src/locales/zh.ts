@@ -414,6 +414,8 @@ export const zh: Record<DictKey, string> = {
   "composer.send": "发送（Enter）",
   "composer.shellMode": "Shell 模式：给输入前加 !",
   "composer.shellModeOn": "Shell 模式已开：点击移除 !",
+  "composer.pastChatsError": "加载会话失败",
+  "composer.pastChatsRetry": "重试",
   "composer.stop": "停止（Esc）",
   "composer.stopShort": "停止",
   "composer.pastedLabel": "[已粘贴文本 #{id} · {lines} 行]",

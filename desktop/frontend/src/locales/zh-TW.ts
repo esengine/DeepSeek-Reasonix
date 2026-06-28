@@ -291,6 +291,8 @@ export const zhTW: Record<DictKey, string> = {
   "composer.resize": "拖動調整輸入區高度，雙擊重置",
   "composer.send": "傳送（Enter）",
   "composer.stop": "停止（Esc）",
+  "composer.pastChatsError": "載入工作階段失敗",
+  "composer.pastChatsRetry": "重試",
   "composer.stopShort": "停止",
   "composer.pastedLabel": "[已貼上文字 #{id} · {lines} 行]",
   "composer.pastedShowPreview": "預覽貼上文字",
