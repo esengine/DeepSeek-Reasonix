@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"reasonix/internal/event"
 	"reasonix/internal/nilutil"
@@ -53,6 +54,13 @@ type Coordinator struct {
 	executor       *Agent
 	temperature    float64
 	sink           event.Sink
+
+	// plannerSessCacheHit/CacheMiss accumulate cache tokens across the planner's
+	// API calls (raw provider path), so usage events carry session-cumulative
+	// stats for the frontend's aggregate cache-rate display.
+	plannerSessCacheHit  atomic.Int64
+	plannerSessCacheMiss atomic.Int64
+
 	// shouldPlan gates the planner pass per turn; nil plans every turn. Lets a
 	// trivial, non-work turn (a question, a greeting) skip straight to the
 	// executor instead of paying a planner round on it.
@@ -296,13 +304,17 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 			c.sink.Emit(event.Event{Kind: event.Text, Text: chunk.Text, Source: event.UsageSourcePlanner})
 		case provider.ChunkUsage:
 			usage = chunk.Usage
+			c.plannerSessCacheHit.Add(int64(chunk.Usage.CacheHitTokens))
+			c.plannerSessCacheMiss.Add(int64(chunk.Usage.CacheMissTokens))
 		case provider.ChunkError:
 			return "", chunk.Err
 		}
 	}
 	// Closes the planner's raw text block (no markdown redraw) and prints its
 	// usage line, mirroring the old Fprintln + printUsage tail.
-	c.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: c.plannerPricing, Source: event.UsageSourcePlanner, UsageSource: event.UsageSourcePlanner})
+	c.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: c.plannerPricing,
+		Source: event.UsageSourcePlanner, UsageSource: event.UsageSourcePlanner,
+		SessionHit: int(c.plannerSessCacheHit.Load()), SessionMiss: int(c.plannerSessCacheMiss.Load())})
 
 	plan := text.String()
 	c.plannerSess.Add(provider.Message{Role: provider.RoleAssistant, Content: plan})

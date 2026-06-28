@@ -680,7 +680,7 @@ function applyEvent(s: State, e: WireEvent): State {
       const turnCost = s.turnCost + usageCost;
       const sessionCost = s.sessionCost + usageCost;
       const sessionCurrency = e.usage?.currency || s.sessionCurrency || "¥";
-      const usage = updateContextGauge ? e.usage : s.usage ?? e.usage;
+      const usage = e.usage ?? s.usage;
       return { ...s, usage, context: { ...s.context, used, sessionTokens }, turnTokens, turnTotalTokens, turnCost, sessionTokens, sessionCost, sessionCurrency };
     }
     case "notice":
