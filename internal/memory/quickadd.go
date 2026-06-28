@@ -4,7 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
+
+// quickAddMu serializes AppendDoc writes so concurrent "#" quick-adds don't
+// interleave their read-modify-write and clobber each other's note.
+var quickAddMu sync.Mutex
 
 // quickAddHeading marks the section quick-added notes accumulate under, so
 // repeated "#" additions group together instead of scattering through a
@@ -17,6 +22,9 @@ const quickAddHeading = "## Notes"
 // the write side of the "#" quick-add: a plain file edit the user can later
 // reorganise by hand.
 func AppendDoc(path, note string) error {
+	quickAddMu.Lock()
+	defer quickAddMu.Unlock()
+
 	note = oneLine(note)
 	if note == "" {
 		return nil
@@ -58,6 +66,30 @@ func writeDocFile(path, body string) error {
 	return os.WriteFile(path, []byte(out), 0o644)
 }
 
+// isATXHeading reports whether a line is a CommonMark ATX heading: 1–6 "#"
+// followed by a space or end-of-line. A line like "#tag" (no space) is NOT a
+// heading — it's a tag — so the section scanner won't stop at it and bullets
+// appended under "## Notes" stay inside that section even when a "#tag" line
+// appears later.
+func isATXHeading(line string) bool {
+	t := strings.TrimSpace(line)
+	if !strings.HasPrefix(t, "#") {
+		return false
+	}
+	n := 0
+	for _, r := range t {
+		if r != '#' {
+			break
+		}
+		n++
+	}
+	if n > 6 {
+		return false
+	}
+	rest := t[n:]
+	return rest == "" || strings.HasPrefix(rest, " ") || strings.HasPrefix(rest, "\t")
+}
+
 // insertUnderHeading appends bullet to the end of the section started by heading
 // — just before the next "## "/"# " heading, or at end of file if none follows.
 func insertUnderHeading(body, heading, bullet string) string {
@@ -74,7 +106,7 @@ func insertUnderHeading(body, heading, bullet string) string {
 	}
 	end := len(lines)
 	for i := start + 1; i < len(lines); i++ {
-		if strings.HasPrefix(strings.TrimSpace(lines[i]), "#") {
+		if isATXHeading(lines[i]) {
 			end = i
 			break
 		}

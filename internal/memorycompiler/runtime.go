@@ -2250,7 +2250,31 @@ func applyDriftControl(st state, now time.Time, traceID string) (state, DriftRep
 		st.Edges = appendEdge(st.Edges, edge)
 	}
 	if len(st.Edges) > 600 {
-		st.Edges = st.Edges[len(st.Edges)-600:]
+		// Preserve edges that touch a TruthLocked node: dropping them would
+		// silently sever a locked fact from its causal neighborhood. Keep all
+		// such edges, then fill the remaining budget with the most recent others.
+		truthIDs := map[string]bool{}
+		for _, n := range st.Nodes {
+			if n.TruthLocked {
+				truthIDs[n.ID] = true
+			}
+		}
+		var keep, rest []MemoryEdge
+		for _, e := range st.Edges {
+			if truthIDs[e.From] || truthIDs[e.To] {
+				keep = append(keep, e)
+			} else {
+				rest = append(rest, e)
+			}
+		}
+		budget := 600 - len(keep)
+		if budget < 0 {
+			budget = 0
+		}
+		if len(rest) > budget {
+			rest = rest[len(rest)-budget:]
+		}
+		st.Edges = append(keep, rest...)
 	}
 	report.ConflictingFacts = conflicts
 	report.OverusedStrategies = limitStrings(canonicalStrings(report.OverusedStrategies), 10)
@@ -2806,16 +2830,23 @@ func (r *Runtime) loadState() state {
 	return r.loadStateLocked()
 }
 
+// emptyState returns a fresh state with the minimal initialized fields. It is
+// the single source of truth for "what a brand-new state looks like" so the
+// corrupt-file and missing-file paths can't drift apart.
+func emptyState() state {
+	return state{NoisyRefs: map[string]int{}}
+}
+
 func (r *Runtime) loadStateLocked() state {
 	var st state
 	path := filepath.Join(r.dir, stateFile)
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return state{NoisyRefs: map[string]int{}}
+		return emptyState()
 	}
 	if err := json.Unmarshal(b, &st); err != nil {
 		_ = os.WriteFile(fmt.Sprintf("%s.corrupt-%d", path, time.Now().UnixNano()), b, 0o600)
-		return state{NoisyRefs: map[string]int{}}
+		return emptyState()
 	}
 	if st.NoisyRefs == nil {
 		st.NoisyRefs = map[string]int{}

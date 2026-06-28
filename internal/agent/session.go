@@ -59,10 +59,18 @@ func (s *Session) Snapshot() []provider.Message {
 }
 
 // RewriteVersion returns the current rewrite version.
-func (s *Session) RewriteVersion() int { return s.rewriteVersion }
+func (s *Session) RewriteVersion() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rewriteVersion
+}
 
 // IncrementRewrite bumps the rewrite version by 1.
-func (s *Session) IncrementRewrite() { s.rewriteVersion++ }
+func (s *Session) IncrementRewrite() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rewriteVersion++
+}
 
 // HasContent returns true when the session carries at least one user,
 // assistant, or tool message — i.e. more than just a system prompt. An

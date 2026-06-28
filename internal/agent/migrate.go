@@ -587,6 +587,11 @@ func transformAndCopyJsonl(src, dst string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	// os.Rename may fail transiently on Windows when antivirus software holds
+	// an open handle on the destination (Windows Defender, Smartscreen). The
+	// caller (migrateLegacySessionsWithMarkers) treats a failed copy as
+	// non-fatal and the next launch retries, so a transient AV lock is
+	// self-healing. See #4666.
 	if err := os.Rename(tmpPath, dst); err != nil {
 		return err
 	}

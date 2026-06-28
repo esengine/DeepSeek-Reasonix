@@ -18,6 +18,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -115,6 +116,12 @@ func loadFrom(dir string, names []string, scope Scope, seen *docSeen) []Source {
 // The shared file handle keeps the content and identity tied to the same target,
 // which matters when a discovered memory path is a symlink.
 func readDoc(path string) (string, os.FileInfo, bool) {
+	// Resolve symlinks so the returned identity tracks the real file, not the
+	// link — a discovered AGENTS.md that symlinks to CLAUDE.md should be
+	// recognized as the same physical file by docSeen.
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return "", nil, false
@@ -290,5 +297,23 @@ func absOf(p string) string {
 	return filepath.Clean(p)
 }
 
+// samePath reports whether two paths denote the same file, resolving symlinks
+// and comparing case-insensitively on Windows and macOS (where the filesystem
+// is case-insensitive by default). On Linux the comparison is case-sensitive.
+func samePath(a, b string) bool {
+	aa, err := filepath.EvalSymlinks(absOf(a))
+	if err != nil {
+		aa = absOf(a)
+	}
+	bb, err := filepath.EvalSymlinks(absOf(b))
+	if err != nil {
+		bb = absOf(b)
+	}
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return strings.EqualFold(aa, bb)
+	}
+	return aa == bb
+}
+
 // sameDir reports whether two paths denote the same directory.
-func sameDir(a, b string) bool { return absOf(a) == absOf(b) }
+func sameDir(a, b string) bool { return samePath(a, b) }

@@ -457,6 +457,10 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 			}
 			return FormatSubagentRunResult(answer, run, false), nil
 		})
+		if job == nil {
+			run.Release()
+			return "", fmt.Errorf("could not start background task %q", label)
+		}
 		if run != nil && run.Ref != "" {
 			return fmt.Sprintf("Started background task %q (%s).\n%s\nIt runs across turns; collect its final answer with wait (or wait will return it once done), and you'll be notified when it finishes.", job.ID, label, FormatSubagentReference(run)), nil
 		}

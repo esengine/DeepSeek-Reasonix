@@ -563,6 +563,12 @@ func underRoot(path, root string) bool {
 	if err != nil {
 		return false
 	}
+	if realPath, err := filepath.EvalSymlinks(absPath); err == nil {
+		absPath = realPath
+	}
+	if realRoot, err := filepath.EvalSymlinks(absRoot); err == nil {
+		absRoot = realRoot
+	}
 	rel, err := filepath.Rel(absRoot, absPath)
 	if err != nil {
 		return false
