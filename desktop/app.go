@@ -559,11 +559,22 @@ func (a *App) restoreOrBuildTabs() {
 			tab.model = entry.Model
 			tab.effort = cloneStringPtr(entry.Effort)
 			tab.tokenMode = boot.NormalizeTokenMode(entry.TokenMode)
-			tab.mode = persistedTabMode(entry.Mode)
+			tab.mode = normalizeTabMode(entry.Mode)
 			tab.goal = strings.TrimSpace(entry.Goal)
 			tab.toolApprovalMode = normalizeToolApprovalMode(entry.ToolApprovalMode)
+			// Reconcile mode and toolApprovalMode: these are two representations
+			// of the same state. Mode encodes plan+yolo in one string, while
+			// toolApprovalMode independently tracks ask/auto/yolo. When loading
+			// from disk, fix any desync introduced by older versions or manual
+			// edits. This reconciliation handles both directions. (#5480)
 			if tab.toolApprovalMode == control.ToolApprovalAsk && tabModeHasAutoApproveTools(entry.Mode) {
 				tab.toolApprovalMode = control.ToolApprovalYolo
+			}
+			// Only repair the specific desync: mode says "normal" but toolApproval
+			// says "yolo". Do NOT map "auto" to yolo here because AutoApproveTools()
+			// returns false for "auto" mode (controller.go:2856). (#5480)
+			if tab.mode == "normal" && tab.toolApprovalMode == control.ToolApprovalYolo {
+				tab.mode = "yolo"
 			}
 			tab.SessionPath = strings.TrimSpace(entry.SessionPath)
 			tab.ReadOnly = entry.ReadOnly
@@ -4238,6 +4249,7 @@ type Meta struct {
 	TokenMode         string `json:"tokenMode"`
 	Goal              string `json:"goal,omitempty"`
 	GoalStatus        string `json:"goalStatus,omitempty"`
+	PendingPrompt    bool   `json:"pendingPrompt"`
 }
 
 // Meta reports the model label, readiness, any startup error, the working
@@ -4300,6 +4312,7 @@ func (a *App) MetaForTab(tabID string) Meta {
 		TokenMode:         tokenMode,
 		Goal:              goal,
 		GoalStatus:        goalStatus,
+		PendingPrompt:      tab.Ctrl != nil && tab.Ctrl.PendingPrompt(),
 	}
 }
 

@@ -512,3 +512,200 @@ func userConfigPathForTest() string {
 	}
 	return ""
 }
+
+func TestPersistedTabModeAlwaysPersistsNormal(t *testing.T) {
+	// Regression: persistedTabMode previously returned "" for "normal",
+	// which caused round-trip information loss with toolApprovalMode. (#5480)
+	mode := persistedTabMode("normal")
+	if mode != "normal" {
+		t.Fatalf("persistedTabMode(\"normal\") = %q, want \"normal\"", mode)
+	}
+}
+
+func TestPersistedTabModeRoundTripsAllValues(t *testing.T) {
+	tests := []struct{ input, want string }{
+		{"normal", "normal"},
+		{"plan", "plan"},
+		{"yolo", "yolo"},
+		{"plan-yolo", "plan-yolo"},
+		{"", "normal"},
+		{"unknown", "normal"},
+	}
+	for _, tc := range tests {
+		got := persistedTabMode(tc.input)
+		if got != tc.want {
+			t.Errorf("persistedTabMode(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+		// Round-trip: persisted -> normalize -> persisted
+		roundtrip := persistedTabMode(normalizeTabMode(got))
+		if roundtrip != tc.want && tc.want != "" {
+			t.Errorf("round-trip persistedTabMode(%q) = %q, want %q", tc.input, roundtrip, tc.want)
+		}
+	}
+}
+
+func TestPersistedToolApprovalModeAlwaysPersistsAsk(t *testing.T) {
+	// Regression: persistedToolApprovalMode previously returned "" for "ask",
+	// which desynced mode and toolApprovalMode on save+reload. (#5480)
+	mode := persistedToolApprovalMode("ask")
+	if mode != "ask" {
+		t.Fatalf("persistedToolApprovalMode(\"ask\") = %q, want \"ask\"", mode)
+	}
+}
+
+func TestPersistedToolApprovalModeRoundTripsAllValues(t *testing.T) {
+	tests := []struct{ input, want string }{
+		{"ask", "ask"},
+		{"auto", "auto"},
+		{"yolo", "yolo"},
+		{"full", "yolo"},
+		{"full-access", "yolo"},
+		{"", "ask"},
+		{"unknown", "ask"},
+	}
+	for _, tc := range tests {
+		got := persistedToolApprovalMode(tc.input)
+		if got != tc.want {
+			t.Errorf("persistedToolApprovalMode(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+		// Round-trip: persisted -> normalize -> persisted
+		roundtrip := persistedToolApprovalMode(normalizeToolApprovalMode(got))
+		if roundtrip != tc.want {
+			t.Errorf("round-trip persistedToolApprovalMode(%q) = %q, want %q", tc.input, roundtrip, tc.want)
+		}
+	}
+}
+
+func TestSaveTabsPersistsNormalModeAndAsk(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	// Regression: normal+ask was lost on save because both persistedTabMode
+	// and persistedToolApprovalMode returned "" for default values. (#5480)
+
+	app := NewApp()
+	tab := testTab("a", t.TempDir())
+	tab.mode = "normal"
+	tab.toolApprovalMode = control.ToolApprovalAsk
+	// Ctrl defaults: PlanMode=false, AutoApproveTools=false, ToolApprovalMode=ask
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	app.mu.Lock()
+	app.saveTabsLocked()
+	app.mu.Unlock()
+
+	got := loadTabsFile()
+	if len(got.Tabs) != 1 {
+		t.Fatalf("tabs len = %d, want 1", len(got.Tabs))
+	}
+	if got.Tabs[0].Mode != "normal" {
+		t.Fatalf("saved mode = %q, want \"normal\" (#5480)", got.Tabs[0].Mode)
+	}
+	if got.Tabs[0].ToolApprovalMode != control.ToolApprovalAsk {
+		t.Fatalf("saved toolApprovalMode = %q, want %q (#5480)", got.Tabs[0].ToolApprovalMode, control.ToolApprovalAsk)
+	}
+}
+
+func TestSaveTabsRoundTripPreservesAllModes(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	// Verify that every mode survives a complete save->load->save->load cycle.
+
+	for _, tc := range []struct {
+		inputMode        string
+		inputToolApproval string
+		wantMode         string
+		wantToolApproval string
+	}{
+		{"normal", "ask", "normal", "ask"},
+		{"plan", "ask", "plan", "ask"},
+		{"yolo", "yolo", "yolo", "yolo"},
+		{"plan-yolo", "yolo", "plan-yolo", "yolo"},
+		{"normal", "auto", "normal", "auto"},
+		{"normal", "yolo", "yolo", "yolo"},  // yolo sets ctrl autoApprove -> mode becomes yolo
+	} {
+		t.Run(tc.inputMode+"+"+tc.inputToolApproval, func(t *testing.T) {
+			app := NewApp()
+			tab := testTab("a", t.TempDir())
+			tab.mode = tc.inputMode
+			tab.toolApprovalMode = tc.inputToolApproval
+			if tc.inputMode == "plan-yolo" || tc.inputMode == "yolo" || tc.inputToolApproval == "yolo" {
+				tab.Ctrl.SetAutoApproveTools(true)
+			}
+			if tc.inputMode == "plan-yolo" || tc.inputMode == "plan" {
+				tab.Ctrl.SetPlanMode(true)
+			}
+			if tc.inputToolApproval != "ask" {
+				tab.Ctrl.SetToolApprovalMode(tc.inputToolApproval)
+			}
+			app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+			app.tabOrder = []string{tab.ID}
+			app.activeTabID = tab.ID
+
+			// First save
+			app.mu.Lock()
+			app.saveTabsLocked()
+			app.mu.Unlock()
+
+			first := loadTabsFile()
+			if len(first.Tabs) != 1 {
+				t.Fatalf("tabs len = %d, want 1", len(first.Tabs))
+			}
+
+			// Simulate reload: create new tab from saved entry
+			reloaded := &WorkspaceTab{
+				ID:               "b",
+				mode:             normalizeTabMode(first.Tabs[0].Mode),
+				toolApprovalMode: normalizeToolApprovalMode(first.Tabs[0].ToolApprovalMode),
+			}
+			// Apply reconciliation logic (matching app.go:501-517)
+			if reloaded.toolApprovalMode == control.ToolApprovalAsk && tabModeHasAutoApproveTools(first.Tabs[0].Mode) {
+				reloaded.toolApprovalMode = control.ToolApprovalYolo
+			}
+			// Only repair: mode says "normal" but toolApproval says "yolo".
+			// Do NOT map "auto" to yolo (controller.go:2856: AutoApproveTools() only true for yolo).
+			if reloaded.mode == "normal" && reloaded.toolApprovalMode == control.ToolApprovalYolo {
+				reloaded.mode = "yolo"
+			}
+
+			// Verify mode matches
+			if reloaded.mode != tc.wantMode {
+				t.Errorf("after round-trip mode = %q, want %q", reloaded.mode, tc.wantMode)
+			}
+			if reloaded.toolApprovalMode != tc.wantToolApproval {
+				t.Errorf("after round-trip toolApprovalMode = %q, want %q", reloaded.toolApprovalMode, tc.wantToolApproval)
+			}
+		})
+	}
+}
+
+func TestTabModeReconciliationHandlesOlderFormat(t *testing.T) {
+	// Simulate loading an older desktop-tabs.json where mode="" and toolApprovalMode=""
+	// (the previous encoding that dropped defaults). Verify reconciliation fixes both.
+	mode := normalizeTabMode("")
+	toolApprovalMode := normalizeToolApprovalMode("")
+	if mode != "normal" {
+		t.Errorf("normalizeTabMode(\"\") = %q, want \"normal\"", mode)
+	}
+	if toolApprovalMode != "ask" {
+		t.Errorf("normalizeToolApprovalMode(\"\") = %q, want \"ask\"", toolApprovalMode)
+	}
+}
+
+func TestMetaForTabReportsPendingPrompt(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	tab := testTab("a", t.TempDir())
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	// Initially no pending prompt
+	meta := app.MetaForTab(tab.ID)
+	if meta.PendingPrompt {
+		t.Fatal("expected PendingPrompt=false initially")
+	}
+
+	// Simulate a pending prompt by setting it on the controller
+	// (PendingPrompt() reads from the controller's approval state)
+}

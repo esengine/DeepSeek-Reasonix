@@ -5120,25 +5120,22 @@ func normalizeToolApprovalMode(mode string) string {
 	}
 }
 
+// persistedToolApprovalMode always persists the tool approval mode so the
+// value survives tab reload, app relaunch, and tab switches. Previously only
+// non-default values (auto, yolo) were persisted; returning "" for "ask" caused
+// a round-trip information loss that desynced mode and toolApprovalMode fields
+// when the tab was saved and reloaded. (#5480)
 func persistedToolApprovalMode(mode string) string {
-	switch normalizeToolApprovalMode(mode) {
-	case control.ToolApprovalAuto, control.ToolApprovalYolo:
-		return normalizeToolApprovalMode(mode)
-	default:
-		return ""
-	}
+	return normalizeToolApprovalMode(mode)
 }
 
-// persistedTabMode is the composer mode saved with a tab so it survives reload
-// and app relaunch. plan, yolo, and plan-yolo are remembered (a restored yolo
-// tab keeps its status-bar indicator); "normal" is the default and isn't
-// persisted. (#3517)
+// persistedTabMode always persists the mode so it survives reload, app
+// relaunch, and tab switches. Previously "normal" was omitted (returned "")
+// which caused round-trip information loss when combined with the separate
+// toolApprovalMode field. Now every mode is persisted so loading always
+// reconstructs the exact same state. (#5480)
 func persistedTabMode(mode string) string {
-	switch normalizeTabMode(mode) {
-	case "plan", "yolo", "plan-yolo":
-		return normalizeTabMode(mode)
-	}
-	return ""
+	return normalizeTabMode(mode)
 }
 
 func newTabID() string {
