@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1454,5 +1455,39 @@ func TestServeUnknownMethod(t *testing.T) {
 	}
 	if resp.Error.Code != ErrMethodNotFound {
 		t.Errorf("error code = %d, want %d", resp.Error.Code, ErrMethodNotFound)
+	}
+}
+
+func TestServeRequestRunsAfterResponseHookAfterWritingResult(t *testing.T) {
+	var buf bytes.Buffer
+	conn := NewConn(strings.NewReader(""), &buf)
+	conn.Handle("test/hook", func(context.Context, json.RawMessage) (any, error) {
+		return afterResponse{
+			result: map[string]string{"ok": "yes"},
+			after: func() {
+				_ = conn.Notify("test/notification", map[string]string{"after": "yes"})
+			},
+		}, nil
+	})
+
+	conn.serveRequest(context.Background(), json.RawMessage("1"), "test/hook", nil)
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("wrote %d frames, want 2: %q", len(lines), buf.String())
+	}
+	var response frame
+	if err := json.Unmarshal([]byte(lines[0]), &response); err != nil {
+		t.Fatalf("response frame: %v", err)
+	}
+	if response.ID == nil || response.Method != "" {
+		t.Fatalf("first frame = %+v, want response", response)
+	}
+	var notification frame
+	if err := json.Unmarshal([]byte(lines[1]), &notification); err != nil {
+		t.Fatalf("notification frame: %v", err)
+	}
+	if notification.Method != "test/notification" || notification.ID != nil {
+		t.Fatalf("second frame = %+v, want notification", notification)
 	}
 }

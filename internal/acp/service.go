@@ -170,6 +170,22 @@ type acpSession struct {
 	deleted bool
 }
 
+// afterResponse wraps a result with deferred work that runs after the
+// JSON-RPC response is written — this keeps ACP notifications (e.g.
+// available_commands_update) strictly after their matching response.
+type afterResponse struct {
+	result any
+	after  func()
+}
+
+func (r afterResponse) Response() any { return r.result }
+
+func (r afterResponse) AfterResponse() {
+	if r.after != nil {
+		r.after()
+	}
+}
+
 func (s *acpSession) begin(ctx context.Context) (context.Context, context.CancelFunc, bool) {
 	runCtx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
@@ -348,12 +364,13 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 	s.mu.Lock()
 	s.sessions[id] = sess
 	s.mu.Unlock()
-	s.sendAvailableCommands(sess)
-
-	return SessionNewResult{
-		SessionID:     id,
-		Models:        cfgState.Models,
-		ConfigOptions: cfgState.ConfigOptions,
+	return afterResponse{
+		result: SessionNewResult{
+			SessionID:     id,
+			Models:        cfgState.Models,
+			ConfigOptions: cfgState.ConfigOptions,
+		},
+		after: func() { s.sendAvailableCommands(sess) },
 	}, nil
 }
 
