@@ -29,6 +29,7 @@ import {
   Brain,
   Cpu,
   Palette,
+  ChevronDown,
 } from "lucide-react";
 import { useToast } from "./lib/toast";
 import { asArray } from "./lib/array";
@@ -121,6 +122,7 @@ import {
   saveRightDockTreeWidth,
   saveSidebarCollapsed,
   saveSidebarWidth,
+  saveTopicbarCollapsed,
   useLayoutStore,
 } from "./store/layout";
 import { useOverlayStore } from "./store/overlays";
@@ -871,6 +873,8 @@ export default function App() {
   const [sidebarImDetailConnectionId, setSidebarImDetailConnectionId] = useState("");
   const sidebarCollapsed = useLayoutStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useLayoutStore((s) => s.setSidebarCollapsed);
+  const topicbarCollapsed = useLayoutStore((s) => s.topicbarCollapsed);
+  const setTopicbarCollapsed = useLayoutStore((s) => s.setTopicbarCollapsed);
   const heartbeatOpen = useOverlayStore((s) => s.heartbeatOpen);
   const setHeartbeatOpen = useOverlayStore((s) => s.setHeartbeatOpen);
   type TimeFilter = "all" | "10" | "20" | "1h" | "3h" | "5h" | "1d";
@@ -1754,6 +1758,12 @@ export default function App() {
     setSidebarCollapsed(nextCollapsed);
     saveSidebarCollapsed(nextCollapsed);
   }, [anchorAppScrollToChat, closeTransientOverlays, pulseSidebarToggle, sidebarCollapsed]);
+
+  const toggleTopicbarCollapsed = useCallback(() => {
+    const next = !topicbarCollapsed;
+    setTopicbarCollapsed(next);
+    saveTopicbarCollapsed(next);
+  }, [topicbarCollapsed]);
 
   const sidebarWidthClamp = desktopLayoutStyle === "creation" ? clampCreationSidebarWidth : clampSidebarWidth;
   const sidebarRenderWidth = liveSidebarWidth ?? sidebarWidth;
@@ -3023,7 +3033,7 @@ export default function App() {
 
         <section className={`chat-pane${sidebarCreation && !sessionHasContent ? " chat-pane--creation-empty" : ""}`}>
           <>
-          <header className="topicbar">
+          <header className={`topicbar${topicbarCollapsed ? " topicbar--collapsed" : ""}`}>
             {workbenchChromeHidden && (
               <Tooltip label={sidebarToggleTitle}>
                 <button
@@ -3106,6 +3116,16 @@ export default function App() {
               )}
             </div>
             <div className="topicbar__spacer" />
+            <Tooltip label={topicbarCollapsed ? t("topicBar.expand") : t("topicBar.collapse")}>
+              <button
+                className={`topicbar__collapse-btn${topicbarCollapsed ? " topicbar__collapse-btn--collapsed" : ""}`}
+                type="button"
+                onClick={toggleTopicbarCollapsed}
+                aria-label={topicbarCollapsed ? t("topicBar.expand") : t("topicBar.collapse")}
+              >
+                <ChevronDown size={14} />
+              </button>
+            </Tooltip>
             <div className="topicbar__actions">
               {workbenchChromeHidden && (
                 <Tooltip label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}>

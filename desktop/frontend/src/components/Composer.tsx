@@ -48,7 +48,7 @@ export interface WorkspaceReference {
 
 const LONG_PASTE_MIN_CHARS = 2000;
 const LONG_PASTE_MIN_LINES = 20;
-const COMPOSER_MIN_HEIGHT = 104;
+const COMPOSER_MIN_HEIGHT = 64;
 const COMPOSER_MAX_HEIGHT = 360;
 const COMPOSER_MAX_VIEWPORT_RATIO = 0.4;
 const COMPOSER_AUTO_RESERVED_HEIGHT = 58;
@@ -1412,7 +1412,8 @@ export function Composer({
   }, []);
 
   const measureTextareaAutoHeight = useCallback(() => {
-    if (composerHeight !== null) {
+    // Fixed at a size above minimum → lock, no auto-growth.
+    if (composerHeight !== null && composerHeight > COMPOSER_MIN_HEIGHT) {
       setTextareaAutoHeight(null);
       setTextareaAutoOverflow(false);
       return;
@@ -1425,8 +1426,21 @@ export function Composer({
     const nextHeight = Math.min(node.scrollHeight, maxHeight);
     const nextOverflow = node.scrollHeight > maxHeight + 1;
     node.style.height = previousHeight;
-    setTextareaAutoHeight((current) => (current === nextHeight ? current : nextHeight));
-    setTextareaAutoOverflow((current) => (current === nextOverflow ? current : nextOverflow));
+
+    if (composerHeight === null) {
+      // Pure auto mode: the textarea floats freely via textareaAutoHeight.
+      setTextareaAutoHeight((current) => (current === nextHeight ? current : nextHeight));
+      setTextareaAutoOverflow((current) => (current === nextOverflow ? current : nextOverflow));
+    } else {
+      // Dragged to minimum height: grow the card to match content.
+      const cardEl = composerCardRef.current;
+      if (!cardEl) return;
+      const currentCardHeight = cardEl.getBoundingClientRect().height;
+      const currentTextareaHeight = node.getBoundingClientRect().height;
+      const chromeHeight = currentCardHeight - currentTextareaHeight;
+      const newCardHeight = Math.max(COMPOSER_MIN_HEIGHT, Math.min(nextHeight + chromeHeight, composerMaxHeight()));
+      setComposerHeight((current) => (current === newCardHeight ? current : newCardHeight));
+    }
   }, [composerHeight]);
 
   useLayoutEffect(() => {
@@ -1434,7 +1448,7 @@ export function Composer({
   }, [text, measureTextareaAutoHeight]);
 
   useEffect(() => {
-    if (composerHeight !== null) return;
+    if (composerHeight !== null && composerHeight > COMPOSER_MIN_HEIGHT) return;
     let frame = 0;
     const update = () => {
       if (frame) window.cancelAnimationFrame(frame);

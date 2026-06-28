@@ -4888,7 +4888,7 @@ a[href] {
   flex: 0 0 auto;
   border-top: 1px solid var(--border-soft);
   background: var(--chat-bg);
-  padding: 12px 32px 10px;
+  padding: 8px 24px 6px;
 }
 
 /* ── undo-rewind banner (above composer after a rewind) ─────────────── */
@@ -5955,7 +5955,7 @@ a[href] {
 
 .statusbar {
   max-width: var(--maxw);
-  margin: 7px auto 0;
+  margin: 4px auto 0;
   display: flex;
   align-items: center;
   gap: 0;
@@ -16885,6 +16885,57 @@ a[href] {
 
 .topicbar__spacer {
   display: none;
+}
+
+/* ── topicbar collapse ──────────────────────────────────────────────────── */
+.topicbar--collapsed {
+  min-height: 30px;
+  padding: 2px 18px;
+  gap: 8px;
+  overflow: hidden;
+}
+.topicbar--collapsed .topicbar__title-row h1 {
+  font-size: 13px; /* smaller title when collapsed */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topicbar--collapsed .topicbar__title-row .topicbar__icon-btn {
+  display: none; /* hide rename pencil */
+}
+.topicbar--collapsed .topicbar__title-edit {
+  display: none; /* hide rename input */
+}
+.topicbar--collapsed .topicbar__title-button {
+  font-size: 13px;
+}
+.topicbar--collapsed .topicbar__subtitle {
+  display: none;
+}
+.topicbar--collapsed .topicbar__actions {
+  display: none;
+}
+.topicbar__collapse-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  --wails-draggable: no-drag;
+  transition: color 0.12s, background 0.12s, transform 0.16s ease;
+}
+.topicbar__collapse-btn:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
+}
+.topicbar__collapse-btn--collapsed {
+  transform: rotate(-90deg);
 }
 
 .topicbar__actions {

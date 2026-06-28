@@ -151,6 +151,8 @@ export const en = {
   "topicBar.exportJson": "Export JSON",
   "topicBar.exportPdf": "Export PDF",
   "topicBar.exportImage": "Export Image",
+  "topicBar.collapse": "Collapse topic bar",
+  "topicBar.expand": "Expand topic bar",
 
   // scope labels
   "scope.global": "Scope: Global",

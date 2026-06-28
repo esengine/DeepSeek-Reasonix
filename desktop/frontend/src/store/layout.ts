@@ -19,6 +19,7 @@ import { loadLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import { applySetState } from "./setState";
 
 const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
+const TOPICBAR_COLLAPSED_KEY = "reasonix.topicbar.collapsed";
 const SIDEBAR_DEFAULT_WIDTH = 264;
 export const SIDEBAR_MIN_WIDTH = 264;
 export const CREATION_SIDEBAR_MIN_WIDTH = 236;
@@ -83,6 +84,24 @@ export function saveSidebarCollapsed(collapsed: boolean): void {
   }
 }
 
+function loadTopicbarCollapsed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(TOPICBAR_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function saveTopicbarCollapsed(collapsed: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(TOPICBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
+  } catch {
+    /* ignore storage failures */
+  }
+}
+
 function loadSidebarWidth(): number {
   return loadLayoutSize("sidebarWidthGraphite", defaultSidebarWidth(), clampStoredSidebarWidth);
 }
@@ -119,6 +138,7 @@ export type RightDockMode = "context" | "files" | "changed";
 export type LayoutState = {
   sidebarCollapsed: boolean;
   sidebarWidth: number;
+  topicbarCollapsed: boolean;
   rightDockTreeWidth: number;
   rightDockPreviewWidth: number;
   workspacePanelOpen: boolean;
@@ -127,6 +147,7 @@ export type LayoutState = {
   rightDockMode: RightDockMode;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setSidebarWidth: (width: number) => void;
+  setTopicbarCollapsed: (collapsed: boolean) => void;
   setRightDockTreeWidth: (width: number) => void;
   setRightDockPreviewWidth: (width: number) => void;
   setWorkspacePanelOpen: Dispatch<SetStateAction<boolean>>;
@@ -138,6 +159,7 @@ export type LayoutState = {
 export const useLayoutStore = create<LayoutState>((set) => ({
   sidebarCollapsed: loadSidebarCollapsed(),
   sidebarWidth: loadSidebarWidth(),
+  topicbarCollapsed: loadTopicbarCollapsed(),
   rightDockTreeWidth: loadRightDockTreeWidth(),
   rightDockPreviewWidth: loadRightDockPreviewWidth(),
   workspacePanelOpen: WORKSPACE_PANEL_DEFAULT_OPEN,
@@ -146,6 +168,7 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   rightDockMode: "context",
   setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
   setSidebarWidth: (width) => set({ sidebarWidth: width }),
+  setTopicbarCollapsed: (collapsed) => set({ topicbarCollapsed: collapsed }),
   setRightDockTreeWidth: (width) => set({ rightDockTreeWidth: width }),
   setRightDockPreviewWidth: (width) => set({ rightDockPreviewWidth: width }),
   setWorkspacePanelOpen: (update) => set((s) => ({ workspacePanelOpen: applySetState(s.workspacePanelOpen, update) })),
