@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { useT } from "../lib/i18n";
 
@@ -54,7 +54,7 @@ async function writeClipboardText(value: string): Promise<void> {
 // CopyButton copies text to the clipboard on click and briefly flips to a check.
 // Clipboard writes are best-effort across browser dev, Wails, and webviews, so
 // the visible acknowledgement stays tied to the user action.
-export function CopyButton({
+export const CopyButton = memo(function CopyButton({
   text,
   getText,
   className,
@@ -111,4 +111,4 @@ export function CopyButton({
       )}
     </button>
   );
-}
+});

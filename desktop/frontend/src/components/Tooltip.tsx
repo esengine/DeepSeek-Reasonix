@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 
@@ -33,7 +33,7 @@ function samePosition(
   );
 }
 
-export function Tooltip({
+export const Tooltip = memo(function Tooltip({
   label,
   children,
   side = "top",
@@ -182,4 +182,4 @@ export function Tooltip({
         )}
     </>
   );
-}
+});
