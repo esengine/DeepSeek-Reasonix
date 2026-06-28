@@ -22,8 +22,18 @@ Use the provided tools to investigate or act. Return a single final answer that 
 and self-contained — the parent will see only that answer, not your tool calls or reasoning.
 If you need to ask for clarification, fail with a precise question instead of guessing.`
 
+// DefaultReadOnlyTaskSystemPrompt steers read-only sub-agents toward isolated
+// research. They never receive writer tools, persisted transcript controls, or
+// background process controls, so their final answer is the only handoff.
+const DefaultReadOnlyTaskSystemPrompt = `You are a read-only research sub-agent invoked by a parent coding agent.
+Use only the provided read-only tools to inspect code, docs, history, and safe shell output.
+Do not attempt to write files, install capabilities, mutate memory, control long-lived
+processes, or delegate to another agent. Return a concise, self-contained final answer
+with the evidence the parent needs.`
+
 var subagentMetaTools = []string{
 	"task",
+	"parallel_tasks",
 	"run_skill",
 	"read_skill",
 	"install_skill",
@@ -38,6 +48,10 @@ var subagentJobTools = []string{
 	"wait",
 	"bash_output",
 	"kill_shell",
+}
+
+var readOnlySubagentWorkflowTools = []string{
+	"connect_tool_source",
 }
 
 const subagentToolBoundarySummary = "Recursive agent/skill tools and unsupported background job tools (wait, bash_output, kill_shell) are excluded; bash is exposed as foreground-only inside subagents."
@@ -99,6 +113,34 @@ func (b foregroundOnlyBash) Execute(ctx context.Context, args json.RawMessage) (
 }
 
 func (b foregroundOnlyBash) ReadOnly() bool { return b.inner.ReadOnly() }
+
+type readOnlyBash struct {
+	inner tool.Tool
+}
+
+func (b readOnlyBash) Name() string { return "bash" }
+
+func (b readOnlyBash) Description() string {
+	desc := strings.TrimSpace(b.inner.Description())
+	if desc == "" {
+		desc = "Execute a command in the shell and return combined stdout/stderr."
+	}
+	desc = strings.Replace(desc, "Execute a command in the shell", "Execute a foreground read-only command in the shell", 1)
+	return desc + " Only plan-mode safe read-only commands are allowed; shell operators, background execution, process preservation, and write-capable arguments are blocked."
+}
+
+func (readOnlyBash) Schema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Read-only shell command to execute in the foreground. Must match the plan-mode safe bash policy."}},"required":["command"]}`)
+}
+
+func (b readOnlyBash) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	if blocked, msg := planModeBashBlocked(args); blocked {
+		return msg, nil
+	}
+	return b.inner.Execute(ctx, args)
+}
+
+func (readOnlyBash) ReadOnly() bool { return true }
 
 // TaskTool spawns a sub-agent in its own session for a focused sub-task. The
 // sub-agent runs with a filtered tool whitelist and the same step budget shape
@@ -461,6 +503,46 @@ var plannerNonResearchTools = []string{
 func PlannerToolRegistry(parent *tool.Registry) *tool.Registry {
 	exclude := append(SubagentMetaTools(), plannerNonResearchTools...)
 	return FilterReadOnlyRegistry(parent, exclude...)
+}
+
+// ReadOnlySubagentToolRegistry returns the tool set exposed to read-only
+// sub-agents: read-only research tools plus a bash wrapper that enforces the
+// plan-mode safe command policy at execution time. Workflow/meta tools are
+// excluded even when their Tool.ReadOnly contract is true.
+func ReadOnlySubagentToolRegistry(parent *tool.Registry, names []string) *tool.Registry {
+	exclude := append(SubagentMetaTools(), subagentJobTools...)
+	exclude = append(exclude, plannerNonResearchTools...)
+	exclude = append(exclude, readOnlySubagentWorkflowTools...)
+	ex := make(map[string]bool, len(exclude))
+	for _, e := range exclude {
+		ex[e] = true
+	}
+	sub := tool.NewRegistry()
+	if parent == nil {
+		return sub
+	}
+	src := names
+	if len(src) == 0 {
+		src = parent.Names()
+	}
+	for _, name := range src {
+		if ex[name] {
+			continue
+		}
+		tl, ok := parent.Get(name)
+		if !ok {
+			continue
+		}
+		if name == "bash" {
+			sub.Add(readOnlyBash{inner: tl})
+			continue
+		}
+		if !tl.ReadOnly() {
+			continue
+		}
+		sub.Add(tl)
+	}
+	return sub
 }
 
 // FilterReadOnlyRegistry builds a sub-registry containing only tools whose
