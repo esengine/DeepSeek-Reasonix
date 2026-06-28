@@ -42,6 +42,13 @@ const (
 	staleConfidenceThreshold  = 0.2
 )
 
+// runtimeLocks maps cleaned project directory paths to per-directory mutexes
+// so concurrent writes to the same project's memory state are serialised.
+// Entries are intentionally never deleted: each entry is a single *sync.Mutex
+// (lightweight), and the number of unique project directories visited during
+// a process lifetime is bounded in practice. If a future use case requires
+// cleanup, iterate over the map and remove entries whose Runtime instances
+// have been garbage-collected — but that adds complexity for negligible gain.
 var runtimeLocks sync.Map
 
 // Runtime owns one project's Memory v5 state.
