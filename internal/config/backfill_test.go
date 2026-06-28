@@ -430,6 +430,27 @@ func TestApplyDeepSeekOfficialDefaultPricingKeepsCustomPrice(t *testing.T) {
 	}
 }
 
+func TestApplyDeepSeekOfficialDefaultPricingPreservesUSDCurrency(t *testing.T) {
+	c := &Config{Language: "zh", Providers: []ProviderEntry{{
+		Name:    "deepseek-flash",
+		Kind:    "openai",
+		BaseURL: "https://api.deepseek.com",
+		Model:   "deepseek-v4-flash",
+		Price:   &provider.Pricing{CacheHit: 0.0028, Input: 0.14, Output: 0.28, Currency: "$"},
+	}}}
+	applyDeepSeekOfficialDefaultPricing(c)
+	p, ok := c.Provider("deepseek-flash")
+	if !ok {
+		t.Fatal("deepseek-flash provider missing")
+	}
+	if p.Price == nil || p.Price.Currency != "$" {
+		t.Fatalf("USD price overridden: got %+v, want currency $", p.Price)
+	}
+	if p.Price.Output != 0.28 {
+		t.Fatalf("USD output = %v, want 0.28", p.Price.Output)
+	}
+}
+
 func TestResetOfficialProviderPricingOnUpgradeRunsOnce(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "reasonix.toml")
 	c := &Config{

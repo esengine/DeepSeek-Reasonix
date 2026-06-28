@@ -184,7 +184,15 @@ func backfillDeepSeekPro(c *Config) {
 	for _, bp := range Default().Providers {
 		if bp.Name == "deepseek-pro" {
 			bp.APIKeyEnv = flash.APIKeyEnv
-			bp.Price = deepSeekV4PriceForModel(c.DeepSeekOfficialPricingLanguage(), proModel)
+			// Use the flash provider's existing currency to pick the price table (#4814)
+			if table := matchDeepSeekPriceTable(flash.Price); table != nil {
+				if price := table[proModel]; price != nil {
+					bp.Price = clonePricing(price)
+				}
+			}
+			if bp.Price == nil {
+				bp.Price = clonePricing(deepSeekV4Prices()[proModel])
+			}
 			c.Providers = append(c.Providers, bp)
 			return
 		}

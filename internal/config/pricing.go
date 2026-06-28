@@ -53,11 +53,6 @@ func deepSeekV4PricesForConfig(c *Config) map[string]*provider.Pricing {
 	return deepSeekV4Prices()
 }
 
-func deepSeekV4PriceForModel(lang, model string) *provider.Pricing {
-	_ = lang
-	return clonePricing(deepSeekV4Prices()[strings.TrimSpace(model)])
-}
-
 // DeepSeekOfficialPricingLanguage is retained for settings/template compatibility.
 // Official DeepSeek providers now seed RMB prices by default; explicit user
 // prices in config still override these defaults.
@@ -77,21 +72,49 @@ func applyDeepSeekOfficialDefaultPricing(c *Config) {
 	if c == nil {
 		return
 	}
-	lang := c.DeepSeekOfficialPricingLanguage()
 	for i := range c.Providers {
 		p := &c.Providers[i]
 		if officialProviderKind(p) != "deepseek" {
 			continue
 		}
-		if isKnownDeepSeekOfficialPricing(p.Model, p.Price) {
-			p.Price = deepSeekV4PriceForModel(lang, p.Model)
+		if table := matchDeepSeekPriceTable(p.Price); table != nil {
+			if updated := table[strings.TrimSpace(p.Model)]; updated != nil {
+				p.Price = clonePricing(updated)
+			}
 		}
 		for model, price := range p.Prices {
-			if isKnownDeepSeekOfficialPricing(model, price) {
-				p.Prices[model] = deepSeekV4PriceForModel(lang, model)
+			if table := matchDeepSeekPriceTable(price); table != nil {
+				if updated := table[strings.TrimSpace(model)]; updated != nil {
+					p.Prices[model] = clonePricing(updated)
+				}
 			}
 		}
 	}
+}
+
+// matchDeepSeekPriceTable returns the DeepSeek price table that the given
+// pricing matches, so callers can pull updates from the same table (preserving
+// the user's currency choice). Returns nil when the pricing is custom. (#4814)
+func matchDeepSeekPriceTable(price *provider.Pricing) map[string]*provider.Pricing {
+	if price == nil {
+		return nil
+	}
+	if p := deepSeekV4Prices(); isKnownInTable(price, p) {
+		return p
+	}
+	if p := deepSeekV4PricesUSD(); isKnownInTable(price, p) {
+		return p
+	}
+	return nil
+}
+
+func isKnownInTable(price *provider.Pricing, table map[string]*provider.Pricing) bool {
+	for _, ref := range table {
+		if samePricing(price, ref) {
+			return true
+		}
+	}
+	return false
 }
 
 func mimoV25ProPrice() *provider.Pricing {
@@ -186,19 +209,6 @@ func resetDeepSeekOfficialPricing(p *ProviderEntry) {
 			p.Prices[model] = clonePricing(price)
 		}
 	}
-}
-
-func isKnownDeepSeekOfficialPricing(model string, price *provider.Pricing) bool {
-	model = strings.TrimSpace(model)
-	if model == "" || price == nil {
-		return false
-	}
-	for _, prices := range []map[string]*provider.Pricing{deepSeekV4Prices(), deepSeekV4PricesUSD()} {
-		if samePricing(price, prices[model]) {
-			return true
-		}
-	}
-	return false
 }
 
 func samePricing(a, b *provider.Pricing) bool {
