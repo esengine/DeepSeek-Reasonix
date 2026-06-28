@@ -2939,10 +2939,14 @@ func removeString(values []string, value string) []string {
 		return uniqueStrings(values)
 	}
 	out := make([]string, 0, len(values))
-	for _, item := range uniqueStrings(values) {
-		if item != value {
-			out = append(out, item)
+	seen := make(map[string]bool, len(values))
+	for _, item := range values {
+		item = strings.TrimSpace(item)
+		if item == "" || item == value || seen[item] {
+			continue
 		}
+		seen[item] = true
+		out = append(out, item)
 	}
 	return out
 }
@@ -2952,8 +2956,8 @@ func containsDesktopString(values []string, value string) bool {
 	if value == "" {
 		return false
 	}
-	for _, item := range uniqueStrings(values) {
-		if item == value {
+	for _, item := range values {
+		if strings.TrimSpace(item) == value {
 			return true
 		}
 	}
