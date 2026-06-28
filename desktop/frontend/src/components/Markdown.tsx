@@ -1,6 +1,16 @@
-import { lazy, memo, Suspense } from "react";
+import { lazy, memo, Suspense, useEffect } from "react";
 
 const MarkdownRenderer = lazy(() => import("./MarkdownRenderer"));
+
+// Preload the MarkdownRenderer code-split chunk so the first message renders
+// without a Suspense fallback flash of raw text.
+let preloaded = false;
+function preloadMarkdownRenderer() {
+  if (preloaded) return;
+  preloaded = true;
+  void import("./MarkdownRenderer");
+}
+preloadMarkdownRenderer();
 
 export const Markdown = memo(function Markdown({
   text,
