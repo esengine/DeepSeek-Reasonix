@@ -1672,6 +1672,9 @@ export function Composer({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Cancel any pending native clipboard image paste timer on any key press,
+    // preventing an image path from being inserted after user-typed text.
+    clearNativeClipboardPasteTimer();
     const composing = isImeKeyEvent(e, composingRef.current, lastCompositionEndAt.current);
     const native = e.nativeEvent as globalThis.KeyboardEvent & {
       keyCode?: number;
