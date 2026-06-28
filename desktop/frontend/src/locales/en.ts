@@ -152,6 +152,14 @@ export const en = {
   "topicBar.exportPdf": "Export PDF",
   "topicBar.exportImage": "Export Image",
 
+  // past:chats
+  "composer.pastChatsLoading": "Loading sessions...",
+  "composer.pastChatsEmpty": "No recent sessions",
+  "composer.pastChatsNoMatch": "No matching sessions",
+  "composer.pastChatsBackToList": "← Back to file list",
+  "composer.pastChatsSearchPlaceholder": "Search sessions...",
+  "composer.removeSessionRef": "Remove session reference",
+
   // scope labels
   "scope.global": "Scope: Global",
   "scope.project": "Project · {name}",

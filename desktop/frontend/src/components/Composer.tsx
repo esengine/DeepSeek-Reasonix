@@ -2011,11 +2011,11 @@ export function Composer({
           <div className="slashmenu" role="listbox">
             {loadingPastChats ? (
               <div className="slashmenu__item slashmenu__item--empty">
-                <span className="slashmenu__name">正在加载历史会话...</span>
+                <span className="slashmenu__name">{t("composer.pastChatsLoading")}</span>
               </div>
             ) : pastChats.length === 0 ? (
               <div className="slashmenu__item slashmenu__item--empty">
-                <span className="slashmenu__name">暂无历史会话</span>
+                <span className="slashmenu__name">{t("composer.pastChatsEmpty")}</span>
               </div>
             ) : (
               <>
@@ -2024,7 +2024,7 @@ export function Composer({
                   <input
                     className="slashmenu__search"
                     type="text"
-                    placeholder="搜索历史会话…"
+                    placeholder={t("composer.pastChatsSearchPlaceholder")}
                     value={pastChatQuery}
                     autoFocus
                     onChange={(ev) => {
@@ -2036,7 +2036,7 @@ export function Composer({
                 </div>
                 {filteredPastChats.length === 0 ? (
                   <div className="slashmenu__item slashmenu__item--empty">
-                    <span className="slashmenu__name">没有匹配的历史会话</span>
+                    <span className="slashmenu__name">{t("composer.pastChatsNoMatch")}</span>
                   </div>
                 ) : (
                   filteredPastChats.map((session, i) => {
@@ -2092,7 +2092,7 @@ export function Composer({
                 setActive(0);
               }}
             >
-              <span className="slashmenu__name">← 返回文件列表</span>
+              <span className="slashmenu__name">{t("composer.pastChatsBackToList")}</span>
             </button>
           </div>
         ) : (
@@ -2196,7 +2196,7 @@ export function Composer({
                   </span>
                 </span>
               </Tooltip>
-              <Tooltip label="移除引用会话">
+              <Tooltip label={t("composer.removeSessionRef")}>
                 <button
                   type="button"
                   onClick={() => removeSessionRef(ref.path)}

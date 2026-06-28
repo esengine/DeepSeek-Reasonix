@@ -1201,6 +1201,14 @@ export const zhTW: Record<DictKey, string> = {
   "topicBar.command": "命令",
   "topicBar.exportPdf": "匯出 PDF",
   "topicBar.exportImage": "匯出圖片",
+
+  // past:chats
+  "composer.pastChatsLoading": "正在載入歷史工作階段...",
+  "composer.pastChatsEmpty": "暫無歷史工作階段",
+  "composer.pastChatsNoMatch": "沒有符合的工作階段",
+  "composer.pastChatsBackToList": "← 返回檔案列表",
+  "composer.pastChatsSearchPlaceholder": "搜尋工作階段...",
+  "composer.removeSessionRef": "移除引用工作階段",
   "workspace.filterReferencedFiles": "篩選依賴檔案…",
   "workspace.clearFileScope": "顯示完整檔案樹",
   "workspace.clearChangeScope": "顯示全部改動",

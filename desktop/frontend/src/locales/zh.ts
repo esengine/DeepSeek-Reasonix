@@ -153,6 +153,14 @@ export const zh: Record<DictKey, string> = {
   "topicBar.exportPdf": "导出 PDF",
   "topicBar.exportImage": "导出图片",
 
+  // past:chats
+  "composer.pastChatsLoading": "正在加载历史会话...",
+  "composer.pastChatsEmpty": "暂无历史会话",
+  "composer.pastChatsNoMatch": "没有匹配的历史会话",
+  "composer.pastChatsBackToList": "← 返回文件列表",
+  "composer.pastChatsSearchPlaceholder": "搜索历史会话...",
+  "composer.removeSessionRef": "移除引用会话",
+
   // 范围标签
   "scope.global": "范围：全局",
   "scope.project": "项目 · {name}",
