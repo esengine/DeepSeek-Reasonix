@@ -11,6 +11,12 @@ import (
 // keyed by file name and invalidated by mtime, so the flash model is queried
 // once per session rather than on every sidebar refresh. Persistence is
 // best-effort: a missing or unreadable cache just regenerates.
+//
+// The cache is capped at maxTitleCacheEntries to prevent unbounded growth over
+// long server uptimes. When the limit is reached, a single oldest entry is
+// evicted before inserting the new one.
+const maxTitleCacheEntries = 1000
+
 type titleCache struct {
 	mu      sync.Mutex
 	dir     string
@@ -51,6 +57,13 @@ func (c *titleCache) put(name, title string, mod int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.load()
+	// Evict oldest entry when at capacity to prevent unbounded growth.
+	if len(c.entries) >= maxTitleCacheEntries {
+		for k := range c.entries {
+			delete(c.entries, k)
+			break
+		}
+	}
 	c.entries[name] = titleEntry{Title: title, Mod: mod}
 	if data, err := json.Marshal(c.entries); err == nil {
 		_ = os.WriteFile(filepath.Join(c.dir, ".session-titles.json"), data, 0o644)
