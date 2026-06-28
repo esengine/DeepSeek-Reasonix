@@ -412,6 +412,7 @@ export interface Meta {
   workspaceRoot?: string;
   workspaceName?: string;
   workspacePath?: string;
+  sessionPath?: string;
   gitBranch?: string;
   imageInputEnabled?: boolean;
   autoApproveTools?: boolean;

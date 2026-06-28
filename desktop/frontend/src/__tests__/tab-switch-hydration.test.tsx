@@ -63,6 +63,7 @@ function tabMeta(id: string, overrides: Partial<TabMeta> = {}): TabMeta {
     gitBranch: "main",
     topicId: `topic-${id}`,
     topicTitle: id,
+    sessionPath: `${workspaceRoot}/sessions/${id}.jsonl`,
     label: `model-${id}`,
     ready: true,
     running: false,
@@ -171,7 +172,7 @@ window.go = {
       },
       OpenProjectTab: async () => {
         backendActiveId = "tab-d";
-        return { ...tabD, active: true };
+        return { ...(tabsById.get("tab-d") ?? tabD), active: true };
       },
       NewSession: async () => {
         newSessionCalls += 1;
@@ -240,11 +241,13 @@ await act(async () => {
 eq(newSessionCalls, 1, "newSession runs after the selected tab is active in the backend");
 await waitFor("tab-b history request", () => historyCalls.includes("tab-b"));
 
+const historyCallsBeforeReturnToA = historyCalls.length;
 await act(async () => {
   await controller?.switchTab("tab-a", tabA);
   await flushPromises();
 });
 await waitFor("tab-a restored", () => controller?.activeTabId === "tab-a" && controller.state.items.some((item) => item.kind === "user" && item.text === "cached A"));
+eq(historyCalls.length, historyCallsBeforeReturnToA, "cached idle tab skips history hydration when reselected");
 
 await act(async () => {
   historyB.resolve([userMessage("late B")]);
@@ -295,12 +298,29 @@ eq(controller?.state.items.length, 0, "open topic keeps the new tab transcript e
 ok(controller?.state.hydratePlaceholderItems?.some((item) => item.kind === "user" && item.text === "streaming C") ?? false, "open topic stores previous transcript only as a hydration placeholder");
 
 await act(async () => {
-  historyD.resolve([]);
+  historyD.resolve([userMessage("history D")]);
   await historyD.promise;
   await flushPromises();
 });
-eq(controller?.state.items.length, 0, "empty topic history keeps the real transcript empty");
-eq(controller?.state.hydratePlaceholderItems?.length ?? 0, 0, "empty topic history clears the hydration placeholder");
+ok(controller?.state.items.some((item) => item.kind === "user" && item.text === "history D") ?? false, "topic history replaces the hydration placeholder");
+eq(controller?.state.hydratePlaceholderItems?.length ?? 0, 0, "topic history clears the hydration placeholder");
+
+const historyCallsBeforeReopenD = historyCalls.length;
+await act(async () => {
+  await controller?.openProjectTab(tabD.workspaceRoot, tabD.topicId || "");
+  await flushPromises();
+});
+eq(controller?.activeTabId, "tab-d", "reopening an already hydrated topic keeps it active");
+ok(controller?.state.items.some((item) => item.kind === "user" && item.text === "history D") ?? false, "reopened cached topic keeps its transcript");
+eq(historyCalls.length, historyCallsBeforeReopenD, "reopening an already hydrated topic skips history hydration");
+
+tabsById.set("tab-d", { ...tabD, sessionPath: `${tabD.workspaceRoot}/sessions/next-tab-d.jsonl` });
+const historyCallsBeforeReboundD = historyCalls.length;
+await act(async () => {
+  await controller?.openProjectTab(tabD.workspaceRoot, tabD.topicId || "");
+  await flushPromises();
+});
+eq(historyCalls.length, historyCallsBeforeReboundD + 1, "rebound topic reloads history when session path changes");
 
 await act(async () => {
   root.unmount();

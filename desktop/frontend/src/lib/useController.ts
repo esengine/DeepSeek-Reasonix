@@ -186,6 +186,7 @@ export function metaFromTab(tab: TabMeta, existing?: Meta): Meta {
     workspaceRoot: tab.workspaceRoot || existing?.workspaceRoot || cwd,
     workspaceName: tab.workspaceName || existing?.workspaceName,
     workspacePath: tab.workspacePath || tab.workspaceRoot || existing?.workspacePath,
+    sessionPath: tab.sessionPath !== undefined ? tab.sessionPath : existing?.sessionPath,
     gitBranch: tab.gitBranch || existing?.gitBranch,
     autoApproveTools,
     bypass: autoApproveTools,
@@ -213,6 +214,7 @@ export function sameMeta(a?: Meta, b?: Meta): boolean {
     a.workspaceRoot === b.workspaceRoot &&
     a.workspaceName === b.workspaceName &&
     a.workspacePath === b.workspacePath &&
+    a.sessionPath === b.sessionPath &&
     a.gitBranch === b.gitBranch &&
     a.imageInputEnabled === b.imageInputEnabled &&
     a.autoApproveTools === b.autoApproveTools &&
@@ -245,6 +247,13 @@ function hasCachedLiveTurn(state: State | undefined): boolean {
     (item.kind === "assistant" && item.streaming) ||
     (item.kind === "tool" && item.status === "running")
   );
+}
+
+function hasReusableCachedTranscript(state: State | undefined, sessionPath?: string): boolean {
+  if (!state || state.items.length === 0) return false;
+  const expectedSessionPath = (sessionPath ?? "").trim();
+  if (!expectedSessionPath) return true;
+  return (state.meta?.sessionPath ?? "").trim() === expectedSessionPath;
 }
 
 /** Mirrors Go backend's ReadOnly() hints. */
@@ -813,7 +822,10 @@ export function reducer(s: State, a: Action): State {
       });
       return { ...s, items: finalized, running: false, turnActive: false, pendingPrompt, backgroundJobs, cancelRequested, cancellable, live: undefined, currentAssistant: undefined, approval: undefined, ask: undefined };
     }
-    case "meta": return sameMeta(s.meta, a.meta) ? s : { ...s, meta: a.meta };
+    case "meta": {
+      const meta = a.meta.sessionPath === undefined && s.meta?.sessionPath !== undefined ? { ...a.meta, sessionPath: s.meta.sessionPath } : a.meta;
+      return sameMeta(s.meta, meta) ? s : { ...s, meta };
+    }
     case "optimistic_meta": return sameMeta(s.meta, a.meta) ? s : { ...s, meta: a.meta, hydrateError: undefined };
     case "context": {
       const sessionTokens = typeof a.context.sessionTokens === "number"
@@ -987,13 +999,13 @@ export function useController() {
     tabId: string,
     reset = false,
     reason: HydrateReason = "startup",
-    options: { skipHistory?: boolean; placeholderItems?: Item[]; preserveCachedHistory?: boolean } = {},
+    options: { skipHistory?: boolean; placeholderItems?: Item[]; preserveCachedHistory?: boolean; sessionPath?: string } = {},
   ) => {
     const seq = bumpSessionLoadSeq(tabId);
     const hydrateStartedAt = Date.now();
     const skipHistory = Boolean(
       options.skipHistory ||
-      (options.preserveCachedHistory && !reset && (statesRef.current.get(tabId)?.items.length ?? 0) > 0),
+      (options.preserveCachedHistory && !reset && hasReusableCachedTranscript(statesRef.current.get(tabId), options.sessionPath)),
     );
     addBreadcrumb("tab.hydrate", `start ${reason} ${tabId}`);
     dispatchTo(tabId, { type: "hydrate_start", reason, placeholderItems: options.placeholderItems });
@@ -1618,6 +1630,8 @@ export function useController() {
   // Tab management: switch preserves per-tab state; open creates it.
   const switchTab = useCallback(async (tabId: string, optimisticTab?: TabMeta): Promise<TabMeta[] | undefined> => {
     const startedAt = Date.now();
+    const targetSessionPath = optimisticTab?.sessionPath ?? statesRef.current.get(tabId)?.meta?.sessionPath;
+    const preserveCachedHistory = hasReusableCachedTranscript(statesRef.current.get(tabId), targetSessionPath);
     addBreadcrumb("tab.switch", `click ${tabId}`);
     setActiveTabId(tabId);
     activeTabIdRef.current = tabId;
@@ -1645,6 +1659,8 @@ export function useController() {
         const tabs = await reconcileTabRuntime(tabId, { hydrateSessionData: false });
         void loadSessionDataForTab(tabId, false, "switch-tab", {
           skipHistory: hasCachedLiveTurn(statesRef.current.get(tabId)),
+          preserveCachedHistory,
+          sessionPath: targetSessionPath,
         });
         return tabs;
       })
@@ -1658,13 +1674,17 @@ export function useController() {
   const openProjectTab = useCallback(async (workspaceRoot: string, topicId: string): Promise<TabMeta> => {
     const meta = await app.OpenProjectTab(workspaceRoot, topicId);
     const prevItems = activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current)?.items : undefined;
-    const isNewTab = !statesRef.current.has(meta.id);
+    const prevState = statesRef.current.get(meta.id);
+    const isNewTab = !prevState;
+    const preserveCachedHistory = hasReusableCachedTranscript(prevState, meta.sessionPath);
     setActiveTabId(meta.id);
     activeTabIdRef.current = meta.id;
     confirmBackendActiveTab(meta.id);
     dispatchTo(meta.id, { type: "optimistic_meta", meta: metaFromTab(meta, statesRef.current.get(meta.id)?.meta) });
     void loadSessionDataForTab(meta.id, isNewTab, "open-topic", {
       placeholderItems: isNewTab ? prevItems : undefined,
+      preserveCachedHistory,
+      sessionPath: meta.sessionPath,
     });
     return meta;
   }, [confirmBackendActiveTab, dispatchTo, loadSessionDataForTab]);
@@ -1672,13 +1692,17 @@ export function useController() {
   const openGlobalTab = useCallback(async (topicId: string): Promise<TabMeta> => {
     const meta = await app.OpenGlobalTab(topicId);
     const prevItems = activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current)?.items : undefined;
-    const isNewTab = !statesRef.current.has(meta.id);
+    const prevState = statesRef.current.get(meta.id);
+    const isNewTab = !prevState;
+    const preserveCachedHistory = hasReusableCachedTranscript(prevState, meta.sessionPath);
     setActiveTabId(meta.id);
     activeTabIdRef.current = meta.id;
     confirmBackendActiveTab(meta.id);
     dispatchTo(meta.id, { type: "optimistic_meta", meta: metaFromTab(meta, statesRef.current.get(meta.id)?.meta) });
     void loadSessionDataForTab(meta.id, isNewTab, "open-topic", {
       placeholderItems: isNewTab ? prevItems : undefined,
+      preserveCachedHistory,
+      sessionPath: meta.sessionPath,
     });
     return meta;
   }, [confirmBackendActiveTab, dispatchTo, loadSessionDataForTab]);
@@ -1686,13 +1710,17 @@ export function useController() {
   const openTopicSession = useCallback(async (scope: string, workspaceRoot: string, topicId: string, sessionPath: string): Promise<TabMeta> => {
     const meta = await app.OpenTopicSession(scope, workspaceRoot, topicId, sessionPath);
     const prevItems = activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current)?.items : undefined;
-    const isNewTab = !statesRef.current.has(meta.id);
+    const prevState = statesRef.current.get(meta.id);
+    const isNewTab = !prevState;
+    const preserveCachedHistory = hasReusableCachedTranscript(prevState, meta.sessionPath);
     setActiveTabId(meta.id);
     activeTabIdRef.current = meta.id;
     confirmBackendActiveTab(meta.id);
     dispatchTo(meta.id, { type: "optimistic_meta", meta: metaFromTab(meta, statesRef.current.get(meta.id)?.meta) });
     void loadSessionDataForTab(meta.id, isNewTab, "open-topic", {
       placeholderItems: isNewTab ? prevItems : undefined,
+      preserveCachedHistory,
+      sessionPath: meta.sessionPath,
     });
     return meta;
   }, [confirmBackendActiveTab, dispatchTo, loadSessionDataForTab]);
