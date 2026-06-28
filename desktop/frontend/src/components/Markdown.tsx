@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useEffect } from "react";
+import { lazy, memo, Suspense } from "react";
 
 const MarkdownRenderer = lazy(() => import("./MarkdownRenderer"));
 
