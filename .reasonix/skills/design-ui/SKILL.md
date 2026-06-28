@@ -1,58 +1,58 @@
 ---
 name: design-ui
-description: Generate UI code matching a DESIGN.md design system — load tokens, build components, verify
+description: 根据 DESIGN.md 设计系统生成 UI 代码 — 加载令牌、构建组件、验证
 ---
 
-# Design UI — generate UI code from DESIGN.md
+# Design UI — 从 DESIGN.md 生成 UI 代码
 
-Your task: generate UI code (HTML/CSS, React, or the framework specified) that follows the design system defined in the project's DESIGN.md.
+你的任务：生成符合项目 DESIGN.md 设计系统的 UI 代码（HTML/CSS、React 或指定的框架）。
 
-## How it works
+## 工作流程
 
-1. **Find the DESIGN.md** — look in these locations in order:
+1. **找到 DESIGN.md** — 按顺序查找：
    - `.reasonix/DESIGN.md`
    - `./DESIGN.md`
-   - Any file ending with `DESIGN.md` in the project root
-   
-   If none exists, offer to create one by downloading from [awesome-design-md](https://github.com/VoltAgent/awesome-design-md) using `web_fetch`.
+   - 项目根目录下任何以 `DESIGN.md` 结尾的文件
 
-2. **Read the DESIGN.md** — use `@DESIGN.md` or `read_file` to load the full file. Pay attention to:
-   - Color palette (semantic names + hex values)
-   - Typography scale (font families, sizes, weights)
-   - Spacing/rounded tokens
-   - Component definitions (buttons, cards, inputs, nav)
-   - Do's and Don'ts (design guardrails)
+   如果都没有，用 `web_fetch` 从 [awesome-design-md](https://github.com/VoltAgent/awesome-design-md) 下载一个。
 
-3. **Classify the request** — is the user asking for:
-   - A single page/component? → build it directly
-   - A full site? → identify pages, plan the component tree first
-   - Just a design exploration? → generate a preview HTML
+2. **读取 DESIGN.md** — 用 `@DESIGN.md` 或 `read_file` 加载完整文件。重点关注：
+   - 色板（语义名称 + 十六进制值）
+   - 字体层级（字族、字号、字重）
+   - 间距/圆角令牌
+   - 组件定义（按钮、卡片、输入框、导航）
+   - 注意事项（设计红线）
 
-4. **Generate the code** — produce production-ready UI that:
-   - Uses the exact hex values from DESIGN.md's color palette
-   - Follows the typography hierarchy (display-xl → caption)
-   - Applies the spacing scale and border radius tokens
-   - Mirrors the component definitions (button shapes, card styles)
-   - Respects every "Don't" rule in the DESIGN.md
+3. **判断需求** — 用户在问：
+   - 单个页面/组件？→ 直接构建
+   - 完整站点？→ 先规划页面结构，再构建组件树
+   - 只是设计探索？→ 生成预览 HTML
 
-5. **Write to files** — use `write_file` to create:
-   - `ui/index.html` or the appropriate framework files
-   - Include a `<link>` to the CSS or inline styles
+4. **生成代码** — 产出可用于生产环境的 UI：
+   - 使用 DESIGN.md 色板中的精确十六进制值
+   - 遵循字体层级（display-xl → caption）
+   - 应用间距刻度和圆角令牌
+   - 匹配组件定义（按钮形状、卡片样式）
+   - 遵守每条 "Don't" 规则
 
-6. **Verify** — if a browser/build tool is available, offer to verify visually.
+5. **写入文件** — 用 `write_file` 创建：
+   - `ui/index.html` 或对应框架的文件
+   - 包含 CSS 链接或内联样式
 
-## Design constraints
+6. **验证** — 如果有浏览器/构建工具可用，提供视觉验证。
 
-- Every color MUST come from the DESIGN.md palette — never invent hex values
-- Component shapes MUST match the `components:` section tokens
-- Typography MUST use the defined `typography` scale tokens
-- If DESIGN.md says "Don't", don't do it
-- Use CSS custom properties (--color-primary, --spacing-lg) to map DESIGN.md tokens to runtime values so the relationship is explicit
+## 设计约束
 
-## Arguments format
+- 每个颜色**必须**来自 DESIGN.md 色板 — 绝不凭空造十六进制值
+- 组件形状**必须**匹配 `components:` 节的令牌
+- 字体**必须**使用定义的 `typography` 层级令牌
+- 如果 DESIGN.md 说 "Don't"，就别做
+- 用 CSS 自定义属性（`--color-primary`、`--spacing-lg`）映射 DESIGN.md 令牌到运行时值，使映射关系显式可追溯
+
+## 参数格式
 
 ```
-design-ui arguments: "<description of what to build>, design=<path-to-design.md>"
+design-ui arguments: "<要构建的内容描述>, design=<design.md路径>"
 ```
 
-If `design` is omitted, search PROJECT_ROOT/DESIGN.md then .reasonix/DESIGN.md.
+如果不传 `design`，默认搜索 `PROJECT_ROOT/DESIGN.md` 然后是 `.reasonix/DESIGN.md`。
