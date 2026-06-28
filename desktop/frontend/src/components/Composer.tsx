@@ -210,11 +210,10 @@ function clipboardFiles(data: DataTransfer): File[] {
 }
 
 function clipboardHasImageHint(data: DataTransfer): boolean {
-  const imageType = (value: string) => {
-    const type = value.toLowerCase();
-    return type.startsWith("image/") || type.includes("png") || type.includes("jpeg") || type.includes("jpg") || type.includes("tiff");
-  };
-  return Array.from(data.items).some((item) => imageType(item.type)) || Array.from(data.types).some(imageType);
+  // All standard image MIME types start with "image/" — including webp, gif,
+  // bmp, svg+xml, avif which were previously missed by the substring approach.
+  const isImageType = (value: string) => value.toLowerCase().startsWith("image/");
+  return Array.from(data.items).some((item) => isImageType(item.type)) || Array.from(data.types).some(isImageType);
 }
 
 function isPasteShortcut(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
