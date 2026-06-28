@@ -11,6 +11,9 @@ import (
 // keyed by file name and invalidated by mtime, so the flash model is queried
 // once per session rather than on every sidebar refresh. Persistence is
 // best-effort: a missing or unreadable cache just regenerates.
+//
+// All exported methods are concurrency-safe. The internal load() method must
+// be called with c.mu held; it guards c.loaded and c.entries under that lock.
 type titleCache struct {
 	mu      sync.Mutex
 	dir     string
@@ -27,6 +30,7 @@ func newTitleCache(dir string) *titleCache {
 	return &titleCache{dir: dir, entries: map[string]titleEntry{}}
 }
 
+// load reads the on-disk cache once. Must be called with c.mu held.
 func (c *titleCache) load() {
 	if c.loaded {
 		return
