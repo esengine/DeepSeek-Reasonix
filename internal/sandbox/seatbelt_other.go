@@ -2,12 +2,12 @@
 
 package sandbox
 
-import "os/exec"
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+)
 
-// Command runs the command unwrapped: no OS sandbox is implemented for this
-// platform yet (Linux bubblewrap/landlock is the next step). The permission
-// layer still gates the call.
-//
 // When spec.Mode is "enforce" and bubblewrap (bwrap) is available on PATH,
 // the command is wrapped in a bubblewrap sandbox with a profile analogous to
 // macOS Seatbelt: writes confined to WriteRoots, network denied unless
@@ -26,6 +26,21 @@ func Command(spec Spec, sh Shell, command string) ([]string, bool) {
 	return sh.argv(command), false
 }
 
+// CommandArgs is like Command but accepts the command as raw argv instead of a
+// shell command string. The args are appended directly after the bwrap sandbox
+// prefix without shell interpretation — suitable for direct binary invocations
+// like ripgrep that don't need a shell wrapper.
+func CommandArgs(spec Spec, args []string) ([]string, bool) {
+	if !spec.enforce() {
+		return args, false
+	}
+	if bwrap, err := exec.LookPath("bwrap"); err == nil {
+		argv := append([]string{bwrap}, bwrapArgsForArgs(spec, args)...)
+		return argv, true
+	}
+	return args, false
+}
+
 // Available reports whether an OS sandbox is available on this platform.
 // On Linux, this checks for bubblewrap (bwrap) on PATH.
 func Available() bool {
@@ -34,9 +49,9 @@ func Available() bool {
 }
 
 // bwrapArgs builds the bubblewrap command-line arguments that confine the
-// shell command to the write roots, deny network unless allowed, and allow
-// read access to the whole filesystem (matching the macOS Seatbelt profile's
-// read-open policy).
+// shell command to the write roots, deny network unless allowed, and overlay
+// forbid-read directories with tmpfs so they appear empty. The rest of the
+// filesystem is mounted read-only (matching the macOS Seatbelt profile).
 func bwrapArgs(spec Spec, sh Shell, command string) []string {
 	args := []string{
 		"--unshare-net", // deny network by default
@@ -52,5 +67,72 @@ func bwrapArgs(spec Spec, sh Shell, command string) []string {
 	for _, root := range spec.WriteRoots {
 		args = append(args, "--bind", root, root)
 	}
+	for _, root := range linuxWriteDirs() {
+		args = append(args, "--bind", root, root)
+	}
+	for _, root := range spec.ForbidReadRoots {
+		args = append(args, "--tmpfs", root)
+	}
 	return append(args, sh.argv(command)...)
+}
+
+// bwrapArgsForArgs is like bwrapArgs but accepts raw argv instead of a shell
+// command string. It builds the same sandbox prefix and appends the caller's
+// argv directly — no shell interpreter wrapping.
+func bwrapArgsForArgs(spec Spec, args []string) []string {
+	out := []string{
+		"--unshare-net", // deny network by default
+		"--ro-bind", "/", "/",
+		"--dev", "/dev",
+		"--proc", "/proc",
+		"--tmpfs", "/tmp",
+	}
+	if spec.Network {
+		// Re-allow network by removing the network namespace.
+		out = out[1:] // drop --unshare-net
+	}
+	for _, root := range spec.WriteRoots {
+		out = append(out, "--bind", root, root)
+	}
+	for _, root := range linuxWriteDirs() {
+		out = append(out, "--bind", root, root)
+	}
+	for _, root := range spec.ForbidReadRoots {
+		out = append(out, "--tmpfs", root)
+	}
+	return append(out, args...)
+}
+
+func linuxWriteDirs() []string {
+	dirs := []string{}
+	if td := os.TempDir(); td != "" && td != "/tmp" {
+		dirs = append(dirs, td)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		for _, sub := range []string{".cache", ".cargo", ".npm", "go"} {
+			dirs = append(dirs, filepath.Join(home, sub))
+		}
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		abs, err := filepath.Abs(d)
+		if err != nil {
+			continue
+		}
+		if real, err := filepath.EvalSymlinks(abs); err == nil {
+			abs = real
+		}
+		if abs == "/tmp" || seen[abs] || !dirExists(abs) {
+			continue
+		}
+		seen[abs] = true
+		out = append(out, abs)
+	}
+	return out
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }

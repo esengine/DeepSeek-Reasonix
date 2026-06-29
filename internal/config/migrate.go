@@ -88,7 +88,11 @@ func (r *MigrationResult) Notice() string {
 // modifies or deletes the legacy files. Returns nil when there is nothing to
 // migrate, or when the current user config already exists.
 func MigrateLegacyIfNeeded() (*MigrationResult, error) {
-	credErr := migrateLegacyCredentialsIfNeeded()
+	return MigrateLegacyIfNeededForRoot(".")
+}
+
+func MigrateLegacyIfNeededForRoot(root string) (*MigrationResult, error) {
+	credErr := migrateLegacyCredentialsIfNeededForRoot(root)
 	dest := userConfigPath()
 	if dest == "" {
 		return nil, credErr
@@ -161,6 +165,10 @@ func MigrateLegacyIfNeeded() (*MigrationResult, error) {
 		}
 	}
 	return res, credErr
+}
+
+func MigrateLegacyCredentialsForRoot(root string) error {
+	return migrateLegacyCredentialsIfNeededForRoot(root)
 }
 
 // MigrateMCPToUserConfigOnUpgrade runs a one-time best-effort backfill for the
@@ -328,8 +336,19 @@ func normalizedMCPMigrationRoots(roots []string) []string {
 	return out
 }
 
-func migrateLegacyCredentialsIfNeeded() error {
+func migrateLegacyCredentialsIfNeededForRoot(root string) error {
 	missing := map[string]string{}
+	skip := func(key string) bool {
+		return credentialCurrentStoreHasKey(key) || credentialCurrentStoreClearedKey(key)
+	}
+	for _, key := range credentialEnvNamesForRoot(root) {
+		if skip(key) {
+			continue
+		}
+		if value, ok := legacyKeyringCredentialValueLookup(key); ok {
+			missing[key] = value
+		}
+	}
 	for _, src := range legacyCredentialsPaths() {
 		if src == "" {
 			continue
@@ -340,7 +359,7 @@ func migrateLegacyCredentialsIfNeeded() error {
 		}
 		assignments := parseCredentialLines(strings.Split(string(data), "\n"))
 		for key, value := range assignments {
-			if _, exists := missing[key]; !exists && !credentialCurrentStoreHasKey(key) {
+			if _, exists := missing[key]; !exists && !skip(key) {
 				missing[key] = value
 			}
 		}
@@ -566,7 +585,7 @@ func mergeEnv(base, overlay map[string]string) map[string]string {
 	return out
 }
 
-// writeCredentialsEnv merges lines into the configured global credential store
+// writeCredentialsEnv merges lines into Reasonix's global .env
 // and pins them into the current process env so the just-built session resolves
 // the key without a restart. Falls back to ~/.env only when Reasonix home can't
 // be resolved — never a project .env, so a migration keeps secrets out of the

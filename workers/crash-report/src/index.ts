@@ -4,7 +4,7 @@
 import { z } from "zod";
 import type { Env } from "./env";
 import { html, redirect } from "./shell";
-import { renderGroup, renderStats, type Group } from "./stats";
+import { renderGroup, renderStats, type Group, type StatsModule } from "./stats";
 import { renderLogin, renderRegister, renderAccount } from "./auth_pages";
 import { renderUsers, renderAudit, type UserRow, type AuditRow } from "./admin";
 import {
@@ -245,12 +245,37 @@ export function crashTitle(message: string): string {
   return head.slice(0, 200);
 }
 
+type SeverityInput = {
+  kind: string;
+  source: string;
+  label: string;
+  errorType: string;
+  errorMessage: string;
+  topFrame: string;
+};
+
+export function isOpaqueScriptErrorReport(input: SeverityInput): boolean {
+  return (
+    input.kind === "crash" &&
+    input.source === "frontend.global" &&
+    input.label === "window.error" &&
+    input.errorType === "string" &&
+    input.errorMessage.trim() === "Script error." &&
+    input.topFrame.trim() === ""
+  );
+}
+
 function severityForKind(kind: string): string {
   if (kind === "crash") return "high";
   if (kind === "performance") return "medium";
   if (kind === "bot") return "medium";
   if (kind === "exception") return "medium";
   return "low";
+}
+
+export function severityForReport(input: SeverityInput): string {
+  if (isOpaqueScriptErrorReport(input)) return "low";
+  return severityForKind(input.kind);
 }
 
 async function sha256Hex(s: string): Promise<string> {
@@ -308,7 +333,7 @@ async function handleReport(request: Request, env: Env): Promise<Response> {
   const errorType = r.errorType ?? "";
   const buildCommit = r.buildCommit ?? "";
   const channel = r.channel ?? "";
-  const severity = severityForKind(r.kind);
+  const severity = severityForReport({ kind: r.kind, source, label, errorType, errorMessage, topFrame });
   const prior = await env.DB.prepare("SELECT status FROM groups WHERE fingerprint = ?1")
     .bind(fingerprint)
     .first<{ status: string }>();
@@ -557,7 +582,7 @@ function statsFilters(url: URL): StatsFilters {
     platform: (url.searchParams.get("platform") ?? "").slice(0, 80),
     newLatest: url.searchParams.get("new") === "latest",
     regressed: url.searchParams.get("regressed") === "1",
-    windowDays: windowParam === "30d" ? 30 : 7,
+    windowDays: windowParam === "7d" ? 7 : 30,
     preferenceMode: url.searchParams.get("prefs") === "opens" ? "opens" : "users",
   };
 }
@@ -748,7 +773,7 @@ async function metricUserRows(env: Env, days: 7 | 30): Promise<{ signal: string;
   }
 }
 
-async function handleStats(request: Request, env: Env, user: User): Promise<Response> {
+async function handleStats(request: Request, env: Env, user: User, activeModule: StatsModule): Promise<Response> {
   const url = new URL(request.url);
   const filters = statsFilters(url);
   const latestVersion = await latestObservedVersion(env);
@@ -786,6 +811,7 @@ async function handleStats(request: Request, env: Env, user: User): Promise<Resp
         filters,
       },
       user,
+      activeModule,
     ),
   );
 }
@@ -945,7 +971,9 @@ export default {
       return user ? handleAccountPassword(request, env, user) : redirect("/login");
 
     const groupMatch = path.match(/^\/stats\/group\/([0-9a-f]{64})$/);
-    if (path === "/stats" && method === "GET") return requireViewer(user) ?? handleStats(request, env, user as User);
+    const statsModuleMatch = path.match(/^\/stats\/(diagnostics|usage|preferences|health)$/);
+    if ((path === "/stats" || statsModuleMatch) && method === "GET")
+      return requireViewer(user) ?? handleStats(request, env, user as User, (statsModuleMatch?.[1] as StatsModule | undefined) ?? "usage");
     if (groupMatch && method === "GET") return requireViewer(user) ?? handleGroup(env, groupMatch[1], user as User);
     if (groupMatch && method === "POST") {
       if (user?.role !== "admin") return new Response("forbidden", { status: 403 });

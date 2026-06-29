@@ -1,7 +1,8 @@
 # Reasonix configuration.
-# Resolution order: flag > ./reasonix.toml > ~/.config/reasonix/config.toml > built-in defaults.
+# Resolution order: flag > ./reasonix.toml > ~/.reasonix/config.toml > built-in defaults.
 # Fields marked user/global only are not overridden by ./reasonix.toml.
-# Secrets come from the environment via api_key_env; never put keys here.
+# Provider entries name secrets via api_key_env; saved key values live in
+# Reasonix's global ~/.reasonix/.env. Never put API key values here.
 
 default_model = "deepseek"   # a provider name (→ its default model) or "provider/model"
 # language      = "zh"   # ui language; empty = auto-detect from $LANG / $REASONIX_LANG
@@ -33,6 +34,7 @@ max_steps         = 0    # user/global only; executor tool-call rounds; 0 = no l
 planner_max_steps = 0    # user/global only; planner read-only tool-call rounds; 0 = no limit
 temperature       = 0.0
 auto_plan         = "off"   # user-level only; ignored in project reasonix.toml
+memory_compiler = { enabled = true }   # user-level only; Memory v5 execution compiler
 # reasoning_language = "auto"   # visible reasoning text: auto|zh|en
 # auto_plan_classifier = "deepseek-flash"   # optional; only used for borderline tasks
 soft_compact_ratio  = 0.5   # notice only; keeps the cache-first prefix intact
@@ -101,9 +103,22 @@ effort         = "high"
 [tools]
 enabled = []   # empty = all built-in tools
 bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
+mcp_call_timeout_seconds = 300   # default MCP call safety cap; per-plugin/tool overrides may raise it
 
 [tools.background_jobs]
 stalled_warning_seconds = 900   # warn once per background job after this many quiet seconds; 0 disables
+
+# Sandbox confinement bounds the blast radius of tool calls. Writers may only
+# modify workspace_root (empty = current directory) plus allow_write. forbid_read
+# hides sensitive directories from read/list/search tools and from sandboxed bash
+# while OS-level sandboxing is active. Use absolute paths or ${HOME}; "~" is not
+# expanded in config values.
+# [sandbox]
+# workspace_root = ""
+# allow_write    = ["/tmp"]
+# forbid_read    = ["${HOME}/.ssh"]
+# bash           = "enforce"   # enforce (default) | off
+# network        = true
 
 # Skills are invokable playbooks (SKILL.md / <name>.md with frontmatter), found
 # under .reasonix/skills, .agents/skills, .agent/skills, .claude/skills (project)
@@ -136,6 +151,13 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # [[plugins]]
 # name    = "example"
 # command = "reasonix-plugin-example"
+# # Per-server MCP call timeout; 0 keeps the global/default cap.
+# # call_timeout_seconds = 600
+# # Raw MCP tool names with per-tool call timeouts.
+# # tool_timeout_seconds = { "generate_video" = 1800 }
+# # Optional pre-seeded read-only trust. Interactive sessions can also remember
+# # audited third-party readers when you choose "always allow" from the trust prompt.
+# # trusted_read_only_tools = ["search"]
 # # Enabled MCP servers connect automatically in the background after session
 # # start. Use /mcp or the desktop MCP panel to refresh, reconnect, or disable.
 
@@ -178,3 +200,10 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # account_id = "default"
 # token_env = "WEIXIN_BOT_TOKEN"
 # api_base  = "https://ilinkai.weixin.qq.com"   # Tencent iLink Bot API base URL
+
+[serve]
+# Authentication for the HTTP serve frontend (reasonix serve).
+# auth_mode = "none"      # none | token | password
+# token      = ""          # pre-shared token for auth_mode = "token" (auto-generated if empty)
+# password_hash = ""       # bcrypt hash for auth_mode = "password". Generate with: reasonix serve --hash-password <password>
+# behind_proxy = false      # set true when behind a trusted reverse proxy (nginx, Caddy, etc.) that sets X-Forwarded-* headers

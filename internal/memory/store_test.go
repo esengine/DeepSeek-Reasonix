@@ -69,12 +69,32 @@ func TestStoreIndexPreservesHandEdits(t *testing.T) {
 	if _, err := s.Save(Memory{Name: "alpha", Description: "first", Type: TypeProject, Body: "x"}); err != nil {
 		t.Fatal(err)
 	}
+	indexPath := filepath.Join(s.Dir, indexFile)
+	handEdited := "# Memory\n\nUser note before managed lines.\n\n" + mustReadString(t, indexPath) + "\nSee [design](design.md) for context.\n"
+	if err := os.WriteFile(indexPath, []byte(handEdited), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.Save(Memory{Name: "beta", Description: "second", Type: TypeProject, Body: "y"}); err != nil {
 		t.Fatal(err)
 	}
-	idx := s.Index()
-	if !strings.Contains(idx, "alpha.md") || !strings.Contains(idx, "beta.md") {
-		t.Fatalf("an entry was lost on the second save:\n%s", idx)
+	raw := mustReadString(t, indexPath)
+	for _, want := range []string{"User note before managed lines.", "See [design](design.md) for context.", "alpha.md", "beta.md"} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("MEMORY.md lost %q:\n%s", want, raw)
+		}
+	}
+	if strings.Count(raw, "alpha.md") != 1 || strings.Count(raw, "beta.md") != 1 {
+		t.Fatalf("managed lines were duplicated:\n%s", raw)
+	}
+	if err := s.Delete("alpha"); err != nil {
+		t.Fatal(err)
+	}
+	raw = mustReadString(t, indexPath)
+	if strings.Contains(raw, "alpha.md") {
+		t.Fatalf("deleted managed line remained:\n%s", raw)
+	}
+	if !strings.Contains(raw, "See [design](design.md) for context.") {
+		t.Fatalf("ordinary markdown link was treated as managed:\n%s", raw)
 	}
 }
 
@@ -266,6 +286,15 @@ func TestStoreArchiveFlushesStaleIndexWithoutFile(t *testing.T) {
 	if !strings.Contains(idx, "beta.md") {
 		t.Fatalf("unrelated index line should remain:\n%s", idx)
 	}
+}
+
+func mustReadString(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
 
 func TestStoreListArchivedNewestFirst(t *testing.T) {

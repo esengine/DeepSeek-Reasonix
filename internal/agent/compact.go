@@ -303,6 +303,7 @@ func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
 		Content: "Summary of the later conversation (compacted from here on):\n" + summary,
 	})
 	a.session.Replace(next)
+	a.session.IncrementRewrite()
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("summarized %d later messages → summary", len(region))})
 	return nil
@@ -336,6 +337,7 @@ func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
 	})
 	next = append(next, msgs[toIdx:]...)
 	a.session.Replace(next)
+	a.session.IncrementRewrite()
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("summarized %d earlier messages → summary", len(region))})
 	return nil

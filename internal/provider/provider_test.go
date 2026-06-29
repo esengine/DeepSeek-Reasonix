@@ -223,6 +223,20 @@ func TestSanitizeToolPairingBackfillsEmptyName(t *testing.T) {
 	}
 }
 
+func TestSanitizeToolPairingBackfillsMissingToolResultName(t *testing.T) {
+	in := []Message{
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c1", Name: "ls"}}},
+		{Role: RoleTool, ToolCallID: "c1", Content: "main.go"},
+	}
+	out := SanitizeToolPairing(in)
+	if out[1].Name != "ls" {
+		t.Fatalf("missing tool result name not backfilled: %+v", out[1])
+	}
+	if in[1].Name != "" {
+		t.Fatalf("stored history mutated: %+v", in[1])
+	}
+}
+
 // --- Pricing.Cost ---
 
 func TestPricingCostNil(t *testing.T) {

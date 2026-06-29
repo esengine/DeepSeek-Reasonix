@@ -42,7 +42,7 @@ jobs:
     name: cache hit guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -58,7 +58,7 @@ jobs:
     # canary dispatches run free.
     environment: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'canary' && 'canary' || 'release' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod

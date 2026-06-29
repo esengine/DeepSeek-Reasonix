@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,6 +45,160 @@ func TestLoadMCPJSON(t *testing.T) {
 	if st.Type != "http" || st.URL != "https://mcp.stripe.com" ||
 		st.Headers["Authorization"] != "Bearer ${STRIPE_KEY}" {
 		t.Errorf("stripe decoded wrong: %+v", st)
+	}
+}
+
+func TestMCPJSONTrustedReadOnlyToolsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, mcpJSONFile)
+	if _, err := UpsertMCPJSONPlugin(path, PluginEntry{
+		Name:                 "github",
+		Command:              "npx",
+		Args:                 []string{"-y", "@modelcontextprotocol/server-github"},
+		TrustedReadOnlyTools: []string{"issue_read", "pull_request_read"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadMCPJSON(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("entries = %+v, want one github entry", got)
+	}
+	tools := got[0].TrustedReadOnlyTools
+	if len(tools) != 2 || tools[0] != "issue_read" || tools[1] != "pull_request_read" {
+		t.Fatalf("trusted read-only tools = %+v", tools)
+	}
+}
+
+func TestMCPJSONCallTimeoutsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, mcpJSONFile)
+	if err := os.WriteFile(path, []byte(`{
+  "mcpServers": {
+    "maker": {
+      "command": "old-maker",
+      "unknown_field": true
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpsertMCPJSONPlugin(path, PluginEntry{
+		Name:               "maker",
+		Command:            "maker-mcp",
+		CallTimeoutSeconds: 600,
+		ToolTimeoutSeconds: map[string]int{
+			"generate/video": 1800,
+			"search":         120,
+			"ignored_zero":   0,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadMCPJSON(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("entries = %+v, want one maker entry", got)
+	}
+	if got[0].CallTimeoutSeconds != 600 {
+		t.Fatalf("call_timeout_seconds = %d, want 600", got[0].CallTimeoutSeconds)
+	}
+	if got[0].ToolTimeoutSeconds["generate/video"] != 1800 || got[0].ToolTimeoutSeconds["search"] != 120 {
+		t.Fatalf("tool_timeout_seconds = %+v, want generate/video=1800 search=120", got[0].ToolTimeoutSeconds)
+	}
+	if _, ok := got[0].ToolTimeoutSeconds["ignored_zero"]; ok {
+		t.Fatalf("zero timeout should not be written: %+v", got[0].ToolTimeoutSeconds)
+	}
+
+	root, servers, err := readMCPJSONRaw(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(root) == 0 || len(servers) != 1 {
+		t.Fatalf("raw root/servers = %+v/%+v", root, servers)
+	}
+	var server map[string]any
+	if err := json.Unmarshal(servers["maker"], &server); err != nil {
+		t.Fatal(err)
+	}
+	if server["unknown_field"] != true {
+		t.Fatalf("unknown per-server field was not preserved: %+v", server)
+	}
+}
+
+func TestTrustPluginReadOnlyToolInSourceForRootUpdatesProjectTOML(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	root := t.TempDir()
+	projectTOML := filepath.Join(root, "reasonix.toml")
+	if err := os.WriteFile(projectTOML, []byte(`[[plugins]]
+name = "github"
+command = "github-mcp"
+trusted_read_only_tools = ["issue_read"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, changed, source, err := TrustPluginReadOnlyToolInSourceForRoot(root, "github", " pull_request_read ")
+	if err != nil {
+		t.Fatalf("TrustPluginReadOnlyToolInSourceForRoot: %v", err)
+	}
+	if !changed || source != projectTOML {
+		t.Fatalf("changed/source = %v/%q, want true/%q", changed, source, projectTOML)
+	}
+	if got := strings.Join(updated.TrustedReadOnlyTools, ","); got != "issue_read,pull_request_read" {
+		t.Fatalf("updated trusted tools = %q", got)
+	}
+	cfg := LoadForEdit(projectTOML)
+	if got := strings.Join(cfg.Plugins[0].TrustedReadOnlyTools, ","); got != "issue_read,pull_request_read" {
+		t.Fatalf("saved trusted tools = %q", got)
+	}
+
+	_, changed, _, err = TrustPluginReadOnlyToolInSourceForRoot(root, "github", "pull_request_read")
+	if err != nil {
+		t.Fatalf("second TrustPluginReadOnlyToolInSourceForRoot: %v", err)
+	}
+	if changed {
+		t.Fatal("trusting an already trusted tool should report unchanged")
+	}
+}
+
+func TestTrustPluginReadOnlyToolInSourceForRootUpdatesMCPJSON(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	root := t.TempDir()
+	path := filepath.Join(root, mcpJSONFile)
+	if _, err := UpsertMCPJSONPlugin(path, PluginEntry{Name: "github", Command: "github-mcp"}); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, changed, source, err := TrustPluginReadOnlyToolInSourceForRoot(root, "github", "issue_read")
+	if err != nil {
+		t.Fatalf("TrustPluginReadOnlyToolInSourceForRoot: %v", err)
+	}
+	if !changed || source != path {
+		t.Fatalf("changed/source = %v/%q, want true/%q", changed, source, path)
+	}
+	if got := strings.Join(updated.TrustedReadOnlyTools, ","); got != "issue_read" {
+		t.Fatalf("updated trusted tools = %q", got)
+	}
+	entries, err := loadMCPJSON(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(entries[0].TrustedReadOnlyTools, ","); got != "issue_read" {
+		t.Fatalf(".mcp.json trusted tools = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(root, "reasonix.toml")); !os.IsNotExist(err) {
+		t.Fatalf("project TOML should not be created for .mcp.json-owned server, stat err=%v", err)
 	}
 }
 

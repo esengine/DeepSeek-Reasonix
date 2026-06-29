@@ -15,10 +15,11 @@ import (
 )
 
 const (
-	maxGoalAutoTurns  = 50
-	maxGoalIdleTurns  = 2
-	goalContinueTurn  = "Continue pursuing the active goal. If it is complete, provide the concise final result and end with [goal:complete]. If it is truly blocked on a user-owned decision after trying sensible defaults, end with [goal:blocked:<short reason>]. Otherwise do the next useful work and end with [goal:continue]."
-	goalSelfCheckTurn = "The agent signaled goal completion and all tasks are marked done. Before finalizing, perform a brief quality self-check:\n1. Verify any changed files compile or parse correctly\n2. Run the relevant tests if applicable\n3. Confirm the original requirements are met\nIf everything checks out, signal [goal:complete]. If issues are found, fix them and signal [goal:complete] when done."
+	maxGoalAutoTurns   = 50
+	maxGoalIdleTurns   = 2
+	goalContinueTurn   = "Continue pursuing the active goal. If it is complete, provide the concise final result and end with [goal:complete]. If it is truly blocked on a user-owned decision after trying sensible defaults, end with [goal:blocked:<short reason>]. Otherwise do the next useful work and end with [goal:continue]."
+	goalSelfCheckTurn  = "The agent signaled goal completion and all tasks are marked done. Before finalizing, perform a brief quality self-check:\n1. Verify any changed files compile or parse correctly\n2. Run the relevant tests if applicable\n3. Confirm the original requirements are met\nIf everything checks out, signal [goal:complete]. If issues are found, fix them and signal [goal:complete] when done."
+	goalCompleteNotice = "goal complete"
 )
 
 // goalMachine owns the active goal's finite-state machine and its persistence.
@@ -216,7 +217,7 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 		g.blocks = 0
 		g.block = ""
 		g.interceptMsg = ""
-		notice = "goal complete"
+		notice = goalCompleteNotice
 	case GoalStatusBlocked:
 		reason := cleanGoalBlockReason(in.reason)
 		if reason == "" {
@@ -311,6 +312,50 @@ func (g *goalMachine) writeState(path string, data []byte) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		slog.Warn("controller: write goal state", "err", err)
 	}
+}
+
+// persistWithTodos re-persists goal state with the given todos, without
+// changing any in-memory goal fields. Used after force-completing todos on
+// goal completion so a session reload does not revert to the old incomplete
+// todo state.
+func (g *goalMachine) persistWithTodos(todos []evidence.TodoItem) {
+	g.mu.Lock()
+	path, data, ok := g.buildStateLocked(todos)
+	g.mu.Unlock()
+	if ok {
+		g.writeState(path, data)
+	}
+}
+
+// terminalTodosFromState reads the persisted goal-state sidecar and returns its
+// todo snapshot only after the goal has reached a terminal state. Running goal
+// state is not refreshed on every todo_write, so its todos may be older than the
+// transcript rebuilt by Agent.SetSession.
+func (g *goalMachine) terminalTodosFromState(sessionPath string) ([]evidence.TodoItem, bool) {
+	if strings.TrimSpace(sessionPath) == "" {
+		return nil, false
+	}
+	data, err := os.ReadFile(goalStatePath(sessionPath))
+	if err != nil {
+		if !os.IsNotExist(err) {
+			slog.Warn("controller: read goal state", "err", err)
+		}
+		return nil, false
+	}
+	var state goalState
+	if err := json.Unmarshal(data, &state); err != nil {
+		slog.Warn("controller: parse goal state", "err", err)
+		return nil, false
+	}
+	switch state.Status {
+	case GoalStatusComplete, GoalStatusBlocked, GoalStatusStopped:
+	default:
+		return nil, false
+	}
+	if len(state.Todos) == 0 {
+		return nil, false
+	}
+	return append([]evidence.TodoItem(nil), state.Todos...), true
 }
 
 // formatIncompleteTodos renders the reminder shown when [goal:complete] arrives
@@ -423,4 +468,15 @@ func (c *Controller) persistGoalState(path string, data []byte, ok bool) {
 		return
 	}
 	c.goals.writeState(path, data)
+}
+
+func (c *Controller) restoreTerminalGoalTodos(sessionPath string) {
+	if c.executor == nil {
+		return
+	}
+	todos, ok := c.goals.terminalTodosFromState(sessionPath)
+	if !ok {
+		return
+	}
+	c.executor.ReplaceTodoState(todos)
 }

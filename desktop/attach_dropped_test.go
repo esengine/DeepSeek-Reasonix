@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/control"
 )
 
 const desktopTinyPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
@@ -223,5 +226,59 @@ func TestAttachDroppedImageStoresThumbnail(t *testing.T) {
 	}
 	if !strings.HasPrefix(got.PreviewURL, "data:image/png;base64,") {
 		t.Fatalf("preview = %q, want png data URL", got.PreviewURL)
+	}
+}
+
+func TestAttachDroppedOutsideWorkspaceDirRegistersWorkspaceRef(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	workspace := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "Folder With Spaces")
+	if err := os.MkdirAll(filepath.Join(outside, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "sub", "notes.txt"), []byte("notes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	expectedOutside := outside
+	if resolved, err := filepath.EvalSymlinks(outside); err == nil {
+		expectedOutside = resolved
+	}
+	expectedDisplayPath := filepath.ToSlash(expectedOutside)
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatal(err)
+	}
+
+	ctrl := control.New(control.Options{WorkspaceRoot: workspace})
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"project": {ID: "project", WorkspaceRoot: workspace, Ctrl: ctrl},
+		},
+		activeTabID: "project",
+	}
+
+	got, err := app.AttachDropped(outside)
+	if err != nil {
+		t.Fatalf("AttachDropped: %v", err)
+	}
+	if got.Kind != "workspace" || !got.IsDir {
+		t.Fatalf("got %+v, want workspace directory ref", got)
+	}
+	if !strings.HasPrefix(got.Path, "__reasonix_external_folder/") || strings.ContainsAny(got.Path, " \t\r\n") {
+		t.Fatalf("external folder path token = %q, want whitespace-free external token", got.Path)
+	}
+	if got.DisplayPath != expectedDisplayPath {
+		t.Fatalf("display path = %q, want %q", got.DisplayPath, expectedDisplayPath)
+	}
+
+	block, errs := ctrl.ResolveScopedRefs(context.Background(), "inspect @"+got.Path+"/")
+	if len(errs) != 0 {
+		t.Fatalf("ResolveScopedRefs errors = %v", errs)
+	}
+	if !strings.Contains(block, `<dir path="`+expectedDisplayPath+`">`) ||
+		!strings.Contains(block, "sub/") ||
+		!strings.Contains(block, "sub/notes.txt") {
+		t.Fatalf("external dropped folder should resolve as dir context:\n%s", block)
 	}
 }

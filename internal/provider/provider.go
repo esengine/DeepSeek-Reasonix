@@ -37,10 +37,22 @@ type Message struct {
 	// replayed on the next turn when a tool call followed thinking; providers
 	// without signed reasoning (e.g. the openai-compatible ones) leave it empty.
 	// Round-tripped alongside ReasoningContent.
-	ReasoningSignature string     `json:"reasoning_signature,omitempty"`
-	ToolCalls          []ToolCall `json:"tool_calls,omitempty"`   // set by assistant
-	ToolCallID         string     `json:"tool_call_id,omitempty"` // links a tool result to its call
-	Name               string     `json:"name,omitempty"`         // tool message: tool name
+	ReasoningSignature string           `json:"reasoning_signature,omitempty"`
+	ToolCalls          []ToolCall       `json:"tool_calls,omitempty"`      // set by assistant
+	ToolCallID         string           `json:"tool_call_id,omitempty"`    // links a tool result to its call
+	Name               string           `json:"name,omitempty"`            // tool message: tool name
+	MemoryCitations    []MemoryCitation `json:"memoryCitations,omitempty"` // local UI metadata; provider requests ignore it
+}
+
+// MemoryCitation is local display metadata for memories that influenced an
+// assistant turn. Provider implementations must not forward it to model APIs.
+type MemoryCitation struct {
+	ID        string `json:"id,omitempty"`
+	Source    string `json:"source"`
+	LineStart int    `json:"lineStart,omitempty"`
+	LineEnd   int    `json:"lineEnd,omitempty"`
+	Note      string `json:"note,omitempty"`
+	Kind      string `json:"kind,omitempty"`
 }
 
 // ParseImageDataURL splits a `data:<media-type>;base64,<payload>` URL into its
@@ -213,6 +225,9 @@ func toolTurnWellFormed(calls []ToolCall, results []Message) bool {
 		if results[k].ToolCallID != tc.ID {
 			return false
 		}
+		if results[k].Name != tc.Name {
+			return false
+		}
 	}
 	return true
 }
@@ -322,6 +337,7 @@ func pairToolResults(calls []ToolCall, avail []Message) []Message {
 		}
 		for _, tc := range calls {
 			if r, ok := byID[tc.ID]; ok {
+				r.Name = tc.Name
 				out = append(out, r)
 			} else {
 				out = append(out, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tc.Name, Content: interruptedToolResult})
@@ -333,6 +349,7 @@ func pairToolResults(calls []ToolCall, avail []Message) []Message {
 		if k < len(avail) {
 			r := avail[k]
 			r.ToolCallID = tc.ID
+			r.Name = tc.Name
 			out = append(out, r)
 		} else {
 			out = append(out, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tc.Name, Content: interruptedToolResult})

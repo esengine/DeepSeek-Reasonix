@@ -750,6 +750,16 @@ func TestApplyIndexMandatesInlineButRestrainsSubagent(t *testing.T) {
 	}
 }
 
+func TestReadOnlyIndexBlockPointsAtReadOnlySkill(t *testing.T) {
+	out := ReadOnlyIndexBlock([]Skill{{Name: "beta", Description: "the beta", RunAs: RunSubagent}})
+	if !strings.Contains(out, "read_only_skill") {
+		t.Fatalf("read-only index should name read_only_skill:\n%s", out)
+	}
+	if strings.Contains(out, "Call `run_skill") {
+		t.Fatalf("read-only index should not tell the model to call run_skill:\n%s", out)
+	}
+}
+
 func TestApplyIndexTruncates(t *testing.T) {
 	var skills []Skill
 	for i := 0; i < 200; i++ {

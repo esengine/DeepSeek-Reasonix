@@ -74,6 +74,7 @@ func (m *chatTUI) slashItems() []compItem {
 		{label: "/model", insert: "/model ", hint: i18n.M.CmdModel, descend: true},
 		{label: "/provider", insert: "/provider ", hint: i18n.M.CmdProvider, descend: true},
 		{label: "/skills", insert: "/skills", hint: i18n.M.CmdSkill},
+		{label: "/reload-cmd", insert: "/reload-cmd", hint: i18n.M.CmdReloadCmd},
 		{label: "/hooks", insert: "/hooks ", hint: i18n.M.CmdHooks, descend: true},
 		{label: "/paste-image", insert: "/paste-image", hint: i18n.M.CmdPasteImage},
 		{label: "/output-style", insert: "/output-style", hint: i18n.M.CmdOutputStyle},
@@ -83,6 +84,7 @@ func (m *chatTUI) slashItems() []compItem {
 		{label: "/effort", insert: "/effort ", hint: i18n.M.CmdEffort, descend: true},
 		{label: "/auto-plan", insert: "/auto-plan ", hint: i18n.M.CmdAutoPlan, descend: true},
 		{label: "/reasoning-language", insert: "/reasoning-language ", hint: i18n.M.CmdReasonLang, descend: true},
+		{label: "/memory-v5", insert: "/memory-v5 ", hint: i18n.M.CmdMemoryV5, descend: true},
 		{label: "/theme", insert: "/theme ", hint: i18n.M.CmdTheme, descend: true},
 		{label: "/language", insert: "/language ", hint: i18n.M.CmdLanguage, descend: true},
 		{label: "/help", insert: "/help ", hint: i18n.M.CmdHelp},
@@ -92,6 +94,8 @@ func (m *chatTUI) slashItems() []compItem {
 		{label: "/remember", insert: "/remember ", hint: i18n.M.CmdRemember},
 		{label: "/forget", insert: "/forget ", hint: i18n.M.CmdForget},
 		{label: "/quit", insert: "/quit", hint: i18n.M.CmdQuit},
+		{label: "/copy", insert: "/copy", hint: i18n.M.CmdCopy},
+		{label: "/export", insert: "/export", hint: i18n.M.CmdExport},
 	}
 	for _, c := range m.commands {
 		items = append(items, compItem{label: "/" + c.Name, insert: "/" + c.Name + " ", hint: c.Description})

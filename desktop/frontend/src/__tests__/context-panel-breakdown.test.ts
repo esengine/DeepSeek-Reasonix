@@ -1,6 +1,6 @@
 // Run: tsx src/__tests__/context-panel-breakdown.test.ts
 
-import { contextBreakdown, contextCostDisplay, formatCacheHitRate } from "../components/ContextPanel";
+import { contextBreakdown, contextCostDisplay, formatCacheHitRate, formatMetricTokens } from "../components/ContextPanel";
 import { currencySymbol, formatMoney, formatMoneyLocalized } from "../lib/money";
 
 let passed = 0;
@@ -50,6 +50,23 @@ eq(
   "legend values sum to used context tokens",
 );
 eq(Math.round(mock.otherPct), 33, "donut endpoint follows used/window percent");
+
+const issue5283 = contextBreakdown(6888, 1_000_000, 6840, 48, 48);
+eq(
+  {
+    promptTokens: issue5283.promptTokens,
+    completionTokens: issue5283.completionTokens,
+    reasoningTokens: issue5283.reasoningTokens,
+    otherTokens: issue5283.otherTokens,
+  },
+  {
+    promptTokens: 6840,
+    completionTokens: 0,
+    reasoningTokens: 48,
+    otherTokens: 0,
+  },
+  "prompt tokens are not scaled down when used context includes completion tokens",
+);
 
 const oversized = contextBreakdown(61_000, 1_000_000, 1_622_277, 12_049, 3_217);
 eq(
@@ -101,6 +118,16 @@ console.log("\ncontext panel cache rate");
 eq(formatCacheHitRate(99_950, 50), "99.95%", "cache hit rate preserves two decimal places");
 eq(formatCacheHitRate(0, 10_000), "0.00%", "cache hit rate shows zero when usage data exists");
 eq(formatCacheHitRate(0, 0), "-", "cache hit rate stays empty before usage data exists");
+
+console.log("\ncontext panel metric token labels");
+
+const exactMetric = formatMetricTokens(999_999, "en");
+eq(exactMetric.display, "999,999", "sub-million metric tokens keep exact comma formatting");
+eq(exactMetric.exact, "999,999", "sub-million exact metric title matches the display");
+
+const largeMetric = formatMetricTokens(123_456_789, "en");
+eq(largeMetric.display, "123,456,789", "large metric tokens keep exact comma formatting");
+eq(largeMetric.exact, "123,456,789", "large metric exact title matches the display");
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

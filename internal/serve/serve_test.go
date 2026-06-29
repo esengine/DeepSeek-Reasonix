@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/eventwire"
 	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
 )
@@ -30,7 +31,7 @@ func TestServeSubmitRunsAndBroadcastsTurnDone(t *testing.T) {
 	bc := NewBroadcaster()
 	got := make(chan string, 1)
 	ctrl := control.New(control.Options{Runner: fakeRunner{got: got}, Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	sub, cancel := bc.Subscribe() // observe the broadcast deterministically
@@ -58,7 +59,7 @@ func TestServeSubmitRunsAndBroadcastsTurnDone(t *testing.T) {
 	for {
 		select {
 		case data := <-sub:
-			var w wireEvent
+			var w eventwire.Event
 			if err := json.Unmarshal(data, &w); err == nil && w.Kind == "turn_done" {
 				return
 			}
@@ -71,7 +72,7 @@ func TestServeSubmitRunsAndBroadcastsTurnDone(t *testing.T) {
 func TestServeEndpoints(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc}) // no runner needed for these
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	if resp, err := http.Get(srv.URL + "/history"); err != nil || resp.StatusCode != 200 {
@@ -119,7 +120,7 @@ func TestServeSubmitRejectsShellShortcut(t *testing.T) {
 	bc := NewBroadcaster()
 	got := make(chan string, 1)
 	ctrl := control.New(control.Options{Runner: fakeRunner{got: got}, Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	resp, err := http.Post(srv.URL+"/submit", "application/json", strings.NewReader(`{"input":"!echo nope"}`))
@@ -181,7 +182,7 @@ func TestPreviewSessionFileStripsTransientReasoningLanguageBlock(t *testing.T) {
 func TestServeCancelEndpoint(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	resp, err := http.Post(srv.URL+"/cancel", "application/json", nil)
@@ -197,7 +198,7 @@ func TestServeCancelEndpoint(t *testing.T) {
 func TestServeApproveMissingID(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	// Missing id should return 400.
@@ -221,7 +222,7 @@ func TestServeApproveMissingID(t *testing.T) {
 func TestServeNewSessionEndpoint(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	resp, err := http.Post(srv.URL+"/new", "application/json", nil)
@@ -237,7 +238,7 @@ func TestServeNewSessionEndpoint(t *testing.T) {
 func TestServeCompactEndpoint(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	resp, err := http.Post(srv.URL+"/compact", "application/json", nil)
@@ -253,7 +254,7 @@ func TestServeCompactEndpoint(t *testing.T) {
 func TestServeIndexPage(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/")
@@ -282,6 +283,20 @@ func TestServeIndexDefinesQueryHelpers(t *testing.T) {
 	}
 }
 
+func TestServeIndexHandlesRetryingEvents(t *testing.T) {
+	html := string(indexHTML)
+	for _, want := range []string{
+		"case 'retrying': setRetrying(e.retryAttempt,e.retryMax); break;",
+		"if(e.kind!=='retrying')clearRetrying();",
+		"'retrying_status': 'Retrying ({attempt}/{max})...'",
+		"'retrying_status': '正在重试 ({attempt}/{max})...'",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("serve index missing retrying support %q", want)
+		}
+	}
+}
+
 func TestServeIndexPagePassesLanguagePreferenceToClient(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -290,7 +305,7 @@ func TestServeIndexPagePassesLanguagePreferenceToClient(t *testing.T) {
 
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/")
@@ -349,7 +364,7 @@ func TestResumeRequiresSessionPathInsideSessionDir(t *testing.T) {
 
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc, SessionDir: dir, SessionPath: active})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	post := func(path string) int {
@@ -394,7 +409,7 @@ func TestResumeRejectsCleanupPendingSession(t *testing.T) {
 
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc, SessionDir: dir, SessionPath: active})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	body, err := json.Marshal(map[string]string{"path": pending})
@@ -429,7 +444,7 @@ func TestSessionsSkipsCleanupPending(t *testing.T) {
 
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc, SessionDir: dir, SessionPath: active})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/sessions")
@@ -478,7 +493,7 @@ func TestDeleteSessionRequiresSessionNameInsideSessionDir(t *testing.T) {
 
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc, SessionDir: dir, SessionPath: active})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	post := func(body string) int {
@@ -545,7 +560,7 @@ func writeServeSubagentArtifact(t *testing.T, dir, ref, parentSession string) {
 func TestServeSubmitMalformedJSON(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	resp, err := http.Post(srv.URL+"/submit", "application/json", strings.NewReader(`{not json`))
@@ -561,7 +576,7 @@ func TestServeSubmitMalformedJSON(t *testing.T) {
 func TestServePlanMalformedJSON(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	resp, err := http.Post(srv.URL+"/plan", "application/json", strings.NewReader(`{bad`))
@@ -577,7 +592,7 @@ func TestServePlanMalformedJSON(t *testing.T) {
 func TestServeContextEndpoint(t *testing.T) {
 	bc := NewBroadcaster()
 	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/context")

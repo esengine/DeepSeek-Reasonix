@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"reasonix/internal/diff"
 	fileenc "reasonix/internal/fileutil/encoding"
@@ -71,17 +70,17 @@ func (e editFile) Preview(args json.RawMessage) (diff.Change, error) {
 		return diff.Change{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}
 
-	switch strings.Count(content, p.OldString) {
-	case 0:
-		return diff.Change{}, fmt.Errorf("old_string not found in %s", p.Path)
-	case 1:
+	applied := applyOldStringEdit(content, p.OldString, p.NewString, false)
+	switch {
+	case applied.applied == 1:
 		// ok
+	case applied.matches == 0:
+		return diff.Change{}, oldStringNotFoundError(p.Path, p.OldString, content)
 	default:
-		return diff.Change{}, fmt.Errorf("old_string is not unique in %s; add more surrounding context", p.Path)
+		return diff.Change{}, oldStringNotUniqueError(p.Path, applied.matches, false)
 	}
 
-	updated := strings.Replace(content, p.OldString, p.NewString, 1)
-	return diff.Build(p.Path, content, updated, diff.Modify), nil
+	return diff.Build(p.Path, content, applied.updated, diff.Modify), nil
 }
 
 // Preview computes the change multi_edit would make by replaying every edit
@@ -114,18 +113,12 @@ func (m multiEdit) Preview(args json.RawMessage) (diff.Change, error) {
 		if step.OldString == "" {
 			return diff.Change{}, fmt.Errorf("edit %d: old_string is required", i+1)
 		}
-		if step.ReplaceAll {
-			if strings.Count(content, step.OldString) == 0 {
-				return diff.Change{}, fmt.Errorf("edit %d: old_string not found", i+1)
-			}
-			content = strings.ReplaceAll(content, step.OldString, step.NewString)
-			continue
-		}
-		switch strings.Count(content, step.OldString) {
-		case 0:
+		result := applyOldStringEdit(content, step.OldString, step.NewString, step.ReplaceAll)
+		switch {
+		case result.applied > 0:
+			content = result.updated
+		case result.matches == 0:
 			return diff.Change{}, fmt.Errorf("edit %d: old_string not found", i+1)
-		case 1:
-			content = strings.Replace(content, step.OldString, step.NewString, 1)
 		default:
 			return diff.Change{}, fmt.Errorf("edit %d: old_string is not unique; add more surrounding context or set replace_all", i+1)
 		}

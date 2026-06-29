@@ -323,6 +323,43 @@ func TestSetAutoPlan(t *testing.T) {
 	}
 }
 
+func TestSetDesktopDefaultToolApprovalMode(t *testing.T) {
+	c := Default()
+	for _, mode := range []string{"ask", "auto", "yolo"} {
+		if err := c.SetDesktopDefaultToolApprovalMode(mode); err != nil {
+			t.Fatalf("SetDesktopDefaultToolApprovalMode(%q): %v", mode, err)
+		}
+		if c.DesktopDefaultToolApprovalMode() != mode {
+			t.Fatalf("desktop default tool approval mode = %q, want %q", c.DesktopDefaultToolApprovalMode(), mode)
+		}
+	}
+	if err := c.SetDesktopDefaultToolApprovalMode("full-access"); err != nil {
+		t.Fatalf("legacy full-access should be accepted: %v", err)
+	}
+	if c.DesktopDefaultToolApprovalMode() != "yolo" {
+		t.Fatalf("legacy full-access should save as yolo, got %q", c.DesktopDefaultToolApprovalMode())
+	}
+	if err := c.SetDesktopDefaultToolApprovalMode("maybe"); err == nil {
+		t.Fatal("expected error for invalid desktop default tool approval mode")
+	}
+}
+
+func TestSetMemoryCompilerEnabled(t *testing.T) {
+	c := Default()
+	if err := c.SetMemoryCompilerEnabled(false); err != nil {
+		t.Fatalf("SetMemoryCompilerEnabled(false): %v", err)
+	}
+	if c.MemoryCompilerEnabled() {
+		t.Fatal("memory compiler explicit false = true, want false")
+	}
+	if err := c.SetMemoryCompilerEnabled(true); err != nil {
+		t.Fatalf("SetMemoryCompilerEnabled(true): %v", err)
+	}
+	if !c.MemoryCompilerEnabled() {
+		t.Fatal("memory compiler explicit true = false, want true")
+	}
+}
+
 func TestSetUIShortcutLayout(t *testing.T) {
 	c := Default()
 	if got := c.UIShortcutLayout(); got != "classic" {
@@ -773,6 +810,15 @@ func TestPluginMutators(t *testing.T) {
 	if err := c.UpsertPlugin(PluginEntry{Name: "bad", Type: "carrier-pigeon", Command: "x"}); err == nil {
 		t.Error("unknown transport should error")
 	}
+	if err := c.UpsertPlugin(PluginEntry{Name: "bad", Command: "x", CallTimeoutSeconds: -1}); err == nil {
+		t.Error("negative call_timeout_seconds should error")
+	}
+	if err := c.UpsertPlugin(PluginEntry{Name: "bad", Command: "x", ToolTimeoutSeconds: map[string]int{"generate": -1}}); err == nil {
+		t.Error("negative tool_timeout_seconds should error")
+	}
+	if err := c.UpsertPlugin(PluginEntry{Name: "bad", Command: "x", ToolTimeoutSeconds: map[string]int{" ": 1}}); err == nil {
+		t.Error("empty tool_timeout_seconds key should error")
+	}
 
 	// Replace in place.
 	if err := c.UpsertPlugin(PluginEntry{Name: "ex", Command: "other-cmd"}); err != nil {
@@ -967,7 +1013,9 @@ func TestSaveToScopesUserAndProjectFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read project config: %v", err)
 	}
-	if strings.Contains(string(projectBody), "[desktop]") || strings.Contains(string(projectBody), "close_behavior") {
+	if strings.Contains(string(projectBody), "[desktop]") ||
+		strings.Contains(string(projectBody), "close_behavior") ||
+		strings.Contains(string(projectBody), "default_tool_approval_mode") {
 		t.Fatalf("project config should not include desktop preferences:\n%s", projectBody)
 	}
 	if info, err := os.Stat(projectPath); err != nil {
@@ -1251,6 +1299,105 @@ api_key_env = "PROJECT_KEY"
 	}
 	if _, ok := got.Provider("project-local"); !ok {
 		t.Fatalf("project provider missing after save: %+v", got.Providers)
+	}
+}
+
+func TestSaveToExistingProjectPersistsTopLevelDelta(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("[permissions]\nallow = [\"Bash(go test:*)\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	cfg.ConfigVersion = 2
+	if err := cfg.SetDefaultModel("deepseek-pro"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatalf("read project config: %v", err)
+	}
+	if !strings.Contains(string(body), `default_model = "deepseek-pro"`) {
+		t.Fatalf("project config dropped top-level default_model delta:\n%s", body)
+	}
+	if !strings.Contains(string(body), "config_version = 2") {
+		t.Fatalf("project config dropped top-level config_version delta:\n%s", body)
+	}
+	var got Config
+	if _, err := toml.DecodeFile(projectPath, &got); err != nil {
+		t.Fatalf("saved project config does not parse: %v", err)
+	}
+	if got.DefaultModel != "deepseek-pro" {
+		t.Fatalf("default_model = %q, want deepseek-pro", got.DefaultModel)
+	}
+	if got.ConfigVersion != 2 {
+		t.Fatalf("config_version = %d, want 2", got.ConfigVersion)
+	}
+}
+
+func TestSaveToExistingProjectRemovesPluginDelta(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	cfg := Default()
+	if err := cfg.UpsertPlugin(PluginEntry{Name: "ed", Type: "http", URL: "https://mcp.example.com/mcp", Headers: map[string]string{"Authorization": "Bearer token"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("initial SaveTo: %v", err)
+	}
+	if !cfg.RemovePlugin("ed") {
+		t.Fatal("RemovePlugin should report changed")
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("SaveTo after remove: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatalf("read project config: %v", err)
+	}
+	if strings.Contains(string(body), "[[plugins]]") || strings.Contains(string(body), "[plugins.headers]") || strings.Contains(string(body), "Authorization") {
+		t.Fatalf("removed plugin should not remain in project config:\n%s", body)
+	}
+	var got Config
+	if _, err := toml.DecodeFile(projectPath, &got); err != nil {
+		t.Fatalf("saved project config does not parse: %v", err)
+	}
+	if len(got.Plugins) != 0 {
+		t.Fatalf("plugins = %+v, want none", got.Plugins)
+	}
+}
+
+func TestSaveForRootDoesNotWriteUserAgentSettingsIntoProjectConfig(t *testing.T) {
+	isolateUserConfigHome(t)
+	root := t.TempDir()
+	userPath := UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPath, []byte("[agent]\ntemperature = 0.42\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(root, "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("[permissions]\nallow = [\"Bash(go test:*)\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadForRoot(root)
+	if err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
+	}
+	if cfg.Agent.Temperature != 0.42 {
+		t.Fatalf("runtime temperature = %v, want merged user config", cfg.Agent.Temperature)
+	}
+	if err := cfg.SaveForRoot(root); err != nil {
+		t.Fatalf("SaveForRoot: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatalf("read project config: %v", err)
+	}
+	if strings.Contains(string(body), "temperature") {
+		t.Fatalf("user agent setting leaked into project config:\n%s", body)
 	}
 }
 

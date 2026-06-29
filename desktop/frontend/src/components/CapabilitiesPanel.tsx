@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ShieldCheck, ShieldOff } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app, openExternal } from "../lib/bridge";
 import { useT } from "../lib/i18n";
@@ -239,6 +240,9 @@ export function CapabilitiesPanel({
                       onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
                       onReconnect={(name) => void mutate(() => app.ReconnectMCPServer(name))}
                       onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
+                      onTrustTool={(name, toolName) => void mutate(() => app.TrustMCPServerTool(name, toolName))}
+                      onTrustTools={(name, toolNames) => void mutate(() => app.TrustMCPServerTools(name, toolNames))}
+                      onUntrustTool={(name, toolName) => void mutate(() => app.UntrustMCPServerTool(name, toolName))}
                       onToggle={(name, on) => void mutate(() => app.SetMCPServerEnabled(name, on))}
                       onUpdate={(name, input) =>
                         void mutate(() => app.UpdateMCPServer(name, input)).then((ok) => {
@@ -320,7 +324,9 @@ function normalizeServerViews(servers: ServerView[] | null | undefined): ServerV
       ...server,
       args: asArray(server.args),
       envKeys: asArray(server.envKeys),
+      headerKeys: asArray(server.headerKeys),
       toolList: asArray(server.toolList),
+      trustedReadOnlyTools: asArray(server.trustedReadOnlyTools),
     })),
   );
 }
@@ -651,6 +657,9 @@ function ServerGroup({
   onRetry,
   onReconnect,
   onConfirmClearAuth,
+  onTrustTool,
+  onTrustTools,
+  onUntrustTool,
   onToggle,
   onUpdate,
   onToggleDetails,
@@ -667,6 +676,9 @@ function ServerGroup({
   onRetry: (name: string) => void;
   onReconnect: (name: string) => void;
   onConfirmClearAuth: (name: string) => void;
+  onTrustTool: (name: string, toolName: string) => void;
+  onTrustTools: (name: string, toolNames: string[]) => void;
+  onUntrustTool: (name: string, toolName: string) => void;
   onToggle: (name: string, on: boolean) => void;
   onUpdate: (name: string, input: MCPServerInput) => void;
   onToggleDetails: (name: string) => void;
@@ -689,6 +701,9 @@ function ServerGroup({
           onRetry={() => onRetry(s.name)}
           onReconnect={() => onReconnect(s.name)}
           onConfirmClearAuth={() => onConfirmClearAuth(s.name)}
+          onTrustTool={(toolName) => onTrustTool(s.name, toolName)}
+          onTrustTools={(toolNames) => onTrustTools(s.name, toolNames)}
+          onUntrustTool={(toolName) => onUntrustTool(s.name, toolName)}
           onToggle={(on) => onToggle(s.name, on)}
           onUpdate={(input) => onUpdate(s.name, input)}
           onToggleDetails={() => onToggleDetails(s.name)}
@@ -845,6 +860,9 @@ function ServerRow({
   onRetry,
   onReconnect,
   onConfirmClearAuth,
+  onTrustTool,
+  onTrustTools,
+  onUntrustTool,
   onToggle,
   onUpdate,
   onToggleDetails,
@@ -861,6 +879,9 @@ function ServerRow({
   onRetry: () => void;
   onReconnect: () => void;
   onConfirmClearAuth: () => void;
+  onTrustTool: (toolName: string) => void;
+  onTrustTools: (toolNames: string[]) => void;
+  onUntrustTool: (toolName: string) => void;
   onToggle: (on: boolean) => void;
   onUpdate: (input: MCPServerInput) => void;
   onToggleDetails: () => void;
@@ -944,6 +965,9 @@ function ServerRow({
           onConnectNow={onRetry}
           onReconnect={onReconnect}
           onConfirmClearAuth={onConfirmClearAuth}
+          onTrustTool={onTrustTool}
+          onTrustTools={onTrustTools}
+          onUntrustTool={onUntrustTool}
           toolsExpanded={toolsExpanded}
           editing={editing}
           onEdit={onEdit}
@@ -964,6 +988,9 @@ function ServerDetails({
   onConnectNow,
   onReconnect,
   onConfirmClearAuth,
+  onTrustTool,
+  onTrustTools,
+  onUntrustTool,
   toolsExpanded,
   editing,
   onEdit,
@@ -978,6 +1005,9 @@ function ServerDetails({
   onConnectNow: () => void;
   onReconnect: () => void;
   onConfirmClearAuth: () => void;
+  onTrustTool: (toolName: string) => void;
+  onTrustTools: (toolNames: string[]) => void;
+  onUntrustTool: (toolName: string) => void;
   toolsExpanded: boolean;
   editing: boolean;
   onEdit: () => void;
@@ -994,6 +1024,11 @@ function ServerDetails({
   const canShowTools = s.status === "connected" && ((s.tools ?? 0) > 0 || (tools?.length ?? 0) > 0);
   const showClearAuth = canClearAuth(s);
   const authLabel = serverAuthLabel(s, t);
+  const trustedReadOnlyTools = s.trustedReadOnlyTools ?? [];
+  const trustedReadOnlyToolNames = new Set(trustedReadOnlyTools);
+  const canTrustTool = s.configured && !s.builtIn;
+  const reportedReadOnlyToolNames = (tools ?? []).filter((tool) => tool.readOnlyHint).map((tool) => tool.name);
+  const bulkTrustToolNames = reportedReadOnlyToolNames.filter((name) => !trustedReadOnlyToolNames.has(name));
   if (editing && canEditConfig) {
     return (
       <div className="cap-server-details">
@@ -1030,6 +1065,18 @@ function ServerDetails({
             <span className="cap-detail__value">{s.envKeys.join(", ")}</span>
           </div>
         )}
+        {s.headerKeys && s.headerKeys.length > 0 && (
+          <div className="cap-detail cap-detail--wide">
+            <span className="cap-detail__label">{t("caps.headerKeys")}</span>
+            <span className="cap-detail__value">{s.headerKeys.join(", ")}</span>
+          </div>
+        )}
+        {trustedReadOnlyTools.length > 0 && (
+          <div className="cap-detail cap-detail--wide">
+            <span className="cap-detail__label">{t("caps.trustedReadOnlyTools")}</span>
+            <span className="cap-detail__code">{trustedReadOnlyTools.join(", ")}</span>
+          </div>
+        )}
       </div>
       <div className="cap-detail-actions">
         {canConnectNow && (
@@ -1045,6 +1092,18 @@ function ServerDetails({
         {canShowTools && (
           <button className="btn btn--small" disabled={busy} onClick={onToggleTools} aria-expanded={toolsExpanded}>
             {toolsExpanded ? t("caps.hideTools") : t("caps.showTools")}
+          </button>
+        )}
+        {canTrustTool && bulkTrustToolNames.length > 0 && (
+          <button
+            className="btn btn--small cap-trust-bulk"
+            disabled={busy}
+            onClick={() => onTrustTools(bulkTrustToolNames)}
+            title={t("caps.trustReportedReadOnlyTitle")}
+            type="button"
+          >
+            <ShieldCheck aria-hidden size={13} strokeWidth={2.2} />
+            {t("caps.trustReportedReadOnly", { count: bulkTrustToolNames.length })}
           </button>
         )}
         {showClearAuth && (
@@ -1076,12 +1135,55 @@ function ServerDetails({
         tools && tools.length > 0 ? (
           <div className="cap-tool-list">
             <div className="cap-tool-list__title">{t("caps.tools")}</div>
-            {tools.map((tool) => (
-              <div className="cap-tool" key={tool.name}>
-                <div className="cap-tool__name">{tool.name}</div>
-                {tool.description && <div className="cap-tool__desc">{tool.description}</div>}
-              </div>
-            ))}
+            {tools.map((tool) => {
+              const trusted = trustedReadOnlyToolNames.has(tool.name);
+              return (
+                <div className="cap-tool" key={tool.name}>
+                  <div className="cap-tool__name">{tool.name}</div>
+                  <div className="cap-tool__desc">
+                    <span>{tool.description}</span>
+                    {tool.readOnlyHint && (
+                      <span className="cap-tool-hint" title={t("caps.reportedReadOnlyTitle")}>
+                        {t("caps.reportedReadOnly")}
+                      </span>
+                    )}
+                  </div>
+                  <div className="cap-tool__action">
+                    {canTrustTool ? (
+                      trusted ? (
+                        <div className="cap-tool-trust-stack">
+                          <span className="cap-tool-trust cap-tool-trust--trusted" title={t("caps.trustedReadOnlyTitle")}>
+                            <ShieldCheck aria-hidden size={12} strokeWidth={2.2} />
+                            {t("caps.trustedReadOnly")}
+                          </span>
+                          <button
+                            className="btn btn--small cap-tool-untrust-btn"
+                            disabled={busy}
+                            onClick={() => onUntrustTool(tool.name)}
+                            title={t("caps.untrustReadOnlyTitle")}
+                            type="button"
+                          >
+                            <ShieldOff aria-hidden size={12} strokeWidth={2.2} />
+                            {t("caps.untrustReadOnly")}
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          className="btn btn--small cap-tool-trust-btn"
+                          disabled={busy}
+                          onClick={() => onTrustTool(tool.name)}
+                          title={t("caps.trustReadOnlyTitle")}
+                          type="button"
+                        >
+                          <ShieldCheck aria-hidden size={12} strokeWidth={2.2} />
+                          {t("caps.trustReadOnly")}
+                        </button>
+                      )
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div className="cap-tool-empty">{t("caps.noToolDetails")}</div>
@@ -1107,19 +1209,23 @@ function EditServerForm({
   const [transport, setTransport] = useState(initialTransport);
   const [command, setCommand] = useState(initialTransport === "stdio" ? serverCommand(s) : "");
   const [url, setUrl] = useState(initialTransport === "stdio" ? "" : s.url || serverCommand(s));
+  const [headers, setHeaders] = useState("");
   const [env, setEnv] = useState("");
   const isStdio = transport === "stdio";
   const ready = isStdio ? command.trim() !== "" : url.trim() !== "";
 
   const submit = () => {
     const envText = env.trim();
+    const headerText = headers.trim();
     onSave({
       name: s.name,
       transport,
       command: isStdio ? command.trim() : "",
       args: [],
       url: isStdio ? "" : url.trim(),
-      env: envText === "" ? null : parseEnvText(envText),
+      env: envText === "" ? null : parseKeyValueText(envText),
+      headers: isStdio || headerText === "" ? null : parseKeyValueText(headerText),
+      trustedReadOnlyTools: s.trustedReadOnlyTools ?? [],
     });
   };
 
@@ -1148,6 +1254,19 @@ function EditServerForm({
             <span className="cap-detail__label">{t("caps.url")}</span>
             <input className="mem-input" value={url} disabled={busy} onChange={(e) => setUrl(e.target.value)} placeholder={t("caps.urlPlaceholder")} />
           </label>
+        )}
+        {!isStdio && (
+          <label className="cap-detail cap-detail--wide">
+            <span className="cap-detail__label">{t("caps.headersLabel")}</span>
+            <textarea className="mem-textarea cap-config-edit__env" value={headers} disabled={busy} onChange={(e) => setHeaders(e.target.value)} placeholder={t("caps.headersPlaceholder")} spellCheck={false} />
+          </label>
+        )}
+        {!isStdio && s.headerKeys && s.headerKeys.length > 0 && (
+          <div className="cap-detail cap-detail--wide">
+            <span className="cap-detail__label">{t("caps.headerKeys")}</span>
+            <span className="cap-detail__value">{s.headerKeys.join(", ")}</span>
+            <span className="cap-edit-hint">{t("caps.headersPreserveHint")}</span>
+          </div>
         )}
         <label className="cap-detail cap-detail--wide">
           <span className="cap-detail__label">{t("caps.envLabel")}</span>
@@ -1182,13 +1301,15 @@ function normalizeTransportValue(transport: string): string {
   return transport === "http" || transport === "sse" ? transport : "stdio";
 }
 
-function parseEnvText(env: string): Record<string, string> {
-  const envMap: Record<string, string> = {};
-  for (const line of env.split("\n")) {
+function parseKeyValueText(text: string): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
     const eq = line.indexOf("=");
-    if (eq > 0) envMap[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+    if (eq > 0) values[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
   }
-  return envMap;
+  return values;
 }
 
 function serverStatusLabel(s: ServerView, t: ReturnType<typeof useT>): string {
@@ -1415,24 +1536,23 @@ function AddServerForm({
   const [transport, setTransport] = useState("stdio");
   const [command, setCommand] = useState("");
   const [url, setUrl] = useState("");
+  const [headers, setHeaders] = useState("");
   const [env, setEnv] = useState("");
 
   const isStdio = transport === "stdio";
   const ready = name.trim() !== "" && (isStdio ? command.trim() !== "" : url.trim() !== "");
 
   const submit = () => {
-    const envMap: Record<string, string> = {};
-    for (const line of env.split("\n")) {
-      const eq = line.indexOf("=");
-      if (eq > 0) envMap[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
-    }
+    const envText = env.trim();
+    const headerText = headers.trim();
     onAdd({
       name: name.trim(),
       transport,
       command: isStdio ? command.trim() : "",
       args: [],
       url: isStdio ? "" : url.trim(),
-      env: envMap,
+      env: envText === "" ? null : parseKeyValueText(envText),
+      headers: isStdio || headerText === "" ? null : parseKeyValueText(headerText),
     });
   };
 
@@ -1449,6 +1569,12 @@ function AddServerForm({
         <input className="mem-input" placeholder={t("caps.commandPlaceholder")} value={command} onChange={(e) => setCommand(e.target.value)} />
       ) : (
         <input className="mem-input" placeholder={t("caps.urlPlaceholder")} value={url} onChange={(e) => setUrl(e.target.value)} />
+      )}
+      {!isStdio && (
+        <>
+          <label className="set-label">{t("caps.headersLabel")}</label>
+          <textarea className="mem-textarea" value={headers} onChange={(e) => setHeaders(e.target.value)} placeholder={t("caps.headersPlaceholder")} spellCheck={false} />
+        </>
       )}
       <label className="set-label">{t("caps.envLabel")}</label>
       <textarea className="mem-textarea" value={env} onChange={(e) => setEnv(e.target.value)} placeholder={t("caps.envPlaceholder")} spellCheck={false} />
@@ -1600,6 +1726,9 @@ export function MCPServersSettingsPage() {
 						onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
 						onReconnect={(name) => void mutate(() => app.ReconnectMCPServer(name))}
 						onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
+						onTrustTool={(name, toolName) => void mutate(() => app.TrustMCPServerTool(name, toolName))}
+						onTrustTools={(name, toolNames) => void mutate(() => app.TrustMCPServerTools(name, toolNames))}
+						onUntrustTool={(name, toolName) => void mutate(() => app.UntrustMCPServerTool(name, toolName))}
 						onToggle={(name, on) => void mutate(() => app.SetMCPServerEnabled(name, on))}
 						onUpdate={(name, input) =>
 							void mutate(() => app.UpdateMCPServer(name, input)).then((ok) => {

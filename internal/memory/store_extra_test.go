@@ -93,12 +93,29 @@ func TestSlug(t *testing.T) {
 		{"", ""},
 		{"---", ""},
 		{"hello_world", "hello-world"},
+		{"中文标题", "中文标题"},
+		{"HÉLLO", "héllo"},
+		{"日本語123", "日本語123"},
 	}
 	for _, c := range cases {
 		got := slug(c.input)
 		if got != c.want {
 			t.Errorf("slug(%q) = %q, want %q", c.input, got, c.want)
 		}
+	}
+}
+
+func TestStoreSaveUnicodeAndRejectsEmptySlug(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	path, err := s.Save(Memory{Name: "中文标题", Description: "d", Type: TypeProject, Body: "body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(path) != "中文标题.md" {
+		t.Fatalf("unicode name path = %q", path)
+	}
+	if _, err := s.Save(Memory{Name: "---", Description: "d", Type: TypeProject, Body: "body"}); err == nil {
+		t.Fatal("punctuation-only name should be rejected")
 	}
 }
 

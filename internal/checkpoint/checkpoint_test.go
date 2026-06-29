@@ -249,6 +249,56 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	}
 }
 
+func TestListExposesCurrentTurnFiles(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a.txt")
+	write(t, a, "v0")
+	s := New("", root)
+	s.Begin(0, "edit current", 0)
+	s.Snapshot(diff.Change{Path: a, Kind: diff.Modify, OldText: "v0"})
+
+	metas := s.List()
+	if len(metas) != 1 {
+		t.Fatalf("metas = %d, want 1", len(metas))
+	}
+	if len(metas[0].Paths) != 1 || metas[0].Paths[0] != a {
+		t.Fatalf("current turn paths = %#v, want [%q]", metas[0].Paths, a)
+	}
+}
+
+func TestTruncateFromDropsFutureCheckpointsAndFiles(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "sess.ckpt")
+	a := filepath.Join(root, "a.txt")
+	write(t, a, "v0")
+	s := New(dir, root)
+	s.Begin(0, "first", 0)
+	s.Snapshot(diff.Change{Path: a, Kind: diff.Modify, OldText: "v0"})
+	s.Begin(1, "second", 2)
+	s.Snapshot(diff.Change{Path: a, Kind: diff.Modify, OldText: "v1"})
+	s.Begin(2, "third", 4)
+
+	s.TruncateFrom(1)
+
+	metas := s.List()
+	if len(metas) != 1 || metas[0].Turn != 0 {
+		t.Fatalf("metas after truncate = %+v, want only turn 0", metas)
+	}
+	if s.NextTurn() != 1 {
+		t.Fatalf("NextTurn after truncate = %d, want 1", s.NextTurn())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "turn-1.json")); !os.IsNotExist(err) {
+		t.Fatalf("turn-1 checkpoint should be deleted, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "turn-2.json")); !os.IsNotExist(err) {
+		t.Fatalf("turn-2 checkpoint should be deleted, stat err=%v", err)
+	}
+	reloaded := New(dir, root)
+	if got := reloaded.List(); len(got) != 1 || got[0].Turn != 0 {
+		t.Fatalf("reloaded metas after truncate = %+v, want only turn 0", got)
+	}
+}
+
 func BenchmarkRestoreGB18030Encoding(b *testing.B) {
 	root := b.TempDir()
 	a := filepath.Join(root, "gbk.txt")

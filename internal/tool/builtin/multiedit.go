@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"reasonix/internal/tool"
 )
@@ -90,26 +89,19 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 	// safety guarantee that makes multi_edit preferable to chained
 	// edit_file calls.
 	applied := 0
+	usedFuzzy := false
 	for i, step := range p.Edits {
 		if step.OldString == "" {
 			return "", fmt.Errorf("edit %d: old_string is required", i+1)
 		}
-		old, newStr := matchLineEndings(content, step.OldString, step.NewString)
-		if step.ReplaceAll {
-			count := strings.Count(content, old)
-			if count == 0 {
-				return "", fmt.Errorf("edit %d: old_string not found", i+1)
-			}
-			content = strings.ReplaceAll(content, old, newStr)
-			applied += count
-			continue
-		}
-		switch strings.Count(content, old) {
-		case 0:
+		result := applyOldStringEdit(content, step.OldString, step.NewString, step.ReplaceAll)
+		switch {
+		case result.applied > 0:
+			content = result.updated
+			applied += result.applied
+			usedFuzzy = usedFuzzy || result.fuzzy
+		case result.matches == 0:
 			return "", fmt.Errorf("edit %d: old_string not found", i+1)
-		case 1:
-			content = strings.Replace(content, old, newStr, 1)
-			applied++
 		default:
 			return "", fmt.Errorf("edit %d: old_string is not unique; add more surrounding context or set replace_all", i+1)
 		}
@@ -117,6 +109,9 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 
 	if err := writeFileEncoded(p.Path, content, enc); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
+	}
+	if usedFuzzy {
+		return fmt.Sprintf("multi_edit %s: %d edits applied (%d total replacements) (fuzzy match)", p.Path, len(p.Edits), applied), nil
 	}
 	return fmt.Sprintf("multi_edit %s: %d edits applied (%d total replacements)", p.Path, len(p.Edits), applied), nil
 }

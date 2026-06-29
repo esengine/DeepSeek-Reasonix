@@ -24,6 +24,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/guardian"
 	"reasonix/internal/history"
 	"reasonix/internal/hook"
 	"reasonix/internal/installsource"
@@ -31,10 +32,12 @@ import (
 	"reasonix/internal/jobs"
 	"reasonix/internal/lsp"
 	"reasonix/internal/memory"
+	"reasonix/internal/memorycompiler"
 	"reasonix/internal/migration"
 	"reasonix/internal/netclient"
 	"reasonix/internal/outputstyle"
 	"reasonix/internal/permission"
+	"reasonix/internal/planmode"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
@@ -131,7 +134,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// One-time import of v1/v0.5 legacy config — runs before Load so the freshly
 	// written config + ~/.env are picked up this same boot. CLI Run also calls this
 	// before config-only commands; this call stays as the shared frontend fallback.
-	migrated, migErr := config.MigrateLegacyIfNeeded()
+	migrated, migErr := config.MigrateLegacyIfNeededForRoot(root)
 	cfg, err := config.LoadForRoot(root)
 	if err != nil {
 		return nil, err
@@ -167,6 +170,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// outlive a turn and are cancelled by Controller.Close.
 	sink := event.Sync(opts.Sink)
 
+	if ignored := (planmode.Policy{AllowedTools: cfg.Agent.PlanModeAllowedTools}).IgnoredAllowedTools(); len(ignored) > 0 {
+		sink.Emit(event.Event{
+			Kind:  event.Notice,
+			Level: event.LevelWarn,
+			Text:  fmt.Sprintf("plan_mode_allowed_tools ignored known blocked entries: %s; this setting only declares extra read-only custom tools and cannot unlock known blocked tools or unsafe bash", strings.Join(ignored, ", ")),
+		})
+	}
 	if migErr != nil {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "config migration from ~/.reasonix failed: " + migErr.Error()})
 	} else if migrated != nil {
@@ -218,6 +228,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if st, ok := outputstyle.Resolve(cfg.Agent.OutputStyle, outputstyle.Dirs()); ok {
 		sysPrompt = outputstyle.Apply(sysPrompt, st)
 	}
+	sysPrompt += "\n\n" + config.UserDecisionPolicy
 	sysPrompt += "\n\n" + config.LanguagePolicy
 	if tokenEconomy {
 		sysPrompt += "\n\n" + tokenEconomyPrompt
@@ -252,7 +263,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 
 	reg := tool.NewRegistry()
-	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: cfg.WriteRootsForRoot(root), Network: cfg.Sandbox.Network}
+	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: cfg.WriteRootsForRoot(root), ForbidReadRoots: cfg.ForbidReadRootsForRoot(root), Network: cfg.Sandbox.Network}
 	shell := sandbox.ResolveShell(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, stderr)
 	bashSpec.Shell = shell
 	if bashSpec.Mode == "enforce" && !sandbox.Available() {
@@ -267,7 +278,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if tokenEconomy {
 		enabledBuiltins = tokenEconomyBuiltins(enabledBuiltins)
 	}
-	addBuiltins(reg, enabledBuiltins, cfg.WriteRootsForRoot(root), bashSpec, bashTimeout, searchSpec, stderr, root, proxySpec)
+	readPathResolver := builtin.NewPathResolver()
+	addBuiltins(reg, enabledBuiltins, cfg.WriteRootsForRoot(root), bashSpec, bashTimeout, searchSpec, stderr, root, proxySpec, cfg.ForbidReadRootsForRoot(root), readPathResolver)
 	// Use the caller-supplied shared host when set, so controllers for the same
 	// workspace root reuse running MCP processes (e.g. one CodeGraph daemon
 	// instead of one per tab). Otherwise construct a private host per controller.
@@ -278,13 +290,20 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 
 	// Partition configured plugins by tier so eager can block when explicitly
 	// requested while every other enabled MCP warms up in the background.
+	pluginSpecOptions := PluginSpecOptions{
+		DefaultCallTimeout:   time.Duration(cfg.MCPCallTimeoutSeconds()) * time.Second,
+		PlanModeAllowedTools: cfg.Agent.PlanModeAllowedTools,
+	}
 	autoStartEntries := cfg.AutoStartPlugins()
 	eagerEntries, bgEntries := partitionByTier(autoStartEntries)
-	extraSpecs := applyKnownPluginOverrides(opts.ExtraPlugins, root)
+	extraSpecs := applyDefaultMCPCallTimeout(
+		applyPlanModeAllowedMCPToolTrust(applyKnownPluginOverrides(opts.ExtraPlugins, root), cfg.Agent.PlanModeAllowedTools),
+		pluginSpecOptions.DefaultCallTimeout,
+	)
 	onDemandMCPSpecs := map[string]plugin.Spec{}
 	onDemandMCPNames := []string{}
 	if tokenEconomy {
-		for _, spec := range append(PluginSpecsForRoot(autoStartEntries, root), extraSpecs...) {
+		for _, spec := range append(PluginSpecsForRootWithOptions(autoStartEntries, root, pluginSpecOptions), extraSpecs...) {
 			name := strings.TrimSpace(spec.Name)
 			if name == "" {
 				continue
@@ -296,6 +315,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 		eagerEntries, bgEntries = nil, nil
 	}
+	trustedMCPServers := planModeTrustedMCPServers(onDemandMCPSpecs)
 
 	// Auto-demote: any eager plugin that has been chronically slow (recent
 	// samples repeatedly hit the blocking startup budget) drops to background
@@ -315,8 +335,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	eagerEntries = kept
 
-	eagerSpecs := PluginSpecsForRoot(eagerEntries, root)
-	bgSpecs := PluginSpecsForRoot(bgEntries, root)
+	eagerSpecs := PluginSpecsForRootWithOptions(eagerEntries, root, pluginSpecOptions)
+	bgSpecs := PluginSpecsForRootWithOptions(bgEntries, root, pluginSpecOptions)
 
 	if !tokenEconomy {
 		eagerSpecs = append(eagerSpecs, extraSpecs...)
@@ -530,24 +550,43 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	taskModel := firstNonEmpty(cfg.Agent.SubagentModels["task"], cfg.Agent.SubagentModel)
 	taskEffort := firstNonEmpty(cfg.Agent.SubagentEfforts["task"], cfg.Agent.SubagentEffort)
 	taskToolAdded := false
-	addTaskTool := func() string {
-		if taskToolAdded {
-			return "task tool is already enabled."
-		}
-		taskToolAdded = true
-		tt := agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
+	readOnlyTaskToolAdded := false
+	var taskTool *agent.TaskTool
+	newTaskTool := func() *agent.TaskTool {
+		return agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
 			entry.ContextWindow, cfg.Agent.RecentKeep, cfg.Agent.SoftCompactRatio, cfg.Agent.CompactRatio, cfg.Agent.CompactForceRatio,
 			cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate,
 			keepPolicy,
 			taskModel, taskEffort, resolveSubagentProvider).
 			WithTranscripts(subagentStore, root, modelName, entry.Effort).
 			WithTranscriptIdentityResolver(subagentIdentity)
-		reg.Add(tt)
-		reg.Add(agent.NewParallelTasksTool(tt, reg))
+	}
+	addTaskTool := func() string {
+		if taskToolAdded {
+			return "task tool is already enabled."
+		}
+		taskToolAdded = true
+		if taskTool == nil {
+			taskTool = newTaskTool()
+		}
+		reg.Add(taskTool)
+		reg.Add(agent.NewParallelTasksTool(taskTool, reg))
 		return "enabled task."
+	}
+	addReadOnlyTaskTool := func() string {
+		if readOnlyTaskToolAdded {
+			return "read_only_task tool is already enabled."
+		}
+		readOnlyTaskToolAdded = true
+		if taskTool == nil {
+			taskTool = newTaskTool()
+		}
+		reg.Add(agent.NewReadOnlyTaskTool(taskTool))
+		return "enabled read_only_task."
 	}
 	if !tokenEconomy {
 		addTaskTool()
+		addReadOnlyTaskTool()
 	}
 
 	// The `memory` tool searches/reads saved facts on demand; `remember` persists
@@ -571,12 +610,59 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// has none, so ask resolves to "decide for yourself".
 	reg.Add(agent.NewAskTool())
 
-	// Skill tools: run_skill / install_skill plus the dedicated subagent wrappers
-	// (explore / research / review / security_review). A subagent skill reuses the
-	// sub-agent machinery via this runner — an isolated loop with the skill body
-	// as system prompt, a tool set scoped to the skill's allowed-tools (minus the
-	// task/skill meta-tools, to bar recursion), and an optional per-skill model.
-	// Its tool activity nests under the invoking call, like `task`.
+	// Skill tools: read_only_skill is a narrow plan-mode-safe entry point; the
+	// full skills source adds run_skill / install_skill plus the dedicated
+	// subagent wrappers (explore / research / review / security_review). Read-only
+	// subagent skills run ephemerally with the same registry boundary as
+	// read_only_task, so they cannot write, install, mutate memory, resume/fork
+	// transcripts, or delegate further.
+	readOnlySkillRunner := func(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
+		if strings.TrimSpace(runOpts.ContinueFrom) != "" || strings.TrimSpace(runOpts.ForkFrom) != "" {
+			return "", fmt.Errorf("read_only_skill does not support continue_from/fork_from")
+		}
+		sk = skill.WithCodeGraphTools(sk, skill.CodeGraphReadTools(reg))
+		prov, price, ctxWin := execProv, entry.Price, entry.ContextWindow
+		modelRef := subagentModelRef(cfg, sk)
+		effortRef := subagentEffortRef(cfg, sk)
+		if modelRef != "" || effortRef != "" {
+			p, pr, cw, err := resolveSubagentProvider(modelRef, effortRef)
+			if err != nil {
+				return "", fmt.Errorf("read-only subagent skill %q profile: %w", sk.Name, err)
+			}
+			prov, price, ctxWin = p, pr, cw
+		}
+		subReg := agent.ReadOnlySubagentToolRegistry(reg, sk.AllowedTools)
+		if subReg.Len() == 0 {
+			return "", fmt.Errorf("read_only_skill: skill %q has no read-only tools available", sk.Name)
+		}
+		steps := maxSteps
+		if steps > 0 {
+			if steps /= 2; steps < 5 {
+				steps = 5
+			}
+		}
+		sysPrompt := agent.DefaultReadOnlyTaskSystemPrompt + "\n\nSkill instructions:\n" + sk.Body
+		return agent.RunSubAgentWithSession(sctx, prov, subReg, agent.NewSession(sysPrompt), task, agent.Options{
+			MaxSteps:          steps,
+			Temperature:       cfg.Agent.Temperature,
+			Pricing:           price,
+			UsageSource:       event.UsageSourceSubagent,
+			Gate:              headlessGate,
+			ContextWindow:     ctxWin,
+			RecentKeep:        cfg.Agent.RecentKeep,
+			SoftCompactRatio:  cfg.Agent.SoftCompactRatio,
+			CompactRatio:      cfg.Agent.CompactRatio,
+			CompactForceRatio: cfg.Agent.CompactForceRatio,
+			ArchiveDir:        config.ArchiveDir(),
+			KeepPolicy:        keepPolicy,
+			ReasoningLanguage: agent.ReasoningLanguageFromContext(sctx),
+		}, agent.NestedSink(sctx, event.Discard))
+	}
+	// Writer-capable subagent skills reuse the sub-agent machinery via this
+	// runner: an isolated loop with the skill body as system prompt, a tool set
+	// scoped to the skill's allowed-tools (minus recursive meta-tools), optional
+	// per-skill model, and resumable transcripts when the parent session supports
+	// them. Its tool activity nests under the invoking call, like `task`.
 	skillRunner := func(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
 		sk = skill.WithCodeGraphTools(sk, skill.CodeGraphReadTools(reg))
 		prov, price, ctxWin := execProv, entry.Price, entry.ContextWindow
@@ -590,9 +676,10 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			prov, price, ctxWin = p, pr, cw
 		}
 		subReg := agent.SubagentToolRegistry(reg, sk.AllowedTools)
-		continueFrom, forkFrom := strings.TrimSpace(runOpts.ContinueFrom), strings.TrimSpace(runOpts.ForkFrom)
-		if continueFrom != "" && forkFrom != "" {
-			return "", fmt.Errorf("continue_from and fork_from are mutually exclusive")
+		continueFrom := strings.TrimSpace(runOpts.ContinueFrom)
+		legacyForkFrom := strings.TrimSpace(runOpts.ForkFrom)
+		if continueFrom != "" && legacyForkFrom != "" {
+			return "", fmt.Errorf("continue_from and fork_from are mutually exclusive; pass only continue_from")
 		}
 		parentID, _, _, _ := agent.CallContext(sctx)
 		parentSession := agent.ParentSession(sctx)
@@ -600,10 +687,10 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		if subagentStore == nil || parentSession == "" {
 			// Headless runs (e.g. `reasonix run`) have no persistent session to
 			// own a transcript. Run the skill sub-agent ephemerally, as before
-			// persisted transcripts existed, instead of failing. Continuation and
-			// fork need a persisted owner, so they error here.
-			if continueFrom != "" || forkFrom != "" {
-				return "", fmt.Errorf("continue_from/fork_from require a persisted session; none is active in this run")
+			// persisted transcripts existed, instead of failing. Continuation needs
+			// a persisted owner, so it errors here.
+			if continueFrom != "" || legacyForkFrom != "" {
+				return "", fmt.Errorf("subagent continuation requires a persisted session; none is active in this run")
 			}
 			run = agent.EphemeralSubagentRun(sk.Body)
 		} else {
@@ -620,12 +707,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				Effort:           identityEffort,
 			}
 			var prepErr error
-			switch {
-			case continueFrom != "":
+			if continueFrom != "" {
 				run, prepErr = subagentStore.PrepareContinue(continueFrom, spec)
-			case forkFrom != "":
-				run, prepErr = subagentStore.PrepareFork(forkFrom, spec)
-			default:
+			} else if legacyForkFrom != "" {
+				run, prepErr = subagentStore.PrepareLegacyForkFrom(legacyForkFrom, spec)
+			} else {
 				run, prepErr = subagentStore.PrepareFresh(spec)
 			}
 			if prepErr != nil {
@@ -657,7 +743,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		if err := subagentStore.SaveCompleted(run); err != nil {
 			return "", errors.Join(err, subagentStore.SaveFailed(run))
 		}
-		return agent.FormatSubagentResult(answer, run.Ref, false), nil
+		return agent.FormatSubagentRunResult(answer, run, false), nil
 	}
 	skillProfile := func(sk skill.Skill) *event.Profile {
 		model, effort := subagentModelRef(cfg, sk), subagentEffortRef(cfg, sk)
@@ -704,7 +790,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			ProjectRoot: root,
 			HTTPClient:  balanceClient,
 			ConnectMCP: func(e config.PluginEntry) (installsource.MCPConnectResult, error) {
-				spec := pluginSpecFromEntry(e, root)
+				spec := pluginSpecFromEntryWithOptions(e, root, pluginSpecOptions)
 				if opts.Stderr != nil {
 					spec.Stderr = opts.Stderr
 				}
@@ -738,12 +824,22 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}))
 		return "enabled install_source."
 	}
+	readOnlySkillToolsAdded := false
+	addReadOnlySkillTools := func() string {
+		if readOnlySkillToolsAdded {
+			return "read_only_skill tool is already enabled.\n\n" + skill.ReadOnlyIndexBlock(skills)
+		}
+		readOnlySkillToolsAdded = true
+		reg.Add(skill.NewReadOnlySkillTool(skillStore, readOnlySkillRunner, skillProfile))
+		return "enabled read_only_skill. Use read_only_skill for inline skills or read-only subagent skills on the next model request.\n\n" + skill.ReadOnlyIndexBlock(skills)
+	}
 	skillToolsAdded := false
 	addSkillTools := func() string {
 		if skillToolsAdded {
 			return "skills are already enabled.\n\n" + skill.IndexBlock(skills)
 		}
 		skillToolsAdded = true
+		addReadOnlySkillTools()
 		reg.Add(skill.NewRunSkillTool(skillStore, skillRunner, skillProfile))
 		reg.Add(skill.NewReadSkillTool(skillStore))
 		reg.Add(skill.NewInstallSkillTool(skillStore, nil))
@@ -751,7 +847,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			reg.Add(t)
 		}
 		addSlashCommandTool(true)
-		return "enabled skills. Use run_skill/read_skill or the dedicated skill tools on the next model request.\n\n" + skill.IndexBlock(skills)
+		return "enabled skills. Use run_skill/read_skill/read_only_skill or the dedicated skill tools on the next model request.\n\n" + skill.IndexBlock(skills)
 	}
 	if tokenEconomy {
 		addSlashCommandTool(false)
@@ -766,6 +862,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			},
 			task: func(context.Context) (string, error) {
 				return addTaskTool(), nil
+			},
+			readOnlyTask: func(context.Context) (string, error) {
+				return addReadOnlyTaskTool(), nil
+			},
+			readOnlySkill: func(context.Context) (string, error) {
+				return addReadOnlySkillTools(), nil
 			},
 			install: func(context.Context) (string, error) {
 				return addInstallSourceTool(), nil
@@ -831,28 +933,36 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				}
 				return fmt.Sprintf("enabled MCP server %q tools: %s.", spec.Name, strings.Join(names, ", ")), nil
 			},
-			mcpNames: onDemandMCPNames,
+			mcpNames:                 onDemandMCPNames,
+			planModeAllowedTools:     cfg.Agent.PlanModeAllowedTools,
+			planModeTrustedMCPServer: trustedMCPServers,
 		})
 	}
 
 	execSess := agent.NewSession(sysPrompt)
+	var memCompiler *memorycompiler.Runtime
+	if cfg.MemoryCompilerEnabled() {
+		memCompiler = memorycompiler.New(config.MemoryCompilerDir(root))
+	}
 	executor := agent.New(execProv, reg, execSess, agent.Options{
-		MaxSteps:             maxSteps,
-		Temperature:          cfg.Agent.Temperature,
-		Pricing:              entry.Price,
-		Gate:                 headlessGate,
-		Hooks:                hookRunner,
-		Jobs:                 jm,
-		ProjectChecks:        projectChecks,
-		ContextWindow:        entry.ContextWindow,
-		SoftCompactRatio:     cfg.Agent.SoftCompactRatio,
-		CompactRatio:         cfg.Agent.CompactRatio,
-		CompactForceRatio:    cfg.Agent.CompactForceRatio,
-		RecentKeep:           cfg.Agent.RecentKeep,
-		ArchiveDir:           config.ArchiveDir(),
-		KeepPolicy:           keepPolicy,
-		ReasoningLanguage:    cfg.ReasoningLanguage(),
-		PlanModeAllowedTools: cfg.Agent.PlanModeAllowedTools,
+		MaxSteps:                           maxSteps,
+		Temperature:                        cfg.Agent.Temperature,
+		Pricing:                            entry.Price,
+		Gate:                               headlessGate,
+		Hooks:                              hookRunner,
+		Jobs:                               jm,
+		ProjectChecks:                      projectChecks,
+		ContextWindow:                      entry.ContextWindow,
+		SoftCompactRatio:                   cfg.Agent.SoftCompactRatio,
+		CompactRatio:                       cfg.Agent.CompactRatio,
+		CompactForceRatio:                  cfg.Agent.CompactForceRatio,
+		RecentKeep:                         cfg.Agent.RecentKeep,
+		ArchiveDir:                         config.ArchiveDir(),
+		KeepPolicy:                         keepPolicy,
+		ReasoningLanguage:                  cfg.ReasoningLanguage(),
+		PlanModeAllowedTools:               cfg.Agent.PlanModeAllowedTools,
+		MemoryCompiler:                     memCompiler,
+		UseMemoryCompilerLLMClassification: strings.TrimSpace(os.Getenv("REASONIX_MEMORY_COMPILER_LLM_CLASSIFICATION")) == "true",
 	}, sink)
 
 	var runner agent.Runner = executor
@@ -930,7 +1040,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Registry:               reg,
 		PluginCtx:              ctx,
 		WorkspaceRoot:          root,
+		ExternalFolderToolRefs: readPathResolver,
 		AutoPlan:               cfg.Agent.AutoPlan,
+		ResponseLanguage:       cfg.ResponseLanguage(),
 		ReasoningLanguage:      cfg.ReasoningLanguage(),
 		DisableColdResumePrune: !cfg.ColdResumePruneEnabled(),
 		Shell:                  shell,
@@ -939,6 +1051,29 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		OnRemember: func(rule string) control.RememberResult {
 			return rememberPermissionRule(root, rule)
 		},
+		OnRememberMCPReadOnlyTrust: func(serverName, rawToolName string) control.MCPReadOnlyTrustResult {
+			return rememberMCPReadOnlyTrust(root, serverName, rawToolName)
+		},
+	}
+	// Guardian: when guardian_model is configured, spawn an LLM safety reviewer
+	// that can auto-allow safe Ask decisions and annotate risky ones before
+	// escalating to the human approval prompt.
+	if guardianModel := cfg.Agent.GuardianModel; guardianModel != "" {
+		ge, ok := cfg.ResolveModel(guardianModel)
+		if !ok {
+			slog.Warn("guardian model is not a configured provider — guardian disabled", "model", guardianModel)
+			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: fmt.Sprintf("guardian_model %q not found — guardian disabled", guardianModel)})
+		} else {
+			pProv, err := NewProviderWithProxy(ge, proxySpec)
+			if err != nil {
+				slog.Warn("guardian provider construction failed — guardian disabled", "model", guardianModel, "err", err)
+				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: fmt.Sprintf("guardian construction failed: %v — guardian disabled", err)})
+			} else {
+				guardianReg := agent.FilterReadOnlyRegistry(reg, agent.SubagentMetaTools()...)
+				ctrlOpts.Guardian = guardian.NewSession(pProv, guardianReg, guardian.PolicyPrompt(), guardianModel, cfg.Agent.GuardianTemperature, ge.Price, sink)
+				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("guardian enabled · model=%s", ge.Model)})
+			}
+		}
 	}
 	if classifier != nil {
 		ctrlOpts.Classifier = classifier
@@ -960,7 +1095,7 @@ func rememberPermissionRule(workspaceRoot, rule string) control.RememberResult {
 		result.Err = err
 		return result
 	}
-	if err := edit.SaveTo(path); err != nil {
+	if err := config.WritePermissionsSection(path, edit.Permissions.Allow); err != nil {
 		slog.Warn("save config after permission rule", "err", err)
 		result.Err = err
 		return result
@@ -979,6 +1114,25 @@ func rememberPermissionConfigPath(workspaceRoot string) string {
 		path = "reasonix.toml" // match Config.Save() fallback
 	}
 	return path
+}
+
+func rememberMCPReadOnlyTrust(workspaceRoot, serverName, rawToolName string) control.MCPReadOnlyTrustResult {
+	serverName = strings.TrimSpace(serverName)
+	rawToolName = strings.TrimSpace(rawToolName)
+	result := control.MCPReadOnlyTrustResult{Server: serverName, Tool: rawToolName}
+	_, changed, path, err := config.TrustPluginReadOnlyToolInSourceForRoot(workspaceRoot, serverName, rawToolName)
+	result.Path = path
+	if err != nil {
+		slog.Warn("persist MCP read-only trust", "server", serverName, "tool", rawToolName, "err", err)
+		result.Err = err
+		return result
+	}
+	if changed {
+		result.Saved = true
+		return result
+	}
+	result.CoveredBy = rawToolName
+	return result
 }
 
 func coveredPermissionRule(rules []string, rule string) string {
@@ -1166,7 +1320,6 @@ func NewProvider(e *config.ProviderEntry) (provider.Provider, error) {
 // NewProviderWithProxy builds a provider.Provider with the configured ordinary
 // network proxy settings.
 func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (provider.Provider, error) {
-	keyResolution := config.ResolveCredential(e.APIKeyEnv)
 	return provider.New(e.Kind, provider.Config{
 		Name:    e.Name,
 		BaseURL: e.BaseURL,
@@ -1177,7 +1330,7 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 		// default_effort when the user has not explicitly selected /effort.
 		Extra: map[string]any{
 			"api_key_env":        e.APIKeyEnv,
-			"api_key_source":     keyResolution.Source.Label,
+			"api_key_source":     e.APIKeySourceLabel(),
 			"thinking":           e.Thinking,
 			"effort":             config.EffectiveEffort(e),
 			"reasoning_protocol": config.ReasoningProtocolForEntry(e),
@@ -1192,14 +1345,16 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 // them. writeRoots confines the file-writing built-ins to the workspace: after
 // the (unconfined) defaults are added, each enabled writer is replaced by an
 // instance bound to writeRoots (preserving registry order).
+// forbidReadRoots confines the read/list/search built-ins so they cannot peek at
+// the listed directories.
 // When workDir is non-empty, tools resolve relative paths against it instead of
 // the process cwd, enabling concurrent multi-project sessions.
-func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec, bashTimeout time.Duration, searchSpec builtin.SearchSpec, stderr io.Writer, workDir string, proxySpec netclient.ProxySpec) {
+func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec, bashTimeout time.Duration, searchSpec builtin.SearchSpec, stderr io.Writer, workDir string, proxySpec netclient.ProxySpec, forbidReadRoots []string, readPathResolver *builtin.PathResolver) {
 	// If a workspace directory is set, use workspace-bound tools that resolve
 	// paths relative to that directory. Otherwise fall back to the process-cwd
 	// compile-time builtins.
 	if workDir != "" {
-		ws := builtin.Workspace{Dir: workDir, WriteRoots: writeRoots, Bash: bashSpec, BashTimeout: bashTimeout, Search: searchSpec, ProxySpec: proxySpec}
+		ws := builtin.Workspace{Dir: workDir, WriteRoots: writeRoots, ForbidReadRoots: forbidReadRoots, Bash: bashSpec, BashTimeout: bashTimeout, Search: searchSpec, ProxySpec: proxySpec, ReadPaths: readPathResolver}
 		for _, t := range ws.Tools(enabled...) {
 			reg.Add(t)
 		}
@@ -1220,9 +1375,14 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 		}
 	}
 	// Replace the unconfined defaults with confined instances (registry order is
-	// preserved on replace): file-writers bound to the workspace, bash to the OS
-	// sandbox, web_fetch to the proxy. Only replace tools actually enabled/present.
-	confined := append(builtin.ConfineWriters(writeRoots), builtin.ConfineBash(bashSpec, bashTimeout), builtin.ConfineSearch(searchSpec), builtin.ConfineWebFetch(proxySpec))
+	// preserved on replace): file-writers bound to the workspace, read tools
+	// bound to forbid-read roots, bash to the OS sandbox, web_fetch to the proxy.
+	// Only replace tools actually enabled/present.
+	confined := append(builtin.ConfineWriters(writeRoots),
+		builtin.ConfineBash(bashSpec, bashTimeout),
+		builtin.ConfineSearch(searchSpec, bashSpec, forbidReadRoots),
+		builtin.ConfineWebFetch(proxySpec))
+	confined = append(confined, builtin.ConfineReaders(forbidReadRoots)...)
 	for _, t := range confined {
 		if _, ok := reg.Get(t.Name()); ok {
 			reg.Add(t)
@@ -1268,30 +1428,167 @@ func PluginSpecs(entries []config.PluginEntry) []plugin.Spec {
 // PluginSpecsForRoot maps configured plugin entries to plugin.Spec and applies
 // workspace-aware compatibility overrides for known cwd-sensitive servers.
 func PluginSpecsForRoot(entries []config.PluginEntry, workspaceRoot string) []plugin.Spec {
-	specs := make([]plugin.Spec, len(entries))
-	for i, e := range entries {
-		specs[i] = pluginSpecFromEntry(e, workspaceRoot)
-	}
-	return specs
+	return PluginSpecsForRootWithPlanModeAllowedTools(entries, workspaceRoot, nil)
 }
 
-func pluginSpecFromEntry(e config.PluginEntry, workspaceRoot string) plugin.Spec {
+// PluginSpecOptions carries runtime policy that is not stored on each plugin
+// entry but still needs to reach plugin.Spec.
+type PluginSpecOptions struct {
+	DefaultCallTimeout   time.Duration
+	PlanModeAllowedTools []string
+}
+
+// PluginSpecsForRootWithPlanModeAllowedTools also promotes model-visible MCP
+// names declared in agent.plan_mode_allowed_tools to trusted read-only model
+// names for their matching server. This keeps the planner/read-only research
+// trust path aligned with the plan-mode execution escape valve.
+func PluginSpecsForRootWithPlanModeAllowedTools(entries []config.PluginEntry, workspaceRoot string, allowedTools []string) []plugin.Spec {
+	return PluginSpecsForRootWithOptions(entries, workspaceRoot, PluginSpecOptions{
+		PlanModeAllowedTools: allowedTools,
+	})
+}
+
+// PluginSpecsForRootWithOptions maps configured plugin entries to plugin.Spec
+// and injects runtime policy such as the global MCP call timeout.
+func PluginSpecsForRootWithOptions(entries []config.PluginEntry, workspaceRoot string, opts PluginSpecOptions) []plugin.Spec {
+	specs := make([]plugin.Spec, len(entries))
+	for i, e := range entries {
+		specs[i] = pluginSpecFromEntryWithOptions(e, workspaceRoot, opts)
+	}
+	return applyPlanModeAllowedMCPToolTrust(specs, opts.PlanModeAllowedTools)
+}
+
+func pluginSpecFromEntryWithOptions(e config.PluginEntry, workspaceRoot string, opts PluginSpecOptions) plugin.Spec {
 	e = e.ExpandedPlugin() // resolve ${VAR} / ${VAR:-default} from the environment
 	return plugin.ApplyKnownOverrides(plugin.Spec{
-		Name:    e.Name,
-		Type:    e.Type,
-		Command: e.Command,
-		Args:    e.Args,
-		Env:     e.Env,
-		URL:     e.URL,
-		Headers: e.Headers,
+		Name:               e.Name,
+		Type:               e.Type,
+		Command:            e.Command,
+		Args:               e.Args,
+		Env:                e.Env,
+		URL:                e.URL,
+		Headers:            e.Headers,
+		DefaultCallTimeout: opts.DefaultCallTimeout,
+		CallTimeout:        secondsDuration(e.CallTimeoutSeconds),
+		ToolTimeouts:       toolTimeoutDurations(e.ToolTimeoutSeconds),
+		ReadOnlyToolNames:  trustedRawReadOnlyToolNames(e.TrustedReadOnlyTools),
 	}, workspaceRoot)
+}
+
+func secondsDuration(seconds int) time.Duration {
+	if seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func toolTimeoutDurations(seconds map[string]int) map[string]time.Duration {
+	if len(seconds) == 0 {
+		return nil
+	}
+	out := make(map[string]time.Duration, len(seconds))
+	for name, sec := range seconds {
+		name = strings.TrimSpace(name)
+		if name == "" || sec <= 0 {
+			continue
+		}
+		out[name] = time.Duration(sec) * time.Second
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func applyKnownPluginOverrides(specs []plugin.Spec, workspaceRoot string) []plugin.Spec {
 	out := make([]plugin.Spec, len(specs))
 	for i, spec := range specs {
 		out[i] = plugin.ApplyKnownOverrides(spec, workspaceRoot)
+	}
+	return out
+}
+
+func applyDefaultMCPCallTimeout(specs []plugin.Spec, timeout time.Duration) []plugin.Spec {
+	if len(specs) == 0 || timeout <= 0 {
+		return specs
+	}
+	out := make([]plugin.Spec, len(specs))
+	for i, spec := range specs {
+		out[i] = spec
+		if out[i].DefaultCallTimeout <= 0 {
+			out[i].DefaultCallTimeout = timeout
+		}
+	}
+	return out
+}
+
+func applyPlanModeAllowedMCPToolTrust(specs []plugin.Spec, allowedTools []string) []plugin.Spec {
+	if len(specs) == 0 || len(allowedTools) == 0 {
+		return specs
+	}
+	out := make([]plugin.Spec, len(specs))
+	for i, spec := range specs {
+		out[i] = spec
+		prefix := plugin.ToolPrefix(spec.Name)
+		clonedModelNames := false
+		for _, name := range allowedTools {
+			name = strings.TrimSpace(name)
+			if !strings.HasPrefix(name, prefix) || len(name) <= len(prefix) {
+				continue
+			}
+			if out[i].ReadOnlyModelToolNames == nil {
+				out[i].ReadOnlyModelToolNames = map[string]bool{}
+				clonedModelNames = true
+			} else if !clonedModelNames {
+				out[i].ReadOnlyModelToolNames = cloneBoolMap(spec.ReadOnlyModelToolNames)
+				clonedModelNames = true
+			}
+			out[i].ReadOnlyModelToolNames[name] = true
+		}
+	}
+	return out
+}
+
+func trustedRawReadOnlyToolNames(names []string) map[string]bool {
+	if len(names) == 0 {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			out[name] = true
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func planModeTrustedMCPServers(specs map[string]plugin.Spec) map[string]bool {
+	if len(specs) == 0 {
+		return nil
+	}
+	out := map[string]bool{}
+	for name, spec := range specs {
+		if len(spec.ReadOnlyToolNames) > 0 || len(spec.ReadOnlyModelToolNames) > 0 {
+			out[name] = true
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func cloneBoolMap(in map[string]bool) map[string]bool {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(in))
+	for k, v := range in {
+		out[k] = v
 	}
 	return out
 }

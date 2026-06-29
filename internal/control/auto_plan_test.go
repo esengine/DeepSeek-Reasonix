@@ -14,6 +14,12 @@ func TestTaskWarrantsPlanner(t *testing.T) {
 		{"", false},
 		{"   ", false},
 		{"/init", false},
+		{"1", false},
+		{"2.", false},
+		{"A", false},
+		{"好的", false},
+		{"继续", false},
+		{"选 1", false},
 		{"what does this function do?", false}, // low-risk question → executor only
 		{"why did the test fail", false},
 		{"解释一下这段代码", false},
@@ -22,6 +28,10 @@ func TestTaskWarrantsPlanner(t *testing.T) {
 		{reasoningLanguageBlock("en") + "\n\nfix the bug", true},
 		{"fix the bug", true},        // terse, but a work request → still planned
 		{"add a login button", true}, // ditto
+		{"执行修复", true},
+		{"开始迁移", true},
+		{"继续重构", true},
+		{"continue fixing tests", true},
 		{"implement the new caching layer across the backend", true},
 		{"who wrote this file?", false},
 		{"where is the config file?", false},

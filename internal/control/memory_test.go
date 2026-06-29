@@ -12,7 +12,7 @@ import (
 
 // TestMemoryWriteReflectsInSnapshot verifies that a memory write lands on disk
 // and that Memory() returns a freshly reloaded snapshot afterwards — the behavior
-// the off-c.mu (memMu) refactor must preserve.
+// the memoryManager (off-c.mu) extraction must preserve.
 func TestMemoryWriteReflectsInSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	c := New(Options{Memory: memory.Load(memory.Options{CWD: dir})})
@@ -40,14 +40,15 @@ func TestMemoryWriteReflectsInSnapshot(t *testing.T) {
 		t.Fatal("memory snapshot is nil after QuickAdd")
 	}
 	if after == before {
-		t.Fatal("Memory() returned the stale snapshot; applyMemoryWrite did not swap in a reload")
+		t.Fatal("Memory() returned the stale snapshot; the manager did not swap in a reload")
 	}
 }
 
 // TestMemoryWritesConcurrencySafe hammers memory writes from many goroutines
-// while c.mu-guarded reads run concurrently. Under -race this proves the new
-// memMu/c.mu split has no data race and no deadlock — and that holding memMu
-// (not c.mu) across the disk I/O still serializes writes so every note lands.
+// while c.mu-guarded reads run concurrently. Under -race this proves the
+// memoryManager's writeMu/mu split has no data race and no deadlock — and that
+// holding writeMu (off c.mu) across the disk I/O still serializes writes so every
+// note lands.
 func TestMemoryWritesConcurrencySafe(t *testing.T) {
 	dir := t.TempDir()
 	c := New(Options{Memory: memory.Load(memory.Options{CWD: dir})})

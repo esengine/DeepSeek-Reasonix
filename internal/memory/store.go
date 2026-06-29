@@ -184,9 +184,12 @@ func (s Store) Save(m Memory) (string, error) {
 	if dir == "" {
 		return "", fmt.Errorf("memory store unavailable (no user config dir)")
 	}
+	if strings.TrimSpace(m.Name) == "" {
+		return "", fmt.Errorf("memory needs a name")
+	}
 	name := slug(m.Name)
 	if name == "" {
-		return "", fmt.Errorf("memory needs a name")
+		return "", fmt.Errorf("memory name needs at least one letter or digit")
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -401,7 +404,7 @@ func render(m Memory, name string) string {
 // indexLineRe matches a managed index line so reindex/Delete can target the line
 // for one memory by its filename without disturbing the rest of a hand-edited
 // MEMORY.md.
-var indexLineRe = regexp.MustCompile(`\]\(([^)]+)\.md\)`)
+var indexLineRe = regexp.MustCompile(`(?m)^\s*-\s\[.+?\]\(([^)]+)\.md\)\s*—\s.*$`)
 
 // indexLinesExceptIn returns the managed MEMORY.md lines keyed by filename stem
 // in the given directory, dropping the entry for name (a missing index → empty map).
@@ -430,21 +433,56 @@ func indexContainsIn(dir, name string) bool {
 }
 
 // flushIndexIn rewrites MEMORY.md in the given directory from the managed lines,
-// sorted by filename.
+// preserving hand-written content. Managed lines are updated or removed, and
+// new managed entries are appended in sorted order.
 func flushIndexIn(dir string, lines map[string]string) error {
+	path := filepath.Join(dir, indexFile)
+	existing, _ := os.ReadFile(path)
+	processed := map[string]bool{}
+	var preserved strings.Builder
+	preservedEmpty := true
+	for _, line := range strings.Split(string(existing), "\n") {
+		trimmed := strings.TrimRight(line, "\r")
+		if mt := indexLineRe.FindStringSubmatch(trimmed); mt != nil {
+			name := mt[1]
+			if fresh, ok := lines[name]; ok {
+				preserved.WriteString(fresh)
+				preserved.WriteString("\n")
+				processed[name] = true
+				preservedEmpty = false
+			}
+			continue
+		}
+		preserved.WriteString(trimmed)
+		preserved.WriteString("\n")
+		if strings.TrimSpace(trimmed) != "" {
+			preservedEmpty = false
+		}
+	}
+
 	names := make([]string, 0, len(lines))
 	for n := range lines {
-		names = append(names, n)
+		if !processed[n] {
+			names = append(names, n)
+		}
 	}
 	sort.Strings(names)
 
 	var b strings.Builder
-	b.WriteString("# Memory\n\n")
+	if preservedEmpty && len(names) > 0 {
+		b.WriteString("# Memory\n\n")
+	} else {
+		b.WriteString(preserved.String())
+	}
 	for _, n := range names {
 		b.WriteString(lines[n])
 		b.WriteString("\n")
 	}
-	return os.WriteFile(filepath.Join(dir, indexFile), []byte(b.String()), 0o644)
+	result := strings.TrimRight(b.String(), "\n")
+	if result == "" {
+		return os.WriteFile(path, []byte(""), 0o644)
+	}
+	return os.WriteFile(path, []byte(result+"\n"), 0o644)
 }
 
 // reindexIn rewrites the MEMORY.md line for name in the given directory,
@@ -577,8 +615,8 @@ func splitFrontmatter(s string) (map[string]string, string) {
 	return frontmatter.Split(s)
 }
 
-// slugRe strips everything but lowercase alphanumerics and dashes.
-var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
+// slugRe strips everything but Unicode letters and digits.
+var slugRe = regexp.MustCompile(`[^\p{L}\p{N}]+`)
 
 // slug normalises a name into a kebab-case, filesystem-safe stem.
 func slug(s string) string {

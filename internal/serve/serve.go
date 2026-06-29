@@ -41,11 +41,18 @@ type Server struct {
 	titleProv  provider.Provider // lightweight flash provider for session titles
 	titlePrice *provider.Pricing
 	titles     *titleCache
+	auth       *authGate // nil when auth is disabled
 }
 
 // New builds a Server. bc must be the controller's event sink.
-func New(ctrl control.SessionAPI, bc *Broadcaster) *Server {
-	s := &Server{ctrl: ctrl, bc: bc, titles: newTitleCache(ctrl.SessionDir())}
+// serveCfg controls authentication (none, token, or password).
+func New(ctrl control.SessionAPI, bc *Broadcaster, serveCfg config.ServeConfig) *Server {
+	s := &Server{
+		ctrl:   ctrl,
+		bc:     bc,
+		titles: newTitleCache(ctrl.SessionDir()),
+		auth:   newAuthGate(serveCfg),
+	}
 	s.initTitleProvider()
 	return s
 }
@@ -56,6 +63,22 @@ func (s *Server) ctl() control.SessionAPI {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.ctrl
+}
+
+// AuthToken returns the pre-shared token when in token mode, or "" otherwise.
+func (s *Server) AuthToken() string {
+	if s.auth == nil {
+		return ""
+	}
+	return s.auth.Token()
+}
+
+// AuthMode returns the authentication mode: "none", "token", or "password".
+func (s *Server) AuthMode() string {
+	if s.auth == nil {
+		return "none"
+	}
+	return s.auth.Mode()
 }
 
 // initTitleProvider builds a lightweight flash-model provider used solely to
@@ -112,11 +135,7 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 	// Keep the carried conversation in its existing file so the switch doesn't
 	// orphan a duplicate (#2807).
 	newPath := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())
-	if len(carried) > 0 {
-		newCtrl.Resume(&agent.Session{Messages: carried}, newPath)
-	} else if newPath != "" {
-		newCtrl.SetSessionPath(newPath)
-	}
+	newCtrl.AdoptHistory(carried, newPath)
 
 	s.ctrl = newCtrl
 	cur.Close()
@@ -210,6 +229,7 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("POST /tool-approval-mode", s.toolApprovalMode)
 	mux.HandleFunc("POST /auto-approve-tools", s.autoApproveTools)
 	mux.HandleFunc("POST /bypass", s.bypass)
+	mux.HandleFunc("POST /goal", s.goal)
 	mux.HandleFunc("POST /answer", s.answer)
 	mux.HandleFunc("POST /resume", s.resume)
 	mux.HandleFunc("POST /forget", s.forget)
@@ -218,8 +238,9 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /status", s.status)
 	mux.HandleFunc("GET /sessions", s.sessions)
 	mux.HandleFunc("GET /skills", s.skills)
+	mux.HandleFunc("GET /todos", s.todos)
 	mux.HandleFunc("POST /delete-session", s.deleteSession)
-	return logMiddleware(csrfGuard(mux))
+	return logMiddleware(s.auth.middleware(csrfGuard(mux)))
 }
 
 // csrfGuard rejects state-changing requests that don't carry a JSON content type.
@@ -236,7 +257,7 @@ func csrfGuard(next http.Handler) http.Handler {
 			if i := strings.IndexByte(ct, ';'); i >= 0 {
 				ct = ct[:i]
 			}
-			if strings.TrimSpace(ct) != "application/json" {
+			if !strings.EqualFold(strings.TrimSpace(ct), "application/json") {
 				http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
 				return
 			}
@@ -693,6 +714,28 @@ func (s *Server) bypass(w http.ResponseWriter, r *http.Request) {
 	s.autoApproveTools(w, r)
 }
 
+// goal sets or clears the active goal. An empty goal string clears it.
+// Setting a non-empty goal disables plan mode (matching the desktop behavior).
+func (s *Server) goal(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Goal string `json:"goal"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	goal := strings.TrimSpace(body.Goal)
+	if goal == "" {
+		s.ctl().ClearGoal()
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	// Disable plan mode before setting the goal, mirroring the desktop.
+	s.ctl().SetPlanMode(false)
+	s.ctl().SetGoal(goal)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // answer responds to an ask_request.
 func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 	var body struct {
@@ -827,7 +870,13 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 		sess["lastUsage"] = u
 	}
 	if b, err := s.ctl().Balance(r.Context()); err == nil && b != nil {
-		sess["balance"] = b
+		sess["balance"] = map[string]any{
+			"display":   b.Display(),
+			"available": b.Available,
+			"infos":     b.Infos,
+		}
+	} else if err != nil {
+		slog.Warn("serve: balance fetch failed", "err", err)
 	}
 	if j := s.ctl().Jobs(); len(j) > 0 {
 		sess["jobs"] = j
@@ -1096,6 +1145,23 @@ func (s *Server) skills(w http.ResponseWriter, _ *http.Request) {
 	out := make([]skillEntry, len(raw))
 	for i, sk := range raw {
 		out[i] = skillEntry{Name: sk.Name, Scope: string(sk.Scope), Subagent: sk.RunAs == "subagent", Description: sk.Description}
+	}
+	writeJSON(w, out)
+}
+
+// todos returns the canonical task list (latest todo_write state merged with
+// complete_step advances) so the frontend can render a live task panel.
+func (s *Server) todos(w http.ResponseWriter, _ *http.Request) {
+	type todoItem struct {
+		Content    string `json:"content"`
+		Status     string `json:"status"`
+		ActiveForm string `json:"activeForm,omitempty"`
+		Level      int    `json:"level,omitempty"`
+	}
+	raw := s.ctl().Todos()
+	out := make([]todoItem, len(raw))
+	for i, t := range raw {
+		out[i] = todoItem{Content: t.Content, Status: t.Status, ActiveForm: t.ActiveForm, Level: t.Level}
 	}
 	writeJSON(w, out)
 }

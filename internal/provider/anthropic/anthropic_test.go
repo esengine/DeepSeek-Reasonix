@@ -154,7 +154,7 @@ func TestReadStream(t *testing.T) {
 	c := &client{name: "anthropic"}
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(sseFixture))}
 	ch := make(chan provider.Chunk)
-	go c.readStream(resp, ch)
+	go c.readStream(context.Background(), resp, ch)
 
 	var text strings.Builder
 	var started, full *provider.ToolCall
@@ -207,7 +207,7 @@ func TestReadStreamError(t *testing.T) {
 	c := &client{name: "anthropic"}
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(sse))}
 	ch := make(chan provider.Chunk)
-	go c.readStream(resp, ch)
+	go c.readStream(context.Background(), resp, ch)
 
 	var gotErr error
 	for ck := range ch {
@@ -269,6 +269,26 @@ func TestBuildRequestThinkingOff(t *testing.T) {
 	}
 }
 
+func TestBuildRequestDropsMemoryCitations(t *testing.T) {
+	c := &client{model: "claude-opus-4-8"}
+	r := c.buildRequest(provider.Request{Messages: []provider.Message{
+		{Role: provider.RoleUser, Content: "continue"},
+		{Role: provider.RoleAssistant, Content: "done", MemoryCitations: []provider.MemoryCitation{{
+			ID: "mem-1", Source: "MEMORY.md", LineStart: 116, LineEnd: 123, Note: "workflow",
+		}}},
+	}})
+	b, err := json.Marshal(r.Messages)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), "memoryCitations") || strings.Contains(string(b), "MEMORY.md") {
+		t.Fatalf("local memory citations leaked into Anthropic request: %s", b)
+	}
+	if !strings.Contains(string(b), "done") {
+		t.Fatalf("assistant content was dropped with local metadata: %s", b)
+	}
+}
+
 const sseThinking = `event: content_block_start
 data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}
 
@@ -300,7 +320,7 @@ func TestReadStreamThinking(t *testing.T) {
 	c := &client{name: "anthropic"}
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(sseThinking))}
 	ch := make(chan provider.Chunk)
-	go c.readStream(resp, ch)
+	go c.readStream(context.Background(), resp, ch)
 
 	var reasoning, text strings.Builder
 	var sig string

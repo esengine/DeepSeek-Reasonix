@@ -281,5 +281,10 @@ Examples:
   reasonix mcp add stripe --http https://mcp.stripe.com --header "Authorization=Bearer $STRIPE_KEY"
 
 Changes take effect on the next session; inside a running chat, use /mcp add to
-connect a server live.`)
+connect a server live.
+
+MCP tools that report readOnlyHint are confirmed on first plan-mode use. Choose
+"always allow" in the approval prompt to remember that read-only trust; advanced
+users may pre-seed trusted_read_only_tools in config. Auto/YOLO tool approval
+does not answer this trust prompt.`)
 }

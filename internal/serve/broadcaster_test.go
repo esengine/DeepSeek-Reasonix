@@ -2,9 +2,11 @@ package serve
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"reasonix/internal/event"
+	"reasonix/internal/eventwire"
 )
 
 func TestBroadcasterFanOut(t *testing.T) {
@@ -21,12 +23,27 @@ func TestBroadcasterFanOut(t *testing.T) {
 	b.Emit(event.Event{Kind: event.Text, Text: "hi"})
 
 	for i, ch := range []<-chan []byte{a, d} {
-		var w wireEvent
+		var w eventwire.Event
 		if err := json.Unmarshal(<-ch, &w); err != nil {
 			t.Fatalf("subscriber %d: %v", i, err)
 		}
 		if w.Kind != "text" || w.Text != "hi" {
 			t.Errorf("subscriber %d got %+v", i, w)
+		}
+	}
+}
+
+func TestBroadcasterEmitsRetryingJSON(t *testing.T) {
+	b := NewBroadcaster()
+	ch, cancel := b.Subscribe()
+	defer cancel()
+
+	b.Emit(event.Event{Kind: event.Retrying, RetryAttempt: 3, RetryMax: 10})
+
+	s := string(<-ch)
+	for _, want := range []string{`"kind":"retrying"`, `"retryAttempt":3`, `"retryMax":10`} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("retrying broadcast JSON = %s, want it to contain %s", s, want)
 		}
 	}
 }

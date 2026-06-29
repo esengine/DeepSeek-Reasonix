@@ -5,16 +5,187 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"reasonix/internal/event"
 	"reasonix/internal/tool"
 )
+
+type countingToolsTransport struct {
+	mu    sync.Mutex
+	calls int
+	raw   json.RawMessage
+}
+
+func (t *countingToolsTransport) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if method != "tools/list" {
+		return json.RawMessage(`{}`), nil
+	}
+	t.mu.Lock()
+	t.calls++
+	t.mu.Unlock()
+	if len(t.raw) > 0 {
+		return t.raw, nil
+	}
+	return json.RawMessage(`{"tools":[{"name":"zed","description":"Sorted after echo.","inputSchema":{"type":"object"}},{"name":"echo","description":"Echo back the message.","inputSchema":{"type":"object","properties":{"msg":{"type":"string"}},"required":["z","msg"]},"annotations":{"readOnlyHint":true}}]}`), nil
+}
+
+func (t *countingToolsTransport) notify(ctx context.Context, method string, params any) error {
+	return nil
+}
+func (t *countingToolsTransport) close() {}
+
+func (t *countingToolsTransport) toolsListCalls() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.calls
+}
+
+type deadlineRecordingTransport struct {
+	mu        sync.Mutex
+	deadline  []time.Duration
+	methods   []string
+	block     bool
+	noContext bool
+}
+
+func (t *deadlineRecordingTransport) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if d, ok := ctx.Deadline(); ok {
+		t.mu.Lock()
+		t.deadline = append(t.deadline, time.Until(d))
+		t.methods = append(t.methods, method)
+		t.mu.Unlock()
+	} else {
+		t.mu.Lock()
+		t.noContext = true
+		t.methods = append(t.methods, method)
+		t.mu.Unlock()
+	}
+	if t.block {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return json.RawMessage(`{}`), nil
+}
+
+func (t *deadlineRecordingTransport) notify(ctx context.Context, method string, params any) error {
+	return nil
+}
+func (t *deadlineRecordingTransport) close() {}
+
+func (t *deadlineRecordingTransport) lastDeadline(tst *testing.T) time.Duration {
+	tst.Helper()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.deadline) == 0 {
+		tst.Fatalf("transport recorded no deadline; methods=%v noContext=%v", t.methods, t.noContext)
+	}
+	return t.deadline[len(t.deadline)-1]
+}
+
+func assertDeadlineNear(t *testing.T, got, want time.Duration) {
+	t.Helper()
+	if got < want-2*time.Second || got > want+2*time.Second {
+		t.Fatalf("deadline = %v, want near %v", got, want)
+	}
+}
+
+func TestClientCallAppliesBuiltInDefaultTimeout(t *testing.T) {
+	for _, transportName := range []string{"stdio", "http"} {
+		t.Run(transportName, func(t *testing.T) {
+			tr := &deadlineRecordingTransport{}
+			c := &Client{name: "maker", t: tr, spec: Spec{Name: "maker"}, transport: transportName}
+			if _, err := c.call(context.Background(), "tools/list", map[string]any{}); err != nil {
+				t.Fatalf("call: %v", err)
+			}
+			assertDeadlineNear(t, tr.lastDeadline(t), defaultCallTimeout)
+		})
+	}
+}
+
+func TestClientCallTimeoutPrecedence(t *testing.T) {
+	tr := &deadlineRecordingTransport{}
+	c := &Client{
+		name: "maker",
+		t:    tr,
+		spec: Spec{
+			Name:               "maker",
+			DefaultCallTimeout: 300 * time.Second,
+			CallTimeout:        600 * time.Second,
+			ToolTimeouts:       map[string]time.Duration{"generate_video": 1800 * time.Second},
+		},
+		transport: "stdio",
+	}
+
+	if _, err := c.call(context.Background(), "tools/call", map[string]any{"name": "generate_video"}); err != nil {
+		t.Fatalf("tool override call: %v", err)
+	}
+	assertDeadlineNear(t, tr.lastDeadline(t), 1800*time.Second)
+
+	if _, err := c.call(context.Background(), "tools/call", map[string]any{"name": "search"}); err != nil {
+		t.Fatalf("plugin override call: %v", err)
+	}
+	assertDeadlineNear(t, tr.lastDeadline(t), 600*time.Second)
+
+	if _, err := c.call(context.Background(), "prompts/list", map[string]any{}); err != nil {
+		t.Fatalf("method call: %v", err)
+	}
+	assertDeadlineNear(t, tr.lastDeadline(t), 600*time.Second)
+}
+
+func TestClientCallRespectsParentDeadline(t *testing.T) {
+	tr := &deadlineRecordingTransport{}
+	c := &Client{
+		name: "maker",
+		t:    tr,
+		spec: Spec{
+			Name:        "maker",
+			CallTimeout: 10 * time.Minute,
+		},
+		transport: "http",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := c.call(ctx, "tools/call", map[string]any{"name": "generate_video"}); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	got := tr.lastDeadline(t)
+	if got > 150*time.Millisecond {
+		t.Fatalf("deadline = %v, want caller deadline around 100ms", got)
+	}
+}
+
+func TestClientCallTimeoutErrorNamesToolAndConfig(t *testing.T) {
+	tr := &deadlineRecordingTransport{block: true}
+	c := &Client{
+		name: "maker",
+		t:    tr,
+		spec: Spec{
+			Name:        "maker",
+			CallTimeout: 25 * time.Millisecond,
+		},
+		transport: "stdio",
+	}
+	_, err := c.call(context.Background(), "tools/call", map[string]any{"name": "generate_video"})
+	if err == nil {
+		t.Fatal("timed-out call returned nil error")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error should wrap context deadline exceeded, got %v", err)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, `MCP tool "maker.generate_video" timed out after 25ms`) ||
+		!strings.Contains(msg, "tool_timeout_seconds or call_timeout_seconds") {
+		t.Fatalf("timeout error lacks useful guidance: %v", err)
+	}
+}
 
 // TestStdioEndToEnd drives a real subprocess (this test binary re-invoked in
 // helper mode) through the full MCP handshake and a tool call, exercising
@@ -55,6 +226,83 @@ func TestStdioEndToEnd(t *testing.T) {
 	}
 }
 
+func TestHostToolsForReusesCachedTools(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	tr := &countingToolsTransport{}
+	host := NewHost()
+	defer host.Close()
+	host.clients = []*Client{{
+		name:      "mock",
+		t:         tr,
+		spec:      Spec{Name: "mock"},
+		transport: "stdio",
+	}}
+
+	first, err := host.ToolsFor(ctx, "mock")
+	if err != nil {
+		t.Fatalf("first ToolsFor: %v", err)
+	}
+	second, err := host.ToolsFor(ctx, "mock")
+	if err != nil {
+		t.Fatalf("second ToolsFor: %v", err)
+	}
+	if got := tr.toolsListCalls(); got != 1 {
+		t.Fatalf("tools/list calls = %d, want 1", got)
+	}
+	if len(first) != 2 || len(second) != 2 {
+		t.Fatalf("ToolsFor lengths = %d and %d, want 2 each", len(first), len(second))
+	}
+	if got := first[0].Name(); got != "mcp__mock__echo" {
+		t.Fatalf("first tool name = %q, want sorted echo first", got)
+	}
+	if got, want := string(second[0].Schema()), string(first[0].Schema()); got != want {
+		t.Fatalf("cached schema changed:\n first=%s\nsecond=%s", want, got)
+	}
+	if !second[0].ReadOnly() {
+		t.Fatal("cached tool lost readOnlyHint")
+	}
+
+	statuses := host.Servers()
+	if len(statuses) != 1 || len(statuses[0].ToolList) != 2 {
+		t.Fatalf("server tool status = %+v, want cached tool metadata", statuses)
+	}
+	if statuses[0].ToolList[0].Name != "echo" || !statuses[0].ToolList[0].ReadOnlyHint {
+		t.Fatalf("tool metadata = %+v, want sorted echo with readOnlyHint", statuses[0].ToolList)
+	}
+}
+
+func TestHostToolsForCachesEmptyToolList(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	tr := &countingToolsTransport{raw: json.RawMessage(`{"tools":[]}`)}
+	host := NewHost()
+	defer host.Close()
+	host.clients = []*Client{{
+		name:      "empty",
+		t:         tr,
+		spec:      Spec{Name: "empty"},
+		transport: "stdio",
+	}}
+
+	first, err := host.ToolsFor(ctx, "empty")
+	if err != nil {
+		t.Fatalf("first ToolsFor: %v", err)
+	}
+	second, err := host.ToolsFor(ctx, "empty")
+	if err != nil {
+		t.Fatalf("second ToolsFor: %v", err)
+	}
+	if len(first) != 0 || len(second) != 0 {
+		t.Fatalf("ToolsFor lengths = %d and %d, want 0 each", len(first), len(second))
+	}
+	if got := tr.toolsListCalls(); got != 1 {
+		t.Fatalf("empty tools/list calls = %d, want 1", got)
+	}
+}
+
 func TestSpecReadOnlyToolNamesMarksUnhintedToolsReadOnly(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -92,6 +340,49 @@ func TestSpecReadOnlyToolNamesMarksUnhintedToolsReadOnly(t *testing.T) {
 	}
 	if zed.ReadOnly() {
 		t.Fatal("read-only override should not mark non-listed tools read-only")
+	}
+}
+
+func TestSpecReadOnlyModelToolNamesMarksVisibleToolsTrusted(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	spec := Spec{
+		Name:    "mock",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestHelperProcess", "--"},
+		Env:     map[string]string{"GO_WANT_HELPER_PROCESS": "1"},
+		ReadOnlyModelToolNames: map[string]bool{
+			"mcp__mock__echo": true,
+		},
+	}
+
+	host, tools, err := StartAll(ctx, []Spec{spec})
+	if err != nil {
+		t.Fatalf("StartAll: %v", err)
+	}
+	defer host.Close()
+
+	byName := map[string]tool.Tool{}
+	for _, tl := range tools {
+		byName[tl.Name()] = tl
+	}
+	echo := byName["mcp__mock__echo"]
+	if echo == nil {
+		t.Fatalf("mcp__mock__echo missing from %v", byName)
+	}
+	if !echo.ReadOnly() {
+		t.Fatal("model-visible read-only override did not mark echo tool read-only")
+	}
+	if u, ok := echo.(tool.PlanModeUntrustedReadOnly); ok && u.PlanModeUntrustedReadOnly() {
+		t.Fatal("model-visible read-only override should be trusted in plan mode")
+	}
+	zed := byName["mcp__mock__zed"]
+	if zed == nil {
+		t.Fatalf("mcp__mock__zed missing from %v", byName)
+	}
+	if zed.ReadOnly() {
+		t.Fatal("model-visible read-only override should not mark non-listed tools read-only")
 	}
 }
 
@@ -727,5 +1018,64 @@ func TestHelperProcess(t *testing.T) {
 		resp := map[string]any{"jsonrpc": "2.0", "id": *req.ID, "result": result}
 		b, _ := json.Marshal(resp)
 		os.Stdout.Write(append(b, '\n'))
+	}
+}
+
+// TestReadOnlyTrustDoesNotChangeModelVisibleSchema locks the cache invariant
+// behind the MCP trust controls: marking a tool trusted read-only changes its
+// execution/approval flags (ReadOnly / PlanModeUntrustedReadOnly) but must not
+// alter the model-visible tool name or input schema. If trust leaked into the
+// provider-visible tool list/schema, every trust toggle would break the stable
+// prompt prefix and drop the prompt-cache hit rate.
+func TestReadOnlyTrustDoesNotChangeModelVisibleSchema(t *testing.T) {
+	startMockEcho := func(spec Spec) (*Host, map[string]tool.Tool) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		t.Cleanup(cancel)
+		spec.Name = "mock"
+		spec.Command = os.Args[0]
+		spec.Args = []string{"-test.run=TestHelperProcess", "--"}
+		spec.Env = map[string]string{"GO_WANT_HELPER_PROCESS": "1"}
+		host, tools, err := StartAll(ctx, []Spec{spec})
+		if err != nil {
+			t.Fatalf("StartAll: %v", err)
+		}
+		t.Cleanup(func() { host.Close() })
+		byName := map[string]tool.Tool{}
+		for _, tl := range tools {
+			byName[tl.Name()] = tl
+		}
+		return host, byName
+	}
+
+	_, untrusted := startMockEcho(Spec{})
+	_, trusted := startMockEcho(Spec{ReadOnlyModelToolNames: map[string]bool{"mcp__mock__echo": true}})
+
+	base, ok := untrusted["mcp__mock__echo"]
+	if !ok {
+		t.Fatalf("mcp__mock__echo missing from untrusted tools %v", untrusted)
+	}
+	trustedEcho, ok := trusted["mcp__mock__echo"]
+	if !ok {
+		t.Fatalf("mcp__mock__echo missing from trusted tools %v", trusted)
+	}
+
+	// The model-visible surface (name + schema bytes) must be byte-identical.
+	if base.Name() != trustedEcho.Name() {
+		t.Fatalf("trust changed model-visible tool name: %q vs %q", base.Name(), trustedEcho.Name())
+	}
+	if got, want := string(trustedEcho.Schema()), string(base.Schema()); got != want {
+		t.Fatalf("trust changed model-visible schema bytes:\n trusted=%s\n   base=%s", got, want)
+	}
+
+	// Trust only flips the execution/approval flags.
+	if base.ReadOnly() {
+		t.Fatal("untrusted echo should not be read-only without a hint")
+	}
+	if !trustedEcho.ReadOnly() {
+		t.Fatal("trusted echo should be marked read-only")
+	}
+	if u, ok := trustedEcho.(tool.PlanModeUntrustedReadOnly); ok && u.PlanModeUntrustedReadOnly() {
+		t.Fatal("trusted echo should be trusted in plan mode")
 	}
 }

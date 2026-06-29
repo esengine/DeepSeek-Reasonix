@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/event"
 )
@@ -63,6 +64,107 @@ func TestRunSkillSubagentRuns(t *testing.T) {
 	}
 	if out != "answer from dig" {
 		t.Errorf("runner output not returned: %q", out)
+	}
+}
+
+func TestRunSkillSubagentCancellationReachesRunner(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
+	runner := func(ctx context.Context, _ Skill, _ string, _ SubagentRunOptions) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+	tl := NewRunSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), runner)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := tl.Execute(ctx, json.RawMessage(`{"name":"dig","arguments":"find X"}`))
+		done <- err
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Execute error = %v, want context cancellation", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("run_skill subagent runner did not observe cancellation promptly")
+	}
+}
+
+func TestReadOnlySkillInlineAndIsReadOnly(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/note.md", "---\ndescription: take a note\n---\nDo the thing.")
+	tl := NewReadOnlySkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), nil)
+
+	if !tl.ReadOnly() {
+		t.Fatal("read_only_skill must be ReadOnly so it works in plan mode")
+	}
+	out, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"note","arguments":"with args"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(out, "Do the thing.") || !strings.Contains(out, "Arguments: with args") {
+		t.Errorf("inline body/args missing:\n%s", out)
+	}
+}
+
+func TestReadOnlySkillSubagentRunsWithoutContinuation(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
+	var gotTask string
+	var gotOpts SubagentRunOptions
+	runner := func(_ context.Context, sk Skill, task string, opts SubagentRunOptions) (string, error) {
+		gotTask = task
+		gotOpts = opts
+		return "read-only answer from " + sk.Name, nil
+	}
+	tl := NewReadOnlySkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), runner)
+	out, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"dig","arguments":"find X"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotTask != "find X" {
+		t.Errorf("runner got task %q", gotTask)
+	}
+	if gotOpts.ContinueFrom != "" || gotOpts.ForkFrom != "" {
+		t.Fatalf("read_only_skill should not pass continuation opts, got %+v", gotOpts)
+	}
+	if out != "read-only answer from dig" {
+		t.Errorf("runner output not returned: %q", out)
+	}
+}
+
+func TestReadOnlySkillSubagentRequiresArgs(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
+	runner := func(_ context.Context, _ Skill, _ string, _ SubagentRunOptions) (string, error) {
+		return "x", nil
+	}
+	tl := NewReadOnlySkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), runner)
+	if _, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"dig"}`)); err == nil {
+		t.Error("read_only_skill subagent should require arguments")
+	}
+}
+
+func TestReadOnlySkillSubagentResolvesProfile(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/deep.md", "---\ndescription: deep\nrunAs: subagent\nmodel: deepseek-pro\neffort: max\n---\nbody")
+	tl := NewReadOnlySkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), nil)
+
+	pr, ok := tl.(interface {
+		ResolveProfile(json.RawMessage) *event.Profile
+	})
+	if !ok {
+		t.Fatal("read_only_skill should expose ResolveProfile")
+	}
+	got := pr.ResolveProfile(json.RawMessage(`{"name":"deep","arguments":"x"}`))
+	if got == nil || got.Model != "deepseek-pro" || got.Effort != "max" {
+		t.Fatalf("profile = %+v, want deepseek-pro/max", got)
 	}
 }
 
@@ -161,8 +263,73 @@ func TestBuiltinSubagentToolsPassContinuationOptions(t *testing.T) {
 	if _, err := review.Execute(context.Background(), json.RawMessage(`{"task":"again","continue_from":"sa_prev"}`)); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if got.ContinueFrom != "sa_prev" || got.ForkFrom != "" {
+	if got.ContinueFrom != "sa_prev" {
 		t.Fatalf("continuation opts = %+v, want continue_from sa_prev", got)
+	}
+}
+
+func TestRunSkillToolPassesLegacyForkOption(t *testing.T) {
+	var got SubagentRunOptions
+	runner := func(_ context.Context, _ Skill, _ string, opts SubagentRunOptions) (string, error) {
+		got = opts
+		return "ok", nil
+	}
+	runSkill := NewRunSkillTool(New(Options{HomeDir: t.TempDir()}), runner)
+	if _, err := runSkill.Execute(context.Background(), json.RawMessage(`{"name":"review","arguments":"again","fork_from":"sa_prev"}`)); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if got.ForkFrom != "sa_prev" {
+		t.Fatalf("continuation opts = %+v, want fork_from sa_prev", got)
+	}
+}
+
+func TestBuiltinSubagentToolsPassLegacyForkOption(t *testing.T) {
+	var got SubagentRunOptions
+	runner := func(_ context.Context, _ Skill, _ string, opts SubagentRunOptions) (string, error) {
+		got = opts
+		return "ok", nil
+	}
+	tools := BuiltinSubagentTools(New(Options{HomeDir: t.TempDir()}), runner)
+	var review interface {
+		Name() string
+		Execute(context.Context, json.RawMessage) (string, error)
+	}
+	for _, tl := range tools {
+		if tl.Name() == "review" {
+			review = tl
+			break
+		}
+	}
+	if review == nil {
+		t.Fatal("review wrapper tool not built")
+	}
+	if _, err := review.Execute(context.Background(), json.RawMessage(`{"task":"again","fork_from":"sa_prev"}`)); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if got.ForkFrom != "sa_prev" {
+		t.Fatalf("continuation opts = %+v, want fork_from sa_prev", got)
+	}
+}
+
+func TestSubagentSkillSchemasExposeOnlyContinueFromForPersistence(t *testing.T) {
+	runSkill := NewRunSkillTool(New(Options{HomeDir: t.TempDir(), DisableBuiltins: true}), nil)
+	runSchema := string(runSkill.Schema())
+	if !strings.Contains(runSchema, `"continue_from"`) {
+		t.Fatalf("run_skill schema = %s, want continue_from", runSchema)
+	}
+	if strings.Contains(runSchema, "fork_from") {
+		t.Fatalf("run_skill schema = %s, want no fork_from", runSchema)
+	}
+
+	tools := BuiltinSubagentTools(New(Options{HomeDir: t.TempDir()}), nil)
+	for _, tl := range tools {
+		schema := string(tl.Schema())
+		if !strings.Contains(schema, `"continue_from"`) {
+			t.Fatalf("%s schema = %s, want continue_from", tl.Name(), schema)
+		}
+		if strings.Contains(schema, "fork_from") {
+			t.Fatalf("%s schema = %s, want no fork_from", tl.Name(), schema)
+		}
 	}
 }
 

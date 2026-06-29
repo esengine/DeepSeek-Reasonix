@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -109,6 +110,62 @@ var (
 	executedMu sync.Mutex
 	executed   []string
 )
+
+type stuckStreamProvider struct{}
+
+func (stuckStreamProvider) Name() string { return "stuck-stream" }
+
+func (stuckStreamProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	return make(chan provider.Chunk), nil
+}
+
+type closedStreamProvider struct{}
+
+func (closedStreamProvider) Name() string { return "closed-stream" }
+
+func (closedStreamProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	ch := make(chan provider.Chunk)
+	close(ch)
+	return ch, nil
+}
+
+func TestCanceledContextClosedProviderStreamReturnsCancel(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		a := New(closedStreamProvider{}, tool.NewRegistry(), NewSession(""), Options{}, &recordSink{})
+		err := a.Run(ctx, "already cancelled")
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run error on iteration %d = %v, want context cancellation", i, err)
+		}
+	}
+}
+
+func TestCancelDuringStuckProviderStreamReturnsPromptly(t *testing.T) {
+	a := New(stuckStreamProvider{}, tool.NewRegistry(), NewSession(""), Options{}, &recordSink{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- a.Run(ctx, "wait on provider")
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Run returned nil after context cancellation")
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run error = %v, want context cancellation", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Run did not return promptly after provider stream context cancellation")
+	}
+}
 
 // TestCancelDuringToolExecutionBreaksOutPromptly verifies that when the context
 // is cancelled while tools are executing, the agent loop breaks out immediately

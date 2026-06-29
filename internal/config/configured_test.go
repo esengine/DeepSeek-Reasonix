@@ -6,15 +6,12 @@ import "testing"
 // selected. Providers with no api_key_env are explicit no-auth providers; if an
 // env var is configured, it must resolve to a non-empty value.
 func TestProviderConfigured(t *testing.T) {
-	t.Setenv("REASONIX_TEST_KEY", "secret")
-	t.Setenv("REASONIX_TEST_EMPTY", "")
-
 	cases := []struct {
 		name string
 		p    ProviderEntry
 		want bool
 	}{
-		{"key set", ProviderEntry{APIKeyEnv: "REASONIX_TEST_KEY"}, true},
+		{"key set", ProviderEntry{APIKeyEnv: "REASONIX_TEST_KEY", resolvedAPIKey: "secret"}, true},
 		{"key env empty", ProviderEntry{APIKeyEnv: "REASONIX_TEST_EMPTY"}, false},
 		{"key env unset", ProviderEntry{APIKeyEnv: "REASONIX_TEST_MISSING"}, false},
 		{"loopback key env unset", ProviderEntry{BaseURL: "http://127.0.0.1:23333/v1", APIKeyEnv: "REASONIX_TEST_MISSING"}, true},

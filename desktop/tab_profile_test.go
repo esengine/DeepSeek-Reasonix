@@ -432,6 +432,32 @@ func TestMetaReportsGoalStatus(t *testing.T) {
 	}
 }
 
+func TestMetaReportsStoredCollaborationModeWhileControllerRebuilds(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	tab := testTab("a", t.TempDir())
+	tab.Ctrl.Close()
+	tab.Ctrl = nil
+	tab.mode = "plan-yolo"
+	tab.toolApprovalMode = control.ToolApprovalYolo
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	meta := app.MetaForTab(tab.ID)
+	if meta.CollaborationMode != "plan" || meta.ToolApprovalMode != control.ToolApprovalYolo {
+		t.Fatalf("rebuilding plan-yolo meta = %+v, want plan/yolo", meta)
+	}
+
+	tab.mode = "normal"
+	tab.goal = "finish the goal runner"
+	meta = app.MetaForTab(tab.ID)
+	if meta.CollaborationMode != "goal" || meta.Goal != "finish the goal runner" || meta.GoalStatus != control.GoalStatusRunning {
+		t.Fatalf("rebuilding goal meta = %+v, want running goal", meta)
+	}
+}
+
 func TestSetPlanModePreservesAutoApproveTools(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

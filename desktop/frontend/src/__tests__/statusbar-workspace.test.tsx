@@ -25,8 +25,6 @@ function renderStatusBar(props: Partial<Parameters<typeof StatusBar>[0]> = {}): 
       <StatusBar
         context={{ used: 0, window: 0, sessionTokens: 0 }}
         running={false}
-        collaborationMode="normal"
-        toolApprovalMode="ask"
         {...props}
       />
     </LocaleProvider>,
@@ -78,6 +76,12 @@ console.log("\nstatus bar workspace");
   });
   ok(html.indexOf("feature/meta") >= 0 && html.indexOf("workspace/repo") >= 0, "workspace and git branch render as configured items");
   ok(html.indexOf("feature/meta") < html.indexOf("workspace/repo"), "workspace items follow configured order");
+}
+
+{
+  const html = renderStatusBar({ items: ["model"] });
+  ok(!html.includes("YOLO"), "status bar renders only configured status items, not mode indicators");
+  ok(!html.includes("后台作业") && !html.includes("Background jobs"), "status bar omits non-configurable job indicators");
 }
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

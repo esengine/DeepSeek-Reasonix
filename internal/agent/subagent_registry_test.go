@@ -35,8 +35,10 @@ func TestSubagentToolRegistryFiltersUnavailableToolsAndWrapsBash(t *testing.T) {
 	parent := tool.NewRegistry()
 	for _, name := range []string{
 		"task",
+		"read_only_task",
 		"parallel_tasks",
 		"run_skill",
+		"read_only_skill",
 		"read_skill",
 		"install_skill",
 		"install_source",
@@ -60,8 +62,10 @@ func TestSubagentToolRegistryFiltersUnavailableToolsAndWrapsBash(t *testing.T) {
 	sub := SubagentToolRegistry(parent, nil)
 	for _, hidden := range []string{
 		"task",
+		"read_only_task",
 		"parallel_tasks",
 		"run_skill",
+		"read_only_skill",
 		"read_skill",
 		"install_skill",
 		"install_source",
@@ -99,9 +103,74 @@ func TestSubagentToolRegistryFiltersUnavailableToolsAndWrapsBash(t *testing.T) {
 	}
 }
 
+func TestReadOnlySubagentToolRegistryKeepsOnlyResearchToolsAndSafeBash(t *testing.T) {
+	parent := tool.NewRegistry()
+	parent.Add(subagentRegistryTool{name: "task"})
+	parent.Add(subagentRegistryTool{name: "read_only_task"})
+	parent.Add(subagentRegistryTool{name: "read_only_skill", readOnly: true})
+	parent.Add(subagentRegistryTool{name: "write_file"})
+	parent.Add(subagentRegistryTool{name: "remember"})
+	parent.Add(subagentRegistryTool{name: "todo_write", readOnly: true})
+	parent.Add(subagentRegistryTool{name: "complete_step", readOnly: true})
+	parent.Add(subagentRegistryTool{name: "connect_tool_source", readOnly: true})
+	parent.Add(subagentRegistryTool{name: "read_file", readOnly: true})
+	parent.Add(subagentRegistryTool{
+		name:   "bash",
+		schema: `{"type":"object","properties":{"command":{"type":"string"},"run_in_background":{"type":"boolean"}},"required":["command"]}`,
+		result: "safe bash ok",
+	})
+
+	sub := ReadOnlySubagentToolRegistry(parent, nil)
+	for _, hidden := range []string{"task", "read_only_task", "read_only_skill", "write_file", "remember", "todo_write", "complete_step", "connect_tool_source"} {
+		if _, ok := sub.Get(hidden); ok {
+			t.Fatalf("read-only subagent registry should hide %q; got %v", hidden, sub.Names())
+		}
+	}
+	if _, ok := sub.Get("read_file"); !ok {
+		t.Fatalf("read-only subagent registry should keep read_file; got %v", sub.Names())
+	}
+	bash, ok := sub.Get("bash")
+	if !ok {
+		t.Fatalf("read-only subagent registry should keep safe bash; got %v", sub.Names())
+	}
+	if !bash.ReadOnly() {
+		t.Fatal("read-only subagent bash wrapper must report ReadOnly")
+	}
+	if strings.Contains(string(bash.Schema()), "run_in_background") {
+		t.Fatalf("read-only subagent bash schema should not advertise run_in_background: %s", bash.Schema())
+	}
+	out, err := bash.Execute(context.Background(), json.RawMessage(`{"command":"git status"}`))
+	if err != nil || out != "safe bash ok" {
+		t.Fatalf("safe bash delegated to inner tool = %q, %v; want safe bash ok, nil", out, err)
+	}
+	out, err = bash.Execute(context.Background(), json.RawMessage(`{"command":"rm -rf tmp"}`))
+	if err != nil || !strings.HasPrefix(out, "blocked:") {
+		t.Fatalf("unsafe bash should be blocked as tool output, got %q, %v", out, err)
+	}
+}
+
+// TestReadOnlySubagentToolRegistryExcludesUntrustedReadOnly proves an MCP tool
+// whose ReadOnly()==true comes from an untrusted server readOnlyHint is excluded
+// from a read-only research sub-agent, even though its ReadOnly contract is true.
+func TestReadOnlySubagentToolRegistryExcludesUntrustedReadOnly(t *testing.T) {
+	parent := tool.NewRegistry()
+	parent.Add(subagentRegistryTool{name: "read_file", readOnly: true})
+	parent.Add(untrustedReadOnlyTool{fakeTool{name: "mcp__srv__read", readOnly: true}})
+
+	sub := ReadOnlySubagentToolRegistry(parent, nil)
+	if _, ok := sub.Get("mcp__srv__read"); ok {
+		t.Fatalf("read-only subagent registry must exclude an untrusted readOnlyHint MCP tool; got %v", sub.Names())
+	}
+	if _, ok := sub.Get("read_file"); !ok {
+		t.Fatalf("a trusted read-only tool should remain; got %v", sub.Names())
+	}
+}
+
 func TestTaskToolBuildSubRegUsesSubagentToolRegistry(t *testing.T) {
 	parent := tool.NewRegistry()
 	parent.Add(subagentRegistryTool{name: "task"})
+	parent.Add(subagentRegistryTool{name: "read_only_task"})
+	parent.Add(subagentRegistryTool{name: "read_only_skill", readOnly: true})
 	parent.Add(subagentRegistryTool{name: "parallel_tasks"})
 	parent.Add(subagentRegistryTool{name: "wait"})
 	parent.Add(subagentRegistryTool{
@@ -111,7 +180,7 @@ func TestTaskToolBuildSubRegUsesSubagentToolRegistry(t *testing.T) {
 	task := &TaskTool{parentReg: parent}
 
 	sub := task.buildSubReg(nil)
-	for _, hidden := range []string{"task", "parallel_tasks", "wait"} {
+	for _, hidden := range []string{"task", "read_only_task", "read_only_skill", "parallel_tasks", "wait"} {
 		if _, ok := sub.Get(hidden); ok {
 			t.Fatalf("task subagent registry should hide %q; got %v", hidden, sub.Names())
 		}

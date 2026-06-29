@@ -45,6 +45,41 @@ func TestBashTimeoutSecondsFallsBackForNegative(t *testing.T) {
 	}
 }
 
+func TestMCPCallTimeoutSecondsDefaultsToSafetyCap(t *testing.T) {
+	cfg := Default()
+	if cfg.Tools.MCPCallTimeoutSeconds != nil {
+		t.Fatalf("default raw MCP call timeout = %v, want nil", *cfg.Tools.MCPCallTimeoutSeconds)
+	}
+	if got := cfg.MCPCallTimeoutSeconds(); got != 300 {
+		t.Fatalf("MCPCallTimeoutSeconds() = %d, want 300", got)
+	}
+}
+
+func TestMCPCallTimeoutSecondsExplicitPositive(t *testing.T) {
+	cfg := Default()
+	if _, err := toml.Decode("[tools]\nmcp_call_timeout_seconds = 600\n", cfg); err != nil {
+		t.Fatalf("decode MCP timeout: %v", err)
+	}
+	if cfg.Tools.MCPCallTimeoutSeconds == nil {
+		t.Fatal("explicit MCP timeout decoded as nil")
+	}
+	if got := cfg.MCPCallTimeoutSeconds(); got != 600 {
+		t.Fatalf("MCPCallTimeoutSeconds() = %d, want 600", got)
+	}
+}
+
+func TestMCPCallTimeoutSecondsFallsBackForZeroOrNegative(t *testing.T) {
+	cfg := Default()
+	cfg.Tools.MCPCallTimeoutSeconds = intPtr(0)
+	if got := cfg.MCPCallTimeoutSeconds(); got != 300 {
+		t.Fatalf("zero MCPCallTimeoutSeconds() = %d, want 300", got)
+	}
+	cfg.Tools.MCPCallTimeoutSeconds = intPtr(-1)
+	if got := cfg.MCPCallTimeoutSeconds(); got != 300 {
+		t.Fatalf("negative MCPCallTimeoutSeconds() = %d, want 300", got)
+	}
+}
+
 func TestBackgroundJobStalledWarningSecondsDefault(t *testing.T) {
 	cfg := Default()
 	if cfg.Tools.BackgroundJobs.StalledWarningSeconds != nil {

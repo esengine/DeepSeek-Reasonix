@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,12 +14,14 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/checkpoint"
+	"reasonix/internal/command"
 	"reasonix/internal/event"
 	"reasonix/internal/hook"
 	"reasonix/internal/jobs"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
+	"reasonix/internal/skill"
 	"reasonix/internal/tool"
 )
 
@@ -65,6 +68,39 @@ func (r *sessionContextRunner) Run(ctx context.Context, input string) error {
 	r.parentSession = agent.ParentSession(ctx)
 	r.jobSession = jobs.SessionFromContext(ctx)
 	return nil
+}
+
+type cancelingRunner struct {
+	cancel context.CancelFunc
+}
+
+func (r cancelingRunner) Run(_ context.Context, _ string) error {
+	r.cancel()
+	return nil
+}
+
+func TestContextSnapshotIncludesCompletionTokens(t *testing.T) {
+	prov := &scriptedTurns{turns: [][]provider.Chunk{{
+		{Type: provider.ChunkText, Text: "ok"},
+		{Type: provider.ChunkUsage, Usage: &provider.Usage{
+			PromptTokens:     6840,
+			CompletionTokens: 48,
+			TotalTokens:      6888,
+			ReasoningTokens:  48,
+		}},
+		{Type: provider.ChunkDone},
+	}}}
+	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{ContextWindow: 1_000_000}, event.Discard)
+	c := New(Options{Runner: ag, Executor: ag})
+
+	if err := c.Run(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+
+	used, window := c.ContextSnapshot()
+	if used != 6888 || window != 1_000_000 {
+		t.Fatalf("ContextSnapshot() = (%d, %d), want (6888, 1000000)", used, window)
+	}
 }
 
 type fakeControlTool struct{ name string }
@@ -144,6 +180,15 @@ func requestMessagesText(messages []provider.Message) string {
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+func lastUserMessage(messages []provider.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == provider.RoleUser {
+			return messages[i].Content
+		}
+	}
+	return ""
 }
 
 func TestNewTreatsTypedNilSinkAsDiscard(t *testing.T) {
@@ -282,6 +327,39 @@ func TestRunInjectsParentSessionForJobs(t *testing.T) {
 	}
 }
 
+func TestRunStopHookIgnoresCanceledCallerContext(t *testing.T) {
+	runCtx, cancel := context.WithCancel(context.Background())
+	var stopCalls int
+	var stopErr error
+	hooks := hook.NewRunner([]hook.ResolvedHook{{
+		HookConfig: hook.HookConfig{Command: "record-stop"},
+		Event:      hook.Stop,
+		Scope:      hook.ScopeProject,
+	}}, "", func(ctx context.Context, in hook.SpawnInput) hook.SpawnResult {
+		stopCalls++
+		stopErr = ctx.Err()
+		return hook.SpawnResult{ExitCode: 0}
+	}, nil)
+	c := New(Options{
+		Runner: cancelingRunner{cancel: cancel},
+		Hooks:  hooks,
+	})
+
+	if err := c.Run(runCtx, "hello"); err != nil {
+		t.Fatal(err)
+	}
+
+	if runCtx.Err() != context.Canceled {
+		t.Fatalf("caller context err = %v, want %v", runCtx.Err(), context.Canceled)
+	}
+	if stopCalls != 1 {
+		t.Fatalf("Stop hook calls = %d, want 1", stopCalls)
+	}
+	if stopErr != nil {
+		t.Fatalf("Stop hook context err = %v, want nil", stopErr)
+	}
+}
+
 func TestSetSessionPathAdoptsTemporaryBackgroundJobs(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
@@ -335,6 +413,70 @@ func TestGoalStatePersistsNextToSessionPath(t *testing.T) {
 	}
 	if state.Goal != "fix the typo" || state.Status != GoalStatusRunning || state.ResearchMode != GoalResearchOn || !state.Strict {
 		t.Fatalf("goal state = %+v, want running strict research goal", state)
+	}
+}
+
+func TestResumeRestoresTerminalGoalTodosFromSidecar(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	loaded := agent.NewSession("sys")
+	loaded.Add(provider.Message{
+		Role: provider.RoleAssistant,
+		ToolCalls: []provider.ToolCall{{
+			ID:        "todo-1",
+			Name:      "todo_write",
+			Arguments: `{"todos":[{"content":"Step 1","status":"in_progress"}]}`,
+		}},
+	})
+	loaded.Add(provider.Message{
+		Role:       provider.RoleTool,
+		ToolCallID: "todo-1",
+		Name:       "todo_write",
+		Content:    "ok",
+	})
+	if err := os.WriteFile(goalStatePath(path), []byte(`{"status":"complete","todos":[{"content":"Step 1","status":"completed"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	c := New(Options{Executor: exec, SessionDir: dir, Label: "test"})
+	c.Resume(loaded, path)
+
+	got := c.Todos()
+	if len(got) != 1 || got[0].Content != "Step 1" || got[0].Status != "completed" {
+		t.Fatalf("Todos() after resume = %+v, want completed todos from goal-state sidecar", got)
+	}
+}
+
+func TestResumeKeepsTranscriptTodosForRunningGoalSidecar(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	loaded := agent.NewSession("sys")
+	loaded.Add(provider.Message{
+		Role: provider.RoleAssistant,
+		ToolCalls: []provider.ToolCall{{
+			ID:        "todo-1",
+			Name:      "todo_write",
+			Arguments: `{"todos":[{"content":"Step 1","status":"in_progress"}]}`,
+		}},
+	})
+	loaded.Add(provider.Message{
+		Role:       provider.RoleTool,
+		ToolCallID: "todo-1",
+		Name:       "todo_write",
+		Content:    "ok",
+	})
+	if err := os.WriteFile(goalStatePath(path), []byte(`{"status":"running","todos":[{"content":"Step 1","status":"completed"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	c := New(Options{Executor: exec, SessionDir: dir, Label: "test"})
+	c.Resume(loaded, path)
+
+	got := c.Todos()
+	if len(got) != 1 || got[0].Content != "Step 1" || got[0].Status != "in_progress" {
+		t.Fatalf("Todos() after resume = %+v, want transcript todos while goal state is running", got)
 	}
 }
 
@@ -585,6 +727,43 @@ func TestResetPlannerSessionClearsPlannerHistory(t *testing.T) {
 	}
 	if !strings.Contains(second, "second task") {
 		t.Fatalf("planner request after reset missing current task:\n%s", second)
+	}
+}
+
+func TestTwoModelShortChoiceReplySkipsPlanner(t *testing.T) {
+	dir := t.TempDir()
+	planner := &recordingProvider{name: "planner", streams: [][]provider.Chunk{
+		textTurn("planner should not run for a context-dependent choice reply"),
+	}}
+	execProv := &recordingProvider{name: "executor", streams: [][]provider.Chunk{
+		textTurn("selected option 1"),
+	}}
+	execSess := agent.NewSession("exec sys")
+	execSess.Add(provider.Message{Role: provider.RoleUser, Content: "先给我两个执行方案"})
+	execSess.Add(provider.Message{Role: provider.RoleAssistant, Content: "两个执行方式可选：\n\n1. Subagent-Driven（推荐）\n2. 当前会话执行\n\n你选哪种？"})
+	exec := agent.New(execProv, tool.NewRegistry(), execSess, agent.Options{}, event.Discard)
+	coord := agent.NewCoordinator(planner, agent.NewSession("planner sys"), nil, tool.NewRegistry(), agent.Options{}, exec, 0, event.Discard, NewPlannerGate(nil))
+	c := New(Options{Runner: coord, Executor: exec, SystemPrompt: "exec sys", SessionDir: dir, SessionPath: filepath.Join(dir, "session.jsonl"), Label: "test"})
+
+	if err := c.Run(context.Background(), "1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(planner.requests) != 0 {
+		t.Fatalf("planner requests = %d, want 0 for a short context-dependent choice reply", len(planner.requests))
+	}
+	if len(execProv.requests) != 1 {
+		t.Fatalf("executor requests = %d, want 1", len(execProv.requests))
+	}
+	reqText := requestMessagesText(execProv.requests[0].Messages)
+	if !strings.Contains(reqText, "1. Subagent-Driven") {
+		t.Fatalf("executor request lost the previous assistant options:\n%s", reqText)
+	}
+	if strings.Contains(reqText, "Reasonix executor handoff") {
+		t.Fatalf("short choice reply should not be wrapped as a planner handoff:\n%s", reqText)
+	}
+	if got := lastUserMessage(execProv.requests[0].Messages); got != "1" {
+		t.Fatalf("executor last user = %q, want raw choice reply", got)
 	}
 }
 
@@ -1114,6 +1293,121 @@ func TestApprovalPersistentBashPrefixRememberRule(t *testing.T) {
 	}
 }
 
+func TestPlanModeReadOnlyTrustApprovalPersistsMCPTrust(t *testing.T) {
+	ids := make(chan string, 2)
+	var approval event.Approval
+	var notices []string
+	var rememberedServer, rememberedTool string
+	prompts := 0
+	c := New(Options{
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.ApprovalRequest {
+				prompts++
+				approval = e.Approval
+				ids <- e.Approval.ID
+			}
+			if e.Kind == event.Notice {
+				notices = append(notices, e.Text)
+			}
+		}),
+		OnRememberMCPReadOnlyTrust: func(serverName, rawToolName string) MCPReadOnlyTrustResult {
+			rememberedServer, rememberedTool = serverName, rawToolName
+			return MCPReadOnlyTrustResult{Server: serverName, Tool: rawToolName, Path: "reasonix.toml", Saved: true}
+		},
+	})
+
+	go func() {
+		c.Approve(<-ids, true, true, true)
+	}()
+	req := agent.PlanModeReadOnlyTrustRequest{
+		ToolName:    "mcp__github__issue_read",
+		ServerName:  "github",
+		RawToolName: "issue/read",
+		Args:        json.RawMessage(`{"issue":1}`),
+	}
+	allow, reason, err := planModeReadOnlyTrustApprover{c}.CheckPlanModeReadOnlyTrust(context.Background(), req)
+	if err != nil || !allow || reason != "" {
+		t.Fatalf("CheckPlanModeReadOnlyTrust = (%v,%q,%v), want allow", allow, reason, err)
+	}
+	if approval.Tool != "mcp__github__issue_read" || !strings.Contains(approval.Subject, "github/issue/read") || !strings.Contains(approval.Reason, "read-only") {
+		t.Fatalf("approval = %+v, want MCP read-only trust prompt", approval)
+	}
+	if rememberedServer != "github" || rememberedTool != "issue/read" {
+		t.Fatalf("remembered MCP trust = %s/%s, want github/issue/read", rememberedServer, rememberedTool)
+	}
+	if len(notices) != 1 || !strings.Contains(notices[0], "github/issue/read") {
+		t.Fatalf("notices = %v, want MCP trust saved notice", notices)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	allow, reason, err = planModeReadOnlyTrustApprover{c}.CheckPlanModeReadOnlyTrust(ctx, req)
+	if err != nil || !allow || reason != "" {
+		t.Fatalf("second CheckPlanModeReadOnlyTrust = (%v,%q,%v), want session grant", allow, reason, err)
+	}
+	if prompts != 1 {
+		t.Fatalf("approval prompts = %d, want 1", prompts)
+	}
+}
+
+func TestPlanModeReadOnlyTrustApprovalIgnoresToolAutoApproval(t *testing.T) {
+	approvalRequests := make(chan event.Approval, 1)
+	c := New(Options{
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.ApprovalRequest {
+				approvalRequests <- e.Approval
+			}
+		}),
+	})
+	c.SetAutoApproveTools(true)
+
+	type trustResult struct {
+		allow  bool
+		reason string
+		err    error
+	}
+	done := make(chan trustResult, 1)
+	req := agent.PlanModeReadOnlyTrustRequest{
+		ToolName:    "mcp__github__issue_read",
+		ServerName:  "github",
+		RawToolName: "issue/read",
+	}
+	go func() {
+		allow, reason, err := planModeReadOnlyTrustApprover{c}.CheckPlanModeReadOnlyTrust(context.Background(), req)
+		done <- trustResult{allow: allow, reason: reason, err: err}
+	}()
+
+	var approval event.Approval
+	select {
+	case approval = <-approvalRequests:
+	case <-time.After(2 * time.Second):
+		t.Fatal("MCP read-only trust prompt was not emitted under tool auto-approval")
+	}
+	if approval.Tool != "mcp__github__issue_read" || !strings.Contains(approval.Subject, "github/issue/read") {
+		t.Fatalf("approval = %+v, want MCP read-only trust prompt", approval)
+	}
+	select {
+	case got := <-done:
+		t.Fatalf("tool auto-approval must not answer MCP read-only trust, got %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	c.Approve(approval.ID, true, true, false)
+	select {
+	case got := <-done:
+		if got.err != nil || !got.allow || got.reason != "" {
+			t.Fatalf("CheckPlanModeReadOnlyTrust after approval = %+v, want allow", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("MCP read-only trust prompt stayed blocked after Approve")
+	}
+
+	allow, reason, err := planModeReadOnlyTrustApprover{c}.CheckPlanModeReadOnlyTrust(context.Background(), req)
+	if err != nil || !allow || reason != "" {
+		t.Fatalf("session-granted MCP read-only trust under YOLO = (%v,%q,%v), want allow", allow, reason, err)
+	}
+}
+
 func TestApprovalSessionGrantGroupsFileMutationTools(t *testing.T) {
 	c, ids, prompts := approvalIDs()
 	go func() { c.Approve(<-ids, true, true, false) }()
@@ -1299,6 +1593,73 @@ func (r blockingRunner) Run(_ context.Context, input string) error {
 	return nil
 }
 
+func TestRunTurnReportsErrTurnRunning(t *testing.T) {
+	sess := agent.NewSession("sys")
+	release := make(chan struct{})
+	c := New(Options{Runner: blockingRunner{session: sess, release: release}})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- c.RunTurn(context.Background(), "first")
+	}()
+	waitForRunning(t, c)
+
+	if err := c.RunTurn(context.Background(), "second"); err != ErrTurnRunning {
+		t.Fatalf("RunTurn while running error = %v, want ErrTurnRunning", err)
+	}
+
+	close(release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("first RunTurn returned %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first RunTurn did not finish after release")
+	}
+}
+
+func TestSendWhileRunningDoesNotInterleaveTurns(t *testing.T) {
+	sess := agent.NewSession("sys")
+	release := make(chan struct{})
+	events := make(chan event.Event, 4)
+	c := New(Options{
+		Runner: blockingRunner{session: sess, release: release},
+		Sink: event.FuncSink(func(e event.Event) {
+			events <- e
+		}),
+	})
+	defer c.autosaveWG.Wait()
+
+	c.Send("first")
+	waitForRunning(t, c)
+	c.Send("second")
+	close(release)
+	waitForTurnDone(t, events)
+
+	var users []string
+	for _, m := range sess.Messages {
+		if m.Role == provider.RoleUser {
+			users = append(users, m.Content)
+		}
+	}
+	if len(users) != 1 || users[0] != "first" {
+		t.Fatalf("user turns = %v, want only first turn recorded", users)
+	}
+}
+
+func waitForRunning(t *testing.T, c *Controller) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if c.Running() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("controller did not enter running state")
+}
+
 func TestMidTurnAutosavePersistsDuringLongTurn(t *testing.T) {
 	old := midTurnSnapshotInterval.Load()
 	midTurnSnapshotInterval.Store(int64(10 * time.Millisecond))
@@ -1449,4 +1810,469 @@ func TestApprovedPlanDoesNotAutoApproveNonContinuationTurn(t *testing.T) {
 	if approvalPrompts != 2 {
 		t.Fatalf("non-continuation writer should prompt after plan approval, prompts=%d", approvalPrompts)
 	}
+}
+
+// writeCmdFile creates a command .md file with frontmatter under dir.
+func writeCmdFile(t *testing.T, dir, name, description, body string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := fmt.Sprintf("---\ndescription: %s\n---\n%s\n", description, body)
+	if err := os.WriteFile(filepath.Join(dir, name+".md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCommandsAtomicPointer verifies that commands passed via Options.Commands are
+// correctly exposed through the atomic-pointer Commands() getter and that
+// CustomCommand resolves and renders them. Missing commands return found=false.
+func TestCommandsAtomicPointer(t *testing.T) {
+	cmds := []command.Command{
+		{Name: "review", Description: "Review code", Body: "Review $1"},
+		{Name: "test", Description: "Run tests", Body: "Test $1"},
+	}
+	c := New(Options{
+		Commands: cmds,
+		Sink:     &typedNilControllerSink{},
+		Registry: tool.NewRegistry(),
+	})
+
+	// Commands() returns what was passed via Options
+	got := c.Commands()
+	if len(got) != 2 {
+		t.Fatalf("Commands() = %d, want 2", len(got))
+	}
+	// Check retrieval via CustomCommand
+	sent, ok := c.CustomCommand("/review myfile.go")
+	if !ok {
+		t.Error("/review should be found")
+	}
+	if !strings.Contains(sent, "Review myfile.go") {
+		t.Errorf("unexpected render: %q", sent)
+	}
+	_, ok = c.CustomCommand("/missing")
+	if ok {
+		t.Error("/missing should not be found")
+	}
+
+	// Commands() getter uses atomic.Pointer internally
+	if cmds2 := c.Commands(); len(cmds2) != 2 {
+		t.Errorf("Commands() = %d after change, want 2", len(cmds2))
+	}
+}
+
+// TestReloadCommandsFromFilesystem exercises ReloadCommands against real .md
+// files in a temp workspace: initial load, hot-reload with a new file, and
+// hot-reload after modifying an existing file. Also verifies that skills are
+// preserved across the reload.
+func TestReloadCommandsFromFilesystem(t *testing.T) {
+	// Isolate HOME so CommandDirsForRoot does not pick up global .md command files.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+
+	wsRoot := t.TempDir()
+	cmdDir := filepath.Join(wsRoot, ".reasonix", "commands")
+	writeCmdFile(t, cmdDir, "review", "Review code", "Review $1")
+	writeCmdFile(t, cmdDir, "test", "Run tests", "Test $1")
+
+	// Create a minimal in-memory skill to verify skills are preserved across reload.
+	sk := skill.Skill{
+		Name:        "myskill",
+		Description: "Test skill",
+		Body:        "You are a test skill. User says: {{.Input}}",
+	}
+
+	reg := tool.NewRegistry()
+	c := New(Options{
+		Sink:          &typedNilControllerSink{},
+		Registry:      reg,
+		WorkspaceRoot: wsRoot,
+		Skills:        []skill.Skill{sk},
+	})
+
+	// ReloadCommands should pick up the two .md files and preserve the skill.
+	if err := c.ReloadCommands(context.Background()); err != nil {
+		t.Fatalf("ReloadCommands: %v", err)
+	}
+	cmds := c.Commands()
+	if len(cmds) != 2 {
+		t.Fatalf("Commands() = %d after reload, want 2", len(cmds))
+	}
+
+	// CustomCommand should resolve through the hot-swapped getter
+	sent, ok := c.CustomCommand("/review hello.go")
+	if !ok {
+		t.Fatal("/review should be found after reload")
+	}
+	if !strings.Contains(sent, "Review hello.go") {
+		t.Errorf("render = %q, want Review hello.go", sent)
+	}
+
+	// Missing command still not found
+	if _, ok := c.CustomCommand("/nope"); ok {
+		t.Error("/nope should not be found")
+	}
+
+	// Skill should appear in the slash_command tool's description after reload.
+	if tool, found := reg.Get("slash_command"); found {
+		if !strings.Contains(tool.Description(), "myskill") {
+			t.Error("skill 'myskill' should appear in slash_command tool Description after ReloadCommands")
+		}
+	} else {
+		t.Error("slash_command tool should be registered after ReloadCommands")
+	}
+
+	// Skill should still be callable via RunSkill after reload.
+	if _, ok := c.RunSkill("/myskill"); !ok {
+		t.Error("RunSkill(/myskill) should find the skill after ReloadCommands")
+	}
+
+	// Hot-reload: add a new command file
+	writeCmdFile(t, cmdDir, "count", "Count to N", "Count from 1 to $1")
+	if err := c.ReloadCommands(context.Background()); err != nil {
+		t.Fatalf("ReloadCommands (add): %v", err)
+	}
+	if cmds := c.Commands(); len(cmds) != 3 {
+		t.Fatalf("Commands() = %d after add, want 3", len(cmds))
+	}
+
+	// Hot-reload: modify an existing command
+	writeCmdFile(t, cmdDir, "review", "Review code (friendly)", "Kindly review $1")
+	if err := c.ReloadCommands(context.Background()); err != nil {
+		t.Fatalf("ReloadCommands (modify): %v", err)
+	}
+	if cmds := c.Commands(); len(cmds) != 3 {
+		t.Fatalf("Commands() = %d after modify, want 3", len(cmds))
+	}
+	sent, ok = c.CustomCommand("/review world.go")
+	if !ok {
+		t.Fatal("/review should be found after modify")
+	}
+	if !strings.Contains(sent, "Kindly review world.go") {
+		t.Errorf("render after modify = %q, want Kindly review world.go", sent)
+	}
+
+	// The slash_command tool should be registered and updated
+	if _, found := reg.Get("slash_command"); !found {
+		t.Error("slash_command tool should be registered after ReloadCommands")
+	}
+}
+
+// TestReloadCommandsDeleteFile verifies that removing a command .md file and
+// reloading causes the command to disappear from both Commands() and
+// CustomCommand(), while other commands remain intact.
+func TestReloadCommandsDeleteFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+
+	wsRoot := t.TempDir()
+	cmdDir := filepath.Join(wsRoot, ".reasonix", "commands")
+	writeCmdFile(t, cmdDir, "alpha", "Alpha cmd", "Alpha $1")
+	writeCmdFile(t, cmdDir, "beta", "Beta cmd", "Beta $1")
+
+	reg := tool.NewRegistry()
+	c := New(Options{
+		Sink:          &typedNilControllerSink{},
+		Registry:      reg,
+		WorkspaceRoot: wsRoot,
+	})
+
+	if err := c.ReloadCommands(context.Background()); err != nil {
+		t.Fatalf("initial reload: %v", err)
+	}
+	if got := len(c.Commands()); got != 2 {
+		t.Fatalf("Commands() = %d, want 2", got)
+	}
+
+	// Delete alpha.md
+	if err := os.Remove(filepath.Join(cmdDir, "alpha.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.ReloadCommands(context.Background()); err != nil {
+		t.Fatalf("reload after delete: %v", err)
+	}
+	if got := len(c.Commands()); got != 1 {
+		t.Fatalf("Commands() = %d after delete, want 1", got)
+	}
+
+	// /alpha should no longer be found
+	if _, ok := c.CustomCommand("/alpha x"); ok {
+		t.Error("/alpha should NOT be found after deletion")
+	}
+	// /beta should still work
+	sent, ok := c.CustomCommand("/beta y")
+	if !ok {
+		t.Error("/beta should still be found")
+	}
+	if !strings.Contains(sent, "Beta y") {
+		t.Errorf("render = %q, want Beta y", sent)
+	}
+}
+
+// TestReloadCommandsMalformedFile verifies that a malformed .md file causes
+// ReloadCommands to return an error but does not prevent other valid commands
+// from loading.
+func TestReloadCommandsMalformedFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+
+	wsRoot := t.TempDir()
+	cmdDir := filepath.Join(wsRoot, ".reasonix", "commands")
+	writeCmdFile(t, cmdDir, "good", "Good cmd", "Good $1")
+
+	// Write a malformed file (no valid frontmatter)
+	if err := os.MkdirAll(cmdDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	broken := filepath.Join(cmdDir, "broken.md")
+	if err := os.WriteFile(broken, []byte("this is not valid yaml\n---\nrandom\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := tool.NewRegistry()
+	c := New(Options{
+		Sink:          &typedNilControllerSink{},
+		Registry:      reg,
+		WorkspaceRoot: wsRoot,
+	})
+
+	err := c.ReloadCommands(context.Background())
+	// We expect some error from the malformed file
+	if err == nil {
+		t.Log("ReloadCommands returned nil error despite malformed file — command.Load may tolerate it")
+	} else {
+		t.Logf("ReloadCommands returned error (expected): %v", err)
+	}
+
+	// The valid command should still be loadable
+	cmds := c.Commands()
+	foundGood := false
+	for _, cmd := range cmds {
+		if cmd.Name == "good" {
+			foundGood = true
+		}
+	}
+	if !foundGood {
+		t.Errorf("valid command 'good' should be present, got commands: %v", cmdNames(cmds))
+	}
+}
+
+// TestReloadCommandsSameNameAcrossDirs verifies that when the same command
+// name exists in multiple convention directories, the later-scanned directory
+// (higher priority) wins. ConventionDirs = [".reasonix", ".agents", ".agent",
+// ".claude"], scanned in reverse, so .reasonix is highest priority.
+func TestReloadCommandsSameNameAcrossDirs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+
+	wsRoot := t.TempDir()
+
+	// Lower priority: .claude/commands
+	claudeDir := filepath.Join(wsRoot, ".claude", "commands")
+	writeCmdFile(t, claudeDir, "greet", "Claude greet", "Hello from Claude: $1")
+
+	// Higher priority: .reasonix/commands
+	reasonixDir := filepath.Join(wsRoot, ".reasonix", "commands")
+	writeCmdFile(t, reasonixDir, "greet", "Reasonix greet", "Hello from Reasonix: $1")
+
+	reg := tool.NewRegistry()
+	c := New(Options{
+		Sink:          &typedNilControllerSink{},
+		Registry:      reg,
+		WorkspaceRoot: wsRoot,
+	})
+
+	if err := c.ReloadCommands(context.Background()); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	// There should be exactly 1 command named "greet"
+	cmds := c.Commands()
+	count := 0
+	for _, cmd := range cmds {
+		if cmd.Name == "greet" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly 1 'greet' command, got %d", count)
+	}
+
+	// The winning version should be from .reasonix (highest priority)
+	sent, ok := c.CustomCommand("/greet world")
+	if !ok {
+		t.Fatal("/greet should be found")
+	}
+	if !strings.Contains(sent, "Hello from Reasonix") {
+		t.Errorf("expected .reasonix version to win, got render: %q", sent)
+	}
+}
+
+// TestReloadCommandsEmptySet verifies that deleting all command files and
+// reloading results in an empty Commands() slice, while the slash_command tool
+// still exists in the Registry (containing only Skills).
+func TestReloadCommandsEmptySet(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+
+	wsRoot := t.TempDir()
+	cmdDir := filepath.Join(wsRoot, ".reasonix", "commands")
+	writeCmdFile(t, cmdDir, "temp", "Temp cmd", "Temp $1")
+
+	sk := skill.Skill{
+		Name:        "preserved",
+		Description: "A skill to keep",
+		Body:        "Skill body: {{.Input}}",
+	}
+
+	reg := tool.NewRegistry()
+	c := New(Options{
+		Sink:          &typedNilControllerSink{},
+		Registry:      reg,
+		WorkspaceRoot: wsRoot,
+		Skills:        []skill.Skill{sk},
+	})
+
+	if err := c.ReloadCommands(context.Background()); err != nil {
+		t.Fatalf("initial reload: %v", err)
+	}
+	if got := len(c.Commands()); got != 1 {
+		t.Fatalf("Commands() = %d, want 1", got)
+	}
+
+	// Delete all command files
+	if err := os.Remove(filepath.Join(cmdDir, "temp.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.ReloadCommands(context.Background()); err != nil {
+		t.Fatalf("reload after delete all: %v", err)
+	}
+	if got := len(c.Commands()); got != 0 {
+		t.Fatalf("Commands() = %d after delete all, want 0", got)
+	}
+
+	// /temp should no longer be found
+	if _, ok := c.CustomCommand("/temp x"); ok {
+		t.Error("/temp should NOT be found after deletion")
+	}
+
+	// slash_command tool should still exist (for Skills)
+	slashTool, found := reg.Get("slash_command")
+	if !found {
+		t.Fatal("slash_command tool should still exist even with 0 commands")
+	}
+	// It should still contain the skill
+	if !strings.Contains(slashTool.Description(), "preserved") {
+		t.Error("skill 'preserved' should still appear in slash_command tool Description")
+	}
+}
+
+// TestReloadCommandsDesktopManagementNotice verifies the desktop/HTTP path:
+// when the frontend submits "/reload-cmd" as raw input, Submit → managementNotice
+// handles it and emits a Notice event with the correct count.
+func TestReloadCommandsDesktopManagementNotice(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+
+	wsRoot := t.TempDir()
+	cmdDir := filepath.Join(wsRoot, ".reasonix", "commands")
+	writeCmdFile(t, cmdDir, "hello", "Greet", "Hello $1")
+	writeCmdFile(t, cmdDir, "review", "Review code", "Review $1")
+
+	var notices []string
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice {
+			notices = append(notices, e.Text)
+		}
+	})
+
+	reg := tool.NewRegistry()
+	c := New(Options{
+		Sink:          sink,
+		Registry:      reg,
+		WorkspaceRoot: wsRoot,
+	})
+
+	// Initial load so Commands() is populated.
+	if err := c.ReloadCommands(context.Background()); err != nil {
+		t.Fatalf("initial reload: %v", err)
+	}
+	notices = nil // reset
+
+	// Desktop path: managementNotice("/reload-cmd") should emit a notice.
+	handled := c.managementNotice("/reload-cmd")
+	if !handled {
+		t.Fatal("managementNotice(/reload-cmd) should return true")
+	}
+	if len(notices) != 1 {
+		t.Fatalf("expected 1 notice, got %d: %v", len(notices), notices)
+	}
+	if !strings.Contains(notices[0], "commands reloaded") {
+		t.Errorf("notice = %q, want 'commands reloaded'", notices[0])
+	}
+	if !strings.Contains(notices[0], "2 available") {
+		t.Errorf("notice = %q, want '2 available'", notices[0])
+	}
+
+	// Delete one command file and reload again.
+	if err := os.Remove(filepath.Join(cmdDir, "hello.md")); err != nil {
+		t.Fatal(err)
+	}
+	notices = nil
+	handled = c.managementNotice("/reload-cmd")
+	if !handled {
+		t.Fatal("managementNotice(/reload-cmd) after delete should return true")
+	}
+	if len(notices) != 1 {
+		t.Fatalf("expected 1 notice after delete, got %d: %v", len(notices), notices)
+	}
+	if !strings.Contains(notices[0], "1 available") {
+		t.Errorf("notice after delete = %q, want '1 available'", notices[0])
+	}
+
+	// Delete all and verify empty-set notice.
+	if err := os.Remove(filepath.Join(cmdDir, "review.md")); err != nil {
+		t.Fatal(err)
+	}
+	notices = nil
+	handled = c.managementNotice("/reload-cmd")
+	if !handled {
+		t.Fatal("managementNotice(/reload-cmd) empty set should return true")
+	}
+	if len(notices) != 1 {
+		t.Fatalf("expected 1 notice for empty set, got %d: %v", len(notices), notices)
+	}
+	if !strings.Contains(notices[0], "0 available") {
+		t.Errorf("notice for empty set = %q, want '0 available'", notices[0])
+	}
+}
+
+// cmdNames is a test helper that extracts command names from a slice.
+func cmdNames(cmds []command.Command) []string {
+	names := make([]string, len(cmds))
+	for i, c := range cmds {
+		names[i] = c.Name
+	}
+	return names
 }

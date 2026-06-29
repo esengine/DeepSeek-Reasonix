@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,12 +19,6 @@ import (
 )
 
 const closeWaitBudget = 5 * time.Second
-
-// defaultCallTimeout is the per-call deadline applied when the caller's context
-// carries no deadline of its own. Without this a slow or hung MCP server blocks
-// the agent's turn indefinitely because the turn context is normally cancelled
-// only by explicit user action.
-const defaultCallTimeout = 60 * time.Second
 
 // stdioTransport speaks newline-delimited JSON-RPC 2.0 over a subprocess's
 // stdin/stdout — the MCP stdio convention (one JSON message per line, no
@@ -42,8 +35,7 @@ type stdioTransport struct {
 	stdout *bufio.Reader
 	stderr *tailBuffer
 
-	callMu      sync.Mutex    // one in-flight request/response at a time over the shared pipe
-	callTimeout time.Duration // per-call deadline when ctx has no deadline; 0 means defaultCallTimeout
+	callMu sync.Mutex // one in-flight request/response at a time over the shared pipe
 
 	mu      sync.Mutex
 	nextID  int
@@ -498,23 +490,8 @@ func (t *stdioTransport) call(ctx context.Context, method string, params any) (j
 		return nil, fmt.Errorf("plugin %q: write %s: %w", t.name, method, err)
 	}
 
-	var appliedTimeout time.Duration
-	if _, ok := ctx.Deadline(); !ok {
-		appliedTimeout = t.callTimeout
-		if appliedTimeout <= 0 {
-			appliedTimeout = defaultCallTimeout
-		}
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, appliedTimeout)
-		defer cancel()
-	}
-
 	select {
 	case <-ctx.Done():
-		if ctx.Err() == context.DeadlineExceeded {
-			slog.Warn("plugin: MCP call timed out",
-				"server", t.name, "method", method, "timeout", appliedTimeout)
-		}
 		return nil, ctx.Err()
 	case resp, ok := <-ch:
 		if !ok {

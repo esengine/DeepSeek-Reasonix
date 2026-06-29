@@ -195,10 +195,10 @@ func gitRoot(dir string) string {
 }
 
 // resolveImports inlines lines that are exactly "@<path>" by replacing them with
-// the referenced file's content. Paths resolve relative to baseDir, with a
-// leading ~ expanded to home and absolute paths honored as-is. Recurses up to
-// maxImportDepth with cycle detection via seen (absolute paths). An import that
-// cannot be read is left as-is so the user can see what failed.
+// the referenced file's content. Imports must stay inside the importing file's
+// directory after symlink resolution. Recurses up to maxImportDepth with cycle
+// detection via seen (absolute paths). An import that cannot be read is left
+// as-is so the user can see what failed.
 func resolveImports(body, baseDir string, seen map[string]bool, depth int) string {
 	if depth >= maxImportDepth {
 		return body
@@ -210,6 +210,9 @@ func resolveImports(body, baseDir string, seen map[string]bool, depth int) strin
 			continue
 		}
 		path := resolvePath(target, baseDir)
+		if path == "" {
+			continue
+		}
 		abs := absOf(path)
 		if seen[abs] {
 			lines[i] = line + "  <!-- skipped: import cycle -->"
@@ -245,19 +248,37 @@ func importTarget(line string) (string, bool) {
 	return p, true
 }
 
-// resolvePath turns an import token into a filesystem path: ~ expands to home,
-// absolute paths pass through, everything else is relative to baseDir.
+// resolvePath turns an import token into a filesystem path. Home-relative ("~")
+// and absolute imports are refused so a memory can't read sensitive files
+// outside the project tree. Relative imports must remain inside baseDir after
+// symlink resolution.
 func resolvePath(p, baseDir string) string {
-	if strings.HasPrefix(p, "~") {
-		if home, err := os.UserHomeDir(); err == nil {
-			rest := strings.TrimLeft(p[1:], "/\\")
-			return filepath.Join(home, rest)
-		}
+	cleaned := strings.TrimSpace(p)
+	if cleaned == "" || strings.HasPrefix(cleaned, "~") || filepath.IsAbs(cleaned) {
+		return ""
 	}
-	if filepath.IsAbs(p) {
-		return p
+	baseAbs, err := filepath.Abs(baseDir)
+	if err != nil {
+		return ""
 	}
-	return filepath.Join(baseDir, p)
+	baseReal, err := filepath.EvalSymlinks(baseAbs)
+	if err != nil {
+		return ""
+	}
+	joined := filepath.Join(baseReal, cleaned)
+	abs, err := filepath.Abs(joined)
+	if err != nil {
+		return ""
+	}
+	targetReal, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		targetReal = abs
+	}
+	rel, err := filepath.Rel(baseReal, targetReal)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return ""
+	}
+	return targetReal
 }
 
 // absOf returns the absolute form of p, falling back to a cleaned p on error so

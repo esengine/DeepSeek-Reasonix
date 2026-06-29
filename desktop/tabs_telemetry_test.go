@@ -74,8 +74,15 @@ func TestWorkspaceTabAggregatesSessionUsageTelemetry(t *testing.T) {
 	}
 
 	app := &App{tabs: map[string]*WorkspaceTab{"tab": tab}}
-	if context := app.ContextUsageForTab("tab"); context.SessionTokens != 140 {
+	context := app.ContextUsageForTab("tab")
+	if context.SessionTokens != 140 {
 		t.Fatalf("context usage session tokens = %d, want 140", context.SessionTokens)
+	}
+	if context.SessionCost <= 0 || context.SessionCurrency != "¥" {
+		t.Fatalf("context usage cost = %f %q, want positive ¥", context.SessionCost, context.SessionCurrency)
+	}
+	if context.CacheHitTokens != 70 || context.CacheMissTokens != 30 {
+		t.Fatalf("context usage cache tokens = hit %d miss %d, want 70/30", context.CacheHitTokens, context.CacheMissTokens)
 	}
 	if panel := app.ContextPanel("tab"); panel.TotalTokens != 140 {
 		t.Fatalf("context panel total tokens = %d, want 140", panel.TotalTokens)

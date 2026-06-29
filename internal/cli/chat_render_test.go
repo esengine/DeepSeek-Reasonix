@@ -332,6 +332,28 @@ func TestRepeatedShellCommandDoesNotAccumulateOutput(t *testing.T) {
 	}
 }
 
+func TestCollapsedShellHintUsesKeyboardShortcutOnly(t *testing.T) {
+	m := newTestChatTUI()
+	const id = "shell-long"
+	lines := make([]string, shellPreviewLines+2)
+	for i := range lines {
+		lines[i] = "line"
+	}
+	output := strings.Join(lines, "\n") + "\n"
+	m.shellOutputs[id] = output
+	m.transcript = []string{""}
+
+	m.collapseShellSlot(id, 0, output)
+
+	got := m.transcript[0]
+	if !strings.Contains(got, "more lines (Ctrl+B)") {
+		t.Fatalf("collapsed shell hint should mention Ctrl+B, got %q", got)
+	}
+	if strings.Contains(got, "click/") {
+		t.Fatalf("collapsed shell hint must not advertise mouse click in default TUI mode, got %q", got)
+	}
+}
+
 // TestConsecutiveNonShellToolsDoNotRenderNegativeLineCount is the regression
 // test for the review-blocking case. The original fix to back-to-back shell
 // tools records every dispatched id in shellTranscriptIdx so a late

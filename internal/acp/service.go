@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -539,6 +540,11 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 		sess.finish()
 		if err := s.applyPendingSessionConfig(ctx, sess); err != nil {
 			sess.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "session config switch failed after turn: " + err.Error()})
+			if isSessionConfigActiveWorkError(err) {
+				if current, stateErr := s.configStateForSession(ctx, sess); stateErr == nil {
+					sess.sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: current.ConfigOptions})
+				}
+			}
 		}
 		cancel()
 	}()
@@ -657,14 +663,18 @@ func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState
 		sess.mu.Unlock()
 		return &RPCError{Code: ErrInvalidRequest, Message: "session config: session is deleted"}
 	}
-	if sess.running || sess.ctrl.Running() {
+	status := sess.ctrl.RuntimeStatus()
+	if status.PendingPrompt {
+		sess.mu.Unlock()
+		return sessionConfigActiveWorkError("answer pending prompts before switching config")
+	}
+	if !sess.running && !status.Running && status.BackgroundJobs > 0 {
+		sess.mu.Unlock()
+		return sessionConfigActiveWorkError("stop background jobs before switching config")
+	}
+	if sess.running || status.Running {
 		pending := cloneSessionConfigState(cfgState)
-		sess.model = cfgState.Model
-		sess.effortOverride = cloneStringPtr(cfgState.EffortOverride)
 		sess.pendingConfig = &pending
-		if sess.transcript != "" && sessionFileExists(sess.transcript) {
-			_ = saveACPMeta(sess.transcript, sess.metaLocked())
-		}
 		sess.mu.Unlock()
 		sess.sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: cfgState.ConfigOptions})
 		return nil
@@ -696,11 +706,7 @@ func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState
 	newCtrl.EnableInteractiveApproval()
 	sink.bindApprove(newCtrl.Approve)
 	sink.bindAnswer(newCtrl.AnswerQuestion)
-	if len(carried) > 0 {
-		newCtrl.Resume(&agent.Session{Messages: carried}, prevPath)
-	} else if prevPath != "" {
-		newCtrl.SetSessionPath(prevPath)
-	}
+	newCtrl.AdoptHistory(carried, prevPath)
 	// InheritLifecycleFrom wires two concrete controllers' turn/hook state; it's a
 	// construction concern, not part of the driving port. cur is always the
 	// *control.Controller the factory built for this session, so this is safe.
@@ -736,15 +742,36 @@ func (s *service) applyPendingSessionConfig(ctx context.Context, sess *acpSessio
 	sess.mu.Unlock()
 
 	if err := s.rebuildSession(ctx, sess, cfgState); err != nil {
-		sess.mu.Lock()
-		if !sess.deleted && sess.pendingConfig == nil {
-			pending := cloneSessionConfigState(cfgState)
-			sess.pendingConfig = &pending
+		if !isSessionConfigActiveWorkError(err) {
+			sess.mu.Lock()
+			if !sess.deleted && sess.pendingConfig == nil {
+				pending := cloneSessionConfigState(cfgState)
+				sess.pendingConfig = &pending
+			}
+			sess.mu.Unlock()
 		}
-		sess.mu.Unlock()
 		return err
 	}
 	return nil
+}
+
+type activeSessionConfigWorkError struct {
+	*RPCError
+}
+
+func (e *activeSessionConfigWorkError) Unwrap() error {
+	return e.RPCError
+}
+
+func sessionConfigActiveWorkError(message string) error {
+	return &activeSessionConfigWorkError{
+		RPCError: &RPCError{Code: ErrInvalidRequest, Message: "session config: " + message},
+	}
+}
+
+func isSessionConfigActiveWorkError(err error) bool {
+	var activeErr *activeSessionConfigWorkError
+	return errors.As(err, &activeErr)
 }
 
 // sessionClose releases an active session. Unknown sessions are accepted as a

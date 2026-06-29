@@ -209,6 +209,25 @@ func TestPlainInputWithWeakResearchSignalDoesNotAutoStartGoal(t *testing.T) {
 	}
 }
 
+func TestCancelStopsIdleGoalWithIncompleteTodos(t *testing.T) {
+	ag := agent.New(nil, nil, agent.NewSession(""), agent.Options{}, event.Discard)
+	ag.SeedTodoState([]evidence.TodoItem{{Content: "finish the migration", Status: "in_progress"}})
+	c := New(Options{Executor: ag, Sink: event.Discard})
+	c.SetGoalWithResearchMode("finish the migration", GoalResearchOn)
+
+	c.Cancel()
+
+	if got := c.GoalStatus(); got != GoalStatusStopped {
+		t.Fatalf("GoalStatus() = %q, want stopped", got)
+	}
+	if got := c.Goal(); got != "finish the migration" {
+		t.Fatalf("Goal() = %q, want stopped goal text to remain for display/persistence", got)
+	}
+	if todos := c.Todos(); len(todos) != 1 || todos[0].Status != "in_progress" {
+		t.Fatalf("Todos() after stopping idle goal = %+v, want incomplete todo retained", todos)
+	}
+}
+
 func TestGoalRepeatedBlockedStopsAfterThreeTurns(t *testing.T) {
 	prov := &scriptedTurns{turns: [][]provider.Chunk{
 		textTurn("Blocked.\n\n[goal:blocked: Needs credentials.]"),
@@ -373,6 +392,146 @@ func TestGoalInterceptsCompleteWithIncompleteTodos(t *testing.T) {
 	if c.GoalStatus() != GoalStatusComplete {
 		t.Fatalf("GoalStatus() = %q, want complete (second [goal:complete] should override)", c.GoalStatus())
 	}
+}
+
+// TestGoalOverrideCompletesRemainingTodos verifies that when the goal
+// completes via the second [goal:complete] override (non-strict mode), any
+// remaining incomplete canonical todos are force-completed and a synthetic
+// todo_write event is emitted so the frontend panel reflects the final state.
+func TestGoalOverrideCompletesRemainingTodos(t *testing.T) {
+	prov := &scriptedTurns{turns: [][]provider.Chunk{
+		textTurn("All done.\n\n[goal:complete]"),
+		textTurn("All done.\n\n[goal:complete]"),
+	}}
+	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
+	ag.SeedTodoState([]evidence.TodoItem{
+		{Content: "Step 1", Status: "in_progress"},
+		{Content: "Step 2", Status: "pending"},
+	})
+
+	var tools []event.Event
+	done := make(chan event.Event, 1)
+	c := New(Options{
+		Runner:   ag,
+		Executor: ag,
+		Sink: event.FuncSink(func(e event.Event) {
+			switch e.Kind {
+			case event.ToolDispatch, event.ToolResult:
+				tools = append(tools, e)
+			case event.TurnDone:
+				done <- e
+			}
+		}),
+	})
+
+	c.Submit("/goal do everything")
+	<-done // wait for the goal loop to finish
+
+	if c.GoalStatus() != GoalStatusComplete {
+		t.Fatalf("GoalStatus() = %q, want complete", c.GoalStatus())
+	}
+
+	// All todos in the executor must be force-completed.
+	for _, td := range c.executor.CanonicalTodoState() {
+		if td.Status != "completed" {
+			t.Fatalf("canonical todo %q = %s, want completed after goal override", td.Content, td.Status)
+		}
+	}
+
+	// Must have emitted a synthetic todo_write (ToolDispatch + ToolResult)
+	// from completeRemainingGoalTodos.
+	hasSynthetic := false
+	for _, e := range tools {
+		if e.Tool.ID == "goal-final" && e.Tool.Name == "todo_write" {
+			hasSynthetic = true
+			break
+		}
+	}
+	if !hasSynthetic {
+		t.Fatal("expected synthetic todo_write event (ID=goal-final) after goal override completion")
+	}
+}
+
+// TestCompleteRemainingGoalTodosEdgeCases verifies that the helper is a no-op
+// when there are no incomplete todos or no todos at all.
+func TestCompleteRemainingGoalTodosEdgeCases(t *testing.T) {
+	t.Run("empty todo list does nothing", func(t *testing.T) {
+		ag := agent.New(nil, nil, agent.NewSession(""), agent.Options{}, event.Discard)
+		c := New(Options{Executor: ag, Sink: event.Discard})
+		c.completeRemainingGoalTodos()
+		if len(ag.CanonicalTodoState()) != 0 {
+			t.Fatal("expected no changes to empty todo list")
+		}
+	})
+
+	t.Run("all completed does nothing", func(t *testing.T) {
+		ag := agent.New(nil, nil, agent.NewSession(""), agent.Options{}, event.Discard)
+		ag.SeedTodoState([]evidence.TodoItem{
+			{Content: "A", Status: "completed"},
+			{Content: "B", Status: "completed"},
+		})
+		var events []event.Event
+		c := New(Options{
+			Executor: ag,
+			Sink: event.FuncSink(func(e event.Event) {
+				events = append(events, e)
+			}),
+		})
+		c.completeRemainingGoalTodos()
+		if len(events) > 0 {
+			t.Fatalf("expected no events when all todos already completed, got %d", len(events))
+		}
+	})
+
+	t.Run("force-completes mixed todos", func(t *testing.T) {
+		ag := agent.New(nil, nil, agent.NewSession(""), agent.Options{}, event.Discard)
+		ag.SeedTodoState([]evidence.TodoItem{
+			{Content: "A", Status: "completed"},
+			{Content: "B", Status: "in_progress"},
+			{Content: "C", Status: "pending"},
+		})
+		var captured []event.Event
+		c := New(Options{
+			Executor: ag,
+			Sink: event.FuncSink(func(e event.Event) {
+				if e.Kind == event.ToolDispatch || e.Kind == event.ToolResult {
+					captured = append(captured, e)
+				}
+			}),
+		})
+		c.completeRemainingGoalTodos()
+		// All must be completed.
+		for _, td := range ag.CanonicalTodoState() {
+			if td.Status != "completed" {
+				t.Fatalf("todo %q = %s, want completed", td.Content, td.Status)
+			}
+		}
+		// Must include a ToolDispatch+ToolResult for the synthetic todo_write.
+		if len(captured) != 2 {
+			t.Fatalf("expected 2 synthetic events (dispatch+result), got %d", len(captured))
+		}
+		if captured[0].Kind != event.ToolDispatch || captured[0].Tool.Name != "todo_write" {
+			t.Fatalf("first event should be ToolDispatch for todo_write, got %+v", captured[0].Kind)
+		}
+		if captured[1].Kind != event.ToolResult || captured[1].Tool.Name != "todo_write" {
+			t.Fatalf("second event should be ToolResult for todo_write, got %+v", captured[1].Kind)
+		}
+	})
+
+	t.Run("empty-string status treated as incomplete", func(t *testing.T) {
+		ag := agent.New(nil, nil, agent.NewSession(""), agent.Options{}, event.Discard)
+		ag.SeedTodoState([]evidence.TodoItem{
+			{Content: "A", Status: ""},
+			{Content: "B", Status: "completed"},
+		})
+		c := New(Options{Executor: ag, Sink: event.Discard})
+		c.completeRemainingGoalTodos()
+		for _, td := range ag.CanonicalTodoState() {
+			if td.Status != "completed" {
+				t.Fatalf("empty-string todo %q should be force-completed, got %q", td.Content, td.Status)
+			}
+		}
+	})
 }
 
 // TestStrictGoalBlocksRepeatedComplete verifies that in strict mode, every

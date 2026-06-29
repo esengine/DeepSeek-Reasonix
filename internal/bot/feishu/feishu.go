@@ -171,12 +171,7 @@ func (a *adapter) runWebSocket(ctx context.Context) {
 		return
 	}
 	eventHandler := a.newEventDispatcher()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
+	bot.RunWithRetry(ctx, a.logger, "feishu sdk websocket", bot.RetryConfig{}, func(ctx context.Context) error {
 		opts := []larkws.ClientOption{
 			larkws.WithEventHandler(eventHandler),
 			larkws.WithLogLevel(larkcore.LogLevelError),
@@ -191,28 +186,20 @@ func (a *adapter) runWebSocket(ctx context.Context) {
 		}
 		client := larkws.NewClient(a.cfg.AppID, secret, opts...)
 		a.wsClient = client
+		// client.Start blocks; run it off-loop so cancellation closes the client
+		// immediately rather than waiting for Start to notice ctx. RunWithRetry
+		// handles the reconnect backoff.
 		errCh := make(chan error, 1)
 		go func() { errCh <- client.Start(ctx) }()
 		select {
 		case <-ctx.Done():
 			client.Close()
-			return
+			return nil
 		case err := <-errCh:
 			client.Close()
-			if err != nil {
-				a.logger.Error("feishu sdk websocket stopped", "err", err)
-			} else {
-				a.logger.Warn("feishu sdk websocket stopped without error")
-			}
+			return err
 		}
-		timer := time.NewTimer(5 * time.Second)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return
-		case <-timer.C:
-		}
-	}
+	})
 }
 
 func (a *adapter) newEventDispatcher() *dispatcher.EventDispatcher {

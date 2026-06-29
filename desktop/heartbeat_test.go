@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"reasonix/internal/config"
+	"reasonix/internal/control"
 )
 
 func TestHeartbeatConfigPathUsesReasonixUserStateDir(t *testing.T) {
@@ -61,6 +63,190 @@ func TestHeartbeatTaskDueAtHonorsWeeklySelection(t *testing.T) {
 	}
 }
 
+type heartbeatStatusStub struct {
+	status control.RuntimeStatus
+}
+
+func (s heartbeatStatusStub) RuntimeStatus() control.RuntimeStatus {
+	return s.status
+}
+
+type heartbeatExecuteTaskCtrlStub struct {
+	control.SessionAPI
+	status       control.RuntimeStatus
+	submitted    []string
+	approvalMode string
+}
+
+func (s *heartbeatExecuteTaskCtrlStub) RuntimeStatus() control.RuntimeStatus {
+	return s.status
+}
+
+func (s *heartbeatExecuteTaskCtrlStub) SubmitUserTurn(input, display string) {
+	s.submitted = append(s.submitted, input)
+}
+
+func (s *heartbeatExecuteTaskCtrlStub) SetToolApprovalMode(mode string) {
+	s.approvalMode = mode
+}
+
+func (s *heartbeatExecuteTaskCtrlStub) PlanMode() bool {
+	return false
+}
+
+func (s *heartbeatExecuteTaskCtrlStub) AutoApproveTools() bool {
+	return false
+}
+
+func (s *heartbeatExecuteTaskCtrlStub) Goal() string {
+	return ""
+}
+
+func (s *heartbeatExecuteTaskCtrlStub) ToolApprovalMode() string {
+	return s.approvalMode
+}
+
+func (s *heartbeatExecuteTaskCtrlStub) SetSessionPath(string) {}
+
+func (s *heartbeatExecuteTaskCtrlStub) SessionPath() string {
+	return ""
+}
+
+func (s *heartbeatExecuteTaskCtrlStub) SessionDir() string {
+	return ""
+}
+
+func (s *heartbeatExecuteTaskCtrlStub) Close() {}
+
+func TestHeartbeatControllerBusyIncludesPendingPrompt(t *testing.T) {
+	if heartbeatControllerBusy(heartbeatStatusStub{status: control.RuntimeStatus{Running: false, PendingPrompt: false}}) {
+		t.Fatal("idle controller should be available for heartbeat execution")
+	}
+	if !heartbeatControllerBusy(heartbeatStatusStub{status: control.RuntimeStatus{Running: true}}) {
+		t.Fatal("running controller should be busy")
+	}
+	if !heartbeatControllerBusy(heartbeatStatusStub{status: control.RuntimeStatus{PendingPrompt: true}}) {
+		t.Fatal("pending prompt should keep controller busy")
+	}
+}
+
+func TestHeartbeatExecuteTaskPersistsFreshConversationTopicID(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	app.runtimeEvents.emit = func(context.Context, string, ...interface{}) {}
+	engine := &HeartbeatEngine{
+		app:           app,
+		pendingTopics: map[string]heartbeatPendingTopic{},
+	}
+	ctrl := &heartbeatExecuteTaskCtrlStub{}
+	injected := make(chan struct{})
+
+	go func() {
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-injected:
+				return
+			case <-ticker.C:
+				var cancel context.CancelFunc
+				var tabToInject *WorkspaceTab
+				app.mu.Lock()
+				for _, tab := range app.tabs {
+					if tab == nil {
+						continue
+					}
+					tab.removed = true
+					cancel = tab.buildCancel
+					tabToInject = tab
+					break
+				}
+				app.mu.Unlock()
+				if tabToInject == nil {
+					continue
+				}
+				if cancel != nil {
+					cancel()
+				}
+				app.mu.Lock()
+				if tabToInject.Ctrl == nil {
+					tabToInject.Ctrl = ctrl
+					tabToInject.Ready = true
+					tabToInject.StartupErr = ""
+					app.mu.Unlock()
+					close(injected)
+					return
+				}
+				app.mu.Unlock()
+			}
+		}
+	}()
+
+	got := engine.executeTask(HeartbeatTask{
+		ID:                     "fresh",
+		Title:                  "Fresh",
+		Prompt:                 "ping",
+		NewConversationEachRun: true,
+		ApprovalMode:           "auto",
+	})
+
+	if got.TopicID == "" {
+		t.Fatal("fresh conversation task should return the newly created topic ID")
+	}
+	if got.LastRunAt == 0 {
+		t.Fatal("fresh conversation task should update LastRunAt after submit")
+	}
+	if len(ctrl.submitted) != 1 || ctrl.submitted[0] != "ping" {
+		t.Fatalf("submitted prompts = %v, want [ping]", ctrl.submitted)
+	}
+	if ctrl.approvalMode != "auto" {
+		t.Fatalf("approval mode = %q, want auto", ctrl.approvalMode)
+	}
+	pending := engine.pendingTopics["fresh"]
+	if pending.TopicID != got.TopicID || !pending.Submitted {
+		t.Fatalf("pending topic = %+v, want submitted %q", pending, got.TopicID)
+	}
+}
+
+func TestHeartbeatTaskDueAtHonorsIntervalTimeWindow(t *testing.T) {
+	loc := time.UTC
+	lastRun := time.Date(2026, 6, 18, 16, 0, 0, 0, loc)
+	task := HeartbeatTask{
+		ID:              "window",
+		Interval:        "30m",
+		Enabled:         true,
+		LastRunAt:       lastRun.UnixMilli(),
+		TimeWindowStart: "09:00",
+		TimeWindowEnd:   "17:00",
+	}
+
+	if !heartbeatTaskDueAt(task, time.Date(2026, 6, 18, 16, 30, 0, 0, loc)) {
+		t.Fatal("interval task should run in the configured time window once due")
+	}
+	if heartbeatTaskDueAt(task, time.Date(2026, 6, 18, 17, 20, 0, 0, loc)) {
+		t.Fatal("interval task should wait while outside the configured time window")
+	}
+	if !heartbeatTaskDueAt(task, time.Date(2026, 6, 19, 9, 0, 0, 0, loc)) {
+		t.Fatal("interval task should run when the next time window opens")
+	}
+
+	neverRun := HeartbeatTask{
+		ID:              "never-run-window",
+		Interval:        "30m",
+		Enabled:         true,
+		TimeWindowStart: "09:00",
+		TimeWindowEnd:   "17:00",
+	}
+	if heartbeatTaskDueAt(neverRun, time.Date(2026, 6, 18, 20, 0, 0, 0, loc)) {
+		t.Fatal("never-run interval task should wait while outside the configured time window")
+	}
+	if !heartbeatTaskDueAt(neverRun, time.Date(2026, 6, 19, 9, 0, 0, 0, loc)) {
+		t.Fatal("never-run interval task should run when the configured time window opens")
+	}
+}
+
 func TestHeartbeatMergeRunUpdatesPreservesConcurrentEditsAndDeletes(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	engine := &HeartbeatEngine{
@@ -102,6 +288,38 @@ func TestHeartbeatMergeRunUpdatesPreservesConcurrentEditsAndDeletes(t *testing.T
 		if task.ID == "deleted" {
 			t.Fatalf("deleted task was resurrected: %+v", engine.tasks)
 		}
+	}
+}
+
+func TestHeartbeatReplaceTasksPrunesFreshConversationPendingTopics(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	engine := &HeartbeatEngine{
+		pendingTopics: map[string]heartbeatPendingTopic{
+			"fresh":   {TopicID: "topic-fresh", Submitted: true},
+			"legacy":  {TopicID: "topic-legacy", Submitted: true},
+			"deleted": {TopicID: "topic-deleted", Submitted: true},
+		},
+	}
+
+	err := engine.ReplaceTasks([]HeartbeatTask{
+		{ID: "fresh", NewConversationEachRun: true},
+		{ID: "legacy", NewConversationEachRun: false},
+	})
+	if err != nil {
+		t.Fatalf("ReplaceTasks: %v", err)
+	}
+
+	if len(engine.pendingTopics) != 1 {
+		t.Fatalf("pendingTopics len = %d, want 1: %+v", len(engine.pendingTopics), engine.pendingTopics)
+	}
+	if got := engine.pendingTopics["fresh"]; got.TopicID != "topic-fresh" || !got.Submitted {
+		t.Fatalf("fresh pending topic = %+v, want submitted topic-fresh", got)
+	}
+	if _, ok := engine.pendingTopics["legacy"]; ok {
+		t.Fatalf("legacy task should not keep a fresh-conversation pending topic")
+	}
+	if _, ok := engine.pendingTopics["deleted"]; ok {
+		t.Fatalf("deleted task should not keep a pending topic")
 	}
 }
 

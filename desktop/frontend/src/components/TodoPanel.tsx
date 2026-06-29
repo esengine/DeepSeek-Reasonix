@@ -3,31 +3,44 @@ import { useT } from "../lib/i18n";
 import type { Todo } from "../lib/tools";
 import { PromptBadge, PromptHeaderAction, PromptShelf } from "./PromptShelf";
 
+const STORAGE_KEY = "todoPanel:open";
+
+function loadOpenState(): boolean {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    return saved === null ? true : saved === "1";
+  } catch {
+    return true;
+  }
+}
+
+function saveOpenState(open: boolean): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, open ? "1" : "0");
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
 // TodoPanel is the live task list pinned just above the composer — the kernel's
 // latest todo_write call drives it, and it updates in place as the agent flips
-// items to in_progress / completed. Completed lists collapse automatically so
-// the user still sees the final state without the footer staying tall forever.
+// items to in_progress / completed. The collapsed/expanded state is persisted
+// globally in localStorage so the user's choice sticks across sessions.
 export function TodoPanel({
-  todoKey,
   todos,
   onDismiss,
 }: {
-  todoKey: string;
   todos: Todo[];
   onDismiss: () => void;
 }) {
   const t = useT();
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(loadOpenState);
   const currentRef = useRef<HTMLLIElement | null>(null);
 
   const done = todos.filter((t) => t.status === "completed").length;
   const current = todos.find((t) => t.status === "in_progress");
   const allDone = todos.length > 0 && done === todos.length;
   const summary = current?.activeForm || current?.content || todos[todos.length - 1]?.content || "";
-
-  useEffect(() => {
-    setOpen(!allDone);
-  }, [todoKey, allDone]);
 
   useEffect(() => {
     if (!open) return;
@@ -45,7 +58,7 @@ export function TodoPanel({
       role="region"
       headerActions={
         <>
-          <PromptHeaderAction onClick={() => setOpen((value) => !value)}>
+          <PromptHeaderAction onClick={() => setOpen((value) => { const next = !value; saveOpenState(next); return next; })}>
             {open ? t("common.collapse") : t("common.expand")}
           </PromptHeaderAction>
           {allDone && (

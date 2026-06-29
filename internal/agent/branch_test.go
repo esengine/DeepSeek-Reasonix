@@ -3,6 +3,7 @@ package agent
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"reasonix/internal/provider"
 )
@@ -89,6 +90,73 @@ func TestListBranchesSkipsCleanupPending(t *testing.T) {
 	}
 	if branches[0].Path != visiblePath {
 		t.Fatalf("listed branch path = %q, want %q", branches[0].Path, visiblePath)
+	}
+}
+
+func TestSessionInFlightTurnMetaRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "in-flight.jsonl")
+	sess := NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "work"})
+	if err := sess.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := TouchBranchMeta(path); err != nil {
+		t.Fatal(err)
+	}
+	before, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta ok=%v err=%v", ok, err)
+	}
+	updatedAt := before.UpdatedAt
+
+	if err := MarkSessionInFlightTurn(path, 1, true); err != nil {
+		t.Fatal(err)
+	}
+	marked, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta marked ok=%v err=%v", ok, err)
+	}
+	if marked.InFlightTurn == nil {
+		t.Fatal("in-flight turn marker missing")
+	}
+	if marked.InFlightTurn.StartMessageIndex != 1 || !marked.InFlightTurn.PreserveUser {
+		t.Fatalf("in-flight marker = %+v, want index=1 preserveUser=true", marked.InFlightTurn)
+	}
+	if marked.InFlightTurn.StartedAt.IsZero() || time.Since(marked.InFlightTurn.StartedAt) > time.Minute {
+		t.Fatalf("unexpected marker timestamp: %v", marked.InFlightTurn.StartedAt)
+	}
+	if !marked.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("MarkSessionInFlightTurn updated activity time: got %v want %v", marked.UpdatedAt, updatedAt)
+	}
+
+	if err := UpdateSessionMeta(path, "model-a", "preview", 1, true); err != nil {
+		t.Fatal(err)
+	}
+	refreshed, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta refreshed ok=%v err=%v", ok, err)
+	}
+	if refreshed.InFlightTurn == nil {
+		t.Fatal("UpdateSessionMeta dropped in-flight marker")
+	}
+	if refreshed.InFlightTurn.StartMessageIndex != 1 || !refreshed.InFlightTurn.PreserveUser {
+		t.Fatalf("refreshed in-flight marker = %+v, want index=1 preserveUser=true", refreshed.InFlightTurn)
+	}
+	updatedAt = refreshed.UpdatedAt
+
+	if err := ClearSessionInFlightTurn(path); err != nil {
+		t.Fatal(err)
+	}
+	cleared, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta cleared ok=%v err=%v", ok, err)
+	}
+	if cleared.InFlightTurn != nil {
+		t.Fatalf("in-flight marker survived clear: %+v", cleared.InFlightTurn)
+	}
+	if !cleared.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("ClearSessionInFlightTurn updated activity time: got %v want %v", cleared.UpdatedAt, updatedAt)
 	}
 }
 

@@ -67,8 +67,7 @@ func (*runSkillTool) Schema() json.RawMessage {
 "properties":{
   "name":{"type":"string","description":"Skill identifier as it appears in the pinned Skills index (e.g. 'explore', 'review'). Case-sensitive. Just the identifier, not the [🧬 subagent] tag."},
   "arguments":{"type":"string","description":"Free-form arguments. For inline skills: appended as an 'Arguments:' line; the skill's own instructions decide how to use them. For subagent skills: REQUIRED — becomes the entire task the subagent receives."},
-  "continue_from":{"type":"string","description":"Resume a prior subagent run in place: the subagent retains its context from the previous run; use in iterative loops (e.g. review -> fix -> review again) by passing only the 'sa_...' value from the prior result's 'Subagent reference: ...' line. Only valid for runAs=subagent skills."},
-  "fork_from":{"type":"string","description":"Fork a prior subagent run: copies its transcript, leaves the source unchanged, and continues independently. Use only when you need an independent branch; for iterative continuation, use continue_from. Only valid for runAs=subagent skills. Pass the 'sa_...' value from the prior result's 'Subagent reference: ...' line. Mutually exclusive with continue_from."}
+  "continue_from":{"type":"string","description":"Continue a prior compatible subagent transcript in the current conversation context. Only valid for runAs=subagent skills. Pass only the 'sa_...' value from the prior result's 'Subagent reference: ...' line."}
 },
 "required":["name"]
 }`)
@@ -94,6 +93,9 @@ func (t *runSkillTool) Execute(ctx context.Context, args json.RawMessage) (strin
 	}
 	rawArgs := strings.TrimSpace(p.Arguments)
 	opts := SubagentRunOptions{ContinueFrom: strings.TrimSpace(p.Continue), ForkFrom: strings.TrimSpace(p.Fork)}
+	if opts.ContinueFrom != "" && opts.ForkFrom != "" {
+		return "", fmt.Errorf("run_skill: continue_from and fork_from are mutually exclusive; pass only continue_from")
+	}
 
 	if sk.RunAs == RunSubagent {
 		if t.runner == nil {
@@ -105,7 +107,7 @@ func (t *runSkillTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		return t.runner(ctx, sk, rawArgs, opts)
 	}
 	if opts.ContinueFrom != "" || opts.ForkFrom != "" {
-		return "", fmt.Errorf("run_skill: continue_from/fork_from are only valid for runAs=subagent skills")
+		return "", fmt.Errorf("run_skill: subagent continuation is only valid for runAs=subagent skills")
 	}
 	return renderInline(sk, rawArgs), nil
 }
@@ -129,8 +131,102 @@ func (t *runSkillTool) ResolveProfile(args json.RawMessage) *event.Profile {
 }
 
 func (t *runSkillTool) profileForSkill(sk Skill) *event.Profile {
-	if t.profileResolver != nil {
-		if pr := t.profileResolver(sk); pr != nil {
+	return profileForSkill(sk, t.profileResolver)
+}
+
+// --- read_only_skill ---
+
+type readOnlySkillTool struct {
+	store           *Store
+	runner          SubagentRunner
+	profileResolver ProfileResolver
+}
+
+// NewReadOnlySkillTool builds a plan-mode-safe skill entry point. Inline skills
+// are rendered like read_skill; subagent skills run through a host-provided
+// read-only subagent runner with no continuation/fork controls.
+func NewReadOnlySkillTool(store *Store, runner SubagentRunner, profileResolver ...ProfileResolver) tool.Tool {
+	var pr ProfileResolver
+	if len(profileResolver) > 0 {
+		pr = profileResolver[0]
+	}
+	return &readOnlySkillTool{store: store, runner: runner, profileResolver: pr}
+}
+
+func (*readOnlySkillTool) Name() string { return "read_only_skill" }
+
+func (*readOnlySkillTool) ReadOnly() bool { return true }
+
+// PlanModeSafe reports true: read_only_skill delegates to a skill sub-agent
+// restricted to read-only research tools and plan-mode-safe foreground bash, so
+// it is safe to run while planning.
+func (*readOnlySkillTool) PlanModeSafe() bool { return true }
+
+func (*readOnlySkillTool) Description() string {
+	return "Invoke a skill in read-only mode. Inline skills are loaded into context like read_skill. `[🧬 subagent]` skills run in an isolated ephemeral read-only subagent with only read-only research tools and safe foreground bash; no writes, installers, memory mutation, continuation/fork, background jobs, or further delegation are available. Pass `name` as the bare skill identifier and `arguments` as the concrete task."
+}
+
+func (*readOnlySkillTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+"type":"object",
+"properties":{
+  "name":{"type":"string","description":"Skill identifier as it appears in the pinned Skills index. Just the identifier, not the [🧬 subagent] tag."},
+  "arguments":{"type":"string","description":"Free-form arguments. For inline skills: appended as an 'Arguments:' line. For subagent skills: REQUIRED — becomes the read-only subagent's entire task."}
+},
+"required":["name"]
+}`)
+}
+
+func (t *readOnlySkillTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var p struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return "", fmt.Errorf("invalid args: %w", err)
+	}
+	name := cleanSkillName(p.Name)
+	if name == "" {
+		return "", fmt.Errorf("read_only_skill requires a 'name' argument (got %q, which is just a marker/tag)", p.Name)
+	}
+	sk, ok := t.store.Read(name)
+	if !ok {
+		return "", fmt.Errorf("unknown skill %q — available: %s", name, availableNames(t.store))
+	}
+	rawArgs := strings.TrimSpace(p.Arguments)
+	if sk.RunAs == RunSubagent {
+		if t.runner == nil {
+			return "", fmt.Errorf("read_only_skill: skill %q is runAs=subagent but no read-only subagent runner is configured in this session", name)
+		}
+		if rawArgs == "" {
+			return "", fmt.Errorf("read_only_skill: skill %q is a subagent and requires 'arguments' — the subagent has no other context, so describe the concrete read-only task", name)
+		}
+		return t.runner(ctx, sk, rawArgs, SubagentRunOptions{})
+	}
+	return renderInline(sk, rawArgs), nil
+}
+
+func (t *readOnlySkillTool) ResolveProfile(args json.RawMessage) *event.Profile {
+	var p struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil
+	}
+	name := cleanSkillName(p.Name)
+	if name == "" {
+		return nil
+	}
+	sk, ok := t.store.Read(name)
+	if !ok || sk.RunAs != RunSubagent {
+		return nil
+	}
+	return profileForSkill(sk, t.profileResolver)
+}
+
+func profileForSkill(sk Skill, resolver ProfileResolver) *event.Profile {
+	if resolver != nil {
+		if pr := resolver(sk); pr != nil {
 			return pr
 		}
 	}
@@ -211,7 +307,7 @@ func (t *subagentSkillTool) Description() string { return t.description }
 
 func (t *subagentSkillTool) Schema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"task":{"type":"string","description":` +
-		strconv.Quote(t.taskDesc) + `},"continue_from":{"type":"string","description":"Resume a prior subagent run in place: the subagent retains its context from the previous run. Use in iterative loops (e.g. review -> fix -> review again): pass only the 'sa_...' value from the prior result's 'Subagent reference: ...' line."},"fork_from":{"type":"string","description":"Fork a prior subagent run: copies its transcript, leaves the source unchanged, and continues independently. Use only when you need an independent branch; for iterative continuation, use continue_from. Pass the 'sa_...' value from the prior result's 'Subagent reference: ...' line. Mutually exclusive with continue_from."}},"required":["task"]}`)
+		strconv.Quote(t.taskDesc) + `},"continue_from":{"type":"string","description":"Continue a prior compatible subagent transcript in the current conversation context. Pass only the 'sa_...' value from the prior result's 'Subagent reference: ...' line."}},"required":["task"]}`)
 }
 
 func (t *subagentSkillTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
@@ -239,7 +335,11 @@ func (t *subagentSkillTool) Execute(ctx context.Context, args json.RawMessage) (
 	if t.runner == nil {
 		return "", fmt.Errorf("%s: no subagent runner is configured in this session", t.toolName)
 	}
-	return t.runner(ctx, sk, task, SubagentRunOptions{ContinueFrom: strings.TrimSpace(p.Continue), ForkFrom: strings.TrimSpace(p.Fork)})
+	opts := SubagentRunOptions{ContinueFrom: strings.TrimSpace(p.Continue), ForkFrom: strings.TrimSpace(p.Fork)}
+	if opts.ContinueFrom != "" && opts.ForkFrom != "" {
+		return "", fmt.Errorf("%s: continue_from and fork_from are mutually exclusive; pass only continue_from", t.toolName)
+	}
+	return t.runner(ctx, sk, task, opts)
 }
 
 func (t *subagentSkillTool) ResolveProfile(json.RawMessage) *event.Profile {

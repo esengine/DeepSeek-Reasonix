@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"reflect"
 	"testing"
 
@@ -70,29 +69,10 @@ func TestSelectedTextMultiLine(t *testing.T) {
 	}
 }
 
-func TestCopyToClipboardPlatformSuccess(t *testing.T) {
-	defer func(fn func(string) error) { clipboardWriteAll = fn }(clipboardWriteAll)
-	var got string
-	clipboardWriteAll = func(s string) error { got = s; return nil }
-
-	if msg := copyToClipboard("hello")(); msg != nil {
-		t.Errorf("platform write succeeded; want nil msg (no OSC 52 fallback), got %#v", msg)
-	}
-	if got != "hello" {
-		t.Errorf("clipboardWriteAll got %q, want %q", got, "hello")
-	}
-}
-
-func TestCopyToClipboardOSC52Fallback(t *testing.T) {
-	defer func(fn func(string) error) { clipboardWriteAll = fn }(clipboardWriteAll)
-	clipboardWriteAll = func(string) error { return errors.New("no display (tmux/ssh)") }
-
-	// On failure the command must return the *message* tea.SetClipboard yields —
-	// the runtime handles it by emitting OSC 52 (bubbletea tea.go: setClipboardMsg
-	// -> ansi.SetSystemClipboard). Returning the command itself would be dropped.
-	got := copyToClipboard("copied text")()
-	want := tea.SetClipboard("copied text")()
+func TestCopyToClipboard(t *testing.T) {
+	got := copyToClipboard("hello")()
+	want := tea.SetClipboard("hello")()
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("fallback msg = %#v (%T), want the runtime-handled setClipboardMsg %#v (%T)", got, got, want, want)
+		t.Fatalf("copyToClipboard returned %#v, want %#v", got, want)
 	}
 }

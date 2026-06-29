@@ -150,19 +150,25 @@ func TestCommandUnwrappedWhenOff(t *testing.T) {
 }
 
 func TestProfileNetworkAndRoots(t *testing.T) {
-	with := seatbeltProfile(Spec{Mode: "enforce", WriteRoots: []string{"/work/proj"}, Network: true})
+	with := seatbeltProfile(Spec{Mode: "enforce", WriteRoots: []string{"/work/proj"}, ForbidReadRoots: []string{"/etc/ssh", "/home/user/.ssh"}, Network: true})
 	if strings.Contains(with, "(deny network*)") {
 		t.Error("network=true should not deny network")
 	}
-	if !strings.Contains(with, "(allow default)") || !strings.Contains(with, "(deny file-write*)") {
+	if !strings.Contains(with, "(allow default)") || !strings.Contains(with, "(deny file-write*)") || !strings.Contains(with, "(deny file-read* (subpath") {
 		t.Error("profile missing base allow/deny structure")
 	}
 	if !strings.Contains(with, `(subpath "/work/proj")`) {
 		t.Errorf("profile missing the write-root subpath:\n%s", with)
 	}
+	if !strings.Contains(with, `(subpath "/home/user/.ssh")`) {
+		t.Errorf("profile missing the forbid-read subpath:\n%s", with)
+	}
 	without := seatbeltProfile(Spec{Mode: "enforce", Network: false})
 	if !strings.Contains(without, "(deny network*)") {
 		t.Error("network=false should deny network")
+	}
+	if strings.Contains(without, "deny file-read") {
+		t.Error("profile should not contain file-read rules when forbid-read is empty")
 	}
 }
 

@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"reasonix/internal/provider"
 )
@@ -76,6 +78,51 @@ func TestStreamReconnectsOnEarlyConnReset(t *testing.T) {
 	}
 	if reqs != 2 {
 		t.Errorf("server saw %d requests, want 2 (one reset + one replay)", reqs)
+	}
+}
+
+func TestStreamCancelDoesNotReconnect(t *testing.T) {
+	var reqs atomic.Int32
+	ready := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		first := reqs.Add(1) == 1
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, ": keep-alive\n\n")
+		flush(w)
+		if first {
+			close(ready)
+		}
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	p, err := New(provider.Config{Name: "deepseek", BaseURL: srv.URL, Model: "deepseek-v4", APIKey: "k"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := p.Stream(ctx, provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not receive the streaming request")
+	}
+	cancel()
+
+	var got error
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkError {
+			got = chunk.Err
+		}
+	}
+	if !errors.Is(got, context.Canceled) {
+		t.Fatalf("stream error = %v, want context.Canceled", got)
+	}
+	if reqs.Load() != 1 {
+		t.Fatalf("cancelled stream reconnected; server saw %d requests, want 1", reqs.Load())
 	}
 }
 

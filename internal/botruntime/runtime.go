@@ -2,6 +2,7 @@ package botruntime
 
 import (
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -334,6 +335,45 @@ func RememberInboundSessionWorkspace(msg bot.InboundMessage, sessionID string, w
 	return rememberInbound(msg, strings.TrimSpace(sessionID), strings.TrimSpace(workspaceRoot))
 }
 
+func ForgetAutoSessionMappingsForPath(sessionPath string) error {
+	target := normalizedBotSessionPath(sessionPath)
+	if target == "" {
+		return nil
+	}
+	userPath := config.UserConfigPath()
+	if strings.TrimSpace(userPath) == "" {
+		return nil
+	}
+	rememberPersistMu.Lock()
+	defer rememberPersistMu.Unlock()
+
+	cfg := config.LoadForEdit(userPath)
+	now := time.Now().UTC().Format(time.RFC3339)
+	changed := false
+	for i := range cfg.Bot.Connections {
+		conn := &cfg.Bot.Connections[i]
+		next := conn.SessionMappings[:0]
+		removed := false
+		for _, mapping := range conn.SessionMappings {
+			if strings.TrimSpace(mapping.SessionSource) == "auto" && normalizedBotSessionPath(mapping.SessionID) == target {
+				removed = true
+				continue
+			}
+			next = append(next, mapping)
+		}
+		if !removed {
+			continue
+		}
+		conn.SessionMappings = next
+		conn.UpdatedAt = now
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return cfg.SaveTo(userPath)
+}
+
 func rememberInbound(msg bot.InboundMessage, sessionID string, actualWorkspaceRoot string) error {
 	userPath := config.UserConfigPath()
 	platform := msg.Platform
@@ -454,6 +494,23 @@ func botSessionSource(sessionID string) string {
 		return ""
 	}
 	return "auto"
+}
+
+func normalizedBotSessionPath(sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(sessionID), "path:") {
+		sessionID = strings.TrimSpace(sessionID[5:])
+	}
+	if sessionID == "" {
+		return ""
+	}
+	if !(strings.HasSuffix(sessionID, ".jsonl") || strings.Contains(sessionID, "/") || strings.Contains(sessionID, `\`) || strings.HasPrefix(sessionID, "~")) {
+		return ""
+	}
+	return filepath.Clean(sessionID)
 }
 
 func connectionMatchesInbound(conn config.BotConnectionConfig, msg bot.InboundMessage) bool {

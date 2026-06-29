@@ -73,9 +73,10 @@ model = "m"
 	}
 }
 
-func TestLoadForEditLoadsDotEnvNextToEditedProjectConfig(t *testing.T) {
+func TestLoadForEditIgnoresProjectDotEnvForProviderCredentials(t *testing.T) {
 	project := t.TempDir()
 	launch := t.TempDir()
+	home := t.TempDir()
 	path := filepath.Join(project, "reasonix.toml")
 	body := `default_model = "custom/m"
 [[providers]]
@@ -92,6 +93,10 @@ api_key_env = "PROJECT_ONLY_KEY"
 		t.Fatal(err)
 	}
 	t.Chdir(launch)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	t.Setenv("PROJECT_ONLY_KEY", "")
 	os.Unsetenv("PROJECT_ONLY_KEY")
 
@@ -100,10 +105,10 @@ api_key_env = "PROJECT_ONLY_KEY"
 	if !ok {
 		t.Fatalf("provider missing from edited config: %+v", cfg.Providers)
 	}
-	if !provider.Configured() {
-		t.Fatalf("provider should resolve api_key_env from project .env next to edited config")
+	if provider.Configured() {
+		t.Fatalf("provider should not resolve api_key_env from project .env next to edited config")
 	}
-	if got := ResolveCredentialForRoot(project, "PROJECT_ONLY_KEY"); !got.Set || got.Value != "from-project" {
-		t.Fatalf("credential = %+v, want project .env value", got)
+	if got := ResolveCredentialForRootGlobalFirst(project, "PROJECT_ONLY_KEY"); got.Set {
+		t.Fatalf("credential = %+v, want project .env ignored for provider key", got)
 	}
 }

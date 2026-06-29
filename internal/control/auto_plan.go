@@ -17,6 +17,8 @@ const (
 )
 
 var numberedListRE = regexp.MustCompile(`(?m)^\s*(?:[-*]|\d+[.)])\s+\S`)
+var directOptionReplyRE = regexp.MustCompile(`(?i)^\s*(?:\d+|[a-z])\s*[.)、。]?\s*$`)
+var prefixedOptionReplyRE = regexp.MustCompile(`(?i)^\s*(?:选|选择|就|用|按|走|执行|choose|pick|use|option|choice|方案)\s*(?:第\s*)?(?:方案|选项|option|choice)?\s*(?:\d+|[一二三四五六七八九十]|[a-z])\s*(?:个|号|项|种|条|方案|option|choice)?\s*[.)、。!！?？]?\s*$`)
 
 type AutoPlanClassifier interface {
 	NeedsPlan(ctx context.Context, input string, score int) (bool, string, error)
@@ -72,8 +74,10 @@ func (c *Controller) shouldAutoPlan(ctx context.Context, input string) bool {
 
 // TaskWarrantsPlanner reports whether a task turn is worth a planner pass in
 // two-model mode. Empty input, slash commands, and low-risk informational asks
-// (explain / show / what / why / 解释 / 查一下 …) skip straight to the executor;
-// anything that reads like a work request — even a terse one — still gets planned.
+// (explain / show / what / why / 解释 / 查一下 …) skip straight to the executor.
+// Context-dependent short replies ("1", "A", "继续", "好的") also skip the
+// planner because the executor session, not the planner session, owns the
+// previous assistant answer they refer to.
 func TaskWarrantsPlanner(input string) bool {
 	text := strings.TrimSpace(agent.StripTransientUserBlocks(input))
 	text = stripActiveGoalBlock(text)
@@ -81,6 +85,9 @@ func TaskWarrantsPlanner(input string) bool {
 		return false
 	}
 	if IsSyntheticUserMessage(text) {
+		return false
+	}
+	if isContextDependentShortReply(text) {
 		return false
 	}
 	return !isLowRiskQuestion(strings.ToLower(text))
@@ -93,6 +100,9 @@ func autoPlanScore(input string) int {
 		return 0
 	}
 	if IsSyntheticUserMessage(text) {
+		return 0
+	}
+	if isContextDependentShortReply(text) {
 		return 0
 	}
 	lower := strings.ToLower(text)
@@ -124,6 +134,74 @@ func autoPlanScore(input string) int {
 		score++
 	}
 	return score
+}
+
+func isContextDependentShortReply(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" || strings.ContainsAny(text, "\n\r") {
+		return false
+	}
+	if directOptionReplyRE.MatchString(text) || prefixedOptionReplyRE.MatchString(text) {
+		return true
+	}
+	lower := strings.ToLower(text)
+	if containsAny(lower, complexIntentTerms) || containsAny(lower, lowRiskWorkRequestTerms) {
+		return false
+	}
+	if shortContextReplies[lower] {
+		return true
+	}
+	if utf8.RuneCountInString(text) > 16 {
+		return false
+	}
+	for _, prefix := range shortContextReplyPrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+var shortContextReplies = map[string]bool{
+	"ok":          true,
+	"okay":        true,
+	"yes":         true,
+	"y":           true,
+	"no":          true,
+	"n":           true,
+	"sure":        true,
+	"go ahead":    true,
+	"proceed":     true,
+	"continue":    true,
+	"next":        true,
+	"sounds good": true,
+	"好":           true,
+	"好的":          true,
+	"可以":          true,
+	"行":           true,
+	"嗯":           true,
+	"对":           true,
+	"是":           true,
+	"确认":          true,
+	"同意":          true,
+	"继续":          true,
+	"继续吧":         true,
+	"下一步":         true,
+	"开始":          true,
+	"开始吧":         true,
+	"执行":          true,
+	"就这样":         true,
+	"没问题":         true,
+}
+
+var shortContextReplyPrefixes = []string{
+	"继续",
+	"执行",
+	"开始",
+	"下一步",
+	"go ahead",
+	"proceed",
+	"continue",
 }
 
 func isLowRiskQuestion(lower string) bool {

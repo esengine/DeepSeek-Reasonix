@@ -89,14 +89,15 @@ func (s *lazySpawn) kick() {
 // reacquires mu to publish the result.
 func (s *lazySpawn) run() {
 	real, err := s.host.Add(s.ctx, s.spec)
+	var cacheTools []tool.Tool
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err != nil {
 		if errors.Is(err, ErrSpawningInFlight) {
 			// Another tab is already spawning this server; reset to idle so
 			// the next call retries instead of recording a spurious failure.
 			s.state = spawnIdle
 			s.spawnErr = nil
+			s.mu.Unlock()
 			return
 		}
 		if IsServerAlreadyConnected(err) {
@@ -110,17 +111,22 @@ func (s *lazySpawn) run() {
 				}
 				s.state = spawnReady
 				s.trySwap()
+				cacheTools = tools
+				s.mu.Unlock()
+				saveLazyCachedSchema(s.spec, cacheTools)
 				return
 			}
 			// ToolsFor failed — still not a real failure; just mark failed
 			// without recording it so /mcp status stays clean.
 			s.state = spawnFailed
 			s.spawnErr = err
+			s.mu.Unlock()
 			return
 		}
 		s.state = spawnFailed
 		s.spawnErr = err
 		s.host.RecordFailure(s.spec, err)
+		s.mu.Unlock()
 		return
 	}
 	s.real = make(map[string]tool.Tool, len(real))
@@ -129,6 +135,17 @@ func (s *lazySpawn) run() {
 	}
 	s.state = spawnReady
 	s.trySwap()
+	cacheTools = real
+	s.mu.Unlock()
+	saveLazyCachedSchema(s.spec, cacheTools)
+}
+
+func saveLazyCachedSchema(spec Spec, real []tool.Tool) {
+	_ = SaveCachedSchema(spec.Name, CachedSchema{
+		SpecHash:     SpecFingerprint(spec),
+		Capabilities: map[string]bool{},
+		Tools:        cacheableToolsOf(real),
+	})
 }
 
 // trySwap installs the real tools into reg if the spawn is ready and the
@@ -152,9 +169,14 @@ func (s *lazySpawn) trySwap() {
 type lazyTool struct {
 	shared   *lazySpawn
 	name     string // namespaced "mcp__<server>__<tool>"
+	rawName  string // original server-local tool name, when cached
 	desc     string
 	schema   json.RawMessage
 	readOnly bool
+	// readOnlyTrusted mirrors remoteTool: true only for a first-party
+	// ReadOnlyToolNames override, so plan mode can tell trusted first-party
+	// read-only from an untrusted server readOnlyHint.
+	readOnlyTrusted bool
 	// hasCache true → schema is trusted, so Execute runs the handshake
 	// synchronously and forwards in one turn. false → schema is empty, so we
 	// can't honour the model's call; we kick the spawn async and ask for a
@@ -166,6 +188,19 @@ type lazyTool struct {
 func (lt *lazyTool) Name() string        { return lt.name }
 func (lt *lazyTool) Description() string { return lt.desc }
 func (lt *lazyTool) ReadOnly() bool      { return lt.readOnly }
+func (lt *lazyTool) MCPServerName() string {
+	if lt.shared == nil {
+		return ""
+	}
+	return lt.shared.spec.Name
+}
+func (lt *lazyTool) MCPRawToolName() string { return lt.rawName }
+
+// PlanModeUntrustedReadOnly mirrors remoteTool: true when ReadOnly() is true only
+// from an untrusted server readOnlyHint, false for a first-party override.
+func (lt *lazyTool) PlanModeUntrustedReadOnly() bool {
+	return lt.readOnly && !lt.readOnlyTrusted
+}
 func (lt *lazyTool) Schema() json.RawMessage {
 	if len(lt.schema) == 0 {
 		return json.RawMessage(`{"type":"object"}`)
@@ -339,13 +374,16 @@ func LazyToolset(spec Spec, cs *CachedSchema, host *Host, reg *tool.Registry, se
 			if spec.StripRawPrefix != "" {
 				visibleName = strings.TrimPrefix(visibleName, spec.StripRawPrefix)
 			}
+			trusted := spec.toolReadOnlyTrusted(ct.Name, visibleName)
 			out = append(out, &lazyTool{
-				shared:   shared,
-				name:     toolName(spec.Name, visibleName),
-				desc:     ct.Description,
-				schema:   ct.Schema,
-				readOnly: spec.toolReadOnly(ct.Name, ct.ReadOnly),
-				hasCache: true,
+				shared:          shared,
+				name:            toolName(spec.Name, visibleName),
+				rawName:         ct.Name,
+				desc:            ct.Description,
+				schema:          ct.Schema,
+				readOnly:        spec.toolReadOnly(ct.Name, visibleName, ct.ReadOnly),
+				readOnlyTrusted: trusted,
+				hasCache:        true,
 			})
 		}
 	}
