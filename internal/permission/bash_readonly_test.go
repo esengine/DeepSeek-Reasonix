@@ -23,6 +23,7 @@ func TestIsReadOnlyBashSubject(t *testing.T) {
 		{"stat main.go", true},
 		{"du -sh .", true},
 		{"diff a.go b.go", true},
+		{"printenv PATH", true},
 
 		// Git read-only
 		{"git log", true},
@@ -50,6 +51,7 @@ func TestIsReadOnlyBashSubject(t *testing.T) {
 		// Not read-only
 		{"rm file.txt", false},
 		{"rm -rf /", false},
+		{"env rm -rf /", false},
 		{"git commit -m 'msg'", false},
 		{"git branch", false},
 		{"git branch feature/new", false},
@@ -74,7 +76,13 @@ func TestIsReadOnlyBashSubject(t *testing.T) {
 		{"ls & rm file.txt", false},
 		{"find . -name '*.go' | xargs gofmt -w", false},
 		{"find . -name '*.go' -exec rm {} \\;", false},
+		{"find . -name '*.go' -ok rm {} \\;", false},
+		{"find . -name '*.go' -okdir rm {} \\;", false},
 		{"find . -name '*.tmp' -delete", false},
+		{"find . -name '*.go' -fls files.txt", false},
+		{"find . -name '*.go' -fprint files.txt", false},
+		{"find . -name '*.go' -fprint0 files.txt", false},
+		{"find . -name '*.go' -fprintf files.txt '%p\\n'", false},
 		{"awk '{print $1}' file.txt", false},
 		{"awk 'BEGIN{system(\"touch /tmp/reasonix-awk-test\")}'", false},
 		{"awk 'BEGIN{print \"evil\" > \"/tmp/reasonix-awk-test\"}'", false},

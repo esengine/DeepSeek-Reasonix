@@ -183,11 +183,18 @@ the **native** webview per OS, so the rough edges are platform-specific. What's
 handled here, and what to reach for if a target misbehaves:
 
 - **Linux / WebKitGTK** is the one real pain point — rendering varies by distro &
-  GPU driver. `main.go` sets `WebviewGpuPolicy: OnDemand` to avoid blank/flickering
-  webviews from forced compositing. If artifacts persist, launch with
-  `WEBKIT_DISABLE_COMPOSITING_MODE=1`. Test on at least one GTK target before
-  release; the CSS deliberately avoids `backdrop-filter`/blur (slow & inconsistent
-  there).
+  GPU driver. `main.go` keeps `WebviewGpuPolicy: OnDemand` when a DRI render node
+  is usable, and falls back to `Never` for xrdp/headless/software-rendered sessions
+  that cannot access `/dev/dri`. If artifacts persist, launch with
+  `WEBKIT_DISABLE_COMPOSITING_MODE=1`. Test on at least one GTK target before release;
+  the CSS deliberately avoids `backdrop-filter`/blur (slow & inconsistent there).
+  - **Wayland + NVIDIA**: On KDE Plasma Wayland with NVIDIA GPUs, WebKitGTK can
+    crash at startup (`Error 71: Protocol error`) due to an upstream WebKit
+    explicit-sync bug (WebKit #280210, #317089, NVIDIA/egl-wayland #179).
+    Reasonix automatically sets `__NV_DISABLE_EXPLICIT_SYNC=1` when it detects
+    Wayland + NVIDIA GPU. To opt out, set `__NV_DISABLE_EXPLICIT_SYNC=0`.
+    Alternative fallbacks: `WEBKIT_DISABLE_DMABUF_RENDERER=1` (poor performance)
+    or `GDK_BACKEND=x11` (forces XWayland).
 - **Windows / WebView2** — `Theme: SystemDefault` follows the OS light/dark
   setting; the installer embeds the WebView2 bootstrapper. Canary builds disable
   WebView2 GPU acceleration by default to smoke-test blank-window reports; set
@@ -240,3 +247,13 @@ Settings > Updates > "Share aggregate quality metrics", or by setting
 `metrics = false` under `[desktop]`. These metrics are anonymous signal/bucket
 counts and preference buckets; they never include conversations, prompts, keys,
 paths, base URLs, or file contents.
+
+When Memory v5 is enabled, the same aggregate metrics pipeline may include only
+content-free count/size buckets such as injection on/off, compiled-token bucket,
+IR-overhead bucket, memory-reference count, constraint/risk/step counts, and
+memory-graph size buckets. It never uploads memory text, tool outputs, prompts,
+file paths, IDs, keys, base URLs, or file contents. The Memory v5 runtime itself
+is controlled from Settings > General > "Memory v5" and shares the user/global
+`agent.memory_compiler.enabled` setting with the CLI/TUI and `reasonix serve`;
+CLI users can also run `/memory-v5 off|on|status` in a session or
+`reasonix config memory-v5 off|on|status` from a shell.

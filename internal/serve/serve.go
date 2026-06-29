@@ -135,11 +135,7 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 	// Keep the carried conversation in its existing file so the switch doesn't
 	// orphan a duplicate (#2807).
 	newPath := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())
-	if len(carried) > 0 {
-		newCtrl.Resume(&agent.Session{Messages: carried}, newPath)
-	} else if newPath != "" {
-		newCtrl.SetSessionPath(newPath)
-	}
+	newCtrl.AdoptHistory(carried, newPath)
 
 	s.ctrl = newCtrl
 	cur.Close()

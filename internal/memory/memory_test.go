@@ -89,6 +89,48 @@ func TestImportResolution(t *testing.T) {
 	}
 }
 
+func TestImportResolutionRejectsEscapes(t *testing.T) {
+	proj := t.TempDir()
+	mustMkdir(t, filepath.Join(proj, ".git"))
+	outside := t.TempDir()
+	mustWrite(t, filepath.Join(outside, "secret.md"), "SECRET")
+	mustWrite(t, filepath.Join(proj, "REASONIX.md"), "Top\n@/abs/path.md\n@~/secret.md\n@../secret.md\nBottom")
+
+	set := Load(Options{CWD: proj})
+	if len(set.Docs) != 1 {
+		t.Fatalf("want 1 doc, got %d", len(set.Docs))
+	}
+	body := set.Docs[0].Body
+	if strings.Contains(body, "SECRET") {
+		t.Fatalf("unsafe import was inlined: %q", body)
+	}
+	for _, directive := range []string{"@/abs/path.md", "@~/secret.md", "@../secret.md"} {
+		if !strings.Contains(body, directive) {
+			t.Fatalf("unsafe directive %q should be left visible, body: %q", directive, body)
+		}
+	}
+}
+
+func TestImportResolutionRejectsSymlinkEscape(t *testing.T) {
+	proj := t.TempDir()
+	mustMkdir(t, filepath.Join(proj, ".git"))
+	outside := t.TempDir()
+	mustWrite(t, filepath.Join(outside, "secret.md"), "SECRET")
+	if err := os.Symlink(filepath.Join(outside, "secret.md"), filepath.Join(proj, "linked.md")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	mustWrite(t, filepath.Join(proj, "REASONIX.md"), "Top\n@linked.md\nBottom")
+
+	set := Load(Options{CWD: proj})
+	if len(set.Docs) != 1 {
+		t.Fatalf("want 1 doc, got %d", len(set.Docs))
+	}
+	body := set.Docs[0].Body
+	if strings.Contains(body, "SECRET") || !strings.Contains(body, "@linked.md") {
+		t.Fatalf("symlink escape should not be inlined, body: %q", body)
+	}
+}
+
 // TestImportCycleDoesNotHang verifies cycle detection terminates.
 func TestImportCycleDoesNotHang(t *testing.T) {
 	proj := t.TempDir()

@@ -121,29 +121,57 @@ type SessionNewParams struct {
 
 // MCPServerSpec describes one MCP server the client asks the agent to connect.
 type MCPServerSpec struct {
-	Name    string            `json:"name"`
-	Type    string            `json:"type,omitempty"`
-	Command string            `json:"command,omitempty"`
-	Args    []string          `json:"args,omitempty"`
-	Env     MCPEnv            `json:"env,omitempty"`
-	URL     string            `json:"url,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
+	Name    string     `json:"name"`
+	Type    string     `json:"type,omitempty"`
+	Command string     `json:"command,omitempty"`
+	Args    []string   `json:"args,omitempty"`
+	Env     MCPEnv     `json:"env,omitempty"`
+	URL     string     `json:"url,omitempty"`
+	Headers MCPHeaders `json:"headers,omitempty"`
 }
 
 // MCPEnv accepts ACP's official EnvVariable[] shape while still accepting the
 // older map shape that Reasonix v1 clients used.
 type MCPEnv map[string]string
 
-// EnvVariable is one official ACP MCP environment variable entry.
+// MCPHeaders accepts ACP's official HTTPHeader[] shape while still accepting
+// the older map shape that Reasonix v1 clients used. The official spec
+// (https://agentclientprotocol.com) ships HTTP/SSE MCP headers as an array of
+// {name,value} objects, even when empty.
+type MCPHeaders map[string]string
+
+// EnvVariable is one official ACP MCP environment variable entry. The same
+// {name,value} shape is also used by HTTP/SSE headers in the ACP spec, so we
+// reuse it as the parse target for [MCPHeaders] too.
 type EnvVariable struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
 }
 
 func (e *MCPEnv) UnmarshalJSON(raw []byte) error {
-	if strings.TrimSpace(string(raw)) == "" || strings.TrimSpace(string(raw)) == "null" {
-		*e = nil
-		return nil
+	out, err := unmarshalNameValueMap(raw, "env")
+	if err != nil {
+		return err
+	}
+	*e = out
+	return nil
+}
+
+func (h *MCPHeaders) UnmarshalJSON(raw []byte) error {
+	out, err := unmarshalNameValueMap(raw, "headers")
+	if err != nil {
+		return err
+	}
+	*h = out
+	return nil
+}
+
+// unmarshalNameValueMap parses ACP's official [{name,value}, ...] array shape
+// or the legacy {name: value, ...} map shape into a map. field names the JSON
+// field for error messages.
+func unmarshalNameValueMap(raw []byte, field string) (map[string]string, error) {
+	if s := strings.TrimSpace(string(raw)); s == "" || s == "null" {
+		return nil, nil
 	}
 
 	var vars []EnvVariable
@@ -151,20 +179,18 @@ func (e *MCPEnv) UnmarshalJSON(raw []byte) error {
 		out := make(map[string]string, len(vars))
 		for i, v := range vars {
 			if strings.TrimSpace(v.Name) == "" {
-				return fmt.Errorf("env[%d].name is required", i)
+				return nil, fmt.Errorf("%s[%d].name is required", field, i)
 			}
 			out[v.Name] = v.Value
 		}
-		*e = out
-		return nil
+		return out, nil
 	}
 
 	var legacy map[string]string
 	if err := json.Unmarshal(raw, &legacy); err == nil {
-		*e = legacy
-		return nil
+		return legacy, nil
 	}
-	return fmt.Errorf("env must be an array of {name,value} objects")
+	return nil, fmt.Errorf("%s must be an array of {name,value} objects", field)
 }
 
 // SessionNewResult returns the opaque id used to address the session thereafter.

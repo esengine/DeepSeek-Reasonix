@@ -26,9 +26,15 @@ const (
 func init() { tool.RegisterBuiltin(readFile{}) }
 
 // readFile reads a text file. workDir, when non-empty, is the directory a
-// relative path is resolved against (see resolveIn); the zero value registered
-// at init resolves against the process working directory.
-type readFile struct{ workDir string }
+// relative path is resolved against (see resolveIn). paths maps session-scoped
+// external read aliases to local roots without changing the model-visible tool
+// schema. forbidRoots lists directories the tool may not read from (resolved,
+// absolute paths).
+type readFile struct {
+	workDir     string
+	paths       *PathResolver
+	forbidRoots []string
+}
 
 const (
 	readFileDefaultLimit = 2000 // lines returned when limit is unset
@@ -54,6 +60,12 @@ func (readFile) Schema() json.RawMessage {
 
 func (readFile) ReadOnly() bool { return true }
 
+// SnipHint front-loads file content: the most relevant lines are near the top,
+// so keep a generous head and a short tail when an old read is shortened.
+func (readFile) SnipHint() tool.SnipHint {
+	return tool.SnipHint{Head: 120, Tail: 12, HeadChars: 12000, TailChars: 2000}
+}
+
 func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		Path   string `json:"path"`
@@ -66,7 +78,16 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	if p.Path == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	p.Path = resolveIn(r.workDir, p.Path)
+	rp := resolveReadablePath(r.workDir, p.Path, r.paths)
+	p.Path = rp.Path
+	displayPath := rp.DisplayPath
+	if confineRead(r.forbidRoots, p.Path) {
+		err := &os.PathError{Op: "open", Path: p.Path, Err: os.ErrNotExist}
+		if rp.External {
+			return "", fmt.Errorf("read %s: %s", displayPath, rp.ErrorText(err))
+		}
+		return "", err
+	}
 	if p.Offset < 0 {
 		p.Offset = 0
 	}
@@ -78,12 +99,15 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	// an actionable message (and avoid the doubled "read X: read X:" the scanner's
 	// error would otherwise produce) so the model switches to the ls tool.
 	if info, err := os.Stat(p.Path); err == nil && info.IsDir() {
-		return "", fmt.Errorf("%s is a directory, not a file — use the ls tool to list it, or read a specific file inside it", p.Path)
+		return "", fmt.Errorf("%s is a directory, not a file — use the ls tool to list it, or read a specific file inside it", displayPath)
 	}
 
 	f, err := os.Open(p.Path)
 	if err != nil {
-		return "", fmt.Errorf("read %s: %w", p.Path, err)
+		if rp.External {
+			return "", fmt.Errorf("read %s: %s", displayPath, rp.ErrorText(err))
+		}
+		return "", fmt.Errorf("read %s: %w", displayPath, err)
 	}
 	defer f.Close()
 
@@ -103,7 +127,10 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		// buffer it fully (these files are rare and usually small).
 		rest, rerr := io.ReadAll(f)
 		if rerr != nil {
-			return "", fmt.Errorf("read %s: %w", p.Path, rerr)
+			if rp.External {
+				return "", fmt.Errorf("read %s: %s", displayPath, rp.ErrorText(rerr))
+			}
+			return "", fmt.Errorf("read %s: %w", displayPath, rerr)
 		}
 		all := append(peek, rest...)
 		bom := fileenc.DetectQuick(all)
@@ -123,14 +150,20 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	if k, ok := fileenc.DetectUTF16NoBOM(peek); ok {
 		rest, rerr := io.ReadAll(f)
 		if rerr != nil {
-			return "", fmt.Errorf("read %s: %w", p.Path, rerr)
+			if rp.External {
+				return "", fmt.Errorf("read %s: %s", displayPath, rp.ErrorText(rerr))
+			}
+			return "", fmt.Errorf("read %s: %w", displayPath, rerr)
 		}
 		all := append(peek, rest...)
 		return r.scan(bytes.NewReader(fileenc.Decode(all, k)), p.Offset, p.Limit)
 	}
 
 	if bytes.IndexByte(peek, 0) >= 0 {
-		return "", fmt.Errorf("binary file %s (NUL byte detected); use `bash hexdump` or another tool", p.Path)
+		if rp.External {
+			return "", fmt.Errorf("binary file %s (NUL byte detected); not shown by read_file", displayPath)
+		}
+		return "", fmt.Errorf("binary file %s (NUL byte detected); use `bash hexdump` or another tool", displayPath)
 	}
 
 	// Read up to a bounded sample for encoding detection, then stream the rest —

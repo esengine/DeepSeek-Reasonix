@@ -64,6 +64,39 @@ func TestBashCancelKillsWindowsChildProcessTree(t *testing.T) {
 	t.Fatalf("child process %d survived bash cancel", childPID)
 }
 
+func TestBashWindowsReapsChildAfterForegroundShellExit(t *testing.T) {
+	powershell, err := exec.LookPath("powershell")
+	if err != nil {
+		t.Skip("powershell not found")
+	}
+	tmp := t.TempDir()
+	pidFile := filepath.Join(tmp, "child.pid")
+	quotedPIDFile := strings.ReplaceAll(pidFile, "'", "''")
+	command := fmt.Sprintf(
+		"$p = Start-Process -FilePath powershell -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 120' -PassThru; "+
+			"Set-Content -LiteralPath '%s' -Value $p.Id",
+		quotedPIDFile,
+	)
+	args, _ := json.Marshal(map[string]any{"command": command})
+
+	out, err := (bash{
+		shell: sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: powershell},
+	}).Execute(context.Background(), args)
+	childPID := waitForWindowsPIDFile(t, pidFile)
+	if err != nil {
+		killWindowsPID(childPID)
+		t.Fatalf("foreground command failed: %v (out=%q)", err, out)
+	}
+	for i := 0; i < 50; i++ {
+		if !windowsProcessAlive(childPID) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	killWindowsPID(childPID)
+	t.Fatalf("child process %d survived foreground bash cleanup", childPID)
+}
+
 func waitForWindowsPIDFile(t *testing.T, path string) int {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)

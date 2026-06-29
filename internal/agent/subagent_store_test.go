@@ -50,7 +50,7 @@ func TestSubagentStoreForkCreatesIndependentReference(t *testing.T) {
 	}
 	run.Release()
 
-	forked, err := store.PrepareFork(run.Ref, spec)
+	forked, err := store.prepareFork(run.Ref, spec)
 	if err != nil {
 		t.Fatalf("PrepareFork: %v", err)
 	}
@@ -66,7 +66,114 @@ func TestSubagentStoreForkCreatesIndependentReference(t *testing.T) {
 	}
 }
 
-func TestSubagentStoreRejectsContinueFromDifferentParentSession(t *testing.T) {
+func TestSubagentStoreRejectsContinueFromSiblingSession(t *testing.T) {
+	sessionDir := t.TempDir()
+	store := NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	spec := testSubagentSpec(t, "review")
+	spec.ParentSession = "left"
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	if err := store.SaveCompleted(run); err != nil {
+		t.Fatalf("SaveCompleted: %v", err)
+	}
+	run.Release()
+
+	saveTestBranchMeta(t, sessionDir, "root", "")
+	saveTestBranchMeta(t, sessionDir, "left", "root")
+	saveTestBranchMeta(t, sessionDir, "right", "root")
+	other := spec
+	other.ParentSession = "right"
+	if _, err := store.PrepareContinue(run.Ref, other); err == nil || !strings.Contains(err.Error(), "not in current parent session") {
+		t.Fatalf("PrepareContinue error = %v, want lineage rejection", err)
+	}
+}
+
+func TestSubagentStoreContinueFromAncestorCopiesIntoCurrentSession(t *testing.T) {
+	sessionDir := t.TempDir()
+	store := NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	spec := testSubagentSpec(t, "review")
+	spec.ParentSession = "root"
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	run.Session.Add(provider.Message{Role: provider.RoleUser, Content: "review diff"})
+	if err := store.SaveCompleted(run); err != nil {
+		t.Fatalf("SaveCompleted: %v", err)
+	}
+	run.Release()
+
+	saveTestBranchMeta(t, sessionDir, "root", "")
+	saveTestBranchMeta(t, sessionDir, "child", "root")
+	child := spec
+	child.ParentSession = "child"
+	continued, err := store.PrepareContinue(run.Ref, child)
+	if err != nil {
+		t.Fatalf("PrepareContinue: %v", err)
+	}
+	defer continued.Release()
+	if continued.Ref == run.Ref {
+		t.Fatalf("continued ref should be copied into child session, got source ref %q", continued.Ref)
+	}
+	if continued.Meta.ParentSession != "child" {
+		t.Fatalf("continued parent session = %q, want child", continued.Meta.ParentSession)
+	}
+	if continued.Meta.ForkedFrom != run.Ref {
+		t.Fatalf("forkedFrom = %q, want %q", continued.Meta.ForkedFrom, run.Ref)
+	}
+	if got := continued.Session.Snapshot(); len(got) != 2 || got[1].Content != "review diff" {
+		t.Fatalf("continued transcript = %+v, want copied source transcript", got)
+	}
+	sourceMeta, err := store.LoadMeta(run.Ref)
+	if err != nil {
+		t.Fatalf("LoadMeta source: %v", err)
+	}
+	if sourceMeta.ParentSession != "root" {
+		t.Fatalf("source parent session = %q, want root", sourceMeta.ParentSession)
+	}
+}
+
+func TestSubagentStoreLegacyForkFromAncestorConvertsToContinueCopy(t *testing.T) {
+	sessionDir := t.TempDir()
+	store := NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	spec := testSubagentSpec(t, "review")
+	spec.ParentSession = "root"
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	run.Session.Add(provider.Message{Role: provider.RoleUser, Content: "review diff"})
+	if err := store.SaveCompleted(run); err != nil {
+		t.Fatalf("SaveCompleted: %v", err)
+	}
+	run.Release()
+
+	saveTestBranchMeta(t, sessionDir, "root", "")
+	saveTestBranchMeta(t, sessionDir, "child", "root")
+	child := spec
+	child.ParentSession = "child"
+	continued, err := store.PrepareLegacyForkFrom(run.Ref, child)
+	if err != nil {
+		t.Fatalf("PrepareLegacyForkFrom: %v", err)
+	}
+	defer continued.Release()
+	if continued.Ref == run.Ref {
+		t.Fatalf("legacy fork ref should be copied into child session, got source ref %q", continued.Ref)
+	}
+	if continued.Meta.ParentSession != "child" {
+		t.Fatalf("continued parent session = %q, want child", continued.Meta.ParentSession)
+	}
+	if continued.Meta.ForkedFrom != run.Ref {
+		t.Fatalf("forkedFrom = %q, want %q", continued.Meta.ForkedFrom, run.Ref)
+	}
+	if got := continued.Session.Snapshot(); len(got) != 2 || got[1].Content != "review diff" {
+		t.Fatalf("continued transcript = %+v, want copied source transcript", got)
+	}
+}
+
+func TestSubagentStoreRejectsLegacyForkFromCurrentSession(t *testing.T) {
 	store := NewSubagentStore(t.TempDir())
 	spec := testSubagentSpec(t, "review")
 	run, err := store.PrepareFresh(spec)
@@ -78,10 +185,181 @@ func TestSubagentStoreRejectsContinueFromDifferentParentSession(t *testing.T) {
 	}
 	run.Release()
 
-	other := spec
-	other.ParentSession = "other-parent"
-	if _, err := store.PrepareContinue(run.Ref, other); err == nil || !strings.Contains(err.Error(), "use fork_from") {
-		t.Fatalf("PrepareContinue error = %v, want parent ownership failure", err)
+	if _, err := store.PrepareLegacyForkFrom(run.Ref, spec); err == nil || !strings.Contains(err.Error(), "cannot be safely converted") {
+		t.Fatalf("PrepareLegacyForkFrom error = %v, want unsafe conversion rejection", err)
+	}
+}
+
+func TestSubagentStoreContinueFromAncestorReusesCurrentSessionCopy(t *testing.T) {
+	sessionDir := t.TempDir()
+	store := NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	spec := testSubagentSpec(t, "review")
+	spec.ParentSession = "root"
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	run.Session.Add(provider.Message{Role: provider.RoleUser, Content: "review diff"})
+	if err := store.SaveCompleted(run); err != nil {
+		t.Fatalf("SaveCompleted: %v", err)
+	}
+	run.Release()
+
+	saveTestBranchMeta(t, sessionDir, "root", "")
+	saveTestBranchMeta(t, sessionDir, "child", "root")
+	child := spec
+	child.ParentSession = "child"
+	first, err := store.PrepareContinue(run.Ref, child)
+	if err != nil {
+		t.Fatalf("first PrepareContinue: %v", err)
+	}
+	firstRef := first.Ref
+	if err := store.SaveCompleted(first); err != nil {
+		t.Fatalf("SaveCompleted first: %v", err)
+	}
+	first.Release()
+
+	second, err := store.PrepareContinue(run.Ref, child)
+	if err != nil {
+		t.Fatalf("second PrepareContinue: %v", err)
+	}
+	defer second.Release()
+	if second.Ref != firstRef {
+		t.Fatalf("second continuation ref = %q, want existing child copy %q", second.Ref, firstRef)
+	}
+}
+
+func TestSubagentStoreContinueFromOlderAncestorUsesNearestLineageCopy(t *testing.T) {
+	sessionDir := t.TempDir()
+	store := NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	spec := testSubagentSpec(t, "review")
+	spec.ParentSession = "root"
+	rootRun, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh root: %v", err)
+	}
+	rootRun.Session.Add(provider.Message{Role: provider.RoleUser, Content: "root task"})
+	if err := store.SaveCompleted(rootRun); err != nil {
+		t.Fatalf("SaveCompleted root: %v", err)
+	}
+	rootRun.Release()
+
+	saveTestBranchMeta(t, sessionDir, "root", "")
+	saveTestBranchMeta(t, sessionDir, "child", "root")
+	saveTestBranchMeta(t, sessionDir, "grandchild", "child")
+
+	child := spec
+	child.ParentSession = "child"
+	childRun, err := store.PrepareContinue(rootRun.Ref, child)
+	if err != nil {
+		t.Fatalf("PrepareContinue child: %v", err)
+	}
+	childRun.Session.Add(provider.Message{Role: provider.RoleAssistant, Content: "child finding"})
+	childRef := childRun.Ref
+	if err := store.SaveCompleted(childRun); err != nil {
+		t.Fatalf("SaveCompleted child: %v", err)
+	}
+	childRun.Release()
+
+	grandchild := spec
+	grandchild.ParentSession = "grandchild"
+	fromRoot, err := store.PrepareContinue(rootRun.Ref, grandchild)
+	if err != nil {
+		t.Fatalf("PrepareContinue grandchild from root: %v", err)
+	}
+	grandchildRef := fromRoot.Ref
+	if fromRoot.Meta.ForkedFrom != childRef {
+		t.Fatalf("grandchild forkedFrom = %q, want nearest child copy %q", fromRoot.Meta.ForkedFrom, childRef)
+	}
+	if got := fromRoot.Session.Snapshot(); len(got) != 3 || got[2].Content != "child finding" {
+		t.Fatalf("grandchild transcript = %+v, want child copy transcript", got)
+	}
+	if err := store.SaveCompleted(fromRoot); err != nil {
+		t.Fatalf("SaveCompleted grandchild: %v", err)
+	}
+	fromRoot.Release()
+
+	fromChild, err := store.PrepareContinue(childRef, grandchild)
+	if err != nil {
+		t.Fatalf("PrepareContinue grandchild from child: %v", err)
+	}
+	defer fromChild.Release()
+	if fromChild.Ref != grandchildRef {
+		t.Fatalf("grandchild ref from child copy = %q, want existing copy %q", fromChild.Ref, grandchildRef)
+	}
+}
+
+func TestSubagentStoreRejectsAncestorContinuationWhenCurrentCopyFailed(t *testing.T) {
+	sessionDir := t.TempDir()
+	store := NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	spec := testSubagentSpec(t, "review")
+	spec.ParentSession = "root"
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	if err := store.SaveCompleted(run); err != nil {
+		t.Fatalf("SaveCompleted root: %v", err)
+	}
+	run.Release()
+
+	saveTestBranchMeta(t, sessionDir, "root", "")
+	saveTestBranchMeta(t, sessionDir, "child", "root")
+	child := spec
+	child.ParentSession = "child"
+	copyRun, err := store.PrepareContinue(run.Ref, child)
+	if err != nil {
+		t.Fatalf("PrepareContinue child: %v", err)
+	}
+	if err := store.SaveFailed(copyRun); err != nil {
+		t.Fatalf("SaveFailed child copy: %v", err)
+	}
+	copyRun.Release()
+
+	if _, err := store.PrepareContinue(run.Ref, child); err == nil || !strings.Contains(err.Error(), "failed and cannot be continued") {
+		t.Fatalf("PrepareContinue error = %v, want failed current copy rejection", err)
+	}
+}
+
+func TestSubagentStoreRejectsAncestorContinuationWithMultipleCurrentCopies(t *testing.T) {
+	sessionDir := t.TempDir()
+	store := NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	spec := testSubagentSpec(t, "review")
+	spec.ParentSession = "root"
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	if err := store.SaveCompleted(run); err != nil {
+		t.Fatalf("SaveCompleted root: %v", err)
+	}
+	run.Release()
+
+	saveTestBranchMeta(t, sessionDir, "root", "")
+	saveTestBranchMeta(t, sessionDir, "child", "root")
+	child := spec
+	child.ParentSession = "child"
+	first, err := store.PrepareContinue(run.Ref, child)
+	if err != nil {
+		t.Fatalf("PrepareContinue first: %v", err)
+	}
+	if err := store.SaveCompleted(first); err != nil {
+		t.Fatalf("SaveCompleted first: %v", err)
+	}
+	first.Release()
+
+	second, err := store.PrepareFresh(child)
+	if err != nil {
+		t.Fatalf("PrepareFresh second: %v", err)
+	}
+	second.Meta.ForkedFrom = run.Ref
+	if err := store.SaveCompleted(second); err != nil {
+		t.Fatalf("SaveCompleted second: %v", err)
+	}
+	second.Release()
+
+	if _, err := store.PrepareContinue(run.Ref, child); err == nil || !strings.Contains(err.Error(), "multiple copied transcripts") {
+		t.Fatalf("PrepareContinue error = %v, want multiple-copy rejection", err)
 	}
 }
 
@@ -104,7 +382,7 @@ func TestSubagentStoreForkFromAncestorSessionCreatesCurrentOwner(t *testing.T) {
 	saveTestBranchMeta(t, sessionDir, "child", "root")
 	other := spec
 	other.ParentSession = "child"
-	forked, err := store.PrepareFork(run.Ref, other)
+	forked, err := store.prepareFork(run.Ref, other)
 	if err != nil {
 		t.Fatalf("PrepareFork: %v", err)
 	}
@@ -130,7 +408,7 @@ func TestSubagentStoreRejectsForkWhenSourceOwnerMetaMissing(t *testing.T) {
 
 	other := spec
 	other.ParentSession = "child"
-	if _, err := store.PrepareFork(ref, other); err == nil || !strings.Contains(err.Error(), "lineage could not be verified") {
+	if _, err := store.prepareFork(ref, other); err == nil || !strings.Contains(err.Error(), "lineage could not be verified") {
 		t.Fatalf("PrepareFork error = %v, want unverified lineage rejection", err)
 	}
 }
@@ -144,7 +422,7 @@ func TestSubagentStoreRejectsForkWhenSourceOwnerMetaCorrupt(t *testing.T) {
 
 	other := spec
 	other.ParentSession = "child"
-	if _, err := store.PrepareFork(ref, other); err == nil || !strings.Contains(err.Error(), "lineage could not be verified") {
+	if _, err := store.prepareFork(ref, other); err == nil || !strings.Contains(err.Error(), "lineage could not be verified") {
 		t.Fatalf("PrepareFork error = %v, want unverified lineage rejection", err)
 	}
 }
@@ -158,7 +436,7 @@ func TestSubagentStoreRejectsForkWhenSourceOwnerMetaIDDiffers(t *testing.T) {
 
 	other := spec
 	other.ParentSession = "child"
-	if _, err := store.PrepareFork(ref, other); err == nil || !strings.Contains(err.Error(), "lineage could not be verified") {
+	if _, err := store.prepareFork(ref, other); err == nil || !strings.Contains(err.Error(), "lineage could not be verified") {
 		t.Fatalf("PrepareFork error = %v, want unverified lineage rejection", err)
 	}
 }
@@ -182,7 +460,7 @@ func TestSubagentStoreRejectsForkFromSiblingSession(t *testing.T) {
 	saveTestBranchMeta(t, sessionDir, "right", "root")
 	other := spec
 	other.ParentSession = "right"
-	if _, err := store.PrepareFork(run.Ref, other); err == nil || !strings.Contains(err.Error(), "not in current parent session") {
+	if _, err := store.prepareFork(run.Ref, other); err == nil || !strings.Contains(err.Error(), "not in current parent session") {
 		t.Fatalf("PrepareFork error = %v, want lineage rejection", err)
 	}
 }
@@ -205,7 +483,7 @@ func TestSubagentStoreRejectsForkFromUnrelatedSession(t *testing.T) {
 	saveTestBranchMeta(t, sessionDir, "current", "root")
 	other := spec
 	other.ParentSession = "current"
-	if _, err := store.PrepareFork(run.Ref, other); err == nil || !strings.Contains(err.Error(), "not in current parent session") {
+	if _, err := store.prepareFork(run.Ref, other); err == nil || !strings.Contains(err.Error(), "not in current parent session") {
 		t.Fatalf("PrepareFork error = %v, want unrelated session rejection", err)
 	}
 }
@@ -226,7 +504,7 @@ func TestSubagentStoreRejectsForkWhenLineageCannotBeProven(t *testing.T) {
 
 	other := spec
 	other.ParentSession = "child"
-	if _, err := store.PrepareFork(run.Ref, other); err == nil || !strings.Contains(err.Error(), "lineage could not be verified") {
+	if _, err := store.prepareFork(run.Ref, other); err == nil || !strings.Contains(err.Error(), "lineage could not be verified") {
 		t.Fatalf("PrepareFork error = %v, want unverified lineage rejection", err)
 	}
 }
@@ -244,7 +522,7 @@ func TestSubagentStoreForkReleasesSourceLockAfterCopy(t *testing.T) {
 	}
 	run.Release()
 
-	forked, err := store.PrepareFork(run.Ref, spec)
+	forked, err := store.prepareFork(run.Ref, spec)
 	if err != nil {
 		t.Fatalf("PrepareFork: %v", err)
 	}
@@ -327,7 +605,7 @@ func TestSubagentStoreSaveFailedPersistsTranscriptAndRejectsReuse(t *testing.T) 
 	if _, err := store.PrepareContinue(run.Ref, spec); err == nil || !strings.Contains(err.Error(), "failed and cannot be continued") {
 		t.Fatalf("PrepareContinue error = %v, want failed ref rejection", err)
 	}
-	if _, err := store.PrepareFork(run.Ref, spec); err == nil || !strings.Contains(err.Error(), "failed and cannot be continued") {
+	if _, err := store.prepareFork(run.Ref, spec); err == nil || !strings.Contains(err.Error(), "failed and cannot be continued") {
 		t.Fatalf("PrepareFork error = %v, want failed ref rejection", err)
 	}
 }
@@ -363,7 +641,7 @@ func TestSubagentStoreCleanupStaleRunningMarksInterrupted(t *testing.T) {
 	if _, err := store.PrepareContinue(ref, spec); err == nil || !strings.Contains(err.Error(), "interrupted by a previous shutdown or crash") {
 		t.Fatalf("PrepareContinue error = %v, want interrupted rejection", err)
 	}
-	if _, err := store.PrepareFork(ref, spec); err == nil || !strings.Contains(err.Error(), "cannot be continued or forked") {
+	if _, err := store.prepareFork(ref, spec); err == nil || !strings.Contains(err.Error(), "cannot be continued or forked") {
 		t.Fatalf("PrepareFork error = %v, want interrupted fork rejection", err)
 	}
 }

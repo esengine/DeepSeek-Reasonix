@@ -11,6 +11,7 @@ const commandPaletteSource = readFileSync(resolve(testDir, "../components/Comman
 const projectTreeSource = readFileSync(resolve(testDir, "../components/ProjectTree.tsx"), "utf8");
 const topicShortcutsSource = readFileSync(resolve(testDir, "../lib/topicShortcuts.ts"), "utf8");
 const transcriptSource = readFileSync(resolve(testDir, "../components/Transcript.tsx"), "utf8");
+const layoutStoreSource = readFileSync(resolve(testDir, "../store/layout.ts"), "utf8");
 const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 
 let passed = 0;
@@ -66,6 +67,12 @@ for (const propName of ["onTabChange", "onTabClose", "onTabsClose", "onTabsReord
 ok(
   /app-chrome__tab-strip/.test(appChromeSource),
   "AppChrome markup includes classic tab strip containers",
+);
+
+ok(
+  /const WORKSPACE_PANEL_DEFAULT_OPEN = false;/.test(layoutStoreSource) &&
+    /workspacePanelOpen:\s*WORKSPACE_PANEL_DEFAULT_OPEN/.test(layoutStoreSource),
+  "right dock starts collapsed on launch",
 );
 
 ok(
@@ -174,10 +181,51 @@ ok(
 
 ok(
   /const controllerReady = state\.meta\?\.ready === true && !state\.backendActivationPending;/.test(appSource) &&
-    /if \(!controllerReady\) return;\s*void commitThenSend\(text\);/s.test(appSource) &&
+    /if \(!controllerReady\) return;\s*void commitThenSend\(text\)\.catch/.test(appSource) &&
     /onPrompt=\{handleTranscriptPrompt\}/.test(appSource) &&
     /submitDisabled=\{!controllerReady\}/.test(appSource),
   "welcome prompts and composer submit share the controller readiness gate",
+);
+
+ok(
+  /const transcriptHydrating = state\.hydrating && !state\.hydrateHistoryLoaded;/.test(appSource) &&
+    /hydrating=\{transcriptHydrating\}/.test(appSource),
+  "Welcome is suppressed only until transcript history has loaded",
+);
+
+const navigationBlock = appSource.match(/const runNavigationRequest = useCallback\([\s\S]*?\n  \}, \[[^\]]*singleSurfaceLayout[^\]]*\]\);/)?.[0] ?? "";
+ok(
+  /const navigationRunningRef = useRef\(false\);/.test(appSource) &&
+    /const navigationPendingRef = useRef<PendingDesktopNavigationRequest \| null>\(null\);/.test(appSource) &&
+    /const runNavigationRequest = useCallback\(async \(request: PendingDesktopNavigationRequest\)/.test(appSource) &&
+    /const latest = \(\) => request\.seq === navigationSeqRef\.current;/.test(appSource) &&
+    /return activateTopic\(scope, workspaceRoot, topicId/.test(appSource) &&
+    /return openTopicSession\(scope, workspaceRoot, topicId/.test(appSource) &&
+    /return openGlobalTab\(topicId\)/.test(appSource) &&
+    /return openProjectTab\(workspaceRoot, topicId\)/.test(appSource) &&
+    /enqueueNavigationRequest\([\s\S]*runningRef: navigationRunningRef, pendingRef: navigationPendingRef/.test(appSource) &&
+    !/openTopicQueueRef\.current\.catch\(\(\) => \{\}\)\.then/.test(appSource) &&
+    /const refreshLatestTabMetas = async \(\): Promise<TabMeta\[]> => \{[\s\S]*if \(latest\(\)\) setTabMetas\(tabs\);/.test(navigationBlock) &&
+    /if \(!latest\(\)\) return;[\s\S]*seedActiveTabMeta\(openedTab\);[\s\S]*void refreshLatestTabMetas\(\);/.test(navigationBlock),
+  "desktop navigation coalesces pending requests, ignores stale results, and seeds active tab metadata before background refresh",
+);
+
+ok(
+  /return enqueueNavigation\(\{ kind: "topic", scope, workspaceRoot, topicId, sessionPath \}\);/.test(appSource) &&
+    /enqueueNavigation\(\{ kind: "blank", scope, workspaceRoot: scope === "project" \? workspaceRoot : "" \}\)/.test(appSource) &&
+    /return enqueueNavigation\(\{ kind: "sidebar-im", connection \}\);/.test(appSource) &&
+    /return enqueueNavigation\(\{ kind: "resume-session", session \}\);/.test(appSource),
+  "topic, blank, IM, and history navigation all use the shared coalescing path",
+);
+
+ok(
+  !/await resumeSession\(session\.path, targetTab\.id\);/.test(navigationBlock),
+  "history navigation does not re-resume a session that OpenTopicSession already pinned",
+);
+
+ok(
+  /<HeartbeatPanel[\s\S]*onOpenTopic=\{\(scope, workspaceRoot, topicId\) => \{[\s\S]*void handleOpenTopic\(scope, workspaceRoot, topicId\);[\s\S]*\}\}/.test(appSource),
+  "heartbeat topic navigation uses the guarded open-topic path",
 );
 
 for (const selector of [

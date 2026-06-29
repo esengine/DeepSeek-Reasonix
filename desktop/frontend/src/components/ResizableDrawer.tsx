@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useT } from "../lib/i18n";
 import { loadLayoutSize, saveLayoutSize, type LayoutSizeKey } from "../lib/layoutPreferences";
+import { createRafResizeUpdater } from "../lib/resizeDrag";
 import { useDeferredClose } from "../lib/useMountTransition";
 
 const DRAWER_DEFAULT_WIDTH = 440;
@@ -51,6 +52,7 @@ export function ResizableDrawer({
 }) {
   const t = useT();
   const config = drawerConfig(wide);
+  const drawerRef = useRef<HTMLElement>(null);
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 1440 : window.innerWidth));
   const [width, setWidth] = useState(() =>
     loadLayoutSize(config.key, config.defaultWidth, (value) => clampDrawerWidth(value, wide)),
@@ -79,14 +81,22 @@ export function ResizableDrawer({
   const startResize = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
       if (event.button !== 0) return;
+      const drawer = drawerRef.current;
+      if (!drawer) return;
       event.preventDefault();
       setResizing(true);
       let nextWidth = effectiveWidth;
+      const liveResize = createRafResizeUpdater({
+        target: drawer,
+        separator: event.currentTarget,
+        cssVar: "--drawer-width",
+      });
       const onMove = (moveEvent: PointerEvent) => {
         nextWidth = clampDrawerWidth(window.innerWidth - moveEvent.clientX, wide, window.innerWidth);
-        setWidth(nextWidth);
+        liveResize.schedule(nextWidth);
       };
       const onDone = () => {
+        liveResize.flush();
         setWidth(nextWidth);
         saveLayoutSize(config.key, nextWidth);
         setResizing(false);
@@ -124,6 +134,7 @@ export function ResizableDrawer({
   return (
     <div className={`drawer-backdrop${subtle ? " drawer-backdrop--subtle" : ""}`} data-state={status} onClick={requestClose}>
       <aside
+        ref={drawerRef}
         className={`drawer${wide ? " drawer--wide" : ""}${resizing ? " drawer--resizing" : ""}`}
         data-state={status}
         onClick={(e) => e.stopPropagation()}

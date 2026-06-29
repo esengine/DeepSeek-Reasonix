@@ -32,6 +32,7 @@ export const RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH = 660;
 export const RIGHT_DOCK_PREVIEW_MIN_WIDTH = 420;
 export const RIGHT_DOCK_MIN_RENDER_WIDTH = 280;
 export const RIGHT_DOCK_MAX_WIDTH = 860;
+const WORKSPACE_PANEL_DEFAULT_OPEN = false;
 
 export function clampSidebarWidth(width: number): number {
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
@@ -139,7 +140,7 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   sidebarWidth: loadSidebarWidth(),
   rightDockTreeWidth: loadRightDockTreeWidth(),
   rightDockPreviewWidth: loadRightDockPreviewWidth(),
-  workspacePanelOpen: true,
+  workspacePanelOpen: WORKSPACE_PANEL_DEFAULT_OPEN,
   workspacePanelMaximized: false,
   workspacePreviewActive: false,
   rightDockMode: "context",

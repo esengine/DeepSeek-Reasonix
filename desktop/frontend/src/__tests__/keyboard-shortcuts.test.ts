@@ -1,5 +1,7 @@
 // Run: tsx src/__tests__/keyboard-shortcuts.test.ts
 
+import { JSDOM } from "jsdom";
+
 import {
   defaultShortcutCombo,
   formatShortcutCombo,
@@ -36,6 +38,22 @@ function event(key: string, modifiers: { ctrlKey?: boolean; metaKey?: boolean; a
   };
 }
 
+function eventWithTarget(
+  key: string,
+  target: EventTarget | null,
+  modifiers: { ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean; defaultPrevented?: boolean } = {},
+) {
+  return {
+    key,
+    ctrlKey: modifiers.ctrlKey ?? false,
+    metaKey: modifiers.metaKey ?? false,
+    altKey: modifiers.altKey ?? false,
+    shiftKey: modifiers.shiftKey ?? false,
+    defaultPrevented: modifiers.defaultPrevented ?? false,
+    target,
+  };
+}
+
 console.log("\nkeyboard shortcuts");
 
 eq(isCloseTabShortcut(event("w", { metaKey: true }), "darwin"), true, "Cmd+W closes tabs on macOS");
@@ -66,6 +84,16 @@ eq(topicShortcutIndexFromEvent(event("9", { metaKey: true }), "windows"), null, 
 eq(topicShortcutIndexFromEvent(event("1", { ctrlKey: true, shiftKey: true }), "linux"), null, "topic shortcuts reject extra modifiers");
 eq(topicShortcutIndexFromEvent(event("0", { metaKey: true }), "darwin"), null, "Cmd+0 is not a topic shortcut");
 eq(topicShortcutIndexFromEvent(event("1", { metaKey: true, defaultPrevented: true }), "darwin"), null, "topic shortcuts yield to already-handled custom shortcuts");
+{
+  const dom = new JSDOM("<!doctype html><html><body><input /><textarea></textarea></body></html>");
+  const previousHTMLElement = globalThis.HTMLElement;
+  globalThis.HTMLElement = dom.window.HTMLElement;
+  const input = dom.window.document.querySelector("input");
+  const textarea = dom.window.document.querySelector("textarea");
+  eq(topicShortcutIndexFromEvent(eventWithTarget("1", input, { metaKey: true }), "darwin"), 0, "Cmd+1 still works when an input has focus");
+  eq(topicShortcutIndexFromEvent(eventWithTarget("9", textarea, { ctrlKey: true }), "windows"), 8, "Ctrl+9 still works when a textarea has focus");
+  globalThis.HTMLElement = previousHTMLElement;
+}
 eq(topicShortcutLabel(1, "darwin"), "⌘1", "topic badge uses the macOS command glyph");
 eq(topicShortcutLabel(1, "windows"), "Ctrl+1", "topic badge uses the Windows control modifier");
 

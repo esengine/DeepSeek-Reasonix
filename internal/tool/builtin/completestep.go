@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"reasonix/internal/evidence"
@@ -51,6 +52,7 @@ func (completeStep) Schema() json.RawMessage {
 "type":"object",
 "properties":{
   "step":{"type":"string","description":"Which plan step this completes — its title or number, matching the task list."},
+  "step_index":{"type":"integer","minimum":1,"description":"Optional 1-based task-list item number. Prefer this when the step title is long or easy to mistype."},
   "result":{"type":"string","description":"What is now true or changed as a result of finishing this step."},
   "evidence":{
     "type":"array",
@@ -69,7 +71,7 @@ func (completeStep) Schema() json.RawMessage {
   },
   "notes":{"type":"string","description":"Optional caveats, follow-ups, or anything deferred."}
 },
-"required":["step","result","evidence"]
+"required":["result","evidence"]
 }`)
 }
 
@@ -77,18 +79,29 @@ func (completeStep) Schema() json.RawMessage {
 // effect), so it never needs approval and stays available alongside todo_write.
 func (completeStep) ReadOnly() bool { return true }
 
+// PlanModeSafe reports false: although complete_step is read-only, it signs off a
+// completed execution step, which is meaningful only after plan approval — not
+// during planning. This self-report backs up its knownBlockedTools entry so the
+// gate refuses it even if the classifier wiring regresses.
+func (completeStep) PlanModeSafe() bool { return false }
+
 func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
-		Step     string         `json:"step"`
-		Result   string         `json:"result"`
-		Evidence []stepEvidence `json:"evidence"`
-		Notes    string         `json:"notes"`
+		Step      string         `json:"step"`
+		StepIndex int            `json:"step_index"`
+		Result    string         `json:"result"`
+		Evidence  []stepEvidence `json:"evidence"`
+		Notes     string         `json:"notes"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
-	if strings.TrimSpace(p.Step) == "" {
-		return "", fmt.Errorf("step is required — name the plan step you are completing")
+	step := completeStepIdentity(p.Step, p.StepIndex)
+	if step == "" {
+		return "", fmt.Errorf("step or step_index is required — name the plan step you are completing, or cite its 1-based task-list number")
+	}
+	if p.StepIndex < 0 {
+		return "", fmt.Errorf("step_index must be a positive 1-based task-list number")
 	}
 	if strings.TrimSpace(p.Result) == "" {
 		return "", fmt.Errorf("result is required — state what is now true after finishing this step")
@@ -111,7 +124,7 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 	if err != nil {
 		return "", err
 	}
-	todoMatch, hasTodo, err := verifyTodoStep(ctx, p.Step)
+	todoMatch, hasTodo, err := verifyTodoStep(ctx, step)
 	if err != nil {
 		return "", err
 	}
@@ -125,14 +138,21 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 	}
 	todoStatus := ""
 	if hasTodo {
-		todoStatus = fmt.Sprintf(" Todo step: todo-matched %d.", todoMatch.Index)
+		todoStatus = fmt.Sprintf(" Todo step: todo-matched %d (%q).", todoMatch.Index, todoMatch.Content)
 	}
 	projectStatus := ""
 	if projectVerified > 0 {
 		projectStatus = fmt.Sprintf(" Project checks: project checks %d.", projectVerified)
 	}
 	return fmt.Sprintf("Step %q signed off with %d evidence item(s) [%s].%s The host advanced the task list; continue with the next step.",
-		p.Step, len(p.Evidence), strings.Join(kinds, ", "), hostStatus+todoStatus+projectStatus), nil
+		step, len(p.Evidence), strings.Join(kinds, ", "), hostStatus+todoStatus+projectStatus), nil
+}
+
+func completeStepIdentity(step string, stepIndex int) string {
+	if stepIndex > 0 {
+		return strconv.Itoa(stepIndex)
+	}
+	return strings.TrimSpace(step)
 }
 
 func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified int, manualUnverified int, err error) {
@@ -151,7 +171,8 @@ func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified
 				if ledger.HasFailedCommand(command) {
 					return 0, 0, fmt.Errorf("evidence %d: verification command %q ran but exited non-zero, so it can't prove the step; if the non-zero exit is itself the expected proof (e.g. a file is gone), re-run it so it succeeds (append \"|| true\") and sign off again", i+1, command)
 				}
-				return 0, 0, fmt.Errorf("evidence %d: verification command %q has no matching successful bash receipt in this turn%s", i+1, command, receiptHint("commands run this turn", ledger.SuccessfulCommands(5)))
+				hint := allCommandHints(ctx, ledger)
+				return 0, 0, fmt.Errorf("evidence %d: verification command %q has no matching successful receipt — cite the command exactly as it ran in the session%s", i+1, command, hint)
 			}
 			hostVerified++
 		case "diff":
@@ -337,6 +358,56 @@ func receiptHint(label string, items []string) string {
 		}
 	}
 	return fmt.Sprintf("; %s: %q — cite one as it actually ran, or run the check now", label, items)
+}
+
+// allCommandHints builds a combined hint from both the per-turn ledger and the
+// full session history, so the model can self-correct a mismatched citation.
+func allCommandHints(ctx context.Context, ledger *evidence.Ledger) string {
+	seen := map[string]bool{}
+	var cmds []string
+	if ledger != nil {
+		for _, c := range ledger.SuccessfulCommands(8) {
+			if !seen[c] {
+				seen[c] = true
+				cmds = append(cmds, c)
+			}
+		}
+	}
+	if msgs, ok := evidence.SessionMessagesFromContext(ctx); ok {
+		failed := failedCallIDs(msgs)
+		for _, msg := range msgs {
+			for _, tc := range msg.ToolCalls {
+				if failed[tc.ID] {
+					continue
+				}
+				if tc.Name == "todo_write" || tc.Name == "complete_step" {
+					continue
+				}
+				c := extractCommandFromCall(tc.Name, tc.Arguments)
+				if c == "" || seen[c] {
+					continue
+				}
+				seen[c] = true
+				cmds = append(cmds, c)
+				if len(cmds) >= 12 {
+					break
+				}
+			}
+			if len(cmds) >= 12 {
+				break
+			}
+		}
+	}
+	if len(cmds) == 0 {
+		return ""
+	}
+	// Truncate long entries for readability.
+	for i, c := range cmds {
+		if len(c) > 80 {
+			cmds[i] = c[:80] + "…"
+		}
+	}
+	return fmt.Sprintf("; commands that ran: %q — pick the matching one and retry complete_step", cmds)
 }
 
 func firstWord(s string) string {

@@ -1,5 +1,8 @@
 // Run: tsx src/__tests__/send-failed.test.ts
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { initialState, reducer, replayPendingPromptsForActiveTab } from "../lib/useController";
 import type { WireEvent } from "../lib/types";
 
@@ -35,6 +38,41 @@ const confirmed = reducer(sent, { type: "event", e: { kind: "text", text: "hi" }
 eq(confirmed.items.filter((it) => it.kind === "user").length, 1, "first backend event confirms without duplicating");
 eq(confirmed.pendingUser, undefined, "confirmation clears the pending marker");
 
+const memoryStatsEvent = {
+  kind: "memory_compiler_stats",
+  memoryCompiler: {
+    injected: true,
+    usefulIR: true,
+    compiledTokens: 640,
+    irOverheadTokens: 120,
+    memoryReferences: 2,
+    constraints: 1,
+    riskNotes: 0,
+    executionSteps: 3,
+    totalNodes: 18,
+    highSignalNodes: 4,
+    toolResultNodes: 6,
+    decisionNodes: 2,
+    strategyCount: 5,
+    learningCount: 3,
+  },
+} as WireEvent;
+const statsOnly = reducer(sent, { type: "event", e: memoryStatsEvent });
+eq(statsOnly, sent, "memory compiler stats do not confirm or mutate the visible turn");
+const startedThenStats = reducer(reducer(sent, { type: "event", e: { kind: "turn_started" } as WireEvent }), { type: "event", e: memoryStatsEvent });
+eq(startedThenStats.items.length, 2, "memory compiler stats do not add transcript items after turn start");
+const compilerCitationMessage = {
+  kind: "message",
+  memoryCitations: [{ kind: "compiler_reference", source: "Memory v5", note: "evidence: bash succeeded" }],
+} as WireEvent;
+const citationOnlyFinal = reducer(reducer(sent, { type: "event", e: { kind: "turn_started" } as WireEvent }), { type: "event", e: compilerCitationMessage });
+eq(citationOnlyFinal.items.length, 1, "memory compiler citations alone do not leave an empty assistant bubble");
+eq(citationOnlyFinal.items.some((it) => it.kind === "assistant"), false, "memory compiler citations alone stay hidden from the transcript");
+const textThenCitationFinal = reducer(reducer(startedThenStats, { type: "event", e: { kind: "text", text: "done" } as WireEvent }), { type: "event", e: compilerCitationMessage });
+const citedAssistant = textThenCitationFinal.items.find((it) => it.kind === "assistant");
+eq(citedAssistant?.kind === "assistant" && citedAssistant.text, "done", "memory compiler citations preserve existing assistant text");
+eq(citedAssistant?.kind === "assistant" && citedAssistant.memoryCitations?.length, 1, "memory compiler citations attach to real assistant content");
+
 const failedState = reducer(sent, { type: "send_failed", error: "Send failed: bridge unavailable" });
 const failedBubble = failedState.items.find((it) => it.kind === "user");
 eq(failedBubble?.kind === "user" && failedBubble.failed, true, "send_failed marks the bubble failed");
@@ -44,8 +82,49 @@ eq(notice.kind === "notice" && notice.level, "warn", "the notice is a warning");
 eq(failedState.running, false, "send_failed stops the running indicator");
 eq(failedState.pendingUser, undefined, "send_failed clears the pending marker");
 
+const shellSent = reducer({ ...initialState }, { type: "user", text: "!ls", seq: 0 });
+const shellFailed = reducer(shellSent, { type: "send_failed", error: "Command failed: workspace is still starting" });
+const shellNotice = shellFailed.items[shellFailed.items.length - 1];
+eq(shellNotice.kind, "notice", "rejected shell command appends a visible notice");
+eq(shellNotice.kind === "notice" && shellNotice.text.includes("workspace is still starting"), true, "shell rejection notice includes the backend error");
+
 const lateFailure = reducer(confirmed, { type: "send_failed", error: "Send failed: late" });
 eq(lateFailure, confirmed, "send_failed after backend confirmation is a no-op");
+
+const beforeMcpReady = { ...initialState };
+const mcpReady = reducer(beforeMcpReady, { type: "event", e: { kind: "mcp_surface_ready" } as WireEvent });
+eq(mcpReady, beforeMcpReady, "mcp_surface_ready is accepted as a deliberate no-op");
+const pendingMcpReady = reducer(sent, { type: "event", e: { kind: "mcp_surface_ready" } as WireEvent });
+eq(pendingMcpReady, sent, "mcp_surface_ready does not confirm a pending submit");
+const failedAfterMcpReady = reducer(pendingMcpReady, { type: "send_failed", error: "Send failed: bridge unavailable" });
+const failedAfterMcpReadyBubble = failedAfterMcpReady.items.find((it) => it.kind === "user");
+eq(
+  failedAfterMcpReadyBubble?.kind === "user" && failedAfterMcpReadyBubble.failed,
+  true,
+  "send_failed still marks a pending submit after mcp readiness",
+);
+
+const here = dirname(fileURLToPath(import.meta.url));
+const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
+const typesSource = readFileSync(resolve(here, "../lib/types.ts"), "utf8");
+const controllerSource = readFileSync(resolve(here, "../lib/useController.ts"), "utf8");
+eq(typesSource.includes('"mcp_surface_ready"'), true, "TypeScript EventKind declares mcp_surface_ready");
+eq(controllerSource.includes('e.kind === "memory_compiler_stats" || e.kind === "mcp_surface_ready"'), true, "reducer handles mcp_surface_ready before optimistic confirmation");
+eq(
+  /state\.approval!\.tool === "exit_plan_mode" && allow\) await applyCollaborationMode\("normal"\);/.test(appSource),
+  true,
+  "plan approval clears the remembered plan restore intent before execution",
+);
+eq(
+  !/exit_plan_mode[\s\S]{0,240}rememberUserIntent:\s*false/.test(appSource),
+  true,
+  "plan approval must not preserve stale plan restore intent",
+);
+eq(
+  !appSource.includes("rememberUserIntent"),
+  true,
+  "collaboration mode changes always reconcile the remembered plan restore intent",
+);
 
 const unsent = reducer(sent, { type: "unsend" });
 eq(unsent.pendingUser, undefined, "unsend clears the pending marker");

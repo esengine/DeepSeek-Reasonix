@@ -103,6 +103,7 @@ type Goals interface {
 // operations (compact, summarize).
 type SessionHistory interface {
 	Checkpoints() []checkpoint.Meta
+	CheckpointTurnsByMessageIndex() map[int]int
 	CheckpointHasBoundary(turn int) bool
 	Rewind(turn int, scope RewindScope) error
 	Fork(turn int) (string, error)
@@ -189,11 +190,15 @@ type Input interface {
 	ComposeSynthetic(text string) string
 	ResolveRefs(ctx context.Context, line string) (block string, errs []string)
 	HasRefs(line string) bool
+	ImageInputEnabled() bool
+	RegisterExternalFolderRef(path string) (token, displayPath string, err error)
 }
 
 // Settings covers runtime session settings that don't fit a richer domain.
 type Settings interface {
+	SetResponseLanguage(lang string)
 	SetReasoningLanguage(lang string)
+	SetMemoryCompilerEnabled(enabled bool)
 	SetDisplayRecorder(fn func(content, display string))
 }
 

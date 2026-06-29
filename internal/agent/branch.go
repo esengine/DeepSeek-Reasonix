@@ -44,8 +44,9 @@ type BranchMeta struct {
 	// in-memory conversation, so ListSessions stays O(1) per session instead of
 	// O(file size). Gated by SchemaVersion (above), not Turns == 0, so a
 	// genuinely-empty session is recorded once and never re-decoded.
-	Turns   int    `json:"turns,omitempty"`
-	Preview string `json:"preview,omitempty"`
+	Turns        int               `json:"turns,omitempty"`
+	Preview      string            `json:"preview,omitempty"`
+	InFlightTurn *InFlightTurnMeta `json:"in_flight_turn,omitempty"`
 }
 
 // BranchMetaCountsVersion is stamped into BranchMeta.SchemaVersion whenever a
@@ -53,6 +54,15 @@ type BranchMeta struct {
 // Fork/Branch). Bump it when the meaning of those listing fields changes so
 // existing listings re-derive them instead of trusting a stale cache.
 const BranchMetaCountsVersion = 1
+
+// InFlightTurnMeta records the message-log boundary for a foreground turn that
+// has started but not yet reached TurnDone. If the process exits mid-turn, a
+// later resume can strip the partial assistant/tool tail without guessing.
+type InFlightTurnMeta struct {
+	StartMessageIndex int       `json:"start_message_index"`
+	PreserveUser      bool      `json:"preserve_user"`
+	StartedAt         time.Time `json:"started_at"`
+}
 
 func (m BranchMeta) DefaultScope() string {
 	switch m.Scope {
@@ -188,6 +198,34 @@ func TouchBranchMeta(sessionPath string) error {
 	}
 	m.UpdatedAt = time.Now().UTC()
 	return saveBranchMeta(sessionPath, m, false)
+}
+
+func MarkSessionInFlightTurn(sessionPath string, startMessageIndex int, preserveUser bool) error {
+	if startMessageIndex < 0 {
+		startMessageIndex = 0
+	}
+	m, err := EnsureBranchMeta(sessionPath)
+	if err != nil {
+		return err
+	}
+	m.InFlightTurn = &InFlightTurnMeta{
+		StartMessageIndex: startMessageIndex,
+		PreserveUser:      preserveUser,
+		StartedAt:         time.Now().UTC(),
+	}
+	return SaveBranchMetaPreserveUpdated(sessionPath, m)
+}
+
+func ClearSessionInFlightTurn(sessionPath string) error {
+	m, ok, err := LoadBranchMeta(sessionPath)
+	if err != nil || !ok {
+		return err
+	}
+	if m.InFlightTurn == nil {
+		return nil
+	}
+	m.InFlightTurn = nil
+	return SaveBranchMetaPreserveUpdated(sessionPath, m)
 }
 
 func ListBranches(dir string) ([]BranchInfo, error) {

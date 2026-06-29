@@ -456,7 +456,14 @@ func redirectToSafeTarget(w http.ResponseWriter, r *http.Request, raw string, st
 func (ag *authGate) signSession() string {
 	expiry := time.Now().Add(sessionDuration).Unix()
 	nonce := make([]byte, 16)
-	_, _ = rand.Read(nonce)
+	if _, err := rand.Read(nonce); err != nil {
+		// crypto/rand.Read cannot fail on modern systems; panic rather than
+		// fall back to an all-zero nonce. Forging a cookie still requires the
+		// PBKDF2-derived sessKey, so this is not an auth bypass, but a constant
+		// nonce weakens session token uniqueness/unpredictability and is the
+		// same anti-pattern generateToken/sessionKeyForPasswordHash panic on.
+		panic("serve/auth: crypto/rand.Read failed: " + err.Error())
+	}
 
 	payload := strconv.FormatInt(expiry, 10) + "|" + base64.RawURLEncoding.EncodeToString(nonce)
 	mac := hmac.New(sha256.New, ag.sessKey)

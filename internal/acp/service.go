@@ -706,11 +706,7 @@ func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState
 	newCtrl.EnableInteractiveApproval()
 	sink.bindApprove(newCtrl.Approve)
 	sink.bindAnswer(newCtrl.AnswerQuestion)
-	if len(carried) > 0 {
-		newCtrl.Resume(&agent.Session{Messages: carried}, prevPath)
-	} else if prevPath != "" {
-		newCtrl.SetSessionPath(prevPath)
-	}
+	newCtrl.AdoptHistory(carried, prevPath)
 	// InheritLifecycleFrom wires two concrete controllers' turn/hook state; it's a
 	// construction concern, not part of the driving port. cur is always the
 	// *control.Controller the factory built for this session, so this is safe.

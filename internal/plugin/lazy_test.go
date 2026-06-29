@@ -285,9 +285,8 @@ func TestLazyCacheHitStartupTimeoutCanRetry(t *testing.T) {
 func TestLazyToolsetAppliesSpecReadOnlyOverrideToCachedTools(t *testing.T) {
 	redirectCache(t)
 	spec := helperSpec()
-	cachedSpec := spec
-	writeMockCache(t, cachedSpec)
 	spec.ReadOnlyToolNames = map[string]bool{"echo": true}
+	writeMockCache(t, spec)
 
 	cs, ok := LoadCachedSchema(spec.Name, SpecFingerprint(spec))
 	if !ok {

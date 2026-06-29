@@ -67,7 +67,7 @@ func TestTodoWriteAllowsInitialCompletedWithoutBaseline(t *testing.T) {
 	}
 }
 
-func TestTodoWriteIgnoresFailedCompleteStepReceipt(t *testing.T) {
+func TestTodoWriteRejectsFailedCompleteStepReceipt(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{
 		ToolName: "todo_write",
@@ -80,6 +80,109 @@ func TestTodoWriteIgnoresFailedCompleteStepReceipt(t *testing.T) {
 
 	_, err := (todoWrite{}).Execute(ctx, args)
 	if err == nil || !strings.Contains(err.Error(), "complete_step") {
-		t.Fatalf("failed complete_step should not authorize new completion, got %v", err)
+		t.Fatalf("failed complete_step without proof-bearing recovery should not authorize completion, got %v", err)
+	}
+}
+
+func TestTodoWriteRejectsFailedCompleteStepWithoutProof(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos:    []evidence.TodoItem{{Content: "Run project script", Status: "in_progress"}},
+	})
+	ledger.Record(evidence.Receipt{
+		ToolName: "bash",
+		Success:  true,
+		Command:  `python "script.py"`,
+	})
+	ledger.Record(evidence.ReceiptFromToolCall("complete_step", json.RawMessage(`{
+		"step":"Run project script",
+		"result":"script ran",
+		"evidence":[]
+	}`), false, true))
+	ctx := evidence.WithLedger(context.Background(), ledger)
+	args := json.RawMessage(`{"todos":[{"content":"Run project script","status":"completed"}]}`)
+
+	_, err := (todoWrite{}).Execute(ctx, args)
+	if err == nil || !strings.Contains(err.Error(), "complete_step") {
+		t.Fatalf("failed complete_step without proof should not authorize completion, got %v", err)
+	}
+}
+
+func TestTodoWriteRejectsFailedCompleteStepMissingResult(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos:    []evidence.TodoItem{{Content: "Run project script", Status: "in_progress"}},
+	})
+	ledger.Record(evidence.Receipt{
+		ToolName: "bash",
+		Success:  true,
+		Command:  `python "script.py"`,
+	})
+	ledger.Record(evidence.ReceiptFromToolCall("complete_step", json.RawMessage(`{
+		"step":"Run project script",
+		"evidence":[{"kind":"manual","summary":"checked manually"}]
+	}`), false, true))
+	ctx := evidence.WithLedger(context.Background(), ledger)
+	args := json.RawMessage(`{"todos":[{"content":"Run project script","status":"completed"}]}`)
+
+	_, err := (todoWrite{}).Execute(ctx, args)
+	if err == nil || !strings.Contains(err.Error(), "complete_step") {
+		t.Fatalf("failed complete_step without result should not authorize completion, got %v", err)
+	}
+}
+
+func TestTodoWriteRecoversAfterFailedCompleteStepWithProgressReceipt(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos:    []evidence.TodoItem{{Content: "Run project script", Status: "in_progress"}},
+	})
+	ledger.Record(evidence.Receipt{
+		ToolName: "bash",
+		Success:  true,
+		Command:  `python "script.py"`,
+	})
+	ledger.Record(evidence.ReceiptFromToolCall("complete_step", json.RawMessage(`{
+		"step":"Run project script",
+		"result":"script ran",
+		"evidence":[{"kind":"verification","summary":"script completed","command":"python script.py"}]
+	}`), false, true))
+	ctx := evidence.WithLedger(context.Background(), ledger)
+	args := json.RawMessage(`{"todos":[{"content":"Run project script","status":"completed"}]}`)
+
+	if _, err := (todoWrite{}).Execute(ctx, args); err != nil {
+		t.Fatalf("matching failed complete_step with progress receipt should recover todo completion: %v", err)
+	}
+}
+
+func TestTodoWriteRejectsRecoveryWhenProgressIsAfterFailedCompleteStep(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos:    []evidence.TodoItem{{Content: "Run project script", Status: "in_progress"}},
+	})
+	ledger.Record(evidence.ReceiptFromToolCall("complete_step", json.RawMessage(`{
+		"step":"Run project script",
+		"result":"script ran",
+		"evidence":[{"kind":"verification","summary":"script completed","command":"python other.py"}]
+	}`), false, true))
+	ledger.Record(evidence.Receipt{
+		ToolName: "write_file",
+		Success:  true,
+		Paths:    []string{"docs/notes.md"},
+		Write:    true,
+	})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+	args := json.RawMessage(`{"todos":[{"content":"Run project script","status":"completed"}]}`)
+
+	_, err := (todoWrite{}).Execute(ctx, args)
+	if err == nil || !strings.Contains(err.Error(), "complete_step") {
+		t.Fatalf("progress after a failed complete_step should not authorize recovery, got %v", err)
 	}
 }

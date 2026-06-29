@@ -4,6 +4,7 @@ import {
   buildCrashPayload,
   buildPerformancePayload,
   formatPerformanceContext,
+  globalCrashReportReason,
   normalizeCrashError,
   parseReportedPerf,
   performanceLabelForReason,
@@ -79,6 +80,25 @@ eq(
   }),
   false,
   "checks ErrorEvent.error when ErrorEvent.message is a wrapper",
+);
+eq(
+  globalCrashReportReason({
+    defaultPrevented: false,
+    message: "Script error.",
+    filename: "wails://wails/assets/index-abc123.js",
+    lineno: 42,
+    colno: 7,
+  }),
+  "Script error.\nfilename=wails://wails/assets/index-abc123.js lineno=42 colno=7",
+  "adds script location to opaque window.error messages",
+);
+eq(
+  globalCrashReportReason({
+    defaultPrevented: false,
+    message: "Script error.",
+  }),
+  "Script error.",
+  "keeps opaque script errors bare when WebView provides no location",
 );
 
 const perf: PerformanceSnapshot = {

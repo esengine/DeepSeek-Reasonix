@@ -5,6 +5,24 @@ import (
 	"testing"
 )
 
+func TestWithResponseLanguageOnlySkipsLeadingInjectedBlock(t *testing.T) {
+	userMention := "explain why <response-language> appears in this file"
+	got := WithResponseLanguage(userMention, "en")
+	if !strings.HasPrefix(got, "<response-language>") || !strings.Contains(got, "use English") || !strings.HasSuffix(got, userMention) {
+		t.Fatalf("WithResponseLanguage should prefix user-authored tag mentions, got %q", got)
+	}
+
+	alreadyPrefixed := ResponseLanguageBlock("en") + "\n\n" + userMention
+	if got := WithResponseLanguage(alreadyPrefixed, "en"); got != alreadyPrefixed {
+		t.Fatalf("WithResponseLanguage duplicated a leading injected block:\n got %q\nwant %q", got, alreadyPrefixed)
+	}
+
+	withLeadingMemory := "<memory-update>\nRemember this.\n</memory-update>\n\n" + alreadyPrefixed
+	if got := WithResponseLanguage(withLeadingMemory, "en"); got != withLeadingMemory {
+		t.Fatalf("WithResponseLanguage duplicated a response block after leading transient context:\n got %q\nwant %q", got, withLeadingMemory)
+	}
+}
+
 func TestWithReasoningLanguageOnlySkipsLeadingInjectedBlock(t *testing.T) {
 	userMention := "explain why <reasoning-language> appears in this file"
 	got := WithReasoningLanguage(userMention, "zh")

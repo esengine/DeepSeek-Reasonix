@@ -30,15 +30,16 @@ type ignoreFrame struct {
 // Stateful across one WalkDir: enter pushes a directory's cumulative frame before
 // its children are visited; skip pops frames once the walk leaves them.
 type walkIgnorer struct {
-	root     string
-	repoRoot string
-	disabled bool
-	frames   []ignoreFrame // shallow→deep; the deepest is the active matcher
-	compiled map[string]*ignore.GitIgnore
+	root        string
+	repoRoot    string
+	disabled    bool
+	frames      []ignoreFrame // shallow→deep; the deepest is the active matcher
+	compiled    map[string]*ignore.GitIgnore
+	forbidRoots []string // directories the walk must never enter
 }
 
-func newWalkIgnorer(root string) *walkIgnorer {
-	ig := &walkIgnorer{root: absClean(root), compiled: map[string]*ignore.GitIgnore{}}
+func newWalkIgnorer(root string, forbidRoots []string) *walkIgnorer {
+	ig := &walkIgnorer{root: absClean(root), compiled: map[string]*ignore.GitIgnore{}, forbidRoots: forbidRoots}
 	rr := findRepoRoot(ig.root)
 	if rr == "" {
 		return ig
@@ -93,6 +94,9 @@ func (ig *walkIgnorer) skip(path, name string, isDir bool) bool {
 		return true
 	}
 	if isDir && (vendorDirs[name] || isProtectedDir(abs)) {
+		return true
+	}
+	if isDir && skipForbidDir(abs, ig.forbidRoots) {
 		return true
 	}
 	return ig.ignored(abs, isDir)

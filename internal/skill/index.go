@@ -16,10 +16,23 @@ const missingDescPlaceholder = `(no description — frontmatter is missing a "de
 const indexHeader = "# Skills — playbooks you can invoke\n\n" +
 	"One-liner index. Before non-trivial work, scan it: if an untagged (inline) skill is even plausibly relevant to the task, invoke it before continuing instead of pre-judging — loading one imperfect inline skill is cheap. Skills tagged `[🧬 subagent]` are the heavy path; reach for them only when the task genuinely needs context-heavy work, not on weak relevance. Each entry is a built-in or a user-authored playbook. Call `run_skill({ name: \"<skill-name>\", arguments: \"<task>\" })` — `name` is JUST the identifier (e.g. `\"explore\"`), NOT the `[🧬 subagent]` tag that follows it. Prefer the dedicated top-level tool when one exists for a built-in subagent skill. Entries tagged `[🧬 subagent]` spawn an isolated subagent — its tool calls and reasoning never enter your context, only its final answer does; use them for context-heavy work (deep exploration, multi-step research) where you only need the conclusion. Untagged skills are inlined: the body becomes a tool result you read and act on directly. The user can also invoke a skill via `/<name>`."
 
+const readOnlyIndexHeader = "# Skills — read-only playbooks you can invoke\n\n" +
+	"One-liner index for the narrow read-only skill surface. Call `read_only_skill({ name: \"<skill-name>\", arguments: \"<task>\" })` — `name` is JUST the identifier, NOT the `[🧬 subagent]` tag. Inline skills are loaded into context. Skills tagged `[🧬 subagent]` run in an isolated ephemeral read-only subagent with only read-only research tools and safe foreground bash; no writes, installers, memory mutation, continuation/fork, background jobs, or further delegation are available."
+
 // IndexBlock renders the system/tool-result skills listing without attaching it
 // to a base prompt. Only names + descriptions (+ a subagent tag) are listed;
 // bodies load on demand via run_skill.
 func IndexBlock(skills []Skill) string {
+	return indexBlockWithHeader(indexHeader, skills)
+}
+
+// ReadOnlyIndexBlock renders the same listing with read_only_skill-specific
+// invocation guidance for token-economy plan-mode connections.
+func ReadOnlyIndexBlock(skills []Skill) string {
+	return indexBlockWithHeader(readOnlyIndexHeader, skills)
+}
+
+func indexBlockWithHeader(header string, skills []Skill) string {
 	if len(skills) == 0 {
 		return ""
 	}
@@ -31,7 +44,7 @@ func IndexBlock(skills []Skill) string {
 	if r := []rune(joined); len(r) > IndexMaxChars {
 		joined = string(r[:IndexMaxChars]) + fmt.Sprintf("\n… (truncated %d chars)", len(r)-IndexMaxChars)
 	}
-	return indexHeader + "\n\n```\n" + joined + "\n```"
+	return header + "\n\n```\n" + joined + "\n```"
 }
 
 // ApplyIndex appends the skills index to basePrompt, or returns it unchanged

@@ -9,6 +9,8 @@ import (
 	"sync"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/planmode"
+	"reasonix/internal/plugin"
 	"reasonix/internal/tool"
 )
 
@@ -17,7 +19,7 @@ const (
 	TokenModeEconomy = "economy"
 )
 
-const tokenEconomyPrompt = `Token economy mode is on. Keep the default tool surface lean. Optional sources are hidden behind connect_tool_source; enable skills, MCP servers, LSP, web_fetch, install_source, or task only when the current request actually needs them.`
+const tokenEconomyPrompt = `Token economy mode is on. Keep the default tool surface lean. Optional sources are hidden behind connect_tool_source; enable skills, read_only_skill, MCP servers, LSP, web_fetch, install_source, task, or read_only_task only when the current request actually needs them.`
 
 var tokenEconomyCoreBuiltins = []string{
 	"bash",
@@ -70,19 +72,24 @@ func tokenEconomyBuiltins(configured []string) []string {
 type toolSourceConnector struct {
 	mu sync.Mutex
 
-	skills   func(context.Context) (string, error)
-	task     func(context.Context) (string, error)
-	install  func(context.Context) (string, error)
-	webFetch func(context.Context) (string, error)
-	lsp      func(context.Context) (string, error)
-	mcp      func(context.Context, string) (string, error)
-	mcpNames []string
+	skills        func(context.Context) (string, error)
+	readOnlySkill func(context.Context) (string, error)
+	task          func(context.Context) (string, error)
+	readOnlyTask  func(context.Context) (string, error)
+	install       func(context.Context) (string, error)
+	webFetch      func(context.Context) (string, error)
+	lsp           func(context.Context) (string, error)
+	mcp           func(context.Context, string) (string, error)
+	mcpNames      []string
+
+	planModeAllowedTools     []string
+	planModeTrustedMCPServer map[string]bool
 }
 
 func (*toolSourceConnector) Name() string { return "connect_tool_source" }
 
 func (*toolSourceConnector) Description() string {
-	return "Token economy mode only: enable an optional tool source when the task needs it. Sources: skills, mcp, lsp, web_fetch, install_source, task. For mcp, pass the configured server name; omit name to list servers. Newly enabled tools are available on the next model request."
+	return "Token economy mode only: enable an optional tool source when the task needs it. Sources: skills, read_only_skill, mcp, lsp, web_fetch, install_source, task, read_only_task. For mcp, pass the configured server name; omit name to list servers. Newly enabled tools are available on the next model request."
 }
 
 func (*toolSourceConnector) ReadOnly() bool { return true }
@@ -91,7 +98,7 @@ func (*toolSourceConnector) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type":"object",
 		"properties":{
-			"source":{"type":"string","description":"Tool source to enable: skills, mcp, lsp, web_fetch, install_source, or task."},
+			"source":{"type":"string","description":"Tool source to enable: skills, read_only_skill, mcp, lsp, web_fetch, install_source, task, or read_only_task."},
 			"name":{"type":"string","description":"For source=mcp, the configured server name. Omit to list configured MCP servers without connecting them."}
 		},
 		"required":["source"]
@@ -110,29 +117,31 @@ func (t *toolSourceConnector) Execute(ctx context.Context, args json.RawMessage)
 	if source == "" {
 		return "", fmt.Errorf("unknown tool source %q; available: %s", p.Source, strings.Join(t.availableSources(), ", "))
 	}
+	name := strings.TrimSpace(p.Name)
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	if blocked, msg := t.planModeSourceBlocked(ctx, source, name); blocked {
+		return msg, nil
+	}
+
 	switch source {
 	case "skills":
 		return runSourceInstaller(ctx, "skills", t.skills)
+	case "read_only_skill":
+		return runSourceInstaller(ctx, "read_only_skill", t.readOnlySkill)
 	case "task":
-		if agent.PlanModeFromContext(ctx) {
-			return "task is unavailable in plan mode because it exposes a writer-capable sub-agent tool.", nil
-		}
 		return runSourceInstaller(ctx, "task", t.task)
+	case "read_only_task":
+		return runSourceInstaller(ctx, "read_only_task", t.readOnlyTask)
 	case "install_source":
-		if agent.PlanModeFromContext(ctx) {
-			return "install_source is unavailable in plan mode because it can install or remove tools.", nil
-		}
 		return runSourceInstaller(ctx, "install_source", t.install)
 	case "web_fetch":
 		return runSourceInstaller(ctx, "web_fetch", t.webFetch)
 	case "lsp":
 		return runSourceInstaller(ctx, "lsp", t.lsp)
 	case "mcp":
-		name := strings.TrimSpace(p.Name)
 		if name == "" {
 			if len(t.mcpNames) == 0 {
 				return "No configured MCP servers are available in this session.", nil
@@ -150,10 +159,41 @@ func (t *toolSourceConnector) Execute(ctx context.Context, args json.RawMessage)
 	}
 }
 
+func (t *toolSourceConnector) planModeSourceBlocked(ctx context.Context, source, name string) (bool, string) {
+	if !agent.PlanModeFromContext(ctx) {
+		return false, ""
+	}
+	if source == "mcp" {
+		if name == "" || planModeAllowsMCPServer(t.planModeAllowedTools, name) || t.planModeTrustedMCPServer[name] {
+			return false, ""
+		}
+		return true, fmt.Sprintf("blocked: MCP source %q is not available in plan mode until at least one concrete tool is trusted. Connect it outside plan mode, choose always allow from the read-only trust prompt, pre-seed trusted_read_only_tools, or declare a concrete %q tool in plan_mode_allowed_tools. Keep exploring with read-only tools, then write your plan for approval before using this MCP server.", name, plugin.ToolPrefix(name))
+	}
+	// Sources are read-only iff they expose only read-only research surfaces; the
+	// moderate plan-mode gate then trusts that ReadOnly flag (step 6), while any
+	// other source stays non-read-only and is fail-closed by the policy.
+	readOnlySource := source == "web_fetch" || source == "lsp" || source == "read_only_task" || source == "read_only_skill"
+	decision := planmode.Policy{}.Decide(planmode.Call{Name: source, ReadOnly: readOnlySource})
+	return decision.Blocked, decision.Message
+}
+
+func planModeAllowsMCPServer(allowedTools []string, server string) bool {
+	prefix := plugin.ToolPrefix(server)
+	for _, name := range allowedTools {
+		name = strings.TrimSpace(name)
+		if strings.HasPrefix(name, prefix) && len(name) > len(prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeToolSource(source string) string {
 	switch strings.ToLower(strings.TrimSpace(source)) {
 	case "skill", "skills":
 		return "skills"
+	case "read_only_skill", "readonly_skill", "read-only-skill", "read_only_skills", "readonly_skills", "read-only-skills":
+		return "read_only_skill"
 	case "mcp", "plugin", "plugins", "server", "servers":
 		return "mcp"
 	case "lsp", "language_server", "language-servers":
@@ -162,6 +202,8 @@ func normalizeToolSource(source string) string {
 		return "web_fetch"
 	case "install", "install_source", "installer":
 		return "install_source"
+	case "read_only_task", "readonly_task", "read-only-task", "read_only_subagent", "readonly_subagent", "read-only-subagent", "research_task", "research-subagent":
+		return "read_only_task"
 	case "task", "subagent", "subagents":
 		return "task"
 	default:
@@ -173,6 +215,9 @@ func (t *toolSourceConnector) availableSources() []string {
 	var out []string
 	if t.skills != nil {
 		out = append(out, "skills")
+	}
+	if t.readOnlySkill != nil {
+		out = append(out, "read_only_skill")
 	}
 	if t.mcp != nil || len(t.mcpNames) > 0 {
 		out = append(out, "mcp")
@@ -188,6 +233,9 @@ func (t *toolSourceConnector) availableSources() []string {
 	}
 	if t.task != nil {
 		out = append(out, "task")
+	}
+	if t.readOnlyTask != nil {
+		out = append(out, "read_only_task")
 	}
 	sort.Strings(out)
 	return out

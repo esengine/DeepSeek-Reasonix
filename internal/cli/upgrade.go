@@ -160,8 +160,12 @@ func upgradeCommand(args []string, version string) int {
 		return 1
 	}
 
-	fmt.Printf(i18n.M.UpgradeSuccessFmt+"\n", latest)
+	fmt.Println(upgradeSuccessMessage(cur, latest))
 	return 0
+}
+
+func upgradeSuccessMessage(cur, latest string) string {
+	return fmt.Sprintf(i18n.M.UpgradeSuccessFmt, cur, latest)
 }
 
 // normalizeVersion returns v as valid semver ("vX.Y.Z") or ok=false for dev.

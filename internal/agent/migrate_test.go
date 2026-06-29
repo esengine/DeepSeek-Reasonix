@@ -105,6 +105,32 @@ func TestMigrateLegacySessionsRunsOnce(t *testing.T) {
 	}
 }
 
+func TestMigrateLegacySessionsFromExplicitDirIgnoresDefaultMarkers(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "custom-install.jsonl"), []byte(legacyMessageLog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeImportMarkers(dest, legacyRoutedHomeImportMarker, legacyJsonlPassMarker)
+
+	if n, err := MigrateLegacySessions(src, dest, nil); err != nil || n != 0 {
+		t.Fatalf("default migrate with markers: n=%d err=%v, want 0 nil", n, err)
+	}
+	n, err := MigrateLegacySessionsFromExplicitDir(src, dest, nil)
+	if err != nil {
+		t.Fatalf("explicit migrate: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("explicit imported %d sessions, want 1", n)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "custom-install.jsonl")); err != nil {
+		t.Fatalf("explicit imported session missing: %v", err)
+	}
+	if n, err := MigrateLegacySessionsFromExplicitDir(src, dest, nil); err != nil || n != 0 {
+		t.Fatalf("explicit migrate should be source-marker idempotent: n=%d err=%v", n, err)
+	}
+}
+
 func TestMigrateLegacySessionsRoutedPassIgnoresFlatMarkers(t *testing.T) {
 	src := t.TempDir()
 	dest := t.TempDir()

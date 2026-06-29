@@ -290,6 +290,33 @@ func TestCompleteStepMatchesTodoReceipt(t *testing.T) {
 	}
 }
 
+func TestCompleteStepMatchesTodoByExplicitStepIndex(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []evidence.TodoItem{
+			{Content: "Add parser", Status: "completed"},
+			{Content: "Wire parser", Status: "in_progress"},
+		},
+	})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	out, err := completeStep{}.Execute(ctx, json.RawMessage(`{
+		"step_index":2,
+		"result":"parser wiring is complete",
+		"evidence":[{"kind":"manual","summary":"checked manually"}]}`))
+	if err != nil {
+		t.Fatalf("todo-backed step_index rejected: %v", err)
+	}
+	if !strings.Contains(out, "todo-matched 2") {
+		t.Fatalf("ack should mention todo index match, got %q", out)
+	}
+	if !strings.Contains(out, "Wire parser") {
+		t.Fatalf("ack should name the indexed todo, got %q", out)
+	}
+}
+
 func TestCompleteStepRejectsTodoMismatch(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{
@@ -365,9 +392,9 @@ func TestCompleteStepIgnoresFailedTodoReceipt(t *testing.T) {
 	}
 }
 
-func TestCompleteStepReadOnly(t *testing.T) {
+func TestCompleteStepReadOnlyForPermissionLayer(t *testing.T) {
 	if !(completeStep{}).ReadOnly() {
-		t.Fatal("complete_step must be ReadOnly so it stays available and needs no approval")
+		t.Fatal("complete_step stays ReadOnly so permission policy need not prompt; plan mode blocks it as an execution-only workflow")
 	}
 }
 

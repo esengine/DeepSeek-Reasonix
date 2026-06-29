@@ -167,6 +167,13 @@ func TestWorkspaceToolSchemasStableAcrossRoots(t *testing.T) {
 	if strings.Contains(first, firstRoot) || strings.Contains(first, secondRoot) {
 		t.Fatalf("workspace paths must not leak into tool schemas: %s", first)
 	}
+
+	resolver := NewPathResolver()
+	resolver.RegisterReadRoot("__reasonix_external_folder/schema/root", t.TempDir())
+	withResolver := workspaceSchemasJSONWithResolver(t, firstRoot, resolver)
+	if first != withResolver {
+		t.Fatalf("workspace tool schemas should not depend on external read roots:\nfirst=%s\nwith=%s", first, withResolver)
+	}
 }
 
 // TestWorkspaceEmptyDirUnchanged confirms a zero-Dir workspace yields tools that
@@ -181,6 +188,54 @@ func TestWorkspaceEmptyDirUnchanged(t *testing.T) {
 	if resolveIn("", "foo") != "foo" {
 		t.Fatal("empty workspace should leave paths unresolved")
 	}
+}
+
+func TestWorkspaceReadToolsResolveExternalReadRoots(t *testing.T) {
+	workspace := t.TempDir()
+	external := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(external, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	externalFile := filepath.Join(external, "src", "outside.txt")
+	if err := os.WriteFile(externalFile, []byte("outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	token := "__reasonix_external_folder/abc123/External"
+	resolver := NewPathResolver()
+	resolver.RegisterReadRoot(token, external)
+	tools := byName(Workspace{Dir: workspace, ReadPaths: resolver}.Tools("read_file", "ls", "grep", "glob"))
+
+	readOut := runTool(t, tools["read_file"], map[string]any{"path": token + "/src/outside.txt"})
+	if !strings.Contains(readOut, "1→outside") {
+		t.Fatalf("read_file external token output = %q, want file content", readOut)
+	}
+
+	lsOut := runTool(t, tools["ls"], map[string]any{"path": token + "/src"})
+	if !strings.Contains(lsOut, "outside.txt") {
+		t.Fatalf("ls external token output = %q, want outside.txt", lsOut)
+	}
+
+	grepOut := runTool(t, tools["grep"], map[string]any{"pattern": "outside", "path": token})
+	if !strings.Contains(grepOut, token+"/src/outside.txt:1:outside") {
+		t.Fatalf("grep external token output = %q, want token path hit", grepOut)
+	}
+	if strings.Contains(grepOut, filepath.ToSlash(external)) {
+		t.Fatalf("grep external token output leaked local path: %q", grepOut)
+	}
+
+	globOut := runTool(t, tools["glob"], map[string]any{"pattern": token + "/**/*.txt"})
+	if !strings.Contains(globOut, token+"/src/outside.txt") {
+		t.Fatalf("glob external token output = %q, want token path hit", globOut)
+	}
+	if strings.Contains(globOut, filepath.ToSlash(external)) {
+		t.Fatalf("glob external token output leaked local path: %q", globOut)
+	}
+
+	assertExternalToolError(t, tools["read_file"], map[string]any{"path": token + "/src/missing.txt"}, token+"/src/missing.txt", external)
+	assertExternalToolError(t, tools["ls"], map[string]any{"path": token + "/missing"}, token+"/missing", external)
+	assertExternalToolError(t, tools["grep"], map[string]any{"pattern": "outside", "path": token + "/missing"}, token+"/missing", external)
+	assertExternalToolError(t, tools["glob"], map[string]any{"pattern": token + "/missing/**/*.go"}, token+"/missing/**/*.go", external)
 }
 
 // --- helpers ---
@@ -202,9 +257,13 @@ func keys(m map[string]tool.Tool) []string {
 }
 
 func workspaceSchemasJSON(t *testing.T, dir string) string {
+	return workspaceSchemasJSONWithResolver(t, dir, nil)
+}
+
+func workspaceSchemasJSONWithResolver(t *testing.T, dir string, resolver *PathResolver) string {
 	t.Helper()
 	reg := tool.NewRegistry()
-	for _, tt := range (Workspace{Dir: dir}).Tools() {
+	for _, tt := range (Workspace{Dir: dir, ReadPaths: resolver}).Tools() {
 		reg.Add(tt)
 	}
 	b, err := json.Marshal(reg.Schemas())
@@ -212,4 +271,19 @@ func workspaceSchemasJSON(t *testing.T, dir string) string {
 		t.Fatalf("marshal schemas: %v", err)
 	}
 	return string(b)
+}
+
+func assertExternalToolError(t *testing.T, tl tool.Tool, args map[string]any, wantTokenPath, externalRoot string) {
+	t.Helper()
+	_, err := tl.Execute(context.Background(), argsJSON(t, args))
+	if err == nil {
+		t.Fatalf("%s should fail for missing external path", tl.Name())
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, wantTokenPath) {
+		t.Fatalf("%s error = %q, want token path %q", tl.Name(), msg, wantTokenPath)
+	}
+	if strings.Contains(msg, filepath.ToSlash(externalRoot)) || strings.Contains(msg, externalRoot) {
+		t.Fatalf("%s error leaked external root: %q", tl.Name(), msg)
+	}
 }

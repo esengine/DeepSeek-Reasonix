@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"unicode/utf16"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
@@ -492,9 +493,8 @@ func runServe(args []string) int {
 	// Auto-save target: reuse the resumed file, else a fresh one — same as chat.
 	if *resume != "" {
 		ctrl.Resume(resumeSession, *resume)
-	} else if ctrl.SessionDir() != "" {
-		ctrl.SetSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
 	}
+	ctrl.EnsureSessionPath()
 
 	srv := serve.New(ctrl, bc, serveCfg)
 	fmt.Printf("reasonix serve — %s on http://%s\n", ctrl.Label(), *addr)
@@ -597,15 +597,14 @@ func chatREPL(args []string) int {
 	// file so closing/reopening keeps appending to the same history; a fresh
 	// session lands in a new file stamped with the model name.
 	if resumePath != "" {
-		if loaded, err := agent.LoadSession(resumePath); err != nil {
+		loaded, err := agent.LoadSession(resumePath)
+		if err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
-		} else {
-			ctrl.Resume(loaded, resumePath)
 		}
-	} else if ctrl.SessionDir() != "" {
-		ctrl.SetSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
+		ctrl.Resume(loaded, resumePath)
 	}
+	ctrl.EnsureSessionPath()
 
 	// Surface a missing-key warning inside the TUI banner so the first message
 	// failing is at least pre-announced; the user can still enter chat.
@@ -657,11 +656,7 @@ func chatREPL(args []string) int {
 		// Keep the carried conversation in its existing file so the switch doesn't
 		// orphan a duplicate (#2807).
 		path := agent.ContinueSessionPath(resumePath, c.SessionDir(), c.Label())
-		if len(carry) > 0 {
-			c.Resume(&agent.Session{Messages: carry}, path)
-		} else if path != "" {
-			c.SetSessionPath(path)
-		}
+		c.AdoptHistory(carry, path)
 		c.EnableInteractiveApproval()
 		if *yolo {
 			c.SetAutoApproveTools(true)
@@ -1280,7 +1275,38 @@ func providerSlug(kind, baseURL string) string {
 			}
 		}
 	}
-	return kind + "-" + strings.TrimRight(b.String(), "-")
+	slug := strings.TrimRight(b.String(), "-")
+	if slug == "" {
+		sum := sha1.Sum([]byte(baseURL))
+		return kind + "-" + hex.EncodeToString(sum[:4])
+	}
+	return kind + "-" + slug
+}
+
+func apiKeyEnvFromProviderName(name string) string {
+	stem := strings.ToUpper(strings.TrimSpace(name))
+	stem = strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		default:
+			return '_'
+		}
+	}, stem)
+	stem = strings.Trim(stem, "_")
+	if stem == "" {
+		return "CUSTOM_" + fnv1a32Hex(name) + "_API_KEY"
+	}
+	return stem + "_API_KEY"
+}
+
+func fnv1a32Hex(s string) string {
+	hash := uint32(0x811c9dc5)
+	for _, unit := range utf16.Encode([]rune(strings.TrimSpace(s))) {
+		hash ^= uint32(unit)
+		hash *= 0x01000193
+	}
+	return fmt.Sprintf("%08x", hash)
 }
 
 // providerFamily is a wizard-only grouping of provider SKUs by vendor; it does
@@ -1334,8 +1360,9 @@ func promptCustomProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKey s
 			return nil, fmt.Errorf("base URL is required")
 		}
 	}
+	providerName := providerSlug("custom", baseURL)
 	if keyEnv == "" {
-		keyEnv = ask(in, os.Stdout, i18n.M.CustomPromptKeyEnv, "CUSTOM_API_KEY")
+		keyEnv = ask(in, os.Stdout, i18n.M.CustomPromptKeyEnv, apiKeyEnvFromProviderName(providerName))
 	}
 	if apiKey == "" {
 		apiKey = ask(in, os.Stdout, i18n.M.CustomPromptAPIKey, "")
@@ -1348,7 +1375,7 @@ func promptCustomProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKey s
 		return nil, fmt.Errorf("model name is required")
 	}
 	entry := config.ProviderEntry{
-		Name: providerSlug("custom", baseURL), Kind: "openai", BaseURL: baseURL,
+		Name: providerName, Kind: "openai", BaseURL: baseURL,
 		Model: modelName, APIKeyEnv: keyEnv, ContextWindow: 128000,
 	}
 	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.CustomAddedFmt, entry.Name+"/"+modelName)))
@@ -1367,7 +1394,8 @@ func promptCustomProviderFromURL() ([]config.ProviderEntry, error) {
 	if baseURL == "" {
 		return nil, fmt.Errorf("base URL is required")
 	}
-	keyEnv := ask(in, os.Stdout, i18n.M.CustomPromptKeyEnv, "CUSTOM_API_KEY")
+	providerName := providerSlug("custom", baseURL)
+	keyEnv := ask(in, os.Stdout, i18n.M.CustomPromptKeyEnv, apiKeyEnvFromProviderName(providerName))
 	apiKey := ask(in, os.Stdout, i18n.M.CustomPromptAPIKey, "")
 	if apiKey != "" {
 		os.Setenv(keyEnv, apiKey)
@@ -1400,7 +1428,7 @@ func promptCustomProviderFromURL() ([]config.ProviderEntry, error) {
 		selected = append(selected, models[i])
 	}
 	entry := config.ProviderEntry{
-		Name: providerSlug("custom", baseURL), Kind: "openai", BaseURL: baseURL,
+		Name: providerName, Kind: "openai", BaseURL: baseURL,
 		Models: selected, Model: selected[0], APIKeyEnv: keyEnv, ContextWindow: 128000,
 	}
 	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.CustomAddedFmt, entry.Name+"/"+selected[0])))
@@ -1740,6 +1768,8 @@ func configCommand(args []string) int {
 	switch args[0] {
 	case "auto-plan":
 		return configAutoPlanCommand(args[1:])
+	case "memory-v5":
+		return configMemoryV5Command(args[1:])
 	case "reasoning-language":
 		return configReasoningLanguageCommand(args[1:])
 	default:
@@ -1789,6 +1819,53 @@ func configAutoPlanCommand(args []string) int {
 		return 1
 	}
 	fmt.Printf("auto_plan = %q (%s)\n", cfg.Agent.AutoPlan, displayPath(path))
+	return 0
+}
+
+func configMemoryV5Command(args []string) int {
+	fs := flag.NewFlagSet("config memory-v5", flag.ContinueOnError)
+	local := fs.Bool("local", false, "unsupported; Memory v5 is user-level only")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *local {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "memory-v5 is user-level only; --local is not supported")
+		return 2
+	}
+	rest := fs.Args()
+	if len(rest) > 1 {
+		configMemoryV5Usage()
+		return 2
+	}
+	if len(rest) == 0 || strings.EqualFold(rest[0], "status") {
+		cfg, err := config.Load()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		fmt.Printf("memory_compiler.enabled = %v\n", cfg.MemoryCompilerEnabled())
+		return 0
+	}
+	enabled, err := parseCLIMemoryV5Mode(rest[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	path := config.UserConfigPath()
+	if path == "" {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "cannot resolve config path")
+		return 1
+	}
+	cfg := config.LoadForEdit(path)
+	if err := cfg.SetMemoryCompilerEnabled(enabled); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 1
+	}
+	fmt.Printf("memory_compiler.enabled = %v (%s)\n", cfg.MemoryCompilerEnabled(), displayPath(path))
 	return 0
 }
 
@@ -1855,6 +1932,7 @@ func configReasoningLanguageCommand(args []string) int {
 func configUsage() {
 	fmt.Print(`Usage:
   reasonix config auto-plan [off|on]
+  reasonix config memory-v5 [off|on|status]
   reasonix config reasoning-language [--local] [auto|zh|en]
 `)
 }
@@ -1862,6 +1940,12 @@ func configUsage() {
 func configAutoPlanUsage() {
 	fmt.Print(`Usage:
   reasonix config auto-plan [off|on]
+`)
+}
+
+func configMemoryV5Usage() {
+	fmt.Print(`Usage:
+  reasonix config memory-v5 [off|on|status]
 `)
 }
 

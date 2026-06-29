@@ -70,6 +70,9 @@ var ChineseTraditional = Messages{
 	PermissionSavedFmt:          "授權已儲存到 %s：%s",
 	PermissionAlreadyAllowedFmt: "授權已由 %s 中的規則覆蓋：%s",
 	PermissionSaveFailedFmt:     "儲存授權 %s 失敗：%v",
+	MCPReadOnlyTrustSavedFmt:    "MCP 唯讀信任已儲存到 %s：%s/%s",
+	MCPReadOnlyTrustAlreadyFmt:  "MCP 唯讀信任已儲存在 %s：%s/%s",
+	MCPReadOnlyTrustFailedFmt:   "儲存 MCP 唯讀信任 %s/%s 失敗：%v",
 	DiffFoldedFmt:               "… 還有 %d 行",
 
 	OutputStyleNone:    "沒有可用的輸出風格",
@@ -96,7 +99,7 @@ var ChineseTraditional = Messages{
 	SlashUnavailable:   "當前建構不支援該命令",
 	SlashUnknown:       "未知命令",
 	SlashTodoCleared:   "已清除任務清單",
-	SlashHelp:          "命令：/compact · /new（/clear）· /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model（切換模型）· /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /migrate · /remember · /quit · /help · 以及 skills（/init、/explore …）",
+	SlashHelp:          "命令：/compact · /new（/clear）· /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model（切換模型）· /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /memory-v5 · /migrate · /remember · /quit · /help · 以及 skills（/init、/explore …）",
 
 	SkillPickerTitle:             "Skills",
 	SkillPickerAvailableFmt:      "%d 個可用",
@@ -181,9 +184,17 @@ var ChineseTraditional = Messages{
 	CmdEffort:                  "設定推理強度",
 	CmdAutoPlan:                "設定自動計畫模式",
 	CmdReasonLang:              "設定可見思考語言",
+	CmdMemoryV5:                "切換 Memory v5",
 	CmdHelp:                    "檢視命令列表",
 	CmdTodo:                    "清除任務清單",
 	CmdQuit:                    "退出會話",
+	CmdCopy:                    "選擇回覆複製到剪貼簿",
+	CmdExport:                  "將會話匯出為 Markdown",
+	SlashCopyDone:              "已複製到剪貼簿",
+	SlashCopyEmpty:             "沒有可複製的助手回覆",
+	SlashCopyListHeader:        "選擇要複製的回覆：",
+	SlashExportDoneFmt:         "會話已匯出到 %s",
+	SlashExportEmpty:           "沒有可匯出的訊息",
 	ArgSkillList:               "列出 skills",
 	ArgSkillShow:               "檢視 skill 內容",
 	ArgSkillNew:                "新建一個 skill",
@@ -375,6 +386,7 @@ var ChineseTraditional = Messages{
   reasonix acp [--model NAME]                           透過 stdio 提供 Agent Client Protocol（也可用：reasonix --acp）
   reasonix setup [path]                                 互動式設定精靈；生成 reasonix.toml（及 .env）
   reasonix config auto-plan [off|on]                    設定自動計畫模式
+  reasonix config memory-v5 [off|on|status]             設定 Memory v5
   reasonix config reasoning-language [auto|zh|en]        設定可見思考語言
   reasonix mcp <add|remove|list|import>                 管理 reasonix.toml 裡的 MCP 伺服器
   reasonix init                                         查看如何產生專案記憶（AGENTS.md）

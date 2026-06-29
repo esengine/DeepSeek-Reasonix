@@ -14,8 +14,14 @@ import (
 func init() { tool.RegisterBuiltin(listDir{}) }
 
 // listDir lists a directory. workDir, when non-empty, is the directory a
-// relative path resolves against (see resolveIn).
-type listDir struct{ workDir string }
+// relative path resolves against (see resolveIn). paths resolves session-scoped
+// read aliases for external folder refs. forbidRoots lists directories the tool
+// may not list or recurse into.
+type listDir struct {
+	workDir     string
+	paths       *PathResolver
+	forbidRoots []string
+}
 
 func (listDir) Name() string { return "ls" }
 
@@ -28,6 +34,12 @@ func (listDir) Schema() json.RawMessage {
 }
 
 func (listDir) ReadOnly() bool { return true }
+
+// SnipHint keeps a long head and short tail like grep/glob: the first entries
+// matter most, the tail confirms scope.
+func (listDir) SnipHint() tool.SnipHint {
+	return tool.SnipHint{Head: 80, Tail: 8, HeadChars: 10000, TailChars: 1000}
+}
 
 func (l listDir) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	p := struct {
@@ -42,16 +54,23 @@ func (l listDir) Execute(ctx context.Context, args json.RawMessage) (string, err
 	if p.Path == "" {
 		p.Path = "."
 	}
-	p.Path = resolveIn(l.workDir, p.Path)
+	rp := resolveReadablePath(l.workDir, p.Path, l.paths)
+	p.Path = rp.Path
+	if confineRead(l.forbidRoots, p.Path) {
+		return "(empty directory)", nil
+	}
 
 	// Recursive mode: walk the whole tree depth-first.
 	if p.Recursive {
-		return l.listRecursive(p.Path)
+		return l.listRecursive(p.Path, rp)
 	}
 
 	entries, err := os.ReadDir(p.Path)
 	if err != nil {
-		return "", fmt.Errorf("ls %s: %w", p.Path, err)
+		if rp.External {
+			return "", fmt.Errorf("ls %s: %s", rp.DisplayPath, rp.ErrorText(err))
+		}
+		return "", fmt.Errorf("ls %s: %w", rp.DisplayPath, err)
 	}
 
 	var b strings.Builder
@@ -74,7 +93,7 @@ func (l listDir) Execute(ctx context.Context, args json.RawMessage) (string, err
 
 // listRecursive walks a directory tree depth-first, skipping noise dirs.
 // Depth is capped to guard against symlink loops.
-func (l listDir) listRecursive(root string) (string, error) {
+func (l listDir) listRecursive(root string, rp ResolvedPath) (string, error) {
 	var b strings.Builder
 	err := filepath.WalkDir(root, func(p string, d os.DirEntry, wErr error) error {
 		if wErr != nil {
@@ -86,6 +105,9 @@ func (l listDir) listRecursive(root string) (string, error) {
 		if d.IsDir() {
 			switch d.Name() {
 			case ".git", "node_modules", ".DS_Store", "__pycache__", ".idea", ".vscode":
+				return filepath.SkipDir
+			}
+			if skipForbidDir(p, l.forbidRoots) {
 				return filepath.SkipDir
 			}
 		}
@@ -110,7 +132,10 @@ func (l listDir) listRecursive(root string) (string, error) {
 		return nil
 	})
 	if err != nil {
-		return "", fmt.Errorf("ls -R %s: %w", root, err)
+		if rp.External {
+			return "", fmt.Errorf("ls -R %s: %s", rp.DisplayPath, rp.ErrorText(err))
+		}
+		return "", fmt.Errorf("ls -R %s: %w", rp.DisplayPath, err)
 	}
 	if b.Len() == 0 {
 		return "(empty directory tree)", nil

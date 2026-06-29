@@ -331,11 +331,230 @@ func TestMCPEditConfigLaunchUsesVisualBeforeEditor(t *testing.T) {
 	if launch.editor != "vim" {
 		t.Fatalf("editor = %q, want vim", launch.editor)
 	}
-	if len(launch.cmd.Args) != 3 || launch.cmd.Args[0] != "sh" || launch.cmd.Args[1] != "-lc" {
-		t.Fatalf("VISUAL should run through shell, args=%v", launch.cmd.Args)
+	// VISUAL must run the editor binary directly (not via sh -lc) so that
+	// shell metacharacters in the env value cannot be executed. argv is
+	// [editorBinary, path].
+	if len(launch.cmd.Args) != 2 || launch.cmd.Args[0] != "vim" || launch.cmd.Args[1] != path {
+		t.Fatalf("VISUAL should invoke editor binary directly, args=%v", launch.cmd.Args)
 	}
-	if want := "vim " + shellQuote(path); launch.cmd.Args[2] != want {
-		t.Fatalf("shell command = %q, want %q", launch.cmd.Args[2], want)
+}
+
+// TestMCPEditConfigLaunchEditorWithArgs confirms that an EDITOR/VISUAL value
+// carrying arguments (e.g. "code --wait") is split into argv correctly and
+// the path is appended as the final argument, without going through a shell.
+func TestMCPEditConfigLaunchEditorWithArgs(t *testing.T) {
+	t.Setenv("VISUAL", "code --wait")
+	t.Setenv("EDITOR", "")
+
+	path := "/tmp/reasonix.toml"
+	launch, err := mcpEditConfigLaunchCommand(path, func(string) (string, error) {
+		t.Fatal("lookPath should not be called when VISUAL is set")
+		return "", errors.New("unexpected lookup")
+	})
+	if err != nil {
+		t.Fatalf("edit command: %v", err)
+	}
+	if launch.editor != "code" {
+		t.Fatalf("editor display name = %q, want code", launch.editor)
+	}
+	want := []string{"code", "--wait", path}
+	if len(launch.cmd.Args) != len(want) {
+		t.Fatalf("args length = %d, want %d, args=%v", len(launch.cmd.Args), len(want), launch.cmd.Args)
+	}
+	for i, w := range want {
+		if launch.cmd.Args[i] != w {
+			t.Fatalf("args[%d] = %q, want %q, full args=%v", i, launch.cmd.Args[i], w, launch.cmd.Args)
+		}
+	}
+}
+
+func TestMCPEditConfigLaunchEditorParsesShellStyleQuotes(t *testing.T) {
+	path := "/tmp/reasonix.toml"
+	cases := []struct {
+		name       string
+		editor     string
+		wantEditor string
+		wantArgs   []string
+	}{
+		{
+			name:       "empty fallback arg",
+			editor:     "emacsclient -c -a ''",
+			wantEditor: "emacsclient",
+			wantArgs:   []string{"emacsclient", "-c", "-a", "", path},
+		},
+		{
+			name:       "quoted editor path",
+			editor:     "'/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code' --wait",
+			wantEditor: "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+			wantArgs:   []string{"/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code", "--wait", path},
+		},
+		{
+			name:       "escaped whitespace",
+			editor:     `/opt/My\ Editor/bin/edit --flag`,
+			wantEditor: "/opt/My Editor/bin/edit",
+			wantArgs:   []string{"/opt/My Editor/bin/edit", "--flag", path},
+		},
+		{
+			name:       "quoted arg",
+			editor:     `nvim --cmd "set tabstop=2"`,
+			wantEditor: "nvim",
+			wantArgs:   []string{"nvim", "--cmd", "set tabstop=2", path},
+		},
+		{
+			name:       "double quoted literal backslashes",
+			editor:     `nvim "C:\tmp\file"`,
+			wantEditor: "nvim",
+			wantArgs:   []string{"nvim", `C:\tmp\file`, path},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("VISUAL", c.editor)
+			t.Setenv("EDITOR", "")
+			launch, err := mcpEditConfigLaunchCommand(path, func(string) (string, error) {
+				t.Fatal("lookPath should not be called when VISUAL is set")
+				return "", errors.New("unexpected lookup")
+			})
+			if err != nil {
+				t.Fatalf("edit command: %v", err)
+			}
+			if launch.editor != c.wantEditor {
+				t.Fatalf("editor display name = %q, want %q", launch.editor, c.wantEditor)
+			}
+			if !reflect.DeepEqual(launch.cmd.Args, c.wantArgs) {
+				t.Fatalf("args = %#v, want %#v", launch.cmd.Args, c.wantArgs)
+			}
+		})
+	}
+}
+
+func TestMCPEditConfigLaunchEditorRejectsUnterminatedQuote(t *testing.T) {
+	t.Setenv("VISUAL", `code --wait "unterminated`)
+	t.Setenv("EDITOR", "")
+
+	_, err := mcpEditConfigLaunchCommand("/tmp/reasonix.toml", func(string) (string, error) {
+		t.Fatal("lookPath should not be called when VISUAL is set")
+		return "", errors.New("unexpected lookup")
+	})
+	if err == nil {
+		t.Fatal("expected unterminated quote error")
+	}
+}
+
+// TestMCPEditConfigLaunchEditorRejectsShellMetachars confirms that shell
+// metacharacters in EDITOR/VISUAL are treated as literal argv tokens and
+// never executed as a shell command — the previous sh -lc construction would
+// have run "rm" here.
+func TestMCPEditConfigLaunchEditorRejectsShellMetachars(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "vim; rm -rf /tmp/should-not-exist")
+
+	path := "/tmp/reasonix.toml"
+	launch, err := mcpEditConfigLaunchCommand(path, func(string) (string, error) {
+		t.Fatal("lookPath should not be called when EDITOR is set")
+		return "", errors.New("unexpected lookup")
+	})
+	if err != nil {
+		t.Fatalf("edit command: %v", err)
+	}
+	// The entire EDITOR value is split on whitespace, so "vim;", "rm", "-rf",
+	// and the path become separate argv tokens — none of them are interpreted
+	// by a shell. The first token "vim;" is the (literal) program name; the
+	// shell injection payload "rm" is just an argument to it.
+	wantFirst := "vim;"
+	if launch.cmd.Args[0] != wantFirst {
+		t.Fatalf("first arg = %q, want %q (shell metachars must not be executed)", launch.cmd.Args[0], wantFirst)
+	}
+	if launch.cmd.Args[len(launch.cmd.Args)-1] != path {
+		t.Fatalf("last arg should be path, args=%v", launch.cmd.Args)
+	}
+}
+
+// TestMCPEditConfigLaunchEditorExpandsEnvVar confirms that $VAR references
+// in EDITOR/VISUAL are expanded without going through a shell, preserving
+// the behavior of the prior sh -lc path for users who set values such as
+// EDITOR="$HOME/bin/myeditor" verbatim (rather than relying on the shell
+// to expand at export time).
+func TestMCPEditConfigLaunchEditorExpandsEnvVar(t *testing.T) {
+	t.Setenv("REASONIX_TEST_EDITOR_BIN", "/opt/custom/bin/myed")
+	t.Setenv("VISUAL", "$REASONIX_TEST_EDITOR_BIN --flag")
+	t.Setenv("EDITOR", "")
+
+	path := "/tmp/reasonix.toml"
+	launch, err := mcpEditConfigLaunchCommand(path, func(string) (string, error) {
+		t.Fatal("lookPath should not be called when VISUAL is set")
+		return "", errors.New("unexpected lookup")
+	})
+	if err != nil {
+		t.Fatalf("edit command: %v", err)
+	}
+	want := []string{"/opt/custom/bin/myed", "--flag", path}
+	if len(launch.cmd.Args) != len(want) {
+		t.Fatalf("args length = %d, want %d, args=%v", len(launch.cmd.Args), len(want), launch.cmd.Args)
+	}
+	for i, w := range want {
+		if launch.cmd.Args[i] != w {
+			t.Fatalf("args[%d] = %q, want %q, full args=%v", i, launch.cmd.Args[i], w, launch.cmd.Args)
+		}
+	}
+}
+
+// TestMCPEditConfigLaunchEditorExpandsTilde confirms that a leading ~ or ~/
+// in EDITOR/VISUAL is expanded to the user's home directory without a shell.
+func TestMCPEditConfigLaunchEditorExpandsTilde(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("cannot determine home dir: %v", err)
+	}
+	cases := []struct {
+		name   string
+		editor string
+		want0  string
+	}{
+		{"tilde_slash", "~/bin/myed", home + "/bin/myed"},
+		{"bare_tilde", "~", home},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("VISUAL", c.editor+" --wait")
+			t.Setenv("EDITOR", "")
+			launch, err := mcpEditConfigLaunchCommand("/tmp/reasonix.toml", func(string) (string, error) {
+				t.Fatal("lookPath should not be called when VISUAL is set")
+				return "", errors.New("unexpected lookup")
+			})
+			if err != nil {
+				t.Fatalf("edit command: %v", err)
+			}
+			if launch.cmd.Args[0] != c.want0 {
+				t.Fatalf("args[0] = %q, want %q", launch.cmd.Args[0], c.want0)
+			}
+			if launch.cmd.Args[1] != "--wait" {
+				t.Fatalf("args[1] = %q, want --wait", launch.cmd.Args[1])
+			}
+		})
+	}
+}
+
+// TestMCPEditConfigLaunchEditorTildeNotInPayload confirms that a tilde
+// appearing in an injection payload (not as the leading token) is left
+// untouched and is NOT expanded into a path the shell would then execute.
+func TestMCPEditConfigLaunchEditorTildeNotInPayload(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "vim; rm -rf ~/should-not-exist")
+
+	launch, err := mcpEditConfigLaunchCommand("/tmp/reasonix.toml", func(string) (string, error) {
+		t.Fatal("lookPath should not be called when EDITOR is set")
+		return "", errors.New("unexpected lookup")
+	})
+	if err != nil {
+		t.Fatalf("edit command: %v", err)
+	}
+	// The tilde sits in the middle of the value, so it is NOT expanded; the
+	// leading token "vim;" is looked up literally and the payload "rm" never
+	// runs. This proves tilde expansion cannot be abused to make an injection
+	// payload resolve to a real path.
+	if launch.cmd.Args[0] != "vim;" {
+		t.Fatalf("args[0] = %q, want vim;", launch.cmd.Args[0])
 	}
 }
 

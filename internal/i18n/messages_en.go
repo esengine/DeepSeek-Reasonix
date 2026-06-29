@@ -73,6 +73,9 @@ var English = Messages{
 	PermissionSavedFmt:          "permission saved to %s: %s",
 	PermissionAlreadyAllowedFmt: "permission already covered in %s: %s",
 	PermissionSaveFailedFmt:     "permission save failed for %s: %v",
+	MCPReadOnlyTrustSavedFmt:    "MCP read-only trust saved to %s: %s/%s",
+	MCPReadOnlyTrustAlreadyFmt:  "MCP read-only trust already saved in %s: %s/%s",
+	MCPReadOnlyTrustFailedFmt:   "MCP read-only trust save failed for %s/%s: %v",
 	DiffFoldedFmt:               "… +%d more lines",
 	DiffFoldEnabledFmt:          "diff folded to %d lines (/diff-fold to expand)",
 	DiffFoldDisabled:            "diff expanded — showing all lines (/diff-fold to fold)",
@@ -104,7 +107,7 @@ var English = Messages{
 	SlashUnavailable:   "command unavailable in this build",
 	SlashUnknown:       "unknown command",
 	SlashTodoCleared:   "task list dismissed",
-	SlashHelp:          "commands: /compact · /new · /clear · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model (switch model) · /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /migrate · /goal · /remember · /quit · /help · plus skills (/init, /explore, …)",
+	SlashHelp:          "commands: /compact · /new · /clear · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model (switch model) · /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /memory-v5 · /migrate · /goal · /remember · /quit · /help · plus skills (/init, /explore, …)",
 
 	SkillPickerTitle:             "Skills",
 	SkillPickerAvailableFmt:      "%d available",
@@ -193,9 +196,17 @@ var English = Messages{
 	CmdEffort:                  "set reasoning effort",
 	CmdAutoPlan:                "configure automatic plan mode",
 	CmdReasonLang:              "set visible reasoning language",
+	CmdMemoryV5:                "toggle Memory v5",
 	CmdHelp:                    "list commands",
 	CmdTodo:                    "dismiss the task list",
 	CmdQuit:                    "exit the session",
+	CmdCopy:                    "pick a response to copy to clipboard",
+	CmdExport:                  "export session as markdown",
+	SlashCopyDone:              "copied response to clipboard",
+	SlashCopyEmpty:             "no assistant response to copy",
+	SlashCopyListHeader:        "pick a response to copy:",
+	SlashExportDoneFmt:         "session exported to %s",
+	SlashExportEmpty:           "no messages to export",
 	ArgSkillList:               "list skills",
 	ArgSkillShow:               "show a skill's body",
 	ArgSkillNew:                "scaffold a new skill",
@@ -425,6 +436,7 @@ Usage:
   reasonix acp [--model NAME]                           serve Agent Client Protocol over stdio (also: reasonix --acp)
   reasonix setup [path]                                 interactive config wizard; writes reasonix.toml (+ .env)
   reasonix config auto-plan [off|on]                    configure automatic plan mode
+  reasonix config memory-v5 [off|on|status]             configure Memory v5
   reasonix config reasoning-language [auto|zh|en]        configure visible reasoning language
   reasonix mcp <add|remove|list|import>                 manage MCP servers in reasonix.toml
   reasonix init                                         show how to generate project memory (AGENTS.md)

@@ -27,6 +27,7 @@ import (
 
 const sessionTitlesFile = ".titles.json"
 const sessionDisplayFile = ".display.json"
+const sessionPlannerDisplayFile = ".planner-display.json"
 const sessionTrashDir = ".trash"
 const sessionTrashMetaFile = ".trash-meta.json"
 
@@ -209,22 +210,112 @@ func validateSessionTrashTarget(dir, sessionPath, key string) error {
 		return err
 	}
 	itemDir := filepath.Join(sessionTrashPath(dir), key)
-	if _, err := os.Stat(itemDir); err == nil {
-		return fmt.Errorf("session already exists in trash: %s", key)
+	if info, err := os.Stat(itemDir); err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("session trash target is not a directory: %s", key)
+		}
+		trashPath := filepath.Join(itemDir, key)
+		if trashInfo, err := os.Stat(trashPath); err == nil && !trashInfo.IsDir() {
+			discardable, err := liveSessionDiscardable(sessionPath)
+			if err != nil {
+				return err
+			}
+			if discardable {
+				return nil
+			}
+			return fmt.Errorf("session already exists in trash: %s", key)
+		} else if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
 	} else if !os.IsNotExist(err) {
 		return err
 	}
 	return nil
 }
 
+func prepareSessionTrashTarget(dir, sessionPath, key string) (bool, error) {
+	if _, err := os.Stat(sessionPath); os.IsNotExist(err) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	itemDir := filepath.Join(sessionTrashPath(dir), key)
+	if info, err := os.Stat(itemDir); err == nil {
+		if !info.IsDir() {
+			return false, fmt.Errorf("session trash target is not a directory: %s", key)
+		}
+		trashPath := filepath.Join(itemDir, key)
+		if trashInfo, err := os.Stat(trashPath); err == nil && !trashInfo.IsDir() {
+			discardable, err := liveSessionDiscardable(sessionPath)
+			if err != nil {
+				return false, err
+			}
+			if discardable {
+				return false, removeDesktopSessionArtifacts(sessionPath)
+			}
+			return false, fmt.Errorf("session already exists in trash: %s", key)
+		} else if err != nil && !os.IsNotExist(err) {
+			return false, err
+		}
+		if err := os.RemoveAll(itemDir); err != nil {
+			return false, err
+		}
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+	return true, nil
+}
+
+func liveSessionDiscardable(sessionPath string) (bool, error) {
+	if agent.IsCleanupPending(sessionPath) {
+		return true, nil
+	}
+	info, err := os.Stat(sessionPath)
+	if os.IsNotExist(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if info.IsDir() {
+		return false, nil
+	}
+	if info.Size() == 0 {
+		return true, nil
+	}
+	session, err := agent.LoadSession(sessionPath)
+	if err != nil {
+		return false, nil
+	}
+	return !session.HasContent(), nil
+}
+
+func sessionFileHasConversationContent(sessionPath string) bool {
+	if strings.TrimSpace(sessionPath) == "" || agent.IsCleanupPending(sessionPath) {
+		return false
+	}
+	info, err := os.Stat(sessionPath)
+	if err != nil || info.IsDir() || info.Size() == 0 {
+		return false
+	}
+	session, err := agent.LoadSession(sessionPath)
+	if err != nil {
+		return false
+	}
+	return session.HasContent()
+}
+
 func trashSessionArtifactsBeforeMove(dir, sessionPath, key string, beforeMove func()) error {
 	if err := validateSessionTrashTarget(dir, sessionPath, key); err != nil {
 		return err
 	}
-	if _, err := os.Stat(sessionPath); os.IsNotExist(err) {
-		return nil
-	} else if err != nil {
+	shouldMove, err := prepareSessionTrashTarget(dir, sessionPath, key)
+	if err != nil {
 		return err
+	}
+	if !shouldMove {
+		return nil
 	}
 	itemDir := filepath.Join(sessionTrashPath(dir), key)
 	if err := os.MkdirAll(itemDir, 0o755); err != nil {
@@ -304,7 +395,16 @@ func restoreTrashedSessionFile(dir, path string) error {
 	}
 	target := filepath.Join(dir, key)
 	if _, err := os.Stat(target); err == nil {
-		return fmt.Errorf("session already exists: %s", key)
+		discardable, err := liveSessionDiscardable(target)
+		if err != nil {
+			return err
+		}
+		if !discardable {
+			return fmt.Errorf("session already exists: %s", key)
+		}
+		if err := removeDesktopSessionArtifacts(target); err != nil {
+			return err
+		}
 	} else if !os.IsNotExist(err) {
 		return err
 	}
@@ -629,6 +729,13 @@ func validateTrashedSessionPath(dir, sessionPath string) (string, string, string
 
 type sessionDisplayMap map[string]map[string]string
 
+type sessionPlannerDisplayMap map[string][]plannerDisplayTurn
+
+type plannerDisplayTurn struct {
+	UserHash string           `json:"userHash"`
+	Messages []HistoryMessage `json:"messages"`
+}
+
 func messageDisplayKey(content string) string {
 	sum := sha256.Sum256([]byte(content))
 	return fmt.Sprintf("%x", sum[:])
@@ -642,6 +749,83 @@ func loadSessionDisplays(dir string) sessionDisplayMap {
 	}
 	_ = json.Unmarshal(b, &m)
 	return m
+}
+
+func sessionPlannerDisplayPath(dir string) string {
+	return filepath.Join(dir, sessionPlannerDisplayFile)
+}
+
+func loadSessionPlannerDisplays(dir string) sessionPlannerDisplayMap {
+	m := sessionPlannerDisplayMap{}
+	if strings.TrimSpace(dir) == "" {
+		return m
+	}
+	b, err := os.ReadFile(sessionPlannerDisplayPath(dir))
+	if err != nil {
+		return m
+	}
+	_ = json.Unmarshal(b, &m)
+	return m
+}
+
+func saveSessionPlannerDisplays(dir string, m sessionPlannerDisplayMap) error {
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".planner-display.*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return fileutil.ReplaceFile(tmpPath, sessionPlannerDisplayPath(dir))
+}
+
+func recordSessionPlannerDisplay(dir, sessionPath, userContent string, messages []HistoryMessage) error {
+	if strings.TrimSpace(sessionPath) == "" || strings.TrimSpace(userContent) == "" || len(messages) == 0 {
+		return nil
+	}
+	m := loadSessionPlannerDisplays(dir)
+	key := filepath.Base(sessionPath)
+	turn := plannerDisplayTurn{
+		UserHash: messageDisplayKey(userContent),
+		Messages: cloneHistoryMessages(messages),
+	}
+	m[key] = append(m[key], turn)
+	return saveSessionPlannerDisplays(dir, m)
+}
+
+func sessionPlannerDisplayTurns(dir, sessionPath string) []plannerDisplayTurn {
+	if strings.TrimSpace(dir) == "" || strings.TrimSpace(sessionPath) == "" {
+		return nil
+	}
+	turns := loadSessionPlannerDisplays(dir)[filepath.Base(sessionPath)]
+	if len(turns) == 0 {
+		return nil
+	}
+	out := make([]plannerDisplayTurn, 0, len(turns))
+	for _, turn := range turns {
+		if strings.TrimSpace(turn.UserHash) == "" || len(turn.Messages) == 0 {
+			continue
+		}
+		out = append(out, plannerDisplayTurn{
+			UserHash: turn.UserHash,
+			Messages: cloneHistoryMessages(turn.Messages),
+		})
+	}
+	return out
 }
 
 func saveSessionDisplays(dir string, m sessionDisplayMap) error {

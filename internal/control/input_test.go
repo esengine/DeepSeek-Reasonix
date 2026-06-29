@@ -31,17 +31,28 @@ func (f *fakeAutoPlanClassifier) NeedsPlan(ctx context.Context, input string, sc
 }
 
 type fakeTurnRunner struct {
-	inputs []string
+	inputs               []string
+	memoryCompilerInputs []string
+	memoryCompilerSkips  []bool
 }
 
 func (f *fakeTurnRunner) Run(ctx context.Context, input string) error {
 	f.inputs = append(f.inputs, input)
+	f.memoryCompilerSkips = append(f.memoryCompilerSkips, agent.MemoryCompilerSkipFromContext(ctx))
+	if source, ok := agent.MemoryCompilerSourceInputFromContext(ctx); ok {
+		f.memoryCompilerInputs = append(f.memoryCompilerInputs, source)
+	}
 	return nil
 }
 
 type fakeLanguageRunner struct {
 	fakeTurnRunner
-	lang string
+	responseLang string
+	lang         string
+}
+
+func (f *fakeLanguageRunner) SetResponseLanguage(lang string) {
+	f.responseLang = lang
 }
 
 func (f *fakeLanguageRunner) SetReasoningLanguage(lang string) {
@@ -110,6 +121,24 @@ func TestComposePlanModeMarker(t *testing.T) {
 	}
 }
 
+func TestPlanModeMarkerMatchesPolicy(t *testing.T) {
+	for _, want := range []string{"research", "ask", "todo_write", "read_only_task", "read_only_skill"} {
+		if !strings.Contains(PlanModeMarker, want) {
+			t.Fatalf("PlanModeMarker should describe %q as available:\n%s", want, PlanModeMarker)
+		}
+	}
+	for _, forbidden := range []string{"task", "complete_step"} {
+		if strings.Contains(PlanModeMarker, forbidden+" are available") || strings.Contains(PlanModeMarker, forbidden+",") {
+			t.Fatalf("PlanModeMarker must not list blocked tool %q as available:\n%s", forbidden, PlanModeMarker)
+		}
+	}
+	for _, blocked := range []string{"write files", "unsafe shell commands", "install capabilities", "mutate memory", "delegate", "mark execution steps complete"} {
+		if !strings.Contains(PlanModeMarker, blocked) {
+			t.Fatalf("PlanModeMarker should mention blocked capability %q:\n%s", blocked, PlanModeMarker)
+		}
+	}
+}
+
 func TestComposeReasoningLanguagePreference(t *testing.T) {
 	auto := New(Options{ReasoningLanguage: "auto"})
 	if got := auto.Compose("hi"); got != "hi" {
@@ -123,6 +152,22 @@ func TestComposeReasoningLanguagePreference(t *testing.T) {
 	}
 	if stripped := StripComposePrefixes(got); stripped != "hi" {
 		t.Fatalf("StripComposePrefixes = %q, want hi", stripped)
+	}
+}
+
+func TestRunComposesResponseLanguagePreference(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	c := New(Options{ResponseLanguage: "en", Runner: runner})
+
+	if err := c.Run(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.inputs) != 1 {
+		t.Fatalf("runner inputs = %d, want 1", len(runner.inputs))
+	}
+	got := runner.inputs[0]
+	if !strings.HasPrefix(got, "<response-language>") || !strings.Contains(got, "use English") || !strings.HasSuffix(got, "hi") {
+		t.Fatalf("headless Run should compose the response language preference, got %q", got)
 	}
 }
 
@@ -142,6 +187,21 @@ func TestRunComposesReasoningLanguagePreference(t *testing.T) {
 	}
 }
 
+func TestSetResponseLanguageUpdatesRunner(t *testing.T) {
+	runner := &fakeLanguageRunner{}
+	c := New(Options{Runner: runner})
+
+	c.SetResponseLanguage("en")
+	if runner.responseLang != "en" {
+		t.Fatalf("runner response language = %q, want en", runner.responseLang)
+	}
+
+	c.SetResponseLanguage("auto")
+	if runner.responseLang != "auto" {
+		t.Fatalf("runner response language = %q, want auto", runner.responseLang)
+	}
+}
+
 func TestSetReasoningLanguageUpdatesRunner(t *testing.T) {
 	runner := &fakeLanguageRunner{}
 	c := New(Options{Runner: runner})
@@ -154,6 +214,18 @@ func TestSetReasoningLanguageUpdatesRunner(t *testing.T) {
 	c.SetReasoningLanguage("auto")
 	if runner.lang != "auto" {
 		t.Fatalf("runner reasoning language = %q, want auto", runner.lang)
+	}
+}
+
+func TestComposeSyntheticResponseLanguagePreference(t *testing.T) {
+	c := New(Options{ResponseLanguage: "en"})
+
+	got := c.ComposeSynthetic(planApprovedMessage)
+	if !strings.HasPrefix(got, "<response-language>") || !strings.Contains(got, "use English") || !strings.HasSuffix(got, planApprovedMessage) {
+		t.Fatalf("ComposeSynthetic should prefix response language, got %q", got)
+	}
+	if !IsSyntheticUserMessage(got) {
+		t.Fatalf("response-language-prefixed plan approval should still be synthetic")
 	}
 }
 
@@ -763,6 +835,11 @@ func TestStripComposePrefixes(t *testing.T) {
 		{
 			name:  "plan mode marker stripped",
 			input: PlanModeMarker + "\n\nexplain this function",
+			want:  "explain this function",
+		},
+		{
+			name:  "legacy plan mode marker stripped",
+			input: legacyPlanModeMarker + "\n\nexplain this function",
 			want:  "explain this function",
 		},
 		{

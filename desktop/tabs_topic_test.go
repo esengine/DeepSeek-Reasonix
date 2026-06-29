@@ -1431,6 +1431,25 @@ func TestTrashTopicMovesRelatedSessionsToTrash(t *testing.T) {
 		t.Fatalf("mkdir sessions: %v", err)
 	}
 	sessionPath := writeTopicSession(t, dir, "trash-me.jsonl", topicID, "Trash history", projectRoot)
+	placeholderPath := filepath.Join(dir, "trash-placeholder-session.jsonl")
+	if err := os.WriteFile(placeholderPath, nil, 0o644); err != nil {
+		t.Fatalf("write placeholder session: %v", err)
+	}
+	now := time.Now()
+	if err := agent.SaveBranchMetaPreserveUpdated(placeholderPath, agent.BranchMeta{
+		CreatedAt:     now.Add(-time.Minute),
+		UpdatedAt:     now,
+		Scope:         "project",
+		WorkspaceRoot: projectRoot,
+		TopicID:       topicID,
+		TopicTitle:    "Trash history",
+	}); err != nil {
+		t.Fatalf("save placeholder branch meta: %v", err)
+	}
+	placeholderGoalPath := strings.TrimSuffix(placeholderPath, ".jsonl") + ".goal-state.json"
+	if err := os.WriteFile(placeholderGoalPath, []byte(`{"done":true}`), 0o644); err != nil {
+		t.Fatalf("write placeholder goal state: %v", err)
+	}
 	ref := "sa_20260102_030405_000000000_aabbccddeeff"
 	writeSubagentArtifact(t, dir, ref, agent.BranchID(sessionPath))
 
@@ -1443,6 +1462,19 @@ func TestTrashTopicMovesRelatedSessionsToTrash(t *testing.T) {
 	trashPath := filepath.Join(dir, sessionTrashDir, "trash-me.jsonl", "trash-me.jsonl")
 	if _, err := os.Stat(trashPath); err != nil {
 		t.Fatalf("topic session should be moved to trash: %v", err)
+	}
+	if _, err := os.Stat(placeholderPath); !os.IsNotExist(err) {
+		t.Fatalf("placeholder session should be removed from active history, stat err = %v", err)
+	}
+	placeholderTrashDir := filepath.Join(dir, sessionTrashDir, "trash-placeholder-session.jsonl")
+	if _, err := os.Stat(filepath.Join(placeholderTrashDir, "trash-placeholder-session.jsonl")); err != nil {
+		t.Fatalf("placeholder session should be moved to trash: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(placeholderTrashDir, "trash-placeholder-session.jsonl.meta")); err != nil {
+		t.Fatalf("placeholder meta should be moved to trash: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(placeholderTrashDir, "trash-placeholder-session.goal-state.json")); err != nil {
+		t.Fatalf("placeholder goal state should be moved to trash: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, sessionTrashDir, "trash-me.jsonl", "subagents", ref+".jsonl")); err != nil {
 		t.Fatalf("topic subagent should be moved to trash: %v", err)
@@ -1747,6 +1779,58 @@ func TestTrashTopicCancelsRunningSessionRuntime(t *testing.T) {
 	}
 }
 
+func TestTrashTopicFallbackCreatesIndexedTopic(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_only"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "Only topic"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	sessionPath := writeTopicSession(t, dir, "only-topic.jsonl", topicID, "Only topic", projectRoot)
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: sessionPath, Label: "test", WorkspaceRoot: projectRoot})
+	defer ctrl.Close()
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"only": {
+				ID:            "only",
+				Scope:         "project",
+				WorkspaceRoot: projectRoot,
+				TopicID:       topicID,
+				TopicTitle:    "Only topic",
+				Ctrl:          ctrl,
+				Ready:         true,
+				disabledMCP:   map[string]ServerView{},
+			},
+		},
+		tabOrder:    []string{"only"},
+		activeTabID: "only",
+	}
+
+	if err := app.TrashTopic(topicID); err != nil {
+		t.Fatalf("TrashTopic: %v", err)
+	}
+	if len(app.tabs) != 1 {
+		t.Fatalf("fallback should create exactly one visible tab, got %d", len(app.tabs))
+	}
+	for id, tab := range app.tabs {
+		if strings.TrimSpace(tab.TopicID) == "" {
+			t.Fatalf("fallback tab %q has empty topic ID", id)
+		}
+		f := loadProjectsFile()
+		if len(f.Projects) != 1 || !containsDesktopString(f.Projects[0].Topics, tab.TopicID) {
+			t.Fatalf("fallback topic %q was not indexed in project topics %#v", tab.TopicID, f.Projects)
+		}
+	}
+}
+
 func TestTrashTopicTrashConflictKeepsRunningRuntime(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -1789,21 +1873,81 @@ func TestTrashTopicTrashConflictKeepsRunningRuntime(t *testing.T) {
 	ctrl.Submit("long turn")
 	<-runner.started
 	err := app.TrashTopic(topicID)
-	if err == nil || !strings.Contains(err.Error(), "already exists in trash") {
-		t.Fatalf("TrashTopic conflict error = %v, want trash conflict", err)
+	if err != nil {
+		t.Fatalf("TrashTopic should succeed after cleaning empty trash dir: %v", err)
 	}
-	if _, ok := app.tabs["running"]; !ok {
-		t.Fatalf("running runtime should remain bound after preflight failure")
-	}
-	if !ctrl.Running() {
-		t.Fatalf("running turn should not be cancelled on preflight failure")
-	}
-	if _, err := os.Stat(sessionPath); err != nil {
-		t.Fatalf("session file should remain after preflight failure: %v", err)
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
+		t.Fatalf("session file should be moved to trash, stat err = %v", err)
 	}
 
 	close(runner.release)
 	waitNotRunning(t, ctrl)
+}
+
+func TestTrashTopicValidTrashRemovesEmptyLiveStub(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_valid_trash"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "Valid trash"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	sessionPath := filepath.Join(dir, "valid-trash.jsonl")
+	if err := os.WriteFile(sessionPath, nil, 0o644); err != nil {
+		t.Fatalf("write live stub: %v", err)
+	}
+	if err := agent.SaveBranchMeta(sessionPath, agent.BranchMeta{
+		CreatedAt:     time.Now().Add(-time.Minute),
+		UpdatedAt:     time.Now(),
+		Scope:         "project",
+		WorkspaceRoot: projectRoot,
+		TopicID:       topicID,
+		TopicTitle:    "Valid trash",
+	}); err != nil {
+		t.Fatalf("save branch meta: %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, filepath.Base(sessionPath), filepath.Base(sessionPath))
+	if err := os.MkdirAll(filepath.Dir(trashPath), 0o755); err != nil {
+		t.Fatalf("create trash dir: %v", err)
+	}
+	if err := os.WriteFile(trashPath, []byte(`{"role":"user","content":"already trashed"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write trash session: %v", err)
+	}
+
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"stale": {
+				ID:            "stale",
+				Scope:         "project",
+				WorkspaceRoot: projectRoot,
+				TopicID:       topicID,
+				TopicTitle:    "Valid trash",
+				SessionPath:   sessionPath,
+				Ready:         true,
+				disabledMCP:   map[string]ServerView{},
+			},
+			"other": {ID: "other", Scope: "project", WorkspaceRoot: projectRoot, TopicID: "other", Ready: true},
+		},
+		tabOrder:    []string{"stale", "other"},
+		activeTabID: "other",
+	}
+
+	if err := app.TrashTopic(topicID); err != nil {
+		t.Fatalf("TrashTopic should remove stale live stub: %v", err)
+	}
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
+		t.Fatalf("live stub should be removed, stat err = %v", err)
+	}
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("existing trash should remain authoritative: %v", err)
+	}
 }
 
 func hasHistoryContent(messages []HistoryMessage, content string) bool {

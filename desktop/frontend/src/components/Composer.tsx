@@ -10,6 +10,7 @@ import { cacheGeneration, loadOlder } from "../lib/composerHistory";
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
 import { detectShortcutPlatform, matchesShortcut } from "../lib/keyboardShortcuts";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
+import { createRafResizeUpdater } from "../lib/resizeDrag";
 import { useToast } from "../lib/toast";
 import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type DirEntry, type EffortInfo, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type TokenMode, type ToolApprovalMode } from "../lib/types";
 import {
@@ -20,12 +21,13 @@ import {
 } from "../lib/workspaceDrag";
 import { SlashMenu } from "./SlashMenu";
 import { ArgMenu } from "./ArgMenu";
-import { VirtualMenu } from "./VirtualMenu";
 import { ANCHORED_POPOVER_CLOSE_MS, AnchoredPopover } from "./AnchoredPopover";
 import { EffortSwitcher } from "./EffortSwitcher";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { Tooltip } from "./Tooltip";
 import { ComposerContextCard } from "./ComposerContextCard";
+import { VirtualMenu } from "./VirtualMenu";
+import { dirEntryMenuLabel, dirEntrySubmitPath } from "./FileReferenceMenu";
 
 interface Attachment {
   path: string;
@@ -38,9 +40,10 @@ interface AttachmentDedupKey {
   source: string;
 }
 
-interface WorkspaceReference {
+export interface WorkspaceReference {
   path: string;
   isDir?: boolean;
+  displayPath?: string;
 }
 
 const LONG_PASTE_MIN_CHARS = 2000;
@@ -60,9 +63,24 @@ type PastedBlock = {
   text: string;
 };
 
+type ComposerDraft = {
+  text: string;
+  attachments: Attachment[];
+  workspaceRefs: WorkspaceReference[];
+  pastedBlocks: PastedBlock[];
+  openPastedLabels: string[];
+  sessionRefs: SessionReference[];
+  attachmentDedupKeys: Record<string, AttachmentDedupKey>;
+  nextPasteId: number;
+  historyIndex: number;
+  savedText: string;
+};
+
 type WebkitFileEntry = {
   isDirectory?: boolean;
 };
+
+const DEFAULT_COMPOSER_DRAFT_KEY = "__default_composer_draft__";
 
 function lineCount(s: string): number {
   if (s === "") return 0;
@@ -91,6 +109,10 @@ function attachmentExt(name: string): string {
   return dot >= 0 ? name.slice(dot + 1).toUpperCase() : "";
 }
 
+function hasImageAttachments(items: Attachment[]): boolean {
+  return items.some((attachment) => Boolean(attachment.previewUrl));
+}
+
 function displayRefName(name: string): string {
   return name.replace(/[\[\]\(\)\r\n]+/g, " ").replace(/\s+/g, " ").trim() || "attachment";
 }
@@ -109,6 +131,63 @@ function sortComposerAttachments(items: Attachment[]): Attachment[] {
 
 function workspaceReferenceKey(ref: WorkspaceReference): string {
   return `${ref.isDir ? "dir" : "file"}:${ref.path}`;
+}
+
+export function composerPickFileEntry(
+  text: string,
+  atRaw: string | null,
+  atDir: string,
+  entry: DirEntry,
+): { text: string; workspaceRef?: WorkspaceReference } {
+  const atPos = text.length - (atRaw?.length ?? 0) - 1; // index of '@'
+  const prefix = text.slice(0, Math.max(0, atPos));
+  const refPath = dirEntrySubmitPath(entry, atDir);
+  if (entry.path || entry.displayPath) {
+    return { text: prefix, workspaceRef: { path: refPath, isDir: entry.isDir, displayPath: entry.displayPath } };
+  }
+  return { text: prefix + "@" + refPath + (entry.isDir ? "/" : " ") };
+}
+
+function emptyComposerDraft(): ComposerDraft {
+  return {
+    text: "",
+    attachments: [],
+    workspaceRefs: [],
+    pastedBlocks: [],
+    openPastedLabels: [],
+    sessionRefs: [],
+    attachmentDedupKeys: {},
+    nextPasteId: 1,
+    historyIndex: -1,
+    savedText: "",
+  };
+}
+
+function cloneComposerDraft(draft: ComposerDraft): ComposerDraft {
+  return {
+    text: draft.text,
+    attachments: [...draft.attachments],
+    workspaceRefs: [...draft.workspaceRefs],
+    pastedBlocks: [...draft.pastedBlocks],
+    openPastedLabels: [...draft.openPastedLabels],
+    sessionRefs: [...draft.sessionRefs],
+    attachmentDedupKeys: { ...draft.attachmentDedupKeys },
+    nextPasteId: draft.nextPasteId,
+    historyIndex: draft.historyIndex,
+    savedText: draft.savedText,
+  };
+}
+
+function attachmentDedupFromKeys(keys: Record<string, AttachmentDedupKey>): DedupIndex {
+  const index = new DedupIndex();
+  for (const key of Object.values(keys)) {
+    index.add(key.hash, key.source);
+  }
+  return index;
+}
+
+function draftHasAttachmentDedupKey(draft: ComposerDraft, key: AttachmentDedupKey): boolean {
+  return Object.values(draft.attachmentDedupKeys).some((existing) => existing.hash === key.hash && existing.source === key.source);
 }
 
 function fileKey(file: File): string {
@@ -327,6 +406,7 @@ export function Composer({
   goal,
   cwd,
   modelLabel,
+  imageInputEnabled = true,
   tabId,
   effort,
   onSend,
@@ -350,6 +430,7 @@ export function Composer({
   turnTokens,
   retry,
   transientDismissSignal,
+  sessionKey,
 }: {
   running: boolean;
   collaborationMode: CollaborationMode;
@@ -358,9 +439,10 @@ export function Composer({
   goal?: string;
   cwd?: string;
   modelLabel: string;
+  imageInputEnabled?: boolean;
   tabId?: string;
   effort?: EffortInfo;
-  onSend: (displayText: string, submitText?: string) => void;
+  onSend: (displayText: string, submitText?: string) => void | Promise<void>;
   // Returns the un-sent text when cancelling before the server replied (so it can
   // be restored to the input); undefined for a normal cancel.
   onCancel: () => string | undefined;
@@ -387,6 +469,7 @@ export function Composer({
   turnTokens?: number;
   retry?: { attempt: number; max: number };
   transientDismissSignal?: number;
+  sessionKey?: string;
 }) {
   const { t, locale } = useI18n();
   const { showToast } = useToast();
@@ -449,6 +532,73 @@ export function Composer({
   cwdRef.current = cwd;
   const attachmentDedupRef = useRef(new DedupIndex());
   const attachmentDedupKeysRef = useRef<Record<string, AttachmentDedupKey>>({});
+  const draftKey = sessionKey || tabId || DEFAULT_COMPOSER_DRAFT_KEY;
+  const draftsBySessionRef = useRef<Record<string, ComposerDraft>>({});
+  const activeDraftKeyRef = useRef(draftKey);
+  const textRef = useRef(text);
+  const attachmentsRef = useRef(attachments);
+  const workspaceRefsRef = useRef(workspaceRefs);
+  const openPastedLabelsRef = useRef(openPastedLabels);
+  const sessionRefsRef = useRef(sessionRefs);
+  textRef.current = text;
+  attachmentsRef.current = attachments;
+  workspaceRefsRef.current = workspaceRefs;
+  pastedBlocksRef.current = pastedBlocks;
+  openPastedLabelsRef.current = openPastedLabels;
+  sessionRefsRef.current = sessionRefs;
+
+  const snapshotComposerDraft = (): ComposerDraft => ({
+    text: textRef.current,
+    attachments: [...attachmentsRef.current],
+    workspaceRefs: [...workspaceRefsRef.current],
+    pastedBlocks: [...pastedBlocksRef.current],
+    openPastedLabels: [...openPastedLabelsRef.current],
+    sessionRefs: [...sessionRefsRef.current],
+    attachmentDedupKeys: { ...attachmentDedupKeysRef.current },
+    nextPasteId: nextPasteId.current,
+    historyIndex: historyIndexRef.current,
+    savedText: savedTextRef.current,
+  });
+
+  const restoreComposerDraft = (draft: ComposerDraft) => {
+    const next = cloneComposerDraft(draft);
+    setText(next.text);
+    setAttachments(next.attachments);
+    setWorkspaceRefs(next.workspaceRefs);
+    pastedBlocksRef.current = next.pastedBlocks;
+    setPastedBlocks(next.pastedBlocks);
+    setOpenPastedLabels(next.openPastedLabels);
+    setSessionRefs(next.sessionRefs);
+    attachmentDedupKeysRef.current = next.attachmentDedupKeys;
+    attachmentDedupRef.current = attachmentDedupFromKeys(next.attachmentDedupKeys);
+    nextPasteId.current = next.nextPasteId;
+    historyIndexRef.current = next.historyIndex;
+    savedTextRef.current = next.savedText;
+    setHistoryIndex(next.historyIndex);
+    lastSelectionRef.current = { start: next.text.length, end: next.text.length };
+    setComposerPrompt(null);
+    setShowPastChats(false);
+    setPastChatQuery("");
+    setActive(0);
+    setIntentMenuOpen(false);
+    setIntentMenuClosing(false);
+    setMoreMenuOpen(false);
+    setMoreMenuClosing(false);
+  };
+
+  useLayoutEffect(() => {
+    const previousKey = activeDraftKeyRef.current;
+    if (previousKey === draftKey) return;
+    draftsBySessionRef.current[previousKey] = snapshotComposerDraft();
+    activeDraftKeyRef.current = draftKey;
+    restoreComposerDraft(draftsBySessionRef.current[draftKey] ?? emptyComposerDraft());
+  }, [draftKey]);
+
+  useEffect(() => {
+    return () => {
+      draftsBySessionRef.current[activeDraftKeyRef.current] = snapshotComposerDraft();
+    };
+  }, []);
 
   const clearNativeClipboardPasteTimer = () => {
     if (nativeClipboardPasteTimerRef.current === null) return;
@@ -771,7 +921,9 @@ export function Composer({
     setWorkspaceRefs((prev) => {
       const key = workspaceReferenceKey(ref);
       if (prev.some((item) => workspaceReferenceKey(item) === key)) return prev;
-      return [...prev, ref];
+      const next = [...prev, ref];
+      workspaceRefsRef.current = next;
+      return next;
     });
     requestAnimationFrame(() => taRef.current?.focus());
   };
@@ -815,6 +967,7 @@ export function Composer({
   };
 
   const clearAttachments = () => {
+    attachmentsRef.current = [];
     setAttachments([]);
     attachmentDedupRef.current.clear();
     attachmentDedupKeysRef.current = {};
@@ -822,8 +975,74 @@ export function Composer({
 
   const removeAttachment = (path: string) => {
     forgetAttachment(path);
-    setAttachments((prev) => prev.filter((x) => x.path !== path));
+    setAttachments(attachmentsRef.current.filter((x) => x.path !== path));
     requestAnimationFrame(() => taRef.current?.focus());
+  };
+
+  const attachmentSeenInDraft = (targetDraftKey: string, key: AttachmentDedupKey): boolean => {
+    if (targetDraftKey === activeDraftKeyRef.current) return attachmentDedupRef.current.seen(key.hash, key.source);
+    const draft = draftsBySessionRef.current[targetDraftKey];
+    return draft ? draftHasAttachmentDedupKey(draft, key) : false;
+  };
+
+  const addAttachmentToDraft = (targetDraftKey: string, attachment: Attachment, key: AttachmentDedupKey): boolean => {
+    if (targetDraftKey === activeDraftKeyRef.current) {
+      if (attachmentDedupRef.current.seen(key.hash, key.source)) return false;
+      rememberAttachment(attachment.path, key);
+      const next = [...attachmentsRef.current, attachment];
+      attachmentsRef.current = next;
+      setAttachments(next);
+      return true;
+    }
+    const draft = cloneComposerDraft(draftsBySessionRef.current[targetDraftKey] ?? emptyComposerDraft());
+    if (draftHasAttachmentDedupKey(draft, key)) return false;
+    draft.attachmentDedupKeys[attachment.path] = key;
+    draft.attachments = [...draft.attachments, attachment];
+    draftsBySessionRef.current[targetDraftKey] = draft;
+    return true;
+  };
+
+  const addWorkspaceReferenceToDraft = (targetDraftKey: string, ref: WorkspaceReference) => {
+    if (targetDraftKey === activeDraftKeyRef.current) {
+      addWorkspaceReference(ref);
+      return;
+    }
+    const draft = cloneComposerDraft(draftsBySessionRef.current[targetDraftKey] ?? emptyComposerDraft());
+    const key = workspaceReferenceKey(ref);
+    if (draft.workspaceRefs.some((item) => workspaceReferenceKey(item) === key)) return;
+    draft.workspaceRefs = [...draft.workspaceRefs, ref];
+    draftsBySessionRef.current[targetDraftKey] = draft;
+  };
+
+  const clearSubmittedDraft = (targetDraftKey: string) => {
+    if (targetDraftKey === activeDraftKeyRef.current) {
+      textRef.current = "";
+      setText("");
+      historyIndexRef.current = -1;
+      setHistoryIndex(-1);
+      clearAttachments();
+      workspaceRefsRef.current = [];
+      setWorkspaceRefs([]);
+      sessionRefsRef.current = [];
+      setSessionRefs([]);
+      pastedBlocksRef.current = [];
+      setPastedBlocks([]);
+      openPastedLabelsRef.current = [];
+      setOpenPastedLabels([]);
+      savedTextRef.current = "";
+      return;
+    }
+    const draft = cloneComposerDraft(draftsBySessionRef.current[targetDraftKey] ?? emptyComposerDraft());
+    draft.text = "";
+    draft.attachments = [];
+    draft.workspaceRefs = [];
+    draft.pastedBlocks = [];
+    draft.openPastedLabels = [];
+    draft.sessionRefs = [];
+    draft.attachmentDedupKeys = {};
+    draft.historyIndex = -1;
+    draft.savedText = "";
+    draftsBySessionRef.current[targetDraftKey] = draft;
   };
 
   const clearIntentCloseTimer = useCallback(() => {
@@ -887,11 +1106,18 @@ export function Composer({
   const activeGoal = (goal ?? "").trim();
   const goalModeOn = collaborationMode === "goal";
   const tokenModeOn = tokenMode === "economy";
+  const warnImageInputFallback = useCallback((message = t("composer.imageInputUnsupported")) => {
+    showToast(message, "warn");
+  }, [showToast, t]);
 
   const submit = async () => {
     if (disabled || submitDisabled || readOnly || submittingRef.current) return;
+    const submitDraftKey = activeDraftKeyRef.current;
     const trimmedText = text.trim();
     if (pendingPaste > 0) return;
+    if (!imageInputEnabled && hasImageAttachments(attachmentsRef.current)) {
+      warnImageInputFallback();
+    }
     if (!trimmedText && attachments.length === 0 && workspaceRefs.length === 0) {
       if (goalModeOn && !activeGoal) {
         setComposerPrompt(t("composer.goalInputRequired"));
@@ -903,30 +1129,27 @@ export function Composer({
     submittingRef.current = true;
     setSubmitting(true);
     try {
-    const orderedAttachments = sortComposerAttachments(attachments);
-    const refs = [
-      ...workspaceRefs.map((ref) => formatWorkspaceReference(ref.path, ref.isDir)),
-      ...orderedAttachments.map((a) => `@${a.path}`),
-    ].join(" ");
-    const displayRefs = [
-      ...workspaceRefs.map((ref) => formatWorkspaceReference(ref.path, ref.isDir)),
-      ...orderedAttachments.map(formatAttachmentDisplayReference),
-    ].join(" ");
-    const displayText = [trimmedText, displayRefs].filter(Boolean).join(trimmedText && displayRefs ? " " : "");
-    // PR-B: when past:chats refs are attached, prepend their formatted transcript
-    // to submitText only (displayText stays unchanged so the user still sees their
-    // original prompt in the input preview). With no refs we keep the original
-    // submitText verbatim — no header, no rewording, byte-identical to pre-PR-B.
-    const sessionContext = sessionRefs.length === 0 ? "" : await buildSessionContext(sessionRefs);
-    const baseSubmitText = [expandPastedBlocks(trimmedText), refs].filter(Boolean).join(trimmedText && refs ? " " : "");
-    const submitText = sessionContext ? `${sessionContext}${baseSubmitText}` : baseSubmitText;
-    onSend(displayText, submitText);
-    setText("");
-    historyIndexRef.current = -1;
-    setHistoryIndex(-1);
-    clearAttachments();
-    setWorkspaceRefs([]);
-    setSessionRefs([]);
+      const orderedAttachments = sortComposerAttachments(attachments);
+      const refs = [
+        ...workspaceRefs.map((ref) => formatWorkspaceReference(ref.path, ref.isDir)),
+        ...orderedAttachments.map((a) => `@${a.path}`),
+      ].join(" ");
+      const displayRefs = [
+        ...workspaceRefs.map((ref) => formatWorkspaceReference(ref.displayPath || ref.path, ref.isDir)),
+        ...orderedAttachments.map(formatAttachmentDisplayReference),
+      ].join(" ");
+      const displayText = [trimmedText, displayRefs].filter(Boolean).join(trimmedText && displayRefs ? " " : "");
+      // PR-B: when past:chats refs are attached, prepend their formatted transcript
+      // to submitText only (displayText stays unchanged so the user still sees their
+      // original prompt in the input preview). With no refs we keep the original
+      // submitText verbatim — no header, no rewording, byte-identical to pre-PR-B.
+      const sessionContext = sessionRefs.length === 0 ? "" : await buildSessionContext(sessionRefs);
+      const baseSubmitText = [expandPastedBlocks(trimmedText), refs].filter(Boolean).join(trimmedText && refs ? " " : "");
+      const submitText = sessionContext ? `${sessionContext}${baseSubmitText}` : baseSubmitText;
+      await onSend(displayText, submitText);
+      clearSubmittedDraft(submitDraftKey);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), "warn");
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -941,19 +1164,18 @@ export function Composer({
       reader.readAsDataURL(file);
     });
 
-  const attachImageFiles = async (files: File[]) => {
+  const attachImageFiles = async (files: File[], sourceDraftKey: string) => {
     const images = files.filter((f) => f.type.startsWith("image/"));
     if (images.length === 0) return;
     for (const file of images) {
       setPendingPaste((n) => n + 1);
       try {
         const key = await fileDedupKey(file);
-        if (attachmentDedupRef.current.seen(key.hash, key.source)) continue;
+        if (attachmentSeenInDraft(sourceDraftKey, key)) continue;
         const dataUrl = await readFileAsDataURL(file);
         const path = await app.SavePastedImage(dataUrl);
         const previewUrl = await app.AttachmentDataURL(path);
-        rememberAttachment(path, key);
-        setAttachments((prev) => [...prev, { path, previewUrl, displayName: file.name }]);
+        addAttachmentToDraft(sourceDraftKey, { path, previewUrl, displayName: file.name }, key);
       } catch (error) {
         console.warn("[composer] failed to attach pasted image", error);
         showToast(t("composer.attachImageFailed"), "warn");
@@ -966,19 +1188,20 @@ export function Composer({
 
   // Non-image pastes (PDFs, docs): the clipboard hands us bytes, not a path, so
   // the kernel stores them and we reference the saved path — attached, not ignored.
-  const attachOtherFiles = async (files: File[]) => {
+  const attachOtherFiles = async (files: File[], sourceDraftKey: string) => {
     const others = files.filter((f) => !f.type.startsWith("image/"));
     if (others.length === 0) return;
     for (const file of others) {
       setPendingPaste((n) => n + 1);
       try {
         const key = await fileDedupKey(file);
-        if (attachmentDedupRef.current.seen(key.hash, key.source)) continue;
+        if (attachmentSeenInDraft(sourceDraftKey, key)) continue;
         const dataUrl = await readFileAsDataURL(file);
         const path = await app.SavePastedFile(file.name, dataUrl);
-        rememberAttachment(path, key);
-        setAttachments((prev) => [...prev, { path, displayName: file.name }]);
+        addAttachmentToDraft(sourceDraftKey, { path, displayName: file.name }, key);
       } catch {
+        console.warn("[composer] failed to attach pasted file");
+        showToast(t("composer.attachFileFailed"), "warn");
         // non-fatal: a failed attach must not block normal text input
       } finally {
         setPendingPaste((n) => Math.max(0, n - 1));
@@ -987,19 +1210,19 @@ export function Composer({
   };
 
   const attachFiles = (files: File[]) => {
-    void attachImageFiles(files);
-    void attachOtherFiles(files);
+    const sourceDraftKey = activeDraftKeyRef.current;
+    void attachImageFiles(files, sourceDraftKey);
+    void attachOtherFiles(files, sourceDraftKey);
   };
 
-  const attachNativeClipboardImage = async (notifyOnError: boolean) => {
+  const attachNativeClipboardImage = async (notifyOnError: boolean, sourceDraftKey: string) => {
     setPendingPaste((n) => n + 1);
     try {
       const path = await app.SaveClipboardImage();
       const previewUrl = await app.AttachmentDataURL(path);
       const key = { hash: await dataURLHash(previewUrl), source: `native-clipboard:${path}` };
-      if (attachmentDedupRef.current.seen(key.hash, key.source)) return;
-      rememberAttachment(path, key);
-      setAttachments((prev) => [...prev, { path, previewUrl }]);
+      if (attachmentSeenInDraft(sourceDraftKey, key)) return;
+      addAttachmentToDraft(sourceDraftKey, { path, previewUrl }, key);
     } catch (error) {
       console.warn("[composer] failed to read native clipboard image", error);
       if (notifyOnError) showToast(t("composer.pasteImageFailed"), "warn");
@@ -1011,21 +1234,22 @@ export function Composer({
   // OS file drops arrive as absolute paths through the native bridge (the webview
   // withholds them from the HTML drop event); the kernel resolves each into a
   // workspace @reference or a stored attachment.
-  const attachDroppedPaths = async (paths: string[]) => {
+  const attachDroppedPaths = async (paths: string[], sourceDraftKey = activeDraftKeyRef.current) => {
     setDragOver(false);
     for (const path of paths) {
       setPendingPaste((n) => n + 1);
       try {
         const key = { hash: "", source: `path:${path}` };
-        if (attachmentDedupRef.current.seen(key.hash, key.source)) continue;
+        if (attachmentSeenInDraft(sourceDraftKey, key)) continue;
         const item = await app.AttachDropped(path);
         if (item.kind === "workspace") {
-          addWorkspaceReference({ path: item.path, isDir: item.isDir });
+          addWorkspaceReferenceToDraft(sourceDraftKey, { path: item.path, isDir: item.isDir, displayPath: item.displayPath });
         } else {
-          rememberAttachment(item.path, key);
-          setAttachments((prev) => [...prev, { path: item.path, previewUrl: item.previewUrl, displayName: baseName(path) }]);
+          addAttachmentToDraft(sourceDraftKey, { path: item.path, previewUrl: item.previewUrl, displayName: baseName(path) }, key);
         }
       } catch {
+        console.warn("[composer] failed to attach dropped file");
+        showToast(t("composer.attachDropFailed"), "warn");
         // non-fatal: a failed drop attach must not block normal text input
       } finally {
         setPendingPaste((n) => Math.max(0, n - 1));
@@ -1034,7 +1258,7 @@ export function Composer({
   };
 
   useEffect(() => {
-    return onFilesDropped((paths) => void attachDroppedPaths(paths));
+    return onFilesDropped((paths) => void attachDroppedPaths(paths, activeDraftKeyRef.current));
   }, []);
 
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -1050,7 +1274,7 @@ export function Composer({
     const hasImageHint = clipboardHasImageHint(e.clipboardData);
     if (hasImageHint || pasted === "") {
       e.preventDefault();
-      void attachNativeClipboardImage(hasImageHint);
+      void attachNativeClipboardImage(hasImageHint, activeDraftKeyRef.current);
       return;
     }
     if (!shouldFoldPaste(pasted)) return;
@@ -1127,8 +1351,11 @@ export function Composer({
     }
 
     // OS file drops deliver no usable bytes/paths here; the native bridge
-    // (onFilesDropped → AttachDropped) handles them. Just clear the hover state.
-    if (hasFileDrag(e.dataTransfer)) setDragOver(false);
+    // (onFilesDropped -> AttachDropped) handles them. Prevent webview navigation.
+    if (hasFileDrag(e.dataTransfer)) {
+      e.preventDefault();
+      setDragOver(false);
+    }
   };
 
   const onDragOver = (e: DragEvent<HTMLDivElement>) => {
@@ -1144,6 +1371,7 @@ export function Composer({
   // replied, the just-sent text is handed back so we drop it back into the input.
   const handleCancel = () => {
     const restored = onCancel();
+    if (goalModeOn && activeGoal) onClearGoal();
     if (typeof restored === "string") setTextCaretEnd(restored);
   };
 
@@ -1248,18 +1476,29 @@ export function Composer({
     const startHeight = composerHeight ?? card.getBoundingClientRect().height;
     let nextHeight = clampComposerHeight(startHeight);
     let moved = false;
+    card.style.setProperty("--composer-height", `${nextHeight}px`);
+    e.currentTarget.setAttribute("aria-valuenow", String(nextHeight));
+    const liveResize = createRafResizeUpdater({
+      target: card,
+      separator: e.currentTarget,
+      cssVar: "--composer-height",
+    });
     setComposerResizing(true);
     document.body.classList.add("composer-resizing");
 
     const onMove = (event: PointerEvent) => {
       moved = true;
       nextHeight = clampComposerHeight(startHeight + startY - event.clientY);
-      setComposerHeight(nextHeight);
+      liveResize.schedule(nextHeight);
     };
     const onUp = () => {
+      liveResize.flush();
       setComposerResizing(false);
       document.body.classList.remove("composer-resizing");
-      if (moved) saveComposerHeight(nextHeight);
+      if (moved) {
+        setComposerHeight(nextHeight);
+        saveComposerHeight(nextHeight);
+      }
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
       document.removeEventListener("pointercancel", onUp);
@@ -1287,10 +1526,14 @@ export function Composer({
   };
 
   const pickEntry = (e: DirEntry) => {
-    const atPos = text.length - (atRaw?.length ?? 0) - 1; // index of '@'
-    const prefix = text.slice(0, atPos);
+    const picked = composerPickFileEntry(text, atRaw, atDir, e);
+    if (picked.workspaceRef) {
+      setTextCaretEnd(picked.text);
+      addWorkspaceReference(picked.workspaceRef);
+      return;
+    }
     // A directory keeps the menu open (trailing "/"); a file completes it (space).
-    setTextCaretEnd(prefix + "@" + atDir + e.name + (e.isDir ? "/" : " "));
+    setTextCaretEnd(picked.text);
   };
 
   // --- past:chats session reference ---
@@ -1449,9 +1692,10 @@ export function Composer({
 
     if (isPasteShortcut(e) && !composing) {
       clearNativeClipboardPasteTimer();
+      const sourceDraftKey = activeDraftKeyRef.current;
       nativeClipboardPasteTimerRef.current = window.setTimeout(() => {
         nativeClipboardPasteTimerRef.current = null;
-        void attachNativeClipboardImage(false);
+        void attachNativeClipboardImage(false, sourceDraftKey);
       }, 160);
     }
 
@@ -1603,6 +1847,7 @@ export function Composer({
     ? ({ height: `${textareaAutoHeight}px`, overflowY: textareaAutoOverflow ? "auto" : "hidden" } as CSSProperties)
     : undefined;
   const composerAutoExpanded = composerHeight === null && textareaAutoHeight !== null && textareaAutoHeight > 40;
+  const composerResizeValue = composerHeight ?? clampComposerHeight((textareaAutoHeight ?? 0) + COMPOSER_AUTO_RESERVED_HEIGHT);
   void onSetMode;
   const chooseApprovalMode = (nextMode: ToolApprovalMode) => {
     onSetToolApprovalMode(nextMode);
@@ -1855,7 +2100,7 @@ export function Composer({
           <VirtualMenu
             items={atMenuItems}
             activeIndex={active}
-            itemKey={(it) => (it.kind === "pastChats" ? "past:chats" : (it.entry.isDir ? "d:" : "f:") + it.entry.name)}
+            itemKey={(it) => (it.kind === "pastChats" ? "past:chats" : (it.entry.isDir ? "d:" : "f:") + (it.entry.path || it.entry.name))}
             renderItem={(it, i) =>
               it.kind === "pastChats" ? (
                 <button
@@ -1886,7 +2131,7 @@ export function Composer({
                     <FileText size={13} className="filemenu__icon" />
                   )}
                   <span className="slashmenu__name slashmenu__name--file">
-                    {it.entry.name}
+                    {dirEntryMenuLabel(it.entry)}
                     {it.entry.isDir ? "/" : ""}
                   </span>
                 </button>
@@ -1931,11 +2176,11 @@ export function Composer({
             <ComposerContextCard
               key={workspaceReferenceKey(ref)}
               variant="workspace"
-              tooltipLabel={formatWorkspaceReference(ref.path, ref.isDir)}
+              tooltipLabel={ref.displayPath ? formatWorkspaceReference(ref.displayPath, ref.isDir) : formatWorkspaceReference(ref.path, ref.isDir)}
               removeLabel={t("composer.removeReference")}
               onRemove={() => removeWorkspaceReference(ref)}
               folder={Boolean(ref.isDir)}
-              label={ref.isDir ? `${baseName(ref.path)}/` : baseName(ref.path)}
+              label={ref.isDir ? `${baseName(ref.displayPath || ref.path)}/` : baseName(ref.displayPath || ref.path)}
             />
           ))}
           {sessionRefs.map((ref) => (
@@ -1998,14 +2243,19 @@ export function Composer({
         </div>
       )}
       <div
-        className={`composer-card${composerHeight !== null ? " composer-card--resized" : ""}${composerAutoExpanded ? " composer-card--autosized" : ""}${composerResizing ? " composer-card--resizing" : ""}${running ? " composer-card--running" : ""}`}
+        className={`composer-card${composerHeight !== null || composerResizing ? " composer-card--resized" : ""}${composerAutoExpanded ? " composer-card--autosized" : ""}${composerResizing ? " composer-card--resizing" : ""}${running ? " composer-card--running" : ""}`}
         ref={composerCardRef}
         style={composerCardStyle}
       >
         <button
           className="composer-resize-handle"
           type="button"
+          role="separator"
+          aria-orientation="horizontal"
           aria-label={t("composer.resize")}
+          aria-valuemin={COMPOSER_MIN_HEIGHT}
+          aria-valuemax={composerMaxHeight()}
+          aria-valuenow={composerResizeValue}
           title={t("composer.resize")}
           onPointerDown={onComposerResizeStart}
           onKeyDown={onComposerResizeKeyDown}

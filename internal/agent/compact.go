@@ -22,16 +22,17 @@ import (
 // fraction of the window, so a huge window still compacts rarely while a small
 // one still lands below the trigger (which is what stops the re-compaction loop).
 const (
-	defaultSoftCompactRatio   = 0.5   // report growing context here, but keep the cache-stable prefix intact
-	defaultCompactRatio       = 0.8   // trigger: prompt at this fraction of the window compacts
-	defaultCompactForceRatio  = 0.9   // force compaction at this high-water mark even for low-value folds
-	defaultCompactTarget      = 0.5   // safety cap: the kept tail never exceeds this fraction of the window
-	defaultTailTokens         = 16384 // verbatim recent-tail budget, in tokens
-	minRecentKeep             = 2     // never keep fewer recent messages than this
-	minCompactMessages        = 2     // skip compaction below this many compactable messages
-	fallbackTokPerChar        = 0.25  // ~4 chars/token, used before any usage is available to calibrate
-	maxPinnedFirstUserTokens  = 1500  // ceiling on pinning the first user turn verbatim; larger first turns (pasted content) stay foldable
-	pinnedFirstUserWindowFrac = 0.15  // and never pin a first turn worth more than this fraction of the window
+	defaultSoftCompactRatio    = 0.5   // report growing context here, but keep the cache-stable prefix intact
+	defaultToolResultSnipRatio = 0.6   // rewrite stale tool results cheaply before summary compaction
+	defaultCompactRatio        = 0.8   // trigger: prompt at this fraction of the window compacts
+	defaultCompactForceRatio   = 0.9   // force compaction at this high-water mark even for low-value folds
+	defaultCompactTarget       = 0.5   // safety cap: the kept tail never exceeds this fraction of the window
+	defaultTailTokens          = 16384 // verbatim recent-tail budget, in tokens
+	minRecentKeep              = 2     // never keep fewer recent messages than this
+	minCompactMessages         = 2     // skip compaction below this many compactable messages
+	fallbackTokPerChar         = 0.25  // ~4 chars/token, used before any usage is available to calibrate
+	maxPinnedFirstUserTokens   = 1500  // ceiling on pinning the first user turn verbatim; larger first turns (pasted content) stay foldable
+	pinnedFirstUserWindowFrac  = 0.15  // and never pin a first turn worth more than this fraction of the window
 )
 
 // summaryTag wraps the compaction summary so the model can distinguish it from
@@ -86,12 +87,22 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 		return
 	}
 	high := int(float64(a.contextWindow) * a.compactRatio)
+	snip := int(float64(a.contextWindow) * a.toolResultSnipRatio)
 	soft := int(float64(a.contextWindow) * a.softCompactRatio)
 	// Between the soft ratio and the trigger, report growing context once without
 	// rewriting the prefix — a compaction here would needlessly crater the cache.
-	if u.PromptTokens >= soft && u.PromptTokens < high && !a.softCompactNoticed {
+	if u.PromptTokens >= soft && u.PromptTokens < snip && !a.softCompactNoticed {
 		a.softCompactNoticed = true
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("context reached %.0f%% of window; keeping cache-first prefix until compact threshold %.0f%%", a.softCompactRatio*100, a.compactRatio*100)})
+		return
+	}
+	if u.PromptTokens >= snip && u.PromptTokens < high {
+		ratio := a.tokPerChar()
+		if st, err := a.SnipStaleToolResults(); err == nil && st.Results > 0 {
+			saved := int(float64(st.SavedChars) * ratio)
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(
+				"snipped %d stale tool results (~%d tokens est.) before compaction", st.Results, saved)})
+		}
 		return
 	}
 	if u.PromptTokens < high {
@@ -303,6 +314,7 @@ func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
 		Content: "Summary of the later conversation (compacted from here on):\n" + summary,
 	})
 	a.session.Replace(next)
+	a.session.IncrementRewrite()
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("summarized %d later messages → summary", len(region))})
 	return nil
@@ -336,6 +348,7 @@ func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
 	})
 	next = append(next, msgs[toIdx:]...)
 	a.session.Replace(next)
+	a.session.IncrementRewrite()
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("summarized %d earlier messages → summary", len(region))})
 	return nil

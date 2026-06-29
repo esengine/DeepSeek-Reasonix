@@ -7,6 +7,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/command"
+	"reasonix/internal/planmode"
 	"reasonix/internal/skill"
 )
 
@@ -25,7 +26,9 @@ func rawSlashArgs(input string) string {
 // PlanModeMarker is prepended to every user turn while plan mode is on. It rides
 // in the user message (not the system prompt or tools), so the cache-stable
 // prompt prefix is left untouched and the toggle costs nothing in cache hits.
-const PlanModeMarker = "[Plan mode — read-only. Explore the codebase first (read_file, ls, grep, glob, web_fetch, task, ask are available; writers are refused by the harness). Before planning, if a decision that is genuinely the user's — tech stack, an ambiguous requirement, scope, an irreversible choice — would materially shape the plan and you can't settle it from the codebase or a sensible default, use the ask tool to clarify it first; otherwise pick the obvious default and state the assumption in the plan instead of asking. Then present a LAYERED plan as your reply and stop — do not write files, edit, or run side-effecting bash. Structure the plan as a two-level markdown list so it becomes a layered task list: each PHASE is a top-level numbered list item (a coherent milestone, e.g. \"1. Add the config loader\"), and each phase's concrete, verifiable sub-steps are bullets indented beneath it (e.g. \"   - parse the TOML into Config\"). Use plain numbered list items for phases — do NOT write phases as markdown headings (##, ###) — so both levels parse. Keep phases few (about 2-6). The user will be asked to approve before any changes are made.]"
+const PlanModeMarker = planmode.Marker
+
+const legacyPlanModeMarker = "[Plan mode — read-only. Explore the codebase first (read_file, ls, grep, glob, web_fetch, task, ask are available; writers are refused by the harness). Before planning, if a decision that is genuinely the user's — tech stack, an ambiguous requirement, scope, an irreversible choice — would materially shape the plan and you can't settle it from the codebase or a sensible default, use the ask tool to clarify it first; otherwise pick the obvious default and state the assumption in the plan instead of asking. Then present a LAYERED plan as your reply and stop — do not write files, edit, or run side-effecting bash. Structure the plan as a two-level markdown list so it becomes a layered task list: each PHASE is a top-level numbered list item (a coherent milestone, e.g. \"1. Add the config loader\"), and each phase's concrete, verifiable sub-steps are bullets indented beneath it (e.g. \"   - parse the TOML into Config\"). Use plain numbered list items for phases — do NOT write phases as markdown headings (##, ###) — so both levels parse. Keep phases few (about 2-6). The user will be asked to approve before any changes are made.]"
 
 const (
 	activeGoalOpen  = "<active-goal>"
@@ -56,10 +59,15 @@ const (
 // feature, or synthetic user messages injected by the controller).
 func StripComposePrefixes(content string) string {
 	s := agent.StripTransientUserBlocks(content)
-	s = strings.TrimPrefix(s, PlanModeMarker+"\n\n")
-	s = strings.TrimPrefix(s, PlanModeMarker)
+	s = stripComposeMarker(s, PlanModeMarker)
+	s = stripComposeMarker(s, legacyPlanModeMarker)
 	s = strings.TrimSpace(s)
 	return s
+}
+
+func stripComposeMarker(s, marker string) string {
+	s = strings.TrimPrefix(s, marker+"\n\n")
+	return strings.TrimPrefix(s, marker)
 }
 
 // StripReferencedContextPrefix removes the "Referenced context:" preamble and
@@ -150,12 +158,13 @@ var syntheticPrefixes = []string{
 func (c *Controller) Compose(text string) string {
 	c.mu.Lock()
 	plan := c.planMode
+	responseLanguage := c.responseLanguage
 	reasoningLanguage := c.reasoningLanguage
 	c.mu.Unlock()
 	notes := c.memory.drainPending()
 	goal, goalStatus, goalResearchMode := c.goals.snapshot()
 
-	text = composeStableContext(text, plan, goal, goalStatus, goalResearchMode, reasoningLanguage)
+	text = composeStableContext(text, plan, goal, goalStatus, goalResearchMode, responseLanguage, reasoningLanguage)
 
 	// Memory added mid-session rides the turn (never the cached system prefix),
 	// so it takes effect now without invalidating the prompt cache. It folds into
@@ -185,19 +194,21 @@ func (c *Controller) Compose(text string) string {
 func (c *Controller) composeWithoutParentDrains(text string) string {
 	c.mu.Lock()
 	plan := c.planMode
+	responseLanguage := c.responseLanguage
 	reasoningLanguage := c.reasoningLanguage
 	c.mu.Unlock()
 	goal, goalStatus, goalResearchMode := c.goals.snapshot()
-	return composeStableContext(text, plan, goal, goalStatus, goalResearchMode, reasoningLanguage)
+	return composeStableContext(text, plan, goal, goalStatus, goalResearchMode, responseLanguage, reasoningLanguage)
 }
 
-func composeStableContext(text string, plan bool, goal, goalStatus string, goalResearchMode GoalResearchMode, reasoningLanguage string) string {
+func composeStableContext(text string, plan bool, goal, goalStatus string, goalResearchMode GoalResearchMode, responseLanguage, reasoningLanguage string) string {
 	if strings.TrimSpace(goal) != "" && goalStatus == GoalStatusRunning {
 		text = activeGoalBlock(goal, goalResearchMode) + "\n\n" + text
 	}
 	if plan {
 		text = PlanModeMarker + "\n\n" + text
 	}
+	text = agent.WithResponseLanguage(text, responseLanguage)
 	return agent.WithReasoningLanguage(text, reasoningLanguage)
 }
 
@@ -207,8 +218,10 @@ func reasoningLanguageBlock(lang string) string {
 
 func (c *Controller) ComposeSynthetic(text string) string {
 	c.mu.Lock()
+	responseLang := c.responseLanguage
 	lang := c.reasoningLanguage
 	c.mu.Unlock()
+	text = agent.WithResponseLanguage(text, responseLang)
 	return agent.WithReasoningLanguage(text, lang)
 }
 
