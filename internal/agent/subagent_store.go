@@ -382,7 +382,11 @@ func (s *SubagentStore) nearestLineageSource(requestedRef string, spec SubagentS
 }
 
 func (s *SubagentStore) sessionAncestors(current string) ([]string, error) {
-	current = strings.TrimSpace(current)
+	var err error
+	current, err = normalizeLineageSessionID(current)
+	if err != nil {
+		return nil, err
+	}
 	if current == "" {
 		return nil, nil
 	}
@@ -404,7 +408,10 @@ func (s *SubagentStore) sessionAncestors(current string) ([]string, error) {
 		if strings.TrimSpace(meta.ID) != cursor {
 			return nil, fmt.Errorf("branch metadata for session %q declares id %q", cursor, meta.ID)
 		}
-		parent := strings.TrimSpace(meta.ParentID)
+		parent, err := normalizeLineageSessionID(meta.ParentID)
+		if err != nil {
+			return nil, err
+		}
 		if parent == "" {
 			break
 		}
@@ -618,7 +625,11 @@ func validateMeta(meta SubagentMeta, spec SubagentSpec) error {
 }
 
 func requireParentSession(spec SubagentSpec) error {
-	if strings.TrimSpace(spec.ParentSession) == "" {
+	parentSession, err := normalizeLineageSessionID(spec.ParentSession)
+	if err != nil {
+		return err
+	}
+	if parentSession == "" {
 		return fmt.Errorf("subagent transcript parent session is required")
 	}
 	return nil
@@ -656,8 +667,15 @@ func (s *SubagentStore) validateForkOwner(meta SubagentMeta, spec SubagentSpec) 
 }
 
 func (s *SubagentStore) isAncestorSession(ancestor, current string) (bool, error) {
-	ancestor = strings.TrimSpace(ancestor)
-	current = strings.TrimSpace(current)
+	var err error
+	ancestor, err = normalizeLineageSessionID(ancestor)
+	if err != nil {
+		return false, err
+	}
+	current, err = normalizeLineageSessionID(current)
+	if err != nil {
+		return false, err
+	}
 	if ancestor == "" || current == "" {
 		return false, nil
 	}
@@ -681,7 +699,10 @@ func (s *SubagentStore) isAncestorSession(ancestor, current string) (bool, error
 		if cursor == ancestor {
 			return true, nil
 		}
-		parent := strings.TrimSpace(meta.ParentID)
+		parent, err := normalizeLineageSessionID(meta.ParentID)
+		if err != nil {
+			return false, err
+		}
 		cursor = parent
 	}
 	return false, nil
@@ -754,6 +775,27 @@ func validSubagentRef(ref string) bool {
 	}
 	for _, r := range ref {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func normalizeLineageSessionID(id string) (string, error) {
+	trimmed := strings.TrimSpace(id)
+	if trimmed == "" {
+		return "", nil
+	}
+	if trimmed != id || trimmed == "." || trimmed == ".." || !validLineageSessionID(trimmed) {
+		return "", fmt.Errorf("invalid parent session identifier %q", id)
+	}
+	return trimmed, nil
+}
+
+func validLineageSessionID(id string) bool {
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
 			continue
 		}
 		return false

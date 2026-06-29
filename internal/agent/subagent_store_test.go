@@ -509,6 +509,111 @@ func TestSubagentStoreRejectsForkWhenLineageCannotBeProven(t *testing.T) {
 	}
 }
 
+func TestSubagentStoreRejectsUnsafeLineageSessionIDs(t *testing.T) {
+	rootDir := t.TempDir()
+	sessionDir := filepath.Join(rootDir, "sessions")
+	store := NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	outsidePath := filepath.Join(rootDir, "outside.jsonl")
+	if err := SaveBranchMeta(outsidePath, BranchMeta{ID: "../outside"}); err != nil {
+		t.Fatalf("SaveBranchMeta(outside): %v", err)
+	}
+	saveTestBranchMeta(t, sessionDir, "child", "")
+
+	cases := []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "ancestors current traversal",
+			run: func() error {
+				_, err := store.sessionAncestors("../outside")
+				return err
+			},
+		},
+		{
+			name: "ancestor current traversal",
+			run: func() error {
+				_, err := store.isAncestorSession("child", "../outside")
+				return err
+			},
+		},
+		{
+			name: "ancestor target traversal",
+			run: func() error {
+				_, err := store.isAncestorSession("../outside", "child")
+				return err
+			},
+		},
+		{
+			name: "prepare parent traversal",
+			run: func() error {
+				spec := testSubagentSpec(t, "review")
+				spec.ParentSession = "../outside"
+				run, err := store.PrepareFresh(spec)
+				if run != nil {
+					run.Release()
+				}
+				return err
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			requireInvalidLineageSessionID(t, tc.run())
+		})
+	}
+}
+
+func TestSubagentStoreRejectsUnsafeLineageParentIDs(t *testing.T) {
+	rootDir := t.TempDir()
+	sessionDir := filepath.Join(rootDir, "sessions")
+	store := NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	outsidePath := filepath.Join(rootDir, "outside.jsonl")
+	if err := SaveBranchMeta(outsidePath, BranchMeta{ID: "../outside"}); err != nil {
+		t.Fatalf("SaveBranchMeta(outside): %v", err)
+	}
+	saveTestBranchMeta(t, sessionDir, "child", "../outside")
+
+	t.Run("ancestors parent traversal", func(t *testing.T) {
+		_, err := store.sessionAncestors("child")
+		requireInvalidLineageSessionID(t, err)
+	})
+	t.Run("ancestor parent traversal", func(t *testing.T) {
+		_, err := store.isAncestorSession("root", "child")
+		requireInvalidLineageSessionID(t, err)
+	})
+}
+
+func TestSubagentStoreLineageAllowsDottedSessionIDs(t *testing.T) {
+	sessionDir := t.TempDir()
+	store := NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	root := "2026.06.29-root"
+	child := "child.session-1"
+	saveTestBranchMeta(t, sessionDir, root, "")
+	saveTestBranchMeta(t, sessionDir, child, root)
+
+	ancestors, err := store.sessionAncestors(child)
+	if err != nil {
+		t.Fatalf("sessionAncestors: %v", err)
+	}
+	if len(ancestors) != 1 || ancestors[0] != root {
+		t.Fatalf("ancestors = %v, want [%s]", ancestors, root)
+	}
+	ok, err := store.isAncestorSession(root, child)
+	if err != nil {
+		t.Fatalf("isAncestorSession: %v", err)
+	}
+	if !ok {
+		t.Fatalf("isAncestorSession(%q, %q) = false, want true", root, child)
+	}
+}
+
 func TestSubagentStoreForkReleasesSourceLockAfterCopy(t *testing.T) {
 	store := NewSubagentStore(t.TempDir())
 	spec := testSubagentSpec(t, "review")
@@ -712,4 +817,11 @@ func prepareCompletedSubagentForLineageTest(t *testing.T, parentSession string) 
 	}
 	run.Release()
 	return sessionDir, store, run.Ref, spec
+}
+
+func requireInvalidLineageSessionID(t *testing.T, err error) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), "invalid parent session identifier") {
+		t.Fatalf("error = %v, want invalid parent session identifier", err)
+	}
 }
