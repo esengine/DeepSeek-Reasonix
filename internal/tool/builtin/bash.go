@@ -113,7 +113,7 @@ func (b bash) resolved() sandbox.Shell {
 }
 
 func (bash) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"run_in_background":{"type":"boolean","description":"Run detached: returns a job id immediately and keeps running across turns (no foreground timeout). Read new output with bash_output, wait with wait, stop it with kill_shell. Use for long-running commands like servers, watchers, or builds you don't need to block on."},"preserve_background_processes":{"type":"boolean","description":"After the shell command exits normally, keep any process-group members it intentionally left behind. Use only for deliberate daemonization, such as nohup/disown/setsid; cancellation and timeouts still kill the process group."}},"required":["command"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"run_in_background":{"type":"boolean","description":"Run detached: returns a job id immediately and keeps running across turns (no foreground timeout). Read new output with bash_output, wait with wait, stop it with kill_shell. Use for long-running commands like servers, watchers, or builds you don't need to block on."},"preserve_background_processes":{"type":"boolean","description":"After the shell command exits normally, keep any process-group members it intentionally left behind. Use only for deliberate daemonization or session launchers such as nohup/disown/setsid, dev servers, or browser automation commands that must stay alive after the launcher exits, for example playwright-cli open; cancellation and timeouts still kill the process group."}},"required":["command"]}`)
 }
 
 // ReadOnly is false: bash's effect cannot be inferred from args (rm, curl,
@@ -208,11 +208,18 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 	if errors.Is(context.Cause(runCtx), errBashTimeout) {
 		return out, fmt.Errorf("command timed out (> %s)", timeout)
 	}
+	if preservedBackgroundWaitDelay(p.PreserveBackgroundProcesses, err) {
+		return out, nil
+	}
 	if err != nil {
 		// Non-zero exit: feed output and error back so the model can self-correct.
 		return out, fmt.Errorf("command exited: %w", err)
 	}
 	return out, nil
+}
+
+func preservedBackgroundWaitDelay(preserveBackgroundProcesses bool, err error) bool {
+	return preserveBackgroundProcesses && errors.Is(err, exec.ErrWaitDelay)
 }
 
 func shouldReapAfterRun(ctx context.Context, sh sandbox.Shell, command string, preserveBackgroundProcesses bool) bool {
