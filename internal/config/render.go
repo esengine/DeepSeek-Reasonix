@@ -424,6 +424,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		fmt.Fprintf(&b, "app_id = %q\n", c.Bot.QQ.AppID)
 		fmt.Fprintf(&b, "app_secret_env = %q\n", c.Bot.QQ.AppSecretEnv)
 		fmt.Fprintf(&b, "sandbox = %v\n", c.Bot.QQ.Sandbox)
+		if c.Bot.QQ.SystemPrompt != "" {
+			b.WriteString("system_prompt = \"\"\"\n")
+			b.WriteString(c.Bot.QQ.SystemPrompt)
+			b.WriteString("\n\"\"\"\n")
+		}
 		b.WriteString("\n[bot.feishu]\n")
 		fmt.Fprintf(&b, "enabled = %v\n", c.Bot.Feishu.Enabled)
 		fmt.Fprintf(&b, "app_id = %q\n", c.Bot.Feishu.AppID)
@@ -438,6 +443,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		fmt.Fprintf(&b, "account_id = %q\n", c.Bot.Weixin.AccountID)
 		fmt.Fprintf(&b, "token_env = %q\n", c.Bot.Weixin.TokenEnv)
 		fmt.Fprintf(&b, "api_base = %q\n", c.Bot.Weixin.APIBase)
+		if c.Bot.Weixin.SystemPrompt != "" {
+			b.WriteString("system_prompt = \"\"\"\n")
+			b.WriteString(c.Bot.Weixin.SystemPrompt)
+			b.WriteString("\n\"\"\"\n")
+		}
 		for _, conn := range c.Bot.Connections {
 			b.WriteString("\n[[bot.connections]]\n")
 			fmt.Fprintf(&b, "id = %q\n", conn.ID)
@@ -454,6 +464,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			}
 			if conn.WorkspaceRoot != "" {
 				fmt.Fprintf(&b, "workspace_root = %q\n", conn.WorkspaceRoot)
+			}
+			if conn.SystemPrompt != "" {
+				b.WriteString("system_prompt = \"\"\"\n")
+				b.WriteString(conn.SystemPrompt)
+				b.WriteString("\n\"\"\"\n")
 			}
 			if conn.LastError != "" {
 				fmt.Fprintf(&b, "last_error = %q\n", conn.LastError)

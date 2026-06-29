@@ -474,13 +474,22 @@ func (a *adapter) handleIlinkMessage(m ilinkMessage) {
 		if item.Type == weixinItemText {
 			continue
 		}
+		// dump full item for debugging
+		if item.Type != weixinItemText {
+			if jsonStr, jsonErr := json.Marshal(item); jsonErr == nil {
+				a.logger.Info("weixin non-text item", "type", item.Type, "raw", string(jsonStr))
+			}
+		}
 		if item.ImageItem.URL != "" {
 			mediaURLs = append(mediaURLs, item.ImageItem.URL)
 		}
 	}
+	if len(mediaURLs) > 0 {
+		a.logger.Info("weixin image received", "count", len(mediaURLs), "urls", mediaURLs)
+	}
 	// 只有纯文本才跳过，有图片时即使 text 为空也要继续
 	if text == "" && len(mediaURLs) == 0 {
-		a.logger.Info("weixin message ignored", "reason", "empty_text", "from", logHash(m.FromUserID), "message", logHash(string(m.MessageID)))
+		a.logger.Info("weixin message ignored", "reason", "empty_text", "from", logHash(m.FromUserID), "message", logHash(string(m.MessageID)), "msg_type", m.MsgType, "item_count", len(m.ItemList))
 		return
 	}
 	chatType, chatID := guessIlinkChat(m, a.accountID())

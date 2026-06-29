@@ -54,6 +54,7 @@ type ChannelConfig struct {
 	Model            string
 	ToolApprovalMode string
 	WorkspaceRoot    string
+	SystemPrompt     string
 }
 
 // AdapterBinding attaches an adapter instance to one saved bot connection.
@@ -356,6 +357,44 @@ func (gw *BotGateway) handleMessage(ctx context.Context, binding AdapterBinding,
 	}
 
 	gw.runTurn(ctx, binding.Adapter, key, msg)
+
+	// turn 完成后，drain msgCh 中同 session 的消息，注入历史上下文
+	gw.drainSameSessionMsg(ctx, key, binding, msg.Platform)
+}
+
+// drainSameSessionMsg 在 turn 完成后，清空 msgCh 中同 session 的排队消息，
+// 将它们注入 session 历史作为上下文（不触发 AI 回复）。
+func (gw *BotGateway) drainSameSessionMsg(ctx context.Context, key string, binding AdapterBinding, plat Platform) {
+	// 非阻塞读取 msgCh，收集同 session 的消息
+	var skipped []string
+	msgCh := binding.Adapter.Messages()
+	for {
+		select {
+		case next := <-msgCh:
+			nextKey := BuildSessionKey(next.Session())
+			if nextKey == key {
+				if next.Text != "" {
+					skipped = append(skipped, next.Text)
+				}
+				continue
+			}
+			// 不同 session 的消息放不回去了... 直接丢弃（容错）
+			gw.logger.Warn("dropped cross-session message due to drain", "session", key[:8], "other_session", nextKey[:8])
+		default:
+			// 通道空，结束
+			if len(skipped) > 0 {
+				merged := strings.Join(skipped, "\n")
+				gw.mu.Lock()
+				state := gw.controllers[key]
+				gw.mu.Unlock()
+				if state != nil && state.ctrl != nil {
+					state.ctrl.AddUserMessage(merged)
+					gw.logger.Info("injected skipped messages into session history", "session", key[:8], "count", len(skipped), "chars", len(merged))
+				}
+			}
+			return
+		}
+	}
 }
 
 func (gw *BotGateway) addPendingReaction(ctx context.Context, plat Platform, adapter Adapter, msg InboundMessage) {
@@ -784,6 +823,11 @@ func toolApprovalModeLabel(mode string) string {
 func (gw *BotGateway) runTurn(ctx context.Context, adapter Adapter, key string, msg InboundMessage) {
 	gw.logger.Info("bot turn started", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8])
 	defer func() {
+		if r := recover(); r != nil {
+			gw.logger.Error("turn panicked", "session", key[:8], "recover", r)
+			gw.sessions.ForceRelease(key)
+			return
+		}
 		// 检查是否有等待队列中的消息
 		next := gw.sessions.Release(key)
 		if next != nil {
@@ -841,8 +885,9 @@ func (gw *BotGateway) runTurn(ctx context.Context, adapter Adapter, key string, 
 	state.sink.setTarget(sink)
 	defer state.sink.setTarget(nil)
 
-	// 创建带取消的 context
-	turnCtx, cancel := context.WithCancel(ctx)
+	// 创建带取消和超时的 context
+	turnTimeout := 120 * time.Second
+	turnCtx, cancel := context.WithTimeout(ctx, turnTimeout)
 	defer cancel()
 
 	gw.mu.Lock()
@@ -880,6 +925,15 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	gw.logger.Info("bot session creating", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8], "model", model, "workspace_set", strings.TrimSpace(workspaceRoot) != "", "tool_approval_mode", normalizeBotToolApprovalMode(toolApprovalMode))
 	// convert configured plugins to plugin specs for boot
 	pluginSpecs := boot.PluginSpecs(gw.cfg.Plugins)
+	// 解析 system prompt：优先使用 per-platform 通道配置
+	sysPrompt := gw.cfg.SystemPrompt
+	if ch, ok := gw.cfg.Channels[msg.Platform]; ok && ch.SystemPrompt != "" {
+		sysPrompt = ch.SystemPrompt
+	} else if connCh, ok := gw.cfg.ConnectionChannels[msg.ConnectionID]; ok && connCh.SystemPrompt != "" {
+		sysPrompt = connCh.SystemPrompt
+	}
+	gw.logger.Info("bot system prompt resolved", "platform", msg.Platform, "connection", msg.ConnectionID, "has_channel", gw.cfg.Channels[msg.Platform].SystemPrompt != "", "sysprompt_len", len(sysPrompt))
+
 	ctrl, err := boot.Build(ctx, boot.Options{
 		Model:         model,
 		MaxSteps:      gw.cfg.MaxSteps,
@@ -887,7 +941,7 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 		Sink:          sessionSink,
 		WorkspaceRoot: workspaceRoot,
 		SessionDir:    botSessionDir(workspaceRoot),
-		SystemPromptOverride: gw.cfg.SystemPrompt,
+		SystemPromptOverride: sysPrompt,
 		ExtraPlugins:  pluginSpecs,
 	})
 	if err != nil {

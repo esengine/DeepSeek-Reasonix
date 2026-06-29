@@ -81,6 +81,15 @@ func botStart(args []string, version string) int {
 
 	requestedChannels := splitBotChannels(*channels)
 	enabledPlatforms, unknownChannels := botruntime.EnabledPlatforms(cfg, requestedChannels)
+	// force enable requested channels even if disabled in config (for CLI-only channels)
+	for _, ch := range requestedChannels {
+		if plat := bot.Platform(strings.TrimSpace(ch)); plat != "" {
+			// Also add platforms that are missing OR disabled
+			if enabled, ok := enabledPlatforms[plat]; !ok || !enabled {
+				enabledPlatforms[plat] = true
+			}
+		}
+	}
 	for _, ch := range unknownChannels {
 		fmt.Fprintf(os.Stderr, "warning: unknown channel %q\n", ch)
 	}
@@ -102,6 +111,7 @@ func botStart(args []string, version string) int {
 		WorkspaceRoot:      workspaceRoot,
 		Channels:           botruntime.ChannelConfigs(cfg.Bot.Connections, *model == "", *dir == ""),
 		ConnectionChannels: botruntime.ConnectionChannelConfigs(cfg.Bot.Connections, *model == "", *dir == ""),
+
 		Enabled:            enabledPlatforms,
 		Allowlist: bot.AllowlistConfig{
 			Enabled:  cfg.Bot.Allowlist.Enabled,
@@ -122,6 +132,25 @@ func botStart(args []string, version string) int {
 		OnInbound:      rememberInboundRemote,
 		OnSessionReady: botruntime.NewSessionRemembererWithWorkspace(logger, workspaceRoot),
 	}
+	// per-platform SystemPrompt from legacy [bot.qq] / [bot.weixin]
+	if gwCfg.Channels == nil {
+		gwCfg.Channels = make(map[bot.Platform]bot.ChannelConfig)
+	}
+	// per-platform SystemPrompt: fill if missing or empty in channels
+	fillPlatPrompt := func(plat bot.Platform, prompt string) {
+		if prompt == "" {
+			return
+		}
+		ch, ok := gwCfg.Channels[plat]
+		if !ok {
+			gwCfg.Channels[plat] = bot.ChannelConfig{SystemPrompt: prompt}
+		} else if ch.SystemPrompt == "" {
+			ch.SystemPrompt = prompt
+			gwCfg.Channels[plat] = ch
+		}
+	}
+	fillPlatPrompt(bot.PlatformQQ, cfg.Bot.QQ.SystemPrompt)
+	fillPlatPrompt(bot.PlatformWeixin, cfg.Bot.Weixin.SystemPrompt)
 
 	feishuDomains := botruntime.RequestedFeishuDomains(requestedChannels)
 	gw := bot.NewGatewayWithAdapterBindings(gwCfg, botruntime.AdapterBindings(cfg, enabledPlatforms, feishuDomains, logger), logger)

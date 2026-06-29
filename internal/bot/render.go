@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -214,18 +216,77 @@ func (s *renderSink) flushPrefix(idx int) {
 		s.lastFlush = time.Now()
 		return
 	}
+
+	// 解析 [图片:路径] 标记，提取图片路径到 MediaURLs
+	cleanText, mediaURLs := extractImageRefs(text)
+
 	_ = s.send(OutboundMessage{
 		ConnectionID: s.connID,
 		Domain:       s.domain,
 		ChatID:       s.chatID,
 		ChatType:     s.chatType,
-		Text:         text,
+		Text:         cleanText,
+		MediaURLs:    mediaURLs,
 		ReplyToMsgID: s.replyTo,
 	})
 	remaining := raw[idx:]
 	s.buf.Reset()
 	s.buf.WriteString(remaining)
 	s.lastFlush = time.Now()
+}
+
+// extractImageRefs 从文本中提取 [图片:路径] 标记，返回清理后的文本和有效的图片路径列表。
+func extractImageRefs(text string) (string, []string) {
+	const prefix = "[图片:"
+	const suffix = "]"
+
+	var clean strings.Builder
+	var paths []string
+	remaining := text
+
+	for {
+		start := strings.Index(remaining, prefix)
+		if start < 0 {
+			clean.WriteString(remaining)
+			break
+		}
+		clean.WriteString(remaining[:start])
+		afterPrefix := start + len(prefix)
+		end := strings.Index(remaining[afterPrefix:], suffix)
+		if end < 0 {
+			clean.WriteString(remaining[start:])
+			break
+		}
+		path := strings.TrimSpace(remaining[afterPrefix : afterPrefix+end])
+
+		if path != "" {
+			// URL paths go directly (no file check needed)
+			if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+				paths = append(paths, path)
+				slog.Debug("extractImageRefs found image URL", "url", path)
+			} else {
+				absPath, err := filepath.Abs(path)
+				if err == nil {
+					if info, statErr := os.Stat(absPath); statErr == nil && !info.IsDir() {
+						paths = append(paths, absPath)
+						slog.Debug("extractImageRefs found image", "path", absPath, "size", info.Size())
+					} else {
+						slog.Warn("extractImageRefs file not found or is dir", "path", absPath, "err", statErr)
+					}
+				} else {
+					slog.Warn("extractImageRefs abs failed", "path", path, "err", err)
+				}
+			}
+		} else {
+			slog.Debug("extractImageRefs empty path in marker")
+		}
+
+		remaining = remaining[afterPrefix+end+len(suffix):]
+		// 吃掉后面的空格
+		remaining = strings.TrimLeft(remaining, " ")
+	}
+
+	return strings.TrimSpace(clean.String()), paths
 }
 
 func (s *renderSink) sendProgress(text string, force bool) {

@@ -1327,6 +1327,21 @@ func (c *Controller) SteerConsumed() bool {
 	return true
 }
 
+// AddUserMessage 向对话历史中插入一条用户消息，不触发 AI 回复。
+func (c *Controller) AddUserMessage(content string) {
+	c.mu.Lock()
+	exec := c.executor
+	if exec == nil {
+		c.mu.Unlock()
+		return
+	}
+	sess := exec.Session()
+	c.mu.Unlock()
+	if sess != nil {
+		sess.Add(provider.Message{Role: provider.RoleUser, Content: content})
+	}
+}
+
 // Ask implements agent.Asker: it emits an AskRequest and blocks until
 // AnswerQuestion(ID, …) answers or ctx is cancelled. promptMu serialises it
 // against tool-approval prompts so at most one user prompt is outstanding.

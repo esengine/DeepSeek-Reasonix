@@ -132,7 +132,10 @@ func ChannelConfigs(connections []config.BotConnectionConfig, includeModel bool,
 		if value := normalizeToolApprovalMode(conn.ToolApprovalMode); value != "" {
 			channel.ToolApprovalMode = value
 		}
-		if channel.Model != "" || channel.WorkspaceRoot != "" || channel.ToolApprovalMode != "" {
+		if value := strings.TrimSpace(conn.SystemPrompt); value != "" {
+			channel.SystemPrompt = value
+		}
+		if channel.Model != "" || channel.WorkspaceRoot != "" || channel.ToolApprovalMode != "" || channel.SystemPrompt != "" {
 			out[plat] = channel
 		}
 	}
@@ -165,7 +168,10 @@ func ConnectionChannelConfigs(connections []config.BotConnectionConfig, includeM
 		if value := normalizeToolApprovalMode(conn.ToolApprovalMode); value != "" {
 			channel.ToolApprovalMode = value
 		}
-		if channel.Model != "" || channel.WorkspaceRoot != "" || channel.ToolApprovalMode != "" {
+		if value := strings.TrimSpace(conn.SystemPrompt); value != "" {
+			channel.SystemPrompt = value
+		}
+		if channel.Model != "" || channel.WorkspaceRoot != "" || channel.ToolApprovalMode != "" || channel.SystemPrompt != "" {
 			out[id] = channel
 		}
 	}

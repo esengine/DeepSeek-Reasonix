@@ -431,13 +431,15 @@ type QQBotConfig struct {
 	Enabled      bool   `toml:"enabled"`
 	AppID        string `toml:"app_id"`
 	AppSecretEnv string `toml:"app_secret_env"` // 环境变量名，如 QQ_BOT_APP_SECRET
-	Sandbox      bool   `toml:"sandbox"`        // true 使用 QQ 沙箱 API / gateway
+	SystemPrompt string `toml:"system_prompt"`
+	Sandbox      bool   `toml:"sandbox"` // true 使用 QQ 沙箱 API / gateway
 }
 
 // FeishuBotConfig 飞书自建应用 Bot 配置。
 type FeishuBotConfig struct {
 	Enabled           bool   `toml:"enabled"`
-	Domain            string `toml:"domain"` // feishu（默认）| lark
+	Domain            string `toml:"domain"`             // feishu（默认）| lark
+	SystemPrompt      string `toml:"system_prompt"`
 	AppID             string `toml:"app_id"`
 	AppSecretEnv      string `toml:"app_secret_env"`     // 如 FEISHU_BOT_APP_SECRET
 	VerificationToken string `toml:"verification_token"` // 事件订阅验证 token
@@ -448,10 +450,11 @@ type FeishuBotConfig struct {
 
 // WeixinBotConfig 微信 iLink Bot 配置。
 type WeixinBotConfig struct {
-	Enabled   bool   `toml:"enabled"`
-	AccountID string `toml:"account_id"`
-	TokenEnv  string `toml:"token_env"` // 环境变量名，如 WEIXIN_BOT_TOKEN
-	APIBase   string `toml:"api_base"`  // iLink API base URL
+	Enabled      bool   `toml:"enabled"`
+	AccountID    string `toml:"account_id"`
+	TokenEnv     string `toml:"token_env"`     // 环境变量名，如 WEIXIN_BOT_TOKEN
+	SystemPrompt string `toml:"system_prompt"`
+	APIBase      string `toml:"api_base"` // iLink API base URL
 }
 
 // BotConnectionConfig is the desktop-friendly connection record for IM bot
@@ -468,6 +471,7 @@ type BotConnectionConfig struct {
 	Model            string                        `toml:"model"`
 	ToolApprovalMode string                        `toml:"tool_approval_mode"`
 	WorkspaceRoot    string                        `toml:"workspace_root"`
+	SystemPrompt     string                        `toml:"system_prompt"`
 	Credential       BotConnectionCredential       `toml:"credential"`
 	SessionMappings  []BotConnectionSessionMapping `toml:"session_mappings"`
 	LastError        string                        `toml:"last_error"`
