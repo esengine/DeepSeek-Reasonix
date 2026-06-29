@@ -157,6 +157,27 @@ func TestRecallToolReadsMemoryByName(t *testing.T) {
 	}
 }
 
+func TestRecallToolReadsMemoryByListedMarkdownName(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	saveMemory(t, store, Memory{
+		Name:        "user-prefers-tabs",
+		Title:       "Prefers tabs",
+		Description: "User prefers tabs for indentation",
+		Type:        TypeUser,
+		Body:        "Use tabs unless the repository style clearly says otherwise.",
+	})
+
+	out, err := NewRecallTool(store).Execute(context.Background(), []byte(`{"operation":"read","name":"user-prefers-tabs.md"}`))
+	if err != nil {
+		t.Fatalf("Execute read with listed markdown name: %v", err)
+	}
+	for _, want := range []string{"Memory user-prefers-tabs", "type: user", "Use tabs"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("read output missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestRecallToolListsAndFiltersByType(t *testing.T) {
 	store := Store{Dir: t.TempDir()}
 	saveMemory(t, store, Memory{Name: "one", Description: "project fact", Type: TypeProject, Body: "body"})
