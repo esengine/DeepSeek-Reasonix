@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"reasonix/internal/event"
+	"reasonix/internal/i18n"
 	"reasonix/internal/sandbox"
 )
 
@@ -146,7 +147,7 @@ func TestRunShell_FailingCommand(t *testing.T) {
 }
 
 func TestRunShell_CancelStopsCommand(t *testing.T) {
-	sink, done, _ := collectSink()
+	sink, done, events := collectSink()
 	ctrl := &Controller{sink: sink}
 
 	command := "sleep 30"
@@ -165,5 +166,21 @@ func TestRunShell_CancelStopsCommand(t *testing.T) {
 	e := waitForDoneWithin(t, done, shellWaitDelay+10*time.Second)
 	if e.Kind != event.TurnDone {
 		t.Fatalf("done event kind = %v, want TurnDone", e.Kind)
+	}
+	if e.Err != nil {
+		t.Fatalf("cancelled shell TurnDone err = %v, want nil", e.Err)
+	}
+	var result *event.Event
+	for i := range *events {
+		if (*events)[i].Kind == event.ToolResult {
+			result = &(*events)[i]
+			break
+		}
+	}
+	if result == nil {
+		t.Fatal("expected ToolResult for cancelled shell")
+	}
+	if result.Tool.Err != i18n.M.TurnCancelled {
+		t.Fatalf("cancelled shell result err = %q, want %q", result.Tool.Err, i18n.M.TurnCancelled)
 	}
 }

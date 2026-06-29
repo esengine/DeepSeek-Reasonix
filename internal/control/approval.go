@@ -74,15 +74,38 @@ func (a *approvalManager) preApproved(tool, subject string) bool {
 	return a.bypassAllowsLocked(tool) || a.sessionGrantAllowsLocked(tool, subject)
 }
 
+// preApprovedForDecision reports whether a prompt can be skipped for a decision
+// class. Fresh user decisions may reuse an explicit session grant, but they are
+// never answered by YOLO/full-access or the approved-plan execution window.
+func (a *approvalManager) preApprovedForDecision(tool, subject string, fresh bool) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if fresh {
+		return a.sessionGrantAllowsLocked(tool, subject)
+	}
+	return a.bypassAllowsLocked(tool) || a.sessionGrantAllowsLocked(tool, subject)
+}
+
 // register allocates an approval ID, records the pending prompt, and returns the
 // reply channel the resolve path will signal.
-func (a *approvalManager) register(tool, subject string) (string, chan approvalReply) {
+func (a *approvalManager) register(tool, subject, reason string) (string, chan approvalReply) {
+	return a.registerDecision(tool, subject, reason, false)
+}
+
+// registerDecision allocates an approval ID for either an ordinary tool
+// permission or a fresh user decision. Fresh decisions are not auto-drained when
+// the user switches to auto/yolo tool approval while the prompt is visible.
+func (a *approvalManager) registerDecision(tool, subject, reason string, fresh bool) (string, chan approvalReply) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.nextID++
 	id := strconv.Itoa(a.nextID)
 	reply := make(chan approvalReply, 1)
-	a.approvals[id] = pendingApproval{tool: tool, subject: subject, autoDrain: a.autoApprovalWouldAllowLocked(tool, subject), reply: reply}
+	autoDrain := false
+	if !fresh {
+		autoDrain = a.autoApprovalWouldAllowLocked(tool, subject)
+	}
+	a.approvals[id] = pendingApproval{tool: tool, subject: subject, reason: reason, fresh: fresh, autoDrain: autoDrain, reply: reply}
 	return id, reply
 }
 
@@ -199,7 +222,7 @@ func (a *approvalManager) snapshotPrompts() ([]event.Approval, []event.Ask) {
 	defer a.mu.Unlock()
 	approvals := make([]event.Approval, 0, len(a.approvals))
 	for id, p := range a.approvals {
-		approvals = append(approvals, event.Approval{ID: id, Tool: p.tool, Subject: p.subject})
+		approvals = append(approvals, event.Approval{ID: id, Tool: p.tool, Subject: p.subject, Reason: p.reason})
 	}
 	asks := make([]event.Ask, 0, len(a.asks))
 	for id, p := range a.asks {
@@ -244,7 +267,7 @@ func (a *approvalManager) sessionGrantAllowsLocked(tool, subject string) bool {
 func (a *approvalManager) drainLocked(includeExplicitAsk bool) []chan approvalReply {
 	pending := make([]chan approvalReply, 0, len(a.approvals))
 	for id, approval := range a.approvals {
-		if requiresFreshApprovalTool(approval.tool) {
+		if approval.fresh || requiresFreshApprovalTool(approval.tool) {
 			continue
 		}
 		if !includeExplicitAsk && !approval.autoDrain {

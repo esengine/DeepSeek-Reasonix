@@ -87,6 +87,22 @@ func TestCacheInvalidatesOnSpecHashMismatch(t *testing.T) {
 	}
 }
 
+func TestCacheInvalidatesWhenReadOnlyTrustChanges(t *testing.T) {
+	redirectCache(t)
+	spec := sampleSpec()
+	spec.ReadOnlyToolNames = map[string]bool{"echo": true}
+	spec.ReadOnlyModelToolNames = map[string]bool{"mcp__my-server__search": true}
+	hash := SpecFingerprint(spec)
+	if err := SaveCachedSchema(spec.Name, sampleCachedSchema(hash)); err != nil {
+		t.Fatalf("SaveCachedSchema: %v", err)
+	}
+
+	withoutTrust := sampleSpec()
+	if _, ok := LoadCachedSchema(spec.Name, SpecFingerprint(withoutTrust)); ok {
+		t.Fatal("LoadCachedSchema: hit after trusted read-only config changed")
+	}
+}
+
 func TestCacheCorruptedFileReturnsFalse(t *testing.T) {
 	redirectCache(t)
 	p := cachePath("broken")

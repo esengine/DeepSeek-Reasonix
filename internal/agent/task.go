@@ -691,6 +691,7 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 		CompactForceRatio: t.compactForceRatio,
 		ArchiveDir:        t.archiveDir,
 		KeepPolicy:        t.keepPolicy,
+		ResponseLanguage:  ResponseLanguageFromContext(ctx),
 		ReasoningLanguage: ReasoningLanguageFromContext(ctx),
 	}, sink)
 }

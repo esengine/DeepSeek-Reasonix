@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"testing"
 	"time"
-
-	runtimecanary "reasonix/internal/runtime/canary"
 )
 
 func TestCompressCausalEdgesRetainsAnchorsAndCounts(t *testing.T) {
@@ -21,27 +19,12 @@ func TestCompressCausalEdgesRetainsAnchorsAndCounts(t *testing.T) {
 			Relation: relation,
 		})
 	}
-	hardening := &ProductionHardeningTrace{
-		CanaryDiff: runtimecanary.BehaviorDiff{
-			Attribution: runtimecanary.CausalAttribution{
-				PrimaryCause: "decision_changed",
-				Factors: []runtimecanary.CausalFactor{{
-					Layer:    "control",
-					Cause:    "decision_changed",
-					Severity: "high",
-				}},
-			},
-		},
-	}
-	compressed := compressCausalEdges(edges, hardening, 12)
+	compressed := compressCausalEdges(edges, 12)
 	if compressed.TotalEdges != 40 || compressed.RetainedEdges != 12 || compressed.DroppedEdges != 28 {
 		t.Fatalf("unexpected edge counts: %+v", compressed)
 	}
 	if compressed.RelationCounts["explains_divergence"] != 8 || compressed.RelationCounts["influenced"] != 32 {
 		t.Fatalf("relation counts lost causality: %+v", compressed.RelationCounts)
-	}
-	if len(compressed.PrimaryCauses) == 0 || compressed.PrimaryCauses[0] != "control:decision_changed" {
-		t.Fatalf("missing primary cause attribution: %+v", compressed.PrimaryCauses)
 	}
 	for _, edge := range compressed.AnchorEdges[:8] {
 		if edge.Relation != "explains_divergence" {
@@ -98,10 +81,9 @@ func TestCausalCompressionSummarizesStateAndRetainsImportantMemory(t *testing.T)
 		})
 	}
 	st := state{
-		Nodes:          nodes,
-		Edges:          []MemoryEdge{{From: "truth-old", To: "trace-1", Relation: "supports"}},
-		ControlReports: []ControlReport{{TraceID: "previous", Mode: "balanced"}},
-		NoisyRefs:      map[string]int{},
+		Nodes:     nodes,
+		Edges:     []MemoryEdge{{From: "truth-old", To: "trace-1", Relation: "supports"}},
+		NoisyRefs: map[string]int{},
 	}
 	tr := ExecutionTrace{
 		ID:           "trace-compression-state",
@@ -152,7 +134,7 @@ func TestCompressCausalEdgesRetainsLongTailRelation(t *testing.T) {
 		Relation: "rare_relation",
 	})
 
-	compressed := compressCausalEdges(edges, nil, 12)
+	compressed := compressCausalEdges(edges, 12)
 	if compressed.RetainedEdges != 12 {
 		t.Fatalf("retained edges = %d, want 12", compressed.RetainedEdges)
 	}
@@ -278,7 +260,7 @@ func TestCrossGraphAlignmentCapsOverCoupling(t *testing.T) {
 	causal := compressCausalEdges([]CausalEdge{
 		{From: "memory-1", To: "decision:coupled", Relation: "influenced"},
 		{From: "constraint-1", To: "decision:coupled", Relation: "constrained"},
-	}, nil, maxCompressedCausalAnchors)
+	}, maxCompressedCausalAnchors)
 	memory := MemoryGraphCompression{
 		RelationCounts: map[string]int{
 			"supports":   3,
@@ -311,7 +293,7 @@ func TestCausalSignalDynamicsKeepsSharpHierarchy(t *testing.T) {
 		To:       "outcome:sharp",
 		Relation: "influenced",
 	})
-	causal := compressCausalEdges(edges, nil, maxCompressedCausalAnchors)
+	causal := compressCausalEdges(edges, maxCompressedCausalAnchors)
 	dynamics := causalSignalDynamics(causal, CrossGraphAlignment{IndependenceStatus: "independent"})
 	if dynamics.OverRegularized {
 		t.Fatalf("sharp causal hierarchy was misclassified as over-regularized: %+v", dynamics)

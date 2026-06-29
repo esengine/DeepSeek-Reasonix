@@ -33,10 +33,12 @@ func (f *fakeAutoPlanClassifier) NeedsPlan(ctx context.Context, input string, sc
 type fakeTurnRunner struct {
 	inputs               []string
 	memoryCompilerInputs []string
+	memoryCompilerSkips  []bool
 }
 
 func (f *fakeTurnRunner) Run(ctx context.Context, input string) error {
 	f.inputs = append(f.inputs, input)
+	f.memoryCompilerSkips = append(f.memoryCompilerSkips, agent.MemoryCompilerSkipFromContext(ctx))
 	if source, ok := agent.MemoryCompilerSourceInputFromContext(ctx); ok {
 		f.memoryCompilerInputs = append(f.memoryCompilerInputs, source)
 	}
@@ -45,7 +47,12 @@ func (f *fakeTurnRunner) Run(ctx context.Context, input string) error {
 
 type fakeLanguageRunner struct {
 	fakeTurnRunner
-	lang string
+	responseLang string
+	lang         string
+}
+
+func (f *fakeLanguageRunner) SetResponseLanguage(lang string) {
+	f.responseLang = lang
 }
 
 func (f *fakeLanguageRunner) SetReasoningLanguage(lang string) {
@@ -148,6 +155,22 @@ func TestComposeReasoningLanguagePreference(t *testing.T) {
 	}
 }
 
+func TestRunComposesResponseLanguagePreference(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	c := New(Options{ResponseLanguage: "en", Runner: runner})
+
+	if err := c.Run(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.inputs) != 1 {
+		t.Fatalf("runner inputs = %d, want 1", len(runner.inputs))
+	}
+	got := runner.inputs[0]
+	if !strings.HasPrefix(got, "<response-language>") || !strings.Contains(got, "use English") || !strings.HasSuffix(got, "hi") {
+		t.Fatalf("headless Run should compose the response language preference, got %q", got)
+	}
+}
+
 func TestRunComposesReasoningLanguagePreference(t *testing.T) {
 	runner := &fakeTurnRunner{}
 	c := New(Options{ReasoningLanguage: "zh", Runner: runner})
@@ -164,6 +187,21 @@ func TestRunComposesReasoningLanguagePreference(t *testing.T) {
 	}
 }
 
+func TestSetResponseLanguageUpdatesRunner(t *testing.T) {
+	runner := &fakeLanguageRunner{}
+	c := New(Options{Runner: runner})
+
+	c.SetResponseLanguage("en")
+	if runner.responseLang != "en" {
+		t.Fatalf("runner response language = %q, want en", runner.responseLang)
+	}
+
+	c.SetResponseLanguage("auto")
+	if runner.responseLang != "auto" {
+		t.Fatalf("runner response language = %q, want auto", runner.responseLang)
+	}
+}
+
 func TestSetReasoningLanguageUpdatesRunner(t *testing.T) {
 	runner := &fakeLanguageRunner{}
 	c := New(Options{Runner: runner})
@@ -176,6 +214,18 @@ func TestSetReasoningLanguageUpdatesRunner(t *testing.T) {
 	c.SetReasoningLanguage("auto")
 	if runner.lang != "auto" {
 		t.Fatalf("runner reasoning language = %q, want auto", runner.lang)
+	}
+}
+
+func TestComposeSyntheticResponseLanguagePreference(t *testing.T) {
+	c := New(Options{ResponseLanguage: "en"})
+
+	got := c.ComposeSynthetic(planApprovedMessage)
+	if !strings.HasPrefix(got, "<response-language>") || !strings.Contains(got, "use English") || !strings.HasSuffix(got, planApprovedMessage) {
+		t.Fatalf("ComposeSynthetic should prefix response language, got %q", got)
+	}
+	if !IsSyntheticUserMessage(got) {
+		t.Fatalf("response-language-prefixed plan approval should still be synthetic")
 	}
 }
 

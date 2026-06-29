@@ -542,6 +542,81 @@ func TestGatewayYoloCommandUpdatesCurrentSessionAndConnectionDefault(t *testing.
 	}
 }
 
+func TestGatewayUpdateConnectionToolApprovalModeUpdatesHashedActiveSessions(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{
+		ToolApprovalMode: "ask",
+		ConnectionChannels: map[string]ChannelConfig{
+			"feishu-lark": {ToolApprovalMode: "yolo"},
+		},
+	}, nil, logger)
+
+	msg := InboundMessage{
+		Platform:     PlatformFeishu,
+		ConnectionID: "feishu-lark",
+		Domain:       "lark",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+	}
+	key := BuildSessionKey(msg.Session())
+	if strings.HasPrefix(key, msg.ConnectionID) {
+		t.Fatalf("test setup expected hashed key, got %q", key)
+	}
+	ctrl := control.New(control.Options{})
+	ctrl.SetToolApprovalMode(control.ToolApprovalYolo)
+	gw.controllers[key] = &sessionState{ctrl: ctrl, platform: msg.Platform, connectionID: msg.ConnectionID}
+
+	gw.UpdateConnectionToolApprovalMode("feishu-lark", control.ToolApprovalAsk)
+
+	if got := ctrl.ToolApprovalMode(); got != control.ToolApprovalAsk {
+		t.Fatalf("active session mode = %q, want ask", got)
+	}
+	if got := gw.cfg.ConnectionChannels["feishu-lark"].ToolApprovalMode; got != control.ToolApprovalAsk {
+		t.Fatalf("connection default mode = %q, want ask", got)
+	}
+}
+
+func TestGatewayUpdateConnectionToolApprovalModeInheritsGatewayDefault(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{
+		ToolApprovalMode: control.ToolApprovalAuto,
+		ConnectionChannels: map[string]ChannelConfig{
+			"feishu-lark":   {ToolApprovalMode: control.ToolApprovalYolo},
+			"feishu-feishu": {ToolApprovalMode: control.ToolApprovalYolo},
+		},
+	}, nil, logger)
+
+	larkMsg := InboundMessage{
+		Platform:     PlatformFeishu,
+		ConnectionID: "feishu-lark",
+		Domain:       "lark",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+	}
+	larkKey := BuildSessionKey(larkMsg.Session())
+	larkCtrl := control.New(control.Options{})
+	larkCtrl.SetToolApprovalMode(control.ToolApprovalYolo)
+	gw.controllers[larkKey] = &sessionState{ctrl: larkCtrl, platform: larkMsg.Platform, connectionID: larkMsg.ConnectionID}
+
+	otherCtrl := control.New(control.Options{})
+	otherCtrl.SetToolApprovalMode(control.ToolApprovalYolo)
+	gw.controllers["other-hashed-key"] = &sessionState{ctrl: otherCtrl, platform: PlatformFeishu, connectionID: "feishu-feishu"}
+
+	gw.UpdateConnectionToolApprovalMode("feishu-lark", "")
+
+	if got := gw.cfg.ConnectionChannels["feishu-lark"].ToolApprovalMode; got != "" {
+		t.Fatalf("connection override = %q, want empty inherit", got)
+	}
+	if got := larkCtrl.ToolApprovalMode(); got != control.ToolApprovalAuto {
+		t.Fatalf("lark active session mode = %q, want inherited auto", got)
+	}
+	if got := otherCtrl.ToolApprovalMode(); got != control.ToolApprovalYolo {
+		t.Fatalf("other connection mode = %q, want unchanged yolo", got)
+	}
+}
+
 func TestGatewayModeCommandSupportsAskAutoAndStatus(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	gw := NewGateway(GatewayConfig{

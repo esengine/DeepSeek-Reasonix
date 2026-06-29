@@ -169,6 +169,7 @@ func (s *lazySpawn) trySwap() {
 type lazyTool struct {
 	shared   *lazySpawn
 	name     string // namespaced "mcp__<server>__<tool>"
+	rawName  string // original server-local tool name, when cached
 	desc     string
 	schema   json.RawMessage
 	readOnly bool
@@ -187,6 +188,13 @@ type lazyTool struct {
 func (lt *lazyTool) Name() string        { return lt.name }
 func (lt *lazyTool) Description() string { return lt.desc }
 func (lt *lazyTool) ReadOnly() bool      { return lt.readOnly }
+func (lt *lazyTool) MCPServerName() string {
+	if lt.shared == nil {
+		return ""
+	}
+	return lt.shared.spec.Name
+}
+func (lt *lazyTool) MCPRawToolName() string { return lt.rawName }
 
 // PlanModeUntrustedReadOnly mirrors remoteTool: true when ReadOnly() is true only
 // from an untrusted server readOnlyHint, false for a first-party override.
@@ -366,13 +374,15 @@ func LazyToolset(spec Spec, cs *CachedSchema, host *Host, reg *tool.Registry, se
 			if spec.StripRawPrefix != "" {
 				visibleName = strings.TrimPrefix(visibleName, spec.StripRawPrefix)
 			}
+			trusted := spec.toolReadOnlyTrusted(ct.Name, visibleName)
 			out = append(out, &lazyTool{
 				shared:          shared,
 				name:            toolName(spec.Name, visibleName),
+				rawName:         ct.Name,
 				desc:            ct.Description,
 				schema:          ct.Schema,
-				readOnly:        spec.toolReadOnly(ct.Name, ct.ReadOnly),
-				readOnlyTrusted: spec.ReadOnlyToolNames[ct.Name],
+				readOnly:        spec.toolReadOnly(ct.Name, visibleName, ct.ReadOnly),
+				readOnlyTrusted: trusted,
 				hasCache:        true,
 			})
 		}

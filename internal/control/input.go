@@ -145,6 +145,7 @@ var syntheticPrefixes = []string{
 func (c *Controller) Compose(text string) string {
 	c.mu.Lock()
 	plan := c.planMode
+	responseLanguage := c.responseLanguage
 	reasoningLanguage := c.reasoningLanguage
 	c.mu.Unlock()
 	notes := c.memory.drainPending()
@@ -156,6 +157,7 @@ func (c *Controller) Compose(text string) string {
 	if plan {
 		text = PlanModeMarker + "\n\n" + text
 	}
+	text = agent.WithResponseLanguage(text, responseLanguage)
 	text = agent.WithReasoningLanguage(text, reasoningLanguage)
 
 	// Memory added mid-session rides the turn (never the cached system prefix),
@@ -189,8 +191,10 @@ func reasoningLanguageBlock(lang string) string {
 
 func (c *Controller) ComposeSynthetic(text string) string {
 	c.mu.Lock()
+	responseLang := c.responseLanguage
 	lang := c.reasoningLanguage
 	c.mu.Unlock()
+	text = agent.WithResponseLanguage(text, responseLang)
 	return agent.WithReasoningLanguage(text, lang)
 }
 

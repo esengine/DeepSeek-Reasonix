@@ -85,19 +85,20 @@ type UIConfig struct {
 // separate from top-level language and [ui] so desktop choices do not affect CLI
 // language, terminal colours, or provider-visible prompt/request data.
 type DesktopConfig struct {
-	Language       string   `toml:"language"`         // auto|en|zh; empty/auto = browser/OS auto-detect
-	LayoutStyle    string   `toml:"layout_style"`     // classic|workbench|creation; desktop layout style
-	Theme          string   `toml:"theme"`            // auto|dark|light; empty resolves to auto
-	ThemeStyle     string   `toml:"theme_style"`      // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
-	CloseBehavior  string   `toml:"close_behavior"`   // quit|background; desktop window close behavior
-	DisplayMode    string   `toml:"display_mode"`     // standard|compact (legacy "minimal" maps to compact); transcript display mode
-	StatusBarStyle string   `toml:"status_bar_style"` // icon|text; desktop status bar metric labels
-	StatusBarItems []string `toml:"status_bar_items"` // ordered visible desktop status bar items
-	CheckUpdates   *bool    `toml:"check_updates"`    // startup update checks; nil keeps the default enabled
-	Telemetry      *bool    `toml:"telemetry"`        // anonymous launch ping (install id + version + OS); nil keeps the default enabled
-	Metrics        *bool    `toml:"metrics"`          // aggregate desktop metrics (anonymous signal/bucket counts; no content); nil keeps the default enabled
-	ProviderAccess []string `toml:"provider_access"`  // desktop-only list of provider entries shown in Settings > Model > Access
-	ExpandThinking bool     `toml:"expand_thinking"`  // true = show reasoning text expanded by default; false = collapsed
+	Language                string   `toml:"language"`                   // auto|en|zh; empty/auto = browser/OS auto-detect
+	LayoutStyle             string   `toml:"layout_style"`               // classic|workbench|creation; desktop layout style
+	Theme                   string   `toml:"theme"`                      // auto|dark|light; empty resolves to auto
+	ThemeStyle              string   `toml:"theme_style"`                // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
+	CloseBehavior           string   `toml:"close_behavior"`             // quit|background; desktop window close behavior
+	DisplayMode             string   `toml:"display_mode"`               // standard|compact (legacy "minimal" maps to compact); transcript display mode
+	StatusBarStyle          string   `toml:"status_bar_style"`           // icon|text; desktop status bar metric labels
+	StatusBarItems          []string `toml:"status_bar_items"`           // ordered visible desktop status bar items
+	DefaultToolApprovalMode string   `toml:"default_tool_approval_mode"` // ask|auto|yolo; default for newly-created desktop sessions
+	CheckUpdates            *bool    `toml:"check_updates"`              // startup update checks; nil keeps the default enabled
+	Telemetry               *bool    `toml:"telemetry"`                  // anonymous launch ping (install id + version + OS); nil keeps the default enabled
+	Metrics                 *bool    `toml:"metrics"`                    // aggregate desktop metrics (anonymous signal/bucket counts; no content); nil keeps the default enabled
+	ProviderAccess          []string `toml:"provider_access"`            // desktop-only list of provider entries shown in Settings > Model > Access
+	ExpandThinking          bool     `toml:"expand_thinking"`            // true = show reasoning text expanded by default; false = collapsed
 }
 
 // NotificationsConfig controls optional system notifications for CLI chat/run.
@@ -241,6 +242,29 @@ func (c *Config) DesktopDisplayMode() string {
 	}
 }
 
+// NormalizeToolApprovalMode returns the canonical desktop/session tool approval
+// posture. Unknown or missing values fall back to ask for safety.
+func NormalizeToolApprovalMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "auto":
+		return "auto"
+	case "yolo", "full", "full-access", "bypass":
+		return "yolo"
+	default:
+		return "ask"
+	}
+}
+
+// DesktopDefaultToolApprovalMode is the Ask/Auto/YOLO default used only when
+// creating a new desktop session. Existing tabs and restored sessions keep their
+// own persisted runtime state.
+func (c *Config) DesktopDefaultToolApprovalMode() string {
+	if c == nil {
+		return "ask"
+	}
+	return NormalizeToolApprovalMode(c.Desktop.DefaultToolApprovalMode)
+}
+
 // DesktopStatusBarStyle normalizes the desktop status bar metric label style.
 // Default is "text"; explicit "icon" preserves the user's compact choice.
 func (c *Config) DesktopStatusBarStyle() string {
@@ -327,6 +351,29 @@ func (c *Config) ColdResumePruneEnabled() bool {
 		return true
 	}
 	return *c.Agent.ColdResumePrune
+}
+
+// ResponseLanguage normalizes the top-level language preference for final
+// answers. Empty means auto: replies follow the current user turn.
+func (c *Config) ResponseLanguage() string {
+	if c == nil {
+		return "auto"
+	}
+	return NormalizeLanguage(c.Language)
+}
+
+// NormalizeLanguage returns one of auto|zh|en for UI/default reply language settings.
+func NormalizeLanguage(lang string) string {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "", "auto", "detect", "default":
+		return "auto"
+	case "zh", "cn", "chinese", "中文":
+		return "zh"
+	case "en", "english":
+		return "en"
+	default:
+		return "auto"
+	}
 }
 
 // ReasoningLanguage normalizes agent.reasoning_language. Empty means auto:
@@ -692,11 +739,13 @@ func (c *Config) IsSkillDisabled(name string) bool {
 // (write_file / edit_file / multi_edit / move_file) may modify; empty means the
 // current working directory, so writes stay inside the project by default.
 // AllowWrite lists extra directories writers may also touch (e.g. a sibling repo
-// or a temp dir). Both support ${VAR} / ${VAR:-default} expansion. Reads are
+// or a temp dir). ForbidRead lists directories the agent may not read or list at all
+// (e.g. ~/.ssh for secrets). Both support ${VAR} / ${VAR:-default} expansion. Reads are
 // unrestricted; confining `bash` is Phase 1 (OS-level sandbox).
 type SandboxConfig struct {
 	WorkspaceRoot string   `toml:"workspace_root"`
 	AllowWrite    []string `toml:"allow_write"`
+	ForbidRead    []string `toml:"forbid_read"`
 	// Bash is the OS-sandbox mode for the bash tool: "enforce" (default) jails
 	// each command, "off" runs it unconfined. Phase 1; macOS only for now, with
 	// a graceful fallback elsewhere (see internal/sandbox).
@@ -739,6 +788,37 @@ func (c *Config) WriteRootsForRoot(fallbackRoot string) []string {
 	return roots
 }
 
+// ForbidReadRoots returns the directories the agent is forbidden from reading
+// or listing, with ${VAR} expanded. Relative roots are resolved against the
+// current working directory; the confiner resolves them to symlink-free paths.
+// Empty when no forbid_read entries are configured.
+func (c *Config) ForbidReadRoots() []string {
+	return c.ForbidReadRootsForRoot(".")
+}
+
+// ForbidReadRootsForRoot is like ForbidReadRoots but uses fallbackRoot when
+// resolving relative paths (for desktop tabs that pass their project root).
+func (c *Config) ForbidReadRootsForRoot(fallbackRoot string) []string {
+	root := fallbackRoot
+	if root == "" || root == "." {
+		if wd, err := os.Getwd(); err == nil {
+			root = wd
+		} else {
+			root = "."
+		}
+	}
+	roots := make([]string, 0, len(c.Sandbox.ForbidRead))
+	for _, d := range c.Sandbox.ForbidRead {
+		if d = c.expandVars(d); d != "" {
+			if !filepath.IsAbs(d) {
+				d = filepath.Join(root, d)
+			}
+			roots = append(roots, d)
+		}
+	}
+	return roots
+}
+
 // BashMode normalises the bash-sandbox mode: only an explicit "off" disables
 // it; empty or any other value resolves to "enforce", so the sandbox is on by
 // default and fails safe.
@@ -755,16 +835,18 @@ func (c *Config) BashMode() string {
 // each model's prompt prefix stays cache-stable). SubagentModel is the optional
 // default for runAs=subagent skills; SubagentModels overrides it per skill name.
 type AgentConfig struct {
-	SystemPrompt     string            `toml:"system_prompt"`
-	SystemPromptFile string            `toml:"system_prompt_file"`
-	MaxSteps         int               `toml:"max_steps"`         // tool-call rounds per turn; 0 = unlimited
-	PlannerMaxSteps  int               `toml:"planner_max_steps"` // planner read-only tool-call rounds; 0 = unlimited
-	Temperature      float64           `toml:"temperature"`
-	PlannerModel     string            `toml:"planner_model"`
-	SubagentModel    string            `toml:"subagent_model"`
-	SubagentModels   map[string]string `toml:"subagent_models"`
-	SubagentEffort   string            `toml:"subagent_effort"`
-	SubagentEfforts  map[string]string `toml:"subagent_efforts"`
+	SystemPrompt        string            `toml:"system_prompt"`
+	SystemPromptFile    string            `toml:"system_prompt_file"`
+	MaxSteps            int               `toml:"max_steps"`         // tool-call rounds per turn; 0 = unlimited
+	PlannerMaxSteps     int               `toml:"planner_max_steps"` // planner read-only tool-call rounds; 0 = unlimited
+	Temperature         float64           `toml:"temperature"`
+	PlannerModel        string            `toml:"planner_model"`
+	GuardianModel       string            `toml:"guardian_model"`
+	GuardianTemperature float64           `toml:"guardian_temperature"`
+	SubagentModel       string            `toml:"subagent_model"`
+	SubagentModels      map[string]string `toml:"subagent_models"`
+	SubagentEffort      string            `toml:"subagent_effort"`
+	SubagentEfforts     map[string]string `toml:"subagent_efforts"`
 	// OutputStyle selects a persona/tone block folded into the system prompt at
 	// startup (a built-in like "explanatory"/"learning"/"concise", or a custom
 	// .reasonix/output-styles/<name>.md). Empty = the unmodified prompt.
@@ -1006,15 +1088,17 @@ func clonePricing(p *provider.Pricing) *provider.Pricing {
 
 // ToolsConfig selects which built-in tools are enabled. Empty means all of them.
 type ToolsConfig struct {
-	Enabled            []string             `toml:"enabled"`
-	BashTimeoutSeconds *int                 `toml:"bash_timeout_seconds"`
-	BackgroundJobs     BackgroundJobsConfig `toml:"background_jobs"`
-	Search             SearchConfig         `toml:"search"`
-	Shell              ShellConfig          `toml:"shell"`
+	Enabled               []string             `toml:"enabled"`
+	BashTimeoutSeconds    *int                 `toml:"bash_timeout_seconds"`
+	MCPCallTimeoutSeconds *int                 `toml:"mcp_call_timeout_seconds"`
+	BackgroundJobs        BackgroundJobsConfig `toml:"background_jobs"`
+	Search                SearchConfig         `toml:"search"`
+	Shell                 ShellConfig          `toml:"shell"`
 }
 
 const (
 	defaultBashTimeoutSeconds             = 120
+	defaultMCPCallTimeoutSeconds          = 300
 	defaultBackgroundJobStalledWarningSec = 900
 	maxBackgroundJobStalledWarningSec     = 86400
 )
@@ -1028,6 +1112,16 @@ func (c *Config) BashTimeoutSeconds() int {
 		return defaultBashTimeoutSeconds
 	}
 	return *c.Tools.BashTimeoutSeconds
+}
+
+// MCPCallTimeoutSeconds returns the default MCP JSON-RPC call timeout in
+// seconds. Omitted, zero, and negative values keep the built-in safety cap so a
+// hung MCP server cannot block a turn indefinitely.
+func (c *Config) MCPCallTimeoutSeconds() int {
+	if c.Tools.MCPCallTimeoutSeconds == nil || *c.Tools.MCPCallTimeoutSeconds <= 0 {
+		return defaultMCPCallTimeoutSeconds
+	}
+	return *c.Tools.MCPCallTimeoutSeconds
 }
 
 // BackgroundJobsConfig tunes parent-created background jobs.
@@ -1094,6 +1188,17 @@ type PluginEntry struct {
 	Env     map[string]string `toml:"env"`
 	URL     string            `toml:"url"`
 	Headers map[string]string `toml:"headers"`
+	// CallTimeoutSeconds overrides the default per-call deadline for this MCP
+	// server. Zero falls back to [tools].mcp_call_timeout_seconds.
+	CallTimeoutSeconds int `toml:"call_timeout_seconds"`
+	// ToolTimeoutSeconds overrides the per-call deadline for raw MCP tool names
+	// from this server. Keys are server-local tool names, not model-visible
+	// mcp__server__tool names.
+	ToolTimeoutSeconds map[string]int `toml:"tool_timeout_seconds"`
+	// TrustedReadOnlyTools names raw MCP tool names that Reasonix should treat as
+	// trusted read-only for planner / plan-mode / read-only research surfaces.
+	// Use this only for tools whose semantics are known to be side-effect free.
+	TrustedReadOnlyTools []string `toml:"trusted_read_only_tools"`
 	// AutoStart controls whether the server connects during session startup.
 	// Nil preserves historical behavior: configured servers start automatically.
 	AutoStart *bool `toml:"auto_start"`

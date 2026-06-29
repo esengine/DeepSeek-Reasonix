@@ -82,7 +82,8 @@ type toolSourceConnector struct {
 	mcp           func(context.Context, string) (string, error)
 	mcpNames      []string
 
-	planModeAllowedTools []string
+	planModeAllowedTools     []string
+	planModeTrustedMCPServer map[string]bool
 }
 
 func (*toolSourceConnector) Name() string { return "connect_tool_source" }
@@ -163,10 +164,10 @@ func (t *toolSourceConnector) planModeSourceBlocked(ctx context.Context, source,
 		return false, ""
 	}
 	if source == "mcp" {
-		if name == "" || planModeAllowsMCPServer(t.planModeAllowedTools, name) {
+		if name == "" || planModeAllowsMCPServer(t.planModeAllowedTools, name) || t.planModeTrustedMCPServer[name] {
 			return false, ""
 		}
-		return true, fmt.Sprintf("blocked: MCP source %q is not available in plan mode unless plan_mode_allowed_tools declares at least one concrete tool with prefix %q. Keep exploring with read-only tools, then write your plan for approval before using this MCP server.", name, plugin.ToolPrefix(name))
+		return true, fmt.Sprintf("blocked: MCP source %q is not available in plan mode until at least one concrete tool is trusted. Connect it outside plan mode, choose always allow from the read-only trust prompt, pre-seed trusted_read_only_tools, or declare a concrete %q tool in plan_mode_allowed_tools. Keep exploring with read-only tools, then write your plan for approval before using this MCP server.", name, plugin.ToolPrefix(name))
 	}
 	// Sources are read-only iff they expose only read-only research surfaces; the
 	// moderate plan-mode gate then trusts that ReadOnly flag (step 6), while any

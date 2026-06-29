@@ -73,6 +73,23 @@ func (m *checkpointManager) begin(input string, msgIndex int) {
 	store.Begin(turn, input, msgIndex)
 }
 
+// turnsByMessageIndex returns message-log index -> checkpoint turn over live
+// boundaries. The desktop transcript uses this authoritative map instead of
+// recounting visible user bubbles, which can diverge when synthetic user-role
+// messages are hidden from the UI.
+func (m *checkpointManager) turnsByMessageIndex() map[int]int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[int]int, len(m.bound))
+	for turn, index := range m.bound {
+		if existing, ok := out[index]; ok && existing < turn {
+			continue
+		}
+		out[index] = turn
+	}
+	return out
+}
+
 // boundary returns the recorded turn-start message index, if any.
 func (m *checkpointManager) boundary(turn int) (int, bool) {
 	m.mu.Lock()
@@ -119,6 +136,7 @@ func (m *checkpointManager) snapshot(ch diff.Change) {
 // after it — the conversation-rewind renumber after the message log is cut back.
 func (m *checkpointManager) truncateFrom(turn int) {
 	m.mu.Lock()
+	store := m.store
 	m.turn = turn
 	for k := range m.bound {
 		if k >= turn {
@@ -126,6 +144,9 @@ func (m *checkpointManager) truncateFrom(turn int) {
 		}
 	}
 	m.mu.Unlock()
+	if store != nil {
+		store.TruncateFrom(turn)
+	}
 }
 
 // clearBounds drops every boundary after a summarize restructures the log (so

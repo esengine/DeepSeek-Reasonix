@@ -103,9 +103,22 @@ effort         = "high"
 [tools]
 enabled = []   # empty = all built-in tools
 bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
+mcp_call_timeout_seconds = 300   # default MCP call safety cap; per-plugin/tool overrides may raise it
 
 [tools.background_jobs]
 stalled_warning_seconds = 900   # warn once per background job after this many quiet seconds; 0 disables
+
+# Sandbox confinement bounds the blast radius of tool calls. Writers may only
+# modify workspace_root (empty = current directory) plus allow_write. forbid_read
+# hides sensitive directories from read/list/search tools and from sandboxed bash
+# while OS-level sandboxing is active. Use absolute paths or ${HOME}; "~" is not
+# expanded in config values.
+# [sandbox]
+# workspace_root = ""
+# allow_write    = ["/tmp"]
+# forbid_read    = ["${HOME}/.ssh"]
+# bash           = "enforce"   # enforce (default) | off
+# network        = true
 
 # Skills are invokable playbooks (SKILL.md / <name>.md with frontmatter), found
 # under .reasonix/skills, .agents/skills, .agent/skills, .claude/skills (project)
@@ -138,6 +151,13 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # [[plugins]]
 # name    = "example"
 # command = "reasonix-plugin-example"
+# # Per-server MCP call timeout; 0 keeps the global/default cap.
+# # call_timeout_seconds = 600
+# # Raw MCP tool names with per-tool call timeouts.
+# # tool_timeout_seconds = { "generate_video" = 1800 }
+# # Optional pre-seeded read-only trust. Interactive sessions can also remember
+# # audited third-party readers when you choose "always allow" from the trust prompt.
+# # trusted_read_only_tools = ["search"]
 # # Enabled MCP servers connect automatically in the background after session
 # # start. Use /mcp or the desktop MCP panel to refresh, reconnect, or disable.
 

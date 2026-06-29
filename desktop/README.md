@@ -183,11 +183,11 @@ the **native** webview per OS, so the rough edges are platform-specific. What's
 handled here, and what to reach for if a target misbehaves:
 
 - **Linux / WebKitGTK** is the one real pain point — rendering varies by distro &
-  GPU driver. `main.go` sets `WebviewGpuPolicy: OnDemand` to avoid blank/flickering
-  webviews from forced compositing. If artifacts persist, launch with
-  `WEBKIT_DISABLE_COMPOSITING_MODE=1`. Test on at least one GTK target before
-  release; the CSS deliberately avoids `backdrop-filter`/blur (slow & inconsistent
-  there).
+  GPU driver. `main.go` keeps `WebviewGpuPolicy: OnDemand` when a DRI render node
+  is usable, and falls back to `Never` for xrdp/headless/software-rendered sessions
+  that cannot access `/dev/dri`. If artifacts persist, launch with
+  `WEBKIT_DISABLE_COMPOSITING_MODE=1`. Test on at least one GTK target before release;
+  the CSS deliberately avoids `backdrop-filter`/blur (slow & inconsistent there).
   - **Wayland + NVIDIA**: On KDE Plasma Wayland with NVIDIA GPUs, WebKitGTK can
     crash at startup (`Error 71: Protocol error`) due to an upstream WebKit
     explicit-sync bug (WebKit #280210, #317089, NVIDIA/egl-wayland #179).

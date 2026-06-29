@@ -102,6 +102,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		fmt.Fprintf(&b, "close_behavior = %q   # desktop: quit|background when the window close button is clicked\n", c.DesktopCloseBehavior())
 		fmt.Fprintf(&b, "status_bar_style = %q   # desktop: icon|text metric labels in the bottom status bar\n", c.DesktopStatusBarStyle())
 		fmt.Fprintf(&b, "status_bar_items = %s   # desktop: ordered visible bottom status bar items\n", renderStringArray(c.DesktopStatusBarItems()))
+		fmt.Fprintf(&b, "default_tool_approval_mode = %q   # desktop: Ask/Auto/YOLO default for newly-created sessions\n", c.DesktopDefaultToolApprovalMode())
 		fmt.Fprintf(&b, "check_updates = %v   # desktop: check for new versions on startup\n", c.DesktopCheckUpdates())
 		fmt.Fprintf(&b, "telemetry = %v   # desktop: anonymous launch ping (install id + version + OS); never content\n", c.DesktopTelemetry())
 		fmt.Fprintf(&b, "metrics = %v   # desktop: aggregate desktop metrics (anonymous signal/bucket counts); never content\n", c.DesktopMetrics())
@@ -334,7 +335,8 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		}
 		b.WriteString("]\n")
 	}
-	fmt.Fprintf(&b, "bash_timeout_seconds = %d   # foreground safety cap; set 0 for no tool-local cap\n\n", c.BashTimeoutSeconds())
+	fmt.Fprintf(&b, "bash_timeout_seconds = %d   # foreground safety cap; set 0 for no tool-local cap\n", c.BashTimeoutSeconds())
+	fmt.Fprintf(&b, "mcp_call_timeout_seconds = %d   # default MCP call safety cap; per-plugin/tool overrides may raise it\n\n", c.MCPCallTimeoutSeconds())
 
 	b.WriteString("[tools.background_jobs]\n")
 	fmt.Fprintf(&b, "stalled_warning_seconds = %d   # warn once per background job after this many quiet seconds; 0 disables\n\n", c.BackgroundJobStalledWarningSeconds())
@@ -403,6 +405,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		fmt.Fprintf(&b, "allow_write = %s\n", renderStringArray(c.Sandbox.AllowWrite))
 	} else {
 		b.WriteString("# allow_write = [\"/tmp\"]          # extra dirs writers may also modify\n")
+	}
+	if len(c.Sandbox.ForbidRead) > 0 {
+		fmt.Fprintf(&b, "forbid_read = %s\n", renderStringArray(c.Sandbox.ForbidRead))
+	} else {
+		b.WriteString("# forbid_read = []                  # dirs the agent cannot read or list\n")
 	}
 	fmt.Fprintf(&b, "bash    = %q\n", c.BashMode())
 	fmt.Fprintf(&b, "network = %v\n", c.Sandbox.Network)
@@ -504,6 +511,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		b.WriteString("# [[plugins]]\n")
 		b.WriteString("# name    = \"example\"\n")
 		b.WriteString("# command = \"reasonix-plugin-example\"\n")
+		b.WriteString("# call_timeout_seconds = 600       # optional per-server MCP call timeout\n")
+		b.WriteString("# tool_timeout_seconds = { \"generate_video\" = 1800 }   # raw MCP tool names\n")
+		b.WriteString("# trusted_read_only_tools = [\"search\"]   # optional pre-seeded MCP read-only trust\n")
 		b.WriteString("# [[plugins]]                                  # a remote server over Streamable HTTP\n")
 		b.WriteString("# name    = \"stripe\"\n")
 		b.WriteString("# type    = \"http\"\n")
@@ -530,6 +540,18 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			}
 			if len(pl.Env) > 0 {
 				fmt.Fprintf(&b, "env     = %s\n", renderStringMap(pl.Env))
+			}
+			if pl.CallTimeoutSeconds > 0 {
+				b.WriteString("# Per-server MCP call timeout; 0 keeps the global/default cap.\n")
+				fmt.Fprintf(&b, "call_timeout_seconds = %d\n", pl.CallTimeoutSeconds)
+			}
+			if hasPositiveIntMap(pl.ToolTimeoutSeconds) {
+				b.WriteString("# Raw MCP tool names with per-tool call timeouts.\n")
+				fmt.Fprintf(&b, "tool_timeout_seconds = %s\n", renderIntMap(pl.ToolTimeoutSeconds))
+			}
+			if len(pl.TrustedReadOnlyTools) > 0 {
+				b.WriteString("# optional pre-seeded MCP read-only trust; the approval prompt can also remember this\n")
+				fmt.Fprintf(&b, "trusted_read_only_tools = %s\n", renderStringArray(pl.TrustedReadOnlyTools))
 			}
 			if pl.AutoStart != nil {
 				fmt.Fprintf(&b, "auto_start = %v\n", *pl.AutoStart)
@@ -769,13 +791,18 @@ func RenderTOMLProjectDelta(c *Config) string {
 	}
 
 	// [tools]
-	if len(c.Tools.Enabled) > 0 || (c.Tools.BashTimeoutSeconds != nil && *c.Tools.BashTimeoutSeconds != 0) {
+	if len(c.Tools.Enabled) > 0 ||
+		(c.Tools.BashTimeoutSeconds != nil && *c.Tools.BashTimeoutSeconds != 0) ||
+		(c.Tools.MCPCallTimeoutSeconds != nil && *c.Tools.MCPCallTimeoutSeconds > 0) {
 		b.WriteString("[tools]\n")
 		if len(c.Tools.Enabled) > 0 {
 			fmt.Fprintf(&b, "enabled = %s\n", renderStringArray(c.Tools.Enabled))
 		}
 		if c.Tools.BashTimeoutSeconds != nil && *c.Tools.BashTimeoutSeconds != 0 {
 			fmt.Fprintf(&b, "bash_timeout_seconds = %d\n", *c.Tools.BashTimeoutSeconds)
+		}
+		if c.Tools.MCPCallTimeoutSeconds != nil && *c.Tools.MCPCallTimeoutSeconds > 0 {
+			fmt.Fprintf(&b, "mcp_call_timeout_seconds = %d\n", *c.Tools.MCPCallTimeoutSeconds)
 		}
 		b.WriteString("\n")
 	}
@@ -893,6 +920,18 @@ func RenderTOMLProjectDelta(c *Config) string {
 		}
 		if len(pl.Env) > 0 {
 			fmt.Fprintf(&b, "env     = %s\n", renderStringMap(pl.Env))
+		}
+		if pl.CallTimeoutSeconds > 0 {
+			b.WriteString("# Per-server MCP call timeout; 0 keeps the global/default cap.\n")
+			fmt.Fprintf(&b, "call_timeout_seconds = %d\n", pl.CallTimeoutSeconds)
+		}
+		if hasPositiveIntMap(pl.ToolTimeoutSeconds) {
+			b.WriteString("# Raw MCP tool names with per-tool call timeouts.\n")
+			fmt.Fprintf(&b, "tool_timeout_seconds = %s\n", renderIntMap(pl.ToolTimeoutSeconds))
+		}
+		if len(pl.TrustedReadOnlyTools) > 0 {
+			b.WriteString("# optional pre-seeded MCP read-only trust; the approval prompt can also remember this\n")
+			fmt.Fprintf(&b, "trusted_read_only_tools = %s\n", renderStringArray(pl.TrustedReadOnlyTools))
 		}
 		if pl.AutoStart != nil {
 			fmt.Fprintf(&b, "auto_start = %v\n", *pl.AutoStart)
@@ -1086,6 +1125,37 @@ func renderStringMap(m map[string]string) string {
 			b.WriteString(", ")
 		}
 		fmt.Fprintf(&b, "%s = %q", k, m[k])
+	}
+	b.WriteString(" }")
+	return b.String()
+}
+
+func hasPositiveIntMap(m map[string]int) bool {
+	for k, v := range m {
+		if strings.TrimSpace(k) != "" && v > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// renderIntMap renders a map[string]int as a TOML inline table with positive
+// values only, preserving deterministic key order.
+func renderIntMap(m map[string]int) string {
+	keys := make([]string, 0, len(m))
+	for k, v := range m {
+		if strings.TrimSpace(k) != "" && v > 0 {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString("{ ")
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%q = %d", k, m[k])
 	}
 	b.WriteString(" }")
 	return b.String()

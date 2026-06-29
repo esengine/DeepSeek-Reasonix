@@ -203,6 +203,28 @@ type untrustedReadOnlyTool struct {
 
 func (untrustedReadOnlyTool) PlanModeUntrustedReadOnly() bool { return true }
 
+type untrustedMCPReadOnlyTool struct {
+	untrustedReadOnlyTool
+	server string
+	raw    string
+}
+
+func (t untrustedMCPReadOnlyTool) MCPServerName() string  { return t.server }
+func (t untrustedMCPReadOnlyTool) MCPRawToolName() string { return t.raw }
+
+type fakePlanModeReadOnlyTrustGate struct {
+	allow  bool
+	reason string
+	req    PlanModeReadOnlyTrustRequest
+	calls  int
+}
+
+func (g *fakePlanModeReadOnlyTrustGate) CheckPlanModeReadOnlyTrust(ctx context.Context, req PlanModeReadOnlyTrustRequest) (bool, string, error) {
+	g.calls++
+	g.req = req
+	return g.allow, g.reason, nil
+}
+
 // TestPlanModeUntrustedReadOnlyToolFailsClosed proves the gate does NOT trust an
 // MCP tool's self-reported readOnlyHint: a ReadOnly()==true external tool is
 // still fail-closed in plan mode, and runs only once declared in
@@ -224,6 +246,70 @@ func TestPlanModeUntrustedReadOnlyToolFailsClosed(t *testing.T) {
 	declared.SetPlanMode(true)
 	if out := declared.executeOne(context.Background(), provider.ToolCall{Name: "mcp__srv__query"}); strings.HasPrefix(out.output, "blocked:") {
 		t.Errorf("declared untrusted tool should run in plan mode, got: %q", out.output)
+	}
+}
+
+func TestPlanModeUntrustedReadOnlyToolCanAskForTrust(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(untrustedMCPReadOnlyTool{
+		untrustedReadOnlyTool: untrustedReadOnlyTool{fakeTool{name: "mcp__srv__normalized_query", readOnly: true}},
+		server:                "srv",
+		raw:                   "raw/query",
+	})
+	gate := &fakePlanModeReadOnlyTrustGate{allow: true}
+	a := New(nil, reg, NewSession(""), Options{PlanModeReadOnlyTrustGate: gate}, event.Discard)
+	a.SetPlanMode(true)
+
+	out := a.executeOne(context.Background(), provider.ToolCall{Name: "mcp__srv__normalized_query", Arguments: `{"q":"x"}`})
+	if strings.HasPrefix(out.output, "blocked:") || !strings.Contains(out.output, "done") {
+		t.Fatalf("trusted untrusted-read-only MCP tool should run, got: %q", out.output)
+	}
+	if gate.calls != 1 {
+		t.Fatalf("trust gate calls = %d, want 1", gate.calls)
+	}
+	if gate.req.ServerName != "srv" || gate.req.RawToolName != "raw/query" {
+		t.Fatalf("trust request target = %+v, want raw MCP identity", gate.req)
+	}
+	if gate.req.ToolName != "mcp__srv__normalized_query" || string(gate.req.Args) != `{"q":"x"}` {
+		t.Fatalf("trust request call metadata = %+v", gate.req)
+	}
+}
+
+func TestPlanModeUntrustedReadOnlyToolTrustDeclineBlocks(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(untrustedReadOnlyTool{fakeTool{name: "mcp__srv__query", readOnly: true}})
+	gate := &fakePlanModeReadOnlyTrustGate{allow: false, reason: "not trusted"}
+	a := New(nil, reg, NewSession(""), Options{PlanModeReadOnlyTrustGate: gate}, event.Discard)
+	a.SetPlanMode(true)
+
+	out := a.executeOne(context.Background(), provider.ToolCall{Name: "mcp__srv__query"})
+	if !strings.Contains(out.output, "not trusted") {
+		t.Fatalf("declined trust should block with reason, got: %q", out.output)
+	}
+	if gate.req.ServerName != "srv" || gate.req.RawToolName != "query" {
+		t.Fatalf("fallback trust request target = %+v", gate.req)
+	}
+}
+
+type unsafeUntrustedReadOnlyTool struct {
+	untrustedReadOnlyTool
+}
+
+func (unsafeUntrustedReadOnlyTool) PlanModeSafe() bool { return false }
+
+func TestPlanModeUnsafeUntrustedReadOnlyToolDoesNotAskForTrust(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(unsafeUntrustedReadOnlyTool{untrustedReadOnlyTool{fakeTool{name: "mcp__srv__unsafe", readOnly: true}}})
+	gate := &fakePlanModeReadOnlyTrustGate{allow: true}
+	a := New(nil, reg, NewSession(""), Options{PlanModeReadOnlyTrustGate: gate}, event.Discard)
+	a.SetPlanMode(true)
+
+	out := a.executeOne(context.Background(), provider.ToolCall{Name: "mcp__srv__unsafe"})
+	if !strings.HasPrefix(out.output, "blocked:") {
+		t.Fatalf("unsafe untrusted read-only MCP tool should remain blocked, got: %q", out.output)
+	}
+	if gate.calls != 0 {
+		t.Fatalf("trust gate calls = %d, want 0 for unsafe tool", gate.calls)
 	}
 }
 

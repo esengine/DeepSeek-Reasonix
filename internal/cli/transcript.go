@@ -6,7 +6,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -22,24 +21,12 @@ func wrapTranscript(s string, width int) string {
 	return lipgloss.NewStyle().Width(width).Render(s)
 }
 
-// clipboardWriteAll is the platform clipboard writer; a var so tests can force
-// the failure path (the tmux / SSH scenario) without a real display server.
-var clipboardWriteAll = clipboard.WriteAll
-
-// copyToClipboard writes text to the system clipboard. It first tries the
-// platform tool (xclip / xsel / wl-copy / pbcopy) via atotto; when that fails —
-// typically inside tmux or over SSH where the display server is unreachable — it
-// falls back to OSC 52, which tmux and modern terminals forward to the host
-// clipboard. tea.SetClipboard's command is *run* here so the message it yields
-// (handled by the runtime) reaches the event loop; returning the command itself
-// would be dropped as an unrecognized message and emit nothing.
+// copyToClipboard writes text through the terminal via OSC 52. That targets the
+// terminal-side clipboard in common SSH/tmux setups when the terminal permits it;
+// platform clipboard tools can instead succeed on the remote host and skip the
+// terminal clipboard path entirely.
 func copyToClipboard(text string) tea.Cmd {
-	return func() tea.Msg {
-		if err := clipboardWriteAll(text); err != nil {
-			return tea.SetClipboard(text)()
-		}
-		return nil
-	}
+	return tea.SetClipboard(text)
 }
 
 // autoScrollMsg drives one step of edge-drag scrolling while a selection is held
@@ -189,6 +176,26 @@ func scrollbarThumb(height, yoff, total int) (start, size int) {
 	return start, size
 }
 
+func scrollbarYOffset(height, row, total, grabOffset int) int {
+	if total <= height {
+		return 0
+	}
+	_, thumbSize := scrollbarThumb(height, 0, total)
+	maxTop := height - thumbSize
+	if maxTop <= 0 {
+		return 0
+	}
+	top := row - grabOffset
+	if top < 0 {
+		top = 0
+	}
+	if top > maxTop {
+		top = maxTop
+	}
+	maxYoff := total - height
+	return (top*maxYoff + maxTop/2) / maxTop
+}
+
 func scrollbarCell(row, total, height, thumbStart, thumbSize int) string {
 	if total <= height {
 		return " "
@@ -197,6 +204,26 @@ func scrollbarCell(row, total, height, thumbStart, thumbSize int) string {
 		return scrollThumbStyle.Render("█")
 	}
 	return scrollTrackStyle.Render("│")
+}
+
+func (m chatTUI) inScrollbar(x, y int) bool {
+	if m.nativeScrollback {
+		return false
+	}
+	h := m.viewport.Height()
+	return h > 0 && y >= 0 && y < h && x == m.viewport.Width() && len(m.wrappedLines) > h
+}
+
+func (m chatTUI) scrollbarGrabRowOffset(row int) int {
+	thumbStart, thumbSize := scrollbarThumb(m.viewport.Height(), m.viewport.YOffset(), len(m.wrappedLines))
+	if row >= thumbStart && row < thumbStart+thumbSize {
+		return row - thumbStart
+	}
+	return thumbSize / 2
+}
+
+func (m *chatTUI) dragScrollbar(row int) {
+	m.viewport.SetYOffset(scrollbarYOffset(m.viewport.Height(), row, len(m.wrappedLines), m.scrollbarGrabOffset))
 }
 
 // transcriptCaret maps a screen cell (x, y) in the transcript region to an

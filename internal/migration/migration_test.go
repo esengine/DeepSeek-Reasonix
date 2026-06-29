@@ -145,6 +145,53 @@ func TestRunLegacyRescueNoopStillShowsProgress(t *testing.T) {
 	}
 }
 
+func TestRunLegacyRescueCommandImportsFromExplicitInstallDir(t *testing.T) {
+	home := isolateMigrationHome(t)
+	installRoot := filepath.Join(home, "Custom Reasonix")
+	legacySessions := filepath.Join(installRoot, "sessions")
+	if err := os.MkdirAll(legacySessions, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacySessions, "custom-chat.jsonl"), []byte(legacyMessageLog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	currentSessions := config.SessionDir()
+	if err := os.MkdirAll(currentSessions, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{".legacy-imported.v2-routed", ".legacy-imported.v3-jsonl"} {
+		if err := os.WriteFile(filepath.Join(currentSessions, marker), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var notices []string
+	res := RunLegacyRescueCommand(`--from "`+installRoot+`"`, event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice {
+			notices = append(notices, e.Text)
+		}
+	}))
+	if len(res.SessionErrs) != 0 {
+		t.Fatalf("session migration errors: %v", res.SessionErrs)
+	}
+	if got := totalImported(res.SessionImports); got != 1 {
+		t.Fatalf("imported sessions = %d, want 1; imports=%+v", got, res.SessionImports)
+	}
+	if _, err := os.Stat(filepath.Join(currentSessions, "custom-chat.jsonl")); err != nil {
+		t.Fatalf("explicit imported session missing: %v", err)
+	}
+	joined := strings.Join(notices, "\n")
+	for _, want := range []string{
+		"migration rescue: scanning explicit legacy sessions from " + installRoot,
+		"imported 1 past session(s) from " + legacySessions,
+		"migration rescue complete: imported 1 past session(s)",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing notice %q in:\n%s", want, joined)
+		}
+	}
+}
+
 func TestMigrateLegacySessionSourcesSkipsCurrentProjectTree(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

@@ -59,6 +59,14 @@ func TestPreviewMatchesExecute(t *testing.T) {
 			},
 		},
 		{
+			name: "edit_file fuzzy",
+			tool: editFile{},
+			seed: "alpha   \nbeta   \n",
+			args: func(p string) map[string]any {
+				return map[string]any{"path": p, "old_string": "alpha\nbeta", "new_string": "ALPHA\nBETA"}
+			},
+		},
+		{
 			name: "multi_edit",
 			tool: multiEdit{},
 			seed: "package old\n\nfunc old() {\n\told()\n}\n",

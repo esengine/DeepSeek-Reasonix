@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -79,14 +81,39 @@ func MigrateLegacySessionsFromConfigDir(srcDir, globalDest string, projectDir fu
 	return migrateLegacySessions(srcDir, globalDest, legacyRoutedConfigImportMarker, projectDir)
 }
 
+// MigrateLegacySessionsFromExplicitDir imports sessions from a user-selected
+// legacy directory. It uses a source-specific marker so a previous default
+// /migrate pass cannot hide later imports from a custom Windows install/data
+// directory.
+func MigrateLegacySessionsFromExplicitDir(srcDir, globalDest string, projectDir func(workspaceRoot string) string) (int, error) {
+	marker := explicitLegacyImportMarker(srcDir)
+	return migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, marker+".jsonl", projectDir)
+}
+
+func explicitLegacyImportMarker(srcDir string) string {
+	key := strings.TrimSpace(srcDir)
+	if abs, err := filepath.Abs(key); err == nil {
+		key = abs
+	}
+	sum := sha256.Sum256([]byte(filepath.Clean(key)))
+	return ".legacy-imported.explicit." + hex.EncodeToString(sum[:8])
+}
+
 func migrateLegacySessions(srcDir, globalDest, marker string, projectDir func(string) string) (int, error) {
+	return migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, legacyJsonlPassMarker, projectDir)
+}
+
+func migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, jsonlMarker string, projectDir func(string) string) (int, error) {
 	if strings.TrimSpace(marker) == "" {
 		marker = legacyImportMarker
+	}
+	if strings.TrimSpace(jsonlMarker) == "" {
+		jsonlMarker = legacyJsonlPassMarker
 	}
 	// Gate on both the routed marker AND the jsonl marker: an existing upgrader
 	// whose events pass already stamped the routed marker must still reach the
 	// .jsonl-only / subdir passes below (Pass 1 is idempotent via dest checks).
-	if importMarkerExists(globalDest, marker) && importMarkerExists(globalDest, legacyJsonlPassMarker) {
+	if importMarkerExists(globalDest, marker) && importMarkerExists(globalDest, jsonlMarker) {
 		// The one-time full passes already ran for this source. Still run the
 		// bounded re-home pass: a user who downgrades to a pre-routing build
 		// (which writes every session to the flat dir) and then upgrades again
@@ -177,7 +204,7 @@ func migrateLegacySessions(srcDir, globalDest, marker string, projectDir func(st
 	// desktop, subagent, and later-version chat sessions). The pass is gated by
 	// its own marker so existing upgraders whose events passes completed still
 	// get their .jsonl-only sessions imported.
-	if !importMarkerExists(globalDest, legacyJsonlPassMarker) {
+	if !importMarkerExists(globalDest, jsonlMarker) {
 		n, failed := importJsonlSessions(entries, srcDir, globalDest, hasEvents, projectDir)
 		imported += n
 		hadArtifactFailure = hadArtifactFailure || failed
@@ -261,7 +288,7 @@ func migrateLegacySessions(srcDir, globalDest, marker string, projectDir func(st
 	if hadArtifactFailure {
 		return imported, nil
 	}
-	writeImportMarkers(globalDest, marker, legacyImportMarker, legacyEventsHomeImportMarker, legacyEventsConfigImportMarker, legacyJsonlPassMarker)
+	writeImportMarkers(globalDest, marker, legacyImportMarker, legacyEventsHomeImportMarker, legacyEventsConfigImportMarker, jsonlMarker)
 	return imported, nil
 }
 

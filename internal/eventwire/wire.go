@@ -19,6 +19,7 @@ type Event struct {
 	Approval        *Approval        `json:"approval,omitempty"`
 	Ask             *Ask             `json:"ask,omitempty"`
 	Compaction      *Compaction      `json:"compaction,omitempty"`
+	Guardian        *Guardian        `json:"guardian,omitempty"`
 	Err             string           `json:"err,omitempty"`
 	RetryAttempt    int              `json:"retryAttempt,omitempty"`
 	RetryMax        int              `json:"retryMax,omitempty"`
@@ -89,7 +90,7 @@ func ToWire(e event.Event) Event {
 			}
 		}
 	case event.ApprovalRequest:
-		w.Approval = &Approval{ID: e.Approval.ID, Tool: e.Approval.Tool, Subject: e.Approval.Subject}
+		w.Approval = &Approval{ID: e.Approval.ID, Tool: e.Approval.Tool, Subject: e.Approval.Subject, Reason: e.Approval.Reason}
 	case event.AskRequest:
 		w.Ask = ToWireAsk(e.Ask)
 	case event.CompactionStarted, event.CompactionDone:
@@ -97,6 +98,8 @@ func ToWire(e event.Event) Event {
 			Trigger: e.Compaction.Trigger, Messages: e.Compaction.Messages,
 			Summary: e.Compaction.Summary, Archive: e.Compaction.Archive,
 		}
+	case event.GuardianAssessment:
+		w.Guardian = ToWireGuardian(e.Guardian)
 	case event.TurnDone:
 		if e.Err != nil {
 			w.Err = e.Err.Error()
@@ -245,6 +248,48 @@ type Approval struct {
 	ID      string `json:"id"`
 	Tool    string `json:"tool"`
 	Subject string `json:"subject"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// Guardian is the JSON form of an event.GuardianResult.
+type Guardian struct {
+	ID                string `json:"id"`
+	Tool              string `json:"tool"`
+	Subject           string `json:"subject"`
+	Outcome           string `json:"outcome"`
+	RiskLevel         string `json:"risk_level,omitempty"`
+	UserAuthorization string `json:"user_authorization,omitempty"`
+	Rationale         string `json:"rationale,omitempty"`
+	DurationMs        int64  `json:"duration_ms,omitempty"`
+	Usage             *Usage `json:"usage,omitempty"`
+}
+
+// ToWireGuardian converts an event.GuardianResult into its JSON wire form.
+func ToWireGuardian(g event.GuardianResult) *Guardian {
+	out := &Guardian{
+		ID:                g.ID,
+		Tool:              g.Tool,
+		Subject:           g.Subject,
+		Outcome:           g.Outcome,
+		RiskLevel:         g.RiskLevel,
+		UserAuthorization: g.UserAuthorization,
+		Rationale:         g.Rationale,
+		DurationMs:        g.DurationMs,
+	}
+	if u := g.Usage; u != nil {
+		out.Usage = &Usage{
+			PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens,
+			TotalTokens: u.TotalTokens, CacheHitTokens: u.CacheHitTokens,
+			CacheMissTokens: u.CacheMissTokens, ReasoningTokens: u.ReasoningTokens,
+		}
+		if g.Pricing != nil {
+			cost := g.Pricing.Cost(u)
+			out.Usage.Cost = cost
+			out.Usage.Currency = g.Pricing.Symbol()
+			out.Usage.CostUSD = cost
+		}
+	}
+	return out
 }
 
 // ToWireAsk converts an event.Ask into its JSON wire form.
@@ -295,4 +340,5 @@ var kindNames = map[event.Kind]string{
 	event.Retrying:                 "retrying",
 	event.Steer:                    "steer",
 	event.MemoryCompilerStatsEvent: "memory_compiler_stats",
+	event.GuardianAssessment:       "guardian_assessment",
 }

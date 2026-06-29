@@ -532,6 +532,53 @@ func TestSetReasoningLanguagePersistsToUserConfig(t *testing.T) {
 	}
 }
 
+func TestSetDesktopLanguagePersistsResponseLanguageAndUpdatesLiveTabs(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	projectRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectRoot, "reasonix.toml"), []byte("language = \"zh\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	userCtrl := control.New(control.Options{})
+	projectCtrl := control.New(control.Options{})
+	app.tabs = map[string]*WorkspaceTab{
+		"user": {
+			ID:          "user",
+			Scope:       "global",
+			Ctrl:        userCtrl,
+			Ready:       true,
+			disabledMCP: map[string]ServerView{},
+		},
+		"project": {
+			ID:            "project",
+			Scope:         "project",
+			WorkspaceRoot: projectRoot,
+			Ctrl:          projectCtrl,
+			Ready:         true,
+			disabledMCP:   map[string]ServerView{},
+		},
+	}
+	app.activeTabID = "user"
+
+	if err := app.SetDesktopLanguage("en"); err != nil {
+		t.Fatalf("SetDesktopLanguage: %v", err)
+	}
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if cfg.DesktopLanguage() != "en" || cfg.Language != "en" {
+		t.Fatalf("saved language prefs = desktop:%q response:%q, want en/en", cfg.DesktopLanguage(), cfg.Language)
+	}
+	got := userCtrl.Compose("解释这个函数")
+	if !strings.Contains(got, "<response-language>") || !strings.Contains(got, "use English") {
+		t.Fatalf("live controller Compose = %q, want English response language", got)
+	}
+	projectComposed := projectCtrl.Compose("explain this function")
+	if !strings.Contains(projectComposed, "use Simplified Chinese") {
+		t.Fatalf("project controller Compose = %q, want project zh response language", projectComposed)
+	}
+}
+
 func TestSetReasoningLanguageUpdatesLiveTabControllers(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	projectRoot := t.TempDir()
@@ -744,6 +791,29 @@ func TestSetDesktopCheckUpdatesPersistsToUserConfig(t *testing.T) {
 	}
 	if cfg.DesktopCheckUpdates() {
 		t.Fatal("DesktopCheckUpdates() = true, want false")
+	}
+}
+
+func TestSetDefaultToolApprovalModePersistsToUserConfig(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	if app.Settings().DefaultToolApprovalMode != control.ToolApprovalAsk {
+		t.Fatalf("Settings().DefaultToolApprovalMode = %q, want ask", app.Settings().DefaultToolApprovalMode)
+	}
+	if err := app.SetDefaultToolApprovalMode(control.ToolApprovalAuto); err != nil {
+		t.Fatalf("SetDefaultToolApprovalMode: %v", err)
+	}
+	view := app.Settings()
+	if view.DefaultToolApprovalMode != control.ToolApprovalAuto {
+		t.Fatalf("Settings().DefaultToolApprovalMode = %q, want auto", view.DefaultToolApprovalMode)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if cfg.Desktop.DefaultToolApprovalMode != control.ToolApprovalAuto {
+		t.Fatalf("desktop.default_tool_approval_mode = %q, want auto", cfg.Desktop.DefaultToolApprovalMode)
+	}
+	if cfg.DesktopDefaultToolApprovalMode() != control.ToolApprovalAuto {
+		t.Fatalf("DesktopDefaultToolApprovalMode() = %q, want auto", cfg.DesktopDefaultToolApprovalMode())
 	}
 }
 

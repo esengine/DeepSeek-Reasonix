@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
-import { useI18n, type Translator } from "../lib/i18n";
+import { useI18n, type Locale, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
 import type { DictKey } from "../locales/en";
 import type { BalanceInfo, ContextInfo, ContextPanelInfo, UsageSourceStats, WireUsage } from "../lib/types";
@@ -40,6 +40,26 @@ function fmtDuration(ms: number, t: Translator): string {
 function fmtOptionalTokens(tokens?: number): string {
   if (typeof tokens !== "number" || tokens <= 0) return "-";
   return tokens.toLocaleString();
+}
+
+interface MetricTokenDisplay {
+  display: string;
+  exact: string;
+}
+
+function numberLocale(locale: Locale | string): string {
+  if (locale === "zh") return "zh-CN";
+  if (locale === "zh-TW") return "zh-TW";
+  return "en";
+}
+
+export function formatMetricTokens(tokens: number | undefined, locale: Locale | string): MetricTokenDisplay {
+  if (typeof tokens !== "number" || tokens <= 0) {
+    return { display: "-", exact: "-" };
+  }
+  const tag = numberLocale(locale);
+  const exact = tokens.toLocaleString(tag);
+  return { display: exact, exact };
 }
 
 function fmtTurns(turns: number | undefined, t: Translator): string {
@@ -292,6 +312,14 @@ export function ContextPanel({
   const reasoningTokens = hasPanelUsage ? info?.reasoningTokens ?? 0 : usage?.reasoningTokens ?? 0;
   const cacheHitTokens = hasPanelUsage ? info?.cacheHitTokens ?? 0 : usage?.cacheHitTokens ?? 0;
   const cacheMissTokens = hasPanelUsage ? info?.cacheMissTokens ?? 0 : usage?.cacheMissTokens ?? 0;
+  // Session-cumulative values for the metrics cards (方案A: 纯前端改数据源)
+  const sessionCacheHit = info?.sessionCacheHitTokens ?? usage?.sessionCacheHitTokens ?? context?.cacheHitTokens ?? 0;
+  const sessionCacheMiss = info?.sessionCacheMissTokens ?? usage?.sessionCacheMissTokens ?? context?.cacheMissTokens ?? 0;
+  const sessionCompletion = info?.sessionCompletionTokens ?? 0;
+  const sessionCacheHitMetric = formatMetricTokens(sessionCacheHit, locale);
+  const sessionCacheMissMetric = formatMetricTokens(sessionCacheMiss, locale);
+  const sessionCompletionMetric = formatMetricTokens(sessionCompletion, locale);
+  const totalTokensMetric = formatMetricTokens(totalTokens, locale);
   const cost = contextCostDisplay({ info, sessionCost, sessionCurrency, usage });
   const costSources = sourceRows(info, sessionCurrency);
   const showCostSources = costSources.some((row) => row.source !== "executor") || costSources.length > 1;
@@ -374,7 +402,10 @@ export function ContextPanel({
             <div className="context-panel__stats">
               <MetricCard label={t("context.time")} value={fmtDuration(elapsed, t)} />
               <MetricCard label={t("context.requests")} value={requestCount > 0 ? String(requestCount) : "-"} />
-              <MetricCard label={t("context.sessionTokens")} value={totalTokens > 0 ? totalTokens.toLocaleString() : "-"} wide />
+              <MetricCard label={t("context.inputCacheHit")} value={sessionCacheHitMetric.display} valueTitle={sessionCacheHitMetric.exact} wide />
+              <MetricCard label={t("context.inputCacheMiss")} value={sessionCacheMissMetric.display} valueTitle={sessionCacheMissMetric.exact} wide />
+              <MetricCard label={t("context.outputTokens")} value={sessionCompletionMetric.display} valueTitle={sessionCompletionMetric.exact} wide />
+              <MetricCard label={t("context.sessionTokens")} value={totalTokensMetric.display} valueTitle={totalTokensMetric.exact} wide />
             </div>
           </section>
           <section className="context-panel__section">
@@ -437,13 +468,14 @@ function MiniStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function MetricCard({ label, value, tone, wide }: { label: string; value: string; tone?: "accent" | "good" | "notice" | "warn"; wide?: boolean }) {
+function MetricCard({ label, value, valueTitle, tone, wide }: { label: string; value: string; valueTitle?: string; tone?: "accent" | "good" | "notice" | "warn"; wide?: boolean }) {
   const toneClass = tone ? ` context-panel__metric--${tone}` : "";
   const wideClass = wide ? " context-panel__metric--wide" : "";
+  const exactTitle = valueTitle && valueTitle !== value ? valueTitle : undefined;
   return (
-    <div className={`context-panel__metric${toneClass}${wideClass}`}>
+    <div className={`context-panel__metric${toneClass}${wideClass}`} aria-label={exactTitle ? `${label}: ${exactTitle}` : undefined}>
       <span>{label}</span>
-      <strong>{value}</strong>
+      <strong title={exactTitle}>{value}</strong>
     </div>
   );
 }

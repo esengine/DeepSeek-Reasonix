@@ -77,6 +77,22 @@ func (c *Config) SetAutoPlan(mode string) error {
 	return nil
 }
 
+// SetDesktopDefaultToolApprovalMode sets the Ask/Auto/YOLO posture used only
+// for newly-created desktop sessions.
+func (c *Config) SetDesktopDefaultToolApprovalMode(mode string) error {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "ask":
+		c.Desktop.DefaultToolApprovalMode = "ask"
+	case "auto":
+		c.Desktop.DefaultToolApprovalMode = "auto"
+	case "yolo", "full", "full-access", "bypass":
+		c.Desktop.DefaultToolApprovalMode = "yolo"
+	default:
+		return fmt.Errorf("default_tool_approval_mode %q: must be ask|auto|yolo", mode)
+	}
+	return nil
+}
+
 // SetMemoryCompilerEnabled toggles the v5 execution-memory compiler.
 func (c *Config) SetMemoryCompilerEnabled(enabled bool) error {
 	c.Agent.MemoryCompiler.Enabled = &enabled
@@ -718,6 +734,35 @@ func (c *Config) ClearPluginAuthentication(name string) (PluginEntry, bool, erro
 	return PluginEntry{}, false, fmt.Errorf("clear plugin authentication: no plugin %q", name)
 }
 
+// TrustPluginReadOnlyTool adds one raw MCP tool name to a plugin's trusted
+// read-only list. It reports changed=false when the entry already contains it.
+func (c *Config) TrustPluginReadOnlyTool(name, toolName string) (PluginEntry, bool, error) {
+	name = strings.TrimSpace(name)
+	toolName = strings.TrimSpace(toolName)
+	if name == "" {
+		return PluginEntry{}, false, fmt.Errorf("trust plugin read-only tool: plugin name is required")
+	}
+	if toolName == "" {
+		return PluginEntry{}, false, fmt.Errorf("trust plugin read-only tool: tool name is required")
+	}
+	for i := range c.Plugins {
+		if c.Plugins[i].Name != name {
+			continue
+		}
+		trusted := uniqueStrings(c.Plugins[i].TrustedReadOnlyTools)
+		for _, existing := range trusted {
+			if existing == toolName {
+				c.Plugins[i].TrustedReadOnlyTools = trusted
+				return c.Plugins[i], false, nil
+			}
+		}
+		trusted = append(trusted, toolName)
+		c.Plugins[i].TrustedReadOnlyTools = trusted
+		return c.Plugins[i], true, nil
+	}
+	return PluginEntry{}, false, fmt.Errorf("trust plugin read-only tool: no plugin %q", name)
+}
+
 // ClearPluginAuthenticationInSource clears auth material in the file that actually
 // owns the MCP server. Load() merges user/project TOML and project .mcp.json into
 // one Config, so callers must not mutate that merged view and Save() it back: a
@@ -746,7 +791,47 @@ func ClearPluginAuthenticationInSource(name string) (PluginEntry, bool, string, 
 }
 
 func pluginTOMLSourcePath(name string) string {
-	paths := append([]string{"reasonix.toml"}, userConfigCandidatePaths()...)
+	return pluginTOMLSourcePathForRoot(".", name)
+}
+
+// TrustPluginReadOnlyToolInSourceForRoot persists one trusted MCP read-only tool
+// into the file that owns the server for root. TOML declarations win over
+// .mcp.json, matching LoadForRoot merge precedence.
+func TrustPluginReadOnlyToolInSourceForRoot(root, name, toolName string) (PluginEntry, bool, string, error) {
+	if path := pluginTOMLSourcePathForRoot(root, name); path != "" {
+		cfg := LoadForEdit(path)
+		updated, changed, err := cfg.TrustPluginReadOnlyTool(name, toolName)
+		if err != nil {
+			return PluginEntry{}, false, path, err
+		}
+		if changed {
+			if err := cfg.SaveTo(path); err != nil {
+				return PluginEntry{}, false, path, err
+			}
+		}
+		return updated, changed, path, nil
+	}
+	mcpPath := mcpJSONFile
+	if resolved := resolveRoot(root); resolved != "." {
+		mcpPath = filepath.Join(resolved, mcpJSONFile)
+	}
+	updated, changed, err := trustMCPJSONReadOnlyTool(mcpPath, name, toolName)
+	if err != nil {
+		return PluginEntry{}, false, mcpPath, err
+	}
+	return updated, changed, mcpPath, nil
+}
+
+func TrustPluginReadOnlyToolInSource(name, toolName string) (PluginEntry, bool, string, error) {
+	return TrustPluginReadOnlyToolInSourceForRoot(".", name, toolName)
+}
+
+func pluginTOMLSourcePathForRoot(root, name string) string {
+	projectTOML := "reasonix.toml"
+	if resolved := resolveRoot(root); resolved != "." {
+		projectTOML = filepath.Join(resolved, "reasonix.toml")
+	}
+	paths := append([]string{projectTOML}, userConfigCandidatePaths()...)
 	for _, path := range paths {
 		if strings.TrimSpace(path) == "" {
 			continue
@@ -765,6 +850,17 @@ func pluginTOMLSourcePath(name string) string {
 func validatePlugin(e PluginEntry) error {
 	if strings.TrimSpace(e.Name) == "" {
 		return fmt.Errorf("plugin: name is required")
+	}
+	if e.CallTimeoutSeconds < 0 {
+		return fmt.Errorf("plugin %q: call_timeout_seconds must be >= 0", e.Name)
+	}
+	for name, sec := range e.ToolTimeoutSeconds {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("plugin %q: tool_timeout_seconds contains an empty tool name", e.Name)
+		}
+		if sec < 0 {
+			return fmt.Errorf("plugin %q: tool_timeout_seconds[%q] must be >= 0", e.Name, name)
+		}
 	}
 	switch strings.ToLower(strings.TrimSpace(e.Type)) {
 	case "", "stdio":

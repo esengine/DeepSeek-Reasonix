@@ -47,7 +47,6 @@ type CausalGraphCompression struct {
 	RetainedEdges   int            `json:"retained_edges,omitempty"`
 	DroppedEdges    int            `json:"dropped_edges,omitempty"`
 	RelationCounts  map[string]int `json:"relation_counts,omitempty"`
-	PrimaryCauses   []string       `json:"primary_causes,omitempty"`
 	AnchorEdges     []CausalEdge   `json:"anchor_edges,omitempty"`
 	LongTailEdges   []CausalEdge   `json:"long_tail_edges,omitempty"`
 	LongTailSignals []string       `json:"long_tail_signals,omitempty"`
@@ -247,7 +246,7 @@ func buildCompressionReport(st state, tr ExecutionTrace, learning SystemLearning
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	causal := compressCausalEdges(tr.CausalEdges, tr.ProductionHardening, maxCompressedCausalAnchors)
+	causal := compressCausalEdges(tr.CausalEdges, maxCompressedCausalAnchors)
 	execution := compressExecutionTrace(tr, learning)
 	control := compressControlGraph(st, policy)
 	memory := compressMemoryGraph(st, now)
@@ -262,7 +261,7 @@ func buildCompressionReport(st state, tr ExecutionTrace, learning SystemLearning
 		TruthLocksDecayed: len(memory.TruthLockDecay),
 		AlignmentStatus:   alignment.Status,
 	}
-	total := causal.TotalEdges + len(tr.ToolResults) + len(st.Nodes) + len(st.Edges) + len(st.ControlReports)
+	total := causal.TotalEdges + len(tr.ToolResults) + len(st.Nodes) + len(st.Edges)
 	retained := causal.RetainedEdges + len(memory.AnchorNodes) + len(control.TopSignals) + len(execution.KeyFindings)
 	ratio := 1.0
 	if total > 0 {
@@ -285,7 +284,7 @@ func buildCompressionReport(st state, tr ExecutionTrace, learning SystemLearning
 	}
 }
 
-func compressCausalEdges(edges []CausalEdge, hardening *ProductionHardeningTrace, limit int) CausalGraphCompression {
+func compressCausalEdges(edges []CausalEdge, limit int) CausalGraphCompression {
 	if limit <= 0 {
 		limit = maxCompressedCausalAnchors
 	}
@@ -300,17 +299,6 @@ func compressCausalEdges(edges []CausalEdge, hardening *ProductionHardeningTrace
 		}
 		out.RelationCounts[relation]++
 	}
-	if hardening != nil {
-		if cause := strings.TrimSpace(hardening.CanaryDiff.Attribution.PrimaryCause); cause != "" && cause != "none" {
-			out.PrimaryCauses = append(out.PrimaryCauses, cause)
-		}
-		for _, factor := range hardening.CanaryDiff.Attribution.Factors {
-			if factor.Cause != "" {
-				out.PrimaryCauses = append(out.PrimaryCauses, factor.Layer+":"+factor.Cause)
-			}
-		}
-	}
-	out.PrimaryCauses = limitStrings(canonicalStrings(out.PrimaryCauses), maxCompressionStrings)
 	candidates := append([]CausalEdge(nil), edges...)
 	sortCausalAnchors(candidates)
 	candidates = dedupeCausalEdges(candidates)
@@ -456,7 +444,7 @@ func compressControlGraph(st state, policy ControlPolicy) ControlGraphCompressio
 	return ControlGraphCompression{
 		Mode:               policy.Mode,
 		Controller:         policy.Controller,
-		ReportsFolded:      len(st.ControlReports),
+		ReportsFolded:      0,
 		StabilityBand:      scoreBand(policy.SystemStabilityScore),
 		OscillationBand:    scoreBand(policy.OscillationIndex),
 		EquilibriumState:   policy.EquilibriumState,
@@ -641,7 +629,6 @@ func cloneCompressionReport(in *CompressionReport) *CompressionReport {
 	}
 	out := *in
 	out.CausalGraph.RelationCounts = cloneStringIntMap(in.CausalGraph.RelationCounts)
-	out.CausalGraph.PrimaryCauses = append([]string(nil), in.CausalGraph.PrimaryCauses...)
 	out.CausalGraph.AnchorEdges = append([]CausalEdge(nil), in.CausalGraph.AnchorEdges...)
 	out.CausalGraph.LongTailEdges = append([]CausalEdge(nil), in.CausalGraph.LongTailEdges...)
 	out.CausalGraph.LongTailSignals = append([]string(nil), in.CausalGraph.LongTailSignals...)

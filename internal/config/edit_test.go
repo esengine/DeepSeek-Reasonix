@@ -323,6 +323,27 @@ func TestSetAutoPlan(t *testing.T) {
 	}
 }
 
+func TestSetDesktopDefaultToolApprovalMode(t *testing.T) {
+	c := Default()
+	for _, mode := range []string{"ask", "auto", "yolo"} {
+		if err := c.SetDesktopDefaultToolApprovalMode(mode); err != nil {
+			t.Fatalf("SetDesktopDefaultToolApprovalMode(%q): %v", mode, err)
+		}
+		if c.DesktopDefaultToolApprovalMode() != mode {
+			t.Fatalf("desktop default tool approval mode = %q, want %q", c.DesktopDefaultToolApprovalMode(), mode)
+		}
+	}
+	if err := c.SetDesktopDefaultToolApprovalMode("full-access"); err != nil {
+		t.Fatalf("legacy full-access should be accepted: %v", err)
+	}
+	if c.DesktopDefaultToolApprovalMode() != "yolo" {
+		t.Fatalf("legacy full-access should save as yolo, got %q", c.DesktopDefaultToolApprovalMode())
+	}
+	if err := c.SetDesktopDefaultToolApprovalMode("maybe"); err == nil {
+		t.Fatal("expected error for invalid desktop default tool approval mode")
+	}
+}
+
 func TestSetMemoryCompilerEnabled(t *testing.T) {
 	c := Default()
 	if err := c.SetMemoryCompilerEnabled(false); err != nil {
@@ -789,6 +810,15 @@ func TestPluginMutators(t *testing.T) {
 	if err := c.UpsertPlugin(PluginEntry{Name: "bad", Type: "carrier-pigeon", Command: "x"}); err == nil {
 		t.Error("unknown transport should error")
 	}
+	if err := c.UpsertPlugin(PluginEntry{Name: "bad", Command: "x", CallTimeoutSeconds: -1}); err == nil {
+		t.Error("negative call_timeout_seconds should error")
+	}
+	if err := c.UpsertPlugin(PluginEntry{Name: "bad", Command: "x", ToolTimeoutSeconds: map[string]int{"generate": -1}}); err == nil {
+		t.Error("negative tool_timeout_seconds should error")
+	}
+	if err := c.UpsertPlugin(PluginEntry{Name: "bad", Command: "x", ToolTimeoutSeconds: map[string]int{" ": 1}}); err == nil {
+		t.Error("empty tool_timeout_seconds key should error")
+	}
 
 	// Replace in place.
 	if err := c.UpsertPlugin(PluginEntry{Name: "ex", Command: "other-cmd"}); err != nil {
@@ -983,7 +1013,9 @@ func TestSaveToScopesUserAndProjectFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read project config: %v", err)
 	}
-	if strings.Contains(string(projectBody), "[desktop]") || strings.Contains(string(projectBody), "close_behavior") {
+	if strings.Contains(string(projectBody), "[desktop]") ||
+		strings.Contains(string(projectBody), "close_behavior") ||
+		strings.Contains(string(projectBody), "default_tool_approval_mode") {
 		t.Fatalf("project config should not include desktop preferences:\n%s", projectBody)
 	}
 	if info, err := os.Stat(projectPath); err != nil {

@@ -1,5 +1,8 @@
 // Run: tsx src/__tests__/workspace-layout.test.ts
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   availableWorkspacePanelWidth,
   resolveLiveWorkspacePanelWidth,
@@ -9,6 +12,8 @@ import {
 
 let passed = 0;
 let failed = 0;
+const testDir = dirname(fileURLToPath(import.meta.url));
+const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
 
 function eq(a: unknown, b: unknown, label: string) {
   if (a === b) {
@@ -140,6 +145,11 @@ eq(
   }),
   212,
   "live sidebar drag recomputes dock width from the dragged sidebar width",
+);
+eq(
+  /const closeWorkspacePanel = useCallback\(\(\) => \{[\s\S]*?setLiveWorkspacePanelRenderWidth\(null\);[\s\S]*?setWorkspacePanelOpen\(false\);/.test(appSource),
+  true,
+  "closing the dock clears the transient render width before hiding the panel",
 );
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

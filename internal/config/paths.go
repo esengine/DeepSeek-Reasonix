@@ -7,6 +7,18 @@ import (
 	"strings"
 )
 
+var (
+	runtimeGOOS     = runtime.GOOS
+	osUserHomeDir   = os.UserHomeDir
+	osUserConfigDir = func() string {
+		dir, err := os.UserConfigDir()
+		if err != nil {
+			return ""
+		}
+		return dir
+	}
+)
+
 func userConfigPath() string {
 	dir := userConfigDir()
 	if dir == "" {
@@ -23,17 +35,22 @@ func reasonixHomeDir() string {
 	if dir := cleanEnvDir("REASONIX_HOME"); dir != "" {
 		return dir
 	}
-	if runtime.GOOS != "windows" {
-		if home, err := os.UserHomeDir(); err == nil && home != "" {
-			return filepath.Join(home, ".reasonix")
+	if runtimeGOOS == "windows" {
+		if dir := osUserConfigDir(); dir != "" {
+			return filepath.Join(dir, "reasonix")
+		}
+		if home, err := osUserHomeDir(); err == nil && home != "" {
+			return filepath.Join(home, "AppData", "Roaming", "reasonix")
 		}
 		return ""
 	}
-	dir := osUserConfigDir()
-	if dir == "" {
-		return ""
+	if home, err := osUserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, ".reasonix")
 	}
-	return filepath.Join(dir, "reasonix")
+	if dir := osUserConfigDir(); dir != "" {
+		return filepath.Join(dir, "reasonix")
+	}
+	return ""
 }
 
 func userConfigLoadPath() string {
@@ -85,7 +102,7 @@ func userConfigCandidatePaths() []string {
 }
 
 func legacyXDGConfigPaths() []string {
-	if runtime.GOOS == "windows" {
+	if runtimeGOOS == "windows" {
 		return nil
 	}
 	seen := map[string]bool{}
@@ -104,7 +121,7 @@ func legacyXDGConfigPaths() []string {
 	if dir := cleanEnvDir("XDG_CONFIG_HOME"); dir != "" {
 		add(filepath.Join(dir, "reasonix", "config.toml"))
 	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
+	if home, err := osUserHomeDir(); err == nil && home != "" {
 		add(filepath.Join(home, ".config", "reasonix", "config.toml"))
 	}
 	return paths
@@ -140,14 +157,6 @@ func userCacheDir() string {
 	return filepath.Join(dir, "reasonix")
 }
 
-func osUserConfigDir() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return ""
-	}
-	return dir
-}
-
 func cleanEnvDir(name string) string {
 	dir := strings.TrimSpace(os.Getenv(name))
 	if dir == "" {
@@ -155,11 +164,11 @@ func cleanEnvDir(name string) string {
 	}
 	dir = ExpandVars(dir)
 	if dir == "~" {
-		if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if home, err := osUserHomeDir(); err == nil && home != "" {
 			dir = home
 		}
 	} else if strings.HasPrefix(dir, "~/") || strings.HasPrefix(dir, `~\`) {
-		if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if home, err := osUserHomeDir(); err == nil && home != "" {
 			dir = filepath.Join(home, dir[2:])
 		}
 	}
@@ -194,7 +203,7 @@ func userConfigDisplayPath() string {
 	if p == "" {
 		return "<os-config-dir>/reasonix/config.toml"
 	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
+	if home, err := osUserHomeDir(); err == nil && home != "" {
 		if rel, err := filepath.Rel(home, p); err == nil && !strings.HasPrefix(rel, "..") {
 			return "~/" + filepath.ToSlash(rel)
 		}
@@ -204,8 +213,9 @@ func userConfigDisplayPath() string {
 
 // UserConfigPath is the user-global config.toml. It lives under Reasonix home:
 // REASONIX_HOME/config.toml, then ~/.reasonix/config.toml on Unix-like systems,
-// or %AppData%/reasonix/config.toml on Windows. "" when the user config dir
-// can't be resolved.
+// or %AppData%/reasonix/config.toml on Windows. If %AppData% is unavailable on
+// Windows, it falls back to %USERPROFILE%/AppData/Roaming/reasonix/config.toml.
+// "" when the user config dir can't be resolved.
 func UserConfigPath() string { return userConfigPath() }
 
 // LegacyUserConfigPath is the old OS app-support config.toml path when it
@@ -238,7 +248,8 @@ func LegacyUserConfigPaths() []string {
 
 // ReasonixHomeDir is the current Reasonix home directory. It honors
 // REASONIX_HOME, then uses ~/.reasonix on macOS/Linux or %APPDATA%/reasonix on
-// Windows.
+// Windows, with a %USERPROFILE%/AppData/Roaming fallback when %APPDATA% is
+// unavailable.
 func ReasonixHomeDir() string { return reasonixHomeDir() }
 
 // UserCredentialsPath is the reasonix-owned global .env file under Reasonix
@@ -384,7 +395,7 @@ func CommandDirsForRoot(root string) []string {
 	for _, legacy := range legacyXDGConfigPaths() {
 		add(filepath.Join(filepath.Dir(legacy), "commands"))
 	}
-	if home, err := os.UserHomeDir(); err == nil {
+	if home, err := osUserHomeDir(); err == nil {
 		for _, dir := range conventionSubdirsAsc(home, "commands") {
 			add(dir)
 		}

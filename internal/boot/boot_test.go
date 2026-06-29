@@ -679,6 +679,45 @@ model = "x"
 	}
 }
 
+func TestBuildUsesConfiguredLanguageForResponsePreference(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootSubagentTestProvider()
+	prov := &bootSubagentTestProvider{}
+	setBootSubagentTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+language = "en"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-subagent-test"
+model = "x"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	if err := ctrl.Run(context.Background(), "first review"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.requestsSnapshot()
+	if len(reqs) == 0 {
+		t.Fatal("provider requests = 0, want at least one")
+	}
+	if got := bootLastUser(reqs[0]); !strings.Contains(got, "<response-language>") || !strings.Contains(got, "use English") {
+		t.Fatalf("first user turn = %q, want English response preference", got)
+	}
+}
+
 func TestBuildSubagentSkillGetsForegroundOnlyBash(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)
@@ -1581,6 +1620,62 @@ env = { GO_WANT_HELPER_PROCESS = "1" }
 	}
 }
 
+func TestBuildTokenEconomyPlanModeCanConnectTrustedReadOnlyMCPSource(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("token-economy",
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "source-1", Name: "connect_tool_source", Arguments: `{"source":"mcp","name":"mockmcp"}`},
+		}},
+		testutil.Turn{Text: "done"},
+	)
+	setBootTokenProfileTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", fmt.Sprintf(`
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+
+[[plugins]]
+name = "mockmcp"
+command = %q
+args = ["-test.run=TestHelperProcess", "--"]
+env = { GO_WANT_HELPER_PROCESS = "1" }
+trusted_read_only_tools = ["echo"]
+`, os.Args[0]))
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	ctrl.SetPlanMode(true)
+	if err := ctrl.Run(context.Background(), "connect trusted mcp while planning"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	reqs := prov.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("requests = %d, want 2", len(reqs))
+	}
+	if !requestHasTool(reqs[1], "mcp__mockmcp__echo") {
+		t.Fatalf("second request should expose trusted MCP source in plan economy mode; tools=%v", toolSchemaNames(reqs[1].Tools))
+	}
+	for _, msg := range ctrl.History() {
+		if msg.Role == provider.RoleTool && msg.Name == "connect_tool_source" && strings.Contains(msg.Content, "blocked:") {
+			t.Fatalf("connect_tool_source should not block trusted MCP in plan mode, got:\n%s", msg.Content)
+		}
+	}
+}
+
 func TestPlanModeAllowsMCPServerRequiresConcreteToolName(t *testing.T) {
 	if planModeAllowsMCPServer([]string{"mcp__mockmcp__"}, "mockmcp") {
 		t.Fatal("bare MCP namespace prefix should not allow a server in plan mode")
@@ -1848,7 +1943,7 @@ model = "x"
 func TestAddBuiltinsWithWorkspaceRootKeepsSessionTools(t *testing.T) {
 	reg := tool.NewRegistry()
 	var stderr bytes.Buffer
-	addBuiltins(reg, nil, []string{robustTempDir(t)}, sandbox.Spec{}, 120*time.Second, builtin.SearchSpec{}, &stderr, robustTempDir(t), netclient.ProxySpec{})
+	addBuiltins(reg, nil, []string{robustTempDir(t)}, sandbox.Spec{}, 120*time.Second, builtin.SearchSpec{}, &stderr, robustTempDir(t), netclient.ProxySpec{}, nil, nil)
 	for _, name := range []string{
 		"todo_write",
 		"complete_step",
@@ -2475,6 +2570,94 @@ func TestPluginSpecsTrustKnownCodeGraphReadTools(t *testing.T) {
 		if !specs[0].ReadOnlyToolNames[name] {
 			t.Fatalf("codegraph spec missing read-only override for %q: %+v", name, specs[0].ReadOnlyToolNames)
 		}
+	}
+}
+
+func TestPluginSpecsTrustConfiguredReadOnlyTools(t *testing.T) {
+	specs := PluginSpecs([]config.PluginEntry{{
+		Name:                 "github",
+		TrustedReadOnlyTools: []string{"issue_read", " pull_request_read ", ""},
+	}})
+	if len(specs) != 1 {
+		t.Fatalf("PluginSpecs returned %d specs, want 1", len(specs))
+	}
+	for _, name := range []string{"issue_read", "pull_request_read"} {
+		if !specs[0].ReadOnlyToolNames[name] {
+			t.Fatalf("configured trusted read-only tool %q missing: %+v", name, specs[0].ReadOnlyToolNames)
+		}
+	}
+	if specs[0].ReadOnlyToolNames[""] {
+		t.Fatalf("empty trusted read-only tool name should be ignored: %+v", specs[0].ReadOnlyToolNames)
+	}
+}
+
+func TestPluginSpecsMapConfiguredCallTimeouts(t *testing.T) {
+	specs := PluginSpecsForRootWithOptions([]config.PluginEntry{{
+		Name:               "maker",
+		Command:            "maker-mcp",
+		CallTimeoutSeconds: 600,
+		ToolTimeoutSeconds: map[string]int{
+			"generate_video": 1800,
+			" ":              120,
+			"zero":           0,
+		},
+	}}, "", PluginSpecOptions{DefaultCallTimeout: 300 * time.Second})
+	if len(specs) != 1 {
+		t.Fatalf("PluginSpecs returned %d specs, want 1", len(specs))
+	}
+	if specs[0].DefaultCallTimeout != 5*time.Minute {
+		t.Fatalf("DefaultCallTimeout = %v, want 5m", specs[0].DefaultCallTimeout)
+	}
+	if specs[0].CallTimeout != 10*time.Minute {
+		t.Fatalf("CallTimeout = %v, want 10m", specs[0].CallTimeout)
+	}
+	if specs[0].ToolTimeouts["generate_video"] != 30*time.Minute {
+		t.Fatalf("generate_video timeout = %v, want 30m", specs[0].ToolTimeouts["generate_video"])
+	}
+	if _, ok := specs[0].ToolTimeouts["zero"]; ok {
+		t.Fatalf("zero tool timeout should be ignored: %+v", specs[0].ToolTimeouts)
+	}
+	if _, ok := specs[0].ToolTimeouts[""]; ok {
+		t.Fatalf("empty tool timeout should be ignored: %+v", specs[0].ToolTimeouts)
+	}
+}
+
+func TestApplyDefaultMCPCallTimeoutPreservesConfiguredDefault(t *testing.T) {
+	specs := applyDefaultMCPCallTimeout([]plugin.Spec{
+		{Name: "configured", DefaultCallTimeout: 2 * time.Minute},
+		{Name: "empty"},
+	}, 5*time.Minute)
+	if specs[0].DefaultCallTimeout != 2*time.Minute {
+		t.Fatalf("configured DefaultCallTimeout overwritten: %v", specs[0].DefaultCallTimeout)
+	}
+	if specs[1].DefaultCallTimeout != 5*time.Minute {
+		t.Fatalf("empty DefaultCallTimeout = %v, want 5m", specs[1].DefaultCallTimeout)
+	}
+}
+
+func TestPluginSpecsTrustPlanModeAllowedMCPTools(t *testing.T) {
+	specs := PluginSpecsForRootWithPlanModeAllowedTools(
+		[]config.PluginEntry{{Name: "github"}, {Name: "linear"}},
+		"",
+		[]string{
+			"mcp__github__issue_read",
+			"mcp__linear__issue_read",
+			"mcp__github__",
+			"read_file",
+			"mcp__other__issue_read",
+		},
+	)
+	if len(specs) != 2 {
+		t.Fatalf("PluginSpecsForRootWithPlanModeAllowedTools returned %d specs, want 2", len(specs))
+	}
+	if !specs[0].ReadOnlyModelToolNames["mcp__github__issue_read"] {
+		t.Fatalf("github allowed MCP tool missing from model trust map: %+v", specs[0].ReadOnlyModelToolNames)
+	}
+	if specs[0].ReadOnlyModelToolNames["mcp__github__"] || specs[0].ReadOnlyModelToolNames["mcp__other__issue_read"] {
+		t.Fatalf("github trust map accepted non-concrete or other-server tools: %+v", specs[0].ReadOnlyModelToolNames)
+	}
+	if !specs[1].ReadOnlyModelToolNames["mcp__linear__issue_read"] {
+		t.Fatalf("linear allowed MCP tool missing from model trust map: %+v", specs[1].ReadOnlyModelToolNames)
 	}
 }
 

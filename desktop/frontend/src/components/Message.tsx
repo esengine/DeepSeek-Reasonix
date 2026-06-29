@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
-import { ChevronDown, ChevronRight, FileText, Folder, GitBranch, Image, MessageSquare, Pencil, RotateCcw, ScrollText } from "lucide-react";
+import { BrainCircuit, ChevronDown, ChevronRight, FileText, Folder, GitBranch, Image, MessageSquare, Pencil, RotateCcw, ScrollText } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
 import { ProcessBrainIcon } from "./ProcessCard";
@@ -13,6 +13,8 @@ import { useT } from "../lib/i18n";
 import { Tooltip } from "./Tooltip";
 import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import { displayReasoningText } from "../lib/reasoningDisplay";
+import { stripMemoryCompilerExecution } from "../lib/memoryCompilerDisplay";
+import { visibleTranscriptMemoryCitations } from "../lib/memoryCitationVisibility";
 import type { Item, MessageActionScope } from "../lib/useController";
 import type { CheckpointMeta, MemoryCitation } from "../lib/types";
 
@@ -83,7 +85,7 @@ function MemoryCitations({ citations }: { citations?: MemoryCitation[] }) {
   const t = useT();
   const bodyRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
-  const clean = (citations ?? [])
+  const clean = visibleTranscriptMemoryCitations(citations)
     .filter((citation) => (citation.source ?? citation.id ?? citation.note ?? "").trim() !== "")
     .slice(0, 5);
   useGSAPCollapse(bodyRef, open);
@@ -166,7 +168,8 @@ export function UserMessage({
 }) {
   const t = useT();
   const imSource = parseImSourceMessage(text);
-  const actionText = imSource?.text ?? text;
+  const actionText = stripMemoryCompilerExecution(imSource?.text ?? text);
+  const hasMemoryCompiler = Boolean(submitText?.includes("<memory-compiler-execution>"));
   const { text: displayText, attachments } = parseAttachmentRefsForDisplay(actionText);
   const orderedAttachments = sortDisplayAttachments(attachments);
   const sourceLabel = imSource ? imSourceLabel(imSource, t) : "";
@@ -381,6 +384,11 @@ export function UserMessage({
             <time className="msg-meta__time" dateTime={sentAt.toISOString()} title={sentAt.toLocaleString()}>
               {formatMessageTime(sentAt)}
             </time>
+          )}
+          {hasMemoryCompiler && (
+            <span className="msg-meta__indicator" title={t("msg.memoryCompilerApplied")} aria-hidden="true">
+              <BrainCircuit size={14} />
+            </span>
           )}
           <CopyButton text={actionText} label={t("msg.copy")} showInlineLabel={false} className="msg-meta__btn msg-meta__copy" />
           {onEdit && (

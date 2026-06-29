@@ -80,6 +80,8 @@ func builtinHelpItems() []compItem {
 		{label: "/reasoning-language", hint: i18n.M.CmdReasonLang},
 		{label: "/reload-cmd", hint: i18n.M.CmdReloadCmd},
 		{label: "/help", hint: i18n.M.CmdHelp},
+		{label: "/copy", hint: i18n.M.CmdCopy},
+		{label: "/export", hint: i18n.M.CmdExport},
 	}
 }
 

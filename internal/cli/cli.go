@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"unicode/utf16"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
@@ -1279,7 +1280,38 @@ func providerSlug(kind, baseURL string) string {
 			}
 		}
 	}
-	return kind + "-" + strings.TrimRight(b.String(), "-")
+	slug := strings.TrimRight(b.String(), "-")
+	if slug == "" {
+		sum := sha1.Sum([]byte(baseURL))
+		return kind + "-" + hex.EncodeToString(sum[:4])
+	}
+	return kind + "-" + slug
+}
+
+func apiKeyEnvFromProviderName(name string) string {
+	stem := strings.ToUpper(strings.TrimSpace(name))
+	stem = strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		default:
+			return '_'
+		}
+	}, stem)
+	stem = strings.Trim(stem, "_")
+	if stem == "" {
+		return "CUSTOM_" + fnv1a32Hex(name) + "_API_KEY"
+	}
+	return stem + "_API_KEY"
+}
+
+func fnv1a32Hex(s string) string {
+	hash := uint32(0x811c9dc5)
+	for _, unit := range utf16.Encode([]rune(strings.TrimSpace(s))) {
+		hash ^= uint32(unit)
+		hash *= 0x01000193
+	}
+	return fmt.Sprintf("%08x", hash)
 }
 
 // providerFamily is a wizard-only grouping of provider SKUs by vendor; it does
@@ -1333,8 +1365,9 @@ func promptCustomProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKey s
 			return nil, fmt.Errorf("base URL is required")
 		}
 	}
+	providerName := providerSlug("custom", baseURL)
 	if keyEnv == "" {
-		keyEnv = ask(in, os.Stdout, i18n.M.CustomPromptKeyEnv, "CUSTOM_API_KEY")
+		keyEnv = ask(in, os.Stdout, i18n.M.CustomPromptKeyEnv, apiKeyEnvFromProviderName(providerName))
 	}
 	if apiKey == "" {
 		apiKey = ask(in, os.Stdout, i18n.M.CustomPromptAPIKey, "")
@@ -1347,7 +1380,7 @@ func promptCustomProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKey s
 		return nil, fmt.Errorf("model name is required")
 	}
 	entry := config.ProviderEntry{
-		Name: providerSlug("custom", baseURL), Kind: "openai", BaseURL: baseURL,
+		Name: providerName, Kind: "openai", BaseURL: baseURL,
 		Model: modelName, APIKeyEnv: keyEnv, ContextWindow: 128000,
 	}
 	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.CustomAddedFmt, entry.Name+"/"+modelName)))
@@ -1366,7 +1399,8 @@ func promptCustomProviderFromURL() ([]config.ProviderEntry, error) {
 	if baseURL == "" {
 		return nil, fmt.Errorf("base URL is required")
 	}
-	keyEnv := ask(in, os.Stdout, i18n.M.CustomPromptKeyEnv, "CUSTOM_API_KEY")
+	providerName := providerSlug("custom", baseURL)
+	keyEnv := ask(in, os.Stdout, i18n.M.CustomPromptKeyEnv, apiKeyEnvFromProviderName(providerName))
 	apiKey := ask(in, os.Stdout, i18n.M.CustomPromptAPIKey, "")
 	if apiKey != "" {
 		os.Setenv(keyEnv, apiKey)
@@ -1399,7 +1433,7 @@ func promptCustomProviderFromURL() ([]config.ProviderEntry, error) {
 		selected = append(selected, models[i])
 	}
 	entry := config.ProviderEntry{
-		Name: providerSlug("custom", baseURL), Kind: "openai", BaseURL: baseURL,
+		Name: providerName, Kind: "openai", BaseURL: baseURL,
 		Models: selected, Model: selected[0], APIKeyEnv: keyEnv, ContextWindow: 128000,
 	}
 	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.CustomAddedFmt, entry.Name+"/"+selected[0])))

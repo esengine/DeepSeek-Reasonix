@@ -160,6 +160,11 @@ window.go = {
       JobsForTab: async () => jobs,
       CheckpointsForTab: async () => checkpoints,
       HistoryForTab: async () => staleHistory.promise,
+      HistoryPageForTab: async () => {
+        const messages = await staleHistory.promise;
+        return { messages, startTurn: 0, endTurn: messages.filter((message) => message.role === "user").length, totalTurns: messages.filter((message) => message.role === "user").length, hasOlder: false };
+      },
+      HistoryCheckpointTurnsForTab: async () => [],
       ReplayPendingPrompts: async () => {},
       NewSession: async () => {
         newSessionCalls += 1;
@@ -216,6 +221,8 @@ window.go.main.App = {
   JobsForTab: async () => jobs,
   CheckpointsForTab: async () => checkpoints,
   HistoryForTab: async () => [],
+  HistoryPageForTab: async () => ({ messages: [], startTurn: 0, endTurn: 0, totalTurns: 0, hasOlder: false }),
+  HistoryCheckpointTurnsForTab: async () => [],
   ReplayPendingPrompts: async () => {},
   EnsureBlankSurface: async () => {
     ensureBlankSurfaceCalls += 1;

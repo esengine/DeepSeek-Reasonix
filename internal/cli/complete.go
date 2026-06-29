@@ -95,6 +95,8 @@ func (m *chatTUI) slashItems() []compItem {
 		{label: "/remember", insert: "/remember ", hint: i18n.M.CmdRemember},
 		{label: "/forget", insert: "/forget ", hint: i18n.M.CmdForget},
 		{label: "/quit", insert: "/quit", hint: i18n.M.CmdQuit},
+		{label: "/copy", insert: "/copy", hint: i18n.M.CmdCopy},
+		{label: "/export", insert: "/export", hint: i18n.M.CmdExport},
 	}
 	for _, c := range m.commands {
 		items = append(items, compItem{label: "/" + c.Name, insert: "/" + c.Name + " ", hint: c.Description})

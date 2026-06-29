@@ -227,6 +227,8 @@ func (e *HeartbeatEngine) executeTask(t HeartbeatTask) HeartbeatTask {
 	//     previous run cannot overlap with the next scheduled fresh topic.
 	//   - Once the submitted topic is idle and due again, clear it and create a
 	//     fresh topic.
+	//   - topicId is always updated to the latest conversation so the task list
+	//     always points to the most recent session regardless of mode switch.
 	//
 	// For the legacy mode:
 	//   - Reuse the persisted topicID if available; create one on first run.
@@ -247,6 +249,7 @@ func (e *HeartbeatEngine) executeTask(t HeartbeatTask) HeartbeatTask {
 				return t
 			}
 			topicID = meta.ID
+			t.TopicID = topicID // always persist the latest topic
 			// Save in-memory for retry safety (NOT persisted to disk).
 			e.mu.Lock()
 			if e.pendingTopics == nil {

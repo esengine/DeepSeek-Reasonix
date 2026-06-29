@@ -286,26 +286,39 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
 - **Relationship to plan mode.** Plan mode (§3.4) is an orthogonal, coarser gate
   checked before the permission layer. Its boundary is fail-closed for untrusted
   tools: while planning, a tool runs only if it reports a *trustworthy*
-  `ReadOnly()==true` — a built-in or a first-party MCP `ReadOnlyToolNames`
-  override — or self-reports plan-safe via `tool.PlanModeClassifier`. An MCP
-  tool's `ReadOnly()` may instead come from the server's self-reported
-  `readOnlyHint`, which plan mode does not trust (`tool.PlanModeUntrustedReadOnly`):
-  such a tool is gated like a writer. Writers, installers, memory mutation, process
+  `ReadOnly()==true` — a built-in, a first-party MCP `ReadOnlyToolNames`
+  override, a plugin-level `trusted_read_only_tools` declaration, or a concrete
+  MCP name listed in `[agent].plan_mode_allowed_tools` — or self-reports
+  plan-safe via `tool.PlanModeClassifier`. An MCP tool's `ReadOnly()` may
+  instead come from the server's self-reported `readOnlyHint`, which plan mode
+  treats as untrusted (`tool.PlanModeUntrustedReadOnly`): interactive
+  controllers may ask once before executing it and may remember a persistent
+  approval as `trusted_read_only_tools`. This trust prompt is a fresh user
+  decision: `auto`, `yolo`, and the approved-plan execution window do not answer
+  it, but an explicit session grant still prevents repeat prompts for the same
+  tool. Non-interactive sessions and declined approvals remain fail-closed.
+  Writers, installers, memory mutation, process
   control, and `complete_step` (read-only yet post-approval only, so it
   self-reports plan-unsafe) are refused; the enforced invariant is
-  PlanSafe ⇒ ReadOnly. An untrusted read-only MCP/plugin tool is therefore blocked
-  until declared in `[agent].plan_mode_allowed_tools`, and is likewise excluded
-  from read-only research sub-agents. Plan mode still allows `read_only_task` and
+  PlanSafe ⇒ ReadOnly. An untrusted read-only MCP/plugin tool is therefore
+  blocked until the user approves or pre-trusts it, and it is excluded from
+  planner/read-only research sub-agents until the tool is part of the trusted
+  read-only registry. Plan mode still allows `read_only_task` and
   `read_only_skill`, whose sub-agents receive only read-only research tools and
   safe foreground bash; writer-capable `task` delegation and full skill execution
-  remain blocked.
+  remain blocked. The desktop MCP panel writes the same
+  `trusted_read_only_tools` raw-name list as an advanced management surface:
+  **Pre-trust read-only** adds currently listed `readOnlyHint` tools, per-tool
+  **Pre-trust** adds an audited reader manually, and **Untrust** removes it
+  again. These UI actions do not make MCP `readOnlyHint` globally trusted by
+  default.
 - **User decisions are separate from tool approvals.** Runtime tool approval has
   three user-facing postures: `ask` ("需要批准"), `auto` ("自动批准"), and
   `yolo` ("Yolo批准"). `auto` lets the permission policy auto-approve the writer
   fallback while preserving explicit ask/deny rules; `yolo` skips all tool
   permission approvals for approval-gated tools such as writers and Bash.
-  Neither posture answers `ask` questions or approves `exit_plan_mode` plans for
-  the user.
+  Neither posture answers `ask` questions, approves `exit_plan_mode` plans, or
+  confirms MCP read-only trust prompts for the user.
   Auto-plan is also a separate feature flag: when enabled, a complex task may
   still enter plan mode in any tool approval posture. After a user approves a
   plan, the controller opens a short `approvedPlanAutoApproveTools` execution
@@ -340,12 +353,12 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   desktop UI so the collaboration mode remains one of the three choices, while
   the underlying tool approval posture is preserved.
 
-| Tool approval posture | Tool approvals | Plan approval | `ask` questions |
-| --- | --- | --- | --- |
-| Need approval / `ask` | Follow permission policy (`Ask` prompts interactively) | Waits for user | Waits for user |
-| Auto approve / `auto` | Writer fallback auto-allowed; explicit ask/deny rules still apply | Waits for user | Waits for user |
-| YOLO approval / `yolo` | Approval prompts auto-allowed unless denied | Waits for user | Waits for user |
-| Approved-plan execution window | Approved plan's tool calls auto-allowed unless denied | Future plans still wait | Waits for user |
+| Tool approval posture | Tool approvals | Plan approval | MCP read-only trust | `ask` questions |
+| --- | --- | --- | --- | --- |
+| Need approval / `ask` | Follow permission policy (`Ask` prompts interactively) | Waits for user | Waits for user unless session-granted | Waits for user |
+| Auto approve / `auto` | Writer fallback auto-allowed; explicit ask/deny rules still apply | Waits for user | Waits for user unless session-granted | Waits for user |
+| YOLO approval / `yolo` | Approval prompts auto-allowed unless denied | Waits for user | Waits for user unless session-granted | Waits for user |
+| Approved-plan execution window | Approved plan's tool calls auto-allowed unless denied | Future plans still wait | Waits for user unless session-granted | Waits for user |
 
 Out of the box (`mode = "ask"`, no rules) `reasonix run` behaves exactly as before
 (writers resolve `Ask`→allow with no TTY), while `reasonix` now prompts before
@@ -506,6 +519,7 @@ context_window = 1000000   # tokens; harness compacts older history near this li
 [tools]
 enabled = []   # omit/empty = all built-ins
 bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
+mcp_call_timeout_seconds = 300   # default MCP call safety cap; plugin/tool overrides may raise it
 
 [tools.shell]
 prefer = "auto"   # auto (default) | bash | powershell | pwsh — force the shell tool's interpreter
@@ -525,6 +539,7 @@ ask   = []                                 # force a prompt even if otherwise al
 [sandbox]
 # workspace_root = ""          # file-writers confined here; empty = cwd
 # allow_write    = ["/tmp"]    # extra dirs write_file/edit_file/multi_edit/move_file may modify
+# forbid_read    = ["${HOME}/.ssh"]   # dirs read/list/search tools and sandboxed bash may not inspect
 
 [serve]
 auth_mode = "none"             # none|token|password; use auth before binding beyond localhost
@@ -537,6 +552,9 @@ name    = "example"            # type defaults to "stdio"
 command = "reasonix-plugin-example"
 args    = []
 # env   = { FOO = "bar" }
+# call_timeout_seconds = 600            # per-server MCP call timeout; 0 = global/default cap
+# tool_timeout_seconds = { "generate_video" = 1800 }   # raw MCP tool names
+# trusted_read_only_tools = ["search"]   # optional pre-seeded MCP read-only trust
 
 # [[plugins]]                   # a remote MCP server over Streamable HTTP
 # name    = "stripe"
@@ -575,11 +593,15 @@ config dir, plus `allow_write`: a write whose target — resolved to an absolute
 symlink-free path so a symlinked dir or `..` cannot tunnel out — falls outside
 every root is refused, and the error is fed back to the model. Confinement is on
 by default (root = cwd), so edits stay in the project while the agent can still
-update its own global config; reads are unrestricted. `bash` is itself jailed on
-macOS by default (`[sandbox] bash = "enforce"`, Seatbelt): each command runs
-under sandbox-exec allowed to write only the same roots (+ temp and toolchain
-caches) and to reach the network only when `network = true`. Unsupported platforms fall back to
-running unconfined. The escape-prompt and Linux support are Phase 1's remainder (§9).
+update its own global config. `forbid_read` lists directories the agent should
+not read, list, or search; entries support `${VAR}` / `${VAR:-default}` expansion
+and should be absolute, or use `${HOME}` for home-relative secrets such as
+`${HOME}/.ssh`. `bash` is itself jailed on macOS by default
+(`[sandbox] bash = "enforce"`, Seatbelt): each command runs under sandbox-exec
+allowed to write only the same roots (+ temp and toolchain caches), denied reads
+under `forbid_read`, and allowed to reach the network only when `network = true`.
+Unsupported platforms fall back to running unconfined when no OS sandbox is
+available. The escape-prompt and Linux support are Phase 1's remainder (§9).
 
 ## 6. Error Handling
 

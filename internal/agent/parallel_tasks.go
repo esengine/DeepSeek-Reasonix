@@ -316,6 +316,7 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 				}
 			}
 			markCancelled(err)
+			wg.Wait()
 			return formatParallelTasksAggregate(outputs, taskErrs, statuses, true), err
 		}
 	}

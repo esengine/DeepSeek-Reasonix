@@ -91,6 +91,9 @@ type Messages struct {
 	PermissionSavedFmt          string // permission rule saved notice: path, rule
 	PermissionAlreadyAllowedFmt string // permission rule already covered notice: path, rule
 	PermissionSaveFailedFmt     string // permission rule save failure notice: rule, error
+	MCPReadOnlyTrustSavedFmt    string // MCP trusted read-only saved notice: path, server, tool
+	MCPReadOnlyTrustAlreadyFmt  string // MCP trusted read-only already covered notice: path, server, tool
+	MCPReadOnlyTrustFailedFmt   string // MCP trusted read-only save failure notice: server, tool, error
 	DiffFoldedFmt               string // "… +%d more lines" footer when a writer diff is folded
 	DiffFoldEnabledFmt          string // notice when /diff-fold enables folding, %d = line limit
 	DiffFoldDisabled            string // notice when /diff-fold disables folding (shows all lines)
@@ -150,60 +153,67 @@ type Messages struct {
 
 	// slash command + sub-command descriptions shown in the menu (CLI and desktop
 	// share these via i18n.M, so both frontends localize identically).
-	CmdNew          string // /new
-	CmdClear        string // /clear
-	CmdCompact      string // /compact
-	CmdRewind       string // /rewind
-	CmdTree         string // /tree
-	CmdBranch       string // /branch
-	CmdSwitchBranch string // /switch
-	CmdResume       string // /resume
-	CmdRename       string // /rename
-	CmdModel        string // /model
-	CmdMemory       string // /memory
-	CmdMigrate      string // /migrate
-	CmdGoal         string // /goal
-	CmdRemember     string // /remember
-	CmdForget       string // /forget
-	CmdMcp          string // /mcp
-	CmdHooks        string // /hooks
-	CmdPasteImage   string // /paste-image
-	CmdOutputStyle  string // /output-style
-	CmdTheme        string // /theme
-	CmdLanguage     string // /language
-	CmdSkill        string // /skills
-	CmdVerbose      string // /verbose
-	CmdReloadCmd    string // /reload-cmd
-	CmdDiffFold     string // /diff-fold
-	CmdSandbox      string // /sandbox
-	CmdEffort       string // /effort
-	CmdAutoPlan     string // /auto-plan
-	CmdReasonLang   string // /reasoning-language
-	CmdMemoryV5     string // /memory-v5
-	CmdHelp         string // /help
-	CmdTodo         string // /todo
-	CmdQuit         string // /quit (also accepts /exit as hidden alias)
-	ArgSkillList    string // /skills list
-	ArgSkillShow    string // /skills show
-	ArgSkillNew     string // /skills new
-	ArgSkillPaths   string // /skills paths
-	ArgMcpAdd       string // /mcp add
-	ArgMcpRemove    string // /mcp remove
-	ArgMcpList      string // /mcp list
-	ArgMcpConnected string // /mcp remove <server> tag
-	ArgHooksList    string // /hooks list
-	ArgHooksTrust   string // /hooks trust
-	ArgModelCurrent string // /model <ref> active tag
-	ArgEffortAuto   string // /effort auto
-	ArgEffortLow    string // /effort low
-	ArgEffortMedium string // /effort medium
-	ArgEffortHigh   string // /effort high
-	ArgEffortXHigh  string // /effort xhigh
-	ArgEffortMax    string // /effort max
-	ArgThemeCurrent string // /theme <style> active tag
-	ArgLanguageAuto string // /language auto
-	ArgLanguageEn   string // /language en
-	ArgLanguageZh   string // /language zh
+	CmdNew              string // /new
+	CmdClear            string // /clear
+	CmdCompact          string // /compact
+	CmdRewind           string // /rewind
+	CmdTree             string // /tree
+	CmdBranch           string // /branch
+	CmdSwitchBranch     string // /switch
+	CmdResume           string // /resume
+	CmdRename           string // /rename
+	CmdModel            string // /model
+	CmdMemory           string // /memory
+	CmdMigrate          string // /migrate
+	CmdGoal             string // /goal
+	CmdRemember         string // /remember
+	CmdForget           string // /forget
+	CmdMcp              string // /mcp
+	CmdHooks            string // /hooks
+	CmdPasteImage       string // /paste-image
+	CmdOutputStyle      string // /output-style
+	CmdTheme            string // /theme
+	CmdLanguage         string // /language
+	CmdSkill            string // /skills
+	CmdVerbose          string // /verbose
+	CmdReloadCmd        string // /reload-cmd
+	CmdDiffFold         string // /diff-fold
+	CmdSandbox          string // /sandbox
+	CmdEffort           string // /effort
+	CmdAutoPlan         string // /auto-plan
+	CmdReasonLang       string // /reasoning-language
+	CmdMemoryV5         string // /memory-v5
+	CmdHelp             string // /help
+	CmdTodo             string // /todo
+	CmdQuit             string // /quit (also accepts /exit as hidden alias)
+	CmdCopy             string // /copy
+	CmdExport           string // /export
+	SlashCopyDone       string // "/copy" succeeded
+	SlashCopyEmpty      string // no assistant response to copy
+	SlashCopyListHeader string // header shown before the numbered list
+	SlashExportDoneFmt  string // "/export" succeeded, %s = file path
+	SlashExportEmpty    string // no messages to export
+	ArgSkillList        string // /skills list
+	ArgSkillShow        string // /skills show
+	ArgSkillNew         string // /skills new
+	ArgSkillPaths       string // /skills paths
+	ArgMcpAdd           string // /mcp add
+	ArgMcpRemove        string // /mcp remove
+	ArgMcpList          string // /mcp list
+	ArgMcpConnected     string // /mcp remove <server> tag
+	ArgHooksList        string // /hooks list
+	ArgHooksTrust       string // /hooks trust
+	ArgModelCurrent     string // /model <ref> active tag
+	ArgEffortAuto       string // /effort auto
+	ArgEffortLow        string // /effort low
+	ArgEffortMedium     string // /effort medium
+	ArgEffortHigh       string // /effort high
+	ArgEffortXHigh      string // /effort xhigh
+	ArgEffortMax        string // /effort max
+	ArgThemeCurrent     string // /theme <style> active tag
+	ArgLanguageAuto     string // /language auto
+	ArgLanguageEn       string // /language en
+	ArgLanguageZh       string // /language zh
 
 	// management listing notices (the Submit path: desktop / HTTP frontends)
 	ListModelsHeaderFmt string // "models (active: %s)"

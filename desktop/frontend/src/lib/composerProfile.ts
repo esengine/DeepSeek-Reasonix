@@ -53,24 +53,39 @@ function profileWithPending(profile: Omit<ComposerProfile, "pending">, pending: 
   return { ...profile, pending };
 }
 
-export function composerProfileFromTab(tab?: TabMeta | null): ComposerProfile {
+function fallbackToolApprovalMode(rawMode: string | undefined, fallback?: ToolApprovalMode | null): ToolApprovalMode | undefined {
+  if ((rawMode ?? "").trim() !== "") return undefined;
+  return fallback === "auto" ? "auto" : undefined;
+}
+
+export function composerProfileFromTab(tab?: TabMeta | null, fallback?: ToolApprovalMode | null): ComposerProfile {
   if (!tab) return { ...defaultComposerProfile, pending: {} };
   const legacyMode = normalizeMode(tab.mode);
   const goal = activeGoal(tab.goal, tab.goalStatus);
   return profileWithPending({
     collaborationMode: normalizeCollaborationMode(tab.collaborationMode, goal, legacyMode),
     goalDraftMode: false,
-    toolApprovalMode: normalizeToolApprovalMode(tab.toolApprovalMode, legacyMode, tab.toolApprovalMode === "yolo"),
+    toolApprovalMode: normalizeToolApprovalMode(
+      tab.toolApprovalMode,
+      legacyMode,
+      tab.toolApprovalMode === "yolo",
+      fallbackToolApprovalMode(tab.toolApprovalMode, fallback),
+    ),
     tokenMode: normalizeTokenMode(tab.tokenMode),
     goal,
   });
 }
 
-export function composerProfileFromMeta(meta?: Meta | null, legacyMode?: Mode): ComposerProfile {
+export function composerProfileFromMeta(meta?: Meta | null, legacyMode?: Mode, fallback?: ToolApprovalMode | null): ComposerProfile {
   if (!meta) return { ...defaultComposerProfile, pending: {} };
   const fallbackMode = normalizeMode(legacyMode);
   const goal = activeGoal(meta.goal, meta.goalStatus);
-  const toolApprovalMode = normalizeToolApprovalMode(meta.toolApprovalMode, fallbackMode, meta.autoApproveTools ?? meta.bypass);
+  const toolApprovalMode = normalizeToolApprovalMode(
+    meta.toolApprovalMode,
+    fallbackMode,
+    meta.autoApproveTools ?? meta.bypass,
+    fallbackToolApprovalMode(meta.toolApprovalMode, fallback),
+  );
   return profileWithPending({
     collaborationMode: normalizeCollaborationMode(meta.collaborationMode, goal, fallbackMode),
     goalDraftMode: false,
@@ -139,7 +154,7 @@ export function hydrateComposerProfilesFromTabs(current: ComposerProfilesByTab, 
   let changed = false;
 
   for (const tab of tabs) {
-    const profile = reconcileComposerProfile(current[tab.id], composerProfileFromTab(tab));
+    const profile = reconcileComposerProfile(current[tab.id], composerProfileFromTab(tab, current[tab.id]?.toolApprovalMode));
     next[tab.id] = profile;
     if (!profilesEqual(current[tab.id], profile)) changed = true;
   }
@@ -153,7 +168,11 @@ export function hydrateComposerProfilesFromTabs(current: ComposerProfilesByTab, 
 
 export function hydrateComposerProfileFromMeta(current: ComposerProfilesByTab, tabId: string, meta: Meta): ComposerProfilesByTab {
   const previous = current[tabId];
-  const backend = composerProfileFromMeta(meta, previous ? composerProfileMode(previous) : undefined);
+  const backend = composerProfileFromMeta(
+    meta,
+    previous ? composerProfileMode(previous) : undefined,
+    previous?.toolApprovalMode,
+  );
   const profile = reconcileComposerProfile(previous, backend);
   if (profilesEqual(previous, profile)) return current;
   return { ...current, [tabId]: profile };

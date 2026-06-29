@@ -12,6 +12,7 @@
 ## Contents
 
 - [Configuration](#configuration)
+- [Environment variables](#environment-variables)
 - [Serve web frontend](#serve-web-frontend)
 - [Configuration paths](./CONFIG_PATHS.md)
 - [Reasoning language](./REASONING_LANGUAGE.md)
@@ -74,6 +75,7 @@ api_key_env = "DEEPSEEK_API_KEY"
 [tools]
 enabled = []   # omit/empty = all built-ins
 bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
+mcp_call_timeout_seconds = 300   # default MCP call safety cap; per-plugin/tool overrides may raise it
 
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
@@ -88,6 +90,7 @@ allow = ["Bash(go test:*)"]                  # never prompted
 [sandbox]
 # workspace_root = ""          # file-writers confined here; empty = current dir
 # allow_write    = ["/tmp"]    # extra dirs write_file/edit_file/multi_edit/move_file may touch
+# forbid_read    = ["${HOME}/.ssh"]   # dirs the agent must not read or list
 
 [serve]
 auth_mode = "none"             # none|token|password; use auth before binding beyond localhost
@@ -98,18 +101,51 @@ auth_mode = "none"             # none|token|password; use auth before binding be
 [[plugins]]
 name    = "example"
 command = "reasonix-plugin-example"
+call_timeout_seconds = 600   # optional per-server MCP call timeout
+tool_timeout_seconds = { "generate_video" = 1800 }   # optional raw MCP tool names
 ```
 
 For the full schema and every field's contract, see [`SPEC.md` §5](./SPEC.md#5-configuration-toml).
 
 `[agent].plan_mode_allowed_tools` is an extra read-only declaration for custom or
-external tools Reasonix cannot classify itself — it is also the escape valve for
-MCP/plugin tools whose read-only flag comes from an untrusted server
-`readOnlyHint`, which plan mode does not trust and so fails closed on until
-declared here (first-party `ReadOnlyToolNames` overrides and built-ins stay
-trusted). It never unlocks known blocked plan-mode tools such as `bash`, `task`,
-writers, installers, or memory mutation tools, and it never bypasses bash's
-plan-mode safety checks.
+external tools Reasonix cannot classify itself. For MCP/plugin tools, a concrete
+model-visible name such as `mcp__github__issue_read` also promotes that tool to a
+trusted read-only reader for planner and read-only research surfaces. Prefer the
+one-time MCP read-only trust prompt, or plugin-level `trusted_read_only_tools`
+when you want to pre-seed audited tools; keep `plan_mode_allowed_tools` as the
+compatibility escape valve. It never unlocks known blocked plan-mode tools such
+as `bash`, `task`, writers, installers, or memory mutation tools, and it never
+bypasses bash's plan-mode safety checks.
+
+### Environment variables
+
+Most day-to-day settings belong in `config.toml` or the global Reasonix `.env`
+described above. The variables below are process-level advanced switches; set
+them before launching Reasonix. Project `.env` files are not a runtime source for
+Reasonix control variables.
+
+`REASONIX_MEMORY_COMPILER_LLM_CLASSIFICATION=true` enables the optional LLM
+task/chat classifier for Memory v5. By default it is disabled, and Reasonix uses
+the local heuristic classifier without extra provider calls. When enabled, cache
+misses may send a small classifier request through the configured provider before
+deciding whether a user input is task-like or conversational; this can add a
+little latency, provider usage, and token cost. The classifier result is cached
+per session for a short time. Only the exact trimmed value `true` enables it;
+unset, `false`, `1`, and `TRUE` keep the default heuristic path.
+
+```bash
+REASONIX_MEMORY_COMPILER_LLM_CLASSIFICATION=true reasonix
+```
+
+For development runs, prefix the command that starts the process, for example:
+
+```bash
+REASONIX_MEMORY_COMPILER_LLM_CLASSIFICATION=true wails dev -forcebuild
+```
+
+Packaged desktop apps launched from the OS app launcher may not inherit variables
+from your interactive terminal; start the app from an environment-managed launcher
+when you intentionally want this advanced switch enabled.
 
 ## Serve web frontend
 
@@ -242,6 +278,7 @@ Mode and display shortcuts:
 | `Ctrl+B` | Expands or collapses long shell output | Works with terminal-native text selection because the TUI does not enable mouse reporting by default. |
 | Ask / Auto | No keyboard cycle | Ask is the default interactive base. Auto is not entered through `Shift+Tab`; use clients or APIs that expose the tool approval posture directly. |
 | `/goal <objective>`, `/goal --research <objective>`, `/goal --simple <objective>`, `/goal status`, `/goal clear` | Starts, checks, or clears Goal | Goal is not in any keyboard cycle; clearly long-horizon goals automatically enable AutoResearch. Ordinary prompts with strong AutoResearch signals are also upgraded into Goal. |
+| `/migrate`, `/migrate --from <legacy-dir>` | Retries legacy migration or imports sessions from a chosen v0.x source | Use `--from` for custom Windows v0.52 install/data directories; it imports sessions only. See [Configuration paths](./CONFIG_PATHS.md). |
 
 Picker and approval shortcuts:
 
@@ -262,7 +299,7 @@ Mode meanings:
 | --- | --- |
 | Ask | Prompts for fallback writer approvals. |
 | Auto | Auto-allows fallback approvals; explicit `ask` / `deny` rules still apply. |
-| YOLO | Skips ordinary tool approval prompts; `deny`, user `ask` questions, and plan approval prompts still wait. |
+| YOLO | Skips ordinary tool approval prompts; `deny`, user `ask` questions, plan approval prompts, and MCP read-only trust prompts still wait. |
 | Plan | Keeps the next work read-only until a plan is approved or Plan is turned off. |
 | Goal | Pursues a saved objective until complete, blocked, or cleared. |
 
@@ -281,10 +318,14 @@ Permissions are *policy* (which calls to allow / prompt). The **sandbox** is
 *enforcement*: the file-writers (`write_file` / `edit_file` / `multi_edit` / `move_file`)
 refuse any path outside `[sandbox] workspace_root` (default: the current dir, so
 edits stay in the project), resolving symlinks and `..` so a link can't tunnel
-out. Reads are unrestricted. `bash` is itself jailed on macOS by default
-(`[sandbox] bash`, Seatbelt): commands may write only those same roots (plus
-temp and toolchain caches) and reach the network only when `[sandbox] network`
-is set. Other platforms fall back to running unconfined for now (see
+out. `forbid_read` optionally hides sensitive directories from the agent's
+read/list/search tools; use absolute paths or `${HOME}` / `${VAR}` references,
+not `~`, because config expansion is environment-variable based. `bash` is
+itself jailed on macOS by default (`[sandbox] bash`, Seatbelt): commands may
+write only those same roots (plus temp and toolchain caches), cannot read
+configured `forbid_read` roots while the OS sandbox is active, and reach the
+network only when `[sandbox] network` is set. Other platforms fall back to
+running unconfined when no OS sandbox is available (see
 [`SPEC.md` §9](./SPEC.md#9-roadmap-not-in-current-scope) for the escape-prompt and
 Linux support still to come).
 
@@ -296,7 +337,30 @@ Reasonix is an MCP client. A `[[plugins]]` entry's `type` selects the transport:
 (`${VAR}` / `${VAR:-default}` expanded from the environment, so tokens stay out
 of the file). Tools surface to the model as `mcp__<server>__<tool>`; a tool
 declaring MCP's `readOnlyHint: true` joins parallel dispatch and the permission
-reader-default.
+reader-default, but planner / read-only research confirms third-party read-only
+hints before relying on them. In interactive sessions, approve the first trust
+prompt once, or choose the persistent option to remember the raw MCP tool name.
+This trust prompt is a user decision, so Auto/YOLO tool approval does not answer
+it; allowing for the session or persisting trust prevents repeat prompts for the
+same MCP tool.
+Advanced users can also pre-seed audited third-party readers on the plugin:
+
+```toml
+[[plugins]]
+name = "github"
+command = "github-mcp"
+trusted_read_only_tools = ["issue_read", "pull_request_read"]
+```
+
+The desktop MCP panel keeps this as an advanced management surface: expand a
+configured server and open its tools list, then use **Pre-trust read-only** or a
+per-tool **Pre-trust** button only when you want to approve tools before they are
+needed. Use **Untrust** to remove a remembered reader. The desktop writes the raw
+MCP tool names to `trusted_read_only_tools` in the owning config source: project
+`.mcp.json` servers are updated under
+`mcpServers.<server>.trusted_read_only_tools`, while ordinary Reasonix plugins
+are updated in the user's Reasonix config. Trust only side-effect-free readers;
+create/update/delete tools should remain untrusted.
 
 A server's **prompts** surface as `/mcp__<server>__<prompt>` slash commands
 (positional args after the command); its **resources** are pulled in by writing
@@ -309,6 +373,8 @@ resource) you can copy.
 [[plugins]]                       # local stdio server
 name    = "example"
 command = "reasonix-plugin-example"
+# call_timeout_seconds = 600       # optional per-server MCP call timeout
+# tool_timeout_seconds = { "generate_video" = 1800 }   # optional raw MCP tool names
 
 [[plugins]]                       # remote server over Streamable HTTP
 name    = "stripe"

@@ -29,6 +29,14 @@ const userTimeItems = historyMessagesToItems([
 eq(userTimeItems[0]?.kind === "user" && userTimeItems[0].createdAt, undefined, "history users without createdAt keep no timestamp");
 eq(userTimeItems[1]?.kind === "user" && userTimeItems[1].createdAt, 1_718_000_000_000, "history users preserve createdAt when present");
 
+const checkpointTurnItems = historyMessagesToItems([
+  { role: "user", content: "first", checkpointTurn: 0 },
+  { role: "assistant", content: "ok" },
+  { role: "user", content: "second", checkpointTurn: 3 },
+] as HistoryMessage[], "c").items.filter((item) => item.kind === "user");
+eq(checkpointTurnItems[0]?.kind === "user" && checkpointTurnItems[0].checkpointTurn, 0, "history users preserve checkpoint turn zero");
+eq(checkpointTurnItems[1]?.kind === "user" && checkpointTurnItems[1].checkpointTurn, 3, "history users preserve non-contiguous backend checkpoint turns");
+
 const citedAssistant = historyMessagesToItems([
   {
     role: "assistant",

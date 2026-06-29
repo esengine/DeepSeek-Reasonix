@@ -12,6 +12,7 @@
 ## 目录
 
 - [配置](#配置)
+- [环境变量](#环境变量)
 - [Serve Web 前端](#serve-web-前端)
 - [配置路径](./CONFIG_PATHS.zh-CN.md)
 - [思考语言](./REASONING_LANGUAGE.zh-CN.md)
@@ -66,6 +67,7 @@ api_key_env = "DEEPSEEK_API_KEY"
 [tools]
 enabled = []   # 省略/为空 = 全部内置工具
 bash_timeout_seconds = 120   # 前台安全上限；设为 0 表示不设工具层超时
+mcp_call_timeout_seconds = 300   # MCP 调用默认安全上限；可用 plugin/tool 覆盖
 
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # 额外的自定义技能目录
@@ -80,6 +82,7 @@ allow = ["Bash(go test:*)"]                  # 从不询问
 [sandbox]
 # workspace_root = ""          # 文件写工具被限制在此目录；留空 = 当前目录
 # allow_write    = ["/tmp"]    # write_file/edit_file/multi_edit/move_file 额外可写的目录
+# forbid_read    = ["${HOME}/.ssh"]   # agent 不可读取或列出的目录
 
 [serve]
 auth_mode = "none"             # none|token|password；绑定到非 localhost 前请先开启认证
@@ -90,14 +93,41 @@ auth_mode = "none"             # none|token|password；绑定到非 localhost �
 [[plugins]]
 name    = "example"
 command = "reasonix-plugin-example"
+call_timeout_seconds = 600   # 可选：单个 MCP server 的调用超时
+tool_timeout_seconds = { "generate_video" = 1800 }   # 可选：raw MCP tool 名称
 ```
 
 完整 schema 与每个字段的契约见 [`SPEC.md` §5](./SPEC.md#5-configuration-toml)。
 
-`[agent].plan_mode_allowed_tools` 用于把 Reasonix 无法自动分类的自定义/外部工具声明为额外只读工具，
-它也是 MCP/plugin 工具的逃生阀——当 MCP 工具的只读标志来自服务器自报的 `readOnlyHint`(不可信)时，
-计划模式不信任它、默认 fail-closed，需在此显式声明才能使用(first-party `ReadOnlyToolNames` 覆盖与 builtin 仍可信)。
-它不再解锁 `bash`、`task`、写文件工具、安装器、记忆变更工具等计划模式已知阻断项，也不会绕过 bash 在计划模式下的安全检查。
+`[agent].plan_mode_allowed_tools` 用于把 Reasonix 无法自动分类的自定义/外部工具声明为额外只读工具。
+对 MCP/plugin 工具，像 `mcp__github__issue_read` 这样的具体模型可见名也会把该工具提升为
+planner / read-only research 可用的可信只读工具。优先使用 MCP 只读信任的一次性确认；需要预置已审过工具时，
+再在 plugin 上写 `trusted_read_only_tools`，`plan_mode_allowed_tools` 保留为兼容逃生阀。它不再解锁 `bash`、`task`、
+写文件工具、安装器、记忆变更工具等计划模式已知阻断项，也不会绕过 bash 在计划模式下的安全检查。
+
+### 环境变量
+
+多数日常设置应写在 `config.toml` 或前文提到的 Reasonix 全局 `.env` 中。下面这些变量是进程级高级开关；
+需要在启动 Reasonix 之前设置。项目 `.env` 不是 Reasonix 控制变量的运行时来源。
+
+`REASONIX_MEMORY_COMPILER_LLM_CLASSIFICATION=true` 会为 Memory v5 启用可选的 LLM 任务/聊天分类器。
+默认关闭，此时 Reasonix 使用本地 heuristic classifier，不会产生额外 provider 调用。开启后，分类缓存未命中时，
+Reasonix 可能先通过已配置 provider 发送一个很小的分类请求，再决定用户输入是任务还是普通对话；这会增加少量延迟、
+provider 用量和 token 成本。分类结果会在单个 session 内短时间缓存。只有去掉首尾空白后精确等于 `true`
+才会启用；未设置、`false`、`1`、`TRUE` 都会保持默认 heuristic 路径。
+
+```bash
+REASONIX_MEMORY_COMPILER_LLM_CLASSIFICATION=true reasonix
+```
+
+开发运行时，把变量放在启动进程的命令前，例如：
+
+```bash
+REASONIX_MEMORY_COMPILER_LLM_CLASSIFICATION=true wails dev -forcebuild
+```
+
+从系统图形界面直接启动的打包桌面端通常不会继承交互式终端里的环境变量；如果确实要开启这个高级开关，
+请从受环境变量管理的启动方式打开应用。
 
 ## Serve Web 前端
 
@@ -219,6 +249,7 @@ Goal、由 `todo_write` 工具驱动的实时 Todo 面板，以及已配置 prov
 | `Ctrl+B` | 展开或收起较长 shell 输出 | TUI 默认不启用鼠标报告，因此可和终端原生文本选择共存。 |
 | Ask / Auto | 没有键盘循环 | Ask 是默认交互基底；Auto 不通过 `Shift+Tab` 进入，需要由暴露工具审批姿态的客户端或 API 直接设置。 |
 | `/goal <目标>`、`/goal --research <目标>`、`/goal --simple <目标>`、`/goal status`、`/goal clear` | 启动、查看或清除 Goal | Goal 不进入任何快捷键循环；明显长周期目标会自动启用 AutoResearch。普通输入命中强 AutoResearch 信号时也会自动升级为 Goal。 |
+| `/migrate`、`/migrate --from <旧目录>` | 重试旧数据迁移，或从指定 v0.x 来源导入 sessions | Windows v0.52 自定义安装/数据目录用 `--from`；该形式只导入 sessions。详见[配置路径](./CONFIG_PATHS.zh-CN.md)。 |
 
 选择器与审批：
 
@@ -239,7 +270,7 @@ Goal、由 `todo_write` 工具驱动的实时 Todo 面板，以及已配置 prov
 | --- | --- |
 | Ask | writer 兜底审批时询问。 |
 | Auto | 自动放行兜底审批；显式 `ask` / `deny` 规则仍生效。 |
-| YOLO | 跳过普通工具审批；`deny`、用户 `ask` 问题、计划批准提示仍会等待。 |
+| YOLO | 跳过普通工具审批；`deny`、用户 `ask` 问题、计划批准提示、MCP 只读信任提示仍会等待。 |
 | Plan | 下一轮保持只读规划，直到计划被批准或关闭 Plan。 |
 | Goal | 持续追一个已保存目标，直到完成、阻塞或清除。 |
 
@@ -255,9 +286,11 @@ Goal、由 `todo_write` 工具驱动的实时 Todo 面板，以及已配置 prov
 权限是**策略**（哪些调用放行/询问），**沙盒**是**强制**：文件写工具
 （`write_file` / `edit_file` / `multi_edit` / `move_file`）拒绝 `[sandbox] workspace_root`
 之外的任何路径（默认当前目录，编辑不出项目），并解析符号链接与 `..`，使链接无法
-打洞越界。读不受限。`bash` 本身在 macOS 默认进沙盒（`[sandbox] bash`，Seatbelt）：
-命令只能写这些 root（外加临时目录与工具链缓存），`[sandbox] network` 为真时才能联网；
-其它平台暂回退为不沙盒运行（越界问一次与 Linux 支持见
+打洞越界。`forbid_read` 可选地隐藏敏感目录，使 agent 的读文件、列目录和搜索工具不能读取或列出它们；
+建议使用绝对路径或 `${HOME}` / `${VAR}`，不要写 `~`，因为配置只做环境变量展开。
+`bash` 本身在 macOS 默认进沙盒（`[sandbox] bash`，Seatbelt）：命令只能写这些 root（外加临时目录与工具链缓存），
+OS 沙盒生效时也不能读取配置的 `forbid_read` roots，`[sandbox] network` 为真时才能联网；
+其它平台在没有可用 OS 沙盒时会回退为不沙盒运行（越界问一次与 Linux 支持见
 [`SPEC.md` §9](./SPEC.md#9-roadmap-not-in-current-scope)）。
 
 ## 插件（MCP）
@@ -266,7 +299,24 @@ Reasonix 是一个 MCP 客户端。`[[plugins]]` 的 `type` 选择传输：`stdi
 程（`command`/`args`/`env`）；`http`（Streamable HTTP）连接远程 `url`，可带静态
 `headers`（`${VAR}` / `${VAR:-default}` 从环境展开，密钥不入文件）。工具以
 `mcp__<server>__<tool>` 暴露给模型，与 Claude Code 一致；声明 MCP `readOnlyHint: true`
-的工具会参与并行调度并命中权限层的只读默认放行。
+的工具会参与并行调度并命中权限层的只读默认放行，但 planner / read-only research 会先确认第三方
+自报只读。交互式会话里，第一次需要时允许即可；选择持久允许会把 raw MCP tool name 记住。
+这个信任提示属于用户决策，Auto/YOLO 工具审批不会代答；选择本会话允许或持久允许后，同一个 MCP
+工具不会在本会话里重复弹。
+高级用户也可以在 plugin 上预置审过的第三方读工具：
+
+```toml
+[[plugins]]
+name = "github"
+command = "github-mcp"
+trusted_read_only_tools = ["issue_read", "pull_request_read"]
+```
+
+桌面端 MCP 面板保留为高级管理入口：展开已配置的服务器并打开工具列表；只有在想提前批准工具时，
+才使用 **预先信任只读** 或单个工具旁的 **预先信任**。用 **取消信任** 可以移除已记住的读工具。
+桌面端会把 raw MCP tool name 写入拥有该服务器的配置源：项目 `.mcp.json` 里的服务器会更新到
+`mcpServers.<server>.trusted_read_only_tools`，普通 Reasonix plugin 会写入用户级 Reasonix config。
+只信任无副作用的读取工具；create/update/delete 这类写工具应保持未信任。
 
 服务器的 **prompts** 会暴露成 `/mcp__<server>__<prompt>` 斜杠命令（命令后空格分隔参
 数）；**resources** 通过在消息里写 `@<server>:<uri>` 拉入；`/mcp` 列出已连接服务器及
@@ -278,6 +328,8 @@ stdio 参考实现（`echo`、`wordcount`、一个 `review` prompt、一个 styl
 [[plugins]]                       # 本地 stdio 服务器
 name    = "example"
 command = "reasonix-plugin-example"
+# call_timeout_seconds = 600       # 可选：单个 MCP server 的调用超时
+# tool_timeout_seconds = { "generate_video" = 1800 }   # 可选：raw MCP tool 名称
 
 [[plugins]]                       # 远程 Streamable HTTP 服务器
 name    = "stripe"

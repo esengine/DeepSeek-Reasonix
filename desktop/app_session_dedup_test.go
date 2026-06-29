@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
@@ -386,5 +387,107 @@ func TestNewSessionNoopsWhenCurrentTabIsBlank(t *testing.T) {
 	}
 	if got := ctrl.SessionPath(); got != path {
 		t.Fatalf("blank NewSession changed session path = %q, want %q", got, path)
+	}
+}
+
+func TestNewSessionUsesFreshTopicIdentity(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	oldTopicID := "topic_old"
+	oldTopicTitle := "Old topic"
+	oldPath := writeTopicSessionWithPrompt(t, dir, "old.jsonl", oldTopicID, oldTopicTitle, projectRoot, "old prompt", time.Now().Add(-time.Hour))
+	sess := &agent.Session{}
+	sess.Replace([]provider.Message{{Role: provider.RoleUser, Content: "old prompt"}})
+	ag := agent.New(stubProvider{}, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{Executor: ag, SessionDir: dir, SessionPath: oldPath, Sink: event.Discard})
+
+	app := NewApp()
+	app.setTestCtrl(ctrl, "model-a")
+	tab := app.tabs["test"]
+	tab.Scope = "project"
+	tab.WorkspaceRoot = projectRoot
+	tab.TopicID = oldTopicID
+	tab.TopicTitle = oldTopicTitle
+	tab.SessionPath = oldPath
+	app.projectTreeChangedHook = func() {}
+
+	if err := app.NewSession(); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if got := tab.TopicID; got == "" || got == oldTopicID {
+		t.Fatalf("new session topic ID = %q, want fresh ID distinct from %q", got, oldTopicID)
+	}
+	if got := tab.TopicTitle; got != defaultTopicTitle {
+		t.Fatalf("new session topic title = %q, want %q", got, defaultTopicTitle)
+	}
+	newPath := ctrl.SessionPath()
+	if newPath == "" || filepath.Clean(newPath) == filepath.Clean(oldPath) {
+		t.Fatalf("new session path = %q, want fresh path distinct from %q", newPath, oldPath)
+	}
+
+	if err := os.WriteFile(newPath, []byte(`{"role":"user","content":"new prompt"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write new session: %v", err)
+	}
+	if !app.maybeAutoTitleTopic(tab) {
+		t.Fatalf("new session should auto-title its fresh topic")
+	}
+
+	oldMeta, ok, err := agent.LoadBranchMeta(oldPath)
+	if err != nil || !ok {
+		t.Fatalf("load old meta: ok=%v err=%v", ok, err)
+	}
+	if oldMeta.TopicID != oldTopicID || oldMeta.TopicTitle != oldTopicTitle {
+		t.Fatalf("old session meta changed after new session auto-title: %+v", oldMeta)
+	}
+	newMeta, ok, err := agent.LoadBranchMeta(newPath)
+	if err != nil || !ok {
+		t.Fatalf("load new meta: ok=%v err=%v", ok, err)
+	}
+	if newMeta.TopicID != tab.TopicID || newMeta.TopicTitle != "new prompt" {
+		t.Fatalf("new session meta = %+v, want topic %q titled new prompt", newMeta, tab.TopicID)
+	}
+}
+
+func TestNewSessionKeepsFreshRuntimeWhenTopicRepairFails(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := agent.NewSessionPath(dir, "model-a")
+	ctrl := controllerWithContent(t, path)
+	app := NewApp()
+	app.projectTreeChangedHook = func() {}
+	app.setTestCtrl(ctrl, "model-a")
+	tab := app.tabs["test"]
+	tab.TopicID = "topic_old"
+	tab.TopicTitle = "Old topic"
+
+	// Block desktopConfigDir-backed topic-index writes without affecting the
+	// session directory, which exercises the post-NewSession repair failure path.
+	if err := os.MkdirAll(filepath.Dir(desktopConfigDir()), 0o755); err != nil {
+		t.Fatalf("mkdir desktop config parent: %v", err)
+	}
+	if err := os.WriteFile(desktopConfigDir(), []byte("not-a-directory"), 0o644); err != nil {
+		t.Fatalf("block desktop config dir: %v", err)
+	}
+
+	if err := app.NewSession(); err != nil {
+		t.Fatalf("NewSession should keep the fresh runtime even when topic repair fails: %v", err)
+	}
+	if got := tab.TopicID; got == "" || got == "topic_old" {
+		t.Fatalf("new session topic ID = %q, want fresh ID distinct from the old topic", got)
+	}
+	if got := tab.TopicTitle; got != defaultTopicTitle {
+		t.Fatalf("new session topic title = %q, want %q", got, defaultTopicTitle)
+	}
+	if got := ctrl.SessionPath(); got == "" || filepath.Clean(got) == filepath.Clean(path) {
+		t.Fatalf("new session path = %q, want a fresh path distinct from %q", got, path)
 	}
 }

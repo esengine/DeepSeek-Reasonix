@@ -397,7 +397,8 @@ func (c *Controller) managementNotice(trimmed string) bool {
 	case "/memory-v5":
 		c.memoryV5Notice(fields)
 	case "/migrate", "/migration":
-		migration.RunLegacyRescue(c.sink)
+		args := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
+		migration.RunLegacyRescueCommand(args, c.sink)
 	case "/skill", "/skills":
 		sub := ""
 		if len(fields) >= 2 {

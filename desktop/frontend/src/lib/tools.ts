@@ -66,6 +66,8 @@ export function subjectOf(name: string, args: string): string {
       return str(a, "url");
     case "task":
       return str(a, "description") || str(a, "prompt");
+    case "run_skill":
+      return str(a, "name");
     case "move_file": {
       const src = str(a, "source_path");
       const dst = str(a, "destination_path");

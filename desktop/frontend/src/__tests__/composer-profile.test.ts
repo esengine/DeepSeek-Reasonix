@@ -17,6 +17,9 @@ import {
 } from "../lib/composerProfile";
 import type { Meta, TabMeta } from "../lib/types";
 
+type LooseTabMeta = Omit<TabMeta, "toolApprovalMode"> & { toolApprovalMode?: TabMeta["toolApprovalMode"] | "" };
+type LooseMeta = Omit<Meta, "toolApprovalMode"> & { toolApprovalMode?: Meta["toolApprovalMode"] | "" };
+
 let passed = 0;
 let failed = 0;
 
@@ -30,7 +33,7 @@ function eq(a: unknown, b: unknown, label: string) {
   }
 }
 
-function tab(overrides: Partial<TabMeta> = {}): TabMeta {
+function tab(overrides: Partial<LooseTabMeta> = {}): TabMeta {
   return {
     id: "tab-1",
     scope: "project",
@@ -50,10 +53,10 @@ function tab(overrides: Partial<TabMeta> = {}): TabMeta {
     active: true,
     cwd: "/repo",
     ...overrides,
-  };
+  } as TabMeta;
 }
 
-function meta(overrides: Partial<Meta> = {}): Meta {
+function meta(overrides: Partial<LooseMeta> = {}): Meta {
   return {
     label: "DeepSeek-R1",
     ready: true,
@@ -67,7 +70,7 @@ function meta(overrides: Partial<Meta> = {}): Meta {
     goal: "",
     goalStatus: "stopped",
     ...overrides,
-  };
+  } as Meta;
 }
 
 console.log("\ncomposer profile");
@@ -142,6 +145,17 @@ console.log("\ncomposer profile");
   profiles = hydrateComposerProfilesFromTabs(profiles, [tab()]);
 
   eq(Boolean(profiles["tab-2"]), false, "tab hydration removes profiles for closed tabs");
+}
+
+{
+  let profiles: ComposerProfilesByTab = {};
+  profiles = hydrateComposerProfilesFromTabs(profiles, [tab({ toolApprovalMode: "auto" })]);
+  profiles = hydrateComposerProfilesFromTabs(profiles, [tab({ toolApprovalMode: "" })]);
+
+  eq(profiles["tab-1"].toolApprovalMode, "auto", "blank tab payload does not demote explicit auto approval mode to ask");
+
+  profiles = hydrateComposerProfileFromMeta(profiles, "tab-1", meta({ toolApprovalMode: "" }));
+  eq(profiles["tab-1"].toolApprovalMode, "auto", "blank meta payload does not demote explicit auto approval mode to ask");
 }
 
 {

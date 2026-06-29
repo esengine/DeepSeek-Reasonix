@@ -225,3 +225,39 @@ func TestDecideUntrustedReadOnlyFailsClosedThenOverride(t *testing.T) {
 		t.Fatalf("a trusted read-only tool should be allowed: %s", d.Message)
 	}
 }
+
+// TestPlanModeAllowsSharedReadOnlyBashSet is the #5341 regression: plan mode now
+// classifies bash commands against the same shellsafe table the permission
+// auto-approve path uses, so read-only git/tooling commands beyond the old
+// status/diff/log/show short list are runnable while planning. Write-capable
+// commands and write-capable args remain blocked.
+func TestPlanModeAllowsSharedReadOnlyBashSet(t *testing.T) {
+	bash := func(cmd string) Call {
+		args, err := json.Marshal(map[string]any{"command": cmd})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return Call{Name: "bash", Args: args}
+	}
+
+	for _, cmd := range []string{
+		"git rev-parse --abbrev-ref HEAD", "git describe --tags", "git reflog",
+		"git for-each-ref", "git cat-file -p HEAD", "git ls-tree HEAD",
+		"go env", "npm view react version", "docker ps", "kubectl get pods",
+	} {
+		if d := (Policy{}).Decide(bash(cmd)); d.Blocked {
+			t.Errorf("plan mode blocked read-only %q: %s", cmd, d.Message)
+		}
+	}
+
+	for _, cmd := range []string{
+		"git checkout main", "git commit -m x", "git branch -d feature",
+		"go build ./...", "npm install",
+		"git status && rm -rf /", "git status > out.txt",
+		"git grep foo --open-files-in-pager=sh", "go list ./... -mod=mod",
+	} {
+		if d := (Policy{}).Decide(bash(cmd)); !d.Blocked {
+			t.Errorf("plan mode allowed unsafe %q", cmd)
+		}
+	}
+}

@@ -1431,6 +1431,25 @@ func TestTrashTopicMovesRelatedSessionsToTrash(t *testing.T) {
 		t.Fatalf("mkdir sessions: %v", err)
 	}
 	sessionPath := writeTopicSession(t, dir, "trash-me.jsonl", topicID, "Trash history", projectRoot)
+	placeholderPath := filepath.Join(dir, "trash-placeholder-session.jsonl")
+	if err := os.WriteFile(placeholderPath, nil, 0o644); err != nil {
+		t.Fatalf("write placeholder session: %v", err)
+	}
+	now := time.Now()
+	if err := agent.SaveBranchMetaPreserveUpdated(placeholderPath, agent.BranchMeta{
+		CreatedAt:     now.Add(-time.Minute),
+		UpdatedAt:     now,
+		Scope:         "project",
+		WorkspaceRoot: projectRoot,
+		TopicID:       topicID,
+		TopicTitle:    "Trash history",
+	}); err != nil {
+		t.Fatalf("save placeholder branch meta: %v", err)
+	}
+	placeholderGoalPath := strings.TrimSuffix(placeholderPath, ".jsonl") + ".goal-state.json"
+	if err := os.WriteFile(placeholderGoalPath, []byte(`{"done":true}`), 0o644); err != nil {
+		t.Fatalf("write placeholder goal state: %v", err)
+	}
 	ref := "sa_20260102_030405_000000000_aabbccddeeff"
 	writeSubagentArtifact(t, dir, ref, agent.BranchID(sessionPath))
 
@@ -1443,6 +1462,19 @@ func TestTrashTopicMovesRelatedSessionsToTrash(t *testing.T) {
 	trashPath := filepath.Join(dir, sessionTrashDir, "trash-me.jsonl", "trash-me.jsonl")
 	if _, err := os.Stat(trashPath); err != nil {
 		t.Fatalf("topic session should be moved to trash: %v", err)
+	}
+	if _, err := os.Stat(placeholderPath); !os.IsNotExist(err) {
+		t.Fatalf("placeholder session should be removed from active history, stat err = %v", err)
+	}
+	placeholderTrashDir := filepath.Join(dir, sessionTrashDir, "trash-placeholder-session.jsonl")
+	if _, err := os.Stat(filepath.Join(placeholderTrashDir, "trash-placeholder-session.jsonl")); err != nil {
+		t.Fatalf("placeholder session should be moved to trash: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(placeholderTrashDir, "trash-placeholder-session.jsonl.meta")); err != nil {
+		t.Fatalf("placeholder meta should be moved to trash: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(placeholderTrashDir, "trash-placeholder-session.goal-state.json")); err != nil {
+		t.Fatalf("placeholder goal state should be moved to trash: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, sessionTrashDir, "trash-me.jsonl", "subagents", ref+".jsonl")); err != nil {
 		t.Fatalf("topic subagent should be moved to trash: %v", err)

@@ -26,6 +26,10 @@ function entry(name: string, isDir = false): DirEntry {
   return { name, isDir };
 }
 
+function externalEntry(path: string, displayName: string): DirEntry {
+  return { name: displayName, path, displayName, isDir: false };
+}
+
 console.log("\nat-matches filter");
 
 // 1. Nested file surfaces when fragment matches an intermediate segment.
@@ -90,6 +94,27 @@ console.log("\nat-matches filter");
     ["a.ts", "b.ts", "src/c.ts"],
     "empty fragment includes every entry (legacy behavior preserved)",
   );
+}
+
+// 6. External-folder search results can match against a friendly display name
+// even when the submitted path is an opaque session token.
+{
+  const entries: DirEntry[] = [];
+  const searchEntries = [externalEntry("__reasonix_external_folder/abc/Folder/src/outside.txt", "Folder With Spaces/src/outside.txt")];
+  const got = filterAtMatches(entries, searchEntries, "spaces");
+  eq(
+    got.map((e) => e.path),
+    ["__reasonix_external_folder/abc/Folder/src/outside.txt"],
+    "external display name participates in filtering while preserving token path",
+  );
+}
+
+// 7. Dedup uses the submitted path when present.
+{
+  const entries = [externalEntry("__reasonix_external_folder/abc/Folder/src/outside.txt", "outside.txt")];
+  const searchEntries = [externalEntry("__reasonix_external_folder/abc/Folder/src/outside.txt", "Folder With Spaces/src/outside.txt")];
+  const got = filterAtMatches(entries, searchEntries, "outside");
+  eq(got.length, 1, "external entries with the same submitted path dedup to one");
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);

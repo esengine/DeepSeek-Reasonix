@@ -1,6 +1,8 @@
 package control
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -281,6 +283,36 @@ func TestManagementMigrateEmitsProgress(t *testing.T) {
 		"migration rescue: scanning legacy memory",
 		"migration rescue: scanning legacy sessions",
 		"migration rescue complete:",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing notice %q in:\n%s", want, joined)
+		}
+	}
+}
+
+func TestManagementMigrateFromImportsExplicitSessions(t *testing.T) {
+	home := isolateControlConfigHome(t)
+	legacySessions := filepath.Join(home, "Old Reasonix", "sessions")
+	if err := os.MkdirAll(legacySessions, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacySessions, "old-chat.jsonl"), []byte(`{"role":"user","content":"hello from old install"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var notices []string
+	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice {
+			notices = append(notices, e.Text)
+		}
+	})})
+
+	if !c.managementNotice(`/migrate --from "` + filepath.Dir(legacySessions) + `"`) {
+		t.Fatal("/migrate --from was not handled")
+	}
+	joined := strings.Join(notices, "\n")
+	for _, want := range []string{
+		"migration rescue: scanning explicit legacy sessions from " + filepath.Dir(legacySessions),
+		"imported 1 past session(s) from " + legacySessions,
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("missing notice %q in:\n%s", want, joined)

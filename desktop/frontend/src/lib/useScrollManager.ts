@@ -22,6 +22,8 @@ export function useScrollManager() {
   const gsapCtx = useRef<gsap.Context | null>(null);
   const prevQuestionsLen = useRef(0);
   const resizeFrame = useRef<number | null>(null);
+  const repinFrame = useRef<number | null>(null);
+  const pendingRepinHeightDelta = useRef(0);
   const layoutScrollFrames = useRef<number[]>([]);
   const lastClientHeight = useRef<number | null>(null);
   const lastFooterHeight = useRef<number | null>(null);
@@ -32,6 +34,7 @@ export function useScrollManager() {
     return () => {
       gsapCtx.current?.revert();
       if (resizeFrame.current !== null) cancelAnimationFrame(resizeFrame.current);
+      if (repinFrame.current !== null) cancelAnimationFrame(repinFrame.current);
       for (const frame of layoutScrollFrames.current) cancelAnimationFrame(frame);
       layoutScrollFrames.current = [];
     };
@@ -158,6 +161,20 @@ export function useScrollManager() {
     [scrollToBottom],
   );
 
+  const scheduleRepinIfWasPinned = useCallback(
+    (containerHeightDelta: number) => {
+      pendingRepinHeightDelta.current += containerHeightDelta;
+      if (repinFrame.current !== null) return;
+      repinFrame.current = requestAnimationFrame(() => {
+        repinFrame.current = null;
+        const delta = pendingRepinHeightDelta.current;
+        pendingRepinHeightDelta.current = 0;
+        repinIfWasPinned(delta);
+      });
+    },
+    [repinIfWasPinned],
+  );
+
   /**
    * Track question count changes to call onNewQuestion.
    * Returns the previous length ref for useEffect comparison.
@@ -182,6 +199,7 @@ export function useScrollManager() {
     scrollToBottomAfterLayout,
     onNewQuestion,
     repinIfWasPinned,
+    scheduleRepinIfWasPinned,
     trackQuestions,
     resizeFrame,
     lastClientHeight,

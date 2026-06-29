@@ -104,6 +104,65 @@ func RunLegacyRescue(sink event.Sink) Result {
 	return result
 }
 
+// RunLegacyRescueCommand handles the /migrate argument form shared by the CLI
+// TUI and desktop submit path. With no arguments it runs the default rescue;
+// with --from it imports sessions from a user-selected legacy directory.
+func RunLegacyRescueCommand(args string, sink event.Sink) Result {
+	source, explicit, err := parseLegacyRescueArgs(args)
+	if err != nil {
+		sink = event.Sync(sink)
+		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "migration rescue: " + err.Error()})
+		return Result{SessionErrs: []error{err}}
+	}
+	if explicit {
+		return RunLegacySessionImportFrom(source, sink)
+	}
+	return RunLegacyRescue(sink)
+}
+
+// RunLegacySessionImportFrom imports sessions from a user-selected legacy root.
+// The root may be the old install directory, a data directory, or the sessions
+// directory itself. Only sessions are imported; config and credentials stay on
+// the default non-destructive migration path.
+func RunLegacySessionImportFrom(sourceRoot string, sink event.Sink) Result {
+	sink = event.Sync(sink)
+	emit := func(level event.Level, text string) {
+		sink.Emit(event.Event{Kind: event.Notice, Level: level, Text: text})
+	}
+	result := Result{}
+	sourceRoot = strings.TrimSpace(sourceRoot)
+	emit(event.LevelInfo, "migration rescue: scanning explicit legacy sessions from "+sourceRoot)
+	sources, err := explicitLegacySessionSources(sourceRoot)
+	if err != nil {
+		result.SessionErrs = append(result.SessionErrs, err)
+		emit(event.LevelWarn, "migration rescue: "+err.Error())
+		emit(event.LevelInfo, result.Summary())
+		return result
+	}
+	if len(sources) == 0 {
+		emit(event.LevelInfo, "migration rescue: no legacy session directories found under "+sourceRoot)
+		emit(event.LevelInfo, result.Summary())
+		return result
+	}
+	for _, src := range sources {
+		n, err := agent.MigrateLegacySessionsFromExplicitDir(src.dir, config.SessionDir(), config.ProjectSessionDir)
+		if err != nil {
+			result.SessionErrs = append(result.SessionErrs, fmt.Errorf("%s: %w", src.label, err))
+			emit(event.LevelWarn, "migration rescue: skipped "+src.label+": "+err.Error())
+			continue
+		}
+		if n > 0 {
+			result.SessionImports = append(result.SessionImports, SessionImport{Source: src.label, Destination: config.SessionDir(), Count: n})
+			emit(event.LevelInfo, fmt.Sprintf("imported %d past session(s) from %s — resume them with --resume or the history panel", n, src.label))
+		}
+	}
+	if len(result.SessionImports) == 0 && len(result.SessionErrs) == 0 {
+		emit(event.LevelInfo, "migration rescue: no legacy sessions needed migration from "+sourceRoot)
+	}
+	emit(event.LevelInfo, result.Summary())
+	return result
+}
+
 // MigrateLegacyMemorySources imports older memory stores during normal boot.
 // It stays quiet unless files were actually copied.
 func MigrateLegacyMemorySources(sink event.Sink) []MemoryImport {
@@ -386,6 +445,117 @@ func migrateLegacySessionSources(sink event.Sink, verbose bool) sessionMigration
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "migration rescue: no legacy sessions needed migration"})
 	}
 	return result
+}
+
+type explicitSessionSource struct {
+	dir   string
+	label string
+}
+
+func parseLegacyRescueArgs(args string) (source string, explicit bool, err error) {
+	args = strings.TrimSpace(args)
+	if args == "" {
+		return "", false, nil
+	}
+	const flag = "--from"
+	switch {
+	case args == flag:
+		return "", false, fmt.Errorf("--from requires a legacy directory path")
+	case strings.HasPrefix(args, flag+"="):
+		source = strings.TrimSpace(strings.TrimPrefix(args, flag+"="))
+	case len(args) > len(flag) && strings.HasPrefix(args, flag) && (args[len(flag)] == ' ' || args[len(flag)] == '\t'):
+		source = strings.TrimSpace(args[len(flag):])
+	default:
+		first := args
+		if i := strings.IndexAny(first, " \t"); i >= 0 {
+			first = first[:i]
+		}
+		return "", false, fmt.Errorf("unknown /migrate option %q; use /migrate --from <legacy-dir>", first)
+	}
+	source = trimMatchingQuotes(source)
+	if source == "" {
+		return "", false, fmt.Errorf("--from requires a legacy directory path")
+	}
+	return source, true, nil
+}
+
+func trimMatchingQuotes(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 {
+		return s
+	}
+	if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
+func explicitLegacySessionSources(root string) ([]explicitSessionSource, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return nil, fmt.Errorf("--from requires a legacy directory path")
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, fmt.Errorf("legacy directory %s is not readable: %w", root, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("legacy path %s is not a directory", root)
+	}
+	candidates := []string{
+		filepath.Join(root, "sessions"),
+		filepath.Join(root, ".reasonix", "sessions"),
+		filepath.Join(root, "reasonix", "sessions"),
+	}
+	var out []explicitSessionSource
+	seen := map[string]bool{}
+	for _, dir := range candidates {
+		key := cleanAbs(dir)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		if dirLooksLikeLegacySessionDir(dir) {
+			out = append(out, explicitSessionSource{dir: dir, label: dir})
+		}
+	}
+	if len(out) == 0 && dirLooksLikeLegacySessionDir(root) {
+		out = append(out, explicitSessionSource{dir: root, label: root})
+	}
+	return out, nil
+}
+
+func dirLooksLikeLegacySessionDir(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && legacySessionArtifactName(entry.Name()) {
+			return true
+		}
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == "subagents" {
+			continue
+		}
+		subEntries, err := os.ReadDir(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		for _, sub := range subEntries {
+			if !sub.IsDir() && legacySessionArtifactName(sub.Name()) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func legacySessionArtifactName(name string) bool {
+	return strings.HasSuffix(name, ".events.jsonl") ||
+		strings.HasSuffix(name, ".jsonl") ||
+		strings.HasSuffix(name, ".jsonl.bak")
 }
 
 func samePath(a, b string) bool {

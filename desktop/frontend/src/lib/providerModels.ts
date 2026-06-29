@@ -38,7 +38,21 @@ export function apiKeyEnvFromProviderName(name: string): string {
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
-  return stem ? `${stem}_API_KEY` : "CUSTOM_API_KEY";
+  if (stem) return `${stem}_API_KEY`;
+  // When the provider name is entirely non-ASCII (e.g. Chinese characters),
+  // generate a stable hash suffix so each custom provider gets a unique slot.
+  const hash = fnv1a32(name.trim());
+  return `CUSTOM_${hash}_API_KEY`;
+}
+
+/** 32-bit FNV-1a hash, returns 8-char lowercase hex. Stable and deterministic. */
+function fnv1a32(s: string): string {
+  let hash = 0x811c9dc5 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    hash ^= s.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
 }
 
 export function isLikelyChatModel(model: string): boolean {

@@ -11,7 +11,7 @@ function basename(path: string): string {
 }
 
 function treeSearchPath(entry: DirEntry): string {
-  const path = entry.name.replace(/\\/g, "/");
+  const path = (entry.path || entry.name).replace(/\\/g, "/");
   if (!entry.isDir || path.endsWith("/")) return path;
   return path + "/";
 }
@@ -23,7 +23,7 @@ export function mergeWorkspaceSearchResults(rows: WorkspaceSearchRow[], results:
   for (const result of results) {
     const path = treeSearchPath(result);
     if (seen.has(path)) continue;
-    merged.push({ path, entry: { name: basename(path), isDir: result.isDir } });
+    merged.push({ path, entry: { ...result, name: result.displayName || basename(path) } });
     seen.add(path);
   }
   return merged;

@@ -470,6 +470,82 @@ func TestBackgroundCloseHideStrategyByPlatform(t *testing.T) {
 	}
 }
 
+func TestBackgroundCloseRequiresRestorePath(t *testing.T) {
+	tests := []struct {
+		name        string
+		goos        string
+		trayStarted bool
+		trayReady   bool
+		want        bool
+	}{
+		{name: "macOS restores from Dock", goos: "darwin", trayStarted: false, trayReady: false, want: true},
+		{name: "Windows tray ready", goos: "windows", trayStarted: true, trayReady: true, want: true},
+		{name: "Windows tray started but not ready", goos: "windows", trayStarted: true, trayReady: false, want: false},
+		{name: "Linux tray ready", goos: "linux", trayStarted: true, trayReady: true, want: true},
+		{name: "Linux tray started but not ready", goos: "linux", trayStarted: true, trayReady: false, want: false},
+		{name: "Linux no tray", goos: "linux", trayStarted: false, trayReady: false, want: false},
+		{name: "other Unix no tray", goos: "freebsd", trayStarted: false, trayReady: false, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := backgroundCloseHasRestorePathFor(tt.goos, tt.trayStarted, tt.trayReady); got != tt.want {
+				t.Fatalf("backgroundCloseHasRestorePathFor(%q, %v, %v) = %v, want %v", tt.goos, tt.trayStarted, tt.trayReady, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBackgroundCloseReadySignalRequiresCurrentReadyState(t *testing.T) {
+	app := NewApp()
+	tray := newDesktopTray()
+	app.mu.Lock()
+	app.tray = tray
+	app.mu.Unlock()
+
+	if app.waitForTrayReady(0) {
+		t.Fatal("tray should not be ready before its ready signal")
+	}
+
+	tray.markReady()
+	if app.waitForTrayReady(0) {
+		t.Fatal("closed ready signal should not count without the current ready state")
+	}
+
+	app.mu.Lock()
+	app.trayReady = true
+	app.mu.Unlock()
+	if !app.waitForTrayReady(0) {
+		t.Fatal("ready state should be accepted after the tray is marked ready")
+	}
+
+	app.mu.Lock()
+	app.trayReady = false
+	app.mu.Unlock()
+	if app.waitForTrayReady(0) {
+		t.Fatal("stale ready signal should not count after the tray exits")
+	}
+}
+
+func TestBackgroundCloseWaitsForTrayReadySignal(t *testing.T) {
+	app := NewApp()
+	tray := newDesktopTray()
+	app.mu.Lock()
+	app.tray = tray
+	app.mu.Unlock()
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		app.mu.Lock()
+		app.trayReady = true
+		app.mu.Unlock()
+		tray.markReady()
+	}()
+
+	if !app.waitForTrayReady(200 * time.Millisecond) {
+		t.Fatal("waitForTrayReady should observe the tray becoming ready")
+	}
+}
+
 func TestBackgroundRestoreMaximiseStrategy(t *testing.T) {
 	tests := []struct {
 		goos      string
@@ -1990,6 +2066,80 @@ func TestSetTokenModeMigratesStaleOfficialDeepSeekTabModel(t *testing.T) {
 	}
 }
 
+func TestMetaForTabReportsImageInputCapability(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	setDesktopTestCredential(t, "CUSTOM_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "custom/text-only"
+	cfg.Desktop.ProviderAccess = []string{"custom"}
+	cfg.Providers = []config.ProviderEntry{{
+		Name:         "custom",
+		Kind:         "openai",
+		BaseURL:      "https://example.invalid/v1",
+		APIKeyEnv:    "CUSTOM_KEY",
+		Models:       []string{"text-only", "vision-pro"},
+		VisionModels: []string{"vision-pro"},
+	}}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	app.setTestCtrl(control.New(control.Options{Label: "custom/text-only"}), "custom/text-only")
+	defer func() {
+		if c := app.activeCtrl(); c != nil {
+			c.Close()
+		}
+	}()
+
+	if got := app.Meta().ImageInputEnabled; got {
+		t.Fatal("text-only meta should disable image input")
+	}
+	if err := app.SetModel("custom/vision-pro"); err != nil {
+		t.Fatalf("SetModel(custom/vision-pro): %v", err)
+	}
+	if got := app.Meta().ImageInputEnabled; !got {
+		t.Fatal("vision model meta should enable image input")
+	}
+}
+
+func TestMetaForTabImageInputCapabilityUsesCurrentRef(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	setDesktopTestCredential(t, "CUSTOM_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "custom/vision-pro"
+	cfg.Desktop.ProviderAccess = []string{"custom"}
+	cfg.Providers = []config.ProviderEntry{{
+		Name:         "custom",
+		Kind:         "openai",
+		BaseURL:      "https://example.invalid/v1",
+		APIKeyEnv:    "CUSTOM_KEY",
+		Models:       []string{"text-only", "vision-pro"},
+		VisionModels: []string{"vision-pro"},
+	}}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	app.setTestCtrl(control.New(control.Options{Label: "deleted/model"}), "deleted/model")
+	defer func() {
+		if c := app.activeCtrl(); c != nil {
+			c.Close()
+		}
+	}()
+
+	if got := app.Meta().ImageInputEnabled; got {
+		t.Fatal("unknown model ref should not inherit image input from the default fallback model")
+	}
+}
+
 func TestSetTokenModeKeepsControllerWhenRebuildFails(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	t.Setenv("DEEPSEEK_API_KEY", "")
@@ -2345,6 +2495,59 @@ func TestFileRefsUseActiveTabWorkspaceRoot(t *testing.T) {
 	preview := app.ReadFile("frontend/wailsjs/runtime/runtime.js")
 	if preview.Err != "" || preview.Body != "right workspace" {
 		t.Fatalf("ReadFile active project preview = %+v, want project file", preview)
+	}
+}
+
+func TestFileRefsIncludeRegisteredExternalFolderChildren(t *testing.T) {
+	workspace := robustTempDir(t)
+	external := filepath.Join(robustTempDir(t), "Folder With Spaces")
+	if err := os.MkdirAll(filepath.Join(external, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(external, "src", "outside.txt"), []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	expectedExternal := external
+	if resolved, err := filepath.EvalSymlinks(external); err == nil {
+		expectedExternal = resolved
+	}
+	expectedDisplayPath := filepath.ToSlash(expectedExternal)
+
+	ctrl := &control.Controller{}
+	token, _, err := ctrl.RegisterExternalFolderRef(external)
+	if err != nil {
+		t.Fatalf("RegisterExternalFolderRef: %v", err)
+	}
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"project": {ID: "project", WorkspaceRoot: workspace, Ctrl: ctrl},
+		},
+		activeTabID: "project",
+	}
+
+	listed := app.ListDir(token + "/src/")
+	if len(listed) != 1 ||
+		listed[0].Name != "outside.txt" ||
+		listed[0].Path != token+"/src/outside.txt" ||
+		listed[0].DisplayPath != expectedDisplayPath+"/src/outside.txt" {
+		t.Fatalf("ListDir external src = %+v, want outside token/display path", listed)
+	}
+
+	found := app.SearchFileRefs("outside")
+	var externalHit *DirEntry
+	for i := range found {
+		if found[i].Path == token+"/src/outside.txt" {
+			externalHit = &found[i]
+			break
+		}
+	}
+	if externalHit == nil || externalHit.DisplayName != "Folder With Spaces/src/outside.txt" || externalHit.DisplayPath != expectedDisplayPath+"/src/outside.txt" {
+		t.Fatalf("SearchFileRefs external hit = %+v, all results %+v", externalHit, found)
+	}
+
+	preview := app.ReadFile(token + "/src/outside.txt")
+	if preview.Err != "" || preview.Body != "outside" {
+		t.Fatalf("ReadFile external token preview = %+v, want outside file body", preview)
 	}
 }
 
@@ -3005,6 +3208,52 @@ func TestListSessionsMarksAutoBotSessionAsChannel(t *testing.T) {
 	}
 }
 
+func TestDeleteSessionClearsAutoBotSessionMapping(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	path := filepath.Join(dir, "bot-channel.jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"user","content":"from channel"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+	other := filepath.Join(dir, "other-channel.jsonl")
+	cfg := config.Default()
+	cfg.Bot.Connections = []config.BotConnectionConfig{{
+		ID: "weixin-weixin", Provider: "weixin", Domain: "weixin", Label: "微信", Enabled: true, Status: "connected",
+		SessionMappings: []config.BotConnectionSessionMapping{
+			{RemoteID: "remove-auto", SessionID: "path:" + path, SessionSource: "auto"},
+			{RemoteID: "keep-explicit", SessionID: "path:" + path},
+			{RemoteID: "keep-other-auto", SessionID: "path:" + other, SessionSource: "auto"},
+		},
+	}}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	app := NewApp()
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: filepath.Join(dir, "active.jsonl"), Label: "test"})
+	app.setTestCtrl(ctrl, "")
+	defer app.activeCtrl().Close()
+
+	if err := app.DeleteSession(path); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+
+	got := config.LoadForEdit(config.UserConfigPath())
+	mappings := got.Bot.Connections[0].SessionMappings
+	if len(mappings) != 2 {
+		t.Fatalf("session mappings = %+v, want explicit and other auto mappings preserved", mappings)
+	}
+	for _, mapping := range mappings {
+		if mapping.RemoteID == "remove-auto" {
+			t.Fatalf("deleted session auto mapping was preserved: %+v", mappings)
+		}
+	}
+}
+
 func TestOpenChannelSessionForTabIsReadOnly(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -3060,6 +3309,64 @@ func TestOpenChannelSessionForTabIsReadOnly(t *testing.T) {
 	}
 	if !strings.Contains(string(afterSnapshot), "external follow-up") {
 		t.Fatalf("read-only channel snapshot overwrote external append:\n%s", afterSnapshot)
+	}
+}
+
+func TestUserTriggeredCommandsReturnErrorsWhenUnavailable(t *testing.T) {
+	tests := []struct {
+		name string
+		app  *App
+		call func(*App) error
+		want string
+	}{
+		{
+			name: "submit read-only",
+			app: &App{
+				tabs:        map[string]*WorkspaceTab{"test": {ID: "test", Scope: "global", ReadOnly: true}},
+				activeTabID: "test",
+			},
+			call: func(app *App) error { return app.SubmitToTab("test", "hello") },
+			want: "read-only",
+		},
+		{
+			name: "submit workspace unavailable",
+			app: &App{
+				tabs:        map[string]*WorkspaceTab{"test": {ID: "test", Scope: "global", StartupErr: "boom"}},
+				activeTabID: "test",
+			},
+			call: func(app *App) error { return app.SubmitToTab("test", "hello") },
+			want: "workspace failed to start: boom",
+		},
+		{
+			name: "run shell workspace unavailable",
+			app: &App{
+				tabs:        map[string]*WorkspaceTab{"test": {ID: "test", Scope: "global"}},
+				activeTabID: "test",
+			},
+			call: func(app *App) error { return app.RunShellForTab("test", "echo hi") },
+			want: "workspace is still starting",
+		},
+		{
+			name: "steer workspace unavailable",
+			app: &App{
+				tabs:        map[string]*WorkspaceTab{"test": {ID: "test", Scope: "global"}},
+				activeTabID: "test",
+			},
+			call: func(app *App) error { return app.SteerForTab("test", "please continue") },
+			want: "workspace is still starting",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.call(tt.app)
+			if err == nil {
+				t.Fatalf("expected error containing %q", tt.want)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want to contain %q", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -3743,6 +4050,103 @@ func TestUpdateMCPServerEditsProjectMCPJSONEntry(t *testing.T) {
 	}
 	if _, ok := findPluginEntry(config.LoadForEdit(config.UserConfigPath()).Plugins, "codegraph"); ok {
 		t.Fatalf(".mcp.json update should not create a user config shadow entry")
+	}
+}
+
+func TestTrustMCPServerToolPersistsTrustedReadOnlyTools(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+[[plugins]]
+name = "github"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+trusted_read_only_tools = ["pull_request_read"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
+	defer app.activeCtrl().Close()
+
+	if err := app.TrustMCPServerTool("github", " issue_read "); err != nil {
+		t.Fatalf("TrustMCPServerTool(github, issue_read): %v", err)
+	}
+	if err := app.TrustMCPServerTool("github", "issue_read"); err != nil {
+		t.Fatalf("TrustMCPServerTool duplicate: %v", err)
+	}
+	if err := app.TrustMCPServerTools("github", []string{" search_issues ", "issue_read", ""}); err != nil {
+		t.Fatalf("TrustMCPServerTools(github): %v", err)
+	}
+	if err := app.UntrustMCPServerTool("github", " pull_request_read "); err != nil {
+		t.Fatalf("UntrustMCPServerTool(github, pull_request_read): %v", err)
+	}
+	cfg, err := config.LoadForRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, ok := findPluginEntry(cfg.Plugins, "github")
+	if !ok {
+		t.Fatalf("github plugin missing: %+v", cfg.Plugins)
+	}
+	if !reflect.DeepEqual(updated.TrustedReadOnlyTools, []string{"issue_read", "search_issues"}) {
+		t.Fatalf("trusted read-only tools = %+v", updated.TrustedReadOnlyTools)
+	}
+	for _, s := range app.MCPServers() {
+		if s.Name == "github" {
+			if !reflect.DeepEqual(s.TrustedReadOnlyTools, []string{"issue_read", "search_issues"}) {
+				t.Fatalf("view trusted read-only tools = %+v", s.TrustedReadOnlyTools)
+			}
+			return
+		}
+	}
+	t.Fatalf("github MCP missing from view")
+}
+
+func TestTrustMCPServerToolPersistsProjectMCPJSONEntry(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, ".mcp.json"), []byte(`{
+  "mcpServers": {
+    "codegraph": { "command": "codegraph", "args": ["serve", "--mcp"] }
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
+	defer app.activeCtrl().Close()
+
+	if err := app.TrustMCPServerTool("codegraph", "codegraph_context"); err != nil {
+		t.Fatalf("TrustMCPServerTool(.mcp.json codegraph): %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, ".mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		MCPServers map[string]struct {
+			TrustedReadOnlyTools []string `json:"trusted_read_only_tools"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(doc.MCPServers["codegraph"].TrustedReadOnlyTools, []string{"codegraph_context"}) {
+		t.Fatalf(".mcp.json trusted_read_only_tools = %+v", doc.MCPServers["codegraph"].TrustedReadOnlyTools)
+	}
+	cfg, err := config.LoadForRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, ok := findPluginEntry(cfg.Plugins, "codegraph")
+	if !ok || !reflect.DeepEqual(updated.TrustedReadOnlyTools, []string{"codegraph_context"}) {
+		t.Fatalf("merged codegraph trusted_read_only_tools = %+v, found=%v", updated.TrustedReadOnlyTools, ok)
 	}
 }
 

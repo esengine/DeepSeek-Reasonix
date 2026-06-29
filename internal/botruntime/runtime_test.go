@@ -287,6 +287,48 @@ func TestRememberInboundSessionUpdatesAutoMappingTarget(t *testing.T) {
 	}
 }
 
+func TestForgetAutoSessionMappingsForPathRemovesOnlyAutoPathTargets(t *testing.T) {
+	isolateUserConfig(t)
+	target := filepath.Join(t.TempDir(), "bot-channel.jsonl")
+	other := filepath.Join(t.TempDir(), "other-channel.jsonl")
+	cfg := config.Default()
+	cfg.Bot.Connections = []config.BotConnectionConfig{{
+		ID: "weixin-weixin", Provider: "weixin", Domain: "weixin", Label: "微信", Enabled: true, Status: "connected",
+		SessionMappings: []config.BotConnectionSessionMapping{
+			{RemoteID: "remove-path-prefix", SessionID: "path:" + target, SessionSource: "auto"},
+			{RemoteID: "remove-raw-path", SessionID: target, SessionSource: "auto"},
+			{RemoteID: "keep-explicit-path", SessionID: "path:" + target},
+			{RemoteID: "keep-other-auto", SessionID: "path:" + other, SessionSource: "auto"},
+			{RemoteID: "keep-topic-auto", SessionID: "topic:bot-topic", SessionSource: "auto"},
+		},
+	}}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	if err := ForgetAutoSessionMappingsForPath(target); err != nil {
+		t.Fatalf("forget auto session mappings: %v", err)
+	}
+
+	got := config.LoadForEdit(config.UserConfigPath())
+	mappings := got.Bot.Connections[0].SessionMappings
+	if len(mappings) != 3 {
+		t.Fatalf("mappings = %+v, want three preserved mappings", mappings)
+	}
+	remotes := map[string]bool{}
+	for _, mapping := range mappings {
+		remotes[mapping.RemoteID] = true
+	}
+	for _, remote := range []string{"keep-explicit-path", "keep-other-auto", "keep-topic-auto"} {
+		if !remotes[remote] {
+			t.Fatalf("mapping %q was not preserved: %+v", remote, mappings)
+		}
+	}
+	if got.Bot.Connections[0].UpdatedAt == "" {
+		t.Fatalf("connection UpdatedAt was not refreshed")
+	}
+}
+
 func TestConnectionChannelConfigsPreserveToolApprovalMode(t *testing.T) {
 	connections := []config.BotConnectionConfig{
 		{ID: "feishu-feishu", Provider: "feishu", Domain: "feishu", Enabled: true, ToolApprovalMode: "auto"},

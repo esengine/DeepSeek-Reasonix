@@ -1,58 +1,12 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { Activity, CircleDollarSign, CircleGauge, Database, Folder, GitBranch, Layers, Percent, RefreshCw, Wallet, Zap } from "lucide-react";
 import { Tooltip } from "./Tooltip";
 import { useI18n, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
 import { normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
-import { type BalanceInfo, type CollaborationMode, type ContextInfo, type JobView, type ToolApprovalMode, type WireUsage } from "../lib/types";
+import { type BalanceInfo, type ContextInfo, type WireUsage } from "../lib/types";
 
 type StatusBarLabelStyle = "icon" | "text";
-
-// JobsChip is the status-bar background-jobs indicator: a count that opens an
-// upward popover listing the running jobs (id · label · status), mirroring the
-// ModelSwitcher's click-to-open pattern. With no jobs it stays hidden so the
-// high-priority status metrics keep the compact left-to-right scan.
-function JobsChip({ jobs }: { jobs: JobView[] }) {
-  const { t } = useI18n();
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (wrapRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    document.addEventListener("click", closeOnOutsideClick);
-    return () => document.removeEventListener("click", closeOnOutsideClick);
-  }, [open]);
-  if (jobs.length === 0) {
-    return null;
-  }
-  return (
-    <div className="statusbar__jobswrap" ref={wrapRef}>
-      <Tooltip label={t("status.jobsTitle")}>
-        <button className="stat stat--jobs statusbar__jobs" onClick={() => setOpen((v) => !v)}>
-          <span className="stat__label">{t("status.jobsLabel")}</span>
-          <b>{jobs.length}</b>
-        </button>
-      </Tooltip>
-      {open && (
-        <div className="modelsw__menu jobsmenu" role="listbox">
-          <div className="jobsmenu__head">{t("status.jobsTitle")}</div>
-          {jobs.map((j) => (
-            <div className="jobsmenu__item" key={j.id} role="option">
-              <span className="jobsmenu__id">{j.id}</span>
-              <span className="jobsmenu__label">{j.label || j.kind}</span>
-              <span className="jobsmenu__status">{j.status}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function formatRate(hit: number, denom: number): string | null {
   if (denom <= 0) return null;
@@ -76,6 +30,15 @@ function avgRate(u?: WireUsage): string | null {
   if (!u) return null;
   const denom = u.sessionCacheHitTokens + u.sessionCacheMissTokens;
   return formatRate(u.sessionCacheHitTokens, denom);
+}
+
+// contextAvgRate computes the session-aggregate cache-hit % from ContextInfo
+// cache tokens (loaded from persisted telemetry on session resume). Used as a
+// fallback when no live WireUsage is available yet.
+function contextAvgRate(ctx: ContextInfo): string | null {
+  const hit = ctx.cacheHitTokens ?? 0;
+  const miss = ctx.cacheMissTokens ?? 0;
+  return formatRate(hit, hit + miss);
 }
 
 function rateValueClass(rate: string | null): string {
@@ -134,10 +97,7 @@ export function StatusBar({
   context,
   usage,
   balance,
-  jobs,
   running,
-  collaborationMode,
-  toolApprovalMode,
   sessionTurns,
   sessionTokens,
   turnTokens,
@@ -150,15 +110,11 @@ export function StatusBar({
   workspacePath,
   workspaceName,
   gitBranch,
-  hydrationLabel,
 }: {
   context: ContextInfo;
   usage?: WireUsage;
   balance?: BalanceInfo;
-  jobs?: JobView[];
   running: boolean;
-  collaborationMode: CollaborationMode;
-  toolApprovalMode: ToolApprovalMode;
   sessionTurns?: number;
   sessionTokens?: number;
   turnTokens?: number;
@@ -171,7 +127,6 @@ export function StatusBar({
   workspacePath?: string;
   workspaceName?: string;
   gitBranch?: string;
-  hydrationLabel?: string;
 }) {
   const { locale, t } = useI18n();
   const pct = context.window ? Math.min(100, Math.round((context.used / context.window) * 100)) : null;
@@ -179,8 +134,7 @@ export function StatusBar({
   const compactNear = pct !== null && compactPct !== null && pct >= Math.max(0, compactPct - 10);
   const compactReached = pct !== null && compactPct !== null && pct >= compactPct;
   const nowPct = nowRate(usage);
-  const avgPct = avgRate(usage);
-  const jobsList = jobs ?? [];
+  const avgPct = avgRate(usage) ?? contextAvgRate(context);
   const turnCostLabel = formatMoneyLocalized(turnCost, currency, { locale });
   const costLabel = formatMoneyLocalized(cost, currency, { locale });
   const displayWorkspacePath = (workspacePath || workspaceName || "").trim();
@@ -191,8 +145,6 @@ export function StatusBar({
   const tokenLabel = formatTokenCount(sessionTokens);
   const turnTokenLabel = formatTokenCount(turnTokens);
   const balanceLabel = balance?.available && balance.display ? balance.display : "-";
-  const planMode = collaborationMode === "plan";
-  const goalMode = collaborationMode === "goal";
   const metricLabelStyle = labelStyle === "text" ? "text" : "icon";
   const visibleItems = normalizeStatusBarItems(items);
   const itemRenderers: Record<StatusBarItemId, ReactNode> = {
@@ -311,31 +263,8 @@ export function StatusBar({
   const renderedItems = visibleItems
     .map((id) => ({ id, node: itemRenderers[id] }))
     .filter(({ node }) => node !== null && node !== undefined && node !== false);
-  const modeIndicators = [
-    planMode ? <span className="statusbar__plan" key="plan">{t("status.plan")}</span> : null,
-    goalMode ? <span className="statusbar__plan" key="goal">{t("composer.goalMode")}</span> : null,
-    toolApprovalMode === "auto" ? (
-      <Tooltip label={t("composer.accessAutoTitle")} key="auto">
-        <span className="statusbar__yolo">{t("composer.accessAuto")}</span>
-      </Tooltip>
-    ) : null,
-    toolApprovalMode === "yolo" ? (
-      <Tooltip label={t("status.yoloTitle")} key="yolo">
-        <span className="statusbar__yolo">{t("composer.accessYolo")}</span>
-      </Tooltip>
-    ) : null,
-  ].filter(Boolean);
-
   return (
     <div className={`statusbar statusbar--${metricLabelStyle}`}>
-      {hydrationLabel && (
-        <div className="statusbar__group statusbar__group--hydrate">
-          <span className="stat statusbar__hydrate" role="status">
-            <RefreshCw size={12} />
-            <span>{hydrationLabel}</span>
-          </span>
-        </div>
-      )}
       <div className="statusbar__group statusbar__group--items">
         {renderedItems.map(({ id, node }) => (
           <span className="statusbar__item" data-statusbar-item={id} key={id}>
@@ -343,12 +272,6 @@ export function StatusBar({
           </span>
         ))}
       </div>
-      {modeIndicators.length > 0 && <div className="statusbar__group statusbar__group--modes">{modeIndicators}</div>}
-      {jobsList.length > 0 && (
-        <div className="statusbar__group statusbar__group--jobs">
-          <JobsChip jobs={jobsList} />
-        </div>
-      )}
     </div>
   );
 }

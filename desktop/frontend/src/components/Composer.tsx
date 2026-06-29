@@ -21,12 +21,13 @@ import {
 } from "../lib/workspaceDrag";
 import { SlashMenu } from "./SlashMenu";
 import { ArgMenu } from "./ArgMenu";
-import { VirtualMenu } from "./VirtualMenu";
 import { ANCHORED_POPOVER_CLOSE_MS, AnchoredPopover } from "./AnchoredPopover";
 import { EffortSwitcher } from "./EffortSwitcher";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { Tooltip } from "./Tooltip";
 import { ComposerContextCard } from "./ComposerContextCard";
+import { VirtualMenu } from "./VirtualMenu";
+import { dirEntryMenuLabel, dirEntrySubmitPath } from "./FileReferenceMenu";
 
 interface Attachment {
   path: string;
@@ -39,9 +40,10 @@ interface AttachmentDedupKey {
   source: string;
 }
 
-interface WorkspaceReference {
+export interface WorkspaceReference {
   path: string;
   isDir?: boolean;
+  displayPath?: string;
 }
 
 const LONG_PASTE_MIN_CHARS = 2000;
@@ -107,6 +109,10 @@ function attachmentExt(name: string): string {
   return dot >= 0 ? name.slice(dot + 1).toUpperCase() : "";
 }
 
+function hasImageAttachments(items: Attachment[]): boolean {
+  return items.some((attachment) => Boolean(attachment.previewUrl));
+}
+
 function displayRefName(name: string): string {
   return name.replace(/[\[\]\(\)\r\n]+/g, " ").replace(/\s+/g, " ").trim() || "attachment";
 }
@@ -125,6 +131,21 @@ function sortComposerAttachments(items: Attachment[]): Attachment[] {
 
 function workspaceReferenceKey(ref: WorkspaceReference): string {
   return `${ref.isDir ? "dir" : "file"}:${ref.path}`;
+}
+
+export function composerPickFileEntry(
+  text: string,
+  atRaw: string | null,
+  atDir: string,
+  entry: DirEntry,
+): { text: string; workspaceRef?: WorkspaceReference } {
+  const atPos = text.length - (atRaw?.length ?? 0) - 1; // index of '@'
+  const prefix = text.slice(0, Math.max(0, atPos));
+  const refPath = dirEntrySubmitPath(entry, atDir);
+  if (entry.path || entry.displayPath) {
+    return { text: prefix, workspaceRef: { path: refPath, isDir: entry.isDir, displayPath: entry.displayPath } };
+  }
+  return { text: prefix + "@" + refPath + (entry.isDir ? "/" : " ") };
 }
 
 function emptyComposerDraft(): ComposerDraft {
@@ -385,6 +406,7 @@ export function Composer({
   goal,
   cwd,
   modelLabel,
+  imageInputEnabled = true,
   tabId,
   effort,
   onSend,
@@ -417,9 +439,10 @@ export function Composer({
   goal?: string;
   cwd?: string;
   modelLabel: string;
+  imageInputEnabled?: boolean;
   tabId?: string;
   effort?: EffortInfo;
-  onSend: (displayText: string, submitText?: string) => void;
+  onSend: (displayText: string, submitText?: string) => void | Promise<void>;
   // Returns the un-sent text when cancelling before the server replied (so it can
   // be restored to the input); undefined for a normal cancel.
   onCancel: () => string | undefined;
@@ -952,7 +975,7 @@ export function Composer({
 
   const removeAttachment = (path: string) => {
     forgetAttachment(path);
-    setAttachments((prev) => prev.filter((x) => x.path !== path));
+    setAttachments(attachmentsRef.current.filter((x) => x.path !== path));
     requestAnimationFrame(() => taRef.current?.focus());
   };
 
@@ -1083,12 +1106,18 @@ export function Composer({
   const activeGoal = (goal ?? "").trim();
   const goalModeOn = collaborationMode === "goal";
   const tokenModeOn = tokenMode === "economy";
+  const warnImageInputFallback = useCallback((message = t("composer.imageInputUnsupported")) => {
+    showToast(message, "warn");
+  }, [showToast, t]);
 
   const submit = async () => {
     if (disabled || submitDisabled || readOnly || submittingRef.current) return;
     const submitDraftKey = activeDraftKeyRef.current;
     const trimmedText = text.trim();
     if (pendingPaste > 0) return;
+    if (!imageInputEnabled && hasImageAttachments(attachmentsRef.current)) {
+      warnImageInputFallback();
+    }
     if (!trimmedText && attachments.length === 0 && workspaceRefs.length === 0) {
       if (goalModeOn && !activeGoal) {
         setComposerPrompt(t("composer.goalInputRequired"));
@@ -1100,25 +1129,27 @@ export function Composer({
     submittingRef.current = true;
     setSubmitting(true);
     try {
-    const orderedAttachments = sortComposerAttachments(attachments);
-    const refs = [
-      ...workspaceRefs.map((ref) => formatWorkspaceReference(ref.path, ref.isDir)),
-      ...orderedAttachments.map((a) => `@${a.path}`),
-    ].join(" ");
-    const displayRefs = [
-      ...workspaceRefs.map((ref) => formatWorkspaceReference(ref.path, ref.isDir)),
-      ...orderedAttachments.map(formatAttachmentDisplayReference),
-    ].join(" ");
-    const displayText = [trimmedText, displayRefs].filter(Boolean).join(trimmedText && displayRefs ? " " : "");
-    // PR-B: when past:chats refs are attached, prepend their formatted transcript
-    // to submitText only (displayText stays unchanged so the user still sees their
-    // original prompt in the input preview). With no refs we keep the original
-    // submitText verbatim — no header, no rewording, byte-identical to pre-PR-B.
-    const sessionContext = sessionRefs.length === 0 ? "" : await buildSessionContext(sessionRefs);
-    const baseSubmitText = [expandPastedBlocks(trimmedText), refs].filter(Boolean).join(trimmedText && refs ? " " : "");
-    const submitText = sessionContext ? `${sessionContext}${baseSubmitText}` : baseSubmitText;
-    onSend(displayText, submitText);
-    clearSubmittedDraft(submitDraftKey);
+      const orderedAttachments = sortComposerAttachments(attachments);
+      const refs = [
+        ...workspaceRefs.map((ref) => formatWorkspaceReference(ref.path, ref.isDir)),
+        ...orderedAttachments.map((a) => `@${a.path}`),
+      ].join(" ");
+      const displayRefs = [
+        ...workspaceRefs.map((ref) => formatWorkspaceReference(ref.displayPath || ref.path, ref.isDir)),
+        ...orderedAttachments.map(formatAttachmentDisplayReference),
+      ].join(" ");
+      const displayText = [trimmedText, displayRefs].filter(Boolean).join(trimmedText && displayRefs ? " " : "");
+      // PR-B: when past:chats refs are attached, prepend their formatted transcript
+      // to submitText only (displayText stays unchanged so the user still sees their
+      // original prompt in the input preview). With no refs we keep the original
+      // submitText verbatim — no header, no rewording, byte-identical to pre-PR-B.
+      const sessionContext = sessionRefs.length === 0 ? "" : await buildSessionContext(sessionRefs);
+      const baseSubmitText = [expandPastedBlocks(trimmedText), refs].filter(Boolean).join(trimmedText && refs ? " " : "");
+      const submitText = sessionContext ? `${sessionContext}${baseSubmitText}` : baseSubmitText;
+      await onSend(displayText, submitText);
+      clearSubmittedDraft(submitDraftKey);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), "warn");
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -1169,6 +1200,8 @@ export function Composer({
         const path = await app.SavePastedFile(file.name, dataUrl);
         addAttachmentToDraft(sourceDraftKey, { path, displayName: file.name }, key);
       } catch {
+        console.warn("[composer] failed to attach pasted file");
+        showToast(t("composer.attachFileFailed"), "warn");
         // non-fatal: a failed attach must not block normal text input
       } finally {
         setPendingPaste((n) => Math.max(0, n - 1));
@@ -1210,11 +1243,13 @@ export function Composer({
         if (attachmentSeenInDraft(sourceDraftKey, key)) continue;
         const item = await app.AttachDropped(path);
         if (item.kind === "workspace") {
-          addWorkspaceReferenceToDraft(sourceDraftKey, { path: item.path, isDir: item.isDir });
+          addWorkspaceReferenceToDraft(sourceDraftKey, { path: item.path, isDir: item.isDir, displayPath: item.displayPath });
         } else {
           addAttachmentToDraft(sourceDraftKey, { path: item.path, previewUrl: item.previewUrl, displayName: baseName(path) }, key);
         }
       } catch {
+        console.warn("[composer] failed to attach dropped file");
+        showToast(t("composer.attachDropFailed"), "warn");
         // non-fatal: a failed drop attach must not block normal text input
       } finally {
         setPendingPaste((n) => Math.max(0, n - 1));
@@ -1316,8 +1351,11 @@ export function Composer({
     }
 
     // OS file drops deliver no usable bytes/paths here; the native bridge
-    // (onFilesDropped → AttachDropped) handles them. Just clear the hover state.
-    if (hasFileDrag(e.dataTransfer)) setDragOver(false);
+    // (onFilesDropped -> AttachDropped) handles them. Prevent webview navigation.
+    if (hasFileDrag(e.dataTransfer)) {
+      e.preventDefault();
+      setDragOver(false);
+    }
   };
 
   const onDragOver = (e: DragEvent<HTMLDivElement>) => {
@@ -1333,6 +1371,7 @@ export function Composer({
   // replied, the just-sent text is handed back so we drop it back into the input.
   const handleCancel = () => {
     const restored = onCancel();
+    if (goalModeOn && activeGoal) onClearGoal();
     if (typeof restored === "string") setTextCaretEnd(restored);
   };
 
@@ -1487,10 +1526,14 @@ export function Composer({
   };
 
   const pickEntry = (e: DirEntry) => {
-    const atPos = text.length - (atRaw?.length ?? 0) - 1; // index of '@'
-    const prefix = text.slice(0, atPos);
+    const picked = composerPickFileEntry(text, atRaw, atDir, e);
+    if (picked.workspaceRef) {
+      setTextCaretEnd(picked.text);
+      addWorkspaceReference(picked.workspaceRef);
+      return;
+    }
     // A directory keeps the menu open (trailing "/"); a file completes it (space).
-    setTextCaretEnd(prefix + "@" + atDir + e.name + (e.isDir ? "/" : " "));
+    setTextCaretEnd(picked.text);
   };
 
   // --- past:chats session reference ---
@@ -2057,7 +2100,7 @@ export function Composer({
           <VirtualMenu
             items={atMenuItems}
             activeIndex={active}
-            itemKey={(it) => (it.kind === "pastChats" ? "past:chats" : (it.entry.isDir ? "d:" : "f:") + it.entry.name)}
+            itemKey={(it) => (it.kind === "pastChats" ? "past:chats" : (it.entry.isDir ? "d:" : "f:") + (it.entry.path || it.entry.name))}
             renderItem={(it, i) =>
               it.kind === "pastChats" ? (
                 <button
@@ -2088,7 +2131,7 @@ export function Composer({
                     <FileText size={13} className="filemenu__icon" />
                   )}
                   <span className="slashmenu__name slashmenu__name--file">
-                    {it.entry.name}
+                    {dirEntryMenuLabel(it.entry)}
                     {it.entry.isDir ? "/" : ""}
                   </span>
                 </button>
@@ -2133,11 +2176,11 @@ export function Composer({
             <ComposerContextCard
               key={workspaceReferenceKey(ref)}
               variant="workspace"
-              tooltipLabel={formatWorkspaceReference(ref.path, ref.isDir)}
+              tooltipLabel={ref.displayPath ? formatWorkspaceReference(ref.displayPath, ref.isDir) : formatWorkspaceReference(ref.path, ref.isDir)}
               removeLabel={t("composer.removeReference")}
               onRemove={() => removeWorkspaceReference(ref)}
               folder={Boolean(ref.isDir)}
-              label={ref.isDir ? `${baseName(ref.path)}/` : baseName(ref.path)}
+              label={ref.isDir ? `${baseName(ref.displayPath || ref.path)}/` : baseName(ref.displayPath || ref.path)}
             />
           ))}
           {sessionRefs.map((ref) => (

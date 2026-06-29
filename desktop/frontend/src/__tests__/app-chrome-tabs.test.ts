@@ -181,7 +181,7 @@ ok(
 
 ok(
   /const controllerReady = state\.meta\?\.ready === true && !state\.backendActivationPending;/.test(appSource) &&
-    /if \(!controllerReady\) return;\s*void commitThenSend\(text\);/s.test(appSource) &&
+    /if \(!controllerReady\) return;\s*void commitThenSend\(text\)\.catch/.test(appSource) &&
     /onPrompt=\{handleTranscriptPrompt\}/.test(appSource) &&
     /submitDisabled=\{!controllerReady\}/.test(appSource),
   "welcome prompts and composer submit share the controller readiness gate",
@@ -193,15 +193,39 @@ ok(
   "Welcome is suppressed only until transcript history has loaded",
 );
 
-const openTopicBlock = appSource.match(/const handleOpenTopic = useCallback\([\s\S]*?\n  \}, \[[^\]]*seedActiveTabMeta[^\]]*\]\);/)?.[0] ?? "";
+const navigationBlock = appSource.match(/const runNavigationRequest = useCallback\([\s\S]*?\n  \}, \[[^\]]*singleSurfaceLayout[^\]]*\]\);/)?.[0] ?? "";
 ok(
-  /let openedTab: TabMeta;/.test(openTopicBlock) &&
-    /openedTab = await activateTopic/.test(openTopicBlock) &&
-    /openedTab = await openTopicSession/.test(openTopicBlock) &&
-    /openedTab = await openGlobalTab/.test(openTopicBlock) &&
-    /openedTab = await openProjectTab/.test(openTopicBlock) &&
-    /seedActiveTabMeta\(openedTab\);[\s\S]*void refreshTabMetas\(\);/.test(openTopicBlock),
-  "opening topics seeds active tab metadata before background refresh",
+  /const navigationRunningRef = useRef\(false\);/.test(appSource) &&
+    /const navigationPendingRef = useRef<PendingDesktopNavigationRequest \| null>\(null\);/.test(appSource) &&
+    /const runNavigationRequest = useCallback\(async \(request: PendingDesktopNavigationRequest\)/.test(appSource) &&
+    /const latest = \(\) => request\.seq === navigationSeqRef\.current;/.test(appSource) &&
+    /return activateTopic\(scope, workspaceRoot, topicId/.test(appSource) &&
+    /return openTopicSession\(scope, workspaceRoot, topicId/.test(appSource) &&
+    /return openGlobalTab\(topicId\)/.test(appSource) &&
+    /return openProjectTab\(workspaceRoot, topicId\)/.test(appSource) &&
+    /enqueueNavigationRequest\([\s\S]*runningRef: navigationRunningRef, pendingRef: navigationPendingRef/.test(appSource) &&
+    !/openTopicQueueRef\.current\.catch\(\(\) => \{\}\)\.then/.test(appSource) &&
+    /const refreshLatestTabMetas = async \(\): Promise<TabMeta\[]> => \{[\s\S]*if \(latest\(\)\) setTabMetas\(tabs\);/.test(navigationBlock) &&
+    /if \(!latest\(\)\) return;[\s\S]*seedActiveTabMeta\(openedTab\);[\s\S]*void refreshLatestTabMetas\(\);/.test(navigationBlock),
+  "desktop navigation coalesces pending requests, ignores stale results, and seeds active tab metadata before background refresh",
+);
+
+ok(
+  /return enqueueNavigation\(\{ kind: "topic", scope, workspaceRoot, topicId, sessionPath \}\);/.test(appSource) &&
+    /enqueueNavigation\(\{ kind: "blank", scope, workspaceRoot: scope === "project" \? workspaceRoot : "" \}\)/.test(appSource) &&
+    /return enqueueNavigation\(\{ kind: "sidebar-im", connection \}\);/.test(appSource) &&
+    /return enqueueNavigation\(\{ kind: "resume-session", session \}\);/.test(appSource),
+  "topic, blank, IM, and history navigation all use the shared coalescing path",
+);
+
+ok(
+  !/await resumeSession\(session\.path, targetTab\.id\);/.test(navigationBlock),
+  "history navigation does not re-resume a session that OpenTopicSession already pinned",
+);
+
+ok(
+  /<HeartbeatPanel[\s\S]*onOpenTopic=\{\(scope, workspaceRoot, topicId\) => \{[\s\S]*void handleOpenTopic\(scope, workspaceRoot, topicId\);[\s\S]*\}\}/.test(appSource),
+  "heartbeat topic navigation uses the guarded open-topic path",
 );
 
 for (const selector of [

@@ -62,6 +62,41 @@ func TestUserConfigPathHonorsReasonixHome(t *testing.T) {
 	}
 }
 
+func TestLoadForRootUsesWindowsHomeFallbackWhenConfigDirUnavailable(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+
+	oldGOOS := runtimeGOOS
+	oldConfigDir := osUserConfigDir
+	oldHomeDir := osUserHomeDir
+	runtimeGOOS = "windows"
+	osUserConfigDir = func() string { return "" }
+	osUserHomeDir = func() (string, error) { return home, nil }
+	t.Cleanup(func() {
+		runtimeGOOS = oldGOOS
+		osUserConfigDir = oldConfigDir
+		osUserHomeDir = oldHomeDir
+	})
+
+	t.Setenv("REASONIX_HOME", "")
+
+	configPath := filepath.Join(home, "AppData", "Roaming", "reasonix", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("default_model = \"custom/from-home\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadForRoot(project)
+	if err != nil {
+		t.Fatalf("LoadForRoot() error = %v", err)
+	}
+	if cfg.DefaultModel != "custom/from-home" {
+		t.Fatalf("DefaultModel = %q, want %q", cfg.DefaultModel, "custom/from-home")
+	}
+}
+
 func TestRenderTOMLHeaderShowsResolvedConfigPath(t *testing.T) {
 	isolateUserConfigHome(t)
 	out := RenderTOML(Default())
@@ -106,6 +141,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Desktop.DisplayMode = "compact"
 	orig.Desktop.StatusBarStyle = "text"
 	orig.Desktop.StatusBarItems = []string{"model", "balance", "cache"}
+	orig.Desktop.DefaultToolApprovalMode = "auto"
 	orig.Desktop.CheckUpdates = boolPtr(false)
 	orig.Desktop.Telemetry = boolPtr(false)
 	orig.Notifications.Enabled = true
@@ -179,7 +215,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	orig.Plugins = []PluginEntry{
 		{Name: "example", Command: "reasonix-plugin-example"},
-		{Name: "stripe", Type: "http", URL: "https://mcp.stripe.com", Headers: map[string]string{"Authorization": "Bearer x"}, AutoStart: boolPtr(false), Tier: "background"},
+		{Name: "stripe", Type: "http", URL: "https://mcp.stripe.com", Headers: map[string]string{"Authorization": "Bearer x"}, TrustedReadOnlyTools: []string{"customer_read"}, AutoStart: boolPtr(false), Tier: "background"},
 	}
 	mm, _ := orig.Provider("mimo-pro")
 	mm.BaseURL = "http://localhost:8000/v1"
@@ -235,6 +271,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if want := []string{"model", "balance", "cache"}; !reflect.DeepEqual(got.Desktop.StatusBarItems, want) {
 		t.Errorf("desktop.status_bar_items = %v, want %v", got.Desktop.StatusBarItems, want)
+	}
+	if got.DesktopDefaultToolApprovalMode() != "auto" {
+		t.Errorf("desktop.default_tool_approval_mode = %q, want auto", got.DesktopDefaultToolApprovalMode())
 	}
 	if got.Desktop.CheckUpdates == nil || *got.Desktop.CheckUpdates {
 		t.Errorf("desktop.check_updates = %+v, want false", got.Desktop.CheckUpdates)
@@ -364,6 +403,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if stripe.Headers["Authorization"] != "Bearer x" {
 		t.Errorf("plugin headers not preserved: %v", stripe.Headers)
 	}
+	if len(stripe.TrustedReadOnlyTools) != 1 || stripe.TrustedReadOnlyTools[0] != "customer_read" {
+		t.Errorf("plugin trusted_read_only_tools not preserved: %+v", stripe.TrustedReadOnlyTools)
+	}
 	if stripe.AutoStart == nil || *stripe.AutoStart {
 		t.Errorf("auto_start should render and parse as false, got %+v", stripe.AutoStart)
 	}
@@ -393,6 +435,71 @@ func TestRenderTOMLDocumentsPlanModeAllowedTools(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Agent.PlanModeAllowedTools, cfg.Agent.PlanModeAllowedTools) {
 		t.Fatalf("PlanModeAllowedTools round trip = %v, want %v", got.Agent.PlanModeAllowedTools, cfg.Agent.PlanModeAllowedTools)
+	}
+}
+
+func TestRenderTOMLDocumentsPluginTrustedReadOnlyTools(t *testing.T) {
+	cfg := Default()
+	cfg.Plugins = []PluginEntry{{
+		Name:                 "github",
+		Command:              "github-mcp",
+		TrustedReadOnlyTools: []string{"issue_read", "pull_request_read"},
+	}}
+
+	rendered := RenderTOML(cfg)
+	if !strings.Contains(rendered, `trusted_read_only_tools = ["issue_read", "pull_request_read"]`) {
+		t.Fatalf("rendered config should preserve trusted_read_only_tools:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "optional pre-seeded MCP read-only trust") {
+		t.Fatalf("rendered config should document trusted_read_only_tools semantics:\n%s", rendered)
+	}
+
+	var got Config
+	if _, err := toml.Decode(rendered, &got); err != nil {
+		t.Fatalf("rendered TOML does not parse: %v\n%s", err, rendered)
+	}
+	if !reflect.DeepEqual(got.Plugins[0].TrustedReadOnlyTools, cfg.Plugins[0].TrustedReadOnlyTools) {
+		t.Fatalf("TrustedReadOnlyTools round trip = %v, want %v", got.Plugins[0].TrustedReadOnlyTools, cfg.Plugins[0].TrustedReadOnlyTools)
+	}
+}
+
+func TestRenderTOMLPreservesMCPCallTimeouts(t *testing.T) {
+	cfg := Default()
+	cfg.Tools.MCPCallTimeoutSeconds = intPtr(450)
+	cfg.Plugins = []PluginEntry{{
+		Name:               "maker",
+		Command:            "maker-mcp",
+		CallTimeoutSeconds: 600,
+		ToolTimeoutSeconds: map[string]int{
+			"generate/video": 1800,
+			"search":         120,
+		},
+	}}
+
+	rendered := RenderTOML(cfg)
+	for _, want := range []string{
+		"mcp_call_timeout_seconds = 450",
+		"call_timeout_seconds = 600",
+		`tool_timeout_seconds = { "generate/video" = 1800, "search" = 120 }`,
+		"Raw MCP tool names",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered config missing %q:\n%s", want, rendered)
+		}
+	}
+
+	var got Config
+	if _, err := toml.Decode(rendered, &got); err != nil {
+		t.Fatalf("rendered TOML does not parse: %v\n%s", err, rendered)
+	}
+	if got.Tools.MCPCallTimeoutSeconds == nil || *got.Tools.MCPCallTimeoutSeconds != 450 {
+		t.Fatalf("MCPCallTimeoutSeconds round trip = %v, want 450", got.Tools.MCPCallTimeoutSeconds)
+	}
+	if got.Plugins[0].CallTimeoutSeconds != 600 {
+		t.Fatalf("CallTimeoutSeconds round trip = %d, want 600", got.Plugins[0].CallTimeoutSeconds)
+	}
+	if !reflect.DeepEqual(got.Plugins[0].ToolTimeoutSeconds, cfg.Plugins[0].ToolTimeoutSeconds) {
+		t.Fatalf("ToolTimeoutSeconds round trip = %v, want %v", got.Plugins[0].ToolTimeoutSeconds, cfg.Plugins[0].ToolTimeoutSeconds)
 	}
 }
 
@@ -536,17 +643,18 @@ func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
 	c.Desktop.ThemeStyle = "graphite"
 	c.Desktop.CloseBehavior = "background"
 	c.Desktop.StatusBarStyle = "text"
+	c.Desktop.DefaultToolApprovalMode = "auto"
 	c.Desktop.CheckUpdates = boolPtr(false)
 
 	user := RenderTOMLForScope(c, RenderScopeUser)
-	for _, want := range []string{"config_version = 3", "[desktop]", `theme = "dark"`, `close_behavior = "background"`, `status_bar_style = "text"`, `check_updates = false`, "[notifications]", "[tools.shell]"} {
+	for _, want := range []string{"config_version = 3", "[desktop]", `theme = "dark"`, `close_behavior = "background"`, `status_bar_style = "text"`, `default_tool_approval_mode = "auto"`, `check_updates = false`, "[notifications]", "[tools.shell]"} {
 		if !strings.Contains(user, want) {
 			t.Fatalf("user render missing %q:\n%s", want, user)
 		}
 	}
 
 	project := RenderTOMLForScope(c, RenderScopeProject)
-	for _, forbidden := range []string{"[desktop]", "[notifications]", "close_behavior =", "check_updates =", "max_steps", "planner_max_steps"} {
+	for _, forbidden := range []string{"[desktop]", "[notifications]", "close_behavior =", "default_tool_approval_mode =", "check_updates =", "max_steps", "planner_max_steps"} {
 		if strings.Contains(project, forbidden) {
 			t.Fatalf("project render should not contain %q:\n%s", forbidden, project)
 		}

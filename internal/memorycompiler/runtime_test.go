@@ -9,10 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	runtimecanary "reasonix/internal/runtime/canary"
-	runtimeresource "reasonix/internal/runtime/resource"
-	runtimesnapshot "reasonix/internal/runtime/snapshot"
 )
 
 func TestStartTurnEmptyStateDoesNotInjectIR(t *testing.T) {
@@ -128,6 +124,74 @@ func TestStartTurnExposesMemoryCitations(t *testing.T) {
 	citations[0].Note = "mutated"
 	if turn.MemoryCitations()[0].Note == "mutated" {
 		t.Fatal("MemoryCitations returned mutable backing slice")
+	}
+}
+
+func TestMemoryCitationsHideEvidenceReferences(t *testing.T) {
+	citations := memoryCitationsForIR(PlannerIR{
+		Version:     version,
+		Goal:        "fix a bug",
+		SourceEvent: "fix a bug",
+		MemoryReferences: []MemoryRef{
+			{ID: "tool-1", Content: "bash succeeded", Quality: string(QualityHighSignal), Influence: "evidence"},
+			{ID: "mem-1", Content: "prefer focused tests", Quality: string(QualityHighSignal), Influence: "reference"},
+		},
+		Constraints: []Constraint{{Type: "avoid", Text: "repeat failed command", Source: "constraint-1"}},
+		RiskNotes:   []string{"verify before final answer"},
+	})
+
+	if len(citations) == 0 {
+		t.Fatal("expected non-evidence compiler citations to remain visible")
+	}
+	for _, c := range citations {
+		if strings.Contains(c.Note, "bash succeeded") || strings.Contains(c.Note, "evidence:") {
+			t.Fatalf("tool-result evidence citation leaked into user-facing citations: %+v", c)
+		}
+	}
+	foundReference := false
+	foundConstraint := false
+	for _, c := range citations {
+		if strings.Contains(c.Note, "reference: prefer focused tests") {
+			foundReference = true
+		}
+		if strings.Contains(c.Note, "avoid: repeat failed command") {
+			foundConstraint = true
+		}
+	}
+	if !foundReference || !foundConstraint {
+		t.Fatalf("expected reference and constraint citations to remain, got %+v", citations)
+	}
+}
+
+func TestStrategyPreconditionShortTokenMatchesOnWordBoundary(t *testing.T) {
+	// "ui" must match the real frontend keyword but not arbitrary substrings —
+	// otherwise the synthetic "Continue pursuing the active goal." turn (and any
+	// goal/build/quiet text) misroutes to frontend-visual-verify (#5342).
+	matches := []string{"fix the ui", "UI layout broken", "tweak the ui.", "ui/ux pass"}
+	for _, g := range matches {
+		if !strategyPreconditionMatches(g, "ui") {
+			t.Errorf("strategyPreconditionMatches(%q, \"ui\") = false, want true", g)
+		}
+	}
+	nonMatches := []string{"Continue pursuing the active goal.", "build the parser", "quiet mode", "guidance notes"}
+	for _, g := range nonMatches {
+		if strategyPreconditionMatches(g, "ui") {
+			t.Errorf("strategyPreconditionMatches(%q, \"ui\") = true, want false (substring false positive)", g)
+		}
+	}
+	// Longer preconditions keep substring semantics.
+	if !strategyPreconditionMatches("optimize the frontend pipeline", "frontend") {
+		t.Errorf("long precondition lost substring match")
+	}
+}
+
+func TestClassifyStrategyDoesNotRouteGoalContinuationToFrontend(t *testing.T) {
+	goal := "Continue pursuing the active goal. If it is complete, end with [goal:complete]."
+	if got := classifyStrategy(goal); got == "frontend-visual-verify" {
+		t.Fatalf("goal-continuation classified as %q (the \"ui\" in \"pursuing\" leaked)", got)
+	}
+	if got := classifyStrategy("redesign the ui layout"); got != "frontend-visual-verify" {
+		t.Fatalf("genuine ui goal classified as %q, want frontend-visual-verify", got)
 	}
 }
 
@@ -389,7 +453,7 @@ func TestCompilerContractCanonicalizesSemanticOrder(t *testing.T) {
 	}
 }
 
-func TestCompilerContractIncludesBoundedIRExplanation(t *testing.T) {
+func TestCompilerContractIsCompact(t *testing.T) {
 	ir := PlannerIR{
 		Version:     version,
 		Goal:        "optimize a workflow",
@@ -401,20 +465,35 @@ func TestCompilerContractIncludesBoundedIRExplanation(t *testing.T) {
 		MemoryReferences: []MemoryRef{
 			{ID: "memory:latency", Content: "user prefers low latency", Quality: string(QualityHighSignal), Influence: "constraint"},
 		},
-		StrategySelection: &StrategyPick{Selected: "general", Reason: "matched prior low-latency pattern"},
+		AvailableStrategies: []StrategyRef{
+			{ID: "general", SuccessRate: 0.9, Samples: 10, Score: 0.8, Reason: "ranked top"},
+			{ID: "bugfix-reproduce-first", SuccessRate: 0.5, Samples: 4},
+		},
+		StrategySelection: &StrategyPick{Selected: "general", Reason: "matched prior low-latency pattern", Score: 0.8, Rejected: []RejectedStrategy{{ID: "z", Score: 0.1}}},
 	}
 	contract, err := compileExecutionContract(ir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(contract, `"ir_explanation"`) {
-		t.Fatalf("compiled contract missing IR explanation:\n%s", contract)
+	// The load-bearing fields the model acts on must survive compaction.
+	if !strings.Contains(contract, `"source_event":"optimize a workflow"`) {
+		t.Fatalf("compiled contract dropped source_event:\n%s", contract)
 	}
-	if !strings.Contains(contract, `"constraint_mapping":["must_use constraint from memory:latency: prefer low latency"]`) {
-		t.Fatalf("compiled contract missing constraint explanation:\n%s", contract)
+	if !strings.Contains(contract, `"prefer low latency"`) {
+		t.Fatalf("compiled contract dropped the active constraint:\n%s", contract)
 	}
-	if !strings.Contains(contract, `"memory_influence":["memory:latency influenced decision as constraint (HIGH_SIGNAL)"]`) {
-		t.Fatalf("compiled contract missing memory influence explanation:\n%s", contract)
+	if !strings.Contains(contract, `"selected":"general"`) {
+		t.Fatalf("compiled contract dropped the selected strategy:\n%s", contract)
+	}
+	if !strings.Contains(contract, `"memory:latency"`) {
+		t.Fatalf("compiled contract dropped the high-signal memory reference:\n%s", contract)
+	}
+	// The compacted-away fields (prose explanation, ranked candidate table,
+	// rejected strategies) must NOT bloat the per-turn contract.
+	for _, banned := range []string{`"ir_explanation"`, `"available_strategies"`, `"rejected"`, `"constraint_mapping"`} {
+		if strings.Contains(contract, banned) {
+			t.Fatalf("compiled contract still carries bloat field %s:\n%s", banned, contract)
+		}
 	}
 }
 
@@ -514,49 +593,6 @@ func TestControlPolicyAdaptiveGainChangesMutationCooldown(t *testing.T) {
 	}
 	if unstable.MutationCooldown <= mutationFeedbackCooldown {
 		t.Fatalf("unstable policy should lengthen cooldown for damping: %+v", unstable)
-	}
-}
-
-func TestControlPolicyIncludesGlobalEquilibriumTrace(t *testing.T) {
-	st := state{ControlReports: []ControlReport{
-		{Mode: "explore", ExplorationRatePercent: maxExplorationRatePercent, Gain: 1.1},
-		{Mode: "dampen", ExplorationRatePercent: minExplorationRatePercent, Gain: 0.6},
-		{Mode: "explore", ExplorationRatePercent: maxExplorationRatePercent, Gain: 1.1},
-		{Mode: "dampen", ExplorationRatePercent: minExplorationRatePercent, Gain: 0.6},
-	}}
-	base := controlPolicyForState(state{}, DriftReport{})
-	policy := controlPolicyForState(st, DriftReport{})
-	if policy.EquilibriumState != "damping" {
-		t.Fatalf("equilibrium state = %q, want damping: %+v", policy.EquilibriumState, policy)
-	}
-	if policy.Mode != base.Mode {
-		t.Fatalf("equilibrium must not override control mode: base=%+v got=%+v", base, policy)
-	}
-	if policy.Gain >= base.Gain && base.Gain > 0 {
-		t.Fatalf("equilibrium should damp control gain without changing mode: base=%+v got=%+v", base, policy)
-	}
-	if policy.OscillationIndex < 0.7 {
-		t.Fatalf("oscillation index = %.3f, want high", policy.OscillationIndex)
-	}
-	if len(policy.EquilibriumActions) == 0 {
-		t.Fatalf("missing equilibrium actions: %+v", policy)
-	}
-	trace := equilibriumTraceForPolicy(policy)
-	if trace == nil || trace.State != "damping" || len(trace.Actions) == 0 {
-		t.Fatalf("invalid equilibrium trace: %+v", trace)
-	}
-	bundle := splitTrace(ExecutionTrace{
-		ID:               "trace-equilibrium",
-		IRVersion:        version,
-		Goal:             "control stability",
-		Outcome:          "success",
-		EquilibriumTrace: trace,
-	}, SystemLearning{TraceID: "trace-equilibrium", GoodPatterns: []string{"general"}}, false)
-	if bundle.RuntimeTrace.EquilibriumTrace == nil {
-		t.Fatalf("runtime trace missing equilibrium trace: %+v", bundle.RuntimeTrace)
-	}
-	if bundle.LearningTrace == nil || bundle.LearningTrace.EquilibriumTrace == nil {
-		t.Fatalf("learning trace missing equilibrium trace: %+v", bundle.LearningTrace)
 	}
 }
 
@@ -774,6 +810,9 @@ func TestDriftControlReportsStaleConflictingAndOverusedState(t *testing.T) {
 	assertNode(t, next.Nodes, func(n MemoryNode) bool {
 		return n.ID == "old-fact" && n.Quality == QualityNoise
 	}, "stale node marked as noise")
+	assertNode(t, next.Nodes, func(n MemoryNode) bool {
+		return n.ID == "old-fact" && n.Confidence == 0.1
+	}, "drift control should not persist decayed confidence")
 }
 
 func TestTruthLockedNodeCannotBeOverwritten(t *testing.T) {
@@ -801,242 +840,44 @@ func TestTruthLockedNodeCannotBeOverwritten(t *testing.T) {
 	}
 }
 
-func TestProductionHardeningRecordsBudgetExceededButStillInjects(t *testing.T) {
+func TestLoadStateBacksUpCorruptState(t *testing.T) {
 	dir := t.TempDir()
-	now := time.Now().UTC()
-	st := state{
-		Nodes: []MemoryNode{
-			{
-				ID:         "m1",
-				Type:       "fact",
-				Content:    "first relevant memory",
-				Timestamp:  now,
-				Confidence: 0.9,
-				Quality:    QualityHighSignal,
-				Constraint: &Constraint{Type: "must_use", Text: "use first relevant memory", Source: "m1"},
-			},
-			{
-				ID:         "m2",
-				Type:       "fact",
-				Content:    "second relevant memory",
-				Timestamp:  now,
-				Confidence: 0.8,
-				Quality:    QualityHighSignal,
-			},
-		},
-		Production: normalizeProductionState(ProductionState{}),
-	}
-	st.Production.Budget.MaxMemoryNodes = 1
-	if err := writeJSON(filepath.Join(dir, stateFile), st); err != nil {
+	path := filepath.Join(dir, stateFile)
+	if err := os.WriteFile(path, []byte("{not-json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	contract, turn := New(dir).StartTurn(context.Background(), "fix a bug", nil)
-	// Hardening is observability only: an over-budget verdict must NOT suppress
-	// the cache-safe contract. The contract is plain input text and the real
-	// execution that follows is still bounded by tool permissions. (Regression
-	// guard: gating here once made the whole compiler fall silent forever once
-	// learned memory reached the GC cap.)
-	if contract == "" {
-		t.Fatal("over-budget turn must still inject the contract; hardening must not gate it")
+	r := New(dir)
+	st := r.loadState()
+	if st.NoisyRefs == nil {
+		t.Fatal("loadState should return initialized empty state")
 	}
-	if turn == nil || turn.trace.ProductionHardening == nil {
-		t.Fatalf("missing production hardening trace: %+v", turn)
-	}
-	hardening := turn.trace.ProductionHardening
-	if hardening.Allowed {
-		t.Fatalf("hardening should record not-allowed when over budget: %+v", hardening)
-	}
-	if !strings.Contains(strings.Join(hardening.BlockReasons, "\n"), "memory node budget exceeded") {
-		t.Fatalf("missing memory budget reason: %+v", hardening.BlockReasons)
-	}
-}
-
-func TestProductionHardeningCreatesSnapshotAndRestoresState(t *testing.T) {
-	dir := t.TempDir()
-	rt := New(dir)
-	now := time.Now().UTC()
-	st := state{
-		Nodes: []MemoryNode{{
-			ID:         "stable",
-			Type:       "fact",
-			Content:    "stable memory",
-			Timestamp:  now,
-			Confidence: 0.9,
-			Quality:    QualityHighSignal,
-		}},
-		Strategies: ensureBuiltInStrategies(nil),
-		Production: normalizeProductionState(ProductionState{}),
-		NoisyRefs:  map[string]int{},
-	}
-	tr := ExecutionTrace{
-		ID:          "trace-production",
-		IRVersion:   version,
-		Goal:        "fix a bug",
-		Steps:       []Step{{ID: "validate", Action: "Validate"}},
-		Outcome:     "success",
-		Cost:        CostMetrics{EstimatedInputTokens: 10, EstimatedCompiledTokens: 5, ToolCalls: 1},
-		StartedAt:   now,
-		CompletedAt: now.Add(time.Second),
-	}
-	next, tr := rt.applyProductionHardening(st, tr, defaultControlPolicy(), now)
-	if tr.ProductionHardening == nil || tr.ProductionHardening.SnapshotID == "" {
-		t.Fatalf("missing production snapshot in trace: %+v", tr.ProductionHardening)
-	}
-	if next.Production.LastSnapshotID != tr.ProductionHardening.SnapshotID {
-		t.Fatalf("last snapshot = %q, trace snapshot = %q", next.Production.LastSnapshotID, tr.ProductionHardening.SnapshotID)
-	}
-	if snap, err := runtimesnapshot.Load(dir, tr.ProductionHardening.SnapshotID); err != nil || !snap.Stable {
-		t.Fatalf("snapshot load = %+v err=%v, want stable snapshot", snap, err)
-	} else if snap.BarrierID == "" || snap.StateHash == "" {
-		t.Fatalf("snapshot missing atomic barrier metadata: %+v", snap)
-	}
-	mutated := next
-	mutated.Nodes = append(mutated.Nodes, MemoryNode{ID: "corrupted", Type: "state", Content: "bad", Quality: QualityCorrupted})
-	restored, err := restoreProductionSnapshot(dir, tr.ProductionHardening.SnapshotID, mutated.Production)
+	matches, err := filepath.Glob(path + ".corrupt-*")
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertNode(t, restored.Nodes, func(n MemoryNode) bool { return n.ID == "stable" }, "restored stable node")
-	for _, node := range restored.Nodes {
-		if node.ID == "corrupted" {
-			t.Fatalf("restore kept corrupted node: %+v", restored.Nodes)
-		}
+	if len(matches) != 1 {
+		t.Fatalf("corrupt backup count = %d, want 1", len(matches))
+	}
+	b, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != "{not-json" {
+		t.Fatalf("backup content = %q", b)
 	}
 }
 
-func TestProductionHardeningRecordsUnreservedToolCallButKeepsOutcome(t *testing.T) {
-	now := time.Now().UTC()
-	rt := New(t.TempDir())
-	st := state{Production: normalizeProductionState(ProductionState{}), NoisyRefs: map[string]int{}}
-	ir := PlannerIR{
-		Version:        version,
-		Goal:           "fix a bug",
-		SourceEvent:    "fix a bug",
-		Constraints:    []Constraint{{Type: "must_use", Text: "stay inside one tool call", Source: "test"}},
-		ExecutionSteps: []Step{{ID: "one", Action: "Run one tool"}},
+func TestTraceIDIncludesCollisionGuard(t *testing.T) {
+	now := time.Unix(123, 456).UTC()
+	a := traceID(now)
+	b := traceID(now)
+	prefix := now.Format("20060102T150405.000000000") + "-"
+	if !strings.HasPrefix(a, prefix) || !strings.HasPrefix(b, prefix) {
+		t.Fatalf("trace IDs missing timestamp prefix: %q %q", a, b)
 	}
-	hardening := hardeningTraceForStart(context.Background(), ir, "fix a bug", st, now)
-	tr := ExecutionTrace{
-		ID:                  "trace-unreserved-tool",
-		IRVersion:           version,
-		Goal:                "fix a bug",
-		Steps:               ir.ExecutionSteps,
-		Outcome:             "success",
-		Cost:                CostMetrics{EstimatedInputTokens: 5, EstimatedCompiledTokens: 5, ToolCalls: 2},
-		ProductionHardening: hardening,
-		StartedAt:           now,
-		CompletedAt:         now.Add(time.Second),
+	if a == b {
+		t.Fatalf("trace IDs collided for the same timestamp: %q", a)
 	}
-	_, tr = rt.applyProductionHardening(st, tr, defaultControlPolicy(), now)
-	// The turn genuinely succeeded (err==nil); hardening must NOT rewrite the real
-	// outcome. A budget overrun is recorded as an advisory observation only.
-	// (Regression guard: this previously demoted every >budget success to
-	// partial_success, poisoning the trace log.)
-	if tr.Outcome != "success" {
-		t.Fatalf("outcome = %q, want success preserved (hardening must not demote real results)", tr.Outcome)
-	}
-	if tr.ProductionHardening == nil || tr.ProductionHardening.ResourceDecision.Allowed {
-		t.Fatalf("resource decision should record unreserved tool growth: %+v", tr.ProductionHardening)
-	}
-	if tr.ProductionHardening.Allowed {
-		t.Fatalf("hardening should record not-allowed for unreserved tool growth: %+v", tr.ProductionHardening)
-	}
-	if !strings.Contains(strings.Join(tr.ProductionHardening.BlockReasons, "\n"), "unreserved tool call usage") {
-		t.Fatalf("missing unreserved tool-call reason: %+v", tr.ProductionHardening.BlockReasons)
-	}
-	if tr.ProductionHardening.EnforcementAuthority != "production_hardening" {
-		t.Fatalf("wrong enforcement authority: %+v", tr.ProductionHardening)
-	}
-}
-
-func TestProductionHardeningConsumesCoordinatorReservation(t *testing.T) {
-	dir := t.TempDir()
-	rt := New(dir)
-	now := time.Now().UTC()
-	st := state{Production: normalizeProductionState(ProductionState{}), NoisyRefs: map[string]int{}}
-	ir := PlannerIR{
-		Version:        version,
-		Goal:           "fix a bug",
-		SourceEvent:    "fix a bug",
-		Constraints:    []Constraint{{Type: "must_use", Text: "stay inside budget", Source: "test"}},
-		ExecutionSteps: []Step{{ID: "one", Action: "Run one tool"}},
-	}
-	hardening := rt.hardeningTraceForStart(context.Background(), ir, "fix a bug", st, now, "trace-coordinator")
-	if hardening.ResourceReservation.ID != "trace-coordinator" {
-		t.Fatalf("reservation id = %q", hardening.ResourceReservation.ID)
-	}
-	if got := budgetCoordinatorForDir(dir).Snapshot(now).ActiveReservations; got != 1 {
-		t.Fatalf("active reservations = %d, want 1", got)
-	}
-	tr := ExecutionTrace{
-		ID:                  "trace-coordinator",
-		IRVersion:           version,
-		Goal:                "fix a bug",
-		Steps:               ir.ExecutionSteps,
-		Outcome:             "success",
-		Cost:                CostMetrics{EstimatedInputTokens: 5, EstimatedCompiledTokens: 5, ToolCalls: 1},
-		ProductionHardening: hardening,
-		StartedAt:           now,
-		CompletedAt:         now.Add(time.Second),
-	}
-	_, tr = rt.applyProductionHardening(st, tr, defaultControlPolicy(), now)
-	if tr.ProductionHardening == nil || !tr.ProductionHardening.ResourceDecision.Allowed {
-		t.Fatalf("coordinated reservation was not committed: %+v", tr.ProductionHardening)
-	}
-	if got := budgetCoordinatorForDir(dir).Snapshot(now).ActiveReservations; got != 0 {
-		t.Fatalf("active reservations after commit = %d, want 0", got)
-	}
-	ghost := commitProductionBudget(budgetCoordinatorForDir(dir), hardening.ResourceReservation, runtimeresource.Usage{Tokens: 10, ToolCalls: 1, MemoryNodes: 0}, now.Add(time.Second))
-	if ghost.Allowed || !strings.Contains(strings.Join(ghost.Reasons, "\n"), "reservation not found") {
-		t.Fatalf("duplicate reservation commit was not rejected: %+v", ghost)
-	}
-}
-
-func TestProductionHardeningCanaryDiffAddsCausalAttribution(t *testing.T) {
-	now := time.Now().UTC()
-	rt := New(t.TempDir())
-	st := state{
-		Production: normalizeProductionState(ProductionState{
-			Canary: runtimecanary.Policy{Mode: runtimecanary.CanaryMode, TrafficPercent: 100, MinStableRuns: 1},
-			CanaryBaseline: runtimecanary.BehaviorSample{
-				Decision: "production_hardening",
-				Strategy: "general",
-				Outcome:  "success",
-				Steps:    []string{"baseline"},
-			},
-		}),
-		NoisyRefs: map[string]int{},
-	}
-	ir := PlannerIR{
-		Version:        version,
-		Goal:           "fix a bug",
-		SourceEvent:    "fix a bug",
-		Constraints:    []Constraint{{Type: "must_use", Text: "stay inside budget", Source: "test"}},
-		ExecutionSteps: []Step{{ID: "current", Action: "Run one tool"}},
-	}
-	hardening := rt.hardeningTraceForStart(context.Background(), ir, "fix a bug", st, now, "trace-canary")
-	tr := ExecutionTrace{
-		ID:                  "trace-canary",
-		IRVersion:           version,
-		Goal:                "fix a bug",
-		Steps:               ir.ExecutionSteps,
-		Outcome:             "partial_success",
-		StrategyUsed:        []string{"bugfix"},
-		Cost:                CostMetrics{EstimatedInputTokens: 5, EstimatedCompiledTokens: 5, ToolCalls: 1},
-		ProductionHardening: hardening,
-		StartedAt:           now,
-		CompletedAt:         now.Add(time.Second),
-	}
-	_, tr = rt.applyProductionHardening(st, tr, defaultControlPolicy(), now)
-	if tr.ProductionHardening == nil || !tr.ProductionHardening.CanaryDiff.Diverged {
-		t.Fatalf("missing canary divergence: %+v", tr.ProductionHardening)
-	}
-	if tr.ProductionHardening.CanaryDiff.Attribution.PrimaryCause == "" {
-		t.Fatalf("missing canary attribution: %+v", tr.ProductionHardening.CanaryDiff)
-	}
-	assertCausalEdge(t, tr.CausalEdges, func(edge CausalEdge) bool {
-		return strings.HasPrefix(edge.From, "canary:trace-canary:") && edge.To == "outcome:trace-canary" && edge.Relation == "explains_divergence"
-	}, "canary divergence causal edge")
 }
 
 func readState(t *testing.T, dir string) state {
@@ -1094,16 +935,6 @@ func assertNode(t *testing.T, nodes []MemoryNode, pred func(MemoryNode) bool, de
 		}
 	}
 	t.Fatalf("missing node: %s\nnodes=%+v", desc, nodes)
-}
-
-func assertCausalEdge(t *testing.T, edges []CausalEdge, pred func(CausalEdge) bool, desc string) {
-	t.Helper()
-	for _, e := range edges {
-		if pred(e) {
-			return
-		}
-	}
-	t.Fatalf("missing causal edge: %s\nedges=%+v", desc, edges)
 }
 
 func assertEdge(t *testing.T, edges []MemoryEdge, relation string) {
