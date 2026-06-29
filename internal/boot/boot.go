@@ -223,17 +223,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		return nil, err
 	}
 	// Output style: fold the selected persona/tone block into the base prompt
-	// before language/memory/skills append, so a "replace" style (keep-coding
+	// before memory/skills/policies append, so a "replace" style (keep-coding
 	// false) still keeps those. Applied once, into the cache-stable prefix.
 	if st, ok := outputstyle.Resolve(cfg.Agent.OutputStyle, outputstyle.Dirs()); ok {
 		sysPrompt = outputstyle.Apply(sysPrompt, st)
 	}
-	sysPrompt += "\n\n" + config.UserDecisionPolicy
-	sysPrompt += "\n\n" + config.LanguagePolicy
-	if tokenEconomy {
-		sysPrompt += "\n\n" + tokenEconomyPrompt
-	}
-
 	// Persistent memory (REASONIX.md / AGENTS.md hierarchy + auto-memory index)
 	// folds into the system prompt exactly here, once: it becomes part of the
 	// durable, cache-stable prefix every turn reuses, so memory costs nothing per
@@ -260,6 +254,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	allSkills := allSkillStore.List()
 	if !tokenEconomy {
 		sysPrompt = skill.ApplyIndex(sysPrompt, skills)
+	}
+	// Policies are appended last so the durable user context (memory) and tool
+	// surface (skills index) stay closer to the base prompt for cache coherence.
+	sysPrompt += "\n\n" + config.UserDecisionPolicy
+	sysPrompt += "\n\n" + config.LanguagePolicy
+	if tokenEconomy {
+		sysPrompt += "\n\n" + tokenEconomyPrompt
 	}
 
 	reg := tool.NewRegistry()

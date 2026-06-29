@@ -1935,10 +1935,9 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	if i := strings.Index(sys, "\n\n# Skills"); i >= 0 {
 		base = sys[:i]
 	}
-	// The language policy is always appended at boot; strip it so this assertion
-	// is purely about whether project/ancestor memory leaked into the base. The
-	// user-decision policy is another fixed boot policy and is stripped for the
-	// same reason.
+	// Policies are now appended after the skills index; the skills-strip above
+	// already removes them. stripLanguagePolicy is kept as a safety net in case
+	// skills are absent or the assembly order shifts again.
 	base = stripLanguagePolicy(base)
 	if base != "JUST THE BASE" {
 		t.Fatalf("expected untouched base prompt, got:\n%s", sys)

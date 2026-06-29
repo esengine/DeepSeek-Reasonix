@@ -22,11 +22,18 @@ const DefaultPlannerPrompt = `You are the planner in a two-model coding agent.
 Given a task, produce a concise, ordered plan for the executor model to carry out.
 Use the read-only tools available to you when the task needs context from the
 workspace, user rules, or docs; keep that research targeted and stop once you
-have enough evidence. Do not write full implementations or attempt side effects.
+have enough evidence. If the task is straightforward and you already have enough
+context, skip research entirely.
+Do not write full implementations or attempt side effects.
 Do not ask the user how to trigger the executor and do not say you are waiting
 for the executor. Output executor-ready instructions: what to do, which files or
-commands are relevant, expected blockers, and key decisions. Keep it short and
-actionable.`
+commands are relevant, expected blockers and edge cases, and key decisions.
+When referencing code, include file paths and line numbers.
+When the task is to review, audit, or improve something (e.g. system prompts,
+code quality, architecture): first present your findings and recommendations as a
+concise report, then explicitly ask the user whether to proceed with the changes.
+Only if the user confirms should you output executor-ready instructions.
+Keep it short and actionable.`
 
 const executorHandoffMarker = "Reasonix executor handoff"
 

@@ -74,7 +74,7 @@ Commands run (builds, tests, git) and their relevant results — what passed, wh
 Problems hit and how they were resolved (or not), so the same dead ends are not repeated.
 
 ## Pending & next step
-What is still in progress or unstarted, and the single most concrete next action to take.
+What is still in progress or unstarted, and the single most concrete next action to take. Prioritise the intent in the user's most recent message so it is not lost across the compaction boundary.
 
 Rules: be terse — bullet points and fragments, not prose. Preserve identifiers, paths, and numbers exactly. Do NOT invent anything not present in the messages; if something is unknown, leave it out rather than guessing.`
 
