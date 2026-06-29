@@ -196,6 +196,7 @@ func filterMemories(memories []Memory, typ Type) []Memory {
 }
 
 func readMemoryByName(store Store, name string) (Memory, bool) {
+	name = strings.TrimSuffix(name, ".md")
 	name = slug(name)
 	if name == "" {
 		return Memory{}, false

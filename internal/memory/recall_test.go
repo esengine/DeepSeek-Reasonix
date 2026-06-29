@@ -136,6 +136,32 @@ func TestRecallToolExcludesArchivedMemories(t *testing.T) {
 	}
 }
 
+func TestRecallToolReadsMemoryWithDotMdSuffix(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	saveMemory(t, store, Memory{
+		Name:        "test-rules",
+		Title:       "Test rules",
+		Description: "Test description",
+		Type:        TypeProject,
+		Body:        "Test body.",
+	})
+
+	for _, tc := range []struct{ name, label string }{
+		{"test-rules.md", ".md suffix from list display"},
+		{"test-rules", "plain slug (backwards compat)"},
+	} {
+		out, err := NewRecallTool(store).Execute(context.Background(), []byte(`{"operation":"read","name":"`+tc.name+`"}`))
+		if err != nil {
+			t.Fatalf("[%s] Execute read(%q): %v", tc.label, tc.name, err)
+		}
+		for _, want := range []string{"Memory test-rules", "Test body"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("[%s] read output missing %q:\n%s", tc.label, want, out)
+			}
+		}
+	}
+}
+
 func TestRecallToolReadsMemoryByName(t *testing.T) {
 	store := Store{Dir: t.TempDir()}
 	saveMemory(t, store, Memory{
