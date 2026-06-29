@@ -37,6 +37,25 @@ func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
 		return out
 	}
 
+	// Wait for the async controller build (#4544).
+	// When switching conversations via the sidebar, the tab is created and
+	// returned immediately, but tab.Ctrl is still nil — the controller is
+	// built in a goroutine (startTabControllerBuild → buildTabControllerWithContext).
+	// If WorkspaceChanges is called before the build finishes, ctrl is nil
+	// and checkpoint data is silently skipped.
+	// Git-only endpoints like WorkspaceGitHistory bypass this wait because
+	// they only need the workspace root, not the controller.
+	if ctrl == nil {
+		ctrl = a.waitForTabCtrl(tabID)
+		// Re-read workspaceRoot — the async build may have updated it
+		// via reconcileTabWithPinnedSessionMeta.
+		a.mu.RLock()
+		if tab, ok := a.tabs[tabID]; ok {
+			workspaceRoot = tab.WorkspaceRoot
+		}
+		a.mu.RUnlock()
+	}
+
 	base, err := workspaceBaseFromRoot(workspaceRoot)
 	if err != nil {
 		out.GitAvailable = false
@@ -125,6 +144,31 @@ func (a *App) workspaceChangesTarget(tabID string) (string, control.SessionAPI, 
 		return "", nil, tabID == ""
 	}
 	return tab.WorkspaceRoot, tab.Ctrl, true
+}
+
+// waitForTabCtrl polls up to 5s for tab.Ctrl to become non-nil. Returns the
+// controller or nil if the build failed (Ready==true but Ctrl==nil) or timed out.
+// The caller must not hold a.mu.
+func (a *App) waitForTabCtrl(tabID string) control.SessionAPI {
+	for i := 0; i < 50; i++ {
+		a.mu.RLock()
+		tab := a.tabs[tabID]
+		if tab == nil {
+			a.mu.RUnlock()
+			return nil
+		}
+		ctrl := tab.Ctrl
+		ready := tab.Ready
+		a.mu.RUnlock()
+		if ctrl != nil {
+			return ctrl
+		}
+		if ready {
+			return nil // build finished with error
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return nil // timed out
 }
 
 func (a *App) workspaceBaseForTab(tabID string) (string, error) {
