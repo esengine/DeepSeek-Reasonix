@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -74,7 +75,7 @@ func (t recallTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 	case "read":
 		m, ok := readMemoryByName(t.store, in.Name)
 		if !ok {
-			return "", fmt.Errorf("memory %q not found", slug(in.Name))
+			return "", fmt.Errorf("memory %q not found", normalizeReadMemoryName(in.Name))
 		}
 		return formatMemory(t.store, m), nil
 	case "list":
@@ -196,7 +197,7 @@ func filterMemories(memories []Memory, typ Type) []Memory {
 }
 
 func readMemoryByName(store Store, name string) (Memory, bool) {
-	name = slug(name)
+	name = normalizeReadMemoryName(name)
 	if name == "" {
 		return Memory{}, false
 	}
@@ -206,6 +207,14 @@ func readMemoryByName(store Store, name string) (Memory, bool) {
 	}
 	m.Name = name
 	return m, true
+}
+
+func normalizeReadMemoryName(name string) string {
+	name = strings.TrimSpace(name)
+	if ext := filepath.Ext(name); strings.EqualFold(ext, ".md") {
+		name = strings.TrimSuffix(name, ext)
+	}
+	return slug(name)
 }
 
 func memorySearchText(m Memory) string {
