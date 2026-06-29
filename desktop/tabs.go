@@ -5203,6 +5203,13 @@ func loadPinnedTabSessionWithPreload(dir, sessionPath string, preloaded loadedTa
 		}
 		return nil, "", false
 	}
+	// An empty file (0 messages) is a pre-created placeholder, not a real
+	// session to resume.  Treating it as valid would make ctrl.Resume replace
+	// the executor's live session (with system prompt) with the empty one,
+	// causing the saved transcript to lack the agent identity contract.
+	if len(loaded.Snapshot()) == 0 {
+		return nil, path, true
+	}
 	return loaded, path, true
 }
 
