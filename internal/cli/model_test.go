@@ -32,6 +32,31 @@ func TestModelRefsFromConfig(t *testing.T) {
 	}
 }
 
+// TestModelRefsFallsBackToRawModelsWhenChatFilterEmpty verifies the /model
+// picker still exposes a configured provider when the chat-name heuristic
+// filters out every model. This mirrors /provider, which already falls back to
+// the raw configured model list for providers with no chat-looking entries.
+func TestModelRefsFallsBackToRawModelsWhenChatFilterEmpty(t *testing.T) {
+	isolateUserConfig(t)
+	cfg := config.Default()
+	cfg.DefaultModel = "local/custom-embedding"
+	cfg.Providers = []config.ProviderEntry{{
+		Name:    "local",
+		Kind:    "openai",
+		BaseURL: "http://127.0.0.1:11434/v1",
+		Models:  []string{"custom-embedding"},
+		Default: "custom-embedding",
+	}}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("write user config: %v", err)
+	}
+
+	refs := modelRefs()
+	if len(refs) != 1 || refs[0] != "local/custom-embedding" {
+		t.Fatalf("modelRefs() = %v, want [local/custom-embedding]", refs)
+	}
+}
+
 // TestModelRefsSkipsUnconfigured verifies that with no provider keys set, the
 // picker offers nothing rather than listing models the user can't select.
 func TestModelRefsSkipsUnconfigured(t *testing.T) {

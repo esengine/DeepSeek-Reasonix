@@ -91,7 +91,7 @@ func (m *chatTUI) showModels() {
 		if !p.Configured() {
 			continue
 		}
-		for _, model := range p.ChatModelList() {
+		for _, model := range modelPickerModels(p) {
 			refs = append(refs, p.Name+"/"+model)
 		}
 	}
@@ -135,11 +135,21 @@ func modelRefs() []string {
 		if !p.Configured() {
 			continue
 		}
-		for _, model := range p.ChatModelList() {
+		for _, model := range modelPickerModels(p) {
 			out = append(out, p.Name+"/"+model)
 		}
 	}
 	return out
+}
+
+// modelPickerModels matches /provider: prefer chat-looking models, but keep a
+// configured provider selectable when the heuristic filters every model.
+func modelPickerModels(p *config.ProviderEntry) []string {
+	models := p.ChatModelList()
+	if len(models) == 0 {
+		models = p.ModelList()
+	}
+	return models
 }
 
 // providerNames returns the names of configured providers for slash completion.
