@@ -66,6 +66,19 @@ func TestCompleteStepRejectsEmptyEvidenceSummary(t *testing.T) {
 	}
 }
 
+func TestCompleteStepHintsUnescapedWindowsPathJSON(t *testing.T) {
+	_, err := completeStep{}.Execute(context.Background(),
+		json.RawMessage(`{"step":"x","result":"y","evidence":[{"kind":"files","summary":"checked","paths":["D:\work\task.md"]}]}`))
+	if err == nil {
+		t.Fatal("raw Windows paths should still be invalid JSON")
+	}
+	for _, want := range []string{"escape Windows path backslashes", `D:\\work\\task.md`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error should hint %q, got %v", want, err)
+		}
+	}
+}
+
 func TestCompleteStepAccepts(t *testing.T) {
 	out, err := completeStep{}.Execute(context.Background(), json.RawMessage(`{
 		"step":"Add the parser",
