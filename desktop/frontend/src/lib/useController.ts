@@ -1008,6 +1008,7 @@ export function useController() {
 
   const checkpointRefreshSeq = useRef(new Map<string, number>());
   const sessionLoadSeq = useRef(new Map<string, number>());
+  const sessionLoadInFlight = useRef(new Map<string, { sessionPath: string; promise: Promise<void> }>());
   const bumpSessionLoadSeq = useCallback((tabId: string): number => {
     const seq = (sessionLoadSeq.current.get(tabId) ?? 0) + 1;
     sessionLoadSeq.current.set(tabId, seq);
@@ -1034,77 +1035,99 @@ export function useController() {
     reason: HydrateReason = "startup",
     options: { skipHistory?: boolean; placeholderItems?: Item[]; preserveCachedHistory?: boolean; sessionPath?: string } = {},
   ) => {
-    const seq = bumpSessionLoadSeq(tabId);
-    const hydrateStartedAt = Date.now();
-    const skipHistory = Boolean(
-      options.skipHistory ||
-      (options.preserveCachedHistory && !reset && hasReusableCachedTranscript(statesRef.current.get(tabId), options.sessionPath)),
-    );
-    addBreadcrumb("tab.hydrate", `start ${reason} ${tabId}`);
-    dispatchTo(tabId, { type: "hydrate_start", reason, placeholderItems: options.placeholderItems });
-    if (reset && sessionLoadCurrent(tabId, seq)) dispatchTo(tabId, { type: "reset" });
-
-    const stillCurrent = () => sessionLoadCurrent(tabId, seq);
-    const noteFailure = (label: string, err: unknown) => {
-      addBreadcrumb("tab.hydrate", `${label} failed ${tabId}: ${errorMessage(err)}`);
-    };
-
-    const historyStartedAt = Date.now();
-
-    // Phase 1: dispatch fast metadata immediately so the transcript can render
-    // without waiting for slower ancillary calls (e.g. BalanceForTab network).
-    const [meta, historyPage] = await Promise.all([
-      app.MetaForTab(tabId).catch((err) => { noteFailure("meta", err); return undefined; }),
-      skipHistory
-        ? Promise.resolve(undefined)
-        : app.HistoryPageForTab(tabId, 0, HISTORY_PAGE_TURNS).catch((err) => { noteFailure("history", err); return undefined; }),
-    ]);
-
-    if (!stillCurrent()) return;
-    if (meta !== undefined) dispatchTo(tabId, { type: "meta", meta });
-    if (!skipHistory && historyPage !== undefined) {
-      const messages = asArray(historyPage.messages);
-      dispatchTo(tabId, { type: "history_page", page: historyPage, mode: "replace" });
-      addBreadcrumb(
-        "tab.hydrate",
-        `history page ${tabId} messages=${messages.length} turns=${historyPage.startTurn}-${historyPage.endTurn}/${historyPage.totalTurns} ms=${Date.now() - historyStartedAt}`,
-      );
-      if (reason === "switch-tab") {
-        addBreadcrumb(
-          "tab.switch",
-          `history-done ${tabId} messages=${messages.length} turns=${historyPage.startTurn}-${historyPage.endTurn}/${historyPage.totalTurns} ms=${Date.now() - historyStartedAt}`,
-        );
-      }
-    } else if (skipHistory) {
-      const skipReason = options.skipHistory ? "cached-live-turn" : "cached-transcript";
-      addBreadcrumb("tab.hydrate", `history skipped ${tabId} reason=${skipReason}`);
-      if (reason === "switch-tab") {
-        addBreadcrumb("tab.switch", `history-done ${tabId} skipped ms=${Date.now() - historyStartedAt}`);
-      }
+    const sessionPath = (options.sessionPath ?? statesRef.current.get(tabId)?.meta?.sessionPath ?? "").trim();
+    const canJoinInFlight = !reset && !options.skipHistory;
+    const shouldTrackInFlight = !options.skipHistory;
+    if (canJoinInFlight) {
+      const existing = sessionLoadInFlight.current.get(tabId);
+      if (existing?.sessionPath === sessionPath) return existing.promise;
+    } else {
+      sessionLoadInFlight.current.delete(tabId);
     }
 
-    // Phase 2: local ancillary data. Balance is a network call and is refreshed
-    // after hydrate_done so it cannot hold the transcript loading state open.
-    // These don't block the transcript, so they're batched into one render.
-    const [effort, jobs, checkpoints, context] = await Promise.all([
-      app.EffortForTab(tabId).catch((err) => { noteFailure("effort", err); return undefined; }),
-      app.JobsForTab(tabId).catch((err) => { noteFailure("jobs", err); return undefined; }),
-      app.CheckpointsForTab(tabId).catch((err) => { noteFailure("checkpoints", err); return undefined; }),
-      app.ContextUsageForTab(tabId).catch((err) => { noteFailure("context", err); return undefined; }),
-    ]);
-    if (!stillCurrent()) return;
-    if (effort !== undefined) dispatchTo(tabId, { type: "effort", effort });
-    if (jobs !== undefined) dispatchTo(tabId, { type: "jobs", jobs: asArray(jobs) });
-    if (checkpoints !== undefined) dispatchTo(tabId, { type: "checkpoints", checkpoints: asArray(checkpoints) });
-    if (context !== undefined) dispatchTo(tabId, { type: "context", context });
+    const promise = (async () => {
+      const seq = bumpSessionLoadSeq(tabId);
+      const hydrateStartedAt = Date.now();
+      const skipHistory = Boolean(
+        options.skipHistory ||
+        (options.preserveCachedHistory && !reset && hasReusableCachedTranscript(statesRef.current.get(tabId), options.sessionPath)),
+      );
+      addBreadcrumb("tab.hydrate", `start ${reason} ${tabId}`);
+      dispatchTo(tabId, { type: "hydrate_start", reason, placeholderItems: options.placeholderItems });
+      if (reset && sessionLoadCurrent(tabId, seq)) dispatchTo(tabId, { type: "reset" });
 
-    dispatchTo(tabId, { type: "hydrate_done" });
-    addBreadcrumb("tab.hydrate", `done ${reason} ${tabId} ms=${Date.now() - hydrateStartedAt}`);
-    app.BalanceForTab(tabId)
-      .then((balance) => {
-        if (sessionLoadCurrent(tabId, seq)) dispatchTo(tabId, { type: "balance", balance });
-      })
-      .catch((err) => { noteFailure("balance", err); });
+      const stillCurrent = () => sessionLoadCurrent(tabId, seq);
+      const noteFailure = (label: string, err: unknown) => {
+        addBreadcrumb("tab.hydrate", `${label} failed ${tabId}: ${errorMessage(err)}`);
+      };
+
+      const historyStartedAt = Date.now();
+
+      // Phase 1: dispatch fast metadata immediately so the transcript can render
+      // without waiting for slower ancillary calls (e.g. BalanceForTab network).
+      const [meta, historyPage] = await Promise.all([
+        app.MetaForTab(tabId).catch((err) => { noteFailure("meta", err); return undefined; }),
+        skipHistory
+          ? Promise.resolve(undefined)
+          : app.HistoryPageForTab(tabId, 0, HISTORY_PAGE_TURNS).catch((err) => { noteFailure("history", err); return undefined; }),
+      ]);
+
+      if (!stillCurrent()) return;
+      if (meta !== undefined) dispatchTo(tabId, { type: "meta", meta });
+      if (!skipHistory && historyPage !== undefined) {
+        const messages = asArray(historyPage.messages);
+        dispatchTo(tabId, { type: "history_page", page: historyPage, mode: "replace" });
+        addBreadcrumb(
+          "tab.hydrate",
+          `history page ${tabId} messages=${messages.length} turns=${historyPage.startTurn}-${historyPage.endTurn}/${historyPage.totalTurns} ms=${Date.now() - historyStartedAt}`,
+        );
+        if (reason === "switch-tab") {
+          addBreadcrumb(
+            "tab.switch",
+            `history-done ${tabId} messages=${messages.length} turns=${historyPage.startTurn}-${historyPage.endTurn}/${historyPage.totalTurns} ms=${Date.now() - historyStartedAt}`,
+          );
+        }
+      } else if (skipHistory) {
+        const skipReason = options.skipHistory ? "cached-live-turn" : "cached-transcript";
+        addBreadcrumb("tab.hydrate", `history skipped ${tabId} reason=${skipReason}`);
+        if (reason === "switch-tab") {
+          addBreadcrumb("tab.switch", `history-done ${tabId} skipped ms=${Date.now() - historyStartedAt}`);
+        }
+      }
+
+      // Phase 2: local ancillary data. Balance is a network call and is refreshed
+      // after hydrate_done so it cannot hold the transcript loading state open.
+      // These don't block the transcript, so they're batched into one render.
+      const [effort, jobs, checkpoints, context] = await Promise.all([
+        app.EffortForTab(tabId).catch((err) => { noteFailure("effort", err); return undefined; }),
+        app.JobsForTab(tabId).catch((err) => { noteFailure("jobs", err); return undefined; }),
+        app.CheckpointsForTab(tabId).catch((err) => { noteFailure("checkpoints", err); return undefined; }),
+        app.ContextUsageForTab(tabId).catch((err) => { noteFailure("context", err); return undefined; }),
+      ]);
+      if (!stillCurrent()) return;
+      if (effort !== undefined) dispatchTo(tabId, { type: "effort", effort });
+      if (jobs !== undefined) dispatchTo(tabId, { type: "jobs", jobs: asArray(jobs) });
+      if (checkpoints !== undefined) dispatchTo(tabId, { type: "checkpoints", checkpoints: asArray(checkpoints) });
+      if (context !== undefined) dispatchTo(tabId, { type: "context", context });
+
+      dispatchTo(tabId, { type: "hydrate_done" });
+      addBreadcrumb("tab.hydrate", `done ${reason} ${tabId} ms=${Date.now() - hydrateStartedAt}`);
+      app.BalanceForTab(tabId)
+        .then((balance) => {
+          if (sessionLoadCurrent(tabId, seq)) dispatchTo(tabId, { type: "balance", balance });
+        })
+        .catch((err) => { noteFailure("balance", err); });
+    })();
+    if (shouldTrackInFlight) {
+      sessionLoadInFlight.current.set(tabId, { sessionPath, promise });
+    }
+    try {
+      await promise;
+    } finally {
+      if (sessionLoadInFlight.current.get(tabId)?.promise === promise) {
+        sessionLoadInFlight.current.delete(tabId);
+      }
+    }
   }, [bumpSessionLoadSeq, dispatchTo, sessionLoadCurrent]);
 
   const loadOlderHistory = useCallback(async (tabId?: string): Promise<void> => {

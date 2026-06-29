@@ -133,8 +133,11 @@ const tabD = tabMeta("tab-d");
 let backendActiveId = "tab-a";
 const historyB = deferred<HistoryMessage[]>();
 const historyD = deferred<HistoryMessage[]>();
+const contextDGate = deferred<ContextInfo>();
 const setActiveBGate = deferred<void>();
 const historyCalls: string[] = [];
+let contextDCalls = 0;
+let holdNextContextForD = false;
 let setActiveCalls = 0;
 let newSessionCalls = 0;
 const runningTabs = new Set<string>();
@@ -159,7 +162,15 @@ window.go = {
     App: {
       ListTabs: async () => currentTabs(),
       MetaForTab: async (tabID: string) => metaFor(tabsById.get(tabID) ?? tabA),
-      ContextUsageForTab: async () => context,
+      ContextUsageForTab: async (tabID: string) => {
+        if (tabID === "tab-d" && holdNextContextForD) {
+          contextDCalls += 1;
+          holdNextContextForD = false;
+          return contextDGate.promise;
+        }
+        if (tabID === "tab-d") contextDCalls += 1;
+        return context;
+      },
       EffortForTab: async () => effort,
       BalanceForTab: async () => balance,
       JobsForTab: async () => jobs,
@@ -294,6 +305,7 @@ eq(controller?.activeTabId, "tab-c", "switching to a cached running tab still up
 ok(controller?.state.items.some((item) => item.kind === "user" && item.text === "streaming C") ?? false, "cached running tab keeps its optimistic transcript");
 ok(!historyCalls.includes("tab-c"), "cached running tab skips history hydration");
 
+holdNextContextForD = true;
 await act(async () => {
   await controller?.openProjectTab(tabD.workspaceRoot, tabD.topicId || "");
   await flushPromises();
@@ -305,6 +317,18 @@ ok(controller?.state.hydratePlaceholderItems?.some((item) => item.kind === "user
 await act(async () => {
   historyD.resolve([userMessage("history D")]);
   await historyD.promise;
+  await flushPromises();
+});
+await waitFor("open topic phase 2 started", () => contextDCalls === 1);
+const contextCallsBeforeReadyD = contextDCalls;
+await act(async () => {
+  for (const handler of readyHandlers) handler();
+  await flushPromises();
+});
+eq(contextDCalls, contextCallsBeforeReadyD, "agent ready reuses in-flight open-topic hydration for the active tab");
+await act(async () => {
+  contextDGate.resolve(context);
+  await contextDGate.promise;
   await flushPromises();
 });
 ok(controller?.state.items.some((item) => item.kind === "user" && item.text === "history D") ?? false, "topic history replaces the hydration placeholder");
