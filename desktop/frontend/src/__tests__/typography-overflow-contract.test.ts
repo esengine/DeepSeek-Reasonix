@@ -166,6 +166,26 @@ ok(
 );
 eq(finalDeclaration(".md table", "overflow-x"), "auto", "markdown tables scroll horizontally");
 eq(finalDeclaration(".code", "overflow"), "auto", "code blocks scroll instead of widening the layout");
+eq(
+  finalDeclaration(".provider-model-draft__list", "grid-template-columns"),
+  "repeat(auto-fit, minmax(min(100%, 240px), 1fr))",
+  "provider model draft keeps enough width for long fetched model names",
+);
+eq(
+  finalDeclaration(".provider-model-draft__model", "grid-template-columns"),
+  "max-content minmax(0, 1fr)",
+  "provider model draft reserves a stable checkbox column",
+);
+eq(
+  finalDeclaration(".provider-model-draft__option input", "width"),
+  "14px",
+  "provider model draft checkboxes keep a fixed width",
+);
+eq(
+  finalDeclaration(".provider-model-draft__option span", "line-height"),
+  "1.35",
+  "provider model draft labels keep predictable wrapped line height",
+);
 ok(
   /@media\s*\(max-width:\s*900px\)[\s\S]*?\.settings-center\s*\{[\s\S]*?grid-template-columns\s*:\s*1fr/.test(styles),
   "settings center stacks navigation before the modal is too narrow",
