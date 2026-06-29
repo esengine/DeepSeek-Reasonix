@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -75,6 +76,64 @@ func TestBashPowerShellAllowsQuotedOperator(t *testing.T) {
 	}
 	if !strings.Contains(out, "a && b") {
 		t.Fatalf("output = %q", out)
+	}
+}
+
+func TestBashPowerShellRunsMultilinePythonC(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("powershell e2e is windows-only")
+	}
+	if _, err := exec.LookPath("python"); err != nil {
+		t.Skip("python not found on PATH")
+	}
+	cases := []struct {
+		name    string
+		command string
+		want    string
+	}{
+		{
+			name:    "multiline",
+			command: "python -c \"import os\nprint(os.name)\"",
+			want:    "nt",
+		},
+		{
+			name:    "python dict literal",
+			command: "python -c \"print({'a': 1})\"",
+			want:    "{'a': 1}",
+		},
+		{
+			name:    "bash-style escaped quotes",
+			command: "python -c \"print(\\\"hello\\\")\"",
+			want:    "hello",
+		},
+	}
+	for _, tc := range cases {
+		out, err := runPS(t, tc.command)
+		if err != nil {
+			t.Fatalf("%s python -c should run: %v (out=%q)", tc.name, err, out)
+		}
+		if !strings.Contains(out, tc.want) {
+			t.Fatalf("%s output = %q, want it to contain %s", tc.name, out, tc.want)
+		}
+	}
+}
+
+func TestMaterializePowerShellPythonCWritesTempScript(t *testing.T) {
+	command, cleanup, err := materializePowerShellPythonC("python -c \"print(\\\"hello\\\")\"")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if !strings.HasPrefix(command, "python '") || !strings.HasSuffix(command, "'") {
+		t.Fatalf("command = %q, want python followed by a PowerShell literal path", command)
+	}
+	path := strings.TrimPrefix(strings.TrimSuffix(command, "'"), "python '")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); got != "print(\"hello\")" {
+		t.Fatalf("temp script = %q", got)
 	}
 }
 

@@ -148,33 +148,46 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 			"conditional chaining, or issue the commands as separate calls")
 	}
 
+	command := p.Command
+	cleanup := func() {}
+	if sh.Kind == sandbox.ShellPowerShell {
+		var err error
+		command, cleanup, err = materializePowerShellPythonC(p.Command)
+		if err != nil {
+			return "", err
+		}
+	}
+
 	// Wrap in the OS sandbox when configured; otherwise argv is just the shell.
-	argv, _ := sandbox.Command(b.sb, sh, p.Command)
+	argv, _ := sandbox.Command(b.sb, sh, command)
 	cmdEnv := bashCommandEnv(ctx)
 
 	if p.RunInBackground {
 		jm, ok := jobs.FromContext(ctx)
 		if !ok {
+			cleanup()
 			return "", fmt.Errorf("background execution is not available in this context")
 		}
 		workDir := b.workDir
 		// The job runs under the manager's session context (no foreground timeout), so it
 		// survives this turn; its combined output streams to the job buffer.
 		job := jm.StartForSession(jobs.SessionFromContext(ctx), "bash", commandPreview(p.Command), func(jobCtx context.Context, out io.Writer) (string, error) {
+			defer cleanup()
 			cmd := exec.CommandContext(jobCtx, argv[0], argv[1:]...)
 			cmd.Dir = workDir
 			cmd.Env = cmdEnv
 			cmd.WaitDelay = bashWaitDelay
 			cmd.Stdout = out
 			cmd.Stderr = out
-			tracked, runErr := runShellProcess(cmd, shouldTrackShellProcess(sh, p.Command, p.PreserveBackgroundProcesses))
-			if shouldReapAfterRun(jobCtx, sh, p.Command, p.PreserveBackgroundProcesses) {
+			tracked, runErr := runShellProcess(cmd, shouldTrackShellProcess(sh, command, p.PreserveBackgroundProcesses))
+			if shouldReapAfterRun(jobCtx, sh, command, p.PreserveBackgroundProcesses) {
 				reapShellProcess(cmd, tracked) // reap process-group stragglers the job left running (#3702)
 			}
 			return "", runErr
 		})
 		return fmt.Sprintf("Started background job %q. It keeps running across turns; read new output with bash_output(job_id=%q), wait for it with wait, or stop it with kill_shell(job_id=%q).", job.ID, job.ID, job.ID), nil
 	}
+	defer cleanup()
 
 	runCtx := ctx
 	timeout := b.foregroundTimeout()
@@ -195,12 +208,12 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 	}
 	cmd.Stdout = w
 	cmd.Stderr = w
-	tracked, err := runShellProcess(cmd, shouldTrackShellProcess(sh, p.Command, p.PreserveBackgroundProcesses))
+	tracked, err := runShellProcess(cmd, shouldTrackShellProcess(sh, command, p.PreserveBackgroundProcesses))
 	// A foreground command that spawned a lingering child (e.g. `bazel run`'s
 	// server) leaves it in the process group; Wait only reaped the shell leader.
 	// Kill the group so those don't accumulate into an OOM (#3702). On cancel/
 	// timeout the command's Cancel path already did this; this covers normal exit.
-	if shouldReapAfterRun(runCtx, sh, p.Command, p.PreserveBackgroundProcesses) {
+	if shouldReapAfterRun(runCtx, sh, command, p.PreserveBackgroundProcesses) {
 		reapShellProcess(cmd, tracked)
 	}
 	out := buf.String()
@@ -213,6 +226,99 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 		return out, fmt.Errorf("command exited: %w", err)
 	}
 	return out, nil
+}
+
+func materializePowerShellPythonC(command string) (string, func(), error) {
+	python, code, ok := parsePythonCCommand(command)
+	if !ok {
+		return command, func() {}, nil
+	}
+	f, err := os.CreateTemp("", "reasonix-python-c-*.py")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("create python -c temp file: %w", err)
+	}
+	name := f.Name()
+	cleanup := func() { _ = os.Remove(name) }
+	if _, err := f.WriteString(code); err != nil {
+		_ = f.Close()
+		cleanup()
+		return "", func() {}, fmt.Errorf("write python -c temp file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("close python -c temp file: %w", err)
+	}
+	return python + " " + quotePowerShellLiteral(name), cleanup, nil
+}
+
+func parsePythonCCommand(command string) (string, string, bool) {
+	s := strings.TrimSpace(command)
+	i := strings.IndexAny(s, " \t\r\n")
+	if i <= 0 {
+		return "", "", false
+	}
+	python := s[:i]
+	if !isPythonLauncher(python) {
+		return "", "", false
+	}
+	rest := strings.TrimSpace(s[i:])
+	if !strings.HasPrefix(rest, "-c") {
+		return "", "", false
+	}
+	rest = strings.TrimSpace(rest[2:])
+	if rest == "" || (rest[0] != '"' && rest[0] != '\'') {
+		return "", "", false
+	}
+	code, tail, ok := parsePythonCQuoted(rest)
+	if !ok || strings.TrimSpace(tail) != "" {
+		return "", "", false
+	}
+	return python, code, true
+}
+
+func isPythonLauncher(name string) bool {
+	switch strings.ToLower(name) {
+	case "python", "python.exe", "python3", "python3.exe", "py", "py.exe":
+		return true
+	default:
+		return false
+	}
+}
+
+func parsePythonCQuoted(s string) (string, string, bool) {
+	quote := s[0]
+	var b strings.Builder
+	escaped := false
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if quote == '"' && escaped {
+			switch c {
+			case '"', '\\':
+				b.WriteByte(c)
+			default:
+				b.WriteByte('\\')
+				b.WriteByte(c)
+			}
+			escaped = false
+			continue
+		}
+		if quote == '"' && c == '\\' {
+			escaped = true
+			continue
+		}
+		if c == quote {
+			return b.String(), s[i+1:], true
+		}
+		b.WriteByte(c)
+	}
+	if escaped {
+		b.WriteByte('\\')
+	}
+	return "", "", false
+}
+
+func quotePowerShellLiteral(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
 func shouldReapAfterRun(ctx context.Context, sh sandbox.Shell, command string, preserveBackgroundProcesses bool) bool {
