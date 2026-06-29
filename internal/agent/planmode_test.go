@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"reasonix/internal/event"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"reasonix/internal/planmode"
@@ -623,6 +624,23 @@ func TestSideReadOnlyBlocksWritersWithSideMessage(t *testing.T) {
 	}
 	if !strings.Contains(wr.output, "side read-only mode") {
 		t.Fatalf("side block text should mention side read-only mode: %q", wr.output)
+	}
+}
+
+func TestSideReadOnlyBlocksUntrustedReadOnlyTool(t *testing.T) {
+	var calls int32
+	reg := tool.NewRegistry()
+	reg.Add(untrustedReadOnlyTool{fakeTool{name: "mcp__srv__query", readOnly: true, calls: &calls}})
+
+	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
+	a.SetSideReadOnly(true)
+
+	out := a.executeOne(context.Background(), provider.ToolCall{Name: "mcp__srv__query"})
+	if !strings.HasPrefix(out.output, "blocked:") {
+		t.Fatalf("untrusted read-only MCP tool should fail closed in side mode, got: %q", out.output)
+	}
+	if atomic.LoadInt32(&calls) != 0 {
+		t.Fatalf("untrusted read-only MCP tool executed in side mode")
 	}
 }
 

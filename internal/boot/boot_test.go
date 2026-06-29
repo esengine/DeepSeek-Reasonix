@@ -243,6 +243,81 @@ model = "x"
 	}
 }
 
+func TestBuildSideAgentDisablesPersistence(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+memory_compiler = { enabled = true }
+
+[[providers]]
+name = "test-model"
+kind = "boot-retrieval-tool-test"
+model = "x"
+`)
+	registerBootRetrievalToolTestProvider()
+	setBootRetrievalToolTestProvider(t, testutil.NewMock("boot-side-test",
+		testutil.Turn{Text: "side reply"},
+	))
+
+	mainEvents := make(chan event.Event, 8)
+	sideEvents := make(chan event.Event, 8)
+	ctrl, err := Build(context.Background(), Options{
+		WorkspaceRoot: dir,
+		Sink:          event.FuncSink(func(e event.Event) { mainEvents <- e }),
+		SideSink:      event.FuncSink(func(e event.Event) { sideEvents <- e }),
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	sess := agent.NewSession(systemMessage(ctrl.History()))
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "main context"})
+	ctrl.Resume(sess, "")
+	for len(mainEvents) > 0 {
+		<-mainEvents
+	}
+
+	if err := ctrl.StartSide("fix the side bug"); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+
+	deadline := time.After(500 * time.Millisecond)
+	var seen []event.Event
+	textSeen := false
+	for {
+		select {
+		case e := <-sideEvents:
+			seen = append(seen, e)
+			if e.Kind == event.Text && strings.Contains(e.Text, "side reply") {
+				textSeen = true
+			}
+			if e.Kind == event.TurnDone {
+				if e.Err != nil {
+					t.Fatalf("side turn failed: %v; seen=%+v", e.Err, seen)
+				}
+				if !textSeen {
+					t.Fatalf("side reply missing; seen=%+v", seen)
+				}
+				for _, ev := range seen {
+					if ev.Kind == event.MemoryCompilerStatsEvent {
+						t.Fatalf("side agent emitted memory compiler stats despite side persistence being disabled; seen=%+v", seen)
+					}
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for side turn; seen=%+v", seen)
+		}
+	}
+}
+
 func waitForEventKind(t *testing.T, ch <-chan event.Event, kind event.Kind) event.Event {
 	t.Helper()
 	deadline := time.After(500 * time.Millisecond)

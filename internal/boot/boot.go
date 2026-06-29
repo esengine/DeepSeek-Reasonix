@@ -971,6 +971,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		sideOpts := executorOpts
 		sideOpts.Hooks = nil
 		sideOpts.Jobs = nil
+		sideOpts.ArchiveDir = ""
+		sideOpts.MemoryCompiler = nil
+		sideOpts.UseMemoryCompilerLLMClassification = false
 		child := agent.New(execProv, reg, sess, sideOpts, sink)
 		return child, nil
 	}

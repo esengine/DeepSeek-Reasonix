@@ -1973,8 +1973,12 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 			errMsg:  "blocked by loop guard",
 		}
 	}
+	untrustedReadOnly := false
+	if u, ok := t.(tool.PlanModeUntrustedReadOnly); ok {
+		untrustedReadOnly = u.PlanModeUntrustedReadOnly()
+	}
 	if a.sideReadOnly.Load() {
-		if blocked, msg := a.sideReadOnlyBlocked(call.Name, t.ReadOnly(), json.RawMessage(call.Arguments)); blocked {
+		if blocked, msg := a.sideReadOnlyBlocked(call.Name, t.ReadOnly(), untrustedReadOnly, json.RawMessage(call.Arguments)); blocked {
 			return toolOutcome{
 				output:  msg,
 				blocked: true,
@@ -1995,13 +1999,9 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		}
 		// External tools (MCP) whose ReadOnly() is only a server-reported
 		// readOnlyHint are not trusted by plan mode's read-only fast path.
-		untrusted := false
-		if u, ok := t.(tool.PlanModeUntrustedReadOnly); ok {
-			untrusted = u.PlanModeUntrustedReadOnly()
-		}
-		if blocked, msg := a.planModeBlocked(call.Name, t.ReadOnly(), untrusted, safety, json.RawMessage(call.Arguments)); blocked {
+		if blocked, msg := a.planModeBlocked(call.Name, t.ReadOnly(), untrustedReadOnly, safety, json.RawMessage(call.Arguments)); blocked {
 			trustAllowed := false
-			if t.ReadOnly() && untrusted && safety != planmode.PlanSafetyUnsafe {
+			if t.ReadOnly() && untrustedReadOnly && safety != planmode.PlanSafetyUnsafe {
 				if allow, outcome, handled := a.checkPlanModeReadOnlyTrust(ctx, call, t); handled {
 					if !allow {
 						return outcome
@@ -2190,8 +2190,11 @@ func (a *Agent) planModeBlocked(toolName string, readOnly, untrusted bool, safet
 	return decision.Blocked, decision.Message
 }
 
-func (a *Agent) sideReadOnlyBlocked(toolName string, readOnly bool, args json.RawMessage) (blocked bool, message string) {
+func (a *Agent) sideReadOnlyBlocked(toolName string, readOnly, untrusted bool, args json.RawMessage) (blocked bool, message string) {
 	if readOnly {
+		if untrusted {
+			return true, fmt.Sprintf("blocked: %q reports read-only, but that flag is self-reported by an untrusted external source (e.g. an MCP server's readOnlyHint). Trust it as read-only from the main thread before using it in side mode.", toolName)
+		}
 		return false, ""
 	}
 	if toolName == "bash" {

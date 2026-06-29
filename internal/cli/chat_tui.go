@@ -968,6 +968,14 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.scheduleSideEventWait(&cmds)
 				return m, finalize(m, cmds)
 			}
+			if msg.String() == "esc" {
+				return m, finalize(m, cmds)
+			}
+			var ic tea.Cmd
+			m.input, ic = m.input.Update(msg)
+			cmds = append(cmds, ic)
+			m.growInputToFit()
+			return m, finalize(m, cmds)
 		}
 		// A question card is modal: keys drive it. In its free-text ("Type
 		// something") mode, the keystroke goes to the textarea — Enter confirms the

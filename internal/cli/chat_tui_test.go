@@ -399,6 +399,58 @@ func TestBtwSideInputIgnoresMainChooser(t *testing.T) {
 	}
 }
 
+func TestBtwEscDoesNotCancelHiddenMainTurn(t *testing.T) {
+	sideEvents := make(chan event.Event, 8)
+	started := make(chan string, 1)
+	r := &blockingTurnRunner{started: make(chan struct{})}
+	mainSess := agent.NewSession("sys")
+	mainSess.Add(provider.Message{Role: provider.RoleUser, Content: "main context"})
+	mainExec := agent.New(nil, tool.NewRegistry(), mainSess, agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{
+		Runner:   r,
+		Executor: mainExec,
+		SideSink: &eventSink{ch: sideEvents},
+		SideFactory: func(ctx context.Context, sess *agent.Session, sink event.Sink) (*agent.Agent, error) {
+			return agent.New(&cliSideTestProvider{started: started}, tool.NewRegistry(), sess, agent.Options{}, sink), nil
+		},
+	})
+	ctrl.Send("foreground main turn")
+	<-r.started
+	defer ctrl.Cancel()
+	if err := ctrl.StartSide(""); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+	m := newChatTUI(ctrl, "", make(chan event.Event, 8), 80, sideEvents)
+	m.state = tuiRunning
+	m.surface = tuiSurfaceSide
+	m.input.SetValue("side draft")
+
+	next, _ := m.update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = next.(chatTUI)
+	if ctrl.CancelRequested() {
+		t.Fatal("Esc on side surface should not cancel hidden main turn")
+	}
+	if got := m.input.Value(); got != "side draft" {
+		t.Fatalf("side draft = %q, want preserved", got)
+	}
+}
+
+func TestBtwSideTypingIgnoresHiddenMainApproval(t *testing.T) {
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{})
+	m.surface = tuiSurfaceSide
+	m.pendingApproval = &event.Approval{ID: "approval-1", Tool: "bash", Subject: "echo main"}
+
+	next, _ := m.update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	m = next.(chatTUI)
+	if m.pendingApproval == nil {
+		t.Fatal("hidden main approval consumed side key")
+	}
+	if got := m.input.Value(); got != "x" {
+		t.Fatalf("side composer = %q, want typed key", got)
+	}
+}
+
 func TestBtwCtrlCReturnsFromSide(t *testing.T) {
 	ctrl := newBtwTestController(t, event.Discard, nil)
 	if err := ctrl.StartSide(""); err != nil {
