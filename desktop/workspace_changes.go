@@ -14,6 +14,14 @@ import (
 	"reasonix/internal/proc"
 )
 
+const (
+	// waitForTabCtrlPollAttempts and waitForTabCtrlPollInterval define the
+	// spin-wait loop in waitForTabCtrl. Total timeout = attempts × interval
+	// (default 50 × 100ms = 5s).
+	waitForTabCtrlPollAttempts = 50
+	waitForTabCtrlPollInterval = 100 * time.Millisecond
+)
+
 type gitStatusEntry struct {
 	Path    string
 	OldPath string
@@ -150,7 +158,7 @@ func (a *App) workspaceChangesTarget(tabID string) (string, control.SessionAPI, 
 // controller or nil if the build failed (Ready==true but Ctrl==nil) or timed out.
 // The caller must not hold a.mu.
 func (a *App) waitForTabCtrl(tabID string) control.SessionAPI {
-	for i := 0; i < 50; i++ {
+	for i := 0; i < waitForTabCtrlPollAttempts; i++ {
 		a.mu.RLock()
 		tab := a.tabs[tabID]
 		if tab == nil {
@@ -166,7 +174,7 @@ func (a *App) waitForTabCtrl(tabID string) control.SessionAPI {
 		if ready {
 			return nil // build finished with error
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(waitForTabCtrlPollInterval)
 	}
 	return nil // timed out
 }

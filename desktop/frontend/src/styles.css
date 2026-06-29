@@ -7177,7 +7177,7 @@ body > .mermaid-diagram--fullscreen {
 
 /* ── workspace side panel ────────────────────────────────────────────────── */
 .workspace-panel {
-  --workspace-tree-width: 280px;
+  --workspace-tree-width: 300px;
   --workspace-tree-rail-width: 44px;
   --workspace-preview-min-width: 360px;
   position: relative;
@@ -7356,9 +7356,6 @@ body > .mermaid-diagram--fullscreen {
   border-color: var(--border-soft);
   background: var(--bg-soft);
   color: var(--fg);
-}
-.workspace-current-file__recent--open svg {
-  transform: rotate(180deg);
 }
 .workspace-preview__window-actions {
   flex: 0 0 auto;
@@ -8218,7 +8215,9 @@ button.workspace-change-scope__action {
   transition: opacity 0.1s ease;
   pointer-events: none;
 }
-.workspace-tree__row:hover .workspace-tree__hover-icon {
+.workspace-tree__row:hover .workspace-tree__hover-icon,
+.workspace-tree__row:focus-within .workspace-tree__hover-icon,
+.workspace-tree__row:focus-visible .workspace-tree__hover-icon {
   opacity: 1;
 }
 .workspace-git-history > .workspace-change-scope + .workspace-change-scope {

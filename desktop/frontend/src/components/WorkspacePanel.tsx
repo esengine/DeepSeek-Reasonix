@@ -11,6 +11,7 @@ import type {
 import {
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   FileText,
   Folder,
   FolderOpen,
@@ -278,8 +279,23 @@ export function WorkspacePanel({
       return next;
     });
   }, []);
+  const toggleTreeDir = useCallback((path: string) => {
+    setExpandedTreeDirs((prev) => {
+      const next = { ...prev, [path]: !(prev[path] ?? true) };
+      try {
+        localStorage.setItem("workspaceChangesTreeDirs", JSON.stringify(next));
+      } catch { /* noop */ }
+      return next;
+    });
+  }, []);
   const [changeView, setChangeView] = useState<"list" | "tree">("list");
-  const [expandedTreeDirs, setExpandedTreeDirs] = useState<Record<string, boolean>>({});
+  const [expandedTreeDirs, setExpandedTreeDirs] = useState<Record<string, boolean>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("workspaceChangesTreeDirs") ?? "{}");
+    } catch {
+      return {};
+    }
+  });
   const [recentOpen, setRecentOpen] = useState(false);
   const lastPreviewModeActiveRef = useRef<boolean | null>(null);
   const lastRevealRequestIdRef = useRef<number | null>(null);
@@ -729,6 +745,15 @@ export function WorkspacePanel({
     () => workspaceChanges?.files.filter((c) => c.sources.includes("session")) ?? null,
     [workspaceChanges],
   );
+  const gitStatusMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    if (workspaceChanges) {
+      for (const c of workspaceChanges.files) {
+        map[c.path] = c.gitStatus || "M";
+      }
+    }
+    return map;
+  }, [workspaceChanges]);
   const workspaceGitWarning = workspaceChanges && (!workspaceChanges.gitAvailable || workspaceChanges.gitErr?.trim())
     ? t("workspace.gitUnavailable")
     : null;
@@ -1220,7 +1245,7 @@ export function WorkspacePanel({
                 aria-expanded={recentOpen}
                 onClick={() => setRecentOpen((open) => !open)}
               >
-                <ChevronDown size={13} />
+                {recentOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
               </button>
             </Tooltip>
           </div>
@@ -1271,7 +1296,7 @@ export function WorkspacePanel({
           </AnchoredPopover>
         </header>
 
-        {selectedPath && <div className="workspace-preview__meta">
+        {selectedPath && !previewSubtitle && <div className="workspace-preview__meta">
           <Tooltip label={cwd}>
             <button
               className="workspace-crumb"
@@ -1455,10 +1480,6 @@ export function WorkspacePanel({
                             }
 
                             return (() => {
-                              const gitStatusMap: Record<string, string> = {};
-                              for (const c of sessionChanges) {
-                                gitStatusMap[c.path] = c.gitStatus || "M";
-                              }
                               return rows.map((row) => {
                                 const active = selectedPath === row.path;
                                 if (row.isDir) {
@@ -1469,7 +1490,7 @@ export function WorkspacePanel({
                                     className={`workspace-tree__row${active ? " workspace-tree__row--active" : ""}`}
                                     type="button"
                                     style={{ paddingLeft: 8 + row.depth * 14 }}
-                                    onClick={() => setExpandedTreeDirs((prev) => ({ ...prev, [row.path]: !(prev[row.path] ?? true) }))}
+                                    onClick={() => toggleTreeDir(row.path)}
                                   >
                                     <ChevronRight
                                       size={13}
@@ -1561,7 +1582,7 @@ export function WorkspacePanel({
                                   ))}
                                 </div>
                               ) : (
-                                <div className="workspace-empty">No details available</div>
+                                <div className="workspace-empty">{t("workspace.noDetails")}</div>
                               )}
                             </div>
                             </>
@@ -1622,7 +1643,7 @@ export function WorkspacePanel({
                           ) : commitDetail?.diff ? (
                             <CodeViewer value={cleanGitDiff(commitDetail.diff)} language="diff" />
                           ) : (
-                            <div className="workspace-empty">No details available</div>
+                            <div className="workspace-empty">{t("workspace.noDetails")}</div>
                           )}
                         </div>
                         </>
@@ -1721,6 +1742,7 @@ export function WorkspacePanel({
                   className={viewMode === "files" ? "workspace-files__tab workspace-files__tab--active" : "workspace-files__tab"}
                   onClick={() => setViewMode("files")}
                 >
+                  <FileText size={13} />
                   {t("workspace.filesTab")}
                 </button>
                 <button

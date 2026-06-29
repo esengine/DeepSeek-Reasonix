@@ -122,6 +122,7 @@ export const zhTW: Record<DictKey, string> = {
   "workspace.refreshTree": "重新整理檔案樹",
   "workspace.refreshChanges": "重新整理變更",
   "workspace.loadingChanges": "正在載入變更…",
+  "workspace.noDetails": "暫無詳細資訊",
   "workspace.noChanges": "暫無變更檔案",
   "workspace.gitUnavailable": "當前工作區不可讀取 Git 狀態。",
   "workspace.gitChangesUnknown": "無法確認目前變更檔案。",

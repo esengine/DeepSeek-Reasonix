@@ -192,6 +192,7 @@ export const zh: Record<DictKey, string> = {
   "workspace.refreshTree": "刷新文件树",
   "workspace.refreshChanges": "刷新改动",
   "workspace.loadingChanges": "正在加载改动…",
+  "workspace.noDetails": "暂无详细信息",
   "workspace.noChanges": "暂无改动文件",
   "workspace.gitUnavailable": "当前工作区不可读取 Git 状态。",
   "workspace.gitChangesUnknown": "无法确认当前改动文件。",

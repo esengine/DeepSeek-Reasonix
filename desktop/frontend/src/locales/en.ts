@@ -191,6 +191,7 @@ export const en = {
   "workspace.refreshTree": "Refresh file tree",
   "workspace.refreshChanges": "Refresh changes",
   "workspace.loadingChanges": "Loading changes…",
+  "workspace.noDetails": "No details available",
   "workspace.noChanges": "No changed files",
   "workspace.gitUnavailable": "Git status is unavailable for this workspace.",
   "workspace.gitChangesUnknown": "Changed files could not be determined.",
