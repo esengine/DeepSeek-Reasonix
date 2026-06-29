@@ -13070,7 +13070,7 @@ body > .mermaid-diagram--fullscreen {
 }
 .provider-model-draft__list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
   gap: 6px;
   max-height: 220px;
   overflow: auto;
@@ -13094,8 +13094,8 @@ body > .mermaid-diagram--fullscreen {
 .provider-model-draft__vision {
   min-width: 0;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: start;
   gap: 7px;
 }
 .provider-model-draft__vision {
@@ -13104,10 +13104,13 @@ body > .mermaid-diagram--fullscreen {
   font-size: var(--font-control-small);
 }
 .provider-model-draft__option input {
-  margin: 0;
+  width: 14px;
+  height: 14px;
+  margin: 1px 0 0;
 }
 .provider-model-draft__option span {
   min-width: 0;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 .provider-model-draft__empty {
