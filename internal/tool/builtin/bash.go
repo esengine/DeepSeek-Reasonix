@@ -113,7 +113,7 @@ func (b bash) resolved() sandbox.Shell {
 }
 
 func (bash) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"run_in_background":{"type":"boolean","description":"Run detached: returns a job id immediately and keeps running across turns (no foreground timeout). Read new output with bash_output, wait with wait, stop it with kill_shell. Use for long-running commands like servers, watchers, or builds you don't need to block on."},"preserve_background_processes":{"type":"boolean","description":"After the shell command exits normally, keep any process-group members it intentionally left behind. Use only for deliberate daemonization, such as nohup/disown/setsid; cancellation and timeouts still kill the process group."}},"required":["command"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"run_in_background":{"type":"boolean","description":"Run detached: returns a job id immediately and keeps running across turns (no foreground timeout). Read new output with bash_output, wait with wait, stop it with kill_shell. Use for long-running commands like servers, watchers, or builds you don't need to block on."},"preserve_background_processes":{"type":"boolean","description":"After the shell command exits normally, keep any process-group members it intentionally left behind. Use only for deliberate daemonization, such as nohup/disown/setsid or commands that launch persistent browser sessions like playwright-cli open; cancellation and timeouts still kill the process group."}},"required":["command"]}`)
 }
 
 // ReadOnly is false: bash's effect cannot be inferred from args (rm, curl,
@@ -168,10 +168,11 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 			cmd.Stdout = out
 			cmd.Stderr = out
 			tracked, runErr := runShellProcess(cmd, shouldTrackShellProcess(sh, p.Command, p.PreserveBackgroundProcesses))
-			if shouldReapAfterRun(jobCtx, sh, p.Command, p.PreserveBackgroundProcesses) {
+			reapAfterRun := shouldReapAfterRun(jobCtx, sh, p.Command, p.PreserveBackgroundProcesses)
+			if reapAfterRun {
 				reapShellProcess(cmd, tracked) // reap process-group stragglers the job left running (#3702)
 			}
-			return "", runErr
+			return "", normalizeBashRunError(jobCtx, runErr, !reapAfterRun)
 		})
 		return fmt.Sprintf("Started background job %q. It keeps running across turns; read new output with bash_output(job_id=%q), wait for it with wait, or stop it with kill_shell(job_id=%q).", job.ID, job.ID, job.ID), nil
 	}
@@ -200,7 +201,8 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 	// server) leaves it in the process group; Wait only reaped the shell leader.
 	// Kill the group so those don't accumulate into an OOM (#3702). On cancel/
 	// timeout the command's Cancel path already did this; this covers normal exit.
-	if shouldReapAfterRun(runCtx, sh, p.Command, p.PreserveBackgroundProcesses) {
+	reapAfterRun := shouldReapAfterRun(runCtx, sh, p.Command, p.PreserveBackgroundProcesses)
+	if reapAfterRun {
 		reapShellProcess(cmd, tracked)
 	}
 	out := buf.String()
@@ -208,6 +210,7 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 	if errors.Is(context.Cause(runCtx), errBashTimeout) {
 		return out, fmt.Errorf("command timed out (> %s)", timeout)
 	}
+	err = normalizeBashRunError(runCtx, err, !reapAfterRun)
 	if err != nil {
 		// Non-zero exit: feed output and error back so the model can self-correct.
 		return out, fmt.Errorf("command exited: %w", err)
@@ -243,6 +246,16 @@ func (b bash) foregroundTimeout() time.Duration {
 		return 0
 	}
 	return b.timeout
+}
+
+func normalizeBashRunError(ctx context.Context, err error, keepBackgroundProcesses bool) error {
+	if err == nil {
+		return nil
+	}
+	if keepBackgroundProcesses && ctx.Err() == nil && errors.Is(err, exec.ErrWaitDelay) {
+		return nil
+	}
+	return err
 }
 
 type trackedShellProcess struct {

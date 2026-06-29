@@ -2,6 +2,8 @@ package builtin
 
 import (
 	"context"
+	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +58,26 @@ func TestWorkspacePassesBashTimeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("error = %v, want timeout", err)
+	}
+}
+
+func TestNormalizeBashRunErrorPreservesWaitDelayOnlyForKeptBackgroundProcesses(t *testing.T) {
+	if got := normalizeBashRunError(context.Background(), exec.ErrWaitDelay, true); got != nil {
+		t.Fatalf("preserved ErrWaitDelay = %v, want nil", got)
+	}
+	if got := normalizeBashRunError(context.Background(), exec.ErrWaitDelay, false); !errors.Is(got, exec.ErrWaitDelay) {
+		t.Fatalf("non-preserved ErrWaitDelay = %v, want ErrWaitDelay", got)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := normalizeBashRunError(ctx, exec.ErrWaitDelay, true); !errors.Is(got, exec.ErrWaitDelay) {
+		t.Fatalf("cancelled preserved ErrWaitDelay = %v, want ErrWaitDelay", got)
+	}
+
+	errBoom := errors.New("boom")
+	if got := normalizeBashRunError(context.Background(), errBoom, true); !errors.Is(got, errBoom) {
+		t.Fatalf("other error = %v, want boom", got)
 	}
 }
 
