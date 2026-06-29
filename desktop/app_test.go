@@ -143,6 +143,26 @@ func TestNeedsOnboardingTreatsBlankSavedKeyAsMissing(t *testing.T) {
 	}
 }
 
+func TestNeedsOnboardingSkipsWhenCustomProviderKeyStored(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	// No DEEPSEEK_API_KEY stored — simulate a user who only has a custom provider.
+	setDesktopTestCredential(t, "OPENAI_API_KEY", "sk-custom")
+
+	app := NewApp()
+	if app.NeedsOnboarding() {
+		t.Fatal("NeedsOnboarding should return false when any credential (e.g. custom provider) is stored")
+	}
+}
+
+func TestNeedsOnboardingRequiresKeyWhenCredentialsFileMissing(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	// No credentials file at all — onboarding should still be required.
+	app := NewApp()
+	if !app.NeedsOnboarding() {
+		t.Fatal("NeedsOnboarding should require a key when no credentials file exists")
+	}
+}
+
 func providerNamesFromView(providers []ProviderView) []string {
 	out := make([]string, 0, len(providers))
 	for _, p := range providers {

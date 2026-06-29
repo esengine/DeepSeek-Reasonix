@@ -278,6 +278,18 @@ func CredentialStored(key string) bool {
 	return envFileHasValue(UserCredentialsPath(), key)
 }
 
+// AnyCredentialStored reports whether Reasonix's global credentials file
+// contains at least one non-empty credential. The desktop onboarding gate
+// uses this to avoid re-prompting users who already have a custom provider
+// (or any other provider) configured — not just the default DeepSeek key.
+func AnyCredentialStored() bool {
+	path := UserCredentialsPath()
+	if path == "" {
+		return false
+	}
+	return envFileHasAnyValue(path)
+}
+
 func credentialCurrentStoreHasKey(key string) bool {
 	key = strings.TrimSpace(key)
 	if key == "" {

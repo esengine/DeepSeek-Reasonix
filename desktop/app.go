@@ -7223,7 +7223,12 @@ func (a *App) ConfirmAction(req NativeConfirmRequest) (bool, error) {
 }
 
 func (a *App) NeedsOnboarding() bool {
-	return !config.CredentialStored(onboardingKeyEnv)
+	if config.CredentialStored(onboardingKeyEnv) {
+		return false
+	}
+	// If the user has configured any custom provider (or any other credential
+	// stored in Reasonix's global .env), skip the first-run DeepSeek gate.
+	return !config.AnyCredentialStored()
 }
 
 // ConnectKey validates apiKey against the balance endpoint, persists it to
