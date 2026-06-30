@@ -1717,15 +1717,25 @@ export default function App() {
     };
   }, []);
 
-  // Run the ambient engine only while the agent is generating.
+  // Stable boolean: true while ANY tab is generating foreground content.
+  // state.running covers the active tab (optimistic frontend state);
+  // tabMetas[].cancellable covers background tabs (foreground-only; excludes
+  // background-only jobs which keep t.running=true but have no generation).
+  // useMemo prevents the effect from re-firing on every 2s tabMeta refresh
+  // (which would cause stop→start glitches every 2 seconds).
+  const anyTabRunning = useMemo(
+    () => state.running || tabMetas.some((t) => t.cancellable),
+    [state.running, tabMetas],
+  );
+
   useEffect(() => {
-    if (state.running && isGenerativeMusicEnabled()) {
+    if (anyTabRunning && isGenerativeMusicEnabled()) {
       generativeMusic.start();
     } else {
       generativeMusic.stop();
     }
     return () => generativeMusic.stop();
-  }, [state.running]);
+  }, [anyTabRunning]);
 
   // playTokenNote no-ops unless the engine is running, so subscribe unconditionally.
   useEffect(() => {
@@ -3506,7 +3516,7 @@ export default function App() {
           <SettingsPanel
             initialTab={settingsTarget}
             initialFocus={settingsFocus ?? undefined}
-            agentRunning={state.running}
+            agentRunning={anyTabRunning}
             onClose={() => {
               setSettingsFocus(null);
               setSettingsTarget(null);

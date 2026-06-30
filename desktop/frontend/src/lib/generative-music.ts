@@ -114,6 +114,11 @@ class GenerativeMusicEngine {
 
     try {
       this.ctx = new AudioContext();
+      // If the browser suspends the context (autoplay policy), resume it.
+      // This can happen when the engine restarts outside a user-gesture path.
+      if (this.ctx.state === "suspended") {
+        void this.ctx.resume().catch((e) => console.warn("generative-music: resume failed", e));
+      }
       this.buildSignalChain();
     } catch (e) {
       console.warn("generative-music: failed to create AudioContext", e);
