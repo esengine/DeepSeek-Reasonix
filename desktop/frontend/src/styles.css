@@ -3574,7 +3574,7 @@ a[href] {
   position: absolute;
   right: 2px;
   top: 50%;
-  z-index: var(--z-dropdown);
+  z-index: var(--z-popover);
   display: flex;
   flex-direction: column;
   width: 320px;

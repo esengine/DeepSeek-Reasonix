@@ -55,15 +55,13 @@ export function ChatHistorySidebar({ questions, onJump }: ChatHistorySidebarProp
       }
     };
 
-    let rafId: number;
-    const poll = () => { sync(); rafId = requestAnimationFrame(poll); };
-
     sync();
     transcript.addEventListener("scroll", sync, { passive: true });
-    rafId = requestAnimationFrame(poll);
+    const ro = new ResizeObserver(() => sync());
+    ro.observe(transcript);
     return () => {
       transcript.removeEventListener("scroll", sync);
-      cancelAnimationFrame(rafId);
+      ro.disconnect();
     };
   }, []);
 
@@ -151,7 +149,8 @@ export function ChatHistorySidebar({ questions, onJump }: ChatHistorySidebarProp
             type="button"
             data-turn={q.turn}
             aria-label={t("questionNav.jump", { n: q.turn + 1 })}
-            tabIndex={-1}
+            tabIndex={0}
+            onClick={() => { scrollTo(q); setPanelOpen(true); pauseSyncRef.current = true; }}
           >
             <span className="ch-dot" data-active={active === q.turn ? "true" : undefined} />
           </button>
