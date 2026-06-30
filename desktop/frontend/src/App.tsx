@@ -2041,6 +2041,11 @@ export default function App() {
 
   const handleTabClose = useCallback(async (id: string) => {
     closeTransientOverlays();
+    // Clear any pending optimistic rewind for the closing tab.
+    if (rewindStateRef.current?.tabId === id) {
+      setRewindState(null);
+      rewindStateRef.current = null;
+    }
     setComposerProfilesByTab((current) => {
       if (!(id in current)) return current;
       const next = { ...current };
@@ -2065,6 +2070,11 @@ export default function App() {
 
   const handleTabsClose = useCallback(async (ids: string[], nextActiveTabId?: string) => {
     closeTransientOverlays();
+    // Clear any pending optimistic rewind if the originating tab is among those being closed.
+    if (rewindStateRef.current && ids.includes(rewindStateRef.current.tabId)) {
+      setRewindState(null);
+      rewindStateRef.current = null;
+    }
     const currentIds = tabMetas.map((tab) => tab.id);
     const targets = ids.filter((id, index) => currentIds.includes(id) && ids.indexOf(id) === index);
     if (targets.length === 0) return;
@@ -2102,10 +2112,11 @@ export default function App() {
   type RewindState = {
     turn: number;
     scope: string;
-    fullItems: Item[];     // pre-truncation items (for undo)
-    boundaryIdx: number;   // first item index of the rewound-to turn
-    turnDiff: number;      // turns rolled back
-    prompt: string;        // user message text for composer fill
+    tabId: string;           // the tab that initiated the optimistic rewind
+    fullItems: Item[];       // pre-truncation items (for undo)
+    boundaryIdx: number;     // first item index of the rewound-to turn
+    turnDiff: number;        // turns rolled back
+    prompt: string;          // user message text for composer fill
   };
   const [rewindState, setRewindState] = useState<RewindState | null>(null);
   const [rewindCommitting, setRewindCommitting] = useState(false);
@@ -2120,18 +2131,18 @@ export default function App() {
   const transcriptHydrating = state.hydrating && !state.hydrateHistoryLoaded;
   const transcriptItems = hydratePlaceholderActive ? state.hydratePlaceholderItems! : state.items;
 
-  // Display items: truncated when an optimistic rewind is pending.
+  // Display items: truncated when an optimistic rewind is pending for the current tab.
   const displayItems = useMemo(() => {
-    if (!rewindState) return transcriptItems;
+    if (!rewindState || rewindState.tabId !== activeTabId) return transcriptItems;
     return transcriptItems.slice(0, rewindState.boundaryIdx).filter((it) => it.kind !== "compaction");
-  }, [transcriptItems, rewindState]);
+  }, [transcriptItems, rewindState, activeTabId]);
 
   // send wrapper: commits any pending optimistic rewind before sending.
   const commitThenSend = useCallback(async (displayText: string, submitText?: string) => {
     if (activeTab?.readOnly) throw new Error("channel session is read-only");
     if (!controllerReady) throw new Error("workspace is still starting");
     const rs = rewindStateRef.current;
-    if (rs) {
+    if (rs && rs.tabId === activeTabId) {
       rewindStateRef.current = null;
       setRewindState(null);
       setRewindCommitting(true);
@@ -2155,7 +2166,7 @@ export default function App() {
       }
     }
     await send(displayText, submitText);
-  }, [activeTab?.readOnly, controllerReady, send, rewind]);
+  }, [activeTab?.readOnly, activeTabId, controllerReady, send, rewind]);
 
   const handleTranscriptPrompt = useCallback((text: string) => {
     if (!controllerReady) return;
@@ -2234,9 +2245,11 @@ export default function App() {
     // Save full items for undo.
     const userItem = items[boundaryIdx]?.kind === "user" ? items[boundaryIdx] as Extract<Item, { kind: "user" }> : undefined;
     const prompt = userItem?.text ?? "";
+    if (!activeTabId) return;
     setRewindState({
       turn,
       scope,
+      tabId: activeTabId,
       fullItems: items,
       boundaryIdx,
       turnDiff,
@@ -2252,7 +2265,7 @@ export default function App() {
 
   const handleEditPrompt = useCallback(async (turn: number, displayText: string, submitText?: string): Promise<boolean> => {
     const sourceTabId = activeTabId;
-    if (!sourceTabId || activeTab?.readOnly || !controllerReady || hydratePlaceholderActive || rewindStateRef.current || state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending) return false;
+    if (!sourceTabId || activeTab?.readOnly || !controllerReady || hydratePlaceholderActive || (rewindStateRef.current && rewindStateRef.current.tabId === activeTabId) || state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending) return false;
     const next = displayText.trim();
     if (!next) return false;
     const submit = (submitText ?? displayText).trim();
@@ -3281,7 +3294,7 @@ export default function App() {
           {!sidebarImDetailConnection && (
           <footer className="footer" ref={footerRef}>
             {showTodos && <TodoPanel todos={todos} onDismiss={() => setDismissedTodo(todoKey)} />}
-            {rewindState && (
+            {rewindState && rewindState.tabId === activeTabId && (
               <UndoRewindBanner
                 meta={{
                   turns: rewindState.turnDiff,
