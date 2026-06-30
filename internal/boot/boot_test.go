@@ -606,6 +606,31 @@ func firstTokenProfileRequest(t *testing.T, tokenMode string) provider.Request {
 	return reqs[0]
 }
 
+func captureTokenProfileSurface(t *testing.T, tokenMode string) (provider.Request, []tool.ContractEntry) {
+	t.Helper()
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("token-profile", testutil.Turn{Text: "done"})
+	setBootTokenProfileTestProvider(t, prov)
+
+	opts := Options{Sink: event.Discard}
+	if tokenMode != "" {
+		opts.TokenMode = tokenMode
+	}
+	ctrl, err := Build(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Build(%q): %v", tokenMode, err)
+	}
+	defer ctrl.Close()
+	if err := ctrl.Run(context.Background(), "capture contract"); err != nil {
+		t.Fatalf("Run(%q): %v", tokenMode, err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("requests(%q) = %d, want 1", tokenMode, len(reqs))
+	}
+	return reqs[0], ctrl.ToolContractEntries()
+}
+
 func TestBuildSubagentSkillFailedContinuationPersistsTranscript(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)
@@ -1285,6 +1310,306 @@ model = "x"
 	}
 	if requestHasTool(fullReq, "connect_tool_source") {
 		t.Fatalf("full mode should not expose economy connector; tools=%v", toolSchemaNames(fullReq.Tools))
+	}
+}
+
+func TestBuildInjectsEnvironmentBlockByDefaultAndEconomy(t *testing.T) {
+	for _, tokenMode := range []string{"", TokenModeEconomy} {
+		t.Run(firstNonEmpty(tokenMode, "default"), func(t *testing.T) {
+			isolateConfigHome(t)
+			dir := robustTempDir(t)
+			t.Chdir(dir)
+			writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+
+			req, _ := captureTokenProfileSurface(t, tokenMode)
+			sys := systemMessage(req.Messages)
+			if !strings.Contains(sys, "## Environment") {
+				t.Fatalf("environment block missing in tokenMode=%q:\n%s", tokenMode, sys)
+			}
+			if !strings.Contains(sys, "- OS:") || !strings.Contains(sys, "Detected tools:") {
+				t.Fatalf("environment block missing stable fields in tokenMode=%q:\n%s", tokenMode, sys)
+			}
+		})
+	}
+}
+
+func TestBuildSkipsEnvironmentBlockWhenDisabled(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[environment]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+
+	req, _ := captureTokenProfileSurface(t, "")
+	if sys := systemMessage(req.Messages); strings.Contains(sys, "## Environment") {
+		t.Fatalf("environment block should be disabled:\n%s", sys)
+	}
+}
+
+func TestBuildDoesNotExecuteWorkspaceEnvironmentOverride(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	toolPath := filepath.Join(dir, "go")
+	ranPath := filepath.Join(dir, "ran")
+	body := "#!/bin/sh\ntouch " + shellQuoteForTest(ranPath) + "\nprintf 'bad\\n'\n"
+	if runtime.GOOS == "windows" {
+		toolPath += ".bat"
+		body = "@echo bad>\"" + ranPath + "\"\r\n@echo bad\r\n"
+	}
+	if err := os.WriteFile(toolPath, []byte(body), 0o755); err != nil {
+		t.Fatalf("write fake tool: %v", err)
+	}
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[environment.tools]
+go = "./go"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+
+	req, _ := captureTokenProfileSurface(t, "")
+	if _, err := os.Stat(ranPath); !os.IsNotExist(err) {
+		t.Fatalf("workspace environment override was executed; stat err=%v", err)
+	}
+	if sys := systemMessage(req.Messages); !strings.Contains(sys, "- go: not trusted") {
+		t.Fatalf("environment block should mark workspace override untrusted:\n%s", sys)
+	}
+}
+
+func TestBootToolContractMatchesProviderVisibleSurface(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		tokenMode string
+	}{
+		{name: "default", tokenMode: ""},
+		{name: "economy", tokenMode: TokenModeEconomy},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateConfigHome(t)
+			dir := robustTempDir(t)
+			t.Chdir(dir)
+			writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+
+			req, entries := captureTokenProfileSurface(t, tc.tokenMode)
+			wantNames := defaultFullBootToolNames()
+			if tc.tokenMode == TokenModeEconomy {
+				wantNames = economyBootToolNames()
+			}
+			if got := toolSchemaNames(req.Tools); !reflect.DeepEqual(got, wantNames) {
+				t.Fatalf("%s provider-visible tool surface changed\ngot  %v\nwant %v", tc.name, got, wantNames)
+			}
+			if len(entries) != len(req.Tools) {
+				t.Fatalf("contract entries = %d, provider tools = %d\ncontract=%v\nprovider=%v", len(entries), len(req.Tools), contractEntryNames(entries), toolSchemaNames(req.Tools))
+			}
+			for i, e := range entries {
+				s := req.Tools[i]
+				if e.Name != s.Name {
+					t.Fatalf("tool[%d] name = %q, want %q\ncontract=%v\nprovider=%v", i, e.Name, s.Name, contractEntryNames(entries), toolSchemaNames(req.Tools))
+				}
+				if e.Description != strings.TrimSpace(s.Description) {
+					t.Fatalf("%s description drift\ncontract=%q\nprovider=%q", e.Name, e.Description, s.Description)
+				}
+				if !json.Valid(e.Schema) {
+					t.Fatalf("%s contract schema is invalid JSON: %s", e.Name, e.Schema)
+				}
+				if got := string(provider.CanonicalizeSchema(e.Schema)); got != string(e.Schema) {
+					t.Fatalf("%s contract schema is not canonical", e.Name)
+				}
+				if string(e.Schema) != string(s.Parameters) {
+					t.Fatalf("%s schema drift\ncontract=%s\nprovider=%s", e.Name, e.Schema, s.Parameters)
+				}
+			}
+			readOnly := map[string]bool{}
+			for _, e := range entries {
+				readOnly[e.Name] = e.ReadOnly
+			}
+			for name, want := range map[string]bool{
+				"bash":                false,
+				"read_file":           true,
+				"memory":              true,
+				"remember":            false,
+				"connect_tool_source": tc.tokenMode == TokenModeEconomy,
+			} {
+				got, ok := readOnly[name]
+				if !ok {
+					if name == "connect_tool_source" && tc.tokenMode != TokenModeEconomy {
+						continue
+					}
+					t.Fatalf("contract missing %s; tools=%v", name, contractEntryNames(entries))
+				}
+				if got != want {
+					t.Fatalf("%s ReadOnly = %v, want %v", name, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestToolContractDocCoversDefaultBootSurfaces(t *testing.T) {
+	pkgDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+
+	fullReq, _ := captureTokenProfileSurface(t, TokenModeFull)
+	economyReq, _ := captureTokenProfileSurface(t, TokenModeEconomy)
+	doc, err := os.ReadFile(filepath.Join(pkgDir, "..", "..", "docs", "TOOL_CONTRACT.md"))
+	if err != nil {
+		t.Fatalf("read tool contract doc: %v", err)
+	}
+	text := string(doc)
+	for _, heading := range []string{"## Default Full Boot Surface", "## Token Economy Boot Surface"} {
+		if !strings.Contains(text, heading) {
+			t.Fatalf("tool contract doc missing %q", heading)
+		}
+	}
+	var missing []string
+	for _, name := range append(toolSchemaNames(fullReq.Tools), toolSchemaNames(economyReq.Tools)...) {
+		if !strings.Contains(text, "`"+name+"`") {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		t.Fatalf("tool contract doc missing boot-surface tools: %v", missing)
+	}
+}
+
+func contractEntryNames(entries []tool.ContractEntry) []string {
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name)
+	}
+	return names
+}
+
+func defaultFullBootToolNames() []string {
+	return []string{
+		"ask",
+		"bash",
+		"bash_output",
+		"code_index",
+		"complete_step",
+		"delete_range",
+		"delete_symbol",
+		"edit_file",
+		"explore",
+		"forget",
+		"glob",
+		"grep",
+		"history",
+		"install_skill",
+		"install_source",
+		"kill_shell",
+		"list_sessions",
+		"ls",
+		"lsp_definition",
+		"lsp_diagnostics",
+		"lsp_hover",
+		"lsp_references",
+		"memory",
+		"move_file",
+		"multi_edit",
+		"notebook_edit",
+		"parallel_tasks",
+		"read_file",
+		"read_only_skill",
+		"read_only_task",
+		"read_session",
+		"read_skill",
+		"remember",
+		"research",
+		"review",
+		"run_skill",
+		"security_review",
+		"slash_command",
+		"task",
+		"todo_write",
+		"wait",
+		"web_fetch",
+		"write_file",
+	}
+}
+
+func economyBootToolNames() []string {
+	return []string{
+		"ask",
+		"bash",
+		"bash_output",
+		"code_index",
+		"complete_step",
+		"connect_tool_source",
+		"edit_file",
+		"forget",
+		"glob",
+		"grep",
+		"history",
+		"kill_shell",
+		"list_sessions",
+		"ls",
+		"memory",
+		"move_file",
+		"multi_edit",
+		"read_file",
+		"read_session",
+		"remember",
+		"slash_command",
+		"todo_write",
+		"wait",
+		"write_file",
 	}
 }
 
@@ -2174,6 +2499,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	// is purely about whether project/ancestor memory leaked into the base. The
 	// user-decision policy is another fixed boot policy and is stripped for the
 	// same reason.
+	base = stripEnvironmentBlock(base)
 	base = stripLanguagePolicy(base)
 	if base != "JUST THE BASE" {
 		t.Fatalf("expected untouched base prompt, got:\n%s", sys)
@@ -2264,11 +2590,22 @@ func stripLanguagePolicy(s string) string {
 	return s
 }
 
+func stripEnvironmentBlock(s string) string {
+	if i := strings.Index(s, "\n\n## Environment"); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
 func writeFile(t *testing.T, dir, name, body string) {
 	t.Helper()
 	if err := writeFileRaw(dir, name, body); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func shellQuoteForTest(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 func TestRememberPermissionRuleUsesWorkspaceRoot(t *testing.T) {

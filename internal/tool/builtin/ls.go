@@ -35,6 +35,12 @@ func (listDir) Schema() json.RawMessage {
 
 func (listDir) ReadOnly() bool { return true }
 
+// SnipHint keeps a long head and short tail like grep/glob: the first entries
+// matter most, the tail confirms scope.
+func (listDir) SnipHint() tool.SnipHint {
+	return tool.SnipHint{Head: 80, Tail: 8, HeadChars: 10000, TailChars: 1000}
+}
+
 func (l listDir) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	p := struct {
 		Path      string `json:"path"`

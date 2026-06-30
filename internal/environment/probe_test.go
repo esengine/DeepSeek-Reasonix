@@ -1,0 +1,246 @@
+package environment
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestFormatSectionSortsAndRedacts(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("home: %v", err)
+	}
+	section := FormatSection([]ProbeResult{
+		{Binary: "python3", Found: true, Output: "Python 3.12.0"},
+		{Binary: "go", Found: true, Output: "go version go1.24 darwin/arm64"},
+		{Binary: "docker", Error: "not found"},
+	}, "darwin/arm64", filepath.Join(home, "bin", "bash"), map[string]string{
+		"python3": filepath.Join(home, ".pyenv", "shims", "python3"),
+		"go":      "/opt/homebrew/bin/go",
+	})
+
+	for _, want := range []string{
+		"## Environment",
+		"- OS: darwin/arm64",
+		"- Shell: ~/bin/bash",
+		"Configured tools:\n- go: /opt/homebrew/bin/go\n- python3: ~/.pyenv/shims/python3",
+		"Detected tools:\n- go: go version go1.24 darwin/arm64\n- python3: Python 3.12.0",
+		"Not found or unavailable:\n- docker: not found",
+	} {
+		if !strings.Contains(section, want) {
+			t.Fatalf("section missing %q:\n%s", want, section)
+		}
+	}
+}
+
+func TestRunProbesReportsMissingCommand(t *testing.T) {
+	results := RunProbes(context.Background(), []string{"__reasonix_missing_probe__ --version"})
+	if len(results) != 1 {
+		t.Fatalf("results len = %d, want 1", len(results))
+	}
+	if results[0].Found {
+		t.Fatalf("missing command marked found: %+v", results[0])
+	}
+	if results[0].Error != "not found" {
+		t.Fatalf("Error = %q, want not found", results[0].Error)
+	}
+}
+
+func TestRunProbesUsesOverridePathAndFirstLine(t *testing.T) {
+	dir := t.TempDir()
+	toolPath := filepath.Join(dir, "mytool")
+	toolPath = writeProbeTool(t, toolPath, "custom version\nignored")
+
+	results := RunProbesWithOverrides(context.Background(), []string{"mytool --version"}, map[string]string{"mytool": toolPath})
+	if len(results) != 1 {
+		t.Fatalf("results len = %d, want 1", len(results))
+	}
+	if !results[0].Found {
+		t.Fatalf("override command not found: %+v", results[0])
+	}
+	if results[0].Output != "custom version" {
+		t.Fatalf("Output = %q, want first line", results[0].Output)
+	}
+}
+
+func TestRunProbesRejectsDeniedOverridePath(t *testing.T) {
+	resetProbeCacheForTest(t, time.Unix(50, 0))
+	dir := t.TempDir()
+	toolPath := filepath.Join(dir, "deniedtool")
+	toolPath = writeProbeTool(t, toolPath, "should not run")
+
+	results := RunProbesWithOptions(context.Background(), []string{"deniedtool --version"}, ProbeOptions{
+		Overrides: map[string]string{"deniedtool": toolPath},
+		DenyRoots: []string{dir},
+	})
+	if len(results) != 1 {
+		t.Fatalf("results len = %d, want 1", len(results))
+	}
+	if results[0].Found || results[0].Error != "not trusted" {
+		t.Fatalf("denied override result = %+v, want not trusted", results[0])
+	}
+}
+
+func TestRunProbesRejectsDeniedPathHit(t *testing.T) {
+	resetProbeCacheForTest(t, time.Unix(75, 0))
+	dir := t.TempDir()
+	writeProbeTool(t, filepath.Join(dir, "pathtool"), "should not run")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	results := RunProbesWithOptions(context.Background(), []string{"pathtool --version"}, ProbeOptions{
+		DenyRoots: []string{dir},
+	})
+	if len(results) != 1 {
+		t.Fatalf("results len = %d, want 1", len(results))
+	}
+	if results[0].Found || results[0].Error != "not trusted" {
+		t.Fatalf("denied PATH result = %+v, want not trusted", results[0])
+	}
+}
+
+func TestRunProbesReportsTimeout(t *testing.T) {
+	dir := t.TempDir()
+	toolPath := filepath.Join(dir, "slowtool")
+	body := "#!/bin/sh\nsleep 3\n"
+	if runtime.GOOS == "windows" {
+		toolPath += ".bat"
+		body = "@ping 127.0.0.1 -n 4 > nul\r\n"
+	}
+	if err := os.WriteFile(toolPath, []byte(body), 0o755); err != nil {
+		t.Fatalf("write tool: %v", err)
+	}
+
+	results := RunProbesWithOverrides(context.Background(), []string{"slowtool --version"}, map[string]string{"slowtool": toolPath})
+	if len(results) != 1 {
+		t.Fatalf("results len = %d, want 1", len(results))
+	}
+	if results[0].Found {
+		t.Fatalf("timeout command marked found: %+v", results[0])
+	}
+	if results[0].Error != "timeout" {
+		t.Fatalf("Error = %q, want timeout", results[0].Error)
+	}
+}
+
+func TestRunProbesCachesByFingerprint(t *testing.T) {
+	resetProbeCacheForTest(t, time.Unix(100, 0))
+	dir := t.TempDir()
+	toolPath := filepath.Join(dir, "cachedtool")
+	toolPath = writeProbeTool(t, toolPath, "version one")
+
+	results := RunProbesWithOverrides(context.Background(), []string{"cachedtool --version"}, map[string]string{"cachedtool": toolPath})
+	if got := results[0].Output; got != "version one" {
+		t.Fatalf("first Output = %q, want version one", got)
+	}
+	results[0].Output = "mutated"
+	toolPath = writeProbeTool(t, toolPath, "version two")
+
+	results = RunProbesWithOverrides(context.Background(), []string{"cachedtool --version"}, map[string]string{"cachedtool": toolPath})
+	if got := results[0].Output; got != "version one" {
+		t.Fatalf("cached Output = %q, want version one", got)
+	}
+}
+
+func TestRunProbesCacheExpires(t *testing.T) {
+	now := time.Unix(200, 0)
+	resetProbeCacheForTest(t, now)
+	dir := t.TempDir()
+	toolPath := filepath.Join(dir, "expiringtool")
+	toolPath = writeProbeTool(t, toolPath, "version one")
+
+	results := RunProbesWithOverrides(context.Background(), []string{"expiringtool --version"}, map[string]string{"expiringtool": toolPath})
+	if got := results[0].Output; got != "version one" {
+		t.Fatalf("first Output = %q, want version one", got)
+	}
+	toolPath = writeProbeTool(t, toolPath, "version two")
+	setProbeNowForTest(now.Add(probeCacheTTL + time.Second))
+
+	results = RunProbesWithOverrides(context.Background(), []string{"expiringtool --version"}, map[string]string{"expiringtool": toolPath})
+	if got := results[0].Output; got != "version two" {
+		t.Fatalf("expired Output = %q, want version two", got)
+	}
+}
+
+func TestRunProbesCacheSeparatesOverrides(t *testing.T) {
+	resetProbeCacheForTest(t, time.Unix(300, 0))
+	dir := t.TempDir()
+	toolOne := filepath.Join(dir, "override-one")
+	toolTwo := filepath.Join(dir, "override-two")
+	toolOne = writeProbeTool(t, toolOne, "version one")
+	toolTwo = writeProbeTool(t, toolTwo, "version two")
+
+	results := RunProbesWithOverrides(context.Background(), []string{"overridetool --version"}, map[string]string{"overridetool": toolOne})
+	if got := results[0].Output; got != "version one" {
+		t.Fatalf("first override Output = %q, want version one", got)
+	}
+	results = RunProbesWithOverrides(context.Background(), []string{"overridetool --version"}, map[string]string{"overridetool": toolTwo})
+	if got := results[0].Output; got != "version two" {
+		t.Fatalf("second override Output = %q, want version two", got)
+	}
+}
+
+func TestFormatSectionLimitsToolOutput(t *testing.T) {
+	overrides := map[string]string{}
+	var results []ProbeResult
+	for i := 0; i < maxRenderedTools+2; i++ {
+		name := fmt.Sprintf("tool%02d", i)
+		overrides[name] = "/bin/" + name
+		results = append(results, ProbeResult{Binary: name, Found: true, Output: "ok"})
+		results = append(results, ProbeResult{Binary: "missing" + name, Error: "not found"})
+	}
+
+	section := FormatSection(results, "test/os", "", overrides)
+	for _, want := range []string{
+		"- ... 2 more configured tools omitted",
+		"- ... 2 more detected tools omitted",
+		"- ... 2 more unavailable tools omitted",
+	} {
+		if !strings.Contains(section, want) {
+			t.Fatalf("section missing %q:\n%s", want, section)
+		}
+	}
+}
+
+func writeProbeTool(t *testing.T, path, output string) string {
+	t.Helper()
+	body := "#!/bin/sh\nprintf '%s\\n'\n"
+	body = fmt.Sprintf(body, strings.ReplaceAll(output, "'", "'\\''"))
+	if runtime.GOOS == "windows" {
+		if !strings.HasSuffix(path, ".bat") {
+			path += ".bat"
+		}
+		body = "@echo " + strings.ReplaceAll(output, "\n", "\r\n@echo ") + "\r\n"
+	}
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write tool: %v", err)
+	}
+	return path
+}
+
+func resetProbeCacheForTest(t *testing.T, now time.Time) {
+	t.Helper()
+	setProbeNowForTest(now)
+	probeCacheMu.Lock()
+	probeCache = map[string]probeCacheEntry{}
+	probeInflightCalls = map[string]*probeInflight{}
+	probeCacheMu.Unlock()
+	t.Cleanup(func() {
+		probeCacheMu.Lock()
+		probeCache = map[string]probeCacheEntry{}
+		probeInflightCalls = map[string]*probeInflight{}
+		probeNow = time.Now
+		probeCacheMu.Unlock()
+	})
+}
+
+func setProbeNowForTest(now time.Time) {
+	probeCacheMu.Lock()
+	probeNow = func() time.Time { return now }
+	probeCacheMu.Unlock()
+}

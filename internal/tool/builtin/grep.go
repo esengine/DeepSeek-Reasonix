@@ -90,6 +90,12 @@ func (grepTool) Schema() json.RawMessage {
 
 func (grepTool) ReadOnly() bool { return true }
 
+// SnipHint keeps a long head of matches and a short tail: the first matches are
+// the ones the model usually acts on, the tail just confirms scope.
+func (grepTool) SnipHint() tool.SnipHint {
+	return tool.SnipHint{Head: 80, Tail: 8, HeadChars: 10000, TailChars: 1000}
+}
+
 func (g grepTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		Pattern        string `json:"pattern"`

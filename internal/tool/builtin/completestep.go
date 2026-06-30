@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"reasonix/internal/evidence"
@@ -51,6 +52,7 @@ func (completeStep) Schema() json.RawMessage {
 "type":"object",
 "properties":{
   "step":{"type":"string","description":"Which plan step this completes — its title or number, matching the task list."},
+  "step_index":{"type":"integer","minimum":1,"description":"Optional 1-based task-list item number. Prefer this when the step title is long or easy to mistype."},
   "result":{"type":"string","description":"What is now true or changed as a result of finishing this step."},
   "evidence":{
     "type":"array",
@@ -69,7 +71,7 @@ func (completeStep) Schema() json.RawMessage {
   },
   "notes":{"type":"string","description":"Optional caveats, follow-ups, or anything deferred."}
 },
-"required":["step","result","evidence"]
+"required":["result","evidence"]
 }`)
 }
 
@@ -85,16 +87,21 @@ func (completeStep) PlanModeSafe() bool { return false }
 
 func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
-		Step     string         `json:"step"`
-		Result   string         `json:"result"`
-		Evidence []stepEvidence `json:"evidence"`
-		Notes    string         `json:"notes"`
+		Step      string         `json:"step"`
+		StepIndex int            `json:"step_index"`
+		Result    string         `json:"result"`
+		Evidence  []stepEvidence `json:"evidence"`
+		Notes     string         `json:"notes"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
-	if strings.TrimSpace(p.Step) == "" {
-		return "", fmt.Errorf("step is required — name the plan step you are completing")
+	step := completeStepIdentity(p.Step, p.StepIndex)
+	if step == "" {
+		return "", fmt.Errorf("step or step_index is required — name the plan step you are completing, or cite its 1-based task-list number")
+	}
+	if p.StepIndex < 0 {
+		return "", fmt.Errorf("step_index must be a positive 1-based task-list number")
 	}
 	if strings.TrimSpace(p.Result) == "" {
 		return "", fmt.Errorf("result is required — state what is now true after finishing this step")
@@ -117,7 +124,7 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 	if err != nil {
 		return "", err
 	}
-	todoMatch, hasTodo, err := verifyTodoStep(ctx, p.Step)
+	todoMatch, hasTodo, err := verifyTodoStep(ctx, step)
 	if err != nil {
 		return "", err
 	}
@@ -131,14 +138,21 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 	}
 	todoStatus := ""
 	if hasTodo {
-		todoStatus = fmt.Sprintf(" Todo step: todo-matched %d.", todoMatch.Index)
+		todoStatus = fmt.Sprintf(" Todo step: todo-matched %d (%q).", todoMatch.Index, todoMatch.Content)
 	}
 	projectStatus := ""
 	if projectVerified > 0 {
 		projectStatus = fmt.Sprintf(" Project checks: project checks %d.", projectVerified)
 	}
 	return fmt.Sprintf("Step %q signed off with %d evidence item(s) [%s].%s The host advanced the task list; continue with the next step.",
-		p.Step, len(p.Evidence), strings.Join(kinds, ", "), hostStatus+todoStatus+projectStatus), nil
+		step, len(p.Evidence), strings.Join(kinds, ", "), hostStatus+todoStatus+projectStatus), nil
+}
+
+func completeStepIdentity(step string, stepIndex int) string {
+	if stepIndex > 0 {
+		return strconv.Itoa(stepIndex)
+	}
+	return strings.TrimSpace(step)
 }
 
 func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified int, manualUnverified int, err error) {

@@ -121,6 +121,13 @@ func (bash) Schema() json.RawMessage {
 // command happens to be read-only — the agent batch decision can't tell.
 func (bash) ReadOnly() bool { return false }
 
+// SnipHint keeps both ends of command output equally: a build/test run's
+// failure usually sits at the tail while the command and early context sit at
+// the head, so neither end can be favored.
+func (bash) SnipHint() tool.SnipHint {
+	return tool.SnipHint{Head: 40, Tail: 40, HeadChars: 8000, TailChars: 8000}
+}
+
 func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		Command                     string `json:"command"`

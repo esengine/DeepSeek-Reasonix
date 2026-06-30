@@ -96,6 +96,31 @@ type MCPMetadata interface {
 	MCPRawToolName() string
 }
 
+// SnipHint describes how context maintenance should shorten a stale, oversized
+// result this tool produced. Head/Tail are the line counts kept from each end
+// when the result has many lines; HeadChars/TailChars bound the kept runes when
+// the result is one giant line. A zero value is invalid — implementers return
+// positive counts. The geometry lives on the tool, not in a lookup table keyed
+// by name, so renaming a tool carries its snip policy with it and a new tool
+// cannot silently fall back to a generic default unnoticed (the contract test
+// forces every registered tool to either implement SnipHinter or opt into the
+// read-only/side-effecting default explicitly).
+type SnipHint struct {
+	Head      int
+	Tail      int
+	HeadChars int
+	TailChars int
+}
+
+// SnipHinter is an optional capability a Tool implements when its output has a
+// known shape that a generic head/tail split would garble — e.g. read_file
+// front-loads the most relevant lines, while bash output is equally meaningful
+// at both ends. Type-assert a Tool to discover support; tools that omit it take
+// the ReadOnly-tiered default in the maintainer.
+type SnipHinter interface {
+	SnipHint() SnipHint
+}
+
 // --- process-global built-in set (populated by builtin subpackage init) ---
 
 var builtins = map[string]Tool{}

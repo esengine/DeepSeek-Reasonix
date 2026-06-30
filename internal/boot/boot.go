@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"reasonix/internal/command"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/environment"
 	"reasonix/internal/event"
 	"reasonix/internal/guardian"
 	"reasonix/internal/history"
@@ -219,6 +221,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if err != nil {
 		return nil, err
 	}
+	shell := sandbox.ResolveShell(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, stderr)
 
 	sysPrompt, err := cfg.ResolveSystemPromptForRoot(root)
 	if err != nil {
@@ -234,6 +237,24 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	sysPrompt += "\n\n" + config.LanguagePolicy
 	if tokenEconomy {
 		sysPrompt += "\n\n" + tokenEconomyPrompt
+	}
+	if cfg.EnvironmentEnabled() {
+		shellLabel := shell.Kind.String()
+		if strings.TrimSpace(cfg.Tools.Shell.Path) != "" {
+			shellLabel = shell.Path
+		}
+		envSection := environment.FormatSection(
+			environment.RunProbesWithOptions(ctx, environment.DefaultProbes(), environment.ProbeOptions{
+				Overrides: cfg.Environment.Tools,
+				DenyRoots: []string{root},
+			}),
+			runtime.GOOS+"/"+runtime.GOARCH,
+			shellLabel,
+			cfg.Environment.Tools,
+		)
+		if envSection != "" {
+			sysPrompt += "\n\n" + envSection
+		}
 	}
 
 	// Persistent memory (REASONIX.md / AGENTS.md hierarchy + auto-memory index)
@@ -266,7 +287,6 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 
 	reg := tool.NewRegistry()
 	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: cfg.WriteRootsForRoot(root), ForbidReadRoots: cfg.ForbidReadRootsForRoot(root), Network: cfg.Sandbox.Network}
-	shell := sandbox.ResolveShell(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, stderr)
 	bashSpec.Shell = shell
 	if bashSpec.Mode == "enforce" && !sandbox.Available() {
 		fmt.Fprintln(stderr, "warning: bash sandbox requested but unavailable on this platform; running bash unconfined")
@@ -556,7 +576,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	var taskTool *agent.TaskTool
 	newTaskTool := func() *agent.TaskTool {
 		return agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
-			entry.ContextWindow, cfg.Agent.RecentKeep, cfg.Agent.SoftCompactRatio, cfg.Agent.CompactRatio, cfg.Agent.CompactForceRatio,
+			entry.ContextWindow, cfg.Agent.RecentKeep, cfg.Agent.SoftCompactRatio, cfg.Agent.ToolResultSnipRatio, cfg.Agent.CompactRatio, cfg.Agent.CompactForceRatio,
 			cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate,
 			keepPolicy,
 			taskModel, taskEffort, resolveSubagentProvider).
@@ -645,19 +665,20 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 		sysPrompt := agent.DefaultReadOnlyTaskSystemPrompt + "\n\nSkill instructions:\n" + sk.Body
 		return agent.RunSubAgentWithSession(sctx, prov, subReg, agent.NewSession(sysPrompt), task, agent.Options{
-			MaxSteps:          steps,
-			Temperature:       cfg.Agent.Temperature,
-			Pricing:           price,
-			UsageSource:       event.UsageSourceSubagent,
-			Gate:              headlessGate,
-			ContextWindow:     ctxWin,
-			RecentKeep:        cfg.Agent.RecentKeep,
-			SoftCompactRatio:  cfg.Agent.SoftCompactRatio,
-			CompactRatio:      cfg.Agent.CompactRatio,
-			CompactForceRatio: cfg.Agent.CompactForceRatio,
-			ArchiveDir:        config.ArchiveDir(),
-			KeepPolicy:        keepPolicy,
-			ReasoningLanguage: agent.ReasoningLanguageFromContext(sctx),
+			MaxSteps:            steps,
+			Temperature:         cfg.Agent.Temperature,
+			Pricing:             price,
+			UsageSource:         event.UsageSourceSubagent,
+			Gate:                headlessGate,
+			ContextWindow:       ctxWin,
+			RecentKeep:          cfg.Agent.RecentKeep,
+			SoftCompactRatio:    cfg.Agent.SoftCompactRatio,
+			ToolResultSnipRatio: cfg.Agent.ToolResultSnipRatio,
+			CompactRatio:        cfg.Agent.CompactRatio,
+			CompactForceRatio:   cfg.Agent.CompactForceRatio,
+			ArchiveDir:          config.ArchiveDir(),
+			KeepPolicy:          keepPolicy,
+			ReasoningLanguage:   agent.ReasoningLanguageFromContext(sctx),
 		}, agent.NestedSink(sctx, event.Discard))
 	}
 	// Writer-capable subagent skills reuse the sub-agent machinery via this
@@ -956,6 +977,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		ProjectChecks:                      projectChecks,
 		ContextWindow:                      entry.ContextWindow,
 		SoftCompactRatio:                   cfg.Agent.SoftCompactRatio,
+		ToolResultSnipRatio:                cfg.Agent.ToolResultSnipRatio,
 		CompactRatio:                       cfg.Agent.CompactRatio,
 		CompactForceRatio:                  cfg.Agent.CompactForceRatio,
 		RecentKeep:                         cfg.Agent.RecentKeep,
@@ -1012,17 +1034,18 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			plannerSess := agent.NewSession(agent.PlannerPromptWithContext(mem.Block()))
 			plannerTools := agent.PlannerToolRegistry(reg)
 			runner = agent.NewCoordinator(plannerProv, plannerSess, pe.Price, plannerTools, agent.Options{
-				MaxSteps:          cfg.Agent.PlannerMaxSteps,
-				MaxStepsKey:       "agent.planner_max_steps",
-				Gate:              headlessGate,
-				ContextWindow:     pe.ContextWindow,
-				SoftCompactRatio:  cfg.Agent.SoftCompactRatio,
-				CompactRatio:      cfg.Agent.CompactRatio,
-				CompactForceRatio: cfg.Agent.CompactForceRatio,
-				RecentKeep:        cfg.Agent.RecentKeep,
-				ArchiveDir:        config.ArchiveDir(),
-				KeepPolicy:        keepPolicy,
-				ReasoningLanguage: cfg.ReasoningLanguage(),
+				MaxSteps:            cfg.Agent.PlannerMaxSteps,
+				MaxStepsKey:         "agent.planner_max_steps",
+				Gate:                headlessGate,
+				ContextWindow:       pe.ContextWindow,
+				SoftCompactRatio:    cfg.Agent.SoftCompactRatio,
+				ToolResultSnipRatio: cfg.Agent.ToolResultSnipRatio,
+				CompactRatio:        cfg.Agent.CompactRatio,
+				CompactForceRatio:   cfg.Agent.CompactForceRatio,
+				RecentKeep:          cfg.Agent.RecentKeep,
+				ArchiveDir:          config.ArchiveDir(),
+				KeepPolicy:          keepPolicy,
+				ReasoningLanguage:   cfg.ReasoningLanguage(),
 			}, executor, cfg.Agent.Temperature, sink, control.NewPlannerGate(classifier))
 			label = entry.Model + " + planner " + pe.Model
 		}

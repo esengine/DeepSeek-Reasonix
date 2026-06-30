@@ -60,6 +60,9 @@
   two models together (executor + planner) in separate, cache-stable sessions.
 - **Plugin-driven.** External tools run as subprocesses over stdio JSON-RPC
   (MCP-compatible). Built-in tools self-register at compile time.
+- **Cache-aware context maintenance.** Startup injects a small stable environment
+  summary, stale tool output is snipped/pruned before summary compaction, and the
+  built-in tool schema contract is documented for regression review.
 - **Zero-friction distribution.** `CGO_ENABLED=0` single binary; cross-compile
   to six targets with one command. The only dependency is a TOML parser.
 
@@ -134,6 +137,8 @@ commands, `@` references, and two-model setup are all in the
   from the desktop app, then use approvals, YOLO, and commands from IM.
 - **[Spec](./docs/SPEC.md)** — engineering contract: architecture, registries,
   data types, and roadmap.
+- **[Tool contract](./docs/TOOL_CONTRACT.md)** — provider-visible built-in tool
+  names, read-only flags, and schema snapshot guard.
 - **[Migrating from 0.x](./docs/MIGRATING.md)** — moving from the legacy
   TypeScript releases to the 1.0 Go rewrite.
 - **[Checkpoints & rewind](./docs/CHECKPOINTS.md)** — the snapshot-based edit

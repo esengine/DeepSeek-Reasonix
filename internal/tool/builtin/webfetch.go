@@ -49,6 +49,12 @@ func (webFetch) Schema() json.RawMessage {
 
 func (webFetch) ReadOnly() bool { return true }
 
+// SnipHint front-loads fetched page content like a file read: keep a generous
+// head and a short tail.
+func (webFetch) SnipHint() tool.SnipHint {
+	return tool.SnipHint{Head: 120, Tail: 12, HeadChars: 12000, TailChars: 2000}
+}
+
 // ssrfGuardedTransport refuses to connect to private, link-local, or unspecified
 // addresses — the SSRF surface a prompt-injected fetch would aim at (cloud
 // metadata at 169.254.169.254, RFC1918 internal services). Loopback is allowed:

@@ -162,6 +162,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		}
 		b.WriteString("\n")
 	}
+	if shouldRenderEnvironment(c, defaults, scope) {
+		renderEnvironmentConfig(&b, c.Environment)
+	}
 
 	b.WriteString("[agent]\n")
 	if shouldRenderSystemPrompt(c, defaults, scope) {
@@ -211,6 +214,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		b.WriteString("# auto_plan_classifier = \"deepseek-flash\"   # optional; only used for borderline tasks\n")
 	}
 	fmt.Fprintf(&b, "soft_compact_ratio  = %s   # notice only; keeps cache-first prefix intact\n", formatFloat(c.Agent.SoftCompactRatio))
+	fmt.Fprintf(&b, "tool_result_snip_ratio = %s   # snip stale tool results at this fraction before summary compaction\n", formatFloat(c.Agent.ToolResultSnipRatio))
 	fmt.Fprintf(&b, "compact_ratio       = %s   # try compacting when prompt reaches this fraction\n", formatFloat(c.Agent.CompactRatio))
 	fmt.Fprintf(&b, "compact_force_ratio = %s   # force compacting at this high-water mark\n", formatFloat(c.Agent.CompactForceRatio))
 	if c.Agent.Keep != nil {
@@ -672,6 +676,10 @@ func RenderTOMLProjectDelta(c *Config) string {
 		fmt.Fprintf(&agentBuf, "soft_compact_ratio = %s\n", formatFloat(c.Agent.SoftCompactRatio))
 		anyAgent = true
 	}
+	if c.Agent.ToolResultSnipRatio != d.Agent.ToolResultSnipRatio {
+		fmt.Fprintf(&agentBuf, "tool_result_snip_ratio = %s\n", formatFloat(c.Agent.ToolResultSnipRatio))
+		anyAgent = true
+	}
 	if c.Agent.CompactRatio != d.Agent.CompactRatio {
 		fmt.Fprintf(&agentBuf, "compact_ratio = %s\n", formatFloat(c.Agent.CompactRatio))
 		anyAgent = true
@@ -995,6 +1003,37 @@ func shouldRenderNetwork(c, defaults *Config, scope RenderScope) bool {
 		return true
 	}
 	return !reflect.DeepEqual(c.Network, defaults.Network)
+}
+
+func shouldRenderEnvironment(c, defaults *Config, scope RenderScope) bool {
+	if scope != RenderScopeProject {
+		return true
+	}
+	return !reflect.DeepEqual(c.Environment, defaults.Environment)
+}
+
+func renderEnvironmentConfig(b *strings.Builder, cfg EnvironmentConfig) {
+	b.WriteString("[environment]\n")
+	enabled := true
+	if cfg.Enabled != nil {
+		enabled = *cfg.Enabled
+	}
+	fmt.Fprintf(b, "enabled = %v   # inject a stable startup environment summary into the model prompt\n", enabled)
+	if len(cfg.Tools) == 0 {
+		b.WriteString("# [environment.tools]\n")
+		b.WriteString("# go = \"/opt/homebrew/bin/go\"   # trusted executable path; workspace-local paths are not auto-executed\n\n")
+		return
+	}
+	b.WriteString("\n[environment.tools]\n")
+	names := make([]string, 0, len(cfg.Tools))
+	for name := range cfg.Tools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		fmt.Fprintf(b, "%s = %q\n", renderTOMLKeyPart(name), cfg.Tools[name])
+	}
+	b.WriteString("\n")
 }
 
 func shouldRenderProviders(c, defaults *Config, scope RenderScope) bool {

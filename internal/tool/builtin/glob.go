@@ -36,6 +36,12 @@ func (globTool) Schema() json.RawMessage {
 
 func (globTool) ReadOnly() bool { return true }
 
+// SnipHint keeps a long head and short tail like grep: the first paths matter
+// most, the tail confirms how many more there were.
+func (globTool) SnipHint() tool.SnipHint {
+	return tool.SnipHint{Head: 80, Tail: 8, HeadChars: 10000, TailChars: 1000}
+}
+
 const globMaxResults = 1000
 
 func (g globTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {

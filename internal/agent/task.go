@@ -155,28 +155,29 @@ func (readOnlyBash) ReadOnly() bool { return true }
 // parallel research across independent areas (the parallel-dispatch path picks
 // these up only when readOnly, which task is not).
 type TaskTool struct {
-	prov              provider.Provider
-	pricing           *provider.Pricing
-	parentReg         *tool.Registry
-	maxSteps          int
-	contextWindow     int
-	softCompactRatio  float64
-	compactRatio      float64
-	compactForceRatio float64
-	recentKeep        int
-	temperature       float64
-	archiveDir        string
-	keepPolicy        KeepPolicy
-	sysPrompt         string
-	gate              Gate
-	subagentModel     string
-	subagentEffort    string
-	resolveProvider   func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error)
-	transcripts       *SubagentStore
-	workspaceRoot     string
-	baseModel         string
-	baseEffort        string
-	identityProfile   func(modelRef, effort string) (string, string)
+	prov                provider.Provider
+	pricing             *provider.Pricing
+	parentReg           *tool.Registry
+	maxSteps            int
+	contextWindow       int
+	softCompactRatio    float64
+	toolResultSnipRatio float64
+	compactRatio        float64
+	compactForceRatio   float64
+	recentKeep          int
+	temperature         float64
+	archiveDir          string
+	keepPolicy          KeepPolicy
+	sysPrompt           string
+	gate                Gate
+	subagentModel       string
+	subagentEffort      string
+	resolveProvider     func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error)
+	transcripts         *SubagentStore
+	workspaceRoot       string
+	baseModel           string
+	baseEffort          string
+	identityProfile     func(modelRef, effort string) (string, string)
 }
 
 // NewTaskTool wires a task tool to the parent agent's environment so its
@@ -186,29 +187,30 @@ type TaskTool struct {
 // deny rules still bite while autonomous sub-agents are never blocked on an
 // interactive prompt (there is no UI to answer one).
 func NewTaskTool(prov provider.Provider, pricing *provider.Pricing, parentReg *tool.Registry,
-	maxSteps, contextWindow, recentKeep int, softCompactRatio, compactRatio, compactForceRatio, temperature float64, archiveDir, sysPrompt string, gate Gate,
+	maxSteps, contextWindow, recentKeep int, softCompactRatio, toolResultSnipRatio, compactRatio, compactForceRatio, temperature float64, archiveDir, sysPrompt string, gate Gate,
 	keepPolicy KeepPolicy, subagentModel, subagentEffort string, resolveProvider func(string, string) (provider.Provider, *provider.Pricing, int, error)) *TaskTool {
 	if sysPrompt == "" {
 		sysPrompt = DefaultTaskSystemPrompt
 	}
 	return &TaskTool{
-		prov:              prov,
-		pricing:           pricing,
-		parentReg:         parentReg,
-		maxSteps:          maxSteps,
-		contextWindow:     contextWindow,
-		recentKeep:        recentKeep,
-		softCompactRatio:  softCompactRatio,
-		compactRatio:      compactRatio,
-		compactForceRatio: compactForceRatio,
-		temperature:       temperature,
-		archiveDir:        archiveDir,
-		keepPolicy:        keepPolicy,
-		sysPrompt:         sysPrompt,
-		gate:              gate,
-		subagentModel:     subagentModel,
-		subagentEffort:    subagentEffort,
-		resolveProvider:   resolveProvider,
+		prov:                prov,
+		pricing:             pricing,
+		parentReg:           parentReg,
+		maxSteps:            maxSteps,
+		contextWindow:       contextWindow,
+		recentKeep:          recentKeep,
+		softCompactRatio:    softCompactRatio,
+		toolResultSnipRatio: toolResultSnipRatio,
+		compactRatio:        compactRatio,
+		compactForceRatio:   compactForceRatio,
+		temperature:         temperature,
+		archiveDir:          archiveDir,
+		keepPolicy:          keepPolicy,
+		sysPrompt:           sysPrompt,
+		gate:                gate,
+		subagentModel:       subagentModel,
+		subagentEffort:      subagentEffort,
+		resolveProvider:     resolveProvider,
 	}
 }
 
@@ -679,20 +681,21 @@ func (t *TaskTool) resolveSubSessionRuntime(modelRef, effort string) (provider.P
 
 func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session) (string, error) {
 	return RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, Options{
-		MaxSteps:          maxSteps,
-		Temperature:       t.temperature,
-		Pricing:           pricing,
-		UsageSource:       event.UsageSourceSubagent,
-		Gate:              t.gate,
-		ContextWindow:     ctxWin,
-		RecentKeep:        t.recentKeep,
-		SoftCompactRatio:  t.softCompactRatio,
-		CompactRatio:      t.compactRatio,
-		CompactForceRatio: t.compactForceRatio,
-		ArchiveDir:        t.archiveDir,
-		KeepPolicy:        t.keepPolicy,
-		ResponseLanguage:  ResponseLanguageFromContext(ctx),
-		ReasoningLanguage: ReasoningLanguageFromContext(ctx),
+		MaxSteps:            maxSteps,
+		Temperature:         t.temperature,
+		Pricing:             pricing,
+		UsageSource:         event.UsageSourceSubagent,
+		Gate:                t.gate,
+		ContextWindow:       ctxWin,
+		RecentKeep:          t.recentKeep,
+		SoftCompactRatio:    t.softCompactRatio,
+		ToolResultSnipRatio: t.toolResultSnipRatio,
+		CompactRatio:        t.compactRatio,
+		CompactForceRatio:   t.compactForceRatio,
+		ArchiveDir:          t.archiveDir,
+		KeepPolicy:          t.keepPolicy,
+		ResponseLanguage:    ResponseLanguageFromContext(ctx),
+		ReasoningLanguage:   ReasoningLanguageFromContext(ctx),
 	}, sink)
 }
 

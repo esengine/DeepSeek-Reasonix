@@ -63,6 +63,7 @@ reasoning_language = "auto"      # visible reasoning text: auto|zh|en
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
 auto_plan = "off"                  # user-level only; off|on; off keeps plan mode manual
 # auto_plan_classifier = "deepseek-flash"   # optional; only borderline tasks call it
+tool_result_snip_ratio = 0.6       # shorten stale tool output before summary compaction
 
 [[providers]]
 name        = "deepseek-flash"
@@ -76,6 +77,11 @@ api_key_env = "DEEPSEEK_API_KEY"
 enabled = []   # omit/empty = all built-ins
 bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
 mcp_call_timeout_seconds = 300   # default MCP call safety cap; per-plugin/tool overrides may raise it
+
+[environment]
+enabled = true   # inject a stable startup summary of OS, shell, and common tools
+# [environment.tools]
+# go = "/opt/homebrew/bin/go"   # optional explicit trusted path; workspace-local paths are not auto-executed
 
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots

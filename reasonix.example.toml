@@ -38,6 +38,7 @@ memory_compiler = { enabled = true }   # user-level only; Memory v5 execution co
 # reasoning_language = "auto"   # visible reasoning text: auto|zh|en
 # auto_plan_classifier = "deepseek-flash"   # optional; only used for borderline tasks
 soft_compact_ratio  = 0.5   # notice only; keeps the cache-first prefix intact
+tool_result_snip_ratio = 0.6   # snip stale tool results before summary compaction
 compact_ratio       = 0.8   # try compacting when prompt reaches this fraction
 compact_force_ratio = 0.9   # force compacting at this high-water mark
 # planner_model = "deepseek-pro"   # optional: enable two-model collaboration
@@ -99,6 +100,11 @@ price          = { cache_hit = 0.5, input = 5, output = 25, currency = "$" }   #
 # across tool calls). Omit to disable. effort: low | medium | high | xhigh | max.
 thinking       = "adaptive"
 effort         = "high"
+
+[environment]
+enabled = true   # inject a stable startup summary of OS, shell, and common tools into the prompt
+# [environment.tools]
+# go = "/opt/homebrew/bin/go"   # optional trusted executable path; workspace-local paths are not auto-executed
 
 [tools]
 enabled = []   # empty = all built-in tools

@@ -55,6 +55,7 @@ reasoning_language = "auto"      # 可见思考过程语言：auto|zh|en
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
 auto_plan = "off"                  # 仅用户级生效；off|on；off 表示计划模式仅手动开启
 # auto_plan_classifier = "deepseek-flash"   # 可选；只在边界任务上调用
+tool_result_snip_ratio = 0.6       # 在摘要 compaction 前先缩短旧工具输出
 
 [[providers]]
 name        = "deepseek-flash"
@@ -68,6 +69,11 @@ api_key_env = "DEEPSEEK_API_KEY"
 enabled = []   # 省略/为空 = 全部内置工具
 bash_timeout_seconds = 120   # 前台安全上限；设为 0 表示不设工具层超时
 mcp_call_timeout_seconds = 300   # MCP 调用默认安全上限；可用 plugin/tool 覆盖
+
+[environment]
+enabled = true   # 启动时把 OS、shell 和常见工具摘要稳定注入 prompt
+# [environment.tools]
+# go = "/opt/homebrew/bin/go"   # 可选：显式可信路径；workspace 内路径不会在启动时自动执行
 
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # 额外的自定义技能目录

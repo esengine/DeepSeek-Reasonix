@@ -322,6 +322,7 @@ type Agent struct {
 	// notice so it fires once per approach, not every turn.
 	contextWindow       int
 	softCompactRatio    float64
+	toolResultSnipRatio float64
 	compactRatio        float64
 	compactForceRatio   float64
 	softCompactNoticed  bool
@@ -688,13 +689,14 @@ type Options struct {
 
 	// Context management. ContextWindow <= 0 disables compaction. Ratios and
 	// RecentKeep fall back to defaults when unset.
-	ContextWindow     int
-	SoftCompactRatio  float64
-	CompactRatio      float64
-	CompactForceRatio float64
-	RecentKeep        int
-	ArchiveDir        string
-	KeepPolicy        KeepPolicy
+	ContextWindow       int
+	SoftCompactRatio    float64
+	ToolResultSnipRatio float64
+	CompactRatio        float64
+	CompactForceRatio   float64
+	RecentKeep          int
+	ArchiveDir          string
+	KeepPolicy          KeepPolicy
 
 	// Hooks fires PreToolUse / PostToolUse shell hooks around tool calls. nil
 	// disables hook firing.
@@ -735,8 +737,14 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	if opts.SoftCompactRatio <= 0 {
 		opts.SoftCompactRatio = defaultSoftCompactRatio
 	}
+	if opts.ToolResultSnipRatio <= 0 {
+		opts.ToolResultSnipRatio = defaultToolResultSnipRatio
+	}
 	if opts.CompactRatio <= 0 {
 		opts.CompactRatio = defaultCompactRatio
+	}
+	if opts.ToolResultSnipRatio >= opts.CompactRatio {
+		opts.ToolResultSnipRatio = opts.CompactRatio
 	}
 	if opts.CompactForceRatio <= 0 {
 		opts.CompactForceRatio = defaultCompactForceRatio
@@ -781,6 +789,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		projectChecks:         append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
 		contextWindow:         opts.ContextWindow,
 		softCompactRatio:      opts.SoftCompactRatio,
+		toolResultSnipRatio:   opts.ToolResultSnipRatio,
 		compactRatio:          opts.CompactRatio,
 		compactForceRatio:     opts.CompactForceRatio,
 		recentKeep:            opts.RecentKeep,

@@ -290,6 +290,33 @@ func TestCompleteStepMatchesTodoReceipt(t *testing.T) {
 	}
 }
 
+func TestCompleteStepMatchesTodoByExplicitStepIndex(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []evidence.TodoItem{
+			{Content: "Add parser", Status: "completed"},
+			{Content: "Wire parser", Status: "in_progress"},
+		},
+	})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	out, err := completeStep{}.Execute(ctx, json.RawMessage(`{
+		"step_index":2,
+		"result":"parser wiring is complete",
+		"evidence":[{"kind":"manual","summary":"checked manually"}]}`))
+	if err != nil {
+		t.Fatalf("todo-backed step_index rejected: %v", err)
+	}
+	if !strings.Contains(out, "todo-matched 2") {
+		t.Fatalf("ack should mention todo index match, got %q", out)
+	}
+	if !strings.Contains(out, "Wire parser") {
+		t.Fatalf("ack should name the indexed todo, got %q", out)
+	}
+}
+
 func TestCompleteStepRejectsTodoMismatch(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{

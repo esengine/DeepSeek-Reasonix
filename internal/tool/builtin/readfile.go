@@ -60,6 +60,12 @@ func (readFile) Schema() json.RawMessage {
 
 func (readFile) ReadOnly() bool { return true }
 
+// SnipHint front-loads file content: the most relevant lines are near the top,
+// so keep a generous head and a short tail when an old read is shortened.
+func (readFile) SnipHint() tool.SnipHint {
+	return tool.SnipHint{Head: 120, Tail: 12, HeadChars: 12000, TailChars: 2000}
+}
+
 func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		Path   string `json:"path"`

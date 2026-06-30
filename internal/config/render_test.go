@@ -152,6 +152,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Agent.PlannerMaxSteps = 0
 	orig.Agent.AutoPlanClassifier = "deepseek-flash"
 	orig.Agent.ReasoningLanguage = "zh"
+	orig.Agent.ToolResultSnipRatio = 0.65
 	orig.Agent.SubagentModel = "mimo-pro"
 	orig.Agent.SubagentModels = map[string]string{"review": "deepseek-pro"}
 	orig.Agent.Keep = []string{"errors", "user_marked"}
@@ -176,6 +177,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 			Password: "${REASONIX_PROXY_PASSWORD}",
 		},
 	}
+	orig.Environment.Enabled = boolPtr(false)
+	orig.Environment.Tools = map[string]string{"go": "/opt/homebrew/bin/go", "python3": "~/.pyenv/shims/python3"}
 	orig.Skills.Paths = []string{"~/my-skills", "../shared/skills"}
 	orig.Skills.ExcludedPaths = []string{"~/.agents/skills"}
 	orig.Skills.DisabledSkills = []string{"review", "explore"}
@@ -311,6 +314,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Agent.SoftCompactRatio != orig.Agent.SoftCompactRatio {
 		t.Errorf("soft_compact_ratio = %v, want %v", got.Agent.SoftCompactRatio, orig.Agent.SoftCompactRatio)
 	}
+	if got.Agent.ToolResultSnipRatio != orig.Agent.ToolResultSnipRatio {
+		t.Errorf("tool_result_snip_ratio = %v, want %v", got.Agent.ToolResultSnipRatio, orig.Agent.ToolResultSnipRatio)
+	}
 	if got.Agent.CompactRatio != orig.Agent.CompactRatio {
 		t.Errorf("compact_ratio = %v, want %v", got.Agent.CompactRatio, orig.Agent.CompactRatio)
 	}
@@ -328,6 +334,12 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if !got.LSP.Enabled {
 		t.Error("lsp.enabled = false, want true")
+	}
+	if got.Environment.Enabled == nil || *got.Environment.Enabled {
+		t.Errorf("environment.enabled = %+v, want false", got.Environment.Enabled)
+	}
+	if !reflect.DeepEqual(got.Environment.Tools, orig.Environment.Tools) {
+		t.Errorf("environment.tools = %v, want %v", got.Environment.Tools, orig.Environment.Tools)
 	}
 	lua := got.LSP.Servers["lua"]
 	if lua.Command != "lua-language-server" || lua.LanguageID != "lua" || lua.InstallHint != "install lua-language-server" {

@@ -408,6 +408,20 @@ func (c *Controller) recordDisplay(content, display string) {
 	}
 }
 
+// ToolContractEntries returns a stable snapshot of the executor's live tool
+// contract: provider-visible names, descriptions, canonical schemas, and
+// read-only flags. It is intended for diagnostics and regression tests.
+func (c *Controller) ToolContractEntries() []tool.ContractEntry {
+	if c == nil {
+		return nil
+	}
+	reg := c.mcp.registry()
+	if reg == nil {
+		return nil
+	}
+	return reg.ContractEntries()
+}
+
 func (c *Controller) recordDisplayForNewUser(startMessages int, display string) {
 	if strings.TrimSpace(display) == "" {
 		return

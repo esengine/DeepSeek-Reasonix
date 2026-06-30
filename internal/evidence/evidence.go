@@ -620,7 +620,7 @@ func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, re
 			r.Command = stringField(fields, "command")
 		}
 		if toolName == "complete_step" {
-			r.Step = stringField(fields, "step")
+			r.Step = completeStepIdentity(fields)
 			r.StepProof = completeStepHasProof(fields)
 		}
 		if toolName == "todo_write" {
@@ -687,6 +687,25 @@ func stringField(fields map[string]json.RawMessage, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(s)
+}
+
+func completeStepIdentity(fields map[string]json.RawMessage) string {
+	if n, ok := intField(fields, "step_index"); ok && n > 0 {
+		return strconv.Itoa(n)
+	}
+	return stringField(fields, "step")
+}
+
+func intField(fields map[string]json.RawMessage, key string) (int, bool) {
+	raw, ok := fields[key]
+	if !ok {
+		return 0, false
+	}
+	var n int
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 func stringSliceField(fields map[string]json.RawMessage, key string) []string {

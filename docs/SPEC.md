@@ -110,6 +110,9 @@ type Tool interface {
   (`tool.RegisterBuiltin(t)`); `tool.Builtins()` lists them.
 - A runtime `*Registry` is assembled per run: enabled built-ins (filtered by
   config) **plus** plugin-provided tools. The agent only sees the `*Registry`.
+- Tool schemas are canonicalized on registry insertion. The built-in contract is
+  documented in [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md) and backed by tests that
+  compare the documented surface against the same canonical schema path.
 - `Execute` parses raw JSON args itself. Errors are returned, not fatal — the
   agent feeds them back so the model can self-correct.
 
@@ -182,14 +185,25 @@ prefix cache-stable:
 Long tasks eventually fill the model's context window. Reasonix manages this with
 **low-frequency compaction** that respects the cache-first design:
 
-- Each provider declares its `context_window` (tokens). When a turn's reported
-  `prompt_tokens` reach `compactRatio` (default `0.8`) of that window, the
-  executor compacts **once** before the next turn.
-- Compaction folds only the assistant/tool work. Every **user turn** small
-  enough to be a brief and every **prior digest** is kept verbatim; the foldable
-  remainder is summarized — using the executor's own provider, no tools — in
-  place. The boundary is aligned backward off any tool result so the recent tail
-  never begins with an orphan tool message whose `tool_calls` were summarized away.
+- Each provider declares its `context_window` (tokens). Context maintenance is
+  tiered: below `agent.tool_result_snip_ratio` (default `0.6`) the session is
+  left untouched apart from the soft notice; at the snip ratio, stale tool
+  results before the recent tail are archived and shortened with deterministic
+  head/tail markers; at `agent.compact_ratio` (default `0.8`) stale tool results
+  are archived and pruned to short placeholders before any summary call; only if
+  pruning still leaves the prompt above the threshold does summary compaction
+  run. At `agent.compact_force_ratio` (default `0.9`), the existing forced fold
+  may proceed even when the fold economics would normally skip it.
+- Tool-result snip/prune never removes messages, so assistant `tool_calls` and
+  tool results stay paired. `KeepErrors` preserves error/blocked tool outputs,
+  and the recent tail is not rewritten. Snipped results can later be upgraded to
+  pruned placeholders; already-pruned results are left alone.
+- When summary compaction runs, it folds only the assistant/tool work. Every
+  **user turn** small enough to be a brief and every **prior digest** is kept
+  verbatim; the foldable remainder is summarized — using the executor's own
+  provider, no tools — in place. The boundary is aligned backward off any tool
+  result so the recent tail never begins with an orphan tool message whose
+  `tool_calls` were summarized away.
 - The dropped originals are archived under the user config dir
   (`reasonix/archive/<timestamp>.jsonl`; see §5 for its per-OS location), one
   message per line, so the full history stays traceable.
@@ -515,6 +529,14 @@ api_key_env    = "DEEPSEEK_API_KEY"
 context_window = 1000000   # tokens; harness compacts older history near this limit (0 disables)
 
 # A single-model entry still works for custom OpenAI-compatible endpoints.
+
+[environment]
+enabled = true   # inject a stable startup summary of OS, shell, and common tool versions
+
+# Optional trusted executable paths shown to the model when PATH probing is not enough.
+# Workspace-local paths are listed but not auto-executed during startup probing.
+# [environment.tools]
+# go = "/opt/homebrew/bin/go"
 
 [tools]
 enabled = []   # omit/empty = all built-ins

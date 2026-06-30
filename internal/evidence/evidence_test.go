@@ -190,6 +190,21 @@ func TestReceiptFromToolCallExtractsCompleteStep(t *testing.T) {
 	}
 }
 
+func TestReceiptFromToolCallExtractsCompleteStepIndex(t *testing.T) {
+	receipt := ReceiptFromToolCall("complete_step", json.RawMessage(`{
+		"step_index":2,
+		"result":"done",
+		"evidence":[{"kind":"manual","summary":"checked"}]
+	}`), true, true)
+
+	if receipt.Step != "2" {
+		t.Fatalf("step index not extracted as step identity: %+v", receipt)
+	}
+	if !receipt.StepProof {
+		t.Fatalf("step proof not detected: %+v", receipt)
+	}
+}
+
 func TestLedgerMatchesLatestSuccessfulTodoStep(t *testing.T) {
 	ledger := NewLedger()
 	ledger.Record(Receipt{

@@ -204,18 +204,19 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 
 			sess := NewSession("")
 			output, runErr := RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, Options{
-				MaxSteps:          max,
-				Temperature:       p.taskTool.temperature,
-				Pricing:           pricing,
-				UsageSource:       event.UsageSourceSubagent,
-				Gate:              p.taskTool.gate,
-				ContextWindow:     ctxWin,
-				RecentKeep:        p.taskTool.recentKeep,
-				SoftCompactRatio:  p.taskTool.softCompactRatio,
-				CompactRatio:      p.taskTool.compactRatio,
-				CompactForceRatio: p.taskTool.compactForceRatio,
-				ArchiveDir:        p.taskTool.archiveDir,
-				KeepPolicy:        p.taskTool.keepPolicy,
+				MaxSteps:            max,
+				Temperature:         p.taskTool.temperature,
+				Pricing:             pricing,
+				UsageSource:         event.UsageSourceSubagent,
+				Gate:                p.taskTool.gate,
+				ContextWindow:       ctxWin,
+				RecentKeep:          p.taskTool.recentKeep,
+				SoftCompactRatio:    p.taskTool.softCompactRatio,
+				ToolResultSnipRatio: p.taskTool.toolResultSnipRatio,
+				CompactRatio:        p.taskTool.compactRatio,
+				CompactForceRatio:   p.taskTool.compactForceRatio,
+				ArchiveDir:          p.taskTool.archiveDir,
+				KeepPolicy:          p.taskTool.keepPolicy,
 			}, nested)
 
 			if ctx.Err() != nil && runErr == nil {
