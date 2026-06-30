@@ -3,6 +3,7 @@
 
 import { addBreadcrumb, dumpBreadcrumbs, snapshotBreadcrumbs, type Breadcrumb } from "./breadcrumbs";
 import { t } from "./i18n";
+import { writeClipboardText } from "./clipboard";
 
 declare const __BUILD_COMMIT__: string;
 declare const __BUILD_CHANNEL__: string;
@@ -483,8 +484,14 @@ function paintPerformancePrompt(payload: CrashPayload, snapshot: PerformanceSnap
   const send = sendButton(payload, "performance-report__send", () => markPerfReported(payload.label));
   const copy = document.createElement("button");
   copy.className = "performance-report__copy";
-  copy.textContent = t("crash.copy");
-  copy.onclick = () => void navigator.clipboard?.writeText(payload.message);
+  copy.type = "button";
+  const copyLabel = t("crash.copy");
+  copy.textContent = copyLabel;
+  copy.onclick = () => {
+    void writeClipboardText(payload.message);
+    copy.textContent = t("msg.copied");
+    setTimeout(() => { copy.textContent = copyLabel; }, 1200);
+  };
   const dismiss = document.createElement("button");
   dismiss.className = "performance-report__dismiss";
   dismiss.textContent = t("performanceReport.dismiss");
@@ -515,8 +522,14 @@ function paint(payload: CrashPayload) {
   body.textContent = payload.message;
   const copy = document.createElement("button");
   copy.className = "crash-overlay__copy";
-  copy.textContent = t("crash.copy");
-  copy.onclick = () => void navigator.clipboard?.writeText(payload.message);
+  copy.type = "button";
+  const copyLabel = t("crash.copy");
+  copy.textContent = copyLabel;
+  copy.onclick = () => {
+    void writeClipboardText(payload.message);
+    copy.textContent = t("msg.copied");
+    setTimeout(() => { copy.textContent = copyLabel; }, 1200);
+  };
   const actions = document.createElement("div");
   actions.className = "crash-overlay__actions";
   const send = sendButton(payload);
@@ -691,4 +704,22 @@ export function installGlobalCrashHandlers() {
   window.addEventListener("unhandledrejection", (e) => {
     if (shouldReportGlobalCrashEvent(e)) reportCrash("unhandledrejection", e.reason);
   });
+}
+
+// --- Debug helpers (dev only) ---
+// Exposed on window for testing the performance/crash overlay copy buttons from
+// the browser console. Call from DevTools after the app starts:
+//
+//   await window.__debugShowPerformancePanel()
+//   await window.__debugShowCrashOverlay()
+//
+if (typeof window !== "undefined" && (typeof __BUILD_CHANNEL__ === "undefined" || __BUILD_CHANNEL__ !== "production")) {
+  const w = window as unknown as Record<string, unknown>;
+  w.__debugShowPerformancePanel = async () => {
+    const snapshot = performanceSnapshot("manual debug trigger");
+    paintPerformancePrompt(buildPerformancePayload(snapshot), snapshot);
+  };
+  w.__debugShowCrashOverlay = () => {
+    reportCrash("debug", new Error("Debug: manual crash overlay trigger"));
+  };
 }

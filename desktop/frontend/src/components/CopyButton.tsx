@@ -1,55 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { useT } from "../lib/i18n";
-
-function fallbackCopyText(value: string): boolean {
-  const activeElement = document.activeElement;
-  const selection = document.getSelection();
-  const ranges: Range[] = [];
-  if (selection) {
-    for (let index = 0; index < selection.rangeCount; index += 1) {
-      ranges.push(selection.getRangeAt(index));
-    }
-  }
-  const textarea = document.createElement("textarea");
-  textarea.value = value;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "fixed";
-  textarea.style.inset = "0 auto auto 0";
-  textarea.style.width = "1px";
-  textarea.style.height = "1px";
-  textarea.style.opacity = "0";
-  document.body.appendChild(textarea);
-  textarea.select();
-  let ok = false;
-  try {
-    ok = document.execCommand("copy");
-  } finally {
-    textarea.remove();
-    if (selection) {
-      selection.removeAllRanges();
-      for (const range of ranges) selection.addRange(range);
-    }
-    if (activeElement instanceof HTMLElement) activeElement.focus();
-  }
-  return ok;
-}
-
-async function writeClipboardText(value: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(value);
-    return;
-  } catch {
-    /* try the desktop runtime below */
-  }
-  try {
-    if (typeof window !== "undefined" && (await window.runtime?.ClipboardSetText?.(value))) return;
-  } catch {
-    /* runtime unavailable in browser dev */
-  }
-  if (fallbackCopyText(value)) return;
-  throw new Error("clipboard unavailable");
-}
+import { writeClipboardText } from "../lib/clipboard";
 
 // CopyButton copies text to the clipboard on click and briefly flips to a check.
 // Clipboard writes are best-effort across browser dev, Wails, and webviews, so
