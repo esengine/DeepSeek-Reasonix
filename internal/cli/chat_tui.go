@@ -1554,10 +1554,13 @@ func clampWidth(s string, width int) string {
 func (m *chatTUI) commitLine(s string) {
 	*m.pendingCommit = append(*m.pendingCommit, s)
 	m.transcript = append(m.transcript, s)
-	// Incrementally wrap the new block and append to wrappedLines so the next
-	// frame only does a cheap join instead of a full join+wrap+split rebuild.
-	if m.contentWidth > 0 {
-		newLines := strings.Split(wrapTranscript(s, m.contentWidth), "\n")
+	// Incrementally wrap the new block and append to wrappedLines.
+	cw := m.contentWidth
+	if cw <= 0 {
+		cw = transcriptContentWidth(m.width, m.nativeScrollback)
+	}
+	if cw > 0 {
+		newLines := strings.Split(wrapTranscript(s, cw), "\n")
 		m.wrappedLines = append(m.wrappedLines, newLines...)
 	}
 	m.wrappedDirty = true
