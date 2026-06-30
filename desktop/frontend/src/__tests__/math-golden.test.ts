@@ -282,6 +282,12 @@ check("digit before $$ is NOT a prose boundary (preserves c^2$$)", () => {
   const out = normalizeMath("c^2$$ x $$");
   return out === "c^2$$ x $$";
 });
+eq(normalizeMath("intro$$x+1"), "intro\n$$\nx+1", "orphan opening $$ is not duplicated");
+eq(
+  normalizeMath("first$$a$$ middle $$b$$ end"),
+  "first\n$$\na\n$$\n middle \n$$\nb\n$$\n end",
+  "multiple display blocks on one line are all normalised",
+);
 
 console.log("\nnormalizeMath — non-math dollar filtering");
 eq(normalizeMath("costs $1$ today"), "costs &#36;1&#36; today", "$1$ not math");

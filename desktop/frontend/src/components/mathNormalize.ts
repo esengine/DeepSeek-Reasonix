@@ -267,7 +267,7 @@ function normaliseDisplayBlocks(s: string): string {
         out.push(DM);
         out.push(latexNormalizeForKatex(m[2]));
         out.push(DM);
-        if (m[3]) out.push(m[3]);
+        if (m[3]) out.push(normaliseDisplayBlocks(m[3]));
         i += 1;
         continue;
       }
@@ -316,6 +316,8 @@ function normaliseDisplayBlocks(s: string): string {
       if (before.trim()) out.push(before);
       out.push("$$");
       if (afterOpen) out.push(afterOpen);
+      i += 1;
+      continue;
     }
 
     // --- No display math on this line — pass through --------------------
