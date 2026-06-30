@@ -1364,7 +1364,6 @@ export function WorkspacePanel({
               </div>
               <div className="workspace-change-scope__list">
                 {scopedChangeRows.map((change) => {
-                  const dir = parentPath(change.path);
                   return (
                     <button
                       key={change.key}
@@ -1379,7 +1378,6 @@ export function WorkspacePanel({
                       <FileText size={14} />
                       <span className="workspace-change__body">
                         <span className="workspace-change__name">{basename(change.path)}</span>
-                        {dir && <span className="workspace-change__path">{dir}</span>}
                         {change.detail && <span className="workspace-change__detail">{change.detail}</span>}
                       </span>
                       <span className="workspace-change__meta">
