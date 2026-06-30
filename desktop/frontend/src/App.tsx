@@ -154,6 +154,7 @@ const SettingsPanel = lazy(() => import("./components/SettingsPanel").then((modu
 const CHAT_MIN_WIDTH = 400;
 const CHAT_COMFORT_MIN_WIDTH = 560;
 const WORKSPACE_RESIZER_WIDTH = 8;
+const RESPONSIVE_SIDEBAR_COLLAPSE_WIDTH = 820;
 
 function stripGoalResearchFlags(arg: string): string {
   const parts = arg.trim().split(/\s+/).filter(Boolean);
@@ -890,6 +891,7 @@ export default function App() {
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [liveSidebarWidth, setLiveSidebarWidth] = useState<number | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 1440 : window.innerWidth));
+  const responsiveSidebarCollapseRef = useRef(false);
   const workspacePanelOpen = useLayoutStore((s) => s.workspacePanelOpen);
   const setWorkspacePanelOpen = useLayoutStore((s) => s.setWorkspacePanelOpen);
   const rightDockTreeWidth = useLayoutStore((s) => s.rightDockTreeWidth);
@@ -1117,6 +1119,21 @@ export default function App() {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  useEffect(() => {
+    if (viewportWidth <= RESPONSIVE_SIDEBAR_COLLAPSE_WIDTH) {
+      if (!sidebarCollapsed) {
+        responsiveSidebarCollapseRef.current = true;
+        setSidebarCollapsed(true);
+        setSidebarSearchOpen(false);
+      }
+      return;
+    }
+    if (responsiveSidebarCollapseRef.current) {
+      responsiveSidebarCollapseRef.current = false;
+      if (sidebarCollapsed) setSidebarCollapsed(false);
+    }
+  }, [sidebarCollapsed, setSidebarCollapsed, setSidebarSearchOpen, viewportWidth]);
 
   const [pendingPlanRevision, setPendingPlanRevision] = useState<string | null>(null);
   const [footerHeight, setFooterHeight] = useState(0);
