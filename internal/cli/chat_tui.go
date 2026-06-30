@@ -169,6 +169,12 @@ type chatTUI struct {
 	toolStreamStart time.Time
 	toolStreamFrame int
 	transcriptDirty bool
+	// wrappedDirty is set when wrappedLines needs a viewport.SetContent on the
+	// next frame (commitLine appended new rows, or a stream block was replaced).
+	wrappedDirty bool
+	// contentWidth caches the current viewport content width so commitLine can
+	// wrap new blocks inline without reaching back to Update's derived value.
+	contentWidth int
 	// forceGotoBottom is set by replayActiveBranch and resetFreshContextView to
 	// pin the viewport to the bottom after a session / branch / clear switch
 	// regardless of the previous wasAtBottom state (#4584).
@@ -192,6 +198,11 @@ type chatTUI struct {
 	// dead target and dragging it never leaves a transcript selection behind.
 	scrollbarDrag       bool
 	scrollbarGrabOffset int
+
+	// reasoningFlushTime throttles transcriptDirty during streaming reasoning:
+	// only sets dirty if more than reasoningFlushInterval has passed since the
+	// last flush. commitReasoning always flushes regardless.
+	reasoningFlushTime time.Time
 
 	// The user bubble is echoed to scrollback immediately on Enter (bubbleStartIdx
 	// marks where in the transcript it landed). It stays "un-sendable" until the
@@ -324,6 +335,12 @@ type agentEventMsg event.Event
 // maxEventDrain caps how many buffered events one Update coalesces before
 // yielding to render, so a sustained output flood still shows live progress.
 const maxEventDrain = 512
+
+// maxTranscriptBlocks is the soft ceiling on transcript entries. When exceeded,
+// old blocks are dropped from the head at the next turn boundary to prevent
+// unbounded memory growth in multi-day sessions.
+const maxTranscriptBlocks = 500
+const transcriptTrimTarget = 400
 
 const resetMouseTracking = ansi.ResetModeMouseX10 +
 	ansi.ResetModeMouseNormal +
@@ -687,7 +704,6 @@ func suspendWithMouseReset() tea.Cmd {
 
 func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	wasAtBottom := m.viewport.AtBottom()
-	prevLines := len(m.transcript)
 	prevWidth := m.width
 	prevYOff := m.viewport.YOffset()
 
@@ -695,31 +711,41 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cm := next.(chatTUI)
 
 	contentW := transcriptContentWidth(cm.width, cm.nativeScrollback)
+	cm.contentWidth = contentW
 	cm.viewport.SetWidth(contentW)
-	// Recompute the wrapped status-line count so bottomRows reserves the right
-	// height for the viewport. Use cm.width (same as boxW in View()) so the
-	// wrapping width matches what View() actually renders.
 	cm.statusLineCount = cm.computeStatusLineCount(cm.width)
 	cm.viewport.SetHeight(cm.transcriptHeight())
-	// Re-feed only when the content grew or the width changed (re-wrapping is
-	// the expensive part); a bare scroll or spinner tick keeps the offset.
-	if len(cm.transcript) != prevLines || cm.width != prevWidth || cm.transcriptDirty {
-		wrapped := wrapTranscript(strings.Join(cm.transcript, "\n"), contentW)
-		cm.viewport.SetContent(wrapped)
-		cm.wrappedLines = strings.Split(wrapped, "\n")
+
+	// Full rebuild only on terminal resize (rare).
+	if cm.width != prevWidth {
+		cm.rebuildWrappedLines()
 		if wasAtBottom {
-			cm.viewport.GotoBottom() // tail-follow: stay pinned to newest output
+			cm.viewport.GotoBottom()
 		}
 	}
+
+	// transcriptDirty triggers a full rebuild (in-place mutation paths at low
+	// frequency). Handle first so wrappedDirty doesn't do a wasted SetContent.
+	if cm.transcriptDirty {
+		cm.rebuildWrappedLines()
+		if wasAtBottom {
+			cm.viewport.GotoBottom()
+		}
+	} else if cm.wrappedDirty {
+		// Incremental: commitLine appended rows or a stream block was replaced.
+		// Only join wrappedLines (no expensive re-wrap) and feed to viewport.
+		cm.viewport.SetContent(strings.Join(cm.wrappedLines, "\n"))
+		cm.wrappedDirty = false
+		if wasAtBottom {
+			cm.viewport.GotoBottom()
+		}
+	}
+
 	if cm.forceGotoBottom {
 		cm.viewport.GotoBottom()
 		cm.forceGotoBottom = false
 	}
 	cm.transcriptDirty = false
-	// Any viewport scroll (wheel, PgUp/PgDn, edge auto-scroll, or tail-follow to
-	// newest output) shifts the whole window. Some terminals (Warp) mishandle
-	// the renderer's scroll/insert-line optimization and strand stale rows, so
-	// force a full clear+redraw whenever the offset actually moved.
 	if cm.viewport.YOffset() != prevYOff && !cm.nativeScrollback {
 		return cm, tea.Batch(tea.ClearScreen, cmd)
 	}
@@ -1469,6 +1495,8 @@ func (m *chatTUI) clearTranscriptDisplay() {
 	m.toolTail = nil
 	m.toolPartial = ""
 	m.toolLineCount = 0
+	m.wrappedDirty = false
+	m.transcriptDirty = false
 }
 
 // scrollChunkHeight is the largest block (in lines) finalize prints at once in
@@ -1526,6 +1554,13 @@ func clampWidth(s string, width int) string {
 func (m *chatTUI) commitLine(s string) {
 	*m.pendingCommit = append(*m.pendingCommit, s)
 	m.transcript = append(m.transcript, s)
+	// Incrementally wrap the new block and append to wrappedLines so the next
+	// frame only does a cheap join instead of a full join+wrap+split rebuild.
+	if m.contentWidth > 0 {
+		newLines := strings.Split(wrapTranscript(s, m.contentWidth), "\n")
+		m.wrappedLines = append(m.wrappedLines, newLines...)
+	}
+	m.wrappedDirty = true
 }
 
 // commitSpacer separates the next block (a thinking marker or a tool line) from
@@ -1696,6 +1731,8 @@ const reasoningTailLines = 12
 // streamReasoning appends a chunk and rewrites the live reasoning block from a
 // bounded trailing view (mirrors streamToolOutput), so the chain of thought is
 // visible while the model works without re-rendering the whole thing per token.
+const reasoningFlushInterval = 50 * time.Millisecond
+
 func (m *chatTUI) streamReasoning(chunk string) {
 	m.reasoning.WriteString(chunk) // full text retained for verbose mode
 	if m.reasoningTextIdx < 0 {
@@ -1710,7 +1747,13 @@ func (m *chatTUI) streamReasoning(chunk string) {
 		m.reasoningView = m.reasoningView[:copy(m.reasoningView, m.reasoningView[drop:])]
 	}
 	m.transcript[m.reasoningTextIdx] = reasoningBlock(string(m.reasoningView), m.width, reasoningTailLines)
-	m.transcriptDirty = true
+	// Throttle: only trigger the expensive full rebuild every 50ms during active
+	// streaming. commitReasoning always flushes the final state regardless.
+	now := time.Now()
+	if m.reasoningFlushTime.IsZero() || now.Sub(m.reasoningFlushTime) >= reasoningFlushInterval {
+		m.reasoningFlushTime = now
+		m.transcriptDirty = true
+	}
 }
 
 // reasoningBlock renders raw thinking text as dim, width-wrapped lines under a
@@ -2109,6 +2152,7 @@ func (m *chatTUI) commitReasoning() {
 		}
 	}
 	m.transcriptDirty = true
+	m.reasoningFlushTime = time.Time{} // reset throttle for next turn
 	m.reasoning.Reset()
 	m.reasoningView = m.reasoningView[:0]
 	m.reasoningLineIdx = -1
@@ -3074,6 +3118,7 @@ func (m *chatTUI) unsendPending() {
 	m.input.SetValue(m.pendingRestore)
 	m.growInputToFit()
 	m.transcript = m.transcript[:m.bubbleStartIdx]
+	*m.pendingCommit = (*m.pendingCommit)[:m.bubbleStartIdx]
 	m.transcriptDirty = true
 	m.bubblePending = false
 	m.pendingRestore = ""
@@ -3288,6 +3333,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		// Plan-mode approval is now driven by the controller (it emits an
 		// ApprovalRequest when a plan-mode turn produces a proposal), so there's
 		// nothing to detect here.
+		m.maybeTrimTranscript()
 	}
 }
 
@@ -3898,6 +3944,56 @@ func wrapForViewport(text string, width int, fg cliColor) string {
 		width = 80
 	}
 	return themeStyle(fg).Width(width).Render(text)
+}
+
+// rebuildWrappedLines fully rebuilds wrappedLines from transcript. Called only
+// on terminal resize or when transcriptDirty is set by in-place mutation paths.
+func (m *chatTUI) rebuildWrappedLines() {
+	if len(m.transcript) == 0 {
+		m.wrappedLines = nil
+		m.viewport.SetContent("")
+		m.wrappedDirty = false
+		m.transcriptDirty = false
+		return
+	}
+	wrapped := wrapTranscript(strings.Join(m.transcript, "\n"), m.contentWidth)
+	m.wrappedLines = strings.Split(wrapped, "\n")
+	m.viewport.SetContent(wrapped)
+	m.wrappedDirty = false
+	m.transcriptDirty = false
+}
+
+// maybeTrimTranscript drops old blocks from the transcript head when it exceeds
+// maxTranscriptBlocks, preventing unbounded memory growth in multi-day sessions.
+// Called at TurnDone, when all streaming indices are reset to -1 (safe to shift).
+func (m *chatTUI) maybeTrimTranscript() {
+	if len(m.transcript) <= maxTranscriptBlocks {
+		return
+	}
+	drop := len(m.transcript) - transcriptTrimTarget
+
+	m.transcript = m.transcript[drop:]
+	if len(*m.pendingCommit) > drop {
+		*m.pendingCommit = (*m.pendingCommit)[drop:]
+	} else {
+		*m.pendingCommit = (*m.pendingCommit)[:0]
+	}
+
+	// Adjust shellTranscriptIdx offset (the only index map alive after a turn).
+	for id, idx := range m.shellTranscriptIdx {
+		if idx < drop {
+			delete(m.shellTranscriptIdx, id)
+		} else {
+			m.shellTranscriptIdx[id] = idx - drop
+		}
+	}
+	if m.bubbleStartIdx >= drop {
+		m.bubbleStartIdx -= drop
+	} else {
+		m.bubbleStartIdx = 0
+	}
+
+	m.rebuildWrappedLines()
 }
 
 // renderUserBubble renders the just-submitted prompt as a transcript line. Keep

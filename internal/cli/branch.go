@@ -111,6 +111,8 @@ func (m *chatTUI) replayActiveBranch(title string) {
 	// the scroll position to be preserved at a stale offset inside the merged
 	// content (#4584).
 	m.transcript = nil
+	m.wrappedLines = nil
+	m.wrappedDirty = false
 	m.transcriptDirty = true
 	m.forceGotoBottom = true
 
