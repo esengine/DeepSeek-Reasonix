@@ -75,13 +75,13 @@ const (
 // UIConfig controls CLI presentation-only settings. Desktop appearance is kept in
 // DesktopConfig so desktop preferences cannot alter terminal output or prompts.
 type UIConfig struct {
-	Theme          string `toml:"theme"`           // auto|dark|light; empty resolves to auto
-	ThemeStyle     string `toml:"theme_style"`     // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
-	ShortcutLayout string `toml:"shortcut_layout"` // classic|desktop; accepted for compatibility
-	CloseBehavior  string `toml:"close_behavior"`  // legacy desktop close behavior; prefer desktop.close_behavior
-	ShowReasoning  bool   `toml:"show_reasoning"`  // Ctrl+O / /verbose: show thinking text in CLI; false = collapsed
-	CursorShape    string `toml:"cursor_shape"`    // block|underline|bar; empty defaults to underline
-	MaxTranscriptBlocks int `toml:"max_transcript_blocks"` // transcript block ceiling; 0 defaults to 500
+	Theme               string `toml:"theme"`                 // auto|dark|light; empty resolves to auto
+	ThemeStyle          string `toml:"theme_style"`           // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
+	ShortcutLayout      string `toml:"shortcut_layout"`       // classic|desktop; accepted for compatibility
+	CloseBehavior       string `toml:"close_behavior"`        // legacy desktop close behavior; prefer desktop.close_behavior
+	ShowReasoning       bool   `toml:"show_reasoning"`        // Ctrl+O / /verbose: show thinking text in CLI; false = collapsed
+	CursorShape         string `toml:"cursor_shape"`          // block|underline|bar; empty defaults to underline
+	MaxTranscriptBlocks int    `toml:"max_transcript_blocks"` // transcript block ceiling; 0 defaults to 500
 }
 
 // DesktopConfig controls desktop-only UI preferences. It is intentionally
