@@ -36,6 +36,45 @@ func TestComposeAppendsAfterBase(t *testing.T) {
 	}
 }
 
+func TestBlockInjectsFeedbackMemoryBodies(t *testing.T) {
+	root := t.TempDir()
+	user := filepath.Join(root, "userconfig")
+	proj := filepath.Join(root, "proj")
+	mustMkdir(t, user)
+	mustMkdir(t, filepath.Join(proj, ".git"))
+
+	set := Load(Options{CWD: proj, UserDir: user})
+	if _, err := set.Store.Save(Memory{
+		Name:        "prefer-concrete-next-action",
+		Title:       "Prefer concrete next action",
+		Description: "Reply structure preference",
+		Type:        TypeFeedback,
+		Body:        "When responding, lead with the concrete next action.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := set.Store.Save(Memory{
+		Name:        "project-background",
+		Description: "Background context",
+		Type:        TypeProject,
+		Body:        "PROJECT BACKGROUND SHOULD STAY LINKED ONLY",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	set = Load(Options{CWD: proj, UserDir: user})
+	block := set.Block()
+	if !strings.Contains(block, "When responding, lead with the concrete next action.") {
+		t.Fatalf("feedback memory body was not injected into prompt:\n%s", block)
+	}
+	if strings.Contains(block, "PROJECT BACKGROUND SHOULD STAY LINKED ONLY") {
+		t.Fatalf("non-feedback memory body should stay linked only:\n%s", block)
+	}
+	if !strings.Contains(block, "[Prefer concrete next action](prefer-concrete-next-action.md)") {
+		t.Fatalf("saved memory index entry missing:\n%s", block)
+	}
+}
+
 // TestDiscoverPrecedenceOrder checks user → ancestor → project → local ordering,
 // which puts the most specific guidance last.
 func TestDiscoverPrecedenceOrder(t *testing.T) {

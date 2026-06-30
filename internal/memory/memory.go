@@ -13,11 +13,12 @@ import (
 // UserDir are retained so the controller can resolve quick-add targets without
 // re-deriving discovery context.
 type Set struct {
-	Docs    []Source // REASONIX.md / AGENTS.md, ascending precedence
-	Store   Store    // auto-memory store (may be a zero/disabled Store)
-	Index   string   // MEMORY.md contents at load time
-	CWD     string   // project working dir used for discovery
-	UserDir string   // user config root (may be "")
+	Docs     []Source // REASONIX.md / AGENTS.md, ascending precedence
+	Store    Store    // auto-memory store (may be a zero/disabled Store)
+	Index    string   // MEMORY.md contents at load time
+	Feedback []Memory // saved feedback bodies captured at load time
+	CWD      string   // project working dir used for discovery
+	UserDir  string   // user config root (may be "")
 }
 
 // Options configures discovery. CWD defaults to "." and UserDir is the user
@@ -37,13 +38,25 @@ func Load(opts Options) *Set {
 		cwd = "."
 	}
 	store := StoreFor(opts.UserDir, cwd)
+	memories := store.List()
 	return &Set{
-		Docs:    discoverDocs(cwd, opts.UserDir),
-		Store:   store,
-		Index:   store.Index(),
-		CWD:     cwd,
-		UserDir: opts.UserDir,
+		Docs:     discoverDocs(cwd, opts.UserDir),
+		Store:    store,
+		Index:    store.Index(),
+		Feedback: feedbackMemories(memories),
+		CWD:      cwd,
+		UserDir:  opts.UserDir,
 	}
+}
+
+func feedbackMemories(memories []Memory) []Memory {
+	var out []Memory
+	for _, m := range memories {
+		if m.Type == TypeFeedback && strings.TrimSpace(m.Body) != "" {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // DocPath returns the doc-memory file a given scope writes to. To avoid splitting
@@ -77,7 +90,7 @@ func (s *Set) DocPath(scope Scope) string {
 // the base prompt byte-for-byte untouched (and the cache prefix maximal) when
 // there is no memory at all.
 func (s *Set) Empty() bool {
-	return s == nil || (len(s.Docs) == 0 && strings.TrimSpace(s.Index) == "")
+	return s == nil || (len(s.Docs) == 0 && len(s.Feedback) == 0 && strings.TrimSpace(s.Index) == "")
 }
 
 // docScopes are the scopes the panel can target for a quick-add or a new doc.
@@ -134,6 +147,14 @@ func (s *Set) Block() string {
 
 	for _, d := range s.Docs {
 		fmt.Fprintf(&b, "\n## %s (%s)\n\n%s\n", d.Path, d.Scope, strings.TrimSpace(d.Body))
+	}
+
+	if len(s.Feedback) > 0 {
+		b.WriteString("\n## Saved feedback\n\n")
+		b.WriteString("Apply these saved feedback memories as standing user guidance for this session.\n")
+		for _, m := range s.Feedback {
+			fmt.Fprintf(&b, "\n### %s\n\n%s\n", displayTitle(m.Title, m.Name), strings.TrimSpace(m.Body))
+		}
 	}
 
 	if idx := strings.TrimSpace(s.Index); idx != "" {
