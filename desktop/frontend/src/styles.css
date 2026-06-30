@@ -13398,6 +13398,9 @@ body > .mermaid-diagram--fullscreen {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 6px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 .set-rule__x {
   border: none;
@@ -15069,12 +15072,6 @@ body > .mermaid-diagram--fullscreen {
   .settings-page--form .set-rules-grid,
   .set-rules-grid {
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
-  }
-
-  .set-rule {
-    max-width: 100%;
-    overflow-wrap: anywhere;
-    white-space: normal;
   }
 
   .set-rules__add .mem-input {
