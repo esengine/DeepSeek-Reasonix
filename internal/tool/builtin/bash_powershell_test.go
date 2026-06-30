@@ -101,6 +101,22 @@ func TestBashPowerShellOutputIsUTF8(t *testing.T) {
 	}
 }
 
+func TestBashPowerShellRunsMultilinePythonC(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("powershell e2e is windows-only")
+	}
+	if _, err := exec.LookPath("python"); err != nil {
+		t.Skip("python not found")
+	}
+	out, err := runPS(t, "python -c \"import os\nprint(os.name)\"")
+	if err != nil {
+		t.Fatalf("python -c command failed: %v (out=%q)", err, out)
+	}
+	if !strings.Contains(out, "nt") {
+		t.Fatalf("output = %q, want it to contain nt", out)
+	}
+}
+
 func TestBashDescriptionReflectsShell(t *testing.T) {
 	ps := bash{shell: sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: "powershell"}}
 	psDesc := ps.Description()

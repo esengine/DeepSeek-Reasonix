@@ -40,3 +40,30 @@ func TestArgvNormalizesNulRedirect(t *testing.T) {
 		t.Errorf("powershell argv command = %q, want nul rewritten to $null", last)
 	}
 }
+
+func TestPowerShellPythonInlineMultilineUsesHereString(t *testing.T) {
+	argv := Shell{Kind: ShellPowerShell, Path: "powershell"}.argv("python -c \"import os\nprint(os.name)\"")
+	last := argv[len(argv)-1]
+	want := psUTF8Prologue + "python -c @'\nimport os\nprint(os.name)\n'@"
+	if last != want {
+		t.Fatalf("powershell argv command = %q, want %q", last, want)
+	}
+}
+
+func TestPowerShellPythonInlineLeavesSingleLineAlone(t *testing.T) {
+	argv := Shell{Kind: ShellPowerShell, Path: "powershell"}.argv("python -c \"print('ok')\"")
+	last := argv[len(argv)-1]
+	want := psUTF8Prologue + "python -c \"print('ok')\""
+	if last != want {
+		t.Fatalf("powershell argv command = %q, want %q", last, want)
+	}
+}
+
+func TestPowerShellPythonInlineSkipsUnsafeHereStringTerminator(t *testing.T) {
+	argv := Shell{Kind: ShellPowerShell, Path: "powershell"}.argv("python -c \"print('before')\n'@\nprint('after')\"")
+	last := argv[len(argv)-1]
+	want := psUTF8Prologue + "python -c \"print('before')\n'@\nprint('after')\""
+	if last != want {
+		t.Fatalf("powershell argv command = %q, want %q", last, want)
+	}
+}

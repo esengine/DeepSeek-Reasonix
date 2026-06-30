@@ -243,6 +243,98 @@ func normalizeNulRedirect(command, sink string) string {
 	})
 }
 
+// normalizePowerShellPythonInline rewrites the common
+//
+//	python -c "multi-line code"
+//
+// pattern to use a PowerShell here-string for the -c argument. Without this,
+// Windows PowerShell consumes the quotes and parses the embedded newlines as
+// PowerShell statements before python receives them.
+func normalizePowerShellPythonInline(command string) string {
+	codeArgStart, codeStart, codeEnd, ok := findPowerShellPythonInlineCode(command)
+	if !ok {
+		return command
+	}
+	code := command[codeStart:codeEnd]
+	if !strings.ContainsAny(code, "\r\n") || hasPowerShellSingleQuotedHereStringTerminator(code) {
+		return command
+	}
+	if strings.TrimSpace(command[codeEnd+1:]) != "" {
+		return command
+	}
+	if !strings.HasSuffix(code, "\n") {
+		code += "\n"
+	}
+	return command[:codeArgStart] + "@'\n" + code + "'@"
+}
+
+func findPowerShellPythonInlineCode(command string) (codeArgStart, codeStart, codeEnd int, ok bool) {
+	i := skipSpaces(command, 0)
+	wordStart := i
+	for i < len(command) && !isShellWordBreak(command[i]) {
+		i++
+	}
+	word := strings.TrimSuffix(strings.ToLower(command[wordStart:i]), ".exe")
+	if !isPythonCommandWord(word) {
+		return 0, 0, 0, false
+	}
+	i = skipSpaces(command, i)
+	if !strings.HasPrefix(command[i:], "-c") {
+		return 0, 0, 0, false
+	}
+	i += 2
+	if i < len(command) && !isShellWordBreak(command[i]) {
+		return 0, 0, 0, false
+	}
+	i = skipSpaces(command, i)
+	if i >= len(command) || (command[i] != '"' && command[i] != '\'') {
+		return 0, 0, 0, false
+	}
+	quote := command[i]
+	codeArgStart = i
+	i++
+	codeStart = i
+	for i < len(command) {
+		if quote == '"' && command[i] == '`' {
+			i += 2
+			continue
+		}
+		if quote == '\'' && command[i] == '\'' && i+1 < len(command) && command[i+1] == '\'' {
+			i += 2
+			continue
+		}
+		if command[i] == quote {
+			return codeArgStart, codeStart, i, true
+		}
+		i++
+	}
+	return 0, 0, 0, false
+}
+
+func skipSpaces(s string, i int) int {
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+	return i
+}
+
+func isShellWordBreak(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\r' || b == '\n' || b == ';' || b == '|'
+}
+
+func isPythonCommandWord(word string) bool {
+	return word == "py" || word == "python" || strings.HasPrefix(word, "python3")
+}
+
+func hasPowerShellSingleQuotedHereStringTerminator(s string) bool {
+	for _, line := range strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n") {
+		if strings.TrimSpace(line) == "'@" {
+			return true
+		}
+	}
+	return false
+}
+
 // argv builds the exec argv that runs command under this shell.
 func (s Shell) argv(command string) []string {
 	path := s.Path
@@ -250,6 +342,7 @@ func (s Shell) argv(command string) []string {
 		path = s.Kind.String()
 	}
 	if s.Kind == ShellPowerShell {
+		command = normalizePowerShellPythonInline(command)
 		return []string{path, "-NoProfile", "-NonInteractive", "-Command", psUTF8Prologue + normalizeNulRedirect(command, "$null")}
 	}
 	return []string{path, "-c", normalizeNulRedirect(command, "/dev/null")}
