@@ -336,11 +336,25 @@ type agentEventMsg event.Event
 // yielding to render, so a sustained output flood still shows live progress.
 const maxEventDrain = 512
 
-// maxTranscriptBlocks is the soft ceiling on transcript entries. When exceeded,
-// old blocks are dropped from the head at the next turn boundary to prevent
-// unbounded memory growth in multi-day sessions.
-const maxTranscriptBlocks = 500
+// defaultMaxTranscriptBlocks is the soft ceiling on transcript entries. When
+// exceeded, old blocks are dropped from the head at the next turn boundary to
+// prevent unbounded memory growth in multi-day sessions. Can be overridden via
+// [ui] max_transcript_blocks in reasonix.toml.
+const defaultMaxTranscriptBlocks = 500
 const transcriptTrimTarget = 400
+
+// maxTranscriptBlocks returns the configured transcript block ceiling, falling
+// back to defaultMaxTranscriptBlocks when unset or zero.
+func maxTranscriptBlocks() int {
+	cfg, err := config.Load()
+	if err != nil {
+		return defaultMaxTranscriptBlocks
+	}
+	if v := cfg.UI.MaxTranscriptBlocks; v > 0 {
+		return v
+	}
+	return defaultMaxTranscriptBlocks
+}
 
 const resetMouseTracking = ansi.ResetModeMouseX10 +
 	ansi.ResetModeMouseNormal +
@@ -3969,8 +3983,10 @@ func (m *chatTUI) rebuildWrappedLines() {
 // maybeTrimTranscript drops old blocks from the transcript head when it exceeds
 // maxTranscriptBlocks, preventing unbounded memory growth in multi-day sessions.
 // Called at TurnDone, when all streaming indices are reset to -1 (safe to shift).
+// A notice line is prepended so the user can see how many blocks were trimmed.
 func (m *chatTUI) maybeTrimTranscript() {
-	if len(m.transcript) <= maxTranscriptBlocks {
+	max := maxTranscriptBlocks()
+	if len(m.transcript) <= max {
 		return
 	}
 	drop := len(m.transcript) - transcriptTrimTarget
@@ -3997,6 +4013,13 @@ func (m *chatTUI) maybeTrimTranscript() {
 	}
 
 	m.rebuildWrappedLines()
+
+	// Prepend a notice line so the user knows truncation happened.
+	notice := dim(fmt.Sprintf("  ⋯ %d earlier transcript blocks trimmed (set max_transcript_blocks in [ui] to adjust)", drop))
+	m.transcript = append([]string{notice}, m.transcript...)
+	newLines := strings.Split(wrapTranscript(notice, m.contentWidth), "\n")
+	m.wrappedLines = append(newLines, m.wrappedLines...)
+	m.wrappedDirty = true
 }
 
 // renderUserBubble renders the just-submitted prompt as a transcript line. Keep

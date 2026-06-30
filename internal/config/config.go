@@ -81,6 +81,7 @@ type UIConfig struct {
 	CloseBehavior  string `toml:"close_behavior"`  // legacy desktop close behavior; prefer desktop.close_behavior
 	ShowReasoning  bool   `toml:"show_reasoning"`  // Ctrl+O / /verbose: show thinking text in CLI; false = collapsed
 	CursorShape    string `toml:"cursor_shape"`    // block|underline|bar; empty defaults to underline
+	MaxTranscriptBlocks int `toml:"max_transcript_blocks"` // transcript block ceiling; 0 defaults to 500
 }
 
 // DesktopConfig controls desktop-only UI preferences. It is intentionally
