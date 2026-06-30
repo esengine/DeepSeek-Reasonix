@@ -3511,6 +3511,145 @@ a[href] {
   }
 }
 
+/* ── ChatHistorySidebar (conversation history hover panel) ──────────────────── */
+.ch-sidebar {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  z-index: var(--z-inline-sticky);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  width: 40px;
+  padding: 0 12px 0 8px;
+  transform: translate(4px, -50%);
+  opacity: 0;
+  pointer-events: none;
+  animation: jump-bar-in 0.18s ease-out 0.08s forwards;
+}
+.transcript > .ch-sidebar {
+  max-width: none;
+  margin: 0;
+}
+.ch-sidebar__rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0px;
+  padding: 8px 0;
+  cursor: pointer;
+  pointer-events: auto;
+  scrollbar-width: none;
+}
+.ch-sidebar__rail::-webkit-scrollbar { display: none; }
+.ch-item {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: flex-end;
+  width: 24px;
+  min-height: 7px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: none;
+}
+.ch-item:focus { outline: none; }
+.ch-item:focus-visible .ch-dot { box-shadow: 0 0 0 3px var(--accent-soft); }
+.ch-dot {
+  pointer-events: none;
+  width: 16px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--border);
+}
+.ch-dot[data-active="true"] {
+  background: var(--fg);
+}
+
+/* ── History panel (the hover popover) ──────────────────────────────────────── */
+.ch-panel {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  z-index: var(--z-dropdown);
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-height: 380px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  pointer-events: auto;
+  transform: translateY(-50%);
+  overflow: hidden;
+}
+.ch-panel__list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 0;
+}
+.ch-panel__list::-webkit-scrollbar { width: 4px; }
+.ch-panel__list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.ch-panel__list::-webkit-scrollbar-track { background: transparent; }
+
+.ch-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: calc(100% - 16px);
+  margin: 0 8px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms;
+}
+.ch-row:hover { background: var(--bg-soft); }
+.ch-row--active { background: var(--accent-soft); }
+.ch-row--active:hover { background: var(--accent-soft); }
+.ch-row__num {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--bg);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  margin-top: 1px;
+}
+.ch-row--active .ch-row__num {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.ch-row__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  word-break: break-word;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 760px) {
+  .ch-panel { width: 260px; }
+  .ch-sidebar { display: none; }
+}
+
 .welcome {
   --welcome-brand-width: 240px;
   --welcome-brand-height: 56px;
