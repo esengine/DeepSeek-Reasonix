@@ -1764,8 +1764,10 @@ func (m *chatTUI) streamReasoning(chunk string) {
 		m.reasoningView = m.reasoningView[:copy(m.reasoningView, m.reasoningView[drop:])]
 	}
 	m.transcript[m.reasoningTextIdx] = reasoningBlock(string(m.reasoningView), m.width, reasoningTailLines)
-	// Throttle: only trigger the expensive full rebuild every 50ms during active
-	// streaming. commitReasoning always flushes the final state regardless.
+	// Always flag that the viewport needs a cheap SetContent refresh so the
+	// streamed reasoning text is visible immediately. The throttled
+	// transcriptDirty only triggers the expensive full rebuild.
+	m.wrappedDirty = true
 	now := time.Now()
 	if m.reasoningFlushTime.IsZero() || now.Sub(m.reasoningFlushTime) >= reasoningFlushInterval {
 		m.reasoningFlushTime = now
