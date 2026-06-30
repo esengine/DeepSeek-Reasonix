@@ -67,30 +67,20 @@ function normalizeMathText(s: string): string {
   const escapedDollarToken = unusedEscapedDollarToken(r);
   r = r.split("\\$").join(escapedDollarToken);
 
-  // Step 3: repair inline $$. CommonMark requires a blank line before
-  // block math; without it remark-math parses the opening $$ as an
-  // empty math node and the formula leaks out as literal text.
-  // Digits are excluded so `c^2$$` inside a formula is left alone.
-  // Comma is included so `…D(q^2),$$` (closing $$ on the same line as
-  // the trailing content) is repaired: micromark-extension-math only
-  // recognises a closing $$ fence at the start of a new line, so
-  // without this repair it consumes the rest of the document as math
-  // and katex fails on the stray $ in the next paragraph. Closing
-  // braces } and { are included too — a model that writes
-  // `\end{array}$$` or `\frac{a}{b}$$` on one line has the same
-  // micromark-fence problem, and these are the most common ends of
-  // LaTeX math content.
-  r = r.replace(/([A-Za-z\)\]\>\.。！？,{}])\$\$/g, (_m, prev) => prev + "\n\n$$");
-
-  // Orphan opening $$ (model forgot the closing $$) is left alone:
-  // converting it to a lone $ would interact badly with the $…$
-  // matcher below and wrap whole prose paragraphs in math spans. The
-  // right fix is upstream — a post-generation lint or stricter prompt.
-
-  // Step 4: $$…$$ → display placeholders. KaTeX-specific normalisation
-  // runs here so |→\vert (with \| protected) and \text{} escapes both
-  // apply to display math.
-  r = r.replace(/\$\$([\s\S]*?)\$\$/g, (_m, m) => `${DM}${latexNormalizeForKatex(m)}${DM}`);
+  // Step 3+4: normalise display $$ blocks and run KaTeX-specific
+  // normalisation on each recognised math source.
+  //
+  // remark-math requires opening/closing $$ to be on their own lines with
+  // nothing else on that line.  LLMs write several non-conforming variants:
+  //   (a) $$formula$$              — single-line inline display
+  //   (b) text$$\nformula\n$$      — opening $$ glued to prose
+  //   (c) $$\nformula\n$$          — already correct (no-op)
+  //   (d) $$formula\n$$            — opening $$ with content, no \n before $$
+  // A single regex cannot reliably handle all four without accidentally
+  // consuming prose between two blocks.  We use a line-by-line parser
+  // instead.  Safe to run before Step 5/6 because the DM placeholders
+  // contain no `$` and won't be consumed by the inline-$…$ classifier.
+  r = normaliseDisplayBlocks(r);
 
   // Step 5: $\cmd{...}$ pairs where the body may contain a stray $
   // (e.g. $\text{price is $5}$). Recognised first so the inner $ doesn't
@@ -245,4 +235,93 @@ function inlineCodeEnd(s: string, start: number): number {
 function lineEnd(s: string, start: number): number {
   const end = s.indexOf("\n", start);
   return end < 0 ? s.length : end;
+}
+
+/**
+ * Normalise display $$ blocks to the remark-math-parseable form
+ * `$$\nformula\n$$` and replace each with DM placeholders.
+ *
+ * Handles all LLM-generated variants:
+ *   $$formula$$          → $$\nformula\n$$    (single-line)
+ *   text$$\nformula\n$$  → text\n$$\nformula\n$$ (opening $$ glued to prose)
+ *   $$formula\n$$        → $$\nformula\n$$    (opening $$ with content, no preceding \n)
+ *   $$\nformula\n$$      → no change           (already correct)
+ */
+function normaliseDisplayBlocks(s: string): string {
+  const lines = s.split("\n");
+  const out: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const $$idx = line.indexOf("$$");
+
+    // --- Single-line: $$formula$$ on one line ---------------------------
+    // Two $$ on the same line — either $$formula$$ or text$$formula$$.
+    // Skip if the first $$ is preceded by a digit (e.g. c^2$$x$$).
+    if ($$idx >= 0 && line.indexOf("$$", $$idx + 2) >= 0
+        && !($$idx > 0 && /\d/.test(line[$$idx - 1]))) {
+      const m = line.match(/^(.*?)\$\$([^\n]*?)\$\$(.*)$/);
+      if (m) {
+        if (m[1]) out.push(m[1]);
+        out.push(DM);
+        out.push(latexNormalizeForKatex(m[2]));
+        out.push(DM);
+        if (m[3]) out.push(m[3]);
+        i += 1;
+        continue;
+      }
+    }
+
+    // --- Opening $$ on this line (may have content after $$) ------------
+    // Exactly one $$ on this line.  Skip if preceded by a digit
+    // (e.g. c^2$$ — digits are not prose boundaries).
+    if ($$idx >= 0 && line.indexOf("$$", $$idx + 2) < 0
+        && !($$idx > 0 && /\d/.test(line[$$idx - 1]))) {
+      const before = line.slice(0, $$idx);
+      const afterOpen = line.slice($$idx + 2); // content after $$
+
+      // Collect formula lines until closing $$
+      const formulaLines: string[] = [];
+      if (afterOpen) formulaLines.push(afterOpen);
+
+      let j = i + 1;
+      let found = false;
+      while (j < lines.length) {
+        const fLine = lines[j];
+        // Check for closing $$ anywhere on this line (at start, middle, or end)
+        const closeIdx = fLine.indexOf("$$");
+        if (closeIdx >= 0 && fLine.indexOf("$$", closeIdx + 2) < 0) {
+          // Exactly one $$ on this line — it's the closing delimiter
+          const formulaPart = fLine.slice(0, closeIdx);
+          const afterClose = fLine.slice(closeIdx + 2);
+          if (before.trim()) out.push(before);
+          if (formulaPart) formulaLines.push(formulaPart);
+          const formula = formulaLines.join("\n");
+          out.push(DM);
+          out.push(latexNormalizeForKatex(formula));
+          out.push(DM);
+          if (afterClose) out.push(afterClose);
+          i = j + 1;
+          found = true;
+          break;
+        }
+        formulaLines.push(fLine);
+        j += 1;
+      }
+
+      if (found) continue;
+      // No closing $$ found — orphan opening $$. Move $$ to its own line
+      // so remark-math at least sees a well-formed (if incomplete) block.
+      if (before.trim()) out.push(before);
+      out.push("$$");
+      if (afterOpen) out.push(afterOpen);
+    }
+
+    // --- No display math on this line — pass through --------------------
+    out.push(line);
+    i += 1;
+  }
+
+  return out.join("\n");
 }

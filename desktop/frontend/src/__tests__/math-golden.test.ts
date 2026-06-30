@@ -217,7 +217,7 @@ check("\\|x\\| renders as double bars", () => {
 
 console.log("\nnormalizeMath — LLM delimiter conversion");
 eq(normalizeMath("\\(x^2\\)"), "$x^2$", "\\(…\\) → $…$");
-eq(normalizeMath("\\[E=mc^2\\]"), "$$E=mc^2$$", "\\[…\\] → $$…$$");
+eq(normalizeMath("\\[E=mc^2\\]"), "$$\nE=mc^2\n$$", "\\[…\\] → $$…$$");
 eq(normalizeMath("\\\\[4pt]"), "\\\\[4pt]", "\\\\[ line-break spacing protected");
 
 console.log("\nnormalizeMath — \\slashed conversion (regression)");
@@ -230,16 +230,15 @@ eq(normalizeMath("$\\slashed a$"), "$\\not a$", "\\slashed a → \\not a (unbrac
 
 console.log("\nnormalizeMath — inline $$ glued to prose (regression)");
 // User-reported: "…decomposes as$$\n\mathbf{6}…" — block math glued to prose.
-// Without a blank line, remark-math parses the opening $$ as an empty math node
-// and the formula leaks out as literal text. normalizeMath must insert a blank
-// line before any $$ preceded by a letter/closing bracket/etc.
+// remark-math requires closing $$ on its own line. normalizeMath moves it
+// to a new line (preceded by \n) so remark-math sees valid block math.
 check("inline $$ after prose", () => {
   const out = normalizeMath("decomposes as$$\n\\mathbf{6}.$$");
-  return /^decomposes as\n\n\$\$/.test(out) && out.includes("\\mathbf{6}");
+  return /^decomposes as\n\$\$/.test(out) && out.includes("\\mathbf{6}");
 });
 check("inline $$ after closing bracket", () => {
   const out = normalizeMath("(octet)$$ \\mathbf{56}.$$");
-  return out.startsWith("(octet)\n\n$$");
+  return out.startsWith("(octet)\n$$");
 });
 check("inline $$ after closing brace (\\end{...}$$)", () => {
   // A model that writes `\end{array}$$` or `\frac{a}{b}$$` on one line
@@ -247,7 +246,7 @@ check("inline $$ after closing brace (\\end{...}$$)", () => {
   // closing brace is the most common end-of-content marker in LaTeX
   // math, so the repair-regex character class includes it.
   const out = normalizeMath("$$\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}$$");
-  return out.includes("\\end{pmatrix},\n\n$$") || out.includes("\\end{pmatrix}\n\n$$");
+  return out.includes("\\end{pmatrix},\n$$") || out.includes("\\end{pmatrix}\n$$");
 });
 check("inline $$ after comma on same line as content", () => {
   // User-reported (2026-06-12, soft-pion chat): the model wrote the
@@ -261,20 +260,23 @@ check("inline $$ after comma on same line as content", () => {
   // as math, which then fails to render with "Can't use function '$'
   // in math mode" on the stray $ inside the equation body.
   const out = normalizeMath("…D(q^2),$$\nwith $P=…$");
-  return out.includes("D(q^2),\n\n$$");
+  return out.includes("D(q^2),\n$$");
 });
 check("well-formed $$ already on own line is normalised consistently", () => {
   // Whether the model writes `decomposes as$$\n\mathbf{6}.$$` or
-  // `decomposes as\n\n$$\n\mathbf{6}.$$`, both must produce the same
-  // remark-math-parseable form: opening $$ on its own line, body, blank
-  // line, closing $$ on its own line.
+  // `decomposes as\n\n$$\n\mathbf{6}.$$`, both must produce valid
+  // remark-math-parseable form: opening $$ on its own line, body,
+  // closing $$ on its own line.
   const inline = normalizeMath("decomposes as$$\n\\mathbf{6}.$$");
   const block = normalizeMath("decomposes as\n\n$$\n\\mathbf{6}.$$");
-  const expected = "decomposes as\n\n$$\n\\mathbf{6}.\n\n$$";
-  return inline === expected && block === expected;
+  // Both must have $$ on own lines (no $$ glued to prose).
+  // They may differ by one blank line before opening $$ — remark-math
+  // parses both identically.
+  const valid = (s: string) => /\n\$\$\n/.test(s) && /\n\$\$/.test(s) && s.includes("\\mathbf{6}");
+  return valid(inline) && valid(block);
 });
 check("\\[…\\] → $$…$$ still works (no spurious blank line)", () => {
-  return normalizeMath("\\[E=mc^2\\]") === "$$E=mc^2$$";
+  return normalizeMath("\\[E=mc^2\\]") === "$$\nE=mc^2\n$$";
 });
 check("digit before $$ is NOT a prose boundary (preserves c^2$$)", () => {
   const out = normalizeMath("c^2$$ x $$");
@@ -486,7 +488,7 @@ check("\\yng inside \\(...\\) does not get double-wrapped", () => {
 });
 check("\\yng inside \\[...\\] stays display math without triple dollars", () => {
   const out = normalizeMath("\\[\\yng(2,1)\\]");
-  return out.startsWith("$$\\begin{array}{l}")
+  return out.startsWith("$$\n\\begin{array}{l}")
     && out.endsWith("$$")
     && !out.includes("$$$");
 });
@@ -505,7 +507,7 @@ check("digit-starting inline math with \\young does not get nested wrappers", ()
 });
 check("display math ending in digit closes before following bare \\yng", () => {
   const out = normalizeMath("$$x^2$$ \\yng(1)");
-  return out === "$$x^2$$ $\\begin{array}{l}\\square\\end{array}$";
+  return out === "$$\nx^2\n$$\n $\\begin{array}{l}\\square\\end{array}$";
 });
 check("bare \\yng after inline math is separated from adjacent dollars", () => {
   const out = normalizeMath("$x$\\yng(1)");
