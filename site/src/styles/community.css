@@ -37,6 +37,14 @@ a { color: inherit; text-decoration: none; }
 .wrap { max-width: 1180px; margin: 0 auto; padding: 0 32px; }
 [hidden] { display: none !important; }
 
+/* bilingual toggle — mirrors the main site (shared reasonix-lang choice) */
+body[data-lang="en"] .l-zh { display: none !important; }
+body[data-lang="zh"] .l-en { display: none !important; }
+.lang-switch { display: inline-flex; gap: 2px; padding: 3px; background: var(--bg-soft); border-radius: 999px; }
+.lang-switch button { font-family: var(--font-sans); font-size: 12.5px; font-weight: 500; color: var(--ink-2); background: transparent; border: none; cursor: pointer; padding: 6px 12px; border-radius: 999px; transition: background 0.2s, color 0.2s, box-shadow 0.2s; }
+.lang-switch button:hover { color: var(--ink); }
+.lang-switch button.active { background: #fff; color: var(--accent); box-shadow: var(--shadow-1); }
+
 .nav { position: sticky; top: 0; z-index: 50; background: oklch(1 0 0 / 0.86); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border-bottom: 1px solid var(--line); }
 .nav-inner { display: flex; align-items: center; gap: 20px; height: 64px; max-width: 1180px; margin: 0 auto; padding: 0 32px; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; letter-spacing: -0.01em; }

@@ -18,18 +18,21 @@ const canonical = new URL(Astro.url.pathname, Astro.site).href;
   <meta property="og:title" content={title} />
   <meta property="og:description" content={description} />
 </head>
-<body>
+<body data-lang="en">
   <header class="nav">
     <div class="nav-inner">
-      <a class="brand" href="/community/"><span class="mark">R</span>Reasonix<span class="ctag">Community</span></a>
+      <a class="brand" href="/community/"><span class="mark">R</span>Reasonix<span class="ctag"><span class="l-en">Community</span><span class="l-zh">社区</span></span></a>
       <nav class="nav-links">
-        <a class={active === "discussions" ? "here" : ""} href="/community/">Discussions</a>
-        <a href="/community/?category=skills">Skills</a>
-        <a href="/community/?category=show">Showcase</a>
-        <a href="/docs/">Docs ↗</a>
+        <a class={active === "discussions" ? "here" : ""} href="/community/"><span class="l-en">Discussions</span><span class="l-zh">讨论</span></a>
+        <a href="/community/?category=skills"><span class="l-en">Skills</span><span class="l-zh">技能</span></a>
+        <a href="/community/?category=show"><span class="l-en">Showcase</span><span class="l-zh">展示</span></a>
+        <a href="/docs/"><span class="l-en">Docs ↗</span><span class="l-zh">文档 ↗</span></a>
       </nav>
       <div class="nav-right">
-        <label class="nav-search"><span class="ico">⌕</span><input placeholder="Search…" disabled /></label>
+        <div class="lang-switch" role="group" aria-label="Language">
+          <button type="button" data-lang="en" class="active">EN</button>
+          <button type="button" data-lang="zh">中文</button>
+        </div>
         <span id="nav-account"></span>
       </div>
     </div>
@@ -42,10 +45,10 @@ const canonical = new URL(Astro.url.pathname, Astro.site).href;
   <footer class="foot">
     <div class="foot-inner">
       <a class="brand" href="/"><span class="mark">R</span>Reasonix</a>
-      <span>© 2026 · MIT · built to be left running.</span>
+      <span><span class="l-en">© 2026 · MIT · built to be left running.</span><span class="l-zh">© 2026 · MIT 许可 · 为常驻运行而生。</span></span>
       <nav class="links">
-        <a href="/community/guidelines/">Guidelines</a>
-        <a href="/docs/">Docs</a>
+        <a href="/community/guidelines/"><span class="l-en">Guidelines</span><span class="l-zh">规范</span></a>
+        <a href="/docs/"><span class="l-en">Docs</span><span class="l-zh">文档</span></a>
         <a href="https://github.com/esengine/DeepSeek-Reasonix">GitHub</a>
       </nav>
     </div>
