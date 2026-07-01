@@ -1937,7 +1937,7 @@ a[href] {
   display: grid;
   justify-content: start;
   grid-template-rows: var(--app-chrome-height) minmax(0, 1fr);
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) minmax(0, var(--workspace-width));
   height: 100%;
   min-height: 0;
   width: 100%;
@@ -1963,23 +1963,16 @@ a[href] {
 }
 .layout--sidebar-collapsed {
   --sidebar-width: 0px;
-  grid-template-columns: 0px minmax(0, 1fr);
-}
-.layout:not(.layout--sidebar-collapsed):not(.layout--workspace-open):not(.layout--workspace-maximized) {
-  grid-template-columns: var(--sidebar-expanded-width) minmax(0, 1fr);
 }
 .layout--workspace-open {
   --chrome-right-toggle-offset: var(--workspace-width);
   min-width: min(780px, 100vw);
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) minmax(0, var(--workspace-width));
 }
 .layout--workspace-open:not(.layout--sidebar-collapsed) {
   min-width: min(780px, 100vw);
-  grid-template-columns: var(--sidebar-expanded-width) minmax(0, 1fr) minmax(0, var(--workspace-width));
 }
 .layout--workspace-open.layout--sidebar-collapsed {
   min-width: min(560px, 100vw);
-  grid-template-columns: 0px minmax(0, 1fr) minmax(0, var(--workspace-width));
 }
 /* Skip dock-column interpolation in creation mode. WebKit can mount the
    overview at zero inline size and fail to repaint its text on reopen. */
@@ -19164,6 +19157,15 @@ body > .mermaid-diagram--fullscreen {
 .layout--workspace-maximized .workbench-dock {
   width: auto;
   max-width: none;
+}
+
+.workbench-dock--collapsed {
+  overflow: hidden;
+  width: 0;
+  min-width: 0;
+  opacity: 0;
+  pointer-events: none;
+  border-left: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
