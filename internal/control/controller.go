@@ -790,6 +790,26 @@ func turnOutcome(err error) string {
 // Send starts a turn with an uncomposed message. The controller applies
 // auto-plan, plan-mode, memory, and background-job framing inside the async turn
 // path so frontends do not block on classifier I/O.
+// runGuardedOrSteer is like runGuarded but when the controller is already
+// running it queues the steerText into the agent's steer queue instead of
+// silently dropping the request. Pass an empty steerText to get the same
+// behavior as runGuarded (silent drop). This avoids the call-at-every-leaf
+// problem — callers that have user-facing text pass it here and the running
+// path handles it via Steer.
+func (c *Controller) runGuardedOrSteer(steerText string, body func(ctx context.Context) error) {
+	c.mu.Lock()
+	if c.running {
+		exec := c.executor
+		c.mu.Unlock()
+		if exec != nil && steerText != "" {
+			exec.Steer(steerText)
+		}
+		return
+	}
+	c.mu.Unlock()
+	c.runGuarded(body)
+}
+
 func (c *Controller) Send(input string) {
 	c.SendWithRaw(input, input)
 }
@@ -799,7 +819,7 @@ func (c *Controller) Send(input string) {
 // resolved @-reference payloads so referenced file contents cannot inflate the
 // complexity score.
 func (c *Controller) SendWithRaw(input, raw string) {
-	c.runGuarded(func(ctx context.Context) error { return c.runGoalLoopWithRaw(ctx, input, raw) })
+	c.runGuardedOrSteer(raw, func(ctx context.Context) error { return c.runGoalLoopWithRaw(ctx, input, raw) })
 }
 
 // planApprovalTool is the Tool name on the ApprovalRequest the controller emits
@@ -1604,13 +1624,13 @@ func (c *Controller) runScopedRefTurnWithRefs(input, refLine, display string) {
 }
 
 func (c *Controller) runRefTurnWithResolver(input, refLine, display string, resolve func(context.Context, string) (string, []string)) {
-	c.runGuarded(func(ctx context.Context) error {
+	c.runGuardedOrSteer(display, func(ctx context.Context) error {
 		return c.runRefTurnWithResolverSync(ctx, input, refLine, display, "", resolve)
 	})
 }
 
 func (c *Controller) runEditedRefTurnWithResolver(input, refLine, display, original string, resolve func(context.Context, string) (string, []string)) {
-	c.runGuarded(func(ctx context.Context) error {
+	c.runGuardedOrSteer(display, func(ctx context.Context) error {
 		return c.runRefTurnWithResolverSync(ctx, input, refLine, display, original, resolve)
 	})
 }
