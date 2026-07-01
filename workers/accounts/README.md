@@ -88,3 +88,9 @@ wrangler deploy
 
 The `id.reasonix.io` custom domain route is declared in `wrangler.toml`; point the
 DNS/custom-domain binding at this worker in the Cloudflare dashboard on first deploy.
+
+The steps above are the one-time bootstrap. After that, every merge to `main-v2`
+that touches `workers/accounts/**` redeploys via `.github/workflows/deploy-accounts-worker.yml`
+(same pattern as the crash worker). CI does **not** run migrations or set secrets —
+apply new migrations with `pnpm db:apply:remote` and rotate secrets with `wrangler secret put`
+out of band.

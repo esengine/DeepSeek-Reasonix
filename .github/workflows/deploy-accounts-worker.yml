@@ -1,0 +1,38 @@
+name: Deploy accounts worker
+
+on:
+  push:
+    branches: [main-v2]
+    paths:
+      - 'workers/accounts/**'
+      - '.github/workflows/deploy-accounts-worker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-accounts-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: workers/accounts/pnpm-lock.yaml
+      - name: Deploy
+        working-directory: workers/accounts
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          pnpm install --frozen-lockfile
+          npx wrangler deploy
