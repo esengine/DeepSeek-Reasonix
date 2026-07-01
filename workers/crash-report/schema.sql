@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS metric_users (
   PRIMARY KEY (date, signal, bucket, install_id)
 );
 
+-- Legacy local auth — superseded by id.reasonix.io identity + the `access`
+-- table below. Kept during the transition; migrate-access.sql copies roles over.
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT NOT NULL UNIQUE,
@@ -105,6 +107,17 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE INDEX IF NOT EXISTS sessions_user ON sessions (user_id);
+
+-- Dashboard authorization keyed by the shared account email. Identity (login,
+-- password, verification) lives in id.reasonix.io; this only maps email → role.
+CREATE TABLE IF NOT EXISTS access (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  approved_at TEXT,
+  approved_by TEXT
+);
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

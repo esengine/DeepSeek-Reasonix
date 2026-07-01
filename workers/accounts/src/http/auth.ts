@@ -6,9 +6,9 @@ import { repos } from "../db";
 import { readSessionToken } from "../auth/cookies";
 import { ApiError } from "./errors";
 
-// Non-browser clients (CLI/desktop) carry the session in an Authorization header
-// instead of the cookie.
-function readBearerToken(c: Context<AppEnv>): string | undefined {
+// Non-browser clients (CLI/desktop) and cross-service callers carry the session
+// in an Authorization header instead of the cookie.
+export function readBearerToken(c: Context<AppEnv>): string | undefined {
   const header = c.req.header("authorization");
   if (!header) return undefined;
   const token = /^Bearer\s+(.+)$/i.exec(header.trim())?.[1]?.trim();

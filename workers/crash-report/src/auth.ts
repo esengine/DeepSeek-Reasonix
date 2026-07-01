@@ -1,3 +1,6 @@
+// Dashboard authorization. Identity comes from id.reasonix.io (the shared
+// account service); this worker only maps a signed-in identity to a per-dashboard
+// role via the `access` table.
 import type { Env } from "./env";
 import { esc } from "./shell";
 
@@ -17,72 +20,16 @@ export function atLeast(role: Role, min: Role): boolean {
   return RANK[role] >= RANK[min];
 }
 
-const COOKIE = "rxsess";
-const SESSION_TTL_MS = 30 * 86_400_000;
-const PBKDF2_ITERS = 100_000;
+// The id.reasonix.io session cookie is scoped to `.reasonix.io`, so the browser
+// sends it here too; we hand it back as a Bearer token to resolve the identity.
+const SHARED_COOKIE = "rxid";
 
-function b64(bytes: Uint8Array): string {
-  let s = "";
-  for (const byte of bytes) s += String.fromCharCode(byte);
-  return btoa(s);
+function idOrigin(env: Env): string {
+  return (env.ID_ORIGIN ?? "https://id.reasonix.io").replace(/\/$/, "");
 }
 
-function unb64(s: string): Uint8Array {
-  const bin = atob(s);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-async function deriveBits(password: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations, hash: "SHA-256" }, key, 256);
-  return new Uint8Array(bits);
-}
-
-export async function hashPassword(password: string): Promise<string> {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const hash = await deriveBits(password, salt, PBKDF2_ITERS);
-  return `pbkdf2$${PBKDF2_ITERS}$${b64(salt)}$${b64(hash)}`;
-}
-
-export async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const [scheme, iters, saltB64, hashB64] = stored.split("$");
-  if (scheme !== "pbkdf2") return false;
-  const got = await deriveBits(password, unb64(saltB64), Number(iters));
-  const want = unb64(hashB64);
-  return got.byteLength === want.byteLength && crypto.subtle.timingSafeEqual(got, want);
-}
-
-function randomToken(): string {
-  const b = crypto.getRandomValues(new Uint8Array(32));
-  return [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
-}
-
-export async function createSession(env: Env, userId: number): Promise<string> {
-  const token = randomToken();
-  const now = Date.now();
-  await env.DB.prepare("INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)")
-    .bind(token, userId, new Date(now).toISOString(), new Date(now + SESSION_TTL_MS).toISOString())
-    .run();
-  return token;
-}
-
-export async function destroySession(env: Env, token: string): Promise<void> {
-  await env.DB.prepare("DELETE FROM sessions WHERE token = ?1").bind(token).run();
-}
-
-export async function endSession(request: Request, env: Env): Promise<void> {
-  const token = getCookie(request, COOKIE);
-  if (token) await destroySession(env, token);
-}
-
-export function sessionCookie(token: string): string {
-  return `${COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`;
-}
-
-export function clearCookie(): string {
-  return `${COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
+function appOrigin(env: Env): string {
+  return (env.APP_ORIGIN ?? "https://reasonix.io").replace(/\/$/, "");
 }
 
 export function getCookie(request: Request, name: string): string | null {
@@ -94,21 +41,74 @@ export function getCookie(request: Request, name: string): string | null {
   return null;
 }
 
-export async function currentUser(request: Request, env: Env): Promise<User | null> {
-  const token = getCookie(request, COOKIE);
+// Where an unauthenticated visitor is sent to sign in: the shared login page,
+// with a same-site `next` back to the page they wanted.
+export function loginUrl(env: Env, request: Request): string {
+  const here = new URL(request.url);
+  const next = `${here.origin}${here.pathname}`;
+  return `${appOrigin(env)}/login/?next=${encodeURIComponent(next)}`;
+}
+
+interface Identity {
+  email: string;
+  emailVerified: boolean;
+}
+
+async function resolveIdentity(request: Request, env: Env): Promise<Identity | null> {
+  const token = getCookie(request, SHARED_COOKIE);
   if (!token) return null;
-  const row = await env.DB.prepare(
-    `SELECT u.id, u.email, u.role, u.created_at, u.approved_at, s.expires_at
-     FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?1`,
-  )
-    .bind(token)
-    .first<{ id: number; email: string; role: Role; created_at: string; approved_at: string | null; expires_at: string }>();
-  if (!row) return null;
-  if (row.expires_at < new Date().toISOString()) {
-    await destroySession(env, token);
-    return null;
+  const res = await fetch(`${idOrigin(env)}/me`, { headers: { authorization: `Bearer ${token}` } });
+  if (!res.ok) return null;
+  const data = await res.json<{ user?: { email?: string; emailVerified?: boolean } }>().catch(() => null);
+  const email = data?.user?.email?.toLowerCase();
+  if (!email) return null;
+  return { email, emailVerified: data?.user?.emailVerified === true };
+}
+
+// Resolves the signed-in dashboard user, or null. A first-seen identity is
+// recorded as `pending`; an ADMIN_EMAILS identity is force-promoted to admin so
+// the owner can never be locked out of their own dashboard.
+export async function currentUser(request: Request, env: Env): Promise<User | null> {
+  const identity = await resolveIdentity(request, env);
+  if (!identity) return null;
+
+  const now = new Date().toISOString();
+  const bootstrapAdmin = isAdminEmail(env, identity.email);
+  let row = await selectAccess(env, identity.email);
+  if (!row) {
+    await env.DB.prepare(
+      "INSERT INTO access (email, role, created_at, approved_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(email) DO NOTHING",
+    )
+      .bind(identity.email, bootstrapAdmin ? "admin" : "pending", now, bootstrapAdmin ? now : null)
+      .run();
+    row = await selectAccess(env, identity.email);
+    if (!row) return null;
+  } else if (bootstrapAdmin && row.role !== "admin") {
+    await env.DB.prepare("UPDATE access SET role = 'admin', approved_at = COALESCE(approved_at, ?2) WHERE id = ?1")
+      .bind(row.id, now)
+      .run();
+    row.role = "admin";
   }
-  return { id: row.id, email: row.email, role: row.role, created_at: row.created_at, approved_at: row.approved_at };
+  return row;
+}
+
+function selectAccess(env: Env, email: string): Promise<User | null> {
+  return env.DB.prepare("SELECT id, email, role, created_at, approved_at FROM access WHERE email = ?1")
+    .bind(email)
+    .first<User>();
+}
+
+// Ends the shared id.reasonix.io session (best-effort) and returns a Set-Cookie
+// that clears the shared cookie browser-side.
+export async function sharedLogout(request: Request, env: Env): Promise<string> {
+  const token = getCookie(request, SHARED_COOKIE);
+  if (token) {
+    await fetch(`${idOrigin(env)}/auth/logout`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+    }).catch(() => {});
+  }
+  return `${SHARED_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.reasonix.io; Max-Age=0`;
 }
 
 export function isAdminEmail(env: Env, email: string): boolean {

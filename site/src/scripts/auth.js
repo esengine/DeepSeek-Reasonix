@@ -24,6 +24,19 @@ const $ = (id) => document.getElementById(id);
 const qp = new URLSearchParams(location.search);
 const withBase = (p) => (import.meta.env.BASE_URL.replace(/\/$/, "") + p) || p;
 
+// A `next` is honoured only if it's a same-origin path or an absolute https URL
+// under reasonix.io, so a subdomain (e.g. crash.reasonix.io) can return here
+// after sign-in without opening a redirect to an arbitrary host.
+function safeNext(next) {
+  if (!next) return null;
+  if (next.startsWith("/")) return next;
+  try {
+    const u = new URL(next);
+    if (u.protocol === "https:" && (u.host === "reasonix.io" || u.host.endsWith(".reasonix.io"))) return next;
+  } catch {}
+  return null;
+}
+
 function msg(el, kind, text) {
   if (!el) return;
   el.className = "auth-msg " + kind;
@@ -52,8 +65,7 @@ if (loginForm) {
     busy(btn, true);
     try {
       await api("/auth/login", { method: "POST", body: { email: $("email").value.trim(), password: $("password").value } });
-      const next = qp.get("next");
-      location.href = next && next.startsWith("/") ? next : withBase("/account/");
+      location.href = safeNext(qp.get("next")) || withBase("/account/");
     } catch (err) {
       msg(box, "error", err.message);
       busy(btn, false);
