@@ -2059,10 +2059,10 @@ export default function App() {
       ({
         "--sidebar-expanded-width": `${sidebarRenderWidth}px`,
         "--chat-min-width": `${chatReservedWidth}px`,
-        "--workspace-width": `${workspacePanelRenderWidth}px`,
+        "--workspace-width": workspacePanelOpen ? `${workspacePanelRenderWidth}px` : "0px",
         "--workspace-resizer-width": `${WORKSPACE_RESIZER_WIDTH}px`,
       }) as CSSProperties,
-    [chatReservedWidth, sidebarRenderWidth, workspacePanelRenderWidth],
+    [chatReservedWidth, sidebarRenderWidth, workspacePanelOpen, workspacePanelRenderWidth],
   );
 
   const setWorkspacePanel = useCallback((open: boolean) => {
@@ -3507,13 +3507,13 @@ export default function App() {
           />
         )}
 
-        {workspacePanelRenderable && (
-          <aside
-            className={[
-              "workbench-dock",
-              `workbench-dock--${rightDockMode}`,
-            ].join(" ")}
-            aria-label={t("rightDock.workbench")}
+        <aside
+          className={[
+            "workbench-dock",
+            `workbench-dock--${rightDockMode}`,
+            !workspacePanelRenderable ? "workbench-dock--collapsed" : "",
+          ].filter(Boolean).join(" ")}
+          aria-label={t("rightDock.workbench")}
           >
             <div className="workbench-dock__tools">
               <div className="workbench-dock__tabs" role="tablist" aria-label={t("rightDock.views")}>
@@ -3589,7 +3589,6 @@ export default function App() {
               )}
             </div>
           </aside>
-        )}
       </div>
 
       {histView !== null && (
