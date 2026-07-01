@@ -35,6 +35,7 @@ export function assertCanPost(member: Member, opts: { minTrust: number; body: st
   if (member.silencedUntil && member.silencedUntil > new Date().toISOString()) {
     throw new HttpError(403, "silenced", "Your account is temporarily restricted from posting.");
   }
+  if (isStaff(member)) return;
   if (member.trust < opts.minTrust) {
     throw new HttpError(403, "insufficient_trust", "You don't have access to post in this category yet.");
   }
@@ -43,8 +44,12 @@ export function assertCanPost(member: Member, opts: { minTrust: number; body: st
   }
 }
 
-// Whether a member's action is subject to the per-IP creation limiter. Trusted
-// members (regular+) skip it; new/basic members are always rate-limited.
+function isStaff(member: Member): boolean {
+  return member.role === "admin" || member.role === "moderator";
+}
+
+// Whether a member's action is subject to the per-IP creation limiter. Staff and
+// trusted members (regular+) skip it; new/basic members are always rate-limited.
 export function rateLimited(member: Member): boolean {
-  return member.trust < TRUST.REGULAR;
+  return !isStaff(member) && member.trust < TRUST.REGULAR;
 }
