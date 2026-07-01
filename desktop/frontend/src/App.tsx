@@ -997,6 +997,12 @@ export default function App() {
 
   // Persist window geometry across launches.
   useWindowStatePersistence();
+  // Restore workspace panel state from previous session.
+  useEffect(() => {
+    app.LoadLayoutState().then((s) => {
+      if (s?.workspacePanelOpen) setWorkspacePanelOpen(true);
+    }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useViewportHeightVar();
   useEffect(() => {
     document.documentElement.setAttribute("data-platform", desktopPlatform);

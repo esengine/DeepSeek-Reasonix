@@ -110,6 +110,10 @@ interface DesktopWindowState {
   maximised: boolean;
 }
 
+interface DesktopLayoutState {
+  workspacePanelOpen: boolean;
+}
+
 // AppBindings is the hand-written contract between the React app and the Go
 // kernel. It uses local types (types.ts) so components don't import generated
 // model classes. _CheckGeneratedBindings catches drift: when a Go method is
@@ -263,6 +267,8 @@ export interface AppBindings {
   SaveDoc(path: string, body: string): Promise<string>;
   SaveDocForTab(tabID: string, path: string, body: string): Promise<string>;
   DesktopStartupSettings(): Promise<DesktopStartupSettingsView>;
+  LoadLayoutState(): Promise<DesktopLayoutState>;
+  SaveLayoutState(state: DesktopLayoutState): Promise<void>;
   Settings(): Promise<SettingsView>;
   HooksSettings(scope: string): Promise<HooksSettingsView>;
   SaveHooksSettings(scope: string, hooks: HookConfigView[]): Promise<void>;
@@ -3189,6 +3195,12 @@ function makeMockApp(): AppBindings {
     },
     async SaveWindowState(_state) {
       // no-op in browser dev — no real window geometry to persist
+    },
+    async LoadLayoutState() {
+      return { workspacePanelOpen: false };
+    },
+    async SaveLayoutState(_state) {
+      // no-op in browser dev — no real layout state to persist
     },
     async ContextPanel(_tabID: string) {
       const now = Date.now();

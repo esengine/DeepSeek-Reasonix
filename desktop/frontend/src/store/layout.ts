@@ -33,6 +33,7 @@ export const RIGHT_DOCK_PREVIEW_MIN_WIDTH = 420;
 export const RIGHT_DOCK_MIN_RENDER_WIDTH = 280;
 export const RIGHT_DOCK_MAX_WIDTH = 860;
 const WORKSPACE_PANEL_DEFAULT_OPEN = false;
+const WORKSPACE_PANEL_OPEN_KEY = "reasonix.workspacePanel.open";
 
 export function clampSidebarWidth(width: number): number {
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
@@ -80,6 +81,28 @@ export function saveSidebarCollapsed(collapsed: boolean): void {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
   } catch {
     /* ignore storage failures */
+  }
+}
+
+function loadWorkspacePanelOpen(): boolean {
+  if (typeof window === "undefined") return WORKSPACE_PANEL_DEFAULT_OPEN;
+  try {
+    return window.localStorage.getItem(WORKSPACE_PANEL_OPEN_KEY) === "1";
+  } catch {
+    return WORKSPACE_PANEL_DEFAULT_OPEN;
+  }
+}
+
+export async function persistWorkspacePanelOpen(open: boolean): Promise<void> {
+  if (typeof window === "undefined") return;
+  // Best-effort localStorage fallback for fast subsequent loads, plus Go backend
+  // for durable cross-session persistence.
+  try { window.localStorage.setItem(WORKSPACE_PANEL_OPEN_KEY, open ? "1" : "0"); } catch { /* ok */ }
+  try {
+    const { app } = await import("../lib/bridge");
+    await app.SaveLayoutState({ workspacePanelOpen: open });
+  } catch {
+    /* bridge not ready yet — the subscribe will retry on next change */
   }
 }
 
@@ -140,7 +163,7 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   sidebarWidth: loadSidebarWidth(),
   rightDockTreeWidth: loadRightDockTreeWidth(),
   rightDockPreviewWidth: loadRightDockPreviewWidth(),
-  workspacePanelOpen: WORKSPACE_PANEL_DEFAULT_OPEN,
+  workspacePanelOpen: loadWorkspacePanelOpen(),
   workspacePanelMaximized: false,
   workspacePreviewActive: false,
   rightDockMode: "context",
@@ -153,3 +176,12 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   setWorkspacePreviewActive: (update) => set((s) => ({ workspacePreviewActive: applySetState(s.workspacePreviewActive, update) })),
   setRightDockMode: (update) => set((s) => ({ rightDockMode: applySetState(s.rightDockMode, update) })),
 }));
+
+// Auto-persist workspacePanelOpen — subscribe catches changes from every code path.
+if (typeof window !== "undefined") {
+  useLayoutStore.subscribe((state, prev) => {
+    if (state.workspacePanelOpen !== prev.workspacePanelOpen) {
+      persistWorkspacePanelOpen(state.workspacePanelOpen);
+    }
+  });
+}
