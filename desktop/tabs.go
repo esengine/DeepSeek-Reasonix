@@ -2495,7 +2495,7 @@ func sessionBindingInDir(dir, sessionPath string) (sessionBinding, bool) {
 	}
 	if hasMeta {
 		binding.topicID = strings.TrimSpace(meta.TopicID)
-		binding.topicTitle = strings.TrimSpace(meta.TopicTitle)
+		binding.topicTitle = cleanStoredTopicTitle(meta.TopicTitle)
 	}
 	if binding.scope == "project" {
 		binding.workspaceRoot = normalizeProjectRoot(binding.workspaceRoot)
@@ -2520,7 +2520,7 @@ func sessionBindingFromMeta(path string, meta agent.BranchMeta) (sessionBinding,
 		scope:         scope,
 		workspaceRoot: workspaceRoot,
 		topicID:       strings.TrimSpace(meta.TopicID),
-		topicTitle:    strings.TrimSpace(meta.TopicTitle),
+		topicTitle:    cleanStoredTopicTitle(meta.TopicTitle),
 		hasMeta:       true,
 		meta:          meta,
 	}, true
@@ -2719,7 +2719,9 @@ func topicTitleFallbackForOpen(workspaceRoot, topicID, sessionPath string) (stri
 	if topicID == "" || sessionPath == "" {
 		return "", "", false
 	}
-	storedTitle := strings.TrimSpace(loadTopicTitle(workspaceRoot, topicID))
+	rawStoredTitle := strings.TrimSpace(loadTopicTitle(workspaceRoot, topicID))
+	storedTitle := cleanStoredTopicTitle(rawStoredTitle)
+	storedTitleInternal := titleLooksInternal(rawStoredTitle) && storedTitle == ""
 	storedSource := strings.TrimSpace(loadTopicTitleSource(workspaceRoot, topicID))
 	if storedTitle != "" {
 		if storedSource == topicTitleSourceManual || storedTitle != defaultTopicTitle {
@@ -2738,10 +2740,10 @@ func topicTitleFallbackForOpen(workspaceRoot, topicID, sessionPath string) (stri
 		}
 	}
 
-	if storedSource == topicTitleSourceManual {
+	if storedSource == topicTitleSourceManual && !storedTitleInternal {
 		return "", "", false
 	}
-	if storedSource == "" || storedSource == topicTitleSourceAuto {
+	if storedSource == "" || storedSource == topicTitleSourceAuto || storedTitleInternal {
 		if title := topicTitleFromSession(sessionPath); title != "" {
 			return title, topicTitleSourceAuto, true
 		}
@@ -2765,14 +2767,58 @@ func topicTitleFromSession(path string) string {
 			return ""
 		}
 		if msg.Role == "user" {
-			content := control.StripComposePrefixes(agent.HandoffTask(msg.Content))
+			content := agent.UserPreviewText(msg.Content)
 			content = control.StripReferencedContextPrefix(content)
 			return topicTitleFromText(content)
 		}
 	}
 }
 
+func memoryCompilerTitleText(text string) (string, bool) {
+	if !titleLooksInternal(text) {
+		return "", false
+	}
+	cleaned := strings.TrimSpace(agent.UserPreviewText(text))
+	if cleaned == "" || titleLooksInternal(cleaned) {
+		return "", true
+	}
+	return cleaned, true
+}
+
+func titleLooksInternal(text string) bool {
+	return strings.Contains(text, "<memory-compiler") ||
+		strings.Contains(text, `"type":"memory_v5_execution_contract"`) ||
+		strings.Contains(text, `"type": "memory_v5_execution_contract"`)
+}
+
+func cleanStoredSessionTitle(text string) string {
+	if cleaned, ok := memoryCompilerTitleText(text); ok {
+		return cleaned
+	}
+	return strings.TrimSpace(text)
+}
+
+func cleanStoredTopicTitle(text string) string {
+	if cleaned, ok := memoryCompilerTitleText(text); ok {
+		return topicTitleFromText(cleaned)
+	}
+	return strings.TrimSpace(text)
+}
+
+func topicTreeTitle(title, preview string) string {
+	if title := cleanStoredTopicTitle(title); title != "" {
+		return title
+	}
+	if title := topicTitleFromText(preview); title != "" {
+		return title
+	}
+	return defaultTopicTitle
+}
+
 func topicTitleFromText(text string) string {
+	if cleaned, ok := memoryCompilerTitleText(text); ok {
+		text = cleaned
+	}
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return ""
@@ -3782,7 +3828,7 @@ func loadTopicCreatedAt(workspaceRoot, topicID string) int64 {
 
 func topicTitleForTab(scope, workspaceRoot, topicID string) string {
 	titleRoot := topicTitleRoot(scope, workspaceRoot)
-	if title := strings.TrimSpace(loadTopicTitle(titleRoot, topicID)); title != "" {
+	if title := cleanStoredTopicTitle(loadTopicTitle(titleRoot, topicID)); title != "" {
 		return title
 	}
 	if scope == "global" {
@@ -4878,6 +4924,7 @@ func (a *App) topicTrashTargets(topicID string) ([]topicTrashTarget, error) {
 type topicSummary struct {
 	turns          int
 	lastActivityAt int64
+	preview        string
 }
 
 var listProjectTreeMu sync.Mutex
@@ -5065,8 +5112,8 @@ func (a *App) ListProjectTree() []ProjectNode {
 		globalTopicIDs := pinnedTopicIDs(orderedTopicIDs(f.GlobalTopics, globalTitleMap), f.GlobalPinnedTopics)
 		children := make([]ProjectNode, 0, len(globalTopicIDs))
 		for _, id := range globalTopicIDs {
-			title := globalTitleMap[id]
 			summary := topicSummaries[topicSummaryKey("global", "", id)]
+			title := topicTreeTitle(globalTitleMap[id], summary.preview)
 			open, running, status := topicRuntimeStatus(topicSummaryKey("global", "", id))
 			pinned := containsDesktopString(f.GlobalPinnedTopics, id)
 			children = append(children, ProjectNode{
@@ -5136,11 +5183,8 @@ func (a *App) ListProjectTree() []ProjectNode {
 
 		children := make([]ProjectNode, 0, len(topicIDs))
 		for _, tid := range topicIDs {
-			topicTitle := strings.TrimSpace(titleMap[tid])
-			if topicTitle == "" {
-				topicTitle = defaultTopicTitle
-			}
 			summary := topicSummaries[topicSummaryKey("project", p.Root, tid)]
+			topicTitle := topicTreeTitle(titleMap[tid], summary.preview)
 			open, running, status := topicRuntimeStatus(topicSummaryKey("project", p.Root, tid))
 			pinned := containsDesktopString(p.PinnedTopics, tid)
 			children = append(children, ProjectNode{
@@ -5182,7 +5226,7 @@ func projectSessionNodeKey(scope, sessionPath string) string {
 }
 
 func runtimeSessionTreeLabel(tab *WorkspaceTab, info agent.SessionInfo, title string) string {
-	if title = strings.TrimSpace(title); title != "" {
+	if title = cleanStoredSessionTitle(title); title != "" {
 		return title
 	}
 	if preview := topicTitleFromText(info.Preview); preview != "" {
@@ -5969,6 +6013,9 @@ func mergeSessionInfos(dir string, infos []agent.SessionInfo, titles map[string]
 		lastActivityAt := info.LastActivityAt.UnixMilli()
 		if lastActivityAt > summary.lastActivityAt {
 			summary.lastActivityAt = lastActivityAt
+			summary.preview = info.Preview
+		} else if summary.preview == "" {
+			summary.preview = info.Preview
 		}
 		topicSummaries[key] = summary
 	}

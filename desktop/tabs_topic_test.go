@@ -1544,6 +1544,87 @@ func TestAutoTitleTopicFromFirstUserMessage(t *testing.T) {
 	}
 }
 
+func TestAutoTitleTopicUnwrapsMemoryCompilerContract(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topic, err := NewApp().CreateTopic("project", projectRoot, "")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	prompt := historyMemoryCompilerContract(t, "测试用例设计")
+	if err := os.WriteFile(sessionPath, []byte(`{"role":"user","content":`+strconv.Quote(prompt)+`}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+
+	title, updated := autoTitleTopicFromSession(projectRoot, topic.ID, sessionPath)
+	if !updated {
+		t.Fatal("auto title should update")
+	}
+	if title != "测试用例设计" {
+		t.Fatalf("generated title = %q", title)
+	}
+}
+
+func TestProjectTreeFallsBackFromInternalTopicTitleToSessionPreview(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_memory_title"
+	rawTitle := "<memory-compiler-e"
+	if err := setTopicTitleWithSource(projectRoot, topicID, rawTitle, topicTitleSourceManual); err != nil {
+		t.Fatalf("set stale topic title: %v", err)
+	}
+	if err := prependTopicInProjectsFile(projectRoot, topicID, true); err != nil {
+		t.Fatalf("index topic: %v", err)
+	}
+	dir := desktopSessionDir(projectRoot)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	sessionPath := writeTopicSessionWithPrompt(t, dir, "memory-title.jsonl", topicID, rawTitle, projectRoot, "测试用例设计", time.Now())
+
+	title, source, ok := topicTitleFallbackForOpen(projectRoot, topicID, sessionPath)
+	if !ok || title != "测试用例设计" || source != topicTitleSourceAuto {
+		t.Fatalf("fallback title=(%q,%q,%v), want 测试用例设计 auto true", title, source, ok)
+	}
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || len(nodes[0].Children) != 1 {
+		t.Fatalf("project tree = %#v, want one project with one topic", nodes)
+	}
+	if got := nodes[0].Children[0].Label; got != "测试用例设计" {
+		t.Fatalf("tree title = %q, want 测试用例设计", got)
+	}
+}
+
+func TestSessionMetaCleansMemoryCompilerTitles(t *testing.T) {
+	rawTitle := historyMemoryCompilerContract(t, "测试用例设计")
+	now := time.Now()
+	meta := sessionMetaFromInfo(agent.SessionInfo{
+		Path:           filepath.Join(t.TempDir(), "memory-title.jsonl"),
+		Preview:        "测试用例设计",
+		Turns:          1,
+		CreatedAt:      now,
+		LastActivityAt: now,
+		TopicTitle:     rawTitle,
+	}, rawTitle, false, false, 0)
+
+	if meta.Title != "测试用例设计" {
+		t.Fatalf("session title = %q, want 测试用例设计", meta.Title)
+	}
+	if meta.TopicTitle != "测试用例设计" {
+		t.Fatalf("topic title = %q, want 测试用例设计", meta.TopicTitle)
+	}
+
+	plainTitle := "explain memory_v5_execution_contract"
+	plain := sessionMetaFromInfo(agent.SessionInfo{TopicTitle: plainTitle}, plainTitle, false, false, 0)
+	if plain.Title != plainTitle || plain.TopicTitle != plainTitle {
+		t.Fatalf("plain title cleaned to (%q,%q), want %q", plain.Title, plain.TopicTitle, plainTitle)
+	}
+}
+
 func TestAutoTitleTopicStripsReasoningLanguagePrefix(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

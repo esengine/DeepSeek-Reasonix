@@ -58,6 +58,9 @@ func loadSessionTitles(dir string) map[string]string {
 		return m
 	}
 	_ = json.Unmarshal(b, &m)
+	for key, title := range m {
+		m[key] = cleanStoredSessionTitle(title)
+	}
 	return m
 }
 

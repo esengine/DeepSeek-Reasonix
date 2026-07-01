@@ -1891,7 +1891,7 @@ func sessionMetaFromInfo(s agent.SessionInfo, title string, current, open bool, 
 	return SessionMeta{
 		Path:           s.Path,
 		Preview:        s.Preview,
-		Title:          title,
+		Title:          cleanStoredSessionTitle(title),
 		Turns:          s.Turns,
 		CreatedAt:      s.CreatedAt.UnixMilli(),
 		LastActivityAt: s.LastActivityAt.UnixMilli(),
@@ -1902,7 +1902,7 @@ func sessionMetaFromInfo(s agent.SessionInfo, title string, current, open bool, 
 		Scope:          s.Scope,
 		WorkspaceRoot:  s.WorkspaceRoot,
 		TopicID:        s.TopicID,
-		TopicTitle:     s.TopicTitle,
+		TopicTitle:     cleanStoredTopicTitle(s.TopicTitle),
 	}
 }
 
