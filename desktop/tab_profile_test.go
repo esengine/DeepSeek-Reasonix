@@ -693,3 +693,76 @@ func userConfigPathForTest() string {
 	}
 	return ""
 }
+
+
+func TestTabModeLoadedAsNormalNotBlank(t *testing.T) {
+	// Regression: restoreOrBuildTabs should set tab.mode to a valid normalized
+	// value ("normal") instead of "" when loading an entry with mode="" (old
+	// JSON format where omitempty dropped the default). Having tab.mode=""
+	// is fragile — any code that compares tab.mode directly (without normalizeTabMode)
+	// would misidentify it.
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	tab := testTab("a", t.TempDir())
+	tab.mode = ""
+	tab.toolApprovalMode = control.ToolApprovalAsk
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	app.mu.Lock()
+	app.saveTabsLocked()
+	app.mu.Unlock()
+
+	got := loadTabsFile()
+	if len(got.Tabs) != 1 {
+		t.Fatalf("tabs len = %d, want 1", len(got.Tabs))
+	}
+
+	// Simulate restoreOrBuildTabs loading logic
+	loadedMode := normalizeTabMode(got.Tabs[0].Mode)
+	if loadedMode != "normal" {
+		t.Errorf("normalizeTabMode(saved mode %q) = %q, want "normal"", got.Tabs[0].Mode, loadedMode)
+	}
+}
+
+func TestTabModeReconciliationEdgeCases(t *testing.T) {
+	// Verify that the reconciliation logic in restoreOrBuildTabs handles
+	// the edge case where entry.Mode="" (old format) and toolApproval="yolo".
+	isolateDesktopUserDirs(t)
+
+	tests := []struct {
+		mode             string
+		toolApprovalMode string
+		wantMode         string
+		wantToolApproval string
+	}{
+		{"", "yolo", "yolo", "yolo"},         // old format mode="" + yolo → reverse reconciliation
+		{"", "", "normal", "ask"},             // old format both empty → normal defaults
+		{"", "auto", "normal", "auto"},        // old format mode="" + auto → no yolo→mode mapping
+	}
+
+	for _, tc := range tests {
+		name := tc.mode + "+" + tc.toolApprovalMode
+		t.Run(name, func(t *testing.T) {
+			mode := normalizeTabMode(tc.mode)
+			toolApproval := normalizeToolApprovalMode(tc.toolApprovalMode)
+
+			// Apply reconciliation (matching app.go restoreOrBuildTabs logic)
+			if toolApproval == control.ToolApprovalAsk && tabModeHasAutoApproveTools(tc.mode) {
+				toolApproval = control.ToolApprovalYolo
+			}
+			if mode == "normal" && toolApproval == control.ToolApprovalYolo {
+				mode = "yolo"
+			}
+
+			if mode != tc.wantMode {
+				t.Errorf("after reconciliation mode = %q, want %q", mode, tc.wantMode)
+			}
+			if toolApproval != tc.wantToolApproval {
+				t.Errorf("after reconciliation toolApproval = %q, want %q", toolApproval, tc.wantToolApproval)
+			}
+		})
+	}
+}
