@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -213,6 +214,9 @@ type Agent struct {
 	// loop accumulates them while the status line reads them.
 	sessCacheHit  atomic.Int64
 	sessCacheMiss atomic.Int64
+	// sessCost accumulates total spend across every API call this session (in
+	// µ¥ = ¥×1e6), so the TUI can show a running cost in the status line.
+	sessCost atomic.Int64
 
 	// lastPrefixShape records the previous provider request's cacheable prefix
 	// so usage events can explain prefix churn on the next request.
@@ -595,6 +599,7 @@ func (a *Agent) SetSession(s *Session) {
 	a.sessMu.Unlock()
 	a.sessCacheHit.Store(0)
 	a.sessCacheMiss.Store(0)
+	a.sessCost.Store(0)
 	if s != nil {
 		a.rebuildTodoState(s.Snapshot())
 	}
@@ -613,6 +618,21 @@ func (a *Agent) LastUsage() *provider.Usage { return a.lastUsage.Load() }
 // API call this session — the basis for the status line's aggregate hit-rate.
 func (a *Agent) SessionCache() (hit, miss int) {
 	return int(a.sessCacheHit.Load()), int(a.sessCacheMiss.Load())
+}
+
+// SessionCost returns the total API spend this session (in the provider's
+// currency, default "¥"). Zero before the first turn or when no pricing is set.
+func (a *Agent) SessionCost() float64 {
+	return float64(a.sessCost.Load()) / 1_000_000
+}
+
+// PricingSymbol returns the currency display symbol used by the active pricing
+// (defaults to "¥" when nil or not set).
+func (a *Agent) PricingSymbol() string {
+	if a.pricing == nil {
+		return "¥"
+	}
+	return a.pricing.Symbol()
 }
 
 // ContextWindow returns the configured context-window size in tokens. 0
@@ -1649,6 +1669,13 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 			a.lastUsage.Store(chunk.Usage)
 			a.sessCacheHit.Add(int64(chunk.Usage.CacheHitTokens))
 			a.sessCacheMiss.Add(int64(chunk.Usage.CacheMissTokens))
+			if a.pricing != nil {
+				// Accumulate cost in µ¥ (¥×1e6). Guard against NaN/Inf from
+				// misconfigured pricing (e.g. zero rates producing Inf cost).
+				if c := a.pricing.Cost(chunk.Usage); !math.IsNaN(c) && !math.IsInf(c, 0) {
+					a.sessCost.Add(int64(math.Round(c * 1_000_000)))
+				}
+			}
 		case provider.ChunkError:
 			if provider.IsStreamInterrupted(chunk.Err) {
 				stored, _ := finishReasoning()

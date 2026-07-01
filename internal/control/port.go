@@ -165,6 +165,8 @@ type Capabilities interface {
 type Status interface {
 	ContextSnapshot() (int, int)
 	LastUsage() *provider.Usage
+	SessionCost() float64
+	PricingSymbol() string
 	Balance(ctx context.Context) (*billing.Balance, error)
 	Jobs() []jobs.View
 	Todos() []evidence.TodoItem

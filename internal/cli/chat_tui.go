@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -2396,6 +2397,9 @@ func (m chatTUI) View() tea.View {
 	if m.balance != "" {
 		data = append(data, dim(m.balance))
 	}
+	if ct := m.costTag(); ct != "" {
+		data = append(data, ct)
+	}
 	dataLine := "  " + strings.Join(data, " · ")
 	// A configured custom status line replaces the built-in data row entirely.
 	if m.statuslineCmd != "" && m.statuslineOut != "" {
@@ -2600,6 +2604,16 @@ func (m chatTUI) cacheTag() string {
 		return dim(avg)
 	}
 	return ""
+}
+
+// costTag returns the session's total API spend for the status line, or ""
+// when no cost has been incurred yet (before the first turn or no pricing).
+func (m chatTUI) costTag() string {
+	cost := m.ctrl.SessionCost()
+	if cost <= 0 || math.IsNaN(cost) {
+		return ""
+	}
+	return dim(fmt.Sprintf("cost %s%.4f", m.ctrl.PricingSymbol(), cost))
 }
 
 // jobsTag shows the count of running background jobs in the status line. Job
@@ -2869,6 +2883,9 @@ func (m chatTUI) computeStatusLineCount(width int) int {
 	}
 	if m.balance != "" {
 		data = append(data, m.balance)
+	}
+	if ct := m.costTag(); ct != "" {
+		data = append(data, ct)
 	}
 	dataLine := "  " + strings.Join(data, " · ")
 	if m.statuslineCmd != "" && m.statuslineOut != "" {
