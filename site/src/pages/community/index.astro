@@ -1,0 +1,58 @@
+---
+import Community from "../../layouts/Community.astro";
+---
+<Community title="Reasonix Community" description="Ask questions, share skills, and shape a DeepSeek-native agent." active="discussions">
+  <section class="head">
+    <div class="wrap">
+      <div class="row">
+        <div>
+          <div class="eyebrow">Reasonix Community</div>
+          <h1>Discussions</h1>
+          <p>Ask questions, share skills, and shape a DeepSeek-native agent — with the makers and other builders.</p>
+        </div>
+        <a class="btn btn-primary" href="/community/new/">✎ New topic</a>
+      </div>
+    </div>
+  </section>
+
+  <div class="wrap layout">
+    <div>
+      <div class="sec-title"><h2>Categories</h2></div>
+      <div class="cats" id="cat-list">
+        <div class="cat"><span class="ico">·</span><div><h3>Loading…</h3></div></div>
+      </div>
+
+      <div class="sec-title">
+        <div class="tabs" id="sort-tabs">
+          <button class="on" data-sort="latest">Latest</button>
+          <button data-sort="top">Top</button>
+        </div>
+      </div>
+      <div class="topics" id="topic-list">
+        <div class="skeleton"><div class="bar"></div><div class="bar short"></div></div>
+        <div class="skeleton"><div class="bar"></div><div class="bar short"></div></div>
+        <div class="skeleton"><div class="bar"></div><div class="bar short"></div></div>
+      </div>
+    </div>
+
+    <aside class="side">
+      <div class="card cta">
+        <h4>Start a discussion</h4>
+        <p class="lead" id="cta-lead">Ask a question or share what you built.</p>
+        <a class="btn btn-primary" href="/community/new/">✎ New topic</a>
+      </div>
+      <div class="card">
+        <h4 style="margin-bottom:14px">Community</h4>
+        <div class="stats-grid" id="stats">
+          <div class="stat-box"><div class="n" id="s-topics">—</div><div class="l">topics</div></div>
+          <div class="stat-box"><div class="n" id="s-cats">—</div><div class="l">categories</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h4 style="margin-bottom:14px">Guidelines</h4>
+        <p class="lead">Be kind, search first, and keep code in fenced blocks. New accounts unlock links and more as they participate.</p>
+        <a class="btn btn-ghost sm" href="/community/guidelines/">Read the guidelines</a>
+      </div>
+    </aside>
+  </div>
+</Community>

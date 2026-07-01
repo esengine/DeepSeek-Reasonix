@@ -1,0 +1,28 @@
+---
+import Community from "../../layouts/Community.astro";
+---
+<Community title="New topic — Reasonix Community" description="Start a discussion on the Reasonix community forum.">
+  <div class="wrap" style="padding-top:32px;max-width:820px">
+    <div class="crumb"><a href="/community/">Community</a><span class="sep">/</span><span>New topic</span></div>
+    <h1 style="font-size:28px;font-weight:600;letter-spacing:-0.02em;margin-bottom:6px">Start a discussion</h1>
+
+    <div id="new-gate" hidden class="card cta" style="margin-top:18px">
+      <h4>Sign in to post</h4>
+      <p class="lead">You'll post with your Reasonix account. New here? Signing in creates one.</p>
+      <a class="btn btn-primary" id="gate-login" href="#">Sign in</a>
+    </div>
+
+    <div id="new-form" hidden>
+      <div class="msg error" id="new-msg" hidden></div>
+      <div class="composer">
+        <input class="title" id="f-title" placeholder="Topic title — be specific" maxlength="160" />
+        <textarea id="f-body" placeholder="Write your post… Markdown and ``` code blocks supported."></textarea>
+        <div class="foot">
+          <select id="f-category"><option value="">Choose a category…</option></select>
+          <button class="btn btn-primary" id="f-submit">Post topic</button>
+        </div>
+      </div>
+      <p class="lead" style="margin-top:14px">Please search before posting, keep it on-topic, and format code in fenced blocks. New accounts can't post links until they've participated a little.</p>
+    </div>
+  </div>
+</Community>

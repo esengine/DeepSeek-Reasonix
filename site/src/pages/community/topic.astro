@@ -1,0 +1,42 @@
+---
+import Community from "../../layouts/Community.astro";
+---
+<Community title="Discussion — Reasonix Community" description="A discussion on the Reasonix community forum.">
+  <div class="wrap" style="padding-top:28px">
+    <div class="crumb">
+      <a href="/community/">Community</a><span class="sep">/</span>
+      <span id="crumb-cat">…</span><span class="sep">/</span>
+      <span id="crumb-title">Loading…</span>
+    </div>
+    <div class="thread-head">
+      <h1 id="t-title">
+        <div class="skeleton" style="border:none;padding:0"><div class="bar" style="width:70%;height:22px"></div></div>
+      </h1>
+      <div class="meta" id="t-meta"></div>
+    </div>
+  </div>
+
+  <div class="wrap thread-layout">
+    <div>
+      <div id="posts">
+        <div class="skeleton"><div class="bar"></div><div class="bar short"></div></div>
+        <div class="skeleton"><div class="bar"></div><div class="bar short"></div></div>
+      </div>
+
+      <div id="reply-zone"></div>
+    </div>
+
+    <aside class="side">
+      <div class="side-card">
+        <h4>Participants</h4>
+        <div class="parti" id="parti"></div>
+      </div>
+      <div class="side-card">
+        <h4>Actions</h4>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <a class="link-act" href="/community/">← Back to discussions</a>
+        </div>
+      </div>
+    </aside>
+  </div>
+</Community>
