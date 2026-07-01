@@ -166,7 +166,7 @@ model = "x"
 	if _, err := store.Save(memory.Memory{
 		Name:        "synthesis-cache-policy",
 		Description: "Stable conclusions should be reused from memory",
-		Type:        memory.TypeFeedback,
+		Type:        memory.TypeProject,
 		Body:        "Use a synthesis cache document when expensive retrieval produced a stable conclusion.",
 	}); err != nil {
 		t.Fatalf("save memory: %v", err)
