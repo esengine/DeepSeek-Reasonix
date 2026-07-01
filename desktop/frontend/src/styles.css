@@ -4013,6 +4013,7 @@ a[href] {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  position: relative; /* anchor for .stats-bar */
 }
 .msg--process-only {
   margin-top: 6px;
@@ -4798,6 +4799,41 @@ body > .mermaid-diagram--fullscreen {
   user-select: text;
   -webkit-user-select: text;
 }
+
+/* ── Stats Bar (streaming token telemetry) ──────────────────────────────── */
+.stats-bar {
+  position: absolute;
+  bottom: 2px;
+  left: 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 1px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 10px;
+  color: var(--fg-muted, var(--fg-dim));
+  opacity: 0.75;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+  z-index: var(--z-local-raised);
+}
+
+.stats-bar__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  line-height: 1;
+}
+
+.stats-bar__icon {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+}
+
 .turn-actions {
   display: flex;
   align-items: center;
@@ -4845,6 +4881,29 @@ body > .mermaid-diagram--fullscreen {
   bottom: calc(100% + 5px);
   right: auto;
   left: 0;
+}
+
+/* ── Turn-actions stats box ────────────────────────────────────────────── */
+.turn-actions__stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  color: var(--fg-faint);
+  border-radius: 6px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.turn-actions__stats-icon {
+  width: 11px;
+  height: 11px;
+  opacity: 0.7;
 }
 
 /* ── diff ────────────────────────────────────────────────────────────────── */
@@ -15522,6 +15581,22 @@ body > .mermaid-diagram--fullscreen {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+.composer-runstatus__stat {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+.composer-runstatus__stat-icon {
+  width: 9px;
+  height: 9px;
 }
 
 .composer-runstatus__stop {

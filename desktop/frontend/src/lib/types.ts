@@ -315,6 +315,7 @@ export interface HistoryMessage {
   messages?: number;
   summary?: string;
   archive?: string;
+  usage?: WireUsage;
 }
 
 export interface HistoryToolCall {

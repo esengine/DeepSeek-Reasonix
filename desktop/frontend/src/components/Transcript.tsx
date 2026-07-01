@@ -1,6 +1,8 @@
 import { createContext, memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
+import { LiveStatsContext } from "./StatsBar";
+import type { WireUsage } from "../lib/types";
 import { useT } from "../lib/i18n";
 import { AssistantMessage, TurnActions, UserMessage } from "./Message";
 import { ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
@@ -99,6 +101,8 @@ export function Transcript({
   olderHistoryCount = 0,
   loadingOlderHistory = false,
   onLoadOlderHistory,
+  usage,
+  turnStartAt,
 }: {
   items: Item[];
   live?: LiveStream;
@@ -122,6 +126,8 @@ export function Transcript({
   olderHistoryCount?: number;
   loadingOlderHistory?: boolean;
   onLoadOlderHistory?: () => void;
+  usage?: WireUsage;
+  turnStartAt?: number;
 }) {
   const t = useT();
   const {
@@ -375,6 +381,8 @@ export function Transcript({
     let actionText = "";
     let actionReady = false;
     let activeTurn: number | undefined;
+    let actionUsage: WireUsage | undefined;
+    let actionUserCreatedAt: number | undefined;
     const pushTurnActions = () => {
       if (activeTurn == null || !actionReady || actionText.trim() === "") return;
       const turn = activeTurn;
@@ -384,6 +392,8 @@ export function Transcript({
           key={`ta-${turn}`}
           text={actionText}
           turn={turn}
+          usage={actionUsage}
+          userCreatedAt={actionUserCreatedAt}
           openMenu={openMenu}
           onOpenMenu={(menu) => setOpenAction(menu ? { turn, menu } : null)}
           checkpoint={checkpointsByTurn.get(turn)}
@@ -398,6 +408,8 @@ export function Transcript({
       );
       actionText = "";
       actionReady = false;
+      actionUsage = undefined;
+      actionUserCreatedAt = undefined;
     };
 
     // Compact mode: step-based rendering
@@ -433,6 +445,7 @@ export function Transcript({
           const tn = userTurn.get(first.id);
           const checkpoint = tn == null ? undefined : checkpointsByTurn.get(tn);
           activeTurn = tn;
+          actionUserCreatedAt = first.createdAt;
           out.push(
             <UserMessage
               key={first.id}
@@ -502,6 +515,7 @@ export function Transcript({
           if (!it.streaming && it.text.trim() !== "") {
             actionText = it.text;
             actionReady = true;
+            actionUsage = (it as { usage?: WireUsage }).usage;
           }
         }
       }
@@ -554,6 +568,7 @@ export function Transcript({
             const tn = userTurn.get(it.id);
             const checkpoint = tn == null ? undefined : checkpointsByTurn.get(tn);
             activeTurn = tn;
+            actionUserCreatedAt = it.createdAt;
             out.push(
               <UserMessage
                 key={it.id}
@@ -575,6 +590,7 @@ export function Transcript({
             if (!it.streaming && it.text.trim() !== "") {
               actionText = it.text;
               actionReady = true;
+              actionUsage = (it as { usage?: WireUsage }).usage;
             }
             break;
           case "tool":
@@ -609,6 +625,7 @@ export function Transcript({
         {empty && !hydrating && <Welcome onPrompt={onPrompt} variant={welcomeVariant} />}
 
         <LiveStreamContext.Provider value={live}>
+          <LiveStatsContext.Provider value={{ usage, turnStartAt, running: !!running }}>
           {hasOlderHistory && (
             <button
               type="button"
@@ -649,6 +666,7 @@ export function Transcript({
           <div ref={entranceRef}>
             {hotZoneNodes}
           </div>
+          </LiveStatsContext.Provider>
         </LiveStreamContext.Provider>
       </div>
 
@@ -841,6 +859,8 @@ function WarmTurnItems({
   let actionText = "";
   let actionReady = false;
   let activeTurn: number | undefined;
+  let actionUsage: WireUsage | undefined;
+  let actionUserCreatedAt: number | undefined;
   const pushTurnActions = () => {
     if (activeTurn == null || !actionReady || actionText.trim() === "") return;
     const turn = activeTurn;
@@ -850,6 +870,8 @@ function WarmTurnItems({
         key={`ta-${turn}`}
         text={actionText}
         turn={turn}
+        usage={actionUsage}
+        userCreatedAt={actionUserCreatedAt}
         openMenu={openMenu}
         onOpenMenu={(menu) => setOpenAction(menu ? { turn, menu } : null)}
         checkpoint={checkpoints.get(turn)}
@@ -905,9 +927,11 @@ function WarmTurnItems({
     switch (it.kind) {
       case "user": {
         pushTurnActions();
+        actionUsage = undefined;
         const tn = userTurnMap.get(it.id);
         const checkpoint = tn == null ? undefined : checkpoints.get(tn);
         activeTurn = tn;
+        actionUserCreatedAt = it.createdAt;
         nodes.push(
           <UserMessage
             key={it.id}
@@ -928,6 +952,7 @@ function WarmTurnItems({
         if (!it.streaming && it.text.trim() !== "") {
           actionText = it.text;
           actionReady = true;
+          actionUsage = (it as { usage?: WireUsage }).usage;
         }
         break;
       }

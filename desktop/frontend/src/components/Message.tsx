@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
-import { BrainCircuit, ChevronDown, ChevronRight, FileText, Folder, GitBranch, Image, MessageSquare, Pencil, RotateCcw, ScrollText } from "lucide-react";
+import { ArrowDown, ArrowUp, BrainCircuit, ChevronDown, ChevronRight, Clock, Database, FileText, Folder, GitBranch, Image, MessageSquare, Pencil, RotateCcw, ScrollText, Zap } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
 import { ProcessBrainIcon } from "./ProcessCard";
@@ -16,7 +16,7 @@ import { displayReasoningText } from "../lib/reasoningDisplay";
 import { stripMemoryCompilerExecution } from "../lib/memoryCompilerDisplay";
 import { visibleTranscriptMemoryCitations } from "../lib/memoryCitationVisibility";
 import type { Item, MessageActionScope } from "../lib/useController";
-import type { CheckpointMeta, MemoryCitation } from "../lib/types";
+import type { CheckpointMeta, MemoryCitation, WireUsage } from "../lib/types";
 
 type AssistantItem = Extract<Item, { kind: "assistant" }>;
 export type TurnActionMenu = "summary" | "rewind";
@@ -142,7 +142,8 @@ function messageDate(value?: number): Date {
 function formatMessageTime(date: Date): string {
   const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${hours}:${minutes}`;
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  return `${hours}:${minutes}:${seconds}`;
 }
 
 export function UserMessage({
@@ -419,6 +420,8 @@ export function TurnActions({
   actionPending = false,
   rewindDisabled = false,
   hoverMenus = false,
+  usage,
+  userCreatedAt,
 }: {
   text: string;
   turn?: number;
@@ -429,6 +432,8 @@ export function TurnActions({
   actionPending?: boolean;
   rewindDisabled?: boolean;
   hoverMenus?: boolean;
+  usage?: WireUsage;
+  userCreatedAt?: number;
 }) {
   const t = useT();
   const [confirmScope, setConfirmScope] = useState<MessageActionScope | null>(null);
@@ -618,8 +623,51 @@ export function TurnActions({
           </div>
         </>
       )}
+      {usage && (usage.promptTokens || usage.completionTokens || usage.cacheHitTokens || usage.cacheMissTokens) ? (
+        <span className="turn-actions__stats" title={`Input miss ${usage.cacheMissTokens} · Cache hit ${usage.cacheHitTokens ?? 0} · Output ${usage.completionTokens ?? 0}`}>
+          <ArrowUp size={11} className="turn-actions__stats-icon" />
+          <span>{fmtTurnToken(usage.cacheMissTokens)}</span>
+          <Database size={11} className="turn-actions__stats-icon" />
+          <span>{fmtTurnToken(usage.cacheHitTokens ?? 0)}</span>
+          <ArrowDown size={11} className="turn-actions__stats-icon" />
+          <span>{fmtTurnToken(usage.completionTokens ?? 0)}</span>
+          {usage.completionTokens > 0 && userCreatedAt ? (
+            <>
+              <Zap size={11} className="turn-actions__stats-icon" />
+              <span>{fmtTurnTps(usage.completionTokens, userCreatedAt)} tok/s</span>
+              <Clock size={11} className="turn-actions__stats-icon" />
+              <span>{fmtTurnElapsed(userCreatedAt)}s</span>
+            </>
+          ) : null}
+        </span>
+      ) : null}
     </div>
   );
+}
+
+/** Format a token count for the turn-actions stats display. */
+function fmtTurnToken(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+/** Compute elapsed seconds from user message createdAt to now. */
+function fmtTurnElapsed(userCreatedAt: number): string {
+  const ms = Date.now() - userCreatedAt;
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return String(sec);
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/** Compute tokens-per-second from output tokens and user message timestamp. */
+function fmtTurnTps(tokens: number, userCreatedAt: number): string {
+  const ms = Date.now() - userCreatedAt;
+  const sec = ms / 1000;
+  if (sec <= 0) return "—";
+  return (tokens / sec).toFixed(1);
 }
 
 export const AssistantMessage = memo(function AssistantMessage({
@@ -718,6 +766,11 @@ export const AssistantMessage = memo(function AssistantMessage({
         </div>
       )}
       <MemoryCitations citations={item.memoryCitations} />
+      {item.createdAt && (
+        <time className="msg-meta__time" dateTime={new Date(item.createdAt).toISOString()} title={new Date(item.createdAt).toLocaleString()}>
+          {formatMessageTime(new Date(item.createdAt))}
+        </time>
+      )}
     </div>
   );
 });

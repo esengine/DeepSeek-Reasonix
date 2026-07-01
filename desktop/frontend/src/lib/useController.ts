@@ -48,7 +48,7 @@ const HISTORY_PAGE_TURNS = 60;
 
 export type Item =
   | { kind: "user"; id: string; text: string; submitText?: string; failed?: boolean; createdAt?: number; checkpointTurn?: number }
-  | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; reasoningComplete?: boolean; memoryCitations?: MemoryCitation[] }
+  | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; createdAt?: number; reasoningComplete?: boolean; memoryCitations?: MemoryCitation[]; usage?: WireUsage }
   | { kind: "phase"; id: string; text: string }
   | { kind: "notice"; id: string; level: "info" | "warn"; text: string }
   | {
@@ -115,9 +115,21 @@ interface State {
   pendingUser?: string;
   discardTurn?: boolean;
   turnStartAt: number;
+  // Per-turn accumulators (reset each turn)
   turnTokens: number;
+  // Global accumulators (never reset, track entire session)
+  globalTokens: number;
+  globalCacheHitTokens: number;
+  globalCacheMissTokens: number;
+  // Turn-start baselines for computing per-turn contribution
+  turnStartGlobalTokens: number;
+  turnStartGlobalCacheHit: number;
+  turnStartGlobalCacheMiss: number;
   turnTotalTokens: number;
   turnCost: number;
+  turnPromptTokens: number;
+  turnCacheHitTokens: number;
+  turnCacheMissTokens: number;
   sessionTokens: number;
   sessionCost: number;
   sessionCurrency: string;
@@ -145,8 +157,17 @@ export const initialState: State = {
   backendActivationPending: false,
   turnStartAt: 0,
   turnTokens: 0,
+  globalTokens: 0,
+  globalCacheHitTokens: 0,
+  globalCacheMissTokens: 0,
+  turnStartGlobalTokens: 0,
+  turnStartGlobalCacheHit: 0,
+  turnStartGlobalCacheMiss: 0,
   turnTotalTokens: 0,
   turnCost: 0,
+  turnPromptTokens: 0,
+  turnCacheHitTokens: 0,
+  turnCacheMissTokens: 0,
   sessionTokens: 0,
   sessionCost: 0,
   sessionCurrency: "¥",
@@ -413,6 +434,7 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
           reasoning: m.reasoning ?? "",
           streaming: false,
           memoryCitations: memoryCitations.length > 0 ? memoryCitations : undefined,
+          usage: m.usage,
         });
         seq++;
       }
@@ -581,8 +603,35 @@ function applyEvent(s: State, e: WireEvent): State {
       // the first text/reasoning token.
       let cur: State = s;
       if (cur.pendingUser !== undefined) cur = flushPendingUser(cur);
-      const { items, id, seq } = ensureAssistant(cur);
-      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "", reasoningComplete: false }, running: true, turnActive: true, pendingPrompt: false, cancelRequested: false, cancellable: true, turnStartAt: Date.now(), turnTokens: 0, turnTotalTokens: 0, turnCost: 0 };
+      // Compute previous turn's contribution from global accumulators
+      const turnContribution_tokens = (cur.globalTokens ?? 0) - (cur.turnStartGlobalTokens ?? 0);
+      const turnContribution_cacheHit = (cur.globalCacheHitTokens ?? 0) - (cur.turnStartGlobalCacheHit ?? 0);
+      const turnContribution_cacheMiss = (cur.globalCacheMissTokens ?? 0) - (cur.turnStartGlobalCacheMiss ?? 0);
+      // Update the last assistant item with the computed turn contribution
+      let items = cur.items;
+      if ((turnContribution_tokens > 0 || turnContribution_cacheHit > 0 || turnContribution_cacheMiss > 0) && cur.turnStartGlobalTokens !== undefined) {
+        for (let i = cur.items.length - 1; i >= 0; i--) {
+          const it = cur.items[i];
+          if (it.kind === "assistant") {
+            items = cur.items.map((item, idx) =>
+              idx === i
+                ? { ...item, usage: {
+                    promptTokens: turnContribution_tokens,
+                    completionTokens: turnContribution_tokens,
+                    totalTokens: turnContribution_tokens,
+                    cacheHitTokens: turnContribution_cacheHit,
+                    cacheMissTokens: turnContribution_cacheMiss,
+                    sessionCacheHitTokens: cur.usage?.sessionCacheHitTokens ?? 0,
+                    sessionCacheMissTokens: cur.usage?.sessionCacheMissTokens ?? 0,
+                  } }
+                : item,
+            );
+            break;
+          }
+        }
+      }
+      const stateWithItems: State = { ...cur, items }; const { items: ensuredItems, id, seq } = ensureAssistant(stateWithItems);
+      return { ...cur, items: ensuredItems, currentAssistant: id, seq, live: { id, text: "", reasoning: "", reasoningComplete: false }, running: true, turnActive: true, pendingPrompt: false, cancelRequested: false, cancellable: true, turnStartAt: Date.now(), turnTokens: 0, turnTotalTokens: 0, turnCost: 0, turnPromptTokens: 0, turnCacheHitTokens: 0, turnCacheMissTokens: 0, turnStartGlobalTokens: cur.globalTokens ?? 0, turnStartGlobalCacheHit: cur.globalCacheHitTokens ?? 0, turnStartGlobalCacheMiss: cur.globalCacheMissTokens ?? 0 };
     }
     case "text":
     case "reasoning": {
@@ -620,6 +669,16 @@ function applyEvent(s: State, e: WireEvent): State {
                 reasoning,
                 streaming: false,
                 memoryCitations: memoryCitations.length > 0 ? memoryCitations : undefined,
+                usage: {
+                  promptTokens: (s.globalTokens ?? 0) - (s.turnStartGlobalTokens ?? 0),
+                  completionTokens: (s.globalTokens ?? 0) - (s.turnStartGlobalTokens ?? 0),
+                  totalTokens: (s.globalTokens ?? 0) - (s.turnStartGlobalTokens ?? 0),
+                  cacheHitTokens: (s.globalCacheHitTokens ?? 0) - (s.turnStartGlobalCacheHit ?? 0),
+                  cacheMissTokens: (s.globalCacheMissTokens ?? 0) - (s.turnStartGlobalCacheMiss ?? 0),
+                  sessionCacheHitTokens: s.usage?.sessionCacheHitTokens ?? 0,
+                  sessionCacheMissTokens: s.usage?.sessionCacheMissTokens ?? 0,
+                },
+                createdAt: it.createdAt ?? Date.now(),
               };
             })()
           : it,
@@ -694,7 +753,39 @@ function applyEvent(s: State, e: WireEvent): State {
       return { ...s, items: next };
     }
     case "usage": {
-      if (!countsTowardCurrentTurn(s)) return s;
+      // Always accumulate global counters (even after turn_done, e.g. title events)
+      const gTokens = (s.globalTokens ?? 0) + (e.usage?.completionTokens ?? 0);
+      const gCacheHit = (s.globalCacheHitTokens ?? 0) + (e.usage?.cacheHitTokens ?? 0);
+      const gCacheMiss = (s.globalCacheMissTokens ?? 0) + (e.usage?.cacheMissTokens ?? 0);
+      if (!countsTowardCurrentTurn(s)) {
+        // Update the last assistant item with post-turn events (title generation, etc.)
+        const turnDiff_tokens = gTokens - (s.turnStartGlobalTokens ?? 0);
+        const turnDiff_cacheHit = gCacheHit - (s.turnStartGlobalCacheHit ?? 0);
+        const turnDiff_cacheMiss = gCacheMiss - (s.turnStartGlobalCacheMiss ?? 0);
+        let postItems = s.items;
+        if (turnDiff_tokens > 0 || turnDiff_cacheHit > 0 || turnDiff_cacheMiss > 0) {
+          for (let i = s.items.length - 1; i >= 0; i--) {
+            const it = s.items[i];
+            if (it.kind === "assistant") {
+              postItems = s.items.map((item, idx) =>
+                idx === i
+                  ? { ...item, usage: {
+                      promptTokens: turnDiff_tokens,
+                      completionTokens: turnDiff_tokens,
+                      totalTokens: turnDiff_tokens,
+                      cacheHitTokens: turnDiff_cacheHit,
+                      cacheMissTokens: turnDiff_cacheMiss,
+                      sessionCacheHitTokens: s.usage?.sessionCacheHitTokens ?? 0,
+                      sessionCacheMissTokens: s.usage?.sessionCacheMissTokens ?? 0,
+                    } }
+                  : item,
+              );
+              break;
+            }
+          }
+        }
+        return { ...s, items: postItems, globalTokens: gTokens, globalCacheHitTokens: gCacheHit, globalCacheMissTokens: gCacheMiss };
+      }
       const updateContextGauge = updatesContextGauge(e.usage);
       const used = e.usage && s.context.window && updateContextGauge ? e.usage.promptTokens : s.context.used;
       const turnTokens = s.turnTokens + (e.usage?.completionTokens ?? 0);
@@ -705,8 +796,27 @@ function applyEvent(s: State, e: WireEvent): State {
       const turnCost = s.turnCost + usageCost;
       const sessionCost = s.sessionCost + usageCost;
       const sessionCurrency = e.usage?.currency || s.sessionCurrency || "¥";
+      const turnPromptTokens = s.turnPromptTokens + (e.usage?.promptTokens ?? 0);
+      const turnCacheHitTokens = s.turnCacheHitTokens + (e.usage?.cacheHitTokens ?? 0);
+      const turnCacheMissTokens = s.turnCacheMissTokens + (e.usage?.cacheMissTokens ?? 0);
       const usage = updateContextGauge ? e.usage : s.usage;
-      return { ...s, usage, context: { ...s.context, used, sessionTokens }, turnTokens, turnTotalTokens, turnCost, sessionTokens, sessionCost, sessionCurrency };
+      // Also attach usage/createdAt to the current assistant item so it persists after streaming
+      const items = s.currentAssistant != null
+        ? s.items.map((it) =>
+            it.kind === "assistant" && it.id === s.currentAssistant && !it.usage
+              ? { ...it, usage: {
+                  promptTokens: gTokens - (s.turnStartGlobalTokens ?? 0),
+                  completionTokens: gTokens - (s.turnStartGlobalTokens ?? 0),
+                  totalTokens: gTokens - (s.turnStartGlobalTokens ?? 0),
+                  cacheHitTokens: gCacheHit - (s.turnStartGlobalCacheHit ?? 0),
+                  cacheMissTokens: gCacheMiss - (s.turnStartGlobalCacheMiss ?? 0),
+                  sessionCacheHitTokens: s.usage?.sessionCacheHitTokens ?? 0,
+                  sessionCacheMissTokens: s.usage?.sessionCacheMissTokens ?? 0,
+                }, createdAt: it.createdAt ?? Date.now() }
+              : it,
+          )
+        : s.items;
+      return { ...s, items, usage, context: { ...s.context, used, sessionTokens }, turnTokens, turnTotalTokens, turnCost, turnPromptTokens, turnCacheHitTokens, turnCacheMissTokens, sessionTokens, sessionCost, sessionCurrency, globalTokens: gTokens, globalCacheHitTokens: gCacheHit, globalCacheMissTokens: gCacheMiss };
     }
     case "notice":
       return { ...s, running: s.turnActive ? s.running : false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: e.level ?? "info", text: e.text ?? "" }] };
@@ -744,12 +854,38 @@ function applyEvent(s: State, e: WireEvent): State {
     case "turn_done": {
       if (s.pendingUser !== undefined) s = flushPendingUser(s);
       const finalized = s.items.map((it) => {
-        if (it.kind === "assistant" && s.live && it.id === s.live.id) return { ...it, text: s.live.text, reasoning: s.live.reasoning, streaming: false };
-        if (it.kind === "assistant" && it.streaming) return { ...it, streaming: false };
+        if (it.kind === "assistant" && s.live && it.id === s.live.id) return { ...it, text: s.live.text, reasoning: s.live.reasoning, streaming: false, createdAt: it.createdAt ?? Date.now() };
+        if (it.kind === "assistant" && it.streaming) return { ...it, streaming: false, createdAt: it.createdAt ?? Date.now() };
         if (it.kind === "tool" && it.status === "running") return { ...it, status: "stopped" as const };
         return it;
       });
       let items: Item[] = e.err ? [...finalized, { kind: "notice", id: `e${s.seq}`, level: "warn", text: e.err }] : finalized;
+      // Update the last assistant item's usage with the final turn contribution
+      // from global accumulators (catches background events like title gen).
+      const turnDelta = (s.globalTokens ?? 0) - (s.turnStartGlobalTokens ?? 0);
+      const turnCacheHitDelta = (s.globalCacheHitTokens ?? 0) - (s.turnStartGlobalCacheHit ?? 0);
+      const turnCacheMissDelta = (s.globalCacheMissTokens ?? 0) - (s.turnStartGlobalCacheMiss ?? 0);
+      if (turnDelta > 0 && s.turnStartGlobalTokens !== undefined) {
+        for (let i = items.length - 1; i >= 0; i--) {
+          const it = items[i];
+          if (it.kind === "assistant") {
+            items = items.map((item, idx) =>
+              idx === i
+                ? { ...item, usage: {
+                    promptTokens: turnDelta,
+                    completionTokens: turnDelta,
+                    totalTokens: turnDelta,
+                    cacheHitTokens: turnCacheHitDelta,
+                    cacheMissTokens: turnCacheMissDelta,
+                    sessionCacheHitTokens: s.usage?.sessionCacheHitTokens ?? 0,
+                    sessionCacheMissTokens: s.usage?.sessionCacheMissTokens ?? 0,
+                  } }
+                : item,
+            );
+            break;
+          }
+        }
+      }
       // Plan approval can arrive before turn_done on some Wails event paths.
       // Keep that gate visible instead of clearing the only UI that can answer it.
       const keepPlanApproval = s.approval?.tool === "exit_plan_mode";
@@ -788,6 +924,9 @@ export function reducer(s: State, a: Action): State {
         turnTokens: 0,
         turnTotalTokens: 0,
         turnCost: 0,
+        turnPromptTokens: 0,
+        turnCacheHitTokens: 0,
+        turnCacheMissTokens: 0,
         pendingUser: a.text,
         discardTurn: false,
       };
@@ -831,8 +970,8 @@ export function reducer(s: State, a: Action): State {
         };
       }
       const finalized = s.items.map((it) => {
-        if (it.kind === "assistant" && s.live && it.id === s.live.id) return { ...it, text: s.live.text, reasoning: s.live.reasoning, streaming: false };
-        if (it.kind === "assistant" && it.streaming) return { ...it, streaming: false };
+        if (it.kind === "assistant" && s.live && it.id === s.live.id) return { ...it, text: s.live.text, reasoning: s.live.reasoning, streaming: false, createdAt: it.createdAt ?? Date.now() };
+        if (it.kind === "assistant" && it.streaming) return { ...it, streaming: false, createdAt: it.createdAt ?? Date.now() };
         if (it.kind === "tool" && it.status === "running") return { ...it, status: "stopped" as const };
         return it;
       });

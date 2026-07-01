@@ -3416,6 +3416,8 @@ type HistoryMessage struct {
 	Messages           int                       `json:"messages,omitempty"`
 	Summary            string                    `json:"summary,omitempty"`
 	Archive            string                    `json:"archive,omitempty"`
+	Usage              *provider.Usage           `json:"usage,omitempty"`
+	CreatedAt          int64                     `json:"createdAt,omitempty"`
 }
 
 type HistoryToolCall struct {
@@ -3663,7 +3665,10 @@ func historyMessagesWithPlannerDisplaysAndLookups(
 		if m.Role == provider.RoleAssistant {
 			reasoning = m.ReasoningContent
 		}
-		hm := HistoryMessage{Role: string(m.Role), Content: content, CheckpointTurn: checkpointTurn, Reasoning: reasoning}
+		hm := HistoryMessage{Role: string(m.Role), Content: content, CheckpointTurn: checkpointTurn, Reasoning: reasoning, CreatedAt: m.CreatedAt}
+		if m.Role == provider.RoleAssistant {
+			hm.Usage = m.Usage
+		}
 		if m.Role == provider.RoleAssistant && len(m.MemoryCitations) > 0 {
 			hm.MemoryCitations = append([]provider.MemoryCitation(nil), m.MemoryCitations...)
 		}
@@ -4131,12 +4136,13 @@ func previewSessionMessages(sessionDir, path string) ([]HistoryMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return historyMessagesWithPlannerDisplays(
+	msgs := historyMessagesWithPlannerDisplays(
 		loaded.Snapshot(),
 		sessionDisplayResolver(sessionDir, sessionPath),
 		sessionPlannerDisplayTurns(sessionDir, sessionPath),
 		nil,
-	), nil
+	)
+	return msgs, nil
 }
 
 func previewSessionPage(sessionDir, path string, beforeTurn, limit int) (HistoryPage, error) {
@@ -4191,6 +4197,7 @@ type previewEventRecord struct {
 	Messages         int                       `json:"messages"`
 	Summary          string                    `json:"summary"`
 	Archive          string                    `json:"archive"`
+	Usage            *provider.Usage           `json:"usage,omitempty"`
 }
 
 type previewToolCall struct {
@@ -4221,6 +4228,7 @@ func previewEventSessionMessages(path string) ([]HistoryMessage, bool, error) {
 	out := []HistoryMessage{}
 	toolName := map[string]string{}
 	sawEvent := false
+	var pendingUsage *provider.Usage
 	for {
 		var rec previewEventRecord
 		if err := dec.Decode(&rec); err != nil {
@@ -4247,6 +4255,11 @@ func previewEventSessionMessages(path string) ([]HistoryMessage, bool, error) {
 			}
 		case "model.final":
 			hm := HistoryMessage{Role: "assistant", Content: rec.Content, Reasoning: firstNonEmpty(rec.Reasoning, rec.ReasoningContent)}
+			// Attach any pending usage from a preceding usage event
+			if pendingUsage != nil {
+				hm.Usage = pendingUsage
+				pendingUsage = nil
+			}
 			if len(rec.MemoryCitations) > 0 {
 				hm.MemoryCitations = append([]provider.MemoryCitation(nil), rec.MemoryCitations...)
 			}
@@ -4295,6 +4308,10 @@ func previewEventSessionMessages(path string) ([]HistoryMessage, bool, error) {
 				Summary:  c.Summary,
 				Archive:  c.Archive,
 			})
+		case "usage":
+			if rec.Usage != nil {
+				pendingUsage = rec.Usage
+			}
 		}
 	}
 	return out, sawEvent, nil

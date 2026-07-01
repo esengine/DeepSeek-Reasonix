@@ -22,6 +22,7 @@ import (
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
+
 )
 
 // maxToolOutputBytes caps a single tool result before it goes into the model's
@@ -908,7 +909,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			}
 		}
 	}
-	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input, Images: userImages(ctx)})
+	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input, Images: userImages(ctx), CreatedAt: time.Now().UnixMilli()})
 
 	finalReadinessBlocks := 0
 	emptyFinalBlocks := 0
@@ -944,6 +945,8 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 						ReasoningContent:   reasoning,
 						ReasoningSignature: signature,
 						MemoryCitations:    a.memoryCitations(),
+						Usage:              usage,
+						CreatedAt:          time.Now().UnixMilli(),
 					})
 				}
 				a.session.Add(provider.Message{
@@ -982,6 +985,8 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			ReasoningSignature: signature,
 			ToolCalls:          calls,
 			MemoryCitations:    a.memoryCitations(),
+			Usage:              usage,
+			CreatedAt:          time.Now().UnixMilli(),
 		})
 
 		if len(calls) == 0 {

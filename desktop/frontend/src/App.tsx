@@ -3274,6 +3274,8 @@ export default function App() {
                 olderHistoryCount={state.historyStartTurn}
                 loadingOlderHistory={state.historyOlderLoading}
                 onLoadOlderHistory={() => activeTabId && loadOlderHistory(activeTabId)}
+                usage={state.usage}
+                turnStartAt={state.turnStartAt}
               />
             )}
           </main>
@@ -3369,6 +3371,9 @@ export default function App() {
               ready={controllerReady}
               turnStartAt={state.turnStartAt}
               turnTokens={state.turnTokens}
+              turnCacheHitTokens={state.turnCacheHitTokens}
+              turnCacheMissTokens={state.turnCacheMissTokens}
+              usage={state.usage}
               retry={state.retry}
               transientDismissSignal={transientOverlayDismissSignal}
               sessionKey={composerSessionKey}

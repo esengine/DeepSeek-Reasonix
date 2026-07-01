@@ -44,6 +44,8 @@ type Message struct {
 	MemoryCitations    []MemoryCitation `json:"memoryCitations,omitempty"` // local UI metadata; provider requests ignore it
 	Edited             bool             `json:"edited,omitempty"`          // local UI metadata; provider requests ignore it
 	Original           string           `json:"original,omitempty"`        // user prompt before inline edit
+	Usage              *Usage           `json:"usage,omitempty"`           // per-turn token telemetry
+	CreatedAt          int64            `json:"createdAt,omitempty"`        // unix milliseconds
 }
 
 // MemoryCitation is local display metadata for memories that influenced an
@@ -466,13 +468,13 @@ const (
 // the model's last reported choices[0].finish_reason so the agent can surface
 // abnormal terminations ("length", "content_filter", "repetition_truncation").
 type Usage struct {
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
-	CacheHitTokens   int    // prompt tokens served from cache
-	CacheMissTokens  int    // prompt tokens not cached
-	ReasoningTokens  int    // subset of CompletionTokens spent on chain-of-thought
-	FinishReason     string // "stop", "tool_calls", "length", "content_filter", "repetition_truncation", …
+	PromptTokens     int    `json:"promptTokens"`
+	CompletionTokens int    `json:"completionTokens"`
+	TotalTokens      int    `json:"totalTokens"`
+	CacheHitTokens   int    `json:"cacheHitTokens"`
+	CacheMissTokens  int    `json:"cacheMissTokens"`
+	ReasoningTokens  int    `json:"reasoningTokens,omitempty"`
+	FinishReason     string `json:"finishReason,omitempty"`
 }
 
 // Pricing is a provider's per-1M-token rates, used to estimate spend. Currency

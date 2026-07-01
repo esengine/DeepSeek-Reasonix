@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowUp, Check, ChevronsUpDown, Eye, FileText, Folder, Gauge, List, MessageSquare, Search, Shield, ShieldAlert, ShieldCheck, SlidersHorizontal, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowUp, Check, ChevronsUpDown, Database, Eye, FileText, Folder, Gauge, List, MessageSquare, Search, Shield, ShieldAlert, ShieldCheck, SlidersHorizontal, Square, Target, Trash2, X, Zap } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
@@ -12,7 +12,7 @@ import { detectShortcutPlatform, matchesShortcut } from "../lib/keyboardShortcut
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import { createRafResizeUpdater } from "../lib/resizeDrag";
 import { useToast } from "../lib/toast";
-import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type DirEntry, type EffortInfo, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type TokenMode, type ToolApprovalMode } from "../lib/types";
+import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type DirEntry, type EffortInfo, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type TokenMode, type ToolApprovalMode, type WireUsage } from "../lib/types";
 import {
   formatWorkspaceReference,
   parseWorkspaceReference,
@@ -428,6 +428,9 @@ export function Composer({
   ready,
   turnStartAt,
   turnTokens,
+  usage,
+  turnCacheHitTokens,
+  turnCacheMissTokens,
   retry,
   transientDismissSignal,
   sessionKey,
@@ -467,6 +470,9 @@ export function Composer({
   ready?: boolean;
   turnStartAt?: number;
   turnTokens?: number;
+  usage?: WireUsage;
+  turnCacheHitTokens?: number;
+  turnCacheMissTokens?: number;
   retry?: { attempt: number; max: number };
   transientDismissSignal?: number;
   sessionKey?: string;
@@ -2176,6 +2182,27 @@ export function Composer({
           <div className="composer-runstatus" role="status" aria-live="polite">
             <span className="composer-runstatus__dot" />
             <span className="composer-runstatus__text">{runActivity}</span>
+            {usage?.cacheMissTokens ? (
+              <span className="composer-runstatus__stat" title="Input miss">
+                <ArrowUp size={9} className="composer-runstatus__stat-icon" />
+                {fmtTokens(turnCacheMissTokens ?? usage.cacheMissTokens)}
+              </span>
+            ) : null}
+            {usage?.cacheHitTokens ? (
+              <span className="composer-runstatus__stat" title="Cache hit">
+                <Database size={9} className="composer-runstatus__stat-icon" />
+                {fmtTokens(turnCacheHitTokens ?? usage.cacheHitTokens)}
+              </span>
+            ) : null}
+            {running && turnStartAt && turnTokens ? (
+              <span className="composer-runstatus__stat composer-runstatus__stat--tps" title="Tokens per second">
+                <Zap size={9} className="composer-runstatus__stat-icon" />
+                {(() => {
+                  const elapsedSec = Math.max(0, Date.now() - turnStartAt) / 1000;
+                  return elapsedSec > 0 ? `${Math.round(turnTokens / elapsedSec * 10) / 10} tok/s` : "—";
+                })()}
+              </span>
+            ) : null}
             <Tooltip label={t("composer.stop")}>
               <button className="composer-runstatus__stop" type="button" onClick={handleCancel}>
                 <Square size={10} fill="currentColor" />
