@@ -1,0 +1,24 @@
+{
+  "name": "reasonix-forum",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "db:apply:local": "wrangler d1 execute reasonix-forum --local --file=schema.sql",
+    "db:apply:remote": "wrangler d1 execute reasonix-forum --remote --file=schema.sql"
+  },
+  "dependencies": {
+    "hono": "^4.6.14",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260601.0",
+    "typescript": "^5.8.0",
+    "wrangler": "^4.102.0"
+  },
+  "overrides": {
+    "esbuild": "0.28.1"
+  }
+}
