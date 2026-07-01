@@ -22,7 +22,7 @@ ADMIN_EMAILS = "359807859@qq.com"
 [[d1_databases]]
 binding = "DB"
 database_name = "reasonix-forum"
-database_id = "REPLACE_WITH_D1_ID"
+database_id = "294f6daa-6ee5-4c2d-a98f-54b38a1b3ac0"
 
 # Per-IP throttle for content creation (topics/replies/flags).
 [[unsafe.bindings]]
