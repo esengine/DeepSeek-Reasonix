@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -125,6 +126,20 @@ func TestRunProbesReportsTimeout(t *testing.T) {
 	}
 	if results[0].Error != "timeout" {
 		t.Fatalf("Error = %q, want timeout", results[0].Error)
+	}
+}
+
+func TestPrepareProbeCommandSetsCancellationBudget(t *testing.T) {
+	cmd := exec.Command("reasonix-test-probe")
+	prepareProbeCommand(cmd)
+	if cmd.Cancel == nil {
+		t.Fatal("probe command must install a cancellation hook")
+	}
+	if cmd.WaitDelay != probeWaitDelay {
+		t.Fatalf("WaitDelay = %v, want %v", cmd.WaitDelay, probeWaitDelay)
+	}
+	if runtime.GOOS == "windows" && cmd.SysProcAttr == nil {
+		t.Fatal("probe command must hide console windows on Windows")
 	}
 }
 

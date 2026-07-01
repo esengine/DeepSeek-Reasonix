@@ -101,9 +101,9 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 			applied += result.applied
 			usedFuzzy = usedFuzzy || result.fuzzy
 		case result.matches == 0:
-			return "", fmt.Errorf("edit %d: old_string not found", i+1)
+			return "", fmt.Errorf("edit %d: %w", i+1, oldStringNotFoundError(p.Path, step.OldString, content))
 		default:
-			return "", fmt.Errorf("edit %d: old_string is not unique; add more surrounding context or set replace_all", i+1)
+			return "", fmt.Errorf("edit %d: %w", i+1, oldStringNotUniqueError(p.Path, step.OldString, content, result.matches, true))
 		}
 	}
 

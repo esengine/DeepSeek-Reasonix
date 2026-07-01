@@ -44,6 +44,12 @@ export const PasswordChangeSchema = z.object({
   newPassword: password,
 });
 
+const userCode = z.string().trim().min(4).max(20);
+
+export const DevicePollSchema = z.object({ deviceCode: z.string().min(10).max(256) });
+export const DeviceApproveSchema = z.object({ userCode });
+export const DeviceCodeQuerySchema = z.object({ userCode });
+
 function firstIssue(error: z.ZodError): string {
   const issue = error.issues[0];
   if (!issue) return "Some fields are invalid.";

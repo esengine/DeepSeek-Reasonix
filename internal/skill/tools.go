@@ -8,45 +8,21 @@ import (
 	"strconv"
 	"strings"
 
-	"reasonix/internal/diff"
 	"reasonix/internal/event"
 	"reasonix/internal/tool"
 )
-
-type Gate interface {
-	Check(ctx context.Context, toolName string, args json.RawMessage, readOnly bool) (allow bool, reason string, err error)
-}
-
-type Asker interface {
-	Ask(ctx context.Context, questions []event.AskQuestion) ([]event.AskAnswer, error)
-}
-
-// SubagentRunContext carries host-owned runtime wiring for a subagent run. The
-// zero value preserves the legacy model-tool path, where the runner derives its
-// sink from agent.CallContext.
-type SubagentRunContext struct {
-	Sink event.Sink
-	// ContinueFrom resumes an existing subagent transcript in place. ForkFrom
-	// copies an existing transcript before running. They are mutually exclusive.
-	ContinueFrom string
-	ForkFrom     string
-	// Gate, when set, overrides the runner's default gate. Foreground
-	// slash-subagents use this to route writer approvals through the controller.
-	Gate Gate
-	// Asker, when set, lets the child ask the same interactive frontend as the
-	// parent. Background/model-internal subagents leave it nil and stay headless.
-	Asker Asker
-	// PreEditHook snapshots previewable writer edits before they run. Foreground
-	// slash-subagents share the parent's checkpoint anchor through this hook.
-	PreEditHook func(diff.Change)
-}
 
 // SubagentRunner runs a runAs=subagent skill: it spawns an isolated child loop
 // with the skill body as system prompt and `task` as its only input, returning
 // the final answer. boot wires this over the agent's sub-agent machinery; nil
 // means subagent skills are unavailable in this session (they error rather than
 // silently inlining, which would lose the isolation the author asked for).
-type SubagentRunner func(ctx context.Context, sk Skill, task string, run SubagentRunContext) (string, error)
+type SubagentRunOptions struct {
+	ContinueFrom string
+	ForkFrom     string
+}
+
+type SubagentRunner func(ctx context.Context, sk Skill, task string, opts SubagentRunOptions) (string, error)
 
 // ProfileResolver returns the model/effort profile a subagent skill will use.
 // It is optional; without one, skill frontmatter still supplies display metadata.
@@ -116,8 +92,8 @@ func (t *runSkillTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		return "", fmt.Errorf("unknown skill %q — available: %s", name, availableNames(t.store))
 	}
 	rawArgs := strings.TrimSpace(p.Arguments)
-	run := SubagentRunContext{ContinueFrom: strings.TrimSpace(p.Continue), ForkFrom: strings.TrimSpace(p.Fork)}
-	if run.ContinueFrom != "" && run.ForkFrom != "" {
+	opts := SubagentRunOptions{ContinueFrom: strings.TrimSpace(p.Continue), ForkFrom: strings.TrimSpace(p.Fork)}
+	if opts.ContinueFrom != "" && opts.ForkFrom != "" {
 		return "", fmt.Errorf("run_skill: continue_from and fork_from are mutually exclusive; pass only continue_from")
 	}
 
@@ -128,9 +104,9 @@ func (t *runSkillTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		if rawArgs == "" {
 			return "", fmt.Errorf("run_skill: skill %q is a subagent and requires 'arguments' — the subagent has no other context, so describe the concrete task", name)
 		}
-		return t.runner(ctx, sk, rawArgs, run)
+		return t.runner(ctx, sk, rawArgs, opts)
 	}
-	if run.ContinueFrom != "" || run.ForkFrom != "" {
+	if opts.ContinueFrom != "" || opts.ForkFrom != "" {
 		return "", fmt.Errorf("run_skill: subagent continuation is only valid for runAs=subagent skills")
 	}
 	return renderInline(sk, rawArgs), nil
@@ -225,7 +201,7 @@ func (t *readOnlySkillTool) Execute(ctx context.Context, args json.RawMessage) (
 		if rawArgs == "" {
 			return "", fmt.Errorf("read_only_skill: skill %q is a subagent and requires 'arguments' — the subagent has no other context, so describe the concrete read-only task", name)
 		}
-		return t.runner(ctx, sk, rawArgs, SubagentRunContext{})
+		return t.runner(ctx, sk, rawArgs, SubagentRunOptions{})
 	}
 	return renderInline(sk, rawArgs), nil
 }
@@ -359,11 +335,11 @@ func (t *subagentSkillTool) Execute(ctx context.Context, args json.RawMessage) (
 	if t.runner == nil {
 		return "", fmt.Errorf("%s: no subagent runner is configured in this session", t.toolName)
 	}
-	run := SubagentRunContext{ContinueFrom: strings.TrimSpace(p.Continue), ForkFrom: strings.TrimSpace(p.Fork)}
-	if run.ContinueFrom != "" && run.ForkFrom != "" {
+	opts := SubagentRunOptions{ContinueFrom: strings.TrimSpace(p.Continue), ForkFrom: strings.TrimSpace(p.Fork)}
+	if opts.ContinueFrom != "" && opts.ForkFrom != "" {
 		return "", fmt.Errorf("%s: continue_from and fork_from are mutually exclusive; pass only continue_from", t.toolName)
 	}
-	return t.runner(ctx, sk, task, run)
+	return t.runner(ctx, sk, task, opts)
 }
 
 func (t *subagentSkillTool) ResolveProfile(json.RawMessage) *event.Profile {

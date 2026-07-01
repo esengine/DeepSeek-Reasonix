@@ -509,9 +509,15 @@ func TestConfigMemoryV5CommandWritesUserConfig(t *testing.T) {
 	if !strings.Contains(out, "memory_compiler.enabled = false") {
 		t.Fatalf("config memory-v5 output = %q", out)
 	}
+	if !strings.Contains(out, `memory_compiler.verbosity = "observe"`) {
+		t.Fatalf("config memory-v5 output missing verbosity = %q", out)
+	}
 	cfg := config.LoadForEdit(config.UserConfigPath())
 	if cfg.MemoryCompilerEnabled() {
 		t.Fatalf("saved memory_compiler.enabled = true, want false")
+	}
+	if got := cfg.MemoryCompilerVerbosity(); got != config.MemoryCompilerVerbosityObserve {
+		t.Fatalf("saved memory_compiler.verbosity = %q, want observe", got)
 	}
 
 	out = captureStdout(t, func() {
@@ -521,6 +527,19 @@ func TestConfigMemoryV5CommandWritesUserConfig(t *testing.T) {
 	})
 	if !strings.Contains(out, "memory_compiler.enabled = false") {
 		t.Fatalf("config memory-v5 status output = %q", out)
+	}
+	if !strings.Contains(out, `memory_compiler.verbosity = "observe"`) {
+		t.Fatalf("config memory-v5 status output = %q", out)
+	}
+
+	out = captureStdout(t, func() {
+		if rc := Run([]string{"config", "memory-v5", "compact"}, "test-version"); rc != 0 {
+			t.Fatalf("config memory-v5 compact rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, "memory_compiler.enabled = true") ||
+		!strings.Contains(out, `memory_compiler.verbosity = "compact"`) {
+		t.Fatalf("config memory-v5 compact output = %q", out)
 	}
 }
 

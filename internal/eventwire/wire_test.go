@@ -55,8 +55,6 @@ func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 		"memoryCompiler?: MemoryCompilerStats;",
 		"export interface MemoryCompilerStats",
 		"cacheDiagnostics?: WireCacheDiagnostics;",
-		"subagent?: WireSubagent;",
-		"export interface WireSubagent",
 		"export interface WireCacheDiagnostics",
 		"prefixHash: string;",
 		"prefixChanged: boolean;",
@@ -245,20 +243,6 @@ func TestToWireInteractionAndLifecyclePayloads(t *testing.T) {
 			name: "steer",
 			in:   event.Event{Kind: event.Steer, Text: "mid-turn guidance"},
 			want: []string{`"kind":"steer"`, `"text":"mid-turn guidance"`},
-		},
-		{
-			name: "subagent",
-			in: event.Event{
-				Kind: event.Message,
-				Text: "child answer",
-				Subagent: &event.Subagent{
-					ID:    "sub-1",
-					Skill: "scout",
-					Alias: "One",
-					State: event.SubagentCompleted,
-				},
-			},
-			want: []string{`"kind":"message"`, `"text":"child answer"`, `"subagent":{"id":"sub-1"`, `"skill":"scout"`, `"alias":"One"`, `"state":"completed"`},
 		},
 	}
 	for _, tt := range tests {

@@ -156,26 +156,6 @@ type Approval struct {
 	Reason  string // optional annotation explaining why approval is needed
 }
 
-// SubagentState is the lifecycle state of one slash-subagent run.
-type SubagentState string
-
-const (
-	SubagentRunning   SubagentState = "running"
-	SubagentCompleted SubagentState = "completed"
-	SubagentFailed    SubagentState = "failed"
-	SubagentCanceled  SubagentState = "canceled"
-)
-
-// Subagent identifies one slash-subagent run. Set on any event kind when the
-// event belongs to a slash-subagent lifecycle or output stream.
-type Subagent struct {
-	ID    string        // stable per-run identity; UUID when available
-	Skill string        // invoked skill name, e.g. "scout"
-	Alias string        // localized human-friendly codename, e.g. "Scout One"
-	State SubagentState // lifecycle state
-	Error string        // set for failed / canceled terminal events
-}
-
 // AskOption is one choice the user can pick for an AskQuestion.
 type AskOption struct {
 	Label       string
@@ -277,7 +257,6 @@ type Event struct {
 	SessionHit   int        // Usage: cumulative cache-hit prompt tokens this session
 	SessionMiss  int        // Usage: cumulative cache-miss prompt tokens this session
 	Level        Level      // Notice
-	Subagent     *Subagent  // optional slash-subagent run metadata; when present the event belongs to that subagent lifecycle or output stream
 	Approval     Approval   // ApprovalRequest
 	Ask          Ask        // AskRequest
 	Err          error      // TurnDone: non-nil on failure

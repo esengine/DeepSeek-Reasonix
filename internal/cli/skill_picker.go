@@ -100,8 +100,8 @@ func (m chatTUI) handleSkillPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		case "enter":
 			return m.saveSkillPick()
 		case "backspace":
-			if p.query != "" {
-				p.query = trimLastRune(p.query)
+			if len(p.query) > 0 {
+				p.query = p.query[:len(p.query)-1]
 				p.sel = clampSel(p.sel, p.filteredSkills())
 			}
 			return m, nil
@@ -661,6 +661,19 @@ func sortedSkills(skills []skill.Skill) []skill.Skill {
 		return sorted[i].Name < sorted[j].Name
 	})
 	return sorted
+}
+
+func clampSel[T any](sel int, items []T) int {
+	if len(items) == 0 {
+		return 0
+	}
+	if sel < 0 {
+		return 0
+	}
+	if sel >= len(items) {
+		return len(items) - 1
+	}
+	return sel
 }
 
 func clampInt(sel, total int) int {

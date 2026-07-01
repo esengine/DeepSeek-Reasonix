@@ -50,7 +50,7 @@ func TestRunSkillSubagentRuns(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
 	var gotTask string
-	runner := func(_ context.Context, sk Skill, task string, _ SubagentRunContext) (string, error) {
+	runner := func(_ context.Context, sk Skill, task string, _ SubagentRunOptions) (string, error) {
 		gotTask = task
 		return "answer from " + sk.Name, nil
 	}
@@ -70,7 +70,7 @@ func TestRunSkillSubagentRuns(t *testing.T) {
 func TestRunSkillSubagentCancellationReachesRunner(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
-	runner := func(ctx context.Context, _ Skill, _ string, _ SubagentRunContext) (string, error) {
+	runner := func(ctx context.Context, _ Skill, _ string, _ SubagentRunOptions) (string, error) {
 		<-ctx.Done()
 		return "", ctx.Err()
 	}
@@ -117,8 +117,8 @@ func TestReadOnlySkillSubagentRunsWithoutContinuation(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
 	var gotTask string
-	var gotOpts SubagentRunContext
-	runner := func(_ context.Context, sk Skill, task string, opts SubagentRunContext) (string, error) {
+	var gotOpts SubagentRunOptions
+	runner := func(_ context.Context, sk Skill, task string, opts SubagentRunOptions) (string, error) {
 		gotTask = task
 		gotOpts = opts
 		return "read-only answer from " + sk.Name, nil
@@ -142,7 +142,7 @@ func TestReadOnlySkillSubagentRunsWithoutContinuation(t *testing.T) {
 func TestReadOnlySkillSubagentRequiresArgs(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
-	runner := func(_ context.Context, _ Skill, _ string, _ SubagentRunContext) (string, error) {
+	runner := func(_ context.Context, _ Skill, _ string, _ SubagentRunOptions) (string, error) {
 		return "x", nil
 	}
 	tl := NewReadOnlySkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), runner)
@@ -188,7 +188,9 @@ func TestRunSkillSubagentResolvesProfile(t *testing.T) {
 func TestRunSkillSubagentRequiresArgs(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
-	runner := func(_ context.Context, _ Skill, _ string, _ SubagentRunContext) (string, error) { return "x", nil }
+	runner := func(_ context.Context, _ Skill, _ string, _ SubagentRunOptions) (string, error) {
+		return "x", nil
+	}
 	tl := NewRunSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), runner)
 	if _, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"dig"}`)); err == nil {
 		t.Error("subagent skill should require arguments")
@@ -213,7 +215,7 @@ func TestCleanSkillName(t *testing.T) {
 
 func TestBuiltinSubagentToolsRunner(t *testing.T) {
 	var ran string
-	runner := func(_ context.Context, sk Skill, task string, _ SubagentRunContext) (string, error) {
+	runner := func(_ context.Context, sk Skill, task string, _ SubagentRunOptions) (string, error) {
 		ran = sk.Name + ":" + task
 		return "ok", nil
 	}
@@ -239,8 +241,8 @@ func TestBuiltinSubagentToolsRunner(t *testing.T) {
 }
 
 func TestBuiltinSubagentToolsPassContinuationOptions(t *testing.T) {
-	var got SubagentRunContext
-	runner := func(_ context.Context, _ Skill, _ string, opts SubagentRunContext) (string, error) {
+	var got SubagentRunOptions
+	runner := func(_ context.Context, _ Skill, _ string, opts SubagentRunOptions) (string, error) {
 		got = opts
 		return "ok", nil
 	}
@@ -267,8 +269,8 @@ func TestBuiltinSubagentToolsPassContinuationOptions(t *testing.T) {
 }
 
 func TestRunSkillToolPassesLegacyForkOption(t *testing.T) {
-	var got SubagentRunContext
-	runner := func(_ context.Context, _ Skill, _ string, opts SubagentRunContext) (string, error) {
+	var got SubagentRunOptions
+	runner := func(_ context.Context, _ Skill, _ string, opts SubagentRunOptions) (string, error) {
 		got = opts
 		return "ok", nil
 	}
@@ -282,8 +284,8 @@ func TestRunSkillToolPassesLegacyForkOption(t *testing.T) {
 }
 
 func TestBuiltinSubagentToolsPassLegacyForkOption(t *testing.T) {
-	var got SubagentRunContext
-	runner := func(_ context.Context, _ Skill, _ string, opts SubagentRunContext) (string, error) {
+	var got SubagentRunOptions
+	runner := func(_ context.Context, _ Skill, _ string, opts SubagentRunOptions) (string, error) {
 		got = opts
 		return "ok", nil
 	}

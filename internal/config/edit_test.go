@@ -78,6 +78,25 @@ func TestUIThemeStyleNormalizes(t *testing.T) {
 	}
 }
 
+func TestUICursorShapeNormalizes(t *testing.T) {
+	c := Default()
+	for _, tt := range []struct {
+		in   string
+		want string
+	}{
+		{"", "underline"},
+		{"UNDERLINE", "underline"},
+		{" block ", "block"},
+		{"bar", "bar"},
+		{"unknown", "underline"},
+	} {
+		c.UI.CursorShape = tt.in
+		if got := c.UICursorShape(); got != tt.want {
+			t.Errorf("UICursorShape(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestUICloseBehaviorNormalizes(t *testing.T) {
 	c := Default()
 	for _, tt := range []struct {
@@ -357,6 +376,31 @@ func TestSetMemoryCompilerEnabled(t *testing.T) {
 	}
 	if !c.MemoryCompilerEnabled() {
 		t.Fatal("memory compiler explicit true = false, want true")
+	}
+}
+
+func TestSetMemoryCompilerVerbosity(t *testing.T) {
+	c := Default()
+	if err := c.SetMemoryCompilerVerbosity("compact"); err != nil {
+		t.Fatalf("SetMemoryCompilerVerbosity(compact): %v", err)
+	}
+	if got := c.MemoryCompilerVerbosity(); got != MemoryCompilerVerbosityCompact {
+		t.Fatalf("memory compiler verbosity = %q, want compact", got)
+	}
+	if err := c.SetMemoryCompilerVerbosity("on"); err != nil {
+		t.Fatalf("SetMemoryCompilerVerbosity(on): %v", err)
+	}
+	if got := c.MemoryCompilerVerbosity(); got != MemoryCompilerVerbosityCompact {
+		t.Fatalf("memory compiler verbosity after on = %q, want compact", got)
+	}
+	if err := c.SetMemoryCompilerVerbosity("observe"); err != nil {
+		t.Fatalf("SetMemoryCompilerVerbosity(observe): %v", err)
+	}
+	if got := c.MemoryCompilerVerbosity(); got != MemoryCompilerVerbosityObserve {
+		t.Fatalf("memory compiler verbosity = %q, want observe", got)
+	}
+	if err := c.SetMemoryCompilerVerbosity("verbose"); err == nil {
+		t.Fatal("expected error for invalid memory compiler verbosity")
 	}
 }
 

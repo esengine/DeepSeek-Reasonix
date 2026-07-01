@@ -2,6 +2,8 @@ package builtin
 
 import (
 	"context"
+	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +58,102 @@ func TestWorkspacePassesBashTimeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("error = %v, want timeout", err)
+	}
+}
+
+func TestNormalizeBashRunErrorAllowsPreservedWaitDelay(t *testing.T) {
+	if err := normalizeBashRunError(context.Background(), exec.ErrWaitDelay, true); err != nil {
+		t.Fatalf("preserved post-exit WaitDelay should be ignored, got %v", err)
+	}
+	if err := normalizeBashRunError(context.Background(), exec.ErrWaitDelay, false); !errors.Is(err, exec.ErrWaitDelay) {
+		t.Fatalf("ordinary WaitDelay should remain visible, got %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := normalizeBashRunError(ctx, exec.ErrWaitDelay, true); !errors.Is(err, exec.ErrWaitDelay) {
+		t.Fatalf("cancelled WaitDelay should remain visible, got %v", err)
+	}
+}
+
+func TestWaitForTrackedShellProcessReturnsWhenWaitStallsAfterCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	tracked := &trackedShellProcess{}
+	releaseWait := make(chan struct{})
+	defer close(releaseWait)
+
+	start := time.Now()
+	err := waitForTrackedShellProcess(ctx, tracked, func() error {
+		<-releaseWait
+		return nil
+	}, 20*time.Millisecond)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("cancelled stalled wait returned too slowly: %v", elapsed)
+	}
+	if !tracked.killed {
+		t.Fatal("tracked process was not marked killed")
+	}
+}
+
+func TestWaitForTrackedShellProcessKeepsWaitErrorAfterCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	tracked := &trackedShellProcess{}
+	waitStarted := make(chan struct{})
+	releaseWait := make(chan struct{})
+	errWait := errors.New("wait failed after cancel")
+	done := make(chan error, 1)
+
+	go func() {
+		done <- waitForTrackedShellProcess(ctx, tracked, func() error {
+			close(waitStarted)
+			<-releaseWait
+			return errWait
+		}, time.Second)
+	}()
+
+	<-waitStarted
+	cancel()
+	waitUntilTrackedShellKilled(t, tracked)
+	close(releaseWait)
+
+	select {
+	case err := <-done:
+		if err.Error() != context.Canceled.Error() {
+			t.Fatalf("error text = %q, want %q", err.Error(), context.Canceled.Error())
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error = %v, want context.Canceled", err)
+		}
+		if !errors.Is(err, errWait) {
+			t.Fatalf("error = %v, want wrapped wait error %v", err, errWait)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for cancelled shell wait")
+	}
+}
+
+func waitUntilTrackedShellKilled(t *testing.T, tracked *trackedShellProcess) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for {
+		tracked.mu.Lock()
+		killed := tracked.killed
+		tracked.mu.Unlock()
+		if killed {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for tracked shell kill")
+		default:
+			time.Sleep(time.Millisecond)
+		}
 	}
 }
 

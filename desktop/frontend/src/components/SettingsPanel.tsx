@@ -17,6 +17,7 @@ import {
   type ThemeStyle,
 } from "../lib/theme";
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
+import { snapZoom, zoomToPercent, saveRestartZoom, getRestartZoom, type ZoomLevel } from "../lib/dpiScale";
 import {
   applyFontFamily,
   applyMonoFontFamily,
@@ -57,6 +58,7 @@ import { ShortcutComboDisplay } from "./ShortcutComboDisplay";
 
 const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "hooks", "shortcuts", "permissions", "sandbox", "network", "appearance", "updates"];
 export type SettingsInitialFocus = { target: "bot-allowlist"; connectionId?: string };
+type DesktopPlatform = "darwin" | "windows" | "linux";
 
 const MCPServersSettingsPage = lazy(() => import("./CapabilitiesPanel").then((module) => ({ default: module.MCPServersSettingsPage })));
 const SkillsSettingsPage = lazy(() => import("./CapabilitiesPanel").then((module) => ({ default: module.SkillsSettingsPage })));
@@ -72,12 +74,14 @@ export function SettingsPanel({
   initialTab,
   initialFocus,
   agentRunning = false,
+  desktopPlatform,
 }: {
   onClose: () => void;
   onChanged: (settings?: SettingsView | null) => void;
   initialTab?: SettingsTab;
   initialFocus?: SettingsInitialFocus;
   agentRunning?: boolean;
+  desktopPlatform: DesktopPlatform;
 }) {
   const t = useT();
   const [s, setS] = useState<SettingsView | null>(null);
@@ -89,6 +93,7 @@ export function SettingsPanel({
   const [theme, setThemeState] = useState<Theme>(getTheme());
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => getThemeStyle(getTheme()));
   const [textSize, setTextSizeState] = useState<TextSize>(getTextSize());
+  const [zoomPct, setZoomPct] = useState<number>(zoomToPercent(getRestartZoom()));
   const [fontFamily, setFontFamilyState] = useState<FontFamily>(getFontFamily());
   const [monoFontFamily, setMonoFontFamilyState] = useState<MonoFontFamily>(getMonoFontFamily());
   const [customFontName, setCustomFontNameState] = useState<string>(getCustomFontName());
@@ -220,6 +225,8 @@ export function SettingsPanel({
                       theme={theme}
                       themeStyle={themeStyle}
                       textSize={textSize}
+                      showDisplayZoom={desktopPlatform === "windows"}
+                      zoomPct={zoomPct}
                       fontFamily={fontFamily}
                       monoFontFamily={monoFontFamily}
                       customFontName={customFontName}
@@ -237,6 +244,18 @@ export function SettingsPanel({
                       onTextSize={(size) => {
                         applyTextSize(size);
                         setTextSizeState(size);
+                      }}
+                      onRestartZoom={async (zoom) => {
+                        const snapped = snapZoom(zoom);
+                        setErr(null);
+                        setWarning(null);
+                        try {
+                          await app.SetDesktopZoomFactor(snapped);
+                          saveRestartZoom(snapped);
+                          setZoomPct(zoomToPercent(snapped));
+                        } catch (e) {
+                          setErr(String((e as Error)?.message ?? e));
+                        }
                       }}
                       onFontFamily={(font) => {
                         applyFontFamily(font);
@@ -650,6 +669,28 @@ function normalizeReasoningProtocol(protocol: string | undefined): string {
   return REASONING_PROTOCOLS.includes(protocol ?? "") ? protocol ?? "" : "";
 }
 
+export function providerEditorEffectiveKind(isNewCustomProvider: boolean, kind: string, kinds: string[]): string {
+  return isNewCustomProvider ? "openai" : (kind.trim() || kinds[0] || "openai");
+}
+
+function trimmedURL(value: string): string {
+  return value.trim().replace(/\/+$/, "");
+}
+
+export function providerChatURLPreview(baseUrl: string, chatUrl: string, fullURL: boolean): string {
+  if (fullURL) return trimmedURL(chatUrl);
+  const base = trimmedURL(baseUrl);
+  return base ? `${base}/chat/completions` : "";
+}
+
+export function providerBaseURLFromChatURL(chatUrl: string): string {
+  const full = trimmedURL(chatUrl);
+  for (const suffix of ["/chat/completions", "/responses", "/response"]) {
+    if (full.endsWith(suffix)) return trimmedURL(full.slice(0, -suffix.length));
+  }
+  return full;
+}
+
 function normalizeReasoningLanguage(lang: string | undefined): string {
   const v = String(lang ?? "").trim().toLowerCase();
   return v === "zh" || v === "en" ? v : "auto";
@@ -782,6 +823,7 @@ function normalizeProviderView(p: ProviderView): ProviderView {
     ...p,
     builtIn: Boolean(p.builtIn),
     added: Boolean(p.added),
+    chatUrl: p.chatUrl ?? "",
     models: asArray(p.models),
     visionModels,
     visionModelsConfigured: Boolean(p.visionModelsConfigured ?? visionModels.length > 0),
@@ -4287,14 +4329,16 @@ function ProviderEditor({
 }) {
   const t = useT();
   const [name, setName] = useState(initial?.name ?? "");
-  const [kind, setKind] = useState(initial?.kind ?? kinds[0] ?? "openai");
+  const [kind, setKind] = useState(initial?.kind ?? "openai");
   const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? "");
+  const [chatUrl, setChatUrl] = useState(initial?.chatUrl ?? "");
+  const [fullChatUrl, setFullChatUrl] = useState(Boolean((initial?.chatUrl ?? "").trim()));
   const [models, setModels] = useState((initial?.models ?? []).join(", "));
   const [visionModels, setVisionModels] = useState((initial?.visionModels ?? []).join(", "));
   const [visionModelsConfigured, setVisionModelsConfigured] = useState(
     Boolean(initial?.visionModelsConfigured ?? ((initial?.visionModels ?? []).length > 0)),
   );
-  const [modelsUrl] = useState(initial?.modelsUrl ?? "");
+  const [modelsUrl, setModelsUrl] = useState(initial?.modelsUrl ?? "");
   const [apiKeyEnv, setApiKeyEnv] = useState(initial?.apiKeyEnv ?? "");
   const [keyDraft, setKeyDraft] = useState("");
   const [balanceUrl, setBalanceUrl] = useState(initial?.balanceUrl ?? "");
@@ -4311,6 +4355,11 @@ function ProviderEditor({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const builtIn = initial?.builtIn ?? false;
   const isNewCustomProvider = !initial;
+  const effectiveKind = providerEditorEffectiveKind(isNewCustomProvider, kind, kinds);
+  const effectiveBaseUrl = fullChatUrl ? providerBaseURLFromChatURL(chatUrl) : baseUrl.trim();
+  const effectiveChatUrl = fullChatUrl ? trimmedURL(chatUrl) : "";
+  const effectiveModelsUrl = modelsUrl.trim();
+  const previewChatUrl = providerChatURLPreview(baseUrl, chatUrl, fullChatUrl);
 
   // Offer the kinds the kernel actually registered; if the stored kind is a
   // legacy/unknown one, keep it as an option so editing doesn't silently change it.
@@ -4357,9 +4406,10 @@ function ProviderEditor({
         name: name.trim() || t("settings.newProviderDraftName"),
         builtIn: initial?.builtIn ?? false,
         added: initial?.added ?? true,
-        kind: kind.trim() || kinds[0] || "openai",
-        baseUrl: baseUrl.trim(),
-        modelsUrl,
+        kind: effectiveKind,
+        baseUrl: effectiveBaseUrl,
+        chatUrl: effectiveChatUrl,
+        modelsUrl: effectiveModelsUrl,
         models: [],
         visionModels: [],
         visionModelsConfigured: false,
@@ -4398,14 +4448,15 @@ function ProviderEditor({
       name: name.trim(),
       builtIn: initial?.builtIn ?? false,
       added: initial?.added ?? true,
-      kind: kind.trim() || kinds[0] || "openai",
-      baseUrl: baseUrl.trim(),
+      kind: effectiveKind,
+      baseUrl: effectiveBaseUrl,
+      chatUrl: effectiveChatUrl,
       models: ms,
       visionModels: vms,
       visionModelsConfigured: visionModelsConfigured || vms.length > 0,
       default: ms[0] ?? "",
       apiKeyEnv: effectiveApiKeyEnv,
-      modelsUrl,
+      modelsUrl: effectiveModelsUrl,
       keySet: Boolean(keyDraft.trim()) || (initial?.keySet ?? false),
       balanceUrl: balanceUrl.trim(),
       contextWindow: Number(ctx) || 0,
@@ -4455,7 +4506,7 @@ function ProviderEditor({
     () => models.split(",").map((m) => m.trim()).filter(Boolean),
     [models],
   );
-  const canFetch = Boolean(name.trim() && baseUrl.trim());
+  const canFetch = Boolean(name.trim() && effectiveBaseUrl);
 
   const protocolField = initial ? (
     <select className="mem-select" value={kind} onChange={(e) => setKind(e.target.value)}>
@@ -4484,6 +4535,14 @@ function ProviderEditor({
           onChange={(e) => setApiKeyEnv(e.target.value)}
         />
         <div className="mem-hint">{t("settings.providerApiKeyEnvHint")}</div>
+        <label className="set-label">{t("settings.providerModelsUrl")}</label>
+        <input
+          className="mem-input"
+          placeholder={t("settings.providerModelsUrlPlaceholder")}
+          value={modelsUrl}
+          onChange={(e) => setModelsUrl(e.target.value)}
+        />
+        <div className="mem-hint">{t("settings.providerModelsUrlHint")}</div>
         <label className="set-label">{t("settings.providerBalanceUrl")}</label>
         <input className="mem-input" placeholder={t("settings.balanceUrlPlaceholder")} value={balanceUrl} onChange={(e) => setBalanceUrl(e.target.value)} />
         <div className="mem-hint">{t("settings.balanceUrlHint")}</div>
@@ -4595,8 +4654,44 @@ function ProviderEditor({
       <input className="mem-input" placeholder={t("settings.customProviderNamePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} disabled={!!initial} />
       <label className="set-label">{t("settings.providerProtocol")}</label>
       {protocolField}
-      <label className="set-label">{t("settings.providerBaseUrlLabel")}</label>
-      <input className="mem-input" placeholder={t("settings.providerBaseUrl")} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+      <div className="set-row">
+        <label className="set-label set-grow">
+          {t(fullChatUrl ? "settings.providerChatUrlLabel" : "settings.providerBaseUrlLabel")}
+        </label>
+        <label className="set-check">
+          <input
+            type="checkbox"
+            checked={fullChatUrl}
+            onChange={(e) => {
+              const checked = e.target.checked;
+              setFullChatUrl(checked);
+              if (checked && !chatUrl.trim()) {
+                setChatUrl(providerChatURLPreview(baseUrl, "", false));
+              } else if (!checked && !baseUrl.trim()) {
+                setBaseUrl(providerBaseURLFromChatURL(chatUrl));
+              }
+            }}
+          />
+          {t("settings.providerUseFullChatUrl")}
+        </label>
+      </div>
+      <input
+        className="mem-input"
+        placeholder={t(fullChatUrl ? "settings.providerChatUrlPlaceholder" : "settings.providerBaseUrl")}
+        value={fullChatUrl ? chatUrl : baseUrl}
+        onChange={(e) => {
+          const value = e.target.value;
+          if (fullChatUrl) {
+            setChatUrl(value);
+            setBaseUrl(providerBaseURLFromChatURL(value));
+          } else {
+            setBaseUrl(value);
+          }
+        }}
+      />
+      <div className="mem-hint">
+        {previewChatUrl ? t("settings.providerRequestPreview", { url: previewChatUrl }) : t("settings.providerRequestPreviewEmpty")}
+      </div>
       {!initial && (
         <>
           <label className="set-label">{t("settings.providerKey")}</label>
@@ -4652,7 +4747,7 @@ function ProviderEditor({
         <button className="btn btn--small" onClick={onCancel} disabled={busy}>
           {t("common.cancel")}
         </button>
-        <button className="btn btn--primary btn--small" onClick={() => void save()} disabled={busy || !name.trim() || !baseUrl.trim() || !models.trim()}>
+        <button className="btn btn--primary btn--small" onClick={() => void save()} disabled={busy || !name.trim() || !effectiveBaseUrl || !models.trim()}>
           {t("common.save")}
         </button>
       </div>
@@ -5196,6 +5291,8 @@ function AppearanceSection({
   theme,
   themeStyle,
   textSize,
+  showDisplayZoom,
+  zoomPct,
   fontFamily,
   monoFontFamily,
   customFontName,
@@ -5203,6 +5300,7 @@ function AppearanceSection({
   onTheme,
   onThemeStyle,
   onTextSize,
+  onRestartZoom,
   onFontFamily,
   onMonoFontFamily,
   onCustomFontNameChange,
@@ -5211,6 +5309,8 @@ function AppearanceSection({
   theme: Theme;
   themeStyle: ThemeStyle;
   textSize: TextSize;
+  showDisplayZoom: boolean;
+  zoomPct: number;
   fontFamily: FontFamily;
   monoFontFamily: MonoFontFamily;
   customFontName: string;
@@ -5218,6 +5318,7 @@ function AppearanceSection({
   onTheme: (t: Theme) => void;
   onThemeStyle: (style: ThemeStyle) => void;
   onTextSize: (size: TextSize) => void;
+  onRestartZoom: (zoom: ZoomLevel) => Promise<void>;
   onFontFamily: (font: FontFamily) => void;
   onMonoFontFamily: (font: MonoFontFamily) => void;
   onCustomFontNameChange: (name: string) => void;
@@ -5289,6 +5390,37 @@ function AppearanceSection({
           ))}
         </div>
       </SettingsField>
+      {showDisplayZoom && (
+        <SettingsField label={t("settings.displayZoom")}>
+          <div className="zoom-slider-wrap">
+            <div className="zoom-slider__value">{zoomPct}%</div>
+            <div className="zoom-slider-row">
+              <span className="zoom-slider__label">50%</span>
+              <div className="slider-track">
+                <div className="slider-track__bg" />
+                <div
+                  className="slider-track__fill"
+                  style={{ width: `calc(${((zoomPct - 50) / 150) * 100}% + 15px)` }}
+                />
+                <div className="slider-thumb" style={{ left: `${((zoomPct - 50) / 150) * 100}%` }}>
+                  <div className="slider-thumb__left" />
+                  <div className="slider-thumb__mid" />
+                  <div className="slider-thumb__right" />
+                </div>
+                <input
+                  type="range"
+                  min={50}
+                  max={200}
+                  step={5}
+                  value={zoomPct}
+                  onChange={(e) => { void onRestartZoom(Number(e.target.value) / 100); }}
+                />
+              </div>
+              <span className="zoom-slider__label">200%</span>
+            </div>
+          </div>
+        </SettingsField>
+      )}
       <SettingsField label={t("settings.fontFamily")}>
         <div className="set-seg">
           {availableFontFamilies.map((font) => (

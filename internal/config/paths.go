@@ -412,15 +412,6 @@ func CommandDirsForRoot(root string) []string {
 	return dirs
 }
 
-// AgentDirs returns the project-local directories scanned for agent definitions.
-// Agents run as subagents and stay project-scoped.
-func AgentDirs() []string {
-	return []string{
-		filepath.Join(".reasonix", "agents"),
-		filepath.Join(".claude", "agents"),
-	}
-}
-
 // SourcePath returns the highest-priority config file that exists, or "" if none.
 func SourcePath() string {
 	return SourcePathForRoot(".")

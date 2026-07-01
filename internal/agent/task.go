@@ -9,7 +9,6 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"reasonix/internal/diff"
 	"reasonix/internal/event"
 	"reasonix/internal/jobs"
 	"reasonix/internal/planmode"
@@ -700,31 +699,6 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 	}, sink)
 }
 
-// SubagentRunConfig carries optional runtime wiring for a sub-agent run.
-// The zero value preserves the legacy task-tool path.
-type SubagentRunConfig struct {
-	Sink        event.Sink
-	PlanMode    bool
-	Asker       Asker
-	PreEditHook func(diff.Change)
-}
-
-// RunSubAgent runs prompt to completion in a fresh sub-agent session over reg,
-// emitting tool activity to sink, and returns the sub-agent's final assistant
-// answer. It is the shared core behind the `task` tool and subagent skills: a
-// caller supplies the system prompt (the task persona or the skill body), the
-// tool registry (already filtered), and the run Options (model budget, gate).
-func RunSubAgent(ctx context.Context, prov provider.Provider, reg *tool.Registry, sysPrompt, prompt string, opts Options, sink event.Sink) (string, error) {
-	return RunSubAgentWithConfig(ctx, prov, reg, sysPrompt, prompt, opts, SubagentRunConfig{Sink: sink})
-}
-
-// RunSubAgentWithConfig is the shared sub-agent entrypoint for callers that
-// need additional runtime wiring beyond the base provider/registry/options.
-func RunSubAgentWithConfig(ctx context.Context, prov provider.Provider, reg *tool.Registry, sysPrompt, prompt string, opts Options, cfg SubagentRunConfig) (string, error) {
-	sess := NewSession(sysPrompt)
-	return RunSubAgentWithSessionConfig(ctx, prov, reg, sess, prompt, opts, cfg)
-}
-
 func FormatSubagentReference(run *SubagentRun) string {
 	if run == nil || run.Ref == "" {
 		return ""
@@ -759,27 +733,10 @@ func FormatSubagentRunResult(answer string, run *SubagentRun, failed bool) strin
 // returns the latest final assistant answer. Fresh sub-agents pass a newly-created
 // session; continued sub-agents pass a loaded transcript session.
 func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *tool.Registry, sess *Session, prompt string, opts Options, sink event.Sink) (string, error) {
-	return RunSubAgentWithSessionConfig(ctx, prov, reg, sess, prompt, opts, SubagentRunConfig{Sink: sink})
-}
-
-// RunSubAgentWithSessionConfig is RunSubAgentWithSession with host-owned runtime
-// wiring for interactive foreground subagents.
-func RunSubAgentWithSessionConfig(ctx context.Context, prov provider.Provider, reg *tool.Registry, sess *Session, prompt string, opts Options, cfg SubagentRunConfig) (string, error) {
 	if sess == nil {
 		return "", fmt.Errorf("sub-agent session is nil")
 	}
-	sink := cfg.Sink
-	if sink == nil {
-		sink = event.Discard
-	}
 	sub := New(prov, reg, sess, opts, sink)
-	sub.SetPlanMode(cfg.PlanMode)
-	sub.SetAsker(cfg.Asker)
-	sub.SetPreEditHook(cfg.PreEditHook)
-	return finishSubAgentRun(ctx, sub, sess, prompt)
-}
-
-func finishSubAgentRun(ctx context.Context, sub *Agent, sess *Session, prompt string) (string, error) {
 	if err := sub.Run(ctx, prompt); err != nil {
 		return "", fmt.Errorf("sub-agent: %w", err)
 	}

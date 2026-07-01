@@ -21,32 +21,3 @@ func TestWireEventTabPreservesSharedRetryingFields(t *testing.T) {
 		}
 	}
 }
-
-func TestWireEventTabOmitsSubagentForDesktop(t *testing.T) {
-	w := toWireTab(event.Event{
-		Kind: event.Message,
-		Text: "child answer",
-		Subagent: &event.Subagent{
-			ID:    "sub-1",
-			Skill: "scout",
-			Alias: "One",
-			State: event.SubagentCompleted,
-		},
-	}, "tab-1")
-	b, err := json.Marshal(w)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if jsonContainsKey(b, "subagent") {
-		t.Fatalf("desktop wire should omit subagent payload, got %s", b)
-	}
-}
-
-func jsonContainsKey(b []byte, key string) bool {
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(b, &m); err != nil {
-		return false
-	}
-	_, ok := m[key]
-	return ok
-}

@@ -110,6 +110,147 @@ func TestDesktopMCPMigrationRootsIncludesLegacyWorkspaces(t *testing.T) {
 	}
 }
 
+func TestRecoverLegacyProjectSidebarRootsPreservesUpgradeProjects(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	existing := t.TempDir()
+	active := t.TempDir()
+	legacy := t.TempDir()
+	tabRoot := t.TempDir()
+	missing := filepath.Join(t.TempDir(), "missing")
+
+	if err := saveProjectsFile(desktopProjectFile{Projects: []desktopProject{{Root: existing, Title: "Existing"}}}); err != nil {
+		t.Fatal(err)
+	}
+	saveWorkspace(active)
+	if err := os.MkdirAll(filepath.Dir(workspaceListPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal([]string{legacy, active, missing, legacy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workspaceListPath(), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tabs := desktopTabsFile{
+		Tabs: []desktopTabEntry{
+			{Scope: "project", WorkspaceRoot: tabRoot},
+			{Scope: "project", WorkspaceRoot: missing},
+			{Scope: "global"},
+		},
+	}
+	changed, err := recoverLegacyProjectSidebarRoots(tabs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("recoverLegacyProjectSidebarRoots should add missing legacy projects")
+	}
+
+	projects := loadProjectsFile().Projects
+	want := []string{
+		normalizeProjectRoot(existing),
+		normalizeProjectRoot(active),
+		normalizeProjectRoot(legacy),
+		normalizeProjectRoot(tabRoot),
+	}
+	if len(projects) != len(want) {
+		t.Fatalf("project count = %d, want %d: %+v", len(projects), len(want), projects)
+	}
+	for i, root := range want {
+		if projects[i].Root != root {
+			t.Fatalf("projects[%d].Root = %q, want %q; projects=%+v", i, projects[i].Root, root, projects)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(desktopConfigDir(), legacyProjectSidebarRecoveryMarker)); err != nil {
+		t.Fatalf("recovery marker was not written: %v", err)
+	}
+
+	if err := removeProject(legacy); err != nil {
+		t.Fatal(err)
+	}
+	changed, err = recoverLegacyProjectSidebarRoots(tabs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed {
+		t.Fatal("recovery should be one-shot after the marker is written")
+	}
+	for _, project := range loadProjectsFile().Projects {
+		if project.Root == normalizeProjectRoot(legacy) {
+			t.Fatalf("removed legacy project was restored after marker: %+v", loadProjectsFile().Projects)
+		}
+		if project.Root == normalizeProjectRoot(missing) {
+			t.Fatalf("missing legacy project should not be restored: %+v", loadProjectsFile().Projects)
+		}
+	}
+}
+
+func TestProjectFileUpdatesSerializeReadModifyWrite(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	active := t.TempDir()
+	added := t.TempDir()
+
+	if err := saveProjectsFile(desktopProjectFile{Projects: []desktopProject{{Root: active, Title: "Active"}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	updateErr := make(chan error, 1)
+	go func() {
+		updateErr <- updateProjectsFile(func(f *desktopProjectFile) (bool, error) {
+			close(entered)
+			<-release
+			for i, project := range f.Projects {
+				if project.Root == normalizeProjectRoot(active) {
+					f.Projects[i].Title = "Active edited"
+					return true, nil
+				}
+			}
+			return false, nil
+		})
+	}()
+	<-entered
+
+	addErr := make(chan error, 1)
+	go func() {
+		addErr <- addProject(added, "Added")
+	}()
+	select {
+	case err := <-addErr:
+		t.Fatalf("addProject completed while another project update was in progress: %v", err)
+	case <-time.After(10 * time.Millisecond):
+	}
+	close(release)
+	if err := <-updateErr; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-addErr; err != nil {
+		t.Fatal(err)
+	}
+
+	projects := loadProjectsFile().Projects
+	if len(projects) != 2 {
+		t.Fatalf("project count = %d, want 2: %+v", len(projects), projects)
+	}
+	if projects[0].Root != normalizeProjectRoot(active) || projects[0].Title != "Active edited" {
+		t.Fatalf("active project was not preserved with edited title: %+v", projects)
+	}
+	if projects[1].Root != normalizeProjectRoot(added) || projects[1].Title != "Added" {
+		t.Fatalf("concurrent project add was lost: %+v", projects)
+	}
+
+	if err := addProject(active, ""); err != nil {
+		t.Fatal(err)
+	}
+	projects = loadProjectsFile().Projects
+	if len(projects) != 2 || projects[1].Root != normalizeProjectRoot(added) {
+		t.Fatalf("no-op addProject overwrote the added project: %+v", projects)
+	}
+}
+
 func TestDialogDefaultDirectoryFallsBackFromMissingWorkspace(t *testing.T) {
 	parent := t.TempDir()
 	missing := filepath.Join(parent, "deleted", "project")

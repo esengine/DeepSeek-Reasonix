@@ -120,14 +120,6 @@ export interface WireAsk {
   questions: WireAskQuestion[];
 }
 
-export interface WireSubagent {
-  id?: string;
-  skill?: string;
-  alias?: string;
-  state?: string;
-  error?: string;
-}
-
 // QuestionAnswer is the reply for one question, sent back via AnswerQuestion.
 export interface QuestionAnswer {
   questionId: string;
@@ -167,7 +159,6 @@ export interface WireEvent {
   memoryCitations?: MemoryCitation[];
   memoryCompiler?: MemoryCompilerStats;
   level?: "info" | "warn";
-  subagent?: WireSubagent;
   tool?: WireTool;
   usage?: WireUsage;
   approval?: WireApproval;
@@ -216,6 +207,7 @@ export interface TabMeta {
   tokenMode?: TokenMode;
   goal?: string;
   goalStatus?: GoalStatus;
+  autoResearch?: AutoResearchCompactView;
   startupErr?: string;
   active: boolean;
   cwd: string;
@@ -364,6 +356,8 @@ export interface CheckpointMeta {
   turn: number;
   prompt: string;
   files: string[];
+  fileCount?: number;
+  filesTruncated?: boolean;
   turnFileCount?: number;
   time: number; // unix ms
   canCode?: boolean;
@@ -421,6 +415,7 @@ export interface ContextInfo {
   sessionCurrency?: string;
   cacheHitTokens?: number;
   cacheMissTokens?: number;
+  sources?: Record<string, UsageSourceStats>;
 }
 
 export interface Meta {
@@ -442,12 +437,62 @@ export interface Meta {
   tokenMode?: TokenMode;
   goal?: string;
   goalStatus?: GoalStatus;
+  autoResearch?: AutoResearchCompactView;
 }
 
 export type CollaborationMode = "normal" | "plan" | "goal";
 export type ToolApprovalMode = "ask" | "auto" | "yolo";
 export type TokenMode = "full" | "economy";
 export type GoalStatus = "running" | "complete" | "blocked" | "stopped";
+
+export interface AutoResearchCompactView {
+  taskId: string;
+  status: "running" | "blocked" | "complete" | "stopped" | "invalid";
+  iteration: number;
+  pivotRequired: boolean;
+  staleCount: number;
+}
+
+export interface AutoResearchCriterionView {
+  id: string;
+  description: string;
+  required: boolean;
+  evidenceCount: number;
+  status: string;
+}
+
+export interface AutoResearchStatusView extends AutoResearchCompactView {
+  goal: string;
+  currentDirection: string;
+  pivotCount: number;
+  lastHeartbeatAt: string;
+  findingCount: number;
+  openCriteria: AutoResearchCriterionView[];
+  blocker: string;
+  taskPath: string;
+  nextRequiredAction: string;
+}
+
+export interface AutoResearchFindingView {
+  id: string;
+  kind: string;
+  summary: string;
+  source: string;
+  command?: string;
+  paths?: string[];
+  accepted: boolean;
+  createdAt: string;
+}
+
+export interface AutoResearchEvidenceView {
+  id: string;
+  kind: string;
+  summary: string;
+  source: string;
+  command?: string;
+  paths?: string[];
+  accepted: boolean;
+}
 
 export function normalizeCollaborationMode(mode?: string, goal?: string, legacyMode?: Mode): CollaborationMode {
   if (mode === "plan" || mode === "goal" || mode === "normal") return mode;
@@ -755,6 +800,7 @@ export interface ProviderView {
   added: boolean;
   kind: string;
   baseUrl: string;
+  chatUrl?: string; // optional full chat completions URL; empty derives from baseUrl
   models: string[];
   visionModels: string[]; // subset of models that accepts image input
   visionModelsConfigured: boolean; // true when an empty list is an explicit choice

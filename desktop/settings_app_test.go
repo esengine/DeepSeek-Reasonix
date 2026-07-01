@@ -382,6 +382,51 @@ func TestSaveProviderFiltersNonChatModels(t *testing.T) {
 	}
 }
 
+func TestSaveProviderPersistsCustomEndpointURLs(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	if err := app.SaveProvider(ProviderView{
+		Name:      "sub2api",
+		Kind:      "openai",
+		BaseURL:   "https://proxy.example.com/v1",
+		ChatURL:   " https://proxy.example.com/custom/chat/completions ",
+		ModelsURL: " https://proxy.example.com/v1/models ",
+		Models:    []string{"model-a"},
+		Default:   "model-a",
+		APIKeyEnv: "SUB2API_KEY",
+	}); err != nil {
+		t.Fatalf("SaveProvider: %v", err)
+	}
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	got, ok := cfg.Provider("sub2api")
+	if !ok {
+		t.Fatal("saved provider not found")
+	}
+	if got.ChatURL != "https://proxy.example.com/custom/chat/completions" {
+		t.Fatalf("saved chat_url = %q", got.ChatURL)
+	}
+	if got.ModelsURL != "https://proxy.example.com/v1/models" {
+		t.Fatalf("saved models_url = %q", got.ModelsURL)
+	}
+
+	view := app.Settings()
+	for _, provider := range view.Providers {
+		if provider.Name != "sub2api" {
+			continue
+		}
+		if provider.ChatURL != "https://proxy.example.com/custom/chat/completions" {
+			t.Fatalf("Settings chatUrl = %q", provider.ChatURL)
+		}
+		if provider.ModelsURL != "https://proxy.example.com/v1/models" {
+			t.Fatalf("Settings modelsUrl = %q", provider.ModelsURL)
+		}
+		return
+	}
+	t.Fatalf("Settings providers missing sub2api: %+v", view.Providers)
+}
+
 func TestSaveProviderClearsProviderWideVisionForPerModelSelection(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

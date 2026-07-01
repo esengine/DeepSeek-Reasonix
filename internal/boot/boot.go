@@ -636,8 +636,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// subagent skills run ephemerally with the same registry boundary as
 	// read_only_task, so they cannot write, install, mutate memory, resume/fork
 	// transcripts, or delegate further.
-	readOnlySkillRunner := func(sctx context.Context, sk skill.Skill, task string, runCtx skill.SubagentRunContext) (string, error) {
-		if strings.TrimSpace(runCtx.ContinueFrom) != "" || strings.TrimSpace(runCtx.ForkFrom) != "" {
+	readOnlySkillRunner := func(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
+		if strings.TrimSpace(runOpts.ContinueFrom) != "" || strings.TrimSpace(runOpts.ForkFrom) != "" {
 			return "", fmt.Errorf("read_only_skill does not support continue_from/fork_from")
 		}
 		sk = skill.WithCodeGraphTools(sk, skill.CodeGraphReadTools(reg))
@@ -676,7 +676,6 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			CompactForceRatio:   cfg.Agent.CompactForceRatio,
 			ArchiveDir:          config.ArchiveDir(),
 			KeepPolicy:          keepPolicy,
-			ResponseLanguage:    agent.ResponseLanguageFromContext(sctx),
 			ReasoningLanguage:   agent.ReasoningLanguageFromContext(sctx),
 		}, agent.NestedSink(sctx, event.Discard))
 	}
@@ -685,7 +684,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// scoped to the skill's allowed-tools (minus recursive meta-tools), optional
 	// per-skill model, and resumable transcripts when the parent session supports
 	// them. Its tool activity nests under the invoking call, like `task`.
-	skillRunner := func(sctx context.Context, sk skill.Skill, task string, runCtx skill.SubagentRunContext) (string, error) {
+	skillRunner := func(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
 		sk = skill.WithCodeGraphTools(sk, skill.CodeGraphReadTools(reg))
 		prov, price, ctxWin := execProv, entry.Price, entry.ContextWindow
 		modelRef := subagentModelRef(cfg, sk)
@@ -698,11 +697,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			prov, price, ctxWin = p, pr, cw
 		}
 		subReg := agent.SubagentToolRegistry(reg, sk.AllowedTools)
-		continueFrom, forkFrom := strings.TrimSpace(runCtx.ContinueFrom), strings.TrimSpace(runCtx.ForkFrom)
-		if continueFrom != "" && forkFrom != "" {
+		continueFrom := strings.TrimSpace(runOpts.ContinueFrom)
+		legacyForkFrom := strings.TrimSpace(runOpts.ForkFrom)
+		if continueFrom != "" && legacyForkFrom != "" {
 			return "", fmt.Errorf("continue_from and fork_from are mutually exclusive; pass only continue_from")
 		}
-		legacyForkFrom := forkFrom
 		parentID, _, _, _ := agent.CallContext(sctx)
 		parentSession := agent.ParentSession(sctx)
 		var run *agent.SubagentRun
@@ -747,42 +746,23 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				steps = 5
 			}
 		}
-		sink := runCtx.Sink
-		if sink == nil {
-			sink = agent.NestedSink(sctx, event.Discard)
-		}
-		var gate agent.Gate = headlessGate
-		if runCtx.Gate != nil {
-			gate = runCtx.Gate
-		}
-		answer, err := agent.RunSubAgentWithSessionConfig(sctx, prov, subReg, run.Session, task, agent.Options{
+		answer, err := agent.RunSubAgentWithSession(sctx, prov, subReg, run.Session, task, agent.Options{
 			MaxSteps:          steps,
 			Temperature:       cfg.Agent.Temperature,
 			Pricing:           price,
 			UsageSource:       event.UsageSourceSubagent,
-			Gate:              gate,
-			ProjectChecks:     projectChecks,
+			Gate:              headlessGate,
 			ContextWindow:     ctxWin,
 			RecentKeep:        cfg.Agent.RecentKeep,
 			ArchiveDir:        config.ArchiveDir(),
 			KeepPolicy:        keepPolicy,
 			ReasoningLanguage: agent.ReasoningLanguageFromContext(sctx),
-		}, agent.SubagentRunConfig{
-			Sink:        sink,
-			PlanMode:    agent.PlanModeContext(sctx),
-			Asker:       runCtx.Asker,
-			PreEditHook: runCtx.PreEditHook,
-		})
+		}, agent.NestedSink(sctx, event.Discard))
 		if err != nil {
-			if subagentStore != nil {
-				return "", errors.Join(err, subagentStore.SaveFailed(run))
-			}
-			return "", err
+			return "", errors.Join(err, subagentStore.SaveFailed(run))
 		}
-		if subagentStore != nil {
-			if err := subagentStore.SaveCompleted(run); err != nil {
-				return "", errors.Join(err, subagentStore.SaveFailed(run))
-			}
+		if err := subagentStore.SaveCompleted(run); err != nil {
+			return "", errors.Join(err, subagentStore.SaveFailed(run))
 		}
 		return agent.FormatSubagentRunResult(answer, run, false), nil
 	}
@@ -1004,6 +984,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		ReasoningLanguage:                  cfg.ReasoningLanguage(),
 		PlanModeAllowedTools:               cfg.Agent.PlanModeAllowedTools,
 		MemoryCompiler:                     memCompiler,
+		MemoryCompilerVerbosity:            cfg.MemoryCompilerVerbosity(),
 		UseMemoryCompilerLLMClassification: strings.TrimSpace(os.Getenv("REASONIX_MEMORY_COMPILER_LLM_CLASSIFICATION")) == "true",
 	}, sink)
 
@@ -1061,9 +1042,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	ctrlOpts := control.Options{
 		Runner:                 runner,
 		Executor:               executor,
-		SkillRunner:            skillRunner,
 		Sink:                   sink,
 		Policy:                 policy,
+		SkillRunner:            skillRunner,
 		Label:                  label,
 		ModelRef:               modelRef,
 		SystemPrompt:           sysPrompt,
@@ -1378,6 +1359,7 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 			"thinking":           e.Thinking,
 			"effort":             config.EffectiveEffort(e),
 			"reasoning_protocol": config.ReasoningProtocolForEntry(e),
+			"chat_url":           e.ChatURL,
 			"proxy_spec":         proxy,
 			"vision":             config.EffectiveVision(e),
 			"vision_detail":      e.VisionDetail,

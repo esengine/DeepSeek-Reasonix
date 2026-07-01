@@ -11,6 +11,12 @@ export interface TurnGroup {
   endIdx: number;
 }
 
+export interface StepGroup {
+  items: Item[];
+  isFinal: boolean;
+  isComplete: boolean;
+}
+
 export type WarmLayerState = {
   sessionKey: string;
   expandedWarmTurns: ReadonlySet<number>;
@@ -119,6 +125,36 @@ export function buildTurnGroups(items: Item[]): TurnGroup[] {
     }
   }
   return groups;
+}
+
+export function buildStepGroups(items: Item[], startIdx = 0): StepGroup[] {
+  const groups: StepGroup[] = [];
+  let current: Item[] = [];
+
+  const flush = (isComplete: boolean) => {
+    if (current.length === 0) return;
+    groups.push({ items: current, isFinal: hasVisibleAssistantText(current), isComplete });
+    current = [];
+  };
+
+  for (let i = startIdx; i < items.length; i++) {
+    const it = items[i];
+    if (it.kind === "user") {
+      flush(true);
+      groups.push({ items: [it], isFinal: false, isComplete: true });
+      continue;
+    }
+    if (it.kind === "assistant") {
+      flush(true);
+    }
+    current.push(it);
+  }
+  flush(false);
+  return groups;
+}
+
+function hasVisibleAssistantText(items: Item[]): boolean {
+  return items.some((it) => it.kind === "assistant" && !it.streaming && it.text.trim() !== "");
 }
 
 export function warmPagination({ turnCount, hotTurns, pageSize, coldPage }: {

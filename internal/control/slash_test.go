@@ -41,7 +41,6 @@ func TestSlashArgItems(t *testing.T) {
 		CurrentModel:    "deepseek-flash/deepseek-v4-flash",
 		ProviderNames:   []string{"deepseek-flash", "deepseek-pro", "custom"},
 		CurrentProvider: "deepseek-flash",
-		Subagents:       []SubagentSummary{{ID: "run-1", Skill: "scout", Alias: "Ellis", State: "running"}},
 	}
 
 	// /skills subcommands
@@ -136,22 +135,6 @@ func TestSlashArgItems(t *testing.T) {
 	if !has(items, "list") || !has(items, "trust") {
 		t.Errorf("/hooks should offer list/trust; got %v", labelsOf(items))
 	}
-	// /subagents
-	items, _ = SlashArgItems("/subagents ", data)
-	if !has(items, "cancel") || !has(items, "clear") {
-		t.Errorf("/subagents should offer cancel/clear; got %v", labelsOf(items))
-	}
-	items, _ = SlashArgItems("/subagents cancel ", data)
-	if !has(items, "Ellis") {
-		t.Errorf("/subagents cancel should offer subagent aliases; got %v", labelsOf(items))
-	}
-	items, _ = SlashArgItems("/subagents clear ", data)
-	if !has(items, "completed") || !has(items, "failed") || !has(items, "canceled") || !has(items, "all") {
-		t.Errorf("/subagents clear should offer terminal states; got %v", labelsOf(items))
-	}
-	if items, _ := SlashArgItems("/subagents list", data); len(items) != 0 {
-		t.Errorf("/subagents list should not offer a hidden no-op suggestion; got %v", labelsOf(items))
-	}
 	// /effort
 	items, _ = SlashArgItems("/effort ", data)
 	if !has(items, "auto") || !has(items, "high") || !has(items, "max") || has(items, "off") {
@@ -177,8 +160,8 @@ func TestSlashArgItems(t *testing.T) {
 	}
 	// /memory-v5
 	items, _ = SlashArgItems("/memory-v5 ", data)
-	if !has(items, "status") || !has(items, "off") || !has(items, "on") {
-		t.Errorf("/memory-v5 should offer status/off/on; got %v", labelsOf(items))
+	if !has(items, "status") || !has(items, "off") || !has(items, "observe") || !has(items, "compact") || !has(items, "on") {
+		t.Errorf("/memory-v5 should offer status/off/observe/compact/on; got %v", labelsOf(items))
 	}
 	// /theme
 	items, _ = SlashArgItems("/theme ", data)
@@ -276,6 +259,9 @@ func TestManagementMemoryV5WritesUserConfig(t *testing.T) {
 	cfg := config.LoadForEdit(config.UserConfigPath())
 	if cfg.MemoryCompilerEnabled() {
 		t.Fatal("memory_compiler.enabled = true, want false")
+	}
+	if got := cfg.MemoryCompilerVerbosity(); got != config.MemoryCompilerVerbosityObserve {
+		t.Fatalf("memory_compiler.verbosity = %q, want observe", got)
 	}
 	if !strings.Contains(strings.Join(notices, "\n"), "memory-v5 set to off") {
 		t.Fatalf("missing memory-v5 notice: %v", notices)

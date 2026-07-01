@@ -13,17 +13,16 @@ package control
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +30,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/autoresearch"
 	"reasonix/internal/billing"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/command"
@@ -124,7 +124,8 @@ type Controller struct {
 	// goals owns the active goal's FSM (status, intercepts, idle/turn counters)
 	// and its persistence, behind its own mutex so a per-turn goal save never
 	// stalls an approval or status poll on c.mu. See goal.go.
-	goals goalMachine
+	goals        goalMachine
+	autoResearch *autoresearch.Store
 
 	// workspaceRoot is the workspace root: the base for resolving @-refs and slash
 	// path refs, the working directory for user "!" shell commands and custom
@@ -147,16 +148,6 @@ type Controller struct {
 	// orchestration (truncating the session, restoring code, emitting events). See
 	// checkpoint.go.
 	checkpoints checkpointManager
-
-	// emitMu serializes every controller-originated Emit. The base event.Sink
-	// contract is serial, while slash subagents and background commands can emit
-	// concurrently with a parent turn.
-	emitMu sync.Mutex
-
-	// subagentMu serializes subagent registry access and transcript merge.
-	subagentMu         sync.Mutex
-	subagentReg        map[string]*SubagentRun
-	pendingCompletions []*SubagentRun
 
 	// approval owns the approval/ask prompt bookkeeping and the runtime approval
 	// posture (ask/auto/yolo, session grants, the just-approved-plan window)
@@ -203,6 +194,16 @@ type pendingAsk struct {
 	reply     chan []event.AskAnswer
 }
 
+type AutoResearchEvidenceInput struct {
+	ID       string
+	Kind     string
+	Summary  string
+	Source   string
+	Command  string
+	Paths    []string
+	Accepted bool
+}
+
 type plannerSessionResetter interface {
 	ResetPlannerSession()
 }
@@ -237,44 +238,6 @@ type RememberResult struct {
 	Saved     bool
 	CoveredBy string
 	Err       error
-}
-
-var errSubagentHookBlocked = errors.New("subagent blocked by hooks")
-
-type subagentHookBlockedError struct {
-	reason string
-}
-
-func (e *subagentHookBlockedError) Error() string {
-	if reason := strings.TrimSpace(e.reason); reason != "" {
-		return reason
-	}
-	return errSubagentHookBlocked.Error()
-}
-
-func (e *subagentHookBlockedError) Is(target error) bool {
-	return target == errSubagentHookBlocked
-}
-
-func newSubagentHookBlockedError(reason string) error {
-	return &subagentHookBlockedError{reason: strings.TrimSpace(reason)}
-}
-
-func subagentHookBlockedReason(err error) (string, bool) {
-	if err == nil {
-		return "", false
-	}
-	var blocked *subagentHookBlockedError
-	if errors.As(err, &blocked) {
-		if reason := strings.TrimSpace(blocked.reason); reason != "" {
-			return reason, true
-		}
-		return errSubagentHookBlocked.Error(), true
-	}
-	if errors.Is(err, errSubagentHookBlocked) {
-		return errSubagentHookBlocked.Error(), true
-	}
-	return "", false
 }
 
 // MCPReadOnlyTrustResult describes what happened when a trusted MCP read-only
@@ -415,6 +378,9 @@ func New(opts Options) *Controller {
 		externalFolderToolRefs:     opts.ExternalFolderToolRefs,
 		approval:                   newApprovalManager(opts.Policy, ToolApprovalAsk, opts.ApprovalTimeout),
 	}
+	if strings.TrimSpace(opts.WorkspaceRoot) != "" {
+		c.autoResearch = autoresearch.NewStore(opts.WorkspaceRoot)
+	}
 	// Checkpoints: bind a store to the session and route writer pre-edits into it.
 	c.rebindCheckpoints(opts.SessionPath)
 	c.setActiveJobSession(opts.SessionPath)
@@ -427,12 +393,6 @@ func New(opts Options) *Controller {
 		c.executor.SetMemoryQueue(c)
 	}
 	return c
-}
-
-func (c *Controller) emit(e event.Event) {
-	c.emitMu.Lock()
-	defer c.emitMu.Unlock()
-	c.sink.Emit(e)
 }
 
 // SetDisplayRecorder installs an optional hook used by frontends that persist a
@@ -482,6 +442,29 @@ func (c *Controller) recordDisplayForNewUser(startMessages int, display string) 
 			c.recordDisplay(m.Content, display)
 			return
 		}
+	}
+}
+
+func (c *Controller) markEditedForNewUser(startMessages int, original string) {
+	if strings.TrimSpace(original) == "" || c.executor == nil {
+		return
+	}
+	s := c.executor.Session()
+	msgs := s.Snapshot()
+	if startMessages > len(msgs) {
+		startMessages = len(msgs)
+	}
+	for i := startMessages; i < len(msgs); i++ {
+		if msgs[i].Role != provider.RoleUser {
+			continue
+		}
+		if msgs[i].Content == original {
+			return
+		}
+		msgs[i].Edited = true
+		msgs[i].Original = original
+		s.Replace(msgs)
+		return
 	}
 }
 
@@ -546,9 +529,11 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 		}()
 		err := body(ctx)
 		c.mu.Lock()
-		c.finishGuardedTurnLocked()
+		c.running = false
+		c.cancel = nil
+		c.canceling = false
 		c.mu.Unlock()
-		c.emit(event.Event{Kind: event.TurnDone, Err: explainError(err)})
+		c.sink.Emit(event.Event{Kind: event.TurnDone, Err: explainError(err)})
 	}()
 }
 
@@ -565,54 +550,6 @@ func (c *Controller) Send(input string) {
 // complexity score.
 func (c *Controller) SendWithRaw(input, raw string) {
 	c.runGuarded(func(ctx context.Context) error { return c.runGoalLoopWithRaw(ctx, input, raw) })
-}
-
-// StartSkill starts one slash-invoked skill as a top-level turn. Inline skills
-// run in the main loop; runAs=subagent skills execute via the configured child
-// runner and emit only their final answer back into the parent session.
-func (c *Controller) StartSkill(input string, sk skill.Skill, args string) {
-	if sk.RunAs != skill.RunSubagent {
-		c.runGuarded(func(ctx context.Context) error {
-			rendered := skill.Render(sk, args)
-			return c.runTurnWithRaw(ctx, rendered, rendered)
-		})
-		return
-	}
-	if !c.subagentCanRunInBackground(sk) {
-		c.runGuarded(func(ctx context.Context) error {
-			return c.runForegroundSubagentTurn(ctx, input, sk, args)
-		})
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		meta := c.newSubagentIdentity(sk.Name)
-		run := c.registerSubagent(meta.ID, meta.Skill, meta.Alias, input, args, cancel)
-		c.emit(event.Event{Kind: event.TurnStarted, Subagent: &event.Subagent{ID: meta.ID, Skill: meta.Skill, Alias: meta.Alias, State: event.SubagentRunning}})
-		answer, err := c.runSlashSubagentTurn(ctx, input, sk, args, meta)
-		c.finalizeSubagent(run, answer, err)
-		state := c.subagentState(meta.ID)
-		if state == "" {
-			state = event.SubagentCompleted
-		}
-		emitErr := err
-		sub := &event.Subagent{ID: meta.ID, Skill: meta.Skill, Alias: meta.Alias, State: state}
-		if state == event.SubagentCanceled {
-			if reason, blocked := subagentHookBlockedReason(err); blocked {
-				sub.Error = reason
-			} else {
-				sub.Error = i18n.M.SubagentCanceledByUser
-				emitErr = context.Canceled
-			}
-		} else if err != nil {
-			sub.Error = err.Error()
-		}
-		if state == event.SubagentCompleted && strings.TrimSpace(answer) != "" {
-			c.emit(event.Event{Kind: event.Message, Text: answer, Subagent: sub})
-		}
-		c.emit(event.Event{Kind: event.TurnDone, Err: emitErr, Subagent: sub})
-	}()
 }
 
 // planApprovalTool is the Tool name on the ApprovalRequest the controller emits
@@ -677,8 +614,56 @@ func (c *Controller) runGoalLoopWithRawDisplay(ctx context.Context, input, raw, 
 	return newTurnOrchestrator(c).runGoalLoopWithRawDisplay(ctx, input, raw, display)
 }
 
+func (c *Controller) runEditedGoalLoopWithRawDisplay(ctx context.Context, input, raw, display, original string) error {
+	return newTurnOrchestrator(c).runEditedGoalLoopWithRawDisplay(ctx, input, raw, display, original)
+}
+
 func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input, raw, display string) error {
 	return newTurnOrchestrator(c).runTurnWithRawDisplay(ctx, input, raw, display)
+}
+
+func (c *Controller) runSlashSubagentSkill(ctx context.Context, input, display string, sk skill.Skill, task string) error {
+	c.maybeSessionStart(ctx)
+	parentSession := c.parentSessionID()
+	ctx = agent.WithParentSession(ctx, parentSession)
+	ctx = jobs.WithSession(ctx, parentSession)
+	c.mu.Lock()
+	responseLanguage := c.responseLanguage
+	reasoningLanguage := c.reasoningLanguage
+	c.mu.Unlock()
+	ctx = agent.WithResponseLanguagePreference(ctx, responseLanguage)
+	ctx = agent.WithReasoningLanguagePreference(ctx, reasoningLanguage)
+
+	composedTask := c.Compose(task)
+	startMessages := c.messageCount()
+	defer c.snapshotActivityIfChanged(startMessages)
+	if c.hooks.Enabled() {
+		c.mu.Lock()
+		c.turn++
+		turn := c.turn
+		c.mu.Unlock()
+		if block, _ := c.hooks.PromptSubmit(ctx, composedTask, turn); block {
+			return nil
+		}
+		defer func() { c.hooks.Stop(context.Background(), lastAssistantText(c.History()), turn) }()
+	}
+	if c.executor != nil {
+		c.beginCheckpoint(input)
+		c.executor.Session().Add(provider.Message{Role: provider.RoleUser, Content: input})
+		c.recordDisplay(input, display)
+	}
+
+	c.sink.Emit(event.Event{Kind: event.TurnStarted})
+	answer, err := c.skillRunner(ctx, sk, composedTask, skill.SubagentRunOptions{})
+	if err != nil {
+		return err
+	}
+	if c.executor != nil {
+		c.executor.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: answer})
+	}
+	c.sink.Emit(event.Event{Kind: event.Text, Text: answer})
+	c.sink.Emit(event.Event{Kind: event.Message, Text: answer})
+	return nil
 }
 
 // toolWasCalledLastTurn reports whether the most recent assistant message
@@ -702,110 +687,6 @@ func (c *Controller) stopGoal(status string) {
 	c.persistGoalState(path, data, ok)
 }
 
-func (c *Controller) runForegroundSubagentTurn(ctx context.Context, input string, sk skill.Skill, args string) error {
-	c.maybeSessionStart(ctx)
-	startMessages := c.messageCount()
-	defer c.snapshotActivityIfChanged(startMessages)
-	c.beginCheckpoint(input)
-	subCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	meta := c.newSubagentIdentity(sk.Name)
-	run := c.registerSubagent(meta.ID, meta.Skill, meta.Alias, input, args, cancel)
-
-	c.emit(event.Event{Kind: event.TurnStarted, Subagent: &event.Subagent{ID: meta.ID, Skill: meta.Skill, Alias: meta.Alias, State: event.SubagentRunning}})
-	answer, err := c.runSlashSubagentTurn(subCtx, input, sk, args, meta)
-	c.finalizeSubagent(run, answer, err)
-	state := c.subagentState(meta.ID)
-	if state == "" {
-		state = event.SubagentCompleted
-	}
-	emitErr := err
-	returnErr := err
-	sub := &event.Subagent{ID: meta.ID, Skill: meta.Skill, Alias: meta.Alias, State: state}
-	if state == event.SubagentCanceled {
-		if reason, blocked := subagentHookBlockedReason(err); blocked {
-			sub.Error = reason
-			returnErr = nil
-		} else {
-			sub.Error = i18n.M.SubagentCanceledByUser
-			emitErr = context.Canceled
-			returnErr = context.Canceled
-		}
-	} else if err != nil {
-		sub.Error = err.Error()
-	}
-	if state == event.SubagentCompleted && strings.TrimSpace(answer) != "" {
-		c.emit(event.Event{Kind: event.Message, Text: answer, Subagent: sub})
-	}
-	c.emit(event.Event{Kind: event.TurnDone, Err: emitErr, Subagent: sub})
-	return returnErr
-}
-
-func (c *Controller) subagentPreEditHook() func(diff.Change) {
-	return func(ch diff.Change) {
-		c.checkpoints.snapshot(ch)
-	}
-}
-
-func (c *Controller) runSlashSubagentTurn(ctx context.Context, input string, sk skill.Skill, task string, meta subagentIdentity) (string, error) {
-	if c.skillRunner == nil {
-		return "", fmt.Errorf("/%s is runAs=subagent but no subagent runner is configured in this session", sk.Name)
-	}
-	c.mu.Lock()
-	plan := c.planMode
-	c.mu.Unlock()
-	background := c.subagentCanRunInBackground(sk)
-	if background {
-		task = c.composeWithoutParentDrains(task)
-	} else {
-		task = c.Compose(task)
-	}
-	var stopAnswer string
-	if c.hooks.Enabled() {
-		c.mu.Lock()
-		c.turn++
-		turn := c.turn
-		c.mu.Unlock()
-		if block, msg := c.hooks.PromptSubmit(ctx, input, turn); block {
-			c.subagentNotice(meta, event.SubagentCanceled)
-			return "", newSubagentHookBlockedError(msg)
-		}
-		defer func() { c.hooks.Stop(ctx, stopAnswer, turn) }()
-	}
-	c.subagentNotice(meta, event.SubagentRunning)
-	childSink := c.subagentSink(meta)
-	var gate skill.Gate
-	var asker skill.Asker
-	var preEditHook func(diff.Change)
-	if !background {
-		gate = permission.NewGate(c.policy, gateApprover{c})
-		asker = c
-		preEditHook = c.subagentPreEditHook()
-	}
-	ctx = agent.WithCallContext(ctx, meta.ID, childSink, asker)
-	ctx = agent.WithPlanModeContext(ctx, plan)
-	answer, err := c.skillRunner(ctx, sk, task, skill.SubagentRunContext{
-		Sink:        childSink,
-		Gate:        gate,
-		Asker:       asker,
-		PreEditHook: preEditHook,
-	})
-	stopAnswer = answer
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return "", err
-		}
-		c.subagentNotice(meta, event.SubagentFailed)
-		return "", err
-	}
-	c.subagentNotice(meta, event.SubagentCompleted)
-	return answer, nil
-}
-
-func (c *Controller) SubagentRunsInBackground(sk skill.Skill) bool {
-	return sk.RunAs == skill.RunSubagent && c.subagentCanRunInBackground(sk)
-}
-
 // lastAssistantText returns the content of the most recent assistant message with
 // non-empty text — the model's final answer for the turn (its plan, in plan mode).
 func lastAssistantText(msgs []provider.Message) string {
@@ -827,7 +708,7 @@ func lastAssistantText(msgs []provider.Message) string {
 // resolve to a turn; an unknown slash emits a Notice. Anything else is a normal
 // turn with its @-references resolved first.
 func (c *Controller) Submit(input string) {
-	c.submit(input, "")
+	c.submit(input, "", "")
 }
 
 // SubmitHTTP accepts input from the unauthenticated localhost HTTP frontend. It
@@ -840,7 +721,14 @@ func (c *Controller) SubmitHTTP(input string) {
 // SubmitDisplay runs input as a turn while remembering the user-facing display
 // text for transcript replay when controller-side composition expands input.
 func (c *Controller) SubmitDisplay(display, input string) {
-	c.submit(input, display)
+	c.submit(input, display, "")
+}
+
+// SubmitEditedDisplay is SubmitDisplay for an inline-edited prompt. The model
+// sees input; the saved user message also keeps the pre-edit prompt as local UI
+// metadata so the edit survives session rewrites.
+func (c *Controller) SubmitEditedDisplay(display, input, original string) {
+	c.submit(input, display, original)
 }
 
 // SubmitUserTurn starts a normal model turn without interpreting shell or slash
@@ -850,7 +738,7 @@ func (c *Controller) SubmitUserTurn(input, display string) {
 	c.runRefTurn(input, display)
 }
 
-func (c *Controller) submit(input, display string) {
+func (c *Controller) submit(input, display, editedOriginal string) {
 	trimmed := strings.TrimSpace(input)
 	if note, ok := MemoryQuickAddNote(trimmed); ok {
 		c.rememberProjectNote(note)
@@ -867,7 +755,7 @@ func (c *Controller) submit(input, display string) {
 		c.RunShell(trimmed[1:])
 		return
 	}
-	c.submitCommandOrTurn(trimmed, input, display, false)
+	c.submitCommandOrTurn(trimmed, input, display, false, editedOriginal)
 }
 
 func (c *Controller) submitHTTP(input, display string) {
@@ -887,15 +775,27 @@ func (c *Controller) submitHTTP(input, display string) {
 		c.notice("shell commands are unavailable from this frontend")
 		return
 	}
-	c.submitCommandOrTurn(trimmed, input, display, true)
+	c.submitCommandOrTurn(trimmed, input, display, true, "")
 }
 
-func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedRefsOnly bool) {
+func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedRefsOnly bool, editedOriginal string) {
 	runRefTurn := c.runRefTurn
 	runRefTurnWithRefs := c.runRefTurnWithRefs
+	runGoalLoop := c.runGoalLoopWithRawDisplay
 	if scopedRefsOnly {
 		runRefTurn = c.runScopedRefTurn
 		runRefTurnWithRefs = c.runScopedRefTurnWithRefs
+	}
+	if strings.TrimSpace(editedOriginal) != "" {
+		runRefTurn = func(input, display string) {
+			c.runEditedRefTurn(input, display, editedOriginal)
+		}
+		runRefTurnWithRefs = func(input, refLine, display string) {
+			c.runEditedRefTurnWithRefs(input, refLine, display, editedOriginal)
+		}
+		runGoalLoop = func(ctx context.Context, input, raw, display string) error {
+			return c.runEditedGoalLoopWithRawDisplay(ctx, input, raw, display, editedOriginal)
+		}
 	}
 	switch {
 	case trimmed == "/compact" || strings.HasPrefix(trimmed, "/compact "):
@@ -936,7 +836,7 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 				c.notice("unknown command: " + trimmed)
 				return nil
 			}
-			return c.runGoalLoopWithRawDisplay(ctx, sent, sent, display)
+			return runGoalLoop(ctx, sent, sent, display)
 		})
 	case strings.HasPrefix(trimmed, "//"):
 		// Double-slash — not a command. Common in code snippets (JS
@@ -958,7 +858,7 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 		// Read-only management verbs (/model /memory /skills /hooks /mcp) emit a
 		// listing Notice, so Submit-based frontends (desktop, HTTP) get them with
 		// no extra wiring. (The chat TUI handles these itself with richer output.)
-		fields := slashFields(trimmed)
+		fields := strings.Fields(trimmed)
 		switch fields[0] {
 		case "/tree":
 			c.notice(c.BranchTreeText())
@@ -1008,31 +908,28 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 		// turn. (Built-in slash verbs like /compact are handled above.)
 		if sent, ok := c.CustomCommand(trimmed); ok {
 			c.runGuarded(func(ctx context.Context) error {
-				return c.runGoalLoopWithRawDisplay(ctx, sent, sent, display)
+				return runGoalLoop(ctx, sent, sent, display)
 			})
 			return
 		}
-		if sk, args, ok := c.ResolveSkill(trimmed); ok {
-			if sk.RunAs == skill.RunSubagent {
-				c.StartSkill(trimmed, sk, args)
-			} else {
-				rendered := skill.Render(sk, args)
+		if sent, ok, handled := c.RunSkillCommand(trimmed, display); ok {
+			if !handled {
 				c.runGuarded(func(ctx context.Context) error {
-					return c.runGoalLoopWithRawDisplay(ctx, rendered, rendered, display)
+					return runGoalLoop(ctx, sent, sent, display)
 				})
 			}
 			return
 		}
 		c.notice("unknown command: " + trimmed)
 	default:
-		if c.maybeAutoStartResearchGoal(input, display) {
+		if c.maybeAutoStartResearchGoal(input, display, editedOriginal) {
 			return
 		}
 		runRefTurn(input, display)
 	}
 }
 
-func (c *Controller) maybeAutoStartResearchGoal(input, display string) bool {
+func (c *Controller) maybeAutoStartResearchGoal(input, display, editedOriginal string) bool {
 	goal, ok := c.autoStartResearchGoalCandidate(input)
 	if !ok {
 		return false
@@ -1052,6 +949,9 @@ func (c *Controller) maybeAutoStartResearchGoal(input, display string) bool {
 			sent := "Start pursuing the active goal now."
 			if block != "" {
 				sent = "Referenced context:\n\n" + block + "\n\n" + sent
+			}
+			if strings.TrimSpace(editedOriginal) != "" {
+				return c.runEditedGoalLoopWithRawDisplay(ctx, sent, goal, displayText, editedOriginal)
 			}
 			return c.runGoalLoopWithRawDisplay(ctx, sent, goal, displayText)
 		})
@@ -1344,6 +1244,10 @@ func (c *Controller) runRefTurn(input, display string) {
 	c.runRefTurnWithRefs(input, input, display)
 }
 
+func (c *Controller) runEditedRefTurn(input, display, original string) {
+	c.runEditedRefTurnWithRefs(input, input, display, original)
+}
+
 func (c *Controller) runScopedRefTurn(input, display string) {
 	c.runScopedRefTurnWithRefs(input, input, display)
 }
@@ -1355,176 +1259,44 @@ func (c *Controller) runRefTurnWithRefs(input, refLine, display string) {
 	c.runRefTurnWithResolver(input, refLine, display, c.ResolveRefs)
 }
 
+func (c *Controller) runEditedRefTurnWithRefs(input, refLine, display, original string) {
+	c.runEditedRefTurnWithResolver(input, refLine, display, original, c.ResolveRefs)
+}
+
 func (c *Controller) runScopedRefTurnWithRefs(input, refLine, display string) {
 	c.runRefTurnWithResolver(input, refLine, display, c.ResolveScopedRefs)
 }
 
 func (c *Controller) runRefTurnWithResolver(input, refLine, display string, resolve func(context.Context, string) (string, []string)) {
 	c.runGuarded(func(ctx context.Context) error {
-		block, errs := resolve(ctx, refLine)
-		for _, e := range errs {
-			c.notice(e)
-		}
-		sent := input
-		if block != "" {
-			sent = "Referenced context:\n\n" + block + "\n\n" + input
-		}
-		return c.runGoalLoopWithRawDisplay(ctx, sent, input, display)
+		return c.runRefTurnWithResolverSync(ctx, input, refLine, display, "", resolve)
 	})
+}
+
+func (c *Controller) runEditedRefTurnWithResolver(input, refLine, display, original string, resolve func(context.Context, string) (string, []string)) {
+	c.runGuarded(func(ctx context.Context) error {
+		return c.runRefTurnWithResolverSync(ctx, input, refLine, display, original, resolve)
+	})
+}
+
+func (c *Controller) runRefTurnWithResolverSync(ctx context.Context, input, refLine, display, original string, resolve func(context.Context, string) (string, []string)) error {
+	block, errs := resolve(ctx, refLine)
+	for _, e := range errs {
+		c.notice(e)
+	}
+	sent := input
+	if block != "" {
+		sent = "Referenced context:\n\n" + block + "\n\n" + input
+	}
+	if strings.TrimSpace(original) != "" {
+		return c.runEditedGoalLoopWithRawDisplay(ctx, sent, input, display, original)
+	}
+	return c.runGoalLoopWithRawDisplay(ctx, sent, input, display)
 }
 
 // notice emits an informational Notice event.
 func (c *Controller) notice(text string) {
-	c.emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: text})
-}
-
-type subagentIdentity struct {
-	ID    string
-	Skill string
-	Alias string
-}
-
-var subagentEnglishNicknames = [...]string{
-	"Alex", "Avery", "Blair", "Casey", "Drew", "Eden", "Ellis", "Emery",
-	"Finley", "Gray", "Harper", "Hayden", "Jamie", "Jordan", "Kai", "Logan",
-	"Morgan", "Noel", "Parker", "Quinn", "Reese", "Remy", "Riley", "Robin",
-	"Rowan", "Sage", "Sam", "Sky", "Taylor", "Toby", "Devon", "Cameron",
-}
-
-var subagentChineseNicknames = [...]string{
-	"小张", "小王", "小李", "小赵", "小刘", "小陈", "小杨", "小黄",
-	"小吴", "小周", "小徐", "小孙", "小胡", "小朱", "小高", "小林",
-	"小何", "小郭", "小马", "小罗", "小郑", "小梁", "小谢", "小宋",
-	"小唐", "小许", "小邓", "小韩", "小冯", "小曹", "小彭", "小董",
-}
-
-func (c *Controller) newSubagentIdentity(skillName string) subagentIdentity {
-	id, err := newSubagentID()
-	if err != nil {
-		id = fmt.Sprintf("slash-subagent-%d", time.Now().UnixNano())
-	}
-	return subagentIdentity{
-		ID:    id,
-		Skill: skillName,
-		Alias: localizedSubagentAlias(skillName, id),
-	}
-}
-
-func (c *Controller) subagentNotice(meta subagentIdentity, state event.SubagentState) {
-	textState := SubagentStateText(state)
-	if state == event.SubagentCompleted {
-		textState = i18n.M.SubagentNoticeCompleted
-	}
-	alias := strings.TrimSpace(meta.Alias)
-	if alias == "" {
-		alias = meta.Skill
-	}
-	text := fmt.Sprintf("[%s] %s (/%s · %s) %s", i18n.M.SkillPickerSubagent, alias, meta.Skill, meta.ID, textState)
-	c.emit(event.Event{
-		Kind:  event.Notice,
-		Level: event.LevelInfo,
-		Text:  text,
-		Subagent: &event.Subagent{
-			ID:    meta.ID,
-			Skill: meta.Skill,
-			Alias: alias,
-			State: state,
-		},
-	})
-}
-
-func (c *Controller) subagentSink(meta subagentIdentity) event.Sink {
-	return event.FuncSink(func(e event.Event) {
-		e.Subagent = &event.Subagent{
-			ID: meta.ID, Skill: meta.Skill, Alias: meta.Alias,
-			State: event.SubagentRunning,
-		}
-		c.recordSubagentEvent(meta.ID, e)
-		c.emit(e)
-	})
-}
-
-func (c *Controller) recordSubagentEvent(id string, e event.Event) {
-	detail := SubagentEvent{Kind: e.Kind}
-	switch e.Kind {
-	case event.Reasoning, event.Text, event.Message, event.Notice, event.Phase:
-		detail.Text = e.Text
-	case event.Usage:
-		if e.Usage != nil {
-			detail.Text = agent.FormatUsageLine(e.Usage, e.Pricing, e.CacheDiagnostics)
-		}
-	case event.ToolDispatch:
-		if e.Tool.Partial {
-			return
-		}
-		detail.Tool = e.Tool.Name
-		detail.Text = e.Tool.Args
-	case event.ToolResult:
-		detail.Tool = e.Tool.Name
-		if e.Tool.Err != "" {
-			detail.Error = e.Tool.Err
-		}
-		detail.Text = e.Tool.Output
-	case event.TurnDone:
-		if e.Err != nil {
-			detail.Error = e.Err.Error()
-		}
-	default:
-		return
-	}
-	c.appendSubagentEvent(id, detail)
-}
-
-func (c *Controller) subagentCanRunInBackground(sk skill.Skill) bool {
-	reg := c.mcp.registry()
-	if reg == nil {
-		return false
-	}
-	excluded := map[string]bool{}
-	for _, name := range agent.SubagentMetaTools() {
-		excluded[name] = true
-	}
-	names := sk.AllowedTools
-	if len(names) == 0 {
-		names = reg.Names()
-	}
-	resolved := 0
-	for _, name := range names {
-		if excluded[name] {
-			continue
-		}
-		tl, ok := reg.Get(name)
-		if !ok {
-			return false
-		}
-		resolved++
-		if !tl.ReadOnly() {
-			return false
-		}
-	}
-	return resolved > 0
-}
-
-func localizedSubagentAlias(skillName, id string) string {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(skillName))
-	_, _ = h.Write([]byte{0})
-	_, _ = h.Write([]byte(id))
-	sum := h.Sum32()
-	if i18n.M == i18n.Chinese {
-		return subagentChineseNicknames[int(sum)%len(subagentChineseNicknames)]
-	}
-	return subagentEnglishNicknames[int(sum)%len(subagentEnglishNicknames)]
-}
-
-func newSubagentID() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
-	}
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: text})
 }
 
 // Run executes a turn synchronously, returning the agent's error. Used by the
@@ -1714,7 +1486,7 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 	defer c.approval.promptMu.Unlock()
 
 	id, reply := c.approval.registerAsk(questions)
-	c.emit(event.Event{Kind: event.AskRequest, Ask: event.Ask{ID: id, Questions: questions}})
+	c.sink.Emit(event.Event{Kind: event.AskRequest, Ask: event.Ask{ID: id, Questions: questions}})
 
 	waitCtx, cancelWait := c.approval.waitContext(ctx)
 	defer cancelWait()
@@ -1816,6 +1588,13 @@ func (c *Controller) SetMemoryCompilerEnabled(enabled bool) {
 	c.executor.SetMemoryCompiler(rt)
 }
 
+func (c *Controller) SetMemoryCompilerVerbosity(verbosity string) {
+	if c == nil || c.executor == nil {
+		return
+	}
+	c.executor.SetMemoryCompilerVerbosity(verbosity)
+}
+
 // PlanMode reports whether outgoing turns currently receive the plan-mode
 // marker. Frontends use it after Compose because auto-plan may flip the mode.
 func (c *Controller) PlanMode() bool {
@@ -1840,8 +1619,343 @@ func (c *Controller) SetGoal(goal string) {
 }
 
 func (c *Controller) SetGoalWithResearchMode(goal string, researchMode GoalResearchMode) {
-	path, data, ok := c.goals.set(goal, researchMode, c.goalTodos())
+	taskID, blockReason := c.ensureAutoResearchTask(goal, researchMode)
+	path, data, ok := c.goals.set(goal, researchMode, taskID, c.goalTodos())
 	c.persistGoalState(path, data, ok)
+	if blockReason != "" {
+		path, data, ok := c.goals.stop(GoalStatusBlocked, c.goalTodos())
+		c.persistGoalState(path, data, ok)
+		c.notice("autoresearch resume failed: " + blockReason)
+	}
+}
+
+func (c *Controller) ensureAutoResearchTask(goal string, researchMode GoalResearchMode) (string, string) {
+	goal = strings.TrimSpace(goal)
+	if goal == "" || c.autoResearch == nil || !shouldUseAutoResearch(goal, researchMode) {
+		return "", ""
+	}
+	currentGoal, currentStatus, _, currentTaskID := c.goals.snapshot()
+	if strings.TrimSpace(currentGoal) == goal && currentStatus == GoalStatusRunning && strings.TrimSpace(currentTaskID) != "" {
+		return currentTaskID, ""
+	}
+	if task, ok, err := c.autoResearch.ResumeFromGoalText(goal); err != nil {
+		slog.Warn("controller: resume autoresearch task", "err", err)
+		if ok {
+			return "", err.Error()
+		}
+	} else if ok {
+		c.notice("autoresearch task resumed: " + task.ID)
+		return task.ID, ""
+	}
+	task, err := c.autoResearch.CreateTask(goal, autoresearch.CreateOptions{
+		AllowedOperations: autoresearch.AllowedOperations{
+			Write:   true,
+			Network: false,
+			Publish: false,
+		},
+		SuccessCriteria: defaultAutoResearchSuccessCriteria(),
+	})
+	if err != nil {
+		slog.Warn("controller: create autoresearch task", "err", err)
+		return "", ""
+	}
+	c.notice("autoresearch task created: " + task.ID)
+	return task.ID, ""
+}
+
+func defaultAutoResearchSuccessCriteria() []autoresearch.SuccessCriterion {
+	return []autoresearch.SuccessCriterion{
+		{
+			ID:          "objective_evidence",
+			Description: "The goal outcome is supported by direct evidence, such as inspected code, reproduced behavior, source material, or concrete findings.",
+			Required:    true,
+		},
+		{
+			ID:          "verification",
+			Description: "The result has relevant verification evidence, such as tests, commands, benchmarks, manual checks, or a documented reason why verification is not applicable.",
+			Required:    true,
+		},
+	}
+}
+
+func (c *Controller) appendAutoResearchHeartbeat(taskID, status, message string) {
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return
+	}
+	iteration := 0
+	if summary, err := c.autoResearch.Summary(taskID); err == nil {
+		iteration = summary.Iteration
+	}
+	if err := c.autoResearch.AppendHeartbeat(taskID, autoresearch.Heartbeat{
+		Status:    status,
+		Iteration: iteration,
+		Message:   message,
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		slog.Warn("controller: append autoresearch heartbeat", "task_id", taskID, "status", status, "err", err)
+	}
+}
+
+func (c *Controller) autoResearchAcceptedEvidenceIDs(taskID string) map[string]bool {
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return nil
+	}
+	findings, err := c.autoResearch.Findings(taskID, 0)
+	if err != nil {
+		slog.Warn("controller: read autoresearch findings", "task_id", taskID, "err", err)
+		return nil
+	}
+	accepted := make(map[string]bool, len(findings))
+	for _, finding := range findings {
+		if finding.Accepted {
+			accepted[finding.ID] = true
+		}
+	}
+	return accepted
+}
+
+func (c *Controller) recordAutoResearchTurnProgress(taskID string, acceptedBefore map[string]bool) {
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return
+	}
+	acceptedAfter := c.autoResearchAcceptedEvidenceIDs(taskID)
+	newAccepted := make([]string, 0)
+	for id := range acceptedAfter {
+		if acceptedBefore == nil || !acceptedBefore[id] {
+			newAccepted = append(newAccepted, id)
+		}
+	}
+	sort.Strings(newAccepted)
+	summary := autoResearchDirectionSummary(lastAssistantText(c.History()))
+	if _, err := c.autoResearch.RecordDirection(taskID, autoresearch.Direction{
+		Summary:             summary,
+		AcceptedEvidenceIDs: newAccepted,
+		Now:                 time.Now().UTC(),
+	}); err != nil {
+		slog.Warn("controller: record autoresearch direction", "task_id", taskID, "err", err)
+	}
+}
+
+func (c *Controller) recordAutoResearchEvidenceFromAssistant(taskID, text string) {
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return
+	}
+	for _, item := range parseAutoResearchEvidenceBlocks(text) {
+		if err := c.recordAutoResearchEvidenceForTask(taskID, item.CriterionID, AutoResearchEvidenceInput{
+			ID:       item.ID,
+			Kind:     item.Kind,
+			Summary:  item.Summary,
+			Source:   item.Source,
+			Command:  item.Command,
+			Paths:    append([]string(nil), item.Paths...),
+			Accepted: item.Accepted,
+		}); err != nil {
+			slog.Warn("controller: record autoresearch evidence block", "task_id", taskID, "criterion_id", item.CriterionID, "err", err)
+		}
+	}
+}
+
+type autoResearchEvidenceBlock struct {
+	CriterionID string   `json:"criterion_id"`
+	ID          string   `json:"id"`
+	Kind        string   `json:"kind"`
+	Summary     string   `json:"summary"`
+	Source      string   `json:"source"`
+	Command     string   `json:"command"`
+	Paths       []string `json:"paths"`
+	Accepted    bool     `json:"accepted"`
+}
+
+const (
+	autoResearchEvidenceOpen  = "<autoresearch-evidence>"
+	autoResearchEvidenceClose = "</autoresearch-evidence>"
+)
+
+func parseAutoResearchEvidenceBlocks(text string) []autoResearchEvidenceBlock {
+	var out []autoResearchEvidenceBlock
+	rest := text
+	for {
+		start := strings.Index(rest, autoResearchEvidenceOpen)
+		if start < 0 {
+			return out
+		}
+		rest = rest[start+len(autoResearchEvidenceOpen):]
+		end := strings.Index(rest, autoResearchEvidenceClose)
+		if end < 0 {
+			return out
+		}
+		raw := strings.TrimSpace(rest[:end])
+		rest = rest[end+len(autoResearchEvidenceClose):]
+		if raw == "" {
+			continue
+		}
+		var many []autoResearchEvidenceBlock
+		if err := json.Unmarshal([]byte(raw), &many); err == nil {
+			out = append(out, many...)
+			continue
+		}
+		var one autoResearchEvidenceBlock
+		if err := json.Unmarshal([]byte(raw), &one); err == nil {
+			out = append(out, one)
+		}
+	}
+}
+
+func autoResearchDirectionSummary(text string) string {
+	text = stripAutoResearchEvidenceBlocks(text)
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		lower := strings.ToLower(line)
+		if line == "" || strings.HasPrefix(lower, "[goal:") {
+			continue
+		}
+		if len(line) > 160 {
+			line = line[:160]
+		}
+		return line
+	}
+	return "turn completed"
+}
+
+func stripAutoResearchEvidenceBlocks(text string) string {
+	var b strings.Builder
+	rest := text
+	for {
+		start := strings.Index(rest, autoResearchEvidenceOpen)
+		if start < 0 {
+			b.WriteString(rest)
+			return b.String()
+		}
+		b.WriteString(rest[:start])
+		afterOpen := rest[start+len(autoResearchEvidenceOpen):]
+		end := strings.Index(afterOpen, autoResearchEvidenceClose)
+		if end < 0 {
+			return b.String()
+		}
+		rest = afterOpen[end+len(autoResearchEvidenceClose):]
+	}
+}
+
+func (c *Controller) autoResearchReadinessFailure() string {
+	taskID := c.goals.currentAutoResearchTaskID()
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return ""
+	}
+	report, err := c.autoResearch.Readiness(taskID)
+	if err != nil {
+		return "AutoResearch readiness check failed: " + err.Error()
+	}
+	if report.Ready {
+		return ""
+	}
+	var parts []string
+	if len(report.MissingCriteria) > 0 {
+		parts = append(parts, "missing criteria: "+strings.Join(report.MissingCriteria, ", "))
+	}
+	if report.BlockedReason != "" {
+		parts = append(parts, "blocked: "+report.BlockedReason)
+	}
+	if len(report.Errors) > 0 {
+		parts = append(parts, "state errors: "+strings.Join(report.Errors, "; "))
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "task is not ready")
+	}
+	return "AutoResearch readiness check failed: " + strings.Join(parts, "; ")
+}
+
+func (c *Controller) AutoResearchSummary() (*autoresearch.Summary, bool) {
+	taskID := c.goals.currentAutoResearchTaskID()
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return nil, false
+	}
+	summary, err := c.autoResearch.Summary(taskID)
+	if err != nil {
+		return &autoresearch.Summary{
+			TaskID:  taskID,
+			Status:  autoresearch.StatusInvalid,
+			Blocker: err.Error(),
+		}, true
+	}
+	return summary, true
+}
+
+func (c *Controller) AutoResearchList() ([]autoresearch.Summary, bool) {
+	if c.autoResearch == nil {
+		return nil, false
+	}
+	summaries, err := c.autoResearch.ListSummaries()
+	if err != nil {
+		slog.Warn("controller: list autoresearch tasks", "err", err)
+		return nil, true
+	}
+	return summaries, true
+}
+
+func (c *Controller) AutoResearchFindings(limit int) ([]autoresearch.Finding, bool) {
+	taskID := c.goals.currentAutoResearchTaskID()
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return nil, false
+	}
+	findings, err := c.autoResearch.Findings(taskID, limit)
+	if err != nil {
+		return nil, true
+	}
+	return findings, true
+}
+
+func (c *Controller) RecordAutoResearchEvidence(criterionID string, input AutoResearchEvidenceInput) error {
+	taskID := c.goals.currentAutoResearchTaskID()
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return errors.New("autoresearch: no active task")
+	}
+	return c.recordAutoResearchEvidenceForTask(taskID, criterionID, input)
+}
+
+func (c *Controller) recordAutoResearchEvidenceForTask(taskID, criterionID string, input AutoResearchEvidenceInput) error {
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return errors.New("autoresearch: no active task")
+	}
+	id := strings.TrimSpace(input.ID)
+	if id == "" {
+		id = c.nextAutoResearchFindingID(taskID)
+	}
+	kind := strings.TrimSpace(input.Kind)
+	if kind == "" {
+		kind = autoresearch.FindingKindManual
+	}
+	source := strings.TrimSpace(input.Source)
+	if source == "" {
+		source = autoresearch.FindingSourceManual
+	}
+	finding := autoresearch.Finding{
+		ID:        id,
+		Kind:      kind,
+		Summary:   strings.TrimSpace(input.Summary),
+		Source:    source,
+		Command:   strings.TrimSpace(input.Command),
+		Paths:     append([]string(nil), input.Paths...),
+		Accepted:  input.Accepted,
+		CreatedAt: time.Now().UTC(),
+	}
+	return c.autoResearch.RecordEvidence(taskID, criterionID, finding)
+}
+
+func (c *Controller) nextAutoResearchFindingID(taskID string) string {
+	findings, err := c.autoResearch.Findings(taskID, 0)
+	if err != nil {
+		return fmt.Sprintf("f%d", time.Now().UTC().UnixNano())
+	}
+	used := make(map[string]bool, len(findings))
+	for _, finding := range findings {
+		used[finding.ID] = true
+	}
+	for i := 1; ; i++ {
+		id := fmt.Sprintf("f%d", len(findings)+i)
+		if !used[id] {
+			return id
+		}
+	}
 }
 
 func (c *Controller) ClearGoal() {
@@ -2039,7 +2153,7 @@ func (c *Controller) CheckpointTurnsByMessageIndex() map[int]int {
 // returned error — e.g. the desktop bridge's .catch — still shows the user why
 // the rewind did nothing) and returns it.
 func (c *Controller) rewindFail(err error) error {
-	c.emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: err.Error()})
+	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: err.Error()})
 	return err
 }
 
@@ -2064,7 +2178,7 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 			return c.rewindFail(fmt.Errorf("rewind code: %w", err))
 		}
 		if len(written) > 0 || len(deleted) > 0 {
-			c.emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
+			c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 				Text: fmt.Sprintf("rewound code to turn %d — %d file(s) restored, %d removed", turn, len(written), len(deleted))})
 		}
 	}
@@ -2084,7 +2198,7 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 		if err := c.Snapshot(); err != nil {
 			slog.Warn("controller: snapshot after rewind", "err", err)
 		}
-		c.emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
+		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 			Text: fmt.Sprintf("rewound conversation to turn %d", turn)})
 	}
 	return nil
@@ -2169,7 +2283,7 @@ func (c *Controller) forkNamed(turn int, name string, switchToFork bool) (string
 			c.guardianSess.Reset()
 		}
 	}
-	c.emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
+	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("forked conversation at turn %d into a new session", turn)})
 	return newPath, nil
 }
@@ -2240,7 +2354,7 @@ func (c *Controller) Branch(name string) (string, error) {
 	if c.guardianSess != nil {
 		c.guardianSess.Reset()
 	}
-	c.emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
+	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("created branch %s", agent.BranchID(newPath))})
 	return newPath, nil
 }
@@ -2294,7 +2408,7 @@ func (c *Controller) SwitchBranch(ref string) (agent.BranchInfo, error) {
 	c.rebindCheckpoints(match.Path)
 	c.restoreTerminalGoalTodos(match.Path)
 	c.loadGuardianSession()
-	c.emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
+	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("switched to branch %s", branchDisplayName(match))})
 	return match, nil
 }
@@ -2390,6 +2504,7 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 	c.mu.Unlock()
 	c.setActiveJobSession(path)
 	c.rebindCheckpoints(path)
+	c.goals.restoreRunningFromState(path)
 	c.restoreTerminalGoalTodos(path)
 	c.loadGuardianSession()
 	c.recoverInterruptedTurn(path)
@@ -2513,6 +2628,18 @@ func (c *Controller) snapshot(markActivity bool) error {
 	if !s.HasContent() {
 		// Nothing to persist yet (e.g. a fresh session with only a system
 		// prompt) — staying quiet here is correct, not a data-loss path.
+		return nil
+	}
+	if !s.HasSystemMessage() {
+		// The session has user/assistant/tool messages but no leading system
+		// prompt.  Persisting it would create a session file that, when
+		// reloaded, has no agent-identity contract — the model falls back to
+		// its training-data defaults, giving wrong answers to identity
+		// queries ("who are you?").  Log the anomaly so the root cause
+		// (typically an empty sysPrompt reaching NewSession) can be
+		// diagnosed, then refuse to write a corrupted transcript.
+		slog.Warn("controller: refusing to snapshot session with content but no system message",
+			"label", c.Label(), "session_dir", c.SessionDir(), "message_count", len(s.Snapshot()))
 		return nil
 	}
 	if path == "" {
@@ -3576,9 +3703,9 @@ func (c *Controller) seedPlanTodos(plan string) string {
 		return ""
 	}
 	t := event.Tool{ID: "plan-seed", Name: "todo_write", Args: args, ReadOnly: true}
-	c.emit(event.Event{Kind: event.ToolDispatch, Tool: t})
+	c.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: t})
 	t.Output = "task list seeded from the approved plan"
-	c.emit(event.Event{Kind: event.ToolResult, Tool: t})
+	c.sink.Emit(event.Event{Kind: event.ToolResult, Tool: t})
 	c.seedAgentTodoState(args)
 	return args
 }
@@ -3603,9 +3730,9 @@ func (c *Controller) completePlanTodos(args string) {
 		return
 	}
 	t := event.Tool{ID: "plan-seed", Name: "todo_write", Args: done, ReadOnly: true}
-	c.emit(event.Event{Kind: event.ToolDispatch, Tool: t})
+	c.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: t})
 	t.Output = "approved plan finished"
-	c.emit(event.Event{Kind: event.ToolResult, Tool: t})
+	c.sink.Emit(event.Event{Kind: event.ToolResult, Tool: t})
 	c.replaceAgentTodoState(done)
 }
 
@@ -3884,7 +4011,7 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 		id, reply = c.approval.register(tool, subject, reason)
 	}
 
-	c.emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: id, Tool: tool, Subject: subject, Reason: reason}})
+	c.sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: id, Tool: tool, Subject: subject, Reason: reason}})
 	if hookSubject, hookArgs, ok := permissionRequestHookPayload(tool, subject, args); ok {
 		go c.hooks.PermissionRequest(ctx, tool, hookSubject, hookArgs)
 	}

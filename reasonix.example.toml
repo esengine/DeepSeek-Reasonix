@@ -11,6 +11,7 @@ default_model = "deepseek"   # a provider name (→ its default model) or "provi
 theme = "auto"   # auto|dark|light; controls CLI colors only; REASONIX_THEME can override per run
 # theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 # shortcut_layout = "desktop"   # classic|desktop; compatibility setting; Shift+Tab toggles Plan, Ctrl+Y toggles YOLO
+# cursor_shape = "underline"   # block|underline|bar; text input cursor shape; default underline to avoid CJK rendering artifacts
 
 [desktop]
 layout_style = "classic"   # classic|workbench|creation; desktop layout style

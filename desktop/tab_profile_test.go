@@ -432,6 +432,177 @@ func TestMetaReportsGoalStatus(t *testing.T) {
 	}
 }
 
+func TestAutoResearchStatusSurfaceForActiveTab(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	root := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	app := NewApp()
+	tab := testTab("a", root)
+	tab.Ctrl = control.New(control.Options{Label: tab.ID, WorkspaceRoot: root})
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	defer tab.Ctrl.Close()
+
+	tab.Ctrl.SetGoalWithResearchMode("identify the root cause", control.GoalResearchOn)
+
+	meta := app.MetaForTab(tab.ID)
+	if meta.AutoResearch == nil || meta.AutoResearch.TaskID == "" {
+		t.Fatalf("MetaForTab AutoResearch = %+v, want compact active task summary", meta.AutoResearch)
+	}
+	if meta.AutoResearch.Status != control.GoalStatusRunning || meta.AutoResearch.Iteration != 0 {
+		t.Fatalf("compact AutoResearch summary = %+v", meta.AutoResearch)
+	}
+
+	current := app.AutoResearchCurrent()
+	if current.TaskID != meta.AutoResearch.TaskID || current.Goal != "identify the root cause" {
+		t.Fatalf("AutoResearchCurrent = %+v, want task %q", current, meta.AutoResearch.TaskID)
+	}
+	if current.TaskPath == "" || current.Status != control.GoalStatusRunning {
+		t.Fatalf("AutoResearchCurrent missing status/path: %+v", current)
+	}
+	heartbeatPath := filepath.Join(root, ".reasonix", "autoresearch", current.TaskID, "logs", "heartbeat.jsonl")
+	if err := os.WriteFile(heartbeatPath, []byte(`{"status":"turn_done","iteration":1,"created_at":"2026-06-30T00:00:00Z"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write heartbeat: %v", err)
+	}
+	current = app.AutoResearchCurrent()
+	if current.LastHeartbeatAt != "2026-06-30T00:00:00Z" || current.NextRequiredAction == "" {
+		t.Fatalf("AutoResearchCurrent missing runtime fields: %+v", current)
+	}
+
+	tabs := app.ListTabs()
+	if len(tabs) != 1 || tabs[0].AutoResearch == nil || tabs[0].AutoResearch.TaskID != current.TaskID {
+		t.Fatalf("ListTabs AutoResearch = %+v, want compact summary for task %q", tabs, current.TaskID)
+	}
+}
+
+func TestAutoResearchFindingsAreLoadedOnDemand(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	root := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	app := NewApp()
+	tab := testTab("a", root)
+	tab.Ctrl = control.New(control.Options{Label: tab.ID, WorkspaceRoot: root})
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	defer tab.Ctrl.Close()
+
+	tab.Ctrl.SetGoalWithResearchMode("collect accepted findings", control.GoalResearchOn)
+	current := app.AutoResearchCurrent()
+	if current.TaskID == "" {
+		t.Fatal("expected active AutoResearch task")
+	}
+	findingsPath := filepath.Join(root, ".reasonix", "autoresearch", current.TaskID, "state", "findings.jsonl")
+	if err := os.WriteFile(findingsPath, []byte(
+		`{"id":"f1","kind":"test","summary":"old","source":"command","command":"go test ./...","accepted":true,"created_at":"2026-06-29T10:00:00Z"}`+"\n"+
+			`{"id":"f2","kind":"review","summary":"new","source":"manual","accepted":true,"created_at":"2026-06-29T11:00:00Z"}`+"\n",
+	), 0o644); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+
+	findings := app.AutoResearchFindings(tab.ID, 1)
+	if len(findings) != 1 || findings[0].ID != "f2" || findings[0].Summary != "new" {
+		t.Fatalf("AutoResearchFindings = %+v, want newest capped finding", findings)
+	}
+	if meta := app.MetaForTab(tab.ID); meta.AutoResearch == nil || meta.AutoResearch.TaskID != current.TaskID {
+		t.Fatalf("MetaForTab compact summary lost task id: %+v", meta.AutoResearch)
+	}
+}
+
+func TestAutoResearchListReturnsWorkspaceTasks(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	root := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	app := NewApp()
+	tab := testTab("a", root)
+	tab.Ctrl = control.New(control.Options{Label: tab.ID, WorkspaceRoot: root})
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	defer tab.Ctrl.Close()
+
+	tab.Ctrl.SetGoalWithResearchMode("list active research task", control.GoalResearchOn)
+	list := app.AutoResearchList(tab.ID)
+	if len(list) != 1 || list[0].TaskID == "" || list[0].Goal != "list active research task" {
+		t.Fatalf("AutoResearchList = %+v, want active workspace task", list)
+	}
+}
+
+func TestAutoResearchOpenTaskRevealsTaskDirectory(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	root := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	app := NewApp()
+	tab := testTab("a", root)
+	tab.Ctrl = control.New(control.Options{Label: tab.ID, WorkspaceRoot: root})
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	defer tab.Ctrl.Close()
+
+	tab.Ctrl.SetGoalWithResearchMode("open task folder", control.GoalResearchOn)
+	current := app.AutoResearchCurrent()
+	var revealed string
+	oldReveal := revealPath
+	revealPath = func(path string) error {
+		revealed = path
+		return nil
+	}
+	defer func() { revealPath = oldReveal }()
+
+	if err := app.AutoResearchOpenTask(tab.ID); err != nil {
+		t.Fatalf("AutoResearchOpenTask: %v", err)
+	}
+	if revealed != current.TaskPath {
+		t.Fatalf("revealed path = %q, want task path %q", revealed, current.TaskPath)
+	}
+}
+
+func TestAutoResearchRecordEvidenceThroughDesktopAPI(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	root := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	app := NewApp()
+	tab := testTab("a", root)
+	tab.Ctrl = control.New(control.Options{Label: tab.ID, WorkspaceRoot: root})
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	defer tab.Ctrl.Close()
+
+	tab.Ctrl.SetGoalWithResearchMode("record evidence through desktop", control.GoalResearchOn)
+	err := app.AutoResearchRecordEvidence(tab.ID, "objective_evidence", AutoResearchEvidenceView{
+		ID:       "f1",
+		Kind:     "test",
+		Summary:  "desktop evidence recorded",
+		Source:   "manual",
+		Accepted: true,
+	})
+	if err != nil {
+		t.Fatalf("AutoResearchRecordEvidence: %v", err)
+	}
+	findings := app.AutoResearchFindings(tab.ID, 10)
+	if len(findings) != 1 || findings[0].ID != "f1" {
+		t.Fatalf("findings = %+v, want f1", findings)
+	}
+}
+
 func TestMetaReportsStoredCollaborationModeWhileControllerRebuilds(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

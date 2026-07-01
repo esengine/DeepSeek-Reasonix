@@ -184,6 +184,16 @@ console.log("\nuse controller meta");
   const activeHelper = reducer(active, { type: "event", e: { kind: "usage", usage: usage("subagent") } });
   eq(activeHelper.sessionTokens, 120, "helper usage inside a turn still counts toward session tokens");
   eq(activeHelper.sessionCost, 0.001, "helper usage inside a turn still counts toward session cost");
+  eq(activeHelper.usage, undefined, "helper usage inside a turn does not become displayed latest usage");
+
+  const plannerFirst = reducer(active, { type: "event", e: { kind: "usage", usage: usage("planner") } });
+  eq(plannerFirst.sessionTokens, 120, "planner usage inside a turn still counts toward session tokens");
+  eq(plannerFirst.usage, undefined, "planner usage does not fill the single displayed usage slot");
+
+  const activeExecutor = reducer(active, { type: "event", e: { kind: "usage", usage: usage("executor") } });
+  const afterCompaction = reducer(activeExecutor, { type: "event", e: { kind: "usage", usage: usage("compaction") } });
+  eq(afterCompaction.usage?.source, "executor", "compaction usage does not overwrite displayed executor usage");
+  eq(afterCompaction.sessionTokens, 240, "compaction usage still contributes to session token totals");
 }
 
 {

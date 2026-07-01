@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { buildTurnGroups, createWarmLayerState, questionTurnsById, warmColdPageForTurn, warmLayerForSession, warmLayerWithColdPageAtLeast, warmLayerWithExpandedTurn, warmLayerWithNextColdPage, warmPagination } from "../lib/transcriptGrouping";
+import { buildStepGroups, buildTurnGroups, createWarmLayerState, questionTurnsById, warmColdPageForTurn, warmLayerForSession, warmLayerWithColdPageAtLeast, warmLayerWithExpandedTurn, warmLayerWithNextColdPage, warmPagination } from "../lib/transcriptGrouping";
 import type { Item } from "../lib/useController";
 
 let passed = 0;
@@ -66,6 +66,27 @@ console.log("\ntranscript grouping contract");
   eq(groups[0].endIdx, 4, "first group end index");
   eq(groups[0].toolCount, 2, "counts top-level tools in a turn");
   eq(groups[2].assistantPreview, "answer 2", "keeps latest assistant preview for each turn");
+}
+
+{
+  const groups = buildStepGroups([
+    { kind: "user", id: "u0", text: "fix this" },
+    { kind: "assistant", id: "a1", text: "visible answer before retry", reasoning: "", streaming: false },
+    { kind: "notice", id: "s1", level: "info", text: "↪ steer" },
+    { kind: "assistant", id: "a2", text: "", reasoning: "", streaming: true },
+  ] as Item[]);
+  eq(groups[1]?.isFinal, true, "visible assistant text before a later assistant stays outside processed folds");
+}
+
+{
+  const groups = buildStepGroups([
+    { kind: "user", id: "u0", text: "use tools" },
+    { kind: "assistant", id: "a1", text: "", reasoning: "", streaming: false },
+    { kind: "tool", id: "t1", name: "read_file", args: "{}", readOnly: true, status: "done" },
+    { kind: "assistant", id: "a2", text: "final answer", reasoning: "", streaming: false },
+  ] as Item[]);
+  eq(groups[1]?.isFinal, false, "tool-only completed steps still fold in compact mode");
+  eq(groups[2]?.isFinal, true, "later visible final answer renders directly");
 }
 
 {

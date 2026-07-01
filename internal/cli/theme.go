@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"reasonix/internal/config"
@@ -96,6 +97,10 @@ var (
 	activeCLITheme                  = applyCLIThemeStyle(cliDarkTheme, cliThemeStyles[0])
 	queryTerminalBackgroundForTheme = queryTerminalBackground
 )
+
+// cliCursorShape is the active cursor shape for the textarea input, configured
+// via [ui] cursor_shape. Defaults to "underline".
+var cliCursorShape = "underline"
 
 func configureCLITheme(mode string) {
 	configureCLIThemeWithStyle(mode, "")
@@ -431,6 +436,14 @@ func applyTextareaTheme(ti *textarea.Model) {
 		styles.Cursor.Color = themeLipColor(activeCLITheme.accent)
 	} else {
 		styles.Cursor.Color = nil
+	}
+	switch cliCursorShape {
+	case "block":
+		styles.Cursor.Shape = tea.CursorBlock
+	case "bar":
+		styles.Cursor.Shape = tea.CursorBar
+	default:
+		styles.Cursor.Shape = tea.CursorUnderline
 	}
 	ti.SetStyles(styles)
 }

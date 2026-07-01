@@ -83,15 +83,15 @@ type chatTUI struct {
 	// pinned just above the input (see renderTodoPanel). "" when there's no list.
 	// Persists across turns until the work completes or a new session starts.
 	todoArgs string
-	// subagent is the most recently updated slash-subagent block in the main
-	// transcript. subagents keeps retained runs keyed by stable controller ID.
-	subagent  *subagentPanel
-	subagents subagentPanels
 
 	// planMode mirrors the agent's read-only gate (Shift+Tab toggles it). The
 	// marker rides in outgoing user messages so the cache-stable prompt prefix is
 	// left untouched.
 	planMode bool
+	// sessionSwitch is set by replayActiveBranch to suppress the ClearScreen
+	// flicker when the viewport content is completely rebuilt during a session
+	// switch (#5441). Cleared after one Update cycle.
+	sessionSwitch bool
 	// yoloRestoreToolApprovalMode remembers the Ask/Auto base mode that Ctrl+Y
 	// should restore after a desktop-style YOLO toggle.
 	yoloRestoreToolApprovalMode string
@@ -223,8 +223,6 @@ type chatTUI struct {
 	// keys drive it and it renders as an overlay. lastEsc times the double-Esc
 	// gesture that opens it on an empty composer.
 	rewind *rewindPicker
-	// subagentPicker is the interactive /subagents runtime browser.
-	subagentPicker *subagentPicker
 	// resumePick is the interactive "/resume" session picker overlay. Non-nil
 	// while the user browses saved sessions with ↑/↓ and confirms with Enter.
 	resumePick *resumePicker
@@ -726,9 +724,10 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// newest output) shifts the whole window. Some terminals (Warp) mishandle
 	// the renderer's scroll/insert-line optimization and strand stale rows, so
 	// force a full clear+redraw whenever the offset actually moved.
-	if cm.viewport.YOffset() != prevYOff && !cm.nativeScrollback {
+	if cm.viewport.YOffset() != prevYOff && !cm.nativeScrollback && !cm.sessionSwitch {
 		return cm, tea.Batch(tea.ClearScreen, cmd)
 	}
+	cm.sessionSwitch = false
 	return cm, cmd
 }
 
@@ -761,9 +760,6 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseWheelMsg:
-		if m.subagentPicker != nil && m.subagentPicker.detail != nil {
-			return m.handleSubagentsMouse(tea.MouseMsg(msg))
-		}
 		switch msg.Button {
 		case tea.MouseWheelUp:
 			m.viewport.ScrollUp(3)
@@ -939,10 +935,6 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mcpImport != nil {
 			return m.handleMCPImportKey(msg)
 		}
-		// The subagents browser is modal while open: keys navigate it.
-		if m.subagentPicker != nil {
-			return m.handleSubagentsKey(msg)
-		}
 		// Copy picker is modal while open.
 		if m.copyPick != nil {
 			return m.handleCopyPickerKey(msg)
@@ -1113,6 +1105,17 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, finalize(m, nil)
 		case "ctrl+d":
 			return m, tea.Quit
+		case "ctrl+l":
+			if m.state != tuiRunning {
+				m.finalizeStreamed()
+				m.clearTranscriptDisplay()
+				m.commitLine(strings.TrimRight(
+					renderTUIBanner(m.label, "", transcriptContentWidth(m.width, m.nativeScrollback)), "\n"))
+				m.transcriptDirty = true
+				m.forceGotoBottom = true
+				m.notice(i18n.M.SlashClsDone)
+			}
+			return m, finalize(m, cmds)
 		case "ctrl+v", "ctrl+shift+v", "super+v", "meta+v":
 			if m.state == tuiRunning {
 				return m, nil
@@ -1123,11 +1126,6 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toggleYoloMode()
 			return m, nil
 		case "ctrl+o":
-			if m.subagent != nil {
-				m.subagent.expanded = !m.subagent.expanded
-				m.refreshSubagentTranscript(m.subagent)
-				return m, nil
-			}
 			m.toggleVerboseReasoning(m.state != tuiRunning)
 			return m, finalize(m, cmds)
 		case "ctrl+b":
@@ -1460,6 +1458,24 @@ func finalize(m chatTUI, cmds []tea.Cmd) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+func (m *chatTUI) clearTranscriptDisplay() {
+	if m.pendingCommit != nil {
+		*m.pendingCommit = (*m.pendingCommit)[:0]
+	}
+	m.transcript = nil
+	m.wrappedLines = nil
+	m.viewport.SetContent("")
+	m.shellOutputs = make(map[string]string)
+	m.shellExpanded = make(map[string]bool)
+	m.shellTranscriptIdx = make(map[string]int)
+	m.toolLineCountByID = make(map[string]int)
+	m.toolStreamID = ""
+	m.toolStreamIdx = -1
+	m.toolTail = nil
+	m.toolPartial = ""
+	m.toolLineCount = 0
+}
+
 // scrollChunkHeight is the largest block (in lines) finalize prints at once in
 // native-scrollback mode, leaving room for the pinned bottom frame.
 func (m chatTUI) scrollChunkHeight() int {
@@ -1539,7 +1555,6 @@ func (m chatTUI) bottomRows() int {
 		m.renderChooser(),
 		m.renderRewind(),
 		m.renderMCPImport(),
-		m.renderSubagents(),
 		m.renderResumePicker(),
 		m.renderCopyPicker(),
 		m.renderCompletion(),
@@ -1961,9 +1976,9 @@ func (m *chatTUI) collapseShellSlot(id string, idx int, resultOutput string) {
 func (m *chatTUI) toggleShellOutput() {
 	// Find the most recent shell output that has a transcript entry.
 	var lastID string
-	var lastIdx int
+	lastIdx := -1
 	for id, idx := range m.shellTranscriptIdx {
-		if idx > lastIdx {
+		if idx >= 0 && idx < len(m.transcript) && idx > lastIdx {
 			lastID = id
 			lastIdx = idx
 		}
@@ -2279,13 +2294,6 @@ func (m chatTUI) runningWorkingLine(cancelRequested, styled bool) string {
 }
 
 func (m chatTUI) View() tea.View {
-	if m.subagentPicker != nil && m.subagentPicker.detail != nil {
-		v := tea.NewView(m.renderSubagentDetailScreen())
-		v.AltScreen = true
-		v.MouseMode = tea.MouseModeCellMotion
-		return v
-	}
-
 	boxW := m.width
 	if boxW < 10 {
 		boxW = 10
@@ -2336,8 +2344,6 @@ func (m chatTUI) View() tea.View {
 		status = "  " + modeTag + " · ⟲ rewind"
 	case m.mcpImport != nil:
 		status = "  " + modeTag + " · MCP import"
-	case m.subagentPicker != nil:
-		status = "  " + modeTag + " · " + i18n.M.CmdSubagents
 	case m.resumePick != nil:
 		status = "  " + modeTag + " · " + i18n.M.StatusResumePicker
 	case m.mcp != nil:
@@ -2418,10 +2424,6 @@ func (m chatTUI) View() tea.View {
 		rowsAboveBox += strings.Count(card, "\n") + 1
 	}
 	if card := m.renderMCPImport(); card != "" {
-		parts = append(parts, card)
-		rowsAboveBox += strings.Count(card, "\n") + 1
-	}
-	if card := m.renderSubagents(); card != "" {
 		parts = append(parts, card)
 		rowsAboveBox += strings.Count(card, "\n") + 1
 	}
@@ -3027,7 +3029,18 @@ func (m *chatTUI) startTurn(sent, displayed, restore string) tea.Cmd {
 	return m.startTurnWithRaw(sent, displayed, restore, sent)
 }
 
-func (m *chatTUI) beginPendingTurn(displayed, restore string) {
+// startTurnWithRaw is startTurn plus an explicit `raw` (the un-resolved user
+// prompt) used only for the controller's auto-plan scoring, so resolved
+// @-reference payloads can't inflate the complexity signal.
+func (m *chatTUI) startTurnWithRaw(sent, displayed, restore, raw string) tea.Cmd {
+	cmd := m.beginTurnDisplay(displayed, restore)
+	// The controller owns the run goroutine, its context, and cancellation; it
+	// streams events to eventCh and emits TurnDone when the turn settles.
+	m.ctrl.SendWithRaw(sent, raw)
+	return cmd
+}
+
+func (m *chatTUI) beginTurnDisplay(displayed, restore string) tea.Cmd {
 	// Flush any half-streamed leftover before the new turn (defensive).
 	m.commitReasoning()
 	m.commitPending()
@@ -3043,48 +3056,12 @@ func (m *chatTUI) beginPendingTurn(displayed, restore string) {
 	m.commitLine(renderUserBubble(displayed, m.width, m.planMode))
 	m.bubblePending = true
 	m.turnDiscarded = false
-}
-
-// startTurnWithRaw is startTurn plus an explicit `raw` (the un-resolved user
-// prompt) used only for the controller's auto-plan scoring, so resolved
-// @-reference payloads can't inflate the complexity signal.
-func (m *chatTUI) startTurnWithRaw(sent, displayed, restore, raw string) tea.Cmd {
-	m.beginPendingTurn(displayed, restore)
 
 	m.state = tuiRunning
 	m.runStart = time.Now()
 	m.elapsed = 0
 	m.turnTokens = 0
-	// The controller owns the run goroutine, its context, and cancellation; it
-	// streams events to eventCh and emits TurnDone when the turn settles.
-	m.ctrl.SendWithRaw(sent, raw)
 	return tea.Batch(m.spinner.Tick, elapsedTick())
-}
-
-func (m *chatTUI) startControllerTurn(displayed, restore string, start func()) tea.Cmd {
-	m.beginPendingTurn(displayed, restore)
-	m.state = tuiRunning
-	m.runStart = time.Now()
-	m.elapsed = 0
-	m.turnTokens = 0
-	start()
-	return tea.Batch(m.spinner.Tick, elapsedTick())
-}
-
-func (m *chatTUI) startSkillTurn(displayed string, sk skill.Skill, args string) tea.Cmd {
-	if sk.RunAs != skill.RunSubagent || !m.ctrl.SubagentRunsInBackground(sk) {
-		return m.startControllerTurn(displayed, displayed, func() { m.ctrl.StartSkill(displayed, sk, args) })
-	}
-	// Background subagent skills keep the main composer interactive. The user
-	// bubble is still committed immediately, but unlike a foreground turn it
-	// should not occupy the pending "unsendable" slot or delay pasted-block
-	// cleanup; controller notices and the final subagent answer land as regular
-	// transcript events.
-	m.beginPendingTurn(displayed, displayed)
-	m.ctrl.StartSkill(displayed, sk, args)
-	m.confirmBubbleSent()
-	m.clearSubmittedPastes()
-	return nil
 }
 
 // confirmBubbleSent marks the already-echoed user bubble as really sent once a
@@ -3139,24 +3116,14 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		}
 		return
 	}
-	if e.Kind == event.Notice && e.Subagent != nil {
-		m.updateSubagent(*e.Subagent)
-		m.refreshSubagentTranscript(m.subagent)
-		return
-	}
 	// The first packet of any kind means the server replied — confirm the send so
 	// Esc cancels the stream instead of un-sending. TurnStarted is local (emitted
 	// before the request) and TurnDone is handled in its own case.
-	if e.Subagent == nil && e.Kind != event.TurnStarted && e.Kind != event.TurnDone {
+	if e.Kind != event.TurnStarted && e.Kind != event.TurnDone {
 		m.confirmBubbleSent()
 	}
 	switch e.Kind {
 	case event.Reasoning:
-		if sub := m.updateSubagentEvent(e.Subagent); sub != nil {
-			m.appendSubagentPresentationEvent(sub, e.Kind, e.Text, "", "", "")
-			m.refreshSubagentTranscript(sub)
-			break
-		}
 		if m.nativeScrollback {
 			if !m.reasoningNative {
 				m.thinkStart = time.Now()
@@ -3180,44 +3147,19 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		m.streamReasoning(e.Text)
 
 	case event.Text:
-		if sub := m.updateSubagentEvent(e.Subagent); sub != nil {
-			if e.Subagent.State != event.SubagentCompleted {
-				m.appendSubagentPresentationEvent(sub, e.Kind, e.Text, "", "", "")
-			}
-			m.refreshSubagentTranscript(sub)
-			break
-		}
 		m.commitReasoning() // reasoning ends as the answer begins
 		m.pending.WriteString(e.Text)
 		m.streamAnswer()
 
 	case event.Message:
-		if sub := m.updateSubagentEvent(e.Subagent); sub != nil {
-			m.appendSubagentPresentationEvent(sub, e.Kind, e.Text, "", "", "")
-			m.refreshSubagentTranscript(sub)
-			break
-		}
 		// The answer stream is complete — freeze reasoning + the markdown answer.
 		m.commitReasoning()
-		if m.pending.Len() == 0 && strings.TrimSpace(e.Text) != "" {
-			rendered := strings.TrimRight(m.renderer.Render(e.Text), "\n")
-			if strings.TrimSpace(rendered) == "" {
-				rendered = e.Text
-			}
-			m.commitSpacer()
-			m.commitLine(rendered)
-		}
 		m.commitPending()
 
 	case event.ToolDispatch:
 		// The early (partial) dispatch only carries the name — the full dispatch
 		// with args prints the line. The running spinner covers the gap meanwhile.
 		if e.Tool.Partial {
-			break
-		}
-		if sub := m.updateSubagentEvent(e.Subagent); sub != nil {
-			m.appendSubagentPresentationEvent(sub, e.Kind, "", e.Tool.Name, e.Tool.Args, "")
-			m.refreshSubagentTranscript(sub)
 			break
 		}
 		m.finalizeStreamed()
@@ -3243,13 +3185,6 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		m.streamToolOutput(e.Tool.ID, e.Tool.Output)
 
 	case event.ToolResult:
-		if sub := m.updateSubagentEvent(e.Subagent); sub != nil {
-			if e.Tool.Err != "" {
-				m.appendSubagentPresentationEvent(sub, e.Kind, "", e.Tool.Name, "", e.Tool.Err)
-			}
-			m.refreshSubagentTranscript(sub)
-			break
-		}
 		// A successful result is silent (it only feeds the model); a blocked/failed
 		// call surfaces a red "⏺ Verb ⊘ <reason>" card. A live-output block (bash)
 		// collapses to a one-line "⎿ N lines" summary first. Pass the final
@@ -3265,14 +3200,6 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		}
 
 	case event.Usage:
-		if sub := m.updateSubagentEvent(e.Subagent); sub != nil {
-			m.flushSubagentBufs(sub)
-			sub.textStreamed = false
-			resetSubagentStreamBlocks(sub)
-			sub.usageSummary = subagentUsageSummary(e.Usage, e.Pricing)
-			m.refreshSubagentTranscript(sub)
-			break
-		}
 		if e.Usage != nil {
 			m.turnTokens += e.Usage.CompletionTokens
 		}
@@ -3282,11 +3209,11 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		}
 
 	case event.Notice:
-		m.finalizeStreamed()
 		glyph := "·"
 		if e.Level == event.LevelWarn {
 			glyph = "!"
 		}
+		m.finalizeStreamed()
 		m.commitLine(fmt.Sprintf("  %s %s", glyph, e.Text))
 
 	case event.GuardianAssessment:
@@ -3351,13 +3278,6 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		m.refreshMCPManager()
 
 	case event.TurnDone:
-		if e.Subagent != nil {
-			if sub := m.updateSubagentEvent(e.Subagent); sub != nil {
-				m.flushSubagentBufs(sub)
-				m.refreshSubagentTranscript(sub)
-			}
-			break
-		}
 		// The turn settled — freeze anything still streaming, surface a real error,
 		// and gate a plan-mode proposal on the user's approval. Autosave already
 		// happened in Controller so every frontend shares the same activity-time
@@ -3387,19 +3307,6 @@ func (m *chatTUI) finalizeStreamed() {
 	m.collapseToolOutput(m.toolStreamID, "")
 	m.commitReasoning()
 	m.commitPending()
-}
-
-func subagentStateLabel(state event.SubagentState) string {
-	switch state {
-	case event.SubagentCompleted:
-		return green(control.SubagentStateText(state))
-	case event.SubagentFailed:
-		return red(control.SubagentStateText(state))
-	case event.SubagentCanceled:
-		return yellow(control.SubagentStateText(state))
-	default:
-		return accent(control.SubagentStateText(state))
-	}
 }
 
 func waitForAgentEvent(ch chan event.Event) tea.Cmd {
@@ -3441,6 +3348,15 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	case "/clear":
 		m.echoLocalCommand(input)
 		m.clearConfirm = &clearConfirm{confirm: 1}
+	case "/cls":
+		m.echoLocalCommand(input)
+		m.finalizeStreamed()
+		m.clearTranscriptDisplay()
+		m.commitLine(strings.TrimRight(
+			renderTUIBanner(m.label, "", transcriptContentWidth(m.width, m.nativeScrollback)), "\n"))
+		m.transcriptDirty = true
+		m.forceGotoBottom = true
+		m.notice(i18n.M.SlashClsDone)
 	case "/resume":
 		m.runResumeCommand(input)
 	case "/rename":
@@ -3499,8 +3415,6 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		if m.pendingModelSwitch != nil {
 			return m.pendingModelSwitch
 		}
-	case "/subagents":
-		m.runSubagentsSubcommand(input)
 	case "/hooks":
 		m.echoLocalCommand(input)
 		m.runHooksSubcommand(input)
@@ -3586,8 +3500,11 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		if sent, ok := m.ctrl.CustomCommand(input); ok {
 			return m.startTurn(sent, input, input)
 		}
-		if sk, args, ok := m.ctrl.ResolveSkill(input); ok {
-			return m.startSkillTurn(input, sk, args)
+		if sent, ok, handled := m.ctrl.RunSkillCommand(input, input); ok {
+			if handled {
+				return m.beginTurnDisplay(input, input)
+			}
+			return m.startTurn(sent, input, input)
 		}
 		m.notice(fmt.Sprintf("%s: %s", i18n.M.SlashUnknown, cmd))
 	}

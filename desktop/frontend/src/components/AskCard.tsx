@@ -22,8 +22,10 @@ export function AskCard({
   // Per-question state: selected option labels, and an optional typed answer.
   const [sel, setSel] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
+  const [customOpen, setCustomOpen] = useState(false);
   const [active, setActive] = useState(0);
   const shelfRef = useRef<HTMLDivElement | null>(null);
+  const customInputRef = useRef<HTMLInputElement | null>(null);
   const advanceTimer = useRef<number | null>(null);
 
   const questions = ask.questions;
@@ -36,6 +38,7 @@ export function AskCard({
     shelfRef.current?.focus();
     setSel({});
     setCustom({});
+    setCustomOpen(false);
     setActive(0);
     if (advanceTimer.current != null) window.clearTimeout(advanceTimer.current);
     playAttentionChime();
@@ -66,7 +69,15 @@ export function AskCard({
     (sel[question.id]?.length ?? 0) > 0 || (custom[question.id]?.trim() ?? "") !== "";
 
   const currentAnswered = q ? answered(q) : false;
-  const showSubmitAction = q ? q.multi || Boolean(custom[q.id]?.trim()) : false;
+  const showSubmitAction = q ? q.multi || customOpen || Boolean(custom[q.id]?.trim()) : false;
+
+  useEffect(() => {
+    setCustomOpen(false);
+  }, [active]);
+
+  useEffect(() => {
+    if (customOpen) customInputRef.current?.focus();
+  }, [customOpen]);
 
   const finishOrAdvance = (nextSel = sel, nextCustom = custom) => {
     if (advanceTimer.current != null) {
@@ -89,6 +100,7 @@ export function AskCard({
 
     setCustom(nextCustom);
     setSel(nextSel);
+    setCustomOpen(false);
 
     if (!question.multi) {
       if (advanceTimer.current != null) window.clearTimeout(advanceTimer.current);
@@ -148,6 +160,7 @@ export function AskCard({
 
   return (
     <PromptShelf
+      className="prompt-shelf--compact prompt-shelf--ask"
       barRef={shelfRef}
       titleId="ask-shelf-title"
       title={t("ask.title")}
@@ -165,6 +178,9 @@ export function AskCard({
       headerActions={
         <>
           <PromptHeaderAction onClick={onDismiss}>{t("ask.justChat")}</PromptHeaderAction>
+          {!customOpen && (
+            <PromptHeaderAction onClick={() => setCustomOpen(true)}>{t("ask.customAnswer")}</PromptHeaderAction>
+          )}
           <PromptHeaderAction onClick={onStop} ariaLabel={t("composer.stopShort")}>Esc</PromptHeaderAction>
         </>
       }
@@ -213,8 +229,10 @@ export function AskCard({
         )
       }
     >
+      {customOpen && (
       <div className="ask-shelf__custom-row">
         <input
+          ref={customInputRef}
           className="ask-shelf__custom"
           placeholder={t("ask.customPlaceholder")}
           value={custom[q.id] ?? ""}
@@ -225,6 +243,7 @@ export function AskCard({
           }}
         />
       </div>
+      )}
     </PromptShelf>
   );
 }

@@ -77,3 +77,13 @@ func (s *Session) HasContent() bool {
 	}
 	return false
 }
+
+// HasSystemMessage reports whether the session starts with a system message,
+// which carries the agent's stable identity and behavioural contract. Sessions
+// without one are not safe to persist: when reloaded the model has no identity
+// context and falls back to its training-data defaults.
+func (s *Session) HasSystemMessage() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.Messages) > 0 && s.Messages[0].Role == provider.RoleSystem
+}

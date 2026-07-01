@@ -153,8 +153,28 @@ function textarea(): HTMLTextAreaElement {
   return node;
 }
 
+function sendButton(): HTMLButtonElement {
+  const node = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
+  if (!node) throw new Error("composer send button did not render");
+  return node;
+}
+
 function contextItemCount(): number {
   return document.querySelectorAll(".composer-context__item").length;
+}
+
+function textPasteEvent(text: string): Event {
+  const event = new Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "clipboardData", {
+    configurable: true,
+    value: {
+      files: [],
+      items: [],
+      types: ["text/plain"],
+      getData: (kind: string) => (kind === "text" || kind === "text/plain" ? text : ""),
+    },
+  });
+  return event;
 }
 
 console.log("\ncomposer session draft");
@@ -200,6 +220,43 @@ console.log("\ncomposer session draft");
   await rerender({ sessionKey: "session:project:/repo:topic-b:session-b" });
   eq(textarea().value, "draft for B", "session B text is restored independently");
   eq(contextItemCount(), 0, "session B context refs stay isolated");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  const sent: Array<{ display: string; submit?: string }> = [];
+  const { root } = await renderComposer({
+    onSend: (display, submit) => {
+      sent.push({ display, submit });
+    },
+  });
+  const rawPaste = "error: failed to compile\r\nat loader.ts:10\r\nat run.ts:22";
+  const normalizedPaste = "error: failed to compile\nat loader.ts:10\nat run.ts:22";
+  const event = textPasteEvent(rawPaste);
+
+  await act(async () => {
+    const input = textarea();
+    input.selectionStart = input.selectionEnd = 0;
+    input.dispatchEvent(event);
+    await flushTimers();
+  });
+
+  eq(event.defaultPrevented, true, "short text paste is handled by React state");
+  eq(textarea().value, normalizedPaste, "short multiline paste is visible in the composer");
+
+  await act(async () => {
+    sendButton().click();
+    await flushTimers();
+  });
+
+  eq(sent.length, 1, "short multiline paste submits once");
+  eq(sent[0]?.display, normalizedPaste, "short multiline paste is preserved in display text");
+  eq(sent[0]?.submit, normalizedPaste, "short multiline paste is preserved in submit text");
 
   await act(async () => {
     root.unmount();

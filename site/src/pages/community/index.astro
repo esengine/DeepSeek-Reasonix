@@ -1,0 +1,58 @@
+---
+import Community from "../../layouts/Community.astro";
+---
+<Community title="Reasonix Community" description="Ask questions, share skills, and shape a DeepSeek-native agent." active="discussions">
+  <section class="head">
+    <div class="wrap">
+      <div class="row">
+        <div>
+          <div class="eyebrow"><span class="l-en">Reasonix Community</span><span class="l-zh">Reasonix 社区</span></div>
+          <h1><span class="l-en">Discussions</span><span class="l-zh">讨论区</span></h1>
+          <p><span class="l-en">Ask questions, share skills, and shape a DeepSeek-native agent — with the makers and other builders.</span><span class="l-zh">提问、分享技能、一起打磨这个 DeepSeek 原生 Agent —— 和作者及其他构建者。</span></p>
+        </div>
+        <a class="btn btn-primary" href="/community/new/"><span class="l-en">✎ New topic</span><span class="l-zh">✎ 发起话题</span></a>
+      </div>
+    </div>
+  </section>
+
+  <div class="wrap layout">
+    <div>
+      <div class="sec-title"><h2><span class="l-en">Categories</span><span class="l-zh">分区</span></h2></div>
+      <div class="cats" id="cat-list">
+        <div class="cat"><span class="ico">·</span><div><h3><span class="l-en">Loading…</span><span class="l-zh">加载中…</span></h3></div></div>
+      </div>
+
+      <div class="sec-title">
+        <div class="tabs" id="sort-tabs">
+          <button class="on" data-sort="latest"><span class="l-en">Latest</span><span class="l-zh">最新</span></button>
+          <button data-sort="top"><span class="l-en">Top</span><span class="l-zh">热门</span></button>
+        </div>
+      </div>
+      <div class="topics" id="topic-list">
+        <div class="skeleton"><div class="bar"></div><div class="bar short"></div></div>
+        <div class="skeleton"><div class="bar"></div><div class="bar short"></div></div>
+        <div class="skeleton"><div class="bar"></div><div class="bar short"></div></div>
+      </div>
+    </div>
+
+    <aside class="side">
+      <div class="card cta">
+        <h4><span class="l-en">Start a discussion</span><span class="l-zh">发起讨论</span></h4>
+        <p class="lead"><span class="l-en">Ask a question or share what you built.</span><span class="l-zh">提个问题，或分享你做的东西。</span></p>
+        <a class="btn btn-primary" href="/community/new/"><span class="l-en">✎ New topic</span><span class="l-zh">✎ 发起话题</span></a>
+      </div>
+      <div class="card">
+        <h4 style="margin-bottom:14px"><span class="l-en">Community</span><span class="l-zh">社区</span></h4>
+        <div class="stats-grid" id="stats">
+          <div class="stat-box"><div class="n" id="s-topics">—</div><div class="l"><span class="l-en">topics</span><span class="l-zh">话题</span></div></div>
+          <div class="stat-box"><div class="n" id="s-cats">—</div><div class="l"><span class="l-en">categories</span><span class="l-zh">分区</span></div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h4 style="margin-bottom:14px"><span class="l-en">Guidelines</span><span class="l-zh">社区规范</span></h4>
+        <p class="lead"><span class="l-en">Be kind, search first, and keep code in fenced blocks. New accounts unlock links and more as they participate.</span><span class="l-zh">友善、先搜索、代码放进围栏块。新账号随参与逐步解锁发链接等权限。</span></p>
+        <a class="btn btn-ghost sm" href="/community/guidelines/"><span class="l-en">Read the guidelines</span><span class="l-zh">阅读规范</span></a>
+      </div>
+    </aside>
+  </div>
+</Community>

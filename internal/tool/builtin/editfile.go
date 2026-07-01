@@ -62,7 +62,7 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	case applied.matches == 0:
 		return "", oldStringNotFoundError(p.Path, p.OldString, content)
 	default:
-		return "", oldStringNotUniqueError(p.Path, applied.matches, false)
+		return "", oldStringNotUniqueError(p.Path, p.OldString, content, applied.matches, false)
 	}
 
 	if err := writeFileEncoded(p.Path, applied.updated, enc); err != nil {

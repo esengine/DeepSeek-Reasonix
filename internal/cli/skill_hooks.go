@@ -49,7 +49,7 @@ func (m *chatTUI) runSkillSubcommand(input string) {
 		m.skillPaths()
 	default:
 		hint := ""
-		if _, _, ok := m.ctrl.ResolveSkill("/" + args[1]); ok {
+		if _, ok := m.ctrl.RunSkill("/" + args[1]); ok {
 			hint = " (to run it, type /" + args[1] + ")"
 		}
 		m.notice("unknown /skills subcommand " + args[1] + hint + " — try: /skills, /skills manage, /skills show <name>, /skills enable <name>, /skills disable <name>, /skills new <name>, /skills paths")
@@ -270,17 +270,4 @@ func containsArg(args []string, flag string) bool {
 		}
 	}
 	return false
-}
-
-func (m *chatTUI) runSubagentsSubcommand(input string) {
-	m.echoLocalCommand(input)
-	args := tokenizeArgs(input)
-	if len(args) <= 1 {
-		m.openSubagents()
-		return
-	}
-	if m.ctrl == nil {
-		return
-	}
-	m.notice(m.ctrl.SubagentsText(input))
 }

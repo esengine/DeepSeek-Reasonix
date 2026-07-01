@@ -4,7 +4,7 @@ import { Tooltip } from "./Tooltip";
 import { useI18n, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
 import { normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
-import { type BalanceInfo, type ContextInfo, type WireUsage } from "../lib/types";
+import { type BalanceInfo, type ContextInfo, type UsageSourceStats, type WireUsage } from "../lib/types";
 
 type StatusBarLabelStyle = "icon" | "text";
 
@@ -17,8 +17,7 @@ function formatRate(hit: number, denom: number): string | null {
 // steeper number on a non-compacting DeepSeek session. null when nothing yet.
 function nowRate(u?: WireUsage): string | null {
   if (!u) return null;
-  let denom = u.cacheHitTokens + u.cacheMissTokens;
-  if (denom === 0) denom = u.promptTokens;
+  const denom = u.cacheHitTokens + u.cacheMissTokens;
   return formatRate(u.cacheHitTokens, denom);
 }
 
@@ -58,6 +57,59 @@ function formatTokenCount(tokens?: number): string {
 function formatTurnCount(turns: number | undefined, t: Translator): string {
   if (typeof turns !== "number" || turns < 0) return "-";
   return t(turns === 1 ? "history.turnOne" : "history.turnOther", { n: turns });
+}
+
+const STATUS_SOURCE_ORDER = ["executor", "planner", "subagent", "compaction", "classifier", "title"];
+
+function sourceLabel(source: string, t: Translator): string {
+  switch (source) {
+    case "executor": return t("context.sourceExecutor");
+    case "planner": return t("context.sourcePlanner");
+    case "subagent": return t("context.sourceSubagent");
+    case "compaction": return t("context.sourceCompaction");
+    case "classifier": return t("context.sourceClassifier");
+    case "title": return t("context.sourceTitle");
+    default: return source;
+  }
+}
+
+function sourceRows(sources?: Record<string, UsageSourceStats>): Array<{ source: string; stats: UsageSourceStats }> {
+  return Object.entries(sources ?? {})
+    .filter(([, stats]) =>
+      (stats.requestCount ?? 0) > 0 ||
+      (stats.promptTokens ?? 0) > 0 ||
+      (stats.completionTokens ?? 0) > 0 ||
+      (stats.cacheHitTokens ?? 0) > 0 ||
+      (stats.cacheMissTokens ?? 0) > 0
+    )
+    .sort(([a], [b]) => {
+      const ia = STATUS_SOURCE_ORDER.indexOf(a);
+      const ib = STATUS_SOURCE_ORDER.indexOf(b);
+      if (ia >= 0 || ib >= 0) return (ia >= 0 ? ia : STATUS_SOURCE_ORDER.length) - (ib >= 0 ? ib : STATUS_SOURCE_ORDER.length);
+      return a.localeCompare(b);
+    })
+    .map(([source, stats]) => ({ source, stats }));
+}
+
+function sourceCacheTooltip(t: Translator, title: string, context: ContextInfo): ReactNode {
+  const rows = sourceRows(context.sources);
+  if (rows.length === 0) return title;
+  return (
+    <span className="statusbar__tooltip-stack">
+      <span>{title}</span>
+      {rows.map(({ source, stats }) => {
+        const denom = stats.cacheHitTokens + stats.cacheMissTokens;
+        const rate = denom > 0 ? `${formatRate(stats.cacheHitTokens, denom)}%` : t("context.cacheNotReported");
+        return (
+          <span key={source}>
+            {sourceLabel(source, t)}: {rate} · {t("context.sourceInput")} {formatTokenCount(stats.promptTokens)}
+            {" · "}{t("context.sourceOutput")} {formatTokenCount(stats.completionTokens)}
+            {" · "}{t("context.sourceRequests", { count: stats.requestCount ?? 0 })}
+          </span>
+        );
+      })}
+    </span>
+  );
 }
 
 function MetricLabel({ style, icon, label }: { style: StatusBarLabelStyle; icon: ReactNode; label: string }) {
@@ -147,6 +199,8 @@ export function StatusBar({
   const balanceLabel = balance?.available && balance.display ? balance.display : "-";
   const metricLabelStyle = labelStyle === "text" ? "text" : "icon";
   const visibleItems = normalizeStatusBarItems(items);
+  const cacheTooltip = sourceCacheTooltip(t, t("status.cacheTitle"), context);
+  const avgCacheTooltip = sourceCacheTooltip(t, t("status.cacheAvgTitle"), context);
   const itemRenderers: Record<StatusBarItemId, ReactNode> = {
     model: (
       <Tooltip label={t("status.modelTitle")}>
@@ -173,7 +227,7 @@ export function StatusBar({
       </Tooltip>
     ) : null,
     cache: (
-      <Tooltip label={t("status.cacheTitle")} className="statusbar__metric statusbar__metric--cache">
+      <Tooltip label={cacheTooltip} className="statusbar__metric statusbar__metric--cache">
         <span className="stat statusbar__cache">
           <MetricLabel style={metricLabelStyle} icon={<Percent size={12} />} label={t("status.cacheLabel")} />
           <b className={rateValueClass(nowPct) || undefined}>{nowPct !== null ? `${nowPct}%` : "-"}</b>
@@ -181,7 +235,7 @@ export function StatusBar({
       </Tooltip>
     ),
     cache_avg: (
-      <Tooltip label={t("status.cacheAvgTitle")} className="statusbar__metric statusbar__metric--avg">
+      <Tooltip label={avgCacheTooltip} className="statusbar__metric statusbar__metric--avg">
         <span className="stat statusbar__avg">
           <MetricLabel style={metricLabelStyle} icon={<Activity size={12} />} label={t("status.cacheAvgLabel")} />
           <b className={rateValueClass(avgPct) || undefined}>{avgPct !== null ? `${avgPct}%` : "-"}</b>

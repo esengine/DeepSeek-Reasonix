@@ -1,6 +1,6 @@
 // Run: tsx src/__tests__/bridge-drag-rejection.test.ts
 
-import { isWailsNonFileDragError, isWailsNonFileDragErrorEvent } from "../lib/bridge";
+import { isTransientWailsIPCError, isWailsNonFileDragError, isWailsNonFileDragErrorEvent } from "../lib/bridge";
 
 let passed = 0;
 let failed = 0;
@@ -57,6 +57,21 @@ eq(
   isWailsNonFileDragErrorEvent({ message: "Uncaught TypeError: invalid argument", error: new TypeError("invalid argument") }, false),
   false,
   "keeps ErrorEvent invalid argument visible without a recent native file drag",
+);
+eq(
+  isTransientWailsIPCError(new DOMException("Failed to execute 'send' on 'WebSocket': Still in CONNECTING state.", "InvalidStateError")),
+  true,
+  "suppresses Wails IPC calls made before the websocket is open",
+);
+eq(
+  isTransientWailsIPCError(new TypeError("Cannot read properties of null (reading 'send')")),
+  true,
+  "suppresses Wails IPC calls made after the websocket is torn down",
+);
+eq(
+  isTransientWailsIPCError(new Error("backend returned an application error")),
+  false,
+  "keeps ordinary bridge failures visible",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

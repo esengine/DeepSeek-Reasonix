@@ -14,7 +14,6 @@ type Event struct {
 	MemoryCitations []MemoryCitation `json:"memoryCitations,omitempty"`
 	MemoryCompiler  *MemoryCompiler  `json:"memoryCompiler,omitempty"`
 	Level           string           `json:"level,omitempty"`
-	Subagent        *Subagent        `json:"subagent,omitempty"`
 	Tool            *Tool            `json:"tool,omitempty"`
 	Usage           *Usage           `json:"usage,omitempty"`
 	Approval        *Approval        `json:"approval,omitempty"`
@@ -29,15 +28,6 @@ type Event struct {
 // ToWire converts a typed runtime event into the shared frontend JSON contract.
 func ToWire(e event.Event) Event {
 	w := Event{Kind: kindNames[e.Kind], Text: e.Text, Reasoning: e.Reasoning}
-	if e.Subagent != nil {
-		w.Subagent = &Subagent{
-			ID:    e.Subagent.ID,
-			Skill: e.Subagent.Skill,
-			Alias: e.Subagent.Alias,
-			State: string(e.Subagent.State),
-			Error: e.Subagent.Error,
-		}
-	}
 	if len(e.MemoryCitations) > 0 {
 		w.MemoryCitations = ToWireMemoryCitations(e.MemoryCitations)
 	}
@@ -119,15 +109,6 @@ func ToWire(e event.Event) Event {
 		w.RetryMax = e.RetryMax
 	}
 	return w
-}
-
-// Subagent is the JSON form of event.Subagent.
-type Subagent struct {
-	ID    string `json:"id,omitempty"`
-	Skill string `json:"skill,omitempty"`
-	Alias string `json:"alias,omitempty"`
-	State string `json:"state,omitempty"`
-	Error string `json:"error,omitempty"`
 }
 
 // MemoryCitation is the JSON form of provider.MemoryCitation.

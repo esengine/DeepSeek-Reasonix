@@ -265,10 +265,39 @@ func TestEditFileOldStringNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for old_string not found")
 	}
+	if !strings.Contains(err.Error(), "Re-read the current file") {
+		t.Fatalf("not-found error should include recovery hint, got: %v", err)
+	}
 	// File should be unchanged.
 	got, _ := os.ReadFile(f)
 	if string(got) != "hello world" {
 		t.Errorf("file modified despite error: %q", got)
+	}
+}
+
+func TestEditFileNotUniqueReportsMatchingLines(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "map.html")
+	separator := "    // ═══════════════════════════════════════"
+	body := strings.Join([]string{
+		separator,
+		"const a = 1;",
+		separator,
+		"const b = 2;",
+		separator,
+		"",
+	}, "\n")
+	os.WriteFile(f, []byte(body), 0o644)
+
+	_, err := editFile{}.Execute(context.Background(), argsJSON(t, map[string]any{
+		"path": f, "old_string": separator, "new_string": "// section",
+	}))
+	if err == nil {
+		t.Fatal("expected not-unique error")
+	}
+	for _, want := range []string{"not unique", "matching lines include 1, 3, 5", "repeated separator lines"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q: %v", want, err)
+		}
 	}
 }
 
@@ -345,6 +374,11 @@ func TestMultiEditStepNotFound(t *testing.T) {
 	}))
 	if err == nil {
 		t.Fatal("expected error for missing edit step")
+	}
+	for _, want := range []string{"edit 2", "Re-read the current file"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("multi_edit error should mention %q, got: %v", want, err)
+		}
 	}
 	// File should be unchanged (atomicity).
 	got, _ := os.ReadFile(f)

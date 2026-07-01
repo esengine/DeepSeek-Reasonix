@@ -196,5 +196,34 @@ console.log("\napproval modal file references");
   dom.window.close();
 }
 
+{
+  const dom = installDom();
+  mockApp({
+    ListDir: async () => [],
+    SearchFileRefs: async () => [],
+  });
+  const { root } = await renderApproval({
+    approval: {
+      id: "tool-approval",
+      tool: "bash",
+      subject: "npm run build\n\nRun the build command to verify frontend artifacts.",
+    },
+  });
+
+  const subject = document.querySelector(".approval-subject");
+  ok(subject != null, "tool approval shows its full subject by default");
+  eq(
+    subject?.textContent,
+    "npm run build\n\nRun the build command to verify frontend artifacts.",
+    "default-open tool approval keeps the complete subject visible",
+  );
+  ok(document.body.textContent?.includes("Hide") === true, "tool approval details start expanded");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

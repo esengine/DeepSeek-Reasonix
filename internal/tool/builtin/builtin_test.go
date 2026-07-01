@@ -192,6 +192,8 @@ func TestEditFile(t *testing.T) {
 	args := argsJSON(t, map[string]any{"path": f, "old_string": "x", "new_string": "y"})
 	if _, err := (editFile{}).Execute(context.Background(), args); err == nil {
 		t.Fatal("expected not-unique error")
+	} else if !strings.Contains(err.Error(), "repeated separator lines") {
+		t.Fatalf("not-unique error should steer away from weak anchors, got: %v", err)
 	}
 	if b, _ := os.ReadFile(f); string(b) != "x x x" {
 		t.Fatalf("file modified despite error: %q", b)

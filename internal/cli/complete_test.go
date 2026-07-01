@@ -491,7 +491,7 @@ func TestSlashArgCompletionMemoryV5(t *testing.T) {
 	if !m.completion.active || m.completion.kind != compSlashArg {
 		t.Fatalf("/memory-v5 should open arg completion: %+v", m.completion)
 	}
-	for _, want := range []string{"status", "off", "on"} {
+	for _, want := range []string{"status", "off", "observe", "compact", "on"} {
 		if !hasLabel(m.completion.items, want) {
 			t.Fatalf("/memory-v5 completion missing %q: %v", want, labels(m.completion.items))
 		}

@@ -15,7 +15,9 @@ import (
 	"reasonix/internal/command"
 	"reasonix/internal/event"
 	"reasonix/internal/memory"
+	"reasonix/internal/provider"
 	"reasonix/internal/skill"
+	"reasonix/internal/tool"
 )
 
 type fakeAutoPlanClassifier struct {
@@ -94,6 +96,134 @@ func TestSkillsReflectStoreChangesAfterControllerBuild(t *testing.T) {
 	if !strings.Contains(sent, "Hot body") || !strings.Contains(sent, "Arguments: now") {
 		t.Fatalf("rendered skill = %q", sent)
 	}
+}
+
+func TestRunSkillCommandSubagentUsesRunner(t *testing.T) {
+	project := t.TempDir()
+	home := t.TempDir()
+	store := skill.New(skill.Options{HomeDir: home, ProjectRoot: project, DisableBuiltins: true})
+	writeControlSkill(t, project, ".reasonix/skills/scout/SKILL.md", "---\nname: scout\ndescription: Scout\nrunAs: subagent\n---\nScout body")
+	session := agent.NewSession("sys")
+	exec := agent.New(nil, tool.NewRegistry(), session, agent.Options{}, event.Discard)
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	events := make(chan event.Event, 8)
+	var gotName, gotTask, gotParent, gotResponseLang, gotReasoningLang string
+	runner := func(ctx context.Context, sk skill.Skill, task string, _ skill.SubagentRunOptions) (string, error) {
+		gotName = sk.Name
+		gotTask = task
+		gotParent = agent.ParentSession(ctx)
+		gotResponseLang = agent.ResponseLanguageFromContext(ctx)
+		gotReasoningLang = agent.ReasoningLanguageFromContext(ctx)
+		return "child answer", nil
+	}
+	c := New(Options{
+		Executor:          exec,
+		SkillStore:        store,
+		Skills:            store.List(),
+		SkillRunner:       runner,
+		SessionPath:       sessionPath,
+		ResponseLanguage:  "en",
+		ReasoningLanguage: "zh",
+		Sink: event.FuncSink(func(e event.Event) {
+			events <- e
+		}),
+	})
+
+	sent, found, handled := c.RunSkillCommand("/scout inspect auth", "/scout inspect auth")
+	if !found || !handled || sent != "" {
+		t.Fatalf("RunSkillCommand = sent %q found %v handled %v, want handled subagent", sent, found, handled)
+	}
+	seen := collectTurnEvents(t, events)
+	if gotName != "scout" {
+		t.Fatalf("runner skill = %q, want scout", gotName)
+	}
+	if !strings.Contains(gotTask, "inspect auth") {
+		t.Fatalf("runner task = %q, want composed task containing arguments", gotTask)
+	}
+	if gotParent != agent.BranchID(sessionPath) {
+		t.Fatalf("parent session = %q, want %q", gotParent, agent.BranchID(sessionPath))
+	}
+	if gotResponseLang != "en" || gotReasoningLang != "zh" {
+		t.Fatalf("languages = response %q reasoning %q, want en/zh", gotResponseLang, gotReasoningLang)
+	}
+	assertSawEvent(t, seen, event.TurnStarted, "")
+	assertSawEvent(t, seen, event.Text, "child answer")
+	assertSawEvent(t, seen, event.Message, "child answer")
+	msgs := session.Snapshot()
+	if len(msgs) < 3 {
+		t.Fatalf("session messages = %+v, want system plus user/assistant", msgs)
+	}
+	user := msgs[len(msgs)-2]
+	assistant := msgs[len(msgs)-1]
+	if user.Role != provider.RoleUser || user.Content != "/scout inspect auth" {
+		t.Fatalf("user message = %+v, want slash command recorded", user)
+	}
+	if assistant.Role != provider.RoleAssistant || assistant.Content != "child answer" {
+		t.Fatalf("assistant message = %+v, want child answer recorded", assistant)
+	}
+}
+
+func TestRunSkillCommandSubagentRequiresArguments(t *testing.T) {
+	project := t.TempDir()
+	home := t.TempDir()
+	store := skill.New(skill.Options{HomeDir: home, ProjectRoot: project, DisableBuiltins: true})
+	writeControlSkill(t, project, ".reasonix/skills/scout/SKILL.md", "---\nname: scout\ndescription: Scout\nrunAs: subagent\n---\nScout body")
+	events := make(chan event.Event, 4)
+	called := false
+	c := New(Options{
+		SkillStore: store,
+		Skills:     store.List(),
+		SkillRunner: func(context.Context, skill.Skill, string, skill.SubagentRunOptions) (string, error) {
+			called = true
+			return "", nil
+		},
+		Sink: event.FuncSink(func(e event.Event) {
+			events <- e
+		}),
+	})
+
+	sent, found, handled := c.RunSkillCommand("/scout", "/scout")
+	if !found || !handled || sent != "" {
+		t.Fatalf("RunSkillCommand = sent %q found %v handled %v, want handled validation error", sent, found, handled)
+	}
+	seen := collectTurnEvents(t, events)
+	if called {
+		t.Fatal("runner should not be called without arguments")
+	}
+	assertSawEvent(t, seen, event.Notice, "requires arguments")
+}
+
+func collectTurnEvents(t *testing.T, events <-chan event.Event) []event.Event {
+	t.Helper()
+	var seen []event.Event
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case e := <-events:
+			seen = append(seen, e)
+			if e.Kind == event.TurnDone {
+				if e.Err != nil {
+					t.Fatalf("turn finished with error: %v", e.Err)
+				}
+				return seen
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for turn_done; seen=%+v", seen)
+		}
+	}
+}
+
+func assertSawEvent(t *testing.T, events []event.Event, kind event.Kind, text string) {
+	t.Helper()
+	for _, e := range events {
+		if e.Kind != kind {
+			continue
+		}
+		if text == "" || strings.Contains(e.Text, text) {
+			return
+		}
+	}
+	t.Fatalf("missing event kind %v containing %q in %+v", kind, text, events)
 }
 
 func writeControlSkill(t *testing.T, root, rel, body string) {
@@ -263,15 +393,19 @@ func TestComposeIncludesActiveGoal(t *testing.T) {
 }
 
 func TestGoalAutoResearchTriggersForLongHorizonGoals(t *testing.T) {
-	c := New(Options{})
+	root := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	c := New(Options{WorkspaceRoot: root})
 	c.SetGoal("持续排查这个线上卡顿直到根因明确，并验证修复")
 
 	got := c.Compose("next step?")
 	for _, want := range []string{
 		"AutoResearch protocol",
-		".reasonix/autoresearch/<task-id>/",
-		"YYYYMMDD-HHMMSS-slug",
-		"state/task_spec.md",
+		"<autoresearch-runtime>",
+		"task_id:",
+		"pivot_required:",
 		"stale_count >= 2",
 		"durable strategy for this Goal",
 	} {

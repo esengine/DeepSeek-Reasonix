@@ -1,4 +1,4 @@
-import { Minus, PanelLeft, PanelRight, Search, Square, X } from "lucide-react";
+import { PanelLeft, PanelRight, Search } from "lucide-react";
 import { TabBar } from "./TabBar";
 import type { TabMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
@@ -58,14 +58,12 @@ export function AppChrome({
 }: AppChromeProps) {
   const t = useT();
   const darwinChrome = platform === "darwin";
-  const showWindowsPreviewControls = browserPreviewChrome && platform === "windows";
   const chromeClassName = [
     "app-chrome",
     "app-chrome--tabs",
     darwinChrome ? "app-chrome--darwin-tabs" : "app-chrome--native-tabs",
     workbenchChrome ? "app-chrome--workbench" : "",
     !darwinChrome ? "app-chrome--identityless" : "",
-    showWindowsPreviewControls ? "app-chrome--preview-window-controls" : "",
     `app-chrome--platform-${platform}`,
   ].filter(Boolean).join(" ");
   const tabBar = (
@@ -193,19 +191,6 @@ export function AppChrome({
         >
           <PanelRight size={16} />
         </button>
-      )}
-      {showWindowsPreviewControls && (
-        <div className="app-chrome__window-controls app-chrome__window-controls--windows" aria-hidden="true">
-          <span className="app-chrome__window-control app-chrome__window-control--minimize">
-            <Minus size={12} strokeWidth={1.9} />
-          </span>
-          <span className="app-chrome__window-control app-chrome__window-control--maximize">
-            <Square size={10} strokeWidth={1.8} />
-          </span>
-          <span className="app-chrome__window-control app-chrome__window-control--close">
-            <X size={12} strokeWidth={1.9} />
-          </span>
-        </div>
       )}
     </header>
   );

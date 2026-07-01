@@ -161,7 +161,7 @@ ok(
 
 eq(finalDeclaration(".composer-modebar", "overflow"), "hidden", "chat mode switcher contains enlarged labels");
 ok(
-  /@container\s*\(max-width:\s*760px\)[\s\S]*?\.composer-meta--has-intent-chip\s+\.composer-meta__control--model\s*\{[\s\S]*?flex\s*:\s*1 1 160px[\s\S]*?\.composer-meta__control--effort\s*\{[\s\S]*?display\s*:\s*none[\s\S]*?\.composer-meta__control--more\s*\{[\s\S]*?display\s*:\s*inline-flex/.test(styles),
+  /@container\s*\(max-width:\s*760px\)[\s\S]*?\.composer-meta__control--model\s*\{[\s\S]*?flex\s*:\s*0 1 auto[\s\S]*?width\s*:\s*fit-content[\s\S]*?max-width\s*:\s*min\(240px,\s*42vw\)[\s\S]*?\.composer-meta--has-intent-chip\s+\.composer-meta__control--model\s*\{[\s\S]*?flex\s*:\s*0 1 auto[\s\S]*?width\s*:\s*fit-content[\s\S]*?max-width\s*:\s*min\(220px,\s*38vw\)[\s\S]*?\.composer-meta__control--effort\s*\{[\s\S]*?display\s*:\s*none[\s\S]*?\.composer-meta__control--more\s*\{[\s\S]*?display\s*:\s*inline-flex/.test(styles),
   "composer compact controls activate at the capped theme width",
 );
 eq(finalDeclaration(".md table", "overflow-x"), "auto", "markdown tables scroll horizontally");
@@ -177,6 +177,10 @@ ok(
 ok(
   /@media\s*\(max-width:\s*760px\)[\s\S]*?\.settings-modal\s*\{[\s\S]*?width\s*:\s*100vw[\s\S]*?height\s*:\s*100vh/.test(styles),
   "settings modal only becomes fullscreen at the narrow breakpoint",
+);
+ok(
+  /@media\s*\(max-width:\s*820px\)[\s\S]*?\.app\s+\.layout[\s\S]*?grid-template-columns\s*:\s*minmax\(0,\s*1fr\)\s*!important[\s\S]*?\.app\s+\.sidebar[\s\S]*?display\s*:\s*none\s*!important[\s\S]*?\.app\s+\.chat-pane[\s\S]*?grid-column\s*:\s*1\s*!important/.test(styles),
+  "narrow workbench layout hides side panels and keeps chat single-column",
 );
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

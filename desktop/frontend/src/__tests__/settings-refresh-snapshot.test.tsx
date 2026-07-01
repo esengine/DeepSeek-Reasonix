@@ -4,7 +4,12 @@ import { JSDOM } from "jsdom";
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { SettingsPanel } from "../components/SettingsPanel";
+import {
+  SettingsPanel,
+  providerBaseURLFromChatURL,
+  providerChatURLPreview,
+  providerEditorEffectiveKind,
+} from "../components/SettingsPanel";
 import { LocaleProvider } from "../lib/i18n";
 import type { AppBindings } from "../lib/bridge";
 import type { SettingsView } from "../lib/types";
@@ -90,6 +95,12 @@ function baseSettings(displayMode: "standard" | "compact" = "standard"): Setting
 }
 
 console.log("\nsettings refresh snapshot");
+
+eq(providerEditorEffectiveKind(true, "anthropic", ["anthropic", "openai"]), "openai", "new custom providers ignore sorted providerKinds and default to OpenAI");
+eq(providerEditorEffectiveKind(false, "anthropic", ["anthropic", "openai"]), "anthropic", "existing providers preserve their stored kind");
+eq(providerChatURLPreview("https://proxy.example.com/v1", "", false), "https://proxy.example.com/v1/chat/completions", "base URL mode previews chat completions URL");
+eq(providerChatURLPreview("", "https://proxy.example.com/custom/chat", true), "https://proxy.example.com/custom/chat", "full URL mode previews configured URL");
+eq(providerBaseURLFromChatURL("https://proxy.example.com/v1/chat/completions"), "https://proxy.example.com/v1", "chat URL derives base URL for model discovery");
 
 const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
   pretendToBeVisual: true,

@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"reasonix/internal/command"
 	"reasonix/internal/config"
 	"reasonix/internal/hook"
 	"reasonix/internal/i18n"
@@ -40,16 +39,15 @@ type ArgData struct {
 	CurrentModel    string
 	ProviderNames   []string
 	CurrentProvider string
-	Subagents       []SubagentSummary
 }
 
 // SlashArgItems completes the arguments of a management slash command
 // (everything after the command word). It returns the suggestions filtered by
 // the token being typed and the byte offset where that token begins, so a caller
 // replaces just that token. Only structured commands participate (/mcp /model
-// /skills /hooks /subagents /effort /auto-plan /goal /reasoning-language
-// /memory-v5 /theme /language); others yield nil. Single source of truth for
-// CLI + desktop.
+// /skills /hooks /effort /auto-plan /goal /reasoning-language /memory-v5
+// /theme /language);
+// others yield nil. Single source of truth for CLI + desktop.
 func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 	cmdEnd := strings.IndexAny(line, " \t")
 	if cmdEnd < 0 {
@@ -70,8 +68,6 @@ func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 		raw = skillArgItems(prior, d)
 	case "/hooks":
 		raw = hooksArgItems(prior)
-	case "/subagents":
-		raw = subagentsArgItems(prior, d)
 	case "/effort":
 		raw = effortArgItems(prior, d)
 	case "/auto-plan":
@@ -132,7 +128,9 @@ func memoryV5ArgItems(prior []string) []SlashItem {
 	return []SlashItem{
 		{Label: "status", Insert: "status", Hint: "show current Memory v5 state"},
 		{Label: "off", Insert: "off", Hint: "disable Memory v5 for future turns"},
-		{Label: "on", Insert: "on", Hint: "enable Memory v5 for future turns"},
+		{Label: "observe", Insert: "observe", Hint: "learn without injecting IR"},
+		{Label: "compact", Insert: "compact", Hint: "inject compact execution contracts"},
+		{Label: "on", Insert: "on", Hint: "alias for compact"},
 	}
 }
 
@@ -356,41 +354,6 @@ func hooksArgItems(prior []string) []SlashItem {
 	return nil
 }
 
-func subagentsArgItems(prior []string, d ArgData) []SlashItem {
-	if len(prior) <= 1 {
-		return []SlashItem{
-			{Label: "cancel", Insert: "cancel ", Hint: i18n.M.ArgSubagentsCancel, Descend: true},
-			{Label: "clear", Insert: "clear ", Hint: i18n.M.ArgSubagentsClear, Descend: true},
-		}
-	}
-	switch prior[1] {
-	case "cancel":
-		if len(prior) != 2 {
-			return nil
-		}
-		var items []SlashItem
-		for _, s := range d.Subagents {
-			label := strings.TrimSpace(s.Alias)
-			if label == "" {
-				label = s.ID
-			}
-			items = append(items, SlashItem{Label: label, Insert: label, Hint: s.Skill})
-		}
-		return items
-	case "clear":
-		if len(prior) != 2 {
-			return nil
-		}
-		return []SlashItem{
-			{Label: "completed", Insert: "completed", Hint: subagentClearStateHint("completed")},
-			{Label: "failed", Insert: "failed", Hint: subagentClearStateHint("failed")},
-			{Label: "canceled", Insert: "canceled", Hint: subagentClearStateHint("canceled")},
-			{Label: "all", Insert: "all", Hint: subagentClearStateHint("all")},
-		}
-	}
-	return nil
-}
-
 // filterSlash keeps items whose label starts with the typed token (case-
 // insensitive) and drops no-op suggestions — ones whose insert wouldn't change
 // the line because the token is already fully typed (e.g. "/skills list" offering
@@ -486,8 +449,6 @@ func (c *Controller) managementNotice(trimmed string) bool {
 		default:
 			c.notice("unknown /hooks subcommand " + fields[1] + " — try: /hooks, /hooks trust")
 		}
-	case "/subagents":
-		c.notice(c.subagentsText(fields))
 	case "/mcp":
 		if len(fields) >= 3 && fields[1] == "connect" {
 			n, err := c.ConnectConfiguredMCPServer(fields[2])
@@ -507,7 +468,7 @@ func (c *Controller) managementNotice(trimmed string) bool {
 
 func (c *Controller) memoryV5Notice(fields []string) {
 	if len(fields) > 2 {
-		c.notice("usage: /memory-v5 off|on|status")
+		c.notice("usage: /memory-v5 off|observe|compact|on|status")
 		return
 	}
 	if len(fields) < 2 || strings.EqualFold(fields[1], "status") {
@@ -516,14 +477,14 @@ func (c *Controller) memoryV5Notice(fields []string) {
 			c.notice("memory-v5: " + err.Error())
 			return
 		}
-		c.notice(fmt.Sprintf("memory-v5: %s (usage: /memory-v5 off|on|status)", memoryV5Mode(cfg.MemoryCompilerEnabled())))
+		c.notice(fmt.Sprintf("memory-v5: %s (usage: /memory-v5 off|observe|compact|on|status)", memoryV5Mode(cfg.MemoryCompilerEnabled(), cfg.MemoryCompilerVerbosity())))
 		return
 	}
 	if c.Running() {
 		c.notice("finish or cancel the current turn before changing memory-v5")
 		return
 	}
-	enabled, err := parseMemoryV5Mode(fields[1])
+	setting, err := parseMemoryV5Setting(fields[1])
 	if err != nil {
 		c.notice("memory-v5: " + err.Error())
 		return
@@ -534,34 +495,51 @@ func (c *Controller) memoryV5Notice(fields []string) {
 		return
 	}
 	edit := config.LoadForEdit(path)
-	if err := edit.SetMemoryCompilerEnabled(enabled); err != nil {
+	if err := edit.SetMemoryCompilerEnabled(setting.enabled); err != nil {
 		c.notice("memory-v5: " + err.Error())
 		return
+	}
+	if setting.setVerbosity {
+		if err := edit.SetMemoryCompilerVerbosity(setting.verbosity); err != nil {
+			c.notice("memory-v5: " + err.Error())
+			return
+		}
 	}
 	if err := edit.SaveTo(path); err != nil {
 		c.notice("memory-v5: " + err.Error())
 		return
 	}
-	c.SetMemoryCompilerEnabled(enabled)
-	c.notice(fmt.Sprintf("memory-v5 set to %s", memoryV5Mode(enabled)))
+	c.SetMemoryCompilerEnabled(setting.enabled)
+	if setting.setVerbosity {
+		c.SetMemoryCompilerVerbosity(setting.verbosity)
+	}
+	c.notice(fmt.Sprintf("memory-v5 set to %s", memoryV5Mode(edit.MemoryCompilerEnabled(), edit.MemoryCompilerVerbosity())))
 }
 
-func parseMemoryV5Mode(mode string) (bool, error) {
+type memoryV5Setting struct {
+	enabled      bool
+	verbosity    string
+	setVerbosity bool
+}
+
+func parseMemoryV5Setting(mode string) (memoryV5Setting, error) {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "on":
-		return true, nil
 	case "off":
-		return false, nil
+		return memoryV5Setting{enabled: false}, nil
+	case "observe", "silent", "minimal":
+		return memoryV5Setting{enabled: true, verbosity: config.MemoryCompilerVerbosityObserve, setVerbosity: true}, nil
+	case "on", "compact", "inject", "contract":
+		return memoryV5Setting{enabled: true, verbosity: config.MemoryCompilerVerbosityCompact, setVerbosity: true}, nil
 	default:
-		return false, fmt.Errorf("memory-v5 %q: must be off|on|status", mode)
+		return memoryV5Setting{}, fmt.Errorf("memory-v5 %q: must be off|observe|compact|on|status", mode)
 	}
 }
 
-func memoryV5Mode(enabled bool) string {
-	if enabled {
-		return "on"
+func memoryV5Mode(enabled bool, verbosity string) string {
+	if !enabled {
+		return "off"
 	}
-	return "off"
+	return config.NormalizeMemoryCompilerVerbosity(verbosity)
 }
 
 func (c *Controller) modelListText() string {
@@ -695,59 +673,6 @@ func memoryDisplayTitle(title, name string) string {
 
 func memoryOneLine(s string) string {
 	return strings.Join(strings.Fields(s), " ")
-}
-
-func (c *Controller) SubagentsText(input string) string {
-	return c.subagentsText(command.TokenizeArgs(input))
-}
-
-func (c *Controller) subagentsText(fields []string) string {
-	sub := ""
-	if len(fields) > 1 {
-		sub = strings.ToLower(fields[1])
-	}
-	switch sub {
-	case "cancel":
-		if len(fields) < 3 {
-			return i18n.M.SubagentsUsageCancel
-		}
-		run, err := c.resolveSubagentRef(fields[2])
-		if err != nil {
-			return err.Error()
-		}
-		if run.ID == "" {
-			return fmt.Sprintf(i18n.M.SubagentNotFoundFmt, fields[2])
-		}
-		c.CancelSubagent(run.ID)
-		return fmt.Sprintf(i18n.M.SubagentCanceledFmt, run.Alias)
-	case "clear":
-		state, ok := normalizeSubagentClearState("completed")
-		if len(fields) > 2 {
-			state, ok = normalizeSubagentClearState(fields[2])
-		}
-		if !ok {
-			return i18n.M.SubagentsUsageClear
-		}
-		c.ClearSubagents(state)
-		if state == "all" {
-			return i18n.M.SubagentsClearedAll
-		}
-		return fmt.Sprintf(i18n.M.SubagentsClearedFmt, subagentClearStateText(state))
-	case "":
-		summaries := c.ListSubagents()
-		if len(summaries) == 0 {
-			return i18n.M.SubagentsNone
-		}
-		var b strings.Builder
-		fmt.Fprintf(&b, i18n.M.SubagentsTextHeaderFmt+"\n", len(summaries))
-		for _, s := range summaries {
-			state := SubagentStateText(s.State)
-			fmt.Fprintf(&b, "  %s /%s — %s (%s)\n", s.Alias, s.Skill, state, s.PromptPreview)
-		}
-		return strings.TrimRight(b.String(), "\n")
-	default:
-		return i18n.M.SubagentsUsage
-	}
 }
 
 func (c *Controller) skillListText() string {

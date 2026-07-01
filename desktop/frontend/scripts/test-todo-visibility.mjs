@@ -16,7 +16,16 @@ const transpiled = ts.transpileModule(source, {
 }).outputText;
 
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(transpiled).toString("base64")}`;
-const { shouldShowTodoPanel, todoDismissalKey } = await import(moduleUrl);
+const {
+  dismissedTodoKeyForScope,
+  scopedTodoBatchKey,
+  scopedTodoDismissalKey,
+  shouldOpenTodoPanelByDefault,
+  shouldShowTodoPanel,
+  todoBatchKey,
+  todoDismissalKey,
+  todoPanelScope,
+} = await import(moduleUrl);
 
 const completedTodos = [
   { content: "Inspect the report", status: "completed" },
@@ -42,6 +51,66 @@ assert.equal(
   false,
   "a user dismissal still hides that exact todo list",
 );
+const completedKey = todoDismissalKey(completedTodos);
+const dismissedBySession = new Set([scopedTodoDismissalKey("session:a", completedKey)]);
+assert.equal(
+  shouldShowTodoPanel(completedKey, dismissedTodoKeyForScope("session:a", dismissedBySession, completedKey), completedTodos),
+  false,
+  "a completed todo dismissal hides the list in the session where it was closed",
+);
+assert.equal(
+  shouldShowTodoPanel(completedKey, dismissedTodoKeyForScope("session:b", dismissedBySession, completedKey), completedTodos),
+  true,
+  "a completed todo dismissal in one session does not hide another session's list",
+);
+dismissedBySession.add(scopedTodoDismissalKey("session:b", completedKey));
+assert.equal(
+  shouldShowTodoPanel(completedKey, dismissedTodoKeyForScope("session:a", dismissedBySession, completedKey), completedTodos),
+  false,
+  "closing another session's todo does not forget the first session dismissal",
+);
+assert.equal(
+  todoPanelScope({
+    activeTabId: "tab-a",
+    activeTab: {
+      id: "tab-a",
+      scope: "project",
+      workspaceRoot: "/repo",
+      topicId: "topic-a",
+      sessionPath: "/sessions/a.jsonl",
+    },
+  }),
+  "session:/sessions/a.jsonl",
+  "a restored history session uses its session path as the todo panel scope",
+);
+assert.equal(
+  todoPanelScope({
+    activeTabId: "tab-b",
+    activeTab: {
+      id: "tab-a",
+      scope: "project",
+      workspaceRoot: "/repo",
+      topicId: "topic-a",
+      sessionPath: "/sessions/a.jsonl",
+    },
+    eventChannel: "desktop-events",
+  }),
+  "tab:tab-b",
+  "a stale active-tab fallback must not scope dismissal to the previous session",
+);
+assert.equal(
+  todoPanelScope({
+    activeTabId: "tab-c",
+    activeTab: {
+      id: "tab-c",
+      scope: "project",
+      workspaceRoot: "/repo",
+      topicId: "topic-a",
+    },
+  }),
+  "tab:tab-c",
+  "an unsaved topic session uses its tab id so sibling sessions do not share todo state",
+);
 assert.equal(shouldShowTodoPanel(null, null, completedTodos), false, "no canonical todo item means no panel");
 assert.equal(shouldShowTodoPanel("todo-empty", null, []), false, "empty todo lists do not render a panel");
 
@@ -60,6 +129,36 @@ assert.notEqual(
   activeKey,
   todoDismissalKey([{ ...activeTodos[0], status: "completed" }, { ...activeTodos[1], status: "in_progress" }]),
   "real progress produces a fresh dismissal key",
+);
+assert.equal(
+  todoBatchKey(activeTodos),
+  todoBatchKey([{ ...activeTodos[0], status: "completed" }, { ...activeTodos[1], status: "in_progress" }]),
+  "status progress stays in the same todo batch",
+);
+assert.equal(
+  scopedTodoBatchKey("session:a", todoBatchKey(activeTodos)),
+  scopedTodoBatchKey("session:a", todoBatchKey([{ ...activeTodos[0], status: "completed" }, { ...activeTodos[1], status: "in_progress" }])),
+  "status progress keeps the same scoped open-state key",
+);
+assert.notEqual(
+  scopedTodoBatchKey("session:a", todoBatchKey(activeTodos)),
+  scopedTodoBatchKey("session:b", todoBatchKey(activeTodos)),
+  "the same task list in a different session gets isolated open state",
+);
+assert.notEqual(
+  todoBatchKey(activeTodos),
+  todoBatchKey([{ content: "Run a different task", status: "in_progress" }]),
+  "new task content creates a new todo batch",
+);
+assert.equal(
+  shouldOpenTodoPanelByDefault(activeTodos),
+  true,
+  "new incomplete todo batches open by default",
+);
+assert.equal(
+  shouldOpenTodoPanelByDefault(completedTodos),
+  false,
+  "completed todo batches collapse by default",
 );
 
 const iterations = 200_000;

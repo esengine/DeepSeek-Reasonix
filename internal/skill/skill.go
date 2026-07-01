@@ -17,7 +17,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -70,36 +69,6 @@ type Skill struct {
 
 // IsValidName reports whether name is a usable skill identifier.
 func IsValidName(name string) bool { return config.IsValidSkillName(name) }
-
-// IsAgent reports whether a skill originated from an agents directory. Agent
-// files always execute as subagents regardless of frontmatter.
-func IsAgent(sk Skill) bool { return isAgentPath(sk.Path) }
-
-func isAgentPath(path string) bool {
-	if path == "" || path == "(builtin)" {
-		return false
-	}
-	normalized := strings.ReplaceAll(path, "\\", "/")
-	parts := strings.FieldsFunc(normalized, func(r rune) bool { return r == '/' })
-	for i := 0; i+1 < len(parts); i++ {
-		if (parts[i] == ".reasonix" || parts[i] == ".claude") && parts[i+1] == "agents" {
-			return true
-		}
-	}
-	return false
-}
-
-func forceAgentRunAs(sk Skill) Skill {
-	if isAgentPath(sk.Path) {
-		sk.RunAs = RunSubagent
-	}
-	return sk
-}
-
-// validAgentName allows CJK characters used by agent directories from other tools.
-var validAgentNameRe = regexp.MustCompile(`^[\p{Han}a-zA-Z0-9_./-]{1,64}$`)
-
-func validAgentName(name string) bool { return validAgentNameRe.MatchString(name) }
 
 // Options configure a Store. ProjectRoot "" reads only the global + custom
 // scopes. HomeDir "" resolves to the OS home dir (tests point it at a tmpdir).
@@ -224,9 +193,6 @@ func (s *Store) roots() []discoveryRoot {
 	if s.projectRoot != "" {
 		for _, c := range config.ConventionDirs {
 			dirs = append(dirs, de{filepath.Join(s.projectRoot, c, SkillsDirname), ScopeProject, c == ".claude"})
-		}
-		for _, d := range config.AgentDirs() {
-			dirs = append(dirs, de{filepath.Join(s.projectRoot, d), ScopeProject, false})
 		}
 	}
 	for _, d := range s.customPaths {
@@ -463,21 +429,12 @@ func (s *Store) readEntry(dir string, scope Scope, requireFlatMarker bool, e os.
 		if _, err := os.Stat(file); err != nil {
 			return Skill{}, false // a directory without a SKILL.md is not a skill
 		}
-		sk, ok := s.parse(file, name, scope)
-		return forceAgentRunAs(sk), ok
+		return s.parse(file, name, scope)
 	}
 	if isFile && strings.EqualFold(filepath.Ext(name), ".md") {
 		stem := strings.TrimSuffix(name, filepath.Ext(name))
-		if filepath.Base(dir) == "agents" {
-			if !validAgentName(stem) {
-				return Skill{}, false
-			}
-		} else if !IsValidName(stem) {
+		if !IsValidName(stem) {
 			return Skill{}, false
-		}
-		if filepath.Base(dir) == "agents" {
-			sk, ok := s.parse(full, stem, scope)
-			return forceAgentRunAs(sk), ok
 		}
 		return s.parseFlat(full, stem, scope, requireFlatMarker)
 	}

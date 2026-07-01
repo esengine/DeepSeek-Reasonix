@@ -14,7 +14,7 @@ import { isReadOnlyTool } from "../lib/useController";
 import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import { useEntranceAnimation } from "../lib/useEntranceAnimation";
 import { useScrollManager } from "../lib/useScrollManager";
-import { buildTurnGroups, compactQuestionText, createWarmLayerState, questionAnchorId, questionTurnsById, scrollVersion, warmColdPageForTurn, warmLayerWithColdPageAtLeast, warmLayerWithExpandedTurn, warmLayerWithNextColdPage, warmPagination, warmUserPreview, type QuestionAnchor, type TurnGroup, type WarmLayerState } from "../lib/transcriptGrouping";
+import { buildStepGroups, buildTurnGroups, compactQuestionText, createWarmLayerState, questionAnchorId, questionTurnsById, scrollVersion, warmColdPageForTurn, warmLayerWithColdPageAtLeast, warmLayerWithExpandedTurn, warmLayerWithNextColdPage, warmPagination, warmUserPreview, type QuestionAnchor, type TurnGroup, type WarmLayerState } from "../lib/transcriptGrouping";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 type AssistantItem = Extract<Item, { kind: "assistant" }>;
@@ -367,37 +367,7 @@ export function Transcript({
   // Each completed non-final step is folded into "Processed".
   const stepGroups = useMemo(() => {
     if (displayMode === "standard") return null;
-    const groups: { items: Item[]; isFinal: boolean; isComplete: boolean }[] = [];
-    let current: Item[] = [];
-
-    for (let i = hotStartIdx; i < items.length; i++) {
-      const it = items[i];
-      if (it.kind === "user") {
-        if (current.length > 0) {
-          const first = current[0];
-          const isFinal = first.kind === "assistant" && !first.streaming && first.text.trim() !== "";
-          groups.push({ items: current, isFinal, isComplete: true });
-          current = [];
-        }
-        groups.push({ items: [it], isFinal: false, isComplete: true });
-        continue;
-      }
-      if (it.kind === "assistant") {
-        if (current.length > 0) {
-          groups.push({ items: current, isFinal: false, isComplete: true });
-          current = [];
-        }
-        current.push(it);
-      } else {
-        current.push(it);
-      }
-    }
-    if (current.length > 0) {
-      const first = current[0];
-      const isFinal = first.kind === "assistant" && !first.streaming && first.text.trim() !== "";
-      groups.push({ items: current, isFinal, isComplete: false });
-    }
-    return groups;
+    return buildStepGroups(items, hotStartIdx);
   }, [displayMode, hotStartIdx, items]);
 
   const hotZoneNodes = useMemo<ReactNode[]>(() => {

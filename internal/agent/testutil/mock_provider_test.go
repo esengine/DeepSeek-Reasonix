@@ -42,19 +42,14 @@ func TestMockProviderStreamStopsOnContextCancellation(t *testing.T) {
 		t.Fatalf("first chunk text = %q, want first", got)
 	}
 	cancel()
-	sawCanceled := false
-	for chunk := range ch {
-		switch chunk.Type {
-		case provider.ChunkError:
-			if !errors.Is(chunk.Err, context.Canceled) {
-				t.Fatalf("chunk after cancellation = %#v, want context.Canceled error", chunk)
-			}
-			sawCanceled = true
-		case provider.ChunkDone:
-			t.Fatalf("stream completed normally after cancellation: %#v", chunk)
-		}
-	}
-	if !sawCanceled {
+	chunk, ok := <-ch
+	if !ok {
 		t.Fatal("stream closed without returning cancellation error")
+	}
+	if chunk.Type != provider.ChunkError || !errors.Is(chunk.Err, context.Canceled) {
+		t.Fatalf("chunk after cancellation = %#v, want context.Canceled error", chunk)
+	}
+	if _, ok := <-ch; ok {
+		t.Fatal("stream stayed open after cancellation error")
 	}
 }

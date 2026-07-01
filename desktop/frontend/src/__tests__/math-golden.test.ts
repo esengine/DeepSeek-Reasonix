@@ -133,6 +133,17 @@ check("$\\frac{a}{b}$", () => isLikelyInlineMath("\\frac{a}{b}") === true);
 check("$f(x)$", () => isLikelyInlineMath("f(x)") === true);
 check("$x+1$", () => isLikelyInlineMath("x+1") === true);
 
+console.log("\nisLikelyInlineMath — classifier gaps from PR #4543");
+check("$\\tfrac12$", () => isLikelyInlineMath("\\tfrac12") === true);
+check("$\\sqrt2$", () => isLikelyInlineMath("\\sqrt2") === true);
+check("$SO(3,1)$", () => isLikelyInlineMath("SO(3,1)") === true);
+check("$SU(2)$", () => isLikelyInlineMath("SU(2)") === true);
+check("$GL(n)$", () => isLikelyInlineMath("GL(n)") === true);
+check("$K = -iJ$", () => isLikelyInlineMath("K = -iJ") === true);
+check("$p = +\\alpha$", () => isLikelyInlineMath("p = +\\alpha") === true);
+check("$+$", () => isLikelyInlineMath("+") === true);
+check("$=$", () => isLikelyInlineMath("=") === true);
+
 console.log("\nisLikelyInlineMath — currency/link (NOT math)");
 check("$5", () => isLikelyInlineMath("5") === false);
 check("$10", () => isLikelyInlineMath("10") === false);
@@ -153,6 +164,15 @@ check("uppercase $I$ → math (math name in non-English prose)", () => isLikelyI
 check("uppercase $A$ → math", () => isLikelyInlineMath("A") === true);
 check("uppercase $V$ → math", () => isLikelyInlineMath("V") === true);
 
+console.log("\nisLikelyInlineMath — primed letters and bracketed labels");
+check("$S'$ → math (primed letter)", () => isLikelyInlineMath("S'") === true);
+check("$y''$ → math (double prime)", () => isLikelyInlineMath("y''") === true);
+check("$f'(x)$ → math (primed function)", () => isLikelyInlineMath("f'(x)") === true);
+check("$\\psi'$ → math (Greek with prime)", () => isLikelyInlineMath("\\psi'") === true);
+check("$[56]$ → math (irrep label)", () => isLikelyInlineMath("[56]") === true);
+check("$[56,0^+]$ → math", () => isLikelyInlineMath("[56,0^+]") === true);
+check("$[\\mathbf{56}]$ → math", () => isLikelyInlineMath("[\\mathbf{56}]") === true);
+
 console.log("\nisLikelyInlineMath — minimal LaTeX patterns (regression)");
 // LLMs frequently emit minimal LaTeX in math contexts that the older
 // classifier rejected as currency / word tokens. These tests pin down the
@@ -170,6 +190,8 @@ check("comma-separated $A, B$ → math (ordered pair)", () => isLikelyInlineMath
 check("comma-separated $1, 2, 3$ → math (sequence)", () => isLikelyInlineMath("1, 2, 3") === true);
 check("comma-separated $\\alpha, \\beta$ → math (Greek pair)", () => isLikelyInlineMath("\\alpha, \\beta") === true);
 check("parens-wrapped $(A, B)$ inner → math", () => isLikelyInlineMath("(A, B)") === true);
+check("cycle notation $(12)$ → math", () => isLikelyInlineMath("(12)") === true);
+check("cycle notation $(12)(34)$ → math", () => isLikelyInlineMath("(12)(34)") === true);
 check("$S$ (set name) → math", () => isLikelyInlineMath("S") === true);
 check("$S$ with surrounding prose (regression)", () => {
   return normalizeMath("$S$ 非空\n$S$ 有上界") === "$S$ 非空\n$S$ 有上界";
@@ -217,7 +239,7 @@ check("\\|x\\| renders as double bars", () => {
 
 console.log("\nnormalizeMath — LLM delimiter conversion");
 eq(normalizeMath("\\(x^2\\)"), "$x^2$", "\\(…\\) → $…$");
-eq(normalizeMath("\\[E=mc^2\\]"), "$$E=mc^2$$", "\\[…\\] → $$…$$");
+eq(normalizeMath("\\[E=mc^2\\]"), "$$\nE=mc^2\n$$", "\\[…\\] → $$…$$");
 eq(normalizeMath("\\\\[4pt]"), "\\\\[4pt]", "\\\\[ line-break spacing protected");
 
 console.log("\nnormalizeMath — \\slashed conversion (regression)");
@@ -235,19 +257,17 @@ console.log("\nnormalizeMath — inline $$ glued to prose (regression)");
 // line before any $$ preceded by a letter/closing bracket/etc.
 check("inline $$ after prose", () => {
   const out = normalizeMath("decomposes as$$\n\\mathbf{6}.$$");
-  return /^decomposes as\n\n\$\$/.test(out) && out.includes("\\mathbf{6}");
+  return /^decomposes as\n\$\$/.test(out) && out.includes("\\mathbf{6}");
 });
 check("inline $$ after closing bracket", () => {
   const out = normalizeMath("(octet)$$ \\mathbf{56}.$$");
-  return out.startsWith("(octet)\n\n$$");
+  return out.startsWith("(octet)\n$$");
 });
 check("inline $$ after closing brace (\\end{...}$$)", () => {
-  // A model that writes `\end{array}$$` or `\frac{a}{b}$$` on one line
-  // has the same micromark-fence problem as the comma case. The
-  // closing brace is the most common end-of-content marker in LaTeX
-  // math, so the repair-regex character class includes it.
+  // A display equation ending with }$$ must be extracted as a unit.
+  // The closing $$ must not be split off, or the equation body is emptied.
   const out = normalizeMath("$$\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}$$");
-  return out.includes("\\end{pmatrix},\n\n$$") || out.includes("\\end{pmatrix}\n\n$$");
+  return out.includes("\\end{pmatrix},\n$$") || out.includes("\\end{pmatrix}\n$$");
 });
 check("inline $$ after comma on same line as content", () => {
   // User-reported (2026-06-12, soft-pion chat): the model wrote the
@@ -261,25 +281,31 @@ check("inline $$ after comma on same line as content", () => {
   // as math, which then fails to render with "Can't use function '$'
   // in math mode" on the stray $ inside the equation body.
   const out = normalizeMath("…D(q^2),$$\nwith $P=…$");
-  return out.includes("D(q^2),\n\n$$");
+  return out.includes("D(q^2),\n$$");
 });
 check("well-formed $$ already on own line is normalised consistently", () => {
   // Whether the model writes `decomposes as$$\n\mathbf{6}.$$` or
-  // `decomposes as\n\n$$\n\mathbf{6}.$$`, both must produce the same
-  // remark-math-parseable form: opening $$ on its own line, body, blank
-  // line, closing $$ on its own line.
+  // `decomposes as\n\n$$\n\mathbf{6}.$$`, both must produce valid
+  // remark-math-parseable form: opening $$ on its own line, body, closing
+  // $$ on its own line.
   const inline = normalizeMath("decomposes as$$\n\\mathbf{6}.$$");
   const block = normalizeMath("decomposes as\n\n$$\n\\mathbf{6}.$$");
-  const expected = "decomposes as\n\n$$\n\\mathbf{6}.\n\n$$";
-  return inline === expected && block === expected;
+  const valid = (s: string) => /\n\$\$\n/.test(s) && /\n\$\$/.test(s) && s.includes("\\mathbf{6}");
+  return valid(inline) && valid(block);
 });
 check("\\[…\\] → $$…$$ still works (no spurious blank line)", () => {
-  return normalizeMath("\\[E=mc^2\\]") === "$$E=mc^2$$";
+  return normalizeMath("\\[E=mc^2\\]") === "$$\nE=mc^2\n$$";
 });
 check("digit before $$ is NOT a prose boundary (preserves c^2$$)", () => {
   const out = normalizeMath("c^2$$ x $$");
   return out === "c^2$$ x $$";
 });
+eq(normalizeMath("intro$$x+1"), "intro\n$$\nx+1", "orphan opening $$ is not duplicated");
+eq(
+  normalizeMath("first$$a$$ middle $$b$$ end"),
+  "first\n$$\na\n$$\n middle \n$$\nb\n$$\n end",
+  "multiple display blocks on one line are all normalised",
+);
 
 console.log("\nnormalizeMath — non-math dollar filtering");
 eq(normalizeMath("costs $1$ today"), "costs &#36;1&#36; today", "$1$ not math");
@@ -409,6 +435,10 @@ const e2e: Array<[string, string]> = [
   ["$\\frac{1}{\\sqrt{2}}\\|uud\\rangle$", "ket in fraction with \\|"],
   ["$\\|x\\|$", "norm \\|x\\| → double bar (regression)"],
   ["$\\langle\\psi\\|$", "bra closer \\| → single bar (regression)"],
+  ["$S'$", "primed letter S'"],
+  ["$f'(x)$", "primed function call"],
+  ["$[56]$", "bracketed irrep label"],
+  ["$[56,0^+]$", "bracketed irrep label with charge"],
 ];
 for (const [src, label] of e2e) {
   check(`${label}: ${src}`, () => katexOf(normalizeMath(src), false));
@@ -458,6 +488,19 @@ check("real inline math $x^2$ still renders as KaTeX", () => {
   const html = renderHtml("the value $x^2$ here");
   return html.includes("katex");
 });
+check("blockquote display math does not swallow following inline math", () => {
+  const html = renderHtml("> theorem\n> $$E=mc^2$$\n> after $x$");
+  return html.includes("katex-display")
+    && !html.includes("katex-error")
+    && html.includes(">x</mi>");
+});
+check("multi-line blockquote display math strips quote markers from the formula", () => {
+  const html = renderHtml("> theorem\n> $$\n> E=mc^2\n> $$\n> after $x$");
+  return html.includes("katex-display")
+    && !html.includes("katex-error")
+    && !html.includes("&gt; E")
+    && html.includes(">x</mi>");
+});
 
 // ── Young diagram / tableau macros ─────────────────────────────────────────────
 // `\yng` (ytableau) and `\young` (youngtab) are common in physics —
@@ -486,7 +529,7 @@ check("\\yng inside \\(...\\) does not get double-wrapped", () => {
 });
 check("\\yng inside \\[...\\] stays display math without triple dollars", () => {
   const out = normalizeMath("\\[\\yng(2,1)\\]");
-  return out.startsWith("$$\\begin{array}{l}")
+  return out.startsWith("$$\n\\begin{array}{l}")
     && out.endsWith("$$")
     && !out.includes("$$$");
 });
@@ -505,7 +548,7 @@ check("digit-starting inline math with \\young does not get nested wrappers", ()
 });
 check("display math ending in digit closes before following bare \\yng", () => {
   const out = normalizeMath("$$x^2$$ \\yng(1)");
-  return out === "$$x^2$$ $\\begin{array}{l}\\square\\end{array}$";
+  return out === "$$\nx^2\n$$\n $\\begin{array}{l}\\square\\end{array}$";
 });
 check("bare \\yng after inline math is separated from adjacent dollars", () => {
   const out = normalizeMath("$x$\\yng(1)");

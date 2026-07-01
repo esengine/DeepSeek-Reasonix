@@ -1,0 +1,65 @@
+---
+import Account from '../layouts/Account.astro';
+---
+<Account
+  wide
+  title="Your account — Reasonix"
+  titleEn="Your account — Reasonix"
+  titleZh="我的账号 — Reasonix"
+  description="Manage your Reasonix account.">
+  <div id="account-gate" class="auth-head">
+    <p><span class="l-en">Loading your account…</span><span class="l-zh">正在加载账号…</span></p>
+  </div>
+
+  <div id="account-view" hidden>
+    <div class="acct-id">
+      <div>
+        <div id="acct-handle" class="acct-handle"></div>
+        <div id="acct-email" class="acct-email"></div>
+      </div>
+      <span id="acct-role" class="acct-role"></span>
+    </div>
+
+    <h2 class="acct-h2"><span class="l-en">Profile</span><span class="l-zh">资料</span></h2>
+    <div id="profile-msg" class="auth-msg" hidden></div>
+    <form id="profile-form" class="auth-form" novalidate>
+      <div class="field">
+        <label for="f-displayName"><span class="l-en">Display name</span><span class="l-zh">显示名</span></label>
+        <input id="f-displayName" type="text" maxlength="80" />
+      </div>
+      <div class="field">
+        <label for="f-handle"><span class="l-en">Handle</span><span class="l-zh">用户名</span></label>
+        <input id="f-handle" type="text" minlength="3" maxlength="30" />
+        <span class="hint"><span class="l-en">Your public profile lives at /u/&lt;handle&gt;.</span><span class="l-zh">你的公开主页地址是 /u/&lt;用户名&gt;。</span></span>
+      </div>
+      <div class="field">
+        <label for="f-bio"><span class="l-en">Bio</span><span class="l-zh">简介</span></label>
+        <textarea id="f-bio" rows="3" maxlength="500"></textarea>
+      </div>
+      <div class="field">
+        <label for="f-avatarUrl"><span class="l-en">Avatar URL</span><span class="l-zh">头像链接</span></label>
+        <input id="f-avatarUrl" type="url" maxlength="500" />
+      </div>
+      <button type="submit" class="btn btn-dark"><span class="l-en">Save profile</span><span class="l-zh">保存资料</span></button>
+    </form>
+
+    <h2 class="acct-h2"><span class="l-en">Password</span><span class="l-zh">密码</span></h2>
+    <div id="password-msg" class="auth-msg" hidden></div>
+    <form id="password-form" class="auth-form" novalidate>
+      <div class="field">
+        <label for="currentPassword"><span class="l-en">Current password</span><span class="l-zh">当前密码</span></label>
+        <input id="currentPassword" type="password" autocomplete="current-password" required />
+      </div>
+      <div class="field">
+        <label for="newPassword"><span class="l-en">New password</span><span class="l-zh">新密码</span></label>
+        <input id="newPassword" type="password" autocomplete="new-password" minlength="8" required />
+      </div>
+      <button type="submit" class="btn btn-ghost"><span class="l-en">Change password</span><span class="l-zh">修改密码</span></button>
+    </form>
+
+    <div class="acct-foot">
+      <button id="logout-btn" type="button" class="btn btn-ghost"><span class="l-en">Sign out</span><span class="l-zh">退出登录</span></button>
+      <button id="delete-btn" type="button" class="acct-danger"><span class="l-en">Delete account</span><span class="l-zh">注销账号</span></button>
+    </div>
+  </div>
+</Account>

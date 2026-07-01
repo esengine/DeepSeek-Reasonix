@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"reasonix/internal/frontmatter"
 )
@@ -29,43 +28,6 @@ type Command struct {
 
 // substRe matches the substitution tokens recognised in a command body.
 var substRe = regexp.MustCompile(`\$(\$|ARGUMENTS|[0-9]+)`)
-
-// TokenizeArgs splits a slash-command line into arguments, honoring quoted
-// segments so values with spaces survive as a single token. An unterminated
-// quote takes the rest of the line as one token.
-func TokenizeArgs(s string) []string {
-	var out []string
-	var cur strings.Builder
-	inWord := false
-	var quote rune
-	for _, r := range s {
-		switch {
-		case quote != 0:
-			if r == quote {
-				quote = 0
-			} else {
-				cur.WriteRune(r)
-			}
-			inWord = true
-		case r == '"' || r == '\'':
-			quote = r
-			inWord = true
-		case unicode.IsSpace(r):
-			if inWord {
-				out = append(out, cur.String())
-				cur.Reset()
-				inWord = false
-			}
-		default:
-			cur.WriteRune(r)
-			inWord = true
-		}
-	}
-	if inWord {
-		out = append(out, cur.String())
-	}
-	return out
-}
 
 // Render substitutes args into the command body: $ARGUMENTS is all args joined
 // by spaces, $1..$N are positional (empty when absent), and $$ is a literal $.

@@ -52,6 +52,7 @@ credentials_store = "auto"   # legacy compatibility; provider keys are in .env
 
 [ui]
 theme = "auto"
+cursor_shape = "underline"   # CLI/TUI text cursor: underline|block|bar
 
 [desktop]
 provider_access = ["deepseek"]
@@ -76,6 +77,10 @@ command = "example-mcp-server"
 Do not put API key values in `config.toml`. This file is regular configuration:
 it is safe to inspect, edit, migrate, and include in diagnostics after standard
 redaction. Secrets belong in the global `.env` below.
+
+`[ui].cursor_shape` affects only the CLI/TUI composer. The default `underline`
+avoids terminal block-cursor artifacts with double-width CJK characters; use
+`block` or `bar` if you prefer those cursor shapes.
 
 ### Custom provider `api_key_env` names
 
@@ -102,6 +107,15 @@ Existing configs are not rewritten on upgrade. If an old custom provider already
 uses `CUSTOM_API_KEY`, it will keep working with that key. If several old custom
 providers accidentally share `CUSTOM_API_KEY`, edit each provider's
 `api_key_env` to a distinct name and save the corresponding API key again.
+
+### Custom provider endpoint URLs
+
+Custom OpenAI-compatible providers normally store an API endpoint in `base_url`.
+Reasonix sends chat requests to `base_url + "/chat/completions"` and probes model
+discovery candidates such as `/models` and `/v1/models`. If a gateway gives you a
+complete chat request URL, set `chat_url`; Reasonix will use it directly and will
+not append `/chat/completions`. If model discovery needs a separate address, set
+`models_url`.
 
 ## Global `.env`
 

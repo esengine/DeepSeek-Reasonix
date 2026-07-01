@@ -88,6 +88,55 @@ func TestHasContentWithTool(t *testing.T) {
 	}
 }
 
+// --- Session.HasSystemMessage ---
+
+func TestHasSystemMessageWithSystem(t *testing.T) {
+	s := NewSession("system prompt")
+	if !s.HasSystemMessage() {
+		t.Error("session with system message should report HasSystemMessage true")
+	}
+}
+
+func TestHasSystemMessageWithoutSystem(t *testing.T) {
+	s := NewSession("")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
+	if s.HasSystemMessage() {
+		t.Error("session without system message should report HasSystemMessage false")
+	}
+}
+
+func TestHasSystemMessageAfterReplaceWithoutSystem(t *testing.T) {
+	s := NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "kept"})
+	// Replace with messages that have no system message — simulates a
+	// compact/summarise path that failed to preserve the system prompt.
+	s.Replace([]provider.Message{
+		{Role: provider.RoleUser, Content: "replaced"},
+	})
+	if s.HasContent() {
+		// HasContent returns true because the user message exists.
+		if s.HasSystemMessage() {
+			t.Error("session replaced without system message should report HasSystemMessage false")
+		}
+	} else {
+		t.Error("session with user message should have content")
+	}
+}
+
+func TestHasSystemMessageCompactedKeepsSystem(t *testing.T) {
+	// This is the healthy path: compact preserves the system message at index 0.
+	s := NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "answer"})
+	s.Replace([]provider.Message{
+		{Role: provider.RoleSystem, Content: "system"},
+		{Role: provider.RoleUser, Content: "summary"},
+	})
+	if !s.HasSystemMessage() {
+		t.Error("compacted session should still have system message at index 0")
+	}
+}
+
 // --- Save / LoadSession round-trip ---
 
 func TestSaveLoadSessionRoundTrip(t *testing.T) {

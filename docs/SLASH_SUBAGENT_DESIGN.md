@@ -1,339 +1,85 @@
-# Slash Subagent Lifecycle
+# Slash Subagent Design
 
-Status: **Implemented for the TUI**, with desktop text fallback for
-hand-entered `/subagents` management. Desktop still does not implement the
-interactive `/subagents` runtime browser in this slice. Existing desktop
-slash-skill behavior, including entries such as `/explore`, remains unchanged.
-
-This document records the current contract after the TUI implementation.
-`/subagents show` is intentionally absent - it never shipped because the TUI's
-interactive detail screen (Enter on any run in the picker) serves the same
-purpose. Desktop keeps `/subagents` out of command discovery, but hand-entered
-management commands fall back to controller notice text until a first-class
-desktop runtime UI exists.
+Status: implemented as a narrow slash-skill dispatch layer.
 
 ## Scope
 
-Slash subagents are user-invoked skills whose frontmatter resolves to
-`runAs=subagent`, for example:
+`main-v2` already owns the durable subagent implementation:
+
+- `runAs: subagent` skill metadata.
+- The `run_skill` tool path.
+- Built-in subagent tools such as `task`, `read_only_task`, and `read_only_skill`.
+- Subagent transcript storage, parent-session ownership, continuation, model selection, tool scoping, and permission handling.
+
+This PR only changes direct user invocation of slash skills:
+
+- `/name args` for an inline skill keeps the existing behavior: render the skill body into the parent turn.
+- `/name args` for a `runAs: subagent` skill runs through the existing `skill.SubagentRunner`.
+
+Everything else stays out of scope:
+
+- No `/subagents` management command.
+- No separate task-center or transcript browser UI.
+- No subagent-specific event or wire payloads.
+- No desktop-only subagent runtime surface.
+
+## Dispatch Order
+
+Slash input keeps the same precedence as other commands:
+
+1. Built-in slash commands run first.
+2. Custom slash commands win over skills with the same name.
+3. Skills are resolved last.
+
+The skill path then branches by `runAs`:
 
 ```text
-/scout inspect this code path
+/name args
+  -> custom command? render and start parent turn
+  -> inline skill? render and start parent turn
+  -> subagent skill? run existing SkillRunner with args as the task
 ```
 
-There are two separate concepts:
+## Subagent Slash Flow
 
-- **Model subagents** are spawned by tools such as `task` and return through the
-  parent model's tool result.
-- **Slash subagents** are started directly by the user, have controller-owned
-  lifecycle state, and can be inspected from the TUI with `/subagents`.
+For `runAs: subagent`, the controller handles the slash command directly:
 
-Current frontend scope:
+1. Validate that a subagent runner exists for the session.
+2. Validate that arguments are present. The child has no implicit user task beyond the slash arguments.
+3. Start a guarded foreground controller operation so cancellation, busy state, autosave, and `TurnDone` stay consistent.
+4. Attach the current parent session to the context with `agent.WithParentSession` and `jobs.WithSession`.
+5. Attach response and reasoning language preferences to the context.
+6. Compose the slash arguments so active goal, memory updates, background-job completions, plan-mode marker, and language blocks reach the child task.
+7. Call `skill.SubagentRunner` with the resolved skill and composed task.
+8. Record the visible slash command as the parent user message.
+9. Record the child final answer as the parent assistant message.
+10. Emit the final answer as ordinary `Text` and `Message` events, followed by the normal guarded `TurnDone`.
 
-- TUI: supported.
-- HTTP/SSE: receives typed events and can use textual management notices.
-- Desktop: existing slash skills remain available; `/subagents` stays hidden
-  from command discovery, while hand-entered management commands use
-  controller-generated notice text until a first-class desktop renderer exists.
+The parent conversation stores only the user slash command and final child answer. The child transcript remains isolated in the existing subagent store when the session supports persistence.
 
-## Controller Model
+## UX Behavior
 
-The controller owns retained slash-subagent state in `SubagentRun`.
+The user-facing contract is intentionally small:
 
-```go
-type SubagentRun struct {
-    ID        string
-    Skill     string
-    Alias     string
-    Prompt    string
-    Task      string
-    StartedAt time.Time
-    EndedAt   time.Time
-    State     event.SubagentState
-    Answer    string
-    Err       string
-    Events    []SubagentEvent
-}
-```
+- `/subagent-skill do the task` behaves like a foreground turn that returns a final answer.
+- Empty arguments produce a notice instead of starting the child.
+- Sessions without a configured subagent runner produce a notice.
+- Inline skills are unchanged.
+- Existing slash help, completion, and skill-management surfaces continue to come from the main skill registry.
 
-The public snapshots are:
+Because the output is emitted as regular answer events, frontends do not need subagent-specific rendering to support this feature.
 
-```go
-func (c *Controller) ListSubagents() []SubagentSummary
-func (c *Controller) SubagentDetail(id string) (SubagentDetail, bool)
-func (c *Controller) CancelSubagent(id string)
-func (c *Controller) ClearSubagents(state string)
-```
+## Why Not A `/subagents` Command
 
-`SubagentEvent` is a controller-owned detail log capped at
-`maxSubagentEvents = 200`. It retains full display text for replaying the TUI
-detail transcript, including reasoning, answer text, tool dispatches, tool
-results, notices, usage, and terminal errors.
+The earlier design included a `/subagents` command, a task-center style browser, and extra event metadata. That overlapped heavily with the current mainline implementation and created frequent conflicts in the controller, TUI, desktop event bridge, and i18n catalogs.
 
-## Lifecycle
+The accepted shape is narrower: user-invoked `/name` subagents should reuse the existing skill runner. Management, browsing, and richer continuation UX can be designed separately on top of the mainline subagent store if needed.
 
-Inline skills still run through the normal guarded parent turn.
+## Split Plan
 
-For `runAs=subagent` skills:
+This PR intentionally avoids growing `controller.go` with a second subagent management surface. If future work needs richer subagent UX, split it into smaller follow-up PRs:
 
-1. The controller allocates a stable subagent ID, alias, and `SubagentRun`.
-2. It emits `TurnStarted` with `event.Subagent` metadata.
-3. Read-only/background-capable subagents run in a child goroutine.
-4. Writer-capable subagents fall back to a guarded foreground subagent turn.
-5. Child events are tagged with the subagent ID and appended to the retained
-   detail log.
-6. Completion updates the run state to `completed`, `failed`, or `canceled`.
-7. Successful runs append the slash command and final child answer to the parent
-   transcript only through the controller finalization path.
-
-If a parent foreground turn is running when a child finishes, the child
-completion is queued and flushed at a controller safe point before the parent
-`TurnDone` event is emitted. Child goroutines must not directly mutate the
-parent session.
-
-Background slash subagents inherit static controller context such as active goal
-and plan-mode framing, but they do not consume parent-turn one-shot queues such
-as pending memory updates or completed background-job summaries. Those queues
-remain reserved for the next parent turn.
-
-## Event Contract
-
-Slash subagent lifecycle reuses existing event kinds. It does not add dedicated
-subagent event kinds.
-
-```go
-type Subagent struct {
-    ID    string
-    Skill string
-    Alias string
-    State SubagentState
-    Error string
-}
-```
-
-When `Event.Subagent` is present, the event belongs to that slash-subagent
-lifecycle or output stream. Parent reducers must not treat those events as
-normal parent assistant text.
-
-Important event meanings:
-
-- `TurnStarted + Subagent`: child run started.
-- `Reasoning/Text + Subagent`: child reasoning or answer stream for detail
-  replay.
-- `ToolDispatch/ToolResult + Subagent`: child tool activity.
-- `Message + Subagent`: final child answer for runtime/detail display.
-- `Usage + Subagent`: child usage summary.
-- `TurnDone + Subagent`: terminal child state; state must not remain `running`.
-
-Notice strings are human-readable only. Frontends should not parse
-`[subagent] ...` notice text for controller-originated state.
-
-## `/subagents` Command
-
-`/subagents` is the public task-center entrypoint for runtime slash-subagent
-instances.
-
-```text
-/subagents
-/subagents cancel <id-or-alias>
-/subagents clear [completed|failed|canceled|all]
-```
-
-There is intentionally no `/subagents show` command. `show` never shipped, and
-the TUI detail path is the supported inspection surface.
-
-Reference resolution for `cancel` is controller-owned:
-
-1. Exact subagent ID.
-2. Unique alias, case-insensitive.
-
-Ambiguous refs return a readable notice and do not pick an arbitrary run.
-
-`/subagents` is no longer treated as a public text subcommand group in the TUI.
-Bare `/subagents` opens the task center; explicit management commands such as
-`cancel` and `clear` remain available for controller-backed, non-interactive
-flows. `clear all` removes terminal retained runs only; running runs are
-preserved. Clearing never mutates persisted chat history.
-
-## TUI Behavior
-
-Bare `/subagents` is intercepted by the TUI and opens an interactive runtime
-browser backed by `ListSubagents()` and `SubagentDetail(id)`.
-
-When users type `/subagents cancel ...` or `/subagents clear ...` in the TUI,
-the command is delegated to the controller notice path instead of opening the
-browser.
-
-Live slash-subagent output in the main chat no longer uses a bottom-pinned
-runtime panel. It is rendered as a structured block directly inside the main
-transcript so child activity appears in conversational order with the parent
-session.
-
-Embedded live block behavior:
-
-- A background-capable slash subagent inserts one transcript block when the
-  controller emits its structured `Notice + Subagent` metadata.
-- While the child is still running, the block defaults to a collapsed preview
-  of recent reasoning / output lines.
-- `Ctrl-O` toggles the most recently updated live block between collapsed and
-  expanded state.
-- When the child reaches a terminal state (`completed`, `failed`, `canceled`),
-  the block auto-expands so the final answer or terminal error is shown in full.
-- The main composer remains interactive while a background slash subagent runs;
-  users can keep typing or start another foreground turn without waiting for the
-  child to finish.
-
-List view:
-
-- Shows active and retained runs newest-first.
-- `/` enters filter mode.
-- While filtering, typed text narrows runs by alias, skill, or state.
-- `Enter` leaves filter mode and keeps the current filter applied.
-- `Backspace` edits the active filter; clearing the query restores the full
-  retained list.
-- `Up/Down` or `k/j` moves selection.
-- `Enter` opens detail for the selected run.
-- `c` cancels a running selected run.
-- `r` refreshes the list.
-- `Esc` leaves filter mode first when editing; otherwise `Esc` or `q` closes
-  back to the main agent.
-
-Detail view:
-
-- Is an independent rendered screen, not scrollback appended under the main
-  agent transcript.
-- Is read-only and has no input box.
-- Reuses the main subagent panel rendering path for reasoning blocks, answer
-  markdown, tool calls, tool results, notices, usage, and terminal errors.
-- Does not compress completed runs into a separate summary style; completed and
-  running details replay the same event log.
-- `Up/Down`, `j/k`, mouse wheel, `PgUp/PgDn`, `Home`, and `End` scroll inside
-  the detail screen.
-- `Esc` returns to the main agent without leaving rendered detail content in the
-  main transcript.
-- `Enter` is ignored in detail; users cannot reply from a subagent detail view.
-- `Ctrl-D` keeps the normal quit behavior instead of being swallowed by the
-  subagent browser.
-
-The TUI must not re-queue Bubble Tea mouse messages from a view callback. Bubble
-Tea already forwards mouse messages to `Update`; re-sending them can create an
-infinite mouse-message loop and starve keyboard events.
-
-## Desktop Behavior
-
-Desktop does not implement the slash-subagent runtime browser in this slice.
-
-The desktop app:
-
-- Does not list `/subagents` in command autocomplete.
-- Keeps pre-existing slash skills, including `runAs=subagent` skills such as
-  `/explore`, visible in the slash menu.
-- Routes hand-entered `/subagents` commands through the controller notice path,
-  so bare `/subagents` lists retained runs in text and `cancel` / `clear`
-  remain usable without the interactive browser.
-- Does not expose `ListSubagents`, `SubagentDetail`, or `CancelSubagent` Wails
-  bindings.
-- Does not include a `subagent` field in `desktop/wire.go`.
-
-Future desktop support should be added only with a first-class desktop runtime
-surface and reducer separation equivalent to the TUI detail screen.
-
-## Wire Contract
-
-The HTTP/SSE wire layer serializes `event.Subagent` as:
-
-```json
-{
-  "kind": "message",
-  "text": "...",
-  "subagent": {
-    "id": "...",
-    "skill": "scout",
-    "alias": "Ellis",
-    "state": "completed",
-    "error": ""
-  }
-}
-```
-
-Desktop intentionally does not expose this field while desktop subagent UI is
-disabled.
-
-## Safety Rules
-
-- Parent transcript merge order is deterministic and controller-owned.
-- Child goroutines do not directly mutate the parent session.
-- Successful child answers merge as a user slash command plus assistant answer.
-- Failed and canceled child runs do not append a parent assistant answer.
-- Background slash subagents must not drain parent-turn pending memory or
-  completed-job context.
-- `Cancel()` continues to target the foreground turn; `CancelSubagent(id)`
-  targets a retained slash-subagent run.
-- Writer-capable slash subagents must not run as unsafe background editors.
-  Current behavior is foreground fallback through the guarded controller path.
-- Tool-spawned model subagents keep existing `Tool.ParentID` behavior.
-
-## Test Coverage
-
-Controller:
-
-- Successful, failed, and canceled subagent states.
-- Full retained event text for detail replay.
-- Final answer appended as a retained `Message` event when needed.
-- Parent-turn interleaving and queued completion merge.
-- Background slash subagents do not drain parent-turn pending memory or
-  completed-job context.
-- Clear/cancel ref handling and ambiguous alias handling.
-
-TUI:
-
-- Bare `/subagents` opens the picker without writing a notice into scrollback.
-- Empty list still opens the picker.
-- Explicit `/subagents clear ...` and `/subagents cancel ...` stay on the
-  controller notice path instead of reopening the picker.
-- Detail replay preserves reasoning, tool calls/results, answer text, usage,
-  and terminal errors.
-- Completed detail uses the same rendering path as running detail.
-- Detail screen is height-bounded and scrollable.
-- Keyboard and mouse scrolling work without starving `Esc` or `Ctrl-D`.
-- Detail view is read-only and ignores `Enter`.
-- Cancel affordance appears only for cancelable runs.
-
-Desktop:
-
-- Desktop command menu keeps existing slash skills while omitting `/subagents`
-  management.
-- Desktop slash-arg completion hides `/subagents`, and `/agents` has no
-  management surface because the command is removed.
-- Desktop submit path forwards hand-entered `/subagents` runtime-management
-  commands to controller notice text instead of opening the TUI browser.
-
-## Acceptance Criteria
-
-- `/subagents show` is absent.
-- TUI `/subagents` opens an interactive selectable runtime list.
-- Selecting any run state, including `completed`, opens the independent detail
-  screen.
-- Detail replay does not lose styling for reasoning, tools, normal answer text,
-  final answer, usage, or errors.
-- Subagent detail has no reply input.
-- `Esc` returns to the main agent and does not leave detail content in the main
-  transcript.
-- Desktop exposes no interactive `/subagents` runtime browser entrypoint until
-  a dedicated desktop runtime UI is implemented.
-- Desktop hand-entered `/subagents` still supports textual list / cancel / clear
-  management through controller notices.
-
-## Settings Shell Commands
-
-Settings-defined slash commands are platform shell snippets. Reasonix appends
-the raw slash arguments and executes the combined command with the platform
-default shell:
-
-- Windows: `cmd /c <command>`
-- Other platforms: `sh -c <command>`
-
-Reasonix preserves quoted user arguments when appending them, but it does not
-translate POSIX shell syntax to Windows `cmd.exe` syntax. Cross-platform
-commands should either use syntax accepted by both shells or be defined per
-platform by the user's settings.
+1. Extract slash skill dispatch from the controller into a focused helper.
+2. Add read-only subagent listing APIs around the existing store.
+3. Add frontend-specific browsing UI without changing the core runner path.
+4. Add continuation commands only after the store-level API and UX are agreed.

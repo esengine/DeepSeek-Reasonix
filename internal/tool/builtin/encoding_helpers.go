@@ -115,17 +115,19 @@ func applyOldStringEdit(content, oldString, newString string, replaceAll bool) e
 }
 
 func oldStringNotFoundError(path, oldString, content string) error {
+	hint := " Re-read the current file before retrying; if several related edits target the same area, combine the final replacements in one multi_edit call."
 	if line, text, ok := nearestContentLine(oldString, content); ok {
-		return fmt.Errorf("old_string not found in %s (nearest line %d: %q)", path, line, text)
+		return fmt.Errorf("old_string not found in %s (nearest line %d: %q).%s", path, line, text, hint)
 	}
-	return fmt.Errorf("old_string not found in %s", path)
+	return fmt.Errorf("old_string not found in %s.%s", path, hint)
 }
 
-func oldStringNotUniqueError(path string, matches int, replaceAllHint bool) error {
+func oldStringNotUniqueError(path, oldString, content string, matches int, replaceAllHint bool) error {
+	lineHint := oldStringMatchLineSummary(oldString, content, 5)
 	if replaceAllHint {
-		return fmt.Errorf("old_string is not unique in %s (%d matches); add more surrounding context or set replace_all", path, matches)
+		return fmt.Errorf("old_string is not unique in %s (%d matches)%s; add nearby unique code, not just repeated separator lines, or set replace_all if every match should change", path, matches, lineHint)
 	}
-	return fmt.Errorf("old_string is not unique in %s (%d matches); add more surrounding context", path, matches)
+	return fmt.Errorf("old_string is not unique in %s (%d matches)%s; add nearby unique code, not just repeated separator lines", path, matches, lineHint)
 }
 
 type lineSegment struct {
@@ -317,6 +319,51 @@ func nearestContentLine(oldString, content string) (int, string, bool) {
 		return 0, "", false
 	}
 	return bestLine, bestText, true
+}
+
+func oldStringMatchLineSummary(oldString, content string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	target := firstNonEmptyLine(oldString)
+	if target == "" {
+		return ""
+	}
+	var matches []int
+	for i, line := range splitLineSegments(content) {
+		text := strings.TrimSuffix(line.raw, "\n")
+		text = strings.TrimSuffix(text, "\r")
+		if strings.Contains(text, target) {
+			matches = append(matches, i+1)
+		}
+	}
+	if len(matches) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("; matching lines include ")
+	for i, line := range matches {
+		if i >= limit {
+			b.WriteString(", ...")
+			break
+		}
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprint(&b, line)
+	}
+	return b.String()
+}
+
+func firstNonEmptyLine(s string) string {
+	for _, line := range splitLineSegments(s) {
+		text := strings.TrimSpace(strings.TrimSuffix(line.raw, "\n"))
+		text = strings.TrimSuffix(text, "\r")
+		if text != "" {
+			return text
+		}
+	}
+	return ""
 }
 
 func commonPrefixLen(a, b string) int {

@@ -70,6 +70,9 @@ eq(
 );
 eq(finalDeclaration(".workspace-preview__body--code .workspace-note", "flex"), "0 0 auto", "code truncation note keeps its own row");
 eq(finalDeclaration(".workspace-preview__body--code .code-block", "display"), "flex", "code block fills the preview viewport");
+eq(finalDeclaration(".workspace-preview__body--code .code-block__wrap", "display"), "flex", "code wrapper keeps the preview viewport height");
+eq(finalDeclaration(".workspace-preview__body--code .code-block__wrap", "flex"), "1 1 auto", "code wrapper participates in the preview flex height");
+eq(finalDeclaration(".workspace-preview__body--code .code-block__wrap", "min-height"), "0", "code wrapper can shrink around the scrollable code viewport");
 eq(finalDeclaration(".workspace-preview__body--code .code", "overflow"), "auto", "code viewport owns horizontal and vertical scrolling");
 eq(finalDeclaration(".workspace-preview__body--code .code", "min-height"), "0", "code viewport can shrink inside the preview pane");
 eq(finalDeclaration(".workspace-preview__body--code .code", "margin"), "0", "code viewport scrollbar sits at the visible pane bottom");

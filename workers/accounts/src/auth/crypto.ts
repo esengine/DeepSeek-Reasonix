@@ -63,6 +63,21 @@ export function hashToken(pepper: string, token: string): Promise<string> {
   return sha256Hex(`${pepper}:${token}`);
 }
 
+// Crockford base32 (no I/L/O/U) so a spoken or hand-typed device code has no
+// ambiguous characters.
+const USER_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+// A canonical 8-char user code for the device-authorization flow. 40 bits of
+// entropy; the pending window is tiny and short-lived and approval is
+// auth-gated + rate-limited, so guessing is impractical. `byte & 31` is unbiased
+// because 256 is an exact multiple of the 32-symbol alphabet.
+export function generateUserCode(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  let s = "";
+  for (const byte of bytes) s += USER_CODE_ALPHABET[byte & 31];
+  return s;
+}
+
 // A short random suffix for handle generation. Hex-encodes crypto bytes (a
 // bijection — no modulo, so no bias) and trims to length. Hex digits are all
 // valid handle characters.

@@ -46,6 +46,7 @@ credentials_store = "auto"   # 旧兼容字段；provider key 保存在 .env
 
 [ui]
 theme = "auto"
+cursor_shape = "underline"   # CLI/TUI 输入光标：underline|block|bar
 
 [desktop]
 provider_access = ["deepseek"]
@@ -70,6 +71,9 @@ command = "example-mcp-server"
 不要把 API key 的真实值写进 `config.toml`。这个文件是普通配置：可以查看、编辑、
 迁移，也可以在常规脱敏后用于诊断。密钥值属于下面的全局 `.env`。
 
+`[ui].cursor_shape` 只影响 CLI/TUI 的输入框。默认值 `underline` 用来避免终端块状光标在
+CJK 双宽字符上造成视觉覆盖；如果偏好其它形状，可以设为 `block` 或 `bar`。
+
 ### 自定义 provider 的 `api_key_env` 命名
 
 通过桌面端设置或 `reasonix setup` 添加自定义 provider 时，Reasonix 会把生成的
@@ -90,6 +94,14 @@ provider-name 规则。例如 `https://token.sensenova.cn/v1` 会生成 provider
 升级时不会自动改写已有配置。旧配置中已经使用 `CUSTOM_API_KEY` 的自定义 provider 会继续
 读取这个 key。若多个旧自定义 provider 已经意外共用了 `CUSTOM_API_KEY`，需要手动把各自的
 `api_key_env` 改成不同名称，并重新保存对应的 API key。
+
+### 自定义 provider 的端点 URL
+
+自定义 OpenAI-compatible provider 通常只需要在 `base_url` 中填写 API 端点。
+Reasonix 会把聊天请求发送到 `base_url + "/chat/completions"`，并尝试 `/models`
+和 `/v1/models` 等模型发现地址。如果网关给的是完整聊天请求 URL，可以设置
+`chat_url`；Reasonix 会直接使用这个地址，不再追加 `/chat/completions`。如果模型
+发现需要使用单独地址，可以设置 `models_url`。
 
 ## 全局 `.env`
 

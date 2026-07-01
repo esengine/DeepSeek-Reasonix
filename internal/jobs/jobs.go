@@ -739,13 +739,10 @@ func (m *Manager) resolve(parentSession string, ids []string) []*Job {
 			if !sessionMatches(parentSession, j.SessionID) {
 				continue
 			}
-			// Treat a job as still active until its final bookkeeping is done and
-			// j.done is closed. Status can flip to a terminal value just before the
-			// completion note is queued, so checking status alone makes Wait(nil)
-			// race ahead of DrainCompletedNote.
-			select {
-			case <-j.done:
-			default:
+			j.mu.Lock()
+			running := j.status == Running
+			j.mu.Unlock()
+			if running {
 				out = append(out, j)
 			}
 		}

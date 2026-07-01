@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1219,7 +1220,7 @@ func TestAddOfficialProviderAccessRejectsBackgroundJobsBeforeSavingKey(t *testin
 	os.Unsetenv("DEEPSEEK_API_KEY")
 
 	app := NewApp()
-	app.ctx = context.Background()
+	app.readyHook = func() {}
 	app.setTestCtrl(newBackgroundJobController(t, "provider-access-job"), "deepseek-flash/deepseek-v4-flash")
 
 	_, err := app.AddOfficialProviderAccess("deepseek", "sk-test")
@@ -1613,6 +1614,517 @@ func TestSetModelForTabRejectsProviderOutsideAccess(t *testing.T) {
 	err := app.SetModelForTab(tab.ID, "other/other-model")
 	if err == nil || !strings.Contains(err.Error(), "not available") {
 		t.Fatalf("SetModelForTab hidden provider error = %v, want not available", err)
+	}
+}
+
+func TestSetModelForTabRefreshesCarriedSystemPrompt(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	setDesktopTestCredential(t, "OLD_MODEL_KEY", "sk-test")
+	setDesktopTestCredential(t, "NEW_MODEL_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "old/old-model"
+	cfg.Desktop.ProviderAccess = []string{"old", "new"}
+	cfg.Providers = []config.ProviderEntry{
+		{Name: "old", Kind: "openai", BaseURL: "https://example.invalid/v1", Model: "old-model", APIKeyEnv: "OLD_MODEL_KEY"},
+		{Name: "new", Kind: "openai", BaseURL: "https://example.invalid/v1", Model: "new-model", APIKeyEnv: "NEW_MODEL_KEY"},
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	if err := os.MkdirAll(config.MemoryUserDir(), 0o755); err != nil {
+		t.Fatalf("mkdir memory dir: %v", err)
+	}
+	const freshRule = "Fresh global AGENTS rule for model switch"
+	if err := os.WriteFile(filepath.Join(config.MemoryUserDir(), "AGENTS.md"), []byte(freshRule), 0o644); err != nil {
+		t.Fatalf("write global AGENTS.md: %v", err)
+	}
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	oldSession := agent.NewSession("old system prompt without memory")
+	oldSession.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
+	oldExec := agent.New(nil, nil, oldSession, agent.Options{}, event.Discard)
+	oldPath := filepath.Join(dir, "old.jsonl")
+	oldCtrl := control.New(control.Options{Executor: oldExec, SessionDir: dir, SessionPath: oldPath, Label: "old", Sink: event.Discard})
+
+	app := NewApp()
+	app.ctx = context.Background()
+	tab := &WorkspaceTab{
+		ID:          "tab_a",
+		Scope:       "global",
+		Ready:       true,
+		model:       "old/old-model",
+		Ctrl:        oldCtrl,
+		sink:        &tabEventSink{tabID: "tab_a", app: app},
+		disabledMCP: map[string]ServerView{},
+	}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	t.Cleanup(func() {
+		if tab.Ctrl != nil {
+			tab.Ctrl.Close()
+		}
+	})
+
+	if err := app.SetModelForTab(tab.ID, "new/new-model"); err != nil {
+		t.Fatalf("SetModelForTab: %v", err)
+	}
+	history := tab.Ctrl.History()
+	if len(history) < 2 {
+		t.Fatalf("history length = %d, want system + user", len(history))
+	}
+	if history[0].Role != provider.RoleSystem {
+		t.Fatalf("first message role = %s, want system", history[0].Role)
+	}
+	if !strings.Contains(history[0].Content, freshRule) {
+		t.Fatalf("refreshed system prompt missing global AGENTS rule:\n%s", history[0].Content)
+	}
+	if history[1].Role != provider.RoleUser || history[1].Content != "hello" {
+		t.Fatalf("carried user message changed: %+v", history[1])
+	}
+}
+
+type staleWorkspaceBindingFixture struct {
+	app          *App
+	tab          *WorkspaceTab
+	oldCtrl      control.SessionAPI
+	projectA     string
+	sessionDirA  string
+	sessionPathA string
+}
+
+func newStaleWorkspaceBindingFixture(t *testing.T, suffix string) staleWorkspaceBindingFixture {
+	return newStaleWorkspaceBindingFixtureWithLayout(t, suffix, "")
+}
+
+func newStaleWorkspaceBindingFixtureWithLayout(t *testing.T, suffix, layoutStyle string) staleWorkspaceBindingFixture {
+	t.Helper()
+	isolateDesktopUserDirs(t)
+	setDesktopTestCredential(t, "TEST_MODEL_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "test/test-model"
+	cfg.Desktop.ProviderAccess = []string{"test"}
+	cfg.Providers = []config.ProviderEntry{
+		{Name: "test", Kind: "openai", BaseURL: "https://example.invalid/v1", Model: "test-model", APIKeyEnv: "TEST_MODEL_KEY"},
+	}
+	if strings.TrimSpace(layoutStyle) != "" {
+		if err := cfg.SetDesktopLayoutStyle(layoutStyle); err != nil {
+			t.Fatalf("set desktop layout style: %v", err)
+		}
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	projectA := t.TempDir()
+	projectB := t.TempDir()
+	if err := addProject(projectA, "Project A"); err != nil {
+		t.Fatalf("add project A: %v", err)
+	}
+	if err := addProject(projectB, "Project B"); err != nil {
+		t.Fatalf("add project B: %v", err)
+	}
+
+	topicID := "topic_" + suffix
+	topicTitle := "Rebuild workspace " + suffix
+	sessionDirA := desktopSessionDir(projectA)
+	sessionDirB := desktopSessionDir(projectB)
+	if err := os.MkdirAll(sessionDirA, 0o755); err != nil {
+		t.Fatalf("mkdir project A sessions: %v", err)
+	}
+	if err := os.MkdirAll(sessionDirB, 0o755); err != nil {
+		t.Fatalf("mkdir project B sessions: %v", err)
+	}
+	sessionPathA := writeTopicSessionWithPrompt(t, sessionDirA, "project-a.jsonl", topicID, topicTitle, projectA, "project A prompt", time.Now())
+	sessionPathB := filepath.Join(sessionDirB, "wrong.jsonl")
+
+	oldSession := agent.NewSession("old system prompt")
+	oldSession.Add(provider.Message{Role: provider.RoleUser, Content: "carry me"})
+	oldExec := agent.New(nil, nil, oldSession, agent.Options{}, event.Discard)
+	oldCtrl := control.New(control.Options{
+		Executor:      oldExec,
+		SessionDir:    sessionDirB,
+		SessionPath:   sessionPathB,
+		Label:         "test/test-model",
+		ModelRef:      "test/test-model",
+		WorkspaceRoot: projectB,
+		Sink:          event.Discard,
+	})
+
+	app := NewApp()
+	app.readyHook = func() {}
+	tab := &WorkspaceTab{
+		ID:            "tab_stale_workspace_" + suffix,
+		Scope:         "project",
+		WorkspaceRoot: projectB,
+		TopicID:       topicID,
+		TopicTitle:    topicTitle,
+		SessionPath:   sessionPathA,
+		Ready:         true,
+		model:         "test/test-model",
+		Ctrl:          oldCtrl,
+		sink:          &tabEventSink{tabID: "tab_stale_workspace_" + suffix, app: app},
+		disabledMCP:   map[string]ServerView{},
+	}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	t.Cleanup(func() {
+		if tab.Ctrl != nil {
+			tab.Ctrl.Close()
+		}
+	})
+
+	return staleWorkspaceBindingFixture{
+		app:          app,
+		tab:          tab,
+		oldCtrl:      oldCtrl,
+		projectA:     projectA,
+		sessionDirA:  sessionDirA,
+		sessionPathA: sessionPathA,
+	}
+}
+
+func assertTabRebuiltToPinnedWorkspace(t *testing.T, f staleWorkspaceBindingFixture) {
+	t.Helper()
+	if f.tab.Ctrl == nil {
+		t.Fatal("controller was not rebuilt")
+	}
+	if f.tab.Ctrl == f.oldCtrl {
+		t.Fatal("stale controller was reused")
+	}
+	if got := normalizeProjectRoot(f.tab.WorkspaceRoot); got != normalizeProjectRoot(f.projectA) {
+		t.Fatalf("tab workspace root = %q, want project A %q", got, normalizeProjectRoot(f.projectA))
+	}
+	if got := normalizeProjectRoot(f.tab.Ctrl.WorkspaceRoot()); got != normalizeProjectRoot(f.projectA) {
+		t.Fatalf("controller workspace root = %q, want project A %q", got, normalizeProjectRoot(f.projectA))
+	}
+	if !sameDesktopPath(f.tab.Ctrl.SessionDir(), f.sessionDirA) {
+		t.Fatalf("controller session dir = %q, want %q", f.tab.Ctrl.SessionDir(), f.sessionDirA)
+	}
+	if !sameDesktopPath(f.tab.Ctrl.SessionPath(), f.sessionPathA) {
+		t.Fatalf("controller session path = %q, want %q", f.tab.Ctrl.SessionPath(), f.sessionPathA)
+	}
+}
+
+type blockingSnapshotCtrl struct {
+	control.SessionAPI
+
+	firstSnapshotStarted  chan struct{}
+	secondSnapshotStarted chan struct{}
+	releaseSnapshot       chan struct{}
+	firstOnce             sync.Once
+	secondOnce            sync.Once
+	snapshotCount         atomic.Int32
+	closeCount            atomic.Int32
+}
+
+func newBlockingSnapshotCtrl(ctrl control.SessionAPI) *blockingSnapshotCtrl {
+	return &blockingSnapshotCtrl{
+		SessionAPI:            ctrl,
+		firstSnapshotStarted:  make(chan struct{}),
+		secondSnapshotStarted: make(chan struct{}),
+		releaseSnapshot:       make(chan struct{}),
+	}
+}
+
+func (c *blockingSnapshotCtrl) Snapshot() error {
+	count := c.snapshotCount.Add(1)
+	switch count {
+	case 1:
+		c.firstOnce.Do(func() { close(c.firstSnapshotStarted) })
+	case 2:
+		c.secondOnce.Do(func() { close(c.secondSnapshotStarted) })
+	}
+	<-c.releaseSnapshot
+	if c.SessionAPI == nil {
+		return nil
+	}
+	return c.SessionAPI.Snapshot()
+}
+
+func (c *blockingSnapshotCtrl) Close() {
+	c.closeCount.Add(1)
+	if c.SessionAPI != nil {
+		c.SessionAPI.Close()
+	}
+}
+
+func (f *staleWorkspaceBindingFixture) installBlockingSnapshotController() *blockingSnapshotCtrl {
+	ctrl := newBlockingSnapshotCtrl(f.tab.Ctrl)
+	f.tab.Ctrl = ctrl
+	f.oldCtrl = ctrl
+	return ctrl
+}
+
+func TestEnsureTabControllerWorkspaceRebuildsStaleWorkspace(t *testing.T) {
+	f := newStaleWorkspaceBindingFixture(t, "rebuild_workspace")
+
+	if err := f.app.ensureTabControllerWorkspace(f.tab); err != nil {
+		t.Fatalf("ensureTabControllerWorkspace: %v", err)
+	}
+	assertTabRebuiltToPinnedWorkspace(t, f)
+}
+
+func TestSteerForTabReconcilesStaleWorkspaceBeforeIdleFallback(t *testing.T) {
+	f := newStaleWorkspaceBindingFixture(t, "steer_idle_fallback")
+
+	if err := f.app.SteerForTab(f.tab.ID, "/unknown-command"); err != nil {
+		t.Fatalf("SteerForTab: %v", err)
+	}
+	waitNotRunning(t, f.tab.Ctrl)
+	assertTabRebuiltToPinnedWorkspace(t, f)
+}
+
+func TestCompactReconcilesStaleWorkspaceBeforeCompaction(t *testing.T) {
+	f := newStaleWorkspaceBindingFixture(t, "compact")
+
+	if err := f.app.Compact(); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	assertTabRebuiltToPinnedWorkspace(t, f)
+}
+
+func TestEffortCommandUsesPinnedSessionOwnerBeforeStaleWorkspaceRoot(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	setDesktopTestCredential(t, "OWNER_MODEL_KEY", "sk-test")
+	setDesktopTestCredential(t, "STALE_MODEL_KEY", "sk-test")
+
+	projectA := t.TempDir()
+	projectB := t.TempDir()
+	if err := addProject(projectA, "Project A"); err != nil {
+		t.Fatalf("add project A: %v", err)
+	}
+	if err := addProject(projectB, "Project B"); err != nil {
+		t.Fatalf("add project B: %v", err)
+	}
+	ownerConfig := `default_model = "owner/owner-model"
+[[providers]]
+name = "owner"
+kind = "openai"
+base_url = "https://owner.example.invalid/v1"
+model = "owner-model"
+api_key_env = "OWNER_MODEL_KEY"
+supported_efforts = ["max"]
+default_effort = "max"
+`
+	if err := os.WriteFile(filepath.Join(projectA, "reasonix.toml"), []byte(ownerConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	staleConfig := `default_model = "stale/stale-model"
+[[providers]]
+name = "stale"
+kind = "openai"
+base_url = "https://stale.example.invalid/v1"
+model = "stale-model"
+api_key_env = "STALE_MODEL_KEY"
+reasoning_protocol = "none"
+`
+	if err := os.WriteFile(filepath.Join(projectB, "reasonix.toml"), []byte(staleConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	topicID := "topic_effort_owner"
+	topicTitle := "Effort owner"
+	sessionDirA := desktopSessionDir(projectA)
+	sessionDirB := desktopSessionDir(projectB)
+	if err := os.MkdirAll(sessionDirA, 0o755); err != nil {
+		t.Fatalf("mkdir project A sessions: %v", err)
+	}
+	if err := os.MkdirAll(sessionDirB, 0o755); err != nil {
+		t.Fatalf("mkdir project B sessions: %v", err)
+	}
+	sessionPathA := writeTopicSessionWithPrompt(t, sessionDirA, "project-a.jsonl", topicID, topicTitle, projectA, "project A prompt", time.Now())
+	oldCtrl := control.New(control.Options{
+		SessionDir:    sessionDirB,
+		SessionPath:   filepath.Join(sessionDirB, "wrong.jsonl"),
+		WorkspaceRoot: projectB,
+		Sink:          event.Discard,
+	})
+
+	app := NewApp()
+	app.readyHook = func() {}
+	tab := &WorkspaceTab{
+		ID:            "tab_stale_effort",
+		Scope:         "project",
+		WorkspaceRoot: projectB,
+		TopicID:       topicID,
+		TopicTitle:    topicTitle,
+		SessionPath:   sessionPathA,
+		Ready:         true,
+		Ctrl:          oldCtrl,
+		sink:          &tabEventSink{tabID: "tab_stale_effort", app: app},
+		disabledMCP:   map[string]ServerView{},
+	}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	t.Cleanup(func() {
+		if tab.Ctrl != nil {
+			tab.Ctrl.Close()
+		}
+	})
+
+	if err := app.SubmitToTab(tab.ID, "/effort max"); err != nil {
+		t.Fatalf("SubmitToTab(/effort max): %v", err)
+	}
+	waitNotRunning(t, tab.Ctrl)
+	if tab.effort == nil || *tab.effort != "max" {
+		t.Fatalf("tab effort = %#v, want max from pinned project A provider", tab.effort)
+	}
+	if got := normalizeProjectRoot(tab.WorkspaceRoot); got != normalizeProjectRoot(projectA) {
+		t.Fatalf("tab workspace root = %q, want project A %q", got, normalizeProjectRoot(projectA))
+	}
+	if got := normalizeProjectRoot(tab.Ctrl.WorkspaceRoot()); got != normalizeProjectRoot(projectA) {
+		t.Fatalf("controller workspace root = %q, want project A %q", got, normalizeProjectRoot(projectA))
+	}
+}
+
+func TestClassicLayoutQuickClicksSerializeWorkspaceRebuild(t *testing.T) {
+	runQuickClickWorkspaceReconcileTest(t, "classic")
+}
+
+func TestWorkbenchLayoutQuickClicksSerializeWorkspaceRebuild(t *testing.T) {
+	runQuickClickWorkspaceReconcileTest(t, "workbench")
+}
+
+func TestCreationLayoutQuickClicksSerializeWorkspaceRebuild(t *testing.T) {
+	runQuickClickWorkspaceReconcileTest(t, "creation")
+}
+
+func runQuickClickWorkspaceReconcileTest(t *testing.T, layoutStyle string) {
+	t.Helper()
+	f := newStaleWorkspaceBindingFixtureWithLayout(t, "quick_click_"+layoutStyle, layoutStyle)
+	if got, want := f.app.singleSurfaceLayoutEnabled(), singleSurfaceLayoutStyle(layoutStyle); got != want {
+		t.Fatalf("singleSurfaceLayoutEnabled(%q) = %v, want %v", layoutStyle, got, want)
+	}
+	blockingCtrl := f.installBlockingSnapshotController()
+
+	type quickAction struct {
+		name string
+		run  func() error
+	}
+	actions := []quickAction{
+		{name: "submit", run: func() error { return f.app.SubmitToTab(f.tab.ID, "/unknown-command") }},
+		{name: "steer", run: func() error { return f.app.SteerForTab(f.tab.ID, "/unknown-command") }},
+		{name: "compact", run: func() error { return f.app.Compact() }},
+		{name: "submit-display", run: func() error { return f.app.SubmitDisplayToTab(f.tab.ID, "/unknown display", "/unknown-command") }},
+	}
+
+	start := make(chan struct{})
+	ready := make(chan struct{}, len(actions))
+	errs := make(chan error, len(actions))
+	var wg sync.WaitGroup
+	for _, action := range actions {
+		action := action
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ready <- struct{}{}
+			<-start
+			if err := action.run(); err != nil {
+				errs <- fmt.Errorf("%s: %w", action.name, err)
+			}
+		}()
+	}
+	for range actions {
+		<-ready
+	}
+	close(start)
+
+	select {
+	case <-blockingCtrl.firstSnapshotStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first stale controller snapshot")
+	}
+	select {
+	case <-blockingCtrl.secondSnapshotStarted:
+		t.Fatal("workspace rebuild was not serialized: second stale snapshot started before the first rebuild finished")
+	case <-time.After(75 * time.Millisecond):
+	}
+	close(blockingCtrl.releaseSnapshot)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	if t.Failed() {
+		return
+	}
+	if got := blockingCtrl.snapshotCount.Load(); got != 1 {
+		t.Fatalf("stale snapshot count = %d, want 1", got)
+	}
+	if got := blockingCtrl.closeCount.Load(); got != 1 {
+		t.Fatalf("stale close count = %d, want 1", got)
+	}
+	waitNotRunning(t, f.tab.Ctrl)
+	assertTabRebuiltToPinnedWorkspace(t, f)
+}
+
+func TestListSessionsUsesPinnedSessionOwnerBeforeStaleRuntimeDir(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectA := t.TempDir()
+	projectB := t.TempDir()
+	if err := addProject(projectA, "Project A"); err != nil {
+		t.Fatalf("add project A: %v", err)
+	}
+	if err := addProject(projectB, "Project B"); err != nil {
+		t.Fatalf("add project B: %v", err)
+	}
+	sessionDirA := desktopSessionDir(projectA)
+	sessionDirB := desktopSessionDir(projectB)
+	if err := os.MkdirAll(sessionDirA, 0o755); err != nil {
+		t.Fatalf("mkdir project A sessions: %v", err)
+	}
+	if err := os.MkdirAll(sessionDirB, 0o755); err != nil {
+		t.Fatalf("mkdir project B sessions: %v", err)
+	}
+	sessionPathA := writeTopicSessionWithPrompt(t, sessionDirA, "project-a.jsonl", "topic_project_a", "Project A topic", projectA, "project A prompt", time.Now())
+	sessionPathB := writeTopicSessionWithPrompt(t, sessionDirB, "project-b.jsonl", "topic_project_b", "Project B topic", projectB, "project B prompt", time.Now().Add(time.Minute))
+
+	app := NewApp()
+	oldCtrl := control.New(control.Options{
+		SessionDir:    sessionDirB,
+		SessionPath:   sessionPathB,
+		WorkspaceRoot: projectB,
+		Sink:          event.Discard,
+	})
+	tab := &WorkspaceTab{
+		ID:            "tab_stale_runtime_dir",
+		Scope:         "project",
+		WorkspaceRoot: projectB,
+		TopicID:       "topic_project_a",
+		TopicTitle:    "Project A topic",
+		SessionPath:   sessionPathA,
+		Ready:         true,
+		Ctrl:          oldCtrl,
+		disabledMCP:   map[string]ServerView{},
+	}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	t.Cleanup(oldCtrl.Close)
+
+	sessions := app.ListSessions()
+	if len(sessions) == 0 {
+		t.Fatal("ListSessions() returned no sessions")
+	}
+	if filepath.Clean(sessions[0].Path) != filepath.Clean(sessionPathA) {
+		t.Fatalf("ListSessions()[0].Path = %q, want pinned project A session %q", sessions[0].Path, sessionPathA)
+	}
+	for _, item := range sessions {
+		if filepath.Clean(item.Path) == filepath.Clean(sessionPathB) {
+			t.Fatalf("ListSessions() included stale project B runtime session: %+v", sessions)
+		}
+	}
+	if got := normalizeProjectRoot(tab.WorkspaceRoot); got != normalizeProjectRoot(projectA) {
+		t.Fatalf("tab workspace root = %q, want project A %q", got, normalizeProjectRoot(projectA))
 	}
 }
 
@@ -2689,8 +3201,8 @@ func TestDeleteLastTopicSessionFallbackDoesNotReuseDeletedTopic(t *testing.T) {
 		if tab.TopicID == topicID {
 			t.Fatalf("fallback tab %q reused deleted topic %q", id, topicID)
 		}
-		if strings.TrimSpace(tab.TopicID) == "" {
-			t.Fatalf("fallback tab %q has empty topic ID", id)
+		if strings.TrimSpace(tab.TopicID) != "" {
+			t.Fatalf("fallback tab %q topic ID = %q, want transient unindexed blank", id, tab.TopicID)
 		}
 	}
 	trashPath := filepath.Join(dir, sessionTrashDir, "delete-last.jsonl", "delete-last.jsonl")
@@ -3969,6 +4481,45 @@ args = ["serve"]
 	}
 	if _, ok := findPluginEntry(cfg.Plugins, "time"); ok {
 		t.Fatalf("time plugin still configured after remove: %+v", cfg.Plugins)
+	}
+}
+
+func TestRemoveMCPServerClearsRecordedStartupFailure(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+[[plugins]]
+name = "broken"
+command = "reasonix-missing-mcp-binary"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
+	defer app.activeCtrl().Close()
+	recordMCPFailure(app.activeCtrl(), config.PluginEntry{
+		Name:    "broken",
+		Command: "reasonix-missing-mcp-binary",
+	}, errors.New("connect: missing binary"))
+
+	view := app.Capabilities()
+	if len(view.Servers) != 1 || view.Servers[0].Name != "broken" || view.Servers[0].Status != "failed" {
+		t.Fatalf("Capabilities before remove = %+v, want broken failed", view.Servers)
+	}
+
+	if err := app.RemoveMCPServer("broken"); err != nil {
+		t.Fatalf("RemoveMCPServer(broken): %v", err)
+	}
+	if mcpFailed(app.activeCtrl(), "broken") {
+		t.Fatalf("Host.Failures() still contains broken after remove: %+v", app.activeCtrl().Host().Failures())
+	}
+	view = app.Capabilities()
+	for _, s := range view.Servers {
+		if s.Name == "broken" {
+			t.Fatalf("Capabilities after remove still contains broken: %+v", view.Servers)
+		}
 	}
 }
 

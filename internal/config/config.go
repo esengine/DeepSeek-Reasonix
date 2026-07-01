@@ -80,6 +80,7 @@ type UIConfig struct {
 	ShortcutLayout string `toml:"shortcut_layout"` // classic|desktop; accepted for compatibility
 	CloseBehavior  string `toml:"close_behavior"`  // legacy desktop close behavior; prefer desktop.close_behavior
 	ShowReasoning  bool   `toml:"show_reasoning"`  // Ctrl+O / /verbose: show thinking text in CLI; false = collapsed
+	CursorShape    string `toml:"cursor_shape"`    // block|underline|bar; empty defaults to underline
 }
 
 // DesktopConfig controls desktop-only UI preferences. It is intentionally
@@ -151,6 +152,21 @@ func (c *Config) UIShortcutLayout() string {
 		return "desktop"
 	default:
 		return "classic"
+	}
+}
+
+// UICursorShape normalizes ui.cursor_shape. Defaults to "underline" to avoid
+// block-cursor visual corruption with CJK wide characters in the textarea
+// (Bubble Tea real-cursor + CJK column-counting drift). Valid values:
+// "block", "underline", "bar".
+func (c *Config) UICursorShape() string {
+	switch strings.ToLower(strings.TrimSpace(c.UI.CursorShape)) {
+	case "block":
+		return "block"
+	case "bar":
+		return "bar"
+	default:
+		return "underline"
 	}
 }
 
@@ -901,8 +917,14 @@ type AgentConfig struct {
 
 // MemoryCompilerConfig controls the v5 execution-memory compiler.
 type MemoryCompilerConfig struct {
-	Enabled *bool `toml:"enabled"`
+	Enabled   *bool  `toml:"enabled"`
+	Verbosity string `toml:"verbosity"`
 }
+
+const (
+	MemoryCompilerVerbosityObserve = "observe"
+	MemoryCompilerVerbosityCompact = "compact"
+)
 
 // MemoryCompilerEnabled reports whether the v5 execution-memory compiler should
 // participate in future turns. Missing config defaults to true.
@@ -913,6 +935,29 @@ func (c *Config) MemoryCompilerEnabled() bool {
 	return *c.Agent.MemoryCompiler.Enabled
 }
 
+// MemoryCompilerVerbosity reports how much Memory v5 state should be injected
+// into model-facing turns. The default observes and learns without prompt
+// injection, so Memory v5 IR is not provider-visible unless opted in.
+func (c *Config) MemoryCompilerVerbosity() string {
+	if c == nil {
+		return MemoryCompilerVerbosityObserve
+	}
+	return NormalizeMemoryCompilerVerbosity(c.Agent.MemoryCompiler.Verbosity)
+}
+
+// NormalizeMemoryCompilerVerbosity accepts current and legacy spellings for the
+// Memory v5 injection mode.
+func NormalizeMemoryCompilerVerbosity(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "observe", "observed", "silent", "minimal", "none":
+		return MemoryCompilerVerbosityObserve
+	case "compact", "inject", "injected", "contract", "on":
+		return MemoryCompilerVerbosityCompact
+	default:
+		return MemoryCompilerVerbosityObserve
+	}
+}
+
 // ProviderEntry declares a model provider instance. ContextWindow is the model's
 // token budget; the harness compacts older history as a turn's prompt approaches
 // it (see agent compaction). 0 disables compaction for the instance.
@@ -920,6 +965,7 @@ type ProviderEntry struct {
 	Name           string   `toml:"name"`
 	Kind           string   `toml:"kind"`
 	BaseURL        string   `toml:"base_url"`
+	ChatURL        string   `toml:"chat_url"`
 	Model          string   `toml:"model"`      // a single model (back-compat)
 	Models         []string `toml:"models"`     // a vendor's model list (one base_url/key, many models)
 	ModelsURL      string   `toml:"models_url"` // auto-fetch models from this URL on startup

@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/textarea"
-	tea "charm.land/bubbletea/v2"
 
 	"reasonix/internal/event"
 )
@@ -390,110 +389,6 @@ func TestConsecutiveNonShellToolsDoNotRenderNegativeLineCount(t *testing.T) {
 		if strings.Contains(line, "0 lines") || strings.Contains(line, "-1 lines") {
 			t.Fatalf("non-shell tool marker should be blank, got %q\nfull transcript:\n%s",
 				line, strings.Join(transcript, "\n"))
-		}
-	}
-}
-
-func TestSubagentNoticeEmbedsTranscriptBlock(t *testing.T) {
-	m := newTestChatTUI()
-	m.ingestEvent(event.Event{
-		Kind: event.Notice,
-		Text: "raw fallback text should not be shown",
-		Subagent: &event.Subagent{
-			ID:    "run-123",
-			Skill: "只读测试员",
-			Alias: "Blair",
-			State: event.SubagentRunning,
-		},
-	})
-
-	if len(m.transcript) != 1 {
-		t.Fatalf("subagent notice should create one live transcript block, transcript=%v", m.transcript)
-	}
-	panel := m.transcript[0]
-	for _, want := range []string{"[subagent]", "Blair", "/只读测试员", "running", "Ctrl-O expand"} {
-		if !strings.Contains(panel, want) {
-			t.Fatalf("subagent transcript block missing %q: %q", want, panel)
-		}
-	}
-	if strings.Contains(panel, "raw fallback text should not be shown") {
-		t.Fatalf("subagent block should be rendered from structured metadata, got %q", panel)
-	}
-}
-
-func TestSubagentTranscriptBlockDoesNotUseBottomRegion(t *testing.T) {
-	m := newTestChatTUI()
-	baseRows := m.bottomRows()
-
-	m.ingestEvent(event.Event{
-		Kind: event.Notice,
-		Subagent: &event.Subagent{
-			ID:    "run-123",
-			Skill: "只读测试员",
-			Alias: "Blair",
-			State: event.SubagentRunning,
-		},
-	})
-
-	if got := m.bottomRows(); got != baseRows {
-		t.Fatalf("embedded subagent block should not grow bottom region, before=%d after=%d", baseRows, got)
-	}
-}
-
-func TestCtrlOTogglesEmbeddedSubagentBlock(t *testing.T) {
-	m := newTestChatTUI()
-	m.height = 24
-	m.subagent = &subagentPanel{
-		alias:  "Blair",
-		skill:  "scout",
-		status: string(event.SubagentRunning),
-		lines:  []string{"one", "two", "three", "four", "five", "six"},
-	}
-	m.refreshSubagentTranscript(m.subagent)
-
-	collapsed := m.transcript[m.subagent.transcriptIdx]
-	if !strings.Contains(collapsed, "Ctrl-O expand") {
-		t.Fatalf("collapsed subagent block should advertise Ctrl-O expand, got %q", collapsed)
-	}
-
-	updated, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'o', Mod: tea.ModCtrl}))
-	m2, ok := updated.(chatTUI)
-	if !ok {
-		t.Fatalf("Update returned %T, want chatTUI", updated)
-	}
-	if m2.subagent == nil || !m2.subagent.expanded {
-		t.Fatalf("Ctrl-O should expand the embedded subagent block, panel=%#v", m2.subagent)
-	}
-
-	expanded := m2.transcript[m2.subagent.transcriptIdx]
-	if !strings.Contains(expanded, "Ctrl-O collapse") {
-		t.Fatalf("expanded subagent block should advertise Ctrl-O collapse, got %q", expanded)
-	}
-}
-
-func TestCompletedSubagentTranscriptShowsFullAnswer(t *testing.T) {
-	m := newTestChatTUI()
-	m.subagent = &subagentPanel{
-		alias:     "Noel",
-		skill:     "只读测试员",
-		status:    string(event.SubagentCompleted),
-		completed: true,
-		expanded:  true,
-		lines: []string{
-			"line 1", "line 2", "line 3", "line 4",
-			"line 5", "line 6", "line 7", "line 8",
-		},
-		answer: "first line\nsecond line\nthird line",
-	}
-	m.refreshSubagentTranscript(m.subagent)
-
-	block := m.transcript[m.subagent.transcriptIdx]
-	if strings.Contains(block, "lines omitted") {
-		t.Fatalf("completed subagent block should stay fully expanded, got %q", block)
-	}
-	for _, want := range []string{"line 8", "answer", "first line", "third line"} {
-		if !strings.Contains(block, want) {
-			t.Fatalf("completed subagent block missing %q: %q", want, block)
 		}
 	}
 }

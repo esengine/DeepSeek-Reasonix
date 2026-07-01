@@ -672,21 +672,6 @@ func TestClampSel(t *testing.T) {
 	}
 }
 
-func TestTrimLastRune(t *testing.T) {
-	if got := trimLastRune(""); got != "" {
-		t.Fatalf("trimLastRune(empty) = %q, want empty", got)
-	}
-	if got := trimLastRune("abc"); got != "ab" {
-		t.Fatalf("trimLastRune(abc) = %q, want ab", got)
-	}
-	if got := trimLastRune("复核a"); got != "复核" {
-		t.Fatalf("trimLastRune(复核a) = %q, want 复核", got)
-	}
-	if got := trimLastRune("复核"); got != "复" {
-		t.Fatalf("trimLastRune(复核) = %q, want 复", got)
-	}
-}
-
 func TestSkillRowLabelHasSubagentTag(t *testing.T) {
 	s := skill.Skill{Name: "review", Description: "Review code", Scope: skill.ScopeProject, RunAs: skill.RunSubagent}
 	row := renderSkillRow(1, false, s, true, 80)

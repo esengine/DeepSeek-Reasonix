@@ -2,26 +2,14 @@ package control
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"unicode"
 
 	"reasonix/internal/agent"
-	"reasonix/internal/command"
 	"reasonix/internal/planmode"
 	"reasonix/internal/skill"
 )
-
-func slashFields(input string) []string {
-	return command.TokenizeArgs(strings.TrimSpace(input))
-}
-
-func rawSlashArgs(input string) string {
-	trimmed := strings.TrimSpace(input)
-	if i := strings.IndexFunc(trimmed, unicode.IsSpace); i >= 0 {
-		return strings.TrimSpace(trimmed[i+1:])
-	}
-	return ""
-}
 
 // PlanModeMarker is prepended to every user turn while plan mode is on. It rides
 // in the user message (not the system prompt or tools), so the cache-stable
@@ -152,9 +140,9 @@ var syntheticPrefixes = []string{
 	"No tool calls in recent turns.",
 }
 
-// Compose applies controller-owned context to a parent turn's text, returning
-// the message to actually send to the model. The frontend keeps showing the raw
-// text as the user bubble.
+// Compose applies the plan-mode marker to a turn's text when plan mode is on,
+// returning the message to actually send to the model. The frontend keeps
+// showing the raw text as the user bubble.
 func (c *Controller) Compose(text string) string {
 	c.mu.Lock()
 	plan := c.planMode
@@ -162,9 +150,20 @@ func (c *Controller) Compose(text string) string {
 	reasoningLanguage := c.reasoningLanguage
 	c.mu.Unlock()
 	notes := c.memory.drainPending()
-	goal, goalStatus, goalResearchMode := c.goals.snapshot()
+	goal, goalStatus, goalResearchMode, autoResearchTaskID := c.goals.snapshot()
 
-	text = composeStableContext(text, plan, goal, goalStatus, goalResearchMode, responseLanguage, reasoningLanguage)
+	if strings.TrimSpace(goal) != "" && goalStatus == GoalStatusRunning {
+		prefix := activeGoalBlock(goal, goalResearchMode)
+		if runtime := c.autoResearchRuntimeBlock(autoResearchTaskID); runtime != "" {
+			prefix += "\n\n" + runtime
+		}
+		text = prefix + "\n\n" + text
+	}
+	if plan {
+		text = PlanModeMarker + "\n\n" + text
+	}
+	text = agent.WithResponseLanguage(text, responseLanguage)
+	text = agent.WithReasoningLanguage(text, reasoningLanguage)
 
 	// Memory added mid-session rides the turn (never the cached system prefix),
 	// so it takes effect now without invalidating the prompt cache. It folds into
@@ -191,26 +190,52 @@ func (c *Controller) Compose(text string) string {
 	return text
 }
 
-func (c *Controller) composeWithoutParentDrains(text string) string {
-	c.mu.Lock()
-	plan := c.planMode
-	responseLanguage := c.responseLanguage
-	reasoningLanguage := c.reasoningLanguage
-	c.mu.Unlock()
-	goal, goalStatus, goalResearchMode := c.goals.snapshot()
-	return composeStableContext(text, plan, goal, goalStatus, goalResearchMode, responseLanguage, reasoningLanguage)
+func (c *Controller) autoResearchRuntimeBlock(taskID string) string {
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return ""
+	}
+	summary, err := c.autoResearch.Summary(taskID)
+	if err != nil {
+		return "<autoresearch-runtime>\nstatus: invalid\nerror: " + strings.ReplaceAll(err.Error(), autoResearchRuntimeClose, "<\\/autoresearch-runtime>") + "\n</autoresearch-runtime>"
+	}
+	var b strings.Builder
+	b.WriteString("<autoresearch-runtime>\n")
+	b.WriteString("task_id: " + summary.TaskID + "\n")
+	b.WriteString("status: " + summary.Status + "\n")
+	b.WriteString("iteration: ")
+	b.WriteString(strconv.Itoa(summary.Iteration))
+	b.WriteString("\n")
+	b.WriteString("current_direction: " + summary.CurrentDirection + "\n")
+	b.WriteString("stale_count: ")
+	b.WriteString(strconv.Itoa(summary.StaleCount))
+	b.WriteString("\n")
+	b.WriteString("pivot_count: ")
+	b.WriteString(strconv.Itoa(summary.PivotCount))
+	b.WriteString("\n")
+	if summary.PivotRequired {
+		b.WriteString("pivot_required: true\n")
+	} else {
+		b.WriteString("pivot_required: false\n")
+	}
+	b.WriteString("open_success_criteria: ")
+	b.WriteString(strconv.Itoa(len(summary.OpenCriteria)))
+	b.WriteString("\n")
+	for _, criterion := range summary.OpenCriteria {
+		b.WriteString("- ")
+		b.WriteString(criterion.ID)
+		b.WriteString(": ")
+		b.WriteString(strings.ReplaceAll(criterion.Description, "\n", " "))
+		b.WriteString("\n")
+	}
+	if summary.Blocker != "" {
+		b.WriteString("blocker: " + summary.Blocker + "\n")
+	}
+	b.WriteString("next_required_action: " + summary.NextRequiredAction + "\n")
+	b.WriteString("</autoresearch-runtime>")
+	return b.String()
 }
 
-func composeStableContext(text string, plan bool, goal, goalStatus string, goalResearchMode GoalResearchMode, responseLanguage, reasoningLanguage string) string {
-	if strings.TrimSpace(goal) != "" && goalStatus == GoalStatusRunning {
-		text = activeGoalBlock(goal, goalResearchMode) + "\n\n" + text
-	}
-	if plan {
-		text = PlanModeMarker + "\n\n" + text
-	}
-	text = agent.WithResponseLanguage(text, responseLanguage)
-	return agent.WithReasoningLanguage(text, reasoningLanguage)
-}
+const autoResearchRuntimeClose = "</autoresearch-runtime>"
 
 func reasoningLanguageBlock(lang string) string {
 	return agent.ReasoningLanguageBlock(lang)
@@ -244,14 +269,17 @@ func activeGoalBlock(goal string, researchMode GoalResearchMode) string {
 }
 
 const autoResearchGoalInstructions = `AutoResearch protocol: this goal looks like long-horizon research, debugging, optimization, or implementation work. Treat AutoResearch as a durable strategy for this Goal, not as a background daemon or a global skill.
-- Say briefly in the first visible reply that the goal is being handled with AutoResearch and that state will live under .reasonix/autoresearch/<task-id>/.
+- Say briefly in the first visible reply that the goal is being handled with AutoResearch and that host-owned state lives under .reasonix/autoresearch/<task-id>/, using the actual task_id from <autoresearch-runtime>.
 - Keep dynamic state out of REASONIX.md, AGENTS.md, project memory, system prompts, and tool schemas. Use project-local .reasonix/autoresearch/ state only.
-- For a new task, create a collision-resistant task id YYYYMMDD-HHMMSS-slug, check .reasonix/autoresearch/ first, and append -2, -3, etc. only on collision. Reuse an explicitly supplied .reasonix/autoresearch/<task-id>/ path exactly.
-- Maintain state/task_spec.md, state/progress.json, state/findings.jsonl, state/directions_tried.json, state/iteration_log.jsonl, and logs/heartbeat.jsonl. Record goal, scope, non-goals, allowed operations, success criteria, verification gates, iteration direction, evidence, stale_count, pivots, blockers, and completion summary.
-- Before each iteration, read the existing state files as authoritative, append a heartbeat, choose a direction that differs materially from directions already tried, execute the smallest evidence-producing chunk, verify it, then persist JSON/JSONL state before reporting.
+- Use the task_id and open_success_criteria in <autoresearch-runtime> as authoritative. The host creates task ids and owns state/task_spec.json, state/progress.json, state/findings.jsonl, state/directions_tried.json, state/iteration_log.jsonl, and logs/heartbeat.jsonl.
+- Do not hand-edit the host-owned AutoResearch state files. When you have direct evidence for an open criterion, include an <autoresearch-evidence> block in your assistant reply so the host can persist it:
+<autoresearch-evidence>
+{"criterion_id":"objective_evidence","kind":"file","summary":"What was directly observed","source":"file","paths":["relative/path"],"accepted":true}
+</autoresearch-evidence>
+- Before each iteration, use the runtime summary as authoritative, choose a direction that differs materially from directions already tried, execute the smallest evidence-producing chunk, verify it, and report accepted evidence with <autoresearch-evidence> blocks.
 - Increment stale_count when an iteration lacks accepted evidence or repeats a prior direction. At stale_count >= 2, make a structural pivot such as changing evidence source, entrypoint, implementation boundary, test oracle, benchmark, decomposition, environment, platform, or refutation angle. At stale_count >= 4, stop autonomous digging and ask for the smallest external input needed.
 - Workers or subagents may gather evidence, but the orchestrator owns canonical state writes. Workers must not publish, push, delete, contact external systems, or write canonical state unless explicitly designated.
-- Complete only after auditing every success criterion in task_spec.md against direct evidence. Public publishing, destructive changes, credential use, payments, external notifications, privacy-sensitive output, and cache-sensitive changes still require the normal Reasonix gates.`
+- Complete only after auditing every open success criterion in <autoresearch-runtime> against direct evidence. Public publishing, destructive changes, credential use, payments, external notifications, privacy-sensitive output, and cache-sensitive changes still require the normal Reasonix gates.`
 
 func shouldUseAutoResearch(goal string, mode GoalResearchMode) bool {
 	switch mode {
@@ -493,7 +521,7 @@ func leadingGoalToken(s string) (string, string) {
 // commands, returning the rendered prompt to send (found=false when no command
 // matches). It does not apply the plan-mode marker — call Compose for that.
 func (c *Controller) CustomCommand(input string) (sent string, found bool) {
-	fields := slashFields(input)
+	fields := strings.Fields(input)
 	if len(fields) == 0 {
 		return "", false
 	}
@@ -506,30 +534,59 @@ func (c *Controller) CustomCommand(input string) (sent string, found bool) {
 	return "", false
 }
 
-// ResolveSkill resolves a "/<name> args…" line against the loaded skills.
-// args preserves the raw text after the skill name so runAs=subagent skills can
-// receive an exact task string.
-func (c *Controller) ResolveSkill(input string) (sk skill.Skill, args string, found bool) {
-	fields := slashFields(input)
+// RunSkill resolves a "/<name> args…" line against the loaded skills, returning
+// the skill's rendered body to send as a turn (found=false when no skill
+// matches). The caller applies Compose for plan-mode/memory framing.
+func (c *Controller) RunSkill(input string) (sent string, found bool) {
+	sk, args, ok := c.resolveSlashSkill(input)
+	if !ok {
+		return "", false
+	}
+	return skill.Render(sk, args), true
+}
+
+// RunSkillCommand resolves a "/<name> args..." line against skills. Inline
+// skills still return their rendered body for a parent turn. runAs=subagent
+// skills are handled here because they must execute through the subagent runner,
+// not by inlining their body into the parent model context.
+func (c *Controller) RunSkillCommand(input, display string) (sent string, found bool, handled bool) {
+	sk, args, ok := c.resolveSlashSkill(input)
+	if !ok {
+		return "", false, false
+	}
+	if sk.RunAs != skill.RunSubagent {
+		return skill.Render(sk, args), true, false
+	}
+	if c.skillRunner == nil {
+		c.runGuarded(func(context.Context) error {
+			c.notice(input + " is runAs=subagent but no subagent runner is configured in this session")
+			return nil
+		})
+		return "", true, true
+	}
+	if strings.TrimSpace(args) == "" {
+		c.runGuarded(func(context.Context) error {
+			c.notice(input + " is runAs=subagent and requires arguments")
+			return nil
+		})
+		return "", true, true
+	}
+	c.runGuarded(func(ctx context.Context) error {
+		return c.runSlashSubagentSkill(ctx, input, display, sk, args)
+	})
+	return "", true, true
+}
+
+func (c *Controller) resolveSlashSkill(input string) (skill.Skill, string, bool) {
+	fields := strings.Fields(input)
 	if len(fields) == 0 {
 		return skill.Skill{}, "", false
 	}
 	name := strings.TrimPrefix(fields[0], "/")
 	if sk, ok := c.skills.byName(name); ok {
-		return sk, rawSlashArgs(input), true
+		return sk, strings.Join(fields[1:], " "), true
 	}
 	return skill.Skill{}, "", false
-}
-
-// RunSkill renders a resolved slash skill for inline execution in the main
-// loop. Callers must branch on ResolveSkill first when runAs=subagent needs the
-// isolated child-loop path.
-func (c *Controller) RunSkill(input string) (sent string, found bool) {
-	sk, args, found := c.ResolveSkill(input)
-	if !found {
-		return "", false
-	}
-	return skill.Render(sk, args), true
 }
 
 // MCPPrompt resolves a "/mcp__server__prompt args…" line: it maps the positional

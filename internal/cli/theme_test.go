@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
 
@@ -196,6 +197,39 @@ func TestApplyTextareaThemeClearsCursorLineBackground(t *testing.T) {
 			}
 			if styles.Cursor.Color == nil {
 				t.Fatal("cursor color is nil with color enabled")
+			}
+		})
+	}
+}
+
+func TestApplyTextareaThemeHonorsCursorShape(t *testing.T) {
+	t.Setenv("COLORTERM", "")
+	t.Setenv("TERM_PROGRAM", "")
+	t.Setenv("REASONIX_THEME", "")
+	t.Setenv("REASONIX_THEME_STYLE", "")
+	defer restoreThemeForTest(colorEnabled, activeCLITheme)
+	prevShape := cliCursorShape
+	defer func() { cliCursorShape = prevShape }()
+	colorEnabled = true
+	configureCLITheme("dark")
+
+	for _, tt := range []struct {
+		name string
+		in   string
+		want tea.CursorShape
+	}{
+		{name: "default", in: "", want: tea.CursorUnderline},
+		{name: "underline", in: "underline", want: tea.CursorUnderline},
+		{name: "block", in: "block", want: tea.CursorBlock},
+		{name: "bar", in: "bar", want: tea.CursorBar},
+		{name: "unknown", in: "unknown", want: tea.CursorUnderline},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cliCursorShape = tt.in
+			ti := textarea.New()
+			applyTextareaTheme(&ti)
+			if got := ti.Styles().Cursor.Shape; got != tt.want {
+				t.Fatalf("cursor shape = %v, want %v", got, tt.want)
 			}
 		})
 	}
