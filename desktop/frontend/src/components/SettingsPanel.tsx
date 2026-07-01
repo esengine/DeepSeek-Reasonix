@@ -4323,7 +4323,7 @@ function ProviderEditor({
   kinds: string[];
   busy: boolean;
   onCancel: () => void;
-  onSave: (p: ProviderView) => void;
+  onSave: (p: ProviderView) => void | Promise<void>;
   onSaveKey?: (apiKeyEnv: string, value: string) => Promise<void>;
   onClearKey?: (apiKeyEnv: string) => Promise<void>;
 }) {
@@ -4443,29 +4443,34 @@ function ProviderEditor({
     const ms = parseProviderListInput(models);
     const vms = parseProviderListInput(visionModels).filter((model) => ms.includes(model));
     const effectiveApiKeyEnv = providerApiKeyEnvForSave(name, apiKeyEnv, keyDraft);
-    if (keyDraft.trim()) await app.SetProviderKey(effectiveApiKeyEnv, keyDraft.trim());
-    onSave({
-      name: name.trim(),
-      builtIn: initial?.builtIn ?? false,
-      added: initial?.added ?? true,
-      kind: effectiveKind,
-      baseUrl: effectiveBaseUrl,
-      chatUrl: effectiveChatUrl,
-      models: ms,
-      visionModels: vms,
-      visionModelsConfigured: visionModelsConfigured || vms.length > 0,
-      default: ms[0] ?? "",
-      apiKeyEnv: effectiveApiKeyEnv,
-      modelsUrl: effectiveModelsUrl,
-      keySet: Boolean(keyDraft.trim()) || (initial?.keySet ?? false),
-      balanceUrl: balanceUrl.trim(),
-      contextWindow: Number(ctx) || 0,
-      reasoningProtocol,
-      supportedEfforts,
-      // Clear the stored default if no levels are selected; the backend's
-      // NormalizeEffort would otherwise silently ignore an unsupported value.
-      defaultEffort: supportedEfforts.length > 0 ? defaultEffort : "",
-    });
+    setFetchErr(null);
+    try {
+      if (keyDraft.trim()) await app.SetProviderKey(effectiveApiKeyEnv, keyDraft.trim());
+      await onSave({
+        name: name.trim(),
+        builtIn: initial?.builtIn ?? false,
+        added: initial?.added ?? true,
+        kind: effectiveKind,
+        baseUrl: effectiveBaseUrl,
+        chatUrl: effectiveChatUrl,
+        models: ms,
+        visionModels: vms,
+        visionModelsConfigured: visionModelsConfigured || vms.length > 0,
+        default: ms[0] ?? "",
+        apiKeyEnv: effectiveApiKeyEnv,
+        modelsUrl: effectiveModelsUrl,
+        keySet: Boolean(keyDraft.trim()) || (initial?.keySet ?? false),
+        balanceUrl: balanceUrl.trim(),
+        contextWindow: Number(ctx) || 0,
+        reasoningProtocol,
+        supportedEfforts,
+        // Clear the stored default if no levels are selected; the backend's
+        // NormalizeEffort would otherwise silently ignore an unsupported value.
+        defaultEffort: supportedEfforts.length > 0 ? defaultEffort : "",
+      });
+    } catch (e) {
+      setFetchErr(String((e as Error)?.message ?? e));
+    }
   };
 
   if (builtIn) {
