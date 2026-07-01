@@ -36,3 +36,14 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           npx wrangler deploy
+      - name: Sync RESEND_API_KEY to the worker
+        working-directory: workers/accounts
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          if [ -n "$RESEND_API_KEY" ]; then
+            printf '%s' "$RESEND_API_KEY" | npx wrangler secret put RESEND_API_KEY
+          else
+            echo "RESEND_API_KEY not set in repo secrets; skipping (worker stays in stub email mode)."
+          fi

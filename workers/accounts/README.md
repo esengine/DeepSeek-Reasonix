@@ -91,6 +91,10 @@ DNS/custom-domain binding at this worker in the Cloudflare dashboard on first de
 
 The steps above are the one-time bootstrap. After that, every merge to `main-v2`
 that touches `workers/accounts/**` redeploys via `.github/workflows/deploy-accounts-worker.yml`
-(same pattern as the crash worker). CI does **not** run migrations or set secrets —
-apply new migrations with `pnpm db:apply:remote` and rotate secrets with `wrangler secret put`
-out of band.
+(same pattern as the crash worker). CI does **not** run migrations — apply new ones
+with `pnpm db:apply:remote` out of band.
+
+`RESEND_API_KEY` is synced to the worker on each deploy from the `RESEND_API_KEY`
+GitHub Actions repo secret (so the mail key has a single source of truth and needs
+no local wrangler auth). `SESSION_PEPPER` is not in CI — set it once with
+`wrangler secret put SESSION_PEPPER`.
