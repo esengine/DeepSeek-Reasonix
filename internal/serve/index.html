@@ -1066,7 +1066,9 @@ function copyText(text) {
   return Promise.resolve(false);
 }
 function renderToolDispatch(tool) {
-  hideWelcome(); const card=el('div','card'); card.id='tool-'+tool.id; card.dataset.open='false'; card.dataset.tone='accent';
+  hideWelcome(); let card=toolCards[tool.id];
+  if(!card){card=el('div','card');card.id='tool-'+tool.id;}else{card.innerHTML='';}
+  card.dataset.open='false'; card.dataset.tone='accent';
   card.dataset.startedAt=String(Date.now());
   const head=el('div','card-head');
   const summary=toolArgsSummary(tool.args);
