@@ -658,8 +658,8 @@ func lastAssistantText(msgs []provider.Message) string {
 //
 // Slash commands route to the matching primitive: /compact, /new, and /clear
 // run their session op and emit a Notice; /mcp__server__prompt and custom /commands
-// resolve to a turn; an unknown slash emits a Notice. Anything else is a normal
-// turn with its @-references resolved first.
+// resolve to a turn; an unknown slash falls back to a normal turn. Anything else
+// is a normal turn with its @-references resolved first.
 func (c *Controller) Submit(input string) {
 	c.submit(input, "", "")
 }
@@ -871,7 +871,7 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 			})
 			return
 		}
-		c.notice("unknown command: " + trimmed)
+		runRefTurn(input, display)
 	default:
 		if c.maybeAutoStartResearchGoal(input, display, editedOriginal) {
 			return

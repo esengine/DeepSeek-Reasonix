@@ -2186,6 +2186,41 @@ func TestSlashQuitExit(t *testing.T) {
 	}
 }
 
+func TestUnknownSlashCommandStartsModelTurn(t *testing.T) {
+	runner := &recordingTurnRunner{}
+	events := make(chan event.Event, 4)
+	ctrl := control.New(control.Options{
+		AutoPlan: "off",
+		Runner:   runner,
+		Sink: event.FuncSink(func(e event.Event) {
+			events <- e
+		}),
+		SessionDir: t.TempDir(),
+		Label:      "test",
+	})
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+
+	const input = "/history正常应该是这样的行为"
+	if cmd := m.runSlashCommand(input); cmd == nil {
+		t.Fatal("unknown slash text should start a model turn")
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case e := <-events:
+			if e.Kind == event.TurnDone {
+				if len(runner.inputs) != 1 || runner.inputs[0] != input {
+					t.Fatalf("unknown slash command should be sent as a normal prompt, inputs=%q", runner.inputs)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for model turn, inputs=%q", runner.inputs)
+		}
+	}
+}
+
 func TestSlashMigrateShowsProgress(t *testing.T) {
 	isolateCLIConfigHome(t)
 	m := newTestChatTUI()

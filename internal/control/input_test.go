@@ -577,7 +577,7 @@ func TestSubmitMissingSlashPathDiagnosticStartsTurn(t *testing.T) {
 	}
 }
 
-func TestSubmitUnknownSlashCommandStillReportsNotice(t *testing.T) {
+func TestSubmitUnknownSlashCommandStartsNormalTurn(t *testing.T) {
 	runner := &fakeTurnRunner{}
 	events := make(chan event.Event, 4)
 	c := New(Options{
@@ -588,18 +588,12 @@ func TestSubmitUnknownSlashCommandStillReportsNotice(t *testing.T) {
 		}),
 	})
 
-	c.Submit("/definitely-not-a-command")
+	const input = "/history正常应该是这样的行为"
+	c.Submit(input)
+	waitForTurnDone(t, events)
 
-	if len(runner.inputs) != 0 {
-		t.Fatalf("unknown slash command should not start a model turn, inputs=%q", runner.inputs)
-	}
-	select {
-	case e := <-events:
-		if e.Kind != event.Notice || !strings.Contains(e.Text, "unknown command: /definitely-not-a-command") {
-			t.Fatalf("event = %+v, want unknown-command notice", e)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for unknown-command notice")
+	if len(runner.inputs) != 1 || runner.inputs[0] != input {
+		t.Fatalf("unknown slash command should start a normal model turn, inputs=%q", runner.inputs)
 	}
 }
 

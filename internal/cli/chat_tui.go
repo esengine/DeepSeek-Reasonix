@@ -1214,16 +1214,17 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(m.spinner.Tick, elapsedTick())
 			}
 
-			// Slash commands run locally without going through the model. A
+			// Known slash commands run locally without going through the model. A
 			// '/'-leading line that's actually a dragged file path is an attachment,
-			// not a command, so it's rewritten to an @reference instead.
+			// not a command, so it's rewritten to an @reference instead. Unknown
+			// slash-prefixed prose falls through to the normal message path.
 			if strings.HasPrefix(line, "//") {
 				// Double-slash — common in JS comments, file:// URLs, etc.
 				// Not a command. Fall through to normal message path.
 			} else if strings.HasPrefix(line, "/") {
 				if ref, ok := control.FileRefLine(line); ok {
 					line = ref
-				} else {
+				} else if m.handlesSlashCommand(line) {
 					m.input.Reset()
 					m.pastedBlocks = nil
 					cmds = append(cmds, m.runSlashCommand(line))
@@ -3059,6 +3060,70 @@ func (m *chatTUI) startTurnWithRaw(sent, displayed, restore, raw string) tea.Cmd
 	return tea.Batch(m.spinner.Tick, elapsedTick())
 }
 
+var chatSlashCommands = map[string]struct{}{
+	"/auto-plan":          {},
+	"/branch":             {},
+	"/clear":              {},
+	"/cls":                {},
+	"/compact":            {},
+	"/copy":               {},
+	"/diff-fold":          {},
+	"/effort":             {},
+	"/exit":               {},
+	"/export":             {},
+	"/forget":             {},
+	"/goal":               {},
+	"/help":               {},
+	"/hooks":              {},
+	"/language":           {},
+	"/mcp":                {},
+	"/memory":             {},
+	"/memory-v5":          {},
+	"/migrate":            {},
+	"/migration":          {},
+	"/model":              {},
+	"/new":                {},
+	"/output-style":       {},
+	"/output-styles":      {},
+	"/paste-image":        {},
+	"/provider":           {},
+	"/quit":               {},
+	"/reasoning-language": {},
+	"/reload-cmd":         {},
+	"/remember":           {},
+	"/rename":             {},
+	"/resume":             {},
+	"/rewind":             {},
+	"/sandbox":            {},
+	"/skill":              {},
+	"/skills":             {},
+	"/switch":             {},
+	"/theme":              {},
+	"/todo":               {},
+	"/tree":               {},
+	"/verbose":            {},
+}
+
+func (m *chatTUI) handlesSlashCommand(input string) bool {
+	cmd := strings.TrimSpace(strings.SplitN(input, " ", 2)[0])
+	if strings.HasPrefix(cmd, "/mcp__") {
+		return true
+	}
+	if _, ok := chatSlashCommands[cmd]; ok {
+		return true
+	}
+	if m.ctrl == nil {
+		return false
+	}
+	if _, ok := m.ctrl.CustomCommand(input); ok {
+		return true
+	}
+	if _, ok := m.ctrl.RunSkill(input); ok {
+		return true
+	}
+	return false
+}
+
 // confirmBubbleSent marks the already-echoed user bubble as really sent once a
 // turn's first response packet arrives, so Esc no longer un-sends it (it cancels
 // the stream instead). Also called defensively at turn end. A no-op once confirmed.
@@ -3498,7 +3563,7 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		if sent, ok := m.ctrl.RunSkill(input); ok {
 			return m.startTurn(sent, input, input)
 		}
-		m.notice(fmt.Sprintf("%s: %s", i18n.M.SlashUnknown, cmd))
+		return m.startTurn(input, input, input)
 	}
 	return nil
 }
