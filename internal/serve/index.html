@@ -825,7 +825,9 @@ function finalizeMsg() { if(currentMsg){const c=currentMsg.querySelector('.curso
 
 // ── tool cards (v1 pattern) ──
 function renderToolDispatch(tool) {
-  hideWelcome(); const card=el('div','card'); card.id='tool-'+tool.id; card.dataset.open='false'; card.dataset.tone='accent';
+  hideWelcome(); let card=toolCards[tool.id];
+  if(!card){card=el('div','card');card.id='tool-'+tool.id;}else{card.innerHTML='';}
+  card.dataset.open='false'; card.dataset.tone='accent';
   const head=el('div','card-head');
   head.innerHTML='<span class="ico spin"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-dasharray="60" stroke-dashoffset="20"/></svg></span><span class="name">'+escHtml(tool.name)+'</span>'+(tool.args?'<span class="subject">'+escHtml(tool.args.slice(0,80))+'</span>':'')+'<span class="grow"></span><span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></span>';
   const body=el('div','card-body'); body.style.display='none';
