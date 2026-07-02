@@ -219,6 +219,7 @@ var Chinese = Messages{
 	ArgHooksTrust:       "信任本项目的 hooks",
 	ArgModelCurrent:     "当前",
 	ArgEffortAuto:       "使用模型默认值",
+	ArgEffortDisabled:   "关闭思考（简单任务更快）",
 	ArgEffortLow:        "较轻推理",
 	ArgEffortMedium:     "均衡推理",
 	ArgEffortHigh:       "较深推理",

@@ -538,10 +538,10 @@ func TestSetReasoningLanguage(t *testing.T) {
 func TestNormalizeEffortDeepSeek(t *testing.T) {
 	e := &ProviderEntry{Name: "deepseek", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4"}
 	cap := EffortCapabilityForEntry(e)
-	if !cap.Supported || len(cap.Levels) != 3 || cap.Levels[0] != "auto" || cap.Levels[1] != "high" || cap.Levels[2] != "max" {
-		t.Fatalf("DeepSeek levels = %+v, want auto/high/max", cap)
+	if !cap.Supported || len(cap.Levels) != 4 || cap.Levels[0] != "auto" || cap.Levels[1] != "high" || cap.Levels[2] != "max" || cap.Levels[3] != "disabled" {
+		t.Fatalf("DeepSeek levels = %+v, want auto/high/max/disabled", cap)
 	}
-	for in, want := range map[string]string{"auto": "", "high": "high", "max": "max", "low": "high", "medium": "high", "xhigh": "max"} {
+	for in, want := range map[string]string{"auto": "", "disabled": "disabled", "high": "high", "max": "max", "low": "high", "medium": "high", "xhigh": "max"} {
 		got, err := NormalizeEffort(e, in)
 		if err != nil || got != want {
 			t.Fatalf("NormalizeEffort(%q) = %q/%v, want %q/nil", in, got, err, want)
@@ -1489,7 +1489,7 @@ func TestEffortCapabilityUsesKnownModelRegistry(t *testing.T) {
 	if !cap.Supported {
 		t.Fatalf("deepseek model behind proxy should expose effort, got %+v", cap)
 	}
-	wantLevels := []string{"auto", "high", "max"}
+	wantLevels := []string{"auto", "high", "max", "disabled"}
 	if len(cap.Levels) != len(wantLevels) {
 		t.Fatalf("levels = %v, want %v", cap.Levels, wantLevels)
 	}
@@ -1506,6 +1506,41 @@ func TestEffortCapabilityUsesKnownModelRegistry(t *testing.T) {
 	}
 	if got, err := NormalizeEffort(e, "max"); err != nil || got != "max" {
 		t.Fatalf("NormalizeEffort(max) = %q/%v, want max/nil", got, err)
+	}
+}
+
+func TestEffortCapabilityForGLMModels(t *testing.T) {
+	// GLM exposes a binary thinking knob: enabled (on) or disabled (off).
+	e := &ProviderEntry{
+		Name:    "zhipu",
+		Kind:    "openai",
+		BaseURL: "https://open.bigmodel.cn/api",
+		Model:   "glm-5",
+	}
+	cap := EffortCapabilityForEntry(e)
+	if !cap.Supported {
+		t.Fatalf("GLM should expose effort, got %+v", cap)
+	}
+	if len(cap.Levels) != 3 || cap.Levels[0] != "auto" || cap.Levels[1] != "enabled" || cap.Levels[2] != "disabled" {
+		t.Fatalf("GLM levels = %v, want [auto enabled disabled]", cap.Levels)
+	}
+	if cap.Default != "enabled" {
+		t.Fatalf("GLM default = %q, want enabled", cap.Default)
+	}
+	// /effort enabled/disabled
+	for in, want := range map[string]string{"enabled": "enabled", "disabled": "disabled", "off": "disabled", "high": "enabled", "max": "enabled"} {
+		got, err := NormalizeEffort(e, in)
+		if err != nil || got != want {
+			t.Fatalf("NormalizeEffort(%q) for GLM = %q/%v, want %q/nil", in, got, err, want)
+		}
+	}
+	// Reject unknown levels (none is not a known GLM effort level)
+	if _, err := NormalizeEffort(e, "none"); err == nil {
+		t.Fatal("GLM must reject /effort none")
+	}
+	// /effort auto returns empty
+	if got, err := NormalizeEffort(e, "auto"); err != nil || got != "" {
+		t.Fatalf("NormalizeEffort(auto) for GLM = %q/%v, want empty/nil", got, err)
 	}
 }
 

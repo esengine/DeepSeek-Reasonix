@@ -44,3 +44,9 @@ func IsDeepSeek(baseURL string) bool {
 func IsMiniMax(baseURL string) bool {
 	return matchesVendorHost(baseURL, "minimaxi.com", "api.minimaxi.com")
 }
+
+// IsGLM reports whether baseURL points at Zhipu AI's (智谱) OpenAI-compatible
+// endpoint (open.bigmodel.cn or any *.bigmodel.cn subdomain).
+func IsGLM(baseURL string) bool {
+	return matchesVendorHost(baseURL, "bigmodel.cn", "open.bigmodel.cn")
+}

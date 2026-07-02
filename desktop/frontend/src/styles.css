@@ -1926,7 +1926,7 @@ a[href] {
   --chat-min-width: 760px;
   --workspace-width: 420px;
   --workspace-resizer-width: 8px;
-  --app-chrome-height: 38px;
+  --app-chrome-height: 0px; /* AppChrome 顶部栏已移除，不再预留高度 */
   --topicbar-height: 56px;
   --statusbar-height: 0px;
   --chrome-toggle-size: 42px;
@@ -1946,7 +1946,7 @@ a[href] {
 }
 
 .app--darwin .layout {
-  --app-chrome-height: 44px;
+  --app-chrome-height: 0px;
   --chrome-toggle-size: 36px;
   --chrome-left-safe-offset: 112px;
   transition:
@@ -1969,7 +1969,7 @@ a[href] {
   grid-template-columns: var(--sidebar-expanded-width) minmax(0, 1fr);
 }
 .layout--workspace-open {
-  --chrome-right-toggle-offset: var(--workspace-width);
+  /* 按钮始终在最右侧，不再因工作区展开而左移 */
   min-width: min(780px, 100vw);
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr) minmax(0, var(--workspace-width));
 }
@@ -6008,9 +6008,9 @@ body > .mermaid-diagram--fullscreen {
 
   .composer-meta__control--more {
     display: inline-flex;
-    flex: 0 0 86px;
-    width: 86px;
-    max-width: 86px;
+    flex: 0 0 100px;
+    width: 100px;
+    max-width: 100px;
   }
 }
 
@@ -8037,7 +8037,7 @@ body > .mermaid-diagram--fullscreen {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 8px;
+  padding: 7px 16px; /* 增大每个改动项的左右间距，避免内容贴边 */
   border: 0;
   border-radius: var(--tree-row-radius);
   background: transparent;
@@ -17164,9 +17164,9 @@ body > .mermaid-diagram--fullscreen {
   width: 30px;
   height: 30px;
   padding: 0;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   border-radius: 7px;
-  background: transparent;
+  background: var(--bg-elev);
   color: var(--fg-faint);
   line-height: 1;
   transition: color 0.12s, border-color 0.12s, background 0.12s, transform 0.12s;
@@ -18891,7 +18891,7 @@ body > .mermaid-diagram--fullscreen {
 .workbench-dock__tabs {
   --wails-draggable: no-drag;
   flex: 0 1 auto;
-  width: max-content;
+  width: 100%; /* 三个标签均分整行宽度，而不是只占内容宽度 */
   max-width: 100%;
   min-width: 0;
   display: flex;
@@ -18910,9 +18910,9 @@ body > .mermaid-diagram--fullscreen {
   align-items: center;
   justify-content: center;
   gap: 5px;
-  flex: 0 1 auto;
+  flex: 1 1 0; /* 概览/改动/文件 三个标签等分容器宽度 */
   min-width: 30px;
-  max-width: 118px;
+  max-width: none; /* 取消原 118px 上限，允许各自撑满均分后的宽度 */
   height: 24px;
   padding: 0 8px;
   border: 0;
@@ -19011,7 +19011,17 @@ body > .mermaid-diagram--fullscreen {
   min-height: 0;
   overflow-y: auto;
   padding: 8px var(--context-panel-gutter) 12px;
-  scrollbar-gutter: stable;
+  /* 右侧面板内容通常不多，隐藏滚动条并不再为其预留 gutter 空间；
+     仍保留 overflow-y: auto，内容溢出时可用滚轮/触控板滚动。 */
+  scrollbar-width: none;
+  scrollbar-gutter: auto;
+}
+
+/* 配合上面的 scrollbar-width: none，WebKit 内核下也隐藏滚动条 */
+.context-panel__body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .context-panel__overview {
@@ -20344,7 +20354,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 :root[data-theme-style] .layout {
-  --app-chrome-height: 46px;
+  --app-chrome-height: 0px; /* AppChrome 顶部栏已移除 */
   --topicbar-height: 58px;
   background: var(--bg);
 }
@@ -20356,7 +20366,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 :root[data-theme-style] .app--darwin .layout {
-  --app-chrome-height: 46px;
+  --app-chrome-height: 0px;
 }
 
 :root[data-theme-style] .app--darwin .layout--workbench-chrome-hidden {
@@ -22099,12 +22109,12 @@ body > .mermaid-diagram--fullscreen {
 
 :root[data-theme-style] .workbench-dock__tabs {
   position: relative;
-  width: auto;
+  width: 100%; /* 均分：tab 容器撑满整行 */
   height: 100%;
   flex: 0 0 auto;
   display: flex;
   align-items: stretch;
-  justify-content: flex-start;
+  justify-content: stretch; /* 三个 tab 均分容器宽度 */
   gap: 2px;
   padding: 0;
   border: 0;
@@ -22114,7 +22124,7 @@ body > .mermaid-diagram--fullscreen {
 
 :root[data-theme-style] .workbench-dock__tab {
   position: relative;
-  flex: 0 0 auto;
+  flex: 1 1 0; /* 概览/改动/文件 三个标签等分容器宽度 */
   min-width: auto;
   max-width: none;
   height: 40px;
@@ -22122,7 +22132,7 @@ body > .mermaid-diagram--fullscreen {
   padding: 0 12px 1px;
   border: 0;
   border-radius: 0;
-  justify-content: flex-start;
+  justify-content: center;
   gap: 6px;
   color: var(--fg-faint);
   font-size: 12.5px;
@@ -22269,7 +22279,7 @@ body > .mermaid-diagram--fullscreen {
 
 :root[data-theme-style] .workspace-change {
   min-height: 56px;
-  padding: 8px 9px;
+  padding: 8px 16px; /* 增大每个改动项的左右间距，避免内容贴边 */
   border: 1px solid transparent;
   transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast), transform var(--dur-fast) var(--ease-out);
 }
@@ -22368,7 +22378,8 @@ body > .mermaid-diagram--fullscreen {
 
 :root[data-theme-style] .workspace-preview__body {
   background: var(--chat-bg);
-  padding: 10px 0 18px;
+  /* 改动(git-history)视图：增大左右内边距，让每次 git 记录的卡片容器与面板两侧有明显间距 */
+  padding: 10px 8px 18px;
   scrollbar-color: color-mix(in srgb, var(--fg-faint) 30%, transparent) transparent;
 }
 
@@ -26326,6 +26337,8 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .app--creation .context-panel__body {
+  /* 与基础 .context-panel__body 一致：隐藏滚动条、不预留 gutter。
+     此处显式重复是为了让 creation 布局即使基础规则被改回也保持隐藏。 */
   scrollbar-width: none;
   scrollbar-gutter: auto;
 }

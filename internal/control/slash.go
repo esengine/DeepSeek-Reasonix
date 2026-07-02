@@ -183,6 +183,8 @@ func effortArgItems(prior []string, d ArgData) []SlashItem {
 			switch level {
 			case "auto":
 				hint = i18n.M.ArgEffortAuto
+			case "disabled":
+				hint = i18n.M.ArgEffortDisabled
 			case "low":
 				hint = i18n.M.ArgEffortLow
 			case "medium":

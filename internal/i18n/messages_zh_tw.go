@@ -205,6 +205,7 @@ var ChineseTraditional = Messages{
 	ArgHooksTrust:       "信任本專案的 hooks",
 	ArgModelCurrent:     "當前",
 	ArgEffortAuto:       "使用模型預設值",
+	ArgEffortDisabled:   "關閉思考（簡單任務更快）",
 	ArgEffortLow:        "較輕推理",
 	ArgEffortMedium:     "均衡推理",
 	ArgEffortHigh:       "較深推理",

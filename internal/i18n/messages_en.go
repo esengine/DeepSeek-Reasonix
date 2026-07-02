@@ -218,6 +218,7 @@ var English = Messages{
 	ArgHooksTrust:       "trust this project's hooks",
 	ArgModelCurrent:     "current",
 	ArgEffortAuto:       "use the model default",
+	ArgEffortDisabled:   "turn off thinking (faster for simple tasks)",
 	ArgEffortLow:        "lighter reasoning",
 	ArgEffortMedium:     "balanced reasoning",
 	ArgEffortHigh:       "deeper reasoning",

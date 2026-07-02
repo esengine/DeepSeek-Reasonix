@@ -29,8 +29,8 @@ type modelReasoningCapability struct {
 }
 
 var modelReasoningCapabilities = map[string]modelReasoningCapability{
-	"deepseek-v4-flash": {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"high", "max"}, Default: "high"},
-	"deepseek-v4-pro":   {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"high", "max"}, Default: "high"},
+	"deepseek-v4-flash": {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"high", "max", "disabled"}, Default: "high"},
+	"deepseek-v4-pro":   {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"high", "max", "disabled"}, Default: "high"},
 }
 
 // EffortCapabilityForEntry returns the user-facing /effort levels for a resolved
@@ -74,6 +74,9 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 		// runs with thinking on out of the box; "auto" means "don't override
 		// the model default" (== adaptive for M3).
 		return EffortCapability{Supported: true, Levels: []string{"auto", "adaptive", "disabled"}, Default: "adaptive"}
+	case isGLMEntry(e):
+		// GLM exposes a binary thinking knob (enabled|disabled).
+		return EffortCapability{Supported: true, Levels: []string{"auto", "enabled", "disabled"}, Default: "enabled"}
 	case e != nil && e.Kind == "anthropic":
 		return EffortCapability{Supported: true, Levels: []string{"auto", "low", "medium", "high", "xhigh", "max"}, Default: "auto"}
 	default:
@@ -101,9 +104,25 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 		}
 		return "", fmt.Errorf("usage: /effort auto|%s", strings.Join(supported, "|"))
 	}
+	// GLM's thinking is binary: enabled (on) or disabled (off).
+	// See https://docs.bigmodel.cn/docs/thinking/
+	if isGLMEntry(e) {
+		switch level {
+		case "enabled", "disabled":
+			return level, nil
+		case "off":
+			return "disabled", nil
+		case "low", "medium", "high", "adaptive", "xhigh", "max":
+			return "enabled", nil
+		default:
+			return "", fmt.Errorf("usage: /effort auto|enabled|disabled")
+		}
+	}
 	switch ReasoningProtocolForEntry(e) {
 	case ReasoningProtocolDeepSeek:
 		switch level {
+		case "disabled":
+			return "disabled", nil
 		case "high", "max":
 			return level, nil
 		case "low", "medium":
@@ -111,7 +130,7 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 		case "xhigh":
 			return "max", nil
 		default:
-			return "", fmt.Errorf("usage: /effort auto|high|max")
+			return "", fmt.Errorf("usage: /effort auto|disabled|high|max")
 		}
 	case ReasoningProtocolOpenAI:
 		switch level {
@@ -262,6 +281,12 @@ func isMiniMaxEntry(e *ProviderEntry) bool {
 	return e != nil && e.Kind == "openai" && openai.IsMiniMax(e.BaseURL)
 }
 
+// isGLMEntry reports whether the entry points at Zhipu AI's (智谱)
+// OpenAI-compatible endpoint. See openai.IsGLM for the host-matching rule.
+func isGLMEntry(e *ProviderEntry) bool {
+	return e != nil && e.Kind == "openai" && openai.IsGLM(e.BaseURL)
+}
+
 func resolvedModelReasoningCapability(e *ProviderEntry) (modelReasoningCapability, bool) {
 	if e == nil || e.Kind != "openai" {
 		return modelReasoningCapability{}, false
@@ -282,7 +307,10 @@ func effortCapabilityFromModel(cap modelReasoningCapability) EffortCapability {
 }
 
 func deepSeekEffortCapability() EffortCapability {
-	return EffortCapability{Supported: true, Levels: []string{"auto", "high", "max"}, Default: "high"}
+	// "disabled" lets the user turn off chain-of-thought entirely for simple
+	// tasks where deep reasoning is unnecessary — the official API supports
+	// thinking.type=disabled, and hiding that option only wastes tokens and time.
+	return EffortCapability{Supported: true, Levels: []string{"auto", "high", "max", "disabled"}, Default: "high"}
 }
 
 func openAIEffortCapability() EffortCapability {

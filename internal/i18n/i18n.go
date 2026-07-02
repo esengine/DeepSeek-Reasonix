@@ -207,6 +207,7 @@ type Messages struct {
 	ArgHooksTrust       string // /hooks trust
 	ArgModelCurrent     string // /model <ref> active tag
 	ArgEffortAuto       string // /effort auto
+	ArgEffortDisabled   string // /effort disabled (turn off thinking)
 	ArgEffortLow        string // /effort low
 	ArgEffortMedium     string // /effort medium
 	ArgEffortHigh       string // /effort high

@@ -13,7 +13,6 @@ import {
   Download,
   Search,
   SquarePen,
-  PanelLeft,
   PanelRight,
   FileDown,
   FileImage,
@@ -52,7 +51,7 @@ import { WorkspacePanel } from "./components/WorkspacePanel";
 import { Tooltip } from "./components/Tooltip";
 import { StartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
-import { AppChrome } from "./components/AppChrome";
+// AppChrome 顶部栏已移除，不再使用
 import { ShortcutsCheatsheet } from "./components/ShortcutsCheatsheet";
 import { ProjectTree } from "./components/ProjectTree";
 import { HeartbeatPanel } from "./custom/features/heartbeat/HeartbeatPanel";
@@ -970,14 +969,12 @@ export default function App() {
   const setSidebarSearchOpen = useOverlayStore((s) => s.setSidebarSearchOpen);
   const sidebarSearchFocusSignal = useOverlayStore((s) => s.sidebarSearchFocusSignal);
   const setSidebarSearchFocusSignal = useOverlayStore((s) => s.setSidebarSearchFocusSignal);
-  const [sidebarTogglePressed, setSidebarTogglePressed] = useState(false);
   const [workspaceTogglePressed, setWorkspaceTogglePressed] = useState(false);
   const [clearContextPending, setClearContextPending] = useState(false);
   const topicRenameSkipCommitRef = useRef(false);
   const topicRenameCommitHandledRef = useRef(false);
   const appRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
-  const sidebarTogglePressTimerRef = useRef<number | null>(null);
   const workspaceTogglePressTimerRef = useRef<number | null>(null);
 
   // Persist window geometry across launches.
@@ -1020,18 +1017,6 @@ export default function App() {
     setSettingsTarget("bots");
   }, [closeTransientOverlays]);
 
-  const pulseSidebarToggle = useCallback(() => {
-    if (typeof window === "undefined") return;
-    if (sidebarTogglePressTimerRef.current !== null) {
-      window.clearTimeout(sidebarTogglePressTimerRef.current);
-    }
-    setSidebarTogglePressed(true);
-    sidebarTogglePressTimerRef.current = window.setTimeout(() => {
-      sidebarTogglePressTimerRef.current = null;
-      setSidebarTogglePressed(false);
-    }, 260);
-  }, []);
-
   const pulseWorkspaceToggle = useCallback(() => {
     if (typeof window === "undefined") return;
     if (workspaceTogglePressTimerRef.current !== null) {
@@ -1058,9 +1043,6 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      if (sidebarTogglePressTimerRef.current !== null) {
-        window.clearTimeout(sidebarTogglePressTimerRef.current);
-      }
       if (workspaceTogglePressTimerRef.current !== null) {
         window.clearTimeout(workspaceTogglePressTimerRef.current);
       }
@@ -1799,13 +1781,12 @@ export default function App() {
 
   const toggleSidebar = useCallback(() => {
     closeTransientOverlays();
-    pulseSidebarToggle();
     anchorAppScrollToChat();
     const nextCollapsed = !sidebarCollapsed;
     if (nextCollapsed) setSidebarSearchOpen(false);
     setSidebarCollapsed(nextCollapsed);
     saveSidebarCollapsed(nextCollapsed);
-  }, [anchorAppScrollToChat, closeTransientOverlays, pulseSidebarToggle, sidebarCollapsed]);
+  }, [anchorAppScrollToChat, closeTransientOverlays, sidebarCollapsed]);
 
   const sidebarWidthClamp = desktopLayoutStyle === "creation" ? clampCreationSidebarWidth : clampSidebarWidth;
   const sidebarRenderWidth = liveSidebarWidth ?? sidebarWidth;
@@ -2732,10 +2713,6 @@ export default function App() {
     }
   }, [renameTopic, renamingTopicId, topicTitleDraft]);
 
-  const sidebarExpandBlocked = false;
-  const sidebarToggleTitle = sidebarCollapsed
-      ? t("sidebar.expand")
-      : t("sidebar.collapse");
   const sidebarNavTooltipDisabled = !sidebarCollapsed;
   const browserPreviewChrome = typeof window !== "undefined" && !window.runtime;
   const workspacePanelResetWidth = rightDockDetailActive
@@ -2761,13 +2738,16 @@ export default function App() {
   const sidebarWorkbench = desktopLayoutStyle === "workbench";
   // Creation keeps the classic sidebar/chat structure while gating chrome tweaks
   // behind its own style flag so classic/workbench remain unchanged.
-  const appChromeHidden = sidebarWorkbench || sidebarCreation;
+  // AppChrome 顶部栏已全部移除：标签页和搜索功能由 topicbar 承载，所有布局模式统一
   const workbenchChromeHidden = sidebarWorkbench;
   const sidebarClassName = [
     "sidebar",
     sidebarCollapsed ? "sidebar--collapsed" : "",
     sidebarWorkbench ? "sidebar--workbench" : "",
   ].filter(Boolean).join(" ");
+
+  // AppChrome 移除后这些变量不再有消费者，保留以避免删除大量关联逻辑
+  void tabRevealSignal; void visibleTabs; void handleTabChange; void handleTabsClose; void handleTabsReorder;
 
   return (
     <ShellExpandProvider>
@@ -2800,33 +2780,7 @@ export default function App() {
           .join(" ")}
         style={layoutStyle}
       >
-        {!appChromeHidden && (
-          <AppChrome
-            platform={desktopPlatform}
-            browserPreviewChrome={browserPreviewChrome}
-            workbenchChrome={sidebarWorkbench}
-            tabs={visibleTabs}
-            activeTabId={visibleTabId}
-            revealActiveSignal={tabRevealSignal}
-            commandCompact={true}
-            sidebarTogglePressed={sidebarTogglePressed}
-            sidebarExpandBlocked={sidebarExpandBlocked}
-            sidebarCollapsed={sidebarCollapsed}
-            sidebarToggleTitle={sidebarToggleTitle}
-            workspacePanelMaximized={workspacePanelMaximized}
-            workspacePanelRenderable={workspacePanelRenderable}
-            workspaceTogglePressed={workspaceTogglePressed}
-            workspacePanelLabel={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
-            onToggleSidebar={toggleSidebar}
-            onToggleWorkspacePanel={toggleWorkspacePanel}
-            onTabChange={(id) => void handleTabChange(id)}
-            onTabClose={(id) => void handleTabClose(id)}
-            onTabsClose={(ids, nextActiveTabId) => void handleTabsClose(ids, nextActiveTabId)}
-            onTabsReorder={(ids) => void handleTabsReorder(ids)}
-            onNewTab={() => void handleNewTab()}
-            onOpenPalette={() => void openPalette()}
-          />
-        )}
+        {/* AppChrome 顶部栏已移除：标签页和搜索功能由 topicbar 承载 */}
         <a className="skip-to-composer" href="#composer-input">
           {t("shortcuts.skipToComposer")}
         </a>
@@ -3072,40 +3026,11 @@ export default function App() {
           onKeyDown={resizeSidebarWithKeyboard}
           onDoubleClick={() => setExpandedSidebarWidth(defaultSidebarWidth())}
         />
-        {sidebarCreation && (
-          <button
-            className={`sidebar-collapse-toggle${sidebarCollapsed ? " sidebar-collapse-toggle--collapsed" : ""}${sidebarTogglePressed ? " sidebar-collapse-toggle--pressed" : ""}`}
-            type="button"
-            onClick={toggleSidebar}
-            aria-label={sidebarToggleTitle}
-            aria-pressed={!sidebarCollapsed}
-            title={sidebarToggleTitle}
-          >
-            {sidebarCollapsed ? <PanelRight size={14} /> : <PanelLeft size={14} />}
-          </button>
-        )}
-
+        {/* 此处原为 creation 布局下的侧边栏折叠按钮，已移除：统一用 Ctrl/Cmd+B 快捷键折叠（同 VSCode），界面无需按钮 */}
         <section className={`chat-pane${sidebarCreation && !sessionHasContent ? " chat-pane--creation-empty" : ""}`}>
           <>
           <header className="topicbar">
-            {workbenchChromeHidden && (
-              <Tooltip label={sidebarToggleTitle}>
-                <button
-                  className={[
-                    "topicbar__chrome-btn",
-                    sidebarExpandBlocked ? "topicbar__chrome-btn--blocked" : "",
-                    sidebarTogglePressed ? "topicbar__chrome-btn--pressed" : "",
-                  ].filter(Boolean).join(" ")}
-                  type="button"
-                  onClick={sidebarExpandBlocked ? undefined : toggleSidebar}
-                  aria-label={sidebarToggleTitle}
-                  aria-pressed={!sidebarCollapsed}
-                  aria-disabled={sidebarExpandBlocked}
-                >
-                  <PanelLeft size={15} />
-                </button>
-              </Tooltip>
-            )}
+            {/* 此处原为 workbenchChrome 隐藏时的侧边栏折叠按钮，已移除：用 Ctrl/Cmd+B 快捷键即可（同 VSCode） */}
             <div className="topicbar__identity">
               <div className="topicbar__title-row">
                 {topicbarEditing ? (
@@ -3171,24 +3096,6 @@ export default function App() {
             </div>
             <div className="topicbar__spacer" />
             <div className="topicbar__actions">
-              {workbenchChromeHidden && (
-                <Tooltip label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}>
-                  <button
-                    className={[
-                      "topicbar__chrome-btn",
-                      "topicbar__chrome-btn--workspace",
-                      workspacePanelRenderable ? "topicbar__chrome-btn--active" : "",
-                      workspaceTogglePressed ? "topicbar__chrome-btn--pressed" : "",
-                    ].filter(Boolean).join(" ")}
-                    type="button"
-                    onClick={toggleWorkspacePanel}
-                    aria-label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
-                    aria-pressed={workspacePanelRenderable}
-                  >
-                    <PanelRight size={15} />
-                  </button>
-                </Tooltip>
-              )}
               {!sidebarImDetailConnection && (
               <>
               <Tooltip label={t("topicBar.copyAll")}>
@@ -3273,7 +3180,8 @@ export default function App() {
                   <span>{t("topicBar.command")}</span>
                 </button>
               </Tooltip>
-              {sidebarCreation && (
+              {/* 展开工作区按钮放在 topicbar 命令按钮最右侧（所有布局模式通用） */}
+              {(!workspacePanelMaximized) && (
                 <Tooltip label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}>
                   <button
                     className={[

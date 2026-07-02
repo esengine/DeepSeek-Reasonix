@@ -70,31 +70,47 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if visionDetail != "low" && visionDetail != "high" {
 		visionDetail = "" // auto — omit the field
 	}
-	deepseek := protocol == "deepseek" || (protocol == "" && IsDeepSeek(cfg.BaseURL))
-	minimax := protocol == "" && IsMiniMax(cfg.BaseURL)
+	deepseek := !IsGLM(cfg.BaseURL) && (protocol == "deepseek" || (protocol == "" && IsDeepSeek(cfg.BaseURL)))
+	minimax := !IsGLM(cfg.BaseURL) && protocol == "" && IsMiniMax(cfg.BaseURL)
+	// GLM may match via IsGLM (when no explicit protocol) OR via the model registry
+	// (which assigns ReasoningProtocolDeepSeek to GLM models for wire compatibility).
+	// Checking only protocol == "" would miss GLM models with resolved protocol, causing
+	// them to hit the deepseek branch instead of the glm branch in buildRequest.
+	glm := IsGLM(cfg.BaseURL)
 	switch {
 	case protocol == "none":
 		effort = ""
 	case deepseek:
+		// DeepSeek supports thinking on/off via thinking.type, plus reasoning_effort
+		// for depth. "disabled" means turn off CoT entirely (faster, cheaper for
+		// simple tasks).
 		switch effort {
-		case "", "off": // "off" is a retired level (disabled thinking); fall back to the default depth
+		case "", "off": // "off" is a retired level; fall back to the default depth
 			effort = "high"
+		case "disabled": // user explicitly turned off thinking
 		case "high", "max":
 		default:
-			return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort must be high or max", name)
+			return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort must be disabled, high, or max", name)
 		}
 	case minimax:
-		// M3's knob is binary. The config effort layer normalises user input
-		// to "adaptive", "disabled", or "" (== auto). We keep "high"/"max"
-		// (legacy DeepSeek) and "low"/"medium" (Anthropic) out — config-level
-		// NormalizeEffort remaps them to "adaptive" already, so anything
-		// reaching here is expected to be one of: "", "adaptive", "disabled".
+		// M3's knob is binary.
 		effort = strings.ToLower(strings.TrimSpace(effort))
 		switch effort {
 		case "": // auto — leave empty so the wire emits thinking.type=adaptive
 		case "adaptive", "disabled":
 		default:
 			return nil, fmt.Errorf("openai: provider %q uses MiniMax thinking; effort must be adaptive or disabled", name)
+		}
+	case glm:
+		// GLM's thinking is a binary knob: enabled (on) or disabled (off).
+		// No reasoning_effort scale, just a thinking.type field.
+		effort = strings.ToLower(strings.TrimSpace(effort))
+		switch effort {
+		case "": // auto — enable thinking by default
+			effort = "enabled"
+		case "enabled", "disabled":
+		default:
+			return nil, fmt.Errorf("openai: provider %q uses GLM thinking; effort must be enabled or disabled", name)
 		}
 	case effort != "":
 		// Non-DeepSeek backends use OpenAI's reasoning_effort scale (low/medium/
@@ -122,6 +138,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		model:        cfg.Model,
 		deepseek:     deepseek,
 		minimax:      minimax,
+		glm:          glm,
 		vision:       vision,
 		visionDetail: visionDetail,
 		effort:       effort,
@@ -151,6 +168,7 @@ type client struct {
 	http         *http.Client
 	deepseek     bool
 	minimax      bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
+	glm          bool          // true for open.bigmodel.cn — emits GLM thinking.type (enabled/disabled)
 	vision       bool          // model accepts image input — embed attached images as image_url parts
 	visionDetail string        // image_url detail hint (low|high); "" = auto/omit
 	effort       string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
@@ -332,16 +350,31 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 	}
 	switch {
 	case c.deepseek:
-		// DeepSeek's CoT is controlled by `thinking` (always on) plus
-		// `reasoning_effort` for depth. We never disable thinking for DeepSeek.
-		out.Thinking = &thinkingMode{Type: "enabled"}
+		// DeepSeek's CoT is controlled by `thinking` (enabled/disabled) plus
+		// `reasoning_effort` for depth. When the user picks "disabled" we turn
+		// off chain-of-thought entirely.
+		if c.effort == "disabled" {
+			out.Thinking = &thinkingMode{Type: "disabled"}
+			out.ReasoningEffort = ""
+		} else {
+			out.Thinking = &thinkingMode{Type: "enabled"}
+		}
 	case c.minimax:
 		// M3 uses a single `thinking.type` field with two valid values:
-		// "adaptive" (default, thinking on) and "disabled" (off). Reasoning
-		// depth is not a knob on M3, so reasoning_effort is omitted entirely.
+		// "adaptive" (default, thinking on) and "disabled" (off).
 		t := c.effort
 		if t == "" {
-			t = "adaptive" // /effort auto == the M3 model default
+			t = "adaptive"
+		}
+		out.Thinking = &thinkingMode{Type: t}
+		out.ReasoningEffort = ""
+	case c.glm:
+		// GLM uses a single `thinking.type` field with two valid values:
+		// "enabled" (on) and "disabled" (off). Reasoning depth is not a
+		// knob on GLM, so reasoning_effort is omitted entirely.
+		t := c.effort
+		if t == "" {
+			t = "enabled" // default to enabled
 		}
 		out.Thinking = &thinkingMode{Type: t}
 		out.ReasoningEffort = ""

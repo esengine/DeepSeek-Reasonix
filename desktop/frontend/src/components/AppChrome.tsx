@@ -1,4 +1,4 @@
-import { Minus, PanelLeft, PanelRight, Search, Square, X } from "lucide-react";
+import { Minus, Search, Square, X } from "lucide-react";
 import { TabBar } from "./TabBar";
 import type { TabMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
@@ -13,16 +13,6 @@ interface AppChromeProps {
   activeTabId?: string;
   revealActiveSignal: number;
   commandCompact: boolean;
-  sidebarTogglePressed: boolean;
-  sidebarExpandBlocked: boolean;
-  sidebarCollapsed: boolean;
-  sidebarToggleTitle: string;
-  workspacePanelMaximized: boolean;
-  workspacePanelRenderable: boolean;
-  workspaceTogglePressed: boolean;
-  workspacePanelLabel: string;
-  onToggleSidebar: () => void;
-  onToggleWorkspacePanel: () => void;
   onTabChange: (tabId: string) => void;
   onTabClose: (tabId: string) => void;
   onTabsClose: (tabIds: string[], nextActiveTabId?: string) => void;
@@ -39,16 +29,6 @@ export function AppChrome({
   activeTabId,
   revealActiveSignal,
   commandCompact,
-  sidebarTogglePressed,
-  sidebarExpandBlocked,
-  sidebarCollapsed,
-  sidebarToggleTitle,
-  workspacePanelMaximized,
-  workspacePanelRenderable,
-  workspaceTogglePressed,
-  workspacePanelLabel,
-  onToggleSidebar,
-  onToggleWorkspacePanel,
   onTabChange,
   onTabClose,
   onTabsClose,
@@ -93,21 +73,7 @@ export function AppChrome({
         </div>
       )}
       {darwinChrome && <span className="app-chrome__drag-rail" aria-hidden="true" />}
-      <button
-        className={[
-          "app-chrome__panel-toggle",
-          "app-chrome__panel-toggle--left",
-          sidebarTogglePressed ? "app-chrome__panel-toggle--pressed" : "",
-          sidebarExpandBlocked ? "app-chrome__panel-toggle--blocked" : "",
-        ].filter(Boolean).join(" ")}
-        type="button"
-        onClick={sidebarExpandBlocked ? undefined : onToggleSidebar}
-        aria-label={sidebarToggleTitle}
-        aria-pressed={!sidebarCollapsed}
-        aria-disabled={sidebarExpandBlocked}
-      >
-        <PanelLeft size={16} />
-      </button>
+      {/* 左侧侧边栏折叠按钮已移除：沿用 Ctrl/Cmd+B 快捷键（与 VSCode 一致），界面上不再显示 */}
       {workbenchChrome && (
         <button
           className="app-chrome__workbench-search"
@@ -130,7 +96,6 @@ export function AppChrome({
             className={[
               "app-chrome__tools",
               "app-chrome__tools--fixed",
-              workspaceTogglePressed ? "app-chrome__tools--workspace-pressed" : "",
             ].filter(Boolean).join(" ")}
             aria-label={t("tabBar.commandSearch")}
           >
@@ -157,7 +122,6 @@ export function AppChrome({
           <div
             className={[
               "app-chrome__tools",
-              workspaceTogglePressed ? "app-chrome__tools--workspace-pressed" : "",
             ].filter(Boolean).join(" ")}
             aria-label={t("tabBar.commandSearch")}
           >
@@ -178,22 +142,8 @@ export function AppChrome({
         </>
       )}
 
-      {!workspacePanelMaximized && (
-        <button
-          className={[
-            "app-chrome__panel-toggle",
-            "app-chrome__panel-toggle--right",
-            workspacePanelRenderable ? "app-chrome__panel-toggle--active" : "",
-            workspaceTogglePressed ? "app-chrome__panel-toggle--pressed" : "",
-          ].filter(Boolean).join(" ")}
-          type="button"
-          onClick={onToggleWorkspacePanel}
-          aria-label={workspacePanelLabel}
-          aria-pressed={workspacePanelRenderable}
-        >
-          <PanelRight size={16} />
-        </button>
-      )}
+      {/* 展开工作区按钮已移至 topicbar 命令按钮最右侧 */}
+
       {showWindowsPreviewControls && (
         <div className="app-chrome__window-controls app-chrome__window-controls--windows" aria-hidden="true">
           <span className="app-chrome__window-control app-chrome__window-control--minimize">

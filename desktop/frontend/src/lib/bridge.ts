@@ -2339,6 +2339,7 @@ function makeMockApp(): AppBindings {
         ],
         "/effort": [
           { label: "auto", insert: "auto", hint: "use the model default" },
+          { label: "disabled", insert: "disabled", hint: "turn off thinking (faster for simple tasks)" },
           { label: "high", insert: "high", hint: "deeper reasoning" },
           { label: "max", insert: "max", hint: "maximum reasoning" },
         ],
@@ -2488,7 +2489,7 @@ function makeMockApp(): AppBindings {
           setMockTabModel(tabID, name);
         },
         async Effort() {
-          return { supported: true, current: mockEffort, default: "high", levels: ["auto", "high", "max"] };
+          return { supported: true, current: mockEffort, default: "high", levels: ["auto", "disabled", "high", "max"] };
         },
         async EffortForTab() {
           return this.Effort();
