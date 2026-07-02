@@ -236,22 +236,28 @@ func TestUpdateSinkApprovalBashPrefix(t *testing.T) {
 		if err := json.Unmarshal(raw, &p); err != nil {
 			t.Fatalf("permission params: %v", err)
 		}
-		// Bash with a safe prefix now uses the same standard options as any
-		// other tool (allow_always / allow_persistent); the old prefix-specific
-		// OptAllowPrefix/OptPersistPrefix are gone.
-		var hasSession, hasPersistent bool
+		// ACP permission options must stay within the official spec kinds.
+		var hasOnce, hasSession, hasReject bool
 		for _, opt := range p.Options {
-			hasSession = hasSession || opt.OptionID == string(OptAllowAlways)
-			hasPersistent = hasPersistent || opt.OptionID == string(OptAllowPersistent)
+			switch opt.Kind {
+			case OptAllowOnce:
+				hasOnce = true
+			case OptAllowAlways:
+				hasSession = true
+			case OptRejectOnce:
+				hasReject = true
+			default:
+				t.Fatalf("unexpected ACP permission option kind %q in %+v", opt.Kind, p.Options)
+			}
 		}
-		if !hasSession || !hasPersistent {
-			t.Fatalf("options = %+v, want standard session and persistent choices", p.Options)
+		if !hasOnce || !hasSession || !hasReject {
+			t.Fatalf("options = %+v, want allow once, session, reject", p.Options)
 		}
-		if len(p.Options) != 4 {
-			t.Fatalf("options = %+v, want allow once, session, persistent, reject", p.Options)
+		if len(p.Options) != 3 {
+			t.Fatalf("options = %+v, want allow once, session, reject", p.Options)
 		}
 		res, _ := json.Marshal(PermissionRequestResult{
-			Outcome: PermissionOutcome{Outcome: "selected", OptionID: string(OptAllowPersistent)},
+			Outcome: PermissionOutcome{Outcome: "selected", OptionID: string(OptAllowAlways)},
 		})
 		return res, nil
 	}}
@@ -263,7 +269,7 @@ func TestUpdateSinkApprovalBashPrefix(t *testing.T) {
 
 	select {
 	case c := <-got:
-		want := approveCall{id: "10", allow: true, session: true, persist: true}
+		want := approveCall{id: "10", allow: true, session: true, persist: false}
 		if c != want {
 			t.Errorf("approve = %+v, want %+v", c, want)
 		}

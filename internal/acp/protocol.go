@@ -490,15 +490,15 @@ type SessionCancelParams struct {
 
 // --- session/request_permission (agent → client request) ---
 
-// PermissionOptionKind classifies an option for host UI styling. Matches main.
+// PermissionOptionKind classifies an option for host UI styling. Keep this to
+// the official ACP kinds so strict clients can validate request params.
 type PermissionOptionKind string
 
 const (
-	OptAllowOnce       PermissionOptionKind = "allow_once"
-	OptAllowAlways     PermissionOptionKind = "allow_always"
-	OptAllowPersistent PermissionOptionKind = "allow_persistent"
-	OptRejectOnce      PermissionOptionKind = "reject_once"
-	OptRejectAlways    PermissionOptionKind = "reject_always"
+	OptAllowOnce    PermissionOptionKind = "allow_once"
+	OptAllowAlways  PermissionOptionKind = "allow_always"
+	OptRejectOnce   PermissionOptionKind = "reject_once"
+	OptRejectAlways PermissionOptionKind = "reject_always"
 )
 
 // PermissionOption is one choice offered to the user for a permission request.
