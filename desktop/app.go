@@ -141,6 +141,8 @@ type App struct {
 
 	metrics atomic.Pointer[metricsAggregator] // non-nil only when desktop.metrics is opted in; swapped live by SetDesktopMetrics
 
+	usageTracker atomic.Pointer[DesktopUsageTracker] // always-on usage recorder
+
 	runtimeEvents asyncRuntimeEmitter
 
 	// promptHistoryTape is a lazy, cursor-addressed view of prompt history. It
@@ -360,6 +362,13 @@ func (a *App) startup(ctx context.Context) {
 	if cfg, err := config.Load(); err == nil && cfg.DesktopMetrics() && version != "dev" {
 		a.metrics.Store(newMetricsAggregator(config.MemoryUserDir()))
 		a.recordSettingsMetricsSnapshot(cfg)
+	}
+
+	// Always-on usage tracker
+	if t, err := newDesktopUsageTracker(); err == nil {
+		a.usageTracker.Store(t)
+	} else {
+		slog.Error("[desktop] usage tracker failed", "err", err)
 	}
 
 	a.heartbeat = newHeartbeatEngine(a)
@@ -645,6 +654,9 @@ func (a *App) snapshotAllTabs() {
 func (a *App) shutdown(context.Context) {
 	if a.heartbeat != nil {
 		a.heartbeat.Stop()
+	}
+	if t := a.usageTracker.Load(); t != nil {
+		t.Close()
 	}
 	a.stopBotRuntime()
 	a.stopTray()
@@ -1464,6 +1476,7 @@ func (a *App) clearActiveSessionRuntime(tab *WorkspaceTab, oldCtrl control.Sessi
 
 	newSink := &tabEventSink{tabID: tab.ID, app: a, ctx: a.ctx}
 	sharedHost := a.lookupSharedHost(tab.SharedHostKey)
+	store := a.usageStoreForBoot()
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:                    tab.model,
 		RequireKey:               false,
@@ -1474,6 +1487,7 @@ func (a *App) clearActiveSessionRuntime(tab *WorkspaceTab, oldCtrl control.Sessi
 		TokenMode:                currentTabTokenMode(tab),
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
+		UsageStore:               store,
 	})
 	if err != nil {
 		if teardownTimedOut {
@@ -6552,6 +6566,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	// Preserve the shared plugin host across controller rebuilds — the tab
 	// stays in the same workspace root, so MCP processes must not be restarted.
 	sharedHost := a.lookupSharedHost(tab.SharedHostKey)
+	store2 := a.usageStoreForBoot()
 
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:                    name,
@@ -6563,6 +6578,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 		TokenMode:                currentTabTokenMode(tab),
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
+		UsageStore:               store2,
 	})
 	if err != nil {
 		return err
@@ -6655,6 +6671,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 		tab.Ctrl.Close()
 	}
 	sharedHost := a.lookupSharedHost(tab.SharedHostKey)
+	store3 := a.usageStoreForBoot()
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:                    modelRef,
 		RequireKey:               false,
@@ -6665,6 +6682,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 		TokenMode:                currentTabTokenMode(tab),
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
+		UsageStore:               store3,
 	})
 	if err != nil {
 		return err
@@ -6733,6 +6751,7 @@ func (a *App) SetTokenModeForTab(tabID, mode string) error {
 		carried = oldCtrl.History()
 	}
 	sharedHost := a.lookupSharedHost(tab.SharedHostKey)
+	store4 := a.usageStoreForBoot()
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:                    modelRef,
 		RequireKey:               false,
@@ -6743,6 +6762,7 @@ func (a *App) SetTokenModeForTab(tabID, mode string) error {
 		TokenMode:                mode,
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
+		UsageStore:               store4,
 	})
 	if err != nil {
 		return err

@@ -975,6 +975,7 @@ func (a *App) rebuild() error {
 		}
 	}
 	sharedHost := a.lookupSharedHost(tab.SharedHostKey)
+	store := a.usageStoreForBoot()
 	ctrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model: model, RequireKey: false,
 		Sink:                     tab.sink,
@@ -983,6 +984,7 @@ func (a *App) rebuild() error {
 		EffortOverride:           cloneStringPtr(tab.effort),
 		TokenMode:                currentTabTokenMode(tab),
 		SharedHost:               sharedHost,
+		UsageStore:               store,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
 	})
 	if err != nil {

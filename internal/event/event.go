@@ -264,6 +264,16 @@ type Event struct {
 	Guardian     GuardianResult
 	RetryAttempt int // Retrying: 1-based attempt about to be made
 	RetryMax     int // Retrying: total attempts before giving up
+
+	// The following optional fields are populated by usage.EnrichSink for
+	// Usage events so that downstream consumers (usage tracker, desktop
+	// telemetry) can identify the model, latency, and session without
+	// additional plumbing. Zero values mean "not set" and do not affect
+	// existing sinks.
+	ProviderName string // provider name (e.g. "deepseek"); enrichSink injects
+	ModelName    string // model name (e.g. "deepseek-reasoner"); enrichSink injects
+	LatencyMS    int64  // turn latency in ms (TurnStarted → Usage); enrichSink injects
+	SessionID    string // session path (the .jsonl file); enrichSink injects
 }
 
 // MemoryCompilerStats is intentionally limited to counts and estimated token

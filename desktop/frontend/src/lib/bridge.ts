@@ -359,6 +359,16 @@ export interface AppBindings {
   // New native-feel bindings (added with the desktop native-feel plan).
   ConfirmAction(req: NativeConfirmRequest): Promise<boolean>;
   SaveWindowState(state: DesktopWindowState): Promise<void>;
+  // ── Usage Tracker ──
+  UsageOverview(days: number): Promise<unknown>;
+  UsageTrend(days: number): Promise<unknown[]>;
+  UsageModels(days: number): Promise<unknown[]>;
+  UsageLogs(limit: number, days: number, provider: string, model: string): Promise<unknown>;
+  UsageProviders(): Promise<string[]>;
+  UsageModelNames(): Promise<string[]>;
+  UsageDiskUsage(): Promise<number>;
+  DeleteUsageData(): Promise<boolean>;
+  SaveFile(filename: string, content: string): Promise<string>;
 }
 
 // Compile-time drift check. Exclude<A, B> extracts keys in A that are missing
@@ -3315,5 +3325,27 @@ function makeMockApp(): AppBindings {
         ],
       };
     },
+    async UsageOverview(_days: number) {
+      return {
+        overview: { requests: 12, prompt_tokens: 45000, completion_tokens: 3200, cache_hit_tokens: 38000, cache_miss_tokens: 7000, reasoning_tokens: 800, total_tokens: 48200, cost: 0.0123, currency: "¥", tpm: 2410, rpm: 0.6 },
+        models: [
+          { provider: "mock", model: "mock-model", requests: 12, prompt_tokens: 45000, completion_tokens: 3200, cache_hit_tokens: 38000, cache_miss_tokens: 7000, reasoning_tokens: 800, total_tokens: 48200, cost: 0.0123, currency: "¥", avg_latency_ms: 1200 },
+        ],
+      };
+    },
+    async UsageTrend(_days: number) {
+      return [{ date: new Date().toISOString().slice(0, 10), requests: 12, prompt_tokens: 45000, completion_tokens: 3200, cache_hit_tokens: 38000, cache_miss_tokens: 7000, reasoning_tokens: 800, total_tokens: 48200, cost: 0.0123, currency: "¥" }];
+    },
+    async UsageModels(_days: number) {
+      return [{ provider: "mock", model: "mock-model", requests: 12, prompt_tokens: 45000, completion_tokens: 3200, cache_hit_tokens: 38000, cache_miss_tokens: 7000, reasoning_tokens: 800, total_tokens: 48200, cost: 0.0123, currency: "¥", avg_latency_ms: 1200 }];
+    },
+    async UsageLogs(_limit: number, _days: number, _provider: string, _model: string) {
+      return { entries: [] };
+    },
+    async UsageProviders() { return ["mock"]; },
+    async UsageModelNames() { return ["mock-model"]; },
+    async UsageDiskUsage() { return 0; },
+    async DeleteUsageData() { return true; },
+    async SaveFile(_filename: string, _content: string) { return ""; },
   };
 }

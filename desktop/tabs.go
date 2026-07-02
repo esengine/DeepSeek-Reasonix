@@ -715,6 +715,10 @@ func (s *tabEventSink) Emit(e event.Event) {
 		case event.TurnDone:
 			s.recordTurnDone()
 		}
+		// Usage tracker (JSONL-backed, always on)
+		if t := s.app.usageTracker.Load(); t != nil {
+			t.Observe(e, s.tabID)
+		}
 		if m := s.app.metrics.Load(); m != nil {
 			m.observe(e)
 			if e.Kind == event.TurnDone {
@@ -2265,6 +2269,7 @@ func (a *App) buildTabControllerWithContext(tab *WorkspaceTab, loadedSession loa
 	}
 	tab.SharedHostKey = rootKey
 	sharedHost := a.acquireSharedHost(rootKey)
+	store0 := a.usageStoreForBoot()
 
 	ctrl, err := boot.Build(buildCtx, boot.Options{
 		Model:                    model,
@@ -2276,6 +2281,7 @@ func (a *App) buildTabControllerWithContext(tab *WorkspaceTab, loadedSession loa
 		TokenMode:                currentTabTokenMode(tab),
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
+		UsageStore:               store0,
 	})
 	if err != nil {
 		a.mu.Lock()

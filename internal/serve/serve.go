@@ -27,6 +27,7 @@ import (
 	"reasonix/internal/jobs"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/provider"
+	usageutil "reasonix/internal/usage"
 )
 
 //go:embed index.html
@@ -35,23 +36,28 @@ var indexHTML []byte
 // Server wires a controller to its HTTP surface. The Broadcaster must be the
 // same sink the controller was constructed with, so events reach SSE clients.
 type Server struct {
-	mu         sync.RWMutex // guards ctrl, which switchModel swaps at runtime
-	ctrl       control.SessionAPI
-	bc         *Broadcaster
-	titleProv  provider.Provider // lightweight flash provider for session titles
-	titlePrice *provider.Pricing
-	titles     *titleCache
-	auth       *authGate // nil when auth is disabled
+	mu             sync.RWMutex // guards ctrl, which switchModel swaps at runtime
+	ctrl           control.SessionAPI
+	bc             *Broadcaster
+	titleProv      provider.Provider // lightweight flash provider for session titles
+	titleProvName  string            // provider name for usage records
+	titleProvModel string            // model name for usage records
+	titles         *titleCache
+	usageStore     *usageutil.Store // optional; writes title Usage events directly
+	auth           *authGate        // nil when auth is disabled
 }
 
 // New builds a Server. bc must be the controller's event sink.
 // serveCfg controls authentication (none, token, or password).
-func New(ctrl control.SessionAPI, bc *Broadcaster, serveCfg config.ServeConfig) *Server {
+func New(ctrl control.SessionAPI, bc *Broadcaster, serveCfg config.ServeConfig, usageStore ...*usageutil.Store) *Server {
 	s := &Server{
 		ctrl:   ctrl,
 		bc:     bc,
 		titles: newTitleCache(ctrl.SessionDir()),
 		auth:   newAuthGate(serveCfg),
+	}
+	if len(usageStore) > 0 {
+		s.usageStore = usageStore[0]
 	}
 	s.initTitleProvider()
 	return s
@@ -98,13 +104,19 @@ func (s *Server) initTitleProvider() {
 		BaseURL: entry.BaseURL,
 		Model:   entry.Model,
 		APIKey:  entry.APIKey(),
-		Extra:   map[string]any{"effort": "off"},
+		Extra: map[string]any{
+			"reasoning_protocol": "none",
+		},
 	})
 	if err != nil {
 		return
 	}
+	if nilutil.IsNil(prov) {
+		return
+	}
 	s.titleProv = prov
-	s.titlePrice = entry.Price
+	s.titleProvName = entry.Name
+	s.titleProvModel = entry.Model
 }
 
 // switchModel rebuilds the controller with a new model, carrying over the
@@ -125,9 +137,10 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 	carried := cur.History()
 
 	newCtrl, err := boot.Build(ctx, boot.Options{
-		Model:  ref,
-		Sink:   s.bc,
-		Stderr: os.Stderr,
+		Model:      ref,
+		Sink:       s.bc,
+		Stderr:     os.Stderr,
+		UsageStore: s.usageStore,
 	})
 	if err != nil {
 		return fmt.Errorf("switch model: %w", err)
@@ -904,6 +917,7 @@ func (s *Server) generateTitle(ctx context.Context, firstMsg string) string {
 		MaxTokens:   20,
 	})
 	if err != nil {
+		slog.Warn("[serve] generateTitle: Stream failed", "err", err)
 		return ""
 	}
 	var text strings.Builder
@@ -913,13 +927,26 @@ func (s *Server) generateTitle(ctx context.Context, firstMsg string) string {
 		case provider.ChunkText:
 			text.WriteString(chunk.Text)
 		case provider.ChunkUsage:
-			// Title usage is intentionally not broadcast on the shared chat SSE stream.
+			usage = chunk.Usage
 		case provider.ChunkError:
 			return ""
 		}
 	}
-	if usage != nil && usage.TotalTokens > 0 && s.bc != nil {
-		s.bc.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: s.titlePrice, UsageSource: event.UsageSourceTitle})
+	if usage != nil && usage.TotalTokens > 0 {
+		if s.usageStore != nil {
+			s.usageStore.Write(usageutil.Record{
+				TS:               time.Now(),
+				Provider:         s.titleProvName,
+				Model:            s.titleProvModel,
+				PromptTokens:     usage.PromptTokens,
+				CompletionTokens: usage.CompletionTokens,
+				CacheHitTokens:   usage.CacheHitTokens,
+				CacheMissTokens:  usage.CacheMissTokens,
+				ReasoningTokens:  usage.ReasoningTokens,
+				TotalTokens:      usage.TotalTokens,
+				UsageSource:      event.UsageSourceTitle,
+			})
+		}
 	}
 	title := strings.TrimSpace(text.String())
 	if len(title) >= 2 && ((title[0] == '"' && title[len(title)-1] == '"') || (title[0] == '\'' && title[len(title)-1] == '\'')) {

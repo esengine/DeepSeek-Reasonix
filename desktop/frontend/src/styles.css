@@ -6712,6 +6712,7 @@ body > .mermaid-diagram--fullscreen {
   line-height: 1.25;
   border-radius: var(--button-radius);
   white-space: nowrap;
+  cursor: pointer;
   transition: color 0.12s, border-color 0.12s, background 0.12s, box-shadow 0.12s;
 }
 .btn:hover {
@@ -27757,4 +27758,108 @@ body > .mermaid-diagram--fullscreen {
     grid-column: 1 !important;
     min-width: 0;
   }
+}
+
+/* ─── Usage settings page ─────────────────────────────────────────────────── */
+
+.usage-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.usage-toolbar__range,
+.usage-toolbar__actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.usage-toolbar__disk {
+  font-size: 12px;
+  opacity: 0.6;
+  margin-right: 4px;
+}
+
+.usage-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+}
+.usage-kpi-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.usage-kpi-card__label {
+  font-size: var(--text-2xs);
+  color: var(--fg-faint);
+  margin-bottom: 2px;
+}
+.usage-kpi-card__value {
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.usage-table-wrap {
+  overflow-x: auto;
+}
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+.usage-table th {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--fg-faint);
+  font-weight: 600;
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+.usage-table td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-faint, var(--border-soft));
+  white-space: nowrap;
+}
+.usage-table tbody tr:hover {
+  background: var(--bg-hover, rgba(0,0,0,0.03));
+}
+
+.usage-trend {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+.usage-trend__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.usage-trend__date {
+  width: 42px;
+  text-align: right;
+  color: var(--fg-faint);
+}
+.usage-trend__bar {
+  opacity: 0.6;
+  letter-spacing: 1px;
+}
+.usage-trend__value {
+  width: 70px;
+  text-align: right;
+}
+.usage-trend__cost {
+  width: 60px;
+  text-align: right;
+  color: var(--fg-faint);
+}
+.usage-table tbody tr:hover {
+  background: var(--bg-hover, rgba(0,0,0,0.03));
 }

@@ -373,6 +373,10 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		// DeepSeek's CoT is controlled by `thinking` (always on) plus
 		// `reasoning_effort` for depth. We never disable thinking for DeepSeek.
 		out.Thinking = &thinkingMode{Type: "enabled"}
+	case !c.deepseek && c.effort == "" && IsDeepSeek(c.baseURL):
+		// reasoning_protocol="none" for a DeepSeek URL: explicitly disable thinking
+		// so the model returns plain content instead of reasoning_content.
+		out.Thinking = &thinkingMode{Type: "disabled"}
 	case c.minimax:
 		// M3 uses a single `thinking.type` field with two valid values:
 		// "adaptive" (default, thinking on) and "disabled" (off). Reasoning
