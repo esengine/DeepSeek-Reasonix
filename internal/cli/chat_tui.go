@@ -3060,24 +3060,23 @@ func (m *chatTUI) startTurnWithRaw(sent, displayed, restore, raw string) tea.Cmd
 	return tea.Batch(m.spinner.Tick, elapsedTick())
 }
 
-var slashCommandAliases = map[string]string{
-	"/exit":          "/quit",
-	"/migration":     "/migrate",
-	"/output-styles": "/output-style",
-	"/skill":         "/skills",
-}
-
 func (m *chatTUI) handlesSlashCommand(input string) bool {
 	cmd := strings.TrimSpace(strings.SplitN(input, " ", 2)[0])
-	if canonical, ok := slashCommandAliases[cmd]; ok {
-		cmd = canonical
-	}
 	for _, item := range m.slashItems() {
-		if item.label == cmd {
+		if item.matches(cmd) {
 			return true
 		}
 	}
 	return false
+}
+
+func (m *chatTUI) canonicalSlashCommand(cmd string) string {
+	for _, item := range m.slashItems() {
+		if item.matches(cmd) {
+			return item.label
+		}
+	}
+	return cmd
 }
 
 // confirmBubbleSent marks the already-echoed user bubble as really sent once a
@@ -3336,11 +3335,14 @@ func elapsedTick() tea.Cmd {
 // runSlashCommand handles "/<cmd> <args>" input. Local commands queue their
 // output to scrollback; MCP prompt / custom commands resolve to a model turn.
 func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
-	cmd := strings.TrimSpace(strings.SplitN(input, " ", 2)[0])
+	rawCmd := strings.TrimSpace(strings.SplitN(input, " ", 2)[0])
 
-	if strings.HasPrefix(cmd, "/mcp__") {
+	if strings.HasPrefix(rawCmd, "/mcp__") {
 		return m.runMCPPrompt(input)
 	}
+
+	cmd := m.canonicalSlashCommand(rawCmd)
+	args := strings.TrimSpace(strings.TrimPrefix(input, rawCmd))
 
 	switch cmd {
 	case "/compact":
@@ -3350,8 +3352,7 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		// card as they arrive; compactDoneMsg only handles the terminal error /
 		// snapshot once the pass returns. Any text after "/compact" is focus
 		// guidance steering what the summary keeps.
-		focus := strings.TrimSpace(strings.TrimPrefix(input, cmd))
-		return func() tea.Msg { return compactDoneMsg{err: m.ctrl.Compact(context.Background(), focus)} }
+		return func() tea.Msg { return compactDoneMsg{err: m.ctrl.Compact(context.Background(), args)} }
 	case "/new":
 		m.echoLocalCommand(input)
 		if err := m.ctrl.NewSession(); err != nil {
@@ -3425,7 +3426,7 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		if m.pendingModelSwitch != nil {
 			return m.pendingModelSwitch
 		}
-	case "/skill", "/skills":
+	case "/skills":
 		m.echoLocalCommand(input)
 		m.runSkillSubcommand(input)
 		if m.pendingModelSwitch != nil {
@@ -3456,7 +3457,7 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 
 	case "/paste-image":
 		return pasteClipboardImage()
-	case "/output-style", "/output-styles":
+	case "/output-style":
 		m.echoLocalCommand(input)
 		styles := outputstyle.List(outputstyle.Dirs())
 		if len(styles) == 0 {
@@ -3485,9 +3486,9 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	case "/memory":
 		m.echoLocalCommand(input)
 		m.showMemory()
-	case "/migrate", "/migration":
+	case "/migrate":
 		m.echoLocalCommand(input)
-		migration.RunLegacyRescueCommand(strings.TrimSpace(strings.TrimPrefix(input, cmd)), event.FuncSink(func(e event.Event) {
+		migration.RunLegacyRescueCommand(args, event.FuncSink(func(e event.Event) {
 			if e.Kind == event.Notice {
 				m.notice(e.Text)
 			}
@@ -3495,22 +3496,21 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	case "/goal":
 		return m.runGoalSubcommand(input)
 	case "/remember":
-		note := strings.TrimSpace(strings.TrimPrefix(input, cmd))
-		if note == "" {
+		if args == "" {
 			m.notice("nothing to remember")
-		} else if path, err := m.ctrl.QuickAdd(memory.ScopeProject, note); err != nil {
+		} else if path, err := m.ctrl.QuickAdd(memory.ScopeProject, args); err != nil {
 			m.notice("memory: " + err.Error())
 		} else {
 			m.notice("remembered → " + path)
 		}
-	case "/quit", "/exit":
+	case "/quit":
 		return tea.Quit
 	case "/copy":
 		return m.runCopyCommand(input)
 	case "/export":
 		m.runExportCommand(input)
 	case "/forget":
-		m.forgetMemory(strings.TrimSpace(strings.TrimPrefix(input, cmd)))
+		m.forgetMemory(args)
 	default:
 		// A custom command wins over a skill of the same name; both resolve to a turn.
 		if sent, ok := m.ctrl.CustomCommand(input); ok {

@@ -64,6 +64,49 @@ func TestSlashCompletionIncludesCustomCommands(t *testing.T) {
 	}
 }
 
+func TestCompItemMatchesLabelAndAliases(t *testing.T) {
+	item := compItem{label: "/skills", aliases: []string{"/skill"}}
+
+	for _, input := range []string{"/skills", "/skill"} {
+		if !item.matches(input) {
+			t.Fatalf("compItem should match %q", input)
+		}
+	}
+	if item.matches("/skillful") {
+		t.Fatal("compItem should not fuzzy-match alias-like text")
+	}
+}
+
+func TestSlashCompletionKeepsAliasesHidden(t *testing.T) {
+	m := newTestChatTUI()
+	items := m.slashItems()
+	hiddenAliases := map[string]string{
+		"/skills":       "/skill",
+		"/output-style": "/output-styles",
+		"/migrate":      "/migration",
+		"/quit":         "/exit",
+	}
+
+	for label, alias := range hiddenAliases {
+		var item compItem
+		for _, it := range items {
+			if it.label == label {
+				item = it
+				break
+			}
+		}
+		if item.label == "" {
+			t.Fatalf("slashItems missing canonical command %q", label)
+		}
+		if !item.matches(alias) {
+			t.Fatalf("slashItems entry %q should accept hidden alias %q", label, alias)
+		}
+		if hasLabel(items, alias) {
+			t.Fatalf("alias %q should not be exposed as a completion label", alias)
+		}
+	}
+}
+
 func TestCompletionClosesOnSpaceAndNonMatch(t *testing.T) {
 	m := newTestChatTUI()
 

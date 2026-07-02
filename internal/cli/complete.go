@@ -26,12 +26,26 @@ const (
 
 // compItem is one menu row: label shown, insert applied on accept, hint dimmed.
 // descend marks a directory entry — accepting it fills the input and re-opens
-// the menu one level deeper instead of closing.
+// the menu one level deeper instead of closing. aliases are accepted spellings
+// that are intentionally hidden from completion.
 type compItem struct {
 	label   string
 	insert  string
 	hint    string
 	descend bool
+	aliases []string
+}
+
+func (it compItem) matches(label string) bool {
+	if it.label == label {
+		return true
+	}
+	for _, alias := range it.aliases {
+		if alias == label {
+			return true
+		}
+	}
+	return false
 }
 
 // completion is the live autocomplete menu state. Empty value = inactive.
@@ -74,11 +88,11 @@ func (m *chatTUI) slashItems() []compItem {
 		{label: "/mcp", insert: "/mcp", hint: i18n.M.CmdMcp},
 		{label: "/model", insert: "/model ", hint: i18n.M.CmdModel, descend: true},
 		{label: "/provider", insert: "/provider ", hint: i18n.M.CmdProvider, descend: true},
-		{label: "/skills", insert: "/skills", hint: i18n.M.CmdSkill},
+		{label: "/skills", insert: "/skills", hint: i18n.M.CmdSkill, aliases: []string{"/skill"}},
 		{label: "/reload-cmd", insert: "/reload-cmd", hint: i18n.M.CmdReloadCmd},
 		{label: "/hooks", insert: "/hooks ", hint: i18n.M.CmdHooks, descend: true},
 		{label: "/paste-image", insert: "/paste-image", hint: i18n.M.CmdPasteImage},
-		{label: "/output-style", insert: "/output-style", hint: i18n.M.CmdOutputStyle},
+		{label: "/output-style", insert: "/output-style", hint: i18n.M.CmdOutputStyle, aliases: []string{"/output-styles"}},
 		{label: "/verbose", insert: "/verbose", hint: i18n.M.CmdVerbose},
 		{label: "/diff-fold", insert: "/diff-fold", hint: i18n.M.CmdDiffFold},
 		{label: "/sandbox", insert: "/sandbox", hint: i18n.M.CmdSandbox},
@@ -90,11 +104,11 @@ func (m *chatTUI) slashItems() []compItem {
 		{label: "/language", insert: "/language ", hint: i18n.M.CmdLanguage, descend: true},
 		{label: "/help", insert: "/help ", hint: i18n.M.CmdHelp},
 		{label: "/memory", insert: "/memory ", hint: i18n.M.CmdMemory},
-		{label: "/migrate", insert: "/migrate", hint: i18n.M.CmdMigrate},
+		{label: "/migrate", insert: "/migrate", hint: i18n.M.CmdMigrate, aliases: []string{"/migration"}},
 		{label: "/goal", insert: "/goal ", hint: i18n.M.CmdGoal, descend: true},
 		{label: "/remember", insert: "/remember ", hint: i18n.M.CmdRemember},
 		{label: "/forget", insert: "/forget ", hint: i18n.M.CmdForget},
-		{label: "/quit", insert: "/quit", hint: i18n.M.CmdQuit},
+		{label: "/quit", insert: "/quit", hint: i18n.M.CmdQuit, aliases: []string{"/exit"}},
 		{label: "/copy", insert: "/copy", hint: i18n.M.CmdCopy},
 		{label: "/export", insert: "/export", hint: i18n.M.CmdExport},
 	}

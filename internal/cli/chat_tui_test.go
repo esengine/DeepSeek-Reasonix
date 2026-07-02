@@ -2227,6 +2227,11 @@ func TestHandlesSlashCommandFollowsSlashItems(t *testing.T) {
 		if !m.handlesSlashCommand(item.label + " extra") {
 			t.Fatalf("handlesSlashCommand should accept slashItems entry %q", item.label)
 		}
+		for _, alias := range item.aliases {
+			if !m.handlesSlashCommand(alias + " extra") {
+				t.Fatalf("handlesSlashCommand should accept alias %q for slashItems entry %q", alias, item.label)
+			}
+		}
 	}
 }
 
@@ -2239,6 +2244,23 @@ func TestHandlesSlashCommandAliasesAndUnknownProse(t *testing.T) {
 	}
 	if m.handlesSlashCommand("/history正常应该是这样的行为") {
 		t.Fatal("unknown slash-prefixed prose should fall through to the normal prompt path")
+	}
+}
+
+func TestCanonicalSlashCommandUsesSlashItemAliases(t *testing.T) {
+	m := newTestChatTUI()
+	for input, want := range map[string]string{
+		"/exit":          "/quit",
+		"/migration":     "/migrate",
+		"/output-styles": "/output-style",
+		"/skill":         "/skills",
+	} {
+		if got := m.canonicalSlashCommand(input); got != want {
+			t.Fatalf("canonicalSlashCommand(%q) = %q, want %q", input, got, want)
+		}
+	}
+	if got := m.canonicalSlashCommand("/history正常应该是这样的行为"); got != "/history正常应该是这样的行为" {
+		t.Fatalf("unknown slash text canonicalized to %q", got)
 	}
 }
 
@@ -2274,9 +2296,9 @@ func TestSlashMigrateFromImportsExplicitSessions(t *testing.T) {
 	}
 	m := newTestChatTUI()
 
-	input := `/migrate --from "` + filepath.Dir(legacySessions) + `"`
+	input := `/migration --from "` + filepath.Dir(legacySessions) + `"`
 	if cmd := m.runSlashCommand(input); cmd != nil {
-		t.Fatal("/migrate --from should run locally without returning a command")
+		t.Fatal("/migration --from should run locally without returning a command")
 	}
 	out := strings.Join(m.transcript, "\n")
 	for _, want := range []string{
