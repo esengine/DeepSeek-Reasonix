@@ -285,6 +285,9 @@ var ChineseTraditional = Messages{
 	APIKeyAlreadySetFmt:        "復用已設定的 %s",
 	APIKeyResetPromptFmt:       "重新輸入 %s？",
 
+	// DeepSeek provider
+	DeepSeekProviderDesc: "快速且便宜，另有更強的 Pro 型號",
+
 	// custom provider
 	CustomProviderLabel:  "自訂模型",
 	CustomProviderDesc:   "新增第三方 OpenAI 相容模型",

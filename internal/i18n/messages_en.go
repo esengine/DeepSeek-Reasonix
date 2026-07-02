@@ -304,6 +304,9 @@ var English = Messages{
 	APIKeyAlreadySetFmt:        "reusing existing value for %s",
 	APIKeyResetPromptFmt:       "Re-enter %s?",
 
+	// DeepSeek provider
+	DeepSeekProviderDesc: "fast & cheap, plus a stronger Pro SKU",
+
 	// custom provider
 	CustomProviderLabel:  "Custom Model",
 	CustomProviderDesc:   "Add third-party OpenAI compatible model",

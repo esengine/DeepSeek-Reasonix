@@ -342,6 +342,9 @@ type Messages struct {
 	APIKeyAlreadySetFmt        string // "reusing existing value for %s"
 	APIKeyResetPromptFmt       string // "Re-enter %s?"
 
+	// DeepSeek provider
+	DeepSeekProviderDesc string // "fast & cheap, plus a stronger Pro SKU"
+
 	// custom provider
 	CustomProviderLabel  string // "Custom Model"
 	CustomProviderDesc   string // "Add third-party OpenAI compatible model"
