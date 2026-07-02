@@ -571,6 +571,10 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 				b.WriteString("# optional pre-seeded MCP read-only trust; the approval prompt can also remember this\n")
 				fmt.Fprintf(&b, "trusted_read_only_tools = %s\n", renderStringArray(pl.TrustedReadOnlyTools))
 			}
+			if len(pl.DisabledTools) > 0 {
+				b.WriteString("# Raw MCP tool names to exclude from registration.\n")
+				fmt.Fprintf(&b, "disabled_tools = %s\n", renderStringArray(pl.DisabledTools))
+			}
 			if pl.AutoStart != nil {
 				fmt.Fprintf(&b, "auto_start = %v\n", *pl.AutoStart)
 			}
@@ -966,6 +970,10 @@ func RenderTOMLProjectDelta(c *Config) string {
 		if len(pl.TrustedReadOnlyTools) > 0 {
 			b.WriteString("# optional pre-seeded MCP read-only trust; the approval prompt can also remember this\n")
 			fmt.Fprintf(&b, "trusted_read_only_tools = %s\n", renderStringArray(pl.TrustedReadOnlyTools))
+		}
+		if len(pl.DisabledTools) > 0 {
+			b.WriteString("# Raw MCP tool names to exclude from registration.\n")
+			fmt.Fprintf(&b, "disabled_tools = %s\n", renderStringArray(pl.DisabledTools))
 		}
 		if pl.AutoStart != nil {
 			fmt.Fprintf(&b, "auto_start = %v\n", *pl.AutoStart)
