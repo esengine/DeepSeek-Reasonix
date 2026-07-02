@@ -42,6 +42,7 @@ type HeartbeatTask struct {
 	ApprovalMode           string `json:"approvalMode"`              // "ask" | "auto" | "yolo"; empty defaults to "yolo"
 	TimeWindowStart        string `json:"timeWindowStart,omitempty"` // "HH:MM" — interval tasks only run after this time (inclusive)
 	TimeWindowEnd          string `json:"timeWindowEnd,omitempty"`   // "HH:MM" — interval tasks only run before this time (exclusive)
+	NotifyChannels         *bool  `json:"notifyChannels,omitempty"`  // true = push to bot channels; nil/false = skip
 }
 
 // heartbeatConfig is the on-disk format.
@@ -322,9 +323,21 @@ func (e *HeartbeatEngine) executeTask(t HeartbeatTask) HeartbeatTask {
 	t.ApprovalMode = mode
 	e.app.SetToolApprovalModeForTab(tabMeta.ID, mode)
 
+	// Attach bot event forwarding if the bot runtime is active and has
+	// session-mapped targets. The forwarder is set on the tab's event sink
+	// so AI output events are streamed to connected bot channels in
+	// real-time alongside the desktop UI.
+	botForwardAttached := false
+	if t.NotifyChannels != nil && *t.NotifyChannels {
+		botForwardAttached = e.attachBotForwarder(tabMeta.ID)
+	}
+
 	// Submit as a plain user turn so scheduled prompts cannot invoke desktop
 	// shell or slash-command handlers such as "!cmd", "/clear", or "/compact".
 	if !e.app.submitUserTurnToTab(tabMeta.ID, t.Prompt) {
+		if botForwardAttached {
+			e.clearBotForwarder(tabMeta.ID)
+		}
 		log.Printf("[heartbeat] submit skipped for %q", t.Title)
 		return t
 	}
@@ -805,4 +818,41 @@ func (a *App) HeartbeatGenerateID() string {
 		b[i] = chars[rand.Intn(len(chars))]
 	}
 	return string(b)
+}
+
+// attachBotForwarder sets up event forwarding to connected bot channels for
+// the tab identified by tabID. It is called before submitting a heartbeat
+// prompt. If the bot runtime is not active or has no session-mapped targets
+// the call is a no-op.
+func (e *HeartbeatEngine) attachBotForwarder(tabID string) bool {
+	runtime := e.app.botRuntime
+	if runtime == nil || !runtime.Running() {
+		return false
+	}
+	cfg, err := e.app.loadDesktopBotConfig()
+	if err != nil {
+		log.Printf("[heartbeat] load config for bot forward: %v", err)
+		return false
+	}
+	targets := runtime.ForwardTargets(cfg)
+	if len(targets) == 0 {
+		return false // no session-mapped channels to forward to
+	}
+	tab := e.app.tabByID(tabID)
+	if tab == nil || tab.sink == nil {
+		return false
+	}
+	log.Printf("[heartbeat] bot forwarding attached: %d target(s) for tab %s", len(targets), tabID)
+
+	forwarder := newBotEventForwarder(runtime, targets)
+	tab.sink.SetBotSink(forwarder)
+	return true
+}
+
+func (e *HeartbeatEngine) clearBotForwarder(tabID string) {
+	tab := e.app.tabByID(tabID)
+	if tab == nil || tab.sink == nil {
+		return
+	}
+	tab.sink.SetBotSink(nil)
 }

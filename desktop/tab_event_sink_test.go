@@ -10,6 +10,40 @@ import (
 	"reasonix/internal/event"
 )
 
+type closeTrackingSink struct {
+	closed atomic.Bool
+}
+
+func (s *closeTrackingSink) Emit(event.Event) {}
+
+func (s *closeTrackingSink) Close() {
+	s.closed.Store(true)
+}
+
+func TestTabEventSinkSetBotSinkClosesPreviousSink(t *testing.T) {
+	sink := &tabEventSink{}
+	first := &closeTrackingSink{}
+	second := &closeTrackingSink{}
+
+	sink.SetBotSink(first)
+	if first.closed.Load() {
+		t.Fatal("newly attached sink was closed")
+	}
+
+	sink.SetBotSink(second)
+	if !first.closed.Load() {
+		t.Fatal("previous sink was not closed when replaced")
+	}
+	if second.closed.Load() {
+		t.Fatal("replacement sink was closed too early")
+	}
+
+	sink.SetBotSink(nil)
+	if !second.closed.Load() {
+		t.Fatal("second sink was not closed when cleared")
+	}
+}
+
 func TestTabEventSinkDoesNotBlockOnRuntimeEventsEmit(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})

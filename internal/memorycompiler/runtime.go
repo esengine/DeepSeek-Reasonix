@@ -5,6 +5,7 @@ package memorycompiler
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -40,6 +41,13 @@ const (
 	mutationFeedbackCooldown  = 30 * time.Minute
 	strategyDecayK            = 10.0
 	staleConfidenceThreshold  = 0.2
+
+	compilerIROverheadSelfFeedback = "compiled IR overhead exceeded budget; reduce memory references before injection"
+	planModeBlockedToolError       = "blocked: plan mode is read-only"
+
+	maxRuntimeTraceJSONLLines  = 500
+	maxLearningTraceJSONLLines = 100
+	maxDebugTraceJSONLLines    = 100
 )
 
 var runtimeLocks sync.Map
@@ -128,6 +136,7 @@ type ToolRecord struct {
 	Output     string `json:"output,omitempty"`
 	Error      string `json:"error,omitempty"`
 	ReadOnly   bool   `json:"read_only"`
+	Blocked    bool   `json:"blocked,omitempty"`
 	DurationMs int64  `json:"duration_ms,omitempty"`
 	Truncated  bool   `json:"truncated,omitempty"`
 }
@@ -559,6 +568,9 @@ func buildIRWithPolicy(goal, sourceEvent string, st state) (PlannerIR, ControlPo
 	}
 	ir.StrategySelection = &strategyPick
 	for _, c := range st.ExecutionState.ActiveConstraints {
+		if isCompilerFeedbackNoise(c.Text) {
+			continue
+		}
 		ir.Constraints = appendConstraint(ir.Constraints, c)
 	}
 	for _, failed := range st.ExecutionState.FailedStrategies {
@@ -568,16 +580,17 @@ func buildIRWithPolicy(goal, sourceEvent string, st state) (PlannerIR, ControlPo
 	}
 	for _, noisy := range sortedNoisyRefs(st.NoisyRefs) {
 		ref, count := noisy.ref, noisy.count
-		if count >= 2 {
-			ir.RiskNotes = append(ir.RiskNotes, "quarantined noisy memory pattern "+ref)
+		if count < 2 || isCompilerFeedbackNoise(ref) {
+			continue
 		}
+		ir.RiskNotes = append(ir.RiskNotes, "quarantined noisy memory pattern "+ref)
 	}
 	ir.RiskNotes = append(ir.RiskNotes, driftRiskNotes(drift)...)
 	for _, node := range usableSubgraphNodes(st.Nodes, st.Edges, now) {
-		if node.Constraint != nil {
+		if node.Constraint != nil && !isCompilerFeedbackNoise(node.Constraint.Text) {
 			ir.Constraints = appendConstraint(ir.Constraints, *node.Constraint)
 		}
-		if node.Quality == QualityHighSignal || node.Type == "tool_result" {
+		if (node.Quality == QualityHighSignal || node.Type == "tool_result") && !isCompilerFeedbackNoise(node.Content) {
 			ir.MemoryReferences = append(ir.MemoryReferences, MemoryRef{
 				ID:        node.ID,
 				Content:   node.Content,
@@ -591,6 +604,9 @@ func buildIRWithPolicy(goal, sourceEvent string, st state) (PlannerIR, ControlPo
 	}
 	for _, m := range st.Mutations {
 		if !m.Applied {
+			continue
+		}
+		if isCompilerFeedbackNoise(m.Reason) {
 			continue
 		}
 		switch m.Change {
@@ -1772,12 +1788,22 @@ func outcomeFor(records []ToolRecord, err error) string {
 		if strings.TrimSpace(records[i].Name) == "" {
 			continue
 		}
+		if isPlanModeBlockedToolRecord(records[i]) {
+			continue
+		}
 		if strings.TrimSpace(records[i].Error) == "" {
 			return "success"
 		}
 		return "partial_success"
 	}
-	return "partial_success"
+	return "success"
+}
+
+func isPlanModeBlockedToolRecord(rec ToolRecord) bool {
+	if !rec.Blocked {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(rec.Error), planModeBlockedToolError)
 }
 
 func efficiencyScore(records []ToolRecord, start, end time.Time) float64 {
@@ -1862,12 +1888,12 @@ func (r *Runtime) writeTraceAndLearn(tr ExecutionTrace, strategyID string) {
 	st, tr = applyCausalCompression(st, tr, learning, policy, now)
 	st.UpdatedAt = now
 	bundle := splitTrace(tr, learning, debugTraceEnabled())
-	_ = appendJSONL(filepath.Join(r.dir, tracesFile), bundle.RuntimeTrace)
+	_ = appendBoundedJSONL(filepath.Join(r.dir, tracesFile), bundle.RuntimeTrace, maxRuntimeTraceJSONLLines)
 	if bundle.LearningTrace != nil {
-		_ = appendJSONL(filepath.Join(r.dir, learningTracesFile), *bundle.LearningTrace)
+		_ = appendBoundedJSONL(filepath.Join(r.dir, learningTracesFile), *bundle.LearningTrace, maxLearningTraceJSONLLines)
 	}
 	if bundle.DebugTrace != nil {
-		_ = appendJSONL(filepath.Join(r.dir, debugTracesFile), *bundle.DebugTrace)
+		_ = appendBoundedJSONL(filepath.Join(r.dir, debugTracesFile), *bundle.DebugTrace, maxDebugTraceJSONLLines)
 	}
 	_ = writeJSON(filepath.Join(r.dir, stateFile), st)
 }
@@ -1967,9 +1993,13 @@ func analyzeTrace(tr ExecutionTrace, strategyID string) SystemLearning {
 		}
 		parts := strings.SplitN(sig, "\x00", 2)
 		toolName := parts[0]
+		errLine := firstLine(parts[1])
+		if isCompilerFeedbackNoise(errLine) {
+			continue
+		}
 		learning.BadStrategies = append(learning.BadStrategies, strategyID)
-		learning.MemoryNoisePatterns = append(learning.MemoryNoisePatterns, fmt.Sprintf("%s repeated error: %s", toolName, firstLine(parts[1])))
-		learning.CompilerImprovements = append(learning.CompilerImprovements, fmt.Sprintf("avoid repeating %s after repeated error: %s", toolName, firstLine(parts[1])))
+		learning.MemoryNoisePatterns = append(learning.MemoryNoisePatterns, fmt.Sprintf("%s repeated error: %s", toolName, errLine))
+		learning.CompilerImprovements = append(learning.CompilerImprovements, fmt.Sprintf("avoid repeating %s after repeated error: %s", toolName, errLine))
 	}
 	if tr.Outcome == "failure" {
 		learning.BadStrategies = append(learning.BadStrategies, strategyID)
@@ -1999,10 +2029,20 @@ func analyzeTrace(tr ExecutionTrace, strategyID string) SystemLearning {
 	if tr.Cost.ToolCalls > len(tr.Steps)+3 && tr.Cost.ToolCalls >= 6 {
 		learning.CompilerImprovements = append(learning.CompilerImprovements, "tool call count exceeded plan shape; prefer tighter execution steps")
 	}
-	if tr.Cost.EstimatedIROverheadTokens > 800 {
-		learning.CompilerImprovements = append(learning.CompilerImprovements, "compiled IR overhead exceeded budget; reduce memory references before injection")
-	}
 	return dedupeLearning(learning)
+}
+
+func isCompilerFeedbackNoise(s string) bool {
+	normalized := strings.Join(strings.Fields(s), " ")
+	if normalized == compilerIROverheadSelfFeedback {
+		return true
+	}
+	lower := strings.ToLower(normalized)
+	if lower == planModeBlockedToolError {
+		return true
+	}
+	return strings.Contains(lower, planModeBlockedToolError) &&
+		(strings.Contains(lower, "repeated error") || strings.Contains(lower, "avoid repeating"))
 }
 
 func mutationsFromLearning(learning SystemLearning, baseline float64) []CompilerMutation {
@@ -2865,6 +2905,34 @@ func appendJSONL(path string, v any) error {
 		return err
 	}
 	return w.Flush()
+}
+
+func appendBoundedJSONL(path string, v any, maxLines int) error {
+	if maxLines <= 0 {
+		return appendJSONL(path, v)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	line, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	var lines [][]byte
+	if trimmed := bytes.TrimRight(existing, "\n"); len(trimmed) > 0 {
+		lines = bytes.Split(trimmed, []byte("\n"))
+	}
+	lines = append(lines, line)
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	out := bytes.Join(lines, []byte("\n"))
+	out = append(out, '\n')
+	return fileutil.AtomicWriteFile(path, out, 0o600)
 }
 
 func writeJSON(path string, v any) error {

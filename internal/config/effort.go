@@ -196,10 +196,12 @@ func normalizeProviderEffortFields(e *ProviderEntry) {
 	if e == nil {
 		return
 	}
+	e.Headers = normalizedProviderHeaders(e.Headers)
 	e.Effort = normalizeStoredEffort(e.Effort)
 	e.ReasoningProtocol = normalizeReasoningProtocol(e.ReasoningProtocol)
 	e.DefaultEffort = normalizeEffortLevel(e.DefaultEffort)
 	e.SupportedEfforts = normalizedSupportedEfforts(e)
+	e.ModelOverrides = normalizedModelOverrides(e.ModelOverrides)
 }
 
 func normalizeStoredEffort(raw string) string {
@@ -317,15 +319,68 @@ func normalizedSupportedEfforts(e *ProviderEntry) []string {
 	if e == nil || len(e.SupportedEfforts) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(e.SupportedEfforts))
+	return normalizedEffortLevels(e.SupportedEfforts)
+}
+
+func normalizedEffortLevels(levels []string) []string {
+	if len(levels) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(levels))
 	seen := map[string]bool{}
-	for _, raw := range e.SupportedEfforts {
+	for _, raw := range levels {
 		level := normalizeEffortLevel(raw)
 		if level == "" || level == "auto" || seen[level] {
 			continue
 		}
 		seen[level] = true
 		out = append(out, level)
+	}
+	return out
+}
+
+func normalizedProviderHeaders(headers map[string]string) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(headers))
+	for rawName, rawValue := range headers {
+		name := strings.TrimSpace(rawName)
+		value := strings.TrimSpace(rawValue)
+		if name == "" || value == "" {
+			continue
+		}
+		out[name] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func normalizedModelOverrides(overrides map[string]ProviderModelOverride) map[string]ProviderModelOverride {
+	if len(overrides) == 0 {
+		return nil
+	}
+	out := make(map[string]ProviderModelOverride, len(overrides))
+	for rawModel, ov := range overrides {
+		model := strings.TrimSpace(rawModel)
+		if model == "" {
+			continue
+		}
+		ov.ReasoningProtocol = normalizeReasoningProtocol(ov.ReasoningProtocol)
+		ov.SupportedEfforts = normalizedEffortLevels(ov.SupportedEfforts)
+		ov.DefaultEffort = normalizeEffortLevel(ov.DefaultEffort)
+		if ov.DefaultEffort != "" && !containsString(ov.SupportedEfforts, ov.DefaultEffort) {
+			ov.DefaultEffort = ""
+		}
+		if ov.ReasoningProtocol == "" && len(ov.SupportedEfforts) == 0 && ov.DefaultEffort == "" && ov.Vision == nil {
+			continue
+		}
+		out[model] = ov
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

@@ -77,7 +77,7 @@ func (e editFile) Preview(args json.RawMessage) (diff.Change, error) {
 	case applied.matches == 0:
 		return diff.Change{}, oldStringNotFoundError(p.Path, p.OldString, content)
 	default:
-		return diff.Change{}, oldStringNotUniqueError(p.Path, applied.matches, false)
+		return diff.Change{}, oldStringNotUniqueError(p.Path, p.OldString, content, applied.matches, false)
 	}
 
 	return diff.Build(p.Path, content, applied.updated, diff.Modify), nil
@@ -118,9 +118,9 @@ func (m multiEdit) Preview(args json.RawMessage) (diff.Change, error) {
 		case result.applied > 0:
 			content = result.updated
 		case result.matches == 0:
-			return diff.Change{}, fmt.Errorf("edit %d: old_string not found", i+1)
+			return diff.Change{}, fmt.Errorf("edit %d: %w", i+1, oldStringNotFoundError(p.Path, step.OldString, content))
 		default:
-			return diff.Change{}, fmt.Errorf("edit %d: old_string is not unique; add more surrounding context or set replace_all", i+1)
+			return diff.Change{}, fmt.Errorf("edit %d: %w", i+1, oldStringNotUniqueError(p.Path, step.OldString, content, result.matches, true))
 		}
 	}
 	return diff.Build(p.Path, original, content, diff.Modify), nil

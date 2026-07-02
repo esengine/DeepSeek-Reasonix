@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/control"
@@ -74,6 +75,31 @@ func (f *fakeAdapter) sentMessages() []OutboundMessage {
 	out := make([]OutboundMessage, len(f.sent))
 	copy(out, f.sent)
 	return out
+}
+
+type blockingSendAdapter struct {
+	*fakeAdapter
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func newBlockingSendAdapter(platform Platform, name string) *blockingSendAdapter {
+	return &blockingSendAdapter{
+		fakeAdapter: newFakeAdapter(platform, name),
+		entered:     make(chan struct{}),
+		release:     make(chan struct{}),
+	}
+}
+
+func (f *blockingSendAdapter) Send(ctx context.Context, msg OutboundMessage) (SendResult, error) {
+	f.once.Do(func() { close(f.entered) })
+	select {
+	case <-f.release:
+	case <-ctx.Done():
+		return SendResult{}, ctx.Err()
+	}
+	return f.fakeAdapter.Send(ctx, msg)
 }
 
 type fakeReactionAdapter struct {
@@ -184,6 +210,50 @@ func TestGatewayStartsHealthyAdaptersWhenOneFails(t *testing.T) {
 	startErr := gw.StartErrors()
 	if len(startErr) != 1 || !strings.Contains(startErr[0].Error(), "weixin-weixin") {
 		t.Fatalf("start errors = %#v, want wrapped connection error", startErr)
+	}
+}
+
+func TestGatewaySendToAdapterReleasesLockBeforeSend(t *testing.T) {
+	adapter := newBlockingSendAdapter(PlatformFeishu, "blocking-feishu")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGatewayWithAdapterBindings(GatewayConfig{}, []AdapterBinding{{
+		ID:       "feishu-lark",
+		Domain:   "lark",
+		Platform: PlatformFeishu,
+		Adapter:  adapter,
+	}}, logger)
+
+	sendDone := make(chan error, 1)
+	go func() {
+		_, err := gw.SendToAdapter(context.Background(), "feishu-lark", "lark", OutboundMessage{ChatID: "chat", Text: "hello"})
+		sendDone <- err
+	}()
+
+	select {
+	case <-adapter.entered:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("adapter send did not start")
+	}
+
+	updateDone := make(chan struct{})
+	go func() {
+		gw.UpdateConnectionToolApprovalMode("feishu-lark", "ask")
+		close(updateDone)
+	}()
+	select {
+	case <-updateDone:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("UpdateConnectionToolApprovalMode blocked behind SendToAdapter")
+	}
+
+	close(adapter.release)
+	select {
+	case err := <-sendDone:
+		if err != nil {
+			t.Fatalf("SendToAdapter returned error: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("SendToAdapter did not finish after release")
 	}
 }
 

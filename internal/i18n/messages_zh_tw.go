@@ -157,6 +157,7 @@ var ChineseTraditional = Messages{
 	ShellModeHint:       "Enter 執行 Shell · Esc 取消 · 點擊輸出展開",
 
 	CmdNew:              "清空上下文並儲存歷史",
+	CmdCls:              "清除畫面（保留 LLM 上下文）",
 	CmdCompact:          "壓縮上下文",
 	CmdRewind:           "回滾到更早的一輪",
 	CmdTree:             "檢視對話分支樹",
@@ -335,7 +336,7 @@ var ChineseTraditional = Messages{
   reasonix acp [--model NAME]                           透過 stdio 提供 Agent Client Protocol（也可用：reasonix --acp）
   reasonix setup [path]                                 互動式設定精靈；生成 reasonix.toml（及 .env）
   reasonix config auto-plan [off|on]                    設定自動計畫模式
-  reasonix config memory-v5 [off|on|status]             設定 Memory v5
+  reasonix config memory-v5 [off|observe|compact|on|status]  設定 Memory v5
   reasonix config reasoning-language [auto|zh|en]        設定可見思考語言
   reasonix mcp <add|remove|list|import>                 管理 reasonix.toml 裡的 MCP 伺服器
   reasonix init                                         查看如何產生專案記憶（AGENTS.md）
@@ -365,6 +366,7 @@ var ChineseTraditional = Messages{
 	SlashClearPrompt:           "清空當前上下文且不儲存？",
 	SlashClearDone:             "已清空當前上下文",
 	SlashClearFailed:           "清空當前上下文失敗",
+	SlashClsDone:               "已清除畫面（LLM 上下文保留）",
 	CmdClear:                   "丟棄當前上下文",
 	CmdRename:                  "重新命名會話",
 	CmdGoal:                    "設定或清除當前目標",

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/autoresearch"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/jobs"
@@ -18,10 +20,11 @@ type turnOrchestrator struct {
 }
 
 type orchestratedTurn struct {
-	input     string
-	raw       string
-	display   string
-	synthetic bool
+	input          string
+	raw            string
+	display        string
+	editedOriginal string
+	synthetic      bool
 }
 
 func newTurnOrchestrator(c *Controller) *turnOrchestrator {
@@ -30,6 +33,10 @@ func newTurnOrchestrator(c *Controller) *turnOrchestrator {
 
 func (o *turnOrchestrator) runTurnWithRawDisplay(ctx context.Context, input, raw, display string) error {
 	return o.runOrchestratedTurn(ctx, orchestratedTurn{input: input, raw: raw, display: display})
+}
+
+func (o *turnOrchestrator) runEditedTurnWithRawDisplay(ctx context.Context, input, raw, display, original string) error {
+	return o.runOrchestratedTurn(ctx, orchestratedTurn{input: input, raw: raw, display: display, editedOriginal: original})
 }
 
 func (o *turnOrchestrator) runSyntheticTurnWithRawDisplay(ctx context.Context, input, raw, display string) error {
@@ -64,6 +71,9 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)
 	defer c.recordDisplayForNewUser(startMessages, turn.display)
+	if turn.editedOriginal != "" {
+		defer c.markEditedForNewUser(startMessages, turn.editedOriginal)
+	}
 	// Open a checkpoint only for visible user turns before the user message is
 	// appended, so the recorded message boundary precedes it and pre-edit
 	// snapshots land here. Synthetic continuations stay attached to the visible
@@ -89,10 +99,17 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		defer func() { c.hooks.Stop(context.Background(), lastAssistantText(c.History()), turn) }()
 	}
 	c.markInFlightTurn(startMessages, !turn.synthetic && !IsSyntheticUserMessage(turn.raw))
+	autoResearchTaskID := c.goals.currentAutoResearchTaskID()
+	autoResearchAcceptedBefore := c.autoResearchAcceptedEvidenceIDs(autoResearchTaskID)
+	c.appendAutoResearchHeartbeat(autoResearchTaskID, autoresearch.HeartbeatStartingTurn, "")
 	err := c.runner.Run(ctx, input)
 	if err == nil {
+		c.recordAutoResearchEvidenceFromAssistant(autoResearchTaskID, lastAssistantText(c.History()))
+		c.recordAutoResearchTurnProgress(autoResearchTaskID, autoResearchAcceptedBefore)
+		c.appendAutoResearchHeartbeat(autoResearchTaskID, autoresearch.HeartbeatTurnDone, "")
 		c.clearInFlightTurn()
 	} else {
+		c.appendAutoResearchHeartbeat(autoResearchTaskID, autoresearch.HeartbeatWarning, err.Error())
 		// When the user explicitly cancels (Ctrl+C), the incomplete turn's
 		// assistant messages and tool results are already saved to the
 		// session. If they stay, the next turn's model sees leftover
@@ -163,6 +180,16 @@ func (o *turnOrchestrator) runGoalLoopWithRawDisplay(ctx context.Context, input,
 	return o.continueGoal(ctx)
 }
 
+func (o *turnOrchestrator) runEditedGoalLoopWithRawDisplay(ctx context.Context, input, raw, display, original string) error {
+	if err := o.runEditedTurnWithRawDisplay(ctx, input, raw, display, original); err != nil {
+		if ctx.Err() != nil {
+			o.c.stopGoal(GoalStatusStopped)
+		}
+		return err
+	}
+	return o.continueGoal(ctx)
+}
+
 func (o *turnOrchestrator) continueGoal(ctx context.Context) error {
 	c := o.c
 	for {
@@ -177,7 +204,11 @@ func (o *turnOrchestrator) continueGoal(ctx context.Context) error {
 		turn := goalContinueTurn
 		if msg, ok := c.goals.takeIntercept(); ok {
 			turn = msg
-			c.notice("goal intercept: incomplete todos remain (override with a second [goal:complete])")
+			if strings.Contains(msg, "AutoResearch readiness check failed") {
+				c.notice("autoresearch readiness blocked completion")
+			} else {
+				c.notice("goal intercept: incomplete todos remain (override with a second [goal:complete])")
+			}
 		}
 		if err := o.runSyntheticTurnWithRawDisplay(ctx, turn, turn, ""); err != nil {
 			if ctx.Err() != nil {
@@ -194,9 +225,17 @@ func (o *turnOrchestrator) advanceGoalAfterTurn() bool {
 	// snapshot the executor's todos + readiness, and check tool activity. None
 	// of these touch goal state, so the machine's critical section stays pure.
 	status, reason, _ := parseGoalStatusMarker(lastAssistantText(c.History()))
+	autoResearchTaskID := c.goals.currentAutoResearchTaskID()
 	var readiness string
 	if c.executor != nil {
 		readiness = c.executor.GoalReadinessFailure()
+	}
+	if arReadiness := c.autoResearchReadinessFailure(); arReadiness != "" {
+		if readiness != "" {
+			readiness += "\n" + arReadiness
+		} else {
+			readiness = arReadiness
+		}
 	}
 	res := c.goals.advance(goalAdvanceInput{
 		status:     status,
@@ -207,12 +246,39 @@ func (o *turnOrchestrator) advanceGoalAfterTurn() bool {
 	})
 	c.persistGoalState(res.path, res.data, res.ok)
 	if res.notice != "" {
+		c.finalizeAutoResearchTask(autoResearchTaskID, res.notice)
 		c.notice(res.notice)
 	}
 	if res.notice == goalCompleteNotice && c.executor != nil {
 		c.completeRemainingGoalTodos()
 	}
 	return res.cont
+}
+
+func (c *Controller) finalizeAutoResearchTask(taskID, notice string) {
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return
+	}
+	switch {
+	case notice == goalCompleteNotice:
+		status := autoresearch.StatusComplete
+		if _, err := c.autoResearch.UpdateProgress(taskID, autoresearch.ProgressPatch{Status: &status}); err != nil {
+			c.notice("autoresearch task completion update failed: " + err.Error())
+			return
+		}
+		c.notice("autoresearch task completed: " + taskID)
+	case strings.HasPrefix(notice, "goal blocked: ") || notice == "goal continuation limit reached":
+		status := autoresearch.StatusBlocked
+		reason := strings.TrimPrefix(notice, "goal blocked: ")
+		if reason == "" {
+			reason = notice
+		}
+		if _, err := c.autoResearch.UpdateProgress(taskID, autoresearch.ProgressPatch{Status: &status, BlockedReason: &reason}); err != nil {
+			c.notice("autoresearch task blocked update failed: " + err.Error())
+			return
+		}
+		c.notice("autoresearch task blocked: " + taskID)
+	}
 }
 
 // completeRemainingGoalTodos force-completes any remaining incomplete canonical

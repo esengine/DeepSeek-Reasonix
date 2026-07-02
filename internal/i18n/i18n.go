@@ -135,6 +135,7 @@ type Messages struct {
 	SlashClearPrompt   string // "/clear" destructive confirmation prompt
 	SlashClearDone     string // "/clear" succeeded
 	SlashClearFailed   string // "/clear" errored
+	SlashClsDone       string // "/cls" succeeded
 	SlashTodoCleared   string // "/todo" dismissed the pinned task list
 	SlashUnavailable   string // the command is configured off (no callback wired)
 	SlashUnknown       string // shown when the user types an unrecognised "/cmd"
@@ -155,6 +156,7 @@ type Messages struct {
 	// share these via i18n.M, so both frontends localize identically).
 	CmdNew              string // /new
 	CmdClear            string // /clear
+	CmdCls              string // /cls
 	CmdCompact          string // /compact
 	CmdRewind           string // /rewind
 	CmdTree             string // /tree

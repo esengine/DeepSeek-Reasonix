@@ -263,15 +263,19 @@ func TestComposeIncludesActiveGoal(t *testing.T) {
 }
 
 func TestGoalAutoResearchTriggersForLongHorizonGoals(t *testing.T) {
-	c := New(Options{})
+	root := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	c := New(Options{WorkspaceRoot: root})
 	c.SetGoal("持续排查这个线上卡顿直到根因明确，并验证修复")
 
 	got := c.Compose("next step?")
 	for _, want := range []string{
 		"AutoResearch protocol",
-		".reasonix/autoresearch/<task-id>/",
-		"YYYYMMDD-HHMMSS-slug",
-		"state/task_spec.md",
+		"<autoresearch-runtime>",
+		"task_id:",
+		"pivot_required:",
 		"stale_count >= 2",
 		"durable strategy for this Goal",
 	} {

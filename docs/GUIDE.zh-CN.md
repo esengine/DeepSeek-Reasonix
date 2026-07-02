@@ -16,6 +16,7 @@
 - [Serve Web 前端](#serve-web-前端)
 - [配置路径](./CONFIG_PATHS.zh-CN.md)
 - [思考语言](./REASONING_LANGUAGE.zh-CN.md)
+- [自定义 OpenAI-compatible provider](#自定义-openai-compatible-provider)
 - [桌面端 Hooks](./DESKTOP_HOOKS.zh-CN.md)
 - [快捷键](#快捷键)
 - [权限与沙盒](#权限与沙盒)
@@ -43,6 +44,7 @@ default_model = "deepseek-flash"   # 执行器；设 [agent].planner_model 可�
 
 [ui]
 # shortcut_layout = "desktop"      # classic|desktop；兼容旧配置
+# cursor_shape = "underline"       # block|underline|bar；CLI/TUI 输入光标
 
 [agent]
 max_steps = 0                    # 仅用户/全局；执行器工具调用轮数；0 表示不限
@@ -173,12 +175,39 @@ Goal、由 `todo_write` 工具驱动的实时 Todo 面板，以及已配置 prov
 `--model`、`--max-steps` 或 `--resume`；不传 `--model` 时，`serve` 使用用户全局
 `default_model`。
 
+## 自定义 OpenAI-compatible provider
+
+在桌面端打开 **设置 -> 模型 -> 接入 -> 添加模型服务 -> 自定义供应商**，用于接入代理、
+聚合平台或自建 OpenAI-compatible chat API 服务。
+
+**API 地址** 填写服务端点。默认模式下，Reasonix 会预览并把聊天请求发送到：
+
+```text
+<API 地址>/chat/completions
+```
+
+如果服务商给的是完整请求 URL，例如 `https://gateway.example.com/v1/chat/completions`，
+开启 **完整 URL**。开启后 Reasonix 会直接使用该地址，不再追加 `/chat/completions`。
+输入框下方的预览就是最终请求地址。
+
+模型发现会基于 API 地址尝试 `/models`、`/v1/models` 等候选地址。如果网关要求单独的
+模型列表端点，在 **高级设置** 中填写 `models_url`，例如
+`https://gateway.example.com/v1/models`。如果接口不支持模型发现，也可以手动填写模型列表。
+
+**完整 URL** 仍使用 OpenAI-compatible chat 请求体；它不会切换成 OpenAI Responses API
+的请求 schema。
+
 ## 快捷键
 
 这里按使用端来写，因为用户通常是先知道“我现在在桌面端/CLI”，再找对应按键。
 核心模式规则很小：`Shift+Tab` 只管 Plan，`Ctrl/Cmd+Y` 只管 YOLO，粘贴继续走系统粘贴快捷键。
 
 `[ui].shortcut_layout` 仍被接受以兼容旧配置，但下面的快捷键行为已经跨布局统一。
+
+CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `underline`、`block`
+和 `bar`。默认值是 `underline`，因为部分终端中的 block 光标会在中英混排输入时覆盖
+CJK 双宽字符，造成视觉错位。想保留旧的终端块状光标可设为 `block`，想使用细插入线可设为
+`bar`。该设置不影响桌面端或 Web 输入框。
 
 ### 桌面端 GUI
 
@@ -235,6 +264,7 @@ Goal、由 `todo_write` 工具驱动的实时 Todo 面板，以及已配置 prov
 | 空闲时普通 `Up` / `Down` | 回放更旧或更新的已提交提示词 | turn 运行中同一组按键用于导航排队反馈。 |
 | `PageUp` / `PageDown` | 滚动 transcript | 不受当前聊天状态影响。 |
 | `Ctrl+Home` / `Ctrl+End` | 跳到 transcript 顶部或底部 | 长工具输出后很有用。 |
+| `Ctrl+L` 或 `/cls` | 只清空可见 transcript | LLM 上下文、session 文件、工具、记忆和插件都保持加载；想丢弃对话上下文时用 `/clear`。 |
 | `Esc` | 退出当前最具体的动作 | 可在无回复前撤回刚提交的 turn、取消运行中的 turn，或清空非空输入。 |
 | 空闲且输入为空时双击 `Esc` | 打开 rewind 选择器 | 和 `/rewind` 是同一个入口。 |
 | 终端原生选择 | 复制 transcript 文本 | Reasonix 默认不启用鼠标报告，因此终端自己的选择/复制仍可使用。 |
@@ -384,11 +414,14 @@ agent 发起的 `remember` 和 `forget` 每次都会要求新的人工确认，�
 Memory v5 在 CLI/TUI、`reasonix serve` 和桌面端默认开启，因为这些入口共用同一套本地
 controller。它会把本地、按项目隔离的执行轨迹和编译器状态写在 Reasonix home 下，并且只有
 历史结果产生可行动约束时，才把下一轮用户输入编译成精简 execution contract。早期轮次可能
-只写入轨迹而不注入任何内容。Memory v5 不会绕过 memory 审批，不会上传记忆正文，也不会修改
-cache-stable system prompt、Provider 前缀或工具 schema。
+只写入轨迹而不注入任何内容。默认的 `verbosity = "observe"` 只做本地学习和内容无关指标，
+不会把 `<memory-compiler-execution>` 发送到 provider 可见的用户轮次；只有显式切到
+`verbosity = "compact"`（或旧的 `on` 命令别名）时才恢复精简 execution contract 注入，
+并把选中的精简 memory reference 放进 provider 可见的用户轮次。Memory v5 不会绕过
+memory 审批，也不会修改 cache-stable system prompt、Provider 前缀或工具 schema。
 
-交互式会话里可用 `/memory-v5 off|on|status` 控制后续轮次，也可在 shell/脚本里用
-`reasonix config memory-v5 off|on|status`。桌面端还可以在设置 → 通用 → Memory v5 中控制。
+交互式会话里可用 `/memory-v5 off|observe|compact|on|status` 控制后续轮次，也可在 shell/脚本里用
+`reasonix config memory-v5 off|observe|compact|on|status`。桌面端还可以在设置 → 通用 → Memory v5 中控制。
 设置 → 更新 → 共享聚合质量指标控制可选的聚合上报；开启后只会上报匿名计数/大小桶，例如是否
 注入、编译后 token 大小桶、IR overhead 大小桶、memory reference 数量、constraint/risk/step
 数量，以及记忆图规模桶。它不会包含记忆正文、提示词、工具输出、文件路径、ID、密钥、base URL
@@ -400,7 +433,7 @@ CLI/TUI 和 `reasonix serve` 使用同一个 user/global 配置。项目内的 `
 
 ```toml
 [agent]
-memory_compiler = { enabled = false }
+memory_compiler = { enabled = true, verbosity = "observe" }
 ```
 
 CLI 可以在本地轮次使用 Memory v5，但不会运行桌面端的聚合指标上传管线。使用
@@ -494,8 +527,8 @@ source 仍会启用可写 skill 工具，plan mode 下继续阻断。
 `reasonix config auto-plan off|on`。Auto-plan 只认用户级设置；项目
 `reasonix.toml` 里的 `agent.auto_plan` 会被忽略。可见思考语言也采用类似形态：
 会话里用 `/reasoning-language auto|zh|en`，shell/脚本里用
-`reasonix config reasoning-language auto|zh|en`。Memory v5 使用 `/memory-v5 off|on|status`
-或 `reasonix config memory-v5 off|on|status`，并且只认用户级设置。只有明确想为
+`reasonix config reasoning-language auto|zh|en`。Memory v5 使用 `/memory-v5 off|observe|compact|on|status`
+或 `reasonix config memory-v5 off|observe|compact|on|status`，并且只认用户级设置。只有明确想为
 reasoning-language 写项目级覆盖时，才给 shell 命令加 `--local`。
 
 桌面端“协作方式”菜单里的计划模式、目标模式和省 token 模式的使用方法与注意事项，

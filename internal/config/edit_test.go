@@ -78,6 +78,25 @@ func TestUIThemeStyleNormalizes(t *testing.T) {
 	}
 }
 
+func TestUICursorShapeNormalizes(t *testing.T) {
+	c := Default()
+	for _, tt := range []struct {
+		in   string
+		want string
+	}{
+		{"", "underline"},
+		{"UNDERLINE", "underline"},
+		{" block ", "block"},
+		{"bar", "bar"},
+		{"unknown", "underline"},
+	} {
+		c.UI.CursorShape = tt.in
+		if got := c.UICursorShape(); got != tt.want {
+			t.Errorf("UICursorShape(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestUICloseBehaviorNormalizes(t *testing.T) {
 	c := Default()
 	for _, tt := range []struct {
@@ -357,6 +376,31 @@ func TestSetMemoryCompilerEnabled(t *testing.T) {
 	}
 	if !c.MemoryCompilerEnabled() {
 		t.Fatal("memory compiler explicit true = false, want true")
+	}
+}
+
+func TestSetMemoryCompilerVerbosity(t *testing.T) {
+	c := Default()
+	if err := c.SetMemoryCompilerVerbosity("compact"); err != nil {
+		t.Fatalf("SetMemoryCompilerVerbosity(compact): %v", err)
+	}
+	if got := c.MemoryCompilerVerbosity(); got != MemoryCompilerVerbosityCompact {
+		t.Fatalf("memory compiler verbosity = %q, want compact", got)
+	}
+	if err := c.SetMemoryCompilerVerbosity("on"); err != nil {
+		t.Fatalf("SetMemoryCompilerVerbosity(on): %v", err)
+	}
+	if got := c.MemoryCompilerVerbosity(); got != MemoryCompilerVerbosityCompact {
+		t.Fatalf("memory compiler verbosity after on = %q, want compact", got)
+	}
+	if err := c.SetMemoryCompilerVerbosity("observe"); err != nil {
+		t.Fatalf("SetMemoryCompilerVerbosity(observe): %v", err)
+	}
+	if got := c.MemoryCompilerVerbosity(); got != MemoryCompilerVerbosityObserve {
+		t.Fatalf("memory compiler verbosity = %q, want observe", got)
+	}
+	if err := c.SetMemoryCompilerVerbosity("verbose"); err == nil {
+		t.Fatal("expected error for invalid memory compiler verbosity")
 	}
 }
 
@@ -641,6 +685,50 @@ func TestEffectiveVisionUsesPerModelVisionList(t *testing.T) {
 	textOnly.Vision = true
 	if !EffectiveVision(textOnly) {
 		t.Fatalf("provider-level vision=true should still enable every selected model")
+	}
+}
+
+func TestResolveModelAppliesModelOverrides(t *testing.T) {
+	visionOff := false
+	c := &Config{Providers: []ProviderEntry{{
+		Name:              "gateway",
+		Kind:              "openai",
+		BaseURL:           "https://proxy.example.com/v1",
+		Models:            []string{"deepseek-v4-flash", "plain-chat"},
+		Default:           "plain-chat",
+		ReasoningProtocol: ReasoningProtocolOpenAI,
+		SupportedEfforts:  []string{"low", "medium", "high"},
+		ModelOverrides: map[string]ProviderModelOverride{
+			"deepseek-v4-flash": {
+				ReasoningProtocol: ReasoningProtocolDeepSeek,
+				SupportedEfforts:  []string{"high", "max"},
+				DefaultEffort:     "max",
+				Vision:            &visionOff,
+			},
+		},
+	}}}
+
+	deepseek, ok := c.ResolveModel("gateway/deepseek-v4-flash")
+	if !ok {
+		t.Fatal("ResolveModel did not find gateway/deepseek-v4-flash")
+	}
+	if protocol := ReasoningProtocolForEntry(deepseek); protocol != ReasoningProtocolDeepSeek {
+		t.Fatalf("deepseek protocol = %q, want deepseek", protocol)
+	}
+	cap := EffortCapabilityForEntry(deepseek)
+	if cap.Default != "max" || !containsString(cap.Levels, "max") || containsString(cap.Levels, "low") {
+		t.Fatalf("deepseek effort capability = %+v, want high|max default max", cap)
+	}
+	if EffectiveVision(deepseek) {
+		t.Fatalf("vision override false should disable image input")
+	}
+
+	plain, ok := c.ResolveModel("gateway/plain-chat")
+	if !ok {
+		t.Fatal("ResolveModel did not find gateway/plain-chat")
+	}
+	if protocol := ReasoningProtocolForEntry(plain); protocol != ReasoningProtocolOpenAI {
+		t.Fatalf("plain protocol = %q, want provider-level openai", protocol)
 	}
 }
 

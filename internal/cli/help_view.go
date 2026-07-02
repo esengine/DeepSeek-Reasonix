@@ -59,6 +59,7 @@ func builtinHelpItems() []compItem {
 		{label: "/new", hint: i18n.M.CmdNew},
 		{label: "/rename", hint: i18n.M.CmdRename},
 		{label: "/clear", hint: i18n.M.CmdClear},
+		{label: "/cls", hint: i18n.M.CmdCls},
 		{label: "/rewind", hint: i18n.M.CmdRewind},
 		{label: "/tree", hint: i18n.M.CmdTree},
 		{label: "/branch", hint: i18n.M.CmdBranch},

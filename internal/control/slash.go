@@ -128,7 +128,9 @@ func memoryV5ArgItems(prior []string) []SlashItem {
 	return []SlashItem{
 		{Label: "status", Insert: "status", Hint: "show current Memory v5 state"},
 		{Label: "off", Insert: "off", Hint: "disable Memory v5 for future turns"},
-		{Label: "on", Insert: "on", Hint: "enable Memory v5 for future turns"},
+		{Label: "observe", Insert: "observe", Hint: "learn without injecting IR"},
+		{Label: "compact", Insert: "compact", Hint: "inject compact execution contracts"},
+		{Label: "on", Insert: "on", Hint: "alias for compact"},
 	}
 }
 
@@ -466,7 +468,7 @@ func (c *Controller) managementNotice(trimmed string) bool {
 
 func (c *Controller) memoryV5Notice(fields []string) {
 	if len(fields) > 2 {
-		c.notice("usage: /memory-v5 off|on|status")
+		c.notice("usage: /memory-v5 off|observe|compact|on|status")
 		return
 	}
 	if len(fields) < 2 || strings.EqualFold(fields[1], "status") {
@@ -475,14 +477,14 @@ func (c *Controller) memoryV5Notice(fields []string) {
 			c.notice("memory-v5: " + err.Error())
 			return
 		}
-		c.notice(fmt.Sprintf("memory-v5: %s (usage: /memory-v5 off|on|status)", memoryV5Mode(cfg.MemoryCompilerEnabled())))
+		c.notice(fmt.Sprintf("memory-v5: %s (usage: /memory-v5 off|observe|compact|on|status)", memoryV5Mode(cfg.MemoryCompilerEnabled(), cfg.MemoryCompilerVerbosity())))
 		return
 	}
 	if c.Running() {
 		c.notice("finish or cancel the current turn before changing memory-v5")
 		return
 	}
-	enabled, err := parseMemoryV5Mode(fields[1])
+	setting, err := parseMemoryV5Setting(fields[1])
 	if err != nil {
 		c.notice("memory-v5: " + err.Error())
 		return
@@ -493,34 +495,51 @@ func (c *Controller) memoryV5Notice(fields []string) {
 		return
 	}
 	edit := config.LoadForEdit(path)
-	if err := edit.SetMemoryCompilerEnabled(enabled); err != nil {
+	if err := edit.SetMemoryCompilerEnabled(setting.enabled); err != nil {
 		c.notice("memory-v5: " + err.Error())
 		return
+	}
+	if setting.setVerbosity {
+		if err := edit.SetMemoryCompilerVerbosity(setting.verbosity); err != nil {
+			c.notice("memory-v5: " + err.Error())
+			return
+		}
 	}
 	if err := edit.SaveTo(path); err != nil {
 		c.notice("memory-v5: " + err.Error())
 		return
 	}
-	c.SetMemoryCompilerEnabled(enabled)
-	c.notice(fmt.Sprintf("memory-v5 set to %s", memoryV5Mode(enabled)))
+	c.SetMemoryCompilerEnabled(setting.enabled)
+	if setting.setVerbosity {
+		c.SetMemoryCompilerVerbosity(setting.verbosity)
+	}
+	c.notice(fmt.Sprintf("memory-v5 set to %s", memoryV5Mode(edit.MemoryCompilerEnabled(), edit.MemoryCompilerVerbosity())))
 }
 
-func parseMemoryV5Mode(mode string) (bool, error) {
+type memoryV5Setting struct {
+	enabled      bool
+	verbosity    string
+	setVerbosity bool
+}
+
+func parseMemoryV5Setting(mode string) (memoryV5Setting, error) {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "on":
-		return true, nil
 	case "off":
-		return false, nil
+		return memoryV5Setting{enabled: false}, nil
+	case "observe", "silent", "minimal":
+		return memoryV5Setting{enabled: true, verbosity: config.MemoryCompilerVerbosityObserve, setVerbosity: true}, nil
+	case "on", "compact", "inject", "contract":
+		return memoryV5Setting{enabled: true, verbosity: config.MemoryCompilerVerbosityCompact, setVerbosity: true}, nil
 	default:
-		return false, fmt.Errorf("memory-v5 %q: must be off|on|status", mode)
+		return memoryV5Setting{}, fmt.Errorf("memory-v5 %q: must be off|observe|compact|on|status", mode)
 	}
 }
 
-func memoryV5Mode(enabled bool) string {
-	if enabled {
-		return "on"
+func memoryV5Mode(enabled bool, verbosity string) string {
+	if !enabled {
+		return "off"
 	}
-	return "off"
+	return config.NormalizeMemoryCompilerVerbosity(verbosity)
 }
 
 func (c *Controller) modelListText() string {

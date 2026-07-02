@@ -5,20 +5,15 @@ import { z } from "zod";
 import type { Env } from "./env";
 import { html, redirect } from "./shell";
 import { renderGroup, renderStats, type Group, type StatsModule } from "./stats";
-import { renderLogin, renderRegister, renderAccount } from "./auth_pages";
+import { renderAccount } from "./auth_pages";
 import { renderUsers, renderAudit, type UserRow, type AuditRow } from "./admin";
 import {
   atLeast,
-  createSession,
   currentUser,
-  endSession,
-  hashPassword,
-  isAdminEmail,
+  loginUrl,
   logAction,
   sameOrigin,
-  sessionCookie,
-  clearCookie,
-  verifyPassword,
+  sharedLogout,
   type Role,
   type User,
 } from "./auth";
@@ -472,16 +467,6 @@ async function handleMetrics(request: Request, env: Env): Promise<Response> {
   return new Response("ok", { status: 202 });
 }
 
-const Credentials = z.object({
-  email: z.string().email().max(254),
-  password: z.string().min(8).max(200),
-});
-
-const PasswordChange = z.object({
-  current: z.string().min(1).max(200),
-  next: z.string().min(8).max(200),
-});
-
 const UserAction = z.object({
   action: z.enum(["role", "delete"]),
   userId: z.coerce.number().int().positive(),
@@ -501,62 +486,6 @@ async function formObject(request: Request): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
   for (const [k, v] of form) out[k] = typeof v === "string" ? v : "";
   return out;
-}
-
-async function handleRegister(request: Request, env: Env): Promise<Response> {
-  if (!sameOrigin(request)) return new Response("forbidden", { status: 403 });
-  const parsed = Credentials.safeParse(await formObject(request));
-  if (!parsed.success)
-    return html(renderRegister({ kind: "err", text: "Enter a valid email and a password of at least 8 characters." }));
-  const email = parsed.data.email.toLowerCase();
-
-  const existing = await env.DB.prepare("SELECT id FROM users WHERE email = ?1").bind(email).first();
-  if (existing) return html(renderRegister({ kind: "err", text: "That email is already registered — try signing in." }));
-
-  const role: Role = isAdminEmail(env, email) ? "admin" : "pending";
-  const now = new Date().toISOString();
-  const hash = await hashPassword(parsed.data.password);
-  const res = await env.DB.prepare(
-    "INSERT INTO users (email, password_hash, role, created_at, approved_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-  )
-    .bind(email, hash, role, now, role === "admin" ? now : null)
-    .run();
-
-  const token = await createSession(env, res.meta.last_row_id);
-  return redirect(role === "pending" ? "/account" : "/stats", sessionCookie(token));
-}
-
-async function handleLogin(request: Request, env: Env): Promise<Response> {
-  if (!sameOrigin(request)) return new Response("forbidden", { status: 403 });
-  const parsed = Credentials.safeParse(await formObject(request));
-  if (!parsed.success) return html(renderLogin({ kind: "err", text: "Enter a valid email and password." }));
-  const email = parsed.data.email.toLowerCase();
-
-  const row = await env.DB.prepare("SELECT id, password_hash, role FROM users WHERE email = ?1")
-    .bind(email)
-    .first<{ id: number; password_hash: string; role: Role }>();
-  const ok = row ? await verifyPassword(parsed.data.password, row.password_hash) : false;
-  if (!row || !ok) return html(renderLogin({ kind: "err", text: "Wrong email or password." }));
-
-  const token = await createSession(env, row.id);
-  return redirect(atLeast(row.role, "viewer") ? "/stats" : "/account", sessionCookie(token));
-}
-
-async function handleAccountPassword(request: Request, env: Env, user: User): Promise<Response> {
-  if (!sameOrigin(request)) return new Response("forbidden", { status: 403 });
-  const parsed = PasswordChange.safeParse(await formObject(request));
-  if (!parsed.success) return html(renderAccount(user, { kind: "err", text: "New password must be at least 8 characters." }));
-
-  const row = await env.DB.prepare("SELECT password_hash FROM users WHERE id = ?1")
-    .bind(user.id)
-    .first<{ password_hash: string }>();
-  if (!row || !(await verifyPassword(parsed.data.current, row.password_hash)))
-    return html(renderAccount(user, { kind: "err", text: "Current password is incorrect." }));
-
-  await env.DB.prepare("UPDATE users SET password_hash = ?1 WHERE id = ?2")
-    .bind(await hashPassword(parsed.data.next), user.id)
-    .run();
-  return html(renderAccount(user, { kind: "ok", text: "Password updated." }));
 }
 
 type StatsFilters = {
@@ -899,24 +828,21 @@ async function handleAdminUsers(request: Request, env: Env, admin: User): Promis
   const a = parsed.data;
   if (a.userId === admin.id) return redirect("/admin");
 
-  const target = await env.DB.prepare("SELECT email, role FROM users WHERE id = ?1")
+  const target = await env.DB.prepare("SELECT email, role FROM access WHERE id = ?1")
     .bind(a.userId)
     .first<{ email: string; role: Role }>();
   if (!target) return redirect("/admin");
 
   if (a.action === "delete") {
-    await env.DB.batch([
-      env.DB.prepare("DELETE FROM sessions WHERE user_id = ?1").bind(a.userId),
-      env.DB.prepare("DELETE FROM users WHERE id = ?1").bind(a.userId),
-    ]);
+    await env.DB.prepare("DELETE FROM access WHERE id = ?1").bind(a.userId).run();
     await logAction(env, admin, "delete_user", target.email);
     return redirect("/admin");
   }
 
   const role: Role = a.role ?? "pending";
   const now = new Date().toISOString();
-  await env.DB.prepare("UPDATE users SET role = ?1, approved_at = ?2, approved_by = ?3 WHERE id = ?4")
-    .bind(role, role === "pending" ? null : now, admin.id, a.userId)
+  await env.DB.prepare("UPDATE access SET role = ?1, approved_at = ?2, approved_by = ?3 WHERE id = ?4")
+    .bind(role, role === "pending" ? null : now, admin.email, a.userId)
     .run();
   await logAction(env, admin, "set_role", target.email, `${target.role} → ${role}`);
   return redirect("/admin");
@@ -924,7 +850,7 @@ async function handleAdminUsers(request: Request, env: Env, admin: User): Promis
 
 async function handleAdminList(env: Env, admin: User): Promise<Response> {
   const users = await env.DB.prepare(
-    "SELECT id, email, role, created_at, approved_at FROM users ORDER BY (role = 'pending') DESC, created_at DESC",
+    "SELECT id, email, role, created_at, approved_at FROM access ORDER BY (role = 'pending') DESC, created_at DESC",
   ).all<UserRow>();
   return html(renderUsers(admin, users.results));
 }
@@ -936,8 +862,8 @@ async function handleAdminAudit(env: Env, admin: User): Promise<Response> {
   return html(renderAudit(admin, rows.results));
 }
 
-function requireViewer(user: User | null): Response | null {
-  if (!user) return redirect("/login");
+function requireViewer(user: User | null, login: string): Response | null {
+  if (!user) return redirect(login);
   if (!atLeast(user.role, "viewer")) return redirect("/account");
   return null;
 }
@@ -952,40 +878,34 @@ export default {
     if (path === "/v1/ping" && method === "POST") return handlePing(request, env);
     if (path === "/v1/metrics" && method === "POST") return handleMetrics(request, env);
 
-    if (path === "/register" && method === "GET") return html(renderRegister());
-    if (path === "/register" && method === "POST") return handleRegister(request, env);
-    if (path === "/login" && method === "GET") return html(renderLogin());
-    if (path === "/login" && method === "POST") return handleLogin(request, env);
-    if (path === "/logout" && method === "POST") {
-      await endSession(request, env);
-      return redirect("/login", clearCookie());
-    }
+    const login = loginUrl(env, request);
+
+    // Authentication moved to id.reasonix.io; these paths just bounce there.
+    if ((path === "/login" || path === "/register") && method === "GET") return redirect(login);
+    if (path === "/logout" && method === "POST") return redirect(login, await sharedLogout(request, env));
 
     const user = await currentUser(request, env);
 
-    if (path === "/") return redirect(user ? (atLeast(user.role, "viewer") ? "/stats" : "/account") : "/login");
+    if (path === "/") return redirect(user ? (atLeast(user.role, "viewer") ? "/stats" : "/account") : login);
 
-    if (path === "/account" && method === "GET")
-      return user ? html(renderAccount(user)) : redirect("/login");
-    if (path === "/account/password" && method === "POST")
-      return user ? handleAccountPassword(request, env, user) : redirect("/login");
+    if (path === "/account" && method === "GET") return user ? html(renderAccount(user)) : redirect(login);
 
     const groupMatch = path.match(/^\/stats\/group\/([0-9a-f]{64})$/);
     const statsModuleMatch = path.match(/^\/stats\/(diagnostics|usage|preferences|health)$/);
     if ((path === "/stats" || statsModuleMatch) && method === "GET")
-      return requireViewer(user) ?? handleStats(request, env, user as User, (statsModuleMatch?.[1] as StatsModule | undefined) ?? "usage");
-    if (groupMatch && method === "GET") return requireViewer(user) ?? handleGroup(env, groupMatch[1], user as User);
+      return requireViewer(user, login) ?? handleStats(request, env, user as User, (statsModuleMatch?.[1] as StatsModule | undefined) ?? "usage");
+    if (groupMatch && method === "GET") return requireViewer(user, login) ?? handleGroup(env, groupMatch[1], user as User);
     if (groupMatch && method === "POST") {
       if (user?.role !== "admin") return new Response("forbidden", { status: 403 });
       return handleGroupAction(request, env, user, groupMatch[1]);
     }
 
     if (path === "/admin" && method === "GET") {
-      if (!user) return redirect("/login");
+      if (!user) return redirect(login);
       return user.role === "admin" ? handleAdminList(env, user) : redirect("/account");
     }
     if (path === "/admin/audit" && method === "GET") {
-      if (!user) return redirect("/login");
+      if (!user) return redirect(login);
       return user.role === "admin" ? handleAdminAudit(env, user) : redirect("/account");
     }
     if (path === "/admin/users" && method === "POST") {
@@ -1001,7 +921,6 @@ export default {
       path === "/register" ||
       path === "/logout" ||
       path === "/account" ||
-      path === "/account/password" ||
       path.startsWith("/stats") ||
       path.startsWith("/admin")
     ) {

@@ -1,0 +1,548 @@
+---
+import Base from '../layouts/Base.astro';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
+const desc = "Browse, publish, and install community skills and MCP servers for Reasonix. One command to add any capability to your agent — install_source does the rest, SSRF-guarded and risk-rated.";
+---
+<Base
+  title="Reasonix — Skills & MCP registry"
+  titleEn="Reasonix — Skills & MCP registry"
+  titleZh="Reasonix — 技能与 MCP 市场"
+  description={desc}>
+
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="Reasonix logo" /><span>Reasonix</span></a>
+      <nav class="nav-links">
+        <a href={`${base}/#features`}><span class="l-en">Features</span><span class="l-zh">特性</span></a>
+        <a href={`${base}/skills/`} class="here"><span class="l-en">Skills</span><span class="l-zh">技能市场</span></a>
+        <a href={`${base}/#community`}><span class="l-en">Community</span><span class="l-zh">社区</span></a>
+        <a href={`${base}/docs/`}><span class="l-en">Docs</span><span class="l-zh">文档</span></a>
+      </nav>
+      <div class="lang-switch" role="group" aria-label="Language">
+        <button type="button" data-lang="en" class="active">EN</button>
+        <button type="button" data-lang="zh">中文</button>
+      </div>
+      <span class="nav-acct" data-account-slot></span>
+      <a class="btn btn-dark" id="publish-open" href="#publish"><span class="l-en">Publish</span><span class="l-zh">发布</span></a>
+    </div>
+  </header>
+
+  <main>
+  <section class="reg-head">
+    <div class="wrap">
+      <div class="sec-head split">
+        <span class="kicker"><span class="l-en">Registry</span><span class="l-zh">技能市场</span></span>
+        <h2><span class="l-en">Every skill, one <span class="em">install</span> away.</span><span class="l-zh">每个能力,一条 <span class="em">install</span> 就到手。</span></h2>
+        <p><span class="l-en">Community skills and MCP servers for your agent. The registry only stores metadata and a source pointer — installs run client-side through <code>install_source</code>, SSRF-guarded and risk-rated. Nothing executes here.</span><span class="l-zh">社区贡献的技能与 MCP 服务器。市场只存元数据与来源指针——安装在你本机经 <code>install_source</code> 执行(带 SSRF 防护与风险分级),这里不运行任何代码。</span></p>
+      </div>
+
+      <div class="reg-toolbar">
+        <div class="reg-search">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8.5 3a5.5 5.5 0 1 0 3.4 9.8l3.6 3.7 1.4-1.4-3.7-3.6A5.5 5.5 0 0 0 8.5 3Zm0 2a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Z"/></svg>
+          <input id="reg-q" type="search" autocomplete="off" placeholder="Search skills, MCP servers, tags…" aria-label="Search the registry" />
+        </div>
+        <div class="reg-tabs" data-group="kind" role="tablist">
+          <button class="active" data-kind="all" role="tab"><span class="l-en">All</span><span class="l-zh">全部</span></button>
+          <button data-kind="skill" role="tab">Skills</button>
+          <button data-kind="mcp" role="tab">MCP</button>
+        </div>
+        <div class="reg-tabs" data-group="sort" role="tablist">
+          <button class="active" data-sort="new" role="tab"><span class="l-en">New</span><span class="l-zh">最新</span></button>
+          <button data-sort="trending" role="tab"><span class="l-en">Trending</span><span class="l-zh">趋势</span></button>
+          <button data-sort="installs" role="tab"><span class="l-en">Top</span><span class="l-zh">最热</span></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="reg-body">
+    <div class="wrap reg-cols">
+      <div class="reg-main">
+        <div id="pkg-grid" class="pkg-grid" data-state="loading" aria-live="polite">
+          <div class="pkg-skel"></div><div class="pkg-skel"></div><div class="pkg-skel"></div><div class="pkg-skel"></div>
+        </div>
+        <div id="reg-empty" class="reg-state" hidden>
+          <h3><span class="l-en">Be the first to publish.</span><span class="l-zh">来当第一个发布者。</span></h3>
+          <p><span class="l-en">No packages match yet. Ship a skill you built and it lands here for everyone.</span><span class="l-zh">还没有匹配的包。把你写的技能发上来,所有人都能一键装。</span></p>
+          <a class="btn btn-dark" href="#publish" data-publish-jump><span class="l-en">Publish a skill</span><span class="l-zh">发布一个技能</span></a>
+        </div>
+        <div id="reg-offline" class="reg-state" hidden>
+          <h3><span class="l-en">Registry is launching soon.</span><span class="l-zh">市场即将上线。</span></h3>
+          <p><span class="l-en">The registry service isn't reachable yet. Sign in to get a handle ready — your packages will be namespaced to it.</span><span class="l-zh">市场服务暂时还连不上。先登录占好你的 handle——你的包会以它作命名空间。</span></p>
+          <a class="btn btn-dark" href="https://id.reasonix.io"><span class="l-en">Sign in at id.reasonix.io</span><span class="l-zh">前往 id.reasonix.io 登录</span></a>
+        </div>
+      </div>
+
+      <aside class="reg-aside">
+        <div class="feed-card">
+          <div class="feed-head"><span class="pulse"></span><span class="l-en">Live activity</span><span class="l-zh">实时动态</span></div>
+          <ul id="feed" class="feed-list"><li class="feed-skel"></li><li class="feed-skel"></li><li class="feed-skel"></li></ul>
+          <div id="feed-empty" class="feed-empty" hidden><span class="l-en">Quiet for now — the first publish shows up here.</span><span class="l-zh">暂时安静——第一个发布会出现在这里。</span></div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="reg-review" id="review" hidden>
+    <div class="wrap">
+      <div class="review-head">
+        <span class="kicker"><span class="l-en">Review queue</span><span class="l-zh">审核队列</span></span>
+        <span class="review-count" id="review-count"></span>
+      </div>
+      <div id="review-list" class="review-list"></div>
+      <div id="review-empty" class="review-empty" hidden><span class="l-en">Nothing pending — all caught up.</span><span class="l-zh">没有待审——都处理完了。</span></div>
+    </div>
+  </section>
+
+  <section class="reg-publish" id="publish" hidden>
+    <div class="wrap">
+      <div class="pub-card">
+        <div class="pub-head">
+          <div>
+            <h3><span class="l-en">Publish a package</span><span class="l-zh">发布一个包</span></h3>
+            <p><span class="l-en">Verified accounts only. Submissions are reviewed before they go live; your package is namespaced to your handle (<code>@you/name</code>).</span><span class="l-zh">仅已验证邮箱的账号可提交。提交后经管理员审核才会公开;包以你的 handle 命名(<code>@you/name</code>)。</span></p>
+          </div>
+          <button type="button" class="pub-close" id="publish-close" aria-label="Close">✕</button>
+        </div>
+        <form id="pub-form" class="pub-form">
+          <div class="pub-row">
+            <label><span class="l-en">Kind</span><span class="l-zh">类型</span>
+              <select name="kind"><option value="skill">skill</option><option value="mcp">mcp</option></select>
+            </label>
+            <label><span class="l-en">Name</span><span class="l-zh">名称</span>
+              <input name="name" required placeholder="my-skill" pattern="[a-z0-9][a-z0-9._-]*" />
+            </label>
+            <label><span class="l-en">Version</span><span class="l-zh">版本</span>
+              <input name="version" placeholder="0.1.0" />
+            </label>
+          </div>
+          <label><span class="l-en">One-line summary</span><span class="l-zh">一句话简介</span>
+            <input name="summary" maxlength="200" placeholder="What does it do?" />
+          </label>
+          <label><span class="l-en">Source</span><span class="l-zh">来源</span>
+            <input name="source" required placeholder="https://… SKILL.md · .mcp.json · repo · package name" />
+          </label>
+          <div class="pub-row">
+            <label><span class="l-en">Repo (optional)</span><span class="l-zh">仓库(可选)</span>
+              <input name="repoUrl" placeholder="https://github.com/…" />
+            </label>
+            <label><span class="l-en">Tags (comma-separated)</span><span class="l-zh">标签(逗号分隔)</span>
+              <input name="tags" placeholder="testing, go, review" />
+            </label>
+          </div>
+          <div class="pub-actions">
+            <button type="submit" class="btn btn-dark"><span class="l-en">Publish</span><span class="l-zh">发布</span></button>
+            <span id="pub-msg" class="pub-msg" role="status"></span>
+          </div>
+        </form>
+      </div>
+    </div>
+  </section>
+  </main>
+
+  <footer>
+    <div class="foot-inner">
+      <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="Reasonix logo" /><span>Reasonix</span></a>
+      <span><span class="l-en">© 2026 Reasonix · MIT licensed · built to be left running.</span><span class="l-zh">© 2026 Reasonix · MIT 许可 · 为常驻运行而生。</span></span>
+      <nav class="foot-links">
+        <a href={repo}>GitHub</a>
+        <a href={`${base}/`}><span class="l-en">Home</span><span class="l-zh">首页</span></a>
+        <a href={`${base}/docs/`}><span class="l-en">Docs</span><span class="l-zh">文档</span></a>
+        <a href="https://id.reasonix.io"><span class="l-en">Sign in</span><span class="l-zh">登录</span></a>
+      </nav>
+    </div>
+  </footer>
+
+  <style is:global>
+    .reg-head { padding: 128px 0 0; }
+    .reg-toolbar {
+      display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+      margin-top: 32px; padding-bottom: 4px;
+    }
+    .reg-search {
+      display: flex; align-items: center; gap: 8px; flex: 1 1 240px;
+      background: var(--bg-soft); border-radius: 999px; padding: 0 18px;
+      border: 1px solid transparent; transition: border-color .2s, background .2s;
+    }
+    .reg-search:focus-within { background: #fff; border-color: var(--line); box-shadow: var(--shadow-1); }
+    .reg-search svg { width: 18px; height: 18px; fill: var(--ink-3); flex: none; }
+    .reg-search input {
+      border: none; background: none; outline: none; width: 100%;
+      font-family: var(--font-sans); font-size: 15px; color: var(--ink); padding: 12px 0;
+    }
+    .reg-tabs { display: inline-flex; gap: 2px; padding: 3px; background: var(--bg-soft); border-radius: 999px; }
+    .reg-tabs button {
+      font-family: var(--font-sans); font-size: 13.5px; font-weight: 500; color: var(--ink-2);
+      background: transparent; border: none; cursor: pointer; padding: 8px 16px; border-radius: 999px;
+      transition: background .2s, color .2s, box-shadow .2s;
+    }
+    .reg-tabs button:hover { color: var(--ink); }
+    .reg-tabs button.active { background: #fff; color: var(--accent); box-shadow: var(--shadow-1); }
+
+    .reg-body { padding: 36px 0 96px; }
+    .reg-cols { display: grid; grid-template-columns: 1fr 320px; gap: 32px; align-items: start; }
+    .reg-main { min-width: 0; }
+    .pkg-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    .pkg-grid[data-state="loading"] .pkg-skel { display: block; }
+
+    .pkg-card {
+      display: flex; flex-direction: column; gap: 12px;
+      background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+      padding: 22px; min-width: 0; transition: box-shadow .25s, border-color .25s, transform .25s;
+    }
+    .pkg-card:hover { box-shadow: var(--shadow-2); border-color: transparent; transform: translateY(-2px); }
+    .pkg-top { display: flex; align-items: center; gap: 8px; }
+    .pkg-kind { font-family: var(--font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); background: var(--accent-soft); padding: 4px 9px; border-radius: 999px; }
+    .pkg-kind.mcp { color: oklch(0.5 0.16 300); background: color-mix(in oklch, oklch(0.5 0.16 300) 9%, white); }
+    .pkg-badge { font-size: 11px; font-weight: 600; padding: 4px 9px; border-radius: 999px; }
+    .pkg-badge.verified { color: oklch(0.5 0.13 155); background: color-mix(in oklch, oklch(0.5 0.13 155) 10%, white); }
+    .pkg-badge.community { color: var(--ink-3); background: var(--bg-soft); }
+    .pkg-stars { margin-left: auto; font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+    .pkg-name { font-size: 17px; font-weight: 600; letter-spacing: -.01em; overflow-wrap: anywhere; }
+    .pkg-name .scope { color: var(--ink-3); font-weight: 500; }
+    .pkg-sum { font-size: 14px; line-height: 1.55; color: var(--ink-2); overflow-wrap: anywhere; }
+    .pkg-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pkg-tags span { font-size: 12px; color: var(--ink-3); background: var(--bg-soft); padding: 3px 10px; border-radius: 999px; }
+    .pkg-foot { display: flex; align-items: center; gap: 12px; margin-top: 2px; }
+    .pkg-install {
+      display: inline-flex; align-items: center; gap: 10px; flex: 1; min-width: 0;
+      font-family: var(--font-mono); font-size: 12.5px; color: var(--ink);
+      background: var(--bg-soft); border-radius: 999px; padding: 8px 8px 8px 14px;
+    }
+    .pkg-install code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pkg-install button {
+      margin-left: auto; flex: none; font-family: var(--font-sans); font-size: 12px; font-weight: 600;
+      background: #fff; color: var(--accent); border: none; cursor: pointer; padding: 6px 13px;
+      border-radius: 999px; box-shadow: var(--shadow-1); transition: background .2s, color .2s;
+    }
+    .pkg-install button.copied { background: oklch(0.55 0.14 155); color: #fff; }
+    .pkg-meta { font-size: 12.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+    .pkg-skel, .feed-skel { display: none; border-radius: var(--radius); background: linear-gradient(100deg, var(--bg-soft) 30%, oklch(0.94 0.004 247) 50%, var(--bg-soft) 70%); background-size: 200% 100%; animation: sheen 1.2s linear infinite; }
+    .pkg-skel { height: 168px; }
+    .feed-skel { height: 44px; border-radius: 12px; margin-bottom: 10px; }
+    @keyframes sheen { to { background-position: -200% 0; } }
+
+    .reg-state { text-align: center; padding: 56px 20px; border: 1px dashed var(--line); border-radius: var(--radius); }
+    .reg-state h3 { font-size: 20px; font-weight: 600; }
+    .reg-state p { margin: 10px auto 22px; max-width: 40ch; color: var(--ink-2); font-size: 15px; line-height: 1.55; }
+
+    .reg-aside { position: sticky; top: 88px; }
+    .feed-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
+    .feed-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 14px; }
+    .pulse { width: 8px; height: 8px; border-radius: 50%; background: oklch(0.7 0.16 150); box-shadow: 0 0 0 0 oklch(0.7 0.16 150 / .5); animation: pulse 2s var(--ease) infinite; }
+    @keyframes pulse { 70%, 100% { box-shadow: 0 0 0 7px oklch(0.7 0.16 150 / 0); } }
+    .feed-list { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+    .feed-item { display: flex; flex-direction: column; gap: 2px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 13px; }
+    .feed-item:first-child { border-top: none; }
+    .feed-item .fx { color: var(--ink); line-height: 1.45; }
+    .feed-item .fx b { font-weight: 600; }
+    .feed-item .fx a { color: var(--accent); text-decoration: none; }
+    .feed-item .fx a:hover { text-decoration: underline; }
+    .feed-item .ft { color: var(--ink-3); font-size: 11.5px; }
+    .feed-item .ico { font-family: var(--font-mono); }
+    .feed-empty { font-size: 13px; color: var(--ink-3); line-height: 1.5; }
+
+    .nav-acct { display: inline-flex; align-items: center; }
+    .acct { display: inline-flex; align-items: center; gap: 10px; }
+    .acct-name { font-size: 14px; font-weight: 600; color: var(--ink); text-decoration: none; }
+    .acct-name:hover { color: var(--accent); }
+    .acct-logout { font-family: var(--font-sans); font-size: 13px; font-weight: 500; color: var(--ink-2); background: var(--bg-soft); border: none; cursor: pointer; padding: 8px 14px; border-radius: 999px; transition: background .2s, color .2s; }
+    .acct-logout:hover { color: var(--ink); background: oklch(0.94 0.004 247); }
+    .acct-warn { font-size: 11px; font-weight: 600; color: oklch(0.52 0.15 60); background: color-mix(in oklch, oklch(0.7 0.16 60) 16%, white); padding: 3px 9px; border-radius: 999px; text-decoration: none; }
+    .reg-review { padding: 8px 0 40px; }
+    .review-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
+    .review-count { font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+    .review-list { display: flex; flex-direction: column; gap: 12px; }
+    .review-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; background: color-mix(in oklch, oklch(0.7 0.16 60) 6%, white); border: 1px solid color-mix(in oklch, oklch(0.7 0.16 60) 30%, white); border-radius: var(--radius-sm); padding: 14px 16px; }
+    .review-row .rv-main { flex: 1; min-width: 0; }
+    .review-row .rv-name { font-size: 15px; font-weight: 600; }
+    .review-row .rv-name .scope { color: var(--ink-3); font-weight: 500; }
+    .review-row .rv-sum { font-size: 13px; color: var(--ink-2); margin-top: 2px; overflow-wrap: anywhere; }
+    .review-row .rv-src { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-3); margin-top: 4px; overflow-wrap: anywhere; }
+    .review-row .rv-acts { display: inline-flex; gap: 8px; flex: none; }
+    .rv-btn { font-family: var(--font-sans); font-size: 13px; font-weight: 600; border: none; cursor: pointer; padding: 8px 14px; border-radius: 999px; transition: background .2s, color .2s, box-shadow .2s; }
+    .rv-btn.approve { background: oklch(0.55 0.13 155); color: #fff; }
+    .rv-btn.reject { background: var(--bg-soft); color: oklch(0.5 0.18 25); }
+    .rv-btn.verify { background: #fff; color: var(--accent); box-shadow: var(--shadow-1); }
+    .rv-btn:disabled { opacity: .5; cursor: default; }
+    .review-empty { font-size: 14px; color: var(--ink-3); padding: 28px 0; }
+
+    .reg-publish { padding: 8px 0 64px; scroll-margin-top: 88px; }
+    .pub-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px; box-shadow: var(--shadow-2); }
+    .pub-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+    .pub-head h3 { font-size: 20px; font-weight: 600; }
+    .pub-head p { margin-top: 6px; color: var(--ink-2); font-size: 14px; }
+    .pub-close { background: var(--bg-soft); border: none; cursor: pointer; width: 32px; height: 32px; border-radius: 50%; color: var(--ink-2); font-size: 14px; flex: none; }
+    .pub-close:hover { color: var(--ink); }
+    .pub-form { display: flex; flex-direction: column; gap: 14px; }
+    .pub-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .pub-form label { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+    .pub-form input, .pub-form select {
+      font-family: var(--font-sans); font-size: 14px; color: var(--ink); font-weight: 400;
+      background: var(--bg-soft); border: 1px solid transparent; border-radius: var(--radius-sm);
+      padding: 11px 14px; outline: none; transition: border-color .2s, background .2s;
+    }
+    .pub-form input:focus, .pub-form select:focus { background: #fff; border-color: var(--accent); }
+    .pub-actions { display: flex; align-items: center; gap: 16px; margin-top: 4px; }
+    .pub-msg { font-size: 13.5px; color: var(--ink-2); }
+    .pub-msg.err { color: oklch(0.55 0.18 25); }
+    .pub-msg.ok { color: oklch(0.5 0.13 155); }
+
+    @media (max-width: 900px) {
+      .reg-cols { grid-template-columns: 1fr; }
+      .reg-aside { position: static; }
+      .pkg-grid { grid-template-columns: 1fr; }
+      .pub-row { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 560px) {
+      .reg-head { padding-top: 104px; }
+      .wrap { padding: 0 20px; }
+      .reg-toolbar { gap: 10px; }
+      .reg-tabs { flex: 1 1 auto; justify-content: center; }
+      .pkg-card { padding: 18px; }
+      .pub-card { padding: 20px; }
+    }
+  </style>
+
+  <script>
+    import { currentAccount, accountLogout } from '../scripts/auth.js';
+    const REGISTRY = import.meta.env.PUBLIC_REGISTRY_ORIGIN || 'https://registry.reasonix.io';
+    const state = { kind: 'all', sort: 'new', q: '' };
+    let currentUser = null;
+
+    const grid = document.getElementById('pkg-grid');
+    const emptyEl = document.getElementById('reg-empty');
+    const offlineEl = document.getElementById('reg-offline');
+    const feedEl = document.getElementById('feed');
+    const feedEmpty = document.getElementById('feed-empty');
+
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (m) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]
+    ));
+
+    function show(el, on) { if (el) el.hidden = !on; }
+
+    function card(p) {
+      const kindCls = p.kind === 'mcp' ? 'pkg-kind mcp' : 'pkg-kind';
+      const badge = p.verified
+        ? '<span class="pkg-badge verified">✓ verified</span>'
+        : '<span class="pkg-badge community">community</span>';
+      const tags = (p.tags || []).slice(0, 4).map((t) => `<span>${esc(t)}</span>`).join('');
+      const stars = p.starCount > 0 ? `<span class="pkg-stars">★ ${p.starCount}</span>` : '';
+      const repo = p.repoUrl ? ` · <a href="${esc(p.repoUrl)}" target="_blank" rel="noreferrer">repo</a>` : '';
+      return `<article class="pkg-card">
+        <div class="pkg-top"><span class="${kindCls}">${esc(p.kind)}</span>${badge}${stars}</div>
+        <div class="pkg-name"><span class="scope">${esc(p.handle)}/</span>${esc(p.name)}</div>
+        <div class="pkg-sum">${esc(p.summary) || '<span style="color:var(--ink-3)">No summary.</span>'}</div>
+        ${tags ? `<div class="pkg-tags">${tags}</div>` : ''}
+        <div class="pkg-foot">
+          <span class="pkg-install" title="Install source — give it to Reasonix"><code>${esc(p.source)}</code><button data-copy="${esc(p.source)}" data-slug="${esc(p.handle)}/${esc(p.name)}">Copy</button></span>
+        </div>
+        <div class="pkg-meta">↓ ${p.installCount || 0} installs · v${esc(p.latestVersion) || '—'}${repo}</div>
+      </article>`;
+    }
+
+    function renderPackages(list) {
+      grid.removeAttribute('data-state');
+      show(offlineEl, false);
+      if (!list.length) { grid.innerHTML = ''; show(emptyEl, true); return; }
+      show(emptyEl, false);
+      grid.innerHTML = list.map(card).join('');
+    }
+
+    function renderOffline() {
+      grid.removeAttribute('data-state');
+      grid.innerHTML = '';
+      show(emptyEl, false);
+      show(offlineEl, true);
+    }
+
+    const rel = (iso) => {
+      const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+      if (s < 60) return 'just now';
+      if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+      if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+      return `${Math.floor(s / 86400)}d ago`;
+    };
+
+    function feedLine(e) {
+      const who = e.actor ? `<b>@${esc(e.actor)}</b> ` : '';
+      const link = e.slug ? `<a href="#" data-slug="${esc(e.slug)}">${esc(e.slug)}</a>` : '';
+      const verb = { publish: 'published', update: 'updated', star: 'starred', milestone: '' };
+      const ico = { publish: '↑', update: '↻', star: '★', milestone: '◎' }[e.type] || '•';
+      const text = e.type === 'milestone' ? esc(e.summary) : `${who}${verb[e.type] || e.type} ${link}`;
+      return `<li class="feed-item"><span class="fx"><span class="ico">${ico}</span> ${text}</span><span class="ft">${rel(e.createdAt)}</span></li>`;
+    }
+
+    function renderFeed(events) {
+      if (!events.length) { feedEl.innerHTML = ''; show(feedEmpty, true); return; }
+      show(feedEmpty, false);
+      feedEl.innerHTML = events.map(feedLine).join('');
+    }
+
+    async function loadPackages() {
+      const params = new URLSearchParams({ kind: state.kind, sort: state.sort, q: state.q, limit: '48' });
+      try {
+        const r = await fetch(`${REGISTRY}/v1/packages?${params}`);
+        if (!r.ok) throw new Error(String(r.status));
+        renderPackages((await r.json()).packages || []);
+      } catch { renderOffline(); }
+    }
+
+    async function loadFeed() {
+      try {
+        const r = await fetch(`${REGISTRY}/v1/activity?limit=20`);
+        if (!r.ok) throw new Error(String(r.status));
+        renderFeed((await r.json()).events || []);
+      } catch { feedEl.innerHTML = ''; show(feedEmpty, true); }
+    }
+
+    // Copy install command (cards render after page load, so delegate).
+    grid.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button[data-copy]');
+      if (!btn) return;
+      navigator.clipboard?.writeText(btn.dataset.copy);
+      btn.classList.add('copied');
+      btn.textContent = '✓';
+      setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'Copy'; }, 1400);
+      // Best-effort install ping — powers the trending rank.
+      fetch(`${REGISTRY}/v1/packages/${btn.dataset.slug}/installed`, { method: 'POST' }).catch(() => {});
+    });
+
+    // Toolbar
+    let debounce;
+    document.getElementById('reg-q').addEventListener('input', (e) => {
+      clearTimeout(debounce);
+      state.q = e.target.value.trim();
+      debounce = setTimeout(loadPackages, 220);
+    });
+    document.querySelectorAll('.reg-tabs').forEach((group) => {
+      group.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('button');
+        if (!btn) return;
+        group.querySelectorAll('button').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        if (group.dataset.group === 'kind') state.kind = btn.dataset.kind;
+        else state.sort = btn.dataset.sort;
+        loadPackages();
+      });
+    });
+
+    // Publish panel — sign-in gated: send anonymous visitors to /login, and warn
+    // a signed-in-but-unverified user that publishing needs a confirmed email.
+    const publish = document.getElementById('publish');
+    const loginNext = () => { location.href = '/login?next=' + encodeURIComponent('/skills/'); };
+    const openPublish = (ev) => {
+      if (ev) ev.preventDefault();
+      if (!currentUser) return loginNext();
+      publish.hidden = false;
+      if (!currentUser.emailVerified) setMsg('Verify your email before publishing — check your inbox.', 'err');
+      publish.scrollIntoView({ behavior: 'smooth' });
+    };
+    document.getElementById('publish-open').addEventListener('click', openPublish);
+    document.querySelectorAll('[data-publish-jump]').forEach((el) => el.addEventListener('click', openPublish));
+    document.getElementById('publish-close').addEventListener('click', () => { publish.hidden = true; });
+    if (location.hash === '#publish') publish.hidden = false;
+
+    const msg = document.getElementById('pub-msg');
+    const setMsg = (text, cls) => { msg.textContent = text; msg.className = 'pub-msg' + (cls ? ' ' + cls : ''); };
+
+    document.getElementById('pub-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = new FormData(ev.target);
+      const tags = String(f.get('tags') || '').split(',').map((t) => t.trim()).filter(Boolean);
+      const body = {
+        kind: f.get('kind'), name: f.get('name'), summary: f.get('summary') || '',
+        source: f.get('source'), version: f.get('version') || '',
+        repoUrl: f.get('repoUrl') || '', tags,
+      };
+      setMsg('Publishing…');
+      try {
+        const r = await fetch(`${REGISTRY}/v1/packages`, {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (r.status === 401) return loginNext();
+        if (!r.ok) { setMsg(data?.error?.message || 'Publish failed.', 'err'); return; }
+        const pending = data.package?.status === 'pending';
+        setMsg(pending
+          ? `Submitted ${data.package.slug} for review — an admin approves it before it goes live.`
+          : `Published ${data.package.slug}@${data.version}.`, 'ok');
+        ev.target.reset();
+        loadPackages(); loadFeed();
+      } catch { setMsg('Registry is unreachable right now.', 'err'); }
+    });
+
+    // Admin review queue — only initialised for admins.
+    const reviewSection = document.getElementById('review');
+    const reviewList = document.getElementById('review-list');
+    const reviewCount = document.getElementById('review-count');
+    const reviewEmpty = document.getElementById('review-empty');
+
+    function renderReview(pkgs) {
+      reviewCount.textContent = pkgs.length ? `${pkgs.length} pending` : '';
+      if (!pkgs.length) { reviewList.innerHTML = ''; show(reviewEmpty, true); return; }
+      show(reviewEmpty, false);
+      reviewList.innerHTML = pkgs.map((p) => `
+        <div class="review-row" data-slug="${esc(p.handle)}/${esc(p.name)}">
+          <div class="rv-main">
+            <div class="rv-name"><span class="scope">${esc(p.handle)}/</span>${esc(p.name)} <span class="pkg-kind${p.kind === 'mcp' ? ' mcp' : ''}">${esc(p.kind)}</span></div>
+            <div class="rv-sum">${esc(p.summary) || '(no summary)'}</div>
+            <div class="rv-src">${esc(p.source)}</div>
+          </div>
+          <div class="rv-acts">
+            <button class="rv-btn approve" data-act="approve">Approve</button>
+            <button class="rv-btn reject" data-act="reject">Reject</button>
+          </div>
+        </div>`).join('');
+    }
+
+    async function loadReview() {
+      try {
+        const r = await fetch(`${REGISTRY}/v1/admin/packages?status=pending`, { credentials: 'include' });
+        if (!r.ok) throw new Error(String(r.status));
+        renderReview((await r.json()).packages || []);
+      } catch { reviewSection.hidden = true; }
+    }
+
+    reviewList.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('.rv-btn');
+      if (!btn) return;
+      const row = btn.closest('.review-row');
+      row.querySelectorAll('.rv-btn').forEach((b) => (b.disabled = true));
+      try {
+        const r = await fetch(`${REGISTRY}/v1/admin/packages/${row.dataset.slug}/${btn.dataset.act}`, { method: 'POST', credentials: 'include' });
+        if (!r.ok) throw new Error();
+        row.remove();
+        loadReview(); loadPackages(); loadFeed();
+      } catch { row.querySelectorAll('.rv-btn').forEach((b) => (b.disabled = false)); }
+    });
+
+    // Nav account state, via the site's shared account client. Signed out → a
+    // sign-in link; signed in → the handle (linking to /account) + a log-out control.
+    async function mountAccount() {
+      const slot = document.querySelector('[data-account-slot]');
+      const user = await currentAccount();
+      if (!user) {
+        slot.innerHTML = `<a class="btn btn-ghost" href="/login/?next=${encodeURIComponent('/skills/')}"><span class="l-en">Sign in</span><span class="l-zh">登录</span></a>`;
+        return null;
+      }
+      const warn = user.emailVerified ? '' : `<a class="acct-warn" href="/account/"><span class="l-en">unverified</span><span class="l-zh">未验证</span></a>`;
+      slot.innerHTML = `<span class="acct">${warn}<a class="acct-name" href="/account/">@${esc(user.handle)}</a><button type="button" class="acct-logout"><span class="l-en">Log out</span><span class="l-zh">退出</span></button></span>`;
+      slot.querySelector('.acct-logout').addEventListener('click', async () => { await accountLogout(); location.reload(); });
+      return user;
+    }
+
+    mountAccount().then((user) => {
+      currentUser = user;
+      if (user && user.role === 'admin') { reviewSection.hidden = false; loadReview(); }
+    });
+
+    loadPackages();
+    loadFeed();
+  </script>
+</Base>

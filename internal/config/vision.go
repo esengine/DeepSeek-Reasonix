@@ -66,6 +66,9 @@ func EffectiveVision(e *ProviderEntry) bool {
 	if e == nil {
 		return false
 	}
+	if e.visionOverride != nil {
+		return *e.visionOverride
+	}
 	if e.Vision {
 		return true
 	}

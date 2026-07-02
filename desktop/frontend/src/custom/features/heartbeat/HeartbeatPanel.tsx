@@ -190,6 +190,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
           enabled: true,
           approvalMode: "yolo",
           newConversationEachRun: false,
+          notifyChannels: false,
           createdAt: Date.now(),
         });
       });
@@ -218,6 +219,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
       enabled: true,
       approvalMode: "yolo",
       newConversationEachRun: false,
+      notifyChannels: false,
       createdAt: Date.now(),
     });
   }, []);
@@ -952,37 +954,63 @@ function TaskEditor({
         />
       </div>
 
-      {/* Approval Mode */}
-      <div className="heartbeat-editor__field">
-        <label>{t("heartbeat.fieldApprovalMode")}</label>
-        <div className="set-seg" style={{ alignSelf: "flex-start" }}>
-          <button
-            className={`set-seg__btn${normalizeMode(draft.approvalMode) === "ask" ? " set-seg__btn--on" : ""}`}
-            onClick={() => setDraft((prev) => ({ ...prev, approvalMode: "ask" }))}
-            title={t("heartbeat.approvalModeAskTooltip")}
-          >
-            {t("heartbeat.approvalModeAsk")}
-          </button>
-          <button
-            className={`set-seg__btn${normalizeMode(draft.approvalMode) === "auto" ? " set-seg__btn--on" : ""}`}
-            onClick={() => setDraft((prev) => ({ ...prev, approvalMode: "auto" }))}
-            title={t("heartbeat.approvalModeAutoTooltip")}
-          >
-            {t("heartbeat.approvalModeAuto")}
-          </button>
-          <button
-            className={`set-seg__btn${normalizeMode(draft.approvalMode) === "yolo" ? " set-seg__btn--on" : ""}`}
-            onClick={() => setDraft((prev) => ({ ...prev, approvalMode: "yolo" }))}
-            title={t("heartbeat.approvalModeYoloTooltip")}
-          >
-            {t("heartbeat.approvalModeYolo")}
-          </button>
+      {/* Approval Mode + Push to bot (side by side) */}
+      <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+        <div className="heartbeat-editor__field" style={{ flex: "1 1 45%", minWidth: "200px" }}>
+          <label>{t("heartbeat.fieldApprovalMode")}</label>
+          <div className="set-seg" style={{ alignSelf: "flex-start" }}>
+            <button
+              className={`set-seg__btn${normalizeMode(draft.approvalMode) === "ask" ? " set-seg__btn--on" : ""}`}
+              onClick={() => setDraft((prev) => ({ ...prev, approvalMode: "ask" }))}
+              title={t("heartbeat.approvalModeAskTooltip")}
+            >
+              {t("heartbeat.approvalModeAsk")}
+            </button>
+            <button
+              className={`set-seg__btn${normalizeMode(draft.approvalMode) === "auto" ? " set-seg__btn--on" : ""}`}
+              onClick={() => setDraft((prev) => ({ ...prev, approvalMode: "auto" }))}
+              title={t("heartbeat.approvalModeAutoTooltip")}
+            >
+              {t("heartbeat.approvalModeAuto")}
+            </button>
+            <button
+              className={`set-seg__btn${normalizeMode(draft.approvalMode) === "yolo" ? " set-seg__btn--on" : ""}`}
+              onClick={() => setDraft((prev) => ({ ...prev, approvalMode: "yolo" }))}
+              title={t("heartbeat.approvalModeYoloTooltip")}
+            >
+              {t("heartbeat.approvalModeYolo")}
+            </button>
+          </div>
+          <span className="heartbeat-editor__mode-hint">
+            {normalizeMode(draft.approvalMode) === "yolo" ? t("heartbeat.approvalModeYoloHint") :
+             normalizeMode(draft.approvalMode) === "auto" ? t("heartbeat.approvalModeAutoHint") :
+             t("heartbeat.approvalModeAskHint")}
+          </span>
         </div>
-        <span className="heartbeat-editor__mode-hint">
-          {normalizeMode(draft.approvalMode) === "yolo" ? t("heartbeat.approvalModeYoloHint") :
-           normalizeMode(draft.approvalMode) === "auto" ? t("heartbeat.approvalModeAutoHint") :
-           t("heartbeat.approvalModeAskHint")}
-        </span>
+
+        {/* Push to bot channels */}
+        <div className="heartbeat-editor__field" style={{ flex: "1 1 45%", minWidth: "200px", textAlign: "left" }}>
+          <label>{t("heartbeat.notifyChannels")} <span className="heartbeat-editor__optional">{t("heartbeat.optional")}</span></label>
+          <div className="set-seg" style={{ alignSelf: "flex-start" }}>
+            <button
+              className={`set-seg__btn${draft.notifyChannels === true ? " set-seg__btn--on" : ""}`}
+              onClick={() => setDraft((prev) => ({ ...prev, notifyChannels: true }))}
+            >
+              {t("heartbeat.notifyChannelsOn")}
+            </button>
+            <button
+              className={`set-seg__btn${draft.notifyChannels !== true ? " set-seg__btn--on" : ""}`}
+              onClick={() => setDraft((prev) => ({ ...prev, notifyChannels: false }))}
+            >
+              {t("heartbeat.notifyChannelsOff")}
+            </button>
+          </div>
+          <span className="heartbeat-editor__mode-hint">
+            {draft.notifyChannels === true
+              ? t("heartbeat.notifyChannelsOnHint")
+              : t("heartbeat.notifyChannelsOffHint")}
+          </span>
+        </div>
       </div>
 
       {/* New conversation per run */}

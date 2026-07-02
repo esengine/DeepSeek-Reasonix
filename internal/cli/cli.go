@@ -168,8 +168,10 @@ func migrateMCPConfigForCLIWorkspace() {
 func configureCLIThemeFromConfig() {
 	if cfg, err := config.Load(); err == nil {
 		configureCLIThemeWithStyle(cfg.UITheme(), cfg.UIThemeStyle())
+		cliCursorShape = cfg.UICursorShape()
 	} else {
 		configureCLITheme("auto")
+		cliCursorShape = "underline"
 	}
 }
 
@@ -548,6 +550,7 @@ func chatREPL(args []string) int {
 	cfg, err := config.Load()
 	if err == nil {
 		configureCLIThemeWithStyle(cfg.UITheme(), cfg.UIThemeStyle())
+		cliCursorShape = cfg.UICursorShape()
 	}
 
 	// Decide whether we're starting fresh or resuming. --resume opens an
@@ -1145,18 +1148,19 @@ func fetchModelListCompat(ctx context.Context, baseURL, apiKey string) ([]string
 		return nil, err
 	}
 	var lastErr error
+	var firstHardErr error
 	for _, u := range candidates {
-		models, err := openai.FetchModels(ctx, u, apiKey)
+		models, err := openai.FetchModels(ctx, u, apiKey, nil)
 		if err == nil {
 			return models, nil
 		}
 		lastErr = err
-		// An endpoint-miss is not a hard error — try the next candidate.
-		// Anything else (auth, 5xx, bad TLS) bubbles up immediately because
-		// retrying it on a sibling URL won't help.
-		if !openai.IsModelFetchEndpointMiss(err) {
-			return nil, err
+		if !openai.IsModelFetchEndpointMiss(err) && firstHardErr == nil {
+			firstHardErr = err
 		}
+	}
+	if firstHardErr != nil {
+		return nil, firstHardErr
 	}
 	if lastErr != nil {
 		slog.Debug("model-list probe: all candidates missed", "base_url", baseURL, "err", lastErr)
@@ -1849,9 +1853,10 @@ func configMemoryV5Command(args []string) int {
 			return 1
 		}
 		fmt.Printf("memory_compiler.enabled = %v\n", cfg.MemoryCompilerEnabled())
+		fmt.Printf("memory_compiler.verbosity = %q\n", cfg.MemoryCompilerVerbosity())
 		return 0
 	}
-	enabled, err := parseCLIMemoryV5Mode(rest[0])
+	setting, err := parseCLIMemoryV5Setting(rest[0])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
@@ -1862,15 +1867,22 @@ func configMemoryV5Command(args []string) int {
 		return 1
 	}
 	cfg := config.LoadForEdit(path)
-	if err := cfg.SetMemoryCompilerEnabled(enabled); err != nil {
+	if err := cfg.SetMemoryCompilerEnabled(setting.enabled); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
+	}
+	if setting.setVerbosity {
+		if err := cfg.SetMemoryCompilerVerbosity(setting.verbosity); err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 2
+		}
 	}
 	if err := cfg.SaveTo(path); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
 	}
-	fmt.Printf("memory_compiler.enabled = %v (%s)\n", cfg.MemoryCompilerEnabled(), displayPath(path))
+	fmt.Printf("memory_compiler.enabled = %v\n", cfg.MemoryCompilerEnabled())
+	fmt.Printf("memory_compiler.verbosity = %q (%s)\n", cfg.MemoryCompilerVerbosity(), displayPath(path))
 	return 0
 }
 
@@ -1937,7 +1949,7 @@ func configReasoningLanguageCommand(args []string) int {
 func configUsage() {
 	fmt.Print(`Usage:
   reasonix config auto-plan [off|on]
-  reasonix config memory-v5 [off|on|status]
+  reasonix config memory-v5 [off|observe|compact|on|status]
   reasonix config reasoning-language [--local] [auto|zh|en]
 `)
 }
@@ -1950,7 +1962,7 @@ func configAutoPlanUsage() {
 
 func configMemoryV5Usage() {
 	fmt.Print(`Usage:
-  reasonix config memory-v5 [off|on|status]
+  reasonix config memory-v5 [off|observe|compact|on|status]
 `)
 }
 

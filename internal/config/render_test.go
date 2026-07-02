@@ -133,6 +133,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.UI.Theme = "light"
 	orig.UI.ThemeStyle = "glacier"
 	orig.UI.ShortcutLayout = "desktop"
+	orig.UI.CursorShape = "bar"
 	orig.Desktop.Language = "en"
 	orig.Desktop.LayoutStyle = "workbench"
 	orig.Desktop.Theme = "dark"
@@ -222,6 +223,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	mm, _ := orig.Provider("mimo-pro")
 	mm.BaseURL = "http://localhost:8000/v1"
+	mm.ChatURL = "http://localhost:8000/v1/chat/completions"
+	mm.ModelsURL = "http://localhost:8000/v1/models"
 	mm.ReasoningProtocol = "openai"
 	ds, _ := orig.Provider("deepseek-flash")
 	ds.Effort = "max"
@@ -250,6 +253,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if got.UI.ShortcutLayout != "desktop" {
 		t.Errorf("ui.shortcut_layout = %q, want desktop", got.UI.ShortcutLayout)
+	}
+	if got.UICursorShape() != "bar" {
+		t.Errorf("ui.cursor_shape = %q, want bar", got.UICursorShape())
 	}
 	if got.Desktop.Language != "en" {
 		t.Errorf("desktop.language = %q, want en", got.Desktop.Language)
@@ -372,8 +378,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Tools.Shell.Path != "/usr/local/bin/bash" {
 		t.Errorf("tools.shell.path = %q, want /usr/local/bin/bash", got.Tools.Shell.Path)
 	}
-	if g, _ := got.Provider("mimo-pro"); g == nil || g.BaseURL != "http://localhost:8000/v1" || g.ReasoningProtocol != "openai" {
-		t.Errorf("mimo-pro base_url not preserved: %+v", g)
+	if g, _ := got.Provider("mimo-pro"); g == nil || g.BaseURL != "http://localhost:8000/v1" || g.ChatURL != "http://localhost:8000/v1/chat/completions" || g.ModelsURL != "http://localhost:8000/v1/models" || g.ReasoningProtocol != "openai" {
+		t.Errorf("mimo-pro endpoint fields not preserved: %+v", g)
 	}
 	if g, _ := got.Provider("deepseek-flash"); g == nil || g.Effort != "max" {
 		t.Errorf("deepseek-flash effort not preserved: %+v", g)
@@ -703,6 +709,26 @@ func TestProjectDeltaRendersToolsShellOverrides(t *testing.T) {
 	}
 }
 
+func TestProjectDeltaRendersUICursorShape(t *testing.T) {
+	c := Default()
+	c.UI.CursorShape = "block"
+
+	delta := RenderTOMLProjectDelta(c)
+	for _, want := range []string{"[ui]", `cursor_shape = "block"`} {
+		if !strings.Contains(delta, want) {
+			t.Fatalf("project delta missing %q:\n%s", want, delta)
+		}
+	}
+
+	got := Default()
+	if _, err := toml.Decode(delta, got); err != nil {
+		t.Fatalf("decode project delta: %v\n%s", err, delta)
+	}
+	if got.UICursorShape() != "block" {
+		t.Fatalf("ui.cursor_shape = %q, want block", got.UICursorShape())
+	}
+}
+
 func TestProjectRenderPreservesNonDefaultLegacySections(t *testing.T) {
 	c := Default()
 	c.UI.Theme = "light"
@@ -799,6 +825,54 @@ func TestRenderTOMLRoundTripsVisionModels(t *testing.T) {
 	}
 	if disabled.VisionModels == nil || len(disabled.VisionModels) != 0 {
 		t.Fatalf("disabled-vision vision_models after round trip = %#v, want explicit empty list", disabled.VisionModels)
+	}
+}
+
+func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
+	orig := Default()
+	orig.Providers = []ProviderEntry{{
+		Name:      "gateway",
+		Kind:      "openai",
+		BaseURL:   "https://gateway.example/v1",
+		Models:    []string{"deepseek-v4-flash", "plain-chat"},
+		Default:   "plain-chat",
+		APIKeyEnv: "GATEWAY_API_KEY",
+		Headers: map[string]string{
+			"HTTP-Referer": "https://app.example",
+			"X-Title":      "Reasonix",
+		},
+		ModelOverrides: map[string]ProviderModelOverride{
+			"deepseek-v4-flash": {
+				ReasoningProtocol: ReasoningProtocolDeepSeek,
+				SupportedEfforts:  []string{"high", "max"},
+				DefaultEffort:     "high",
+				Vision:            boolPtr(false),
+			},
+		},
+	}}
+
+	rendered := RenderTOML(orig)
+	if !strings.Contains(rendered, `headers     = { HTTP-Referer = "https://app.example", X-Title = "Reasonix" }`) {
+		t.Fatalf("rendered TOML missing headers:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, `model_overrides`) || !strings.Contains(rendered, `reasoning_protocol = "deepseek"`) {
+		t.Fatalf("rendered TOML missing model overrides:\n%s", rendered)
+	}
+
+	var got Config
+	if _, err := toml.Decode(rendered, &got); err != nil {
+		t.Fatalf("rendered TOML does not parse: %v\n%s", err, rendered)
+	}
+	p, ok := got.Provider("gateway")
+	if !ok {
+		t.Fatal("gateway provider missing after round trip")
+	}
+	if p.Headers["HTTP-Referer"] != "https://app.example" || p.Headers["X-Title"] != "Reasonix" {
+		t.Fatalf("headers after round trip = %+v", p.Headers)
+	}
+	ov := p.ModelOverrides["deepseek-v4-flash"]
+	if ov.ReasoningProtocol != ReasoningProtocolDeepSeek || !reflect.DeepEqual(ov.SupportedEfforts, []string{"high", "max"}) || ov.DefaultEffort != "high" || ov.Vision == nil || *ov.Vision {
+		t.Fatalf("model override after round trip = %+v", ov)
 	}
 }
 

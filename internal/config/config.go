@@ -80,6 +80,7 @@ type UIConfig struct {
 	ShortcutLayout string `toml:"shortcut_layout"` // classic|desktop; accepted for compatibility
 	CloseBehavior  string `toml:"close_behavior"`  // legacy desktop close behavior; prefer desktop.close_behavior
 	ShowReasoning  bool   `toml:"show_reasoning"`  // Ctrl+O / /verbose: show thinking text in CLI; false = collapsed
+	CursorShape    string `toml:"cursor_shape"`    // block|underline|bar; empty defaults to underline
 }
 
 // DesktopConfig controls desktop-only UI preferences. It is intentionally
@@ -151,6 +152,21 @@ func (c *Config) UIShortcutLayout() string {
 		return "desktop"
 	default:
 		return "classic"
+	}
+}
+
+// UICursorShape normalizes ui.cursor_shape. Defaults to "underline" to avoid
+// block-cursor visual corruption with CJK wide characters in the textarea
+// (Bubble Tea real-cursor + CJK column-counting drift). Valid values:
+// "block", "underline", "bar".
+func (c *Config) UICursorShape() string {
+	switch strings.ToLower(strings.TrimSpace(c.UI.CursorShape)) {
+	case "block":
+		return "block"
+	case "bar":
+		return "bar"
+	default:
+		return "underline"
 	}
 }
 
@@ -901,8 +917,14 @@ type AgentConfig struct {
 
 // MemoryCompilerConfig controls the v5 execution-memory compiler.
 type MemoryCompilerConfig struct {
-	Enabled *bool `toml:"enabled"`
+	Enabled   *bool  `toml:"enabled"`
+	Verbosity string `toml:"verbosity"`
 }
+
+const (
+	MemoryCompilerVerbosityObserve = "observe"
+	MemoryCompilerVerbosityCompact = "compact"
+)
 
 // MemoryCompilerEnabled reports whether the v5 execution-memory compiler should
 // participate in future turns. Missing config defaults to true.
@@ -913,18 +935,43 @@ func (c *Config) MemoryCompilerEnabled() bool {
 	return *c.Agent.MemoryCompiler.Enabled
 }
 
+// MemoryCompilerVerbosity reports how much Memory v5 state should be injected
+// into model-facing turns. The default observes and learns without prompt
+// injection, so Memory v5 IR is not provider-visible unless opted in.
+func (c *Config) MemoryCompilerVerbosity() string {
+	if c == nil {
+		return MemoryCompilerVerbosityObserve
+	}
+	return NormalizeMemoryCompilerVerbosity(c.Agent.MemoryCompiler.Verbosity)
+}
+
+// NormalizeMemoryCompilerVerbosity accepts current and legacy spellings for the
+// Memory v5 injection mode.
+func NormalizeMemoryCompilerVerbosity(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "observe", "observed", "silent", "minimal", "none":
+		return MemoryCompilerVerbosityObserve
+	case "compact", "inject", "injected", "contract", "on":
+		return MemoryCompilerVerbosityCompact
+	default:
+		return MemoryCompilerVerbosityObserve
+	}
+}
+
 // ProviderEntry declares a model provider instance. ContextWindow is the model's
 // token budget; the harness compacts older history as a turn's prompt approaches
 // it (see agent compaction). 0 disables compaction for the instance.
 type ProviderEntry struct {
-	Name           string   `toml:"name"`
-	Kind           string   `toml:"kind"`
-	BaseURL        string   `toml:"base_url"`
-	Model          string   `toml:"model"`      // a single model (back-compat)
-	Models         []string `toml:"models"`     // a vendor's model list (one base_url/key, many models)
-	ModelsURL      string   `toml:"models_url"` // auto-fetch models from this URL on startup
-	Default        string   `toml:"default"`    // default model when Models is set (else Models[0])
-	APIKeyEnv      string   `toml:"api_key_env"`
+	Name           string            `toml:"name"`
+	Kind           string            `toml:"kind"`
+	BaseURL        string            `toml:"base_url"`
+	ChatURL        string            `toml:"chat_url"`
+	Model          string            `toml:"model"`      // a single model (back-compat)
+	Models         []string          `toml:"models"`     // a vendor's model list (one base_url/key, many models)
+	ModelsURL      string            `toml:"models_url"` // auto-fetch models from this URL on startup
+	Default        string            `toml:"default"`    // default model when Models is set (else Models[0])
+	APIKeyEnv      string            `toml:"api_key_env"`
+	Headers        map[string]string `toml:"headers"` // optional extra HTTP headers for OpenAI-compatible gateways; secrets should stay in api_key_env.
 	resolvedAPIKey string
 	resolvedSource CredentialSource
 	BalanceURL     string                       `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
@@ -966,9 +1013,22 @@ type ProviderEntry struct {
 	// DefaultEffort is the /effort level used when the user picks "auto" or
 	// has not set Effort. Ignored when SupportedEfforts is empty.
 	DefaultEffort string `toml:"default_effort"`
+	// ModelOverrides customizes capability metadata after ResolveModel selects a
+	// concrete model from a multi-model provider. Use it when a gateway exposes
+	// mixed DeepSeek/OpenAI/no-reasoning or mixed vision/text models under one
+	// base_url/key.
+	ModelOverrides map[string]ProviderModelOverride `toml:"model_overrides"`
+	visionOverride *bool
 	// NoProxy reaches this provider's base_url directly, never through the proxy.
 	// For China-only endpoints a foreign-exit proxy resets the TLS handshake (#2803).
 	NoProxy bool `toml:"no_proxy"`
+}
+
+type ProviderModelOverride struct {
+	ReasoningProtocol string   `toml:"reasoning_protocol"`
+	SupportedEfforts  []string `toml:"supported_efforts"`
+	DefaultEffort     string   `toml:"default_effort"`
+	Vision            *bool    `toml:"vision"`
 }
 
 // ModelList returns the models this provider exposes: the explicit `models` list,
@@ -1092,6 +1152,44 @@ func (e *ProviderEntry) applyModelPrice() {
 		return
 	}
 	e.Price = e.PriceForModel(e.Model)
+}
+
+func (e *ProviderEntry) applyModelOverride() {
+	if e == nil || len(e.ModelOverrides) == 0 {
+		return
+	}
+	ov, ok := e.modelOverrideForModel(e.Model)
+	if !ok {
+		return
+	}
+	if ov.ReasoningProtocol != "" {
+		e.ReasoningProtocol = ov.ReasoningProtocol
+	}
+	if ov.SupportedEfforts != nil {
+		e.SupportedEfforts = append([]string(nil), ov.SupportedEfforts...)
+	}
+	if ov.DefaultEffort != "" || ov.SupportedEfforts != nil {
+		e.DefaultEffort = ov.DefaultEffort
+	}
+	if ov.Vision != nil {
+		e.visionOverride = ov.Vision
+	}
+}
+
+func (e *ProviderEntry) modelOverrideForModel(model string) (ProviderModelOverride, bool) {
+	model = strings.TrimSpace(model)
+	if e == nil || model == "" || len(e.ModelOverrides) == 0 {
+		return ProviderModelOverride{}, false
+	}
+	if ov, ok := e.ModelOverrides[model]; ok {
+		return ov, true
+	}
+	for k, ov := range e.ModelOverrides {
+		if strings.EqualFold(strings.TrimSpace(k), model) {
+			return ov, true
+		}
+	}
+	return ProviderModelOverride{}, false
 }
 
 func clonePricing(p *provider.Pricing) *provider.Pricing {
@@ -1387,6 +1485,7 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 			cp := *e
 			cp.Model = model
 			cp.applyModelPrice()
+			cp.applyModelOverride()
 			return &cp, true
 		}
 	}
@@ -1395,6 +1494,7 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 		cp := *e
 		cp.Model = e.DefaultModel()
 		cp.applyModelPrice()
+		cp.applyModelOverride()
 		return &cp, true
 	}
 	// a bare model name → the provider that lists it
@@ -1403,6 +1503,7 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 			cp := c.Providers[i]
 			cp.Model = ref
 			cp.applyModelPrice()
+			cp.applyModelOverride()
 			return &cp, true
 		}
 	}

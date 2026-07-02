@@ -84,5 +84,10 @@ console.log("\nstatus bar workspace");
   ok(!html.includes("后台作业") && !html.includes("Background jobs"), "status bar omits non-configurable job indicators");
 }
 
+{
+  const defaultItems = DEFAULT_STATUS_BAR_ITEMS as readonly string[];
+  ok(!defaultItems.includes("autoresearch"), "autoresearch is not a configurable status bar UI item");
+}
+
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

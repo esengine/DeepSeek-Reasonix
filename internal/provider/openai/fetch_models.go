@@ -33,7 +33,7 @@ func IsModelFetchEndpointMiss(err error) bool {
 
 // FetchModels calls the OpenAI-compatible GET /models endpoint and returns the
 // available model IDs.
-func FetchModels(ctx context.Context, baseURL, apiKey string) ([]string, error) {
+func FetchModels(ctx context.Context, baseURL, apiKey string, headers map[string]string) ([]string, error) {
 	cli := &http.Client{Timeout: 10 * time.Second}
 	url := strings.TrimRight(baseURL, "/")
 	if !strings.HasSuffix(url, "/models") {
@@ -48,6 +48,7 @@ func FetchModels(ctx context.Context, baseURL, apiKey string) ([]string, error) 
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 	req.Header.Set("Accept", "application/json")
+	applyCustomHeaders(req.Header, headers)
 
 	resp, err := cli.Do(req)
 	if err != nil {

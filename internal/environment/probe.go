@@ -14,9 +14,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"reasonix/internal/proc"
 )
 
 const ProbeTimeout = 2 * time.Second
+
+const probeWaitDelay = time.Second
 
 const probeCacheTTL = 5 * time.Minute
 
@@ -201,6 +205,7 @@ func runOne(ctx context.Context, command string, opts ProbeOptions) ProbeResult 
 	cmdCtx, cancel := context.WithTimeout(ctx, ProbeTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(cmdCtx, exe, parts[1:]...)
+	prepareProbeCommand(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -224,6 +229,16 @@ func runOne(ctx context.Context, command string, opts ProbeOptions) ProbeResult 
 	res.Found = true
 	res.Output = firstLine(out)
 	return res
+}
+
+func prepareProbeCommand(cmd *exec.Cmd) {
+	proc.HideWindow(cmd)
+	proc.SetProcessGroupKill(cmd)
+	cmd.Cancel = func() error {
+		proc.KillTree(cmd)
+		return nil
+	}
+	cmd.WaitDelay = probeWaitDelay
 }
 
 func sortResults(results []ProbeResult) {

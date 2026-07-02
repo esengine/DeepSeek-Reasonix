@@ -49,7 +49,12 @@ func waitForFile(t *testing.T, path, want string) {
 
 func waitForAutosaveIdle(t *testing.T, tab *WorkspaceTab) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	waitForAutosaveIdleWithin(t, tab, 2*time.Second)
+}
+
+func waitForAutosaveIdleWithin(t *testing.T, tab *WorkspaceTab, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		tab.saveMu.Lock()
 		idle := !tab.saving && !tab.saveAgain
@@ -132,6 +137,91 @@ func TestScheduleSnapshotCoalesces(t *testing.T) {
 	waitForAutosaveIdle(t, tab)
 }
 
+func TestAutosaveFailureRetriesAndRecoversOnNextTurnDone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "blocked.jsonl")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("mkdir blocked path: %v", err)
+	}
+	a, tab := appWithTab(t, path)
+	_ = a
+
+	tab.sink.Emit(event.Event{Kind: event.TurnDone})
+	waitForAutosaveIdleWithin(t, tab, 5*time.Second)
+
+	tab.saveMu.Lock()
+	failures := tab.saveFailures
+	tab.saveMu.Unlock()
+	if failures == 0 {
+		t.Fatal("autosave failure should be recorded and retried")
+	}
+	if info, err := os.Stat(path); err != nil || !info.IsDir() {
+		t.Fatalf("blocked session path should still be the directory, info=%v err=%v", info, err)
+	}
+
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove blocked dir: %v", err)
+	}
+	tab.sink.Emit(event.Event{Kind: event.TurnDone})
+	waitForFile(t, path, "remember this turn")
+	waitForAutosaveIdle(t, tab)
+
+	tab.saveMu.Lock()
+	failures = tab.saveFailures
+	tab.saveMu.Unlock()
+	if failures != 0 {
+		t.Fatalf("autosave failures after recovery = %d, want 0", failures)
+	}
+}
+
+func TestSetActiveTabBlocksWhenCurrentSessionCannotPersist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "blocked.jsonl")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("mkdir blocked path: %v", err)
+	}
+	a, _ := appWithTab(t, path)
+	a.tabs["target_tab"] = &WorkspaceTab{
+		ID:          "target_tab",
+		Scope:       "global",
+		Ready:       true,
+		disabledMCP: map[string]ServerView{},
+	}
+	a.tabOrder = []string{"test_tab", "target_tab"}
+
+	err := a.SetActiveTab("target_tab")
+	if err == nil || !strings.Contains(err.Error(), "save current session before switching tabs") {
+		t.Fatalf("SetActiveTab error = %v, want persistence failure", err)
+	}
+	if a.activeTabID != "test_tab" {
+		t.Fatalf("active tab = %q, want original tab after failed save", a.activeTabID)
+	}
+}
+
+func TestRebindSessionBlocksWhenCurrentSessionCannotPersist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "blocked.jsonl")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("mkdir blocked path: %v", err)
+	}
+	a, tab := appWithTab(t, path)
+	target := filepath.Join(t.TempDir(), "target.jsonl")
+	sess := agent.NewSession("system")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "target prompt"})
+	if err := sess.Save(target); err != nil {
+		t.Fatalf("save target: %v", err)
+	}
+	loaded, err := agent.LoadSession(target)
+	if err != nil {
+		t.Fatalf("load target: %v", err)
+	}
+
+	err = a.rebindTabToLoadedSessionPath(tab, target, loaded)
+	if err == nil || !strings.Contains(err.Error(), "save current session before switching sessions") {
+		t.Fatalf("rebind error = %v, want persistence failure", err)
+	}
+	if tab.Ctrl == nil || tab.Ctrl.SessionPath() != path {
+		t.Fatalf("tab controller/path changed after failed save: ctrl=%v path=%q", tab.Ctrl, tab.currentSessionPath())
+	}
+}
+
 // TestCloseTabNoResurrectionFromAutosave is the regression test for #4384.
 // It proves that after CloseTab returns, the per-turn autosave goroutine can no
 // longer write the session file — even when it is in flight at the moment the
@@ -184,6 +274,34 @@ func TestCloseTabNoResurrectionFromAutosave(t *testing.T) {
 	// can write either.
 	if got := doomedTab.Ctrl.SessionPath(); got != "" {
 		t.Fatalf("controller session path = %q after CloseTab, want empty so snapshots no-op", got)
+	}
+}
+
+func TestCloseTabBlocksWhenSessionCannotPersist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "blocked.jsonl")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("mkdir blocked path: %v", err)
+	}
+	a, tab := appWithTab(t, path)
+	survivor := &WorkspaceTab{
+		ID:          "survivor_tab",
+		Scope:       "global",
+		Ready:       true,
+		disabledMCP: map[string]ServerView{},
+	}
+	survivor.sink = &tabEventSink{tabID: survivor.ID, app: a}
+	a.tabs[survivor.ID] = survivor
+	a.tabOrder = []string{tab.ID, survivor.ID}
+
+	err := a.CloseTab(tab.ID)
+	if err == nil || !strings.Contains(err.Error(), "save current session before closing tab") {
+		t.Fatalf("CloseTab error = %v, want persistence failure", err)
+	}
+	if _, ok := a.tabs[tab.ID]; !ok {
+		t.Fatal("tab was removed even though its session could not be saved")
+	}
+	if tab.Ctrl == nil || tab.Ctrl.SessionPath() != path {
+		t.Fatalf("tab controller/path changed after failed close: ctrl=%v path=%q", tab.Ctrl, tab.currentSessionPath())
 	}
 }
 

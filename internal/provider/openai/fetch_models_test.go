@@ -28,7 +28,7 @@ func TestFetchModels(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	models, err := FetchModels(context.Background(), srv.URL, "test-key")
+	models, err := FetchModels(context.Background(), srv.URL, "test-key", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -40,13 +40,37 @@ func TestFetchModels(t *testing.T) {
 	}
 }
 
+func TestFetchModelsSendsCustomHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("HTTP-Referer") != "https://app.example" || r.Header.Get("X-Title") != "Reasonix" {
+			http.Error(w, `{"error":"missing headers"}`, http.StatusForbidden)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]string{{"id": "model-a"}},
+		})
+	}))
+	defer srv.Close()
+
+	models, err := FetchModels(context.Background(), srv.URL, "key", map[string]string{
+		"HTTP-Referer": "https://app.example",
+		"X-Title":      "Reasonix",
+	})
+	if err != nil {
+		t.Fatalf("FetchModels: %v", err)
+	}
+	if len(models) != 1 || models[0] != "model-a" {
+		t.Fatalf("models = %v, want [model-a]", models)
+	}
+}
+
 func TestFetchModelsAuthError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":{"message":"invalid key"}}`, http.StatusUnauthorized)
 	}))
 	defer srv.Close()
 
-	_, err := FetchModels(context.Background(), srv.URL, "bad-key")
+	_, err := FetchModels(context.Background(), srv.URL, "bad-key", nil)
 	if err == nil {
 		t.Fatal("expected error for bad key")
 	}
@@ -58,7 +82,7 @@ func TestFetchModelsEmptyResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	models, err := FetchModels(context.Background(), srv.URL, "key")
+	models, err := FetchModels(context.Background(), srv.URL, "key", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

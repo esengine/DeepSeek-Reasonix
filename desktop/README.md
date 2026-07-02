@@ -255,5 +255,5 @@ memory-graph size buckets. It never uploads memory text, tool outputs, prompts,
 file paths, IDs, keys, base URLs, or file contents. The Memory v5 runtime itself
 is controlled from Settings > General > "Memory v5" and shares the user/global
 `agent.memory_compiler.enabled` setting with the CLI/TUI and `reasonix serve`;
-CLI users can also run `/memory-v5 off|on|status` in a session or
-`reasonix config memory-v5 off|on|status` from a shell.
+CLI users can also run `/memory-v5 off|observe|compact|on|status` in a session
+or `reasonix config memory-v5 off|observe|compact|on|status` from a shell.

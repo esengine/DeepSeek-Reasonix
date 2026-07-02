@@ -160,8 +160,8 @@ func TestSlashArgItems(t *testing.T) {
 	}
 	// /memory-v5
 	items, _ = SlashArgItems("/memory-v5 ", data)
-	if !has(items, "status") || !has(items, "off") || !has(items, "on") {
-		t.Errorf("/memory-v5 should offer status/off/on; got %v", labelsOf(items))
+	if !has(items, "status") || !has(items, "off") || !has(items, "observe") || !has(items, "compact") || !has(items, "on") {
+		t.Errorf("/memory-v5 should offer status/off/observe/compact/on; got %v", labelsOf(items))
 	}
 	// /theme
 	items, _ = SlashArgItems("/theme ", data)
@@ -259,6 +259,9 @@ func TestManagementMemoryV5WritesUserConfig(t *testing.T) {
 	cfg := config.LoadForEdit(config.UserConfigPath())
 	if cfg.MemoryCompilerEnabled() {
 		t.Fatal("memory_compiler.enabled = true, want false")
+	}
+	if got := cfg.MemoryCompilerVerbosity(); got != config.MemoryCompilerVerbosityObserve {
+		t.Fatalf("memory_compiler.verbosity = %q, want observe", got)
 	}
 	if !strings.Contains(strings.Join(notices, "\n"), "memory-v5 set to off") {
 		t.Fatalf("missing memory-v5 notice: %v", notices)

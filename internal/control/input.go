@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -149,10 +150,14 @@ func (c *Controller) Compose(text string) string {
 	reasoningLanguage := c.reasoningLanguage
 	c.mu.Unlock()
 	notes := c.memory.drainPending()
-	goal, goalStatus, goalResearchMode := c.goals.snapshot()
+	goal, goalStatus, goalResearchMode, autoResearchTaskID := c.goals.snapshot()
 
 	if strings.TrimSpace(goal) != "" && goalStatus == GoalStatusRunning {
-		text = activeGoalBlock(goal, goalResearchMode) + "\n\n" + text
+		prefix := activeGoalBlock(goal, goalResearchMode)
+		if runtime := c.autoResearchRuntimeBlock(autoResearchTaskID); runtime != "" {
+			prefix += "\n\n" + runtime
+		}
+		text = prefix + "\n\n" + text
 	}
 	if plan {
 		text = PlanModeMarker + "\n\n" + text
@@ -184,6 +189,53 @@ func (c *Controller) Compose(text string) string {
 	}
 	return text
 }
+
+func (c *Controller) autoResearchRuntimeBlock(taskID string) string {
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return ""
+	}
+	summary, err := c.autoResearch.Summary(taskID)
+	if err != nil {
+		return "<autoresearch-runtime>\nstatus: invalid\nerror: " + strings.ReplaceAll(err.Error(), autoResearchRuntimeClose, "<\\/autoresearch-runtime>") + "\n</autoresearch-runtime>"
+	}
+	var b strings.Builder
+	b.WriteString("<autoresearch-runtime>\n")
+	b.WriteString("task_id: " + summary.TaskID + "\n")
+	b.WriteString("status: " + summary.Status + "\n")
+	b.WriteString("iteration: ")
+	b.WriteString(strconv.Itoa(summary.Iteration))
+	b.WriteString("\n")
+	b.WriteString("current_direction: " + summary.CurrentDirection + "\n")
+	b.WriteString("stale_count: ")
+	b.WriteString(strconv.Itoa(summary.StaleCount))
+	b.WriteString("\n")
+	b.WriteString("pivot_count: ")
+	b.WriteString(strconv.Itoa(summary.PivotCount))
+	b.WriteString("\n")
+	if summary.PivotRequired {
+		b.WriteString("pivot_required: true\n")
+	} else {
+		b.WriteString("pivot_required: false\n")
+	}
+	b.WriteString("open_success_criteria: ")
+	b.WriteString(strconv.Itoa(len(summary.OpenCriteria)))
+	b.WriteString("\n")
+	for _, criterion := range summary.OpenCriteria {
+		b.WriteString("- ")
+		b.WriteString(criterion.ID)
+		b.WriteString(": ")
+		b.WriteString(strings.ReplaceAll(criterion.Description, "\n", " "))
+		b.WriteString("\n")
+	}
+	if summary.Blocker != "" {
+		b.WriteString("blocker: " + summary.Blocker + "\n")
+	}
+	b.WriteString("next_required_action: " + summary.NextRequiredAction + "\n")
+	b.WriteString("</autoresearch-runtime>")
+	return b.String()
+}
+
+const autoResearchRuntimeClose = "</autoresearch-runtime>"
 
 func reasoningLanguageBlock(lang string) string {
 	return agent.ReasoningLanguageBlock(lang)
@@ -217,14 +269,17 @@ func activeGoalBlock(goal string, researchMode GoalResearchMode) string {
 }
 
 const autoResearchGoalInstructions = `AutoResearch protocol: this goal looks like long-horizon research, debugging, optimization, or implementation work. Treat AutoResearch as a durable strategy for this Goal, not as a background daemon or a global skill.
-- Say briefly in the first visible reply that the goal is being handled with AutoResearch and that state will live under .reasonix/autoresearch/<task-id>/.
+- Say briefly in the first visible reply that the goal is being handled with AutoResearch and that host-owned state lives under .reasonix/autoresearch/<task-id>/, using the actual task_id from <autoresearch-runtime>.
 - Keep dynamic state out of REASONIX.md, AGENTS.md, project memory, system prompts, and tool schemas. Use project-local .reasonix/autoresearch/ state only.
-- For a new task, create a collision-resistant task id YYYYMMDD-HHMMSS-slug, check .reasonix/autoresearch/ first, and append -2, -3, etc. only on collision. Reuse an explicitly supplied .reasonix/autoresearch/<task-id>/ path exactly.
-- Maintain state/task_spec.md, state/progress.json, state/findings.jsonl, state/directions_tried.json, state/iteration_log.jsonl, and logs/heartbeat.jsonl. Record goal, scope, non-goals, allowed operations, success criteria, verification gates, iteration direction, evidence, stale_count, pivots, blockers, and completion summary.
-- Before each iteration, read the existing state files as authoritative, append a heartbeat, choose a direction that differs materially from directions already tried, execute the smallest evidence-producing chunk, verify it, then persist JSON/JSONL state before reporting.
+- Use the task_id and open_success_criteria in <autoresearch-runtime> as authoritative. The host creates task ids and owns state/task_spec.json, state/progress.json, state/findings.jsonl, state/directions_tried.json, state/iteration_log.jsonl, and logs/heartbeat.jsonl.
+- Do not hand-edit the host-owned AutoResearch state files. When you have direct evidence for an open criterion, include an <autoresearch-evidence> block in your assistant reply so the host can persist it:
+<autoresearch-evidence>
+{"criterion_id":"objective_evidence","kind":"file","summary":"What was directly observed","source":"file","paths":["relative/path"],"accepted":true}
+</autoresearch-evidence>
+- Before each iteration, use the runtime summary as authoritative, choose a direction that differs materially from directions already tried, execute the smallest evidence-producing chunk, verify it, and report accepted evidence with <autoresearch-evidence> blocks.
 - Increment stale_count when an iteration lacks accepted evidence or repeats a prior direction. At stale_count >= 2, make a structural pivot such as changing evidence source, entrypoint, implementation boundary, test oracle, benchmark, decomposition, environment, platform, or refutation angle. At stale_count >= 4, stop autonomous digging and ask for the smallest external input needed.
 - Workers or subagents may gather evidence, but the orchestrator owns canonical state writes. Workers must not publish, push, delete, contact external systems, or write canonical state unless explicitly designated.
-- Complete only after auditing every success criterion in task_spec.md against direct evidence. Public publishing, destructive changes, credential use, payments, external notifications, privacy-sensitive output, and cache-sensitive changes still require the normal Reasonix gates.`
+- Complete only after auditing every open success criterion in <autoresearch-runtime> against direct evidence. Public publishing, destructive changes, credential use, payments, external notifications, privacy-sensitive output, and cache-sensitive changes still require the normal Reasonix gates.`
 
 func shouldUseAutoResearch(goal string, mode GoalResearchMode) bool {
 	switch mode {

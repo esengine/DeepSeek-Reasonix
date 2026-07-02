@@ -31,6 +31,32 @@ func TestNoToolSuccessfulTurnIsSuccess(t *testing.T) {
 	}
 }
 
+func TestPlanModeBlockedToolsDoNotPoisonStrategy(t *testing.T) {
+	records := []ToolRecord{
+		{Name: "bash", Error: planModeBlockedToolError, Blocked: true},
+		{Name: "edit", Error: planModeBlockedToolError, Blocked: true},
+	}
+	if got := outcomeFor(records, nil); got != "success" {
+		t.Fatalf("outcomeFor(plan-mode blocked tools, no err) = %q, want success", got)
+	}
+
+	dir := t.TempDir()
+	rt := New(dir)
+	_, turn := rt.StartTurn(context.Background(), "draft a plan for the fix", nil)
+	if turn == nil {
+		t.Fatal("nil turn")
+	}
+	turn.RecordToolResults(records)
+	turn.Finish(nil)
+
+	st := rt.loadState()
+	for _, s := range st.Strategies {
+		if s.Failures > 0 {
+			t.Errorf("strategy %q got %d failures from plan-mode policy blocks", s.ID, s.Failures)
+		}
+	}
+}
+
 // #2: goal classification must strip the injected "Referenced context:" preamble
 // and file blocks, while SourceEvent keeps the full input (the model's only view
 // of the referenced files once the contract replaces the user turn).

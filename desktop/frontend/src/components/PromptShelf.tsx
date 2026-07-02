@@ -1,6 +1,8 @@
 import type { ReactNode, RefObject } from "react";
 
 export function PromptShelf({
+  className,
+  cardClassName,
   titleId,
   title,
   badges,
@@ -13,6 +15,8 @@ export function PromptShelf({
   barRef,
   role = "dialog",
 }: {
+  className?: string;
+  cardClassName?: string;
   titleId: string;
   title: ReactNode;
   badges?: ReactNode;
@@ -26,10 +30,10 @@ export function PromptShelf({
   role?: "dialog" | "region";
 }) {
   return (
-    <div className="prompt-shelf" aria-live="polite">
+    <div className={["prompt-shelf", className ?? ""].filter(Boolean).join(" ")} aria-live="polite">
       <div
         ref={barRef}
-        className="prompt-shelf__card"
+        className={["prompt-shelf__card", cardClassName ?? ""].filter(Boolean).join(" ")}
         role={role}
         aria-modal={role === "dialog" ? "false" : undefined}
         aria-labelledby={titleId}

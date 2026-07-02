@@ -29,6 +29,10 @@ type BranchMeta struct {
 	TopicID          string    `json:"topic_id,omitempty"`
 	TopicTitle       string    `json:"topic_title,omitempty"`
 	Model            string    `json:"model,omitempty"`
+	TokenMode        string    `json:"token_mode,omitempty"`
+	Mode             string    `json:"mode,omitempty"`
+	ToolApprovalMode string    `json:"tool_approval_mode,omitempty"`
+	Goal             string    `json:"goal,omitempty"`
 	// SchemaVersion records the BranchMeta version that last wrote the listing
 	// fields (Turns/Preview) FROM the session's content. It is stamped only by the
 	// writers that actually derive those counts — Controller.snapshot's

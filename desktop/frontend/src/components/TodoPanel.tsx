@@ -1,22 +1,39 @@
 import { useEffect, useRef, useState } from "react";
 import { useT } from "../lib/i18n";
 import type { Todo } from "../lib/tools";
+import { shouldOpenTodoPanelByDefault } from "../lib/todoVisibility";
 import { PromptBadge, PromptHeaderAction, PromptShelf } from "./PromptShelf";
 
-const STORAGE_KEY = "todoPanel:open";
+const STORAGE_KEY = "todoPanel:openStates";
+const MAX_STORED_OPEN_STATES = 80;
 
-function loadOpenState(): boolean {
+function loadOpenStates(): Record<string, boolean> {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    return saved === null ? true : saved === "1";
+    if (!saved) return {};
+    const parsed = JSON.parse(saved) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const states: Record<string, boolean> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === "boolean") states[key] = value;
+    }
+    return states;
   } catch {
-    return true;
+    return {};
   }
 }
 
-function saveOpenState(open: boolean): void {
+function loadOpenState(stateKey: string, defaultOpen: boolean): boolean {
+  const states = loadOpenStates();
+  return Object.prototype.hasOwnProperty.call(states, stateKey) ? states[stateKey] : defaultOpen;
+}
+
+function saveOpenState(stateKey: string, open: boolean): void {
   try {
-    localStorage.setItem(STORAGE_KEY, open ? "1" : "0");
+    const entries = Object.entries(loadOpenStates()).filter(([key]) => key !== stateKey);
+    entries.push([stateKey, open]);
+    const trimmed = entries.slice(-MAX_STORED_OPEN_STATES);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(Object.fromEntries(trimmed)));
   } catch {
     /* ignore quota errors */
   }
@@ -24,23 +41,35 @@ function saveOpenState(open: boolean): void {
 
 // TodoPanel is the live task list pinned just above the composer — the kernel's
 // latest todo_write call drives it, and it updates in place as the agent flips
-// items to in_progress / completed. The collapsed/expanded state is persisted
-// globally in localStorage so the user's choice sticks across sessions.
+// items to in_progress / completed. Open state follows the current todo batch:
+// new incomplete work opens by default, finished work collapses to a reviewable
+// summary, and manual expand/collapse is restored only for the same batch.
 export function TodoPanel({
+  stateKey,
   todos,
   onDismiss,
 }: {
+  stateKey: string;
   todos: Todo[];
   onDismiss: () => void;
 }) {
   const t = useT();
-  const [open, setOpen] = useState(loadOpenState);
   const currentRef = useRef<HTMLLIElement | null>(null);
 
   const done = todos.filter((t) => t.status === "completed").length;
   const current = todos.find((t) => t.status === "in_progress");
   const allDone = todos.length > 0 && done === todos.length;
   const summary = current?.activeForm || current?.content || todos[todos.length - 1]?.content || "";
+  const [open, setOpen] = useState(() => loadOpenState(stateKey, shouldOpenTodoPanelByDefault(todos)));
+  const wasAllDoneRef = useRef(allDone);
+
+  useEffect(() => {
+    if (allDone && !wasAllDoneRef.current) {
+      saveOpenState(stateKey, false);
+      setOpen(false);
+    }
+    wasAllDoneRef.current = allDone;
+  }, [allDone, stateKey]);
 
   useEffect(() => {
     if (!open) return;
@@ -58,7 +87,13 @@ export function TodoPanel({
       role="region"
       headerActions={
         <>
-          <PromptHeaderAction onClick={() => setOpen((value) => { const next = !value; saveOpenState(next); return next; })}>
+          <PromptHeaderAction
+            onClick={() => setOpen((value) => {
+              const next = !value;
+              saveOpenState(stateKey, next);
+              return next;
+            })}
+          >
             {open ? t("common.collapse") : t("common.expand")}
           </PromptHeaderAction>
           {allDone && (

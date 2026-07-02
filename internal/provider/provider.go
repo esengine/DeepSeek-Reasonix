@@ -42,6 +42,8 @@ type Message struct {
 	ToolCallID         string           `json:"tool_call_id,omitempty"`    // links a tool result to its call
 	Name               string           `json:"name,omitempty"`            // tool message: tool name
 	MemoryCitations    []MemoryCitation `json:"memoryCitations,omitempty"` // local UI metadata; provider requests ignore it
+	Edited             bool             `json:"edited,omitempty"`          // local UI metadata; provider requests ignore it
+	Original           string           `json:"original,omitempty"`        // user prompt before inline edit
 }
 
 // MemoryCitation is local display metadata for memories that influenced an

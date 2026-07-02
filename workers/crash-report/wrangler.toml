@@ -5,6 +5,15 @@ compatibility_date = "2026-06-01"
 
 routes = [{ pattern = "crash.reasonix.io", custom_domain = true }]
 
+[vars]
+# Emails force-promoted to dashboard admin — the owner is never locked out even
+# if the role migration misses them.
+ADMIN_EMAILS = "359807859@qq.com"
+# Shared identity service (resolves the session) and the site hosting its login
+# page. Override for local dev.
+ID_ORIGIN = "https://id.reasonix.io"
+APP_ORIGIN = "https://reasonix.io"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "reasonix-crash"

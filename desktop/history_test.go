@@ -9,9 +9,11 @@ import (
 	"unicode/utf8"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/boot"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"reasonix/internal/store"
 	"reasonix/internal/tool"
 )
 
@@ -825,6 +827,232 @@ func TestRebindTabToLoadedSessionReusesPreloadedTranscript(t *testing.T) {
 	}
 	if gotPath := app.tabs[tab.ID].Ctrl.SessionPath(); gotPath != targetPath {
 		t.Fatalf("rebound session path = %q, want %q", gotPath, targetPath)
+	}
+}
+
+func TestRebindTabToLoadedSessionPersistsAndRestoresSessionProfile(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	root := globalTabWorkspaceRoot()
+	dir := desktopSessionDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+
+	currentPath := filepath.Join(dir, "current.jsonl")
+	targetPath := filepath.Join(dir, "target.jsonl")
+	writeHistoryTestSession(t, currentPath, "current prompt")
+	writeHistoryTestSession(t, targetPath, "target prompt")
+	if err := agent.SaveBranchMetaPreserveUpdated(targetPath, agent.BranchMeta{
+		TokenMode:        boot.TokenModeFull,
+		Mode:             "yolo",
+		ToolApprovalMode: control.ToolApprovalYolo,
+	}); err != nil {
+		t.Fatalf("SaveBranchMetaPreserveUpdated target: %v", err)
+	}
+
+	loaded, err := agent.LoadSession(targetPath)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: currentPath, Label: "current", Sink: event.Discard})
+	ctrl.SetMode(true, false)
+	ctrl.SetToolApprovalMode(control.ToolApprovalAuto)
+	defer ctrl.Close()
+
+	app := NewApp()
+	tab := &WorkspaceTab{
+		ID:               "tab",
+		Scope:            "global",
+		WorkspaceRoot:    root,
+		SessionPath:      currentPath,
+		Ctrl:             ctrl,
+		Ready:            true,
+		tokenMode:        boot.TokenModeEconomy,
+		mode:             "plan",
+		toolApprovalMode: control.ToolApprovalAuto,
+		sink:             &tabEventSink{tabID: "tab", app: app},
+		disabledMCP:      map[string]ServerView{},
+	}
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	if err := app.rebindTabToLoadedSessionPath(tab, targetPath, loaded); err != nil {
+		t.Fatalf("rebindTabToLoadedSessionPath: %v", err)
+	}
+
+	currentMeta, ok, err := agent.LoadBranchMeta(currentPath)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta current ok=%v err=%v", ok, err)
+	}
+	if currentMeta.TokenMode != boot.TokenModeEconomy || currentMeta.Mode != "plan" || currentMeta.ToolApprovalMode != control.ToolApprovalAuto {
+		t.Fatalf("current session profile = token:%q mode:%q approval:%q, want economy/plan/auto",
+			currentMeta.TokenMode, currentMeta.Mode, currentMeta.ToolApprovalMode)
+	}
+	if got := currentTabTokenMode(tab); got != boot.TokenModeFull {
+		t.Fatalf("rebound token mode = %q, want full", got)
+	}
+	if got := currentTabMode(tab); got != "yolo" {
+		t.Fatalf("rebound mode = %q, want yolo", got)
+	}
+	if got := currentTabToolApprovalMode(tab); got != control.ToolApprovalYolo {
+		t.Fatalf("rebound tool approval = %q, want yolo", got)
+	}
+}
+
+func TestCloseTabPersistsSessionProfileBeforeRemovingVisibleTab(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	root := globalTabWorkspaceRoot()
+	dir := desktopSessionDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+
+	currentPath := filepath.Join(dir, "profile.jsonl")
+	otherPath := filepath.Join(dir, "other.jsonl")
+	writeHistoryTestSession(t, currentPath, "profile prompt")
+	writeHistoryTestSession(t, otherPath, "other prompt")
+	if err := agent.SaveBranchMetaPreserveUpdated(currentPath, agent.BranchMeta{}); err != nil {
+		t.Fatalf("SaveBranchMetaPreserveUpdated current: %v", err)
+	}
+
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: currentPath, Label: "profile", Sink: event.Discard})
+	ctrl.SetMode(true, false)
+	ctrl.SetToolApprovalMode(control.ToolApprovalAuto)
+	ctrl.SetGoal("finish the review")
+
+	app := NewApp()
+	tab := &WorkspaceTab{
+		ID:               "profile",
+		Scope:            "global",
+		WorkspaceRoot:    root,
+		SessionPath:      currentPath,
+		Ctrl:             ctrl,
+		Ready:            true,
+		tokenMode:        boot.TokenModeEconomy,
+		mode:             "plan",
+		toolApprovalMode: control.ToolApprovalAuto,
+		sink:             &tabEventSink{tabID: "profile", app: app},
+		disabledMCP:      map[string]ServerView{},
+	}
+	other := &WorkspaceTab{
+		ID:            "other",
+		Scope:         "global",
+		WorkspaceRoot: root,
+		SessionPath:   otherPath,
+		Ready:         true,
+		disabledMCP:   map[string]ServerView{},
+	}
+	app.tabs[tab.ID] = tab
+	app.tabs[other.ID] = other
+	app.tabOrder = []string{tab.ID, other.ID}
+	app.activeTabID = tab.ID
+
+	if err := app.CloseTab(tab.ID); err != nil {
+		t.Fatalf("CloseTab: %v", err)
+	}
+
+	meta, ok, err := agent.LoadBranchMeta(currentPath)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta current ok=%v err=%v", ok, err)
+	}
+	if meta.TokenMode != boot.TokenModeEconomy || meta.Mode != "plan" || meta.ToolApprovalMode != control.ToolApprovalAuto || meta.Goal != "finish the review" {
+		t.Fatalf("closed session profile = token:%q mode:%q approval:%q goal:%q, want economy/plan/auto/goal",
+			meta.TokenMode, meta.Mode, meta.ToolApprovalMode, meta.Goal)
+	}
+}
+
+func TestKeepOnlyVisibleTabPersistsRemovedSessionProfile(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	root := globalTabWorkspaceRoot()
+	dir := desktopSessionDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+
+	keepPath := filepath.Join(dir, "keep.jsonl")
+	removedPath := filepath.Join(dir, "removed.jsonl")
+	writeHistoryTestSession(t, keepPath, "keep prompt")
+	writeHistoryTestSession(t, removedPath, "removed prompt")
+	if err := agent.SaveBranchMetaPreserveUpdated(removedPath, agent.BranchMeta{}); err != nil {
+		t.Fatalf("SaveBranchMetaPreserveUpdated removed: %v", err)
+	}
+
+	removedCtrl := control.New(control.Options{SessionDir: dir, SessionPath: removedPath, Label: "removed", Sink: event.Discard})
+	removedCtrl.SetMode(true, false)
+	removedCtrl.SetToolApprovalMode(control.ToolApprovalAuto)
+	removedCtrl.SetGoal("keep this profile")
+
+	app := NewApp()
+	keep := &WorkspaceTab{
+		ID:            "keep",
+		Scope:         "global",
+		WorkspaceRoot: root,
+		SessionPath:   keepPath,
+		Ready:         true,
+		disabledMCP:   map[string]ServerView{},
+	}
+	removed := &WorkspaceTab{
+		ID:               "removed",
+		Scope:            "global",
+		WorkspaceRoot:    root,
+		SessionPath:      removedPath,
+		Ctrl:             removedCtrl,
+		Ready:            true,
+		tokenMode:        boot.TokenModeEconomy,
+		mode:             "plan",
+		toolApprovalMode: control.ToolApprovalAuto,
+		sink:             &tabEventSink{tabID: "removed", app: app},
+		disabledMCP:      map[string]ServerView{},
+	}
+	app.tabs[keep.ID] = keep
+	app.tabs[removed.ID] = removed
+	app.tabOrder = []string{keep.ID, removed.ID}
+	app.activeTabID = removed.ID
+
+	if _, err := app.keepOnlyVisibleTab(keep.ID); err != nil {
+		t.Fatalf("keepOnlyVisibleTab: %v", err)
+	}
+
+	meta, ok, err := agent.LoadBranchMeta(removedPath)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta removed ok=%v err=%v", ok, err)
+	}
+	if meta.TokenMode != boot.TokenModeEconomy || meta.Mode != "plan" || meta.ToolApprovalMode != control.ToolApprovalAuto || meta.Goal != "keep this profile" {
+		t.Fatalf("removed session profile = token:%q mode:%q approval:%q goal:%q, want economy/plan/auto/goal",
+			meta.TokenMode, meta.Mode, meta.ToolApprovalMode, meta.Goal)
+	}
+}
+
+func TestLoadTabSessionProfileIgnoresTerminalGoalState(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	root := globalTabWorkspaceRoot()
+	dir := desktopSessionDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+
+	sessionPath := filepath.Join(dir, "terminal-goal.jsonl")
+	writeHistoryTestSession(t, sessionPath, "terminal prompt")
+	if err := agent.SaveBranchMetaPreserveUpdated(sessionPath, agent.BranchMeta{
+		TokenMode:        boot.TokenModeEconomy,
+		Mode:             "plan",
+		ToolApprovalMode: control.ToolApprovalAuto,
+		Goal:             "stale terminal goal",
+	}); err != nil {
+		t.Fatalf("SaveBranchMetaPreserveUpdated: %v", err)
+	}
+	if err := os.WriteFile(store.SessionGoalState(sessionPath), []byte(`{"goal":"stale terminal goal","status":"complete"}`), 0o644); err != nil {
+		t.Fatalf("write goal state: %v", err)
+	}
+
+	profile := loadTabSessionProfile(sessionPath)
+	if profile.goal != "" {
+		t.Fatalf("loaded profile goal = %q, want terminal goal ignored", profile.goal)
+	}
+	if profile.tokenMode != boot.TokenModeEconomy || profile.mode != "plan" || profile.toolApprovalMode != control.ToolApprovalAuto {
+		t.Fatalf("loaded profile = token:%q mode:%q approval:%q, want economy/plan/auto",
+			profile.tokenMode, profile.mode, profile.toolApprovalMode)
 	}
 }
 

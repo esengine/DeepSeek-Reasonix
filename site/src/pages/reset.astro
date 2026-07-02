@@ -1,0 +1,33 @@
+---
+import Account from '../layouts/Account.astro';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+<Account
+  title="Set a new password — Reasonix"
+  titleEn="Set a new password — Reasonix"
+  titleZh="设置新密码 — Reasonix"
+  description="Choose a new password for your Reasonix account.">
+  <div class="auth-head">
+    <h1><span class="l-en">Set a new password</span><span class="l-zh">设置新密码</span></h1>
+    <p><span class="l-en">Choose a password you haven't used before.</span><span class="l-zh">请设置一个新密码。</span></p>
+  </div>
+
+  <div id="reset-msg" class="auth-msg" hidden></div>
+
+  <form id="reset-form" class="auth-form" novalidate>
+    <div class="field">
+      <label for="password"><span class="l-en">New password</span><span class="l-zh">新密码</span></label>
+      <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required />
+      <span class="hint"><span class="l-en">At least 8 characters.</span><span class="l-zh">至少 8 个字符。</span></span>
+    </div>
+    <div class="field">
+      <label for="confirm"><span class="l-en">Confirm password</span><span class="l-zh">确认密码</span></label>
+      <input id="confirm" name="confirm" type="password" autocomplete="new-password" minlength="8" required />
+    </div>
+    <button type="submit" class="btn btn-dark"><span class="l-en">Update password</span><span class="l-zh">更新密码</span></button>
+  </form>
+
+  <p class="auth-alt">
+    <a href={`${base}/login/`}><span class="l-en">Back to sign in</span><span class="l-zh">返回登录</span></a>
+  </p>
+</Account>

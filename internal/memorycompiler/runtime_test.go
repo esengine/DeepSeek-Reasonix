@@ -665,6 +665,107 @@ func TestIRExecutionValidatorSplitsHardAndSoftSemanticDrift(t *testing.T) {
 	}
 }
 
+func TestMemoryCompilerSuppressesCompilerFeedbackNoise(t *testing.T) {
+	overhead := compilerIROverheadSelfFeedback
+	planModeBlocked := planModeBlockedToolError
+	planModeConstraint := "avoid repeating bash after repeated error: " + planModeBlocked
+	planModeNode := "bash repeated error: " + planModeBlocked
+
+	learning := analyzeTrace(ExecutionTrace{
+		ID:      "trace-overhead",
+		Goal:    "fix memory compiler",
+		Outcome: "success",
+		Cost: CostMetrics{
+			EstimatedInputTokens:      10,
+			EstimatedCompiledTokens:   950,
+			EstimatedIROverheadTokens: 940,
+		},
+	}, "general")
+	if strings.Contains(strings.Join(learning.CompilerImprovements, "\n"), overhead) {
+		t.Fatalf("IR overhead metric should not become compiler self-feedback: %+v", learning.CompilerImprovements)
+	}
+	learning = analyzeTrace(ExecutionTrace{
+		ID:      "trace-plan-mode",
+		Goal:    "draft a plan",
+		Outcome: "partial_success",
+		ToolResults: []ToolRecord{
+			{Name: "bash", Error: planModeBlocked},
+			{Name: "bash", Error: planModeBlocked},
+		},
+	}, "general")
+	if len(learning.BadStrategies) > 0 ||
+		strings.Contains(strings.Join(learning.MemoryNoisePatterns, "\n"), planModeBlocked) ||
+		strings.Contains(strings.Join(learning.CompilerImprovements, "\n"), planModeBlocked) {
+		t.Fatalf("plan-mode policy blocks should not become cross-session learning: %+v", learning)
+	}
+
+	realConstraint := Constraint{Type: "must_use", Text: "keep source-of-truth verification", Source: "policy:real"}
+	now := time.Now().UTC()
+	ir := buildIR("fix memory compiler", "fix memory compiler", state{
+		ExecutionState: ExecutionState{ActiveConstraints: []Constraint{
+			{Type: "reference", Text: overhead, Source: "learning:old"},
+			{Type: "avoid", Text: planModeConstraint, Source: "learning:plan-mode"},
+			realConstraint,
+		}},
+		Nodes: []MemoryNode{
+			{
+				ID:          "learning:old-node",
+				Type:        "fact",
+				Content:     overhead,
+				Timestamp:   now,
+				Confidence:  1,
+				Quality:     QualityHighSignal,
+				Constraint:  &Constraint{Type: "reference", Text: overhead, Source: "learning:old-node"},
+				TruthLocked: false,
+			},
+			{
+				ID:          "noise:plan-mode",
+				Type:        "state",
+				Content:     planModeNode,
+				Timestamp:   now,
+				Confidence:  1,
+				Quality:     QualityHighSignal,
+				Constraint:  &Constraint{Type: "avoid", Text: planModeNode, Source: "noise:plan-mode"},
+				TruthLocked: false,
+			},
+			{
+				ID:         "memory:real",
+				Type:       "fact",
+				Content:    "use the issue body as source",
+				Timestamp:  now,
+				Confidence: 1,
+				Quality:    QualityHighSignal,
+				Constraint: &realConstraint,
+			},
+		},
+		Mutations: []CompilerMutation{
+			{Target: "strategy_selector", Change: "add_constraint", Reason: overhead, Applied: true},
+			{Target: "strategy_selector", Change: "add_constraint", Reason: planModeConstraint, Applied: true},
+			{Target: "strategy_selector", Change: "add_constraint", Reason: "keep focused regression check", Applied: true},
+		},
+		NoisyRefs: map[string]int{
+			overhead:                  2,
+			planModeNode:              2,
+			"real transient IO error": 2,
+		},
+	})
+	compiled, err := compileExecutionContract(ir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(compiled, overhead) {
+		t.Fatalf("compiled contract leaked IR-overhead self-feedback:\n%s", compiled)
+	}
+	if strings.Contains(compiled, planModeBlocked) {
+		t.Fatalf("compiled contract leaked plan-mode policy noise:\n%s", compiled)
+	}
+	for _, want := range []string{realConstraint.Text, "use the issue body as source", "keep focused regression check", "real transient IO error"} {
+		if !strings.Contains(compiled, want) {
+			t.Fatalf("compiled contract lost actionable signal %q:\n%s", want, compiled)
+		}
+	}
+}
+
 func TestStrategyExplorationEntropyStaysAboveFloor(t *testing.T) {
 	strategies := ensureBuiltInStrategies(nil)
 	explored := 0
@@ -714,6 +815,33 @@ func TestTraceSplitterKeepsRuntimeTraceSmall(t *testing.T) {
 	}
 	if bundle.LearningTrace == nil || len(bundle.LearningTrace.CausalFindings) == 0 {
 		t.Fatalf("learning trace missing structured signal: %+v", bundle.LearningTrace)
+	}
+}
+
+func TestAppendBoundedJSONLPrunesOldLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), learningTracesFile)
+	for i := 0; i < 5; i++ {
+		if err := appendBoundedJSONL(path, map[string]int{"i": i}, 3); err != nil {
+			t.Fatalf("appendBoundedJSONL(%d): %v", i, err)
+		}
+	}
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("lines = %d, want 3:\n%s", len(lines), string(b))
+	}
+	for idx, line := range lines {
+		var got map[string]int
+		if err := json.Unmarshal([]byte(line), &got); err != nil {
+			t.Fatalf("line %d json: %v", idx, err)
+		}
+		if want := idx + 2; got["i"] != want {
+			t.Fatalf("line %d i = %d, want %d", idx, got["i"], want)
+		}
 	}
 }
 

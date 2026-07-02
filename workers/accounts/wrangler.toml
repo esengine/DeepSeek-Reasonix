@@ -22,7 +22,9 @@ COOKIE_DOMAIN = ".reasonix.io"
 # "stub" logs email links to the worker console (local dev); "resend" sends real
 # mail via RESEND_API_KEY.
 EMAIL_PROVIDER = "resend"
-MAIL_FROM = "Reasonix <no-reply@reasonix.io>"
+# From-domain must match a verified Resend domain — send.reasonix.io is verified
+# (DKIM), the apex is not, and Resend rejects sends from an unverified domain.
+MAIL_FROM = "Reasonix <no-reply@send.reasonix.io>"
 # Comma-separated emails minted as admins on first sign-up.
 ADMIN_EMAILS = ""
 

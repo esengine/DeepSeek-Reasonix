@@ -7,6 +7,7 @@ import { buildMailer, verifyEmail, resetEmail, accountExistsEmail } from "../ema
 import { hashPassword, verifyPassword, randomSuffix } from "../auth/crypto";
 import { setSessionCookie, clearSessionCookie, readSessionToken } from "../auth/cookies";
 import { authRateLimit } from "../http/ratelimit";
+import { readBearerToken } from "../http/auth";
 import { ApiError } from "../http/errors";
 import { deriveHandleBase, isValidHandle } from "../lib/handle";
 import { parseBody, RegisterSchema, LoginSchema, ForgotSchema, ResetSchema, ResendSchema } from "../lib/validation";
@@ -96,7 +97,7 @@ auth.post("/login", async (c) => {
 });
 
 auth.post("/logout", async (c) => {
-  const token = readSessionToken(c);
+  const token = readSessionToken(c) ?? readBearerToken(c);
   if (token) await repos(c.env).sessions.deleteByToken(token);
   clearSessionCookie(c);
   return c.json({ ok: true });

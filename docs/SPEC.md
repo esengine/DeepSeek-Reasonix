@@ -84,14 +84,16 @@ type Config struct {
   differing only in `base_url` / `model` / `api_key_env`. Adding another OpenAI-
   compatible model is a config edit, not a code change.
 - **A provider is a vendor endpoint** (one `base_url` + `api_key_env`) that offers
-  one or more models. An entry declares either a single `model = "..."` or a
+  one or more models. OpenAI-compatible chat normally posts to
+  `base_url + "/chat/completions"`; set `chat_url` only for gateways that require a
+  full request URL. An entry declares either a single `model = "..."` or a
   `models = ["...", "..."]` list (with an optional `default`); the list form lets
-  one vendor expose several models without re-declaring the endpoint/key — picking
-  a model reuses the same connection. A **model reference** (`default_model`, the
-  `--model` flag, the desktop switcher) resolves via `Config.ResolveModel`, which
-  accepts a provider name (→ its default model), a bare model name, or an explicit
-  `provider/model`. `context_window` / `price` are per-provider, so models that
-  need distinct values stay separate single-`model` entries.
+  one vendor expose several models without re-declaring the endpoint/key. A
+  **model reference** (`default_model`, the `--model` flag, the desktop switcher)
+  resolves via `Config.ResolveModel`, which accepts a provider name (→ its default
+  model), a bare model name, or an explicit `provider/model`. `context_window` /
+  `price` are per-provider, so models that need distinct values stay separate
+  single-`model` entries.
 - Streaming tool-call deltas are accumulated by index inside the provider; only
   complete `ToolCall`s are emitted.
 
@@ -505,12 +507,16 @@ compiler switch.
 default_model = "deepseek"   # provider name (→ its default model) or "provider/model"
 # language    = "zh"                # ui language tag; empty = auto-detect from $LANG / $REASONIX_LANG
 
+[ui]
+# shortcut_layout = "desktop"       # classic|desktop; compatibility setting
+# cursor_shape = "underline"        # CLI/TUI textarea cursor: underline|block|bar
+
 [agent]
 system_prompt = "You are Reasonix, a coding agent..."  # or system_prompt_file = "..."
 max_steps         = 0    # user/global only; executor tool-call rounds; 0 = no limit
 planner_max_steps = 0    # user/global only; planner read-only tool-call rounds; 0 = no limit
 temperature       = 0.0
-memory_compiler = { enabled = true }   # user/global only; Memory v5 execution compiler; CLI: reasonix config memory-v5 off|on|status
+memory_compiler = { enabled = true, verbosity = "observe" }   # user/global only; observe|compact; CLI: reasonix config memory-v5 off|observe|compact|on|status
 reasoning_language = "auto"       # visible reasoning text: auto|zh|en
 # plan_mode_allowed_tools = ["custom_reader"]   # extra read-only declarations for custom tools;
 #                                                # cannot unlock known blocked tools or unsafe bash
@@ -523,6 +529,8 @@ reasoning_language = "auto"       # visible reasoning text: auto|zh|en
 name           = "deepseek"
 kind           = "openai"
 base_url       = "https://api.deepseek.com"
+# chat_url     = "https://proxy.example.com/v1/chat/completions"   # optional full chat request URL
+# models_url   = "https://proxy.example.com/v1/models"             # optional model discovery URL
 models         = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default        = "deepseek-v4-flash"   # optional; defaults to models[0]
 api_key_env    = "DEEPSEEK_API_KEY"
@@ -586,6 +594,12 @@ args    = []
 ```
 
 `reasonix setup` writes this default config so the CLI is usable out of the box.
+
+`[ui].cursor_shape` is normalized to `underline`, `block`, or `bar`; empty or
+unknown values fall back to `underline`. It applies to the Bubble Tea CLI/TUI
+textarea only, while desktop and browser inputs keep their platform-native
+cursor behavior.
+
 `[serve]` controls the HTTP browser frontend used by `reasonix serve`. The
 default `auth_mode = "none"` is intended for the loopback default
 `127.0.0.1:8787`; deployments reachable from another machine must use `token` or

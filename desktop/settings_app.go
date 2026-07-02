@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -27,27 +29,38 @@ import (
 // --- read ---
 
 type ProviderView struct {
-	Name              string   `json:"name"`
-	BuiltIn           bool     `json:"builtIn"`
-	Added             bool     `json:"added"`
-	Kind              string   `json:"kind"`
-	BaseURL           string   `json:"baseUrl"`
-	Models            []string `json:"models"`
-	VisionModels      []string `json:"visionModels"`
-	VisionModelsSet   bool     `json:"visionModelsConfigured"`
-	ModelsURL         string   `json:"modelsUrl"`
-	Default           string   `json:"default"`
-	APIKeyEnv         string   `json:"apiKeyEnv"`
-	KeySet            bool     `json:"keySet"` // the env var currently resolves to a non-empty value
-	RequiresKey       bool     `json:"requiresKey"`
-	Configured        bool     `json:"configured"` // selectable: either key is present or no key is required
-	KeySource         string   `json:"keySource,omitempty"`
-	KeySourcePath     string   `json:"keySourcePath,omitempty"`
-	BalanceURL        string   `json:"balanceUrl"`
-	ContextWindow     int      `json:"contextWindow"`
+	Name              string                      `json:"name"`
+	BuiltIn           bool                        `json:"builtIn"`
+	Added             bool                        `json:"added"`
+	Kind              string                      `json:"kind"`
+	BaseURL           string                      `json:"baseUrl"`
+	ChatURL           string                      `json:"chatUrl"`
+	Models            []string                    `json:"models"`
+	VisionModels      []string                    `json:"visionModels"`
+	VisionModelsSet   bool                        `json:"visionModelsConfigured"`
+	ModelsURL         string                      `json:"modelsUrl"`
+	Default           string                      `json:"default"`
+	APIKeyEnv         string                      `json:"apiKeyEnv"`
+	Headers           map[string]string           `json:"headers"`
+	KeySet            bool                        `json:"keySet"` // the env var currently resolves to a non-empty value
+	RequiresKey       bool                        `json:"requiresKey"`
+	Configured        bool                        `json:"configured"` // selectable: either key is present or no key is required
+	KeySource         string                      `json:"keySource,omitempty"`
+	KeySourcePath     string                      `json:"keySourcePath,omitempty"`
+	BalanceURL        string                      `json:"balanceUrl"`
+	ContextWindow     int                         `json:"contextWindow"`
+	ReasoningProtocol string                      `json:"reasoningProtocol"`
+	SupportedEfforts  []string                    `json:"supportedEfforts"`
+	DefaultEffort     string                      `json:"defaultEffort"`
+	ModelOverrides    []ProviderModelOverrideView `json:"modelOverrides"`
+}
+
+type ProviderModelOverrideView struct {
+	Model             string   `json:"model"`
 	ReasoningProtocol string   `json:"reasoningProtocol"`
 	SupportedEfforts  []string `json:"supportedEfforts"`
 	DefaultEffort     string   `json:"defaultEffort"`
+	Vision            *bool    `json:"vision"`
 }
 
 type PermissionsView struct {
@@ -204,6 +217,78 @@ func nonNil(s []string) []string {
 	return s
 }
 
+func nonNilStringMap(m map[string]string) map[string]string {
+	if m == nil {
+		return map[string]string{}
+	}
+	return m
+}
+
+func providerModelOverridesForView(overrides map[string]config.ProviderModelOverride, models []string) []ProviderModelOverrideView {
+	if len(overrides) == 0 {
+		return []ProviderModelOverrideView{}
+	}
+	modelSet := map[string]bool{}
+	for _, model := range models {
+		modelSet[model] = true
+	}
+	keys := make([]string, 0, len(overrides))
+	for model := range overrides {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		if len(modelSet) > 0 && !modelSet[model] {
+			continue
+		}
+		keys = append(keys, model)
+	}
+	sort.Strings(keys)
+	out := make([]ProviderModelOverrideView, 0, len(keys))
+	for _, model := range keys {
+		ov := overrides[model]
+		out = append(out, ProviderModelOverrideView{
+			Model:             model,
+			ReasoningProtocol: ov.ReasoningProtocol,
+			SupportedEfforts:  nonNil(ov.SupportedEfforts),
+			DefaultEffort:     ov.DefaultEffort,
+			Vision:            ov.Vision,
+		})
+	}
+	return out
+}
+
+func providerModelOverridesForSave(overrides []ProviderModelOverrideView, models []string) map[string]config.ProviderModelOverride {
+	if len(overrides) == 0 {
+		return nil
+	}
+	modelSet := map[string]bool{}
+	for _, model := range models {
+		modelSet[model] = true
+	}
+	out := map[string]config.ProviderModelOverride{}
+	for _, item := range overrides {
+		model := strings.TrimSpace(item.Model)
+		if model == "" || (len(modelSet) > 0 && !modelSet[model]) {
+			continue
+		}
+		ov := config.ProviderModelOverride{
+			ReasoningProtocol: strings.TrimSpace(item.ReasoningProtocol),
+			SupportedEfforts:  nonNil(item.SupportedEfforts),
+			DefaultEffort:     strings.TrimSpace(item.DefaultEffort),
+			Vision:            item.Vision,
+		}
+		if strings.TrimSpace(ov.ReasoningProtocol) == "" && len(ov.SupportedEfforts) == 0 && strings.TrimSpace(ov.DefaultEffort) == "" && ov.Vision == nil {
+			continue
+		}
+		out[model] = ov
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func providerRemovalFallbackRef(c *config.Config, name string) string {
 	for i := range c.Providers {
 		p := &c.Providers[i]
@@ -306,9 +391,10 @@ func providerViewFromEntryForRootWithResolver(p config.ProviderEntry, builtIn, a
 	key := resolver.ResolveGlobalFirst(p.APIKeyEnv)
 	requiresKey := p.RequiresAPIKey()
 	return ProviderView{
-		Name: p.Name, BuiltIn: builtIn, Added: added, Kind: p.Kind, BaseURL: p.BaseURL,
+		Name: p.Name, BuiltIn: builtIn, Added: added, Kind: p.Kind, BaseURL: p.BaseURL, ChatURL: p.ChatURL,
 		Models: nonNil(models), VisionModels: nonNil(providerVisionModels(models, visionModels)), VisionModelsSet: visionModelsSet, ModelsURL: p.ModelsURL, Default: p.DefaultModel(),
 		APIKeyEnv:         p.APIKeyEnv,
+		Headers:           nonNilStringMap(p.Headers),
 		KeySet:            key.Set,
 		RequiresKey:       requiresKey,
 		Configured:        !requiresKey || key.Set,
@@ -319,6 +405,7 @@ func providerViewFromEntryForRootWithResolver(p config.ProviderEntry, builtIn, a
 		ReasoningProtocol: p.ReasoningProtocol,
 		SupportedEfforts:  nonNil(p.SupportedEfforts),
 		DefaultEffort:     p.DefaultEffort,
+		ModelOverrides:    providerModelOverridesForView(p.ModelOverrides, models),
 	}
 }
 
@@ -606,11 +693,11 @@ func (a *App) applyConfigOnly(mutate func(*config.Config) error) error {
 }
 
 func (a *App) ensureActiveTabRebuildAllowed(setting string) error {
-	if a.ctx == nil {
-		return nil
-	}
 	tab := a.activeTab()
 	if tab == nil {
+		if a.ctx == nil {
+			return nil
+		}
 		return fmt.Errorf("no active tab")
 	}
 	if controllerHasActiveRuntimeWork(tab.Ctrl) {
@@ -805,10 +892,12 @@ func configDeclaresProviderAccess(path string) bool {
 }
 
 func (a *App) activeWorkspaceRoot() string {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	if tab := a.activeTabLocked(); tab != nil {
-		return tab.WorkspaceRoot
+	tab := a.activeTab()
+	if tab != nil {
+		a.reconcileTabWithPinnedSessionMeta(tab)
+		if strings.TrimSpace(tab.WorkspaceRoot) != "" {
+			return tab.WorkspaceRoot
+		}
 	}
 	return "."
 }
@@ -861,11 +950,18 @@ func (a *App) rebuild() error {
 	if controllerHasActiveRuntimeWork(tab.Ctrl) {
 		return rebuildControllerActiveWorkError("settings")
 	}
+	if err := a.ensureTabControllerWorkspace(tab); err != nil {
+		return err
+	}
+	prevPath := a.reconciledSessionPathForTab(tab)
 	var carried []provider.Message
-	prevPath := ""
 	if tab.Ctrl != nil {
-		prevPath = tab.Ctrl.SessionPath()
-		_ = a.snapshotTab(tab)
+		if prevPath == "" {
+			prevPath = tab.Ctrl.SessionPath()
+		}
+		if err := a.snapshotTabForAction(tab, "rebuilding settings"); err != nil {
+			return err
+		}
 		carried = tab.Ctrl.History()
 		tab.Ctrl.Close()
 	}
@@ -925,34 +1021,6 @@ func (a *App) rebuild() error {
 	}
 	a.persistTabSessionPath(tab, path)
 	return nil
-}
-
-func systemPromptFrom(messages []provider.Message) string {
-	for _, m := range messages {
-		if m.Role == provider.RoleSystem {
-			return m.Content
-		}
-	}
-	return ""
-}
-
-func withFreshSystemPrompt(messages []provider.Message, system string) []provider.Message {
-	if strings.TrimSpace(system) == "" {
-		return messages
-	}
-	out := append([]provider.Message(nil), messages...)
-	for i := range out {
-		if out[i].Role == provider.RoleSystem {
-			out[i].Content = system
-			out[i].ReasoningContent = ""
-			out[i].ReasoningSignature = ""
-			out[i].ToolCalls = nil
-			out[i].ToolCallID = ""
-			out[i].Name = ""
-			return out
-		}
-	}
-	return append([]provider.Message{{Role: provider.RoleSystem, Content: system}}, out...)
 }
 
 // SetDefaultModel sets the config default and switches the live model to it.
@@ -1231,8 +1299,10 @@ func (a *App) SaveProvider(p ProviderView) error {
 		e.Name = p.Name
 		e.Kind = p.Kind
 		e.BaseURL = p.BaseURL
-		e.ModelsURL = p.ModelsURL
+		e.ChatURL = strings.TrimSpace(p.ChatURL)
+		e.ModelsURL = strings.TrimSpace(p.ModelsURL)
 		e.APIKeyEnv = p.APIKeyEnv
+		e.Headers = p.Headers
 		e.BalanceURL = strings.TrimSpace(p.BalanceURL)
 		e.ContextWindow = p.ContextWindow
 		e.ReasoningProtocol = p.ReasoningProtocol
@@ -1246,6 +1316,7 @@ func (a *App) SaveProvider(p ProviderView) error {
 		if len(models) > 0 {
 			e.Model = models[0] // also satisfies validateProvider's model requirement
 			e.Models = models
+			e.ModelOverrides = providerModelOverridesForSave(p.ModelOverrides, models)
 			if p.VisionModelsSet || len(p.VisionModels) > 0 {
 				e.Vision = false
 				e.VisionModels = providerVisionModels(models, p.VisionModels)
@@ -1256,6 +1327,7 @@ func (a *App) SaveProvider(p ProviderView) error {
 		} else {
 			e.Vision = false
 			e.VisionModels = nil
+			e.ModelOverrides = nil
 		}
 		if err := c.UpsertProvider(e); err != nil {
 			return err
@@ -1311,8 +1383,9 @@ func (a *App) FetchProviderModels(p ProviderView) ([]string, error) {
 	e := config.ProviderEntry{
 		Name:      p.Name,
 		BaseURL:   p.BaseURL,
-		ModelsURL: p.ModelsURL,
+		ModelsURL: strings.TrimSpace(p.ModelsURL),
 		APIKeyEnv: p.APIKeyEnv,
+		Headers:   p.Headers,
 	}
 	e.ResolveAPIKeyForRoot(a.activeWorkspaceRoot())
 	ctx, cancel := context.WithTimeout(a.reqCtx(), 15*time.Second)
@@ -1427,6 +1500,14 @@ func (a *App) removeBuiltInProviderAccessAndRetargetTabs(name string) error {
 			return err
 		}
 	}
+	for _, item := range affected {
+		if item.ctrl != nil && !item.readOnly {
+			if err := item.ctrl.Snapshot(); err != nil {
+				slog.Warn("desktop: snapshot before removing provider access failed", "tab", item.id, "provider", name, "err", err)
+				return fmt.Errorf("save current session before removing provider access: %w", err)
+			}
+		}
+	}
 	retargetProviderReferences(cfg, name, fallbackRef)
 	removeProviderAccess(cfg, name)
 	if err := cfg.SaveTo(path); err != nil {
@@ -1437,9 +1518,6 @@ func (a *App) removeBuiltInProviderAccessAndRetargetTabs(name string) error {
 	}
 	for _, item := range affected {
 		if item.ctrl != nil {
-			if !item.readOnly {
-				_ = item.ctrl.Snapshot()
-			}
 			item.ctrl.Close()
 		}
 	}
@@ -1510,6 +1588,14 @@ func (a *App) deleteProviderAndRetargetTabs(name string) error {
 			return err
 		}
 	}
+	for _, item := range affected {
+		if item.ctrl != nil && !item.readOnly {
+			if err := item.ctrl.Snapshot(); err != nil {
+				slog.Warn("desktop: snapshot before deleting provider failed", "tab", item.id, "provider", name, "err", err)
+				return fmt.Errorf("save current session before deleting provider: %w", err)
+			}
+		}
+	}
 	if err := cfg.RemoveProvider(name); err != nil {
 		return err
 	}
@@ -1523,9 +1609,6 @@ func (a *App) deleteProviderAndRetargetTabs(name string) error {
 	}
 	for _, item := range affected {
 		if item.ctrl != nil {
-			if !item.readOnly {
-				_ = item.ctrl.Snapshot()
-			}
 			item.ctrl.Close()
 		}
 	}

@@ -1,0 +1,38 @@
+---
+import Account from '../layouts/Account.astro';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+<Account
+  title="Create account — Reasonix"
+  titleEn="Create account — Reasonix"
+  titleZh="注册 — Reasonix"
+  description="Create your Reasonix account.">
+  <div class="auth-head">
+    <h1><span class="l-en">Create your account</span><span class="l-zh">创建账号</span></h1>
+    <p><span class="l-en">Join the Reasonix community.</span><span class="l-zh">加入 Reasonix 社区。</span></p>
+  </div>
+
+  <div id="register-msg" class="auth-msg" hidden></div>
+
+  <form id="register-form" class="auth-form" novalidate>
+    <div class="field">
+      <label for="displayName"><span class="l-en">Display name</span><span class="l-zh">显示名</span> <span class="hint">(<span class="l-en">optional</span><span class="l-zh">可选</span>)</span></label>
+      <input id="displayName" name="displayName" type="text" autocomplete="nickname" maxlength="80" />
+    </div>
+    <div class="field">
+      <label for="email"><span class="l-en">Email</span><span class="l-zh">邮箱</span></label>
+      <input id="email" name="email" type="email" autocomplete="email" required />
+    </div>
+    <div class="field">
+      <label for="password"><span class="l-en">Password</span><span class="l-zh">密码</span></label>
+      <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required />
+      <span class="hint"><span class="l-en">At least 8 characters.</span><span class="l-zh">至少 8 个字符。</span></span>
+    </div>
+    <button type="submit" class="btn btn-dark"><span class="l-en">Create account</span><span class="l-zh">注册</span></button>
+  </form>
+
+  <p class="auth-alt">
+    <span class="l-en">Already have an account? <a href={`${base}/login/`}>Sign in</a></span>
+    <span class="l-zh">已有账号？<a href={`${base}/login/`}>登录</a></span>
+  </p>
+</Account>

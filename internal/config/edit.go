@@ -99,6 +99,21 @@ func (c *Config) SetMemoryCompilerEnabled(enabled bool) error {
 	return nil
 }
 
+// SetMemoryCompilerVerbosity controls whether Memory v5 only observes turns or
+// also injects compact execution contracts into provider-visible messages.
+func (c *Config) SetMemoryCompilerVerbosity(verbosity string) error {
+	normalized := NormalizeMemoryCompilerVerbosity(verbosity)
+	if strings.TrimSpace(verbosity) != "" && normalized == MemoryCompilerVerbosityObserve {
+		switch strings.ToLower(strings.TrimSpace(verbosity)) {
+		case "observe", "observed", "silent", "minimal", "none":
+		default:
+			return fmt.Errorf("memory_compiler.verbosity %q: must be observe|compact", verbosity)
+		}
+	}
+	c.Agent.MemoryCompiler.Verbosity = normalized
+	return nil
+}
+
 // SetUIShortcutLayout selects the CLI keyboard shortcut layout. "classic" keeps
 // historical behavior; "desktop" enables the two-axis desktop-style shortcuts.
 func (c *Config) SetUIShortcutLayout(layout string) error {

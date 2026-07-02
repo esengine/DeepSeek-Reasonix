@@ -483,9 +483,9 @@ export function TurnActions({
     }
   };
   const actionMeta = (scope: MessageActionScope): string => {
-    if ((scope === "code" || scope === "both") && checkpoint?.files?.length) {
-      const total = checkpoint.files.length;
-      const turnCount = checkpoint.turnFileCount ?? 0;
+    const total = checkpoint?.fileCount ?? checkpoint?.files?.length ?? 0;
+    if ((scope === "code" || scope === "both") && total > 0) {
+      const turnCount = checkpoint?.turnFileCount ?? 0;
       if (turnCount > 0 && turnCount < total) {
         return `${t("rewind.filesChanged", { count: total })} (${t("rewind.turnFiles", { count: turnCount })})`;
       }
@@ -496,12 +496,16 @@ export function TurnActions({
   const actionTooltipLabel = (scope: MessageActionScope) => {
     const reason = actionDisabledReason(scope);
     if (reason) return <span>{reason}</span>;
-    if ((scope === "code" || scope === "both") && checkpoint?.files?.length) {
+    const files = checkpoint?.files ?? [];
+    const total = checkpoint?.fileCount ?? files.length;
+    if ((scope === "code" || scope === "both") && total > 0) {
+      const hidden = Math.max(0, total - files.length);
       return (
         <div className="rewind__files-tooltip">
-          {checkpoint.files.map((file) => (
+          {files.map((file) => (
             <div key={file}>{file.split(/[/\\]/).pop() || file}</div>
           ))}
+          {hidden > 0 && <div>+{hidden}</div>}
         </div>
       );
     }

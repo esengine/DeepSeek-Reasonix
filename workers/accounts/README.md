@@ -15,18 +15,26 @@ src/
   app.ts              middleware + route wiring
   env.ts  types.ts  config.ts
   auth/   crypto.ts (PBKDF2 + token hashing)  cookies.ts (session cookie)
-  db/     users.ts  sessions.ts  emailTokens.ts  index.ts (repos factory)
+  db/     users.ts  sessions.ts  emailTokens.ts  deviceGrants.ts  index.ts (repos factory)
   email/  index.ts (Mailer + templates)  resend.ts  types.ts
-  http/   errors.ts  cors.ts  auth.ts (session middleware)  ratelimit.ts
+  http/   errors.ts  cors.ts  auth.ts (cookie + Bearer session)  ratelimit.ts
   lib/    validation.ts (zod)  handle.ts
-  routes/ auth.ts  me.ts  users.ts  health.ts
+  routes/ auth.ts  device.ts  me.ts  users.ts  health.ts
 ```
 
 Design notes:
 
 - **Sessions store `sha256(pepper:token)`** — the raw token only ever lives in the
-  cookie, so a DB read can't resurrect a live session. `sessions.kind` (`web`/`cli`)
-  is reserved so the future desktop/CLI device-flow login reuses this table.
+  cookie (web) or the client's credential store (CLI/desktop), so a DB read can't
+  resurrect a live session. Protected routes accept the session from the `rxid`
+  cookie or an `Authorization: Bearer <token>` header, so the same table serves
+  both surfaces (`sessions.kind` = `web` | `cli`).
+- **Device sign-in (RFC 8628-style)** lets the CLI/desktop authenticate without a
+  browser redirect: `/device/start` issues a `device_code` (polled) and a short
+  `user_code` (the human approves it on `APP_ORIGIN/device` while signed in). Only
+  the device code's peppered hash is stored; the `cli` session token is minted on
+  the winning poll (an atomic `DELETE … RETURNING` claim), so it never lands in the
+  DB. Polling isn't IP-limited — a `slow_down` hint plus the 10-minute TTL bound it.
 - **`password_hash` is nullable** on `users` so OAuth-only identities can be added
   later without a rebuild.
 - **Registration is enumeration-safe**: the response never reveals whether an email
@@ -45,7 +53,12 @@ Design notes:
 | POST   | `/auth/forgot`             | —    | `{ email }` → reset link                |
 | POST   | `/auth/reset`              | —    | `{ token, password }`                    |
 | POST   | `/auth/resend-verification`| —    | `{ email }`                              |
-| GET    | `/me`                      | ✓    | the signed-in account                   |
+| POST   | `/device/start`            | —    | CLI begins sign-in → `{ deviceCode, userCode, verificationUri, interval, expiresIn }` |
+| POST   | `/device/poll`             | —    | `{ deviceCode }` → `authorization_pending` \| `slow_down` \| `{ sessionToken, user }` |
+| GET    | `/device/info?userCode=`   | ✓    | approval screen: what a `user_code` will authorize |
+| POST   | `/device/approve`          | ✓    | `{ userCode }` — bind the pending grant to the signed-in user |
+| POST   | `/device/deny`             | ✓    | `{ userCode }` — reject the pending grant |
+| GET    | `/me`                      | ✓    | the signed-in account (cookie or Bearer) |
 | PATCH  | `/me`                      | ✓    | `{ displayName?, bio?, avatarUrl?, handle? }` |
 | POST   | `/me/password`             | ✓    | `{ currentPassword, newPassword }`      |
 | DELETE | `/me`                      | ✓    | soft-delete the account                 |
@@ -88,3 +101,13 @@ wrangler deploy
 
 The `id.reasonix.io` custom domain route is declared in `wrangler.toml`; point the
 DNS/custom-domain binding at this worker in the Cloudflare dashboard on first deploy.
+
+The steps above are the one-time bootstrap. After that, every merge to `main-v2`
+that touches `workers/accounts/**` redeploys via `.github/workflows/deploy-accounts-worker.yml`
+(same pattern as the crash worker). CI does **not** run migrations — apply new ones
+with `pnpm db:apply:remote` out of band.
+
+`RESEND_API_KEY` is synced to the worker on each deploy from the `RESEND_API_KEY`
+GitHub Actions repo secret (so the mail key has a single source of truth and needs
+no local wrangler auth). `SESSION_PEPPER` is not in CI — set it once with
+`wrangler secret put SESSION_PEPPER`.

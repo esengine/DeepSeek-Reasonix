@@ -92,15 +92,20 @@ func (a *App) MemorySuggestionsForTab(tabID string) MemorySuggestionsView {
 	tab := a.tabByIDLocked(tabID)
 	var ctrl control.SessionAPI
 	workspaceRoot := ""
-	sessionDir := ""
 	if tab != nil {
 		ctrl = tab.Ctrl
 		workspaceRoot = tab.WorkspaceRoot
-		sessionDir = tabSessionDir(tab)
 	}
 	a.mu.RUnlock()
 	if ctrl == nil {
 		return view
+	}
+	sessionDir := ""
+	if path, ok := a.reconcileTabWithPinnedSessionMeta(tab); ok && strings.TrimSpace(path) != "" {
+		sessionDir = filepath.Dir(path)
+		workspaceRoot = tab.WorkspaceRoot
+	} else {
+		sessionDir = tabRuntimeSessionDir(tab)
 	}
 	set := ctrl.Memory()
 	if set == nil {

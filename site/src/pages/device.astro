@@ -1,0 +1,34 @@
+---
+import Account from '../layouts/Account.astro';
+---
+<Account
+  title="Authorize a device — Reasonix"
+  titleEn="Authorize a device — Reasonix"
+  titleZh="授权设备 — Reasonix"
+  description="Approve a sign-in request from the Reasonix CLI or desktop app.">
+  <div id="device-gate" class="auth-head">
+    <p><span class="l-en">Checking your session…</span><span class="l-zh">正在检查登录状态…</span></p>
+  </div>
+
+  <div id="device-view" hidden>
+    <div class="auth-head">
+      <h1><span class="l-en">Authorize sign-in</span><span class="l-zh">授权登录</span></h1>
+      <p><span class="l-en">Confirm the code shown in your terminal or app.</span><span class="l-zh">请确认终端或应用里显示的验证码。</span></p>
+    </div>
+
+    <div id="device-msg" class="auth-msg" hidden></div>
+
+    <div class="field">
+      <label for="device-code"><span class="l-en">Device code</span><span class="l-zh">设备码</span></label>
+      <input id="device-code" class="device-code" type="text" autocomplete="one-time-code" spellcheck="false" placeholder="XXXX-XXXX" />
+    </div>
+    <button id="device-check" type="button" class="btn btn-ghost" style="width:100%"><span class="l-en">Continue</span><span class="l-zh">继续</span></button>
+
+    <p id="device-meta" class="device-meta" hidden></p>
+
+    <div id="device-actions" class="device-actions" hidden>
+      <button id="device-approve" type="button" class="btn btn-dark"><span class="l-en">Approve</span><span class="l-zh">批准</span></button>
+      <button id="device-deny" type="button" class="btn btn-ghost"><span class="l-en">Reject</span><span class="l-zh">拒绝</span></button>
+    </div>
+  </div>
+</Account>

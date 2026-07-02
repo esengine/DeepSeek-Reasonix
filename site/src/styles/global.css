@@ -739,3 +739,64 @@ footer { background: var(--bg); border-top: 1px solid var(--line); margin-top: 0
   .hero { padding-top: 130px; }
   section { padding-top: 100px; }
 }
+
+/* account / auth pages */
+.auth-nav { background: oklch(1 0 0 / 0.92); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); box-shadow: 0 1px 0 var(--line); }
+.auth-main { min-height: 100vh; display: grid; place-items: center; padding: 116px 24px 72px; }
+.auth-card {
+  width: 100%; max-width: 420px;
+  background: var(--card); border-radius: var(--radius);
+  box-shadow: var(--shadow-2); padding: 42px 40px 36px;
+}
+.auth-card.wide { max-width: 560px; }
+.auth-head { text-align: center; }
+.auth-head h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
+.auth-head p { margin-top: 10px; font-size: 15px; line-height: 1.6; color: var(--ink-2); }
+.auth-form { display: flex; flex-direction: column; gap: 16px; margin-top: 24px; }
+.field { display: flex; flex-direction: column; gap: 7px; text-align: left; }
+.field label { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.field .hint { font-size: 12px; font-weight: 400; color: var(--ink-3); }
+.field input, .field textarea {
+  width: 100%; font-family: var(--font-sans); font-size: 15px; color: var(--ink);
+  background: var(--bg-soft); border: 1px solid transparent; border-radius: var(--radius-sm);
+  padding: 12px 14px; resize: vertical;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+.field input:focus, .field textarea:focus {
+  outline: none; background: #fff;
+  border-color: color-mix(in oklch, var(--accent) 45%, var(--line));
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+.field input:disabled, .field textarea:disabled { opacity: 0.55; }
+.auth-form .btn { width: 100%; margin-top: 4px; }
+.btn[disabled], .btn.loading { opacity: 0.55; pointer-events: none; }
+.auth-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.auth-small { font-size: 12.5px; color: var(--accent); text-decoration: none; font-weight: 500; }
+.auth-small:hover { text-decoration: underline; }
+.auth-msg { margin-top: 20px; font-size: 13.5px; line-height: 1.55; border-radius: var(--radius-sm); padding: 11px 14px; text-align: left; }
+.auth-msg.error { background: color-mix(in oklch, oklch(0.63 0.21 25) 10%, white); color: oklch(0.5 0.19 25); }
+.auth-msg.ok { background: color-mix(in oklch, oklch(0.65 0.16 155) 13%, white); color: oklch(0.44 0.12 155); }
+.auth-alt { margin-top: 24px; text-align: center; font-size: 14px; color: var(--ink-3); }
+.auth-alt a { color: var(--accent); text-decoration: none; font-weight: 500; }
+.auth-alt a:hover { text-decoration: underline; }
+
+.acct-id { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 8px; }
+.acct-handle { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.acct-email { margin-top: 3px; font-size: 13.5px; color: var(--ink-3); }
+.acct-role {
+  font-family: var(--font-mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--accent); background: var(--accent-soft); padding: 5px 12px; border-radius: 999px;
+}
+.acct-h2 {
+  font-size: 15px; font-weight: 600; color: var(--ink);
+  margin: 30px 0 4px; padding-top: 24px; border-top: 1px solid var(--line);
+}
+.acct-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 34px; padding-top: 22px; border-top: 1px solid var(--line); }
+.acct-foot .btn { width: auto; margin: 0; }
+.acct-danger { font-family: var(--font-sans); font-size: 14px; font-weight: 500; color: oklch(0.55 0.19 25); background: none; border: none; cursor: pointer; padding: 8px 4px; }
+.acct-danger:hover { text-decoration: underline; }
+
+.device-code { font-family: var(--font-mono); font-size: 20px; letter-spacing: 0.16em; text-transform: uppercase; text-align: center; }
+.device-meta { margin-top: 16px; text-align: center; font-size: 13.5px; color: var(--ink-2); }
+.device-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 18px; }
+.device-actions .btn { width: 100%; margin: 0; }

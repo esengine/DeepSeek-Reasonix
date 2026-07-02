@@ -10,6 +10,7 @@ import (
 	"embed"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 
 	"github.com/wailsapp/wails/v2"
@@ -102,10 +103,17 @@ func main() {
 		}
 	}
 
+	// Restore saved desktop zoom factor (WebView2 ZoomFactor), or default to 1.0.
+	zoomFactor := 1.0
+	if zf, ok := loadZoomFactor(); ok && zf > 0 {
+		zoomFactor = zf
+	}
+
 	err := wails.Run(&options.App{
 		Title:     "Reasonix",
 		Width:     width,
 		Height:    height,
+		Frameless: goruntime.GOOS == "windows",
 		MinWidth:  760,
 		MinHeight: 480,
 		// Match the dark UI shell so the initial webview background doesn't flash
@@ -144,6 +152,7 @@ func main() {
 			// Follow the OS theme so the title bar matches light/dark system
 			// preference instead of being locked to dark.
 			Theme:                windows.SystemDefault,
+			ZoomFactor:           zoomFactor,
 			WebviewGpuIsDisabled: windowsWebview2GPUDisabled(),
 		},
 		Linux: &linux.Options{

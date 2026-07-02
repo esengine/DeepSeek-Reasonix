@@ -106,7 +106,10 @@ func TestRunUsesMemoryCompilerContractAsUserTurn(t *testing.T) {
 	seed.Finish(nil)
 
 	mp := testutil.NewMock("m", testutil.Turn{Text: "done"})
-	a := New(mp, echoRegistry(), NewSession(""), Options{MemoryCompiler: rt}, event.Discard)
+	a := New(mp, echoRegistry(), NewSession(""), Options{
+		MemoryCompiler:          rt,
+		MemoryCompilerVerbosity: MemoryCompilerVerbosityCompact,
+	}, event.Discard)
 	if err := a.Run(context.Background(), "continue work"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -132,6 +135,45 @@ func TestRunUsesMemoryCompilerContractAsUserTurn(t *testing.T) {
 	}
 }
 
+func TestRunMemoryCompilerDefaultsToObserveMode(t *testing.T) {
+	rt := memorycompiler.New(t.TempDir())
+	_, seed := rt.StartTurn(context.Background(), "fix a bug", nil)
+	seed.RecordToolResults([]memorycompiler.ToolRecord{
+		{Name: "bash", Output: "tests passed"},
+	})
+	seed.Finish(nil)
+
+	mp := testutil.NewMock("m", testutil.Turn{Text: "done"})
+	var stats []event.MemoryCompilerStats
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind == event.MemoryCompilerStatsEvent && e.MemoryCompiler != nil {
+			stats = append(stats, *e.MemoryCompiler)
+		}
+	})
+	a := New(mp, echoRegistry(), NewSession(""), Options{MemoryCompiler: rt}, sink)
+	if err := a.Run(context.Background(), "continue work"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	reqs := mp.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("requests = %d, want 1", len(reqs))
+	}
+	user := lastUserMessageFromRequest(t, reqs[0])
+	if user.Content != "continue work" {
+		t.Fatalf("observe mode should preserve raw user input, got:\n%s", user.Content)
+	}
+	if strings.Contains(user.Content, "<memory-compiler-execution>") {
+		t.Fatalf("observe mode exposed Memory v5 contract:\n%s", user.Content)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("memory compiler stats events = %d, want 1", len(stats))
+	}
+	if stats[0].Injected || !stats[0].UsefulIR || stats[0].CompiledTokens != 0 {
+		t.Fatalf("observe mode stats should be useful but not injected: %+v", stats[0])
+	}
+}
+
 func TestRunCompilesMemoryGoalFromRawInputBeforeReasoningLanguage(t *testing.T) {
 	rt := memorycompiler.New(t.TempDir())
 	_, seed := rt.StartTurn(context.Background(), "fix a bug", nil)
@@ -142,7 +184,10 @@ func TestRunCompilesMemoryGoalFromRawInputBeforeReasoningLanguage(t *testing.T) 
 	seed.Finish(nil)
 
 	mp := testutil.NewMock("m", testutil.Turn{Text: "done"})
-	a := New(mp, echoRegistry(), NewSession(""), Options{MemoryCompiler: rt}, event.Discard)
+	a := New(mp, echoRegistry(), NewSession(""), Options{
+		MemoryCompiler:          rt,
+		MemoryCompilerVerbosity: MemoryCompilerVerbosityCompact,
+	}, event.Discard)
 	a.SetReasoningLanguage("zh")
 	if err := a.Run(context.Background(), "fix another bug"); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -179,7 +224,10 @@ func TestRunCompilesMemorySourceFromUnexpandedContext(t *testing.T) {
 			stats = append(stats, *e.MemoryCompiler)
 		}
 	})
-	a := New(mp, echoRegistry(), NewSession(""), Options{MemoryCompiler: rt}, sink)
+	a := New(mp, echoRegistry(), NewSession(""), Options{
+		MemoryCompiler:          rt,
+		MemoryCompilerVerbosity: MemoryCompilerVerbosityCompact,
+	}, sink)
 	ctx := WithMemoryCompilerSourceInput(context.Background(), raw)
 	if err := a.Run(ctx, expanded); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -260,7 +308,10 @@ func TestRunThrottlesMemoryCompilerInjectionButKeepsLearning(t *testing.T) {
 			stats = append(stats, *e.MemoryCompiler)
 		}
 	})
-	a := New(mp, echoRegistry(), NewSession(""), Options{MemoryCompiler: rt}, sink)
+	a := New(mp, echoRegistry(), NewSession(""), Options{
+		MemoryCompiler:          rt,
+		MemoryCompilerVerbosity: MemoryCompilerVerbosityCompact,
+	}, sink)
 
 	if err := a.Run(context.Background(), "fix first prompt"); err != nil {
 		t.Fatalf("first Run: %v", err)
@@ -524,7 +575,10 @@ func TestClassifierUsesMemoryV5ForTask(t *testing.T) {
 			stats = append(stats, *e.MemoryCompiler)
 		}
 	})
-	a := New(mp, echoRegistry(), NewSession(""), Options{MemoryCompiler: rt}, sink)
+	a := New(mp, echoRegistry(), NewSession(""), Options{
+		MemoryCompiler:          rt,
+		MemoryCompilerVerbosity: MemoryCompilerVerbosityCompact,
+	}, sink)
 
 	// 发送没有命令式动词但明显需要处理的问题描述
 	if err := a.Run(context.Background(), "the auth isn't working"); err != nil {
@@ -567,7 +621,10 @@ func TestTaskClassifierResultControlsMemoryV5Injection(t *testing.T) {
 	seed.Finish(nil)
 
 	mp := testutil.NewMock("m", testutil.Turn{Text: "done"})
-	a := New(mp, echoRegistry(), NewSession(""), Options{MemoryCompiler: rt}, event.Discard)
+	a := New(mp, echoRegistry(), NewSession(""), Options{
+		MemoryCompiler:          rt,
+		MemoryCompilerVerbosity: MemoryCompilerVerbosityCompact,
+	}, event.Discard)
 	a.classifier = fixedTaskClassifier{isTask: true}
 
 	if err := a.Run(context.Background(), "please look into this"); err != nil {

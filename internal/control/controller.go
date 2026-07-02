@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/autoresearch"
 	"reasonix/internal/billing"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/command"
@@ -123,7 +125,8 @@ type Controller struct {
 	// goals owns the active goal's FSM (status, intercepts, idle/turn counters)
 	// and its persistence, behind its own mutex so a per-turn goal save never
 	// stalls an approval or status poll on c.mu. See goal.go.
-	goals goalMachine
+	goals        goalMachine
+	autoResearch *autoresearch.Store
 
 	// workspaceRoot is the workspace root: the base for resolving @-refs and slash
 	// path refs, the working directory for user "!" shell commands and custom
@@ -192,6 +195,16 @@ type pendingApproval struct {
 type pendingAsk struct {
 	questions []event.AskQuestion
 	reply     chan []event.AskAnswer
+}
+
+type AutoResearchEvidenceInput struct {
+	ID       string
+	Kind     string
+	Summary  string
+	Source   string
+	Command  string
+	Paths    []string
+	Accepted bool
 }
 
 type plannerSessionResetter interface {
@@ -374,6 +387,9 @@ func New(opts Options) *Controller {
 		externalFolderToolRefs:     opts.ExternalFolderToolRefs,
 		approval:                   newApprovalManager(opts.Policy, ToolApprovalAsk, opts.ApprovalTimeout),
 	}
+	if strings.TrimSpace(opts.WorkspaceRoot) != "" {
+		c.autoResearch = autoresearch.NewStore(opts.WorkspaceRoot)
+	}
 	// Checkpoints: bind a store to the session and route writer pre-edits into it.
 	c.rebindCheckpoints(opts.SessionPath)
 	c.setActiveJobSession(opts.SessionPath)
@@ -435,6 +451,29 @@ func (c *Controller) recordDisplayForNewUser(startMessages int, display string) 
 			c.recordDisplay(m.Content, display)
 			return
 		}
+	}
+}
+
+func (c *Controller) markEditedForNewUser(startMessages int, original string) {
+	if strings.TrimSpace(original) == "" || c.executor == nil {
+		return
+	}
+	s := c.executor.Session()
+	msgs := s.Snapshot()
+	if startMessages > len(msgs) {
+		startMessages = len(msgs)
+	}
+	for i := startMessages; i < len(msgs); i++ {
+		if msgs[i].Role != provider.RoleUser {
+			continue
+		}
+		if msgs[i].Content == original {
+			return
+		}
+		msgs[i].Edited = true
+		msgs[i].Original = original
+		s.Replace(msgs)
+		return
 	}
 }
 
@@ -584,6 +623,10 @@ func (c *Controller) runGoalLoopWithRawDisplay(ctx context.Context, input, raw, 
 	return newTurnOrchestrator(c).runGoalLoopWithRawDisplay(ctx, input, raw, display)
 }
 
+func (c *Controller) runEditedGoalLoopWithRawDisplay(ctx context.Context, input, raw, display, original string) error {
+	return newTurnOrchestrator(c).runEditedGoalLoopWithRawDisplay(ctx, input, raw, display, original)
+}
+
 func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input, raw, display string) error {
 	return newTurnOrchestrator(c).runTurnWithRawDisplay(ctx, input, raw, display)
 }
@@ -630,7 +673,7 @@ func lastAssistantText(msgs []provider.Message) string {
 // resolve to a turn; an unknown slash emits a Notice. Anything else is a normal
 // turn with its @-references resolved first.
 func (c *Controller) Submit(input string) {
-	c.submit(input, "")
+	c.submit(input, "", "")
 }
 
 // SubmitHTTP accepts input from the unauthenticated localhost HTTP frontend. It
@@ -643,7 +686,14 @@ func (c *Controller) SubmitHTTP(input string) {
 // SubmitDisplay runs input as a turn while remembering the user-facing display
 // text for transcript replay when controller-side composition expands input.
 func (c *Controller) SubmitDisplay(display, input string) {
-	c.submit(input, display)
+	c.submit(input, display, "")
+}
+
+// SubmitEditedDisplay is SubmitDisplay for an inline-edited prompt. The model
+// sees input; the saved user message also keeps the pre-edit prompt as local UI
+// metadata so the edit survives session rewrites.
+func (c *Controller) SubmitEditedDisplay(display, input, original string) {
+	c.submit(input, display, original)
 }
 
 // SubmitUserTurn starts a normal model turn without interpreting shell or slash
@@ -653,7 +703,7 @@ func (c *Controller) SubmitUserTurn(input, display string) {
 	c.runRefTurn(input, display)
 }
 
-func (c *Controller) submit(input, display string) {
+func (c *Controller) submit(input, display, editedOriginal string) {
 	trimmed := strings.TrimSpace(input)
 	if note, ok := MemoryQuickAddNote(trimmed); ok {
 		c.rememberProjectNote(note)
@@ -670,7 +720,7 @@ func (c *Controller) submit(input, display string) {
 		c.RunShell(trimmed[1:])
 		return
 	}
-	c.submitCommandOrTurn(trimmed, input, display, false)
+	c.submitCommandOrTurn(trimmed, input, display, false, editedOriginal)
 }
 
 func (c *Controller) submitHTTP(input, display string) {
@@ -690,15 +740,27 @@ func (c *Controller) submitHTTP(input, display string) {
 		c.notice("shell commands are unavailable from this frontend")
 		return
 	}
-	c.submitCommandOrTurn(trimmed, input, display, true)
+	c.submitCommandOrTurn(trimmed, input, display, true, "")
 }
 
-func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedRefsOnly bool) {
+func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedRefsOnly bool, editedOriginal string) {
 	runRefTurn := c.runRefTurn
 	runRefTurnWithRefs := c.runRefTurnWithRefs
+	runGoalLoop := c.runGoalLoopWithRawDisplay
 	if scopedRefsOnly {
 		runRefTurn = c.runScopedRefTurn
 		runRefTurnWithRefs = c.runScopedRefTurnWithRefs
+	}
+	if strings.TrimSpace(editedOriginal) != "" {
+		runRefTurn = func(input, display string) {
+			c.runEditedRefTurn(input, display, editedOriginal)
+		}
+		runRefTurnWithRefs = func(input, refLine, display string) {
+			c.runEditedRefTurnWithRefs(input, refLine, display, editedOriginal)
+		}
+		runGoalLoop = func(ctx context.Context, input, raw, display string) error {
+			return c.runEditedGoalLoopWithRawDisplay(ctx, input, raw, display, editedOriginal)
+		}
 	}
 	switch {
 	case trimmed == "/compact" || strings.HasPrefix(trimmed, "/compact "):
@@ -739,7 +801,7 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 				c.notice("unknown command: " + trimmed)
 				return nil
 			}
-			return c.runGoalLoopWithRawDisplay(ctx, sent, sent, display)
+			return runGoalLoop(ctx, sent, sent, display)
 		})
 	case strings.HasPrefix(trimmed, "//"):
 		// Double-slash — not a command. Common in code snippets (JS
@@ -811,26 +873,26 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 		// turn. (Built-in slash verbs like /compact are handled above.)
 		if sent, ok := c.CustomCommand(trimmed); ok {
 			c.runGuarded(func(ctx context.Context) error {
-				return c.runGoalLoopWithRawDisplay(ctx, sent, sent, display)
+				return runGoalLoop(ctx, sent, sent, display)
 			})
 			return
 		}
 		if sent, ok := c.RunSkill(trimmed); ok {
 			c.runGuarded(func(ctx context.Context) error {
-				return c.runGoalLoopWithRawDisplay(ctx, sent, sent, display)
+				return runGoalLoop(ctx, sent, sent, display)
 			})
 			return
 		}
 		c.notice("unknown command: " + trimmed)
 	default:
-		if c.maybeAutoStartResearchGoal(input, display) {
+		if c.maybeAutoStartResearchGoal(input, display, editedOriginal) {
 			return
 		}
 		runRefTurn(input, display)
 	}
 }
 
-func (c *Controller) maybeAutoStartResearchGoal(input, display string) bool {
+func (c *Controller) maybeAutoStartResearchGoal(input, display, editedOriginal string) bool {
 	goal, ok := c.autoStartResearchGoalCandidate(input)
 	if !ok {
 		return false
@@ -850,6 +912,9 @@ func (c *Controller) maybeAutoStartResearchGoal(input, display string) bool {
 			sent := "Start pursuing the active goal now."
 			if block != "" {
 				sent = "Referenced context:\n\n" + block + "\n\n" + sent
+			}
+			if strings.TrimSpace(editedOriginal) != "" {
+				return c.runEditedGoalLoopWithRawDisplay(ctx, sent, goal, displayText, editedOriginal)
 			}
 			return c.runGoalLoopWithRawDisplay(ctx, sent, goal, displayText)
 		})
@@ -1142,6 +1207,10 @@ func (c *Controller) runRefTurn(input, display string) {
 	c.runRefTurnWithRefs(input, input, display)
 }
 
+func (c *Controller) runEditedRefTurn(input, display, original string) {
+	c.runEditedRefTurnWithRefs(input, input, display, original)
+}
+
 func (c *Controller) runScopedRefTurn(input, display string) {
 	c.runScopedRefTurnWithRefs(input, input, display)
 }
@@ -1153,22 +1222,39 @@ func (c *Controller) runRefTurnWithRefs(input, refLine, display string) {
 	c.runRefTurnWithResolver(input, refLine, display, c.ResolveRefs)
 }
 
+func (c *Controller) runEditedRefTurnWithRefs(input, refLine, display, original string) {
+	c.runEditedRefTurnWithResolver(input, refLine, display, original, c.ResolveRefs)
+}
+
 func (c *Controller) runScopedRefTurnWithRefs(input, refLine, display string) {
 	c.runRefTurnWithResolver(input, refLine, display, c.ResolveScopedRefs)
 }
 
 func (c *Controller) runRefTurnWithResolver(input, refLine, display string, resolve func(context.Context, string) (string, []string)) {
 	c.runGuarded(func(ctx context.Context) error {
-		block, errs := resolve(ctx, refLine)
-		for _, e := range errs {
-			c.notice(e)
-		}
-		sent := input
-		if block != "" {
-			sent = "Referenced context:\n\n" + block + "\n\n" + input
-		}
-		return c.runGoalLoopWithRawDisplay(ctx, sent, input, display)
+		return c.runRefTurnWithResolverSync(ctx, input, refLine, display, "", resolve)
 	})
+}
+
+func (c *Controller) runEditedRefTurnWithResolver(input, refLine, display, original string, resolve func(context.Context, string) (string, []string)) {
+	c.runGuarded(func(ctx context.Context) error {
+		return c.runRefTurnWithResolverSync(ctx, input, refLine, display, original, resolve)
+	})
+}
+
+func (c *Controller) runRefTurnWithResolverSync(ctx context.Context, input, refLine, display, original string, resolve func(context.Context, string) (string, []string)) error {
+	block, errs := resolve(ctx, refLine)
+	for _, e := range errs {
+		c.notice(e)
+	}
+	sent := input
+	if block != "" {
+		sent = "Referenced context:\n\n" + block + "\n\n" + input
+	}
+	if strings.TrimSpace(original) != "" {
+		return c.runEditedGoalLoopWithRawDisplay(ctx, sent, input, display, original)
+	}
+	return c.runGoalLoopWithRawDisplay(ctx, sent, input, display)
 }
 
 // notice emits an informational Notice event.
@@ -1465,6 +1551,13 @@ func (c *Controller) SetMemoryCompilerEnabled(enabled bool) {
 	c.executor.SetMemoryCompiler(rt)
 }
 
+func (c *Controller) SetMemoryCompilerVerbosity(verbosity string) {
+	if c == nil || c.executor == nil {
+		return
+	}
+	c.executor.SetMemoryCompilerVerbosity(verbosity)
+}
+
 // PlanMode reports whether outgoing turns currently receive the plan-mode
 // marker. Frontends use it after Compose because auto-plan may flip the mode.
 func (c *Controller) PlanMode() bool {
@@ -1489,8 +1582,343 @@ func (c *Controller) SetGoal(goal string) {
 }
 
 func (c *Controller) SetGoalWithResearchMode(goal string, researchMode GoalResearchMode) {
-	path, data, ok := c.goals.set(goal, researchMode, c.goalTodos())
+	taskID, blockReason := c.ensureAutoResearchTask(goal, researchMode)
+	path, data, ok := c.goals.set(goal, researchMode, taskID, c.goalTodos())
 	c.persistGoalState(path, data, ok)
+	if blockReason != "" {
+		path, data, ok := c.goals.stop(GoalStatusBlocked, c.goalTodos())
+		c.persistGoalState(path, data, ok)
+		c.notice("autoresearch resume failed: " + blockReason)
+	}
+}
+
+func (c *Controller) ensureAutoResearchTask(goal string, researchMode GoalResearchMode) (string, string) {
+	goal = strings.TrimSpace(goal)
+	if goal == "" || c.autoResearch == nil || !shouldUseAutoResearch(goal, researchMode) {
+		return "", ""
+	}
+	currentGoal, currentStatus, _, currentTaskID := c.goals.snapshot()
+	if strings.TrimSpace(currentGoal) == goal && currentStatus == GoalStatusRunning && strings.TrimSpace(currentTaskID) != "" {
+		return currentTaskID, ""
+	}
+	if task, ok, err := c.autoResearch.ResumeFromGoalText(goal); err != nil {
+		slog.Warn("controller: resume autoresearch task", "err", err)
+		if ok {
+			return "", err.Error()
+		}
+	} else if ok {
+		c.notice("autoresearch task resumed: " + task.ID)
+		return task.ID, ""
+	}
+	task, err := c.autoResearch.CreateTask(goal, autoresearch.CreateOptions{
+		AllowedOperations: autoresearch.AllowedOperations{
+			Write:   true,
+			Network: false,
+			Publish: false,
+		},
+		SuccessCriteria: defaultAutoResearchSuccessCriteria(),
+	})
+	if err != nil {
+		slog.Warn("controller: create autoresearch task", "err", err)
+		return "", ""
+	}
+	c.notice("autoresearch task created: " + task.ID)
+	return task.ID, ""
+}
+
+func defaultAutoResearchSuccessCriteria() []autoresearch.SuccessCriterion {
+	return []autoresearch.SuccessCriterion{
+		{
+			ID:          "objective_evidence",
+			Description: "The goal outcome is supported by direct evidence, such as inspected code, reproduced behavior, source material, or concrete findings.",
+			Required:    true,
+		},
+		{
+			ID:          "verification",
+			Description: "The result has relevant verification evidence, such as tests, commands, benchmarks, manual checks, or a documented reason why verification is not applicable.",
+			Required:    true,
+		},
+	}
+}
+
+func (c *Controller) appendAutoResearchHeartbeat(taskID, status, message string) {
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return
+	}
+	iteration := 0
+	if summary, err := c.autoResearch.Summary(taskID); err == nil {
+		iteration = summary.Iteration
+	}
+	if err := c.autoResearch.AppendHeartbeat(taskID, autoresearch.Heartbeat{
+		Status:    status,
+		Iteration: iteration,
+		Message:   message,
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		slog.Warn("controller: append autoresearch heartbeat", "task_id", taskID, "status", status, "err", err)
+	}
+}
+
+func (c *Controller) autoResearchAcceptedEvidenceIDs(taskID string) map[string]bool {
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return nil
+	}
+	findings, err := c.autoResearch.Findings(taskID, 0)
+	if err != nil {
+		slog.Warn("controller: read autoresearch findings", "task_id", taskID, "err", err)
+		return nil
+	}
+	accepted := make(map[string]bool, len(findings))
+	for _, finding := range findings {
+		if finding.Accepted {
+			accepted[finding.ID] = true
+		}
+	}
+	return accepted
+}
+
+func (c *Controller) recordAutoResearchTurnProgress(taskID string, acceptedBefore map[string]bool) {
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return
+	}
+	acceptedAfter := c.autoResearchAcceptedEvidenceIDs(taskID)
+	newAccepted := make([]string, 0)
+	for id := range acceptedAfter {
+		if acceptedBefore == nil || !acceptedBefore[id] {
+			newAccepted = append(newAccepted, id)
+		}
+	}
+	sort.Strings(newAccepted)
+	summary := autoResearchDirectionSummary(lastAssistantText(c.History()))
+	if _, err := c.autoResearch.RecordDirection(taskID, autoresearch.Direction{
+		Summary:             summary,
+		AcceptedEvidenceIDs: newAccepted,
+		Now:                 time.Now().UTC(),
+	}); err != nil {
+		slog.Warn("controller: record autoresearch direction", "task_id", taskID, "err", err)
+	}
+}
+
+func (c *Controller) recordAutoResearchEvidenceFromAssistant(taskID, text string) {
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return
+	}
+	for _, item := range parseAutoResearchEvidenceBlocks(text) {
+		if err := c.recordAutoResearchEvidenceForTask(taskID, item.CriterionID, AutoResearchEvidenceInput{
+			ID:       item.ID,
+			Kind:     item.Kind,
+			Summary:  item.Summary,
+			Source:   item.Source,
+			Command:  item.Command,
+			Paths:    append([]string(nil), item.Paths...),
+			Accepted: item.Accepted,
+		}); err != nil {
+			slog.Warn("controller: record autoresearch evidence block", "task_id", taskID, "criterion_id", item.CriterionID, "err", err)
+		}
+	}
+}
+
+type autoResearchEvidenceBlock struct {
+	CriterionID string   `json:"criterion_id"`
+	ID          string   `json:"id"`
+	Kind        string   `json:"kind"`
+	Summary     string   `json:"summary"`
+	Source      string   `json:"source"`
+	Command     string   `json:"command"`
+	Paths       []string `json:"paths"`
+	Accepted    bool     `json:"accepted"`
+}
+
+const (
+	autoResearchEvidenceOpen  = "<autoresearch-evidence>"
+	autoResearchEvidenceClose = "</autoresearch-evidence>"
+)
+
+func parseAutoResearchEvidenceBlocks(text string) []autoResearchEvidenceBlock {
+	var out []autoResearchEvidenceBlock
+	rest := text
+	for {
+		start := strings.Index(rest, autoResearchEvidenceOpen)
+		if start < 0 {
+			return out
+		}
+		rest = rest[start+len(autoResearchEvidenceOpen):]
+		end := strings.Index(rest, autoResearchEvidenceClose)
+		if end < 0 {
+			return out
+		}
+		raw := strings.TrimSpace(rest[:end])
+		rest = rest[end+len(autoResearchEvidenceClose):]
+		if raw == "" {
+			continue
+		}
+		var many []autoResearchEvidenceBlock
+		if err := json.Unmarshal([]byte(raw), &many); err == nil {
+			out = append(out, many...)
+			continue
+		}
+		var one autoResearchEvidenceBlock
+		if err := json.Unmarshal([]byte(raw), &one); err == nil {
+			out = append(out, one)
+		}
+	}
+}
+
+func autoResearchDirectionSummary(text string) string {
+	text = stripAutoResearchEvidenceBlocks(text)
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		lower := strings.ToLower(line)
+		if line == "" || strings.HasPrefix(lower, "[goal:") {
+			continue
+		}
+		if len(line) > 160 {
+			line = line[:160]
+		}
+		return line
+	}
+	return "turn completed"
+}
+
+func stripAutoResearchEvidenceBlocks(text string) string {
+	var b strings.Builder
+	rest := text
+	for {
+		start := strings.Index(rest, autoResearchEvidenceOpen)
+		if start < 0 {
+			b.WriteString(rest)
+			return b.String()
+		}
+		b.WriteString(rest[:start])
+		afterOpen := rest[start+len(autoResearchEvidenceOpen):]
+		end := strings.Index(afterOpen, autoResearchEvidenceClose)
+		if end < 0 {
+			return b.String()
+		}
+		rest = afterOpen[end+len(autoResearchEvidenceClose):]
+	}
+}
+
+func (c *Controller) autoResearchReadinessFailure() string {
+	taskID := c.goals.currentAutoResearchTaskID()
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return ""
+	}
+	report, err := c.autoResearch.Readiness(taskID)
+	if err != nil {
+		return "AutoResearch readiness check failed: " + err.Error()
+	}
+	if report.Ready {
+		return ""
+	}
+	var parts []string
+	if len(report.MissingCriteria) > 0 {
+		parts = append(parts, "missing criteria: "+strings.Join(report.MissingCriteria, ", "))
+	}
+	if report.BlockedReason != "" {
+		parts = append(parts, "blocked: "+report.BlockedReason)
+	}
+	if len(report.Errors) > 0 {
+		parts = append(parts, "state errors: "+strings.Join(report.Errors, "; "))
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "task is not ready")
+	}
+	return "AutoResearch readiness check failed: " + strings.Join(parts, "; ")
+}
+
+func (c *Controller) AutoResearchSummary() (*autoresearch.Summary, bool) {
+	taskID := c.goals.currentAutoResearchTaskID()
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return nil, false
+	}
+	summary, err := c.autoResearch.Summary(taskID)
+	if err != nil {
+		return &autoresearch.Summary{
+			TaskID:  taskID,
+			Status:  autoresearch.StatusInvalid,
+			Blocker: err.Error(),
+		}, true
+	}
+	return summary, true
+}
+
+func (c *Controller) AutoResearchList() ([]autoresearch.Summary, bool) {
+	if c.autoResearch == nil {
+		return nil, false
+	}
+	summaries, err := c.autoResearch.ListSummaries()
+	if err != nil {
+		slog.Warn("controller: list autoresearch tasks", "err", err)
+		return nil, true
+	}
+	return summaries, true
+}
+
+func (c *Controller) AutoResearchFindings(limit int) ([]autoresearch.Finding, bool) {
+	taskID := c.goals.currentAutoResearchTaskID()
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return nil, false
+	}
+	findings, err := c.autoResearch.Findings(taskID, limit)
+	if err != nil {
+		return nil, true
+	}
+	return findings, true
+}
+
+func (c *Controller) RecordAutoResearchEvidence(criterionID string, input AutoResearchEvidenceInput) error {
+	taskID := c.goals.currentAutoResearchTaskID()
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return errors.New("autoresearch: no active task")
+	}
+	return c.recordAutoResearchEvidenceForTask(taskID, criterionID, input)
+}
+
+func (c *Controller) recordAutoResearchEvidenceForTask(taskID, criterionID string, input AutoResearchEvidenceInput) error {
+	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+		return errors.New("autoresearch: no active task")
+	}
+	id := strings.TrimSpace(input.ID)
+	if id == "" {
+		id = c.nextAutoResearchFindingID(taskID)
+	}
+	kind := strings.TrimSpace(input.Kind)
+	if kind == "" {
+		kind = autoresearch.FindingKindManual
+	}
+	source := strings.TrimSpace(input.Source)
+	if source == "" {
+		source = autoresearch.FindingSourceManual
+	}
+	finding := autoresearch.Finding{
+		ID:        id,
+		Kind:      kind,
+		Summary:   strings.TrimSpace(input.Summary),
+		Source:    source,
+		Command:   strings.TrimSpace(input.Command),
+		Paths:     append([]string(nil), input.Paths...),
+		Accepted:  input.Accepted,
+		CreatedAt: time.Now().UTC(),
+	}
+	return c.autoResearch.RecordEvidence(taskID, criterionID, finding)
+}
+
+func (c *Controller) nextAutoResearchFindingID(taskID string) string {
+	findings, err := c.autoResearch.Findings(taskID, 0)
+	if err != nil {
+		return fmt.Sprintf("f%d", time.Now().UTC().UnixNano())
+	}
+	used := make(map[string]bool, len(findings))
+	for _, finding := range findings {
+		used[finding.ID] = true
+	}
+	for i := 1; ; i++ {
+		id := fmt.Sprintf("f%d", len(findings)+i)
+		if !used[id] {
+			return id
+		}
+	}
 }
 
 func (c *Controller) ClearGoal() {
@@ -2039,6 +2467,7 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 	c.mu.Unlock()
 	c.setActiveJobSession(path)
 	c.rebindCheckpoints(path)
+	c.goals.restoreRunningFromState(path)
 	c.restoreTerminalGoalTodos(path)
 	c.loadGuardianSession()
 	c.recoverInterruptedTurn(path)
@@ -2162,6 +2591,18 @@ func (c *Controller) snapshot(markActivity bool) error {
 	if !s.HasContent() {
 		// Nothing to persist yet (e.g. a fresh session with only a system
 		// prompt) — staying quiet here is correct, not a data-loss path.
+		return nil
+	}
+	if !s.HasSystemMessage() {
+		// The session has user/assistant/tool messages but no leading system
+		// prompt.  Persisting it would create a session file that, when
+		// reloaded, has no agent-identity contract — the model falls back to
+		// its training-data defaults, giving wrong answers to identity
+		// queries ("who are you?").  Log the anomaly so the root cause
+		// (typically an empty sysPrompt reaching NewSession) can be
+		// diagnosed, then refuse to write a corrupted transcript.
+		slog.Warn("controller: refusing to snapshot session with content but no system message",
+			"label", c.Label(), "session_dir", c.SessionDir(), "message_count", len(s.Snapshot()))
 		return nil
 	}
 	if path == "" {

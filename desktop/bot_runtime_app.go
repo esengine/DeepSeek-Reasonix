@@ -258,3 +258,63 @@ func (r *desktopBotRuntime) updateConnectionToolApprovalMode(connID, mode string
 	r.gw.UpdateConnectionToolApprovalMode(connID, mode)
 	return true
 }
+
+// SendToAdapter sends a message through the running gateway's adapter
+// identified by connID. Returns an error if the gateway is not running
+// or no matching adapter is found.
+func (r *desktopBotRuntime) SendToAdapter(ctx context.Context, connID, domain string, msg bot.OutboundMessage) (bot.SendResult, error) {
+	r.mu.Lock()
+	gw := r.gw
+	r.mu.Unlock()
+	if gw == nil {
+		return bot.SendResult{}, nil // gateway not running — silent no-op
+	}
+	return gw.SendToAdapter(ctx, connID, domain, msg)
+}
+
+// Running returns true if the bot gateway is currently active.
+func (r *desktopBotRuntime) Running() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.gw != nil
+}
+
+// ForwardTargets returns the list of bot forward targets derived from the
+// current config's bot connections and their session mappings. Each mapping
+// produces one target (connID + chatID + chatType) for event forwarding.
+func (r *desktopBotRuntime) ForwardTargets(cfg *config.Config) []botForwardTarget {
+	if cfg == nil {
+		return nil
+	}
+	var targets []botForwardTarget
+	seen := make(map[botForwardTarget]bool)
+	for _, conn := range cfg.Bot.Connections {
+		if !conn.Enabled {
+			continue
+		}
+		connID := botruntime.ConnectionRuntimeID(conn)
+		domain := strings.TrimSpace(conn.Domain)
+		for _, sm := range conn.SessionMappings {
+			remoteID := strings.TrimSpace(sm.RemoteID)
+			if remoteID == "" {
+				continue
+			}
+			chatType := bot.ChatDM
+			if sm.ChatType != "" {
+				chatType = bot.ChatType(sm.ChatType)
+			}
+			target := botForwardTarget{
+				ConnID:   connID,
+				Domain:   domain,
+				ChatID:   remoteID,
+				ChatType: chatType,
+			}
+			if seen[target] {
+				continue
+			}
+			seen[target] = true
+			targets = append(targets, target)
+		}
+	}
+	return targets
+}

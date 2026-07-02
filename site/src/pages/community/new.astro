@@ -1,0 +1,28 @@
+---
+import Community from "../../layouts/Community.astro";
+---
+<Community title="New topic — Reasonix Community" description="Start a discussion on the Reasonix community forum.">
+  <div class="wrap" style="padding-top:32px;max-width:820px">
+    <div class="crumb"><a href="/community/">Community</a><span class="sep">/</span><span><span class="l-en">New topic</span><span class="l-zh">发起话题</span></span></div>
+    <h1 style="font-size:28px;font-weight:600;letter-spacing:-0.02em;margin-bottom:6px"><span class="l-en">Start a discussion</span><span class="l-zh">发起讨论</span></h1>
+
+    <div id="new-gate" hidden class="card cta" style="margin-top:18px">
+      <h4><span class="l-en">Sign in to post</span><span class="l-zh">登录后发帖</span></h4>
+      <p class="lead"><span class="l-en">You'll post with your Reasonix account. New here? Signing in creates one.</span><span class="l-zh">用你的 Reasonix 账号发帖。还没有账号？登录即创建。</span></p>
+      <a class="btn btn-primary" id="gate-login" href="#"><span class="l-en">Sign in</span><span class="l-zh">登录</span></a>
+    </div>
+
+    <div id="new-form" hidden>
+      <div class="msg error" id="new-msg" hidden></div>
+      <div class="composer">
+        <input class="title" id="f-title" maxlength="160" data-ph-en="Topic title — be specific" data-ph-zh="话题标题 —— 尽量具体" />
+        <textarea id="f-body" data-ph-en="Write your post… Markdown and ``` code blocks supported." data-ph-zh="写下内容… 支持 Markdown 和 ``` 代码块。"></textarea>
+        <div class="foot">
+          <select id="f-category"><option value="" data-l-en="Choose a category…" data-l-zh="选择分区…">Choose a category…</option></select>
+          <button class="btn btn-primary" id="f-submit"><span class="l-en">Post topic</span><span class="l-zh">发布话题</span></button>
+        </div>
+      </div>
+      <p class="lead" style="margin-top:14px"><span class="l-en">Please search before posting, keep it on-topic, and format code in fenced blocks. New accounts can't post links until they've participated a little.</span><span class="l-zh">发帖前请先搜索、保持切题、代码放进围栏块。新账号需参与一段时间后才能发链接。</span></p>
+    </div>
+  </div>
+</Community>

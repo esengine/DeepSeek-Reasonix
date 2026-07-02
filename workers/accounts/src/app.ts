@@ -5,6 +5,7 @@ import { loadUser } from "./http/auth";
 import { errorHandler, notFoundHandler } from "./http/errors";
 import health from "./routes/health";
 import auth from "./routes/auth";
+import device from "./routes/device";
 import me from "./routes/me";
 import users from "./routes/users";
 
@@ -18,6 +19,7 @@ app.use("*", loadUser);
 
 app.route("/", health);
 app.route("/auth", auth);
+app.route("/device", device);
 app.route("/me", me);
 app.route("/u", users);
 

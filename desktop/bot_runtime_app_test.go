@@ -63,6 +63,37 @@ func TestDesktopBotRuntimePlanStopsWhenBotDisabled(t *testing.T) {
 	}
 }
 
+func TestDesktopBotRuntimeForwardTargetsDeduplicatesMappedChats(t *testing.T) {
+	cfg := config.Default()
+	cfg.Bot.Connections = []config.BotConnectionConfig{{
+		ID:       "feishu-lark",
+		Provider: "feishu",
+		Domain:   "lark",
+		Enabled:  true,
+		SessionMappings: []config.BotConnectionSessionMapping{
+			{RemoteID: "oc-group-1", ChatType: string(bot.ChatGroup), UserID: "ou-user-1"},
+			{RemoteID: "oc-group-1", ChatType: string(bot.ChatGroup), UserID: "ou-user-2"},
+			{RemoteID: "oc-dm-1", ChatType: string(bot.ChatDM), UserID: "ou-user-1"},
+		},
+	}}
+
+	targets := newDesktopBotRuntime().ForwardTargets(cfg)
+	if len(targets) != 2 {
+		t.Fatalf("targets = %+v, want one group target plus one dm target", targets)
+	}
+	seen := map[string]bool{}
+	for _, target := range targets {
+		key := target.ConnID + "|" + target.Domain + "|" + target.ChatID + "|" + string(target.ChatType)
+		if seen[key] {
+			t.Fatalf("duplicate target %q in %+v", key, targets)
+		}
+		seen[key] = true
+	}
+	if !seen["feishu-lark|lark|oc-group-1|group"] || !seen["feishu-lark|lark|oc-dm-1|dm"] {
+		t.Fatalf("targets = %+v, want group and dm targets", targets)
+	}
+}
+
 func TestDesktopBotRuntimeConfigUsesUserBotSettings(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
