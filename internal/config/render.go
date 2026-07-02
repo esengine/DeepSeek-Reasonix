@@ -115,6 +115,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			fmt.Fprintf(&b, "provider_access = %s   # desktop settings: providers shown on Settings > Model > Access\n", renderStringArray(c.Desktop.ProviderAccess))
 		}
 		fmt.Fprintf(&b, "expand_thinking = %v   # desktop: show reasoning text expanded by default; false = collapsed\n", c.Desktop.ExpandThinking)
+		if c.Desktop.CentralizeProjectData {
+			b.WriteString("centralize_project_data = true   # store .reasonix data under Reasonix user data dir (keeps projects clean)\n")
+		} else {
+			b.WriteString("# centralize_project_data = true   # store .reasonix data under Reasonix user data dir (keeps projects clean)\n")
+		}
 		fmt.Fprintf(&b, "display_mode = %q   # desktop: standard|compact transcript display mode\n", c.DesktopDisplayMode())
 		b.WriteString("\n")
 

@@ -708,6 +708,8 @@ export const zhTW: Record<DictKey, string> = {
   "settings.autoPlan.on": "開啟",
   "settings.memoryCompiler": "Memory v5",
   "settings.memoryCompilerHint": "開啟執行型記憶編譯器，用歷史執行結果生成和優化下一步行動計畫。",
+  "settings.centralizeProjectData": "集中儲存專案數據",
+  "settings.centralizeProjectDataHint": "將 .reasonix 數據儲存到 Reasonix 用戶數據目錄，不在專案目錄下建立 .reasonix 資料夾，保持專案目錄乾淨。",
   "settings.agentRuntime": "Agent 執行",
   "settings.agentRuntimeHint": "輪數上限只認全域設定；專案裡的 ./reasonix.toml 不覆蓋。0 表示不限。",
   "settings.executorMaxSteps": "執行輪數上限",

@@ -302,6 +302,28 @@ func ProjectSessionDir(workspaceRoot string) string {
 	return filepath.Join(base, "projects", WorkspaceSlug(root), "sessions")
 }
 
+// ProjectDataRoot returns the directory root under which project-local data
+// (.reasonix, hooks, attachments) should be stored for the given workspaceRoot.
+//
+// When centralize is true, project data is stored under
+// <config root>/projects/<slug>/ so the project directory stays clean;
+// sessions and memory compiler already use this area. When false (default),
+// data is stored directly in workspaceRoot (current behaviour).
+func ProjectDataRoot(workspaceRoot string, centralize bool) string {
+	if !centralize {
+		return workspaceRoot
+	}
+	base := MemoryUserDir()
+	root := strings.TrimSpace(workspaceRoot)
+	if base == "" || root == "" {
+		return workspaceRoot
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	return filepath.Join(base, "projects", WorkspaceSlug(root))
+}
+
 // MemoryCompilerDir is the project-scoped state directory for the Memory v5
 // execution compiler. Empty means persistent compiler state is unavailable.
 func MemoryCompilerDir(workspaceRoot string) string {

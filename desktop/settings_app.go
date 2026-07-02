@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/autoresearch"
 	"reasonix/internal/boot"
 	"reasonix/internal/botruntime"
 	"reasonix/internal/config"
@@ -182,6 +183,7 @@ type SettingsView struct {
 	Metrics                 bool            `json:"metrics"`
 	MemoryCompiler          bool            `json:"memoryCompilerEnabled"`
 	ExpandThinking          bool            `json:"expandThinking"`
+	CentralizeProjectData   bool            `json:"centralizeProjectData"`
 	ConfigPath              string          `json:"configPath"`
 	// ProviderKinds lists the provider implementations the kernel actually
 	// registered (provider.Kinds()), so the editor's "kind" picker offers only
@@ -578,6 +580,7 @@ func (a *App) Settings() SettingsView {
 		Metrics:                 cfg.DesktopMetrics(),
 		MemoryCompiler:          cfg.MemoryCompilerEnabled(),
 		ExpandThinking:          cfg.Desktop.ExpandThinking,
+		CentralizeProjectData:   cfg.DesktopCentralizeProjectData(),
 		ConfigPath:              cfgPath,
 		ProviderKinds:           nonNil(provider.Kinds()),
 		AutoApproveTools:        ctrl != nil && ctrl.AutoApproveTools(),
@@ -1990,6 +1993,25 @@ func (a *App) SetDesktopMetrics(enabled bool) error {
 // the desktop. It is desktop-only and does not rebuild the controller.
 func (a *App) SetExpandThinking(on bool) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetExpandThinking(on) })
+}
+
+func (a *App) SetProjectStorage(centralize bool) error {
+	return a.applyConfigOnly(func(c *config.Config) error {
+		if err := c.SetDesktopCentralizeProjectData(centralize); err != nil {
+			return err
+		}
+		if c.DesktopCentralizeProjectData() {
+			fn := func(workspaceRoot string) string {
+				return config.ProjectDataRoot(workspaceRoot, true)
+			}
+			SetProjectDataRoot(fn)
+			autoresearch.SetProjectDataRootOverride(fn)
+		} else {
+			SetProjectDataRoot(nil)
+			autoresearch.SetProjectDataRootOverride(nil)
+		}
+		return nil
+	})
 }
 
 // MigrateDesktopPreferences imports old browser-local desktop preferences into

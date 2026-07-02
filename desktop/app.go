@@ -362,6 +362,17 @@ func (a *App) startup(ctx context.Context) {
 		a.recordSettingsMetricsSnapshot(cfg)
 	}
 
+	// Set up project data root override for centralized storage mode.
+	if cfg, err := config.Load(); err == nil {
+		if cfg.DesktopCentralizeProjectData() {
+			fn := func(workspaceRoot string) string {
+				return config.ProjectDataRoot(workspaceRoot, true)
+			}
+			SetProjectDataRoot(fn)
+			autoresearch.SetProjectDataRootOverride(fn)
+		}
+	}
+
 	a.heartbeat = newHeartbeatEngine(a)
 	a.heartbeat.Start()
 
@@ -7344,6 +7355,14 @@ func (a *App) withActiveWorkspace(fn func() (string, error)) (string, error) {
 
 func (a *App) withActiveWorkspaceDo(fn func() error) error {
 	root := a.activeWorkspaceRoot()
+	// Apply project data root override for centralized project storage so
+	// attachments are stored under the centralized .reasonix/attachments
+	// instead of creating .reasonix in the project directory.
+	if fn := projectDataRootOverride; fn != nil {
+		if r := fn(root); r != "" && r != root {
+			root = r
+		}
+	}
 	if root != "" && root != "." {
 		prev, err := os.Getwd()
 		if err != nil {

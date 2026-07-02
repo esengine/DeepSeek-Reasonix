@@ -3675,34 +3675,64 @@ func removeProject(root string) error {
 
 // --- topic helpers ----------------------------------------------------------
 
-const (
+var (
 	topicTitlesFile        = "desktop-topic-titles.json"
 	topicTitleSourcesFile  = "desktop-topic-title-sources.json"
 	topicCreatedAtsFile    = "desktop-topic-created-at.json"
 	defaultTopicTitle      = "新的会话"
 	topicTitleSourceAuto   = "auto"
 	topicTitleSourceManual = "manual"
+
+	// projectDataRootOverride is set by the desktop app to redirect project data
+	// (.reasonix) to a centralized directory instead of the project root. When
+	// non-nil, topic path functions call it with the workspace root to get the
+	// effective data root. Nil = local mode (current default).
+	projectDataRootOverride func(workspaceRoot string) string
 )
+
+// SetProjectDataRoot sets the project data root override used by topic path
+// functions. Pass nil to revert to local mode.
+func SetProjectDataRoot(fn func(workspaceRoot string) string) {
+	projectDataRootOverride = fn
+}
 
 func topicTitlesPath(workspaceRoot string) string {
 	if workspaceRoot == "" {
 		return filepath.Join(desktopConfigDir(), "global", topicTitlesFile)
 	}
-	return filepath.Join(workspaceRoot, ".reasonix", topicTitlesFile)
+	root := workspaceRoot
+	if fn := projectDataRootOverride; fn != nil {
+		if r := fn(workspaceRoot); r != "" {
+			root = r
+		}
+	}
+	return filepath.Join(root, ".reasonix", topicTitlesFile)
 }
 
 func topicTitleSourcesPath(workspaceRoot string) string {
 	if workspaceRoot == "" {
 		return filepath.Join(desktopConfigDir(), "global", topicTitleSourcesFile)
 	}
-	return filepath.Join(workspaceRoot, ".reasonix", topicTitleSourcesFile)
+	root := workspaceRoot
+	if fn := projectDataRootOverride; fn != nil {
+		if r := fn(workspaceRoot); r != "" {
+			root = r
+		}
+	}
+	return filepath.Join(root, ".reasonix", topicTitleSourcesFile)
 }
 
 func topicCreatedAtsPath(workspaceRoot string) string {
 	if workspaceRoot == "" {
 		return filepath.Join(desktopConfigDir(), "global", topicCreatedAtsFile)
 	}
-	return filepath.Join(workspaceRoot, ".reasonix", topicCreatedAtsFile)
+	root := workspaceRoot
+	if fn := projectDataRootOverride; fn != nil {
+		if r := fn(workspaceRoot); r != "" {
+			root = r
+		}
+	}
+	return filepath.Join(root, ".reasonix", topicCreatedAtsFile)
 }
 
 const topicFileReadTimeout = 200 * time.Millisecond

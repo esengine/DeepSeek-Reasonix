@@ -952,6 +952,8 @@ export const zh: Record<DictKey, string> = {
   "settings.autoPlan.on": "开启",
   "settings.memoryCompiler": "Memory v5",
   "settings.memoryCompilerHint": "开启执行型记忆编译器，用历史执行结果生成和优化下一步行动计划。",
+  "settings.centralizeProjectData": "集中存储项目数据",
+  "settings.centralizeProjectDataHint": "将 .reasonix 数据存储到 Reasonix 用户数据目录，不在项目目录下创建 .reasonix 文件夹，保持项目目录干净。",
   "settings.agentRuntime": "Agent 运行",
   "settings.agentRuntimeHint": "轮数上限只认全局设置；项目里的 ./reasonix.toml 不覆盖。0 表示不限。",
   "settings.executorMaxSteps": "执行轮数上限",
