@@ -3060,66 +3060,22 @@ func (m *chatTUI) startTurnWithRaw(sent, displayed, restore, raw string) tea.Cmd
 	return tea.Batch(m.spinner.Tick, elapsedTick())
 }
 
-var chatSlashCommands = map[string]struct{}{
-	"/auto-plan":          {},
-	"/branch":             {},
-	"/clear":              {},
-	"/cls":                {},
-	"/compact":            {},
-	"/copy":               {},
-	"/diff-fold":          {},
-	"/effort":             {},
-	"/exit":               {},
-	"/export":             {},
-	"/forget":             {},
-	"/goal":               {},
-	"/help":               {},
-	"/hooks":              {},
-	"/language":           {},
-	"/mcp":                {},
-	"/memory":             {},
-	"/memory-v5":          {},
-	"/migrate":            {},
-	"/migration":          {},
-	"/model":              {},
-	"/new":                {},
-	"/output-style":       {},
-	"/output-styles":      {},
-	"/paste-image":        {},
-	"/provider":           {},
-	"/quit":               {},
-	"/reasoning-language": {},
-	"/reload-cmd":         {},
-	"/remember":           {},
-	"/rename":             {},
-	"/resume":             {},
-	"/rewind":             {},
-	"/sandbox":            {},
-	"/skill":              {},
-	"/skills":             {},
-	"/switch":             {},
-	"/theme":              {},
-	"/todo":               {},
-	"/tree":               {},
-	"/verbose":            {},
+var slashCommandAliases = map[string]string{
+	"/exit":          "/quit",
+	"/migration":     "/migrate",
+	"/output-styles": "/output-style",
+	"/skill":         "/skills",
 }
 
 func (m *chatTUI) handlesSlashCommand(input string) bool {
 	cmd := strings.TrimSpace(strings.SplitN(input, " ", 2)[0])
-	if strings.HasPrefix(cmd, "/mcp__") {
-		return true
+	if canonical, ok := slashCommandAliases[cmd]; ok {
+		cmd = canonical
 	}
-	if _, ok := chatSlashCommands[cmd]; ok {
-		return true
-	}
-	if m.ctrl == nil {
-		return false
-	}
-	if _, ok := m.ctrl.CustomCommand(input); ok {
-		return true
-	}
-	if _, ok := m.ctrl.RunSkill(input); ok {
-		return true
+	for _, item := range m.slashItems() {
+		if item.label == cmd {
+			return true
+		}
 	}
 	return false
 }

@@ -2221,6 +2221,27 @@ func TestUnknownSlashCommandStartsModelTurn(t *testing.T) {
 	}
 }
 
+func TestHandlesSlashCommandFollowsSlashItems(t *testing.T) {
+	m := newTestChatTUI()
+	for _, item := range m.slashItems() {
+		if !m.handlesSlashCommand(item.label + " extra") {
+			t.Fatalf("handlesSlashCommand should accept slashItems entry %q", item.label)
+		}
+	}
+}
+
+func TestHandlesSlashCommandAliasesAndUnknownProse(t *testing.T) {
+	m := newTestChatTUI()
+	for _, input := range []string{"/exit", "/migration", "/output-styles", "/skill"} {
+		if !m.handlesSlashCommand(input) {
+			t.Fatalf("handlesSlashCommand should accept alias %q", input)
+		}
+	}
+	if m.handlesSlashCommand("/history正常应该是这样的行为") {
+		t.Fatal("unknown slash-prefixed prose should fall through to the normal prompt path")
+	}
+}
+
 func TestSlashMigrateShowsProgress(t *testing.T) {
 	isolateCLIConfigHome(t)
 	m := newTestChatTUI()
