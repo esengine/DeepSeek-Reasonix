@@ -23,7 +23,8 @@ export type ShortcutAction =
   | "topic.goto.6"
   | "topic.goto.7"
   | "topic.goto.8"
-  | "topic.goto.9";
+  | "topic.goto.9"
+  | "topic.nextUnread";
 
 type KeyboardShortcutEvent = Pick<globalThis.KeyboardEvent, "key"> &
   Partial<Pick<globalThis.KeyboardEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "target">>;
@@ -233,6 +234,16 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
     defaults: modCombo("9"),
     preventDefault: true,
     configurable: false,
+  },
+  {
+    action: "topic.nextUnread",
+    section: "session",
+    labelKey: "shortcuts.action.topicNextUnread",
+    descriptionKey: "shortcuts.desc.topicNextUnread",
+    defaults: modCombo("g"),
+    preventDefault: true,
+    allowInEditable: true,
+    configurable: true,
   },
 ] as const;
 

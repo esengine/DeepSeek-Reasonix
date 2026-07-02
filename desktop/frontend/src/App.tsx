@@ -2638,18 +2638,30 @@ export default function App() {
 
   // --- Topic shortcut navigation (Cmd/Ctrl+1-9) ---
   const visibleTopicsRef = useRef<TopicShortcutEntry[]>([]);
+  const nextUnreadTopicRef = useRef<TopicShortcutEntry | null>(null);
   const handleVisibleTopicsChange = useCallback((topics: TopicShortcutEntry[]) => {
     visibleTopicsRef.current = topics;
+  }, []);
+  const handleNextUnreadTopicChange = useCallback((entry: TopicShortcutEntry | null) => {
+    nextUnreadTopicRef.current = entry;
   }, []);
   const handleNavigateTopic = useCallback((entry: TopicShortcutEntry) => {
     void handleOpenTopic(entry.scope, entry.workspaceRoot, entry.topicId, entry.sessionPath);
   }, [handleOpenTopic]);
   const { showBadges: showTopicBadges } = useTopicShortcuts(!sidebarCollapsed, desktopPlatform);
 
+  useGlobalShortcut("topic.nextUnread", () => {
+    const entry = nextUnreadTopicRef.current;
+    if (entry) {
+      handleNavigateTopic(entry);
+    }
+  }, [handleNavigateTopic]);
+
   // Register Cmd/Ctrl+1-9 shortcuts for topic navigation
   useEffect(() => {
     if (sidebarCollapsed) return;
     const onKeydown = (event: globalThis.KeyboardEvent) => {
+      // Cmd/Ctrl+1-9: topic by index
       const idx = topicShortcutIndexFromEvent(event, desktopPlatform);
       if (idx === null) return;
       event.preventDefault();
@@ -3045,6 +3057,7 @@ export default function App() {
               showShortcutBadges={showTopicBadges}
               shortcutPlatform={desktopPlatform}
               onVisibleTopicsChange={handleVisibleTopicsChange}
+              onNextUnreadTopicChange={handleNextUnreadTopicChange}
             />
           </section>
 
