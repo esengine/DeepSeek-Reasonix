@@ -2655,7 +2655,7 @@ export default function App() {
     if (entry) {
       handleNavigateTopic(entry);
     }
-  }, [handleNavigateTopic]);
+  }, [handleNavigateTopic], !sidebarCollapsed);
 
   // Register Cmd/Ctrl+1-9 shortcuts for topic navigation
   useEffect(() => {
