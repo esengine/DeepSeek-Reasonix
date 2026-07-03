@@ -214,13 +214,23 @@ func TestTruthLockedImportanceDecaysForCompressionPriority(t *testing.T) {
 		Confidence: 0.95,
 		Quality:    QualityHighSignal,
 	}
+	// H6: TruthLocked nodes are unconditionally retained. With limit=1 the
+	// locked old-truth survives even though new-signal has higher priority;
+	// the importance decay is still surfaced via TruthLockDecay so callers
+	// know the lock is stale and may warrant manual review.
 	retained := retainMemoryNodes([]MemoryNode{oldTruth, newSignal}, 1, now)
-	if len(retained) != 1 || retained[0].ID != "new-signal" {
-		t.Fatalf("stale truth lock dominated high-signal node: %+v", retained)
+	if len(retained) != 1 || retained[0].ID != "old-truth" {
+		t.Fatalf("truth-locked node was dropped during compression: %+v", retained)
 	}
 	memory := compressMemoryGraph(state{Nodes: []MemoryNode{oldTruth, newSignal}}, now)
 	if !containsString(memory.TruthLockDecay, "old-truth") {
 		t.Fatalf("missing truth-lock decay report: %+v", memory)
+	}
+
+	// When the budget admits both, the high-signal non-locked node is also kept.
+	retained2 := retainMemoryNodes([]MemoryNode{oldTruth, newSignal}, 2, now)
+	if len(retained2) != 2 {
+		t.Fatalf("expected both nodes retained with limit=2, got %+v", retained2)
 	}
 }
 

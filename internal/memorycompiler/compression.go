@@ -582,22 +582,54 @@ func retainMemoryNodes(nodes []MemoryNode, limit int, nowArg ...time.Time) []Mem
 	if len(nowArg) > 0 && !nowArg[0].IsZero() {
 		now = nowArg[0].UTC()
 	}
-	out := append([]MemoryNode(nil), nodes...)
-	sort.SliceStable(out, func(i, j int) bool {
-		pi := memoryNodeCompressionPriority(out[i], now)
-		pj := memoryNodeCompressionPriority(out[j], now)
-		if pi != pj {
-			return pi < pj
+	// Partition: TruthLocked nodes are always retained regardless of priority —
+	// dropping a locked fact during compression would silently lose a guarantee
+	// the user or tool explicitly pinned. Fill the remaining budget with the
+	// highest-priority non-locked nodes.
+	var locked, others []MemoryNode
+	for _, n := range nodes {
+		if n.TruthLocked {
+			locked = append(locked, n)
+		} else {
+			others = append(others, n)
 		}
-		if out[i].Confidence != out[j].Confidence {
-			return out[i].Confidence > out[j].Confidence
-		}
-		if !out[i].Timestamp.Equal(out[j].Timestamp) {
-			return out[i].Timestamp.After(out[j].Timestamp)
-		}
-		return out[i].ID < out[j].ID
-	})
-	out = out[:limit]
+	}
+	sortOthers := func(out []MemoryNode) {
+		sort.SliceStable(out, func(i, j int) bool {
+			pi := memoryNodeCompressionPriority(out[i], now)
+			pj := memoryNodeCompressionPriority(out[j], now)
+			if pi != pj {
+				return pi < pj
+			}
+			if out[i].Confidence != out[j].Confidence {
+				return out[i].Confidence > out[j].Confidence
+			}
+			if !out[i].Timestamp.Equal(out[j].Timestamp) {
+				return out[i].Timestamp.After(out[j].Timestamp)
+			}
+			return out[i].ID < out[j].ID
+		})
+	}
+	if len(locked) >= limit {
+		// Locked alone fill the budget; keep them all (best effort — dropping
+		// any would violate the lock contract, so we exceed the limit rather
+		// than lose a pinned fact).
+		out := append([]MemoryNode(nil), locked...)
+		sort.SliceStable(out, func(i, j int) bool {
+			if out[i].Timestamp.Equal(out[j].Timestamp) {
+				return out[i].ID < out[j].ID
+			}
+			return out[i].Timestamp.Before(out[j].Timestamp)
+		})
+		return out
+	}
+	remaining := limit - len(locked)
+	out := append([]MemoryNode(nil), others...)
+	sortOthers(out)
+	if len(out) > remaining {
+		out = out[:remaining]
+	}
+	out = append(append([]MemoryNode(nil), locked...), out...)
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Timestamp.Equal(out[j].Timestamp) {
 			return out[i].ID < out[j].ID

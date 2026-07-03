@@ -12,6 +12,7 @@ package checkpoint
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"reasonix/internal/diff"
+	"reasonix/internal/fileutil"
 	fileenc "reasonix/internal/fileutil/encoding"
 )
 
@@ -178,7 +180,7 @@ func (s *Store) persist(c *Checkpoint) {
 		slog.Warn("checkpoint: create dir failed", "dir", s.dir, "err", err)
 		return
 	}
-	if err := os.WriteFile(filepath.Join(s.dir, fmt.Sprintf("turn-%d.json", c.Turn)), b, 0o644); err != nil {
+	if err := fileutil.AtomicWriteFile(filepath.Join(s.dir, fmt.Sprintf("turn-%d.json", c.Turn)), b, 0o644); err != nil {
 		slog.Warn("checkpoint: persist failed", "turn", c.Turn, "err", err)
 	}
 }
@@ -251,16 +253,12 @@ func (s *Store) TruncateFrom(fromTurn int) {
 		s.seen = map[string]bool{}
 	}
 	dir := s.dir
-	s.mu.Unlock()
-
-	if dir == "" || len(deleteTurns) == 0 {
-		return
-	}
 	for turn := range deleteTurns {
 		if err := os.Remove(filepath.Join(dir, fmt.Sprintf("turn-%d.json", turn))); err != nil && !os.IsNotExist(err) {
 			slog.Warn("checkpoint: truncate failed", "turn", turn, "err", err)
 		}
 	}
+	s.mu.Unlock()
 }
 
 // RestoreCode reverts the workspace to its state at the start of turn `fromTurn`:
@@ -290,7 +288,7 @@ func (s *Store) RestoreCode(fromTurn int) (written, deleted []string, err error)
 	for _, p := range order {
 		abs, gerr := safePath(root, p)
 		if gerr != nil {
-			err = gerr
+			err = errors.Join(err, gerr)
 			continue
 		}
 		snap := earliest[p]
@@ -298,12 +296,12 @@ func (s *Store) RestoreCode(fromTurn int) (written, deleted []string, err error)
 			if rmErr := os.Remove(abs); rmErr == nil {
 				deleted = append(deleted, p)
 			} else if !os.IsNotExist(rmErr) {
-				err = rmErr
+				err = errors.Join(err, rmErr)
 			}
 			continue
 		}
 		if mkErr := os.MkdirAll(filepath.Dir(abs), 0o755); mkErr != nil {
-			err = mkErr
+			err = errors.Join(err, mkErr)
 			continue
 		}
 		enc := fileenc.UTF8
@@ -313,7 +311,7 @@ func (s *Store) RestoreCode(fromTurn int) (written, deleted []string, err error)
 			enc = *current
 		}
 		if wErr := os.WriteFile(abs, fileenc.Encode(*snap.Content, enc), 0o644); wErr != nil {
-			err = wErr
+			err = errors.Join(err, wErr)
 			continue
 		}
 		written = append(written, p)
@@ -341,6 +339,12 @@ func safePath(root, p string) (string, error) {
 	abs = filepath.Clean(abs)
 	if root != "" {
 		r := filepath.Clean(root)
+		if realRoot, err := filepath.EvalSymlinks(r); err == nil {
+			r = realRoot
+		}
+		if realAbs, err := filepath.EvalSymlinks(abs); err == nil {
+			abs = realAbs
+		}
 		rel, err := filepath.Rel(r, abs)
 		if err != nil || !filepath.IsLocal(rel) {
 			return "", fmt.Errorf("checkpoint path %q escapes workspace %q", p, root)

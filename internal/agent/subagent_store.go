@@ -525,7 +525,11 @@ func (s *SubagentStore) SaveCompleted(run *SubagentRun) error {
 		return nil
 	}
 	if err := run.Session.Save(s.sessionPath(run.Ref)); err != nil {
-		return err
+		meta := run.Meta
+		meta.Status = SubagentFailed
+		meta.UpdatedAt = time.Now().UTC()
+		run.Meta = meta
+		return errors.Join(err, s.saveMeta(meta))
 	}
 	meta := run.Meta
 	meta.Status = SubagentCompleted

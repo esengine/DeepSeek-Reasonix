@@ -61,6 +61,7 @@ func Search(root, query string, limit int) []SearchResult {
 	var segmentHits []SearchResult
 	var dirHits []SearchResult
 	visited := 0
+	nDirs := 0
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if d != nil && d.IsDir() {
@@ -78,6 +79,10 @@ func Search(root, query string, limit int) []SearchResult {
 
 		name := d.Name()
 		if d.IsDir() {
+			nDirs++
+			if nDirs > maxWalkEntries {
+				return filepath.SkipAll
+			}
 			rel, err := filepath.Rel(root, path)
 			if err != nil {
 				return filepath.SkipDir
@@ -125,7 +130,7 @@ func Search(root, query string, limit int) []SearchResult {
 	// out by a large number of file matches.
 	const dirQuota = 5
 	out := make([]SearchResult, 0, limit)
-	nDirs := len(dirHits)
+	nDirs = len(dirHits)
 	if nDirs > dirQuota {
 		nDirs = dirQuota
 	}
