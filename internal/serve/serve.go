@@ -900,7 +900,7 @@ func (s *Server) generateTitle(ctx context.Context, firstMsg string) string {
 			{Role: provider.RoleSystem, Content: titlePrompt},
 			{Role: provider.RoleUser, Content: firstMsg},
 		},
-		Temperature: 0,
+		Temperature: provider.TemperaturePtr(0),
 		MaxTokens:   20,
 	})
 	if err != nil {

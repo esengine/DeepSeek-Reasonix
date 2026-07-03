@@ -419,9 +419,13 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 
 	var tools []chatTool
 	for _, t := range req.Tools {
+		parameters := t.Parameters
+		if len(parameters) == 0 {
+			parameters = provider.CanonicalizeSchema(nil)
+		}
 		tools = append(tools, chatTool{
 			Type:     "function",
-			Function: chatFunction{Name: t.Name, Description: t.Description, Parameters: t.Parameters},
+			Function: chatFunction{Name: t.Name, Description: t.Description, Parameters: parameters},
 		})
 	}
 
@@ -706,7 +710,7 @@ type chatRequest struct {
 	Tools           []chatTool     `json:"tools,omitempty"`
 	Stream          bool           `json:"stream"`
 	StreamOptions   *streamOptions `json:"stream_options,omitempty"`
-	Temperature     float64        `json:"temperature,omitempty"`
+	Temperature     *float64       `json:"temperature,omitempty"`
 	MaxTokens       int            `json:"max_tokens,omitempty"`
 	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
 	Thinking        *thinkingMode  `json:"thinking,omitempty"`

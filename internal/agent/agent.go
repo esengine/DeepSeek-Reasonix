@@ -11,6 +11,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"mvdan.cc/sh/v3/syntax"
+
 	"reasonix/internal/diff"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
@@ -21,6 +23,7 @@ import (
 	"reasonix/internal/nilutil"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
+	"reasonix/internal/shellparse"
 	"reasonix/internal/tool"
 )
 
@@ -1626,7 +1629,7 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 	ch, err := a.prov.Stream(ctx, provider.Request{
 		Messages:    a.session.Messages,
 		Tools:       a.tools.Schemas(),
-		Temperature: a.temperature,
+		Temperature: provider.OptionalTemperature(a.temperature),
 	})
 	if err != nil {
 		return "", "", "", nil, nil, false, false, err
@@ -2441,6 +2444,9 @@ func canonicalToolArgs(raw string) string {
 }
 
 func normalizeShellCommand(command string) string {
+	if fields, malformed := shellparse.StaticFields(command); malformed == "" && len(fields) > 0 {
+		return strings.Join(fields, " ")
+	}
 	return strings.Join(strings.Fields(command), " ")
 }
 
@@ -2476,6 +2482,78 @@ func shellPythonOpenWrites(lower string) bool {
 }
 
 func hasShellWriteRedirect(command string) bool {
+	file, err := shellparse.ParseBash(command)
+	if err == nil {
+		hasWrite := false
+		syntax.Walk(file, func(node syntax.Node) bool {
+			redir, ok := node.(*syntax.Redirect)
+			if !ok {
+				return true
+			}
+			if bashRedirectWritesFile(command, redir) {
+				hasWrite = true
+				return false
+			}
+			return true
+		})
+		return hasWrite
+	}
+	return hasShellWriteRedirectFallback(command)
+}
+
+func bashRedirectWritesFile(source string, redir *syntax.Redirect) bool {
+	if redir == nil {
+		return false
+	}
+	switch redir.Op {
+	case syntax.RdrOut, syntax.AppOut, syntax.RdrClob, syntax.AppClob,
+		syntax.RdrAll, syntax.RdrAllClob, syntax.AppAll, syntax.AppAllClob,
+		syntax.RdrInOut:
+		return !redirectWordIsNullSink(source, redir.Word)
+	default:
+		return false
+	}
+}
+
+func redirectWordIsNullSink(source string, word *syntax.Word) bool {
+	if word == nil {
+		return false
+	}
+	if value, ok := shellparse.StaticWord(word); ok {
+		if isNullSinkWord(strings.TrimSpace(value)) {
+			return true
+		}
+	}
+	value := strings.TrimSpace(redirectWordSource(source, word))
+	if isNullSinkWord(value) {
+		return true
+	}
+	if len(value) >= 2 && ((value[0] == '\'' && value[len(value)-1] == '\'') || (value[0] == '"' && value[len(value)-1] == '"')) {
+		return isNullSinkWord(value[1 : len(value)-1])
+	}
+	return false
+}
+
+func isNullSinkWord(value string) bool {
+	if value == "/dev/null" {
+		return true
+	}
+	return strings.EqualFold(value, "$null") || strings.EqualFold(value, "nul")
+}
+
+func redirectWordSource(source string, word *syntax.Word) string {
+	if word == nil || !word.Pos().IsValid() || !word.End().IsValid() {
+		return ""
+	}
+	start := int(word.Pos().Offset())
+	end := int(word.End().Offset())
+	if start < 0 || end < start || end > len(source) {
+		return ""
+	}
+	return source[start:end]
+}
+
+func hasShellWriteRedirectFallback(command string) bool {
 	var quote rune
 	var prev rune
 	for _, r := range command {

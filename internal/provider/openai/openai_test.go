@@ -536,6 +536,39 @@ func TestBuildRequestForwardsReasoningEffort(t *testing.T) {
 	}
 }
 
+func TestBuildRequestTemperatureSerialization(t *testing.T) {
+	c := &client{model: "m"}
+
+	omitted := c.buildRequest(provider.Request{})
+	if omitted.Temperature != nil {
+		t.Fatalf("unset request temperature = %v, want nil", omitted.Temperature)
+	}
+	b, err := json.Marshal(omitted)
+	if err != nil {
+		t.Fatalf("marshal omitted: %v", err)
+	}
+	if strings.Contains(string(b), "temperature") {
+		t.Fatalf("unset temperature must be omitted from payload: %s", b)
+	}
+
+	zero := c.buildRequest(provider.Request{Temperature: provider.TemperaturePtr(0)})
+	if zero.Temperature == nil || *zero.Temperature != 0 {
+		t.Fatalf("zero request temperature = %v, want ptr(0)", zero.Temperature)
+	}
+	b, err = json.Marshal(zero)
+	if err != nil {
+		t.Fatalf("marshal zero: %v", err)
+	}
+	if !strings.Contains(string(b), `"temperature":0`) {
+		t.Fatalf("explicit zero temperature must be serialized: %s", b)
+	}
+
+	nonzero := c.buildRequest(provider.Request{Temperature: provider.TemperaturePtr(0.25)})
+	if nonzero.Temperature == nil || *nonzero.Temperature != 0.25 {
+		t.Fatalf("nonzero request temperature = %v, want ptr(0.25)", nonzero.Temperature)
+	}
+}
+
 func TestBuildRequestDeepSeekThinking(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -555,6 +588,23 @@ func TestBuildRequestDeepSeekThinking(t *testing.T) {
 				t.Fatalf("ReasoningEffort = %q, want %q", req.ReasoningEffort, tc.wantReasoning)
 			}
 		})
+	}
+}
+
+func TestBuildRequestDeepSeekPreservesCallerTemperature(t *testing.T) {
+	c := &client{model: "deepseek-v4", deepseek: true, effort: "high"}
+
+	omitted := c.buildRequest(provider.Request{})
+	if omitted.Temperature != nil {
+		t.Fatalf("DeepSeek default temperature = %v, want omitted", omitted.Temperature)
+	}
+
+	zero := c.buildRequest(provider.Request{Temperature: provider.TemperaturePtr(0)})
+	if zero.Temperature == nil || *zero.Temperature != 0 {
+		t.Fatalf("DeepSeek explicit zero temperature = %v, want ptr(0)", zero.Temperature)
+	}
+	if zero.Thinking == nil || zero.Thinking.Type != "enabled" {
+		t.Fatalf("DeepSeek thinking = %+v, want enabled", zero.Thinking)
 	}
 }
 
@@ -958,7 +1008,7 @@ func TestBuildRequestOmitsResponseOnlyToolCallIndex(t *testing.T) {
 	}
 }
 
-func TestBuildRequestOmitsEmptyToolDescriptionAndParameters(t *testing.T) {
+func TestBuildRequestDefaultsEmptyToolParameters(t *testing.T) {
 	c := &client{name: "x", model: "m", baseURL: "https://api.example.com/v1"}
 	req := provider.Request{
 		Tools: []provider.ToolSchema{{Name: "noargs"}},
@@ -985,7 +1035,7 @@ func TestBuildRequestOmitsEmptyToolDescriptionAndParameters(t *testing.T) {
 	if _, ok := fn["description"]; ok {
 		t.Fatalf("empty description should be omitted: %s", body)
 	}
-	if _, ok := fn["parameters"]; ok {
-		t.Fatalf("nil parameters should be omitted: %s", body)
+	if got, want := string(fn["parameters"]), `{"type":"object"}`; got != want {
+		t.Fatalf("nil parameters should default to %s, got %s in %s", want, got, body)
 	}
 }
