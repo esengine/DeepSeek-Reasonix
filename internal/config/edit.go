@@ -338,6 +338,14 @@ func (c *Config) SetDesktopMetrics(enabled bool) error {
 	return nil
 }
 
+// SetRememberMCPChoice controls whether MCP toggle decisions persist across
+// sessions. When false, the boot path ignores per-server auto_start and starts
+// every configured MCP server.
+func (c *Config) SetRememberMCPChoice(enabled bool) error {
+	c.Desktop.RememberMCPChoice = &enabled
+	return nil
+}
+
 // SetUICloseBehavior is kept for callers compiled against the old edit API.
 func (c *Config) SetUICloseBehavior(mode string) error {
 	return c.SetDesktopCloseBehavior(mode)

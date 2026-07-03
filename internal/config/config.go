@@ -101,6 +101,7 @@ type DesktopConfig struct {
 	Metrics                 *bool    `toml:"metrics"`                    // aggregate desktop metrics (anonymous signal/bucket counts; no content); nil keeps the default enabled
 	ProviderAccess          []string `toml:"provider_access"`            // desktop-only list of provider entries shown in Settings > Model > Access
 	ExpandThinking          bool     `toml:"expand_thinking"`            // true = show reasoning text expanded by default; false = collapsed
+	RememberMCPChoice       *bool    `toml:"remember_mcp_choice"`        // nil defaults to false: treat auto_start=false as session-only
 }
 
 // NotificationsConfig controls optional system notifications for CLI chat/run.
@@ -372,6 +373,16 @@ func (c *Config) DesktopCheckUpdates() bool {
 		return true
 	}
 	return *c.Desktop.CheckUpdates
+}
+
+// RememberMCPChoice reports whether the user opted into persisting MCP toggle
+// decisions across sessions. Nil defaults to true (respect auto_start) for
+// backward compatibility; only explicit false starts every MCP regardless.
+func (c *Config) RememberMCPChoice() bool {
+	if c == nil || c.Desktop.RememberMCPChoice == nil {
+		return true
+	}
+	return *c.Desktop.RememberMCPChoice
 }
 
 // ColdResumePruneEnabled reports whether stale tool results are elided when a
@@ -1361,6 +1372,11 @@ func resolvedMCPTier(tier string) string {
 }
 
 func (c *Config) AutoStartPlugins() []PluginEntry {
+	// When the user explicitly turns off remember_mcp_choice, start every
+	// configured MCP regardless of per-server auto_start.
+	if c.Desktop.RememberMCPChoice != nil && !*c.Desktop.RememberMCPChoice {
+		return c.Plugins
+	}
 	out := make([]PluginEntry, 0, len(c.Plugins))
 	for _, p := range c.Plugins {
 		if p.ShouldAutoStart() {

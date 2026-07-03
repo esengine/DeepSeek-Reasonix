@@ -940,6 +940,28 @@ func TestAutoStartPlugins(t *testing.T) {
 	}
 }
 
+func TestAutoStartPluginsRespectsRememberMCPChoice(t *testing.T) {
+	c := Default()
+	off := false
+	c.Plugins = []PluginEntry{
+		{Name: "implicit", Command: "implicit-bin"},
+		{Name: "disabled", Command: "disabled-bin", AutoStart: &off},
+	}
+	// Explicit false: ignore per-server auto_start, return all.
+	f := false
+	c.Desktop.RememberMCPChoice = &f
+	got := c.AutoStartPlugins()
+	if len(got) != 2 {
+		t.Fatalf("AutoStartPlugins with remember_mcp_choice=false = %d entries, want 2 (all)", len(got))
+	}
+	// Nil (default): respect auto_start, skip disabled.
+	c.Desktop.RememberMCPChoice = nil
+	got = c.AutoStartPlugins()
+	if len(got) != 1 || got[0].Name != "implicit" {
+		t.Fatalf("AutoStartPlugins with nil = %+v, want implicit only", got)
+	}
+}
+
 func TestPluginResolvedTierDefaultsToBackground(t *testing.T) {
 	for _, tc := range []struct {
 		name string

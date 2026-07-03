@@ -233,7 +233,9 @@ export interface AppBindings {
   RefreshSkills(): Promise<void>;
   ReloadCommands(): Promise<void>;
   SetSkillEnabled(name: string, enabled: boolean): Promise<void>;
-  SetMCPServerEnabled(name: string, enabled: boolean): Promise<void>;
+  SetMCPServerEnabled(name: string, enabled: boolean, persist?: boolean): Promise<void>;
+  ResetAllMCPAutoStart(): Promise<void>;
+  SetRememberMCPChoice(enabled: boolean): Promise<void>;
   SetMCPServerTier(name: string, tier: string): Promise<void>;
   SlashArgs(input: string): Promise<SlashArgsResult>;
   ListDir(rel: string): Promise<DirEntry[]>;
@@ -2398,13 +2400,13 @@ function makeMockApp(): AppBindings {
       const skill = capSkills.find((s) => s.name === name);
       if (skill) skill.enabled = enabled;
     },
-    async SetMCPServerEnabled(name: string, enabled: boolean) {
+    async SetMCPServerEnabled(name: string, enabled: boolean, persist?: boolean) {
       capServers = capServers.map((s) =>
         s.name === name
           ? {
               ...s,
               status: enabled ? "connected" : "disabled",
-              autoStart: s.builtIn ? enabled : s.autoStart,
+              autoStart: persist ? enabled : s.builtIn ? enabled : s.autoStart,
               tools: enabled ? s.tools || 4 : 0,
               error: undefined,
               authStatus: !enabled && s.transport !== "stdio" ? "possible" : undefined,
@@ -2412,6 +2414,12 @@ function makeMockApp(): AppBindings {
             }
           : s,
       );
+    },
+    async ResetAllMCPAutoStart() {
+      // Config-only: Go backend resets auto_start; no UI state change needed.
+    },
+    async SetRememberMCPChoice(_enabled: boolean) {
+      // Config-only; the boot path reads [desktop].remember_mcp_choice.
     },
     async SetMCPServerTier(name: string, tier: string) {
       capServers = capServers.map((s) => {
