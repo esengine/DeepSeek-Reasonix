@@ -152,6 +152,37 @@ func readDotEnvFileMap(path string, allow func(string) bool) map[string]string {
 	return out
 }
 
+// envFileHasAnyValue reports whether path contains at least one non-empty,
+// non-comment KEY=value assignment. Used by AnyCredentialStored to decide
+// whether the user has configured *any* provider key (not just DeepSeek).
+func envFileHasAnyValue(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		if strings.Trim(strings.TrimSpace(val), `"'`) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func envFileValue(path, wantKey string) (string, bool) {
 	f, err := os.Open(path)
 	if err != nil {
