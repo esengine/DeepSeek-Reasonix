@@ -783,6 +783,18 @@ func TestTaskToolRejectsMismatchedContinuationProfile(t *testing.T) {
 	}
 }
 
+func extractJobID(msg string) string {
+	quote := strings.Index(msg, `"`)
+	if quote < 0 {
+		return ""
+	}
+	end := strings.Index(msg[quote+1:], `"`)
+	if end < 0 {
+		return ""
+	}
+	return msg[quote+1 : quote+1+end]
+}
+
 func subagentRefFromOutput(t *testing.T, out string) string {
 	t.Helper()
 	for _, line := range strings.Split(out, "\n") {

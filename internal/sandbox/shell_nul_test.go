@@ -39,6 +39,18 @@ func TestNormalizeNullRedirects(t *testing.T) {
 	}
 }
 
+func TestNormalizeNullRedirectsPreservesHereDocBody(t *testing.T) {
+	in := "cat > out.go <<'EOF'\n" +
+		"func main() {\n" +
+		"\tdata := []byte(`{\"token\":\"TOKEN_EXAMPLE\"}`)\n" +
+		"\tjson.Unmarshal(data, &v)\n" +
+		"}\n" +
+		"EOF\n"
+	if got := normalizeNullRedirects(in, "/dev/null"); got != in {
+		t.Fatalf("normalizeNullRedirects changed heredoc body:\n--- got ---\n%s\n--- want ---\n%s", got, in)
+	}
+}
+
 func TestArgvNormalizesNullRedirects(t *testing.T) {
 	bashArgv := Shell{Kind: ShellBash, Path: "bash"}.argv("echo hi 2>nul")
 	if last := bashArgv[len(bashArgv)-1]; last != "echo hi 2>/dev/null" {

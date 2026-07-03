@@ -974,7 +974,7 @@ function normalizeProviderView(p: ProviderView): ProviderView {
 function normalizeSettingsView(view: SettingsView | null | undefined): SettingsView | null {
   if (!view) return null;
   const permissions = view.permissions ?? { mode: "ask", allow: [], ask: [], deny: [] };
-  const sandbox = view.sandbox ?? { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [], shell: "auto" };
+  const sandbox = view.sandbox ?? { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: "", effectiveWriteRoots: [], shell: "auto" };
   const network = view.network ?? {
     proxyMode: "auto",
     proxyUrl: "",
@@ -1000,6 +1000,8 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     sandbox: {
       ...sandbox,
       allowWrite: asArray(sandbox.allowWrite),
+      effectiveWorkspaceRoot: String(sandbox.effectiveWorkspaceRoot ?? ""),
+      effectiveWriteRoots: asArray(sandbox.effectiveWriteRoots),
     },
     network: {
       ...network,
@@ -5479,11 +5481,24 @@ function SandboxSection({ s, busy, apply }: SectionProps) {
   const t = useT();
   const sb = s.sandbox;
   const [root, setRoot] = useState(sb.workspaceRoot);
+  const effectiveWriteRoots = asArray(sb.effectiveWriteRoots).filter((path) => String(path).trim());
   const set = (next: Partial<typeof sb>) =>
     apply(() => app.SetSandbox(next.bash ?? sb.bash, next.network ?? sb.network, next.workspaceRoot ?? sb.workspaceRoot, next.allowWrite ?? sb.allowWrite, next.shell ?? sb.shell));
+  const reload = () => apply(() => app.ReloadSettings());
 
   return (
-    <SettingsSection title={t("settings.sandboxTitle")}>
+    <SettingsSection
+      title={t("settings.sandboxTitle")}
+      description={t("settings.sandboxBoundaryHint")}
+      actions={
+        <Tooltip label={t("settings.reloadSessionConfigHint")}>
+          <button className="btn btn--small" disabled={busy} title={t("settings.reloadSessionConfigHint")} onClick={() => void reload()}>
+            <RefreshCw size={14} aria-hidden="true" />
+            <span>{t("settings.reloadSessionConfig")}</span>
+          </button>
+        </Tooltip>
+      }
+    >
       <SettingsField label={t("settings.shellInterpreter")}>
         <select className="mem-select set-grow" value={sb.shell || "auto"} disabled={busy} onChange={(e) => void set({ shell: e.target.value })}>
           <option value="auto">{t("settings.shellAuto")}</option>
@@ -5513,6 +5528,18 @@ function SandboxSection({ s, busy, apply }: SectionProps) {
           onChange={(e) => setRoot(e.target.value)}
           onBlur={() => root !== sb.workspaceRoot && void set({ workspaceRoot: root })}
         />
+      </SettingsField>
+      <SettingsField label={t("settings.effectiveWriteRoots")} hint={t("settings.effectiveWriteRootsHint")} stacked>
+        <div className="set-rules set-rules--readonly">
+          <div className="set-rules__chips">
+            {effectiveWriteRoots.length === 0 && <span className="mem-empty">{t("settings.noEffectiveWriteRoots")}</span>}
+            {effectiveWriteRoots.map((path, index) => (
+              <span className="set-rule set-rule--path" key={`${path}-${index}`}>
+                {path}
+              </span>
+            ))}
+          </div>
+        </div>
       </SettingsField>
       <RuleList
         list="allow_write"

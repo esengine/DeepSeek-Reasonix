@@ -644,12 +644,14 @@ by default (root = cwd), so edits stay in the project while the agent can still
 update its own global config. `forbid_read` lists directories the agent should
 not read, list, or search; entries support `${VAR}` / `${VAR:-default}` expansion
 and should be absolute, or use `${HOME}` for home-relative secrets such as
-`${HOME}/.ssh`. `bash` is itself jailed on macOS by default
-(`[sandbox] bash = "enforce"`, Seatbelt): each command runs under sandbox-exec
-allowed to write only the same roots (+ temp and toolchain caches), denied reads
-under `forbid_read`, and allowed to reach the network only when `network = true`.
-Unsupported platforms fall back to running unconfined when no OS sandbox is
-available. The escape-prompt and Linux support are Phase 1's remainder (§9).
+`${HOME}/.ssh`. `bash` is itself jailed by default when an OS sandbox is
+available (`[sandbox] bash = "enforce"`: Seatbelt on macOS, bubblewrap on
+Linux): each command is allowed to write only the same roots (+ temp and
+toolchain caches), denied reads under `forbid_read`, and allowed to reach the
+network only when `network = true`.
+When no OS sandbox is available, `bash = "enforce"` refuses bash execution
+instead of running unconfined. The escape-prompt and broader OS support are Phase
+1's remainder (§9).
 
 ## 6. Error Handling
 
@@ -676,13 +678,15 @@ available. The escape-prompt and Linux support are Phase 1's remainder (§9).
 ## 9. Roadmap (not in current scope)
 
 - Sandbox Phase 1: an OS-level jail for `bash` so commands — not just the
-  file-writer built-ins (Phase 0) — are confined to the workspace. **macOS
-  (Seatbelt via `sandbox-exec`) ships, on by default** (see §5). Remaining: (a)
-  the escape-prompt — detect a sandbox-denied failure and offer to re-run the
-  command unconfined via the permission gate (in `reasonix run`, the command just
-  fails and the model adapts), which completes the "allow inside the box, prompt
-  at its edge" model; (b) Linux (bubblewrap / landlock). Shells out to OS tooling
-  so the binary stays dependency-free; Windows is out of scope. With this in
+  file-writer built-ins (Phase 0) — are confined to the workspace. **Seatbelt on
+  macOS and bubblewrap on Linux ship, on by default when available** (see §5).
+  Remaining: (a)
+  the escape-prompt — detect sandbox-unavailable or sandbox-denied failures and
+  offer an explicit, permission-gated unconfined rerun (in `reasonix run`, the
+  command just fails and the model adapts), which completes the "allow inside the
+  box, prompt at its edge" model; (b) broader OS sandbox support beyond current
+  Seatbelt/bubblewrap hosts. Shells out to OS tooling so the binary stays
+  dependency-free. With this in
   place, "always allow" rule persistence becomes optional rather than load-bearing.
 - MCP long tail (deferred deliberately — no consumer / no foundation yet): OAuth
   2.0 + `headersHelper` auth for remote servers; the remaining `.mcp.json` scopes

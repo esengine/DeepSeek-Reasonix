@@ -930,6 +930,8 @@ export interface SandboxView {
   network: boolean;
   workspaceRoot: string;
   allowWrite: string[];
+  effectiveWorkspaceRoot: string;
+  effectiveWriteRoots: string[];
   shell: string; // "auto" | "bash" | "powershell" | "pwsh"
 }
 

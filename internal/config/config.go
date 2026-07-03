@@ -789,8 +789,8 @@ type SandboxConfig struct {
 	AllowWrite    []string `toml:"allow_write"`
 	ForbidRead    []string `toml:"forbid_read"`
 	// Bash is the OS-sandbox mode for the bash tool: "enforce" (default) jails
-	// each command, "off" runs it unconfined. Phase 1; macOS only for now, with
-	// a graceful fallback elsewhere (see internal/sandbox).
+	// each command when an OS sandbox is available and refuses bash otherwise;
+	// "off" runs it unconfined.
 	Bash string `toml:"bash"`
 	// Network allows network egress from inside the bash sandbox. Defaults true
 	// so module/package downloads keep working; the boundary is then writes.

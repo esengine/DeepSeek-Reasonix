@@ -251,8 +251,6 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 				allow = true
 			case OptAllowAlways:
 				allow, session = true, true
-			case OptAllowPersistent:
-				allow, session, persist = true, true, true
 			}
 		}
 	}
@@ -331,18 +329,16 @@ func (s *updateSink) requestAskQuestion(ctx context.Context, askID string, q eve
 	return label, ok
 }
 
-func approvalOptionNames(tool, subject string) (session, persistent string) {
+func approvalSessionOptionName(tool, subject string) string {
 	sessionRule := permission.SessionGrantRuleForScope(tool, subject)
-	persistentRule := permission.RememberRuleForScope(tool, subject)
-	return "Allow " + sessionRule + " for this session", "Always allow " + persistentRule + " (save to config)"
+	return "Allow " + sessionRule + " for this session"
 }
 
 func approvalOptions(tool, subject string) []PermissionOption {
-	allowSessionName, allowPersistentName := approvalOptionNames(tool, subject)
+	allowSessionName := approvalSessionOptionName(tool, subject)
 	options := []PermissionOption{
 		{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},
 		{OptionID: string(OptAllowAlways), Name: allowSessionName, Kind: OptAllowAlways},
-		{OptionID: string(OptAllowPersistent), Name: allowPersistentName, Kind: OptAllowPersistent},
 		{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce},
 	}
 	return options

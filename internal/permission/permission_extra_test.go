@@ -197,6 +197,12 @@ func TestRememberRuleForBashUsesPrefixWhenAvailable(t *testing.T) {
 	if RuleMatchesString("Bash(go test *)", "bash", "go test ./legacy && rm -rf /tmp/x") {
 		t.Errorf("legacy space-star prefix should not match commands with shell syntax")
 	}
+	if !RuleMatchesString("Bash(go test:*)", "bash", `go "test" ./legacy`) {
+		t.Errorf("prefix rule should match statically quoted command fields")
+	}
+	if RuleMatchesString("Bash(go test:*)", "bash", `go "$subcmd" ./legacy`) {
+		t.Errorf("prefix rule should not match dynamic command fields")
+	}
 }
 
 func TestBashPrefixRulesMatchSafeRedirectsOnly(t *testing.T) {

@@ -9,6 +9,8 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+
+	"reasonix/internal/shellparse"
 )
 
 // Decision is the outcome of evaluating a tool call against a Policy.
@@ -537,7 +539,10 @@ func BashCommandPrefix(subject string) string {
 	if BashDangerWarning(cmd) != "" {
 		return ""
 	}
-	fields := strings.Fields(cmd)
+	fields, malformed := shellparse.StaticFields(cmd)
+	if malformed != "" {
+		return ""
+	}
 	if len(fields) < 2 {
 		return ""
 	}
@@ -638,8 +643,18 @@ func bashPrefixMatches(base, subject string) bool {
 	if normalized, ok := normalizeBashSafeRedirectsForMatch(subject); ok {
 		subject = normalized
 	}
-	if containsShellSyntax(subject) {
+	fields, malformed := shellparse.StaticFields(subject)
+	if malformed != "" {
 		return false
 	}
-	return subject == base || strings.HasPrefix(subject, base+" ")
+	baseFields, malformed := shellparse.StaticFields(base)
+	if malformed != "" || len(baseFields) == 0 || len(fields) < len(baseFields) {
+		return false
+	}
+	for i, want := range baseFields {
+		if fields[i] != want {
+			return false
+		}
+	}
+	return true
 }

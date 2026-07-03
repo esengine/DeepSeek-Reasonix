@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"reasonix/internal/config"
@@ -163,6 +164,34 @@ func TestBashSandboxConfinement(t *testing.T) {
 	}
 	if _, err := os.Stat(outPath); !os.IsNotExist(err) {
 		t.Error("escaping write must not create the file")
+	}
+}
+
+func TestBashEnforceRejectsWhenSandboxUnavailable(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := bash{
+		sb: sandbox.Spec{
+			Mode:       "enforce",
+			WriteRoots: []string{t.TempDir()},
+		},
+		shell: sandbox.Shell{Kind: sandbox.ShellBash, Path: exe},
+	}
+
+	args, _ := json.Marshal(map[string]string{"command": "ignored"})
+	out, err := b.Execute(context.Background(), args)
+	if err == nil {
+		t.Fatal("bash should reject enforce mode when the OS sandbox is unavailable")
+	}
+	if !strings.Contains(err.Error(), "bash sandbox requested but unavailable") {
+		t.Fatalf("error = %q, want sandbox unavailable", err)
+	}
+	if out != "" {
+		t.Fatalf("output = %q, want no command execution", out)
 	}
 }
 

@@ -9,8 +9,10 @@ func TestCommandIsReadOnly(t *testing.T) {
 		"git rev-parse HEAD", "git describe --tags", "git reflog",
 		"git for-each-ref", "git cat-file -p HEAD", "git ls-tree HEAD",
 		"git rev-list --count HEAD", "git shortlog", "git name-rev HEAD",
+		`git log "2>/dev/null"`, `git log 2\>/dev/null`,
 		// general read-only commands.
 		"ls -la", "cat go.mod", "grep -r foo .", "pwd", "head -n5 x", "stat x", "du -sh .",
+		`grep 'a|b' file`, `printf "%s\n" "a && b"`,
 		// tooling probes.
 		"go version", "go env", "go list ./...", "go doc fmt",
 		"npm view react version", "npm outdated", "cargo check",
@@ -31,7 +33,7 @@ func TestCommandIsReadOnly(t *testing.T) {
 		"kubectl apply -f x.yaml", "mv a b", "chmod 777 x",
 		// shell syntax can smuggle a write past a read-only base word.
 		"git status && rm -rf /", "cat a | tee b", "echo $(rm x)",
-		"git status > out.txt", "ls; rm x", "git log `whoami`",
+		"git status > out.txt", "ls; rm x", "git log `whoami`", "echo $HOME",
 		// unknown command.
 		"frobnicate --all",
 	}
@@ -48,7 +50,7 @@ func TestContainsShellSyntax(t *testing.T) {
 			t.Errorf("ContainsShellSyntax(%q) = false, want true", c)
 		}
 	}
-	for _, c := range []string{"git status", "ls -la", "grep foo bar.go"} {
+	for _, c := range []string{"git status", "ls -la", "grep foo bar.go", `grep 'a|b' file`, `echo "a && b"`} {
 		if ContainsShellSyntax(c) {
 			t.Errorf("ContainsShellSyntax(%q) = true, want false", c)
 		}

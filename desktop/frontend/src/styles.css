@@ -9230,6 +9230,8 @@ body > .mermaid-diagram--fullscreen {
   min-width: 0;
 }
 .mem-select {
+  padding-right: 30px;
+  text-overflow: ellipsis;
 }
 .mem-hint {
   margin-top: 6px;
@@ -13915,6 +13917,11 @@ body > .mermaid-diagram--fullscreen {
   border: 1px solid var(--border);
   border-radius: 6px;
 }
+.set-rule--path {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
 .set-rule__x {
   border: none;
   background: transparent;
@@ -17211,6 +17218,30 @@ body > .mermaid-diagram--fullscreen {
   pointer-events: auto;
   user-select: none;
   --wails-draggable: no-drag;
+  transition: opacity var(--dur-base) ease;
+}
+
+/* When the workspace panel is closed (no layout--workspace-open or
+   layout--workspace-maximized), make the window controls box transparent so it
+   blends into the title bar / background instead of showing a distinct box. */
+.app--windows-frameless .layout:not(.layout--workspace-open):not(.layout--workspace-maximized) ~ .windows-window-controls {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+:root[data-theme-style] .app--windows-frameless .layout:not(.layout--workspace-open):not(.layout--workspace-maximized) ~ .windows-window-controls {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+/* When a drawer/palette overlay is open, dim the window controls so they
+   visually sit behind the backdrop instead of staying highlighted on top. */
+.drawer-backdrop[data-state="open"] ~ .windows-window-controls {
+  opacity: 0.35;
+}
+:root[data-theme-style] .drawer-backdrop[data-state="open"] ~ .windows-window-controls {
+  opacity: 0.35;
 }
 
 .windows-window-control {
@@ -27680,25 +27711,34 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .workbench-dock__tabs,
 :root[data-theme-style] .app--creation .workbench-dock__tabs {
-  width: 100%;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: auto;
+  flex: 0 0 auto;
+  display: flex;
   align-items: stretch;
-  gap: 0;
+  justify-content: flex-start;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .app--creation .workbench-dock__tab,
 :root[data-theme-style] .app--creation .workbench-dock__tab {
-  justify-content: center;
-  width: 100%;
+  flex: 0 0 auto;
+  width: auto;
   max-width: none;
   height: 40px;
-  padding: 0 8px 1px;
+  padding: 0 12px 1px;
   gap: 6px;
+  justify-content: center;
   color: color-mix(in srgb, var(--fg-dim) 72%, transparent);
   font-size: 12px;
   font-weight: 560;
   letter-spacing: 0.01em;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .app--creation .workbench-dock__tab--active,
@@ -28072,6 +28112,18 @@ body > .mermaid-diagram--fullscreen {
   --windows-window-controls-height: 56px;
 }
 
+/* When workspace panel is open in creation mode, match the dock tools height
+   (40px) instead of the tall 56px default, so the window controls box does not
+   extend below the workbench-dock__tools. */
+.app--windows-frameless.app--creation .layout--workspace-open ~ .windows-window-controls,
+.app--windows-frameless.app--creation .layout--workspace-maximized ~ .windows-window-controls {
+  height: 40px;
+}
+:root[data-theme-style] .app--windows-frameless.app--creation .layout--workspace-open ~ .windows-window-controls,
+:root[data-theme-style] .app--windows-frameless.app--creation .layout--workspace-maximized ~ .windows-window-controls {
+  height: 40px;
+}
+
 .app--windows-frameless .app-chrome--native-tabs,
 :root[data-theme-style] .app--windows-frameless .app-chrome--native-tabs {
   --windows-frameless-titlebar-tools-offset: var(--windows-window-controls-safe);
@@ -28086,6 +28138,17 @@ body > .mermaid-diagram--fullscreen {
 .app--windows-frameless .topicbar,
 :root[data-theme-style] .app--windows-frameless .topicbar {
   padding-right: var(--windows-window-controls-safe);
+}
+
+/* When workspace panel is open the workbench-dock covers the right edge, so the
+   topicbar no longer needs the window-controls safe space — use the normal 18px
+   padding instead to prevent buttons from being pushed off-screen or overlapping
+   the dock. */
+.app--windows-frameless .layout--workspace-open .topicbar,
+.app--windows-frameless .layout--workspace-maximized .topicbar,
+:root[data-theme-style] .app--windows-frameless .layout--workspace-open .topicbar,
+:root[data-theme-style] .app--windows-frameless .layout--workspace-maximized .topicbar {
+  padding-right: 18px;
 }
 
 .app--windows-frameless .workbench-dock__tools,

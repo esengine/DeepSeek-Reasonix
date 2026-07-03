@@ -107,6 +107,17 @@ func TestNormalizeBashSafeRedirectsForMatch(t *testing.T) {
 			in:   "git log < /dev/null",
 			ok:   false,
 		},
+		{
+			name: "quoted redirect text is not removed",
+			in:   "printf '%s\\n' '>/dev/null'",
+			want: "printf '%s\\n' '>/dev/null'",
+			ok:   true,
+		},
+		{
+			name: "heredoc fails closed",
+			in:   "cat <<'EOF'\n>/dev/null\nEOF",
+			ok:   false,
+		},
 	}
 
 	for _, tt := range tests {

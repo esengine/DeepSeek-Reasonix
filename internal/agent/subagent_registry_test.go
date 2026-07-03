@@ -143,6 +143,10 @@ func TestReadOnlySubagentToolRegistryKeepsOnlyResearchToolsAndSafeBash(t *testin
 	if err != nil || out != "safe bash ok" {
 		t.Fatalf("safe bash delegated to inner tool = %q, %v; want safe bash ok, nil", out, err)
 	}
+	out, err = bash.Execute(context.Background(), json.RawMessage(`{"command":"git status 2>/dev/null"}`))
+	if err != nil || out != "safe bash ok" {
+		t.Fatalf("safe redirected bash delegated to inner tool = %q, %v; want safe bash ok, nil", out, err)
+	}
 	out, err = bash.Execute(context.Background(), json.RawMessage(`{"command":"rm -rf tmp"}`))
 	if err != nil || !strings.HasPrefix(out, "blocked:") {
 		t.Fatalf("unsafe bash should be blocked as tool output, got %q, %v", out, err)

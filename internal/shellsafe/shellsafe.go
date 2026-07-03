@@ -7,7 +7,11 @@
 // argument-rigor on top — plan mode is intentionally stricter than auto-approve.
 package shellsafe
 
-import "strings"
+import (
+	"strings"
+
+	"reasonix/internal/shellparse"
+)
 
 // ReadOnlyCommands holds single-word commands whose base name alone implies a
 // read-only operation. The first word of a command (lowercased) is looked up
@@ -71,7 +75,7 @@ var ReadOnlyPrefixes = map[string]map[string]bool{
 // substitution — chaining/redirection/expansion can smuggle a write past a
 // read-only base-word check, so any such command is treated as not read-only.
 func ContainsShellSyntax(cmd string) bool {
-	return strings.ContainsAny(cmd, ";|&<>\n\r`") || strings.Contains(cmd, "$(")
+	return shellparse.ContainsShellSyntax(cmd)
 }
 
 // CommandIsReadOnly reports whether the command's base/subcommand is in the
@@ -80,12 +84,8 @@ func ContainsShellSyntax(cmd string) bool {
 // ok is false when the command contains shell syntax or the base/subcommand is
 // not a known read-only operation.
 func CommandIsReadOnly(command string) (base, sub string, ok bool) {
-	cmd := strings.TrimSpace(command)
-	if cmd == "" || ContainsShellSyntax(cmd) {
-		return "", "", false
-	}
-	fields := strings.Fields(cmd)
-	if len(fields) == 0 {
+	fields, malformed := shellparse.StaticFields(command)
+	if malformed != "" || len(fields) == 0 {
 		return "", "", false
 	}
 	base = strings.ToLower(fields[0])

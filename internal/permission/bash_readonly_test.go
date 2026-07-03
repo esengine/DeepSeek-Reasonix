@@ -14,6 +14,7 @@ func TestIsReadOnlyBashSubject(t *testing.T) {
 		{"head -n 5 file.txt", true},
 		{"find . -name '*.go'", true},
 		{"grep TODO *.go", true},
+		{"grep 'a|b' file", true},
 		{"rg pattern", true},
 		{"echo hello", true},
 		{"pwd", true},
@@ -61,6 +62,7 @@ func TestIsReadOnlyBashSubject(t *testing.T) {
 
 		// Not read-only
 		{"rm file.txt", false},
+		{"echo $HOME", false},
 		{"rm -rf /", false},
 		{"env rm -rf /", false},
 		{"git commit -m 'msg'", false},

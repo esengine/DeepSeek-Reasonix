@@ -113,6 +113,21 @@ func TestExplicitBackgroundKeepaliveDetection(t *testing.T) {
 			want:    true,
 		},
 		{
+			name:    "command wrapper before nohup",
+			command: "command nohup sleep 60 >/dev/null 2>&1 &",
+			want:    true,
+		},
+		{
+			name:    "env assignment wrapper before nohup",
+			command: "env CUDA_VISIBLE_DEVICES=0 nohup python train.py >/dev/null 2>&1 &",
+			want:    true,
+		},
+		{
+			name:    "quoted command name still static",
+			command: `"nohup" sleep 60 >/dev/null 2>&1 &`,
+			want:    true,
+		},
+		{
 			name:    "plain background still reaped",
 			command: "sleep 60 >/dev/null 2>&1 &",
 			want:    false,
@@ -125,6 +140,26 @@ func TestExplicitBackgroundKeepaliveDetection(t *testing.T) {
 		{
 			name:    "quoted nohup argument ignored",
 			command: "echo 'nohup sleep 60 &' &",
+			want:    false,
+		},
+		{
+			name:    "process substitution quoted keepalive text ignored",
+			command: "cat <(printf '%s\\n' 'nohup sleep 60 &')",
+			want:    false,
+		},
+		{
+			name:    "process substitution real keepalive command",
+			command: "cat <(nohup sleep 60 >/dev/null 2>&1 &)",
+			want:    true,
+		},
+		{
+			name:    "dynamic command name is not preserved",
+			command: `cmd=nohup; "$cmd" sleep 60 >/dev/null 2>&1 &`,
+			want:    false,
+		},
+		{
+			name:    "parse failure is conservative",
+			command: "nohup sleep 60 & '",
 			want:    false,
 		},
 		{
@@ -141,6 +176,26 @@ func TestExplicitBackgroundKeepaliveDetection(t *testing.T) {
 			name:    "assignment before nohup",
 			command: "CUDA_VISIBLE_DEVICES=0 nohup python train.py >/dev/null 2>&1 &",
 			want:    true,
+		},
+		{
+			name: "heredoc body ampersand and parens are not keepalive",
+			command: strings.Join([]string{
+				"cat > /tmp/test_redact.go <<'EOF'",
+				"func main() {",
+				"\tjson.Unmarshal(data, &v)",
+				"}",
+				"EOF",
+			}, "\n"),
+			want: false,
+		},
+		{
+			name: "heredoc body keepalive text is not keepalive",
+			command: strings.Join([]string{
+				"cat > /tmp/repro.txt <<'EOF'",
+				"nohup sleep 60 >/dev/null 2>&1 &",
+				"EOF",
+			}, "\n"),
+			want: false,
 		},
 	}
 

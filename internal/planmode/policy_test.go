@@ -153,6 +153,82 @@ func TestDecideDeclaredReadOnlyBashCommandStillBlocksShellSyntax(t *testing.T) {
 	}
 }
 
+func TestDecideAllowsBashSafeNullRedirects(t *testing.T) {
+	bash := func(cmd string) Call {
+		args, err := json.Marshal(map[string]any{"command": cmd})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return Call{Name: "bash", Args: args}
+	}
+
+	for _, cmd := range []string{
+		"git log 2>/dev/null",
+		"git log 2> /dev/null",
+		"git log >/dev/null",
+		"git log >>/dev/null",
+		"git log &>/dev/null",
+		"git log &>> /dev/null",
+		"git log 2>$null",
+		"git log 2>NUL",
+		"git log 2>&1",
+		"2>/dev/null git log",
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			if decision := (Policy{}).Decide(bash(cmd)); decision.Blocked {
+				t.Fatalf("safe redirect command should be allowed in plan mode: %s", decision.Message)
+			}
+		})
+	}
+}
+
+func TestDecideBashSafeRedirectsStayConservative(t *testing.T) {
+	bash := func(cmd string) Call {
+		args, err := json.Marshal(map[string]any{"command": cmd})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return Call{Name: "bash", Args: args}
+	}
+
+	for _, cmd := range []string{
+		"git log >/tmp/out",
+		"git log >/dev/nullish",
+		"git log 2>$nullish",
+		"git log 2>nul.txt",
+		"git log < /dev/null",
+		"git log 2>/dev/null && rm -rf /tmp/x",
+		"git diff --output changes.patch 2>/dev/null",
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			if decision := (Policy{}).Decide(bash(cmd)); !decision.Blocked {
+				t.Fatal("unsafe or non-operator redirect-looking command should be blocked in plan mode")
+			}
+		})
+	}
+}
+
+func TestDecideBashAllowsRedirectLookingText(t *testing.T) {
+	bash := func(cmd string) Call {
+		args, err := json.Marshal(map[string]any{"command": cmd})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return Call{Name: "bash", Args: args}
+	}
+
+	for _, cmd := range []string{
+		`git log "2>/dev/null"`,
+		`git log 2\>/dev/null`,
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			if decision := (Policy{}).Decide(bash(cmd)); decision.Blocked {
+				t.Fatalf("redirect-looking text should stay a read-only argument in plan mode: %s", decision.Message)
+			}
+		})
+	}
+}
+
 func TestDecideDeclaredReadOnlyBashCommandIgnoresShellInterpreters(t *testing.T) {
 	p := Policy{ReadOnlyCommands: []string{"bash", "gh", "gh issue", "gh issue close"}}
 	args, err := json.Marshal(map[string]any{"command": "bash run-anything"})
@@ -327,6 +403,7 @@ func TestPlanModeAllowsSharedReadOnlyBashSet(t *testing.T) {
 		"git rev-parse --abbrev-ref HEAD", "git describe --tags", "git reflog",
 		"git for-each-ref", "git cat-file -p HEAD", "git ls-tree HEAD",
 		"go env", "npm view react version", "docker ps", "kubectl get pods",
+		"grep 'a|b' file",
 	} {
 		if d := (Policy{}).Decide(bash(cmd)); d.Blocked {
 			t.Errorf("plan mode blocked read-only %q: %s", cmd, d.Message)
@@ -338,6 +415,7 @@ func TestPlanModeAllowsSharedReadOnlyBashSet(t *testing.T) {
 		"go build ./...", "npm install",
 		"git status && rm -rf /", "git status > out.txt",
 		"git grep foo --open-files-in-pager=sh", "go list ./... -mod=mod",
+		"echo $HOME",
 	} {
 		if d := (Policy{}).Decide(bash(cmd)); !d.Blocked {
 			t.Errorf("plan mode allowed unsafe %q", cmd)

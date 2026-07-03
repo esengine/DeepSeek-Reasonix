@@ -1,6 +1,6 @@
 // Run: tsx src/__tests__/context-panel-breakdown.test.ts
 
-import { cacheHitTone, contextBreakdown, contextCostDisplay, contextSourceRows, contextWindowStatus, formatCacheHitRate, formatMetricTokens } from "../components/ContextPanel";
+import { cacheHitTone, contextBreakdown, contextCostDisplay, contextSourceRows, contextUsageRefreshKey, contextWindowStatus, formatCacheHitRate, formatMetricTokens } from "../components/ContextPanel";
 import { currencySymbol, formatMoney, formatMoneyLocalized } from "../lib/money";
 
 let passed = 0;
@@ -129,6 +129,28 @@ eq(cacheHitTone(8700, 1300), "good", "healthy cache hit rate uses positive tone"
 eq(cacheHitTone(6000, 4000), "notice", "mid cache hit rate uses notice tone");
 eq(cacheHitTone(5999, 4001), "warn", "low cache hit rate uses warning tone");
 eq(cacheHitTone(0, 0), undefined, "missing cache data stays uncolored");
+
+console.log("\ncontext panel usage refresh key");
+
+eq(contextUsageRefreshKey(undefined), "", "missing usage does not request a streaming refresh");
+ok(
+  contextUsageRefreshKey({
+    totalTokens: 10,
+    promptTokens: 10,
+    completionTokens: 0,
+    reasoningTokens: 0,
+    sessionCacheHitTokens: 0,
+    sessionCacheMissTokens: 0,
+  }) !== contextUsageRefreshKey({
+    totalTokens: 11,
+    promptTokens: 10,
+    completionTokens: 1,
+    reasoningTokens: 0,
+    sessionCacheHitTokens: 0,
+    sessionCacheMissTokens: 0,
+  }),
+  "general token changes refresh even when cache counters stay unchanged",
+);
 
 console.log("\ncontext panel source rows");
 

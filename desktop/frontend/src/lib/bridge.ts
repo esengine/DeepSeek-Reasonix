@@ -304,6 +304,7 @@ export interface AppBindings {
   SetPermissionMode(mode: string): Promise<void>;
   AddPermissionRule(list: string, rule: string): Promise<void>;
   RemovePermissionRule(list: string, rule: string): Promise<void>;
+  ReloadSettings(): Promise<void>;
   SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string): Promise<void>;
   SetNetwork(n: NetworkView): Promise<void>;
   SetBotSettings(b: BotSettingsView): Promise<void>;
@@ -906,7 +907,7 @@ function makeMockApp(): AppBindings {
       { name: "deepseek", builtIn: true, added: false, kind: "openai", baseUrl: "https://api.deepseek.com", modelsUrl: "", models: ["deepseek-v4-flash", "deepseek-v4-pro"], visionModels: [], visionModelsConfigured: false, default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: true, balanceUrl: "https://api.deepseek.com/user/balance", contextWindow: 1_000_000, reasoningProtocol: "", thinking: "", supportedEfforts: [], defaultEffort: "" },
     ],
     permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["Bash(rm:*)"] },
-    sandbox: { bash: "enforce", network: true, workspaceRoot: "", allowWrite: [], shell: "auto" },
+    sandbox: { bash: "enforce", network: true, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: cwd, effectiveWriteRoots: [cwd], shell: "auto" },
     network: {
       proxyMode: "auto",
       proxyUrl: "",
@@ -2845,8 +2846,10 @@ function makeMockApp(): AppBindings {
       const k = list as "allow" | "ask" | "deny";
       settings.permissions[k] = settings.permissions[k].filter((r) => r !== rule);
     },
+        async ReloadSettings() {},
         async SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string) {
-          settings.sandbox = { bash, network, workspaceRoot, allowWrite, shell };
+          const effectiveWorkspaceRoot = workspaceRoot.trim() || cwd;
+          settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell };
         },
         async SetNetwork(n: NetworkView) {
           settings.network = n;

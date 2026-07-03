@@ -74,11 +74,13 @@ type PermissionsView struct {
 }
 
 type SandboxView struct {
-	Bash          string   `json:"bash"`
-	Network       bool     `json:"network"`
-	WorkspaceRoot string   `json:"workspaceRoot"`
-	AllowWrite    []string `json:"allowWrite"`
-	Shell         string   `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
+	Bash                   string   `json:"bash"`
+	Network                bool     `json:"network"`
+	WorkspaceRoot          string   `json:"workspaceRoot"`
+	AllowWrite             []string `json:"allowWrite"`
+	EffectiveWorkspaceRoot string   `json:"effectiveWorkspaceRoot"`
+	EffectiveWriteRoots    []string `json:"effectiveWriteRoots"`
+	Shell                  string   `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
 }
 
 type NetworkProxyView struct {
@@ -526,7 +528,7 @@ func (a *App) Settings() SettingsView {
 				Ask:   []string{},
 				Deny:  []string{},
 			},
-			Sandbox:                 SandboxView{Bash: "enforce", AllowWrite: []string{}, Shell: "auto"},
+			Sandbox:                 SandboxView{Bash: "enforce", AllowWrite: []string{}, EffectiveWriteRoots: []string{}, Shell: "auto"},
 			Agent:                   AgentView{PlannerMaxSteps: 0, MaxSubagentDepth: agent.DefaultMaxSubagentDepth, ColdResumePrune: true, ReasoningLanguage: "auto"},
 			Bot:                     botSettingsView(config.BotConfig{}),
 			AutoPlan:                "off",
@@ -554,6 +556,12 @@ func (a *App) Settings() SettingsView {
 	if shell == "" {
 		shell = "auto"
 	}
+	root := a.activeWorkspaceRoot()
+	writeRoots := cfg.WriteRootsForRoot(root)
+	effectiveWorkspaceRoot := ""
+	if len(writeRoots) > 0 {
+		effectiveWorkspaceRoot = writeRoots[0]
+	}
 	v := SettingsView{
 		DefaultModel:      cfg.DefaultModel,
 		PlannerModel:      cfg.Agent.PlannerModel,
@@ -571,6 +579,7 @@ func (a *App) Settings() SettingsView {
 		Sandbox: SandboxView{
 			Bash: bash, Network: cfg.Sandbox.Network,
 			WorkspaceRoot: cfg.Sandbox.WorkspaceRoot, AllowWrite: nonNil(cfg.Sandbox.AllowWrite),
+			EffectiveWorkspaceRoot: effectiveWorkspaceRoot, EffectiveWriteRoots: nonNil(writeRoots),
 			Shell: shell,
 		},
 		Network: NetworkView{
@@ -607,7 +616,6 @@ func (a *App) Settings() SettingsView {
 		Bypass:                  ctrl != nil && ctrl.AutoApproveTools(),
 	}
 	added := providerAccessSet(cfg.Desktop.ProviderAccess)
-	root := a.activeWorkspaceRoot()
 	resolver := config.NewCredentialResolverForRoot(root)
 	v.OfficialProviders = officialProviderViewsForRootWithResolver(officialProviderAddedSet(cfg), cfg.DeepSeekOfficialPricingLanguage(), root, resolver)
 	for i := range cfg.Providers {
@@ -1794,6 +1802,15 @@ func (a *App) RemovePermissionRule(list, rule string) error {
 		_, err := c.RemovePermissionRule(list, rule)
 		return err
 	})
+}
+
+// ReloadSettings rebuilds the active controller from the current config without
+// changing any config file. It lets manual config.toml edits take effect.
+func (a *App) ReloadSettings() error {
+	if err := a.ensureActiveTabRebuildAllowed("settings"); err != nil {
+		return err
+	}
+	return a.rebuild()
 }
 
 // SetSandbox updates the bash sandbox mode, network egress, and write roots.

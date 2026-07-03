@@ -3837,7 +3837,7 @@ func (m *chatTUI) showSandboxStatus() {
 	b.WriteString("  phase 1  OS bash sandbox\n")
 	fmt.Fprintf(&b, "    bash        %s", bash)
 	if bash == "enforce" && !available {
-		b.WriteString(" (inactive: no OS sandbox on this host — bash runs unconfined)")
+		b.WriteString(" (unavailable: no OS sandbox on this host — bash execution is refused)")
 	}
 	b.WriteString("\n")
 	fmt.Fprintf(&b, "    network     %v\n", network)

@@ -453,13 +453,14 @@ edits stay in the project), resolving symlinks and `..` so a link can't tunnel
 out. `forbid_read` optionally hides sensitive directories from the agent's
 read/list/search tools; use absolute paths or `${HOME}` / `${VAR}` references,
 not `~`, because config expansion is environment-variable based. `bash` is
-itself jailed on macOS by default (`[sandbox] bash`, Seatbelt): commands may
-write only those same roots (plus temp and toolchain caches), cannot read
-configured `forbid_read` roots while the OS sandbox is active, and reach the
-network only when `[sandbox] network` is set. Other platforms fall back to
-running unconfined when no OS sandbox is available (see
+itself jailed by default when an OS sandbox is available (`[sandbox] bash`,
+Seatbelt on macOS and bubblewrap on Linux): commands may write only those same
+roots (plus temp and toolchain caches), cannot read configured `forbid_read`
+roots while the OS sandbox is active, and reach the network only when
+`[sandbox] network` is set. When no OS sandbox is available, `bash = "enforce"`
+refuses bash execution instead of running unconfined (see
 [`SPEC.md` §9](./SPEC.md#9-roadmap-not-in-current-scope) for the escape-prompt and
-Linux support still to come).
+broader OS support still to come).
 
 ## Plugins (MCP)
 
