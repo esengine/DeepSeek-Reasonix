@@ -1025,6 +1025,8 @@ export const en = {
   "settings.autoPlan.on": "On",
   "settings.memoryCompiler": "Memory v5",
   "settings.memoryCompilerHint": "Use the execution memory compiler to generate and improve action plans from past outcomes.",
+  "settings.centralizeProjectData": "Centralized project data",
+  "settings.centralizeProjectDataHint": "Store .reasonix data in the Reasonix user data directory instead of each project folder, keeping your project directories clean.",
   "settings.agentRuntime": "Agent runtime",
   "settings.agentRuntimeHint": "Step limits use global settings only; ./reasonix.toml does not override them. 0 means unlimited.",
   "settings.executorMaxSteps": "Executor step limit",

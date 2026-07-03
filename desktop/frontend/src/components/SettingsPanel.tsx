@@ -1023,6 +1023,7 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     statusBarItems: normalizeStatusBarItems(view.statusBarItems),
     checkUpdates: view.checkUpdates !== false,
     memoryCompilerEnabled: view.memoryCompilerEnabled !== false,
+    centralizeProjectData: Boolean(view.centralizeProjectData),
   };
 }
 
@@ -1154,6 +1155,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   const autoPlan = normalizeAutoPlan(s.autoPlan);
   const defaultToolApprovalMode = normalizeToolApprovalMode(s.defaultToolApprovalMode);
   const memoryCompilerEnabled = s.memoryCompilerEnabled !== false;
+  const centralizeProjectData = s.centralizeProjectData === true;
   const languagePref = normalizeLangPref(s.desktopLanguage);
   const desktopLayoutStyle = normalizeDesktopLayoutStyle(s.desktopLayoutStyle);
   const [genMusicPreset, setGenMusicPreset] = useState<GenerativePreset>(getGenerativePreset());
@@ -1404,6 +1406,13 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           value={memoryCompilerEnabled}
           disabled={busy}
           onChange={(enabled) => void apply(() => app.SetMemoryCompilerEnabled(enabled))}
+        />
+      </SettingsField>
+      <SettingsField label={t("settings.centralizeProjectData")} hint={t("settings.centralizeProjectDataHint")}>
+        <ToggleSegment
+          value={centralizeProjectData}
+          disabled={busy}
+          onChange={(centralize) => void apply(() => app.SetProjectStorage(centralize))}
         />
       </SettingsField>
       <SettingsField label={t("settings.sound")} hint={t("settings.soundHint")} stacked>

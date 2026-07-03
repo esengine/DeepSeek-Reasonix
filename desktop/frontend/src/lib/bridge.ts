@@ -329,6 +329,8 @@ export interface AppBindings {
   SetDesktopMetrics(enabled: boolean): Promise<void>;
   SetMemoryCompilerEnabled(enabled: boolean): Promise<void>;
   SetExpandThinking(on: boolean): Promise<void>;
+  SetDesktopProjectStorage(centralized: boolean): Promise<void>;
+  SetProjectStorage(centralized: boolean): Promise<void>;
   MigrateDesktopPreferences(language: string, theme: string, style: string): Promise<void>;
   SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
   SetColdResumePrune(enabled: boolean): Promise<void>;
@@ -607,7 +609,7 @@ function bridgeBreadcrumb(method: string): string {
     return `turn ${method}`;
   if (/^(SetModel|SetEffort|SetTokenMode|SetDefaultModel|SetPlannerModel|SetSubagentModel|SetSubagentEffort|SetMaxSubagentDepth)/.test(method))
     return `model ${method}`;
-  if (/^(SetDesktop|SetCloseBehavior|SetDisplayMode|SetStatusBar|SetExpandThinking|SetAutoPlan|SetDefaultToolApprovalMode|SetMemoryCompilerEnabled|SetReasoningLanguage)/.test(method))
+  if (/^(SetDesktop|SetCloseBehavior|SetDisplayMode|SetStatusBar|SetExpandThinking|SetDesktopProjectStorage|SetProjectStorage|SetAutoPlan|SetDefaultToolApprovalMode|SetMemoryCompilerEnabled|SetReasoningLanguage)/.test(method))
     return `settings ${method}`;
   if (/^(SaveProvider|AddOfficialProviderAccess|RemoveProviderAccess|DeleteProvider|SetProviderKey|ClearProviderKey|FetchProviderModels|ConnectKey)/.test(method))
     return `provider ${method}`;
@@ -1032,6 +1034,7 @@ function makeMockApp(): AppBindings {
     telemetry: true,
     metrics: true,
     memoryCompilerEnabled: true,
+    centralizeProjectData: false,
     configPath: "~/projects/reasonix/reasonix.toml",
     providerKinds: ["openai"],
     autoApproveTools: false,
@@ -2989,6 +2992,12 @@ function makeMockApp(): AppBindings {
           settings.memoryCompilerEnabled = enabled;
         },
         async SetExpandThinking(_on: boolean) {},
+        async SetDesktopProjectStorage(centralized: boolean) {
+          settings.centralizeProjectData = centralized;
+        },
+        async SetProjectStorage(centralize: boolean) {
+          settings.centralizeProjectData = centralize;
+        },
         async MigrateDesktopPreferences(language: string, theme: string, style: string) {
           if (!settings.desktopLanguage) settings.desktopLanguage = language === "en" || language === "zh" || language === "zh-TW" ? language : "";
           if (!settings.desktopTheme && !settings.desktopThemeStyle) {

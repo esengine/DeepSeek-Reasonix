@@ -150,9 +150,11 @@ func ProjectSettingsPath(projectRoot string) string {
 }
 
 // LoadOptions configure Load. Project hooks load only when Trusted; global hooks
-// always load.
+// always load. When SettingsRoot is set, project hooks settings are read from
+// SettingsRoot instead of ProjectRoot (used for centralized project storage).
 type LoadOptions struct {
-	ProjectRoot string
+	ProjectRoot  string
+	SettingsRoot string // optional: overrides ProjectRoot for settings.json lookup
 	HomeDir     string
 	Trusted     bool
 }
@@ -163,7 +165,11 @@ type LoadOptions struct {
 func Load(opts LoadOptions) []ResolvedHook {
 	var out []ResolvedHook
 	if opts.ProjectRoot != "" && opts.Trusted {
-		p := ProjectSettingsPath(opts.ProjectRoot)
+		settingsRoot := opts.SettingsRoot
+		if settingsRoot == "" {
+			settingsRoot = opts.ProjectRoot
+		}
+		p := ProjectSettingsPath(settingsRoot)
 		if s := readSettings(p); s != nil {
 			appendResolved(&out, s, ScopeProject, p)
 		}

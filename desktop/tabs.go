@@ -3795,34 +3795,73 @@ func removeProject(root string) error {
 
 // --- topic helpers ----------------------------------------------------------
 
-const (
+var (
 	topicTitlesFile        = "desktop-topic-titles.json"
 	topicTitleSourcesFile  = "desktop-topic-title-sources.json"
 	topicCreatedAtsFile    = "desktop-topic-created-at.json"
 	defaultTopicTitle      = "新的会话"
 	topicTitleSourceAuto   = "auto"
 	topicTitleSourceManual = "manual"
+
+	// projectDataRootOverride is set by the desktop app to redirect project data
+	// (.reasonix) to a centralized directory instead of the project root. When
+	// non-nil, topic path functions call it with the workspace root to get the
+	// effective data root. Nil = local mode (current default).
+	projectDataRootOverride func(workspaceRoot string) string
 )
 
-func topicTitlesPath(workspaceRoot string) string {
+// SetProjectDataRoot sets the project data root override used by topic path
+// functions. The override should return the ".reasonix"-equivalent directory:
+// for local mode this is <workspaceRoot>/.reasonix, for centralized mode it is
+// the slug directory without the .reasonix suffix. Pass nil to revert to local
+// mode.
+func SetProjectDataRoot(fn func(workspaceRoot string) string) {
+	projectDataRootOverride = fn
+}
+
+func topicDir(workspaceRoot string) (dir string, dotReasonix bool) {
 	if workspaceRoot == "" {
+		return "", false
+	}
+	if fn := projectDataRootOverride; fn != nil {
+		if r := fn(workspaceRoot); r != "" {
+			return r, false // override already points to the .reasonix-equivalent dir
+		}
+	}
+	return workspaceRoot, true // local mode: need to append .reasonix
+}
+
+func topicTitlesPath(workspaceRoot string) string {
+	dir, dot := topicDir(workspaceRoot)
+	if dir == "" {
 		return filepath.Join(desktopConfigDir(), "global", topicTitlesFile)
 	}
-	return filepath.Join(workspaceRoot, ".reasonix", topicTitlesFile)
+	if dot {
+		dir = filepath.Join(dir, ".reasonix")
+	}
+	return filepath.Join(dir, topicTitlesFile)
 }
 
 func topicTitleSourcesPath(workspaceRoot string) string {
-	if workspaceRoot == "" {
+	dir, dot := topicDir(workspaceRoot)
+	if dir == "" {
 		return filepath.Join(desktopConfigDir(), "global", topicTitleSourcesFile)
 	}
-	return filepath.Join(workspaceRoot, ".reasonix", topicTitleSourcesFile)
+	if dot {
+		dir = filepath.Join(dir, ".reasonix")
+	}
+	return filepath.Join(dir, topicTitleSourcesFile)
 }
 
 func topicCreatedAtsPath(workspaceRoot string) string {
-	if workspaceRoot == "" {
+	dir, dot := topicDir(workspaceRoot)
+	if dir == "" {
 		return filepath.Join(desktopConfigDir(), "global", topicCreatedAtsFile)
 	}
-	return filepath.Join(workspaceRoot, ".reasonix", topicCreatedAtsFile)
+	if dot {
+		dir = filepath.Join(dir, ".reasonix")
+	}
+	return filepath.Join(dir, topicCreatedAtsFile)
 }
 
 const topicFileReadTimeout = 200 * time.Millisecond

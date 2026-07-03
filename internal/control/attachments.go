@@ -25,6 +25,17 @@ var attachmentPathSeq atomic.Uint64
 var attachmentNow = time.Now
 var safeAttachmentExt = regexp.MustCompile(`^\.[a-z0-9]{1,12}$`)
 
+// attachmentRootOverride redirects the attachment storage root for centralized
+// project storage. When true, attachments are stored under <CWD>/attachments/
+// instead of <CWD>/.reasonix/attachments/.
+var attachmentRootOverride bool
+
+// SetAttachmentRoot sets whether to use the centralized attachment root
+// (attachments/ instead of .reasonix/attachments/).
+func SetAttachmentRoot(centralized bool) {
+	attachmentRootOverride = centralized
+}
+
 // SaveAttachmentDataURL stores a non-image file (dropped/pasted in the desktop
 // app, where the browser exposes bytes but not a real path) under
 // .reasonix/attachments and returns its repo-relative path for @referencing.
@@ -338,9 +349,9 @@ func cleanAttachmentPath(path string) (string, error) {
 		return "", fmt.Errorf("attachment path must be relative")
 	}
 	clean := filepath.Clean(filepath.FromSlash(path))
-	root := filepath.Join(".reasonix", "attachments")
+	root := attachmentRoot()
 	if clean == "." || clean == root || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || !strings.HasPrefix(clean, root+string(filepath.Separator)) {
-		return "", fmt.Errorf("attachment path is outside .reasonix/attachments")
+		return "", fmt.Errorf("attachment path is outside %s", root)
 	}
 	if err := ensureAttachmentRoot(); err != nil {
 		return "", err
@@ -376,8 +387,15 @@ func rejectSymlinkComponents(path, root string) error {
 	return nil
 }
 
+func attachmentRoot() string {
+	if attachmentRootOverride {
+		return "attachments"
+	}
+	return filepath.Join(".reasonix", "attachments")
+}
+
 func ensureAttachmentRoot() error {
-	root := filepath.Join(".reasonix", "attachments")
+	root := attachmentRoot()
 	if info, err := os.Lstat(root); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("attachment directory must not be a symlink")
@@ -477,7 +495,7 @@ func createAttachmentFile(ext string) (string, *os.File, error) {
 func attachmentPath(ext string) string {
 	seq := attachmentPathSeq.Add(1)
 	name := fmt.Sprintf("clipboard-%s-%06d%s", attachmentNow().Format("20060102-150405.000000"), seq, ext)
-	return filepath.Join(".reasonix", "attachments", name)
+	return filepath.Join(attachmentRoot(), name)
 }
 
 func detectedImageMime(raw []byte) string {

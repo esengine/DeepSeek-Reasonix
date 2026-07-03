@@ -111,7 +111,8 @@ func classifyRef(token string, known map[string]bool, exists func(string) bool) 
 }
 
 func isAttachmentRef(token string) bool {
-	return strings.HasPrefix(filepath.ToSlash(token), ".reasonix/attachments/")
+	path := filepath.ToSlash(token)
+	return strings.HasPrefix(path, ".reasonix/attachments/") || strings.HasPrefix(path, "attachments/")
 }
 
 func isImageAttachmentRef(token string) bool {

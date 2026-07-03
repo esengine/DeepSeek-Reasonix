@@ -1135,6 +1135,7 @@ export interface SettingsView {
   telemetry: boolean; // anonymous launch ping (install id + version + OS)
   metrics: boolean; // aggregate desktop metrics (anonymous signal/bucket counts)
   memoryCompilerEnabled: boolean; // Memory v5 execution compiler
+  centralizeProjectData: boolean; // true = store .reasonix in user data dir (projects stay clean)
   configPath: string;
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
   autoApproveTools: boolean;

@@ -320,6 +320,13 @@ func (c *Config) SetDesktopCheckUpdates(enabled bool) error {
 	return nil
 }
 
+// SetDesktopCentralizeProjectData sets whether project data (.reasonix) is stored
+// centrally in the Reasonix user data dir instead of inside the project directory.
+func (c *Config) SetDesktopCentralizeProjectData(centralize bool) error {
+	c.Desktop.CentralizeProjectData = centralize
+	return nil
+}
+
 // SetColdResumePrune toggles auto-elision of stale tool results on cold resume.
 func (c *Config) SetColdResumePrune(enabled bool) error {
 	c.Agent.ColdResumePrune = &enabled

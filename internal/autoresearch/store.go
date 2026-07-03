@@ -18,6 +18,17 @@ import (
 var safeTaskID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 var explicitTaskPath = regexp.MustCompile(`\.reasonix/autoresearch/([A-Za-z0-9][A-Za-z0-9._-]*)/?`)
 
+// projectDataRootOverride redirects the autoresearch store root for centralized
+// project storage. When non-nil, it is called with the workspace root to get the
+// effective data root for .reasonix data. Set via SetProjectDataRootOverride.
+var projectDataRootOverride func(workspaceRoot string) string
+
+// SetProjectDataRootOverride sets the project data root override used by the
+// autoresearch store. Pass nil to revert to local mode (default).
+func SetProjectDataRootOverride(fn func(workspaceRoot string) string) {
+	projectDataRootOverride = fn
+}
+
 type Store struct {
 	workspaceRoot string
 	root          string
@@ -29,9 +40,15 @@ func NewStore(workspaceRoot string) *Store {
 	if resolved, err := filepath.EvalSymlinks(workspaceRoot); err == nil {
 		workspaceRoot = resolved
 	}
+	storeRoot := workspaceRoot
+	if fn := projectDataRootOverride; fn != nil {
+		if r := fn(workspaceRoot); r != "" {
+			storeRoot = r
+		}
+	}
 	return &Store{
 		workspaceRoot: workspaceRoot,
-		root:          filepath.Join(workspaceRoot, ".reasonix", "autoresearch"),
+		root:          filepath.Join(storeRoot, ".reasonix", "autoresearch"),
 		taskLocks:     map[string]*sync.Mutex{},
 	}
 }

@@ -101,6 +101,7 @@ type DesktopConfig struct {
 	Metrics                 *bool    `toml:"metrics"`                    // aggregate desktop metrics (anonymous signal/bucket counts; no content); nil keeps the default enabled
 	ProviderAccess          []string `toml:"provider_access"`            // desktop-only list of provider entries shown in Settings > Model > Access
 	ExpandThinking          bool     `toml:"expand_thinking"`            // true = show reasoning text expanded by default; false = collapsed
+	CentralizeProjectData   bool     `toml:"centralize_project_data"`    // true = store .reasonix in user data dir; false = local (default)
 }
 
 // NotificationsConfig controls optional system notifications for CLI chat/run.
@@ -372,6 +373,16 @@ func (c *Config) DesktopCheckUpdates() bool {
 		return true
 	}
 	return *c.Desktop.CheckUpdates
+}
+
+// DesktopCentralizeProjectData reports whether project data (.reasonix) should
+// be stored centrally in the Reasonix user data directory rather than inside
+// each project directory. Default false (local storage).
+func (c *Config) DesktopCentralizeProjectData() bool {
+	if c == nil {
+		return false
+	}
+	return c.Desktop.CentralizeProjectData
 }
 
 // ColdResumePruneEnabled reports whether stale tool results are elided when a
