@@ -811,6 +811,8 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 		"goal":             s.ctl().Goal(),
 		"goalStatus":       s.ctl().GoalStatus(),
 		"cwd":              s.ctl().SessionDir(),
+		"workspaceRoot":    s.ctl().WorkspaceRoot(),
+		"sessionDir":       s.ctl().SessionDir(),
 		"used":             used,
 		"window":           window,
 		"cacheHit":         hit,

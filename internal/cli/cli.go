@@ -338,8 +338,12 @@ func runServe(args []string) int {
 	maxSteps := fs.Int("max-steps", 0, "max tool-call rounds (0 = use config/default)")
 	addr := fs.String("addr", "127.0.0.1:8787", "listen address")
 	resume := fs.String("resume", "", "resume a saved session file")
+	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if rc := chdirTo(*dir); rc != 0 {
+		return rc
 	}
 
 	ctx := context.Background()
