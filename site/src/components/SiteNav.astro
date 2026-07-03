@@ -1,0 +1,37 @@
+---
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const {
+  active = '',
+  scrolled = false,
+  showSignIn = false,
+  showInstall = false,
+  showPublish = false,
+  accountSlot = false,
+} = Astro.props;
+
+const homeHash = (id) => active === 'home' ? `#${id}` : `${base}/#${id}`;
+const startHref = active === 'home' ? '#start' : `${base}/#start`;
+const linkClass = (key) => active === key ? 'here' : undefined;
+---
+
+<header class={scrolled ? 'nav scrolled' : 'nav'}>
+  <div class="nav-inner">
+    <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="Reasonix logo" /><span>Reasonix</span></a>
+    <nav class="nav-links">
+      <a href={homeHash('features')}><span class="l-en">Features</span><span class="l-zh">特性</span></a>
+      <a href={homeHash('how')}><span class="l-en">How it works</span><span class="l-zh">工作原理</span></a>
+      <a href={`${base}/skills/`} class={linkClass('skills')}><span class="l-en">Skills</span><span class="l-zh">技能市场</span></a>
+      <a href={homeHash('community')}><span class="l-en">Community</span><span class="l-zh">社区</span></a>
+      <a href={`${base}/docs/`} class={linkClass('docs')}><span class="l-en">Docs</span><span class="l-zh">文档</span></a>
+      <a href={startHref}><span class="l-en">Get started</span><span class="l-zh">快速开始</span></a>
+    </nav>
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button type="button" data-lang="en" class="active">EN</button>
+      <button type="button" data-lang="zh">中文</button>
+    </div>
+    {accountSlot && <span class="nav-acct" data-account-slot></span>}
+    {showSignIn && <a class="btn btn-ghost" href={`${base}/login/`}><span class="l-en">Sign in</span><span class="l-zh">登录</span></a>}
+    {showPublish && <a class="btn btn-dark" id="publish-open" href="#publish"><span class="l-en">Publish</span><span class="l-zh">发布</span></a>}
+    {showInstall && <a class="btn btn-dark" href={startHref}><span class="l-en">Install</span><span class="l-zh">安装</span></a>}
+  </div>
+</header>
