@@ -2011,9 +2011,11 @@ func (a *App) SetProjectStorage(centralize bool) error {
 			}
 			SetProjectDataRoot(fn)
 			autoresearch.SetProjectDataRootOverride(fn)
+			control.SetAttachmentRoot(true)
 		} else {
 			SetProjectDataRoot(nil)
 			autoresearch.SetProjectDataRootOverride(nil)
+			control.SetAttachmentRoot(false)
 		}
 		return nil
 	})

@@ -370,6 +370,7 @@ func (a *App) startup(ctx context.Context) {
 			}
 			SetProjectDataRoot(fn)
 			autoresearch.SetProjectDataRootOverride(fn)
+			control.SetAttachmentRoot(true)
 		}
 	}
 
