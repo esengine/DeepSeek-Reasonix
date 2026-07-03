@@ -240,6 +240,51 @@ func TestListSessionsSkipsNonJSONL(t *testing.T) {
 	}
 }
 
+func TestListSessionsShowsCorruptedSession(t *testing.T) {
+	dir := t.TempDir()
+	corrupted := filepath.Join(dir, "corrupted.jsonl")
+	// A non-empty file that is not valid JSONL — e.g., truncated mid-write.
+	if err := os.WriteFile(corrupted, []byte(`{"role":"user","content":[`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Write a sidecar with turns=0 (recorded as authoritative). ListSessions
+	// trusts the sidecar count, sees 0 turns, then discovers the file is
+	// non-empty and unloadable → shows it with a corruption warning (#5794).
+	_ = UpdateSessionMeta(corrupted, "", "", 0, false)
+
+	sessions, err := ListSessions(dir)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("corrupted session should be visible, got %d sessions", len(sessions))
+	}
+	if sessions[0].Turns != 1 {
+		t.Errorf("corrupted session should have non-zero turns to appear in sidebar, got %d", sessions[0].Turns)
+	}
+	if !strings.Contains(sessions[0].Preview, "corrupted") {
+		t.Errorf("preview should indicate corruption, got %q", sessions[0].Preview)
+	}
+}
+
+func TestListSessionsSkipsEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	empty := filepath.Join(dir, "empty.jsonl")
+	if err := os.WriteFile(empty, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Write a sidecar so the file is picked up.
+	_ = UpdateSessionMeta(empty, "", "", 0, false)
+
+	sessions, err := ListSessions(dir)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Errorf("empty (0-byte) files should still be skipped, got %d sessions", len(sessions))
+	}
+}
+
 // --- previewSession ---
 
 func TestPreviewSession(t *testing.T) {

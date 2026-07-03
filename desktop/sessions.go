@@ -84,6 +84,11 @@ func saveSessionTitles(dir string, m map[string]string) error {
 		os.Remove(tmpPath)
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpPath)
 		return err
@@ -842,6 +847,11 @@ func saveSessionDisplays(dir string, m sessionDisplayMap) error {
 	}
 	tmpPath := tmp.Name()
 	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		os.Remove(tmpPath)
 		return err

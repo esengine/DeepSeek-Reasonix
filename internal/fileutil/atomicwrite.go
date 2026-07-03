@@ -94,12 +94,35 @@ func copyOnto(tmp, dest string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(dest, data, info.Mode().Perm()); err != nil {
+	// Write to a sibling temp file, fsync, then rename atomically — never
+	// truncate the destination directly with os.WriteFile, which would leave
+	// a corrupted/empty file on crash or power loss (#5794).
+	tmp2, err := os.CreateTemp(filepath.Dir(dest), ".atomic-copy-*.tmp")
+	if err != nil {
 		return err
 	}
-	// WriteFile keeps an existing dest's mode, so re-apply tmp's mode to match
-	// what the rename would have done (a 0600 config tmp must not widen to 0644).
-	_ = os.Chmod(dest, info.Mode().Perm())
+	tmp2Path := tmp2.Name()
+	cleanup := func() { tmp2.Close(); os.Remove(tmp2Path) }
+	if _, err := tmp2.Write(data); err != nil {
+		cleanup()
+		return err
+	}
+	if err := tmp2.Sync(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := tmp2.Close(); err != nil {
+		os.Remove(tmp2Path)
+		return err
+	}
+	if err := os.Chmod(tmp2Path, info.Mode().Perm()); err != nil {
+		os.Remove(tmp2Path)
+		return err
+	}
+	if err := os.Rename(tmp2Path, dest); err != nil {
+		os.Remove(tmp2Path)
+		return err
+	}
 	_ = os.Remove(tmp)
 	return nil
 }

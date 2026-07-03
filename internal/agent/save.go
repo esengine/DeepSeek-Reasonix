@@ -45,6 +45,11 @@ func (s *Session) Save(path string) error {
 			return fmt.Errorf("encode message: %w", err)
 		}
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("fsync session tmp: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpPath)
 		return err
@@ -359,6 +364,26 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 			_ = UpdateSessionMeta(session.Path, "", preview, turns, false)
 		}
 		if turns == 0 {
+			// A non-empty file that previewSession couldn't extract any user
+			// turns from may be corrupted. Attempt LoadSession to distinguish
+			// "genuinely empty" from "corrupted beyond decoding" (#5794).
+			if fi, err := os.Stat(session.Path); err == nil && fi.Size() > 0 {
+				if _, loadErr := LoadSession(session.Path); loadErr != nil {
+					out = append(out, SessionInfo{
+						Path:           session.Path,
+						CreatedAt:      session.CreatedAt,
+						LastActivityAt: session.LastActivityAt,
+						ModTime:        session.ModTime,
+						Preview:        "⚠️ Session may be corrupted — check " + filepath.Base(session.Path),
+						Turns:          1, // non-zero so it appears in the sidebar
+						Scope:          session.Scope,
+						WorkspaceRoot:  session.WorkspaceRoot,
+						TopicID:        session.TopicID,
+						TopicTitle:     session.TopicTitle,
+					})
+					continue
+				}
+			}
 			// Never had user interaction — an empty conversation that should not
 			// appear in the history panel or the resume picker.
 			continue
