@@ -305,9 +305,15 @@ func ProjectSessionDir(workspaceRoot string) string {
 // ProjectDotReasonixDir returns the directory that serves as the ".reasonix"
 // equivalent for a project. In local mode this is <workspaceRoot>/.reasonix.
 // In centralized mode this is <dataRoot>/projects/<slug>/ — no .reasonix
-// subdirectory, files go directly under the slug.
+// subdirectory, files go directly under the slug. Backward compatibility:
+// if the project already has a .reasonix directory from an older version,
+// it is used regardless of the centralize flag.
 func ProjectDotReasonixDir(workspaceRoot string, centralize bool) string {
 	if !centralize {
+		return filepath.Join(workspaceRoot, ".reasonix")
+	}
+	// Backward compatibility: if project already has .reasonix, keep it.
+	if info, err := os.Stat(filepath.Join(workspaceRoot, ".reasonix")); err == nil && info.IsDir() {
 		return filepath.Join(workspaceRoot, ".reasonix")
 	}
 	base := MemoryUserDir()
@@ -322,29 +328,24 @@ func ProjectDotReasonixDir(workspaceRoot string, centralize bool) string {
 }
 
 // ProjectConfigPath returns the path to the project's reasonix.toml config
-// file. When centralize is true, the config is stored under the Reasonix user
-// data dir (<state root>/projects/<slug>/reasonix.toml) instead of the project
-// root, keeping the project directory clean. Backward compatibility: if the
-// project already has a reasonix.toml from an older version, it is used
+// file. In local mode this is <workspaceRoot>/.reasonix/reasonix.toml.
+// In centralized mode this is <dataRoot>/projects/<slug>/reasonix.toml.
+// Backward compatibility: if the project has a legacy reasonix.toml at the
+// project root (from an older version), that path is returned instead,
 // regardless of the centralize flag.
 func ProjectConfigPath(workspaceRoot string, centralize bool) string {
-	projectPath := filepath.Join(workspaceRoot, "reasonix.toml")
-	if !centralize {
-		return projectPath
+	dir := ProjectDotReasonixDir(workspaceRoot, centralize)
+	path := filepath.Join(dir, "reasonix.toml")
+	// If the file already exists at the canonical location, use it.
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		return path
 	}
-	// If the project already has a reasonix.toml, keep using it.
-	if info, err := os.Stat(projectPath); err == nil && !info.IsDir() {
-		return projectPath
+	// Backward compatibility: check for legacy reasonix.toml at project root.
+	legacy := filepath.Join(workspaceRoot, "reasonix.toml")
+	if info, err := os.Stat(legacy); err == nil && !info.IsDir() {
+		return legacy
 	}
-	base := MemoryUserDir()
-	root := strings.TrimSpace(workspaceRoot)
-	if base == "" || root == "" {
-		return projectPath
-	}
-	if abs, err := filepath.Abs(root); err == nil {
-		root = abs
-	}
-	return filepath.Join(base, "projects", WorkspaceSlug(root), "reasonix.toml")
+	return path
 }
 
 // ProjectDataRoot returns the directory root under which project-local data
