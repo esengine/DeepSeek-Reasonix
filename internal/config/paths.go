@@ -313,6 +313,11 @@ func ProjectDataRoot(workspaceRoot string, centralize bool) string {
 	if !centralize {
 		return workspaceRoot
 	}
+	// If the project already has a .reasonix directory (created by an older
+	// version), keep using the project-local path for backward compatibility.
+	if info, err := os.Stat(filepath.Join(workspaceRoot, ".reasonix")); err == nil && info.IsDir() {
+		return workspaceRoot
+	}
 	base := MemoryUserDir()
 	root := strings.TrimSpace(workspaceRoot)
 	if base == "" || root == "" {
