@@ -1212,10 +1212,9 @@ export function Composer({
         ...currentWorkspaceRefs.map((ref) => formatWorkspaceReference(ref.displayPath || ref.path, ref.isDir)),
         ...orderedAttachments.map(formatAttachmentDisplayReference),
       ].join(" ");
-      const displayText = [trimmedText, displayRefs].filter(Boolean).join(trimmedText && displayRefs ? " " : "");
+      const displayText = [expandPastedBlocks(trimmedText), displayRefs].filter(Boolean).join(trimmedText && displayRefs ? " " : "");
       // PR-B: when past:chats refs are attached, prepend their formatted transcript
-      // to submitText only (displayText stays unchanged so the user still sees their
-      // original prompt in the input preview). With no refs we keep the original
+      // to submitText only (displayText now also expands pasted blocks for AI context).
       // submitText verbatim — no header, no rewording, byte-identical to pre-PR-B.
       const currentSessionRefs = sessionRefsRef.current;
       const sessionContext = currentSessionRefs.length === 0 ? "" : await buildSessionContext(currentSessionRefs);
