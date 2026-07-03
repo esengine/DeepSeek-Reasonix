@@ -14,7 +14,7 @@ import (
 // spec.Network is true. When bwrap is unavailable the command runs unconfined
 // (boot and acp warn about this once at startup).
 func Command(spec Spec, sh Shell, command string) ([]string, bool) {
-	if !spec.enforce() {
+	if !spec.Enforce() {
 		return sh.argv(command), false
 	}
 	if bwrap, err := exec.LookPath("bwrap"); err == nil {
@@ -31,7 +31,7 @@ func Command(spec Spec, sh Shell, command string) ([]string, bool) {
 // prefix without shell interpretation — suitable for direct binary invocations
 // like ripgrep that don't need a shell wrapper.
 func CommandArgs(spec Spec, args []string) ([]string, bool) {
-	if !spec.enforce() {
+	if !spec.Enforce() {
 		return args, false
 	}
 	if bwrap, err := exec.LookPath("bwrap"); err == nil {

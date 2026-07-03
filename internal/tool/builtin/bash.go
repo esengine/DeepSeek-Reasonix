@@ -142,7 +142,15 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 	}
 
 	// Wrap in the OS sandbox when configured; otherwise argv is just the shell.
-	argv, _ := sandbox.Command(b.sb, sh, p.Command)
+	argv, sandboxed := sandbox.Command(b.sb, sh, p.Command)
+
+	// When OS sandbox is unavailable but enforce is requested, apply in-process
+	// write-path validation so bash cannot bypass the file-tool sandbox (#5793).
+	if !sandboxed && b.sb.Enforce() {
+		if err := checkBashWriteTargets(p.Command, sh, b.sb.WriteRoots); err != nil {
+			return "", err
+		}
+	}
 	cmdEnv := bashCommandEnv(ctx)
 
 	if p.RunInBackground {
@@ -530,6 +538,357 @@ func shellWordBase(word string) string {
 		return word[i+1:]
 	}
 	return word
+}
+
+// checkBashWriteTargets scans command for file-write patterns (redirects,
+// PowerShell cmdlets, tee, dd) and validates every detected output path against
+// writeRoots. When OS sandbox is unavailable, this in-process check prevents the
+// model from using bash to bypass the file-tool sandbox (#5793).
+//
+// It is a best-effort defence: it catches the common patterns the model learns
+// (Set-Content, Out-File, >/>> redirects) but cannot intercept writes made by a
+// sub-program the shell invokes (python -c "open(...)"). The permission layer
+// already gates the bash call itself; this guard closes the "approve once,
+// write anywhere" gap on platforms without OS sandboxing.
+func checkBashWriteTargets(command string, sh sandbox.Shell, writeRoots []string) error {
+	if len(writeRoots) == 0 {
+		return nil
+	}
+	roots := realRoots(writeRoots)
+	for _, target := range extractWriteTargets(command, sh) {
+		if err := confine(roots, target); err != nil {
+			return fmt.Errorf("bash sandbox: %w. "+
+				"Use the dedicated write tools (write_file, edit_file) to modify files — "+
+				"they respect the sandbox. To bypass, set [sandbox] bash = \"off\" in reasonix.toml.",
+				err)
+		}
+	}
+	return nil
+}
+
+// extractWriteTargets returns file paths that the command appears to write to.
+// It handles common patterns the model uses to bypass the file-tool sandbox:
+// PowerShell Set-Content/Out-File/Add-Content -Path, shell >/>> redirects,
+// tee, and dd of=. It does not parse arbitrary subcommands.
+func extractWriteTargets(command string, sh sandbox.Shell) []string {
+	var targets []string
+
+	if sh.Kind == sandbox.ShellPowerShell {
+		targets = append(targets, extractPSWriteTargets(command)...)
+	}
+
+	// Shell redirect targets: >file, >>file, 2>file, &>file, 1>file
+	targets = append(targets, extractRedirectTargets(command)...)
+
+	// tee file1 file2 ...
+	targets = append(targets, extractTeeTargets(command)...)
+
+	// dd of=file
+	targets = append(targets, extractDdTargets(command)...)
+
+	return targets
+}
+
+// extractPSWriteTargets extracts -Path and -FilePath arguments from PowerShell
+// write cmdlets (Set-Content, Out-File, Add-Content, New-Item,
+// Export-Csv, Export-Clixml).
+func extractPSWriteTargets(command string) []string {
+	writeCmdlets := []string{
+		"Set-Content", "Out-File", "Add-Content", "New-Item",
+		"Export-Csv", "Export-Clixml",
+	}
+
+	var targets []string
+	// Scan for each write cmdlet and its -Path / -FilePath argument.
+	for _, c := range writeCmdlets {
+		rest := command
+		for {
+			idx := findCmdlet(rest, c)
+			if idx < 0 {
+				break
+			}
+			// Search for -Path or -FilePath after the cmdlet name.
+			tail := rest[idx+len(c):]
+			path := extractPSPathArg(tail)
+			if path != "" {
+				targets = append(targets, path)
+			}
+			rest = rest[idx+len(c):]
+		}
+	}
+	return targets
+}
+
+// findCmdlet finds the next occurrence of cmdlet in command, returning the
+// start index or -1. It matches only when cmdlet appears as a whole word
+// (preceded by start-of-string, whitespace, or a pipe/command separator).
+func findCmdlet(command, cmdlet string) int {
+	for i := 0; i <= len(command)-len(cmdlet); i++ {
+		sub := command[i : i+len(cmdlet)]
+		if !strings.EqualFold(sub, cmdlet) {
+			continue
+		}
+		// Check that it's a whole word.
+		if i > 0 {
+			prev := command[i-1]
+			if prev != ' ' && prev != '\t' && prev != '|' && prev != ';' && prev != '\n' && prev != '&' {
+				continue
+			}
+		}
+		end := i + len(cmdlet)
+		if end < len(command) {
+			next := command[end]
+			if next != ' ' && next != '\t' && next != '\n' && next != '\r' {
+				continue
+			}
+		}
+		return i
+	}
+	return -1
+}
+
+// extractPSPathArg extracts the value of -Path or -FilePath from a PowerShell
+// cmdlet argument tail (the part of the command after the cmdlet name).
+func extractPSPathArg(tail string) string {
+	for _, flag := range []string{"-FilePath", "-Path"} {
+		if path := extractFlagValue(tail, flag); path != "" {
+			return path
+		}
+	}
+	return ""
+}
+
+// extractFlagValue extracts a flag's value from a command tail. Handles
+// quoted and unquoted values, and -Flag=value / -Flag:value syntax.
+func extractFlagValue(tail, flag string) string {
+	rest := tail
+	for {
+		idx := findFlag(rest, flag)
+		if idx < 0 {
+			return ""
+		}
+		after := rest[idx+len(flag):]
+		// Handle -Flag=value or -Flag:value syntax.
+		if len(after) > 0 && (after[0] == '=' || after[0] == ':') {
+			after = after[1:]
+		}
+		after = strings.TrimLeftFunc(after, func(r rune) bool {
+			return r == ' ' || r == '\t'
+		})
+		if after == "" {
+			rest = rest[idx+len(flag):]
+			continue
+		}
+		// Quoted value.
+		if after[0] == '"' || after[0] == '\'' {
+			q := after[0]
+			end := strings.IndexByte(after[1:], q)
+			if end >= 0 {
+				return after[1 : 1+end]
+			}
+			return ""
+		}
+		// Unquoted value: take until whitespace or end.
+		end := strings.IndexFunc(after, func(r rune) bool {
+			return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == ';' || r == '|' || r == '&'
+		})
+		if end < 0 {
+			return after
+		}
+		return after[:end]
+	}
+}
+
+// findFlag finds a flag in a command string, matching only when it appears as a
+// whole flag (preceded by whitespace, semicolon, pipe, or start-of-string).
+func findFlag(s, flag string) int {
+	lower := strings.ToLower(s)
+	flagLower := strings.ToLower(flag)
+	for i := 0; i <= len(lower)-len(flagLower); i++ {
+		sub := lower[i : i+len(flagLower)]
+		if sub != flagLower {
+			continue
+		}
+		if i > 0 {
+			prev := s[i-1]
+			if prev != ' ' && prev != '\t' && prev != ';' && prev != '|' && prev != '\n' {
+				continue
+			}
+		}
+		return i
+	}
+	return -1
+}
+
+// extractRedirectTargets extracts file paths from shell redirect operators
+// (> file, >> file, 2> file, 1> file, &> file, 2>> file, etc.).
+func extractRedirectTargets(command string) []string {
+	var targets []string
+	// Scan for > (redirect) outside quoted spans.
+	var quote byte
+	for i := 0; i < len(command); i++ {
+		c := command[i]
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		if c == '\'' || c == '"' {
+			quote = c
+			continue
+		}
+		if c != '>' {
+			continue
+		}
+		// Skip >> (append) — treat it the same as >.
+		if i+1 < len(command) && command[i+1] == '>' {
+			i++ // skip second >
+		}
+		// Extract the target path after >.
+		after := strings.TrimLeftFunc(command[i+1:], func(r rune) bool {
+			return r == ' ' || r == '\t'
+		})
+		if after == "" {
+			continue
+		}
+		// Skip fd passthrough (e.g., 2>&1, &>1, 1>&2) but NOT >&file which
+		// redirects both stdout+stderr to a file.
+		if after[0] == '&' {
+			if len(after) > 1 && (after[1] >= '0' && after[1] <= '9') {
+				continue // fd passthrough: >&1, >&2
+			}
+			// ">& file" or ">>& file" — consume the &, extract the path.
+			afterPath := strings.TrimLeftFunc(after[1:], func(r rune) bool {
+				return r == ' ' || r == '\t'
+			})
+			path := extractShellWord(afterPath)
+			if path != "" && !strings.HasPrefix(path, "/dev/") {
+				targets = append(targets, path)
+			}
+			continue
+		}
+		// Extract the path.
+		path := extractShellWord(after)
+		if path != "" && !strings.HasPrefix(path, "/dev/") {
+			targets = append(targets, path)
+		}
+	}
+	return targets
+}
+
+// extractShellWord returns the first shell word from s (handles quoting).
+func extractShellWord(s string) string {
+	if s == "" {
+		return ""
+	}
+	if s[0] == '"' || s[0] == '\'' {
+		q := s[0]
+		end := strings.IndexByte(s[1:], q)
+		if end >= 0 {
+			return s[1 : 1+end]
+		}
+		return s[1:] // unterminated quote — take rest
+	}
+	end := strings.IndexFunc(s, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == ';' || r == '|' || r == '&' || r == '<' || r == '>'
+	})
+	if end < 0 {
+		return s
+	}
+	return s[:end]
+}
+
+// extractTeeTargets extracts file paths from tee [file1 file2 ...].
+func extractTeeTargets(command string) []string {
+	var targets []string
+	rest := command
+	for {
+		idx := findCmdlet(rest, "tee")
+		if idx < 0 {
+			break
+		}
+		tail := rest[idx+3:] // skip "tee"
+		tail = strings.TrimLeftFunc(tail, func(r rune) bool {
+			return r == ' ' || r == '\t'
+		})
+
+		// tee accepts -a/--append flags anywhere; skip them.
+		for {
+			if strings.HasPrefix(tail, "-a ") || strings.HasPrefix(tail, "--append ") {
+				tail = tail[strings.IndexByte(tail, ' ')+1:]
+				tail = strings.TrimLeftFunc(tail, func(r rune) bool {
+					return r == ' ' || r == '\t'
+				})
+				continue
+			}
+			if tail == "-a" || tail == "--append" {
+				break // flag at end, no files follow
+			}
+			break
+		}
+
+		// Extract all file arguments (tee can write to multiple files).
+		for {
+			tail = strings.TrimSpace(tail)
+			if tail == "" {
+				break
+			}
+			word := extractShellWord(tail)
+			if word == "" {
+				break
+			}
+			if strings.HasPrefix(word, "-") {
+				// Next flag — could be -a/--append, skip and continue.
+				if word == "-a" || word == "--append" {
+					tail = tail[len(word):]
+					tail = strings.TrimSpace(tail)
+					continue
+				}
+				break // other flags end the file list
+			}
+			targets = append(targets, word)
+			tail = tail[len(word):]
+		}
+		rest = rest[idx+3:]
+	}
+	return targets
+}
+
+// extractDdTargets extracts file paths from dd of=file.
+func extractDdTargets(command string) []string {
+	var targets []string
+	rest := command
+	for {
+		idx := findCmdlet(rest, "dd")
+		if idx < 0 {
+			break
+		}
+		tail := rest[idx+2:] // skip "dd"
+		// Find of= in the arguments.
+		for {
+			eqIdx := strings.Index(strings.ToLower(tail), "of=")
+			if eqIdx < 0 {
+				break
+			}
+			valStart := eqIdx + 3
+			end := strings.IndexFunc(tail[valStart:], func(r rune) bool {
+				return r == ' ' || r == '\t' || r == '\n'
+			})
+			var val string
+			if end < 0 {
+				val = tail[valStart:]
+			} else {
+				val = tail[valStart : valStart+end]
+			}
+			if val != "" {
+				targets = append(targets, val)
+			}
+			tail = tail[valStart:]
+		}
+		rest = rest[idx+2:]
+	}
+	return targets
 }
 
 // commandPreview is a short single-line label for a background bash job, surfaced

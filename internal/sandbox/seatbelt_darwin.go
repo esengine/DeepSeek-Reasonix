@@ -14,7 +14,7 @@ import (
 // sandbox-exec missing — a graceful fallback rather than a hard failure, since
 // the permission layer still gates the call).
 func Command(spec Spec, sh Shell, command string) ([]string, bool) {
-	if !spec.enforce() || !Available() {
+	if !spec.Enforce() || !Available() {
 		return sh.argv(command), false
 	}
 	return append([]string{"sandbox-exec", "-p", seatbeltProfile(spec)}, sh.argv(command)...), true
@@ -25,7 +25,7 @@ func Command(spec Spec, sh Shell, command string) ([]string, bool) {
 // without shell interpretation — suitable for direct binary invocations like
 // ripgrep that don't need a shell wrapper.
 func CommandArgs(spec Spec, args []string) ([]string, bool) {
-	if !spec.enforce() || !Available() {
+	if !spec.Enforce() || !Available() {
 		return args, false
 	}
 	return append([]string{"sandbox-exec", "-p", seatbeltProfile(spec)}, args...), true
