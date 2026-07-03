@@ -3691,48 +3691,57 @@ var (
 )
 
 // SetProjectDataRoot sets the project data root override used by topic path
-// functions. Pass nil to revert to local mode.
+// functions. The override should return the ".reasonix"-equivalent directory:
+// for local mode this is <workspaceRoot>/.reasonix, for centralized mode it is
+// the slug directory without the .reasonix suffix. Pass nil to revert to local
+// mode.
 func SetProjectDataRoot(fn func(workspaceRoot string) string) {
 	projectDataRootOverride = fn
 }
 
-func topicTitlesPath(workspaceRoot string) string {
+func topicDir(workspaceRoot string) (dir string, dotReasonix bool) {
 	if workspaceRoot == "" {
-		return filepath.Join(desktopConfigDir(), "global", topicTitlesFile)
+		return "", false
 	}
-	root := workspaceRoot
 	if fn := projectDataRootOverride; fn != nil {
 		if r := fn(workspaceRoot); r != "" {
-			root = r
+			return r, false // override already points to the .reasonix-equivalent dir
 		}
 	}
-	return filepath.Join(root, ".reasonix", topicTitlesFile)
+	return workspaceRoot, true // local mode: need to append .reasonix
+}
+
+func topicTitlesPath(workspaceRoot string) string {
+	dir, dot := topicDir(workspaceRoot)
+	if dir == "" {
+		return filepath.Join(desktopConfigDir(), "global", topicTitlesFile)
+	}
+	if dot {
+		dir = filepath.Join(dir, ".reasonix")
+	}
+	return filepath.Join(dir, topicTitlesFile)
 }
 
 func topicTitleSourcesPath(workspaceRoot string) string {
-	if workspaceRoot == "" {
+	dir, dot := topicDir(workspaceRoot)
+	if dir == "" {
 		return filepath.Join(desktopConfigDir(), "global", topicTitleSourcesFile)
 	}
-	root := workspaceRoot
-	if fn := projectDataRootOverride; fn != nil {
-		if r := fn(workspaceRoot); r != "" {
-			root = r
-		}
+	if dot {
+		dir = filepath.Join(dir, ".reasonix")
 	}
-	return filepath.Join(root, ".reasonix", topicTitleSourcesFile)
+	return filepath.Join(dir, topicTitleSourcesFile)
 }
 
 func topicCreatedAtsPath(workspaceRoot string) string {
-	if workspaceRoot == "" {
+	dir, dot := topicDir(workspaceRoot)
+	if dir == "" {
 		return filepath.Join(desktopConfigDir(), "global", topicCreatedAtsFile)
 	}
-	root := workspaceRoot
-	if fn := projectDataRootOverride; fn != nil {
-		if r := fn(workspaceRoot); r != "" {
-			root = r
-		}
+	if dot {
+		dir = filepath.Join(dir, ".reasonix")
 	}
-	return filepath.Join(root, ".reasonix", topicCreatedAtsFile)
+	return filepath.Join(dir, topicCreatedAtsFile)
 }
 
 const topicFileReadTimeout = 200 * time.Millisecond

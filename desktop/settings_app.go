@@ -2007,7 +2007,7 @@ func (a *App) SetProjectStorage(centralize bool) error {
 		}
 		if c.DesktopCentralizeProjectData() {
 			fn := func(workspaceRoot string) string {
-				return config.ProjectDataRoot(workspaceRoot, true)
+				return config.ProjectDotReasonixDir(workspaceRoot, true)
 			}
 			SetProjectDataRoot(fn)
 			autoresearch.SetProjectDataRootOverride(fn)

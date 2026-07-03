@@ -25,6 +25,17 @@ var attachmentPathSeq atomic.Uint64
 var attachmentNow = time.Now
 var safeAttachmentExt = regexp.MustCompile(`^\.[a-z0-9]{1,12}$`)
 
+// attachmentRootOverride redirects the attachment storage root for centralized
+// project storage. When non-empty, attachments use this absolute root directory
+// instead of <CWD>/.reasonix/attachments.
+var attachmentRootOverride string
+
+// SetAttachmentRoot sets an absolute path to use as the attachment root,
+// replacing <CWD>/.reasonix/attachments. Pass empty string to revert.
+func SetAttachmentRoot(root string) {
+	attachmentRootOverride = root
+}
+
 // SaveAttachmentDataURL stores a non-image file (dropped/pasted in the desktop
 // app, where the browser exposes bytes but not a real path) under
 // .reasonix/attachments and returns its repo-relative path for @referencing.
@@ -376,8 +387,15 @@ func rejectSymlinkComponents(path, root string) error {
 	return nil
 }
 
+func attachmentRoot() string {
+	if attachmentRootOverride != "" {
+		return filepath.Join(attachmentRootOverride, "attachments")
+	}
+	return filepath.Join(".reasonix", "attachments")
+}
+
 func ensureAttachmentRoot() error {
-	root := filepath.Join(".reasonix", "attachments")
+	root := attachmentRoot()
 	if info, err := os.Lstat(root); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("attachment directory must not be a symlink")

@@ -366,7 +366,7 @@ func (a *App) startup(ctx context.Context) {
 	if cfg, err := config.Load(); err == nil {
 		if cfg.DesktopCentralizeProjectData() {
 			fn := func(workspaceRoot string) string {
-				return config.ProjectDataRoot(workspaceRoot, true)
+				return config.ProjectDotReasonixDir(workspaceRoot, true)
 			}
 			SetProjectDataRoot(fn)
 			autoresearch.SetProjectDataRootOverride(fn)
