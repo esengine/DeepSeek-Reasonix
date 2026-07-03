@@ -1131,7 +1131,14 @@ func rememberPermissionRule(workspaceRoot, rule string) control.RememberResult {
 func rememberPermissionConfigPath(workspaceRoot string) string {
 	workspaceRoot = strings.TrimSpace(workspaceRoot)
 	if workspaceRoot != "" {
-		return filepath.Join(workspaceRoot, "reasonix.toml")
+		// Determine whether centralized project storage is active by loading
+		// the user config. This lets permission rules follow the centralize_project_data
+		// setting (saved reasonix.toml goes to user data dir instead of project root).
+		centralize := false
+		if cfg := config.LoadForEditWithoutCredentials(config.UserConfigPath()); cfg != nil {
+			centralize = cfg.DesktopCentralizeProjectData()
+		}
+		return config.ProjectConfigPath(workspaceRoot, centralize)
 	}
 	path := config.SourcePath()
 	if path == "" {

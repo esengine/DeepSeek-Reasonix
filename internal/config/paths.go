@@ -302,6 +302,32 @@ func ProjectSessionDir(workspaceRoot string) string {
 	return filepath.Join(base, "projects", WorkspaceSlug(root), "sessions")
 }
 
+// ProjectConfigPath returns the path to the project's reasonix.toml config
+// file. When centralize is true, the config is stored under the Reasonix user
+// data dir (<state root>/projects/<slug>/reasonix.toml) instead of the project
+// root, keeping the project directory clean. Backward compatibility: if the
+// project already has a reasonix.toml from an older version, it is used
+// regardless of the centralize flag.
+func ProjectConfigPath(workspaceRoot string, centralize bool) string {
+	projectPath := filepath.Join(workspaceRoot, "reasonix.toml")
+	if !centralize {
+		return projectPath
+	}
+	// If the project already has a reasonix.toml, keep using it.
+	if info, err := os.Stat(projectPath); err == nil && !info.IsDir() {
+		return projectPath
+	}
+	base := MemoryUserDir()
+	root := strings.TrimSpace(workspaceRoot)
+	if base == "" || root == "" {
+		return projectPath
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	return filepath.Join(base, "projects", WorkspaceSlug(root), "reasonix.toml")
+}
+
 // ProjectDataRoot returns the directory root under which project-local data
 // (.reasonix, hooks, attachments) should be stored for the given workspaceRoot.
 //

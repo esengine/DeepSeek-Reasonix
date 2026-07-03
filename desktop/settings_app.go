@@ -922,7 +922,12 @@ func projectConfigPathForRoot(root string) string {
 	if strings.TrimSpace(root) == "" || root == "." {
 		return "reasonix.toml"
 	}
-	return filepath.Join(root, "reasonix.toml")
+	// Check if centralized project storage is active.
+	centralize := false
+	if cfg := config.LoadForEditWithoutCredentials(config.UserConfigPath()); cfg != nil {
+		centralize = cfg.DesktopCentralizeProjectData()
+	}
+	return config.ProjectConfigPath(root, centralize)
 }
 
 func sameConfigPath(a, b string) bool {
