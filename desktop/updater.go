@@ -38,7 +38,7 @@ import (
 // the canary line and a stable build polls latest; the two never cross.
 const (
 	r2Base         = "https://dl.reasonix.io"
-	ghReleasesBase = "https://github.com/esengine/reasonix/releases"
+	ghReleasesBase = "https://github.com/esengine/DeepSeek-Reasonix/releases"
 	httpTimeout    = 15 * time.Second
 )
 

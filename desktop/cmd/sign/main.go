@@ -166,8 +166,8 @@ func signFiles(files []string) error {
 // release tag used in download URLs (e.g. "desktop-v1.1.0").
 func genManifest(dir, version, tag string) error {
 	repo := os.Getenv("GITHUB_REPOSITORY")
-	if repo == "" {
-		repo = "esengine/reasonix"
+	if repo == "" || repo == "esengine/reasonix" {
+		repo = "esengine/DeepSeek-Reasonix"
 	}
 	m := update.Manifest{
 		Version:      version,
