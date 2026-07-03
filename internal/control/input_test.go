@@ -586,9 +586,8 @@ func TestSubmitUnknownSlashCommandStillReportsNotice(t *testing.T) {
 
 	c.Submit("/definitely-not-a-command")
 
-	if len(runner.inputs) != 0 {
-		t.Fatalf("unknown slash command should not start a model turn, inputs=%q", runner.inputs)
-	}
+	// An unknown slash command should emit a notice AND send the message to the
+	// AI as a normal turn — it might be a legitimate message starting with "/".
 	select {
 	case e := <-events:
 		if e.Kind != event.Notice || !strings.Contains(e.Text, "unknown command: /definitely-not-a-command") {
@@ -596,6 +595,10 @@ func TestSubmitUnknownSlashCommandStillReportsNotice(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for unknown-command notice")
+	}
+	waitForTurnDone(t, events)
+	if len(runner.inputs) != 1 || runner.inputs[0] != "/definitely-not-a-command" {
+		t.Fatalf("unknown slash command should start a model turn, inputs=%q", runner.inputs)
 	}
 }
 
