@@ -479,7 +479,7 @@ export const zhTW: Record<DictKey, string> = {
   "status.jobsTitle": "背景作業",
   "status.workspaceTitle": "當前工作區",
   "status.sandboxTitle": "沙箱路徑",
-  "status.gitBranchTitle": "當前 Git 分支",
+  "status.gitBranchTitle": "當前分支",
   "status.yolo": "YOLO",
   "status.yoloTitle": "YOLO —— 本會話正在跳過所有核准",
 

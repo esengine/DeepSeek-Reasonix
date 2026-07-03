@@ -202,6 +202,7 @@ export function metaFromTab(tab: TabMeta, existing?: Meta): Meta {
     workspacePath: tab.workspacePath || tab.workspaceRoot || existing?.workspacePath,
     sessionPath: tab.sessionPath !== undefined ? tab.sessionPath : existing?.sessionPath,
     gitBranch: tab.gitBranch || existing?.gitBranch,
+    vcs: tab.vcs || existing?.vcs,
     autoApproveTools,
     bypass: autoApproveTools,
     collaborationMode: tab.collaborationMode ?? existing?.collaborationMode ?? "normal",
@@ -230,6 +231,7 @@ export function sameMeta(a?: Meta, b?: Meta): boolean {
     a.workspacePath === b.workspacePath &&
     a.sessionPath === b.sessionPath &&
     a.gitBranch === b.gitBranch &&
+    a.vcs === b.vcs &&
     a.imageInputEnabled === b.imageInputEnabled &&
     a.autoApproveTools === b.autoApproveTools &&
     a.bypass === b.bypass &&

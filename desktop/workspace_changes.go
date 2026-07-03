@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os/exec"
@@ -12,18 +11,13 @@ import (
 
 	"reasonix/internal/control"
 	"reasonix/internal/proc"
+	"reasonix/internal/vcs"
 )
-
-type gitStatusEntry struct {
-	Path    string
-	OldPath string
-	Status  string
-}
 
 type workspaceChangeAccumulator struct {
 	view       WorkspaceChangeView
 	hasSession bool
-	hasGit     bool
+	hasVCS     bool
 }
 
 func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
@@ -44,7 +38,30 @@ func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
 		return out
 	}
 
-	out.GitBranch = workspaceGitBranch(base)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	vcsType := vcs.DetectVCS(base)
+	out.VCS = vcsType
+
+	branch := ""
+	switch vcsType {
+	case "jj":
+		if info, err := vcs.LoadJJInfo(ctx, base); err == nil {
+			branch = info.Branch
+			if info.Detached {
+				branch = "@" + branch
+			}
+		}
+	case "git":
+		if info, err := vcs.LoadGitInfo(ctx, base); err == nil {
+			branch = info.Branch
+			if info.Detached {
+				branch = "@" + branch
+			}
+		}
+	}
+	out.GitBranch = branch
 
 	changes := map[string]*workspaceChangeAccumulator{}
 	add := func(path string) *workspaceChangeAccumulator {
@@ -77,17 +94,26 @@ func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
 		}
 	}
 
-	gitEntries, gitErr := workspaceGitStatus(base)
-	if gitErr != nil {
+	var vcsEntries []vcs.VCSFileStatus
+	var vcsErr error
+	switch vcsType {
+	case "jj":
+		vcsEntries, vcsErr = vcs.JJFileStatus(ctx, base)
+	case "git":
+		vcsEntries, vcsErr = vcs.GitFileStatus(ctx, base)
+	default:
 		out.GitAvailable = false
-		out.GitErr = gitErr.Error()
 	}
-	for _, entry := range gitEntries {
+	if vcsErr != nil {
+		out.GitAvailable = false
+		out.GitErr = vcsErr.Error()
+	}
+	for _, entry := range vcsEntries {
 		acc := add(entry.Path)
 		if acc == nil {
 			continue
 		}
-		acc.hasGit = true
+		acc.hasVCS = true
 		acc.view.GitStatus = entry.Status
 		acc.view.OldPath = normalizeWorkspaceRelPath(base, entry.OldPath)
 	}
@@ -97,7 +123,7 @@ func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
 		if acc.hasSession {
 			acc.view.Sources = append(acc.view.Sources, "session")
 		}
-		if acc.hasGit {
+		if acc.hasVCS {
 			acc.view.Sources = append(acc.view.Sources, "git")
 		}
 		out.Files = append(out.Files, acc.view)
@@ -136,6 +162,30 @@ func (a *App) workspaceBaseForTab(tabID string) (string, error) {
 	return workspaceBaseFromRoot(workspaceRoot)
 }
 
+func workspaceVCSBranch(base string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	vcsType := vcs.DetectVCS(base)
+	switch vcsType {
+	case "jj":
+		if info, err := vcs.LoadJJInfo(ctx, base); err == nil {
+			if info.Detached {
+				return "@" + info.Branch
+			}
+			return info.Branch
+		}
+	case "git":
+		if info, err := vcs.LoadGitInfo(ctx, base); err == nil {
+			if info.Detached {
+				return "@" + info.Branch
+			}
+			return info.Branch
+		}
+	}
+	return ""
+}
+
 // workspaceGit builds a console-hidden git probe: CREATE_NO_WINDOW so git's own
 // children inherit the invisible console, fsmonitor/auto-maintenance off so a
 // probe never spawns a background daemon that opens a console of its own (#3906).
@@ -147,54 +197,6 @@ func workspaceGitCommand(ctx context.Context, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-c", "core.fsmonitor=false", "-c", "maintenance.auto=false"}, args...)...)
 	proc.HideWindow(cmd)
 	return cmd
-}
-
-func workspaceGitStatus(base string) ([]gitStatusEntry, error) {
-	cmd := workspaceGit("-C", base, "status", "--porcelain=v1", "-z", "--untracked-files=all")
-	raw, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	entries := parseGitStatusPorcelainZ(raw)
-	topCmd := workspaceGit("-C", base, "rev-parse", "--show-toplevel")
-	topRaw, err := topCmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	repoRoot := strings.TrimSpace(string(topRaw))
-	if repoRoot == "" {
-		return entries, nil
-	}
-	out := make([]gitStatusEntry, 0, len(entries))
-	for _, entry := range entries {
-		entry.Path = workspaceRelPathFromGitStatus(repoRoot, base, entry.Path)
-		if entry.Path == "" {
-			continue
-		}
-		entry.OldPath = workspaceRelPathFromGitStatus(repoRoot, base, entry.OldPath)
-		out = append(out, entry)
-	}
-	return out, nil
-}
-
-func parseGitStatusPorcelainZ(raw []byte) []gitStatusEntry {
-	parts := bytes.Split(raw, []byte{0})
-	out := make([]gitStatusEntry, 0, len(parts))
-	for i := 0; i < len(parts); i++ {
-		part := parts[i]
-		if len(part) < 4 {
-			continue
-		}
-		status := string(part[:2])
-		path := string(part[3:])
-		entry := gitStatusEntry{Path: path, Status: strings.TrimSpace(status)}
-		if strings.ContainsAny(status, "RC") && i+1 < len(parts) {
-			i++
-			entry.OldPath = string(parts[i])
-		}
-		out = append(out, entry)
-	}
-	return out
 }
 
 func normalizeWorkspaceRelPath(base, path string) string {
@@ -214,58 +216,15 @@ func normalizeWorkspaceRelPath(base, path string) string {
 	return filepath.ToSlash(path)
 }
 
-func workspaceRelPathFromGitStatus(repoRoot, base, path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ""
-	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(repoRoot, filepath.FromSlash(path))
-	}
-	return normalizeWorkspaceRelPath(base, path)
-}
-
-// workspaceGitBranch returns the current git branch name for the repo rooted
-// at base, or an empty string when base is not inside a git repository or when
-// git is unavailable.
-func workspaceGitBranch(base string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	cmd := workspaceGitCommand(ctx, "-C", base, "branch", "--show-current")
-	raw, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	if branch := strings.TrimSpace(string(raw)); branch != "" {
-		return branch
-	}
-
-	headCmd := workspaceGitCommand(ctx, "-C", base, "rev-parse", "--short", "HEAD")
-	raw, err = headCmd.Output()
-	if err != nil {
-		return ""
-	}
-	short := strings.TrimSpace(string(raw))
-	if short == "" {
-		return ""
-	}
-	return "@" + short
-}
-
 // GitBranches returns all local git branches for the active workspace's repo.
 func (a *App) GitBranches() ([]string, error) {
 	base, err := a.activeWorkspaceBase()
 	if err != nil {
 		return nil, err
 	}
-	cmd := workspaceGit("-C", base, "branch", "--format=%(refname:short)")
-	raw, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	branches := strings.FieldsFunc(strings.TrimSpace(string(raw)), func(r rune) bool { return r == '\n' })
-	return branches, nil
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return vcs.GitListBranches(ctx, base)
 }
 
 // GitCheckout switches the active workspace's git branch and returns the
@@ -275,15 +234,9 @@ func (a *App) GitCheckout(branch string) error {
 	if err != nil {
 		return err
 	}
-	cmd := workspaceGit("-C", base, "checkout", branch)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		if len(out) > 0 {
-			return fmt.Errorf("git checkout: %s", strings.TrimSpace(string(out)))
-		}
-		return err
-	}
-	return nil
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return vcs.GitCheckout(ctx, base, branch)
 }
 
 type GitCommitView struct {
@@ -304,27 +257,21 @@ func (a *App) WorkspaceGitHistory(tabID string, path string) ([]GitCommitView, e
 		return nil, err
 	}
 
-	args := []string{"-C", base, "log", "--pretty=format:%H%x00%an%x00%ad%x00%s", "-z", "-n", "100"}
-	if path != "" {
-		args = append(args, "--", path)
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
-	cmd := workspaceGit(args...)
-	raw, err := cmd.Output()
+	commits, err := vcs.GitHistory(ctx, base, path, 100)
 	if err != nil {
 		return nil, err
 	}
-
-	parts := bytes.Split(raw, []byte{0})
-	var out []GitCommitView
-	// 4 parts per commit: hash, author, date, message
-	for i := 0; i+3 < len(parts); i += 4 {
-		out = append(out, GitCommitView{
-			Hash:    string(parts[i]),
-			Author:  string(parts[i+1]),
-			Date:    string(parts[i+2]),
-			Message: string(parts[i+3]),
-		})
+	out := make([]GitCommitView, len(commits))
+	for i, c := range commits {
+		out[i] = GitCommitView{
+			Hash:    c.Hash,
+			Author:  c.Author,
+			Date:    c.Date,
+			Message: c.Message,
+		}
 	}
 	return out, nil
 }
@@ -335,30 +282,12 @@ func (a *App) WorkspaceGitCommitDetail(tabID string, hash string, path string) (
 		return GitCommitDetailView{}, err
 	}
 
-	if path != "" {
-		// Single file diff
-		cmd := workspaceGit("-C", base, "show", "--relative", "--pretty=format:", "--patch", hash, "--", path)
-		raw, err := cmd.Output()
-		if err != nil {
-			return GitCommitDetailView{}, err
-		}
-		diffStr := strings.TrimSpace(string(raw))
-		return GitCommitDetailView{Diff: &diffStr}, nil
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
-	// Project level: list of files changed
-	cmd := workspaceGit("-C", base, "diff-tree", "--relative", "--no-commit-id", "--name-only", "-r", hash)
-	raw, err := cmd.Output()
+	detail, err := vcs.GitCommitDetail(ctx, base, hash, path)
 	if err != nil {
 		return GitCommitDetailView{}, err
 	}
-
-	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	var files []string
-	for _, line := range lines {
-		if line != "" {
-			files = append(files, line)
-		}
-	}
-	return GitCommitDetailView{Files: files}, nil
+	return GitCommitDetailView{Diff: detail.Diff, Files: detail.Files}, nil
 }

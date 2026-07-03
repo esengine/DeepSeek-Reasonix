@@ -319,6 +319,7 @@ export function WorkspacePanel({
           gitAvailable: result?.gitAvailable !== false,
           gitErr: result?.gitErr,
           gitBranch: result?.gitBranch,
+          vcs: result?.vcs,
         });
       }
     } catch {

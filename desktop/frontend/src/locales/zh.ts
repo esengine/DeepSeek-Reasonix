@@ -628,7 +628,7 @@ export const zh: Record<DictKey, string> = {
   "status.modelTitle": "当前模型",
   "status.workspaceTitle": "当前工作区",
   "status.sandboxTitle": "沙箱路径",
-  "status.gitBranchTitle": "当前 Git 分支",
+  "status.gitBranchTitle": "当前分支",
   "status.yolo": "YOLO",
   "status.yoloTitle": "YOLO —— 正在跳过工具批准；ask 与计划确认仍会等待",
 

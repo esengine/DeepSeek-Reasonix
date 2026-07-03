@@ -29,6 +29,7 @@ import (
 	"reasonix/internal/fileutil"
 	"reasonix/internal/provider"
 	"reasonix/internal/store"
+	"reasonix/internal/vcs"
 )
 
 // --- WorkspaceTab -----------------------------------------------------------
@@ -1139,6 +1140,7 @@ type TabMeta struct {
 	WorkspaceName     string                   `json:"workspaceName"`
 	WorkspacePath     string                   `json:"workspacePath,omitempty"`
 	GitBranch         string                   `json:"gitBranch,omitempty"`
+	VCS               string                   `json:"vcs,omitempty"`
 	TopicID           string                   `json:"topicId"`
 	TopicTitle        string                   `json:"topicTitle"`
 	SessionPath       string                   `json:"sessionPath,omitempty"`
@@ -1165,7 +1167,8 @@ type TabMeta struct {
 
 func enrichTabMeta(meta TabMeta) TabMeta {
 	if meta.Active {
-		meta.GitBranch = workspaceGitBranch(meta.WorkspaceRoot)
+		meta.GitBranch = workspaceVCSBranch(meta.WorkspaceRoot)
+		meta.VCS = vcs.DetectVCS(meta.WorkspaceRoot)
 	}
 	return meta
 }
@@ -1173,7 +1176,8 @@ func enrichTabMeta(meta TabMeta) TabMeta {
 func enrichTabMetas(metas []TabMeta) []TabMeta {
 	for i := range metas {
 		if metas[i].Active {
-			metas[i].GitBranch = workspaceGitBranch(metas[i].WorkspaceRoot)
+			metas[i].GitBranch = workspaceVCSBranch(metas[i].WorkspaceRoot)
+			metas[i].VCS = vcs.DetectVCS(metas[i].WorkspaceRoot)
 		}
 	}
 	return metas

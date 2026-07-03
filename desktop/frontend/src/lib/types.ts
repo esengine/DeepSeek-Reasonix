@@ -188,6 +188,7 @@ export interface TabMeta {
   workspaceName: string;
   workspacePath?: string;
   gitBranch?: string;
+  vcs?: string;
   topicId: string;
   topicTitle: string;
   sessionPath?: string;
@@ -429,6 +430,7 @@ export interface Meta {
   workspacePath?: string;
   sessionPath?: string;
   gitBranch?: string;
+  vcs?: string;
   imageInputEnabled?: boolean;
   autoApproveTools?: boolean;
   bypass?: boolean; // legacy JSON key for YOLO/full-access tool auto-approval
@@ -603,6 +605,7 @@ export interface WorkspaceChangesView {
   gitAvailable: boolean;
   gitErr?: string;
   gitBranch?: string;
+  vcs?: string;
 }
 
 export interface GitCommitView {

@@ -11,36 +11,38 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"reasonix/internal/vcs"
 )
 
 func TestParseGitNumstat(t *testing.T) {
-	added, removed := parseGitNumstat("10\t2\ta.go\n-\t-\tasset.bin\n3\t0\tpath with spaces.go\n")
+	added, removed := vcs.ParseGitNumstat("10\t2\ta.go\n-\t-\tasset.bin\n3\t0\tpath with spaces.go\n")
 	if added != 13 || removed != 2 {
 		t.Fatalf("parseGitNumstat = (+%d -%d), want (+13 -2)", added, removed)
 	}
 }
 
 func TestCountUntracked(t *testing.T) {
-	got := countUntracked(" M tracked.go\n?? new.go\n?? nested/\n")
+	got := vcs.CountGitUntracked(" M tracked.go\n?? new.go\n?? nested/\n")
 	if got != 2 {
 		t.Fatalf("countUntracked = %d, want 2", got)
 	}
 }
 
 func TestGitStatusRender(t *testing.T) {
-	got := ansi.Strip(gitStatus{Repo: "mySkills", Branch: "main", Added: 15}.Render())
+	got := ansi.Strip(vcsRenderFull(gitStatus{Repo: "mySkills", Branch: "main", Added: 15}))
 	if got != "mySkills@main (+15 -0)" {
 		t.Fatalf("Render = %q", got)
 	}
 
-	got = ansi.Strip(gitStatus{Repo: "repo", Branch: "abc1234", Detached: true, Untracked: 2}.Render())
+	got = ansi.Strip(vcsRenderFull(gitStatus{Repo: "repo", Branch: "abc1234", Detached: true, Untracked: 2}))
 	if got != "repo@abc1234 (?2)" {
 		t.Fatalf("detached Render = %q", got)
 	}
 }
 
 func TestGitStatusRenderRepoUsesSuppliedRepoStyle(t *testing.T) {
-	got := ansi.Strip(gitStatus{Repo: "repo", Branch: "main"}.RenderRepo("[repo]"))
+	got := ansi.Strip(vcsRenderRepo(gitStatus{Repo: "repo", Branch: "main"}, "[repo]"))
 	if got != "[repo]@main" {
 		t.Fatalf("RenderRepo = %q, want styled repo name only", got)
 	}
@@ -49,12 +51,12 @@ func TestGitStatusRenderRepoUsesSuppliedRepoStyle(t *testing.T) {
 func TestGitStatusRenderWithinCompactsRepoBeforeBranch(t *testing.T) {
 	status := gitStatus{Repo: "VeryLongDeepSeekReasonixWorkspace", Branch: "codex/cli-tui-status-row"}
 
-	full := ansi.Strip(status.RenderWithin(80, statusAutoColor))
+	full := ansi.Strip(vcsRenderWithin(status, 80, statusAutoColor))
 	if full != "VeryLongDeepSeekReasonixWorkspace@codex/cli-tui-status-row" {
 		t.Fatalf("wide RenderWithin = %q", full)
 	}
 
-	got := ansi.Strip(status.RenderWithin(46, statusAutoColor))
+	got := ansi.Strip(vcsRenderWithin(status, 46, statusAutoColor))
 	if ansi.StringWidth(got) > 46 {
 		t.Fatalf("compacted status width = %d, want <= 46: %q", ansi.StringWidth(got), got)
 	}
@@ -75,7 +77,7 @@ func TestGitStatusRenderWithinKeepsDirtySuffix(t *testing.T) {
 		Untracked: 4,
 	}
 
-	got := ansi.Strip(status.RenderWithin(35, statusAutoColor))
+	got := ansi.Strip(vcsRenderWithin(status, 35, statusAutoColor))
 	if ansi.StringWidth(got) > 35 {
 		t.Fatalf("compacted dirty status width = %d, want <= 35: %q", ansi.StringWidth(got), got)
 	}
@@ -109,9 +111,9 @@ func TestLoadGitStatus(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	status, err := loadGitStatus(ctx, filepath.Join(root, "subdir"))
+	status, err := loadVCSStatus(ctx, filepath.Join(root, "subdir"))
 	if err != nil {
-		t.Fatalf("loadGitStatus: %v", err)
+		t.Fatalf("loadVCSStatus: %v", err)
 	}
 	if status.Repo != filepath.Base(root) || status.Branch != "main" || status.Detached {
 		t.Fatalf("status identity = %+v", status)
@@ -119,7 +121,7 @@ func TestLoadGitStatus(t *testing.T) {
 	if status.Added != 2 || status.Removed != 1 || status.Untracked != 1 {
 		t.Fatalf("status changes = (+%d -%d ?%d), want (+2 -1 ?1)", status.Added, status.Removed, status.Untracked)
 	}
-	if plain := ansi.Strip(status.Render()); !strings.Contains(plain, filepath.Base(root)+"@main") || !strings.Contains(plain, "+2 -1 ?1") {
+	if plain := ansi.Strip(vcsRenderFull(status)); !strings.Contains(plain, filepath.Base(root)+"@main") || !strings.Contains(plain, "+2 -1 ?1") {
 		t.Fatalf("rendered status = %q", plain)
 	}
 }
@@ -141,7 +143,7 @@ func TestRunGitDisablesOptionalLocks(t *testing.T) {
 
 	out, err := runGit(context.Background(), "", "status")
 	if err != nil {
-		t.Fatalf("runGit: %v", err)
+		t.Fatalf("GitRun: %v", err)
 	}
 	if out != "0" {
 		t.Fatalf("GIT_OPTIONAL_LOCKS = %q, want 0", out)

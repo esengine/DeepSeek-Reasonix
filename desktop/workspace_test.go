@@ -17,6 +17,7 @@ import (
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/vcs"
 )
 
 // --- workspaceStatePath ---
@@ -896,7 +897,7 @@ func TestWindowsOpenWorkspacePathAvoidsCmdShell(t *testing.T) {
 
 func TestParseGitStatusPorcelainZ(t *testing.T) {
 	raw := []byte(" M changed.go\x00?? new.txt\x00R  renamed.go\x00old.go\x00")
-	got := parseGitStatusPorcelainZ(raw)
+	got := vcs.ParseGitPorcelainZ(raw)
 	if len(got) != 3 {
 		t.Fatalf("entries = %d, want 3: %+v", len(got), got)
 	}

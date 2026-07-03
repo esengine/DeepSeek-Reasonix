@@ -627,7 +627,7 @@ export const en = {
   "status.modelTitle": "Current model",
   "status.workspaceTitle": "Current workspace",
   "status.sandboxTitle": "Sandbox path",
-  "status.gitBranchTitle": "Current Git branch",
+  "status.gitBranchTitle": "Current branch",
   "status.yolo": "YOLO",
   "status.yoloTitle": "YOLO — tool approvals are being skipped; ask and plan decisions still wait",
 

@@ -40,7 +40,7 @@ func TestWorkspaceGitBranch(t *testing.T) {
 	runGit(t, "init")
 	runGit(t, "checkout", "-b", "feature/status")
 
-	if got := workspaceGitBranch(repo); got != "feature/status" {
+	if got := workspaceVCSBranch(repo); got != "feature/status" {
 		t.Fatalf("branch = %q, want feature/status", got)
 	}
 }
@@ -74,13 +74,13 @@ func TestWorkspaceGitBranchDetachedHead(t *testing.T) {
 	short := gitOutput(t, "rev-parse", "--short", "HEAD")
 	runGit(t, "checkout", "--detach", "HEAD")
 
-	if got := workspaceGitBranch(repo); got != "@"+short {
+	if got := workspaceVCSBranch(repo); got != "@"+short {
 		t.Fatalf("branch = %q, want @%s", got, short)
 	}
 }
 
 func TestWorkspaceGitBranchNonGitDirectory(t *testing.T) {
-	if got := workspaceGitBranch(t.TempDir()); got != "" {
+	if got := workspaceVCSBranch(t.TempDir()); got != "" {
 		t.Fatalf("branch = %q, want empty", got)
 	}
 }

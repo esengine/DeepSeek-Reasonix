@@ -47,6 +47,7 @@ import (
 	"reasonix/internal/pluginpkg"
 	"reasonix/internal/provider"
 	"reasonix/internal/skill"
+	"reasonix/internal/vcs"
 )
 
 // eventChannel is the Wails runtime event name the frontend subscribes to for the
@@ -4633,6 +4634,7 @@ type Meta struct {
 	WorkspaceName     string                   `json:"workspaceName,omitempty"`
 	WorkspacePath     string                   `json:"workspacePath,omitempty"`
 	GitBranch         string                   `json:"gitBranch,omitempty"`
+	VCS               string                   `json:"vcs,omitempty"`
 	ImageInputEnabled bool                     `json:"imageInputEnabled"`
 	AutoApproveTools  bool                     `json:"autoApproveTools"`
 	Bypass            bool                     `json:"bypass"` // legacy JSON key for YOLO/full-access tool auto-approval
@@ -4749,7 +4751,8 @@ func (a *App) MetaForTab(tabID string) Meta {
 		WorkspaceRoot:     cwd,
 		WorkspaceName:     tabWorkspaceName(tab, cwd),
 		WorkspacePath:     cwd,
-		GitBranch:         workspaceGitBranch(cwd),
+		GitBranch:         workspaceVCSBranch(cwd),
+		VCS:               vcs.DetectVCS(cwd),
 		ImageInputEnabled: a.imageInputEnabledForTab(tabID),
 		AutoApproveTools:  autoApproveTools,
 		Bypass:            autoApproveTools,
@@ -6885,6 +6888,7 @@ type WorkspaceChangesView struct {
 	GitAvailable bool                  `json:"gitAvailable"`
 	GitErr       string                `json:"gitErr,omitempty"`
 	GitBranch    string                `json:"gitBranch,omitempty"`
+	VCS          string                `json:"vcs,omitempty"`
 }
 
 // workspaceNoiseNames are local cache/vendor entries hidden from the file tree

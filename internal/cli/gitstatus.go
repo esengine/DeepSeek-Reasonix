@@ -2,35 +2,28 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"reasonix/internal/vcs"
 )
 
 const gitStatusTimeout = 700 * time.Millisecond
 
-type gitStatus struct {
-	Repo      string
-	Branch    string
-	Detached  bool
-	Added     int
-	Removed   int
-	Untracked int
-}
+// gitStatus keeps the TUI rendering methods while sharing VCSInfo fields.
+type gitStatus vcs.VCSInfo
 
 func fetchGitStatus() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), gitStatusTimeout)
 		defer cancel()
-		status, err := loadGitStatus(ctx, "")
+		status, err := loadVCSStatus(ctx, "")
 		if err != nil {
 			return gitStatusMsg{}
 		}
@@ -38,39 +31,21 @@ func fetchGitStatus() tea.Cmd {
 	}
 }
 
-func loadGitStatus(ctx context.Context, cwd string) (gitStatus, error) {
-	root, err := runGit(ctx, cwd, "rev-parse", "--show-toplevel")
-	if err != nil {
-		return gitStatus{}, err
+func loadVCSStatus(ctx context.Context, cwd string) (gitStatus, error) {
+	t := vcs.DetectVCS(cwd)
+	switch t {
+	case "jj":
+		info, err := vcs.LoadJJInfo(ctx, cwd)
+		return gitStatus(info), err
+	case "git":
+		info, err := vcs.LoadGitInfo(ctx, cwd)
+		return gitStatus(info), err
+	default:
+		return gitStatus{}, nil
 	}
-	root = strings.TrimSpace(root)
-	if root == "" {
-		return gitStatus{}, errors.New("empty git root")
-	}
-
-	status := gitStatus{Repo: filepath.Base(root)}
-	if branch, err := runGit(ctx, root, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil && strings.TrimSpace(branch) != "" {
-		status.Branch = strings.TrimSpace(branch)
-	} else if sha, err := runGit(ctx, root, "rev-parse", "--short", "HEAD"); err == nil && strings.TrimSpace(sha) != "" {
-		status.Branch = strings.TrimSpace(sha)
-		status.Detached = true
-	} else if ref, err := runGit(ctx, root, "symbolic-ref", "--short", "HEAD"); err == nil && strings.TrimSpace(ref) != "" {
-		status.Branch = strings.TrimSpace(ref)
-	}
-	if status.Branch == "" {
-		status.Branch = "HEAD"
-		status.Detached = true
-	}
-
-	if out, err := runGit(ctx, root, "diff", "--numstat", "HEAD", "--"); err == nil {
-		status.Added, status.Removed = parseGitNumstat(out)
-	}
-	if out, err := runGit(ctx, root, "status", "--porcelain=v1", "--untracked-files=normal"); err == nil {
-		status.Untracked = countUntracked(out)
-	}
-	return status, nil
 }
 
+// runGit is a convenience wrapper for git commands used outside VCS abstraction.
 func runGit(ctx context.Context, cwd string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	if cwd != "" {
@@ -84,44 +59,11 @@ func runGit(ctx context.Context, cwd string, args ...string) (string, error) {
 	return string(out), nil
 }
 
-func parseGitNumstat(out string) (added int, removed int) {
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if line == "" {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		if fields[0] != "-" {
-			if n, err := strconv.Atoi(fields[0]); err == nil {
-				added += n
-			}
-		}
-		if fields[1] != "-" {
-			if n, err := strconv.Atoi(fields[1]); err == nil {
-				removed += n
-			}
-		}
-	}
-	return added, removed
-}
-
-func countUntracked(out string) int {
-	n := 0
-	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
-		if strings.HasPrefix(line, "?? ") {
-			n++
-		}
-	}
-	return n
-}
-
 func (m chatTUI) gitTag() string {
 	if strings.TrimSpace(m.gitStatus.Repo) == "" || strings.TrimSpace(m.gitStatus.Branch) == "" {
 		return ""
 	}
-	return m.gitStatus.render(themeFg(m.statusModeColor(), m.gitStatus.Repo), m.gitStatus.Branch)
+	return vcsRender(m.gitStatus, themeFg(m.statusModeColor(), m.gitStatus.Repo), m.gitStatus.Branch)
 }
 
 var (
@@ -142,36 +84,73 @@ func (m chatTUI) statusModeColor() cliColor {
 	}
 }
 
+func vcsRender(s gitStatus, repo, branch string) string {
+	var b strings.Builder
+	b.WriteString(repo)
+	b.WriteString(dim("@"))
+	if s.Detached {
+		b.WriteString(yellow(branch))
+	} else {
+		b.WriteString(green(branch))
+	}
+
+	var parts []string
+	if s.Added > 0 || s.Removed > 0 {
+		parts = append(parts, green(fmt.Sprintf("+%d", s.Added)), red(fmt.Sprintf("-%d", s.Removed)))
+	}
+	if s.Untracked > 0 {
+		parts = append(parts, yellow(fmt.Sprintf("?%d", s.Untracked)))
+	}
+	if len(parts) > 0 {
+		b.WriteString(dim(" ("))
+		b.WriteString(strings.Join(parts, " "))
+		b.WriteString(dim(")"))
+	}
+	return b.String()
+}
+
+func vcsRenderFull(s gitStatus) string {
+	return vcsRenderRepo(s, accent(s.Repo))
+}
+
 func (s gitStatus) Render() string {
-	return s.RenderRepo(accent(s.Repo))
+	return vcsRenderFull(s)
 }
 
 func (s gitStatus) RenderRepo(repo string) string {
-	if strings.TrimSpace(s.Repo) == "" || strings.TrimSpace(s.Branch) == "" {
-		return ""
-	}
-	return s.render(repo, s.Branch)
+	return vcsRenderRepo(s, repo)
 }
 
 func (s gitStatus) RenderWithin(maxWidth int, repoColor cliColor) string {
+	return vcsRenderWithin(s, maxWidth, repoColor)
+}
+
+func vcsRenderRepo(s gitStatus, repo string) string {
 	if strings.TrimSpace(s.Repo) == "" || strings.TrimSpace(s.Branch) == "" {
 		return ""
 	}
-	repo, branch := s.compactIdentity(maxWidth)
-	out := s.render(themeFg(repoColor, repo), branch)
+	return vcsRender(s, repo, s.Branch)
+}
+
+func vcsRenderWithin(s gitStatus, maxWidth int, repoColor cliColor) string {
+	if strings.TrimSpace(s.Repo) == "" || strings.TrimSpace(s.Branch) == "" {
+		return ""
+	}
+	repo, branch := vcsCompactIdentity(s, maxWidth)
+	out := vcsRender(s, themeFg(repoColor, repo), branch)
 	if maxWidth > 0 && visibleWidth(out) > maxWidth {
 		return ansi.Truncate(out, maxWidth, "…")
 	}
 	return out
 }
 
-func (s gitStatus) compactIdentity(maxWidth int) (repo, branch string) {
+func vcsCompactIdentity(s gitStatus, maxWidth int) (repo, branch string) {
 	repo = strings.TrimSpace(s.Repo)
 	branch = strings.TrimSpace(s.Branch)
 	if maxWidth <= 0 {
 		return repo, branch
 	}
-	dirtyWidth := visibleWidth(s.dirtyPlain())
+	dirtyWidth := visibleWidth(vcsDirtyPlain(s))
 	nameBudget := maxWidth - dirtyWidth - visibleWidth("@")
 	if nameBudget <= 2 {
 		return compactEnd(repo, max(1, nameBudget)), ""
@@ -195,7 +174,7 @@ func (s gitStatus) compactIdentity(maxWidth int) (repo, branch string) {
 	return compactMiddle(repo, repoBudget), compactMiddle(branch, branchBudget)
 }
 
-func (s gitStatus) dirtyPlain() string {
+func vcsDirtyPlain(s gitStatus) string {
 	var parts []string
 	if s.Added > 0 || s.Removed > 0 {
 		parts = append(parts, fmt.Sprintf("+%d", s.Added), fmt.Sprintf("-%d", s.Removed))
@@ -207,29 +186,4 @@ func (s gitStatus) dirtyPlain() string {
 		return ""
 	}
 	return " (" + strings.Join(parts, " ") + ")"
-}
-
-func (s gitStatus) render(repo, branch string) string {
-	var b strings.Builder
-	b.WriteString(repo)
-	b.WriteString(dim("@"))
-	if s.Detached {
-		b.WriteString(yellow(branch))
-	} else {
-		b.WriteString(green(branch))
-	}
-
-	var parts []string
-	if s.Added > 0 || s.Removed > 0 {
-		parts = append(parts, green(fmt.Sprintf("+%d", s.Added)), red(fmt.Sprintf("-%d", s.Removed)))
-	}
-	if s.Untracked > 0 {
-		parts = append(parts, yellow(fmt.Sprintf("?%d", s.Untracked)))
-	}
-	if len(parts) > 0 {
-		b.WriteString(dim(" ("))
-		b.WriteString(strings.Join(parts, " "))
-		b.WriteString(dim(")"))
-	}
-	return b.String()
 }
