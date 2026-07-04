@@ -1,6 +1,7 @@
 package config
 
 import (
+	"sort"
 	"strings"
 
 	"reasonix/internal/provider"
@@ -23,7 +24,11 @@ const ProviderPresetVersion = 1
 // intentionally editable after installation; they reduce setup friction without
 // turning fast-moving third-party catalogs into hard runtime dependencies.
 func CuratedProviderPresets() []ProviderPreset {
-	return cloneProviderPresets(curatedProviderPresets)
+	presets := cloneProviderPresets(curatedProviderPresets)
+	sort.SliceStable(presets, func(i, j int) bool {
+		return providerPresetDisplayRank(presets[i].ID) < providerPresetDisplayRank(presets[j].ID)
+	})
+	return presets
 }
 
 // CuratedProviderPreset returns a single provider preset by id.
@@ -37,10 +42,27 @@ func CuratedProviderPreset(id string) (ProviderPreset, bool) {
 	return ProviderPreset{}, false
 }
 
+func providerPresetDisplayRank(id string) int {
+	switch {
+	case id == "glm-cn" || id == "zai-global" || strings.HasPrefix(id, "glm-coding-plan-") || strings.HasPrefix(id, "zai-coding-plan-"):
+		return 0
+	case strings.HasPrefix(id, "longcat-"):
+		return 1
+	case strings.HasPrefix(id, "kimi-"):
+		return 2
+	case strings.HasPrefix(id, "minimax-"):
+		return 3
+	default:
+		return 4
+	}
+}
+
 var (
 	kimiAPIModels       = []string{"kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"}
 	kimiAPIVisionModels = []string{"kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"}
 	kimiCodingModels    = []string{"kimi-for-coding"}
+
+	longCat20Models = []string{"LongCat-2.0"}
 
 	mimoV25Models       = []string{"mimo-v2.5-pro", "mimo-v2.5"}
 	mimoV25VisionModels = []string{"mimo-v2.5"}
@@ -74,6 +96,47 @@ var (
 )
 
 var curatedProviderPresets = []ProviderPreset{
+	{
+		ID:          "longcat-openai",
+		Label:       "LongCat OpenAI",
+		Description: "LongCat Platform OpenAI-compatible endpoint for LongCat-2.0.",
+		KeyEnv:      "LONGCAT_API_KEY",
+		Entries: []ProviderEntry{{
+			Name:             "longcat-openai",
+			Kind:             "openai",
+			BaseURL:          "https://api.longcat.chat/openai/v1",
+			ModelsURL:        "https://api.longcat.chat/openai/v1/models",
+			Models:           longCat20Models,
+			Default:          "LongCat-2.0",
+			APIKeyEnv:        "LONGCAT_API_KEY",
+			ContextWindow:    131072,
+			Prices:           longCat20Prices(longCat20Models),
+			Thinking:         "enabled",
+			SupportedEfforts: []string{"enabled", "disabled"},
+			DefaultEffort:    "enabled",
+		}},
+	},
+	{
+		ID:          "longcat-anthropic",
+		Label:       "LongCat Anthropic",
+		Description: "LongCat Platform Anthropic-compatible Messages endpoint for LongCat-2.0.",
+		KeyEnv:      "LONGCAT_API_KEY",
+		Entries: []ProviderEntry{{
+			Name:             "longcat-anthropic",
+			Kind:             "anthropic",
+			BaseURL:          "https://api.longcat.chat/anthropic",
+			ModelsURL:        "https://api.longcat.chat/anthropic/v1/models",
+			Models:           longCat20Models,
+			Default:          "LongCat-2.0",
+			APIKeyEnv:        "LONGCAT_API_KEY",
+			AuthHeader:       true,
+			Thinking:         "enabled",
+			SupportedEfforts: []string{"enabled", "disabled"},
+			DefaultEffort:    "enabled",
+			ContextWindow:    131072,
+			Prices:           longCat20Prices(longCat20Models),
+		}},
+	},
 	{
 		ID:          "kimi-cn",
 		Label:       "Kimi CN API",

@@ -125,6 +125,25 @@ func TestIsZhipu(t *testing.T) {
 	}
 }
 
+func TestIsLongCat(t *testing.T) {
+	for _, tc := range []struct {
+		baseURL string
+		want    bool
+	}{
+		{"https://api.longcat.chat/openai/v1", true},
+		{"https://api.longcat.chat/anthropic", true},
+		{"https://gateway.longcat.chat/openai/v1", true},
+		{"https://longcat.chat/openai/v1", false},
+		{"https://api.deepseek.com", false},
+		{"", false},
+		{"not-a-url", false},
+	} {
+		if got := IsLongCat(tc.baseURL); got != tc.want {
+			t.Errorf("IsLongCat(%q) = %v, want %v", tc.baseURL, got, tc.want)
+		}
+	}
+}
+
 func TestIsOllamaCloud(t *testing.T) {
 	for _, tc := range []struct {
 		baseURL string

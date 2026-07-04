@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -85,5 +86,40 @@ func TestReasoningProtocolOverridesEndpointHeuristic(t *testing.T) {
 	c = p.(*client)
 	if c.deepseek || c.effort != "" {
 		t.Fatalf("deepseek=%v effort=%q, want false/empty", c.deepseek, c.effort)
+	}
+}
+
+func TestLongCatThinkingUsesThinkingField(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "longcat",
+		BaseURL: "https://api.longcat.chat/openai/v1",
+		Model:   "LongCat-2.0",
+		APIKey:  "k",
+		Extra:   map[string]any{"effort": "disabled", "thinking": "enabled"},
+	})
+	if err != nil {
+		t.Fatalf("New longcat: %v", err)
+	}
+	c := p.(*client)
+	if !c.longcat || c.effort != "disabled" {
+		t.Fatalf("longcat=%v effort=%q, want true/disabled", c.longcat, c.effort)
+	}
+	req := c.buildRequest(provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	b, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(b, &body); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	thinking, _ := body["thinking"].(map[string]any)
+	if thinking["type"] != "disabled" {
+		t.Fatalf("thinking = %#v, want disabled", body["thinking"])
+	}
+	if _, ok := body["reasoning_effort"]; ok {
+		t.Fatalf("LongCat request must omit reasoning_effort: %s", b)
 	}
 }

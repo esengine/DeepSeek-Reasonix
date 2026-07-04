@@ -89,6 +89,8 @@ const METRIC_SIGNALS = [
   "updater_error",
   "compaction",
   "turns",
+  "desktop_hang",
+  "desktop_hang_age",
   "client_surface",
   "client_version",
   "settings_language",

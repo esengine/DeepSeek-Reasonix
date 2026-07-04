@@ -1,0 +1,124 @@
+// Run: tsx src/__tests__/wails-resize-fix.test.tsx
+
+import { JSDOM } from "jsdom";
+import React from "react";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { useWailsResizeFix } from "../lib/useWailsResizeFix";
+
+let passed = 0;
+let failed = 0;
+
+function ok(value: boolean, label: string) {
+  if (value) {
+    process.stdout.write(`  PASS  ${label}\n`);
+    passed += 1;
+  } else {
+    process.stdout.write(`  FAIL  ${label}\n`);
+    failed += 1;
+  }
+}
+
+function eq(actual: unknown, expected: unknown, label: string) {
+  if (actual === expected) {
+    ok(true, label);
+  } else {
+    ok(false, `${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  }
+}
+
+function installDom(): JSDOM {
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
+    pretendToBeVisual: true,
+    url: "http://localhost/",
+  });
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  globalThis.window = dom.window as unknown as Window & typeof globalThis;
+  globalThis.document = dom.window.document;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
+  globalThis.HTMLElement = dom.window.HTMLElement;
+  globalThis.MouseEvent = dom.window.MouseEvent;
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 100 });
+  Object.defineProperty(window, "innerHeight", { configurable: true, value: 80 });
+  return dom;
+}
+
+function installWailsFlags(flags?: Partial<NonNullable<Window["wails"]>["flags"]>) {
+  window.wails = {
+    Callback: () => undefined,
+    EventsNotify: () => undefined,
+    flags: {
+      enableResize: true,
+      resizeEdge: undefined,
+      borderThickness: 6,
+      defaultCursor: null,
+      cssDragProperty: "--wails-draggable",
+      cssDragValue: "drag",
+      cssDropProperty: "--wails-drop-target",
+      cssDropValue: "drop",
+      shouldDrag: false,
+      deferDragToMouseMove: false,
+      disableScrollbarDrag: false,
+      disableDefaultContextMenu: false,
+      enableWailsDragAndDrop: false,
+      ...flags,
+    },
+  };
+}
+
+function Harness({ enabled }: { enabled: boolean }) {
+  useWailsResizeFix(enabled);
+  return null;
+}
+
+async function renderHarness(root: Root, enabled: boolean) {
+  await act(async () => {
+    root.render(<Harness enabled={enabled} />);
+  });
+}
+
+async function unmount(root: Root) {
+  await act(async () => {
+    root.unmount();
+  });
+}
+
+console.log("\nwails resize fix");
+
+{
+  const dom = installDom();
+  installWailsFlags({ enableResize: true, resizeEdge: "n-resize" });
+  const root = createRoot(document.getElementById("root")!);
+
+  await renderHarness(root, false);
+  window.dispatchEvent(new MouseEvent("mousemove", { clientX: 97, clientY: 40 }));
+  eq(window.wails?.flags.enableResize, true, "disabled hook leaves Wails resize enabled");
+  eq(window.wails?.flags.resizeEdge, "n-resize", "disabled hook leaves resize edge unchanged");
+
+  await unmount(root);
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  document.documentElement.style.cursor = "grab";
+  installWailsFlags({ enableResize: true, resizeEdge: "n-resize" });
+  const root = createRoot(document.getElementById("root")!);
+
+  await renderHarness(root, true);
+  eq(window.wails?.flags.enableResize, false, "enabled hook disables Wails built-in mousemove resize");
+
+  window.dispatchEvent(new MouseEvent("mousemove", { clientX: 97, clientY: 40 }));
+  eq(window.wails?.flags.resizeEdge, "e-resize", "enabled hook detects right edge using innerWidth CSS pixels");
+  eq(document.documentElement.style.cursor, "e-resize", "enabled hook mirrors detected edge cursor");
+
+  await unmount(root);
+  eq(window.wails?.flags.enableResize, true, "cleanup restores previous enableResize");
+  eq(window.wails?.flags.resizeEdge, "n-resize", "cleanup restores previous resizeEdge");
+  eq(document.documentElement.style.cursor, "grab", "cleanup restores previous cursor");
+
+  dom.window.close();
+}
+
+console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
+if (failed > 0) process.exit(1);

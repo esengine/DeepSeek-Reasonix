@@ -46,6 +46,7 @@ type GatewayConfig struct {
 	Channels           map[Platform]ChannelConfig
 	ConnectionChannels map[string]ChannelConfig
 	Routes             []RouteConfig
+	ConnectionAccess   map[string]AccessConfig
 	Allowlist          AllowlistConfig
 	Enabled            map[Platform]bool
 	Debounce           time.Duration
@@ -112,6 +113,17 @@ type AllowlistConfig struct {
 	Approvers map[Platform][]string
 	Admins    map[Platform][]string
 	Groups    map[Platform][]string
+}
+
+// AccessConfig controls who may use one concrete bot connection.
+type AccessConfig struct {
+	Enabled        bool
+	AllowAll       bool
+	PairingEnabled bool
+	Users          []string
+	Groups         []string
+	Approvers      []string
+	Admins         []string
 }
 
 // AdapterHealthSnapshot describes the gateway's current view of one adapter.
@@ -800,7 +812,38 @@ func outboundMessageKey(platform Platform, connID, domain, chatID, messageID str
 	}, "\x00")
 }
 
+func (gw *BotGateway) connectionAccess(msg InboundMessage) (AccessConfig, bool) {
+	if gw.cfg.ConnectionAccess == nil {
+		return AccessConfig{}, false
+	}
+	id := strings.TrimSpace(msg.ConnectionID)
+	if id == "" {
+		return AccessConfig{}, false
+	}
+	access, ok := gw.cfg.ConnectionAccess[id]
+	if !ok {
+		return AccessConfig{}, false
+	}
+	if !accessConfigActive(access) {
+		return AccessConfig{}, false
+	}
+	return access, true
+}
+
+func accessConfigActive(access AccessConfig) bool {
+	return access.Enabled ||
+		access.AllowAll ||
+		access.PairingEnabled ||
+		len(access.Users) > 0 ||
+		len(access.Groups) > 0 ||
+		len(access.Approvers) > 0 ||
+		len(access.Admins) > 0
+}
+
 func (gw *BotGateway) checkAllowlist(plat Platform, msg InboundMessage) bool {
+	if access, ok := gw.connectionAccess(msg); ok {
+		return checkConnectionAllowlist(access, msg)
+	}
 	if gw.cfg.Allowlist.AllowAll {
 		return true
 	}
@@ -821,6 +864,27 @@ func (gw *BotGateway) checkAllowlist(plat Platform, msg InboundMessage) bool {
 	return true
 }
 
+func checkConnectionAllowlist(access AccessConfig, msg InboundMessage) bool {
+	if access.AllowAll {
+		return true
+	}
+	if !access.Enabled {
+		return false
+	}
+	actor := msg.UserID
+	if msg.OperatorID != "" {
+		actor = msg.OperatorID
+	}
+	users := stringSet(append(append(append([]string{}, access.Users...), access.Admins...), access.Approvers...))
+	groups := stringSet(access.Groups)
+	actorAllowed := users[actor]
+	groupAllowed := chatUsesGroupAllowlist(msg.ChatType) && groups[msg.ChatID]
+	if len(users) == 0 && len(groups) == 0 {
+		return false
+	}
+	return actorAllowed || groupAllowed
+}
+
 func (gw *BotGateway) requireCommandRole(ctx context.Context, adapter Adapter, msg InboundMessage, role string) bool {
 	if gw.checkCommandRole(msg.Platform, msg, role) {
 		return true
@@ -836,6 +900,17 @@ func (gw *BotGateway) checkCommandRole(plat Platform, msg InboundMessage, role s
 	}
 	if strings.TrimSpace(actor) == "" {
 		return false
+	}
+	if access, ok := gw.connectionAccess(msg); ok {
+		admins := stringSet(access.Admins)
+		approvers := stringSet(access.Approvers)
+		if len(admins) == 0 && len(approvers) == 0 {
+			return true
+		}
+		if admins[actor] {
+			return true
+		}
+		return role == "approver" && approvers[actor]
 	}
 	admins := stringSet(gw.cfg.Allowlist.Admins[plat])
 	approvers := stringSet(gw.cfg.Allowlist.Approvers[plat])
@@ -863,7 +938,11 @@ func stringSet(values []string) map[string]bool {
 }
 
 func (gw *BotGateway) offerPairing(ctx context.Context, adapter Adapter, msg InboundMessage) bool {
-	if !gw.cfg.PairingEnabled {
+	if access, ok := gw.connectionAccess(msg); ok {
+		if !access.PairingEnabled {
+			return false
+		}
+	} else if !gw.cfg.PairingEnabled {
 		return false
 	}
 	req, created, err := CreateOrRefreshPairingRequest(msg, PairingConfig{

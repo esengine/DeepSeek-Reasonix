@@ -4,6 +4,8 @@ import "testing"
 
 func TestCuratedProviderPresetsCoverRequestedProviders(t *testing.T) {
 	wantIDs := []string{
+		"longcat-openai",
+		"longcat-anthropic",
 		"kimi-cn",
 		"kimi-global",
 		"kimi-coding-plan",
@@ -73,6 +75,35 @@ func TestCuratedProviderPresetsCoverRequestedProviders(t *testing.T) {
 	}
 }
 
+func TestCuratedProviderPresetsDisplayOrder(t *testing.T) {
+	wantPrefix := []string{
+		"glm-cn",
+		"zai-global",
+		"glm-coding-plan-cn",
+		"glm-coding-plan-cn-anthropic",
+		"zai-coding-plan-global",
+		"zai-coding-plan-global-anthropic",
+		"longcat-openai",
+		"longcat-anthropic",
+		"kimi-cn",
+		"kimi-global",
+		"kimi-coding-plan",
+		"minimax-cn-api",
+		"minimax-global-api",
+		"minimax-cn-anthropic",
+		"minimax-global-anthropic",
+	}
+	got := CuratedProviderPresets()
+	if len(got) < len(wantPrefix) {
+		t.Fatalf("got %d presets, want at least %d", len(got), len(wantPrefix))
+	}
+	for i, want := range wantPrefix {
+		if got[i].ID != want {
+			t.Fatalf("preset[%d] = %q, want %q", i, got[i].ID, want)
+		}
+	}
+}
+
 func TestCuratedProviderPresetReturnsDeepCopy(t *testing.T) {
 	preset, ok := CuratedProviderPreset("minimax-cn-api")
 	if !ok {
@@ -127,6 +158,27 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	}
 	if kimiPlan.Kind != "anthropic" || kimiPlan.DefaultModel() != "kimi-for-coding" || !kimiPlan.HasVisionModel("kimi-for-coding") || kimiPlan.Thinking != "adaptive" || kimiPlan.HasModel("kimi-code") {
 		t.Fatalf("kimi-coding-plan capability mismatch: %+v", kimiPlan)
+	}
+
+	longcat, ok := cfg.ResolveModel("longcat-openai/LongCat-2.0")
+	if !ok {
+		t.Fatal("longcat-openai/LongCat-2.0 did not resolve")
+	}
+	if longcat.BaseURL != "https://api.longcat.chat/openai/v1" || longcat.ModelsURL != "https://api.longcat.chat/openai/v1/models" || longcat.APIKeyEnv != "LONGCAT_API_KEY" {
+		t.Fatalf("longcat-openai endpoint/key mismatch: %+v", longcat)
+	}
+	if cap := EffortCapabilityForEntry(longcat); !cap.Supported || cap.Default != "enabled" || !containsString(cap.Levels, "disabled") {
+		t.Fatalf("longcat-openai effort capability = %+v, want enabled/disabled", cap)
+	}
+	if price := longcat.PriceForModel("LongCat-2.0"); price == nil || price.Currency != "¥" || price.Input != 2 || price.Output != 8 || price.CacheHit != 0.04 {
+		t.Fatalf("LongCat-2.0 price = %+v, want RMB discounted pricing", price)
+	}
+	longcatAnthropic, ok := cfg.Provider("longcat-anthropic")
+	if !ok {
+		t.Fatal("longcat-anthropic provider missing")
+	}
+	if longcatAnthropic.Kind != "anthropic" || longcatAnthropic.BaseURL != "https://api.longcat.chat/anthropic" || longcatAnthropic.ModelsURL != "https://api.longcat.chat/anthropic/v1/models" || !longcatAnthropic.AuthHeader || longcatAnthropic.Thinking != "enabled" {
+		t.Fatalf("longcat-anthropic capability mismatch: %+v", longcatAnthropic)
 	}
 
 	mimo, ok := cfg.Provider("mimo-api")

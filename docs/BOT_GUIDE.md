@@ -169,6 +169,10 @@ The headless gateway uses the same config records as the desktop app:
 - `workspace_root`, `model`, and `tool_approval_mode` can be set per
   connection. This lets different IM channels route to different local projects
   or approval postures.
+- `access` can also be set per connection with `enabled`, `allow_all`,
+  `pairing_enabled`, `users`, `groups`, `admins`, and `approvers`. When a
+  connection has active access settings, they are checked before the legacy
+  global `[bot.allowlist]`.
 - `[[bot.routes]]` adds finer routing by connection, platform, chat type, chat
   ID, user ID, or thread ID. Empty match fields are wildcards; the first matching
   route wins and can override `workspace_root`, `model`, and
@@ -183,14 +187,19 @@ The headless gateway uses the same config records as the desktop app:
   can only jump to those indexed targets; arbitrary local directories are not
   accepted from IM text.
 
-Access control is still mandatory. You can configure platform user IDs under
-`[bot.allowlist]`, deliberately set `allow_all = true`, or enable
-`[bot.pairing]` so an unknown DM sender receives a one-time pairing code. That
-code must be approved locally with `reasonix bot pairing approve <code>` before
-the sender can drive the bot. Users listed in `*_admins` or `*_approvers` also
-receive base bot admission, so they do not need to be duplicated in `*_users`.
-Group chats are not opened by DM pairing or role admission; group IDs remain an
-additional narrowing layer.
+Access control is still mandatory. New desktop-created bots should normally set
+access inside that bot's own detail panel, which saves to `[[bot.connections]]`
+or `[bot.qq].access`. The legacy global `[bot.allowlist]` remains a fallback for
+older configs and for connections without active per-bot access. You can
+deliberately set `allow_all = true`, or enable `pairing_enabled` for a single
+bot / `[bot.pairing]` globally so an unknown DM sender receives a one-time
+pairing code. That code must be approved locally with
+`reasonix bot pairing approve <code>` before the sender can drive the bot; when
+the request is tied to a connection, approval adds the sender to that
+connection's access list. Users listed in `admins` / `approvers` or the legacy
+`*_admins` / `*_approvers` also receive base bot admission, so they do not need
+to be duplicated in `users` / `*_users`. Group chats are not opened by DM
+pairing or role admission; group IDs remain an additional narrowing layer.
 Use these commands to manage pending requests:
 
 ```sh

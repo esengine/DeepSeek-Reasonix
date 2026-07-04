@@ -9,6 +9,7 @@ import {
   projectTreeReadActivityKey,
   projectTreeTopicHasUnreadActivity,
   projectTreeShouldRenderTopicActions,
+  projectTreeTopicMetaLine,
 } from "../components/ProjectTree";
 import type { ProjectNode } from "../lib/types";
 
@@ -26,6 +27,12 @@ function eq(a: unknown, b: unknown, label: string) {
 }
 
 console.log("\nproject tree runtime sessions");
+
+const testT = (key: string, vars?: Record<string, string | number>) => {
+  if (key === "history.turnOne") return `${vars?.n ?? 1} turn`;
+  if (key === "history.turnOther") return `${vars?.n ?? 0} turns`;
+  return key;
+};
 
 const tree: ProjectNode[] = [
   {
@@ -105,6 +112,29 @@ eq(
   }),
   { scope: "project", workspaceRoot: "/repo", topicId: "topic-project", sessionPath: undefined },
   "regular project topic still opens by topic",
+);
+
+eq(
+  projectTreeTopicMetaLine({
+    key: "global_topic_missing_time",
+    kind: "global_topic",
+    label: "Old empty topic",
+    topicId: "missing-time",
+  }, testT),
+  "projectTree.previously",
+  "topic with no turns and no timestamps renders previous-time fallback meta",
+);
+
+eq(
+  projectTreeTopicMetaLine({
+    key: "global_topic_recent",
+    kind: "global_topic",
+    label: "Recent blank topic",
+    topicId: "recent",
+    createdAt: Date.now(),
+  }, testT),
+  "projectTree.justNow",
+  "topic with a real recent timestamp still renders just-now meta",
 );
 
 const completedTopic: ProjectNode = {

@@ -550,12 +550,27 @@ type BotPairingConfig struct {
 	MaxPendingPerPlatform int  `toml:"max_pending_per_platform"`
 }
 
+// BotAccessConfig controls who may use one concrete bot connection.
+type BotAccessConfig struct {
+	Enabled        bool     `toml:"enabled"`
+	AllowAll       bool     `toml:"allow_all"`
+	PairingEnabled bool     `toml:"pairing_enabled"`
+	Users          []string `toml:"users"`
+	Groups         []string `toml:"groups"`
+	Approvers      []string `toml:"approvers"`
+	Admins         []string `toml:"admins"`
+}
+
 // QQBotConfig QQ 官方 Bot API v2 配置。
 type QQBotConfig struct {
-	Enabled      bool   `toml:"enabled"`
-	AppID        string `toml:"app_id"`
-	AppSecretEnv string `toml:"app_secret_env"` // 环境变量名，如 QQ_BOT_APP_SECRET
-	Sandbox      bool   `toml:"sandbox"`        // true 使用 QQ 沙箱 API / gateway
+	Enabled          bool            `toml:"enabled"`
+	AppID            string          `toml:"app_id"`
+	AppSecretEnv     string          `toml:"app_secret_env"` // 环境变量名，如 QQ_BOT_APP_SECRET
+	Sandbox          bool            `toml:"sandbox"`        // true 使用 QQ 沙箱 API / gateway
+	Model            string          `toml:"model"`
+	ToolApprovalMode string          `toml:"tool_approval_mode"`
+	WorkspaceRoot    string          `toml:"workspace_root"`
+	Access           BotAccessConfig `toml:"access"`
 }
 
 // FeishuBotConfig 飞书自建应用 Bot 配置。
@@ -592,6 +607,7 @@ type BotConnectionConfig struct {
 	Model            string                        `toml:"model"`
 	ToolApprovalMode string                        `toml:"tool_approval_mode"`
 	WorkspaceRoot    string                        `toml:"workspace_root"`
+	Access           BotAccessConfig               `toml:"access"`
 	Credential       BotConnectionCredential       `toml:"credential"`
 	SessionMappings  []BotConnectionSessionMapping `toml:"session_mappings"`
 	LastError        string                        `toml:"last_error"`

@@ -33,6 +33,30 @@ func newDesktopBotRuntime() *desktopBotRuntime {
 	return &desktopBotRuntime{status: BotRuntimeStatusView{Status: "stopped", Message: "bot runtime is not started"}}
 }
 
+func desktopBotChannelsWithLegacyQQ(qq config.QQBotConfig, channels map[bot.Platform]bot.ChannelConfig, connectionChannels map[string]bot.ChannelConfig) (map[bot.Platform]bot.ChannelConfig, map[string]bot.ChannelConfig) {
+	channel := bot.ChannelConfig{
+		Model:            strings.TrimSpace(qq.Model),
+		ToolApprovalMode: normalizeBotConnectionToolApprovalMode(qq.ToolApprovalMode),
+		WorkspaceRoot:    strings.TrimSpace(qq.WorkspaceRoot),
+	}
+	if channel.Model == "" && channel.ToolApprovalMode == "" && channel.WorkspaceRoot == "" {
+		return channels, connectionChannels
+	}
+	if channels == nil {
+		channels = make(map[bot.Platform]bot.ChannelConfig)
+	}
+	if _, ok := channels[bot.PlatformQQ]; !ok {
+		channels[bot.PlatformQQ] = channel
+	}
+	if connectionChannels == nil {
+		connectionChannels = make(map[string]bot.ChannelConfig)
+	}
+	if _, ok := connectionChannels[string(bot.PlatformQQ)]; !ok {
+		connectionChannels[string(bot.PlatformQQ)] = channel
+	}
+	return channels, connectionChannels
+}
+
 func (a *App) refreshBotRuntimeAsync() {
 	if a.ctx == nil {
 		return
@@ -92,6 +116,9 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	ctx, cancel := context.WithCancel(parent)
 	modelName := botruntime.ModelName(cfg, "")
+	channels := botruntime.ChannelConfigs(cfg.Bot.Connections, true, true)
+	connectionChannels := botruntime.ConnectionChannelConfigs(cfg.Bot.Connections, true, true)
+	channels, connectionChannels = desktopBotChannelsWithLegacyQQ(cfg.Bot.QQ, channels, connectionChannels)
 	gwCfg := bot.GatewayConfig{
 		Model:              modelName,
 		ToolApprovalMode:   cfg.Bot.ToolApprovalMode,
@@ -112,9 +139,10 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 		ControlAddr:        cfg.Bot.Control.Addr,
 		ControlToken:       os.Getenv(strings.TrimSpace(cfg.Bot.Control.TokenEnv)),
 		WorkspaceRoot:      workspaceRoot,
-		Channels:           botruntime.ChannelConfigs(cfg.Bot.Connections, true, true),
-		ConnectionChannels: botruntime.ConnectionChannelConfigs(cfg.Bot.Connections, true, true),
+		Channels:           channels,
+		ConnectionChannels: connectionChannels,
 		Routes:             botruntime.RouteConfigs(cfg.Bot.Routes, true, true),
+		ConnectionAccess:   botruntime.ConnectionAccessConfigs(cfg),
 		Enabled:            plan.Enabled,
 		Allowlist: bot.AllowlistConfig{
 			Enabled:  cfg.Bot.Allowlist.Enabled,
@@ -232,8 +260,8 @@ func desktopBotRuntimePlan(cfg *config.Config) botRuntimePlan {
 	if !cfg.Bot.Enabled {
 		return botRuntimePlan{Status: "stopped", Message: "bot is disabled"}
 	}
-	if !cfg.Bot.Allowlist.AllowAll && !cfg.Bot.Pairing.Enabled && (!cfg.Bot.Allowlist.Enabled || botruntime.AllowlistUserCount(cfg.Bot.Allowlist) == 0) {
-		return botRuntimePlan{Status: "blocked", Message: "bot requires an allowlist, pairing, or allow_all=true"}
+	if !botruntime.BotConfigHasAccessControl(cfg.Bot) {
+		return botRuntimePlan{Status: "blocked", Message: "bot requires an allowlist, pairing, per-bot access, or allow_all=true"}
 	}
 	enabled, unknown := botruntime.EnabledPlatforms(cfg, nil)
 	if len(unknown) > 0 {

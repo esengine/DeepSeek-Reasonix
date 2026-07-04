@@ -151,6 +151,16 @@ type BotAllowlistView struct {
 	WeixinGroups    []string `json:"weixinGroups"`
 }
 
+type BotAccessView struct {
+	Enabled        bool     `json:"enabled"`
+	AllowAll       bool     `json:"allowAll"`
+	PairingEnabled bool     `json:"pairingEnabled"`
+	Users          []string `json:"users"`
+	Groups         []string `json:"groups"`
+	Approvers      []string `json:"approvers"`
+	Admins         []string `json:"admins"`
+}
+
 type BotSelfUserIDsView struct {
 	QQ     []string `json:"qq"`
 	Feishu []string `json:"feishu"`
@@ -182,11 +192,15 @@ type BotRouteView struct {
 }
 
 type QQBotView struct {
-	Enabled      bool   `json:"enabled"`
-	AppID        string `json:"appId"`
-	AppSecretEnv string `json:"appSecretEnv"`
-	SecretSet    bool   `json:"secretSet"`
-	Sandbox      bool   `json:"sandbox"`
+	Enabled          bool          `json:"enabled"`
+	AppID            string        `json:"appId"`
+	AppSecretEnv     string        `json:"appSecretEnv"`
+	SecretSet        bool          `json:"secretSet"`
+	Sandbox          bool          `json:"sandbox"`
+	Model            string        `json:"model"`
+	ToolApprovalMode string        `json:"toolApprovalMode"`
+	WorkspaceRoot    string        `json:"workspaceRoot"`
+	Access           BotAccessView `json:"access"`
 }
 
 type FeishuBotView struct {
@@ -927,11 +941,15 @@ func botSettingsView(b config.BotConfig) BotSettingsView {
 			WeixinGroups:    nonNil(b.Allowlist.WeixinGroups),
 		},
 		QQ: QQBotView{
-			Enabled:      b.QQ.Enabled,
-			AppID:        b.QQ.AppID,
-			AppSecretEnv: b.QQ.AppSecretEnv,
-			SecretSet:    strings.TrimSpace(b.QQ.AppSecretEnv) != "" && os.Getenv(b.QQ.AppSecretEnv) != "",
-			Sandbox:      b.QQ.Sandbox,
+			Enabled:          b.QQ.Enabled,
+			AppID:            b.QQ.AppID,
+			AppSecretEnv:     b.QQ.AppSecretEnv,
+			SecretSet:        strings.TrimSpace(b.QQ.AppSecretEnv) != "" && os.Getenv(b.QQ.AppSecretEnv) != "",
+			Sandbox:          b.QQ.Sandbox,
+			Model:            b.QQ.Model,
+			ToolApprovalMode: normalizeBotConnectionToolApprovalMode(b.QQ.ToolApprovalMode),
+			WorkspaceRoot:    b.QQ.WorkspaceRoot,
+			Access:           botAccessViewFromConfig(b.QQ.Access),
 		},
 		Feishu: FeishuBotView{
 			Enabled:           b.Feishu.Enabled,
@@ -1010,6 +1028,30 @@ func botRouteConfigs(routes []BotRouteView) []config.BotRouteConfig {
 		return nil
 	}
 	return out
+}
+
+func botAccessViewFromConfig(access config.BotAccessConfig) BotAccessView {
+	return BotAccessView{
+		Enabled:        access.Enabled,
+		AllowAll:       access.AllowAll,
+		PairingEnabled: access.PairingEnabled,
+		Users:          nonNil(access.Users),
+		Groups:         nonNil(access.Groups),
+		Approvers:      nonNil(access.Approvers),
+		Admins:         nonNil(access.Admins),
+	}
+}
+
+func botAccessConfigFromView(access BotAccessView) config.BotAccessConfig {
+	return config.BotAccessConfig{
+		Enabled:        access.Enabled,
+		AllowAll:       access.AllowAll,
+		PairingEnabled: access.PairingEnabled,
+		Users:          trimList(access.Users),
+		Groups:         trimList(access.Groups),
+		Approvers:      trimList(access.Approvers),
+		Admins:         trimList(access.Admins),
+	}
 }
 
 func botDomainOrDefault(domain string) string {
@@ -1207,7 +1249,14 @@ func desktopBotConfigConfigured(bot config.BotConfig) bool {
 		len(bot.Allowlist.QQGroups)+len(bot.Allowlist.FeishuGroups)+len(bot.Allowlist.WeixinGroups) > 0 {
 		return true
 	}
-	if bot.QQ.Enabled || strings.TrimSpace(bot.QQ.AppID) != "" || bot.QQ.AppSecretEnv != defaults.QQ.AppSecretEnv || bot.QQ.Sandbox != defaults.QQ.Sandbox {
+	if bot.QQ.Enabled ||
+		strings.TrimSpace(bot.QQ.AppID) != "" ||
+		bot.QQ.AppSecretEnv != defaults.QQ.AppSecretEnv ||
+		bot.QQ.Sandbox != defaults.QQ.Sandbox ||
+		strings.TrimSpace(bot.QQ.Model) != "" ||
+		strings.TrimSpace(bot.QQ.ToolApprovalMode) != "" ||
+		strings.TrimSpace(bot.QQ.WorkspaceRoot) != "" ||
+		botruntime.BotAccessActive(bot.QQ.Access) {
 		return true
 	}
 	if bot.Feishu.Enabled ||
@@ -1312,10 +1361,14 @@ func sameConfigPath(a, b string) bool {
 	return filepath.Clean(a) == filepath.Clean(b)
 }
 
-// rebuild tears down the controller and rebuilds it from the (just-changed)
-// config, carrying the conversation forward. It keeps the active model if it
-// still resolves; otherwise it falls back to the new default. Mirrors SetModel.
+// rebuild builds a replacement controller from the (just-changed) config and
+// swaps it in only after the target session lease is available. The old
+// controller stays usable if the rebuild fails.
 func (a *App) rebuild() error {
+	return a.rebuildSetting("settings")
+}
+
+func (a *App) rebuildSetting(setting string) error {
 	if a.ctx == nil {
 		return nil
 	}
@@ -1324,22 +1377,41 @@ func (a *App) rebuild() error {
 		return fmt.Errorf("no active tab")
 	}
 	if controllerHasActiveRuntimeWork(tab.Ctrl) {
-		return rebuildControllerActiveWorkError("settings")
+		return rebuildControllerActiveWorkError(setting)
 	}
 	if err := a.ensureTabControllerWorkspace(tab); err != nil {
 		return err
 	}
 	prevPath := a.reconciledSessionPathForTab(tab)
-	var carried []provider.Message
-	if tab.Ctrl != nil {
+	if prevPath == "" {
+		prevPath = strings.TrimSpace(tab.currentSessionPath())
+	}
+	if tab.Ctrl == nil && prevPath != "" && a.attachExistingSessionRuntime(tab, prevPath, a.ctx) {
+		prevPath = a.reconciledSessionPathForTab(tab)
 		if prevPath == "" {
-			prevPath = tab.Ctrl.SessionPath()
+			prevPath = strings.TrimSpace(tab.currentSessionPath())
+		}
+	}
+	if controllerHasActiveRuntimeWork(tab.Ctrl) {
+		return rebuildControllerActiveWorkError(setting)
+	}
+	if err := a.ensureTabControllerWorkspace(tab); err != nil {
+		return err
+	}
+
+	var carried []provider.Message
+	oldCtrl := tab.Ctrl
+	if oldCtrl != nil {
+		if prevPath == "" {
+			prevPath = oldCtrl.SessionPath()
+		}
+		if err := tab.ensureSessionLease(prevPath); err != nil {
+			return userFacingSessionLeaseError(setting, err)
 		}
 		if err := a.snapshotTabForAction(tab, "rebuilding settings"); err != nil {
 			return err
 		}
-		carried = tab.Ctrl.History()
-		tab.Ctrl.Close()
+		carried = oldCtrl.History()
 	}
 	model := tab.model
 	if cfg, err := config.LoadForRoot(tab.WorkspaceRoot); err == nil {
@@ -1364,12 +1436,13 @@ func (a *App) rebuild() error {
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
 	})
 	if err != nil {
-		tab.releaseSessionLease()
-		a.mu.Lock()
-		tab.StartupErr = err.Error()
-		tab.Ready = true
-		a.mu.Unlock()
-		a.emitReady(a.ctx)
+		if oldCtrl == nil {
+			a.mu.Lock()
+			tab.StartupErr = err.Error()
+			tab.Ready = true
+			a.mu.Unlock()
+			a.emitReady(a.ctx)
+		}
 		return err
 	}
 	a.bindControllerDisplayRecorder(ctrl)
@@ -1385,14 +1458,11 @@ func (a *App) rebuild() error {
 	path := agent.ContinueSessionPath(prevPath, ctrl.SessionDir(), ctrl.Label())
 	if err := tab.ensureSessionLease(path); err != nil {
 		ctrl.Close()
-		tab.releaseSessionLease()
-		return err
+		return userFacingSessionLeaseError(setting, err)
 	}
-	if len(carried) > 0 {
-		carried = withFreshSystemPrompt(carried, systemPromptFrom(ctrl.History()))
-		ctrl.Resume(&agent.Session{Messages: carried}, path)
-	} else if path != "" {
-		ctrl.SetSessionPath(path)
+	resumeWithFreshSystemPrompt(ctrl, carried, path)
+	if oldCtrl != nil {
+		oldCtrl.Close()
 	}
 	a.persistTabSessionPath(tab, path)
 	a.mu.Lock()
@@ -2181,7 +2251,7 @@ func (a *App) SetProviderKey(apiKeyEnv, value string) (string, error) {
 	if err := a.ensureProviderAccessForKey(apiKeyEnv); err != nil {
 		return "", err
 	}
-	if err := a.rebuild(); err != nil {
+	if err := a.rebuildSetting("provider key"); err != nil {
 		return "", err
 	}
 	return warning, nil
@@ -2250,7 +2320,7 @@ func (a *App) ClearProviderKey(apiKeyEnv string) error {
 	if err := removeDotEnv(apiKeyEnv); err != nil {
 		return err
 	}
-	return a.rebuild()
+	return a.rebuildSetting("provider key")
 }
 
 // SetPermissionMode sets the writer-fallback mode (ask|allow|deny).
@@ -2354,10 +2424,14 @@ func (a *App) SetBotSettings(b BotSettingsView) error {
 			WeixinGroups:    trimList(b.Allowlist.WeixinGroups),
 		}
 		c.Bot.QQ = config.QQBotConfig{
-			Enabled:      b.QQ.Enabled,
-			AppID:        strings.TrimSpace(b.QQ.AppID),
-			AppSecretEnv: strings.TrimSpace(b.QQ.AppSecretEnv),
-			Sandbox:      b.QQ.Sandbox,
+			Enabled:          b.QQ.Enabled,
+			AppID:            strings.TrimSpace(b.QQ.AppID),
+			AppSecretEnv:     strings.TrimSpace(b.QQ.AppSecretEnv),
+			Sandbox:          b.QQ.Sandbox,
+			Model:            strings.TrimSpace(b.QQ.Model),
+			ToolApprovalMode: normalizeBotConnectionToolApprovalMode(b.QQ.ToolApprovalMode),
+			WorkspaceRoot:    strings.TrimSpace(b.QQ.WorkspaceRoot),
+			Access:           botAccessConfigFromView(b.QQ.Access),
 		}
 		c.Bot.Feishu = config.FeishuBotConfig{
 			Enabled:           b.Feishu.Enabled,

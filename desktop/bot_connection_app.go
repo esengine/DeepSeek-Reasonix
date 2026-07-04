@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/bot"
 	"reasonix/internal/bot/feishu"
 	"reasonix/internal/bot/weixin"
+	"reasonix/internal/botruntime"
 	"reasonix/internal/config"
 )
 
@@ -48,6 +49,7 @@ type BotConnectionView struct {
 	Model            string                            `json:"model"`
 	ToolApprovalMode string                            `json:"toolApprovalMode"`
 	WorkspaceRoot    string                            `json:"workspaceRoot"`
+	Access           BotAccessView                     `json:"access"`
 	Credential       BotConnectionCredentialView       `json:"credential"`
 	SessionMappings  []BotConnectionSessionMappingView `json:"sessionMappings"`
 	LastError        string                            `json:"lastError"`
@@ -164,6 +166,7 @@ func (a *App) PollBotConnectionInstall(installID string) (BotInstallPollResult, 
 			Label:      "微信",
 			Enabled:    true,
 			Status:     "connected",
+			Access:     botInstallAccess(result.UserID),
 			Credential: config.BotConnectionCredential{AccountID: result.AccountID, TokenEnv: "WEIXIN_BOT_TOKEN"},
 		}, func(c *config.Config) {
 			c.Bot.Enabled = true
@@ -518,6 +521,7 @@ func (a *App) pollFeishuConnectionInstall(installID string, session *botInstallS
 		Label:      label,
 		Enabled:    true,
 		Status:     "connected",
+		Access:     botInstallAccess(userID),
 		Credential: config.BotConnectionCredential{AppID: appID, AppSecretEnv: secretEnv},
 	}, func(c *config.Config) {
 		c.Bot.Enabled = true
@@ -545,6 +549,9 @@ func (a *App) upsertBotConnection(conn config.BotConnectionConfig, updateLegacy 
 	if conn.Status == "" {
 		conn.Status = "connected"
 	}
+	if normalizeBotConnectionToolApprovalMode(conn.ToolApprovalMode) == "" {
+		conn.ToolApprovalMode = "ask"
+	}
 	if conn.ID == "" {
 		conn.ID = connectionID(conn.Provider, conn.Domain)
 	}
@@ -556,6 +563,9 @@ func (a *App) upsertBotConnection(conn config.BotConnectionConfig, updateLegacy 
 		for i, existing := range c.Bot.Connections {
 			if existing.ID == conn.ID {
 				conn.CreatedAt = firstNonEmptyBot(existing.CreatedAt, conn.CreatedAt)
+				if !botruntime.BotAccessActive(conn.Access) && botruntime.BotAccessActive(existing.Access) {
+					conn.Access = existing.Access
+				}
 				c.Bot.Connections[i] = conn
 				replaced = true
 				break
@@ -697,6 +707,7 @@ func botConnectionView(conn config.BotConnectionConfig) BotConnectionView {
 	return BotConnectionView{
 		ID: conn.ID, Provider: conn.Provider, Domain: conn.Domain, Label: conn.Label, Enabled: conn.Enabled, Status: conn.Status,
 		Model: conn.Model, ToolApprovalMode: normalizeBotConnectionToolApprovalMode(conn.ToolApprovalMode), WorkspaceRoot: conn.WorkspaceRoot,
+		Access: botAccessViewFromConfig(conn.Access),
 		Credential: BotConnectionCredentialView{
 			AppID: conn.Credential.AppID, AppSecretEnv: conn.Credential.AppSecretEnv, AccountID: conn.Credential.AccountID, TokenEnv: conn.Credential.TokenEnv,
 			SecretSet: botCredentialSecretSet(conn),
@@ -763,8 +774,9 @@ func botConnectionConfig(view BotConnectionView) config.BotConnectionConfig {
 		Enabled:          view.Enabled,
 		Status:           strings.TrimSpace(view.Status),
 		Model:            strings.TrimSpace(view.Model),
-		ToolApprovalMode: normalizeBotConnectionToolApprovalMode(view.ToolApprovalMode),
+		ToolApprovalMode: firstNonEmptyBot(normalizeBotConnectionToolApprovalMode(view.ToolApprovalMode), "ask"),
 		WorkspaceRoot:    strings.TrimSpace(view.WorkspaceRoot),
+		Access:           botAccessConfigFromView(view.Access),
 		Credential: config.BotConnectionCredential{
 			AppID:        strings.TrimSpace(view.Credential.AppID),
 			AppSecretEnv: strings.TrimSpace(view.Credential.AppSecretEnv),
@@ -871,6 +883,15 @@ func botSessionMappingConfigs(mappings []BotConnectionSessionMappingView, connec
 
 func connectionID(provider, domain string) string {
 	return strings.Trim(strings.ToLower(provider+"-"+domain), "-")
+}
+
+func botInstallAccess(userID string) config.BotAccessConfig {
+	userID = strings.TrimSpace(userID)
+	access := config.BotAccessConfig{Enabled: true, PairingEnabled: true}
+	if userID != "" {
+		access.Users = []string{userID}
+	}
+	return access
 }
 
 func randomInstallID() string {

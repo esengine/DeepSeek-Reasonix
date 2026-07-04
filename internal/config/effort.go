@@ -81,6 +81,10 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 		// thinking on out of the box; "auto" means "don't override the model
 		// default" (== enabled for GLM).
 		return EffortCapability{Supported: true, Levels: []string{"auto", "enabled", "disabled"}, Default: "enabled"}
+	case isLongCatEntry(e):
+		// LongCat exposes the same binary thinking vocabulary on its
+		// OpenAI-compatible endpoint and documents no reasoning_effort depth scale.
+		return EffortCapability{Supported: true, Levels: []string{"auto", "enabled", "disabled"}, Default: "enabled"}
 	case isOllamaCloudEntry(e):
 		// Ollama Cloud accepts top-level reasoning_effort values low|medium|
 		// high|max. "none" means omit the field so the hosted model runs without
@@ -162,6 +166,19 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 		// depth levels onto the nearest valid value so a stale /effort high|low
 		// still works. "off" is a retired DeepSeek level meaning "no thinking",
 		// which maps to "disabled".
+		switch level {
+		case "enabled", "disabled":
+			return level, nil
+		case "off":
+			return "disabled", nil
+		case "low", "medium", "high", "xhigh", "max":
+			return "enabled", nil
+		default:
+			return "", fmt.Errorf("usage: /effort auto|enabled|disabled")
+		}
+	case isLongCatEntry(e):
+		// LongCat's knob is binary (enabled|disabled); depth-like aliases mean
+		// thinking on, while the legacy off spellings disable it.
 		switch level {
 		case "enabled", "disabled":
 			return level, nil
@@ -312,6 +329,12 @@ func isMiniMaxEntry(e *ProviderEntry) bool {
 // entry-wrapper just gates on the openai kind.
 func isZhipuEntry(e *ProviderEntry) bool {
 	return e != nil && e.Kind == "openai" && openai.IsZhipu(e.BaseURL)
+}
+
+// isLongCatEntry reports whether the entry points at LongCat's OpenAI-compatible
+// endpoint. See openai.IsLongCat for the host-matching rule.
+func isLongCatEntry(e *ProviderEntry) bool {
+	return e != nil && e.Kind == "openai" && openai.IsLongCat(e.BaseURL)
 }
 
 // isOllamaCloudEntry reports whether the entry points at hosted Ollama Cloud,

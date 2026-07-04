@@ -1170,6 +1170,27 @@ func TestCreateTopicDefaultsToAutoNewSessionTitle(t *testing.T) {
 	}
 }
 
+func TestListProjectTreeFallsBackToTopicIDCreatedAt(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	const topicID = "legacy_20260606-114914_2276f13fd87c"
+	if err := setTopicTitleWithSource("", topicID, "你好，你是谁", topicTitleSourceManual); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	if err := prependTopicInProjectsFile("", topicID, false); err != nil {
+		t.Fatalf("prepend topic: %v", err)
+	}
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || nodes[0].Kind != "global_folder" || len(nodes[0].Children) != 1 {
+		t.Fatalf("project tree = %#v, want Global with one topic", nodes)
+	}
+	expected := time.Date(2026, 6, 6, 11, 49, 14, 0, time.UTC).UnixMilli()
+	if got := nodes[0].Children[0].CreatedAt; got != expected {
+		t.Fatalf("project tree createdAt = %d, want %d", got, expected)
+	}
+}
+
 func TestCreateTopicAppearsFirstInProjectTree(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

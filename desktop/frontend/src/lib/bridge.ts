@@ -766,6 +766,7 @@ function mockPreset(id: string, label: string, description: string, keyEnv: stri
 }
 
 const mockKimiAPIModels = ["kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"];
+const mockLongCatModels = ["LongCat-2.0"];
 const mockMiMoV25Models = ["mimo-v2.5-pro", "mimo-v2.5"];
 const mockMiniMaxModels = ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"];
 const mockGLMAPIModels = ["glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-5v-turbo", "glm-4.7", "glm-4.7-flash", "glm-4.7-flashx", "glm-4.6", "glm-4.5", "glm-4.5-air", "glm-4.5-flash"];
@@ -784,6 +785,8 @@ const mockVercelModels = ["anthropic/claude-sonnet-4.6", "anthropic/claude-opus-
 const mockOllamaCloudModels = ["glm-5.2", "kimi-k2.7-code", "deepseek-v4-pro", "deepseek-v4-flash", "minimax-m3", "nemotron-3-nano:30b", "qwen3-coder-next"];
 
 const mockProviderPresetTemplates: MockProviderPresetTemplate[] = [
+  mockPreset("longcat-openai", "LongCat OpenAI", "LongCat Platform OpenAI-compatible endpoint for LongCat-2.0.", "LONGCAT_API_KEY", mockProviderTemplate({ name: "longcat-openai", kind: "openai", baseUrl: "https://api.longcat.chat/openai/v1", modelsUrl: "https://api.longcat.chat/openai/v1/models", models: mockLongCatModels, default: "LongCat-2.0", apiKeyEnv: "LONGCAT_API_KEY", contextWindow: 131072, thinking: "enabled", supportedEfforts: ["enabled", "disabled"], defaultEffort: "enabled" })),
+  mockPreset("longcat-anthropic", "LongCat Anthropic", "LongCat Platform Anthropic-compatible Messages endpoint for LongCat-2.0.", "LONGCAT_API_KEY", mockProviderTemplate({ name: "longcat-anthropic", kind: "anthropic", baseUrl: "https://api.longcat.chat/anthropic", modelsUrl: "https://api.longcat.chat/anthropic/v1/models", models: mockLongCatModels, default: "LongCat-2.0", apiKeyEnv: "LONGCAT_API_KEY", authHeader: true, contextWindow: 131072, thinking: "enabled", supportedEfforts: ["enabled", "disabled"], defaultEffort: "enabled" })),
   mockPreset("kimi-cn", "Kimi CN API", "Moonshot Kimi China OpenAI-compatible API.", "KIMI_API_KEY", mockProviderTemplate({ name: "kimi-cn", kind: "openai", baseUrl: "https://api.moonshot.cn/v1", models: mockKimiAPIModels, visionModels: mockKimiAPIModels, default: "kimi-k2.7-code", apiKeyEnv: "KIMI_API_KEY", balanceUrl: "https://api.moonshot.cn/v1/users/me/balance", contextWindow: 262144, reasoningProtocol: "none" })),
   mockPreset("kimi-global", "Kimi Global API", "Moonshot Kimi international OpenAI-compatible API.", "MOONSHOT_API_KEY", mockProviderTemplate({ name: "kimi-global", kind: "openai", baseUrl: "https://api.moonshot.ai/v1", models: mockKimiAPIModels, visionModels: mockKimiAPIModels, default: "kimi-k2.7-code", apiKeyEnv: "MOONSHOT_API_KEY", balanceUrl: "https://api.moonshot.ai/v1/users/me/balance", contextWindow: 262144, reasoningProtocol: "none" })),
   mockPreset("kimi-coding-plan", "Kimi Coding Plan", "Kimi Coding Plan via its dedicated Anthropic-compatible endpoint.", "KIMI_CODING_API_KEY", mockProviderTemplate({ name: "kimi-coding-plan", kind: "anthropic", baseUrl: "https://api.kimi.com/coding/", models: ["kimi-for-coding"], visionModels: ["kimi-for-coding"], default: "kimi-for-coding", apiKeyEnv: "KIMI_CODING_API_KEY", headers: { "User-Agent": "claude-code/0.1.0" }, thinking: "adaptive", contextWindow: 262144 })),
@@ -826,7 +829,7 @@ const mockProviderPresetTemplates: MockProviderPresetTemplate[] = [
 ];
 
 function mockProviderPresetViews(): ProviderPresetView[] {
-  return mockProviderPresetTemplates.map((template) => ({
+  return [...mockProviderPresetTemplates].sort((a, b) => mockProviderPresetDisplayRank(a.id) - mockProviderPresetDisplayRank(b.id)).map((template) => ({
     id: template.id,
     label: template.label,
     description: template.description,
@@ -842,6 +845,14 @@ function mockProviderPresetViews(): ProviderPresetView[] {
   }));
 }
 
+function mockProviderPresetDisplayRank(id: string): number {
+  if (id === "glm-cn" || id === "zai-global" || id.startsWith("glm-coding-plan-") || id.startsWith("zai-coding-plan-")) return 0;
+  if (id.startsWith("longcat-")) return 1;
+  if (id.startsWith("kimi-")) return 2;
+  if (id.startsWith("minimax-")) return 3;
+  return 4;
+}
+
 function cloneMockProviderTemplate(id: string, key: string): ProviderView | undefined {
   const template = mockProviderPresetTemplates.find((candidate) => candidate.id === id);
   if (!template) return undefined;
@@ -851,11 +862,15 @@ function cloneMockProviderTemplate(id: string, key: string): ProviderView | unde
   };
 }
 
+const mockPreviewImageDataURL =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='120' viewBox='0 0 160 120'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23f97316'/%3E%3Cstop offset='1' stop-color='%232563eb'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='160' height='120' rx='14' fill='url(%23g)'/%3E%3Ccircle cx='44' cy='38' r='16' fill='%23fff7ed' opacity='.9'/%3E%3Cpath d='M18 96 62 58l24 22 18-16 38 32z' fill='%23ffffff' opacity='.9'/%3E%3C/svg%3E";
+
 function makeMockApp(): AppBindings {
   const scenario = mockScenario();
   const freshMock = scenario === "fresh";
   const guidanceMock = scenario === "guidance";
   const runningMock = scenario === "running" || guidanceMock;
+  const mockAttachmentDataURLs = new Map<string, string>();
   let cancelled = false;
   let pendingAskPreview = false;
   let pendingApprovalPreview = false;
@@ -863,6 +878,7 @@ function makeMockApp(): AppBindings {
   let cwd = freshMock ? globalWorkspaceRoot : "~/projects/joyquant-db"; // mutable so PickWorkspace is visible in dev
   let workspaces = freshMock ? [] : ["~/projects/joyquant-db", "~/projects/joyquant-sys", "~/projects/reasonix", "~/projects/blade"];
   let mockEffort = "auto";
+  let mockDesktopZoomFactor = 1.0;
   const day = 86_400_000;
   const t0 = Date.now();
   // Mutable so MCP add/remove/retry are observable in browser dev.
@@ -1048,17 +1064,43 @@ function makeMockApp(): AppBindings {
       toolApprovalMode: "ask",
       maxSteps: 25,
       debounceMs: 1500,
+      queueMode: "steer",
+      queueCap: 20,
+      queueDrop: "summarize",
+      ignoreSelfMessages: true,
+      selfUserIds: {
+        qq: [],
+        feishu: [],
+        weixin: [],
+      },
+      control: {
+        enabled: false,
+        addr: "127.0.0.1:37913",
+        tokenEnv: "REASONIX_BOT_CONTROL_TOKEN",
+      },
+      pairing: {
+        enabled: true,
+        requestTtlMinutes: 60,
+        maxPendingPerPlatform: 3,
+      },
+      routes: [],
       allowlist: {
         enabled: true,
         allowAll: false,
         qqUsers: [],
         feishuUsers: freshMock ? [] : ["ou_mock_user_001"],
         weixinUsers: freshMock ? [] : ["wxid_mock_user_001"],
+        qqApprovers: [],
+        feishuApprovers: [],
+        weixinApprovers: [],
+        qqAdmins: [],
+        feishuAdmins: [],
+        weixinAdmins: [],
         qqGroups: [],
         feishuGroups: [],
         weixinGroups: [],
       },
-      qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false, sandbox: false },
+      qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false, sandbox: false, model: "", toolApprovalMode: "ask", workspaceRoot: "", access: { enabled: true, allowAll: false, pairingEnabled: true, users: [], groups: [], approvers: [], admins: [] } },
       feishu: {
         enabled: false,
         domain: "feishu",
@@ -1085,10 +1127,11 @@ function makeMockApp(): AppBindings {
           label: "kun",
           enabled: true,
           status: "connected",
-          model: "",
-          toolApprovalMode: "",
-          workspaceRoot: "",
-          credential: {
+	          model: "",
+	          toolApprovalMode: "",
+	          workspaceRoot: "",
+	          access: { enabled: true, allowAll: false, pairingEnabled: true, users: ["ou_mock_user_001"], groups: [], approvers: [], admins: [] },
+	          credential: {
             appId: "cli_mock_lark",
             appSecretEnv: "FEISHU_BOT_APP_SECRET",
             accountId: "",
@@ -1119,10 +1162,11 @@ function makeMockApp(): AppBindings {
           label: "kun",
           enabled: true,
           status: "connected",
-          model: "",
-          toolApprovalMode: "",
-          workspaceRoot: "",
-          credential: {
+	          model: "",
+	          toolApprovalMode: "",
+	          workspaceRoot: "",
+	          access: { enabled: true, allowAll: false, pairingEnabled: true, users: ["wxid_mock_user_001"], groups: [], approvers: [], admins: [] },
+	          credential: {
             appId: "",
             appSecretEnv: "",
             accountId: "default",
@@ -2667,14 +2711,20 @@ function makeMockApp(): AppBindings {
     async RevealPath(path: string) {
       console.info("mock RevealPath", path);
     },
-    async SavePastedImage(_dataUrl: string) {
-      return ".reasonix/attachments/mock.png";
+    async SavePastedImage(dataUrl: string) {
+      const path = `.reasonix/attachments/mock-${mockAttachmentDataURLs.size + 1}.png`;
+      mockAttachmentDataURLs.set(path, dataUrl);
+      return path;
     },
     async SaveClipboardImage() {
-      return ".reasonix/attachments/mock-clipboard.png";
+      const path = `.reasonix/attachments/mock-clipboard-${mockAttachmentDataURLs.size + 1}.png`;
+      mockAttachmentDataURLs.set(path, mockPreviewImageDataURL);
+      return path;
     },
-    async SavePastedFile(name: string, _dataUrl: string) {
-      return `.reasonix/attachments/mock-${name}`;
+    async SavePastedFile(name: string, dataUrl: string) {
+      const path = `.reasonix/attachments/mock-${name}`;
+      mockAttachmentDataURLs.set(path, dataUrl);
+      return path;
     },
     async PickExportFile(defaultFilename: string, _mimeType: string) {
       return defaultFilename;
@@ -2701,10 +2751,12 @@ function makeMockApp(): AppBindings {
         const tokenName = name.replace(/[^\w.-]+/g, "-") || "folder";
         return { kind: "workspace" as const, path: `__reasonix_external_folder/mock/${tokenName}`, isDir: true, displayPath: path };
       }
-      return { kind: "attachment" as const, path: `.reasonix/attachments/mock-${name}` };
+      const attachmentPath = `.reasonix/attachments/mock-${name}`;
+      mockAttachmentDataURLs.set(attachmentPath, mockPreviewImageDataURL);
+      return { kind: "attachment" as const, path: attachmentPath };
     },
-    async AttachmentDataURL(_path: string) {
-      return "data:image/png;base64,iVBORw0KGgo=";
+    async AttachmentDataURL(path: string) {
+      return mockAttachmentDataURLs.get(path) ?? mockPreviewImageDataURL;
     },
         async Models() {
           const active = mockTabs.find((tab) => tab.active) ?? mockTabs[0];
@@ -3079,10 +3131,11 @@ function makeMockApp(): AppBindings {
             label: domain === "lark" ? "Lark" : domain === "weixin" ? "微信" : "飞书",
             enabled: true,
             status: "connected",
-            model: "",
-            toolApprovalMode: "",
-            workspaceRoot: "",
-            credential: {
+	            model: "",
+	            toolApprovalMode: "",
+	            workspaceRoot: "",
+	            access: { enabled: true, allowAll: false, pairingEnabled: true, users: [provider === "weixin" ? "wxid_mock_user_001" : "ou_mock_user_001"], groups: [], approvers: [], admins: [] },
+	            credential: {
               appId: provider === "feishu" ? "cli_mock" : "",
               appSecretEnv: provider === "feishu" ? (domain === "lark" ? "LARK_BOT_APP_SECRET" : "FEISHU_BOT_APP_SECRET") : "",
               accountId: provider === "weixin" ? "mock-account" : "",
@@ -3131,11 +3184,11 @@ function makeMockApp(): AppBindings {
         async SetDesktopLayoutStyle(style: string) {
           settings.desktopLayoutStyle = style === "workbench" || style === "creation" ? style : "classic";
         },
-        async SetDesktopZoomFactor(_factor: number) {
-          // no-op in mock; in production this writes desktop-zoom.json via Go
+        async SetDesktopZoomFactor(factor: number) {
+          mockDesktopZoomFactor = Math.min(2.0, Math.max(0.5, Number.isFinite(factor) ? factor : 1.0));
         },
         async GetDesktopZoomFactor() {
-          return 1.0; // default in mock
+          return mockDesktopZoomFactor;
         },
         async RestartApplication() {
           // no-op in mock

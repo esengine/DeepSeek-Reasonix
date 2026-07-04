@@ -252,6 +252,27 @@ func TestBuildRequestThinking(t *testing.T) {
 	}
 }
 
+func TestBuildRequestThinkingEnabledGateway(t *testing.T) {
+	c := &client{model: "LongCat-2.0", thinking: "enabled", effort: "disabled"}
+	r := c.buildRequest(provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "hi"},
+			{Role: provider.RoleAssistant, Content: "ok", ReasoningContent: "signed reasoning", ReasoningSignature: "sig"},
+		},
+	})
+	if r.Thinking == nil || r.Thinking.Type != "disabled" || r.Thinking.Display != "" {
+		t.Fatalf("thinking config = %+v, want disabled without display", r.Thinking)
+	}
+	if r.OutputConfig != nil {
+		t.Fatalf("enabled/disabled gateway thinking must omit output_config: %+v", r.OutputConfig)
+	}
+	for _, block := range r.Messages[1].Content {
+		if block.Type == "thinking" {
+			t.Fatalf("enabled/disabled gateway must not replay Anthropic signed thinking blocks: %+v", r.Messages[1])
+		}
+	}
+}
+
 // TestBuildRequestThinkingOff is the default: no thinking field, and reasoning is
 // NOT replayed (even with a signature present) since the model wasn't asked to think.
 func TestBuildRequestThinkingOff(t *testing.T) {

@@ -26,6 +26,7 @@ import { EffortSwitcher } from "./EffortSwitcher";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { Tooltip } from "./Tooltip";
 import { ComposerContextCard } from "./ComposerContextCard";
+import { ImageViewer } from "./ImageViewer";
 import { VirtualMenu } from "./VirtualMenu";
 import { dirEntryMenuLabel, dirEntrySubmitPath } from "./FileReferenceMenu";
 
@@ -504,6 +505,15 @@ export function Composer({
   const now = useTick(running);
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [imageViewer, setImageViewer] = useState<{ open: boolean; url: string; name: string }>({ open: false, url: "", name: "" });
+  const openComposerImageViewer = useCallback((url: string, name: string) => {
+    setImageViewer({ open: true, url, name });
+  }, []);
+
+  const closeComposerImageViewer = useCallback(() => {
+    setImageViewer((prev) => (prev.open ? { ...prev, open: false } : prev));
+  }, []);
+
   const [workspaceRefs, setWorkspaceRefs] = useState<WorkspaceReference[]>([]);
   const [pastedBlocks, setPastedBlocks] = useState<PastedBlock[]>([]);
   const [openPastedLabels, setOpenPastedLabels] = useState<string[]>([]);
@@ -2386,10 +2396,11 @@ export function Composer({
               <ComposerContextCard
                 key={a.path}
                 variant="attachment"
-                tooltipLabel={a.path}
+                tooltipLabel={a.previewUrl ? `${t("imageViewer.clickToPreview")} — ${a.path}` : a.path}
                 removeLabel={t("composer.removeImage")}
                 onRemove={() => removeAttachment(a.path)}
                 previewUrl={a.previewUrl}
+                onImageClick={a.previewUrl ? () => openComposerImageViewer(a.previewUrl!, attachmentName(a)) : undefined}
                 imageOnly={imageOnly}
                 name={attachmentName(a)}
                 meta={attachmentExt(attachmentName(a)) || t("msg.fileAttachment")}
@@ -2433,6 +2444,12 @@ export function Composer({
           ))}
         </div>
       )}
+      <ImageViewer
+        open={imageViewer.open}
+        imageUrl={imageViewer.url}
+        imageName={imageViewer.name}
+        onClose={closeComposerImageViewer}
+      />
       {activePastedBlocks.length > 0 && (
         <div className="composer__pasted">
           {activePastedBlocks.map((block) => {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"reasonix/internal/control"
@@ -25,6 +26,18 @@ type workspaceChangeAccumulator struct {
 	hasSession bool
 	hasGit     bool
 }
+
+const workspaceGitBranchCacheTTL = 2 * time.Second
+
+type workspaceGitBranchCacheEntry struct {
+	branch  string
+	expires time.Time
+}
+
+var workspaceGitBranchCache = struct {
+	sync.Mutex
+	entries map[string]workspaceGitBranchCacheEntry
+}{entries: map[string]workspaceGitBranchCacheEntry{}}
 
 func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
 	out := WorkspaceChangesView{Files: []WorkspaceChangeView{}, GitAvailable: true}
@@ -223,6 +236,35 @@ func workspaceRelPathFromGitStatus(repoRoot, base, path string) string {
 		path = filepath.Join(repoRoot, filepath.FromSlash(path))
 	}
 	return normalizeWorkspaceRelPath(base, path)
+}
+
+// workspaceGitBranchForMeta is the cached variant used by high-frequency UI
+// metadata refreshes. Workflows that need an immediate git read, such as
+// WorkspaceChanges, should call workspaceGitBranch directly.
+func workspaceGitBranchForMeta(base string) string {
+	key := filepath.Clean(base)
+	now := time.Now()
+	workspaceGitBranchCache.Lock()
+	if cached, ok := workspaceGitBranchCache.entries[key]; ok && now.Before(cached.expires) {
+		workspaceGitBranchCache.Unlock()
+		return cached.branch
+	}
+	workspaceGitBranchCache.Unlock()
+
+	branch := workspaceGitBranch(base)
+
+	storeNow := time.Now()
+	workspaceGitBranchCache.Lock()
+	if len(workspaceGitBranchCache.entries) > 256 {
+		for k, cached := range workspaceGitBranchCache.entries {
+			if storeNow.After(cached.expires) {
+				delete(workspaceGitBranchCache.entries, k)
+			}
+		}
+	}
+	workspaceGitBranchCache.entries[key] = workspaceGitBranchCacheEntry{branch: branch, expires: storeNow.Add(workspaceGitBranchCacheTTL)}
+	workspaceGitBranchCache.Unlock()
+	return branch
 }
 
 // workspaceGitBranch returns the current git branch name for the repo rooted

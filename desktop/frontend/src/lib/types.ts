@@ -984,9 +984,55 @@ export interface BotAllowlistView {
   qqUsers: string[];
   feishuUsers: string[];
   weixinUsers: string[];
+  qqApprovers: string[];
+  feishuApprovers: string[];
+  weixinApprovers: string[];
+  qqAdmins: string[];
+  feishuAdmins: string[];
+  weixinAdmins: string[];
   qqGroups: string[];
   feishuGroups: string[];
   weixinGroups: string[];
+}
+
+export interface BotAccessView {
+  enabled: boolean;
+  allowAll: boolean;
+  pairingEnabled: boolean;
+  users: string[];
+  groups: string[];
+  approvers: string[];
+  admins: string[];
+}
+
+export interface BotSelfUserIDsView {
+  qq: string[];
+  feishu: string[];
+  weixin: string[];
+}
+
+export interface BotPairingView {
+  enabled: boolean;
+  requestTtlMinutes: number;
+  maxPendingPerPlatform: number;
+}
+
+export interface BotControlView {
+  enabled: boolean;
+  addr: string;
+  tokenEnv: string;
+}
+
+export interface BotRouteView {
+  connectionId: string;
+  platform: string;
+  chatType: string;
+  chatId: string;
+  userId: string;
+  threadId: string;
+  model: string;
+  toolApprovalMode: ToolApprovalMode | "" | string;
+  workspaceRoot: string;
 }
 
 export interface QQBotView {
@@ -995,6 +1041,10 @@ export interface QQBotView {
   appSecretEnv: string;
   secretSet: boolean;
   sandbox: boolean;
+  model: string;
+  toolApprovalMode: ToolApprovalMode | "" | string;
+  workspaceRoot: string;
+  access: BotAccessView;
 }
 
 export interface FeishuBotView {
@@ -1047,6 +1097,7 @@ export interface BotConnectionView {
   model: string;
   toolApprovalMode: ToolApprovalMode | "" | string;
   workspaceRoot: string;
+  access: BotAccessView;
   credential: BotConnectionCredentialView;
   sessionMappings: BotConnectionSessionMappingView[];
   lastError: string;
@@ -1060,6 +1111,14 @@ export interface BotSettingsView {
   toolApprovalMode: ToolApprovalMode | "" | string;
   maxSteps: number;
   debounceMs: number;
+  queueMode: string;
+  queueCap: number;
+  queueDrop: string;
+  ignoreSelfMessages: boolean;
+  selfUserIds: BotSelfUserIDsView;
+  control: BotControlView;
+  pairing: BotPairingView;
+  routes: BotRouteView[];
   allowlist: BotAllowlistView;
   qq: QQBotView;
   feishu: FeishuBotView;

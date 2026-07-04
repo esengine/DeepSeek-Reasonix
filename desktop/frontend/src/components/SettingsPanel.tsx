@@ -1,5 +1,5 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
-import { Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, GripVertical, KeyRound, Loader2, Play, QrCode, RefreshCw, Send } from "lucide-react";
+import { Bot as BotIcon, Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, GripVertical, KeyRound, Loader2, MessageCircle, Minus, Play, Plus, QrCode, RefreshCw, RotateCcw, Send } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { app } from "../lib/bridge";
@@ -17,7 +17,7 @@ import {
   type ThemeStyle,
 } from "../lib/theme";
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
-import { snapZoom, zoomToPercent, saveRestartZoom, getRestartZoom, type ZoomLevel } from "../lib/dpiScale";
+import { DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, ZOOM_STEP, snapZoom, zoomToPercent, saveRestartZoom, getRestartZoom, type ZoomLevel } from "../lib/dpiScale";
 import {
   applyFontFamily,
   applyMonoFontFamily,
@@ -46,7 +46,7 @@ import {
   shortcutDefinitions,
   type ShortcutAction,
 } from "../lib/keyboardShortcuts";
-import type { BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderPresetView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import type { BotAccessView, BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotRouteView, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderPresetView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
@@ -102,6 +102,7 @@ export function SettingsPanel({
   const [tab, setTab] = useState<SettingsTab>(initialTab === "providers" ? "models" : initialTab ?? "general");
   // Play the modal exit animation, then let the parent unmount us.
   const { status, requestClose } = useDeferredClose(onClose, 240);
+  const zoomSaveSeq = useRef(0);
 
   const reload = useCallback(async () => {
     setLoadingSettings(true);
@@ -129,6 +130,24 @@ export function SettingsPanel({
     setThemeState(nextTheme);
     setThemeStyleState(nextStyle);
   }, [s?.desktopTheme, s?.desktopThemeStyle]);
+  useEffect(() => {
+    if (desktopPlatform !== "windows") return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const persisted = await app.GetDesktopZoomFactor();
+        if (cancelled || typeof persisted !== "number" || !Number.isFinite(persisted)) return;
+        const snapped = snapZoom(persisted);
+        saveRestartZoom(snapped);
+        setZoomPct(zoomToPercent(snapped));
+      } catch {
+        // Older mocks or startup races can lack the binding; keep the local fallback.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [desktopPlatform]);
 
   // apply runs a mutation, re-reads settings, and refreshes the topbar/model.
   const apply = useCallback(async (fn: () => Promise<unknown>) => {
@@ -159,6 +178,21 @@ export function SettingsPanel({
       setErr(String((e as Error)?.message ?? e));
     }
   }, [reload, onChanged]);
+  const setRestartZoom = useCallback(async (zoom: ZoomLevel) => {
+    const snapped = snapZoom(zoom);
+    const seq = ++zoomSaveSeq.current;
+    setErr(null);
+    setWarning(null);
+    setZoomPct(zoomToPercent(snapped));
+    try {
+      await app.SetDesktopZoomFactor(snapped);
+      if (seq === zoomSaveSeq.current) saveRestartZoom(snapped);
+    } catch (e) {
+      if (seq !== zoomSaveSeq.current) return;
+      setErr(String((e as Error)?.message ?? e));
+      setZoomPct(zoomToPercent(getRestartZoom()));
+    }
+  }, []);
 
   // Close on Esc
   useEffect(() => {
@@ -248,18 +282,7 @@ export function SettingsPanel({
                         applyTextSize(size);
                         setTextSizeState(size);
                       }}
-                      onRestartZoom={async (zoom) => {
-                        const snapped = snapZoom(zoom);
-                        setErr(null);
-                        setWarning(null);
-                        try {
-                          await app.SetDesktopZoomFactor(snapped);
-                          saveRestartZoom(snapped);
-                          setZoomPct(zoomToPercent(snapped));
-                        } catch (e) {
-                          setErr(String((e as Error)?.message ?? e));
-                        }
-                      }}
+                      onRestartZoom={setRestartZoom}
                       onFontFamily={(font) => {
                         applyFontFamily(font);
                         setFontFamilyState(font);
@@ -651,6 +674,9 @@ const LANGUAGE_PREFS: LangPref[] = ["", "zh", "en"];
 const AUTO_PLAN_MODES = ["off", "on"] as const;
 const TOOL_APPROVAL_MODES = ["ask", "auto", "yolo"] as const;
 const BOT_TOOL_APPROVAL_MODES = ["", "ask", "auto", "yolo"] as const;
+const BOT_QUEUE_MODES = ["steer", "followup", "collect", "interrupt"] as const;
+const BOT_QUEUE_DROPS = ["summarize", "old", "new"] as const;
+const BOT_ROUTE_CHAT_TYPES = ["", "dm", "group", "guild", "direct", "thread"] as const;
 
 type ProxyMode = (typeof PROXY_MODES)[number];
 type AutoPlanMode = (typeof AUTO_PLAN_MODES)[number];
@@ -807,6 +833,63 @@ function normalizeReasoningLanguage(lang: string | undefined): string {
   return v === "zh" || v === "en" ? v : "auto";
 }
 
+function normalizeBotQueueMode(mode: unknown): string {
+  const raw = String(mode ?? "").trim().toLowerCase();
+  return BOT_QUEUE_MODES.includes(raw as any) ? raw : "steer";
+}
+
+function normalizeBotQueueDrop(mode: unknown): string {
+  const raw = String(mode ?? "").trim().toLowerCase();
+  return BOT_QUEUE_DROPS.includes(raw as any) ? raw : "summarize";
+}
+
+function normalizeBotRouteChatType(value: unknown): string {
+  const raw = String(value ?? "").trim().toLowerCase();
+  return BOT_ROUTE_CHAT_TYPES.includes(raw as any) ? raw : "";
+}
+
+function normalizeBotRoute(raw: any): BotRouteView {
+  return {
+    connectionId: String(raw?.connectionId ?? "").trim(),
+    platform: String(raw?.platform ?? "").trim().toLowerCase(),
+    chatType: normalizeBotRouteChatType(raw?.chatType),
+    chatId: String(raw?.chatId ?? "").trim(),
+    userId: String(raw?.userId ?? "").trim(),
+    threadId: String(raw?.threadId ?? "").trim(),
+    model: String(raw?.model ?? "").trim(),
+    toolApprovalMode: normalizeBotToolApprovalMode(raw?.toolApprovalMode),
+    workspaceRoot: String(raw?.workspaceRoot ?? "").trim(),
+  };
+}
+
+function emptyBotRoute(): BotRouteView {
+  return {
+    connectionId: "",
+    platform: "",
+    chatType: "",
+    chatId: "",
+    userId: "",
+    threadId: "",
+    model: "",
+    toolApprovalMode: "",
+    workspaceRoot: "",
+  };
+}
+
+function botRouteHasValue(route: BotRouteView): boolean {
+  return Boolean(
+    route.connectionId ||
+    route.platform ||
+    route.chatType ||
+    route.chatId ||
+    route.userId ||
+    route.threadId ||
+    route.model ||
+    route.toolApprovalMode ||
+    route.workspaceRoot
+  );
+}
+
 function defaultBotSettings(): BotSettingsView {
   return {
     enabled: false,
@@ -814,17 +897,43 @@ function defaultBotSettings(): BotSettingsView {
     toolApprovalMode: "ask",
     maxSteps: 0,
     debounceMs: 1500,
+    queueMode: "steer",
+    queueCap: 20,
+    queueDrop: "summarize",
+    ignoreSelfMessages: true,
+    selfUserIds: {
+      qq: [],
+      feishu: [],
+      weixin: [],
+    },
+    control: {
+      enabled: false,
+      addr: "127.0.0.1:37913",
+      tokenEnv: "REASONIX_BOT_CONTROL_TOKEN",
+    },
+    pairing: {
+      enabled: true,
+      requestTtlMinutes: 60,
+      maxPendingPerPlatform: 3,
+    },
+    routes: [],
     allowlist: {
       enabled: true,
       allowAll: false,
       qqUsers: [],
       feishuUsers: [],
       weixinUsers: [],
+      qqApprovers: [],
+      feishuApprovers: [],
+      weixinApprovers: [],
+      qqAdmins: [],
+      feishuAdmins: [],
+      weixinAdmins: [],
       qqGroups: [],
       feishuGroups: [],
       weixinGroups: [],
     },
-    qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false, sandbox: false },
+    qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false, sandbox: false, model: "", toolApprovalMode: "ask", workspaceRoot: "", access: defaultBotAccess() },
     feishu: {
       enabled: false,
       domain: "feishu",
@@ -847,9 +956,37 @@ function defaultBotSettings(): BotSettingsView {
   };
 }
 
+function defaultBotAccess(): BotAccessView {
+  return {
+    enabled: true,
+    allowAll: false,
+    pairingEnabled: true,
+    users: [],
+    groups: [],
+    approvers: [],
+    admins: [],
+  };
+}
+
+function normalizeBotAccess(raw: any, fallback: BotAccessView = defaultBotAccess()): BotAccessView {
+  const access = raw ?? fallback;
+  return {
+    enabled: access.enabled !== false,
+    allowAll: Boolean(access.allowAll),
+    pairingEnabled: access.pairingEnabled !== false,
+    users: asArray(access.users),
+    groups: asArray(access.groups),
+    approvers: asArray(access.approvers),
+    admins: asArray(access.admins),
+  };
+}
+
 function normalizeBotSettings(bot: BotSettingsView | null | undefined): BotSettingsView {
   const fallback = defaultBotSettings();
   const allowlist = bot?.allowlist ?? fallback.allowlist;
+  const selfUserIds = bot?.selfUserIds ?? fallback.selfUserIds;
+  const control = bot?.control ?? fallback.control;
+  const pairing = bot?.pairing ?? fallback.pairing;
   const mode = bot?.feishu?.mode === "websocket" ? "websocket" : "webhook";
   return {
     ...fallback,
@@ -857,17 +994,50 @@ function normalizeBotSettings(bot: BotSettingsView | null | undefined): BotSetti
     toolApprovalMode: normalizeBotToolApprovalMode(bot?.toolApprovalMode),
     maxSteps: Math.max(0, Number(bot?.maxSteps ?? fallback.maxSteps) || 0),
     debounceMs: Number(bot?.debounceMs) || fallback.debounceMs,
+    queueMode: normalizeBotQueueMode(bot?.queueMode),
+    queueCap: Math.max(0, Math.floor(Number(bot?.queueCap ?? fallback.queueCap) || 0)),
+    queueDrop: normalizeBotQueueDrop(bot?.queueDrop),
+    ignoreSelfMessages: bot?.ignoreSelfMessages !== false,
+    selfUserIds: {
+      qq: asArray(selfUserIds.qq),
+      feishu: asArray(selfUserIds.feishu),
+      weixin: asArray(selfUserIds.weixin),
+    },
+    control: {
+      enabled: Boolean(control.enabled),
+      addr: String(control.addr ?? fallback.control.addr),
+      tokenEnv: String(control.tokenEnv ?? fallback.control.tokenEnv),
+    },
+    pairing: {
+      enabled: pairing.enabled !== false,
+      requestTtlMinutes: Math.max(0, Math.floor(Number(pairing.requestTtlMinutes ?? fallback.pairing.requestTtlMinutes) || 0)),
+      maxPendingPerPlatform: Math.max(0, Math.floor(Number(pairing.maxPendingPerPlatform ?? fallback.pairing.maxPendingPerPlatform) || 0)),
+    },
+    routes: asArray(bot?.routes).map(normalizeBotRoute).filter(botRouteHasValue),
     allowlist: {
       ...fallback.allowlist,
       ...allowlist,
       qqUsers: asArray(allowlist.qqUsers),
       feishuUsers: asArray(allowlist.feishuUsers),
       weixinUsers: asArray(allowlist.weixinUsers),
+      qqApprovers: asArray(allowlist.qqApprovers),
+      feishuApprovers: asArray(allowlist.feishuApprovers),
+      weixinApprovers: asArray(allowlist.weixinApprovers),
+      qqAdmins: asArray(allowlist.qqAdmins),
+      feishuAdmins: asArray(allowlist.feishuAdmins),
+      weixinAdmins: asArray(allowlist.weixinAdmins),
       qqGroups: asArray(allowlist.qqGroups),
       feishuGroups: asArray(allowlist.feishuGroups),
       weixinGroups: asArray(allowlist.weixinGroups),
     },
-    qq: { ...fallback.qq, ...bot?.qq },
+    qq: {
+      ...fallback.qq,
+      ...bot?.qq,
+      model: String(bot?.qq?.model ?? fallback.qq.model).trim(),
+      toolApprovalMode: normalizeBotToolApprovalMode(bot?.qq?.toolApprovalMode),
+      workspaceRoot: String(bot?.qq?.workspaceRoot ?? fallback.qq.workspaceRoot).trim(),
+      access: normalizeBotAccess(bot?.qq?.access, fallback.qq.access),
+    },
     feishu: { ...fallback.feishu, ...bot?.feishu, domain: bot?.feishu?.domain === "lark" ? "lark" : "feishu", mode },
     weixin: { ...fallback.weixin, ...bot?.weixin },
     connections: asArray(bot?.connections).map(normalizeBotConnection),
@@ -887,6 +1057,7 @@ function normalizeBotConnection(raw: any) {
     model: String(raw?.model ?? "").trim(),
     toolApprovalMode: normalizeBotToolApprovalMode(raw?.toolApprovalMode, true),
     workspaceRoot,
+    access: normalizeBotAccess(raw?.access),
     credential: {
       appId: String(credential.appId ?? "").trim(),
       appSecretEnv: String(credential.appSecretEnv ?? "").trim(),
@@ -1924,8 +2095,22 @@ function NetworkSection({ s, busy, apply }: SectionProps) {
 
 type BotInstallTarget = "qq" | "feishu" | "lark" | "weixin";
 type BotOfficialInstallTarget = Exclude<BotInstallTarget, "qq">;
-const BOT_ALLOWLIST_TEXT_KEYS = ["qqUsers", "feishuUsers", "weixinUsers", "qqGroups", "feishuGroups", "weixinGroups"] as const;
+const BOT_ALLOWLIST_TEXT_KEYS = [
+  "qqUsers",
+  "feishuUsers",
+  "weixinUsers",
+  "qqApprovers",
+  "feishuApprovers",
+  "weixinApprovers",
+  "qqAdmins",
+  "feishuAdmins",
+  "weixinAdmins",
+  "qqGroups",
+  "feishuGroups",
+  "weixinGroups",
+] as const;
 type BotAllowlistTextKey = typeof BOT_ALLOWLIST_TEXT_KEYS[number];
+type BotSelfUserTextKey = keyof BotSettingsView["selfUserIds"];
 type BotInstallState = {
   target: BotInstallTarget | "";
   result: BotInstallStartResult | null;
@@ -1938,6 +2123,27 @@ const BOT_INSTALL_DEFAULT_TIMEOUT_SECONDS = 300;
 const BOT_INSTALL_MIN_POLL_SECONDS = 3;
 const DEFAULT_QQ_SECRET_ENV = "QQ_BOT_APP_SECRET";
 const QQ_CONNECTION_ID = "__qq_bot__";
+const BOT_PLATFORM_KEYS = ["qq", "feishu", "weixin"] as const;
+type BotPlatformKey = typeof BOT_PLATFORM_KEYS[number];
+const BOT_ALLOWLIST_ROLES = ["Users", "Groups", "Approvers", "Admins"] as const;
+type BotAllowlistRole = typeof BOT_ALLOWLIST_ROLES[number];
+type BotAccessListField = "users" | "groups" | "approvers" | "admins";
+
+function botAllowlistKey(platform: BotPlatformKey, role: BotAllowlistRole): BotAllowlistTextKey {
+  return `${platform}${role}`;
+}
+
+function botConnectionPlatform(connection: BotConnectionView): BotPlatformKey {
+  if (connection.provider === "weixin") return "weixin";
+  if (connection.provider === "qq") return "qq";
+  return "feishu";
+}
+
+function botPlatformLabel(platform: BotPlatformKey, t: ReturnType<typeof useT>): string {
+  if (platform === "qq") return "QQ";
+  if (platform === "weixin") return t("settings.botWeixin");
+  return t("settings.botPlatformFeishuLark");
+}
 
 type BotConnectionListItem =
   | { kind: "qq" }
@@ -1950,54 +2156,57 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const savedBot = normalizeBotSettings(s.bot);
   const [draft, setDraft] = useState<BotSettingsView>(savedBot);
   const [allowlistText, setAllowlistText] = useState<Record<BotAllowlistTextKey, string>>(() => botAllowlistTextValues(savedBot.allowlist));
-  const [allowlistFocused, setAllowlistFocused] = useState(false);
-  const [allowlistOpen, setAllowlistOpen] = useState(false);
+  const [selfUserText, setSelfUserText] = useState<Record<BotSelfUserTextKey, string>>(() => botSelfUserTextValues(savedBot.selfUserIds));
+  const [showAllPlatforms, setShowAllPlatforms] = useState(false);
   const [installTarget, setInstallTarget] = useState<BotInstallTarget>("qq");
   const [install, setInstall] = useState<BotInstallState>({ target: "qq", result: null, status: "idle", timeLeft: 0, message: "" });
   const [diagnostics, setDiagnostics] = useState<Record<string, BotConnectionDiagnostic | string>>({});
   const [testTargets, setTestTargets] = useState<Record<string, string>>({});
   const [connectionSecrets, setConnectionSecrets] = useState<Record<string, string>>({});
+  const [accessText, setAccessText] = useState<Record<string, string>>({});
   const [qqSecretValue, setQQSecretValue] = useState("");
   const [expandedConnectionId, setExpandedConnectionId] = useState("");
+  const [advancedMode, setAdvancedMode] = useState(false);
   const installRef = useRef(install);
   const installPollTimerRef = useRef<number | null>(null);
   const installCountdownTimerRef = useRef<number | null>(null);
   const installRequestInFlightRef = useRef(false);
   const installAttemptRef = useRef(0);
-  const allowlistRef = useRef<HTMLDetailsElement | null>(null);
+  const stepConnectRef = useRef<HTMLElement | null>(null);
   const initialFocusHandledRef = useRef("");
-  const pendingAllowlistFocusRef = useRef(false);
   const refs = allRefs(s);
 
   useEffect(() => {
     const nextBot = normalizeBotSettings(s.bot);
     setDraft(nextBot);
     setAllowlistText(botAllowlistTextValues(nextBot.allowlist));
+    setSelfUserText(botSelfUserTextValues(nextBot.selfUserIds));
     setConnectionSecrets({});
+    setAccessText({});
     setQQSecretValue("");
     setTestTargets({});
   }, [s.bot]);
+  const focusAccessStep = () => {
+    if (!expandedConnectionId && connectionItems.length > 0) {
+      const first = connectionItems[0];
+      if (first.kind === "qq") {
+        setInstallTarget("qq");
+        setExpandedConnectionId(QQ_CONNECTION_ID);
+      } else {
+        const nextTarget = botInstallTargetForConnection(first.connection);
+        setInstallTarget(nextTarget);
+        setExpandedConnectionId(first.connection.id);
+      }
+    }
+    window.setTimeout(() => stepConnectRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }), 60);
+  };
   useEffect(() => {
     if (initialFocus?.target !== "bot-allowlist") return;
     const focusKey = `${initialFocus.target}:${initialFocus.connectionId ?? ""}`;
     if (initialFocusHandledRef.current === focusKey) return;
-    let focusConnectionId = "";
-    if (initialFocus.connectionId === QQ_CONNECTION_ID && qqBotAdded(draft.qq)) {
-      focusConnectionId = QQ_CONNECTION_ID;
-    } else if (initialFocus.connectionId && draft.connections.some((connection) => connection.id === initialFocus.connectionId)) {
-      focusConnectionId = initialFocus.connectionId;
-    } else {
-      focusConnectionId = draft.connections[0]?.id ?? "";
-    }
-    if (!focusConnectionId) return;
     initialFocusHandledRef.current = focusKey;
-    pendingAllowlistFocusRef.current = true;
-    setExpandedConnectionId(focusConnectionId);
-    setAllowlistOpen(false);
-  }, [draft.connections, draft.qq, initialFocus]);
-  useEffect(() => {
-    setAllowlistOpen(false);
-  }, [expandedConnectionId]);
+    focusAccessStep();
+  }, [initialFocus]);
   useEffect(() => {
     installRef.current = install;
   }, [install]);
@@ -2045,10 +2254,60 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     setAllowlistText((prev) => ({ ...prev, [key]: entries.join("\n") }));
     void persistAllowlist({ [key]: entries } as Partial<BotAllowlistView>);
   };
+  const updateBotSettings = (patch: Partial<BotSettingsView>) =>
+    setDraft((prev) => ({ ...prev, ...patch }));
+  const persistBotSettings = (patch: Partial<BotSettingsView>) =>
+    persistBotDraft({ ...draft, ...patch });
+  const updateSelfUserText = (key: BotSelfUserTextKey, value: string) =>
+    setSelfUserText((prev) => ({ ...prev, [key]: value }));
+  const persistSelfUserText = (key: BotSelfUserTextKey, value: string) => {
+    const entries = parseBotListInput(value);
+    const nextSelfUserIds = { ...draft.selfUserIds, [key]: entries };
+    setSelfUserText((prev) => ({ ...prev, [key]: entries.join("\n") }));
+    void persistBotSettings({ selfUserIds: nextSelfUserIds });
+  };
+  const updateRoute = (index: number, patch: Partial<BotRouteView>) =>
+    setDraft((prev) => ({
+      ...prev,
+      routes: prev.routes.map((route, routeIndex) => routeIndex === index ? normalizeBotRoute({ ...route, ...patch }) : route),
+    }));
+  const persistRoute = (index: number, patch: Partial<BotRouteView>) =>
+    persistBotDraft({
+      ...draft,
+      routes: draft.routes.map((route, routeIndex) => routeIndex === index ? normalizeBotRoute({ ...route, ...patch }) : route),
+    });
+  const addRoute = () =>
+    setDraft((prev) => ({ ...prev, routes: [...prev.routes, emptyBotRoute()] }));
+  const removeRoute = (index: number) =>
+    void persistBotDraft({ ...draft, routes: draft.routes.filter((_, routeIndex) => routeIndex !== index) });
   const updateQQ = (patch: Partial<BotSettingsView["qq"]>) =>
     setDraft((prev) => ({ ...prev, qq: { ...prev.qq, ...patch } }));
   const persistQQ = (patch: Partial<BotSettingsView["qq"]>) =>
     persistBotDraft({ ...draft, qq: { ...draft.qq, ...patch } });
+  const updateQQAccess = (patch: Partial<BotAccessView>) =>
+    updateQQ({ access: normalizeBotAccess({ ...draft.qq.access, ...patch }) });
+  const persistQQAccess = (patch: Partial<BotAccessView>) =>
+    persistQQ({ access: normalizeBotAccess({ ...draft.qq.access, ...patch }) });
+  const updateConnectionAccess = (id: string, patch: Partial<BotAccessView>) =>
+    setConnections((items) => items.map((item) => item.id === id ? { ...item, access: normalizeBotAccess({ ...item.access, ...patch }) } : item));
+  const persistConnectionAccess = (connection: BotConnectionView, patch: Partial<BotAccessView>) =>
+    persistConnection(connection.id, { access: normalizeBotAccess({ ...connection.access, ...patch }) });
+  const accessTextKey = (id: string, field: BotAccessListField) => `${id}:${field}`;
+  const accessListText = (id: string, access: BotAccessView, field: BotAccessListField) =>
+    accessText[accessTextKey(id, field)] ?? access[field].join("\n");
+  const setAccessListText = (id: string, field: BotAccessListField, value: string) =>
+    setAccessText((prev) => ({ ...prev, [accessTextKey(id, field)]: value }));
+  const persistAccessListText = (
+    id: string,
+    access: BotAccessView,
+    field: BotAccessListField,
+    value: string,
+    persistAccess: (patch: Partial<BotAccessView>) => void,
+  ) => {
+    const entries = parseBotListInput(value);
+    setAccessText((prev) => ({ ...prev, [accessTextKey(id, field)]: entries.join("\n") }));
+    persistAccess({ ...access, [field]: entries } as Partial<BotAccessView>);
+  };
   const removeConnection = async (connection: BotConnectionView) => {
     const nextDraft = botDraftWithDerivedGatewayState({
       ...draft,
@@ -2061,12 +2320,11 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const installQrURL = install.result?.url ?? "";
   const installQrIsImage = installQrURL.startsWith("data:image/");
   const isQQInstallTarget = installTarget === "qq";
-  const selectedInstallConnection = isQQInstallTarget ? undefined : draft.connections.find((connection) => botInstallTargetMatchesConnection(installTarget, connection));
   const selectedInstallLabel = botTargetLabel(installTarget, t);
   const installUserCode = install.result?.userCode && installTarget !== "weixin" ? formatInstallUserCode(install.result.userCode) : "";
   const qqSecretEnv = draft.qq.appSecretEnv.trim() || DEFAULT_QQ_SECRET_ENV;
   const qqConfigured = draft.qq.enabled && draft.qq.appId.trim() && qqSecretEnv && draft.qq.secretSet;
-  const qqCanEnableAccess = qqAccessReady(draft.allowlist);
+  const qqCanEnableAccess = botAccessReady(draft.qq.access);
   const qqCanSaveAndEnable = Boolean(draft.qq.appId.trim() && qqSecretEnv && (draft.qq.secretSet || qqSecretValue.trim()) && qqCanEnableAccess);
   const qqAdded = qqBotAdded(draft.qq);
   const nativeRuntimeAvailable = typeof window !== "undefined" && Boolean(window.runtime);
@@ -2075,6 +2333,15 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const connectionItems: BotConnectionListItem[] = [
     ...(qqAdded ? [{ kind: "qq" as const }] : []),
     ...draft.connections.map((connection) => ({ kind: "connection" as const, connection })),
+  ];
+  const selectedInstallConnection = isQQInstallTarget ? undefined : draft.connections.find((connection) => botInstallTargetMatchesConnection(installTarget, connection));
+  const selectedChannelConfigured = isQQInstallTarget ? qqAdded : Boolean(selectedInstallConnection);
+  const routeConnectionOptions = [
+    ...(qqAdded ? [{ id: "qq", label: "QQ" }] : []),
+    ...draft.connections.map((connection) => ({
+      id: connection.id || [connection.provider, connection.domain].filter(Boolean).join("-"),
+      label: connection.label || botConnectionLabel(connection, t),
+    })).filter((item) => item.id),
   ];
 
   const saveBot = () => app.SetBotSettings(botDraftWithDerivedGatewayState(draft));
@@ -2255,11 +2522,9 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     setQQSecretValue("");
   };
   const focusQQAccessSettings = () => {
-    pendingAllowlistFocusRef.current = true;
-    setExpandedConnectionId(QQ_CONNECTION_ID);
-    setAllowlistOpen(true);
-    setAllowlistFocused(true);
     setDiagnostics((prev) => ({ ...prev, [QQ_CONNECTION_ID]: t("settings.botQQAccessRequired") }));
+    setExpandedConnectionId(QQ_CONNECTION_ID);
+    window.setTimeout(() => stepConnectRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }), 60);
   };
   const saveQQAndEnable = async () => {
     if (!qqCanEnableAccess) {
@@ -2289,7 +2554,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     const env = draft.qq.appSecretEnv.trim() || DEFAULT_QQ_SECRET_ENV;
     const nextDraft = botDraftWithDerivedGatewayState({
       ...draft,
-      qq: { enabled: false, appId: "", appSecretEnv: DEFAULT_QQ_SECRET_ENV, secretSet: false, sandbox: false },
+      qq: { enabled: false, appId: "", appSecretEnv: DEFAULT_QQ_SECRET_ENV, secretSet: false, sandbox: false, model: "", toolApprovalMode: "ask", workspaceRoot: "", access: defaultBotAccess() },
     });
     await apply(async () => {
       await app.SetBotSettings(nextDraft);
@@ -2299,780 +2564,1114 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     setQQSecretValue("");
     setExpandedConnectionId("");
   };
-  const onlineConnections = (qqOnline ? 1 : 0) + draft.connections.filter((connection) => connection.enabled && connection.status === "connected").length;
-  const selectedQQ = qqAdded && expandedConnectionId === QQ_CONNECTION_ID;
-  const selectedConnection = selectedQQ ? null : draft.connections.find((connection) => connection.id === expandedConnectionId) ?? null;
+  const selectedQQ = isQQInstallTarget && qqAdded;
+  const selectedConnection = isQQInstallTarget ? null : selectedInstallConnection ?? null;
   const selectedDiagnostic = selectedConnection ? diagnostics[selectedConnection.id] : undefined;
   const selectedDiagnosticDetail = diagnosticReportDetail(selectedDiagnostic);
   const selectedConnectionRemote = selectedConnection ? firstConnectionRemote(selectedConnection) : "";
-  const selectedConnectionToolApprovalMode = selectedConnection ? normalizeBotToolApprovalMode(selectedConnection.toolApprovalMode, true) : "";
-  const selectedAllowlistTargetReady = selectedQQ || Boolean(selectedConnection);
-  useEffect(() => {
-    if (!pendingAllowlistFocusRef.current || !selectedAllowlistTargetReady) return;
-    setAllowlistOpen(true);
-    const scrollTimer = window.setTimeout(() => {
-      if (!allowlistRef.current) return;
-      pendingAllowlistFocusRef.current = false;
-      allowlistRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
-      setAllowlistFocused(true);
-    }, 80);
-    const clearTimer = window.setTimeout(() => setAllowlistFocused(false), 2100);
-    return () => {
-      window.clearTimeout(scrollTimer);
-      window.clearTimeout(clearTimer);
+  const selectedConnectionToolApprovalMode = selectedConnection ? normalizeBotToolApprovalMode(selectedConnection.toolApprovalMode) : "ask";
+  const simpleAccessMode = draft.allowlist.allowAll ? "everyone" : "trusted";
+  const connectedPlatforms = new Set<BotPlatformKey>();
+  if (qqAdded) connectedPlatforms.add("qq");
+  for (const connection of draft.connections) connectedPlatforms.add(botConnectionPlatform(connection));
+  const platformHasAllowlistText = (platform: BotPlatformKey) =>
+    BOT_ALLOWLIST_ROLES.some((role) => allowlistText[botAllowlistKey(platform, role)].trim());
+  const visibleAccessPlatforms = BOT_PLATFORM_KEYS.filter((platform) =>
+    showAllPlatforms || connectedPlatforms.size === 0 || connectedPlatforms.has(platform) || platformHasAllowlistText(platform));
+  const platformFilterAvailable = connectedPlatforms.size > 0 &&
+    BOT_PLATFORM_KEYS.some((platform) => !connectedPlatforms.has(platform) && !platformHasAllowlistText(platform));
+  const botChannelConnectionForTarget = (target: BotInstallTarget) =>
+    target === "qq" ? null : draft.connections.find((connection) => botInstallTargetMatchesConnection(target, connection));
+  const botChannelIsConfigured = (target: BotInstallTarget) =>
+    target === "qq" ? qqAdded : Boolean(botChannelConnectionForTarget(target));
+  const openBotChannel = (target: BotInstallTarget) => {
+    setInstallTarget(target);
+    const connection = botChannelConnectionForTarget(target);
+    setExpandedConnectionId(target === "qq" && qqAdded ? QQ_CONNECTION_ID : connection?.id || "");
+  };
+  const setSimpleAccessMode = (mode: "trusted" | "everyone") => {
+    const patch = mode === "everyone"
+      ? { enabled: false, allowAll: true }
+      : { enabled: true, allowAll: false };
+    updateAllowlist(patch);
+    void persistAllowlist(patch);
+  };
+  const renderBotAccessSection = (
+    id: string,
+    access: BotAccessView,
+    updateAccess: (patch: Partial<BotAccessView>) => void,
+    persistAccess: (patch: Partial<BotAccessView>) => void,
+  ) => {
+    const mode = access.allowAll ? "everyone" : "trusted";
+    const setMode = (nextMode: "trusted" | "everyone") => {
+      const patch = nextMode === "everyone"
+        ? { enabled: false, allowAll: true }
+        : { enabled: true, allowAll: false };
+      updateAccess(patch);
+      persistAccess(patch);
     };
-  }, [selectedAllowlistTargetReady]);
-
-  return (
-    <div className="bot-phone-connect">
-        <div className="bot-connection-list">
-          <div className="bot-connection-list__head">
-            <div className="bot-connection-list__title">
-              <strong>{t("settings.botConnectedBots")}</strong>
-              <span>{t("settings.botConnectedBotsSummary", { online: onlineConnections, total: connectionItems.length })}</span>
+    return (
+      <section className="bot-detail-section bot-detail-section--access">
+        <div>
+          <div className="bot-detail-section__head">{t("settings.botAccessControl")}</div>
+          <p>{access.allowAll ? t("settings.botSimpleAccessEveryoneSummary") : t("settings.botSimpleAccessTrustedSummary", { count: botAccessEntryCount(access) })}</p>
+        </div>
+        <div className="bot-choice-grid bot-choice-grid--access">
+          <button
+            type="button"
+            className={`bot-choice-card${mode === "trusted" ? " bot-choice-card--active" : ""}`}
+            disabled={busy}
+            onClick={() => setMode("trusted")}
+          >
+            <strong>{t("settings.botAccessTrusted")}</strong>
+            <span>{t("settings.botAccessTrustedHint")}</span>
+          </button>
+          <button
+            type="button"
+            className={`bot-choice-card${mode === "everyone" ? " bot-choice-card--active" : ""}`}
+            disabled={busy}
+            onClick={() => setMode("everyone")}
+          >
+            <strong>{t("settings.botAccessEveryone")}</strong>
+            <span>{t("settings.botAccessEveryoneHint")}</span>
+          </button>
+        </div>
+        <div className="bot-pairing-row">
+          <div>
+            <strong>{t("settings.botAccessPairing")}</strong>
+            <span>{t("settings.botAccessPairingHint")}</span>
+          </div>
+          <ToggleSegment
+            value={access.pairingEnabled}
+            disabled={busy}
+            onChange={(pairingEnabled) => {
+              updateAccess({ pairingEnabled });
+              persistAccess({ pairingEnabled });
+            }}
+          />
+        </div>
+        {access.allowAll ? (
+          <div className="bot-access-panel__warning">{t("settings.botAllowAllWarn")}</div>
+        ) : (
+          <div className="bot-access-platforms bot-access-platforms--single">
+            <div className="bot-access-platform">
+              <BotListInput
+                label={t("settings.botListUsers")}
+                value={accessListText(id, access, "users")}
+                disabled={busy}
+                placeholder={t("settings.botListPlaceholder")}
+                onChange={(value) => setAccessListText(id, "users", value)}
+                onBlur={(value) => persistAccessListText(id, access, "users", value, persistAccess)}
+              />
+              <BotListInput
+                label={t("settings.botListGroups")}
+                value={accessListText(id, access, "groups")}
+                disabled={busy}
+                placeholder={t("settings.botListPlaceholder")}
+                onChange={(value) => setAccessListText(id, "groups", value)}
+                onBlur={(value) => persistAccessListText(id, access, "groups", value, persistAccess)}
+              />
             </div>
           </div>
-          {browserPreviewBotConfigured ? (
-            <div className="bot-connection-warning">{t("settings.botBrowserPreviewWarning")}</div>
-          ) : null}
-          {connectionItems.length === 0 ? (
-            <div className="bot-connection-empty">{t("settings.botConnectionsEmpty")}</div>
-          ) : (
-            <div className="bot-connection-table" role="table" aria-label={t("settings.botConnectedBots")}>
-              <div className="bot-connection-table__header" role="row">
-                <span>{t("settings.botConnectionColumnChannel")}</span>
-                <span>{t("settings.botConnectionColumnName")}</span>
-                <span>{t("settings.botConnectionColumnStatus")}</span>
-                <span>{t("settings.botConnectionColumnActions")}</span>
+        )}
+        <details className="bot-access-panel bot-simple-roles">
+          <summary className="bot-access-panel__summary">
+            <span>
+              <strong>{t("settings.botRoleAccess")}</strong>
+              <small>{t("settings.botRoleAccessHint")}</small>
+            </span>
+            <ChevronDown className="bot-access-panel__chevron" size={16} aria-hidden="true" />
+          </summary>
+          <div className="bot-access-panel__body">
+            <div className="bot-access-platforms bot-access-platforms--single">
+              <div className="bot-access-platform">
+                <BotListInput
+                  label={t("settings.botListApprovers")}
+                  value={accessListText(id, access, "approvers")}
+                  disabled={busy || access.allowAll}
+                  placeholder={t("settings.botListPlaceholder")}
+                  onChange={(value) => setAccessListText(id, "approvers", value)}
+                  onBlur={(value) => persistAccessListText(id, access, "approvers", value, persistAccess)}
+                />
+                <BotListInput
+                  label={t("settings.botListAdmins")}
+                  value={accessListText(id, access, "admins")}
+                  disabled={busy || access.allowAll}
+                  placeholder={t("settings.botListPlaceholder")}
+                  onChange={(value) => setAccessListText(id, "admins", value)}
+                  onBlur={(value) => persistAccessListText(id, access, "admins", value, persistAccess)}
+                />
               </div>
-              {connectionItems.map((item) => {
-                if (item.kind === "qq") {
-                  const appID = draft.qq.appId.trim();
-                  const qqDiagMessage = diagnosticMessage(diagnostics[QQ_CONNECTION_ID]);
-                  const statusText = qqOnline
-                    ? t("settings.botConnectionConnected")
-                    : qqConfigured
-                      ? t("settings.botConnectionConfigured")
-                      : draft.qq.secretSet
-                      ? t("settings.botConnectionDisconnected")
-                      : t("settings.botSecretMissing");
-                  return (
-                    <div key={QQ_CONNECTION_ID} className="bot-connection-row" role="rowgroup">
-                      <div className="bot-connection-row__grid" role="row">
-                      <div className="bot-connection-row__channel" role="cell">
-                        <span>QQ</span>
-                      </div>
-                      <div className="bot-connection-row__identity-cell" role="cell">
-                        <button
-                          type="button"
-                          className="bot-connection-identity"
-                          disabled={busy}
-                          onClick={() => setExpandedConnectionId((current) => current === QQ_CONNECTION_ID ? "" : QQ_CONNECTION_ID)}
-                          title={appID || "QQ Bot"}
-                        >
-                          <span className="bot-connection-identity__main">
-                            <strong>QQ Bot</strong>
-                            <code>{appID || "—"}</code>
-                          </span>
-                        </button>
-                      </div>
-                      <div className="bot-connection-row__state" role="cell">
-                        <span className={`bot-connection-row__status bot-connection-row__status--${qqOnline ? "connected" : qqConfigured ? "configured" : "disconnected"}`}>
-                            {statusText}
-                          </span>
-                          <ToggleSegment
-                            value={draft.qq.enabled}
-                            disabled={busy}
-                            onChange={(enabled) => {
-                              if (enabled && !qqCanEnableAccess) {
-                                focusQQAccessSettings();
-                                return;
-                              }
-                              updateQQ({ enabled });
-                              void persistQQ({ enabled });
-                            }}
-                          />
-                        </div>
-                        <div className="bot-connection-row__actions" role="cell">
-                          <button
-                            type="button"
-                            className={`btn btn--small${selectedQQ ? " btn--primary" : " btn--secondary"}`}
-                            disabled={busy}
-                            onClick={() => setExpandedConnectionId((current) => current === QQ_CONNECTION_ID ? "" : QQ_CONNECTION_ID)}
-                          >
-                            {t("settings.botManage")}
-                          </button>
-                        </div>
-                      </div>
-                      {qqDiagMessage ? <em className="bot-connection-row__diag">{qqDiagMessage}</em> : null}
-                    </div>
-                  );
-                }
-                const connection = item.connection;
-                const sessionID = firstConnectionRemote(connection);
-                const diagMessage = diagnosticMessage(diagnostics[connection.id]);
-                const connectionStatusClass = connection.status === "connected" ? "connected" : "disconnected";
-                return (
-                  <div key={connection.id} className="bot-connection-row" role="rowgroup">
-                    <div className="bot-connection-row__grid" role="row">
-                      <div className="bot-connection-row__channel" role="cell">
-                        <span>{botConnectionLabel(connection, t)}</span>
-                      </div>
-                      <div className="bot-connection-row__identity-cell" role="cell">
-                        <button
-                          type="button"
-                          className="bot-connection-identity"
-                          disabled={busy}
-                          onClick={() => setExpandedConnectionId((current) => current === connection.id ? "" : connection.id)}
-                          title={sessionID || connection.label || botConnectionLabel(connection, t)}
-                        >
-                          <span className="bot-connection-identity__main">
-                            <strong>{connection.label || botConnectionLabel(connection, t)}</strong>
-                            <code>{sessionID || "—"}</code>
-                          </span>
-                        </button>
-                      </div>
-                      <div className="bot-connection-row__state" role="cell">
-                        <span className={`bot-connection-row__status bot-connection-row__status--${connectionStatusClass}`}>
-                          {connection.status === "connected" ? t("settings.botConnectionConnected") : connection.status || t("settings.botConnectionDisconnected")}
-                        </span>
-                        <ToggleSegment
-                          value={connection.enabled}
-                          disabled={busy}
-                          onChange={(enabled) => void persistConnection(connection.id, { enabled })}
-                        />
-                      </div>
-                      <div className="bot-connection-row__actions" role="cell">
-                        <button
-                          type="button"
-                          className={`btn btn--small${expandedConnectionId === connection.id ? " btn--primary" : " btn--secondary"}`}
-                          disabled={busy}
-                          onClick={() => setExpandedConnectionId((current) => current === connection.id ? "" : connection.id)}
-                        >
-                          {t("settings.botManage")}
-                        </button>
-                      </div>
-                    </div>
-                    {diagMessage ? <em className="bot-connection-row__diag">{diagMessage}</em> : null}
-                  </div>
-                );
-              })}
             </div>
-          )}
+          </div>
+        </details>
+      </section>
+    );
+  };
+  const qqDetailCard = (
+    <article className="bot-detail-card" aria-labelledby="bot-detail-title">
+      <div className="bot-detail-card__head">
+        <div className="bot-detail-card__identity">
+          <div className="bot-detail-card__title" id="bot-detail-title">
+            QQ Bot
+            <span className="badge badge--neutral">QQ</span>
+            <span className={`badge ${qqOnline ? "badge--project" : qqConfigured ? "badge--feedback" : "badge--feedback"}`}>
+              {qqOnline ? t("settings.botConnectionConnected") : qqConfigured ? t("settings.botConnectionConfigured") : t("settings.botConnectionDisconnected")}
+            </span>
+          </div>
+          <div className="bot-detail-card__desc">{t("settings.botAutoSaveHint")}</div>
         </div>
+      </div>
 
-        {selectedQQ ? (
-          <article className="bot-detail-card" aria-labelledby="bot-detail-title">
-            <div className="bot-detail-card__head">
-              <div className="bot-detail-card__identity">
-                <div className="bot-detail-card__title" id="bot-detail-title">
-                  QQ Bot
-                  <span className="badge badge--neutral">QQ</span>
-                  <span className={`badge ${qqOnline ? "badge--project" : qqConfigured ? "badge--feedback" : "badge--feedback"}`}>
-                    {qqOnline ? t("settings.botConnectionConnected") : qqConfigured ? t("settings.botConnectionConfigured") : t("settings.botConnectionDisconnected")}
-                  </span>
-                </div>
-                <div className="bot-detail-card__desc">{t("settings.botAutoSaveHint")}</div>
-              </div>
-              <div className="bot-detail-card__actions">
-                <button type="button" className="btn btn--small" onClick={() => setExpandedConnectionId("")}>
-                  {t("common.collapse")}
-                </button>
-              </div>
+      <section className="bot-detail-section">
+        <div className="bot-detail-section__head">{t("settings.botConnectionSummary")}</div>
+        <div className="bot-detail-summary">
+          <div>
+            <span>{t("settings.botConnectionColumnChannel")}</span>
+            <strong>QQ</strong>
+          </div>
+          <div>
+            <span>{t("settings.botConnectionColumnRemote")}</span>
+            <code title={draft.qq.appId.trim() || undefined}>{draft.qq.appId.trim() || "—"}</code>
+          </div>
+          <div>
+            <span>{t("settings.botConnectionColumnScope")}</span>
+            <strong>{t("settings.botScopeGlobal")}</strong>
+          </div>
+          <div>
+            <span>{t("settings.botConnectionColumnStatus")}</span>
+            <strong>{qqOnline ? t("settings.botConnectionConnected") : qqConfigured ? t("settings.botConnectionConfigured") : t("settings.botConnectionDisconnected")}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="bot-detail-section bot-detail-section--runtime-primary">
+        <SettingsField label={t("settings.botEnableBot")} hint={t("settings.botGatewayEnabled")}>
+          <ToggleSegment
+            value={draft.qq.enabled}
+            disabled={busy}
+            onChange={(enabled) => {
+              if (enabled && !qqCanEnableAccess) {
+                focusQQAccessSettings();
+                return;
+              }
+              updateQQ({ enabled });
+              void persistQQ({ enabled });
+            }}
+          />
+        </SettingsField>
+        <SettingsField label={t("settings.botToolApprovalMode")} hint={t("settings.botToolApprovalModeHint")}>
+          <div className="provider-add-segmented" role="group" aria-label={t("settings.botToolApprovalMode")}>
+            {TOOL_APPROVAL_MODES.map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={normalizeBotToolApprovalMode(draft.qq.toolApprovalMode) === mode ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
+                disabled={busy}
+                onClick={() => void persistQQ({ toolApprovalMode: mode })}
+              >
+                {t(`settings.botToolApprovalMode.${mode}` as DictKey)}
+              </button>
+            ))}
+          </div>
+        </SettingsField>
+        <SettingsField label={t("settings.botChannelModel")} hint={t("settings.botChannelModelHint")}>
+          <ModelPicker
+            s={s}
+            refs={refs}
+            value={toRef(draft.qq.model, s)}
+            disabled={busy}
+            emptyOptionLabel={t("settings.botChannelModelAuto")}
+            emptyOptionHint={settingsModelMeta(s, t)}
+            onPick={(model) => void persistQQ({ model })}
+          />
+        </SettingsField>
+      </section>
+
+      {renderBotAccessSection(QQ_CONNECTION_ID, draft.qq.access, updateQQAccess, (patch) => void persistQQAccess(patch))}
+
+      <section className="bot-detail-section">
+        <div className="bot-detail-section__head">{t("settings.botRuntimeSettings")}</div>
+        <SettingsField label={t("settings.botSandbox")} hint={t("settings.botInstallQQHint")}>
+          <ToggleSegment
+            value={draft.qq.sandbox}
+            disabled={busy}
+            onLabel={t("settings.toggleOn")}
+            offLabel={t("settings.toggleOff")}
+            onChange={(sandbox) => {
+              updateQQ({ sandbox });
+              void persistQQ({ sandbox });
+            }}
+          />
+        </SettingsField>
+        <SettingsField label={t("settings.botWorkspaceRoot")} hint={t("settings.botWorkspaceRootHint")}>
+          <input
+            className="mem-input"
+            value={draft.qq.workspaceRoot}
+            disabled={busy}
+            placeholder={t("settings.botWorkspaceRootPlaceholder")}
+            spellCheck={false}
+            onChange={(event) => updateQQ({ workspaceRoot: event.target.value })}
+            onBlur={(event) => void persistQQ({ workspaceRoot: event.currentTarget.value })}
+          />
+        </SettingsField>
+      </section>
+
+      <section className="bot-detail-section">
+        <div className="bot-detail-section__head">{t("settings.botCredential")}</div>
+        <div className="bot-credential-stack">
+          <div className="bot-credential-line">
+            <span>{draft.qq.appId.trim() ? t("settings.botCredentialApp", { value: draft.qq.appId.trim() }) : t("settings.botCredentialConfigured")}</span>
+            <strong>{draft.qq.secretSet ? t("settings.botSecretSet") : t("settings.botSecretMissing")}</strong>
+          </div>
+          <div className="bot-secret-row bot-secret-row--qq">
+            <input
+              className="mem-input"
+              value={draft.qq.appId}
+              disabled={busy}
+              placeholder={t("settings.botAppId")}
+              spellCheck={false}
+              aria-label={t("settings.botAppId")}
+              onChange={(event) => updateQQ({ appId: event.target.value })}
+              onBlur={(event) => void persistQQ({ appId: event.currentTarget.value })}
+            />
+            <input
+              className="mem-input"
+              value={draft.qq.appSecretEnv || DEFAULT_QQ_SECRET_ENV}
+              disabled={busy}
+              placeholder={DEFAULT_QQ_SECRET_ENV}
+              spellCheck={false}
+              aria-label={t("settings.botSecretEnv")}
+              onChange={(event) => updateQQ({ appSecretEnv: event.target.value })}
+              onBlur={(event) => void persistQQ({ appSecretEnv: event.currentTarget.value || DEFAULT_QQ_SECRET_ENV })}
+            />
+            <input
+              className="mem-input"
+              type="password"
+              value={qqSecretValue}
+              disabled={busy}
+              placeholder={draft.qq.secretSet ? t("settings.botSecretReplace") : t("settings.botSecretPaste")}
+              aria-label={t("settings.botSecretValue")}
+              onChange={(event) => setQQSecretValue(event.target.value)}
+            />
+            <button type="button" className="btn btn--secondary btn--small" disabled={busy || !qqCanSaveAndEnable} onClick={() => void saveQQAndEnable()}>
+              {draft.qq.secretSet ? t("settings.saveKey") : t("settings.botSaveAndEnable")}
+            </button>
+            <button type="button" className="btn btn--secondary btn--small" disabled={busy || !draft.qq.secretSet} onClick={() => void clearQQSecret()}>
+              {t("settings.clearKey")}
+            </button>
+          </div>
+          {!qqCanEnableAccess ? <div className="bot-connect-panel__hint bot-connect-panel__hint--warning">{t("settings.botQQAccessRequired")}</div> : null}
+        </div>
+      </section>
+
+      <section className="bot-detail-section bot-detail-section--danger">
+        <div>
+          <div className="bot-detail-section__head">{t("settings.botDangerZone")}</div>
+          <p>{t("settings.deleteBotHint")}</p>
+        </div>
+        <InlineConfirmButton
+          label={t("settings.deleteBot")}
+          confirmLabel={t("settings.confirmDeleteBot")}
+          cancelLabel={t("common.cancel")}
+          disabled={busy}
+          danger
+          onConfirm={() => void removeQQBot()}
+        />
+      </section>
+    </article>
+  );
+
+  const connectionDetailCard = selectedConnection ? (
+    <article className="bot-detail-card" aria-labelledby="bot-detail-title">
+      <div className="bot-detail-card__head">
+        <div className="bot-detail-card__identity">
+          <div className="bot-detail-card__title" id="bot-detail-title">
+            {selectedConnection.label || botConnectionLabel(selectedConnection, t)}
+            <span className="badge badge--neutral">{botConnectionLabel(selectedConnection, t)}</span>
+            <span className={`badge ${selectedConnection.status === "connected" ? "badge--project" : "badge--feedback"}`}>
+              {selectedConnection.status === "connected" ? t("settings.botConnectionConnected") : selectedConnection.status || t("settings.botConnectionDisconnected")}
+            </span>
+          </div>
+          <div className="bot-detail-card__desc">{t("settings.botAutoSaveHint")}</div>
+        </div>
+        <div className="bot-detail-card__actions">
+          <button type="button" className="btn btn--small" disabled={busy} onClick={() => void diagnoseConnection(selectedConnection.id)}>
+            {t("settings.botDiagnose")}
+          </button>
+          {(selectedConnection.provider === "feishu" || selectedConnection.provider === "weixin") ? (
+            <button type="button" className="btn btn--small" disabled={busy || !selectedConnectionRemote} onClick={() => void testConnection(selectedConnection)}>
+              {t("settings.botTest")}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {diagnosticMessage(selectedDiagnostic) ? (
+        <div className="bot-detail-notice">
+          <span>{diagnosticMessage(selectedDiagnostic)}</span>
+          {selectedDiagnosticDetail ? (
+            <div className="bot-diagnostic-actions">
+              <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => void copyConnectionDiagnostic(selectedConnection)}>
+                <Clipboard aria-hidden="true" />
+                {t("settings.botCopyDiagnostic")}
+              </button>
+              <button type="button" className="btn btn--primary btn--small" disabled={busy} onClick={() => void reportConnectionDiagnostic(selectedConnection)}>
+                <Send aria-hidden="true" />
+                {t("settings.botSendDiagnostic")}
+              </button>
+              <small>{t("settings.botDiagnosticPrivacy")}</small>
             </div>
+          ) : null}
+        </div>
+      ) : null}
 
-            <section className="bot-detail-section">
-              <div className="bot-detail-section__head">{t("settings.botConnectionSummary")}</div>
-              <div className="bot-detail-summary">
-                <div>
-                  <span>{t("settings.botConnectionColumnChannel")}</span>
-                  <strong>QQ</strong>
-                </div>
-                <div>
-                  <span>{t("settings.botConnectionColumnRemote")}</span>
-                  <code title={draft.qq.appId.trim() || undefined}>{draft.qq.appId.trim() || "—"}</code>
-                </div>
-                <div>
-                  <span>{t("settings.botConnectionColumnScope")}</span>
-                  <strong>{t("settings.botScopeGlobal")}</strong>
-                </div>
-                <div>
-                  <span>{t("settings.botConnectionColumnStatus")}</span>
-                  <strong>{qqOnline ? t("settings.botConnectionConnected") : qqConfigured ? t("settings.botConnectionConfigured") : t("settings.botConnectionDisconnected")}</strong>
-                </div>
+      <section className="bot-detail-section">
+        <div className="bot-detail-section__head">{t("settings.botConnectionSummary")}</div>
+        <div className="bot-detail-summary">
+          <div>
+            <span>{t("settings.botConnectionColumnChannel")}</span>
+            <strong>{botConnectionLabel(selectedConnection, t)}</strong>
+          </div>
+          <div>
+            <span>{t("settings.botConnectionColumnRemote")}</span>
+            <code title={selectedConnectionRemote || undefined}>{selectedConnectionRemote || "—"}</code>
+          </div>
+          <div>
+            <span>{t("settings.botConnectionColumnScope")}</span>
+            <strong>{botConnectionScopeLabel(selectedConnection, t)}</strong>
+          </div>
+          <div>
+            <span>{t("settings.botConnectionColumnStatus")}</span>
+            <strong>{selectedConnection.status === "connected" ? t("settings.botConnectionConnected") : selectedConnection.status || t("settings.botConnectionDisconnected")}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="bot-detail-section bot-detail-section--runtime-primary">
+        <SettingsField label={t("settings.botEnableBot")} hint={t("settings.botGatewayEnabled")}>
+          <ToggleSegment
+            value={selectedConnection.enabled}
+            disabled={busy}
+            onChange={(enabled) => void persistConnection(selectedConnection.id, { enabled })}
+          />
+        </SettingsField>
+        <SettingsField label={t("settings.botToolApprovalMode")} hint={t("settings.botToolApprovalModeHint")}>
+          <div className="provider-add-segmented" role="group" aria-label={t("settings.botToolApprovalMode")}>
+            {TOOL_APPROVAL_MODES.map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={selectedConnectionToolApprovalMode === mode ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
+                disabled={busy}
+                onClick={() => persistConnectionToolApprovalMode(selectedConnection.id, mode)}
+              >
+                {t(`settings.botToolApprovalMode.${mode}` as DictKey)}
+              </button>
+            ))}
+          </div>
+        </SettingsField>
+        <SettingsField label={t("settings.botChannelModel")} hint={t("settings.botChannelModelHint")}>
+          <ModelPicker
+            s={s}
+            refs={refs}
+            value={toRef(selectedConnection.model, s)}
+            disabled={busy}
+            emptyOptionLabel={t("settings.botChannelModelAuto")}
+            emptyOptionHint={settingsModelMeta(s, t)}
+            onPick={(model) => void persistConnection(selectedConnection.id, { model })}
+          />
+        </SettingsField>
+      </section>
+
+      {renderBotAccessSection(
+        selectedConnection.id,
+        selectedConnection.access,
+        (patch) => updateConnectionAccess(selectedConnection.id, patch),
+        (patch) => void persistConnectionAccess(selectedConnection, patch),
+      )}
+
+      <section className="bot-detail-section">
+        <div className="bot-detail-section__head">{t("settings.botRuntimeSettings")}</div>
+        <SettingsField label={t("settings.botWorkspaceRoot")} hint={t("settings.botWorkspaceRootHint")}>
+          <input
+            className="mem-input"
+            value={selectedConnection.workspaceRoot}
+            disabled={busy}
+            placeholder={t("settings.botWorkspaceRootPlaceholder")}
+            spellCheck={false}
+            onChange={(event) => updateConnection(selectedConnection.id, { workspaceRoot: event.target.value })}
+            onBlur={(event) => void persistConnection(selectedConnection.id, { workspaceRoot: event.currentTarget.value })}
+          />
+        </SettingsField>
+      </section>
+
+      <section className="bot-detail-section">
+        <div className="bot-detail-section__head">{t("settings.botCredential")}</div>
+        <div className="bot-credential-stack">
+          <div className="bot-credential-line">
+            <span>{botConnectionCredentialSummary(selectedConnection, t)}</span>
+            <strong>{selectedConnection.credential.secretSet ? t("settings.botSecretSet") : t("settings.botSecretMissing")}</strong>
+          </div>
+          {botConnectionSecretEnv(selectedConnection) ? (
+            <div className="bot-secret-row">
+              <input
+                className="mem-input"
+                value={botConnectionSecretEnv(selectedConnection)}
+                disabled={busy}
+                spellCheck={false}
+                onChange={(event) => updateConnectionCredential(selectedConnection.id, botConnectionSecretPatch(selectedConnection, event.target.value))}
+                onBlur={(event) => void persistConnectionCredential(selectedConnection.id, botConnectionSecretPatch(selectedConnection, event.currentTarget.value))}
+              />
+              <input
+                className="mem-input"
+                type="password"
+                value={connectionSecrets[selectedConnection.id] ?? ""}
+                disabled={busy}
+                placeholder={selectedConnection.credential.secretSet ? t("settings.botSecretReplace") : t("settings.botSecretPaste")}
+                onChange={(event) => setConnectionSecrets((prev) => ({ ...prev, [selectedConnection.id]: event.target.value }))}
+              />
+              <button type="button" className="btn btn--secondary btn--small" disabled={busy || !(connectionSecrets[selectedConnection.id] ?? "").trim()} onClick={() => void saveConnectionSecret(selectedConnection)}>
+                {t("settings.saveKey")}
+              </button>
+              <button type="button" className="btn btn--secondary btn--small" disabled={busy || !selectedConnection.credential.secretSet} onClick={() => void clearConnectionSecret(selectedConnection)}>
+                {t("settings.clearKey")}
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="bot-detail-section bot-detail-section--danger">
+        <div>
+          <div className="bot-detail-section__head">{t("settings.botDangerZone")}</div>
+          <p>{t("settings.deleteBotHint")}</p>
+        </div>
+        <InlineConfirmButton
+          label={t("settings.deleteBot")}
+          confirmLabel={t("settings.confirmDeleteBot")}
+          cancelLabel={t("common.cancel")}
+          disabled={busy}
+          danger
+          onConfirm={() => removeConnection(selectedConnection)}
+        />
+      </section>
+    </article>
+  ) : null;
+
+  const installPanelContent = (
+    <>
+      {isQQInstallTarget ? (
+        <div className="bot-connect-panel bot-connect-panel--manual bot-connect-panel--qq">
+          <div className="bot-connect-panel__body">
+            <div className="bot-qq-simple__head">
+              <div>
+                <strong>{selectedInstallLabel}</strong>
+                <p>{t("settings.botInstallManualQQ")}</p>
               </div>
-            </section>
-
-            <section className="bot-detail-section">
-              <div className="bot-detail-section__head">{t("settings.botRuntimeSettings")}</div>
-              <SettingsField label={t("settings.botEnableBot")} hint={t("settings.botGatewayEnabled")}>
-                <ToggleSegment
-                  value={draft.qq.enabled}
-                  disabled={busy}
-                  onChange={(enabled) => {
-                    if (enabled && !qqCanEnableAccess) {
-                      focusQQAccessSettings();
-                      return;
-                    }
-                    updateQQ({ enabled });
-                    void persistQQ({ enabled });
-                  }}
-                />
-              </SettingsField>
-              <SettingsField label={t("settings.botSandbox")} hint={t("settings.botInstallQQHint")}>
-                <ToggleSegment
-                  value={draft.qq.sandbox}
-                  disabled={busy}
-                  onLabel={t("settings.toggleOn")}
-                  offLabel={t("settings.toggleOff")}
-                  onChange={(sandbox) => {
-                    updateQQ({ sandbox });
-                    void persistQQ({ sandbox });
-                  }}
-                />
-              </SettingsField>
-            </section>
-
-            <section className="bot-detail-section">
-              <div className="bot-detail-section__head">{t("settings.botCredential")}</div>
-              <div className="bot-credential-stack">
-                <div className="bot-credential-line">
-                  <span>{draft.qq.appId.trim() ? t("settings.botCredentialApp", { value: draft.qq.appId.trim() }) : t("settings.botCredentialConfigured")}</span>
-                  <strong>{draft.qq.secretSet ? t("settings.botSecretSet") : t("settings.botSecretMissing")}</strong>
-                </div>
-                <div className="bot-secret-row bot-secret-row--qq">
+              <span className={`bot-qq-simple__status${qqConfigured ? " bot-qq-simple__status--ready" : ""}`}>
+                {qqConfigured ? <CheckCircle2 aria-hidden="true" /> : <KeyRound aria-hidden="true" />}
+                {draft.qq.secretSet ? t("settings.botSecretSet") : t("settings.botSecretMissing")}
+              </span>
+            </div>
+            <div className="bot-manual-form bot-manual-form--qq">
+              <div className="bot-card-field">
+                <span>{t("settings.botAppId")}</span>
+                <div>
                   <input
                     className="mem-input"
+                    aria-label={t("settings.botAppId")}
                     value={draft.qq.appId}
                     disabled={busy}
-                    placeholder={t("settings.botAppId")}
                     spellCheck={false}
-                    aria-label={t("settings.botAppId")}
                     onChange={(event) => updateQQ({ appId: event.target.value })}
                     onBlur={(event) => void persistQQ({ appId: event.currentTarget.value })}
                   />
-                  <input
-                    className="mem-input"
-                    value={draft.qq.appSecretEnv || DEFAULT_QQ_SECRET_ENV}
-                    disabled={busy}
-                    placeholder={DEFAULT_QQ_SECRET_ENV}
-                    spellCheck={false}
-                    aria-label={t("settings.botSecretEnv")}
-                    onChange={(event) => updateQQ({ appSecretEnv: event.target.value })}
-                    onBlur={(event) => void persistQQ({ appSecretEnv: event.currentTarget.value || DEFAULT_QQ_SECRET_ENV })}
-                  />
+                </div>
+              </div>
+              <div className="bot-card-field">
+                <span>{t("settings.botAppSecret")}</span>
+                <div>
                   <input
                     className="mem-input"
                     type="password"
                     value={qqSecretValue}
                     disabled={busy}
-                    placeholder={draft.qq.secretSet ? t("settings.botSecretReplace") : t("settings.botSecretPaste")}
+                    placeholder={draft.qq.secretSet ? t("settings.botSecretSavedOptional") : t("settings.botSecretPaste")}
+                    spellCheck={false}
                     aria-label={t("settings.botSecretValue")}
                     onChange={(event) => setQQSecretValue(event.target.value)}
                   />
-                  <button type="button" className="btn btn--secondary btn--small" disabled={busy || !qqCanSaveAndEnable} onClick={() => void saveQQAndEnable()}>
-                    {draft.qq.secretSet ? t("settings.saveKey") : t("settings.botSaveAndEnable")}
-                  </button>
-                  <button type="button" className="btn btn--secondary btn--small" disabled={busy || !draft.qq.secretSet} onClick={() => void clearQQSecret()}>
-                    {t("settings.clearKey")}
-                  </button>
                 </div>
-                {!qqCanEnableAccess ? <div className="bot-connect-panel__hint bot-connect-panel__hint--warning">{t("settings.botQQAccessRequired")}</div> : null}
               </div>
-            </section>
-
-            <details
-              ref={allowlistRef}
-              className={`bot-access-panel${allowlistFocused ? " bot-access-panel--focused" : ""}`}
-              data-focus-target="bot-allowlist"
-              open={allowlistOpen}
-              onToggle={(event) => setAllowlistOpen(event.currentTarget.open)}
-            >
-              <summary className="bot-access-panel__summary">
-                <span>
-                  <strong>{t("settings.botAccessControl")}</strong>
-                  <small>{t("settings.botAllowlistHint")}</small>
-                </span>
-                <ChevronDown className="bot-access-panel__chevron" size={16} aria-hidden="true" />
-              </summary>
-              {allowlistOpen ? (
-                <div className="bot-access-panel__body">
-                  <SettingsField label={t("settings.botAccessMode")} hint={t("settings.botAccessControlHint")}>
-                    <ToggleSegment
-                      value={!draft.allowlist.allowAll}
-                      disabled={busy}
-                      onLabel={t("settings.botAccessWhitelist")}
-                      offLabel={t("settings.botAccessAll")}
-                      onChange={(whitelistOnly) => {
-                        const patch = { enabled: whitelistOnly, allowAll: !whitelistOnly };
-                        updateAllowlist(patch);
-                        void persistAllowlist(patch);
-                      }}
-                    />
-                  </SettingsField>
-                  {draft.allowlist.allowAll ? <div className="bot-access-panel__warning">{t("settings.botAllowAllWarn")}</div> : null}
-                  <SettingsField label={t("settings.botAllowlistEntries")} hint={t("settings.botListPlaceholder")}>
-                    <div className="bot-list-grid bot-list-grid--qq">
-                      <label className="bot-list-input">
-                        <span>{t("settings.botQQUsers")}</span>
-                        <textarea
-                          className="mem-input bot-list-input__textarea"
-                          value={allowlistText.qqUsers}
-                          disabled={busy || draft.allowlist.allowAll}
-                          placeholder={t("settings.botListPlaceholder")}
-                          spellCheck={false}
-                          onChange={(event) => setAllowlistText((prev) => ({ ...prev, qqUsers: event.target.value }))}
-                          onBlur={(event) => persistAllowlistText("qqUsers", event.currentTarget.value)}
-                        />
-                      </label>
-                      <label className="bot-list-input">
-                        <span>{t("settings.botQQGroups")}</span>
-                        <textarea
-                          className="mem-input bot-list-input__textarea"
-                          value={allowlistText.qqGroups}
-                          disabled={busy || draft.allowlist.allowAll}
-                          placeholder={t("settings.botListPlaceholder")}
-                          spellCheck={false}
-                          onChange={(event) => setAllowlistText((prev) => ({ ...prev, qqGroups: event.target.value }))}
-                          onBlur={(event) => persistAllowlistText("qqGroups", event.currentTarget.value)}
-                        />
-                      </label>
-                    </div>
-                  </SettingsField>
-                </div>
-              ) : null}
-            </details>
-
-            <section className="bot-detail-section bot-detail-section--danger">
-              <div>
-                <div className="bot-detail-section__head">{t("settings.botDangerZone")}</div>
-                <p>{t("settings.deleteBotHint")}</p>
-              </div>
-              <InlineConfirmButton
-                label={t("settings.deleteBot")}
-                confirmLabel={t("settings.confirmDeleteBot")}
-                cancelLabel={t("common.cancel")}
-                disabled={busy}
-                danger
-                onConfirm={() => void removeQQBot()}
-              />
-            </section>
-          </article>
-        ) : null}
-
-        {selectedConnection ? (
-          <article className="bot-detail-card" aria-labelledby="bot-detail-title">
-            <div className="bot-detail-card__head">
-              <div className="bot-detail-card__identity">
-                <div className="bot-detail-card__title" id="bot-detail-title">
-                  {selectedConnection.label || botConnectionLabel(selectedConnection, t)}
-                  <span className="badge badge--neutral">{botConnectionLabel(selectedConnection, t)}</span>
-                  <span className={`badge ${selectedConnection.status === "connected" ? "badge--project" : "badge--feedback"}`}>
-                    {selectedConnection.status === "connected" ? t("settings.botConnectionConnected") : selectedConnection.status || t("settings.botConnectionDisconnected")}
-                  </span>
-                </div>
-                <div className="bot-detail-card__desc">{t("settings.botAutoSaveHint")}</div>
-              </div>
-              <div className="bot-detail-card__actions">
-                <button type="button" className="btn btn--small" disabled={busy} onClick={() => void diagnoseConnection(selectedConnection.id)}>
-                  {t("settings.botDiagnose")}
-                </button>
-                {(selectedConnection.provider === "feishu" || selectedConnection.provider === "weixin") ? (
-                  <button type="button" className="btn btn--small" disabled={busy || !selectedConnectionRemote} onClick={() => void testConnection(selectedConnection)}>
-                    {t("settings.botTest")}
-                  </button>
-                ) : null}
-                <button type="button" className="btn btn--small" onClick={() => setExpandedConnectionId("")}>
-                  {t("common.collapse")}
+              <div className="bot-qq-simple__actions">
+                <button type="button" className="btn btn--primary btn--small" disabled={busy || !qqCanSaveAndEnable} onClick={() => void saveQQAndEnable()}>
+                  {t("settings.botSaveAndEnable")}
                 </button>
               </div>
-            </div>
-
-              {diagnosticMessage(selectedDiagnostic) ? (
-                <div className="bot-detail-notice">
-                  <span>{diagnosticMessage(selectedDiagnostic)}</span>
-                  {selectedDiagnosticDetail ? (
-                    <div className="bot-diagnostic-actions">
-                      <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => void copyConnectionDiagnostic(selectedConnection)}>
-                        <Clipboard aria-hidden="true" />
-                        {t("settings.botCopyDiagnostic")}
-                      </button>
-                      <button type="button" className="btn btn--primary btn--small" disabled={busy} onClick={() => void reportConnectionDiagnostic(selectedConnection)}>
-                        <Send aria-hidden="true" />
-                        {t("settings.botSendDiagnostic")}
-                      </button>
-                      <small>{t("settings.botDiagnosticPrivacy")}</small>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              <section className="bot-detail-section">
-                <div className="bot-detail-section__head">{t("settings.botConnectionSummary")}</div>
-                <div className="bot-detail-summary">
-                  <div>
-                    <span>{t("settings.botConnectionColumnChannel")}</span>
-                    <strong>{botConnectionLabel(selectedConnection, t)}</strong>
-                  </div>
-                  <div>
-                    <span>{t("settings.botConnectionColumnRemote")}</span>
-                    <code title={selectedConnectionRemote || undefined}>{selectedConnectionRemote || "—"}</code>
-                  </div>
-                  <div>
-                    <span>{t("settings.botConnectionColumnScope")}</span>
-                    <strong>{botConnectionScopeLabel(selectedConnection, t)}</strong>
-                  </div>
-                  <div>
-                    <span>{t("settings.botConnectionColumnStatus")}</span>
-                    <strong>{selectedConnection.status === "connected" ? t("settings.botConnectionConnected") : selectedConnection.status || t("settings.botConnectionDisconnected")}</strong>
-                  </div>
-                </div>
-              </section>
-
-              <details
-                ref={allowlistRef}
-                className={`bot-access-panel${allowlistFocused ? " bot-access-panel--focused" : ""}`}
-                data-focus-target="bot-allowlist"
-                open={allowlistOpen}
-                onToggle={(event) => setAllowlistOpen(event.currentTarget.open)}
-              >
-                <summary className="bot-access-panel__summary">
-                  <span>
-                    <strong>{t("settings.botAccessControl")}</strong>
-                    <small>{t("settings.botAllowlistHint")}</small>
-                  </span>
-                  <ChevronDown className="bot-access-panel__chevron" size={16} aria-hidden="true" />
-                </summary>
-                {allowlistOpen ? (
-                  <div className="bot-access-panel__body">
-                    <SettingsField label={t("settings.botAccessMode")} hint={t("settings.botAccessControlHint")}>
-                      <ToggleSegment
-                        value={!draft.allowlist.allowAll}
-                        disabled={busy}
-                        onLabel={t("settings.botAccessWhitelist")}
-                        offLabel={t("settings.botAccessAll")}
-                        onChange={(whitelistOnly) => {
-                          const patch = { enabled: whitelistOnly, allowAll: !whitelistOnly };
-                          updateAllowlist(patch);
-                          void persistAllowlist(patch);
-                        }}
-                      />
-                    </SettingsField>
-                    {draft.allowlist.allowAll ? <div className="bot-access-panel__warning">{t("settings.botAllowAllWarn")}</div> : null}
-                    <SettingsField label={t("settings.botAllowlistEntries")} hint={t("settings.botListPlaceholder")}>
-                      <div className="bot-list-grid">
-                        <label className="bot-list-input">
-                          <span>{t("settings.botQQUsers")}</span>
-                          <textarea
-                            className="mem-input bot-list-input__textarea"
-                            value={allowlistText.qqUsers}
-                            disabled={busy || draft.allowlist.allowAll}
-                            placeholder={t("settings.botListPlaceholder")}
-                            spellCheck={false}
-                            onChange={(event) => setAllowlistText((prev) => ({ ...prev, qqUsers: event.target.value }))}
-                            onBlur={(event) => persistAllowlistText("qqUsers", event.currentTarget.value)}
-                          />
-                        </label>
-                        <label className="bot-list-input">
-                          <span>{t("settings.botFeishuLarkUsers")}</span>
-                          <textarea
-                            className="mem-input bot-list-input__textarea"
-                            value={allowlistText.feishuUsers}
-                            disabled={busy || draft.allowlist.allowAll}
-                            placeholder={t("settings.botListPlaceholder")}
-                            spellCheck={false}
-                            onChange={(event) => setAllowlistText((prev) => ({ ...prev, feishuUsers: event.target.value }))}
-                            onBlur={(event) => persistAllowlistText("feishuUsers", event.currentTarget.value)}
-                          />
-                        </label>
-                        <label className="bot-list-input">
-                          <span>{t("settings.botWeixinUsers")}</span>
-                          <textarea
-                            className="mem-input bot-list-input__textarea"
-                            value={allowlistText.weixinUsers}
-                            disabled={busy || draft.allowlist.allowAll}
-                            placeholder={t("settings.botListPlaceholder")}
-                            spellCheck={false}
-                            onChange={(event) => setAllowlistText((prev) => ({ ...prev, weixinUsers: event.target.value }))}
-                            onBlur={(event) => persistAllowlistText("weixinUsers", event.currentTarget.value)}
-                          />
-                        </label>
-                        <label className="bot-list-input">
-                          <span>{t("settings.botQQGroups")}</span>
-                          <textarea
-                            className="mem-input bot-list-input__textarea"
-                            value={allowlistText.qqGroups}
-                            disabled={busy || draft.allowlist.allowAll}
-                            placeholder={t("settings.botListPlaceholder")}
-                            spellCheck={false}
-                            onChange={(event) => setAllowlistText((prev) => ({ ...prev, qqGroups: event.target.value }))}
-                            onBlur={(event) => persistAllowlistText("qqGroups", event.currentTarget.value)}
-                          />
-                        </label>
-                        <label className="bot-list-input">
-                          <span>{t("settings.botFeishuLarkGroups")}</span>
-                          <textarea
-                            className="mem-input bot-list-input__textarea"
-                            value={allowlistText.feishuGroups}
-                            disabled={busy || draft.allowlist.allowAll}
-                            placeholder={t("settings.botListPlaceholder")}
-                            spellCheck={false}
-                            onChange={(event) => setAllowlistText((prev) => ({ ...prev, feishuGroups: event.target.value }))}
-                            onBlur={(event) => persistAllowlistText("feishuGroups", event.currentTarget.value)}
-                          />
-                        </label>
-                        <label className="bot-list-input">
-                          <span>{t("settings.botWeixinGroups")}</span>
-                          <textarea
-                            className="mem-input bot-list-input__textarea"
-                            value={allowlistText.weixinGroups}
-                            disabled={busy || draft.allowlist.allowAll}
-                            placeholder={t("settings.botListPlaceholder")}
-                            spellCheck={false}
-                            onChange={(event) => setAllowlistText((prev) => ({ ...prev, weixinGroups: event.target.value }))}
-                            onBlur={(event) => persistAllowlistText("weixinGroups", event.currentTarget.value)}
-                          />
-                        </label>
-                      </div>
-                    </SettingsField>
-                  </div>
-                ) : null}
-              </details>
-
-              <section className="bot-detail-section">
-                <div className="bot-detail-section__head">{t("settings.botRuntimeSettings")}</div>
-                <SettingsField label={t("settings.botToolApprovalMode")} hint={t("settings.botToolApprovalModeHint")}>
-                  <div className="provider-add-segmented" role="group" aria-label={t("settings.botToolApprovalMode")}>
-                    {BOT_TOOL_APPROVAL_MODES.map((mode) => (
-                      <button
-                        key={mode || "inherit"}
-                        type="button"
-                        className={selectedConnectionToolApprovalMode === mode ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
-                        disabled={busy}
-                        onClick={() => persistConnectionToolApprovalMode(selectedConnection.id, mode)}
-                      >
-                        {t(`settings.botToolApprovalMode.${mode || "inherit"}` as DictKey)}
-                      </button>
-                    ))}
-                  </div>
-                </SettingsField>
-                <SettingsField label={t("settings.botChannelModel")} hint={t("settings.botChannelModelHint")}>
-                  <ModelPicker
-                    s={s}
-                    refs={refs}
-                    value={toRef(selectedConnection.model, s)}
-                    disabled={busy}
-                    emptyOptionLabel={t("settings.botChannelModelAuto")}
-                    emptyOptionHint={settingsModelMeta(s, t)}
-                    onPick={(model) => void persistConnection(selectedConnection.id, { model })}
-                  />
-                </SettingsField>
-                <SettingsField label={t("settings.botWorkspaceRoot")} hint={t("settings.botWorkspaceRootHint")}>
-                  <input
-                    className="mem-input"
-                    value={selectedConnection.workspaceRoot}
-                    disabled={busy}
-                    placeholder={t("settings.botWorkspaceRootPlaceholder")}
-                    spellCheck={false}
-                    onChange={(event) => updateConnection(selectedConnection.id, { workspaceRoot: event.target.value })}
-                    onBlur={(event) => void persistConnection(selectedConnection.id, { workspaceRoot: event.currentTarget.value })}
-                  />
-                </SettingsField>
-              </section>
-
-              <section className="bot-detail-section">
-                <div className="bot-detail-section__head">{t("settings.botCredential")}</div>
-                <div className="bot-credential-stack">
-                  <div className="bot-credential-line">
-                    <span>{botConnectionCredentialSummary(selectedConnection, t)}</span>
-                    <strong>{selectedConnection.credential.secretSet ? t("settings.botSecretSet") : t("settings.botSecretMissing")}</strong>
-                  </div>
-                  {botConnectionSecretEnv(selectedConnection) ? (
-                    <div className="bot-secret-row">
-                      <input
-                        className="mem-input"
-                        value={botConnectionSecretEnv(selectedConnection)}
-                        disabled={busy}
-                        spellCheck={false}
-                        onChange={(event) => updateConnectionCredential(selectedConnection.id, botConnectionSecretPatch(selectedConnection, event.target.value))}
-                        onBlur={(event) => void persistConnectionCredential(selectedConnection.id, botConnectionSecretPatch(selectedConnection, event.currentTarget.value))}
-                      />
-                      <input
-                        className="mem-input"
-                        type="password"
-                        value={connectionSecrets[selectedConnection.id] ?? ""}
-                        disabled={busy}
-                        placeholder={selectedConnection.credential.secretSet ? t("settings.botSecretReplace") : t("settings.botSecretPaste")}
-                        onChange={(event) => setConnectionSecrets((prev) => ({ ...prev, [selectedConnection.id]: event.target.value }))}
-                      />
-                      <button type="button" className="btn btn--secondary btn--small" disabled={busy || !(connectionSecrets[selectedConnection.id] ?? "").trim()} onClick={() => void saveConnectionSecret(selectedConnection)}>
-                        {t("settings.saveKey")}
-                      </button>
-                      <button type="button" className="btn btn--secondary btn--small" disabled={busy || !selectedConnection.credential.secretSet} onClick={() => void clearConnectionSecret(selectedConnection)}>
-                        {t("settings.clearKey")}
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              </section>
-
-              <section className="bot-detail-section bot-detail-section--danger">
-                <div>
-                  <div className="bot-detail-section__head">{t("settings.botDangerZone")}</div>
-                  <p>{t("settings.deleteBotHint")}</p>
-                </div>
-                <InlineConfirmButton
-                  label={t("settings.deleteBot")}
-                  confirmLabel={t("settings.confirmDeleteBot")}
-                  cancelLabel={t("common.cancel")}
-                  disabled={busy}
-                  danger
-                  onConfirm={() => removeConnection(selectedConnection)}
-                />
-              </section>
-          </article>
-        ) : null}
-
-        <div className="bot-add-panel">
-          <div className="bot-phone-connect__top">
-            <div className="bot-phone-connect__title">
-              <strong>{t("settings.botConnectPhoneTitle")}</strong>
-              <span>{t("settings.botConnectPhoneSubtitle")}</span>
+              {!qqCanEnableAccess ? <div className="bot-connect-panel__hint bot-connect-panel__hint--warning">{t("settings.botQQAccessRequired")}</div> : null}
             </div>
           </div>
+        </div>
+      ) : (
+        <div className="bot-connect-panel bot-connect-panel--phone">
+          <div className="bot-connect-panel__qr">
+            {selectedInstallConnection ? (
+              <div className="bot-connect-panel__state bot-connect-panel__state--success">
+                <CheckCircle2 aria-hidden="true" />
+              </div>
+            ) : install.status === "showing" && installQrURL ? (
+              installQrIsImage ? (
+                <img src={installQrURL} alt={t("settings.botInstallQrAlt")} />
+              ) : (
+                <Suspense fallback={<div className="bot-connect-panel__state"><QrCode aria-hidden="true" /></div>}>
+                  <QRCodeSVG className="bot-connect-panel__qr-code" value={installQrURL} size={196} marginSize={1} />
+                </Suspense>
+              )
+            ) : install.status === "starting" ? (
+              <div className="bot-connect-panel__state">
+                <Loader2 className="bot-spin" aria-hidden="true" />
+                <span>{t("settings.botInstallStarting")}</span>
+              </div>
+            ) : install.status === "error" ? (
+              <div className="bot-connect-panel__state bot-connect-panel__state--error">
+                <RefreshCw aria-hidden="true" />
+              </div>
+            ) : (
+              <div className="bot-connect-panel__state">
+                <QrCode aria-hidden="true" />
+              </div>
+            )}
+          </div>
+          <div className="bot-connect-panel__body">
+            <strong>{selectedInstallLabel}</strong>
+            <p>
+              {selectedInstallConnection
+                ? t("settings.botInstallAlreadyConnected", { provider: selectedInstallLabel })
+                : install.message || botTargetHint(installTarget, t)}
+            </p>
+            {install.status === "showing" && install.timeLeft > 0 ? (
+              <span className="bot-connect-panel__timer">{t("settings.botInstallTimeLeft", { time: formatInstallTimeLeft(install.timeLeft) })}</span>
+            ) : null}
+            {installUserCode ? <code>{installUserCode}</code> : null}
+            <div className="bot-connect-panel__actions">
+              {!selectedInstallConnection && install.status !== "showing" && install.status !== "starting" ? (
+                <button type="button" className="btn btn--primary btn--small" disabled={busy} onClick={() => void startInstall(installTarget)}>
+                  {install.status === "error" ? <RefreshCw aria-hidden="true" /> : <QrCode aria-hidden="true" />}
+                  {install.status === "error" ? t("settings.botInstallRetry") : t("settings.botInstallGenerate")}
+                </button>
+              ) : null}
+              {install.status === "showing" ? (
+                <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => void pollInstall()}>
+                  {t("settings.botInstallCheck")}
+                </button>
+              ) : null}
+              {selectedInstallConnection ? (
+                <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => void diagnoseConnection(selectedInstallConnection.id)}>
+                  {t("settings.botDiagnose")}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 
-          <div className="bot-phone-targets" role="tablist" aria-label={t("settings.botChannels")}>
-            {BOT_INSTALL_TARGETS.map((target) => (
+  const botManager = (
+    <section ref={stepConnectRef} id="bot-step-connect" className="bot-channel-manager-card">
+      <div className="bot-channel-manager-card__head">
+        <div>
+          <strong>{t("settings.botManageBots")}</strong>
+          <span>{t("settings.botManageBotsHint")}</span>
+        </div>
+      </div>
+      {browserPreviewBotConfigured ? (
+        <div className="bot-connection-warning">{t("settings.botBrowserPreviewWarning")}</div>
+      ) : null}
+      <div className="bot-channel-manager">
+        <div className="bot-channel-tabs" role="tablist" aria-label={t("settings.botChannelTabsLabel")}>
+          {BOT_INSTALL_TARGETS.map((target) => {
+            const configured = botChannelIsConfigured(target);
+            const connected = target === "qq" ? qqOnline : botChannelConnectionForTarget(target)?.status === "connected";
+            return (
               <button
                 key={target}
                 type="button"
                 role="tab"
                 aria-selected={installTarget === target}
-                className={`bot-phone-target${installTarget === target ? " bot-phone-target--active" : ""}`}
+                className={`bot-channel-tab${installTarget === target ? " bot-channel-tab--active" : ""}`}
                 disabled={busy || install.status === "starting"}
-                onClick={() => setInstallTarget(target)}
+                onClick={() => openBotChannel(target)}
               >
-                <strong>{botTargetLabel(target, t)}</strong>
-                <span>{botTargetHint(target, t)}</span>
+                <span className="bot-channel-tab__icon" aria-hidden="true">
+                  {target === "qq" || target === "weixin" ? <MessageCircle size={24} /> : <BotIcon size={24} />}
+                </span>
+                <span className="bot-channel-tab__text">
+                  <strong>{botTargetLabel(target, t)}</strong>
+                  <small>{botTargetHint(target, t)}</small>
+                </span>
+                <span className={`bot-channel-tab__dot${connected ? " bot-channel-tab__dot--online" : configured ? " bot-channel-tab__dot--configured" : ""}`} />
               </button>
-            ))}
-          </div>
-
-          {isQQInstallTarget ? (
-            <div className="bot-connect-panel bot-connect-panel--manual bot-connect-panel--qq">
-              <div className="bot-connect-panel__body">
-                <div className="bot-qq-simple__head">
-                  <div>
-                    <strong>{selectedInstallLabel}</strong>
-                    <p>{t("settings.botInstallManualQQ")}</p>
-                  </div>
-                  <span className={`bot-qq-simple__status${qqConfigured ? " bot-qq-simple__status--ready" : ""}`}>
-                    {qqConfigured ? <CheckCircle2 aria-hidden="true" /> : <KeyRound aria-hidden="true" />}
-                    {draft.qq.secretSet ? t("settings.botSecretSet") : t("settings.botSecretMissing")}
-                  </span>
+            );
+          })}
+        </div>
+        <div className="bot-channel-manager__detail" role="tabpanel" aria-label={selectedInstallLabel}>
+          {!selectedChannelConfigured ? (
+            <article className="bot-channel-setup-card">
+              <div className="bot-channel-setup-card__head">
+                <div>
+                  <strong>{t("settings.botChannelSetupTitle", { provider: selectedInstallLabel })}</strong>
+                  <span>{t("settings.botChannelSetupHint")}</span>
                 </div>
-                <div className="bot-manual-form bot-manual-form--qq">
-                  <div className="bot-card-field">
-                    <span>{t("settings.botAppId")}</span>
-                    <div>
-                      <input
-                        className="mem-input"
-                        aria-label={t("settings.botAppId")}
-                        value={draft.qq.appId}
-                        disabled={busy}
-                        spellCheck={false}
-                        onChange={(event) => updateQQ({ appId: event.target.value })}
-                        onBlur={(event) => void persistQQ({ appId: event.currentTarget.value })}
-                      />
-                    </div>
-                  </div>
-                  <div className="bot-card-field">
-                    <span>{t("settings.botAppSecret")}</span>
-                    <div>
-                      <input
-                        className="mem-input"
-                        type="password"
-                        value={qqSecretValue}
-                        disabled={busy}
-                        placeholder={draft.qq.secretSet ? t("settings.botSecretSavedOptional") : t("settings.botSecretPaste")}
-                        spellCheck={false}
-                        aria-label={t("settings.botSecretValue")}
-                        onChange={(event) => setQQSecretValue(event.target.value)}
-                      />
-                    </div>
-                  </div>
-                  <div className="bot-qq-simple__actions">
-                    <button type="button" className="btn btn--primary btn--small" disabled={busy || !qqCanSaveAndEnable} onClick={() => void saveQQAndEnable()}>
-                      {t("settings.botSaveAndEnable")}
-                    </button>
-                  </div>
-                  {!qqCanEnableAccess ? <div className="bot-connect-panel__hint bot-connect-panel__hint--warning">{t("settings.botQQAccessRequired")}</div> : null}
-                </div>
+                <span className="badge badge--neutral">{t("settings.botChannelNeedsSetup")}</span>
               </div>
-            </div>
+              {installPanelContent}
+            </article>
+          ) : selectedQQ ? (
+            qqDetailCard
+          ) : selectedConnection ? (
+            connectionDetailCard
           ) : (
-            <div className="bot-connect-panel bot-connect-panel--phone">
-              <div className="bot-connect-panel__qr">
-                {selectedInstallConnection ? (
-                  <div className="bot-connect-panel__state bot-connect-panel__state--success">
-                    <CheckCircle2 aria-hidden="true" />
-                  </div>
-                ) : install.status === "showing" && installQrURL ? (
-                  installQrIsImage ? (
-                    <img src={installQrURL} alt={t("settings.botInstallQrAlt")} />
-                  ) : (
-                    <Suspense fallback={<div className="bot-connect-panel__state"><QrCode aria-hidden="true" /></div>}>
-                      <QRCodeSVG className="bot-connect-panel__qr-code" value={installQrURL} size={196} marginSize={1} />
-                    </Suspense>
-                  )
-                ) : install.status === "starting" ? (
-                  <div className="bot-connect-panel__state">
-                    <Loader2 className="bot-spin" aria-hidden="true" />
-                    <span>{t("settings.botInstallStarting")}</span>
-                  </div>
-                ) : install.status === "error" ? (
-                  <div className="bot-connect-panel__state bot-connect-panel__state--error">
-                    <RefreshCw aria-hidden="true" />
-                  </div>
-                ) : (
-                  <div className="bot-connect-panel__state">
-                    <QrCode aria-hidden="true" />
-                  </div>
-                )}
-              </div>
-              <div className="bot-connect-panel__body">
-                <strong>{selectedInstallLabel}</strong>
-                <p>
-                  {selectedInstallConnection
-                    ? t("settings.botInstallAlreadyConnected", { provider: selectedInstallLabel })
-                    : install.message || botTargetHint(installTarget, t)}
-                </p>
-                {install.status === "showing" && install.timeLeft > 0 ? (
-                  <span className="bot-connect-panel__timer">{t("settings.botInstallTimeLeft", { time: formatInstallTimeLeft(install.timeLeft) })}</span>
-                ) : null}
-                {installUserCode ? <code>{installUserCode}</code> : null}
-                <div className="bot-connect-panel__actions">
-                  {!selectedInstallConnection && install.status !== "showing" && install.status !== "starting" ? (
-                    <button type="button" className="btn btn--primary btn--small" disabled={busy} onClick={() => void startInstall(installTarget)}>
-                      {install.status === "error" ? <RefreshCw aria-hidden="true" /> : <QrCode aria-hidden="true" />}
-                      {install.status === "error" ? t("settings.botInstallRetry") : t("settings.botInstallGenerate")}
-                    </button>
-                  ) : null}
-                  {install.status === "showing" ? (
-                    <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => void pollInstall()}>
-                      {t("settings.botInstallCheck")}
-                    </button>
-                  ) : null}
-                  {selectedInstallConnection ? (
-                    <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => void diagnoseConnection(selectedInstallConnection.id)}>
-                      {t("settings.botDiagnose")}
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            </div>
+            <div className="bot-manager__empty">{t("settings.botSelectBotHint")}</div>
           )}
         </div>
+      </div>
+    </section>
+  );
+
+  return (
+    <div className="bot-phone-connect">
+      {botManager}
+
+	      <details
+        id="bot-advanced-settings"
+        className="bot-simple-advanced"
+        open={advancedMode}
+        onToggle={(event) => {
+          const nextOpen = event.currentTarget.open;
+          setAdvancedMode((current) => current === nextOpen ? current : nextOpen);
+        }}
+      >
+        <summary className="bot-simple-advanced__summary">
+          <span>
+            <strong>{t("settings.botShowAdvancedSettings")}</strong>
+            <small>{t("settings.botAdvancedSettingsHint")}</small>
+          </span>
+          <span className="bot-simple-advanced__toggle">
+            {advancedMode ? t("common.collapse") : t("common.expand")}
+            <ChevronDown aria-hidden="true" size={16} />
+          </span>
+	        </summary>
+	        <div className="bot-simple-advanced__body">
+	          <details className="bot-access-panel bot-global-access-panel">
+	            <summary className="bot-access-panel__summary">
+	              <span>
+	                <strong>{t("settings.botGlobalAllowlist")}</strong>
+	                <small>{t("settings.botGlobalAllowlistHint")}</small>
+	              </span>
+	              <ChevronDown className="bot-access-panel__chevron" size={16} aria-hidden="true" />
+	            </summary>
+	            <div className="bot-access-panel__body">
+	              <div className="bot-choice-grid bot-choice-grid--access">
+	                <button
+	                  type="button"
+	                  className={`bot-choice-card${simpleAccessMode === "trusted" ? " bot-choice-card--active" : ""}`}
+	                  disabled={busy}
+	                  onClick={() => setSimpleAccessMode("trusted")}
+	                >
+	                  <strong>{t("settings.botAccessTrusted")}</strong>
+	                  <span>{t("settings.botAccessTrustedHint")}</span>
+	                </button>
+	                <button
+	                  type="button"
+	                  className={`bot-choice-card${simpleAccessMode === "everyone" ? " bot-choice-card--active" : ""}`}
+	                  disabled={busy}
+	                  onClick={() => setSimpleAccessMode("everyone")}
+	                >
+	                  <strong>{t("settings.botAccessEveryone")}</strong>
+	                  <span>{t("settings.botAccessEveryoneHint")}</span>
+	                </button>
+	              </div>
+	              <div className="bot-pairing-row">
+	                <div>
+	                  <strong>{t("settings.botAccessPairing")}</strong>
+	                  <span>{t("settings.botAccessPairingHint")}</span>
+	                </div>
+	                <ToggleSegment
+	                  value={draft.pairing.enabled}
+	                  disabled={busy}
+	                  onChange={(enabled) => void persistBotSettings({ pairing: { ...draft.pairing, enabled } })}
+	                />
+	              </div>
+	              {draft.allowlist.allowAll ? (
+	                <div className="bot-access-panel__warning">{t("settings.botAllowAllWarn")}</div>
+	              ) : (
+	                <>
+	                  <div className="bot-access-platforms">
+	                    {visibleAccessPlatforms.map((platform) => (
+	                      <div className="bot-access-platform" key={platform}>
+	                        <div className="bot-access-platform__name">{botPlatformLabel(platform, t)}</div>
+	                        <BotListInput
+	                          label={t("settings.botListUsers")}
+	                          value={allowlistText[botAllowlistKey(platform, "Users")]}
+	                          disabled={busy}
+	                          placeholder={t("settings.botListPlaceholder")}
+	                          onChange={(value) => setAllowlistText((prev) => ({ ...prev, [botAllowlistKey(platform, "Users")]: value }))}
+	                          onBlur={(value) => persistAllowlistText(botAllowlistKey(platform, "Users"), value)}
+	                        />
+	                        <BotListInput
+	                          label={t("settings.botListGroups")}
+	                          value={allowlistText[botAllowlistKey(platform, "Groups")]}
+	                          disabled={busy}
+	                          placeholder={t("settings.botListPlaceholder")}
+	                          onChange={(value) => setAllowlistText((prev) => ({ ...prev, [botAllowlistKey(platform, "Groups")]: value }))}
+	                          onBlur={(value) => persistAllowlistText(botAllowlistKey(platform, "Groups"), value)}
+	                        />
+	                      </div>
+	                    ))}
+	                  </div>
+	                  {platformFilterAvailable ? (
+	                    <button type="button" className="bot-access-platforms__toggle" onClick={() => setShowAllPlatforms((value) => !value)}>
+	                      {showAllPlatforms ? t("settings.botAccessShowConnectedOnly") : t("settings.botAccessShowAllPlatforms")}
+	                    </button>
+	                  ) : null}
+	                </>
+	              )}
+	              <details className="bot-access-panel bot-simple-roles">
+	                <summary className="bot-access-panel__summary">
+	                  <span>
+	                    <strong>{t("settings.botRoleAccess")}</strong>
+	                    <small>{t("settings.botRoleAccessHint")}</small>
+	                  </span>
+	                  <ChevronDown className="bot-access-panel__chevron" size={16} aria-hidden="true" />
+	                </summary>
+	                <div className="bot-access-panel__body">
+	                  <div className="bot-access-platforms">
+	                    {visibleAccessPlatforms.map((platform) => (
+	                      <div className="bot-access-platform" key={platform}>
+	                        <div className="bot-access-platform__name">{botPlatformLabel(platform, t)}</div>
+	                        <BotListInput
+	                          label={t("settings.botListApprovers")}
+	                          value={allowlistText[botAllowlistKey(platform, "Approvers")]}
+	                          disabled={busy || draft.allowlist.allowAll}
+	                          placeholder={t("settings.botListPlaceholder")}
+	                          onChange={(value) => setAllowlistText((prev) => ({ ...prev, [botAllowlistKey(platform, "Approvers")]: value }))}
+	                          onBlur={(value) => persistAllowlistText(botAllowlistKey(platform, "Approvers"), value)}
+	                        />
+	                        <BotListInput
+	                          label={t("settings.botListAdmins")}
+	                          value={allowlistText[botAllowlistKey(platform, "Admins")]}
+	                          disabled={busy || draft.allowlist.allowAll}
+	                          placeholder={t("settings.botListPlaceholder")}
+	                          onChange={(value) => setAllowlistText((prev) => ({ ...prev, [botAllowlistKey(platform, "Admins")]: value }))}
+	                          onBlur={(value) => persistAllowlistText(botAllowlistKey(platform, "Admins"), value)}
+	                        />
+	                      </div>
+	                    ))}
+	                  </div>
+	                </div>
+	              </details>
+	            </div>
+	          </details>
+	          <details className="bot-access-panel bot-gateway-panel">
+            <summary className="bot-access-panel__summary">
+              <span>
+                <strong>{t("settings.botGatewayDefaults")}</strong>
+                <small>{t("settings.botGatewayDefaultsHint")}</small>
+              </span>
+              <ChevronDown className="bot-access-panel__chevron" size={16} aria-hidden="true" />
+            </summary>
+            <div className="bot-access-panel__body">
+              <SettingsField label={t("settings.botRuntime")} hint={t("settings.botRuntimeHint")}>
+                <div className="bot-inline-grid bot-inline-grid--runtime">
+                  <label>
+                    <span>{t("settings.botMaxSteps")}</span>
+                    <input
+                      className="mem-input"
+                      type="number"
+                      min={0}
+                      value={draft.maxSteps}
+                      disabled={busy}
+                      onChange={(event) => updateBotSettings({ maxSteps: Number(event.target.value) || 0 })}
+                      onBlur={(event) => void persistBotSettings({ maxSteps: Number(event.currentTarget.value) || 0 })}
+                    />
+                  </label>
+                  <label>
+                    <span>{t("settings.botDebounceMs")}</span>
+                    <input
+                      className="mem-input"
+                      type="number"
+                      min={0}
+                      value={draft.debounceMs}
+                      disabled={busy}
+                      onChange={(event) => updateBotSettings({ debounceMs: Number(event.target.value) || 0 })}
+                      onBlur={(event) => void persistBotSettings({ debounceMs: Number(event.currentTarget.value) || 0 })}
+                    />
+                  </label>
+                  <label>
+                    <span>{t("settings.botQueueCap")}</span>
+                    <input
+                      className="mem-input"
+                      type="number"
+                      min={0}
+                      value={draft.queueCap}
+                      disabled={busy}
+                      onChange={(event) => updateBotSettings({ queueCap: Number(event.target.value) || 0 })}
+                      onBlur={(event) => void persistBotSettings({ queueCap: Number(event.currentTarget.value) || 0 })}
+                    />
+                  </label>
+                </div>
+              </SettingsField>
+              <SettingsField label={t("settings.botQueueModeSimple")} hint={t("settings.botQueueModeSimpleHint")}>
+                <select
+                  className="mem-select"
+                  value={normalizeBotQueueMode(draft.queueMode)}
+                  disabled={busy}
+                  onChange={(event) => void persistBotSettings({ queueMode: event.target.value })}
+                >
+                  {BOT_QUEUE_MODES.map((mode) => (
+                    <option key={mode} value={mode}>{t(`settings.botQueueMode.${mode}` as DictKey)}</option>
+                  ))}
+                </select>
+              </SettingsField>
+              <SettingsField label={t("settings.botQueueDropLabel")} hint={t("settings.botQueueDropHint")}>
+                <select
+                  className="mem-select"
+                  value={normalizeBotQueueDrop(draft.queueDrop)}
+                  disabled={busy}
+                  onChange={(event) => void persistBotSettings({ queueDrop: event.target.value })}
+                >
+                  {BOT_QUEUE_DROPS.map((mode) => (
+                    <option key={mode} value={mode}>{t(`settings.botQueueDrop.${mode}` as DictKey)}</option>
+                  ))}
+                </select>
+              </SettingsField>
+              <SettingsField label={t("settings.botIgnoreSelfMessages")} hint={t("settings.botIgnoreSelfMessagesHint")}>
+                <ToggleSegment
+                  value={draft.ignoreSelfMessages}
+                  disabled={busy}
+                  onChange={(ignoreSelfMessages) => void persistBotSettings({ ignoreSelfMessages })}
+                />
+              </SettingsField>
+              <SettingsField label={t("settings.botSelfUserIds")} hint={t("settings.botSelfUserIdsHint")}>
+                <div className="bot-list-grid">
+                  <BotListInput
+                    label={t("settings.botQQUsers")}
+                    value={selfUserText.qq}
+                    disabled={busy}
+                    placeholder={t("settings.botListPlaceholder")}
+                    onChange={(value) => updateSelfUserText("qq", value)}
+                    onBlur={(value) => persistSelfUserText("qq", value)}
+                  />
+                  <BotListInput
+                    label={t("settings.botFeishuLarkUsers")}
+                    value={selfUserText.feishu}
+                    disabled={busy}
+                    placeholder={t("settings.botListPlaceholder")}
+                    onChange={(value) => updateSelfUserText("feishu", value)}
+                    onBlur={(value) => persistSelfUserText("feishu", value)}
+                  />
+                  <BotListInput
+                    label={t("settings.botWeixinUsers")}
+                    value={selfUserText.weixin}
+                    disabled={busy}
+                    placeholder={t("settings.botListPlaceholder")}
+                    onChange={(value) => updateSelfUserText("weixin", value)}
+                    onBlur={(value) => persistSelfUserText("weixin", value)}
+                  />
+                </div>
+              </SettingsField>
+              <SettingsField label={t("settings.botPairing")} hint={t("settings.botPairingDetailHint")}>
+                <div className="bot-inline-grid bot-inline-grid--runtime">
+                  <label>
+                    <span>{t("settings.botPairingTTL")}</span>
+                    <input
+                      className="mem-input"
+                      type="number"
+                      min={0}
+                      value={draft.pairing.requestTtlMinutes}
+                      disabled={busy}
+                      onChange={(event) => updateBotSettings({ pairing: { ...draft.pairing, requestTtlMinutes: Number(event.target.value) || 0 } })}
+                      onBlur={(event) => void persistBotSettings({ pairing: { ...draft.pairing, requestTtlMinutes: Number(event.currentTarget.value) || 0 } })}
+                    />
+                  </label>
+                  <label>
+                    <span>{t("settings.botPairingMaxPending")}</span>
+                    <input
+                      className="mem-input"
+                      type="number"
+                      min={0}
+                      value={draft.pairing.maxPendingPerPlatform}
+                      disabled={busy}
+                      onChange={(event) => updateBotSettings({ pairing: { ...draft.pairing, maxPendingPerPlatform: Number(event.target.value) || 0 } })}
+                      onBlur={(event) => void persistBotSettings({ pairing: { ...draft.pairing, maxPendingPerPlatform: Number(event.currentTarget.value) || 0 } })}
+                    />
+                  </label>
+                </div>
+              </SettingsField>
+            </div>
+          </details>
+
+          <details className="bot-access-panel bot-routes-panel">
+            <summary className="bot-access-panel__summary">
+              <span>
+                <strong>{t("settings.botRoutes")}</strong>
+                <small>{t("settings.botRoutesHint")}</small>
+              </span>
+              <ChevronDown className="bot-access-panel__chevron" size={16} aria-hidden="true" />
+            </summary>
+            <div className="bot-access-panel__body">
+              {draft.routes.length === 0 ? (
+                <div className="bot-route-empty">{t("settings.botRoutesEmpty")}</div>
+              ) : (
+                <div className="bot-route-list">
+                  {draft.routes.map((route, index) => (
+                    <div className="bot-route-row" key={index}>
+                      <div className="bot-route-row__head">
+                        <strong>{t("settings.botRouteTitle", { n: index + 1 })}</strong>
+                        <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => removeRoute(index)}>
+                          {t("common.delete")}
+                        </button>
+                      </div>
+                      <div className="bot-route-grid">
+                        <label>
+                          <span>{t("settings.botRouteConnection")}</span>
+                          <select
+                            className="mem-select"
+                            value={route.connectionId}
+                            disabled={busy}
+                            onChange={(event) => {
+                              updateRoute(index, { connectionId: event.target.value });
+                              void persistRoute(index, { connectionId: event.target.value });
+                            }}
+                          >
+                            <option value="">{t("settings.botRouteAny")}</option>
+                            {routeConnectionOptions.map((option) => (
+                              <option key={option.id} value={option.id}>{option.label} · {option.id}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          <span>{t("settings.botRoutePlatform")}</span>
+                          <select
+                            className="mem-select"
+                            value={route.platform}
+                            disabled={busy}
+                            onChange={(event) => {
+                              updateRoute(index, { platform: event.target.value });
+                              void persistRoute(index, { platform: event.target.value });
+                            }}
+                          >
+                            <option value="">{t("settings.botRouteAny")}</option>
+                            <option value="qq">QQ</option>
+                            <option value="feishu">{t("settings.botFeishu")}</option>
+                            <option value="weixin">{t("settings.botWeixin")}</option>
+                          </select>
+                        </label>
+                        <label>
+                          <span>{t("settings.botRouteChatType")}</span>
+                          <select
+                            className="mem-select"
+                            value={route.chatType}
+                            disabled={busy}
+                            onChange={(event) => {
+                              updateRoute(index, { chatType: event.target.value });
+                              void persistRoute(index, { chatType: event.target.value });
+                            }}
+                          >
+                            {BOT_ROUTE_CHAT_TYPES.map((chatType) => (
+                              <option key={chatType || "any"} value={chatType}>{t(`settings.botRouteChatType.${chatType || "any"}` as DictKey)}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          <span>{t("settings.botRouteChatId")}</span>
+                          <input
+                            className="mem-input"
+                            value={route.chatId}
+                            disabled={busy}
+                            spellCheck={false}
+                            onChange={(event) => updateRoute(index, { chatId: event.target.value })}
+                            onBlur={(event) => void persistRoute(index, { chatId: event.currentTarget.value })}
+                          />
+                        </label>
+                        <label>
+                          <span>{t("settings.botRouteUserId")}</span>
+                          <input
+                            className="mem-input"
+                            value={route.userId}
+                            disabled={busy}
+                            spellCheck={false}
+                            onChange={(event) => updateRoute(index, { userId: event.target.value })}
+                            onBlur={(event) => void persistRoute(index, { userId: event.currentTarget.value })}
+                          />
+                        </label>
+                        <label>
+                          <span>{t("settings.botRouteThreadId")}</span>
+                          <input
+                            className="mem-input"
+                            value={route.threadId}
+                            disabled={busy}
+                            spellCheck={false}
+                            onChange={(event) => updateRoute(index, { threadId: event.target.value })}
+                            onBlur={(event) => void persistRoute(index, { threadId: event.currentTarget.value })}
+                          />
+                        </label>
+                      </div>
+                      <div className="bot-route-grid bot-route-grid--outputs">
+                        <label>
+                          <span>{t("settings.botWorkspaceRoot")}</span>
+                          <input
+                            className="mem-input"
+                            value={route.workspaceRoot}
+                            disabled={busy}
+                            placeholder={t("settings.botWorkspaceRootPlaceholder")}
+                            spellCheck={false}
+                            onChange={(event) => updateRoute(index, { workspaceRoot: event.target.value })}
+                            onBlur={(event) => void persistRoute(index, { workspaceRoot: event.currentTarget.value })}
+                          />
+                        </label>
+                        <label>
+                          <span>{t("settings.botChannelModel")}</span>
+                          <ModelPicker
+                            s={s}
+                            refs={refs}
+                            value={toRef(route.model, s)}
+                            disabled={busy}
+                            emptyOptionLabel={t("settings.botChannelModelAuto")}
+                            emptyOptionHint={settingsModelMeta(s, t)}
+                            onPick={(model) => void persistRoute(index, { model })}
+                          />
+                        </label>
+                        <label>
+                          <span>{t("settings.botToolApprovalMode")}</span>
+                          <select
+                            className="mem-select"
+                            value={route.toolApprovalMode}
+                            disabled={busy}
+                            onChange={(event) => {
+                              updateRoute(index, { toolApprovalMode: event.target.value });
+                              void persistRoute(index, { toolApprovalMode: event.target.value });
+                            }}
+                          >
+                            {BOT_TOOL_APPROVAL_MODES.map((mode) => (
+                              <option key={mode || "inherit"} value={mode}>{t(`settings.botToolApprovalMode.${mode || "inherit"}` as DictKey)}</option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button type="button" className="btn btn--secondary btn--small bot-route-add" disabled={busy} onClick={addRoute}>
+                {t("settings.botAddRoute")}
+              </button>
+            </div>
+          </details>
+        </div>
+      </details>
     </div>
   );
 }
@@ -3109,16 +3708,32 @@ function qqBotAdded(qq: BotSettingsView["qq"]): boolean {
   return Boolean(qq.enabled || qq.secretSet || qq.appId.trim());
 }
 
-function qqAccessReady(allowlist: BotAllowlistView): boolean {
-  if (allowlist.allowAll) return true;
-  if (!allowlist.enabled) return false;
-  return asArray(allowlist.qqUsers).some((value) => value.trim()) || asArray(allowlist.qqGroups).some((value) => value.trim());
+function botAccessEntryCount(access: BotAccessView): number {
+  return [
+    ...asArray(access.users),
+    ...asArray(access.groups),
+    ...asArray(access.approvers),
+    ...asArray(access.admins),
+  ].filter((value) => value.trim()).length;
+}
+
+function botAccessReady(access: BotAccessView): boolean {
+  if (access.allowAll || access.pairingEnabled) return true;
+  if (!access.enabled) return false;
+  return botAccessEntryCount(access) > 0;
 }
 
 function botInstallTargetMatchesConnection(target: BotOfficialInstallTarget, connection: BotConnectionView): boolean {
   if (target === "weixin") return connection.provider === "weixin";
   if (target === "lark") return connection.provider === "feishu" && connection.domain === "lark";
   return connection.provider === "feishu" && connection.domain !== "lark";
+}
+
+function botInstallTargetForConnection(connection: BotConnectionView): BotInstallTarget {
+  if (connection.provider === "weixin") return "weixin";
+  if (connection.provider === "feishu" && connection.domain === "lark") return "lark";
+  if (connection.provider === "qq") return "qq";
+  return "feishu";
 }
 
 function formatInstallUserCode(code: string): string {
@@ -3205,6 +3820,37 @@ function ToggleSegment({
   );
 }
 
+function BotListInput({
+  label,
+  value,
+  disabled,
+  placeholder,
+  onChange,
+  onBlur,
+}: {
+  label: ReactNode;
+  value: string;
+  disabled: boolean;
+  placeholder: string;
+  onChange: (value: string) => void;
+  onBlur: (value: string) => void;
+}) {
+  return (
+    <label className="bot-list-input">
+      <span>{label}</span>
+      <textarea
+        className="mem-input bot-list-input__textarea"
+        value={value}
+        disabled={disabled}
+        placeholder={placeholder}
+        spellCheck={false}
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={(event) => onBlur(event.currentTarget.value)}
+      />
+    </label>
+  );
+}
+
 function sanitizeBotDraft(draft: BotSettingsView): BotSettingsView {
   const bot = normalizeBotSettings(draft);
   return {
@@ -3213,11 +3859,36 @@ function sanitizeBotDraft(draft: BotSettingsView): BotSettingsView {
     toolApprovalMode: normalizeBotToolApprovalMode(bot.toolApprovalMode),
     maxSteps: Math.max(0, Math.floor(bot.maxSteps || 0)),
     debounceMs: Math.max(0, Math.floor(bot.debounceMs || 0)),
+    queueMode: normalizeBotQueueMode(bot.queueMode),
+    queueCap: Math.max(0, Math.floor(bot.queueCap || 0)),
+    queueDrop: normalizeBotQueueDrop(bot.queueDrop),
+    selfUserIds: {
+      qq: uniqueStrings(bot.selfUserIds.qq.map((v) => v.trim())),
+      feishu: uniqueStrings(bot.selfUserIds.feishu.map((v) => v.trim())),
+      weixin: uniqueStrings(bot.selfUserIds.weixin.map((v) => v.trim())),
+    },
+    control: {
+      enabled: bot.control.enabled,
+      addr: bot.control.addr.trim(),
+      tokenEnv: bot.control.tokenEnv.trim(),
+    },
+    pairing: {
+      enabled: bot.pairing.enabled,
+      requestTtlMinutes: Math.max(0, Math.floor(bot.pairing.requestTtlMinutes || 0)),
+      maxPendingPerPlatform: Math.max(0, Math.floor(bot.pairing.maxPendingPerPlatform || 0)),
+    },
+    routes: bot.routes.map(normalizeBotRoute).filter(botRouteHasValue),
     allowlist: {
       ...bot.allowlist,
       qqUsers: uniqueStrings(bot.allowlist.qqUsers.map((v) => v.trim())),
       feishuUsers: uniqueStrings(bot.allowlist.feishuUsers.map((v) => v.trim())),
       weixinUsers: uniqueStrings(bot.allowlist.weixinUsers.map((v) => v.trim())),
+      qqApprovers: uniqueStrings(bot.allowlist.qqApprovers.map((v) => v.trim())),
+      feishuApprovers: uniqueStrings(bot.allowlist.feishuApprovers.map((v) => v.trim())),
+      weixinApprovers: uniqueStrings(bot.allowlist.weixinApprovers.map((v) => v.trim())),
+      qqAdmins: uniqueStrings(bot.allowlist.qqAdmins.map((v) => v.trim())),
+      feishuAdmins: uniqueStrings(bot.allowlist.feishuAdmins.map((v) => v.trim())),
+      weixinAdmins: uniqueStrings(bot.allowlist.weixinAdmins.map((v) => v.trim())),
       qqGroups: uniqueStrings(bot.allowlist.qqGroups.map((v) => v.trim())),
       feishuGroups: uniqueStrings(bot.allowlist.feishuGroups.map((v) => v.trim())),
       weixinGroups: uniqueStrings(bot.allowlist.weixinGroups.map((v) => v.trim())),
@@ -3226,6 +3897,10 @@ function sanitizeBotDraft(draft: BotSettingsView): BotSettingsView {
       ...bot.qq,
       appId: bot.qq.appId.trim(),
       appSecretEnv: bot.qq.appSecretEnv.trim(),
+      model: bot.qq.model.trim(),
+      toolApprovalMode: normalizeBotToolApprovalMode(bot.qq.toolApprovalMode),
+      workspaceRoot: bot.qq.workspaceRoot.trim(),
+      access: sanitizeBotAccess(bot.qq.access),
     },
     feishu: {
       ...bot.feishu,
@@ -3242,7 +3917,18 @@ function sanitizeBotDraft(draft: BotSettingsView): BotSettingsView {
       tokenEnv: bot.weixin.tokenEnv.trim(),
       apiBase: bot.weixin.apiBase.trim().replace(/\/+$/, ""),
     },
-    connections: bot.connections.map(normalizeBotConnection).filter((conn) => conn.id && conn.provider),
+    connections: bot.connections.map((conn) => ({ ...normalizeBotConnection(conn), access: sanitizeBotAccess(conn.access) })).filter((conn) => conn.id && conn.provider),
+  };
+}
+
+function sanitizeBotAccess(access: BotAccessView): BotAccessView {
+  const normalized = normalizeBotAccess(access);
+  return {
+    ...normalized,
+    users: uniqueStrings(normalized.users.map((v) => v.trim()).filter(Boolean)),
+    groups: uniqueStrings(normalized.groups.map((v) => v.trim()).filter(Boolean)),
+    approvers: uniqueStrings(normalized.approvers.map((v) => v.trim()).filter(Boolean)),
+    admins: uniqueStrings(normalized.admins.map((v) => v.trim()).filter(Boolean)),
   };
 }
 
@@ -4042,6 +4728,10 @@ function providerTemplateConflictProviderName(choice: ProviderTemplateChoice): s
 
 function providerPresetDescription(preset: ProviderPresetView, t: ReturnType<typeof useT>): string {
   switch (preset.id) {
+    case "longcat-openai":
+      return t("settings.addProvider.preset.longcatOpenAIDesc");
+    case "longcat-anthropic":
+      return t("settings.addProvider.preset.longcatAnthropicDesc");
     case "kimi-cn":
       return t("settings.addProvider.preset.kimiCnDesc");
     case "kimi-global":
@@ -4723,9 +5413,23 @@ function botAllowlistTextValues(allowlist: BotAllowlistView): Record<BotAllowlis
     qqUsers: allowlist.qqUsers.join("\n"),
     feishuUsers: allowlist.feishuUsers.join("\n"),
     weixinUsers: allowlist.weixinUsers.join("\n"),
+    qqApprovers: allowlist.qqApprovers.join("\n"),
+    feishuApprovers: allowlist.feishuApprovers.join("\n"),
+    weixinApprovers: allowlist.weixinApprovers.join("\n"),
+    qqAdmins: allowlist.qqAdmins.join("\n"),
+    feishuAdmins: allowlist.feishuAdmins.join("\n"),
+    weixinAdmins: allowlist.weixinAdmins.join("\n"),
     qqGroups: allowlist.qqGroups.join("\n"),
     feishuGroups: allowlist.feishuGroups.join("\n"),
     weixinGroups: allowlist.weixinGroups.join("\n"),
+  };
+}
+
+function botSelfUserTextValues(selfUserIds: BotSettingsView["selfUserIds"]): Record<BotSelfUserTextKey, string> {
+  return {
+    qq: selfUserIds.qq.join("\n"),
+    feishu: selfUserIds.feishu.join("\n"),
+    weixin: selfUserIds.weixin.join("\n"),
   };
 }
 
@@ -4965,10 +5669,17 @@ function ProviderEditor({
 
   const save = async () => {
     if (extraBodyInvalid) return;
+    setFetchStatus(null);
+    setFetchFallback(null);
     const ms = parseProviderListInput(models);
     const vms = parseProviderListInput(visionModels).filter((model) => ms.includes(model));
     const effectiveApiKeyEnv = providerApiKeyEnvForSave(name, apiKeyEnv, keyDraft);
-    if (keyDraft.trim()) await app.SetProviderKey(effectiveApiKeyEnv, keyDraft.trim());
+    try {
+      if (keyDraft.trim()) await app.SetProviderKey(effectiveApiKeyEnv, keyDraft.trim());
+    } catch (e) {
+      setFetchFallback(String((e as Error)?.message ?? e));
+      return;
+    }
     onSave({
       name: name.trim(),
       builtIn: initial?.builtIn ?? false,
@@ -5905,6 +6616,15 @@ function AppearanceSection({
   const themeOptions: Theme[] = ["auto", "light", "dark"];
   const availableFontFamilies = useMemo(() => getAvailableFontFamilies(fontFamily), [fontFamily]);
   const availableMonoFontFamilies = useMemo(() => getAvailableMonoFontFamilies(monoFontFamily), [monoFontFamily]);
+  const zoomMinPct = zoomToPercent(MIN_ZOOM);
+  const zoomMaxPct = zoomToPercent(MAX_ZOOM);
+  const zoomStepPct = Math.round(ZOOM_STEP * 100);
+  const zoomProgressPct = Math.min(100, Math.max(0, ((zoomPct - zoomMinPct) / (zoomMaxPct - zoomMinPct)) * 100));
+  const canDecreaseZoom = zoomPct > zoomMinPct;
+  const canIncreaseZoom = zoomPct < zoomMaxPct;
+  const setZoomPercent = (pct: number) => {
+    void onRestartZoom(pct / 100);
+  };
   return (
     <SettingsSection title={t("settings.appearance")}>
       <SettingsField label={t("settings.theme")}>
@@ -5970,30 +6690,62 @@ function AppearanceSection({
       {showDisplayZoom && (
         <SettingsField label={t("settings.displayZoom")}>
           <div className="zoom-slider-wrap">
-            <div className="zoom-slider__value">{zoomPct}%</div>
+            <div className="zoom-slider__head">
+              <div className="zoom-slider__value">{zoomPct}%</div>
+              <div className="zoom-stepper">
+                <button
+                  type="button"
+                  className="zoom-stepper__btn"
+                  aria-label={t("settings.displayZoomDecrease")}
+                  title={t("settings.displayZoomDecrease")}
+                  disabled={!canDecreaseZoom}
+                  onClick={() => setZoomPercent(zoomPct - zoomStepPct)}
+                >
+                  <Minus size={13} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  className="zoom-stepper__reset"
+                  aria-label={t("settings.displayZoomReset")}
+                  title={t("settings.displayZoomReset")}
+                  disabled={zoomPct === zoomToPercent(DEFAULT_ZOOM)}
+                  onClick={() => { void onRestartZoom(DEFAULT_ZOOM); }}
+                >
+                  <RotateCcw size={12} aria-hidden="true" />
+                  <span>100%</span>
+                </button>
+                <button
+                  type="button"
+                  className="zoom-stepper__btn"
+                  aria-label={t("settings.displayZoomIncrease")}
+                  title={t("settings.displayZoomIncrease")}
+                  disabled={!canIncreaseZoom}
+                  onClick={() => setZoomPercent(zoomPct + zoomStepPct)}
+                >
+                  <Plus size={13} aria-hidden="true" />
+                </button>
+              </div>
+            </div>
             <div className="zoom-slider-row">
-              <span className="zoom-slider__label">50%</span>
+              <span className="zoom-slider__label">{zoomMinPct}%</span>
               <div className="slider-track">
                 <div className="slider-track__bg" />
                 <div
                   className="slider-track__fill"
-                  style={{ width: `calc(${((zoomPct - 50) / 150) * 100}% + 15px)` }}
+                  style={{ width: `calc(${zoomProgressPct}% + 15px)` }}
                 />
-                <div className="slider-thumb" style={{ left: `${((zoomPct - 50) / 150) * 100}%` }}>
-                  <div className="slider-thumb__left" />
-                  <div className="slider-thumb__mid" />
-                  <div className="slider-thumb__right" />
-                </div>
+                <div className="slider-thumb" style={{ left: `${zoomProgressPct}%` }} />
                 <input
+                  aria-label={t("settings.displayZoom")}
                   type="range"
-                  min={50}
-                  max={200}
-                  step={5}
+                  min={zoomMinPct}
+                  max={zoomMaxPct}
+                  step={zoomStepPct}
                   value={zoomPct}
-                  onChange={(e) => { void onRestartZoom(Number(e.target.value) / 100); }}
+                  onChange={(e) => setZoomPercent(Number(e.target.value))}
                 />
               </div>
-              <span className="zoom-slider__label">200%</span>
+              <span className="zoom-slider__label">{zoomMaxPct}%</span>
             </div>
           </div>
         </SettingsField>

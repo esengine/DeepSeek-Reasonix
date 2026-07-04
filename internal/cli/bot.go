@@ -68,8 +68,8 @@ func botStart(args []string, version string) int {
 		fmt.Fprintln(os.Stderr, "error: bot is not enabled in config — set [bot] enabled = true")
 		return 1
 	}
-	if !cfg.Bot.Allowlist.AllowAll && !cfg.Bot.Pairing.Enabled && (!cfg.Bot.Allowlist.Enabled || botruntime.AllowlistUserCount(cfg.Bot.Allowlist) == 0) {
-		fmt.Fprintln(os.Stderr, "error: bot requires an explicit allowlist; set [bot.allowlist] enabled = true with platform users/admins/approvers, or set allow_all = true intentionally")
+	if !botruntime.BotConfigHasAccessControl(cfg.Bot) {
+		fmt.Fprintln(os.Stderr, "error: bot requires explicit access control; set per-connection access, enable pairing, configure [bot.allowlist], or set allow_all = true intentionally")
 		return 1
 	}
 
@@ -119,6 +119,7 @@ func botStart(args []string, version string) int {
 		Channels:           botruntime.ChannelConfigs(cfg.Bot.Connections, *model == "", *dir == ""),
 		ConnectionChannels: botruntime.ConnectionChannelConfigs(cfg.Bot.Connections, *model == "", *dir == ""),
 		Routes:             botruntime.RouteConfigs(cfg.Bot.Routes, *model == "", *dir == ""),
+		ConnectionAccess:   botruntime.ConnectionAccessConfigs(cfg),
 		Enabled:            enabledPlatforms,
 		Allowlist: bot.AllowlistConfig{
 			Enabled:  cfg.Bot.Allowlist.Enabled,
@@ -532,6 +533,14 @@ func botConfigIsUserOwned(bc config.BotConfig) bool {
 	}
 	if bc.Allowlist.AllowAll || botruntime.AllowlistUserCount(bc.Allowlist) > 0 {
 		return true
+	}
+	if botruntime.BotAccessActive(bc.QQ.Access) {
+		return true
+	}
+	for _, conn := range bc.Connections {
+		if botruntime.BotAccessActive(conn.Access) {
+			return true
+		}
 	}
 	return len(bc.Allowlist.QQGroups)+len(bc.Allowlist.FeishuGroups)+len(bc.Allowlist.WeixinGroups)+
 		len(bc.Allowlist.QQApprovers)+len(bc.Allowlist.FeishuApprovers)+len(bc.Allowlist.WeixinApprovers)+

@@ -123,14 +123,18 @@ function topicIsActive(node: ProjectNode, activeScope?: string, activeWorkspaceR
   );
 }
 
-function topicMetaLine(node: ProjectNode, t: Translator, compact = false): string {
+export function projectTreeTopicMetaLine(node: ProjectNode, t: Translator, compact = false): string {
   const parts: string[] = [];
   const turns = node.turns ?? 0;
   if (turns > 0) parts.push(t(turns === 1 ? "history.turnOne" : "history.turnOther", { n: turns }));
   const activityAt = node.lastActivityAt || node.createdAt || 0;
   if (activityAt) parts.push(topicActivityLabel(activityAt, t, compact));
-  if (parts.length === 0) parts.push(t("projectTree.justNow"));
+  if (parts.length === 0) parts.push(t("projectTree.previously"));
   return parts.join(" · ");
+}
+
+function topicUnknownTimeLabel(node: ProjectNode, t: Translator): string {
+  return topicActivityAt(node) ? "" : t("projectTree.previously");
 }
 
 const topicStatusLabels: Record<ProjectTopicStatus, DictKey> = {
@@ -1050,8 +1054,10 @@ export function ProjectTree({
     const filtered = tree
       .map(filterNode)
       .filter((node): node is ProjectNode => node !== null);
-    return compactTopics ? arrangeWorkbenchTree(filtered, workbenchOrganizeMode, workbenchSortMode) : filtered;
-  }, [compactTopics, query, tree, timeFilter, workbenchOrganizeMode, workbenchSortMode]);
+    if (compactTopics) return arrangeWorkbenchTree(filtered, workbenchOrganizeMode, workbenchSortMode);
+    if (creationTopics) return arrangeWorkbenchTree(filtered, "project", "updated");
+    return filtered;
+  }, [compactTopics, creationTopics, query, tree, timeFilter, workbenchOrganizeMode, workbenchSortMode]);
 
   const workbenchTreeSections = useMemo<WorkbenchTreeSections>(() => {
     if (!compactTopics) return { pinned: [], projects: visibleTree };
@@ -1128,9 +1134,9 @@ export function ProjectTree({
       const label = (node.label || node.topicId || "Untitled").replace(/^●\s*/, "");
       const activityAt = node.lastActivityAt || node.createdAt || 0;
       const sideTimeVisible = compactTopics || creationTopics;
-      const timeLabel = sideTimeVisible && activityAt ? topicActivityLabel(activityAt, t, true) : "";
+      const timeLabel = sideTimeVisible ? (activityAt ? topicActivityLabel(activityAt, t, true) : topicUnknownTimeLabel(node, t)) : "";
       const exactTimeLabel = sideTimeVisible && activityAt ? topicActivityDateLabel(activityAt) : "";
-      const meta = topicMetaLine(node, t, compactTopics);
+      const meta = projectTreeTopicMetaLine(node, t, compactTopics);
       const status = topicStatus(node);
       const statusLabel = topicStatusLabel(node, t);
       const showStatusInSide = status === "thinking" || status === "streaming" || status === "waiting_confirmation" || status === "background_job";

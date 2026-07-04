@@ -136,6 +136,8 @@ type App struct {
 	backgroundMaximised atomic.Bool
 	trayReady           bool
 	tray                *desktopTray
+	hangWatchdogMu      sync.Mutex
+	hangWatchdogCancel  context.CancelFunc
 
 	mediaTokens *mediaTokenStore
 	botInstalls map[string]*botInstallSession
@@ -366,6 +368,7 @@ func (a *App) startup(ctx context.Context) {
 		a.metrics.Store(newMetricsAggregator(config.MemoryUserDir()))
 		a.recordSettingsMetricsSnapshot(cfg)
 	}
+	a.startMainThreadWatchdog()
 
 	a.heartbeat = newHeartbeatEngine(a)
 	a.heartbeat.Start()
@@ -648,6 +651,7 @@ func (a *App) snapshotAllTabs() {
 
 // shutdown snapshots all tabs, saves the final window geometry, and closes tabs.
 func (a *App) shutdown(context.Context) {
+	a.stopMainThreadWatchdog()
 	if a.heartbeat != nil {
 		a.heartbeat.Stop()
 	}
@@ -4787,7 +4791,7 @@ func (a *App) MetaForTab(tabID string) Meta {
 		WorkspaceRoot:     cwd,
 		WorkspaceName:     tabWorkspaceName(tab, cwd),
 		WorkspacePath:     cwd,
-		GitBranch:         workspaceGitBranch(cwd),
+		GitBranch:         workspaceGitBranchForMeta(cwd),
 		ImageInputEnabled: a.imageInputEnabledForTab(tabID),
 		AutoApproveTools:  autoApproveTools,
 		Bypass:            autoApproveTools,
@@ -6556,6 +6560,36 @@ func rebuildControllerActiveWorkError(setting string) error {
 	return fmt.Errorf("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing %s", setting)
 }
 
+type sessionLeaseBusyError struct {
+	setting string
+	err     error
+}
+
+func (e *sessionLeaseBusyError) Error() string {
+	setting := strings.TrimSpace(e.setting)
+	if setting == "" {
+		setting = "this setting"
+	}
+	return fmt.Sprintf("this session is already open in another Reasonix window or still running in the background; close the other window or open a copy before changing %s", setting)
+}
+
+func (e *sessionLeaseBusyError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+func userFacingSessionLeaseError(setting string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, agent.ErrSessionLeaseHeld) {
+		return &sessionLeaseBusyError{setting: setting, err: err}
+	}
+	return err
+}
+
 // SetModel switches the active model and carries the current conversation into the
 // new model's session, so the chat continues seamlessly and subsequent turns use
 // the new model. No-op if name is already active or the controller is down.
@@ -6574,13 +6608,32 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	if name == tab.model {
 		return nil
 	}
+	prevPath := a.reconciledSessionPathForTab(tab)
+	if prevPath == "" {
+		prevPath = strings.TrimSpace(tab.currentSessionPath())
+	}
+	if tab.Ctrl == nil && prevPath != "" {
+		a.attachExistingSessionRuntime(tab, prevPath, a.ctx)
+	}
 	if controllerHasActiveRuntimeWork(tab.Ctrl) {
 		return rebuildControllerActiveWorkError("model")
 	}
 	if err := a.ensureTabControllerWorkspace(tab); err != nil {
 		return err
 	}
-	prevPath := a.reconciledSessionPathForTab(tab)
+	prevPath = a.reconciledSessionPathForTab(tab)
+	if prevPath == "" {
+		prevPath = strings.TrimSpace(tab.currentSessionPath())
+	}
+	if tab.Ctrl == nil && prevPath != "" && a.attachExistingSessionRuntime(tab, prevPath, a.ctx) {
+		prevPath = a.reconciledSessionPathForTab(tab)
+		if prevPath == "" {
+			prevPath = strings.TrimSpace(tab.currentSessionPath())
+		}
+		if controllerHasActiveRuntimeWork(tab.Ctrl) {
+			return rebuildControllerActiveWorkError("model")
+		}
+	}
 	cfg, err := config.LoadForRoot(tab.WorkspaceRoot)
 	if err != nil {
 		return err
@@ -6604,15 +6657,18 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	}
 
 	var carried []provider.Message
-	if tab.Ctrl != nil {
+	oldCtrl := tab.Ctrl
+	if oldCtrl != nil {
 		if prevPath == "" {
-			prevPath = tab.Ctrl.SessionPath()
+			prevPath = oldCtrl.SessionPath()
+		}
+		if err := tab.ensureSessionLease(prevPath); err != nil {
+			return userFacingSessionLeaseError("model", err)
 		}
 		if err := a.snapshotTabForAction(tab, "changing model"); err != nil {
 			return err
 		}
-		carried = tab.Ctrl.History()
-		tab.Ctrl.Close()
+		carried = oldCtrl.History()
 	}
 
 	// Preserve the shared plugin host across controller rebuilds — the tab
@@ -6633,7 +6689,6 @@ func (a *App) SetModelForTab(tabID, name string) error {
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
 	})
 	if err != nil {
-		tab.releaseSessionLease()
 		return err
 	}
 	a.bindControllerDisplayRecorder(newCtrl)
@@ -6645,10 +6700,12 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	path := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())
 	if err := tab.ensureSessionLease(path); err != nil {
 		newCtrl.Close()
-		tab.releaseSessionLease()
-		return err
+		return userFacingSessionLeaseError("model", err)
 	}
 	resumeWithFreshSystemPrompt(newCtrl, carried, path)
+	if oldCtrl != nil {
+		oldCtrl.Close()
+	}
 	a.persistTabSessionPath(tab, path)
 	a.mu.Lock()
 	tab.Ctrl = newCtrl
@@ -7859,6 +7916,8 @@ const onboardingKeyEnv = "DEEPSEEK_API_KEY"
 // billing.FetchWithClient surfaces 401/403 for a bad key.
 const onboardingBalanceURL = "https://api.deepseek.com/user/balance"
 
+var connectKeyBalanceFetch = billing.FetchWithClient
+
 // NativeConfirmRequest is the payload for ConfirmAction — a native OS confirmation
 // dialog that replaces web-style confirm() for destructive or important actions.
 type NativeConfirmRequest struct {
@@ -7937,20 +7996,22 @@ func (a *App) ConnectKey(apiKey string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 8*time.Second)
 	defer cancel()
-	if _, err := billing.FetchWithClient(ctx, nil, onboardingBalanceURL, apiKey); err != nil {
+	if _, err := connectKeyBalanceFetch(ctx, nil, onboardingBalanceURL, apiKey); err != nil {
 		return "", fmt.Errorf("validate: %w", err)
 	}
 	warning, err := a.saveProviderCredential(onboardingKeyEnv, apiKey)
 	if err != nil {
 		return "", fmt.Errorf("save: %w", err)
 	}
-	if err := a.rebuild(); err != nil {
-		// Key is persisted; surface the failure but let the next rebuild load it.
-		a.mu.Lock()
-		if tab := a.activeTabLocked(); tab != nil {
-			tab.StartupErr = err.Error()
+	if err := a.rebuildSetting("provider key"); err != nil {
+		// Key is persisted. Keep the current session usable and let a later
+		// rebuild pick up the credential.
+		slog.Warn("desktop: connect key rebuild failed", "err", err)
+		if strings.TrimSpace(warning) == "" {
+			warning = err.Error()
+		} else {
+			warning = warning + "\n" + err.Error()
 		}
-		a.mu.Unlock()
 	}
 	return warning, nil
 }

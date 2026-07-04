@@ -551,6 +551,18 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		fmt.Fprintf(&b, "app_id = %q\n", c.Bot.QQ.AppID)
 		fmt.Fprintf(&b, "app_secret_env = %q\n", c.Bot.QQ.AppSecretEnv)
 		fmt.Fprintf(&b, "sandbox = %v\n", c.Bot.QQ.Sandbox)
+		if strings.TrimSpace(c.Bot.QQ.Model) != "" {
+			fmt.Fprintf(&b, "model = %q\n", strings.TrimSpace(c.Bot.QQ.Model))
+		}
+		if strings.TrimSpace(c.Bot.QQ.ToolApprovalMode) != "" {
+			fmt.Fprintf(&b, "tool_approval_mode = %q\n", strings.TrimSpace(c.Bot.QQ.ToolApprovalMode))
+		}
+		if strings.TrimSpace(c.Bot.QQ.WorkspaceRoot) != "" {
+			fmt.Fprintf(&b, "workspace_root = %q\n", strings.TrimSpace(c.Bot.QQ.WorkspaceRoot))
+		}
+		if parts := renderBotAccess(c.Bot.QQ.Access); parts != "" {
+			fmt.Fprintf(&b, "access = %s\n", parts)
+		}
 		b.WriteString("\n[bot.feishu]\n")
 		fmt.Fprintf(&b, "enabled = %v\n", c.Bot.Feishu.Enabled)
 		fmt.Fprintf(&b, "app_id = %q\n", c.Bot.Feishu.AppID)
@@ -581,6 +593,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			}
 			if conn.WorkspaceRoot != "" {
 				fmt.Fprintf(&b, "workspace_root = %q\n", conn.WorkspaceRoot)
+			}
+			if parts := renderBotAccess(conn.Access); parts != "" {
+				fmt.Fprintf(&b, "access = %s\n", parts)
 			}
 			if conn.LastError != "" {
 				fmt.Fprintf(&b, "last_error = %q\n", conn.LastError)
@@ -1472,6 +1487,30 @@ func renderBotCredential(cred BotConnectionCredential) string {
 		return ""
 	}
 	return renderStringMap(parts)
+}
+
+func renderBotAccess(access BotAccessConfig) string {
+	hasList := len(access.Users) > 0 || len(access.Groups) > 0 || len(access.Approvers) > 0 || len(access.Admins) > 0
+	if !access.Enabled && !access.AllowAll && !access.PairingEnabled && !hasList {
+		return ""
+	}
+	var parts []string
+	parts = append(parts, fmt.Sprintf("enabled = %v", access.Enabled))
+	parts = append(parts, fmt.Sprintf("allow_all = %v", access.AllowAll))
+	parts = append(parts, fmt.Sprintf("pairing_enabled = %v", access.PairingEnabled))
+	if len(access.Users) > 0 {
+		parts = append(parts, "users = "+renderStringArray(access.Users))
+	}
+	if len(access.Groups) > 0 {
+		parts = append(parts, "groups = "+renderStringArray(access.Groups))
+	}
+	if len(access.Approvers) > 0 {
+		parts = append(parts, "approvers = "+renderStringArray(access.Approvers))
+	}
+	if len(access.Admins) > 0 {
+		parts = append(parts, "admins = "+renderStringArray(access.Admins))
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
 }
 
 func renderBotSessionMappings(mappings []BotConnectionSessionMapping) string {

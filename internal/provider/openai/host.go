@@ -63,6 +63,13 @@ func IsZhipu(baseURL string) bool {
 		matchesVendorHost(baseURL, "z.ai", "api.z.ai")
 }
 
+// IsLongCat reports whether baseURL points at LongCat's OpenAI-compatible API.
+// LongCat uses the OpenAI chat shape, but gates thinking with thinking.type
+// enabled|disabled rather than the generic reasoning_effort field.
+func IsLongCat(baseURL string) bool {
+	return matchesVendorHost(baseURL, "longcat.chat", "api.longcat.chat")
+}
+
 // IsOllamaCloud reports whether baseURL points at Ollama Cloud's hosted
 // OpenAI-compatible endpoint. Local Ollama servers intentionally do not match:
 // the hosted API accepts the reasoning_effort=max extension, while localhost

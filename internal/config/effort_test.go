@@ -59,6 +59,24 @@ func TestIsZhipuEntry(t *testing.T) {
 	}
 }
 
+func TestIsLongCatEntry(t *testing.T) {
+	for _, tc := range []struct {
+		baseURL string
+		want    bool
+	}{
+		{"https://api.longcat.chat/openai/v1", true},
+		{"https://api.longcat.chat/anthropic", true},
+		{"https://longcat.chat/openai/v1", false},
+		{"https://api.deepseek.com", false},
+		{"", false},
+	} {
+		e := &ProviderEntry{Kind: "openai", BaseURL: tc.baseURL}
+		if got := isLongCatEntry(e); got != tc.want {
+			t.Errorf("baseURL=%q: isLongCatEntry=%v, want %v", tc.baseURL, got, tc.want)
+		}
+	}
+}
+
 func TestIsOllamaCloudEntry(t *testing.T) {
 	for _, tc := range []struct {
 		baseURL string
@@ -95,6 +113,26 @@ func TestEffortCapabilityZhipu(t *testing.T) {
 	}
 	if cap.Default != "enabled" {
 		t.Errorf("default = %q, want enabled (GLM ships with thinking on)", cap.Default)
+	}
+}
+
+func TestEffortCapabilityLongCat(t *testing.T) {
+	e := &ProviderEntry{Kind: "openai", BaseURL: "https://api.longcat.chat/openai/v1", Model: "LongCat-2.0"}
+	cap := EffortCapabilityForEntry(e)
+	if !cap.Supported {
+		t.Fatalf("LongCat entry should expose /effort, got %+v", cap)
+	}
+	wantLevels := []string{"auto", "enabled", "disabled"}
+	if len(cap.Levels) != len(wantLevels) {
+		t.Fatalf("levels = %v, want %v", cap.Levels, wantLevels)
+	}
+	for i, l := range wantLevels {
+		if cap.Levels[i] != l {
+			t.Errorf("levels[%d] = %q, want %q", i, cap.Levels[i], l)
+		}
+	}
+	if cap.Default != "enabled" {
+		t.Errorf("default = %q, want enabled", cap.Default)
 	}
 }
 
@@ -157,6 +195,34 @@ func TestNormalizeEffortZhipu(t *testing.T) {
 		// Stale values from other vendors resolve to a valid GLM level rather
 		// than failing the /effort command.
 		{"off", "disabled"}, // retired DeepSeek "no thinking"
+		{"low", "enabled"},
+		{"medium", "enabled"},
+		{"high", "enabled"},
+		{"xhigh", "enabled"},
+		{"max", "enabled"},
+	}
+	for _, tc := range cases {
+		got, err := NormalizeEffort(e, tc.in)
+		if err != nil {
+			t.Errorf("NormalizeEffort(%q) returned error: %v", tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("NormalizeEffort(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestNormalizeEffortLongCat(t *testing.T) {
+	e := &ProviderEntry{Kind: "openai", BaseURL: "https://api.longcat.chat/openai/v1", Model: "LongCat-2.0"}
+	cases := []struct {
+		in, want string
+	}{
+		{"auto", ""},
+		{"enabled", "enabled"},
+		{"disabled", "disabled"},
+		{"ENABLED", "enabled"},
+		{"off", "disabled"},
 		{"low", "enabled"},
 		{"medium", "enabled"},
 		{"high", "enabled"},

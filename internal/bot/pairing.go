@@ -146,6 +146,12 @@ func ApprovePairingCode(code string) (PairingRequest, error) {
 		return PairingRequest{}, errors.New("reasonix user config path is unavailable")
 	}
 	cfg := config.LoadForEdit(userPath)
+	if approvePairingForConnectionAccess(&cfg.Bot, req) {
+		if err := cfg.SaveTo(userPath); err != nil {
+			return PairingRequest{}, err
+		}
+		return req, nil
+	}
 	cfg.Bot.Allowlist.Enabled = true
 	switch req.Platform {
 	case PlatformQQ:
@@ -172,6 +178,69 @@ func ApprovePairingCode(code string) (PairingRequest, error) {
 		return PairingRequest{}, err
 	}
 	return req, nil
+}
+
+func approvePairingForConnectionAccess(botCfg *config.BotConfig, req PairingRequest) bool {
+	if botCfg == nil {
+		return false
+	}
+	connectionID := strings.TrimSpace(req.ConnectionID)
+	if connectionID != "" {
+		for i := range botCfg.Connections {
+			if pairingConnectionMatches(botCfg.Connections[i], connectionID) {
+				approvePairingAccess(&botCfg.Connections[i].Access, req.UserID)
+				return true
+			}
+		}
+	}
+	if req.Platform == PlatformQQ && (connectionID == "" || connectionID == string(PlatformQQ)) {
+		approvePairingAccess(&botCfg.QQ.Access, req.UserID)
+		return true
+	}
+	return false
+}
+
+func approvePairingAccess(access *config.BotAccessConfig, userID string) {
+	if access == nil {
+		return
+	}
+	wasEmpty := !access.AllowAll &&
+		len(access.Users) == 0 &&
+		len(access.Groups) == 0 &&
+		len(access.Approvers) == 0 &&
+		len(access.Admins) == 0
+	access.Enabled = true
+	access.Users, _ = appendUnique(access.Users, userID)
+	if wasEmpty {
+		access.Admins, _ = appendUnique(access.Admins, userID)
+		access.Approvers, _ = appendUnique(access.Approvers, userID)
+	}
+}
+
+func pairingConnectionMatches(conn config.BotConnectionConfig, connectionID string) bool {
+	connectionID = strings.TrimSpace(connectionID)
+	if connectionID == "" {
+		return false
+	}
+	if strings.TrimSpace(conn.ID) == connectionID {
+		return true
+	}
+	return pairingConnectionRuntimeID(conn) == connectionID
+}
+
+func pairingConnectionRuntimeID(conn config.BotConnectionConfig) string {
+	if id := strings.TrimSpace(conn.ID); id != "" {
+		return id
+	}
+	provider := strings.TrimSpace(conn.Provider)
+	domain := strings.TrimSpace(conn.Domain)
+	if provider == "" {
+		return ""
+	}
+	if domain == "" {
+		return provider
+	}
+	return provider + "-" + domain
 }
 
 func RejectPairingCode(code string) (PairingRequest, error) {

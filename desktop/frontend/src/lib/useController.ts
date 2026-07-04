@@ -1073,23 +1073,31 @@ export function useController() {
       if (reset && sessionLoadCurrent(tabId, seq)) dispatchTo(tabId, { type: "reset" });
 
       const stillCurrent = () => sessionLoadCurrent(tabId, seq);
+      const requiresVisibleTab = reason === "startup" || reason === "switch-tab" || reason === "open-topic";
+      const stillVisible = () => !requiresVisibleTab || activeTabIdRef.current === tabId;
       const noteFailure = (label: string, err: unknown) => {
         addBreadcrumb("tab.hydrate", `${label} failed ${tabId}: ${errorMessage(err)}`);
       };
 
-      const historyStartedAt = Date.now();
+      const loadTimed = async <T,>(label: string, load: () => Promise<T>): Promise<T | undefined> => {
+        const startedAt = Date.now();
+        addBreadcrumb("tab.hydrate", `${label} start ${reason} ${tabId}`);
+        try {
+          const value = await load();
+          addBreadcrumb("tab.hydrate", `${label} done ${reason} ${tabId} ms=${Date.now() - startedAt}`);
+          return value;
+        } catch (err) {
+          noteFailure(label, err);
+          return undefined;
+        }
+      };
 
-      // Phase 1: dispatch fast metadata immediately so the transcript can render
-      // without waiting for slower ancillary calls (e.g. BalanceForTab network).
-      const [meta, historyPage] = await Promise.all([
-        app.MetaForTab(tabId).catch((err) => { noteFailure("meta", err); return undefined; }),
-        skipHistory
-          ? Promise.resolve(undefined)
-          : app.HistoryPageForTab(tabId, 0, HISTORY_PAGE_TURNS).catch((err) => { noteFailure("history", err); return undefined; }),
-      ]);
+      const historyStartedAt = Date.now();
+      const historyPage = skipHistory
+        ? undefined
+        : await loadTimed("history", () => app.HistoryPageForTab(tabId, 0, HISTORY_PAGE_TURNS));
 
       if (!stillCurrent()) return;
-      if (meta !== undefined) dispatchTo(tabId, { type: "meta", meta });
       if (!skipHistory && historyPage !== undefined) {
         const messages = asArray(historyPage.messages);
         dispatchTo(tabId, { type: "history_page", page: historyPage, mode: "replace" });
@@ -1120,21 +1128,20 @@ export function useController() {
       // in a loading state.
       await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
       if (!stillCurrent()) return;
-      if (activeTabIdRef.current !== tabId && (reason === "startup" || reason === "switch-tab" || reason === "open-topic")) {
+      if (!stillVisible()) {
         addBreadcrumb("tab.hydrate", `ancillary skipped inactive ${reason} ${tabId}`);
         return;
       }
+      const meta = await loadTimed("meta", () => app.MetaForTab(tabId));
+      if (!stillCurrent()) return;
+      if (!stillVisible()) {
+        addBreadcrumb("tab.hydrate", `meta ignored inactive ${reason} ${tabId}`);
+        return;
+      }
+      if (meta !== undefined) dispatchTo(tabId, { type: "meta", meta });
       const ancillaryStartedAt = Date.now();
       const loadAncillary = async <T,>(label: string, load: () => Promise<T>): Promise<T | undefined> => {
-        const startedAt = Date.now();
-        try {
-          const value = await load();
-          addBreadcrumb("tab.hydrate", `ancillary ${label} ${reason} ${tabId} ms=${Date.now() - startedAt}`);
-          return value;
-        } catch (err) {
-          noteFailure(label, err);
-          return undefined;
-        }
+        return loadTimed(`ancillary ${label}`, load);
       };
       const [effort, jobs, context] = await Promise.all([
         loadAncillary("effort", () => app.EffortForTab(tabId)),
@@ -1142,22 +1149,30 @@ export function useController() {
         loadAncillary("context", () => app.ContextUsageForTab(tabId)),
       ]);
       if (!stillCurrent()) return;
+      if (!stillVisible()) {
+        addBreadcrumb("tab.hydrate", `ancillary ignored inactive ${reason} ${tabId}`);
+        return;
+      }
       if (effort !== undefined) dispatchTo(tabId, { type: "effort", effort });
       if (jobs !== undefined) dispatchTo(tabId, { type: "jobs", jobs: asArray(jobs) });
       if (context !== undefined) dispatchTo(tabId, { type: "context", context });
       await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
       if (!stillCurrent()) return;
-      if (activeTabIdRef.current !== tabId && (reason === "startup" || reason === "switch-tab" || reason === "open-topic")) {
+      if (!stillVisible()) {
         addBreadcrumb("tab.hydrate", `checkpoints skipped inactive ${reason} ${tabId}`);
         return;
       }
       const checkpoints = await loadAncillary("checkpoints", () => app.CheckpointsForTab(tabId));
       if (!stillCurrent()) return;
+      if (!stillVisible()) {
+        addBreadcrumb("tab.hydrate", `checkpoints ignored inactive ${reason} ${tabId}`);
+        return;
+      }
       if (checkpoints !== undefined) dispatchTo(tabId, { type: "checkpoints", checkpoints: asArray(checkpoints) });
       addBreadcrumb("tab.hydrate", `ancillary ${reason} ${tabId} ms=${Date.now() - ancillaryStartedAt}`);
       app.BalanceForTab(tabId)
         .then((balance) => {
-          if (sessionLoadCurrent(tabId, seq)) dispatchTo(tabId, { type: "balance", balance });
+          if (sessionLoadCurrent(tabId, seq) && stillVisible()) dispatchTo(tabId, { type: "balance", balance });
         })
         .catch((err) => { noteFailure("balance", err); });
     })();

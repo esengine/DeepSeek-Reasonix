@@ -233,6 +233,58 @@ func TestBotPairingApproveAddsAllowlistAndFirstAdmin(t *testing.T) {
 	}
 }
 
+func TestBotPairingApproveAddsUserToConnectionAccess(t *testing.T) {
+	isolateBotUserConfig(t)
+	cfg := config.Default()
+	cfg.Bot.Connections = []config.BotConnectionConfig{{
+		ID:       "feishu-lark",
+		Provider: "feishu",
+		Domain:   "lark",
+		Label:    "Lark",
+		Enabled:  true,
+		Status:   "connected",
+		Access: config.BotAccessConfig{
+			Enabled:        true,
+			PairingEnabled: true,
+			Users:          []string{"ou-existing"},
+		},
+	}}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	req, _, err := bot.CreateOrRefreshPairingRequest(bot.InboundMessage{
+		Platform:     bot.PlatformFeishu,
+		ConnectionID: "feishu-lark",
+		Domain:       "lark",
+		ChatType:     bot.ChatDM,
+		ChatID:       "oc-chat",
+		UserID:       "ou-new",
+	}, bot.PairingConfig{Enabled: true})
+	if err != nil {
+		t.Fatalf("create pairing: %v", err)
+	}
+
+	if rc := botPairing([]string{"approve", req.Code}); rc != 0 {
+		t.Fatalf("botPairing approve rc = %d, want 0", rc)
+	}
+	got := config.LoadForEdit(config.UserConfigPath())
+	if users := got.Bot.Allowlist.FeishuUsers; len(users) != 0 {
+		t.Fatalf("global feishu users = %+v, want unchanged global allowlist", users)
+	}
+	if len(got.Bot.Connections) != 1 {
+		t.Fatalf("connections = %+v, want one connection", got.Bot.Connections)
+	}
+	access := got.Bot.Connections[0].Access
+	if !access.Enabled {
+		t.Fatal("connection access disabled after approval, want enabled")
+	}
+	for _, want := range []string{"ou-existing", "ou-new"} {
+		if !hasTestString(access.Users, want) {
+			t.Fatalf("connection users = %+v, want %s", access.Users, want)
+		}
+	}
+}
+
 func TestBotDoctorPrefersUserBotSettingsOverProjectBotConfig(t *testing.T) {
 	isolateBotUserConfig(t)
 	userCfg := config.Default()
@@ -437,4 +489,13 @@ func isolateBotUserConfig(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	t.Chdir(t.TempDir())
+}
+
+func hasTestString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

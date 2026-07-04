@@ -1206,7 +1206,7 @@ type TabMeta struct {
 
 func enrichTabMeta(meta TabMeta) TabMeta {
 	if meta.Active {
-		meta.GitBranch = workspaceGitBranch(meta.WorkspaceRoot)
+		meta.GitBranch = workspaceGitBranchForMeta(meta.WorkspaceRoot)
 	}
 	return meta
 }
@@ -1214,7 +1214,7 @@ func enrichTabMeta(meta TabMeta) TabMeta {
 func enrichTabMetas(metas []TabMeta) []TabMeta {
 	for i := range metas {
 		if metas[i].Active {
-			metas[i].GitBranch = workspaceGitBranch(metas[i].WorkspaceRoot)
+			metas[i].GitBranch = workspaceGitBranchForMeta(metas[i].WorkspaceRoot)
 		}
 	}
 	return metas
@@ -1593,6 +1593,13 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 		// Reuse a previously-indexed but unused blank topic instead of
 		// creating a new one.  Build it inline (not via OpenProjectTab /
 		// OpenGlobalTab) so it inherits settings from the active tab.
+		if loadTopicCreatedAt(topicTitleRoot(scope, workspaceRoot), topicID) <= 0 {
+			createdAt := topicIDCreatedAt(topicID)
+			if createdAt <= 0 {
+				createdAt = time.Now().UnixMilli()
+			}
+			_ = setTopicCreatedAt(topicTitleRoot(scope, workspaceRoot), topicID, createdAt)
+		}
 		tabID := a.newUniqueTabIDLocked()
 		topicTitle := topicTitleForTab(scope, workspaceRoot, topicID)
 		created = &WorkspaceTab{
@@ -1632,7 +1639,12 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 
 	topicID := newTopicID()
 	topicTitle := defaultTopicTitle
+	createdAt := time.Now().UnixMilli()
 	if err := setTopicTitleWithSource(workspaceRoot, topicID, topicTitle, topicTitleSourceAuto); err != nil {
+		a.mu.Unlock()
+		return TabMeta{}, err
+	}
+	if err := setTopicCreatedAt(workspaceRoot, topicID, createdAt); err != nil {
 		a.mu.Unlock()
 		return TabMeta{}, err
 	}
@@ -4184,6 +4196,33 @@ func loadTopicCreatedAt(workspaceRoot, topicID string) int64 {
 	return loadTopicCreatedAts(workspaceRoot)[topicID]
 }
 
+func topicIDCreatedAt(topicID string) int64 {
+	topicID = strings.TrimSpace(topicID)
+	for _, prefix := range []string{"topic_", "legacy_"} {
+		if !strings.HasPrefix(topicID, prefix) {
+			continue
+		}
+		stamp := strings.TrimPrefix(topicID, prefix)
+		if len(stamp) < len("20060102-150405") {
+			continue
+		}
+		stamp = stamp[:len("20060102-150405")]
+		t, err := time.ParseInLocation("20060102-150405", stamp, time.UTC)
+		if err != nil {
+			continue
+		}
+		return t.UnixMilli()
+	}
+	return 0
+}
+
+func topicCreatedAtForTree(createdAts map[string]int64, topicID string) int64 {
+	if createdAt := createdAts[topicID]; createdAt > 0 {
+		return createdAt
+	}
+	return topicIDCreatedAt(topicID)
+}
+
 func topicTitleForTab(scope, workspaceRoot, topicID string) string {
 	titleRoot := topicTitleRoot(scope, workspaceRoot)
 	if title := strings.TrimSpace(loadTopicTitle(titleRoot, topicID)); title != "" {
@@ -5675,7 +5714,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 				TopicID:          id,
 				ProjectColor:     globalColor,
 				Turns:            summary.turns,
-				CreatedAt:        globalCreatedMap[id],
+				CreatedAt:        topicCreatedAtForTree(globalCreatedMap, id),
 				LastActivityAt:   summary.lastActivityAt,
 				Open:             open,
 				Running:          running,
@@ -5754,7 +5793,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 				TopicID:          tid,
 				ProjectColor:     p.Color,
 				Turns:            summary.turns,
-				CreatedAt:        createdMap[tid],
+				CreatedAt:        topicCreatedAtForTree(createdMap, tid),
 				LastActivityAt:   summary.lastActivityAt,
 				Open:             open,
 				Running:          running,

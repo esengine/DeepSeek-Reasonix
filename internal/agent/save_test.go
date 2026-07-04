@@ -216,6 +216,142 @@ func TestSaveSnapshotRecordsRevisionAndMetaUpdatesPreserveIt(t *testing.T) {
 	}
 }
 
+func TestSaveSnapshotSameContentSkipsRevisionBump(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot base: %v", err)
+	}
+	before, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta base ok=%v err=%v", ok, err)
+	}
+
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot same content: %v", err)
+	}
+	after, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta after no-op ok=%v err=%v", ok, err)
+	}
+	if after.Revision != before.Revision || after.ContentDigest != before.ContentDigest || after.WriterID != before.WriterID {
+		t.Fatalf("same-content snapshot changed persistence meta: before=%+v after=%+v", before, after)
+	}
+
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot append after no-op: %v", err)
+	}
+	advanced, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta advanced ok=%v err=%v", ok, err)
+	}
+	if advanced.Revision != before.Revision+1 {
+		t.Fatalf("revision after append = %d, want %d", advanced.Revision, before.Revision+1)
+	}
+}
+
+func TestSaveSnapshotSameContentByOtherRuntimeKeepsClonedBaselineWritable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save base: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	resumed, ok := loaded.CloneWithMessagesIfCompatible(loaded.Snapshot())
+	if !ok {
+		t.Fatal("expected compatible clone")
+	}
+
+	// Another runtime autosaves the identical transcript (e.g. a shutdown
+	// snapshot of an idle tab). It must not bump the revision, or the resumed
+	// clone's baseline goes stale and its next append is misread as a
+	// stale-runtime conflict.
+	other, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession other: %v", err)
+	}
+	if err := other.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot other same content: %v", err)
+	}
+
+	resumed.Add(provider.Message{Role: provider.RoleUser, Content: "next"})
+	if err := resumed.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot append after same-content autosave elsewhere: %v", err)
+	}
+	reloaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession appended: %v", err)
+	}
+	if got := reloaded.Messages[len(reloaded.Messages)-1].Content; got != "next" {
+		t.Fatalf("tail after append = %q, want next", got)
+	}
+	if matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), "*-recovery-*.jsonl")); err != nil || len(matches) != 0 {
+		t.Fatalf("recovery branches after append = %v err=%v, want none", matches, err)
+	}
+}
+
+func TestSaveSnapshotStillPersistsNormalizedRepair(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	mal := NewSession("sys")
+	mal.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	// Unanswered tool call: LoadSession backfills a placeholder result, so the
+	// loaded history digests equal to itself while the on-disk bytes differ.
+	mal.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "tool-1", Name: "read_file", Arguments: "{}"}}})
+	mal.Add(provider.Message{Role: provider.RoleAssistant, Content: "done"})
+	if err := mal.Save(path); err != nil {
+		t.Fatalf("Save malformed: %v", err)
+	}
+	base, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta base ok=%v err=%v", ok, err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if !loaded.normalizedDirty {
+		t.Fatal("fixture did not trigger a load-time repair; adjust the malformed history")
+	}
+	if err := loaded.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot repaired history: %v", err)
+	}
+	repaired, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta repaired ok=%v err=%v", ok, err)
+	}
+	if repaired.Revision != base.Revision+1 {
+		t.Fatalf("revision after repair save = %d, want %d", repaired.Revision, base.Revision+1)
+	}
+	reloaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession repaired: %v", err)
+	}
+	if reloaded.normalizedDirty {
+		t.Fatal("repair did not persist: reloaded session is still normalized-dirty")
+	}
+
+	// With the repair on disk, the same snapshot is now a true no-op.
+	if err := reloaded.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot post-repair: %v", err)
+	}
+	final, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta final ok=%v err=%v", ok, err)
+	}
+	if final.Revision != repaired.Revision {
+		t.Fatalf("post-repair no-op bumped revision: %d, want %d", final.Revision, repaired.Revision)
+	}
+}
+
 func TestSaveSnapshotRejectsStalePrefixAfterSystemPromptRefresh(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	current := NewSession("new sys")
@@ -349,6 +485,67 @@ func TestSaveRewriteAllowsOwnedNonPrefixRewrite(t *testing.T) {
 	}
 	if got := loaded.Messages[1].Content; got != "summarized first" {
 		t.Fatalf("rewritten content = %q, want %q", got, "summarized first")
+	}
+}
+
+func TestCloneWithMessagesPreservesRewriteBaseline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("old sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "tool-1", Name: "read_file", Arguments: "{}"}}})
+	s.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "tool-1", Name: "read_file", Content: strings.Repeat("detail ", 100)})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "done"})
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save base: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	msgs := loaded.Snapshot()
+	msgs[0].Content = "new sys"
+	msgs[3].Content = "[elided tool result]"
+	resumed := loaded.CloneWithMessages(msgs)
+	if err := resumed.SaveRewrite(path); err != nil {
+		t.Fatalf("SaveRewrite cloned resume rewrite: %v", err)
+	}
+
+	reloaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession rewritten: %v", err)
+	}
+	if got := reloaded.Messages[0].Content; got != "new sys" {
+		t.Fatalf("system prompt after rewrite = %q, want new sys", got)
+	}
+	if got := reloaded.Messages[3].Content; got != "[elided tool result]" {
+		t.Fatalf("tool result after rewrite = %q, want elided", got)
+	}
+}
+
+func TestCloneWithMessagesIfCompatibleRejectsHistoryChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("old sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save base: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	systemOnly := loaded.Snapshot()
+	systemOnly[0].Content = "new sys"
+	if _, ok := loaded.CloneWithMessagesIfCompatible(systemOnly); !ok {
+		t.Fatal("system-only change should be compatible")
+	}
+
+	changed := loaded.Snapshot()
+	changed[2].Content = "rewritten assistant"
+	if _, ok := loaded.CloneWithMessagesIfCompatible(changed); ok {
+		t.Fatal("non-system history change should not preserve baseline")
 	}
 }
 

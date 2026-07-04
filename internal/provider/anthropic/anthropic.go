@@ -9,9 +9,10 @@
 //     requires the *signed* thinking block be replayed on the next turn when a tool
 //     call followed thinking, so Message carries ReasoningSignature alongside
 //     ReasoningContent and this provider replays the signed block on the next
-//     request. Off by default because the field is Anthropic-specific — an
-//     OpenAI-compatible gateway (e.g. DeepSeek's) would reject it. (redacted_thinking
-//     blocks are not yet captured/replayed.)
+//     request. Some Anthropic-compatible gateways such as LongCat instead use
+//     thinking.type enabled|disabled; those values are passed through without
+//     Anthropic's display/output_config fields. Off by default because the field is
+//     provider-specific. (redacted_thinking blocks are not yet captured/replayed.)
 //   - No temperature/top_p. Current Claude models (Opus 4.8/4.7) reject sampling
 //     parameters with a 400; Anthropic steers behavior via prompting instead.
 package anthropic
@@ -72,7 +73,9 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
 	keySource, _ := cfg.Extra["api_key_source"].(string)
 	thinking, _ := cfg.Extra["thinking"].(string)
+	thinking = strings.ToLower(strings.TrimSpace(thinking))
 	effort, _ := cfg.Extra["effort"].(string)
+	effort = strings.ToLower(strings.TrimSpace(effort))
 	vision, _ := cfg.Extra["vision"].(bool)
 	headers, _ := cfg.Extra["headers"].(map[string]string)
 	authHeader, _ := cfg.Extra["auth_header"].(bool)
@@ -274,7 +277,7 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 			// the tool_use it led to). Only when thinking is on and we have both the
 			// text and its signature — reasoning without a signature (e.g. from an
 			// openai-compatible provider) can't be replayed as a thinking block.
-			if c.thinking != "" && m.ReasoningContent != "" && m.ReasoningSignature != "" {
+			if c.thinking == "adaptive" && m.ReasoningContent != "" && m.ReasoningSignature != "" {
 				blocks = append(blocks, contentBlock{Type: "thinking", Thinking: m.ReasoningContent, Signature: m.ReasoningSignature})
 			}
 			if m.Content != "" {
@@ -328,14 +331,21 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 		Tools:     tools,
 		Stream:    true,
 	}
-	// Extended thinking is opt-in and Anthropic-specific (a compatible gateway like
-	// DeepSeek's would reject the field). "summarized" display streams the reasoning
-	// text; the default omits it but still emits the signature we round-trip.
-	if c.thinking == "adaptive" {
+	// Extended thinking is opt-in and provider-specific. Anthropic proper uses
+	// type=adaptive plus display/output_config. LongCat-style compatible gateways
+	// use the simpler enabled|disabled knob and do not accept output_config.
+	switch c.thinking {
+	case "adaptive":
 		r.Thinking = &thinkingConfig{Type: "adaptive", Display: "summarized"}
 		if c.effort != "" {
 			r.OutputConfig = &outputConfig{Effort: c.effort}
 		}
+	case "enabled", "disabled":
+		t := c.thinking
+		if c.effort == "enabled" || c.effort == "disabled" {
+			t = c.effort
+		}
+		r.Thinking = &thinkingConfig{Type: t}
 	}
 	return r
 }

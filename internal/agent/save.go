@@ -150,9 +150,18 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 	}
 	defer unlockFile()
 	if mode != sessionSaveForce {
-		revision, err := s.checkSnapshotWrite(path, msgs, digest, version, mode == sessionSaveRewrite)
+		revision, upToDate, err := s.checkSnapshotWrite(path, msgs, digest, version, mode == sessionSaveRewrite)
 		if err != nil {
 			return err
+		}
+		if upToDate {
+			// Disk already holds exactly this transcript. Rewriting it would only
+			// bump the revision, invalidating the persistence baseline of every
+			// other runtime resumed on this file and turning their next
+			// legitimate save into a stale-runtime conflict. Skip the write and
+			// adopt the current on-disk revision as this session's baseline.
+			s.markPersisted(path, digest, version, revision)
+			return nil
 		}
 		baseRevision = revision
 	} else if revision, _, err := sessionContentRevision(path); err != nil {
@@ -198,35 +207,43 @@ func writeSessionMessages(path string, msgs []provider.Message) error {
 	return nil
 }
 
-func (s *Session) checkSnapshotWrite(path string, next []provider.Message, nextDigest [sha256.Size]byte, nextVersion uint64, allowOwnedRewrite bool) (int64, error) {
+// checkSnapshotWrite decides whether this session may write msgs over path.
+// The bool result reports the write is a no-op: the on-disk transcript already
+// matches next byte-for-byte, so the caller should skip the rewrite instead of
+// burning a revision bump that would stale-out other runtimes' baselines.
+func (s *Session) checkSnapshotWrite(path string, next []provider.Message, nextDigest [sha256.Size]byte, nextVersion uint64, allowOwnedRewrite bool) (int64, bool, error) {
 	current, err := LoadSession(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return 0, nil
+			return 0, false, nil
 		}
-		return 0, err
+		return 0, false, err
 	}
 	currentRevision, _, err := sessionContentRevision(path)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	baseState := s.persistState(path)
 	existing := current.Snapshot()
 	existingDigest, err := digestSessionMessages(existing)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	if bytes.Equal(existingDigest[:], nextDigest[:]) || messagesHavePrefix(next, existing) || messagesHavePrefixWithCompatibleSystem(next, existing) {
-		if baseState.ok && currentRevision != baseState.revision && !bytes.Equal(existingDigest[:], nextDigest[:]) {
-			return 0, snapshotConflict(path, existing, next, baseState.revision, currentRevision)
+	contentUnchanged := bytes.Equal(existingDigest[:], nextDigest[:])
+	if contentUnchanged || messagesHavePrefix(next, existing) || messagesHavePrefixWithCompatibleSystem(next, existing) {
+		if baseState.ok && currentRevision != baseState.revision && !contentUnchanged {
+			return 0, false, snapshotConflict(path, existing, next, baseState.revision, currentRevision)
 		}
-		return currentRevision, nil
+		// A normalized-dirty load means LoadSession repaired the history on the
+		// way in: the digests match but the raw bytes on disk do not, so the
+		// repair still needs a real write to persist.
+		return currentRevision, contentUnchanged && !current.normalizedDirty, nil
 	}
 	if allowOwnedRewrite && s.ownsPersistedState(path, existingDigest, currentRevision, nextVersion) {
-		return currentRevision, nil
+		return currentRevision, false, nil
 	}
 	if messagesHavePrefix(existing, next) || messagesHavePrefixWithCompatibleSystem(existing, next) {
-		return 0, &SessionSnapshotConflictError{
+		return 0, false, &SessionSnapshotConflictError{
 			Path:             path,
 			Kind:             SessionSnapshotConflictStalePrefix,
 			ExistingMessages: len(existing),
@@ -235,7 +252,7 @@ func (s *Session) checkSnapshotWrite(path string, next []provider.Message, nextD
 			DiskRevision:     currentRevision,
 		}
 	}
-	return 0, &SessionSnapshotConflictError{
+	return 0, false, &SessionSnapshotConflictError{
 		Path:             path,
 		Kind:             SessionSnapshotConflictDiverged,
 		ExistingMessages: len(existing),
@@ -545,6 +562,25 @@ func messagesEqualForStorage(a, b provider.Message) bool {
 		return false
 	}
 	return bytes.Equal(ab, bb)
+}
+
+func messagesEqualForStorageList(a, b []provider.Message) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !messagesEqualForStorage(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func messagesCompatibleForStorageBaseline(a, b []provider.Message) bool {
+	if messagesEqualForStorageList(a, b) {
+		return true
+	}
+	return messagesEqualForStorageList(messagesWithoutLeadingSystem(a), messagesWithoutLeadingSystem(b))
 }
 
 func lockSessionSavePath(path string) func() {

@@ -133,9 +133,12 @@ const tabD = tabMeta("tab-d");
 const tabE = tabMeta("tab-e");
 const tabF = tabMeta("tab-f");
 const tabG = tabMeta("tab-g");
+const tabH = tabMeta("tab-h");
 let backendActiveId = "tab-a";
 const historyB = deferred<HistoryMessage[]>();
 const historyD = deferred<HistoryMessage[]>();
+let metaH = deferred<Meta>();
+let historyH = deferred<HistoryMessage[]>();
 const contextDGate = deferred<ContextInfo>();
 const setActiveBGate = deferred<void>();
 const setActiveEGate = deferred<void>();
@@ -144,12 +147,15 @@ const submitTabCGate = deferred<void>();
 const historyCalls: string[] = [];
 const cancelCalls: string[] = [];
 let contextDCalls = 0;
+let metaHCalls = 0;
 let holdNextContextForD = false;
+let holdNextMetaForH = false;
+let holdNextHistoryForH = false;
 let setActiveCalls = 0;
 let newSessionCalls = 0;
 let failSetActiveFor = "";
 const runningTabs = new Set<string>();
-const tabsById = new Map([tabA, tabB, tabC, tabD, tabE, tabF, tabG].map((tab) => [tab.id, tab]));
+const tabsById = new Map([tabA, tabB, tabC, tabD, tabE, tabF, tabG, tabH].map((tab) => [tab.id, tab]));
 const eventHandlers: Array<(e: WireEvent) => void> = [];
 const readyHandlers: Array<(tabId?: string) => void> = [];
 
@@ -172,7 +178,14 @@ window.go = {
   main: {
     App: {
       ListTabs: async () => currentTabs(),
-      MetaForTab: async (tabID: string) => metaFor(tabsById.get(tabID) ?? tabA),
+      MetaForTab: async (tabID: string) => {
+        if (tabID === "tab-h" && holdNextMetaForH) {
+          metaHCalls += 1;
+          holdNextMetaForH = false;
+          return metaH.promise;
+        }
+        return metaFor(tabsById.get(tabID) ?? tabA);
+      },
       ContextUsageForTab: async (tabID: string) => {
         if (tabID === "tab-d" && holdNextContextForD) {
           contextDCalls += 1;
@@ -191,6 +204,12 @@ window.go = {
         if (tabID === "tab-b") return historyB.promise;
         if (tabID === "tab-d") return historyD.promise;
         if (tabID === "tab-e") return [userMessage("fork E")];
+        if (tabID === "tab-g") return [userMessage("history G")];
+        if (tabID === "tab-h" && holdNextHistoryForH) {
+          holdNextHistoryForH = false;
+          return historyH.promise;
+        }
+        if (tabID === "tab-h") return [userMessage("history H")];
         return [userMessage("cached A")];
       },
       HistoryPageForTab: async (tabID: string) => {
@@ -198,9 +217,15 @@ window.go = {
         return { messages, startTurn: 0, endTurn: messages.filter((message) => message.role === "user").length, totalTurns: messages.filter((message) => message.role === "user").length, hasOlder: false };
       },
       HistoryCheckpointTurnsForTab: async () => [],
-      OpenProjectTab: async () => {
-        backendActiveId = "tab-d";
-        return { ...(tabsById.get("tab-d") ?? tabD), active: true };
+      OpenProjectTab: async (workspaceRoot: string, topicId: string) => {
+        const target = Array.from(tabsById.values()).find((tab) => tab.workspaceRoot === workspaceRoot && tab.topicId === topicId) ?? tabD;
+        backendActiveId = target.id;
+        return { ...target, active: true };
+      },
+      ActivateTopic: async (_scope: string, workspaceRoot: string, topicId: string) => {
+        const target = Array.from(tabsById.values()).find((tab) => tab.workspaceRoot === workspaceRoot && tab.topicId === topicId) ?? tabG;
+        backendActiveId = target.id;
+        return { ...target, active: true };
       },
       NewSession: async () => {
         newSessionCalls += 1;
@@ -508,6 +533,70 @@ await act(async () => {
   await flushPromises();
 });
 eq(historyCalls.length, historyCallsBeforeReboundD + 1, "rebound topic reloads history when session path changes");
+
+metaH = deferred<Meta>();
+holdNextMetaForH = true;
+const historyCallsBeforeSlowMeta = historyCalls.length;
+await act(async () => {
+  await controller?.openProjectTab(tabH.workspaceRoot, tabH.topicId || "");
+  await flushPromises();
+});
+await waitFor("slow meta tab hydrates history", () =>
+  controller?.activeTabId === "tab-h" &&
+  controller.state.hydrating === false &&
+  (controller.state.items.some((item) => item.kind === "user" && item.text === "history H") ?? false) &&
+  metaHCalls === 1
+);
+eq(historyCalls.length, historyCallsBeforeSlowMeta + 1, "slow MetaForTab does not delay the history request");
+eq(controller?.state.meta?.label, "model-tab-h", "slow MetaForTab leaves optimistic metadata visible while history hydrates");
+await act(async () => {
+  metaH.resolve({ ...metaFor(tabH), label: "fresh-model-tab-h" });
+  await metaH.promise;
+  await flushPromises();
+});
+await waitFor("slow meta refresh applies", () => controller?.state.meta?.label === "fresh-model-tab-h");
+
+metaH = deferred<Meta>();
+const metaHCallsBeforeStale = metaHCalls;
+holdNextMetaForH = true;
+await act(async () => {
+  await controller?.openProjectTab(tabH.workspaceRoot, tabH.topicId || "");
+  await flushPromises();
+});
+await waitFor("slow meta pending before single-surface navigation", () => metaHCalls === metaHCallsBeforeStale + 1);
+await act(async () => {
+  await controller?.activateTopic("project", tabG.workspaceRoot, tabG.topicId || "");
+  await flushPromises();
+});
+await waitFor("single-surface activation replaces visible tab", () =>
+  controller?.activeTabId === "tab-g" &&
+  (controller.state.items.some((item) => item.kind === "user" && item.text === "history G") ?? false)
+);
+await act(async () => {
+  metaH.resolve({ ...metaFor(tabH), label: "stale-model-tab-h" });
+  await metaH.promise;
+  await flushPromises();
+});
+historyH = deferred<HistoryMessage[]>();
+holdNextHistoryForH = true;
+await act(async () => {
+  await controller?.openProjectTab(tabH.workspaceRoot, tabH.topicId || "");
+  await flushPromises();
+});
+await waitFor("reopened tab-h treats stale late meta as discarded", () =>
+  controller?.activeTabId === "tab-h" &&
+  controller.state.hydrating === true &&
+  (controller.state.hydratePlaceholderItems?.some((item) => item.kind === "user" && item.text === "history G") ?? false)
+);
+await act(async () => {
+  historyH.resolve([userMessage("history H after stale meta")]);
+  await historyH.promise;
+  await flushPromises();
+});
+await waitFor("reopened tab-h finishes after stale meta discard", () =>
+  controller?.state.hydrating === false &&
+  (controller.state.items.some((item) => item.kind === "user" && item.text === "history H after stale meta") ?? false)
+);
 
 await act(async () => {
   root.unmount();
