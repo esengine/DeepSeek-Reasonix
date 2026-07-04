@@ -72,6 +72,11 @@ type Spec struct {
 	// declarations such as agent.plan_mode_allowed_tools without reverse-parsing
 	// normalized MCP tool names back into raw server-local names.
 	ReadOnlyModelToolNames map[string]bool
+	// DisabledTools is the set of raw tool names (as returned by tools/list)
+	// that should be filtered out before they reach the registry. Filtering
+	// happens inside listTools so every downstream path — eager registration,
+	// the on-disk schema cache, and Host.ToolsFor — sees a consistent view.
+	DisabledTools map[string]bool
 	// StripRawPrefix, when non-empty, removes this prefix from each MCP tool's
 	// raw name before namespacing. For example, StripRawPrefix="server_" turns
 	// "server_search" into "search", yielding "mcp__search__search" instead of
@@ -1111,6 +1116,12 @@ func (s Spec) toolReadOnlyTrusted(rawName, visibleName string) bool {
 	return s.ReadOnlyToolNames[rawName] || s.ReadOnlyModelToolNames[toolName(s.Name, visibleName)]
 }
 
+// isToolDisabled reports whether rawName (the original MCP tool name) is
+// excluded by this server's disabled_tools list.
+func (s Spec) isToolDisabled(rawName string) bool {
+	return len(s.DisabledTools) > 0 && s.DisabledTools[rawName]
+}
+
 func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
 	c.toolsMu.Lock()
 	defer c.toolsMu.Unlock()
@@ -1132,6 +1143,9 @@ func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
 	toolInfos := make([]ToolInfo, 0, len(out.Tools))
 	tools := make([]tool.Tool, 0, len(out.Tools))
 	for _, t := range out.Tools {
+		if c.spec.isToolDisabled(t.Name) {
+			continue
+		}
 		hinted := t.Annotations != nil && t.Annotations.ReadOnlyHint
 		visibleName := t.Name
 		if c.spec.StripRawPrefix != "" {
