@@ -3709,6 +3709,7 @@ export default function App() {
                   refreshKey={dockRefreshKey}
                   initialViewMode={rightDockMode === "changed" ? "changed" : "files"}
                   showViewTabs={false}
+                  gitBranch={state.meta?.gitBranch}
                 />
               )}
             </div>
