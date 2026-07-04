@@ -610,6 +610,12 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkReasoning, Text: delta.ReasoningContent}) {
 				return emitted, ctx.Err()
 			}
+		} else if delta.Reasoning != "" {
+			// vLLM returns thinking in 'reasoning' instead of 'reasoning_content'
+			emitted = true
+			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkReasoning, Text: delta.Reasoning}) {
+				return emitted, ctx.Err()
+			}
 		}
 		if delta.Content != "" {
 			r, txt := think.push(delta.Content)
@@ -782,6 +788,7 @@ type chatMessage struct {
 	// and a []chatContentPart array for a vision user turn carrying images.
 	Content          any            `json:"content"`
 	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	Reasoning        string         `json:"reasoning,omitempty"` // vLLM returns thinking in 'reasoning' instead of 'reasoning_content'
 	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string         `json:"tool_call_id,omitempty"`
 	Name             string         `json:"name,omitempty"`
@@ -835,6 +842,7 @@ type streamResponse struct {
 		Delta struct {
 			Content          string         `json:"content"`
 			ReasoningContent string         `json:"reasoning_content"`
+			Reasoning        string         `json:"reasoning"` // vLLM returns thinking in 'reasoning' instead of 'reasoning_content'
 			ToolCalls        []chatToolCall `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
