@@ -86,6 +86,8 @@ Windows builds are code-signed with a free certificate provided by the
 
 ```sh
 make build      # -> bin/reasonix(.exe)
+make install    # build + install to $(PREFIX)/bin (default ~/.local/bin)
+make install FORCE=1  # overwrite existing installation
 make cross      # -> dist/ (darwin|linux|windows × amd64|arm64)
 ```
 
