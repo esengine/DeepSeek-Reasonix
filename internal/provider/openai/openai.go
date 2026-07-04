@@ -605,9 +605,13 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		}
 
 		delta := sr.Choices[0].Delta
-		if delta.ReasoningContent != "" {
+		reasoning := delta.ReasoningContent
+		if reasoning == "" {
+			reasoning = delta.Reasoning
+		}
+		if reasoning != "" {
 			emitted = true
-			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkReasoning, Text: delta.ReasoningContent}) {
+			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkReasoning, Text: reasoning}) {
 				return emitted, ctx.Err()
 			}
 		}
@@ -834,7 +838,8 @@ type streamResponse struct {
 	Choices []struct {
 		Delta struct {
 			Content          string         `json:"content"`
-			ReasoningContent string         `json:"reasoning_content"`
+			ReasoningContent string         `json:"reasoning_content"` // DeepSeek / OpenAI
+			Reasoning        string         `json:"reasoning"`         // vLLM fallback
 			ToolCalls        []chatToolCall `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`

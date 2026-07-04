@@ -1108,3 +1108,85 @@ func TestBuildRequestDefaultsEmptyToolParameters(t *testing.T) {
 		t.Fatalf("nil parameters should default to %s, got %s in %s", want, got, body)
 	}
 }
+
+// TestStreamReadsVLLMReasoningField verifies that vLLM-style reasoning chunks
+// (using the "reasoning" field instead of "reasoning_content") are correctly
+// parsed and emitted as ChunkReasoning.
+func TestStreamReadsVLLMReasoningField(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w,
+			"data: {\"choices\":[{\"delta\":{\"reasoning\":\"let me think\"}}]}\n\n"+
+				"data: {\"choices\":[{\"delta\":{\"content\":\"the answer\"}}]}\n\n"+
+				"data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	p, err := New(provider.Config{Name: "vllm", BaseURL: srv.URL, Model: "qwen3.6-35b", APIKey: "k"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	var reasoning, text string
+	for chunk := range ch {
+		switch chunk.Type {
+		case provider.ChunkReasoning:
+			reasoning += chunk.Text
+		case provider.ChunkText:
+			text += chunk.Text
+		case provider.ChunkError:
+			t.Fatalf("unexpected error: %v", chunk.Err)
+		}
+	}
+	if reasoning != "let me think" {
+		t.Errorf("reasoning = %q, want %q", reasoning, "let me think")
+	}
+	if text != "the answer" {
+		t.Errorf("text = %q, want %q", text, "the answer")
+	}
+}
+
+// TestStreamReasoningContentTakesPrecedence verifies that when both
+// "reasoning_content" and "reasoning" are present in the same delta,
+// the standard "reasoning_content" field is used (DeepSeek/OpenAI take
+// priority over vLLM's variant).
+func TestStreamReasoningContentTakesPrecedence(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w,
+			"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"standard\",\"reasoning\":\"vllm\"}}]}\n\n"+
+				"data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	p, err := New(provider.Config{Name: "deepseek", BaseURL: srv.URL, Model: "deepseek-reasoner", APIKey: "k"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	var reasoning string
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkReasoning {
+			reasoning += chunk.Text
+		}
+	}
+	if reasoning != "standard" {
+		t.Errorf("reasoning = %q, want %q (reasoning_content should take precedence)", reasoning, "standard")
+	}
+}
