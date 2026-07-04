@@ -1108,3 +1108,110 @@ func TestBuildRequestDefaultsEmptyToolParameters(t *testing.T) {
 		t.Fatalf("nil parameters should default to %s, got %s in %s", want, got, body)
 	}
 }
+
+func TestStreamReadsGeminiThoughtSignature(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w,
+			"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_abc123\",\"type\":\"function\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\\\"path\\\":\\\"test.txt\\\"}\",\"thought_signature\":\"gemini_sig_xyz789\"}}]}}]}\n\n"+
+				"data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	p, err := New(provider.Config{Name: "gemini", BaseURL: srv.URL, Model: "gemini-3.5-flash"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ch, err := p.Stream(context.Background(), provider.Request{})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	var foundToolCall bool
+	var gotSignature string
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkToolCall && chunk.ToolCall != nil {
+			foundToolCall = true
+			gotSignature = chunk.ToolCall.ThoughtSignature
+		}
+	}
+
+	if !foundToolCall {
+		t.Fatal("expected ChunkToolCall but none received")
+	}
+	if gotSignature != "gemini_sig_xyz789" {
+		t.Errorf("ThoughtSignature = %q, want %q", gotSignature, "gemini_sig_xyz789")
+	}
+}
+
+func TestBuildRequestRoundTripsGeminiThoughtSignature(t *testing.T) {
+	c := &client{
+		name:    "gemini",
+		baseURL: "https://generativelanguage.googleapis.com/v1beta",
+		model:   "gemini-3.5-flash",
+	}
+
+	req := provider.Request{
+		Messages: []provider.Message{
+			{
+				Role:    provider.RoleAssistant,
+				Content: "I'll use a tool to help you.",
+				ToolCalls: []provider.ToolCall{
+					{
+						ID:               "call_abc123",
+						Name:             "write_file",
+						Arguments:        `{"path":"test.txt"}`,
+						ThoughtSignature: "gemini_sig_xyz789",
+					},
+				},
+			},
+		},
+	}
+
+	chatReq := c.buildRequest(req)
+
+	jsonBytes, err := json.Marshal(chatReq)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(jsonBytes, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	messages, ok := raw["messages"].([]any)
+	if !ok || len(messages) == 0 {
+		t.Fatal("no messages in request")
+	}
+
+	msg, ok := messages[0].(map[string]any)
+	if !ok {
+		t.Fatal("first message is not an object")
+	}
+
+	toolCalls, ok := msg["tool_calls"].([]any)
+	if !ok || len(toolCalls) == 0 {
+		t.Fatal("no tool_calls in message")
+	}
+
+	tc, ok := toolCalls[0].(map[string]any)
+	if !ok {
+		t.Fatal("first tool_call is not an object")
+	}
+
+	fn, ok := tc["function"].(map[string]any)
+	if !ok {
+		t.Fatal("function is not an object")
+	}
+
+	sig, ok := fn["thought_signature"].(string)
+	if !ok {
+		t.Fatal("thought_signature field missing or not a string")
+	}
+	if sig != "gemini_sig_xyz789" {
+		t.Errorf("thought_signature = %q, want %q", sig, "gemini_sig_xyz789")
+	}
+}

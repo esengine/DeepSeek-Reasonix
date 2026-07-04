@@ -78,12 +78,13 @@ func ParseImageDataURL(dataURL string) (mediaType, base64Data string, ok bool) {
 
 // ToolCall is a tool invocation requested by the model. Arguments is raw JSON.
 type ToolCall struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
-	Diff      string `json:"diff,omitempty"`
-	Added     int    `json:"added,omitempty"`
-	Removed   int    `json:"removed,omitempty"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Arguments        string `json:"arguments"`
+	Diff             string `json:"diff,omitempty"`
+	Added            int    `json:"added,omitempty"`
+	Removed          int    `json:"removed,omitempty"`
+	ThoughtSignature string `json:"thought_signature,omitempty"`
 }
 
 // ToolSchema is a tool definition exposed to the model. Parameters is JSON Schema.

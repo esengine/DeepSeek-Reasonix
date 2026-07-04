@@ -447,6 +447,7 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 			wire := chatToolCall{ID: tc.ID, Type: "function"}
 			wire.Function.Name = tc.Name
 			wire.Function.Arguments = tc.Arguments
+			wire.Function.ThoughtSignature = tc.ThoughtSignature
 			cm.ToolCalls = append(cm.ToolCalls, wire)
 		}
 		switch {
@@ -667,6 +668,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 				cur.Name = tc.Function.Name
 			}
 			cur.Arguments += tc.Function.Arguments
+			cur.ThoughtSignature = tc.Function.ThoughtSignature
 			// Signal the call's start the moment its name is known, so a frontend
 			// can show the tool card immediately rather than only after its
 			// (possibly large) arguments finish streaming.
@@ -852,8 +854,9 @@ type chatToolCall struct {
 	ID       string `json:"id,omitempty"`
 	Type     string `json:"type,omitempty"`
 	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
+		Name             string `json:"name"`
+		Arguments        string `json:"arguments"`
+		ThoughtSignature string `json:"thought_signature,omitempty"` // Gemini support
 	} `json:"function"`
 }
 
