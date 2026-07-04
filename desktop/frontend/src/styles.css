@@ -13906,9 +13906,9 @@ body > .mermaid-diagram--fullscreen {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 6px;
-  max-height: 220px;
+  max-height: 280px;
   overflow: auto;
-  padding-right: 2px;
+  padding: 0 2px 6px 0;
 }
 .provider-model-draft__option {
   min-width: 0;
@@ -13936,6 +13936,23 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg-muted);
   font-family: var(--font-sans);
   font-size: var(--font-control-small);
+}
+.provider-model-draft__ctx {
+  color: var(--fg-muted);
+  font-family: var(--font-sans);
+  font-size: var(--font-control-small);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+.provider-model-draft__ctx-label {
+  color: var(--fg-muted);
+  font-family: var(--font-sans);
+  font-size: var(--font-control-small);
+}
+.provider-model-draft__ctx-input {
+  width: 100%;
 }
 .provider-model-draft__option input {
   margin: 0;

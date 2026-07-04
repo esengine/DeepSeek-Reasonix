@@ -1394,3 +1394,51 @@ func TestLoadDesktopUserConfigViewKeepsLegacyBotConfigMigrationInMemory(t *testi
 		t.Fatalf("migration must not rewrite the legacy config, got:\n%s", rawLegacy)
 	}
 }
+
+// TestSaveProviderPersistsPerModelContextWindow verifies that when the frontend
+// sends a model override that only sets context_window (no other capability fields),
+// the backend correctly persists it through to the config TOML and reads it back.
+func TestSaveProviderPersistsPerModelContextWindow(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	// Simulate what the frontend sends after user sets per-model context window
+	// in advanced settings: one override with only contextWindow and model set.
+	overrides := []ProviderModelOverrideView{{
+		Model:         "sensenova-6.7-flash-lite",
+		ContextWindow: 200000,
+	}}
+
+	if err := NewApp().SaveProvider(ProviderView{
+		Name:           "test-provider",
+		Kind:           "openai",
+		BaseURL:        "https://api.example.com/v1",
+		Models:         []string{"model-a", "sensenova-6.7-flash-lite"},
+		Default:        "model-a",
+		ModelOverrides: overrides,
+	}); err != nil {
+		t.Fatalf("SaveProvider: %v", err)
+	}
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	got, ok := cfg.Provider("test-provider")
+	if !ok {
+		t.Fatal("saved provider not found")
+	}
+	if len(got.ModelOverrides) != 1 {
+		t.Fatalf("expected 1 model override, got %d: %+v", len(got.ModelOverrides), got.ModelOverrides)
+	}
+	ov := got.ModelOverrides["sensenova-6.7-flash-lite"]
+	if ov.ContextWindow != 200000 {
+		t.Fatalf("context_window = %d, want 200000", ov.ContextWindow)
+	}
+
+	// Also verify the TOML file contains context_window
+	raw, err := os.ReadFile(config.UserConfigPath())
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	if !strings.Contains(string(raw), `context_window = 200000`) {
+		t.Fatalf("saved config missing context_window:\n%s", raw)
+	}
+	t.Logf("saved config:\n%s", raw)
+}

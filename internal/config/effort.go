@@ -454,7 +454,7 @@ func normalizedModelOverrides(overrides map[string]ProviderModelOverride) map[st
 		if ov.DefaultEffort != "" && !containsString(ov.SupportedEfforts, ov.DefaultEffort) {
 			ov.DefaultEffort = ""
 		}
-		if ov.ReasoningProtocol == "" && len(ov.SupportedEfforts) == 0 && ov.DefaultEffort == "" && ov.Vision == nil {
+		if ov.ReasoningProtocol == "" && len(ov.SupportedEfforts) == 0 && ov.DefaultEffort == "" && ov.Vision == nil && ov.ContextWindow <= 0 {
 			continue
 		}
 		out[model] = ov

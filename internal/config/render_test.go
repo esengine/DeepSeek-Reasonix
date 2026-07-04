@@ -945,6 +945,7 @@ func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
 				SupportedEfforts:  []string{"high", "max"},
 				DefaultEffort:     "high",
 				Vision:            boolPtr(false),
+				ContextWindow:     200000,
 			},
 		},
 	}}
@@ -987,6 +988,9 @@ func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
 	ov := p.ModelOverrides["deepseek-v4-flash"]
 	if ov.ReasoningProtocol != ReasoningProtocolDeepSeek || !reflect.DeepEqual(ov.SupportedEfforts, []string{"high", "max"}) || ov.DefaultEffort != "high" || ov.Vision == nil || *ov.Vision {
 		t.Fatalf("model override after round trip = %+v", ov)
+	}
+	if ov.ContextWindow != 200000 {
+		t.Fatalf("model override context_window after round trip = %d, want 200000", ov.ContextWindow)
 	}
 }
 

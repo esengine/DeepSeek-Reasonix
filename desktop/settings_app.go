@@ -85,6 +85,9 @@ const (
 	providerPresetStatusSimilarExisting   = "similar_existing"
 )
 
+// ProviderModelOverrideView is the JSON-serializable view of a per-model
+// capability override for the desktop settings UI. ContextWindow, when > 0,
+// overrides the provider-level context window for that model.
 type ProviderModelOverrideView struct {
 	Model             string   `json:"model"`
 	ReasoningProtocol string   `json:"reasoningProtocol"`
@@ -92,6 +95,7 @@ type ProviderModelOverrideView struct {
 	SupportedEfforts  []string `json:"supportedEfforts"`
 	DefaultEffort     string   `json:"defaultEffort"`
 	Vision            *bool    `json:"vision"`
+	ContextWindow     int      `json:"contextWindow"`
 }
 
 type PermissionsView struct {
@@ -354,6 +358,7 @@ func providerModelOverridesForView(overrides map[string]config.ProviderModelOver
 			SupportedEfforts:  nonNil(ov.SupportedEfforts),
 			DefaultEffort:     ov.DefaultEffort,
 			Vision:            ov.Vision,
+			ContextWindow:     ov.ContextWindow,
 		})
 	}
 	return out
@@ -378,8 +383,9 @@ func providerModelOverridesForSave(overrides []ProviderModelOverrideView, models
 			SupportedEfforts:  nonNil(item.SupportedEfforts),
 			DefaultEffort:     strings.TrimSpace(item.DefaultEffort),
 			Vision:            item.Vision,
+			ContextWindow:     item.ContextWindow,
 		}
-		if strings.TrimSpace(ov.ReasoningProtocol) == "" && len(ov.SupportedEfforts) == 0 && strings.TrimSpace(ov.DefaultEffort) == "" && ov.Vision == nil {
+		if strings.TrimSpace(ov.ReasoningProtocol) == "" && len(ov.SupportedEfforts) == 0 && strings.TrimSpace(ov.DefaultEffort) == "" && ov.Vision == nil && ov.ContextWindow <= 0 {
 			continue
 		}
 		out[model] = ov

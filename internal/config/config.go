@@ -1152,11 +1152,15 @@ type ProviderEntry struct {
 	NoProxy bool `toml:"no_proxy"`
 }
 
+// ProviderModelOverride declares per-model capability overrides within a
+// multi-model provider entry. The ContextWindow field, when > 0, overrides the
+// provider-level context_window for that specific model.
 type ProviderModelOverride struct {
 	ReasoningProtocol string   `toml:"reasoning_protocol"`
 	SupportedEfforts  []string `toml:"supported_efforts"`
 	DefaultEffort     string   `toml:"default_effort"`
 	Vision            *bool    `toml:"vision"`
+	ContextWindow     int      `toml:"context_window"`
 }
 
 // ModelList returns the models this provider exposes: the explicit `models` list,
@@ -1301,6 +1305,9 @@ func (e *ProviderEntry) applyModelOverride() {
 	}
 	if ov.Vision != nil {
 		e.visionOverride = ov.Vision
+	}
+	if ov.ContextWindow > 0 {
+		e.ContextWindow = ov.ContextWindow
 	}
 }
 

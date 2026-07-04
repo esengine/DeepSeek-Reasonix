@@ -46,7 +46,7 @@ import {
   shortcutDefinitions,
   type ShortcutAction,
 } from "../lib/keyboardShortcuts";
-import type { BotAccessView, BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotRouteView, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderPresetView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import type { BotAccessView, BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotRouteView, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderModelOverrideView, ProviderPresetView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
@@ -5477,6 +5477,11 @@ const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker({
   onToggleVision,
   onSelectAll,
   onClear,
+  advancedOpen,
+  onToggleAdvanced,
+  modelContextWindows,
+  providerCtx,
+  onChangeContextWindow,
 }: {
   candidates: string[];
   selectedModels: string[];
@@ -5486,6 +5491,11 @@ const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker({
   onToggleVision: (model: string) => void;
   onSelectAll: () => void;
   onClear: () => void;
+  advancedOpen?: boolean;
+  onToggleAdvanced?: () => void;
+  modelContextWindows?: Record<string, number>;
+  providerCtx?: number;
+  onChangeContextWindow?: (model: string, value: number) => void;
 }) {
   const t = useT();
   const [query, setQuery] = useState("");
@@ -5515,6 +5525,13 @@ const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker({
           <button type="button" className="btn btn--small" disabled={disabled || selectedModels.length === 0} onClick={onClear}>
             {t("settings.clearModelSelection")}
           </button>
+          {onToggleAdvanced && (
+            <Tooltip label={advancedOpen ? t("settings.exitAdvancedSettingsHint") : t("settings.advancedSettingsHint")}>
+              <button type="button" className="btn btn--small" onClick={onToggleAdvanced}>
+                {advancedOpen ? t("settings.exitAdvancedSettings") : t("settings.advancedSettings")}
+              </button>
+            </Tooltip>
+          )}
         </div>
       </div>
       {candidates.length > 8 && (
@@ -5549,6 +5566,19 @@ const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker({
                 />
                 <span>{t("settings.visionModel")}</span>
               </label>
+              {advancedOpen && enabled && (
+                <div className="provider-model-draft__ctx">
+                  <label className="provider-model-draft__ctx-label">{t("settings.modelContextWindow")}</label>
+                  <input
+                    className="mem-input provider-model-draft__ctx-input"
+                    type="number"
+                    min={0}
+                    placeholder={String(providerCtx || 0)}
+                    value={modelContextWindows?.[model] ?? ""}
+                    onChange={(e) => onChangeContextWindow?.(model, Number(e.target.value))}
+                  />
+                </div>
+              )}
             </div>
           );
         }) : (
@@ -5606,6 +5636,17 @@ function ProviderEditor({
   const [fetchStatus, setFetchStatus] = useState<string | null>(null);
   const [fetchFallback, setFetchFallback] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  // Per-model advanced settings: context window per model
+  const hasPerModelCtx = (initial?.modelOverrides ?? []).some((ov) => ov.contextWindow && ov.contextWindow > 0);
+  const [advancedModelSettings, setAdvancedModelSettings] = useState(hasPerModelCtx);
+  const [modelContextWindows, setModelContextWindows] = useState<Record<string, number>>(() => {
+    const init: Record<string, number> = {};
+    for (const ov of initial?.modelOverrides ?? []) {
+      if (ov.contextWindow && ov.contextWindow > 0) init[ov.model] = ov.contextWindow;
+    }
+    return init;
+  });
+  const [savedProviderCtx, setSavedProviderCtx] = useState<number>(initial?.contextWindow ?? 0);
   const builtIn = initial?.builtIn ?? false;
   const isNewCustomProvider = !initial;
   const providerKindChoices = useMemo(() => {
@@ -5695,6 +5736,30 @@ function ProviderEditor({
     }
   };
 
+  const buildModelOverridesForSave = (): ProviderModelOverrideView[] => {
+    const existing = new Map<string, ProviderModelOverrideView>();
+    for (const ov of initial?.modelOverrides ?? []) {
+      // Copy existing overrides but reset contextWindow — per-model context
+      // windows are solely driven by the current UI state (modelContextWindows),
+      // so exiting advanced mode naturally clears them on the next save.
+      const cleaned = { ...ov };
+      cleaned.contextWindow = 0;
+      existing.set(ov.model, cleaned);
+    }
+    // Merge per-model context windows into overrides
+    for (const [model, ctxWin] of Object.entries(modelContextWindows)) {
+      if (ctxWin > 0) {
+        const ov = existing.get(model) ?? { model, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" };
+        ov.contextWindow = ctxWin;
+        existing.set(model, ov);
+      }
+    }
+    // Only keep overrides that have non-default values
+    return Array.from(existing.values()).filter(
+      (ov) => ov.reasoningProtocol || ov.supportedEfforts.length > 0 || ov.defaultEffort || ov.vision !== undefined || (ov.contextWindow && ov.contextWindow > 0),
+    );
+  };
+
   const save = async () => {
     if (extraBodyInvalid) return;
     setFetchStatus(null);
@@ -5727,7 +5792,7 @@ function ProviderEditor({
       // Clear the stored default if no levels are selected; the backend's
       // NormalizeEffort would otherwise silently ignore an unsupported value.
       defaultEffort: cleanedSupportedEfforts.length > 0 ? cleanDefaultEffort : "",
-      modelOverrides: initial?.modelOverrides ?? [],
+      modelOverrides: buildModelOverridesForSave(),
     };
     try {
       await onSave(provider, keyDraft.trim() || undefined);
@@ -5829,6 +5894,29 @@ function ProviderEditor({
     setVisionModelsConfigured(true);
   };
 
+  const toggleAdvancedModelSettings = () => {
+    if (!advancedModelSettings) {
+      // Entering advanced mode: save current provider context window value
+      setSavedProviderCtx(Number(ctx) || 0);
+      // Initialize per-model context windows to the current provider-level value
+      const currentCtx = Number(ctx) || 0;
+      const init: Record<string, number> = {};
+      for (const model of modelCandidateNames) {
+        init[model] = modelContextWindows[model] ?? currentCtx;
+      }
+      setModelContextWindows(init);
+    } else {
+      // Exiting advanced mode: restore provider-level context window and clear per-model values
+      setCtx(savedProviderCtx ? String(savedProviderCtx) : "");
+      setModelContextWindows({});
+    }
+    setAdvancedModelSettings((prev) => !prev);
+  };
+
+  const setModelContextWindow = (model: string, value: number) => {
+    setModelContextWindows((prev) => ({ ...prev, [model]: value }));
+  };
+
   const advancedFields = (
     <details className="provider-editor-advanced" open={advancedOpen} onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}>
       <summary>
@@ -5912,17 +6000,23 @@ function ProviderEditor({
           onChange={(e) => setBalanceUrl(e.target.value)}
         />
         <div className="mem-hint">{t("settings.balanceUrlHint")}</div>
-        <label className="set-label">{t("settings.providerContextWindow")}</label>
-        <input
-          className="mem-input"
-          inputMode="numeric"
-          min={0}
-          placeholder={t("settings.contextWindowPlaceholder")}
-          type="number"
-          value={ctx}
-          onChange={(e) => setCtx(e.target.value)}
-        />
-        <div className="mem-hint">{t("settings.contextWindowHint")}</div>
+        {!advancedModelSettings ? (
+          <>
+            <label className="set-label">{t("settings.providerContextWindow")}</label>
+            <input
+              className="mem-input"
+              inputMode="numeric"
+              min={0}
+              placeholder={t("settings.contextWindowPlaceholder")}
+              type="number"
+              value={ctx}
+              onChange={(e) => setCtx(e.target.value)}
+            />
+            <div className="mem-hint">{t("settings.contextWindowHint")}</div>
+          </>
+        ) : (
+          <div className="mem-hint">{t("settings.advancedContextWindowActive")}</div>
+        )}
       </div>
     </details>
   );
@@ -6031,6 +6125,11 @@ function ProviderEditor({
         onToggleVision={toggleEditorVisionModel}
         onSelectAll={selectAllEditorModels}
         onClear={clearEditorModels}
+        advancedOpen={advancedModelSettings}
+        onToggleAdvanced={toggleAdvancedModelSettings}
+        modelContextWindows={modelContextWindows}
+        providerCtx={Number(ctx) || 0}
+        onChangeContextWindow={setModelContextWindow}
       />
       {advancedFields}
       <div className="prov-card__actions">
