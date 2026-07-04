@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"reasonix/internal/bot"
 	"reasonix/internal/config"
 
+	lark "github.com/larksuite/oapi-sdk-go/v3"
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
 )
 
@@ -372,5 +374,122 @@ func TestBuildMarkdownCard(t *testing.T) {
 	}
 	if payload.Body.Elements[0].Content != "hello [docs](https://example.com)" {
 		t.Fatalf("content = %q, want original markdown", payload.Body.Elements[0].Content)
+	}
+}
+
+// mockHTTPClient implements larkcore.HttpClient for testing, recording all requests.
+type mockHTTPClient struct {
+	mu       sync.Mutex
+	requests []*http.Request
+}
+
+func (m *mockHTTPClient) Do(req *http.Request) (*http.Response, error) {
+	m.mu.Lock()
+	m.requests = append(m.requests, req)
+	m.mu.Unlock()
+
+	// Handle OAuth token request (first call for any API)
+	if strings.Contains(req.URL.Path, "/auth/v3/tenant_access_token/internal") {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"code":0,"tenant_access_token":"mock-token","expire":3600}`)),
+		}, nil
+	}
+
+	// Handle message API request
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"code":0,"data":{"message_id":"mock-msg-id"}}`)),
+	}, nil
+}
+
+func (m *mockHTTPClient) lastRequestURL() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := len(m.requests) - 1; i >= 0; i-- {
+		if !strings.Contains(m.requests[i].URL.Path, "/auth/") {
+			return m.requests[i].URL.String()
+		}
+	}
+	return ""
+}
+
+func TestSendWithReplyToMsgID(t *testing.T) {
+	mock := &mockHTTPClient{}
+	cfg := config.FeishuBotConfig{
+		AppID:        "cli-test",
+		AppSecretEnv: "FEISHU_REPLY_TEST_SECRET",
+	}
+	t.Setenv("FEISHU_REPLY_TEST_SECRET", "test-secret")
+
+	a := &adapter{
+		cfg:    cfg,
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	// Inject a pre-built client with mock HTTP client so sdkClient returns it.
+	a.client = lark.NewClient(cfg.AppID, "test-secret",
+		lark.WithHttpClient(mock),
+		lark.WithOpenBaseUrl("https://test.feishu.cn"),
+	)
+
+	// With ReplyToMsgID set — should use ReplyMessage API
+	_, err := a.Send(context.Background(), bot.OutboundMessage{
+		ChatID:       "chat-1",
+		Text:         "hello **bold**",
+		ReplyToMsgID: "msg-123",
+	})
+	if err != nil {
+		t.Fatalf("Send with ReplyToMsgID failed: %v", err)
+	}
+
+	lastURL := mock.lastRequestURL()
+	if lastURL == "" {
+		t.Fatal("no message API request was made")
+	}
+	if !strings.Contains(lastURL, "/messages/msg-123/reply") {
+		t.Fatalf("expected ReplyMessage API path containing /messages/msg-123/reply, got: %s", lastURL)
+	}
+}
+
+func TestSendWithoutReplyToMsgID(t *testing.T) {
+	mock := &mockHTTPClient{}
+	cfg := config.FeishuBotConfig{
+		AppID:        "cli-test",
+		AppSecretEnv: "FEISHU_NO_REPLY_TEST_SECRET",
+	}
+	t.Setenv("FEISHU_NO_REPLY_TEST_SECRET", "test-secret")
+
+	a := &adapter{
+		cfg:    cfg,
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	a.client = lark.NewClient(cfg.AppID, "test-secret",
+		lark.WithHttpClient(mock),
+		lark.WithOpenBaseUrl("https://test.feishu.cn"),
+	)
+
+	// Without ReplyToMsgID — should use CreateMessage API
+	_, err := a.Send(context.Background(), bot.OutboundMessage{
+		ChatID: "chat-1",
+		Text:   "hello",
+	})
+	if err != nil {
+		t.Fatalf("Send without ReplyToMsgID failed: %v", err)
+	}
+
+	lastURL := mock.lastRequestURL()
+	if lastURL == "" {
+		t.Fatal("no message API request was made")
+	}
+	if !strings.Contains(lastURL, "/messages?") {
+		t.Fatalf("expected CreateMessage API path containing /messages?..., got: %s", lastURL)
+	}
+	if strings.Contains(lastURL, "/reply") {
+		t.Fatalf("expected CreateMessage API path, got ReplyMessage path: %s", lastURL)
+	}
+	if !strings.Contains(lastURL, "receive_id_type=chat_id") {
+		t.Fatalf("expected CreateMessage API to have receive_id_type=chat_id query param, got: %s", lastURL)
 	}
 }
