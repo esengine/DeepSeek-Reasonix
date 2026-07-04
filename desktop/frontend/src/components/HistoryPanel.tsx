@@ -268,27 +268,23 @@ export function HistoryPanel({
               startRename(target);
             },
           },
-          ...(menuSession.current
-            ? []
-            : [
-                {
-                  key: "delete",
-                  icon: <Archive size={13} />,
-                  label:
-                    menuConfirmTarget?.kind === "delete" && menuConfirmTarget.path === menuSession.path
-                      ? tr("history.confirmMoveToTrash")
-                      : tr("history.moveToTrash"),
-                  disabled: running,
-                  danger: menuConfirmTarget?.kind === "delete" && menuConfirmTarget.path === menuSession.path,
-                  onSelect: () => {
-                    if (menuConfirmTarget?.kind === "delete" && menuConfirmTarget.path === menuSession.path) {
-                      deleteHistorySession(menuSession);
-                    } else {
-                      setMenuConfirmTarget({ kind: "delete", path: menuSession.path });
-                    }
-                  },
-                } as ContextMenuItem,
-              ]),
+          {
+            key: "delete",
+            icon: <Archive size={13} />,
+            label:
+              menuConfirmTarget?.kind === "delete" && menuConfirmTarget.path === menuSession.path
+                ? tr("history.confirmMoveToTrash")
+                : tr("history.moveToTrash"),
+            disabled: running,
+            danger: menuConfirmTarget?.kind === "delete" && menuConfirmTarget.path === menuSession.path,
+            onSelect: () => {
+              if (menuConfirmTarget?.kind === "delete" && menuConfirmTarget.path === menuSession.path) {
+                deleteHistorySession(menuSession);
+              } else {
+                setMenuConfirmTarget({ kind: "delete", path: menuSession.path });
+              }
+            },
+          },
         ]
     : [];
   const trashBlankMenuItems: ContextMenuItem[] =
@@ -327,7 +323,7 @@ export function HistoryPanel({
     startRename(selectedSession);
   };
   const moveSelectedToTrash = () => {
-    if (!selectedSession || running || isTrash || selectedSession.current) return;
+    if (!selectedSession || running || isTrash) return;
     if (actionConfirmDelete) deleteHistorySession(selectedSession);
     else setMenuConfirmTarget({ kind: "delete", path: selectedSession.path });
   };
@@ -522,7 +518,7 @@ export function HistoryPanel({
                       <button
                         className="btn btn--small btn--danger"
                         type="button"
-                        disabled={!selectedSession || running || selectedSession.current}
+                        disabled={!selectedSession || running}
                         onClick={moveSelectedToTrash}
                       >
                         {actionConfirmDelete ? tr("history.confirmMoveToTrash") : tr("history.moveToTrash")}
