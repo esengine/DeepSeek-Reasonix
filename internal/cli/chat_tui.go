@@ -1099,6 +1099,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.bubblePending {
 					m.unsendPending() // server not yet replied — restore text, leave no trace
 				} else if m.cancelRequested() {
+					_ = m.ctrl.Snapshot()
 					m.ctrl.Cancel()
 					return m, tea.Quit
 				} else {
@@ -1130,6 +1131,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if !m.lastCtrlCAt.IsZero() && time.Since(m.lastCtrlCAt) < 1500*time.Millisecond {
+				if m.ctrl != nil {
+					_ = m.ctrl.Snapshot()
+				}
 				return m, tea.Quit
 			}
 			m.lastCtrlCAt = time.Now()
