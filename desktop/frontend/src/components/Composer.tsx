@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowUp, Check, ChevronDown, Eye, FileText, Folder, Fold
 import { asArray } from "../lib/array";
 import { app, onFilesDropped } from "../lib/bridge";
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
+import { formatTokens } from "../lib/format";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import type { CommandInfo, ComposerInsertRequest, DirEntry, EffortInfo, Mode, SlashArgItem, SlashArgsResult, WorkspaceView } from "../lib/types";
 import {
@@ -87,11 +88,6 @@ function composerAutoInputMaxHeight(): number {
 
 function loadComposerHeight(): number | null {
   return loadOptionalLayoutSize("composerHeight", clampComposerHeight);
-}
-
-function fmtTokens(n: number): string {
-  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
-  return String(n);
 }
 
 function fmtElapsed(ms: number): string {
@@ -917,7 +913,7 @@ export function Composer({
           const elapsedMs = Math.max(0, now - turnStartAt);
           const words = SPINNER_WORDS[locale];
           const word = words[Math.floor(elapsedMs / 3000) % words.length];
-          const tok = turnTokens && turnTokens > 0 ? ` · ↓ ${fmtTokens(turnTokens)} ${t("status.tokens")}` : "";
+          const tok = turnTokens && turnTokens > 0 ? ` · ↓ ${formatTokens(turnTokens)} ${t("status.tokens")}` : "";
           return `${word}… ${fmtElapsed(elapsedMs)}${tok}`;
         })()
       : null;

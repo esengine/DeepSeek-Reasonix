@@ -5,6 +5,7 @@ import { ArrowLeft, FileText, Search } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { useT, type Translator } from "../lib/i18n";
+import { formatTokens } from "../lib/format";
 import type { DictKey } from "../locales/en";
 import type { ContextInfo, ContextPanelInfo, WireUsage } from "../lib/types";
 
@@ -19,11 +20,6 @@ interface ContextPanelProps {
 }
 
 type ContextDetail = "read" | "changed";
-
-function fmtTokens(n: number): string {
-  if (n >= 1000) return `${Math.round(n / 1000)}k`;
-  return String(n);
-}
 
 function fmtTime(ms?: number): string {
   if (!ms) return "";
@@ -226,8 +222,8 @@ export function ContextPanel({ tabId, context, usage, sessionCost, sessionCurren
             <section className="context-panel__usage">
               <div className="context-panel__donut" style={donutStyle}>
                 <div className="context-panel__donut-core">
-                  <strong>{fmtTokens(usedTokens)}</strong>
-                  <span>/ {fmtTokens(windowTokens)} tokens</span>
+                  <strong>{formatTokens(usedTokens)}</strong>
+                  <span>/ {formatTokens(windowTokens)} tokens</span>
                 </div>
               </div>
               <div className="context-panel__percent">{usagePct}%</div>
