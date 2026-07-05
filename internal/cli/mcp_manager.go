@@ -60,6 +60,7 @@ type mcpServerView struct {
 	Tools      int
 	Prompts    int
 	Resources  int
+	HasTools   bool
 	Error      string
 	ToolList   []plugin.ToolInfo
 	AuthStatus string
@@ -315,6 +316,7 @@ func (m chatTUI) buildMCPSnapshot() mcpSnapshot {
 			v := mcpServerView{
 				Name: s.Name, Transport: fallbackText(s.Transport, "stdio"), Status: "connected",
 				Tools: s.Tools, Prompts: s.Prompts, Resources: s.Resources,
+				HasTools: s.HasTools,
 				ToolList: append([]plugin.ToolInfo(nil), s.ToolList...),
 			}
 			if p, ok := configured[s.Name]; ok {

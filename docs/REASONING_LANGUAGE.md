@@ -19,7 +19,9 @@ explicit without changing the stable system prompt or tool definitions.
 
 The setting is intentionally small:
 
-- `auto` follows the conversation language and injects no extra instruction.
+- `auto` anchors visible reasoning to Chinese when the raw user prompt is
+  clearly Chinese, ignoring injected reference context such as `@file` contents;
+  English and ambiguous turns add no extra instruction.
 - `zh` asks visible reasoning to prefer Simplified Chinese.
 - `en` asks visible reasoning to prefer English.
 
@@ -89,11 +91,15 @@ argument.
 
 ## Cache Behavior
 
-`auto` is the cache-friendliest choice. It injects nothing and relies on the
-existing stable language policy.
+`auto` is still cache-friendly. When the raw user prompt clearly looks Chinese,
+Reasonix adds the same small transient `<reasoning-language>` block for that
+turn; English and ambiguous turns inject nothing and rely on the existing stable
+language policy. Injected reference context such as `@file` contents is ignored
+for this auto decision.
 
-When set to `zh` or `en`, Reasonix adds a small transient
-`<reasoning-language>` block to the user turn. It does not change:
+When set to `zh` or `en`, Reasonix always adds a small transient
+`<reasoning-language>` block to the user turn. In all modes, this does not
+change:
 
 - the system prompt
 - tool schema bytes or ordering

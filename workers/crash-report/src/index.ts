@@ -22,6 +22,7 @@ import type { Bindings as RegistryBindings } from "./registry/env";
 import { PackageRepo } from "./registry/db/packages";
 import { EventRepo } from "./registry/db/events";
 import { renderCommunity } from "./community";
+import { desktopReleaseChannel, handleDesktopReleaseManifest } from "./desktop_release";
 
 const MAX_BODY_BYTES = 96 * 1024;
 const LATEST_SAMPLES_PER_GROUP = 5;
@@ -85,8 +86,11 @@ const METRIC_SIGNALS = [
   "provider_error",
   "cache_hit",
   "tool_error",
+  "updater_error",
   "compaction",
   "turns",
+  "desktop_hang",
+  "desktop_hang_age",
   "client_surface",
   "client_version",
   "settings_language",
@@ -978,6 +982,9 @@ export default {
     const path = url.pathname;
     const method = request.method;
 
+    const desktopRelease = desktopReleaseChannel(path);
+    if (desktopRelease && method === "GET") return handleDesktopReleaseManifest(desktopRelease);
+
     if (path === "/v1/report" && method === "POST") return handleReport(request, env);
     if (path === "/v1/ping" && method === "POST") return handlePing(request, env);
     if (path === "/v1/metrics" && method === "POST") return handleMetrics(request, env);
@@ -1038,6 +1045,7 @@ export default {
       path === "/v1/report" ||
       path === "/v1/ping" ||
       path === "/v1/metrics" ||
+      desktopReleaseChannel(path) ||
       path === "/login" ||
       path === "/register" ||
       path === "/logout" ||

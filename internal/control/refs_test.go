@@ -33,6 +33,26 @@ func TestFileRefLine(t *testing.T) {
 	}
 }
 
+func TestSlashCodeCommentLine(t *testing.T) {
+	cases := []struct {
+		line string
+		want bool
+	}{
+		{"// explain this", true},
+		{"  /* explain this */", true},
+		{"/**\n * explain this\n */", true},
+		{"/compact", false},
+		{"/mcp__server__prompt", false},
+		{"/missing/Foo.kt:12: error", false},
+		{"hello", false},
+	}
+	for _, c := range cases {
+		if got := SlashCodeCommentLine(c.line); got != c.want {
+			t.Errorf("SlashCodeCommentLine(%q) = %v, want %v", c.line, got, c.want)
+		}
+	}
+}
+
 func TestParseRefTokens(t *testing.T) {
 	cases := []struct {
 		line string

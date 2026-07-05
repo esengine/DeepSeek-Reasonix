@@ -36,5 +36,5 @@ type Spec struct {
 	Shell Shell
 }
 
-// enforce reports whether the spec asks for confinement.
-func (s Spec) enforce() bool { return s.Mode == "enforce" }
+// Enforce reports whether the spec asks for confinement.
+func (s Spec) Enforce() bool { return s.Mode == "enforce" }

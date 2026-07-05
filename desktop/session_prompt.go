@@ -43,7 +43,7 @@ func sessionWithFreshSystemPrompt(session *agent.Session, system string) *agent.
 	if systemPromptFrom(messages) == "" {
 		return session
 	}
-	return &agent.Session{Messages: withFreshSystemPrompt(messages, system)}
+	return session.CloneWithMessages(withFreshSystemPrompt(messages, system))
 }
 
 func resumeWithFreshSystemPrompt(ctrl interface {
@@ -55,7 +55,16 @@ func resumeWithFreshSystemPrompt(ctrl interface {
 		return
 	}
 	if len(messages) > 0 {
-		ctrl.Resume(&agent.Session{Messages: withFreshSystemPrompt(messages, systemPromptFrom(ctrl.History()))}, path)
+		next := withFreshSystemPrompt(messages, systemPromptFrom(ctrl.History()))
+		if path != "" {
+			if loaded, err := agent.LoadSession(path); err == nil && loaded != nil {
+				if resumed, ok := loaded.CloneWithMessagesIfCompatible(next); ok {
+					ctrl.Resume(resumed, path)
+					return
+				}
+			}
+		}
+		ctrl.Resume(agent.NewSession("").CloneWithMessages(next), path)
 		return
 	}
 	if path != "" {

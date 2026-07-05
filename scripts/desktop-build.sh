@@ -41,6 +41,12 @@ node -e 'const fs=require("fs"),f="wails.json",j=JSON.parse(fs.readFileSync(f,"u
 # NSIS installer is Windows-only (Wails requires a single windows target for -nsis).
 ldflags="-X main.version=$VERSION -X main.channel=$CHANNEL"
 [ "$os" = "darwin" ] && [ "${HAS_APPLE_CERT:-}" = "true" ] && ldflags="$ldflags -X main.macSelfUpdate=true"
+UPDATE_HELPER="reasonix-update-helper.exe"
+if [ "$os" = windows ]; then
+	echo "==> go build Windows update helper"
+	GOOS=windows GOARCH="$arch" go build -trimpath -ldflags="-s -w" \
+		-o "build/windows/installer/$UPDATE_HELPER" ./cmd/update-helper
+fi
 build_args=(-clean -platform "$PLATFORM" -ldflags "$ldflags")
 [ "$os" = windows ] && build_args+=(-nsis -webview2 embed)
 # Link cgo against WebKitGTK 4.1: 4.0 (libwebkit2gtk-4.0.so.37) is gone on
@@ -134,6 +140,10 @@ windows)
 	[ -n "$portable" ] || { echo "no portable Windows exe found in build/bin" >&2; exit 1; }
 	staging=$(mktemp -d)
 	cp "$portable" "$staging/${APPNAME}.exe"
+	helper="build/windows/installer/$UPDATE_HELPER"
+	if [ -f "$helper" ]; then
+		cp "$helper" "$staging/$UPDATE_HELPER"
+	fi
 	src_win=$(cygpath -w "$staging/${APPNAME}.exe")
 	zip_win=$(cygpath -w "$ROOT/dist/${APPNAME}-windows-${arch}.zip")
 	powershell.exe -NoProfile -Command "Compress-Archive -Force -LiteralPath '$src_win' -DestinationPath '$zip_win'"

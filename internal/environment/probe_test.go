@@ -70,6 +70,51 @@ func TestRunProbesUsesOverridePathAndFirstLine(t *testing.T) {
 	}
 }
 
+func TestRunProbesParsesQuotedStaticArgs(t *testing.T) {
+	resetProbeCacheForTest(t, time.Unix(25, 0))
+	dir := t.TempDir()
+	toolPath := filepath.Join(dir, "quotedtool")
+	toolPath = writeProbeTool(t, toolPath, "quoted version")
+
+	results := RunProbesWithOverrides(context.Background(), []string{`quotedtool "--version with spaces"`}, map[string]string{"quotedtool": toolPath})
+	if len(results) != 1 {
+		t.Fatalf("results len = %d, want 1", len(results))
+	}
+	if !results[0].Found || results[0].Output != "quoted version" {
+		t.Fatalf("quoted probe result = %+v", results[0])
+	}
+}
+
+func TestRunProbesAllowsStaticEnvAssignment(t *testing.T) {
+	resetProbeCacheForTest(t, time.Unix(35, 0))
+	dir := t.TempDir()
+	toolPath := filepath.Join(dir, "envtool")
+	toolPath = writeEnvProbeTool(t, toolPath)
+
+	results := RunProbesWithOverrides(context.Background(), []string{`REASONIX_PROBE_ENV=ok envtool --version`}, map[string]string{"envtool": toolPath})
+	if len(results) != 1 {
+		t.Fatalf("results len = %d, want 1", len(results))
+	}
+	if !results[0].Found || results[0].Output != "ok" {
+		t.Fatalf("env probe result = %+v", results[0])
+	}
+}
+
+func TestRunProbesAllowsStaticStderrMerge(t *testing.T) {
+	resetProbeCacheForTest(t, time.Unix(40, 0))
+	dir := t.TempDir()
+	toolPath := filepath.Join(dir, "stderrtool")
+	toolPath = writeStderrProbeTool(t, toolPath, "stderr version")
+
+	results := RunProbesWithOverrides(context.Background(), []string{`stderrtool --version 2>&1`}, map[string]string{"stderrtool": toolPath})
+	if len(results) != 1 {
+		t.Fatalf("results len = %d, want 1", len(results))
+	}
+	if !results[0].Found || results[0].Output != "stderr version" {
+		t.Fatalf("stderr merge probe result = %+v", results[0])
+	}
+}
+
 func TestRunProbesRejectsDeniedOverridePath(t *testing.T) {
 	resetProbeCacheForTest(t, time.Unix(50, 0))
 	dir := t.TempDir()
@@ -234,6 +279,37 @@ func writeProbeTool(t *testing.T, path, output string) string {
 	}
 	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
 		t.Fatalf("write tool: %v", err)
+	}
+	return path
+}
+
+func writeEnvProbeTool(t *testing.T, path string) string {
+	t.Helper()
+	body := "#!/bin/sh\nprintf '%s\\n' \"$REASONIX_PROBE_ENV\"\n"
+	if runtime.GOOS == "windows" {
+		if !strings.HasSuffix(path, ".bat") {
+			path += ".bat"
+		}
+		body = "@echo %REASONIX_PROBE_ENV%\r\n"
+	}
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write env tool: %v", err)
+	}
+	return path
+}
+
+func writeStderrProbeTool(t *testing.T, path, output string) string {
+	t.Helper()
+	body := "#!/bin/sh\nprintf '%s\\n' >&2\n"
+	body = fmt.Sprintf(body, strings.ReplaceAll(output, "'", "'\\''"))
+	if runtime.GOOS == "windows" {
+		if !strings.HasSuffix(path, ".bat") {
+			path += ".bat"
+		}
+		body = "@echo " + strings.ReplaceAll(output, "\n", "\r\n@echo ") + " 1>&2\r\n"
+	}
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write stderr tool: %v", err)
 	}
 	return path
 }

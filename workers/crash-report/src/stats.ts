@@ -172,8 +172,11 @@ const METRIC_SIGNAL_LABELS: Record<string, { en: string; zh: string }> = {
   provider_error: { en: "Provider errors", zh: "Provider 错误" },
   cache_hit: { en: "Cache hit rate", zh: "缓存命中率" },
   tool_error: { en: "Tool errors", zh: "工具错误" },
+  updater_error: { en: "Updater errors", zh: "更新器错误" },
   compaction: { en: "Compactions", zh: "压缩" },
   turns: { en: "Turns", zh: "轮次" },
+  desktop_hang: { en: "Desktop hangs", zh: "桌面卡死" },
+  desktop_hang_age: { en: "Desktop hang age", zh: "桌面卡死时长" },
   client_surface: { en: "Client surface", zh: "客户端形态" },
   client_version: { en: "Client version", zh: "客户端版本" },
   settings_language: { en: "Settings: language", zh: "设置：语言" },
@@ -210,7 +213,18 @@ const METRIC_SIGNAL_LABELS: Record<string, { en: string; zh: string }> = {
   settings_bot_connection_approval: { en: "Bot: connection approval", zh: "机器人：连接审批" },
 };
 
-const AGENT_METRIC_SIGNALS = ["finish_reason", "empty_final", "provider_error", "cache_hit", "tool_error", "compaction", "turns"];
+const AGENT_METRIC_SIGNALS = [
+  "finish_reason",
+  "empty_final",
+  "provider_error",
+  "cache_hit",
+  "tool_error",
+  "updater_error",
+  "compaction",
+  "turns",
+  "desktop_hang",
+  "desktop_hang_age",
+];
 const DEFAULT_OPEN_SETTING_GROUPS = new Set(["Client", "Models", "Providers"]);
 
 const SETTINGS_METRIC_GROUPS: { en: string; zh: string; signals: string[] }[] = [
@@ -341,6 +355,12 @@ function healthLevel(kind: "cache" | "rate", value: number | null): "good" | "wa
   return "bad";
 }
 
+function countHealthLevel(value: number): "good" | "warn" | "bad" {
+  if (value <= 0) return "good";
+  if (value <= 2) return "warn";
+  return "bad";
+}
+
 function levelText(level: "good" | "warn" | "bad" | "unknown"): string {
   if (level === "good") return i18n("Good", "健康");
   if (level === "warn") return i18n("Watch", "关注");
@@ -371,6 +391,8 @@ function agentHealth(rows: MetricRow[], previousRows: MetricRow[]): string {
   if (!rows.length) return `<div class="empty">${i18n("No agent health metrics yet", "暂无运行健康指标")}</div>`;
   const cache = cacheHitRate(rows);
   const prevCache = cacheHitRate(previousRows);
+  const desktopHangs = sumMetric(rows, "desktop_hang");
+  const prevDesktopHangs = sumMetric(previousRows, "desktop_hang");
   const rateCard = (signal: string, en: string, zh: string) => {
     const value = ratioPer100(rows, signal);
     const prev = ratioPer100(previousRows, signal);
@@ -394,6 +416,13 @@ ${rateCard("provider_error", "Provider errors", "Provider 错误")}
 ${rateCard("tool_error", "Tool errors", "工具错误")}
 ${rateCard("empty_final", "Empty final guard", "空回复拦截")}
 ${rateCard("compaction", "Compactions", "压缩")}
+${healthCard(
+  { en: "Desktop hangs", zh: "桌面卡死" },
+  String(desktopHangs),
+  countHealthLevel(desktopHangs),
+  healthDeltaHTML(deltaLabel(desktopHangs, prevDesktopHangs)),
+  healthDetailHTML(rows, "desktop_hang_age"),
+)}
 </div>`;
 }
 
@@ -530,7 +559,10 @@ export function renderStats(
   const cache = cacheHitRate(agentMetrics);
   const providerRate = ratioPer100(agentMetrics, "provider_error");
   const toolRate = ratioPer100(agentMetrics, "tool_error");
-  const healthWatchCount = [healthLevel("cache", cache), healthLevel("rate", providerRate), healthLevel("rate", toolRate)].filter((v) => v === "warn" || v === "bad").length;
+  const desktopHangs = sumMetric(agentMetrics, "desktop_hang");
+  const healthWatchCount =
+    [healthLevel("cache", cache), healthLevel("rate", providerRate), healthLevel("rate", toolRate)].filter((v) => v === "warn" || v === "bad").length +
+    (desktopHangs > 0 ? 1 : 0);
   const modulePath = (module: StatsModule) => (module === "usage" ? "/stats" : `/stats/${module}`);
   const filterQS = (patch: Record<string, string>, module: StatsModule = activeModule) => {
     const params = new URLSearchParams();
@@ -577,7 +609,7 @@ ${statCard({ en: "Latest adoption", zh: "最新版本占比" }, latestVersionSha
 ${statCard({ en: "Open reports", zh: "未处理报告" }, String(data.overview.openReports), i18n("needs triage", "需要分诊"), filterQS({}, "diagnostics"), overviewTone)}
 ${statCard({ en: "New in latest", zh: "最新新增" }, String(data.overview.newLatestReports), i18n("first seen on latest", "首次出现在最新版"), filterQS({}, "diagnostics"), data.overview.newLatestReports ? "warn" : "good")}
 ${statCard({ en: "Regressions", zh: "回归问题" }, String(data.overview.regressedReports), i18n("previously resolved", "曾经解决后复现"), filterQS({}, "diagnostics"), data.overview.regressedReports ? "bad" : "good")}
-${statCard({ en: "Agent health", zh: "运行健康" }, healthWatchCount ? String(healthWatchCount) : "OK", i18nHTML(`${pct(cache)} cache · ${providerRate === null ? "n/a" : Number(providerRate.toFixed(1))}/100 provider`, `${pct(cache)} 缓存 · ${providerRate === null ? "n/a" : Number(providerRate.toFixed(1))}/100 Provider`), filterQS({}, "health"), healthWatchCount ? "warn" : "good")}
+${statCard({ en: "Agent health", zh: "运行健康" }, healthWatchCount ? String(healthWatchCount) : "OK", i18nHTML(`${pct(cache)} cache · ${providerRate === null ? "n/a" : Number(providerRate.toFixed(1))}/100 provider · ${desktopHangs} hangs`, `${pct(cache)} 缓存 · ${providerRate === null ? "n/a" : Number(providerRate.toFixed(1))}/100 Provider · ${desktopHangs} 次卡死`), filterQS({}, "health"), healthWatchCount ? "warn" : "good")}
 </section>`;
   const pageOverview = activeModule === "usage" ? overview : "";
   const dashboardNav = `<nav class="site-nav" aria-label="Stats navigation">

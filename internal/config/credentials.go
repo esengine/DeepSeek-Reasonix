@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/BurntSushi/toml"
+	"github.com/joho/godotenv"
 
 	"reasonix/internal/fileutil"
 )
@@ -301,17 +302,20 @@ func CredentialsTargetDescription() string {
 func parseCredentialLines(lines []string) map[string]string {
 	out := map[string]string{}
 	for _, raw := range lines {
-		line := strings.TrimPrefix(strings.TrimSpace(raw), "export ")
-		if line == "" || strings.HasPrefix(line, "#") {
+		if strings.ContainsAny(raw, "\r\n") {
 			continue
 		}
-		key, value, ok := strings.Cut(line, "=")
-		key = strings.TrimSpace(key)
-		value = strings.Trim(strings.TrimSpace(value), `"'`)
-		if !ok || !isCredentialKey(key) || strings.ContainsAny(value, "\r\n") {
+		values, err := godotenv.Unmarshal(raw)
+		if err != nil {
 			continue
 		}
-		out[key] = value
+		for key, value := range values {
+			key = strings.TrimSpace(key)
+			if !isCredentialKey(key) || strings.ContainsAny(value, "\r\n") {
+				continue
+			}
+			out[key] = value
+		}
 	}
 	return out
 }
@@ -519,7 +523,7 @@ func storeCredentialsInFile(path string, assignments map[string]string) error {
 			continue
 		}
 		if value, hit := assignments[key]; hit {
-			lines[i] = key + "=" + value
+			lines[i] = formatCredentialLine(key, value)
 			replaced[key] = true
 		}
 	}
@@ -530,10 +534,28 @@ func storeCredentialsInFile(path string, assignments map[string]string) error {
 	sort.Strings(keys)
 	for _, key := range keys {
 		if !replaced[key] {
-			lines = append(lines, key+"="+assignments[key])
+			lines = append(lines, formatCredentialLine(key, assignments[key]))
 		}
 	}
 	return writeCredentialFileLines(path, lines)
+}
+
+func formatCredentialLine(key, value string) string {
+	if isBareDotEnvValue(value) {
+		return key + "=" + value
+	}
+	line, err := godotenv.Marshal(map[string]string{key: value})
+	if err != nil {
+		return key + "=" + value
+	}
+	return line
+}
+
+func isBareDotEnvValue(value string) bool {
+	if value == "" {
+		return true
+	}
+	return !strings.ContainsAny(value, " \t\r\n#'\"\\")
 }
 
 func removeCredentialFromFile(path, key string) error {

@@ -67,7 +67,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	} else {
 		ctx = agent.WithMemoryCompilerSourceInput(ctx, turn.raw)
 	}
-	input := c.compose(turn.input, !turn.synthetic)
+	input := c.compose(turn.input, turn.raw, !turn.synthetic)
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)
 	defer c.recordDisplayForNewUser(startMessages, turn.display)
@@ -102,7 +102,11 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	autoResearchTaskID := c.goals.currentAutoResearchTaskID()
 	autoResearchAcceptedBefore := c.autoResearchAcceptedEvidenceIDs(autoResearchTaskID)
 	c.appendAutoResearchHeartbeat(autoResearchTaskID, autoresearch.HeartbeatStartingTurn, "")
-	err := c.runner.Run(ctx, input)
+	modelInput := input
+	if !turn.synthetic {
+		modelInput = c.withCapabilityRoute(input, turn.raw)
+	}
+	err := c.runner.Run(ctx, modelInput)
 	if err == nil {
 		c.recordAutoResearchEvidenceFromAssistant(autoResearchTaskID, lastAssistantText(c.History()))
 		c.recordAutoResearchTurnProgress(autoResearchTaskID, autoResearchAcceptedBefore)

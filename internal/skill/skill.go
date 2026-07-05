@@ -65,6 +65,13 @@ type Skill struct {
 	RunAs        RunAs  // inline | subagent
 	Model        string // optional model override for runAs=subagent (frontmatter `model:`)
 	Effort       string // optional effort for runAs=subagent (frontmatter `effort:`)
+	// Routing metadata is intentionally kept out of the cache-stable Skills
+	// index; it feeds per-turn capability hints only.
+	Triggers         []string
+	NegativeTriggers []string
+	AutoUse          string // off | suggest | prefer | require
+	NeedsFreshData   bool
+	Cost             string // low | medium | high (advisory)
 }
 
 // IsValidName reports whether name is a usable skill identifier.
@@ -484,18 +491,30 @@ func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bo
 		RunAs:        parseRunAs(fm[skillFrontmatterRunAs], fm[skillFrontmatterContext], fm[skillFrontmatterAgent]),
 		Model:        strings.TrimSpace(fm[skillFrontmatterModel]),
 		Effort:       strings.TrimSpace(fm[skillFrontmatterEffort]),
+		Triggers:     parseCSVFrontmatter(fm[skillFrontmatterTriggers]),
+		NegativeTriggers: parseCSVFrontmatter(
+			fm[skillFrontmatterNegativeTriggers],
+		),
+		AutoUse:        parseAutoUse(fm[skillFrontmatterAutoUse]),
+		NeedsFreshData: parseBoolFrontmatter(fm[skillFrontmatterNeedsFreshData]),
+		Cost:           parseCost(fm[skillFrontmatterCost]),
 	}, true
 }
 
 const (
-	skillFrontmatterDescription  = "description"
-	skillFrontmatterName         = "name"
-	skillFrontmatterRunAs        = "runas"
-	skillFrontmatterContext      = "context"
-	skillFrontmatterAgent        = "agent"
-	skillFrontmatterAllowedTools = "allowed-tools"
-	skillFrontmatterModel        = "model"
-	skillFrontmatterEffort       = "effort"
+	skillFrontmatterDescription      = "description"
+	skillFrontmatterName             = "name"
+	skillFrontmatterRunAs            = "runas"
+	skillFrontmatterContext          = "context"
+	skillFrontmatterAgent            = "agent"
+	skillFrontmatterAllowedTools     = "allowed-tools"
+	skillFrontmatterModel            = "model"
+	skillFrontmatterEffort           = "effort"
+	skillFrontmatterTriggers         = "triggers"
+	skillFrontmatterNegativeTriggers = "negative-triggers"
+	skillFrontmatterAutoUse          = "auto-use"
+	skillFrontmatterNeedsFreshData   = "needs-fresh-data"
+	skillFrontmatterCost             = "cost"
 )
 
 var skillMarkerFrontmatterKeys = []string{
@@ -507,6 +526,11 @@ var skillMarkerFrontmatterKeys = []string{
 	skillFrontmatterAllowedTools,
 	skillFrontmatterModel,
 	skillFrontmatterEffort,
+	skillFrontmatterTriggers,
+	skillFrontmatterNegativeTriggers,
+	skillFrontmatterAutoUse,
+	skillFrontmatterNeedsFreshData,
+	skillFrontmatterCost,
 }
 
 func hasSkillMarker(content string, fm map[string]string) bool {
@@ -694,6 +718,12 @@ func isScriptExt(ext string) bool {
 // parseAllowedTools splits a comma-separated `allowed-tools` value into trimmed,
 // non-empty tool names; nil when absent.
 func parseAllowedTools(raw string) []string {
+	return parseCSVFrontmatter(raw)
+}
+
+// parseCSVFrontmatter splits simple comma-separated frontmatter values. Full
+// YAML lists are intentionally out of scope for the existing frontmatter parser.
+func parseCSVFrontmatter(raw string) []string {
 	if strings.TrimSpace(raw) == "" {
 		return nil
 	}
@@ -704,6 +734,33 @@ func parseAllowedTools(raw string) []string {
 		}
 	}
 	return out
+}
+
+func parseAutoUse(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "off", "suggest", "prefer", "require":
+		return strings.ToLower(strings.TrimSpace(raw))
+	default:
+		return ""
+	}
+}
+
+func parseBoolFrontmatter(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "true", "yes", "1", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func parseCost(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "low", "medium", "high":
+		return strings.ToLower(strings.TrimSpace(raw))
+	default:
+		return ""
+	}
 }
 
 // parseRunAs maps frontmatter to a run mode. An unknown value defaults to the

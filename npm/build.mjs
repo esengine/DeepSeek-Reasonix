@@ -23,6 +23,7 @@ if (!tag) {
 }
 // npm ships on its own `npm-v*` tag (release-npm.yml); also accept a bare `v*`.
 const version = tag.replace(/^(npm-)?v/, "");
+const binaryVersion = `v${version}`;
 const publish = process.argv.includes("--publish");
 
 rmSync(STAGE, { recursive: true, force: true });
@@ -42,7 +43,7 @@ for (const t of TARGETS) {
       "build",
       "-trimpath",
       "-ldflags",
-      `-s -w -X main.version=${tag}`,
+      `-s -w -X main.version=${binaryVersion}`,
       "-o",
       join(dir, "bin", exe),
       "./cmd/reasonix",

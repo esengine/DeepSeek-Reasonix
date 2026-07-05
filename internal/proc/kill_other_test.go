@@ -13,6 +13,17 @@ import (
 	"time"
 )
 
+func TestSetProcessGroupKillDetachesSession(t *testing.T) {
+	cmd := exec.Command("true")
+	SetProcessGroupKill(cmd)
+	if cmd.SysProcAttr == nil {
+		t.Fatal("SysProcAttr is nil")
+	}
+	if !cmd.SysProcAttr.Setsid {
+		t.Fatal("SetProcessGroupKill should detach the child into a new session")
+	}
+}
+
 func TestKillTreeTerminatesChild(t *testing.T) {
 	cmd := exec.Command("sleep", "30")
 	if err := cmd.Start(); err != nil {

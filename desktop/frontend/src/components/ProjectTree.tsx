@@ -123,14 +123,18 @@ function topicIsActive(node: ProjectNode, activeScope?: string, activeWorkspaceR
   );
 }
 
-function topicMetaLine(node: ProjectNode, t: Translator, compact = false): string {
+export function projectTreeTopicMetaLine(node: ProjectNode, t: Translator, compact = false): string {
   const parts: string[] = [];
   const turns = node.turns ?? 0;
   if (turns > 0) parts.push(t(turns === 1 ? "history.turnOne" : "history.turnOther", { n: turns }));
   const activityAt = node.lastActivityAt || node.createdAt || 0;
   if (activityAt) parts.push(topicActivityLabel(activityAt, t, compact));
-  if (parts.length === 0) parts.push(t("projectTree.justNow"));
+  if (parts.length === 0) parts.push(t("projectTree.previously"));
   return parts.join(" · ");
+}
+
+function topicUnknownTimeLabel(node: ProjectNode, t: Translator): string {
+  return topicActivityAt(node) ? "" : t("projectTree.previously");
 }
 
 const topicStatusLabels: Record<ProjectTopicStatus, DictKey> = {
@@ -1050,8 +1054,10 @@ export function ProjectTree({
     const filtered = tree
       .map(filterNode)
       .filter((node): node is ProjectNode => node !== null);
-    return compactTopics ? arrangeWorkbenchTree(filtered, workbenchOrganizeMode, workbenchSortMode) : filtered;
-  }, [compactTopics, query, tree, timeFilter, workbenchOrganizeMode, workbenchSortMode]);
+    if (compactTopics) return arrangeWorkbenchTree(filtered, workbenchOrganizeMode, workbenchSortMode);
+    if (creationTopics) return arrangeWorkbenchTree(filtered, "project", "updated");
+    return filtered;
+  }, [compactTopics, creationTopics, query, tree, timeFilter, workbenchOrganizeMode, workbenchSortMode]);
 
   const workbenchTreeSections = useMemo<WorkbenchTreeSections>(() => {
     if (!compactTopics) return { pinned: [], projects: visibleTree };
@@ -1128,9 +1134,9 @@ export function ProjectTree({
       const label = (node.label || node.topicId || "Untitled").replace(/^●\s*/, "");
       const activityAt = node.lastActivityAt || node.createdAt || 0;
       const sideTimeVisible = compactTopics || creationTopics;
-      const timeLabel = sideTimeVisible && activityAt ? topicActivityLabel(activityAt, t, true) : "";
+      const timeLabel = sideTimeVisible ? (activityAt ? topicActivityLabel(activityAt, t, true) : topicUnknownTimeLabel(node, t)) : "";
       const exactTimeLabel = sideTimeVisible && activityAt ? topicActivityDateLabel(activityAt) : "";
-      const meta = topicMetaLine(node, t, compactTopics);
+      const meta = projectTreeTopicMetaLine(node, t, compactTopics);
       const status = topicStatus(node);
       const statusLabel = topicStatusLabel(node, t);
       const showStatusInSide = status === "thinking" || status === "streaming" || status === "waiting_confirmation" || status === "background_job";
@@ -1140,7 +1146,15 @@ export function ProjectTree({
       const imSourceLabel = imSource?.label || "";
       const imSourceTitle = imSourceLabel ? t("msg.fromIm", { source: imSourceLabel }) : "";
       const imSourcePlatform = (imSource?.platform || "im").replace(/[^a-z0-9_-]/gi, "").toLowerCase() || "im";
-      const title = [label, imSourceTitle, statusLabel, meta, exactTimeLabel].filter(Boolean).join(" · ");
+      const recovered = Boolean(node.recovered);
+      const recoveryTitle = recovered
+        ? [
+            t("recovery.branch"),
+            node.recoveryReason ? t("recovery.reason", { reason: node.recoveryReason }) : "",
+            node.recoveryDigest ? t("recovery.digest", { digest: node.recoveryDigest.slice(0, 12) }) : "",
+          ].filter(Boolean).join(" · ")
+        : "";
+      const title = [label, recoveryTitle, imSourceTitle, statusLabel, meta, exactTimeLabel].filter(Boolean).join(" · ");
       const topicMenuOpen = !isSessionNode && menuTopic === topicId;
       const pinned = Boolean(node.pinned);
       const pinLabel = t(pinned ? "projectTree.unpinTopic" : "projectTree.pinTopic");
@@ -1217,7 +1231,7 @@ export function ProjectTree({
       }
       const row = (
         <div
-          className={`project-tree__topic${scopeClass}${isSessionNode ? " project-tree__topic--session" : ""}${active ? " project-tree__topic--active" : ""}${node.running ? " project-tree__topic--running" : ""}${status ? ` project-tree__topic--status-${status}` : ""}${unread ? " project-tree__topic--unread" : ""}${!isSessionNode && pinned ? " project-tree__topic--pinned" : ""}${topicMenuOpen ? " project-tree__topic--menu-open" : ""}${sideTimeVisible && (timeLabel || showStatusInSide) ? " project-tree__topic--with-side" : meta ? " project-tree__topic--has-meta" : ""}${imSource ? " project-tree__topic--im-source" : ""}${shortcutIndex > 0 ? " project-tree__topic--show-shortcut" : ""}`}
+          className={`project-tree__topic${scopeClass}${isSessionNode ? " project-tree__topic--session" : ""}${active ? " project-tree__topic--active" : ""}${node.running ? " project-tree__topic--running" : ""}${status ? ` project-tree__topic--status-${status}` : ""}${unread ? " project-tree__topic--unread" : ""}${!isSessionNode && pinned ? " project-tree__topic--pinned" : ""}${recovered ? " project-tree__topic--recovered" : ""}${topicMenuOpen ? " project-tree__topic--menu-open" : ""}${sideTimeVisible && (timeLabel || showStatusInSide) ? " project-tree__topic--with-side" : meta ? " project-tree__topic--has-meta" : ""}${imSource ? " project-tree__topic--im-source" : ""}${shortcutIndex > 0 ? " project-tree__topic--show-shortcut" : ""}`}
           style={accentStyle}
           onContextMenu={isSessionNode ? undefined : openTopicMenu}
         >
@@ -1271,6 +1285,11 @@ export function ProjectTree({
                   </span>
                 )}
                 {!compactTopics && statusLabel && <span className={`project-tree__topic-status project-tree__topic-status--${status}`}>{statusLabel}</span>}
+                {recovered && (
+                  <span className="project-tree__topic-recovery" title={recoveryTitle}>
+                    {t("recovery.badge")}
+                  </span>
+                )}
               </span>
               {!compactTopics && !creationTopics && meta && (
                 <span className="project-tree__topic-meta">
@@ -1292,6 +1311,11 @@ export function ProjectTree({
             {compactTopics && meta && (
               <span className="sr-only">
                 {meta}
+              </span>
+            )}
+            {compactTopics && recovered && (
+              <span className="sr-only">
+                {t("recovery.branch")}
               </span>
             )}
           </button>

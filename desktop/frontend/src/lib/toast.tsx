@@ -4,11 +4,19 @@ export interface Toast {
   id: number;
   text: string;
   level: "info" | "warn" | "error";
+  actionLabel?: string;
+  onAction?: () => void;
+}
+
+export interface ToastOptions {
+  actionLabel?: string;
+  onAction?: () => void;
+  durationMs?: number;
 }
 
 export interface ToastContextValue {
   toasts: Toast[];
-  showToast: (text: string, level?: Toast["level"]) => void;
+  showToast: (text: string, level?: Toast["level"], options?: ToastOptions) => void;
 }
 
 const ToastContext = createContext<ToastContextValue>({ toasts: [], showToast: () => {} });
@@ -23,13 +31,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
 
-  const showToast = useCallback((text: string, level: Toast["level"] = "info") => {
+  const showToast = useCallback((text: string, level: Toast["level"] = "info", options: ToastOptions = {}) => {
     const id = nextId++;
-    setToasts((prev) => [...prev, { id, text, level }]);
+    setToasts((prev) => [...prev, { id, text, level, actionLabel: options.actionLabel, onAction: options.onAction }]);
     const timer = setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
       timers.current.delete(id);
-    }, 2500);
+    }, options.durationMs ?? (options.actionLabel ? 8000 : 2500));
     timers.current.set(id, timer);
   }, []);
 
@@ -49,6 +57,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             {t.level === "warn" && <span className="toast__icon">⚠️</span>}
             {t.level === "error" && <span className="toast__icon">❌</span>}
             <span className="toast__text">{t.text}</span>
+            {t.actionLabel && t.onAction && (
+              <button
+                type="button"
+                className="toast__action"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  dismissToast(t.id);
+                  t.onAction?.();
+                }}
+              >
+                {t.actionLabel}
+              </button>
+            )}
           </div>
         ))}
       </div>

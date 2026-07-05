@@ -760,6 +760,30 @@ func TestReadOnlyIndexBlockPointsAtReadOnlySkill(t *testing.T) {
 	}
 }
 
+func TestSkillRoutingMetadataParsesButStaysOutOfIndex(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/router.md", "---\ndescription: route me\ntriggers: code review, 检查代码\nnegative-triggers: explain only\nauto-use: prefer\nneeds-fresh-data: true\ncost: low\n---\nbody")
+	sk, ok := New(Options{HomeDir: home, DisableBuiltins: true}).Read("router")
+	if !ok {
+		t.Fatal("skill not loaded")
+	}
+	if got := strings.Join(sk.Triggers, ","); got != "code review,检查代码" {
+		t.Fatalf("Triggers = %q", got)
+	}
+	if got := strings.Join(sk.NegativeTriggers, ","); got != "explain only" {
+		t.Fatalf("NegativeTriggers = %q", got)
+	}
+	if sk.AutoUse != "prefer" || !sk.NeedsFreshData || sk.Cost != "low" {
+		t.Fatalf("routing metadata = auto:%q fresh:%v cost:%q", sk.AutoUse, sk.NeedsFreshData, sk.Cost)
+	}
+	index := IndexBlock([]Skill{sk})
+	for _, forbidden := range []string{"code review", "auto-use", "needs-fresh-data"} {
+		if strings.Contains(index, forbidden) {
+			t.Fatalf("routing metadata leaked into index (%q):\n%s", forbidden, index)
+		}
+	}
+}
+
 func TestApplyIndexTruncates(t *testing.T) {
 	var skills []Skill
 	for i := 0; i < 200; i++ {
@@ -768,6 +792,15 @@ func TestApplyIndexTruncates(t *testing.T) {
 	out := ApplyIndex("BASE", skills)
 	if !strings.Contains(out, "truncated") {
 		t.Error("oversized index should be truncated")
+	}
+}
+
+func TestIndexLineClipsGraphemeClusters(t *testing.T) {
+	cluster := "👨‍👩‍👧‍👦"
+	got := clipRunes("a"+cluster+"bc", 3)
+	want := "a" + cluster + "…"
+	if got != want {
+		t.Fatalf("clipRunes() = %q, want %q", got, want)
 	}
 }
 

@@ -189,6 +189,31 @@ type approveCall struct {
 	persist bool
 }
 
+func invalidACPv1PermissionOptionKind(options []PermissionOption) (PermissionOption, bool) {
+	// ACP v1 schema only accepts these four PermissionOptionKind values. ACP hosts
+	// own cross-session persistence, so Reasonix-specific persistent approvals must
+	// not appear in session/request_permission options.
+	valid := map[PermissionOptionKind]bool{
+		OptAllowOnce:    true,
+		OptAllowAlways:  true,
+		OptRejectOnce:   true,
+		OptRejectAlways: true,
+	}
+	for _, opt := range options {
+		if !valid[opt.Kind] {
+			return opt, true
+		}
+	}
+	return PermissionOption{}, false
+}
+
+func assertACPv1PermissionOptionKinds(t *testing.T, options []PermissionOption) {
+	t.Helper()
+	if opt, ok := invalidACPv1PermissionOptionKind(options); ok {
+		t.Fatalf("permission option %q uses non-ACP-v1 kind %q", opt.OptionID, opt.Kind)
+	}
+}
+
 func TestUpdateSinkApprovalAllowAlways(t *testing.T) {
 	fn := &fakeNotifier{onReq: func(method string, params any) (json.RawMessage, error) {
 		if method != "session/request_permission" {
@@ -208,6 +233,7 @@ func TestUpdateSinkApprovalAllowAlways(t *testing.T) {
 		if p.ToolCall.ToolCallID != "gate-9" {
 			t.Errorf("toolCallId = %q, want gate-9", p.ToolCall.ToolCallID)
 		}
+		assertACPv1PermissionOptionKinds(t, p.Options)
 		res, _ := json.Marshal(PermissionRequestResult{
 			Outcome: PermissionOutcome{Outcome: "selected", OptionID: string(OptAllowAlways)},
 		})
@@ -236,22 +262,30 @@ func TestUpdateSinkApprovalBashPrefix(t *testing.T) {
 		if err := json.Unmarshal(raw, &p); err != nil {
 			t.Fatalf("permission params: %v", err)
 		}
-		// Bash with a safe prefix now uses the same standard options as any
-		// other tool (allow_always / allow_persistent); the old prefix-specific
-		// OptAllowPrefix/OptPersistPrefix are gone.
-		var hasSession, hasPersistent bool
+		// ACP permission options stay within the official spec kinds, and ACP
+		// mode leaves cross-session persistence to the host.
+		assertACPv1PermissionOptionKinds(t, p.Options)
+		var hasOnce, hasSession, hasReject bool
 		for _, opt := range p.Options {
-			hasSession = hasSession || opt.OptionID == string(OptAllowAlways)
-			hasPersistent = hasPersistent || opt.OptionID == string(OptAllowPersistent)
+			switch opt.OptionID {
+			case string(OptAllowOnce):
+				hasOnce = opt.Kind == OptAllowOnce
+			case string(OptAllowAlways):
+				hasSession = opt.Kind == OptAllowAlways
+			case string(OptRejectOnce):
+				hasReject = opt.Kind == OptRejectOnce
+			default:
+				t.Fatalf("unexpected ACP permission option %+v in %+v", opt, p.Options)
+			}
 		}
-		if !hasSession || !hasPersistent {
-			t.Fatalf("options = %+v, want standard session and persistent choices", p.Options)
+		if !hasOnce || !hasSession || !hasReject {
+			t.Fatalf("options = %+v, want allow once, session, reject", p.Options)
 		}
-		if len(p.Options) != 4 {
-			t.Fatalf("options = %+v, want allow once, session, persistent, reject", p.Options)
+		if len(p.Options) != 3 {
+			t.Fatalf("options = %+v, want allow once, session, reject", p.Options)
 		}
 		res, _ := json.Marshal(PermissionRequestResult{
-			Outcome: PermissionOutcome{Outcome: "selected", OptionID: string(OptAllowPersistent)},
+			Outcome: PermissionOutcome{Outcome: "selected", OptionID: string(OptAllowAlways)},
 		})
 		return res, nil
 	}}
@@ -263,7 +297,7 @@ func TestUpdateSinkApprovalBashPrefix(t *testing.T) {
 
 	select {
 	case c := <-got:
-		want := approveCall{id: "10", allow: true, session: true, persist: true}
+		want := approveCall{id: "10", allow: true, session: true, persist: false}
 		if c != want {
 			t.Errorf("approve = %+v, want %+v", c, want)
 		}
@@ -328,6 +362,7 @@ func TestUpdateSinkAskRequestUsesPermissionChoices(t *testing.T) {
 		if len(p.Options) != 3 {
 			t.Fatalf("options = %+v, want two answers plus cancel", p.Options)
 		}
+		assertACPv1PermissionOptionKinds(t, p.Options)
 		if p.Options[0].Name != "Tests - Run the suite" || p.Options[0].Kind != OptAllowOnce {
 			t.Fatalf("first option = %+v", p.Options[0])
 		}

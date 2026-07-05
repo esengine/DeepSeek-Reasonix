@@ -18,7 +18,7 @@ provides the pre-release buffer instead of a long-lived branch.
 | Surface | Stable | Pre-release buffer |
 |---|---|---|
 | npm | `latest` (0.x), `next` (1.x) | `canary` (`npm i reasonix@canary`) |
-| Desktop | R2 `latest/` pointer | R2 `canary/` pointer (R2-only — never on the GitHub releases page) |
+| Desktop | R2 `latest/` pointer + release gateway | R2 `canary/` pointer + release gateway proxy (never on the GitHub releases page) |
 
 A canary build is isolated: it **never** moves `latest` / `next` / desktop `latest/`.
 Testers opt in explicitly. (Desktop builds carry `-X main.channel=canary`; npm versions
@@ -68,8 +68,13 @@ the `release` environment deployment.
 - Canary version numbers use the workflow `run_number`, so the desktop and CLI canary
   numbers differ (e.g. `canary.11` vs `canary.2`). Only monotonicity per channel matters.
 - A stable `-rc` tag (e.g. `npm-v1.4.0-rc.1`) still ships under `next`, not `canary`.
-- Desktop in-app updates use R2 first. Stable has a GitHub release fallback; canary is
-  R2-only and never appears on the GitHub releases page.
+- Desktop in-app updates use R2 first, then the `crash.reasonix.io` desktop release
+  gateway. The gateway resolves the `desktop-v*` release line directly and never uses
+  GitHub's repository-wide `/releases/latest`, because plain `v*` tags are the CLI
+  release line. Stable CLI releases also carry a compatibility `latest.json` asset so
+  older desktop builds that still use GitHub `latest` do not 404.
+- Canary uses R2 plus the same gateway proxy for the `canary/` pointer; it never
+  appears on the GitHub releases page.
 - Windows and Linux apply downloaded, minisign-verified artifacts in place. macOS
   applies in-app only for Developer ID signed and notarized builds; ad-hoc/local
   builds fall back to the download page.

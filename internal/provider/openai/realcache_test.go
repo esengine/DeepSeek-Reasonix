@@ -48,7 +48,7 @@ func TestRealDeepSeekCacheProbe(t *testing.T) {
 	send := func(msgs []provider.Message) (probeResult, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		ch, err := p.Stream(ctx, provider.Request{Messages: msgs, Temperature: 0, MaxTokens: 16})
+		ch, err := p.Stream(ctx, provider.Request{Messages: msgs, Temperature: provider.TemperaturePtr(0), MaxTokens: 16})
 		if err != nil {
 			return probeResult{}, err
 		}

@@ -41,8 +41,8 @@ func TestProviderAutoPlanClassifierParsesJSON(t *testing.T) {
 	if len(p.req.Messages) != 2 || p.req.Messages[0].Role != provider.RoleSystem {
 		t.Fatalf("request messages = %+v", p.req.Messages)
 	}
-	if p.req.MaxTokens != 80 || p.req.Temperature != 0 {
-		t.Fatalf("request limits = max %d temp %v, want 80/0", p.req.MaxTokens, p.req.Temperature)
+	if p.req.MaxTokens != 80 || p.req.Temperature == nil || *p.req.Temperature != 0 {
+		t.Fatalf("request limits = max %d temp %v, want 80/ptr(0)", p.req.MaxTokens, p.req.Temperature)
 	}
 	if !strings.Contains(p.req.Messages[1].Content, "heuristic_score=1") {
 		t.Fatalf("user message missing score: %q", p.req.Messages[1].Content)

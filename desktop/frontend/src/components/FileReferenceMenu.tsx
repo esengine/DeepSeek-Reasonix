@@ -6,6 +6,13 @@ import { app } from "../lib/bridge";
 import type { DirEntry } from "../lib/types";
 import { VirtualMenu } from "./VirtualMenu";
 
+const FILE_REF_SEARCH_CACHE_TTL_MS = 5000;
+
+type FileRefSearchCacheEntry = {
+  entries: DirEntry[];
+  cachedAt: number;
+};
+
 export function dirEntrySubmitPath(entry: DirEntry, atDir: string): string {
   return entry.path || atDir + entry.name;
 }
@@ -58,7 +65,7 @@ export function useFileReferenceMenu(text: string, cwd?: string) {
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const dirCache = useRef<Record<string, DirEntry[]>>({});
-  const searchCache = useRef<Record<string, DirEntry[]>>({});
+  const searchCache = useRef<Record<string, FileRefSearchCacheEntry>>({});
   const prevCwdRef = useRef(cwd);
 
   useEffect(() => {
@@ -82,15 +89,17 @@ export function useFileReferenceMenu(text: string, cwd?: string) {
     const cached = dirCache.current[atDir];
     if (cached) {
       setEntries(cached);
-      return;
+    } else {
+      setEntries([]);
     }
     let live = true;
     app
       .ListDir(atDir)
       .then((next) => {
         const list = asArray(next);
+        if (!live) return;
         dirCache.current[atDir] = list;
-        if (live) setEntries(list);
+        setEntries(list);
       })
       .catch(() => {});
     return () => {
@@ -105,17 +114,19 @@ export function useFileReferenceMenu(text: string, cwd?: string) {
     }
     const cached = searchCache.current[atFrag];
     if (cached) {
-      setSearchEntries(cached);
-      return;
+      setSearchEntries(cached.entries);
+      if (Date.now() - cached.cachedAt < FILE_REF_SEARCH_CACHE_TTL_MS) return;
+    } else {
+      setSearchEntries([]);
     }
-    setSearchEntries([]);
     let live = true;
     app
       .SearchFileRefs(atFrag)
       .then((next) => {
-        const list = next ?? [];
-        searchCache.current[atFrag] = list;
-        if (live) setSearchEntries(list);
+        const list = asArray(next);
+        if (!live) return;
+        searchCache.current[atFrag] = { entries: list, cachedAt: Date.now() };
+        setSearchEntries(list);
       })
       .catch(() => {});
     return () => {

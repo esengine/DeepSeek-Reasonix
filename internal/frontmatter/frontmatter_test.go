@@ -111,3 +111,70 @@ func TestSplitCaseInsensitive(t *testing.T) {
 		t.Errorf("description = %q", fm["description"])
 	}
 }
+
+func TestSplitYAMLScalarsWithColonAndMultiline(t *testing.T) {
+	fm, body := Split("---\n" +
+		"name: test\n" +
+		"description: \"run: with colon\"\n" +
+		"notes: |\n" +
+		"  first line\n" +
+		"  second line\n" +
+		"---\n" +
+		"body")
+	if fm["description"] != "run: with colon" {
+		t.Fatalf("description = %q", fm["description"])
+	}
+	if fm["notes"] != "first line\nsecond line" {
+		t.Fatalf("notes = %q", fm["notes"])
+	}
+	if body != "body" {
+		t.Fatalf("body = %q", body)
+	}
+}
+
+func TestDecodeTypedFrontmatter(t *testing.T) {
+	var meta struct {
+		Name         string   `yaml:"name"`
+		Description  string   `yaml:"description"`
+		AllowedTools []string `yaml:"allowed-tools"`
+	}
+	body, err := Decode("---\nname: review\ndescription: \"run: checks\"\nallowed-tools:\n  - read_file\n  - grep\n---\nbody", &meta, DecodeOptions{KnownFields: true})
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if meta.Name != "review" || meta.Description != "run: checks" {
+		t.Fatalf("meta = %+v", meta)
+	}
+	if strings.Join(meta.AllowedTools, ",") != "read_file,grep" {
+		t.Fatalf("AllowedTools = %#v", meta.AllowedTools)
+	}
+	if body != "body" {
+		t.Fatalf("body = %q", body)
+	}
+}
+
+func TestDecodeKnownFieldsReportsUnknownKey(t *testing.T) {
+	var meta struct {
+		Name string `yaml:"name"`
+	}
+	_, err := Decode("---\nname: ok\nextra: nope\n---\nbody", &meta, DecodeOptions{KnownFields: true})
+	if err == nil {
+		t.Fatal("Decode accepted unknown frontmatter key")
+	}
+	if !strings.Contains(err.Error(), "extra") {
+		t.Fatalf("error = %v, want unknown key name", err)
+	}
+}
+
+func TestDecodeReportsMalformedYAML(t *testing.T) {
+	var meta struct {
+		Name string `yaml:"name"`
+	}
+	_, err := Decode("---\nname: [unterminated\n---\nbody", &meta, DecodeOptions{})
+	if err == nil {
+		t.Fatal("Decode accepted malformed YAML")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "line") {
+		t.Fatalf("error = %v, want YAML location detail", err)
+	}
+}

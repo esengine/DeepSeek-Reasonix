@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -170,6 +171,229 @@ func TestAutosaveFailureRetriesAndRecoversOnNextTurnDone(t *testing.T) {
 	tab.saveMu.Unlock()
 	if failures != 0 {
 		t.Fatalf("autosave failures after recovery = %d, want 0", failures)
+	}
+}
+
+func TestDesktopSnapshotConflictRecoveryUpdatesTabAndProjectTree(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	root := globalTabWorkspaceRoot()
+	dir := desktopSessionDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	originalPath := filepath.Join(dir, "session.jsonl")
+	originalTopic := "topic_original"
+	if err := setTopicTitle("", originalTopic, "Original"); err != nil {
+		t.Fatalf("set original topic title: %v", err)
+	}
+	current := agent.NewSession("sys")
+	current.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	current.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	current.Add(provider.Message{Role: provider.RoleUser, Content: "disk second"})
+	if err := current.Save(originalPath); err != nil {
+		t.Fatalf("Save current: %v", err)
+	}
+	if err := agent.SaveBranchMeta(originalPath, agent.BranchMeta{
+		Scope:         "global",
+		TopicID:       originalTopic,
+		TopicTitle:    "Original",
+		Preview:       "first",
+		Turns:         2,
+		SchemaVersion: agent.BranchMetaCountsVersion,
+	}); err != nil {
+		t.Fatalf("SaveBranchMeta original: %v", err)
+	}
+
+	staleSess := agent.NewSession("sys")
+	staleSess.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	staleSess.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	staleSess.Add(provider.Message{Role: provider.RoleUser, Content: "local second"})
+	staleExec := agent.New(stubProvider{}, tool.NewRegistry(), staleSess, agent.Options{}, event.Discard)
+	app := &App{
+		tabs:             map[string]*WorkspaceTab{},
+		detachedSessions: map[string]*WorkspaceTab{},
+		activeTabID:      "recovery_tab",
+	}
+	tab := &WorkspaceTab{
+		ID:            "recovery_tab",
+		Scope:         "global",
+		WorkspaceRoot: root,
+		TopicID:       originalTopic,
+		TopicTitle:    "Original",
+		SessionPath:   originalPath,
+		Ready:         true,
+		model:         "test-model",
+		disabledMCP:   map[string]ServerView{},
+	}
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	tab.Ctrl = control.New(control.Options{
+		Executor:            staleExec,
+		SessionDir:          dir,
+		SessionPath:         originalPath,
+		Label:               "test",
+		Sink:                tab.sink,
+		SessionRecoveryMeta: app.tabSessionRecoveryMeta(tab),
+		OnSessionRecovered:  app.handleTabSessionRecovered(tab),
+	})
+	app.tabs[tab.ID] = tab
+
+	if err := tab.Ctrl.Snapshot(); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	recoveryPath := tab.Ctrl.SessionPath()
+	if recoveryPath == "" || recoveryPath == originalPath {
+		t.Fatalf("recovery path = %q, want distinct path", recoveryPath)
+	}
+	if tab.SessionPath != recoveryPath {
+		t.Fatalf("tab session path = %q, want recovery path %q", tab.SessionPath, recoveryPath)
+	}
+	if tab.TopicID == "" || tab.TopicID == originalTopic {
+		t.Fatalf("tab topic ID = %q, want fresh recovery topic", tab.TopicID)
+	}
+	meta, ok, err := agent.LoadBranchMeta(recoveryPath)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta recovery ok=%v err=%v", ok, err)
+	}
+	if !meta.Recovered || meta.TopicID != tab.TopicID || meta.TopicTitle != tab.TopicTitle {
+		t.Fatalf("recovery meta = %+v, tab topic=%q/%q", meta, tab.TopicID, tab.TopicTitle)
+	}
+	tabMeta := app.tabMeta(tab, true)
+	if !tabMeta.Recovered || tabMeta.RecoveryDigest != meta.RecoveryDigest || tabMeta.RecoveryParentID != string(meta.ParentID) {
+		t.Fatalf("tab recovery meta = %+v, want digest %q parent %q", tabMeta, meta.RecoveryDigest, meta.ParentID)
+	}
+	nodes := app.ListProjectTree()
+	found := false
+	var walk func([]ProjectNode)
+	walk = func(list []ProjectNode) {
+		for _, node := range list {
+			if node.TopicID == tab.TopicID {
+				found = true
+				if !node.Recovered || node.RecoveryDigest != meta.RecoveryDigest || node.RecoveryParentID != string(meta.ParentID) {
+					t.Fatalf("project tree recovery node = %+v, want digest %q parent %q", node, meta.RecoveryDigest, meta.ParentID)
+				}
+			}
+			walk(node.Children)
+		}
+	}
+	walk(nodes)
+	if !found {
+		t.Fatalf("project tree did not include recovery topic %q: %#v", tab.TopicID, nodes)
+	}
+}
+
+func TestDesktopSnapshotConflictRecoveryRequiresRecoveryLease(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	root := globalTabWorkspaceRoot()
+	dir := desktopSessionDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	originalPath := filepath.Join(dir, "session.jsonl")
+	current := agent.NewSession("sys")
+	current.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	current.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	current.Add(provider.Message{Role: provider.RoleUser, Content: "disk second"})
+	if err := current.Save(originalPath); err != nil {
+		t.Fatalf("Save current: %v", err)
+	}
+
+	staleSess := agent.NewSession("sys")
+	staleSess.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	staleSess.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	staleSess.Add(provider.Message{Role: provider.RoleUser, Content: "local second"})
+	recovery, err := staleSess.SaveRecoveryBranch(agent.RecoveryBranchOptions{
+		OriginalPath: originalPath,
+		BranchMeta: agent.BranchMeta{
+			Name:       agent.RecoveryBranchDefaultName,
+			Scope:      "global",
+			TopicID:    "topic_recovery",
+			TopicTitle: "Recovery",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveRecoveryBranch: %v", err)
+	}
+	lease, err := agent.TryAcquireSessionLease(recovery.Path)
+	if err != nil {
+		t.Fatalf("TryAcquireSessionLease recovery: %v", err)
+	}
+	defer lease.Release()
+
+	staleExec := agent.New(stubProvider{}, tool.NewRegistry(), staleSess, agent.Options{}, event.Discard)
+	runtimeEvents := make(chan runtimeEventEnvelope, 4)
+	app := &App{
+		ctx:              context.Background(),
+		tabs:             map[string]*WorkspaceTab{},
+		detachedSessions: map[string]*WorkspaceTab{},
+		activeTabID:      "recovery_tab",
+	}
+	app.runtimeEvents.emit = func(ctx context.Context, name string, payload ...interface{}) {
+		runtimeEvents <- runtimeEventEnvelope{
+			ctx:     ctx,
+			name:    name,
+			payload: append([]interface{}(nil), payload...),
+		}
+	}
+	tab := &WorkspaceTab{
+		ID:            "recovery_tab",
+		Scope:         "global",
+		WorkspaceRoot: root,
+		TopicID:       "topic_original",
+		TopicTitle:    "Original",
+		SessionPath:   originalPath,
+		Ready:         true,
+		model:         "test-model",
+		disabledMCP:   map[string]ServerView{},
+	}
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	tab.Ctrl = control.New(control.Options{
+		Executor:            staleExec,
+		SessionDir:          dir,
+		SessionPath:         originalPath,
+		Label:               "test",
+		Sink:                tab.sink,
+		SessionRecoveryMeta: app.tabSessionRecoveryMeta(tab),
+		OnSessionRecovered:  app.handleTabSessionRecovered(tab),
+	})
+	app.tabs[tab.ID] = tab
+
+	err = tab.Ctrl.Snapshot()
+	if !errors.Is(err, agent.ErrSessionLeaseHeld) {
+		t.Fatalf("Snapshot err = %v, want ErrSessionLeaseHeld", err)
+	}
+	if got := tab.Ctrl.SessionPath(); got != originalPath {
+		t.Fatalf("controller session path = %q, want original %q", got, originalPath)
+	}
+	if tab.SessionPath != originalPath {
+		t.Fatalf("tab session path = %q, want original %q", tab.SessionPath, originalPath)
+	}
+	if tab.TopicID != "topic_original" {
+		t.Fatalf("tab topic ID = %q, want original topic", tab.TopicID)
+	}
+
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case emitted := <-runtimeEvents:
+			if emitted.name != "session:recovery-failed" {
+				continue
+			}
+			if len(emitted.payload) != 1 {
+				t.Fatalf("session:recovery-failed payload count = %d, want 1", len(emitted.payload))
+			}
+			failed, ok := emitted.payload[0].(sessionRecoveryFailedEvent)
+			if !ok {
+				t.Fatalf("session:recovery-failed payload type = %T, want sessionRecoveryFailedEvent", emitted.payload[0])
+			}
+			if failed.Reason != "lease_held" {
+				t.Fatalf("session:recovery-failed reason = %q, want lease_held", failed.Reason)
+			}
+			return
+		case <-deadline:
+			t.Fatal("session:recovery-failed event was not emitted")
+		}
 	}
 }
 

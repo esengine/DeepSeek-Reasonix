@@ -119,44 +119,69 @@ func (t *toolSourceConnector) Execute(ctx context.Context, args json.RawMessage)
 	}
 	name := strings.TrimSpace(p.Name)
 
+	out, mcpConnect, err := t.executeLocked(ctx, source, name, p.Source)
+	if mcpConnect == nil {
+		return out, err
+	}
+	// Connecting an MCP server spawns its subprocess and blocks until the
+	// handshake finishes (seconds, or until ctx expires), so it runs outside
+	// t.mu: concurrent connect_tool_source calls for fast sources must not
+	// queue behind it. No re-locking is needed afterwards: the callback itself
+	// merges the server's tools into the registry (which has its own lock),
+	// and Execute keeps no per-server state. Concurrent connects racing on the
+	// same server are deduplicated inside the callback via the plugin host
+	// (ErrServerAlreadyConnected / ErrSpawningInFlight fall back to the
+	// already-connected server's tools), so the loser still idempotently
+	// reports the enabled tools instead of failing.
+	return mcpConnect(ctx, name)
+}
+
+// executeLocked dispatches a connect_tool_source call under t.mu. Fast sources
+// (registry-only mutations) run to completion while the lock is held. For an
+// MCP connect with a server name it performs only the quick pre-checks
+// (plan-mode gate, callback availability) and returns the connect callback as
+// mcpConnect; the caller invokes it after releasing t.mu. When mcpConnect is
+// nil, out/err are the final result.
+func (t *toolSourceConnector) executeLocked(ctx context.Context, source, name, rawSource string) (out string, mcpConnect func(context.Context, string) (string, error), err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if blocked, msg := t.planModeSourceBlocked(ctx, source, name); blocked {
-		return msg, nil
+		return msg, nil, nil
 	}
 
 	switch source {
 	case "skills":
-		return runSourceInstaller(ctx, "skills", t.skills)
+		out, err = runSourceInstaller(ctx, "skills", t.skills)
 	case "read_only_skill":
-		return runSourceInstaller(ctx, "read_only_skill", t.readOnlySkill)
+		out, err = runSourceInstaller(ctx, "read_only_skill", t.readOnlySkill)
 	case "task":
-		return runSourceInstaller(ctx, "task", t.task)
+		out, err = runSourceInstaller(ctx, "task", t.task)
 	case "read_only_task":
-		return runSourceInstaller(ctx, "read_only_task", t.readOnlyTask)
+		out, err = runSourceInstaller(ctx, "read_only_task", t.readOnlyTask)
 	case "install_source":
-		return runSourceInstaller(ctx, "install_source", t.install)
+		out, err = runSourceInstaller(ctx, "install_source", t.install)
 	case "web_fetch":
-		return runSourceInstaller(ctx, "web_fetch", t.webFetch)
+		out, err = runSourceInstaller(ctx, "web_fetch", t.webFetch)
 	case "lsp":
-		return runSourceInstaller(ctx, "lsp", t.lsp)
+		out, err = runSourceInstaller(ctx, "lsp", t.lsp)
 	case "mcp":
 		if name == "" {
 			if len(t.mcpNames) == 0 {
-				return "No configured MCP servers are available in this session.", nil
+				return "No configured MCP servers are available in this session.", nil, nil
 			}
 			names := append([]string(nil), t.mcpNames...)
 			sort.Strings(names)
-			return "Configured MCP servers: " + strings.Join(names, ", ") + ". Call connect_tool_source again with source=\"mcp\" and name set to connect one server.", nil
+			return "Configured MCP servers: " + strings.Join(names, ", ") + ". Call connect_tool_source again with source=\"mcp\" and name set to connect one server.", nil, nil
 		}
 		if t.mcp == nil {
-			return "", fmt.Errorf("MCP source is unavailable in this session")
+			return "", nil, fmt.Errorf("MCP source is unavailable in this session")
 		}
-		return t.mcp(ctx, name)
+		return "", t.mcp, nil
 	default:
-		return "", fmt.Errorf("unknown tool source %q", p.Source)
+		return "", nil, fmt.Errorf("unknown tool source %q", rawSource)
 	}
+	return out, nil, err
 }
 
 func (t *toolSourceConnector) planModeSourceBlocked(ctx context.Context, source, name string) (bool, string) {

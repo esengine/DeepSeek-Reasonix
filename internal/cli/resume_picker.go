@@ -112,12 +112,15 @@ func (m chatTUI) renderResumePicker() string {
 	return choicePanelStyle.Width(w).Render(b.String())
 }
 
-// sessionPickerLabel is the "N turns · topicTitle/first message" line, truncated to fit.
-// When a TopicTitle is set (via /rename or desktop), it is shown instead of the raw preview.
+// sessionPickerLabel is the "N turns · display title" line, truncated to fit.
+// Explicit session renames win, then topic titles, then the raw preview.
 func sessionPickerLabel(s agent.SessionInfo) string {
-	preview := s.Preview
-	if s.TopicTitle != "" {
+	preview := s.CustomTitle
+	if preview == "" {
 		preview = s.TopicTitle
+	}
+	if preview == "" {
+		preview = s.Preview
 	}
 	if preview == "" {
 		preview = "(no user message yet)"

@@ -509,6 +509,9 @@ func runServe(args []string) int {
 	} else if srv.AuthMode() == "password" {
 		fmt.Printf("  auth: password (login at http://%s/login)\n", *addr)
 	}
+	if warning := serve.PlainHTTPAuthWarning(serveCfg, *addr); warning != "" {
+		fmt.Fprintf(os.Stderr, "  %s\n", warning)
+	}
 	// Diagnostic: check whether balance endpoint is reachable
 	if b, err := ctrl.Balance(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "  balance: error — %v\n", err)
@@ -1816,6 +1819,10 @@ func configAutoPlanCommand(args []string) int {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "cannot resolve config path")
 		return 1
 	}
+	// Serialize the load-modify-save against other in-process user-config
+	// editors so concurrent writers don't drop each other's fields.
+	unlock := config.LockUserConfigEdits()
+	defer unlock()
 	cfg := config.LoadForEdit(path)
 	if err := cfg.SetAutoPlan(rest[0]); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -1864,6 +1871,10 @@ func configMemoryV5Command(args []string) int {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "cannot resolve config path")
 		return 1
 	}
+	// Serialize the load-modify-save against other in-process user-config
+	// editors so concurrent writers don't drop each other's fields.
+	unlock := config.LockUserConfigEdits()
+	defer unlock()
 	cfg := config.LoadForEdit(path)
 	if err := cfg.SetMemoryCompilerEnabled(setting.enabled); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -1930,6 +1941,13 @@ func configReasoningLanguageCommand(args []string) int {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
 		}
+	}
+	if !*local {
+		// Non-local writes target the user config; serialize the
+		// load-modify-save against other in-process user-config editors.
+		// --local writes ./reasonix.toml and needs no user-config lock.
+		unlock := config.LockUserConfigEdits()
+		defer unlock()
 	}
 	cfg := config.LoadForEdit(path)
 	if err := cfg.SetReasoningLanguage(mode); err != nil {

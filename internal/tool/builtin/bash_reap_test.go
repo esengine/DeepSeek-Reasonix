@@ -19,14 +19,14 @@ import (
 
 // TestReapTreeKillsGroupStragglers covers #3702: a foreground command that
 // backgrounds a child (here a long sleep, standing in for `bazel run`'s server)
-// leaves it in the process group after Wait reaps the shell leader. reapTree must
+// leaves it in the process group after Wait reaps the shell leader. KillTree must
 // kill it so such processes don't accumulate into an OOM. The child redirects its
 // fds and the pid is passed via a file so the inherited stdout can't block Wait.
 func TestReapTreeKillsGroupStragglers(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "pid")
 	cmd := exec.CommandContext(context.Background(), "sh", "-c",
 		"sleep 60 >/dev/null 2>&1 & echo $! > "+pidFile)
-	setKillTree(cmd) // Setpgid — the shell leads its own group
+	proc.SetCancelKillsTree(cmd) // new session — the shell leads its own group
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestReapTreeKillsGroupStragglers(t *testing.T) {
 		t.Skipf("backgrounded child %d not alive after shell exit (%v)", pid, err)
 	}
 
-	reapTree(cmd)
+	proc.KillTree(cmd)
 
 	dead := false
 	for i := 0; i < 50; i++ {
@@ -113,6 +113,21 @@ func TestExplicitBackgroundKeepaliveDetection(t *testing.T) {
 			want:    true,
 		},
 		{
+			name:    "command wrapper before nohup",
+			command: "command nohup sleep 60 >/dev/null 2>&1 &",
+			want:    true,
+		},
+		{
+			name:    "env assignment wrapper before nohup",
+			command: "env CUDA_VISIBLE_DEVICES=0 nohup python train.py >/dev/null 2>&1 &",
+			want:    true,
+		},
+		{
+			name:    "quoted command name still static",
+			command: `"nohup" sleep 60 >/dev/null 2>&1 &`,
+			want:    true,
+		},
+		{
 			name:    "plain background still reaped",
 			command: "sleep 60 >/dev/null 2>&1 &",
 			want:    false,
@@ -125,6 +140,26 @@ func TestExplicitBackgroundKeepaliveDetection(t *testing.T) {
 		{
 			name:    "quoted nohup argument ignored",
 			command: "echo 'nohup sleep 60 &' &",
+			want:    false,
+		},
+		{
+			name:    "process substitution quoted keepalive text ignored",
+			command: "cat <(printf '%s\\n' 'nohup sleep 60 &')",
+			want:    false,
+		},
+		{
+			name:    "process substitution real keepalive command",
+			command: "cat <(nohup sleep 60 >/dev/null 2>&1 &)",
+			want:    true,
+		},
+		{
+			name:    "dynamic command name is not preserved",
+			command: `cmd=nohup; "$cmd" sleep 60 >/dev/null 2>&1 &`,
+			want:    false,
+		},
+		{
+			name:    "parse failure is conservative",
+			command: "nohup sleep 60 & '",
 			want:    false,
 		},
 		{
@@ -141,6 +176,26 @@ func TestExplicitBackgroundKeepaliveDetection(t *testing.T) {
 			name:    "assignment before nohup",
 			command: "CUDA_VISIBLE_DEVICES=0 nohup python train.py >/dev/null 2>&1 &",
 			want:    true,
+		},
+		{
+			name: "heredoc body ampersand and parens are not keepalive",
+			command: strings.Join([]string{
+				"cat > /tmp/test_redact.go <<'EOF'",
+				"func main() {",
+				"\tjson.Unmarshal(data, &v)",
+				"}",
+				"EOF",
+			}, "\n"),
+			want: false,
+		},
+		{
+			name: "heredoc body keepalive text is not keepalive",
+			command: strings.Join([]string{
+				"cat > /tmp/repro.txt <<'EOF'",
+				"nohup sleep 60 >/dev/null 2>&1 &",
+				"EOF",
+			}, "\n"),
+			want: false,
 		},
 	}
 

@@ -113,6 +113,10 @@ eq(
   "var(--statusbar-dock-height)",
   "status bar min-height follows the scaled dock token",
 );
+eq(finalDeclaration(".provider-template-grid", "grid-auto-rows"), "92px", "provider preset cards use compact equal-height grid rows");
+eq(finalDeclaration(".provider-template-card", "height"), "100%", "provider preset cards stretch to the grid row height");
+eq(finalDeclaration(".provider-template-card strong", "-webkit-line-clamp"), "1", "provider preset card titles clamp to one line");
+eq(finalDeclaration(".provider-template-card span", "-webkit-line-clamp"), "2", "provider preset card descriptions clamp to two lines");
 
 eq(finalDeclaration(".statusbar", "white-space"), "nowrap", "status bar keeps metrics on one row");
 eq(finalDeclaration(".statusbar", "overflow"), "hidden", "status bar clips instead of overflowing");
@@ -160,6 +164,16 @@ ok(
 );
 
 eq(finalDeclaration(".composer-modebar", "overflow"), "hidden", "chat mode switcher contains enlarged labels");
+eq(
+  finalDeclaration(".app--creation .tool:not(.tool--open) > .tool__body", "height"),
+  "0 !important",
+  "collapsed creation tool bodies keep mounted content clipped",
+);
+eq(
+  finalDeclaration(".app--creation .tool:not(.tool--open) > .tool__body", "visibility"),
+  "hidden",
+  "collapsed creation tool bodies do not paint hidden tool text",
+);
 ok(
   /@container\s*\(max-width:\s*760px\)[\s\S]*?\.composer-meta__control--model\s*\{[\s\S]*?flex\s*:\s*0 1 auto[\s\S]*?width\s*:\s*fit-content[\s\S]*?max-width\s*:\s*min\(240px,\s*42vw\)[\s\S]*?\.composer-meta--has-intent-chip\s+\.composer-meta__control--model\s*\{[\s\S]*?flex\s*:\s*0 1 auto[\s\S]*?width\s*:\s*fit-content[\s\S]*?max-width\s*:\s*min\(220px,\s*38vw\)[\s\S]*?\.composer-meta__control--effort\s*\{[\s\S]*?display\s*:\s*none[\s\S]*?\.composer-meta__control--more\s*\{[\s\S]*?display\s*:\s*inline-flex/.test(styles),
   "composer compact controls activate at the capped theme width",

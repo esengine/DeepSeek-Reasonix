@@ -35,13 +35,18 @@ var indexHTML []byte
 // Server wires a controller to its HTTP surface. The Broadcaster must be the
 // same sink the controller was constructed with, so events reach SSE clients.
 type Server struct {
-	mu         sync.RWMutex // guards ctrl, which switchModel swaps at runtime
-	ctrl       control.SessionAPI
-	bc         *Broadcaster
-	titleProv  provider.Provider // lightweight flash provider for session titles
-	titlePrice *provider.Pricing
-	titles     *titleCache
-	auth       *authGate // nil when auth is disabled
+	mu       sync.RWMutex // guards ctrl, which switchModel swaps at runtime
+	switchMu sync.Mutex   // serializes switchModel so its Snapshot/Build/Close run off s.mu
+	ctrl     control.SessionAPI
+	bc       *Broadcaster
+	// buildController builds the replacement controller during a model switch.
+	// Nil in production (switchModel falls back to boot.Build); tests inject a
+	// fake so switchModel can be exercised without real provider IO.
+	buildController func(ctx context.Context, ref string) (*control.Controller, error)
+	titleProv       provider.Provider // lightweight flash provider for session titles
+	titlePrice      *provider.Pricing
+	titles          *titleCache
+	auth            *authGate // nil when auth is disabled
 }
 
 // New builds a Server. bc must be the controller's event sink.
@@ -108,27 +113,34 @@ func (s *Server) initTitleProvider() {
 }
 
 // switchModel rebuilds the controller with a new model, carrying over the
-// conversation history. This replicates the TUI/desktop model-switch path. The
-// write lock is held across the whole rebuild so concurrent requests never read
-// a half-swapped controller and two switches can't run at once.
+// conversation history. This replicates the TUI/desktop model-switch path.
+//
+// The heavy steps — Snapshot (may touch disk), Build (provider init IO), and the
+// old controller's Close (jobs.CloseWithGrace up to 15s + SessionEnd hook) — all
+// run OFF s.mu. Holding the write lock across them would wedge every HTTP handler
+// on s.ctl()'s RLock for the duration, stalling the whole serve frontend
+// (mirrors the acp rebuildSession fix and PR #5920). switchMu serializes the
+// switch itself so two switches can't interleave, preserving the old "second
+// switch waits" semantics without pinning s.mu.
 func (s *Server) switchModel(ctx context.Context, ref string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	cur := s.ctrl
+	s.switchMu.Lock()
+	defer s.switchMu.Unlock()
+
+	// Snapshot the current controller under a short read of s.mu only.
+	cur := s.ctl()
 	if cur.Running() {
 		return fmt.Errorf("cannot switch model while a turn is running")
 	}
 	prevPath := cur.SessionPath()
+
+	// Off-lock: snapshot, carry history, and build the replacement. None of these
+	// touch s.mu, so concurrent handlers keep reading the live controller.
 	if err := cur.Snapshot(); err != nil {
 		slog.Warn("serve: snapshot before model switch", "err", err)
 	}
 	carried := cur.History()
 
-	newCtrl, err := boot.Build(ctx, boot.Options{
-		Model:  ref,
-		Sink:   s.bc,
-		Stderr: os.Stderr,
-	})
+	newCtrl, err := s.build(ctx, ref)
 	if err != nil {
 		return fmt.Errorf("switch model: %w", err)
 	}
@@ -137,13 +149,40 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 	newPath := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())
 	newCtrl.AdoptHistory(carried, newPath)
 
+	// Publish the swap under a short write lock. switchMu already serializes
+	// switches — today the only writer of s.ctrl — so the identity re-check is
+	// defensive: it keeps a future controller-swapping path (or a test doing so)
+	// from being silently clobbered after the off-lock build. On a mismatch,
+	// discard the fresh controller off-lock instead of leaking it.
+	s.mu.Lock()
+	if s.ctrl != cur {
+		s.mu.Unlock()
+		newCtrl.Close()
+		return fmt.Errorf("switch model: session changed during switch")
+	}
 	s.ctrl = newCtrl
+	s.mu.Unlock()
+
+	// Off-lock: tear down the old controller. Close can block up to 15s.
 	cur.Close()
 	return nil
 }
 
+// build returns the replacement controller for a model switch, using the
+// injected builder in tests and boot.Build in production.
+func (s *Server) build(ctx context.Context, ref string) (*control.Controller, error) {
+	if s.buildController != nil {
+		return s.buildController(ctx, ref)
+	}
+	return boot.Build(ctx, boot.Options{
+		Model:  ref,
+		Sink:   s.bc,
+		Stderr: os.Stderr,
+	})
+}
+
 // switchEffort persists a new reasoning-effort level for the active provider and
-// rebuilds via switchModel (which takes the write lock).
+// rebuilds via switchModel (which serializes on switchMu).
 func (s *Server) switchEffort(ctx context.Context, level string) error {
 	cur := s.ctl()
 	if cur.Running() {
@@ -169,12 +208,21 @@ func (s *Server) switchEffort(ctx context.Context, level string) error {
 	if editPath == "" {
 		return fmt.Errorf("no config file found")
 	}
-	edit := config.LoadForEdit(editPath)
-	if err := applyEffortEdit(edit, entry, effort); err != nil {
+	// Lock only the load-modify-save cycle; switchModel below rebuilds the
+	// controller and must not hold the config edit lock.
+	if err := func() error {
+		unlock := config.LockUserConfigEdits()
+		defer unlock()
+		edit := config.LoadForEdit(editPath)
+		if err := applyEffortEdit(edit, entry, effort); err != nil {
+			return err
+		}
+		if err := edit.SaveTo(editPath); err != nil {
+			return fmt.Errorf("save config: %w", err)
+		}
+		return nil
+	}(); err != nil {
 		return err
-	}
-	if err := edit.SaveTo(editPath); err != nil {
-		return fmt.Errorf("save config: %w", err)
 	}
 	return s.switchModel(ctx, entry.Name+"/"+entry.Model)
 }
@@ -900,7 +948,7 @@ func (s *Server) generateTitle(ctx context.Context, firstMsg string) string {
 			{Role: provider.RoleSystem, Content: titlePrompt},
 			{Role: provider.RoleUser, Content: firstMsg},
 		},
-		Temperature: 0,
+		Temperature: provider.TemperaturePtr(0),
 		MaxTokens:   20,
 	})
 	if err != nil {

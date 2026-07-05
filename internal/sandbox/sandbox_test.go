@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// --- Spec.enforce ---
+// --- Spec.Enforce ---
 
 func TestEnforce(t *testing.T) {
 	cases := []struct {
@@ -22,8 +22,8 @@ func TestEnforce(t *testing.T) {
 	}
 	for _, c := range cases {
 		s := Spec{Mode: c.mode}
-		if got := s.enforce(); got != c.want {
-			t.Errorf("Spec{%q}.enforce() = %v, want %v", c.mode, got, c.want)
+		if got := s.Enforce(); got != c.want {
+			t.Errorf("Spec{%q}.Enforce() = %v, want %v", c.mode, got, c.want)
 		}
 	}
 }
@@ -32,7 +32,7 @@ func TestEnforce(t *testing.T) {
 
 func TestSpecZeroValue(t *testing.T) {
 	var s Spec
-	if s.enforce() {
+	if s.Enforce() {
 		t.Error("zero-value Spec should not enforce")
 	}
 	if s.Network {

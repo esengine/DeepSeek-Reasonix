@@ -10,11 +10,10 @@ import (
 
 // Command returns the argv to run `command` through sh, wrapped in sandbox-exec
 // when the spec enforces and the tool is available. The second return is whether
-// wrapping happened; false means the command runs unconfined (sandbox off, or
-// sandbox-exec missing — a graceful fallback rather than a hard failure, since
-// the permission layer still gates the call).
+// wrapping happened; false means the argv is unwrapped (sandbox off, or
+// sandbox-exec missing). Callers decide whether an unwrapped command is allowed.
 func Command(spec Spec, sh Shell, command string) ([]string, bool) {
-	if !spec.enforce() || !Available() {
+	if !spec.Enforce() || !Available() {
 		return sh.argv(command), false
 	}
 	return append([]string{"sandbox-exec", "-p", seatbeltProfile(spec)}, sh.argv(command)...), true
@@ -25,7 +24,7 @@ func Command(spec Spec, sh Shell, command string) ([]string, bool) {
 // without shell interpretation — suitable for direct binary invocations like
 // ripgrep that don't need a shell wrapper.
 func CommandArgs(spec Spec, args []string) ([]string, bool) {
-	if !spec.enforce() || !Available() {
+	if !spec.Enforce() || !Available() {
 		return args, false
 	}
 	return append([]string{"sandbox-exec", "-p", seatbeltProfile(spec)}, args...), true

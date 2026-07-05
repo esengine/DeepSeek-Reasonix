@@ -2,9 +2,14 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +25,7 @@ import (
 // fakeAdapter 是一个内存中的假适配器，用于测试 BotGateway。
 type fakeAdapter struct {
 	mu       sync.Mutex
+	stopOnce sync.Once
 	platform Platform
 	name     string
 	msgCh    chan InboundMessage
@@ -51,12 +57,9 @@ func (f *fakeAdapter) Start(ctx context.Context) error {
 }
 
 func (f *fakeAdapter) Stop() error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.msgCh != nil {
+	f.stopOnce.Do(func() {
 		close(f.msgCh)
-		f.msgCh = nil
-	}
+	})
 	return nil
 }
 
@@ -105,6 +108,7 @@ func (f *blockingSendAdapter) Send(ctx context.Context, msg OutboundMessage) (Se
 type fakeReactionAdapter struct {
 	*fakeAdapter
 	reactions []string
+	cleanups  []string
 }
 
 type gatewayFakeProvider struct{}
@@ -117,11 +121,84 @@ func (gatewayFakeProvider) Stream(context.Context, provider.Request) (<-chan pro
 	return ch, nil
 }
 
-func (f *fakeReactionAdapter) AddPendingReaction(ctx context.Context, messageID string) error {
+func (f *fakeReactionAdapter) AddPendingReaction(ctx context.Context, messageID string) (func(), error) {
+	f.mu.Lock()
+	f.reactions = append(f.reactions, messageID)
+	f.mu.Unlock()
+	return func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.cleanups = append(f.cleanups, messageID)
+	}, nil
+}
+
+func (f *fakeReactionAdapter) cleanupMessages() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.reactions = append(f.reactions, messageID)
-	return nil
+	out := make([]string, len(f.cleanups))
+	copy(out, f.cleanups)
+	return out
+}
+
+type queueTestController struct {
+	botController
+	mu       sync.Mutex
+	steers   []string
+	canceled bool
+}
+
+func (c *queueTestController) Steer(text string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.steers = append(c.steers, text)
+}
+
+func (c *queueTestController) Cancel() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.canceled = true
+}
+
+func (c *queueTestController) SessionPath() string   { return "" }
+func (c *queueTestController) WorkspaceRoot() string { return "" }
+
+func (c *queueTestController) steered() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, len(c.steers))
+	copy(out, c.steers)
+	return out
+}
+
+func (c *queueTestController) wasCanceled() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.canceled
+}
+
+type blockingApprovalController struct {
+	botController
+	emit     func(event.Event)
+	emitted  chan struct{}
+	approved chan struct{}
+	done     chan struct{}
+	once     sync.Once
+}
+
+func (c *blockingApprovalController) RunTurn(ctx context.Context, input string) error {
+	c.emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: "appr-1", Tool: "bash", Subject: "sample command"}})
+	close(c.emitted)
+	select {
+	case <-c.approved:
+		close(c.done)
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *blockingApprovalController) Approve(id string, allow, session, persist bool) {
+	c.once.Do(func() { close(c.approved) })
 }
 
 func TestFakeAdapterInterface(t *testing.T) {
@@ -309,6 +386,55 @@ func TestGatewayAllowlistCheck(t *testing.T) {
 	}
 }
 
+func TestGatewayRoleListsGrantAllowlistAdmission(t *testing.T) {
+	cfg := GatewayConfig{
+		Allowlist: AllowlistConfig{
+			Enabled: true,
+			Admins: map[Platform][]string{
+				PlatformFeishu: {"admin_user"},
+			},
+			Approvers: map[Platform][]string{
+				PlatformFeishu: {"approver_user"},
+			},
+		},
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(cfg, nil, logger)
+
+	if !gw.checkAllowlist(PlatformFeishu, InboundMessage{Platform: PlatformFeishu, ChatType: ChatDM, UserID: "admin_user"}) {
+		t.Error("admin role should grant base bot admission")
+	}
+	if !gw.checkAllowlist(PlatformFeishu, InboundMessage{Platform: PlatformFeishu, ChatType: ChatDM, UserID: "approver_user"}) {
+		t.Error("approver role should grant base bot admission")
+	}
+	if gw.checkAllowlist(PlatformFeishu, InboundMessage{Platform: PlatformFeishu, ChatType: ChatDM, UserID: "unknown_user"}) {
+		t.Error("unknown user should still be rejected")
+	}
+}
+
+func TestGatewayApproverRoleDoesNotGrantAdminCommands(t *testing.T) {
+	cfg := GatewayConfig{
+		Allowlist: AllowlistConfig{
+			Enabled: true,
+			Approvers: map[Platform][]string{
+				PlatformFeishu: {"approver_user"},
+			},
+		},
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(cfg, nil, logger)
+	msg := InboundMessage{Platform: PlatformFeishu, ChatType: ChatDM, UserID: "approver_user"}
+
+	if !gw.checkCommandRole(PlatformFeishu, msg, "approver") {
+		t.Error("approver should be allowed to run approver commands")
+	}
+	if gw.checkCommandRole(PlatformFeishu, msg, "admin") {
+		t.Error("approver should not be allowed to run admin commands")
+	}
+}
+
 func TestGatewayAllowlistDoesNotApplyGroupsToDirectMessages(t *testing.T) {
 	cfg := GatewayConfig{
 		Allowlist: AllowlistConfig{
@@ -330,6 +456,33 @@ func TestGatewayAllowlistDoesNotApplyGroupsToDirectMessages(t *testing.T) {
 	}
 	if gw.checkAllowlist(PlatformQQ, InboundMessage{Platform: PlatformQQ, ChatType: ChatGroup, ChatID: "unknown_group", UserID: "allowed_user"}) {
 		t.Error("unknown group should still be rejected by group allowlist")
+	}
+}
+
+func TestGatewayGroupAllowlistStillNarrowsRoleAdmission(t *testing.T) {
+	cfg := GatewayConfig{
+		Allowlist: AllowlistConfig{
+			Enabled: true,
+			Admins: map[Platform][]string{
+				PlatformFeishu: {"admin_user"},
+			},
+			Groups: map[Platform][]string{
+				PlatformFeishu: {"allowed_group"},
+			},
+		},
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(cfg, nil, logger)
+
+	if !gw.checkAllowlist(PlatformFeishu, InboundMessage{Platform: PlatformFeishu, ChatType: ChatDM, ChatID: "direct", UserID: "admin_user"}) {
+		t.Error("admin role admission should still allow direct messages")
+	}
+	if !gw.checkAllowlist(PlatformFeishu, InboundMessage{Platform: PlatformFeishu, ChatType: ChatGroup, ChatID: "allowed_group", UserID: "admin_user"}) {
+		t.Error("admin role should pass in allowed group")
+	}
+	if gw.checkAllowlist(PlatformFeishu, InboundMessage{Platform: PlatformFeishu, ChatType: ChatGroup, ChatID: "unknown_group", UserID: "admin_user"}) {
+		t.Error("admin role should still be rejected in an unknown group")
 	}
 }
 
@@ -410,7 +563,7 @@ func TestGatewayNormalizesNumericApprovalShortcutsOnlyWhenPending(t *testing.T) 
 	}
 }
 
-func TestGatewayNormalizesNumericAskShortcutOnlyForSingleChoicePendingAsk(t *testing.T) {
+func TestGatewayNormalizesAskShortcutForPendingAsk(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	gw := NewGateway(GatewayConfig{}, nil, logger)
 	key := "session-key"
@@ -437,8 +590,13 @@ func TestGatewayNormalizesNumericAskShortcutOnlyForSingleChoicePendingAsk(t *tes
 	if !ok || got != "/answer ask-1 2" {
 		t.Fatalf("normalize 2 = %q,%v; want /answer ask-1 2,true", got, ok)
 	}
-	if _, ok := gw.normalizeAskShortcut(key, "1;2"); ok {
-		t.Fatal("compound numeric text should stay a normal message")
+	got, ok = gw.normalizeAskShortcut(key, "1;2")
+	if !ok || got != "/answer ask-1 1;2" {
+		t.Fatalf("normalize 1;2 = %q,%v; want /answer ask-1 1;2,true", got, ok)
+	}
+	got, ok = gw.normalizeAskShortcut(key, "freeform answer")
+	if !ok || got != "/answer ask-1 freeform answer" {
+		t.Fatalf("normalize freeform answer = %q,%v; want /answer ask-1 freeform answer,true", got, ok)
 	}
 
 	gw.controllers[key].pendingAsks["ask-2"] = []event.AskQuestion{
@@ -446,8 +604,12 @@ func TestGatewayNormalizesNumericAskShortcutOnlyForSingleChoicePendingAsk(t *tes
 		{ID: "q2", Prompt: "Second", Options: []event.AskOption{{Label: "B"}}},
 	}
 	gw.controllers[key].lastAskID = "ask-2"
-	if _, ok := gw.normalizeAskShortcut(key, "1"); ok {
-		t.Fatal("numeric shortcut should not answer multi-question asks")
+	got, ok = gw.normalizeAskShortcut(key, "1")
+	if !ok || got != "/answer ask-2 1" {
+		t.Fatalf("normalize 1 on multi-question = %q,%v; want /answer ask-2 1,true", got, ok)
+	}
+	if _, ok := gw.normalizeAskShortcut(key, "/stop"); ok {
+		t.Fatal("slash commands should not be normalized/routed by ask shortcut")
 	}
 }
 
@@ -687,6 +849,61 @@ func TestGatewayUpdateConnectionToolApprovalModeInheritsGatewayDefault(t *testin
 	}
 }
 
+func TestGatewayApprovalReplyUnblocksWedgedTurn(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{Allowlist: AllowlistConfig{AllowAll: true}}, nil, logger)
+	adapter := newFakeAdapter(PlatformFeishu, "fake-feishu")
+	binding := AdapterBinding{ID: "feishu", Platform: PlatformFeishu, Adapter: adapter}
+	msg := InboundMessage{
+		Platform:     PlatformFeishu,
+		ConnectionID: "feishu",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+		Text:         "delete everything",
+	}
+	key := BuildSessionKey(msg.Session())
+	sink := &sessionEventSink{}
+	ctrl := &blockingApprovalController{
+		emit:     sink.Emit,
+		emitted:  make(chan struct{}),
+		approved: make(chan struct{}),
+		done:     make(chan struct{}),
+	}
+	gw.controllers[key] = &sessionState{
+		ctrl:             ctrl,
+		sink:             sink,
+		pendingApprovals: make(map[string]event.Approval),
+		pendingAsks:      make(map[string][]event.AskQuestion),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go gw.dispatchLoop(ctx, binding)
+
+	adapter.msgCh <- msg
+	select {
+	case <-ctrl.emitted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("approval request was never emitted; turn did not start")
+	}
+
+	adapter.msgCh <- InboundMessage{
+		Platform:     PlatformFeishu,
+		ConnectionID: "feishu",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+		Text:         "/approve appr-1",
+	}
+
+	select {
+	case <-ctrl.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("deadlock: /approve reply was not delivered while the turn blocked on approval")
+	}
+}
+
 func TestGatewayModeCommandSupportsAskAutoAndStatus(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	gw := NewGateway(GatewayConfig{
@@ -743,6 +960,566 @@ func TestGatewayHelpMentionsYoloCommands(t *testing.T) {
 	if !strings.Contains(sent[0].Text, "/yolo on|off|auto|status") || !strings.Contains(sent[0].Text, "/mode yolo|ask|auto") {
 		t.Fatalf("help = %q, want yolo commands", sent[0].Text)
 	}
+	if !strings.Contains(sent[0].Text, "/projects") || !strings.Contains(sent[0].Text, "/attach session") || !strings.Contains(sent[0].Text, "/search all") {
+		t.Fatalf("help = %q, want project/session commands", sent[0].Text)
+	}
+}
+
+func TestGatewayProjectCommandsListAndUseProjectOverride(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	base := t.TempDir()
+	alpha := filepath.Join(base, "alpha-project")
+	beta := filepath.Join(base, "beta-project")
+	if err := os.MkdirAll(alpha, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(beta, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gw := NewGateway(GatewayConfig{
+		WorkspaceRoot: alpha,
+		ConnectionChannels: map[string]ChannelConfig{
+			"weixin-main": {WorkspaceRoot: beta},
+		},
+	}, nil, logger)
+	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
+	msg := InboundMessage{
+		Platform:     PlatformWeixin,
+		ConnectionID: "weixin-main",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+		Text:         "/projects",
+	}
+	key := BuildSessionKey(msg.Session())
+
+	gw.handleSlashCommand(context.Background(), adapter, key, msg)
+	sent := adapter.sentMessages()
+	if len(sent) != 1 || !strings.Contains(sent[0].Text, "alpha-project") || !strings.Contains(sent[0].Text, "beta-project") {
+		t.Fatalf("/projects sent = %#v, want both projects", sent)
+	}
+
+	msg.Text = "/use project alpha"
+	gw.handleSlashCommand(context.Background(), adapter, key, msg)
+	_, root, _ := gw.sessionOptionsForMessage(msg)
+	if canonicalBotPath(root) != canonicalBotPath(alpha) {
+		t.Fatalf("workspace after /use project = %q, want %q", root, alpha)
+	}
+
+	msg.Text = "/use project default"
+	gw.handleSlashCommand(context.Background(), adapter, key, msg)
+	_, root, _ = gw.sessionOptionsForMessage(msg)
+	if canonicalBotPath(root) != canonicalBotPath(beta) {
+		t.Fatalf("workspace after /use project default = %q, want connection default %q", root, beta)
+	}
+}
+
+func TestGatewaySessionsSearchAndAttachSessionOverride(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	projectRoot := filepath.Join(t.TempDir(), "attach-project")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionDir := botSessionDir(projectRoot)
+	sessionPath := filepath.Join(sessionDir, "attached.jsonl")
+	sess := agent.NewSession("system")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "needle attach conversation"})
+	if err := sess.Save(sessionPath); err != nil {
+		t.Fatalf("Save session: %v", err)
+	}
+	if err := agent.UpdateSessionMeta(sessionPath, "model-a", "needle attach conversation", 1, true); err != nil {
+		t.Fatalf("UpdateSessionMeta: %v", err)
+	}
+	gw := NewGateway(GatewayConfig{WorkspaceRoot: projectRoot}, nil, logger)
+	adapter := newFakeAdapter(PlatformFeishu, "fake-feishu")
+	msg := InboundMessage{
+		Platform:     PlatformFeishu,
+		ConnectionID: "feishu-lark",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+		Text:         "/sessions search needle",
+	}
+	key := BuildSessionKey(msg.Session())
+
+	gw.handleSlashCommand(context.Background(), adapter, key, msg)
+	sent := adapter.sentMessages()
+	if len(sent) != 1 || !strings.Contains(sent[0].Text, "needle attach") || !strings.Contains(sent[0].Text, "s1") {
+		t.Fatalf("/sessions sent = %#v, want indexed session", sent)
+	}
+
+	msg.Text = "/attach session s1"
+	gw.handleSlashCommand(context.Background(), adapter, key, msg)
+	profile := gw.sessionProfileForMessage(msg)
+	if canonicalBotPath(profile.sessionPath) != canonicalBotPath(sessionPath) {
+		t.Fatalf("attached session path = %q, want %q", profile.sessionPath, sessionPath)
+	}
+	if canonicalBotPath(profile.workspaceRoot) != canonicalBotPath(projectRoot) {
+		t.Fatalf("attached workspace root = %q, want %q", profile.workspaceRoot, projectRoot)
+	}
+}
+
+func TestGatewaySearchAllSearchesIndexedProjects(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	projectRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectRoot, "needle.txt"), []byte("alpha\nunique-cross-project-needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gw := NewGateway(GatewayConfig{WorkspaceRoot: projectRoot}, nil, logger)
+
+	text := gw.handleProjectSearchCommand(context.Background(), "/search all unique-cross-project-needle")
+	if !strings.Contains(text, "needle.txt") || !strings.Contains(text, "unique-cross-project-needle") {
+		t.Fatalf("search text = %q, want file hit", text)
+	}
+}
+
+func TestSearchBotProjectsFallbackStopsAtLimit(t *testing.T) {
+	projectRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectRoot, "one.txt"), []byte("first fallback needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "two.txt"), []byte("second fallback needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projects := []botProjectEntry{{
+		ID:   "p1",
+		Name: "project",
+		Root: projectRoot,
+	}}
+
+	results, err := searchBotProjectsFallback(context.Background(), projects, []string{projectRoot}, "fallback needle", 1)
+	if err != nil {
+		t.Fatalf("fallback search: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("fallback results = %d, want 1", len(results))
+	}
+	if results[0].ProjectID != "p1" || !strings.Contains(results[0].Text, "fallback needle") {
+		t.Fatalf("fallback result = %#v, want project hit", results[0])
+	}
+}
+
+func TestSearchBotProjectsFallbackHonorsContextCancel(t *testing.T) {
+	projectRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectRoot, "needle.txt"), []byte("fallback needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projects := []botProjectEntry{{
+		ID:   "p1",
+		Name: "project",
+		Root: projectRoot,
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	results, err := searchBotProjectsFallback(ctx, projects, []string{projectRoot}, "fallback needle", 1)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("fallback error = %v, want context canceled", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("fallback results = %d, want 0 after canceled context", len(results))
+	}
+}
+
+func TestGatewayAdminRoleRequiredForProjectIndexCommands(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{
+		Allowlist: AllowlistConfig{
+			Enabled: true,
+			Users:   map[Platform][]string{PlatformWeixin: []string{"user"}},
+			Admins:  map[Platform][]string{PlatformWeixin: []string{"admin"}},
+		},
+	}, nil, logger)
+	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
+	msg := InboundMessage{
+		Platform: PlatformWeixin,
+		ChatType: ChatDM,
+		ChatID:   "chat",
+		UserID:   "user",
+		Text:     "/projects",
+	}
+	key := BuildSessionKey(msg.Session())
+
+	gw.handleSlashCommand(context.Background(), adapter, key, msg)
+
+	sent := adapter.sentMessages()
+	if len(sent) != 1 || !strings.Contains(sent[0].Text, "没有执行此 bot 命令的权限") {
+		t.Fatalf("sent = %#v, want permission denial", sent)
+	}
+}
+
+func TestGatewayDefaultQueueSteersActiveTurn(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{Allowlist: AllowlistConfig{AllowAll: true}}, nil, logger)
+	adapter := &fakeReactionAdapter{fakeAdapter: newFakeAdapter(PlatformFeishu, "fake-feishu")}
+	msg := InboundMessage{
+		Platform:     PlatformFeishu,
+		ConnectionID: "feishu-feishu",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+		Text:         "please adjust the current task",
+		MessageID:    "m2",
+	}
+	key := BuildSessionKey(msg.Session())
+	ctrl := &queueTestController{}
+	gw.controllers[key] = &sessionState{ctrl: ctrl, sink: &sessionEventSink{}}
+	if result := gw.sessions.TryAcquireWithQueue(key, msg, QueueOptions{Mode: QueueModeFollowup}); !result.Acquired {
+		t.Fatalf("failed to mark session active: %+v", result)
+	}
+
+	gw.handleMessage(context.Background(), AdapterBinding{ID: "feishu-feishu", Platform: PlatformFeishu, Adapter: adapter}, msg)
+
+	if got := ctrl.steered(); len(got) != 1 || got[0] != msg.Text {
+		t.Fatalf("steers = %#v, want current message", got)
+	}
+	sent := adapter.sentMessages()
+	if len(sent) != 1 || !strings.Contains(sent[0].Text, "并入当前任务") {
+		t.Fatalf("sent = %#v, want steer acknowledgement", sent)
+	}
+	if pending := gw.sessions.PendingCount(key); pending != 0 {
+		t.Fatalf("pending = %d, want 0", pending)
+	}
+	if cleaned := adapter.cleanupMessages(); len(cleaned) != 1 || cleaned[0] != "m2" {
+		t.Fatalf("cleanup messages = %#v, want [m2]", cleaned)
+	}
+}
+
+func TestGatewayDefaultQueueSteersMediaOnlyActiveTurn(t *testing.T) {
+	imageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'})
+	}))
+	defer imageServer.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{
+		Allowlist:     AllowlistConfig{AllowAll: true},
+		WorkspaceRoot: t.TempDir(),
+	}, nil, logger)
+	adapter := newFakeAdapter(PlatformFeishu, "fake-feishu")
+	msg := InboundMessage{
+		Platform:     PlatformFeishu,
+		ConnectionID: "feishu-feishu",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+		MediaURLs:    []string{imageServer.URL + "/image.png"},
+		MessageID:    "m-media",
+	}
+	key := BuildSessionKey(msg.Session())
+	ctrl := &queueTestController{}
+	gw.controllers[key] = &sessionState{ctrl: ctrl, sink: &sessionEventSink{}}
+	if result := gw.sessions.TryAcquireWithQueue(key, msg, QueueOptions{Mode: QueueModeFollowup}); !result.Acquired {
+		t.Fatalf("failed to mark session active: %+v", result)
+	}
+
+	gw.handleMessage(context.Background(), AdapterBinding{ID: "feishu-feishu", Platform: PlatformFeishu, Adapter: adapter}, msg)
+
+	got := ctrl.steered()
+	if len(got) != 1 || !strings.Contains(got[0], "Attachments:") || !strings.Contains(got[0], "@.reasonix/attachments/") {
+		t.Fatalf("steers = %#v, want saved attachment reference", got)
+	}
+}
+
+func TestGatewayQueueFollowupKeepsMessagesForLaterTurns(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{Allowlist: AllowlistConfig{AllowAll: true}}, nil, logger)
+	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
+	msg := InboundMessage{
+		Platform:     PlatformWeixin,
+		ConnectionID: "weixin-weixin",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+		Text:         "first followup",
+	}
+	key := BuildSessionKey(msg.Session())
+	ctrl := &queueTestController{}
+	gw.controllers[key] = &sessionState{ctrl: ctrl, sink: &sessionEventSink{}}
+	if result := gw.sessions.TryAcquireWithQueue(key, msg, QueueOptions{Mode: QueueModeFollowup}); !result.Acquired {
+		t.Fatalf("failed to mark session active: %+v", result)
+	}
+	gw.sessions.SetQueueMode(key, QueueModeFollowup)
+
+	gw.handleMessage(context.Background(), AdapterBinding{ID: "weixin-weixin", Platform: PlatformWeixin, Adapter: adapter}, msg)
+	second := msg
+	second.Text = "second followup"
+	gw.handleMessage(context.Background(), AdapterBinding{ID: "weixin-weixin", Platform: PlatformWeixin, Adapter: adapter}, second)
+
+	if got := ctrl.steered(); len(got) != 0 {
+		t.Fatalf("steers = %#v, want none in followup mode", got)
+	}
+	if pending := gw.sessions.PendingCount(key); pending != 2 {
+		t.Fatalf("pending = %d, want 2", pending)
+	}
+	next := gw.sessions.Release(key)
+	if next == nil || next.Text != "first followup" {
+		t.Fatalf("first release = %#v, want first followup", next)
+	}
+	next = gw.sessions.Release(key)
+	if next == nil || next.Text != "second followup" {
+		t.Fatalf("second release = %#v, want second followup", next)
+	}
+}
+
+func TestGatewayQueueInterruptCancelsAndKeepsNewestMessage(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{Allowlist: AllowlistConfig{AllowAll: true}}, nil, logger)
+	adapter := newFakeAdapter(PlatformQQ, "fake-qq")
+	msg := InboundMessage{
+		Platform:     PlatformQQ,
+		ConnectionID: "qq",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+		Text:         "newest request",
+	}
+	key := BuildSessionKey(msg.Session())
+	ctrl := &queueTestController{}
+	gw.controllers[key] = &sessionState{ctrl: ctrl, sink: &sessionEventSink{}}
+	if result := gw.sessions.TryAcquireWithQueue(key, msg, QueueOptions{Mode: QueueModeFollowup}); !result.Acquired {
+		t.Fatalf("failed to mark session active: %+v", result)
+	}
+	gw.sessions.SetQueueMode(key, QueueModeInterrupt)
+
+	gw.handleMessage(context.Background(), AdapterBinding{ID: "qq", Platform: PlatformQQ, Adapter: adapter}, msg)
+
+	if !ctrl.wasCanceled() {
+		t.Fatal("controller was not canceled")
+	}
+	next := gw.sessions.Release(key)
+	if next == nil || next.Text != "newest request" {
+		t.Fatalf("release = %#v, want newest request", next)
+	}
+	sent := adapter.sentMessages()
+	if len(sent) != 1 || !strings.Contains(sent[0].Text, "稍后处理这条新消息") {
+		t.Fatalf("sent = %#v, want interrupt acknowledgement", sent)
+	}
+}
+
+func TestGatewayUnknownDMGetsPairingCode(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{
+		PairingEnabled: true,
+		Allowlist:      AllowlistConfig{Enabled: true, Users: map[Platform][]string{PlatformFeishu: nil}},
+	}, nil, logger)
+	adapter := newFakeAdapter(PlatformFeishu, "fake-feishu")
+	msg := InboundMessage{
+		Platform:     PlatformFeishu,
+		ConnectionID: "feishu-feishu",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+		Text:         "hello",
+	}
+
+	gw.handleMessage(context.Background(), AdapterBinding{ID: "feishu-feishu", Platform: PlatformFeishu, Adapter: adapter}, msg)
+
+	sent := adapter.sentMessages()
+	if len(sent) != 1 || !strings.Contains(sent[0].Text, "配对码") || !strings.Contains(sent[0].Text, "reasonix bot pairing approve") {
+		t.Fatalf("sent = %#v, want pairing instructions", sent)
+	}
+	reqs, err := ListPairingRequests()
+	if err != nil {
+		t.Fatalf("list pairing: %v", err)
+	}
+	if len(reqs) != 1 || reqs[0].UserID != "user" || reqs[0].ChatID != "chat" {
+		t.Fatalf("pairing requests = %+v, want one request for user/chat", reqs)
+	}
+}
+
+func TestGatewayAdminRoleRequiredForYoloWhenConfigured(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{
+		Allowlist: AllowlistConfig{
+			Enabled: true,
+			Users:   map[Platform][]string{PlatformWeixin: []string{"user"}},
+			Admins:  map[Platform][]string{PlatformWeixin: []string{"admin"}},
+		},
+	}, nil, logger)
+	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
+	msg := InboundMessage{
+		Platform: PlatformWeixin,
+		ChatType: ChatDM,
+		ChatID:   "chat",
+		UserID:   "user",
+		Text:     "/yolo on",
+	}
+	key := BuildSessionKey(msg.Session())
+
+	gw.handleSlashCommand(context.Background(), adapter, key, msg)
+
+	sent := adapter.sentMessages()
+	if len(sent) != 1 || !strings.Contains(sent[0].Text, "没有执行此 bot 命令的权限") {
+		t.Fatalf("sent = %#v, want permission denial", sent)
+	}
+}
+
+func TestGatewayIgnoresOutboundEchoMessageID(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{
+		IgnoreSelfMessages: true,
+		Allowlist:          AllowlistConfig{AllowAll: true},
+	}, nil, logger)
+	adapter := newFakeAdapter(PlatformFeishu, "fake-feishu")
+	msg := InboundMessage{
+		Platform:     PlatformFeishu,
+		ConnectionID: "feishu-feishu",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+		MessageID:    "incoming",
+		Text:         "/status",
+	}
+	if err := gw.sendText(context.Background(), adapter, msg, "reply"); err != nil {
+		t.Fatalf("sendText: %v", err)
+	}
+	echo := msg
+	echo.MessageID = "fake_msg_1"
+
+	gw.handleMessage(context.Background(), AdapterBinding{ID: "feishu-feishu", Platform: PlatformFeishu, Adapter: adapter}, echo)
+
+	if sent := adapter.sentMessages(); len(sent) != 1 {
+		t.Fatalf("sent count = %d, want only original outbound echo registration", len(sent))
+	}
+}
+
+func TestGatewayIgnoresConfiguredSelfUserID(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{
+		IgnoreSelfMessages: true,
+		SelfUserIDs:        map[Platform][]string{PlatformWeixin: []string{"bot-user"}},
+		Allowlist:          AllowlistConfig{AllowAll: true},
+	}, nil, logger)
+	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
+	msg := InboundMessage{
+		Platform:     PlatformWeixin,
+		ConnectionID: "weixin-weixin",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "bot-user",
+		MessageID:    "self-message",
+		Text:         "/status",
+	}
+
+	gw.handleMessage(context.Background(), AdapterBinding{ID: "weixin-weixin", Platform: PlatformWeixin, Adapter: adapter}, msg)
+
+	if sent := adapter.sentMessages(); len(sent) != 0 {
+		t.Fatalf("sent count = %d, want self message ignored", len(sent))
+	}
+}
+
+func TestGatewayAdapterHealthTracksSend(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	adapter := newFakeAdapter(PlatformFeishu, "fake-feishu")
+	gw := NewGatewayWithAdapterBindings(GatewayConfig{
+		Enabled:   map[Platform]bool{PlatformFeishu: true},
+		Allowlist: AllowlistConfig{AllowAll: true},
+	}, []AdapterBinding{{ID: "feishu-lark", Platform: PlatformFeishu, Domain: "lark", Adapter: adapter}}, logger)
+	if err := gw.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer gw.Stop()
+
+	if _, err := gw.SendToAdapter(context.Background(), "feishu-lark", "lark", OutboundMessage{ChatID: "chat", ChatType: ChatDM, Text: "hello"}); err != nil {
+		t.Fatalf("SendToAdapter: %v", err)
+	}
+
+	health := gw.AdapterHealth()
+	if len(health) != 1 {
+		t.Fatalf("health count = %d, want 1", len(health))
+	}
+	if health[0].ID != "feishu-lark" || health[0].Status != "running" || health[0].Sends != 1 || health[0].SendErrors != 0 {
+		t.Fatalf("health = %+v, want running send count", health[0])
+	}
+}
+
+func TestGatewayControlServerStatusAndSend(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	adapter := newFakeAdapter(PlatformFeishu, "fake-feishu")
+	gw := NewGatewayWithAdapterBindings(GatewayConfig{
+		Enabled:        map[Platform]bool{PlatformFeishu: true},
+		Allowlist:      AllowlistConfig{AllowAll: true},
+		ControlEnabled: true,
+		ControlAddr:    "127.0.0.1:0",
+		ControlToken:   "secret",
+	}, []AdapterBinding{{ID: "feishu-lark", Platform: PlatformFeishu, Domain: "lark", Adapter: adapter}}, logger)
+	if err := gw.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer gw.Stop()
+
+	statusURL := "http://" + gw.ControlAddr() + "/status"
+	resp, err := http.Get(statusURL)
+	if err != nil {
+		t.Fatalf("GET /status without token: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("GET /status without token status = %d, want 401", resp.StatusCode)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, statusURL, nil)
+	if err != nil {
+		t.Fatalf("new status request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer secret")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /status: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /status status = %d, want 200", resp.StatusCode)
+	}
+	var status controlStatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if status.Status != "running" || len(status.Adapters) != 1 || status.Adapters[0].ID != "feishu-lark" {
+		t.Fatalf("status = %+v, want running feishu-lark", status)
+	}
+
+	req, err = http.NewRequest(http.MethodPost, "http://"+gw.ControlAddr()+"/send", strings.NewReader(`{"connection_id":"feishu-lark","domain":"lark","chat_id":"chat","chat_type":"dm","text":"hello"}`))
+	if err != nil {
+		t.Fatalf("new send request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /send: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /send status = %d, want 200", resp.StatusCode)
+	}
+	if sent := adapter.sentMessages(); len(sent) != 1 || sent[0].Text != "hello" {
+		t.Fatalf("sent = %+v, want hello", sent)
+	}
+	if health := gw.AdapterHealth(); len(health) != 1 || health[0].Sends != 1 {
+		t.Fatalf("health = %+v, want one send", health)
+	}
+
+	req, err = http.NewRequest(http.MethodGet, "http://"+gw.ControlAddr()+"/metrics", nil)
+	if err != nil {
+		t.Fatalf("new metrics request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer secret")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /metrics: %v", err)
+	}
+	metricsBody, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(metricsBody), "reasonix_bot_adapter_sends_total") {
+		t.Fatalf("GET /metrics status=%d body=%q, want adapter metrics", resp.StatusCode, string(metricsBody))
+	}
 }
 
 func TestGatewayAddsPendingReactionWhenAdapterSupportsIt(t *testing.T) {
@@ -754,6 +1531,47 @@ func TestGatewayAddsPendingReactionWhenAdapterSupportsIt(t *testing.T) {
 
 	if len(fa.reactions) != 1 || fa.reactions[0] != "om_123" {
 		t.Fatalf("reactions = %#v, want [om_123]", fa.reactions)
+	}
+}
+
+func TestGatewayStoresQueuedReactionCleanupBeforeControllerExists(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{}, nil, logger)
+	fa := &fakeReactionAdapter{fakeAdapter: newFakeAdapter(PlatformFeishu, "fake-feishu")}
+	first := InboundMessage{
+		Platform:     PlatformFeishu,
+		ConnectionID: "feishu-feishu",
+		Domain:       "feishu",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+		Text:         "first",
+		MessageID:    "om_first",
+	}
+	key := BuildSessionKey(first.Session())
+	if acquired, merged := gw.sessions.TryAcquire(key, first); !acquired || merged {
+		t.Fatalf("first TryAcquire = (%v, %v), want acquired without merge", acquired, merged)
+	}
+
+	queued := first
+	queued.Text = "queued"
+	queued.MessageID = "om_queued"
+	cleanup := gw.addPendingReaction(context.Background(), PlatformFeishu, fa, queued)
+	if acquired, merged := gw.sessions.TryAcquire(key, queued); acquired || !merged {
+		t.Fatalf("queued TryAcquire = (%v, %v), want merged while active", acquired, merged)
+	}
+	gw.storeReactionCleanup(key, cleanup)
+	if _, ok := gw.controllers[key]; ok {
+		t.Fatal("test setup expected no controller state yet")
+	}
+	if cleaned := fa.cleanupMessages(); len(cleaned) != 0 {
+		t.Fatalf("cleanup messages before flush = %#v, want none", cleaned)
+	}
+
+	gw.flushReactionCleanups(key, nil)
+	cleaned := fa.cleanupMessages()
+	if len(cleaned) != 1 || cleaned[0] != "om_queued" {
+		t.Fatalf("cleanup messages = %#v, want [om_queued]", cleaned)
 	}
 }
 
@@ -812,6 +1630,130 @@ func TestGatewaySessionOptionsPreferConnectionOverride(t *testing.T) {
 	}
 	if mode != "ask" {
 		t.Fatalf("lark tool approval mode = %q, want ask", mode)
+	}
+}
+
+func TestGatewaySessionOptionsPreferConnectionSessionMappingWorkspace(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{
+		Model:         "global-model",
+		WorkspaceRoot: "/global",
+		ConnectionChannels: map[string]ChannelConfig{
+			"weixin-main": {
+				WorkspaceRoot: "/connection",
+				SessionMappings: []SessionMapping{
+					{RemoteID: "group-1", ChatType: string(ChatGroup), UserID: "other", Scope: "project", WorkspaceRoot: "/other"},
+					{RemoteID: "group-1", ChatType: string(ChatGroup), UserID: "user-1", Scope: "project", WorkspaceRoot: "/mapped"},
+				},
+			},
+		},
+	}, nil, logger)
+
+	model, root, mode := gw.sessionOptionsForMessage(InboundMessage{
+		Platform:     PlatformWeixin,
+		ConnectionID: "weixin-main",
+		ChatType:     ChatGroup,
+		ChatID:       "group-1",
+		UserID:       "user-1",
+	})
+	if model != "global-model" || root != "/mapped" || mode != "ask" {
+		t.Fatalf("mapped options = %q,%q,%q; want global model, mapped workspace, ask", model, root, mode)
+	}
+
+	_, root, _ = gw.sessionOptionsForMessage(InboundMessage{
+		Platform:     PlatformWeixin,
+		ConnectionID: "weixin-main",
+		ChatType:     ChatGroup,
+		ChatID:       "group-1",
+		UserID:       "new-user",
+	})
+	if root != "/connection" {
+		t.Fatalf("unmapped group user workspace = %q, want connection default", root)
+	}
+}
+
+func TestGatewaySessionOptionsAllowSessionMappingGlobalWorkspace(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{
+		WorkspaceRoot: "/global-default",
+		ConnectionChannels: map[string]ChannelConfig{
+			"weixin-main": {
+				WorkspaceRoot:   "/connection",
+				SessionMappings: []SessionMapping{{RemoteID: "dm-1", Scope: "global"}},
+			},
+		},
+	}, nil, logger)
+
+	_, root, _ := gw.sessionOptionsForMessage(InboundMessage{
+		Platform:     PlatformWeixin,
+		ConnectionID: "weixin-main",
+		ChatType:     ChatDM,
+		ChatID:       "dm-1",
+	})
+	if root != "" {
+		t.Fatalf("global mapping workspace = %q, want empty global workspace", root)
+	}
+}
+
+func TestSessionStateMatchesRuntimeRejectsWorkspaceOrModelMismatch(t *testing.T) {
+	ctrl := control.New(control.Options{WorkspaceRoot: "/old"})
+	defer ctrl.Close()
+	state := &sessionState{ctrl: ctrl, model: "model-a"}
+
+	if !sessionStateMatchesRuntime(state, sessionRuntimeProfile{model: "model-a", workspaceRoot: "/old"}) {
+		t.Fatal("session should match the controller workspace and model")
+	}
+	if sessionStateMatchesRuntime(state, sessionRuntimeProfile{model: "model-a", workspaceRoot: "/new"}) {
+		t.Fatal("session matched a different workspace root")
+	}
+	if sessionStateMatchesRuntime(state, sessionRuntimeProfile{model: "model-b", workspaceRoot: "/old"}) {
+		t.Fatal("session matched a different model")
+	}
+}
+
+func TestSessionStateMatchesRuntimeRejectsAttachedSessionPathMismatch(t *testing.T) {
+	root := t.TempDir()
+	pathA := filepath.Join(root, "a.jsonl")
+	pathB := filepath.Join(root, "b.jsonl")
+	ctrl := control.New(control.Options{WorkspaceRoot: root, SessionPath: pathA})
+	defer ctrl.Close()
+	state := &sessionState{ctrl: ctrl, model: "model-a", workspaceRoot: root, sessionPath: pathA}
+
+	if !sessionStateMatchesRuntime(state, sessionRuntimeProfile{model: "model-a", workspaceRoot: root, sessionPath: pathA}) {
+		t.Fatal("attached session should match the same pinned path")
+	}
+	if sessionStateMatchesRuntime(state, sessionRuntimeProfile{model: "model-a", workspaceRoot: root, sessionPath: pathB}) {
+		t.Fatal("attached session matched a different path")
+	}
+	if sessionStateMatchesRuntime(state, sessionRuntimeProfile{model: "model-a", workspaceRoot: root}) {
+		t.Fatal("attached session matched an unpinned profile")
+	}
+}
+
+func TestGatewaySessionOptionsPreferRemoteRouteOverride(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{
+		Model:            "global-model",
+		WorkspaceRoot:    "/global",
+		ToolApprovalMode: "ask",
+		ConnectionChannels: map[string]ChannelConfig{
+			"feishu-lark": {Model: "lark-model", WorkspaceRoot: "/lark", ToolApprovalMode: "auto"},
+		},
+		Routes: []RouteConfig{{
+			ConnectionID: "feishu-lark",
+			ChatType:     ChatGroup,
+			ChatID:       "group-1",
+			Channel:      ChannelConfig{Model: "route-model", WorkspaceRoot: "/route", ToolApprovalMode: "yolo"},
+		}},
+	}, nil, logger)
+
+	model, root, mode := gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformFeishu, ConnectionID: "feishu-lark", ChatType: ChatGroup, ChatID: "group-1"})
+	if model != "route-model" || root != "/route" || mode != "yolo" {
+		t.Fatalf("route options = %q,%q,%q; want route override", model, root, mode)
+	}
+	model, root, mode = gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformFeishu, ConnectionID: "feishu-lark", ChatType: ChatGroup, ChatID: "group-2"})
+	if model != "lark-model" || root != "/lark" || mode != "auto" {
+		t.Fatalf("non-matching options = %q,%q,%q; want connection override", model, root, mode)
 	}
 }
 

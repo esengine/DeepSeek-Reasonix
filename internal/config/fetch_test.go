@@ -177,3 +177,69 @@ func TestProviderFetchModelsAllowsNoAuthEndpoint(t *testing.T) {
 		t.Fatalf("got %v, want [local-a local-b]", got)
 	}
 }
+
+func TestProviderFetchModelsUsesAnthropicAuthMode(t *testing.T) {
+	tests := []struct {
+		name       string
+		authHeader bool
+		assertAuth func(t *testing.T, r *http.Request)
+	}{
+		{
+			name:       "x-api-key",
+			authHeader: false,
+			assertAuth: func(t *testing.T, r *http.Request) {
+				t.Helper()
+				if got := r.Header.Get("x-api-key"); got != "anthropic-key" {
+					t.Fatalf("x-api-key = %q, want anthropic-key", got)
+				}
+				if got := r.Header.Get("Authorization"); got != "" {
+					t.Fatalf("Authorization = %q, want omitted", got)
+				}
+			},
+		},
+		{
+			name:       "bearer",
+			authHeader: true,
+			assertAuth: func(t *testing.T, r *http.Request) {
+				t.Helper()
+				if got := r.Header.Get("Authorization"); got != "Bearer anthropic-key" {
+					t.Fatalf("Authorization = %q, want Bearer anthropic-key", got)
+				}
+				if got := r.Header.Get("x-api-key"); got != "" {
+					t.Fatalf("x-api-key = %q, want omitted", got)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/anthropic/models" {
+					t.Fatalf("unexpected path %s", r.URL.Path)
+				}
+				tt.assertAuth(t, r)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"data": []map[string]string{{"id": "anthropic-model"}},
+				})
+			}))
+			defer srv.Close()
+
+			p := ProviderEntry{
+				Name:           "anthropic-compatible",
+				Kind:           "anthropic",
+				BaseURL:        srv.URL + "/anthropic",
+				APIKeyEnv:      "ANTHROPIC_COMPATIBLE_KEY",
+				AuthHeader:     tt.authHeader,
+				resolvedAPIKey: "anthropic-key",
+			}
+			got, err := p.FetchModels(context.Background())
+			if err != nil {
+				t.Fatalf("FetchModels: %v", err)
+			}
+			if len(got) != 1 || got[0] != "anthropic-model" {
+				t.Fatalf("got %v, want [anthropic-model]", got)
+			}
+		})
+	}
+}

@@ -4,6 +4,7 @@ import { JSDOM } from "jsdom";
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import gsap from "gsap";
 import { ApprovalModal } from "../components/ApprovalModal";
 import { LocaleProvider } from "../lib/i18n";
 import type { AppBindings } from "../lib/bridge";
@@ -11,6 +12,17 @@ import type { WireApproval } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
+
+type GsapToOptions = { onComplete?: () => void };
+const gsapForTests = (typeof gsap.to === "function" ? gsap : (gsap as unknown as { default?: typeof gsap }).default) as unknown as {
+  to?: (target: unknown, vars: GsapToOptions) => unknown;
+};
+if (typeof gsapForTests.to === "function") {
+  gsapForTests.to = (_target: unknown, vars: GsapToOptions) => {
+    vars.onComplete?.();
+    return {};
+  };
+}
 
 function ok(value: boolean, label: string) {
   if (value) {
@@ -218,6 +230,49 @@ console.log("\napproval modal file references");
     "default-open tool approval keeps the complete subject visible",
   );
   ok(document.body.textContent?.includes("Hide") === true, "tool approval details start expanded");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  mockApp({
+    ListDir: async () => [],
+    SearchFileRefs: async () => [],
+  });
+  const answers: Array<[boolean, boolean, boolean]> = [];
+  const { root } = await renderApproval({
+    approval: {
+      id: "memory-approval",
+      tool: "remember",
+      subject: "Save/update memory \"prefers-vitest\": Preferred test framework",
+    },
+    onAnswer: (allow, session, persist) => answers.push([allow, session, persist]),
+  });
+
+  const text = document.body.textContent ?? "";
+  ok(text.includes("Allow once"), "fresh-human approval shows allow once");
+  ok(text.includes("Deny"), "fresh-human approval shows deny");
+  ok(!text.includes("Allow for session"), "fresh-human approval hides session grant");
+  ok(!text.includes("Always allow"), "fresh-human approval hides persistent grant");
+  eq(
+    Array.from(document.querySelectorAll(".prompt-shelf__actions button")).map((button) => button.textContent).join("|"),
+    "1Allow once|4Deny",
+    "fresh-human approval keeps allow/deny shortcut keys",
+  );
+
+  const allowButton = Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.includes("Allow once")) as HTMLButtonElement | undefined;
+  if (!allowButton) throw new Error("allow once button did not render");
+
+  await act(async () => {
+    allowButton.click();
+    await flushTimers();
+  });
+
+  eq(JSON.stringify(answers), JSON.stringify([[true, false, false]]), "fresh-human approval allows only once");
 
   await act(async () => {
     root.unmount();

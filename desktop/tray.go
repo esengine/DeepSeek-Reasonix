@@ -105,7 +105,7 @@ func (a *App) updateTrayLocale(locale string) {
 }
 
 func (a *App) trayLocale() string {
-	cfg, _, err := a.loadDesktopUserConfigForEdit()
+	cfg, _, err := a.loadDesktopUserConfigForView()
 	if err != nil {
 		return ""
 	}

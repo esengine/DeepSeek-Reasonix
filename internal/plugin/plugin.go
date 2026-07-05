@@ -204,6 +204,12 @@ const defaultStartConcurrency = 8
 // on than by stalling the whole session.
 const defaultStartTimeout = 5 * time.Second
 
+var advertisedToolsEmptyListRetryDelays = []time.Duration{
+	50 * time.Millisecond,
+	150 * time.Millisecond,
+	300 * time.Millisecond,
+}
+
 // ErrServerAlreadyConnected marks an attempted MCP connection whose server name
 // is already live on the host.
 var ErrServerAlreadyConnected = errors.New("plugin server already connected")
@@ -339,6 +345,7 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 				_ = SaveCachedSchema(spec.Name, CachedSchema{
 					SpecHash: SpecFingerprint(spec),
 					Capabilities: map[string]bool{
+						"tools":     c.hasTools,
 						"prompts":   c.hasPrompts,
 						"resources": c.hasResources,
 					},
@@ -498,6 +505,7 @@ type Client struct {
 	// Capabilities advertised by the server at initialize. prompts/list and
 	// resources/list are only called when advertised, so we never provoke a
 	// "method not found" on a tools-only server.
+	hasTools     bool
 	hasPrompts   bool
 	hasResources bool
 
@@ -543,6 +551,7 @@ type ServerStatus struct {
 	Tools     int
 	Prompts   int
 	Resources int
+	HasTools  bool
 	ToolList  []ToolInfo
 }
 
@@ -563,6 +572,7 @@ func (h *Host) Servers() []ServerStatus {
 			Name:      c.name,
 			Transport: c.transport,
 			Tools:     c.toolCount,
+			HasTools:  c.hasTools,
 		}
 		c.toolsMu.Lock()
 		s.ToolList = append([]ToolInfo(nil), c.tools...)
@@ -1084,6 +1094,7 @@ func (c *Client) initializeSession(ctx context.Context, recordCapabilities bool)
 	if err := json.Unmarshal(res, &ir); err != nil {
 		slog.Warn("plugin: parse initialize capabilities", "server", c.name, "err", err)
 	}
+	_, c.hasTools = ir.Capabilities["tools"]
 	_, c.hasPrompts = ir.Capabilities["prompts"]
 	_, c.hasResources = ir.Capabilities["resources"]
 
@@ -1118,20 +1129,33 @@ func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
 		return append([]tool.Tool(nil), c.toolAdapters...), nil
 	}
 
-	res, err := c.call(ctx, "tools/list", map[string]any{})
+	out, err := c.listToolsRaw(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var out struct {
-		Tools []mcpTool `json:"tools"`
-	}
-	if err := json.Unmarshal(res, &out); err != nil {
-		return nil, fmt.Errorf("plugin %q: decode tools/list: %w", c.name, err)
+
+	// Some MCP servers start accepting requests before dynamically registered
+	// tools have been added. If the server advertised the tools capability, a
+	// first empty list may be a startup race; give it a small bounded window to
+	// settle before freezing the provider-visible tool surface for this client.
+	if c.hasTools && len(out) == 0 {
+		for _, delay := range advertisedToolsEmptyListRetryDelays {
+			if err := sleepContext(ctx, delay); err != nil {
+				return nil, err
+			}
+			out, err = c.listToolsRaw(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if len(out) > 0 {
+				break
+			}
+		}
 	}
 
-	toolInfos := make([]ToolInfo, 0, len(out.Tools))
-	tools := make([]tool.Tool, 0, len(out.Tools))
-	for _, t := range out.Tools {
+	toolInfos := make([]ToolInfo, 0, len(out))
+	tools := make([]tool.Tool, 0, len(out))
+	for _, t := range out {
 		hinted := t.Annotations != nil && t.Annotations.ReadOnlyHint
 		visibleName := t.Name
 		if c.spec.StripRawPrefix != "" {
@@ -1155,6 +1179,34 @@ func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
 	c.toolAdapters = append([]tool.Tool(nil), sortedTools...)
 	c.toolsListed = true
 	return append([]tool.Tool(nil), sortedTools...), nil
+}
+
+func (c *Client) listToolsRaw(ctx context.Context) ([]mcpTool, error) {
+	res, err := c.call(ctx, "tools/list", map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Tools []mcpTool `json:"tools"`
+	}
+	if err := json.Unmarshal(res, &out); err != nil {
+		return nil, fmt.Errorf("plugin %q: decode tools/list: %w", c.name, err)
+	}
+	return out.Tools, nil
+}
+
+func sleepContext(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (c *Client) cachedTools() ([]tool.Tool, bool) {

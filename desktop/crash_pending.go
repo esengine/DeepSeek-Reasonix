@@ -46,15 +46,32 @@ func writePendingCrash(site string, r any, stack []byte) {
 	report.Stack = sanitizeCrashText(stackText, maxCrashStackBytes)
 	report.TopFrame = topFrameFromStack(report.Stack)
 	report.Message = msg
+	_ = writePendingReport(report, true)
+}
+
+func writePendingReport(report crashReport, overwrite bool) bool {
 	body, err := json.Marshal(report)
 	if err != nil {
-		return
+		return false
 	}
 	path := pendingCrashPath()
 	if os.MkdirAll(filepath.Dir(path), 0o755) != nil {
-		return
+		return false
 	}
-	_ = os.WriteFile(path, body, 0o644)
+	if overwrite {
+		return os.WriteFile(path, body, 0o644) == nil
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	n, err := f.Write(body)
+	if err != nil || n != len(body) {
+		_ = os.Remove(path)
+		return false
+	}
+	return true
 }
 
 func (a *App) goSafe(site string, fn func()) {

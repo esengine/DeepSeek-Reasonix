@@ -121,6 +121,21 @@ func mimoDomesticPrices(models []string) map[string]*provider.Pricing {
 	return prices
 }
 
+func longCat20Price() *provider.Pricing {
+	return &provider.Pricing{CacheHit: 0.04, Input: 2, Output: 8, Currency: "¥"}
+}
+
+func longCat20Prices(models []string) map[string]*provider.Pricing {
+	prices := map[string]*provider.Pricing{}
+	for _, model := range models {
+		switch strings.TrimSpace(model) {
+		case "LongCat-2.0":
+			prices[model] = longCat20Price()
+		}
+	}
+	return prices
+}
+
 // ResetOfficialProviderPricingOnUpgrade resets official DeepSeek prices to
 // the current built-in RMB defaults once for desktop upgrades. It intentionally
 // runs from the desktop app startup path, not every config Load(), so user edits

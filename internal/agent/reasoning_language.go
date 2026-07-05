@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"strings"
+	"unicode"
 )
 
 type reasoningLanguageContextKey struct{}
@@ -54,12 +55,119 @@ func ResponseLanguageBlock(lang string) string {
 func ReasoningLanguageBlock(lang string) string {
 	switch NormalizeReasoningLanguage(lang) {
 	case "zh":
-		return "<reasoning-language>\nVisible reasoning/thinking text preference: use Simplified Chinese when the provider exposes reasoning text. Keep code, identifiers, file paths, shell commands, and untranslated technical terms in their original form. This preference does not override an explicit user request for the final answer language.\n</reasoning-language>"
+		return "<reasoning-language>\n可见推理/思考文本偏好：当模型服务暴露可见推理或思考文本时，请使用简体中文。代码、标识符、文件路径、shell 命令和未翻译的技术术语保持原文。此偏好不会覆盖用户对最终回答语言的明确要求。\n</reasoning-language>"
 	case "en":
 		return "<reasoning-language>\nVisible reasoning/thinking text preference: use English when the provider exposes reasoning text. Keep code, identifiers, file paths, shell commands, and untranslated technical terms in their original form. This preference does not override an explicit user request for the final answer language.\n</reasoning-language>"
 	default:
 		return ""
 	}
+}
+
+// ResolveReasoningLanguage returns the concrete visible-reasoning language for
+// a turn. Explicit zh/en settings win; auto anchors clear Chinese user prompts
+// and otherwise stays provider-default to preserve the historical no-injection
+// behaviour for English and ambiguous turns.
+func ResolveReasoningLanguage(lang, source string) string {
+	mode := NormalizeReasoningLanguage(lang)
+	if mode != "auto" {
+		return mode
+	}
+	return InferReasoningLanguageFromText(source)
+}
+
+// InferReasoningLanguageFromText conservatively detects Chinese user-authored
+// turns for auto reasoning-language mode. It strips Reasonix-injected context
+// wrappers first so large @file payloads or transient XML blocks do not drown
+// out the user's actual prompt. English and ambiguous turns intentionally return
+// auto, preserving the old no-extra-instruction behaviour.
+func InferReasoningLanguageFromText(source string) string {
+	source = reasoningLanguageSourceText(source)
+	if source == "" {
+		return "auto"
+	}
+	han, cjkPunct := reasoningLanguageScriptCounts(source)
+	switch {
+	case han >= 4:
+		return "zh"
+	case han >= 2 && (cjkPunct > 0 || hasChineseReasoningCue(source)):
+		return "zh"
+	default:
+		return "auto"
+	}
+}
+
+func reasoningLanguageSourceText(source string) string {
+	s := strings.TrimSpace(StripTransientUserBlocks(source))
+	const preamble = "Referenced context:"
+	if !strings.HasPrefix(s, preamble) {
+		return s
+	}
+	s = strings.TrimSpace(s[len(preamble):])
+	for {
+		s = strings.TrimSpace(s)
+		if s == "" || !strings.HasPrefix(s, "<") {
+			return s
+		}
+		tagEnd := strings.IndexAny(s, " >\t\r\n")
+		if tagEnd <= 1 {
+			return s
+		}
+		tag := s[1:tagEnd]
+		switch tag {
+		case "file", "dir", "resource", "image":
+			closeTag := "</" + tag + ">"
+			i := strings.Index(s, closeTag)
+			if i < 0 {
+				return s
+			}
+			s = strings.TrimSpace(s[i+len(closeTag):])
+		default:
+			return s
+		}
+	}
+}
+
+func reasoningLanguageScriptCounts(source string) (han, cjkPunct int) {
+	for _, r := range source {
+		switch {
+		case unicode.In(r, unicode.Han):
+			han++
+		case isCJKPunctuation(r):
+			cjkPunct++
+		}
+	}
+	return han, cjkPunct
+}
+
+func isCJKPunctuation(r rune) bool {
+	switch {
+	case r >= 0x3000 && r <= 0x303F:
+		return true
+	case r >= 0xFF00 && r <= 0xFFEF:
+		return true
+	default:
+		return false
+	}
+}
+
+func hasChineseReasoningCue(source string) bool {
+	for _, cue := range chineseReasoningLanguageCues {
+		if strings.Contains(source, cue) {
+			return true
+		}
+	}
+	return false
+}
+
+var chineseReasoningLanguageCues = []string{
+	"你好", "请", "帮我", "帮忙", "看看", "看下", "解释", "说明", "总结", "分析",
+	"修复", "实现", "优化", "排查", "处理", "继续", "为什么", "怎么",
+	"是否", "能否", "支持", "设置", "中文", "思考", "问题", "报错",
+	"代码", "文件", "这个", "那个",
+}
+
+func reasoningLanguageBlockForSource(lang, source string) string {
+	return ReasoningLanguageBlock(ResolveReasoningLanguage(lang, source))
 }
 
 // WithResponseLanguage prefixes content with the transient response-language
@@ -77,7 +185,15 @@ func WithResponseLanguage(content, lang string) string {
 // block. User-authored mentions of the tag later in the prompt must not suppress
 // the configured preference.
 func WithReasoningLanguage(content, lang string) string {
-	block := ReasoningLanguageBlock(lang)
+	return WithReasoningLanguageForSource(content, lang, content)
+}
+
+// WithReasoningLanguageForSource prefixes content using source as the language
+// signal for auto mode. Callers that expand @references should pass the raw
+// user prompt as source so referenced English code or logs do not override the
+// user's actual conversation language.
+func WithReasoningLanguageForSource(content, lang, source string) string {
+	block := reasoningLanguageBlockForSource(lang, source)
 	if block == "" || hasLeadingInjectedBlock(content, "reasoning-language") {
 		return content
 	}

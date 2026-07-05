@@ -39,6 +39,14 @@ func SaveAttachmentDataURL(origName, dataURL string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("decode pasted file: %w", err)
 	}
+	return SaveAttachmentBytes(origName, raw)
+}
+
+func SaveAttachmentBytes(origName string, raw []byte) (string, error) {
+	return SaveAttachmentBytesInRoot(".", origName, raw)
+}
+
+func SaveAttachmentBytesInRoot(root, origName string, raw []byte) (string, error) {
 	if len(raw) == 0 || len(raw) > maxFileAttachmentBytes {
 		return "", fmt.Errorf("attachment must be between 1 byte and 25 MB")
 	}
@@ -46,23 +54,7 @@ func SaveAttachmentDataURL(origName, dataURL string) (string, error) {
 	if !safeAttachmentExt.MatchString(ext) {
 		ext = ".bin"
 	}
-	if err := ensureAttachmentRoot(); err != nil {
-		return "", err
-	}
-	rel, f, err := createAttachmentFile(ext)
-	if err != nil {
-		return "", err
-	}
-	if _, err := f.Write(raw); err != nil {
-		_ = f.Close()
-		_ = os.Remove(rel)
-		return "", err
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(rel)
-		return "", err
-	}
-	return filepath.ToSlash(rel), nil
+	return saveAttachmentBytesInRoot(root, ext, raw)
 }
 
 func SaveImageDataURL(dataURL string) (string, error) {
@@ -84,6 +76,10 @@ func SaveImageDataURL(dataURL string) (string, error) {
 }
 
 func SaveImageBytes(declaredMime string, raw []byte) (string, error) {
+	return SaveImageBytesInRoot(".", declaredMime, raw)
+}
+
+func SaveImageBytesInRoot(root, declaredMime string, raw []byte) (string, error) {
 	if len(raw) == 0 || len(raw) > maxImageAttachmentBytes {
 		return "", fmt.Errorf("pasted image must be between 1 byte and 10 MB")
 	}
@@ -95,24 +91,35 @@ func SaveImageBytes(declaredMime string, raw []byte) (string, error) {
 		return "", fmt.Errorf("unsupported image type: %s", declaredMime)
 	}
 	ext := imageExt(mime)
-	if err := ensureAttachmentRoot(); err != nil {
+	return saveAttachmentBytesInRoot(root, ext, raw)
+}
+
+func saveAttachmentBytesInRoot(root, ext string, raw []byte) (string, error) {
+	if strings.TrimSpace(root) == "" {
+		root = "."
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
 		return "", err
 	}
-	rel, f, err := createAttachmentFile(ext)
+	if err := ensureAttachmentRootIn(absRoot); err != nil {
+		return "", err
+	}
+	rel, f, err := createAttachmentFileIn(absRoot, ext)
 	if err != nil {
 		return "", err
 	}
 	if n, err := f.Write(raw); err != nil {
 		_ = f.Close()
-		_ = os.Remove(rel)
+		_ = os.Remove(filepath.Join(absRoot, rel))
 		return "", err
 	} else if n != len(raw) {
 		_ = f.Close()
-		_ = os.Remove(rel)
+		_ = os.Remove(filepath.Join(absRoot, rel))
 		return "", io.ErrShortWrite
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(rel)
+		_ = os.Remove(filepath.Join(absRoot, rel))
 		return "", err
 	}
 	return filepath.ToSlash(rel), nil
@@ -377,7 +384,11 @@ func rejectSymlinkComponents(path, root string) error {
 }
 
 func ensureAttachmentRoot() error {
-	root := filepath.Join(".reasonix", "attachments")
+	return ensureAttachmentRootIn(".")
+}
+
+func ensureAttachmentRootIn(base string) error {
+	root := filepath.Join(base, ".reasonix", "attachments")
 	if info, err := os.Lstat(root); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("attachment directory must not be a symlink")
@@ -460,9 +471,13 @@ end try
 }
 
 func createAttachmentFile(ext string) (string, *os.File, error) {
+	return createAttachmentFileIn(".", ext)
+}
+
+func createAttachmentFileIn(base, ext string) (string, *os.File, error) {
 	for range maxAttachmentCreateAttempts {
 		rel := attachmentPath(ext)
-		f, err := os.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		f, err := os.OpenFile(filepath.Join(base, rel), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 		if os.IsExist(err) {
 			continue
 		}

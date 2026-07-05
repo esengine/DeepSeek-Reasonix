@@ -41,20 +41,27 @@ func (m *chatTUI) runLanguageSubcommand(input string) {
 		m.notice("language: cannot resolve config path")
 		return
 	}
-	edit := config.LoadForEdit(path)
-	if err := edit.SetLanguage(lang); err != nil {
-		m.notice("language: " + err.Error())
-		return
-	}
-	if err := edit.SaveTo(path); err != nil {
-		m.notice("language: " + err.Error())
-		return
-	}
-	if lang == "" {
-		if err := clearUserLanguageOverride(path); err != nil {
-			m.notice("language: " + err.Error())
-			return
+	// Lock the whole load-modify-save cycle, including the user-scope override
+	// cleanup — its own read-modify-write on the user config. path may be a
+	// project config here; holding the user-config lock for that case is
+	// harmless. The controller update below runs off-lock.
+	if err := func() error {
+		unlock := config.LockUserConfigEdits()
+		defer unlock()
+		edit := config.LoadForEdit(path)
+		if err := edit.SetLanguage(lang); err != nil {
+			return err
 		}
+		if err := edit.SaveTo(path); err != nil {
+			return err
+		}
+		if lang == "" {
+			return clearUserLanguageOverride(path)
+		}
+		return nil
+	}(); err != nil {
+		m.notice("language: " + err.Error())
+		return
 	}
 
 	resolved := i18n.DetectLanguage(lang)
@@ -64,6 +71,9 @@ func (m *chatTUI) runLanguageSubcommand(input string) {
 	m.notice(fmt.Sprintf(i18n.M.LanguageChangedFmt, languageDisplay(lang), resolved))
 }
 
+// clearUserLanguageOverride drops a stale user-level language override after a
+// project-level write. Callers must hold LockUserConfigEdits: this is its own
+// load-modify-save on the user config and must not take the lock itself.
 func clearUserLanguageOverride(primaryPath string) error {
 	userPath := config.UserConfigPath()
 	if userPath == "" || sameConfigPath(primaryPath, userPath) {

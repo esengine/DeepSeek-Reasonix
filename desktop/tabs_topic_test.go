@@ -1170,6 +1170,27 @@ func TestCreateTopicDefaultsToAutoNewSessionTitle(t *testing.T) {
 	}
 }
 
+func TestListProjectTreeFallsBackToTopicIDCreatedAt(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	const topicID = "legacy_20260606-114914_2276f13fd87c"
+	if err := setTopicTitleWithSource("", topicID, "你好，你是谁", topicTitleSourceManual); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	if err := prependTopicInProjectsFile("", topicID, false); err != nil {
+		t.Fatalf("prepend topic: %v", err)
+	}
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || nodes[0].Kind != "global_folder" || len(nodes[0].Children) != 1 {
+		t.Fatalf("project tree = %#v, want Global with one topic", nodes)
+	}
+	expected := time.Date(2026, 6, 6, 11, 49, 14, 0, time.UTC).UnixMilli()
+	if got := nodes[0].Children[0].CreatedAt; got != expected {
+		t.Fatalf("project tree createdAt = %d, want %d", got, expected)
+	}
+}
+
 func TestCreateTopicAppearsFirstInProjectTree(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -1567,6 +1588,53 @@ func TestAutoTitleTopicStripsReasoningLanguagePrefix(t *testing.T) {
 	}
 }
 
+func TestAutoTitleTopicRefreshesOnThirdUserTurn(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topic, err := NewApp().CreateTopic("project", projectRoot, "")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	firstTurn := strings.Join([]string{
+		`{"role":"user","content":"帮我看看"}`,
+		`{"role":"assistant","content":"可以"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(sessionPath, []byte(firstTurn), 0o644); err != nil {
+		t.Fatalf("write first session: %v", err)
+	}
+
+	title, updated := autoTitleTopicFromSession(projectRoot, topic.ID, sessionPath)
+	if !updated || title != "帮我看看" {
+		t.Fatalf("first auto title = %q updated=%v, want 帮我看看/true", title, updated)
+	}
+
+	thirdTurn := strings.Join([]string{
+		`{"role":"user","content":"帮我看看"}`,
+		`{"role":"assistant","content":"可以"}`,
+		`{"role":"user","content":"继续"}`,
+		`{"role":"assistant","content":"继续分析"}`,
+		`{"role":"user","content":"实现自动更新会话标题"}`,
+		`{"role":"assistant","content":"已实现"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(sessionPath, []byte(thirdTurn), 0o644); err != nil {
+		t.Fatalf("write third session: %v", err)
+	}
+
+	title, updated = autoTitleTopicFromSession(projectRoot, topic.ID, sessionPath)
+	if !updated || title != "实现自动更新会话标题" {
+		t.Fatalf("third-turn auto title = %q updated=%v, want 实现自动更新会话标题/true", title, updated)
+	}
+	if got := loadTopicTitle(projectRoot, topic.ID); got != "实现自动更新会话标题" {
+		t.Fatalf("stored title = %q, want 实现自动更新会话标题", got)
+	}
+	meta := loadTopicAutoTitleMeta(projectRoot)[topic.ID]
+	if meta.Stage != 3 {
+		t.Fatalf("auto title stage = %d, want 3", meta.Stage)
+	}
+}
+
 func TestAutoTitleDoesNotOverrideManualTopicTitle(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -1589,6 +1657,50 @@ func TestAutoTitleDoesNotOverrideManualTopicTitle(t *testing.T) {
 	}
 	if got := loadTopicTitle(projectRoot, topic.ID); got != "手动标题" {
 		t.Fatalf("stored title = %q, want 手动标题", got)
+	}
+}
+
+func TestAutoTitleDoesNotOverrideManualSessionTitle(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topic, err := NewApp().CreateTopic("project", projectRoot, "")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(sessionPath, []byte(`{"role":"user","content":"讲讲这个代码库的架构"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+	if err := agent.SaveBranchMetaPreserveUpdated(sessionPath, agent.BranchMeta{CustomTitle: "手动会话标题"}); err != nil {
+		t.Fatalf("save branch meta: %v", err)
+	}
+
+	if title, updated := autoTitleTopicFromSession(projectRoot, topic.ID, sessionPath); updated || title != "" {
+		t.Fatalf("manual session title should not auto-update, title=%q updated=%v", title, updated)
+	}
+	if got := loadTopicTitle(projectRoot, topic.ID); got != defaultTopicTitle {
+		t.Fatalf("stored title = %q, want default title", got)
+	}
+}
+
+func TestRenameTopicBlankKeepsManualTitleSource(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	app := NewApp()
+	topic, err := app.CreateTopic("project", projectRoot, "")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	if err := app.RenameTopic(topic.ID, "   "); err != nil {
+		t.Fatalf("rename blank topic: %v", err)
+	}
+	if got := loadTopicTitle(projectRoot, topic.ID); got != defaultTopicTitle {
+		t.Fatalf("stored title = %q, want %q", got, defaultTopicTitle)
+	}
+	if got := loadTopicTitleSource(projectRoot, topic.ID); got != topicTitleSourceManual {
+		t.Fatalf("title source = %q, want manual", got)
 	}
 }
 

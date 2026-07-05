@@ -111,6 +111,10 @@ func (m *chatTUI) persistModel(ref string) {
 	if path == "" {
 		return
 	}
+	// Serialize the load-modify-save against other in-process user-config
+	// editors so concurrent writers don't drop each other's fields.
+	unlock := config.LockUserConfigEdits()
+	defer unlock()
 	edit := config.LoadForEdit(path)
 	if err := edit.SetDefaultModel(ref); err != nil {
 		m.notice(fmt.Sprintf("model: persist refused: %v (ref=%s)", err, ref))

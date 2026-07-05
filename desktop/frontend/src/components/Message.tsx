@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { BrainCircuit, ChevronDown, ChevronRight, FileText, Folder, GitBranch, Image, MessageSquare, Pencil, RotateCcw, ScrollText } from "lucide-react";
 import { Markdown } from "./Markdown";
@@ -10,6 +10,7 @@ import type { DisplayAttachment } from "../lib/attachmentDisplay";
 import { app } from "../lib/bridge";
 import { replaySubmitText } from "../lib/editReplay";
 import { useT } from "../lib/i18n";
+import { ImageViewer } from "./ImageViewer";
 import { Tooltip } from "./Tooltip";
 import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import { displayReasoningText } from "../lib/reasoningDisplay";
@@ -79,6 +80,31 @@ function mergeDisplayAttachments(existing: DisplayAttachment[], incoming: Displa
     merged.push(attachment);
   }
   return merged;
+}
+
+type PastedBlockInfo = {
+  label: string;
+  content: string;
+};
+
+const PASTE_LABEL_RE = /\[(?:已粘贴文本|已貼上文字|Pasted text) #\d+ · \d+ (?:行|lines)\]/g;
+
+export function parsePastedBlocks(text: string, submitText?: string): PastedBlockInfo[] {
+  const labels = text.match(PASTE_LABEL_RE);
+  if (!labels || labels.length === 0 || !submitText) return [];
+  const unique = [...new Set(labels)];
+  const blocks: PastedBlockInfo[] = [];
+  for (const label of unique) {
+    const beginMarker = `--- Begin ${label} ---`;
+    const endMarker = `--- End ${label} ---`;
+    const beginIdx = submitText.indexOf(beginMarker);
+    const endIdx = submitText.indexOf(endMarker);
+    if (beginIdx < 0 || endIdx <= beginIdx) continue;
+    const contentStart = beginIdx + beginMarker.length;
+    const content = submitText.slice(contentStart, endIdx).replace(/^\r?\n/, "");
+    blocks.push({ label, content });
+  }
+  return blocks;
 }
 
 function MemoryCitations({ citations }: { citations?: MemoryCitation[] }) {
@@ -181,6 +207,65 @@ export function UserMessage({
   const [editSubmitting, setEditSubmitting] = useState(false);
   const editRef = useRef<HTMLTextAreaElement>(null);
   const [imagePreviews, setImagePreviews] = useState<Record<string, string>>({});
+  const [imageViewer, setImageViewer] = useState<{ open: boolean; url: string; name: string }>({ open: false, url: "", name: "" });
+  const openImageViewer = useCallback(async (path: string, name: string) => {
+    let url = imagePreviews[path];
+    if (!url) {
+      try {
+        url = await app.AttachmentDataURL(path);
+        setImagePreviews((prev) => (prev[path] ? prev : { ...prev, [path]: url }));
+      } catch {
+        return;
+      }
+    }
+    setImageViewer({ open: true, url, name });
+  }, [imagePreviews]);
+
+  const closeImageViewer = useCallback(() => {
+    setImageViewer((prev) => (prev.open ? { ...prev, open: false } : prev));
+  }, []);
+
+  const pasteBlocks = useMemo(() => parsePastedBlocks(actionText, submitText), [actionText, submitText]);
+  const [expandedPasteLabels, setExpandedPasteLabels] = useState<Record<string, boolean>>({});
+
+  type DisplaySegment =
+    | { type: "text"; content: string }
+    | { type: "paste"; block: PastedBlockInfo };
+
+  const displaySegments = useMemo((): DisplaySegment[] => {
+    if (pasteBlocks.length === 0) return [{ type: "text", content: displayText }];
+    const segments: DisplaySegment[] = [];
+    // Order blocks by their position in the text so cards appear inline.
+    const ordered = pasteBlocks
+      .map((b) => ({ block: b, pos: displayText.indexOf(b.label) }))
+      .filter((x) => x.pos >= 0)
+      .sort((a, b) => a.pos - b.pos);
+    let remaining = displayText;
+    for (const { block } of ordered) {
+      const idx = remaining.indexOf(block.label);
+      if (idx < 0) continue;
+      // Text before the label: strip the trailing newline that separated the
+      // label from the preceding line so the card sits tight against the text.
+      if (idx > 0) {
+        let before = remaining.slice(0, idx);
+        before = before.replace(/\n$/, "");
+        if (before) segments.push({ type: "text", content: before });
+      }
+      segments.push({ type: "paste", block });
+      remaining = remaining.slice(idx + block.label.length);
+    }
+    // Strip the leading newline that followed the label.
+    remaining = remaining.replace(/^\n/, "");
+    if (remaining.trim()) segments.push({ type: "text", content: remaining });
+    return segments.length > 0 ? segments : [{ type: "text", content: displayText }];
+  }, [displayText, pasteBlocks]);
+
+  const togglePasteExpand = (label: string) => {
+    setExpandedPasteLabels((prev) => ({
+      ...prev,
+      [label]: !prev[label],
+    }));
+  };
   const orderedDraftAttachments = sortDisplayAttachments(draftAttachments);
   const imagePreviewKey = orderedAttachments
     .concat(orderedDraftAttachments)
@@ -305,11 +390,12 @@ export function UserMessage({
                     <ComposerContextCard
                       key={attachment.path}
                       variant={attachment.source === "workspace" ? "workspace" : "attachment"}
-                      tooltipLabel={attachment.source === "workspace" ? formatAttachmentRefForSubmit(attachment) : attachment.path}
+                      tooltipLabel={imagePreview ? `${t("imageViewer.clickToPreview")} — ${attachment.path}` : attachment.source === "workspace" ? formatAttachmentRefForSubmit(attachment) : attachment.path}
                       removeLabel={attachment.source === "workspace" ? t("composer.removeReference") : t("composer.removeImage")}
                       removeDisabled={editSubmitting}
                       onRemove={() => removeDraftAttachment(attachment.path)}
                       previewUrl={imagePreview}
+                      onImageClick={imagePreview ? () => openImageViewer(attachment.path, attachment.name) : undefined}
                       imageOnly={imageOnly}
                       folder={attachment.kind === "folder"}
                       label={attachment.kind === "folder" ? `${attachment.name}/` : attachment.name}
@@ -355,26 +441,78 @@ export function UserMessage({
             )}
           </div>
         ) : (
-          displayText && <div className="msg__text">{displayText}</div>
+          <>
+            {displaySegments.map((seg, i) => {
+              if (seg.type === "text") {
+                return seg.content ? <div className="msg__text" key={`s${i}`}>{seg.content}</div> : null;
+              }
+              const expanded = Boolean(expandedPasteLabels[seg.block.label]);
+              return (
+                <div className="msg-pasted" key={seg.block.label}>
+                  <div className="msg-pasted-block">
+                    <div className="msg-pasted-head">
+                      <FileText size={15} />
+                      <span className="msg-pasted-label">{seg.block.label}</span>
+                      <div className="msg-pasted-actions">
+                        <Tooltip label={t(expanded ? "msg.pastedCollapseTooltip" : "msg.pastedExpandTooltip")}>
+                          <button type="button" onClick={() => togglePasteExpand(seg.block.label)}>
+                            {expanded ? t("common.collapse") : t("composer.pastedExpand")}
+                          </button>
+                        </Tooltip>
+                      </div>
+                    </div>
+                    {expanded && (
+                      <div className="msg-pasted-expanded">{seg.block.content}</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </>
         )}
         {failed && <div className="msg__send-failed">{t("msg.sendFailed")}</div>}
         {orderedAttachments.length > 0 && (
           <div className="msg-attachments" aria-label={t("msg.attachments")}>
-            {orderedAttachments.map((attachment, index) => (
-              <div className={`msg-attachment msg-attachment--${attachment.kind}`} key={`${attachment.path}:${index}`} title={attachment.path}>
-                <span className={`msg-attachment__icon msg-attachment__icon--${attachment.kind}`} aria-hidden="true">
-                  {attachment.kind === "image" && imagePreviews[attachment.path] ? <img src={imagePreviews[attachment.path]} alt="" draggable={false} /> : attachmentIcon(attachment.kind)}
-                </span>
-                <span className="msg-attachment__main">
-                  <span className="msg-attachment__name">{attachment.name}</span>
-                  <span className="msg-attachment__meta">
-                    {attachment.kind === "folder"
-                      ? t("msg.folderReference")
-                      : `${attachment.ext || t("msg.fileAttachment")} · ${attachment.source === "workspace" ? t("msg.workspaceReference") : attachment.kind === "image" ? t("msg.imageAttachment") : t("msg.fileAttachment")}`}
+            {orderedAttachments.map((attachment, index) => {
+              const isImage = attachment.kind === "image";
+              const el = (
+                <div
+                  className={`msg-attachment msg-attachment--${attachment.kind}`}
+                  key={isImage ? undefined : `${attachment.path}:${index}`}
+                  title={isImage ? undefined : attachment.path}
+                  onClick={isImage ? () => openImageViewer(attachment.path, attachment.name) : undefined}
+                  role={isImage ? "button" : undefined}
+                  tabIndex={isImage ? 0 : undefined}
+                  onKeyDown={isImage ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openImageViewer(attachment.path, attachment.name); } } : undefined}
+                >
+                  <span className={`msg-attachment__icon msg-attachment__icon--${attachment.kind}`} aria-hidden="true">
+                    {isImage && imagePreviews[attachment.path] ? <img src={imagePreviews[attachment.path]} alt="" draggable={false} /> : attachmentIcon(attachment.kind)}
                   </span>
-                </span>
-              </div>
-            ))}
+                  <span className="msg-attachment__main">
+                    <span className="msg-attachment__name">{attachment.name}</span>
+                    <span className="msg-attachment__meta">
+                      {attachment.kind === "folder"
+                        ? t("msg.folderReference")
+                        : `${attachment.ext || t("msg.fileAttachment")} · ${attachment.source === "workspace" ? t("msg.workspaceReference") : attachment.kind === "image" ? t("msg.imageAttachment") : t("msg.fileAttachment")}`}
+                    </span>
+                  </span>
+                </div>
+              );
+              if (isImage) {
+                return (
+                  <Tooltip key={`${attachment.path}:${index}`} label={t("imageViewer.clickToPreview")} block>
+                    {el}
+                  </Tooltip>
+                );
+              }
+              return el;
+            })}
+            <ImageViewer
+              open={imageViewer.open}
+              imageUrl={imageViewer.url}
+              imageName={imageViewer.name}
+              onClose={closeImageViewer}
+            />
           </div>
         )}
       </div>

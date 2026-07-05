@@ -143,6 +143,20 @@ func (a *App) releaseTabSharedHost(tab *WorkspaceTab) {
 	a.releaseSharedHost(key)
 }
 
+// takeTabSharedHostKey clears the tab's shared-host key and returns it so the
+// caller can release it later. Use from inside a.mu critical sections:
+// releaseSharedHost may close the host and reap MCP subprocesses, which is far
+// too slow to run under the app lock — call a.releaseSharedHost(key) after
+// unlocking.
+func takeTabSharedHostKey(tab *WorkspaceTab) string {
+	if tab == nil || tab.SharedHostKey == "" {
+		return ""
+	}
+	key := tab.SharedHostKey
+	tab.SharedHostKey = ""
+	return key
+}
+
 // closeAllSharedHosts closes every shared host. Called during app shutdown.
 func (a *App) closeAllSharedHosts() {
 	a.sharedHostsMu.Lock()

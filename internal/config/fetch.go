@@ -37,8 +37,12 @@ func (e *ProviderEntry) FetchModels(ctx context.Context) ([]string, error) {
 	}
 	var lastErr error
 	var firstHardErr error
+	authMode := modelFetchAuthMode(e)
 	for _, u := range candidates {
-		models, err := openai.FetchModels(ctx, u, key, e.Headers)
+		models, err := openai.FetchModelsWithOptions(ctx, u, key, openai.FetchModelsOptions{
+			Headers:  e.Headers,
+			AuthMode: authMode,
+		})
 		if err == nil {
 			return models, nil
 		}
@@ -51,6 +55,16 @@ func (e *ProviderEntry) FetchModels(ctx context.Context) ([]string, error) {
 		return nil, firstHardErr
 	}
 	return nil, lastErr
+}
+
+func modelFetchAuthMode(e *ProviderEntry) openai.ModelFetchAuthMode {
+	if e == nil || !strings.EqualFold(strings.TrimSpace(e.Kind), "anthropic") {
+		return openai.ModelFetchAuthAuto
+	}
+	if e.AuthHeader {
+		return openai.ModelFetchAuthBearer
+	}
+	return openai.ModelFetchAuthXAPIKey
 }
 
 // BuildModelFetchURLs derives likely OpenAI-compatible model-list endpoints.

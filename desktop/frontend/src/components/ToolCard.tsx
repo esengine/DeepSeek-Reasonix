@@ -91,7 +91,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
       app.ToolResultForTab(tabId, item.id).then((d) => {
         if (!cancelled && d) setFullData(d);
       }).catch(() => {}),
-    );
+    ).catch(() => {});
     return () => { cancelled = true; };
   }, [open, item.id, item.dataArchived, fullData, tabId]);
 

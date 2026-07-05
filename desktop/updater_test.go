@@ -98,6 +98,14 @@ func TestChannelSelectsDistinctPointers(t *testing.T) {
 	if !strings.Contains(stable[0], "/latest/latest.json") {
 		t.Errorf("stable primary = %q, want the latest/ pointer", stable[0])
 	}
+	if stable[1] != releaseGatewayBase+"/stable/latest.json" {
+		t.Errorf("stable fallback = %q, want the release gateway", stable[1])
+	}
+	for _, u := range append(stable, canary...) {
+		if strings.Contains(u, "/releases/latest") {
+			t.Errorf("manifest endpoint uses GitHub's repository-wide latest release: %q", u)
+		}
+	}
 	for _, u := range canary {
 		if strings.Contains(u, "/latest/") {
 			t.Errorf("canary endpoint hits the stable latest/ pointer: %q", u)
@@ -106,8 +114,11 @@ func TestChannelSelectsDistinctPointers(t *testing.T) {
 	if !strings.Contains(canary[0], "/canary/latest.json") {
 		t.Errorf("canary primary = %q, want the canary/ pointer", canary[0])
 	}
-	if downloadPage() == (ghReleasesBase + "/latest") {
-		t.Error("canary download page should not be the stable latest releases page")
+	if canary[1] != releaseGatewayBase+"/canary/latest.json" {
+		t.Errorf("canary fallback = %q, want the release gateway", canary[1])
+	}
+	if strings.Contains(downloadPage(), "/releases/latest") {
+		t.Errorf("download page should not use GitHub's repository-wide latest release: %q", downloadPage())
 	}
 }
 

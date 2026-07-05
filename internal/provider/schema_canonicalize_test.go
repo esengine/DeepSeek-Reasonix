@@ -22,6 +22,19 @@ func TestCanonicalizeSchemaDropsNonArrayRequired(t *testing.T) {
 	}
 }
 
+func TestCanonicalizeSchemaAddsEmptyPropertiesForNoArgumentObject(t *testing.T) {
+	for _, raw := range []json.RawMessage{
+		nil,
+		json.RawMessage(`{"type":"object"}`),
+	} {
+		got := string(CanonicalizeSchema(raw))
+		want := `{"properties":{},"type":"object"}`
+		if got != want {
+			t.Fatalf("CanonicalizeSchema(%s) = %s, want %s", string(raw), got, want)
+		}
+	}
+}
+
 func TestCanonicalizeSchemaPreservesPropertyNamedRequired(t *testing.T) {
 	raw := json.RawMessage(`{
 		"type":"object",
@@ -49,7 +62,7 @@ func TestCanonicalizeSchemaDependentRequired(t *testing.T) {
 	}`)
 
 	got := string(CanonicalizeSchema(raw))
-	want := `{"dependentRequired":{"cc":["billing_address","name"]},"type":"object"}`
+	want := `{"dependentRequired":{"cc":["billing_address","name"]},"properties":{},"type":"object"}`
 	if got != want {
 		t.Fatalf("CanonicalizeSchema() = %s, want %s", got, want)
 	}

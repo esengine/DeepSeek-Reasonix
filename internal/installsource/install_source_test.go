@@ -430,6 +430,16 @@ func TestParseSkillContentStrictAllowsMissingDescription(t *testing.T) {
 	}
 }
 
+func TestParseSkillContentRejectsMalformedFrontmatter(t *testing.T) {
+	_, err := parseSkillContent("---\nname: [broken\n---\nbody", "broken", "in-memory", true)
+	if err == nil {
+		t.Fatal("malformed frontmatter should fail")
+	}
+	if !strings.Contains(err.Error(), "invalid YAML") || !strings.Contains(strings.ToLower(err.Error()), "line") {
+		t.Fatalf("error = %v, want invalid YAML with location", err)
+	}
+}
+
 func TestApplyStrictFalseWarnsWhenDescriptionMissing(t *testing.T) {
 	project := t.TempDir()
 	home := t.TempDir()

@@ -14,7 +14,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
+	"reasonix/internal/fileutil"
 	"reasonix/internal/frontmatter"
 )
 
@@ -159,21 +161,27 @@ func SaveState(reasonixHome string, st State) error {
 		st.Version = 1
 	}
 	sort.SliceStable(st.Plugins, func(i, j int) bool { return st.Plugins[i].Name < st.Plugins[j].Name })
-	if err := os.MkdirAll(reasonixHome, 0o755); err != nil {
-		return err
-	}
 	b, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
 	}
 	b = append(b, '\n')
-	return os.WriteFile(StatePath(reasonixHome), b, 0o644)
+	return fileutil.AtomicWriteFile(StatePath(reasonixHome), b, 0o644)
 }
+
+// stateMu serialises the read-modify-write of the state file within this
+// process. SaveState writes atomically (tmpfile + rename), so concurrent
+// callers never see a half-written file; this lock additionally prevents two
+// in-process load-modify-save cycles from clobbering each other's edit. It is
+// not a cross-process lock — concurrent Reasonix processes can still race.
+var stateMu sync.Mutex
 
 func Upsert(reasonixHome string, p InstalledPlugin) error {
 	if !IsValidName(p.Name) {
 		return fmt.Errorf("invalid plugin name %q", p.Name)
 	}
+	stateMu.Lock()
+	defer stateMu.Unlock()
 	st, err := LoadState(reasonixHome)
 	if err != nil {
 		return err
@@ -189,6 +197,8 @@ func Upsert(reasonixHome string, p InstalledPlugin) error {
 }
 
 func Remove(reasonixHome, name string) (InstalledPlugin, bool, error) {
+	stateMu.Lock()
+	defer stateMu.Unlock()
 	st, err := LoadState(reasonixHome)
 	if err != nil {
 		return InstalledPlugin{}, false, err
@@ -204,6 +214,8 @@ func Remove(reasonixHome, name string) (InstalledPlugin, bool, error) {
 }
 
 func SetEnabled(reasonixHome, name string, enabled bool) error {
+	stateMu.Lock()
+	defer stateMu.Unlock()
 	st, err := LoadState(reasonixHome)
 	if err != nil {
 		return err

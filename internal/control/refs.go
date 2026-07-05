@@ -644,6 +644,13 @@ func FileRefLine(line string) (string, bool) {
 	return "@" + p, true
 }
 
+// SlashCodeCommentLine reports whether a slash-prefixed line is ordinary source
+// text rather than a Reasonix slash command.
+func SlashCodeCommentLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*")
+}
+
 // SlashPathLineRef reports whether a slash-prefixed line starts with a local file
 // path, including common compiler-location suffixes like ":12" or ":12:34".
 // It returns an @reference for the file so diagnostics that begin with an

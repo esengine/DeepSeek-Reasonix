@@ -29,8 +29,8 @@ type modelReasoningCapability struct {
 }
 
 var modelReasoningCapabilities = map[string]modelReasoningCapability{
-	"deepseek-v4-flash": {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"high", "max"}, Default: "high"},
-	"deepseek-v4-pro":   {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"high", "max"}, Default: "high"},
+	"deepseek-v4-flash": {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"disabled", "high", "max"}, Default: "high"},
+	"deepseek-v4-pro":   {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"disabled", "high", "max"}, Default: "high"},
 }
 
 // EffortCapabilityForEntry returns the user-facing /effort levels for a resolved
@@ -74,6 +74,23 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 		// runs with thinking on out of the box; "auto" means "don't override
 		// the model default" (== adaptive for M3).
 		return EffortCapability{Supported: true, Levels: []string{"auto", "adaptive", "disabled"}, Default: "adaptive"}
+	case isZhipuEntry(e):
+		// Zhipu GLM exposes a binary thinking knob (enabled|disabled) on its
+		// OpenAI-compatible endpoint and ignores reasoning_effort, so /effort
+		// mirrors that vocabulary. Default is "enabled" because GLM runs with
+		// thinking on out of the box; "auto" means "don't override the model
+		// default" (== enabled for GLM).
+		return EffortCapability{Supported: true, Levels: []string{"auto", "enabled", "disabled"}, Default: "enabled"}
+	case isLongCatEntry(e):
+		// LongCat exposes the same binary thinking vocabulary on its
+		// OpenAI-compatible endpoint and documents no reasoning_effort depth scale.
+		return EffortCapability{Supported: true, Levels: []string{"auto", "enabled", "disabled"}, Default: "enabled"}
+	case isOllamaCloudEntry(e):
+		// Ollama Cloud accepts top-level reasoning_effort values low|medium|
+		// high|max. "none" means omit the field so the hosted model runs without
+		// thinking. Leave auto as the default so existing traffic stays provider-
+		// default until the user chooses an effort explicitly.
+		return EffortCapability{Supported: true, Levels: []string{"auto", "none", "low", "medium", "high", "max"}, Default: "auto"}
 	case e != nil && e.Kind == "anthropic":
 		return EffortCapability{Supported: true, Levels: []string{"auto", "low", "medium", "high", "xhigh", "max"}, Default: "auto"}
 	default:
@@ -104,6 +121,10 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 	switch ReasoningProtocolForEntry(e) {
 	case ReasoningProtocolDeepSeek:
 		switch level {
+		case "disabled":
+			return "disabled", nil
+		case "off": // retired DeepSeek "no thinking" → disabled
+			return "disabled", nil
 		case "high", "max":
 			return level, nil
 		case "low", "medium":
@@ -111,7 +132,7 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 		case "xhigh":
 			return "max", nil
 		default:
-			return "", fmt.Errorf("usage: /effort auto|high|max")
+			return "", fmt.Errorf("usage: /effort auto|disabled|high|max")
 		}
 	case ReasoningProtocolOpenAI:
 		switch level {
@@ -139,6 +160,45 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 			return "disabled", nil
 		default:
 			return "", fmt.Errorf("usage: /effort auto|adaptive|disabled")
+		}
+	case isZhipuEntry(e):
+		// GLM's knob is binary (enabled|disabled); map Anthropic / OpenAI-style
+		// depth levels onto the nearest valid value so a stale /effort high|low
+		// still works. "off" is a retired DeepSeek level meaning "no thinking",
+		// which maps to "disabled".
+		switch level {
+		case "enabled", "disabled":
+			return level, nil
+		case "off":
+			return "disabled", nil
+		case "low", "medium", "high", "xhigh", "max":
+			return "enabled", nil
+		default:
+			return "", fmt.Errorf("usage: /effort auto|enabled|disabled")
+		}
+	case isLongCatEntry(e):
+		// LongCat's knob is binary (enabled|disabled); depth-like aliases mean
+		// thinking on, while the legacy off spellings disable it.
+		switch level {
+		case "enabled", "disabled":
+			return level, nil
+		case "off":
+			return "disabled", nil
+		case "low", "medium", "high", "xhigh", "max":
+			return "enabled", nil
+		default:
+			return "", fmt.Errorf("usage: /effort auto|enabled|disabled")
+		}
+	case isOllamaCloudEntry(e):
+		switch level {
+		case "none", "disabled", "off":
+			return "none", nil
+		case "low", "medium", "high", "max":
+			return level, nil
+		case "xhigh":
+			return "max", nil
+		default:
+			return "", fmt.Errorf("usage: /effort auto|none|low|medium|high|max")
 		}
 	case e != nil && e.Kind == "anthropic":
 		switch level {
@@ -264,6 +324,26 @@ func isMiniMaxEntry(e *ProviderEntry) bool {
 	return e != nil && e.Kind == "openai" && openai.IsMiniMax(e.BaseURL)
 }
 
+// isZhipuEntry reports whether the entry points at Zhipu's OpenAI-compatible
+// endpoint for GLM models. See openai.IsZhipu for the host-matching rule; the
+// entry-wrapper just gates on the openai kind.
+func isZhipuEntry(e *ProviderEntry) bool {
+	return e != nil && e.Kind == "openai" && openai.IsZhipu(e.BaseURL)
+}
+
+// isLongCatEntry reports whether the entry points at LongCat's OpenAI-compatible
+// endpoint. See openai.IsLongCat for the host-matching rule.
+func isLongCatEntry(e *ProviderEntry) bool {
+	return e != nil && e.Kind == "openai" && openai.IsLongCat(e.BaseURL)
+}
+
+// isOllamaCloudEntry reports whether the entry points at hosted Ollama Cloud,
+// whose OpenAI-compatible endpoint accepts reasoning_effort=max. Local Ollama
+// endpoints intentionally do not match.
+func isOllamaCloudEntry(e *ProviderEntry) bool {
+	return e != nil && e.Kind == "openai" && openai.IsOllamaCloud(e.BaseURL)
+}
+
 func resolvedModelReasoningCapability(e *ProviderEntry) (modelReasoningCapability, bool) {
 	if e == nil || e.Kind != "openai" {
 		return modelReasoningCapability{}, false
@@ -284,7 +364,7 @@ func effortCapabilityFromModel(cap modelReasoningCapability) EffortCapability {
 }
 
 func deepSeekEffortCapability() EffortCapability {
-	return EffortCapability{Supported: true, Levels: []string{"auto", "high", "max"}, Default: "high"}
+	return EffortCapability{Supported: true, Levels: []string{"auto", "disabled", "high", "max"}, Default: "high"}
 }
 
 func openAIEffortCapability() EffortCapability {

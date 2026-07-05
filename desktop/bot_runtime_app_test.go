@@ -39,6 +39,7 @@ func TestDesktopBotRuntimePlanBlocksWithoutAllowlist(t *testing.T) {
 	cfg := config.Default()
 	cfg.Bot.Enabled = true
 	cfg.Bot.Allowlist.Enabled = true
+	cfg.Bot.Pairing.Enabled = false
 	cfg.Bot.Connections = []config.BotConnectionConfig{
 		{ID: "feishu-lark", Provider: "feishu", Domain: "lark", Enabled: true},
 	}
@@ -46,6 +47,44 @@ func TestDesktopBotRuntimePlanBlocksWithoutAllowlist(t *testing.T) {
 	plan := desktopBotRuntimePlan(cfg)
 	if plan.Start || plan.Status != "blocked" {
 		t.Fatalf("plan = %+v, want blocked without allowlist", plan)
+	}
+}
+
+func TestDesktopBotRuntimePlanStartsWithPairing(t *testing.T) {
+	cfg := config.Default()
+	cfg.Bot.Enabled = true
+	cfg.Bot.Allowlist.Enabled = true
+	cfg.Bot.Pairing.Enabled = true
+	cfg.Bot.Connections = []config.BotConnectionConfig{
+		{ID: "feishu-lark", Provider: "feishu", Domain: "lark", Enabled: true},
+	}
+
+	plan := desktopBotRuntimePlan(cfg)
+	if !plan.Start {
+		t.Fatalf("plan = %+v, want start with pairing enabled", plan)
+	}
+}
+
+func TestDesktopBotChannelsWithLegacyQQConfig(t *testing.T) {
+	channels, connectionChannels := desktopBotChannelsWithLegacyQQ(config.QQBotConfig{
+		Model:            "qq-model",
+		ToolApprovalMode: "auto",
+		WorkspaceRoot:    "/tmp/qq-project",
+	}, nil, nil)
+
+	channel, ok := channels[bot.PlatformQQ]
+	if !ok {
+		t.Fatalf("platform QQ channel missing: %+v", channels)
+	}
+	if channel.Model != "qq-model" || channel.ToolApprovalMode != "auto" || channel.WorkspaceRoot != "/tmp/qq-project" {
+		t.Fatalf("platform channel = %+v, want QQ-specific runtime fields", channel)
+	}
+	connectionChannel, ok := connectionChannels["qq"]
+	if !ok {
+		t.Fatalf("connection QQ channel missing: %+v", connectionChannels)
+	}
+	if connectionChannel.Model != "qq-model" || connectionChannel.ToolApprovalMode != "auto" || connectionChannel.WorkspaceRoot != "/tmp/qq-project" {
+		t.Fatalf("connection channel = %+v, want QQ-specific runtime fields", connectionChannel)
 	}
 }
 
@@ -263,7 +302,8 @@ status = "connected"
 		t.Fatalf("chdir project: %v", err)
 	}
 
-	got, err := NewApp().loadDesktopBotConfig()
+	app := NewApp()
+	got, err := app.loadDesktopBotConfig()
 	if err != nil {
 		t.Fatalf("load desktop bot config: %v", err)
 	}
@@ -271,6 +311,17 @@ status = "connected"
 		t.Fatalf("desktop bot config = %+v, want migrated legacy Lark connection", got.Bot)
 	}
 
+	// The bot-runtime load is a pure read: the merge above stays in memory and
+	// the user config file is not rewritten.
+	preWrite := config.LoadForEdit(config.UserConfigPath())
+	if preWrite.Bot.Enabled || len(preWrite.Bot.Connections) != 0 {
+		t.Fatalf("read path persisted bot config = %+v, want disk untouched until a locked write", preWrite.Bot)
+	}
+
+	// The first locked write path performs the on-disk migration.
+	if err := app.applyConfigOnly(func(*config.Config) error { return nil }); err != nil {
+		t.Fatalf("applyConfigOnly: %v", err)
+	}
 	persisted := config.LoadForEdit(config.UserConfigPath())
 	if !persisted.Bot.Enabled || len(persisted.Bot.Connections) != 1 || persisted.Bot.Connections[0].ID != "feishu-lark" {
 		t.Fatalf("persisted bot config = %+v, want migrated legacy Lark connection", persisted.Bot)
@@ -312,7 +363,8 @@ status = "connected"
 		t.Fatalf("chdir project: %v", err)
 	}
 
-	got, err := NewApp().loadDesktopBotConfig()
+	app := NewApp()
+	got, err := app.loadDesktopBotConfig()
 	if err != nil {
 		t.Fatalf("load desktop bot config: %v", err)
 	}
@@ -320,12 +372,20 @@ status = "connected"
 		t.Fatalf("desktop bot config = %+v, want migrated legacy Lark connection", got.Bot)
 	}
 
+	// The bot-runtime load is a pure read: it serves the legacy config from
+	// memory and must not create the user config file.
+	if _, err := os.Stat(config.UserConfigPath()); !os.IsNotExist(err) {
+		t.Fatalf("read path must not create the user config, stat err = %v", err)
+	}
+
+	// The first locked write path creates the user config with the migrated
+	// bot settings (adopting the legacy config, ConfigVersion-bumped).
+	if err := app.applyConfigOnly(func(*config.Config) error { return nil }); err != nil {
+		t.Fatalf("applyConfigOnly: %v", err)
+	}
 	persisted := config.LoadForEdit(config.UserConfigPath())
 	if !persisted.Bot.Enabled || len(persisted.Bot.Connections) != 1 || persisted.Bot.Connections[0].ID != "feishu-lark" {
 		t.Fatalf("persisted bot config = %+v, want migrated legacy Lark connection", persisted.Bot)
-	}
-	if persisted.DesktopTheme() == "dark" {
-		t.Fatal("legacy project desktop theme should not be persisted during bot-only migration")
 	}
 }
 

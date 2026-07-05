@@ -1368,7 +1368,7 @@ func TestAutoPlanCommandPersistsAndUpdatesController(t *testing.T) {
 	input := "实现 GitHub issue #2395：\n- 新增配置项\n- 自动判断复杂任务\n- 补测试和文档"
 	ctrl.Send(input)
 	waitForCLIEvent(t, events, event.TurnDone)
-	if len(runner.inputs) != 1 || !strings.HasPrefix(runner.inputs[0], control.PlanModeMarker) {
+	if len(runner.inputs) != 1 || !strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), control.PlanModeMarker) {
 		t.Fatalf("/auto-plan on should affect current controller, inputs=%q", runner.inputs)
 	}
 }
@@ -1417,7 +1417,7 @@ func TestReasoningLanguageCommandPersistsAndUpdatesController(t *testing.T) {
 		t.Fatalf("saved config missing reasoning_language=zh:\n%s", body)
 	}
 	composed := ctrl.Compose("hello")
-	if !strings.HasPrefix(composed, "<reasoning-language>") || !strings.Contains(composed, "Simplified Chinese") {
+	if !strings.HasPrefix(composed, "<reasoning-language>") || !strings.Contains(composed, "简体中文") {
 		t.Fatalf("/reasoning-language zh should affect current controller, got %q", composed)
 	}
 }
@@ -2246,6 +2246,56 @@ func TestPasteFoldExpandOnSubmit(t *testing.T) {
 	}
 	if !strings.Contains(mcSource, "line of pasted content") {
 		t.Fatalf("memory compiler source_event must contain the expanded paste content, got:\n%q", mcSource)
+	}
+}
+
+func TestSlashCodeCommentSubmitStartsTurn(t *testing.T) {
+	for _, input := range []string{
+		"// explain this",
+		"/**\n * 阿明\n */",
+	} {
+		t.Run(input, func(t *testing.T) {
+			r := &recordingTurnRunner{}
+			events := make(chan event.Event, 8)
+			ctrl := control.New(control.Options{
+				AutoPlan: "off",
+				Runner:   r,
+				Sink:     event.FuncSink(func(e event.Event) { events <- e }),
+			})
+			m := newTestChatTUI()
+			m.ctrl = ctrl
+			m.input.SetValue(input)
+
+			model, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			m = model.(chatTUI)
+			waitForCLIEvent(t, events, event.TurnDone)
+
+			if len(r.inputs) != 1 || r.inputs[0] != input {
+				t.Fatalf("slash code comment should start a model turn, inputs=%q", r.inputs)
+			}
+		})
+	}
+}
+
+func TestUnknownSlashCommandDoesNotStartTurn(t *testing.T) {
+	r := &recordingTurnRunner{}
+	ctrl := control.New(control.Options{
+		AutoPlan: "off",
+		Runner:   r,
+		Sink:     event.FuncSink(func(event.Event) {}),
+	})
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	m.input.SetValue("/definitely-not-a-command")
+
+	model, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = model.(chatTUI)
+
+	if len(r.inputs) != 0 {
+		t.Fatalf("unknown slash command should not start a model turn, inputs=%q", r.inputs)
+	}
+	if got := strings.Join(m.transcript, "\n"); !strings.Contains(got, "unknown command") {
+		t.Fatalf("unknown slash command should be reported in transcript, got:\n%s", got)
 	}
 }
 

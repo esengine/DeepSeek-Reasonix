@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"runtime/debug"
+	"strconv"
 	"strings"
 
 	"reasonix/internal/event"
@@ -747,6 +748,7 @@ func (t *TaskTool) resolveSubSessionRuntime(modelRef, effort string) (provider.P
 }
 
 func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int) (string, error) {
+	prompt = t.withWorkspaceContext(prompt)
 	return RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, Options{
 		MaxSteps:            maxSteps,
 		Temperature:         t.temperature,
@@ -766,6 +768,28 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 		SubagentDepth:       childDepth,
 		MaxSubagentDepth:    t.maxDepth(),
 	}, sink)
+}
+
+func (t *TaskTool) withWorkspaceContext(prompt string) string {
+	if t == nil {
+		return prompt
+	}
+	ctx := subagentWorkspaceContext(t.workspaceRoot)
+	if ctx == "" {
+		return prompt
+	}
+	return ctx + "\n\n" + prompt
+}
+
+func subagentWorkspaceContext(root string) string {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return ""
+	}
+	return `<workspace-context event="SubagentWorkspace">
+Current workspace: ` + strconv.Quote(root) + `
+File tools resolve relative paths against this workspace. For project inspection, prefer "." or relative paths unless the user explicitly named another absolute path.
+</workspace-context>`
 }
 
 func FormatSubagentReference(run *SubagentRun) string {

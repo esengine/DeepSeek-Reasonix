@@ -137,6 +137,14 @@ func TestSplitQQMessageKeepsUTF8Budget(t *testing.T) {
 	}
 }
 
+func TestFitUTF8SliceKeepsGraphemeCluster(t *testing.T) {
+	cluster := "👨‍👩‍👧‍👦"
+	got := fitUTF8Slice(cluster+"!", len([]byte(cluster)))
+	if got != cluster {
+		t.Fatalf("fitUTF8Slice split grapheme cluster: %q", got)
+	}
+}
+
 func TestCapQQPassiveReplyChunks(t *testing.T) {
 	chunks := splitQQMessage(strings.Repeat("chunk-", 1800), qqMaxChunkBytes)
 	if len(chunks) <= qqMaxPassiveReplyChunks {

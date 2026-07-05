@@ -11,18 +11,18 @@ import (
 // When spec.Mode is "enforce" and bubblewrap (bwrap) is available on PATH,
 // the command is wrapped in a bubblewrap sandbox with a profile analogous to
 // macOS Seatbelt: writes confined to WriteRoots, network denied unless
-// spec.Network is true. When bwrap is unavailable the command runs unconfined
-// (boot and acp warn about this once at startup).
+// spec.Network is true. When bwrap is unavailable, the argv is returned
+// unwrapped with wrapped=false so callers can decide whether to fail closed.
 func Command(spec Spec, sh Shell, command string) ([]string, bool) {
-	if !spec.enforce() {
+	if !spec.Enforce() {
 		return sh.argv(command), false
 	}
 	if bwrap, err := exec.LookPath("bwrap"); err == nil {
 		argv := append([]string{bwrap}, bwrapArgs(spec, sh, command)...)
 		return argv, true
 	}
-	// enforce requested but bwrap unavailable — boot/acp already warned at
-	// startup; fall back to unconfined (the false result signals "not sandboxed").
+	// enforce requested but bwrap unavailable — return the unwrapped argv and let
+	// callers decide whether a non-sandboxed command is acceptable.
 	return sh.argv(command), false
 }
 
@@ -31,7 +31,7 @@ func Command(spec Spec, sh Shell, command string) ([]string, bool) {
 // prefix without shell interpretation — suitable for direct binary invocations
 // like ripgrep that don't need a shell wrapper.
 func CommandArgs(spec Spec, args []string) ([]string, bool) {
-	if !spec.enforce() {
+	if !spec.Enforce() {
 		return args, false
 	}
 	if bwrap, err := exec.LookPath("bwrap"); err == nil {

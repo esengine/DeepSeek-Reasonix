@@ -151,10 +151,10 @@ var syntheticPrefixes = []string{
 // returning the message to actually send to the model. The frontend keeps
 // showing the raw text as the user bubble.
 func (c *Controller) Compose(text string) string {
-	return c.compose(text, true)
+	return c.compose(text, text, true)
 }
 
-func (c *Controller) compose(text string, includeHookContext bool) string {
+func (c *Controller) compose(text, source string, includeHookContext bool) string {
 	c.mu.Lock()
 	plan := c.planMode
 	responseLanguage := c.responseLanguage
@@ -174,7 +174,7 @@ func (c *Controller) compose(text string, includeHookContext bool) string {
 		text = PlanModeMarker + "\n\n" + text
 	}
 	text = agent.WithResponseLanguage(text, responseLanguage)
-	text = agent.WithReasoningLanguage(text, reasoningLanguage)
+	text = agent.WithReasoningLanguageForSource(text, reasoningLanguage, source)
 
 	// Memory added mid-session rides the turn (never the cached system prefix),
 	// so it takes effect now without invalidating the prompt cache. It folds into
@@ -327,7 +327,7 @@ func (c *Controller) ComposeSynthetic(text string) string {
 	lang := c.reasoningLanguage
 	c.mu.Unlock()
 	text = agent.WithResponseLanguage(text, responseLang)
-	return agent.WithReasoningLanguage(text, lang)
+	return agent.WithReasoningLanguageForSource(text, lang, text)
 }
 
 func activeGoalBlock(goal string, researchMode GoalResearchMode) string {

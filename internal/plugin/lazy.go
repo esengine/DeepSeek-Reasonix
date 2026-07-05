@@ -143,7 +143,7 @@ func (s *lazySpawn) run() {
 func saveLazyCachedSchema(spec Spec, real []tool.Tool) {
 	_ = SaveCachedSchema(spec.Name, CachedSchema{
 		SpecHash:     SpecFingerprint(spec),
-		Capabilities: map[string]bool{},
+		Capabilities: map[string]bool{"tools": len(real) > 0},
 		Tools:        cacheableToolsOf(real),
 	})
 }
@@ -265,7 +265,6 @@ func (lt *lazyTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 		real, err := sp.host.AddWithLifecycle(sp.ctx, spawnCtx, sp.spec)
 		cancel()
 		sp.mu.Lock()
-		defer sp.mu.Unlock()
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				// A slow cold start can succeed on a later turn after npm/node
@@ -273,6 +272,7 @@ func (lt *lazyTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 				// the session into spawnFailed for a transient startup budget miss.
 				sp.state = spawnIdle
 				sp.spawnErr = nil
+				sp.mu.Unlock()
 				return "", fmt.Errorf("MCP server %q startup timed out — retry this tool on a later turn", sp.spec.Name)
 			}
 			if errors.Is(err, ErrSpawningInFlight) {
@@ -282,6 +282,7 @@ func (lt *lazyTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 				// connected client once the other spawn finishes.
 				sp.state = spawnIdle
 				sp.spawnErr = nil
+				sp.mu.Unlock()
 				return "", fmt.Errorf("MCP server %q is being started by another tab — retry on next turn", sp.spec.Name)
 			}
 			if IsServerAlreadyConnected(err) {
@@ -298,22 +299,20 @@ func (lt *lazyTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 					if r != nil {
 						// Unlock before forwarding so the lock isn't held
 						// during Execute (matching the spawnReady pattern).
-						// Re-acquire so the outer deferred Unlock handles
-						// the final release cleanly.
 						sp.mu.Unlock()
-						result, execErr := r.Execute(ctx, args)
-						sp.mu.Lock()
-						return result, execErr
+						return r.Execute(ctx, args)
 					}
 				}
 				// ToolsFor failed — not our fault, don't record as failure.
 				sp.state = spawnFailed
 				sp.spawnErr = err
+				sp.mu.Unlock()
 				return "", fmt.Errorf("MCP server %q failed to start: %w", sp.spec.Name, err)
 			}
 			sp.state = spawnFailed
 			sp.spawnErr = err
 			sp.host.RecordFailure(sp.spec, err)
+			sp.mu.Unlock()
 			return "", fmt.Errorf("MCP server %q failed to start: %w", sp.spec.Name, err)
 		}
 		sp.real = make(map[string]tool.Tool, len(real))
@@ -324,8 +323,10 @@ func (lt *lazyTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 		sp.trySwap()
 		r := sp.real[lt.name]
 		if r == nil {
+			sp.mu.Unlock()
 			return "", fmt.Errorf("MCP server %q did not expose tool %q (the cached schema may be stale)", sp.spec.Name, lt.name)
 		}
+		sp.mu.Unlock()
 		return r.Execute(ctx, args)
 	}
 

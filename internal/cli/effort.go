@@ -51,24 +51,27 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 		m.notice("effort: cannot resolve user config directory")
 		return nil
 	}
-	edit := config.LoadForEdit(path)
-	if _, ok := edit.Provider(entry.Name); !ok {
-		if err := edit.UpsertProvider(*entry); err != nil {
-			m.notice("effort: " + err.Error())
-			return nil
+	// Lock only the load-modify-save cycle; the snapshot and controller
+	// rebuild below run off-lock.
+	if err := func() error {
+		unlock := config.LockUserConfigEdits()
+		defer unlock()
+		edit := config.LoadForEdit(path)
+		if _, ok := edit.Provider(entry.Name); !ok {
+			if err := edit.UpsertProvider(*entry); err != nil {
+				return err
+			}
 		}
-	}
-	if entry.Kind == "anthropic" && effort != "" && entry.Thinking == "" {
-		if err := edit.SetProviderThinking(entry.Name, "adaptive"); err != nil {
-			m.notice("effort: " + err.Error())
-			return nil
+		if entry.Kind == "anthropic" && effort != "" && entry.Thinking == "" {
+			if err := edit.SetProviderThinking(entry.Name, "adaptive"); err != nil {
+				return err
+			}
 		}
-	}
-	if err := edit.SetProviderEffort(entry.Name, effort); err != nil {
-		m.notice("effort: " + err.Error())
-		return nil
-	}
-	if err := edit.SaveTo(path); err != nil {
+		if err := edit.SetProviderEffort(entry.Name, effort); err != nil {
+			return err
+		}
+		return edit.SaveTo(path)
+	}(); err != nil {
 		m.notice("effort: " + err.Error())
 		return nil
 	}

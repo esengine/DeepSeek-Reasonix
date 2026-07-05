@@ -8,7 +8,8 @@ name: Release desktop
 # Wails cannot cross-compile a CGO/WebKit binary, so build/ fans out to one native
 # runner per platform. Artifacts are minisign-signed (MINISIGN_* secrets), a
 # latest.json manifest is generated, and everything is published to a GitHub
-# release and mirrored to R2 (the updater reads R2 first, GitHub as fallback).
+# release and mirrored to R2 (the updater reads R2 first, then the crash worker
+# release gateway; GitHub's repository-wide "latest" is reserved for the CLI line).
 #
 # The same build/sign/manifest pipeline serves two channels. A `desktop-v*` tag
 # (or manual stable dispatch) publishes a GitHub release and moves R2's latest/
@@ -260,9 +261,9 @@ jobs:
         working-directory: desktop
         run: go run ./cmd/sign manifest ../dist "${{ steps.ver.outputs.version }}" "${{ steps.ver.outputs.tag }}"
 
-      # Canary is R2-only and never appears on the GitHub releases page; the mirror
-      # job picks up the signed dist via the canary-dist artifact below. Stable
-      # publishes a GitHub release as usual.
+      # Canary never appears on the GitHub releases page; the mirror job picks up
+      # the signed dist via the canary-dist artifact below. Stable publishes a
+      # GitHub release as usual.
       - name: Publish GitHub release
         if: steps.ver.outputs.channel != 'canary'
         env:
@@ -285,7 +286,7 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     permissions:
-      contents: read # gh release download
+      contents: write # gh release download + compatibility manifest upload
       actions: write # dispatch pages.yml to re-bake the site version
     # Skip cleanly when R2 isn't configured; GitHub release still works as fallback.
     if: ${{ github.repository_owner == 'esengine' }}
@@ -364,6 +365,53 @@ jobs:
             echo "prerelease — leaving R2 latest/ untouched"
           else
             aws s3 cp assets/ "s3://${R2_BUCKET}/latest/" --recursive --endpoint-url "$ENDPOINT"
+          fi
+
+      - name: Smoke desktop release pointers
+        if: env.HAS_R2 == 'true'
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          CHANNEL: ${{ steps.ver.outputs.channel }}
+          PRERELEASE: ${{ steps.ver.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          f=assets/latest.json
+          jq -e --arg version "$VERSION" --arg prefix "https://dl.reasonix.io/${TAG}/" '
+            .version == $version and
+            .download_page == "https://reasonix.io/#start" and
+            ([.platforms[] | (.url, .sig)] |
+              all(type == "string" and startswith($prefix) and (contains("/releases/latest/") | not)))
+          ' "$f" >/dev/null
+
+          curl --retry 5 --retry-delay 2 -fsSL "https://dl.reasonix.io/${TAG}/latest.json" >/tmp/reasonix-desktop-tag-latest.json
+          if [ "$CHANNEL" = "canary" ]; then
+            pointer="canary"
+          elif [ "$PRERELEASE" = "true" ]; then
+            pointer=""
+          else
+            pointer="latest"
+          fi
+          if [ -n "$pointer" ]; then
+            curl --retry 5 --retry-delay 2 -fsSL "https://dl.reasonix.io/${pointer}/latest.json" >/tmp/reasonix-desktop-pointer-latest.json
+            jq -e --arg version "$VERSION" '.version == $version' /tmp/reasonix-desktop-pointer-latest.json >/dev/null
+          fi
+
+          jq -r '.platforms[] | .url, .sig' "$f" | while IFS= read -r asset; do
+            curl --retry 5 --retry-delay 2 -fsSI "$asset" >/dev/null
+          done
+
+      - name: Attach desktop manifest to matching CLI release
+        if: env.HAS_R2 == 'true' && steps.ver.outputs.channel != 'canary' && steps.ver.outputs.prerelease != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" assets/latest.json --clobber
+          else
+            echo "CLI release $VERSION does not exist yet; release.yml will attach the compatibility latest.json when it publishes."
           fi
 
       # Stable release moved R2 latest/ — rebuild the site so its build-time baked

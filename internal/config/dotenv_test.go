@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -126,6 +127,92 @@ func TestLoadForRootExpandsPluginAuthFromProjectDotEnv(t *testing.T) {
 	}
 	if got := os.Getenv("STRIPE_KEY"); got != "" {
 		t.Fatalf("project .env leaked into process env: STRIPE_KEY=%q", got)
+	}
+}
+
+func TestProjectDotEnvUsesDotenvSyntax(t *testing.T) {
+	project := t.TempDir()
+	cfgHome := t.TempDir()
+
+	t.Setenv("HOME", cfgHome)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	t.Setenv("USERPROFILE", cfgHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(cfgHome, ".config"))
+	t.Setenv("AppData", filepath.Join(cfgHome, "AppData"))
+	t.Setenv("PLUGIN_TOKEN", "")
+	os.Unsetenv("PLUGIN_TOKEN")
+
+	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("export PLUGIN_TOKEN='project token # kept'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, ".mcp.json"), []byte(`{
+  "mcpServers": {
+    "svc": {
+      "type": "http",
+      "url": "https://mcp.example.test",
+      "headers": { "Authorization": "Bearer ${PLUGIN_TOKEN}" }
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadForRoot(project)
+	if err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
+	}
+	got := cfg.Plugins[0].ExpandedPlugin().Headers["Authorization"]
+	if got != "Bearer project token # kept" {
+		t.Fatalf("expanded auth header = %q", got)
+	}
+	if got := os.Getenv("PLUGIN_TOKEN"); got != "" {
+		t.Fatalf("project .env leaked into process env: %q", got)
+	}
+}
+
+func TestDotEnvFileWarningsReportDuplicateKeysWithoutValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte("TOKEN=secret-one\nOTHER=ok\nexport TOKEN='secret two'\nOTHER=last\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, ok := readDotEnvFile(path)
+	if !ok {
+		t.Fatal("readDotEnvFile failed")
+	}
+	if got := strings.Join(file.Duplicates, ","); got != "OTHER,TOKEN" {
+		t.Fatalf("Duplicates = %#v", file.Duplicates)
+	}
+	warnings := strings.Join(file.warnings(), "\n")
+	for _, want := range []string{"duplicate .env key OTHER", "duplicate .env key TOKEN", "last parsed value wins"} {
+		if !strings.Contains(warnings, want) {
+			t.Fatalf("warnings missing %q:\n%s", want, warnings)
+		}
+	}
+	for _, leak := range []string{"secret-one", "secret two"} {
+		if strings.Contains(warnings, leak) {
+			t.Fatalf("warnings leaked secret value %q:\n%s", leak, warnings)
+		}
+	}
+}
+
+func TestDotEnvFileFilteredPreservesProjectScopeRules(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte("PLUGIN_TOKEN=project\nREASONIX_HOME=blocked\nHOME=blocked\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, ok := readDotEnvFile(path)
+	if !ok {
+		t.Fatal("readDotEnvFile failed")
+	}
+	got := file.filtered(func(key string) bool { return !isProjectDotEnvControlKey(key) })
+	if got["PLUGIN_TOKEN"] != "project" {
+		t.Fatalf("PLUGIN_TOKEN = %q", got["PLUGIN_TOKEN"])
+	}
+	if _, ok := got["REASONIX_HOME"]; ok {
+		t.Fatalf("REASONIX_HOME should be filtered: %+v", got)
+	}
+	if _, ok := got["HOME"]; ok {
+		t.Fatalf("HOME should be filtered: %+v", got)
 	}
 }
 
@@ -614,6 +701,29 @@ func TestStoreCredentialLinesRejectsUnsafeFileLines(t *testing.T) {
 	}
 	if got := os.Getenv("INJECTED"); got != "" {
 		t.Fatalf("injected env was set: %q", got)
+	}
+}
+
+func TestStoreCredentialLinesParsesDotenvQuotes(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+
+	_, err := StoreCredentialLines([]string{`export QUOTED_KEY="value with spaces # kept"`})
+	if err != nil {
+		t.Fatalf("StoreCredentialLines: %v", err)
+	}
+	data, err := os.ReadFile(UserCredentialsPath())
+	if err != nil {
+		t.Fatalf("read credentials file: %v", err)
+	}
+	if string(data) != "QUOTED_KEY=\"value with spaces # kept\"\n" {
+		t.Fatalf("credentials file = %q", data)
+	}
+	if got := os.Getenv("QUOTED_KEY"); got != "value with spaces # kept" {
+		t.Fatalf("env QUOTED_KEY = %q", got)
 	}
 }
 

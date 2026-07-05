@@ -331,6 +331,10 @@ func (c *rpcClient) reply(id *json.RawMessage, result any) {
 	c.send(map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
 }
 
+func (c *rpcClient) replyError(id *json.RawMessage, code int, message string) {
+	c.send(map[string]any{"jsonrpc": "2.0", "id": id, "error": rpcError{Code: code, Message: message}})
+}
+
 func startServer(t *testing.T, factory Factory) (*rpcClient, func()) {
 	t.Helper()
 	inR, inW := io.Pipe()

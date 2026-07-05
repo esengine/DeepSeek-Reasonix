@@ -14,6 +14,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/provider"
+	"reasonix/internal/textutil"
 )
 
 // ---- list_sessions tool -----------------------------------------------------
@@ -199,15 +200,11 @@ loop:
 
 // ---- helpers ----------------------------------------------------------------
 
-// truncateRunes truncates a string to at most max runes, matching the
-// history.Searcher.renderMessage truncation policy.
+// truncateRunes preserves the historical name but truncates by grapheme
+// clusters so previews do not split combined emoji or other visible characters.
 func truncateRunes(s string, max int) string {
 	s = strings.TrimSpace(s)
-	runes := []rune(s)
-	if len(runes) <= max {
-		return s
-	}
-	return string(runes[:max]) + "..."
+	return textutil.TruncateGraphemes(s, max, "...")
 }
 
 // modelFromPath extracts the model name from a session file path.

@@ -33,36 +33,38 @@ import (
 // has no Wails dependency so the logic is unit-tested directly; updater_app.go is
 // the thin Wails binding that wires these into App methods and progress events.
 
-// Manifest endpoints — R2 CDN first (fast, especially in CN), GitHub releases as
-// fallback. The build channel picks the rolling pointer so a canary build polls
-// the canary line and a stable build polls latest; the two never cross.
+// Manifest endpoints — R2 CDN first (fast, especially in CN), then the crash
+// worker release gateway. The build channel picks the rolling pointer so a
+// canary build polls the canary line and a stable build polls latest; the two
+// never cross. The gateway deliberately avoids GitHub's repository-wide
+// /releases/latest shortcut because CLI tags (v*) and desktop tags (desktop-v*)
+// are separate release lines in the same repo.
 const (
-	r2Base         = "https://dl.reasonix.io"
-	ghReleasesBase = "https://github.com/esengine/reasonix/releases"
-	httpTimeout    = 15 * time.Second
+	r2Base             = "https://dl.reasonix.io"
+	releaseGatewayBase = "https://crash.reasonix.io/v1/desktop/releases"
+	downloadPageURL    = "https://reasonix.io/#start"
+	httpTimeout        = 15 * time.Second
 )
 
 // manifestEndpoints returns the primary (R2) then fallback (GitHub) manifest URLs
 // for the running build's channel.
 func manifestEndpoints() []string {
 	if channel == "canary" {
-		// Canary publishes only to R2 (no GitHub release), so there is no
-		// GitHub fallback for this channel.
-		return []string{r2Base + "/canary/latest.json"}
+		return []string{
+			r2Base + "/canary/latest.json",
+			releaseGatewayBase + "/canary/latest.json",
+		}
 	}
 	return []string{
 		r2Base + "/latest/latest.json",
-		ghReleasesBase + "/latest/download/latest.json",
+		releaseGatewayBase + "/stable/latest.json",
 	}
 }
 
 // downloadPage is the human-facing releases page shown when self-update is
 // unavailable (macOS) or the manifest omits its own link.
 func downloadPage() string {
-	if channel == "canary" {
-		return ghReleasesBase // lists pre-releases too
-	}
-	return ghReleasesBase + "/latest"
+	return downloadPageURL
 }
 
 // UpdateInfo is the CheckUpdate result that drives the frontend's update banner.
@@ -570,19 +572,27 @@ func applyLinux(targz []byte) error {
 }
 
 func applyWindowsFile(path string) error {
-	return installerCommand(path, currentInstallDir()).Start()
+	return startWindowsUpdateHandoff(path, currentInstallDir(), currentExecutablePath())
 }
 
-// currentInstallDir is the directory of the running executable — the location a
-// Windows update must overwrite. Empty when it can't be resolved, in which case
-// the installer falls back to its own InstallDir logic.
-func currentInstallDir() string {
+func currentExecutablePath() string {
 	exe, err := os.Executable()
 	if err != nil {
 		return ""
 	}
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
+	}
+	return exe
+}
+
+// currentInstallDir is the directory of the running executable — the location a
+// Windows update must overwrite. Empty when it can't be resolved, in which case
+// the installer falls back to its own InstallDir logic.
+func currentInstallDir() string {
+	exe := currentExecutablePath()
+	if exe == "" {
+		return ""
 	}
 	return filepath.Dir(exe)
 }

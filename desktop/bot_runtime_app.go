@@ -23,14 +23,43 @@ type BotRuntimeStatusView struct {
 }
 
 type desktopBotRuntime struct {
-	mu     sync.Mutex
-	cancel context.CancelFunc
-	gw     *bot.BotGateway
-	status BotRuntimeStatusView
+	// lifecycleMu serializes start/stop transitions so two apply/stop calls
+	// can't race a gateway into existence. The slow work (gw.Stop teardown,
+	// gw.Start dials) runs while holding it but NOT r.mu, so status/send reads
+	// never block on a restart.
+	lifecycleMu sync.Mutex
+	mu          sync.Mutex
+	cancel      context.CancelFunc
+	gw          *bot.BotGateway
+	status      BotRuntimeStatusView
 }
 
 func newDesktopBotRuntime() *desktopBotRuntime {
 	return &desktopBotRuntime{status: BotRuntimeStatusView{Status: "stopped", Message: "bot runtime is not started"}}
+}
+
+func desktopBotChannelsWithLegacyQQ(qq config.QQBotConfig, channels map[bot.Platform]bot.ChannelConfig, connectionChannels map[string]bot.ChannelConfig) (map[bot.Platform]bot.ChannelConfig, map[string]bot.ChannelConfig) {
+	channel := bot.ChannelConfig{
+		Model:            strings.TrimSpace(qq.Model),
+		ToolApprovalMode: normalizeBotConnectionToolApprovalMode(qq.ToolApprovalMode),
+		WorkspaceRoot:    strings.TrimSpace(qq.WorkspaceRoot),
+	}
+	if channel.Model == "" && channel.ToolApprovalMode == "" && channel.WorkspaceRoot == "" {
+		return channels, connectionChannels
+	}
+	if channels == nil {
+		channels = make(map[bot.Platform]bot.ChannelConfig)
+	}
+	if _, ok := channels[bot.PlatformQQ]; !ok {
+		channels[bot.PlatformQQ] = channel
+	}
+	if connectionChannels == nil {
+		connectionChannels = make(map[string]bot.ChannelConfig)
+	}
+	if _, ok := connectionChannels[string(bot.PlatformQQ)]; !ok {
+		connectionChannels[string(bot.PlatformQQ)] = channel
+	}
+	return channels, connectionChannels
 }
 
 func (a *App) refreshBotRuntimeAsync() {
@@ -53,7 +82,11 @@ func (a *App) refreshBotRuntime() {
 }
 
 func (a *App) loadDesktopBotConfig() (*config.Config, error) {
-	cfg, _, err := a.loadDesktopUserConfigForEdit()
+	// Read-only load feeding the bot runtime and connection diagnostics. It
+	// must load credentials: the runtime resolves app secrets and control
+	// tokens from the process env (AppSecretEnv, Control.TokenEnv), which the
+	// credential-free view load would leave unset on a fresh process.
+	cfg, _, err := a.loadDesktopUserConfigForViewWithCredentials()
 	if err != nil {
 		return nil, err
 	}
@@ -81,24 +114,44 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 		parent = context.Background()
 	}
 	plan := desktopBotRuntimePlan(cfg)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.stopLocked()
+	r.lifecycleMu.Lock()
+	defer r.lifecycleMu.Unlock()
+	r.stopCurrent()
 	if !plan.Start {
-		r.status = BotRuntimeStatusView{Status: plan.Status, Message: plan.Message}
+		r.setStatus(BotRuntimeStatusView{Status: plan.Status, Message: plan.Message})
 		return nil
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	ctx, cancel := context.WithCancel(parent)
 	modelName := botruntime.ModelName(cfg, "")
+	channels := botruntime.ChannelConfigs(cfg.Bot.Connections, true, true)
+	connectionChannels := botruntime.ConnectionChannelConfigs(cfg.Bot.Connections, true, true)
+	channels, connectionChannels = desktopBotChannelsWithLegacyQQ(cfg.Bot.QQ, channels, connectionChannels)
 	gwCfg := bot.GatewayConfig{
 		Model:              modelName,
 		ToolApprovalMode:   cfg.Bot.ToolApprovalMode,
 		MaxSteps:           cfg.Bot.MaxSteps,
+		QueueMode:          cfg.Bot.QueueMode,
+		QueueCap:           cfg.Bot.QueueCap,
+		QueueDrop:          cfg.Bot.QueueDrop,
+		PairingEnabled:     cfg.Bot.Pairing.Enabled,
+		PairingTTL:         time.Duration(cfg.Bot.Pairing.RequestTTLMinutes) * time.Minute,
+		PairingMaxPending:  cfg.Bot.Pairing.MaxPendingPerPlatform,
+		IgnoreSelfMessages: cfg.Bot.IgnoreSelfMessages,
+		SelfUserIDs: map[bot.Platform][]string{
+			bot.PlatformQQ:     cfg.Bot.SelfUserIDs.QQ,
+			bot.PlatformFeishu: cfg.Bot.SelfUserIDs.Feishu,
+			bot.PlatformWeixin: cfg.Bot.SelfUserIDs.Weixin,
+		},
+		ControlEnabled:     cfg.Bot.Control.Enabled,
+		ControlAddr:        cfg.Bot.Control.Addr,
+		ControlToken:       os.Getenv(strings.TrimSpace(cfg.Bot.Control.TokenEnv)),
 		WorkspaceRoot:      workspaceRoot,
-		Channels:           botruntime.ChannelConfigs(cfg.Bot.Connections, true, true),
-		ConnectionChannels: botruntime.ConnectionChannelConfigs(cfg.Bot.Connections, true, true),
+		Channels:           channels,
+		ConnectionChannels: connectionChannels,
+		Routes:             botruntime.RouteConfigs(cfg.Bot.Routes, true, true),
+		ConnectionAccess:   botruntime.ConnectionAccessConfigs(cfg),
 		Enabled:            plan.Enabled,
 		Allowlist: bot.AllowlistConfig{
 			Enabled:  cfg.Bot.Allowlist.Enabled,
@@ -107,6 +160,16 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 				bot.PlatformQQ:     cfg.Bot.Allowlist.QQUsers,
 				bot.PlatformFeishu: cfg.Bot.Allowlist.FeishuUsers,
 				bot.PlatformWeixin: cfg.Bot.Allowlist.WeixinUsers,
+			},
+			Approvers: map[bot.Platform][]string{
+				bot.PlatformQQ:     cfg.Bot.Allowlist.QQApprovers,
+				bot.PlatformFeishu: cfg.Bot.Allowlist.FeishuApprovers,
+				bot.PlatformWeixin: cfg.Bot.Allowlist.WeixinApprovers,
+			},
+			Admins: map[bot.Platform][]string{
+				bot.PlatformQQ:     cfg.Bot.Allowlist.QQAdmins,
+				bot.PlatformFeishu: cfg.Bot.Allowlist.FeishuAdmins,
+				bot.PlatformWeixin: cfg.Bot.Allowlist.WeixinAdmins,
 			},
 			Groups: map[bot.Platform][]string{
 				bot.PlatformQQ:     cfg.Bot.Allowlist.QQGroups,
@@ -122,14 +185,14 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 	bindings := botruntime.AdapterBindings(cfg, plan.Enabled, nil, logger)
 	if len(bindings) == 0 {
 		cancel()
-		r.status = BotRuntimeStatusView{Status: "stopped", Message: "no bot adapters configured"}
+		r.setStatus(BotRuntimeStatusView{Status: "stopped", Message: "no bot adapters configured"})
 		return nil
 	}
 	gw := bot.NewGatewayWithAdapterBindings(gwCfg, bindings, logger)
 	if err := gw.Start(ctx); err != nil {
 		cancel()
 		gw.Stop()
-		r.status = BotRuntimeStatusView{Status: "error", Message: err.Error(), Connections: gw.AdapterCount()}
+		r.setStatus(BotRuntimeStatusView{Status: "error", Message: err.Error(), Connections: gw.AdapterCount()})
 		return err
 	}
 	runningConnections := gw.AdapterCount()
@@ -140,6 +203,7 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 		status = "degraded"
 		message = fmt.Sprintf("%d bot connection(s) running; %d failed to start: %s", runningConnections, len(startErrors), summarizeBotRuntimeErrors(startErrors))
 	}
+	r.mu.Lock()
 	r.cancel = cancel
 	r.gw = gw
 	r.status = BotRuntimeStatusView{
@@ -149,6 +213,7 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 		Connections: runningConnections,
 		StartedAt:   time.Now().UTC().Format(time.RFC3339),
 	}
+	r.mu.Unlock()
 	return nil
 }
 
@@ -206,8 +271,8 @@ func desktopBotRuntimePlan(cfg *config.Config) botRuntimePlan {
 	if !cfg.Bot.Enabled {
 		return botRuntimePlan{Status: "stopped", Message: "bot is disabled"}
 	}
-	if !cfg.Bot.Allowlist.AllowAll && (!cfg.Bot.Allowlist.Enabled || botruntime.AllowlistUserCount(cfg.Bot.Allowlist) == 0) {
-		return botRuntimePlan{Status: "blocked", Message: "bot requires an allowlist or allow_all=true"}
+	if !botruntime.BotConfigHasAccessControl(cfg.Bot) {
+		return botRuntimePlan{Status: "blocked", Message: "bot requires an allowlist, pairing, per-bot access, or allow_all=true"}
 	}
 	enabled, unknown := botruntime.EnabledPlatforms(cfg, nil)
 	if len(unknown) > 0 {
@@ -220,21 +285,34 @@ func desktopBotRuntimePlan(cfg *config.Config) botRuntimePlan {
 }
 
 func (r *desktopBotRuntime) stop(status, message string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.stopLocked()
-	r.status = BotRuntimeStatusView{Status: status, Message: message}
+	r.lifecycleMu.Lock()
+	defer r.lifecycleMu.Unlock()
+	r.stopCurrent()
+	r.setStatus(BotRuntimeStatusView{Status: status, Message: message})
 }
 
-func (r *desktopBotRuntime) stopLocked() {
-	if r.cancel != nil {
-		r.cancel()
-		r.cancel = nil
+// stopCurrent detaches the running gateway under r.mu, then tears it down
+// off-lock: gw.Stop() closes every session controller (up to the jobs teardown
+// grace each) and must not stall status/send readers. Callers hold lifecycleMu.
+func (r *desktopBotRuntime) stopCurrent() {
+	r.mu.Lock()
+	cancel := r.cancel
+	gw := r.gw
+	r.cancel = nil
+	r.gw = nil
+	r.mu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
-	if r.gw != nil {
-		r.gw.Stop()
-		r.gw = nil
+	if gw != nil {
+		gw.Stop()
 	}
+}
+
+func (r *desktopBotRuntime) setStatus(status BotRuntimeStatusView) {
+	r.mu.Lock()
+	r.status = status
+	r.mu.Unlock()
 }
 
 func (r *desktopBotRuntime) snapshot() BotRuntimeStatusView {

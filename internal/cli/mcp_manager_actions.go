@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
-	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -17,6 +16,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/mcpdiag"
 	"reasonix/internal/plugin"
+	"reasonix/internal/shellparse"
 )
 
 func (m chatTUI) applyMCPAction(v mcpServerView, action mcpAction) (tea.Model, tea.Cmd) {
@@ -431,10 +431,10 @@ func mcpConnected(ctrl control.Capabilities, name string) bool {
 // (e.g. "code --wait", "nvim -p") and shell variable / tilde references
 // (e.g. "$HOME/bin/myeditor", "~/bin/myeditor"); these are expanded without
 // invoking a shell, and the editor binary is resolved by the OS directly.
-// Shell metacharacters in the value cannot be executed: the expanded value is
-// parsed only into argv words, so a value like "vim; rm -rf ~" becomes the
-// literal argv ["vim;", "rm", "-rf", "~/..."] and "vim;" is looked up as the
-// program name (failing harmlessly) rather than being interpreted by a shell.
+// Shell metacharacters in the value cannot be executed: the expanded value must
+// parse as one static shell command. Control operators, redirection,
+// substitution, globbing, assignments, and other shell-shaping syntax are
+// rejected before launch.
 //
 // This matches the safe pattern already used by the terminal-editor
 // fallback (exec.Command(bin, path)) in the same function and avoids the
@@ -442,7 +442,7 @@ func mcpConnected(ctrl control.Capabilities, name string) bool {
 // a shell command string.
 //
 // Quoting and backslash escaping are honored for word splitting only; shell
-// operators, globbing, command substitution, and redirection are not evaluated.
+// operators, globbing, command substitution, and redirection are rejected.
 // Tilde expansion only covers the leading-token forms "~" and "~/..."; "~user"
 // is not supported (and was not reliably supported by the prior sh -lc path
 // either, since $HOME for another user is not available without getpwuid).
@@ -460,59 +460,10 @@ func editorLaunchCmd(editor, path string) (*exec.Cmd, error) {
 }
 
 func splitEditorCommand(s string) ([]string, error) {
-	var args []string
-	var b strings.Builder
-	var quote rune
-	escaped := false
-	escapedQuote := rune(0)
-	inWord := false
-
-	flush := func() {
-		if inWord {
-			args = append(args, b.String())
-			b.Reset()
-			inWord = false
-		}
+	args, malformed := shellparse.StaticFields(s)
+	if malformed != "" {
+		return nil, fmt.Errorf("%s", malformed)
 	}
-
-	for _, r := range s {
-		switch {
-		case escaped:
-			if escapedQuote == '"' && r != '$' && r != '`' && r != '"' && r != '\\' {
-				b.WriteRune('\\')
-			}
-			b.WriteRune(r)
-			inWord = true
-			escaped = false
-			escapedQuote = 0
-		case r == '\\' && quote != '\'':
-			inWord = true
-			escaped = true
-			escapedQuote = quote
-		case quote != 0:
-			if r == quote {
-				quote = 0
-			} else {
-				b.WriteRune(r)
-			}
-			inWord = true
-		case r == '\'' || r == '"':
-			quote = r
-			inWord = true
-		case unicode.IsSpace(r):
-			flush()
-		default:
-			b.WriteRune(r)
-			inWord = true
-		}
-	}
-	if escaped {
-		b.WriteRune('\\')
-	}
-	if quote != 0 {
-		return nil, fmt.Errorf("unterminated %q quote", quote)
-	}
-	flush()
 	return args, nil
 }
 

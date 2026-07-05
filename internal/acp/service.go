@@ -168,12 +168,18 @@ type acpSession struct {
 	done    chan struct{}
 	running bool
 	deleted bool
+	// maintenanceDone is non-nil while session-owned maintenance, such as an
+	// idle config rebuild, is in flight outside mu.
+	maintenanceDone chan struct{}
 }
 
 func (s *acpSession) begin(ctx context.Context) (context.Context, context.CancelFunc, bool) {
 	runCtx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
-	if s.running || s.deleted {
+	// A queued pendingConfig blocks new turns so a prompt never runs on the
+	// outgoing config. The turn or maintenance that queued it applies it from
+	// its defer, so no new turn is needed to drain the queue.
+	if s.running || s.deleted || s.maintenanceDone != nil || s.pendingConfig != nil {
 		s.mu.Unlock()
 		cancel()
 		return nil, nil, false
@@ -210,12 +216,16 @@ func (s *acpSession) abortAndWait() {
 	s.mu.Lock()
 	c := s.cancel
 	done := s.done
+	maintenanceDone := s.maintenanceDone
 	s.mu.Unlock()
 	if c != nil {
 		c()
 	}
 	if done != nil {
 		<-done
+	}
+	if maintenanceDone != nil {
+		<-maintenanceDone
 	}
 }
 
@@ -224,6 +234,7 @@ func (s *acpSession) deleteAndWait() {
 	s.deleted = true
 	c := s.cancel
 	done := s.done
+	maintenanceDone := s.maintenanceDone
 	s.mu.Unlock()
 	if c != nil {
 		c()
@@ -231,6 +242,35 @@ func (s *acpSession) deleteAndWait() {
 	if done != nil {
 		<-done
 	}
+	if maintenanceDone != nil {
+		<-maintenanceDone
+	}
+}
+
+func (s *acpSession) finishMaintenance(done chan struct{}) {
+	if done == nil {
+		return
+	}
+	closeDone := false
+	s.mu.Lock()
+	if s.maintenanceDone == done {
+		s.maintenanceDone = nil
+		closeDone = true
+	}
+	s.mu.Unlock()
+	if closeDone {
+		close(done)
+	}
+}
+
+// currentCtrl returns the session's controller under mu. rebuildSession swaps
+// ctrl while holding mu, so any read of the field outside mu races with a
+// concurrent config rebuild; always go through this accessor unless mu is
+// already held.
+func (s *acpSession) currentCtrl() acpController {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ctrl
 }
 
 // initialize advertises the agent's capability set: persisted load plus ACP v1
@@ -406,7 +446,8 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 			return SessionConfigState{}, &RPCError{Code: ErrInvalidParams, Message: method + ": unknown session " + id}
 		}
 		if replay {
-			newUpdateSink(s.conn, id).replay(sess.ctrl.History())
+			ctrl := sess.currentCtrl()
+			newUpdateSink(s.conn, id).replay(ctrl.History())
 		}
 		cfgState, err := s.configStateForSession(ctx, sess)
 		if err != nil {
@@ -538,14 +579,7 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 	defer func() {
 		sess.sink.clearTurnContext()
 		sess.finish()
-		if err := s.applyPendingSessionConfig(ctx, sess); err != nil {
-			sess.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "session config switch failed after turn: " + err.Error()})
-			if isSessionConfigActiveWorkError(err) {
-				if current, stateErr := s.configStateForSession(ctx, sess); stateErr == nil {
-					sess.sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: current.ConfigOptions})
-				}
-			}
-		}
+		s.reportPendingSessionConfigError(ctx, sess, s.applyPendingSessionConfig(ctx, sess), "after turn")
 		cancel()
 	}()
 	runErr := sess.ctrl.RunTurn(runCtx, text)
@@ -657,7 +691,7 @@ func (s *service) switchSessionEffort(ctx context.Context, sess *acpSession, eff
 	return cfgState, nil
 }
 
-func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState SessionConfigState) error {
+func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState SessionConfigState) (retErr error) {
 	sess.mu.Lock()
 	if sess.deleted {
 		sess.mu.Unlock()
@@ -672,25 +706,36 @@ func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState
 		sess.mu.Unlock()
 		return sessionConfigActiveWorkError("stop background jobs before switching config")
 	}
-	if sess.running || status.Running {
+	if sess.running || status.Running || sess.maintenanceDone != nil {
 		pending := cloneSessionConfigState(cfgState)
 		sess.pendingConfig = &pending
 		sess.mu.Unlock()
 		sess.sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: cfgState.ConfigOptions})
 		return nil
 	}
+	// Claim the queue in the same critical section that raises maintenanceDone
+	// below: begin must never observe an idle session between the two.
 	sess.pendingConfig = nil
 
 	cur := sess.ctrl
 	prevPath := cur.SessionPath()
-	if err := cur.Snapshot(); err != nil {
-		sess.mu.Unlock()
-		return &RPCError{Code: ErrInternal, Message: "session config: snapshot before switch: " + err.Error()}
-	}
-	carried := cur.History()
 	sink := sess.sink
 	mcpServers := clonePluginSpecs(sess.mcpServers)
 	cwd := sess.cwd
+	maintenanceDone := make(chan struct{})
+	sess.maintenanceDone = maintenanceDone
+	sess.mu.Unlock()
+	defer func() {
+		sess.finishMaintenance(maintenanceDone)
+		if retErr == nil {
+			s.reportPendingSessionConfigError(ctx, sess, s.applyPendingSessionConfig(ctx, sess), "after maintenance")
+		}
+	}()
+
+	if err := cur.Snapshot(); err != nil {
+		return &RPCError{Code: ErrInternal, Message: "session config: snapshot before switch: " + err.Error()}
+	}
+	carried := cur.History()
 
 	newCtrl, err := s.factory.NewSession(ctx, SessionParams{
 		Cwd:            cwd,
@@ -700,7 +745,6 @@ func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState
 		EffortOverride: cloneStringPtr(cfgState.EffortOverride),
 	})
 	if err != nil {
-		sess.mu.Unlock()
 		return &RPCError{Code: ErrInternal, Message: "session config: " + err.Error()}
 	}
 	newCtrl.EnableInteractiveApproval()
@@ -714,6 +758,17 @@ func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState
 		newCtrl.InheritLifecycleFrom(prev)
 	}
 
+	sess.mu.Lock()
+	if sess.deleted {
+		sess.mu.Unlock()
+		newCtrl.Close()
+		return &RPCError{Code: ErrInvalidRequest, Message: "session config: session is deleted"}
+	}
+	if sess.ctrl != cur {
+		sess.mu.Unlock()
+		newCtrl.Close()
+		return sessionConfigActiveWorkError("session changed while switching config; retry")
+	}
 	sess.ctrl = newCtrl
 	sess.model = cfgState.Model
 	sess.effortOverride = cloneStringPtr(cfgState.EffortOverride)
@@ -738,21 +793,35 @@ func (s *service) applyPendingSessionConfig(ctx context.Context, sess *acpSessio
 		return nil
 	}
 	cfgState := cloneSessionConfigState(*sess.pendingConfig)
-	sess.pendingConfig = nil
+	// Keep pendingConfig set while rebuilding: begin refuses new turns until
+	// rebuildSession claims it together with raising maintenanceDone, so no
+	// promptable instant is visible in between.
 	sess.mu.Unlock()
 
 	if err := s.rebuildSession(ctx, sess, cfgState); err != nil {
-		if !isSessionConfigActiveWorkError(err) {
-			sess.mu.Lock()
-			if !sess.deleted && sess.pendingConfig == nil {
-				pending := cloneSessionConfigState(cfgState)
-				sess.pendingConfig = &pending
-			}
-			sess.mu.Unlock()
+		// Once this attempt failed nothing in flight is left to retry a parked
+		// config, and begin refuses new turns while one is queued — drop it so
+		// the session stays promptable (the caller reports the failure).
+		sess.mu.Lock()
+		if !sess.deleted && !sess.running && sess.maintenanceDone == nil {
+			sess.pendingConfig = nil
 		}
+		sess.mu.Unlock()
 		return err
 	}
 	return nil
+}
+
+func (s *service) reportPendingSessionConfigError(ctx context.Context, sess *acpSession, err error, when string) {
+	if err == nil || sess == nil || sess.sink == nil {
+		return
+	}
+	sess.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "session config switch failed " + when + ": " + err.Error()})
+	if isSessionConfigActiveWorkError(err) {
+		if current, stateErr := s.configStateForSession(ctx, sess); stateErr == nil {
+			sess.sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: current.ConfigOptions})
+		}
+	}
 }
 
 type activeSessionConfigWorkError struct {
@@ -933,7 +1002,7 @@ func (s *service) sessionDir() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, sess := range s.sessions {
-		if dir := sess.ctrl.SessionDir(); dir != "" {
+		if dir := sess.currentCtrl().SessionDir(); dir != "" {
 			return dir
 		}
 	}
@@ -1080,18 +1149,27 @@ func (s *service) closeAll() {
 	s.sessions = make(map[string]*acpSession)
 	s.mu.Unlock()
 	for _, sess := range sessions {
-		sess.abort()
-		sess.ctrl.Close()
+		sess.abortAndWait()
+		sess.currentCtrl().Close()
 	}
 }
 
 func (s *acpSession) persistAfterTurn(prompt string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.deleted {
+		s.mu.Unlock()
 		return
 	}
-	_ = s.ctrl.Snapshot()
+	ctrl := s.ctrl
+	s.mu.Unlock()
+
+	_ = ctrl.Snapshot()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.deleted || s.ctrl != ctrl {
+		return
+	}
 	if s.title == "" {
 		s.title = previewTitle(prompt)
 	}
@@ -1124,8 +1202,9 @@ func (s *acpSession) metaLocked() acpSessionMeta {
 
 func (s *acpSession) info() SessionInfo {
 	meta := s.meta()
+	ctrl := s.currentCtrl()
 	extra := map[string]any{}
-	if n := len(s.ctrl.History()); n > 0 {
+	if n := len(ctrl.History()); n > 0 {
 		extra["messageCount"] = n
 	}
 	if len(extra) == 0 {
@@ -1135,10 +1214,14 @@ func (s *acpSession) info() SessionInfo {
 }
 
 func (s *service) sendAvailableCommands(sess *acpSession) {
-	if sess == nil || sess.ctrl == nil {
+	if sess == nil {
 		return
 	}
-	cmds := availableCommandsFor(sess.ctrl)
+	ctrl := sess.currentCtrl()
+	if ctrl == nil {
+		return
+	}
+	cmds := availableCommandsFor(ctrl)
 	if len(cmds) == 0 {
 		return
 	}
@@ -1213,16 +1296,20 @@ func availableCommandsFor(ctrl acpController) []AvailableCommand {
 
 func (s *service) resolveSlashPrompt(ctx context.Context, sess *acpSession, text string) string {
 	line := strings.TrimSpace(text)
-	if sess == nil || sess.ctrl == nil || !strings.HasPrefix(line, "/") {
+	if sess == nil || !strings.HasPrefix(line, "/") {
 		return text
 	}
-	if sent, ok := sess.ctrl.CustomCommand(line); ok {
+	ctrl := sess.currentCtrl()
+	if ctrl == nil {
+		return text
+	}
+	if sent, ok := ctrl.CustomCommand(line); ok {
 		return sent
 	}
-	if sent, ok := sess.ctrl.RunSkill(line); ok {
+	if sent, ok := ctrl.RunSkill(line); ok {
 		return sent
 	}
-	if sent, ok, err := sess.ctrl.MCPPrompt(ctx, line); err == nil && ok {
+	if sent, ok, err := ctrl.MCPPrompt(ctx, line); err == nil && ok {
 		return sent
 	}
 	return text

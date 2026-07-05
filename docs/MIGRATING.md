@@ -103,14 +103,23 @@ and DeepSeek prefix-cache–oriented design.
   external tools**: `[agent].plan_mode_allowed_tools` now only declares extra
   read-only custom/external tools. It no longer unlocks known blocked plan-mode
   tools such as `bash`, `task`, writers, installers, or memory mutation tools, and
-  unsafe bash commands still remain blocked. An MCP/plugin tool whose read-only
-  status comes from the server's untrusted `readOnlyHint` is confirmed the first
-  time an interactive plan-mode run needs it; choose the persistent option to
-  write the plugin-level `trusted_read_only_tools` raw-name list. Auto/YOLO tool
-  approval does not answer this trust prompt, although a session or persistent
-  trust choice prevents repeat prompts for the same MCP tool. Non-interactive
-  runs still fail closed, so pre-seed `trusted_read_only_tools` or declare a
-  concrete `mcp__<server>__<tool>` when no user can approve. In the desktop MCP
+  unsafe bash commands still remain blocked. To migrate old
+  `plan_mode_allowed_tools = ["bash", ...]` configs, move concrete read-only
+  shell prefixes such as `gh issue view` or internal query CLIs to
+  `[agent].plan_mode_read_only_commands`; do not declare shell interpreters or
+  writer-capable commands there. Interactive plan-mode runs can also ask you to
+  trust a concrete unknown query prefix once, and the persistent choice writes
+  the same `plan_mode_read_only_commands` entry. Auto/YOLO tool approval does
+  not answer this bash trust prompt. Use `read_only_task` / `read_only_skill`
+  instead of trying to unlock `task` / `run_skill` while planning. An MCP/plugin tool
+  whose read-only status comes from the server's untrusted `readOnlyHint` is
+  confirmed the first time an interactive plan-mode run needs it; choose the
+  persistent option to write the plugin-level `trusted_read_only_tools` raw-name
+  list. Auto/YOLO tool approval does not answer this trust prompt, although a
+  session or persistent trust choice prevents repeat prompts for the same MCP
+  tool. Non-interactive runs still fail closed, so pre-seed
+  `trusted_read_only_tools` or declare a concrete `mcp__<server>__<tool>` when no
+  user can approve. In the desktop MCP
   panel, expand a server and use **Pre-trust read-only** for currently listed
   `readOnlyHint` tools, per-tool **Pre-trust** for audited readers, or
   **Untrust** to remove a tool; those actions write the same

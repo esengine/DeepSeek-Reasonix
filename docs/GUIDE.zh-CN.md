@@ -54,6 +54,7 @@ planner_max_steps = 0            # 仅用户/全局；规划器只读工具调�
 reasoning_language = "auto"      # 可见思考过程语言：auto|zh|en
 # plan_mode_allowed_tools = ["custom_reader"]   # 仅声明额外只读自定义工具；
 #                                                # 不能解锁被计划模式阻断的工具或 unsafe bash
+# plan_mode_read_only_commands = ["gh issue view", "gh pr diff"]   # 计划模式额外只读 shell 前缀
 # planner_model = "deepseek-pro"      # 可选的低频规划器
 # subagent_model = "deepseek-pro"     # runAs=subagent skill 的默认模型
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
@@ -115,6 +116,14 @@ tool_timeout_seconds = { "generate_video" = 1800 }   # 可选：raw MCP tool 名
 planner / read-only research 可用的可信只读工具。优先使用 MCP 只读信任的一次性确认；需要预置已审过工具时，
 再在 plugin 上写 `trusted_read_only_tools`，`plan_mode_allowed_tools` 保留为兼容逃生阀。它不再解锁 `bash`、`task`、
 写文件工具、安装器、记忆变更工具等计划模式已知阻断项，也不会绕过 bash 在计划模式下的安全检查。
+
+当计划阶段需要运行 Reasonix 尚不能自动分类、但你确认只读的 shell 查询命令时，使用
+`[agent].plan_mode_read_only_commands`，例如 `gh issue view`、`gh pr diff` 或内部只读查询 CLI。
+这里声明的是具体命令前缀，不是工具名：`["gh issue view"]` 会允许 `gh issue view 4572`，
+但 `bash`、`sh` 等 shell 解释器前缀会被忽略。shell 操作符、重定向、命令替换、后台进程、
+以及内置命令里的写能力参数在计划模式下仍会被阻断。交互式计划模式第一次需要某个未知查询前缀时，
+Reasonix 也可以提示你确认是否信任它为只读；选择持久信任会写入同一个
+`[agent].plan_mode_read_only_commands` 配置。Auto/YOLO 审批不会替用户回答这个信任提示。
 
 ### 环境变量
 
@@ -181,7 +190,25 @@ Goal、由 `todo_write` 工具驱动的实时 Todo 面板，以及已配置 prov
 ## 自定义 OpenAI-compatible provider
 
 在桌面端打开 **设置 -> 模型 -> 接入 -> 添加模型服务 -> 自定义供应商**，用于接入代理、
-聚合平台或自建 OpenAI-compatible chat API 服务。
+聚合平台或自建 OpenAI-compatible chat API / Anthropic-compatible Messages API 服务。
+
+常用服务优先使用 **添加模型服务 -> 推荐预设**。Reasonix 可以预填可编辑的自定义 provider：
+Kimi CN、Kimi Global、Kimi Coding Plan、MiMo API、MiMo Anthropic、MiMo Token Plan
+CN/SGP/AMS 及其 Anthropic-compatible 变体、MiniMax CN/Global API、MiniMax
+CN/Global Anthropic、GLM CN、Z.AI Global、GLM/Z.AI Coding Plan 的
+OpenAI-compatible 与 Anthropic-compatible 端点、OpenCode Go、OpenCode Go
+Anthropic、OpenCode Zen Anthropic、Qwen/DashScope CN/Global、Qwen Coding Plan
+CN/Global 的 OpenAI-compatible 与 Anthropic-compatible 端点、StepFun
+OpenAI-compatible 与 Anthropic-compatible 端点、NovitaAI、GMI Cloud、Vercel AI
+Gateway、HuggingFace Router、NVIDIA NIM、KiloCode 和 Ollama Cloud。Plan 表示
+访问/付费形态；只有服务商确实提供不同区域端点时，预设名才同时带 CN/Global。
+因此 Kimi Coding Plan 是独立 plan 端点，Kimi 直连 API 才拆成 CN 和 Global。
+预设路径通常只需要填写服务商 API Key：真实 key 会写入 Reasonix home `.env`，
+`config.toml` 只保存端点、模型列表、key 环境变量名、上下文窗口、视觉模型元数据、
+中国区端点直连、MiniMax `reasoning_split`、GLM/MiniMax thinking heuristic、
+Anthropic-compatible 网关需要的 Bearer 认证、Ollama Cloud max-effort 支持，
+以及 OpenCode Go 的每模型 reasoning 覆盖。添加后仍然可以打开 provider 卡片，
+继续修改模型、请求头、端点或兼容设置。
 
 **API 地址** 填写服务端点。默认模式下，Reasonix 会预览并把聊天请求发送到：
 
@@ -194,11 +221,48 @@ Goal、由 `todo_write` 工具驱动的实时 Todo 面板，以及已配置 prov
 输入框下方的预览就是最终请求地址。
 
 模型发现会基于 API 地址尝试 `/models`、`/v1/models` 等候选地址。如果网关要求单独的
-模型列表端点，在 **高级设置** 中填写 `models_url`，例如
+模型列表端点，在 **兼容设置** 中填写 `models_url`，例如
 `https://gateway.example.com/v1/models`。如果接口不支持模型发现，也可以手动填写模型列表。
 
 **完整 URL** 仍使用 OpenAI-compatible chat 请求体；它不会切换成 OpenAI Responses API
 的请求 schema。
+
+### 兼容设置
+
+**兼容设置（通常不用改）** 用于处理认证变量、模型发现地址、请求头、以及 reasoning/thinking
+请求格式和普通 OpenAI-compatible 默认行为不一致的网关。除非服务商文档明确要求，或代理报错说明
+不兼容，否则保持默认值即可。Kimi Coding Plan、MiniMax CN/Global Anthropic 这类 Anthropic-compatible 服务，
+保存前在基础区域把接入协议切到 **Anthropic-compatible**。
+
+| 字段 | 作用 | 什么时候改 |
+| --- | --- | --- |
+| `api_key_env` | 该 provider 使用的 API key 环境变量名。桌面端保存的真实 key 会写入 Reasonix home `.env` 的同名变量；TOML 配置里只保存变量名。 | 多个 provider 需要不同 key 时改名；服务不需要 API key 时可以留空。 |
+| `models_url` | 只用于自动发现模型列表的 URL。聊天请求仍使用上方的 API 地址或完整 URL。 | `/models` 或 `/v1/models` 不是该网关模型列表地址时填写。 |
+| 额外请求头 | 静态 HTTP header，一行一个 `Header: value`。 | OpenRouter 等网关要求 `HTTP-Referer`、`X-Title` 或类似站点来源 header 时使用。API key 仍放在上方密钥字段，不要重复写到这里。 |
+| 额外请求体 | 合并到聊天请求体顶层的 JSON 对象。 | 仅用于服务商专用开关，例如 `{"enable_thinking": true}`。`model`、`messages`、`tools`、`stream`、`thinking` 等核心字段仍由 Reasonix 控制，且不接受 `null` 值。 |
+| Authorization: Bearer | 对 Anthropic-compatible provider，把已保存的 API key 用 `Authorization: Bearer <key>` 发送，而不是 `x-api-key`。 | MiniMax Global、Vercel AI Gateway 等网关文档明确要求 Bearer 认证时开启。 |
+| 模型能力模式 | 指定 Reasonix 对该 provider 使用哪种 reasoning 请求协议。 | 默认用“自动识别”。只有网关被误判，或模型文档要求特定 reasoning 格式时再切换。 |
+| Thinking 覆盖 | provider 专用的 `thinking.type` 覆盖项。 | 默认用 Auto。只有后端文档明确支持 `enabled`、`disabled` 或 `adaptive` 时再手动指定；不支持的值可能让中转站拒绝请求。 |
+| 余额查询 URL | 可选的钱包余额查询接口。 | 服务商提供余额接口，且希望桌面端状态栏显示余额时填写。 |
+| 上下文窗口 | 该 provider 可保留的最大上下文 token 数。`0` 表示使用模型服务默认值。 | 模型实际上下文大小和 Reasonix 默认值或内置元数据不一致时填写。 |
+
+模型能力模式选项：
+
+| 选项 | 作用 |
+| --- | --- |
+| 自动识别（推荐） | Reasonix 根据模型能力元数据和端点自动选择请求格式。 |
+| DeepSeek 思考 | 使用 DeepSeek 风格的 thinking 控制，包括 `thinking.type` 和 DeepSeek 支持的推理深度。 |
+| OpenAI reasoning | 使用标准 OpenAI-compatible 的 `reasoning_effort` 档位。 |
+| 普通聊天（不发送思考参数） | 不发送 reasoning 或 thinking 控制字段。适合会拒绝 reasoning 参数的普通文本代理。 |
+
+Thinking 覆盖选项：
+
+| 选项 | 作用 |
+| --- | --- |
+| Auto（使用服务默认） | 不写 provider 级 `thinking` 覆盖，让 Reasonix 使用 provider/model 默认行为。 |
+| Enabled（开启） | 对兼容 provider 发送 `thinking.type = "enabled"`。 |
+| Disabled（关闭） | 对兼容 provider 发送 `thinking.type = "disabled"`。DeepSeek 风格 provider 下还会避免继续发送推理深度提示。 |
+| Adaptive（自适应） | 仅在服务文档明确支持 adaptive thinking 时使用，例如 MiniMax-M3 风格端点；语义是发送或保留 `thinking.type = "adaptive"`。 |
 
 ## 快捷键
 
@@ -412,7 +476,8 @@ headers = { Authorization = "Bearer ${STRIPE_KEY}" }
 compaction archive 和已保存事实；这些动态内容不会被塞进稳定的 system prompt 前缀。
 `/forget <name>` 会把已保存事实归档而不是永久删除；CLI/TUI 和桌面记忆面板能显示归档文件用于追溯，
 但它们不会作为 active memory 被检索。检索会保留 BM25 最强命中，同时裁掉弱的泛词命中；
-agent 发起的 `remember` 和 `forget` 每次都会要求新的人工确认，并在执行前展示将保存或归档的记忆摘要。
+agent 发起的 `remember` 和 `forget` 每次都会要求新的人工确认，并在执行前展示将保存或归档的记忆摘要；
+Guardian 审查不能代替用户批准，非交互运行会拒绝这类工具而不是自动批准。
 0 结果会提示 agent 改用更少、更有区分度的词继续查。
 Memory v5 在 CLI/TUI、`reasonix serve` 和桌面端默认开启，因为这些入口共用同一套本地
 controller。它会把本地、按项目隔离的执行轨迹和编译器状态写在 Reasonix home 下，并且只有

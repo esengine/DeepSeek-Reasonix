@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -226,21 +225,126 @@ func windowsPowerShellCandidates() []string {
 	return out
 }
 
-// nulRedirect matches a cmd.exe-style redirect to the "nul" device (>nul,
-// 2>nul, 1>>nul, &>nul …) where nul is a complete token. bash and PowerShell
-// treat "nul" as an ordinary filename, not the null device, so the redirect
-// would create an undeletable file named "nul" (a Windows reserved name) in the
-// working directory. #4252. Group 2 captures the trailing delimiter (RE2 has no
-// lookahead) so it can be re-emitted unchanged.
-var nulRedirect = regexp.MustCompile(`(?i)((?:\d+|&)?>>?)\s*nul([\s;&|<>)]|$)`)
+// normalizeNullRedirects rewrites null-device redirect aliases to sink
+// ("/dev/null" for bash, "$null" for PowerShell), so permission-approved
+// null-sink commands discard output under the resolved shell. It handles
+// cmd.exe-style `nul`, PowerShell `$null`, and POSIX `/dev/null` while avoiding
+// quoted/escaped text.
+func normalizeNullRedirects(command, sink string) string {
+	var (
+		out   strings.Builder
+		quote byte
+	)
+	write := func(c byte) {
+		out.WriteByte(c)
+	}
+	for i := 0; i < len(command); {
+		c := command[i]
+		if quote != 0 {
+			write(c)
+			i++
+			if c == '\\' && quote == '"' && i < len(command) {
+				write(command[i])
+				i++
+				continue
+			}
+			if c == '`' && i < len(command) {
+				write(command[i])
+				i++
+				continue
+			}
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"':
+			quote = c
+			write(c)
+			i++
+		case '\\', '`':
+			write(c)
+			i++
+			if i < len(command) {
+				write(command[i])
+				i++
+			}
+		default:
+			if replacement, next, ok := consumeNullRedirect(command, i, sink); ok {
+				out.WriteString(replacement)
+				i = next
+				continue
+			}
+			write(c)
+			i++
+		}
+	}
+	return out.String()
+}
 
-// normalizeNulRedirect rewrites those nul redirects to sink ("/dev/null" for
-// bash, "$null" for PowerShell), so the command discards output as intended.
-func normalizeNulRedirect(command, sink string) string {
-	return nulRedirect.ReplaceAllStringFunc(command, func(m string) string {
-		sub := nulRedirect.FindStringSubmatch(m)
-		return sub[1] + sink + sub[2]
-	})
+func consumeNullRedirect(s string, start int, sink string) (string, int, bool) {
+	i := start
+	if i >= len(s) {
+		return "", start, false
+	}
+	if s[i] == '&' {
+		i++
+		if i < len(s) && s[i] == '>' {
+			i++
+			if i < len(s) && s[i] == '>' {
+				i++
+			}
+		} else {
+			return "", start, false
+		}
+	} else {
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+		if i >= len(s) || s[i] != '>' {
+			return "", start, false
+		}
+		i++
+		if i < len(s) && s[i] == '>' {
+			i++
+		}
+	}
+	opEnd := i
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+	next, ok := consumeNullSink(s, i)
+	if !ok {
+		return "", start, false
+	}
+	return s[start:opEnd] + sink, next, true
+}
+
+func consumeNullSink(s string, i int) (int, bool) {
+	for _, sink := range []string{"/dev/null", "$null", "nul"} {
+		if i+len(sink) > len(s) {
+			continue
+		}
+		got := s[i : i+len(sink)]
+		if sink == "/dev/null" {
+			if got != sink {
+				continue
+			}
+		} else if !strings.EqualFold(got, sink) {
+			continue
+		}
+		next := i + len(sink)
+		if next < len(s) && !isNullRedirectWordEnd(s[next]) {
+			return next, false
+		}
+		return next, true
+	}
+	return i, false
+}
+
+func isNullRedirectWordEnd(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || strings.ContainsRune(";&|<>)]", rune(c))
 }
 
 // argv builds the exec argv that runs command under this shell.
@@ -250,9 +354,9 @@ func (s Shell) argv(command string) []string {
 		path = s.Kind.String()
 	}
 	if s.Kind == ShellPowerShell {
-		return []string{path, "-NoProfile", "-NonInteractive", "-Command", psUTF8Prologue + normalizeNulRedirect(command, "$null")}
+		return []string{path, "-NoProfile", "-NonInteractive", "-Command", psUTF8Prologue + normalizeNullRedirects(command, "$null")}
 	}
-	return []string{path, "-c", normalizeNulRedirect(command, "/dev/null")}
+	return []string{path, "-c", normalizeNullRedirects(command, "/dev/null")}
 }
 
 // SupportsChaining reports whether the shell parses '&&' / '||'. bash does;

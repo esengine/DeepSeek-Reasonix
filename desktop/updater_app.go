@@ -27,6 +27,7 @@ func (a *App) Version() string { return version }
 func (a *App) CheckUpdate() (*UpdateInfo, error) {
 	c, err := httpClient()
 	if err != nil {
+		a.recordUpdateError(err)
 		return &UpdateInfo{
 			Current:       version,
 			Channel:       channel,
@@ -41,6 +42,7 @@ func (a *App) CheckUpdate() (*UpdateInfo, error) {
 	defer cancel()
 	m, err := fetchManifest(ctx, c)
 	if err != nil {
+		a.recordUpdateError(err)
 		return &UpdateInfo{
 			Current:       version,
 			Channel:       channel,
@@ -55,7 +57,7 @@ func (a *App) CheckUpdate() (*UpdateInfo, error) {
 	return &info, nil
 }
 
-// OpenDownloadPage opens the releases page in the browser — the macOS manual-update
+// OpenDownloadPage opens the install page in the browser — the macOS manual-update
 // path and a fallback link elsewhere.
 func (a *App) OpenDownloadPage() {
 	page := downloadPage()
@@ -208,6 +210,16 @@ func (a *App) emitProgress(phase string, received, total int64, errMsg string) {
 
 // failUpdate emits an error progress event and returns the error to the caller.
 func (a *App) failUpdate(err error) error {
+	a.recordUpdateError(err)
 	a.emitProgress("error", 0, 0, err.Error())
 	return err
+}
+
+func (a *App) recordUpdateError(err error) {
+	if err == nil || version == "dev" {
+		return
+	}
+	if m := a.metrics.Load(); m != nil {
+		m.inc("updater_error", errorClass(err.Error()))
+	}
 }

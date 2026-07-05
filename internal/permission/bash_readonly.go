@@ -3,6 +3,7 @@ package permission
 import (
 	"strings"
 
+	"reasonix/internal/shellparse"
 	"reasonix/internal/shellsafe"
 )
 
@@ -12,11 +13,17 @@ import (
 // shellsafe tables (one source of truth with the plan-mode gate, #5341); the
 // argument rigor below is permission-specific.
 func isReadOnlyBashSubject(subject string) bool {
+	if normalized, ok := normalizeBashSafeRedirectsForMatch(subject); ok {
+		subject = normalized
+	}
 	base, sub, ok := shellsafe.CommandIsReadOnly(subject)
 	if !ok {
 		return false
 	}
-	fields := strings.Fields(strings.TrimSpace(subject))
+	fields, malformed := shellparse.StaticFields(subject)
+	if malformed != "" {
+		return false
+	}
 	if sub == "" {
 		return !hasUnsafeReadOnlyArgs(base, fields[1:])
 	}

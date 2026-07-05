@@ -61,6 +61,7 @@ planner_max_steps = 0            # user/global only; planner read-only tool-call
 reasoning_language = "auto"      # visible reasoning text: auto|zh|en
 # plan_mode_allowed_tools = ["custom_reader"]   # extra read-only custom tools only;
 #                                                # does not unlock blocked tools or unsafe bash
+# plan_mode_read_only_commands = ["gh issue view", "gh pr diff"]   # extra read-only shell prefixes for planning
 # planner_model = "deepseek-pro"      # optional low-frequency planner
 # subagent_model = "deepseek-pro"     # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
@@ -126,6 +127,18 @@ when you want to pre-seed audited tools; keep `plan_mode_allowed_tools` as the
 compatibility escape valve. It never unlocks known blocked plan-mode tools such
 as `bash`, `task`, writers, installers, or memory mutation tools, and it never
 bypasses bash's plan-mode safety checks.
+
+Use `[agent].plan_mode_read_only_commands` when plan-mode research needs a
+specific shell command that Reasonix cannot classify but you know is read-only,
+such as `gh issue view` or an internal query CLI. Entries are concrete command
+prefixes, not tool names: `["gh issue view"]` permits `gh issue view 4572`, while
+`bash`, `sh`, and other shell interpreters are ignored. Shell operators,
+redirection, command substitution, background execution, and unsafe built-in
+command flags remain blocked while planning. In interactive plan mode, Reasonix
+can also ask you to trust a concrete unknown query prefix the first time it is
+needed; the persistent choice writes the same
+`[agent].plan_mode_read_only_commands` entry. Auto/YOLO approval never answers
+this trust prompt.
 
 ### Environment variables
 
@@ -205,7 +218,29 @@ user-global `default_model`.
 
 In the desktop app, open **Settings -> Model -> Access -> Add model service ->
 Custom provider** for proxies, aggregators, or self-hosted services that speak
-the OpenAI-compatible chat API.
+the OpenAI-compatible chat API or Anthropic-compatible Messages API.
+
+For common providers, choose **Add model service -> Recommended preset** instead.
+Reasonix can prefill editable custom-provider entries for Kimi CN, Kimi Global,
+Kimi Coding Plan, MiMo API, MiMo Anthropic, MiMo Token Plan CN/SGP/AMS and their
+Anthropic-compatible variants, MiniMax CN/Global API, MiniMax CN/Global
+Anthropic, GLM CN, Z.AI Global, GLM/Z.AI Coding Plan OpenAI-compatible and
+Anthropic-compatible endpoints, OpenCode Go, OpenCode Go Anthropic, OpenCode Zen
+Anthropic, Qwen/DashScope CN/Global, Qwen Coding Plan CN/Global
+OpenAI-compatible and Anthropic-compatible endpoints, StepFun OpenAI-compatible
+and Anthropic-compatible endpoints, NovitaAI, GMI Cloud, Vercel AI Gateway,
+HuggingFace Router, NVIDIA NIM, KiloCode, and Ollama Cloud. Plan names describe
+the access/payment route; they include CN/Global only when the provider exposes
+distinct regional endpoints. Kimi Coding Plan is therefore a dedicated plan
+endpoint, while Kimi direct API is split into CN and Global. The preset path
+usually needs only the provider API key: the key value is stored in Reasonix home
+`.env`, while `config.toml` stores the endpoint, model list, key
+environment-variable name, context window, vision model metadata, proxy bypass
+for China-only endpoints, MiniMax `reasoning_split`, GLM/MiniMax thinking
+heuristics, Anthropic-compatible Bearer auth where needed, Ollama Cloud
+max-effort support, and OpenCode Go per-model reasoning overrides. After adding
+a preset, open its provider card if you need to change models, headers,
+endpoint, or compatibility settings.
 
 Fill **API address** with the provider endpoint that should receive the standard
 chat path. In this mode Reasonix previews and sends chat requests to:
@@ -221,12 +256,51 @@ preview under the field shows the exact request URL that will be used.
 
 Model discovery uses the API address to try likely model-list URLs such as
 `/models` and `/v1/models`. If the gateway requires a separate model-list
-endpoint, open **Advanced settings** and set `models_url`, for example
+endpoint, open **Compatibility settings** and set `models_url`, for example
 `https://gateway.example.com/v1/models`. If discovery is not available, fill the
 model list manually.
 
 **Full URL** still uses the OpenAI-compatible chat request body. It does not
 switch the request schema to the OpenAI Responses API.
+
+### Compatibility settings
+
+The **Compatibility settings (usually leave unchanged)** section is for gateways
+whose authentication, model-list endpoint, or reasoning/thinking request shape
+differs from the normal OpenAI-compatible defaults. Leave these fields at their
+defaults unless the provider documentation or a proxy error tells you otherwise.
+For Anthropic-compatible services, such as some coding-plan endpoints, choose
+**Anthropic-compatible** as the connection protocol before saving.
+
+| Field | What it controls | When to change it |
+| --- | --- | --- |
+| `api_key_env` | The environment-variable name used for this provider's API key. Desktop-saved key values are stored in Reasonix home `.env` under this name; the TOML config stores only the name. | Change it when several providers need distinct keys, or leave it blank for a service that does not require an API key. |
+| `models_url` | The URL used only for model discovery. Chat requests still use the API address or Full URL above. | Set it when `/models` or `/v1/models` is not where the gateway exposes its model list. |
+| Extra request headers | Static HTTP headers, one `Header: value` per line. | Use for gateways such as OpenRouter that require `HTTP-Referer`, `X-Title`, or similar site headers. Keep bearer/API keys in the key field instead of duplicating them here. |
+| Extra request body | A JSON object merged into the top-level chat request body. | Use only for provider-specific flags such as `{"enable_thinking": true}`. Reasonix still owns core fields such as `model`, `messages`, `tools`, `stream`, and `thinking`, and null values are rejected. |
+| Authorization: Bearer | For Anthropic-compatible providers, sends the saved API key as `Authorization: Bearer <key>` instead of `x-api-key`. | Enable it only when the gateway documents Bearer auth, such as MiniMax Global or Vercel AI Gateway. |
+| Model capability mode | Which reasoning request protocol Reasonix should use for this provider. | Keep **Auto-detect** unless the gateway is misdetected or the model docs require a specific reasoning format. |
+| Thinking override | Provider-specific override for `thinking.type`. | Keep **Auto** unless the backend documents `enabled`, `disabled`, or `adaptive`. Unsupported values can make some OpenAI-compatible gateways reject the request. |
+| Balance URL | Optional endpoint for wallet/balance lookup. | Set it when the provider exposes a balance endpoint and you want the desktop status bar to show it. |
+| Context window | The maximum number of tokens this provider keeps in context. `0` means provider default. | Set it when the model's real context size differs from Reasonix's default or built-in metadata. |
+
+Model capability mode options:
+
+| Option | Effect |
+| --- | --- |
+| Auto-detect (recommended) | Reasonix chooses the request shape from model capability metadata and endpoint detection. |
+| DeepSeek thinking | Uses DeepSeek-style thinking control, including `thinking.type` and DeepSeek-supported reasoning depth. |
+| OpenAI reasoning | Uses the standard OpenAI-compatible `reasoning_effort` levels. |
+| Plain chat | Sends no reasoning or thinking control fields. Use this for text-only proxies that reject reasoning parameters. |
+
+Thinking override options:
+
+| Option | Effect |
+| --- | --- |
+| Auto (provider default) | Does not write an explicit provider-level `thinking` override. Reasonix uses the provider/model default behavior. |
+| Enabled | Sends `thinking.type = "enabled"` for compatible providers. |
+| Disabled | Sends `thinking.type = "disabled"` for compatible providers. On DeepSeek-style providers this also avoids sending a reasoning depth hint. |
+| Adaptive (self-adjusting) | Sends or preserves `thinking.type = "adaptive"` only for providers that document adaptive thinking, such as MiniMax-M3-style endpoints. |
 
 Some OpenAI-compatible gateways require non-standard top-level request body
 fields. Add them with `extra_body` on the provider entry:
@@ -242,7 +316,8 @@ extra_body  = { enable_thinking = true }
 ```
 
 `extra_body` is merged into the chat JSON request body. Reasonix keeps core
-fields such as `model`, `messages`, `tools`, and `stream` under its own control.
+fields such as `model`, `messages`, `tools`, `stream`, and `thinking` under its
+own control.
 
 ## Desktop hooks
 
@@ -403,13 +478,14 @@ edits stay in the project), resolving symlinks and `..` so a link can't tunnel
 out. `forbid_read` optionally hides sensitive directories from the agent's
 read/list/search tools; use absolute paths or `${HOME}` / `${VAR}` references,
 not `~`, because config expansion is environment-variable based. `bash` is
-itself jailed on macOS by default (`[sandbox] bash`, Seatbelt): commands may
-write only those same roots (plus temp and toolchain caches), cannot read
-configured `forbid_read` roots while the OS sandbox is active, and reach the
-network only when `[sandbox] network` is set. Other platforms fall back to
-running unconfined when no OS sandbox is available (see
+itself jailed by default when an OS sandbox is available (`[sandbox] bash`,
+Seatbelt on macOS and bubblewrap on Linux): commands may write only those same
+roots (plus temp and toolchain caches), cannot read configured `forbid_read`
+roots while the OS sandbox is active, and reach the network only when
+`[sandbox] network` is set. When no OS sandbox is available, `bash = "enforce"`
+refuses bash execution instead of running unconfined (see
 [`SPEC.md` §9](./SPEC.md#9-roadmap-not-in-current-scope) for the escape-prompt and
-Linux support still to come).
+broader OS support still to come).
 
 ## Plugins (MCP)
 
@@ -512,8 +588,10 @@ archives, and saved facts on demand instead of injecting that dynamic state into
 the stable system prompt. `/forget <name>` archives a saved fact rather than
 deleting it permanently; the CLI/TUI and desktop memory panel can show those
 archived files for traceability, but they are not searched as active memory.
-Agent-initiated `remember` and `forget` calls always ask for fresh approval and
-show a compact preview of the saved or archived memory before they run.
+Agent-initiated `remember` and `forget` calls always ask for fresh human approval
+and show a compact preview of the saved or archived memory before they run.
+Guardian review cannot answer for the user; non-interactive runs refuse these
+tools instead of auto-approving them.
 Retrieval keeps the top BM25 result while trimming weak common-word matches, and
 0-result responses suggest narrower, more distinctive follow-up searches.
 Memory v5 is enabled by default across the CLI/TUI, `reasonix serve`, and the

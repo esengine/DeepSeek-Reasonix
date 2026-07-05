@@ -216,11 +216,11 @@ func validateSessionTrashTarget(dir, sessionPath, key string) error {
 		}
 		trashPath := filepath.Join(itemDir, key)
 		if trashInfo, err := os.Stat(trashPath); err == nil && !trashInfo.IsDir() {
-			discardable, err := liveSessionDiscardable(sessionPath)
+			removable, err := liveSessionRemovableWithExistingTrash(sessionPath, trashPath)
 			if err != nil {
 				return err
 			}
-			if discardable {
+			if removable {
 				return nil
 			}
 			return fmt.Errorf("session already exists in trash: %s", key)
@@ -247,11 +247,11 @@ func prepareSessionTrashTarget(dir, sessionPath, key string) (bool, error) {
 		}
 		trashPath := filepath.Join(itemDir, key)
 		if trashInfo, err := os.Stat(trashPath); err == nil && !trashInfo.IsDir() {
-			discardable, err := liveSessionDiscardable(sessionPath)
+			removable, err := liveSessionRemovableWithExistingTrash(sessionPath, trashPath)
 			if err != nil {
 				return false, err
 			}
-			if discardable {
+			if removable {
 				return false, removeDesktopSessionArtifacts(sessionPath)
 			}
 			return false, fmt.Errorf("session already exists in trash: %s", key)
@@ -265,6 +265,29 @@ func prepareSessionTrashTarget(dir, sessionPath, key string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// liveSessionRemovableWithExistingTrash reports whether a live session file may
+// be removed even though a trash copy already exists under the same key: the
+// live file must be discardable (empty stub) or byte-identical to the trash
+// copy, and no other runtime may hold its session lease — another process could
+// be mid-write, and removing the file would silently drop its next save.
+func liveSessionRemovableWithExistingTrash(sessionPath, trashPath string) (bool, error) {
+	discardable, err := liveSessionDiscardable(sessionPath)
+	if err != nil {
+		return false, err
+	}
+	duplicate := false
+	if !discardable {
+		duplicate, err = trashSessionMatchesLive(sessionPath, trashPath)
+		if err != nil {
+			return false, err
+		}
+	}
+	if !discardable && !duplicate {
+		return false, nil
+	}
+	return !agent.SessionLeaseHeldByOtherRuntime(sessionPath), nil
 }
 
 func liveSessionDiscardable(sessionPath string) (bool, error) {
@@ -289,6 +312,21 @@ func liveSessionDiscardable(sessionPath string) (bool, error) {
 		return false, nil
 	}
 	return !session.HasContent(), nil
+}
+
+func trashSessionMatchesLive(sessionPath, trashPath string) (bool, error) {
+	live, err := os.ReadFile(sessionPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	trashed, err := os.ReadFile(trashPath)
+	if err != nil {
+		return false, err
+	}
+	return string(live) == string(trashed), nil
 }
 
 func sessionFileHasConversationContent(sessionPath string) bool {

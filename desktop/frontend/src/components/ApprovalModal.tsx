@@ -27,6 +27,10 @@ function animateShelfExit(
   options.onComplete();
 }
 
+function requiresFreshHumanApproval(tool: string): boolean {
+  return tool === "remember" || tool === "forget" || tool === "exit_plan_mode";
+}
+
 export function ApprovalModal({
   approval,
   onAnswer,
@@ -48,6 +52,9 @@ export function ApprovalModal({
 }) {
   const t = useT();
   const isPlanApproval = approval.tool === "exit_plan_mode";
+  const isPlanModeReadOnlyCommand = approval.tool === "plan_mode_read_only_command";
+  const toolLabel = isPlanModeReadOnlyCommand ? "bash" : approval.tool;
+  const isFreshHumanApproval = requiresFreshHumanApproval(approval.tool);
   const subject = approval.subject.trim();
   const subjectSummary = subject.split(/\r?\n/).find((line) => line.trim())?.trim() ?? "";
   const toolMeta = approval.reason?.trim() || subjectSummary || approval.tool;
@@ -93,9 +100,10 @@ export function ApprovalModal({
 
   const chooseToolAction = (key: string) => {
     if (key === "1") answerWithExit(() => onAnswer(true, false, false));
-    else if (key === "2") answerWithExit(() => onAnswer(true, true, false));
-    else if (key === "3") answerWithExit(() => onAnswer(true, true, true));
-    else if (key === "4") answerWithExit(() => onAnswer(false, false, false));
+    else if (isFreshHumanApproval && key === "4") answerWithExit(() => onAnswer(false, false, false));
+    else if (!isFreshHumanApproval && key === "2") answerWithExit(() => onAnswer(true, true, false));
+    else if (!isFreshHumanApproval && key === "3") answerWithExit(() => onAnswer(true, true, true));
+    else if (!isFreshHumanApproval && key === "4") answerWithExit(() => onAnswer(false, false, false));
     else if (key === "Escape") answerWithExit(onStop);
   };
 
@@ -108,7 +116,7 @@ export function ApprovalModal({
     playAttentionChime();
   }, [approval.id, isPlanApproval, showToolDetailsByDefault]);
 
-  const actionCount = isPlanApproval ? 3 : 4;
+  const actionCount = isPlanApproval ? 3 : isFreshHumanApproval ? 2 : 4;
   const selectedIndexRef = useRef(selectedIndex);
   selectedIndexRef.current = selectedIndex;
 
@@ -129,6 +137,7 @@ export function ApprovalModal({
         event.preventDefault();
         const key = String(selectedIndexRef.current + 1);
         if (isPlanApproval) choosePlanAction(key);
+        else if (isFreshHumanApproval) chooseToolAction(selectedIndexRef.current === 0 ? "1" : "4");
         else chooseToolAction(key);
       } else if (event.key === "1" || event.key === "2" || event.key === "3" || event.key === "4" || event.key === "Escape") {
         event.preventDefault();
@@ -138,7 +147,7 @@ export function ApprovalModal({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [isPlanApproval, onAnswer, onExitPlan, onStop, actionCount]);
+  }, [isPlanApproval, isFreshHumanApproval, onAnswer, onExitPlan, onStop, actionCount]);
 
   useEffect(() => {
     if (revisionOpen) {
@@ -291,7 +300,7 @@ export function ApprovalModal({
         barRef={cardRef}
         titleId="tool-approval-title"
         title={t("approval.toolPending")}
-        badges={<PromptBadge>{approval.tool}</PromptBadge>}
+        badges={<PromptBadge>{toolLabel}</PromptBadge>}
         meta={toolMeta}
         headerActions={
           <>
@@ -308,9 +317,15 @@ export function ApprovalModal({
         actions={
           <>
             <PromptAction keyLabel="1" label={t("approval.allowOnce")} onClick={() => answerWithExit(() => onAnswer(true, false, false))} selected={selectedIndex === 0} />
-            <PromptAction keyLabel="2" label={t("approval.allowRuleSession")} onClick={() => answerWithExit(() => onAnswer(true, true, false))} selected={selectedIndex === 1} />
-            <PromptAction keyLabel="3" label={t("approval.allowRulePersistent")} onClick={() => answerWithExit(() => onAnswer(true, true, true))} selected={selectedIndex === 2} />
-            <PromptAction keyLabel="4" label={t("approval.deny")} onClick={() => answerWithExit(() => onAnswer(false, false, false))} selected={selectedIndex === 3} />
+            {isFreshHumanApproval ? (
+              <PromptAction keyLabel="4" label={t("approval.deny")} onClick={() => answerWithExit(() => onAnswer(false, false, false))} selected={selectedIndex === 1} />
+            ) : (
+              <>
+                <PromptAction keyLabel="2" label={t("approval.allowRuleSession")} onClick={() => answerWithExit(() => onAnswer(true, true, false))} selected={selectedIndex === 1} />
+                <PromptAction keyLabel="3" label={t("approval.allowRulePersistent")} onClick={() => answerWithExit(() => onAnswer(true, true, true))} selected={selectedIndex === 2} />
+                <PromptAction keyLabel="4" label={t("approval.deny")} onClick={() => answerWithExit(() => onAnswer(false, false, false))} selected={selectedIndex === 3} />
+              </>
+            )}
           </>
         }
       >

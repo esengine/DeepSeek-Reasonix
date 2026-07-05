@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"reasonix/internal/proc"
+	"reasonix/internal/shellparse"
 )
 
 const ProbeTimeout = 2 * time.Second
@@ -174,7 +175,11 @@ func cloneProbeResults(results []ProbeResult) []ProbeResult {
 }
 
 func runOne(ctx context.Context, command string, opts ProbeOptions) ProbeResult {
-	parts := strings.Fields(command)
+	probe, err := shellparse.ParseStaticCommand(command, shellparse.StaticCommandPolicy{AllowEnvAssignments: true, AllowStderrToStdout: true})
+	if err != nil {
+		return ProbeResult{Command: command, Binary: command, Error: "invalid command: " + err.Error()}
+	}
+	parts := probe.Argv
 	if len(parts) == 0 {
 		return ProbeResult{Command: command, Binary: command, Error: "empty command"}
 	}
@@ -205,11 +210,18 @@ func runOne(ctx context.Context, command string, opts ProbeOptions) ProbeResult 
 	cmdCtx, cancel := context.WithTimeout(ctx, ProbeTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(cmdCtx, exe, parts[1:]...)
+	if len(probe.Env) > 0 {
+		cmd.Env = append(os.Environ(), probe.Env...)
+	}
 	prepareProbeCommand(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
+	if probe.MergeStderr {
+		cmd.Stderr = &stdout
+	} else {
+		cmd.Stderr = &stderr
+	}
+	err = cmd.Run()
 	out := strings.TrimSpace(stdout.String())
 	if out == "" {
 		out = strings.TrimSpace(stderr.String())

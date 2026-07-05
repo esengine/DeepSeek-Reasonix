@@ -14,7 +14,7 @@
 
 取值只有三种：
 
-- `auto`：跟随当前对话语言，不额外注入语言指令。
+- `auto`：用户原始提问明显为中文时锚定中文，并忽略 `@file` 等注入的引用内容；英文或不确定时不额外注入语言指令。
 - `zh`：可见思考过程优先使用简体中文。
 - `en`：可见思考过程优先使用英文。
 
@@ -79,9 +79,9 @@ reasoning_language = "auto" # auto|zh|en
 
 ## 缓存影响
 
-`auto` 对缓存最友好。它不会注入任何额外内容，只复用已有的稳定语言策略。
+`auto` 仍然对缓存友好。用户原始提问明显是中文时，Reasonix 会为这一轮加入同样很小的 `<reasoning-language>` 临时 block；英文或信号不明确时不注入，只复用已有的稳定语言策略。`@file` 等注入的引用内容不会参与这个自动判断。
 
-当设置为 `zh` 或 `en` 时，Reasonix 会把一个很小的 `<reasoning-language>` 临时 block 放进本次 user turn。它不会改变：
+当设置为 `zh` 或 `en` 时，Reasonix 总是会把一个很小的 `<reasoning-language>` 临时 block 放进本次 user turn。所有模式下，它都不会改变：
 
 - system prompt
 - 工具 schema 的字节或顺序

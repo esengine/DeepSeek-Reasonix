@@ -15,6 +15,7 @@ import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import { useEntranceAnimation } from "../lib/useEntranceAnimation";
 import { useScrollManager } from "../lib/useScrollManager";
 import { buildStepGroups, buildTurnGroups, compactQuestionText, createWarmLayerState, questionAnchorId, questionTurnsById, scrollVersion, warmColdPageForTurn, warmLayerWithColdPageAtLeast, warmLayerWithExpandedTurn, warmLayerWithNextColdPage, warmPagination, warmUserPreview, type QuestionAnchor, type TurnGroup, type WarmLayerState } from "../lib/transcriptGrouping";
+import { appendTurnActionCopyText } from "../lib/turnActionCopy";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 type AssistantItem = Extract<Item, { kind: "assistant" }>;
@@ -500,7 +501,7 @@ export function Transcript({
             />,
           );
           if (!it.streaming && it.text.trim() !== "") {
-            actionText = it.text;
+            actionText = appendTurnActionCopyText(actionText, it.text);
             actionReady = true;
           }
         }
@@ -573,7 +574,7 @@ export function Transcript({
           case "assistant":
             out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={false} creationMode={creationMode} />);
             if (!it.streaming && it.text.trim() !== "") {
-              actionText = it.text;
+              actionText = appendTurnActionCopyText(actionText, it.text);
               actionReady = true;
             }
             break;
@@ -926,7 +927,7 @@ function WarmTurnItems({
       case "assistant": {
         nodes.push(<AssistantMessage key={it.id} item={it} defaultExpanded={false} creationMode={creationMode} />);
         if (!it.streaming && it.text.trim() !== "") {
-          actionText = it.text;
+          actionText = appendTurnActionCopyText(actionText, it.text);
           actionReady = true;
         }
         break;

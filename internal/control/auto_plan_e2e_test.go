@@ -85,7 +85,7 @@ func TestAutoPlanGateEndToEnd(t *testing.T) {
 	}
 
 	msgs := ag.Session().Messages
-	if got := firstUserMessage(msgs); !strings.HasPrefix(got, PlanModeMarker) {
+	if got := agent.StripTransientUserBlocks(firstUserMessage(msgs)); !strings.HasPrefix(got, PlanModeMarker) {
 		t.Fatalf("first model input = %q, want the auto-plan marker prefixed", got)
 	}
 	if c.PlanMode() {

@@ -19,7 +19,7 @@ layout_style = "classic"   # classic|workbench|creation; desktop layout style
 # theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 
 [notifications]
-enabled = false   # system notifications for CLI chat/run; default off
+enabled = false   # system notifications for CLI and desktop turns; default off
 turn_done = true   # notify when a turn finishes
 approval_request = true   # notify when a tool approval is waiting
 ask_request = true   # notify when a question is waiting
@@ -38,6 +38,8 @@ auto_plan         = "off"   # user-level only; ignored in project reasonix.toml
 memory_compiler = { enabled = true }   # user-level only; Memory v5 execution compiler
 # reasoning_language = "auto"   # visible reasoning text: auto|zh|en
 # auto_plan_classifier = "deepseek-flash"   # optional; only used for borderline tasks
+# plan_mode_allowed_tools = ["custom_reader"]   # extra read-only custom tools; cannot unlock bash/task/run_skill
+# plan_mode_read_only_commands = ["gh issue view", "gh pr diff"]   # extra read-only shell prefixes for plan mode
 soft_compact_ratio  = 0.5   # notice only; keeps the cache-first prefix intact
 tool_result_snip_ratio = 0.6   # snip stale tool results before summary compaction
 compact_ratio       = 0.8   # try compacting when prompt reaches this fraction
@@ -51,6 +53,12 @@ compact_force_ratio = 0.9   # force compacting at this high-water mark
 # A provider is a vendor endpoint (one base_url + key) that offers one or more
 # models. Use `models = [...]` to expose several under a single entry — switching
 # models reuses the same connection; no need to re-declare base_url/api_key.
+# In the desktop app, Settings -> Model -> Access -> Add provider includes
+# recommended editable presets for Kimi CN/Global, Kimi Coding Plan, MiMo API
+# and Anthropic/token-plan regions, MiniMax CN/Global API and Anthropic routes,
+# GLM/Z.AI CN/Global API and coding-plan routes, OpenCode Go/Zen, Qwen/DashScope
+# CN/Global API and coding-plan routes, StepFun, NovitaAI, GMI, Vercel AI
+# Gateway, HuggingFace, NVIDIA, KiloCode, and Ollama Cloud.
 [[providers]]
 name        = "deepseek"
 kind        = "openai"
@@ -90,6 +98,8 @@ effort      = "high"
 # OpenAI shim). base_url is optional (defaults to https://api.anthropic.com). Note:
 # this provider does not enable extended thinking and does not send temperature —
 # current Claude models reject sampling params (see internal/provider/anthropic).
+# Some Anthropic-compatible gateways use Bearer auth instead of x-api-key; set
+# auth_header = true for those (for example MiniMax Global or Vercel AI Gateway).
 [[providers]]
 name           = "claude"
 kind           = "anthropic"
@@ -176,6 +186,33 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # model      = ""        # 用于 bot 的模型，空则用 default_model
 # max_steps  = 25
 # debounce_ms = 1500      # 消息合并窗口（毫秒）
+# queue_mode = "steer"    # steer|followup|collect|interrupt
+# queue_cap  = 20         # 每个会话最多保留的排队消息数
+# queue_drop = "summarize" # summarize|old|new
+# ignore_self_messages = true # 忽略 bot 自己发出的回声消息
+#
+# [bot.self_user_ids]
+# qq = []                 # 可选：各平台 bot 自己的 user/open id
+# feishu = []
+# weixin = []
+#
+# [bot.control]
+# enabled = false         # 本机 loopback HTTP API：GET /status, GET /metrics, POST /send
+# addr = "127.0.0.1:37913"
+# token_env = "REASONIX_BOT_CONTROL_TOKEN"
+#
+# [[bot.routes]]
+# connection_id = "feishu-lark" # 可选；空字段表示通配
+# chat_type = "group"
+# chat_id = "oc_xxx"
+# workspace_root = "/path/to/project"
+# model = "deepseek-pro"
+# tool_approval_mode = "ask"
+#
+# [bot.pairing]
+# enabled = true
+# request_ttl_minutes = 60
+# max_pending_per_platform = 3
 #
 # [bot.allowlist]
 # enabled     = true
@@ -183,6 +220,12 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # qq_users    = []
 # feishu_users = []
 # weixin_users = []
+# qq_approvers = []       # 为空时沿用 allowlist 用户可审批的兼容行为
+# feishu_approvers = []
+# weixin_approvers = []
+# qq_admins = []          # 配置后 /yolo 和 /mode 仅限 admin
+# feishu_admins = []
+# weixin_admins = []
 # qq_groups   = []
 # feishu_groups = []
 # weixin_groups = []

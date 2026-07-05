@@ -3,6 +3,8 @@ package skill
 import (
 	"fmt"
 	"strings"
+
+	"reasonix/internal/textutil"
 )
 
 // IndexMaxChars caps the pinned skills-index block so it can't bloat the
@@ -78,18 +80,8 @@ func indexLine(sk Skill) string {
 	return "- " + sk.Name + tag + " — " + clipped
 }
 
-// clipRunes truncates s to at most max runes (ellipsis included), never
-// splitting a multi-byte rune.
+// clipRunes preserves the historical name but clips by grapheme clusters so
+// combined emoji and other user-visible characters stay intact.
 func clipRunes(s string, max int) string {
-	if max < 1 {
-		max = 1
-	}
-	r := []rune(s)
-	if len(r) <= max {
-		return s
-	}
-	if max-1 < 1 {
-		return string(r[:1])
-	}
-	return string(r[:max-1]) + "…"
+	return textutil.ClipGraphemes(s, max, "…")
 }
