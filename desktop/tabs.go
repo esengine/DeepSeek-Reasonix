@@ -19,6 +19,7 @@ import (
 	"unicode"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	goruntime "runtime"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
@@ -7015,7 +7016,13 @@ func canonicalTabSessionPath(path string) string {
 		return ""
 	}
 	if validPath, _, err := validateSessionPath(config.SessionDir(), path); err == nil {
+		if goruntime.GOOS == "windows" {
+			validPath = strings.ToLower(validPath)
+		}
 		return validPath
+	}
+	if goruntime.GOOS == "windows" {
+		path = strings.ToLower(path)
 	}
 	return path
 }
