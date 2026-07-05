@@ -12,6 +12,10 @@ theme = "auto"   # auto|dark|light; controls CLI colors only; REASONIX_THEME can
 # theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 # shortcut_layout = "desktop"   # classic|desktop; compatibility setting; Shift+Tab toggles Plan, Ctrl+Y toggles YOLO
 # cursor_shape = "underline"   # block|underline|bar; text input cursor shape; default underline to avoid CJK rendering artifacts
+# mouse_capture = true   # enable in-app mouse handling (transcript scrollbar drag, wheel-scroll,
+                         # drag-select). Set to false to release mouse ownership to the terminal so
+                         # native click-drag selection and the right-click context menu work again.
+                         # Useful when running inside tmux or screen. Toggle at runtime with /mouse.
 
 [desktop]
 layout_style = "classic"   # classic|workbench|creation; desktop layout style
