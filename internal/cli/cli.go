@@ -1196,6 +1196,9 @@ func chatREPL(args []string, version string) int {
 		m.showReasoning = cfg.UI.ShowReasoning   // /verbose persistence: start with config default
 		m.showTurnUsage = cfg.UI.ShowTurnUsage   // retain usage accounting even when transcript receipts are hidden
 		m.cfg = cfg
+		if cfg.UI.MouseCapture != nil && !*cfg.UI.MouseCapture {
+			m.mouseCaptureOff = true
+		}
 	}
 
 	// /model support: a pure builder the TUI calls to rebuild on a different

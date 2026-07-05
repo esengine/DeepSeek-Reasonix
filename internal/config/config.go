@@ -269,6 +269,7 @@ type UIConfig struct {
 	ShowReasoning  bool   `toml:"show_reasoning"`  // Ctrl+O / /verbose: show thinking text in CLI; false = collapsed
 	ShowTurnUsage  bool   `toml:"show_turn_usage"` // show per-request token/cost receipts in the CLI/TUI transcript
 	CursorShape    string `toml:"cursor_shape"`    // block|underline|bar; empty defaults to bar
+	MouseCapture   *bool  `toml:"mouse_capture"`   // enable in-app mouse handling; nil/true = enabled, false = released to terminal (native selection works)
 }
 
 // CLIConfig controls user-global native CLI behavior. It is separate from
