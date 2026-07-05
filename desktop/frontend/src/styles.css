@@ -10252,6 +10252,15 @@ body > .mermaid-diagram--fullscreen {
   line-height: 1.3;
   text-transform: uppercase;
 }
+.cap-server-section__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.cap-advanced-toggle {
+  white-space: nowrap;
+}
 .cap-mcp-toolbar {
   display: flex;
   align-items: center;
@@ -11305,7 +11314,17 @@ body > .mermaid-diagram--fullscreen {
 .cap-switch input:disabled + .cap-switch__track {
   opacity: 0.5;
 }
-
+.cap-switch--labeled {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.cap-switch__label {
+  font-size: 12px;
+  color: var(--fg);
+  white-space: nowrap;
+}
 /* ── management modals: shared shell for settings, history, and trash ───────── */
 .management-modal-backdrop {
   --wails-draggable: no-drag;

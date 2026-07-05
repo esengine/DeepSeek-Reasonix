@@ -49,6 +49,8 @@ export function CapabilitiesPanel({
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(() => new Set());
   const [expandedServers, setExpandedServers] = useState<Set<string>>(() => new Set());
   const [expandedServerTools, setExpandedServerTools] = useState<Set<string>>(() => new Set());
+  const [rememberChoice, setRememberChoice] = useState(() => localStorage.getItem("reasonix-mcp-remember") === "true");
+  const [advancedMode, setAdvancedMode] = useState(() => localStorage.getItem("reasonix-mcp-advanced") === "true");
 
   const reload = useCallback(async () => {
     setView(normalizeCapabilitiesView(await app.Capabilities().catch(() => ({ servers: [], skills: [], skillRoots: [], plugins: [] }))));
@@ -218,14 +220,41 @@ export function CapabilitiesPanel({
                   <div className="cap-server-section">
                     <div className="cap-server-section__head">
                       <div className="cap-server-section__title">{t("caps.availableServers")}</div>
-                      <button
-                        className="btn btn--small"
-                        disabled={busy || retryableActiveServerNames.length === 0}
-                        type="button"
-                        onClick={() => void mutate(() => Promise.allSettled(retryableActiveServerNames.map((name) => app.ReconnectMCPServer(name))))}
-                      >
-                        {t("caps.retryAll")}
-                      </button>
+                      <div className="cap-server-section__controls">
+                        <button
+                          className="btn btn--small"
+                          disabled={busy || retryableActiveServerNames.length === 0}
+                          type="button"
+                          onClick={() => void mutate(() => Promise.allSettled(retryableActiveServerNames.map((name) => app.ReconnectMCPServer(name))))}
+                        >
+                          {t("caps.retryAll")}
+                        </button>
+                        {!advancedMode && (
+                          <Tooltip label={rememberChoice ? t("caps.rememberChoice") + ": on" : t("caps.rememberChoice") + ": off"}>
+                            <label className="cap-switch cap-switch--labeled">
+                              <input
+                                type="checkbox"
+                                checked={rememberChoice}
+                                disabled={busy}
+                                onChange={(e) => { setRememberChoice(e.target.checked); localStorage.setItem("reasonix-mcp-remember", String(e.target.checked)); void app.SetRememberMCPChoice(e.target.checked); }}
+                              />
+                              <span className="cap-switch__track" />
+                              <span className="cap-switch__label">{t("caps.rememberChoice")}</span>
+                            </label>
+                          </Tooltip>
+                        )}
+                        <Tooltip label={t("caps.advancedSettingsHint")}>
+                        <button
+                          className={`btn btn--small cap-advanced-toggle${advancedMode ? " btn--primary" : ""}`}
+                          disabled={busy}
+                          type="button"
+                          onClick={() => setAdvancedMode((v) => { const nv = !v; localStorage.setItem("reasonix-mcp-advanced", String(nv)); return nv; })}
+                          style={{ minWidth: 110 }}
+                        >
+                          {advancedMode ? t("caps.exitAdvanced") : t("caps.advancedSettings")}
+                        </button>
+                        </Tooltip>
+                      </div>
                     </div>
                     <ServerGroup
                       busy={busy}
@@ -244,7 +273,7 @@ export function CapabilitiesPanel({
                       onTrustTool={(name, toolName) => void mutate(() => app.TrustMCPServerTool(name, toolName))}
                       onTrustTools={(name, toolNames) => void mutate(() => app.TrustMCPServerTools(name, toolNames))}
                       onUntrustTool={(name, toolName) => void mutate(() => app.UntrustMCPServerTool(name, toolName))}
-                      onToggle={(name, on) => void mutate(() => app.SetMCPServerEnabled(name, on))}
+                      onToggle={(name, on) => void mutate(() => app.SetMCPServerEnabled(name, on, rememberChoice))}
                       onUpdate={(name, input) =>
                         void mutate(() => app.UpdateMCPServer(name, input)).then((ok) => {
                           if (ok) setEditing(null);
@@ -252,6 +281,12 @@ export function CapabilitiesPanel({
                       }
                       onToggleDetails={toggleServer}
                       onToggleTools={toggleServerTools}
+                      advancedMode={advancedMode}
+                      onAdvancedToggle={(name, value) => {
+                        if (value === "on") void mutate(() => app.SetMCPServerEnabled(name, true, true));
+                        else if (value === "off-session") void mutate(() => app.SetMCPServerEnabled(name, false, false));
+                        else if (value === "off-always") void mutate(() => app.SetMCPServerEnabled(name, false, true));
+                      }}
                     />
                   </div>
                 )}
@@ -647,6 +682,13 @@ function skillRootBadges(root: SkillRootView, t: ReturnType<typeof useT>): Array
   return badges;
 }
 
+function mcpDropdownDefault(s: ServerView): string {
+  if (s.status === "connected") return "on";
+  if (!s.autoStart) return "off-always";
+  if (s.status === "disabled") return "off-session";
+  return "on";
+}
+
 function ServerGroup({
   servers,
   expanded,
@@ -666,6 +708,8 @@ function ServerGroup({
   onUpdate,
   onToggleDetails,
   onToggleTools,
+  advancedMode,
+  onAdvancedToggle,
 }: {
   servers: ServerView[];
   expanded: Set<string>;
@@ -685,6 +729,8 @@ function ServerGroup({
   onUpdate: (name: string, input: MCPServerInput) => void;
   onToggleDetails: (name: string) => void;
   onToggleTools: (name: string) => void;
+  advancedMode: boolean;
+  onAdvancedToggle: (name: string, value: string) => void;
 }) {
   if (servers.length === 0) return null;
   return (
@@ -710,6 +756,8 @@ function ServerGroup({
           onUpdate={(input) => onUpdate(s.name, input)}
           onToggleDetails={() => onToggleDetails(s.name)}
           onToggleTools={() => onToggleTools(s.name)}
+          advancedMode={advancedMode}
+          onAdvancedToggle={(value) => onAdvancedToggle(s.name, value)}
         />
       ))}
     </div>
@@ -869,6 +917,8 @@ function ServerRow({
   onUpdate,
   onToggleDetails,
   onToggleTools,
+  advancedMode,
+  onAdvancedToggle,
 }: {
   s: ServerView;
   expanded: boolean;
@@ -888,6 +938,8 @@ function ServerRow({
   onUpdate: (input: MCPServerInput) => void;
   onToggleDetails: () => void;
   onToggleTools: () => void;
+  advancedMode: boolean;
+  onAdvancedToggle: (value: string) => void;
 }) {
   const t = useT();
   const actionLabel = serverActionLabel(s, t);
@@ -942,6 +994,17 @@ function ServerRow({
               <button className="btn btn--small" disabled={busy} onClick={handlePrimaryAction}>
                 {actionLabel}
               </button>
+            ) : advancedMode ? (
+              <select
+                className="mem-select"
+                value={mcpDropdownDefault(s)}
+                disabled={busy}
+                onChange={(e) => onAdvancedToggle(e.target.value)}
+              >
+                <option value="on">{t("caps.mcpOn")}</option>
+                <option value="off-session">{t("caps.mcpOffSession")}</option>
+                <option value="off-always">{t("caps.mcpOffAlways")}</option>
+              </select>
             ) : (
               <Tooltip label={lifecycle.enabled ? t("caps.disable") : t("caps.enable")}>
                 <label className="cap-switch">
@@ -2218,6 +2281,8 @@ export function MCPServersSettingsPage() {
 	const [expandedErrors, setExpandedErrors] = useState<Set<string>>(() => new Set());
 	const [expandedServers, setExpandedServers] = useState<Set<string>>(() => new Set());
 	const [expandedServerTools, setExpandedServerTools] = useState<Set<string>>(() => new Set());
+	const [rememberChoice, setRememberChoice] = useState(() => localStorage.getItem("reasonix-mcp-remember") === "true");
+	const [advancedMode, setAdvancedMode] = useState(() => localStorage.getItem("reasonix-mcp-advanced") === "true");
 
 	const reload = useCallback(async () => {
 		const [meta, tabs] = await Promise.all([
@@ -2320,14 +2385,41 @@ export function MCPServersSettingsPage() {
 				<div className="cap-server-section">
 					<div className="cap-server-section__head">
 						<div className="cap-server-section__title">{t("caps.availableServers")}</div>
-						<button
-							className="btn btn--small"
-							disabled={actionBusy || retryableActiveServerNames.length === 0}
-							type="button"
-							onClick={() => void mutate(() => Promise.allSettled(retryableActiveServerNames.map((name) => app.ReconnectMCPServer(name))))}
-						>
-							{t("caps.retryAll")}
-						</button>
+						<div className="cap-server-section__controls">
+							<button
+								className="btn btn--small"
+								disabled={actionBusy || retryableActiveServerNames.length === 0}
+								type="button"
+								onClick={() => void mutate(() => Promise.allSettled(retryableActiveServerNames.map((name) => app.ReconnectMCPServer(name))))}
+							>
+								{t("caps.retryAll")}
+							</button>
+							{!advancedMode && (
+								<Tooltip label={rememberChoice ? t("caps.rememberChoice") + ": on" : t("caps.rememberChoice") + ": off"}>
+									<label className="cap-switch cap-switch--labeled">
+										<input
+											type="checkbox"
+											checked={rememberChoice}
+											disabled={actionBusy}
+											onChange={(e) => { setRememberChoice(e.target.checked); localStorage.setItem("reasonix-mcp-remember", String(e.target.checked)); void app.SetRememberMCPChoice(e.target.checked); }}
+										/>
+										<span className="cap-switch__track" />
+										<span className="cap-switch__label">{t("caps.rememberChoice")}</span>
+									</label>
+								</Tooltip>
+							)}
+							<Tooltip label={t("caps.advancedSettingsHint")}>
+							<button
+								className={`btn btn--small cap-advanced-toggle${advancedMode ? " btn--primary" : ""}`}
+								disabled={actionBusy}
+								type="button"
+								onClick={() => setAdvancedMode((v) => { const nv = !v; localStorage.setItem("reasonix-mcp-advanced", String(nv)); return nv; })}
+								style={{ minWidth: 110 }}
+							>
+								{advancedMode ? t("caps.exitAdvanced") : t("caps.advancedSettings")}
+							</button>
+							</Tooltip>
+						</div>
 					</div>
 						<ServerGroup
 							busy={actionBusy}
@@ -2344,7 +2436,7 @@ export function MCPServersSettingsPage() {
 						onTrustTool={(name, toolName) => void mutate(() => app.TrustMCPServerTool(name, toolName))}
 						onTrustTools={(name, toolNames) => void mutate(() => app.TrustMCPServerTools(name, toolNames))}
 						onUntrustTool={(name, toolName) => void mutate(() => app.UntrustMCPServerTool(name, toolName))}
-						onToggle={(name, on) => void mutate(() => app.SetMCPServerEnabled(name, on))}
+						onToggle={(name, on) => void mutate(() => app.SetMCPServerEnabled(name, on, rememberChoice))}
 						onUpdate={(name, input) =>
 							void mutate(() => app.UpdateMCPServer(name, input)).then((ok) => {
 								if (ok) setEditing(null);
@@ -2352,6 +2444,12 @@ export function MCPServersSettingsPage() {
 						}
 						onToggleDetails={toggleServer}
 						onToggleTools={toggleServerTools}
+						advancedMode={advancedMode}
+						onAdvancedToggle={(name, value) => {
+							if (value === "on") void mutate(() => app.SetMCPServerEnabled(name, true, true));
+							else if (value === "off-session") void mutate(() => app.SetMCPServerEnabled(name, false, false));
+							else if (value === "off-always") void mutate(() => app.SetMCPServerEnabled(name, false, true));
+						}}
 					/>
 				</div>
 			)}

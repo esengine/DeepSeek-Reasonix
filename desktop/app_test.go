@@ -4385,7 +4385,7 @@ tier = "lazy"
 		t.Fatalf("configured time server missing from Capabilities: %+v", view.Servers)
 	}
 
-	if err := app.SetMCPServerEnabled("time", false); err != nil {
+	if err := app.SetMCPServerEnabled("time", false, false); err != nil {
 		t.Fatalf("SetMCPServerEnabled(time,false): %v", err)
 	}
 	view = app.Capabilities()
@@ -4456,7 +4456,7 @@ url = %q
 	}
 	app.activeTabID = "active"
 
-	if err := app.SetMCPServerEnabled("h", false); err != nil {
+	if err := app.SetMCPServerEnabled("h", false, false); err != nil {
 		t.Fatalf("SetMCPServerEnabled(h,false): %v", err)
 	}
 	if _, found := activeRegistry.Get("mcp__h__greet"); found {
@@ -4473,7 +4473,7 @@ url = %q
 		t.Fatalf("Capabilities after disable = %+v, want h disabled for the active tab", view.Servers)
 	}
 
-	if err := app.SetMCPServerEnabled("h", true); err != nil {
+	if err := app.SetMCPServerEnabled("h", true, false); err != nil {
 		t.Fatalf("SetMCPServerEnabled(h,true): %v", err)
 	}
 	if _, found := activeRegistry.Get("mcp__h__greet"); !found {
@@ -4491,13 +4491,62 @@ func TestSetMCPServerEnabledRejectsBackgroundJobs(t *testing.T) {
 	app := NewApp()
 	app.setTestCtrl(newBackgroundJobController(t, "mcp-enabled-job"), "")
 
-	err := app.SetMCPServerEnabled("time", false)
+	err := app.SetMCPServerEnabled("time", false, false)
 	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
 		t.Fatalf("SetMCPServerEnabled with background job error = %v, want active-work guard", err)
 	}
 	if tab := app.activeTab(); tab == nil || len(tab.disabledMCP) != 0 {
 		t.Fatalf("disabled MCP state changed after rejected toggle: %+v", tab)
 	}
+}
+
+func TestSetMCPServerEnabledPersistWritesAutoStart(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+[[plugins]]
+name = "time"
+command = "custom-time"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
+	defer app.activeCtrl().Close()
+
+	// persist=false: config untouched.
+	if err := app.SetMCPServerEnabled("time", false, false); err != nil {
+		t.Fatalf("SetMCPServerEnabled(time,false,false): %v", err)
+	}
+	cfg, err := config.LoadForRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range cfg.Plugins {
+		if p.Name == "time" && p.AutoStart != nil {
+			t.Fatalf("persist=false wrote auto_start=%v, want nil (untouched)", *p.AutoStart)
+		}
+	}
+
+	// persist=true: writes auto_start=false.
+	if err := app.SetMCPServerEnabled("time", false, true); err != nil {
+		t.Fatalf("SetMCPServerEnabled(time,false,true): %v", err)
+	}
+	cfg, err = config.LoadForRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range cfg.Plugins {
+		if p.Name == "time" {
+			if p.AutoStart == nil || *p.AutoStart {
+				t.Fatalf("persist=true: auto_start=%v, want false", p.AutoStart)
+			}
+			return
+		}
+	}
+	t.Fatal("time plugin not found after persist toggle")
 }
 
 func TestEditAndRemoveConfiguredMCPWithBuiltInName(t *testing.T) {

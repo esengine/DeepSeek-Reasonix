@@ -6080,9 +6080,9 @@ func (a *App) UntrustMCPServerTool(name, toolName string) error {
 }
 
 // SetMCPServerEnabled is the connector toggle: on reconnects a configured server
-// for this session, off disconnects it (config untouched either way — like Claude
-// Code's per-conversation enable/disable, it resets on the next session start).
-func (a *App) SetMCPServerEnabled(name string, enabled bool) error {
+// for this session, off disconnects it. When persist is true the auto_start setting
+// is written to config so the choice survives restarts.
+func (a *App) SetMCPServerEnabled(name string, enabled bool, persist bool) error {
 	tab := a.activeTab()
 	if tab == nil || tab.Ctrl == nil {
 		return fmt.Errorf("no active session")
@@ -6100,6 +6100,11 @@ func (a *App) SetMCPServerEnabled(name string, enabled bool) error {
 			a.mu.Lock()
 			delete(tab.disabledMCP, name)
 			a.mu.Unlock()
+		}
+		if persist && hasConfiguredEntry && !configuredEntry.ShouldAutoStart() {
+			on := true
+			configuredEntry.AutoStart = &on
+			_ = a.saveDesktopMCPServer(configuredEntry)
 		}
 		return err
 	}
@@ -6122,6 +6127,11 @@ func (a *App) SetMCPServerEnabled(name string, enabled bool) error {
 		tab.disabledMCP[name] = s
 		tab.mcpOrder = mergeServerOrder(tab.mcpOrder, []ServerView{s})
 		a.mu.Unlock()
+	}
+	if persist && hasConfiguredEntry && configuredEntry.ShouldAutoStart() {
+		off := false
+		configuredEntry.AutoStart = &off
+		_ = a.saveDesktopMCPServer(configuredEntry)
 	}
 	if tab.SharedHostKey != "" {
 		tab.Ctrl.UnregisterMCPServerTools(name)
@@ -6215,6 +6225,40 @@ func (a *App) saveDesktopMCPServer(entry config.PluginEntry) error {
 	}
 	_, err = a.removeProjectMCPOverride(entry.Name)
 	return err
+}
+
+// ResetAllMCPAutoStart resets every MCP server's auto_start back to true,
+// used when the user unchecks "remember choice" to undo persistent disables.
+func (a *App) ResetAllMCPAutoStart() error {
+	cfg, path, err := a.loadDesktopUserConfigForEdit()
+	if err != nil {
+		return err
+	}
+	changed := false
+	for i := range cfg.Plugins {
+		if cfg.Plugins[i].AutoStart != nil && !*cfg.Plugins[i].AutoStart {
+			on := true
+			cfg.Plugins[i].AutoStart = &on
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return cfg.SaveTo(path)
+}
+
+// SetRememberMCPChoice persists the "remember MCP toggle decisions" flag to config.
+// When false, boot ignores per-server auto_start and starts every configured MCP.
+func (a *App) SetRememberMCPChoice(enabled bool) error {
+	cfg, path, err := a.loadDesktopUserConfigForEdit()
+	if err != nil {
+		return err
+	}
+	if err := cfg.SetRememberMCPChoice(enabled); err != nil {
+		return err
+	}
+	return cfg.SaveTo(path)
 }
 
 func (a *App) removeDesktopMCPServer(name string) (bool, error) {
