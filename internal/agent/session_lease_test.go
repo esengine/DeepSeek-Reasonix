@@ -250,3 +250,84 @@ func TestSessionLeaseHeldByOtherRuntime(t *testing.T) {
 		}
 	})
 }
+
+func TestSessionLeaseReclaimsStaleForeignLease(t *testing.T) {
+	path := canonicalSessionSavePath(filepath.Join(t.TempDir(), "session.jsonl"))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Simulate a crashed foreign process: write lease info with a PID that
+	// does not exist, and leave the lock file on disk (no active holder).
+	if err := SaveSessionLeaseInfo(path, SessionLeaseInfo{
+		SessionPath: path,
+		WriterID:    "dead-host-9999-deadbeef",
+		PID:         1, // PID 1 (init) is always alive, use a very large PID instead
+		AcquiredAt:  time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("SaveSessionLeaseInfo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Remove(sessionLeaseInfoPath(path))
+		_ = os.Remove(path + ".lease.lock")
+	})
+
+	// Use a PID that is extremely unlikely to exist: max int.
+	// We overwrite the info file with this PID.
+	if err := SaveSessionLeaseInfo(path, SessionLeaseInfo{
+		SessionPath: path,
+		WriterID:    "dead-host-9999-deadbeef",
+		PID:         1<<30 - 1, // very unlikely to be alive
+		AcquiredAt:  time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("SaveSessionLeaseInfo: %v", err)
+	}
+
+	// Create a stale lock file (simulating the crashed process's lock).
+	f, err := os.Create(path + ".lease.lock")
+	if err != nil {
+		t.Fatalf("create lock file: %v", err)
+	}
+	f.Close()
+
+	// TryAcquireSessionLease should detect the stale lease and reclaim it.
+	lease, err := TryAcquireSessionLease(path)
+	if err != nil {
+		t.Fatalf("TryAcquireSessionLease should reclaim stale lease: %v", err)
+	}
+	defer lease.Release()
+
+	// Verify the lease is valid and held by this process.
+	info, err := LoadSessionLeaseInfo(path)
+	if err != nil {
+		t.Fatalf("LoadSessionLeaseInfo: %v", err)
+	}
+	if info.PID != os.Getpid() {
+		t.Fatalf("lease PID = %d, want %d (current process)", info.PID, os.Getpid())
+	}
+	if info.WriterID != SessionWriterID() {
+		t.Fatalf("lease WriterID = %q, want %q", info.WriterID, SessionWriterID())
+	}
+}
+
+func TestSessionLeaseDoesNotReclaimLiveProcess(t *testing.T) {
+	path := canonicalSessionSavePath(filepath.Join(t.TempDir(), "session.jsonl"))
+	holder, err := TryAcquireSessionLease(path)
+	if err != nil {
+		t.Fatalf("TryAcquireSessionLease: %v", err)
+	}
+	defer holder.Release()
+
+	// A second acquire should fail with ErrSessionLeaseHeld — the holder is
+	// alive, so stale reclaim must not kick in.
+	second, err := TryAcquireSessionLease(path)
+	if !errors.Is(err, ErrSessionLeaseHeld) {
+		if second != nil {
+			second.Release()
+		}
+		t.Fatalf("TryAcquireSessionLease err = %v, want ErrSessionLeaseHeld", err)
+	}
+	if second != nil {
+		second.Release()
+		t.Fatal("second lease unexpectedly acquired from live holder")
+	}
+}

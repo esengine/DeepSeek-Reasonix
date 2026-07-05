@@ -78,6 +78,12 @@ func TryAcquireSessionLease(path string) (*SessionLease, error) {
 	if err != nil {
 		sessionLeaseOwners.CompareAndDelete(path, ownerID)
 		if errors.Is(err, ErrSessionLeaseHeld) {
+			// The OS lock is held. Check whether the holder process is still
+			// alive; if it crashed, the lock file is orphaned and we can
+			// reclaim it.
+			if lease, reclaimErr := tryReclaimStaleLease(path); reclaimErr == nil {
+				return lease, nil
+			}
 			info, _ := LoadSessionLeaseInfo(path)
 			return nil, &SessionLeaseError{Path: path, Info: info}
 		}
@@ -132,6 +138,34 @@ func TryReclaimCurrentProcessSessionLease(path string) (*SessionLease, error) {
 		return nil, err
 	}
 	return lease, nil
+}
+
+// tryReclaimStaleLease attempts to reclaim a lease whose holder process has
+// exited without releasing (e.g., a crash or force-kill). It reads the lease
+// info, checks whether the recorded PID is still alive, and if dead, cleans up
+// the orphaned lock and lease info before acquiring a fresh lease. Returns a
+// non-nil lease on success, or an error if the holder appears alive or the
+// reclaim fails.
+func tryReclaimStaleLease(path string) (*SessionLease, error) {
+	info, err := LoadSessionLeaseInfo(path)
+	if err != nil {
+		return nil, err
+	}
+	if info == nil || info.PID == 0 {
+		return nil, errors.New("no PID in lease info")
+	}
+	// Same-process stale leases are handled by TryReclaimCurrentProcessSessionLease.
+	if info.PID == os.Getpid() && info.WriterID == SessionWriterID() {
+		return nil, errors.New("same process — use TryReclaimCurrentProcessSessionLease")
+	}
+	if processAlive(info.PID) {
+		return nil, fmt.Errorf("process %d is still alive", info.PID)
+	}
+	// The holder process is dead. Clean up the orphaned lock file and lease
+	// info, then acquire a fresh lease.
+	_ = os.Remove(sessionLeaseInfoPath(path))
+	_ = os.Remove(path + ".lease.lock")
+	return TryAcquireSessionLease(path)
 }
 
 // SessionLeaseHeldByOtherRuntime reports whether path's session lease is held
