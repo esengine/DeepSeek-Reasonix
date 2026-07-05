@@ -651,6 +651,9 @@ func chatREPL(args []string) int {
 		m.statuslineCmd = cfg.Statusline.Command // custom status-line command, "" = built-in row
 		m.showReasoning = cfg.UI.ShowReasoning   // /verbose persistence: start with config default
 		m.cfg = cfg
+		if cfg.UI.MouseCapture != nil && !*cfg.UI.MouseCapture {
+			m.mouseCaptureOff = true
+		}
 	}
 
 	// /model support: a pure builder the TUI calls to rebuild on a different
