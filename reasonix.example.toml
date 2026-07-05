@@ -15,7 +15,7 @@ theme = "auto"   # auto|dark|light; controls CLI colors only; REASONIX_THEME can
 # mouse_capture = true   # enable in-app mouse handling (transcript scrollbar drag, wheel-scroll,
                          # drag-select). Set to false to release mouse ownership to the terminal so
                          # native click-drag selection and the right-click context menu work again.
-                         # Useful when running inside tmux or screen. Toggle at runtime with /mouse.
+                         # Useful when running inside tmux or screen.
 
 [desktop]
 layout_style = "classic"   # classic|workbench|creation; desktop layout style
