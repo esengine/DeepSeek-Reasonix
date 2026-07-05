@@ -14,6 +14,32 @@ const slug = z
 
 const httpUrl = z.string().trim().url().max(500);
 
+// A GitHub source that points at a whole repo — a bare owner/repo root, or a
+// branch root with no sub-path — rather than one skill. The installsource
+// planner scans such a source recursively and pulls EVERY SKILL.md it finds, so
+// a package that claims to be a single skill must not publish one: it would
+// silently mass-install the repo's entire skill library under this package name.
+function isWholeGitHubRepoSource(source: string): boolean {
+  let raw = source.trim();
+  if (raw.startsWith("git:github.com/")) raw = `https://github.com/${raw.slice("git:github.com/".length)}`;
+  else if (/^github\.com\//i.test(raw)) raw = `https://${raw}`;
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.hostname.toLowerCase() !== "github.com") return false;
+  const parts = u.pathname.split("/").filter(Boolean);
+  // owner/repo                       → whole repo
+  // owner/repo/tree/<branch>         → whole repo at a branch (no sub-path)
+  // owner/repo/tree/<branch>/<path…> → scoped to a path (allowed)
+  // owner/repo/blob/<branch>/<file>  → a specific file (allowed)
+  if (parts.length === 2) return true;
+  if (parts.length === 4 && parts[2].toLowerCase() === "tree") return true;
+  return false;
+}
+
 export const PublishSchema = z
   .object({
     kind: z.enum(["skill", "mcp"]),
@@ -30,7 +56,17 @@ export const PublishSchema = z
     contentHash: z.string().trim().max(128).default(""),
     riskLevel: z.string().trim().max(20).default(""),
   })
-  .strict();
+  .strict()
+  .superRefine((val, ctx) => {
+    if (val.kind === "skill" && isWholeGitHubRepoSource(val.source)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["source"],
+        message:
+          "source points at a whole GitHub repo, which installs every skill in it. Point it at one skill — e.g. https://github.com/<owner>/<repo>/tree/<branch>/skills/<name> or a raw SKILL.md URL.",
+      });
+    }
+  });
 
 export type PublishInput = z.infer<typeof PublishSchema>;
 
