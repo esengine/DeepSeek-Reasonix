@@ -101,7 +101,7 @@ func loadTask(path string) (*Task, error) {
 	return &t, nil
 }
 
-func (tl *TaskList) saveTask(t *Task) error {
+func (tl *TaskList) SaveTask(t *Task) error {
 	if strings.TrimSpace(tl.dir) == "" {
 		return nil
 	}
@@ -152,7 +152,7 @@ func (tl *TaskList) Create(task Task) (string, error) {
 	tl.tasks[task.ID] = &task
 	tl.order = append(tl.order, task.ID)
 
-	if err := tl.saveTask(&task); err != nil {
+	if err := tl.SaveTask(&task); err != nil {
 		return "", err
 	}
 
@@ -221,7 +221,7 @@ func (tl *TaskList) Update(id string, updates Task) error {
 	}
 	t.UpdatedAt = time.Now().UTC()
 
-	return tl.saveTask(t)
+	return tl.SaveTask(t)
 }
 
 func (tl *TaskList) Delete(id string) error {
@@ -265,7 +265,7 @@ func (tl *TaskList) Claim(memberID string) (*Task, bool) {
 		t.Status = TaskInProgress
 		t.Assignee = memberID
 		t.UpdatedAt = time.Now().UTC()
-		if err := tl.saveTask(t); err != nil {
+		if err := tl.SaveTask(t); err != nil {
 			return nil, false
 		}
 		copy := *t

@@ -46,12 +46,8 @@ func LoadFromFile(path string, opts LoadOptions) (*SubagentDefinition, error) {
 }
 
 func LoadFromDirectory(dir string, opts LoadOptions) ([]*SubagentDefinition, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read subagent directory %q: %w", dir, err)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return nil, nil
 	}
 
 	var defs []*SubagentDefinition
@@ -88,16 +84,11 @@ func LoadFromDirectory(dir string, opts LoadOptions) ([]*SubagentDefinition, err
 		return nil
 	}
 
-	_ = entries
 	if err := walk(dir); err != nil {
 		return nil, err
 	}
 
 	return defs, nil
-}
-
-func LoadFromJSON(data []byte, opts LoadOptions) (*SubagentDefinition, error) {
-	return nil, fmt.Errorf("not implemented")
 }
 
 func BuiltinDefinitions() []*SubagentDefinition {

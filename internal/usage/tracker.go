@@ -15,31 +15,31 @@ import (
 )
 
 type SourceBreakdown struct {
-	Source  string `json:"source"`
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	Source           string  `json:"source"`
+	PromptTokens     int     `json:"prompt_tokens"`
+	CompletionTokens int     `json:"completion_tokens"`
+	TotalTokens      int     `json:"total_tokens"`
 	Cost             float64 `json:"cost"`
 	Calls            int     `json:"calls"`
 }
 
 type SessionUsage struct {
-	SessionID        string    `json:"session_id"`
-	PromptTokens     int       `json:"prompt_tokens"`
-	CompletionTokens int       `json:"completion_tokens"`
-	TotalTokens      int       `json:"total_tokens"`
-	CacheHitTokens   int       `json:"cache_hit_tokens"`
-	CacheMissTokens  int       `json:"cache_miss_tokens"`
-	ReasoningTokens  int       `json:"reasoning_tokens"`
-	Cost             float64   `json:"cost"`
-	Currency         string    `json:"currency"`
-	Turns            int       `json:"turns"`
-	StartedAt        time.Time `json:"started_at"`
-	LastActivity      time.Time `json:"last_activity"`
-	Model            string    `json:"model"`
+	SessionID        string            `json:"session_id"`
+	PromptTokens     int               `json:"prompt_tokens"`
+	CompletionTokens int               `json:"completion_tokens"`
+	TotalTokens      int               `json:"total_tokens"`
+	CacheHitTokens   int               `json:"cache_hit_tokens"`
+	CacheMissTokens  int               `json:"cache_miss_tokens"`
+	ReasoningTokens  int               `json:"reasoning_tokens"`
+	Cost             float64           `json:"cost"`
+	Currency         string            `json:"currency"`
+	Turns            int               `json:"turns"`
+	StartedAt        time.Time         `json:"started_at"`
+	LastActivity     time.Time         `json:"last_activity"`
+	Model            string            `json:"model"`
 	Breakdown        []SourceBreakdown `json:"breakdown,omitempty"`
-	CodeAdded        int       `json:"code_added"`
-	CodeRemoved      int       `json:"code_removed"`
+	CodeAdded        int               `json:"code_added"`
+	CodeRemoved      int               `json:"code_removed"`
 }
 
 type Tracker struct {

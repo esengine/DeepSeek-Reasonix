@@ -95,9 +95,6 @@ func (m *Manager) GetTeam(name string) (*Team, bool) {
 }
 
 func (m *Manager) ListTeams() []string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	teamsDir := filepath.Join(m.baseDir, "teams")
 	entries, err := os.ReadDir(teamsDir)
 	if err != nil {
@@ -146,7 +143,11 @@ func (m *Manager) GetMailbox(teamName string) (*Mailbox, error) {
 }
 
 func (m *Manager) SaveTaskList(teamName string, tl *TaskList) error {
-	_ = teamName
-	_ = tl
+	for _, task := range tl.List() {
+		t := task
+		if err := tl.SaveTask(&t); err != nil {
+			return fmt.Errorf("save task %q: %w", task.ID, err)
+		}
+	}
 	return nil
 }

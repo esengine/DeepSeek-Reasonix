@@ -21,14 +21,14 @@ const (
 )
 
 type TeamMember struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Role     string `json:"role"`
-	AgentType string `json:"agent_type"`
-	Model    string `json:"model"`
-	Status   string `json:"status"`
-	SessionID string `json:"session_id"`
-	JoinedAt time.Time `json:"joined_at"`
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Role      string    `json:"role"`
+	AgentType string    `json:"agent_type"`
+	Model     string    `json:"model"`
+	Status    string    `json:"status"`
+	SessionID string    `json:"session_id"`
+	JoinedAt  time.Time `json:"joined_at"`
 }
 
 type TeamConfig struct {
