@@ -50,6 +50,7 @@ var ChineseTraditional = Messages{
 	ChatStatusCycleHint:         "shift+tab 循環切換",
 	ChatStatusCacheNowFmt:       "本次命中 %s",
 	ChatStatusCacheAvgFmt:       "平均 %s",
+	ChatStatusSessionCostFmt:    "花費 %s",
 	ChatStatusPlanApproval:      "Enter/y 核准並執行 · n/Esc 繼續規劃 · PgUp/PgDn 捲動",
 	PlanApprovalPrompt:          "計畫已生成（見上方）— Enter/y 核准執行,n/Esc 繼續規劃",
 	ChatStatusToolApproval:      "1 本次允許 · 2 本會話允許此範圍 · 提供時 3/4 為前綴或儲存 · n/Esc 拒絕 · Ctrl-C 取消本輪",

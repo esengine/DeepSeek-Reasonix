@@ -80,6 +80,14 @@ type chatTUI struct {
 	// events) for the live "↓N" readout in the running status line.
 	turnTokens int
 
+	// sessionCost accumulates this process's estimated spend across every priced
+	// Usage event (planner + executor + subagents + compaction), converted via each
+	// event's Pricing. Process-scoped like turnTokens, so a resumed session starts
+	// fresh rather than replaying prior spend. sessionCostSymbol holds the latest
+	// Pricing's currency symbol for display.
+	sessionCost       float64
+	sessionCostSymbol string
+
 	// balance is the last-fetched wallet-balance readout (e.g. "¥110.00"), "" when
 	// the provider declares no balance_url or a fetch failed. Refreshed async on
 	// startup and after each turn so the status line stays roughly current without
@@ -2438,6 +2446,9 @@ func (m chatTUI) View() tea.View {
 	if m.balance != "" {
 		data = append(data, dim(m.balance))
 	}
+	if ct := m.costTag(); ct != "" {
+		data = append(data, ct)
+	}
 	dataLine := "  " + strings.Join(data, " · ")
 	// A configured custom status line replaces the built-in data row entirely.
 	if m.statuslineCmd != "" && m.statuslineOut != "" {
@@ -2660,6 +2671,18 @@ func (m chatTUI) jobsTag() string {
 		return ""
 	}
 	return dim(fmt.Sprintf("⚙ %d", n))
+}
+
+// costTag shows this process's cumulative estimated spend (Σ over every priced
+// Usage event), formatted as symbol+amount to match the per-turn cost in
+// FormatUsageLine. "" until the first priced Usage arrives — providers without
+// Pricing never set sessionCost, so the tag simply stays hidden.
+func (m chatTUI) costTag() string {
+	if m.sessionCost <= 0 {
+		return ""
+	}
+	money := fmt.Sprintf("%s%.4f", m.sessionCostSymbol, m.sessionCost)
+	return dim(fmt.Sprintf(i18n.M.ChatStatusSessionCostFmt, money))
 }
 
 func (m chatTUI) modelTag() string {
@@ -2933,6 +2956,9 @@ func (m chatTUI) computeStatusLineCount(width int) int {
 	}
 	if m.balance != "" {
 		data = append(data, m.balance)
+	}
+	if ct := m.costTag(); ct != "" {
+		data = append(data, ct)
 	}
 	dataLine := "  " + strings.Join(data, " · ")
 	if m.statuslineCmd != "" && m.statuslineOut != "" {
@@ -3279,6 +3305,10 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 	case event.Usage:
 		if e.Usage != nil {
 			m.turnTokens += e.Usage.CompletionTokens
+			if e.Pricing != nil {
+				m.sessionCost += e.Pricing.Cost(e.Usage)
+				m.sessionCostSymbol = e.Pricing.Symbol()
+			}
 		}
 		if line := agent.FormatUsageLine(e.Usage, e.Pricing, e.CacheDiagnostics); line != "" {
 			m.finalizeStreamed()

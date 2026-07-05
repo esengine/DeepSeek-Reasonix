@@ -79,6 +79,7 @@ type Messages struct {
 	ChatStatusCycleHint         string // plan-toggle shortcut hint shown when no modal prompt owns the status row
 	ChatStatusCacheNowFmt       string // cache status tag, "%s" = latest-turn hit rate with percent sign
 	ChatStatusCacheAvgFmt       string // cache status tag, "%s" = session-average hit rate with percent sign
+	ChatStatusSessionCostFmt    string // session-cumulative spend tag, "%s" = currency symbol + amount (e.g. "¥0.0123")
 	ChatStatusPlanApproval      string // shortcuts hint while a plan is pending
 	PlanApprovalPrompt          string // one-line "plan above is ready" banner shown above the input
 	ChatStatusToolApproval      string // shortcuts hint while a tool call awaits approval
