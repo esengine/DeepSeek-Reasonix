@@ -5,29 +5,37 @@ import (
 	"time"
 )
 
+// SubagentDefinition describes a subagent configuration loaded from a
+// Markdown file with YAML frontmatter. It defines the subagent's name,
+// description, allowed tools, model settings, and other behavior parameters.
+// Fields marked with yaml:"-" are runtime metadata not persisted in the
+// definition file.
 type SubagentDefinition struct {
-	Name             string        `yaml:"name"`
-	Description      string        `yaml:"description"`
-	Prompt           string        `yaml:"-"`
-	Tools            []string      `yaml:"tools"`
-	DisallowedTools  []string      `yaml:"disallowed_tools"`
-	Model            string        `yaml:"model"`
-	Effort           string        `yaml:"effort"`
-	PermissionMode   string        `yaml:"permission_mode"`
-	MaxTurns         int           `yaml:"max_turns"`
-	Skills           []string      `yaml:"skills"`
-	MCPServers       []string      `yaml:"mcp_servers"`
-	Background       bool          `yaml:"background"`
-	Isolation        string        `yaml:"isolation"`
-	Color            string        `yaml:"color"`
-	Memory           string        `yaml:"memory"`
-	InitialPrompt    string        `yaml:"initial_prompt"`
-	SourceFile       string        `yaml:"-"`
-	SourceScope      string        `yaml:"-"`
-	CreatedAt        time.Time     `yaml:"-"`
-	UpdatedAt        time.Time     `yaml:"-"`
+	Name            string    `yaml:"name"`
+	Description     string    `yaml:"description"`
+	Prompt          string    `yaml:"-"`
+	Tools           []string  `yaml:"tools"`
+	DisallowedTools []string  `yaml:"disallowed_tools"`
+	Model           string    `yaml:"model"`
+	Effort          string    `yaml:"effort"`
+	PermissionMode  string    `yaml:"permission_mode"`
+	MaxTurns        int       `yaml:"max_turns"`
+	Skills          []string  `yaml:"skills"`
+	MCPServers      []string  `yaml:"mcp_servers"`
+	Background      bool      `yaml:"background"`
+	Isolation       string    `yaml:"isolation"`
+	Color           string    `yaml:"color"`
+	Memory          string    `yaml:"memory"`
+	InitialPrompt   string    `yaml:"initial_prompt"`
+	SourceFile      string    `yaml:"-"`
+	SourceScope     string    `yaml:"-"`
+	CreatedAt       time.Time `yaml:"-"`
+	UpdatedAt       time.Time `yaml:"-"`
 }
 
+// Normalize trims whitespace from all string fields and removes empty
+// entries from slice fields (tools, disallowed tools, skills, mcp servers).
+// Call this after loading a definition to ensure clean data.
 func (d *SubagentDefinition) Normalize() {
 	d.Name = strings.TrimSpace(d.Name)
 	d.Description = strings.TrimSpace(d.Description)
@@ -76,10 +84,16 @@ func (d *SubagentDefinition) Normalize() {
 	d.MCPServers = mcpServers
 }
 
+// Valid reports whether the definition has a non-empty name, which is the
+// minimum required field for a usable subagent definition.
 func (d *SubagentDefinition) Valid() bool {
 	return d.Name != ""
 }
 
+// ToolAllowed reports whether a given tool name is permitted for this
+// subagent. The check is case-insensitive. If the Tools list is empty,
+// all tools are allowed unless explicitly disallowed. DisallowedTools
+// takes precedence over the allowlist.
 func (d *SubagentDefinition) ToolAllowed(toolName string) bool {
 	toolName = strings.TrimSpace(toolName)
 	if toolName == "" {

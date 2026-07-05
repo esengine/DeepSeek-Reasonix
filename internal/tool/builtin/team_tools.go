@@ -14,9 +14,12 @@ import (
 var (
 	teamToolMu      sync.Mutex
 	teamToolManager *agentteam.Manager
-	teamToolCurrent  string
+	teamToolCurrent string
 )
 
+// SetTeamToolManager sets the team tool manager and current team name for
+// built-in team tools. The manager and team name are used by team tools like
+// send_message, task_create, etc. to operate on the correct agent team.
 func SetTeamToolManager(m *agentteam.Manager, teamName string) {
 	teamToolMu.Lock()
 	defer teamToolMu.Unlock()

@@ -8,12 +8,14 @@ import (
 	"sync"
 )
 
+// Manager 管理多个团队及其相关资源。
 type Manager struct {
 	baseDir string
 	mu      sync.RWMutex
 	teams   map[string]*Team
 }
 
+// NewManager 创建一个新的团队管理器。
 func NewManager(baseDir string) *Manager {
 	return &Manager{
 		baseDir: baseDir,
@@ -50,6 +52,7 @@ func sanitizeName(name string) string {
 	return result
 }
 
+// CreateTeam 创建一个新的团队。
 func (m *Manager) CreateTeam(name, workspace string) (*Team, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -72,6 +75,7 @@ func (m *Manager) CreateTeam(name, workspace string) (*Team, error) {
 	return team, nil
 }
 
+// GetTeam 根据名称获取团队。
 func (m *Manager) GetTeam(name string) (*Team, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -94,6 +98,7 @@ func (m *Manager) GetTeam(name string) (*Team, bool) {
 	return team, true
 }
 
+// ListTeams 列出所有团队的名称。
 func (m *Manager) ListTeams() []string {
 	teamsDir := filepath.Join(m.baseDir, "teams")
 	entries, err := os.ReadDir(teamsDir)
@@ -113,6 +118,7 @@ func (m *Manager) ListTeams() []string {
 	return names
 }
 
+// DeleteTeam 删除指定名称的团队及其所有资源。
 func (m *Manager) DeleteTeam(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -132,16 +138,19 @@ func (m *Manager) DeleteTeam(name string) error {
 	return nil
 }
 
+// GetTaskList 获取指定团队的任务列表。
 func (m *Manager) GetTaskList(teamName string) (*TaskList, error) {
 	taskDir := m.taskDir(teamName)
 	return LoadTaskList(taskDir)
 }
 
+// GetMailbox 获取指定团队的邮箱。
 func (m *Manager) GetMailbox(teamName string) (*Mailbox, error) {
 	mboxDir := m.mailboxDir(teamName)
 	return LoadMailbox(mboxDir)
 }
 
+// SaveTaskList 保存指定团队的所有任务。
 func (m *Manager) SaveTaskList(teamName string, tl *TaskList) error {
 	for _, task := range tl.List() {
 		t := task

@@ -13,18 +13,27 @@ import (
 	"reasonix/internal/fileutil"
 )
 
+// SessionState represents the current state of an agent session.
 type SessionState string
 
 const (
-	StateWorking   SessionState = "working"
+	// StateWorking indicates the agent is actively processing a task.
+	StateWorking SessionState = "working"
+	// StateNeedsInput indicates the agent is waiting for user input.
 	StateNeedsInput SessionState = "needs_input"
-	StateIdle      SessionState = "idle"
+	// StateIdle indicates the agent is idle and waiting for a task.
+	StateIdle SessionState = "idle"
+	// StateCompleted indicates the agent has successfully completed the task.
 	StateCompleted SessionState = "completed"
-	StateFailed    SessionState = "failed"
-	StateStopped   SessionState = "stopped"
-	StateSleeping  SessionState = "sleeping"
+	// StateFailed indicates the agent has encountered an error and failed.
+	StateFailed SessionState = "failed"
+	// StateStopped indicates the agent was stopped by the user.
+	StateStopped SessionState = "stopped"
+	// StateSleeping indicates the agent is sleeping and will wake up later.
+	StateSleeping SessionState = "sleeping"
 )
 
+// SessionInfo holds metadata about an agent session for display in the agent view.
 type SessionInfo struct {
 	ID           string       `json:"id"`
 	Name         string       `json:"name"`
@@ -41,13 +50,17 @@ type SessionInfo struct {
 	NextWakeAt   *time.Time   `json:"next_wake_at,omitempty"`
 }
 
+// Manager manages agent session information for the agent view.
+// It is thread-safe and persists session data to disk as JSON files.
 type Manager struct {
-	baseDir string
-	mu      sync.RWMutex
+	baseDir  string
+	mu       sync.RWMutex
 	sessions map[string]*SessionInfo
-	order   []string
+	order    []string
 }
 
+// NewManager creates a new Manager instance with the given base directory
+// for storing session data.
 func NewManager(baseDir string) *Manager {
 	return &Manager{
 		baseDir:  baseDir,
@@ -64,6 +77,8 @@ func (m *Manager) statePath(id string) string {
 	return filepath.Join(m.sessionsDir(), id+".json")
 }
 
+// Load reads all session files from disk into memory.
+// It returns an error if the directory cannot be read.
 func (m *Manager) Load() error {
 	dir := m.sessionsDir()
 	entries, err := os.ReadDir(dir)
@@ -164,6 +179,8 @@ func (m *Manager) save(info *SessionInfo) error {
 	return fileutil.ReplaceFile(tmpPath, path)
 }
 
+// Register creates a new session with the given parameters and saves it to disk.
+// It returns the created SessionInfo or an error if saving fails.
 func (m *Manager) Register(id, name, workspace, model string) (*SessionInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -191,6 +208,8 @@ func (m *Manager) Register(id, name, workspace, model string) (*SessionInfo, err
 	return info, nil
 }
 
+// UpdateState updates the state of the session with the given id.
+// It also updates LastActivity and sets Running to false for terminal states.
 func (m *Manager) UpdateState(id string, state SessionState) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -207,6 +226,8 @@ func (m *Manager) UpdateState(id string, state SessionState) {
 	_ = m.save(info)
 }
 
+// UpdateSummary updates the summary of the session with the given id.
+// It also updates LastActivity for the session.
 func (m *Manager) UpdateSummary(id, summary string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -220,6 +241,8 @@ func (m *Manager) UpdateSummary(id, summary string) {
 	_ = m.save(info)
 }
 
+// Get returns a copy of the session info for the given id.
+// The second return value indicates whether the session was found.
 func (m *Manager) Get(id string) (*SessionInfo, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -231,6 +254,8 @@ func (m *Manager) Get(id string) (*SessionInfo, bool) {
 	return &copy, true
 }
 
+// List returns all sessions sorted by state priority and last activity.
+// The returned slice is a copy; modifying it does not affect the manager.
 func (m *Manager) List() []SessionInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -244,6 +269,8 @@ func (m *Manager) List() []SessionInfo {
 	return out
 }
 
+// ListByWorkspace returns all sessions for the given workspace.
+// The returned slice is a copy; modifying it does not affect the manager.
 func (m *Manager) ListByWorkspace(workspace string) []SessionInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -257,6 +284,8 @@ func (m *Manager) ListByWorkspace(workspace string) []SessionInfo {
 	return out
 }
 
+// ByState returns all sessions with the given state.
+// The returned slice is a copy; modifying it does not affect the manager.
 func (m *Manager) ByState(state SessionState) []SessionInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -270,6 +299,7 @@ func (m *Manager) ByState(state SessionState) []SessionInfo {
 	return out
 }
 
+// Pin marks the session with the given id as pinned.
 func (m *Manager) Pin(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -280,6 +310,7 @@ func (m *Manager) Pin(id string) {
 	}
 }
 
+// Unpin removes the pinned mark from the session with the given id.
 func (m *Manager) Unpin(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -290,6 +321,8 @@ func (m *Manager) Unpin(id string) {
 	}
 }
 
+// Rename changes the name of the session with the given id.
+// It also updates LastActivity for the session.
 func (m *Manager) Rename(id, newName string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -301,6 +334,8 @@ func (m *Manager) Rename(id, newName string) {
 	}
 }
 
+// Remove deletes the session with the given id from memory and disk.
+// It returns an error if the session is not found or the file cannot be deleted.
 func (m *Manager) Remove(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -325,6 +360,7 @@ func (m *Manager) Remove(id string) error {
 	return nil
 }
 
+// CountByState returns the number of sessions with the given state.
 func (m *Manager) CountByState(state SessionState) int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -337,10 +373,13 @@ func (m *Manager) CountByState(state SessionState) int {
 	return count
 }
 
+// NeedsInputCount returns the number of sessions waiting for user input.
 func (m *Manager) NeedsInputCount() int {
 	return m.CountByState(StateNeedsInput)
 }
 
+// AddPullRequest adds a pull request reference to the session with the given id.
+// It also updates LastActivity for the session.
 func (m *Manager) AddPullRequest(id, pr string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

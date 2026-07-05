@@ -13,39 +13,48 @@ import (
 	"reasonix/internal/fileutil"
 )
 
+// TaskStatus 表示任务的状态。
 type TaskStatus string
 
 const (
-	TaskPending    TaskStatus = "pending"
+	// TaskPending 表示任务等待处理。
+	TaskPending TaskStatus = "pending"
+	// TaskInProgress 表示任务正在进行中。
 	TaskInProgress TaskStatus = "in_progress"
-	TaskCompleted  TaskStatus = "completed"
-	TaskFailed     TaskStatus = "failed"
-	TaskCancelled  TaskStatus = "cancelled"
+	// TaskCompleted 表示任务已完成。
+	TaskCompleted TaskStatus = "completed"
+	// TaskFailed 表示任务执行失败。
+	TaskFailed TaskStatus = "failed"
+	// TaskCancelled 表示任务已取消。
+	TaskCancelled TaskStatus = "cancelled"
 )
 
+// Task 表示一个任务项。
 type Task struct {
-	ID          string     `json:"id"`
-	Title       string     `json:"title"`
-	Description string     `json:"description"`
-	Status      TaskStatus `json:"status"`
-	Assignee    string     `json:"assignee"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
-	Dependencies []string  `json:"dependencies"`
-	Output      string     `json:"output,omitempty"`
-	Priority    int        `json:"priority"`
-	Tags        []string   `json:"tags,omitempty"`
-	lockFile    string     `json:"-"`
+	ID           string     `json:"id"`
+	Title        string     `json:"title"`
+	Description  string     `json:"description"`
+	Status       TaskStatus `json:"status"`
+	Assignee     string     `json:"assignee"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+	Dependencies []string   `json:"dependencies"`
+	Output       string     `json:"output,omitempty"`
+	Priority     int        `json:"priority"`
+	Tags         []string   `json:"tags,omitempty"`
+	lockFile     string     `json:"-"`
 }
 
+// TaskList 表示任务列表，提供任务的增删改查和管理功能。
 type TaskList struct {
-	dir  string
-	mu   sync.RWMutex
+	dir   string
+	mu    sync.RWMutex
 	tasks map[string]*Task
 	order []string
 }
 
+// NewTaskList 创建一个新的任务列表。
 func NewTaskList(dir string) *TaskList {
 	return &TaskList{
 		dir:   dir,
@@ -54,6 +63,7 @@ func NewTaskList(dir string) *TaskList {
 	}
 }
 
+// LoadTaskList 从指定目录加载任务列表。
 func LoadTaskList(dir string) (*TaskList, error) {
 	tl := NewTaskList(dir)
 	entries, err := os.ReadDir(dir)
@@ -101,6 +111,7 @@ func loadTask(path string) (*Task, error) {
 	return &t, nil
 }
 
+// SaveTask 将单个任务保存到磁盘。
 func (tl *TaskList) SaveTask(t *Task) error {
 	if strings.TrimSpace(tl.dir) == "" {
 		return nil
@@ -131,6 +142,7 @@ func (tl *TaskList) SaveTask(t *Task) error {
 	return fileutil.ReplaceFile(tmpPath, path)
 }
 
+// Create 创建一个新任务并保存。
 func (tl *TaskList) Create(task Task) (string, error) {
 	tl.mu.Lock()
 	defer tl.mu.Unlock()
@@ -159,6 +171,7 @@ func (tl *TaskList) Create(task Task) (string, error) {
 	return task.ID, nil
 }
 
+// Get 根据 ID 获取任务的副本。
 func (tl *TaskList) Get(id string) (*Task, bool) {
 	tl.mu.RLock()
 	defer tl.mu.RUnlock()
@@ -170,6 +183,7 @@ func (tl *TaskList) Get(id string) (*Task, bool) {
 	return &copy, true
 }
 
+// List 返回所有任务的列表。
 func (tl *TaskList) List() []Task {
 	tl.mu.RLock()
 	defer tl.mu.RUnlock()
@@ -182,6 +196,7 @@ func (tl *TaskList) List() []Task {
 	return out
 }
 
+// Update 更新指定任务的字段。
 func (tl *TaskList) Update(id string, updates Task) error {
 	tl.mu.Lock()
 	defer tl.mu.Unlock()
@@ -224,6 +239,7 @@ func (tl *TaskList) Update(id string, updates Task) error {
 	return tl.SaveTask(t)
 }
 
+// Delete 删除指定 ID 的任务。
 func (tl *TaskList) Delete(id string) error {
 	tl.mu.Lock()
 	defer tl.mu.Unlock()
@@ -250,6 +266,7 @@ func (tl *TaskList) Delete(id string) error {
 	return nil
 }
 
+// Claim 认领一个待处理的任务并分配给指定成员。
 func (tl *TaskList) Claim(memberID string) (*Task, bool) {
 	tl.mu.Lock()
 	defer tl.mu.Unlock()
@@ -284,6 +301,7 @@ func (tl *TaskList) dependenciesSatisfied(t *Task) bool {
 	return true
 }
 
+// ByStatus 按状态筛选任务。
 func (tl *TaskList) ByStatus(status TaskStatus) []Task {
 	tl.mu.RLock()
 	defer tl.mu.RUnlock()
@@ -296,6 +314,7 @@ func (tl *TaskList) ByStatus(status TaskStatus) []Task {
 	return out
 }
 
+// ByAssignee 按负责人筛选任务。
 func (tl *TaskList) ByAssignee(memberID string) []Task {
 	tl.mu.RLock()
 	defer tl.mu.RUnlock()
@@ -308,6 +327,7 @@ func (tl *TaskList) ByAssignee(memberID string) []Task {
 	return out
 }
 
+// CountByStatus 统计指定状态的任务数量。
 func (tl *TaskList) CountByStatus(status TaskStatus) int {
 	tl.mu.RLock()
 	defer tl.mu.RUnlock()
@@ -320,6 +340,7 @@ func (tl *TaskList) CountByStatus(status TaskStatus) int {
 	return count
 }
 
+// Len 返回任务总数。
 func (tl *TaskList) Len() int {
 	tl.mu.RLock()
 	defer tl.mu.RUnlock()

@@ -12,14 +12,19 @@ import (
 	"reasonix/internal/fileutil"
 )
 
+// TeamStatus 表示团队的状态。
 type TeamStatus string
 
 const (
-	TeamActive   TeamStatus = "active"
+	// TeamActive 表示团队处于活跃状态。
+	TeamActive TeamStatus = "active"
+	// TeamCleaning 表示团队正在清理中。
 	TeamCleaning TeamStatus = "cleaning"
-	TeamDone     TeamStatus = "done"
+	// TeamDone 表示团队已完成工作。
+	TeamDone TeamStatus = "done"
 )
 
+// TeamMember 表示团队中的一个成员。
 type TeamMember struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
@@ -31,6 +36,7 @@ type TeamMember struct {
 	JoinedAt  time.Time `json:"joined_at"`
 }
 
+// TeamConfig 表示团队的配置信息。
 type TeamConfig struct {
 	Name        string       `json:"name"`
 	LeadID      string       `json:"lead_id"`
@@ -42,12 +48,14 @@ type TeamConfig struct {
 	Description string       `json:"description"`
 }
 
+// Team 表示一个团队，包含成员管理和状态跟踪功能。
 type Team struct {
 	config TeamConfig
 	dir    string
 	mu     sync.RWMutex
 }
 
+// NewTeam 创建一个新的团队。
 func NewTeam(name, workspace string) *Team {
 	now := time.Now().UTC()
 	return &Team{
@@ -62,6 +70,7 @@ func NewTeam(name, workspace string) *Team {
 	}
 }
 
+// LoadTeam 从指定目录加载团队配置。
 func LoadTeam(dir string) (*Team, error) {
 	configPath := filepath.Join(dir, "config.json")
 	data, err := os.ReadFile(configPath)
@@ -78,6 +87,7 @@ func LoadTeam(dir string) (*Team, error) {
 	}, nil
 }
 
+// Save 将团队配置保存到指定目录。
 func (t *Team) Save(dir string) error {
 	if strings.TrimSpace(dir) == "" {
 		dir = t.dir
@@ -118,18 +128,21 @@ func (t *Team) Save(dir string) error {
 	return fileutil.ReplaceFile(tmpPath, filepath.Join(dir, "config.json"))
 }
 
+// Name 返回团队名称。
 func (t *Team) Name() string {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.config.Name
 }
 
+// Status 返回团队状态。
 func (t *Team) Status() TeamStatus {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.config.Status
 }
 
+// SetStatus 设置团队状态。
 func (t *Team) SetStatus(status TeamStatus) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -137,12 +150,14 @@ func (t *Team) SetStatus(status TeamStatus) {
 	t.config.UpdatedAt = time.Now().UTC()
 }
 
+// LeadID 返回团队负责人的 ID。
 func (t *Team) LeadID() string {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.config.LeadID
 }
 
+// SetLead 设置团队负责人。
 func (t *Team) SetLead(id string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -150,6 +165,7 @@ func (t *Team) SetLead(id string) {
 	t.config.UpdatedAt = time.Now().UTC()
 }
 
+// AddMember 添加或更新团队成员。
 func (t *Team) AddMember(member TeamMember) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -165,6 +181,7 @@ func (t *Team) AddMember(member TeamMember) {
 	t.config.UpdatedAt = time.Now().UTC()
 }
 
+// RemoveMember 从团队中移除指定 ID 的成员。
 func (t *Team) RemoveMember(id string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -178,6 +195,7 @@ func (t *Team) RemoveMember(id string) {
 	t.config.UpdatedAt = time.Now().UTC()
 }
 
+// Members 返回团队所有成员的副本。
 func (t *Team) Members() []TeamMember {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -186,6 +204,7 @@ func (t *Team) Members() []TeamMember {
 	return out
 }
 
+// GetMember 根据 ID 获取团队成员。
 func (t *Team) GetMember(id string) (TeamMember, bool) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -197,6 +216,7 @@ func (t *Team) GetMember(id string) (TeamMember, bool) {
 	return TeamMember{}, false
 }
 
+// UpdateMemberStatus 更新指定成员的状态。
 func (t *Team) UpdateMemberStatus(id, status string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -209,18 +229,21 @@ func (t *Team) UpdateMemberStatus(id, status string) {
 	}
 }
 
+// Workspace 返回团队的工作目录路径。
 func (t *Team) Workspace() string {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.config.Workspace
 }
 
+// Description 返回团队描述。
 func (t *Team) Description() string {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.config.Description
 }
 
+// SetDescription 设置团队描述。
 func (t *Team) SetDescription(desc string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -228,6 +251,7 @@ func (t *Team) SetDescription(desc string) {
 	t.config.UpdatedAt = time.Now().UTC()
 }
 
+// Config 返回团队配置的副本。
 func (t *Team) Config() TeamConfig {
 	t.mu.RLock()
 	defer t.mu.RUnlock()

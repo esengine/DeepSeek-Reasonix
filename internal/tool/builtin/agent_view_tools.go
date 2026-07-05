@@ -12,11 +12,15 @@ import (
 )
 
 var (
-	agentViewMu       sync.Mutex
-	agentViewManager  *agentview.Manager
-	agentViewSession  string
+	agentViewMu      sync.Mutex
+	agentViewManager *agentview.Manager
+	agentViewSession string
 )
 
+// SetAgentViewManager sets the agent view manager and current session ID for
+// built-in agent view tools. The manager and session ID are used by agent view
+// tools like agent_view_list and agent_view_update to interact with background
+// agent sessions.
 func SetAgentViewManager(m *agentview.Manager, sessionID string) {
 	agentViewMu.Lock()
 	defer agentViewMu.Unlock()

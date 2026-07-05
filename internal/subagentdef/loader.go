@@ -10,10 +10,17 @@ import (
 	"reasonix/internal/frontmatter"
 )
 
+// LoadOptions configures how subagent definitions are loaded from files
+// or directories. Scope sets the source scope used for priority-based
+// deduplication in the registry.
 type LoadOptions struct {
 	Scope string
 }
 
+// LoadFromFile loads a single subagent definition from a Markdown file with
+// YAML frontmatter. The file body after the frontmatter becomes the subagent
+// prompt. Returns an error if the file cannot be read, the frontmatter is
+// invalid, or the definition is missing a name.
 func LoadFromFile(path string, opts LoadOptions) (*SubagentDefinition, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -45,6 +52,10 @@ func LoadFromFile(path string, opts LoadOptions) (*SubagentDefinition, error) {
 	return def, nil
 }
 
+// LoadFromDirectory recursively loads all subagent definitions from .md files
+// in a directory tree. Definitions with duplicate names (case-insensitive)
+// are deduplicated, keeping the first one encountered. Returns nil (not an
+// error) if the directory does not exist.
 func LoadFromDirectory(dir string, opts LoadOptions) ([]*SubagentDefinition, error) {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		return nil, nil
@@ -91,6 +102,9 @@ func LoadFromDirectory(dir string, opts LoadOptions) ([]*SubagentDefinition, err
 	return defs, nil
 }
 
+// BuiltinDefinitions returns the list of built-in subagent definitions that
+// ship with the application. These serve as defaults and can be overridden
+// by definitions from higher-priority scopes (user, project, CLI).
 func BuiltinDefinitions() []*SubagentDefinition {
 	now := time.Now()
 	return []*SubagentDefinition{

@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/fileutil"
 )
 
+// Message 表示邮箱中的一条消息。
 type Message struct {
 	ID        string    `json:"id"`
 	From      string    `json:"from"`
@@ -24,12 +25,14 @@ type Message struct {
 	Type      string    `json:"type"`
 }
 
+// Mailbox 表示团队的消息邮箱。
 type Mailbox struct {
 	dir      string
 	mu       sync.RWMutex
 	messages []*Message
 }
 
+// NewMailbox 创建一个新的邮箱。
 func NewMailbox(dir string) *Mailbox {
 	return &Mailbox{
 		dir:      dir,
@@ -37,6 +40,7 @@ func NewMailbox(dir string) *Mailbox {
 	}
 }
 
+// LoadMailbox 从指定目录加载邮箱。
 func LoadMailbox(dir string) (*Mailbox, error) {
 	mb := NewMailbox(dir)
 	msgsPath := filepath.Join(dir, "messages.json")
@@ -85,6 +89,7 @@ func (mb *Mailbox) save() error {
 	return fileutil.ReplaceFile(tmpPath, path)
 }
 
+// Send 发送一条消息并返回消息 ID。
 func (mb *Mailbox) Send(from, to, subject, content, msgType string) (string, error) {
 	mb.mu.Lock()
 	defer mb.mu.Unlock()
@@ -109,6 +114,7 @@ func (mb *Mailbox) Send(from, to, subject, content, msgType string) (string, err
 	return msg.ID, nil
 }
 
+// Inbox 获取指定成员的收件箱消息列表。
 func (mb *Mailbox) Inbox(memberID string) []Message {
 	mb.mu.RLock()
 	defer mb.mu.RUnlock()
@@ -125,6 +131,7 @@ func (mb *Mailbox) Inbox(memberID string) []Message {
 	return out
 }
 
+// Unread 获取指定成员的未读消息列表。
 func (mb *Mailbox) Unread(memberID string) []Message {
 	mb.mu.RLock()
 	defer mb.mu.RUnlock()
@@ -141,6 +148,7 @@ func (mb *Mailbox) Unread(memberID string) []Message {
 	return out
 }
 
+// MarkRead 将指定消息标记为已读。
 func (mb *Mailbox) MarkRead(msgID string) {
 	mb.mu.Lock()
 	defer mb.mu.Unlock()
@@ -153,6 +161,7 @@ func (mb *Mailbox) MarkRead(msgID string) {
 	_ = mb.save()
 }
 
+// MarkAllRead 将指定成员的所有消息标记为已读。
 func (mb *Mailbox) MarkAllRead(memberID string) {
 	mb.mu.Lock()
 	defer mb.mu.Unlock()
@@ -165,6 +174,7 @@ func (mb *Mailbox) MarkAllRead(memberID string) {
 	_ = mb.save()
 }
 
+// Sent 获取指定成员发送的消息列表。
 func (mb *Mailbox) Sent(from string) []Message {
 	mb.mu.RLock()
 	defer mb.mu.RUnlock()
@@ -181,6 +191,7 @@ func (mb *Mailbox) Sent(from string) []Message {
 	return out
 }
 
+// Get 根据消息 ID 获取消息的副本。
 func (mb *Mailbox) Get(msgID string) (*Message, bool) {
 	mb.mu.RLock()
 	defer mb.mu.RUnlock()
@@ -194,6 +205,7 @@ func (mb *Mailbox) Get(msgID string) (*Message, bool) {
 	return nil, false
 }
 
+// UnreadCount 获取指定成员的未读消息数量。
 func (mb *Mailbox) UnreadCount(memberID string) int {
 	mb.mu.RLock()
 	defer mb.mu.RUnlock()
@@ -207,6 +219,7 @@ func (mb *Mailbox) UnreadCount(memberID string) int {
 	return count
 }
 
+// Broadcast 向所有成员广播一条消息。
 func (mb *Mailbox) Broadcast(from, subject, content string) (string, error) {
 	return mb.Send(from, "all", subject, content, "broadcast")
 }

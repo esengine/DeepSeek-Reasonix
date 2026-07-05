@@ -14,6 +14,7 @@ import (
 	"reasonix/internal/provider"
 )
 
+// SourceBreakdown tracks token usage and cost for a specific source within a session.
 type SourceBreakdown struct {
 	Source           string  `json:"source"`
 	PromptTokens     int     `json:"prompt_tokens"`
@@ -23,6 +24,7 @@ type SourceBreakdown struct {
 	Calls            int     `json:"calls"`
 }
 
+// SessionUsage holds cumulative token usage, cost, and activity data for a single session.
 type SessionUsage struct {
 	SessionID        string            `json:"session_id"`
 	PromptTokens     int               `json:"prompt_tokens"`
@@ -42,13 +44,15 @@ type SessionUsage struct {
 	CodeRemoved      int               `json:"code_removed"`
 }
 
+// Tracker manages per-session usage tracking with thread-safe access and persistent storage.
 type Tracker struct {
-	baseDir string
-	mu      sync.RWMutex
+	baseDir  string
+	mu       sync.RWMutex
 	sessions map[string]*SessionUsage
 	currency string
 }
 
+// NewTracker creates a new usage tracker that persists session data under baseDir.
 func NewTracker(baseDir string) *Tracker {
 	return &Tracker{
 		baseDir:  baseDir,
@@ -61,6 +65,7 @@ func (t *Tracker) sessionPath(id string) string {
 	return filepath.Join(t.baseDir, "usage", id+".json")
 }
 
+// LoadSession reads a session's usage data from disk. Returns nil, nil if the file does not exist.
 func (t *Tracker) LoadSession(id string) (*SessionUsage, error) {
 	path := t.sessionPath(id)
 	data, err := os.ReadFile(path)
@@ -105,6 +110,7 @@ func (t *Tracker) saveSession(su *SessionUsage) error {
 	return fileutil.ReplaceFile(tmpPath, path)
 }
 
+// Record adds a usage entry to the specified session, updating token counts, cost, and source breakdown.
 func (t *Tracker) Record(sessionID string, usage *provider.Usage, pricing *provider.Pricing, source string, model string) {
 	if usage == nil {
 		return
@@ -116,7 +122,7 @@ func (t *Tracker) Record(sessionID string, usage *provider.Usage, pricing *provi
 	su, ok := t.sessions[sessionID]
 	if !ok {
 		su = &SessionUsage{
-			SessionID:   sessionID,
+			SessionID: sessionID,
 			StartedAt: time.Now().UTC(),
 			Model:     model,
 			Currency:  t.currency,
@@ -174,6 +180,7 @@ func (t *Tracker) Record(sessionID string, usage *provider.Usage, pricing *provi
 	_ = t.saveSession(su)
 }
 
+// RecordCodeChanges tracks the number of lines added and removed during a session.
 func (t *Tracker) RecordCodeChanges(sessionID string, added, removed int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -193,6 +200,7 @@ func (t *Tracker) RecordCodeChanges(sessionID string, added, removed int) {
 	_ = t.saveSession(su)
 }
 
+// Get returns a copy of the session usage data for the given session ID, and whether it exists.
 func (t *Tracker) Get(sessionID string) (*SessionUsage, bool) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -204,6 +212,7 @@ func (t *Tracker) Get(sessionID string) (*SessionUsage, bool) {
 	return &copy, true
 }
 
+// ListRecent returns sessions sorted by last activity, most recent first, up to the specified limit.
 func (t *Tracker) ListRecent(limit int) []SessionUsage {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -221,6 +230,7 @@ func (t *Tracker) ListRecent(limit int) []SessionUsage {
 	return sessions
 }
 
+// TotalCost returns the sum of costs across all tracked sessions.
 func (t *Tracker) TotalCost() float64 {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -231,6 +241,7 @@ func (t *Tracker) TotalCost() float64 {
 	return total
 }
 
+// TotalTokens returns the sum of total tokens across all tracked sessions.
 func (t *Tracker) TotalTokens() int {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -241,6 +252,7 @@ func (t *Tracker) TotalTokens() int {
 	return total
 }
 
+// Summary returns a human-readable summary of aggregate usage across all sessions.
 func (t *Tracker) Summary() string {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -276,6 +288,7 @@ func (t *Tracker) Summary() string {
 	)
 }
 
+// FormatSessionUsage returns a formatted string with detailed usage information for a single session.
 func (t *Tracker) FormatSessionUsage(id string) string {
 	su, ok := t.Get(id)
 	if !ok {
