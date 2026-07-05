@@ -62,9 +62,7 @@ func (mb *Mailbox) save() error {
 	if err := os.MkdirAll(mb.dir, 0o755); err != nil {
 		return err
 	}
-	mb.mu.RLock()
 	data, err := json.MarshalIndent(mb.messages, "", "  ")
-	mb.mu.RUnlock()
 	if err != nil {
 		return err
 	}
