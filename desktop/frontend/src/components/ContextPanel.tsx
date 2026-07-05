@@ -5,6 +5,7 @@ import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { useI18n, type Locale, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
+import { formatTokens, formatOptionalTokens } from "../lib/format";
 import type { DictKey } from "../locales/en";
 import type { BalanceInfo, ContextInfo, ContextPanelInfo, UsageSourceStats, WireUsage } from "../lib/types";
 
@@ -23,10 +24,6 @@ interface ContextPanelProps {
   refreshKey?: number;
 }
 
-function fmtFullTokens(n: number): string {
-  if (n <= 0) return "0";
-  return String(Math.round(n));
-}
 
 function fmtDuration(ms: number, t: Translator): string {
   if (ms <= 0) return "-";
@@ -37,10 +34,6 @@ function fmtDuration(ms: number, t: Translator): string {
   return t("context.durationMinutesSeconds", { minutes, seconds });
 }
 
-function fmtOptionalTokens(tokens?: number): string {
-  if (typeof tokens !== "number" || tokens <= 0) return "-";
-  return tokens.toLocaleString();
-}
 
 interface MetricTokenDisplay {
   display: string;
@@ -388,9 +381,9 @@ export function ContextPanel({
   const turnCostLabel = formatMoneyLocalized(turnCost, sessionCurrency, { locale, empty: "dash" });
   const sessionCostLabel = formatMoneyLocalized(cost.amount, cost.currency, { locale, empty: "dash" });
   const totalTokensTitle = totalTokensMetric.exact === "-" ? "-" : t("context.tokensValue", { value: totalTokensMetric.exact });
-  const usedLabel = fmtFullTokens(usedTokens);
-  const windowLabel = fmtFullTokens(windowTokens);
-  const compactRemainingLabel = tokensUntilCompact > 0 ? fmtFullTokens(tokensUntilCompact) : "0";
+  const usedLabel = formatTokens(usedTokens);
+  const windowLabel = formatTokens(windowTokens);
+  const compactRemainingLabel = tokensUntilCompact > 0 ? formatTokens(tokensUntilCompact) : "0";
   const compactMarkerPct = Math.max(0, Math.min(100, compactPct));
   const usageMarkerPct = Math.max(6, Math.min(94, usagePct));
   const compactLabelPct = Math.max(6, Math.min(94, compactMarkerPct));
@@ -508,7 +501,7 @@ export function ContextPanel({
           </section>
           <section className="context-panel__creation-grid" aria-label={t("context.overview")}>
             <MetricCard label={t("status.cacheLabel")} value={fmtUsageCacheRate(usage)} tone="accent" />
-            <MetricCard label={t("status.turnTokensLabel")} value={fmtOptionalTokens(turnTokens)} />
+            <MetricCard label={t("status.turnTokensLabel")} value={formatOptionalTokens(turnTokens)} />
             <MetricCard label={t("status.turnCostLabel")} value={turnCostLabel} />
             <MetricCard label={t("status.balanceLabel")} value={balanceLabel} tone="accent" />
           </section>
