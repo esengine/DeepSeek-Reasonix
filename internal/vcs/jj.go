@@ -1,7 +1,6 @@
 package vcs
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"os/exec"
@@ -32,10 +31,11 @@ func LoadJJInfo(ctx context.Context, cwd string) (VCSInfo, error) {
 
 	info := VCSInfo{Type: "jj", Repo: filepath.Base(root)}
 
-	// Current bookmark (equivalent to git branch --show-current)
+	// Current bookmark(s) attached to @. `jj bookmark list` alone returns all
+	// local bookmarks, so taking the first one can show an unrelated bookmark.
 	if branch, err := jjRun(ctx, cwd,
-		"bookmark", "list",
-		"-T", `if(!remote && normal_target, name ++ "\n")`,
+		"log", "-r", "@", "--no-graph",
+		"-T", `local_bookmarks.map(|b| b.name()).join("\n") ++ "\n"`,
 	); err == nil {
 		branch = strings.TrimSpace(branch)
 		if branch != "" {
@@ -85,7 +85,17 @@ func JJFileStatus(ctx context.Context, cwd string) ([]VCSFileStatus, error) {
 	if err != nil {
 		return nil, err
 	}
-	return parseJJSummary(raw), nil
+	entries := parseJJSummary(raw)
+	out := make([]VCSFileStatus, 0, len(entries))
+	for _, e := range entries {
+		path := normalizeRelPath(cwd, e.Path)
+		if path == "" {
+			continue
+		}
+		oldPath := normalizeRelPath(cwd, e.OldPath)
+		out = append(out, VCSFileStatus{Path: path, OldPath: oldPath, Status: e.Status})
+	}
+	return out, nil
 }
 
 // JJListBranches returns all jj bookmarks.
@@ -133,7 +143,7 @@ func JJHistory(ctx context.Context, cwd, path string, limit int) ([]VCSCommit, e
 		defer cancel()
 	}
 
-	template := `commit_id ++ "\t" ++ author.name() ++ "\t" ++ author.timestamp() ++ "\t" ++ description.first_line()`
+	template := `commit_id ++ "\t" ++ author.name() ++ "\t" ++ author.timestamp() ++ "\t" ++ description.first_line() ++ "\n"`
 	args := []string{"log", "--no-graph", "-T", template, "--limit", strconv.Itoa(limit)}
 	if path != "" {
 		args = append(args, "--", path)
@@ -154,7 +164,7 @@ func JJCommitDetail(ctx context.Context, cwd, changeID, path string) (VCSCommitD
 	}
 
 	if path != "" {
-		raw, err := jjRun(ctx, cwd, "show", changeID, "--", path)
+		raw, err := jjRun(ctx, cwd, "diff", "--from", changeID+"-", "--to", changeID, "--", path)
 		if err != nil {
 			return VCSCommitDetail{}, err
 		}
@@ -162,16 +172,18 @@ func JJCommitDetail(ctx context.Context, cwd, changeID, path string) (VCSCommitD
 		return VCSCommitDetail{Diff: &diffStr}, nil
 	}
 
-	// File list via template
-	raw, err := jjRun(ctx, cwd,
-		"show", "--no-patch",
-		"-T", `files().map(|f| f.path().shortest())`,
-		changeID,
-	)
+	raw, err := jjRun(ctx, cwd, "diff", "--from", changeID+"-", "--to", changeID, "--summary")
 	if err != nil {
 		return VCSCommitDetail{}, err
 	}
-	return VCSCommitDetail{Files: splitLines(raw)}, nil
+	entries := parseJJSummary(raw)
+	files := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.Path != "" {
+			files = append(files, e.Path)
+		}
+	}
+	return VCSCommitDetail{Files: files}, nil
 }
 
 // --- internal helpers ---
@@ -289,7 +301,11 @@ func parseJJRename(s string) (oldPath, newPath string) {
 func parseJJLog(raw string) []VCSCommit {
 	var out []VCSCommit
 	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
-		parts := strings.SplitN(strings.TrimSpace(line), "\t", 4)
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 4)
 		if len(parts) < 4 {
 			continue
 		}
@@ -302,6 +318,3 @@ func parseJJLog(raw string) []VCSCommit {
 	}
 	return out
 }
-
-// Ensure jjRunCombined output is used in JJCheckout (it's already used above).
-var _ = bytes.Buffer{}

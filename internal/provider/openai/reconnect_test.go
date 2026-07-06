@@ -110,14 +110,22 @@ func TestStreamCancelDoesNotReconnect(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("server did not receive the streaming request")
 	}
+	gotC := make(chan error, 1)
+	readerReady := make(chan struct{})
+	go func() {
+		close(readerReady)
+		var got error
+		for chunk := range ch {
+			if chunk.Type == provider.ChunkError {
+				got = chunk.Err
+			}
+		}
+		gotC <- got
+	}()
+	<-readerReady
 	cancel()
 
-	var got error
-	for chunk := range ch {
-		if chunk.Type == provider.ChunkError {
-			got = chunk.Err
-		}
-	}
+	got := <-gotC
 	if !errors.Is(got, context.Canceled) {
 		t.Fatalf("stream error = %v, want context.Canceled", got)
 	}

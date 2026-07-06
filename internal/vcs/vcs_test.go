@@ -1,9 +1,13 @@
 package vcs
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestDetectVCS_Git(t *testing.T) {
@@ -178,5 +182,72 @@ func TestParseJJRename(t *testing.T) {
 		if oldPath != tt.oldPath || newPath != tt.newPath {
 			t.Errorf("parseJJRename(%q) = (%q, %q), want (%q, %q)", tt.input, oldPath, newPath, tt.oldPath, tt.newPath)
 		}
+	}
+}
+
+func TestJJCommandsAgainstRealRepo(t *testing.T) {
+	if _, err := exec.LookPath("jj"); err != nil {
+		t.Skip("jj not installed")
+	}
+	root := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("jj", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "JJ_CONFIG=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("jj %v: %v\n%s", args, err, out)
+		}
+	}
+	run("git", "init", "--colocate", ".")
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("bookmark", "create", "main")
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	info, err := LoadJJInfo(ctx, root)
+	if err != nil {
+		t.Fatalf("LoadJJInfo: %v", err)
+	}
+	if info.Branch != "main" {
+		t.Fatalf("jj branch = %q, want main", info.Branch)
+	}
+
+	status, err := JJFileStatus(ctx, root)
+	if err != nil {
+		t.Fatalf("JJFileStatus: %v", err)
+	}
+	if len(status) != 1 || status[0].Path != "a.txt" {
+		t.Fatalf("JJFileStatus = %+v, want a.txt", status)
+	}
+
+	history, err := JJHistory(ctx, root, "", 5)
+	if err != nil {
+		t.Fatalf("JJHistory: %v", err)
+	}
+	if len(history) == 0 || strings.TrimSpace(history[0].Hash) == "" {
+		t.Fatalf("JJHistory = %+v, want at least one commit hash", history)
+	}
+
+	detail, err := JJCommitDetail(ctx, root, history[0].Hash, "")
+	if err != nil {
+		t.Fatalf("JJCommitDetail files: %v", err)
+	}
+	if len(detail.Files) != 1 || detail.Files[0] != "a.txt" {
+		t.Fatalf("JJCommitDetail files = %+v, want a.txt", detail.Files)
+	}
+
+	diff, err := JJCommitDetail(ctx, root, history[0].Hash, "a.txt")
+	if err != nil {
+		t.Fatalf("JJCommitDetail diff: %v", err)
+	}
+	if diff.Diff == nil || !strings.Contains(*diff.Diff, "two") {
+		t.Fatalf("JJCommitDetail diff = %v, want content containing two", diff.Diff)
 	}
 }

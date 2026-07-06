@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -224,7 +225,14 @@ func (a *App) GitBranches() ([]string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	return vcs.GitListBranches(ctx, base)
+	switch vcs.DetectVCS(base) {
+	case "jj":
+		return vcs.JJListBranches(ctx, base)
+	case "git":
+		return vcs.GitListBranches(ctx, base)
+	default:
+		return nil, errors.New("no supported VCS repository")
+	}
 }
 
 // GitCheckout switches the active workspace's git branch and returns the
@@ -236,7 +244,14 @@ func (a *App) GitCheckout(branch string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	return vcs.GitCheckout(ctx, base, branch)
+	switch vcs.DetectVCS(base) {
+	case "jj":
+		return vcs.JJCheckout(ctx, base, branch)
+	case "git":
+		return vcs.GitCheckout(ctx, base, branch)
+	default:
+		return errors.New("no supported VCS repository")
+	}
 }
 
 type GitCommitView struct {
@@ -260,7 +275,15 @@ func (a *App) WorkspaceGitHistory(tabID string, path string) ([]GitCommitView, e
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	commits, err := vcs.GitHistory(ctx, base, path, 100)
+	var commits []vcs.VCSCommit
+	switch vcs.DetectVCS(base) {
+	case "jj":
+		commits, err = vcs.JJHistory(ctx, base, path, 100)
+	case "git":
+		commits, err = vcs.GitHistory(ctx, base, path, 100)
+	default:
+		err = errors.New("no supported VCS repository")
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +308,15 @@ func (a *App) WorkspaceGitCommitDetail(tabID string, hash string, path string) (
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	detail, err := vcs.GitCommitDetail(ctx, base, hash, path)
+	var detail vcs.VCSCommitDetail
+	switch vcs.DetectVCS(base) {
+	case "jj":
+		detail, err = vcs.JJCommitDetail(ctx, base, hash, path)
+	case "git":
+		detail, err = vcs.GitCommitDetail(ctx, base, hash, path)
+	default:
+		err = errors.New("no supported VCS repository")
+	}
 	if err != nil {
 		return GitCommitDetailView{}, err
 	}
