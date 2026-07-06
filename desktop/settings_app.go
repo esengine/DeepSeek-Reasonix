@@ -1538,6 +1538,7 @@ func (a *App) rebuildSettingLocked(setting string) error {
 		if err := a.snapshotTabForAction(tab, "rebuilding settings"); err != nil {
 			return err
 		}
+		prevPath = sessionPathAfterSnapshot(oldCtrl, prevPath)
 		carried = oldCtrl.History()
 	}
 	snap := a.tabRuntimeSnapshot(tab)

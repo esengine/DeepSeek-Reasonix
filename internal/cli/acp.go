@@ -82,6 +82,7 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 		WorkspaceRoot:            root,
 		ExtraPlugins:             p.MCPServers,
 		CleanupPendingReconciler: acp.ReconcileCleanupPending,
+		OnSessionRecovered:       p.OnSessionRecovered,
 	})
 }
 

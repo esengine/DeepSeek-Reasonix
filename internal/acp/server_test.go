@@ -98,7 +98,7 @@ func (f *configurableFactory) NewSession(_ context.Context, p SessionParams) (*c
 			return behavior(ctx, sink, input, p)
 		},
 	}
-	opts := control.Options{Runner: runner, Sink: p.Sink, SessionDir: f.dir}
+	opts := control.Options{Runner: runner, Sink: p.Sink, SessionDir: f.dir, OnSessionRecovered: p.OnSessionRecovered}
 	if f.withHooks {
 		opts.Hooks = f.hookRunner()
 	}

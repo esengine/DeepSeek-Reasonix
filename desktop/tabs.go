@@ -1973,6 +1973,15 @@ func (a *App) indexedBlankTopicIDLocked(scope, workspaceRoot string) string {
 	if len(topicIDs) == 0 {
 		return ""
 	}
+	// Blank-tab reuse is an automatic write path: the reused ID flows into
+	// ensureTopicIndexed, whose intentional single-topic prepend clears delete
+	// tombstones. Picking a tombstoned topic here (its default title can
+	// linger title-only after a delete raced a scan save) would therefore
+	// fully resurrect a topic the user removed — skip them.
+	deletedTopics := make(map[string]bool, len(f.DeletedTopics))
+	for _, id := range f.DeletedTopics {
+		deletedTopics[id] = true
+	}
 
 	openTopics := map[string]bool{}
 	for _, tab := range a.tabs {
@@ -2006,7 +2015,7 @@ func (a *App) indexedBlankTopicIDLocked(scope, workspaceRoot string) string {
 		addSessionIndex(desktopSessionDir(globalWorkspaceRoot()))
 	}
 	for _, topicID := range topicIDs {
-		if openTopics[topicID] {
+		if deletedTopics[topicID] || openTopics[topicID] {
 			continue
 		}
 		if topicTitleForTab(scope, workspaceRoot, topicID) != defaultTopicTitle {
@@ -3572,6 +3581,7 @@ type desktopProjectFile struct {
 	GlobalColor        string           `json:"globalColor,omitempty"`
 	GlobalTopics       []string         `json:"globalTopics,omitempty"`
 	GlobalPinnedTopics []string         `json:"globalPinnedTopics,omitempty"`
+	DeletedTopics      []string         `json:"deletedTopics,omitempty"`
 	PinnedProjects     []string         `json:"pinnedProjects,omitempty"`
 	SidebarOrder       []string         `json:"sidebarOrder,omitempty"`
 	Projects           []desktopProject `json:"projects"`
@@ -3867,20 +3877,54 @@ func updateProjectsFile(mutator func(*desktopProjectFile) (bool, error)) error {
 }
 
 func prependTopicInProjectsFile(workspaceRoot, topicID string, ensureProject bool) error {
-	return prependTopicsInProjectsFile(workspaceRoot, []string{topicID}, ensureProject)
+	// Single-topic prepends are intentional writes (topic creation, a live tab
+	// indexing its session, restore from trash): they clear any delete
+	// tombstone so the topic fully returns instead of landing in a half-state
+	// where only its title resurfaces.
+	return prependTopicsInProjectsFileOpts(workspaceRoot, []string{topicID}, ensureProject, false)
 }
 
 func prependTopicsInProjectsFile(workspaceRoot string, topicIDs []string, ensureProject bool) error {
+	// Batch prepends come from the legacy migration and index-repair scans:
+	// they must respect delete tombstones so a scan never resurrects a topic
+	// the user removed.
+	return prependTopicsInProjectsFileOpts(workspaceRoot, topicIDs, ensureProject, true)
+}
+
+func prependTopicsInProjectsFileOpts(workspaceRoot string, topicIDs []string, ensureProject, respectTombstones bool) error {
 	workspaceRoot = normalizeProjectRoot(workspaceRoot)
 	topicIDs = uniqueStrings(topicIDs)
 	if len(topicIDs) == 0 {
 		return nil
 	}
 	return updateProjectsFile(func(f *desktopProjectFile) (bool, error) {
-		if workspaceRoot == "" {
-			next := uniqueStrings(append(append([]string(nil), topicIDs...), f.GlobalTopics...))
-			if sameStringList(next, f.GlobalTopics) {
+		// Tombstones are checked under the projects-file lock: a DeleteTopic
+		// that lands between a scan reading DeletedTopics and this write must
+		// not be resurrected by the stale batch.
+		live := topicIDs
+		changed := false
+		if respectTombstones {
+			live = make([]string, 0, len(topicIDs))
+			for _, id := range topicIDs {
+				if !containsDesktopString(f.DeletedTopics, id) {
+					live = append(live, id)
+				}
+			}
+			if len(live) == 0 {
 				return false, nil
+			}
+		} else {
+			for _, id := range topicIDs {
+				if next := removeString(f.DeletedTopics, id); !sameStringList(next, f.DeletedTopics) {
+					f.DeletedTopics = next
+					changed = true
+				}
+			}
+		}
+		if workspaceRoot == "" {
+			next := uniqueStrings(append(append([]string(nil), live...), f.GlobalTopics...))
+			if sameStringList(next, f.GlobalTopics) {
+				return changed, nil
 			}
 			f.GlobalTopics = next
 			return true, nil
@@ -3889,17 +3933,17 @@ func prependTopicsInProjectsFile(workspaceRoot string, topicIDs []string, ensure
 			if p.Root != workspaceRoot {
 				continue
 			}
-			next := uniqueStrings(append(append([]string(nil), topicIDs...), p.Topics...))
+			next := uniqueStrings(append(append([]string(nil), live...), p.Topics...))
 			if sameStringList(next, p.Topics) {
-				return false, nil
+				return changed, nil
 			}
 			f.Projects[i].Topics = next
 			return true, nil
 		}
 		if !ensureProject {
-			return false, nil
+			return changed, nil
 		}
-		f.Projects = append(f.Projects, desktopProject{Root: workspaceRoot, Topics: topicIDs})
+		f.Projects = append(f.Projects, desktopProject{Root: workspaceRoot, Topics: live})
 		return true, nil
 	})
 }
@@ -3917,6 +3961,10 @@ func removeTopicFromProjectsFile(topicID string) error {
 		}
 		if next := removeString(f.GlobalPinnedTopics, topicID); !sameStringList(next, f.GlobalPinnedTopics) {
 			f.GlobalPinnedTopics = next
+			changed = true
+		}
+		if next := prependUniqueString(f.DeletedTopics, topicID); !sameStringList(next, f.DeletedTopics) {
+			f.DeletedTopics = next
 			changed = true
 		}
 		for i, p := range f.Projects {
@@ -3950,6 +3998,7 @@ func normalizeProjectsFile(f desktopProjectFile) desktopProjectFile {
 		GlobalColor:        normalizeProjectColor(f.GlobalColor),
 		GlobalTopics:       uniqueStrings(f.GlobalTopics),
 		GlobalPinnedTopics: uniqueStrings(f.GlobalPinnedTopics),
+		DeletedTopics:      uniqueStrings(f.DeletedTopics),
 	}
 	index := map[string]int{}
 	for _, p := range f.Projects {
@@ -5026,13 +5075,15 @@ var legacyMigrationMu sync.Mutex
 // session that could gain content later keeps the dir unmarked), so the gate
 // never hides a session that should still be migrated.
 const topicMigrationMarker = ".topics-migrated"
+const topicIndexRepairMarker = ".topic-indexes-repaired"
 
-func topicMigrationDone(dir string) bool {
+func topicDirMarkerDone(dir, marker string) bool {
 	dir = strings.TrimSpace(dir)
-	if dir == "" {
+	marker = strings.TrimSpace(marker)
+	if dir == "" || marker == "" {
 		return false
 	}
-	markerInfo, err := os.Stat(filepath.Join(dir, topicMigrationMarker))
+	markerInfo, err := os.Stat(filepath.Join(dir, marker))
 	if err != nil {
 		return false
 	}
@@ -5060,25 +5111,43 @@ func topicMigrationDone(dir string) bool {
 	return true
 }
 
-func markTopicMigrationDone(dir string) {
+func topicMigrationDone(dir string) bool {
+	return topicDirMarkerDone(dir, topicMigrationMarker)
+}
+
+func topicIndexRepairDone(dir string) bool {
+	return topicDirMarkerDone(dir, topicIndexRepairMarker)
+}
+
+func markTopicDirMarkerDone(dir, marker string) {
 	dir = strings.TrimSpace(dir)
-	if dir == "" {
+	marker = strings.TrimSpace(marker)
+	if dir == "" || marker == "" {
 		return
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return
 	}
-	_ = os.WriteFile(filepath.Join(dir, topicMigrationMarker), nil, 0o644)
+	_ = os.WriteFile(filepath.Join(dir, marker), nil, 0o644)
+}
+
+func markTopicMigrationDone(dir string) {
+	markTopicDirMarkerDone(dir, topicMigrationMarker)
+}
+
+func markTopicIndexRepairDone(dir string) {
+	markTopicDirMarkerDone(dir, topicIndexRepairMarker)
 }
 
 func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 	if strings.TrimSpace(dir) == "" {
 		return nil
 	}
+	repairedTopicIDs := repairIndexedSessionTopics(dir)
 	// One-shot per dir: once the migration pass has completed, skip the full
 	// per-render session scan entirely.
 	if topicMigrationDone(dir) {
-		return nil
+		return repairedTopicIDs
 	}
 	scope, workspaceRoot, topicTitleRoot, ok := legacyMigrationTargetForDir(dir)
 	if !ok {
@@ -5190,9 +5259,13 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 		if !deferred {
 			markTopicMigrationDone(dir) // nothing left to migrate — gate future scans
 		}
-		return nil
+		return repairedTopicIDs
 	}
 	_ = prependTopicsInProjectsFile(workspaceRoot, migratedTopicIDs, false)
+	// Same fresh tombstone re-check as the repair pass: these are whole-map
+	// saves, so a concurrent DeleteTopic of an unrelated topic must not have
+	// its title written back by this migration batch.
+	pruneDeletedTopicEntries(topicTitles, topicSources)
 	if topicTitles != nil {
 		_ = saveTopicTitles(topicTitleRoot, topicTitles)
 	}
@@ -5204,7 +5277,178 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 	if !deferred {
 		markTopicMigrationDone(dir) // pass complete with nothing deferred
 	}
-	return migratedTopicIDs
+	return uniqueStrings(append(repairedTopicIDs, migratedTopicIDs...))
+}
+
+// pruneDeletedTopicEntries drops tombstoned topics from scan-built title and
+// source maps just before they are persisted, re-reading DeletedTopics so a
+// DeleteTopic that landed after the scan snapshot wins. The maps are loaded
+// whole at scan start and saved whole at the end; without this re-check the
+// save would write the deleted topic's stale entries back, and a title-map
+// entry alone resurrects a topic in the sidebar (orderedTopicIDs lists topics
+// that exist only in the title map). Returns the tombstone list so callers can
+// filter their returned topic-ID slices against the same snapshot.
+func pruneDeletedTopicEntries(maps ...map[string]string) []string {
+	deleted := loadProjectsFile().DeletedTopics
+	if len(deleted) == 0 {
+		return nil
+	}
+	for _, m := range maps {
+		for _, id := range deleted {
+			delete(m, id)
+		}
+	}
+	return deleted
+}
+
+func repairIndexedSessionTopics(dir string) []string {
+	if strings.TrimSpace(dir) == "" || topicIndexRepairDone(dir) {
+		return nil
+	}
+	scope, workspaceRoot, topicTitleRoot, ok := legacyMigrationTargetForDir(dir)
+	if !ok {
+		return nil
+	}
+	legacyMigrationMu.Lock()
+	defer legacyMigrationMu.Unlock()
+	if topicIndexRepairDone(dir) {
+		return nil
+	}
+	infos, err := agent.ListSessionOrder(dir)
+	if err != nil {
+		return nil
+	}
+
+	topicTitles, err := loadTopicTitlesForUpdate(topicTitleRoot)
+	if err != nil {
+		return nil
+	}
+	topicSources, err := loadTopicTitleSourcesForUpdate(topicTitleRoot)
+	if err != nil {
+		return nil
+	}
+	projects := loadProjectsFile()
+	deletedTopics := projects.DeletedTopics
+	// Repair only topics missing from the sidebar index. Skipping topics that
+	// are already listed and titled keeps steady-state rescans write-free:
+	// otherwise every rescan (any session activity invalidates the marker)
+	// would prepend the full topic list back in most-recently-active order,
+	// reordering the user's sidebar and handing already-visible topics to the
+	// blank-tab binding in the migration callers.
+	indexedTopics := projects.GlobalTopics
+	if scope == "project" {
+		indexedTopics = nil
+		for _, p := range projects.Projects {
+			if p.Root == workspaceRoot {
+				indexedTopics = p.Topics
+				break
+			}
+		}
+	}
+	indexedSet := make(map[string]bool, len(indexedTopics))
+	for _, id := range indexedTopics {
+		indexedSet[id] = true
+	}
+	var repairedTopicIDs []string
+	var sessionTitles map[string]string
+	titlesChanged := false
+	sourcesChanged := false
+	deferred := false
+	for _, info := range infos {
+		topicID := strings.TrimSpace(info.TopicID)
+		if topicID == "" {
+			continue
+		}
+		if indexedSet[topicID] && strings.TrimSpace(topicTitles[topicID]) != "" {
+			continue // fully indexed already — nothing to repair, skip the meta read
+		}
+		meta, ok, err := agent.LoadBranchMeta(info.Path)
+		if err != nil {
+			deferred = true
+			continue
+		}
+		if !ok || strings.TrimSpace(meta.TopicID) == "" {
+			continue
+		}
+		if containsDesktopString(deletedTopics, topicID) {
+			continue
+		}
+		if !legacySessionScopeMatchesMigrationTarget(meta, scope, workspaceRoot) {
+			continue
+		}
+		repairedTopicIDs = append(repairedTopicIDs, topicID)
+		if strings.TrimSpace(topicTitles[topicID]) == "" {
+			if sessionTitles == nil {
+				sessionTitles = loadSessionTitles(dir)
+			}
+			title := indexedSessionTopicTitle(sessionTitles, info, meta)
+			if title == "" {
+				title = defaultTopicTitle
+			}
+			topicTitles[topicID] = title
+			titlesChanged = true
+		}
+		if strings.TrimSpace(topicSources[topicID]) == "" {
+			topicSources[topicID] = topicTitleSourceManual
+			sourcesChanged = true
+		}
+	}
+	if len(repairedTopicIDs) > 0 {
+		// Re-check tombstones right before persisting: a DeleteTopic landing
+		// after the scan snapshot must win. The prepend re-filters under the
+		// projects-file lock; the whole-map title/source saves and the
+		// returned IDs (callers bind blank Global tabs to the first entry)
+		// need the same fresh read.
+		if deletedNow := pruneDeletedTopicEntries(topicTitles, topicSources); len(deletedNow) > 0 {
+			deletedSet := make(map[string]bool, len(deletedNow))
+			for _, id := range deletedNow {
+				deletedSet[id] = true
+			}
+			live := repairedTopicIDs[:0]
+			for _, id := range repairedTopicIDs {
+				if !deletedSet[id] {
+					live = append(live, id)
+				}
+			}
+			repairedTopicIDs = live
+		}
+	}
+	if len(repairedTopicIDs) > 0 {
+		if err := prependTopicsInProjectsFile(workspaceRoot, repairedTopicIDs, false); err != nil {
+			deferred = true
+		}
+		if titlesChanged {
+			if err := saveTopicTitles(topicTitleRoot, topicTitles); err != nil {
+				deferred = true
+			}
+		}
+		if sourcesChanged {
+			if err := saveTopicTitleSources(topicTitleRoot, topicSources); err != nil {
+				deferred = true
+			}
+		}
+		if !deferred {
+			projectSessionCache.invalidate()
+		}
+	}
+	if !deferred {
+		markTopicIndexRepairDone(dir)
+		return uniqueStrings(repairedTopicIDs)
+	}
+	return nil
+}
+
+func indexedSessionTopicTitle(sessionTitles map[string]string, info agent.SessionOrderInfo, meta agent.BranchMeta) string {
+	if title := topicTitleFromText(meta.TopicTitle); title != "" {
+		return title
+	}
+	if title := topicTitleFromText(info.TopicTitle); title != "" {
+		return title
+	}
+	if title := topicTitleFromText(sessionTitles[filepath.Base(info.Path)]); title != "" {
+		return title
+	}
+	return topicTitleFromText(info.Preview)
 }
 
 func legacyMigrationTargetForDir(dir string) (scope, workspaceRoot, topicTitleRoot string, ok bool) {
@@ -5227,6 +5471,10 @@ func legacySessionMetaMatchesMigrationTarget(meta agent.BranchMeta, scope, works
 	if strings.TrimSpace(meta.TopicID) != "" {
 		return false
 	}
+	return legacySessionScopeMatchesMigrationTarget(meta, scope, workspaceRoot)
+}
+
+func legacySessionScopeMatchesMigrationTarget(meta agent.BranchMeta, scope, workspaceRoot string) bool {
 	metaScope := strings.TrimSpace(meta.Scope)
 	if metaScope != "" && metaScope != scope {
 		return false
@@ -5984,6 +6232,14 @@ func (a *App) ListProjectTree() []ProjectNode {
 		migrateLegacySessionsIntoGlobalTopics(dir)
 	}
 	f := loadProjectsFile()
+	// Render-side tombstone guard: a deleted topic whose title survived a racy
+	// whole-map save would otherwise reappear via the orderedTopicIDs title-map
+	// fallback. The tombstone is authoritative until an intentional
+	// single-topic write (create/restore/tab indexing) clears it.
+	deletedTopicSet := make(map[string]bool, len(f.DeletedTopics))
+	for _, id := range f.DeletedTopics {
+		deletedTopicSet[id] = true
+	}
 	out := []ProjectNode{}
 	topicSummaries := map[string]topicSummary{}
 	sessionInfos := map[string]agent.SessionInfo{}
@@ -6156,6 +6412,9 @@ func (a *App) ListProjectTree() []ProjectNode {
 		globalTopicIDs := pinnedTopicIDs(orderedTopicIDs(f.GlobalTopics, globalTitleMap), f.GlobalPinnedTopics)
 		children := make([]ProjectNode, 0, len(globalTopicIDs))
 		for _, id := range globalTopicIDs {
+			if deletedTopicSet[id] {
+				continue
+			}
 			title := globalTitleMap[id]
 			summaryKey := topicSummaryKey("global", "", id)
 			summary := topicSummaries[summaryKey]
@@ -6231,6 +6490,9 @@ func (a *App) ListProjectTree() []ProjectNode {
 
 		children := make([]ProjectNode, 0, len(topicIDs))
 		for _, tid := range topicIDs {
+			if deletedTopicSet[tid] {
+				continue
+			}
 			topicTitle := strings.TrimSpace(titleMap[tid])
 			if topicTitle == "" {
 				topicTitle = defaultTopicTitle

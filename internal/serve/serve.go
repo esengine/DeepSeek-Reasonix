@@ -175,13 +175,17 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 	if cur.Running() {
 		return fmt.Errorf("cannot switch model while a turn is running")
 	}
-	prevPath := cur.SessionPath()
 
 	// Off-lock: snapshot, carry history, and build the replacement. None of these
 	// touch s.mu, so concurrent handlers keep reading the live controller.
 	if err := cur.Snapshot(); err != nil {
 		slog.Warn("serve: snapshot before model switch", "err", err)
 	}
+	// Capture the continue path and history only after Snapshot: a snapshot
+	// conflict can retarget cur to a recovery branch (or adopt the newer disk
+	// transcript), and a pre-snapshot capture would bind the rebuilt controller
+	// back to the original file, re-conflicting on every later save.
+	prevPath := cur.SessionPath()
 	carried := cur.History()
 
 	newCtrl, err := s.build(ctx, ref)
@@ -207,13 +211,13 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 	s.ctrl = newCtrl
 	s.mu.Unlock()
 
-	// A carried conversation keeps its file (newPath == prevPath) and the lease
-	// with it; only a previously file-less session gets a fresh path here, and
-	// the lease follows it (fresh path — failure is theoretical).
-	if newPath != prevPath {
-		if err := s.rebindSessionLease(newPath); err != nil {
-			slog.Warn("serve: session lease after model switch", "err", err)
-		}
+	// The lease follows the active session file. Rebind is a no-op for the
+	// common carried case (newPath == held path); it moves when a previously
+	// file-less session got a fresh path here, or when the pre-switch snapshot
+	// recovered onto a recovery branch. Both targets are fresh files created
+	// by this process, so failure is theoretical.
+	if err := s.rebindSessionLease(newPath); err != nil {
+		slog.Warn("serve: session lease after model switch", "err", err)
 	}
 
 	// Off-lock: tear down the old controller. Close can block up to 15s.

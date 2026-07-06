@@ -1381,6 +1381,11 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.oldCtrl != nil {
 				m.oldControllers = append(m.oldControllers, msg.oldCtrl)
 			}
+			// The lease follows the controller's session file. Normally a
+			// no-op (a carried conversation keeps its file); it moves when
+			// the pre-switch snapshot recovered onto a recovery branch — a
+			// fresh file created by this process, so failure is theoretical.
+			m.followSessionLease()
 			m.notice(fmt.Sprintf(i18n.M.ModelSwitchedFmt, m.label))
 			cmds = append(cmds, fetchBalance(m.ctrl))
 			if c := m.runStatusline(); c != nil {

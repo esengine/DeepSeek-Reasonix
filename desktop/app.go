@@ -7014,6 +7014,25 @@ func userFacingSessionLeaseError(setting string, err error) error {
 	return err
 }
 
+// sessionPathAfterSnapshot returns where a controller rebuild should keep
+// persisting after the old controller was snapshotted. Snapshotting is not
+// path-neutral: a snapshot conflict can recover by retargeting the controller
+// (and the tab's session lease, via handleTabSessionRecovered) to a recovery
+// branch, so a prevPath captured before the snapshot may be stale. Reusing the
+// stale path would bind the rebuilt controller — carrying the just-recovered
+// transcript — back to the original file, turning every later save into a new
+// conflict that derives yet another recovery branch. Falls back to fallback
+// when the controller is gone or persistence is disabled (empty SessionPath).
+func sessionPathAfterSnapshot(ctrl control.SessionAPI, fallback string) string {
+	if ctrl == nil {
+		return fallback
+	}
+	if path := strings.TrimSpace(ctrl.SessionPath()); path != "" {
+		return path
+	}
+	return fallback
+}
+
 func (a *App) ensureTabSessionLeaseForRebuild(tab *WorkspaceTab, path, setting string) error {
 	if err := tab.ensureSessionLease(path); err != nil {
 		if a.canReclaimCurrentProcessSessionLease(tab, path, err) {
@@ -7153,6 +7172,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 		if err := a.snapshotTabForAction(tab, "changing model"); err != nil {
 			return err
 		}
+		prevPath = sessionPathAfterSnapshot(oldCtrl, prevPath)
 		carried = oldCtrl.History()
 	}
 
@@ -7311,6 +7331,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 		if err := a.snapshotTabForAction(tab, "changing effort"); err != nil {
 			return err
 		}
+		prevPath = sessionPathAfterSnapshot(oldCtrl, prevPath)
 		carried = oldCtrl.History()
 	}
 	sharedHost := a.lookupSharedHost(snap.sharedHostKey)
@@ -7437,6 +7458,7 @@ func (a *App) SetTokenModeForTab(tabID, mode string) error {
 		if err := a.snapshotTabForAction(tab, "changing token mode"); err != nil {
 			return err
 		}
+		prevPath = sessionPathAfterSnapshot(oldCtrl, prevPath)
 		carried = oldCtrl.History()
 	}
 	sharedHost := a.lookupSharedHost(snap.sharedHostKey)

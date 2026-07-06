@@ -35,13 +35,16 @@ import (
 // Cwd roots the session's file tools and bash (built via builtin.Workspace).
 // Model and EffortOverride are optional session-local provider selectors from
 // ACP config options. MCPServers are the MCP servers the client asked the agent
-// to connect for this session.
+// to connect for this session. OnSessionRecovered is the service's bookkeeping
+// hook for automatic transcript recovery branches (see sessionRecoveredHandler);
+// factories must wire it into the controller they build.
 type SessionParams struct {
-	Cwd            string
-	MCPServers     []plugin.Spec
-	Sink           event.Sink
-	Model          string
-	EffortOverride *string
+	Cwd                string
+	MCPServers         []plugin.Spec
+	Sink               event.Sink
+	Model              string
+	EffortOverride     *string
+	OnSessionRecovered func(control.SessionRecoveryInfo) error
 }
 
 // Factory builds the per-session controller. The composition root (the cli's
@@ -170,8 +173,10 @@ type acpSession struct {
 	deleted bool
 	// lease is the session lease guarding transcript against other runtimes
 	// (a desktop window, the CLI) for the life of this session. Held from
-	// session/new / session/load and released on close/delete/teardown; config
-	// rebuilds keep the same transcript, so the lease never moves.
+	// session/new / session/load and released on close/delete/teardown.
+	// Config rebuilds keep the same transcript; when a snapshot conflict
+	// retargets the controller to a recovery branch, sessionRecoveredHandler
+	// moves transcript and this lease to the recovery file at commit time.
 	lease *agent.SessionLease
 	// maintenanceDone is non-nil while session-owned maintenance, such as an
 	// idle config rebuild, is in flight outside mu.
@@ -302,6 +307,80 @@ func sessionLeaseBindError(method string, err error) *RPCError {
 	return &RPCError{Code: ErrInternal, Message: method + ": session lease: " + err.Error()}
 }
 
+// sessionRecoveredHandler returns the OnSessionRecovered callback wired into
+// every controller built for session id. When a snapshot conflict retargets
+// the controller to a recovery branch (turn-end autosave in persistAfterTurn,
+// or the pre-rebuild snapshot in rebuildSession), the ACP bookkeeping must
+// follow at commit time: session/prompt reports sess.transcript,
+// session/delete destroys it, and the session lease must guard the file the
+// controller actually writes. The recovery lease is acquired before the old
+// one is released so the outgoing transcript stays guarded until the new one
+// is secured; a failure aborts the recovery commit and the controller stays
+// on the original path (the next save retries).
+func (s *service) sessionRecoveredHandler(id string) func(control.SessionRecoveryInfo) error {
+	return func(info control.SessionRecoveryInfo) error {
+		recoveryPath := strings.TrimSpace(info.RecoveryPath)
+		if recoveryPath == "" {
+			return nil
+		}
+		sess := s.session(id)
+		if sess == nil {
+			return nil
+		}
+		lease, err := agent.TryAcquireSessionLease(recoveryPath)
+		if err != nil {
+			if errors.Is(err, agent.ErrSessionLeaseHeld) {
+				return fmt.Errorf("bind recovery session: %s; %s",
+					control.SessionInUseMessage(err), control.SessionLeaseCloseHint)
+			}
+			return fmt.Errorf("bind recovery session: %w", err)
+		}
+		sess.mu.Lock()
+		if sess.deleted {
+			sess.mu.Unlock()
+			lease.Release()
+			return fmt.Errorf("bind recovery session: session is deleted")
+		}
+		old := sess.lease
+		sess.lease = lease
+		sess.transcript = recoveryPath
+		meta := sess.metaLocked()
+		sess.mu.Unlock()
+		if old != nil {
+			old.Release()
+		}
+		_ = saveACPMeta(recoveryPath, meta)
+		// Leave a redirect on the id-keyed sidecar so restart-time lookups
+		// (session/load, session/resume, session/delete, loadMeta) resolve the
+		// id to the recovery file; without it the next process reopens the
+		// pre-recovery transcript. Always written against the id-keyed path,
+		// so resolution stays a single hop even for recovery-of-recovery.
+		if dir := s.sessionDir(); dir != "" {
+			if idPath := transcriptPath(dir, id); idPath != recoveryPath {
+				idMeta, _, err := loadACPMeta(idPath)
+				if err != nil {
+					slog.Warn("acp: load id-keyed meta for recovery redirect", "err", err)
+					idMeta = acpSessionMeta{}
+				}
+				if idMeta.SessionID == "" {
+					idMeta.SessionID = id
+				}
+				if idMeta.Cwd == "" {
+					idMeta.Cwd = meta.Cwd
+				}
+				if idMeta.CreatedAt.IsZero() {
+					idMeta.CreatedAt = meta.CreatedAt
+				}
+				idMeta.ActiveTranscript = filepath.Base(recoveryPath)
+				if err := saveACPMeta(idPath, idMeta); err != nil {
+					slog.Warn("acp: save recovery redirect", "err", err)
+				}
+			}
+		}
+		return nil
+	}
+}
+
 // initialize advertises the agent's capability set: persisted load plus ACP v1
 // list/resume/close/delete lifecycle helpers, prompts carrying inline resource
 // text (embeddedContext) but not image/audio, and stdio / Streamable HTTP MCP
@@ -381,11 +460,12 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 
 	sink := newUpdateSink(s.conn, id)
 	ctrl, err := s.factory.NewSession(ctx, SessionParams{
-		Cwd:            cwd,
-		MCPServers:     mcpServers,
-		Sink:           sink,
-		Model:          cfgState.Model,
-		EffortOverride: cloneStringPtr(cfgState.EffortOverride),
+		Cwd:                cwd,
+		MCPServers:         mcpServers,
+		Sink:               sink,
+		Model:              cfgState.Model,
+		EffortOverride:     cloneStringPtr(cfgState.EffortOverride),
+		OnSessionRecovered: s.sessionRecoveredHandler(id),
 	})
 	if err != nil {
 		return nil, &RPCError{Code: ErrInternal, Message: "session/new: " + err.Error()}
@@ -496,7 +576,7 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 	var saved acpSessionMeta
 	persistedPath := ""
 	if dir := s.sessionDir(); dir != "" {
-		persistedPath = transcriptPath(dir, id)
+		persistedPath = resolveTranscriptPath(dir, id)
 		if agent.IsCleanupPending(persistedPath) {
 			return SessionConfigState{}, &RPCError{Code: ErrInvalidParams, Message: method + ": unknown session " + id}
 		}
@@ -521,11 +601,12 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 
 	sink := newUpdateSink(s.conn, id)
 	ctrl, err := s.factory.NewSession(ctx, SessionParams{
-		Cwd:            cwd,
-		MCPServers:     mcpServers,
-		Sink:           sink,
-		Model:          cfgState.Model,
-		EffortOverride: cloneStringPtr(cfgState.EffortOverride),
+		Cwd:                cwd,
+		MCPServers:         mcpServers,
+		Sink:               sink,
+		Model:              cfgState.Model,
+		EffortOverride:     cloneStringPtr(cfgState.EffortOverride),
+		OnSessionRecovered: s.sessionRecoveredHandler(id),
 	})
 	if err != nil {
 		return SessionConfigState{}, &RPCError{Code: ErrInternal, Message: method + ": " + err.Error()}
@@ -539,7 +620,7 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 		ctrl.Close()
 		return SessionConfigState{}, &RPCError{Code: ErrInternal, Message: method + ": persistence is disabled"}
 	}
-	path := transcriptPath(dir, id)
+	path := resolveTranscriptPath(dir, id)
 	if path != persistedPath && agent.IsCleanupPending(path) {
 		ctrl.Close()
 		return SessionConfigState{}, &RPCError{Code: ErrInvalidParams, Message: method + ": unknown session " + id}
@@ -598,6 +679,38 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 // chat/run session files (those are addressed by a picker, not by id).
 func transcriptPath(dir, id string) string {
 	return filepath.Join(dir, id+".jsonl")
+}
+
+// resolveTranscriptPath returns the transcript file session id currently
+// lives in. That is the id-keyed path by default; after a snapshot recovery
+// moved the live session onto a recovery branch, the id-keyed sidecar carries
+// an ActiveTranscript redirect (written by sessionRecoveredHandler) that
+// load/resume/delete/meta lookups must follow, or a restart silently reopens
+// the pre-recovery transcript. The redirect is a basename, must stay inside
+// dir, and its target must exist and claim the same session id; anything else
+// falls back to the id-keyed path.
+func resolveTranscriptPath(dir, id string) string {
+	path := transcriptPath(dir, id)
+	meta, ok, err := loadACPMeta(path)
+	if err != nil || !ok {
+		return path
+	}
+	active := strings.TrimSpace(meta.ActiveTranscript)
+	if active == "" || active == filepath.Base(path) {
+		return path
+	}
+	if filepath.Base(active) != active {
+		return path
+	}
+	resolved := filepath.Join(dir, active)
+	if !sessionFileExists(resolved) {
+		return path
+	}
+	targetMeta, ok, err := loadACPMeta(resolved)
+	if err != nil || !ok || targetMeta.SessionID != id {
+		return path
+	}
+	return resolved
 }
 
 // sessionPrompt runs one turn. It flattens the prompt blocks to text and runs the
@@ -766,7 +879,6 @@ func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState
 	sess.pendingConfig = nil
 
 	cur := sess.ctrl
-	prevPath := cur.SessionPath()
 	sink := sess.sink
 	mcpServers := clonePluginSpecs(sess.mcpServers)
 	cwd := sess.cwd
@@ -783,14 +895,24 @@ func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState
 	if err := cur.Snapshot(); err != nil {
 		return &RPCError{Code: ErrInternal, Message: "session config: snapshot before switch: " + err.Error()}
 	}
+	// Capture the adopt path and history only after Snapshot: a snapshot
+	// conflict can retarget cur to a recovery branch (or adopt the newer disk
+	// transcript), and a pre-snapshot capture would bind the rebuilt controller
+	// back to the original file, re-conflicting on every later save. When that
+	// recovery fired, sessionRecoveredHandler already moved sess.transcript
+	// and the session lease to the recovery file, so prevPath, the session
+	// bookkeeping, and the controller agree on one path here.
+	// SessionPath is controller-locked, so reading it off sess.mu is safe.
+	prevPath := cur.SessionPath()
 	carried := cur.History()
 
 	newCtrl, err := s.factory.NewSession(ctx, SessionParams{
-		Cwd:            cwd,
-		MCPServers:     mcpServers,
-		Sink:           sink,
-		Model:          cfgState.Model,
-		EffortOverride: cloneStringPtr(cfgState.EffortOverride),
+		Cwd:                cwd,
+		MCPServers:         mcpServers,
+		Sink:               sink,
+		Model:              cfgState.Model,
+		EffortOverride:     cloneStringPtr(cfgState.EffortOverride),
+		OnSessionRecovered: s.sessionRecoveredHandler(sess.id),
 	})
 	if err != nil {
 		return &RPCError{Code: ErrInternal, Message: "session config: " + err.Error()}
@@ -932,7 +1054,18 @@ func (s *service) sessionList(_ context.Context, raw json.RawMessage) (any, erro
 		if err != nil {
 			return nil, &RPCError{Code: ErrInternal, Message: "session/list: " + err.Error()}
 		}
+		// A recovered session has two sidecars claiming the same id: the
+		// active recovery transcript's own meta and the id-keyed redirect.
+		// Reduce to one representative per id before filtering, so the entry
+		// shown never carries the stale pre-recovery title/timestamps.
+		best := map[string]acpSessionMeta{}
 		for _, meta := range metas {
+			cur, ok := best[meta.SessionID]
+			if !ok || listMetaBeats(meta, cur) {
+				best[meta.SessionID] = meta
+			}
+		}
+		for _, meta := range best {
 			info := meta.info(nil)
 			if sessionInfoMatchesCwd(info, filterCwd) {
 				byID[info.SessionID] = info
@@ -996,7 +1129,7 @@ func (s *service) sessionDelete(_ context.Context, raw json.RawMessage) (any, er
 	}
 	if path == "" {
 		if dir := s.sessionDir(); dir != "" {
-			path = transcriptPath(dir, p.SessionID)
+			path = resolveTranscriptPath(dir, p.SessionID)
 		}
 	}
 	if path != "" && !delayed {
@@ -1005,6 +1138,17 @@ func (s *service) sessionDelete(_ context.Context, raw json.RawMessage) (any, er
 		}
 		if destroy.Finish != nil {
 			destroy.Finish()
+		}
+	}
+	// A recovered session lives in two files: the recovery transcript (deleted
+	// above) and the id-keyed original holding the redirect. Remove the twin
+	// too, or it resurfaces in session/list as a ghost that delete-by-id can
+	// never reach again.
+	if dir := s.sessionDir(); dir != "" {
+		if idPath := transcriptPath(dir, p.SessionID); idPath != path {
+			if err := deleteSessionFiles(idPath); err != nil {
+				return nil, &RPCError{Code: ErrInternal, Message: "session/delete: " + err.Error()}
+			}
 		}
 	}
 	return SessionDeleteResult{}, nil
@@ -1187,7 +1331,7 @@ func (s *service) loadMeta(id string) (acpSessionMeta, bool) {
 	if dir == "" {
 		return acpSessionMeta{}, false
 	}
-	meta, ok, err := loadACPMeta(transcriptPath(dir, id))
+	meta, ok, err := loadACPMeta(resolveTranscriptPath(dir, id))
 	if err != nil {
 		return acpSessionMeta{}, false
 	}
@@ -1377,6 +1521,12 @@ type acpSessionMeta struct {
 	Title          string    `json:"title,omitempty"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
+	// ActiveTranscript, when set on the id-keyed sidecar, is the basename of
+	// the transcript this session currently lives in: a snapshot recovery
+	// moved the live session onto a recovery branch and left this redirect
+	// behind so restart-time lookups (resolveTranscriptPath) follow the
+	// session instead of reopening the pre-recovery file.
+	ActiveTranscript string `json:"activeTranscript,omitempty"`
 }
 
 func (m acpSessionMeta) info(extra map[string]any) SessionInfo {
@@ -1540,6 +1690,19 @@ func sessionIDFromTranscript(path string) string {
 		base = strings.TrimSuffix(base, ext)
 	}
 	return base
+}
+
+// listMetaBeats reports whether a should represent its session id in
+// session/list over b. A meta without an ActiveTranscript redirect is the
+// session's live transcript and always beats a redirect sidecar; between two
+// of the same kind the later UpdatedAt wins.
+func listMetaBeats(a, b acpSessionMeta) bool {
+	aRedirect := strings.TrimSpace(a.ActiveTranscript) != ""
+	bRedirect := strings.TrimSpace(b.ActiveTranscript) != ""
+	if aRedirect != bRedirect {
+		return !aRedirect
+	}
+	return a.UpdatedAt.After(b.UpdatedAt)
 }
 
 func sessionInfoMatchesCwd(info SessionInfo, filter string) bool {

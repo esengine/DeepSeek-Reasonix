@@ -81,11 +81,15 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 		display = "auto"
 	}
 	m.notice(fmt.Sprintf("setting effort for %s to %s…", entry.Name, display))
-	carried := m.ctrl.History()
-	prevPath := m.ctrl.SessionPath()
 	if err := m.ctrl.Snapshot(); err != nil {
 		m.notice("effort: snapshot: " + err.Error())
 	}
+	// Capture the resume path and history only after Snapshot: a snapshot
+	// conflict can retarget the controller to a recovery branch (or adopt the
+	// newer disk transcript), and a pre-snapshot capture would bind the rebuilt
+	// controller back to the original file, re-conflicting on every later save.
+	carried := m.ctrl.History()
+	prevPath := m.ctrl.SessionPath()
 	oldCtrl := m.ctrl
 	build := m.buildController
 	m.modelSwitchPending = true
