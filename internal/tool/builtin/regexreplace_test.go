@@ -386,9 +386,7 @@ func TestRegexReplaceDiffChangeKind(t *testing.T) {
 	if err != nil {
 		t.Fatalf("preview: %v", err)
 	}
-	if change.Mode != string(diff.Modify) {
-		t.Errorf("change.Mode = %q, want %q", change.Mode, diff.Modify)
+	if change.Kind != diff.Modify {
+		t.Errorf("change.Kind = %q, want %q", change.Kind, diff.Modify)
 	}
 }
-
-

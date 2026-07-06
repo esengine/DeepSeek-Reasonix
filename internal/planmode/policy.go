@@ -80,6 +80,7 @@ var knownBlockedTools = map[string]bool{
 	"symbol_delete":   true,
 	"delete_range":    true,
 	"delete_symbol":   true,
+	"regex_replace":   true,
 	"complete_step":   true,
 	"task":            true,
 	"parallel_tasks":  true,
