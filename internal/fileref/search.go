@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"reasonix/internal/textutil"
 )
 
 var skipEntryNames = map[string]bool{
@@ -140,9 +142,9 @@ func Search(root, query string, limit int) []SearchResult {
 		}
 		return nil
 	})
-	sort.Slice(basenameHits, func(i, j int) bool { return basenameHits[i].Path < basenameHits[j].Path })
-	sort.Slice(segmentHits, func(i, j int) bool { return segmentHits[i].Path < segmentHits[j].Path })
-	sort.Slice(dirHits, func(i, j int) bool { return dirHits[i].Path < dirHits[j].Path })
+	sort.Slice(basenameHits, func(i, j int) bool { return textutil.NaturalLess(basenameHits[i].Path, basenameHits[j].Path) })
+	sort.Slice(segmentHits, func(i, j int) bool { return textutil.NaturalLess(segmentHits[i].Path, segmentHits[j].Path) })
+	sort.Slice(dirHits, func(i, j int) bool { return textutil.NaturalLess(dirHits[i].Path, dirHits[j].Path) })
 	// Directories first so the user can navigate into them; then basename
 	// hits (most relevant file matches); then path-segment hits. We reserve
 	// up to dirQuota slots for directories so they are never fully crowded
