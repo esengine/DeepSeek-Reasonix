@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"reasonix/internal/config"
+	"reasonix/internal/control"
 	"reasonix/internal/event"
 )
 
@@ -48,6 +49,75 @@ func TestTerminalTitleActivityPrefersActionRequired(t *testing.T) {
 
 	if got := m.renderTerminalTitle(); got != "Action required" {
 		t.Fatalf("renderTerminalTitle = %q, want Action required", got)
+	}
+}
+
+func TestDefaultTerminalTitleItemsPreferReasonixStatus(t *testing.T) {
+	got := config.DefaultTerminalTitleItems()
+	want := []string{
+		config.TerminalTitleActivity,
+		config.TerminalTitleSessionTitle,
+		config.TerminalTitleTodoProgress,
+		config.TerminalTitleMode,
+		config.TerminalTitleModel,
+		config.TerminalTitleEffort,
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("DefaultTerminalTitleItems = %v, want %v", got, want)
+	}
+}
+
+func TestTerminalTitleIncludesReasonixModeModelEffort(t *testing.T) {
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{})
+	m.ctrl.SetToolApprovalMode(control.ToolApprovalYolo)
+	m.modelRef = "deepseek/deepseek-v4-pro"
+	m.effortLevel = "max"
+	m.terminalTitleItems = []string{
+		config.TerminalTitleMode,
+		config.TerminalTitleModel,
+		config.TerminalTitleEffort,
+	}
+
+	if got := m.renderTerminalTitle(); got != "YOLO | deepseek/deepseek-v4-pro | effort max" {
+		t.Fatalf("renderTerminalTitle = %q, want Reasonix mode/model/effort", got)
+	}
+}
+
+func TestTerminalTitlePickerUsesReasonixDescriptions(t *testing.T) {
+	m := newTestChatTUI()
+	m.openTitlePicker()
+	body := m.renderTitlePickerBody(120)
+
+	for _, want := range []string{"Reasonix Terminal Title", "YOLO", "todo_write", "/model", "/effort"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("title picker body missing %q:\n%s", want, body)
+		}
+	}
+	for _, copied := range []string{"Current working, thinking", "Current thread title", "Latest task progress"} {
+		if strings.Contains(body, copied) {
+			t.Fatalf("title picker still contains copied-style wording %q:\n%s", copied, body)
+		}
+	}
+}
+
+func TestTerminalTitleAliasesRemainCompatible(t *testing.T) {
+	got := config.NormalizeTerminalTitleItems([]string{
+		"thread-title",
+		"task-progress",
+		"approval-mode",
+		"reasoning-effort",
+		"ctx",
+	})
+	want := []string{
+		config.TerminalTitleSessionTitle,
+		config.TerminalTitleTodoProgress,
+		config.TerminalTitleMode,
+		config.TerminalTitleEffort,
+		config.TerminalTitleContext,
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("NormalizeTerminalTitleItems = %v, want %v", got, want)
 	}
 }
 

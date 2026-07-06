@@ -76,6 +76,16 @@ func (m chatTUI) renderTerminalTitleItem(item string) string {
 		return sessionTerminalTitle(m.ctrl.SessionPath())
 	case config.TerminalTitleTodoProgress:
 		return terminalTitleTodoProgress(m.todoArgs)
+	case config.TerminalTitleMode:
+		return m.terminalTitleMode()
+	case config.TerminalTitleModel:
+		return m.terminalTitleModel()
+	case config.TerminalTitleEffort:
+		return m.terminalTitleEffort()
+	case config.TerminalTitleContext:
+		return m.terminalTitleContext()
+	case config.TerminalTitleBalance:
+		return strings.TrimSpace(m.balance)
 	case config.TerminalTitleAppName:
 		return "Reasonix"
 	case config.TerminalTitleProjectName:
@@ -89,6 +99,53 @@ func (m chatTUI) renderTerminalTitleItem(item string) string {
 	default:
 		return ""
 	}
+}
+
+func (m chatTUI) terminalTitleMode() string {
+	if m.ctrl == nil {
+		if m.planMode {
+			return "Plan"
+		}
+		return ""
+	}
+	return m.modeTagText()
+}
+
+func (m chatTUI) terminalTitleModel() string {
+	if ref := strings.TrimSpace(m.modelRef); ref != "" {
+		return ref
+	}
+	return strings.TrimSpace(m.label)
+}
+
+func (m chatTUI) terminalTitleEffort() string {
+	if strings.TrimSpace(m.effortLevel) == "" {
+		return ""
+	}
+	return "effort " + strings.TrimSpace(m.effortLevel)
+}
+
+func (m chatTUI) terminalTitleContext() string {
+	if m.ctrl == nil {
+		return ""
+	}
+	used, window := m.ctrl.ContextSnapshot()
+	if used == 0 || window == 0 {
+		return ""
+	}
+	pct := used * 100 / window
+	if ratio := m.ctrl.CompactRatio(); ratio > 0 && ratio < 1 {
+		threshold := int(ratio * 100)
+		left := threshold - pct
+		if left < 0 {
+			left = 0
+		}
+		if pct >= threshold {
+			return fmt.Sprintf("%s ctx %d%% compacting soon", shortTokens(used), pct)
+		}
+		return fmt.Sprintf("%s ctx %d%% %d%% to compact", shortTokens(used), pct, left)
+	}
+	return fmt.Sprintf("%s/%s ctx %d%%", shortTokens(used), shortTokens(window), pct)
 }
 
 func (m chatTUI) terminalTitleActivity() string {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 )
@@ -119,6 +120,7 @@ func TestRenameCurrentSessionUpdatesTerminalWindowTitle(t *testing.T) {
 		Label:       "test",
 	})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m.terminalTitleItems = []string{config.TerminalTitleSessionTitle}
 
 	m.runRenameCommand("/rename aphone开发线程")
 

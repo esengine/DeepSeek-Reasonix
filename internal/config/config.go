@@ -562,6 +562,11 @@ const (
 	TerminalTitleActivity     = "activity"
 	TerminalTitleSessionTitle = "session-title"
 	TerminalTitleTodoProgress = "todo-progress"
+	TerminalTitleMode         = "mode"
+	TerminalTitleModel        = "model"
+	TerminalTitleEffort       = "effort"
+	TerminalTitleContext      = "context"
+	TerminalTitleBalance      = "balance"
 	TerminalTitleAppName      = "app-name"
 	TerminalTitleProjectName  = "project-name"
 	TerminalTitleCurrentDir   = "current-dir"
@@ -573,6 +578,9 @@ var defaultTerminalTitleItems = []string{
 	TerminalTitleActivity,
 	TerminalTitleSessionTitle,
 	TerminalTitleTodoProgress,
+	TerminalTitleMode,
+	TerminalTitleModel,
+	TerminalTitleEffort,
 }
 
 // DefaultTerminalTitleItems returns the built-in terminal title item order.
@@ -619,6 +627,16 @@ func canonicalTerminalTitleItem(item string) string {
 		return TerminalTitleSessionTitle
 	case TerminalTitleTodoProgress, "task-progress":
 		return TerminalTitleTodoProgress
+	case TerminalTitleMode, "approval-mode", "tool-approval":
+		return TerminalTitleMode
+	case TerminalTitleModel:
+		return TerminalTitleModel
+	case TerminalTitleEffort, "reasoning-effort":
+		return TerminalTitleEffort
+	case TerminalTitleContext, "ctx":
+		return TerminalTitleContext
+	case TerminalTitleBalance:
+		return TerminalTitleBalance
 	case TerminalTitleAppName:
 		return TerminalTitleAppName
 	case TerminalTitleProjectName:

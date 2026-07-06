@@ -22,14 +22,19 @@ type terminalTitleItemDef struct {
 }
 
 var terminalTitleItemDefs = []terminalTitleItemDef{
-	{config.TerminalTitleActivity, "activity", "Current working, thinking, approval, or picker state"},
-	{config.TerminalTitleSessionTitle, "session-title", "Current session title from /rename or session metadata"},
-	{config.TerminalTitleTodoProgress, "todo-progress", "Latest todo_write progress, including completed lists"},
-	{config.TerminalTitleAppName, "app-name", "Reasonix app name"},
-	{config.TerminalTitleProjectName, "project-name", "Workspace root directory name"},
-	{config.TerminalTitleCurrentDir, "current-dir", "Current working directory"},
-	{config.TerminalTitleRunState, "run-state", "Ready, Working, Stopping, or Blocked"},
-	{config.TerminalTitleGitBranch, "git-branch", "Current Git branch when available"},
+	{config.TerminalTitleActivity, "live-run", "Reasonix live line: thinking seconds, cancel state, output tokens"},
+	{config.TerminalTitleSessionTitle, "session", "Title from /rename, branch metadata, or saved session id"},
+	{config.TerminalTitleTodoProgress, "todo-write", "todo_write checklist progress pinned above the composer"},
+	{config.TerminalTitleMode, "mode", "Ask/Auto/YOLO/Plan/Goal badge from the Reasonix status bar"},
+	{config.TerminalTitleModel, "model", "Active provider/model ref selected by /model"},
+	{config.TerminalTitleEffort, "effort", "Current /effort reasoning depth when the provider supports it"},
+	{config.TerminalTitleContext, "context", "Context usage plus auto-compact headroom"},
+	{config.TerminalTitleBalance, "balance", "Provider wallet balance when the model exposes a balance endpoint"},
+	{config.TerminalTitleGitBranch, "git", "Repo branch identity from the built-in Reasonix status line"},
+	{config.TerminalTitleProjectName, "workspace", "Workspace root folder owned by this controller"},
+	{config.TerminalTitleCurrentDir, "cwd", "Process working directory for this CLI session"},
+	{config.TerminalTitleAppName, "app", "Literal Reasonix marker"},
+	{config.TerminalTitleRunState, "state", "Compact Ready/Working/Stopping/Blocked state for terminals"},
 }
 
 func (m *chatTUI) openTitlePicker() {
@@ -137,8 +142,8 @@ func (m chatTUI) renderTitlePicker() string {
 func (m chatTUI) renderTitlePickerBody(width int) string {
 	p := m.titlePick
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n", viewHeader("Configure Terminal Title"))
-	fmt.Fprintf(&b, "%s\n\n", viewMeta("Select which items to display in the terminal title."))
+	fmt.Fprintf(&b, "%s\n", viewHeader("Reasonix Terminal Title"))
+	fmt.Fprintf(&b, "%s\n\n", viewMeta("Pick Reasonix session/status fields to mirror into the terminal tab title."))
 	for i, def := range terminalTitleItemDefs {
 		b.WriteString(renderTitlePickerRow(i, i == p.sel, p.enabled[def.id], def, width))
 		b.WriteByte('\n')
@@ -148,7 +153,7 @@ func (m chatTUI) renderTitlePickerBody(width int) string {
 	preview.titlePick = nil
 	previewTitle := preview.renderTerminalTitle()
 	if previewTitle == "" {
-		previewTitle = "(empty until a session title, todo, or activity is available)"
+		previewTitle = "(waiting for Reasonix session or run metadata)"
 	}
 	b.WriteByte('\n')
 	b.WriteString(viewSubhead("Preview") + "\n")
@@ -165,7 +170,7 @@ func renderTitlePickerRow(_ int, selected, enabled bool, def terminalTitleItemDe
 	if enabled {
 		check = "[x]"
 	}
-	name := fmt.Sprintf("%-14s", def.name)
+	name := fmt.Sprintf("%-12s", def.name)
 	used := 4 + visibleWidth(check) + 1 + visibleWidth(name) + 2
 	desc := viewMeta(viewCompactText(def.desc, viewBudget(width, used)))
 	line := fmt.Sprintf("%s%s %s  %s", prefix, check, name, desc)
