@@ -207,6 +207,7 @@ type Messages struct {
 	CmdSwitchBranch     string // /switch
 	CmdResume           string // /resume
 	CmdRename           string // /rename
+	CmdTitle            string // /title
 	CmdModel            string // /model
 	CmdStatus           string // /status
 	CmdWorkMode         string // /work-mode

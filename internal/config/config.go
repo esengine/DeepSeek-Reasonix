@@ -56,6 +56,7 @@ type Config struct {
 	Plugins          []PluginEntry       `toml:"plugins"`
 	Skills           SkillsConfig        `toml:"skills"`
 	Statusline       StatuslineConfig    `toml:"statusline"`
+	TerminalTitle    TerminalTitleConfig `toml:"terminal_title"`
 	LSP              LSPConfig           `toml:"lsp"`
 	Bot              BotConfig           `toml:"bot"`
 	Serve            ServeConfig         `toml:"serve"`
@@ -548,6 +549,110 @@ type LSPServer struct {
 // status data row. A JSON payload (model, context tokens, cwd) is fed on stdin.
 type StatuslineConfig struct {
 	Command string `toml:"command"`
+}
+
+// TerminalTitleConfig configures the terminal/Ghostty tab title shown by the
+// interactive CLI. Items are rendered in order and omitted when their value is
+// unavailable for the current session.
+type TerminalTitleConfig struct {
+	Items []string `toml:"items"`
+}
+
+const (
+	TerminalTitleActivity     = "activity"
+	TerminalTitleSessionTitle = "session-title"
+	TerminalTitleTodoProgress = "todo-progress"
+	TerminalTitleAppName      = "app-name"
+	TerminalTitleProjectName  = "project-name"
+	TerminalTitleCurrentDir   = "current-dir"
+	TerminalTitleRunState     = "run-state"
+	TerminalTitleGitBranch    = "git-branch"
+)
+
+var defaultTerminalTitleItems = []string{
+	TerminalTitleActivity,
+	TerminalTitleSessionTitle,
+	TerminalTitleTodoProgress,
+}
+
+// DefaultTerminalTitleItems returns the built-in terminal title item order.
+func DefaultTerminalTitleItems() []string {
+	return append([]string(nil), defaultTerminalTitleItems...)
+}
+
+// NormalizeTerminalTitleItems canonicalizes known item names, removes
+// duplicates, and falls back to the built-in defaults when no valid item remains.
+func NormalizeTerminalTitleItems(items []string) []string {
+	out, _ := normalizeTerminalTitleItems(items)
+	if len(out) == 0 {
+		return DefaultTerminalTitleItems()
+	}
+	return out
+}
+
+func normalizeTerminalTitleItems(items []string) ([]string, []string) {
+	out := []string{}
+	invalid := []string{}
+	seen := map[string]bool{}
+	for _, item := range items {
+		canonical := canonicalTerminalTitleItem(item)
+		if canonical == "" {
+			if strings.TrimSpace(item) != "" {
+				invalid = append(invalid, item)
+			}
+			continue
+		}
+		if seen[canonical] {
+			continue
+		}
+		seen[canonical] = true
+		out = append(out, canonical)
+	}
+	return out, invalid
+}
+
+func canonicalTerminalTitleItem(item string) string {
+	switch strings.ToLower(strings.TrimSpace(item)) {
+	case TerminalTitleActivity:
+		return TerminalTitleActivity
+	case TerminalTitleSessionTitle, "thread-title":
+		return TerminalTitleSessionTitle
+	case TerminalTitleTodoProgress, "task-progress":
+		return TerminalTitleTodoProgress
+	case TerminalTitleAppName:
+		return TerminalTitleAppName
+	case TerminalTitleProjectName:
+		return TerminalTitleProjectName
+	case TerminalTitleCurrentDir:
+		return TerminalTitleCurrentDir
+	case TerminalTitleRunState:
+		return TerminalTitleRunState
+	case TerminalTitleGitBranch:
+		return TerminalTitleGitBranch
+	default:
+		return ""
+	}
+}
+
+// TerminalTitleItems returns the effective item order for terminal titles.
+func (c *Config) TerminalTitleItems() []string {
+	if c == nil {
+		return DefaultTerminalTitleItems()
+	}
+	return NormalizeTerminalTitleItems(c.TerminalTitle.Items)
+}
+
+// SetTerminalTitleItems validates and stores the terminal title item order.
+func (c *Config) SetTerminalTitleItems(items []string) error {
+	normalized, invalid := normalizeTerminalTitleItems(items)
+	if len(normalized) == 0 {
+		return fmt.Errorf("terminal title: select at least one item")
+	}
+	if len(invalid) > 0 {
+		return fmt.Errorf("terminal title: unknown item %q", invalid[0])
+	}
+	c.TerminalTitle.Items = normalized
+	return nil
 }
 
 // BotConfig 控制多渠道 IM bot 消息网关。
@@ -1580,6 +1685,7 @@ func Default() *Config {
 		CredentialsStore: CredentialsStoreAuto,
 		UI:               UIConfig{Theme: "auto"},
 		Desktop:          DesktopConfig{DefaultToolApprovalMode: "auto"},
+		TerminalTitle:    TerminalTitleConfig{Items: DefaultTerminalTitleItems()},
 		Notifications: NotificationsConfig{
 			Enabled:         false,
 			TurnDone:        true,

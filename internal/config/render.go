@@ -472,6 +472,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 	b.WriteString("\n")
 
+	b.WriteString("[terminal_title]\n")
+	b.WriteString("# Items shown in the terminal/Ghostty tab title. Use /title to change this interactively.\n")
+	fmt.Fprintf(&b, "items = %s\n", renderStringArray(c.TerminalTitleItems()))
+	b.WriteString("\n")
+
 	if shouldRenderBot(c, defaults, scope) {
 		b.WriteString("# Bot gateway: multi-channel IM bot for QQ, Feishu/Lark, and WeChat.\n")
 		b.WriteString("[bot]\n")
@@ -1091,6 +1096,12 @@ func RenderTOMLProjectDelta(c *Config) string {
 			fmt.Fprintf(&b, "command = %q\n", c.Statusline.Command)
 		}
 		b.WriteString("\n")
+	}
+
+	// [terminal_title]
+	if !reflect.DeepEqual(c.TerminalTitleItems(), d.TerminalTitleItems()) {
+		b.WriteString("[terminal_title]\n")
+		fmt.Fprintf(&b, "items = %s\n\n", renderStringArray(c.TerminalTitleItems()))
 	}
 
 	// [[plugins]] — always include when set; replaces all existing entries
