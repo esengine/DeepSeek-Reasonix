@@ -29511,3 +29511,38 @@ body > .mermaid-diagram--fullscreen {
     min-width: 0;
   }
 }
+
+/* ── Windows frameless: workbench dock tab compression ─────────────── */
+/* When the rightmost tab ("Changes") would touch the window-controls box
+   (dock ≤ 380 px  →  3 × 69 px tabs + 12 px left padding + 156 px safe
+   area), enable proportional flex-shrink.  Padding and gap use clamp()
+   with cqi units so they decrease *continuously* from 380 px down to the
+   minimum dock width — no discrete jumps.  macOS / Linux are unaffected
+   (no .app--windows-frameless class in the DOM). */
+
+@container (max-width: 380px) {
+  /* ── tabs: proportional shrink + continuous padding / gap ── */
+  :root[data-theme-style] .app--windows-frameless .workbench-dock__tab,
+  :root[data-theme-style] .app--windows-frameless.app--creation .workbench-dock__tab,
+  .app--windows-frameless.app--creation .workbench-dock__tab,
+  .app--windows-frameless .workbench-dock__tab {
+    flex: 1 1 auto;
+    min-width: 30px;
+    max-width: none;
+    /*  380 px dock → 12 px padding    300 px dock →  5 px padding  */
+    padding-left:  clamp(5px, calc(8.75 * 1cqi - 21.25px), 12px);
+    padding-right: clamp(5px, calc(8.75 * 1cqi - 21.25px), 12px);
+    /*  380 px dock →  6 px gap        300 px dock →  2 px gap      */
+    gap:           clamp(2px, calc(5 * 1cqi - 13px), 6px);
+  }
+
+  /* ── label: allow truncation once text no longer fits ── */
+  :root[data-theme-style] .app--windows-frameless .workbench-dock__tab-label,
+  :root[data-theme-style] .app--windows-frameless.app--creation .workbench-dock__tab-label,
+  .app--windows-frameless.app--creation .workbench-dock__tab-label,
+  .app--windows-frameless .workbench-dock__tab-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
