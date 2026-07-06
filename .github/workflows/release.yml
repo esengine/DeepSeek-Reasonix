@@ -30,7 +30,9 @@ jobs:
     name: archives + checksums + homebrew tap
     needs: cache-guard
     runs-on: ubuntu-latest
-    # CLI stable release (archives + GitHub release + Homebrew cask). Gated on the
+    # CLI stable release (archives + GitHub release + Homebrew cask). It does not
+    # claim GitHub's repository-wide Latest badge; that belongs to desktop so the
+    # repository homepage points users at the installable app. Gated on the
     # `release` environment so only esengine can approve it going public.
     environment: release
     steps:
@@ -84,12 +86,13 @@ jobs:
           gh release upload "$TAG" latest.json --clobber
 
       # The compatibility asset exists for pre-v1.16 desktop updaters that
-      # still poll GitHub's repository-wide latest URL — so verify it exactly
-      # the way those clients fetch it: anonymously, over the public edge, with
-      # a Go client UA. Unlike dl.reasonix.io (whose bot protection 403s
-      # Actions egress — see the R2 note above), GitHub serves its own runners,
-      # so this can hard-fail. #5826/#5858 shipped a broken update check for
-      # weeks precisely because nothing exercised the public path. Retries
+      # still poll GitHub's repository-wide latest URL. Desktop releases now
+      # own that Latest badge, but this check still exercises the public fallback
+      # path exactly the way those clients fetch it: anonymously, over the public
+      # edge, with a Go client UA. Unlike dl.reasonix.io (whose bot protection
+      # 403s Actions egress — see the R2 note above), GitHub serves its own
+      # runners, so this can hard-fail. #5826/#5858 shipped a broken update check
+      # for weeks precisely because nothing exercised the public path. Retries
       # cover the release CDN propagating the freshly uploaded asset.
       - name: Smoke public compatibility manifest
         env:

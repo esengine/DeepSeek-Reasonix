@@ -9,7 +9,7 @@ name: Release desktop
 # runner per platform. Artifacts are minisign-signed (MINISIGN_* secrets), a
 # latest.json manifest is generated, and everything is published to a GitHub
 # release and mirrored to R2 (the updater reads R2 first, then the crash worker
-# release gateway; GitHub's repository-wide "latest" is reserved for the CLI line).
+# release gateway; stable desktop releases own GitHub's repository-wide "latest").
 #
 # The same build/sign/manifest pipeline serves two channels. A `desktop-v*` tag
 # (or manual stable dispatch) publishes a GitHub release and moves R2's latest/
@@ -269,10 +269,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Repository-wide "latest" is reserved for the CLI line (see header);
-          # without this a desktop release published after the CLI one steals it.
-          args=(--title "Reasonix Desktop ${{ steps.ver.outputs.version }}" --generate-notes --latest=false)
-          [ "${{ steps.ver.outputs.prerelease }}" = "true" ] && args+=(--prerelease)
+          # Keep the repository homepage focused on the installable desktop app;
+          # the CLI release line is configured not to claim repository-wide latest.
+          args=(--title "Reasonix Desktop ${{ steps.ver.outputs.version }}" --generate-notes)
+          if [ "${{ steps.ver.outputs.prerelease }}" = "true" ]; then
+            args+=(--prerelease --latest=false)
+          else
+            args+=(--latest)
+          fi
           gh release create "${{ steps.ver.outputs.tag }}" dist/* "${args[@]}"
 
       - name: Upload canary dist for mirror

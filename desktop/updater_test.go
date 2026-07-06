@@ -102,9 +102,9 @@ func TestChannelSelectsDistinctPointers(t *testing.T) {
 		t.Errorf("stable fallback = %q, want the release gateway", stable[1])
 	}
 	// GitHub is stable's explicit last resort only (#6005: both first-party
-	// endpoints share one Cloudflare zone). release.yml pins the desktop
-	// manifest mirror to the repo-wide latest release, which is what makes this
-	// URL safe; no other slot may lean on repository-wide latest.
+	// endpoints share one Cloudflare zone). Stable desktop releases own the
+	// repo-wide latest release and carry latest.json directly; no other slot may
+	// lean on repository-wide latest.
 	if len(stable) != 3 || stable[2] != githubManifestFallback {
 		t.Errorf("stable endpoints = %q, want the GitHub compatibility manifest last", stable)
 	}

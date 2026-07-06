@@ -577,6 +577,8 @@ await act(async () => {
   await metaH.promise;
   await flushPromises();
 });
+eq(controller?.activeTabId, "tab-g", "late meta from a replaced tab does not switch the visible tab");
+ok(controller?.state.meta?.label !== "stale-model-tab-h", "late meta from a replaced tab does not overwrite visible metadata");
 historyH = deferred<HistoryMessage[]>();
 holdNextHistoryForH = true;
 await act(async () => {

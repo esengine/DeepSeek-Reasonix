@@ -84,7 +84,14 @@ type WorkspaceTab struct {
 	// readTelemetry tracks files read during this tab's session.
 	readTelemetry  []readFileRecord
 	usageTelemetry sessionUsageStats
-	telemMu        sync.Mutex
+	// telemetrySessionKey is the sessionRuntimeKey the telemetry above belongs
+	// to. Controller-side session rotations (typed /new, bot /reset) bypass the
+	// App bindings, so telemetry writers and readers re-key through
+	// syncTelemetryToSession before trusting the in-memory totals — otherwise a
+	// previous session's cost keeps accumulating under the new session and gets
+	// persisted into its sidecar (#5850).
+	telemetrySessionKey string
+	telemMu             sync.Mutex
 
 	// plannerDisplay keeps display-only planner output for the in-flight turn.
 	// The executor session remains the model-facing transcript; this sidecar
@@ -458,32 +465,34 @@ func cloneDetachedRuntimeTab(tab *WorkspaceTab, key, path string) *WorkspaceTab 
 	tab.telemMu.Lock()
 	readTelemetry := append([]readFileRecord(nil), tab.readTelemetry...)
 	usageTelemetry := cloneSessionUsageStats(tab.usageTelemetry)
+	telemetrySessionKey := tab.telemetrySessionKey
 	tab.telemMu.Unlock()
 
 	return &WorkspaceTab{
-		ID:               detachedRuntimeTabID(key),
-		Scope:            tab.Scope,
-		WorkspaceRoot:    tab.WorkspaceRoot,
-		SharedHostKey:    tab.SharedHostKey,
-		TopicID:          tab.TopicID,
-		TopicTitle:       tab.TopicTitle,
-		SessionPath:      canonicalTabSessionPath(path),
-		Ctrl:             tab.Ctrl,
-		Label:            tab.Label,
-		Ready:            tab.Ready,
-		StartupErr:       tab.StartupErr,
-		sink:             tab.sink,
-		ActivityStatus:   tab.ActivityStatus,
-		readTelemetry:    readTelemetry,
-		usageTelemetry:   usageTelemetry,
-		model:            tab.model,
-		effort:           cloneStringPtr(tab.effort),
-		tokenMode:        tab.tokenMode,
-		mode:             tab.mode,
-		goal:             tab.goal,
-		toolApprovalMode: tab.toolApprovalMode,
-		disabledMCP:      cloneServerViewMap(tab.disabledMCP),
-		mcpOrder:         append([]string(nil), tab.mcpOrder...),
+		ID:                  detachedRuntimeTabID(key),
+		Scope:               tab.Scope,
+		WorkspaceRoot:       tab.WorkspaceRoot,
+		SharedHostKey:       tab.SharedHostKey,
+		TopicID:             tab.TopicID,
+		TopicTitle:          tab.TopicTitle,
+		SessionPath:         canonicalTabSessionPath(path),
+		Ctrl:                tab.Ctrl,
+		Label:               tab.Label,
+		Ready:               tab.Ready,
+		StartupErr:          tab.StartupErr,
+		sink:                tab.sink,
+		ActivityStatus:      tab.ActivityStatus,
+		readTelemetry:       readTelemetry,
+		usageTelemetry:      usageTelemetry,
+		telemetrySessionKey: telemetrySessionKey,
+		model:               tab.model,
+		effort:              cloneStringPtr(tab.effort),
+		tokenMode:           tab.tokenMode,
+		mode:                tab.mode,
+		goal:                tab.goal,
+		toolApprovalMode:    tab.toolApprovalMode,
+		disabledMCP:         cloneServerViewMap(tab.disabledMCP),
+		mcpOrder:            append([]string(nil), tab.mcpOrder...),
 	}
 }
 
@@ -546,6 +555,7 @@ func applyRuntimeTab(target, source *WorkspaceTab, path string, wailsCtx context
 	source.telemMu.Lock()
 	readTelemetry := append([]readFileRecord(nil), source.readTelemetry...)
 	usageTelemetry := cloneSessionUsageStats(source.usageTelemetry)
+	telemetrySessionKey := source.telemetrySessionKey
 	source.telemMu.Unlock()
 
 	if source.sink != nil {
@@ -572,6 +582,7 @@ func applyRuntimeTab(target, source *WorkspaceTab, path string, wailsCtx context
 	target.mcpOrder = append([]string(nil), source.mcpOrder...)
 	target.readTelemetry = readTelemetry
 	target.usageTelemetry = usageTelemetry
+	target.telemetrySessionKey = telemetrySessionKey
 }
 
 func (a *App) attachExistingSessionRuntime(tab *WorkspaceTab, path string, wailsCtx context.Context) bool {
@@ -718,10 +729,41 @@ func (t *WorkspaceTab) telemetrySnapshot() tabTelemetrySnapshot {
 	return tabTelemetrySnapshot{Version: 2, ReadFiles: records, Usage: usage}
 }
 
-func (t *WorkspaceTab) resetTelemetry() {
+func (t *WorkspaceTab) resetTelemetry(sessionPath string) {
 	t.telemMu.Lock()
 	t.readTelemetry = nil
 	t.usageTelemetry = sessionUsageStats{}
+	t.telemetrySessionKey = sessionRuntimeKey(sessionPath)
+	t.telemMu.Unlock()
+}
+
+// syncTelemetryToSession keys the in-memory telemetry to the runtime's current
+// session. When the runtime rotated to a different session underneath the tab
+// (typed /new routes through Controller.Submit and never reaches App.NewSession),
+// the previous session's totals must not bleed into the new one: swap in the
+// new session's persisted sidecar, or start from zero when none exists. The
+// sidecar is rewritten on every recorded event, so a reload never loses more
+// than the sub-second in-memory delta of an in-flight record.
+func (t *WorkspaceTab) syncTelemetryToSession(sessionPath string) {
+	key := sessionRuntimeKey(sessionPath)
+	if key == "" {
+		return
+	}
+	t.telemMu.Lock()
+	same := t.telemetrySessionKey == key
+	t.telemMu.Unlock()
+	if same {
+		return
+	}
+	// File I/O stays outside telemMu; re-check the key after reacquiring in
+	// case a concurrent sync or reset re-keyed the tab first.
+	snapshot := loadTelemetry(sessionPath + ".telemetry.json")
+	t.telemMu.Lock()
+	if t.telemetrySessionKey != key {
+		t.readTelemetry = snapshot.ReadFiles
+		t.usageTelemetry = snapshot.Usage
+		t.telemetrySessionKey = key
+	}
 	t.telemMu.Unlock()
 }
 
@@ -1169,6 +1211,13 @@ func (s *tabEventSink) recordReadTelemetry(e event.Event) {
 	truncated := e.Tool.Truncated || strings.Contains(e.Tool.Output, "truncated") ||
 		strings.Contains(e.Tool.Output, "File truncated")
 
+	sp := ""
+	if ctrl != nil {
+		sp = ctrl.SessionPath()
+	}
+	if sp != "" {
+		tab.syncTelemetryToSession(sp)
+	}
 	tab.recordReadFile(readFileRecord{
 		Path:      path,
 		Turn:      turn,
@@ -1177,10 +1226,7 @@ func (s *tabEventSink) recordReadTelemetry(e event.Event) {
 		Limit:     limit,
 		Truncated: truncated,
 	})
-	if ctrl == nil {
-		return
-	}
-	if sp := ctrl.SessionPath(); sp != "" {
+	if sp != "" {
 		_ = saveTelemetry(sp+".telemetry.json", tab.telemetrySnapshot())
 	}
 }
@@ -1189,6 +1235,9 @@ func (s *tabEventSink) recordTurnStarted() {
 	tab, sp := s.telemetryTab()
 	if tab == nil {
 		return
+	}
+	if sp != "" {
+		tab.syncTelemetryToSession(sp)
 	}
 	tab.recordTurnStarted(time.Now().UnixMilli())
 	if sp != "" {
@@ -1201,6 +1250,9 @@ func (s *tabEventSink) recordTurnDone() {
 	if tab == nil {
 		return
 	}
+	if sp != "" {
+		tab.syncTelemetryToSession(sp)
+	}
 	tab.recordTurnDone(time.Now().UnixMilli())
 	if sp != "" {
 		_ = saveTelemetry(sp+".telemetry.json", tab.telemetrySnapshot())
@@ -1211,6 +1263,9 @@ func (s *tabEventSink) recordUsageTelemetry(e event.Event) {
 	tab, sp := s.telemetryTab()
 	if tab == nil {
 		return
+	}
+	if sp != "" {
+		tab.syncTelemetryToSession(sp)
 	}
 	tab.recordUsage(e)
 	if sp != "" {
@@ -2854,14 +2909,18 @@ func (a *App) buildTabControllerWithContext(tab *WorkspaceTab, loadedSession loa
 					a.emitProjectTreeChanged()
 				}
 			}
-			// Restore existing telemetry if resuming a session.
-			telemetryPath := path + ".telemetry.json"
-			if snapshot := loadTelemetry(telemetryPath); len(snapshot.ReadFiles) > 0 || snapshot.Usage.RequestCount > 0 {
-				tab.telemMu.Lock()
-				tab.readTelemetry = snapshot.ReadFiles
-				tab.usageTelemetry = snapshot.Usage
-				tab.telemMu.Unlock()
-			}
+			// Key telemetry to the session this build binds: restore its
+			// persisted sidecar, or start from zero when none exists (fresh
+			// session, CLI-created session, pre-telemetry session). Keeping
+			// the previous session's totals here made 会话费用 accumulate
+			// across sessions and persisted the stale totals into the new
+			// session's sidecar on the next event (#5850).
+			snapshot := loadTelemetry(path + ".telemetry.json")
+			tab.telemMu.Lock()
+			tab.readTelemetry = snapshot.ReadFiles
+			tab.usageTelemetry = snapshot.Usage
+			tab.telemetrySessionKey = sessionRuntimeKey(path)
+			tab.telemMu.Unlock()
 		}
 	}
 
@@ -4808,6 +4867,28 @@ func (a *App) handleTabSessionRecovered(tab *WorkspaceTab) func(control.SessionR
 			}
 		}
 		a.mu.Unlock()
+		// The fork continues the same conversation, so its cost history moves
+		// with it: re-key the in-memory telemetry from the original session to
+		// the recovery path and persist the sidecar right away. Without this
+		// the fork's sidecar stays empty until the next usage event (cost
+		// shows 0 after a restart), and the sync-by-key reload would wipe the
+		// carried totals as "another session's" numbers.
+		if tab != nil && !tab.removed {
+			origKey := sessionRuntimeKey(info.OriginalPath)
+			newKey := sessionRuntimeKey(info.RecoveryPath)
+			carried := false
+			if newKey != "" {
+				tab.telemMu.Lock()
+				if tab.telemetrySessionKey == origKey || tab.telemetrySessionKey == "" {
+					tab.telemetrySessionKey = newKey
+					carried = true
+				}
+				tab.telemMu.Unlock()
+			}
+			if carried {
+				_ = saveTelemetry(info.RecoveryPath+".telemetry.json", tab.telemetrySnapshot())
+			}
+		}
 		a.emitProjectTreeChanged()
 		a.emitRuntimeEvent("session:recovered", sessionRecoveryEvent{
 			OriginalPath:     info.OriginalPath,
@@ -6625,6 +6706,9 @@ func (a *App) ContextPanel(tabID string) ContextPanelInfo {
 
 	info := ContextPanelInfo{ReadFiles: []readFileRecord{}, ChangedFiles: []ChangedFileInfo{}}
 	if ctrl != nil {
+		if sp := ctrl.SessionPath(); sp != "" {
+			tab.syncTelemetryToSession(sp)
+		}
 		used, window := ctrl.ContextSnapshot()
 		info.UsedTokens = used
 		info.WindowTokens = window

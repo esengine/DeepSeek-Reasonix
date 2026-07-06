@@ -37,10 +37,9 @@ import (
 // Manifest endpoints — R2 CDN first (fast, especially in CN), then the crash
 // worker release gateway, then GitHub as the stable channel's last resort. The
 // build channel picks the rolling pointer so a canary build polls the canary
-// line and a stable build polls latest; the two never cross. The gateway
-// deliberately avoids GitHub's repository-wide /releases/latest shortcut
-// because CLI tags (v*) and desktop tags (desktop-v*) are separate release
-// lines in the same repo.
+// line and a stable build polls latest; the two never cross. The gateway still
+// avoids GitHub's repository-wide /releases/latest shortcut so the app is not
+// coupled to GitHub's homepage badge semantics.
 const (
 	r2Base             = "https://dl.reasonix.io"
 	releaseGatewayBase = "https://crash.reasonix.io/v1/desktop/releases"
@@ -51,11 +50,10 @@ const (
 // githubManifestFallback is the stable channel's last-resort manifest source.
 // dl.reasonix.io and crash.reasonix.io share one Cloudflare zone, so bot
 // protection that 403s a user's egress IP takes out both first-party endpoints
-// at once (#6005); GitHub is separate infrastructure. The URL is safe despite
-// the repository-wide /releases/latest caveat above: release.yml pins the
-// repo-wide latest badge to the CLI line and attaches a desktop-manifest mirror
-// to every stable CLI release ("desktop manifest compatibility asset"), so this
-// asset is always the desktop manifest. Canary has no GitHub release, so its
+// at once (#6005); GitHub is separate infrastructure. Stable desktop releases
+// own the repo-wide latest badge and publish latest.json directly, while
+// release.yml also keeps a desktop-manifest mirror attached to stable CLI
+// releases for older publishing windows. Canary has no GitHub release, so its
 // chain stays two-deep.
 const githubManifestFallback = "https://github.com/esengine/DeepSeek-Reasonix/releases/latest/download/latest.json"
 

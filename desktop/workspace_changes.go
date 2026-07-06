@@ -21,6 +21,21 @@ type workspaceChangeAccumulator struct {
 	hasVCS     bool
 }
 
+const workspaceGitBranchCacheTTL = 2 * time.Second
+
+type workspaceGitBranchCacheEntry struct {
+	branch     string
+	expires    time.Time
+	refreshing bool
+}
+
+var workspaceGitBranchCache = struct {
+	sync.Mutex
+	entries map[string]workspaceGitBranchCacheEntry
+}{entries: map[string]workspaceGitBranchCacheEntry{}}
+
+var workspaceGitBranchForMetaProbe = workspaceGitBranch
+
 func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
 	out := WorkspaceChangesView{Files: []WorkspaceChangeView{}, GitAvailable: true}
 	tabID = strings.TrimSpace(tabID)
@@ -215,6 +230,92 @@ func normalizeWorkspaceRelPath(base, path string) string {
 		return ""
 	}
 	return filepath.ToSlash(path)
+}
+
+func workspaceRelPathFromGitStatus(repoRoot, base, path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(repoRoot, filepath.FromSlash(path))
+	}
+	return normalizeWorkspaceRelPath(base, path)
+}
+
+// workspaceGitBranchForMeta is the cached variant used by high-frequency UI
+// metadata refreshes. It never waits for git on the caller path: stale branch
+// metadata is less harmful than blocking tab activation or hydration. Workflows
+// that need an immediate git read, such as WorkspaceChanges, should call
+// workspaceGitBranch directly.
+func workspaceGitBranchForMeta(base string) string {
+	key := filepath.Clean(base)
+	now := time.Now()
+
+	workspaceGitBranchCache.Lock()
+	if cached, ok := workspaceGitBranchCache.entries[key]; ok {
+		branch := cached.branch
+		if now.Before(cached.expires) || cached.refreshing {
+			workspaceGitBranchCache.Unlock()
+			return branch
+		}
+		cached.refreshing = true
+		workspaceGitBranchCache.entries[key] = cached
+		workspaceGitBranchCache.Unlock()
+		go refreshWorkspaceGitBranchForMeta(key, base)
+		return branch
+	}
+
+	workspaceGitBranchCache.entries[key] = workspaceGitBranchCacheEntry{
+		expires:    now.Add(workspaceGitBranchCacheTTL),
+		refreshing: true,
+	}
+	workspaceGitBranchCache.Unlock()
+
+	go refreshWorkspaceGitBranchForMeta(key, base)
+	return ""
+}
+
+func refreshWorkspaceGitBranchForMeta(key, base string) {
+	branch := ""
+	defer func() {
+		storeNow := time.Now()
+		workspaceGitBranchCache.Lock()
+		if len(workspaceGitBranchCache.entries) > 256 {
+			for k, cached := range workspaceGitBranchCache.entries {
+				if storeNow.After(cached.expires) {
+					delete(workspaceGitBranchCache.entries, k)
+				}
+			}
+		}
+		workspaceGitBranchCache.entries[key] = workspaceGitBranchCacheEntry{branch: branch, expires: storeNow.Add(workspaceGitBranchCacheTTL)}
+		workspaceGitBranchCache.Unlock()
+	}()
+
+	branch = workspaceGitBranchForMetaProbe(base)
+}
+
+// workspaceGitBranch returns the current git branch name for the repo rooted
+// at base, or an empty string when base is not inside a git repository or when
+// git is unavailable.
+func workspaceGitBranch(base string) string {
+	raw, err := workspaceGitOutputWithTimeout(2*time.Second, "-C", base, "branch", "--show-current")
+	if err != nil {
+		return ""
+	}
+	if branch := strings.TrimSpace(string(raw)); branch != "" {
+		return branch
+	}
+
+	raw, err = workspaceGitOutputWithTimeout(2*time.Second, "-C", base, "rev-parse", "--short", "HEAD")
+	if err != nil {
+		return ""
+	}
+	short := strings.TrimSpace(string(raw))
+	if short == "" {
+		return ""
+	}
+	return "@" + short
 }
 
 // GitBranches returns all local git branches for the active workspace's repo.

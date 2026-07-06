@@ -444,6 +444,176 @@ func TestSaveSnapshotSameContentByOtherRuntimeKeepsClonedBaselineWritable(t *tes
 	}
 }
 
+func TestSaveSnapshotAllowsExactAppendFromStaleRevisionBaseline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot base: %v", err)
+	}
+	staleBaseline := s.persistState(path)
+
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot prefix append: %v", err)
+	}
+	prefixMeta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta prefix ok=%v err=%v", ok, err)
+	}
+	if prefixMeta.Revision == staleBaseline.revision {
+		t.Fatalf("prefix revision did not advance: %d", prefixMeta.Revision)
+	}
+
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "two"})
+	s.setPersistedBaseline(path, staleBaseline.digest, staleBaseline.version, staleBaseline.revision, true)
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot exact append from stale revision baseline: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession appended: %v", err)
+	}
+	if got := loaded.Messages[len(loaded.Messages)-1].Content; got != "two" {
+		t.Fatalf("tail after stale-baseline append = %q, want two", got)
+	}
+	advancedMeta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta advanced ok=%v err=%v", ok, err)
+	}
+	if advancedMeta.Revision != prefixMeta.Revision+1 {
+		t.Fatalf("revision after stale-baseline append = %d, want %d", advancedMeta.Revision, prefixMeta.Revision+1)
+	}
+	if matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), "*-recovery-*.jsonl")); err != nil || len(matches) != 0 {
+		t.Fatalf("recovery branches after stale-baseline append = %v err=%v, want none", matches, err)
+	}
+}
+
+func TestSaveSnapshotAllowsCompatibleSystemAppendFromStaleRevisionBaseline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys v1")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot base: %v", err)
+	}
+	staleBaseline := s.persistState(path)
+
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot prefix append: %v", err)
+	}
+	prefixMeta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta prefix ok=%v err=%v", ok, err)
+	}
+
+	// A resume swapped the system prompt, then the turn appended a message —
+	// while the persistence baseline still points at the first save.
+	msgs := s.Snapshot()
+	msgs[0] = provider.Message{Role: provider.RoleSystem, Content: "sys v2"}
+	msgs = append(msgs, provider.Message{Role: provider.RoleUser, Content: "two"})
+	s.Replace(msgs)
+	s.setPersistedBaseline(path, staleBaseline.digest, staleBaseline.version, staleBaseline.revision, true)
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot compatible-system append from stale baseline: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession appended: %v", err)
+	}
+	if got := loaded.Messages[0].Content; got != "sys v2" {
+		t.Fatalf("system after compatible append = %q, want sys v2", got)
+	}
+	if got := loaded.Messages[len(loaded.Messages)-1].Content; got != "two" {
+		t.Fatalf("tail after compatible append = %q, want two", got)
+	}
+	advancedMeta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta advanced ok=%v err=%v", ok, err)
+	}
+	if advancedMeta.Revision != prefixMeta.Revision+1 {
+		t.Fatalf("revision after compatible append = %d, want %d", advancedMeta.Revision, prefixMeta.Revision+1)
+	}
+	if matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), "*-recovery-*.jsonl")); err != nil || len(matches) != 0 {
+		t.Fatalf("recovery branches after compatible append = %v err=%v, want none", matches, err)
+	}
+}
+
+func TestSaveSnapshotRefusesStaleBaselineAppendOverRewoundTranscript(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot base: %v", err)
+	}
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot extend: %v", err)
+	}
+
+	// Another runtime rewinds the transcript below this session's baseline
+	// (e.g. a cancelled turn truncated the partial assistant reply).
+	other, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession other: %v", err)
+	}
+	other.Replace(other.Snapshot()[:2])
+	if err := other.SaveRewrite(path); err != nil {
+		t.Fatalf("SaveRewrite rewind: %v", err)
+	}
+
+	// Appending from the stale baseline would resurrect the rewound suffix.
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "two"})
+	if err := s.SaveSnapshot(path); !errors.Is(err, ErrSessionSnapshotConflict) {
+		t.Fatalf("SaveSnapshot over rewound transcript err = %v, want ErrSessionSnapshotConflict", err)
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession after refused append: %v", err)
+	}
+	if got := len(loaded.Messages); got != 2 {
+		t.Fatalf("messages after refused append = %d, want rewound 2", got)
+	}
+}
+
+func TestSaveRewriteAllowsOwnedRewriteAfterLedgerReset(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "partial turn"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot base: %v", err)
+	}
+	// The meta sidecar (revision ledger) is lost — e.g. swept by a cleanup
+	// that deleted session-adjacent files. The transcript itself is intact.
+	if err := os.Remove(BranchMetaPath(path)); err != nil {
+		t.Fatalf("remove sidecar: %v", err)
+	}
+
+	// A cancelled turn strips the partial reply and flushes via SaveRewrite.
+	msgs := s.Snapshot()
+	s.Replace(msgs[:len(msgs)-1])
+	if err := s.SaveRewrite(path); err != nil {
+		t.Fatalf("SaveRewrite after ledger reset: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession truncated: %v", err)
+	}
+	if got := len(loaded.Messages); got != 2 {
+		t.Fatalf("messages after owned rewrite = %d, want 2", got)
+	}
+	if got := loaded.Messages[len(loaded.Messages)-1].Content; got != "first" {
+		t.Fatalf("tail after owned rewrite = %q, want first", got)
+	}
+	if matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), "*-recovery-*.jsonl")); err != nil || len(matches) != 0 {
+		t.Fatalf("recovery branches after owned rewrite = %v err=%v, want none", matches, err)
+	}
+}
+
 func TestSaveSnapshotStillPersistsNormalizedRepair(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	mal := NewSession("sys")
@@ -527,7 +697,7 @@ func TestSaveSnapshotRejectsStalePrefixAfterSystemPromptRefresh(t *testing.T) {
 	}
 }
 
-func TestSaveRewriteRejectsRevisionCASConflict(t *testing.T) {
+func TestSaveRewriteAllowsRewriteOverSameContentForeignStamp(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	base := NewSession("sys")
 	base.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
@@ -540,6 +710,9 @@ func TestSaveRewriteRejectsRevisionCASConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSession stale: %v", err)
 	}
+	// Another runtime healed the ledger over identical content: the revision
+	// advanced under a foreign writer id, but the recorded digest still
+	// describes the exact bytes this session loaded and owns.
 	meta, ok, err := LoadBranchMeta(path)
 	if err != nil || !ok {
 		t.Fatalf("LoadBranchMeta ok=%v err=%v", ok, err)
@@ -554,9 +727,63 @@ func TestSaveRewriteRejectsRevisionCASConflict(t *testing.T) {
 		{Role: provider.RoleSystem, Content: "sys"},
 		{Role: provider.RoleUser, Content: "summarized first"},
 	})
+	if err := stale.SaveRewrite(path); err != nil {
+		t.Fatalf("SaveRewrite over same-content stamp: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got := loaded.Messages[len(loaded.Messages)-1].Content; got != "summarized first" {
+		t.Fatalf("tail after owned rewrite = %q, want summarized first", got)
+	}
+	advanced, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta advanced ok=%v err=%v", ok, err)
+	}
+	if advanced.Revision != meta.Revision+1 {
+		t.Fatalf("revision after rewrite = %d, want %d", advanced.Revision, meta.Revision+1)
+	}
+	if matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), "*-recovery-*.jsonl")); err != nil || len(matches) != 0 {
+		t.Fatalf("recovery branches after owned rewrite = %v err=%v, want none", matches, err)
+	}
+}
+
+func TestSaveRewriteRejectsForeignStampForUnattributedBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	base := NewSession("sys")
+	base.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	base.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	if err := base.Save(path); err != nil {
+		t.Fatalf("Save base: %v", err)
+	}
+
+	stale, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession stale: %v", err)
+	}
+	// A foreign stamp whose digest disagrees with the on-disk transcript is
+	// the aftermath of a save whose bytes and record split — the transcript
+	// cannot be attributed, so the rewrite must fall to the conflict path.
+	meta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta ok=%v err=%v", ok, err)
+	}
+	meta.Revision++
+	meta.WriterID = "other-writer"
+	meta.ContentDigest = "0000000000000000000000000000000000000000000000000000000000000000"
+	if err := SaveBranchMetaPreserveUpdated(path, meta); err != nil {
+		t.Fatalf("stamp foreign digest: %v", err)
+	}
+
+	stale.Replace([]provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "summarized first"},
+	})
 	err = stale.SaveRewrite(path)
 	if !errors.Is(err, ErrSessionSnapshotConflict) {
-		t.Fatalf("SaveRewrite revision conflict err = %v, want ErrSessionSnapshotConflict", err)
+		t.Fatalf("SaveRewrite unattributed stamp err = %v, want ErrSessionSnapshotConflict", err)
 	}
 	var conflict *SessionSnapshotConflictError
 	if !errors.As(err, &conflict) || conflict.Kind != SessionSnapshotConflictDiverged {
@@ -795,6 +1022,86 @@ func TestSaveRecoveryBranchSkipsPureStalePrefix(t *testing.T) {
 	stale.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
 	if _, err := stale.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: path}); !errors.Is(err, ErrSessionRecoveryNotNeeded) {
 		t.Fatalf("SaveRecoveryBranch stale prefix err = %v, want ErrSessionRecoveryNotNeeded", err)
+	}
+}
+
+func divergedSessionPair(t *testing.T, dir, name string) (string, *Session) {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	current := NewSession("sys")
+	current.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	current.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	current.Add(provider.Message{Role: provider.RoleUser, Content: "disk second"})
+	if err := current.Save(path); err != nil {
+		t.Fatalf("Save current: %v", err)
+	}
+	stale := NewSession("sys")
+	stale.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	stale.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	stale.Add(provider.Message{Role: provider.RoleUser, Content: "local " + name})
+	return path, stale
+}
+
+func stampRecoveryMeta(t *testing.T, path string, depth int) {
+	t.Helper()
+	meta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta ok=%v err=%v", ok, err)
+	}
+	meta.Recovered = true
+	meta.RecoveryDepth = depth
+	if err := SaveBranchMeta(path, meta); err != nil {
+		t.Fatalf("SaveBranchMeta: %v", err)
+	}
+}
+
+func TestSaveRecoveryBranchStampsAndCapsChainDepth(t *testing.T) {
+	dir := t.TempDir()
+
+	// Forking from a normal session stamps depth 1.
+	path, stale := divergedSessionPair(t, dir, "session.jsonl")
+	info, err := stale.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: path})
+	if err != nil {
+		t.Fatalf("SaveRecoveryBranch: %v", err)
+	}
+	if info.Meta.RecoveryDepth != 1 {
+		t.Fatalf("first fork depth = %d, want 1", info.Meta.RecoveryDepth)
+	}
+
+	// Forking from a recovery branch increments the chain depth.
+	deeper, staleDeeper := divergedSessionPair(t, dir, "deeper.jsonl")
+	stampRecoveryMeta(t, deeper, 1)
+	info, err = staleDeeper.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: deeper})
+	if err != nil {
+		t.Fatalf("SaveRecoveryBranch from depth 1: %v", err)
+	}
+	if info.Meta.RecoveryDepth != 2 {
+		t.Fatalf("nested fork depth = %d, want 2", info.Meta.RecoveryDepth)
+	}
+
+	// A legacy recovery meta without the depth field counts as depth 1.
+	legacy, staleLegacy := divergedSessionPair(t, dir, "legacy.jsonl")
+	stampRecoveryMeta(t, legacy, 0)
+	info, err = staleLegacy.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: legacy})
+	if err != nil {
+		t.Fatalf("SaveRecoveryBranch from legacy recovery: %v", err)
+	}
+	if info.Meta.RecoveryDepth != 2 {
+		t.Fatalf("legacy nested fork depth = %d, want 2", info.Meta.RecoveryDepth)
+	}
+
+	// A parent at the cap refuses to fork deeper.
+	capped, staleCapped := divergedSessionPair(t, dir, "capped.jsonl")
+	stampRecoveryMeta(t, capped, SessionRecoveryMaxDepth)
+	if _, err := staleCapped.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: capped}); !errors.Is(err, ErrSessionRecoveryDepthExceeded) {
+		t.Fatalf("SaveRecoveryBranch at cap err = %v, want ErrSessionRecoveryDepthExceeded", err)
+	}
+	forks, err := filepath.Glob(filepath.Join(dir, "capped-recovery-*.jsonl"))
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	if len(forks) != 0 {
+		t.Fatalf("capped parent still forked: %v", forks)
 	}
 }
 

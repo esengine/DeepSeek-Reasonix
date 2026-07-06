@@ -385,17 +385,40 @@ type Agent struct {
 	compactStuck        bool
 	consecutiveCompacts int
 
-	// stormSig / stormCount track a run of turns that keep failing the same way so
-	// the loop can break a death-spiral. The signature is each call's (tool, error)
-	// in order, NOT (tool, args): a stuck model reliably reworks the arguments
-	// cosmetically (a re-worded essay, a reordered object) while the call fails
-	// identically every time — keying on args misses the loop entirely (observed
-	// live against truncated tool-call arguments). Because errors that embed their
-	// subject (e.g. "file not found: /x") differ per target, genuine varied probing
-	// does not collapse to one signature. Reset whenever a turn does anything else
-	// (a different failure shape, or any success). See applyStormBreaker.
+	// stormSig / stormCount track a run of turns that keep failing or getting
+	// blocked the same way so the loop can break a death-spiral. The signature is
+	// each call's (tool, error/blocker) in order, NOT (tool, args): a stuck model
+	// reliably reworks the arguments cosmetically (a re-worded essay, a reordered
+	// object, a different shell command) while the host returns the same refusal or
+	// failure every time — keying on args misses the loop entirely. Because errors
+	// that embed their subject (e.g. "file not found: /x") differ per target,
+	// genuine varied probing does not collapse to one signature. Reset whenever a
+	// turn does anything else (a different failure/block shape, or any success).
+	// See applyStormBreaker.
 	stormSig   string
 	stormCount int
+
+	// blockedTurnStreak counts consecutive turns in which every tool call was
+	// blocked by the host (permission, plan mode, hook, or loop guard).
+	// stormSig catches a model fixated on one call shape; this catches a model
+	// rotating between blocked shapes — alternating tools, reordering a batch,
+	// or blockers whose text varies per attempt — which is zero progress all
+	// the same. Reset by any turn containing a non-blocked outcome and at the
+	// start of each user turn. See applyStormBreaker.
+	blockedTurnStreak int
+
+	// loopGuardArmed / loopGuardReceiptMark let final readiness stand down
+	// after a loop guard fired this user turn: once the host has told the model
+	// to stop retrying and report the blocker, demanding the receipts that the
+	// blocker prevents would restart the loop the guard just broke. The mark is
+	// the evidence-ledger receipt count from just before the guarded batch, so
+	// real progress — a successful write or command receipt landing after it —
+	// revokes the pass, while the bookkeeping the guard itself recommends
+	// (ask, todo_write, complete_step) keeps it. Host state, not message text:
+	// tool output that merely quotes "[loop guard]" must not unlock readiness.
+	// Reset at the start of each user turn. See loopGuardAllowsFinal.
+	loopGuardArmed       bool
+	loopGuardReceiptMark int
 
 	// repeatSuccessCounts tracks write-like tool calls that have already
 	// succeeded in this user turn. This catches the complementary loop shape to
@@ -957,6 +980,9 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		a.evidence.Reset()
 	}
 	a.repeatSuccessCounts = nil
+	a.blockedTurnStreak = 0
+	a.loopGuardArmed = false
+	a.loopGuardReceiptMark = 0
 	a.sink.Emit(event.Event{Kind: event.TurnStarted})
 	rawInput := input
 	memoryCompilerInput := rawInput
@@ -1234,6 +1260,9 @@ func (a *Agent) finalReadinessCheck() finalReadinessCheck {
 	writer, hasWriter := a.evidence.LatestSuccessfulWriterIndex()
 	if !hasWriter {
 		if len(missing) > 0 {
+			if a.loopGuardAllowsFinal() {
+				return out
+			}
 			out.reason = strings.Join(missing, "; ")
 		}
 		return out
@@ -1258,8 +1287,39 @@ func (a *Agent) finalReadinessCheck() finalReadinessCheck {
 	if len(missing) == 0 {
 		return out
 	}
+	if a.loopGuardAllowsFinal() {
+		return out
+	}
 	out.reason = strings.Join(missing, "; ")
 	return out
+}
+
+// armLoopGuardPass records that a loop guard fired this user turn.
+// receiptMark is the evidence-ledger receipt count from just before the
+// guarded batch ran, so a successful write or command receipt recorded after
+// it counts as real progress and revokes the pass (see loopGuardAllowsFinal).
+func (a *Agent) armLoopGuardPass(receiptMark int) {
+	a.loopGuardArmed = true
+	a.loopGuardReceiptMark = receiptMark
+}
+
+// loopGuardAllowsFinal reports whether final readiness should stand down: a
+// loop guard fired this user turn and no host-observable progress — a
+// successful write or command receipt — has landed since. In that state the
+// missing receipts are exactly what the blocker prevents, so demanding them
+// would restart the retry loop the guard just broke; the model must be free to
+// report the blocker instead. The bookkeeping the guard recommends (ask,
+// todo_write, complete_step) produces neither write nor command receipts, so
+// it keeps the pass; real progress revokes it because receipts are obtainable
+// again and readiness should resume enforcing them.
+func (a *Agent) loopGuardAllowsFinal() bool {
+	if a == nil || !a.loopGuardArmed {
+		return false
+	}
+	if a.evidence == nil {
+		return true
+	}
+	return !a.evidence.HasWriteOrCommandSince(a.loopGuardReceiptMark)
 }
 
 func finalReadinessIncompleteTodos(items []evidence.TodoStepMatch) string {
@@ -1469,7 +1529,7 @@ func finalReadinessCheckSource(check instruction.VerifyCheck) string {
 }
 
 func finalReadinessRetryMessage(reason string) string {
-	return "Host final-answer readiness check failed. Before giving a final answer, address the missing host-observable receipts: " + reason + ". Run the required tool calls, then answer when readiness is satisfied. If the blocked item needs user input, a user-owned choice, or manual review, call the ask tool with concrete options and wait for its tool result; do not ask in prose, and do not claim the user answered unless an actual ask tool result or a new user message says so."
+	return "Host final-answer readiness check failed. Before giving a final answer, address the missing host-observable receipts: " + reason + ". Run only the required tool calls, then answer when readiness is satisfied. Prefer signing off completed work with complete_step and updating todo_write from existing receipts; do not run exploratory bash commands just to satisfy readiness. If a permission, plan-mode, hook, or loop-guard block prevents the required receipt, do not keep retrying the blocked command with different wording. If the blocked item needs user input, a user-owned choice, or manual review, call the ask tool with concrete options and wait for its tool result; do not ask in prose, and do not claim the user answered unless an actual ask tool result or a new user message says so."
 }
 
 func shouldNudgeExecutorHandoff(input, answer string) bool {
@@ -1805,6 +1865,13 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 	results := make([]string, len(calls))
 	outcomes := make([]toolOutcome, len(calls))
 	durations := make([]int64, len(calls))
+	// Snapshot the receipt count before the batch runs: if a loop guard fires
+	// for this batch, successes recorded during it (a mixed batch where only one
+	// call was guard-blocked) must already count as progress against the pass.
+	receiptMark := 0
+	if a.evidence != nil {
+		receiptMark = a.evidence.Len()
+	}
 	run := func(i int) {
 		start := time.Now()
 		outcomes[i] = a.executeOne(ctx, calls[i])
@@ -1900,7 +1967,7 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 		a.compilerTurn.RecordToolResults(records)
 	}
 	if !cancelled {
-		a.applyStormBreaker(calls, outcomes, results)
+		a.applyStormBreaker(calls, outcomes, results, receiptMark)
 	}
 	return results
 }
@@ -2012,58 +2079,116 @@ const stormBreakThreshold = 3
 // no-op/write loop and should be redirected to a different tool or final answer.
 const repeatSuccessBreakThreshold = 2
 
-// applyStormBreaker detects a run of identically-failing turns and, past the
+// loopGuardBlockErrMsg is the errMsg carried by a repeat-success loop-guard
+// block. applyStormBreaker matches it to arm the final-readiness loop-guard
+// pass, since that guard also invites the model to report the blocker.
+const loopGuardBlockErrMsg = "blocked by loop guard"
+
+// applyStormBreaker detects a run of zero-progress turns and, past the
 // threshold, rewrites the model-facing result (results[0]) into a directive to
-// change approach. It keys on each call's (tool, error) — not its args — because a
-// stuck model reworks the arguments cosmetically while failing identically (see
-// the stormSig field doc). A turn is a fixation candidate only when every one of
-// its calls errored and none was merely blocked by plan mode / permissions (those
-// carry a clear, distinct message the model can already act on). Any success, any
-// block, or a different batch shape is varied work, so it resets the counter. This
-// covers both the single-call spiral and a repeated multi-call batch. The hard
-// maxSteps guard remains the ultimate backstop; this just keeps the loop from
-// burning that whole budget bouncing off the same failure.
-func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutcome, results []string) {
+// change approach. Two detectors, because a stuck model varies its retries two
+// ways. The signature detector keys on each call's (tool, error/blocker) — not
+// its args — since a stuck model reworks the arguments cosmetically while
+// hitting the same host refusal or failure (see the stormSig field doc). The
+// streak detector counts consecutive turns in which every call was blocked,
+// regardless of shape: rotating tools, reordering a batch, or a blocker whose
+// text varies per attempt escapes the signature but is still zero progress —
+// only a host refusal (not a plain error) proves that, so the streak requires
+// blocked outcomes. Any success resets both. When a guard fires — or when a
+// call in the batch was already blocked by the per-call repeat-success guard —
+// the final-readiness loop-guard pass is armed so the model may report the
+// blocker (see loopGuardAllowsFinal). The hard maxSteps guard remains the
+// ultimate backstop; this just keeps the loop from burning that whole budget
+// bouncing off the same host refusals.
+func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutcome, results []string, receiptMark int) {
+	allBlocked := len(outcomes) > 0
+	for _, outcome := range outcomes {
+		if !outcome.blocked {
+			allBlocked = false
+			break
+		}
+	}
+	if allBlocked {
+		a.blockedTurnStreak++
+	} else {
+		a.blockedTurnStreak = 0
+	}
+	for _, outcome := range outcomes {
+		if outcome.blocked && outcome.errMsg == loopGuardBlockErrMsg {
+			a.armLoopGuardPass(receiptMark)
+			break
+		}
+	}
+
 	sig, ok := batchStormSignature(calls, outcomes)
-	if !ok {
+	switch {
+	case !ok:
 		a.stormSig, a.stormCount = "", 0
-		return
-	}
-	if sig != a.stormSig {
+	case sig != a.stormSig:
 		a.stormSig, a.stormCount = sig, 1
+	default:
+		a.stormCount++
+	}
+	stormHit := ok && a.stormCount >= stormBreakThreshold
+	streakHit := allBlocked && a.blockedTurnStreak >= stormBreakThreshold
+	if !stormHit && !streakHit {
 		return
 	}
-	a.stormCount++
-	if a.stormCount < stormBreakThreshold {
-		return
+
+	const blockedAdvice = "Change approach: do not keep retrying a blocked tool by changing the tool, command, or arguments. Respect the permission, plan-mode, hook, or loop-guard blocker; use an already-allowed tool, ask the user for the specific approval or choice if appropriate, or explain the blocker in your final answer."
+	var guard, notice string
+	if stormHit {
+		subject := fmt.Sprintf("%q", calls[0].Name)
+		short := calls[0].Name
+		if len(calls) > 1 {
+			subject = fmt.Sprintf("this batch of %d tool calls", len(calls))
+			short = fmt.Sprintf("a batch of %d calls", len(calls))
+		}
+		anyBlocked := false
+		for _, outcome := range outcomes {
+			if outcome.blocked {
+				anyBlocked = true
+				break
+			}
+		}
+		action := "failed"
+		advice := "Change approach: if an argument is being truncated, write less in one call and split the work into several smaller calls; otherwise fix the arguments, use a different tool, or explain the blocker in your final answer."
+		if anyBlocked {
+			action = "been blocked or failed"
+			advice = blockedAdvice
+		}
+		guard = fmt.Sprintf(
+			"[loop guard] %s has now %s %d times in a row with the same host response. Re-sending it — even with the wording changed — will not help: the calls keep hitting the same outcome. %s",
+			subject, action, a.stormCount, advice)
+		notice = fmt.Sprintf(
+			"loop guard: %s hit the same host response %d× — nudging the model to change approach",
+			short, a.stormCount)
+	} else {
+		guard = fmt.Sprintf(
+			"[loop guard] every tool call in the last %d turns has been blocked by the host (permission, plan mode, hook, or loop guard). Switching tools, reordering calls, or rewording arguments will not help while the blockers stand. %s",
+			a.blockedTurnStreak, blockedAdvice)
+		notice = fmt.Sprintf(
+			"loop guard: every tool call blocked %d turns in a row — nudging the model to change approach",
+			a.blockedTurnStreak)
 	}
-	subject := fmt.Sprintf("%q", calls[0].Name)
-	short := calls[0].Name
-	if len(calls) > 1 {
-		subject = fmt.Sprintf("this batch of %d tool calls", len(calls))
-		short = fmt.Sprintf("a batch of %d calls", len(calls))
-	}
-	results[0] = outcomes[0].output + fmt.Sprintf(
-		"\n\n[loop guard] %s has now failed %d times in a row with the same error. Re-sending it — even with the wording changed — will not help: the calls keep failing the same way. Change approach: if an argument is being truncated, write less in one call and split the work into several smaller calls; otherwise fix the arguments, use a different tool, or explain the blocker in your final answer.",
-		subject, a.stormCount)
-	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: fmt.Sprintf(
-		"loop guard: %s failed %d× the same way — nudging the model to change approach",
-		short, a.stormCount)})
+	results[0] = outcomes[0].output + "\n\n" + guard
+	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: notice})
+	a.armLoopGuardPass(receiptMark)
 }
 
 // batchStormSignature returns a per-turn fixation signature — each call's
-// (name, error) in order — and ok=true only when every call errored and none was
-// merely blocked. ok=false (any success or block) means the turn made varied
-// progress, so the caller resets the counter. Keying on the error rather than the
-// args is deliberate: a stuck model reworks the arguments while failing the same
-// way, so identical-args matching would miss the loop.
+// (name, error/blocker) in order — and ok=true only when every call errored or
+// was blocked. ok=false (any success) means the turn made progress, so the
+// caller resets the counter. Keying on the host response rather than the args is
+// deliberate: a stuck model reworks the arguments while hitting the same
+// response, so identical-args matching would miss the loop.
 func batchStormSignature(calls []provider.ToolCall, outcomes []toolOutcome) (string, bool) {
 	if len(calls) == 0 {
 		return "", false
 	}
 	var sb strings.Builder
 	for i := range calls {
-		if outcomes[i].errMsg == "" || outcomes[i].blocked {
+		if outcomes[i].errMsg == "" {
 			return "", false
 		}
 		sb.WriteString(calls[i].Name)
@@ -2103,7 +2228,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		return toolOutcome{
 			output:  out,
 			blocked: true,
-			errMsg:  "blocked by loop guard",
+			errMsg:  loopGuardBlockErrMsg,
 		}
 	}
 	if out, blocked := a.staleAnchorEditBlock(call); blocked {

@@ -93,13 +93,13 @@ func appWithTab(t *testing.T, path string) (*App, *WorkspaceTab) {
 // nil sink ctx (no webview) must not disable persistence.
 func TestTurnDonePersistsSession(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
-	a, tab := appWithTab(t, path)
+	_, tab := appWithTab(t, path)
 
 	tab.sink.Emit(event.Event{Kind: event.TurnDone})
 
 	waitForFile(t, path, "remember this turn")
 	waitForAutosaveIdle(t, tab)
-	_ = a
+
 }
 
 // TestNonTurnDoneDoesNotPersist confirms only TurnDone triggers a save, so the

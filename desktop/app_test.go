@@ -217,6 +217,7 @@ func TestMetaForTabIncludesWorkspaceContext(t *testing.T) {
 		t.Skip("git not installed")
 	}
 	isolateDesktopUserDirs(t)
+	resetWorkspaceGitBranchMetaCacheForTest(t)
 
 	repo := t.TempDir()
 	configuredSandboxRoot := filepath.Join(t.TempDir(), "sandbox")
@@ -265,8 +266,15 @@ func TestMetaForTabIncludesWorkspaceContext(t *testing.T) {
 	if strings.Contains(string(raw), "sandboxPath") || strings.Contains(string(raw), configuredSandboxRoot) {
 		t.Fatalf("meta should not expose configured sandbox root as sandboxPath: %s", raw)
 	}
-	if got.GitBranch != "feature/meta" {
-		t.Fatalf("gitBranch = %q, want feature/meta", got.GitBranch)
+	deadline := time.Now().Add(time.Second)
+	for {
+		if got = app.MetaForTab("tab-1"); got.GitBranch == "feature/meta" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("gitBranch = %q, want feature/meta after async refresh", got.GitBranch)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

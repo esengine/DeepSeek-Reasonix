@@ -91,6 +91,39 @@ func (l *Ledger) Record(r Receipt) {
 	l.receipts = append(l.receipts, r)
 }
 
+// Len returns the number of receipts recorded this turn, giving callers a
+// stable index to pass to the *Since matchers.
+func (l *Ledger) Len() int {
+	if l == nil {
+		return 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.receipts)
+}
+
+// HasWriteOrCommandSince reports whether a successful write or command receipt
+// was recorded at or after index — host-observable progress, as opposed to
+// bookkeeping receipts (todo_write, complete_step, ask), which carry neither a
+// write flag nor a command.
+func (l *Ledger) HasWriteOrCommandSince(index int) bool {
+	if l == nil {
+		return false
+	}
+	if index < 0 {
+		index = 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := index; i < len(l.receipts); i++ {
+		r := l.receipts[i]
+		if r.Success && (r.Write || r.Command != "") {
+			return true
+		}
+	}
+	return false
+}
+
 func (l *Ledger) HasSuccessfulCommand(command string) bool {
 	command = strings.TrimSpace(command)
 	if l == nil || command == "" {

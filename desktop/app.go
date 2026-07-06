@@ -1465,6 +1465,10 @@ func (a *App) NewSession() error {
 	if err := ctrl.NewSession(); err != nil {
 		return err
 	}
+	// The rotated session starts with zero spend: without this reset the tab
+	// telemetry keeps the previous session's totals and the status bar 会话费用
+	// silently turns into an all-sessions running total (#5850).
+	tab.resetTelemetry(ctrl.SessionPath())
 	a.assignFreshSessionTopic(tab)
 	a.persistTabSessionPath(tab, ctrl.SessionPath())
 	a.invalidatePromptHistoryCache()
@@ -1570,7 +1574,7 @@ func (a *App) ClearSession() error {
 		// and holder id across to the frontend.
 		return userFacingSessionLeaseError("", err)
 	}
-	tab.resetTelemetry()
+	tab.resetTelemetry(ctrl.SessionPath())
 	a.persistTabSessionPath(tab, ctrl.SessionPath())
 	a.invalidatePromptHistoryCache()
 	return nil
@@ -1697,6 +1701,9 @@ func (a *App) clearActiveSessionRuntime(tab *WorkspaceTab, oldCtrl control.Sessi
 	a.supersedeTabBuildLocked(tab)
 	a.saveTabsLocked()
 	a.mu.Unlock()
+	// Same contract as ClearSession's non-running path: the replacement
+	// session starts with zero spend.
+	tab.resetTelemetry(path)
 	oldCtrl.CloseAfterDestroy()
 	a.emitProjectTreeChanged()
 	return nil
@@ -4919,6 +4926,15 @@ func (a *App) ContextUsageForTab(tabID string) ContextInfo {
 
 	var info ContextInfo
 	if tab != nil {
+		// Re-key first: a controller-side rotation (typed /new) may have
+		// swapped sessions without the App noticing, and the stale totals
+		// would otherwise be reported — and then persisted — under the new
+		// session (#5850).
+		if ctrl != nil {
+			if sp := ctrl.SessionPath(); sp != "" {
+				tab.syncTelemetryToSession(sp)
+			}
+		}
 		snap := tab.telemetrySnapshot()
 		info.SessionTokens = snap.Usage.TotalTokens
 		info.SessionCost = snap.Usage.SessionCost
