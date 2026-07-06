@@ -484,6 +484,8 @@ export const en = {
   "composer.stop": "Stop (Esc)",
   "composer.stopShort": "Stop",
   "composer.pastedLabel": "[Pasted text #{id} · {lines} lines]",
+  "composer.selectionLabel": "⟦Selection #{id}⟧",
+  "composer.selectionBadge": "{name} · {lines} lines",
   "composer.pastedShowPreview": "Preview pasted text",
   "composer.pastedHidePreview": "Hide pasted text preview",
   "composer.pastedExpand": "Expand",

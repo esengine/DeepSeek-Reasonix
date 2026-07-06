@@ -63,6 +63,9 @@ const FILE_REF_SEARCH_CACHE_TTL_MS = 5000;
 type PastedBlock = {
   label: string;
   text: string;
+  // Optional descriptive text for the badge card (e.g. "foo.go · 12 行"). When
+  // set, the inline token (`label`) stays short/compact while the card shows this.
+  display?: string;
 };
 
 type PendingGuidance = {
@@ -1012,6 +1015,34 @@ export function Composer({
     });
   };
 
+  const insertCodeBlockAtCaret = (path: string, code: string) => {
+    const id = nextPasteId.current++;
+    const label = t("composer.selectionLabel", { id });
+    const display = t("composer.selectionBadge", { name: baseName(path), lines: lineCount(code) });
+    const content = `From \`${path}\`:\n\n${code}`;
+    const block: PastedBlock = { label, text: content, display };
+    const ta = taRef.current;
+    const start = ta ? (ta.selectionStart ?? text.length) : Math.min(lastSelectionRef.current.start, text.length);
+    const end = ta ? (ta.selectionEnd ?? start) : Math.min(lastSelectionRef.current.end, text.length);
+    const before = text.slice(0, start);
+    const after = text.slice(end);
+    const leading = before.length === 0 || before.endsWith(" ") || before.endsWith("\n") ? "" : " ";
+    const trailing = after.length === 0 || after.startsWith(" ") || after.startsWith("\n") ? "" : " ";
+    const inserted = leading + label + trailing;
+    const next = before + inserted + after;
+    const pos = before.length + inserted.length;
+    pastedBlocksRef.current = [...pastedBlocksRef.current, block];
+    setPastedBlocks((prev) => [...prev, block]);
+    setText(next);
+    requestAnimationFrame(() => {
+      const node = taRef.current;
+      if (!node) return;
+      node.focus();
+      node.selectionStart = node.selectionEnd = pos;
+      lastSelectionRef.current = { start: pos, end: pos };
+    });
+  };
+
   const replaceComposerText = (next: string) => {
     clearAttachments();
     setWorkspaceRefs([]);
@@ -1036,6 +1067,10 @@ export function Composer({
   useEffect(() => {
     if (!insertRequest || insertRequest.id === consumedInsertIdRef.current) return;
     consumedInsertIdRef.current = insertRequest.id;
+    if (insertRequest.block) {
+      insertCodeBlockAtCaret(insertRequest.block.path, insertRequest.block.text);
+      return;
+    }
     if (insertRequest.mode === "replace") {
       replaceComposerText(insertRequest.text);
       return;
@@ -2458,7 +2493,7 @@ export function Composer({
               <div className="composer__pasted-block" key={block.label}>
                 <div className="composer__pasted-head">
                   <FileText size={15} />
-                  <span className="composer__pasted-label">{block.label}</span>
+                  <span className="composer__pasted-label">{block.display ?? block.label}</span>
                   <div className="composer__pasted-actions">
                     <Tooltip label={t(open ? "composer.pastedHidePreview" : "composer.pastedShowPreview")}>
                       <button type="button" onClick={() => togglePastedPreview(block.label)}>

@@ -647,6 +647,10 @@ export interface ComposerInsertRequest {
   id: number;
   text: string;
   mode?: "insert" | "replace";
+  // When set, the composer folds this code into a removable/expandable badge
+  // (a pasted-block) at the caret instead of inserting `text` inline. The path
+  // rides in the badge label; the code expands back in place on send.
+  block?: { path: string; text: string };
 }
 
 // MCP & Skills drawer (desktop/app.go Capabilities) — the GUI counterpart to

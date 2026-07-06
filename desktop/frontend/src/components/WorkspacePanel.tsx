@@ -147,21 +147,6 @@ function renderMediaPreview(preview: FilePreview): ReactElement | null {
   return null;
 }
 
-function fenceFor(text: string): string {
-  let longest = 0;
-  for (const match of text.matchAll(/`+/g)) {
-    longest = Math.max(longest, match[0].length);
-  }
-  return "`".repeat(Math.max(3, longest + 1));
-}
-
-function formatSelectionReference(path: string, text: string): string {
-  const body = text.replace(/\r\n|\r/g, "\n").trimEnd();
-  const fence = fenceFor(body);
-  const lang = languageFor(path);
-  return `From \`${path}\`:\n\n${fence}${lang ?? ""}\n${body}\n${fence}`;
-}
-
 function shortCwd(cwd?: string): string {
   if (!cwd) return "";
   const parts = cwd.split("/").filter(Boolean);
@@ -206,6 +191,7 @@ export function WorkspacePanel({
   onToggleMaximized,
   onPreviewModeChange,
   onAddToChat,
+  onAddCodeToChat,
   onRequestPanelWidth,
   onFileTreeRefresh,
   refreshKey,
@@ -225,6 +211,7 @@ export function WorkspacePanel({
   onToggleMaximized: () => void;
   onPreviewModeChange?: (active: boolean) => void;
   onAddToChat?: (text: string) => void;
+  onAddCodeToChat?: (path: string, code: string) => void;
   onRequestPanelWidth?: (width: number) => void;
   onFileTreeRefresh?: () => void;
   refreshKey?: number;
@@ -637,11 +624,17 @@ export function WorkspacePanel({
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") close();
     };
-    window.addEventListener("click", close);
+    // Dismiss on mousedown rather than click: the trailing click a drag-selection
+    // emits would otherwise close the toolbar the instant mouseup opens it. A fresh
+    // mousedown only fires when the user starts another interaction, and FloatingMenu
+    // stops propagation so pressing its button never counts as an outside press.
+    window.addEventListener("mousedown", close);
+    window.addEventListener("scroll", close, true);
     window.addEventListener("resize", close);
     window.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("click", close);
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("scroll", close, true);
       window.removeEventListener("resize", close);
       window.removeEventListener("keydown", onKey);
     };
@@ -1019,9 +1012,21 @@ export function WorkspacePanel({
     setSelectionMenu({ x: event.clientX, y: event.clientY, text, path: selectedPath });
   };
 
+  // Selecting code with the mouse pops the "Add to Chat" button right away,
+  // so a snippet is one click from the composer instead of right-click →
+  // menu item. The right-click menu (openSelectionMenu) stays as a fallback.
+  const showSelectionToolbar = (event: ReactMouseEvent<HTMLDivElement>) => {
+    // Mouseup on the floating button bubbles back here; let the button handle it.
+    if ((event.target as HTMLElement | null)?.closest(".floating-menu")) return;
+    if (!selectedPath || loadingPreview || preview?.err || preview?.binary || preview?.kind) return;
+    const text = selectedTextFromPreview();
+    if (text.trim() === "") return;
+    setSelectionMenu({ x: event.clientX, y: event.clientY + 8, text, path: selectedPath });
+  };
+
   const addSelectionToChat = () => {
     if (!selectionMenu) return;
-    onAddToChat?.(formatSelectionReference(selectionMenu.path, selectionMenu.text));
+    onAddCodeToChat?.(selectionMenu.path, selectionMenu.text);
     setSelectionMenu(null);
   };
 
@@ -1066,8 +1071,8 @@ export function WorkspacePanel({
         onAddToChat?.(formatWorkspaceReference(target.path, false));
         return;
       }
-      const suffix = file.truncated ? `\n\n${t("workspace.truncated")}` : "";
-      onAddToChat?.(formatSelectionReference(target.path, file.body) + suffix);
+      const body = file.truncated ? `${file.body}\n\n${t("workspace.truncated")}` : file.body;
+      onAddCodeToChat?.(target.path, body);
     } catch {
       onAddToChat?.(formatWorkspaceReference(target.path, false));
     }
@@ -1305,6 +1310,7 @@ export function WorkspacePanel({
           className={`workspace-preview__body${codePreviewActive ? " workspace-preview__body--code" : ""}`}
           ref={previewBodyRef}
           onContextMenu={openSelectionMenu}
+          onMouseUp={showSelectionToolbar}
         >
           {viewMode === "changed" && scopedChangeRows ? (
             <div className="workspace-change-scope">

@@ -485,6 +485,8 @@ export const zh: Record<DictKey, string> = {
   "composer.stop": "停止（Esc）",
   "composer.stopShort": "停止",
   "composer.pastedLabel": "[已粘贴文本 #{id} · {lines} 行]",
+  "composer.selectionLabel": "⟦选中 #{id}⟧",
+  "composer.selectionBadge": "{name} · {lines} 行",
   "composer.pastedShowPreview": "预览粘贴文本",
   "composer.pastedHidePreview": "收起粘贴文本预览",
   "composer.pastedExpand": "展开",

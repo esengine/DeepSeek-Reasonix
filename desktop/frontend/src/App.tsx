@@ -1038,6 +1038,11 @@ export default function App() {
   const [activeTopicTurns, setActiveTopicTurns] = useState<number | undefined>(undefined);
   const [composerInsertRequest, setComposerInsertRequest] = useState<ComposerInsertRequest | null>(null);
   const [planRevisionInsertRequest, setPlanRevisionInsertRequest] = useState<ComposerInsertRequest | null>(null);
+  // Monotonic id for composer insert requests. A wall-clock id (Date.now())
+  // collides when two snippets are inserted within the same millisecond, and
+  // the Composer's consumedInsertIdRef guard would then drop the second one —
+  // so rapid "add selection to chat" bursts must never share an id.
+  const insertRequestIdRef = useRef(0);
   const [workspaceInsertTarget, setWorkspaceInsertTarget] = useState<WorkspaceInsertTarget>("composer");
   const transientOverlayDismissSignal = useOverlayStore((s) => s.transientOverlayDismissSignal);
   const setTransientOverlayDismissSignal = useOverlayStore((s) => s.setTransientOverlayDismissSignal);
@@ -2143,10 +2148,19 @@ export default function App() {
 
   const addWorkspaceTextToComposer = useCallback((text: string) => {
     if (workspaceInsertTarget === "planRevision" && state.approval?.tool === "exit_plan_mode") {
-      setPlanRevisionInsertRequest({ id: Date.now(), text });
+      setPlanRevisionInsertRequest({ id: (insertRequestIdRef.current += 1), text });
       return;
     }
-    setComposerInsertRequest({ id: Date.now(), text });
+    setComposerInsertRequest({ id: (insertRequestIdRef.current += 1), text });
+  }, [state.approval?.tool, workspaceInsertTarget]);
+
+  const addWorkspaceCodeToComposer = useCallback((path: string, code: string) => {
+    const block = { path, text: code };
+    if (workspaceInsertTarget === "planRevision" && state.approval?.tool === "exit_plan_mode") {
+      setPlanRevisionInsertRequest({ id: (insertRequestIdRef.current += 1), text: "", block });
+      return;
+    }
+    setComposerInsertRequest({ id: (insertRequestIdRef.current += 1), text: "", block });
   }, [state.approval?.tool, workspaceInsertTarget]);
 
   // Coalesce tab-bar switches through the same last-click-wins scheduler that
@@ -3706,6 +3720,7 @@ export default function App() {
                   }}
                   onPreviewModeChange={handleWorkspacePreviewModeChange}
                   onAddToChat={addWorkspaceTextToComposer}
+                  onAddCodeToChat={addWorkspaceCodeToComposer}
                   onRequestPanelWidth={ensureWorkspacePanelWidth}
                   onFileTreeRefresh={refreshComposerFileRefs}
                   refreshKey={dockRefreshKey}

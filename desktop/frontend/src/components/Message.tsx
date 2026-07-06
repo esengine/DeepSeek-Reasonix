@@ -87,7 +87,11 @@ type PastedBlockInfo = {
   content: string;
 };
 
-const PASTE_LABEL_RE = /\[(?:已粘贴文本|已貼上文字|Pasted text) #\d+ · \d+ (?:行|lines)\]/g;
+const PASTE_LABEL_RE = /\[(?:已粘贴文本|已貼上文字|Pasted text) #\d+ · \d+ (?:行|lines)\]|⟦(?:选中|選取|Selection) #\d+⟧/g;
+// Selection tokens carry only an id; the "selected" wording is localized, so it
+// gets re-rendered in the active locale for display (the baked token stays fixed
+// in the submitted text for content matching).
+const SELECTION_LABEL_RE = /^⟦(?:选中|選取|Selection) #(\d+)⟧$/;
 
 export function parsePastedBlocks(text: string, submitText?: string): PastedBlockInfo[] {
   const labels = text.match(PASTE_LABEL_RE);
@@ -447,12 +451,14 @@ export function UserMessage({
                 return seg.content ? <div className="msg__text" key={`s${i}`}>{seg.content}</div> : null;
               }
               const expanded = Boolean(expandedPasteLabels[seg.block.label]);
+              const selMatch = SELECTION_LABEL_RE.exec(seg.block.label);
+              const shownLabel = selMatch ? t("composer.selectionLabel", { id: Number(selMatch[1]) }) : seg.block.label;
               return (
                 <div className="msg-pasted" key={seg.block.label}>
                   <div className="msg-pasted-block">
                     <div className="msg-pasted-head">
                       <FileText size={15} />
-                      <span className="msg-pasted-label">{seg.block.label}</span>
+                      <span className="msg-pasted-label">{shownLabel}</span>
                       <div className="msg-pasted-actions">
                         <Tooltip label={t(expanded ? "msg.pastedCollapseTooltip" : "msg.pastedExpandTooltip")}>
                           <button type="button" onClick={() => togglePasteExpand(seg.block.label)}>

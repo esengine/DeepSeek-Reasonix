@@ -25,6 +25,9 @@ for (const [label, name] of [
   ["[已粘贴文本 #2 · 31 行]", "Simplified Chinese"],
   ["[已貼上文字 #2 · 31 行]", "Traditional Chinese"],
   ["[Pasted text #2 · 31 lines]", "English"],
+  ["⟦选中 #3⟧", "Simplified Chinese selection"],
+  ["⟦選取 #3⟧", "Traditional Chinese selection"],
+  ["⟦Selection #3⟧", "English selection"],
 ] as const) {
   eq(
     parsePastedBlocks(`before\n${label}\nafter`, wrapped(label, "line 1\nline 2")),
