@@ -7525,7 +7525,7 @@ body > .mermaid-diagram--fullscreen {
 
 /* ── workspace side panel ────────────────────────────────────────────────── */
 .workspace-panel {
-  --workspace-tree-width: 280px;
+  --workspace-tree-width: 300px;
   --workspace-tree-rail-width: 44px;
   --workspace-preview-min-width: 360px;
   position: relative;
@@ -7535,7 +7535,7 @@ body > .mermaid-diagram--fullscreen {
   grid-template-columns: var(--workspace-tree-width) minmax(var(--workspace-preview-min-width), 1fr);
   grid-template-rows: minmax(0, 1fr);
   height: 100%;
-  background: var(--workspace-preview-bg);
+  background: var(--bg-elev);
   border-left: 1px solid var(--border-soft);
 }
 .workspace-panel--embedded {
@@ -7587,7 +7587,7 @@ body > .mermaid-diagram--fullscreen {
   grid-column: 2;
   display: flex;
   flex-direction: column;
-  background: var(--workspace-preview-bg);
+  background: var(--bg-elev);
 }
 .workspace-panel--embedded.workspace-panel--split-preview .workspace-preview {
   border-left: 1px solid var(--border-soft);
@@ -7704,9 +7704,6 @@ body > .mermaid-diagram--fullscreen {
   border-color: var(--border-soft);
   background: var(--bg-soft);
   color: var(--fg);
-}
-.workspace-current-file__recent--open svg {
-  transform: rotate(180deg);
 }
 .workspace-preview__window-actions {
   flex: 0 0 auto;
@@ -7882,11 +7879,11 @@ body > .mermaid-diagram--fullscreen {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 16px 18px 24px;
-  background: var(--workspace-preview-bg);
+  padding: 12px 8px 16px;
+  background: var(--bg-elev);
 }
 .workspace-panel--embedded .workspace-preview__body {
-  padding: 12px 12px 18px;
+  padding: 12px 8px 18px;
 }
 .workspace-preview__body--code {
   display: flex;
@@ -8422,29 +8419,46 @@ body > .mermaid-diagram--fullscreen {
   align-items: center;
   height: 18px;
   padding: 0 5px;
-  border: 1px solid var(--border-soft);
-  border-radius: 5px;
+  border: none;
+  border-radius: 0;
   color: var(--fg-faint);
   font-size: 10.5px;
   line-height: 1;
 }
 .workspace-change__badge--git {
   color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 32%, var(--border-soft));
+}
+.workspace-change > svg {
+  flex: none;
 }
 .workspace-change-scope {
   display: flex;
   flex-direction: column;
-  gap: 8px;
 }
 .workspace-change-scope__head {
+  --wails-draggable: no-drag;
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 7px 8px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--bg-soft);
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.workspace-change-scope__head:hover {
+  background: var(--tree-row-hover-bg);
+}
+.workspace-change-scope__head--clickable {
+  cursor: pointer;
+}
+.workspace-change-scope__head--clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .workspace-change-scope__title,
 .workspace-change-scope__meta {
@@ -8458,6 +8472,9 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg);
   font-size: 12px;
   font-weight: 620;
+}
+.workspace-change-scope__title--muted {
+  color: var(--fg-dim);
 }
 .workspace-change-scope__meta {
   flex: 0 1 auto;
@@ -8481,6 +8498,30 @@ body > .mermaid-diagram--fullscreen {
   background: var(--tree-row-hover-bg);
   color: var(--fg);
 }
+.workspace-change-scope__actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+button.workspace-change-scope__action {
+  --wails-draggable: no-drag;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+}
+.workspace-change-scope__action:hover {
+  background: var(--tree-row-hover-bg);
+  color: var(--fg);
+}
 .workspace-change-scope__list {
   display: flex;
   flex-direction: column;
@@ -8489,7 +8530,58 @@ body > .mermaid-diagram--fullscreen {
 .workspace-git-history {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+}
+.workspace-git-history > .workspace-change-scope {
+  min-height: 0;
+  overflow-y: auto;
+}
+.workspace-git-history > .workspace-change-scope--session {
+  flex: none;
+  overflow: visible;
+}
+.workspace-git-history > .workspace-change-scope:not(.workspace-change-scope--session) {
+  flex: 1;
+}
+.workspace-change-scope .workspace-tree {
+  padding-left: 0;
+  padding-right: 0;
+}
+:root[data-theme-style] .workspace-change-scope .workspace-tree {
+  padding-left: 0;
+  padding-right: 0;
+}
+.workspace-change-scope .workspace-tree__row {
+  box-sizing: border-box;
+  padding-right: 8px;
+}
+:root[data-theme-style] .workspace-change-scope .workspace-tree__row {
+  box-sizing: border-box;
+  padding-right: 8px;
+}
+.workspace-tree__hover-icon {
+  flex: 0 0 18px;
+  width: 18px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--fg-faint);
+  opacity: 0;
+  transition: opacity 0.1s ease;
+  pointer-events: none;
+}
+.workspace-tree__row:hover .workspace-tree__hover-icon,
+.workspace-tree__row:focus-within .workspace-tree__hover-icon,
+.workspace-tree__row:focus-visible .workspace-tree__hover-icon {
+  opacity: 1;
+}
+.workspace-git-history > .workspace-change-scope + .workspace-change-scope {
+  border-top: 1px solid var(--border-soft);
+  margin-left: -8px;
+  margin-right: -8px;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 .workspace-git-history__list {
   display: flex;
@@ -8497,23 +8589,24 @@ body > .mermaid-diagram--fullscreen {
   gap: 8px;
 }
 .workspace-git-history__item {
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--bg-soft);
-  overflow: hidden;
 }
 .workspace-git-history__head {
   --wails-draggable: no-drag;
   display: flex;
   flex-direction: column;
   width: 100%;
-  padding: 10px 12px;
+  padding: 5px 8px;
   border: none;
+  border-radius: 6px;
   background: transparent;
   color: var(--fg);
   font: inherit;
   font-size: 13px;
   text-align: left;
+  cursor: pointer;
+}
+.workspace-git-history__head:hover {
+  background: var(--tree-row-hover-bg);
 }
 .workspace-git-history__head-top {
   display: flex;
@@ -8525,21 +8618,17 @@ body > .mermaid-diagram--fullscreen {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-left: 22px;
-  margin-top: 4px;
-}
-.workspace-git-history__head:hover {
-  background: var(--sidebar-hover);
+  padding: 0 8px 5px;
 }
 .workspace-git-history__message {
   flex: 1;
-  font-weight: 560;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .workspace-git-history__author {
-  color: var(--fg-dim);
+  flex-shrink: 0;
+  color: var(--fg-faint);
   font-size: 12px;
 }
 .workspace-git-history__date {
@@ -24829,7 +24918,6 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .workspace-recent-menu__item:hover {
   background: var(--workspace-files-hover);
   color: var(--fg);
-  transform: translateX(2px);
 }
 
 :root[data-theme-style] .workspace-tree__row--active,
@@ -24860,16 +24948,16 @@ body > .mermaid-diagram--fullscreen {
   min-height: 56px;
   padding: 8px 9px;
   border: 1px solid transparent;
-  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast), transform var(--dur-fast) var(--ease-out);
+  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
 }
 
 :root[data-theme-style] .workspace-change-scope__head {
-  border-color: var(--border);
-  background: var(--bg-soft);
+  border-color: transparent;
+  background: transparent;
 }
 
 :root[data-theme-style] .workspace-change:hover {
-  border-color: color-mix(in srgb, var(--fg-faint) 20%, transparent);
+  background: var(--workspace-files-hover);
 }
 
 :root[data-theme-style] .workspace-change--active {
@@ -24888,14 +24976,11 @@ body > .mermaid-diagram--fullscreen {
 
 :root[data-theme-style] .workspace-change__badge {
   height: 18px;
-  border-radius: 5px;
-  background: var(--bg-soft);
   color: var(--fg-faint);
 }
 
 :root[data-theme-style] .workspace-change__badge--git {
   color: var(--accent);
-  background: var(--accent-soft);
 }
 
 :root[data-theme-style] .workspace-empty {
@@ -24956,8 +25041,8 @@ body > .mermaid-diagram--fullscreen {
 }
 
 :root[data-theme-style] .workspace-preview__body {
-  background: var(--chat-bg);
-  padding: 10px 0 18px;
+  background: var(--bg-elev);
+  padding: 10px 8px 18px;
   scrollbar-color: color-mix(in srgb, var(--fg-faint) 30%, transparent) transparent;
 }
 

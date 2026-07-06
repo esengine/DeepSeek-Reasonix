@@ -2178,6 +2178,7 @@ export default function App() {
     setTabMetas((current) => current.map((tab) => ({ ...tab, active: tab.id === id })));
     void enqueueTabSwitch(id, selected);
     setTabRevealSignal((signal) => signal + 1);
+    setDockRefreshKey((v) => v + 1);
   }, [closeTransientOverlays, enqueueTabSwitch, tabMetas]);
 
   const handleTabClose = useCallback(async (id: string) => {
