@@ -426,3 +426,69 @@ func TestDownloadFallsBackToSecondClient(t *testing.T) {
 type rtFunc func(*http.Request) (*http.Response, error)
 
 func (f rtFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestUpdaterUserAgentIsSet(t *testing.T) {
+	var ua string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ua = r.Header.Get("User-Agent")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	client := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode:    http.StatusOK,
+			Body:          io.NopCloser(strings.NewReader("{}")),
+			ContentLength: 2,
+			Header:        make(http.Header),
+		}, nil
+	})}
+
+	_, err := fetchBytesOnce(context.Background(), client, srv.URL)
+	if err != nil {
+		t.Fatalf("fetchBytesOnce: %v", err)
+	}
+
+	if ua == "" {
+		t.Fatal("User-Agent header was not set")
+	}
+	if !strings.HasPrefix(ua, "Reasonix-Updater/") {
+		t.Fatalf("User-Agent = %q, want prefix Reasonix-Updater/", ua)
+	}
+	if !strings.Contains(ua, "("+runtime.GOOS+"/"+runtime.GOARCH) {
+		t.Fatalf("User-Agent = %q, want to contain (%s/%s)", ua, runtime.GOOS, runtime.GOARCH)
+	}
+}
+
+func TestDownloadIntoSetsUserAgent(t *testing.T) {
+	var ua string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ua = r.Header.Get("User-Agent")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("test"))
+	}))
+	defer srv.Close()
+
+	client := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode:    http.StatusOK,
+			Body:          io.NopCloser(strings.NewReader("test")),
+			ContentLength: 4,
+			Header:        make(http.Header),
+		}, nil
+	})}
+
+	var buf bytes.Buffer
+	var total int64 = 4
+	err := downloadInto(context.Background(), client, srv.URL, &buf, &total, nil)
+	if err != nil {
+		t.Fatalf("downloadInto: %v", err)
+	}
+
+	if ua == "" {
+		t.Fatal("User-Agent header was not set in download")
+	}
+	if !strings.HasPrefix(ua, "Reasonix-Updater/") {
+		t.Fatalf("User-Agent = %q, want prefix Reasonix-Updater/", ua)
+	}
+}
