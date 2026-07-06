@@ -65,7 +65,13 @@ func (m *chatTUI) runResumeCommand(input string) {
 		return
 	}
 	// Persist the conversation we're leaving so switching back later restores it.
+	// Snapshot before moving the lease: the outgoing session must be written
+	// while this process still owns it.
 	_ = m.ctrl.Snapshot()
+	if err := m.rebindSessionLease(target.Path); err != nil {
+		m.notice("resume: " + sessionLeaseHeldNotice(err))
+		return
+	}
 	m.ctrl.Resume(loaded, target.Path)
 	m.replayActiveBranch(i18n.M.ResumedTitle)
 }

@@ -134,7 +134,7 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # workspace_root = ""
 # allow_write    = ["/tmp"]
 # forbid_read    = ["${HOME}/.ssh"]
-# bash           = "enforce"   # enforce (default) | off
+# bash           = "enforce"   # enforce (default) | off; native Windows uses its helper sandbox, and without any OS sandbox backend, enforce refuses bash
 # network        = true
 
 # Skills are invokable playbooks (SKILL.md / <name>.md with frontmatter), found

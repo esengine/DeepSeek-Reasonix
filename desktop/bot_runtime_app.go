@@ -70,8 +70,11 @@ func (a *App) refreshBotRuntimeAsync() {
 }
 
 func (a *App) refreshBotRuntime() {
+	// NewApp always pre-fills botRuntime; a nil here means a test-constructed
+	// App with no bot runtime, which must not lazily create one from a
+	// background goroutine (that would race a concurrent refresh).
 	if a.botRuntime == nil {
-		a.botRuntime = newDesktopBotRuntime()
+		return
 	}
 	cfg, err := a.loadDesktopBotConfig()
 	if err != nil {

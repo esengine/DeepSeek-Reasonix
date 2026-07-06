@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -140,6 +141,151 @@ func TestSaveSnapshotAllowsAppendFromDiskPrefix(t *testing.T) {
 	}
 	if got := len(loaded.Messages); got != 3 {
 		t.Fatalf("message count after append snapshot = %d, want 3", got)
+	}
+}
+
+func TestSaveSnapshotAppendsWithoutReplacingPrefixFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	base := NewSession("sys")
+	base.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	if err := base.Save(path); err != nil {
+		t.Fatalf("Save base: %v", err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat before append: %v", err)
+	}
+
+	next := NewSession("sys")
+	next.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	next.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	if err := next.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot append: %v", err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat after append: %v", err)
+	}
+	if !os.SameFile(before, after) {
+		t.Fatal("SaveSnapshot replaced the session file; want append-in-place for disk-prefix snapshots")
+	}
+}
+
+func TestSaveSnapshotAppendsToEventLogWithoutChangingCheckpoint(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	base := NewSession("sys")
+	base.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	if err := base.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot base: %v", err)
+	}
+	checkpointBefore, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile checkpoint before append: %v", err)
+	}
+
+	next, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession base: %v", err)
+	}
+	next.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	if err := next.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot append: %v", err)
+	}
+
+	checkpointAfter, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile checkpoint after append: %v", err)
+	}
+	if string(checkpointAfter) != string(checkpointBefore) {
+		t.Fatalf("checkpoint changed after append-only snapshot:\nbefore=%s\nafter=%s", checkpointBefore, checkpointAfter)
+	}
+	events := readSessionEventsForTest(t, path)
+	if len(events) != 2 {
+		t.Fatalf("event count = %d, want replace + append", len(events))
+	}
+	if events[0].Type != sessionEventTypeReplace || events[1].Type != sessionEventTypeAppend {
+		t.Fatalf("event types = %q, %q; want replace, append", events[0].Type, events[1].Type)
+	}
+	if events[1].MessageIndex != 2 || len(events[1].Messages) != 1 || events[1].Messages[0].Content != "one" {
+		t.Fatalf("append event = %+v, want assistant suffix at index 2", events[1])
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession after append: %v", err)
+	}
+	if got := loaded.Messages[len(loaded.Messages)-1].Content; got != "one" {
+		t.Fatalf("loaded tail = %q, want one", got)
+	}
+}
+
+func TestSaveRewriteAppendsReplaceEventAndRefreshesCheckpoint(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	base := NewSession("sys")
+	base.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	base.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	if err := base.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot base: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession base: %v", err)
+	}
+	loaded.Replace([]provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "rewound"},
+	})
+	if err := loaded.SaveRewrite(path); err != nil {
+		t.Fatalf("SaveRewrite: %v", err)
+	}
+	// Rewrites refresh the compatibility checkpoint so direct .jsonl readers
+	// and older binaries stay bounded-stale instead of frozen at first save.
+	anchor, err := loadSessionMessagesFromJSONL(path)
+	if err != nil {
+		t.Fatalf("read checkpoint after rewrite: %v", err)
+	}
+	if len(anchor) != 2 || anchor[1].Content != "rewound" {
+		t.Fatalf("checkpoint after rewrite = %+v, want refreshed rewound transcript", anchor)
+	}
+	events := readSessionEventsForTest(t, path)
+	if len(events) != 2 || events[1].Type != sessionEventTypeReplace || events[1].Reason != "rewrite" {
+		t.Fatalf("events after rewrite = %+v, want trailing rewrite replace", events)
+	}
+	reloaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession after rewrite: %v", err)
+	}
+	if len(reloaded.Messages) != 2 || reloaded.Messages[1].Content != "rewound" {
+		t.Fatalf("replayed rewrite messages = %+v", reloaded.Messages)
+	}
+}
+
+func TestSaveSnapshotMigratesLegacyJSONLToEventLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"system","content":"sys"}`+"\n"+`{"role":"user","content":"legacy"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write legacy jsonl: %v", err)
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession legacy: %v", err)
+	}
+	loaded.Add(provider.Message{Role: provider.RoleAssistant, Content: "migrated"})
+	if err := loaded.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot legacy append: %v", err)
+	}
+	events := readSessionEventsForTest(t, path)
+	if len(events) != 1 || events[0].Type != sessionEventTypeReplace {
+		t.Fatalf("legacy migration events = %+v, want one replace seed", events)
+	}
+	reloaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession migrated: %v", err)
+	}
+	if got := reloaded.Messages[len(reloaded.Messages)-1].Content; got != "migrated" {
+		t.Fatalf("migrated tail = %q, want migrated", got)
+	}
+	if _, err := os.Stat(SessionEventIndexPath(path)); err != nil {
+		t.Fatalf("event index missing: %v", err)
 	}
 }
 
@@ -677,6 +823,307 @@ func TestSaveRecoveryBranchDedupesByDigest(t *testing.T) {
 	}
 }
 
+func TestSaveRecoveryBranchCompactsLongParentFilename(t *testing.T) {
+	dir := t.TempDir()
+	parentID := strings.Repeat("longparent-", 22)
+	path := filepath.Join(dir, parentID+".jsonl")
+	current := NewSession("sys")
+	current.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	current.Add(provider.Message{Role: provider.RoleAssistant, Content: "disk"})
+	if err := current.Save(path); err != nil {
+		t.Fatalf("Save current: %v", err)
+	}
+
+	stale := NewSession("sys")
+	stale.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	stale.Add(provider.Message{Role: provider.RoleAssistant, Content: "local"})
+	info, err := stale.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: path})
+	if err != nil {
+		t.Fatalf("SaveRecoveryBranch: %v", err)
+	}
+	base := filepath.Base(info.Path)
+	if len(base) > 140 {
+		t.Fatalf("recovery basename length = %d (%q), want bounded", len(base), base)
+	}
+	for _, suffix := range []string{".lock", ".lease.lock", ".lease.json", ".meta"} {
+		if len(base+suffix) > 255 {
+			t.Fatalf("recovery sidecar basename %q length = %d, want <= 255", base+suffix, len(base+suffix))
+		}
+	}
+	meta, ok, err := LoadBranchMeta(info.Path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta recovery ok=%v err=%v", ok, err)
+	}
+	if meta.ParentID != BranchID(path) {
+		t.Fatalf("recovery parent = %q, want original branch id", meta.ParentID)
+	}
+}
+
+func TestSaveRecoveryBranchDoesNotCascadeRecoveryFilename(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	current := NewSession("sys")
+	current.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	current.Add(provider.Message{Role: provider.RoleAssistant, Content: "disk"})
+	if err := current.Save(path); err != nil {
+		t.Fatalf("Save current: %v", err)
+	}
+
+	local := NewSession("sys")
+	local.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	local.Add(provider.Message{Role: provider.RoleAssistant, Content: "local"})
+	first, err := local.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: path})
+	if err != nil {
+		t.Fatalf("first SaveRecoveryBranch: %v", err)
+	}
+
+	recoveryDisk, err := LoadSession(first.Path)
+	if err != nil {
+		t.Fatalf("LoadSession recovery: %v", err)
+	}
+	recoveryDisk.Add(provider.Message{Role: provider.RoleUser, Content: "disk follow-up"})
+	if err := recoveryDisk.SaveSnapshot(first.Path); err != nil {
+		t.Fatalf("SaveSnapshot recovery disk: %v", err)
+	}
+	recoveryLocal := NewSession("sys")
+	recoveryLocal.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	recoveryLocal.Add(provider.Message{Role: provider.RoleAssistant, Content: "local"})
+	recoveryLocal.Add(provider.Message{Role: provider.RoleUser, Content: "local follow-up"})
+
+	second, err := recoveryLocal.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: first.Path})
+	if err != nil {
+		t.Fatalf("second SaveRecoveryBranch: %v", err)
+	}
+	base := filepath.Base(second.Path)
+	if count := strings.Count(base, "-recovery-"); count != 1 {
+		t.Fatalf("recovery basename = %q, contains %d recovery markers, want 1", base, count)
+	}
+	if len(base) > 140 {
+		t.Fatalf("recovery basename length = %d (%q), want bounded", len(base), base)
+	}
+}
+
+func TestReconcileSessionSidecarsRemovesUnlockedArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"user","content":"hello"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, sidecar := range []string{path + ".lock", path + ".lease.lock", path + ".lease.json"} {
+		if err := os.WriteFile(sidecar, []byte("{}\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", sidecar, err)
+		}
+	}
+
+	if err := ReconcileSessionSidecars(dir); err != nil {
+		t.Fatalf("ReconcileSessionSidecars: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("session transcript removed: %v", err)
+	}
+	for _, sidecar := range []string{path + ".lock", path + ".lease.lock", path + ".lease.json"} {
+		if _, err := os.Stat(sidecar); !os.IsNotExist(err) {
+			t.Fatalf("%s exists after sidecar cleanup (err=%v)", sidecar, err)
+		}
+	}
+}
+
+func TestReconcileSessionSidecarsKeepsLiveLocks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"user","content":"hello"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := lockSessionFile(path)
+	if err != nil {
+		t.Fatalf("lockSessionFile: %v", err)
+	}
+	defer unlock()
+	lease, err := TryAcquireSessionLease(path)
+	if err != nil {
+		t.Fatalf("TryAcquireSessionLease: %v", err)
+	}
+	defer lease.Release()
+
+	if err := ReconcileSessionSidecars(dir); err != nil {
+		t.Fatalf("ReconcileSessionSidecars: %v", err)
+	}
+	for _, sidecar := range []string{path + ".lock", path + ".lease.lock", path + ".lease.json"} {
+		if _, err := os.Stat(sidecar); err != nil {
+			t.Fatalf("%s missing while lock is live: %v", sidecar, err)
+		}
+	}
+}
+
+// TestReconcileSessionSidecarsKeepsFlockOnlyLocks proves the file lock alone
+// protects a writer from cleanup: CLI-style savers hold the .lock flock while
+// writing without ever taking a session lease.
+func TestReconcileSessionSidecarsKeepsFlockOnlyLocks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"user","content":"hello"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := lockSessionFile(path)
+	if err != nil {
+		t.Fatalf("lockSessionFile: %v", err)
+	}
+	if err := ReconcileSessionSidecars(dir); err != nil {
+		t.Fatalf("ReconcileSessionSidecars: %v", err)
+	}
+	if _, err := os.Stat(path + ".lock"); err != nil {
+		t.Fatalf(".lock removed while a lock-only writer holds it: %v", err)
+	}
+	unlock()
+	if err := ReconcileSessionSidecars(dir); err != nil {
+		t.Fatalf("ReconcileSessionSidecars after unlock: %v", err)
+	}
+	if _, err := os.Stat(path + ".lock"); !os.IsNotExist(err) {
+		t.Fatalf(".lock survived cleanup after release (err=%v)", err)
+	}
+}
+
+// TestReconcileSessionSidecarsRenamesOverlongSessionFiles covers the
+// migration for transcripts left behind by the unbounded recovery cascade
+// (#5923): names so long their lock/lease sidecars could not be created. The
+// conversation bytes must survive under a bounded name, branch meta must move
+// with its ID rewritten, and children must be re-parented onto the new ID.
+func TestReconcileSessionSidecarsRenamesOverlongSessionFiles(t *testing.T) {
+	dir := t.TempDir()
+	longID := strings.Repeat("p", 240) // 246-byte basename: .lock fits, .lease.lock does not
+	hugeID := strings.Repeat("q", 248) // 254-byte basename: no sidecar fits at all
+	oldLong := filepath.Join(dir, longID+".jsonl")
+	oldHuge := filepath.Join(dir, hugeID+".jsonl")
+	content := `{"role":"system","content":"sys"}` + "\n" + `{"role":"user","content":"hello"}` + "\n"
+	for _, p := range []string{oldLong, oldHuge} {
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(oldLong+".lock", []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveBranchMeta(oldLong, BranchMeta{Name: "长会话", ParentID: "root-branch"}); err != nil {
+		t.Fatalf("SaveBranchMeta: %v", err)
+	}
+	childPath := filepath.Join(dir, "child.jsonl")
+	if err := os.WriteFile(childPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveBranchMeta(childPath, BranchMeta{Name: "child", ParentID: longID}); err != nil {
+		t.Fatalf("SaveBranchMeta child: %v", err)
+	}
+
+	if err := ReconcileSessionSidecars(dir); err != nil {
+		t.Fatalf("ReconcileSessionSidecars: %v", err)
+	}
+
+	for _, gone := range []string{oldLong, oldHuge, oldLong + ".lock", oldLong + ".meta"} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Fatalf("%s still present after rename (err=%v)", filepath.Base(gone), err)
+		}
+	}
+	newLongID := recoveryParentStem(longID)
+	newLong := filepath.Join(dir, newLongID+".jsonl")
+	newHuge := filepath.Join(dir, recoveryParentStem(hugeID)+".jsonl")
+	for _, p := range []string{newLong, newHuge} {
+		if base := filepath.Base(p); len(base) > maxSessionBasenameBytes {
+			t.Fatalf("renamed basename %q length %d exceeds bound %d", base, len(base), maxSessionBasenameBytes)
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("read renamed transcript: %v", err)
+		}
+		if string(b) != content {
+			t.Fatalf("transcript content changed by rename: %q", b)
+		}
+	}
+	meta, ok, err := LoadBranchMeta(newLong)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta renamed ok=%v err=%v", ok, err)
+	}
+	if meta.ID != newLongID {
+		t.Fatalf("migrated meta ID = %q, want %q", meta.ID, newLongID)
+	}
+	if meta.Name != "长会话" || meta.ParentID != "root-branch" {
+		t.Fatalf("migrated meta lost fields: %+v", meta)
+	}
+	childMeta, ok, err := LoadBranchMeta(childPath)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta child ok=%v err=%v", ok, err)
+	}
+	if childMeta.ParentID != newLongID {
+		t.Fatalf("child ParentID = %q, want re-parented %q", childMeta.ParentID, newLongID)
+	}
+
+	before, err := filepath.Glob(filepath.Join(dir, "*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ReconcileSessionSidecars(dir); err != nil {
+		t.Fatalf("ReconcileSessionSidecars rerun: %v", err)
+	}
+	after, err := filepath.Glob(filepath.Join(dir, "*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(before) != len(after) {
+		t.Fatalf("rerun changed the directory: before=%d entries, after=%d", len(before), len(after))
+	}
+}
+
+// TestReconcileOverlongRenameStillReparentsWhenSidecarMigrationFails pins the
+// point-of-no-return contract: once the transcript rename lands, the mapping
+// must be committed — children re-parented, error surfaced as a warning —
+// because the old name is gone and no later run can reconstruct it.
+func TestReconcileOverlongRenameStillReparentsWhenSidecarMigrationFails(t *testing.T) {
+	dir := t.TempDir()
+	longID := strings.Repeat("m", 240)
+	oldPath := filepath.Join(dir, longID+".jsonl")
+	content := `{"role":"user","content":"hello"}` + "\n"
+	if err := os.WriteFile(oldPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveBranchMeta(oldPath, BranchMeta{Name: "keep", ParentID: "root"}); err != nil {
+		t.Fatalf("SaveBranchMeta: %v", err)
+	}
+	childPath := filepath.Join(dir, "child.jsonl")
+	if err := os.WriteFile(childPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveBranchMeta(childPath, BranchMeta{Name: "child", ParentID: longID}); err != nil {
+		t.Fatalf("SaveBranchMeta child: %v", err)
+	}
+
+	newID := recoveryParentStem(longID)
+	newPath := filepath.Join(dir, newID+".jsonl")
+	// Sabotage the meta migration: its destination path is a directory.
+	if err := os.Mkdir(newPath+".meta", 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ReconcileSessionSidecars(dir); err == nil {
+		t.Fatal("expected the sabotaged meta migration to surface an error")
+	}
+	if _, err := os.Stat(newPath); err != nil {
+		t.Fatalf("renamed transcript missing after partial failure: %v", err)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("old transcript still present (err=%v)", err)
+	}
+	childMeta, ok, err := LoadBranchMeta(childPath)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta child ok=%v err=%v", ok, err)
+	}
+	if childMeta.ParentID != newID {
+		t.Fatalf("child ParentID = %q, want %q despite sidecar failure", childMeta.ParentID, newID)
+	}
+	// The old meta stays behind as the durable copy of the un-migrated fields.
+	if _, err := os.Stat(oldPath + ".meta"); err != nil {
+		t.Fatalf("old meta lost though its migration failed: %v", err)
+	}
+}
+
 // TestListSessionsOrdersByMTime makes sure the picker shows the most
 // recently used conversation first — that's what users reach for when they
 // hit `reasonix --continue`.
@@ -902,4 +1349,26 @@ func TestListSessionsMissingDir(t *testing.T) {
 	if err != nil || got != nil {
 		t.Errorf("missing dir = %v / %v, want nil/nil", got, err)
 	}
+}
+
+func readSessionEventsForTest(t *testing.T, path string) []sessionEventRecord {
+	t.Helper()
+	f, err := os.Open(SessionEventLogPath(path))
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer f.Close()
+	dec := json.NewDecoder(f)
+	var out []sessionEventRecord
+	for {
+		var rec sessionEventRecord
+		if err := dec.Decode(&rec); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			t.Fatalf("decode event log: %v", err)
+		}
+		out = append(out, rec)
+	}
+	return out
 }

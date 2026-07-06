@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,11 +35,12 @@ import (
 // the thin Wails binding that wires these into App methods and progress events.
 
 // Manifest endpoints — R2 CDN first (fast, especially in CN), then the crash
-// worker release gateway. The build channel picks the rolling pointer so a
-// canary build polls the canary line and a stable build polls latest; the two
-// never cross. The gateway deliberately avoids GitHub's repository-wide
-// /releases/latest shortcut because CLI tags (v*) and desktop tags (desktop-v*)
-// are separate release lines in the same repo.
+// worker release gateway, then GitHub as the stable channel's last resort. The
+// build channel picks the rolling pointer so a canary build polls the canary
+// line and a stable build polls latest; the two never cross. The gateway
+// deliberately avoids GitHub's repository-wide /releases/latest shortcut
+// because CLI tags (v*) and desktop tags (desktop-v*) are separate release
+// lines in the same repo.
 const (
 	r2Base             = "https://dl.reasonix.io"
 	releaseGatewayBase = "https://crash.reasonix.io/v1/desktop/releases"
@@ -46,8 +48,19 @@ const (
 	httpTimeout        = 15 * time.Second
 )
 
-// manifestEndpoints returns the primary (R2) then fallback (GitHub) manifest URLs
-// for the running build's channel.
+// githubManifestFallback is the stable channel's last-resort manifest source.
+// dl.reasonix.io and crash.reasonix.io share one Cloudflare zone, so bot
+// protection that 403s a user's egress IP takes out both first-party endpoints
+// at once (#6005); GitHub is separate infrastructure. The URL is safe despite
+// the repository-wide /releases/latest caveat above: release.yml pins the
+// repo-wide latest badge to the CLI line and attaches a desktop-manifest mirror
+// to every stable CLI release ("desktop manifest compatibility asset"), so this
+// asset is always the desktop manifest. Canary has no GitHub release, so its
+// chain stays two-deep.
+const githubManifestFallback = "https://github.com/esengine/DeepSeek-Reasonix/releases/latest/download/latest.json"
+
+// manifestEndpoints returns the manifest URLs for the running build's channel,
+// in the order fetchManifest tries them.
 func manifestEndpoints() []string {
 	if channel == "canary" {
 		return []string{
@@ -58,7 +71,16 @@ func manifestEndpoints() []string {
 	return []string{
 		r2Base + "/latest/latest.json",
 		releaseGatewayBase + "/stable/latest.json",
+		githubManifestFallback,
 	}
+}
+
+// updaterUserAgent identifies updater traffic. Go's default Go-http-client UA
+// is exactly what edge bot protection scores worst (#6005); a descriptive UA
+// lets the release edge allowlist updater requests and makes them attributable
+// in server logs.
+func updaterUserAgent() string {
+	return fmt.Sprintf("Reasonix-Updater/%s (%s/%s; %s)", version, runtime.GOOS, runtime.GOARCH, channel)
 }
 
 // downloadPage is the human-facing releases page shown when self-update is
@@ -147,24 +169,26 @@ func normalizeVersion(v string) (string, bool) {
 	return semver.Canonical(v), true
 }
 
-// fetchManifest pulls latest.json from the primary endpoint, then the fallback,
-// and decodes it.
+// fetchManifest pulls latest.json from each endpoint in order until one both
+// responds and decodes. Every endpoint's failure is kept — a user staring at a
+// gateway 403 (#6005) needs to see that the R2 pointer failed too, not just
+// whichever endpoint happened to die last.
 func fetchManifest(ctx context.Context, c *http.Client) (*update.Manifest, error) {
-	var lastErr error
+	var errs []error
 	for _, url := range manifestEndpoints() {
 		b, err := fetchBytes(ctx, c, url)
 		if err != nil {
-			lastErr = err
+			errs = append(errs, err)
 			continue
 		}
 		var m update.Manifest
 		if err := json.Unmarshal(b, &m); err != nil {
-			lastErr = err
+			errs = append(errs, fmt.Errorf("%s: %w", url, err))
 			continue
 		}
 		return &m, nil
 	}
-	return nil, fmt.Errorf("update: fetch manifest: %w", lastErr)
+	return nil, fmt.Errorf("update: fetch manifest: %w", errors.Join(errs...))
 }
 
 // evaluate compares the running version against the manifest and builds the
@@ -214,6 +238,9 @@ type cachedUpdate struct {
 var updateCacheBaseDir = defaultUpdateCacheBaseDir
 
 func defaultUpdateCacheBaseDir() (string, error) {
+	if cd := config.CacheDir(); cd != "" {
+		return filepath.Join(cd, "updates"), nil
+	}
 	base, err := os.UserCacheDir()
 	if err != nil {
 		base = os.TempDir()
@@ -426,6 +453,7 @@ func fetchBytesOnce(ctx context.Context, c *http.Client, url string) ([]byte, er
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("User-Agent", updaterUserAgent())
 	resp, err := c.Do(req)
 	if err != nil {
 		return nil, err
@@ -467,6 +495,7 @@ func downloadInto(ctx context.Context, c *http.Client, url string, buf *bytes.Bu
 	if err != nil {
 		return err
 	}
+	req.Header.Set("User-Agent", updaterUserAgent())
 	if buf.Len() > 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", buf.Len()))
 	}

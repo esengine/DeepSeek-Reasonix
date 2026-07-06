@@ -3,12 +3,14 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"reasonix/internal/event"
+	"reasonix/internal/i18n"
 	"reasonix/internal/permission"
 )
 
@@ -296,7 +298,7 @@ func (a *approvalManager) autoApprovalWouldAllowLocked(tool, subject string) boo
 }
 
 func (a *approvalManager) sessionGrantAllowsLocked(tool, subject string) bool {
-	if requiresFreshApprovalTool(tool) {
+	if requiresFreshApprovalTool(tool) && !allowsFreshSessionGrantTool(tool) {
 		return false
 	}
 	for rule := range a.granted {
@@ -339,11 +341,11 @@ func normalizeToolApprovalMode(mode string) string {
 }
 
 // RequiresFreshHumanApprovalTool reports whether a tool must be answered by a
-// human each time, not by YOLO/auto approval, session grants, Guardian, or a
-// non-interactive nil approver.
+// human decision, not by YOLO/auto approval, Guardian, or a non-interactive nil
+// approver. A small subset may still opt into explicit session grants.
 func RequiresFreshHumanApprovalTool(tool string) bool {
 	switch tool {
-	case planApprovalTool, memoryRememberTool, memoryForgetTool:
+	case planApprovalTool, memoryRememberTool, memoryForgetTool, SandboxEscapeApprovalTool:
 		return true
 	default:
 		return false
@@ -354,14 +356,23 @@ func requiresFreshApprovalTool(tool string) bool {
 	return RequiresFreshHumanApprovalTool(tool)
 }
 
+func allowsFreshSessionGrantTool(tool string) bool {
+	switch tool {
+	case SandboxEscapeApprovalTool:
+		return true
+	default:
+		return false
+	}
+}
+
 func approvalNotificationText(tool, subject string) string {
 	if requiresFreshApprovalTool(tool) {
-		return "approval needed: " + tool
+		return fmt.Sprintf(i18n.M.ApprovalNeededFmt, tool)
 	}
 	if subject == "" {
-		return "approval needed: " + tool
+		return fmt.Sprintf(i18n.M.ApprovalNeededFmt, tool)
 	}
-	return "approval needed: " + tool + " " + subject
+	return fmt.Sprintf(i18n.M.ApprovalNeededWithSubjectFmt, tool, subject)
 }
 
 func permissionRequestHookPayload(tool, subject string, args json.RawMessage) (string, json.RawMessage, bool) {

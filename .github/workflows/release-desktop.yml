@@ -269,7 +269,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          args=(--title "Reasonix Desktop ${{ steps.ver.outputs.version }}" --generate-notes)
+          # Repository-wide "latest" is reserved for the CLI line (see header);
+          # without this a desktop release published after the CLI one steals it.
+          args=(--title "Reasonix Desktop ${{ steps.ver.outputs.version }}" --generate-notes --latest=false)
           [ "${{ steps.ver.outputs.prerelease }}" = "true" ] && args+=(--prerelease)
           gh release create "${{ steps.ver.outputs.tag }}" dist/* "${args[@]}"
 
@@ -367,6 +369,10 @@ jobs:
             aws s3 cp assets/ "s3://${R2_BUCKET}/latest/" --recursive --endpoint-url "$ENDPOINT"
           fi
 
+      # dl.reasonix.io serves 403 to GitHub Actions egress IPs (Cloudflare bot
+      # protection), so smoke the mirrored objects over the authenticated S3 API
+      # instead of the public edge. This verifies the mirror landed; the public
+      # edge itself is not reachable from CI and is covered by end users' traffic.
       - name: Smoke desktop release pointers
         if: env.HAS_R2 == 'true'
         env:
@@ -374,8 +380,11 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
           CHANNEL: ${{ steps.ver.outputs.channel }}
           PRERELEASE: ${{ steps.ver.outputs.prerelease }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: |
           set -euo pipefail
+          ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           f=assets/latest.json
           jq -e --arg version "$VERSION" --arg prefix "https://dl.reasonix.io/${TAG}/" '
             .version == $version and
@@ -384,7 +393,8 @@ jobs:
               all(type == "string" and startswith($prefix) and (contains("/releases/latest/") | not)))
           ' "$f" >/dev/null
 
-          curl --retry 5 --retry-delay 2 -fsSL "https://dl.reasonix.io/${TAG}/latest.json" >/tmp/reasonix-desktop-tag-latest.json
+          aws s3 cp "s3://${R2_BUCKET}/${TAG}/latest.json" /tmp/reasonix-desktop-tag-latest.json --endpoint-url "$ENDPOINT"
+          jq -e --arg version "$VERSION" '.version == $version' /tmp/reasonix-desktop-tag-latest.json >/dev/null
           if [ "$CHANNEL" = "canary" ]; then
             pointer="canary"
           elif [ "$PRERELEASE" = "true" ]; then
@@ -393,13 +403,61 @@ jobs:
             pointer="latest"
           fi
           if [ -n "$pointer" ]; then
-            curl --retry 5 --retry-delay 2 -fsSL "https://dl.reasonix.io/${pointer}/latest.json" >/tmp/reasonix-desktop-pointer-latest.json
+            aws s3 cp "s3://${R2_BUCKET}/${pointer}/latest.json" /tmp/reasonix-desktop-pointer-latest.json --endpoint-url "$ENDPOINT"
             jq -e --arg version "$VERSION" '.version == $version' /tmp/reasonix-desktop-pointer-latest.json >/dev/null
           fi
 
           jq -r '.platforms[] | .url, .sig' "$f" | while IFS= read -r asset; do
-            curl --retry 5 --retry-delay 2 -fsSI "$asset" >/dev/null
+            key="${asset#https://dl.reasonix.io/}"
+            aws s3api head-object --bucket "$R2_BUCKET" --key "$key" --endpoint-url "$ENDPOINT" >/dev/null
           done
+
+      # Best-effort probe of the release gateway — the updater's second
+      # manifest source — over the same public edge and Go client UA end users
+      # hit. A 403 here is the known Cloudflare bot-protection gap (#6005:
+      # datacenter/proxy egress gets blocked before the worker runs) and must
+      # not fail the release until a WAF skip rule for /v1/desktop/releases/*
+      # lands; it is surfaced as a warning so the run shows whether the edge
+      # is open. Anything else unexpected (404, 5xx, wrong version) means the
+      # gateway route or pointer regressed and fails hard.
+      - name: Probe public release gateway
+        if: env.HAS_R2 == 'true'
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          CHANNEL: ${{ steps.ver.outputs.channel }}
+          PRERELEASE: ${{ steps.ver.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if [ "$PRERELEASE" = "true" ]; then
+            echo "prerelease — no pointer moved; skipping gateway probe"
+            exit 0
+          fi
+          chan="stable"
+          [ "$CHANNEL" = "canary" ] && chan="canary"
+          url="https://crash.reasonix.io/v1/desktop/releases/${chan}/latest.json"
+          # curl already prints 000 for a transport failure; || true keeps -e
+          # from killing the step so the case below can route it.
+          code="$(curl -sS -A "Go-http-client/2.0" -o /tmp/gateway-latest.json -w '%{http_code}' "$url" || true)"
+          case "$code" in
+            200)
+              if jq -e --arg version "$VERSION" '.version == $version' /tmp/gateway-latest.json >/dev/null; then
+                echo "gateway serves $VERSION on $chan"
+              else
+                echo "::error::gateway responded 200 but serves $(jq -r '.version // "<none>"' /tmp/gateway-latest.json), want $VERSION — stale or wrong pointer"
+                exit 1
+              fi
+              ;;
+            403)
+              echo "::warning::gateway returned 403 to CI egress — known bot-protection gap (#6005), not failing the release"
+              ;;
+            000|"")
+              echo "::warning::gateway unreachable from CI (transport error), not failing the release"
+              ;;
+            *)
+              echo "::error::gateway returned $code for $url — route or pointer regression"
+              exit 1
+              ;;
+          esac
 
       - name: Attach desktop manifest to matching CLI release
         if: env.HAS_R2 == 'true' && steps.ver.outputs.channel != 'canary' && steps.ver.outputs.prerelease != 'true'

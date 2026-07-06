@@ -955,6 +955,27 @@ function errorMessage(err: unknown): string {
   return String(err || "");
 }
 
+export function effortSwitchNoticeText(err: unknown): string {
+  const msg = errorMessage(err).trim() || "unknown error";
+  const lower = msg.toLowerCase();
+  if (lower.includes("finish or cancel") && lower.includes("before changing effort")) {
+    return t("status.effortSwitchBusy");
+  }
+  if (lower.includes("already open in another reasonix window") || lower.includes("session lease held")) {
+    return t("status.effortSwitchLeaseHeld");
+  }
+  if (lower.includes("workspace is still starting")) {
+    return t("status.effortSwitchStarting");
+  }
+  if (lower.startsWith("workspace failed to start")) {
+    return t("status.effortSwitchStartupFailed", { err: msg });
+  }
+  if (lower.includes("changed while switching effort") || (lower.includes("tab ") && lower.includes("not found"))) {
+    return t("status.effortSwitchRetry");
+  }
+  return t("status.effortSwitchFailed", { err: msg });
+}
+
 async function refreshMetaForTab(tabId: string, dispatchTo: (tabId: string, action: Action) => void): Promise<void> {
   try {
     dispatchTo(tabId, { type: "meta", meta: await app.MetaForTab(tabId) });
@@ -1726,7 +1747,12 @@ export function useController() {
 
   const setEffort = useCallback(async (level: string) => {
     if (!activeTabId) return;
-    await app.SetEffortForTab(activeTabId, level).catch(() => {});
+    try {
+      await app.SetEffortForTab(activeTabId, level);
+    } catch (err) {
+      dispatchTo(activeTabId, { type: "local_notice", level: "warn", text: effortSwitchNoticeText(err) });
+      return;
+    }
     try {
       dispatchTo(activeTabId, { type: "meta", meta: await app.MetaForTab(activeTabId) });
       dispatchTo(activeTabId, { type: "context", context: await app.ContextUsageForTab(activeTabId) });

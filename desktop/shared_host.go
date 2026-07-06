@@ -135,11 +135,18 @@ func (a *App) releaseSharedHost(root string) {
 }
 
 func (a *App) releaseTabSharedHost(tab *WorkspaceTab) {
-	if tab == nil || tab.SharedHostKey == "" {
+	if tab == nil {
 		return
 	}
-	key := tab.SharedHostKey
-	tab.SharedHostKey = ""
+	// SharedHostKey is a.mu-guarded (the build goroutine publishes it under
+	// the lock); do the take under the lock and the slow host release after.
+	// Callers must not hold a.mu.
+	a.mu.Lock()
+	key := takeTabSharedHostKey(tab)
+	a.mu.Unlock()
+	if key == "" {
+		return
+	}
 	a.releaseSharedHost(key)
 }
 

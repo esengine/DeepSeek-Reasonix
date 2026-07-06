@@ -1511,12 +1511,12 @@ func (a *App) rebuildSettingLocked(setting string) error {
 	}
 	prevPath := a.reconciledSessionPathForTab(tab)
 	if prevPath == "" {
-		prevPath = strings.TrimSpace(tab.currentSessionPath())
+		prevPath = a.currentSessionPathFor(tab)
 	}
 	if a.controllerForTab(tab) == nil && prevPath != "" && a.attachExistingSessionRuntime(tab, prevPath, a.ctx) {
 		prevPath = a.reconciledSessionPathForTab(tab)
 		if prevPath == "" {
-			prevPath = strings.TrimSpace(tab.currentSessionPath())
+			prevPath = a.currentSessionPathFor(tab)
 		}
 	}
 	if controllerHasActiveRuntimeWork(a.controllerForTab(tab)) {
@@ -1540,8 +1540,9 @@ func (a *App) rebuildSettingLocked(setting string) error {
 		}
 		carried = oldCtrl.History()
 	}
-	model := tab.model
-	if cfg, err := config.LoadForRoot(tab.WorkspaceRoot); err == nil {
+	snap := a.tabRuntimeSnapshot(tab)
+	model := snap.model
+	if cfg, err := config.LoadForRoot(snap.workspaceRoot); err == nil {
 		if resolved, fallback, ok := cfg.ResolveModelWithFallback(model); ok {
 			if fallback && strings.TrimSpace(model) != "" {
 				a.noticeForTab(tab.ID, fmt.Sprintf("model %q is no longer available; switched to %s", model, resolved))
@@ -1549,14 +1550,14 @@ func (a *App) rebuildSettingLocked(setting string) error {
 			model = resolved
 		}
 	}
-	sharedHost := a.lookupSharedHost(tab.SharedHostKey)
+	sharedHost := a.lookupSharedHost(snap.sharedHostKey)
 	ctrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model: model, RequireKey: false,
-		Sink:                     tab.sink,
-		WorkspaceRoot:            tab.WorkspaceRoot,
-		SessionDir:               tabSessionDir(tab),
-		EffortOverride:           cloneStringPtr(tab.effort),
-		TokenMode:                currentTabTokenMode(tab),
+		Sink:                     snap.sink,
+		WorkspaceRoot:            snap.workspaceRoot,
+		SessionDir:               sessionDirForSnapshot(snap),
+		EffortOverride:           cloneStringPtr(snap.effort),
+		TokenMode:                snap.currentTokenMode(),
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
@@ -1574,12 +1575,12 @@ func (a *App) rebuildSettingLocked(setting string) error {
 	}
 	a.bindControllerDisplayRecorder(ctrl)
 	ctrl.EnableInteractiveApproval()
-	applyTabModeToController(ctrl, tab.mode)
+	applyTabModeToController(ctrl, snap.mode)
 	// applyTabModeToController only encodes plan+yolo from tab.mode.
 	// Apply the explicit toolApprovalMode (ask/auto/yolo) afterwards so
 	// "auto" is not lost — otherwise rebuild would silently downgrade
 	// auto to ask (#5424 regression).
-	if mode := strings.TrimSpace(tab.toolApprovalMode); mode != "" {
+	if mode := strings.TrimSpace(snap.toolApprovalMode); mode != "" {
 		applyTabToolApprovalModeToController(ctrl, mode)
 	}
 	path := agent.ContinueSessionPath(prevPath, ctrl.SessionDir(), ctrl.Label())
@@ -1604,6 +1605,9 @@ func (a *App) rebuildSettingLocked(setting string) error {
 	tab.Label = ctrl.Label()
 	tab.StartupErr = ""
 	tab.Ready = true
+	// Supersede any in-flight startup build: it would otherwise finish later,
+	// pass its generation check, and overwrite the controller just installed.
+	a.supersedeTabBuildLocked(tab)
 	a.saveTabsLocked()
 	a.mu.Unlock()
 	a.clearDeferredRebuild(tab.ID)
@@ -2371,6 +2375,10 @@ func (a *App) removeBuiltInProviderAccessAndRetargetTabs(name string) error {
 			continue
 		}
 		tab.Ctrl = nil
+		// Supersede any in-flight startup build: it was planned against the
+		// removed provider and would otherwise finish later, pass its
+		// generation check, and reinstall a controller for it.
+		a.supersedeTabBuildLocked(tab)
 		tab.model = fallbackRef
 		tab.Label = fallbackRef
 		tab.StartupErr = ""
@@ -2486,6 +2494,10 @@ func (a *App) deleteProviderAndRetargetTabs(name string) error {
 			continue
 		}
 		tab.Ctrl = nil
+		// Supersede any in-flight startup build: it was planned against the
+		// removed provider and would otherwise finish later, pass its
+		// generation check, and reinstall a controller for it.
+		a.supersedeTabBuildLocked(tab)
 		tab.model = fallbackRef
 		tab.Label = fallbackRef
 		tab.StartupErr = ""

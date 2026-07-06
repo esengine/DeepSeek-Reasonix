@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"reasonix/internal/control"
 	"reasonix/internal/event"
 )
 
@@ -298,6 +299,56 @@ func TestUpdateSinkApprovalBashPrefix(t *testing.T) {
 	select {
 	case c := <-got:
 		want := approveCall{id: "10", allow: true, session: true, persist: false}
+		if c != want {
+			t.Errorf("approve = %+v, want %+v", c, want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("approve was never called")
+	}
+}
+
+func TestUpdateSinkSandboxEscapeApprovalOffersSessionGrant(t *testing.T) {
+	fn := &fakeNotifier{onReq: func(_ string, params any) (json.RawMessage, error) {
+		raw, _ := json.Marshal(params)
+		var p PermissionRequestParams
+		if err := json.Unmarshal(raw, &p); err != nil {
+			t.Fatalf("permission params: %v", err)
+		}
+		assertACPv1PermissionOptionKinds(t, p.Options)
+		var hasOnce, hasSession, hasReject bool
+		for _, opt := range p.Options {
+			switch opt.OptionID {
+			case string(OptAllowOnce):
+				hasOnce = opt.Kind == OptAllowOnce
+			case string(OptAllowAlways):
+				hasSession = opt.Kind == OptAllowAlways && opt.Name == "Use real environment for this session"
+			case string(OptRejectOnce):
+				hasReject = opt.Kind == OptRejectOnce
+			default:
+				t.Fatalf("unexpected ACP permission option %+v in %+v", opt, p.Options)
+			}
+		}
+		if len(p.Options) != 3 || !hasOnce || !hasSession || !hasReject {
+			t.Fatalf("options = %+v, want allow once, session, reject", p.Options)
+		}
+		res, _ := json.Marshal(PermissionRequestResult{
+			Outcome: PermissionOutcome{Outcome: "selected", OptionID: string(OptAllowAlways)},
+		})
+		return res, nil
+	}}
+	sink := newUpdateSink(fn, "sess-1")
+	got := make(chan approveCall, 1)
+	sink.bindApprove(func(id string, allow, session, persist bool) { got <- approveCall{id, allow, session, persist} })
+
+	sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{
+		ID:      "11",
+		Tool:    control.SandboxEscapeApprovalTool,
+		Subject: "run unconfined once: go test ./...",
+	}})
+
+	select {
+	case c := <-got:
+		want := approveCall{id: "11", allow: true, session: true, persist: false}
 		if c != want {
 			t.Errorf("approve = %+v, want %+v", c, want)
 		}

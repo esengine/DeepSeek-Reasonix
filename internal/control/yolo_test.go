@@ -11,6 +11,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/permission"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
 
@@ -427,6 +428,75 @@ func TestSetAutoApproveToolsAllowsPendingApproval(t *testing.T) {
 	}
 	if !c.AutoApproveTools() {
 		t.Fatal("tool auto-approval should remain on after draining pending approvals")
+	}
+}
+
+func TestSandboxEscapeApprovalIgnoresAutoApproveTools(t *testing.T) {
+	approvalRequests := make(chan event.Approval, 1)
+	c := New(Options{
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.ApprovalRequest {
+				approvalRequests <- e.Approval
+			}
+		}),
+	})
+	c.SetAutoApproveTools(true)
+
+	type escapeResult struct {
+		allow  bool
+		reason string
+		err    error
+	}
+	done := make(chan escapeResult, 1)
+	go func() {
+		allow, reason, err := sandboxEscapeApprover{c}.ApproveSandboxEscape(context.Background(), sandbox.EscapeRequest{
+			Command: "go test ./...",
+			Reason:  "Windows sandbox failed. Run this command unconfined once?",
+		})
+		done <- escapeResult{allow: allow, reason: reason, err: err}
+	}()
+
+	var approval event.Approval
+	select {
+	case approval = <-approvalRequests:
+	case <-time.After(2 * time.Second):
+		t.Fatal("sandbox escape approval request was not emitted")
+	}
+	if approval.Tool != SandboxEscapeApprovalTool {
+		t.Fatalf("approval tool = %q, want %q", approval.Tool, SandboxEscapeApprovalTool)
+	}
+
+	c.SetAutoApproveTools(true)
+	select {
+	case got := <-done:
+		t.Fatalf("tool auto-approval must not answer sandbox escape; got %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	c.Approve(approval.ID, true, true, true)
+	select {
+	case got := <-done:
+		if got.err != nil || !got.allow || got.reason != "" {
+			t.Fatalf("sandbox escape result = %+v, want allowed without reason/error", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("sandbox escape approval stayed blocked after Approve")
+	}
+
+	if !(sandboxEscapeApprover{c}).SandboxEscapeSessionAllowed(context.Background(), sandbox.EscapeRequest{Command: "npm test"}) {
+		t.Fatal("sandbox escape session checker = false, want true after session grant")
+	}
+	allow, reason, err := sandboxEscapeApprover{c}.ApproveSandboxEscape(context.Background(), sandbox.EscapeRequest{
+		Command: "npm test",
+		Reason:  "Windows sandbox failed. Run this command unconfined once?",
+	})
+	if err != nil || !allow || reason != "" {
+		t.Fatalf("sandbox escape session grant result = (%v,%q,%v), want allow", allow, reason, err)
+	}
+	select {
+	case approval := <-approvalRequests:
+		t.Fatalf("sandbox escape session grant emitted another approval: %+v", approval)
+	default:
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
 
@@ -180,6 +181,20 @@ func (c *Coordinator) SetPlanModeReadOnlyTrustGate(g PlanModeReadOnlyTrustGate) 
 	}
 	if c.executor != nil {
 		c.executor.SetPlanModeReadOnlyTrustGate(g)
+	}
+}
+
+// SetSandboxEscapeApprover propagates one-shot shell sandbox escape approvals to
+// both tool-using agents in two-model mode.
+func (c *Coordinator) SetSandboxEscapeApprover(g sandbox.EscapeApprover) {
+	if c == nil {
+		return
+	}
+	if c.plannerAgent != nil {
+		c.plannerAgent.SetSandboxEscapeApprover(g)
+	}
+	if c.executor != nil {
+		c.executor.SetSandboxEscapeApprover(g)
 	}
 }
 

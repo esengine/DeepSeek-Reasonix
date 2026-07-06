@@ -8,8 +8,13 @@ import (
 )
 
 var (
-	maxReplaceRetries = 8
+	maxReplaceRetries = 12
 	replaceRetryBase  = 20 * time.Millisecond
+
+	// renameFile is a test seam: the two rename failure classes ReplaceFile
+	// distinguishes (transient lock vs cross-device) cannot be provoked
+	// portably on a real filesystem.
+	renameFile = os.Rename
 )
 
 // AtomicWriteFile writes data to path crash-safely: it writes to a sibling tmp
@@ -61,34 +66,44 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
-// ReplaceFile renames tmp onto dest, falling back to a copy when the rename
-// fails — Windows encryption-software filter drivers report a cross-device link
-// (EXDEV) for a same-dir rename. A second Windows failure mode is a transient
-// lock on dest (antivirus, the search indexer, a concurrent reader) that makes
-// the rename fail with a sharing violation for a few hundred ms.
+// ReplaceFile renames tmp onto dest, publishing the new content atomically: a
+// reader concurrent with the replace sees either the old file or the complete
+// new one. The rename can fail in two ways, and they are handled differently:
 //
-// Order matters: the rename is retried with backoff FIRST, and the copy runs
-// only after every retry failed. copyOnto truncates dest in place, so a reader
-// racing it can observe an empty or half-written file — reaching for it on the
-// first transient failure would break the atomicity AtomicWriteFile promises.
-// On filter-driver hosts where the rename never succeeds this costs the full
-// retry backoff before each copy; correctness on every other host wins. A
-// missing tmp means the write itself failed and no retry can help.
+//   - A transient lock on dest (antivirus, the search indexer, a concurrent
+//     reader without delete sharing) fails the rename for a few hundred ms.
+//     The rename is retried with backoff, and the last error is returned if
+//     the lock never clears. The failure is loud on purpose: falling back to
+//     an in-place copy here would truncate dest first, letting a racing
+//     reader observe an empty or half-written file — exactly the torn state
+//     AtomicWriteFile promises its callers (session leases, credentials,
+//     plugin state) can never happen.
+//   - Windows encryption-software filter drivers report a cross-device link
+//     (ERROR_NOT_SAME_DEVICE / EXDEV) even for a same-dir rename (#2696), and
+//     every retry fails identically. Only this class falls back to the
+//     non-atomic copy, and immediately — retrying a structurally impossible
+//     rename would only delay it. Torn reads remain possible in that degraded
+//     mode; it is the only way to write at all on such hosts, and
+//     rename-capable filesystems never take it.
+//
+// A missing tmp means the write itself failed and no retry can help.
 func ReplaceFile(tmp, dest string) error {
 	var err error
 	for attempt := 0; ; attempt++ {
-		if err = os.Rename(tmp, dest); err == nil {
+		if err = renameFile(tmp, dest); err == nil {
 			return nil
 		}
+		if renameCrossesDevice(err) {
+			if copyOnto(tmp, dest) == nil {
+				return nil
+			}
+			return err
+		}
 		if attempt >= maxReplaceRetries || !fileExists(tmp) {
-			break
+			return err
 		}
 		time.Sleep(time.Duration(attempt+1) * replaceRetryBase)
 	}
-	if copyOnto(tmp, dest) == nil {
-		return nil
-	}
-	return err
 }
 
 func fileExists(path string) bool {
@@ -96,6 +111,10 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
+// copyOnto is the non-atomic last resort for hosts whose filesystem cannot
+// rename tmp onto dest at all (see ReplaceFile). It truncates dest in place,
+// so a concurrent reader can observe an empty or half-written file — it must
+// never run for failures a retry could clear.
 func copyOnto(tmp, dest string) error {
 	info, err := os.Stat(tmp)
 	if err != nil {

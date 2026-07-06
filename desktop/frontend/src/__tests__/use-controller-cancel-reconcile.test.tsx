@@ -102,6 +102,7 @@ globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.windo
 const eventHandlers: Array<(e: WireEvent) => void> = [];
 let backendRunning = false;
 let cancelCalls = 0;
+let effortCalls = 0;
 const context: ContextInfo = { used: 0, window: 100, sessionTokens: 0 };
 const effort: EffortInfo = { supported: true, current: "auto", default: "auto", levels: ["auto"] };
 
@@ -119,6 +120,10 @@ window.go = {
       MetaForTab: async () => meta(),
       ContextUsageForTab: async () => context,
       EffortForTab: async () => effort,
+      SetEffortForTab: async () => {
+        effortCalls += 1;
+        throw new Error("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing effort");
+      },
       BalanceForTab: async () => ({ available: false, display: "" }),
       JobsForTab: async () => [],
       CheckpointsForTab: async () => [],
@@ -177,6 +182,15 @@ for (let attempt = 0; attempt < 20 && controller?.state.running; attempt += 1) {
 eq(controller?.state.running, false, "cancel reconciliation clears the running state");
 eq(cancelCalls, 1, "CancelTab is called once");
 eq(controller?.state.cancelRequested, false, "cancel reconciliation clears cancelRequested");
+
+await act(async () => {
+  await controller?.setEffort("max");
+  await flushPromises();
+});
+
+const effortNotice = controller?.state.items.find((item) => item.kind === "notice" && item.text.includes("cannot change yet"));
+eq(effortCalls, 1, "SetEffortForTab is called once");
+ok(Boolean(effortNotice), "busy effort switch surfaces a non-failure warning notice");
 
 await act(async () => {
   root.unmount();

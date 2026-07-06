@@ -5207,10 +5207,21 @@ body > .mermaid-diagram--fullscreen {
   min-width: 0;
 }
 .tool__nested-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 34px;
   font-family: var(--mono);
   font-size: 11px;
-  color: var(--accent);
+  color: color-mix(in srgb, var(--fg-dim) 86%, var(--fg));
+  font-variant-numeric: tabular-nums;
   flex-shrink: 0;
+}
+.tool__nested-icon {
+  width: 14px;
+  height: 14px;
+  color: inherit;
+  flex: 0 0 auto;
 }
 .tool__status-icon {
   font-size: 13px;
@@ -20511,26 +20522,6 @@ body > .mermaid-diagram--fullscreen {
 .project-tree__topic-status--error {
   background: color-mix(in srgb, var(--err) 12%, transparent);
   color: color-mix(in srgb, var(--err) 84%, var(--fg));
-}
-
-.project-tree__topic--recovered {
-  color: color-mix(in srgb, var(--warn) 18%, var(--fg-dim));
-}
-
-.project-tree__topic-recovery {
-  flex: 0 0 auto;
-  height: 17px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 5px;
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--warn) 12%, transparent);
-  color: color-mix(in srgb, var(--warn) 82%, var(--fg));
-  font-size: 10.5px;
-  font-weight: 650;
-  line-height: 1;
-  white-space: nowrap;
 }
 
 .project-tree__topic-meta {

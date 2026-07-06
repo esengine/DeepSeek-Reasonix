@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -144,10 +145,34 @@ func sessionTrashArtifacts(sessionPath, key string) []sessionTrashArtifact {
 		{src: sessionPath, name: key},
 		{src: store.SessionMeta(sessionPath), name: key + ".meta"},
 		{src: store.SessionGoalState(sessionPath), name: stem + ".goal-state.json"},
+		{src: store.SessionEventLog(sessionPath), name: stem + ".events.jsonl"},
+		{src: store.SessionEventIndex(sessionPath), name: stem + ".event-index.json"},
 		{src: sessionTelemetryPath(sessionPath), name: key + ".telemetry.json"},
 		{src: store.SessionCheckpointDir(sessionPath), name: stem + ".ckpt"},
 		{src: store.SessionJobsDir(sessionPath), name: stem + ".jobs"},
 	}
+}
+
+// errSessionBusyElsewhere is the sanitized error surfaced when a destructive
+// session operation is blocked by a live owner. It intentionally carries no
+// writer id, hostname, or path.
+var errSessionBusyElsewhere = errors.New("session is in use by another Reasonix window or process")
+
+// acquireSessionRemovalGuard wraps agent.TryAcquireSessionRemovalGuard with
+// the sanitized busy error. The guard holds the session's save and lease
+// locks across the destructive operation and deletes the lock files
+// atomically with the release — a one-shot busy probe followed by RemoveAll
+// would let another process acquire the lease in between and then lose its
+// freshly locked lease file, breaking cross-process mutual exclusion.
+func acquireSessionRemovalGuard(sessionPath string) (*agent.SessionRemovalGuard, error) {
+	guard, err := agent.TryAcquireSessionRemovalGuard(sessionPath)
+	if err != nil {
+		if errors.Is(err, agent.ErrSessionLeaseHeld) {
+			return nil, errSessionBusyElsewhere
+		}
+		return nil, err
+	}
+	return guard, nil
 }
 
 func sessionOwnedArtifactPaths(sessionPath string) []string {
@@ -180,8 +205,39 @@ func reconcileDesktopCleanupPending(dir string) error {
 }
 
 func reconcileDesktopTrashSessionArtifacts(dir, sessionPath, key string) error {
+	// Hold the removal guard across the whole move so no runtime can acquire
+	// the session (or save into it) while its artifacts are relocated; the
+	// lock sidecars are deleted atomically with the guard release.
+	guard, err := acquireSessionRemovalGuard(sessionPath)
+	if err != nil {
+		return err
+	}
+	defer guard.Release()
 	itemDir := filepath.Join(sessionTrashPath(dir), key)
-	if err := os.MkdirAll(itemDir, 0o755); err != nil {
+	if info, err := os.Stat(itemDir); err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("session trash target is not a directory: %s", key)
+		}
+		trashPath := filepath.Join(itemDir, key)
+		if trashInfo, err := os.Stat(trashPath); err == nil && !trashInfo.IsDir() {
+			matches, err := trashSessionMatchesLive(sessionPath, trashPath)
+			if err != nil {
+				return err
+			}
+			if !matches {
+				itemDir, err = reserveUniqueSessionTrashItemDir(dir, key)
+				if err != nil {
+					return err
+				}
+			}
+		} else if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	} else if os.IsNotExist(err) {
+		if err := os.MkdirAll(itemDir, 0o755); err != nil {
+			return err
+		}
+	} else {
 		return err
 	}
 	for _, artifact := range sessionTrashArtifacts(sessionPath, key) {
@@ -190,6 +246,9 @@ func reconcileDesktopTrashSessionArtifacts(dir, sessionPath, key string) error {
 		}
 	}
 	if err := trashSubagentArtifacts(dir, sessionPath, itemDir); err != nil {
+		return err
+	}
+	if err := guard.RemoveSidecarsAndRelease(); err != nil {
 		return err
 	}
 	meta := trashedSessionMeta{Key: key, DeletedAt: time.Now().UnixMilli()}
@@ -223,7 +282,10 @@ func validateSessionTrashTarget(dir, sessionPath, key string) error {
 			if removable {
 				return nil
 			}
-			return fmt.Errorf("session already exists in trash: %s", key)
+			if agent.SessionLeaseHeldByOtherRuntime(sessionPath) {
+				return errSessionBusyElsewhere
+			}
+			return nil
 		} else if err != nil && !os.IsNotExist(err) {
 			return err
 		}
@@ -234,37 +296,64 @@ func validateSessionTrashTarget(dir, sessionPath, key string) error {
 	return nil
 }
 
-func prepareSessionTrashTarget(dir, sessionPath, key string) (bool, error) {
+type preparedSessionTrashTarget struct {
+	shouldMove     bool
+	itemDir        string
+	allocateUnique bool
+}
+
+func prepareSessionTrashTarget(dir, sessionPath, key string) (preparedSessionTrashTarget, error) {
 	if _, err := os.Stat(sessionPath); os.IsNotExist(err) {
-		return false, nil
+		return preparedSessionTrashTarget{}, nil
 	} else if err != nil {
-		return false, err
+		return preparedSessionTrashTarget{}, err
 	}
 	itemDir := filepath.Join(sessionTrashPath(dir), key)
 	if info, err := os.Stat(itemDir); err == nil {
 		if !info.IsDir() {
-			return false, fmt.Errorf("session trash target is not a directory: %s", key)
+			return preparedSessionTrashTarget{}, fmt.Errorf("session trash target is not a directory: %s", key)
 		}
 		trashPath := filepath.Join(itemDir, key)
 		if trashInfo, err := os.Stat(trashPath); err == nil && !trashInfo.IsDir() {
 			removable, err := liveSessionRemovableWithExistingTrash(sessionPath, trashPath)
 			if err != nil {
-				return false, err
+				return preparedSessionTrashTarget{}, err
 			}
 			if removable {
-				return false, removeDesktopSessionArtifacts(sessionPath)
+				return preparedSessionTrashTarget{}, removeDesktopSessionArtifacts(sessionPath)
 			}
-			return false, fmt.Errorf("session already exists in trash: %s", key)
+			if agent.SessionLeaseHeldByOtherRuntime(sessionPath) {
+				return preparedSessionTrashTarget{}, errSessionBusyElsewhere
+			}
+			return preparedSessionTrashTarget{shouldMove: true, allocateUnique: true}, nil
 		} else if err != nil && !os.IsNotExist(err) {
-			return false, err
+			return preparedSessionTrashTarget{}, err
 		}
 		if err := os.RemoveAll(itemDir); err != nil {
-			return false, err
+			return preparedSessionTrashTarget{}, err
 		}
 	} else if !os.IsNotExist(err) {
-		return false, err
+		return preparedSessionTrashTarget{}, err
 	}
-	return true, nil
+	return preparedSessionTrashTarget{shouldMove: true, itemDir: itemDir}, nil
+}
+
+func reserveUniqueSessionTrashItemDir(dir, key string) (string, error) {
+	root := sessionTrashPath(dir)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", err
+	}
+	stem := strings.TrimSuffix(key, ".jsonl")
+	for i := 0; i < 100; i++ {
+		name := fmt.Sprintf("%s.jsonl-deleted-%d-%02d", stem, time.Now().UnixNano(), i)
+		itemDir := filepath.Join(root, name)
+		if err := os.Mkdir(itemDir, 0o755); err == nil {
+			return itemDir, nil
+		} else if !os.IsExist(err) {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("could not allocate unique trash target for session: %s", key)
 }
 
 // liveSessionRemovableWithExistingTrash reports whether a live session file may
@@ -315,18 +404,17 @@ func liveSessionDiscardable(sessionPath string) (bool, error) {
 }
 
 func trashSessionMatchesLive(sessionPath, trashPath string) (bool, error) {
-	live, err := os.ReadFile(sessionPath)
-	if err != nil {
+	if _, err := os.Stat(sessionPath); err != nil {
 		if os.IsNotExist(err) {
 			return true, nil
 		}
 		return false, err
 	}
-	trashed, err := os.ReadFile(trashPath)
-	if err != nil {
-		return false, err
-	}
-	return string(live) == string(trashed), nil
+	// Compare decoded transcripts, not .jsonl bytes: the checkpoint only
+	// changes at checkpoints, so two byte-identical .jsonl files can hide
+	// diverged event logs — and treating them as duplicates would delete the
+	// live session's newer history.
+	return agent.SessionsShareContent(sessionPath, trashPath)
 }
 
 func sessionFileHasConversationContent(sessionPath string) bool {
@@ -348,15 +436,27 @@ func trashSessionArtifactsBeforeMove(dir, sessionPath, key string, beforeMove fu
 	if err := validateSessionTrashTarget(dir, sessionPath, key); err != nil {
 		return err
 	}
-	shouldMove, err := prepareSessionTrashTarget(dir, sessionPath, key)
+	target, err := prepareSessionTrashTarget(dir, sessionPath, key)
 	if err != nil {
 		return err
 	}
-	if !shouldMove {
+	if !target.shouldMove {
 		return nil
 	}
-	itemDir := filepath.Join(sessionTrashPath(dir), key)
-	if err := os.MkdirAll(itemDir, 0o755); err != nil {
+	// Acquired after prepareSessionTrashTarget: the duplicate-trash path in
+	// there takes its own removal guard, and the guard is not reentrant.
+	guard, err := acquireSessionRemovalGuard(sessionPath)
+	if err != nil {
+		return err
+	}
+	defer guard.Release()
+	itemDir := target.itemDir
+	if target.allocateUnique {
+		itemDir, err = reserveUniqueSessionTrashItemDir(dir, key)
+		if err != nil {
+			return err
+		}
+	} else if err := os.MkdirAll(itemDir, 0o755); err != nil {
 		return err
 	}
 	if beforeMove != nil {
@@ -368,6 +468,9 @@ func trashSessionArtifactsBeforeMove(dir, sessionPath, key string, beforeMove fu
 		}
 	}
 	if err := trashSubagentArtifacts(dir, sessionPath, itemDir); err != nil {
+		return err
+	}
+	if err := guard.RemoveSidecarsAndRelease(); err != nil {
 		return err
 	}
 	meta := trashedSessionMeta{Key: key, DeletedAt: time.Now().UnixMilli()}
@@ -398,17 +501,27 @@ func listTrashedSessionFiles(dir string) ([]string, error) {
 		if !e.IsDir() {
 			continue
 		}
-		key := e.Name()
-		if filepath.Ext(key) != ".jsonl" || filepath.Base(key) != key {
-			continue
+		itemDir := filepath.Join(root, e.Name())
+		keys := []string{}
+		if b, err := os.ReadFile(filepath.Join(itemDir, sessionTrashMetaFile)); err == nil {
+			var meta trashedSessionMeta
+			if json.Unmarshal(b, &meta) == nil && store.IsSessionTranscriptName(meta.Key) {
+				keys = append(keys, meta.Key)
+			}
 		}
-		path := filepath.Join(root, key, key)
-		validPath, _, _, err := validateTrashedSessionPath(dir, path)
-		if err != nil {
-			continue
+		if store.IsSessionTranscriptName(e.Name()) {
+			keys = append(keys, e.Name())
 		}
-		if info, err := os.Stat(validPath); err == nil && !info.IsDir() {
-			paths = append(paths, validPath)
+		for _, key := range keys {
+			path := filepath.Join(itemDir, key)
+			validPath, _, _, err := validateTrashedSessionPath(dir, path)
+			if err != nil {
+				continue
+			}
+			if info, err := os.Stat(validPath); err == nil && !info.IsDir() {
+				paths = append(paths, validPath)
+				break
+			}
 		}
 	}
 	return paths, nil
@@ -481,11 +594,8 @@ func purgeTrashedSessionFile(dir, path string) error {
 			return err
 		}
 	}
-	if dm := loadSessionDisplays(dir); dm[key] != nil {
-		delete(dm, key)
-		if err := saveSessionDisplays(dir, dm); err != nil {
-			return err
-		}
+	if err := removeSessionDisplayKey(dir, key); err != nil {
+		return err
 	}
 	return nil
 }
@@ -618,11 +728,15 @@ func trashSubagentArtifacts(dir, sessionPath, itemDir string) error {
 	}
 	trashSubagentDir := filepath.Join(itemDir, "subagents")
 	for _, artifact := range artifacts {
-		if err := movePathIfExists(artifact.SessionPath, filepath.Join(trashSubagentDir, filepath.Base(artifact.SessionPath))); err != nil {
-			return err
-		}
-		if err := movePathIfExists(artifact.MetaPath, filepath.Join(trashSubagentDir, filepath.Base(artifact.MetaPath))); err != nil {
-			return err
+		paths := []string{artifact.SessionPath, artifact.MetaPath}
+		paths = append(paths, store.SessionSidecarFiles(artifact.SessionPath)...)
+		for _, src := range paths {
+			if strings.TrimSpace(src) == "" {
+				continue
+			}
+			if err := movePathIfExists(src, filepath.Join(trashSubagentDir, filepath.Base(src))); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -687,7 +801,7 @@ func validateSessionPath(dir, sessionPath string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	if filepath.Ext(absPath) != ".jsonl" {
+	if !store.IsSessionTranscriptName(filepath.Base(absPath)) {
 		return "", "", fmt.Errorf("not a session file: %s", sessionPath)
 	}
 	rel, err := filepath.Rel(absDir, absPath)
@@ -732,7 +846,7 @@ func validateTrashedSessionPath(dir, sessionPath string) (string, string, string
 	if err != nil {
 		return "", "", "", err
 	}
-	if filepath.Ext(absPath) != ".jsonl" {
+	if !store.IsSessionTranscriptName(filepath.Base(absPath)) {
 		return "", "", "", fmt.Errorf("not a session file: %s", sessionPath)
 	}
 	rel, err := filepath.Rel(root, absPath)
@@ -740,8 +854,18 @@ func validateTrashedSessionPath(dir, sessionPath string) (string, string, string
 		return "", "", "", fmt.Errorf("session path outside trash dir: %s", sessionPath)
 	}
 	parts := strings.Split(rel, string(filepath.Separator))
-	if len(parts) != 2 || parts[0] != parts[1] {
+	if len(parts) != 2 {
 		return "", "", "", fmt.Errorf("invalid trash session path: %s", sessionPath)
+	}
+	if parts[0] != parts[1] {
+		b, err := os.ReadFile(filepath.Join(root, parts[0], sessionTrashMetaFile))
+		if err != nil {
+			return "", "", "", fmt.Errorf("invalid trash session path: %s", sessionPath)
+		}
+		var meta trashedSessionMeta
+		if err := json.Unmarshal(b, &meta); err != nil || meta.Key != parts[1] {
+			return "", "", "", fmt.Errorf("invalid trash session path: %s", sessionPath)
+		}
 	}
 	if info, err := os.Lstat(absPath); err == nil {
 		if info.IsDir() {
@@ -889,6 +1013,84 @@ func saveSessionDisplays(dir string, m sessionDisplayMap) error {
 		return err
 	}
 	return fileutil.ReplaceFile(tmpPath, sessionDisplayPath(dir))
+}
+
+func saveOrRemoveSessionDisplays(dir string, m sessionDisplayMap) error {
+	if len(m) == 0 {
+		err := os.Remove(sessionDisplayPath(dir))
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return saveSessionDisplays(dir, m)
+}
+
+func removeSessionDisplayKey(dir, key string) error {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil
+	}
+	m := loadSessionDisplays(dir)
+	if m[key] == nil {
+		return nil
+	}
+	delete(m, key)
+	return saveOrRemoveSessionDisplays(dir, m)
+}
+
+func removeSessionDisplay(dir, sessionPath string) error {
+	if strings.TrimSpace(sessionPath) == "" {
+		return nil
+	}
+	return removeSessionDisplayKey(dir, filepath.Base(sessionPath))
+}
+
+func pruneSessionDisplays(dir string, protected map[string]struct{}) error {
+	m := loadSessionDisplays(dir)
+	if len(m) == 0 {
+		return nil
+	}
+	changed := false
+	for key := range m {
+		if sessionDisplayKeyStillOwned(dir, key, protected) {
+			continue
+		}
+		delete(m, key)
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return saveOrRemoveSessionDisplays(dir, m)
+}
+
+func sessionDisplayKeyStillOwned(dir, key string, protected map[string]struct{}) bool {
+	key = strings.TrimSpace(key)
+	if key == "" || filepath.Base(key) != key || !store.IsSessionTranscriptName(key) {
+		return false
+	}
+	if protected != nil {
+		if _, ok := protected[key]; ok {
+			return true
+		}
+	}
+	sessionPath := filepath.Join(dir, key)
+	if info, err := os.Stat(sessionPath); err == nil && !info.IsDir() {
+		return true
+	}
+	trashPath := filepath.Join(sessionTrashPath(dir), key, key)
+	if info, err := os.Stat(trashPath); err == nil && !info.IsDir() {
+		return true
+	}
+	if paths, err := listTrashedSessionFiles(dir); err == nil {
+		for _, path := range paths {
+			if filepath.Base(path) == key {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func recordSessionDisplay(dir, sessionPath, content, display string) error {

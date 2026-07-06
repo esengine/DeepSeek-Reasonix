@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/netclient"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/store"
 )
 
 type Options struct {
@@ -78,8 +79,8 @@ type SandboxReport struct {
 	Network    bool     `json:"network"`
 	WriteRoots []string `json:"write_roots,omitempty"`
 	// Available is whether an OS sandbox actually backs an "enforce" request on
-	// this host (bwrap/seatbelt present). Without it "enforce" refuses bash
-	// execution instead of running unconfined.
+	// this host (Seatbelt, bubblewrap, or the Windows helper). Without it
+	// "enforce" refuses bash execution instead of running unconfined.
 	Available bool `json:"available"`
 }
 
@@ -237,7 +238,7 @@ func RenderText(r Report) string {
 	fmt.Fprintf(&b, "\nsandbox\n")
 	bashLine := r.Sandbox.Bash
 	if r.Sandbox.Bash == "enforce" && !r.Sandbox.Available {
-		bashLine += " (unavailable: no OS sandbox on this host — bash execution is refused)"
+		bashLine += " (unavailable: no OS sandbox on this host; bash execution is refused. " + sandbox.UnavailableRemediation() + ")"
 	}
 	fmt.Fprintf(&b, "  bash         %s\n", bashLine)
 	fmt.Fprintf(&b, "  network      %v\n", r.Sandbox.Network)
@@ -265,7 +266,15 @@ func collectSessions(dir string) SessionsReport {
 	}
 	r.Count = len(sessions)
 	if err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || filepath.Ext(path) != ".jsonl" {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		// Transcript storage spans the .jsonl checkpoint plus the event
+		// log/index; counting only checkpoints would under-report usage.
+		name := filepath.Base(path)
+		if !store.IsSessionTranscriptName(name) &&
+			!strings.HasSuffix(name, ".events.jsonl") &&
+			!strings.HasSuffix(name, ".event-index.json") {
 			return nil
 		}
 		if info, statErr := d.Info(); statErr == nil {

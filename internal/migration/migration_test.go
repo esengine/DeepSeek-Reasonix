@@ -14,21 +14,30 @@ const legacyMessageLog = `{"role":"user","content":"hello from v0.x"}
 {"role":"assistant","content":"hi there"}
 `
 
-func isolateMigrationHome(t *testing.T) string {
+func migrationRescueHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
-	t.Setenv("REASONIX_HOME", filepath.Join(home, "new-reasonix"))
+	t.Setenv("REASONIX_HOME", "")
+	t.Setenv("REASONIX_STATE_HOME", filepath.Join(home, "new-state"))
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Chdir(t.TempDir())
 	return home
 }
 
+func isolateMigrationHome(t *testing.T) string {
+	t.Helper()
+	home := migrationRescueHome(t)
+	t.Setenv("REASONIX_HOME", filepath.Join(home, "new-reasonix"))
+	t.Setenv("REASONIX_STATE_HOME", "")
+	return home
+}
+
 func TestRunLegacyRescueImportsSessionsAndEmitsProgress(t *testing.T) {
-	home := isolateMigrationHome(t)
+	home := migrationRescueHome(t)
 	legacyDir := filepath.Join(home, ".reasonix", "sessions")
 	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -69,7 +78,7 @@ func TestRunLegacyRescueImportsSessionsAndEmitsProgress(t *testing.T) {
 }
 
 func TestRunLegacyRescueImportsMemory(t *testing.T) {
-	home := isolateMigrationHome(t)
+	home := migrationRescueHome(t)
 	legacyRoot := filepath.Join(home, ".reasonix")
 	if err := os.MkdirAll(filepath.Join(legacyRoot, "memory", "global"), 0o755); err != nil {
 		t.Fatal(err)
@@ -122,7 +131,7 @@ func TestRunLegacyRescueImportsMemory(t *testing.T) {
 }
 
 func TestRunLegacyRescueNoopStillShowsProgress(t *testing.T) {
-	isolateMigrationHome(t)
+	migrationRescueHome(t)
 
 	var notices []string
 	res := RunLegacyRescue(event.FuncSink(func(e event.Event) {
@@ -142,6 +151,43 @@ func TestRunLegacyRescueNoopStillShowsProgress(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("missing notice %q in:\n%s", want, joined)
 		}
+	}
+}
+
+func TestRunLegacyRescueSkipsImplicitSourcesWhenIsolated(t *testing.T) {
+	home := isolateMigrationHome(t)
+	legacyRoot := filepath.Join(home, ".reasonix")
+	if err := os.MkdirAll(filepath.Join(legacyRoot, "sessions"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyRoot, "sessions", "old-chat.jsonl"), []byte(legacyMessageLog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyRoot, "REASONIX.md"), []byte("legacy user memory\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var notices []string
+	res := RunLegacyRescue(event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice {
+			notices = append(notices, e.Text)
+		}
+	}))
+	if got := totalImported(res.SessionImports); got != 0 {
+		t.Fatalf("imported sessions = %d, want 0; imports=%+v", got, res.SessionImports)
+	}
+	if got := totalMemoryImported(res.MemoryImports); got != 0 {
+		t.Fatalf("imported memory files = %d, want 0; imports=%+v", got, res.MemoryImports)
+	}
+	if _, err := os.Stat(filepath.Join(config.SessionDir(), "old-chat.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("isolated rescue imported legacy session, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(config.MemoryUserDir(), "REASONIX.md")); !os.IsNotExist(err) {
+		t.Fatalf("isolated rescue imported legacy memory, stat err=%v", err)
+	}
+	joined := strings.Join(notices, "\n")
+	if !strings.Contains(joined, "REASONIX_HOME is set; implicit legacy migration is skipped") {
+		t.Fatalf("missing isolated skip notice in:\n%s", joined)
 	}
 }
 

@@ -401,6 +401,60 @@ func TestClearTabBuildCancelCancelsAbandonedBuildContext(t *testing.T) {
 	}
 }
 
+func TestEnsureSessionLeaseSerializesConcurrentSameTabAcquire(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := filepath.Join(dir, "same-tab-concurrent-lease.jsonl")
+	tab := &WorkspaceTab{ID: "tab"}
+	t.Cleanup(tab.releaseSessionLease)
+
+	acquired := make(chan struct{})
+	releaseHook := make(chan struct{})
+	var once sync.Once
+	sessionLeaseAcquireHookForTest = func() {
+		once.Do(func() {
+			close(acquired)
+			<-releaseHook
+		})
+	}
+	t.Cleanup(func() { sessionLeaseAcquireHookForTest = nil })
+
+	firstErr := make(chan error, 1)
+	go func() {
+		firstErr <- tab.ensureSessionLease(path)
+	}()
+
+	select {
+	case <-acquired:
+	case err := <-firstErr:
+		t.Fatalf("first ensureSessionLease returned before hook: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("first ensureSessionLease did not acquire lease")
+	}
+
+	secondErr := make(chan error, 1)
+	go func() {
+		secondErr <- tab.ensureSessionLease(path)
+	}()
+
+	select {
+	case err := <-secondErr:
+		t.Fatalf("second ensureSessionLease returned while first acquire was unbound: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(releaseHook)
+	if err := <-firstErr; err != nil {
+		t.Fatalf("first ensureSessionLease: %v", err)
+	}
+	if err := <-secondErr; err != nil {
+		t.Fatalf("second ensureSessionLease should reuse the tab lease: %v", err)
+	}
+}
+
 func TestAttachExistingSessionRuntimeSkipsRemovedTab(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := config.SessionDir()
@@ -855,8 +909,15 @@ func TestBuildTabControllerBlocksWhenSessionLeaseHeld(t *testing.T) {
 	if !tab.Ready {
 		t.Fatal("tab should be ready with startup error")
 	}
-	if !strings.Contains(tab.StartupErr, agent.ErrSessionLeaseHeld.Error()) {
-		t.Fatalf("startup error = %q, want lease-held error", tab.StartupErr)
+	// The surfaced startup error is the sanitized busy message: the raw lease
+	// error would leak the session path and the holder's host-pid-writer id
+	// into the topbar banner.
+	if !strings.Contains(tab.StartupErr, "already open in another Reasonix window") {
+		t.Fatalf("startup error = %q, want user-facing busy message", tab.StartupErr)
+	}
+	if strings.Contains(tab.StartupErr, agent.ErrSessionLeaseHeld.Error()) ||
+		strings.Contains(tab.StartupErr, path) {
+		t.Fatalf("startup error leaked raw lease details: %q", tab.StartupErr)
 	}
 }
 

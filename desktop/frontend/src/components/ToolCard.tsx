@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Compass } from "lucide-react";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
 import { useT } from "../lib/i18n";
@@ -127,7 +127,12 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
         aria-expanded={hasBody ? open : undefined}
       >
         <span className="tool__label-group">
-          {hasNested && <span className="tool__nested-count">⊞{nested.length}</span>}
+          {hasNested && (
+            <span className="tool__nested-count" aria-label={`${nested.length} nested tool calls`}>
+              <Compass className="tool__nested-icon" size={14} strokeWidth={2} aria-hidden="true" />
+              <span>{nested.length}</span>
+            </span>
+          )}
           {item.status === "error" && <span className="tool__status-icon tool__status-icon--err">✗</span>}
           {item.status === "done" && <span className="tool__status-icon tool__status-icon--ok">✓</span>}
           {item.status === "stopped" && <span className="tool__status-icon tool__status-icon--stopped">—</span>}

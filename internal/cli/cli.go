@@ -31,6 +31,7 @@ import (
 	"reasonix/internal/notify"
 	"reasonix/internal/provider"
 	"reasonix/internal/provider/openai"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/serve"
 	"time"
 
@@ -45,6 +46,9 @@ var (
 
 // Run is the CLI entry point; it returns a process exit code.
 func Run(args []string, version string) int {
+	if len(args) > 0 && args[0] == sandbox.WindowsHelperCommand {
+		return sandbox.RunWindowsSandboxHelper(args[1:], os.Stdin, os.Stdout, os.Stderr)
+	}
 	// Pick the UI language up front so even pre-config paths (the first-run
 	// welcome banner) come through localized. Env-only first; if a config
 	// exists and pins a language, that wins.
@@ -136,7 +140,7 @@ func Run(args []string, version string) int {
 
 func isDefaultInteractiveFlag(arg string) bool {
 	switch arg {
-	case "--model", "--max-steps", "--continue", "-c", "--resume", "--dangerously-skip-permissions", "--yolo", "--dir":
+	case "--model", "--max-steps", "--continue", "-c", "--resume", "--copy", "--dangerously-skip-permissions", "--yolo", "--dir":
 		return true
 	}
 	if name, _, ok := strings.Cut(arg, "="); ok && isDefaultInteractiveFlag(name) {
@@ -294,6 +298,7 @@ func runAgent(args []string) int {
 	cont := fs.Bool("continue", false, "resume the most recent saved session")
 	fs.BoolVar(cont, "c", false, "shorthand for --continue")
 	resume := fs.String("resume", "", "resume a specific session file (non-interactive; takes precedence over --continue)")
+	copySession := fs.Bool("copy", false, "with --resume/--continue: duplicate the session and continue in the copy (escape hatch when the original is held by another Reasonix process)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -312,10 +317,49 @@ func runAgent(args []string) int {
 		return 2
 	}
 
+	// Resolve the resume target up front so --copy and the session lease can be
+	// handled before any heavy assembly. --resume takes precedence over
+	// --continue, matching the Resume call below.
+	resumePath := strings.TrimSpace(*resume)
+	if resumePath == "" && *cont {
+		sessions, err := agent.ListSessions(resolveCLISessionDir())
+		if err != nil || len(sessions) == 0 {
+			fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
+			return 1
+		}
+		resumePath = sessions[0].Path
+	}
+	if *copySession && resumePath == "" {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--copy requires --resume or --continue")
+		return 2
+	}
+	if *copySession {
+		copied, err := copySessionForWriting(resumePath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		fmt.Printf("continuing in a session copy: %s\n", copied)
+		resumePath = copied
+	}
+
+	// Own the session file for the lifetime of this run so a desktop window (or
+	// another CLI) writing the same session is refused up front instead of
+	// silently double-writing. Released after the controller closes.
+	leases := control.NewSessionLeaseKeeper()
+	defer leases.Release()
 	var resumeSession *agent.Session
-	if *resume != "" {
+	if resumePath != "" {
+		if err := leases.Rebind(resumePath); err != nil {
+			if errors.Is(err, agent.ErrSessionLeaseHeld) {
+				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, sessionLeaseResumeRefusal(err))
+			} else {
+				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			}
+			return 1
+		}
 		var err error
-		resumeSession, err = loadResumableSession(*resume)
+		resumeSession, err = loadResumableSession(resumePath)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
@@ -345,12 +389,8 @@ func runAgent(args []string) int {
 		sink = metrics
 	}
 	sink = withNotifications(sink, cfg)
-	if *resume != "" {
-		*model = modelForResumePath(*model, *resume, cfg)
-	} else if *cont {
-		if sessions, err := agent.ListSessions(resolveCLISessionDir()); err == nil && len(sessions) > 0 {
-			*model = modelForResumePath(*model, sessions[0].Path, cfg)
-		}
+	if resumePath != "" {
+		*model = modelForResumePath(*model, resumePath, cfg)
 	}
 	ctrl, err := setup(ctx, *model, *maxSteps, true, sink)
 	if err != nil {
@@ -363,23 +403,17 @@ func runAgent(args []string) int {
 	// MCP/API callers that manage their own per-project session). Takes
 	// precedence over --continue.
 	// --continue: resume the most recent saved session.
-	if *resume != "" {
-		ctrl.Resume(resumeSession, *resume)
-	} else if *cont {
-		sessions, err := agent.ListSessions(ctrl.SessionDir())
-		if err != nil || len(sessions) == 0 {
-			fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
-			return 1
-		}
-		loaded, err := agent.LoadSession(sessions[0].Path)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		ctrl.Resume(loaded, sessions[0].Path)
+	if resumePath != "" {
+		ctrl.Resume(resumeSession, resumePath)
 	}
 	if ctrl.SessionPath() == "" && ctrl.SessionDir() != "" {
 		ctrl.SetSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
+	}
+	// Fresh sessions take the lease too (defensive: the path is brand new); a
+	// resumed path is already held, making this a no-op.
+	if err := leases.Rebind(ctrl.SessionPath()); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
+		return 1
 	}
 
 	runErr := ctrl.Run(ctx, prompt)
@@ -468,8 +502,21 @@ func runServe(args []string) int {
 		return 1
 	}
 
+	// Own the active session file for the server's lifetime; the serve
+	// handlers that rebind sessions (/resume, /new, /fork) move the lease
+	// through the same keeper. Released after the controller closes.
+	leases := control.NewSessionLeaseKeeper()
+	defer leases.Release()
 	var resumeSession *agent.Session
 	if *resume != "" {
+		if err := leases.Rebind(*resume); err != nil {
+			if errors.Is(err, agent.ErrSessionLeaseHeld) {
+				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
+			} else {
+				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			}
+			return 1
+		}
 		var err error
 		resumeSession, err = loadResumableSession(*resume)
 		if err != nil {
@@ -500,8 +547,15 @@ func runServe(args []string) int {
 		ctrl.Resume(resumeSession, *resume)
 	}
 	ctrl.EnsureSessionPath()
+	// Fresh sessions take the lease too (defensive: the path is brand new); a
+	// resumed path is already held, making this a no-op.
+	if err := leases.Rebind(ctrl.SessionPath()); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
+		return 1
+	}
 
 	srv := serve.New(ctrl, bc, serveCfg)
+	srv.SetSessionLeases(leases)
 	fmt.Printf("reasonix serve — %s on http://%s\n", ctrl.Label(), *addr)
 	if srv.AuthMode() == "token" {
 		fmt.Printf("  auth: token\n")
@@ -541,6 +595,7 @@ func chatREPL(args []string) int {
 	cont := fs.Bool("continue", false, "resume the most recent saved session")
 	fs.BoolVar(cont, "c", false, "shorthand for --continue")
 	resume := fs.Bool("resume", false, "list saved sessions and pick one to resume")
+	copySession := fs.Bool("copy", false, "with --resume/--continue: duplicate the selected session and continue in the copy (escape hatch when the original is held by another Reasonix process)")
 	yolo := fs.Bool("dangerously-skip-permissions", false, "YOLO: auto-approve approval-gated tool calls this session; same runtime mode as Ctrl+Y")
 	fs.BoolVar(yolo, "yolo", false, "alias for --dangerously-skip-permissions")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
@@ -573,6 +628,36 @@ func chatREPL(args []string) int {
 			return 1
 		}
 		resumePath = sessions[0].Path
+	}
+	if *copySession && resumePath == "" {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--copy requires --resume or --continue")
+		return 2
+	}
+	if *copySession {
+		copied, err := copySessionForWriting(resumePath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		fmt.Printf("continuing in a session copy: %s\n", copied)
+		resumePath = copied
+	}
+
+	// Own the active session file for the TUI's lifetime; in-TUI switches
+	// (/resume, /switch, /new, ...) move the lease with the active path.
+	// Refusing a held resume target up front is what keeps a desktop window
+	// and this chat from silently double-writing one transcript.
+	leases := control.NewSessionLeaseKeeper()
+	defer leases.Release()
+	if resumePath != "" {
+		if err := leases.Rebind(resumePath); err != nil {
+			if errors.Is(err, agent.ErrSessionLeaseHeld) {
+				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, sessionLeaseResumeRefusal(err))
+			} else {
+				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			}
+			return 1
+		}
 	}
 
 	ctx := context.Background()
@@ -614,6 +699,12 @@ func chatREPL(args []string) int {
 		ctrl.Resume(loaded, resumePath)
 	}
 	ctrl.EnsureSessionPath()
+	// Fresh sessions take the lease too (defensive: the path is brand new); a
+	// resumed path is already held, making this a no-op.
+	if err := leases.Rebind(ctrl.SessionPath()); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
+		return 1
+	}
 
 	// Surface a missing-key warning inside the TUI banner so the first message
 	// failing is at least pre-announced; the user can still enter chat.
@@ -646,6 +737,7 @@ func chatREPL(args []string) int {
 	}
 
 	m := newChatTUI(ctrl, missing, eventCh, termW)
+	m.leases = leases
 	if cfg, err := config.Load(); err == nil {
 		m.outputStyle = cfg.Agent.OutputStyle    // shown as the active entry in /output-style
 		m.statuslineCmd = cfg.Statusline.Command // custom status-line command, "" = built-in row

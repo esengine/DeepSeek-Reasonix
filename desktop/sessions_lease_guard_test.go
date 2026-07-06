@@ -81,7 +81,7 @@ func TestDeleteSessionKeepsDuplicateLiveSessionHeldByOtherRuntime(t *testing.T) 
 	}
 
 	err := app.DeleteSession(filepath.Base(path))
-	if err == nil || !strings.Contains(err.Error(), "session already exists in trash") {
+	if err == nil || !strings.Contains(err.Error(), errSessionBusyElsewhere.Error()) {
 		t.Fatalf("DeleteSession err = %v, want refusal while a foreign runtime holds the lease", err)
 	}
 	if got, readErr := os.ReadFile(path); readErr != nil || string(got) != string(content) {

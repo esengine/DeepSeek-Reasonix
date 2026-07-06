@@ -646,6 +646,24 @@ func TestStoreCredentialLinesFileMode(t *testing.T) {
 	}
 }
 
+func TestUserCredentialsPathIgnoresReasonixStateHome(t *testing.T) {
+	home := t.TempDir()
+	state := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Setenv("REASONIX_HOME", filepath.Join(home, "reasonix-home"))
+	t.Setenv("REASONIX_STATE_HOME", state)
+
+	want := filepath.Join(home, "reasonix-home", ".env")
+	if got := UserCredentialsPath(); got != want {
+		t.Fatalf("UserCredentialsPath() = %q, want %q", got, want)
+	}
+	if strings.HasPrefix(UserCredentialsPath(), state) {
+		t.Fatalf("credentials path must not live under REASONIX_STATE_HOME: %q", UserCredentialsPath())
+	}
+}
+
 func TestRemoveCredentialMarksClearedAndSetRemovesMarker(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

@@ -3,10 +3,13 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/config"
 	"reasonix/internal/sandbox"
@@ -148,17 +151,36 @@ func TestBashSandboxConfinement(t *testing.T) {
 		t.Skipf("cannot create work dir under home: %v", err)
 	}
 	t.Cleanup(func() { os.RemoveAll(work) })
-	b := ConfineBash(sandbox.Spec{Mode: "enforce", WriteRoots: []string{work}, Network: false})
+	t.Chdir(work)
+	var timeout []time.Duration
+	if runtime.GOOS == "windows" {
+		wait := 20 * time.Second
+		t.Setenv("WINDOWS_SANDBOX_WAIT_MS", fmt.Sprint(wait.Milliseconds()))
+		timeout = []time.Duration{wait}
+	}
+	spec := sandbox.Spec{Mode: "enforce", WriteRoots: []string{work}, Network: true}
+	if runtime.GOOS == "windows" {
+		spec.Shell = sandbox.ResolveShell("powershell", "", nil)
+	}
+	b := ConfineBash(spec, timeout...)
 
 	// Writing inside the root works; writing to a sibling under $HOME is denied
 	// by the sandbox the bash tool wrapped the command in.
-	inArgs, _ := json.Marshal(map[string]string{"command": "echo hi > " + filepath.Join(work, "in.txt")})
+	inCommand := "echo hi > " + filepath.Join(work, "in.txt")
+	if runtime.GOOS == "windows" {
+		inCommand = "Set-Content -LiteralPath " + psQuoteForBuiltinTest(filepath.Join(work, "in.txt")) + " -Value hi"
+	}
+	inArgs, _ := json.Marshal(map[string]string{"command": inCommand})
 	if _, err := b.Execute(context.Background(), inArgs); err != nil {
 		t.Fatalf("bash write inside root failed: %v", err)
 	}
 	outPath := filepath.Join(home, ".reasonix-bashsb-escape.txt")
 	t.Cleanup(func() { os.Remove(outPath) })
-	outArgs, _ := json.Marshal(map[string]string{"command": "echo nope > " + outPath})
+	outCommand := "echo nope > " + outPath
+	if runtime.GOOS == "windows" {
+		outCommand = "Set-Content -LiteralPath " + psQuoteForBuiltinTest(outPath) + " -Value nope"
+	}
+	outArgs, _ := json.Marshal(map[string]string{"command": outCommand})
 	if _, err := b.Execute(context.Background(), outArgs); err == nil {
 		t.Error("bash write outside the workspace should be denied by the sandbox")
 	}
@@ -167,7 +189,14 @@ func TestBashSandboxConfinement(t *testing.T) {
 	}
 }
 
+func psQuoteForBuiltinTest(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
 func TestBashEnforceRejectsWhenSandboxUnavailable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("native Windows sandbox availability is helper-backed and independent of PATH")
+	}
 	t.Setenv("PATH", t.TempDir())
 
 	exe, err := os.Executable()

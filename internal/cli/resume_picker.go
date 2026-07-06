@@ -87,7 +87,13 @@ func (m chatTUI) applyResumePick() (tea.Model, tea.Cmd) {
 		m.notice("resume: " + err.Error())
 		return m, nil
 	}
+	// Snapshot before moving the lease: the outgoing session must be written
+	// while this process still owns it.
 	_ = m.ctrl.Snapshot()
+	if err := m.rebindSessionLease(target.Path); err != nil {
+		m.notice("resume: " + sessionLeaseHeldNotice(err))
+		return m, nil
+	}
 	m.ctrl.Resume(loaded, target.Path)
 	m.replayActiveBranch(i18n.M.ResumedTitle)
 	return m, nil

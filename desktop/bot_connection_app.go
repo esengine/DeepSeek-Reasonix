@@ -138,12 +138,19 @@ func (a *App) StartBotConnectionInstall(provider, domain string) (BotInstallStar
 
 func (a *App) PollBotConnectionInstall(installID string) (BotInstallPollResult, error) {
 	installID = strings.TrimSpace(installID)
+	// Copy the session under a.mu: overlapping polls of the same install can
+	// race the locked PollDomain upgrade below with unlocked field reads.
 	a.mu.RLock()
-	session := a.botInstalls[installID]
+	sessionPtr := a.botInstalls[installID]
+	var sessionCopy botInstallSession
+	if sessionPtr != nil {
+		sessionCopy = *sessionPtr
+	}
 	a.mu.RUnlock()
-	if session == nil {
+	if sessionPtr == nil {
 		return BotInstallPollResult{Error: "install session not found"}, nil
 	}
+	session := &sessionCopy
 	if time.Now().After(session.ExpireAt) {
 		a.deleteBotInstall(installID)
 		return BotInstallPollResult{Status: "expired", Error: "install session expired"}, nil

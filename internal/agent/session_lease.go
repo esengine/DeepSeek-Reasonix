@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"reasonix/internal/fileutil"
+	"reasonix/internal/store"
 )
 
 var ErrSessionLeaseHeld = errors.New("session lease held by another runtime")
@@ -92,26 +93,35 @@ func TryAcquireSessionLease(path string) (*SessionLease, error) {
 }
 
 // TryReclaimCurrentProcessSessionLease re-acquires a lease whose in-process
-// owner entry was orphaned (a lease dropped without Release). It only succeeds
-// when the on-disk lease info identifies the current process AND the OS lease
-// lock is free: an active holder keeps its lock file locked, so reclaiming
-// from it fails with ErrSessionLeaseHeld without touching the holder's entry.
+// owner entry was orphaned (a lease dropped without Release). The OS lease
+// lock is the arbiter: an active holder keeps its lock file locked for the
+// whole hold, so reclaiming from one fails with ErrSessionLeaseHeld without
+// touching the holder's entry. Holding the lock proves nobody does, which
+// also covers metadata-damage states — a missing or unreadable lease info
+// (deleted by the user, quarantined by AV, torn by a crash) with a free lock
+// is a leftover, not a holder, and must not wedge the session as busy.
 func TryReclaimCurrentProcessSessionLease(path string) (*SessionLease, error) {
 	path = canonicalSessionSavePath(path)
 	info, err := LoadSessionLeaseInfo(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// The holder finished releasing between the caller's failed
-			// acquire and now; a regular acquire can win the lease cleanly.
-			return TryAcquireSessionLease(path)
+	switch {
+	case err == nil:
+		if info == nil || info.PID != os.Getpid() || info.WriterID != SessionWriterID() {
+			// A readable info naming another live runtime: never steal it.
+			// (A crashed foreign leftover is separated from a live holder by
+			// the lock probe in SessionLeaseHeldByOtherRuntime; reclaim is
+			// only for leases this process lost track of.)
+			return nil, &SessionLeaseError{Path: path, Info: info}
 		}
-		// Unreadable lease info means the holder cannot be identified, so
-		// reclaiming is unsafe. Report the lease as held rather than leaking
-		// a raw filesystem error to callers that surface it to users.
-		return nil, &SessionLeaseError{Path: path}
-	}
-	if info == nil || info.PID != os.Getpid() || info.WriterID != SessionWriterID() {
-		return nil, &SessionLeaseError{Path: path, Info: info}
+	case os.IsNotExist(err):
+		// The holder finished releasing (info removed first) or the sidecar
+		// was deleted out from under an orphaned entry. Either way the lock
+		// probe below decides; info identity has nothing left to say.
+		info = nil
+	default:
+		// Unreadable info hides the holder's identity, but the lock still
+		// tells the truth: a live holder keeps it locked. Fall through to the
+		// probe instead of wedging on metadata damage.
+		info = nil
 	}
 	unlock, err := tryLockSessionLeaseFile(path)
 	if err != nil {
@@ -153,10 +163,22 @@ func SessionLeaseHeldByOtherRuntime(path string) bool {
 	}
 	info, err := LoadSessionLeaseInfo(path)
 	if err != nil {
-		// No info file means no holder: live holders keep it present for
-		// their whole hold. An unreadable one hides the holder's identity,
-		// so err on the side of treating the session as busy.
-		return !os.IsNotExist(err)
+		if os.IsNotExist(err) {
+			// No info file means no holder: live holders keep it present for
+			// their whole hold.
+			return false
+		}
+		unlock, lockErr := tryLockSessionLeaseFile(path)
+		if lockErr == nil {
+			// Corrupt/empty info with a free lock is a crash leftover. Remove the
+			// bad metadata so future probes do not keep reporting a ghost owner.
+			_ = os.Remove(sessionLeaseInfoPath(path))
+			unlock()
+			return false
+		}
+		// An unreadable info file with a live lock still hides the holder's
+		// identity, so err on the side of treating the session as busy.
+		return true
 	}
 	if info != nil && info.PID == os.Getpid() && info.WriterID == SessionWriterID() {
 		return false
@@ -164,6 +186,7 @@ func SessionLeaseHeldByOtherRuntime(path string) bool {
 	unlock, err := tryLockSessionLeaseFile(path)
 	if err == nil {
 		// Foreign info but a free lock: leftover from a crashed process.
+		_ = os.Remove(sessionLeaseInfoPath(path))
 		unlock()
 		return false
 	}
@@ -189,6 +212,16 @@ func (l *SessionLease) Release() {
 		// Only remove the entry this lease owns: after a reclaim the map may
 		// already point at a newer lease for the same path.
 		sessionLeaseOwners.CompareAndDelete(l.path, l.ownerID)
+		// Best-effort retirement of the lock sidecars this session no longer
+		// needs. Historically they were left behind on every release and only
+		// swept on the next boot reconcile, so ordinary use accumulated
+		// .lock/.lease.lock files (#6014). The helpers re-take each lock
+		// non-blocking and delete it atomically with the release, so a new
+		// holder or an in-flight save simply turns this into a no-op. This
+		// must run after CompareAndDelete: the lease-lock helper skips paths
+		// the owner registry still reports as held by this process.
+		_ = removeStaleSessionLeaseLockSidecar(l.path, store.SessionLeaseLock(l.path))
+		_ = removeStaleSessionLockSidecar(l.path, store.SessionLockFile(l.path))
 	})
 }
 
@@ -247,5 +280,5 @@ func SaveSessionLeaseInfo(path string, info SessionLeaseInfo) error {
 }
 
 func sessionLeaseInfoPath(path string) string {
-	return canonicalSessionSavePath(path) + ".lease.json"
+	return store.SessionLeaseInfo(canonicalSessionSavePath(path))
 }

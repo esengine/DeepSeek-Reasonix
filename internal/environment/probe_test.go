@@ -151,6 +151,7 @@ func TestRunProbesRejectsDeniedPathHit(t *testing.T) {
 }
 
 func TestRunProbesReportsTimeout(t *testing.T) {
+	setProbeTimeoutForTest(t, 200*time.Millisecond)
 	dir := t.TempDir()
 	toolPath := filepath.Join(dir, "slowtool")
 	body := "#!/bin/sh\nsleep 3\n"
@@ -269,6 +270,7 @@ func TestFormatSectionLimitsToolOutput(t *testing.T) {
 
 func writeProbeTool(t *testing.T, path, output string) string {
 	t.Helper()
+	setProbeTimeoutForTest(t, 10*time.Second)
 	body := "#!/bin/sh\nprintf '%s\\n'\n"
 	body = fmt.Sprintf(body, strings.ReplaceAll(output, "'", "'\\''"))
 	if runtime.GOOS == "windows" {
@@ -285,6 +287,7 @@ func writeProbeTool(t *testing.T, path, output string) string {
 
 func writeEnvProbeTool(t *testing.T, path string) string {
 	t.Helper()
+	setProbeTimeoutForTest(t, 10*time.Second)
 	body := "#!/bin/sh\nprintf '%s\\n' \"$REASONIX_PROBE_ENV\"\n"
 	if runtime.GOOS == "windows" {
 		if !strings.HasSuffix(path, ".bat") {
@@ -300,6 +303,7 @@ func writeEnvProbeTool(t *testing.T, path string) string {
 
 func writeStderrProbeTool(t *testing.T, path, output string) string {
 	t.Helper()
+	setProbeTimeoutForTest(t, 10*time.Second)
 	body := "#!/bin/sh\nprintf '%s\\n' >&2\n"
 	body = fmt.Sprintf(body, strings.ReplaceAll(output, "'", "'\\''"))
 	if runtime.GOOS == "windows" {
@@ -326,6 +330,7 @@ func resetProbeCacheForTest(t *testing.T, now time.Time) {
 		probeCache = map[string]probeCacheEntry{}
 		probeInflightCalls = map[string]*probeInflight{}
 		probeNow = time.Now
+		probeTimeout = ProbeTimeout
 		probeCacheMu.Unlock()
 	})
 }
@@ -334,4 +339,16 @@ func setProbeNowForTest(now time.Time) {
 	probeCacheMu.Lock()
 	probeNow = func() time.Time { return now }
 	probeCacheMu.Unlock()
+}
+
+func setProbeTimeoutForTest(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	probeCacheMu.Lock()
+	probeTimeout = timeout
+	probeCacheMu.Unlock()
+	t.Cleanup(func() {
+		probeCacheMu.Lock()
+		probeTimeout = ProbeTimeout
+		probeCacheMu.Unlock()
+	})
 }

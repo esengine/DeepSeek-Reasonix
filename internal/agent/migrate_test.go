@@ -58,6 +58,40 @@ func TestMigrateLegacySessionsReconstructsConversation(t *testing.T) {
 	}
 }
 
+func TestMigrateLegacySessionsReplaysNativeEventLog(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	path := filepath.Join(src, "native.jsonl")
+	base := NewSession("sys")
+	base.Add(provider.Message{Role: provider.RoleUser, Content: "checkpoint prompt"})
+	if err := base.Save(path); err != nil {
+		t.Fatalf("Save base: %v", err)
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession base: %v", err)
+	}
+	loaded.Add(provider.Message{Role: provider.RoleAssistant, Content: "event tail"})
+	if err := loaded.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot tail: %v", err)
+	}
+
+	n, err := MigrateLegacySessions(src, dest, nil)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("imported %d sessions, want 1", n)
+	}
+	migrated, err := LoadSession(filepath.Join(dest, "native.jsonl"))
+	if err != nil {
+		t.Fatalf("LoadSession migrated: %v", err)
+	}
+	if got := migrated.Messages[len(migrated.Messages)-1].Content; got != "event tail" {
+		t.Fatalf("migrated tail = %q, want event tail", got)
+	}
+}
+
 func TestMigrateLegacySessionsBackfillsAlongsideExisting(t *testing.T) {
 	src := t.TempDir()
 	dest := t.TempDir()

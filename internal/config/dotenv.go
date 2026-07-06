@@ -92,6 +92,7 @@ func legacyCredentialsPaths() []string {
 	}
 	if dir := userSupportDir(); dir != "" {
 		add(filepath.Join(dir, "credentials"))
+		add(filepath.Join(dir, ".env"))
 	}
 	for _, cfg := range legacyXDGConfigPaths() {
 		add(filepath.Join(filepath.Dir(cfg), "credentials"))

@@ -53,6 +53,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+          HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: |
           set -euo pipefail
           case "$TAG" in
@@ -61,10 +64,58 @@ jobs:
               exit 0
               ;;
           esac
-          curl --retry 5 --retry-delay 2 -fsSL https://dl.reasonix.io/latest/latest.json -o latest.raw.json
+          if [ "$HAS_R2" != "true" ]; then
+            echo "R2 secrets not configured; skipping desktop manifest compatibility asset"
+            exit 0
+          fi
+          # dl.reasonix.io serves 403 to GitHub Actions egress IPs (Cloudflare bot
+          # protection), so read the manifest over the authenticated S3 API instead
+          # of the public edge.
+          aws configure set aws_access_key_id "${{ secrets.R2_ACCESS_KEY_ID }}"
+          aws configure set aws_secret_access_key "${{ secrets.R2_SECRET_ACCESS_KEY }}"
+          aws configure set region auto
+          aws s3 cp "s3://${R2_BUCKET}/latest/latest.json" latest.raw.json \
+            --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           jq '.download_page = "https://reasonix.io/#start"' latest.raw.json > latest.json
           jq -e '
             ([.platforms[] | (.url, .sig)] |
               all(type == "string" and startswith("https://dl.reasonix.io/") and (contains("/releases/latest/") | not)))
           ' latest.json >/dev/null
           gh release upload "$TAG" latest.json --clobber
+
+      # The compatibility asset exists for pre-v1.16 desktop updaters that
+      # still poll GitHub's repository-wide latest URL — so verify it exactly
+      # the way those clients fetch it: anonymously, over the public edge, with
+      # a Go client UA. Unlike dl.reasonix.io (whose bot protection 403s
+      # Actions egress — see the R2 note above), GitHub serves its own runners,
+      # so this can hard-fail. #5826/#5858 shipped a broken update check for
+      # weeks precisely because nothing exercised the public path. Retries
+      # cover the release CDN propagating the freshly uploaded asset.
+      - name: Smoke public compatibility manifest
+        env:
+          TAG: ${{ github.ref_name }}
+          HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            *-*)
+              echo "prerelease $TAG — no compatibility asset uploaded; skipping"
+              exit 0
+              ;;
+          esac
+          if [ "$HAS_R2" != "true" ]; then
+            echo "R2 secrets not configured; no compatibility asset uploaded; skipping"
+            exit 0
+          fi
+          url="https://github.com/${{ github.repository }}/releases/latest/download/latest.json"
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsSL -A "Go-http-client/2.0" -o /tmp/compat-latest.json "$url"; then
+              jq -e '(.version | type == "string") and (.platforms | type == "object")' /tmp/compat-latest.json >/dev/null
+              echo "public compatibility manifest OK (desktop version $(jq -r .version /tmp/compat-latest.json))"
+              exit 0
+            fi
+            echo "attempt $attempt failed; retrying in 10s"
+            sleep 10
+          done
+          echo "::error::public compatibility manifest unreachable at $url"
+          exit 1

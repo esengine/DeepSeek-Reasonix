@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -27,6 +28,7 @@ import (
 	"reasonix/internal/jobs"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/provider"
+	"reasonix/internal/store"
 )
 
 //go:embed index.html
@@ -35,10 +37,17 @@ var indexHTML []byte
 // Server wires a controller to its HTTP surface. The Broadcaster must be the
 // same sink the controller was constructed with, so events reach SSE clients.
 type Server struct {
-	mu       sync.RWMutex // guards ctrl, which switchModel swaps at runtime
-	switchMu sync.Mutex   // serializes switchModel so its Snapshot/Build/Close run off s.mu
-	ctrl     control.SessionAPI
-	bc       *Broadcaster
+	mu sync.RWMutex // guards ctrl, which switchModel swaps at runtime
+	// bindMu serializes every entry point that changes the active session
+	// path — /resume, /new, /fork, and switchModel. net/http runs handlers
+	// concurrently and serve serves multiple browser tabs, so without this
+	// two interleaved rebinds can leave the controller writing one session
+	// while the lease keeper guards another (the exact split this feature
+	// exists to prevent). It also keeps switchModel's Snapshot/Build/Close
+	// off s.mu, as the narrower switchMu did before it was widened.
+	bindMu sync.Mutex
+	ctrl   control.SessionAPI
+	bc     *Broadcaster
 	// buildController builds the replacement controller during a model switch.
 	// Nil in production (switchModel falls back to boot.Build); tests inject a
 	// fake so switchModel can be exercised without real provider IO.
@@ -47,6 +56,11 @@ type Server struct {
 	titlePrice      *provider.Pricing
 	titles          *titleCache
 	auth            *authGate // nil when auth is disabled
+	// leases guards the active session file against other runtimes (a desktop
+	// window, another CLI). Wired by the serve CLI command with the keeper that
+	// already holds the startup session's lease; nil (tests, embedded use)
+	// disables lease gating.
+	leases *control.SessionLeaseKeeper
 }
 
 // New builds a Server. bc must be the controller's event sink.
@@ -68,6 +82,35 @@ func (s *Server) ctl() control.SessionAPI {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.ctrl
+}
+
+// SetSessionLeases hands the server the session-lease keeper that guards its
+// active session file. The write-binding endpoints (/resume, /new, /fork and
+// model switches that rotate the path) then move the lease along with the
+// active session and refuse to bind a session held by another runtime.
+// Call it before serving; a nil keeper leaves lease gating off.
+func (s *Server) SetSessionLeases(k *control.SessionLeaseKeeper) {
+	s.leases = k
+}
+
+// rebindSessionLease moves the server's session lease to path. A nil keeper
+// gates nothing (tests, embedded use).
+func (s *Server) rebindSessionLease(path string) error {
+	if s.leases == nil {
+		return nil
+	}
+	return s.leases.Rebind(path)
+}
+
+// resumeBindHookForTest, when set, runs inside /resume's critical sequence
+// between the lease rebind and the controller Resume. Tests use it to force
+// the interleaving bindMu exists to prevent; production never sets it.
+var resumeBindHookForTest func()
+
+// sessionInUseError renders a lease refusal for HTTP clients using the shared
+// CLI wording, without the session file path.
+func sessionInUseError(err error) string {
+	return control.SessionInUseMessage(err) + "; " + control.SessionLeaseCloseHint
 }
 
 // AuthToken returns the pre-shared token when in token mode, or "" otherwise.
@@ -119,12 +162,13 @@ func (s *Server) initTitleProvider() {
 // old controller's Close (jobs.CloseWithGrace up to 15s + SessionEnd hook) — all
 // run OFF s.mu. Holding the write lock across them would wedge every HTTP handler
 // on s.ctl()'s RLock for the duration, stalling the whole serve frontend
-// (mirrors the acp rebuildSession fix and PR #5920). switchMu serializes the
-// switch itself so two switches can't interleave, preserving the old "second
-// switch waits" semantics without pinning s.mu.
+// (mirrors the acp rebuildSession fix and PR #5920). bindMu serializes the
+// switch against every other session-path-changing entry point (/resume,
+// /new, /fork), preserving the old "second switch waits" semantics without
+// pinning s.mu.
 func (s *Server) switchModel(ctx context.Context, ref string) error {
-	s.switchMu.Lock()
-	defer s.switchMu.Unlock()
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
 
 	// Snapshot the current controller under a short read of s.mu only.
 	cur := s.ctl()
@@ -149,7 +193,7 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 	newPath := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())
 	newCtrl.AdoptHistory(carried, newPath)
 
-	// Publish the swap under a short write lock. switchMu already serializes
+	// Publish the swap under a short write lock. bindMu already serializes
 	// switches — today the only writer of s.ctrl — so the identity re-check is
 	// defensive: it keeps a future controller-swapping path (or a test doing so)
 	// from being silently clobbered after the off-lock build. On a mismatch,
@@ -162,6 +206,15 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 	}
 	s.ctrl = newCtrl
 	s.mu.Unlock()
+
+	// A carried conversation keeps its file (newPath == prevPath) and the lease
+	// with it; only a previously file-less session gets a fresh path here, and
+	// the lease follows it (fresh path — failure is theoretical).
+	if newPath != prevPath {
+		if err := s.rebindSessionLease(newPath); err != nil {
+			slog.Warn("serve: session lease after model switch", "err", err)
+		}
+	}
 
 	// Off-lock: tear down the old controller. Close can block up to 15s.
 	cur.Close()
@@ -182,7 +235,7 @@ func (s *Server) build(ctx context.Context, ref string) (*control.Controller, er
 }
 
 // switchEffort persists a new reasoning-effort level for the active provider and
-// rebuilds via switchModel (which serializes on switchMu).
+// rebuilds via switchModel (which serializes on bindMu).
 func (s *Server) switchEffort(ctx context.Context, level string) error {
 	cur := s.ctl()
 	if cur.Running() {
@@ -506,8 +559,17 @@ func (s *Server) compact(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) newSession(w http.ResponseWriter, _ *http.Request) {
+	// Session-path-changing entry point: serialize with /resume, /fork, and
+	// switchModel so the controller and the lease keeper move together.
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
 	if err := s.ctl().NewSession(); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Fresh path — the lease follows it; failure is theoretical but not silent.
+	if err := s.rebindSessionLease(s.ctl().SessionPath()); err != nil {
+		http.Error(w, sessionInUseError(err), http.StatusConflict)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -689,9 +751,19 @@ func (s *Server) fork(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing turn", http.StatusBadRequest)
 		return
 	}
+	// Session-path-changing critical sequence: serialize with /resume, /new,
+	// and switchModel so the controller and the lease keeper move together.
+	// Taken after body decoding so a slow client cannot hold the binding lock.
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
 	path, err := s.ctl().ForkNamed(body.Turn, body.Name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// The controller switched to the fork (a fresh path); the lease follows it.
+	if err := s.rebindSessionLease(s.ctl().SessionPath()); err != nil {
+		http.Error(w, sessionInUseError(err), http.StatusConflict)
 		return
 	}
 	writeJSON(w, map[string]string{"path": path})
@@ -823,7 +895,7 @@ func (s *Server) resume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	absPath, err := filepath.Abs(strings.TrimSpace(body.Path))
-	if err != nil || filepath.Ext(absPath) != ".jsonl" {
+	if err != nil || !store.IsSessionTranscriptName(filepath.Base(absPath)) {
 		http.Error(w, "invalid session path", http.StatusBadRequest)
 		return
 	}
@@ -840,14 +912,37 @@ func (s *Server) resume(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session is pending cleanup", http.StatusBadRequest)
 		return
 	}
-	// Snapshot the current session before switching away.
+	// Session-path-changing critical sequence: two interleaved resumes would
+	// leave the controller on one session and the lease on another; serialize
+	// with /new, /fork, and switchModel. Taken after body/path validation so a
+	// slow client cannot hold the binding lock while uploading.
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
+	// Snapshot the current session before switching away — while this process
+	// still holds its lease.
 	if err := s.ctl().Snapshot(); err != nil {
 		slog.Warn("serve: snapshot before resume", "err", err)
 	}
+	// Refuse to bind a session another runtime is writing (a desktop window,
+	// another CLI); on success the lease now guards the resume target.
+	if err := s.rebindSessionLease(realPath); err != nil {
+		if errors.Is(err, agent.ErrSessionLeaseHeld) {
+			http.Error(w, sessionInUseError(err), http.StatusConflict)
+		} else {
+			http.Error(w, "session lease: "+err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
 	loaded, err := agent.LoadSession(realPath)
 	if err != nil {
+		// The lease already moved to the target; re-point it at the session the
+		// controller still owns (best-effort).
+		_ = s.rebindSessionLease(s.ctl().SessionPath())
 		http.Error(w, "load session: "+err.Error(), http.StatusBadRequest)
 		return
+	}
+	if hook := resumeBindHookForTest; hook != nil {
+		hook()
 	}
 	s.ctl().Resume(loaded, realPath)
 	w.WriteHeader(http.StatusNoContent)
@@ -999,7 +1094,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 	current := filepath.Clean(s.ctl().SessionPath())
 	var out []sessionEntry
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+		if e.IsDir() || !store.IsSessionTranscriptName(e.Name()) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())
@@ -1008,9 +1103,11 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		}
 		name := strings.TrimSuffix(e.Name(), ".jsonl")
 		entry := sessionEntry{Name: name, Path: path, Current: filepath.Clean(path) == current}
-		if first, turns := previewSessionFile(path); turns > 0 {
+		// Event-log aware: reading the .jsonl checkpoint directly would freeze
+		// turn counts and titles at the last checkpoint write.
+		if first, turns := agent.SessionPreview(path); turns > 0 {
 			entry.Turns = turns
-			entry.Title = s.sessionTitle(r.Context(), e.Name(), first, fileModNano(e))
+			entry.Title = s.sessionTitle(r.Context(), e.Name(), first, agent.SessionContentModTime(path).UnixNano())
 		}
 		out = append(out, entry)
 	}
@@ -1112,8 +1209,14 @@ func delayedSessionDelete(absDir, abs string, destroy control.SessionDestroyHand
 }
 
 func removeSessionFiles(absDir, abs string) error {
-	if err := os.Remove(abs); err != nil && !os.IsNotExist(err) {
-		return err
+	remove := append([]string{abs}, store.SessionSidecarFiles(abs)...)
+	for _, p := range remove {
+		if p == "" {
+			continue
+		}
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 	}
 	if err := agent.DeleteSubagentsByParent(absDir, agent.BranchID(abs)); err != nil {
 		return err
@@ -1143,42 +1246,6 @@ func previewTitle(first string) string {
 		return string(r[:47]) + "..."
 	}
 	return first
-}
-
-func fileModNano(e os.DirEntry) int64 {
-	info, err := e.Info()
-	if err != nil {
-		return 0
-	}
-	return info.ModTime().UnixNano()
-}
-
-// previewSessionFile reads the first user message and turn count from a JSONL session file.
-func previewSessionFile(path string) (string, int) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", 0
-	}
-	defer f.Close()
-	dec := json.NewDecoder(f)
-	first := ""
-	turns := 0
-	for {
-		var m struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		}
-		if err := dec.Decode(&m); err != nil {
-			break
-		}
-		if m.Role == "user" {
-			turns++
-			if first == "" {
-				first = agent.UserPreviewText(m.Content)
-			}
-		}
-	}
-	return first, turns
 }
 
 // skills lists discoverable skills.

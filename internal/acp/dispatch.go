@@ -9,6 +9,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/permission"
 	"reasonix/internal/provider"
@@ -330,11 +331,27 @@ func (s *updateSink) requestAskQuestion(ctx context.Context, askID string, q eve
 }
 
 func approvalSessionOptionName(tool, subject string) string {
+	if tool == control.SandboxEscapeApprovalTool {
+		return "Use real environment for this session"
+	}
 	sessionRule := permission.SessionGrantRuleForScope(tool, subject)
 	return "Allow " + sessionRule + " for this session"
 }
 
 func approvalOptions(tool, subject string) []PermissionOption {
+	if control.RequiresFreshHumanApprovalTool(tool) {
+		if tool == control.SandboxEscapeApprovalTool {
+			return []PermissionOption{
+				{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},
+				{OptionID: string(OptAllowAlways), Name: approvalSessionOptionName(tool, subject), Kind: OptAllowAlways},
+				{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce},
+			}
+		}
+		return []PermissionOption{
+			{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},
+			{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce},
+		}
+	}
 	allowSessionName := approvalSessionOptionName(tool, subject)
 	options := []PermissionOption{
 		{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},
@@ -382,6 +399,8 @@ func toolKindFor(name string) string {
 	case "edit_file", "move_file", "multiedit", "write_file":
 		return "edit"
 	case "bash":
+		return "execute"
+	case control.SandboxEscapeApprovalTool:
 		return "execute"
 	}
 	n := strings.ToLower(name)

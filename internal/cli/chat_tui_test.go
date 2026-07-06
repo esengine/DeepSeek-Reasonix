@@ -2046,6 +2046,34 @@ func TestSessionSwitchSuppressesOneClearScreen(t *testing.T) {
 	}
 }
 
+func TestWideInputChangeRequestsClearScreen(t *testing.T) {
+	prev := clearWideInputChanges
+	clearWideInputChanges = true
+	defer func() { clearWideInputChanges = prev }()
+
+	m := newTestChatTUI()
+	m.input.SetValue("天安a")
+	m.input.SetCursorColumn(len([]rune("天安a")))
+
+	next, cmd := m.update(tea.KeyPressMsg{Code: '门', Text: "门"})
+	got := next.(chatTUI)
+	if got.input.Value() != "天安a门" {
+		t.Fatalf("wide-char insert should preserve the textarea value, got %q", got.input.Value())
+	}
+	if cmd == nil {
+		t.Fatal("wide-char input changes should request a full redraw")
+	}
+	if shouldClearWideInputChange("ascii", "ascii!") {
+		t.Fatal("single-width ASCII input should not request the wide-input redraw")
+	}
+	if !shouldClearWideInputChange("门", "") {
+		t.Fatal("removing the last wide character should request a full redraw")
+	}
+	if !shouldClearWideInputChange("a门", "a") {
+		t.Fatal("removing a wide character from mixed input should request a full redraw")
+	}
+}
+
 func TestReplayActiveBranchClearsPlanModeAndMarksSessionSwitch(t *testing.T) {
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{})
@@ -2348,6 +2376,64 @@ func TestApprovalToolDetailsShortensMCPNames(t *testing.T) {
 	name, detail = approvalToolDetails("bash")
 	if name != "bash" || !strings.Contains(detail, "built-in") {
 		t.Errorf("built-in details = (%q, %q), want bash + built-in source", name, detail)
+	}
+}
+
+func TestSandboxEscapeApprovalBannerUsesRealEnvironmentChoice(t *testing.T) {
+	i18n.DetectLanguage("zh")
+	t.Cleanup(func() { i18n.DetectLanguage("en") })
+
+	m := newTestChatTUI()
+	m.width = 120
+	m.pendingApproval = &event.Approval{
+		ID:      "approval-1",
+		Tool:    control.SandboxEscapeApprovalTool,
+		Subject: "仅本次不进沙箱运行：go test ./...",
+		Reason:  "Windows 沙箱启动这条命令时失败。",
+	}
+	banner := m.renderApprovalBanner()
+	if !strings.Contains(banner, "本会话使用真实环境") {
+		t.Fatalf("approval banner = %q, want real-environment session choice", banner)
+	}
+	if !strings.Contains(banner, "允许一次") {
+		t.Fatalf("approval banner = %q, want desktop-matching allow-once choice", banner)
+	}
+	if !strings.Contains(banner, "3. 拒绝") || strings.Contains(banner, "4. 拒绝") {
+		t.Fatalf("approval banner = %q, want conventional 1/2/3 sandbox choices", banner)
+	}
+	if strings.Contains(banner, "sandbox_escape") {
+		t.Fatalf("approval banner leaked raw tool grant: %q", banner)
+	}
+}
+
+func TestFreshApprovalBannerUsesConventionalDenyChoice(t *testing.T) {
+	i18n.DetectLanguage("zh")
+	t.Cleanup(func() { i18n.DetectLanguage("en") })
+
+	m := newTestChatTUI()
+	m.width = 120
+	m.pendingApproval = &event.Approval{
+		ID:      "approval-1",
+		Tool:    "remember",
+		Subject: "保存/更新记忆",
+	}
+	banner := m.renderApprovalBanner()
+	if !strings.Contains(banner, "1. 本次允许") || !strings.Contains(banner, "2. 拒绝") {
+		t.Fatalf("approval banner = %q, want conventional 1/2 fresh choices", banner)
+	}
+	if strings.Contains(banner, "4. 拒绝") {
+		t.Fatalf("approval banner = %q, must not show non-consecutive deny choice", banner)
+	}
+}
+
+func TestFreshApprovalSessionChoiceIsLimitedToSandboxEscape(t *testing.T) {
+	if !freshApprovalAllowsSession(control.SandboxEscapeApprovalTool) {
+		t.Fatal("sandbox escape should allow an explicit session choice")
+	}
+	for _, toolName := range []string{"remember", "forget", planApprovalTool, agent.PlanModeReadOnlyCommandApprovalTool} {
+		if freshApprovalAllowsSession(toolName) {
+			t.Fatalf("%s should not allow the sandbox escape session choice", toolName)
+		}
 	}
 }
 

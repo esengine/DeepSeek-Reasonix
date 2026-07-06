@@ -125,9 +125,14 @@ func descendantRecords(root uint32, records map[uint32]processRecord) []processR
 	}
 
 	var out []processRecord
+	seen := map[uint32]bool{root: true}
 	var walk func(uint32)
 	walk = func(pid uint32) {
 		for _, child := range children[pid] {
+			if child == 0 || seen[child] {
+				continue
+			}
+			seen[child] = true
 			if rec, ok := records[child]; ok {
 				out = append(out, rec)
 			}

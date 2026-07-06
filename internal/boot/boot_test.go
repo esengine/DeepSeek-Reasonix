@@ -2832,7 +2832,7 @@ func TestBuildMigratesLegacySessionsFromConfigSessionDir(t *testing.T) {
 	}
 }
 
-func TestBuildMigratesLegacyXDGAndProjectSessions(t *testing.T) {
+func TestBuildSkipsLegacySessionMigrationWhenIsolated(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("legacy XDG paths are Unix-only")
 	}
@@ -2866,20 +2866,12 @@ func TestBuildMigratesLegacyXDGAndProjectSessions(t *testing.T) {
 	}
 	defer ctrl.Close()
 
-	flatData, err := os.ReadFile(filepath.Join(config.SessionDir(), "xdg-flat.jsonl"))
-	if err != nil {
-		t.Fatalf("legacy XDG flat session not imported: %v", err)
-	}
-	if !strings.Contains(string(flatData), "hello from xdg") {
-		t.Fatalf("legacy XDG flat session missing content:\n%s", flatData)
+	if _, err := os.Stat(filepath.Join(config.SessionDir(), "xdg-flat.jsonl")); !os.IsNotExist(err) {
+		t.Fatal("legacy XDG flat session was imported but must not be when REASONIX_HOME is set")
 	}
 	projectPath := filepath.Join(config.MemoryUserDir(), "projects", slug, "sessions", "project-chat.jsonl")
-	projectData, err := os.ReadFile(projectPath)
-	if err != nil {
-		t.Fatalf("legacy project session not imported to %s: %v", projectPath, err)
-	}
-	if !strings.Contains(string(projectData), "hello from old project session") {
-		t.Fatalf("legacy project session missing content:\n%s", projectData)
+	if _, err := os.Stat(projectPath); !os.IsNotExist(err) {
+		t.Fatal("legacy project session was imported but must not be when REASONIX_HOME is set")
 	}
 }
 

@@ -14,7 +14,7 @@ import { isReadOnlyTool } from "../lib/useController";
 import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import { useEntranceAnimation } from "../lib/useEntranceAnimation";
 import { useScrollManager } from "../lib/useScrollManager";
-import { buildStepGroups, buildTurnGroups, compactQuestionText, createWarmLayerState, questionAnchorId, questionTurnsById, scrollVersion, warmColdPageForTurn, warmLayerWithColdPageAtLeast, warmLayerWithExpandedTurn, warmLayerWithNextColdPage, warmPagination, warmUserPreview, type QuestionAnchor, type TurnGroup, type WarmLayerState } from "../lib/transcriptGrouping";
+import { buildStepGroups, buildTurnGroups, compactQuestionText, createWarmLayerState, lastQuestionTurn, questionAnchorId, questionTurnsById, scrollVersion, warmColdPageForTurn, warmLayerWithColdPageAtLeast, warmLayerWithExpandedTurn, warmLayerWithNextColdPage, warmPagination, warmUserPreview, type QuestionAnchor, type TurnGroup, type WarmLayerState } from "../lib/transcriptGrouping";
 import { appendTurnActionCopyText } from "../lib/turnActionCopy";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
@@ -315,6 +315,7 @@ export function Transcript({
   }, [openAction]);
 
   const userTurn = useMemo(() => questionTurnsById(questions), [questions]);
+  const lastTurn = useMemo(() => lastQuestionTurn(questions, userTurn), [questions, userTurn]);
   const checkpointsByTurn = useMemo(() => new Map(checkpoints.map((checkpoint) => [checkpoint.turn, checkpoint])), [checkpoints]);
 
   // ── JumpBar integration ───────────────────────────────────────────────────
@@ -391,6 +392,7 @@ export function Transcript({
           actionPending={actionPending}
           rewindDisabled={rewindDisabled}
           hoverMenus={actionHoverMenus}
+          isLastTurn={turn === lastTurn}
           onRewind={(targetTurn, scope) => {
             onRewind?.(targetTurn, scope);
             setOpenAction(null);
@@ -594,7 +596,7 @@ export function Transcript({
       if (!running) pushTurnActions();
     }
     return out;
-  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, running, onEditPrompt, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, stepGroups, tabId, actionHoverMenus, creationMode]);
+  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, running, onEditPrompt, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, stepGroups, tabId, actionHoverMenus, creationMode, lastTurn]);
 
   // ── Assemble rendered output ──────────────────────────────────────────────
   // Warm/cold zone is a separate memo'd WarmZone component so streaming tokens
@@ -632,6 +634,7 @@ export function Transcript({
               warmSubcalls={subcallsByParent}
               warmUserTurn={userTurn}
               warmCheckpoints={checkpointsByTurn}
+              warmLastTurn={lastTurn}
               warmOpenAction={openAction}
               warmActionPending={actionPending}
               warmRewindDisabled={rewindDisabled}
@@ -687,6 +690,7 @@ const WarmZone = memo(function WarmZone({
   warmSubcalls,
   warmUserTurn,
   warmCheckpoints,
+  warmLastTurn,
   warmOpenAction,
   warmActionPending,
   warmRewindDisabled,
@@ -709,6 +713,7 @@ const WarmZone = memo(function WarmZone({
   warmSubcalls: ReadonlyMap<string, ToolItem[]>;
   warmUserTurn: ReadonlyMap<string, number>;
   warmCheckpoints: ReadonlyMap<number, CheckpointMeta>;
+  warmLastTurn?: number;
   warmOpenAction: OpenTurnAction | null;
   warmActionPending: boolean;
   warmRewindDisabled: boolean;
@@ -774,6 +779,7 @@ const WarmZone = memo(function WarmZone({
               onEdit={warmOnEdit}
               tabId={tabId}
               creationMode={creationMode}
+              lastTurn={warmLastTurn}
             />
           </WarmTurnCard>,
         );
@@ -821,6 +827,7 @@ function WarmTurnItems({
   onEdit,
   tabId,
   creationMode = false,
+  lastTurn,
 }: {
   startIdx: number;
   endIdx: number;
@@ -837,6 +844,7 @@ function WarmTurnItems({
   onEdit?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
   tabId?: string;
   creationMode?: boolean;
+  lastTurn?: number;
 }) {
   const nodes: React.ReactNode[] = [];
   let actionText = "";
@@ -857,6 +865,7 @@ function WarmTurnItems({
         actionPending={actionPending}
         rewindDisabled={rewindDisabled}
         hoverMenus={actionHoverMenus}
+        isLastTurn={turn === lastTurn}
         onRewind={(targetTurn, scope) => {
           onRewind?.(targetTurn, scope);
           setOpenAction(null);

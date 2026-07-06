@@ -719,12 +719,13 @@ function browserPlatformOverride(): "darwin" | "windows" | "linux" | "" {
   return value === "darwin" || value === "windows" || value === "linux" ? value : "";
 }
 
-function mockScenario(): "demo" | "fresh" | "running" | "guidance" {
+function mockScenario(): "demo" | "fresh" | "running" | "guidance" | "sandbox_escape" {
   if (typeof window === "undefined") return "demo";
   const value = new URLSearchParams(window.location.search).get("mock")?.trim().toLowerCase();
   if (value === "fresh" || value === "empty" || value === "first-run") return "fresh";
   if (value === "guidance" || value === "guide" || value === "steer") return "guidance";
   if (value === "running" || value === "busy" || value === "streaming") return "running";
+  if (value === "sandbox_escape" || value === "sandbox-escape" || value === "sandboxescape") return "sandbox_escape";
   return "demo";
 }
 
@@ -872,6 +873,7 @@ function makeMockApp(): AppBindings {
   const freshMock = scenario === "fresh";
   const guidanceMock = scenario === "guidance";
   const runningMock = scenario === "running" || guidanceMock;
+  const sandboxEscapeMock = scenario === "sandbox_escape";
   const mockAttachmentDataURLs = new Map<string, string>();
   let cancelled = false;
   let pendingAskPreview = false;
@@ -1634,6 +1636,23 @@ function makeMockApp(): AppBindings {
       cwd: "~/projects/joyquant-db",
     },
   ];
+  if (sandboxEscapeMock) {
+    window.setTimeout(() => {
+      if (pendingApprovalPreview) return;
+      pendingApprovalPreview = true;
+      emitMockTurnStarted();
+      emit({ kind: "reasoning", text: t("mock.sandboxEscapeReasoning") });
+      emit({
+        kind: "approval_request",
+        approval: {
+          id: "mock-sandbox-escape-preview",
+          tool: "sandbox_escape",
+          subject: t("mock.sandboxEscapeSubject"),
+          reason: t("mock.sandboxEscapeReason"),
+        },
+      });
+    }, 800);
+  }
   const mockModelCatalog = [
     { ref: "deepseek/deepseek-v4-flash", provider: "deepseek", model: "deepseek-v4-flash" },
     { ref: "deepseek/deepseek-v4-pro", provider: "deepseek", model: "deepseek-v4-pro" },
@@ -1726,6 +1745,26 @@ function makeMockApp(): AppBindings {
             id: "mock-approval-preview",
             tool: "bash",
             subject: t("mock.approvalSubject"),
+          },
+        });
+        return;
+      }
+      if (
+        trimmedInput === "/sandbox-escape-preview" ||
+        trimmedInput === "sandbox escape preview" ||
+        trimmedInput === "sandbox_escape preview" ||
+        trimmedInput === "sandbox escape预览"
+      ) {
+        pendingApprovalPreview = true;
+        await delay(250);
+        if (cancelled) return;
+        emit({
+          kind: "approval_request",
+          approval: {
+            id: "mock-sandbox-escape-preview",
+            tool: "sandbox_escape",
+            subject: t("mock.sandboxEscapeSubject"),
+            reason: t("mock.sandboxEscapeReason"),
           },
         });
         return;
@@ -1841,6 +1880,67 @@ function makeMockApp(): AppBindings {
           },
         });
         emit({ kind: "message", text: "Process card preview complete." });
+        emitMockTurnDone();
+        return;
+      }
+      if (trimmedInput === "/nested-preview" || trimmedInput === "nested preview" || trimmedInput === "嵌套预览") {
+        const parentId = "mock-nested-explore";
+        await delay(180);
+        if (cancelled) return;
+        emit({
+          kind: "reasoning",
+          text: "我先快速探索相关文件，再整理这个工具行的视觉层级。",
+        });
+        emit({
+          kind: "message",
+          text: "",
+          reasoning: "我先快速探索相关文件，再整理这个工具行的视觉层级。",
+        });
+        emit({
+          kind: "tool_dispatch",
+          tool: {
+            id: parentId,
+            name: "explore",
+            args: JSON.stringify({ task: "在 Reasonix 前端中检查工具调用图标和嵌套调用展示" }),
+            readOnly: true,
+            profile: { model: "mock-reasonix", effort: "high" },
+          },
+        });
+        for (let i = 1; i <= 30; i += 1) {
+          if (cancelled) return;
+          const id = `mock-nested-${i}`;
+          const isSearch = i % 3 === 0;
+          const name = isSearch ? "grep" : "read_file";
+          const args = isSearch
+            ? { pattern: i % 2 === 0 ? "tool__nested-count" : "explore", path: "desktop/frontend/src" }
+            : { path: `desktop/frontend/src/${i % 2 === 0 ? "components/ToolCard.tsx" : "styles.css"}`, offset: i * 10, limit: 40 };
+          emit({ kind: "tool_dispatch", tool: { id, name, args: JSON.stringify(args), readOnly: true, parentId } });
+          emit({
+            kind: "tool_result",
+            tool: {
+              id,
+              name,
+              readOnly: true,
+              output: isSearch ? "3 matches" : "read 40 lines",
+              durationMs: 24 + i,
+            },
+          });
+          await delay(18);
+        }
+        emit({
+          kind: "tool_result",
+          tool: {
+            id: parentId,
+            name: "explore",
+            readOnly: true,
+            output: "已读 20 个文件 · 搜索 10 个文件",
+            durationMs: 61510,
+          },
+        });
+        emit({
+          kind: "message",
+          text: "Mock nested tool preview complete. The explore row now shows the compass count marker.",
+        });
         emitMockTurnDone();
         return;
       }

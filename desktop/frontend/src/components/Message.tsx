@@ -557,6 +557,7 @@ export function TurnActions({
   actionPending = false,
   rewindDisabled = false,
   hoverMenus = false,
+  isLastTurn = false,
 }: {
   text: string;
   turn?: number;
@@ -567,6 +568,8 @@ export function TurnActions({
   actionPending?: boolean;
   rewindDisabled?: boolean;
   hoverMenus?: boolean;
+  /** true when this is the last user turn — disables "summarize after" */
+  isLastTurn?: boolean;
 }) {
   const t = useT();
   const [confirmScope, setConfirmScope] = useState<MessageActionScope | null>(null);
@@ -576,6 +579,9 @@ export function TurnActions({
     if (!checkpoint) return t("rewind.disabledNoCheckpoint");
     if ((scope === "fork" || scope === "summ-from" || scope === "conversation") && !checkpoint.canConversation) {
       return t("rewind.disabledNoBoundary");
+    }
+    if (scope === "summ-from" && isLastTurn) {
+      return t("rewind.disabledNoLater");
     }
     if (scope === "summ-upto") {
       if (!checkpoint.canConversation) return t("rewind.disabledNoBoundary");

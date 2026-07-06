@@ -68,10 +68,39 @@ var English = Messages{
 	ToolApprovalChoices:                    "1. Allow once\n2. Allow %s for this session\n3. Always allow %s (save to config)\n4. Deny\nChoose [1/2/3/4] (y/a/p/n also work)",
 	BashPrefixChoices:                      "1. Allow once\n2. Allow %s for this session\n3. Always allow %s (save to config)\n4. Deny\nChoose [1/2/3/4] (y/a/p/n also work)",
 	PlanModeReadOnlyCommandChoices:         "1. Trust once\n2. Trust this prefix for this session\n3. Always trust this prefix for plan mode (save to config)\n4. Deny\nChoose [1/2/3/4] (y/a/p/n also work)",
-	FreshHumanApprovalChoices:              "1. Allow once\n4. Deny\nChoose [1/4] (y/n also work)",
+	FreshHumanApprovalChoices:              "1. Allow once\n2. Deny\nChoose [1/2] (y/n also work)",
+	SandboxEscapeApprovalChoices:           "1. Allow once\n2. Use real environment for this session\n3. Deny\nChoose [1/2/3] (y/a/n also work)",
+	ApprovalNeededFmt:                      "approval needed: %s",
+	ApprovalNeededWithSubjectFmt:           "approval needed: %s %s",
 	ToolApprovalSourceFmt:                  "Source: %s",
 	ToolApprovalBuiltIn:                    "built-in tool",
 	ToolApprovalImageUse:                   "It will read provided image input for image understanding.",
+	ApprovalToolLabelBash:                  "bash",
+	ApprovalToolLabelEditFile:              "edit file",
+	ApprovalToolLabelWriteFile:             "write file",
+	ApprovalToolLabelMultiEdit:             "multi edit",
+	ApprovalToolLabelMoveFile:              "move file",
+	ApprovalToolLabelWebFetch:              "web fetch",
+	ApprovalToolLabelRunSkill:              "run skill",
+	ApprovalToolLabelRemember:              "remember",
+	ApprovalToolLabelForget:                "forget",
+	ApprovalToolLabelSandboxEscape:         "bash sandbox escape",
+	ApprovalToolLabelPlanModeReadOnly:      "plan-mode read-only command",
+	MemoryApprovalSaveUpdate:               "Save/update memory",
+	MemoryApprovalBodyLabel:                "body",
+	MemoryApprovalArchiveFmt:               "Archive memory %q",
+	PlanModeMCPTrustMetadataMissing:        "this MCP tool did not expose enough metadata to remember a read-only trust decision.",
+	PlanModeMCPTrustSubjectFmt:             "MCP %s/%s as read-only for planning and research",
+	PlanModeMCPTrustReason:                 "This MCP tool reports read-only, but external read-only hints need your confirmation before plan mode can use them. Choose always allow to remember this trust for future planning and read-only research.",
+	PlanModeMCPTrustDeclined:               "the user declined to trust this MCP read-only hint - do not retry it; continue with other trusted read-only tools or ask how to proceed.",
+	PlanModeBashTrustSubjectFmt:            "Trust %q as a read-only command prefix while planning\nCommand: %s",
+	PlanModeBashTrustReason:                "This bash command is not in Reasonix's built-in read-only set. Confirm only if this exact prefix is read-only for planning and research. Auto/YOLO approval cannot answer this trust prompt.",
+	PlanModeBashTrustDeclined:              "the user declined to trust this bash command as read-only for plan mode - do not retry it; continue with other trusted read-only tools or ask how to proceed.",
+	SandboxEscapeSubjectFallback:           "run shell command unconfined once",
+	SandboxEscapeSubjectPrefix:             "run unconfined once: ",
+	SandboxEscapeWrapReason:                "Windows sandbox could not wrap this command. Run it unconfined one time? This bypasses the OS sandbox for this command only.",
+	SandboxEscapeRuntimeReason:             "Windows sandbox failed while starting this command. Run it unconfined one time? This bypasses the OS sandbox for this command only.",
+	SandboxEscapeDeclined:                  "the user declined to run this command without the OS sandbox - do not retry it unconfined; ask how they would like to proceed.",
 	PermissionSavedFmt:                     "permission saved to %s: %s",
 	PermissionAlreadyAllowedFmt:            "permission already covered in %s: %s",
 	PermissionSaveFailedFmt:                "permission save failed for %s: %v",
@@ -391,8 +420,8 @@ var English = Messages{
 	UsageBody: `reasonix — a config- and plugin-driven coding agent (multi-model)
 
 Usage:
-  reasonix [--model NAME] [-c|--continue] [--resume] [--yolo] [--dir PATH]   interactive session (multi-turn; -c resumes the latest, --resume picks one)
-  reasonix run  [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] <task>   run one task and exit
+  reasonix [--model NAME] [-c|--continue] [--resume] [--copy] [--yolo] [--dir PATH]   interactive session (multi-turn; -c resumes the latest, --resume picks one, --copy continues in a duplicate)
+  reasonix run  [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] [--copy] <task>   run one task and exit
   reasonix review [--base BRANCH] [--commit SHA] [--model NAME]  AI-powered code review on local diffs
   reasonix serve [--model NAME] [--addr HOST:PORT] [--auth none|token|password] [--token STR] [--password STR] [--hash-password]  serve over HTTP+SSE (with optional auth)
   reasonix acp [--model NAME]                           serve Agent Client Protocol over stdio (also: reasonix --acp)

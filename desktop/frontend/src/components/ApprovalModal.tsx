@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import gsap from "gsap";
-import { useT } from "../lib/i18n";
+import { useT, type Translator } from "../lib/i18n";
 import type { ComposerInsertRequest, DirEntry, WireApproval } from "../lib/types";
 import { PromptAction, PromptBadge, PromptHeaderAction, PromptShelf } from "./PromptShelf";
 import { playAttentionChime } from "../lib/sound";
@@ -28,7 +28,89 @@ function animateShelfExit(
 }
 
 function requiresFreshHumanApproval(tool: string): boolean {
-  return tool === "remember" || tool === "forget" || tool === "exit_plan_mode";
+  return tool === "remember" || tool === "forget" || tool === "exit_plan_mode" || tool === "sandbox_escape";
+}
+
+function approvalToolLabel(tool: string, t: Translator): string {
+  switch (tool) {
+    case "bash":
+      return t("approval.toolLabelBash");
+    case "edit_file":
+      return t("approval.toolLabelEditFile");
+    case "write_file":
+      return t("approval.toolLabelWriteFile");
+    case "multi_edit":
+      return t("approval.toolLabelMultiEdit");
+    case "move_file":
+      return t("approval.toolLabelMoveFile");
+    case "web_fetch":
+      return t("approval.toolLabelWebFetch");
+    case "run_skill":
+      return t("approval.toolLabelRunSkill");
+    case "remember":
+      return t("approval.toolLabelRemember");
+    case "forget":
+      return t("approval.toolLabelForget");
+    case "sandbox_escape":
+      return t("approval.toolLabelSandboxEscape");
+    case "plan_mode_read_only_command":
+      return t("approval.toolLabelPlanModeReadOnly");
+    default:
+      return tool;
+  }
+}
+
+const sandboxEscapeEnglishSubjectFallback = "run shell command unconfined once";
+const sandboxEscapeEnglishSubjectPrefix = "run unconfined once: ";
+const planModeMcpEnglishSubject = /^MCP (.+) as read-only for planning and research$/;
+const planModeBashEnglishSubject = /^Trust (.+) as a read-only command prefix while planning\r?\nCommand: ([\s\S]+)$/;
+
+function localizeApprovalSubject(tool: string, subject: string, t: Translator): string {
+  const trimmed = subject.trim();
+  if (tool === "sandbox_escape") {
+    if (!trimmed || trimmed === sandboxEscapeEnglishSubjectFallback) return t("approval.sandboxEscapeSubjectFallback");
+    if (trimmed.startsWith(sandboxEscapeEnglishSubjectPrefix)) {
+      return `${t("approval.sandboxEscapeSubjectPrefix")}${trimmed.slice(sandboxEscapeEnglishSubjectPrefix.length)}`;
+    }
+    return trimmed;
+  }
+  if (tool === "remember") {
+    return trimmed
+      .replace(/^Save\/update memory/, t("approval.memorySaveUpdate"))
+      .replace(/\bbody: /g, `${t("approval.memoryBodyLabel")}: `);
+  }
+  if (tool === "forget" && trimmed.startsWith("Archive memory ")) {
+    return `${t("approval.memoryArchivePrefix")}${trimmed.slice("Archive memory ".length)}`;
+  }
+  const mcpTrust = trimmed.match(planModeMcpEnglishSubject);
+  if (mcpTrust) {
+    return t("approval.planModeMcpTrustSubject", { target: mcpTrust[1] ?? "" });
+  }
+  const bashTrust = trimmed.match(planModeBashEnglishSubject);
+  if (bashTrust) {
+    return t("approval.planModeBashTrustSubject", { prefix: bashTrust[1] ?? "", command: bashTrust[2] ?? "" });
+  }
+  return trimmed;
+}
+
+function localizeApprovalReason(tool: string, reason: string | undefined, t: Translator): string {
+  const trimmed = reason?.trim() ?? "";
+  if (tool !== "sandbox_escape") return trimmed;
+  if (trimmed.includes("could not wrap this command")) return t("approval.sandboxEscapeWrapReason");
+  if (trimmed.includes("failed while starting this command") || trimmed.includes("Run this command unconfined once?")) {
+    return t("approval.sandboxEscapeRuntimeReason");
+  }
+  return trimmed || t("approval.sandboxEscapeRuntimeReason");
+}
+
+function localizePlanModeApprovalReason(tool: string, reason: string, t: Translator): string {
+  if (tool === "plan_mode_read_only_command" && reason.includes("built-in read-only set")) {
+    return t("approval.planModeBashTrustReason");
+  }
+  if (reason.includes("external read-only hints need your confirmation")) {
+    return t("approval.planModeMcpTrustReason");
+  }
+  return reason;
 }
 
 export function ApprovalModal({
@@ -52,13 +134,14 @@ export function ApprovalModal({
 }) {
   const t = useT();
   const isPlanApproval = approval.tool === "exit_plan_mode";
-  const isPlanModeReadOnlyCommand = approval.tool === "plan_mode_read_only_command";
-  const toolLabel = isPlanModeReadOnlyCommand ? "bash" : approval.tool;
+  const toolLabel = approvalToolLabel(approval.tool, t);
   const isFreshHumanApproval = requiresFreshHumanApproval(approval.tool);
-  const subject = approval.subject.trim();
+  const hasFreshSessionGrant = approval.tool === "sandbox_escape";
+  const subject = localizeApprovalSubject(approval.tool, approval.subject, t);
+  const reason = localizePlanModeApprovalReason(approval.tool, localizeApprovalReason(approval.tool, approval.reason, t), t);
   const subjectSummary = subject.split(/\r?\n/).find((line) => line.trim())?.trim() ?? "";
-  const toolMeta = approval.reason?.trim() || subjectSummary || approval.tool;
-  const hasToolDetails = Boolean(approval.reason || subject);
+  const toolMeta = reason || subjectSummary || approval.tool;
+  const hasToolDetails = Boolean(reason || subject);
   const showToolDetailsByDefault = !isPlanApproval && hasToolDetails;
   const [revisionOpen, setRevisionOpen] = useState(false);
   const [revisionText, setRevisionText] = useState("");
@@ -100,11 +183,20 @@ export function ApprovalModal({
 
   const chooseToolAction = (key: string) => {
     if (key === "1") answerWithExit(() => onAnswer(true, false, false));
+    else if (hasFreshSessionGrant && key === "2") answerWithExit(() => onAnswer(true, true, false));
+    else if (hasFreshSessionGrant && key === "3") answerWithExit(() => onAnswer(false, false, false));
+    else if (isFreshHumanApproval && key === "2") answerWithExit(() => onAnswer(false, false, false));
     else if (isFreshHumanApproval && key === "4") answerWithExit(() => onAnswer(false, false, false));
     else if (!isFreshHumanApproval && key === "2") answerWithExit(() => onAnswer(true, true, false));
     else if (!isFreshHumanApproval && key === "3") answerWithExit(() => onAnswer(true, true, true));
     else if (!isFreshHumanApproval && key === "4") answerWithExit(() => onAnswer(false, false, false));
     else if (key === "Escape") answerWithExit(onStop);
+  };
+
+  const selectedToolActionKey = (index: number) => {
+    if (!isFreshHumanApproval) return String(index + 1);
+    if (hasFreshSessionGrant) return index === 0 ? "1" : index === 1 ? "2" : "3";
+    return index === 0 ? "1" : "2";
   };
 
   useEffect(() => {
@@ -116,7 +208,7 @@ export function ApprovalModal({
     playAttentionChime();
   }, [approval.id, isPlanApproval, showToolDetailsByDefault]);
 
-  const actionCount = isPlanApproval ? 3 : isFreshHumanApproval ? 2 : 4;
+  const actionCount = isPlanApproval ? 3 : isFreshHumanApproval ? (hasFreshSessionGrant ? 3 : 2) : 4;
   const selectedIndexRef = useRef(selectedIndex);
   selectedIndexRef.current = selectedIndex;
 
@@ -137,8 +229,7 @@ export function ApprovalModal({
         event.preventDefault();
         const key = String(selectedIndexRef.current + 1);
         if (isPlanApproval) choosePlanAction(key);
-        else if (isFreshHumanApproval) chooseToolAction(selectedIndexRef.current === 0 ? "1" : "4");
-        else chooseToolAction(key);
+        else chooseToolAction(selectedToolActionKey(selectedIndexRef.current));
       } else if (event.key === "1" || event.key === "2" || event.key === "3" || event.key === "4" || event.key === "Escape") {
         event.preventDefault();
         if (isPlanApproval) choosePlanAction(event.key);
@@ -147,7 +238,7 @@ export function ApprovalModal({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [isPlanApproval, isFreshHumanApproval, onAnswer, onExitPlan, onStop, actionCount]);
+  }, [isPlanApproval, isFreshHumanApproval, hasFreshSessionGrant, onAnswer, onExitPlan, onStop, actionCount]);
 
   useEffect(() => {
     if (revisionOpen) {
@@ -318,7 +409,14 @@ export function ApprovalModal({
           <>
             <PromptAction keyLabel="1" label={t("approval.allowOnce")} onClick={() => answerWithExit(() => onAnswer(true, false, false))} selected={selectedIndex === 0} />
             {isFreshHumanApproval ? (
-              <PromptAction keyLabel="4" label={t("approval.deny")} onClick={() => answerWithExit(() => onAnswer(false, false, false))} selected={selectedIndex === 1} />
+              hasFreshSessionGrant ? (
+                <>
+                  <PromptAction keyLabel="2" label={t("approval.allowSandboxEscapeSession")} onClick={() => answerWithExit(() => onAnswer(true, true, false))} selected={selectedIndex === 1} />
+                  <PromptAction keyLabel="3" label={t("approval.deny")} onClick={() => answerWithExit(() => onAnswer(false, false, false))} selected={selectedIndex === 2} />
+                </>
+              ) : (
+                <PromptAction keyLabel="2" label={t("approval.deny")} onClick={() => answerWithExit(() => onAnswer(false, false, false))} selected={selectedIndex === 1} />
+              )
             ) : (
               <>
                 <PromptAction keyLabel="2" label={t("approval.allowRuleSession")} onClick={() => answerWithExit(() => onAnswer(true, true, false))} selected={selectedIndex === 1} />
@@ -331,7 +429,7 @@ export function ApprovalModal({
       >
         {detailsOpen && (
           <div className="approval-details">
-            {approval.reason && <div className="approval-reason">{approval.reason}</div>}
+            {reason && <div className="approval-reason">{reason}</div>}
             {subject && (
               <pre className="approval-subject">{subject}</pre>
             )}

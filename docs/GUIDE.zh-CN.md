@@ -16,6 +16,7 @@
 - [Serve Web 前端](#serve-web-前端)
 - [配置路径](./CONFIG_PATHS.zh-CN.md)
 - [思考语言](./REASONING_LANGUAGE.zh-CN.md)
+- [任务合约与暂停策略](./TASK_CONTRACT.zh-CN.md)
 - [自定义 OpenAI-compatible provider](#自定义-openai-compatible-provider)
 - [桌面端 Hooks](./DESKTOP_HOOKS.zh-CN.md)
 - [快捷键](#快捷键)
@@ -391,9 +392,20 @@ CJK 双宽字符，造成视觉错位。想保留旧的终端块状光标可设�
 之外的任何路径（默认当前目录，编辑不出项目），并解析符号链接与 `..`，使链接无法
 打洞越界。`forbid_read` 可选地隐藏敏感目录，使 agent 的读文件、列目录和搜索工具不能读取或列出它们；
 建议使用绝对路径或 `${HOME}` / `${VAR}`，不要写 `~`，因为配置只做环境变量展开。
-`bash` 本身在 macOS 默认进沙盒（`[sandbox] bash`，Seatbelt）：命令只能写这些 root（外加临时目录与工具链缓存），
-OS 沙盒生效时也不能读取配置的 `forbid_read` roots，`[sandbox] network` 为真时才能联网；
-其它平台在没有可用 OS 沙盒时会回退为不沙盒运行（越界问一次与 Linux 支持见
+`bash` 本身默认进 OS 沙盒（`[sandbox] bash`：macOS 使用 Seatbelt，Linux 使用 bubblewrap，
+原生 Windows 使用 native helper）：命令只能写这些 root（外加平台按命令提供的临时/缓存 root），
+OS 沙盒生效时也不能读取配置的 `forbid_read` roots，`[sandbox] network` 为真时才能联网。
+原生 Windows helper 把底层隔离委托给 `github.com/SivanCola/windows-sandbox`：
+只读命令使用 AppContainer，可写命令使用 low-integrity token；它会临时授予
+workspace、每次命令专用 temp root 和目标可执行文件的访问权，对 `forbid_read`
+（文件和目录皆可）临时添加 deny ACE，修改前记录被触碰目录的 DACL，命令结束后尽力恢复。
+作用于同一 workspace 的并发命令会被串行化，避免各自的 ACL 修改互相破坏；被强杀命令
+残留的 low-integrity 标签或 `forbid_read` deny ACE 会由下一次运行清理。由于可写命令跑在
+low-integrity token 下，除配置的 root 外它仍能写入 Windows 对任何 low-integrity 进程开放的
+少数位置（例如 `%USERPROFILE%\AppData\LocalLow`），但 workspace 边界与 `forbid_read`
+拒绝依然有效。只读 AppContainer 命令在关闭网络时不给 network capability；可写 Windows 命令遇到
+`[sandbox] network = false` 时会 fail closed。没有可用 OS 沙盒时，`bash = "enforce"` 会拒绝 bash 执行，不会无沙盒运行
+（越界询问与可选的 Windows elevated 加固见
 [`SPEC.md` §9](./SPEC.md#9-roadmap-not-in-current-scope)）。
 
 ## 插件（MCP）
@@ -528,6 +540,10 @@ Goal 是长期目标的统一运行机制。普通 `/goal` 继续走轻量 Goal�
 要求用户单独运行 `/auto-research` skill；`auto-research` 也不会作为独立 builtin skill 出现在
 Settings -> Skills 或斜杠菜单里。普通聊天输入如果命中很强的长周期信号，也会被 host 自动
 升级为等价的 `/goal --research <原输入>`。
+
+复杂任务建议把目标写成[任务合约](./TASK_CONTRACT.zh-CN.md)：Context、Request、
+Output format、Constraints 和 Pause policy。Goal 模式会把这些部分当作自主执行的边界；
+除非下一步需要不可逆或对外可见操作、任务范围变化，或必须由用户提供信息，否则会继续采用合理默认值推进，并在最后汇报假设与结果。
 
 AutoResearch 会在这些目标里自动启用：包含“持续”“长期”“彻底”“直到根因明确”“多轮排查”
 “不要原地打转”“完整方案”“跑实验”“反复验证”“系统性研究”等强信号；或者目标同时包含

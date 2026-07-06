@@ -53,6 +53,26 @@ func TestGoalCommandAutoContinuesUntilComplete(t *testing.T) {
 	}
 }
 
+func TestActiveGoalBlockCarriesTaskContractAndPausePolicy(t *testing.T) {
+	block := activeGoalBlock("fix the parser", GoalResearchOff)
+	for _, want := range []string{
+		"Treat the user's goal as a task contract",
+		"Context, Request, Output format, Constraints",
+		"Pause policy",
+		"irreversible or externally visible operation",
+		"the requested scope has changed",
+		"information only the user can provide",
+		"output format and constraints are satisfied",
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("active goal block missing %q:\n%s", want, block)
+		}
+	}
+	if strings.Contains(block, "AutoResearch protocol") {
+		t.Fatalf("simple goal should not include AutoResearch protocol:\n%s", block)
+	}
+}
+
 func TestGoalModeSkipsAutoPlanApproval(t *testing.T) {
 	prov := &scriptedTurns{turns: [][]provider.Chunk{
 		textTurn("Implemented the requested work.\n\n[goal:complete]"),

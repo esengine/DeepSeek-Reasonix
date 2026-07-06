@@ -23,6 +23,7 @@ import (
 	"reasonix/internal/nilutil"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/shellparse"
 	"reasonix/internal/tool"
 )
@@ -272,6 +273,10 @@ type Agent struct {
 	// planModeReadOnlyTrust, when non-nil, can ask the user to trust an MCP
 	// server's readOnlyHint for plan-mode execution without changing tool schemas.
 	planModeReadOnlyTrust PlanModeReadOnlyTrustGate
+
+	// sandboxEscapeApprover, when non-nil, can ask the user whether one shell
+	// command may rerun unconfined after the OS sandbox failed to start.
+	sandboxEscapeApprover sandbox.EscapeApprover
 
 	// hooks, when non-nil, fires PreToolUse / PostToolUse shell hooks around each
 	// tool call. nil disables hook firing.
@@ -587,6 +592,15 @@ func (a *Agent) SetPlanModeReadOnlyTrustGate(g PlanModeReadOnlyTrustGate) {
 	a.planModeReadOnlyTrust = g
 }
 
+// SetSandboxEscapeApprover installs the optional one-shot approval path used by
+// the bash tool when an enforced OS sandbox fails to start.
+func (a *Agent) SetSandboxEscapeApprover(g sandbox.EscapeApprover) {
+	if nilutil.IsNil(g) {
+		g = nil
+	}
+	a.sandboxEscapeApprover = g
+}
+
 func (a *Agent) withTurnPreferences(input string) string {
 	if a == nil {
 		return input
@@ -760,6 +774,10 @@ type Options struct {
 	// plan mode would otherwise block them. nil keeps fail-closed behavior.
 	PlanModeReadOnlyTrustGate PlanModeReadOnlyTrustGate
 
+	// SandboxEscapeApprover confirms a one-shot unconfined shell rerun after an
+	// enforced OS sandbox fails. nil keeps fail-closed behavior.
+	SandboxEscapeApprover sandbox.EscapeApprover
+
 	// Context management. ContextWindow <= 0 disables compaction. Ratios and
 	// RecentKeep fall back to defaults when unset.
 	ContextWindow       int
@@ -848,6 +866,10 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	if nilutil.IsNil(planModeReadOnlyTrust) {
 		planModeReadOnlyTrust = nil
 	}
+	sandboxEscapeApprover := opts.SandboxEscapeApprover
+	if nilutil.IsNil(sandboxEscapeApprover) {
+		sandboxEscapeApprover = nil
+	}
 	hooks := opts.Hooks
 	if nilutil.IsNil(hooks) {
 		hooks = nil
@@ -878,6 +900,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		sink:                     sink,
 		gate:                     gate,
 		planModeReadOnlyTrust:    planModeReadOnlyTrust,
+		sandboxEscapeApprover:    sandboxEscapeApprover,
 		hooks:                    hooks,
 		jobs:                     opts.Jobs,
 		evidence:                 evidence.NewLedger(),
@@ -2189,6 +2212,9 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	}
 	if a.jobs != nil {
 		cctx = jobs.WithManager(cctx, a.jobs)
+	}
+	if a.sandboxEscapeApprover != nil {
+		cctx = sandbox.WithEscapeApprover(cctx, a.sandboxEscapeApprover)
 	}
 	if v := a.responseLanguage.Load(); v != nil {
 		if lang, ok := v.(string); ok {

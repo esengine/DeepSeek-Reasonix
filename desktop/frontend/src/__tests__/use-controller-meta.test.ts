@@ -1,6 +1,6 @@
 // Run: tsx src/__tests__/use-controller-meta.test.ts
 
-import { foregroundRunningFromRuntimeMeta, initialState, metaFromTab, reducer, sameMeta, shouldReconcileStaleTurn } from "../lib/useController";
+import { effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, initialState, metaFromTab, reducer, sameMeta, shouldReconcileStaleTurn } from "../lib/useController";
 import type { Meta, TabMeta, WireUsage } from "../lib/types";
 
 type LooseTabMeta = Omit<TabMeta, "toolApprovalMode"> & { toolApprovalMode?: TabMeta["toolApprovalMode"] | "" };
@@ -81,6 +81,34 @@ function usage(source: string): WireUsage {
 }
 
 console.log("\nuse controller meta");
+
+{
+  eq(
+    effortSwitchNoticeText("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing effort"),
+    "Reasoning effort cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
+    "effort busy guard is worded as temporary",
+  );
+  eq(
+    effortSwitchNoticeText("this session is already open in another Reasonix window or still running in the background; close the other window or open a copy before changing effort"),
+    "This session is open in another Reasonix window or still running in the background. Close that window, stop the background run, or open a copy before changing effort.",
+    "effort lease conflict explains the safe path",
+  );
+  eq(
+    effortSwitchNoticeText("workspace is still starting"),
+    "This session is still starting. Try changing reasoning effort again in a moment.",
+    "effort startup race asks the user to retry later",
+  );
+  eq(
+    effortSwitchNoticeText('tab "tab-a" changed while switching effort; retry'),
+    "The current session changed while switching reasoning effort. Try once more.",
+    "effort tab race asks the user to retry",
+  );
+  eq(
+    effortSwitchNoticeText("unknown model \"missing\""),
+    "Reasoning effort switch failed: unknown model \"missing\"",
+    "effort true failure keeps the underlying error",
+  );
+}
 
 {
   eq(sameMeta(meta(), meta()), true, "identical meta is unchanged");

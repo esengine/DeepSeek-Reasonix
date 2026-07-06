@@ -25,6 +25,10 @@ type Session struct {
 	// part of the usual full rewrite; the flag exists for observability and to
 	// let callers opt out of work that a dirty session would make redundant.
 	normalizedDirty bool
+	// eventLogDamaged is set when LoadSession found the on-disk event log torn
+	// or corrupt and returned the replayable prefix (or the .jsonl checkpoint).
+	// The next save heals the log with a rewrite-and-compact.
+	eventLogDamaged bool
 }
 
 // NewSession initializes a session with an optional system prompt.
@@ -92,6 +96,7 @@ func (s *Session) CloneWithMessages(msgs []provider.Message) *Session {
 		rewriteVersion:  s.rewriteVersion,
 		persisted:       s.persisted,
 		normalizedDirty: s.normalizedDirty,
+		eventLogDamaged: s.eventLogDamaged,
 	}
 }
 
@@ -118,6 +123,7 @@ func (s *Session) CloneWithMessagesIfCompatible(msgs []provider.Message) (*Sessi
 		rewriteVersion:  s.rewriteVersion,
 		persisted:       s.persisted,
 		normalizedDirty: s.normalizedDirty,
+		eventLogDamaged: s.eventLogDamaged,
 	}, true
 }
 

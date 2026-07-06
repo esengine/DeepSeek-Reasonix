@@ -195,7 +195,7 @@ func TestReasonixHomeOverridesGlobalHookPaths(t *testing.T) {
 	}
 }
 
-func TestReasonixHomeFallsBackToLegacyGlobalHooksAndTrust(t *testing.T) {
+func TestReasonixHomeDoesNotFallBackToLegacyWhenIsolated(t *testing.T) {
 	home := t.TempDir()
 	reasonixHome := filepath.Join(t.TempDir(), "rx-home")
 	proj := t.TempDir()
@@ -205,11 +205,8 @@ func TestReasonixHomeFallsBackToLegacyGlobalHooksAndTrust(t *testing.T) {
 	writeSettings(t, home, `{"hooks":{"PostToolUse":[{"command":"echo old"}]}}`)
 
 	hooks := Load(LoadOptions{})
-	if len(hooks) != 1 || hooks[0].Command != "echo old" {
-		t.Fatalf("Load hooks = %+v, want legacy global hook", hooks)
-	}
-	if hooks[0].Source != filepath.Join(home, SettingsDirname, SettingsFilename) {
-		t.Fatalf("legacy hook source = %q", hooks[0].Source)
+	if len(hooks) != 0 {
+		t.Fatalf("Load hooks = %+v, want empty (isolated REASONIX_HOME must not load legacy hooks)", hooks)
 	}
 
 	absProj, err := filepath.Abs(proj)
@@ -224,8 +221,8 @@ func TestReasonixHomeFallsBackToLegacyGlobalHooksAndTrust(t *testing.T) {
 	if err := os.WriteFile(legacyTrust, body, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if !IsTrusted(proj, "") {
-		t.Fatal("legacy trust should be honored when new trust.json is absent")
+	if IsTrusted(proj, "") {
+		t.Fatal("legacy trust must not be honored when REASONIX_HOME is set and trust.json is absent")
 	}
 	if err := Trust(proj, ""); err != nil {
 		t.Fatalf("Trust: %v", err)

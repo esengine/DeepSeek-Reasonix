@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { buildStepGroups, buildTurnGroups, createWarmLayerState, questionTurnsById, warmColdPageForTurn, warmLayerForSession, warmLayerWithColdPageAtLeast, warmLayerWithExpandedTurn, warmLayerWithNextColdPage, warmPagination } from "../lib/transcriptGrouping";
+import { buildStepGroups, buildTurnGroups, createWarmLayerState, lastQuestionTurn, questionTurnsById, warmColdPageForTurn, warmLayerForSession, warmLayerWithColdPageAtLeast, warmLayerWithExpandedTurn, warmLayerWithNextColdPage, warmPagination } from "../lib/transcriptGrouping";
 import type { Item } from "../lib/useController";
 
 let passed = 0;
@@ -105,6 +105,22 @@ console.log("\ntranscript grouping contract");
   eq(backendTurns.get("u0"), 0, "uses backend checkpoint turn zero when present");
   eq(backendTurns.get("u2"), 3, "uses non-contiguous backend checkpoint turn");
   ok(!backendTurns.has("u1"), "does not mix visible ordinal fallback into authoritative checkpoint sessions");
+  eq(lastQuestionTurn([
+    { id: "u0", text: "first", turn: 0 },
+    { id: "u1", text: "second", turn: 1 },
+  ], visibleTurns), 1, "last question turn follows visible ordinal fallback");
+  eq(lastQuestionTurn([
+    { id: "u0", text: "first", turn: 0, checkpointTurn: 0 },
+    { id: "u1", text: "live without server stamp yet", turn: 1 },
+    { id: "u2", text: "after hidden synthetic", turn: 2, checkpointTurn: 3 },
+  ], backendTurns), 3, "last question turn follows non-contiguous backend turn");
+
+  const pagedTurns = questionTurnsById([
+    { id: "u-recent", text: "recent prompt", turn: 0, checkpointTurn: 1060 },
+  ]);
+  eq(lastQuestionTurn([
+    { id: "u-recent", text: "recent prompt", turn: 0, checkpointTurn: 1060 },
+  ], pagedTurns), 1060, "last question turn supports paged history windows");
 }
 
 {

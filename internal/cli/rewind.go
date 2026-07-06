@@ -122,6 +122,7 @@ func (m chatTUI) applyRewind() (tea.Model, tea.Cmd) {
 	switch act.kind {
 	case "fork":
 		if _, err := m.ctrl.Fork(meta.Turn); err == nil {
+			m.followSessionLease()
 			m.replayActiveBranch(fmt.Sprintf("branched from turn %d", meta.Turn+1))
 		}
 		return m, nil // the branch is a new session

@@ -38,7 +38,7 @@ func (a *App) startTray() bool {
 	a.tray = t
 	a.mu.Unlock()
 
-	t.end = startDesktopTray(func() {
+	end := startDesktopTray(func() {
 		systray.SetIcon(trayIconBytes)
 		systray.SetTitle("Reasonix")
 		systray.SetTooltip("Reasonix")
@@ -51,21 +51,25 @@ func (a *App) startTray() bool {
 		systray.SetOnSecondaryTapped(nil)
 
 		labels := trayMenuLabels(a.trayLocale())
-		t.openItem = systray.AddMenuItem(labels.openTitle, labels.openTooltip)
-		t.quitItem = systray.AddMenuItem(labels.quitTitle, labels.quitTooltip)
+		openItem := systray.AddMenuItem(labels.openTitle, labels.openTooltip)
+		quitItem := systray.AddMenuItem(labels.quitTitle, labels.quitTooltip)
 
+		// Publish the menu items under a.mu: this callback runs on the systray
+		// goroutine while bound settings calls (updateTrayLocale) read them.
 		a.mu.Lock()
+		t.openItem = openItem
+		t.quitItem = quitItem
 		a.trayReady = true
 		a.mu.Unlock()
 		t.markReady()
 
 		a.goSafe("trayOpenLoop", func() {
-			for range t.openItem.ClickedCh {
+			for range openItem.ClickedCh {
 				a.showFromTray()
 			}
 		})
 		a.goSafe("trayQuitLoop", func() {
-			for range t.quitItem.ClickedCh {
+			for range quitItem.ClickedCh {
 				a.quitFromTray()
 			}
 		})
@@ -77,31 +81,43 @@ func (a *App) startTray() bool {
 		}
 		a.mu.Unlock()
 	})
+	a.mu.Lock()
+	t.end = end
+	a.mu.Unlock()
 	return true
 }
 
 func (a *App) stopTray() {
 	a.mu.RLock()
 	t := a.tray
+	var end func()
+	if t != nil {
+		end = t.end
+	}
 	a.mu.RUnlock()
-	if t == nil || t.end == nil {
+	if t == nil || end == nil {
 		return
 	}
-	t.once.Do(t.end)
+	t.once.Do(end)
 }
 
 func (a *App) updateTrayLocale(locale string) {
 	a.mu.RLock()
 	t := a.tray
+	var openItem, quitItem *systray.MenuItem
+	if t != nil {
+		openItem = t.openItem
+		quitItem = t.quitItem
+	}
 	a.mu.RUnlock()
-	if t == nil || t.openItem == nil || t.quitItem == nil {
+	if openItem == nil || quitItem == nil {
 		return
 	}
 	labels := trayMenuLabels(locale)
-	t.openItem.SetTitle(labels.openTitle)
-	t.openItem.SetTooltip(labels.openTooltip)
-	t.quitItem.SetTitle(labels.quitTitle)
-	t.quitItem.SetTooltip(labels.quitTooltip)
+	openItem.SetTitle(labels.openTitle)
+	openItem.SetTooltip(labels.openTooltip)
+	quitItem.SetTitle(labels.quitTitle)
+	quitItem.SetTooltip(labels.quitTooltip)
 }
 
 func (a *App) trayLocale() string {

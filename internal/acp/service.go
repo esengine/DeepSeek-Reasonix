@@ -168,6 +168,11 @@ type acpSession struct {
 	done    chan struct{}
 	running bool
 	deleted bool
+	// lease is the session lease guarding transcript against other runtimes
+	// (a desktop window, the CLI) for the life of this session. Held from
+	// session/new / session/load and released on close/delete/teardown; config
+	// rebuilds keep the same transcript, so the lease never moves.
+	lease *agent.SessionLease
 	// maintenanceDone is non-nil while session-owned maintenance, such as an
 	// idle config rebuild, is in flight outside mu.
 	maintenanceDone chan struct{}
@@ -271,6 +276,30 @@ func (s *acpSession) currentCtrl() acpController {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.ctrl
+}
+
+// releaseSessionLease drops the session's transcript lease, if any. Idempotent.
+func (s *acpSession) releaseSessionLease() {
+	s.mu.Lock()
+	lease := s.lease
+	s.lease = nil
+	s.mu.Unlock()
+	if lease != nil {
+		lease.Release()
+	}
+}
+
+// sessionLeaseBindError maps a lease-acquisition failure to the protocol
+// error the client sees: a held session names its holder with the shared CLI
+// wording; anything else is an internal error.
+func sessionLeaseBindError(method string, err error) *RPCError {
+	if errors.Is(err, agent.ErrSessionLeaseHeld) {
+		return &RPCError{
+			Code:    ErrInvalidRequest,
+			Message: method + ": " + control.SessionInUseMessage(err) + "; " + control.SessionLeaseCloseHint,
+		}
+	}
+	return &RPCError{Code: ErrInternal, Message: method + ": session lease: " + err.Error()}
 }
 
 // initialize advertises the agent's capability set: persisted load plus ACP v1
@@ -379,9 +408,17 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 	}
 	// Pin a transcript file keyed by session id when the controller has a session
 	// dir, so every turn auto-saves there, session/prompt can hand the path back,
-	// and session/load can find it again by id across process restarts.
+	// and session/load can find it again by id across process restarts. The
+	// session lease is taken with it (defensive: the id-keyed path is brand new)
+	// so no other runtime can bind the transcript while this session lives.
 	if dir := ctrl.SessionDir(); dir != "" {
 		sess.transcript = transcriptPath(dir, id)
+		lease, err := agent.TryAcquireSessionLease(sess.transcript)
+		if err != nil {
+			ctrl.Close()
+			return nil, sessionLeaseBindError("session/new", err)
+		}
+		sess.lease = lease
 		ctrl.SetSessionPath(sess.transcript)
 	}
 
@@ -507,8 +544,17 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 		ctrl.Close()
 		return SessionConfigState{}, &RPCError{Code: ErrInvalidParams, Message: method + ": unknown session " + id}
 	}
+	// Bind the transcript for writing only if no other runtime (a desktop
+	// window, the CLI) holds it; the editor should not silently double-write a
+	// session that is open elsewhere.
+	lease, leaseErr := agent.TryAcquireSessionLease(path)
+	if leaseErr != nil {
+		ctrl.Close()
+		return SessionConfigState{}, sessionLeaseBindError(method, leaseErr)
+	}
 	loaded, err := agent.LoadSession(path)
 	if err != nil {
+		lease.Release()
 		ctrl.Close()
 		return SessionConfigState{}, &RPCError{Code: ErrInvalidParams, Message: method + ": unknown session " + id}
 	}
@@ -529,8 +575,10 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 		title:          meta.Title,
 		createdAt:      meta.CreatedAt,
 		updatedAt:      meta.UpdatedAt,
+		lease:          lease,
 	}
 	if err := saveACPMeta(path, sess.meta()); err != nil {
+		sess.releaseSessionLease()
 		ctrl.Close()
 		return SessionConfigState{}, &RPCError{Code: ErrInternal, Message: method + ": " + err.Error()}
 	}
@@ -856,6 +904,7 @@ func (s *service) sessionClose(_ context.Context, raw json.RawMessage) (any, err
 	if sess := s.takeSession(p.SessionID); sess != nil {
 		sess.abortAndWait()
 		sess.ctrl.Close()
+		sess.releaseSessionLease()
 	}
 	return SessionCloseResult{}, nil
 }
@@ -928,6 +977,10 @@ func (s *service) sessionDelete(_ context.Context, raw json.RawMessage) (any, er
 	var delayed bool
 	if sess := s.takeSession(p.SessionID); sess != nil {
 		sess.deleteAndWait()
+		// The session is going away; drop its lease before removing files so
+		// the lease sidecars retire with the release (they are not in
+		// SessionSidecarFiles and would otherwise linger).
+		sess.releaseSessionLease()
 		path = sess.transcript
 		destroy = sess.ctrl.BeginDestroySession(path)
 		if result := destroy.Wait(); result.HasTimedOut() {
@@ -1151,6 +1204,7 @@ func (s *service) closeAll() {
 	for _, sess := range sessions {
 		sess.abortAndWait()
 		sess.currentCtrl().Close()
+		sess.releaseSessionLease()
 	}
 }
 
@@ -1556,9 +1610,9 @@ func parseSessionUpdatedAt(s string) time.Time {
 func deleteSessionFiles(sessionPath string) error {
 	paths := []string{
 		sessionPath,
-		store.SessionMeta(sessionPath),
 		acpMetaPath(sessionPath),
 	}
+	paths = append(paths, store.SessionSidecarFiles(sessionPath)...)
 	for _, path := range paths {
 		if path == "" {
 			continue

@@ -87,9 +87,38 @@ type Messages struct {
 	BashPrefixChoices                      string // approval choice list when a bash prefix can be granted
 	PlanModeReadOnlyCommandChoices         string // approval choice list for plan-mode read-only command trust
 	FreshHumanApprovalChoices              string // approval choice list for prompts that cannot be remembered
+	SandboxEscapeApprovalChoices           string // approval choice list for Windows sandbox escape prompts
+	ApprovalNeededFmt                      string // notification text for a pending approval, tool only
+	ApprovalNeededWithSubjectFmt           string // notification text for a pending approval with subject
 	ToolApprovalSourceFmt                  string // "Source: %s" / "来源: %s"
 	ToolApprovalBuiltIn                    string // built-in tool source label
 	ToolApprovalImageUse                   string // image-understanding detail for understand_image-style tools
+	ApprovalToolLabelBash                  string // user-facing label for bash approvals
+	ApprovalToolLabelEditFile              string // user-facing label for edit_file approvals
+	ApprovalToolLabelWriteFile             string // user-facing label for write_file approvals
+	ApprovalToolLabelMultiEdit             string // user-facing label for multi_edit approvals
+	ApprovalToolLabelMoveFile              string // user-facing label for move_file approvals
+	ApprovalToolLabelWebFetch              string // user-facing label for web_fetch approvals
+	ApprovalToolLabelRunSkill              string // user-facing label for run_skill approvals
+	ApprovalToolLabelRemember              string // user-facing label for remember approvals
+	ApprovalToolLabelForget                string // user-facing label for forget approvals
+	ApprovalToolLabelSandboxEscape         string // user-facing label for Windows sandbox escape approvals
+	ApprovalToolLabelPlanModeReadOnly      string // user-facing label for plan-mode read-only command trust approvals
+	MemoryApprovalSaveUpdate               string // subject prefix for remember approval
+	MemoryApprovalBodyLabel                string // label before the body excerpt in remember approval
+	MemoryApprovalArchiveFmt               string // subject for forget approval, %q = memory name
+	PlanModeMCPTrustMetadataMissing        string // denial when MCP trust metadata is incomplete
+	PlanModeMCPTrustSubjectFmt             string // subject for MCP read-only trust approval, server/tool
+	PlanModeMCPTrustReason                 string // reason for MCP read-only trust approval
+	PlanModeMCPTrustDeclined               string // model-facing denial after MCP read-only trust rejection
+	PlanModeBashTrustSubjectFmt            string // subject for bash read-only prefix trust approval, prefix + command
+	PlanModeBashTrustReason                string // reason for bash read-only prefix trust approval
+	PlanModeBashTrustDeclined              string // model-facing denial after bash read-only prefix rejection
+	SandboxEscapeSubjectFallback           string // fallback subject for one-shot unconfined Windows sandbox escape approval
+	SandboxEscapeSubjectPrefix             string // subject prefix before the shell command for one-shot unconfined escape approval
+	SandboxEscapeWrapReason                string // reason when the Windows sandbox cannot wrap the command
+	SandboxEscapeRuntimeReason             string // reason when the Windows sandbox helper fails while starting the command
+	SandboxEscapeDeclined                  string // model-facing denial when the user declines a one-shot unconfined retry
 	PermissionSavedFmt                     string // permission rule saved notice: path, rule
 	PermissionAlreadyAllowedFmt            string // permission rule already covered notice: path, rule
 	PermissionSaveFailedFmt                string // permission rule save failure notice: rule, error

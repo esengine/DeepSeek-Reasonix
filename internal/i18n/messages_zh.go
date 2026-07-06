@@ -69,10 +69,39 @@ var Chinese = Messages{
 	ToolApprovalChoices:                    "1. 本次允许\n2. 本会话允许 %s\n3. 总是允许 %s（保存到配置）\n4. 拒绝\n选择 [1/2/3/4]（兼容 y/a/p/n）",
 	BashPrefixChoices:                      "1. 本次允许\n2. 本会话允许 %s\n3. 总是允许 %s（保存到配置）\n4. 拒绝\n选择 [1/2/3/4]（兼容 y/a/p/n）",
 	PlanModeReadOnlyCommandChoices:         "1. 本次信任\n2. 本会话信任此前缀\n3. 总是在计划模式信任此前缀（保存到配置）\n4. 拒绝\n选择 [1/2/3/4]（兼容 y/a/p/n）",
-	FreshHumanApprovalChoices:              "1. 本次允许\n4. 拒绝\n选择 [1/4]（兼容 y/n）",
+	FreshHumanApprovalChoices:              "1. 本次允许\n2. 拒绝\n选择 [1/2]（兼容 y/n）",
+	SandboxEscapeApprovalChoices:           "1. 允许一次\n2. 本会话使用真实环境\n3. 拒绝\n选择 [1/2/3]（兼容 y/a/n）",
+	ApprovalNeededFmt:                      "需要审批：%s",
+	ApprovalNeededWithSubjectFmt:           "需要审批：%s %s",
 	ToolApprovalSourceFmt:                  "来源: %s",
 	ToolApprovalBuiltIn:                    "内置工具",
 	ToolApprovalImageUse:                   "将读取提供的图片用于图像理解。",
+	ApprovalToolLabelBash:                  "bash",
+	ApprovalToolLabelEditFile:              "编辑文件",
+	ApprovalToolLabelWriteFile:             "写入文件",
+	ApprovalToolLabelMultiEdit:             "批量编辑",
+	ApprovalToolLabelMoveFile:              "移动文件",
+	ApprovalToolLabelWebFetch:              "读取网页",
+	ApprovalToolLabelRunSkill:              "运行技能",
+	ApprovalToolLabelRemember:              "保存记忆",
+	ApprovalToolLabelForget:                "删除记忆",
+	ApprovalToolLabelSandboxEscape:         "bash 沙箱降级审批",
+	ApprovalToolLabelPlanModeReadOnly:      "计划模式只读命令",
+	MemoryApprovalSaveUpdate:               "保存/更新记忆",
+	MemoryApprovalBodyLabel:                "正文",
+	MemoryApprovalArchiveFmt:               "归档记忆 %q",
+	PlanModeMCPTrustMetadataMissing:        "这个 MCP 工具没有暴露足够的元数据，无法记住只读信任决策。",
+	PlanModeMCPTrustSubjectFmt:             "将 MCP %s/%s 作为计划/研究只读工具信任",
+	PlanModeMCPTrustReason:                 "这个 MCP 工具声明自己是只读的，但外部只读提示需要你确认后，计划模式才能使用。选择总是允许可为后续计划和只读研究记住这份信任。",
+	PlanModeMCPTrustDeclined:               "用户拒绝信任这个 MCP 只读提示；不要重试它，请继续使用其它已信任的只读工具，或询问用户希望如何继续。",
+	PlanModeBashTrustSubjectFmt:            "在计划模式中信任 %q 为只读命令前缀\n命令：%s",
+	PlanModeBashTrustReason:                "这条 bash 命令不在 Reasonix 内置只读集合中。只有在确认这个精确前缀用于计划和研究时是只读的，才应批准。自动/YOLO 审批不能回答这个信任提示。",
+	PlanModeBashTrustDeclined:              "用户拒绝将这条 bash 命令信任为计划模式只读命令；不要重试它，请继续使用其它已信任的只读工具，或询问用户希望如何继续。",
+	SandboxEscapeSubjectFallback:           "仅本次不进沙箱运行 shell 命令",
+	SandboxEscapeSubjectPrefix:             "仅本次不进沙箱运行：",
+	SandboxEscapeWrapReason:                "Windows 沙箱无法包装这条命令。是否仅本次不进 OS 沙箱运行？这会只对此命令绕过 OS 沙箱。",
+	SandboxEscapeRuntimeReason:             "Windows 沙箱启动这条命令时失败。是否仅本次不进 OS 沙箱运行？这会只对此命令绕过 OS 沙箱。",
+	SandboxEscapeDeclined:                  "用户拒绝在没有 OS 沙箱的情况下运行这条命令；不要不进沙箱重试，请询问用户希望如何继续。",
 	PermissionSavedFmt:                     "授权已保存到 %s：%s",
 	PermissionAlreadyAllowedFmt:            "授权已由 %s 中的规则覆盖：%s",
 	PermissionSaveFailedFmt:                "保存授权 %s 失败：%v",
@@ -392,8 +421,8 @@ var Chinese = Messages{
 	UsageBody: `reasonix — 由配置和插件驱动的 coding agent（多模型）
 
 用法：
-  reasonix [--model NAME] [-c|--continue] [--resume] [--yolo] [--dir PATH]   交互式会话（多轮；-c 恢复最近一次，--resume 选择一个）
-  reasonix run  [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] <task>   执行单次任务后退出
+  reasonix [--model NAME] [-c|--continue] [--resume] [--copy] [--yolo] [--dir PATH]   交互式会话（多轮；-c 恢复最近一次，--resume 选择一个，--copy 在副本中继续）
+  reasonix run  [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] [--copy] <task>   执行单次任务后退出
   reasonix review [--base BRANCH] [--commit SHA] [--model NAME]  AI 代码审查（基于本地 diff）
   reasonix serve [--model NAME] [--addr HOST:PORT] [--auth none|token|password] [--token STR] [--password STR] [--hash-password]  通过 HTTP+SSE 提供服务（支持可选认证）
   reasonix acp [--model NAME]                           通过 stdio 提供 Agent Client Protocol（也可用：reasonix --acp）

@@ -15,6 +15,17 @@ location.
 Set `REASONIX_HOME` to override Reasonix home for tests, CI, or portable
 installations. Normal users should not need it.
 
+When `REASONIX_HOME` is set, the runtime is fully self-contained: all
+configuration, state, cache, and data live under that directory tree. Legacy
+migration, OS-home convention directory scanning, and all other fallback paths
+are skipped so no data leaks in from a system-wide production install.
+
+Advanced test and portable setups may set `REASONIX_STATE_HOME` to move runtime
+state such as sessions, archives, and memory. It does not move global config or
+provider credentials: those remain under `REASONIX_HOME`. If an older build wrote
+provider keys to `REASONIX_STATE_HOME/.env`, Reasonix imports those keys
+non-destructively when `<Reasonix home>/.env` is missing them.
+
 ## What Lives There
 
 | Data | Path |
@@ -26,9 +37,12 @@ installations. Normal users should not need it.
 | Global skills | `<Reasonix home>/skills/` |
 | Global hooks | `<Reasonix home>/settings.json` |
 | Hook trust store | `<Reasonix home>/trust.json` |
-| Sessions | `<Reasonix home>/sessions/` |
-| Archives | `<Reasonix home>/archive/` |
-| Memory | `<Reasonix home>/memory/` and `<Reasonix home>/projects/` |
+| Sessions | `<state root>/sessions/` |
+| Archives | `<state root>/archive/` |
+| Memory | `<state root>/memory/` and `<state root>/projects/` |
+
+`<state root>` defaults to `<Reasonix home>`. It only differs when
+`REASONIX_STATE_HOME` is set.
 
 The global user config is named `config.toml`. Project-local config files keep
 the name `reasonix.toml`. If someone says "global reasonix.toml", they usually
@@ -165,7 +179,9 @@ into the process environment, and Reasonix control variables such as
 Caches remain in the OS cache directory, for example
 `~/Library/Caches/reasonix` on macOS, `$XDG_CACHE_HOME/reasonix` or
 `~/.cache/reasonix` on Linux, and `%LOCALAPPDATA%\reasonix\cache` on Windows.
-Set `REASONIX_CACHE_HOME` to override the cache root.
+Set `REASONIX_CACHE_HOME` to override the cache root. When `REASONIX_HOME` is
+set, the cache is placed under `$REASONIX_HOME/cache` (unless
+`REASONIX_CACHE_HOME` is also set, which takes precedence).
 
 ## Config Priority
 

@@ -660,6 +660,9 @@ func legacyReasonixHome(override string) string {
 	if override != "" {
 		return ""
 	}
+	if config.IsolatedHomeDir() != "" {
+		return ""
+	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return ""

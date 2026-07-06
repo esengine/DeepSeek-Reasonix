@@ -27,6 +27,8 @@ const probeCacheTTL = 5 * time.Minute
 
 const maxRenderedTools = 24
 
+var probeTimeout = ProbeTimeout
+
 type probeCacheEntry struct {
 	storedAt time.Time
 	results  []ProbeResult
@@ -207,7 +209,7 @@ func runOne(ctx context.Context, command string, opts ProbeOptions) ProbeResult 
 		res.Error = "not trusted"
 		return res
 	}
-	cmdCtx, cancel := context.WithTimeout(ctx, ProbeTimeout)
+	cmdCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(cmdCtx, exe, parts[1:]...)
 	if len(probe.Env) > 0 {

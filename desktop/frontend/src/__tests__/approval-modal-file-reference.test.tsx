@@ -54,7 +54,7 @@ async function waitFor(label: string, predicate: () => boolean, timeoutMs = 1000
   ok(false, label);
 }
 
-function installDom() {
+function installDom(language = "en-US") {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -62,6 +62,7 @@ function installDom() {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   globalThis.window = dom.window as unknown as Window & typeof globalThis;
   globalThis.document = dom.window.document;
+  Object.defineProperty(dom.window.navigator, "language", { configurable: true, value: language });
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
   globalThis.Node = dom.window.Node;
   globalThis.Element = dom.window.Element;
@@ -129,7 +130,7 @@ async function renderApproval(props: Partial<Parameters<typeof ApprovalModal>[0]
 console.log("\napproval modal file references");
 
 {
-  const dom = installDom();
+  const dom = installDom("en-US");
   mockApp({
     ListDir: async () => [{ name: "src", isDir: true }, { name: "README.md", isDir: false }],
     SearchFileRefs: async () => [],
@@ -171,6 +172,86 @@ console.log("\napproval modal file references");
   });
 
   eq(revisions.join(","), "please inspect @README.md", "submitted plan revision keeps the selected file reference");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom("zh-CN");
+  mockApp({
+    ListDir: async () => [],
+    SearchFileRefs: async () => [],
+  });
+  const { root } = await renderApproval({
+    approval: {
+      id: "sandbox-escape-approval-zh",
+      tool: "sandbox_escape",
+      subject: "run unconfined once: go test ./...",
+      reason: "Windows sandbox failed while starting this command. Run it unconfined one time? This bypasses the OS sandbox for this command only.",
+    },
+  });
+
+  const text = document.body.textContent ?? "";
+  ok(text.includes("仅本次不进沙箱运行：go test ./..."), "sandbox escape approval localizes subject in Chinese UI");
+  ok(text.includes("Windows 沙箱启动这条命令时失败"), "sandbox escape approval localizes English backend reason in Chinese UI");
+  ok(text.includes("允许一次"), "sandbox escape Chinese approval shows allow once");
+  ok(text.includes("本会话使用真实环境"), "sandbox escape Chinese approval shows session grant");
+  ok(text.includes("拒绝"), "sandbox escape Chinese approval shows deny");
+  ok(!text.includes("总是允许"), "sandbox escape Chinese approval hides persistent grant");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom("zh-CN");
+  mockApp({
+    ListDir: async () => [],
+    SearchFileRefs: async () => [],
+  });
+  const { root } = await renderApproval({
+    approval: {
+      id: "memory-approval-zh",
+      tool: "remember",
+      subject: "Save/update memory \"prefers-vitest\" [user]: Preferred test framework | body: Use Vitest for frontend tests.",
+    },
+  });
+
+  const text = document.body.textContent ?? "";
+  ok(text.includes("保存记忆"), "remember approval localizes tool label in Chinese UI");
+  ok(text.includes("保存/更新记忆 \"prefers-vitest\" [user]"), "remember approval localizes subject prefix in Chinese UI");
+  ok(text.includes("正文: Use Vitest for frontend tests."), "remember approval localizes body label in Chinese UI");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom("zh-CN");
+  mockApp({
+    ListDir: async () => [],
+    SearchFileRefs: async () => [],
+  });
+  const { root } = await renderApproval({
+    approval: {
+      id: "plan-mode-read-only-command-zh",
+      tool: "plan_mode_read_only_command",
+      subject: "Trust \"gh issue view\" as a read-only command prefix while planning\nCommand: gh issue view 5867 --json title",
+      reason: "This bash command is not in Reasonix's built-in read-only set. Confirm only if this exact prefix is read-only for planning and research. Auto/YOLO approval cannot answer this trust prompt.",
+    },
+  });
+
+  const text = document.body.textContent ?? "";
+  ok(text.includes("计划模式只读命令"), "plan-mode read-only command approval localizes tool label in Chinese UI");
+  ok(text.includes("在计划模式中信任 \"gh issue view\" 为只读命令前缀"), "plan-mode read-only command approval localizes subject in Chinese UI");
+  ok(text.includes("不在 Reasonix 内置只读集合中"), "plan-mode read-only command approval localizes reason in Chinese UI");
 
   await act(async () => {
     root.unmount();
@@ -260,8 +341,8 @@ console.log("\napproval modal file references");
   ok(!text.includes("Always allow"), "fresh-human approval hides persistent grant");
   eq(
     Array.from(document.querySelectorAll(".prompt-shelf__actions button")).map((button) => button.textContent).join("|"),
-    "1Allow once|4Deny",
-    "fresh-human approval keeps allow/deny shortcut keys",
+    "1Allow once|2Deny",
+    "fresh-human approval keeps conventional allow/deny shortcut keys",
   );
 
   const allowButton = Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.includes("Allow once")) as HTMLButtonElement | undefined;
@@ -273,6 +354,109 @@ console.log("\napproval modal file references");
   });
 
   eq(JSON.stringify(answers), JSON.stringify([[true, false, false]]), "fresh-human approval allows only once");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  mockApp({
+    ListDir: async () => [],
+    SearchFileRefs: async () => [],
+  });
+  const answers: Array<[boolean, boolean, boolean]> = [];
+  const { root } = await renderApproval({
+    approval: {
+      id: "memory-approval-deny",
+      tool: "remember",
+      subject: "Save/update memory \"prefers-vitest\": Preferred test framework",
+    },
+    onAnswer: (allow, session, persist) => answers.push([allow, session, persist]),
+  });
+
+  await act(async () => {
+    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "2", bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+
+  eq(JSON.stringify(answers), JSON.stringify([[false, false, false]]), "fresh-human numeric 2 denies");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  mockApp({
+    ListDir: async () => [],
+    SearchFileRefs: async () => [],
+  });
+  const answers: Array<{ allow: boolean; session: boolean; persist: boolean }> = [];
+  const { root } = await renderApproval({
+    approval: {
+      id: "sandbox-escape-approval",
+      tool: "sandbox_escape",
+      subject: "run unconfined once: go test ./...",
+      reason: "Windows sandbox failed while starting this command. Run it unconfined one time? This bypasses the OS sandbox for this command only.",
+    },
+    onAnswer: (allow, session, persist) => answers.push({ allow, session, persist }),
+  });
+
+  const text = document.body.textContent ?? "";
+  ok(text.includes("bash sandbox escape"), "sandbox escape approval uses a clear tool label");
+  ok(text.includes("Allow once"), "sandbox escape approval shows allow once");
+  ok(text.includes("Use real environment for this session"), "sandbox escape approval shows session grant");
+  ok(text.includes("Deny"), "sandbox escape approval shows deny");
+  ok(!text.includes("Always allow"), "sandbox escape approval hides persistent grant");
+  eq(
+    Array.from(document.querySelectorAll(".prompt-shelf__actions button")).map((button) => button.textContent).join("|"),
+    "1Allow once|2Use real environment for this session|3Deny",
+    "sandbox escape approval keeps conventional allow once/session/deny shortcut keys",
+  );
+
+  await act(async () => {
+    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  await act(async () => {
+    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  eq(JSON.stringify(answers), JSON.stringify([{ allow: true, session: true, persist: false }]), "sandbox escape Enter on selected session action grants session");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  mockApp({
+    ListDir: async () => [],
+    SearchFileRefs: async () => [],
+  });
+  const answers: Array<{ allow: boolean; session: boolean; persist: boolean }> = [];
+  const { root } = await renderApproval({
+    approval: {
+      id: "sandbox-escape-deny-approval",
+      tool: "sandbox_escape",
+      subject: "run unconfined once: go test ./...",
+      reason: "Windows sandbox failed while starting this command. Run it unconfined one time? This bypasses the OS sandbox for this command only.",
+    },
+    onAnswer: (allow, session, persist) => answers.push({ allow, session, persist }),
+  });
+
+  await act(async () => {
+    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "3", bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  eq(JSON.stringify(answers), JSON.stringify([{ allow: false, session: false, persist: false }]), "sandbox escape numeric 3 denies");
 
   await act(async () => {
     root.unmount();

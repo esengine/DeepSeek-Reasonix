@@ -1083,3 +1083,128 @@ func TestRenderTOMLDefaultStepsDoNotOverrideGlobalConfig(t *testing.T) {
 		t.Errorf("after project: max_steps = %d, want 100 (global should not be overridden by commented-out default)", cfg.Agent.MaxSteps)
 	}
 }
+
+func TestIsolatedHomeDirEmptyByDefault(t *testing.T) {
+	t.Setenv("REASONIX_HOME", "")
+	if got := IsolatedHomeDir(); got != "" {
+		t.Fatalf("IsolatedHomeDir() = %q, want empty", got)
+	}
+}
+
+func TestIsolatedHomeDirReturnsCleanPath(t *testing.T) {
+	raw := filepath.Join(t.TempDir(), "isolated-reasonix")
+	t.Setenv("REASONIX_HOME", raw)
+	got := IsolatedHomeDir()
+	if filepath.Clean(got) != filepath.Clean(raw) {
+		t.Fatalf("IsolatedHomeDir() = %q, want %q", got, raw)
+	}
+}
+
+func TestLegacyOSSupportDirEmptyWhenIsolated(t *testing.T) {
+	isolateUserConfigHome(t)
+	t.Setenv("REASONIX_HOME", filepath.Join(t.TempDir(), "isolated-home"))
+	if got := legacyOSSupportDir(); got != "" {
+		t.Fatalf("legacyOSSupportDir() = %q, want empty when isolated", got)
+	}
+}
+
+func TestLegacyXDGConfigPathsEmptyWhenIsolated(t *testing.T) {
+	isolateUserConfigHome(t)
+	t.Setenv("REASONIX_HOME", filepath.Join(t.TempDir(), "isolated-home"))
+	if got := legacyXDGConfigPaths(); got != nil {
+		t.Fatalf("legacyXDGConfigPaths() = %v, want nil when isolated", got)
+	}
+}
+
+func TestCacheDirHonorsReasonixHome(t *testing.T) {
+	home := t.TempDir()
+	isolated := filepath.Join(home, "isolated-home")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("REASONIX_HOME", isolated)
+
+	got := CacheDir()
+	want := filepath.Join(isolated, "cache")
+	if filepath.Clean(got) != filepath.Clean(want) {
+		t.Fatalf("CacheDir() = %q, want %q", got, want)
+	}
+}
+
+func TestCacheDirHonorsReasonixCacheHomeOverReasonixHome(t *testing.T) {
+	home := t.TempDir()
+	cacheHome := filepath.Join(home, "custom-cache")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("REASONIX_HOME", filepath.Join(home, "isolated-home"))
+	t.Setenv("REASONIX_CACHE_HOME", cacheHome)
+
+	got := CacheDir()
+	want := cacheHome
+	if filepath.Clean(got) != filepath.Clean(want) {
+		t.Fatalf("CacheDir() = %q, want %q (REASONIX_CACHE_HOME must win)", got, want)
+	}
+}
+
+func TestUserConfigLoadPathNoLegacyFallbackWhenIsolated(t *testing.T) {
+	home := isolateUserConfigHome(t)
+	isolated := filepath.Join(home, "isolated-home")
+	t.Setenv("REASONIX_HOME", isolated)
+
+	// Create a legacy config at the OS production path — it must not be loaded.
+	productionHome := expectedDefaultReasonixHome(home)
+	if err := os.MkdirAll(productionHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(productionHome, "config.toml"), []byte("default_model = \"production/model\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The primary config under isolated home does not exist yet.
+	got := userConfigLoadPath()
+	want := filepath.Join(isolated, "config.toml")
+	if filepath.Clean(got) != filepath.Clean(want) {
+		t.Fatalf("userConfigLoadPath() = %q, want %q (must not fall back to production legacy config)", got, want)
+	}
+}
+
+func TestCredentialSourceCandidatesSkipHomeEnvWhenIsolated(t *testing.T) {
+	isolateUserConfigHome(t)
+	t.Setenv("REASONIX_HOME", filepath.Join(t.TempDir(), "isolated-home"))
+
+	// Write a key into the production home .env — it must not appear as a source.
+	if home, err := os.UserHomeDir(); err == nil {
+		if err := os.WriteFile(filepath.Join(home, ".env"), []byte("LEAKED_KEY=leaked-value\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	candidates := credentialSourceCandidates(".")
+	for _, c := range candidates {
+		if c.Kind == CredentialSourceHomeEnv {
+			t.Fatalf("credentialSourceCandidates includes CredentialSourceHomeEnv when isolated: %v", c)
+		}
+	}
+}
+
+func TestMigrateLegacyIfNeededSkipsWhenIsolated(t *testing.T) {
+	home := isolateUserConfigHome(t)
+	isolated := filepath.Join(home, "isolated-home")
+	t.Setenv("REASONIX_HOME", isolated)
+
+	// Create a legacy config.json in production home — migration must skip it.
+	legacyDir := filepath.Join(home, ".reasonix")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "config.json"), []byte(`{"model":"production-model","apiKey":"sk-legacy"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := MigrateLegacyIfNeeded()
+	if err != nil {
+		t.Fatalf("MigrateLegacyIfNeeded() error = %v", err)
+	}
+	if res != nil {
+		t.Fatalf("MigrateLegacyIfNeeded() = %+v, want nil when isolated", res)
+	}
+}

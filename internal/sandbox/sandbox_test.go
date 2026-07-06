@@ -43,6 +43,19 @@ func TestSpecZeroValue(t *testing.T) {
 	}
 }
 
+func TestUnavailableMessageIsActionable(t *testing.T) {
+	msg := UnavailableMessage()
+	for _, want := range []string{
+		"refusing to run unconfined",
+		`[sandbox] bash = "off"`,
+		"Settings -> Sandbox",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("UnavailableMessage() = %q, want %q", msg, want)
+		}
+	}
+}
+
 // --- Command ---
 
 func TestCommandNonEnforce(t *testing.T) {
@@ -301,6 +314,9 @@ func TestCommandDarwinNonEnforce(t *testing.T) {
 func TestAvailableNonDarwin(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("testing non-darwin path")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("windows has its own helper-backed sandbox availability")
 	}
 	_, err := exec.LookPath("bwrap")
 	if Available() != (err == nil) {

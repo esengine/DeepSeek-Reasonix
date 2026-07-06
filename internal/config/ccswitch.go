@@ -49,6 +49,9 @@ func LoadCCSwitchMCPCandidates() ([]MCPImportCandidate, error) {
 // them to Reasonix plugin entries. Newer cc-switch stores servers in SQLite;
 // older installs kept them in config.json(.migrated/.bak), so we support both.
 func LoadCCSwitchMCP() ([]PluginEntry, error) {
+	if IsolatedHomeDir() != "" {
+		return nil, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("cc-switch import: resolve home: %w", err)

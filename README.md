@@ -131,6 +131,8 @@ commands, `@` references, and two-model setup are all in the
   from the desktop app, then use approvals, YOLO, and commands from IM.
 - **[Spec](./docs/SPEC.md)** — engineering contract: architecture, registries,
   data types, and roadmap.
+- **[Task contracts & pause policy](./docs/TASK_CONTRACT.md)** — structure
+  complex requests with context, output boundaries, constraints, and when to ask.
 - **[Tool contract](./docs/TOOL_CONTRACT.md)** — provider-visible built-in tool
   names, read-only flags, and schema snapshot guard.
 - **[Migrating from 0.x](./docs/MIGRATING.md)** — moving from the legacy

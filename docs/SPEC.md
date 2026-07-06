@@ -362,7 +362,17 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   model reports completion, repeats the same blocked state three times, the user
   stops it, or the safety continuation limit is reached. Blocked-state matching
   is normalized for casing, whitespace, and punctuation so minor wording drift
-  does not reset the audit; restarting a goal begins a fresh blocked audit.
+  does not reset the audit; restarting a goal begins a fresh blocked audit. A
+  goal is treated as a task contract: if the objective includes Context,
+  Request, Output format, Constraints, or Pause policy sections, those sections
+  define the autonomous work boundary. When they are absent, the model infers a
+  lightweight contract from the conversation and workspace. The injected goal
+  block tells the model to pause only for irreversible or externally visible
+  operations, scope changes, or information only the user can provide; ordinary
+  uncertainty should be handled with sensible defaults and reported as an
+  assumption. Completion requires the concrete request, output format,
+  constraints, and relevant verification expectations to be satisfied or
+  explicitly reported as unverified.
   Goals that look like long-horizon research, debugging, optimization, or
   implementation work automatically add an AutoResearch protocol to the same
   transient active-goal user block. AutoResearch is a Goal strategy, not a
@@ -646,12 +656,34 @@ not read, list, or search; entries support `${VAR}` / `${VAR:-default}` expansio
 and should be absolute, or use `${HOME}` for home-relative secrets such as
 `${HOME}/.ssh`. `bash` is itself jailed by default when an OS sandbox is
 available (`[sandbox] bash = "enforce"`: Seatbelt on macOS, bubblewrap on
-Linux): each command is allowed to write only the same roots (+ temp and
-toolchain caches), denied reads under `forbid_read`, and allowed to reach the
-network only when `network = true`.
+Linux, and a native helper on Windows): each command is allowed to write only
+the same roots plus platform-specific command temp/cache roots, denied reads
+under `forbid_read`, and allowed to reach the network only when
+`network = true`.
+The native Windows helper delegates the low-level isolation to
+`github.com/SivanCola/windows-sandbox`: AppContainer for read-only commands and
+a low-integrity token for writable commands, with temporary ACL grants for
+writable roots and tool executables, a per-command temp root instead of mutating
+the global Temp directory, temporary deny ACEs for `forbid_read` (files and
+directories), best-effort restoration from pre-run DACL snapshots for touched
+directories, and a kill-on-close Job Object. Because the sandbox works by
+temporarily mutating shared-path ACLs and integrity labels, concurrent commands
+against the same root are serialized with a per-root lock, and residue from a
+force-killed command (a lingering low-integrity label or `forbid_read` deny ACE)
+is swept by the next run so a crash cannot durably lower a workspace's integrity
+or lock the user out of a `forbid_read` path. A writable command runs under a
+low-integrity token, so beyond the configured roots it retains write access to
+the narrow set of locations Windows leaves writable to any low-integrity process
+(e.g. `AppData\LocalLow`); the workspace boundary and `forbid_read` denials are
+unaffected. Read-only AppContainer commands omit network capabilities when
+networking is disabled; writable Windows commands fail closed when
+`network = false` because the low-integrity token does not provide a reliable
+per-process network block without elevated firewall/WFP setup.
 When no OS sandbox is available, `bash = "enforce"` refuses bash execution
-instead of running unconfined. The escape-prompt and broader OS support are Phase
-1's remainder (§9).
+instead of running unconfined. Install the platform sandbox backend
+(bubblewrap/`bwrap` on Linux, `sandbox-exec` on macOS) or set
+`[sandbox] bash = "off"` to explicitly restore the pre-1.16 unconfined shell
+behavior. The escape-prompt and broader OS support are Phase 1's remainder (§9).
 
 ## 6. Error Handling
 
@@ -679,14 +711,15 @@ instead of running unconfined. The escape-prompt and broader OS support are Phas
 
 - Sandbox Phase 1: an OS-level jail for `bash` so commands — not just the
   file-writer built-ins (Phase 0) — are confined to the workspace. **Seatbelt on
-  macOS and bubblewrap on Linux ship, on by default when available** (see §5).
+  macOS, bubblewrap on Linux, and a native Windows helper ship, on by default
+  when available** (see §5).
   Remaining: (a)
   the escape-prompt — detect sandbox-unavailable or sandbox-denied failures and
   offer an explicit, permission-gated unconfined rerun (in `reasonix run`, the
   command just fails and the model adapts), which completes the "allow inside the
-  box, prompt at its edge" model; (b) broader OS sandbox support beyond current
-  Seatbelt/bubblewrap hosts. Shells out to OS tooling so the binary stays
-  dependency-free. With this in
+  box, prompt at its edge" model; (b) an optional elevated Windows backend with a
+  dedicated sandbox user for enterprise hardening. Shells out to OS tooling so
+  the binary stays dependency-free. With this in
   place, "always allow" rule persistence becomes optional rather than load-bearing.
 - MCP long tail (deferred deliberately — no consumer / no foundation yet): OAuth
   2.0 + `headersHelper` auth for remote servers; the remaining `.mcp.json` scopes

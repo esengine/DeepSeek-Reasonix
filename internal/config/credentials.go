@@ -482,8 +482,10 @@ func credentialSourceCandidates(root string) []CredentialSource {
 	if p := UserCredentialsPath(); p != "" {
 		out = append(out, CredentialSource{Kind: CredentialSourceCredentials, Path: p})
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		out = append(out, CredentialSource{Kind: CredentialSourceHomeEnv, Path: filepath.Join(home, ".env")})
+	if IsolatedHomeDir() == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			out = append(out, CredentialSource{Kind: CredentialSourceHomeEnv, Path: filepath.Join(home, ".env")})
+		}
 	}
 	return out
 }

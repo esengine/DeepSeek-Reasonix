@@ -141,7 +141,7 @@ var syntheticPrefixes = []string{
 	"<compaction-summary>",
 	"Summary of the later conversation (compacted from here on):",
 	"Summary of earlier conversation (compacted up to here):",
-	"Continue pursuing the active goal.",
+	"Continue pursuing the active goal",
 	"The agent signaled goal completion and all tasks are marked done.",
 	"Goal signaled complete but issues remain:",
 	"No tool calls in recent turns.",
@@ -338,7 +338,7 @@ func activeGoalBlock(goal string, researchMode GoalResearchMode) string {
 	b.WriteString("\n")
 	b.WriteString(goal)
 	b.WriteString("\n\n")
-	b.WriteString("Goal mode: pursue this goal autonomously. Keep working across turns until the goal is complete. Prefer sensible defaults over asking the user; use ask only when you are truly blocked on a user-owned decision. Do not stop after describing a plan; execute the next useful step. End every goal-mode assistant reply with exactly one status marker on its own line: [goal:continue], [goal:complete], or [goal:blocked:<short reason>].")
+	b.WriteString(goalTaskContractInstructions)
 	if shouldUseAutoResearch(goal, researchMode) {
 		b.WriteString("\n\n")
 		b.WriteString(autoResearchGoalInstructions)
@@ -347,6 +347,14 @@ func activeGoalBlock(goal string, researchMode GoalResearchMode) string {
 	b.WriteString(activeGoalClose)
 	return b.String()
 }
+
+const goalTaskContractInstructions = `Goal mode: pursue this goal autonomously. Treat the user's goal as a task contract:
+- Honor Context, Request, Output format, Constraints, and Checkpoint/Pause policy sections when present; otherwise infer a lightweight contract from the conversation and workspace.
+- Preserve scope and output format. Do not invent requirements or hide uncertainty; state assumptions when sensible defaults are enough to proceed.
+- Pause only when the next step involves an irreversible or externally visible operation, the requested scope has changed, or progress requires information only the user can provide. Otherwise keep working and report assumptions at the end.
+- Complete only when the concrete request is done, the output format and constraints are satisfied, and relevant verification was attempted or reported unavailable.
+
+Do not stop after describing a plan; execute the next useful step. End every goal-mode assistant reply with exactly one status marker on its own line: [goal:continue], [goal:complete], or [goal:blocked:<short reason>].`
 
 const autoResearchGoalInstructions = `AutoResearch protocol: this goal looks like long-horizon research, debugging, optimization, or implementation work. Treat AutoResearch as a durable strategy for this Goal, not as a background daemon or a global skill.
 - Say briefly in the first visible reply that the goal is being handled with AutoResearch and that host-owned state lives under .reasonix/autoresearch/<task-id>/, using the actual task_id from <autoresearch-runtime>.
