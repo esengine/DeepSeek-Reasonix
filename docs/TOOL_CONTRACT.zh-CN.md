@@ -21,6 +21,7 @@
 | `multi_edit` | false | 对单个文件原子应用多个编辑。 |
 | `notebook_edit` | false | 编辑 Jupyter notebook 的单个 cell。 |
 | `read_file` | true | 按可分页的行号格式读取文本文件。 |
+| `regex_replace` | false | 使用 Go RE2 正则表达式替换文件中的文本。支持捕获组引用（$1、${name}）和可选标志（i=忽略大小写, m=多行, s=dotall, U=非贪婪）。返回 unified diff。需要模式匹配而非精确字符串时优先使用。 |
 | `todo_write` | true | 记录并替换当前工作的结构化任务列表。 |
 | `wait` | true | 等待后台 job 完成并返回最终输出。 |
 | `web_fetch` | true | 通过 HTTP/HTTPS 获取 URL 文本内容。 |

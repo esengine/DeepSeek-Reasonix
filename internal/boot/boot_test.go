@@ -1336,6 +1336,7 @@ func defaultFullBootToolNames() []string {
 		"read_only_task",
 		"read_session",
 		"read_skill",
+		"regex_replace",
 		"remember",
 		"research",
 		"review",
@@ -1623,7 +1624,7 @@ model = "x"
 	for _, forbidden := range []string{
 		"connect_tool_source", "task", "parallel_tasks",
 		"install_source", "run_skill", "install_skill", "remember", "forget",
-		"write_file", "edit_file", "multi_edit", "move_file", "complete_step",
+		"write_file", "edit_file", "multi_edit", "move_file", "regex_replace", "complete_step",
 	} {
 		if requestHasTool(subReq, forbidden) {
 			t.Fatalf("read_only_task child request should hide %q; tools=%v", forbidden, toolSchemaNames(subReq.Tools))
@@ -1705,7 +1706,7 @@ READ ONLY SKILL BODY`)
 	for _, forbidden := range []string{
 		"connect_tool_source", "task", "read_only_task", "parallel_tasks",
 		"install_source", "run_skill", "install_skill", "remember", "forget",
-		"write_file", "edit_file", "multi_edit", "move_file", "complete_step",
+		"write_file", "edit_file", "multi_edit", "move_file", "regex_replace", "complete_step",
 	} {
 		if requestHasTool(subReq, forbidden) {
 			t.Fatalf("read_only_skill child request should hide %q; tools=%v", forbidden, toolSchemaNames(subReq.Tools))

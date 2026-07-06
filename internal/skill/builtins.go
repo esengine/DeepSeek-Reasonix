@@ -167,6 +167,43 @@ Don't: install/update dependencies without asking; skip/delete/disable failing t
 
 Lead each turn with a one-line status (e.g. "▸ running go test ./… ", "▸ 2 failures in foo_test.go — first is …") so the user always knows where you are.`
 
+const builtinRegexReplaceBody = `This skill is INLINED — you run in the parent loop. The user asked you to replace text in a file using regex pattern matching. Use the regex_replace tool to perform find-and-replace with regular expressions.
+
+When to use regex_replace instead of edit_file / multi_edit:
+- You need pattern matching, not an exact string: e.g. "rename every foo* identifier" or "replace all TODO comments with FIXME".
+- You need capture-group references in the replacement ($1, $2, ${name}).
+- The target text varies slightly across occurrences (whitespace, casing) and exact matching would require many individual edits.
+
+When NOT to use it:
+- Simple exact-string replacement → edit_file or multi_edit (they are simpler and safer).
+- Full file rewrite → write_file.
+- Deleting a large contiguous block by line anchors → delete_range.
+
+How to operate:
+1. Read the file first (read_file) so you know the current content and can craft a correct pattern.
+2. Call regex_replace with:
+   - path: the target file.
+   - pattern: a Go RE2 regular expression.
+   - replacement: the replacement text. Supports $1–$9 for capture groups, ${name} for named groups, and $$ for a literal $. An empty string deletes the matched text.
+   - flags (optional): combine i (case-insensitive), m (multiline — ^ and $ match line boundaries), s (dotall — . matches \n), U (ungreedy — non-greedy by default). Default is no flags.
+   - all (optional, default true): set false to replace only the first match.
+3. Read the file again to verify the result is what you intended.
+
+RE2 syntax notes (Go regex engine — NOT PCRE):
+- No lookbehind or lookahead assertions.
+- No backreferences in the pattern (\1). Capture groups are for use in the replacement only.
+- Named groups: (?P<name>pattern) or (?<name>pattern).
+- Character classes, alternation, anchors, quantifiers — all standard.
+- The default . does NOT match \n; add the s flag for cross-line matching.
+
+Safety:
+- Regex replacement is destructive. Always read first, and verify after.
+- A too-broad pattern can match unintended text — prefer specific patterns with anchors or character class boundaries.
+- If the replacement is identical to the matched text, the tool returns an error (no change) — this is a safety check, not a bug.
+- The tool preserves the original file encoding (UTF-8, UTF-16, GBK, BOM) automatically.
+
+Lead each turn with a one-line status (e.g. "▸ replacing all foo* identifiers in api.go").`
+
 const builtinInitBody = `This skill is INLINED — you run in the parent loop. The user invoked /init: bootstrap (or refresh) this project's AGENTS.md — the durable memory file folded into every future session. Analyze the codebase, then write a concise, high-signal AGENTS.md.
 
 How to operate:
@@ -340,6 +377,14 @@ func builtinSkills() []Skill {
 			Name:        "test",
 			Description: "Run the project's test suite, diagnose failures, propose+apply fixes, re-run until green (or stop after 2 attempts on the same failure). Inlined — runs in the parent loop. Detects go/npm/pnpm/yarn/pytest/cargo.",
 			Body:        builtinTestBody,
+			Scope:       ScopeBuiltin,
+			Path:        "(builtin)",
+			RunAs:       RunInline,
+		},
+		{
+			Name:        "regex-replace",
+			Description: "Replace text in a single file using regex pattern matching with capture-group support ($1, ${name}). Best for bulk renames, format normalization, pattern-based extraction. Inlined.",
+			Body:        builtinRegexReplaceBody,
 			Scope:       ScopeBuiltin,
 			Path:        "(builtin)",
 			RunAs:       RunInline,

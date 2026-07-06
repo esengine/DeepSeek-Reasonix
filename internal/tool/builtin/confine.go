@@ -48,6 +48,7 @@ func ConfineWriters(roots []string) []tool.Tool {
 		notebookEdit{roots: rs},
 		deleteRange{roots: rs},
 		deleteSymbol{roots: rs},
+		regexReplace{roots: rs},
 	}
 }
 

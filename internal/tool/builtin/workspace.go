@@ -52,6 +52,7 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 		"write_file":    writeFile{workDir: w.Dir, roots: roots},
 		"edit_file":     editFile{workDir: w.Dir, roots: roots},
 		"multi_edit":    multiEdit{workDir: w.Dir, roots: roots},
+		"regex_replace": regexReplace{workDir: w.Dir, roots: roots},
 		"move_file":     moveFile{workDir: w.Dir, roots: roots},
 		"notebook_edit": notebookEdit{workDir: w.Dir, roots: roots},
 		"delete_range":  deleteRange{workDir: w.Dir, roots: roots},
