@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,7 +35,25 @@ func writeHookTestFile(t *testing.T, path, body string) {
 	}
 }
 
+func requireNode(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not available")
+	}
+}
+
 const sampleSettings = `{"hooks":{"PreToolUse":[{"match":"bash","command":"echo pre"}],"Stop":[{"command":"echo stop"}]}}`
+
+func hookSettingsWithCommand(t *testing.T, event Event, command string) string {
+	t.Helper()
+	body, err := json.Marshal(Settings{Hooks: map[Event][]HookConfig{
+		event: []HookConfig{{Match: "bash", Command: command}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
 
 func TestLoadTrustGating(t *testing.T) {
 	home := t.TempDir()
@@ -53,6 +73,104 @@ func TestLoadTrustGating(t *testing.T) {
 	}
 	if got[0].Scope != ScopeProject {
 		t.Errorf("project hooks should sort first, got %s", got[0].Scope)
+	}
+}
+
+func TestLoadNormalizesQuotedNodeEvalHooksPerProject(t *testing.T) {
+	requireNode(t)
+
+	home := t.TempDir()
+	projA := t.TempDir()
+	projB := t.TempDir()
+	script := "const payload = JSON.parse(require('fs').readFileSync(0, 'utf8')); console.log(payload.toolName)"
+	bad := `node -e "\"` + script + `\""`
+	want := NormalizeCommand(bad)
+	if want == bad {
+		t.Fatal("test command did not normalize")
+	}
+	writeSettings(t, projA, hookSettingsWithCommand(t, PreToolUse, bad))
+	writeSettings(t, projB, hookSettingsWithCommand(t, PreToolUse, bad))
+
+	for _, project := range []string{projA, projB, projB} {
+		hooks := Load(LoadOptions{HomeDir: home, ProjectRoot: project, Trusted: true})
+		if len(hooks) != 1 {
+			t.Fatalf("Load(%q) hooks = %+v, want one", project, hooks)
+		}
+		if hooks[0].Command != want {
+			t.Fatalf("Load(%q) command = %q, want %q", project, hooks[0].Command, want)
+		}
+		rep := Run(context.Background(), Payload{Event: PreToolUse, Cwd: project, ToolName: "bash"}, hooks, nil)
+		if len(rep.Outcomes) != 1 || rep.Outcomes[0].Decision != DecisionPass || rep.Outcomes[0].Stdout != "bash" {
+			t.Fatalf("normalized hook outcome = %+v, want pass with bash stdout", rep)
+		}
+	}
+}
+
+func TestNormalizeCommandRepairsOnlyStdinNodeEvalQuoting(t *testing.T) {
+	script := "const payload = JSON.parse(require('fs').readFileSync(0, 'utf8')); console.log(payload.toolName)"
+	doubleQuoteScript := `const payload = JSON.parse(require(\"fs\").readFileSync(0, \"utf8\")); console.log(payload.toolName)`
+	tests := []struct {
+		name    string
+		command string
+		repair  bool
+	}{
+		{
+			name:    "quoted script argument",
+			command: `node -e "\"` + script + `\""`,
+			repair:  true,
+		},
+		{
+			name:    "json escaped shell quotes",
+			command: `node -e \"` + script + `\"`,
+			repair:  true,
+		},
+		{
+			name:    "json escaped shell and script quotes",
+			command: `node -e \"` + doubleQuoteScript + `\"`,
+			repair:  true,
+		},
+		{
+			name:    "normal hook command",
+			command: `node -e "` + script + `"`,
+		},
+		{
+			name:    "intentional string literal",
+			command: `node -e '"hello"'`,
+		},
+		{
+			name:    "not stdin hook script",
+			command: `node -e "\"console.log(1)\""`,
+		},
+		{
+			name:    "compound command",
+			command: `node -e "\"` + script + `\"" && echo done`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NormalizeCommand(tt.command)
+			if tt.repair {
+				if got == tt.command {
+					t.Fatalf("NormalizeCommand(%q) did not repair", tt.command)
+				}
+				if strings.Contains(got, `\""`) {
+					t.Fatalf("NormalizeCommand(%q) left accidental escaped quotes in %q", tt.command, got)
+				}
+				requireNode(t)
+				r := DefaultSpawner(context.Background(), SpawnInput{
+					Command: got,
+					Stdin:   `{"toolName":"bash"}`,
+					Timeout: 2 * time.Second,
+				})
+				if r.ExitCode != 0 || r.Stdout != "bash" {
+					t.Fatalf("normalized command did not execute: command=%q result=%+v", got, r)
+				}
+				return
+			}
+			if got != tt.command {
+				t.Fatalf("NormalizeCommand(%q) = %q, want unchanged", tt.command, got)
+			}
+		})
 	}
 }
 
@@ -461,5 +579,34 @@ func TestDefaultSpawnerOutputCap(t *testing.T) {
 	}
 	if len(r.Stdout) > outputCapBytes {
 		t.Errorf("captured output %d exceeds cap %d", len(r.Stdout), outputCapBytes)
+	}
+}
+
+// TestWellFormedNodeEvalKeepsShellSemantics pins the execution contract for
+// commands that never needed repair: hook commands are documented to run
+// through the shell, and existing user hooks may rely on shell expansion.
+// A well-formed node -e stdin-hook command must therefore keep $VAR expansion
+// on POSIX — only repaired commands (whose broken quoting means they never
+// worked through a shell) may take the direct-exec path.
+func TestWellFormedNodeEvalKeepsShellSemantics(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("cmd does not perform POSIX $ expansion; Windows intentionally direct-execs recognized node evals")
+	}
+	requireNode(t)
+	command := `node -e "const payload = JSON.parse(require('fs').readFileSync(0, 'utf8')); console.log('$HOOK_TEST_MARKER' + payload.toolName)"`
+	if got := NormalizeCommand(command); got != command {
+		t.Fatalf("well-formed command was rewritten: %q", got)
+	}
+	r := DefaultSpawner(context.Background(), SpawnInput{
+		Command: command,
+		Stdin:   `{"toolName":"bash"}`,
+		Timeout: 2 * time.Second,
+		Env:     map[string]string{"HOOK_TEST_MARKER": "expanded-"},
+	})
+	if r.ExitCode != 0 {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	if r.Stdout != "expanded-bash" {
+		t.Fatalf("stdout = %q, want %q — $VAR expansion was lost (command bypassed the shell)", r.Stdout, "expanded-bash")
 	}
 }

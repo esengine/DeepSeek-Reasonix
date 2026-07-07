@@ -3,11 +3,14 @@ package doctor
 
 import (
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/BurntSushi/toml"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
@@ -82,6 +85,11 @@ type SandboxReport struct {
 	// this host (Seatbelt, bubblewrap, or the Windows helper). Without it
 	// "enforce" refuses bash execution instead of running unconfined.
 	Available bool `json:"available"`
+	// Shell is the interpreter the bash tool resolved (kind and path). On
+	// Windows this is the first thing to check when sandboxed commands fail:
+	// Git-for-Windows/MSYS2 bash is far more fragile under a low-integrity
+	// token than PowerShell.
+	Shell string `json:"shell,omitempty"`
 }
 
 type NetworkReport struct {
@@ -110,6 +118,15 @@ func Collect(opts Options) Report {
 	}
 	cwd, _ := os.Getwd()
 	sourcePath := config.SourcePath()
+	// Settings UIs and `reasonix config` edit the user-level config, but a
+	// project reasonix.toml outranks it. Users who toggle the sandbox off in
+	// Settings while the project file pins [sandbox] read the no-op as "bash is
+	// broken" (#5961, #6046) — surface the layering explicitly.
+	if sourcePath != "" && filepath.Base(sourcePath) == "reasonix.toml" {
+		if raw, err := os.ReadFile(sourcePath); err == nil && tomlHasSandboxTable(raw) {
+			warnings = append(warnings, "project "+redactHome(sourcePath)+" sets [sandbox]; it overrides user-level Settings -> Sandbox for this workspace — edit the project file to change sandbox behavior here")
+		}
+	}
 	userPath := config.UserConfigPath()
 	if legacyPath := config.LegacyUserConfigPath(); userPath != "" && legacyPath != "" {
 		if _, userErr := os.Stat(userPath); userErr == nil {
@@ -139,6 +156,7 @@ func Collect(opts Options) Report {
 			Network:    cfg.Sandbox.Network,
 			WriteRoots: redactHomeAll(cfg.WriteRoots()),
 			Available:  sandbox.Available(),
+			Shell:      resolvedShellSummary(cfg),
 		},
 		Network: NetworkReport{
 			ProxyMode: cfg.NetworkProxyMode(),
@@ -241,6 +259,9 @@ func RenderText(r Report) string {
 		bashLine += " (unavailable: no OS sandbox on this host; bash execution is refused. " + sandbox.UnavailableRemediation() + ")"
 	}
 	fmt.Fprintf(&b, "  bash         %s\n", bashLine)
+	if r.Sandbox.Shell != "" {
+		fmt.Fprintf(&b, "  shell        %s\n", r.Sandbox.Shell)
+	}
 	fmt.Fprintf(&b, "  network      %v\n", r.Sandbox.Network)
 	fmt.Fprintf(&b, "  write_roots  %s\n", strings.Join(r.Sandbox.WriteRoots, ", "))
 
@@ -341,4 +362,25 @@ func redactHomeAll(paths []string) []string {
 		out[i] = redactHome(p)
 	}
 	return out
+}
+
+// resolvedShellSummary reports which interpreter the bash tool would run
+// commands under, e.g. "bash (~/bin/bash)" or "powershell (C:\...\pwsh.exe)".
+func resolvedShellSummary(cfg *config.Config) string {
+	sh := sandbox.ResolveShell(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, io.Discard)
+	if sh.Path == "" {
+		return sh.Kind.String() + " (not found)"
+	}
+	return sh.Kind.String() + " (" + redactHome(sh.Path) + ")"
+}
+
+// tomlHasSandboxTable reports whether raw TOML sets any [sandbox] key. A parse
+// failure returns false — the config loader reports broken TOML on its own.
+func tomlHasSandboxTable(raw []byte) bool {
+	var doc map[string]toml.Primitive
+	if _, err := toml.Decode(string(raw), &doc); err != nil {
+		return false
+	}
+	_, ok := doc["sandbox"]
+	return ok
 }

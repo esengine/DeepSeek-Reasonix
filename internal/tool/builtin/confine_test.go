@@ -162,7 +162,7 @@ func TestBashSandboxConfinement(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		spec.Shell = sandbox.ResolveShell("powershell", "", nil)
 	}
-	b := ConfineBash(spec, timeout...)
+	b := ConfineBash(spec, SessionDataGuard{}, timeout...)
 
 	// Writing inside the root works; writing to a sibling under $HOME is denied
 	// by the sandbox the bash tool wrapped the command in.

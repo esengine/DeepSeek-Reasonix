@@ -432,6 +432,7 @@ Usage:
   reasonix mcp <add|remove|list|import>                 manage MCP servers in reasonix.toml
   reasonix init                                         show how to generate project memory (AGENTS.md)
   reasonix doctor [--json]                              print redacted local diagnostics
+  reasonix doctor session <branch-id> [--zip] [--out PATH]  export a session conflict diagnostic zip
   reasonix bot start|doctor|weixin-login                multi-channel IM bot gateway
   reasonix upgrade [--check] [--force]                   self-update to the latest release (also: reasonix update)
   reasonix version

@@ -585,7 +585,7 @@ func TestSameContentRetryHealsLedgerForSurvivingSaver(t *testing.T) {
 	if err := os.WriteFile(metaPath, staleMeta, 0o644); err != nil {
 		t.Fatalf("rewind meta: %v", err)
 	}
-	s.setPersistedBaseline(path, baseline.digest, baseline.version, baseline.revision, true)
+	s.setPersistedBaseline(path, baseline.digest, baseline.version, baseline.revision, true, 0)
 
 	if err := s.SaveSnapshot(path); err != nil {
 		t.Fatalf("autosave retry: %v", err)

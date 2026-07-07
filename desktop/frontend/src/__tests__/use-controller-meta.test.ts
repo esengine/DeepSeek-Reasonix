@@ -1,7 +1,7 @@
 // Run: tsx src/__tests__/use-controller-meta.test.ts
 
-import { effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, initialState, metaFromTab, reducer, sameMeta, shouldReconcileStaleTurn } from "../lib/useController";
-import type { Meta, TabMeta, WireUsage } from "../lib/types";
+import { effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, historyMessagesToItems, initialState, localizedBackendNoticeText, metaFromTab, modelSwitchNoticeText, reducer, sameMeta, shouldReconcileStaleTurn, tokenModeSwitchNoticeText } from "../lib/useController";
+import type { HistoryMessage, Meta, TabMeta, WireUsage } from "../lib/types";
 
 type LooseTabMeta = Omit<TabMeta, "toolApprovalMode"> & { toolApprovalMode?: TabMeta["toolApprovalMode"] | "" };
 
@@ -84,6 +84,39 @@ console.log("\nuse controller meta");
 
 {
   eq(
+    modelSwitchNoticeText("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing model"),
+    "The model cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
+    "model busy guard is localized",
+  );
+  eq(
+    modelSwitchNoticeText("this session is already open in another Reasonix window or still running in the background; close the other window or open a copy before changing model"),
+    "This session is open in another Reasonix window or still running in the background. Close that window, stop the background run, or open a copy before changing models.",
+    "model lease conflict explains the safe path",
+  );
+  eq(
+    modelSwitchNoticeText("workspace is still starting"),
+    "This session is still starting. Try changing models again in a moment.",
+    "model startup race asks the user to retry later",
+  );
+  eq(
+    modelSwitchNoticeText('tab "tab-a" changed while switching model; retry'),
+    "The current session changed while switching models. Try once more.",
+    "model tab race asks the user to retry",
+  );
+  eq(
+    modelSwitchNoticeText('unknown model "missing"'),
+    'Unknown model "missing".',
+    "model unknown error is localized",
+  );
+  eq(
+    modelSwitchNoticeText('model "other/other-model" is not available because provider "other" is not added'),
+    'Model "other/other-model" is unavailable because provider "other" is not added.',
+    "model provider access error is localized",
+  );
+}
+
+{
+  eq(
     effortSwitchNoticeText("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing effort"),
     "Reasoning effort cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
     "effort busy guard is worded as temporary",
@@ -108,6 +141,126 @@ console.log("\nuse controller meta");
     "Reasoning effort switch failed: unknown model \"missing\"",
     "effort true failure keeps the underlying error",
   );
+}
+
+{
+  eq(
+    tokenModeSwitchNoticeText("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing token mode"),
+    "Token saver cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
+    "token mode busy guard is localized",
+  );
+  eq(
+    tokenModeSwitchNoticeText('tab "tab-a" changed while switching token mode; retry'),
+    "The current session changed while switching token saver. Try once more.",
+    "token mode tab race asks the user to retry",
+  );
+}
+
+{
+  eq(
+    localizedBackendNoticeText("Session autosave failed: disk full"),
+    "Session autosave failed: disk full",
+    "backend autosave notice is localized through the active dictionary",
+  );
+  eq(
+    localizedBackendNoticeText("Session save failed before changing model: disk full"),
+    "Session save failed before changing models: disk full",
+    "backend save-before-action notice localizes the action",
+  );
+  eq(
+    localizedBackendNoticeText('model "old/model" is no longer available; switched to new/model'),
+    'Model "old/model" is no longer available; switched to new/model.',
+    "backend model fallback notice is localized",
+  );
+  eq(
+    localizedBackendNoticeText("session changed on disk; unsaved local transcript was saved as recovery branch 20260706-152144.863947300-longcat-openai-LongCat-2.0-119b7259f151-recovery-693ce51bcbcbaa9"),
+    "The session changed on disk, so the unsaved local transcript was kept as a conflict copy.",
+    "legacy recovery branch notice can be normalized without exposing internal branch id",
+  );
+  eq(
+    localizedBackendNoticeText("session changed on disk; unsaved local transcript was saved as a conflict copy"),
+    "The session changed on disk, so the unsaved local transcript was kept as a conflict copy.",
+    "recovery copy notice can be normalized",
+  );
+  eq(
+    localizedBackendNoticeText("session conflicts kept recurring; kept the transcript on the current recovery branch"),
+    "Repeated save conflicts were detected, so the current conflict copy was saved in place.",
+    "legacy repeated recovery conflict notice can be normalized",
+  );
+  eq(
+    localizedBackendNoticeText("repeated save conflicts were detected; saved the current conflict copy in place"),
+    "Repeated save conflicts were detected, so the current conflict copy was saved in place.",
+    "repeated recovery conflict notice can be normalized",
+  );
+  eq(
+    localizedBackendNoticeText("session changed on disk; adopted the newer transcript"),
+    "The session changed on disk, so Reasonix adopted the newer transcript.",
+    "adopted transcript notice can be normalized",
+  );
+  eq(
+    localizedBackendNoticeText("session changed on disk; adopted the newer transcript (local changes already covered)"),
+    "The session changed on disk, so Reasonix adopted the newer transcript; the local changes were already covered.",
+    "covered adopted transcript notice can be normalized",
+  );
+}
+
+{
+  let s = reducer(initialState, {
+    type: "event",
+    e: { kind: "notice", level: "warn", text: "session conflicts kept recurring; kept the transcript on the current recovery branch" },
+  });
+  s = reducer(s, {
+    type: "event",
+    e: { kind: "notice", level: "warn", text: "repeated save conflicts were detected; saved the current conflict copy in place" },
+  });
+  const recoveryNotices = s.items.filter((item) => item.kind === "notice" && item.text.includes("current conflict copy"));
+  eq(recoveryNotices.length, 0, "recovery conflict notices stay silent in the live transcript");
+  eq(s.seq, 0, "silent recovery notices do not consume sequence ids");
+
+  s = reducer(s, { type: "event", e: { kind: "notice", level: "warn", text: "runtime notice" } });
+  s = reducer(s, { type: "event", e: { kind: "notice", level: "warn", text: "runtime notice" } });
+  const ordinaryNotices = s.items.filter((item) => item.kind === "notice" && item.text === "runtime notice");
+  eq(ordinaryNotices.length, 2, "ordinary repeated notices remain visible");
+}
+
+{
+  const quietLifecycleMessages = [
+    { level: "info", text: "guardian enabled · model=guardian-test" },
+    { level: "warn", text: "2 MCP server(s) failed to start: fs, browser — run /mcp for details" },
+    { level: "warn", text: "mcp fs: stdio plugin \"fs\": command \"missing-fs\" not found on PATH" },
+    { level: "info", text: "settings applied: session refreshed after the lease was released" },
+    { level: "info", text: "plugin \"slowserver\" has been slow 3 startups in a row (last 30000ms, budget 1000ms); demoting to background startup this session" },
+  ] as const;
+  let s = initialState;
+  for (const message of quietLifecycleMessages) {
+    s = reducer(s, { type: "event", e: { kind: "notice", level: message.level, text: message.text } });
+  }
+  eq(s.items.filter((item) => item.kind === "notice").length, 0, "background lifecycle notices stay silent in the live transcript");
+  eq(s.seq, 0, "silent lifecycle notices do not consume sequence ids");
+
+  const userActionFailure = reducer(s, { type: "event", e: { kind: "notice", level: "warn", text: "mcp connect: no configured MCP server named \"fs\"" } });
+  const visibleNotices = userActionFailure.items.filter((item) => item.kind === "notice");
+  eq(visibleNotices.length, 1, "user-triggered MCP failures remain visible");
+  eq(visibleNotices[0]?.kind === "notice" && visibleNotices[0].text, "mcp connect: no configured MCP server named \"fs\"", "visible MCP failure keeps its text");
+}
+
+{
+  const history: HistoryMessage[] = [
+    { role: "notice", level: "warn", content: "session conflicts kept recurring; kept the transcript on the current recovery branch" },
+    { role: "notice", level: "warn", content: "repeated save conflicts were detected; saved the current conflict copy in place" },
+    { role: "notice", level: "info", content: "guardian enabled · model=guardian-test" },
+    { role: "notice", level: "warn", content: "1 MCP server(s) failed to start: fs — run /mcp for details" },
+    { role: "notice", level: "info", content: "settings applied: session refreshed after the lease was released" },
+    { role: "user", content: "continue" },
+  ];
+  const hydrated = historyMessagesToItems(history, "h");
+  const recoveryNotices = hydrated.items.filter((item) => item.kind === "notice" && item.text.includes("current conflict copy"));
+  const lifecycleNotices = hydrated.items.filter((item) => item.kind === "notice");
+  const users = hydrated.items.filter((item) => item.kind === "user");
+  eq(recoveryNotices.length, 0, "recovery conflict notices stay silent when hydrating history");
+  eq(lifecycleNotices.length, 0, "background lifecycle notices stay silent when hydrating history");
+  eq(users[0]?.kind === "user" && users[0].id, "h0", "silent history notices keep later item ids compact");
+  eq(hydrated.seq, 1, "silent history notices do not inflate the hydrated sequence");
 }
 
 {

@@ -11,10 +11,12 @@ import (
 func init() { tool.RegisterBuiltin(multiEdit{}) }
 
 // multiEdit applies a batch of edits to one file. roots confines the target to
-// the workspace when non-empty (see writeFile); workDir, when non-empty, is the
+// the workspace when non-empty (see writeFile); guard rejects Reasonix
+// session-data targets (see SessionDataGuard); workDir, when non-empty, is the
 // directory a relative path resolves against (see resolveIn).
 type multiEdit struct {
 	roots   []string
+	guard   SessionDataGuard
 	workDir string
 }
 
@@ -75,7 +77,7 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return "", fmt.Errorf("edits must not be empty")
 	}
 	p.Path = resolveIn(m.workDir, p.Path)
-	if err := confine(m.roots, p.Path); err != nil {
+	if err := confineWrite(m.roots, m.guard, p.Path); err != nil {
 		return "", err
 	}
 

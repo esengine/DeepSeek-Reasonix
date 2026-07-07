@@ -499,7 +499,7 @@ const __T = {
     'model': 'Model',
     'total_tokens': 'Total Tokens',
     'cache_hit_rate': 'Cache Hit Rate',
-    'total_cost': 'Total Cost',
+    'total_cost': 'Session Cost',
     'context_usage': 'Context Usage',
 
     'connected': 'Connected',
@@ -602,7 +602,7 @@ const __T = {
     'model': '模型',
     'total_tokens': '总 Token',
     'cache_hit_rate': '缓存命中率',
-    'total_cost': '总费用',
+    'total_cost': '会话费用',
     'context_usage': '上下文用量',
 
     'connected': '已连接',
@@ -1165,7 +1165,7 @@ function loadSessions(){
       const title=s.title||name.replace(/^\w+-/,'').replace(/T/,' ').replace(/[-_]/g,' ').slice(0,30);
       const meta=s.turns?s.turns+' turns':'';
 	      item.innerHTML='<svg class="session-item__icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><div class="session-item__body"><div class="session-item__title">'+escHtml(title)+'</div><div class="session-item__meta">'+escHtml(meta)+'</div></div><button type="button" class="session-del" data-name="'+escAttr(s.name)+'" title="'+escAttr(__('delete_confirm'))+'">&times;</button>';
-      item.onclick=()=>{if(running||s.current)return;post('/resume',{path:s.path}).then(()=>{log.innerHTML='';log.appendChild(welcome);welcome.style.display='';todosDismissed=false;loadSessions();setTimeout(()=>fetch('/history').then(r=>r.json()).then(msgs=>{renderHistoryMessages(msgs);fetchTodos();}),300);});};
+      item.onclick=()=>{if(running||s.current)return;post('/resume',{path:s.path}).then(()=>{log.innerHTML='';log.appendChild(welcome);welcome.style.display='';todosDismissed=false;resetCumulativeStats();loadSessions();setTimeout(()=>fetch('/history').then(r=>r.json()).then(msgs=>{renderHistoryMessages(msgs);fetchTodos();}),300);});};
       list.appendChild(item);
     });
   }).catch(()=>{const list=$('#session-list');if(list)list.innerHTML='<div style="padding:10px;color:var(--muted-2);font-size:12px">'+__('error_loading')+'</div>';});
@@ -1318,7 +1318,7 @@ $('#btn-plan').onclick=()=>void setPlan(!planMode);
 $('#btn-bypass').onclick=()=>void toggleYolo();
 $('#btn-goal').onclick=()=>toggleGoalMode();
 $('#goal-chip').onclick=()=>toggleGoalMode();
-$('#btn-new').onclick=()=>{if(running)return;post('/new').then(()=>{log.innerHTML='';log.appendChild(welcome);welcome.style.display='';todosState=[];todosDismissed=false;renderTodoPanel();loadSessions();});};
+$('#btn-new').onclick=()=>{if(running)return;post('/new').then(()=>{log.innerHTML='';log.appendChild(welcome);welcome.style.display='';todosState=[];todosDismissed=false;renderTodoPanel();resetCumulativeStats();loadSessions();});};
 $('#btn-compact').onclick=()=>{if(!running)post('/compact');};
 $('#btn-rewind').onclick=()=>openRewindPicker();
 $('#btn-tree').onclick=()=>{post('/submit',{input:'/tree'});};
@@ -1333,7 +1333,11 @@ overlay.onclick=()=>closeSidebar();
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&sidebar.classList.contains('sidebar--open'))closeSidebar();});
 
 // ── cumulative stats ──
+// Session-scoped counters accumulated while this page is open. They reset on
+// session rotation (/new, /resume) so the stats card labeled "session cost"
+// never quietly turns into an all-sessions running total.
 let cumulativeTokens=0, cumulativeCost=0, cumulativeCacheHit=0, cumulativeCacheMiss=0;
+function resetCumulativeStats(){cumulativeTokens=0;cumulativeCost=0;cumulativeCacheHit=0;cumulativeCacheMiss=0;}
 function openStats(){
   const modal=$('#stats-modal');
   if(!modal)return;
@@ -1346,7 +1350,9 @@ function openStats(){
     const hit=cumulativeCacheHit||s.cacheHit||0, miss=cumulativeCacheMiss||s.cacheMiss||0;
     const rate=hit+miss>0?Math.round(hit/(hit+miss)*100)+'%':'0%';
     $('#stats-cache-rate').textContent=rate;
-    const cost=cumulativeCost||s.lastUsage?.cost||0;
+    // No single-request fallback here: rendering lastUsage.cost (one turn)
+    // under the session-cost label displayed one turn's spend as the session's.
+    const cost=cumulativeCost;
     $('#stats-total-cost').textContent=cost>0?fmtMoney(cost,s.lastUsage?.currency):'-';
     $('#stats-balance').textContent=s.balance?.display||'-';
     if(s.window){const pct=Math.min(100,Math.round(s.used/s.window*100));$('#stats-ctx-fill').style.width=pct+'%';$('#stats-ctx-used').textContent=fmtTok(s.used)+' tok';$('#stats-ctx-window').textContent=fmtTok(s.window)+' tok';}

@@ -2,9 +2,11 @@ package cli
 
 import (
 	"context"
+	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -42,6 +44,22 @@ func TestRunStatuslineCmd(t *testing.T) {
 	// A failing command yields an empty line, not an error.
 	if got := runStatuslineCmd(failCmd, "{}"); got != "" {
 		t.Errorf("failed command should yield empty, got %q", got)
+	}
+}
+
+func TestRunStatuslineCmdNormalizesQuotedNodeEval(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not available")
+	}
+	script := "let input = ''; process.stdin.setEncoding('utf8'); process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => { const payload = JSON.parse(input); console.log(payload.model) })"
+	cmd := `node -e "\"` + script + `\""`
+	timeout := statuslineCommandTimeout
+	if runtime.GOOS == "windows" {
+		timeout = 10 * time.Second
+	}
+
+	if got := runStatuslineCmdWithTimeout(cmd, `{"model":"deepseek"}`, timeout); got != "deepseek" {
+		t.Fatalf("normalized statusline node -e output = %q, want deepseek", got)
 	}
 }
 

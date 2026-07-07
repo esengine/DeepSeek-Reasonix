@@ -795,7 +795,7 @@ func (a *App) Settings() SettingsView {
 				Ask:   []string{},
 				Deny:  []string{},
 			},
-			Sandbox:                 SandboxView{Bash: "enforce", AllowWrite: []string{}, EffectiveWriteRoots: []string{}, Shell: "auto"},
+			Sandbox:                 SandboxView{Bash: config.Default().BashMode(), AllowWrite: []string{}, EffectiveWriteRoots: []string{}, Shell: "auto"},
 			Agent:                   AgentView{PlannerMaxSteps: 0, MaxSubagentDepth: agent.DefaultMaxSubagentDepth, ColdResumePrune: true, ReasoningLanguage: "auto"},
 			Bot:                     botSettingsView(config.BotConfig{}),
 			AutoPlan:                "off",
@@ -815,10 +815,7 @@ func (a *App) Settings() SettingsView {
 		}
 	}
 	ctrl := a.activeCtrl()
-	bash := cfg.Sandbox.Bash
-	if bash == "" {
-		bash = "enforce"
-	}
+	bash := cfg.BashMode()
 	shell := cfg.Tools.Shell.Prefer
 	if shell == "" {
 		shell = "auto"
@@ -1566,10 +1563,14 @@ func (a *App) rebuildSettingLocked(setting string) error {
 	})
 	if err != nil {
 		if oldCtrl == nil {
+			leaseHeld := false
 			a.mu.Lock()
-			tab.StartupErr = err.Error()
+			leaseHeld = setTabStartupError(tab, err)
 			tab.Ready = true
 			a.mu.Unlock()
+			if leaseHeld {
+				a.scheduleDeferredStartupBuild(tab.ID)
+			}
 			a.emitReady(a.ctx)
 		}
 		return err
@@ -1604,7 +1605,7 @@ func (a *App) rebuildSettingLocked(setting string) error {
 	tab.Ctrl = ctrl
 	tab.model = model
 	tab.Label = ctrl.Label()
-	tab.StartupErr = ""
+	clearTabStartupError(tab)
 	tab.Ready = true
 	// Supersede any in-flight startup build: it would otherwise finish later,
 	// pass its generation check, and overwrite the controller just installed.
@@ -2382,7 +2383,7 @@ func (a *App) removeBuiltInProviderAccessAndRetargetTabs(name string) error {
 		a.supersedeTabBuildLocked(tab)
 		tab.model = fallbackRef
 		tab.Label = fallbackRef
-		tab.StartupErr = ""
+		clearTabStartupError(tab)
 		tab.Ready = a.ctx == nil
 		if a.ctx != nil {
 			rebuildTabs = append(rebuildTabs, tab)
@@ -2501,7 +2502,7 @@ func (a *App) deleteProviderAndRetargetTabs(name string) error {
 		a.supersedeTabBuildLocked(tab)
 		tab.model = fallbackRef
 		tab.Label = fallbackRef
-		tab.StartupErr = ""
+		clearTabStartupError(tab)
 		tab.Ready = a.ctx == nil
 		if a.ctx != nil {
 			rebuildTabs = append(rebuildTabs, tab)

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/config"
 	"reasonix/internal/skill"
 )
 
@@ -47,7 +48,7 @@ func TestBuildReviewSubagentRegistryUsesForegroundOnlyBash(t *testing.T) {
 		"bash_output",
 		"kill_shell",
 		"task",
-	}})
+	}}, config.Default())
 
 	for _, hidden := range []string{"wait", "bash_output", "kill_shell", "task"} {
 		if _, ok := reg.Get(hidden); ok {

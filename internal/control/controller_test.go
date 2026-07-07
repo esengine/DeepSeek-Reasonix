@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -695,6 +696,149 @@ func TestSnapshotRecoversDivergedControllerTranscript(t *testing.T) {
 	}
 }
 
+// TestSnapshotConflictRecoveryTransplantsInFlightTurnMarker: when a snapshot
+// conflict forks the running turn onto a recovery branch, the in-flight-turn
+// marker must move with it. Left on the original branch, the stale marker
+// makes the next open of that branch strip messages from a turn that in fact
+// kept running (and completed) on the recovery branch.
+func TestSnapshotConflictRecoveryTransplantsInFlightTurnMarker(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+
+	staleSess := agent.NewSession("sys")
+	staleSess.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	staleSess.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	staleSess.Add(provider.Message{Role: provider.RoleUser, Content: "local second"})
+	staleExec := agent.New(nil, nil, staleSess, agent.Options{}, event.Discard)
+	stale := New(Options{Executor: staleExec, SessionDir: dir, SessionPath: path, Label: "test"})
+
+	currentSess := agent.NewSession("sys")
+	currentSess.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	currentSess.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	currentSess.Add(provider.Message{Role: provider.RoleUser, Content: "disk second"})
+	currentExec := agent.New(nil, nil, currentSess, agent.Options{}, event.Discard)
+	current := New(Options{Executor: currentExec, SessionDir: dir, SessionPath: path, Label: "test"})
+	if err := current.SnapshotActivity(); err != nil {
+		t.Fatalf("SnapshotActivity current: %v", err)
+	}
+
+	// The stale runtime had a foreground turn running when the conflict fired.
+	if err := agent.MarkSessionInFlightTurn(path, 2, true); err != nil {
+		t.Fatalf("MarkSessionInFlightTurn: %v", err)
+	}
+
+	if err := stale.Snapshot(); err != nil {
+		t.Fatalf("Snapshot stale diverged: %v", err)
+	}
+	recoveryPath := stale.SessionPath()
+	if recoveryPath == path || recoveryPath == "" {
+		t.Fatalf("stale session path after recovery = %q, want recovery path", recoveryPath)
+	}
+
+	origMeta, ok, err := agent.LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta original ok=%v err=%v", ok, err)
+	}
+	if origMeta.InFlightTurn != nil {
+		t.Fatal("in-flight turn marker left on the forked-from branch; reopening it would strip the turn")
+	}
+	recMeta, ok, err := agent.LoadBranchMeta(recoveryPath)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta recovery ok=%v err=%v", ok, err)
+	}
+	if recMeta.InFlightTurn == nil {
+		t.Fatal("in-flight turn marker not transplanted to the recovery branch")
+	}
+	if recMeta.InFlightTurn.StartMessageIndex != 2 || !recMeta.InFlightTurn.PreserveUser {
+		t.Fatalf("transplanted marker = %+v, want start index 2 with preserve_user", recMeta.InFlightTurn)
+	}
+}
+
+// TestRecoverInterruptedTurnSparesTurnContinuedOnRecoveryBranch covers the
+// legacy leftovers of the marker transplant: runtimes predating it forked a
+// recovery branch mid-turn and left the in-flight marker on the original
+// branch. Opening the original must clear the stale marker without stripping
+// a turn that in fact kept running on the recovery branch.
+func TestRecoverInterruptedTurnSparesTurnContinuedOnRecoveryBranch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+
+	orig := agent.NewSession("sys")
+	orig.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	orig.Add(provider.Message{Role: provider.RoleAssistant, Content: "partial"})
+	if err := orig.Save(path); err != nil {
+		t.Fatalf("Save original: %v", err)
+	}
+	if err := agent.MarkSessionInFlightTurn(path, 1, true); err != nil {
+		t.Fatalf("MarkSessionInFlightTurn: %v", err)
+	}
+	// A legacy runtime forked the running turn onto a recovery branch and
+	// left the marker behind on the original.
+	forked := agent.NewSession("sys")
+	forked.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	forked.Add(provider.Message{Role: provider.RoleAssistant, Content: "continued elsewhere"})
+	if _, err := forked.SaveRecoveryBranch(agent.RecoveryBranchOptions{OriginalPath: path}); err != nil {
+		t.Fatalf("SaveRecoveryBranch: %v", err)
+	}
+
+	loaded, err := agent.LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	exec := agent.New(nil, nil, loaded, agent.Options{}, event.Discard)
+	c := New(Options{Executor: exec, SessionDir: dir, SessionPath: path, Label: "test"})
+	c.recoverInterruptedTurn(path)
+
+	if got := c.executor.Session().Len(); got != 3 {
+		t.Fatalf("message count after reopening forked-from branch = %d, want 3 (turn stripped despite recovery child)", got)
+	}
+	meta, ok, err := agent.LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta ok=%v err=%v", ok, err)
+	}
+	if meta.InFlightTurn != nil {
+		t.Fatal("fork-orphaned in-flight marker not cleared")
+	}
+}
+
+// TestRecoverInterruptedTurnStripsGenuineCrash pins the crash-recovery
+// behavior the recovery-child guard must not swallow: with no recovery branch
+// in sight, an in-flight marker means the runtime died mid-turn and the
+// partial tail is stripped (preserving the user prompt).
+func TestRecoverInterruptedTurnStripsGenuineCrash(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+
+	orig := agent.NewSession("sys")
+	orig.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	orig.Add(provider.Message{Role: provider.RoleAssistant, Content: "partial"})
+	if err := orig.Save(path); err != nil {
+		t.Fatalf("Save original: %v", err)
+	}
+	if err := agent.MarkSessionInFlightTurn(path, 1, true); err != nil {
+		t.Fatalf("MarkSessionInFlightTurn: %v", err)
+	}
+
+	loaded, err := agent.LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	exec := agent.New(nil, nil, loaded, agent.Options{}, event.Discard)
+	c := New(Options{Executor: exec, SessionDir: dir, SessionPath: path, Label: "test"})
+	c.recoverInterruptedTurn(path)
+
+	if got := c.executor.Session().Len(); got != 2 {
+		t.Fatalf("message count after crash recovery = %d, want 2 (sys + preserved user prompt)", got)
+	}
+	meta, ok, err := agent.LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta ok=%v err=%v", ok, err)
+	}
+	if meta.InFlightTurn != nil {
+		t.Fatal("in-flight marker not cleared after crash recovery")
+	}
+}
+
 func TestSnapshotRewriteRecoversStaleControllerTranscript(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
@@ -822,7 +966,8 @@ func TestRecoveryBranchPersistsLaterOwnedCompactionRewrite(t *testing.T) {
 	localSess.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
 	localSess.Add(provider.Message{Role: provider.RoleAssistant, Content: "local"})
 	localExec := agent.New(nil, nil, localSess, agent.Options{}, event.Discard)
-	c := New(Options{Executor: localExec, SessionDir: dir, SessionPath: path, Label: "test"})
+	sink := &noticeSink{}
+	c := New(Options{Executor: localExec, SessionDir: dir, SessionPath: path, Label: "test", Sink: sink})
 
 	if err := c.Snapshot(); err != nil {
 		t.Fatalf("Snapshot initial recovery: %v", err)
@@ -830,6 +975,13 @@ func TestRecoveryBranchPersistsLaterOwnedCompactionRewrite(t *testing.T) {
 	recoveryPath := c.SessionPath()
 	if recoveryPath == "" || recoveryPath == path {
 		t.Fatalf("recovery path = %q, want distinct path", recoveryPath)
+	}
+	notices := sink.notices()
+	if len(notices) == 0 {
+		t.Fatal("initial recovery emitted no user notice")
+	}
+	if got := notices[len(notices)-1]; strings.Contains(got, agent.BranchID(recoveryPath)) || strings.Contains(got, "recovery branch") {
+		t.Fatalf("initial recovery notice exposed internal branch detail: %q", got)
 	}
 
 	localSess.Add(provider.Message{Role: provider.RoleUser, Content: "continue"})
@@ -861,6 +1013,276 @@ func TestRecoveryBranchPersistsLaterOwnedCompactionRewrite(t *testing.T) {
 	}
 	if matches, err := filepath.Glob(filepath.Join(dir, "*-recovery-*-recovery-*.jsonl")); err != nil || len(matches) != 0 {
 		t.Fatalf("nested recovery branches after owned recovery compaction = %v err=%v, want none", matches, err)
+	}
+}
+
+func TestConcurrentSnapshotsShareSingleRecoveryHandoff(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+
+	currentSess := agent.NewSession("sys")
+	currentSess.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	currentSess.Add(provider.Message{Role: provider.RoleAssistant, Content: "disk"})
+	if err := currentSess.Save(path); err != nil {
+		t.Fatalf("Save current: %v", err)
+	}
+
+	localSess := agent.NewSession("sys")
+	localSess.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	localSess.Add(provider.Message{Role: provider.RoleAssistant, Content: "local"})
+	localExec := agent.New(nil, nil, localSess, agent.Options{}, event.Discard)
+
+	entered := make(chan controlRecoveryInfo, 16)
+	release := make(chan struct{})
+	c := New(Options{
+		Executor:    localExec,
+		SessionDir:  dir,
+		SessionPath: path,
+		Label:       "test",
+		OnSessionRecovered: func(info SessionRecoveryInfo) error {
+			entered <- controlRecoveryInfo{originalPath: info.OriginalPath, recoveryPath: info.RecoveryPath}
+			<-release
+			return nil
+		},
+	})
+
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- c.Snapshot() }()
+	first := <-entered
+	if first.originalPath != path || first.recoveryPath == "" || first.recoveryPath == path {
+		t.Fatalf("first recovery info = %+v, want distinct recovery from original", first)
+	}
+
+	const racingSnapshots = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, racingSnapshots)
+	for i := 0; i < racingSnapshots; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- c.Snapshot()
+		}()
+	}
+
+	select {
+	case extra := <-entered:
+		t.Fatalf("concurrent snapshot entered recovery while first handoff was blocked: %+v", extra)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first Snapshot: %v", err)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("racing Snapshot: %v", err)
+		}
+	}
+	select {
+	case extra := <-entered:
+		t.Fatalf("unexpected additional recovery after handoff completed: %+v", extra)
+	default:
+	}
+
+	if got := c.SessionPath(); got != first.recoveryPath {
+		t.Fatalf("controller session path = %q, want recovery %q", got, first.recoveryPath)
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, "*-recovery-*.jsonl"))
+	if err != nil {
+		t.Fatalf("glob recovery branches: %v", err)
+	}
+	recoveries := recoveryTranscriptPaths(matches)
+	if len(recoveries) != 1 || recoveries[0] != first.recoveryPath {
+		t.Fatalf("recovery branches = %v err=%v, want only %q", matches, err, first.recoveryPath)
+	}
+}
+
+func recoveryTranscriptPaths(paths []string) []string {
+	out := paths[:0]
+	for _, path := range paths {
+		if !strings.HasSuffix(path, ".events.jsonl") {
+			out = append(out, path)
+		}
+	}
+	return out
+}
+
+type controlRecoveryInfo struct {
+	originalPath string
+	recoveryPath string
+}
+
+// blockedRecoveryHandoff is a controller whose first Snapshot has entered the
+// recovery handoff and is parked inside OnSessionRecovered until release is
+// closed, so tests can race other controller operations against an in-flight
+// handoff.
+type blockedRecoveryHandoff struct {
+	c         *Controller
+	dir       string
+	path      string
+	local     *agent.Session
+	first     controlRecoveryInfo
+	release   chan struct{}
+	firstDone chan error
+}
+
+func startBlockedRecoveryHandoff(t *testing.T) *blockedRecoveryHandoff {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+
+	currentSess := agent.NewSession("sys")
+	currentSess.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	currentSess.Add(provider.Message{Role: provider.RoleAssistant, Content: "disk"})
+	if err := currentSess.Save(path); err != nil {
+		t.Fatalf("Save current: %v", err)
+	}
+
+	localSess := agent.NewSession("sys")
+	localSess.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	localSess.Add(provider.Message{Role: provider.RoleAssistant, Content: "local"})
+	localExec := agent.New(nil, nil, localSess, agent.Options{}, event.Discard)
+
+	entered := make(chan controlRecoveryInfo, 1)
+	release := make(chan struct{})
+	c := New(Options{
+		Executor:    localExec,
+		SessionDir:  dir,
+		SessionPath: path,
+		Label:       "test",
+		OnSessionRecovered: func(info SessionRecoveryInfo) error {
+			entered <- controlRecoveryInfo{originalPath: info.OriginalPath, recoveryPath: info.RecoveryPath}
+			<-release
+			return nil
+		},
+	})
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
+
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- c.Snapshot() }()
+	first := <-entered
+	if first.originalPath != path || first.recoveryPath == "" || first.recoveryPath == path {
+		t.Fatalf("recovery info = %+v, want distinct recovery from original", first)
+	}
+	return &blockedRecoveryHandoff{
+		c: c, dir: dir, path: path, local: localSess,
+		first: first, release: release, firstDone: firstDone,
+	}
+}
+
+// TestSessionSwapWaitsForRecoveryHandoff guards the swap side of the snapshot
+// serialization: moves of controller-owned session state must wait for an
+// in-flight save/recovery handoff instead of interleaving with it. A swap that
+// lands mid-handoff pairs the old path with the new session, which either
+// writes one transcript's messages into another's file or manufactures another
+// bogus conflict on the next save.
+func TestSessionSwapWaitsForRecoveryHandoff(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(t *testing.T, h *blockedRecoveryHandoff) (done chan struct{}, wantPath string)
+		// during runs while the handoff is still blocked; verify after the
+		// racing operation completed.
+		during func(t *testing.T, h *blockedRecoveryHandoff)
+		verify func(t *testing.T, h *blockedRecoveryHandoff)
+	}{
+		{name: "SetSessionPath", run: func(t *testing.T, h *blockedRecoveryHandoff) (chan struct{}, string) {
+			other := filepath.Join(h.dir, "other.jsonl")
+			done := make(chan struct{})
+			go func() { h.c.SetSessionPath(other); close(done) }()
+			return done, other
+		}},
+		{name: "Resume", run: func(t *testing.T, h *blockedRecoveryHandoff) (chan struct{}, string) {
+			other := filepath.Join(h.dir, "resumed.jsonl")
+			sess := agent.NewSession("sys")
+			sess.Add(provider.Message{Role: provider.RoleUser, Content: "resumed"})
+			if err := sess.Save(other); err != nil {
+				t.Fatalf("Save resumed: %v", err)
+			}
+			done := make(chan struct{})
+			go func() { h.c.Resume(sess, other); close(done) }()
+			return done, other
+		}},
+		{
+			name: "CancelFlush",
+			run: func(t *testing.T, h *blockedRecoveryHandoff) (chan struct{}, string) {
+				// Truncate the cancelled turn: drop the assistant reply, the
+				// same shape stripTurnMessagesAfter feeds this helper.
+				truncated := []provider.Message{
+					{Role: provider.RoleSystem, Content: "sys"},
+					{Role: provider.RoleUser, Content: "first"},
+				}
+				done := make(chan struct{})
+				go func() { h.c.replaceSessionAfterCancel(truncated); close(done) }()
+				return done, h.first.recoveryPath
+			},
+			during: func(t *testing.T, h *blockedRecoveryHandoff) {
+				// The in-memory truncation itself must wait for the handoff: an
+				// early Replace would let the blocked save capture the shortened
+				// transcript, read the longer on-disk partial as a stale-prefix
+				// conflict, and adopt it back over the cancel cleanup.
+				if got := len(h.local.Snapshot()); got != 3 {
+					t.Fatalf("session truncated to %d messages while the handoff was still in flight, want 3", got)
+				}
+			},
+			verify: func(t *testing.T, h *blockedRecoveryHandoff) {
+				if got := len(h.local.Snapshot()); got != 2 {
+					t.Fatalf("session = %d messages after cancel flush, want 2", got)
+				}
+				loaded, err := agent.LoadSession(h.first.recoveryPath)
+				if err != nil {
+					t.Fatalf("LoadSession recovery: %v", err)
+				}
+				if got := len(loaded.Messages); got != 2 {
+					t.Fatalf("recovery transcript = %d messages after cancel flush, want 2", got)
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := startBlockedRecoveryHandoff(t)
+			done, wantPath := tc.run(t, h)
+			select {
+			case <-done:
+				t.Fatal("session state moved while the recovery handoff was still in flight")
+			case <-time.After(100 * time.Millisecond):
+			}
+			if tc.during != nil {
+				tc.during(t, h)
+			}
+			close(h.release)
+			if err := <-h.firstDone; err != nil {
+				t.Fatalf("first Snapshot: %v", err)
+			}
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				t.Fatal("session state move did not finish after the handoff completed")
+			}
+			if got := h.c.SessionPath(); got != wantPath {
+				t.Fatalf("controller session path = %q, want %q", got, wantPath)
+			}
+			matches, err := filepath.Glob(filepath.Join(h.dir, "*-recovery-*.jsonl"))
+			if err != nil {
+				t.Fatalf("glob recovery branches: %v", err)
+			}
+			recoveries := recoveryTranscriptPaths(matches)
+			if len(recoveries) != 1 || recoveries[0] != h.first.recoveryPath {
+				t.Fatalf("recovery branches = %v, want only %q", matches, h.first.recoveryPath)
+			}
+			if tc.verify != nil {
+				tc.verify(t, h)
+			}
+		})
 	}
 }
 
@@ -910,13 +1332,8 @@ func TestSnapshotConflictAdoptionResetsRewriteBaseline(t *testing.T) {
 	if adopted == stale {
 		t.Fatal("expected adoption to replace the stale session")
 	}
-	readBaseline := func() int {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		return c.savedRewriteVersion
-	}
-	if got, want := readBaseline(), adopted.RewriteVersion(); got != want {
-		t.Fatalf("rewrite baseline after adoption = %d, want adopted session's %d", got, want)
+	if adopted.NeedsRewriteSave() {
+		t.Fatal("adopted session should carry a persisted rewrite baseline; the stale session's counter must not leak onto it")
 	}
 
 	// The adopted session's first compaction must persist in place.
@@ -938,35 +1355,6 @@ func TestSnapshotConflictAdoptionResetsRewriteBaseline(t *testing.T) {
 	}
 	if got := len(reloaded.Messages); got != 2 {
 		t.Fatalf("message count after adopted compaction = %d, want 2: %+v", got, reloaded.Messages)
-	}
-}
-
-// TestMarkSessionRewriteVersionPersistedGuards pins the two properties that
-// keep the persisted-rewrite baseline safe under races: it never moves
-// backwards, and a session that is no longer the executor's cannot write its
-// version onto the counter of the session that replaced it.
-func TestMarkSessionRewriteVersionPersistedGuards(t *testing.T) {
-	sess := agent.NewSession("sys")
-	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
-	c := New(Options{Executor: exec, SessionDir: t.TempDir(), Label: "test"})
-	readBaseline := func() int {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		return c.savedRewriteVersion
-	}
-
-	c.markSessionRewriteVersionPersisted(sess, 2)
-	if got := readBaseline(); got != 2 {
-		t.Fatalf("baseline after mark(2) = %d, want 2", got)
-	}
-	c.markSessionRewriteVersionPersisted(sess, 1)
-	if got := readBaseline(); got != 2 {
-		t.Fatalf("baseline lowered to %d by mark(1), want it kept at 2", got)
-	}
-	foreign := agent.NewSession("sys")
-	c.markSessionRewriteVersionPersisted(foreign, 9)
-	if got := readBaseline(); got != 2 {
-		t.Fatalf("baseline = %d after foreign-session mark, want 2", got)
 	}
 }
 
@@ -1239,6 +1627,345 @@ func TestNewSessionStartsFreshContextAndSavesTranscript(t *testing.T) {
 	current := exec.Session().Snapshot()
 	if len(current) != 1 || current[0].Role != provider.RoleSystem || current[0].Content != "sys" {
 		t.Fatalf("fresh context = %+v, want only system prompt", current)
+	}
+}
+
+func TestSnapshotConflictLogAttrsCarryRevisionLedger(t *testing.T) {
+	conflict := &agent.SessionSnapshotConflictError{
+		Path:             "/tmp/session.jsonl",
+		Kind:             agent.SessionSnapshotConflictDiverged,
+		ExistingMessages: 7,
+		SnapshotMessages: 5,
+		BaseRevision:     3,
+		DiskRevision:     9,
+	}
+	attrs := snapshotConflictLogAttrs(fmt.Errorf("save: %w", conflict), "/tmp/session.jsonl", "rewrite")
+	got := map[string]any{}
+	for i := 0; i+1 < len(attrs); i += 2 {
+		key, ok := attrs[i].(string)
+		if !ok {
+			t.Fatalf("attr key %v is not a string", attrs[i])
+		}
+		got[key] = attrs[i+1]
+	}
+	if got["mode"] != "rewrite" || got["kind"] != "diverged" {
+		t.Fatalf("attrs = %v, want mode=rewrite kind=diverged", got)
+	}
+	if got["base_revision"] != int64(3) || got["disk_revision"] != int64(9) {
+		t.Fatalf("attrs = %v, want base_revision=3 disk_revision=9", got)
+	}
+	if got["disk_messages"] != 7 || got["snapshot_messages"] != 5 {
+		t.Fatalf("attrs = %v, want disk_messages=7 snapshot_messages=5", got)
+	}
+
+	// A conflict error without the typed detail still logs path and mode.
+	plain := snapshotConflictLogAttrs(agent.ErrSessionSnapshotConflict, "/tmp/session.jsonl", "snapshot")
+	if len(plain) != 4 {
+		t.Fatalf("plain attrs = %v, want only path and mode", plain)
+	}
+}
+
+type noticeSink struct {
+	mu     sync.Mutex
+	events []event.Event
+}
+
+func (s *noticeSink) Emit(e event.Event) {
+	s.mu.Lock()
+	s.events = append(s.events, e)
+	s.mu.Unlock()
+}
+
+func (s *noticeSink) notices() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for _, e := range s.events {
+		if e.Kind == event.Notice {
+			out = append(out, e.Text)
+		}
+	}
+	return out
+}
+
+func TestSnapshotConflictAtRecoveryDepthCapForceSavesCurrentBranch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	disk := agent.NewSession("sys")
+	disk.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	disk.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	disk.Add(provider.Message{Role: provider.RoleUser, Content: "disk second"})
+	if err := disk.Save(path); err != nil {
+		t.Fatalf("Save disk: %v", err)
+	}
+	meta, ok, err := agent.LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta ok=%v err=%v", ok, err)
+	}
+	meta.Recovered = true
+	meta.RecoveryDepth = agent.SessionRecoveryMaxDepth
+	if err := agent.SaveBranchMeta(path, meta); err != nil {
+		t.Fatalf("SaveBranchMeta: %v", err)
+	}
+
+	stale := agent.NewSession("sys")
+	stale.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	stale.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	stale.Add(provider.Message{Role: provider.RoleUser, Content: "local second"})
+	exec := agent.New(nil, nil, stale, agent.Options{}, event.Discard)
+	sink := &noticeSink{}
+	c := New(Options{Executor: exec, SessionDir: dir, SessionPath: path, Label: "test", Sink: sink})
+	stale.IncrementRewrite()
+
+	if err := c.Snapshot(); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if got := c.SessionPath(); got != path {
+		t.Fatalf("session path = %q, want unchanged %q (no new fork)", got, path)
+	}
+	forks, err := filepath.Glob(filepath.Join(dir, "*-recovery-*.jsonl"))
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	if len(forks) != 0 {
+		t.Fatalf("depth cap still forked: %v", forks)
+	}
+	loaded, err := agent.LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got := loaded.Messages[len(loaded.Messages)-1].Content; got != "local second" {
+		t.Fatalf("disk tail = %q, want force-saved local transcript", got)
+	}
+	notices := sink.notices()
+	if len(notices) == 0 || !strings.Contains(notices[len(notices)-1], "saved the current conflict copy in place") {
+		t.Fatalf("notices = %v, want depth-cap notice", notices)
+	}
+	if stale.NeedsRewriteSave() {
+		t.Fatal("rewrite baseline not re-anchored by depth-cap force save")
+	}
+
+	foreign := agent.NewSession("sys")
+	foreign.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	foreign.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	foreign.Add(provider.Message{Role: provider.RoleUser, Content: "foreign second"})
+	if err := foreign.Save(path); err != nil {
+		t.Fatalf("Save foreign: %v", err)
+	}
+	meta, ok, err = agent.LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta foreign ok=%v err=%v", ok, err)
+	}
+	meta.Recovered = true
+	meta.RecoveryDepth = agent.SessionRecoveryMaxDepth
+	if err := agent.SaveBranchMeta(path, meta); err != nil {
+		t.Fatalf("SaveBranchMeta foreign: %v", err)
+	}
+	if err := c.Snapshot(); err != nil {
+		t.Fatalf("repeated depth-cap Snapshot: %v", err)
+	}
+	if got := sink.notices(); len(got) != len(notices) {
+		t.Fatalf("repeated depth-cap snapshot emitted duplicate notice: %v", got)
+	}
+
+	// The force save re-anchored the baseline: the next snapshot must not
+	// conflict again.
+	stale.Add(provider.Message{Role: provider.RoleAssistant, Content: "answer"})
+	if err := c.Snapshot(); err != nil {
+		t.Fatalf("follow-up Snapshot: %v", err)
+	}
+	if got := sink.notices(); len(got) != len(notices) {
+		t.Fatalf("follow-up snapshot emitted more notices: %v", got)
+	}
+}
+
+func TestNewSessionRefusesWhileTurnRunning(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "old context"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	path := filepath.Join(dir, "session.jsonl")
+	c := New(Options{Executor: exec, SystemPrompt: "sys", SessionDir: dir, SessionPath: path, Label: "test"})
+
+	c.mu.Lock()
+	c.running = true
+	c.mu.Unlock()
+
+	if err := c.NewSession(); err == nil {
+		t.Fatal("NewSession while running = nil error, want refusal")
+	}
+	if got := c.SessionPath(); got != path {
+		t.Fatalf("session path = %q, want unrotated %q", got, path)
+	}
+	if snap := exec.Session().Snapshot(); len(snap) != 2 {
+		t.Fatalf("running session was reset out from under the turn: %+v", snap)
+	}
+
+	c.mu.Lock()
+	c.running = false
+	c.mu.Unlock()
+	if err := c.NewSession(); err != nil {
+		t.Fatalf("NewSession after the turn stopped: %v", err)
+	}
+	if c.SessionPath() == path {
+		t.Fatal("session path did not rotate once the turn stopped")
+	}
+}
+
+// TestNewSessionRefusesTurnStartedDuringSnapshot forces the TOCTOU interleaving
+// the running guard alone missed: a turn starts while NewSession is mid-Snapshot
+// (running was false at the entry check), and must be refused so the executor
+// session is not swapped out from under a live run loop.
+func TestNewSessionRefusesTurnStartedDuringSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+
+	// A diverged on-disk transcript makes Snapshot enter the recovery callback,
+	// where the test parks NewSession mid-rotation.
+	diskSess := agent.NewSession("sys")
+	diskSess.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	diskSess.Add(provider.Message{Role: provider.RoleAssistant, Content: "disk"})
+	if err := diskSess.Save(path); err != nil {
+		t.Fatalf("Save disk: %v", err)
+	}
+	localSess := agent.NewSession("sys")
+	localSess.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	localSess.Add(provider.Message{Role: provider.RoleAssistant, Content: "local"})
+	localExec := agent.New(nil, nil, localSess, agent.Options{}, event.Discard)
+
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	c := New(Options{
+		Executor:     localExec,
+		SystemPrompt: "sys",
+		SessionDir:   dir,
+		SessionPath:  path,
+		Label:        "test",
+		OnSessionRecovered: func(SessionRecoveryInfo) error {
+			entered <- struct{}{}
+			<-release
+			return nil
+		},
+	})
+
+	newSessionDone := make(chan error, 1)
+	go func() { newSessionDone <- c.NewSession() }()
+
+	// NewSession is now parked inside Snapshot, still holding the rotation gate.
+	<-entered
+
+	// A turn tries to start in exactly the window the bare running check left
+	// open. It must be refused rather than flip running=true and read the
+	// session NewSession is about to replace.
+	if err := c.RunTurn(context.Background(), "hello"); !errors.Is(err, ErrTurnRunning) {
+		close(release)
+		<-newSessionDone
+		t.Fatalf("RunTurn during rotation = %v, want ErrTurnRunning", err)
+	}
+	if c.Running() {
+		close(release)
+		<-newSessionDone
+		t.Fatal("RunTurn set running=true during a rotation")
+	}
+	// The live session must be untouched while the refused turn could have read
+	// it: NewSession has not swapped yet (still parked before the swap).
+	if snap := localExec.Session().Snapshot(); len(snap) != 3 {
+		close(release)
+		<-newSessionDone
+		t.Fatalf("session mutated during rotation window: %+v", snap)
+	}
+
+	close(release)
+	if err := <-newSessionDone; err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	// Rotation completed: a fresh session with only the system prompt, on a new
+	// path, and a turn may start again.
+	if c.SessionPath() == path {
+		t.Fatal("session path did not rotate")
+	}
+	if snap := localExec.Session().Snapshot(); len(snap) != 1 || snap[0].Role != provider.RoleSystem {
+		t.Fatalf("post-rotation session = %+v, want only system prompt", snap)
+	}
+	if c.Running() {
+		t.Fatal("rotation gate leaked: controller still marked running")
+	}
+}
+
+// TestSessionMutationsRefuseWhileRotating proves every session-mutating entry
+// point is wired to the same rotation gate: while a rotation is in progress
+// (c.rotating held), each refuses instead of swapping/rewriting the live
+// session, and a turn cannot start either. This is the TOCTOU class the bare
+// Running() checks left open — a mutation slipping in mid-rotation.
+func TestSessionMutationsRefuseWhileRotating(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "there"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	c := New(Options{Executor: exec, SystemPrompt: "sys", SessionDir: dir, SessionPath: path, Label: "test"})
+
+	// Simulate a rotation already in progress (as NewSession/ClearSession hold
+	// it across their snapshot-then-swap window).
+	if err := c.beginRotation(); err != nil {
+		t.Fatalf("beginRotation: %v", err)
+	}
+
+	if err := c.NewSession(); !errors.Is(err, errRotationInProgress) {
+		t.Fatalf("NewSession while rotating = %v, want errRotationInProgress", err)
+	}
+	if err := c.ClearSession(); !errors.Is(err, errRotationInProgress) {
+		t.Fatalf("ClearSession while rotating = %v, want errRotationInProgress", err)
+	}
+	if _, err := c.Branch("x"); !errors.Is(err, errRotationInProgress) {
+		t.Fatalf("Branch while rotating = %v, want errRotationInProgress", err)
+	}
+	if _, err := c.ForkNamed(1, "x"); !errors.Is(err, errRotationInProgress) {
+		t.Fatalf("ForkNamed while rotating = %v, want errRotationInProgress", err)
+	}
+	if _, err := c.SwitchBranch("x"); !errors.Is(err, errRotationInProgress) {
+		t.Fatalf("SwitchBranch while rotating = %v, want errRotationInProgress", err)
+	}
+	if err := c.Compact(context.Background(), ""); !errors.Is(err, errRotationInProgress) {
+		t.Fatalf("Compact while rotating = %v, want errRotationInProgress", err)
+	}
+	if err := c.Rewind(0, RewindConversation); !errors.Is(err, errRotationInProgress) {
+		t.Fatalf("Rewind while rotating = %v, want errRotationInProgress", err)
+	}
+	if err := c.SummarizeFrom(context.Background(), 1); !errors.Is(err, errRotationInProgress) {
+		t.Fatalf("SummarizeFrom while rotating = %v, want errRotationInProgress", err)
+	}
+	if err := c.SummarizeUpTo(context.Background(), 1); !errors.Is(err, errRotationInProgress) {
+		t.Fatalf("SummarizeUpTo while rotating = %v, want errRotationInProgress", err)
+	}
+	// A turn must not start while a rotation holds the gate.
+	if err := c.RunTurn(context.Background(), "hello"); !errors.Is(err, ErrTurnRunning) {
+		t.Fatalf("RunTurn while rotating = %v, want ErrTurnRunning", err)
+	}
+	// The live session was never touched by any refused mutation.
+	if snap := exec.Session().Snapshot(); len(snap) != 3 {
+		t.Fatalf("session mutated during rotation = %+v, want untouched", snap)
+	}
+
+	c.endRotation()
+
+	// Conversely: while a turn runs, every mutation is refused with its own
+	// message and the gate cannot be claimed.
+	c.mu.Lock()
+	c.running = true
+	c.mu.Unlock()
+	if err := c.beginRotation(); !errors.Is(err, errTurnRunningRotation) {
+		t.Fatalf("beginRotation while running = %v, want errTurnRunningRotation", err)
+	}
+	if err := c.Compact(context.Background(), ""); err == nil || !strings.Contains(err.Error(), "cannot compact while a turn is running") {
+		t.Fatalf("Compact while running = %v, want 'cannot compact' message", err)
+	}
+	if err := c.Rewind(0, RewindConversation); err == nil || !strings.Contains(err.Error(), "cannot rewind while a turn is running") {
+		t.Fatalf("Rewind while running = %v, want 'cannot rewind' message", err)
+	}
+	if err := c.SummarizeFrom(context.Background(), 1); err == nil || !strings.Contains(err.Error(), "cannot summarize while a turn is running") {
+		t.Fatalf("SummarizeFrom while running = %v, want 'cannot summarize' message", err)
 	}
 }
 

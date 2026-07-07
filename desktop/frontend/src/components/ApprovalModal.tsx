@@ -4,7 +4,6 @@ import gsap from "gsap";
 import { useT, type Translator } from "../lib/i18n";
 import type { ComposerInsertRequest, DirEntry, WireApproval } from "../lib/types";
 import { PromptAction, PromptBadge, PromptHeaderAction, PromptShelf } from "./PromptShelf";
-import { playAttentionChime } from "../lib/sound";
 import { DUR_FAST } from "../lib/gsapAnimations";
 import {
   FileReferenceMenu,
@@ -205,7 +204,6 @@ export function ApprovalModal({
     setRevisionText("");
     setDetailsOpen(showToolDetailsByDefault);
     setSelectedIndex(isPlanApproval ? 1 : 0);
-    playAttentionChime();
   }, [approval.id, isPlanApproval, showToolDetailsByDefault]);
 
   const actionCount = isPlanApproval ? 3 : isFreshHumanApproval ? (hasFreshSessionGrant ? 3 : 2) : 4;

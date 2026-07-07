@@ -175,7 +175,8 @@ func (p Policy) DecideSubject(toolName string, readOnly bool, subject string) De
 //
 // Precedence stays deny > ask > allow > fallback. Any single segment hitting
 // deny denies the whole call; any segment needing approval turns the whole
-// call into Ask; the whole call is Allow only if every segment is covered.
+// call into Ask; the whole call is Allow only if every segment is covered or
+// writer fallback allows uncovered segments.
 // A segment recognized as read-only by shellsafe (echo/ls/git status/...) is
 // allowed on its own without a rule, matching the behavior of an atomic
 // read-only bash call.
@@ -198,9 +199,16 @@ func (p Policy) decideBashSegments(readOnly bool, parts []string) Decision {
 		case segReadOnly:
 			// covered
 		default:
-			// segment not covered — surface as Ask, but keep scanning for a
-			// downstream Deny that would still trump.
-			out = Ask
+			// Segment not covered by a rule or read-only classification: apply
+			// the same writer fallback used for atomic bash commands.
+			switch p.Mode {
+			case Deny:
+				return Deny
+			case Ask:
+				out = Ask
+			default:
+				// covered by fallback allow
+			}
 		}
 	}
 	return out

@@ -17,7 +17,7 @@ provides the pre-release buffer instead of a long-lived branch.
 
 | Surface | Stable | Pre-release buffer |
 |---|---|---|
-| npm | `latest` (0.x), `next` (1.x) | `canary` (`npm i reasonix@canary`) |
+| npm | `latest` (current 1.x stable) | `next` (rc), `canary` (`npm i reasonix@canary`) |
 | Desktop | R2 `latest/` pointer + release gateway | R2 `canary/` pointer + release gateway proxy (never on the GitHub releases page) |
 
 A canary build is isolated: it **never** moves `latest` / `next` / desktop `latest/`.
@@ -53,15 +53,18 @@ the `release` environment deployment.
 5. **Ship stable** when the canary is clean — push the three tags:
    ```sh
    git tag v1.4.0         && git push origin v1.4.0          # CLI binaries + Homebrew
-   git tag npm-v1.4.0     && git push origin npm-v1.4.0      # npm -> next
+   git tag npm-v1.4.0     && git push origin npm-v1.4.0      # npm -> latest
    git tag desktop-v1.4.0 && git push origin desktop-v1.4.0  # desktop -> R2 latest/
    ```
    Each stable run **waits for esengine to approve the `release` environment** before publishing.
-6. **Promote to default install** (optional, when 1.x should become the bare `npm i` target):
-   ```sh
-   npm dist-tag add reasonix@1.4.0 latest
-   ```
-7. **Next cycle** — the canary rolls on toward `1.5.0`.
+   A stable `npm-v*` publish moves the `latest` dist-tag automatically (build.mjs)
+   and release-npm.yml verifies it landed. **Do not skip the npm tag**: the stable
+   CLI release (release.yml) fails when the matching `npm-v*` tag was never pushed
+   — that guard exists because 1.0.0–1.17.5 shipped without stable npm tags and
+   `npm update -g` silently downgraded users to 0.53.2 (#5822). A pushed tag whose
+   publish is still awaiting approval only warns; release-npm.yml's verify step
+   owns asserting the dist-tag lands.
+6. **Next cycle** — the canary rolls on toward `1.5.0`.
 
 ## Notes
 

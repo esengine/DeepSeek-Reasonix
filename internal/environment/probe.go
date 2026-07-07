@@ -57,6 +57,15 @@ type ProbeResult struct {
 type ProbeOptions struct {
 	Overrides map[string]string
 	DenyRoots []string
+	// SnapshotDir, when set, persists probe results across process restarts
+	// (one snapshot per fingerprint under SnapshotDir/environment). A snapshot
+	// younger than probeSnapshotTTL is served without re-probing, and a
+	// refresh merges transient failures against the previous snapshot — both
+	// keep the rendered environment section byte-stable so the cached
+	// system-prompt prefix survives rebuilds. Empty disables persistence.
+	// The directory is host state, never model-visible, so it stays out of
+	// the probe fingerprint.
+	SnapshotDir string
 }
 
 func DefaultProbes() []string {
@@ -93,7 +102,22 @@ func RunProbesWithOptions(ctx context.Context, commands []string, opts ProbeOpti
 		<-call.done
 		return cloneProbeResults(call.results)
 	}
+	// A fresh persisted snapshot substitutes for a live run entirely: rebuilds
+	// and app relaunches within the TTL render the exact bytes the sessions on
+	// this machine were recorded with, so the provider prefix cache survives.
+	snapshot, hasSnapshot := loadProbeSnapshot(opts.SnapshotDir, key)
+	if hasSnapshot && now.Sub(snapshot.StoredAt) < probeSnapshotTTL {
+		finishProbe(key, snapshot.Results, now)
+		return cloneProbeResults(snapshot.Results)
+	}
 	results := runProbesUncached(ctx, commands, opts)
+	if hasSnapshot {
+		// Even an expired snapshot anchors the flap merge: transient failures
+		// (timeout, nonzero exit) keep the previous successful observation so
+		// a slow tool cannot rewrite the prompt prefix.
+		results = mergeProbeSnapshot(snapshot.Results, results)
+	}
+	saveProbeSnapshot(opts.SnapshotDir, key, results, now)
 	finishProbe(key, results, probeNow())
 	return cloneProbeResults(results)
 }

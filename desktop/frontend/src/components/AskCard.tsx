@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "../lib/i18n";
 import type { QuestionAnswer, WireAsk, WireAskQuestion } from "../lib/types";
 import { PromptAction, PromptHeaderAction, PromptShelf } from "./PromptShelf";
-import { playAttentionChime } from "../lib/sound";
 
 // AskCard renders the `ask` tool as a compact prompt shelf near the composer. It
 // walks multi-question asks one at a time; single-select answers advance
@@ -41,7 +40,9 @@ export function AskCard({
     setCustomOpen(false);
     setActive(0);
     if (advanceTimer.current != null) window.clearTimeout(advanceTimer.current);
-    playAttentionChime();
+    // The attention chime plays from the global runtime event stream (App.tsx),
+    // keyed by prompt id — not here. A mount-time chime would double-fire for
+    // the active tab and stay silent for background tabs.
   }, [ask.id]);
 
   useEffect(() => {

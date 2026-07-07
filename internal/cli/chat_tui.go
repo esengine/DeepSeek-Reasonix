@@ -401,14 +401,20 @@ func (m chatTUI) runStatusline() tea.Cmd {
 	return func() tea.Msg { return statuslineMsg{out: runStatuslineCmd(cmd, string(payload))} }
 }
 
+const statuslineCommandTimeout = 2 * time.Second
+
 // runStatuslineCmd runs a status-line command with the JSON context on stdin and
 // returns its first stdout line (status lines are a single row). A tight timeout
 // keeps a slow script from stalling the UI; any failure collapses to "".
 func runStatuslineCmd(cmd, stdinPayload string) string {
+	return runStatuslineCmdWithTimeout(cmd, stdinPayload, statuslineCommandTimeout)
+}
+
+func runStatuslineCmdWithTimeout(cmd, stdinPayload string, timeout time.Duration) string {
 	res := hook.DefaultSpawner(context.Background(), hook.SpawnInput{
 		Command: cmd,
 		Stdin:   stdinPayload + "\n",
-		Timeout: 2 * time.Second,
+		Timeout: timeout,
 	})
 	out := strings.TrimSpace(res.Stdout)
 	if i := strings.IndexByte(out, '\n'); i >= 0 {
@@ -2678,11 +2684,10 @@ func cacheRateLabel(format string, hit, denom int) string {
 func (m chatTUI) cacheTag() string {
 	now := ""
 	if u := m.ctrl.LastUsage(); u != nil {
-		d := u.CacheHitTokens + u.CacheMissTokens
-		if d == 0 {
-			d = u.PromptTokens
-		}
-		now = cacheRateLabel(i18n.M.ChatStatusCacheNowFmt, u.CacheHitTokens, d)
+		// Only render when the provider actually reports cache token fields:
+		// falling back to PromptTokens as the denominator painted a bogus
+		// "turn hit 0.00%" for providers with no prompt-cache support.
+		now = cacheRateLabel(i18n.M.ChatStatusCacheNowFmt, u.CacheHitTokens, u.CacheHitTokens+u.CacheMissTokens)
 	}
 	avg := ""
 	if hit, miss := m.ctrl.SessionCache(); hit+miss > 0 {

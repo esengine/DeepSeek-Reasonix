@@ -28,6 +28,7 @@ func TestRemoveSessionArtifactsSweepsEventLogAndSidecars(t *testing.T) {
 	}
 	for _, extra := range []string{
 		store.SessionGoalState(path),
+		store.SessionConflictLog(path),
 		guardian.PathFor(path),
 		guardian.CursorPathFor(path),
 		store.SessionEventLog(guardian.PathFor(path)),
@@ -47,6 +48,7 @@ func TestRemoveSessionArtifactsSweepsEventLogAndSidecars(t *testing.T) {
 		store.SessionGoalState(path),
 		store.SessionEventLog(path),
 		store.SessionEventIndex(path),
+		store.SessionConflictLog(path),
 		guardian.PathFor(path),
 		guardian.CursorPathFor(path),
 		store.SessionEventLog(guardian.PathFor(path)),

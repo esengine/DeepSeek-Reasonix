@@ -6,6 +6,7 @@ import (
 
 	"reasonix/internal/evidence"
 	"reasonix/internal/instruction"
+	"reasonix/internal/provider"
 )
 
 func readinessLedger(receipts ...evidence.Receipt) *evidence.Ledger {
@@ -98,6 +99,75 @@ func TestFinalReadinessCheckAuditsIncompleteTodos(t *testing.T) {
 	}
 }
 
+func TestFinalReadinessAllowsFinalAfterLoopGuardedToolBlocker(t *testing.T) {
+	todo := evidence.Receipt{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{{Content: "edit", Status: "in_progress"}}}
+	writer := evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Paths: []string{"a.go"}}
+	ledger := readinessLedger(writer, todo)
+	a := &Agent{evidence: ledger}
+	a.armLoopGuardPass(ledger.Len())
+
+	got := a.finalReadinessCheck()
+	if !got.applies {
+		t.Fatalf("finalReadinessCheck() applies = false, want true audit after loop guard")
+	}
+	if got.reason != "" {
+		t.Fatalf("finalReadinessCheck() reason = %q, want loop guard to allow final blocker report", got.reason)
+	}
+}
+
+// TestFinalReadinessLoopGuardPassSurvivesBookkeeping proves the exact actions
+// the loop guard recommends — ask, todo_write, complete_step — do not revoke
+// the pass: the model must be able to record the blocker and then report it.
+func TestFinalReadinessLoopGuardPassSurvivesBookkeeping(t *testing.T) {
+	todo := evidence.Receipt{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{{Content: "edit", Status: "in_progress"}}}
+	writer := evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Paths: []string{"a.go"}}
+	ledger := readinessLedger(writer, todo)
+	a := &Agent{evidence: ledger}
+	a.armLoopGuardPass(ledger.Len())
+
+	ledger.Record(evidence.Receipt{ToolName: "ask", Success: true})
+	ledger.Record(evidence.Receipt{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{{Content: "edit", Status: "in_progress"}}})
+	ledger.Record(evidence.Receipt{ToolName: "complete_step", Success: true, Step: "edit"})
+
+	if got := a.finalReadinessCheck(); got.reason != "" {
+		t.Fatalf("finalReadinessCheck() reason = %q, want bookkeeping after the guard to keep the pass", got.reason)
+	}
+}
+
+// TestFinalReadinessLoopGuardPassRevokedByRealProgress proves a successful
+// write or command receipt after the guard revokes the pass: receipts are
+// obtainable again, so readiness resumes enforcing them.
+func TestFinalReadinessLoopGuardPassRevokedByRealProgress(t *testing.T) {
+	todo := evidence.Receipt{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{{Content: "edit", Status: "in_progress"}}}
+	writer := evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Paths: []string{"a.go"}}
+	ledger := readinessLedger(writer, todo)
+	a := &Agent{evidence: ledger}
+	a.armLoopGuardPass(ledger.Len())
+
+	ledger.Record(evidence.Receipt{ToolName: "bash", Success: true, Command: "go test ./..."})
+
+	if got := a.finalReadinessCheck(); got.reason == "" {
+		t.Fatal("finalReadinessCheck() reason empty, want real progress after the guard to revoke the pass")
+	}
+}
+
+// TestFinalReadinessIgnoresLoopGuardQuotedInToolOutput proves the pass is host
+// state, not message text: a tool result that merely quotes "[loop guard]"
+// (a grep over this repo, a pasted transcript) must not unlock readiness.
+func TestFinalReadinessIgnoresLoopGuardQuotedInToolOutput(t *testing.T) {
+	todo := evidence.Receipt{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{{Content: "edit", Status: "in_progress"}}}
+	writer := evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Paths: []string{"a.go"}}
+	sess := NewSession("")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "edit"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "b1", Name: "bash"}}})
+	sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "b1", Name: "bash", Content: "agent.go:2082: \"[loop guard] %s has now %s %d times\""})
+	a := &Agent{evidence: readinessLedger(writer, todo), session: sess}
+
+	if got := a.finalReadinessCheck(); got.reason == "" {
+		t.Fatal("finalReadinessCheck() reason empty, want quoted loop-guard text to be ignored")
+	}
+}
+
 func TestFinalReadinessRetryMessageKeepsUserChoicesInteractive(t *testing.T) {
 	msg := finalReadinessRetryMessage("latest successful todo_write still has incomplete items: Ask user to review the doc: in_progress")
 	lower := strings.ToLower(msg)
@@ -106,6 +176,8 @@ func TestFinalReadinessRetryMessageKeepsUserChoicesInteractive(t *testing.T) {
 		"wait for its tool result",
 		"do not ask in prose",
 		"do not claim the user answered",
+		"do not run exploratory bash commands",
+		"do not keep retrying the blocked command",
 	} {
 		if !strings.Contains(lower, want) {
 			t.Fatalf("finalReadinessRetryMessage() missing %q:\n%s", want, msg)

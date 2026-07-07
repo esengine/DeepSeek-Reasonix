@@ -8,6 +8,7 @@ import {
   SettingsPanel,
   formatProviderExtraBody,
   parseProviderExtraBody,
+  providerExtraBodyParseError,
   providerBaseURLFromChatURL,
   providerChatURLPreview,
   providerEditorEffectiveKind,
@@ -146,6 +147,26 @@ try {
   extraBodyRejected = true;
 }
 ok(extraBodyRejected, "extra body editor rejects non-object JSON");
+const extraBodyTestT = ((key: string, vars?: Record<string, string | number>) => {
+  if (key === "settings.providerExtraBodyError") return "localized extra body fallback";
+  if (key === "settings.providerExtraBodyNull") return `${vars?.path} localized null`;
+  return key;
+}) as any;
+eq(
+  providerExtraBodyParseError(new SyntaxError("Unexpected token } in JSON"), extraBodyTestT),
+  "localized extra body fallback",
+  "extra body editor localizes JSON syntax errors",
+);
+try {
+  parseProviderExtraBody('{ "nested": { "value": null } }', extraBodyTestT);
+  ok(false, "extra body editor rejects localized null validation errors");
+} catch (e) {
+  eq(
+    providerExtraBodyParseError(e, extraBodyTestT),
+    "extra_body.nested.value localized null",
+    "extra body editor keeps localized structured validation errors",
+  );
+}
 
 const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
   pretendToBeVisual: true,

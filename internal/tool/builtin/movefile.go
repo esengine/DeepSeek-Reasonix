@@ -18,9 +18,12 @@ func init() { tool.RegisterBuiltin(moveFile{}) }
 var renameFile = os.Rename
 
 // moveFile moves or renames one file. roots, when non-empty, confine both the
-// source and destination to the workspace; workDir resolves relative paths.
+// source and destination to the workspace; guard rejects Reasonix session-data
+// endpoints on either side (a move out of the store mutates it too); workDir
+// resolves relative paths.
 type moveFile struct {
 	roots   []string
+	guard   SessionDataGuard
 	workDir string
 }
 
@@ -52,10 +55,10 @@ func (m moveFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 	src := resolveIn(m.workDir, p.SourcePath)
 	dst := resolveIn(m.workDir, p.DestinationPath)
-	if err := confine(m.roots, src); err != nil {
+	if err := confineWrite(m.roots, m.guard, src); err != nil {
 		return "", err
 	}
-	if err := confine(m.roots, dst); err != nil {
+	if err := confineWrite(m.roots, m.guard, dst); err != nil {
 		return "", err
 	}
 	info, err := os.Stat(src)
