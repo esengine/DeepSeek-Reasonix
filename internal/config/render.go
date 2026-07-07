@@ -434,9 +434,10 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	b.WriteString("[sandbox]\n")
 	b.WriteString("# Confine tool blast radius. File-writers (write_file/edit_file/multi_edit/move_file)\n")
 	b.WriteString("# may only write under workspace_root (empty = current dir) and allow_write extras.\n")
-	b.WriteString("# bash = \"enforce\" (default) jails each command in an OS sandbox when\n")
-	b.WriteString("# available; without one, bash execution is refused. Set bash = \"off\" to restore\n")
-	b.WriteString("# pre-1.16 unconfined shell execution. network allows sandboxed bash egress.\n")
+	b.WriteString("# bash = \"enforce\" jails each command in an OS sandbox when available;\n")
+	b.WriteString("# without one, bash execution is refused. Empty defaults to enforce on macOS/Linux\n")
+	b.WriteString("# and off on Windows. Set bash = \"off\" to restore pre-1.16 unconfined shell execution.\n")
+	b.WriteString("# network allows sandboxed bash egress.\n")
 	if c.Sandbox.WorkspaceRoot != "" {
 		fmt.Fprintf(&b, "workspace_root = %q\n", c.Sandbox.WorkspaceRoot)
 	} else {
@@ -1029,7 +1030,9 @@ func RenderTOMLProjectDelta(c *Config) string {
 		if len(c.Sandbox.AllowWrite) > 0 {
 			fmt.Fprintf(&b, "allow_write = %s\n", renderStringArray(c.Sandbox.AllowWrite))
 		}
-		if c.BashMode() != "enforce" {
+		// Only an explicitly set bash mode is a project delta; an empty value
+		// inherits the platform default.
+		if strings.TrimSpace(c.Sandbox.Bash) != "" {
 			fmt.Fprintf(&b, "bash = %q\n", c.BashMode())
 		}
 		if c.Sandbox.Network != d.Sandbox.Network {

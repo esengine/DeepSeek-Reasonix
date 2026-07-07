@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"reasonix/internal/provider"
+	"reasonix/internal/store"
 )
 
 // touch sets a file's mtime to t. Used by the listing-order test so it
@@ -141,6 +142,337 @@ func TestSaveSnapshotAllowsAppendFromDiskPrefix(t *testing.T) {
 	}
 	if got := len(loaded.Messages); got != 3 {
 		t.Fatalf("message count after append snapshot = %d, want 3", got)
+	}
+}
+
+// TestSaveSnapshotAppendsAcrossInterruptedToolCallTail is the mid-turn autosave
+// shape from the field: a snapshot lands between an assistant tool call and its
+// still-running result, so the transcript on disk ends with a dangling call
+// that LoadSession answers with a fabricated placeholder. The live session then
+// records the real result and keeps going. The next snapshot is a pure append
+// over the bytes on disk and must land as one — not collide with the
+// placeholder, misread the turn as divergence, and fork a recovery branch.
+func TestSaveSnapshotAppendsAcrossInterruptedToolCallTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "run the build"})
+	s.Add(provider.Message{
+		Role: provider.RoleAssistant, Content: "Running it.",
+		ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "bash", Arguments: `{"cmd":"make"}`}},
+	})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("mid-turn SaveSnapshot: %v", err)
+	}
+
+	s.Add(provider.Message{Role: provider.RoleTool, Name: "bash", ToolCallID: "call_1", Content: "ok"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "Build passed."})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot after tool result: %v", err)
+	}
+
+	replay, err := replaySessionEventLog(SessionEventLogPath(path))
+	if err != nil {
+		t.Fatalf("replay event log: %v", err)
+	}
+	if replay.damaged {
+		t.Fatal("event log damaged after appending over an interrupted tool tail")
+	}
+	if replay.records != 2 {
+		t.Fatalf("event log records = %d, want 2 (bootstrap replace + append)", replay.records)
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got := len(loaded.Messages); got != 5 {
+		t.Fatalf("message count after append snapshot = %d, want 5", got)
+	}
+	if got := loaded.Messages[3].Content; got != "ok" {
+		t.Fatalf("tool result after round-trip = %q, want %q", got, "ok")
+	}
+	if loaded.normalizedDirty {
+		t.Fatal("transcript still needs repair after appending the real tool result")
+	}
+}
+
+// TestSaveSnapshotAppendsAcrossPartiallyAnsweredMultiToolCallTail covers the
+// same raw-prefix fallback when a multi-call assistant turn already has some
+// tool results on disk. LoadSession fabricates placeholders only for the still
+// unanswered calls; the live session later appends the real remaining results.
+func TestSaveSnapshotAppendsAcrossPartiallyAnsweredMultiToolCallTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "inspect and test"})
+	s.Add(provider.Message{
+		Role: provider.RoleAssistant, Content: "I will run a few checks.",
+		ToolCalls: []provider.ToolCall{
+			{ID: "call_read", Name: "read_file", Arguments: `{"path":"main.go"}`},
+			{ID: "call_test", Name: "bash", Arguments: `{"cmd":"go test ./..."}`},
+			{ID: "call_status", Name: "bash", Arguments: `{"cmd":"git status --short"}`},
+		},
+	})
+	s.Add(provider.Message{Role: provider.RoleTool, Name: "read_file", ToolCallID: "call_read", Content: "package main"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("partial multi-tool SaveSnapshot: %v", err)
+	}
+
+	loadedPartial, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession partial: %v", err)
+	}
+	if !loadedPartial.normalizedDirty {
+		t.Fatal("partial multi-tool load should need placeholder repair")
+	}
+
+	s.Add(provider.Message{Role: provider.RoleTool, Name: "bash", ToolCallID: "call_test", Content: "ok"})
+	s.Add(provider.Message{Role: provider.RoleTool, Name: "bash", ToolCallID: "call_status", Content: "clean"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "All checks passed."})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot after remaining multi-tool results: %v", err)
+	}
+
+	events := readSessionEventsForTest(t, path)
+	if len(events) != 2 || events[1].Type != sessionEventTypeAppend {
+		t.Fatalf("events after multi-tool append = %+v, want trailing append", events)
+	}
+	if events[1].MessageIndex != 4 || len(events[1].Messages) != 3 {
+		t.Fatalf("multi-tool append event index=%d len=%d, want index 4 len 3", events[1].MessageIndex, len(events[1].Messages))
+	}
+	replay, err := replaySessionEventLog(SessionEventLogPath(path))
+	if err != nil {
+		t.Fatalf("replay event log: %v", err)
+	}
+	if replay.damaged {
+		t.Fatal("event log damaged after appending remaining multi-tool results")
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession final: %v", err)
+	}
+	if got := len(loaded.Messages); got != 7 {
+		t.Fatalf("message count after multi-tool append = %d, want 7", got)
+	}
+	if got := loaded.Messages[4].Content; got != "ok" {
+		t.Fatalf("second tool result after round-trip = %q, want ok", got)
+	}
+	if got := loaded.Messages[5].Content; got != "clean" {
+		t.Fatalf("third tool result after round-trip = %q, want clean", got)
+	}
+	if loaded.normalizedDirty {
+		t.Fatal("multi-tool transcript still needs repair after real results landed")
+	}
+}
+
+// TestSaveSnapshotUnchangedInterruptedToolCallTailIsNoOp covers the turn that
+// stays interrupted (cancel, crash recovery with nothing new in memory):
+// re-snapshotting the exact bytes on disk must be a no-op, not a stale-prefix
+// conflict against the placeholder the load-time repair fabricated.
+func TestSaveSnapshotUnchangedInterruptedToolCallTailIsNoOp(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "run the build"})
+	s.Add(provider.Message{
+		Role: provider.RoleAssistant, Content: "Running it.",
+		ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "bash", Arguments: `{"cmd":"make"}`}},
+	})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("mid-turn SaveSnapshot: %v", err)
+	}
+	logBefore, err := os.ReadFile(SessionEventLogPath(path))
+	if err != nil {
+		t.Fatalf("ReadFile event log: %v", err)
+	}
+
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot unchanged: %v", err)
+	}
+	logAfter, err := os.ReadFile(SessionEventLogPath(path))
+	if err != nil {
+		t.Fatalf("ReadFile event log after no-op snapshot: %v", err)
+	}
+	if string(logBefore) != string(logAfter) {
+		t.Fatal("no-op snapshot rewrote the event log")
+	}
+	if revision, _, err := sessionContentRevision(path); err != nil || revision != 1 {
+		t.Fatalf("revision after no-op snapshot = %d (err %v), want 1", revision, err)
+	}
+}
+
+// TestSaveRewriteOwnedAcrossInterruptedToolCallTail: compaction rewrites the
+// in-memory history while the transcript on disk still ends with the dangling
+// call a mid-turn snapshot left behind. Ownership is anchored on the raw bytes
+// this session wrote; the placeholder fabricated on load must not revoke it.
+func TestSaveRewriteOwnedAcrossInterruptedToolCallTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "run the build"})
+	s.Add(provider.Message{
+		Role: provider.RoleAssistant, Content: "Running it.",
+		ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "bash", Arguments: `{"cmd":"make"}`}},
+	})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("mid-turn SaveSnapshot: %v", err)
+	}
+
+	s.Replace([]provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "[compacted] run the build"},
+	})
+	if err := s.SaveRewrite(path); err != nil {
+		t.Fatalf("SaveRewrite after compaction: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got := len(loaded.Messages); got != 2 {
+		t.Fatalf("message count after owned rewrite = %d, want 2", got)
+	}
+	if got := loaded.Messages[1].Content; got != "[compacted] run the build" {
+		t.Fatalf("compacted message after round-trip = %q", got)
+	}
+}
+
+// TestSaveSnapshotAfterDirtyResumeKeepsEventChainReplayable: a session resumed
+// from an interrupted tool tail carries the load-time repair in memory, so its
+// transcript is one message longer than what the event log replays. The next
+// snapshot must not take the append shortcut with that inflated index — the
+// chain-broken append event would be discarded on replay, silently dropping
+// the whole new turn from disk. It must fall back to a full rewrite that
+// persists the repair and the new turn together.
+func TestSaveSnapshotAfterDirtyResumeKeepsEventChainReplayable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "run the build"})
+	s.Add(provider.Message{
+		Role: provider.RoleAssistant, Content: "Running it.",
+		ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "bash", Arguments: `{"cmd":"make"}`}},
+	})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("mid-turn SaveSnapshot: %v", err)
+	}
+
+	// Crash + reopen: the resume load answers the dangling call with a
+	// placeholder, then the user runs another turn.
+	resumed, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession resume: %v", err)
+	}
+	if !resumed.normalizedDirty {
+		t.Fatal("resume load should carry a pending repair for the dangling call")
+	}
+	resumed.Add(provider.Message{Role: provider.RoleUser, Content: "try again"})
+	resumed.Add(provider.Message{Role: provider.RoleAssistant, Content: "done"})
+	if err := resumed.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot after dirty resume: %v", err)
+	}
+
+	replay, err := replaySessionEventLog(SessionEventLogPath(path))
+	if err != nil {
+		t.Fatalf("replay event log: %v", err)
+	}
+	if replay.damaged {
+		t.Fatal("event log chain broken by the post-resume snapshot")
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession reload: %v", err)
+	}
+	if got := len(loaded.Messages); got != 6 {
+		t.Fatalf("message count after post-resume snapshot = %d, want 6", got)
+	}
+	if got := loaded.Messages[3].ToolCallID; got != "call_1" {
+		t.Fatalf("placeholder tool result not persisted; message 3 tool_call_id = %q", got)
+	}
+	if got := loaded.Messages[5].Content; got != "done" {
+		t.Fatalf("new turn after round-trip = %q, want %q", got, "done")
+	}
+}
+
+// TestSaveSnapshotAfterDirtyResumeWithTruncatedToolArgsPersistsRepair covers a
+// same-length load-time repair: truncated tool-call JSON is fixed in memory, but
+// appending against the repaired view would leave the broken arguments on disk.
+// The snapshot must rewrite so the repair and new turn persist together.
+func TestSaveSnapshotAfterDirtyResumeWithTruncatedToolArgsPersistsRepair(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "run tests"})
+	s.Add(provider.Message{
+		Role:      provider.RoleAssistant,
+		Content:   "Running tests.",
+		ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "bash", Arguments: `{"cmd":"go test ./...`}},
+	})
+	s.Add(provider.Message{Role: provider.RoleTool, Name: "bash", ToolCallID: "call_1", Content: "ok"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot with truncated args: %v", err)
+	}
+
+	resumed, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession resume: %v", err)
+	}
+	if !resumed.normalizedDirty {
+		t.Fatal("resume load should carry a pending repair for truncated tool arguments")
+	}
+	const repairedArgs = `{"cmd":"go test ./..."}`
+	if got := resumed.Messages[2].ToolCalls[0].Arguments; got != repairedArgs {
+		t.Fatalf("repaired args on resume = %q, want %q", got, repairedArgs)
+	}
+
+	resumed.Add(provider.Message{Role: provider.RoleUser, Content: "summarize"})
+	resumed.Add(provider.Message{Role: provider.RoleAssistant, Content: "Tests passed."})
+	if err := resumed.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot after truncated-args resume: %v", err)
+	}
+
+	events := readSessionEventsForTest(t, path)
+	if len(events) != 2 || events[1].Type != sessionEventTypeReplace || events[1].Reason != "snapshot" {
+		t.Fatalf("events after truncated-args repair = %+v, want trailing snapshot replace", events)
+	}
+	replay, err := replaySessionEventLog(SessionEventLogPath(path))
+	if err != nil {
+		t.Fatalf("replay event log: %v", err)
+	}
+	if replay.damaged {
+		t.Fatal("event log damaged after truncated-args repair rewrite")
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession reload: %v", err)
+	}
+	if loaded.normalizedDirty {
+		t.Fatal("truncated-args repair was not persisted")
+	}
+	if got := loaded.Messages[2].ToolCalls[0].Arguments; got != repairedArgs {
+		t.Fatalf("persisted args = %q, want %q", got, repairedArgs)
+	}
+	if got := loaded.Messages[5].Content; got != "Tests passed." {
+		t.Fatalf("new turn after round-trip = %q, want %q", got, "Tests passed.")
+	}
+}
+
+// TestSaveRecoveryBranchNotNeededWhenRawTranscriptCoversSnapshot: the
+// recovery-needed check must also judge coverage against the pre-repair bytes.
+// Here the stored transcript equals the snapshot exactly, but normalization
+// backfills an empty tool-call name on load; that repair must not make the
+// disk look like it fails to cover the snapshot and fork a pointless recovery.
+func TestSaveRecoveryBranchNotNeededWhenRawTranscriptCoversSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "run the build"})
+	s.Add(provider.Message{
+		Role: provider.RoleAssistant, Content: "Running it.",
+		ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "", Arguments: `{"cmd":"make"}`}},
+	})
+	s.Add(provider.Message{Role: provider.RoleTool, Name: "bash", ToolCallID: "call_1", Content: "ok"})
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	_, err := s.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: path})
+	if !errors.Is(err, ErrSessionRecoveryNotNeeded) {
+		t.Fatalf("SaveRecoveryBranch err = %v, want ErrSessionRecoveryNotNeeded", err)
 	}
 }
 
@@ -466,7 +798,7 @@ func TestSaveSnapshotAllowsExactAppendFromStaleRevisionBaseline(t *testing.T) {
 	}
 
 	s.Add(provider.Message{Role: provider.RoleUser, Content: "two"})
-	s.setPersistedBaseline(path, staleBaseline.digest, staleBaseline.version, staleBaseline.revision, true)
+	s.setPersistedBaseline(path, staleBaseline.digest, staleBaseline.version, staleBaseline.revision, true, 0)
 	if err := s.SaveSnapshot(path); err != nil {
 		t.Fatalf("SaveSnapshot exact append from stale revision baseline: %v", err)
 	}
@@ -514,7 +846,7 @@ func TestSaveSnapshotAllowsCompatibleSystemAppendFromStaleRevisionBaseline(t *te
 	msgs[0] = provider.Message{Role: provider.RoleSystem, Content: "sys v2"}
 	msgs = append(msgs, provider.Message{Role: provider.RoleUser, Content: "two"})
 	s.Replace(msgs)
-	s.setPersistedBaseline(path, staleBaseline.digest, staleBaseline.version, staleBaseline.revision, true)
+	s.setPersistedBaseline(path, staleBaseline.digest, staleBaseline.version, staleBaseline.revision, true, 0)
 	if err := s.SaveSnapshot(path); err != nil {
 		t.Fatalf("SaveSnapshot compatible-system append from stale baseline: %v", err)
 	}
@@ -1678,4 +2010,60 @@ func readSessionEventsForTest(t *testing.T, path string) []sessionEventRecord {
 		out = append(out, rec)
 	}
 	return out
+}
+
+// TestReconcileOverlongMigratesDiagnosticSidecars pins two halves of one fix:
+// overlong-name reconciliation must skip .events.jsonl / .conflicts.jsonl
+// sidecars instead of renaming each into a fake session with fabricated meta,
+// and the owning transcript's rename must carry those sidecars along instead
+// of orphaning them under the retired stem.
+func TestReconcileOverlongMigratesDiagnosticSidecars(t *testing.T) {
+	dir := t.TempDir()
+	// 236-byte transcript name: past the 224 reconcile bound, while its
+	// .events.jsonl (243) and .conflicts.jsonl (246) still fit under 255 —
+	// exactly the window where the old suffix filter mistook them for
+	// overlong sessions.
+	id := strings.Repeat("s", 230)
+	oldPath := filepath.Join(dir, id+".jsonl")
+	content := `{"role":"system","content":"sys"}` + "\n" + `{"role":"user","content":"hello"}` + "\n"
+	if err := os.WriteFile(oldPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.SessionEventLog(oldPath),
+		[]byte(`{"schema_version":1,"type":"replace","messages":[{"role":"user","content":"hello"}]}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.SessionConflictLog(oldPath),
+		[]byte(`{"outcome":"forked_recovery_branch"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ReconcileSessionSidecars(dir); err != nil {
+		t.Fatalf("ReconcileSessionSidecars: %v", err)
+	}
+
+	newPath := filepath.Join(dir, recoveryParentStem(id)+".jsonl")
+	if _, err := os.Stat(newPath); err != nil {
+		t.Fatalf("renamed transcript missing: %v", err)
+	}
+	if _, err := os.Stat(store.SessionEventLog(newPath)); err != nil {
+		t.Fatalf("event log not migrated with the rename: %v", err)
+	}
+	if _, err := os.Stat(store.SessionConflictLog(newPath)); err != nil {
+		t.Fatalf("conflict log not migrated with the rename: %v", err)
+	}
+	for _, gone := range []string{oldPath, store.SessionEventLog(oldPath), store.SessionConflictLog(oldPath)} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Fatalf("%s still present under the retired stem (err=%v)", filepath.Base(gone), err)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if store.IsSessionTranscriptName(e.Name()) && e.Name() != filepath.Base(newPath) {
+			t.Fatalf("reconcile fabricated an extra session from a sidecar: %s", e.Name())
+		}
+	}
 }

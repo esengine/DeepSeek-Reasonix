@@ -24,6 +24,7 @@ func IsSessionTranscriptName(name string) bool {
 	name = strings.TrimSpace(name)
 	return strings.HasSuffix(name, ".jsonl") &&
 		!strings.HasSuffix(name, ".events.jsonl") &&
+		!strings.HasSuffix(name, ".conflicts.jsonl") &&
 		!strings.HasSuffix(name, ".guardian.jsonl")
 }
 
@@ -67,6 +68,16 @@ func SessionEventIndex(sessionPath string) string {
 		return ""
 	}
 	return sessionStem(sessionPath) + ".event-index.json"
+}
+
+// SessionConflictLog is the append-only diagnostic log for snapshot conflict
+// recoveries (<id>.conflicts.jsonl). It contains revision counters and branch
+// ids, not transcript content.
+func SessionConflictLog(sessionPath string) string {
+	if sessionPath == "" {
+		return ""
+	}
+	return sessionStem(sessionPath) + ".conflicts.jsonl"
 }
 
 // SessionLockFile is the advisory save lock (<id>.jsonl.lock).
@@ -121,7 +132,7 @@ func SessionCleanupPending(sessionPath string) string {
 }
 
 // SessionSidecarFiles returns every regular-file sidecar owned by a session
-// transcript: branch meta, goal state, the event log, and the event index.
+// transcript: branch meta, goal state, event/index logs, and diagnostic logs.
 // Every surface that deletes a session (desktop trash, /clear, serve, ACP)
 // must remove all of these — the event log is the authoritative transcript, so
 // leaving it behind both leaks the "deleted" conversation and lets LoadSession
@@ -137,5 +148,6 @@ func SessionSidecarFiles(sessionPath string) []string {
 		SessionGoalState(sessionPath),
 		SessionEventLog(sessionPath),
 		SessionEventIndex(sessionPath),
+		SessionConflictLog(sessionPath),
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -35,6 +36,30 @@ func TestRunDispatchesDoctor(t *testing.T) {
 	}
 }
 
+func TestDoctorSessionCommandWritesBundle(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	sessionDir := filepath.Join(home, "sessions")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, "abc.jsonl"), []byte(`{"role":"user","content":"hi"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(t.TempDir(), "abc-diag.zip")
+	out := captureStdout(t, func() {
+		if rc := doctorCommand([]string{"session", "abc", "--zip", "--out", outPath}, "test-version"); rc != 0 {
+			t.Fatalf("doctor session rc = %d, want 0", rc)
+		}
+	})
+	if strings.TrimSpace(out) != outPath {
+		t.Fatalf("doctor session output = %q, want %q", strings.TrimSpace(out), outPath)
+	}
+	if info, err := os.Stat(outPath); err != nil || info.Size() == 0 {
+		t.Fatalf("bundle stat = %v, %v", info, err)
+	}
+}
+
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stdout
@@ -54,4 +79,28 @@ func captureStdout(t *testing.T, fn func()) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+func TestDoctorSessionCommandOutEqualsForm(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	sessionDir := filepath.Join(home, "sessions")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, "abc.jsonl"), []byte(`{"role":"user","content":"hi"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(t.TempDir(), "abc-diag.zip")
+	out := captureStdout(t, func() {
+		if rc := doctorCommand([]string{"session", "abc", "--out=" + outPath}, "test-version"); rc != 0 {
+			t.Fatalf("doctor session rc = %d, want 0", rc)
+		}
+	})
+	if strings.TrimSpace(out) != outPath {
+		t.Fatalf("doctor session output = %q, want %q", strings.TrimSpace(out), outPath)
+	}
+	if rc := doctorCommand([]string{"session", "abc", "--out="}, "test-version"); rc != 2 {
+		t.Fatalf("empty --out= rc = %d, want usage error 2", rc)
+	}
 }

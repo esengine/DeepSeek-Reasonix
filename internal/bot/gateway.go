@@ -1126,8 +1126,18 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 			if cancel != nil {
 				cancel()
 			}
+			// NewSession refuses to rotate while a turn is running; the cancel
+			// above is asynchronous, so give the turn a bounded window to
+			// unwind before rotating.
+			deadline := time.Now().Add(5 * time.Second)
+			for state.ctrl.Running() && time.Now().Before(deadline) {
+				time.Sleep(10 * time.Millisecond)
+			}
 			if err := state.ctrl.NewSession(); err != nil {
 				gw.logger.Warn("new session failed", "err", err)
+				gw.sessions.ForceRelease(key)
+				_ = gw.sendText(ctx, adapter, msg, "新会话创建失败，请稍后重试。")
+				return
 			}
 			gw.rememberSessionReady(msg, state.ctrl)
 		}

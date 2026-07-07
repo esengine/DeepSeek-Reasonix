@@ -200,7 +200,7 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 	// snapshot) that captured before locking could land out of order: the
 	// stalest capture written last would then read the newer transcript it
 	// lost the race to as a bogus stale-prefix conflict.
-	msgs, version := s.snapshotWithVersion()
+	msgs, version, rewriteVersion := s.snapshotWithVersion()
 	digest, contentBytes, err := digestAndSizeSessionMessages(msgs)
 	if err != nil {
 		return err
@@ -249,10 +249,10 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 						slog.Warn("session: keeping save after event index write failure", "path", path, "err", err)
 					}
 				}
-				s.markPersisted(path, digest, version, revision)
+				s.markPersisted(path, digest, version, revision, rewriteVersion)
 				return nil
 			}
-			s.markPersisted(path, digest, version, decision.revision)
+			s.markPersisted(path, digest, version, decision.revision, rewriteVersion)
 			return nil
 		}
 		if decision.appendOnly && probe.native {
@@ -289,7 +289,7 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 				// as a stale-runtime conflict.
 				slog.Warn("session: keeping save after event index write failure", "path", path, "err", err)
 			}
-			s.markPersisted(path, digest, version, revision)
+			s.markPersisted(path, digest, version, revision, rewriteVersion)
 			return nil
 		}
 		baseRevision = decision.revision
@@ -351,7 +351,7 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 			slog.Warn("session: keeping save after event index write failure", "path", path, "err", err)
 		}
 	}
-	s.markPersisted(path, digest, version, revision)
+	s.markPersisted(path, digest, version, revision, rewriteVersion)
 	return nil
 }
 
@@ -408,9 +408,40 @@ func (s *Session) checkSnapshotWrite(path string, next []provider.Message, nextD
 	if err != nil {
 		return snapshotWriteDecision{}, err
 	}
+	// raw is the transcript as stored, before load-time normalization repaired
+	// it; it equals existing when no repair ran. The prefix checks below must
+	// be able to fall back to it: a mid-turn snapshot legitimately cuts an
+	// assistant tool call from its still-running result, normalization then
+	// fabricates a placeholder answer on load, and the live session's real
+	// result collides with that placeholder — misreading a pure append as
+	// divergence (and forking a bogus recovery branch).
+	raw, rawDigest := existing, existingDigest
+	rawDiffers := current.normalizedDirty && len(current.rawMessages) > 0
+	if rawDiffers {
+		raw = current.rawMessages
+		if rawDigest, err = digestSessionMessages(raw); err != nil {
+			return snapshotWriteDecision{}, err
+		}
+	}
 	contentUnchanged := bytes.Equal(existingDigest[:], nextDigest[:])
 	exactAppend := messagesHavePrefix(next, existing)
-	if contentUnchanged || exactAppend || messagesHavePrefixWithCompatibleSystem(next, existing) {
+	appendShaped := contentUnchanged || exactAppend || messagesHavePrefixWithCompatibleSystem(next, existing)
+	repairPending := current.normalizedDirty
+	if !appendShaped && rawDiffers {
+		rawUnchanged := bytes.Equal(rawDigest[:], nextDigest[:])
+		rawAppend := messagesHavePrefix(next, raw)
+		if rawUnchanged || rawAppend || messagesHavePrefixWithCompatibleSystem(next, raw) {
+			existing = raw
+			contentUnchanged = rawUnchanged
+			exactAppend = rawAppend
+			appendShaped = true
+			// The snapshot supersedes the repaired view — appending it lands
+			// the real tool results where the placeholders were fabricated —
+			// so no load-time repair is left to force a rewrite.
+			repairPending = false
+		}
+	}
+	if appendShaped {
 		// An unknown-revision baseline (meta sidecar unreadable at load) cannot
 		// vouch for revision equality; the digest/prefix checks above already
 		// vouch for the content, so only a known baseline arms the CAS check.
@@ -433,7 +464,7 @@ func (s *Session) checkSnapshotWrite(path string, next []provider.Message, nextD
 		// replayable prefix already matches this snapshot.
 		decision := snapshotWriteDecision{
 			revision:  currentRevision,
-			upToDate:  contentUnchanged && !current.normalizedDirty && !current.eventLogDamaged,
+			upToDate:  contentUnchanged && !repairPending && !current.eventLogDamaged,
 			repairLog: current.eventLogDamaged,
 		}
 		// A ledger digest that describes different content than the transcript
@@ -445,16 +476,31 @@ func (s *Session) checkSnapshotWrite(path string, next []provider.Message, nextD
 		if decision.upToDate && currentLedgerDigest != "" && currentLedgerDigest != digestString(nextDigest) {
 			decision.ledgerStale = true
 		}
-		if exactAppend && !contentUnchanged && len(existing) < len(next) && !current.eventLogDamaged {
+		// An append is only chain-safe when existing measures the transcript
+		// the event log actually replays. Under a pending load-time repair the
+		// normalized view differs from the raw log, so an append event indexed
+		// against it breaks the replay chain and orphans the appended suffix;
+		// fall through to the full rewrite, which also persists the repair.
+		if exactAppend && !contentUnchanged && len(existing) < len(next) && !current.eventLogDamaged && !repairPending {
 			decision.appendOnly = true
 			decision.appendFrom = len(existing)
 		}
 		return decision, nil
 	}
-	if allowOwnedRewrite && s.ownsPersistedState(path, existingDigest, currentRevision, currentLedgerDigest, nextVersion) {
-		return snapshotWriteDecision{revision: currentRevision, repairLog: current.eventLogDamaged}, nil
+	if allowOwnedRewrite {
+		owned := s.ownsPersistedState(path, existingDigest, currentRevision, currentLedgerDigest, nextVersion)
+		if !owned && rawDiffers {
+			// The persisted baseline describes the bytes this session wrote, so
+			// a repaired view can never match it; ownership is judged against
+			// the raw transcript.
+			owned = s.ownsPersistedState(path, rawDigest, currentRevision, currentLedgerDigest, nextVersion)
+		}
+		if owned {
+			return snapshotWriteDecision{revision: currentRevision, repairLog: current.eventLogDamaged}, nil
+		}
 	}
-	if messagesHavePrefix(existing, next) || messagesHavePrefixWithCompatibleSystem(existing, next) {
+	if messagesHavePrefix(existing, next) || messagesHavePrefixWithCompatibleSystem(existing, next) ||
+		(rawDiffers && (messagesHavePrefix(raw, next) || messagesHavePrefixWithCompatibleSystem(raw, next))) {
 		return snapshotWriteDecision{}, &SessionSnapshotConflictError{
 			Path:             path,
 			Kind:             SessionSnapshotConflictStalePrefix,
@@ -494,7 +540,7 @@ func (s *Session) SaveRecoveryBranch(opts RecoveryBranchOptions) (RecoveryBranch
 	if originalPath == "" {
 		return RecoveryBranchInfo{}, fmt.Errorf("empty original session path")
 	}
-	msgs, version := s.snapshotWithVersion()
+	msgs, version, rewriteVersion := s.snapshotWithVersion()
 	preview, turns := SessionPreviewFromMessages(msgs)
 	if turns == 0 {
 		return RecoveryBranchInfo{}, ErrSessionRecoveryNotNeeded
@@ -523,9 +569,25 @@ func (s *Session) SaveRecoveryBranch(opts RecoveryBranchOptions) (RecoveryBranch
 		if digestErr != nil {
 			return RecoveryBranchInfo{}, digestErr
 		}
-		if bytes.Equal(existingDigest[:], digest[:]) ||
+		covered := bytes.Equal(existingDigest[:], digest[:]) ||
 			messagesHavePrefix(existing, msgs) ||
-			messagesHavePrefixWithCompatibleSystem(existing, msgs) {
+			messagesHavePrefixWithCompatibleSystem(existing, msgs)
+		if !covered && current.normalizedDirty && len(current.rawMessages) > 0 {
+			// Judge coverage against the pre-repair transcript too, for the
+			// same reason as checkSnapshotWrite: load-time normalization can
+			// reshape what is actually stored, and a recovery fork is only
+			// warranted when the stored bytes themselves fail to cover this
+			// snapshot.
+			raw := current.rawMessages
+			rawDigest, rawErr := digestSessionMessages(raw)
+			if rawErr != nil {
+				return RecoveryBranchInfo{}, rawErr
+			}
+			covered = bytes.Equal(rawDigest[:], digest[:]) ||
+				messagesHavePrefix(raw, msgs) ||
+				messagesHavePrefixWithCompatibleSystem(raw, msgs)
+		}
+		if covered {
 			return RecoveryBranchInfo{}, ErrSessionRecoveryNotNeeded
 		}
 	}
@@ -564,7 +626,7 @@ func (s *Session) SaveRecoveryBranch(opts RecoveryBranchOptions) (RecoveryBranch
 			if err != nil {
 				return RecoveryBranchInfo{}, err
 			}
-			s.markPersisted(recoveryPath, digest, version, meta.Revision)
+			s.markPersisted(recoveryPath, digest, version, meta.Revision, rewriteVersion)
 			return RecoveryBranchInfo{Path: recoveryPath, Digest: digestText, Existing: true, Meta: meta, Preview: preview, Turns: turns}, nil
 		}
 	} else if loadErr != nil && !os.IsNotExist(loadErr) {
@@ -601,7 +663,7 @@ func (s *Session) SaveRecoveryBranch(opts RecoveryBranchOptions) (RecoveryBranch
 		slog.Warn("session: keeping recovery branch after event index write failure",
 			"path", recoveryPath, "err", err)
 	}
-	s.markPersisted(recoveryPath, digest, version, meta.Revision)
+	s.markPersisted(recoveryPath, digest, version, meta.Revision, rewriteVersion)
 	return RecoveryBranchInfo{Path: recoveryPath, Digest: digestText, Meta: meta, Preview: preview, Turns: turns}, nil
 }
 
@@ -746,19 +808,19 @@ func (s *Session) persistState(path string) sessionPersistState {
 	return sessionPersistState{}
 }
 
-func (s *Session) markPersisted(path string, digest [sha256.Size]byte, version uint64, revision int64) {
-	s.setPersistedBaseline(path, digest, version, revision, true)
+func (s *Session) markPersisted(path string, digest [sha256.Size]byte, version uint64, revision int64, rewriteVersion int) {
+	s.setPersistedBaseline(path, digest, version, revision, true, rewriteVersion)
 }
 
 // markPersistedRevisionUnknown records a baseline whose ledger revision could
 // not be learned because the meta sidecar was unreadable. The digest and
 // version still anchor ownership checks; revision-based CAS stays disarmed
 // until a successful save records the real revision via markPersisted.
-func (s *Session) markPersistedRevisionUnknown(path string, digest [sha256.Size]byte, version uint64) {
-	s.setPersistedBaseline(path, digest, version, 0, false)
+func (s *Session) markPersistedRevisionUnknown(path string, digest [sha256.Size]byte, version uint64, rewriteVersion int) {
+	s.setPersistedBaseline(path, digest, version, 0, false, rewriteVersion)
 }
 
-func (s *Session) setPersistedBaseline(path string, digest [sha256.Size]byte, version uint64, revision int64, revisionKnown bool) {
+func (s *Session) setPersistedBaseline(path string, digest [sha256.Size]byte, version uint64, revision int64, revisionKnown bool, rewriteVersion int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.persisted = sessionPersistState{
@@ -768,6 +830,12 @@ func (s *Session) setPersistedBaseline(path string, digest [sha256.Size]byte, ve
 		revision:      revision,
 		revisionKnown: revisionKnown,
 		ok:            true,
+	}
+	// rewriteVersion was captured together with the persisted snapshot; only
+	// move forward so a slower save that captured earlier cannot roll the
+	// baseline back below a rewrite a faster save already persisted.
+	if rewriteVersion > s.persistedRewriteVersion {
+		s.persistedRewriteVersion = rewriteVersion
 	}
 }
 
@@ -1041,6 +1109,12 @@ func LoadSession(path string) (*Session, error) {
 	normalized := NormalizeSession(s.Messages)
 	if len(normalized) != len(s.Messages) || (len(s.Messages) > 0 && &normalized[0] != &s.Messages[0]) {
 		s.normalizedDirty = true
+		// Keep the pre-repair transcript: checkSnapshotWrite must be able to
+		// recognize a snapshot that extends the bytes actually on disk, which
+		// the repaired view no longer represents (an interrupted tool turn
+		// gets a placeholder result fabricated here that the live session
+		// answered for real).
+		s.rawMessages = msgs
 	}
 	s.Messages = normalized
 	if digest, err := digestSessionMessages(s.Messages); err == nil {
@@ -1051,13 +1125,13 @@ func LoadSession(path string) (*Session, error) {
 			// on-disk revision as another runtime's write and fork a recovery
 			// branch. Anchor the baseline on digest+version only until a
 			// successful save re-learns the revision.
-			s.markPersistedRevisionUnknown(path, digest, s.version)
+			s.markPersistedRevisionUnknown(path, digest, s.version, s.rewriteVersion)
 		} else {
 			revision := int64(0)
 			if ok {
 				revision = meta.Revision
 			}
-			s.markPersisted(path, digest, s.version, revision)
+			s.markPersisted(path, digest, s.version, revision, s.rewriteVersion)
 		}
 	}
 	return s, nil
@@ -1403,7 +1477,7 @@ func reconcileOverlongSessionFilenames(dir string) error {
 	renamed := map[string]string{} // old branch ID -> new branch ID
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".jsonl") || strings.HasSuffix(name, guardianSidecarSuffix) {
+		if e.IsDir() || !store.IsSessionTranscriptName(name) {
 			continue
 		}
 		if len(name) <= maxSessionBasenameBytes {
@@ -1527,6 +1601,9 @@ func migrateSessionSidecars(oldPath, newPath, newID string) error {
 	}
 	for _, pair := range [][2]string{
 		{store.SessionGoalState(oldPath), store.SessionGoalState(newPath)},
+		{store.SessionEventLog(oldPath), store.SessionEventLog(newPath)},
+		{store.SessionEventIndex(oldPath), store.SessionEventIndex(newPath)},
+		{store.SessionConflictLog(oldPath), store.SessionConflictLog(newPath)},
 		{store.SessionCheckpointDir(oldPath), store.SessionCheckpointDir(newPath)},
 		{store.SessionJobsDir(oldPath), store.SessionJobsDir(newPath)},
 	} {
@@ -1552,7 +1629,7 @@ func reparentSessionBranches(dir string, renamed map[string]string) error {
 	var errs []error
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".jsonl") || strings.HasSuffix(name, guardianSidecarSuffix) {
+		if e.IsDir() || !store.IsSessionTranscriptName(name) {
 			continue
 		}
 		if len(name)+len(".meta") > nameMaxBytes {

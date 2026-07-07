@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	winsandbox "github.com/SivanCola/windows-sandbox"
+	"reasonix/internal/winsandbox"
 )
 
 type windowsSandboxPayload struct {
@@ -31,7 +31,11 @@ func CommandArgs(spec Spec, args []string) ([]string, bool) {
 }
 
 func windowsSandboxCommand(spec Spec, args []string, writable bool) ([]string, bool) {
-	if !spec.Enforce() {
+	// Mirror the darwin/linux wrappers: when the backend (or this binary's
+	// helper dispatch) is unavailable, return the argv unwrapped so the bash
+	// tool takes its explicit fail-closed / escape-approval path instead of
+	// spawning a helper that cannot work.
+	if !spec.Enforce() || !Available() {
 		return args, false
 	}
 	exe, err := os.Executable()
@@ -48,8 +52,14 @@ func windowsSandboxCommand(spec Spec, args []string, writable bool) ([]string, b
 }
 
 // Available reports whether Reasonix can reach its bundled Windows sandbox
-// helper and the native Windows sandbox backend is available.
+// helper and the native Windows sandbox backend is available. The helper is
+// this same executable relaunched with WindowsHelperCommand, so the entry
+// point must have registered its dispatch route (RegisterHelperDispatch);
+// without it the relaunch would not reach RunWindowsSandboxHelper at all.
 func Available() bool {
+	if !helperDispatchRegistered.Load() {
+		return false
+	}
 	exe, err := os.Executable()
 	if err != nil || exe == "" {
 		return false
@@ -113,5 +123,6 @@ func convertWindowsSandboxSpec(spec Spec, writable bool) winsandbox.Spec {
 		Network:         spec.Network,
 		Writable:        writable,
 		TempPrefix:      "reasonix-sandbox-",
+		LockWait:        spec.WindowsLockWait,
 	}
 }

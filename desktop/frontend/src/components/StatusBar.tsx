@@ -22,9 +22,10 @@ function nowRate(u?: WireUsage): string | null {
 }
 
 // avgRate is the SESSION-AGGREGATE cache-hit % — Σhit/Σ(hit+miss) across every
-// turn — the steadier, cost-oriented number that matches the legacy dashboard.
-// On a non-compacting DeepSeek session it trails nowRate (early cold-start turns
-// drag the average down); it overtakes only when compaction craters single turns.
+// turn — but scoped to the EXECUTOR agent only: the wire session counters come
+// from the main agent and exclude subagent/planner/auxiliary requests. It is
+// only the pre-first-refresh fallback; the authoritative all-sources number is
+// contextAvgRate below, so the "session average" label reports one scope.
 function avgRate(u?: WireUsage): string | null {
   if (!u) return null;
   const denom = u.sessionCacheHitTokens + u.sessionCacheMissTokens;
@@ -32,8 +33,10 @@ function avgRate(u?: WireUsage): string | null {
 }
 
 // contextAvgRate computes the session-aggregate cache-hit % from ContextInfo
-// cache tokens (loaded from persisted telemetry on session resume). Used as a
-// fallback when no live WireUsage is available yet.
+// cache tokens — the tab telemetry that accumulates ALL request sources
+// (executor, subagents, planner, auxiliary calls), refreshed at turn
+// boundaries. Preferred over avgRate: it matches the 会话费用 tooltip's
+// "includes main model, subagents and auxiliary calls" scope.
 function contextAvgRate(ctx: ContextInfo): string | null {
   const hit = ctx.cacheHitTokens ?? 0;
   const miss = ctx.cacheMissTokens ?? 0;
@@ -186,7 +189,9 @@ export function StatusBar({
   const compactNear = pct !== null && compactPct !== null && pct >= Math.max(0, compactPct - 10);
   const compactReached = pct !== null && compactPct !== null && pct >= compactPct;
   const nowPct = nowRate(usage);
-  const avgPct = avgRate(usage) ?? contextAvgRate(context);
+  // All-sources telemetry first; the executor-only live counters only bridge
+  // the gap before the first ContextInfo refresh of a fresh session.
+  const avgPct = contextAvgRate(context) ?? avgRate(usage);
   const turnCostLabel = formatMoneyLocalized(turnCost, currency, { locale });
   const costLabel = formatMoneyLocalized(cost, currency, { locale });
   const displayWorkspacePath = (workspacePath || workspaceName || "").trim();

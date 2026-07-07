@@ -6019,6 +6019,10 @@ func (a *App) emitRuntimeEvent(name string, payload ...interface{}) {
 
 // DeleteTopic removes a topic and its title metadata.
 func (a *App) DeleteTopic(topicID string) error {
+	return friendlySessionFileError(a.deleteTopic(topicID))
+}
+
+func (a *App) deleteTopic(topicID string) error {
 	f := loadProjectsFile()
 	found := false
 	for _, p := range f.Projects {
@@ -6124,6 +6128,10 @@ func (a *App) SetTopicPinned(topicID string, pinned bool) error {
 // cancelled and detached from the app first, so their autosave/jobs cannot
 // recreate state after the topic is gone.
 func (a *App) TrashTopic(topicID string) error {
+	return friendlySessionFileError(a.trashTopic(topicID))
+}
+
+func (a *App) trashTopic(topicID string) error {
 	if strings.TrimSpace(topicID) == "" {
 		return fmt.Errorf("topicID is required")
 	}
@@ -6173,7 +6181,7 @@ func (a *App) TrashTopic(topicID string) error {
 				}
 			}
 		}
-		return a.DeleteTopic(topicID)
+		return a.deleteTopic(topicID)
 	}(); err != nil {
 		return err
 	}

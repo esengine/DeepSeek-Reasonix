@@ -9,10 +9,16 @@ import (
 	"strings"
 	"testing"
 
-	winsandbox "github.com/SivanCola/windows-sandbox"
+	"reasonix/internal/winsandbox"
 )
 
 func TestWindowsCommandWrapsWithHelper(t *testing.T) {
+	// Command only wraps when Available(), which requires the entry point to
+	// have registered its helper dispatch route (cli.Run / desktop main do).
+	RegisterHelperDispatch()
+	if !winsandbox.Available() {
+		t.Skip("windows sandbox APIs unavailable")
+	}
 	cmd, wrapped := Command(Spec{Mode: "enforce", WriteRoots: []string{`C:\work`}, Network: true}, Shell{Kind: ShellPowerShell, Path: "powershell"}, "Write-Output ok")
 	if !wrapped {
 		t.Fatal("windows enforce should wrap through helper")
@@ -39,6 +45,10 @@ func TestWindowsCommandWrapsWithHelper(t *testing.T) {
 }
 
 func TestWindowsCommandArgsWrapsReadOnly(t *testing.T) {
+	RegisterHelperDispatch()
+	if !winsandbox.Available() {
+		t.Skip("windows sandbox APIs unavailable")
+	}
 	cmd, wrapped := CommandArgs(Spec{Mode: "enforce", WriteRoots: []string{`C:\work`}, Network: false}, []string{`C:\tools\rg.exe`, "needle"})
 	if !wrapped {
 		t.Fatal("windows enforce should wrap direct argv through helper")
@@ -84,15 +94,34 @@ func TestWindowsSandboxAvailableOnCI(t *testing.T) {
 	if os.Getenv("CI") == "" {
 		t.Skip("only require Windows sandbox availability on CI")
 	}
-	if !Available() {
+	if RegisterHelperDispatch(); !Available() {
 		t.Fatal("windows sandbox APIs unavailable on CI")
 	}
 	if !winsandbox.Available() {
-		t.Fatal("external windows sandbox APIs unavailable on CI")
+		t.Fatal("bundled windows sandbox APIs unavailable on CI")
+	}
+}
+
+func TestWindowsUnavailableWithoutHelperDispatch(t *testing.T) {
+	// The dispatch flag is process-global and other tests set it, so this can
+	// only assert the wrap-side contract indirectly: with the flag forced off,
+	// Command must refuse to wrap (unwrapped argv triggers the bash tool's
+	// fail-closed / escape-approval path) rather than emit a helper argv that
+	// a dispatch-less binary would swallow into empty output.
+	prev := helperDispatchRegistered.Load()
+	helperDispatchRegistered.Store(false)
+	defer helperDispatchRegistered.Store(prev)
+	if Available() {
+		t.Fatal("Available() must be false while the helper dispatch is unregistered")
+	}
+	argv, wrapped := Command(Spec{Mode: "enforce", WriteRoots: []string{`C:\work`}, Network: true}, Shell{Kind: ShellPowerShell, Path: "powershell"}, "Write-Output ok")
+	if wrapped {
+		t.Fatalf("enforce without helper dispatch must not wrap, got argv %v", argv)
 	}
 }
 
 func TestRunWindowsSandboxHelperRunsExternalSandbox(t *testing.T) {
+	RegisterHelperDispatch()
 	if !Available() {
 		t.Skip("windows sandbox APIs unavailable")
 	}

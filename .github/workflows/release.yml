@@ -122,3 +122,52 @@ jobs:
           done
           echo "::error::public compatibility manifest unreachable at $url"
           exit 1
+
+      # A stable CLI release must never leave the npm line behind: v1.17.5
+      # shipped as binaries/Homebrew while npm `latest` still pointed at 0.53.2
+      # (#5822) — every `npm update -g` user was silently downgraded to a
+      # months-old version, and nothing noticed because the npm line
+      # (release-npm.yml, `npm-vX.Y.Z` tags) is triggered independently and the
+      # stable npm tag was simply never pushed. release-npm.yml's own verify
+      # step only guards runs that happen; this guard catches the run that
+      # DIDN'T.
+      #
+      # Two distinct states, two responses (the runs race: both workflows wait
+      # on the release environment independently, and npm dist-tags propagate
+      # asynchronously, so "tag pushed but latest not moved yet" is a NORMAL
+      # mid-release state, not a failure):
+      #   - npm-v<version> tag missing  -> hard fail. This is the #5822 gap:
+      #     nobody pushed the npm release at all.
+      #   - tag pushed, latest lagging  -> poll briefly, then WARN and pass.
+      #     The npm run may still be awaiting its own environment approval;
+      #     release-npm.yml's verify step owns asserting the dist-tag lands.
+      - name: Check npm latest dist-tag freshness
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            *-*)
+              echo "prerelease $TAG — npm latest does not move on prereleases; skipping"
+              exit 0
+              ;;
+          esac
+          version="${TAG#v}"
+          if ! git ls-remote --exit-code origin "refs/tags/npm-v$version" >/dev/null; then
+            echo "::error::the npm-v$version tag was never pushed — the npm channel is being left behind and 'npm update -g' users will be downgraded to the old 'latest'. Push it: git tag npm-v$version ${TAG} && git push origin npm-v$version (or 'npm dist-tag add reasonix@$version latest' for an already-published version)."
+            exit 1
+          fi
+          for attempt in 1 2 3 4 5 6; do
+            got="$(npm view reasonix dist-tags.latest 2>/dev/null || true)"
+            if [ -n "$got" ]; then
+              newest="$(printf '%s\n%s\n' "$got" "$version" | sort -V | tail -1)"
+              if [ "$newest" = "$got" ]; then
+                echo "npm latest -> $got (>= $version) OK"
+                exit 0
+              fi
+            fi
+            echo "npm latest -> ${got:-<unreadable>}, want >= $version (attempt $attempt)"
+            sleep 10
+          done
+          echo "::warning::npm-v$version is pushed but npm 'latest' is still ${got:-<unreadable>} — the npm publish run is likely awaiting release-environment approval or still propagating. Approve/monitor the release-npm run; its verify step asserts the dist-tag lands."
+          exit 0

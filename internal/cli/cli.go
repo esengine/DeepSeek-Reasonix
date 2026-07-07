@@ -46,6 +46,9 @@ var (
 
 // Run is the CLI entry point; it returns a process exit code.
 func Run(args []string, version string) int {
+	// This binary routes the hidden Windows sandbox helper subcommand below;
+	// registering that fact is what lets sandbox.Available() report true.
+	sandbox.RegisterHelperDispatch()
 	if len(args) > 0 && args[0] == sandbox.WindowsHelperCommand {
 		return sandbox.RunWindowsSandboxHelper(args[1:], os.Stdin, os.Stdout, os.Stderr)
 	}
@@ -161,6 +164,9 @@ func shouldMigrateLegacyConfigForCLI(cmd string) bool {
 func migrateLegacyConfigForCLI() {
 	if _, err := config.MigrateLegacyIfNeeded(); err != nil {
 		fmt.Fprintln(os.Stderr, "warning: config migration failed:", err)
+	}
+	if _, err := config.ApplyUserConfigUpgradesOnStartup(config.UserConfigPath()); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: config upgrade failed:", err)
 	}
 }
 

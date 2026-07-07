@@ -104,6 +104,43 @@ func TestCuratedProviderPresetsDisplayOrder(t *testing.T) {
 	}
 }
 
+func TestCuratedProviderPresetsStepFunUsesOfficialBaseURLs(t *testing.T) {
+	tests := []struct {
+		id      string
+		kind    string
+		baseURL string
+	}{
+		{
+			id:      "stepfun",
+			kind:    "openai",
+			baseURL: "https://api.stepfun.com/step_plan/v1",
+		},
+		{
+			id:      "stepfun-anthropic",
+			kind:    "anthropic",
+			baseURL: "https://api.stepfun.com/step_plan",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			preset, ok := CuratedProviderPreset(tt.id)
+			if !ok {
+				t.Fatalf("missing preset %q", tt.id)
+			}
+			if len(preset.Entries) != 1 {
+				t.Fatalf("preset %q has %d entries, want 1", tt.id, len(preset.Entries))
+			}
+			entry := preset.Entries[0]
+			if entry.Kind != tt.kind {
+				t.Fatalf("preset %q kind = %q, want %q", tt.id, entry.Kind, tt.kind)
+			}
+			if entry.BaseURL != tt.baseURL {
+				t.Fatalf("preset %q base_url = %q, want %q", tt.id, entry.BaseURL, tt.baseURL)
+			}
+		})
+	}
+}
+
 func TestCuratedProviderPresetReturnsDeepCopy(t *testing.T) {
 	preset, ok := CuratedProviderPreset("minimax-cn-api")
 	if !ok {

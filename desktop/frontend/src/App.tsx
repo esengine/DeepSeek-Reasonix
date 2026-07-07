@@ -2279,8 +2279,8 @@ export default function App() {
 
   // send wrapper: commits any pending optimistic rewind before sending.
   const commitThenSend = useCallback(async (displayText: string, submitText?: string) => {
-    if (activeTab?.readOnly) throw new Error("channel session is read-only");
-    if (!controllerReady) throw new Error("workspace is still starting");
+    if (activeTab?.readOnly) throw new Error(t("composer.readOnlyChannel"));
+    if (!controllerReady) throw new Error(t("composer.workspaceStarting"));
     const rs = rewindStateRef.current;
     if (rs) {
       rewindStateRef.current = null;
@@ -2296,7 +2296,7 @@ export default function App() {
         // Rewind failed: the Go conversation is intact. Do not send; the
         // controller emits a notice with the reason.
         setRewindState(null);
-        throw new Error("rewind failed");
+        throw new Error(t("rewind.failed"));
       }
       setRewindSignal((v) => v + 1);
       if (rs.scope === "both") {
@@ -2306,7 +2306,7 @@ export default function App() {
       }
     }
     await send(displayText, submitText);
-  }, [activeTab?.readOnly, controllerReady, send, rewind]);
+  }, [activeTab?.readOnly, controllerReady, send, rewind, t]);
 
   const handleTranscriptPrompt = useCallback((text: string) => {
     if (!controllerReady) return;
@@ -2548,7 +2548,7 @@ export default function App() {
       } else {
         throw new Error(scope === "global" && !session.topicId
           ? t("history.failedOpenSession")
-          : (session.topicId ? "Missing workspaceRoot" : t("history.failedOpenSession")));
+          : (session.topicId ? t("history.missingWorkspaceRoot") : t("history.failedOpenSession")));
       }
       if (!latest()) return;
       seedActiveTabMeta(targetTab);
@@ -2884,13 +2884,6 @@ export default function App() {
     : [topicbarWorkspacePath || topicbarWorkspaceLabel, topicbarImSourceLabel].filter(Boolean).join(" · ");
   const topicbarCanRename = !sidebarImDetailConnection && Boolean(activeTab?.topicId);
   const topicbarTitleEditSize = Math.min(56, Math.max(4, topicTitleDraft.length || topicbarTitle.length || 1));
-  const recoveryBannerTitle = activeTab?.recovered
-    ? [
-        activeTab.recoveryReason ? t("recovery.reason", { reason: activeTab.recoveryReason }) : "",
-        activeTab.recoveryDigest ? t("recovery.digest", { digest: activeTab.recoveryDigest.slice(0, 12) }) : "",
-        activeTab.recoveryParentId ? t("recovery.parent", { parent: activeTab.recoveryParentId }) : "",
-      ].filter(Boolean).join(" · ")
-    : "";
   const sidebarWorkbench = desktopLayoutStyle === "workbench";
   const windowsFramelessChrome = desktopPlatform === "windows";
   const handleWindowsTitlebarDoubleClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
@@ -3443,7 +3436,7 @@ export default function App() {
           )}
 
           {activeTab?.recovered && !sidebarImDetailConnection && (
-            <div className="banner banner--recovery" title={recoveryBannerTitle || undefined}>
+            <div className="banner banner--recovery">
               <span className="banner__badge">{t("recovery.branch")}</span>
               <span>{t("recovery.banner")}</span>
             </div>

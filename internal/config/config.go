@@ -837,9 +837,9 @@ type SandboxConfig struct {
 	WorkspaceRoot string   `toml:"workspace_root"`
 	AllowWrite    []string `toml:"allow_write"`
 	ForbidRead    []string `toml:"forbid_read"`
-	// Bash is the OS-sandbox mode for the bash tool: "enforce" (default) jails
-	// each command when an OS sandbox is available and refuses bash otherwise;
-	// "off" runs it unconfined.
+	// Bash is the OS-sandbox mode for the bash tool: "enforce" jails each
+	// command when an OS sandbox is available and refuses bash otherwise; "off"
+	// runs it unconfined. Empty uses the platform default.
 	Bash string `toml:"bash"`
 	// Network allows network egress from inside the bash sandbox. Defaults true
 	// so module/package downloads keep working; the boundary is then writes.
@@ -879,6 +879,20 @@ func (c *Config) WriteRootsForRoot(fallbackRoot string) []string {
 	return roots
 }
 
+// AllowWriteRoots returns only the configured [sandbox] allow_write extras with
+// ${VAR} expanded — the explicit escape-hatch entries, without the workspace
+// root that WriteRoots prepends. The session-data write guard treats these as
+// user-sanctioned raw access.
+func (c *Config) AllowWriteRoots() []string {
+	var roots []string
+	for _, d := range c.Sandbox.AllowWrite {
+		if d = c.expandVars(d); d != "" {
+			roots = append(roots, d)
+		}
+	}
+	return roots
+}
+
 // ForbidReadRoots returns the directories the agent is forbidden from reading
 // or listing, with ${VAR} expanded. Relative roots are resolved against the
 // current working directory; the confiner resolves them to symlink-free paths.
@@ -910,14 +924,28 @@ func (c *Config) ForbidReadRootsForRoot(fallbackRoot string) []string {
 	return roots
 }
 
-// BashMode normalises the bash-sandbox mode: only an explicit "off" disables
-// it; empty or any other value resolves to "enforce", so the sandbox is on by
-// default and fails safe.
+// BashMode normalises the bash-sandbox mode for the current host.
 func (c *Config) BashMode() string {
-	if c.Sandbox.Bash == "off" {
+	return c.BashModeForGOOS(runtimeGOOS)
+}
+
+// BashModeForGOOS normalises the bash-sandbox mode for tests and cross-platform
+// rendering. Explicit "enforce" and "off" always win; only the empty default is
+// platform-specific.
+func (c *Config) BashModeForGOOS(goos string) string {
+	switch strings.TrimSpace(c.Sandbox.Bash) {
+	case "enforce":
+		return "enforce"
+	case "off":
 		return "off"
+	case "":
+		if goos == "windows" {
+			return "off"
+		}
+		return "enforce"
+	default:
+		return "enforce"
 	}
-	return "enforce"
 }
 
 // AgentConfig configures the harness loop. PlannerModel is optional: when set
@@ -1460,7 +1488,7 @@ const LanguagePolicy = `Reply in the same language the user is using in their mo
 // Default returns the built-in default configuration.
 func Default() *Config {
 	return &Config{
-		ConfigVersion:    3,
+		ConfigVersion:    4,
 		DefaultModel:     "deepseek-flash",
 		CredentialsStore: CredentialsStoreAuto,
 		UI:               UIConfig{Theme: "auto"},
@@ -1489,11 +1517,12 @@ func Default() *Config {
 		// resolves to allow) while `reasonix` prompts before writers. Users add
 		// deny/allow rules to harden or quiet specific tools.
 		Permissions: PermissionsConfig{Mode: "ask"},
-		// Sandbox on by default: bash is jailed (macOS), network allowed so
-		// builds/downloads work. Set bash = "off" to disable. Network=true here
-		// so an absent [sandbox] in a user's file keeps egress (zero value would
-		// wrongly deny it).
-		Sandbox: SandboxConfig{Bash: "enforce", Network: true},
+		// Sandbox uses platform defaults: macOS/Linux jail bash by default;
+		// Windows defaults bash to off because AppContainer behavior varies by
+		// host, while an explicit bash = "enforce" still enables it. Network=true
+		// here so an absent [sandbox] in a user's file keeps egress (zero value
+		// would wrongly deny it).
+		Sandbox: SandboxConfig{Network: true},
 		// LSP tools on by default, but dormant until a language server is on PATH;
 		// a missing server yields an install hint rather than an error.
 		LSP:     LSPConfig{Enabled: true},

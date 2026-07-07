@@ -147,6 +147,7 @@ func sessionTrashArtifacts(sessionPath, key string) []sessionTrashArtifact {
 		{src: store.SessionGoalState(sessionPath), name: stem + ".goal-state.json"},
 		{src: store.SessionEventLog(sessionPath), name: stem + ".events.jsonl"},
 		{src: store.SessionEventIndex(sessionPath), name: stem + ".event-index.json"},
+		{src: store.SessionConflictLog(sessionPath), name: stem + ".conflicts.jsonl"},
 		{src: sessionTelemetryPath(sessionPath), name: key + ".telemetry.json"},
 		{src: store.SessionCheckpointDir(sessionPath), name: stem + ".ckpt"},
 		{src: store.SessionJobsDir(sessionPath), name: stem + ".jobs"},
@@ -612,6 +613,8 @@ func movePathIfExists(src, dst string) error {
 	// Try os.Rename first — it's atomic and fast when it works.
 	if err := os.Rename(src, dst); err == nil {
 		return nil
+	} else if sourcePathMissing(src) {
+		return nil
 	} else if !isRenameCrossDeviceOrBusy(err) {
 		return err
 	}
@@ -640,10 +643,28 @@ func isRenameCrossDeviceOrBusy(err error) bool {
 	return false
 }
 
+func sourcePathMissing(src string) bool {
+	if strings.TrimSpace(src) == "" {
+		return true
+	}
+	_, err := os.Lstat(src)
+	return os.IsNotExist(err)
+}
+
+// copyPathFn is a seam for tests to simulate a source vanishing mid-copy.
+var copyPathFn = copyPath
+
 // copyAndRemove recursively copies src to dst, then removes src. Used as a
 // fallback when os.Rename fails (cross-device or Windows file-lock races).
 func copyAndRemove(src, dst string) error {
-	if err := copyPath(src, dst); err != nil {
+	if err := copyPathFn(src, dst); err != nil {
+		if sourcePathMissing(src) {
+			// The source vanished mid-copy; drop the partial destination so
+			// the trash never keeps a truncated artifact that a later restore
+			// would resurrect as a corrupted transcript.
+			_ = os.RemoveAll(dst)
+			return nil
+		}
 		return err
 	}
 	// On Windows, wait briefly for any file handle release.
@@ -654,6 +675,9 @@ func copyAndRemove(src, dst string) error {
 func copyPath(src, dst string) error {
 	info, err := os.Lstat(src)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
 	mode := info.Mode()
@@ -675,6 +699,10 @@ func copyDir(src, dst string, mode os.FileMode) error {
 	}
 	entries, err := os.ReadDir(src)
 	if err != nil {
+		if os.IsNotExist(err) {
+			_ = os.RemoveAll(dst)
+			return nil
+		}
 		return err
 	}
 	for _, e := range entries {
@@ -691,6 +719,9 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	// Open source file.
 	in, err := os.Open(src)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
 	// Create destination file.
@@ -716,6 +747,9 @@ func copyFile(src, dst string, mode os.FileMode) error {
 func copySymlink(src, dst string) error {
 	target, err := os.Readlink(src)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
 	return os.Symlink(target, dst)

@@ -57,6 +57,7 @@ type heartbeatConfig struct {
 type HeartbeatEngine struct {
 	mu            sync.Mutex
 	tasks         []HeartbeatTask
+	cfgMod        time.Time                        // config-file mtime as of the engine's last read/write (external-edit probe)
 	pendingTopics map[string]heartbeatPendingTopic // in-memory retry/in-flight safety for NewConversationEachRun
 	done          chan struct{}
 	running       bool
@@ -99,6 +100,28 @@ func (e *HeartbeatEngine) loadTasks() []HeartbeatTask {
 	return cfg.Tasks
 }
 
+// noteConfigModLocked records the config file's current mtime so the tick
+// external-edit probe does not re-read a file the engine itself just wrote.
+func (e *HeartbeatEngine) noteConfigModLocked() {
+	if info, err := os.Stat(e.configPath()); err == nil {
+		e.cfgMod = info.ModTime()
+	}
+}
+
+// adoptExternalEditsLocked re-reads the config when its mtime moved since the
+// engine last touched the file: heartbeat-tasks.json is documented as human-
+// and AI-editable, so an external edit should be scheduled by the next tick
+// rather than waiting for a manual Refresh or an app restart.
+func (e *HeartbeatEngine) adoptExternalEditsLocked() {
+	info, err := os.Stat(e.configPath())
+	if err != nil || info.ModTime().Equal(e.cfgMod) {
+		return
+	}
+	e.cfgMod = info.ModTime()
+	e.tasks = e.loadTasks()
+	e.prunePendingTopicsLocked(e.tasks)
+}
+
 // saveTasks writes tasks to disk atomically.
 func (e *HeartbeatEngine) saveTasks(tasks []HeartbeatTask) error {
 	if tasks == nil {
@@ -129,6 +152,7 @@ func (e *HeartbeatEngine) Start() {
 		return
 	}
 	e.tasks = e.loadTasks()
+	e.noteConfigModLocked()
 	e.running = true
 	go e.loop()
 	log.Printf("[heartbeat] engine started (%d tasks)", len(e.tasks))
@@ -160,10 +184,12 @@ func (e *HeartbeatEngine) loop() {
 }
 
 // tick checks every enabled task and runs those whose interval has elapsed.
-// It merges results (topicId, lastRunAt) rather than replacing the full list,
-// so concurrent HeartbeatSaveTasks edits are not lost.
+// It first adopts any external edit to the config file (human/AI-editable),
+// then merges results (topicId, lastRunAt) rather than replacing the full
+// list, so concurrent HeartbeatSaveTasks edits are not lost.
 func (e *HeartbeatEngine) tick() {
 	e.mu.Lock()
+	e.adoptExternalEditsLocked()
 	tasks := append([]HeartbeatTask(nil), e.tasks...)
 	e.mu.Unlock()
 
@@ -374,6 +400,7 @@ func (e *HeartbeatEngine) ReloadTasks() []HeartbeatTask {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.tasks = e.loadTasks()
+	e.noteConfigModLocked()
 	e.prunePendingTopicsLocked(e.tasks)
 	out := make([]HeartbeatTask, len(e.tasks))
 	copy(out, e.tasks)
@@ -386,7 +413,9 @@ func (e *HeartbeatEngine) ReplaceTasks(tasks []HeartbeatTask) error {
 	defer e.mu.Unlock()
 	e.tasks = tasks
 	e.prunePendingTopicsLocked(tasks)
-	return e.saveTasks(tasks)
+	err := e.saveTasks(tasks)
+	e.noteConfigModLocked()
+	return err
 }
 
 func (e *HeartbeatEngine) prunePendingTopicsLocked(tasks []HeartbeatTask) {
@@ -431,7 +460,18 @@ func (e *HeartbeatEngine) mergeRunUpdatesLocked(updates map[string]HeartbeatTask
 	if len(updates) == 0 {
 		return
 	}
-	tasks := append([]HeartbeatTask(nil), e.tasks...)
+	// Rebase onto the on-disk list before the full-list save: the config file
+	// is documented as human- and AI-editable, so an external edit may have
+	// landed after the in-memory snapshot this tick ran from. The engine owns
+	// only the run-state fields (TopicID, LastRunAt, CreatedAt backfill);
+	// task definitions added, edited, or deleted externally are adopted from
+	// disk, so the save below can never silently roll an external edit back.
+	tasks := e.loadTasks()
+	if tasks == nil {
+		// Missing or unreadable file: fall back to the in-memory list so the
+		// run state still lands (the historical behavior).
+		tasks = append([]HeartbeatTask(nil), e.tasks...)
+	}
 	for i := range tasks {
 		update, ok := updates[tasks[i].ID]
 		if !ok {
@@ -448,7 +488,9 @@ func (e *HeartbeatEngine) mergeRunUpdatesLocked(updates map[string]HeartbeatTask
 		}
 	}
 	e.tasks = tasks
+	e.prunePendingTopicsLocked(tasks)
 	_ = e.saveTasks(tasks)
+	e.noteConfigModLocked()
 }
 
 // parseInterval converts a string like "5m", "1h", "30s" to time.Duration.

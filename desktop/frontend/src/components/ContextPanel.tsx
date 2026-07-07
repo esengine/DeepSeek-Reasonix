@@ -126,22 +126,38 @@ export function contextCostDisplay({
   sessionCurrency?: string;
   usage?: Pick<WireUsage, "cost" | "costUsd" | "currency">;
 }): { amount: number; currency?: string } {
+  // Session-scoped sources only: this value renders under the 会话费用 label,
+  // and falling back to a single request's usage.cost silently displayed one
+  // turn's spend as the whole session's. usage now contributes currency only.
   if (info?.sessionCost && info.sessionCost > 0) {
     return { amount: info.sessionCost, currency: info.sessionCurrency || sessionCurrency || usage?.currency };
   }
   if (sessionCost && sessionCost > 0) {
     return { amount: sessionCost, currency: sessionCurrency || info?.sessionCurrency || usage?.currency };
   }
-  if (usage?.cost && usage.cost > 0) {
-    return { amount: usage.cost, currency: usage.currency || sessionCurrency || info?.sessionCurrency };
-  }
   if (info?.sessionCostUsd && info.sessionCostUsd > 0) {
     return { amount: info.sessionCostUsd, currency: info.sessionCurrency || sessionCurrency || usage?.currency };
   }
-  if (usage?.costUsd && usage.costUsd > 0) {
-    return { amount: usage.costUsd, currency: usage.currency || sessionCurrency || info?.sessionCurrency };
-  }
   return { amount: 0, currency: info?.sessionCurrency || sessionCurrency || usage?.currency };
+}
+
+// contextSessionCache picks the session-cumulative cache hit/miss pair for the
+// panel's session average. All-sources telemetry (panel info, then ContextInfo)
+// wins over the wire session counters, which the Go agent scopes to the
+// executor only — the same preference StatusBar applies — and the pair always
+// comes from a single source so the computed rate never mixes scopes.
+export function contextSessionCache(
+  info?: Pick<ContextPanelInfo, "sessionCacheHitTokens" | "sessionCacheMissTokens"> | null,
+  context?: Pick<ContextInfo, "cacheHitTokens" | "cacheMissTokens">,
+  usage?: Pick<WireUsage, "sessionCacheHitTokens" | "sessionCacheMissTokens">,
+): { hit: number; miss: number } {
+  const infoHit = info?.sessionCacheHitTokens ?? 0;
+  const infoMiss = info?.sessionCacheMissTokens ?? 0;
+  if (infoHit + infoMiss > 0) return { hit: infoHit, miss: infoMiss };
+  const ctxHit = context?.cacheHitTokens ?? 0;
+  const ctxMiss = context?.cacheMissTokens ?? 0;
+  if (ctxHit + ctxMiss > 0) return { hit: ctxHit, miss: ctxMiss };
+  return { hit: usage?.sessionCacheHitTokens ?? 0, miss: usage?.sessionCacheMissTokens ?? 0 };
 }
 
 interface ContextBreakdown {
@@ -354,11 +370,12 @@ export function ContextPanel({
         ? usage.totalTokens
         : promptTokens + completionTokens;
   const reasoningTokens = usage?.reasoningTokens ?? info?.reasoningTokens ?? 0;
-  // Session-cumulative values for the top summary.
-  // Prefer usage.sessionCacheHitTokens — it is the session-cumulative value from
-  // the Go agent (includes background tasks) and arrives with every usage event.
-  const sessionCacheHit = usage?.sessionCacheHitTokens ?? info?.sessionCacheHitTokens ?? context?.cacheHitTokens ?? 0;
-  const sessionCacheMiss = usage?.sessionCacheMissTokens ?? info?.sessionCacheMissTokens ?? context?.cacheMissTokens ?? 0;
+  // Session-cumulative cache tokens for the top summary: all-sources telemetry
+  // first (matching the session cost and per-source rows in this panel — the
+  // wire session counters are executor-only), with the live counters bridging
+  // only a fresh session's first turn before the telemetry refresh. Hit and
+  // miss come as a pair from one source so the rate cannot mix scopes.
+  const { hit: sessionCacheHit, miss: sessionCacheMiss } = contextSessionCache(info, context, usage);
   const totalTokensMetric = formatMetricTokens(totalTokens, locale);
   const cost = contextCostDisplay({ info, sessionCost, sessionCurrency, usage });
   const sourceUsageRows = contextSourceRows(info, sessionCurrency);
