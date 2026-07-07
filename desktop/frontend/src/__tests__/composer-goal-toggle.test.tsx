@@ -8,7 +8,7 @@ import { Composer, composerPickFileEntry } from "../components/Composer";
 import { LocaleProvider } from "../lib/i18n";
 import { ToastProvider } from "../lib/toast";
 import type { AppBindings } from "../lib/bridge";
-import type { CollaborationMode, ToolApprovalMode, TokenMode } from "../lib/types";
+import type { CollaborationMode, DirEntry, ToolApprovalMode, TokenMode } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -198,6 +198,16 @@ async function waitFor(label: string, predicate: () => boolean) {
     if (predicate()) return;
   }
   throw new Error(`timed out waiting for ${label}`);
+}
+
+type RenderedComposer = Awaited<ReturnType<typeof renderComposer>>;
+
+function fileEntry(name: string): DirEntry {
+  return { name, isDir: false };
+}
+
+async function replaceComposerDraft(rerender: RenderedComposer["rerender"], id: number, text: string) {
+  await rerender({ insertRequest: { id, text, mode: "replace" } });
 }
 
 console.log("\ncomposer goal toggle");
@@ -732,6 +742,157 @@ console.log("\ncomposer goal toggle");
   });
 
   eq(calls.send.join(","), "steer while activating", "queued guidance can be guided while controllerReady is false");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  let listDirCalls = 0;
+  mockApp({
+    ListDir: async () => {
+      listDirCalls += 1;
+      return listDirCalls === 1 ? [fileEntry("cached-dir.txt")] : [fileEntry("fresh-dir.txt")];
+    },
+    SearchFileRefs: async () => [],
+  });
+  const { root, rerender } = await renderComposer();
+
+  await replaceComposerDraft(rerender, 101, "@");
+  await waitFor("initial @ directory load", () => listDirCalls === 1);
+
+  await replaceComposerDraft(rerender, 102, "");
+  await replaceComposerDraft(rerender, 103, "@");
+  await waitFor("@ directory revalidation call", () => listDirCalls === 2);
+
+  eq(listDirCalls, 2, "@ directory cache hit still revalidates ListDir");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  let listDirCalls = 0;
+  mockApp({
+    ListDir: async () => {
+      listDirCalls += 1;
+      return listDirCalls === 1 ? [fileEntry("manual-refresh-stale.txt")] : [fileEntry("manual-refresh-fresh.txt")];
+    },
+    SearchFileRefs: async () => [],
+  });
+  const { root, rerender } = await renderComposer({ fileRefRefreshKey: "0" });
+
+  await replaceComposerDraft(rerender, 201, "@");
+  await waitFor("initial @ directory load before refresh key", () => listDirCalls === 1);
+
+  await rerender({ fileRefRefreshKey: "1" });
+  await waitFor("@ directory reload after refresh key", () => listDirCalls === 2);
+
+  eq(listDirCalls, 2, "fileRefRefreshKey refreshes @ directory cache while the menu is open");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  const realDateNow = Date.now;
+  let now = 1000;
+  let searchCalls = 0;
+  Date.now = () => now;
+  mockApp({
+    ListDir: async () => [],
+    SearchFileRefs: async () => {
+      searchCalls += 1;
+      return searchCalls === 1 ? [fileEntry("alpha-old.ts")] : [fileEntry("alpha-new.ts")];
+    },
+  });
+  const { root, rerender } = await renderComposer();
+
+  try {
+    await replaceComposerDraft(rerender, 301, "@alpha");
+    await waitFor("initial @ search request", () => searchCalls === 1);
+    eq(searchCalls, 1, "@ search fetches the first query");
+
+    await replaceComposerDraft(rerender, 302, "");
+    now = 2000;
+    await replaceComposerDraft(rerender, 303, "@alpha");
+    await act(async () => {
+      await flushTimers();
+    });
+    eq(searchCalls, 1, "@ search cache is reused inside the TTL");
+
+    await replaceComposerDraft(rerender, 304, "");
+    now = 7001;
+    await replaceComposerDraft(rerender, 305, "@alpha");
+    await waitFor("expired @ search cache refresh", () => searchCalls === 2);
+    eq(searchCalls, 2, "@ search cache revalidates after the TTL");
+  } finally {
+    Date.now = realDateNow;
+  }
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  let staleListDirResolve: ((entries: DirEntry[]) => void) | undefined;
+  let thirdListDirResolve: ((entries: DirEntry[]) => void) | undefined;
+  let listDirCalls = 0;
+  mockApp({
+    ListDir: async () => {
+      listDirCalls += 1;
+      if (listDirCalls === 1) {
+        return new Promise<DirEntry[]>((resolve) => {
+          staleListDirResolve = resolve;
+        });
+      }
+      if (listDirCalls === 2) return [fileEntry("cache-live.txt")];
+      return new Promise<DirEntry[]>((resolve) => {
+        thirdListDirResolve = resolve;
+      });
+    },
+    SearchFileRefs: async () => [],
+  });
+  const { root, rerender } = await renderComposer({ fileRefRefreshKey: "0" });
+
+  const textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
+  if (!textarea) throw new Error("composer textarea did not render");
+
+  await replaceComposerDraft(rerender, 401, "@cache");
+  await waitFor("initial stale @ directory request", () => listDirCalls === 1);
+
+  await rerender({ fileRefRefreshKey: "1" });
+  await waitFor("fresh @ directory request after refresh key", () => listDirCalls === 2);
+  await act(async () => {
+    await flushTimers();
+  });
+
+  staleListDirResolve?.([fileEntry("cache-stale.txt")]);
+  await act(async () => {
+    await flushTimers();
+  });
+
+  await replaceComposerDraft(rerender, 402, "");
+  await replaceComposerDraft(rerender, 403, "@cache");
+  await waitFor("second fresh @ directory request", () => listDirCalls === 3);
+  await act(async () => {
+    textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  eq(textarea.value, "@cache-live.txt ", "stale @ directory request cannot repopulate cache after refresh");
+  thirdListDirResolve?.([fileEntry("cache-later.txt")]);
 
   await act(async () => {
     root.unmount();

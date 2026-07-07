@@ -97,6 +97,16 @@ func TestProviderViewFromEntry_MigratesProviderWideVision(t *testing.T) {
 	}
 }
 
+func TestProviderViewFromEntryIncludesThinking(t *testing.T) {
+	view := providerViewFromEntry(config.ProviderEntry{
+		Name:     "anthropic",
+		Thinking: "ADAPTIVE",
+	}, false, true)
+	if view.Thinking != "adaptive" {
+		t.Fatalf("ProviderView.Thinking = %q, want adaptive", view.Thinking)
+	}
+}
+
 func TestProviderViewFromEntryShowsKeySource(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	t.Setenv("TEST_PROVIDER_KEY_SOURCE", "")
@@ -117,6 +127,43 @@ func TestProviderViewFromEntryShowsKeySource(t *testing.T) {
 	}
 	if view.KeySource == "" || !strings.Contains(view.KeySource, "credentials") {
 		t.Fatalf("KeySource = %q, want credentials source", view.KeySource)
+	}
+}
+
+func TestSettingsExposesEffectiveSandboxWriteRoots(t *testing.T) {
+	home := isolateDesktopUserDirs(t)
+	project := robustTempDir(t)
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	cfg.Sandbox.AllowWrite = []string{
+		"${HOME}/.m2",
+		"${HOME}/.m2/repository",
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	app := NewApp()
+	app.tabs = map[string]*WorkspaceTab{
+		"project": {ID: "project", Scope: "project", WorkspaceRoot: project, Ready: true},
+	}
+	app.activeTabID = "project"
+
+	got := app.Settings().Sandbox
+	if got.EffectiveWorkspaceRoot != project {
+		t.Fatalf("EffectiveWorkspaceRoot = %q, want %q", got.EffectiveWorkspaceRoot, project)
+	}
+	// Settings expose expanded configured roots; the writer confiner normalizes
+	// separators later when enforcing them.
+	want := []string{
+		project,
+		home + "/.m2",
+		home + "/.m2/repository",
+	}
+	if !reflect.DeepEqual(got.EffectiveWriteRoots, want) {
+		t.Fatalf("EffectiveWriteRoots = %v, want %v", got.EffectiveWriteRoots, want)
+	}
+	if !reflect.DeepEqual(got.AllowWrite, cfg.Sandbox.AllowWrite) {
+		t.Fatalf("AllowWrite = %v, want raw configured paths %v", got.AllowWrite, cfg.Sandbox.AllowWrite)
 	}
 }
 
@@ -382,6 +429,60 @@ func TestSaveProviderFiltersNonChatModels(t *testing.T) {
 	}
 }
 
+func TestSaveProviderPersistsThinkingOverride(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	if err := app.SaveProvider(ProviderView{
+		Name:      "glm-proxy",
+		Kind:      "openai",
+		BaseURL:   "https://proxy.example.com/v1",
+		Models:    []string{"glm-4.5-air"},
+		APIKeyEnv: "GLM_PROXY_API_KEY",
+		Thinking:  "DISABLED",
+	}); err != nil {
+		t.Fatalf("SaveProvider: %v", err)
+	}
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	got, ok := cfg.Provider("glm-proxy")
+	if !ok {
+		t.Fatal("saved provider not found")
+	}
+	if got.Thinking != "disabled" {
+		t.Fatalf("saved provider thinking = %q, want disabled", got.Thinking)
+	}
+}
+
+func TestSaveProviderPersistsAuthHeader(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	if err := app.SaveProvider(ProviderView{
+		Name:       "minimax-global-anthropic",
+		Kind:       "anthropic",
+		BaseURL:    "https://api.minimax.io/anthropic",
+		Models:     []string{"MiniMax-M3"},
+		APIKeyEnv:  "MINIMAX_API_KEY",
+		AuthHeader: true,
+	}); err != nil {
+		t.Fatalf("SaveProvider: %v", err)
+	}
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	got, ok := cfg.Provider("minimax-global-anthropic")
+	if !ok {
+		t.Fatal("saved provider not found")
+	}
+	if !got.AuthHeader {
+		t.Fatal("saved provider auth_header = false, want true")
+	}
+	view := providerViewFromEntry(*got, false, true)
+	if !view.AuthHeader {
+		t.Fatal("provider view authHeader = false, want true")
+	}
+}
+
 func TestSaveProviderPersistsCustomEndpointURLs(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -443,6 +544,7 @@ func TestSaveProviderPreservesHiddenProviderFields(t *testing.T) {
 		Thinking:     "adaptive",
 		Effort:       "high",
 		VisionDetail: "low",
+		ExtraBody:    map[string]any{"enable_thinking": true},
 		NoProxy:      true,
 	}}
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
@@ -462,6 +564,9 @@ func TestSaveProviderPreservesHiddenProviderFields(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("Settings providers missing custom: %+v", settings.Providers)
+	}
+	if view.ExtraBody["enable_thinking"] != true {
+		t.Fatalf("settings extra_body = %+v, want enable_thinking=true", view.ExtraBody)
 	}
 
 	if err := app.SaveProvider(view); err != nil {
@@ -484,6 +589,9 @@ func TestSaveProviderPreservesHiddenProviderFields(t *testing.T) {
 	}
 	if got.VisionDetail != "low" {
 		t.Fatalf("vision_detail = %q, want low", got.VisionDetail)
+	}
+	if got.ExtraBody["enable_thinking"] != true {
+		t.Fatalf("extra_body = %+v, want enable_thinking=true", got.ExtraBody)
 	}
 	if !got.NoProxy {
 		t.Fatal("no_proxy = false, want preserved true")
@@ -721,7 +829,7 @@ func TestSetReasoningLanguageUpdatesLiveTabControllers(t *testing.T) {
 	}
 
 	userComposed := userCtrl.Compose("hi")
-	if !strings.Contains(userComposed, "Simplified Chinese") {
+	if !strings.Contains(userComposed, "简体中文") {
 		t.Fatalf("user-level tab Compose = %q, want zh reasoning language", userComposed)
 	}
 	projectComposed := projectCtrl.Compose("hi")
@@ -1107,5 +1215,136 @@ func TestSaveHooksSettingsForRootUsesDisplayedProjectRoot(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(projectB, ".reasonix", "settings.json")); err == nil {
 		t.Fatal("active project root was written instead of displayed project root")
+	}
+}
+
+// TestLoadDesktopUserConfigForViewDoesNotPersistLegacyProviderAccess locks the
+// read-path contract: loading a legacy-form config (configured providers but
+// no declared desktop.provider_access) through the View helpers returns a
+// normalized in-memory view while leaving the file bytes untouched. The
+// on-disk migration only happens once a locked write path runs.
+func TestLoadDesktopUserConfigForViewDoesNotPersistLegacyProviderAccess(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	userPath := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := "default_model = \"local/m1\"\n\n[[providers]]\nname = \"local\"\nbase_url = \"http://127.0.0.1:9999/v1\"\nmodels = [\"m1\"]\n"
+	if err := os.WriteFile(userPath, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	for name, load := range map[string]func() (*config.Config, string, error){
+		"view":                  app.loadDesktopUserConfigForView,
+		"view-with-credentials": app.loadDesktopUserConfigForViewWithCredentials,
+	} {
+		cfg, _, err := load()
+		if err != nil {
+			t.Fatalf("%s load: %v", name, err)
+		}
+		if len(cfg.Desktop.ProviderAccess) == 0 {
+			t.Fatalf("%s load should normalize legacy provider access in memory", name)
+		}
+		raw, err := os.ReadFile(userPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(raw) != legacy {
+			t.Fatalf("%s load must not rewrite the user config, got:\n%s", name, raw)
+		}
+	}
+
+	// The first locked write path persists the pending migration.
+	if err := app.applyConfigOnly(func(*config.Config) error { return nil }); err != nil {
+		t.Fatalf("applyConfigOnly: %v", err)
+	}
+	if !configDeclaresProviderAccess(userPath) {
+		t.Fatal("locked write path should persist the provider access migration to disk")
+	}
+	migrated := config.LoadForEditWithoutCredentials(userPath)
+	if len(migrated.Desktop.ProviderAccess) == 0 {
+		t.Fatalf("migrated config lost provider access: %v", migrated.Desktop.ProviderAccess)
+	}
+}
+
+// TestLoadDesktopUserConfigViewKeepsLegacyBotConfigMigrationInMemory locks the
+// same contract for the legacy bot-config migration: read paths (including the
+// bot runtime's credential-loading view) see the merged bot config in memory
+// without any file being written; the locked write path performs the on-disk
+// migration.
+func TestLoadDesktopUserConfigViewKeepsLegacyBotConfigMigrationInMemory(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	userPath := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	userBody := "default_model = \"local/m1\"\n"
+	if err := os.WriteFile(userPath, []byte(userBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	legacyRoot := t.TempDir()
+	legacyPath := filepath.Join(legacyRoot, "reasonix.toml")
+	legacyBody := "[bot]\nenabled = true\nmodel = \"local/m1\"\n"
+	if err := os.WriteFile(legacyPath, []byte(legacyBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.tabs = map[string]*WorkspaceTab{
+		"t": {ID: "t", Scope: "project", WorkspaceRoot: legacyRoot, Ready: true},
+	}
+	app.activeTabID = "t"
+
+	assertFilesUntouched := func(step string) {
+		t.Helper()
+		rawUser, err := os.ReadFile(userPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(rawUser) != userBody {
+			t.Fatalf("%s must not rewrite the user config, got:\n%s", step, rawUser)
+		}
+		rawLegacy, err := os.ReadFile(legacyPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(rawLegacy) != legacyBody {
+			t.Fatalf("%s must not rewrite the legacy config, got:\n%s", step, rawLegacy)
+		}
+	}
+
+	cfg, _, err := app.loadDesktopUserConfigForView()
+	if err != nil {
+		t.Fatalf("loadDesktopUserConfigForView: %v", err)
+	}
+	if !cfg.Bot.Enabled {
+		t.Fatal("view load should merge the legacy bot config in memory")
+	}
+	assertFilesUntouched("loadDesktopUserConfigForView")
+
+	botCfg, err := app.loadDesktopBotConfig()
+	if err != nil {
+		t.Fatalf("loadDesktopBotConfig: %v", err)
+	}
+	if !botCfg.Bot.Enabled {
+		t.Fatal("bot runtime load should see the merged legacy bot config")
+	}
+	assertFilesUntouched("loadDesktopBotConfig")
+
+	// The first locked write path migrates the bot config into the user file.
+	if err := app.applyConfigOnly(func(*config.Config) error { return nil }); err != nil {
+		t.Fatalf("applyConfigOnly: %v", err)
+	}
+	migrated := config.LoadForEditWithoutCredentials(userPath)
+	if !migrated.Bot.Enabled {
+		t.Fatal("locked write path should persist the legacy bot config migration")
+	}
+	rawLegacy, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(rawLegacy) != legacyBody {
+		t.Fatalf("migration must not rewrite the legacy config, got:\n%s", rawLegacy)
 	}
 }

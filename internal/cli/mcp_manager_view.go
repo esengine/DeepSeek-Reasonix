@@ -334,7 +334,7 @@ func mcpAuthLabel(v mcpServerView) string {
 
 func mcpCapabilitiesText(v mcpServerView) string {
 	var caps []string
-	if v.Tools > 0 {
+	if v.HasTools || v.Tools > 0 {
 		caps = append(caps, "tools")
 	}
 	if v.Prompts > 0 {

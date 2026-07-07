@@ -189,15 +189,28 @@ func readSkillFile(path, fallbackName string, strict bool) (skillCandidate, erro
 func parseSkillContent(content, fallbackName, source string, strict bool) (skillCandidate, error) {
 	bom := "\uFEFF"
 	content = strings.TrimPrefix(strings.ReplaceAll(content, "\r\n", "\n"), bom)
-	fm, body := frontmatter.Split(content)
+	var meta struct {
+		Name        string `yaml:"name"`
+		Description string `yaml:"description"`
+	}
+	body, err := frontmatter.Decode(content, &meta, frontmatter.DecodeOptions{})
+	if err != nil {
+		return skillCandidate{}, newErr(ErrInvalidManifest, "skill frontmatter at %s is invalid YAML: %v", source, err)
+	}
+	fm, _ := frontmatter.Split(content)
 	name := strings.TrimSpace(fallbackName)
-	if v := strings.TrimSpace(fm["name"]); v != "" {
+	if v := strings.TrimSpace(meta.Name); v != "" {
+		name = v
+	} else if v := strings.TrimSpace(fm["name"]); v != "" {
 		name = v
 	}
 	if !config.IsValidSkillName(name) {
 		return skillCandidate{}, newErr(ErrInvalidManifest, "skill %q at %s has an invalid name", name, source)
 	}
-	desc := collapseSpaces(fm["description"])
+	desc := collapseSpaces(meta.Description)
+	if desc == "" {
+		desc = collapseSpaces(fm["description"])
+	}
 	if strict {
 		if desc == "" {
 			return skillCandidate{}, newErr(ErrInvalidManifest, "skill %q at %s is missing description frontmatter", name, source)

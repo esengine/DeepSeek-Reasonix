@@ -16,6 +16,7 @@
 - [Serve Web 前端](#serve-web-前端)
 - [配置路径](./CONFIG_PATHS.zh-CN.md)
 - [思考语言](./REASONING_LANGUAGE.zh-CN.md)
+- [任务合约与暂停策略](./TASK_CONTRACT.zh-CN.md)
 - [自定义 OpenAI-compatible provider](#自定义-openai-compatible-provider)
 - [桌面端 Hooks](./DESKTOP_HOOKS.zh-CN.md)
 - [快捷键](#快捷键)
@@ -37,6 +38,8 @@ Reasonix 全局 `<Reasonix home>/.env`。项目 `.env`、home `.env`、继承的
 
 桌面端和 CLI 端的可见思考语言设置，见 [思考语言](./REASONING_LANGUAGE.zh-CN.md)。
 桌面端 Hooks 的 JSON 配置、事件 key 和 payload 字段，见 [桌面端 Hooks](./DESKTOP_HOOKS.zh-CN.md)。
+`SessionStart` hook 可通过 stdout 或 `hookSpecificOutput.additionalContext` 把插件/工作流 bootstrap 内容一次性注入下一轮真实用户输入上下文，而不是写入稳定 system prompt。
+插件包可通过 `hooks/session-start-codex` 或插件根目录 `CLAUDE.md` 提供该启动上下文；Claude 风格 `.claude/settings.json` command hooks 也会按同名事件映射到 Reasonix hooks。
 
 ```toml
 default_model = "deepseek-flash"   # 执行器；设 [agent].planner_model 可加规划器
@@ -52,9 +55,11 @@ planner_max_steps = 0            # 仅用户/全局；规划器只读工具调�
 reasoning_language = "auto"      # 可见思考过程语言：auto|zh|en
 # plan_mode_allowed_tools = ["custom_reader"]   # 仅声明额外只读自定义工具；
 #                                                # 不能解锁被计划模式阻断的工具或 unsafe bash
+# plan_mode_read_only_commands = ["gh issue view", "gh pr diff"]   # 计划模式额外只读 shell 前缀
 # planner_model = "deepseek-pro"      # 可选的低频规划器
 # subagent_model = "deepseek-pro"     # runAs=subagent skill 的默认模型
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
+# max_subagent_depth = 2              # 子代理嵌套委派深度；设为 1 可恢复旧的单层边界
 auto_plan = "off"                  # 仅用户级生效；off|on；off 表示计划模式仅手动开启
 # auto_plan_classifier = "deepseek-flash"   # 可选；只在边界任务上调用
 tool_result_snip_ratio = 0.6       # 在摘要 compaction 前先缩短旧工具输出
@@ -112,6 +117,14 @@ tool_timeout_seconds = { "generate_video" = 1800 }   # 可选：raw MCP tool 名
 planner / read-only research 可用的可信只读工具。优先使用 MCP 只读信任的一次性确认；需要预置已审过工具时，
 再在 plugin 上写 `trusted_read_only_tools`，`plan_mode_allowed_tools` 保留为兼容逃生阀。它不再解锁 `bash`、`task`、
 写文件工具、安装器、记忆变更工具等计划模式已知阻断项，也不会绕过 bash 在计划模式下的安全检查。
+
+当计划阶段需要运行 Reasonix 尚不能自动分类、但你确认只读的 shell 查询命令时，使用
+`[agent].plan_mode_read_only_commands`，例如 `gh issue view`、`gh pr diff` 或内部只读查询 CLI。
+这里声明的是具体命令前缀，不是工具名：`["gh issue view"]` 会允许 `gh issue view 4572`，
+但 `bash`、`sh` 等 shell 解释器前缀会被忽略。shell 操作符、重定向、命令替换、后台进程、
+以及内置命令里的写能力参数在计划模式下仍会被阻断。交互式计划模式第一次需要某个未知查询前缀时，
+Reasonix 也可以提示你确认是否信任它为只读；选择持久信任会写入同一个
+`[agent].plan_mode_read_only_commands` 配置。Auto/YOLO 审批不会替用户回答这个信任提示。
 
 ### 环境变量
 
@@ -178,7 +191,25 @@ Goal、由 `todo_write` 工具驱动的实时 Todo 面板，以及已配置 prov
 ## 自定义 OpenAI-compatible provider
 
 在桌面端打开 **设置 -> 模型 -> 接入 -> 添加模型服务 -> 自定义供应商**，用于接入代理、
-聚合平台或自建 OpenAI-compatible chat API 服务。
+聚合平台或自建 OpenAI-compatible chat API / Anthropic-compatible Messages API 服务。
+
+常用服务优先使用 **添加模型服务 -> 推荐预设**。Reasonix 可以预填可编辑的自定义 provider：
+Kimi CN、Kimi Global、Kimi Coding Plan、MiMo API、MiMo Anthropic、MiMo Token Plan
+CN/SGP/AMS 及其 Anthropic-compatible 变体、MiniMax CN/Global API、MiniMax
+CN/Global Anthropic、GLM CN、Z.AI Global、GLM/Z.AI Coding Plan 的
+OpenAI-compatible 与 Anthropic-compatible 端点、OpenCode Go、OpenCode Go
+Anthropic、OpenCode Zen Anthropic、Qwen/DashScope CN/Global、Qwen Coding Plan
+CN/Global 的 OpenAI-compatible 与 Anthropic-compatible 端点、StepFun
+OpenAI-compatible 与 Anthropic-compatible 端点、NovitaAI、GMI Cloud、Vercel AI
+Gateway、HuggingFace Router、NVIDIA NIM、KiloCode 和 Ollama Cloud。Plan 表示
+访问/付费形态；只有服务商确实提供不同区域端点时，预设名才同时带 CN/Global。
+因此 Kimi Coding Plan 是独立 plan 端点，Kimi 直连 API 才拆成 CN 和 Global。
+预设路径通常只需要填写服务商 API Key：真实 key 会写入 Reasonix home `.env`，
+`config.toml` 只保存端点、模型列表、key 环境变量名、上下文窗口、视觉模型元数据、
+中国区端点直连、MiniMax `reasoning_split`、GLM/MiniMax thinking heuristic、
+Anthropic-compatible 网关需要的 Bearer 认证、Ollama Cloud max-effort 支持，
+以及 OpenCode Go 的每模型 reasoning 覆盖。添加后仍然可以打开 provider 卡片，
+继续修改模型、请求头、端点或兼容设置。
 
 **API 地址** 填写服务端点。默认模式下，Reasonix 会预览并把聊天请求发送到：
 
@@ -191,11 +222,48 @@ Goal、由 `todo_write` 工具驱动的实时 Todo 面板，以及已配置 prov
 输入框下方的预览就是最终请求地址。
 
 模型发现会基于 API 地址尝试 `/models`、`/v1/models` 等候选地址。如果网关要求单独的
-模型列表端点，在 **高级设置** 中填写 `models_url`，例如
+模型列表端点，在 **兼容设置** 中填写 `models_url`，例如
 `https://gateway.example.com/v1/models`。如果接口不支持模型发现，也可以手动填写模型列表。
 
 **完整 URL** 仍使用 OpenAI-compatible chat 请求体；它不会切换成 OpenAI Responses API
 的请求 schema。
+
+### 兼容设置
+
+**兼容设置（通常不用改）** 用于处理认证变量、模型发现地址、请求头、以及 reasoning/thinking
+请求格式和普通 OpenAI-compatible 默认行为不一致的网关。除非服务商文档明确要求，或代理报错说明
+不兼容，否则保持默认值即可。Kimi Coding Plan、MiniMax CN/Global Anthropic 这类 Anthropic-compatible 服务，
+保存前在基础区域把接入协议切到 **Anthropic-compatible**。
+
+| 字段 | 作用 | 什么时候改 |
+| --- | --- | --- |
+| `api_key_env` | 该 provider 使用的 API key 环境变量名。桌面端保存的真实 key 会写入 Reasonix home `.env` 的同名变量；TOML 配置里只保存变量名。 | 多个 provider 需要不同 key 时改名；服务不需要 API key 时可以留空。 |
+| `models_url` | 只用于自动发现模型列表的 URL。聊天请求仍使用上方的 API 地址或完整 URL。 | `/models` 或 `/v1/models` 不是该网关模型列表地址时填写。 |
+| 额外请求头 | 静态 HTTP header，一行一个 `Header: value`。 | OpenRouter 等网关要求 `HTTP-Referer`、`X-Title` 或类似站点来源 header 时使用。API key 仍放在上方密钥字段，不要重复写到这里。 |
+| 额外请求体 | 合并到聊天请求体顶层的 JSON 对象。 | 仅用于服务商专用开关，例如 `{"enable_thinking": true}`。`model`、`messages`、`tools`、`stream`、`thinking` 等核心字段仍由 Reasonix 控制，且不接受 `null` 值。 |
+| Authorization: Bearer | 对 Anthropic-compatible provider，把已保存的 API key 用 `Authorization: Bearer <key>` 发送，而不是 `x-api-key`。 | MiniMax Global、Vercel AI Gateway 等网关文档明确要求 Bearer 认证时开启。 |
+| 模型能力模式 | 指定 Reasonix 对该 provider 使用哪种 reasoning 请求协议。 | 默认用“自动识别”。只有网关被误判，或模型文档要求特定 reasoning 格式时再切换。 |
+| Thinking 覆盖 | provider 专用的 `thinking.type` 覆盖项。 | 默认用 Auto。只有后端文档明确支持 `enabled`、`disabled` 或 `adaptive` 时再手动指定；不支持的值可能让中转站拒绝请求。 |
+| 余额查询 URL | 可选的钱包余额查询接口。 | 服务商提供余额接口，且希望桌面端状态栏显示余额时填写。 |
+| 上下文窗口 | 该 provider 可保留的最大上下文 token 数。`0` 表示使用模型服务默认值。 | 模型实际上下文大小和 Reasonix 默认值或内置元数据不一致时填写。 |
+
+模型能力模式选项：
+
+| 选项 | 作用 |
+| --- | --- |
+| 自动识别（推荐） | Reasonix 根据模型能力元数据和端点自动选择请求格式。 |
+| DeepSeek 思考 | 使用 DeepSeek 风格的 thinking 控制，包括 `thinking.type` 和 DeepSeek 支持的推理深度。 |
+| OpenAI reasoning | 使用标准 OpenAI-compatible 的 `reasoning_effort` 档位。 |
+| 普通聊天（不发送思考参数） | 不发送 reasoning 或 thinking 控制字段。适合会拒绝 reasoning 参数的普通文本代理。 |
+
+Thinking 覆盖选项：
+
+| 选项 | 作用 |
+| --- | --- |
+| Auto（使用服务默认） | 不写 provider 级 `thinking` 覆盖，让 Reasonix 使用 provider/model 默认行为。 |
+| Enabled（开启） | 对兼容 provider 发送 `thinking.type = "enabled"`。 |
+| Disabled（关闭） | 对兼容 provider 发送 `thinking.type = "disabled"`。DeepSeek 风格 provider 下还会避免继续发送推理深度提示。 |
+| Adaptive（自适应） | 仅在服务文档明确支持 adaptive thinking 时使用，例如 MiniMax-M3 风格端点；语义是发送或保留 `thinking.type = "adaptive"`。 |
 
 ## 快捷键
 
@@ -324,10 +392,34 @@ CJK 双宽字符，造成视觉错位。想保留旧的终端块状光标可设�
 之外的任何路径（默认当前目录，编辑不出项目），并解析符号链接与 `..`，使链接无法
 打洞越界。`forbid_read` 可选地隐藏敏感目录，使 agent 的读文件、列目录和搜索工具不能读取或列出它们；
 建议使用绝对路径或 `${HOME}` / `${VAR}`，不要写 `~`，因为配置只做环境变量展开。
-`bash` 本身在 macOS 默认进沙盒（`[sandbox] bash`，Seatbelt）：命令只能写这些 root（外加临时目录与工具链缓存），
-OS 沙盒生效时也不能读取配置的 `forbid_read` roots，`[sandbox] network` 为真时才能联网；
-其它平台在没有可用 OS 沙盒时会回退为不沙盒运行（越界问一次与 Linux 支持见
+`bash` 本身默认进 OS 沙盒（`[sandbox] bash`：macOS 使用 Seatbelt，Linux 使用 bubblewrap，
+原生 Windows 使用 native helper）：命令只能写这些 root（外加平台按命令提供的临时/缓存 root），
+OS 沙盒生效时也不能读取配置的 `forbid_read` roots，`[sandbox] network` 为真时才能联网。
+原生 Windows helper 使用 Reasonix 内置的 Windows sandbox backend：
+只读命令使用 AppContainer，可写命令使用 low-integrity token；它会临时授予
+workspace、每次命令专用 temp root 和目标可执行文件的访问权，对 `forbid_read`
+（文件和目录皆可）临时添加 deny ACE，修改前记录被触碰目录的 DACL，命令结束后尽力恢复。
+作用于同一 workspace 的并发命令会被串行化，避免各自的 ACL 修改互相破坏；被强杀命令
+残留的 low-integrity 标签或 `forbid_read` deny ACE 会由下一次运行清理。由于可写命令跑在
+low-integrity token 下，除配置的 root 外它仍能写入 Windows 对任何 low-integrity 进程开放的
+少数位置（例如 `%USERPROFILE%\AppData\LocalLow`），但 workspace 边界与 `forbid_read`
+拒绝依然有效。只读 AppContainer 命令在关闭网络时不给 network capability；可写 Windows 命令遇到
+`[sandbox] network = false` 时会 fail closed。没有可用 OS 沙盒时，`bash = "enforce"` 会拒绝 bash 执行，不会无沙盒运行
+（越界询问与可选的 Windows elevated 加固见
 [`SPEC.md` §9](./SPEC.md#9-roadmap-not-in-current-scope)）。
+
+Windows 沙盒排障：沙盒会把 Reasonix 可执行文件自身以隐藏 helper 方式重新拉起，
+CLI 与桌面端都内置了这个 helper 入口——若某个构建缺少入口而又请求 enforce，
+bash 会以明确报错拒绝执行，而不是返回空输出。同一 workspace 上排队等待另一条
+沙盒命令时会打印一行“waiting for another sandboxed command”提示，并在可识别时
+标出持锁命令及其 PID。前台命令排队 1 分钟后即失败并给出同样的持锁信息（被挡住
+的回合应尽快报错，而不是挂住）；后台任务最多等 10 分钟，`WINDOWS_SANDBOX_LOCK_MS`
+可同时覆盖两者。应先停止提示中点名的命令；调大等待上限只会让后续命令等更久。
+如果只有 Git-for-Windows/MSYS2 bash
+下的沙盒命令失败，可试 `[tools.shell] prefer = "powershell"`——MSYS 运行时在
+low-integrity token 下较脆弱。运行 `reasonix doctor` 可查看解析到的 shell、沙盒
+可用性，以及项目 `reasonix.toml` 是否固定了 `[sandbox]`（项目文件优先级高于
+Settings/用户配置；沙盒配置变更需 reload session config 或新开会话才生效）。
 
 ## 插件（MCP）
 
@@ -409,7 +501,8 @@ headers = { Authorization = "Bearer ${STRIPE_KEY}" }
 compaction archive 和已保存事实；这些动态内容不会被塞进稳定的 system prompt 前缀。
 `/forget <name>` 会把已保存事实归档而不是永久删除；CLI/TUI 和桌面记忆面板能显示归档文件用于追溯，
 但它们不会作为 active memory 被检索。检索会保留 BM25 最强命中，同时裁掉弱的泛词命中；
-agent 发起的 `remember` 和 `forget` 每次都会要求新的人工确认，并在执行前展示将保存或归档的记忆摘要。
+agent 发起的 `remember` 和 `forget` 每次都会要求新的人工确认，并在执行前展示将保存或归档的记忆摘要；
+Guardian 审查不能代替用户批准，非交互运行会拒绝这类工具而不是自动批准。
 0 结果会提示 agent 改用更少、更有区分度的词继续查。
 Memory v5 在 CLI/TUI、`reasonix serve` 和桌面端默认开启，因为这些入口共用同一套本地
 controller。它会把本地、按项目隔离的执行轨迹和编译器状态写在 Reasonix home 下，并且只有
@@ -460,6 +553,10 @@ Goal 是长期目标的统一运行机制。普通 `/goal` 继续走轻量 Goal�
 要求用户单独运行 `/auto-research` skill；`auto-research` 也不会作为独立 builtin skill 出现在
 Settings -> Skills 或斜杠菜单里。普通聊天输入如果命中很强的长周期信号，也会被 host 自动
 升级为等价的 `/goal --research <原输入>`。
+
+复杂任务建议把目标写成[任务合约](./TASK_CONTRACT.zh-CN.md)：Context、Request、
+Output format、Constraints 和 Pause policy。Goal 模式会把这些部分当作自主执行的边界；
+除非下一步需要不可逆或对外可见操作、任务范围变化，或必须由用户提供信息，否则会继续采用合理默认值推进，并在最后汇报假设与结果。
 
 AutoResearch 会在这些目标里自动启用：包含“持续”“长期”“彻底”“直到根因明确”“多轮排查”
 “不要原地打转”“完整方案”“跑实验”“反复验证”“系统性研究”等强信号；或者目标同时包含
@@ -512,10 +609,17 @@ Planner 会看到已加载的 `REASONIX.md` / `AGENTS.md` 记忆，并拿到一�
 Subagent skills 默认继承执行器模型。设置 `subagent_model` 可让它们统一走另一个已配置
 模型；设置 `subagent_models` 则只覆盖 `review`、`security_review` 等指定 skill。
 
+Subagent 默认允许再委派一层：根会话是 depth 0，第一层 subagent 是 depth 1，
+`max_subagent_depth = 2` 表示 depth 1 的 workflow 可以再派 depth 2 的 reviewer
+或 implementer；depth 2 不再拿到递归 agent/skill 工具。设
+`agent.max_subagent_depth = 1` 可恢复旧的单层边界。这主要用于 Superpowers 这类
+workflow skill 派发 reviewer subagent 的场景，同时避免无限递归和后台 fanout。
+
 当计划阶段需要隔离上下文做更深的调研时，用 `read_only_task`，而不是放开可写的
 `task`。如果这类调研更适合复用已有 skill，用 `read_only_skill`。两者都会启动
 ephemeral 只读 subagent，只暴露只读研究工具和安全前台 bash，只返回最终答案，不创建
-可续接的 subagent transcript。在 token economy 模式下，只用
+可续接的 subagent transcript。只读嵌套委派会在 `max_subagent_depth` 内可用，但
+可写的 `task` / `run_skill` 仍不可用。在 token economy 模式下，只用
 `connect_tool_source(source="read_only_skill")` 连接这条窄入口；完整的 `skills`
 source 仍会启用可写 skill 工具，plan mode 下继续阻断。
 

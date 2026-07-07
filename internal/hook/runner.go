@@ -104,13 +104,15 @@ func (r *Runner) Stop(ctx context.Context, lastAssistant string, turn int) {
 	r.handle(rep)
 }
 
-// SessionStart fires when a session becomes active. It can't block; its purpose
-// is setup side effects (logging, prepping the workspace, desktop notifications).
-func (r *Runner) SessionStart(ctx context.Context) {
+// SessionStart fires when a session becomes active. It can't block; successful
+// stdout may contribute one-shot context for the next model request.
+func (r *Runner) SessionStart(ctx context.Context) []string {
 	if !r.Enabled() {
-		return
+		return nil
 	}
-	r.handle(Run(ctx, Payload{Event: SessionStart, Cwd: r.cwd}, r.hooks, r.spawner))
+	rep := Run(ctx, Payload{Event: SessionStart, Cwd: r.cwd}, r.hooks, r.spawner)
+	r.handle(rep)
+	return r.additionalContexts(rep)
 }
 
 // SessionEnd fires when a session is closed or rotated (/new). It can't block.
@@ -181,6 +183,29 @@ func (r *Runner) PreCompact(ctx context.Context, trigger string) string {
 	return b.String()
 }
 
+func (r *Runner) additionalContexts(rep Report) []string {
+	var contexts []string
+	for _, o := range rep.Outcomes {
+		if o.Decision != DecisionPass {
+			continue
+		}
+		out, warnings := ParseOutput(rep.Event, o.Stdout)
+		for _, warning := range warnings {
+			if r.notify != nil {
+				r.notify(FormatOutcome(Outcome{
+					Hook:     o.Hook,
+					Decision: DecisionWarn,
+					Stdout:   warning,
+				}))
+			}
+		}
+		if out.AdditionalContext != "" {
+			contexts = append(contexts, out.AdditionalContext)
+		}
+	}
+	return contexts
+}
+
 // handle surfaces every non-pass outcome to the user (notify) and returns the
 // block decision plus the blocking hook's message.
 func (r *Runner) handle(rep Report) (bool, string) {
@@ -207,7 +232,11 @@ func FormatOutcome(o Outcome) string {
 		detail = strings.TrimSpace(o.Stdout)
 	}
 	tag := string(o.Hook.Scope) + "/" + string(o.Hook.Event)
-	cmd := clipRunes(o.Hook.Command, 60)
+	cmd := o.Hook.Command
+	if cmd == "" && o.Hook.ContextFile != "" {
+		cmd = "context:" + o.Hook.ContextFile
+	}
+	cmd = clipRunes(cmd, 60)
 	trunc := ""
 	if o.Truncated {
 		trunc = " (output truncated)"

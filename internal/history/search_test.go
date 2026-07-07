@@ -261,6 +261,27 @@ func TestAroundRendersNearbyMessages(t *testing.T) {
 	}
 }
 
+func TestAroundClampsLargeAfterWithoutOverflow(t *testing.T) {
+	sessionDir := t.TempDir()
+	path := filepath.Join(sessionDir, "nearby.jsonl")
+	writeSession(t, path, []provider.Message{
+		{Role: provider.RoleUser, Content: "first"},
+		{Role: provider.RoleAssistant, Content: "second"},
+	})
+
+	searcher := NewSearcher(Options{SessionDir: sessionDir})
+	msgs, err := searcher.Around(context.Background(), AroundRequest{SessionPath: path, MessageIndex: 0, Before: 0, After: maxAround * 10})
+	if err != nil {
+		t.Fatalf("Around() error = %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("Around() returned %d messages, want 2", len(msgs))
+	}
+	if msgs[0].Index != 0 || msgs[1].Index != 1 {
+		t.Fatalf("Around() message indexes = [%d, %d], want [0, 1]", msgs[0].Index, msgs[1].Index)
+	}
+}
+
 func writeSession(t *testing.T, path string, msgs []provider.Message) {
 	t.Helper()
 	sess := agent.NewSession("")

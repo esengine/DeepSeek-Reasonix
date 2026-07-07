@@ -74,7 +74,7 @@ function tabMeta(overrides: Partial<TabMeta> = {}): TabMeta {
   };
 }
 
-function meta(): Meta {
+function meta(overrides: Partial<Meta> = {}): Meta {
   return {
     label: "model",
     ready: true,
@@ -91,6 +91,7 @@ function meta(): Meta {
     tokenMode: "full",
     goal: "",
     goalStatus: "stopped",
+    ...overrides,
   };
 }
 
@@ -211,10 +212,14 @@ await act(async () => {
 });
 
 const guardedStartupTabs = deferred<TabMeta[]>();
-let ensureBlankSurfaceCalls = 0;
+const staleProjectA = "/repo/project-a";
+const targetProjectB = "/repo/project-b";
+const ensureBlankSurfaceCalls: Array<{ scope: string; workspaceRoot: string }> = [];
 window.go.main.App = {
   ListTabs: async () => guardedStartupTabs.promise,
-  MetaForTab: async () => meta(),
+  MetaForTab: async (tabID: string) => tabID === "tab-new"
+    ? meta({ cwd: targetProjectB, workspaceRoot: targetProjectB, workspaceName: "project-b", workspacePath: targetProjectB })
+    : meta({ cwd: staleProjectA, workspaceRoot: staleProjectA, workspaceName: "project-a", workspacePath: staleProjectA }),
   ContextUsageForTab: async () => context,
   EffortForTab: async () => effort,
   BalanceForTab: async () => balance,
@@ -224,9 +229,17 @@ window.go.main.App = {
   HistoryPageForTab: async () => ({ messages: [], startTurn: 0, endTurn: 0, totalTurns: 0, hasOlder: false }),
   HistoryCheckpointTurnsForTab: async () => [],
   ReplayPendingPrompts: async () => {},
-  EnsureBlankSurface: async () => {
-    ensureBlankSurfaceCalls += 1;
-    return tabMeta({ id: "tab-new", topicId: "topic-new", topicTitle: "New session" });
+  EnsureBlankSurface: async (scope: string, workspaceRoot: string) => {
+    ensureBlankSurfaceCalls.push({ scope, workspaceRoot });
+    return tabMeta({
+      id: "tab-new",
+      topicId: "topic-new",
+      topicTitle: "New session",
+      workspaceRoot: targetProjectB,
+      workspaceName: "project-b",
+      workspacePath: targetProjectB,
+      cwd: targetProjectB,
+    });
   },
 } as Partial<AppBindings> as AppBindings;
 
@@ -239,20 +252,31 @@ await act(async () => {
 });
 
 await act(async () => {
-  await controller?.ensureBlankSurface("project", "/repo");
+  await controller?.ensureBlankSurface("project", targetProjectB);
   await flushPromises();
 });
 
-eq(ensureBlankSurfaceCalls, 1, "EnsureBlankSurface is called once");
+eq(ensureBlankSurfaceCalls.length, 1, "EnsureBlankSurface is called once");
+eq(ensureBlankSurfaceCalls[0]?.workspaceRoot, targetProjectB, "EnsureBlankSurface keeps the requested project root");
 eq(controller?.activeTabId, "tab-new", "blank surface becomes active before startup sync resolves");
+eq(controller?.state.meta?.workspaceRoot, targetProjectB, "blank surface exposes the new project root");
 
 await act(async () => {
-  guardedStartupTabs.resolve([tabMeta({ id: "tab-old", topicId: "topic-old", topicTitle: "Old session" })]);
+  guardedStartupTabs.resolve([tabMeta({
+    id: "tab-old",
+    topicId: "topic-old",
+    topicTitle: "Old session",
+    workspaceRoot: staleProjectA,
+    workspaceName: "project-a",
+    workspacePath: staleProjectA,
+    cwd: staleProjectA,
+  })]);
   await guardedStartupTabs.promise;
   await flushPromises();
 });
 
 eq(controller?.activeTabId, "tab-new", "guarded startup sync cannot restore an older active tab");
+eq(controller?.state.meta?.workspaceRoot, targetProjectB, "guarded startup sync cannot restore the old project root");
 
 await act(async () => {
   guardRoot.unmount();

@@ -22,6 +22,17 @@ func isolateUserConfigHome(t *testing.T) string {
 	return home
 }
 
+// setRuntimeGOOS overrides the package-level runtimeGOOS for one test. The
+// t.Setenv call is a guard: it panics if the test also uses t.Parallel, which
+// would otherwise race on the shared global.
+func setRuntimeGOOS(t *testing.T, goos string) {
+	t.Helper()
+	t.Setenv("REASONIX_TEST_GOOS", goos)
+	old := runtimeGOOS
+	runtimeGOOS = goos
+	t.Cleanup(func() { runtimeGOOS = old })
+}
+
 func expectedDefaultReasonixHome(home string) string {
 	if runtime.GOOS == "windows" {
 		return filepath.Join(home, "AppData", "Roaming", "reasonix")
@@ -156,6 +167,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Agent.ToolResultSnipRatio = 0.65
 	orig.Agent.SubagentModel = "mimo-pro"
 	orig.Agent.SubagentModels = map[string]string{"review": "deepseek-pro"}
+	orig.Agent.MaxSubagentDepth = 3
 	orig.Agent.Keep = []string{"errors", "user_marked"}
 	orig.Agent.RecentKeep = 4
 	orig.Tools.BashTimeoutSeconds = intPtr(900)
@@ -185,6 +197,15 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Skills.DisabledSkills = []string{"review", "explore"}
 	orig.Skills.MaxDepth = 2
 	orig.Bot.ToolApprovalMode = "auto"
+	orig.Bot.Control = BotControlConfig{Enabled: true, Addr: "127.0.0.1:39001", TokenEnv: "BOT_CONTROL_TOKEN"}
+	orig.Bot.Routes = []BotRouteConfig{{
+		ConnectionID:     "feishu-lark",
+		ChatType:         "group",
+		ChatID:           "oc_group",
+		Model:            "deepseek-pro",
+		ToolApprovalMode: "ask",
+		WorkspaceRoot:    "/tmp/reasonix-route",
+	}}
 	orig.Bot.Connections = []BotConnectionConfig{{
 		ID:               "feishu-lark",
 		Provider:         "feishu",
@@ -226,6 +247,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	mm.ChatURL = "http://localhost:8000/v1/chat/completions"
 	mm.ModelsURL = "http://localhost:8000/v1/models"
 	mm.ReasoningProtocol = "openai"
+	mm.PresetID = "mimo-api"
+	mm.PresetVersion = ProviderPresetVersion
 	ds, _ := orig.Provider("deepseek-flash")
 	ds.Effort = "max"
 
@@ -239,8 +262,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.DefaultModel != "mimo-pro" {
 		t.Errorf("default_model = %q, want mimo-pro", got.DefaultModel)
 	}
-	if got.ConfigVersion != 3 {
-		t.Errorf("config_version = %d, want 3", got.ConfigVersion)
+	if got.ConfigVersion != 4 {
+		t.Errorf("config_version = %d, want 4", got.ConfigVersion)
 	}
 	if got.Language != "zh" {
 		t.Errorf("language = %q, want zh", got.Language)
@@ -301,6 +324,12 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if got.Bot.ToolApprovalMode != "auto" || got.Bot.Connections[0].ToolApprovalMode != "yolo" {
 		t.Errorf("bot tool approval mode not preserved: bot=%q connection=%q", got.Bot.ToolApprovalMode, got.Bot.Connections[0].ToolApprovalMode)
+	}
+	if !got.Bot.Control.Enabled || got.Bot.Control.Addr != "127.0.0.1:39001" || got.Bot.Control.TokenEnv != "BOT_CONTROL_TOKEN" {
+		t.Errorf("bot control not preserved: %+v", got.Bot.Control)
+	}
+	if len(got.Bot.Routes) != 1 || got.Bot.Routes[0].WorkspaceRoot != "/tmp/reasonix-route" || got.Bot.Routes[0].ChatID != "oc_group" {
+		t.Errorf("bot routes not preserved: %+v", got.Bot.Routes)
 	}
 	if len(got.Bot.Connections[0].SessionMappings) != 1 || got.Bot.Connections[0].SessionMappings[0].Scope != "project" || got.Bot.Connections[0].SessionMappings[0].WorkspaceRoot != "/tmp/reasonix-bot" {
 		t.Errorf("bot session mapping scope not preserved: %+v", got.Bot.Connections[0].SessionMappings)
@@ -366,6 +395,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Agent.SubagentModels["review"] != "deepseek-pro" {
 		t.Errorf("subagent_models.review = %q, want deepseek-pro", got.Agent.SubagentModels["review"])
 	}
+	if got.Agent.MaxSubagentDepth != 3 {
+		t.Errorf("max_subagent_depth = %d, want 3", got.Agent.MaxSubagentDepth)
+	}
 	if got.Tools.BashTimeoutSeconds == nil || *got.Tools.BashTimeoutSeconds != 900 {
 		t.Errorf("tools.bash_timeout_seconds = %v, want 900", got.Tools.BashTimeoutSeconds)
 	}
@@ -380,6 +412,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if g, _ := got.Provider("mimo-pro"); g == nil || g.BaseURL != "http://localhost:8000/v1" || g.ChatURL != "http://localhost:8000/v1/chat/completions" || g.ModelsURL != "http://localhost:8000/v1/models" || g.ReasoningProtocol != "openai" {
 		t.Errorf("mimo-pro endpoint fields not preserved: %+v", g)
+	}
+	if g, _ := got.Provider("mimo-pro"); g == nil || g.PresetID != "mimo-api" || g.PresetVersion != ProviderPresetVersion {
+		t.Errorf("mimo-pro preset metadata not preserved: %+v", g)
 	}
 	if g, _ := got.Provider("deepseek-flash"); g == nil || g.Effort != "max" {
 		t.Errorf("deepseek-flash effort not preserved: %+v", g)
@@ -438,6 +473,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 func TestRenderTOMLDocumentsPlanModeAllowedTools(t *testing.T) {
 	cfg := Default()
 	cfg.Agent.PlanModeAllowedTools = []string{"custom_reader"}
+	cfg.Agent.PlanModeReadOnlyCommands = []string{"gh issue view"}
 
 	rendered := RenderTOML(cfg)
 	if !strings.Contains(rendered, `plan_mode_allowed_tools = ["custom_reader"]`) {
@@ -453,6 +489,15 @@ func TestRenderTOMLDocumentsPlanModeAllowedTools(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Agent.PlanModeAllowedTools, cfg.Agent.PlanModeAllowedTools) {
 		t.Fatalf("PlanModeAllowedTools round trip = %v, want %v", got.Agent.PlanModeAllowedTools, cfg.Agent.PlanModeAllowedTools)
+	}
+	if !strings.Contains(rendered, `plan_mode_read_only_commands = ["gh issue view"]`) {
+		t.Fatalf("rendered config should preserve plan_mode_read_only_commands:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "concrete read-only shell prefixes") {
+		t.Fatalf("rendered config should document plan_mode_read_only_commands semantics:\n%s", rendered)
+	}
+	if !reflect.DeepEqual(got.Agent.PlanModeReadOnlyCommands, cfg.Agent.PlanModeReadOnlyCommands) {
+		t.Fatalf("PlanModeReadOnlyCommands round trip = %v, want %v", got.Agent.PlanModeReadOnlyCommands, cfg.Agent.PlanModeReadOnlyCommands)
 	}
 }
 
@@ -541,7 +586,7 @@ func TestRenderTOMLCreationLayoutStyle(t *testing.T) {
 
 func TestScopedRenderPreservesLSPConfig(t *testing.T) {
 	const src = `
-config_version = 3
+config_version = 4
 default_model = "mimo"
 
 [lsp]
@@ -665,7 +710,7 @@ func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
 	c.Desktop.CheckUpdates = boolPtr(false)
 
 	user := RenderTOMLForScope(c, RenderScopeUser)
-	for _, want := range []string{"config_version = 3", "[desktop]", `theme = "dark"`, `close_behavior = "background"`, `status_bar_style = "text"`, `default_tool_approval_mode = "auto"`, `check_updates = false`, "[notifications]", "[tools.shell]"} {
+	for _, want := range []string{"config_version = 4", "[desktop]", `theme = "dark"`, `close_behavior = "background"`, `status_bar_style = "text"`, `default_tool_approval_mode = "auto"`, `check_updates = false`, "[notifications]", "[tools.shell]"} {
 		if !strings.Contains(user, want) {
 			t.Fatalf("user render missing %q:\n%s", want, user)
 		}
@@ -841,6 +886,14 @@ func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
 			"HTTP-Referer": "https://app.example",
 			"X-Title":      "Reasonix",
 		},
+		ExtraBody: map[string]any{
+			"enable_thinking": true,
+			"top_p":           0.8,
+			"metadata": map[string]any{
+				"mode": "fast",
+			},
+		},
+		AuthHeader: true,
 		ModelOverrides: map[string]ProviderModelOverride{
 			"deepseek-v4-flash": {
 				ReasoningProtocol: ReasoningProtocolDeepSeek,
@@ -854,6 +907,12 @@ func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
 	rendered := RenderTOML(orig)
 	if !strings.Contains(rendered, `headers     = { HTTP-Referer = "https://app.example", X-Title = "Reasonix" }`) {
 		t.Fatalf("rendered TOML missing headers:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, `extra_body`) || !strings.Contains(rendered, `"enable_thinking" = true`) {
+		t.Fatalf("rendered TOML missing extra_body:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, `auth_header = true`) {
+		t.Fatalf("rendered TOML missing auth_header:\n%s", rendered)
 	}
 	if !strings.Contains(rendered, `model_overrides`) || !strings.Contains(rendered, `reasoning_protocol = "deepseek"`) {
 		t.Fatalf("rendered TOML missing model overrides:\n%s", rendered)
@@ -870,9 +929,46 @@ func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
 	if p.Headers["HTTP-Referer"] != "https://app.example" || p.Headers["X-Title"] != "Reasonix" {
 		t.Fatalf("headers after round trip = %+v", p.Headers)
 	}
+	if p.ExtraBody["enable_thinking"] != true || p.ExtraBody["top_p"] != 0.8 {
+		t.Fatalf("extra_body after round trip = %+v", p.ExtraBody)
+	}
+	if !p.AuthHeader {
+		t.Fatal("auth_header after round trip = false, want true")
+	}
+	metadata, ok := p.ExtraBody["metadata"].(map[string]any)
+	if !ok || metadata["mode"] != "fast" {
+		t.Fatalf("extra_body metadata after round trip = %+v", p.ExtraBody["metadata"])
+	}
 	ov := p.ModelOverrides["deepseek-v4-flash"]
 	if ov.ReasoningProtocol != ReasoningProtocolDeepSeek || !reflect.DeepEqual(ov.SupportedEfforts, []string{"high", "max"}) || ov.DefaultEffort != "high" || ov.Vision == nil || *ov.Vision {
 		t.Fatalf("model override after round trip = %+v", ov)
+	}
+}
+
+func TestRenderStringMapQuotesNonBareTOMLKeys(t *testing.T) {
+	rendered := renderStringMap(map[string]string{
+		"github:gh-fix-ci": "deepseek-pro",
+		"review":           "deepseek-flash",
+	})
+	if !strings.Contains(rendered, `"github:gh-fix-ci" = "deepseek-pro"`) {
+		t.Fatalf("non-bare key was not quoted: %s", rendered)
+	}
+	var got struct {
+		M map[string]string `toml:"m"`
+	}
+	if _, err := toml.Decode("m = "+rendered, &got); err != nil {
+		t.Fatalf("rendered inline map does not parse: %v (%s)", err, rendered)
+	}
+	if got.M["github:gh-fix-ci"] != "deepseek-pro" || got.M["review"] != "deepseek-flash" {
+		t.Fatalf("decoded map = %+v", got.M)
+	}
+}
+
+func TestRenderTOMLTablePathQuotesEachSegment(t *testing.T) {
+	got := renderTOMLTablePath("lsp", "servers", "c++", "github:gh-fix-ci")
+	want := `lsp.servers."c++"."github:gh-fix-ci"`
+	if got != want {
+		t.Fatalf("renderTOMLTablePath = %q, want %q", got, want)
 	}
 }
 
@@ -913,6 +1009,23 @@ func TestRenderTOMLDefaultStepsCommentedOut(t *testing.T) {
 				t.Errorf("default planner_max_steps should be commented out in [agent], got: %s", line)
 			}
 		}
+	}
+}
+
+func TestRenderTOMLWindowsSandboxDefaultAndExplicitEnforce(t *testing.T) {
+	isolateUserConfigHome(t)
+	setRuntimeGOOS(t, "windows")
+
+	defaultRendered := RenderTOMLForScope(Default(), RenderScopeUser)
+	if !strings.Contains(defaultRendered, `bash    = "off"`) {
+		t.Fatalf("Windows default user config should render bash off:\n%s", defaultRendered)
+	}
+
+	cfg := Default()
+	cfg.Sandbox.Bash = "enforce"
+	delta := RenderTOMLProjectDelta(cfg)
+	if !strings.Contains(delta, `bash = "enforce"`) {
+		t.Fatalf("Windows explicit enforce should be rendered as a delta:\n%s", delta)
 	}
 }
 
@@ -996,5 +1109,130 @@ func TestRenderTOMLDefaultStepsDoNotOverrideGlobalConfig(t *testing.T) {
 	}
 	if cfg.Agent.MaxSteps != 100 {
 		t.Errorf("after project: max_steps = %d, want 100 (global should not be overridden by commented-out default)", cfg.Agent.MaxSteps)
+	}
+}
+
+func TestIsolatedHomeDirEmptyByDefault(t *testing.T) {
+	t.Setenv("REASONIX_HOME", "")
+	if got := IsolatedHomeDir(); got != "" {
+		t.Fatalf("IsolatedHomeDir() = %q, want empty", got)
+	}
+}
+
+func TestIsolatedHomeDirReturnsCleanPath(t *testing.T) {
+	raw := filepath.Join(t.TempDir(), "isolated-reasonix")
+	t.Setenv("REASONIX_HOME", raw)
+	got := IsolatedHomeDir()
+	if filepath.Clean(got) != filepath.Clean(raw) {
+		t.Fatalf("IsolatedHomeDir() = %q, want %q", got, raw)
+	}
+}
+
+func TestLegacyOSSupportDirEmptyWhenIsolated(t *testing.T) {
+	isolateUserConfigHome(t)
+	t.Setenv("REASONIX_HOME", filepath.Join(t.TempDir(), "isolated-home"))
+	if got := legacyOSSupportDir(); got != "" {
+		t.Fatalf("legacyOSSupportDir() = %q, want empty when isolated", got)
+	}
+}
+
+func TestLegacyXDGConfigPathsEmptyWhenIsolated(t *testing.T) {
+	isolateUserConfigHome(t)
+	t.Setenv("REASONIX_HOME", filepath.Join(t.TempDir(), "isolated-home"))
+	if got := legacyXDGConfigPaths(); got != nil {
+		t.Fatalf("legacyXDGConfigPaths() = %v, want nil when isolated", got)
+	}
+}
+
+func TestCacheDirHonorsReasonixHome(t *testing.T) {
+	home := t.TempDir()
+	isolated := filepath.Join(home, "isolated-home")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("REASONIX_HOME", isolated)
+
+	got := CacheDir()
+	want := filepath.Join(isolated, "cache")
+	if filepath.Clean(got) != filepath.Clean(want) {
+		t.Fatalf("CacheDir() = %q, want %q", got, want)
+	}
+}
+
+func TestCacheDirHonorsReasonixCacheHomeOverReasonixHome(t *testing.T) {
+	home := t.TempDir()
+	cacheHome := filepath.Join(home, "custom-cache")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("REASONIX_HOME", filepath.Join(home, "isolated-home"))
+	t.Setenv("REASONIX_CACHE_HOME", cacheHome)
+
+	got := CacheDir()
+	want := cacheHome
+	if filepath.Clean(got) != filepath.Clean(want) {
+		t.Fatalf("CacheDir() = %q, want %q (REASONIX_CACHE_HOME must win)", got, want)
+	}
+}
+
+func TestUserConfigLoadPathNoLegacyFallbackWhenIsolated(t *testing.T) {
+	home := isolateUserConfigHome(t)
+	isolated := filepath.Join(home, "isolated-home")
+	t.Setenv("REASONIX_HOME", isolated)
+
+	// Create a legacy config at the OS production path — it must not be loaded.
+	productionHome := expectedDefaultReasonixHome(home)
+	if err := os.MkdirAll(productionHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(productionHome, "config.toml"), []byte("default_model = \"production/model\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The primary config under isolated home does not exist yet.
+	got := userConfigLoadPath()
+	want := filepath.Join(isolated, "config.toml")
+	if filepath.Clean(got) != filepath.Clean(want) {
+		t.Fatalf("userConfigLoadPath() = %q, want %q (must not fall back to production legacy config)", got, want)
+	}
+}
+
+func TestCredentialSourceCandidatesSkipHomeEnvWhenIsolated(t *testing.T) {
+	isolateUserConfigHome(t)
+	t.Setenv("REASONIX_HOME", filepath.Join(t.TempDir(), "isolated-home"))
+
+	// Write a key into the production home .env — it must not appear as a source.
+	if home, err := os.UserHomeDir(); err == nil {
+		if err := os.WriteFile(filepath.Join(home, ".env"), []byte("LEAKED_KEY=leaked-value\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	candidates := credentialSourceCandidates(".")
+	for _, c := range candidates {
+		if c.Kind == CredentialSourceHomeEnv {
+			t.Fatalf("credentialSourceCandidates includes CredentialSourceHomeEnv when isolated: %v", c)
+		}
+	}
+}
+
+func TestMigrateLegacyIfNeededSkipsWhenIsolated(t *testing.T) {
+	home := isolateUserConfigHome(t)
+	isolated := filepath.Join(home, "isolated-home")
+	t.Setenv("REASONIX_HOME", isolated)
+
+	// Create a legacy config.json in production home — migration must skip it.
+	legacyDir := filepath.Join(home, ".reasonix")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "config.json"), []byte(`{"model":"production-model","apiKey":"sk-legacy"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := MigrateLegacyIfNeeded()
+	if err != nil {
+		t.Fatalf("MigrateLegacyIfNeeded() error = %v", err)
+	}
+	if res != nil {
+		t.Fatalf("MigrateLegacyIfNeeded() = %+v, want nil when isolated", res)
 	}
 }

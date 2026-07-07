@@ -98,7 +98,7 @@ func (f *configurableFactory) NewSession(_ context.Context, p SessionParams) (*c
 			return behavior(ctx, sink, input, p)
 		},
 	}
-	opts := control.Options{Runner: runner, Sink: p.Sink, SessionDir: f.dir}
+	opts := control.Options{Runner: runner, Sink: p.Sink, SessionDir: f.dir, OnSessionRecovered: p.OnSessionRecovered}
 	if f.withHooks {
 		opts.Hooks = f.hookRunner()
 	}
@@ -329,6 +329,10 @@ func (c *rpcClient) notify(method string, params any) {
 
 func (c *rpcClient) reply(id *json.RawMessage, result any) {
 	c.send(map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
+}
+
+func (c *rpcClient) replyError(id *json.RawMessage, code int, message string) {
+	c.send(map[string]any{"jsonrpc": "2.0", "id": id, "error": rpcError{Code: code, Message: message}})
 }
 
 func startServer(t *testing.T, factory Factory) (*rpcClient, func()) {

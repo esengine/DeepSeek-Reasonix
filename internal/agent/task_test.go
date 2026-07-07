@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -47,8 +48,32 @@ func TestTaskToolReturnsSubAgentFinalAnswer(t *testing.T) {
 	if sys := sub.lastReq.Messages[0]; sys.Role != provider.RoleSystem || sys.Content != "test-sys-prompt" {
 		t.Errorf("first message = %+v, want system 'test-sys-prompt'", sys)
 	}
-	if got := lastUser(sub.lastReq); got != "find callers of Foo" {
-		t.Errorf("sub-agent user = %q, want the prompt verbatim", got)
+	if got := lastUser(sub.lastReq); !strings.Contains(got, `<subagent-context event="SubagentStart">`) || !strings.HasSuffix(got, "find callers of Foo") {
+		t.Errorf("sub-agent user = %q, want SubagentStart context plus prompt", got)
+	}
+}
+
+func TestTaskToolInjectsWorkspaceContextIntoSubagentPrompt(t *testing.T) {
+	sub := &mockProvider{name: "sub", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "answer"},
+		{Type: provider.ChunkDone},
+	}}
+	workspace := t.TempDir()
+	task := NewTaskTool(sub, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil).
+		WithTranscripts(NewSubagentStore(t.TempDir()), workspace, "base-model", "base-effort")
+
+	if _, err := task.Execute(testTaskContext(), []byte(`{"prompt":"inspect project"}`)); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if sys := sub.lastReq.Messages[0]; sys.Role != provider.RoleSystem || sys.Content != "sys" {
+		t.Fatalf("system prompt = %+v, want original prompt", sys)
+	}
+	got := lastUser(sub.lastReq)
+	if !strings.Contains(got, `<workspace-context event="SubagentWorkspace">`) ||
+		!strings.Contains(got, "Current workspace: "+strconv.Quote(workspace)) ||
+		!strings.Contains(got, `prefer "." or relative paths`) ||
+		!strings.HasSuffix(got, "inspect project") {
+		t.Fatalf("sub-agent user = %q, want workspace context plus prompt", got)
 	}
 }
 
@@ -110,14 +135,15 @@ func TestTaskToolInheritsReasoningLanguageFromContext(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	got := lastUser(sub.lastReq)
-	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "Simplified Chinese") || !strings.HasSuffix(got, "inspect auth") {
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "简体中文") || !strings.HasSuffix(got, "inspect auth") {
 		t.Fatalf("sub-agent user = %q, want reasoning-language-prefixed prompt", got)
 	}
 }
 
 // TestTaskToolFiltersTools verifies the whitelist behaviour: when the caller
 // names a subset of tools, the sub-agent's registry contains exactly that set
-// with subagent/skill meta-tools stripped to prevent recursive delegation.
+// with recursive delegation tools available while max_subagent_depth leaves one
+// more layer.
 func TestTaskToolFiltersTools(t *testing.T) {
 	sub := &mockProvider{name: "sub", chunks: []provider.Chunk{
 		{Type: provider.ChunkText, Text: "ok"},
@@ -137,18 +163,25 @@ func TestTaskToolFiltersTools(t *testing.T) {
 	if _, err := task.Execute(testTaskContext(), args); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	// The sub-agent's tool schemas should reflect the whitelist minus meta-tools.
+	// The sub-agent's tool schemas should reflect the whitelist minus always
+	// unavailable background/install tools. Recursive tools stay visible at depth 1.
 	got := map[string]bool{}
 	for _, s := range sub.lastReq.Tools {
 		got[s.Name] = true
 	}
-	if !got["read_file"] || !got["write_file"] || got["task"] || got["run_skill"] || got["read_only_skill"] || got["research"] || got["bash"] {
-		t.Errorf("sub-agent tools = %v, want {read_file, write_file} (meta-tools stripped, bash not requested)", got)
+	for _, want := range []string{"read_file", "write_file", "task", "run_skill", "read_only_skill", "research"} {
+		if !got[want] {
+			t.Errorf("sub-agent tools = %v, want %q exposed at depth 1", got, want)
+		}
+	}
+	if got["bash"] {
+		t.Errorf("sub-agent tools = %v, want bash omitted when not requested", got)
 	}
 }
 
-// TestTaskToolDefaultsToParentToolsWithoutMetaTools covers the no-whitelist
-// path: the sub-agent inherits parent tools except subagent/skill meta-tools.
+// TestTaskToolDefaultsToParentToolsWithDepthRemaining covers the no-whitelist
+// path: the first-layer sub-agent inherits parent tools except always-hidden
+// background/install tools because it still has one delegation layer available.
 func TestTaskToolDefaultsToParentToolsWithoutMetaTools(t *testing.T) {
 	sub := &mockProvider{name: "sub", chunks: []provider.Chunk{
 		{Type: provider.ChunkText, Text: "ok"},
@@ -174,9 +207,70 @@ func TestTaskToolDefaultsToParentToolsWithoutMetaTools(t *testing.T) {
 	for _, s := range sub.lastReq.Tools {
 		got[s.Name] = true
 	}
-	if !got["read_file"] || !got["grep"] || !got["remember"] ||
-		got["task"] || got["run_skill"] || got["read_only_skill"] || got["explore"] || got["research"] || got["review"] || got["security_review"] {
-		t.Errorf("default sub-agent tools = %v, want normal tools inherited and meta-tools stripped", got)
+	for _, want := range []string{"read_file", "grep", "remember", "task", "run_skill", "read_only_skill", "explore", "research", "review", "security_review"} {
+		if !got[want] {
+			t.Errorf("default sub-agent tools = %v, want %q inherited at depth 1", got, want)
+		}
+	}
+}
+
+func TestTaskToolAllowsSecondLayerAndStopsThere(t *testing.T) {
+	sub := &mockProvider{name: "sub", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "depth two answer"},
+		{Type: provider.ChunkDone},
+	}}
+	parentReg := tool.NewRegistry()
+	parentReg.Add(fakeTool{name: "read_file", readOnly: true})
+	task := newTestTaskTool(t, sub, parentReg, "sys", "", "", nil).WithMaxSubagentDepth(2)
+	parentReg.Add(task)
+	parentReg.Add(fakeTool{name: "run_skill", readOnly: false})
+
+	depthOneCtx := WithSubagentDepth(testTaskContext(), 1)
+	if _, err := task.Execute(depthOneCtx, []byte(`{"prompt":"spawn second layer"}`)); err != nil {
+		t.Fatalf("depth-1 task should be able to spawn depth 2: %v", err)
+	}
+	got := map[string]bool{}
+	for _, s := range sub.lastReq.Tools {
+		got[s.Name] = true
+	}
+	if got["task"] || got["run_skill"] {
+		t.Fatalf("depth-2 child should not receive recursive tools; tools=%v", toolSchemaNames(sub.lastReq.Tools))
+	}
+
+	depthTwoCtx := WithSubagentDepth(testTaskContext(), 2)
+	if _, err := task.Execute(depthTwoCtx, []byte(`{"prompt":"spawn third layer"}`)); err == nil || !strings.Contains(err.Error(), "subagent delegation depth limit reached") {
+		t.Fatalf("depth-2 task error = %v, want depth limit", err)
+	}
+}
+
+func TestTaskToolMaxSubagentDepthOneRestoresSingleLayerBoundary(t *testing.T) {
+	sub := &mockProvider{name: "sub", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "single layer answer"},
+		{Type: provider.ChunkDone},
+	}}
+	parentReg := tool.NewRegistry()
+	parentReg.Add(fakeTool{name: "read_file", readOnly: true})
+	task := newTestTaskTool(t, sub, parentReg, "sys", "", "", nil).WithMaxSubagentDepth(1)
+	parentReg.Add(task)
+	parentReg.Add(fakeTool{name: "run_skill", readOnly: false})
+	parentReg.Add(fakeTool{name: "read_only_task", readOnly: true})
+
+	if _, err := task.Execute(testTaskContext(), []byte(`{"prompt":"single layer"}`)); err != nil {
+		t.Fatalf("root task should still spawn first-layer subagent: %v", err)
+	}
+	got := map[string]bool{}
+	for _, s := range sub.lastReq.Tools {
+		got[s.Name] = true
+	}
+	for _, hidden := range []string{"task", "run_skill", "read_only_task"} {
+		if got[hidden] {
+			t.Fatalf("max_subagent_depth=1 should hide recursive tool %q; tools=%v", hidden, toolSchemaNames(sub.lastReq.Tools))
+		}
+	}
+
+	depthOneCtx := WithSubagentDepth(testTaskContext(), 1)
+	if _, err := task.Execute(depthOneCtx, []byte(`{"prompt":"too deep"}`)); err == nil || !strings.Contains(err.Error(), "max_subagent_depth=1") {
+		t.Fatalf("depth-1 task error = %v, want max depth rejection", err)
 	}
 }
 
@@ -290,6 +384,9 @@ func TestReadOnlyTaskToolRunsEphemerallyWithReadOnlyRegistry(t *testing.T) {
 	if sys := sub.lastReq.Messages[0]; sys.Role != provider.RoleSystem || sys.Content != DefaultReadOnlyTaskSystemPrompt {
 		t.Fatalf("read_only_task system prompt = %+v, want read-only prompt", sys)
 	}
+	if got := lastUser(sub.lastReq); !strings.Contains(got, "Current workspace: ") || !strings.HasSuffix(got, "inspect callers") {
+		t.Fatalf("read_only_task user = %q, want workspace context plus prompt", got)
+	}
 
 	got := map[string]bool{}
 	for _, s := range sub.lastReq.Tools {
@@ -300,9 +397,14 @@ func TestReadOnlyTaskToolRunsEphemerallyWithReadOnlyRegistry(t *testing.T) {
 			t.Fatalf("read_only_task sub-agent missing %q; tools=%v", want, toolSchemaNames(sub.lastReq.Tools))
 		}
 	}
-	for _, hidden := range []string{"write_file", "todo_write", "complete_step", "connect_tool_source", "task", "read_only_task", "read_only_skill"} {
+	for _, hidden := range []string{"write_file", "todo_write", "complete_step", "connect_tool_source", "task"} {
 		if got[hidden] {
 			t.Fatalf("read_only_task sub-agent should hide %q; tools=%v", hidden, toolSchemaNames(sub.lastReq.Tools))
+		}
+	}
+	for _, want := range []string{"read_only_task", "read_only_skill"} {
+		if !got[want] {
+			t.Fatalf("read_only_task depth-1 sub-agent should expose %q; tools=%v", want, toolSchemaNames(sub.lastReq.Tools))
 		}
 	}
 }
@@ -367,7 +469,7 @@ func TestTaskToolPersistsAndContinuesTranscript(t *testing.T) {
 	if len(msgs) < 4 {
 		t.Fatalf("continued request messages = %+v, want prior transcript plus new task", msgs)
 	}
-	if msgs[1].Content != "first task" || msgs[2].Content != "first answer" || lastUser(sub.requests[1]) != "second task" {
+	if !strings.HasSuffix(msgs[1].Content, "first task") || msgs[2].Content != "first answer" || !strings.HasSuffix(lastUser(sub.requests[1]), "second task") {
 		t.Fatalf("continued request messages = %+v, want first task/answer then second task", msgs)
 	}
 }
@@ -537,7 +639,7 @@ func TestTaskToolFailedForegroundContinuationPersistsAndRejectsReuse(t *testing.
 		t.Fatalf("LoadSession: %v", err)
 	}
 	msgs := loaded.Snapshot()
-	if len(msgs) != 4 || msgs[1].Content != "first task" || msgs[2].Content != "first answer" || msgs[3].Content != "second task" {
+	if len(msgs) != 4 || !strings.HasSuffix(msgs[1].Content, "first task") || msgs[2].Content != "first answer" || !strings.HasSuffix(msgs[3].Content, "second task") {
 		t.Fatalf("failed continuation transcript = %+v, want first task/answer plus second task", msgs)
 	}
 	if _, err := task.Execute(testTaskContext(), []byte(`{"prompt":"third task","continue_from":"`+ref+`"}`)); err == nil || !strings.Contains(err.Error(), "failed and cannot be continued") {
@@ -707,6 +809,18 @@ func TestTaskToolRejectsMismatchedContinuationProfile(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "model/effort") {
 		t.Fatalf("mismatched model error = %v, want compatibility failure", err)
 	}
+}
+
+func extractJobID(msg string) string {
+	quote := strings.Index(msg, `"`)
+	if quote < 0 {
+		return ""
+	}
+	end := strings.Index(msg[quote+1:], `"`)
+	if end < 0 {
+		return ""
+	}
+	return msg[quote+1 : quote+1+end]
 }
 
 func subagentRefFromOutput(t *testing.T, out string) string {

@@ -11,6 +11,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"mvdan.cc/sh/v3/syntax"
+
 	"reasonix/internal/diff"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
@@ -21,6 +23,8 @@ import (
 	"reasonix/internal/nilutil"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
+	"reasonix/internal/shellparse"
 	"reasonix/internal/tool"
 )
 
@@ -58,6 +62,7 @@ type Asker interface {
 // callContextKey carries the executing tool call's identity into Execute.
 type callContextKey struct{}
 type parentSessionContextKey struct{}
+type subagentDepthContextKey struct{}
 type userImagesContextKey struct{}
 
 // callContext is the per-call context a tool can read. parentID is the call being
@@ -108,6 +113,24 @@ func ParentSession(ctx context.Context) string {
 	return strings.TrimSpace(parentSession)
 }
 
+// WithSubagentDepth carries the current subagent depth through nested tool calls.
+// The root agent runs at depth 0; each spawned subagent increments by one.
+func WithSubagentDepth(ctx context.Context, depth int) context.Context {
+	if depth < 0 {
+		depth = 0
+	}
+	return context.WithValue(ctx, subagentDepthContextKey{}, depth)
+}
+
+// SubagentDepth returns the current subagent depth carried by a turn context.
+func SubagentDepth(ctx context.Context) int {
+	depth, _ := ctx.Value(subagentDepthContextKey{}).(int)
+	if depth < 0 {
+		return 0
+	}
+	return depth
+}
+
 // WithUserImages carries the data URLs of images the user attached to this turn,
 // resolved by the controller (which owns attachments) since the agent must not
 // depend on it. Run embeds them on the user message; the provider sends them only
@@ -132,19 +155,25 @@ type Gate interface {
 	Check(ctx context.Context, toolName string, args json.RawMessage, readOnly bool) (allow bool, reason string, err error)
 }
 
-// PlanModeReadOnlyTrustRequest describes an external read-only hint that plan
-// mode will not trust without a user decision. ToolName is the provider-visible
-// name; ServerName and RawToolName are the MCP identifiers persisted in config.
+const PlanModeReadOnlyCommandApprovalTool = "plan_mode_read_only_command"
+
+// PlanModeReadOnlyTrustRequest describes a read-only claim that plan mode will
+// not trust without a user decision. For MCP, ServerName and RawToolName are the
+// identifiers persisted in config. For bash, Command is the concrete attempted
+// command and Prefix is the command prefix to trust for planning.
 type PlanModeReadOnlyTrustRequest struct {
 	ToolName    string
 	ServerName  string
 	RawToolName string
+	Command     string
+	Prefix      string
 	Args        json.RawMessage
 }
 
-// PlanModeReadOnlyTrustGate optionally confirms an MCP server's self-reported
-// read-only hint at execution time. It is separate from Gate because the
-// plan-mode check runs before ordinary permission policy.
+// PlanModeReadOnlyTrustGate optionally confirms MCP read-only hints and
+// user-approved bash read-only command prefixes at execution time. It is
+// separate from Gate because the plan-mode check runs before ordinary permission
+// policy.
 type PlanModeReadOnlyTrustGate interface {
 	CheckPlanModeReadOnlyTrust(ctx context.Context, req PlanModeReadOnlyTrustRequest) (allow bool, reason string, err error)
 }
@@ -153,6 +182,17 @@ const (
 	MemoryCompilerVerbosityObserve = "observe"
 	MemoryCompilerVerbosityCompact = "compact"
 )
+
+const DefaultMaxSubagentDepth = 2
+
+// NormalizeMaxSubagentDepth applies the public config contract: values below 1
+// preserve the old single-delegation boundary.
+func NormalizeMaxSubagentDepth(depth int) int {
+	if depth < 1 {
+		return 1
+	}
+	return depth
+}
 
 // ToolHooks fires user-configured shell hooks around each tool call. PreToolUse
 // runs before the call and may block it (block=true; message is the reason fed
@@ -239,6 +279,10 @@ type Agent struct {
 	// server's readOnlyHint for plan-mode execution without changing tool schemas.
 	planModeReadOnlyTrust PlanModeReadOnlyTrustGate
 
+	// sandboxEscapeApprover, when non-nil, can ask the user whether one shell
+	// command may rerun unconfined after the OS sandbox failed to start.
+	sandboxEscapeApprover sandbox.EscapeApprover
+
 	// hooks, when non-nil, fires PreToolUse / PostToolUse shell hooks around each
 	// tool call. nil disables hook firing.
 	hooks ToolHooks
@@ -319,7 +363,13 @@ type Agent struct {
 	// planModeAllowedTools declares extra custom tools that the centralized
 	// plan-mode policy may treat as read-only. Known blocked tools still lose.
 	// Populated from Options.PlanModeAllowedTools during construction.
-	planModeAllowedTools []string
+	planModeAllowedTools     []string
+	planModeReadOnlyCommands []string
+
+	// subagentDepth tracks the current agent's nesting depth. maxSubagentDepth
+	// caps delegation; when reached, recursive agent/skill tools are excluded.
+	subagentDepth    int
+	maxSubagentDepth int
 
 	// Context management: when a turn's prompt nears contextWindow, the older
 	// middle of the session is summarized away, keeping a token-bounded recent
@@ -340,17 +390,40 @@ type Agent struct {
 	compactStuck        bool
 	consecutiveCompacts int
 
-	// stormSig / stormCount track a run of turns that keep failing the same way so
-	// the loop can break a death-spiral. The signature is each call's (tool, error)
-	// in order, NOT (tool, args): a stuck model reliably reworks the arguments
-	// cosmetically (a re-worded essay, a reordered object) while the call fails
-	// identically every time — keying on args misses the loop entirely (observed
-	// live against truncated tool-call arguments). Because errors that embed their
-	// subject (e.g. "file not found: /x") differ per target, genuine varied probing
-	// does not collapse to one signature. Reset whenever a turn does anything else
-	// (a different failure shape, or any success). See applyStormBreaker.
+	// stormSig / stormCount track a run of turns that keep failing or getting
+	// blocked the same way so the loop can break a death-spiral. The signature is
+	// each call's (tool, error/blocker) in order, NOT (tool, args): a stuck model
+	// reliably reworks the arguments cosmetically (a re-worded essay, a reordered
+	// object, a different shell command) while the host returns the same refusal or
+	// failure every time — keying on args misses the loop entirely. Because errors
+	// that embed their subject (e.g. "file not found: /x") differ per target,
+	// genuine varied probing does not collapse to one signature. Reset whenever a
+	// turn does anything else (a different failure/block shape, or any success).
+	// See applyStormBreaker.
 	stormSig   string
 	stormCount int
+
+	// blockedTurnStreak counts consecutive turns in which every tool call was
+	// blocked by the host (permission, plan mode, hook, or loop guard).
+	// stormSig catches a model fixated on one call shape; this catches a model
+	// rotating between blocked shapes — alternating tools, reordering a batch,
+	// or blockers whose text varies per attempt — which is zero progress all
+	// the same. Reset by any turn containing a non-blocked outcome and at the
+	// start of each user turn. See applyStormBreaker.
+	blockedTurnStreak int
+
+	// loopGuardArmed / loopGuardReceiptMark let final readiness stand down
+	// after a loop guard fired this user turn: once the host has told the model
+	// to stop retrying and report the blocker, demanding the receipts that the
+	// blocker prevents would restart the loop the guard just broke. The mark is
+	// the evidence-ledger receipt count from just before the guarded batch, so
+	// real progress — a successful write or command receipt landing after it —
+	// revokes the pass, while the bookkeeping the guard itself recommends
+	// (ask, todo_write, complete_step) keeps it. Host state, not message text:
+	// tool output that merely quotes "[loop guard]" must not unlock readiness.
+	// Reset at the start of each user turn. See loopGuardAllowsFinal.
+	loopGuardArmed       bool
+	loopGuardReceiptMark int
 
 	// repeatSuccessCounts tracks write-like tool calls that have already
 	// succeeded in this user turn. This catches the complementary loop shape to
@@ -542,12 +615,22 @@ func (a *Agent) SetGate(g Gate) {
 }
 
 // SetPlanModeReadOnlyTrustGate installs the optional confirmation path for MCP
-// tools whose read-only flag comes from an external readOnlyHint.
+// tools whose read-only flag comes from an external readOnlyHint and bash
+// commands the user may trust as plan-mode read-only.
 func (a *Agent) SetPlanModeReadOnlyTrustGate(g PlanModeReadOnlyTrustGate) {
 	if nilutil.IsNil(g) {
 		g = nil
 	}
 	a.planModeReadOnlyTrust = g
+}
+
+// SetSandboxEscapeApprover installs the optional one-shot approval path used by
+// the bash tool when an enforced OS sandbox fails to start.
+func (a *Agent) SetSandboxEscapeApprover(g sandbox.EscapeApprover) {
+	if nilutil.IsNil(g) {
+		g = nil
+	}
+	a.sandboxEscapeApprover = g
 }
 
 func (a *Agent) withTurnPreferences(input string) string {
@@ -723,6 +806,10 @@ type Options struct {
 	// plan mode would otherwise block them. nil keeps fail-closed behavior.
 	PlanModeReadOnlyTrustGate PlanModeReadOnlyTrustGate
 
+	// SandboxEscapeApprover confirms a one-shot unconfined shell rerun after an
+	// enforced OS sandbox fails. nil keeps fail-closed behavior.
+	SandboxEscapeApprover sandbox.EscapeApprover
+
 	// Context management. ContextWindow <= 0 disables compaction. Ratios and
 	// RecentKeep fall back to defaults when unset.
 	ContextWindow       int
@@ -755,6 +842,15 @@ type Options struct {
 	// PlanModeAllowedTools names extra custom tools the plan-mode policy may treat
 	// as read-only. It cannot unlock known blocked tools or unsafe bash commands.
 	PlanModeAllowedTools []string
+	// PlanModeReadOnlyCommands names concrete shell command prefixes that plan mode
+	// may treat as read-only. Shell operators, background execution, and shell
+	// interpreter prefixes remain blocked.
+	PlanModeReadOnlyCommands []string
+
+	// SubagentDepth is the current nesting depth for this agent. Root sessions are
+	// depth 0; child subagents are depth 1. MaxSubagentDepth caps delegation.
+	SubagentDepth    int
+	MaxSubagentDepth int
 
 	// MemoryCompiler enables Memory v5 execution trace writeback and cache-safe
 	// execution-contract compilation.
@@ -802,6 +898,10 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	if nilutil.IsNil(planModeReadOnlyTrust) {
 		planModeReadOnlyTrust = nil
 	}
+	sandboxEscapeApprover := opts.SandboxEscapeApprover
+	if nilutil.IsNil(sandboxEscapeApprover) {
+		sandboxEscapeApprover = nil
+	}
 	hooks := opts.Hooks
 	if nilutil.IsNil(hooks) {
 		hooks = nil
@@ -810,33 +910,47 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	if strings.TrimSpace(maxStepsKey) == "" {
 		maxStepsKey = "agent.max_steps"
 	}
+	maxSubagentDepth := opts.MaxSubagentDepth
+	if maxSubagentDepth == 0 {
+		maxSubagentDepth = DefaultMaxSubagentDepth
+	} else {
+		maxSubagentDepth = NormalizeMaxSubagentDepth(maxSubagentDepth)
+	}
+	subagentDepth := opts.SubagentDepth
+	if subagentDepth < 0 {
+		subagentDepth = 0
+	}
 	a := &Agent{
-		prov:                    prov,
-		tools:                   tools,
-		session:                 session,
-		maxSteps:                opts.MaxSteps,
-		maxStepsKey:             maxStepsKey,
-		temperature:             opts.Temperature,
-		pricing:                 opts.Pricing,
-		usageSource:             usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
-		sink:                    sink,
-		gate:                    gate,
-		planModeReadOnlyTrust:   planModeReadOnlyTrust,
-		hooks:                   hooks,
-		jobs:                    opts.Jobs,
-		evidence:                evidence.NewLedger(),
-		projectChecks:           append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
-		contextWindow:           opts.ContextWindow,
-		softCompactRatio:        opts.SoftCompactRatio,
-		toolResultSnipRatio:     opts.ToolResultSnipRatio,
-		compactRatio:            opts.CompactRatio,
-		compactForceRatio:       opts.CompactForceRatio,
-		recentKeep:              opts.RecentKeep,
-		archiveDir:              opts.ArchiveDir,
-		keepPolicy:              opts.KeepPolicy,
-		planModeAllowedTools:    append([]string(nil), opts.PlanModeAllowedTools...),
-		memoryCompiler:          opts.MemoryCompiler,
-		memoryCompilerVerbosity: normalizeMemoryCompilerVerbosity(opts.MemoryCompilerVerbosity),
+		prov:                     prov,
+		tools:                    tools,
+		session:                  session,
+		maxSteps:                 opts.MaxSteps,
+		maxStepsKey:              maxStepsKey,
+		temperature:              opts.Temperature,
+		pricing:                  opts.Pricing,
+		usageSource:              usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
+		sink:                     sink,
+		gate:                     gate,
+		planModeReadOnlyTrust:    planModeReadOnlyTrust,
+		sandboxEscapeApprover:    sandboxEscapeApprover,
+		hooks:                    hooks,
+		jobs:                     opts.Jobs,
+		evidence:                 evidence.NewLedger(),
+		projectChecks:            append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
+		contextWindow:            opts.ContextWindow,
+		softCompactRatio:         opts.SoftCompactRatio,
+		toolResultSnipRatio:      opts.ToolResultSnipRatio,
+		compactRatio:             opts.CompactRatio,
+		compactForceRatio:        opts.CompactForceRatio,
+		recentKeep:               opts.RecentKeep,
+		archiveDir:               opts.ArchiveDir,
+		keepPolicy:               opts.KeepPolicy,
+		planModeAllowedTools:     append([]string(nil), opts.PlanModeAllowedTools...),
+		planModeReadOnlyCommands: append([]string(nil), opts.PlanModeReadOnlyCommands...),
+		subagentDepth:            subagentDepth,
+		maxSubagentDepth:         maxSubagentDepth,
+		memoryCompiler:           opts.MemoryCompiler,
+		memoryCompilerVerbosity:  normalizeMemoryCompilerVerbosity(opts.MemoryCompilerVerbosity),
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -875,6 +989,9 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		a.evidence.Reset()
 	}
 	a.repeatSuccessCounts = nil
+	a.blockedTurnStreak = 0
+	a.loopGuardArmed = false
+	a.loopGuardReceiptMark = 0
 	a.sink.Emit(event.Event{Kind: event.TurnStarted})
 	rawInput := input
 	memoryCompilerInput := rawInput
@@ -1152,6 +1269,9 @@ func (a *Agent) finalReadinessCheck() finalReadinessCheck {
 	writer, hasWriter := a.evidence.LatestSuccessfulWriterIndex()
 	if !hasWriter {
 		if len(missing) > 0 {
+			if a.loopGuardAllowsFinal() {
+				return out
+			}
 			out.reason = strings.Join(missing, "; ")
 		}
 		return out
@@ -1176,8 +1296,39 @@ func (a *Agent) finalReadinessCheck() finalReadinessCheck {
 	if len(missing) == 0 {
 		return out
 	}
+	if a.loopGuardAllowsFinal() {
+		return out
+	}
 	out.reason = strings.Join(missing, "; ")
 	return out
+}
+
+// armLoopGuardPass records that a loop guard fired this user turn.
+// receiptMark is the evidence-ledger receipt count from just before the
+// guarded batch ran, so a successful write or command receipt recorded after
+// it counts as real progress and revokes the pass (see loopGuardAllowsFinal).
+func (a *Agent) armLoopGuardPass(receiptMark int) {
+	a.loopGuardArmed = true
+	a.loopGuardReceiptMark = receiptMark
+}
+
+// loopGuardAllowsFinal reports whether final readiness should stand down: a
+// loop guard fired this user turn and no host-observable progress — a
+// successful write or command receipt — has landed since. In that state the
+// missing receipts are exactly what the blocker prevents, so demanding them
+// would restart the retry loop the guard just broke; the model must be free to
+// report the blocker instead. The bookkeeping the guard recommends (ask,
+// todo_write, complete_step) produces neither write nor command receipts, so
+// it keeps the pass; real progress revokes it because receipts are obtainable
+// again and readiness should resume enforcing them.
+func (a *Agent) loopGuardAllowsFinal() bool {
+	if a == nil || !a.loopGuardArmed {
+		return false
+	}
+	if a.evidence == nil {
+		return true
+	}
+	return !a.evidence.HasWriteOrCommandSince(a.loopGuardReceiptMark)
 }
 
 func finalReadinessIncompleteTodos(items []evidence.TodoStepMatch) string {
@@ -1387,7 +1538,7 @@ func finalReadinessCheckSource(check instruction.VerifyCheck) string {
 }
 
 func finalReadinessRetryMessage(reason string) string {
-	return "Host final-answer readiness check failed. Before giving a final answer, address the missing host-observable receipts: " + reason + ". Run the required tool calls, then answer when readiness is satisfied. If the blocked item needs user input, a user-owned choice, or manual review, call the ask tool with concrete options and wait for its tool result; do not ask in prose, and do not claim the user answered unless an actual ask tool result or a new user message says so."
+	return "Host final-answer readiness check failed. Before giving a final answer, address the missing host-observable receipts: " + reason + ". Run only the required tool calls, then answer when readiness is satisfied. Prefer signing off completed work with complete_step and updating todo_write from existing receipts; do not run exploratory bash commands just to satisfy readiness. If a permission, plan-mode, hook, or loop-guard block prevents the required receipt, do not keep retrying the blocked command with different wording. If the blocked item needs user input, a user-owned choice, or manual review, call the ask tool with concrete options and wait for its tool result; do not ask in prose, and do not claim the user answered unless an actual ask tool result or a new user message says so."
 }
 
 func shouldNudgeExecutorHandoff(input, answer string) bool {
@@ -1570,7 +1721,7 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 	ch, err := a.prov.Stream(ctx, provider.Request{
 		Messages:    a.session.Messages,
 		Tools:       a.tools.Schemas(),
-		Temperature: a.temperature,
+		Temperature: provider.OptionalTemperature(a.temperature),
 	})
 	if err != nil {
 		return "", "", "", nil, nil, false, false, err
@@ -1723,6 +1874,13 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 	results := make([]string, len(calls))
 	outcomes := make([]toolOutcome, len(calls))
 	durations := make([]int64, len(calls))
+	// Snapshot the receipt count before the batch runs: if a loop guard fires
+	// for this batch, successes recorded during it (a mixed batch where only one
+	// call was guard-blocked) must already count as progress against the pass.
+	receiptMark := 0
+	if a.evidence != nil {
+		receiptMark = a.evidence.Len()
+	}
 	run := func(i int) {
 		start := time.Now()
 		outcomes[i] = a.executeOne(ctx, calls[i])
@@ -1818,7 +1976,7 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 		a.compilerTurn.RecordToolResults(records)
 	}
 	if !cancelled {
-		a.applyStormBreaker(calls, outcomes, results)
+		a.applyStormBreaker(calls, outcomes, results, receiptMark)
 	}
 	return results
 }
@@ -1930,58 +2088,116 @@ const stormBreakThreshold = 3
 // no-op/write loop and should be redirected to a different tool or final answer.
 const repeatSuccessBreakThreshold = 2
 
-// applyStormBreaker detects a run of identically-failing turns and, past the
+// loopGuardBlockErrMsg is the errMsg carried by a repeat-success loop-guard
+// block. applyStormBreaker matches it to arm the final-readiness loop-guard
+// pass, since that guard also invites the model to report the blocker.
+const loopGuardBlockErrMsg = "blocked by loop guard"
+
+// applyStormBreaker detects a run of zero-progress turns and, past the
 // threshold, rewrites the model-facing result (results[0]) into a directive to
-// change approach. It keys on each call's (tool, error) — not its args — because a
-// stuck model reworks the arguments cosmetically while failing identically (see
-// the stormSig field doc). A turn is a fixation candidate only when every one of
-// its calls errored and none was merely blocked by plan mode / permissions (those
-// carry a clear, distinct message the model can already act on). Any success, any
-// block, or a different batch shape is varied work, so it resets the counter. This
-// covers both the single-call spiral and a repeated multi-call batch. The hard
-// maxSteps guard remains the ultimate backstop; this just keeps the loop from
-// burning that whole budget bouncing off the same failure.
-func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutcome, results []string) {
+// change approach. Two detectors, because a stuck model varies its retries two
+// ways. The signature detector keys on each call's (tool, error/blocker) — not
+// its args — since a stuck model reworks the arguments cosmetically while
+// hitting the same host refusal or failure (see the stormSig field doc). The
+// streak detector counts consecutive turns in which every call was blocked,
+// regardless of shape: rotating tools, reordering a batch, or a blocker whose
+// text varies per attempt escapes the signature but is still zero progress —
+// only a host refusal (not a plain error) proves that, so the streak requires
+// blocked outcomes. Any success resets both. When a guard fires — or when a
+// call in the batch was already blocked by the per-call repeat-success guard —
+// the final-readiness loop-guard pass is armed so the model may report the
+// blocker (see loopGuardAllowsFinal). The hard maxSteps guard remains the
+// ultimate backstop; this just keeps the loop from burning that whole budget
+// bouncing off the same host refusals.
+func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutcome, results []string, receiptMark int) {
+	allBlocked := len(outcomes) > 0
+	for _, outcome := range outcomes {
+		if !outcome.blocked {
+			allBlocked = false
+			break
+		}
+	}
+	if allBlocked {
+		a.blockedTurnStreak++
+	} else {
+		a.blockedTurnStreak = 0
+	}
+	for _, outcome := range outcomes {
+		if outcome.blocked && outcome.errMsg == loopGuardBlockErrMsg {
+			a.armLoopGuardPass(receiptMark)
+			break
+		}
+	}
+
 	sig, ok := batchStormSignature(calls, outcomes)
-	if !ok {
+	switch {
+	case !ok:
 		a.stormSig, a.stormCount = "", 0
-		return
-	}
-	if sig != a.stormSig {
+	case sig != a.stormSig:
 		a.stormSig, a.stormCount = sig, 1
+	default:
+		a.stormCount++
+	}
+	stormHit := ok && a.stormCount >= stormBreakThreshold
+	streakHit := allBlocked && a.blockedTurnStreak >= stormBreakThreshold
+	if !stormHit && !streakHit {
 		return
 	}
-	a.stormCount++
-	if a.stormCount < stormBreakThreshold {
-		return
+
+	const blockedAdvice = "Change approach: do not keep retrying a blocked tool by changing the tool, command, or arguments. Respect the permission, plan-mode, hook, or loop-guard blocker; use an already-allowed tool, ask the user for the specific approval or choice if appropriate, or explain the blocker in your final answer."
+	var guard, notice string
+	if stormHit {
+		subject := fmt.Sprintf("%q", calls[0].Name)
+		short := calls[0].Name
+		if len(calls) > 1 {
+			subject = fmt.Sprintf("this batch of %d tool calls", len(calls))
+			short = fmt.Sprintf("a batch of %d calls", len(calls))
+		}
+		anyBlocked := false
+		for _, outcome := range outcomes {
+			if outcome.blocked {
+				anyBlocked = true
+				break
+			}
+		}
+		action := "failed"
+		advice := "Change approach: if an argument is being truncated, write less in one call and split the work into several smaller calls; otherwise fix the arguments, use a different tool, or explain the blocker in your final answer."
+		if anyBlocked {
+			action = "been blocked or failed"
+			advice = blockedAdvice
+		}
+		guard = fmt.Sprintf(
+			"[loop guard] %s has now %s %d times in a row with the same host response. Re-sending it — even with the wording changed — will not help: the calls keep hitting the same outcome. %s",
+			subject, action, a.stormCount, advice)
+		notice = fmt.Sprintf(
+			"loop guard: %s hit the same host response %d× — nudging the model to change approach",
+			short, a.stormCount)
+	} else {
+		guard = fmt.Sprintf(
+			"[loop guard] every tool call in the last %d turns has been blocked by the host (permission, plan mode, hook, or loop guard). Switching tools, reordering calls, or rewording arguments will not help while the blockers stand. %s",
+			a.blockedTurnStreak, blockedAdvice)
+		notice = fmt.Sprintf(
+			"loop guard: every tool call blocked %d turns in a row — nudging the model to change approach",
+			a.blockedTurnStreak)
 	}
-	subject := fmt.Sprintf("%q", calls[0].Name)
-	short := calls[0].Name
-	if len(calls) > 1 {
-		subject = fmt.Sprintf("this batch of %d tool calls", len(calls))
-		short = fmt.Sprintf("a batch of %d calls", len(calls))
-	}
-	results[0] = outcomes[0].output + fmt.Sprintf(
-		"\n\n[loop guard] %s has now failed %d times in a row with the same error. Re-sending it — even with the wording changed — will not help: the calls keep failing the same way. Change approach: if an argument is being truncated, write less in one call and split the work into several smaller calls; otherwise fix the arguments, use a different tool, or explain the blocker in your final answer.",
-		subject, a.stormCount)
-	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: fmt.Sprintf(
-		"loop guard: %s failed %d× the same way — nudging the model to change approach",
-		short, a.stormCount)})
+	results[0] = outcomes[0].output + "\n\n" + guard
+	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: notice})
+	a.armLoopGuardPass(receiptMark)
 }
 
 // batchStormSignature returns a per-turn fixation signature — each call's
-// (name, error) in order — and ok=true only when every call errored and none was
-// merely blocked. ok=false (any success or block) means the turn made varied
-// progress, so the caller resets the counter. Keying on the error rather than the
-// args is deliberate: a stuck model reworks the arguments while failing the same
-// way, so identical-args matching would miss the loop.
+// (name, error/blocker) in order — and ok=true only when every call errored or
+// was blocked. ok=false (any success) means the turn made progress, so the
+// caller resets the counter. Keying on the host response rather than the args is
+// deliberate: a stuck model reworks the arguments while hitting the same
+// response, so identical-args matching would miss the loop.
 func batchStormSignature(calls []provider.ToolCall, outcomes []toolOutcome) (string, bool) {
 	if len(calls) == 0 {
 		return "", false
 	}
 	var sb strings.Builder
 	for i := range calls {
-		if outcomes[i].errMsg == "" || outcomes[i].blocked {
+		if outcomes[i].errMsg == "" {
 			return "", false
 		}
 		sb.WriteString(calls[i].Name)
@@ -2021,7 +2237,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		return toolOutcome{
 			output:  out,
 			blocked: true,
-			errMsg:  "blocked by loop guard",
+			errMsg:  loopGuardBlockErrMsg,
 		}
 	}
 	if out, blocked := a.staleAnchorEditBlock(call); blocked {
@@ -2031,12 +2247,12 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 			errMsg:  "blocked: fresh read required",
 		}
 	}
-	untrustedReadOnly := false
+	untrusted := false
 	if u, ok := t.(tool.PlanModeUntrustedReadOnly); ok {
-		untrustedReadOnly = u.PlanModeUntrustedReadOnly()
+		untrusted = u.PlanModeUntrustedReadOnly()
 	}
 	if a.sideReadOnly.Load() {
-		if blocked, msg := a.sideReadOnlyBlocked(call.Name, t.ReadOnly(), untrustedReadOnly, json.RawMessage(call.Arguments)); blocked {
+		if blocked, msg := a.sideReadOnlyBlocked(call.Name, t.ReadOnly(), untrusted, json.RawMessage(call.Arguments)); blocked {
 			return toolOutcome{
 				output:  msg,
 				blocked: true,
@@ -2044,6 +2260,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 			}
 		}
 	}
+	planModeTrustedReadOnly := false
 	if a.planMode.Load() {
 		// Translate the tool's optional plan-mode self-report into the policy's
 		// tri-state. Mirrors the t.(tool.Previewer) assertion precedent below.
@@ -2057,10 +2274,18 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		}
 		// External tools (MCP) whose ReadOnly() is only a server-reported
 		// readOnlyHint are not trusted by plan mode's read-only fast path.
-		if blocked, msg := a.planModeBlocked(call.Name, t.ReadOnly(), untrustedReadOnly, safety, json.RawMessage(call.Arguments)); blocked {
+		if decision := a.planModeDecision(call.Name, t.ReadOnly(), untrusted, safety, json.RawMessage(call.Arguments)); decision.Blocked {
 			trustAllowed := false
-			if t.ReadOnly() && untrustedReadOnly && safety != planmode.PlanSafetyUnsafe {
-				if allow, outcome, handled := a.checkPlanModeReadOnlyTrust(ctx, call, t); handled {
+			if decision.ReadOnlyCommandTrust != nil {
+				if allow, outcome, handled := a.checkPlanModeBashReadOnlyTrust(ctx, call, decision.ReadOnlyCommandTrust); handled {
+					if !allow {
+						return outcome
+					}
+					trustAllowed = true
+					planModeTrustedReadOnly = true
+				}
+			} else if t.ReadOnly() && untrusted && safety != planmode.PlanSafetyUnsafe {
+				if allow, outcome, handled := a.checkPlanModeMCPReadOnlyTrust(ctx, call, t); handled {
 					if !allow {
 						return outcome
 					}
@@ -2069,7 +2294,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 			}
 			if !trustAllowed {
 				return toolOutcome{
-					output:  msg,
+					output:  decision.Message,
 					blocked: true,
 					errMsg:  "blocked: plan mode is read-only",
 				}
@@ -2077,7 +2302,8 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		}
 	}
 	if a.gate != nil {
-		allow, reason, err := a.gate.Check(ctx, call.Name, json.RawMessage(call.Arguments), t.ReadOnly())
+		readOnly := t.ReadOnly() || planModeTrustedReadOnly
+		allow, reason, err := a.gate.Check(ctx, call.Name, json.RawMessage(call.Arguments), readOnly)
 		if err != nil {
 			return toolOutcome{
 				output:  fmt.Sprintf("blocked: %s (%v)", reason, err),
@@ -2119,6 +2345,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		}
 	}
 	cctx := withCallContext(ctx, call.ID, a.sink, a.asker, a.planMode.Load())
+	cctx = WithSubagentDepth(cctx, a.subagentDepth)
 	if a.evidence != nil {
 		cctx = evidence.WithLedger(cctx, a.evidence)
 		cctx = evidence.WithSessionMessages(cctx, a.session.Snapshot())
@@ -2128,6 +2355,9 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	}
 	if a.jobs != nil {
 		cctx = jobs.WithManager(cctx, a.jobs)
+	}
+	if a.sandboxEscapeApprover != nil {
+		cctx = sandbox.WithEscapeApprover(cctx, a.sandboxEscapeApprover)
 	}
 	if v := a.responseLanguage.Load(); v != nil {
 		if lang, ok := v.(string); ok {
@@ -2190,7 +2420,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	return toolOutcome{output: body, truncated: truncMsg != "", truncMsg: truncMsg}
 }
 
-func (a *Agent) checkPlanModeReadOnlyTrust(ctx context.Context, call provider.ToolCall, t tool.Tool) (bool, toolOutcome, bool) {
+func (a *Agent) checkPlanModeMCPReadOnlyTrust(ctx context.Context, call provider.ToolCall, t tool.Tool) (bool, toolOutcome, bool) {
 	if a.planModeReadOnlyTrust == nil {
 		return false, toolOutcome{}, false
 	}
@@ -2225,6 +2455,37 @@ func (a *Agent) checkPlanModeReadOnlyTrust(ctx context.Context, call provider.To
 	return true, toolOutcome{}, true
 }
 
+func (a *Agent) checkPlanModeBashReadOnlyTrust(ctx context.Context, call provider.ToolCall, trust *planmode.ReadOnlyCommandTrust) (bool, toolOutcome, bool) {
+	if a.planModeReadOnlyTrust == nil || trust == nil || strings.TrimSpace(trust.Prefix) == "" {
+		return false, toolOutcome{}, false
+	}
+	req := PlanModeReadOnlyTrustRequest{
+		ToolName: PlanModeReadOnlyCommandApprovalTool,
+		Command:  trust.Command,
+		Prefix:   trust.Prefix,
+		Args:     json.RawMessage(call.Arguments),
+	}
+	allow, reason, err := a.planModeReadOnlyTrust.CheckPlanModeReadOnlyTrust(ctx, req)
+	if err != nil {
+		return false, toolOutcome{
+			output:  fmt.Sprintf("blocked: plan-mode read-only command trust approval aborted (%v)", err),
+			blocked: true,
+			errMsg:  fmt.Sprintf("blocked: %v", err),
+		}, true
+	}
+	if !allow {
+		if strings.TrimSpace(reason) == "" {
+			reason = "the user declined to trust this bash command as read-only for plan mode — do not retry it; continue planning with other trusted read-only tools."
+		}
+		return false, toolOutcome{
+			output:  "blocked: " + reason,
+			blocked: true,
+			errMsg:  "blocked by plan-mode bash read-only trust",
+		}, true
+	}
+	return true, toolOutcome{}, true
+}
+
 func planModeMCPTrustTarget(toolName string, t tool.Tool) (server, rawTool string, ok bool) {
 	if meta, metaOK := t.(tool.MCPMetadata); metaOK {
 		server = strings.TrimSpace(meta.MCPServerName())
@@ -2238,14 +2499,21 @@ func planModeMCPTrustTarget(toolName string, t tool.Tool) (server, rawTool strin
 }
 
 func (a *Agent) planModeBlocked(toolName string, readOnly, untrusted bool, safety planmode.PlanSafety, args json.RawMessage) (blocked bool, message string) {
-	decision := planmode.Policy{AllowedTools: a.planModeAllowedTools}.Decide(planmode.Call{
+	decision := a.planModeDecision(toolName, readOnly, untrusted, safety, args)
+	return decision.Blocked, decision.Message
+}
+
+func (a *Agent) planModeDecision(toolName string, readOnly, untrusted bool, safety planmode.PlanSafety, args json.RawMessage) planmode.Decision {
+	return planmode.Policy{
+		AllowedTools:     a.planModeAllowedTools,
+		ReadOnlyCommands: a.planModeReadOnlyCommands,
+	}.Decide(planmode.Call{
 		Name:      toolName,
 		ReadOnly:  readOnly,
 		Untrusted: untrusted,
 		Safety:    safety,
 		Args:      args,
 	})
-	return decision.Blocked, decision.Message
 }
 
 func (a *Agent) sideReadOnlyBlocked(toolName string, readOnly, untrusted bool, args json.RawMessage) (blocked bool, message string) {
@@ -2373,6 +2641,9 @@ func canonicalToolArgs(raw string) string {
 }
 
 func normalizeShellCommand(command string) string {
+	if fields, malformed := shellparse.StaticFields(command); malformed == "" && len(fields) > 0 {
+		return strings.Join(fields, " ")
+	}
 	return strings.Join(strings.Fields(command), " ")
 }
 
@@ -2408,6 +2679,78 @@ func shellPythonOpenWrites(lower string) bool {
 }
 
 func hasShellWriteRedirect(command string) bool {
+	file, err := shellparse.ParseBash(command)
+	if err == nil {
+		hasWrite := false
+		syntax.Walk(file, func(node syntax.Node) bool {
+			redir, ok := node.(*syntax.Redirect)
+			if !ok {
+				return true
+			}
+			if bashRedirectWritesFile(command, redir) {
+				hasWrite = true
+				return false
+			}
+			return true
+		})
+		return hasWrite
+	}
+	return hasShellWriteRedirectFallback(command)
+}
+
+func bashRedirectWritesFile(source string, redir *syntax.Redirect) bool {
+	if redir == nil {
+		return false
+	}
+	switch redir.Op {
+	case syntax.RdrOut, syntax.AppOut, syntax.RdrClob, syntax.AppClob,
+		syntax.RdrAll, syntax.RdrAllClob, syntax.AppAll, syntax.AppAllClob,
+		syntax.RdrInOut:
+		return !redirectWordIsNullSink(source, redir.Word)
+	default:
+		return false
+	}
+}
+
+func redirectWordIsNullSink(source string, word *syntax.Word) bool {
+	if word == nil {
+		return false
+	}
+	if value, ok := shellparse.StaticWord(word); ok {
+		if isNullSinkWord(strings.TrimSpace(value)) {
+			return true
+		}
+	}
+	value := strings.TrimSpace(redirectWordSource(source, word))
+	if isNullSinkWord(value) {
+		return true
+	}
+	if len(value) >= 2 && ((value[0] == '\'' && value[len(value)-1] == '\'') || (value[0] == '"' && value[len(value)-1] == '"')) {
+		return isNullSinkWord(value[1 : len(value)-1])
+	}
+	return false
+}
+
+func isNullSinkWord(value string) bool {
+	if value == "/dev/null" {
+		return true
+	}
+	return strings.EqualFold(value, "$null") || strings.EqualFold(value, "nul")
+}
+
+func redirectWordSource(source string, word *syntax.Word) string {
+	if word == nil || !word.Pos().IsValid() || !word.End().IsValid() {
+		return ""
+	}
+	start := int(word.Pos().Offset())
+	end := int(word.End().Offset())
+	if start < 0 || end < start || end > len(source) {
+		return ""
+	}
+	return source[start:end]
+}
+
+func hasShellWriteRedirectFallback(command string) bool {
 	var quote rune
 	var prev rune
 	for _, r := range command {

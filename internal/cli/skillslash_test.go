@@ -20,7 +20,7 @@ func TestSlashItemsIncludesSkills(t *testing.T) {
 	for _, it := range m.slashItems() {
 		got[it.label] = true
 	}
-	for _, want := range []string{"/init", "/explore", "/skills", "/hooks", "/model"} {
+	for _, want := range []string{"/init", "/explore", "/skills", "/plugins", "/hooks", "/model"} {
 		if !got[want] {
 			t.Errorf("slash menu missing %q; have %v", want, labels(m.slashItems()))
 		}

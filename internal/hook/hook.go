@@ -22,10 +22,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
 	"reasonix/internal/config"
+	"reasonix/internal/pluginpkg"
 	"reasonix/internal/proc"
 )
 
@@ -85,6 +87,7 @@ type Scope string
 
 const (
 	ScopeProject Scope = "project"
+	ScopePlugin  Scope = "plugin"
 	ScopeGlobal  Scope = "global"
 )
 
@@ -96,12 +99,17 @@ type HookConfig struct {
 	Match string `json:"match,omitempty"`
 	// Command is the shell command to run (spawned through the platform shell).
 	Command string `json:"command"`
+	// ContextFile is an internal plugin-package helper: when set, the hook reads
+	// this file and treats it as stdout instead of spawning a shell command.
+	ContextFile string `json:"contextFile,omitempty"`
 	// Description is an optional human label surfaced in `/hooks`.
 	Description string `json:"description,omitempty"`
 	// Timeout overrides the per-event default, in milliseconds.
 	Timeout int `json:"timeout,omitempty"`
 	// Cwd overrides the working directory (defaults to the payload's cwd).
 	Cwd string `json:"cwd,omitempty"`
+	// Env adds environment variables for this hook invocation.
+	Env map[string]string `json:"env,omitempty"`
 }
 
 // Settings is the shape of a settings.json (only hooks for now).
@@ -160,6 +168,7 @@ func Load(opts LoadOptions) []ResolvedHook {
 			appendResolved(&out, s, ScopeProject, p)
 		}
 	}
+	appendPluginHooks(&out, reasonixHome(opts.HomeDir), opts.ProjectRoot)
 	g := GlobalSettingsPath(opts.HomeDir)
 	if s := readSettings(g); s != nil {
 		appendResolved(&out, s, ScopeGlobal, g)
@@ -225,6 +234,89 @@ func appendResolved(out *[]ResolvedHook, s *Settings, scope Scope, source string
 	}
 }
 
+func appendPluginHooks(out *[]ResolvedHook, reasonixHomeDir, projectRoot string) {
+	if strings.TrimSpace(reasonixHomeDir) == "" {
+		return
+	}
+	installed, _ := pluginpkg.LoadInstalled(reasonixHomeDir)
+	for _, item := range installed {
+		pkg := item.Package
+		events := make([]string, 0, len(pkg.Manifest.Hooks))
+		for event := range pkg.Manifest.Hooks {
+			events = append(events, event)
+		}
+		sort.Strings(events)
+		for _, eventName := range events {
+			event := Event(eventName)
+			if !validEvent(event) {
+				continue
+			}
+			for _, h := range pkg.Manifest.Hooks[eventName] {
+				command := h.Command
+				if command != "" && !h.ShellCommand && !filepath.IsAbs(command) {
+					command = filepath.Join(pkg.Root, filepath.FromSlash(command))
+				}
+				contextFile := h.ContextFile
+				if contextFile != "" && !filepath.IsAbs(contextFile) {
+					contextFile = filepath.Join(pkg.Root, filepath.FromSlash(contextFile))
+				}
+				cwd := h.Cwd
+				if cwd == "" {
+					cwd = pkg.Root
+				} else if !filepath.IsAbs(cwd) {
+					cwd = filepath.Join(pkg.Root, filepath.FromSlash(cwd))
+				}
+				env := cloneEnv(h.Env)
+				env["REASONIX_PLUGIN_ROOT"] = pkg.Root
+				env["REASONIX_PLUGIN_NAME"] = item.Installed.Name
+				env["REASONIX_HOME"] = reasonixHomeDir
+				env["REASONIX_WORKSPACE_ROOT"] = projectRoot
+				env["CLAUDE_PROJECT_DIR"] = projectRoot
+				if item.Installed.Version != "" {
+					env["REASONIX_PLUGIN_VERSION"] = item.Installed.Version
+				}
+				manifestFile := pluginpkg.NativeManifest
+				if pkg.ManifestKind == "codex" {
+					manifestFile = pluginpkg.CodexManifest
+				}
+				*out = append(*out, ResolvedHook{
+					HookConfig: HookConfig{
+						Match:       h.Match,
+						Command:     command,
+						ContextFile: contextFile,
+						Description: h.Description,
+						Timeout:     h.Timeout,
+						Cwd:         cwd,
+						Env:         env,
+					},
+					Event:  event,
+					Scope:  ScopePlugin,
+					Source: filepath.Join(pkg.Root, manifestFile),
+				})
+			}
+		}
+	}
+}
+
+func validEvent(event Event) bool {
+	for _, e := range Events {
+		if e == event {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneEnv(in map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range in {
+		if strings.TrimSpace(k) != "" {
+			out[k] = v
+		}
+	}
+	return out
+}
+
 // MatchesTool reports whether a hook applies to toolName. The match field is an
 // anchored regex; non-tool events always match. A malformed regex never fires
 // (safer than firing on everything).
@@ -288,6 +380,45 @@ type Report struct {
 	Blocked  bool // at least one outcome blocked (only meaningful on gating events)
 }
 
+// HookOutput is the parsed, model-facing part of a successful hook stdout.
+type HookOutput struct {
+	AdditionalContext string
+}
+
+type hookJSONOutput struct {
+	HookSpecificOutput struct {
+		HookEventName     Event  `json:"hookEventName"`
+		AdditionalContext string `json:"additionalContext"`
+	} `json:"hookSpecificOutput"`
+}
+
+// ParseOutput extracts hook-specific context from stdout. Plain text is accepted
+// for SessionStart compatibility; JSON output must identify the current event.
+func ParseOutput(event Event, stdout string) (HookOutput, []string) {
+	stdout = strings.TrimSpace(stdout)
+	if stdout == "" {
+		return HookOutput{}, nil
+	}
+	if !strings.HasPrefix(stdout, "{") {
+		if event == SessionStart {
+			return HookOutput{AdditionalContext: stdout}, nil
+		}
+		return HookOutput{}, nil
+	}
+	var parsed hookJSONOutput
+	if err := json.Unmarshal([]byte(stdout), &parsed); err != nil {
+		return HookOutput{}, []string{fmt.Sprintf("hook %s returned invalid JSON stdout: %v", event, err)}
+	}
+	spec := parsed.HookSpecificOutput
+	if spec.HookEventName == "" && strings.TrimSpace(spec.AdditionalContext) == "" {
+		return HookOutput{}, nil
+	}
+	if spec.HookEventName != event {
+		return HookOutput{}, []string{fmt.Sprintf("hook output event %q does not match current event %q", spec.HookEventName, event)}
+	}
+	return HookOutput{AdditionalContext: strings.TrimSpace(spec.AdditionalContext)}, nil
+}
+
 // decideOutcome maps a spawn result to a verdict.
 func decideOutcome(event Event, r SpawnResult) Decision {
 	switch {
@@ -311,6 +442,7 @@ func decideOutcome(event Event, r SpawnResult) Decision {
 type SpawnInput struct {
 	Command string
 	Cwd     string
+	Env     map[string]string
 	Stdin   string
 	Timeout time.Duration
 }
@@ -352,7 +484,7 @@ func Run(ctx context.Context, payload Payload, hooks []ResolvedHook, spawner Spa
 		}
 		timeout := h.timeout()
 		start := time.Now()
-		r := spawner(ctx, SpawnInput{Command: h.Command, Cwd: cwd, Stdin: stdin, Timeout: timeout})
+		r := runResolvedHook(ctx, h, SpawnInput{Command: h.Command, Cwd: cwd, Env: h.Env, Stdin: stdin, Timeout: timeout}, spawner)
 		decision := decideOutcome(event, r)
 		report.Outcomes = append(report.Outcomes, Outcome{
 			Hook:      h,
@@ -370,6 +502,26 @@ func Run(ctx context.Context, payload Payload, hooks []ResolvedHook, spawner Spa
 		}
 	}
 	return report
+}
+
+func runResolvedHook(ctx context.Context, h ResolvedHook, in SpawnInput, spawner Spawner) SpawnResult {
+	if h.Scope == ScopePlugin && h.ContextFile != "" {
+		return readContextFile(h.ContextFile)
+	}
+	return spawner(ctx, in)
+}
+
+func readContextFile(path string) SpawnResult {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return SpawnResult{ExitCode: -1, SpawnErr: err}
+	}
+	truncated := false
+	if len(body) > outputCapBytes {
+		body = body[:outputCapBytes]
+		truncated = true
+	}
+	return SpawnResult{ExitCode: 0, Stdout: string(body), Truncated: truncated}
 }
 
 // stderrFor returns the best human message for an outcome: real stderr, else a
@@ -398,6 +550,18 @@ func DefaultSpawner(ctx context.Context, in SpawnInput) SpawnResult {
 	cmd := exec.CommandContext(cctx, name, args...)
 	proc.HideWindow(cmd)
 	cmd.Dir = in.Cwd
+	if len(in.Env) > 0 {
+		env := os.Environ()
+		keys := make([]string, 0, len(in.Env))
+		for k := range in.Env {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			env = append(env, k+"="+in.Env[k])
+		}
+		cmd.Env = env
+	}
 	cmd.Stdin = strings.NewReader(in.Stdin)
 	var outBuf, errBuf cappedBuffer
 	cmd.Stdout = &outBuf
@@ -494,6 +658,9 @@ func legacyTrustPath(homeDir string) string {
 
 func legacyReasonixHome(override string) string {
 	if override != "" {
+		return ""
+	}
+	if config.IsolatedHomeDir() != "" {
 		return ""
 	}
 	home, err := os.UserHomeDir()

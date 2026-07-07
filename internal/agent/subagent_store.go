@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"reasonix/internal/fileutil"
+	"reasonix/internal/store"
 	"reasonix/internal/tool"
 )
 
@@ -179,7 +180,15 @@ func DeleteSubagentsByParent(sessionDir, parentSession string) error {
 		return err
 	}
 	for _, artifact := range artifacts {
-		for _, path := range []string{artifact.SessionPath, artifact.MetaPath} {
+		paths := []string{artifact.SessionPath, artifact.MetaPath}
+		// Sub-agent saves are single-file today, but sweep transcript sidecars
+		// (event log, event index, …) so no earlier build's artifacts survive
+		// the delete.
+		paths = append(paths, store.SessionSidecarFiles(artifact.SessionPath)...)
+		for _, path := range paths {
+			if path == "" {
+				continue
+			}
 			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 				return err
 			}

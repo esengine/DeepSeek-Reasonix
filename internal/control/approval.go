@@ -3,12 +3,14 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"reasonix/internal/event"
+	"reasonix/internal/i18n"
 	"reasonix/internal/permission"
 )
 
@@ -28,11 +30,12 @@ type approvalManager struct {
 
 	// mu guards the prompt maps and posture fields; every critical section under
 	// it is short and non-blocking.
-	mu        sync.Mutex
-	approvals map[string]pendingApproval
-	asks      map[string]pendingAsk
-	granted   map[string]bool
-	nextID    int
+	mu                       sync.Mutex
+	approvals                map[string]pendingApproval
+	asks                     map[string]pendingAsk
+	granted                  map[string]bool
+	planModeReadOnlyCommands map[string]bool
+	nextID                   int
 	// toolApprovalMode is the runtime approval posture: "ask" prompts, "auto"
 	// lets the policy auto-approve the writer fallback while preserving ask/deny
 	// rules, and "yolo" skips every tool approval prompt except plan approval.
@@ -50,19 +53,40 @@ type approvalManager struct {
 
 	// promptMu serializes outstanding prompts so at most one user decision is in
 	// flight. Held across the blocking wait, so it must never be taken by the
-	// resolve paths (Approve/AnswerQuestion).
+	// resolve paths (Approve/AnswerQuestion). sink.Emit also runs under it (Ask,
+	// requestApproval): Sink implementations must not block and must not call
+	// back into Ask or the tool-approval chain, or they deadlock the prompt.
 	promptMu sync.Mutex
 }
 
 func newApprovalManager(policy permission.Policy, mode string, timeout time.Duration) approvalManager {
 	return approvalManager{
-		policy:           policy,
-		approvals:        map[string]pendingApproval{},
-		asks:             map[string]pendingAsk{},
-		granted:          map[string]bool{},
-		toolApprovalMode: mode,
-		approvalTimeout:  timeout,
+		policy:                   policy,
+		approvals:                map[string]pendingApproval{},
+		asks:                     map[string]pendingAsk{},
+		granted:                  map[string]bool{},
+		planModeReadOnlyCommands: map[string]bool{},
+		toolApprovalMode:         mode,
+		approvalTimeout:          timeout,
 	}
+}
+
+// NewHeadlessPermissionGate builds the non-interactive gate used by `reasonix run`
+// and sub-agents. It preserves headless autonomy for ordinary Ask decisions, but
+// refuses tools whose contract requires a fresh human approval.
+func NewHeadlessPermissionGate(policy permission.Policy) *freshHumanHeadlessGate {
+	return &freshHumanHeadlessGate{gate: permission.NewGate(policy, nil)}
+}
+
+type freshHumanHeadlessGate struct {
+	gate *permission.Gate
+}
+
+func (g *freshHumanHeadlessGate) Check(ctx context.Context, toolName string, args json.RawMessage, readOnly bool) (bool, string, error) {
+	if RequiresFreshHumanApprovalTool(toolName) {
+		return false, "this tool requires fresh human approval and cannot run in a non-interactive session. Use an interactive session or a user-initiated memory command.", nil
+	}
+	return g.gate.Check(ctx, toolName, args, readOnly)
 }
 
 // preApproved reports whether a tool call can skip the prompt — either the
@@ -115,6 +139,26 @@ func (a *approvalManager) grantSession(tool, subject string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.granted[permission.SessionGrantRuleForScope(tool, subject)] = true
+}
+
+func (a *approvalManager) planModeReadOnlyCommandTrusted(prefix string) bool {
+	prefix = normalizePlanModeReadOnlyCommandPrefix(prefix)
+	if prefix == "" {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.planModeReadOnlyCommands[prefix]
+}
+
+func (a *approvalManager) grantPlanModeReadOnlyCommand(prefix string) {
+	prefix = normalizePlanModeReadOnlyCommandPrefix(prefix)
+	if prefix == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.planModeReadOnlyCommands[prefix] = true
 }
 
 // cancel drops a pending approval (timeout/abort path).
@@ -231,6 +275,10 @@ func (a *approvalManager) snapshotPrompts() ([]event.Approval, []event.Ask) {
 	return approvals, asks
 }
 
+func normalizePlanModeReadOnlyCommandPrefix(prefix string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(prefix)), " ")
+}
+
 // --- decision helpers (caller holds a.mu) ---
 
 func (a *approvalManager) bypassAllowsLocked(tool string) bool {
@@ -250,7 +298,7 @@ func (a *approvalManager) autoApprovalWouldAllowLocked(tool, subject string) boo
 }
 
 func (a *approvalManager) sessionGrantAllowsLocked(tool, subject string) bool {
-	if requiresFreshApprovalTool(tool) {
+	if requiresFreshApprovalTool(tool) && !allowsFreshSessionGrantTool(tool) {
 		return false
 	}
 	for rule := range a.granted {
@@ -292,9 +340,25 @@ func normalizeToolApprovalMode(mode string) string {
 	}
 }
 
-func requiresFreshApprovalTool(tool string) bool {
+// RequiresFreshHumanApprovalTool reports whether a tool must be answered by a
+// human decision, not by YOLO/auto approval, Guardian, or a non-interactive nil
+// approver. A small subset may still opt into explicit session grants.
+func RequiresFreshHumanApprovalTool(tool string) bool {
 	switch tool {
-	case planApprovalTool, memoryRememberTool, memoryForgetTool:
+	case planApprovalTool, memoryRememberTool, memoryForgetTool, SandboxEscapeApprovalTool:
+		return true
+	default:
+		return false
+	}
+}
+
+func requiresFreshApprovalTool(tool string) bool {
+	return RequiresFreshHumanApprovalTool(tool)
+}
+
+func allowsFreshSessionGrantTool(tool string) bool {
+	switch tool {
+	case SandboxEscapeApprovalTool:
 		return true
 	default:
 		return false
@@ -303,12 +367,12 @@ func requiresFreshApprovalTool(tool string) bool {
 
 func approvalNotificationText(tool, subject string) string {
 	if requiresFreshApprovalTool(tool) {
-		return "approval needed: " + tool
+		return fmt.Sprintf(i18n.M.ApprovalNeededFmt, tool)
 	}
 	if subject == "" {
-		return "approval needed: " + tool
+		return fmt.Sprintf(i18n.M.ApprovalNeededFmt, tool)
 	}
-	return "approval needed: " + tool + " " + subject
+	return fmt.Sprintf(i18n.M.ApprovalNeededWithSubjectFmt, tool, subject)
 }
 
 func permissionRequestHookPayload(tool, subject string, args json.RawMessage) (string, json.RawMessage, bool) {

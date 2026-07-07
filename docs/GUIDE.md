@@ -16,7 +16,9 @@
 - [Serve web frontend](#serve-web-frontend)
 - [Configuration paths](./CONFIG_PATHS.md)
 - [Reasoning language](./REASONING_LANGUAGE.md)
+- [Task contracts and pause policy](./TASK_CONTRACT.md)
 - [Custom OpenAI-compatible providers](#custom-openai-compatible-providers)
+- [Desktop hooks](#desktop-hooks)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Permissions & sandbox](#permissions--sandbox)
 - [Plugins (MCP)](#plugins-mcp)
@@ -60,9 +62,11 @@ planner_max_steps = 0            # user/global only; planner read-only tool-call
 reasoning_language = "auto"      # visible reasoning text: auto|zh|en
 # plan_mode_allowed_tools = ["custom_reader"]   # extra read-only custom tools only;
 #                                                # does not unlock blocked tools or unsafe bash
+# plan_mode_read_only_commands = ["gh issue view", "gh pr diff"]   # extra read-only shell prefixes for planning
 # planner_model = "deepseek-pro"      # optional low-frequency planner
 # subagent_model = "deepseek-pro"     # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
+# max_subagent_depth = 2              # nested delegation depth; set 1 for the old single-layer boundary
 auto_plan = "off"                  # user-level only; off|on; off keeps plan mode manual
 # auto_plan_classifier = "deepseek-flash"   # optional; only borderline tasks call it
 tool_result_snip_ratio = 0.6       # shorten stale tool output before summary compaction
@@ -124,6 +128,18 @@ when you want to pre-seed audited tools; keep `plan_mode_allowed_tools` as the
 compatibility escape valve. It never unlocks known blocked plan-mode tools such
 as `bash`, `task`, writers, installers, or memory mutation tools, and it never
 bypasses bash's plan-mode safety checks.
+
+Use `[agent].plan_mode_read_only_commands` when plan-mode research needs a
+specific shell command that Reasonix cannot classify but you know is read-only,
+such as `gh issue view` or an internal query CLI. Entries are concrete command
+prefixes, not tool names: `["gh issue view"]` permits `gh issue view 4572`, while
+`bash`, `sh`, and other shell interpreters are ignored. Shell operators,
+redirection, command substitution, background execution, and unsafe built-in
+command flags remain blocked while planning. In interactive plan mode, Reasonix
+can also ask you to trust a concrete unknown query prefix the first time it is
+needed; the persistent choice writes the same
+`[agent].plan_mode_read_only_commands` entry. Auto/YOLO approval never answers
+this trust prompt.
 
 ### Environment variables
 
@@ -203,7 +219,29 @@ user-global `default_model`.
 
 In the desktop app, open **Settings -> Model -> Access -> Add model service ->
 Custom provider** for proxies, aggregators, or self-hosted services that speak
-the OpenAI-compatible chat API.
+the OpenAI-compatible chat API or Anthropic-compatible Messages API.
+
+For common providers, choose **Add model service -> Recommended preset** instead.
+Reasonix can prefill editable custom-provider entries for Kimi CN, Kimi Global,
+Kimi Coding Plan, MiMo API, MiMo Anthropic, MiMo Token Plan CN/SGP/AMS and their
+Anthropic-compatible variants, MiniMax CN/Global API, MiniMax CN/Global
+Anthropic, GLM CN, Z.AI Global, GLM/Z.AI Coding Plan OpenAI-compatible and
+Anthropic-compatible endpoints, OpenCode Go, OpenCode Go Anthropic, OpenCode Zen
+Anthropic, Qwen/DashScope CN/Global, Qwen Coding Plan CN/Global
+OpenAI-compatible and Anthropic-compatible endpoints, StepFun OpenAI-compatible
+and Anthropic-compatible endpoints, NovitaAI, GMI Cloud, Vercel AI Gateway,
+HuggingFace Router, NVIDIA NIM, KiloCode, and Ollama Cloud. Plan names describe
+the access/payment route; they include CN/Global only when the provider exposes
+distinct regional endpoints. Kimi Coding Plan is therefore a dedicated plan
+endpoint, while Kimi direct API is split into CN and Global. The preset path
+usually needs only the provider API key: the key value is stored in Reasonix home
+`.env`, while `config.toml` stores the endpoint, model list, key
+environment-variable name, context window, vision model metadata, proxy bypass
+for China-only endpoints, MiniMax `reasoning_split`, GLM/MiniMax thinking
+heuristics, Anthropic-compatible Bearer auth where needed, Ollama Cloud
+max-effort support, and OpenCode Go per-model reasoning overrides. After adding
+a preset, open its provider card if you need to change models, headers,
+endpoint, or compatibility settings.
 
 Fill **API address** with the provider endpoint that should receive the standard
 chat path. In this mode Reasonix previews and sends chat requests to:
@@ -219,12 +257,89 @@ preview under the field shows the exact request URL that will be used.
 
 Model discovery uses the API address to try likely model-list URLs such as
 `/models` and `/v1/models`. If the gateway requires a separate model-list
-endpoint, open **Advanced settings** and set `models_url`, for example
+endpoint, open **Compatibility settings** and set `models_url`, for example
 `https://gateway.example.com/v1/models`. If discovery is not available, fill the
 model list manually.
 
 **Full URL** still uses the OpenAI-compatible chat request body. It does not
 switch the request schema to the OpenAI Responses API.
+
+### Compatibility settings
+
+The **Compatibility settings (usually leave unchanged)** section is for gateways
+whose authentication, model-list endpoint, or reasoning/thinking request shape
+differs from the normal OpenAI-compatible defaults. Leave these fields at their
+defaults unless the provider documentation or a proxy error tells you otherwise.
+For Anthropic-compatible services, such as some coding-plan endpoints, choose
+**Anthropic-compatible** as the connection protocol before saving.
+
+| Field | What it controls | When to change it |
+| --- | --- | --- |
+| `api_key_env` | The environment-variable name used for this provider's API key. Desktop-saved key values are stored in Reasonix home `.env` under this name; the TOML config stores only the name. | Change it when several providers need distinct keys, or leave it blank for a service that does not require an API key. |
+| `models_url` | The URL used only for model discovery. Chat requests still use the API address or Full URL above. | Set it when `/models` or `/v1/models` is not where the gateway exposes its model list. |
+| Extra request headers | Static HTTP headers, one `Header: value` per line. | Use for gateways such as OpenRouter that require `HTTP-Referer`, `X-Title`, or similar site headers. Keep bearer/API keys in the key field instead of duplicating them here. |
+| Extra request body | A JSON object merged into the top-level chat request body. | Use only for provider-specific flags such as `{"enable_thinking": true}`. Reasonix still owns core fields such as `model`, `messages`, `tools`, `stream`, and `thinking`, and null values are rejected. |
+| Authorization: Bearer | For Anthropic-compatible providers, sends the saved API key as `Authorization: Bearer <key>` instead of `x-api-key`. | Enable it only when the gateway documents Bearer auth, such as MiniMax Global or Vercel AI Gateway. |
+| Model capability mode | Which reasoning request protocol Reasonix should use for this provider. | Keep **Auto-detect** unless the gateway is misdetected or the model docs require a specific reasoning format. |
+| Thinking override | Provider-specific override for `thinking.type`. | Keep **Auto** unless the backend documents `enabled`, `disabled`, or `adaptive`. Unsupported values can make some OpenAI-compatible gateways reject the request. |
+| Balance URL | Optional endpoint for wallet/balance lookup. | Set it when the provider exposes a balance endpoint and you want the desktop status bar to show it. |
+| Context window | The maximum number of tokens this provider keeps in context. `0` means provider default. | Set it when the model's real context size differs from Reasonix's default or built-in metadata. |
+
+Model capability mode options:
+
+| Option | Effect |
+| --- | --- |
+| Auto-detect (recommended) | Reasonix chooses the request shape from model capability metadata and endpoint detection. |
+| DeepSeek thinking | Uses DeepSeek-style thinking control, including `thinking.type` and DeepSeek-supported reasoning depth. |
+| OpenAI reasoning | Uses the standard OpenAI-compatible `reasoning_effort` levels. |
+| Plain chat | Sends no reasoning or thinking control fields. Use this for text-only proxies that reject reasoning parameters. |
+
+Thinking override options:
+
+| Option | Effect |
+| --- | --- |
+| Auto (provider default) | Does not write an explicit provider-level `thinking` override. Reasonix uses the provider/model default behavior. |
+| Enabled | Sends `thinking.type = "enabled"` for compatible providers. |
+| Disabled | Sends `thinking.type = "disabled"` for compatible providers. On DeepSeek-style providers this also avoids sending a reasoning depth hint. |
+| Adaptive (self-adjusting) | Sends or preserves `thinking.type = "adaptive"` only for providers that document adaptive thinking, such as MiniMax-M3-style endpoints. |
+
+Some OpenAI-compatible gateways require non-standard top-level request body
+fields. Add them with `extra_body` on the provider entry:
+
+```toml
+[[providers]]
+name        = "spark"
+kind        = "openai"
+base_url    = "https://maas-coding-api.cn-huabei-1.xf-yun.com/v2"
+models      = ["xopglm52"]
+api_key_env = "SPARK_API_KEY"
+extra_body  = { enable_thinking = true }
+```
+
+`extra_body` is merged into the chat JSON request body. Reasonix keeps core
+fields such as `model`, `messages`, `tools`, `stream`, and `thinking` under its
+own control.
+
+## Desktop hooks
+
+Desktop hooks run local commands at lifecycle events such as `SessionStart`,
+`UserPromptSubmit`, `PreToolUse`, and `PreCompact`. A successful `SessionStart`
+hook may write plain text to stdout, or return JSON with
+`hookSpecificOutput.additionalContext`; Reasonix injects that text once into the
+next real user turn as `<hook-context event="SessionStart">...</hook-context>`.
+This is intended for plugin or workflow bootstrap context, including
+Superpowers-style startup instructions, without baking that workflow into
+Reasonix's system prompt.
+
+Plugin packages can provide this startup context through
+`hooks/session-start-codex` or a plugin-root `CLAUDE.md`. Claude-style
+`.claude/settings.json` command hooks are also mapped to matching Reasonix hook
+events.
+
+The injected hook context is dynamic current-turn context. It does not change
+the stable system prompt, memory prefix, or tool schema, though dynamic content
+can still reduce cache reuse for that turn. The detailed desktop hook schema and
+trust model are documented in [the Chinese desktop hooks guide](./DESKTOP_HOOKS.zh-CN.md).
 
 ## Keyboard shortcuts
 
@@ -302,7 +417,8 @@ Chat and transcript shortcuts:
 | `Ctrl+L` or `/cls` | Clears only the visible transcript | The LLM context, session file, tools, memory, and plugins stay loaded. Use `/clear` when you want to discard the conversation context. |
 | `Esc` | Backs out of the current action | It un-sends a just-submitted turn before any reply, cancels a running turn, or clears non-empty input. |
 | Double `Esc` on an empty idle composer | Opens the rewind picker | Same entry point as `/rewind`. |
-| Transcript text selection | Copies transcript text | The full-screen TUI enables mouse reporting, so drag in the transcript to select text in-app, then press `Ctrl+C`, `Super+C`, `Meta+C`, or right-click the active selection to copy it. |
+| Transcript text selection | Copies transcript text | The full-screen TUI enables mouse reporting, so drag in the transcript to select text in-app; releasing the mouse copies it automatically, and `Ctrl+C`/`Super+C`/`Meta+C` or right-clicking the active selection copy it again. |
+| `/mouse` | Toggles in-app mouse capture | Off hands the mouse back to your terminal, restoring its native click-drag selection and right-click context menu, at the cost of in-app drag-select, the transcript scrollbar, and wheel-scroll. Set `REASONIX_DISABLE_MOUSE=1` to start every session with it off. |
 | `Ctrl+C` | Copies, cancels, clears, or quits | Copies an active transcript selection first. Otherwise it cancels a running turn, clears non-empty input, or quits on a second empty-composer press. |
 | `Ctrl+D` | Quits the TUI | Immediate quit. |
 | `Ctrl+V`, `Ctrl+Shift+V`, `Meta+V`, or `Super+V` | Pastes clipboard content | The CLI tries an image first, then falls back to text or file references. |
@@ -363,13 +479,52 @@ edits stay in the project), resolving symlinks and `..` so a link can't tunnel
 out. `forbid_read` optionally hides sensitive directories from the agent's
 read/list/search tools; use absolute paths or `${HOME}` / `${VAR}` references,
 not `~`, because config expansion is environment-variable based. `bash` is
-itself jailed on macOS by default (`[sandbox] bash`, Seatbelt): commands may
-write only those same roots (plus temp and toolchain caches), cannot read
-configured `forbid_read` roots while the OS sandbox is active, and reach the
-network only when `[sandbox] network` is set. Other platforms fall back to
-running unconfined when no OS sandbox is available (see
-[`SPEC.md` §9](./SPEC.md#9-roadmap-not-in-current-scope) for the escape-prompt and
-Linux support still to come).
+itself jailed by default when an OS sandbox is available (`[sandbox] bash`,
+Seatbelt on macOS, bubblewrap on Linux, and a native helper on Windows):
+commands may write only those same roots plus platform-specific command
+temp/cache roots, cannot read configured `forbid_read` roots while the OS
+sandbox is active, and reach the network only when `[sandbox] network` is set.
+The native Windows helper uses Reasonix's bundled Windows sandbox backend:
+AppContainer for read-only commands and a low-integrity token for writable
+commands, temporarily grants
+access to the workspace, a per-command temp root, and the target executable,
+applies deny ACEs for `forbid_read` (files as well as directories), snapshots
+touched DACLs before editing them, and restores those snapshots best-effort
+after the command exits. Concurrent commands touching the same workspace are
+serialized so their ACL edits cannot corrupt each other, and residue from a
+force-killed command (a lingering low-integrity label or `forbid_read` deny) is
+cleaned up by the next run. Because a writable command runs under a
+low-integrity token, it can still write the few locations Windows leaves
+writable to any low-integrity process (for example `%USERPROFILE%\AppData\LocalLow`)
+in addition to the configured roots; the workspace boundary and `forbid_read`
+denials still hold. Read-only AppContainer commands omit network capabilities
+when networking is disabled; writable Windows commands fail closed when
+`[sandbox] network = false`.
+When no OS sandbox backend is available, `bash = "enforce"` refuses bash
+execution instead of running unconfined. Install the platform sandbox backend
+(bubblewrap/`bwrap` on Linux, `sandbox-exec` on macOS) or set
+`[sandbox] bash = "off"` to explicitly restore the pre-1.16 unconfined shell
+behavior (see
+[`SPEC.md` §9](./SPEC.md#9-roadmap-not-in-current-scope) for the escape-prompt
+and optional elevated Windows hardening still to come).
+
+Windows sandbox troubleshooting: the sandbox relaunches the Reasonix
+executable as a hidden helper, and both the CLI and the desktop app embed that
+helper entry point — if enforce is requested in a build that lacks it, bash
+refuses with a clear error instead of returning empty output. A command that
+queues behind another sandboxed command on the same workspace prints a
+one-line "waiting for another sandboxed command" notice that names the holding
+command and its PID when known. A foreground command gives up after 1 minute
+with the same holder detail (a queued turn should fail fast, not hang);
+background jobs wait up to 10 minutes, and `WINDOWS_SANDBOX_LOCK_MS` overrides
+both. Stop the named command first; raising the wait cap only makes later
+commands wait longer. If sandboxed commands fail
+only under Git-for-Windows/MSYS2 bash, try `[tools.shell] prefer =
+"powershell"` — the MSYS runtime is fragile under a low-integrity token. Run
+`reasonix doctor` to see the resolved shell, sandbox availability, and whether
+a project `reasonix.toml` pins `[sandbox]` (a project file overrides
+Settings/user-config edits, and sandbox changes take effect after a session
+config reload or a new session).
 
 ## Plugins (MCP)
 
@@ -472,8 +627,10 @@ archives, and saved facts on demand instead of injecting that dynamic state into
 the stable system prompt. `/forget <name>` archives a saved fact rather than
 deleting it permanently; the CLI/TUI and desktop memory panel can show those
 archived files for traceability, but they are not searched as active memory.
-Agent-initiated `remember` and `forget` calls always ask for fresh approval and
-show a compact preview of the saved or archived memory before they run.
+Agent-initiated `remember` and `forget` calls always ask for fresh human approval
+and show a compact preview of the saved or archived memory before they run.
+Guardian review cannot answer for the user; non-interactive runs refuse these
+tools instead of auto-approving them.
 Retrieval keeps the top BM25 result while trimming weak common-word matches, and
 0-result responses suggest narrower, more distinctive follow-up searches.
 Memory v5 is enabled by default across the CLI/TUI, `reasonix serve`, and the
@@ -540,6 +697,13 @@ enables the AutoResearch strategy instead of requiring a separate
 skill in Settings -> Skills or the slash menu. If an ordinary chat prompt has a
 very strong long-horizon signal, the host also upgrades it into the equivalent
 of `/goal --research <original prompt>`.
+
+For complex work, write the objective as a
+[task contract](./TASK_CONTRACT.md): Context, Request, Output format,
+Constraints, and Pause policy. Goal mode treats those sections as the boundary
+for autonomous work. It keeps going with sensible defaults unless the next step
+requires an irreversible or externally visible operation, a scope change, or
+information only the user can provide.
 
 AutoResearch is enabled for goals with strong signals such as "keep
 researching", "long-running", "thoroughly", "debug until the root cause is
@@ -611,11 +775,22 @@ Subagent skills inherit the executor model by default. Set `subagent_model` to
 run them on another configured model, or use `subagent_models` to override only
 specific skills such as `review` or `security_review`.
 
+Subagents may delegate one more layer by default: the root session is depth 0,
+first-layer subagents are depth 1, and the maximum `max_subagent_depth = 2`
+means a depth-1 workflow can dispatch a depth-2 reviewer or implementer. Depth-2
+subagents do not receive recursive agent/skill tools. Set
+`agent.max_subagent_depth = 1` to restore the old single-layer boundary. This is
+intended for workflows such as Superpowers where a workflow skill may dispatch a
+reviewer subagent, while still avoiding unbounded recursion and background
+fanout.
+
 Use `read_only_task` when planning needs isolated, deeper research without
 granting write-capable delegation. Use `read_only_skill` when the same need is
 best expressed through an existing skill. Both run ephemeral read-only
 subagents with only read-only research tools plus safe foreground bash, return
-only the final answer, and do not create resumable subagent transcripts. In
+only the final answer, and do not create resumable subagent transcripts.
+Read-only nested delegation may be available until `max_subagent_depth` is
+reached, but writer-capable `task` / `run_skill` remain unavailable. In
 token economy mode, connect only this narrow surface with
 `connect_tool_source(source="read_only_skill")`; the full `skills` source still
 enables writer-capable skill tools and remains blocked in plan mode.

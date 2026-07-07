@@ -64,6 +64,91 @@ func TestRepeatGuardAllowsRepeatedNonWritingBashCommand(t *testing.T) {
 	}
 }
 
+func TestRepeatGuardBashWriteRedirectDetectionUsesAST(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want bool
+	}{
+		{
+			name: "stdout file redirect",
+			cmd:  "printf hi > prompt.txt",
+			want: true,
+		},
+		{
+			name: "stderr file redirect",
+			cmd:  "printf hi 2>err.log",
+			want: true,
+		},
+		{
+			name: "append redirect",
+			cmd:  "printf hi >> prompt.txt",
+			want: true,
+		},
+		{
+			name: "combined redirect",
+			cmd:  "printf hi &> prompt.txt",
+			want: true,
+		},
+		{
+			name: "read write redirect",
+			cmd:  "cat <> prompt.txt",
+			want: true,
+		},
+		{
+			name: "null sink redirect",
+			cmd:  "printf hi >/dev/null",
+			want: false,
+		},
+		{
+			name: "powershell null sink spelling",
+			cmd:  "printf hi >$null",
+			want: false,
+		},
+		{
+			name: "windows nul sink spelling",
+			cmd:  "printf hi >NUL",
+			want: false,
+		},
+		{
+			name: "fd duplication",
+			cmd:  "printf hi 2>&1",
+			want: false,
+		},
+		{
+			name: "quoted redirect text",
+			cmd:  `printf '%s\n' 'a > b'`,
+			want: false,
+		},
+		{
+			name: "heredoc body redirect text",
+			cmd:  "cat <<'EOF'\n> prompt.txt\nEOF",
+			want: false,
+		},
+		{
+			name: "heredoc with file redirect",
+			cmd:  "cat <<'EOF' > prompt.txt\nbody\nEOF",
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isShellFileWriteCommand(tt.cmd); got != tt.want {
+				t.Fatalf("isShellFileWriteCommand(%q) = %v, want %v", tt.cmd, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRepeatGuardNormalizesStaticBashFields(t *testing.T) {
+	singleQuoted := normalizeShellCommand(`printf '%s\n' 'hello world'`)
+	doubleQuoted := normalizeShellCommand(`printf "%s\n" "hello world"`)
+	if singleQuoted != doubleQuoted {
+		t.Fatalf("normalized quote styles differ:\n single: %q\n double: %q", singleQuoted, doubleQuoted)
+	}
+}
+
 func TestRepeatGuardAllowsTwoRepeatedWriterSuccesses(t *testing.T) {
 	var calls int32
 	reg := tool.NewRegistry()

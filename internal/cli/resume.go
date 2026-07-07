@@ -65,7 +65,13 @@ func (m *chatTUI) runResumeCommand(input string) {
 		return
 	}
 	// Persist the conversation we're leaving so switching back later restores it.
+	// Snapshot before moving the lease: the outgoing session must be written
+	// while this process still owns it.
 	_ = m.ctrl.Snapshot()
+	if err := m.rebindSessionLease(target.Path); err != nil {
+		m.notice("resume: " + sessionLeaseHeldNotice(err))
+		return
+	}
 	m.ctrl.Resume(loaded, target.Path)
 	m.replayActiveBranch(i18n.M.ResumedTitle)
 }
@@ -113,14 +119,16 @@ func (m *chatTUI) resumeArgItems(val string) ([]compItem, int, bool) {
 	return out, from, true
 }
 
-// sessionSummary is the "N turns · project · topicTitle/first message" line
-// shared by the /resume list and its argument completion.
-// When a TopicTitle is set (via /rename or desktop), it is shown instead of
-// the raw preview so the user can identify sessions at a glance.
+// sessionSummary is the "N turns · display title" line shared by the /resume
+// list and its argument completion. Explicit session renames win, then topic
+// titles, then the raw preview so the user can identify sessions at a glance.
 func sessionSummary(s agent.SessionInfo) string {
-	preview := s.Preview
-	if s.TopicTitle != "" {
+	preview := s.CustomTitle
+	if preview == "" {
 		preview = s.TopicTitle
+	}
+	if preview == "" {
+		preview = s.Preview
 	}
 	if preview == "" {
 		preview = "(no user message yet)"

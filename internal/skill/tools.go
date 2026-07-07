@@ -163,7 +163,7 @@ func (*readOnlySkillTool) ReadOnly() bool { return true }
 func (*readOnlySkillTool) PlanModeSafe() bool { return true }
 
 func (*readOnlySkillTool) Description() string {
-	return "Invoke a skill in read-only mode. Inline skills are loaded into context like read_skill. `[🧬 subagent]` skills run in an isolated ephemeral read-only subagent with only read-only research tools and safe foreground bash; no writes, installers, memory mutation, continuation/fork, background jobs, or further delegation are available. Pass `name` as the bare skill identifier and `arguments` as the concrete task."
+	return "Invoke a skill in read-only mode. Inline skills are loaded into context like read_skill. `[🧬 subagent]` skills run in an isolated ephemeral read-only subagent with only read-only research tools and safe foreground bash; no writes, installers, memory mutation, continuation/fork, background jobs, or writer-capable delegation are available. Read-only nested delegation may be available until max_subagent_depth is reached. Pass `name` as the bare skill identifier and `arguments` as the concrete task."
 }
 
 func (*readOnlySkillTool) Schema() json.RawMessage {

@@ -81,6 +81,11 @@ func RunLegacyRescue(sink event.Sink) Result {
 		sink.Emit(event.Event{Kind: event.Notice, Level: level, Text: text})
 	}
 	result := Result{}
+	if config.IsolatedHomeDir() != "" {
+		emit(event.LevelInfo, "migration rescue: REASONIX_HOME is set; implicit legacy migration is skipped")
+		emit(event.LevelInfo, result.Summary())
+		return result
+	}
 	emit(event.LevelInfo, "migration rescue: checking legacy config and credentials")
 	migrated, err := config.MigrateLegacyIfNeeded()
 	result.Config = migrated
@@ -166,6 +171,9 @@ func RunLegacySessionImportFrom(sourceRoot string, sink event.Sink) Result {
 // MigrateLegacyMemorySources imports older memory stores during normal boot.
 // It stays quiet unless files were actually copied.
 func MigrateLegacyMemorySources(sink event.Sink) []MemoryImport {
+	if config.IsolatedHomeDir() != "" {
+		return nil
+	}
 	sink = event.Sync(sink)
 	return migrateLegacyMemorySources(sink, false).imports
 }
@@ -174,6 +182,9 @@ func MigrateLegacyMemorySources(sink event.Sink) []MemoryImport {
 // It preserves the historical boot-time behavior: notify only when something was
 // imported, and otherwise stay quiet.
 func MigrateLegacySessionSources(sink event.Sink) []SessionImport {
+	if config.IsolatedHomeDir() != "" {
+		return nil
+	}
 	sink = event.Sync(sink)
 	return migrateLegacySessionSources(sink, false).imports
 }

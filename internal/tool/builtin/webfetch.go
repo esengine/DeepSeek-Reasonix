@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	stdhtml "html"
 	"io"
 	"net"
 	"net/http"
@@ -13,7 +14,9 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
+	nethtml "golang.org/x/net/html"
 	"golang.org/x/net/proxy"
 
 	"reasonix/internal/netclient"
@@ -303,38 +306,275 @@ func looksLikeHTML(s string) bool {
 }
 
 var (
-	scriptStyle = regexp.MustCompile(`(?is)<(script|style)[^>]*>.*?</(?:script|style)>`)
-	htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
-	anyTag      = regexp.MustCompile(`(?s)<[^>]+>`)
-	multiBlank  = regexp.MustCompile(`\n[\t ]*\n([\t ]*\n)+`)
-	trailingWS  = regexp.MustCompile(`[\t ]+\n`)
+	multiBlank = regexp.MustCompile(`\n[\t ]*\n([\t ]*\n)+`)
+	trailingWS = regexp.MustCompile(`[\t ]+\n`)
 )
 
-// htmlToText strips <script>/<style> blocks, HTML comments, and every other
-// tag, then unescapes the common entities and collapses runs of blank lines.
-// It is intentionally lossy — we want to give the model readable text rather
-// than preserve structure for re-rendering.
+// htmlToText tokenizes HTML, drops script/style content, unescapes entities, and
+// inserts lightweight block boundaries. It is intentionally lossy: we want to
+// give the model readable text rather than preserve structure for re-rendering.
 func htmlToText(s string) string {
-	s = scriptStyle.ReplaceAllString(s, "")
-	s = htmlComment.ReplaceAllString(s, "")
-	s = anyTag.ReplaceAllString(s, "")
+	w := &htmlTextWriter{}
+	tokenizer := nethtml.NewTokenizer(strings.NewReader(s))
+	skipDepth := 0
+	preDepth := 0
+	for {
+		tt := tokenizer.Next()
+		switch tt {
+		case nethtml.ErrorToken:
+			return normalizeHTMLText(w.String())
+		case nethtml.TextToken:
+			if skipDepth == 0 {
+				w.Text(string(tokenizer.Text()), preDepth > 0)
+			}
+		case nethtml.StartTagToken:
+			name, hasAttr := tokenizer.TagName()
+			tag := strings.ToLower(string(name))
+			if tag == "script" || tag == "style" {
+				skipDepth++
+				continue
+			}
+			if skipDepth > 0 {
+				continue
+			}
+			if tag == "a" {
+				w.StartLink(htmlAttr(tokenizer, hasAttr, "href"))
+				continue
+			}
+			w.StartTag(tag)
+			if tag == "pre" {
+				preDepth++
+			}
+		case nethtml.SelfClosingTagToken:
+			name, _ := tokenizer.TagName()
+			tag := strings.ToLower(string(name))
+			w.SelfClosingTag(tag)
+		case nethtml.EndTagToken:
+			name, _ := tokenizer.TagName()
+			tag := strings.ToLower(string(name))
+			if skipDepth > 0 {
+				if tag == "script" || tag == "style" {
+					skipDepth--
+				}
+				continue
+			}
+			if tag == "pre" && preDepth > 0 {
+				preDepth--
+			}
+			w.EndTag(tag)
+		}
+	}
+}
 
-	// Unescape the entities the model is most likely to encounter. Avoids
-	// pulling in html.UnescapeString just to handle five characters.
-	repl := strings.NewReplacer(
-		"&amp;", "&",
-		"&lt;", "<",
-		"&gt;", ">",
-		"&quot;", `"`,
-		"&#39;", "'",
-		"&apos;", "'",
-		"&nbsp;", " ",
-	)
-	s = repl.Replace(s)
+type htmlTextWriter struct {
+	b     strings.Builder
+	links []string
+}
 
+func (w *htmlTextWriter) String() string {
+	return w.b.String()
+}
+
+func (w *htmlTextWriter) StartTag(tag string) {
+	switch tag {
+	case "title":
+		w.ensureBlankLine()
+		w.b.WriteString("# ")
+	case "h1":
+		w.ensureBlankLine()
+		w.b.WriteString("# ")
+	case "h2":
+		w.ensureBlankLine()
+		w.b.WriteString("## ")
+	case "h3":
+		w.ensureBlankLine()
+		w.b.WriteString("### ")
+	case "h4", "h5", "h6":
+		w.ensureBlankLine()
+		w.b.WriteString("#### ")
+	case "li":
+		w.ensureNewline()
+		w.b.WriteString("- ")
+	case "pre":
+		w.ensureBlankLine()
+		w.b.WriteString("```\n")
+	case "blockquote":
+		w.ensureBlankLine()
+		w.b.WriteString("> ")
+	case "tr":
+		w.ensureNewline()
+	case "td", "th":
+		w.ensureCellBoundary()
+	default:
+		if htmlBreakTag(tag) || htmlBlockTag(tag) {
+			w.ensureNewline()
+		}
+	}
+}
+
+func (w *htmlTextWriter) SelfClosingTag(tag string) {
+	if htmlBreakTag(tag) || htmlBlockTag(tag) {
+		w.ensureNewline()
+	}
+}
+
+func (w *htmlTextWriter) EndTag(tag string) {
+	switch tag {
+	case "a":
+		w.EndLink()
+	case "title", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote":
+		w.ensureBlankLine()
+	case "pre":
+		w.ensureNewline()
+		w.b.WriteString("```\n")
+		w.ensureBlankLine()
+	case "li", "p", "tr":
+		w.ensureNewline()
+	case "td", "th":
+		return
+	default:
+		if htmlBlockTag(tag) {
+			w.ensureNewline()
+		}
+	}
+}
+
+func (w *htmlTextWriter) StartLink(href string) {
+	w.links = append(w.links, strings.TrimSpace(href))
+}
+
+func (w *htmlTextWriter) EndLink() {
+	if len(w.links) == 0 {
+		return
+	}
+	href := w.links[len(w.links)-1]
+	w.links = w.links[:len(w.links)-1]
+	if href != "" {
+		w.b.WriteString(" (")
+		w.b.WriteString(href)
+		w.b.WriteByte(')')
+	}
+}
+
+func (w *htmlTextWriter) Text(text string, pre bool) {
+	text = stdhtml.UnescapeString(text)
+	text = strings.ReplaceAll(text, "\u00a0", " ")
+	if !pre {
+		text = collapseHTMLInlineText(text)
+	}
+	if strings.TrimSpace(text) == "" {
+		if !w.lastIsSpace() {
+			w.b.WriteByte(' ')
+		}
+		return
+	}
+	if !pre && w.b.Len() > 0 && !w.lastIsSpace() && !startsWithSpaceOrPunct(text) {
+		w.b.WriteByte(' ')
+	}
+	w.b.WriteString(text)
+}
+
+func (w *htmlTextWriter) ensureNewline() {
+	if w.b.Len() == 0 || w.lastByte() == '\n' {
+		return
+	}
+	w.b.WriteByte('\n')
+}
+
+func (w *htmlTextWriter) ensureBlankLine() {
+	if w.b.Len() == 0 {
+		return
+	}
+	if strings.HasSuffix(w.b.String(), "\n\n") {
+		return
+	}
+	w.ensureNewline()
+	w.b.WriteByte('\n')
+}
+
+func (w *htmlTextWriter) ensureCellBoundary() {
+	if w.b.Len() == 0 || w.lastByte() == '\n' {
+		return
+	}
+	if !strings.HasSuffix(w.b.String(), " | ") {
+		w.b.WriteString(" | ")
+	}
+}
+
+func (w *htmlTextWriter) lastByte() byte {
+	if w.b.Len() == 0 {
+		return 0
+	}
+	s := w.b.String()
+	return s[len(s)-1]
+}
+
+func (w *htmlTextWriter) lastIsSpace() bool {
+	if w.b.Len() == 0 {
+		return false
+	}
+	return unicode.IsSpace(rune(w.lastByte()))
+}
+
+func normalizeHTMLText(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = trailingWS.ReplaceAllString(s, "\n")
 	s = multiBlank.ReplaceAllString(s, "\n\n")
-	return s
+	return strings.TrimSpace(s)
+}
+
+func collapseHTMLInlineText(s string) string {
+	if s == "" {
+		return ""
+	}
+	leading := unicode.IsSpace([]rune(s)[0])
+	trailing := unicode.IsSpace([]rune(s)[len([]rune(s))-1])
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return " "
+	}
+	out := strings.Join(fields, " ")
+	if leading {
+		out = " " + out
+	}
+	if trailing {
+		out += " "
+	}
+	return out
+}
+
+func startsWithSpaceOrPunct(s string) bool {
+	for _, r := range s {
+		return unicode.IsSpace(r) || strings.ContainsRune(".,;:!?)]}", r)
+	}
+	return false
+}
+
+func htmlAttr(tokenizer *nethtml.Tokenizer, hasAttr bool, name string) string {
+	for hasAttr {
+		key, val, more := tokenizer.TagAttr()
+		if strings.EqualFold(string(key), name) {
+			return stdhtml.UnescapeString(string(val))
+		}
+		hasAttr = more
+	}
+	return ""
+}
+
+func htmlBreakTag(tag string) bool {
+	return tag == "br" || tag == "hr"
+}
+
+func htmlBlockTag(tag string) bool {
+	switch tag {
+	case "address", "article", "aside", "blockquote", "body", "caption", "dd", "details",
+		"dialog", "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form",
+		"h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "html", "li", "main", "nav",
+		"ol", "p", "pre", "section", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul":
+		return true
+	default:
+		return false
+	}
 }
 
 func contentTypeShort(ct string) string {

@@ -12,7 +12,7 @@ import (
 type request struct {
 	Op        string            `json:"op"`        // "install" (default) | "uninstall"
 	Source    string            `json:"source"`    // required for install; ignored for uninstall
-	Kind      string            `json:"kind"`      // auto|skill|mcp (install only)
+	Kind      string            `json:"kind"`      // auto|skill|mcp|plugin (install only)
 	Apply     bool              `json:"apply"`     // install only: actually write/connect
 	Scope     string            `json:"scope"`     // project|global
 	Mode      string            `json:"mode"`      // auto|copy|link|register (skill install)
@@ -59,15 +59,16 @@ type response struct {
 // shape stays stable: missing fields read as zero, and we can add new kinds
 // without breaking old clients.
 type kindTally struct {
-	Skill int `json:"skill"`
-	MCP   int `json:"mcp"`
+	Skill  int `json:"skill"`
+	MCP    int `json:"mcp"`
+	Plugin int `json:"plugin"`
 }
 
 // action is the per-install-step DTO. The Kind/Action pair drives the apply
 // dispatcher; RiskLevel/RiskReasons help the calling skill decide whether to
 // ask the user before apply=true.
 type action struct {
-	Kind          string            `json:"kind"`      // "skill" | "mcp"
+	Kind          string            `json:"kind"`      // "skill" | "mcp" | "plugin"
 	Action        string            `json:"action"`    // copy_skill|link_skill|register_skill_root|install_mcp_server|remove_skill|remove_skill_root|remove_mcp_server
 	Status        string            `json:"status"`    // planned|done|failed
 	RiskLevel     RiskLevel         `json:"riskLevel"` // low|medium|high
@@ -92,6 +93,9 @@ type action struct {
 	Discoverable  bool              `json:"discoverable,omitempty"`  // Store.Read can load it after apply/register
 	Indexed       bool              `json:"indexed,omitempty"`       // Store.List includes it for the skills index
 	ToolCount     int               `json:"toolCount,omitempty"`
+	HookCount     int               `json:"hookCount,omitempty"`
+	ManifestKind  string            `json:"manifestKind,omitempty"`
+	Version       string            `json:"version,omitempty"`
 	Warnings      []string          `json:"warnings,omitempty"`
 	Error         string            `json:"error,omitempty"`
 	Next          string            `json:"next,omitempty"`

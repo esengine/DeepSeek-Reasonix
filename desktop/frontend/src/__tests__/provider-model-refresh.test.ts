@@ -47,14 +47,14 @@ eq(
 );
 
 eq(
-  mergedFetchedProviderModels(["mimo-v2.5-pro"], ["mimo-v2-flash", "mimo-v2-omni", "mimo-v2.5-pro"], { preserveCurated: true }),
+  mergedFetchedProviderModels(["mimo-v2.5-pro"], ["mimo-v2.5", "mimo-v2.5-pro"], { preserveCurated: true }),
   ["mimo-v2.5-pro"],
   "manual access refresh preserves selected MiMo model instead of importing provider catalog",
 );
 
 eq(
-  providerModelCandidates(["mimo-v2.5-pro"], ["mimo-v2-flash", "mimo-v2-omni", "mimo-v2.5-pro"]),
-  ["mimo-v2.5-pro", "mimo-v2-flash", "mimo-v2-omni"],
+  providerModelCandidates(["mimo-v2.5-pro"], ["mimo-v2.5", "mimo-v2.5-pro"]),
+  ["mimo-v2.5-pro", "mimo-v2.5"],
   "manual access refresh can show provider catalog as unsaved candidates",
 );
 

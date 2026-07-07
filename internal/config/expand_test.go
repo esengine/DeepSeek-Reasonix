@@ -76,3 +76,32 @@ func TestForbidReadRootsForRootResolvesRelativePathsAndScopedEnv(t *testing.T) {
 		}
 	}
 }
+
+func TestWriteRootsForRootExpandsMavenAllowWrite(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg := Default()
+	cfg.Sandbox.AllowWrite = []string{
+		"${HOME}/.m2",
+		"${HOME}/.m2/repository",
+	}
+
+	got := cfg.WriteRootsForRoot(project)
+	// WriteRootsForRoot expands variables but leaves configured separators intact;
+	// the writer confiner normalizes roots later.
+	want := []string{
+		project,
+		home + "/.m2",
+		home + "/.m2/repository",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("WriteRootsForRoot() returned %d roots, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("root %d = %q, want %q (all roots: %v)", i, got[i], want[i], got)
+		}
+	}
+}

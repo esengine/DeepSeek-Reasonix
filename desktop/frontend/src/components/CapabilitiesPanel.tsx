@@ -4,7 +4,7 @@ import { asArray } from "../lib/array";
 import { app, openExternal } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { mcpServerLifecycleActions, mcpServerRetryableFromAvailableList } from "../lib/mcpServerLifecycle";
-import type { CapabilitiesView, MCPServerInput, ServerView, SkillRootSkillView, SkillRootView, SkillsSettingsView, SkillView, TabMeta } from "../lib/types";
+import type { CapabilitiesView, MCPServerInput, PluginHookView, PluginInstallOptions, PluginMCPServerView, PluginSkillView, PluginView, ServerView, SkillRootSkillView, SkillRootView, SkillsSettingsView, SkillView, TabMeta } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
@@ -20,6 +20,7 @@ type SettingsSnapshot<T> = { key: string; value: T };
 
 let mcpSettingsSnapshot: SettingsSnapshot<ServerView[]> | null = null;
 let skillsSettingsSnapshot: SettingsSnapshot<SkillsSettingsView> | null = null;
+let pluginsSettingsSnapshot: SettingsSnapshot<PluginView[]> | null = null;
 
 function settingsSnapshotKey(meta: Awaited<ReturnType<typeof app.Meta>> | null | undefined, tabs: TabMeta[] | null | undefined): string {
   const active = tabs?.find((tab) => tab.active);
@@ -50,7 +51,7 @@ export function CapabilitiesPanel({
   const [expandedServerTools, setExpandedServerTools] = useState<Set<string>>(() => new Set());
 
   const reload = useCallback(async () => {
-    setView(normalizeCapabilitiesView(await app.Capabilities().catch(() => ({ servers: [], skills: [], skillRoots: [] }))));
+    setView(normalizeCapabilitiesView(await app.Capabilities().catch(() => ({ servers: [], skills: [], skillRoots: [], plugins: [] }))));
   }, []);
   useEffect(() => {
     void reload();
@@ -314,6 +315,7 @@ export function CapabilitiesPanel({
 function normalizeCapabilitiesView(view: CapabilitiesView | null | undefined): CapabilitiesView {
   return {
     servers: normalizeServerViews(view?.servers),
+    plugins: asArray(view?.plugins),
     ...normalizeSkillsSettingsView(view),
   };
 }
@@ -1588,6 +1590,619 @@ function AddServerForm({
       </div>
     </div>
   );
+}
+
+type PluginInstallPlanAction = {
+  action?: string;
+  kind?: string;
+  name?: string;
+  source?: string;
+  status?: string;
+  message?: string;
+  error?: string;
+};
+
+type PluginInstallPlanView = {
+  raw: string;
+  ok?: boolean;
+  status?: string;
+  name?: string;
+  actions: PluginInstallPlanAction[];
+  warnings: string[];
+  error?: string;
+};
+
+type PluginInstallMode = "local" | "git";
+
+// PluginsSettingsPage is the desktop plugin package manager embedded inside
+// Settings. It mirrors the MCP/Skills density: install planning on top, package
+// rows below, and diagnostics/details only when a row is expanded.
+export function PluginsSettingsPage() {
+	const t = useT();
+	const [snapshotKey, setSnapshotKey] = useState("");
+	const [plugins, setPlugins] = useState<PluginView[] | null>(null);
+	const [busy, setBusy] = useState(false);
+	const [err, setErr] = useState<string | null>(null);
+	const [installMode, setInstallMode] = useState<PluginInstallMode>("local");
+	const [localSource, setLocalSource] = useState("");
+	const [gitSource, setGitSource] = useState("");
+	const [name, setName] = useState("");
+	const [link, setLink] = useState(false);
+	const [replace, setReplace] = useState(false);
+	const [plan, setPlan] = useState<PluginInstallPlanView | null>(null);
+	const [notice, setNotice] = useState<string | null>(null);
+	const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+	const [diagnostics, setDiagnostics] = useState<Record<string, PluginView>>({});
+
+	const reload = useCallback(async () => {
+		const [meta, tabs] = await Promise.all([
+			app.Meta().catch(() => null),
+			app.ListTabs().catch(() => []),
+		]);
+		const key = settingsSnapshotKey(meta, tabs);
+		setSnapshotKey(key);
+		const cached = key ? pluginsSettingsSnapshot : null;
+		if (cached?.key === key) {
+			setPlugins(cached.value);
+		} else {
+			setPlugins(null);
+		}
+		const next = normalizePluginViews(await app.Plugins().catch(() => []));
+		pluginsSettingsSnapshot = { key, value: next };
+		setPlugins(next);
+	}, []);
+	useEffect(() => { void reload(); }, [reload]);
+
+	const run = async (fn: () => Promise<unknown>, reloadAfter = true) => {
+		setBusy(true);
+		setErr(null);
+		setNotice(null);
+		try {
+			const result = await fn();
+			if (typeof result === "string" && result.trim()) {
+				const parsed = parsePluginInstallPlan(result);
+				setNotice(pluginPlanNotice(parsed, t));
+			}
+			if (reloadAfter) await reload();
+			return true;
+		} catch (e) {
+			setErr(String((e as Error)?.message ?? e));
+			if (reloadAfter) await reload();
+			return false;
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	const sourceValue = (installMode === "local" ? localSource : gitSource).trim();
+	const installOptions = (): PluginInstallOptions => ({
+		dryRun: false,
+		link: installMode === "local" ? link : false,
+		replace,
+		name: installMode === "git" ? name.trim() || undefined : undefined,
+	});
+	const actionBusy = busy || !snapshotKey || !plugins;
+	const canPlan = sourceValue.length > 0 && !actionBusy;
+	const summary = plugins ? pluginListSummary(plugins, t) : "";
+	const togglePlugin = useCallback((pluginName: string) => {
+		setExpanded((prev) => { const next = new Set(prev); if (next.has(pluginName)) next.delete(pluginName); else next.add(pluginName); return next; });
+	}, []);
+	const setMode = (mode: PluginInstallMode) => {
+		setInstallMode(mode);
+		setPlan(null);
+	};
+	const previewInstall = () => {
+		if (!sourceValue) return;
+		void run(async () => {
+			const raw = await app.PlanPluginInstall(sourceValue, { ...installOptions(), dryRun: true });
+			setPlan(parsePluginInstallPlan(raw));
+		}, false);
+	};
+	const install = () => {
+		if (!sourceValue) return;
+		void run(async () => {
+			const raw = await app.InstallPlugin(sourceValue, installOptions());
+			setPlan(parsePluginInstallPlan(raw));
+			return raw;
+		});
+	};
+	const runDoctor = (pluginName: string) => {
+		void run(async () => {
+			const view = normalizePluginView(await app.PluginDoctor(pluginName));
+			setDiagnostics((prev) => ({ ...prev, [pluginName]: view }));
+			setExpanded((prev) => {
+				const next = new Set(prev);
+				next.add(pluginName);
+				return next;
+			});
+		}, false);
+	};
+	const updateLocalSource = (value: string) => {
+		setLocalSource(value);
+		setPlan(null);
+	};
+	const updateGitSource = (value: string) => {
+		setGitSource(value);
+		setPlan(null);
+	};
+	const pickPluginFolder = () => {
+		void run(async () => {
+			const path = await app.PickPluginFolder();
+			if (path) {
+				setInstallMode("local");
+				updateLocalSource(path);
+			}
+		}, false);
+	};
+
+	return (
+		<section className="mem-section">
+			{err && <div className="banner banner--error">{err}</div>}
+			{notice && !err && <div className="banner banner--success">{notice}</div>}
+			<div className="cap-plugin-installer">
+				<div className="cap-plugin-installer__head">
+					<div className="cap-plugin-installer__copy">
+						<div className="cap-plugin-installer__title">{t("caps.pluginInstallTitle")}</div>
+						<div className="cap-plugin-installer__hint">{t("caps.pluginInstallHint")}</div>
+					</div>
+					<div className="cap-tabs cap-plugin-installer__mode" role="group" aria-label={t("caps.pluginInstallMethod")}>
+						<button
+							className={`cap-tab${installMode === "local" ? " cap-tab--active" : ""}`}
+							type="button"
+							aria-pressed={installMode === "local"}
+							onClick={() => setMode("local")}
+						>
+							{t("caps.pluginInstallLocal")}
+						</button>
+						<button
+							className={`cap-tab${installMode === "git" ? " cap-tab--active" : ""}`}
+							type="button"
+							aria-pressed={installMode === "git"}
+							onClick={() => setMode("git")}
+						>
+							{t("caps.pluginInstallGit")}
+						</button>
+					</div>
+				</div>
+				<div className="cap-plugin-form-grid">
+					{installMode === "local" ? (
+						<div className="cap-plugin-fields cap-plugin-fields--local">
+							<div className="cap-plugin-folder-field">
+								<button className="btn btn--small" disabled={actionBusy} type="button" onClick={pickPluginFolder}>
+									{t("caps.pluginChooseLocalFolder")}
+								</button>
+								<div
+									className={`cap-plugin-path${localSource ? "" : " cap-plugin-path--empty"}`}
+									aria-label={t("caps.pluginLocalFolder")}
+								>
+									{localSource || t("caps.pluginNoLocalFolder")}
+								</div>
+							</div>
+						</div>
+					) : (
+						<div className="cap-plugin-fields cap-plugin-fields--git">
+							<input
+								className="mem-input"
+								aria-label={t("caps.pluginGitSource")}
+								placeholder={t("caps.pluginSourcePlaceholder")}
+								value={gitSource}
+								onInput={(e) => updateGitSource(e.currentTarget.value)}
+								onChange={(e) => updateGitSource(e.target.value)}
+							/>
+							<div className="cap-plugin-field">
+								<input
+									className="mem-input"
+									aria-label={t("caps.pluginInstallName")}
+									placeholder={t("caps.pluginInstallNamePlaceholder")}
+									value={name}
+									onChange={(e) => setName(e.target.value)}
+								/>
+							</div>
+						</div>
+					)}
+					<div className="cap-plugin-installer__options">
+						<div className="cap-plugin-option-block">
+							<label className="cap-plugin-option">
+								<input type="checkbox" checked={replace} disabled={actionBusy} onChange={(e) => setReplace(e.target.checked)} />
+								<span>{t("caps.pluginReplace")}</span>
+							</label>
+							<div className="cap-plugin-option-hint">{t("caps.pluginReplaceHint")}</div>
+						</div>
+						{installMode === "local" && (
+							<div className="cap-plugin-option-block">
+								<label className="cap-plugin-option">
+									<input type="checkbox" checked={link} disabled={actionBusy} onChange={(e) => setLink(e.target.checked)} />
+									<span>{t("caps.pluginLink")}</span>
+								</label>
+								<div className="cap-plugin-option-hint">{t("caps.pluginLinkHint")}</div>
+							</div>
+						)}
+					</div>
+					<div className="cap-plugin-installer__actions">
+						<button className="btn btn--small" type="button" disabled={!canPlan} onClick={previewInstall}>
+							{t("caps.pluginPreview")}
+						</button>
+						<button className="btn btn--primary btn--small" type="button" disabled={!canPlan} onClick={install}>
+							{t("caps.pluginInstall")}
+						</button>
+					</div>
+				</div>
+			</div>
+			{plan && <PluginPlanPreview plan={plan} />}
+			<div className="cap-server-section cap-plugin-section">
+				<div className="cap-server-section__head">
+					<div className="cap-server-section__copy">
+						<div className="cap-server-section__title">{t("caps.installedPlugins")}</div>
+						{plugins && plugins.length > 0 && <div className="drawer__summary">{summary}</div>}
+					</div>
+					<button className="btn btn--small" disabled={actionBusy} type="button" onClick={() => void reload()}>
+						{t("caps.pluginRefresh")}
+					</button>
+				</div>
+				{!plugins ? (
+					<div className="mem-empty">{t("caps.loading")}</div>
+				) : plugins.length === 0 ? (
+					<div className="mem-empty mem-empty--cta">
+						<strong>{t("caps.noPluginsTitle")}</strong>
+						<span>{t("caps.noPluginsHint")}</span>
+					</div>
+				) : (
+					<div className="cap-server-group">
+						{plugins.map((plugin) => (
+							<PluginRow
+								key={plugin.name}
+								plugin={plugin}
+								diagnostic={diagnostics[plugin.name]}
+								busy={actionBusy}
+								expanded={expanded.has(plugin.name)}
+								onToggleDetails={() => togglePlugin(plugin.name)}
+								onToggleEnabled={(enabled) => void run(() => app.SetPluginEnabled(plugin.name, enabled))}
+								onUpdate={() => void run(() => app.UpdatePlugin(plugin.name))}
+								onDoctor={() => runDoctor(plugin.name)}
+								onRemove={() => void run(() => app.RemovePlugin(plugin.name))}
+							/>
+						))}
+					</div>
+				)}
+			</div>
+		</section>
+	);
+}
+
+function PluginPlanPreview({ plan }: { plan: PluginInstallPlanView }) {
+	const t = useT();
+	return (
+		<div className={`cap-plugin-plan${plan.error ? " cap-plugin-plan--error" : ""}`}>
+			<div className="cap-plugin-plan__head">
+				<div className="cap-plugin-plan__title">{plan.error ? t("caps.pluginPlanError") : t("caps.pluginPlanReady")}</div>
+				{plan.status && <span className="cap-source-badge">{plan.status}</span>}
+			</div>
+			{plan.name && <div className="cap-plugin-plan__meta">{plan.name}</div>}
+			{plan.error && <div className="cap-plugin-plan__warning">{plan.error}</div>}
+			{plan.warnings.map((warning, idx) => (
+				<div className="cap-plugin-plan__warning" key={`${warning}-${idx}`}>{warning}</div>
+			))}
+			{plan.actions.length > 0 ? (
+				<div className="cap-plugin-actions">
+					{plan.actions.map((action, idx) => (
+						<div className="cap-plugin-action" key={`${action.action || action.kind || "action"}-${idx}`}>
+							<span className="cap-plugin-action__name">{pluginPlanActionLabel(action, t)}</span>
+							{action.status && <span className="cap-source-badge">{action.status}</span>}
+							{action.source && <span className="cap-plugin-action__source">{action.source}</span>}
+							{action.message && <span className="cap-plugin-action__source">{action.message}</span>}
+							{action.error && <span className="cap-plugin-plan__warning">{action.error}</span>}
+						</div>
+					))}
+				</div>
+			) : (
+				<pre className="cap-plugin-plan__raw">{plan.raw}</pre>
+			)}
+		</div>
+	);
+}
+
+function PluginRow({
+	plugin,
+	diagnostic,
+	busy,
+	expanded,
+	onToggleDetails,
+	onToggleEnabled,
+	onUpdate,
+	onDoctor,
+	onRemove,
+}: {
+	plugin: PluginView;
+	diagnostic?: PluginView;
+	busy: boolean;
+	expanded: boolean;
+	onToggleDetails: () => void;
+	onToggleEnabled: (enabled: boolean) => void;
+	onUpdate: () => void;
+	onDoctor: () => void;
+	onRemove: () => void;
+}) {
+	const t = useT();
+	const status = plugin.error ? "failed" : plugin.enabled ? "connected" : "disabled";
+	const warnings = pluginWarnings(plugin, diagnostic);
+	const sub = plugin.error || pluginCapabilitiesSummary(plugin, t);
+	return (
+		<div className={`cap-server-entry cap-plugin-entry${plugin.enabled ? "" : " cap-server-entry--disabled"}`}>
+			<Tooltip label={plugin.error} disabled={!plugin.error} fill block>
+				<div className={`cap-row${plugin.enabled ? "" : " cap-row--disabled"}`}>
+					<Tooltip label={expanded ? t("caps.collapseDetails") : t("caps.expandDetails")}>
+						<button
+							className="cap-disclosure"
+							aria-expanded={expanded}
+							type="button"
+							onClick={onToggleDetails}
+						>
+							{expanded ? "⌄" : "›"}
+						</button>
+					</Tooltip>
+					<span className={`cap-dot cap-dot--${status}`} />
+					<div className="cap-row__text">
+						<div className="cap-row__head">
+							<span className="cap-row__name">{plugin.name}</span>
+							{plugin.manifestKind && <span className="cap-row__transport">{plugin.manifestKind}</span>}
+							{plugin.version && <span className="cap-source-badge">{plugin.version}</span>}
+							{warnings.length > 0 && <span className="cap-row__update cap-row__update--error">{t("caps.pluginWarnings", { count: warnings.length })}</span>}
+						</div>
+						<div className="cap-row__sub">{sub}</div>
+					</div>
+					<div className="cap-row__actions">
+						<Tooltip label={plugin.enabled ? t("caps.pluginDisable") : t("caps.pluginEnable")}>
+							<label className="cap-switch">
+								<input
+									type="checkbox"
+									checked={plugin.enabled}
+									disabled={busy}
+									onChange={(e) => onToggleEnabled(e.target.checked)}
+								/>
+								<span className="cap-switch__track" />
+							</label>
+						</Tooltip>
+					</div>
+				</div>
+			</Tooltip>
+			{expanded && (
+				<div className="cap-server-details">
+					<div className="cap-detail-grid">
+						<div className="cap-detail">
+							<span className="cap-detail__label">{t("caps.status")}</span>
+							<span className="cap-detail__value">{plugin.enabled ? t("caps.pluginEnabled") : t("caps.pluginDisabled")}</span>
+						</div>
+						{plugin.version && (
+							<div className="cap-detail">
+								<span className="cap-detail__label">{t("caps.pluginVersion")}</span>
+								<span className="cap-detail__value">{plugin.version}</span>
+							</div>
+						)}
+						{plugin.source && (
+							<div className="cap-detail cap-detail--wide">
+								<span className="cap-detail__label">{t("caps.pluginSource")}</span>
+								<span className="cap-detail__code">{plugin.source}</span>
+							</div>
+						)}
+						{plugin.root && (
+							<div className="cap-detail cap-detail--wide">
+								<span className="cap-detail__label">{t("caps.pluginRoot")}</span>
+								<span className="cap-detail__code">{plugin.root}</span>
+							</div>
+						)}
+					</div>
+					{plugin.description && <div className="cap-plugin-description">{plugin.description}</div>}
+					<PluginUsageDetails plugin={plugin} />
+					{diagnostic?.error && <div className="cap-source__warning">{diagnostic.error}</div>}
+					{warnings.map((warning, idx) => (
+						<div className="cap-source__warning" key={`${plugin.name}-warning-${idx}`}>{warning}</div>
+					))}
+					<div className="cap-detail-actions">
+						<button className="btn btn--small" disabled={busy} type="button" onClick={onUpdate}>
+							{t("caps.pluginUpdate")}
+						</button>
+						<button className="btn btn--small" disabled={busy} type="button" onClick={onDoctor}>
+							{t("caps.pluginDoctor")}
+						</button>
+						<InlineConfirmButton
+							label={t("caps.pluginRemove")}
+							confirmLabel={t("caps.pluginConfirmRemove")}
+							cancelLabel={t("common.cancel")}
+							disabled={busy}
+							danger
+							onConfirm={onRemove}
+						/>
+					</div>
+				</div>
+			)}
+		</div>
+	);
+}
+
+function PluginUsageDetails({ plugin }: { plugin: PluginView }) {
+	const t = useT();
+	const skills = asArray(plugin.skillDetails);
+	const hooks = asArray(plugin.hookDetails);
+	const mcps = asArray(plugin.mcpServerDetails);
+	const hasDetails = skills.length > 0 || hooks.length > 0 || mcps.length > 0;
+	return (
+		<div className="cap-plugin-usage">
+			<div className="cap-plugin-usage__title">{t("caps.pluginUsageTitle")}</div>
+			<div className="cap-plugin-usage__hint">
+				{plugin.enabled ? t("caps.pluginUsageEnabledHint") : t("caps.pluginUsageDisabledHint")}
+			</div>
+			{hasDetails ? (
+				<div className="cap-plugin-capabilities">
+					{skills.length > 0 && <PluginSkillList skills={skills} />}
+					{hooks.length > 0 && <PluginHookList hooks={hooks} />}
+					{mcps.length > 0 && <PluginMCPList servers={mcps} />}
+				</div>
+			) : (
+				<div className="cap-plugin-usage__empty">{t("caps.pluginNoCapabilityDetails")}</div>
+			)}
+		</div>
+	);
+}
+
+function PluginSkillList({ skills }: { skills: PluginSkillView[] }) {
+	const t = useT();
+	return (
+		<div className="cap-plugin-capability">
+			<div className="cap-plugin-capability__head">{t("caps.pluginSkillsTitle")}</div>
+			<div className="cap-plugin-capability__hint">{t("caps.pluginSkillsHint")}</div>
+			<div className="cap-plugin-capability__list">
+				{skills.map((skill) => (
+					<div className="cap-plugin-capability__item" key={`${skill.name}-${skill.path || skill.invocation || ""}`}>
+						<div className="cap-plugin-capability__line">
+							<span className="cap-plugin-capability__name">{skill.invocation || `/${skill.name}`}</span>
+							{skill.runAs && <span className="cap-source-badge">{skill.runAs}</span>}
+						</div>
+						<div className="cap-plugin-capability__desc">{skill.description || t("caps.pluginNoDescription")}</div>
+					</div>
+				))}
+			</div>
+		</div>
+	);
+}
+
+function PluginHookList({ hooks }: { hooks: PluginHookView[] }) {
+	const t = useT();
+	return (
+		<div className="cap-plugin-capability">
+			<div className="cap-plugin-capability__head">{t("caps.pluginHooksTitle")}</div>
+			<div className="cap-plugin-capability__hint">{t("caps.pluginHooksHint")}</div>
+			<div className="cap-plugin-capability__list">
+				{hooks.map((hook, idx) => {
+					const target = hook.command || hook.contextFile || t("caps.pluginHookNoTarget");
+					return (
+						<div className="cap-plugin-capability__item" key={`${hook.event}-${hook.match || "*"}-${target}-${idx}`}>
+							<div className="cap-plugin-capability__line">
+								<span className="cap-plugin-capability__name">{hook.event}</span>
+								<span className="cap-source-badge">{hook.match || "*"}</span>
+							</div>
+							<div className="cap-plugin-capability__desc">{hook.description || target}</div>
+						</div>
+					);
+				})}
+			</div>
+		</div>
+	);
+}
+
+function PluginMCPList({ servers }: { servers: PluginMCPServerView[] }) {
+	const t = useT();
+	return (
+		<div className="cap-plugin-capability">
+			<div className="cap-plugin-capability__head">{t("caps.pluginMCPTitle")}</div>
+			<div className="cap-plugin-capability__hint">{t("caps.pluginMCPHint")}</div>
+			<div className="cap-plugin-capability__list">
+				{servers.map((server) => (
+					<div className="cap-plugin-capability__item" key={server.name}>
+						<div className="cap-plugin-capability__line">
+							<span className="cap-plugin-capability__name">{server.name}</span>
+							{server.transport && <span className="cap-source-badge">{server.transport}</span>}
+						</div>
+						<div className="cap-plugin-capability__desc">{server.command || server.url || t("caps.pluginMCPNoTarget")}</div>
+					</div>
+				))}
+			</div>
+		</div>
+	);
+}
+
+function normalizePluginViews(plugins: PluginView[] | null | undefined): PluginView[] {
+	return sortPluginsForDisplay(asArray(plugins).map(normalizePluginView));
+}
+
+function normalizePluginView(plugin: PluginView): PluginView {
+	return {
+		...plugin,
+		name: plugin.name || "plugin",
+		root: plugin.root || "",
+		enabled: Boolean(plugin.enabled),
+		skills: Number.isFinite(plugin.skills) ? plugin.skills : 0,
+		hooks: Number.isFinite(plugin.hooks) ? plugin.hooks : 0,
+		mcpServers: Number.isFinite(plugin.mcpServers) ? plugin.mcpServers : 0,
+		skillDetails: asArray(plugin.skillDetails),
+		hookDetails: asArray(plugin.hookDetails),
+		mcpServerDetails: asArray(plugin.mcpServerDetails),
+		warnings: asArray(plugin.warnings),
+	};
+}
+
+function sortPluginsForDisplay(plugins: PluginView[]): PluginView[] {
+	return [...plugins].sort((a, b) => {
+		const priority = pluginDisplayPriority(a) - pluginDisplayPriority(b);
+		if (priority !== 0) return priority;
+		return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+	});
+}
+
+function pluginDisplayPriority(plugin: PluginView): number {
+	if (plugin.error) return 0;
+	if (plugin.enabled) return 1;
+	return 2;
+}
+
+function pluginListSummary(plugins: PluginView[], t: ReturnType<typeof useT>): string {
+	const enabled = plugins.filter((plugin) => plugin.enabled && !plugin.error).length;
+	const issues = plugins.filter((plugin) => Boolean(plugin.error) || asArray(plugin.warnings).length > 0).length;
+	return t("caps.pluginsSummary", { enabled, total: plugins.length, issues });
+}
+
+function pluginCapabilitiesSummary(plugin: PluginView, t: ReturnType<typeof useT>): string {
+	if (plugin.skills === 0 && plugin.hooks === 0 && plugin.mcpServers === 0) return t("caps.pluginNoCapabilities");
+	return t("caps.pluginCounts", { skills: plugin.skills, hooks: plugin.hooks, mcps: plugin.mcpServers });
+}
+
+function pluginWarnings(plugin: PluginView, diagnostic?: PluginView): string[] {
+	const warnings = [...asArray(plugin.warnings), ...asArray(diagnostic?.warnings)];
+	return Array.from(new Set(warnings.filter((warning) => warning.trim().length > 0)));
+}
+
+function parsePluginInstallPlan(raw: string): PluginInstallPlanView {
+	try {
+		const value = JSON.parse(raw) as Record<string, unknown>;
+		const actions = (Array.isArray(value.actions) ? value.actions : []).flatMap((action) => {
+			if (!action || typeof action !== "object") return [];
+			const item = action as Record<string, unknown>;
+			return [{
+				action: stringValue(item.action),
+				kind: stringValue(item.kind),
+				name: stringValue(item.name),
+				source: stringValue(item.source),
+				status: stringValue(item.status),
+				message: stringValue(item.message),
+				error: stringValue(item.error),
+			}];
+		});
+		return {
+			raw,
+			ok: typeof value.ok === "boolean" ? value.ok : undefined,
+			status: stringValue(value.status),
+			name: stringValue(value.name),
+			actions,
+			warnings: (Array.isArray(value.warnings) ? value.warnings : []).flatMap((warning) => typeof warning === "string" ? [warning] : []),
+			error: stringValue(value.error),
+		};
+	} catch {
+		return { raw, actions: [], warnings: [] };
+	}
+}
+
+function stringValue(value: unknown): string | undefined {
+	return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function pluginPlanActionLabel(action: PluginInstallPlanAction, t: ReturnType<typeof useT>): string {
+	const verb = action.action || action.kind || t("caps.pluginAction");
+	return [verb, action.name].filter(Boolean).join(" · ");
+}
+
+function pluginPlanNotice(plan: PluginInstallPlanView, t: ReturnType<typeof useT>): string {
+	if (plan.error) return plan.error;
+	if (plan.status === "done" || plan.status === "applied" || plan.status === "complete") return t("caps.pluginPlanInstalled");
+	return plan.status ? t("caps.pluginPlanStatus", { status: plan.status }) : t("caps.pluginPlanComplete");
 }
 
 // MCPServersSettingsPage is a self-contained MCP servers management page

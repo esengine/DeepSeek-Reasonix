@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"reasonix/internal/shellparse"
 )
 
 type diffOpts struct {
@@ -546,55 +548,23 @@ func failingTestNames(out string) []string {
 }
 
 func runTests(repo, testCmd string, pkgs []string) (bool, string) {
-	fields := splitShellFields(testCmd)
+	test, err := shellparse.ParseStaticCommand(testCmd, shellparse.StaticCommandPolicy{AllowEnvAssignments: true, AllowStderrToStdout: true})
+	if err != nil {
+		return false, "invalid test command: " + err.Error()
+	}
+	fields := test.Argv
 	if len(fields) == 0 {
 		fields = []string{"go", "test"}
 	}
 	args := append(fields[1:], pkgs...)
 	cmd := exec.Command(fields[0], args...)
 	cmd.Dir = repo
+	if len(test.Env) > 0 {
+		cmd.Env = append(os.Environ(), test.Env...)
+	}
 	cmd.WaitDelay = 5 * time.Minute // bound the wait if `go test` hangs
 	out, err := cmd.CombinedOutput()
 	return err == nil, string(out)
-}
-
-// splitShellFields splits on whitespace, honoring single/double-quoted spans and stripping the quotes.
-func splitShellFields(s string) []string {
-	var out []string
-	var cur strings.Builder
-	inSingle, inDouble := false, false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case inSingle:
-			if c == '\'' {
-				inSingle = false
-			} else {
-				cur.WriteByte(c)
-			}
-		case inDouble:
-			if c == '"' {
-				inDouble = false
-			} else {
-				cur.WriteByte(c)
-			}
-		case c == '\'':
-			inSingle = true
-		case c == '"':
-			inDouble = true
-		case c == ' ' || c == '\t' || c == '\n':
-			if cur.Len() > 0 {
-				out = append(out, cur.String())
-				cur.Reset()
-			}
-		default:
-			cur.WriteByte(c)
-		}
-	}
-	if cur.Len() > 0 {
-		out = append(out, cur.String())
-	}
-	return out
 }
 
 // changedGoFiles lists .go files changed by base...HEAD, excluding *_test.go

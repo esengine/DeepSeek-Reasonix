@@ -12,6 +12,7 @@ export function ComposerContextCard({
   removeDisabled = false,
   removeIconSize,
   previewUrl,
+  onImageClick,
   imageOnly = false,
   folder = false,
   name,
@@ -26,6 +27,8 @@ export function ComposerContextCard({
   removeDisabled?: boolean;
   removeIconSize?: number;
   previewUrl?: string;
+  /** called when the image thumbnail is clicked (only for image attachments with previewUrl) */
+  onImageClick?: () => void;
   imageOnly?: boolean;
   folder?: boolean;
   name?: string;
@@ -46,7 +49,13 @@ export function ComposerContextCard({
       <Tooltip label={tooltipLabel}>
         <span className="composer-context__label">
           {previewUrl ? (
-            <span className="composer-context__thumb">
+            <span
+              className={`composer-context__thumb${onImageClick ? " composer-context__thumb--interactive" : ""}`}
+              onClick={onImageClick}
+              role={onImageClick ? "button" : undefined}
+              tabIndex={onImageClick ? 0 : undefined}
+              onKeyDown={onImageClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onImageClick(); } } : undefined}
+            >
               <img src={previewUrl} alt="" draggable={false} />
             </span>
           ) : variant === "attachment" ? (

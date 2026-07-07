@@ -122,7 +122,7 @@ api_key_env = "PROJECT_API_KEY"
 	if !got.Supported || got.Current != "auto" || got.Default != "high" {
 		t.Fatalf("EffortForTab model registry = %+v, want supported auto/high", got)
 	}
-	wantLevels := []string{"auto", "high", "max"}
+	wantLevels := []string{"auto", "disabled", "high", "max"}
 	if len(got.Levels) != len(wantLevels) {
 		t.Fatalf("levels = %v, want %v", got.Levels, wantLevels)
 	}

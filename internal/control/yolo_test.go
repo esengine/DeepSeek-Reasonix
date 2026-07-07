@@ -11,6 +11,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/permission"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
 
@@ -71,7 +72,7 @@ func TestAutoApproveToolsStillAutoPlansAndRequiresPlanApproval(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("approved plan did not continue into execution")
 	}
-	if got := firstUserMessage(ag.Session().Messages); !strings.HasPrefix(got, PlanModeMarker) {
+	if got := agent.StripTransientUserBlocks(firstUserMessage(ag.Session().Messages)); !strings.HasPrefix(got, PlanModeMarker) {
 		t.Fatalf("first model input = %q, want the auto-plan marker prefixed", got)
 	}
 	if c.PlanMode() {
@@ -208,6 +209,22 @@ func TestToolApprovalModeAutoForcesMemoryAskRules(t *testing.T) {
 		if got := gate.Policy.Decide(toolName, false, json.RawMessage(`{}`)); got != permission.Ask {
 			t.Fatalf("%s under auto mode = %v, want ask", toolName, got)
 		}
+	}
+}
+
+func TestToolApprovalModeYoloForcesMemoryAskRules(t *testing.T) {
+	c := New(Options{})
+	c.SetToolApprovalMode(ToolApprovalYolo)
+
+	gate := c.newInteractiveGate()
+	for _, toolName := range []string{"remember", "forget"} {
+		if got := gate.Policy.Decide(toolName, false, json.RawMessage(`{}`)); got != permission.Ask {
+			t.Fatalf("%s under yolo mode = %v, want ask", toolName, got)
+		}
+	}
+	// Verify that regular tools ARE auto-allowed in YOLO (sanity check).
+	if got := gate.Policy.Decide("bash", false, json.RawMessage(`{"command":"go test ./..."}`)); got != permission.Allow {
+		t.Fatalf("regular tool under yolo mode = %v, want allow", got)
 	}
 }
 
@@ -414,6 +431,75 @@ func TestSetAutoApproveToolsAllowsPendingApproval(t *testing.T) {
 	}
 }
 
+func TestSandboxEscapeApprovalIgnoresAutoApproveTools(t *testing.T) {
+	approvalRequests := make(chan event.Approval, 1)
+	c := New(Options{
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.ApprovalRequest {
+				approvalRequests <- e.Approval
+			}
+		}),
+	})
+	c.SetAutoApproveTools(true)
+
+	type escapeResult struct {
+		allow  bool
+		reason string
+		err    error
+	}
+	done := make(chan escapeResult, 1)
+	go func() {
+		allow, reason, err := sandboxEscapeApprover{c}.ApproveSandboxEscape(context.Background(), sandbox.EscapeRequest{
+			Command: "go test ./...",
+			Reason:  "Windows sandbox failed. Run this command unconfined once?",
+		})
+		done <- escapeResult{allow: allow, reason: reason, err: err}
+	}()
+
+	var approval event.Approval
+	select {
+	case approval = <-approvalRequests:
+	case <-time.After(2 * time.Second):
+		t.Fatal("sandbox escape approval request was not emitted")
+	}
+	if approval.Tool != SandboxEscapeApprovalTool {
+		t.Fatalf("approval tool = %q, want %q", approval.Tool, SandboxEscapeApprovalTool)
+	}
+
+	c.SetAutoApproveTools(true)
+	select {
+	case got := <-done:
+		t.Fatalf("tool auto-approval must not answer sandbox escape; got %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	c.Approve(approval.ID, true, true, true)
+	select {
+	case got := <-done:
+		if got.err != nil || !got.allow || got.reason != "" {
+			t.Fatalf("sandbox escape result = %+v, want allowed without reason/error", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("sandbox escape approval stayed blocked after Approve")
+	}
+
+	if !(sandboxEscapeApprover{c}).SandboxEscapeSessionAllowed(context.Background(), sandbox.EscapeRequest{Command: "npm test"}) {
+		t.Fatal("sandbox escape session checker = false, want true after session grant")
+	}
+	allow, reason, err := sandboxEscapeApprover{c}.ApproveSandboxEscape(context.Background(), sandbox.EscapeRequest{
+		Command: "npm test",
+		Reason:  "Windows sandbox failed. Run this command unconfined once?",
+	})
+	if err != nil || !allow || reason != "" {
+		t.Fatalf("sandbox escape session grant result = (%v,%q,%v), want allow", allow, reason, err)
+	}
+	select {
+	case approval := <-approvalRequests:
+		t.Fatalf("sandbox escape session grant emitted another approval: %+v", approval)
+	default:
+	}
+}
+
 func TestSetAutoApproveToolsDoesNotDrainPendingPlanApproval(t *testing.T) {
 	approvalRequests := make(chan event.Approval, 1)
 	c := New(Options{
@@ -521,6 +607,64 @@ func TestSetAutoApproveToolsDoesNotDrainPendingMCPReadOnlyTrust(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("MCP read-only trust approval stayed blocked after Approve")
+	}
+}
+
+func TestSetAutoApproveToolsDoesNotDrainPendingPlanModeReadOnlyCommandTrust(t *testing.T) {
+	approvalRequests := make(chan event.Approval, 1)
+	c := New(Options{
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.ApprovalRequest {
+				approvalRequests <- e.Approval
+			}
+		}),
+	})
+
+	type trustResult struct {
+		allow  bool
+		reason string
+		err    error
+	}
+	done := make(chan trustResult, 1)
+	req := agent.PlanModeReadOnlyTrustRequest{
+		ToolName: agent.PlanModeReadOnlyCommandApprovalTool,
+		Command:  "gh issue view 5867",
+		Prefix:   "gh issue view",
+	}
+	go func() {
+		allow, reason, err := planModeReadOnlyTrustApprover{c}.CheckPlanModeReadOnlyTrust(context.Background(), req)
+		done <- trustResult{allow: allow, reason: reason, err: err}
+	}()
+
+	var approval event.Approval
+	select {
+	case approval = <-approvalRequests:
+	case <-time.After(2 * time.Second):
+		t.Fatal("plan-mode bash read-only command trust approval request was not emitted")
+	}
+	if approval.Tool != agent.PlanModeReadOnlyCommandApprovalTool {
+		t.Fatalf("approval tool = %q, want %q", approval.Tool, agent.PlanModeReadOnlyCommandApprovalTool)
+	}
+
+	c.SetAutoApproveTools(true)
+
+	select {
+	case got := <-done:
+		t.Fatalf("SetAutoApproveTools must not auto-answer plan-mode bash read-only command trust; got %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if !c.AutoApproveTools() {
+		t.Fatal("tool auto-approval should turn on while plan-mode bash read-only command trust stays pending")
+	}
+
+	c.Approve(approval.ID, true, false, false)
+	select {
+	case got := <-done:
+		if got.err != nil || !got.allow || got.reason != "" {
+			t.Fatalf("manual plan-mode bash read-only command trust approval = %+v, want allow", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("plan-mode bash read-only command trust approval stayed blocked after Approve")
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -71,6 +72,30 @@ func (s *snapshotObservingSession) Snapshot() error {
 		s.onSnapshot()
 	}
 	return nil
+}
+
+func expectAppMutexAvailableDuringSnapshot(t *testing.T, app *App, checks chan<- struct{}) func() {
+	t.Helper()
+	return func() {
+		acquired := make(chan struct{})
+		go func() {
+			app.mu.Lock()
+			app.mu.Unlock() //nolint:staticcheck // probe: lock must be immediately acquirable
+			close(acquired)
+		}()
+		select {
+		case <-acquired:
+		case <-time.After(500 * time.Millisecond):
+			t.Error("Snapshot ran while holding app mutex")
+		}
+		if checks == nil {
+			return
+		}
+		select {
+		case checks <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func TestListTabsKeepsExplicitOrderWhenActiveChanges(t *testing.T) {
@@ -179,6 +204,90 @@ func TestKeepOnlyVisibleTabDetachesRunningHiddenTab(t *testing.T) {
 	close(runner.release)
 	waitNotRunning(t, ctrl)
 	ctrl.Close()
+}
+
+func TestKeepOnlyVisibleTabSnapshotsHiddenTabWithoutAppLock(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	app := &App{
+		tabs:        map[string]*WorkspaceTab{},
+		tabOrder:    []string{"hidden", "target"},
+		activeTabID: "hidden",
+	}
+	snapshotChecks := make(chan struct{}, 2)
+	hiddenCtrl := &snapshotObservingSession{
+		SessionAPI: control.New(control.Options{Label: "hidden"}),
+		onSnapshot: expectAppMutexAvailableDuringSnapshot(t, app, snapshotChecks),
+	}
+	hidden := &WorkspaceTab{
+		ID:            "hidden",
+		Scope:         "global",
+		WorkspaceRoot: globalTabWorkspaceRoot(),
+		TopicID:       "topic-hidden",
+		Ctrl:          hiddenCtrl,
+		Ready:         true,
+		sink:          &tabEventSink{tabID: "hidden"},
+		disabledMCP:   map[string]ServerView{},
+	}
+	target := &WorkspaceTab{
+		ID:          "target",
+		Scope:       "global",
+		Ready:       true,
+		disabledMCP: map[string]ServerView{},
+	}
+	app.tabs["hidden"] = hidden
+	app.tabs["target"] = target
+
+	if _, err := app.keepOnlyVisibleTab("target"); err != nil {
+		t.Fatalf("keepOnlyVisibleTab: %v", err)
+	}
+	select {
+	case <-snapshotChecks:
+	case <-time.After(time.Second):
+		t.Fatal("hidden tab was not snapshotted before pruning")
+	}
+	assertTabIDs(t, app.ListTabs(), "target")
+}
+
+func TestCloseTabSnapshotsWithoutAppLock(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	app := &App{
+		tabs:        map[string]*WorkspaceTab{},
+		tabOrder:    []string{"closing", "survivor"},
+		activeTabID: "closing",
+	}
+	snapshotChecks := make(chan struct{}, 1)
+	closingCtrl := &snapshotObservingSession{
+		SessionAPI: control.New(control.Options{Label: "closing"}),
+		onSnapshot: expectAppMutexAvailableDuringSnapshot(t, app, snapshotChecks),
+	}
+	closing := &WorkspaceTab{
+		ID:            "closing",
+		Scope:         "global",
+		WorkspaceRoot: globalTabWorkspaceRoot(),
+		TopicID:       "topic-closing",
+		Ctrl:          closingCtrl,
+		Ready:         true,
+		sink:          &tabEventSink{tabID: "closing"},
+		disabledMCP:   map[string]ServerView{},
+	}
+	survivor := &WorkspaceTab{
+		ID:          "survivor",
+		Scope:       "global",
+		Ready:       true,
+		disabledMCP: map[string]ServerView{},
+	}
+	app.tabs["closing"] = closing
+	app.tabs["survivor"] = survivor
+
+	if err := app.CloseTab("closing"); err != nil {
+		t.Fatalf("CloseTab: %v", err)
+	}
+	select {
+	case <-snapshotChecks:
+	case <-time.After(time.Second):
+		t.Fatal("closing tab was not snapshotted")
+	}
+	assertTabIDs(t, app.ListTabs(), "survivor")
 }
 
 func TestKeepOnlyVisibleTabCancelsBuildingHiddenTab(t *testing.T) {
@@ -292,6 +401,60 @@ func TestClearTabBuildCancelCancelsAbandonedBuildContext(t *testing.T) {
 	}
 }
 
+func TestEnsureSessionLeaseSerializesConcurrentSameTabAcquire(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := filepath.Join(dir, "same-tab-concurrent-lease.jsonl")
+	tab := &WorkspaceTab{ID: "tab"}
+	t.Cleanup(tab.releaseSessionLease)
+
+	acquired := make(chan struct{})
+	releaseHook := make(chan struct{})
+	var once sync.Once
+	sessionLeaseAcquireHookForTest = func() {
+		once.Do(func() {
+			close(acquired)
+			<-releaseHook
+		})
+	}
+	t.Cleanup(func() { sessionLeaseAcquireHookForTest = nil })
+
+	firstErr := make(chan error, 1)
+	go func() {
+		firstErr <- tab.ensureSessionLease(path)
+	}()
+
+	select {
+	case <-acquired:
+	case err := <-firstErr:
+		t.Fatalf("first ensureSessionLease returned before hook: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("first ensureSessionLease did not acquire lease")
+	}
+
+	secondErr := make(chan error, 1)
+	go func() {
+		secondErr <- tab.ensureSessionLease(path)
+	}()
+
+	select {
+	case err := <-secondErr:
+		t.Fatalf("second ensureSessionLease returned while first acquire was unbound: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(releaseHook)
+	if err := <-firstErr; err != nil {
+		t.Fatalf("first ensureSessionLease: %v", err)
+	}
+	if err := <-secondErr; err != nil {
+		t.Fatalf("second ensureSessionLease should reuse the tab lease: %v", err)
+	}
+}
+
 func TestAttachExistingSessionRuntimeSkipsRemovedTab(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := config.SessionDir()
@@ -398,6 +561,38 @@ func TestRemoveWorkspaceSnapshotsProjectTabBeforeRemovingBinding(t *testing.T) {
 	}
 }
 
+func TestRemoveWorkspaceSnapshotsProjectTabWithoutAppLock(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	projectRoot := t.TempDir()
+	if err := addProject(projectRoot, "Project"); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"project": {ID: "project", Scope: "project", WorkspaceRoot: projectRoot, TopicID: "topic-project", Ready: true, disabledMCP: map[string]ServerView{}},
+			"global":  {ID: "global", Scope: "global", WorkspaceRoot: globalTabWorkspaceRoot(), TopicID: "topic-global", Ready: true, disabledMCP: map[string]ServerView{}},
+		},
+		tabOrder:         []string{"project", "global"},
+		activeTabID:      "project",
+		detachedSessions: map[string]*WorkspaceTab{},
+	}
+	snapshotChecks := make(chan struct{}, 1)
+	app.tabs["project"].Ctrl = &snapshotObservingSession{
+		SessionAPI: control.New(control.Options{Label: "project"}),
+		onSnapshot: expectAppMutexAvailableDuringSnapshot(t, app, snapshotChecks),
+	}
+
+	if err := app.RemoveWorkspace(projectRoot); err != nil {
+		t.Fatalf("RemoveWorkspace: %v", err)
+	}
+	select {
+	case <-snapshotChecks:
+	case <-time.After(time.Second):
+		t.Fatal("project tab was not snapshotted before removing workspace")
+	}
+	assertTabIDs(t, app.ListTabs(), "global")
+}
+
 func TestRemoveWorkspaceRejectsRunningProjectRuntime(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	projectRoot := t.TempDir()
@@ -453,12 +648,16 @@ func TestListTabsRepairsStaleOrderWithoutRacing(t *testing.T) {
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	errs := make(chan string, 8)
+	iterations := 100
+	if testing.Short() {
+		iterations = 5
+	}
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			<-start
-			for j := 0; j < 100; j++ {
+			for j := 0; j < iterations; j++ {
 				if got := strings.Join(tabIDs(app.ListTabs()), ","); got != "a,b,c" {
 					errs <- got
 					return
@@ -676,6 +875,49 @@ func TestBuildTabControllerReusesOpenSessionPathRuntime(t *testing.T) {
 	}
 	if _, ok := app.tabs[oldTab.ID]; ok {
 		t.Fatal("source tab for reused runtime should be removed")
+	}
+}
+
+func TestBuildTabControllerBlocksWhenSessionLeaseHeld(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := desktopSessionDir(globalTabWorkspaceRoot())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := filepath.Join(dir, "leased.jsonl")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("write placeholder session: %v", err)
+	}
+	lease, err := agent.TryAcquireSessionLease(path)
+	if err != nil {
+		t.Fatalf("TryAcquireSessionLease: %v", err)
+	}
+	defer lease.Release()
+
+	app := NewApp()
+	tab := app.createTabEntryWithID("global", globalTabWorkspaceRoot(), "", "leased")
+	tab.SessionPath = path
+	tab.sink = &tabEventSink{tabID: "leased", app: app}
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	app.buildTabController(tab)
+	if tab.Ctrl != nil {
+		t.Fatalf("tab controller = %T, want nil when lease is held", tab.Ctrl)
+	}
+	if !tab.Ready {
+		t.Fatal("tab should be ready with startup error")
+	}
+	// The surfaced startup error is the sanitized busy message: the raw lease
+	// error would leak the session path and the holder's host-pid-writer id
+	// into the topbar banner.
+	if !strings.Contains(tab.StartupErr, "already open in another Reasonix window") {
+		t.Fatalf("startup error = %q, want user-facing busy message", tab.StartupErr)
+	}
+	if strings.Contains(tab.StartupErr, agent.ErrSessionLeaseHeld.Error()) ||
+		strings.Contains(tab.StartupErr, path) {
+		t.Fatalf("startup error leaked raw lease details: %q", tab.StartupErr)
 	}
 }
 

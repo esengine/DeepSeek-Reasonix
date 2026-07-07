@@ -64,6 +64,53 @@ func TestFetchModelsSendsCustomHeaders(t *testing.T) {
 	}
 }
 
+func TestFetchModelsWithOptionsUsesXAPIKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("x-api-key"); got != "anthropic-key" {
+			http.Error(w, `{"error":"missing x-api-key"}`, http.StatusUnauthorized)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "" {
+			http.Error(w, `{"error":"unexpected bearer"}`, http.StatusUnauthorized)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]string{{"id": "anthropic-model"}},
+		})
+	}))
+	defer srv.Close()
+
+	models, err := FetchModelsWithOptions(context.Background(), srv.URL, "anthropic-key", FetchModelsOptions{
+		AuthMode: ModelFetchAuthXAPIKey,
+	})
+	if err != nil {
+		t.Fatalf("FetchModelsWithOptions: %v", err)
+	}
+	if len(models) != 1 || models[0] != "anthropic-model" {
+		t.Fatalf("models = %v, want [anthropic-model]", models)
+	}
+}
+
+func TestApplyAPIKeyHeaderUsesMiMoAPIKeyHeader(t *testing.T) {
+	h := http.Header{}
+	applyAPIKeyHeader(h, "https://api.xiaomimimo.com/v1", "mimo-key")
+	if got := h.Get("api-key"); got != "mimo-key" {
+		t.Fatalf("api-key = %q, want mimo-key", got)
+	}
+	if got := h.Get("Authorization"); got != "" {
+		t.Fatalf("Authorization = %q, want omitted for MiMo", got)
+	}
+
+	h = http.Header{}
+	applyAPIKeyHeader(h, "https://api.deepseek.com", "deepseek-key")
+	if got := h.Get("Authorization"); got != "Bearer deepseek-key" {
+		t.Fatalf("Authorization = %q, want Bearer deepseek-key", got)
+	}
+	if got := h.Get("api-key"); got != "" {
+		t.Fatalf("api-key = %q, want omitted for standard OpenAI-compatible providers", got)
+	}
+}
+
 func TestFetchModelsAuthError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":{"message":"invalid key"}}`, http.StatusUnauthorized)

@@ -169,8 +169,11 @@ time.
 The controller treats these tools like plan approval:
 
 - Auto approval and YOLO/full-access mode do not bypass them.
+- Guardian/safety review cannot allow them on the user's behalf.
 - Session grants and persistent allow rules are not created for them.
 - Pending memory approvals are not drained when the user toggles auto approval.
+- Non-interactive headless runs and sub-agents refuse them instead of treating
+  `Ask` as autonomous allow.
 
 The approval subject is generated from the tool arguments before the
 `ApprovalRequest` event is emitted:

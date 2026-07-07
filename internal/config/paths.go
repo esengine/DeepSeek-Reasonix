@@ -102,6 +102,9 @@ func userConfigCandidatePaths() []string {
 }
 
 func legacyXDGConfigPaths() []string {
+	if IsolatedHomeDir() != "" {
+		return nil
+	}
 	if runtimeGOOS == "windows" {
 		return nil
 	}
@@ -135,6 +138,9 @@ func userSupportDir() string {
 }
 
 func legacyOSSupportDir() string {
+	if IsolatedHomeDir() != "" {
+		return ""
+	}
 	dir := osUserConfigDir()
 	if dir == "" {
 		return ""
@@ -149,6 +155,9 @@ func legacyOSSupportDir() string {
 func userCacheDir() string {
 	if dir := cleanEnvDir("REASONIX_CACHE_HOME"); dir != "" {
 		return dir
+	}
+	if dir := cleanEnvDir("REASONIX_HOME"); dir != "" {
+		return filepath.Join(dir, "cache")
 	}
 	dir, err := os.UserCacheDir()
 	if err != nil {
@@ -193,6 +202,14 @@ func samePath(a, b string) bool {
 		b = bb
 	}
 	return filepath.Clean(a) == filepath.Clean(b)
+}
+
+// IsolatedHomeDir returns the REASONIX_HOME directory when it has been
+// explicitly set via the environment variable. A non-empty return signals a
+// self-contained runtime that must not fall back to legacy OS-default data
+// paths or import data from the system-wide production install.
+func IsolatedHomeDir() string {
+	return cleanEnvDir("REASONIX_HOME")
 }
 
 // userConfigDisplayPath is userConfigPath collapsed to a ~-relative form for
@@ -258,7 +275,7 @@ func ReasonixHomeDir() string { return reasonixHomeDir() }
 // the user saved through setup or settings. "" when Reasonix home can't be
 // resolved.
 func UserCredentialsPath() string {
-	dir := userSupportDir()
+	dir := reasonixHomeDir()
 	if dir == "" {
 		return ""
 	}

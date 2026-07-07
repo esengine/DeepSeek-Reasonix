@@ -40,6 +40,7 @@ func (m chatTUI) confirmClearContext() (tea.Model, tea.Cmd) {
 		m.notice(fmt.Sprintf("%s: %v", i18n.M.SlashClearFailed, err))
 		return m, nil
 	}
+	m.followSessionLease()
 	m.resetFreshContextView(true)
 	m.notice(i18n.M.SlashClearDone)
 	return m, tea.ClearScreen

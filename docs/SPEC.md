@@ -226,8 +226,11 @@ Long tasks eventually fill the model's context window. Reasonix manages this wit
   history when exact original wording or tool output matters.
 - Agent-initiated `remember` and `forget` calls require a fresh human approval
   each time, even when tool auto-approval or YOLO/full-access mode is enabled.
-  The approval request includes a compact preview of the memory being saved or
-  archived, while external notification hooks only receive the tool name.
+  Guardian/safety review cannot answer these prompts on the user's behalf. In
+  non-interactive headless runs or sub-agents, these tools are refused rather
+  than auto-approved. The approval request includes a compact preview of the
+  memory being saved or archived, while external notification hooks only receive
+  the tool name.
   User-initiated memory edits in the local UI are already explicit user actions.
   See [`SESSION_MEMORY_RETRIEVAL.md`](SESSION_MEMORY_RETRIEVAL.md) for the
   detailed implementation contract.
@@ -313,8 +316,16 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   decision: `auto`, `yolo`, and the approved-plan execution window do not answer
   it, but an explicit session grant still prevents repeat prompts for the same
   tool. Non-interactive sessions and declined approvals remain fail-closed.
-  Writers, installers, memory mutation, process
-  control, and `complete_step` (read-only yet post-approval only, so it
+  Bash is gated separately: built-in read-only commands and concrete prefixes
+  declared in `[agent].plan_mode_read_only_commands` may run. Interactive
+  controllers may also ask once before running an unknown query-shaped prefix
+  and may remember a persistent approval as the same
+  `plan_mode_read_only_commands` entry. This bash trust prompt is also a fresh
+  user decision: `auto`, `yolo`, and the approved-plan execution window do not
+  answer it, while explicit session/persistent trust prevents repeat prompts for
+  that prefix. Shell operators, background execution, shell interpreters, and
+  unsafe arguments stay blocked while planning. Writers, installers, memory
+  mutation, process control, and `complete_step` (read-only yet post-approval only, so it
   self-reports plan-unsafe) are refused; the enforced invariant is
   PlanSafe ⇒ ReadOnly. An untrusted read-only MCP/plugin tool is therefore
   blocked until the user approves or pre-trusts it, and it is excluded from
@@ -351,7 +362,17 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   model reports completion, repeats the same blocked state three times, the user
   stops it, or the safety continuation limit is reached. Blocked-state matching
   is normalized for casing, whitespace, and punctuation so minor wording drift
-  does not reset the audit; restarting a goal begins a fresh blocked audit.
+  does not reset the audit; restarting a goal begins a fresh blocked audit. A
+  goal is treated as a task contract: if the objective includes Context,
+  Request, Output format, Constraints, or Pause policy sections, those sections
+  define the autonomous work boundary. When they are absent, the model infers a
+  lightweight contract from the conversation and workspace. The injected goal
+  block tells the model to pause only for irreversible or externally visible
+  operations, scope changes, or information only the user can provide; ordinary
+  uncertainty should be handled with sensible defaults and reported as an
+  assumption. Completion requires the concrete request, output format,
+  constraints, and relevant verification expectations to be satisfied or
+  explicitly reported as unverified.
   Goals that look like long-horizon research, debugging, optimization, or
   implementation work automatically add an AutoResearch protocol to the same
   transient active-goal user block. AutoResearch is a Goal strategy, not a
@@ -520,6 +541,7 @@ memory_compiler = { enabled = true, verbosity = "observe" }   # user/global only
 reasoning_language = "auto"       # visible reasoning text: auto|zh|en
 # plan_mode_allowed_tools = ["custom_reader"]   # extra read-only declarations for custom tools;
 #                                                # cannot unlock known blocked tools or unsafe bash
+# plan_mode_read_only_commands = ["gh issue view", "gh pr diff"]   # extra read-only shell prefixes for plan mode
 # planner_model = "deepseek-pro"   # optional: two-model collaboration (low-frequency planner)
 # subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
@@ -632,12 +654,36 @@ by default (root = cwd), so edits stay in the project while the agent can still
 update its own global config. `forbid_read` lists directories the agent should
 not read, list, or search; entries support `${VAR}` / `${VAR:-default}` expansion
 and should be absolute, or use `${HOME}` for home-relative secrets such as
-`${HOME}/.ssh`. `bash` is itself jailed on macOS by default
-(`[sandbox] bash = "enforce"`, Seatbelt): each command runs under sandbox-exec
-allowed to write only the same roots (+ temp and toolchain caches), denied reads
-under `forbid_read`, and allowed to reach the network only when `network = true`.
-Unsupported platforms fall back to running unconfined when no OS sandbox is
-available. The escape-prompt and Linux support are Phase 1's remainder (§9).
+`${HOME}/.ssh`. `bash` is itself jailed by default when an OS sandbox is
+available (`[sandbox] bash = "enforce"`: Seatbelt on macOS, bubblewrap on
+Linux, and a native helper on Windows): each command is allowed to write only
+the same roots plus platform-specific command temp/cache roots, denied reads
+under `forbid_read`, and allowed to reach the network only when
+`network = true`.
+The native Windows helper uses Reasonix's bundled Windows sandbox backend:
+AppContainer for read-only commands and a low-integrity token for writable
+commands, with temporary ACL grants for
+writable roots and tool executables, a per-command temp root instead of mutating
+the global Temp directory, temporary deny ACEs for `forbid_read` (files and
+directories), best-effort restoration from pre-run DACL snapshots for touched
+directories, and a kill-on-close Job Object. Because the sandbox works by
+temporarily mutating shared-path ACLs and integrity labels, concurrent commands
+against the same root are serialized with a per-root lock, and residue from a
+force-killed command (a lingering low-integrity label or `forbid_read` deny ACE)
+is swept by the next run so a crash cannot durably lower a workspace's integrity
+or lock the user out of a `forbid_read` path. A writable command runs under a
+low-integrity token, so beyond the configured roots it retains write access to
+the narrow set of locations Windows leaves writable to any low-integrity process
+(e.g. `AppData\LocalLow`); the workspace boundary and `forbid_read` denials are
+unaffected. Read-only AppContainer commands omit network capabilities when
+networking is disabled; writable Windows commands fail closed when
+`network = false` because the low-integrity token does not provide a reliable
+per-process network block without elevated firewall/WFP setup.
+When no OS sandbox is available, `bash = "enforce"` refuses bash execution
+instead of running unconfined. Install the platform sandbox backend
+(bubblewrap/`bwrap` on Linux, `sandbox-exec` on macOS) or set
+`[sandbox] bash = "off"` to explicitly restore the pre-1.16 unconfined shell
+behavior. The escape-prompt and broader OS support are Phase 1's remainder (§9).
 
 ## 6. Error Handling
 
@@ -664,13 +710,16 @@ available. The escape-prompt and Linux support are Phase 1's remainder (§9).
 ## 9. Roadmap (not in current scope)
 
 - Sandbox Phase 1: an OS-level jail for `bash` so commands — not just the
-  file-writer built-ins (Phase 0) — are confined to the workspace. **macOS
-  (Seatbelt via `sandbox-exec`) ships, on by default** (see §5). Remaining: (a)
-  the escape-prompt — detect a sandbox-denied failure and offer to re-run the
-  command unconfined via the permission gate (in `reasonix run`, the command just
-  fails and the model adapts), which completes the "allow inside the box, prompt
-  at its edge" model; (b) Linux (bubblewrap / landlock). Shells out to OS tooling
-  so the binary stays dependency-free; Windows is out of scope. With this in
+  file-writer built-ins (Phase 0) — are confined to the workspace. **Seatbelt on
+  macOS, bubblewrap on Linux, and a native Windows helper ship, on by default
+  when available** (see §5).
+  Remaining: (a)
+  the escape-prompt — detect sandbox-unavailable or sandbox-denied failures and
+  offer an explicit, permission-gated unconfined rerun (in `reasonix run`, the
+  command just fails and the model adapts), which completes the "allow inside the
+  box, prompt at its edge" model; (b) an optional elevated Windows backend with a
+  dedicated sandbox user for enterprise hardening. Shells out to OS tooling so
+  the binary stays dependency-free. With this in
   place, "always allow" rule persistence becomes optional rather than load-bearing.
 - MCP long tail (deferred deliberately — no consumer / no foundation yet): OAuth
   2.0 + `headersHelper` auth for remote servers; the remaining `.mcp.json` scopes

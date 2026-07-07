@@ -42,9 +42,9 @@ func TestBoundArrayPayloadsAreNonNilBeforeStartup(t *testing.T) {
 	if got := app.HooksSettings("global"); got.Hooks == nil || got.Events == nil {
 		t.Fatalf("HooksSettings(global) arrays = hooks:%v events:%v, want non-nil", got.Hooks, got.Events)
 	}
-	if got := app.Settings(); got.Providers == nil || got.OfficialProviders == nil || got.ProviderKinds == nil ||
+	if got := app.Settings(); got.Providers == nil || got.OfficialProviders == nil || got.ProviderPresets == nil || got.ProviderKinds == nil ||
 		got.Permissions.Allow == nil || got.Permissions.Ask == nil || got.Permissions.Deny == nil ||
-		got.Sandbox.AllowWrite == nil ||
+		got.Sandbox.AllowWrite == nil || got.Sandbox.EffectiveWriteRoots == nil ||
 		got.Bot.Allowlist.QQUsers == nil || got.Bot.Allowlist.FeishuUsers == nil || got.Bot.Allowlist.WeixinUsers == nil ||
 		got.Bot.Allowlist.QQGroups == nil || got.Bot.Allowlist.FeishuGroups == nil || got.Bot.Allowlist.WeixinGroups == nil {
 		t.Fatalf("Settings() contains nil array fields: %+v", got)

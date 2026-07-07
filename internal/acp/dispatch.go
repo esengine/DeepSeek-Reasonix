@@ -9,6 +9,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/permission"
 	"reasonix/internal/provider"
@@ -251,8 +252,6 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 				allow = true
 			case OptAllowAlways:
 				allow, session = true, true
-			case OptAllowPersistent:
-				allow, session, persist = true, true, true
 			}
 		}
 	}
@@ -331,18 +330,32 @@ func (s *updateSink) requestAskQuestion(ctx context.Context, askID string, q eve
 	return label, ok
 }
 
-func approvalOptionNames(tool, subject string) (session, persistent string) {
+func approvalSessionOptionName(tool, subject string) string {
+	if tool == control.SandboxEscapeApprovalTool {
+		return "Use real environment for this session"
+	}
 	sessionRule := permission.SessionGrantRuleForScope(tool, subject)
-	persistentRule := permission.RememberRuleForScope(tool, subject)
-	return "Allow " + sessionRule + " for this session", "Always allow " + persistentRule + " (save to config)"
+	return "Allow " + sessionRule + " for this session"
 }
 
 func approvalOptions(tool, subject string) []PermissionOption {
-	allowSessionName, allowPersistentName := approvalOptionNames(tool, subject)
+	if control.RequiresFreshHumanApprovalTool(tool) {
+		if tool == control.SandboxEscapeApprovalTool {
+			return []PermissionOption{
+				{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},
+				{OptionID: string(OptAllowAlways), Name: approvalSessionOptionName(tool, subject), Kind: OptAllowAlways},
+				{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce},
+			}
+		}
+		return []PermissionOption{
+			{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},
+			{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce},
+		}
+	}
+	allowSessionName := approvalSessionOptionName(tool, subject)
 	options := []PermissionOption{
 		{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},
 		{OptionID: string(OptAllowAlways), Name: allowSessionName, Kind: OptAllowAlways},
-		{OptionID: string(OptAllowPersistent), Name: allowPersistentName, Kind: OptAllowPersistent},
 		{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce},
 	}
 	return options
@@ -386,6 +399,8 @@ func toolKindFor(name string) string {
 	case "edit_file", "move_file", "multiedit", "write_file":
 		return "edit"
 	case "bash":
+		return "execute"
+	case control.SandboxEscapeApprovalTool:
 		return "execute"
 	}
 	n := strings.ToLower(name)

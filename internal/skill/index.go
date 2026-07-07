@@ -3,6 +3,8 @@ package skill
 import (
 	"fmt"
 	"strings"
+
+	"reasonix/internal/textutil"
 )
 
 // IndexMaxChars caps the pinned skills-index block so it can't bloat the
@@ -17,7 +19,7 @@ const indexHeader = "# Skills — playbooks you can invoke\n\n" +
 	"One-liner index. Before non-trivial work, scan it: if an untagged (inline) skill is even plausibly relevant to the task, invoke it before continuing instead of pre-judging — loading one imperfect inline skill is cheap. Skills tagged `[🧬 subagent]` are the heavy path; reach for them only when the task genuinely needs context-heavy work, not on weak relevance. Each entry is a built-in or a user-authored playbook. Call `run_skill({ name: \"<skill-name>\", arguments: \"<task>\" })` — `name` is JUST the identifier (e.g. `\"explore\"`), NOT the `[🧬 subagent]` tag that follows it. Prefer the dedicated top-level tool when one exists for a built-in subagent skill. Entries tagged `[🧬 subagent]` spawn an isolated subagent — its tool calls and reasoning never enter your context, only its final answer does; use them for context-heavy work (deep exploration, multi-step research) where you only need the conclusion. Untagged skills are inlined: the body becomes a tool result you read and act on directly. The user can also invoke a skill via `/<name>`."
 
 const readOnlyIndexHeader = "# Skills — read-only playbooks you can invoke\n\n" +
-	"One-liner index for the narrow read-only skill surface. Call `read_only_skill({ name: \"<skill-name>\", arguments: \"<task>\" })` — `name` is JUST the identifier, NOT the `[🧬 subagent]` tag. Inline skills are loaded into context. Skills tagged `[🧬 subagent]` run in an isolated ephemeral read-only subagent with only read-only research tools and safe foreground bash; no writes, installers, memory mutation, continuation/fork, background jobs, or further delegation are available."
+	"One-liner index for the narrow read-only skill surface. Call `read_only_skill({ name: \"<skill-name>\", arguments: \"<task>\" })` — `name` is JUST the identifier, NOT the `[🧬 subagent]` tag. Inline skills are loaded into context. Skills tagged `[🧬 subagent]` run in an isolated ephemeral read-only subagent with only read-only research tools and safe foreground bash; no writes, installers, memory mutation, continuation/fork, background jobs, or writer-capable delegation are available. Read-only nested delegation may be available until max_subagent_depth is reached."
 
 // IndexBlock renders the system/tool-result skills listing without attaching it
 // to a base prompt. Only names + descriptions (+ a subagent tag) are listed;
@@ -78,18 +80,8 @@ func indexLine(sk Skill) string {
 	return "- " + sk.Name + tag + " — " + clipped
 }
 
-// clipRunes truncates s to at most max runes (ellipsis included), never
-// splitting a multi-byte rune.
+// clipRunes preserves the historical name but clips by grapheme clusters so
+// combined emoji and other user-visible characters stay intact.
 func clipRunes(s string, max int) string {
-	if max < 1 {
-		max = 1
-	}
-	r := []rune(s)
-	if len(r) <= max {
-		return s
-	}
-	if max-1 < 1 {
-		return string(r[:1])
-	}
-	return string(r[:max-1]) + "…"
+	return textutil.ClipGraphemes(s, max, "…")
 }

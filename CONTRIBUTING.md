@@ -63,6 +63,37 @@ make hooks          # install git hooks (pre-push: go vet)
 make cross          # cross-compile for all 6 targets
 ```
 
+### Isolated development environment
+
+A source-built binary shares no on-disk state with a stable release when launched
+with `REASONIX_HOME` set. This gives each build its own self-contained directory
+tree — config, credentials, sessions, cache, skills, commands, hooks, and
+desktop tab state — so the two builds never interfere:
+
+**CLI**
+
+```bash
+REASONIX_HOME=/tmp/reasonix-dev go run ./cmd/reasonix
+# or after building:
+#   REASONIX_HOME=/tmp/reasonix-dev ./bin/reasonix
+```
+
+**Desktop**
+
+```bash
+cd desktop && wails build
+REASONIX_HOME=/tmp/reasonix-dev-isolated build/bin/reasonix-desktop
+```
+
+On Windows, use `$env:REASONIX_HOME` in PowerShell or `set REASONIX_HOME=` in
+Command Prompt; the binary extension is `.exe`.
+
+The directory is empty on first launch; the app behaves exactly like a fresh
+install. Every subsequent write — config saves, credential storage, session
+logs — stays under `REASONIX_HOME`. Legacy migration, OS-home convention
+directory scanning, and all other fallback paths are skipped so no production
+data leaks in or out.
+
 ### Cache-first review gate
 
 Reasonix treats high prompt-cache hit rate as product behavior. Changes that

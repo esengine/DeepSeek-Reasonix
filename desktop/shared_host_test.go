@@ -18,7 +18,7 @@ func sharedHostRefsForTest(t *testing.T, app *App, root string) (int, bool) {
 
 func TestCloneDetachedRuntimeTabPreservesSharedHostKey(t *testing.T) {
 	tab := &WorkspaceTab{ID: "tab", SharedHostKey: "workspace-root"}
-	detached := cloneDetachedRuntimeTab(tab, "session-key")
+	detached := cloneDetachedRuntimeTab(tab, "session-key", "session-key")
 	if detached == nil {
 		t.Fatal("cloneDetachedRuntimeTab returned nil")
 	}

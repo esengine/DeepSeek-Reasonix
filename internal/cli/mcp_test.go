@@ -143,6 +143,12 @@ func TestRenderMCPStatusCapsLongSections(t *testing.T) {
 	}
 }
 
+func TestMCPCapabilitiesTextUsesAdvertisedTools(t *testing.T) {
+	if got := mcpCapabilitiesText(mcpServerView{HasTools: true}); got != "tools" {
+		t.Fatalf("mcpCapabilitiesText = %q, want tools", got)
+	}
+}
+
 func TestRenderMCPStatusShowsFailures(t *testing.T) {
 	got := renderMCPStatus(90,
 		nil,
@@ -442,31 +448,19 @@ func TestMCPEditConfigLaunchEditorRejectsUnterminatedQuote(t *testing.T) {
 }
 
 // TestMCPEditConfigLaunchEditorRejectsShellMetachars confirms that shell
-// metacharacters in EDITOR/VISUAL are treated as literal argv tokens and
-// never executed as a shell command — the previous sh -lc construction would
-// have run "rm" here.
+// metacharacters in EDITOR/VISUAL are rejected before launch — the previous
+// sh -lc construction would have run "rm" here.
 func TestMCPEditConfigLaunchEditorRejectsShellMetachars(t *testing.T) {
 	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", "vim; rm -rf /tmp/should-not-exist")
 
 	path := "/tmp/reasonix.toml"
-	launch, err := mcpEditConfigLaunchCommand(path, func(string) (string, error) {
+	_, err := mcpEditConfigLaunchCommand(path, func(string) (string, error) {
 		t.Fatal("lookPath should not be called when EDITOR is set")
 		return "", errors.New("unexpected lookup")
 	})
-	if err != nil {
-		t.Fatalf("edit command: %v", err)
-	}
-	// The entire EDITOR value is split on whitespace, so "vim;", "rm", "-rf",
-	// and the path become separate argv tokens — none of them are interpreted
-	// by a shell. The first token "vim;" is the (literal) program name; the
-	// shell injection payload "rm" is just an argument to it.
-	wantFirst := "vim;"
-	if launch.cmd.Args[0] != wantFirst {
-		t.Fatalf("first arg = %q, want %q (shell metachars must not be executed)", launch.cmd.Args[0], wantFirst)
-	}
-	if launch.cmd.Args[len(launch.cmd.Args)-1] != path {
-		t.Fatalf("last arg should be path, args=%v", launch.cmd.Args)
+	if err == nil || !strings.Contains(err.Error(), "shell control syntax") {
+		t.Fatalf("expected shell control rejection, got %v", err)
 	}
 }
 
@@ -536,25 +530,18 @@ func TestMCPEditConfigLaunchEditorExpandsTilde(t *testing.T) {
 }
 
 // TestMCPEditConfigLaunchEditorTildeNotInPayload confirms that a tilde
-// appearing in an injection payload (not as the leading token) is left
-// untouched and is NOT expanded into a path the shell would then execute.
+// appearing in an injection payload cannot be used because shell control syntax
+// is rejected before any expansion beyond the leading editor token matters.
 func TestMCPEditConfigLaunchEditorTildeNotInPayload(t *testing.T) {
 	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", "vim; rm -rf ~/should-not-exist")
 
-	launch, err := mcpEditConfigLaunchCommand("/tmp/reasonix.toml", func(string) (string, error) {
+	_, err := mcpEditConfigLaunchCommand("/tmp/reasonix.toml", func(string) (string, error) {
 		t.Fatal("lookPath should not be called when EDITOR is set")
 		return "", errors.New("unexpected lookup")
 	})
-	if err != nil {
-		t.Fatalf("edit command: %v", err)
-	}
-	// The tilde sits in the middle of the value, so it is NOT expanded; the
-	// leading token "vim;" is looked up literally and the payload "rm" never
-	// runs. This proves tilde expansion cannot be abused to make an injection
-	// payload resolve to a real path.
-	if launch.cmd.Args[0] != "vim;" {
-		t.Fatalf("args[0] = %q, want vim;", launch.cmd.Args[0])
+	if err == nil || !strings.Contains(err.Error(), "shell control syntax") {
+		t.Fatalf("expected shell control rejection, got %v", err)
 	}
 }
 

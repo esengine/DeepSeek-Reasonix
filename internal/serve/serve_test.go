@@ -161,7 +161,7 @@ func TestHistoryMessagesPreserveToolDetails(t *testing.T) {
 	}
 }
 
-func TestPreviewSessionFileStripsTransientReasoningLanguageBlock(t *testing.T) {
+func TestSessionsListPreviewStripsTransientReasoningLanguageBlock(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
 	s := agent.NewSession("system")
@@ -170,12 +170,36 @@ func TestPreviewSessionFileStripsTransientReasoningLanguageBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	preview, turns := previewSessionFile(path)
+	preview, turns := agent.SessionPreview(path)
 	if turns != 1 {
 		t.Errorf("turns = %d, want 1", turns)
 	}
 	if preview != "Explain this module" {
 		t.Errorf("preview = %q, want user prompt", preview)
+	}
+}
+
+func TestSessionsListPreviewSeesEventLogTurns(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	s := agent.NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatal(err)
+	}
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "reply"})
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "second"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatal(err)
+	}
+
+	// The second turn lives only in the event log; a checkpoint-only reader
+	// would still report one turn.
+	if _, turns := agent.SessionPreview(path); turns != 2 {
+		t.Errorf("turns = %d, want 2 (event log turns visible)", turns)
+	}
+	if mod := agent.SessionContentModTime(path); mod.IsZero() {
+		t.Error("SessionContentModTime returned zero for a live session")
 	}
 }
 

@@ -29,6 +29,35 @@ func TestLedgerRecordsSuccessAndFailureReceipts(t *testing.T) {
 	}
 }
 
+func TestLedgerHasWriteOrCommandSince(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(Receipt{ToolName: "todo_write", Success: true, Todos: []TodoItem{{Content: "edit", Status: "in_progress"}}})
+	ledger.Record(Receipt{ToolName: "write_file", Success: true, Write: true, Paths: []string{"a.go"}})
+	ledger.Record(Receipt{ToolName: "bash", Success: false, Command: "go test ./..."})
+	ledger.Record(Receipt{ToolName: "complete_step", Success: true, Step: "edit"})
+
+	if got := ledger.Len(); got != 4 {
+		t.Fatalf("Len() = %d, want 4", got)
+	}
+	if !ledger.HasWriteOrCommandSince(0) {
+		t.Fatal("write receipt at index 1 should count from index 0")
+	}
+	if !ledger.HasWriteOrCommandSince(-1) {
+		t.Fatal("negative index should behave like 0")
+	}
+	if ledger.HasWriteOrCommandSince(2) {
+		t.Fatal("failed command and bookkeeping receipts must not count as progress")
+	}
+	ledger.Record(Receipt{ToolName: "bash", Success: true, Command: "go test ./..."})
+	if !ledger.HasWriteOrCommandSince(2) {
+		t.Fatal("successful command receipt after index should count as progress")
+	}
+	var nilLedger *Ledger
+	if nilLedger.HasWriteOrCommandSince(0) {
+		t.Fatal("nil ledger must report no progress")
+	}
+}
+
 func TestLedgerMatchesFileReadAndWriteReceipts(t *testing.T) {
 	ledger := NewLedger()
 	ledger.Record(Receipt{ToolName: "read_file", Success: true, Paths: []string{`internal/tool/builtin/completestep.go`}, Read: true})

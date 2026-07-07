@@ -36,6 +36,7 @@ Unicode true
 ####
 !include "wails_tools.nsh"
 !include "FileFunc.nsh"
+!include "LogicLib.nsh"
 
 # The version information for this two must consist of 4 parts
 VIProductVersion "${INFO_PRODUCTVERSION}.0"
@@ -76,6 +77,8 @@ ManifestDPIAware true
 Name "${INFO_PRODUCTNAME}"
 OutFile "..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the installer's file.
 !define REASONIX_DEFAULT_INSTALLDIR "$LOCALAPPDATA\Programs\${INFO_PRODUCTNAME}"
+!define REASONIX_UPDATE_HELPER "reasonix-update-helper.exe"
+!define REASONIX_UNLOCK_RETRIES 60
 InstallDirRegKey HKCU "${UNINST_KEY}" "InstallLocation" # Reuse the previous install path on update; .onInit falls back to the default on first install.
 InstallDir "${REASONIX_DEFAULT_INSTALLDIR}" # Per-user install location (no admin rights required).
 ShowInstDetails show # This will always show the installation details.
@@ -130,14 +133,54 @@ fallback:
 done:
 FunctionEnd
 
+Function reasonix.waitForExecutableUnlock
+   IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 done
+   StrCpy $0 0
+
+retry:
+   ClearErrors
+   FileOpen $1 "$INSTDIR\${PRODUCT_EXECUTABLE}" a
+   IfErrors locked
+   FileClose $1
+   Goto done
+
+locked:
+   IntOp $0 $0 + 1
+   IntCmp $0 ${REASONIX_UNLOCK_RETRIES} failed 0 0
+   Sleep 1000
+   Goto retry
+
+failed:
+   IfSilent silent interactive
+
+interactive:
+   MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Reasonix is still running. Close Reasonix, then click Retry to continue the installation." IDRETRY retry IDCANCEL abort
+   Goto retry
+
+silent:
+   SetErrorLevel 1618
+
+abort:
+   Abort "Reasonix is still running. Close Reasonix and run the installer again."
+
+done:
+FunctionEnd
+
 Section
     !insertmacro wails.setShellContext
 
     !insertmacro wails.webview2runtime
 
+    Call reasonix.waitForExecutableUnlock
+
     SetOutPath $INSTDIR
 
     !insertmacro wails.files
+    !if /FileExists "${REASONIX_UPDATE_HELPER}"
+    File "/oname=${REASONIX_UPDATE_HELPER}" "${REASONIX_UPDATE_HELPER}"
+    !else
+    !warning "${REASONIX_UPDATE_HELPER} was not found; Windows auto-update will fall back to installer-side waiting only."
+    !endif
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
@@ -155,6 +198,7 @@ Section "uninstall"
 
     ; Precision uninstall: delete main application files
     Delete "$INSTDIR\${PRODUCT_EXECUTABLE}"
+    Delete "$INSTDIR\${REASONIX_UPDATE_HELPER}"
 
     Delete "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk"
     Delete "$DESKTOP\${INFO_PRODUCTNAME}.lnk"

@@ -43,6 +43,12 @@ Reasonix 的 Goal 模式（`/goal`）在 v1.9+ 中增加了来自 Oh-My-OpenAgen
 - 需要完整测试覆盖的任务
 - 多步骤复杂流程
 
+### 任务合约
+
+复杂目标可以直接写成 Context / Request / Output format / Constraints /
+Pause policy。Goal 模式会把这些段落当作执行边界：满足请求、输出格式、约束和必要验证后才结束；
+除非下一步涉及不可逆或对外可见操作、范围变化，或必须由用户提供信息，否则继续采用合理默认值推进。
+
 ### 并行子任务
 
 ```bash

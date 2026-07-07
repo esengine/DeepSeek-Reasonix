@@ -392,19 +392,12 @@ func (ag *authGate) loginSubmit(w http.ResponseWriter, r *http.Request) {
 
 func (ag *authGate) setAuthCookie(w http.ResponseWriter, r *http.Request, c *http.Cookie) {
 	c.Secure = ag.authCookieSecure(r)
-	// codeql[go/cookie-secure-not-set] Loopback HTTP serve must keep local browser auth usable; non-loopback HTTP still sets Secure cookies.
+	// codeql[go/cookie-secure-not-set] Secure cookies are only sent back over HTTPS; plain-HTTP serve must keep token/password auth usable.
 	http.SetCookie(w, c)
 }
 
 func (ag *authGate) authCookieSecure(r *http.Request) bool {
-	if ag.isTLS(r) {
-		return true
-	}
-	host := r.Host
-	if host == "" && r.URL != nil {
-		host = r.URL.Host
-	}
-	return !isLoopbackHost(host)
+	return ag.isTLS(r)
 }
 
 func safeRedirectTarget(raw string) string {
@@ -594,4 +587,15 @@ func isLoopbackHost(hostport string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// PlainHTTPAuthWarning reports whether serve is exposing authenticated access
+// over a non-loopback plain-HTTP listener. The listener may still be valid for a
+// trusted LAN or reverse-proxy setup, but users should see the risk explicitly.
+func PlainHTTPAuthWarning(cfg config.ServeConfig, addr string) string {
+	mode, err := NormalizeAuthMode(cfg.AuthMode)
+	if err != nil || mode == "none" || isLoopbackHost(addr) {
+		return ""
+	}
+	return "warning: authenticated serve is listening on non-loopback HTTP; use HTTPS via a trusted reverse proxy or bind to 127.0.0.1 for local-only access"
 }

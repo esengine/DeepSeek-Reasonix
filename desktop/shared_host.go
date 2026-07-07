@@ -135,12 +135,33 @@ func (a *App) releaseSharedHost(root string) {
 }
 
 func (a *App) releaseTabSharedHost(tab *WorkspaceTab) {
-	if tab == nil || tab.SharedHostKey == "" {
+	if tab == nil {
 		return
+	}
+	// SharedHostKey is a.mu-guarded (the build goroutine publishes it under
+	// the lock); do the take under the lock and the slow host release after.
+	// Callers must not hold a.mu.
+	a.mu.Lock()
+	key := takeTabSharedHostKey(tab)
+	a.mu.Unlock()
+	if key == "" {
+		return
+	}
+	a.releaseSharedHost(key)
+}
+
+// takeTabSharedHostKey clears the tab's shared-host key and returns it so the
+// caller can release it later. Use from inside a.mu critical sections:
+// releaseSharedHost may close the host and reap MCP subprocesses, which is far
+// too slow to run under the app lock — call a.releaseSharedHost(key) after
+// unlocking.
+func takeTabSharedHostKey(tab *WorkspaceTab) string {
+	if tab == nil || tab.SharedHostKey == "" {
+		return ""
 	}
 	key := tab.SharedHostKey
 	tab.SharedHostKey = ""
-	a.releaseSharedHost(key)
+	return key
 }
 
 // closeAllSharedHosts closes every shared host. Called during app shutdown.

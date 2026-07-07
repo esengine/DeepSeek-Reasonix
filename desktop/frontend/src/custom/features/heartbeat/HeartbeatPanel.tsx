@@ -193,7 +193,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
           notifyChannels: false,
           createdAt: Date.now(),
         });
-      });
+      }).catch(() => {});
     }
   }, [open, startNew]);
 
@@ -210,18 +210,22 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
   );
 
   const handleAdd = useCallback(async () => {
-    const id = await heartbeatGenerateID();
-    setEditing({
-      id,
-      title: "",
-      prompt: "",
-      interval: "30m",
-      enabled: true,
-      approvalMode: "yolo",
-      newConversationEachRun: false,
-      notifyChannels: false,
-      createdAt: Date.now(),
-    });
+    try {
+      const id = await heartbeatGenerateID();
+      setEditing({
+        id,
+        title: "",
+        prompt: "",
+        interval: "30m",
+        enabled: true,
+        approvalMode: "yolo",
+        newConversationEachRun: false,
+        notifyChannels: false,
+        createdAt: Date.now(),
+      });
+    } catch {
+      // ignore
+    }
   }, []);
 
   const handleEdit = useCallback((task: HeartbeatTask) => {
@@ -238,8 +242,12 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
 
   const handleTrigger = useCallback(
     async (id: string) => {
-      await heartbeatTriggerNow(id);
-      void loadTasks();
+      try {
+        await heartbeatTriggerNow(id);
+        void loadTasks();
+      } catch {
+        // ignore
+      }
     },
     [loadTasks],
   );

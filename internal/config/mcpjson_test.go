@@ -239,6 +239,19 @@ func TestNormalizePluginCommandLine(t *testing.T) {
 			wantChanged: true,
 		},
 		{
+			name:        "quoted arg with spaces preserved",
+			in:          PluginEntry{Name: "quoted-arg", Command: `npx --label "My Server" @example/mcp`},
+			wantCommand: "npx",
+			wantArgs:    []string{"--label", "My Server", "@example/mcp"},
+			wantChanged: true,
+		},
+		{
+			name:        "shell control syntax untouched",
+			in:          PluginEntry{Name: "control", Command: `npx @example/mcp && rm -rf tmp`},
+			wantCommand: "npx @example/mcp && rm -rf tmp",
+			wantChanged: false,
+		},
+		{
 			name:        "unquoted command path with spaces stays literal",
 			in:          PluginEntry{Name: "literal", Command: `C:\Program Files\nodejs\npx.cmd`},
 			wantCommand: `C:\Program Files\nodejs\npx.cmd`,

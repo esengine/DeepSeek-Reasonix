@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"unicode"
@@ -21,6 +22,12 @@ const legacyPlanModeMarker = "[Plan mode — read-only. Explore the codebase fir
 const (
 	activeGoalOpen  = "<active-goal>"
 	activeGoalClose = "</active-goal>"
+	hookContextTag  = "hook-context"
+)
+
+const (
+	maxHookContextChars      = 10000
+	maxTotalHookContextChars = 20000
 )
 
 const (
@@ -134,7 +141,7 @@ var syntheticPrefixes = []string{
 	"<compaction-summary>",
 	"Summary of the later conversation (compacted from here on):",
 	"Summary of earlier conversation (compacted up to here):",
-	"Continue pursuing the active goal.",
+	"Continue pursuing the active goal",
 	"The agent signaled goal completion and all tasks are marked done.",
 	"Goal signaled complete but issues remain:",
 	"No tool calls in recent turns.",
@@ -144,6 +151,10 @@ var syntheticPrefixes = []string{
 // returning the message to actually send to the model. The frontend keeps
 // showing the raw text as the user bubble.
 func (c *Controller) Compose(text string) string {
+	return c.compose(text, text, true)
+}
+
+func (c *Controller) compose(text, source string, includeHookContext bool) string {
 	c.mu.Lock()
 	plan := c.planMode
 	responseLanguage := c.responseLanguage
@@ -163,7 +174,7 @@ func (c *Controller) Compose(text string) string {
 		text = PlanModeMarker + "\n\n" + text
 	}
 	text = agent.WithResponseLanguage(text, responseLanguage)
-	text = agent.WithReasoningLanguage(text, reasoningLanguage)
+	text = agent.WithReasoningLanguageForSource(text, reasoningLanguage, source)
 
 	// Memory added mid-session rides the turn (never the cached system prefix),
 	// so it takes effect now without invalidating the prompt cache. It folds into
@@ -187,7 +198,76 @@ func (c *Controller) Compose(text string) string {
 			text = "<background-jobs>\n" + note + "\n</background-jobs>\n\n" + text
 		}
 	}
+	if includeHookContext {
+		if block := c.drainHookContextBlock(); block != "" {
+			text = block + "\n\n" + text
+		}
+	}
 	return text
+}
+
+func (c *Controller) enqueueHookContexts(contexts []string) {
+	if len(contexts) == 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, context := range contexts {
+		context = strings.TrimSpace(context)
+		if context == "" {
+			continue
+		}
+		c.hookContexts = append(c.hookContexts, context)
+	}
+}
+
+func (c *Controller) drainHookContextBlock() string {
+	c.mu.Lock()
+	contexts := c.hookContexts
+	c.hookContexts = nil
+	c.mu.Unlock()
+	if len(contexts) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<hook-context event="SessionStart">`)
+	b.WriteString("\n")
+	total := 0
+	for i, context := range contexts {
+		text, truncated := clipHookContext(context, maxHookContextChars)
+		remaining := maxTotalHookContextChars - total
+		if remaining <= 0 {
+			fmt.Fprintf(&b, "[truncated: omitted %d additional hook context item(s)]\n", len(contexts)-i)
+			break
+		}
+		text, totalTruncated := clipHookContext(text, remaining)
+		total += len([]rune(text))
+		if i > 0 {
+			b.WriteString("\n---\n")
+		}
+		b.WriteString(escapeHookContext(text))
+		b.WriteString("\n")
+		if truncated || totalTruncated {
+			b.WriteString("[truncated]\n")
+		}
+	}
+	b.WriteString(`</hook-context>`)
+	return b.String()
+}
+
+func clipHookContext(s string, max int) (string, bool) {
+	r := []rune(s)
+	if len(r) <= max {
+		return s, false
+	}
+	if max < 0 {
+		max = 0
+	}
+	return string(r[:max]), true
+}
+
+func escapeHookContext(s string) string {
+	return strings.ReplaceAll(s, "</"+hookContextTag+">", "<\\/"+hookContextTag+">")
 }
 
 func (c *Controller) autoResearchRuntimeBlock(taskID string) string {
@@ -247,7 +327,7 @@ func (c *Controller) ComposeSynthetic(text string) string {
 	lang := c.reasoningLanguage
 	c.mu.Unlock()
 	text = agent.WithResponseLanguage(text, responseLang)
-	return agent.WithReasoningLanguage(text, lang)
+	return agent.WithReasoningLanguageForSource(text, lang, text)
 }
 
 func activeGoalBlock(goal string, researchMode GoalResearchMode) string {
@@ -258,7 +338,7 @@ func activeGoalBlock(goal string, researchMode GoalResearchMode) string {
 	b.WriteString("\n")
 	b.WriteString(goal)
 	b.WriteString("\n\n")
-	b.WriteString("Goal mode: pursue this goal autonomously. Keep working across turns until the goal is complete. Prefer sensible defaults over asking the user; use ask only when you are truly blocked on a user-owned decision. Do not stop after describing a plan; execute the next useful step. End every goal-mode assistant reply with exactly one status marker on its own line: [goal:continue], [goal:complete], or [goal:blocked:<short reason>].")
+	b.WriteString(goalTaskContractInstructions)
 	if shouldUseAutoResearch(goal, researchMode) {
 		b.WriteString("\n\n")
 		b.WriteString(autoResearchGoalInstructions)
@@ -267,6 +347,14 @@ func activeGoalBlock(goal string, researchMode GoalResearchMode) string {
 	b.WriteString(activeGoalClose)
 	return b.String()
 }
+
+const goalTaskContractInstructions = `Goal mode: pursue this goal autonomously. Treat the user's goal as a task contract:
+- Honor Context, Request, Output format, Constraints, and Checkpoint/Pause policy sections when present; otherwise infer a lightweight contract from the conversation and workspace.
+- Preserve scope and output format. Do not invent requirements or hide uncertainty; state assumptions when sensible defaults are enough to proceed.
+- Pause only when the next step involves an irreversible or externally visible operation, the requested scope has changed, or progress requires information only the user can provide. Otherwise keep working and report assumptions at the end.
+- Complete only when the concrete request is done, the output format and constraints are satisfied, and relevant verification was attempted or reported unavailable.
+
+Do not stop after describing a plan; execute the next useful step. End every goal-mode assistant reply with exactly one status marker on its own line: [goal:continue], [goal:complete], or [goal:blocked:<short reason>].`
 
 const autoResearchGoalInstructions = `AutoResearch protocol: this goal looks like long-horizon research, debugging, optimization, or implementation work. Treat AutoResearch as a durable strategy for this Goal, not as a background daemon or a global skill.
 - Say briefly in the first visible reply that the goal is being handled with AutoResearch and that host-owned state lives under .reasonix/autoresearch/<task-id>/, using the actual task_id from <autoresearch-runtime>.

@@ -13,11 +13,22 @@ ADMIN_EMAILS = "359807859@qq.com"
 # page. Override for local dev.
 ID_ORIGIN = "https://id.reasonix.io"
 APP_ORIGIN = "https://reasonix.io"
+# Browsers allowed to call the folded registry API with credentials.
+ALLOWED_ORIGINS = "https://reasonix.io,https://www.reasonix.io"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "reasonix-crash"
 database_id = "54825184-366f-4877-80fc-924efab0239b"
+
+# Skill/MCP registry data plane, folded in from the standalone worker. Before
+# merging (the crash worker auto-deploys on push to main-v2):
+#   wrangler d1 create reasonix-registry   # paste the id below
+#   wrangler d1 execute reasonix-registry --remote --file=registry-schema.sql
+[[d1_databases]]
+binding = "REGISTRY_DB"
+database_name = "reasonix-registry"
+database_id = "83786761-5cc5-487d-8624-5cf565d1a57c"
 
 [[unsafe.bindings]]
 name = "RATE_LIMITER"
@@ -38,4 +49,11 @@ simple = { limit = 30, period = 60 }
 name = "METRICS_LIMITER"
 type = "ratelimit"
 namespace_id = "1003"
+simple = { limit = 30, period = 60 }
+
+# Per-IP throttle for registry writes (publish / install-ping / star).
+[[unsafe.bindings]]
+name = "WRITE_LIMITER"
+type = "ratelimit"
+namespace_id = "3001"
 simple = { limit = 30, period = 60 }

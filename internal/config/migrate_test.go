@@ -443,7 +443,7 @@ command = "legacy-bin"
 		t.Fatalf("read migrated config: %v", err)
 	}
 	text := string(got)
-	for _, want := range []string{`config_version = 3`, `[desktop]`, `close_behavior = "quit"`, `name    = "legacy-v1"`} {
+	for _, want := range []string{`config_version = 4`, `[desktop]`, `close_behavior = "quit"`, `name    = "legacy-v1"`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("migrated TOML missing %q:\n%s", want, text)
 		}
@@ -730,6 +730,33 @@ api_key_env = "WORKSPACE_ONLY_KEY"
 	}
 }
 
+func TestMigrateLegacyCredentialsSkipsKeyringWhenIsolated(t *testing.T) {
+	home := t.TempDir()
+	isolated := filepath.Join(home, "isolated-home")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("REASONIX_HOME", isolated)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+
+	old := legacyKeyringCredentialValueLookup
+	legacyKeyringCredentialValueLookup = func(key string) (string, bool) {
+		if key == "DEEPSEEK_API_KEY" {
+			return "legacy-keyring-value", true
+		}
+		return "", false
+	}
+	t.Cleanup(func() { legacyKeyringCredentialValueLookup = old })
+
+	if err := MigrateLegacyCredentialsForRoot("."); err != nil {
+		t.Fatalf("MigrateLegacyCredentialsForRoot: %v", err)
+	}
+	if _, err := os.Stat(UserCredentialsPath()); !os.IsNotExist(err) {
+		t.Fatalf("isolated runtime imported legacy credentials to %s; stat err=%v", UserCredentialsPath(), err)
+	}
+}
+
 func TestMigrateLegacyCredentialsDoesNotReimportClearedKey(t *testing.T) {
 	_, dest, _ := legacyHome(t)
 	legacy := legacyUserConfigPath()
@@ -813,6 +840,42 @@ func TestMigrateSkipsLegacyCredentialsAlreadyInCurrentAutoStore(t *testing.T) {
 	}
 	if string(data) != "DEEPSEEK_API_KEY=sk-current\n" {
 		t.Fatalf("current credentials were overwritten: %q", data)
+	}
+}
+
+func TestMigrateImportsLegacyStateHomeDotEnvCredentials(t *testing.T) {
+	_, dest, _ := legacyHome(t)
+	state := t.TempDir()
+	t.Setenv("REASONIX_STATE_HOME", state)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "")
+	os.Unsetenv("REASONIX_CREDENTIALS_STORE")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte(`default_model = "deepseek-flash/deepseek-chat"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, ".env"), []byte("DEEPSEEK_API_KEY=state-env-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	currentCred := UserCredentialsPath()
+	if strings.HasPrefix(currentCred, state) {
+		t.Fatalf("current credentials path should not be under REASONIX_STATE_HOME: %q", currentCred)
+	}
+	res, err := MigrateLegacyIfNeeded()
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if res != nil {
+		t.Fatalf("primary config exists, config migration should be skipped, got %+v", res)
+	}
+	data, err := os.ReadFile(currentCred)
+	if err != nil {
+		t.Fatalf("read current credentials: %v", err)
+	}
+	if string(data) != "DEEPSEEK_API_KEY=state-env-value\n" {
+		t.Fatalf("migrated credentials = %q", data)
 	}
 }
 

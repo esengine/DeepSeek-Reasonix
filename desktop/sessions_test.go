@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -165,8 +166,20 @@ func TestDeleteSessionFile(t *testing.T) {
 	os.WriteFile(metaPath, []byte("{}"), 0o644)
 	goalPath := store.SessionGoalState(sessionPath)
 	os.WriteFile(goalPath, []byte(`{"goal":"ship"}`), 0o644)
+	eventLogPath := store.SessionEventLog(sessionPath)
+	os.WriteFile(eventLogPath, []byte(`{"schema_version":1,"type":"replace","messages":[{"role":"user","content":"event"}]}`+"\n"), 0o644)
+	eventIndexPath := store.SessionEventIndex(sessionPath)
+	os.WriteFile(eventIndexPath, []byte(`{"schema_version":1,"message_count":1}`), 0o644)
+	conflictLogPath := store.SessionConflictLog(sessionPath)
+	os.WriteFile(conflictLogPath, []byte(`{"outcome":"forked_recovery_branch"}`+"\n"), 0o644)
 	telemetryPath := sessionTelemetryPath(sessionPath)
 	os.WriteFile(telemetryPath, []byte(`{"version":2,"readFiles":[]}`), 0o644)
+	lockPath := store.SessionLockFile(sessionPath)
+	os.WriteFile(lockPath, nil, 0o644)
+	leaseLockPath := store.SessionLeaseLock(sessionPath)
+	os.WriteFile(leaseLockPath, nil, 0o644)
+	leaseInfoPath := store.SessionLeaseInfo(sessionPath)
+	os.WriteFile(leaseInfoPath, []byte(`{"writer_id":"stale"}`), 0o644)
 	ckptDir := filepath.Join(dir, "session.ckpt")
 	if err := os.MkdirAll(ckptDir, 0o755); err != nil {
 		t.Fatalf("mkdir ckpt: %v", err)
@@ -192,6 +205,9 @@ func TestDeleteSessionFile(t *testing.T) {
 	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
 	trashMetaPath := trashPath + ".meta"
 	trashGoalPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.goal-state.json")
+	trashEventLogPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.events.jsonl")
+	trashEventIndexPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.event-index.json")
+	trashConflictLogPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.conflicts.jsonl")
 	trashTelemetryPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl.telemetry.json")
 	trashCkptDir := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.ckpt")
 	trashJobsDir := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jobs")
@@ -206,8 +222,26 @@ func TestDeleteSessionFile(t *testing.T) {
 	if _, err := os.Stat(goalPath); !os.IsNotExist(err) {
 		t.Error("session goal state should be removed from active sessions")
 	}
+	if _, err := os.Stat(eventLogPath); !os.IsNotExist(err) {
+		t.Error("session event log should be removed from active sessions")
+	}
+	if _, err := os.Stat(eventIndexPath); !os.IsNotExist(err) {
+		t.Error("session event index should be removed from active sessions")
+	}
+	if _, err := os.Stat(conflictLogPath); !os.IsNotExist(err) {
+		t.Error("session conflict log should be removed from active sessions")
+	}
 	if _, err := os.Stat(telemetryPath); !os.IsNotExist(err) {
 		t.Error("session telemetry should be removed from active sessions")
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Error("session lock should be removed from active sessions")
+	}
+	if _, err := os.Stat(leaseLockPath); !os.IsNotExist(err) {
+		t.Error("session lease lock should be removed from active sessions")
+	}
+	if _, err := os.Stat(leaseInfoPath); !os.IsNotExist(err) {
+		t.Error("session lease info should be removed from active sessions")
 	}
 	if _, err := os.Stat(ckptDir); !os.IsNotExist(err) {
 		t.Error("session checkpoints should be removed from active sessions")
@@ -224,8 +258,26 @@ func TestDeleteSessionFile(t *testing.T) {
 	if _, err := os.Stat(trashGoalPath); err != nil {
 		t.Fatalf("session goal state should be in trash: %v", err)
 	}
+	if _, err := os.Stat(trashEventLogPath); err != nil {
+		t.Fatalf("session event log should be in trash: %v", err)
+	}
+	if _, err := os.Stat(trashEventIndexPath); err != nil {
+		t.Fatalf("session event index should be in trash: %v", err)
+	}
+	if _, err := os.Stat(trashConflictLogPath); err != nil {
+		t.Fatalf("session conflict log should be in trash: %v", err)
+	}
 	if _, err := os.Stat(trashTelemetryPath); err != nil {
 		t.Fatalf("session telemetry should be in trash: %v", err)
+	}
+	for _, p := range []string{
+		filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl.lock"),
+		filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl.lease.lock"),
+		filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl.lease.json"),
+	} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("ephemeral session artifact should not be moved to trash: %s (err=%v)", p, err)
+		}
 	}
 	if _, err := os.Stat(trashCkptDir); err != nil {
 		t.Fatalf("session checkpoints should be in trash: %v", err)
@@ -442,6 +494,18 @@ func TestRestoreTrashedSessionFile(t *testing.T) {
 	if err := os.WriteFile(goalPath, []byte(`{"goal":"restore"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	eventLogPath := store.SessionEventLog(sessionPath)
+	if err := os.WriteFile(eventLogPath, []byte(`{"schema_version":1,"type":"replace","messages":[{"role":"user","content":"event"}]}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eventIndexPath := store.SessionEventIndex(sessionPath)
+	if err := os.WriteFile(eventIndexPath, []byte(`{"schema_version":1,"message_count":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	conflictLogPath := store.SessionConflictLog(sessionPath)
+	if err := os.WriteFile(conflictLogPath, []byte(`{"outcome":"forked_recovery_branch"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	telemetryPath := sessionTelemetryPath(sessionPath)
 	if err := os.WriteFile(telemetryPath, []byte(`{"version":2,"readFiles":[]}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -480,6 +544,15 @@ func TestRestoreTrashedSessionFile(t *testing.T) {
 	}
 	if _, err := os.Stat(goalPath); err != nil {
 		t.Fatalf("session goal state should be restored: %v", err)
+	}
+	if _, err := os.Stat(eventLogPath); err != nil {
+		t.Fatalf("session event log should be restored: %v", err)
+	}
+	if _, err := os.Stat(eventIndexPath); err != nil {
+		t.Fatalf("session event index should be restored: %v", err)
+	}
+	if _, err := os.Stat(conflictLogPath); err != nil {
+		t.Fatalf("session conflict log should be restored: %v", err)
 	}
 	if _, err := os.Stat(telemetryPath); err != nil {
 		t.Fatalf("session telemetry should be restored: %v", err)
@@ -520,6 +593,51 @@ func TestRestoreTrashedSessionFileWithEmptyLiveStub(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Dir(trashPath)); !os.IsNotExist(err) {
 		t.Fatalf("trash item should be removed after restore, err=%v", err)
+	}
+}
+
+func TestRestoreTrashedSessionFileFromUniqueTrashItem(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "restore-unique.jsonl")
+	if err := os.WriteFile(sessionPath, []byte(`{"role":"user","content":"old"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("trash old: %v", err)
+	}
+	fixedTrashPath := filepath.Join(dir, sessionTrashDir, filepath.Base(sessionPath), filepath.Base(sessionPath))
+	if err := os.WriteFile(sessionPath, []byte(`{"role":"user","content":"new"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write new live session: %v", err)
+	}
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("trash new with fixed trash conflict: %v", err)
+	}
+
+	trashed, err := listTrashedSessionFiles(dir)
+	if err != nil {
+		t.Fatalf("list trash: %v", err)
+	}
+	var uniqueTrashPath string
+	for _, candidate := range trashed {
+		if candidate != fixedTrashPath && filepath.Base(candidate) == filepath.Base(sessionPath) {
+			uniqueTrashPath = candidate
+			break
+		}
+	}
+	if uniqueTrashPath == "" {
+		t.Fatalf("unique trash path not listed, got %#v", trashed)
+	}
+	if err := restoreTrashedSessionFile(dir, uniqueTrashPath); err != nil {
+		t.Fatalf("restore unique trash item: %v", err)
+	}
+	if got, err := os.ReadFile(sessionPath); err != nil || !strings.Contains(string(got), "new") {
+		t.Fatalf("restored session = %q err=%v, want new content", string(got), err)
+	}
+	if _, err := os.Stat(filepath.Dir(uniqueTrashPath)); !os.IsNotExist(err) {
+		t.Fatalf("unique trash item should be removed after restore, stat err = %v", err)
+	}
+	if _, err := os.Stat(fixedTrashPath); err != nil {
+		t.Fatalf("original fixed trash item should remain: %v", err)
 	}
 }
 
@@ -731,11 +849,20 @@ func TestRemoveDesktopSessionArtifactsRemovesOwnedSidecars(t *testing.T) {
 		sessionPath,
 		store.SessionMeta(sessionPath),
 		store.SessionGoalState(sessionPath),
+		store.SessionEventLog(sessionPath),
+		store.SessionEventIndex(sessionPath),
+		store.SessionConflictLog(sessionPath),
 		sessionTelemetryPath(sessionPath),
+		store.SessionLockFile(sessionPath),
+		store.SessionLeaseLock(sessionPath),
+		store.SessionLeaseInfo(sessionPath),
 	} {
 		if err := os.WriteFile(p, []byte("{}"), 0o644); err != nil {
 			t.Fatalf("write %s: %v", p, err)
 		}
+	}
+	if err := recordSessionDisplay(dir, sessionPath, "expanded prompt", "[Pasted text #1 · 2 lines]"); err != nil {
+		t.Fatalf("record display: %v", err)
 	}
 	ckptDir := store.SessionCheckpointDir(sessionPath)
 	if err := os.MkdirAll(ckptDir, 0o755); err != nil {
@@ -760,13 +887,22 @@ func TestRemoveDesktopSessionArtifactsRemovesOwnedSidecars(t *testing.T) {
 		sessionPath,
 		store.SessionMeta(sessionPath),
 		store.SessionGoalState(sessionPath),
+		store.SessionEventLog(sessionPath),
+		store.SessionEventIndex(sessionPath),
+		store.SessionConflictLog(sessionPath),
 		sessionTelemetryPath(sessionPath),
+		store.SessionLockFile(sessionPath),
+		store.SessionLeaseLock(sessionPath),
+		store.SessionLeaseInfo(sessionPath),
 		ckptDir,
 		jobsDir,
 	} {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {
 			t.Fatalf("%s should be removed, stat err = %v", p, err)
 		}
+	}
+	if got := resolveSessionDisplay(dir, sessionPath, "expanded prompt"); got != "expanded prompt" {
+		t.Fatalf("session display key should be removed, got %q", got)
 	}
 }
 
@@ -835,6 +971,74 @@ func TestMovePathIfExistsCopyFallback(t *testing.T) {
 	// Test non-existent source is no-op.
 	if err := movePathIfExists(filepath.Join(dir, "missing.txt"), filepath.Join(dir, "other.txt")); err != nil {
 		t.Fatalf("move missing: %v", err)
+	}
+}
+
+func TestCopyFallbackTreatsMissingSourceAsAlreadyMoved(t *testing.T) {
+	dir := t.TempDir()
+	if err := copyAndRemove(filepath.Join(dir, "missing.txt"), filepath.Join(dir, "dst.txt")); err != nil {
+		t.Fatalf("copy missing source: %v", err)
+	}
+
+	dstDir := filepath.Join(dir, "dst-dir")
+	if err := copyDir(filepath.Join(dir, "missing-dir"), dstDir, 0o755); err != nil {
+		t.Fatalf("copy missing dir: %v", err)
+	}
+	if _, err := os.Stat(dstDir); !os.IsNotExist(err) {
+		t.Fatalf("copy missing dir should not leave an empty target, stat err = %v", err)
+	}
+}
+
+func TestCopyFallbackRemovesPartialTargetWhenSourceVanishesMidCopy(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.txt")
+	dst := filepath.Join(dir, "dst.txt")
+	if err := os.WriteFile(src, []byte("session transcript"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	restore := copyPathFn
+	copyPathFn = func(copySrc, copyDst string) error {
+		// Simulate the source vanishing mid-copy: a truncated destination has
+		// already been written when the copy fails.
+		if err := os.WriteFile(copyDst, []byte("session tra"), 0o644); err != nil {
+			t.Fatalf("write partial destination: %v", err)
+		}
+		if err := os.Remove(copySrc); err != nil {
+			t.Fatalf("remove source: %v", err)
+		}
+		return errors.New("simulated read failure")
+	}
+	t.Cleanup(func() { copyPathFn = restore })
+
+	if err := copyAndRemove(src, dst); err != nil {
+		t.Fatalf("copyAndRemove should treat vanished source as already moved: %v", err)
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Fatalf("partial destination should be removed, stat err = %v", err)
+	}
+}
+
+func TestCopyFallbackKeepsErrorWhenSourceStillExists(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.txt")
+	dst := filepath.Join(dir, "dst.txt")
+	if err := os.WriteFile(src, []byte("session transcript"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	restore := copyPathFn
+	simulated := errors.New("simulated copy failure")
+	copyPathFn = func(copySrc, copyDst string) error {
+		return simulated
+	}
+	t.Cleanup(func() { copyPathFn = restore })
+
+	if err := copyAndRemove(src, dst); !errors.Is(err, simulated) {
+		t.Fatalf("copyAndRemove error = %v, want simulated copy failure", err)
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Fatalf("source should be untouched on real copy failure: %v", err)
 	}
 }
 
@@ -953,6 +1157,48 @@ func TestSessionDisplayRoundTrip(t *testing.T) {
 	}
 	if got := resolveSessionDisplay(dir, sessionPath, "other"); got != "other" {
 		t.Fatalf("unknown content should pass through, got %q", got)
+	}
+}
+
+func TestPruneSessionDisplaysRemovesOnlyOrphans(t *testing.T) {
+	dir := t.TempDir()
+	content := "expanded prompt"
+	if err := saveSessionDisplays(dir, sessionDisplayMap{
+		"live.jsonl":      map[string]string{messageDisplayKey(content): "live display"},
+		"trashed.jsonl":   map[string]string{messageDisplayKey(content): "trash display"},
+		"protected.jsonl": map[string]string{messageDisplayKey(content): "protected display"},
+		"missing.jsonl":   map[string]string{messageDisplayKey(content): "missing display"},
+		"sidecar.events.jsonl": map[string]string{
+			messageDisplayKey(content): "invalid display",
+		},
+	}); err != nil {
+		t.Fatalf("save displays: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "live.jsonl"), []byte("data"), 0o644); err != nil {
+		t.Fatalf("write live session: %v", err)
+	}
+	trashDir := filepath.Join(dir, sessionTrashDir, "trashed.jsonl")
+	if err := os.MkdirAll(trashDir, 0o755); err != nil {
+		t.Fatalf("mkdir trash: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(trashDir, "trashed.jsonl"), []byte("data"), 0o644); err != nil {
+		t.Fatalf("write trashed session: %v", err)
+	}
+
+	if err := pruneSessionDisplays(dir, map[string]struct{}{"protected.jsonl": {}}); err != nil {
+		t.Fatalf("prune displays: %v", err)
+	}
+
+	got := loadSessionDisplays(dir)
+	for _, key := range []string{"live.jsonl", "trashed.jsonl", "protected.jsonl"} {
+		if got[key] == nil {
+			t.Fatalf("%s display should be retained; got %#v", key, got)
+		}
+	}
+	for _, key := range []string{"missing.jsonl", "sidecar.events.jsonl"} {
+		if got[key] != nil {
+			t.Fatalf("%s display should be pruned; got %#v", key, got)
+		}
 	}
 }
 

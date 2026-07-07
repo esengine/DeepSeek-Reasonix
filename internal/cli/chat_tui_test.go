@@ -1756,6 +1756,138 @@ func TestTranscriptScrollbarClickAndDrag(t *testing.T) {
 	}
 }
 
+// TestMouseDragReleaseAutoCopies verifies that releasing the mouse after a
+// left-drag over the transcript copies the selection to the clipboard
+// automatically (native terminal convention), keeps the selection highlighted
+// so a follow-up right-click can still re-copy it, and arms the transient
+// "copied to clipboard" status-line notice.
+func TestMouseDragReleaseAutoCopies(t *testing.T) {
+	m := newTestChatTUI()
+	m.transcript = []string{"hello world"}
+	m.wrappedLines = []string{"hello world"}
+	m.sel = selection{active: true, anchor: selPos{line: 0, col: 0}, head: selPos{line: 0, col: 5}}
+
+	out, cmd := m.Update(tea.MouseReleaseMsg{Button: tea.MouseLeft})
+	m2, ok := out.(chatTUI)
+	if !ok {
+		t.Fatalf("Update returned %T, want chatTUI", out)
+	}
+
+	if cmd == nil {
+		t.Fatal("release after a real drag should return a cmd (clipboard copy + notice)")
+	}
+	if !m2.sel.active {
+		t.Error("selection should stay highlighted after auto-copy so right-click can re-copy it")
+	}
+	if m2.copyNoticeText == "" {
+		t.Error("release after a real drag should arm the copied-to-clipboard notice")
+	}
+}
+
+// TestMousePlainClickReleaseDoesNotCopy verifies that a plain click (no drag,
+// empty selection) does not copy an empty string to the clipboard or show the
+// copied notice — only clears the zero-width selection, as before.
+func TestMousePlainClickReleaseDoesNotCopy(t *testing.T) {
+	m := newTestChatTUI()
+	m.transcript = []string{"hello world"}
+	m.wrappedLines = []string{"hello world"}
+	at := selPos{line: 0, col: 3}
+	m.sel = selection{active: true, anchor: at, head: at} // empty: anchor == head
+
+	out, _ := m.Update(tea.MouseReleaseMsg{Button: tea.MouseLeft})
+	m2, ok := out.(chatTUI)
+	if !ok {
+		t.Fatalf("Update returned %T, want chatTUI", out)
+	}
+
+	if m2.sel.active {
+		t.Error("a plain click (empty selection) should be cleared on release")
+	}
+	if m2.copyNoticeText != "" {
+		t.Error("a plain click (empty selection) must not arm the copied-to-clipboard notice")
+	}
+}
+
+// TestCopyNoticeExpires verifies the copied-to-clipboard notice clears itself
+// once its own expiry tick fires, and that a stale tick from an earlier copy
+// (superseded by a newer one) does not clear the newer notice.
+func TestCopyNoticeExpires(t *testing.T) {
+	m := newTestChatTUI()
+	m.copyNoticeText = i18n.M.MouseCopiedHint
+	m.copyNoticeSeq = 2
+
+	// A stale tick from a prior (superseded) copy must not clear the current notice.
+	out, _ := m.Update(copyNoticeExpireMsg{seq: 1})
+	m2 := out.(chatTUI)
+	if m2.copyNoticeText == "" {
+		t.Fatal("a stale expiry tick must not clear a newer notice")
+	}
+
+	// The current tick clears it.
+	out, _ = m2.Update(copyNoticeExpireMsg{seq: 2})
+	m3 := out.(chatTUI)
+	if m3.copyNoticeText != "" {
+		t.Fatal("the matching expiry tick should clear the notice")
+	}
+}
+
+// TestToggleMouseCaptureFlipsModeAndClearsGestures proves "/mouse" flips
+// mouseCaptureOff, shows the matching on/off notice, and drops any in-flight
+// selection/scrollbar drag so a stale gesture can't be found mid-drag once the
+// terminal starts intercepting the events that would have finished it.
+func TestToggleMouseCaptureFlipsModeAndClearsGestures(t *testing.T) {
+	m := newTestChatTUI()
+	m.transcript = []string{"hello world"}
+	m.wrappedLines = []string{"hello world"}
+	m.sel = selection{active: true, anchor: selPos{line: 0, col: 0}, head: selPos{line: 0, col: 5}}
+	m.scrollbarDrag = true
+	m.autoScroll = 1
+
+	m.toggleMouseCapture()
+	if !m.mouseCaptureOff {
+		t.Fatal("first toggle should turn mouse capture off")
+	}
+	if m.sel.active || m.scrollbarDrag || m.autoScroll != 0 {
+		t.Fatal("toggling mouse capture should clear any in-flight selection/drag")
+	}
+	if got := (*m.pendingCommit)[len(*m.pendingCommit)-1]; !strings.Contains(got, i18n.M.MouseCaptureOffHint) {
+		t.Fatalf("notice = %q, want it to contain %q", got, i18n.M.MouseCaptureOffHint)
+	}
+
+	m.toggleMouseCapture()
+	if m.mouseCaptureOff {
+		t.Fatal("second toggle should turn mouse capture back on")
+	}
+	if got := (*m.pendingCommit)[len(*m.pendingCommit)-1]; !strings.Contains(got, i18n.M.MouseCaptureOnHint) {
+		t.Fatalf("notice = %q, want it to contain %q", got, i18n.M.MouseCaptureOnHint)
+	}
+}
+
+// TestViewMouseModeFollowsCapture proves View() requests MouseModeNone (so
+// the terminal's native right-click menu and click-drag selection work) while
+// mouseCaptureOff is set, and MouseModeCellMotion (in-app selection/scrollbar/
+// wheel-scroll) otherwise.
+func TestViewMouseModeFollowsCapture(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 60)
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
+	m = m0.(chatTUI)
+
+	if got := m.View().MouseMode; got != tea.MouseModeCellMotion {
+		t.Fatalf("MouseMode with capture on = %v, want MouseModeCellMotion", got)
+	}
+
+	m.mouseCaptureOff = true
+	if got := m.View().MouseMode; got != tea.MouseModeNone {
+		t.Fatalf("MouseMode with capture off = %v, want MouseModeNone", got)
+	}
+	// Status line wraps at this width, so check the unwrapped tag rather than
+	// the rendered (possibly line-broken) View() content.
+	if got := m.mouseTag(); !strings.Contains(ansi.Strip(got), i18n.M.MouseCaptureTag) {
+		t.Fatalf("mouseTag() = %q, want it to contain %q", got, i18n.M.MouseCaptureTag)
+	}
+}
+
 func TestEchoLocalCommandAddsTranscriptMarker(t *testing.T) {
 	m := newTestChatTUI()
 	m.echoLocalCommand("  /tree  ")
@@ -1873,7 +2005,7 @@ func TestAutoPlanCommandPersistsAndUpdatesController(t *testing.T) {
 	input := "实现 GitHub issue #2395：\n- 新增配置项\n- 自动判断复杂任务\n- 补测试和文档"
 	ctrl.Send(input)
 	waitForCLIEvent(t, events, event.TurnDone)
-	if len(runner.inputs) != 1 || !strings.HasPrefix(runner.inputs[0], control.PlanModeMarker) {
+	if len(runner.inputs) != 1 || !strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), control.PlanModeMarker) {
 		t.Fatalf("/auto-plan on should affect current controller, inputs=%q", runner.inputs)
 	}
 }
@@ -1922,7 +2054,7 @@ func TestReasoningLanguageCommandPersistsAndUpdatesController(t *testing.T) {
 		t.Fatalf("saved config missing reasoning_language=zh:\n%s", body)
 	}
 	composed := ctrl.Compose("hello")
-	if !strings.HasPrefix(composed, "<reasoning-language>") || !strings.Contains(composed, "Simplified Chinese") {
+	if !strings.HasPrefix(composed, "<reasoning-language>") || !strings.Contains(composed, "简体中文") {
 		t.Fatalf("/reasoning-language zh should affect current controller, got %q", composed)
 	}
 }
@@ -2551,6 +2683,34 @@ func TestSessionSwitchSuppressesOneClearScreen(t *testing.T) {
 	}
 }
 
+func TestWideInputChangeRequestsClearScreen(t *testing.T) {
+	prev := clearWideInputChanges
+	clearWideInputChanges = true
+	defer func() { clearWideInputChanges = prev }()
+
+	m := newTestChatTUI()
+	m.input.SetValue("天安a")
+	m.input.SetCursorColumn(len([]rune("天安a")))
+
+	next, cmd := m.update(tea.KeyPressMsg{Code: '门', Text: "门"})
+	got := next.(chatTUI)
+	if got.input.Value() != "天安a门" {
+		t.Fatalf("wide-char insert should preserve the textarea value, got %q", got.input.Value())
+	}
+	if cmd == nil {
+		t.Fatal("wide-char input changes should request a full redraw")
+	}
+	if shouldClearWideInputChange("ascii", "ascii!") {
+		t.Fatal("single-width ASCII input should not request the wide-input redraw")
+	}
+	if !shouldClearWideInputChange("门", "") {
+		t.Fatal("removing the last wide character should request a full redraw")
+	}
+	if !shouldClearWideInputChange("a门", "a") {
+		t.Fatal("removing a wide character from mixed input should request a full redraw")
+	}
+}
+
 func TestReplayActiveBranchClearsPlanModeAndMarksSessionSwitch(t *testing.T) {
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{})
@@ -2754,6 +2914,56 @@ func TestPasteFoldExpandOnSubmit(t *testing.T) {
 	}
 }
 
+func TestSlashCodeCommentSubmitStartsTurn(t *testing.T) {
+	for _, input := range []string{
+		"// explain this",
+		"/**\n * 阿明\n */",
+	} {
+		t.Run(input, func(t *testing.T) {
+			r := &recordingTurnRunner{}
+			events := make(chan event.Event, 8)
+			ctrl := control.New(control.Options{
+				AutoPlan: "off",
+				Runner:   r,
+				Sink:     event.FuncSink(func(e event.Event) { events <- e }),
+			})
+			m := newTestChatTUI()
+			m.ctrl = ctrl
+			m.input.SetValue(input)
+
+			model, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			m = model.(chatTUI)
+			waitForCLIEvent(t, events, event.TurnDone)
+
+			if len(r.inputs) != 1 || r.inputs[0] != input {
+				t.Fatalf("slash code comment should start a model turn, inputs=%q", r.inputs)
+			}
+		})
+	}
+}
+
+func TestUnknownSlashCommandDoesNotStartTurn(t *testing.T) {
+	r := &recordingTurnRunner{}
+	ctrl := control.New(control.Options{
+		AutoPlan: "off",
+		Runner:   r,
+		Sink:     event.FuncSink(func(event.Event) {}),
+	})
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	m.input.SetValue("/definitely-not-a-command")
+
+	model, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = model.(chatTUI)
+
+	if len(r.inputs) != 0 {
+		t.Fatalf("unknown slash command should not start a model turn, inputs=%q", r.inputs)
+	}
+	if got := strings.Join(m.transcript, "\n"); !strings.Contains(got, "unknown command") {
+		t.Fatalf("unknown slash command should be reported in transcript, got:\n%s", got)
+	}
+}
+
 func TestPasteMsgFoldsBeforeTextareaConsumesNewlines(t *testing.T) {
 	m := newTestChatTUI()
 	model, _ := m.Update(tea.PasteMsg{Content: "1\n2\n3\n4\n5"})
@@ -2803,6 +3013,64 @@ func TestApprovalToolDetailsShortensMCPNames(t *testing.T) {
 	name, detail = approvalToolDetails("bash")
 	if name != "bash" || !strings.Contains(detail, "built-in") {
 		t.Errorf("built-in details = (%q, %q), want bash + built-in source", name, detail)
+	}
+}
+
+func TestSandboxEscapeApprovalBannerUsesRealEnvironmentChoice(t *testing.T) {
+	i18n.DetectLanguage("zh")
+	t.Cleanup(func() { i18n.DetectLanguage("en") })
+
+	m := newTestChatTUI()
+	m.width = 120
+	m.pendingApproval = &event.Approval{
+		ID:      "approval-1",
+		Tool:    control.SandboxEscapeApprovalTool,
+		Subject: "仅本次不进沙箱运行：go test ./...",
+		Reason:  "Windows 沙箱启动这条命令时失败。",
+	}
+	banner := m.renderApprovalBanner()
+	if !strings.Contains(banner, "本会话使用真实环境") {
+		t.Fatalf("approval banner = %q, want real-environment session choice", banner)
+	}
+	if !strings.Contains(banner, "允许一次") {
+		t.Fatalf("approval banner = %q, want desktop-matching allow-once choice", banner)
+	}
+	if !strings.Contains(banner, "3. 拒绝") || strings.Contains(banner, "4. 拒绝") {
+		t.Fatalf("approval banner = %q, want conventional 1/2/3 sandbox choices", banner)
+	}
+	if strings.Contains(banner, "sandbox_escape") {
+		t.Fatalf("approval banner leaked raw tool grant: %q", banner)
+	}
+}
+
+func TestFreshApprovalBannerUsesConventionalDenyChoice(t *testing.T) {
+	i18n.DetectLanguage("zh")
+	t.Cleanup(func() { i18n.DetectLanguage("en") })
+
+	m := newTestChatTUI()
+	m.width = 120
+	m.pendingApproval = &event.Approval{
+		ID:      "approval-1",
+		Tool:    "remember",
+		Subject: "保存/更新记忆",
+	}
+	banner := m.renderApprovalBanner()
+	if !strings.Contains(banner, "1. 本次允许") || !strings.Contains(banner, "2. 拒绝") {
+		t.Fatalf("approval banner = %q, want conventional 1/2 fresh choices", banner)
+	}
+	if strings.Contains(banner, "4. 拒绝") {
+		t.Fatalf("approval banner = %q, must not show non-consecutive deny choice", banner)
+	}
+}
+
+func TestFreshApprovalSessionChoiceIsLimitedToSandboxEscape(t *testing.T) {
+	if !freshApprovalAllowsSession(control.SandboxEscapeApprovalTool) {
+		t.Fatal("sandbox escape should allow an explicit session choice")
+	}
+	for _, toolName := range []string{"remember", "forget", planApprovalTool, agent.PlanModeReadOnlyCommandApprovalTool} {
+		if freshApprovalAllowsSession(toolName) {
+			t.Fatalf("%s should not allow the sandbox escape session choice", toolName)
+		}
 	}
 }
 

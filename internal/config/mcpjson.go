@@ -90,6 +90,9 @@ func specsToEntries(specs map[string]mcpServerSpec, skip map[string]bool) []Plug
 
 // legacyConfigPath is the v0.x (TypeScript line) config file, ~/.reasonix/config.json.
 func legacyConfigPath() string {
+	if IsolatedHomeDir() != "" {
+		return ""
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""

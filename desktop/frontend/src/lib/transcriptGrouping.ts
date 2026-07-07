@@ -74,6 +74,14 @@ export function questionTurnsById(questions: QuestionAnchor[]): Map<string, numb
   return turns;
 }
 
+export function lastQuestionTurn(questions: readonly QuestionAnchor[], turns: ReadonlyMap<string, number>): number | undefined {
+  for (let i = questions.length - 1; i >= 0; i -= 1) {
+    const turn = turns.get(questions[i].id);
+    if (turn != null) return turn;
+  }
+  return undefined;
+}
+
 export function scrollVersion(items: Item[]): string {
   return items
     .map((it) => {

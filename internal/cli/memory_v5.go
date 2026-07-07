@@ -37,18 +37,26 @@ func (m *chatTUI) runMemoryV5Command(input string) {
 		m.notice("memory-v5: cannot resolve config path")
 		return
 	}
-	edit := config.LoadForEdit(path)
-	if err := edit.SetMemoryCompilerEnabled(setting.enabled); err != nil {
-		m.notice("memory-v5: " + err.Error())
-		return
-	}
-	if setting.setVerbosity {
-		if err := edit.SetMemoryCompilerVerbosity(setting.verbosity); err != nil {
-			m.notice("memory-v5: " + err.Error())
-			return
+	// Lock only the load-modify-save cycle; the controller updates below run
+	// off-lock.
+	edit, err := func() (*config.Config, error) {
+		unlock := config.LockUserConfigEdits()
+		defer unlock()
+		edit := config.LoadForEdit(path)
+		if err := edit.SetMemoryCompilerEnabled(setting.enabled); err != nil {
+			return nil, err
 		}
-	}
-	if err := edit.SaveTo(path); err != nil {
+		if setting.setVerbosity {
+			if err := edit.SetMemoryCompilerVerbosity(setting.verbosity); err != nil {
+				return nil, err
+			}
+		}
+		if err := edit.SaveTo(path); err != nil {
+			return nil, err
+		}
+		return edit, nil
+	}()
+	if err != nil {
 		m.notice("memory-v5: " + err.Error())
 		return
 	}

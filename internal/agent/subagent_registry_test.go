@@ -143,9 +143,40 @@ func TestReadOnlySubagentToolRegistryKeepsOnlyResearchToolsAndSafeBash(t *testin
 	if err != nil || out != "safe bash ok" {
 		t.Fatalf("safe bash delegated to inner tool = %q, %v; want safe bash ok, nil", out, err)
 	}
+	out, err = bash.Execute(context.Background(), json.RawMessage(`{"command":"git status 2>/dev/null"}`))
+	if err != nil || out != "safe bash ok" {
+		t.Fatalf("safe redirected bash delegated to inner tool = %q, %v; want safe bash ok, nil", out, err)
+	}
 	out, err = bash.Execute(context.Background(), json.RawMessage(`{"command":"rm -rf tmp"}`))
 	if err != nil || !strings.HasPrefix(out, "blocked:") {
 		t.Fatalf("unsafe bash should be blocked as tool output, got %q, %v", out, err)
+	}
+}
+
+func TestReadOnlySubagentToolRegistryAllowsOnlyReadOnlyDelegationBeforeDepthLimit(t *testing.T) {
+	parent := tool.NewRegistry()
+	for _, name := range []string{"task", "run_skill", "explore", "read_only_task", "read_only_skill", "read_skill", "write_file"} {
+		parent.Add(subagentRegistryTool{name: name, readOnly: strings.HasPrefix(name, "read_only") || name == "read_skill"})
+	}
+	parent.Add(subagentRegistryTool{name: "read_file", readOnly: true})
+
+	firstLayer := ReadOnlySubagentToolRegistryForDepth(parent, nil, 1, 2)
+	for _, want := range []string{"read_file", "read_only_task", "read_only_skill", "read_skill"} {
+		if _, ok := firstLayer.Get(want); !ok {
+			t.Fatalf("first-layer read-only registry should expose %q; got %v", want, firstLayer.Names())
+		}
+	}
+	for _, hidden := range []string{"task", "run_skill", "explore", "write_file"} {
+		if _, ok := firstLayer.Get(hidden); ok {
+			t.Fatalf("first-layer read-only registry should hide %q; got %v", hidden, firstLayer.Names())
+		}
+	}
+
+	secondLayer := ReadOnlySubagentToolRegistryForDepth(parent, nil, 2, 2)
+	for _, hidden := range []string{"task", "run_skill", "read_only_task", "read_only_skill", "read_skill", "explore", "write_file"} {
+		if _, ok := secondLayer.Get(hidden); ok {
+			t.Fatalf("depth-limited read-only registry should hide %q; got %v", hidden, secondLayer.Names())
+		}
 	}
 }
 
@@ -177,12 +208,24 @@ func TestTaskToolBuildSubRegUsesSubagentToolRegistry(t *testing.T) {
 		name:   "bash",
 		schema: `{"type":"object","properties":{"command":{"type":"string"},"run_in_background":{"type":"boolean"}}}`,
 	})
-	task := &TaskTool{parentReg: parent}
+	task := (&TaskTool{parentReg: parent}).WithMaxSubagentDepth(2)
 
-	sub := task.buildSubReg(nil)
+	firstLayer := task.buildSubReg(nil, 1)
+	for _, exposed := range []string{"task", "read_only_task", "read_only_skill"} {
+		if _, ok := firstLayer.Get(exposed); !ok {
+			t.Fatalf("first-layer subagent registry should expose %q; got %v", exposed, firstLayer.Names())
+		}
+	}
+	for _, hidden := range []string{"parallel_tasks", "wait"} {
+		if _, ok := firstLayer.Get(hidden); ok {
+			t.Fatalf("first-layer subagent registry should hide %q; got %v", hidden, firstLayer.Names())
+		}
+	}
+
+	sub := task.buildSubReg(nil, 2)
 	for _, hidden := range []string{"task", "read_only_task", "read_only_skill", "parallel_tasks", "wait"} {
 		if _, ok := sub.Get(hidden); ok {
-			t.Fatalf("task subagent registry should hide %q; got %v", hidden, sub.Names())
+			t.Fatalf("depth-limited subagent registry should hide %q; got %v", hidden, sub.Names())
 		}
 	}
 	bash, ok := sub.Get("bash")

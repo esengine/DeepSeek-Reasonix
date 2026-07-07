@@ -33,12 +33,6 @@
   <a href="https://discord.gg/XF78rEME2D"><img src="https://img.shields.io/badge/discord-join-5865F2.svg?style=flat-square&labelColor=161b22&logo=discord&logoColor=white" alt="Discord"/></a>
 </p>
 
-<p align="center">
-  <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/9e931d80-2050-4b10-902e-44970cc133ad.svg" alt="oosmetrics — Top 2 in Agents by velocity"/></a>
-  <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/556d94b3-61b7-486b-baf2-888b9327deab.svg" alt="oosmetrics — Top 3 in LLMs by velocity"/></a>
-  <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/0f457d4c-efca-4d15-ad2b-139691ff342c.svg" alt="oosmetrics — Top 3 in CLI by velocity"/></a>
-</p>
-
 <br/>
 
 <h3 align="center">面向终端的 DeepSeek 原生 AI coding agent。</h3>
@@ -126,6 +120,7 @@ provider key 的运行时 fallback，但仍会作为当前 workspace 范围内�
 - **[机器人使用指南](./docs/BOT_GUIDE.zh-CN.md)** —— 桌面端连接飞书、Lark、微信
   Bot，以及 IM 里的审批、YOLO 和命令交互。
 - **[规格](./docs/SPEC.md)** —— 工程契约:架构、registry、数据类型与路线图。
+- **[任务合约与暂停策略](./docs/TASK_CONTRACT.zh-CN.md)** —— 用背景、输出边界、约束和暂停条件组织复杂请求。
 - **[工具合约](./docs/TOOL_CONTRACT.zh-CN.md)** —— provider 可见的内置工具名、
   read-only 标记和 schema 快照保护。
 - **[从 0.x 迁移](./docs/MIGRATING.md)** —— 从 legacy TypeScript 版本迁到 1.0 Go 重写版。

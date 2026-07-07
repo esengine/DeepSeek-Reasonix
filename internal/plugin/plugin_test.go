@@ -48,6 +48,40 @@ func (t *countingToolsTransport) toolsListCalls() int {
 	return t.calls
 }
 
+type sequenceToolsTransport struct {
+	mu    sync.Mutex
+	calls int
+	raws  []json.RawMessage
+}
+
+func (t *sequenceToolsTransport) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if method != "tools/list" {
+		return json.RawMessage(`{}`), nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.calls++
+	if len(t.raws) == 0 {
+		return json.RawMessage(`{"tools":[]}`), nil
+	}
+	idx := t.calls - 1
+	if idx >= len(t.raws) {
+		idx = len(t.raws) - 1
+	}
+	return t.raws[idx], nil
+}
+
+func (t *sequenceToolsTransport) notify(ctx context.Context, method string, params any) error {
+	return nil
+}
+func (t *sequenceToolsTransport) close() {}
+
+func (t *sequenceToolsTransport) toolsListCalls() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.calls
+}
+
 type deadlineRecordingTransport struct {
 	mu        sync.Mutex
 	deadline  []time.Duration
@@ -300,6 +334,34 @@ func TestHostToolsForCachesEmptyToolList(t *testing.T) {
 	}
 	if got := tr.toolsListCalls(); got != 1 {
 		t.Fatalf("empty tools/list calls = %d, want 1", got)
+	}
+}
+
+func TestClientListToolsRetriesAdvertisedEmptyToolList(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	tr := &sequenceToolsTransport{raws: []json.RawMessage{
+		json.RawMessage(`{"tools":[]}`),
+		json.RawMessage(`{"tools":[{"name":"echo","description":"Echo back the message.","inputSchema":{"type":"object"}}]}`),
+	}}
+	c := &Client{
+		name:      "race",
+		t:         tr,
+		spec:      Spec{Name: "race"},
+		transport: "stdio",
+		hasTools:  true,
+	}
+
+	tools, err := c.listTools(ctx)
+	if err != nil {
+		t.Fatalf("listTools: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name() != "mcp__race__echo" {
+		t.Fatalf("tools = %v, want mcp__race__echo", names(tools))
+	}
+	if got := tr.toolsListCalls(); got != 2 {
+		t.Fatalf("tools/list calls = %d, want 2", got)
 	}
 }
 

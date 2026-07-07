@@ -3,6 +3,7 @@ package builtin
 import (
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -13,13 +14,15 @@ import (
 
 // ConfineBash returns the bash built-in bound to an OS-sandbox spec, overriding
 // the unconfined instance registered at init. When the spec enforces, bash runs
-// each command through the sandbox (see package sandbox).
-func ConfineBash(spec sandbox.Spec, timeout ...time.Duration) tool.Tool {
+// each command through the sandbox (see package sandbox). guard appends a
+// warning to command output when the command references Reasonix's own session
+// stores (see SessionDataGuard).
+func ConfineBash(spec sandbox.Spec, guard SessionDataGuard, timeout ...time.Duration) tool.Tool {
 	shell := spec.Shell
 	if shell.Path == "" {
 		shell = sandbox.ResolveShell("", "", nil)
 	}
-	b := bash{sb: spec, shell: shell}
+	b := bash{sb: spec, shell: shell, guard: guard}
 	if len(timeout) > 0 {
 		b.timeout = timeout[0]
 	}
@@ -38,16 +41,18 @@ func ConfineWebFetch(proxySpec netclient.ProxySpec) tool.Tool {
 // the unconfined instances registered at init time, so writes stay inside the
 // workspace by default. roots may be relative; they are resolved to absolute,
 // symlink-free paths once here. An empty roots slice yields unconfined writers.
-func ConfineWriters(roots []string) []tool.Tool {
+// guard additionally rejects writes into Reasonix's own session stores even
+// when the roots would allow them (see SessionDataGuard).
+func ConfineWriters(roots []string, guard SessionDataGuard) []tool.Tool {
 	rs := realRoots(roots)
 	return []tool.Tool{
-		writeFile{roots: rs},
-		editFile{roots: rs},
-		multiEdit{roots: rs},
-		moveFile{roots: rs},
-		notebookEdit{roots: rs},
-		deleteRange{roots: rs},
-		deleteSymbol{roots: rs},
+		writeFile{roots: rs, guard: guard},
+		editFile{roots: rs, guard: guard},
+		multiEdit{roots: rs, guard: guard},
+		moveFile{roots: rs, guard: guard},
+		notebookEdit{roots: rs, guard: guard},
+		deleteRange{roots: rs, guard: guard},
+		deleteSymbol{roots: rs, guard: guard},
 	}
 }
 
@@ -69,7 +74,9 @@ func ConfineReaders(forbidRoots []string) []tool.Tool {
 // confineRead reports whether target is inside any forbidRoot. An empty
 // forbidRoots slice is unconfined (returns false). Callers should return a
 // result that mimics the directory appearing empty, matching
-// the tmpfs semantics the bubblewrap sandbox provides.
+// the tmpfs semantics the bubblewrap sandbox provides. Deny-side, so the
+// check folds case on case-insensitive platforms (see withinFold): a
+// case-variant of a forbidden path reaches the same bytes there.
 func confineRead(forbidRoots []string, target string) bool {
 	if len(forbidRoots) == 0 {
 		return false
@@ -79,7 +86,7 @@ func confineRead(forbidRoots []string, target string) bool {
 		return false // can't resolve -> let the caller's normal error path handle it
 	}
 	for _, r := range forbidRoots {
-		if within(r, abs) {
+		if withinFold(r, abs) {
 			return true
 		}
 	}
@@ -121,6 +128,17 @@ func confine(roots []string, target string) error {
 		target, strings.Join(roots, ", "))
 }
 
+// confineWrite is the write-tool boundary check: workspace confinement first,
+// then the session-data guard, so a write can be inside the roots (e.g. a
+// home-directory workspace covering the state root) and still be refused when
+// it targets Reasonix's own session stores.
+func confineWrite(roots []string, guard SessionDataGuard, target string) error {
+	if err := confine(roots, target); err != nil {
+		return err
+	}
+	return guard.Check(target)
+}
+
 // realPath resolves path to an absolute, symlink-free form. Because a write
 // target need not exist yet (write_file creates it), it resolves the deepest
 // existing ancestor with EvalSymlinks and re-appends the not-yet-existing tail.
@@ -156,4 +174,25 @@ func within(root, path string) bool {
 		return false
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// foldPaths reports whether deny-side path checks on this platform must ignore
+// case: the default filesystems on Windows (NTFS) and macOS (APFS/HFS+) are
+// case-insensitive, so /X/SESSIONS and /x/sessions reach the same bytes and a
+// case-variant must not slip past a deny rule. EvalSymlinks does NOT normalize
+// case, so realPath alone cannot be relied on for this.
+var foldPaths = runtime.GOOS == "windows" || runtime.GOOS == "darwin"
+
+// withinFold is within with platform case folding, for DENY-side checks only
+// (forbid-read roots, the session-data guard). Allow-side checks (confine)
+// keep the exact within: folding an allow rule on a case-sensitive filesystem
+// would wave a genuinely different directory through, whereas folding a deny
+// rule only ever refuses more. On a case-sensitive macOS volume this can
+// refuse a legitimate same-letters-different-case path; the error text points
+// at allow_write / forbid_read config as the way out.
+func withinFold(root, path string) bool {
+	if foldPaths {
+		return within(strings.ToLower(root), strings.ToLower(path))
+	}
+	return within(root, path)
 }

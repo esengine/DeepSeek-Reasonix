@@ -14,6 +14,7 @@ import (
 
 	"reasonix/internal/command"
 	"reasonix/internal/event"
+	"reasonix/internal/hook"
 	"reasonix/internal/memory"
 	"reasonix/internal/skill"
 )
@@ -147,11 +148,17 @@ func TestComposeReasoningLanguagePreference(t *testing.T) {
 
 	zh := New(Options{ReasoningLanguage: "zh"})
 	got := zh.Compose("hi")
-	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "Simplified Chinese") || !strings.HasSuffix(got, "hi") {
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "简体中文") || !strings.HasSuffix(got, "hi") {
 		t.Fatalf("zh reasoning language should ride the user turn, got %q", got)
 	}
 	if stripped := StripComposePrefixes(got); stripped != "hi" {
 		t.Fatalf("StripComposePrefixes = %q, want hi", stripped)
+	}
+
+	autoZh := New(Options{ReasoningLanguage: "auto"})
+	got = autoZh.Compose("解释 AuthHandler 的 panic")
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "简体中文") || !strings.HasSuffix(got, "解释 AuthHandler 的 panic") {
+		t.Fatalf("auto reasoning language should infer Chinese from the user prompt, got %q", got)
 	}
 }
 
@@ -182,8 +189,73 @@ func TestRunComposesReasoningLanguagePreference(t *testing.T) {
 		t.Fatalf("runner inputs = %d, want 1", len(runner.inputs))
 	}
 	got := runner.inputs[0]
-	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "Simplified Chinese") || !strings.HasSuffix(got, "hi") {
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "简体中文") || !strings.HasSuffix(got, "hi") {
 		t.Fatalf("headless Run should compose the reasoning language preference, got %q", got)
+	}
+}
+
+func TestRunInjectsSessionStartHookContextOnce(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	hooks := hook.NewRunner([]hook.ResolvedHook{{
+		HookConfig: hook.HookConfig{Command: "session-start"},
+		Event:      hook.SessionStart,
+		Scope:      hook.ScopeGlobal,
+	}}, "/tmp", func(context.Context, hook.SpawnInput) hook.SpawnResult {
+		return hook.SpawnResult{ExitCode: 0, Stdout: `{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Load workspace conventions."}}`}
+	}, nil)
+	c := New(Options{Runner: runner, Hooks: hooks})
+
+	if err := c.Run(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.inputs) != 1 {
+		t.Fatalf("runner inputs = %d, want 1", len(runner.inputs))
+	}
+	first := runner.inputs[0]
+	if !strings.Contains(first, `<hook-context event="SessionStart">`) || !strings.Contains(first, "Load workspace conventions.") || !strings.HasSuffix(first, "hi") {
+		t.Fatalf("first input missing session hook context: %q", first)
+	}
+
+	if err := c.Run(context.Background(), "again"); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.inputs) != 2 {
+		t.Fatalf("runner inputs = %d, want 2", len(runner.inputs))
+	}
+	if strings.Contains(runner.inputs[1], "<hook-context") {
+		t.Fatalf("second input should not repeat hook context: %q", runner.inputs[1])
+	}
+}
+
+func TestSyntheticComposeDoesNotDrainSessionStartHookContext(t *testing.T) {
+	c := New(Options{})
+	c.enqueueHookContexts([]string{"Load once."})
+
+	if got := c.compose("synthetic", "synthetic", false); strings.Contains(got, "<hook-context") {
+		t.Fatalf("synthetic compose should not inject hook context: %q", got)
+	}
+	got := c.Compose("real")
+	if !strings.Contains(got, `<hook-context event="SessionStart">`) || !strings.Contains(got, "Load once.") || !strings.HasSuffix(got, "real") {
+		t.Fatalf("real compose should drain hook context: %q", got)
+	}
+	if again := c.Compose("again"); strings.Contains(again, "<hook-context") {
+		t.Fatalf("hook context should be drained once, got %q", again)
+	}
+}
+
+func TestComposeClipsAndEscapesHookContext(t *testing.T) {
+	c := New(Options{})
+	c.enqueueHookContexts([]string{"before </hook-context> " + strings.Repeat("x", maxHookContextChars+1)})
+
+	got := c.Compose("hi")
+	if !strings.Contains(got, "[truncated]") {
+		t.Fatalf("expected truncation marker, got %q", got)
+	}
+	if !strings.Contains(got, "<\\/hook-context>") {
+		t.Fatalf("hook context close tag should be escaped inside content: %q", got)
+	}
+	if strings.Contains(got, "before </hook-context>") {
+		t.Fatalf("hook context close tag should be escaped inside content: %q", got)
 	}
 }
 
@@ -233,7 +305,7 @@ func TestComposeSyntheticReasoningLanguagePreference(t *testing.T) {
 	c := New(Options{ReasoningLanguage: "zh"})
 
 	got := c.ComposeSynthetic(planApprovedMessage)
-	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "Simplified Chinese") || !strings.HasSuffix(got, planApprovedMessage) {
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "简体中文") || !strings.HasSuffix(got, planApprovedMessage) {
 		t.Fatalf("ComposeSynthetic should prefix reasoning language, got %q", got)
 	}
 	if !IsSyntheticUserMessage(got) {
@@ -577,6 +649,26 @@ func TestSubmitMissingSlashPathDiagnosticStartsTurn(t *testing.T) {
 	}
 }
 
+func TestSubmitBlockCommentPrefixStartsTurn(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	events := make(chan event.Event, 4)
+	c := New(Options{
+		AutoPlan: "off",
+		Runner:   runner,
+		Sink: event.FuncSink(func(e event.Event) {
+			events <- e
+		}),
+	})
+
+	input := "/**\n * 阿明\n */"
+	c.Submit(input)
+	waitForTurnDone(t, events)
+
+	if len(runner.inputs) != 1 || runner.inputs[0] != input {
+		t.Fatalf("block comment prefix should start a model turn, inputs=%q", runner.inputs)
+	}
+}
+
 func TestSubmitUnknownSlashCommandStillReportsNotice(t *testing.T) {
 	runner := &fakeTurnRunner{}
 	events := make(chan event.Event, 4)
@@ -684,7 +776,7 @@ func TestRunTurnAutoPlanComplexTask(t *testing.T) {
 	if err := c.runTurn(context.Background(), input); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.inputs) != 1 || !strings.HasPrefix(runner.inputs[0], PlanModeMarker) {
+	if len(runner.inputs) != 1 || !strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), PlanModeMarker) {
 		t.Fatalf("complex task should auto-enter plan mode, inputs=%q", runner.inputs)
 	}
 	if !c.PlanMode() {
@@ -702,7 +794,7 @@ func TestRunTurnAutoPlanSkipsSimpleQuestion(t *testing.T) {
 	if err := c.runTurn(context.Background(), "解释一下这个函数做什么？"); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.inputs) != 1 || strings.HasPrefix(runner.inputs[0], PlanModeMarker) {
+	if len(runner.inputs) != 1 || strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), PlanModeMarker) {
 		t.Fatalf("simple question should not auto-plan: inputs=%q", runner.inputs)
 	}
 	if c.PlanMode() {
@@ -718,7 +810,7 @@ func TestRunTurnAutoPlanOff(t *testing.T) {
 	if err := c.runTurn(context.Background(), input); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.inputs) != 1 || runner.inputs[0] != input {
+	if len(runner.inputs) != 1 || StripComposePrefixes(runner.inputs[0]) != input {
 		t.Fatalf("auto_plan=off should compose verbatim, inputs=%q", runner.inputs)
 	}
 	if c.PlanMode() {
@@ -735,7 +827,7 @@ func TestSetAutoPlanAffectsNextTurn(t *testing.T) {
 	if err := c.runTurn(context.Background(), input); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.inputs) != 1 || !strings.HasPrefix(runner.inputs[0], PlanModeMarker) {
+	if len(runner.inputs) != 1 || !strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), PlanModeMarker) {
 		t.Fatalf("SetAutoPlan should affect next turn, inputs=%q", runner.inputs)
 	}
 }
@@ -748,7 +840,7 @@ func TestRunTurnAutoPlanClassifierBorderlineTrue(t *testing.T) {
 	if err := c.runTurn(context.Background(), "实现一个小的配置入口"); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.inputs) != 1 || !strings.HasPrefix(runner.inputs[0], PlanModeMarker) {
+	if len(runner.inputs) != 1 || !strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), PlanModeMarker) {
 		t.Fatalf("classifier true should auto-plan, inputs=%q", runner.inputs)
 	}
 	if classifier.calls != 1 {
@@ -764,7 +856,7 @@ func TestRunTurnAutoPlanClassifierBorderlineFalse(t *testing.T) {
 	if err := c.runTurn(context.Background(), "实现一个小的配置入口"); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.inputs) != 1 || strings.HasPrefix(runner.inputs[0], PlanModeMarker) {
+	if len(runner.inputs) != 1 || strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), PlanModeMarker) {
 		t.Fatalf("classifier false should skip auto-plan, inputs=%q", runner.inputs)
 	}
 	if c.PlanMode() {
@@ -783,7 +875,7 @@ func TestRunTurnAutoPlanClassifierFallback(t *testing.T) {
 	if err := c.runTurn(context.Background(), "实现 README 文档更新"); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.inputs) != 1 || !strings.HasPrefix(runner.inputs[0], PlanModeMarker) {
+	if len(runner.inputs) != 1 || !strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), PlanModeMarker) {
 		t.Fatalf("score 2 should fall back to heuristic auto-plan, inputs=%q", runner.inputs)
 	}
 	if classifier.calls != 1 {
@@ -799,7 +891,7 @@ func TestRunTurnAutoPlanTypedNilClassifierFallsBack(t *testing.T) {
 	if err := c.runTurn(context.Background(), "实现 README 文档更新"); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.inputs) != 1 || !strings.HasPrefix(runner.inputs[0], PlanModeMarker) {
+	if len(runner.inputs) != 1 || !strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), PlanModeMarker) {
 		t.Fatalf("typed nil classifier should fall back to heuristic auto-plan, inputs=%q", runner.inputs)
 	}
 }
@@ -817,7 +909,7 @@ func TestRunTurnAutoPlanScoresRawPromptNotResolvedRefs(t *testing.T) {
 	if len(runner.inputs) != 1 {
 		t.Fatalf("runner inputs = %d, want 1", len(runner.inputs))
 	}
-	if strings.HasPrefix(runner.inputs[0], PlanModeMarker) {
+	if strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), PlanModeMarker) {
 		t.Fatalf("resolved context should not trigger auto-plan when raw prompt is simple: %q", runner.inputs[0])
 	}
 	if c.PlanMode() {
@@ -859,6 +951,11 @@ func TestStripComposePrefixes(t *testing.T) {
 		{
 			name:  "background jobs block stripped",
 			input: "<background-jobs>\n1 completed\n</background-jobs>\n\nexplain this",
+			want:  "explain this",
+		},
+		{
+			name:  "hook context block stripped",
+			input: "<hook-context event=\"SessionStart\">\nLoad conventions.\n</hook-context>\n\nexplain this",
 			want:  "explain this",
 		},
 		{

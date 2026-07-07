@@ -5,6 +5,7 @@ import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { Composer } from "../components/Composer";
+import { UserMessage } from "../components/Message";
 import { LocaleProvider } from "../lib/i18n";
 import { ToastProvider } from "../lib/toast";
 import type { CollaborationMode, TokenMode, ToolApprovalMode } from "../lib/types";
@@ -137,7 +138,9 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
       root.render(
         <LocaleProvider>
           <ToastProvider>
-            <Composer {...currentProps} />
+            <div className="chat-pane">
+              <Composer {...currentProps} />
+            </div>
           </ToastProvider>
         </LocaleProvider>,
       );
@@ -181,6 +184,29 @@ function imagePasteEvent(file: File): Event {
     },
   });
   return event;
+}
+
+function imageViewerOpen(): boolean {
+  return Boolean(document.querySelector(".image-viewer-backdrop .image-viewer__image"));
+}
+
+function renderUserMessage(text: string, props: Partial<Parameters<typeof UserMessage>[0]> = {}) {
+  const rootEl = document.getElementById("root");
+  if (!rootEl) throw new Error("missing root");
+  const root = createRoot(rootEl);
+  const paint = async () => {
+    await act(async () => {
+      root.render(
+        <LocaleProvider>
+          <div className="chat-pane">
+            <UserMessage text={text} {...props} />
+          </div>
+        </LocaleProvider>,
+      );
+      await flushTimers();
+    });
+  };
+  return { root, paint };
 }
 
 console.log("\ncomposer image capability");
@@ -248,6 +274,108 @@ console.log("\ncomposer image capability");
   ok(toastText().includes("will not receive images directly"), "text-only send warns about direct image input without blocking");
   eq(document.querySelector(".composer__prompt") === null, true, "image-input warning does not render inside the composer layout");
   ok(sent[0]?.submit?.includes("@.reasonix/attachments/mock.png") === true, "submitted text retains the local image attachment ref");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  installBridgeApp({
+    SavePastedImage: async () => ".reasonix/attachments/mock.png",
+    AttachmentDataURL: async () => "data:image/png;base64,iVBORw0KGgo=",
+  });
+  const { root } = await renderComposer({ imageInputEnabled: true });
+  const file = new File(["img"], "photo.png", { type: "image/png", lastModified: 1 });
+
+  await act(async () => {
+    textarea().dispatchEvent(imagePasteEvent(file));
+    await flushTimers();
+    await flushTimers();
+  });
+  await waitFor(() => Boolean(document.querySelector(".composer-context__thumb img")));
+  const thumb = document.querySelector(".composer-context__thumb") as HTMLElement | null;
+  if (!thumb) throw new Error("missing composer image thumbnail");
+  await act(async () => {
+    thumb.click();
+    await flushTimers();
+  });
+  await waitFor(imageViewerOpen);
+  ok(imageViewerOpen(), "composer image thumbnail opens the image viewer");
+
+  await act(async () => {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await flushTimers();
+  });
+  await waitFor(() => !document.querySelector(".image-viewer-backdrop"));
+  ok(!document.querySelector(".image-viewer-backdrop"), "composer image viewer closes on Escape");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  installBridgeApp({
+    AttachmentDataURL: async () => "data:image/png;base64,iVBORw0KGgo=",
+  });
+  const { root, paint } = renderUserMessage("check @[photo.png](.reasonix/attachments/mock.png)");
+  await paint();
+  await waitFor(() => Boolean(document.querySelector(".msg-attachment--image img")));
+  const thumb = document.querySelector(".msg-attachment--image") as HTMLElement | null;
+  if (!thumb) throw new Error("missing message image thumbnail");
+  await act(async () => {
+    thumb.click();
+    await flushTimers();
+  });
+  await waitFor(() => Boolean(document.querySelector(".chat-pane > .image-viewer-backdrop")));
+  ok(Boolean(document.querySelector(".chat-pane > .image-viewer-backdrop")), "sent message image preview portals into the chat pane");
+
+  const close = document.querySelector(".image-viewer__close") as HTMLButtonElement | null;
+  if (!close) throw new Error("missing image viewer close button");
+  await act(async () => {
+    close.click();
+    await flushTimers();
+  });
+  await waitFor(() => !document.querySelector(".image-viewer-backdrop"));
+  ok(!document.querySelector(".image-viewer-backdrop"), "sent message image viewer closes from the close button");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  installBridgeApp({
+    AttachmentDataURL: async () => "data:image/png;base64,iVBORw0KGgo=",
+  });
+  const { root, paint } = renderUserMessage("check @[photo.png](.reasonix/attachments/mock.png)", {
+    turn: 1,
+    onEdit: () => true,
+  });
+  await paint();
+  await waitFor(() => Boolean(document.querySelector(".msg-attachment--image img")));
+  const edit = document.querySelector("button.msg-meta__btn:not(.msg-meta__copy)") as HTMLButtonElement | null;
+  if (!edit) throw new Error("missing message edit button");
+  await act(async () => {
+    edit.click();
+    await flushTimers();
+  });
+  await waitFor(() => Boolean(document.querySelector(".msg-edit .composer-context__thumb img")));
+  const thumb = document.querySelector(".msg-edit .composer-context__thumb") as HTMLElement | null;
+  if (!thumb) throw new Error("missing edit image thumbnail");
+  await act(async () => {
+    thumb.click();
+    await flushTimers();
+  });
+  await waitFor(imageViewerOpen);
+  ok(imageViewerOpen(), "edit message image thumbnail opens the image viewer");
 
   await act(async () => {
     root.unmount();

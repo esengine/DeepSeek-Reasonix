@@ -8,6 +8,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
 
@@ -183,6 +184,20 @@ func (c *Coordinator) SetPlanModeReadOnlyTrustGate(g PlanModeReadOnlyTrustGate) 
 	}
 }
 
+// SetSandboxEscapeApprover propagates one-shot shell sandbox escape approvals to
+// both tool-using agents in two-model mode.
+func (c *Coordinator) SetSandboxEscapeApprover(g sandbox.EscapeApprover) {
+	if c == nil {
+		return
+	}
+	if c.plannerAgent != nil {
+		c.plannerAgent.SetSandboxEscapeApprover(g)
+	}
+	if c.executor != nil {
+		c.executor.SetSandboxEscapeApprover(g)
+	}
+}
+
 // Run plans with the planner model, then hands the plan to the executor.
 func (c *Coordinator) Run(ctx context.Context, input string) error {
 	c.sink.Emit(event.Event{Kind: event.TurnStarted})
@@ -281,7 +296,7 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 
 	ch, err := c.planner.Stream(ctx, provider.Request{
 		Messages:    c.plannerSess.Messages,
-		Temperature: c.temperature,
+		Temperature: provider.OptionalTemperature(c.temperature),
 	})
 	if err != nil {
 		return "", err

@@ -14,6 +14,7 @@ func TestIsReadOnlyBashSubject(t *testing.T) {
 		{"head -n 5 file.txt", true},
 		{"find . -name '*.go'", true},
 		{"grep TODO *.go", true},
+		{"grep 'a|b' file", true},
 		{"rg pattern", true},
 		{"echo hello", true},
 		{"pwd", true},
@@ -31,6 +32,12 @@ func TestIsReadOnlyBashSubject(t *testing.T) {
 		{"git diff", true},
 		{"git show HEAD", true},
 		{"git blame main.go", true},
+		{"git log 2>/dev/null", true},
+		{"git log >/dev/null", true},
+		{"git log >$null", true},
+		{"git log >NUL", true},
+		{"git log 2>&1", true},
+		{"git log &>/dev/null", true},
 		{"git remote", false},
 		{"git remote add origin git@example.com:x/y", false},
 		{"git config --global user.name Xinwei", false},
@@ -40,6 +47,11 @@ func TestIsReadOnlyBashSubject(t *testing.T) {
 		{"git bundle create repo.bundle HEAD", false},
 		{"git diff --output changes.patch", false},
 		{"git show --output=changes.patch HEAD", false},
+		{"git diff --output changes.patch 2>/dev/null", false},
+		{"git log > changes.patch", false},
+		{"git log >$nullish", false},
+		{"git log >nul.txt", false},
+		{"git log < /dev/null", false},
 
 		// Go read-only
 		{"go vet ./...", true},
@@ -50,6 +62,7 @@ func TestIsReadOnlyBashSubject(t *testing.T) {
 
 		// Not read-only
 		{"rm file.txt", false},
+		{"echo $HOME", false},
 		{"rm -rf /", false},
 		{"env rm -rf /", false},
 		{"git commit -m 'msg'", false},

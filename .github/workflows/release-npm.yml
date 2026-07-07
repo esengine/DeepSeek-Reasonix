@@ -6,16 +6,17 @@ name: Release npm
 # own tag lets a prerelease ship to npm's `next` channel without touching the
 # stable Homebrew cask (and lets a stable cask ship without forcing npm to leave
 # its rc). Bump with:
-#   git tag npm-vX.Y.Z          # stable  -> publishes under `next`
+#   git tag npm-vX.Y.Z          # stable  -> publishes under `latest`
 #   git tag npm-vX.Y.Z-rc.N     # prerelease -> publishes under `next`
 #   git push origin <tag>
 #
 # A manual workflow_dispatch can publish either an opt-in canary from the current
 # ref or an approved stable/next version when tag creation is restricted. Canary
 # publishes to the `canary` dist-tag (npm i reasonix@canary) and never moves
-# `next`/`latest`. build.mjs decides the dist-tag: 0.x stable is `latest`; a
-# `-canary.` build is `canary`; the 1.x line and rc prereleases are `next`. Promote
-# a 1.x stable to the default install with `npm dist-tag add reasonix@X.Y.Z latest`.
+# `next`/`latest`. build.mjs decides the dist-tag: a `-canary.` build is `canary`,
+# any other prerelease is `next`, and a stable version is `latest` (#5822 — the
+# old "promote latest by hand" rule left it pinned at 0.53.2 and downgraded
+# `npm update -g` users). The verify step below asserts the tag actually landed.
 on:
   push:
     tags: ['npm-v*']
@@ -86,3 +87,28 @@ jobs:
       - run: node npm/build.mjs "${{ steps.ver.outputs.arg }}" --publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Assert the dist-tag landed where build.mjs aimed it. This is the guard
+      # that #5822 lacked: `latest` sat on 0.53.2 for months while stables went
+      # to `next`, and nothing noticed until users got downgraded. The registry
+      # applies tags asynchronously after publish, hence the poll.
+      - name: Verify dist-tags
+        run: |
+          set -euo pipefail
+          version="${{ steps.ver.outputs.arg }}"
+          version="${version#npm-}"; version="${version#v}"
+          case "$version" in
+            *-canary.*) tag=canary ;;
+            *-*)        tag=next ;;
+            *)          tag=latest ;;
+          esac
+          for attempt in 1 2 3 4 5 6; do
+            got="$(npm view reasonix dist-tags."$tag" 2>/dev/null || true)"
+            if [ "$got" = "$version" ]; then
+              echo "dist-tag $tag -> $got"
+              exit 0
+            fi
+            echo "dist-tag $tag -> ${got:-<unset>}, want $version (attempt $attempt)"
+            sleep 10
+          done
+          echo "::error::npm dist-tag '$tag' never landed on $version"
+          exit 1

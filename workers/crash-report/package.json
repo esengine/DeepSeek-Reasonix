@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "hono": "^4.6.14",
     "zod": "^3.25.0"
   },
   "devDependencies": {

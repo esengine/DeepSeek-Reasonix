@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"runtime/debug"
+	"strconv"
 	"strings"
 
 	"reasonix/internal/event"
@@ -29,22 +30,30 @@ If you need to ask for clarification, fail with a precise question instead of gu
 const DefaultReadOnlyTaskSystemPrompt = `You are a read-only research sub-agent invoked by a parent coding agent.
 Use only the provided read-only tools to inspect code, docs, history, and safe shell output.
 Do not attempt to write files, install capabilities, mutate memory, control long-lived
-processes, or delegate to another agent. Return a concise, self-contained final answer
-with the evidence the parent needs.`
+processes, or delegate to writer-capable agents. If a read-only delegation tool is
+available and genuinely useful, you may use it within the configured depth limit.
+Return a concise, self-contained final answer with the evidence the parent needs.`
 
-var subagentMetaTools = []string{
+const subagentStartContext = `<subagent-context event="SubagentStart">
+Before acting, check the available skills and tools. If a relevant skill is available, invoke it before continuing. Delegate to another sub-agent only when the task genuinely benefits from isolated context and the delegation tool is available.
+</subagent-context>`
+
+var subagentRecursiveTools = []string{
 	"task",
 	"read_only_task",
-	"parallel_tasks",
 	"run_skill",
 	"read_only_skill",
 	"read_skill",
-	"install_skill",
-	"install_source",
 	"explore",
 	"research",
 	"review",
 	"security_review",
+}
+
+var subagentAlwaysHiddenTools = []string{
+	"parallel_tasks",
+	"install_skill",
+	"install_source",
 }
 
 var subagentJobTools = []string{
@@ -57,15 +66,15 @@ var readOnlySubagentWorkflowTools = []string{
 	"connect_tool_source",
 }
 
-const subagentToolBoundarySummary = "Recursive agent/skill tools and unsupported background job tools (wait, bash_output, kill_shell) are excluded; bash is exposed as foreground-only inside subagents."
+const subagentToolBoundarySummary = "Recursive agent/skill tools are exposed only while max_subagent_depth leaves another delegation layer; unsupported background job tools (parallel_tasks, wait, bash_output, kill_shell) are excluded; bash is exposed as foreground-only inside subagents."
 
 // SubagentMetaTools returns the tool names that spawned agents should not inherit
 // from the parent registry unless a future call site deliberately opts into a
 // different boundary. They can spawn or author more agent work, so excluding them
 // preserves one layer of delegation without adding a spawn-count cap.
 func SubagentMetaTools() []string {
-	out := make([]string, len(subagentMetaTools))
-	copy(out, subagentMetaTools)
+	out := append([]string(nil), subagentRecursiveTools...)
+	out = append(out, subagentAlwaysHiddenTools...)
 	return out
 }
 
@@ -75,7 +84,18 @@ func SubagentMetaTools() []string {
 // sub-agents. When bash is present, it is wrapped to advertise and allow only
 // foreground execution.
 func SubagentToolRegistry(parent *tool.Registry, names []string) *tool.Registry {
-	exclude := append(SubagentMetaTools(), subagentJobTools...)
+	return SubagentToolRegistryForDepth(parent, names, 1, 1)
+}
+
+// SubagentToolRegistryForDepth returns the writer-capable tool set for a spawned
+// subagent at childDepth. Recursive delegation tools are available only when the
+// child still has room to spawn one more subagent.
+func SubagentToolRegistryForDepth(parent *tool.Registry, names []string, childDepth, maxDepth int) *tool.Registry {
+	exclude := append([]string(nil), subagentAlwaysHiddenTools...)
+	if childDepth >= NormalizeMaxSubagentDepth(maxDepth) {
+		exclude = append(exclude, subagentRecursiveTools...)
+	}
+	exclude = append(exclude, subagentJobTools...)
 	sub := FilterRegistry(parent, names, exclude...)
 	if bash, ok := sub.Get("bash"); ok {
 		sub.Add(foregroundOnlyBash{inner: bash})
@@ -178,6 +198,7 @@ type TaskTool struct {
 	baseModel           string
 	baseEffort          string
 	identityProfile     func(modelRef, effort string) (string, string)
+	maxSubagentDepth    int
 }
 
 // NewTaskTool wires a task tool to the parent agent's environment so its
@@ -211,6 +232,7 @@ func NewTaskTool(prov provider.Provider, pricing *provider.Pricing, parentReg *t
 		subagentModel:       subagentModel,
 		subagentEffort:      subagentEffort,
 		resolveProvider:     resolveProvider,
+		maxSubagentDepth:    DefaultMaxSubagentDepth,
 	}
 }
 
@@ -227,6 +249,11 @@ func (t *TaskTool) WithTranscripts(store *SubagentStore, workspaceRoot, baseMode
 
 func (t *TaskTool) WithTranscriptIdentityResolver(resolve func(modelRef, effort string) (string, string)) *TaskTool {
 	t.identityProfile = resolve
+	return t
+}
+
+func (t *TaskTool) WithMaxSubagentDepth(depth int) *TaskTool {
+	t.maxSubagentDepth = NormalizeMaxSubagentDepth(depth)
 	return t
 }
 
@@ -288,7 +315,7 @@ func NewReadOnlyTaskTool(task *TaskTool) *ReadOnlyTaskTool {
 func (*ReadOnlyTaskTool) Name() string { return "read_only_task" }
 
 func (*ReadOnlyTaskTool) Description() string {
-	return "Spawn a read-only research sub-agent for a focused investigation. The sub-agent runs in an isolated, ephemeral session with read-only tools only; bash is wrapped to allow only plan-mode safe foreground commands. It cannot write files, install capabilities, mutate memory, run background jobs, continue/fork transcripts, or delegate to other agents. Only its final answer is returned."
+	return "Spawn a read-only research sub-agent for a focused investigation. The sub-agent runs in an isolated, ephemeral session with read-only tools only; bash is wrapped to allow only plan-mode safe foreground commands. It cannot write files, install capabilities, mutate memory, run background jobs, continue/fork transcripts, or delegate to writer-capable agents. Read-only nested delegation may be available until max_subagent_depth is reached. Only its final answer is returned."
 }
 
 func (*ReadOnlyTaskTool) Schema() json.RawMessage {
@@ -347,7 +374,11 @@ func (r *ReadOnlyTaskTool) Execute(ctx context.Context, args json.RawMessage) (s
 		}
 	}
 
-	subReg := ReadOnlySubagentToolRegistry(r.task.parentReg, p.Tools)
+	childDepth, err := r.task.nextSubagentDepth(ctx)
+	if err != nil {
+		return "", err
+	}
+	subReg := ReadOnlySubagentToolRegistryForDepth(r.task.parentReg, p.Tools, childDepth, r.task.maxDepth())
 	if subReg.Len() == 0 {
 		return "", fmt.Errorf("read_only_task has no read-only tools available")
 	}
@@ -356,7 +387,7 @@ func (r *ReadOnlyTaskTool) Execute(ctx context.Context, args json.RawMessage) (s
 	if err != nil {
 		return "", fmt.Errorf("read-only sub-agent profile: %w", err)
 	}
-	return r.task.runSubSession(ctx, p.Prompt, subReg, subSink(ctx), maxSteps, prov, pricing, ctxWin, NewSession(DefaultReadOnlyTaskSystemPrompt))
+	return r.task.runSubSession(ctx, p.Prompt, subReg, subSink(ctx), maxSteps, prov, pricing, ctxWin, NewSession(DefaultReadOnlyTaskSystemPrompt), childDepth)
 }
 
 func (t *TaskTool) effectiveProfile(model, effort string) (string, string) {
@@ -405,7 +436,11 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		}
 	}
 
-	subReg := t.buildSubReg(p.Tools)
+	childDepth, err := t.nextSubagentDepth(ctx)
+	if err != nil {
+		return "", err
+	}
+	subReg := t.buildSubReg(p.Tools, childDepth)
 	modelRef, effortRef := t.effectiveProfile(p.Model, p.Effort)
 	parentID, parent, _, _ := CallContext(ctx)
 	run, err := t.prepareTranscriptRun(subReg, modelRef, effortRef, ParentSession(ctx), parentID, p.ContinueFrom, p.ForkFrom)
@@ -450,7 +485,7 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 					err = errors.Join(panicErr, t.transcripts.SaveFailed(run))
 				}
 			}()
-			answer, err := t.runSubSession(jobCtx, p.Prompt, subReg, nested, maxSteps, prov, pricing, ctxWin, run.Session)
+			answer, err := t.runSubSession(jobCtx, p.Prompt, subReg, nested, maxSteps, prov, pricing, ctxWin, run.Session, childDepth)
 			if err != nil {
 				return FormatSubagentRunResult("", run, true), errors.Join(err, t.transcripts.SaveFailed(run))
 			}
@@ -467,7 +502,7 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 
 	// Foreground: run synchronously, nesting events under this call.
 	defer run.Release()
-	answer, err := t.runSubSession(ctx, p.Prompt, subReg, subSink(ctx), maxSteps, prov, pricing, ctxWin, run.Session)
+	answer, err := t.runSubSession(ctx, p.Prompt, subReg, subSink(ctx), maxSteps, prov, pricing, ctxWin, run.Session, childDepth)
 	if err != nil {
 		return "", errors.Join(err, t.transcripts.SaveFailed(run))
 	}
@@ -545,8 +580,28 @@ func (t *TaskTool) effectiveEffortIdentity(effort string) string {
 
 // buildSubReg returns the sub-agent's tool set: the named whitelist (minus
 // unavailable sub-agent tools), or every parent tool except those tools.
-func (t *TaskTool) buildSubReg(names []string) *tool.Registry {
-	return SubagentToolRegistry(t.parentReg, names)
+func (t *TaskTool) buildSubReg(names []string, childDepth int) *tool.Registry {
+	return SubagentToolRegistryForDepth(t.parentReg, names, childDepth, t.maxDepth())
+}
+
+func (t *TaskTool) maxDepth() int {
+	if t == nil {
+		return DefaultMaxSubagentDepth
+	}
+	if t.maxSubagentDepth == 0 {
+		return DefaultMaxSubagentDepth
+	}
+	return NormalizeMaxSubagentDepth(t.maxSubagentDepth)
+}
+
+func (t *TaskTool) nextSubagentDepth(ctx context.Context) (int, error) {
+	current := SubagentDepth(ctx)
+	next := current + 1
+	maxDepth := t.maxDepth()
+	if next > maxDepth {
+		return 0, fmt.Errorf("subagent delegation depth limit reached (max_subagent_depth=%d)", maxDepth)
+	}
+	return next, nil
 }
 
 // FilterRegistry builds a sub-registry from parent: the named whitelist (empty =
@@ -600,7 +655,20 @@ func PlannerToolRegistry(parent *tool.Registry) *tool.Registry {
 // plan-mode safe command policy at execution time. Workflow/meta tools are
 // excluded even when their Tool.ReadOnly contract is true.
 func ReadOnlySubagentToolRegistry(parent *tool.Registry, names []string) *tool.Registry {
-	exclude := append(SubagentMetaTools(), subagentJobTools...)
+	return ReadOnlySubagentToolRegistryForDepth(parent, names, 1, 1)
+}
+
+// ReadOnlySubagentToolRegistryForDepth returns the tool set exposed to read-only
+// subagents. It permits only read-only delegation tools while another depth
+// layer is available.
+func ReadOnlySubagentToolRegistryForDepth(parent *tool.Registry, names []string, childDepth, maxDepth int) *tool.Registry {
+	exclude := append([]string(nil), subagentAlwaysHiddenTools...)
+	if childDepth >= NormalizeMaxSubagentDepth(maxDepth) {
+		exclude = append(exclude, subagentRecursiveTools...)
+	} else {
+		exclude = append(exclude, "task", "run_skill", "explore", "research", "review", "security_review")
+	}
+	exclude = append(exclude, subagentJobTools...)
 	exclude = append(exclude, plannerNonResearchTools...)
 	exclude = append(exclude, readOnlySubagentWorkflowTools...)
 	ex := make(map[string]bool, len(exclude))
@@ -679,7 +747,8 @@ func (t *TaskTool) resolveSubSessionRuntime(modelRef, effort string) (provider.P
 	return prov, pricing, ctxWin, nil
 }
 
-func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session) (string, error) {
+func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int) (string, error) {
+	prompt = t.withWorkspaceContext(prompt)
 	return RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, Options{
 		MaxSteps:            maxSteps,
 		Temperature:         t.temperature,
@@ -696,7 +765,31 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 		KeepPolicy:          t.keepPolicy,
 		ResponseLanguage:    ResponseLanguageFromContext(ctx),
 		ReasoningLanguage:   ReasoningLanguageFromContext(ctx),
+		SubagentDepth:       childDepth,
+		MaxSubagentDepth:    t.maxDepth(),
 	}, sink)
+}
+
+func (t *TaskTool) withWorkspaceContext(prompt string) string {
+	if t == nil {
+		return prompt
+	}
+	ctx := subagentWorkspaceContext(t.workspaceRoot)
+	if ctx == "" {
+		return prompt
+	}
+	return ctx + "\n\n" + prompt
+}
+
+func subagentWorkspaceContext(root string) string {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return ""
+	}
+	return `<workspace-context event="SubagentWorkspace">
+Current workspace: ` + strconv.Quote(root) + `
+File tools resolve relative paths against this workspace. For project inspection, prefer "." or relative paths unless the user explicitly named another absolute path.
+</workspace-context>`
 }
 
 func FormatSubagentReference(run *SubagentRun) string {
@@ -736,6 +829,12 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 	if sess == nil {
 		return "", fmt.Errorf("sub-agent session is nil")
 	}
+	if opts.SubagentDepth > 0 {
+		ctx = WithSubagentDepth(ctx, opts.SubagentDepth)
+	}
+	if opts.SubagentDepth > 0 && isFreshSubagentSession(sess) {
+		prompt = subagentStartContext + "\n\n" + prompt
+	}
 	sub := New(prov, reg, sess, opts, sink)
 	if err := sub.Run(ctx, prompt); err != nil {
 		return "", fmt.Errorf("sub-agent: %w", err)
@@ -750,6 +849,14 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 		}
 	}
 	return "", fmt.Errorf("sub-agent finished without producing a final answer")
+}
+
+func isFreshSubagentSession(sess *Session) bool {
+	if sess == nil {
+		return false
+	}
+	snap := sess.Snapshot()
+	return len(snap) == 1 && snap[0].Role == provider.RoleSystem
 }
 
 // NestedSink returns a sink that forwards a sub-agent's tool activity to the

@@ -191,6 +191,10 @@ func (c codeIndex) parseFile(path string) ([]codeSymbol, error) {
 	if filepath.Ext(path) == ".go" {
 		return c.parseGo(path)
 	}
+	if treeSymbols, ok, err := c.parseTreeSitter(path); ok && err == nil {
+		textSymbols, _ := c.parseText(path)
+		return mergeCodeSymbols(treeSymbols, textSymbols), nil
+	}
 	return c.parseText(path)
 }
 
@@ -328,6 +332,33 @@ func formatCodeSymbols(symbols []codeSymbol, truncated bool) string {
 		b.WriteString("... (truncated; narrow path/query/kind or raise limit)\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func mergeCodeSymbols(primary, fallback []codeSymbol) []codeSymbol {
+	if len(primary) == 0 {
+		return fallback
+	}
+	if len(fallback) == 0 {
+		return primary
+	}
+	out := append([]codeSymbol(nil), primary...)
+	seen := make(map[string]struct{}, len(primary)+len(fallback))
+	for _, s := range primary {
+		seen[codeSymbolIdentity(s)] = struct{}{}
+	}
+	for _, s := range fallback {
+		key := codeSymbolIdentity(s)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
+func codeSymbolIdentity(s codeSymbol) string {
+	return fmt.Sprintf("%s:%d:%s:%s:%s", s.File, s.Line, s.Kind, s.Parent, s.Name)
 }
 
 func supportedCodeIndexFile(path string) bool {

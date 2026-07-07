@@ -43,7 +43,7 @@ ok(
   "App loads secondary drawers on demand",
 );
 ok(
-  !/import\s+\{[^}]*\b(?:MCPServersSettingsPage|SkillsSettingsPage)\b[^}]*\}\s+from\s+["']\.\/CapabilitiesPanel["']/.test(settingsSource) &&
+  !/import\s+\{[^}]*\b(?:MCPServersSettingsPage|SkillsSettingsPage|PluginsSettingsPage)\b[^}]*\}\s+from\s+["']\.\/CapabilitiesPanel["']/.test(settingsSource) &&
     !/import\s+\{[^}]*\bMemorySettingsPage\b[^}]*\}\s+from\s+["']\.\/MemoryPanel["']/.test(settingsSource),
   "SettingsPanel keeps secondary settings pages out of the first settings chunk",
 );

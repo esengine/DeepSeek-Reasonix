@@ -73,12 +73,14 @@ func (m *chatTUI) runBranchCommand(input string) {
 		if _, err := m.ctrl.ForkNamed(n-1, name); err != nil {
 			return
 		}
+		m.followSessionLease()
 		m.replayActiveBranch(fmt.Sprintf("branched from turn %d", n))
 		return
 	} else {
 		if _, err := m.ctrl.Branch(name); err != nil {
 			return
 		}
+		m.followSessionLease()
 	}
 	m.showBranchTree()
 }
@@ -89,7 +91,23 @@ func (m *chatTUI) runSwitchCommand(input string) {
 		m.notice("usage: /switch <branch id|name>")
 		return
 	}
+	// Move the session lease before the controller binds the target branch for
+	// writing; a branch held by another runtime is refused here. Resolution
+	// failures fall through to SwitchBranch, which reports them as before.
+	if m.leases != nil {
+		if branches, err := m.ctrl.Branches(); err == nil {
+			if match, err := control.ResolveBranchRef(branches, ref); err == nil {
+				if err := m.rebindSessionLease(match.Path); err != nil {
+					m.notice("switch: " + sessionLeaseHeldNotice(err))
+					return
+				}
+			}
+		}
+	}
 	if _, err := m.ctrl.SwitchBranch(ref); err != nil {
+		// The switch failed after the lease already moved; re-point it at the
+		// session the controller still owns.
+		m.restoreSessionLease()
 		return
 	}
 	m.replayActiveBranch("switched branch")

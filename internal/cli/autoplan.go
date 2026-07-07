@@ -32,12 +32,21 @@ func (m *chatTUI) runAutoPlanCommand(input string) {
 		m.notice("auto-plan: cannot resolve config path")
 		return
 	}
-	edit := config.LoadForEdit(path)
-	if err := edit.SetAutoPlan(args[1]); err != nil {
-		m.notice("auto-plan: " + err.Error())
-		return
-	}
-	if err := edit.SaveTo(path); err != nil {
+	// Lock only the load-modify-save cycle; the controller update below runs
+	// off-lock.
+	edit, err := func() (*config.Config, error) {
+		unlock := config.LockUserConfigEdits()
+		defer unlock()
+		edit := config.LoadForEdit(path)
+		if err := edit.SetAutoPlan(args[1]); err != nil {
+			return nil, err
+		}
+		if err := edit.SaveTo(path); err != nil {
+			return nil, err
+		}
+		return edit, nil
+	}()
+	if err != nil {
 		m.notice("auto-plan: " + err.Error())
 		return
 	}

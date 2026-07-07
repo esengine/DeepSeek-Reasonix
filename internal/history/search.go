@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/provider"
 	"reasonix/internal/retrieval"
+	"reasonix/internal/store"
 )
 
 // Kind identifies the part of a saved message indexed for retrieval.
@@ -249,9 +250,10 @@ func (s *Searcher) Around(ctx context.Context, req AroundRequest) ([]MessageCont
 	if start < 0 {
 		start = 0
 	}
-	end := req.MessageIndex + after + 1
-	if end > len(msgs) {
-		end = len(msgs)
+	remainingAfter := len(msgs) - req.MessageIndex - 1
+	end := len(msgs)
+	if after < remainingAfter {
+		end = len(msgs) - (remainingAfter - after)
 	}
 	out := make([]MessageContext, 0, end-start)
 	for i := start; i < end; i++ {
@@ -343,7 +345,7 @@ func listJSONL(dir, source string, visible func(string) bool) []sourceFile {
 	}
 	var out []sourceFile
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".jsonl" {
+		if entry.IsDir() || !store.IsSessionTranscriptName(entry.Name()) {
 			continue
 		}
 		info, err := entry.Info()
@@ -354,10 +356,16 @@ func listJSONL(dir, source string, visible func(string) bool) []sourceFile {
 		if visible != nil && !visible(path) {
 			continue
 		}
+		// Recency must track the event log too: the .jsonl checkpoint's mtime
+		// only moves at checkpoints.
+		mod := info.ModTime()
+		if contentMod := agent.SessionContentModTime(path); !contentMod.IsZero() {
+			mod = contentMod
+		}
 		out = append(out, sourceFile{
 			path:   path,
 			source: source,
-			mod:    info.ModTime().UnixNano(),
+			mod:    mod.UnixNano(),
 		})
 	}
 	return out

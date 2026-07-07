@@ -538,17 +538,18 @@ func TestSetReasoningLanguage(t *testing.T) {
 func TestNormalizeEffortDeepSeek(t *testing.T) {
 	e := &ProviderEntry{Name: "deepseek", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4"}
 	cap := EffortCapabilityForEntry(e)
-	if !cap.Supported || len(cap.Levels) != 3 || cap.Levels[0] != "auto" || cap.Levels[1] != "high" || cap.Levels[2] != "max" {
-		t.Fatalf("DeepSeek levels = %+v, want auto/high/max", cap)
+	if !cap.Supported || len(cap.Levels) != 4 || cap.Levels[0] != "auto" || cap.Levels[1] != "disabled" || cap.Levels[2] != "high" || cap.Levels[3] != "max" {
+		t.Fatalf("DeepSeek levels = %+v, want auto/disabled/high/max", cap)
 	}
-	for in, want := range map[string]string{"auto": "", "high": "high", "max": "max", "low": "high", "medium": "high", "xhigh": "max"} {
+	for in, want := range map[string]string{"auto": "", "disabled": "disabled", "high": "high", "max": "max", "low": "high", "medium": "high", "xhigh": "max"} {
 		got, err := NormalizeEffort(e, in)
 		if err != nil || got != want {
 			t.Fatalf("NormalizeEffort(%q) = %q/%v, want %q/nil", in, got, err, want)
 		}
 	}
-	if _, err := NormalizeEffort(e, "off"); err == nil {
-		t.Fatal("DeepSeek /effort must reject off")
+	// "off" is the retired DeepSeek "no thinking" spelling — now maps to disabled.
+	if got, err := NormalizeEffort(e, "off"); err != nil || got != "disabled" {
+		t.Fatalf("NormalizeEffort(\"off\") = %q/%v, want \"disabled\"/nil", got, err)
 	}
 }
 
@@ -1533,7 +1534,7 @@ func TestEffortCapabilityUsesKnownModelRegistry(t *testing.T) {
 	if !cap.Supported {
 		t.Fatalf("deepseek model behind proxy should expose effort, got %+v", cap)
 	}
-	wantLevels := []string{"auto", "high", "max"}
+	wantLevels := []string{"auto", "disabled", "high", "max"}
 	if len(cap.Levels) != len(wantLevels) {
 		t.Fatalf("levels = %v, want %v", cap.Levels, wantLevels)
 	}

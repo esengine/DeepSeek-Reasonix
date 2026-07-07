@@ -7,7 +7,7 @@ import { createRoot } from "react-dom/client";
 import { WorkspacePanel } from "../components/WorkspacePanel";
 import { LocaleProvider } from "../lib/i18n";
 import type { AppBindings } from "../lib/bridge";
-import type { WorkspaceChangesView } from "../lib/types";
+import type { DirEntry, WorkspaceChangesView } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -101,6 +101,47 @@ async function renderWorkspace(changes: WorkspaceChangesView) {
   return { dom, root };
 }
 
+async function renderFilesWorkspace(methods: Partial<AppBindings>, props: Partial<Parameters<typeof WorkspacePanel>[0]> = {}) {
+  const dom = installDom();
+  window.go = {
+    main: {
+      App: {
+        ListDir: async () => [],
+        SearchFileRefs: async () => [],
+        WorkspaceGitHistory: async () => [],
+        WorkspaceChanges: async () => ({ files: [], gitAvailable: true }),
+        ...methods,
+      } as Partial<AppBindings> as AppBindings,
+    },
+  };
+  const rootEl = document.getElementById("root");
+  if (!rootEl) throw new Error("missing root");
+  const root = createRoot(rootEl);
+  let currentProps: Parameters<typeof WorkspacePanel>[0] = {
+    open: true,
+    tabId: "tab-a",
+    cwd: "/repo",
+    maximized: false,
+    initialViewMode: "files",
+    onClose: () => {},
+    onToggleMaximized: () => {},
+    ...props,
+  };
+  const rerender = async (nextProps: Partial<Parameters<typeof WorkspacePanel>[0]> = {}) => {
+    currentProps = { ...currentProps, ...nextProps };
+    await act(async () => {
+      root.render(
+        <LocaleProvider>
+          <WorkspacePanel {...currentProps} />
+        </LocaleProvider>,
+      );
+      await flushPromises();
+    });
+  };
+  await rerender();
+  return { dom, root, rerender };
+}
+
 console.log("\nworkspace changes git errors");
 
 {
@@ -145,6 +186,29 @@ console.log("\nworkspace changes git errors");
   await waitFor("git error warning with files", () => document.body.textContent?.includes("app.ts") === true);
   ok(document.body.textContent?.includes("Git status is unavailable for this workspace.") === true, "gitErr renders a warning");
   ok(document.body.textContent?.includes("app.ts") === true, "files still render when gitErr is present");
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const calls: string[] = [];
+  const listDir = async (dir: string): Promise<DirEntry[]> => {
+    calls.push(dir);
+    return [];
+  };
+  const { dom, root, rerender } = await renderFilesWorkspace(
+    { ListDir: listDir },
+    { fileListRequest: { id: 1, paths: ["src/app.ts"] } },
+  );
+
+  await waitFor("initial referenced file dirs", () => calls.filter((dir) => dir === "src/").length === 1);
+  await rerender({ fileListRequest: { id: 2, paths: ["src/app.ts"] } });
+  await waitFor("referenced file dirs revalidated", () => calls.filter((dir) => dir === "src/").length === 2);
+
+  ok(calls.filter((dir) => dir === "src/").length === 2, "workspace file tree revalidates cached directories for repeated file-list requests");
+
   await act(async () => {
     root.unmount();
   });

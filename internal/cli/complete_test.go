@@ -557,7 +557,8 @@ func TestFuzzyFilterSlashSubsequence(t *testing.T) {
 
 // TestFuzzyFilterSlashPrefixFirst proves prefix hits rank ahead of
 // subsequence-only hits, matching the menu behavior we want: typing "/mo"
-// should put /model at the top, not buried after non-prefix matches.
+// should put /model and /mouse (both true "/mo" prefixes) at the top, not
+// buried after non-prefix matches.
 func TestFuzzyFilterSlashPrefixFirst(t *testing.T) {
 	m := newTestChatTUI()
 	m.input.SetValue("/mo")
@@ -566,15 +567,17 @@ func TestFuzzyFilterSlashPrefixFirst(t *testing.T) {
 	if !m.completion.active {
 		t.Fatal("menu should open for /mo")
 	}
-	// /model is the only built-in whose label starts with /mo.
-	if len(m.completion.items) == 0 || m.completion.items[0].label != "/model" {
-		t.Fatalf("prefix hit /model should rank first, got %v", labels(m.completion.items))
+	// /model and /mouse are the only built-ins whose label starts with /mo;
+	// slashItems() declares /model first, and the filter is stable, so it
+	// leads.
+	if len(m.completion.items) < 2 || m.completion.items[0].label != "/model" || m.completion.items[1].label != "/mouse" {
+		t.Fatalf("prefix hits /model, /mouse should rank first in declaration order, got %v", labels(m.completion.items))
 	}
 	// Any other built-ins in the list are subsequence-only matches and must
 	// therefore NOT be prefix hits of /mo.
-	for _, it := range m.completion.items[1:] {
+	for _, it := range m.completion.items[2:] {
 		if strings.HasPrefix(it.label, "/mo") {
-			t.Errorf("%q should not appear after /model (it is a prefix hit too)", it.label)
+			t.Errorf("%q should not appear after the /mo prefix hits", it.label)
 		}
 	}
 }

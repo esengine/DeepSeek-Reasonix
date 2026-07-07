@@ -97,9 +97,11 @@ func LoadForRoot(root string) (*Config, error) {
 	// from the TypeScript line keeps MCP servers without rewriting them. Anything
 	// the v2 config or .mcp.json already declared wins on a name collision.
 	cfg.mergeMCPJSON(loadLegacyMCP(legacyConfigPath()))
+	_ = mergeInstalledPluginPackages(cfg, root)
 	normalizePluginCommandLines(cfg)
 	normalizeLegacyEffort(cfg)
 	normalizeLegacyMCPTiers(cfg)
+	normalizeLegacyStepFunBaseURLs(cfg)
 	normalizeLegacyMimoCustomProviders(cfg)
 	normalizeLegacyProviderModels(cfg)
 	normalizeDesktopOfficialProviderAccess(cfg)
@@ -403,8 +405,8 @@ func loadForEditStrict(path string, loadCredentials bool) (*Config, error) {
 	if err := mergeFile(cfg, path); err != nil {
 		return nil, err
 	}
-	migratedMimo := normalizeConfigForEdit(cfg)
-	if migratedMimo && strings.TrimSpace(path) != "" {
+	changed := normalizeConfigForEdit(cfg)
+	if changed && strings.TrimSpace(path) != "" {
 		if _, err := os.Stat(path); err == nil {
 			if err := cfg.SaveTo(path); err != nil {
 				return nil, err
@@ -418,13 +420,14 @@ func normalizeConfigForEdit(cfg *Config) bool {
 	normalizePluginCommandLines(cfg)
 	normalizeLegacyEffort(cfg)
 	normalizeLegacyMCPTiers(cfg)
-	migratedMimo := normalizeLegacyMimoCustomProviders(cfg)
+	changed := normalizeLegacyStepFunBaseURLs(cfg)
+	changed = normalizeLegacyMimoCustomProviders(cfg) || changed
 	normalizeLegacyProviderModels(cfg)
 	normalizeDesktopOfficialProviderAccess(cfg)
 	applyDeepSeekOfficialDefaultPricing(cfg)
 	backfillDeepSeekOfficialPrices(cfg)
 	normalizeEffortConfig(cfg)
-	return migratedMimo
+	return changed
 }
 
 func loadDotEnvForEditPath(path string) {
@@ -545,6 +548,43 @@ func normalizeLegacyProviderModels(c *Config) {
 			p.Model = model
 		}
 	}
+}
+
+const (
+	legacyStepFunOpenAIBaseURL      = "https://api.stepfun.ai/step_plan/v1"
+	officialStepFunOpenAIBaseURL    = "https://api.stepfun.com/step_plan/v1"
+	legacyStepFunAnthropicBaseURL   = "https://api.stepfun.ai/step_plan"
+	officialStepFunAnthropicBaseURL = "https://api.stepfun.com/step_plan"
+)
+
+func normalizeLegacyStepFunBaseURLs(c *Config) bool {
+	if c == nil {
+		return false
+	}
+	changed := false
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		switch {
+		case isLegacyStepFunPresetProvider(*p, "stepfun", "openai") && normalizedBaseURLForMigration(p.BaseURL) == legacyStepFunOpenAIBaseURL:
+			p.BaseURL = officialStepFunOpenAIBaseURL
+			changed = true
+		case isLegacyStepFunPresetProvider(*p, "stepfun-anthropic", "anthropic") && normalizedBaseURLForMigration(p.BaseURL) == legacyStepFunAnthropicBaseURL:
+			p.BaseURL = officialStepFunAnthropicBaseURL
+			changed = true
+		}
+	}
+	return changed
+}
+
+func isLegacyStepFunPresetProvider(p ProviderEntry, id, kind string) bool {
+	if !strings.EqualFold(strings.TrimSpace(p.Kind), kind) {
+		return false
+	}
+	return strings.TrimSpace(p.Name) == id || strings.TrimSpace(p.PresetID) == id
+}
+
+func normalizedBaseURLForMigration(raw string) string {
+	return strings.TrimRight(strings.TrimSpace(raw), "/")
 }
 
 func normalizeLegacyMimoProviderCatalogs(c *Config) bool {

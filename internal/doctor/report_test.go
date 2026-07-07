@@ -115,14 +115,17 @@ func TestRenderTextSurfacesWarningsUpTop(t *testing.T) {
 	}
 }
 
-func TestRenderTextFlagsInactiveSandbox(t *testing.T) {
+func TestRenderTextFlagsUnavailableSandboxAsFailClosed(t *testing.T) {
 	inactive := RenderText(Report{Sandbox: SandboxReport{Bash: "enforce", Available: false}})
-	if !strings.Contains(inactive, "inactive") {
-		t.Fatalf("enforce without an OS sandbox should be flagged inactive:\n%s", inactive)
+	if !strings.Contains(inactive, "bash execution is refused") {
+		t.Fatalf("enforce without an OS sandbox should report fail-closed bash behavior:\n%s", inactive)
+	}
+	if strings.Contains(inactive, "runs unconfined") {
+		t.Fatalf("enforce without an OS sandbox should not claim bash runs unconfined:\n%s", inactive)
 	}
 
 	active := RenderText(Report{Sandbox: SandboxReport{Bash: "enforce", Available: true}})
-	if strings.Contains(active, "inactive") {
-		t.Fatalf("enforce with an OS sandbox should not be flagged inactive:\n%s", active)
+	if strings.Contains(active, "bash execution is refused") {
+		t.Fatalf("enforce with an OS sandbox should not be flagged unavailable:\n%s", active)
 	}
 }

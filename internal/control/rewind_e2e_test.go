@@ -109,6 +109,7 @@ func TestEditPromptPersistsOriginalPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.SubmitEditedDisplay("edited prompt", "edited prompt", "second prompt")
+	defer c.autosaveWG.Wait()
 
 	var loaded *agent.Session
 	deadline := time.Now().Add(time.Second)

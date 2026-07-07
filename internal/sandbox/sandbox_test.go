@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// --- Spec.enforce ---
+// --- Spec.Enforce ---
 
 func TestEnforce(t *testing.T) {
 	cases := []struct {
@@ -22,8 +22,8 @@ func TestEnforce(t *testing.T) {
 	}
 	for _, c := range cases {
 		s := Spec{Mode: c.mode}
-		if got := s.enforce(); got != c.want {
-			t.Errorf("Spec{%q}.enforce() = %v, want %v", c.mode, got, c.want)
+		if got := s.Enforce(); got != c.want {
+			t.Errorf("Spec{%q}.Enforce() = %v, want %v", c.mode, got, c.want)
 		}
 	}
 }
@@ -32,7 +32,7 @@ func TestEnforce(t *testing.T) {
 
 func TestSpecZeroValue(t *testing.T) {
 	var s Spec
-	if s.enforce() {
+	if s.Enforce() {
 		t.Error("zero-value Spec should not enforce")
 	}
 	if s.Network {
@@ -40,6 +40,19 @@ func TestSpecZeroValue(t *testing.T) {
 	}
 	if len(s.WriteRoots) != 0 {
 		t.Error("zero-value Spec should have no write roots")
+	}
+}
+
+func TestUnavailableMessageIsActionable(t *testing.T) {
+	msg := UnavailableMessage()
+	for _, want := range []string{
+		"refusing to run unconfined",
+		`[sandbox] bash = "off"`,
+		"Settings -> Sandbox",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("UnavailableMessage() = %q, want %q", msg, want)
+		}
 	}
 }
 
@@ -301,6 +314,9 @@ func TestCommandDarwinNonEnforce(t *testing.T) {
 func TestAvailableNonDarwin(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("testing non-darwin path")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("windows has its own helper-backed sandbox availability")
 	}
 	_, err := exec.LookPath("bwrap")
 	if Available() != (err == nil) {

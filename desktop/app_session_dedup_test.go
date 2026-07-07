@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -166,6 +168,60 @@ func TestEnsureBlankTabReusesIndexedTopicWithEmptyStub(t *testing.T) {
 	}
 }
 
+func TestEnsureBlankTabStoresCreatedAt(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	before := time.Now().UnixMilli()
+	meta, err := app.EnsureBlankTab("global", "")
+	after := time.Now().UnixMilli()
+	if err != nil {
+		t.Fatalf("EnsureBlankTab: %v", err)
+	}
+
+	createdAt := loadTopicCreatedAt("", meta.TopicID)
+	if createdAt < before || createdAt > after {
+		t.Fatalf("createdAt = %d, want between %d and %d", createdAt, before, after)
+	}
+
+	nodes := app.ListProjectTree()
+	if len(nodes) != 1 || nodes[0].Kind != "global_folder" || len(nodes[0].Children) != 1 {
+		t.Fatalf("project tree = %#v, want Global with one topic", nodes)
+	}
+	if got := nodes[0].Children[0].CreatedAt; got != createdAt {
+		t.Fatalf("project tree createdAt = %d, want %d", got, createdAt)
+	}
+}
+
+func TestEnsureBlankTabRepairsMissingCreatedAtForReusedTopic(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	const topicID = "topic_20260704-104018_deadbeef"
+	if err := setTopicTitleWithSource("", topicID, defaultTopicTitle, topicTitleSourceAuto); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	if err := prependTopicInProjectsFile("", topicID, false); err != nil {
+		t.Fatalf("prepend topic: %v", err)
+	}
+	if got := loadTopicCreatedAt("", topicID); got != 0 {
+		t.Fatalf("createdAt before reuse = %d, want 0", got)
+	}
+
+	app := NewApp()
+	meta, err := app.EnsureBlankTab("global", "")
+	if err != nil {
+		t.Fatalf("EnsureBlankTab: %v", err)
+	}
+	if meta.TopicID != topicID {
+		t.Fatalf("EnsureBlankTab topic = %q, want reused topic %q", meta.TopicID, topicID)
+	}
+
+	expected := time.Date(2026, 7, 4, 10, 40, 18, 0, time.UTC).UnixMilli()
+	if got := loadTopicCreatedAt("", topicID); got != expected {
+		t.Fatalf("repaired createdAt = %d, want %d", got, expected)
+	}
+}
+
 // EnsureBlankTab reuses an already-open project-scoped blank tab.
 
 func TestEnsureBlankTabCreatesOneBlankPerProject(t *testing.T) {
@@ -186,6 +242,221 @@ func TestEnsureBlankTabCreatesOneBlankPerProject(t *testing.T) {
 	}
 	if tabs := app.ListTabs(); len(tabs) != 1 {
 		t.Fatalf("ListTabs length = %d, want 1: %+v", len(tabs), tabs)
+	}
+}
+
+func TestEnsureBlankTabStartsProjectRuntimeWithCurrentWorkspacePrompt(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectA := robustTempDir(t)
+	projectB := robustTempDir(t)
+	if err := addProject(projectA, "Project A"); err != nil {
+		t.Fatalf("add project A: %v", err)
+	}
+	if err := addProject(projectB, "Project B"); err != nil {
+		t.Fatalf("add project B: %v", err)
+	}
+
+	app := NewApp()
+	first, err := app.EnsureBlankTab("project", projectA)
+	if err != nil {
+		t.Fatalf("EnsureBlankTab(project A): %v", err)
+	}
+	tabA := waitForTabReady(t, app, first.ID)
+	if got := normalizeProjectRoot(tabA.Ctrl.WorkspaceRoot()); got != normalizeProjectRoot(projectA) {
+		t.Fatalf("project A controller workspace root = %q, want %q", got, normalizeProjectRoot(projectA))
+	}
+
+	second, err := app.EnsureBlankTab("project", projectB)
+	if err != nil {
+		t.Fatalf("EnsureBlankTab(project B): %v", err)
+	}
+	if second.ID == first.ID {
+		t.Fatalf("EnsureBlankTab reused project A tab %q for project B", second.ID)
+	}
+	tabB := waitForTabReady(t, app, second.ID)
+
+	if got := normalizeProjectRoot(tabB.WorkspaceRoot); got != normalizeProjectRoot(projectB) {
+		t.Fatalf("project B tab workspace root = %q, want %q", got, normalizeProjectRoot(projectB))
+	}
+	if got := normalizeProjectRoot(tabB.Ctrl.WorkspaceRoot()); got != normalizeProjectRoot(projectB) {
+		t.Fatalf("project B controller workspace root = %q, want %q", got, normalizeProjectRoot(projectB))
+	}
+	if !sameDesktopPath(tabB.Ctrl.SessionDir(), desktopSessionDir(projectB)) {
+		t.Fatalf("project B controller session dir = %q, want %q", tabB.Ctrl.SessionDir(), desktopSessionDir(projectB))
+	}
+	if !sameDesktopPath(filepath.Dir(tabB.Ctrl.SessionPath()), desktopSessionDir(projectB)) {
+		t.Fatalf("project B controller session path = %q, want under %q", tabB.Ctrl.SessionPath(), desktopSessionDir(projectB))
+	}
+	sys := systemPromptFrom(tabB.Ctrl.History())
+	if !strings.Contains(sys, "Current workspace: "+strconv.Quote(projectB)) {
+		t.Fatalf("project B system prompt missing current workspace %q:\n%s", projectB, sys)
+	}
+	if strings.Contains(sys, "Current workspace: "+strconv.Quote(projectA)) {
+		t.Fatalf("project B system prompt retained project A workspace %q:\n%s", projectA, sys)
+	}
+}
+
+func TestBlankTabSessionPathRejectsOtherProjectWorkspace(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectA := robustTempDir(t)
+	projectB := robustTempDir(t)
+	pathA, err := createEmptySessionFile(desktopSessionDir(projectA), "test-model")
+	if err != nil {
+		t.Fatalf("create project A empty session: %v", err)
+	}
+	tab := &WorkspaceTab{
+		ID:            "blank-project-b",
+		Scope:         "project",
+		WorkspaceRoot: projectB,
+		SessionPath:   pathA,
+	}
+
+	if blankTabSessionPathHasNoContent(tab) {
+		t.Fatalf("blank tab treated session %q from project A as reusable for project B %q", pathA, projectB)
+	}
+}
+
+func TestForkKeepsProjectWorkspacePrompt(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectA := robustTempDir(t)
+	projectB := robustTempDir(t)
+	if err := addProject(projectA, "Project A"); err != nil {
+		t.Fatalf("add project A: %v", err)
+	}
+	if err := addProject(projectB, "Project B"); err != nil {
+		t.Fatalf("add project B: %v", err)
+	}
+
+	app := NewApp()
+	first, err := app.EnsureBlankTab("project", projectA)
+	if err != nil {
+		t.Fatalf("EnsureBlankTab(project A): %v", err)
+	}
+	waitForTabReady(t, app, first.ID)
+
+	second, err := app.EnsureBlankTab("project", projectB)
+	if err != nil {
+		t.Fatalf("EnsureBlankTab(project B): %v", err)
+	}
+	tabB := waitForTabReady(t, app, second.ID)
+	ctrl := installStubControllerWithCurrentPrompt(t, app, tabB)
+	turn := submitStubTurnAndWaitForCheckpoint(t, ctrl, "project B turn")
+
+	forked, err := app.Fork(turn)
+	if err != nil {
+		t.Fatalf("Fork: %v", err)
+	}
+	if forked.ID == "" || forked.ID == second.ID {
+		t.Fatalf("forked tab ID = %q, want a fresh tab distinct from %q", forked.ID, second.ID)
+	}
+	forkTab := waitForTabReady(t, app, forked.ID)
+	if got := normalizeProjectRoot(forkTab.WorkspaceRoot); got != normalizeProjectRoot(projectB) {
+		t.Fatalf("fork tab workspace root = %q, want %q", got, normalizeProjectRoot(projectB))
+	}
+	if got := normalizeProjectRoot(forkTab.Ctrl.WorkspaceRoot()); got != normalizeProjectRoot(projectB) {
+		t.Fatalf("fork controller workspace root = %q, want %q", got, normalizeProjectRoot(projectB))
+	}
+	sys := systemPromptFrom(forkTab.Ctrl.History())
+	if !strings.Contains(sys, "Current workspace: "+strconv.Quote(projectB)) {
+		t.Fatalf("fork system prompt missing project B workspace %q:\n%s", projectB, sys)
+	}
+	if strings.Contains(sys, "Current workspace: "+strconv.Quote(projectA)) {
+		t.Fatalf("fork system prompt retained project A workspace %q:\n%s", projectA, sys)
+	}
+}
+
+func TestRewindKeepsProjectWorkspacePrompt(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectA := robustTempDir(t)
+	projectB := robustTempDir(t)
+	if err := addProject(projectA, "Project A"); err != nil {
+		t.Fatalf("add project A: %v", err)
+	}
+	if err := addProject(projectB, "Project B"); err != nil {
+		t.Fatalf("add project B: %v", err)
+	}
+
+	app := NewApp()
+	first, err := app.EnsureBlankTab("project", projectA)
+	if err != nil {
+		t.Fatalf("EnsureBlankTab(project A): %v", err)
+	}
+	waitForTabReady(t, app, first.ID)
+
+	second, err := app.EnsureBlankTab("project", projectB)
+	if err != nil {
+		t.Fatalf("EnsureBlankTab(project B): %v", err)
+	}
+	tabB := waitForTabReady(t, app, second.ID)
+	ctrl := installStubControllerWithCurrentPrompt(t, app, tabB)
+	turn := submitStubTurnAndWaitForCheckpoint(t, ctrl, "project B turn")
+
+	if err := app.Rewind(turn, "conversation"); err != nil {
+		t.Fatalf("Rewind: %v", err)
+	}
+	if got := normalizeProjectRoot(tabB.Ctrl.WorkspaceRoot()); got != normalizeProjectRoot(projectB) {
+		t.Fatalf("rewound controller workspace root = %q, want %q", got, normalizeProjectRoot(projectB))
+	}
+	sys := systemPromptFrom(tabB.Ctrl.History())
+	if !strings.Contains(sys, "Current workspace: "+strconv.Quote(projectB)) {
+		t.Fatalf("rewound system prompt missing project B workspace %q:\n%s", projectB, sys)
+	}
+	if strings.Contains(sys, "Current workspace: "+strconv.Quote(projectA)) {
+		t.Fatalf("rewound system prompt retained project A workspace %q:\n%s", projectA, sys)
+	}
+}
+
+func installStubControllerWithCurrentPrompt(t *testing.T, app *App, tab *WorkspaceTab) *control.Controller {
+	t.Helper()
+	if tab == nil || tab.Ctrl == nil {
+		t.Fatal("tab controller is required")
+	}
+	sys := systemPromptFrom(tab.Ctrl.History())
+	if strings.TrimSpace(sys) == "" {
+		t.Fatal("tab controller did not expose a system prompt")
+	}
+	sessionDir := tab.Ctrl.SessionDir()
+	sessionPath := tab.Ctrl.SessionPath()
+	workspaceRoot := tab.Ctrl.WorkspaceRoot()
+	label := tab.Ctrl.Label()
+	tab.Ctrl.Close()
+
+	sess := agent.NewSession(sys)
+	ag := agent.New(stubProvider{}, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{
+		Runner:        ag,
+		Executor:      ag,
+		SessionDir:    sessionDir,
+		SessionPath:   sessionPath,
+		WorkspaceRoot: workspaceRoot,
+		Label:         label,
+		SystemPrompt:  sys,
+		Sink:          event.Discard,
+	})
+	tab.Ctrl = ctrl
+	app.bindControllerDisplayRecorder(ctrl)
+	return ctrl
+}
+
+func submitStubTurnAndWaitForCheckpoint(t *testing.T, ctrl control.SessionAPI, input string) int {
+	t.Helper()
+	ctrl.SubmitUserTurn(input, input)
+	waitNotRunning(t, ctrl)
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		checkpoints := ctrl.Checkpoints()
+		if len(checkpoints) > 0 {
+			return checkpoints[len(checkpoints)-1].Turn
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("controller did not record a checkpoint")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -368,6 +639,41 @@ func TestEnsureBlankTabDoesNotReuseProjectTopicWithSession(t *testing.T) {
 	}
 	if got, _ := app.findTopicSessionForTarget("project", projectRoot, topic.ID); got != existingPath {
 		t.Fatalf("existing topic session changed = %q, want %q", got, existingPath)
+	}
+}
+
+// EnsureBlankTab must not reuse a tombstoned topic: the reused ID would flow
+// into ensureTopicIndexed, whose intentional prepend clears the delete
+// tombstone and resurrects the topic the user removed.
+func TestEnsureBlankTabDoesNotReuseTombstonedTopic(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	// Race product on disk: deleted topic whose default title lingered in the
+	// global title map (title-only, absent from GlobalTopics, no sessions).
+	tombstonedID := "topic_tombstone_blank"
+	if err := setTopicTitle("", tombstonedID, defaultTopicTitle); err != nil {
+		t.Fatalf("set lingering title: %v", err)
+	}
+	if err := updateProjectsFile(func(f *desktopProjectFile) (bool, error) {
+		f.DeletedTopics = prependUniqueString(f.DeletedTopics, tombstonedID)
+		return true, nil
+	}); err != nil {
+		t.Fatalf("seed tombstone: %v", err)
+	}
+
+	meta, err := NewApp().EnsureBlankTab("global", "")
+	if err != nil {
+		t.Fatalf("EnsureBlankTab: %v", err)
+	}
+	if meta.TopicID == tombstonedID {
+		t.Fatalf("EnsureBlankTab reused tombstoned topic %q", meta.TopicID)
+	}
+	f := loadProjectsFile()
+	if !containsDesktopString(f.DeletedTopics, tombstonedID) {
+		t.Fatalf("deletedTopics = %#v, tombstone must survive blank-tab creation", f.DeletedTopics)
+	}
+	if containsDesktopString(f.GlobalTopics, tombstonedID) {
+		t.Fatalf("globalTopics = %#v, tombstoned topic must not be re-indexed", f.GlobalTopics)
 	}
 }
 

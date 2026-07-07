@@ -88,6 +88,25 @@ func TestHistoryMessagesDoNotReplayMemoryCompilerContract(t *testing.T) {
 	assertNoHistoryMemoryContract(t, got[0].Content)
 }
 
+func TestHistoryMessagesStripActiveGoalFromVisibleUserContent(t *testing.T) {
+	raw := "<active-goal>\nship the approval redesign\n</active-goal>\n\ncontinue implementation"
+	msgs := []provider.Message{
+		{Role: provider.RoleUser, Content: raw},
+		{Role: provider.RoleAssistant, Content: "done"},
+	}
+
+	got := historyMessages(msgs, control.StripComposePrefixes)
+	if len(got) != 2 {
+		t.Fatalf("history length = %d, want 2: %+v", len(got), got)
+	}
+	if got[0].Content != "continue implementation" {
+		t.Fatalf("visible user content = %q, want active-goal stripped", got[0].Content)
+	}
+	if strings.Contains(got[0].Content, "<active-goal>") || strings.Contains(got[0].Content, "ship the approval redesign") {
+		t.Fatalf("active-goal leaked into visible history content: %+v", got[0])
+	}
+}
+
 func TestHistoryMessagesCarryCheckpointTurnsAcrossHiddenSyntheticUsers(t *testing.T) {
 	msgs := []provider.Message{
 		{Role: provider.RoleSystem, Content: "sys"},

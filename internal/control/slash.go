@@ -11,6 +11,7 @@ import (
 	"reasonix/internal/hook"
 	"reasonix/internal/i18n"
 	"reasonix/internal/migration"
+	"reasonix/internal/pluginpkg"
 	"reasonix/internal/skill"
 )
 
@@ -39,13 +40,14 @@ type ArgData struct {
 	CurrentModel    string
 	ProviderNames   []string
 	CurrentProvider string
+	PluginNames     []string
 }
 
 // SlashArgItems completes the arguments of a management slash command
 // (everything after the command word). It returns the suggestions filtered by
 // the token being typed and the byte offset where that token begins, so a caller
 // replaces just that token. Only structured commands participate (/mcp /model
-// /skills /hooks /effort /auto-plan /goal /reasoning-language /memory-v5
+// /skills /plugins /hooks /effort /auto-plan /goal /reasoning-language /memory-v5
 // /theme /language);
 // others yield nil. Single source of truth for CLI + desktop.
 func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
@@ -66,6 +68,8 @@ func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 		raw = providerArgItems(prior, d)
 	case "/skill", "/skills":
 		raw = skillArgItems(prior, d)
+	case "/plugin", "/plugins":
+		raw = pluginArgItems(prior, d)
 	case "/hooks":
 		raw = hooksArgItems(prior)
 	case "/effort":
@@ -344,6 +348,22 @@ func skillArgItems(prior []string, d ArgData) []SlashItem {
 	return nil
 }
 
+func pluginArgItems(prior []string, d ArgData) []SlashItem {
+	if len(prior) <= 1 {
+		return []SlashItem{
+			{Label: "show", Insert: "show ", Hint: "show plugin capabilities and usage", Descend: true},
+		}
+	}
+	if (prior[1] == "show" || prior[1] == "cat") && len(prior) == 2 {
+		var items []SlashItem
+		for _, name := range d.PluginNames {
+			items = append(items, SlashItem{Label: name, Insert: name})
+		}
+		return items
+	}
+	return nil
+}
+
 func hooksArgItems(prior []string) []SlashItem {
 	if len(prior) <= 1 {
 		return []SlashItem{
@@ -418,6 +438,33 @@ func (c *Controller) managementNotice(trimmed string) bool {
 			return true
 		}
 		c.notice(c.skillListText())
+	case "/plugin", "/plugins":
+		sub := ""
+		if len(fields) >= 2 {
+			sub = strings.ToLower(fields[1])
+		}
+		switch sub {
+		case "", "list", "ls":
+			text, err := pluginpkg.InstalledListText(config.ReasonixHomeDir())
+			if err != nil {
+				c.notice("plugins: " + err.Error())
+			} else {
+				c.notice(text)
+			}
+		case "show", "cat":
+			if len(fields) < 3 {
+				c.notice("usage: /plugins show <name>")
+				return true
+			}
+			text, err := pluginpkg.InstalledShowText(config.ReasonixHomeDir(), fields[2])
+			if err != nil {
+				c.notice("plugins: " + err.Error())
+			} else {
+				c.notice(text)
+			}
+		default:
+			c.notice("unknown /plugins subcommand " + fields[1] + " - try: /plugins or /plugins show <name>")
+		}
 	case "/reload-cmd":
 		if c.Running() {
 			c.notice("wait for the current turn to finish, then retry /reload-cmd")
@@ -494,18 +541,26 @@ func (c *Controller) memoryV5Notice(fields []string) {
 		c.notice("memory-v5: cannot resolve config path")
 		return
 	}
-	edit := config.LoadForEdit(path)
-	if err := edit.SetMemoryCompilerEnabled(setting.enabled); err != nil {
-		c.notice("memory-v5: " + err.Error())
-		return
-	}
-	if setting.setVerbosity {
-		if err := edit.SetMemoryCompilerVerbosity(setting.verbosity); err != nil {
-			c.notice("memory-v5: " + err.Error())
-			return
+	// Lock only the load-modify-save cycle; the controller updates below run
+	// off-lock.
+	edit, err := func() (*config.Config, error) {
+		unlock := config.LockUserConfigEdits()
+		defer unlock()
+		edit := config.LoadForEdit(path)
+		if err := edit.SetMemoryCompilerEnabled(setting.enabled); err != nil {
+			return nil, err
 		}
-	}
-	if err := edit.SaveTo(path); err != nil {
+		if setting.setVerbosity {
+			if err := edit.SetMemoryCompilerVerbosity(setting.verbosity); err != nil {
+				return nil, err
+			}
+		}
+		if err := edit.SaveTo(path); err != nil {
+			return nil, err
+		}
+		return edit, nil
+	}()
+	if err != nil {
 		c.notice("memory-v5: " + err.Error())
 		return
 	}

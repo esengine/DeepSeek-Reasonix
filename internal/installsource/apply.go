@@ -41,6 +41,15 @@ func (t *installSourceTool) apply(ctx context.Context, req request, act *action)
 		default:
 			return fmt.Errorf("unknown mcp action %q", act.Action)
 		}
+	case "plugin":
+		switch act.Action {
+		case "install_plugin_package":
+			return t.applyInstallPluginPackage(ctx, req, act)
+		case "remove_plugin_package":
+			return t.applyRemovePluginPackage(req, act)
+		default:
+			return fmt.Errorf("unknown plugin action %q", act.Action)
+		}
 	default:
 		return fmt.Errorf("unknown install action kind %q", act.Kind)
 	}

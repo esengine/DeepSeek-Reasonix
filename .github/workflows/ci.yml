@@ -48,12 +48,26 @@ jobs:
         run: go build ./...
 
       - name: test
+        if: runner.os != 'Windows'
         env:
           # Run the prompt-cache prefix-stability guard (TestCacheHit*) in CI: a
           # regression there silently tanks the cache hit rate the project is
           # built around.
           REASONIX_RELEASE_CACHE_GUARD: "1"
         run: go test ./...
+
+      - name: test
+        if: runner.os == 'Windows'
+        timeout-minutes: 10
+        env:
+          # Run the prompt-cache prefix-stability guard (TestCacheHit*) in CI: a
+          # regression there silently tanks the cache hit rate the project is
+          # built around.
+          REASONIX_RELEASE_CACHE_GUARD: "1"
+          # Bound sandbox helper children in Windows tests so a failed OS-level
+          # launch cannot pin the Actions step after Go's package timeout fires.
+          WINDOWS_SANDBOX_WAIT_MS: "20000"
+        run: go test -p 4 -timeout=3m ./...
 
   race:
     runs-on: ubuntu-latest

@@ -491,6 +491,333 @@ func TestTopicMigrationMarkerRescansWhenSessionFileChanges(t *testing.T) {
 	}
 }
 
+func TestProjectTreeRepairsIndexedGlobalTopicsAfterMigrationMarker(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	if err := addProject(t.TempDir(), "Existing project"); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+
+	sessionPath := writeLegacySession(t, dir, "desktop-legacy.jsonl", "who are you", time.Now().Add(-time.Hour))
+	topicID := "legacy_desktop-legacy_1234"
+	if err := agent.SaveBranchMetaPreserveUpdated(sessionPath, agent.BranchMeta{
+		ID:         agent.BranchID(sessionPath),
+		CreatedAt:  time.Now().Add(-2 * time.Hour),
+		UpdatedAt:  time.Now().Add(-time.Hour),
+		Scope:      "global",
+		TopicID:    topicID,
+		TopicTitle: "你是谁",
+		Turns:      1,
+		Preview:    "who are you",
+	}); err != nil {
+		t.Fatalf("save meta: %v", err)
+	}
+	markTopicMigrationDone(dir)
+
+	repaired := migrateLegacySessionsIntoGlobalTopics(dir)
+	if len(repaired) != 1 || repaired[0] != topicID {
+		t.Fatalf("repaired topics = %#v, want %q", repaired, topicID)
+	}
+
+	nodes := NewApp().ListProjectTree()
+	var global *ProjectNode
+	for i := range nodes {
+		if nodes[i].Kind == "global_folder" {
+			global = &nodes[i]
+			break
+		}
+	}
+	if global == nil {
+		t.Fatalf("project tree = %#v, want repaired Global folder", nodes)
+	}
+	if len(global.Children) != 1 || global.Children[0].TopicID != topicID || global.Children[0].Label != "你是谁" {
+		t.Fatalf("global children = %#v, want repaired topic %q with preserved title", global.Children, topicID)
+	}
+	f := loadProjectsFile()
+	if !containsDesktopString(f.GlobalTopics, topicID) {
+		t.Fatalf("globalTopics = %#v, want %q", f.GlobalTopics, topicID)
+	}
+	if got := loadTopicTitle("", topicID); got != "你是谁" {
+		t.Fatalf("global topic title = %q, want 你是谁", got)
+	}
+}
+
+func TestDeletedRepairedGlobalTopicIsNotAutoRestored(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	if err := addProject(t.TempDir(), "Existing project"); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+
+	sessionPath := writeLegacySession(t, dir, "desktop-delete.jsonl", "delete repaired topic", time.Now().Add(-time.Hour))
+	topicID := "legacy_desktop-delete_1234"
+	if err := agent.SaveBranchMetaPreserveUpdated(sessionPath, agent.BranchMeta{
+		ID:         agent.BranchID(sessionPath),
+		CreatedAt:  time.Now().Add(-2 * time.Hour),
+		UpdatedAt:  time.Now().Add(-time.Hour),
+		Scope:      "global",
+		TopicID:    topicID,
+		TopicTitle: "临时 Global",
+		Turns:      1,
+		Preview:    "delete repaired topic",
+	}); err != nil {
+		t.Fatalf("save meta: %v", err)
+	}
+	markTopicMigrationDone(dir)
+	if repaired := migrateLegacySessionsIntoGlobalTopics(dir); len(repaired) != 1 || repaired[0] != topicID {
+		t.Fatalf("initial repaired topics = %#v, want %q", repaired, topicID)
+	}
+	if err := NewApp().DeleteTopic(topicID); err != nil {
+		t.Fatalf("delete repaired topic: %v", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	later := time.Now()
+	if err := os.Chtimes(sessionPath, later, later); err != nil {
+		t.Fatalf("touch session after delete: %v", err)
+	}
+	if repaired := migrateLegacySessionsIntoGlobalTopics(dir); len(repaired) != 0 {
+		t.Fatalf("deleted repaired topic was restored: %#v", repaired)
+	}
+	f := loadProjectsFile()
+	if containsDesktopString(f.GlobalTopics, topicID) {
+		t.Fatalf("globalTopics = %#v, deleted topic %q should stay removed", f.GlobalTopics, topicID)
+	}
+	if got := loadTopicTitle("", topicID); got != "" {
+		t.Fatalf("global topic title = %q, want deleted", got)
+	}
+	if !containsDesktopString(f.DeletedTopics, topicID) {
+		t.Fatalf("deletedTopics = %#v, want tombstone for %q", f.DeletedTopics, topicID)
+	}
+}
+
+func TestRepairRescanKeepsIndexedTopicsUntouched(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	if err := addProject(t.TempDir(), "Existing project"); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+
+	writeIndexedSession := func(name, topicID, title string, at time.Time) string {
+		p := writeLegacySession(t, dir, name, "prompt "+title, at)
+		if err := agent.SaveBranchMetaPreserveUpdated(p, agent.BranchMeta{
+			ID:         agent.BranchID(p),
+			CreatedAt:  at.Add(-time.Hour),
+			UpdatedAt:  at,
+			Scope:      "global",
+			TopicID:    topicID,
+			TopicTitle: title,
+			Turns:      1,
+			Preview:    "prompt " + title,
+		}); err != nil {
+			t.Fatalf("save meta %s: %v", name, err)
+		}
+		if err := os.Chtimes(p, at, at); err != nil {
+			t.Fatalf("chtimes %s: %v", name, err)
+		}
+		return p
+	}
+	now := time.Now()
+	olderPath := writeIndexedSession("older.jsonl", "legacy_older_000000000001", "旧话题", now.Add(-3*time.Hour))
+	writeIndexedSession("newer.jsonl", "legacy_newer_000000000002", "新话题", now.Add(-time.Hour))
+	markTopicMigrationDone(dir)
+
+	// First pass repairs both missing topics.
+	if repaired := migrateLegacySessionsIntoGlobalTopics(dir); len(repaired) != 2 {
+		t.Fatalf("initial repaired topics = %#v, want 2 entries", repaired)
+	}
+	before := loadProjectsFile()
+	projPath := filepath.Join(desktopConfigDir(), desktopProjectsFile)
+	statBefore, err := os.Stat(projPath)
+	if err != nil {
+		t.Fatalf("stat projects file: %v", err)
+	}
+
+	// Ordinary session activity invalidates the repair marker; the rescan must
+	// not reorder the indexed topics, rewrite the projects file, or report the
+	// already-visible topics as repaired (the callers bind blank Global tabs
+	// to repaired[0]).
+	time.Sleep(10 * time.Millisecond)
+	later := time.Now()
+	if err := os.Chtimes(olderPath, later, later); err != nil {
+		t.Fatalf("touch session: %v", err)
+	}
+	if repaired := migrateLegacySessionsIntoGlobalTopics(dir); len(repaired) != 0 {
+		t.Fatalf("steady-state rescan reported repairs: %#v", repaired)
+	}
+	after := loadProjectsFile()
+	if !sameStringList(before.GlobalTopics, after.GlobalTopics) {
+		t.Fatalf("rescan reordered globalTopics: before=%v after=%v", before.GlobalTopics, after.GlobalTopics)
+	}
+	statAfter, err := os.Stat(projPath)
+	if err != nil {
+		t.Fatalf("stat projects file: %v", err)
+	}
+	if !statAfter.ModTime().Equal(statBefore.ModTime()) {
+		t.Fatalf("steady-state rescan rewrote the projects file")
+	}
+}
+
+func TestBatchPrependRespectsTombstoneWrittenAfterScanSnapshot(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	topicID := "legacy_race_000000000001"
+	// Simulate a DeleteTopic landing between a repair scan's DeletedTopics
+	// snapshot and its batch write: the tombstone exists by the time the
+	// prepend runs, so the batch must drop the topic instead of resurrecting it.
+	if err := updateProjectsFile(func(f *desktopProjectFile) (bool, error) {
+		f.DeletedTopics = prependUniqueString(f.DeletedTopics, topicID)
+		return true, nil
+	}); err != nil {
+		t.Fatalf("seed tombstone: %v", err)
+	}
+	if err := prependTopicsInProjectsFile("", []string{topicID, "legacy_live_000000000002"}, false); err != nil {
+		t.Fatalf("batch prepend: %v", err)
+	}
+	f := loadProjectsFile()
+	if containsDesktopString(f.GlobalTopics, topicID) {
+		t.Fatalf("globalTopics = %#v, tombstoned topic %q must not be batch-prepended", f.GlobalTopics, topicID)
+	}
+	if !containsDesktopString(f.GlobalTopics, "legacy_live_000000000002") {
+		t.Fatalf("globalTopics = %#v, live topic should still be prepended", f.GlobalTopics)
+	}
+	if !containsDesktopString(f.DeletedTopics, topicID) {
+		t.Fatalf("deletedTopics = %#v, tombstone should survive a batch prepend", f.DeletedTopics)
+	}
+
+	// Intentional single-topic writes (create/restore/tab indexing) clear the
+	// tombstone and bring the topic back in the same projects-file transaction.
+	if err := prependTopicInProjectsFile("", topicID, false); err != nil {
+		t.Fatalf("single prepend: %v", err)
+	}
+	f = loadProjectsFile()
+	if !containsDesktopString(f.GlobalTopics, topicID) {
+		t.Fatalf("globalTopics = %#v, single prepend should restore %q", f.GlobalTopics, topicID)
+	}
+	if containsDesktopString(f.DeletedTopics, topicID) {
+		t.Fatalf("deletedTopics = %#v, single prepend should clear the tombstone", f.DeletedTopics)
+	}
+}
+
+func TestTombstonedTitleOnlyTopicStaysHiddenInProjectTree(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	if err := addProject(t.TempDir(), "Existing project"); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+
+	// Control: a legitimate title-only topic (not in GlobalTopics) must keep
+	// rendering through the orderedTopicIDs title-map fallback.
+	controlID := "topic_control_visible"
+	if err := setTopicTitle("", controlID, "正常话题"); err != nil {
+		t.Fatalf("set control title: %v", err)
+	}
+	// Race product: DeleteTopic landed, but a stale whole-map save wrote the
+	// topic's title back — tombstoned, absent from GlobalTopics, title present.
+	tombstonedID := "legacy_raced_000000000009"
+	if err := setTopicTitle("", tombstonedID, "被删除的话题"); err != nil {
+		t.Fatalf("set stale title: %v", err)
+	}
+	if err := updateProjectsFile(func(f *desktopProjectFile) (bool, error) {
+		f.DeletedTopics = prependUniqueString(f.DeletedTopics, tombstonedID)
+		return true, nil
+	}); err != nil {
+		t.Fatalf("seed tombstone: %v", err)
+	}
+
+	nodes := NewApp().ListProjectTree()
+	var global *ProjectNode
+	for i := range nodes {
+		if nodes[i].Kind == "global_folder" {
+			global = &nodes[i]
+			break
+		}
+	}
+	if global == nil {
+		t.Fatalf("project tree = %#v, want Global folder", nodes)
+	}
+	seen := map[string]bool{}
+	for _, c := range global.Children {
+		seen[c.TopicID] = true
+	}
+	if seen[tombstonedID] {
+		t.Fatalf("global children = %#v, tombstoned title-only topic %q must stay hidden", global.Children, tombstonedID)
+	}
+	if !seen[controlID] {
+		t.Fatalf("global children = %#v, legitimate title-only topic %q should still render", global.Children, controlID)
+	}
+}
+
+func TestRepairPassPrunesStaleTitleOfDeletedTopic(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	if err := addProject(t.TempDir(), "Existing project"); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+
+	// Stale race product on disk: tombstoned topic whose title lingers in the
+	// global title map. The next repair pass that saves the whole map must
+	// prune it instead of persisting it again.
+	tombstonedID := "legacy_raced_000000000010"
+	if err := setTopicTitle("", tombstonedID, "被删除的话题"); err != nil {
+		t.Fatalf("set stale title: %v", err)
+	}
+	if err := updateProjectsFile(func(f *desktopProjectFile) (bool, error) {
+		f.DeletedTopics = prependUniqueString(f.DeletedTopics, tombstonedID)
+		return true, nil
+	}); err != nil {
+		t.Fatalf("seed tombstone: %v", err)
+	}
+
+	sessionPath := writeLegacySession(t, dir, "desktop-prune.jsonl", "needs repair", time.Now().Add(-time.Hour))
+	repairID := "legacy_desktop-prune_1234"
+	if err := agent.SaveBranchMetaPreserveUpdated(sessionPath, agent.BranchMeta{
+		ID:         agent.BranchID(sessionPath),
+		CreatedAt:  time.Now().Add(-2 * time.Hour),
+		UpdatedAt:  time.Now().Add(-time.Hour),
+		Scope:      "global",
+		TopicID:    repairID,
+		TopicTitle: "待修复话题",
+		Turns:      1,
+		Preview:    "needs repair",
+	}); err != nil {
+		t.Fatalf("save meta: %v", err)
+	}
+	markTopicMigrationDone(dir)
+
+	if repaired := migrateLegacySessionsIntoGlobalTopics(dir); len(repaired) != 1 || repaired[0] != repairID {
+		t.Fatalf("repaired topics = %#v, want %q", repaired, repairID)
+	}
+	if got := loadTopicTitle("", tombstonedID); got != "" {
+		t.Fatalf("stale title = %q, repair save should prune the tombstoned entry", got)
+	}
+	if got := loadTopicTitle("", repairID); got != "待修复话题" {
+		t.Fatalf("repaired title = %q, want 待修复话题", got)
+	}
+	f := loadProjectsFile()
+	if containsDesktopString(f.GlobalTopics, tombstonedID) {
+		t.Fatalf("globalTopics = %#v, tombstoned topic must stay out", f.GlobalTopics)
+	}
+	if !containsDesktopString(f.GlobalTopics, repairID) {
+		t.Fatalf("globalTopics = %#v, want repaired topic %q", f.GlobalTopics, repairID)
+	}
+}
+
 func TestTopicMigrationDefersEmptyLegacySession(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := config.SessionDir()
@@ -1170,6 +1497,27 @@ func TestCreateTopicDefaultsToAutoNewSessionTitle(t *testing.T) {
 	}
 }
 
+func TestListProjectTreeFallsBackToTopicIDCreatedAt(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	const topicID = "legacy_20260606-114914_2276f13fd87c"
+	if err := setTopicTitleWithSource("", topicID, "你好，你是谁", topicTitleSourceManual); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	if err := prependTopicInProjectsFile("", topicID, false); err != nil {
+		t.Fatalf("prepend topic: %v", err)
+	}
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || nodes[0].Kind != "global_folder" || len(nodes[0].Children) != 1 {
+		t.Fatalf("project tree = %#v, want Global with one topic", nodes)
+	}
+	expected := time.Date(2026, 6, 6, 11, 49, 14, 0, time.UTC).UnixMilli()
+	if got := nodes[0].Children[0].CreatedAt; got != expected {
+		t.Fatalf("project tree createdAt = %d, want %d", got, expected)
+	}
+}
+
 func TestCreateTopicAppearsFirstInProjectTree(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -1567,6 +1915,53 @@ func TestAutoTitleTopicStripsReasoningLanguagePrefix(t *testing.T) {
 	}
 }
 
+func TestAutoTitleTopicRefreshesOnThirdUserTurn(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topic, err := NewApp().CreateTopic("project", projectRoot, "")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	firstTurn := strings.Join([]string{
+		`{"role":"user","content":"帮我看看"}`,
+		`{"role":"assistant","content":"可以"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(sessionPath, []byte(firstTurn), 0o644); err != nil {
+		t.Fatalf("write first session: %v", err)
+	}
+
+	title, updated := autoTitleTopicFromSession(projectRoot, topic.ID, sessionPath)
+	if !updated || title != "帮我看看" {
+		t.Fatalf("first auto title = %q updated=%v, want 帮我看看/true", title, updated)
+	}
+
+	thirdTurn := strings.Join([]string{
+		`{"role":"user","content":"帮我看看"}`,
+		`{"role":"assistant","content":"可以"}`,
+		`{"role":"user","content":"继续"}`,
+		`{"role":"assistant","content":"继续分析"}`,
+		`{"role":"user","content":"实现自动更新会话标题"}`,
+		`{"role":"assistant","content":"已实现"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(sessionPath, []byte(thirdTurn), 0o644); err != nil {
+		t.Fatalf("write third session: %v", err)
+	}
+
+	title, updated = autoTitleTopicFromSession(projectRoot, topic.ID, sessionPath)
+	if !updated || title != "实现自动更新会话标题" {
+		t.Fatalf("third-turn auto title = %q updated=%v, want 实现自动更新会话标题/true", title, updated)
+	}
+	if got := loadTopicTitle(projectRoot, topic.ID); got != "实现自动更新会话标题" {
+		t.Fatalf("stored title = %q, want 实现自动更新会话标题", got)
+	}
+	meta := loadTopicAutoTitleMeta(projectRoot)[topic.ID]
+	if meta.Stage != 3 {
+		t.Fatalf("auto title stage = %d, want 3", meta.Stage)
+	}
+}
+
 func TestAutoTitleDoesNotOverrideManualTopicTitle(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -1589,6 +1984,50 @@ func TestAutoTitleDoesNotOverrideManualTopicTitle(t *testing.T) {
 	}
 	if got := loadTopicTitle(projectRoot, topic.ID); got != "手动标题" {
 		t.Fatalf("stored title = %q, want 手动标题", got)
+	}
+}
+
+func TestAutoTitleDoesNotOverrideManualSessionTitle(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topic, err := NewApp().CreateTopic("project", projectRoot, "")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(sessionPath, []byte(`{"role":"user","content":"讲讲这个代码库的架构"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+	if err := agent.SaveBranchMetaPreserveUpdated(sessionPath, agent.BranchMeta{CustomTitle: "手动会话标题"}); err != nil {
+		t.Fatalf("save branch meta: %v", err)
+	}
+
+	if title, updated := autoTitleTopicFromSession(projectRoot, topic.ID, sessionPath); updated || title != "" {
+		t.Fatalf("manual session title should not auto-update, title=%q updated=%v", title, updated)
+	}
+	if got := loadTopicTitle(projectRoot, topic.ID); got != defaultTopicTitle {
+		t.Fatalf("stored title = %q, want default title", got)
+	}
+}
+
+func TestRenameTopicBlankKeepsManualTitleSource(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	app := NewApp()
+	topic, err := app.CreateTopic("project", projectRoot, "")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	if err := app.RenameTopic(topic.ID, "   "); err != nil {
+		t.Fatalf("rename blank topic: %v", err)
+	}
+	if got := loadTopicTitle(projectRoot, topic.ID); got != defaultTopicTitle {
+		t.Fatalf("stored title = %q, want %q", got, defaultTopicTitle)
+	}
+	if got := loadTopicTitleSource(projectRoot, topic.ID); got != topicTitleSourceManual {
+		t.Fatalf("title source = %q, want manual", got)
 	}
 }
 
@@ -1658,6 +2097,54 @@ func TestTrashTopicMovesRelatedSessionsToTrash(t *testing.T) {
 	}
 	if got := loadTopicTitle(projectRoot, topicID); got != "" {
 		t.Fatalf("topic title should be removed, got %q", got)
+	}
+}
+
+func TestTrashTopicRemovesStaleMissingSession(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_missing_trash"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "Missing trash"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	missingPath := filepath.Join(dir, "already-gone.jsonl")
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"stale": {
+				ID:            "stale",
+				Scope:         "project",
+				WorkspaceRoot: projectRoot,
+				TopicID:       topicID,
+				TopicTitle:    "Missing trash",
+				SessionPath:   missingPath,
+				Ready:         true,
+				disabledMCP:   map[string]ServerView{},
+			},
+			"other": {ID: "other", Scope: "project", WorkspaceRoot: projectRoot, TopicID: "other", Ready: true},
+		},
+		tabOrder:    []string{"stale", "other"},
+		activeTabID: "stale",
+	}
+
+	if err := app.TrashTopic(topicID); err != nil {
+		t.Fatalf("TrashTopic should remove stale missing session: %v", err)
+	}
+	if got := loadTopicTitle(projectRoot, topicID); got != "" {
+		t.Fatalf("topic title should be removed, got %q", got)
+	}
+	if _, ok := app.tabs["stale"]; ok {
+		t.Fatalf("stale tab should be removed")
+	}
+	if got := app.activeTabID; got != "other" {
+		t.Fatalf("active tab = %q, want other", got)
 	}
 }
 

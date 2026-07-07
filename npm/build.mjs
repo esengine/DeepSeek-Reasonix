@@ -23,6 +23,7 @@ if (!tag) {
 }
 // npm ships on its own `npm-v*` tag (release-npm.yml); also accept a bare `v*`.
 const version = tag.replace(/^(npm-)?v/, "");
+const binaryVersion = `v${version}`;
 const publish = process.argv.includes("--publish");
 
 rmSync(STAGE, { recursive: true, force: true });
@@ -42,7 +43,7 @@ for (const t of TARGETS) {
       "build",
       "-trimpath",
       "-ldflags",
-      `-s -w -X main.version=${tag}`,
+      `-s -w -X main.version=${binaryVersion}`,
       "-o",
       join(dir, "bin", exe),
       "./cmd/reasonix",
@@ -99,16 +100,19 @@ if (!publish) {
   process.exit(0);
 }
 
-// Three independent dist-tags: 0.x stable is the promoted default (`latest`); a
-// `-canary.` build is the opt-in tester channel (`canary`); everything else — the
-// 1.x line and rc prereleases — ships under `next`. Only a `--tag canary` publish
-// moves canary, so `next`/`latest` users never resolve a canary. Promote a 1.x
-// stable to default with a manual `npm dist-tag add reasonix@<ver> latest`.
+// Three independent dist-tags: a `-canary.` build is the opt-in tester channel
+// (`canary`); any other prerelease (rc, beta) ships under `next`; a stable
+// version is promoted to `latest` automatically. The old "0.x stable owns
+// latest" rule was a migration guard while the 1.x Go line was rc-only — once
+// 1.x went stable it left `latest` pinned at 0.53.2, silently downgrading
+// every `npm update -g` / `pnpm update -g` user back to the retired line
+// (#5822). Stable now always moves `latest`; release-npm.yml verifies the tag
+// landed after publish.
 const distTag = version.includes("-canary.")
   ? "canary"
-  : version.startsWith("0.") && !version.includes("-")
-    ? "latest"
-    : "next";
+  : version.includes("-")
+    ? "next"
+    : "latest";
 const publishArgs = ["publish", "--access", "public", "--tag", distTag];
 
 for (const sub of subPackages) {

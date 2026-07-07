@@ -7,6 +7,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"reasonix/internal/i18n"
 )
 
 // wrapTranscript wraps the joined transcript to width for the viewport, keeping
@@ -27,6 +29,28 @@ func wrapTranscript(s string, width int) string {
 // terminal clipboard path entirely.
 func copyToClipboard(text string) tea.Cmd {
 	return tea.SetClipboard(text)
+}
+
+// copyNoticeTTL is how long the "copied to clipboard" status-line hint stays
+// visible after a selection copy (mouse drag, right-click, or Ctrl+C) before
+// copyNoticeExpireMsg clears it.
+const copyNoticeTTL = 1500 * time.Millisecond
+
+// copyNoticeExpireMsg clears the transient copy notice — but only if seq still
+// matches m.copyNoticeSeq, so an older copy's timer can't stomp a newer notice
+// (e.g. drag-copy immediately followed by a right-click re-copy).
+type copyNoticeExpireMsg struct{ seq int }
+
+// copySelectionWithNotice copies text to the clipboard and arms the status-line
+// "copied to clipboard" hint, bumping copyNoticeSeq so any in-flight expiry tick
+// from a prior copy is superseded rather than racing this one.
+func (m *chatTUI) copySelectionWithNotice(text string) tea.Cmd {
+	m.copyNoticeSeq++
+	seq := m.copyNoticeSeq
+	m.copyNoticeText = i18n.M.MouseCopiedHint
+	return tea.Batch(copyToClipboard(text), tea.Tick(copyNoticeTTL, func(time.Time) tea.Msg {
+		return copyNoticeExpireMsg{seq: seq}
+	}))
 }
 
 // autoScrollMsg drives one step of edge-drag scrolling while a selection is held

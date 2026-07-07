@@ -479,6 +479,10 @@ func (m *chatTUI) persistTheme(inputName string) {
 	if path == "" {
 		return
 	}
+	// Serialize the load-modify-save against other in-process user-config
+	// editors so concurrent writers don't drop each other's fields.
+	unlock := config.LockUserConfigEdits()
+	defer unlock()
 	edit := config.LoadForEdit(path)
 	switch inputName {
 	case "auto", "light", "dark":

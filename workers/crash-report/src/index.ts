@@ -17,6 +17,12 @@ import {
   type Role,
   type User,
 } from "./auth";
+import registryApp from "./registry/app";
+import type { Bindings as RegistryBindings } from "./registry/env";
+import { PackageRepo } from "./registry/db/packages";
+import { EventRepo } from "./registry/db/events";
+import { renderCommunity } from "./community";
+import { desktopReleaseChannel, handleDesktopReleaseManifest } from "./desktop_release";
 
 const MAX_BODY_BYTES = 96 * 1024;
 const LATEST_SAMPLES_PER_GROUP = 5;
@@ -80,8 +86,11 @@ const METRIC_SIGNALS = [
   "provider_error",
   "cache_hit",
   "tool_error",
+  "updater_error",
   "compaction",
   "turns",
+  "desktop_hang",
+  "desktop_hang_age",
   "client_surface",
   "client_version",
   "settings_language",
@@ -702,43 +711,77 @@ async function metricUserRows(env: Env, days: 7 | 30): Promise<{ signal: string;
   }
 }
 
+type Bar = { label: string; users: number };
+type MetricTotals = { signal: string; bucket: string; total: number }[];
+
+// Each stats module renders only its own section, so a page load should query
+// only what that section shows — the 30-day COUNT(DISTINCT) over metric_users,
+// the heaviest query, is read solely by the preferences module.
 async function handleStats(request: Request, env: Env, user: User, activeModule: StatsModule): Promise<Response> {
   const url = new URL(request.url);
   const filters = statsFilters(url);
-  const latestVersion = await latestObservedVersion(env);
   const days = filters.windowDays;
-  const [daily, versions, platforms, crashes, metrics, previousMetrics, metricUsers, sources, overview] = await Promise.all([
-    env.DB.prepare(
-      `SELECT date, COUNT(*) AS users, SUM(opens) AS opens FROM pings WHERE date >= date('now', '${currentWindowSince(days)}') GROUP BY date`,
-    ).all<{ date: string; users: number; opens: number }>(),
-    env.DB.prepare(
-      `SELECT version AS label, COUNT(DISTINCT install_id) AS users FROM pings WHERE date >= date('now', '${currentWindowSince(days)}') GROUP BY label ORDER BY users DESC LIMIT 15`,
-    ).all<{ label: string; users: number }>(),
-    env.DB.prepare(
-      `SELECT os || ' ' || arch AS label, COUNT(DISTINCT install_id) AS users FROM pings WHERE date >= date('now', '${currentWindowSince(days)}') GROUP BY label ORDER BY users DESC`,
-    ).all<{ label: string; users: number }>(),
-    crashGroups(env, filters, latestVersion),
-    metricRows(env, days),
-    metricRows(env, days, true),
-    metricUserRows(env, days),
-    env.DB.prepare("SELECT source AS label, COUNT(*) AS users FROM groups GROUP BY source ORDER BY users DESC").all<{ label: string; users: number }>(),
-    diagnosticOverview(env, latestVersion, days),
-  ]);
+  const since = currentWindowSince(days);
+  const bars = (sql: string) => env.DB.prepare(sql).all<Bar>().then((r) => r.results);
+  const pingVersions = () =>
+    bars(`SELECT version AS label, COUNT(DISTINCT install_id) AS users FROM pings WHERE date >= date('now', '${since}') GROUP BY label ORDER BY users DESC LIMIT 15`);
+  const pingPlatforms = () =>
+    bars(`SELECT os || ' ' || arch AS label, COUNT(DISTINCT install_id) AS users FROM pings WHERE date >= date('now', '${since}') GROUP BY label ORDER BY users DESC`);
+
+  let daily: { date: string; users: number; opens: number }[] = [];
+  let versions: Bar[] = [];
+  let platforms: Bar[] = [];
+  let crashes: Awaited<ReturnType<typeof crashGroups>>["results"] = [];
+  let metrics: MetricTotals = [];
+  let previousMetrics: MetricTotals = [];
+  let metricUsers: MetricTotals = [];
+  let sources: Bar[] = [];
+  let overview: OverviewCounts = {
+    latestAdoptionPct: null,
+    openReports: 0,
+    newLatestReports: 0,
+    regressedReports: 0,
+    criticalOpenReports: 0,
+  };
+  let latestVersion = "";
+
+  if (activeModule === "usage") {
+    latestVersion = await latestObservedVersion(env);
+    const [dailyR, versionsR, platformsR, metricsR, overviewR] = await Promise.all([
+      env.DB.prepare(
+        `SELECT date, COUNT(*) AS users, SUM(opens) AS opens FROM pings WHERE date >= date('now', '${since}') GROUP BY date`,
+      ).all<{ date: string; users: number; opens: number }>(),
+      pingVersions(),
+      pingPlatforms(),
+      metricRows(env, days),
+      diagnosticOverview(env, latestVersion, days),
+    ]);
+    daily = dailyR.results;
+    versions = versionsR;
+    platforms = platformsR;
+    metrics = metricsR;
+    overview = overviewR;
+  } else if (activeModule === "diagnostics") {
+    latestVersion = await latestObservedVersion(env);
+    const [crashesR, sourcesR, versionsR, platformsR] = await Promise.all([
+      crashGroups(env, filters, latestVersion),
+      bars("SELECT source AS label, COUNT(*) AS users FROM groups GROUP BY source ORDER BY users DESC"),
+      pingVersions(),
+      pingPlatforms(),
+    ]);
+    crashes = crashesR.results;
+    sources = sourcesR;
+    versions = versionsR;
+    platforms = platformsR;
+  } else if (activeModule === "preferences") {
+    [metrics, metricUsers] = await Promise.all([metricRows(env, days), metricUserRows(env, days)]);
+  } else {
+    [metrics, previousMetrics] = await Promise.all([metricRows(env, days), metricRows(env, days, true)]);
+  }
+
   return html(
     renderStats(
-      {
-        daily: daily.results,
-        versions: versions.results,
-        platforms: platforms.results,
-        crashes: crashes.results,
-        metrics,
-        previousMetrics,
-        metricUsers,
-        sources: sources.results,
-        overview,
-        latestVersion,
-        filters,
-      },
+      { daily, versions, platforms, crashes, metrics, previousMetrics, metricUsers, sources, overview, latestVersion, filters },
       user,
       activeModule,
     ),
@@ -868,15 +911,90 @@ function requireViewer(user: User | null, login: string): Response | null {
   return null;
 }
 
+// The folded registry API runs against its own database and resolves identity
+// itself; hand it the second binding plus the account/site origins it expects.
+function registryBindings(env: Env): RegistryBindings {
+  return {
+    DB: env.REGISTRY_DB,
+    WRITE_LIMITER: env.WRITE_LIMITER,
+    ACCOUNTS_ORIGIN: env.ID_ORIGIN ?? "https://id.reasonix.io",
+    APP_ORIGIN: env.APP_ORIGIN ?? "https://reasonix.io",
+    ALLOWED_ORIGINS: env.ALLOWED_ORIGINS ?? "https://reasonix.io,https://www.reasonix.io",
+  };
+}
+
+function communityStatus(url: URL): string {
+  const s = url.searchParams.get("status") ?? "pending";
+  return ["pending", "active", "hidden", "rejected"].includes(s) ? s : "pending";
+}
+
+async function handleCommunityList(env: Env, admin: User, status: string): Promise<Response> {
+  const rows = await new PackageRepo(env.REGISTRY_DB).listByStatus(status, 200);
+  return html(renderCommunity(admin, rows, status));
+}
+
+async function handleCommunityAction(
+  request: Request,
+  env: Env,
+  admin: User,
+  handle: string,
+  name: string,
+  action: string,
+): Promise<Response> {
+  if (!sameOrigin(request)) return new Response("forbidden", { status: 403 });
+  const form = await formObject(request);
+  const backStatus = ["pending", "active", "hidden", "rejected"].includes(form.status) ? form.status : "pending";
+  const back = redirect(`/community?status=${backStatus}`);
+  const slug = `${handle}/${name}`;
+  const repo = new PackageRepo(env.REGISTRY_DB);
+  const now = new Date().toISOString();
+
+  if (action === "verify" || action === "unverify") {
+    await repo.setVerified(slug, action === "verify", now);
+    await logAction(env, admin, `pkg_${action}`, slug);
+    return back;
+  }
+  if (action === "approve") {
+    const before = await repo.bySlug(slug);
+    const row = await repo.setStatus(slug, "active", now);
+    // Emit the publish event on first approval so the feed only announces
+    // packages that actually went public.
+    if (row && before && before.status !== "active") {
+      await new EventRepo(env.REGISTRY_DB).log({
+        type: "publish",
+        packageId: row.id,
+        actorHandle: row.scope_handle,
+        summary: `published ${row.slug}@${row.latest_version}`,
+        now,
+      });
+    }
+    await logAction(env, admin, "pkg_approve", slug);
+    return back;
+  }
+  await repo.setStatus(slug, action === "reject" ? "rejected" : "hidden", now);
+  await logAction(env, admin, `pkg_${action}`, slug);
+  return back;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method;
 
+    const desktopRelease = desktopReleaseChannel(path);
+    if (desktopRelease && method === "GET") return handleDesktopReleaseManifest(desktopRelease);
+
     if (path === "/v1/report" && method === "POST") return handleReport(request, env);
     if (path === "/v1/ping" && method === "POST") return handlePing(request, env);
     if (path === "/v1/metrics" && method === "POST") return handleMetrics(request, env);
+
+    // Skill/MCP registry API — the folded Hono app handles its own auth, CORS
+    // and rate limiting against the registry database (public reads + publish,
+    // plus the JSON /v1/admin the site's moderation panel calls).
+    if (path.startsWith("/v1/packages") || path === "/v1/activity" || path.startsWith("/v1/admin")) {
+      return registryApp.fetch(request, registryBindings(env));
+    }
 
     const login = loginUrl(env, request);
 
@@ -913,16 +1031,28 @@ export default {
       return handleAdminUsers(request, env, user);
     }
 
+    if (path === "/community" && method === "GET") {
+      if (!user) return redirect(login);
+      return user.role === "admin" ? handleCommunityList(env, user, communityStatus(url)) : redirect("/account");
+    }
+    const pkgActionMatch = path.match(/^\/community\/([^/]+)\/([^/]+)\/(approve|reject|hide|verify|unverify)$/);
+    if (pkgActionMatch && method === "POST") {
+      if (user?.role !== "admin") return new Response("forbidden", { status: 403 });
+      return handleCommunityAction(request, env, user, pkgActionMatch[1], pkgActionMatch[2], pkgActionMatch[3]);
+    }
+
     if (
       path === "/v1/report" ||
       path === "/v1/ping" ||
       path === "/v1/metrics" ||
+      desktopReleaseChannel(path) ||
       path === "/login" ||
       path === "/register" ||
       path === "/logout" ||
       path === "/account" ||
       path.startsWith("/stats") ||
-      path.startsWith("/admin")
+      path.startsWith("/admin") ||
+      path.startsWith("/community")
     ) {
       return new Response("method not allowed", { status: 405 });
     }

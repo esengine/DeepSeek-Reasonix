@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"unicode"
 
+	"reasonix/internal/shellparse"
 	"reasonix/internal/shellsafe"
 )
 
@@ -51,11 +51,21 @@ type Call struct {
 type Decision struct {
 	Blocked bool
 	Message string
+	// ReadOnlyCommandTrust, when set, means the bash command is syntactically safe
+	// enough to ask the user whether this concrete prefix should be trusted as a
+	// plan-mode read-only command.
+	ReadOnlyCommandTrust *ReadOnlyCommandTrust
+}
+
+type ReadOnlyCommandTrust struct {
+	Command string
+	Prefix  string
 }
 
 // Policy is the single plan-mode stage policy.
 type Policy struct {
-	AllowedTools []string
+	AllowedTools     []string
+	ReadOnlyCommands []string
 }
 
 var knownBlockedTools = map[string]bool{
@@ -89,6 +99,48 @@ var knownBlockedTools = map[string]bool{
 var alwaysAllowedTools = map[string]bool{
 	"ask":        true,
 	"todo_write": true,
+}
+
+var unsafeDeclaredReadOnlyCommandBases = map[string]bool{
+	"bash":       true,
+	"sh":         true,
+	"zsh":        true,
+	"fish":       true,
+	"powershell": true,
+	"pwsh":       true,
+}
+
+var unsafeDeclaredReadOnlyCommandWords = map[string]bool{
+	"add":     true,
+	"apply":   true,
+	"approve": true,
+	"cancel":  true,
+	"close":   true,
+	"commit":  true,
+	"comment": true,
+	"create":  true,
+	"delete":  true,
+	"edit":    true,
+	"exec":    true,
+	"merge":   true,
+	"push":    true,
+	"remove":  true,
+	"restart": true,
+	"review":  true,
+	"rm":      true,
+	"scale":   true,
+	"set":     true,
+	"start":   true,
+	"stop":    true,
+	"submit":  true,
+	"update":  true,
+}
+
+var readOnlyCommandNeedsThreeTokenPrefixBases = map[string]bool{
+	"aws":    true,
+	"az":     true,
+	"gcloud": true,
+	"gh":     true,
 }
 
 // planSafeReadOnly is the audited set of read-only built-in tools confirmed safe
@@ -141,7 +193,7 @@ var goWriteOrExecArgs = map[string]bool{
 func (p Policy) Decide(call Call) Decision {
 	name := strings.TrimSpace(call.Name)
 	if name == "bash" {
-		return decideBash(call.Args)
+		return decideBash(call.Args, p.ReadOnlyCommands)
 	}
 	if knownBlockedTools[name] {
 		return blockKnown(name)
@@ -191,6 +243,31 @@ func (p Policy) IgnoredAllowedTools() []string {
 		if name == "bash" || knownBlockedTools[name] {
 			out = append(out, name)
 			seen[name] = true
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// IgnoredReadOnlyCommands names configured plan-mode read-only command prefixes
+// that are too broad to honor safely.
+func (p Policy) IgnoredReadOnlyCommands() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, cmd := range p.ReadOnlyCommands {
+		cmd = strings.TrimSpace(cmd)
+		if cmd == "" || seen[cmd] {
+			continue
+		}
+		fields, err := shellFields(cmd)
+		if err != "" || len(fields) == 0 {
+			out = append(out, cmd)
+			seen[cmd] = true
+			continue
+		}
+		if unsafeDeclaredReadOnlyCommandPrefix(fields) {
+			out = append(out, cmd)
+			seen[cmd] = true
 		}
 	}
 	sort.Strings(out)
@@ -279,7 +356,7 @@ func Classify(name string, readOnly bool, safety PlanSafety) Class {
 	return ClassDefaultBlocked
 }
 
-func decideBash(args json.RawMessage) Decision {
+func decideBash(args json.RawMessage, readOnlyCommands []string) Decision {
 	var p struct {
 		Command                     string `json:"command"`
 		RunInBackground             bool   `json:"run_in_background"`
@@ -304,22 +381,44 @@ func decideBash(args json.RawMessage) Decision {
 		}
 	}
 	cmd := strings.TrimSpace(p.Command)
+	checkCmd, safeRedirects := shellsafe.NormalizeBashSafeRedirectsForMatch(cmd)
 
-	if shellsafe.ContainsShellSyntax(cmd) {
+	if !safeRedirects || shellsafe.ContainsShellSyntax(checkCmd) {
+		if _, malformed := shellFields(cmd); malformedShellQuoting(malformed) {
+			return Decision{
+				Blocked: true,
+				Message: fmt.Sprintf("blocked: bash command in plan mode has malformed shell quoting (%s). Use a simple read-only command while planning.", malformed),
+			}
+		}
 		return Decision{
 			Blocked: true,
 			Message: "blocked: bash command in plan mode must not contain shell operators. Use separate calls for chained commands.",
 		}
 	}
 
-	base, sub, ok := shellsafe.CommandIsReadOnly(cmd)
+	base, sub, ok := shellsafe.CommandIsReadOnly(checkCmd)
 	if !ok {
+		if ok, malformed := declaredReadOnlyCommand(checkCmd, readOnlyCommands); malformed != "" {
+			return Decision{
+				Blocked: true,
+				Message: fmt.Sprintf("blocked: bash command in plan mode has malformed shell quoting (%s). Use a simple read-only command while planning.", malformed),
+			}
+		} else if ok {
+			return Decision{}
+		}
+		if trust := readOnlyCommandTrustCandidate(checkCmd); trust != nil {
+			return Decision{
+				Blocked:              true,
+				Message:              fmt.Sprintf("blocked: bash commands in plan mode must be read-only. %q is not a known read-only command. Ask the user whether to trust %q as a plan-mode read-only command prefix, or exit plan mode to run it.", checkCmd, trust.Prefix),
+				ReadOnlyCommandTrust: trust,
+			}
+		}
 		return Decision{
 			Blocked: true,
-			Message: fmt.Sprintf("blocked: bash commands in plan mode must be read-only. %q is not a known read-only command. Use read-only tools for exploration, then exit plan mode to run this command.", cmd),
+			Message: fmt.Sprintf("blocked: bash commands in plan mode must be read-only. %q is not a known read-only command. Use read-only tools for exploration, declare a concrete prefix in plan_mode_read_only_commands, or exit plan mode to run this command.", checkCmd),
 		}
 	}
-	if arg, malformed := unsafePlanModeArg(cmd, base, sub); malformed != "" {
+	if arg, malformed := unsafePlanModeArg(checkCmd, base, sub); malformed != "" {
 		return Decision{
 			Blocked: true,
 			Message: fmt.Sprintf("blocked: bash command in plan mode has malformed shell quoting (%s). Use a simple read-only command while planning.", malformed),
@@ -331,6 +430,116 @@ func decideBash(args json.RawMessage) Decision {
 		}
 	}
 	return Decision{}
+}
+
+func declaredReadOnlyCommand(cmd string, prefixes []string) (bool, string) {
+	fields, malformed := shellFields(cmd)
+	if malformed != "" {
+		return false, malformed
+	}
+	if len(fields) == 0 {
+		return false, ""
+	}
+	for _, prefix := range prefixes {
+		prefix = strings.TrimSpace(prefix)
+		if prefix == "" {
+			continue
+		}
+		prefixFields, prefixMalformed := shellFields(prefix)
+		if prefixMalformed != "" || len(prefixFields) == 0 {
+			continue
+		}
+		if unsafeDeclaredReadOnlyCommandPrefix(prefixFields) {
+			continue
+		}
+		if len(prefixFields) > len(fields) {
+			continue
+		}
+		matches := true
+		for i, want := range prefixFields {
+			if fields[i] != want {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true, ""
+		}
+	}
+	return false, ""
+}
+
+func readOnlyCommandTrustCandidate(cmd string) *ReadOnlyCommandTrust {
+	fields, malformed := shellFields(cmd)
+	if malformed != "" || len(fields) == 0 || unsafeDeclaredReadOnlyCommandPrefix(fields) {
+		return nil
+	}
+	prefixFields := readOnlyCommandTrustPrefixFields(fields)
+	if len(prefixFields) == 0 {
+		return nil
+	}
+	return &ReadOnlyCommandTrust{
+		Command: cmd,
+		Prefix:  strings.Join(prefixFields, " "),
+	}
+}
+
+func readOnlyCommandTrustPrefixFields(fields []string) []string {
+	if len(fields) < 2 {
+		return nil
+	}
+	out := []string{fields[0]}
+	for _, field := range fields[1:] {
+		if strings.HasPrefix(field, "-") {
+			out = append(out, field)
+			break
+		}
+		if !readOnlyCommandPrefixWord(field) {
+			break
+		}
+		out = append(out, field)
+		if len(out) >= 3 {
+			break
+		}
+	}
+	if len(out) < 2 || unsafeDeclaredReadOnlyCommandPrefix(out) {
+		return nil
+	}
+	return out
+}
+
+func readOnlyCommandPrefixWord(field string) bool {
+	if field == "" {
+		return false
+	}
+	for i, r := range field {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' {
+			continue
+		}
+		if i > 0 && (r >= '0' && r <= '9' || r == '_' || r == '-') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func unsafeDeclaredReadOnlyCommandPrefix(fields []string) bool {
+	if len(fields) < 2 {
+		return true
+	}
+	if readOnlyCommandNeedsThreeTokenPrefixBases[strings.ToLower(fields[0])] && len(fields) < 3 {
+		return true
+	}
+	if unsafeDeclaredReadOnlyCommandBases[strings.ToLower(fields[0])] {
+		return true
+	}
+	for _, field := range fields[1:] {
+		if unsafeDeclaredReadOnlyCommandWords[strings.ToLower(field)] {
+			return true
+		}
+	}
+	return false
 }
 
 // unsafePlanModeArg applies plan-mode's stricter, quote-aware argument check on
@@ -391,73 +600,9 @@ func unsafePlanModeArg(cmd, base, sub string) (arg, malformed string) {
 }
 
 func shellFields(s string) ([]string, string) {
-	var fields []string
-	var b strings.Builder
-	inSingle := false
-	inDouble := false
-	escaped := false
-	haveField := false
-	flush := func() {
-		if haveField {
-			fields = append(fields, b.String())
-			b.Reset()
-			haveField = false
-		}
-	}
-	for _, r := range s {
-		if escaped {
-			b.WriteRune(r)
-			haveField = true
-			escaped = false
-			continue
-		}
-		if inSingle {
-			if r == '\'' {
-				inSingle = false
-				continue
-			}
-			b.WriteRune(r)
-			haveField = true
-			continue
-		}
-		if inDouble {
-			switch r {
-			case '"':
-				inDouble = false
-			case '\\':
-				escaped = true
-			default:
-				b.WriteRune(r)
-				haveField = true
-			}
-			continue
-		}
-		switch {
-		case unicode.IsSpace(r):
-			flush()
-		case r == '\'':
-			inSingle = true
-			haveField = true
-		case r == '"':
-			inDouble = true
-			haveField = true
-		case r == '\\':
-			escaped = true
-			haveField = true
-		default:
-			b.WriteRune(r)
-			haveField = true
-		}
-	}
-	if escaped {
-		return nil, "dangling escape"
-	}
-	if inSingle {
-		return nil, "unterminated single quote"
-	}
-	if inDouble {
-		return nil, "unterminated double quote"
-	}
-	flush()
-	return fields, ""
+	return shellparse.StaticFields(s)
+}
+
+func malformedShellQuoting(malformed string) bool {
+	return strings.Contains(malformed, "quote")
 }

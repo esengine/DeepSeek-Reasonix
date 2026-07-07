@@ -33,12 +33,6 @@
   <a href="https://discord.gg/XF78rEME2D"><img src="https://img.shields.io/badge/discord-join-5865F2.svg?style=flat-square&labelColor=161b22&logo=discord&logoColor=white" alt="Discord"/></a>
 </p>
 
-<p align="center">
-  <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/9e931d80-2050-4b10-902e-44970cc133ad.svg" alt="oosmetrics — Top 2 in Agents by velocity"/></a>
-  <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/556d94b3-61b7-486b-baf2-888b9327deab.svg" alt="oosmetrics — Top 3 in LLMs by velocity"/></a>
-  <a href="https://oosmetrics.com/repo/esengine/reasonix"><img src="https://api.oosmetrics.com/api/v1/badge/achievement/0f457d4c-efca-4d15-ad2b-139691ff342c.svg" alt="oosmetrics — Top 3 in CLI by velocity"/></a>
-</p>
-
 <br/>
 
 <h3 align="center">A DeepSeek-native AI coding agent for your terminal.</h3>
@@ -137,6 +131,8 @@ commands, `@` references, and two-model setup are all in the
   from the desktop app, then use approvals, YOLO, and commands from IM.
 - **[Spec](./docs/SPEC.md)** — engineering contract: architecture, registries,
   data types, and roadmap.
+- **[Task contracts & pause policy](./docs/TASK_CONTRACT.md)** — structure
+  complex requests with context, output boundaries, constraints, and when to ask.
 - **[Tool contract](./docs/TOOL_CONTRACT.md)** — provider-visible built-in tool
   names, read-only flags, and schema snapshot guard.
 - **[Migrating from 0.x](./docs/MIGRATING.md)** — moving from the legacy

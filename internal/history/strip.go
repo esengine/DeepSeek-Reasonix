@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-var reComposeBlock = regexp.MustCompile(`(?s)^\s*<(?:memory-update|background-jobs|active-goal)>.*?</(?:memory-update|background-jobs|active-goal)>\s*\n`)
+var reComposeBlock = regexp.MustCompile(`(?s)^\s*<(?:memory-update|background-jobs|active-goal|hook-context)(?:\s+[^>]*)?>.*?</(?:memory-update|background-jobs|active-goal|hook-context)>\s*\n`)
 
 const planModeMarkerPrefix = "[Plan mode"
 

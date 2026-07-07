@@ -139,7 +139,7 @@ func TestRegistrySchemasStableAndCanonical(t *testing.T) {
 	if schemas[0].Name != "alpha" || schemas[1].Name != "zeta" {
 		t.Fatalf("Schemas order = %q, %q; want alpha, zeta", schemas[0].Name, schemas[1].Name)
 	}
-	if got, want := string(schemas[0].Parameters), `{"required":["x","y"],"type":"object"}`; got != want {
+	if got, want := string(schemas[0].Parameters), `{"properties":{},"required":["x","y"],"type":"object"}`; got != want {
 		t.Fatalf("alpha schema = %s, want %s", got, want)
 	}
 	if got, want := string(schemas[1].Parameters), `{"properties":{"a":{"type":"string"},"b":{"type":"string"}},"required":["a","b"],"type":"object"}`; got != want {

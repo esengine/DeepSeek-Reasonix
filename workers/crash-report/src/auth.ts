@@ -54,15 +54,36 @@ interface Identity {
   emailVerified: boolean;
 }
 
+// Short-lived cache of a resolved session so repeat dashboard loads skip the
+// cross-worker /me round-trip. Keyed by the token hash, never the raw token.
+const IDENTITY_TTL_SECONDS = 60;
+
+async function identityCacheKey(token: string): Promise<Request> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return new Request(`https://id-cache.reasonix.io/${hex}`);
+}
+
 async function resolveIdentity(request: Request, env: Env): Promise<Identity | null> {
   const token = getCookie(request, SHARED_COOKIE);
   if (!token) return null;
+  const cacheKey = await identityCacheKey(token);
+  const cached = await caches.default.match(cacheKey);
+  if (cached) return cached.json<Identity>().catch(() => null);
+
   const res = await fetch(`${idOrigin(env)}/me`, { headers: { authorization: `Bearer ${token}` } });
   if (!res.ok) return null;
   const data = await res.json<{ user?: { email?: string; emailVerified?: boolean } }>().catch(() => null);
   const email = data?.user?.email?.toLowerCase();
   if (!email) return null;
-  return { email, emailVerified: data?.user?.emailVerified === true };
+  const identity: Identity = { email, emailVerified: data?.user?.emailVerified === true };
+  await caches.default.put(
+    cacheKey,
+    new Response(JSON.stringify(identity), {
+      headers: { "content-type": "application/json", "cache-control": `max-age=${IDENTITY_TTL_SECONDS}` },
+    }),
+  );
+  return identity;
 }
 
 // Resolves the signed-in dashboard user, or null. A first-seen identity is
@@ -140,6 +161,9 @@ export async function logAction(env: Env, actor: User, action: string, target = 
 }
 
 export function userNav(user: User): string {
-  const admin = user.role === "admin" ? `<a class="navlink" href="/admin">Admin</a>` : "";
+  const admin =
+    user.role === "admin"
+      ? `<a class="navlink" href="/community">Community</a><a class="navlink" href="/admin">Admin</a>`
+      : "";
   return `<span class="chip"><span class="badge ${user.role}">${user.role}</span>${esc(user.email)}</span><a class="navlink" href="/account">Account</a>${admin}<form method="post" action="/logout" class="inline"><button class="btn ghost sm">Sign out</button></form>`;
 }

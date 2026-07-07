@@ -1,9 +1,11 @@
 package fileutil
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -61,6 +63,85 @@ func TestReplaceFileRenamesInPlace(t *testing.T) {
 	}
 	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
 		t.Error("tmp should be gone after ReplaceFile")
+	}
+}
+
+func TestReplaceFileTransientFailureNeverTruncatesDest(t *testing.T) {
+	// A rename blocked by a transient lock must surface the error, never fall
+	// back to the in-place copy: the copy truncates dest first, so a reader
+	// racing it can observe an empty or half-written file — the torn state
+	// AtomicWriteFile promises its callers (session leases, credentials,
+	// plugin state) can never happen.
+	oldBase, oldMax, oldRename := replaceRetryBase, maxReplaceRetries, renameFile
+	replaceRetryBase, maxReplaceRetries = 0, 2
+	renameCalls := 0
+	renameFile = func(oldpath, newpath string) error {
+		renameCalls++
+		return &os.LinkError{Op: "rename", Old: oldpath, New: newpath, Err: errors.New("transient sharing violation")}
+	}
+	t.Cleanup(func() { replaceRetryBase, maxReplaceRetries, renameFile = oldBase, oldMax, oldRename })
+
+	dir := t.TempDir()
+	tmp := filepath.Join(dir, "x.tmp")
+	dest := filepath.Join(dir, "x.txt")
+	if err := os.WriteFile(tmp, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReplaceFile(tmp, dest); err == nil {
+		t.Fatal("want the rename error to surface once retries are exhausted")
+	}
+	if want := maxReplaceRetries + 1; renameCalls != want {
+		t.Errorf("rename attempts = %d, want %d (initial try plus retries)", renameCalls, want)
+	}
+	if b, _ := os.ReadFile(dest); string(b) != "old" {
+		t.Fatalf("dest = %q, want the old content intact — anything else means the non-atomic copy ran", b)
+	}
+	if !fileExists(tmp) {
+		t.Error("tmp should survive a failed replace so the caller can clean up")
+	}
+}
+
+func TestReplaceFileCrossDeviceCopiesImmediately(t *testing.T) {
+	// The cross-device class (Windows encryption filter drivers, #2696) fails
+	// identically on every retry, so ReplaceFile must take the copy fallback
+	// straight away instead of sleeping through the retry ladder.
+	oldBase, oldMax, oldRename := replaceRetryBase, maxReplaceRetries, renameFile
+	// Any retry sleep would trip the elapsed-time check below.
+	replaceRetryBase, maxReplaceRetries = 10*time.Second, 8
+	renameCalls := 0
+	renameFile = func(oldpath, newpath string) error {
+		renameCalls++
+		return &os.LinkError{Op: "rename", Old: oldpath, New: newpath, Err: syscall.EXDEV}
+	}
+	t.Cleanup(func() { replaceRetryBase, maxReplaceRetries, renameFile = oldBase, oldMax, oldRename })
+
+	dir := t.TempDir()
+	tmp := filepath.Join(dir, "x.tmp")
+	dest := filepath.Join(dir, "x.txt")
+	if err := os.WriteFile(tmp, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if err := ReplaceFile(tmp, dest); err != nil {
+		t.Fatalf("ReplaceFile should succeed via the copy fallback: %v", err)
+	}
+	if renameCalls != 1 {
+		t.Errorf("rename attempts = %d, want 1 — a structurally impossible rename must not be retried", renameCalls)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("cross-device fallback took %v — it slept through the retry ladder", elapsed)
+	}
+	if b, _ := os.ReadFile(dest); string(b) != "new" {
+		t.Errorf("dest = %q, want the new content from the copy fallback", b)
+	}
+	if fileExists(tmp) {
+		t.Error("tmp should be consumed by the copy fallback")
 	}
 }
 

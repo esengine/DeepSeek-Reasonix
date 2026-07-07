@@ -11,7 +11,7 @@ changed and how to move over.
 | Language | TypeScript / Node | Go |
 | Branch | [`v1`](https://github.com/esengine/DeepSeek-Reasonix/tree/v1) (maintenance only) | `main-v2` (default, active) |
 | Versions | `0.x` (up to v0.54.x) | `1.0.0`+ |
-| Install | `npm i -g reasonix` (the `latest` tag, stays on `0.x`) | `npm i -g reasonix@next` — `latest` deliberately stays on `0.x`; or a release archive / `go build` |
+| Install | `npm i -g reasonix@0.53.2` (pin a `0.x` version) | `npm i -g reasonix` — `latest` points at the current `1.x` stable; or a release archive / `go build` |
 | Code intelligence | embedding semantic search + tree-sitter symbols | LSP-assisted code reading plus grep/read_file/glob; semantic index is not yet ported |
 
 "v1" and "v2" are **codebase generations**, not semver: the v1 line never reached
@@ -23,18 +23,17 @@ changed and how to move over.
 same way esbuild/biome ship native binaries via npm). The binary itself is a
 standalone Go executable; npm is only the installer, not a runtime dependency.
 
-**`npm i -g reasonix` deliberately still installs `0.x`.** A bare install — and
-`npx reasonix`, and 0.53's own `update` — follows npm's `latest` tag, which we
-keep pinned to the `0.x` line so existing users aren't pulled into the rewrite
-without asking. v1.x (Go) ships under the `next` tag; opt in explicitly:
+**`npm i -g reasonix` installs the current `1.x` stable.** npm's `latest` tag
+moved to the Go line with `1.17.5` — the earlier "`latest` stays pinned to
+`0.x`" migration guard silently downgraded `npm update -g` users once 1.x went
+stable (#5822), so it was retired. Release candidates still ship under the
+`next` tag; `0.x` stays installable by pinning:
 
 ```sh
-npm i -g reasonix@next     # or pin a version: reasonix@1.1.0
-reasonix
+npm i -g reasonix          # current 1.x stable
+npm i -g reasonix@next     # release candidate, when one is ahead of stable
+npm i -g reasonix@0.53.2   # pin the legacy TS build
 ```
-
-`latest` will stay on `0.x` for the foreseeable future, so installing or
-updating v2 always means `@next` (or a pinned `1.x`).
 
 Prebuilt archives (`reasonix-<os>-<arch>.tar.gz` / `.zip`) and the desktop
 installer are attached to each GitHub release. These are a **separate channel**
@@ -103,14 +102,23 @@ and DeepSeek prefix-cache–oriented design.
   external tools**: `[agent].plan_mode_allowed_tools` now only declares extra
   read-only custom/external tools. It no longer unlocks known blocked plan-mode
   tools such as `bash`, `task`, writers, installers, or memory mutation tools, and
-  unsafe bash commands still remain blocked. An MCP/plugin tool whose read-only
-  status comes from the server's untrusted `readOnlyHint` is confirmed the first
-  time an interactive plan-mode run needs it; choose the persistent option to
-  write the plugin-level `trusted_read_only_tools` raw-name list. Auto/YOLO tool
-  approval does not answer this trust prompt, although a session or persistent
-  trust choice prevents repeat prompts for the same MCP tool. Non-interactive
-  runs still fail closed, so pre-seed `trusted_read_only_tools` or declare a
-  concrete `mcp__<server>__<tool>` when no user can approve. In the desktop MCP
+  unsafe bash commands still remain blocked. To migrate old
+  `plan_mode_allowed_tools = ["bash", ...]` configs, move concrete read-only
+  shell prefixes such as `gh issue view` or internal query CLIs to
+  `[agent].plan_mode_read_only_commands`; do not declare shell interpreters or
+  writer-capable commands there. Interactive plan-mode runs can also ask you to
+  trust a concrete unknown query prefix once, and the persistent choice writes
+  the same `plan_mode_read_only_commands` entry. Auto/YOLO tool approval does
+  not answer this bash trust prompt. Use `read_only_task` / `read_only_skill`
+  instead of trying to unlock `task` / `run_skill` while planning. An MCP/plugin tool
+  whose read-only status comes from the server's untrusted `readOnlyHint` is
+  confirmed the first time an interactive plan-mode run needs it; choose the
+  persistent option to write the plugin-level `trusted_read_only_tools` raw-name
+  list. Auto/YOLO tool approval does not answer this trust prompt, although a
+  session or persistent trust choice prevents repeat prompts for the same MCP
+  tool. Non-interactive runs still fail closed, so pre-seed
+  `trusted_read_only_tools` or declare a concrete `mcp__<server>__<tool>` when no
+  user can approve. In the desktop MCP
   panel, expand a server and use **Pre-trust read-only** for currently listed
   `readOnlyHint` tools, per-tool **Pre-trust** for audited readers, or
   **Untrust** to remove a tool; those actions write the same
