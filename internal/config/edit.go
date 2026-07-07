@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"reasonix/internal/fileutil"
 	"reasonix/internal/mcpdiag"
@@ -383,6 +384,32 @@ func (c *Config) SetNetwork(n NetworkConfig) error {
 	n.Proxy.Username = strings.TrimSpace(n.Proxy.Username)
 	c.Network = n
 	return netclient.Validate(c.NetworkProxySpec())
+}
+
+// SetRewriter updates the [rewriter] section. When enabled is true, model must
+// resolve to a configured provider so boot can construct the lightweight
+// provider. Timeout, if non-empty, must be a valid Go duration string.
+func (c *Config) SetRewriter(r RewriterConfig) error {
+	r.Model = strings.TrimSpace(r.Model)
+	r.Timeout = strings.TrimSpace(r.Timeout)
+	if r.Enabled && r.Model == "" {
+		return fmt.Errorf("rewriter: model is required when enabled")
+	}
+	if r.Model != "" {
+		if _, ok := c.ResolveModel(r.Model); !ok {
+			return fmt.Errorf("rewriter: no such model %q (configured: %s)", r.Model, c.providerNames())
+		}
+	}
+	if r.Timeout != "" {
+		if _, err := time.ParseDuration(r.Timeout); err != nil {
+			return fmt.Errorf("rewriter: invalid timeout %q: %w", r.Timeout, err)
+		}
+	}
+	if r.MaxLength < 0 {
+		return fmt.Errorf("rewriter: max_length must be >= 0")
+	}
+	c.Rewriter = r
+	return nil
 }
 
 // ModelRefsProvider reports whether ref targets the named provider. It matches

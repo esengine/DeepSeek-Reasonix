@@ -43,6 +43,7 @@ import (
 	"reasonix/internal/planmode"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
+	"reasonix/internal/rewriter"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/skill"
 	"reasonix/internal/tool"
@@ -994,6 +995,28 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		})
 	}
 
+	// Lightweight prompt rewriter: when enabled and a lightweight model is
+	// configured, short user inputs are rewritten into structured prompts
+	// before reaching the main model. The rewritten text feeds the same
+	// cache-stable system prefix, so the prefix-cache hit rate is preserved
+	// for casual inputs. Failures fall back silently to the original input.
+	var rw rewriter.Rewriter
+	if cfg.Rewriter.Enabled && strings.TrimSpace(cfg.Rewriter.Model) != "" {
+		if re, ok := cfg.ResolveModel(cfg.Rewriter.Model); ok {
+			if reProv, err := NewProviderWithProxy(re, proxySpec); err == nil {
+				rw = rewriter.NewProviderRewriter(reProv, rewriter.Config{
+					Enabled:   true,
+					Timeout:   parseRewriterTimeout(cfg.Rewriter.Timeout),
+					MaxLength: cfg.Rewriter.MaxLength,
+				})
+			} else {
+				slog.Warn("rewriter provider construction failed — rewriter disabled", "err", err)
+			}
+		} else {
+			slog.Warn("rewriter model not found — rewriter disabled", "model", cfg.Rewriter.Model)
+		}
+	}
+
 	execSess := agent.NewSession(sysPrompt)
 	var memCompiler *memorycompiler.Runtime
 	if cfg.MemoryCompilerEnabled() {
@@ -1023,6 +1046,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		MemoryCompiler:                     memCompiler,
 		MemoryCompilerVerbosity:            cfg.MemoryCompilerVerbosity(),
 		UseMemoryCompilerLLMClassification: strings.TrimSpace(os.Getenv("REASONIX_MEMORY_COMPILER_LLM_CLASSIFICATION")) == "true",
+		Rewriter:                           rw,
 	}, sink)
 
 	var runner agent.Runner = executor
@@ -1786,4 +1810,15 @@ func providerNames(cfg *config.Config) string {
 		names[i] = p.Name
 	}
 	return strings.Join(names, "/")
+}
+
+func parseRewriterTimeout(s string) time.Duration {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 3 * time.Second
+	}
+	if d, err := time.ParseDuration(s); err == nil && d > 0 {
+		return d
+	}
+	return 3 * time.Second
 }

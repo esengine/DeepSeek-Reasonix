@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"unicode/utf16"
@@ -1874,6 +1875,8 @@ func configCommand(args []string) int {
 		return configMemoryV5Command(args[1:])
 	case "reasoning-language":
 		return configReasoningLanguageCommand(args[1:])
+	case "rewriter":
+		return configRewriterCommand(args[1:])
 	default:
 		configUsage()
 		return 2
@@ -2054,11 +2057,111 @@ func configReasoningLanguageCommand(args []string) int {
 	return 0
 }
 
+func configRewriterCommand(args []string) int {
+	fs := flag.NewFlagSet("config rewriter", flag.ContinueOnError)
+	local := fs.Bool("local", false, "write ./reasonix.toml instead of the user config")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	rest := fs.Args()
+	if len(rest) == 0 || strings.EqualFold(rest[0], "status") {
+		cfg, err := config.Load()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		printRewriterStatus(&cfg.Rewriter)
+		return 0
+	}
+	if len(rest) == 1 && !strings.EqualFold(rest[0], "enable") && !strings.EqualFold(rest[0], "disable") {
+		configRewriterUsage()
+		return 2
+	}
+	action := strings.ToLower(rest[0])
+	path := config.UserConfigPath()
+	if *local {
+		path = "reasonix.toml"
+	}
+	if path == "" {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "cannot resolve config path")
+		return 1
+	}
+	if !*local {
+		unlock := config.LockUserConfigEdits()
+		defer unlock()
+	}
+	cfg := config.LoadForEdit(path)
+	next := cfg.Rewriter
+	switch action {
+	case "enable":
+		next.Enabled = true
+	case "disable":
+		next.Enabled = false
+	case "model":
+		if len(rest) < 2 {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "rewriter model: missing <ref>")
+			return 2
+		}
+		next.Model = rest[1]
+	case "timeout":
+		if len(rest) < 2 {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "rewriter timeout: missing <dur>")
+			return 2
+		}
+		next.Timeout = rest[1]
+	case "max-length":
+		if len(rest) < 2 {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "rewriter max-length: missing <n>")
+			return 2
+		}
+		n, err := strconv.Atoi(rest[1])
+		if err != nil || n < 0 {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "rewriter max-length: must be a non-negative integer")
+			return 2
+		}
+		next.MaxLength = n
+	default:
+		configRewriterUsage()
+		return 2
+	}
+	if err := cfg.SetRewriter(next); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 1
+	}
+	printRewriterStatus(&cfg.Rewriter)
+	fmt.Printf("  (%s)\n", displayPath(path))
+	return 0
+}
+
+func printRewriterStatus(r *config.RewriterConfig) {
+	fmt.Printf("rewriter.enabled    = %v\n", r.Enabled)
+	if r.Model != "" {
+		fmt.Printf("rewriter.model      = %q\n", r.Model)
+	} else {
+		fmt.Printf("rewriter.model      = (not set)\n")
+	}
+	if r.Timeout != "" {
+		fmt.Printf("rewriter.timeout    = %q\n", r.Timeout)
+	} else {
+		fmt.Printf("rewriter.timeout    = \"3s\" (default)\n")
+	}
+	if r.MaxLength > 0 {
+		fmt.Printf("rewriter.max_length = %d\n", r.MaxLength)
+	} else {
+		fmt.Printf("rewriter.max_length = 500 (default)\n")
+	}
+}
+
 func configUsage() {
 	fmt.Print(`Usage:
   reasonix config auto-plan [off|on]
   reasonix config memory-v5 [off|observe|compact|on|status]
   reasonix config reasoning-language [--local] [auto|zh|en]
+  reasonix config rewriter [--local] [status|enable|disable|model <ref>|timeout <dur>|max-length <n>]
 `)
 }
 
@@ -2077,5 +2180,20 @@ func configMemoryV5Usage() {
 func configReasoningLanguageUsage() {
 	fmt.Print(`Usage:
   reasonix config reasoning-language [--local] [auto|zh|en]
+`)
+}
+
+func configRewriterUsage() {
+	fmt.Print(`Usage:
+  reasonix config rewriter [status|enable|disable|model <ref>|timeout <dur>|max-length <n>]
+
+  status        Show current rewriter settings
+  enable        Enable the rewriter (requires model to be set)
+  disable       Disable the rewriter
+  model <ref>   Set the lightweight model (e.g. "deepseek/deepseek-v4-flash")
+  timeout <dur> Set the per-call timeout (e.g. "3s", "5s")
+  max-length <n> Set the max input length in runes (default 500)
+
+  --local       Write to ./reasonix.toml instead of the user config
 `)
 }

@@ -466,6 +466,29 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 	b.WriteString("\n")
 
+	if shouldRenderRewriter(c, defaults, scope) {
+		b.WriteString("# Lightweight prompt rewriter (optional). Short user inputs are rewritten\n")
+		b.WriteString("# into structured prompts by a lightweight model to improve cache hit rate.\n")
+		b.WriteString("[rewriter]\n")
+		fmt.Fprintf(&b, "enabled = %v\n", c.Rewriter.Enabled)
+		if c.Rewriter.Model != "" {
+			fmt.Fprintf(&b, "model = %q\n", c.Rewriter.Model)
+		} else {
+			b.WriteString("# model = \"deepseek/deepseek-v4-flash\"\n")
+		}
+		if c.Rewriter.Timeout != "" {
+			fmt.Fprintf(&b, "timeout = %q\n", c.Rewriter.Timeout)
+		} else {
+			b.WriteString("# timeout = \"3s\"\n")
+		}
+		if c.Rewriter.MaxLength > 0 {
+			fmt.Fprintf(&b, "max_length = %d\n", c.Rewriter.MaxLength)
+		} else {
+			b.WriteString("# max_length = 500\n")
+		}
+		b.WriteString("\n")
+	}
+
 	if shouldRenderBot(c, defaults, scope) {
 		b.WriteString("# Bot gateway: multi-channel IM bot for QQ, Feishu/Lark, and WeChat.\n")
 		b.WriteString("[bot]\n")
@@ -1047,6 +1070,22 @@ func RenderTOMLProjectDelta(c *Config) string {
 		b.WriteString("\n")
 	}
 
+	// [rewriter]
+	if !reflect.DeepEqual(c.Rewriter, d.Rewriter) {
+		b.WriteString("[rewriter]\n")
+		fmt.Fprintf(&b, "enabled = %v\n", c.Rewriter.Enabled)
+		if c.Rewriter.Model != "" {
+			fmt.Fprintf(&b, "model = %q\n", c.Rewriter.Model)
+		}
+		if c.Rewriter.Timeout != "" {
+			fmt.Fprintf(&b, "timeout = %q\n", c.Rewriter.Timeout)
+		}
+		if c.Rewriter.MaxLength > 0 {
+			fmt.Fprintf(&b, "max_length = %d\n", c.Rewriter.MaxLength)
+		}
+		b.WriteString("\n")
+	}
+
 	// [[plugins]] — always include when set; replaces all existing entries
 	for _, pl := range c.Plugins {
 		b.WriteString("[[plugins]]\n")
@@ -1204,6 +1243,13 @@ func shouldRenderBot(c, defaults *Config, scope RenderScope) bool {
 		return true
 	}
 	return !reflect.DeepEqual(c.Bot, defaults.Bot)
+}
+
+func shouldRenderRewriter(c, defaults *Config, scope RenderScope) bool {
+	if scope != RenderScopeProject {
+		return true
+	}
+	return !reflect.DeepEqual(c.Rewriter, defaults.Rewriter)
 }
 
 func shouldRenderSystemPrompt(c, defaults *Config, scope RenderScope) bool {

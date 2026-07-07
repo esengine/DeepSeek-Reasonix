@@ -251,6 +251,19 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # token_env = "WEIXIN_BOT_TOKEN"
 # api_base  = "https://ilinkai.weixin.qq.com"   # Tencent iLink Bot API base URL
 
+# [rewriter] Lightweight prompt rewriter (optional). When enabled, short user
+# inputs (<max_length runes) are sent to a lightweight model that rewrites them
+# into structured prompts before the main model sees them. This keeps the main
+# model's system-prompt prefix cache-stable — short casual prompts get the same
+# cache hit rate as well-structured ones. Inputs at or above max_length skip
+# the rewrite. Failures (timeout, provider error, empty response) fall back
+# silently to the original input.
+# [rewriter]
+# enabled    = false
+# model      = "deepseek/deepseek-v4-flash"   # a provider/model or bare provider name
+# timeout    = "3s"   # per-call deadline; default 3s
+# max_length = 500    # inputs longer than this (in runes) skip rewrite
+
 [serve]
 # Authentication for the HTTP serve frontend (reasonix serve).
 # auth_mode = "none"      # none | token | password

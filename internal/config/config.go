@@ -59,6 +59,7 @@ type Config struct {
 	LSP              LSPConfig           `toml:"lsp"`
 	Bot              BotConfig           `toml:"bot"`
 	Serve            ServeConfig         `toml:"serve"`
+	Rewriter         RewriterConfig      `toml:"rewriter"`
 
 	providerSources          map[string]providerSourceScope
 	shadowedProjectProviders []ProviderEntry
@@ -653,6 +654,22 @@ type ServeConfig struct {
 	// rate-limiting and Secure-cookie decisions. When false (default), they
 	// are ignored — an attacker can otherwise forge them.
 	BehindProxy bool `toml:"behind_proxy"`
+}
+
+// RewriterConfig controls the optional lightweight prompt rewriter. When
+// enabled, short user inputs (<max_length runes) are sent to a lightweight
+// model (referenced by Model, e.g. "deepseek/deepseek-v4-flash") that rewrites
+// them into structured prompts before the main model sees them. This keeps the
+// main model's system-prompt prefix cache-stable — the rewritten text feeds
+// the same prefix — so short, casual prompts benefit from the same cache hit
+// rate as well-structured ones. Inputs at or above max_length skip the rewrite.
+// Failures (timeout, provider error, empty response) fall back silently to the
+// original input, so the feature never blocks a turn.
+type RewriterConfig struct {
+	Enabled   bool   `toml:"enabled"`
+	Model     string `toml:"model"`
+	Timeout   string `toml:"timeout"`    // duration string e.g. "3s"; empty = 3s
+	MaxLength int    `toml:"max_length"` // 0 = 500 runes
 }
 
 // NetworkConfig controls ordinary outbound HTTP traffic such as model providers,

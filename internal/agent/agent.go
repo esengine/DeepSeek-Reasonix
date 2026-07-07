@@ -23,6 +23,7 @@ import (
 	"reasonix/internal/nilutil"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
+	"reasonix/internal/rewriter"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/shellparse"
 	"reasonix/internal/tool"
@@ -402,6 +403,7 @@ type Agent struct {
 	// stormSig: a model keeps doing the same successful write, so there is no
 	// error for the failure-only storm breaker to see.
 	repeatSuccessCounts map[string]int
+	rewriter            rewriter.Rewriter
 }
 
 // KeepPolicy is a bitmask controlling which messages are preserved beyond the
@@ -830,6 +832,7 @@ type Options struct {
 	// UseMemoryCompilerLLMClassification 启用 LLM 分类来判断任务 vs 聊天
 	// 默认 false 时使用启发式分类器
 	UseMemoryCompilerLLMClassification bool
+	Rewriter                           rewriter.Rewriter
 }
 
 // New constructs an Agent. MaxSteps <= 0 means no cap — the run loop continues
@@ -919,6 +922,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		maxSubagentDepth:         maxSubagentDepth,
 		memoryCompiler:           opts.MemoryCompiler,
 		memoryCompilerVerbosity:  normalizeMemoryCompilerVerbosity(opts.MemoryCompilerVerbosity),
+		rewriter:                 opts.Rewriter,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -958,6 +962,11 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	a.repeatSuccessCounts = nil
 	a.sink.Emit(event.Event{Kind: event.TurnStarted})
+	if a.rewriter != nil {
+		if rewritten, err := a.rewriter.Rewrite(ctx, input); err == nil && rewritten != "" {
+			input = rewritten
+		}
+	}
 	rawInput := input
 	memoryCompilerInput := rawInput
 	if sourceInput, ok := MemoryCompilerSourceInputFromContext(ctx); ok {
