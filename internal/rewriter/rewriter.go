@@ -33,7 +33,7 @@ type ProviderRewriter struct {
 
 func NewProviderRewriter(prov provider.Provider, cfg Config) *ProviderRewriter {
 	if cfg.Timeout == 0 {
-		cfg.Timeout = 3 * time.Second
+		cfg.Timeout = 2 * time.Second
 	}
 	if cfg.MaxLength == 0 {
 		cfg.MaxLength = 500
