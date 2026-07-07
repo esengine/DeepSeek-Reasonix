@@ -3,6 +3,9 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,6 +17,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/boot"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
@@ -181,6 +185,137 @@ func TestBtwSlashCommandStartsSideSurface(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("side turn did not start")
+	}
+}
+
+func TestBtwSlashCommandRendersSideResponse(t *testing.T) {
+	sideEvents := make(chan event.Event, 8)
+	started := make(chan string, 1)
+	ctrl := newBtwTestController(t, &eventSink{ch: sideEvents}, started)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 8), 80, sideEvents)
+	m.input.SetValue("/btw explain this")
+
+	next, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(chatTUI)
+	if cmd == nil {
+		t.Fatal("/btw should schedule side response handling")
+	}
+	select {
+	case got := <-started:
+		if got != "explain this" {
+			t.Fatalf("side prompt = %q, want explain this", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("side turn did not start")
+	}
+
+	msg := nextSideEventMsgFromCmd(t, cmd)
+	next, _ = m.update(msg)
+	m = next.(chatTUI)
+
+	sideText := strings.Join(m.conversation(tuiSurfaceSide).transcript, "\n")
+	if !strings.Contains(sideText, "side answer") {
+		t.Fatalf("side response missing from transcript: %q", sideText)
+	}
+}
+
+func TestBtwOpenAIProviderRendersSideResponseInView(t *testing.T) {
+	isolateUserConfig(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"side visible answer\"}}]}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	if err := os.WriteFile("reasonix.toml", []byte(fmt.Sprintf(`
+default_model = "local"
+
+[agent]
+auto_plan = "off"
+
+[[providers]]
+name = "local"
+kind = "openai"
+base_url = %q
+model = "m"
+`, srv.URL)), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+
+	events := make(chan event.Event, 16)
+	sideEvents := make(chan event.Event, 16)
+	ctrl, err := boot.Build(context.Background(), boot.Options{
+		WorkspaceRoot: root,
+		Sink:          &eventSink{ch: events},
+		SideSink:      &eventSink{ch: sideEvents},
+		SessionDir:    filepath.Join(root, "sessions"),
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "main context"})
+	ctrl.Resume(sess, "")
+
+	m := newChatTUI(ctrl, "", events, 80, sideEvents)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	m = next.(chatTUI)
+	m.input.SetValue("/btw explain")
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(chatTUI)
+	if cmd == nil {
+		t.Fatal("/btw should schedule side response handling")
+	}
+
+	for i := 0; i < 8; i++ {
+		msg := nextSideEventMsgFromCmd(t, cmd)
+		next, cmd = m.Update(msg)
+		m = next.(chatTUI)
+		if strings.Contains(ansi.Strip(m.View().Content), "side visible answer") {
+			return
+		}
+		if msg.event.Kind == event.TurnDone {
+			break
+		}
+	}
+	t.Fatalf("side response missing from rendered view:\n%s", ansi.Strip(m.View().Content))
+}
+
+func nextSideEventMsgFromCmd(t *testing.T, cmd tea.Cmd) sideEventMsg {
+	t.Helper()
+	msgs := make(chan tea.Msg, 16)
+	var run func(tea.Cmd)
+	run = func(c tea.Cmd) {
+		if c == nil {
+			return
+		}
+		go func() {
+			msg := c()
+			if batch, ok := msg.(tea.BatchMsg); ok {
+				for _, nested := range batch {
+					run(nested)
+				}
+				return
+			}
+			msgs <- msg
+		}()
+	}
+	run(cmd)
+	for {
+		select {
+		case msg := <-msgs:
+			if side, ok := msg.(sideEventMsg); ok {
+				return side
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for side event message")
+		}
 	}
 }
 
@@ -360,6 +495,116 @@ func TestBtwSideSurfaceHidesMainPanels(t *testing.T) {
 	}
 	if got, want := m.bottomRows(), m.input.Height()+2+m.statusLineCount; got != want {
 		t.Fatalf("side bottomRows = %d, want composer + status only = %d", got, want)
+	}
+}
+
+func TestBtwSideStatusRemindsMainAttention(t *testing.T) {
+	tests := []struct {
+		name string
+		ev   event.Event
+		want string
+		leak string
+	}{
+		{
+			name: "approval",
+			ev: event.Event{
+				Kind: event.ApprovalRequest,
+				Approval: event.Approval{
+					ID:      "approval-1",
+					Tool:    "bash",
+					Subject: "echo main",
+				},
+			},
+			want: "main needs approval",
+			leak: "echo main",
+		},
+		{
+			name: "notice",
+			ev: event.Event{
+				Kind: event.Notice,
+				Text: "main notice body",
+			},
+			want: "main notice",
+			leak: "main notice body",
+		},
+		{
+			name: "turn done",
+			ev: event.Event{
+				Kind: event.TurnDone,
+			},
+			want: "main finished",
+		},
+		{
+			name: "running",
+			ev: event.Event{
+				Kind: event.TurnStarted,
+			},
+			want: "main working",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestChatTUI()
+			m.ctrl = control.New(control.Options{})
+			m.surface = tuiSurfaceSide
+			m.conversation(tuiSurfaceSide).transcript = []string{"side transcript"}
+			if tt.name == "running" {
+				m.state = tuiRunning
+			}
+			m.ingestEvent(tt.ev)
+			m.statusLineCount = m.computeStatusLineCount(m.width)
+
+			view := ansi.Strip(m.View().Content)
+			if !strings.Contains(view, "from main") {
+				t.Fatalf("side status missing context label:\n%s", view)
+			}
+			if !strings.Contains(view, tt.want) {
+				t.Fatalf("side status missing %q:\n%s", tt.want, view)
+			}
+			if !strings.Contains(view, "Ctrl+C to return") {
+				t.Fatalf("side status missing return hint:\n%s", view)
+			}
+			if tt.leak != "" && strings.Contains(view, tt.leak) {
+				t.Fatalf("side surface leaked main detail %q:\n%s", tt.leak, view)
+			}
+		})
+	}
+}
+
+func TestBtwSideStatusShowsSideWorkingContext(t *testing.T) {
+	sideEvents := make(chan event.Event, 8)
+	started := make(chan string, 1)
+	release := make(chan struct{})
+	mainSess := agent.NewSession("sys")
+	mainSess.Add(provider.Message{Role: provider.RoleUser, Content: "main context"})
+	mainExec := agent.New(nil, tool.NewRegistry(), mainSess, agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{
+		Executor: mainExec,
+		SideSink: &eventSink{ch: sideEvents},
+		SideFactory: func(ctx context.Context, sess *agent.Session, sink event.Sink) (*agent.Agent, error) {
+			return agent.New(&cliSideTestProvider{started: started, release: release}, tool.NewRegistry(), sess, agent.Options{}, sink), nil
+		},
+	})
+	defer close(release)
+	if err := ctrl.StartSide("hold"); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("side turn did not start")
+	}
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80, sideEvents)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	m = next.(chatTUI)
+	m.surface = tuiSurfaceSide
+	m.conversation(tuiSurfaceSide).transcript = []string{"side transcript"}
+	m.statusLineCount = m.computeStatusLineCount(m.width)
+
+	view := ansi.Strip(m.View().Content)
+	if !strings.Contains(view, "from main · side working · Ctrl+C to return") {
+		t.Fatalf("side status missing working context:\n%s", view)
 	}
 }
 

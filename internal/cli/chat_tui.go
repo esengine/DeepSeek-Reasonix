@@ -242,6 +242,11 @@ type chatTUI struct {
 	// run goroutine is blocked awaiting ctrl.AnswerQuestion and keys drive the card.
 	chooser *chooser
 
+	// mainNoticePending reminds the side surface that a main-thread notice arrived
+	// while it was hidden. Approval/ask reminders derive from their existing state.
+	mainNoticePending bool
+	mainDonePending   bool
+
 	// rewind holds the Esc-Esc / "/rewind" picker (nil when closed); while set,
 	// keys drive it and it renders as an overlay. lastEsc times the double-Esc
 	// gesture that opens it on an empty composer.
@@ -983,6 +988,8 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sideGeneration++
 				m.drainSideEvents()
 				m.surface = tuiSurfaceMain
+				m.mainNoticePending = false
+				m.mainDonePending = false
 				m.conversation(tuiSurfaceSide).resetTranscript()
 				m.input.Reset()
 				m.pastedBlocks = nil
@@ -2910,11 +2917,7 @@ func (m chatTUI) primaryStatusLine(modeTag string, shellMode, cancelRequested bo
 	switch {
 	case m.surface == tuiSurfaceSide:
 		side := m.ctrl.SideState()
-		if side.Runtime.Running {
-			status = "  " + modeTag + " · side conversation running · Ctrl+C to return"
-		} else {
-			status = "  " + modeTag + " · side conversation · Ctrl+C to return"
-		}
+		status = "  " + modeTag + m.sideContextStatus(side.Runtime.Running)
 	case m.rewind != nil:
 		status = "  " + modeTag + " · ⟲ rewind"
 	case m.mcpImport != nil:
@@ -2954,6 +2957,40 @@ func (m chatTUI) primaryStatusLine(modeTag string, shellMode, cancelRequested bo
 		}
 	}
 	return status
+}
+
+func (m chatTUI) sideContextStatus(sideRunning bool) string {
+	parts := []string{"from main"}
+	if sideRunning {
+		parts = append(parts, "side working")
+	}
+	if attention := m.mainAttentionStatus(); attention != "" {
+		parts = append(parts, attention)
+	}
+	parts = append(parts, "Ctrl+C to return")
+	return " " + accent(strings.Join(parts, " · "))
+}
+
+func (m chatTUI) mainAttentionStatus() string {
+	if m.surface != tuiSurfaceSide {
+		return ""
+	}
+	switch {
+	case m.pendingApproval != nil && m.pendingApproval.Tool == planApprovalTool:
+		return "main needs plan approval"
+	case m.pendingApproval != nil:
+		return "main needs approval"
+	case m.chooser != nil:
+		return "main needs input"
+	case m.state == tuiRunning:
+		return "main working"
+	case m.mainDonePending:
+		return "main finished"
+	case m.mainNoticePending:
+		return "main notice"
+	default:
+		return ""
+	}
 }
 
 func (m chatTUI) dataStatusLine() string {
@@ -3766,8 +3803,21 @@ func (m *chatTUI) unsendPending() {
 // preserving order. Switching on the event Kind replaces the old prefix-sniffing
 // of a flattened byte stream: the structure is now explicit.
 func (m *chatTUI) ingestEvent(e event.Event) {
+	m.markMainAttention(e)
 	m.syncMainLegacyToSurface()
 	m.ingestEventFor(m.conversation(tuiSurfaceMain), e)
+}
+
+func (m *chatTUI) markMainAttention(e event.Event) {
+	if m.surface != tuiSurfaceSide {
+		return
+	}
+	switch e.Kind {
+	case event.Notice:
+		m.mainNoticePending = true
+	case event.TurnDone:
+		m.mainDonePending = true
+	}
 }
 
 // finalizeStreamed freezes any in-progress reasoning + answer into scrollback so
@@ -4057,6 +4107,8 @@ func (m *chatTUI) runBtwCommand(input string) tea.Cmd {
 		return nil
 	}
 	m.surface = tuiSurfaceSide
+	m.mainNoticePending = false
+	m.mainDonePending = false
 	m.conversation(tuiSurfaceSide).resetTranscript()
 	m.forceGotoBottom = true
 	if args == "" {
