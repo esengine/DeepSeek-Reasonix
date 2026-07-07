@@ -39,6 +39,16 @@ func TestWithReasoningLanguageOnlySkipsLeadingInjectedBlock(t *testing.T) {
 	if got := WithReasoningLanguage(withLeadingMemory, "zh"); got != withLeadingMemory {
 		t.Fatalf("WithReasoningLanguage duplicated a reasoning block after leading transient context:\n got %q\nwant %q", got, withLeadingMemory)
 	}
+
+	withGoalContext := "<active-goal>\nfinish the current goal\n</active-goal>\n\n" + alreadyPrefixed
+	if got := WithReasoningLanguage(withGoalContext, "zh"); got != withGoalContext {
+		t.Fatalf("WithReasoningLanguage duplicated a reasoning block after active goal context:\n got %q\nwant %q", got, withGoalContext)
+	}
+
+	withCapabilityContext := "<capability-route version=\"1\">\nroute: code\n</capability-route>\n\n" + alreadyPrefixed
+	if got := WithReasoningLanguage(withCapabilityContext, "zh"); got != withCapabilityContext {
+		t.Fatalf("WithReasoningLanguage duplicated a reasoning block after capability route context:\n got %q\nwant %q", got, withCapabilityContext)
+	}
 }
 
 func TestWithReasoningLanguageAutoInfersFromSource(t *testing.T) {

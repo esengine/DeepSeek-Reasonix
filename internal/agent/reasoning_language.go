@@ -236,6 +236,18 @@ func hasLeadingInjectedBlock(content, target string) bool {
 			if !ok {
 				return false
 			}
+		case strings.HasPrefix(s, "<active-goal>"):
+			var ok bool
+			s, ok = trimLeadingTransientBlock(s, "active-goal")
+			if !ok {
+				return false
+			}
+		case strings.HasPrefix(s, "<capability-route"):
+			var ok bool
+			s, ok = trimLeadingTransientBlock(s, "capability-route")
+			if !ok {
+				return false
+			}
 		default:
 			return false
 		}
