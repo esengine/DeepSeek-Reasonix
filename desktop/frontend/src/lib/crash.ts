@@ -377,10 +377,11 @@ export function shouldRecordEventLoopLagSample(
   visibilityHidden: boolean,
   msSinceVisible: number,
   focused = true,
+  msSinceFocused = msSinceVisible,
 ): boolean {
   if (!focused) return false;
   if (visibilityHidden) return false;
-  return msSinceVisible >= VISIBILITY_RESUME_GRACE_MS;
+  return msSinceVisible >= VISIBILITY_RESUME_GRACE_MS && msSinceFocused >= VISIBILITY_RESUME_GRACE_MS;
 }
 
 export function buildPerformancePayload(snapshot: PerformanceSnapshot): CrashPayload {
@@ -634,9 +635,18 @@ export function installPerformancePressureMonitor() {
   const isHidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
   const isFocused = () => typeof document === "undefined" || document.hasFocus?.() !== false;
   let visibleSince = isHidden() ? Number.POSITIVE_INFINITY : startedAt;
+  let focusedSince = isFocused() ? startedAt : Number.POSITIVE_INFINITY;
   let expected = performance.now() + 1000;
 
   const pastGrace = () => performance.now() >= graceUntil;
+  const resetSamples = () => {
+    const now = performance.now();
+    longTasks.length = 0;
+    lagSamples.length = 0;
+    expected = now + 1000;
+    visibleSince = isHidden() ? Number.POSITIVE_INFINITY : now;
+    focusedSince = isFocused() ? now : Number.POSITIVE_INFINITY;
+  };
   const inspectLongTasks = () => {
     if (!pastGrace()) return;
     const summary = longTaskSummary();
@@ -647,13 +657,10 @@ export function installPerformancePressureMonitor() {
   };
 
   if (typeof document !== "undefined") {
-    document.addEventListener("visibilitychange", () => {
-      longTasks.length = 0;
-      lagSamples.length = 0;
-      expected = performance.now() + 1000;
-      if (!isHidden()) visibleSince = performance.now();
-    });
+    document.addEventListener("visibilitychange", resetSamples);
   }
+  window.addEventListener("focus", resetSamples);
+  window.addEventListener("blur", resetSamples);
 
   if (typeof PerformanceObserver !== "undefined") {
     try {
@@ -676,7 +683,7 @@ export function installPerformancePressureMonitor() {
     const lagMs = Math.max(0, now - expected);
     expected = now + 1000;
     if (!pastGrace()) return;
-    if (!shouldRecordEventLoopLagSample(isHidden(), now - visibleSince, isFocused())) return;
+    if (!shouldRecordEventLoopLagSample(isHidden(), now - visibleSince, isFocused(), now - focusedSince)) return;
     lagSamples.push(lagMs);
     if (lagSamples.length > MAX_LAG_SAMPLES) lagSamples.shift();
     if (lagMs >= EVENT_LOOP_LAG_PROMPT_MS) promptPerformanceReport(`event loop lag ${fmtNumber(lagMs)}ms`, lagMs);

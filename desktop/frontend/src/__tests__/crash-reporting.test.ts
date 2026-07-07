@@ -143,6 +143,11 @@ eq(shouldRecordLongTaskSample(570_000, 92, 15_000, false, 20_000, false), false,
 eq(shouldRecordEventLoopLagSample(true, 60_000), false, "ignores event-loop lag while the window is hidden");
 eq(shouldRecordEventLoopLagSample(false, 3_000), false, "ignores event-loop lag immediately after visibility resumes");
 eq(shouldRecordEventLoopLagSample(false, 6_000), true, "records event-loop lag after the visibility resume grace period");
+eq(
+  shouldRecordEventLoopLagSample(false, 60_000, true, 3_000),
+  false,
+  "ignores event-loop lag immediately after focus resumes",
+);
 eq(shouldRecordEventLoopLagSample(false, 60_000, false), false, "ignores event-loop lag while unfocused");
 
 eq(shouldPromptForPerformanceLabel(false, 11 * 60_000, false), true, "prompts an unhandled label past cooldown while visible");
