@@ -27,7 +27,7 @@ func (t *installSourceTool) planGitHubPluginPackage(ctx context.Context, req req
 	}
 	var warnings []string
 	for _, branch := range src.branches() {
-		for _, manifestPath := range []string{pluginpkg.NativeManifest, pluginpkg.CodexManifest} {
+		for _, manifestPath := range pluginpkg.ManifestPaths() {
 			rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", src.Owner, src.Repo, branch, joinURLPath(src.Path, manifestPath))
 			body, err := t.fetchText(ctx, rawURL)
 			if err != nil {

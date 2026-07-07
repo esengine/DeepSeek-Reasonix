@@ -1,13 +1,17 @@
 // MCP placeholder tools. Background startup registers cheap placeholder entries
 // in the tool registry at boot — using the on-disk schema cache when it exists —
 // and kicks the real subprocess spawn / handshake immediately. By the time the
-// model calls a tool, the swap is usually already done.
+// model calls a tool, the connection is usually already up.
 //
-// Why the indirection: a background server still needs stable placeholder tools
-// before the real handshake finishes. Once it does finish, lazySpawn swaps the
-// placeholders for real tools through tool.Registry's own lock, so the next
-// model request sees the real schemas without waiting for another placeholder
-// Execute call.
+// Cache-hit placeholders are PINNED for the whole session: they present the
+// cached names/descriptions/schemas from boot onward and forward Execute to the
+// real tools once the handshake completes, but the registry entries themselves
+// are never replaced. The provider request's tools array is part of the cached
+// prompt prefix, so swapping in live tools mid-session — whenever the live
+// handshake differed from the cache — invalidated the whole conversation's
+// provider cache at 10x miss pricing. Live drift lands in the schema cache and
+// surfaces next session. Only the cache-miss connect stub still swaps (there
+// was nothing real to present), a one-time cost per server.
 package plugin
 
 import (
@@ -148,17 +152,33 @@ func saveLazyCachedSchema(spec Spec, real []tool.Tool) {
 	})
 }
 
-// trySwap installs the real tools into reg if the spawn is ready and the
-// swap hasn't happened. Caller must hold s.mu.
+// trySwap publishes the real tools after a successful spawn. Caller must hold
+// s.mu.
+//
+// Cache-miss placeholders (removePrefix set) genuinely swap: the single
+// "<server>__connect" stub is dropped and the real tools register under their
+// own names — a one-time tool-set change per server, unavoidable because no
+// schema existed to present earlier.
+//
+// Cache-hit placeholders do NOT touch the registry. The lazyTools already
+// carry the cached names/descriptions/schemas the model has seen since boot,
+// and Execute forwards to the real tool once ready — swapping in the live
+// tools would rewrite the request's tools array mid-session whenever the live
+// handshake differs from the cache (description tweaks, schema upgrades, new
+// tools), invalidating the provider prefix cache at 10x miss pricing. The
+// live result still lands in the schema cache (saveLazyCachedSchema), so the
+// NEXT session presents the updated surface — freshness deferred one session
+// in exchange for byte-stable tool bytes within this one, same trade the
+// environment-probe snapshot makes for the system prompt.
 func (s *lazySpawn) trySwap() {
 	if s.swapped || s.state != spawnReady {
 		return
 	}
 	if s.removePrefix != "" {
 		s.reg.RemovePrefix(s.removePrefix)
-	}
-	for _, t := range s.real {
-		s.reg.Add(t)
+		for _, t := range s.real {
+			s.reg.Add(t)
+		}
 	}
 	s.swapped = true
 }
@@ -360,7 +380,11 @@ func LazyToolset(spec Spec, cs *CachedSchema, host *Host, reg *tool.Registry, se
 	}
 
 	var out []tool.Tool
-	if cs == nil {
+	// A snapshot with zero tools presents nothing the model could call, so it
+	// gets the same connect stub as a cache miss — otherwise the live tools
+	// would silently join the registry mid-session with no placeholder names
+	// reserved for them.
+	if cs == nil || len(cs.Tools) == 0 {
 		shared.removePrefix = ToolPrefix(spec.Name)
 		out = []tool.Tool{&lazyTool{
 			shared:   shared,

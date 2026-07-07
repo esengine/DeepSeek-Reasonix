@@ -395,7 +395,7 @@ CJK 双宽字符，造成视觉错位。想保留旧的终端块状光标可设�
 `bash` 本身默认进 OS 沙盒（`[sandbox] bash`：macOS 使用 Seatbelt，Linux 使用 bubblewrap，
 原生 Windows 使用 native helper）：命令只能写这些 root（外加平台按命令提供的临时/缓存 root），
 OS 沙盒生效时也不能读取配置的 `forbid_read` roots，`[sandbox] network` 为真时才能联网。
-原生 Windows helper 把底层隔离委托给 `github.com/SivanCola/windows-sandbox`：
+原生 Windows helper 使用 Reasonix 内置的 Windows sandbox backend：
 只读命令使用 AppContainer，可写命令使用 low-integrity token；它会临时授予
 workspace、每次命令专用 temp root 和目标可执行文件的访问权，对 `forbid_read`
 （文件和目录皆可）临时添加 deny ACE，修改前记录被触碰目录的 DACL，命令结束后尽力恢复。
@@ -407,6 +407,19 @@ low-integrity token 下，除配置的 root 外它仍能写入 Windows 对任何
 `[sandbox] network = false` 时会 fail closed。没有可用 OS 沙盒时，`bash = "enforce"` 会拒绝 bash 执行，不会无沙盒运行
 （越界询问与可选的 Windows elevated 加固见
 [`SPEC.md` §9](./SPEC.md#9-roadmap-not-in-current-scope)）。
+
+Windows 沙盒排障：沙盒会把 Reasonix 可执行文件自身以隐藏 helper 方式重新拉起，
+CLI 与桌面端都内置了这个 helper 入口——若某个构建缺少入口而又请求 enforce，
+bash 会以明确报错拒绝执行，而不是返回空输出。同一 workspace 上排队等待另一条
+沙盒命令时会打印一行“waiting for another sandboxed command”提示，并在可识别时
+标出持锁命令及其 PID。前台命令排队 1 分钟后即失败并给出同样的持锁信息（被挡住
+的回合应尽快报错，而不是挂住）；后台任务最多等 10 分钟，`WINDOWS_SANDBOX_LOCK_MS`
+可同时覆盖两者。应先停止提示中点名的命令；调大等待上限只会让后续命令等更久。
+如果只有 Git-for-Windows/MSYS2 bash
+下的沙盒命令失败，可试 `[tools.shell] prefer = "powershell"`——MSYS 运行时在
+low-integrity token 下较脆弱。运行 `reasonix doctor` 可查看解析到的 shell、沙盒
+可用性，以及项目 `reasonix.toml` 是否固定了 `[sandbox]`（项目文件优先级高于
+Settings/用户配置；沙盒配置变更需 reload session config 或新开会话才生效）。
 
 ## 插件（MCP）
 

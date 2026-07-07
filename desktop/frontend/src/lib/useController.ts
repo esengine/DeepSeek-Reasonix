@@ -10,7 +10,7 @@ import { app, onEvent, onReady } from "./bridge";
 import { invalidateCache } from "./composerHistory";
 import { formatGuardianAssessmentNotice } from "./guardianEvents";
 import { createRafBatch } from "./rafBatch";
-import { t } from "./i18n";
+import { t, type DictKey } from "./i18n";
 import { fileDiffFromWire, summarize, summarizeFileDiff, type ToolFileDiff } from "./tools";
 import { modeHasAutoApproveTools, normalizeMode, normalizeToolApprovalMode } from "./types";
 import type {
@@ -244,6 +244,8 @@ export function sameMeta(a?: Meta, b?: Meta): boolean {
 
 const STALE_TURN_RECONCILE_MS = 30_000;
 const CANCEL_RECONCILE_DELAYS_MS = [0, 100, 300, 1_000] as const;
+const STARTUP_READY_META_RECONCILE_MS = 250;
+const STARTUP_READY_META_RECONCILE_ATTEMPTS = 60;
 
 export function shouldReconcileStaleTurn(
   state: Pick<State, "running" | "turnActive"> | undefined,
@@ -379,7 +381,7 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
   const positionalResults = positionalToolResults(messages);
   const consumedPositionalToolIndexes = new Set(Array.from(positionalResults.values(), (result) => result.index));
 
-  const items: Item[] = [];
+  let items: Item[] = [];
   let seq = startSeq;
   const consumedToolIDs = new Set<string>();
   for (let messageIndex = 0; messageIndex < messages.length; messageIndex += 1) {
@@ -394,8 +396,9 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
     }
     if (m.role === "notice") {
       if (m.content.trim() !== "") {
-        items.push({ kind: "notice", id: `${idPrefix}${seq}`, level: m.level === "warn" ? "warn" : "info", text: m.content });
-        seq++;
+        const next = appendNoticeItem(items, seq, `${idPrefix}${seq}`, m.level === "warn" ? "warn" : "info", m.content);
+        items = next.items;
+        seq = next.seq;
       }
       continue;
     }
@@ -725,7 +728,7 @@ function applyEvent(s: State, e: WireEvent): State {
       return { ...s, usage, context: { ...s.context, used, sessionTokens }, turnTokens, turnTotalTokens, turnCost, sessionTokens, sessionCost, sessionCurrency };
     }
     case "notice":
-      return { ...s, running: s.turnActive ? s.running : false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: e.level ?? "info", text: e.text ?? "" }] };
+      return appendNoticeToState(s, e.level ?? "info", e.text ?? "");
     case "phase":
       return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "phase", id: `p${s.seq}`, text: e.text ?? "" }] };
     case "compaction_started":
@@ -954,24 +957,207 @@ function errorMessage(err: unknown): string {
 }
 
 export function effortSwitchNoticeText(err: unknown): string {
+  return settingSwitchNoticeText(err, "effort", {
+    busy: "status.effortSwitchBusy",
+    leaseHeld: "status.effortSwitchLeaseHeld",
+    starting: "status.effortSwitchStarting",
+    startupFailed: "status.effortSwitchStartupFailed",
+    retry: "status.effortSwitchRetry",
+    failed: "status.effortSwitchFailed",
+  });
+}
+
+export function modelSwitchNoticeText(err: unknown): string {
+  const msg = errorMessage(err).trim() || "unknown error";
+  const unknownModel = /^unknown model (.+)$/i.exec(msg);
+  if (unknownModel) {
+    return t("status.modelSwitchUnknown", { model: unknownModel[1] });
+  }
+  const unavailable = /^model (.+) is not available because provider (.+) is not added$/i.exec(msg);
+  if (unavailable) {
+    return t("status.modelSwitchProviderUnavailable", { model: unavailable[1], provider: unavailable[2] });
+  }
+  return settingSwitchNoticeText(msg, "model", {
+    busy: "status.modelSwitchBusy",
+    leaseHeld: "status.modelSwitchLeaseHeld",
+    starting: "status.modelSwitchStarting",
+    startupFailed: "status.modelSwitchStartupFailed",
+    retry: "status.modelSwitchRetry",
+    failed: "status.modelSwitchFailed",
+  });
+}
+
+export function tokenModeSwitchNoticeText(err: unknown): string {
+  return settingSwitchNoticeText(err, "token mode", {
+    busy: "status.tokenModeSwitchBusy",
+    leaseHeld: "status.tokenModeSwitchLeaseHeld",
+    starting: "status.tokenModeSwitchStarting",
+    startupFailed: "status.tokenModeSwitchStartupFailed",
+    retry: "status.tokenModeSwitchRetry",
+    failed: "status.tokenModeSwitchFailed",
+  });
+}
+
+export function localizedBackendNoticeText(text: string): string {
+  const msg = text.trim();
+  const autosave = /^Session autosave failed: (.+)$/s.exec(msg);
+  if (autosave) {
+    return t("status.sessionAutosaveFailed", { err: autosave[1] });
+  }
+  const saveBefore = /^Session save failed before (.+?): (.+)$/s.exec(msg);
+  if (saveBefore) {
+    return t("status.sessionSaveFailedBefore", { action: localizedSessionAction(saveBefore[1]), err: saveBefore[2] });
+  }
+  const modelFallback = /^model (.+) is no longer available; switched to (.+)$/s.exec(msg);
+  if (modelFallback) {
+    return t("status.modelFallbackSwitched", { model: modelFallback[1], fallback: modelFallback[2] });
+  }
+  if (
+    /^session changed on disk; unsaved local transcript was saved as a conflict copy$/i.test(msg) ||
+    /^session changed on disk; unsaved local transcript was saved as recovery branch\b/i.test(msg)
+  ) {
+    return t("recovery.noticeSavedCopy");
+  }
+  if (
+    /^repeated save conflicts were detected; saved the current conflict copy in place$/i.test(msg) ||
+    /^session conflicts kept recurring; kept the transcript on the current recovery branch$/i.test(msg)
+  ) {
+    return t("recovery.noticeKeptCurrent");
+  }
+  if (/^session changed on disk; adopted the newer transcript \(local changes already covered\)$/i.test(msg)) {
+    return t("recovery.noticeAdoptedCovered");
+  }
+  if (/^session changed on disk; adopted the newer transcript$/i.test(msg)) {
+    return t("recovery.noticeAdopted");
+  }
+  return msg;
+}
+
+function recoveryNoticeDedupeKey(text: string): string {
+  const msg = text.trim();
+  if (
+    /^session changed on disk; unsaved local transcript was saved as a conflict copy$/i.test(msg) ||
+    /^session changed on disk; unsaved local transcript was saved as recovery branch\b/i.test(msg) ||
+    msg === t("recovery.noticeSavedCopy")
+  ) {
+    return "recovery:saved-copy";
+  }
+  if (
+    /^repeated save conflicts were detected; saved the current conflict copy in place$/i.test(msg) ||
+    /^session conflicts kept recurring; kept the transcript on the current recovery branch$/i.test(msg) ||
+    msg === t("recovery.noticeKeptCurrent")
+  ) {
+    return "recovery:kept-current";
+  }
+  if (
+    /^session changed on disk; adopted the newer transcript \(local changes already covered\)$/i.test(msg) ||
+    msg === t("recovery.noticeAdoptedCovered")
+  ) {
+    return "recovery:adopted-covered";
+  }
+  if (
+    /^session changed on disk; adopted the newer transcript$/i.test(msg) ||
+    msg === t("recovery.noticeAdopted")
+  ) {
+    return "recovery:adopted";
+  }
+  return "";
+}
+
+function quietTranscriptNoticeKey(text: string): string {
+  const recovery = recoveryNoticeDedupeKey(text);
+  if (recovery) return recovery;
+
+  const msg = text.trim();
+  if (/^guardian enabled · model=.+$/i.test(msg)) {
+    return "startup:guardian-enabled";
+  }
+  if (/^\d+ MCP server\(s\) failed to start: .+ \u2014 run \/mcp for details$/i.test(msg)) {
+    return "startup:mcp-failures";
+  }
+  const directMCPFailure = /^mcp\s+([A-Za-z0-9._-]+):\s+.+$/i.exec(msg);
+  if (directMCPFailure) {
+    const name = directMCPFailure[1].toLowerCase();
+    if (!["add", "auth", "config", "connect", "import", "mode", "remove"].includes(name)) {
+      return "startup:mcp-failure";
+    }
+  }
+  if (/^plugin ".+" has been slow \d+ startups in a row \(last \d+ms, budget \d+ms\); demoting to background startup this session$/i.test(msg)) {
+    return "startup:plugin-demote";
+  }
+  if (/^.+ applied: session refreshed after the lease was released$/i.test(msg)) {
+    return "settings:deferred-refresh-applied";
+  }
+  return "";
+}
+
+function appendNoticeItem(items: Item[], seq: number, id: string, level: "info" | "warn", rawText: string): { items: Item[]; seq: number } {
+  if (quietTranscriptNoticeKey(rawText)) {
+    return { items, seq };
+  }
+  const text = localizedBackendNoticeText(rawText);
+  if (quietTranscriptNoticeKey(text)) {
+    return { items, seq };
+  }
+  return { items: [...items, { kind: "notice", id, level, text }], seq: seq + 1 };
+}
+
+function appendNoticeToState(s: State, level: "info" | "warn", text: string): State {
+  const next = appendNoticeItem(s.items, s.seq, `n${s.seq}`, level, text);
+  return { ...s, running: s.turnActive ? s.running : false, seq: next.seq, items: next.items };
+}
+
+function localizedSessionAction(action: string): string {
+  switch (action.trim()) {
+    case "changing model":
+      return t("status.actionChangingModel");
+    case "changing effort":
+      return t("status.actionChangingEffort");
+    case "changing token mode":
+      return t("status.actionChangingTokenMode");
+    case "rebuilding settings":
+      return t("status.actionRebuildingSettings");
+    case "switching sessions":
+      return t("status.actionSwitchingSessions");
+    case "switching tabs":
+      return t("status.actionSwitchingTabs");
+    case "autosave":
+      return t("status.actionAutosave");
+    default:
+      return action.trim() || t("status.actionCurrentSession");
+  }
+}
+
+function settingSwitchNoticeText(
+  err: unknown,
+  setting: "effort" | "model" | "token mode",
+  keys: {
+    busy: DictKey;
+    leaseHeld: DictKey;
+    starting: DictKey;
+    startupFailed: DictKey;
+    retry: DictKey;
+    failed: DictKey;
+  },
+): string {
   const msg = errorMessage(err).trim() || "unknown error";
   const lower = msg.toLowerCase();
-  if (lower.includes("finish or cancel") && lower.includes("before changing effort")) {
-    return t("status.effortSwitchBusy");
+  if (lower.includes("finish or cancel") && lower.includes(`before changing ${setting}`)) {
+    return t(keys.busy);
   }
   if (lower.includes("already open in another reasonix window") || lower.includes("session lease held")) {
-    return t("status.effortSwitchLeaseHeld");
+    return t(keys.leaseHeld);
   }
   if (lower.includes("workspace is still starting")) {
-    return t("status.effortSwitchStarting");
+    return t(keys.starting);
   }
   if (lower.startsWith("workspace failed to start")) {
-    return t("status.effortSwitchStartupFailed", { err: msg });
+    return t(keys.startupFailed, { err: msg });
   }
-  if (lower.includes("changed while switching effort") || (lower.includes("tab ") && lower.includes("not found"))) {
-    return t("status.effortSwitchRetry");
+  if (lower.includes(`changed while switching ${setting}`) || (lower.includes("tab ") && lower.includes("not found"))) {
+    return t(keys.retry);
   }
-  return t("status.effortSwitchFailed", { err: msg });
+  return t(keys.failed, { err: msg });
 }
 
 async function refreshMetaForTab(tabId: string, dispatchTo: (tabId: string, action: Action) => void): Promise<void> {
@@ -981,6 +1167,16 @@ async function refreshMetaForTab(tabId: string, dispatchTo: (tabId: string, acti
     dispatchTo(tabId, { type: "effort", effort: await app.EffortForTab(tabId) });
   } catch {
     /* ignore */
+  }
+}
+
+async function refreshMetaOnlyForTab(tabId: string, dispatchTo: (tabId: string, action: Action) => void): Promise<Meta | undefined> {
+  try {
+    const meta = await app.MetaForTab(tabId);
+    dispatchTo(tabId, { type: "meta", meta });
+    return meta;
+  } catch {
+    return undefined;
   }
 }
 
@@ -1005,6 +1201,8 @@ export function useController() {
   const stateRef = useRef(activeState);
   const backendActiveTabIdRef = useRef<string | undefined>(undefined);
   const backendActivationPromises = useRef(new Map<string, Promise<boolean>>());
+  const readyMetaReconcileSeq = useRef(0);
+  const readyMetaReconcileActive = useRef<{ tabId: string; seq: number } | undefined>(undefined);
   activeTabIdRef.current = activeTabId;
   stateRef.current = activeState;
 
@@ -1391,11 +1589,9 @@ export function useController() {
         addBreadcrumb("tab.hydrate", `ready ignored ${readyTabId}`);
         return;
       }
-      if (activeId) {
-        void loadSessionDataForTab(activeId, false, "startup", { preserveCachedHistory: true });
-        return;
-      }
-      void syncActiveTabFromBackend(false, true);
+      // A ready event can race the initial hydrate. Refresh the tab metadata
+      // first so a stale ready=false snapshot does not keep the composer locked.
+      void syncActiveTabFromBackend(false, true, { preserveCachedHistory: true });
     });
 
     void syncActiveTabFromBackend(false, true);
@@ -1415,6 +1611,51 @@ export function useController() {
       offReady();
     };
   }, [dispatchTo, loadSessionDataForTab, refreshCheckpoints, syncActiveTabFromBackend]);
+
+  // If the startup ready event is missed, keep the composer lock in sync with
+  // the active tab's backend metadata without kicking off tab activation work.
+  useEffect(() => {
+    const tabId = activeTabId;
+    const meta = activeState.meta;
+    if (!tabId || !meta || meta.ready || meta.startupErr || activeState.backendActivationPending) {
+      readyMetaReconcileSeq.current += 1;
+      readyMetaReconcileActive.current = undefined;
+      return;
+    }
+
+    let cancelled = false;
+    let timer: number | undefined;
+    const seq = readyMetaReconcileSeq.current + 1;
+    readyMetaReconcileSeq.current = seq;
+    readyMetaReconcileActive.current = { tabId, seq };
+
+    const stillCurrent = () => {
+      const active = readyMetaReconcileActive.current;
+      return !cancelled && active?.tabId === tabId && active.seq === seq && activeTabIdRef.current === tabId;
+    };
+
+    const schedule = (attempt: number) => {
+      timer = window.setTimeout(() => {
+        void tick(attempt);
+      }, STARTUP_READY_META_RECONCILE_MS);
+    };
+
+    const tick = async (attempt: number) => {
+      if (!stillCurrent()) return;
+      const current = statesRef.current.get(tabId);
+      if (!current?.meta || current.meta.ready || current.meta.startupErr || current.backendActivationPending) return;
+      const nextMeta = await refreshMetaOnlyForTab(tabId, dispatchTo);
+      if (!stillCurrent()) return;
+      if (nextMeta?.ready || nextMeta?.startupErr || attempt + 1 >= STARTUP_READY_META_RECONCILE_ATTEMPTS) return;
+      schedule(attempt + 1);
+    };
+
+    schedule(0);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [activeTabId, activeState.meta?.ready, activeState.meta?.startupErr, activeState.backendActivationPending, dispatchTo]);
 
   // Stale-turn watchdog: if the frontend thinks the agent is running but the
   // turn stream has gone quiet, reconcile with the backend. This catches cases
@@ -1448,7 +1689,7 @@ export function useController() {
   }, [activeTabId]);
 
   const sendToTab = useCallback(async (tabId: string, displayText: string, submitText = displayText, originalText?: string) => {
-    if (!tabId) throw new Error("workspace is still starting");
+    if (!tabId) throw new Error(t("composer.workspaceStarting"));
     const seq = getOrCreateState(statesRef.current, tabId).seq;
     const display = displayText.trim();
     const submit = submitText.trim();
@@ -1474,7 +1715,7 @@ export function useController() {
       return sendToTab(tabId, displayText, submitText);
     }
     return activeTabFromBackend().then((active) => {
-      if (!active?.id) throw new Error("workspace is still starting");
+      if (!active?.id) throw new Error(t("composer.workspaceStarting"));
       setActiveTabId(active.id);
       activeTabIdRef.current = active.id;
       confirmBackendActiveTab(active.id);
@@ -1484,7 +1725,7 @@ export function useController() {
   }, [activeTabFromBackend, activeTabId, confirmBackendActiveTab, dispatchRuntimeStatusForTab, sendToTab]);
 
   const runShell = useCallback(async (command: string) => {
-    if (!activeTabId) throw new Error("workspace is still starting");
+    if (!activeTabId) throw new Error(t("composer.workspaceStarting"));
     dispatchTo(activeTabId, { type: "user", text: `!${command}`, seq: getOrCreateState(statesRef.current, activeTabId).seq });
     try {
       await app.RunShellForTab(activeTabId, command);
@@ -1495,7 +1736,7 @@ export function useController() {
   }, [activeTabId, dispatchTo]);
 
   const steer = useCallback(async (text: string) => {
-    if (!activeTabId) throw new Error("workspace is still starting");
+    if (!activeTabId) throw new Error(t("composer.workspaceStarting"));
     // No optimistic user bubble: rewind/fork map turns by counting user items,
     // and a steer is not a backend turn — the Steer event's ↪ notice is the
     // visible confirmation (#3660).
@@ -1733,7 +1974,7 @@ export function useController() {
     try {
       await app.SetModelForTab(activeTabId, name);
     } catch (err) {
-      dispatchTo(activeTabId, { type: "local_notice", level: "warn", text: t("status.modelSwitchFailed", { err: errorMessage(err) }) });
+      dispatchTo(activeTabId, { type: "local_notice", level: "warn", text: modelSwitchNoticeText(err) });
       return;
     }
     try {
@@ -1763,7 +2004,7 @@ export function useController() {
     try {
       await app.SetTokenModeForTab(activeTabId, mode);
     } catch (err) {
-      dispatchTo(activeTabId, { type: "local_notice", level: "warn", text: t("status.tokenModeSwitchFailed", { err: errorMessage(err) }) });
+      dispatchTo(activeTabId, { type: "local_notice", level: "warn", text: tokenModeSwitchNoticeText(err) });
       return;
     }
     try {

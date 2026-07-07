@@ -2100,6 +2100,54 @@ func TestTrashTopicMovesRelatedSessionsToTrash(t *testing.T) {
 	}
 }
 
+func TestTrashTopicRemovesStaleMissingSession(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_missing_trash"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "Missing trash"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	missingPath := filepath.Join(dir, "already-gone.jsonl")
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"stale": {
+				ID:            "stale",
+				Scope:         "project",
+				WorkspaceRoot: projectRoot,
+				TopicID:       topicID,
+				TopicTitle:    "Missing trash",
+				SessionPath:   missingPath,
+				Ready:         true,
+				disabledMCP:   map[string]ServerView{},
+			},
+			"other": {ID: "other", Scope: "project", WorkspaceRoot: projectRoot, TopicID: "other", Ready: true},
+		},
+		tabOrder:    []string{"stale", "other"},
+		activeTabID: "stale",
+	}
+
+	if err := app.TrashTopic(topicID); err != nil {
+		t.Fatalf("TrashTopic should remove stale missing session: %v", err)
+	}
+	if got := loadTopicTitle(projectRoot, topicID); got != "" {
+		t.Fatalf("topic title should be removed, got %q", got)
+	}
+	if _, ok := app.tabs["stale"]; ok {
+		t.Fatalf("stale tab should be removed")
+	}
+	if got := app.activeTabID; got != "other" {
+		t.Fatalf("active tab = %q, want other", got)
+	}
+}
+
 func TestRestoreGlobalTopicSessionReindexesProjectTree(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

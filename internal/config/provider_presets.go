@@ -674,7 +674,7 @@ var curatedProviderPresets = []ProviderPreset{
 		Entries: []ProviderEntry{{
 			Name:             "stepfun",
 			Kind:             "openai",
-			BaseURL:          "https://api.stepfun.ai/step_plan/v1",
+			BaseURL:          "https://api.stepfun.com/step_plan/v1",
 			Models:           stepfunPlanModels,
 			Default:          "step-3.7-flash",
 			APIKeyEnv:        "STEPFUN_API_KEY",
@@ -690,7 +690,7 @@ var curatedProviderPresets = []ProviderPreset{
 		Entries: []ProviderEntry{{
 			Name:             "stepfun-anthropic",
 			Kind:             "anthropic",
-			BaseURL:          "https://api.stepfun.ai/step_plan",
+			BaseURL:          "https://api.stepfun.com/step_plan",
 			Models:           stepfunPlanModels,
 			Default:          "step-3.7-flash",
 			APIKeyEnv:        "STEPFUN_API_KEY",

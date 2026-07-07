@@ -39,25 +39,26 @@ import (
 // memory, permissions) scoped to a workspace root, so multiple projects and
 // topics can be active concurrently without interfering.
 type WorkspaceTab struct {
-	ID              string             // stable random id
-	Scope           string             // "project" | "global"
-	WorkspaceRoot   string             // project root dir (empty for global)
-	SharedHostKey   string             // opaque key for the shared plugin host (set by buildTabController)
-	TopicID         string             // topic within the project
-	TopicTitle      string             // display title
-	SessionPath     string             // exact .jsonl file this tab continues
-	ReadOnly        bool               // true for external channel transcripts opened for browsing
-	Ctrl            control.SessionAPI // nil while booting / on error
-	Label           string             // model label (for the tab badge)
-	Ready           bool               // true once boot.Build completes
-	StartupErr      string             // build error, surfaced to the frontend
-	sessionLease    *agent.SessionLease
-	sessionLeaseMu  sync.Mutex
-	sink            *tabEventSink      // routes events with this tab's ID
-	buildCancel     context.CancelFunc // cancels in-flight boot for tabs removed before Ready
-	buildGeneration uint64             // identifies the current in-flight build
-	removed         bool               // set when the visible tab is pruned/closed before build completes
-	reconcileMu     sync.Mutex         // serializes stale controller workspace repair for this tab
+	ID                  string             // stable random id
+	Scope               string             // "project" | "global"
+	WorkspaceRoot       string             // project root dir (empty for global)
+	SharedHostKey       string             // opaque key for the shared plugin host (set by buildTabController)
+	TopicID             string             // topic within the project
+	TopicTitle          string             // display title
+	SessionPath         string             // exact .jsonl file this tab continues
+	ReadOnly            bool               // true for external channel transcripts opened for browsing
+	Ctrl                control.SessionAPI // nil while booting / on error
+	Label               string             // model label (for the tab badge)
+	Ready               bool               // true once boot.Build completes
+	StartupErr          string             // build error, surfaced to the frontend
+	StartupErrLeaseHeld bool               // true when StartupErr can be retried after a session lease releases
+	sessionLease        *agent.SessionLease
+	sessionLeaseMu      sync.Mutex
+	sink                *tabEventSink      // routes events with this tab's ID
+	buildCancel         context.CancelFunc // cancels in-flight boot for tabs removed before Ready
+	buildGeneration     uint64             // identifies the current in-flight build
+	removed             bool               // set when the visible tab is pruned/closed before build completes
+	reconcileMu         sync.Mutex         // serializes stale controller workspace repair for this tab
 
 	ActivityStatus string // transient project-tree status for the in-flight turn
 
@@ -479,6 +480,7 @@ func cloneDetachedRuntimeTab(tab *WorkspaceTab, key, path string) *WorkspaceTab 
 		Label:               tab.Label,
 		Ready:               tab.Ready,
 		StartupErr:          tab.StartupErr,
+		StartupErrLeaseHeld: tab.StartupErrLeaseHeld,
 		sink:                tab.sink,
 		ActivityStatus:      tab.ActivityStatus,
 		readTelemetry:       readTelemetry,
@@ -569,7 +571,7 @@ func applyRuntimeTab(target, source *WorkspaceTab, path string, wailsCtx context
 	target.SharedHostKey = source.SharedHostKey
 	target.Label = source.Label
 	target.Ready = true
-	target.StartupErr = ""
+	clearTabStartupError(target)
 	target.ActivityStatus = source.ActivityStatus
 	target.model = source.model
 	target.effort = cloneStringPtr(source.effort)
@@ -1057,6 +1059,13 @@ type runtimeEventEnvelope struct {
 // emission. runtime.EventsEmit can block when the single webview event channel
 // backs up; callers enqueue in-order work and return without holding the
 // agent's event.Sync lock.
+// runtimeEventsEmitFallback is the emit used when no per-instance override is
+// installed. Production keeps the real Wails bridge; the test binary swaps in
+// a no-op via TestMain, because Wails EventsEmit log.Fatals outside a running
+// Wails app and would kill the whole test process from any code path that
+// emits a runtime event with a plain Background context.
+var runtimeEventsEmitFallback runtimeEventEmitFunc = runtime.EventsEmit
+
 type asyncRuntimeEmitter struct {
 	mu      sync.Mutex
 	emit    runtimeEventEmitFunc
@@ -1112,7 +1121,7 @@ func (e *asyncRuntimeEmitter) run() {
 		}
 		emit := e.emit
 		if emit == nil {
-			emit = runtime.EventsEmit
+			emit = runtimeEventsEmitFallback
 		}
 		e.mu.Unlock()
 
@@ -1153,6 +1162,35 @@ func isBackgroundJobLifecycleNotice(e event.Event) bool {
 			strings.Contains(text, " finished: ") ||
 			strings.Contains(text, " failed: ") ||
 			strings.Contains(text, " killed: "))
+}
+
+// notifyTabRuntimeRebuilt tells the frontend a tab's controller was replaced
+// in place (model/effort/token-mode switch, clear-while-running). A rebuilt
+// controller restarts its approval/ask id counter at "1", so tab-scoped
+// frontend state keyed by prompt id (the attention-chime dedupe) must reset —
+// unlike agent:ready, this event carries no reload semantics, so emitting it
+// on every swap adds no hydration churn.
+//
+// Ordering matters: the reset must reach the frontend BEFORE the rebuilt
+// controller's first approval/ask event, or the stale key still mutes it. The
+// tab's agent events ride the tab sink's own async queue, so the notice goes
+// through THAT queue — same lane, FIFO, guaranteed to arrive first. The
+// App-level queue is only the fallback when the sink cannot deliver (no sink,
+// or its webview context is cleared); it cannot order against sink traffic,
+// but an unordered notice still beats none.
+func (a *App) notifyTabRuntimeRebuilt(tab *WorkspaceTab) {
+	if tab == nil {
+		return
+	}
+	a.mu.RLock()
+	sink := tab.sink
+	tabID := tab.ID
+	a.mu.RUnlock()
+	if sink != nil && sink.context() != nil {
+		sink.emitRuntimeEvent("runtime:rebuilt", tabID)
+		return
+	}
+	a.emitRuntimeEvent("runtime:rebuilt", tabID)
 }
 
 func (a *App) emitReady(ctx context.Context, tabID ...string) {
@@ -2604,6 +2642,23 @@ func (a *App) desktopControllerSink(inner event.Sink, cfg config.NotificationsCo
 	return notify.NewSink(inner, sender, cfg)
 }
 
+func setTabStartupError(tab *WorkspaceTab, err error) bool {
+	if tab == nil {
+		return false
+	}
+	tab.StartupErr = userFacingSessionLeaseError("", err).Error()
+	tab.StartupErrLeaseHeld = errors.Is(err, agent.ErrSessionLeaseHeld)
+	return tab.StartupErrLeaseHeld
+}
+
+func clearTabStartupError(tab *WorkspaceTab) {
+	if tab == nil {
+		return
+	}
+	tab.StartupErr = ""
+	tab.StartupErrLeaseHeld = false
+}
+
 func (a *App) buildTabControllerWithContext(tab *WorkspaceTab, loadedSession loadedTabSession, buildCtx context.Context, buildGeneration uint64, buildCancel context.CancelFunc) {
 	defer a.recoverToPending("buildTabController")
 	keepBuildContext := false
@@ -2640,15 +2695,19 @@ func (a *App) buildTabControllerWithContext(tab *WorkspaceTab, loadedSession loa
 	_ = config.MigrateLegacyCredentialsForRoot(root)
 	cfg, err := config.LoadForRoot(root)
 	if err != nil {
+		leaseHeld := false
 		a.mu.Lock()
 		if a.tabBuildSupersededLocked(tab, buildGeneration) {
 			a.mu.Unlock()
 			return
 		}
-		tab.StartupErr = userFacingSessionLeaseError("", err).Error()
+		leaseHeld = setTabStartupError(tab, err)
 		tab.Ready = true
 		tab.releaseSessionLease()
 		a.mu.Unlock()
+		if leaseHeld {
+			a.scheduleDeferredStartupBuild(tab.ID)
+		}
 		a.emitReady(wailsCtx, tab.ID)
 		return
 	}
@@ -2765,19 +2824,23 @@ func (a *App) buildTabControllerWithContext(tab *WorkspaceTab, loadedSession loa
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
 	})
 	if err != nil {
+		leaseHeld := false
 		a.mu.Lock()
 		if a.tabBuildSupersededLocked(tab, buildGeneration) {
 			a.mu.Unlock()
 			a.abandonSupersededBuild(tab, nil, rootKey, "")
 			return
 		}
-		tab.StartupErr = userFacingSessionLeaseError("", err).Error()
+		leaseHeld = setTabStartupError(tab, err)
 		tab.Ready = true
 		hostKey := takeTabSharedHostKey(tab)
 		tab.releaseSessionLease()
 		a.mu.Unlock()
 		if hostKey != "" {
 			a.releaseSharedHost(hostKey)
+		}
+		if leaseHeld {
+			a.scheduleDeferredStartupBuild(tab.ID)
 		}
 		a.emitReady(wailsCtx, tab.ID)
 		return
@@ -2850,13 +2913,14 @@ func (a *App) buildTabControllerWithContext(tab *WorkspaceTab, loadedSession loa
 			}
 			preLeaseKey := tab.sessionLeaseRuntimeKey()
 			if err := tab.ensureSessionLease(path); err != nil {
+				leaseHeld := false
 				a.mu.Lock()
 				if a.tabBuildSupersededLocked(tab, buildGeneration) {
 					a.mu.Unlock()
 					a.abandonSupersededBuild(tab, ctrl, rootKey, "")
 					return
 				}
-				tab.StartupErr = userFacingSessionLeaseError("", err).Error()
+				leaseHeld = setTabStartupError(tab, err)
 				tab.Ready = true
 				hostKey := takeTabSharedHostKey(tab)
 				// Release only a lease bound to THIS build's session: a failed
@@ -2867,6 +2931,9 @@ func (a *App) buildTabControllerWithContext(tab *WorkspaceTab, loadedSession loa
 				ctrl.Close()
 				if hostKey != "" {
 					a.releaseSharedHost(hostKey)
+				}
+				if leaseHeld {
+					a.scheduleDeferredStartupBuild(tab.ID)
 				}
 				a.emitReady(wailsCtx, tab.ID)
 				return
@@ -2929,7 +2996,7 @@ func (a *App) buildTabControllerWithContext(tab *WorkspaceTab, loadedSession loa
 	tab.Ctrl = ctrl
 	tab.Label = ctrl.Label()
 	tab.Ready = true
-	tab.StartupErr = ""
+	clearTabStartupError(tab)
 	keepBuildContext = true
 	a.mu.Unlock()
 	a.emitReady(wailsCtx, tab.ID)
@@ -6015,6 +6082,10 @@ func (a *App) emitRuntimeEvent(name string, payload ...interface{}) {
 
 // DeleteTopic removes a topic and its title metadata.
 func (a *App) DeleteTopic(topicID string) error {
+	return friendlySessionFileError(a.deleteTopic(topicID))
+}
+
+func (a *App) deleteTopic(topicID string) error {
 	f := loadProjectsFile()
 	found := false
 	for _, p := range f.Projects {
@@ -6120,6 +6191,10 @@ func (a *App) SetTopicPinned(topicID string, pinned bool) error {
 // cancelled and detached from the app first, so their autosave/jobs cannot
 // recreate state after the topic is gone.
 func (a *App) TrashTopic(topicID string) error {
+	return friendlySessionFileError(a.trashTopic(topicID))
+}
+
+func (a *App) trashTopic(topicID string) error {
 	if strings.TrimSpace(topicID) == "" {
 		return fmt.Errorf("topicID is required")
 	}
@@ -6169,7 +6244,7 @@ func (a *App) TrashTopic(topicID string) error {
 				}
 			}
 		}
-		return a.DeleteTopic(topicID)
+		return a.deleteTopic(topicID)
 	}(); err != nil {
 		return err
 	}

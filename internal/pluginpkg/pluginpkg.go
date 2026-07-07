@@ -23,6 +23,7 @@ import (
 const (
 	NativeManifest = "reasonix-plugin.json"
 	CodexManifest  = ".codex-plugin/plugin.json"
+	ClaudeManifest = ".claude-plugin/plugin.json"
 	StateFilename  = "plugin-packages.json"
 
 	claudeSettingsPath = ".claude/settings.json"
@@ -274,7 +275,10 @@ func ParseDir(root string) (Package, []string, error) {
 	if pkg, warnings, err := parseCodex(filepath.Join(root, CodexManifest), root); err == nil {
 		return pkg, warnings, nil
 	}
-	return Package{}, nil, fmt.Errorf("no %s or %s found", NativeManifest, CodexManifest)
+	if pkg, warnings, err := parseClaudePlugin(filepath.Join(root, ClaudeManifest), root); err == nil {
+		return pkg, warnings, nil
+	}
+	return Package{}, nil, fmt.Errorf("no %s, %s, or %s found", NativeManifest, CodexManifest, ClaudeManifest)
 }
 
 func parseNative(path, root string) (Package, []string, error) {
@@ -316,6 +320,14 @@ func parseNative(path, root string) (Package, []string, error) {
 }
 
 func parseCodex(path, root string) (Package, []string, error) {
+	return parseCodexLike(path, root, "codex", true)
+}
+
+func parseClaudePlugin(path, root string) (Package, []string, error) {
+	return parseCodexLike(path, root, "claude", false)
+}
+
+func parseCodexLike(path, root, kind string, includeCodexSessionStartHook bool) (Package, []string, error) {
 	var raw struct {
 		Name        string          `json:"name"`
 		Version     string          `json:"version"`
@@ -340,20 +352,95 @@ func parseCodex(path, root string) (Package, []string, error) {
 		Skills:      skills,
 	}
 	hookPath := filepath.Join(root, "hooks", "session-start-codex")
-	if info, err := os.Stat(hookPath); err == nil && info.Mode().IsRegular() {
-		manifest.Hooks = map[string][]Hook{
-			"SessionStart": {{
-				Command:     hookPath,
-				Cwd:         root,
-				Description: "Codex-compatible session start hook from " + manifest.Name,
-			}},
+	if includeCodexSessionStartHook {
+		if info, err := os.Stat(hookPath); err == nil && info.Mode().IsRegular() {
+			manifest.Hooks = map[string][]Hook{
+				"SessionStart": {{
+					Command:     hookPath,
+					Cwd:         root,
+					Description: "Codex-compatible session start hook from " + manifest.Name,
+				}},
+			}
 		}
 	}
-	warnings := applyClaudeCompatibility(root, &manifest)
+	var warnings []string
+	if kind == "claude" {
+		warnings = append(warnings, applyClaudeConventionDirs(root, &manifest)...)
+	}
+	warnings = append(warnings, applyClaudeCompatibility(root, &manifest)...)
 	if err := validateManifest(root, &manifest); err != nil {
 		return Package{}, warnings, err
 	}
-	return Package{Root: root, ManifestKind: "codex", Manifest: manifest}, warnings, nil
+	return Package{Root: root, ManifestKind: kind, Manifest: manifest}, warnings, nil
+}
+
+// claudeConventionSkillDirs are the directories a Claude plugin loads skills
+// from BY CONVENTION — the official plugin layout auto-discovers skills/ (and
+// packs in the wild use .claude/skills/) without declaring them in
+// plugin.json, whose manifest usually carries metadata only.
+var claudeConventionSkillDirs = []string{"skills", ".claude/skills"}
+
+// claudeUnmappedCapabilities are the conventional Claude plugin surfaces
+// Reasonix does not map yet. Their presence is worth a warning: silently
+// installing a package while dropping half its capabilities reads as "install
+// succeeded" when it mostly didn't.
+var claudeUnmappedCapabilities = []string{"commands", "agents", "hooks/hooks.json", ".mcp.json"}
+
+// applyClaudeConventionDirs fills manifest.Skills from the conventional skill
+// directories when the manifest declares none (the standard Claude plugin
+// shape), and reports the conventional capabilities Reasonix cannot map.
+func applyClaudeConventionDirs(root string, manifest *Manifest) []string {
+	var warnings []string
+	if len(manifest.Skills) == 0 {
+		for _, rel := range claudeConventionSkillDirs {
+			dir := filepath.Join(root, filepath.FromSlash(rel))
+			if dirContainsSkill(dir) {
+				manifest.Skills = append(manifest.Skills, rel)
+			}
+		}
+	}
+	for _, rel := range claudeUnmappedCapabilities {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err == nil {
+			warnings = append(warnings, fmt.Sprintf("claude plugin declares %s, which Reasonix does not map yet; that capability will not be installed", rel))
+		}
+	}
+	return warnings
+}
+
+// dirContainsSkill reports whether dir holds at least one skill definition
+// (<dir>/<name>/SKILL.md), so an empty conventional directory is not adopted
+// as a skill root.
+func dirContainsSkill(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if info, err := os.Stat(filepath.Join(dir, e.Name(), "SKILL.md")); err == nil && info.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
+}
+
+func ManifestPath(kind string) string {
+	switch kind {
+	case "reasonix":
+		return NativeManifest
+	case "codex":
+		return CodexManifest
+	case "claude":
+		return ClaudeManifest
+	default:
+		return NativeManifest
+	}
+}
+
+func ManifestPaths() []string {
+	return []string{NativeManifest, CodexManifest, ClaudeManifest}
 }
 
 func applyClaudeCompatibility(root string, manifest *Manifest) []string {

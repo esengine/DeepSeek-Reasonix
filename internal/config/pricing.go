@@ -136,11 +136,15 @@ func longCat20Prices(models []string) map[string]*provider.Pricing {
 	return prices
 }
 
-// ResetOfficialProviderPricingOnUpgrade resets official DeepSeek prices to
-// the current built-in RMB defaults once for desktop upgrades. It intentionally
-// runs from the desktop app startup path, not every config Load(), so user edits
-// made after the upgrade are preserved.
-func ResetOfficialProviderPricingOnUpgrade(path string) (bool, error) {
+const (
+	deepSeekPricingResetConfigVersion      = 3
+	windowsBashSandboxDefaultConfigVersion = 4
+)
+
+// ApplyUserConfigUpgradesOnStartup applies one-time startup migrations. It
+// intentionally runs from the desktop and CLI startup paths, not every config
+// Load(), so user edits made after the upgrade are preserved.
+func ApplyUserConfigUpgradesOnStartup(path string) (bool, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return false, nil
@@ -159,12 +163,44 @@ func ResetOfficialProviderPricingOnUpgrade(path string) (bool, error) {
 		return false, nil
 	}
 	cfg := LoadForEdit(path)
-	resetOfficialProviderPricingDefaults(cfg)
+	changed := false
+	if header.ConfigVersion < deepSeekPricingResetConfigVersion {
+		resetOfficialProviderPricingDefaults(cfg)
+		changed = true
+	}
+	if shouldMarkWindowsBashSandboxDefaultUpgrade(header.ConfigVersion) {
+		resetWindowsBashSandboxDefaultOnUpgrade(cfg)
+		// Mark the Windows v4 migration even when the user was already on off,
+		// so a later manual enforce choice is not treated as the old template default.
+		changed = true
+	}
+	if !changed {
+		return false, nil
+	}
 	cfg.ConfigVersion = Default().ConfigVersion
 	if err := cfg.SaveTo(path); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// ResetOfficialProviderPricingOnUpgrade is retained for older call sites.
+func ResetOfficialProviderPricingOnUpgrade(path string) (bool, error) {
+	return ApplyUserConfigUpgradesOnStartup(path)
+}
+
+func shouldMarkWindowsBashSandboxDefaultUpgrade(fromVersion int) bool {
+	return runtimeGOOS == "windows" && fromVersion < windowsBashSandboxDefaultConfigVersion
+}
+
+func resetWindowsBashSandboxDefaultOnUpgrade(c *Config) {
+	if c == nil {
+		return
+	}
+	if strings.TrimSpace(c.Sandbox.Bash) != "enforce" {
+		return
+	}
+	c.Sandbox.Bash = "off"
 }
 
 func resetOfficialProviderPricingDefaults(c *Config) {

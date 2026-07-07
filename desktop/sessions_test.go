@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -169,6 +170,8 @@ func TestDeleteSessionFile(t *testing.T) {
 	os.WriteFile(eventLogPath, []byte(`{"schema_version":1,"type":"replace","messages":[{"role":"user","content":"event"}]}`+"\n"), 0o644)
 	eventIndexPath := store.SessionEventIndex(sessionPath)
 	os.WriteFile(eventIndexPath, []byte(`{"schema_version":1,"message_count":1}`), 0o644)
+	conflictLogPath := store.SessionConflictLog(sessionPath)
+	os.WriteFile(conflictLogPath, []byte(`{"outcome":"forked_recovery_branch"}`+"\n"), 0o644)
 	telemetryPath := sessionTelemetryPath(sessionPath)
 	os.WriteFile(telemetryPath, []byte(`{"version":2,"readFiles":[]}`), 0o644)
 	lockPath := store.SessionLockFile(sessionPath)
@@ -204,6 +207,7 @@ func TestDeleteSessionFile(t *testing.T) {
 	trashGoalPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.goal-state.json")
 	trashEventLogPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.events.jsonl")
 	trashEventIndexPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.event-index.json")
+	trashConflictLogPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.conflicts.jsonl")
 	trashTelemetryPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl.telemetry.json")
 	trashCkptDir := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.ckpt")
 	trashJobsDir := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jobs")
@@ -223,6 +227,9 @@ func TestDeleteSessionFile(t *testing.T) {
 	}
 	if _, err := os.Stat(eventIndexPath); !os.IsNotExist(err) {
 		t.Error("session event index should be removed from active sessions")
+	}
+	if _, err := os.Stat(conflictLogPath); !os.IsNotExist(err) {
+		t.Error("session conflict log should be removed from active sessions")
 	}
 	if _, err := os.Stat(telemetryPath); !os.IsNotExist(err) {
 		t.Error("session telemetry should be removed from active sessions")
@@ -256,6 +263,9 @@ func TestDeleteSessionFile(t *testing.T) {
 	}
 	if _, err := os.Stat(trashEventIndexPath); err != nil {
 		t.Fatalf("session event index should be in trash: %v", err)
+	}
+	if _, err := os.Stat(trashConflictLogPath); err != nil {
+		t.Fatalf("session conflict log should be in trash: %v", err)
 	}
 	if _, err := os.Stat(trashTelemetryPath); err != nil {
 		t.Fatalf("session telemetry should be in trash: %v", err)
@@ -492,6 +502,10 @@ func TestRestoreTrashedSessionFile(t *testing.T) {
 	if err := os.WriteFile(eventIndexPath, []byte(`{"schema_version":1,"message_count":1}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	conflictLogPath := store.SessionConflictLog(sessionPath)
+	if err := os.WriteFile(conflictLogPath, []byte(`{"outcome":"forked_recovery_branch"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	telemetryPath := sessionTelemetryPath(sessionPath)
 	if err := os.WriteFile(telemetryPath, []byte(`{"version":2,"readFiles":[]}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -536,6 +550,9 @@ func TestRestoreTrashedSessionFile(t *testing.T) {
 	}
 	if _, err := os.Stat(eventIndexPath); err != nil {
 		t.Fatalf("session event index should be restored: %v", err)
+	}
+	if _, err := os.Stat(conflictLogPath); err != nil {
+		t.Fatalf("session conflict log should be restored: %v", err)
 	}
 	if _, err := os.Stat(telemetryPath); err != nil {
 		t.Fatalf("session telemetry should be restored: %v", err)
@@ -834,6 +851,7 @@ func TestRemoveDesktopSessionArtifactsRemovesOwnedSidecars(t *testing.T) {
 		store.SessionGoalState(sessionPath),
 		store.SessionEventLog(sessionPath),
 		store.SessionEventIndex(sessionPath),
+		store.SessionConflictLog(sessionPath),
 		sessionTelemetryPath(sessionPath),
 		store.SessionLockFile(sessionPath),
 		store.SessionLeaseLock(sessionPath),
@@ -871,6 +889,7 @@ func TestRemoveDesktopSessionArtifactsRemovesOwnedSidecars(t *testing.T) {
 		store.SessionGoalState(sessionPath),
 		store.SessionEventLog(sessionPath),
 		store.SessionEventIndex(sessionPath),
+		store.SessionConflictLog(sessionPath),
 		sessionTelemetryPath(sessionPath),
 		store.SessionLockFile(sessionPath),
 		store.SessionLeaseLock(sessionPath),
@@ -952,6 +971,74 @@ func TestMovePathIfExistsCopyFallback(t *testing.T) {
 	// Test non-existent source is no-op.
 	if err := movePathIfExists(filepath.Join(dir, "missing.txt"), filepath.Join(dir, "other.txt")); err != nil {
 		t.Fatalf("move missing: %v", err)
+	}
+}
+
+func TestCopyFallbackTreatsMissingSourceAsAlreadyMoved(t *testing.T) {
+	dir := t.TempDir()
+	if err := copyAndRemove(filepath.Join(dir, "missing.txt"), filepath.Join(dir, "dst.txt")); err != nil {
+		t.Fatalf("copy missing source: %v", err)
+	}
+
+	dstDir := filepath.Join(dir, "dst-dir")
+	if err := copyDir(filepath.Join(dir, "missing-dir"), dstDir, 0o755); err != nil {
+		t.Fatalf("copy missing dir: %v", err)
+	}
+	if _, err := os.Stat(dstDir); !os.IsNotExist(err) {
+		t.Fatalf("copy missing dir should not leave an empty target, stat err = %v", err)
+	}
+}
+
+func TestCopyFallbackRemovesPartialTargetWhenSourceVanishesMidCopy(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.txt")
+	dst := filepath.Join(dir, "dst.txt")
+	if err := os.WriteFile(src, []byte("session transcript"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	restore := copyPathFn
+	copyPathFn = func(copySrc, copyDst string) error {
+		// Simulate the source vanishing mid-copy: a truncated destination has
+		// already been written when the copy fails.
+		if err := os.WriteFile(copyDst, []byte("session tra"), 0o644); err != nil {
+			t.Fatalf("write partial destination: %v", err)
+		}
+		if err := os.Remove(copySrc); err != nil {
+			t.Fatalf("remove source: %v", err)
+		}
+		return errors.New("simulated read failure")
+	}
+	t.Cleanup(func() { copyPathFn = restore })
+
+	if err := copyAndRemove(src, dst); err != nil {
+		t.Fatalf("copyAndRemove should treat vanished source as already moved: %v", err)
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Fatalf("partial destination should be removed, stat err = %v", err)
+	}
+}
+
+func TestCopyFallbackKeepsErrorWhenSourceStillExists(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.txt")
+	dst := filepath.Join(dir, "dst.txt")
+	if err := os.WriteFile(src, []byte("session transcript"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	restore := copyPathFn
+	simulated := errors.New("simulated copy failure")
+	copyPathFn = func(copySrc, copyDst string) error {
+		return simulated
+	}
+	t.Cleanup(func() { copyPathFn = restore })
+
+	if err := copyAndRemove(src, dst); !errors.Is(err, simulated) {
+		t.Fatalf("copyAndRemove error = %v, want simulated copy failure", err)
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Fatalf("source should be untouched on real copy failure: %v", err)
 	}
 }
 

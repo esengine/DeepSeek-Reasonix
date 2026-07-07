@@ -11,10 +11,12 @@ import (
 func init() { tool.RegisterBuiltin(editFile{}) }
 
 // editFile replaces an exact string in a file. roots confines the target to the
-// workspace when non-empty (see writeFile); workDir, when non-empty, is the
-// directory a relative path resolves against (see resolveIn).
+// workspace when non-empty (see writeFile); guard rejects Reasonix session-data
+// targets (see SessionDataGuard); workDir, when non-empty, is the directory a
+// relative path resolves against (see resolveIn).
 type editFile struct {
 	roots   []string
+	guard   SessionDataGuard
 	workDir string
 }
 
@@ -46,7 +48,7 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "", fmt.Errorf("old_string is required")
 	}
 	p.Path = resolveIn(e.workDir, p.Path)
-	if err := confine(e.roots, p.Path); err != nil {
+	if err := confineWrite(e.roots, e.guard, p.Path); err != nil {
 		return "", err
 	}
 

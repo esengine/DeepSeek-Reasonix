@@ -15,8 +15,8 @@ Reasonix 插件包把 skills、hooks 和 MCP servers 组织成一个可安装单
   `https://github.com/obra/superpowers`。
 - GitHub 分支或子目录 URL，例如
   `https://github.com/owner/repo/tree/main/path/to/plugin`。
-- 本地目录，目录内需要包含 `reasonix-plugin.json` 或
-  `.codex-plugin/plugin.json`。
+- 本地目录，目录内需要包含 `reasonix-plugin.json`、
+  `.codex-plugin/plugin.json` 或 `.claude-plugin/plugin.json`。
 
 只预览安装计划，不写文件：
 
@@ -204,12 +204,16 @@ Reasonix 原生插件在根目录声明 `reasonix-plugin.json`：
 
 相对路径都按插件根目录解析。Reasonix 安装插件时不会执行第三方安装脚本。
 
-## Codex 兼容
+## Codex 与 Claude 兼容
 
-Reasonix 也会读取 `.codex-plugin/plugin.json`。对于 Superpowers 和 Claude 风格
-skill 包，Reasonix 会映射：
+Reasonix 也会读取 `.codex-plugin/plugin.json` 和 `.claude-plugin/plugin.json`。
+Reasonix 尚未映射的 Claude 插件能力（`commands/`、`agents/`、`hooks/hooks.json`、
+`.mcp.json`）会以安装警告的形式提示，而不是被静默丢弃；多插件的
+`marketplace.json` 索引暂不支持——请逐个安装插件目录。
+对于 Superpowers 和 Claude 风格 skill 包，Reasonix 会映射：
 
-- `skills` 到 Reasonix skill root。
+- `skills` 到 Reasonix skill root。Claude 清单若未声明 `skills` 字段，会回退到
+  约定目录 `skills/`（或 `.claude/skills/`），与 Claude 自身的自动发现一致。
 - 如果存在 `hooks/session-start-codex`，映射为 Reasonix `SessionStart` hook。
 - 插件根目录的 `CLAUDE.md` 会映射为内置的 `SessionStart` 上下文 hook。
   Reasonix 会直接读取该文件，不通过 shell 命令。

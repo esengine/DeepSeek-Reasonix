@@ -39,9 +39,9 @@ import { useWailsResizeFix } from "./lib/useWailsResizeFix";
 import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, useI18n, useT, type Translator } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
-import { app, onEvent, onProjectTreeChanged, onSessionRecovered, onSessionRecoveryFailed } from "./lib/bridge";
+import { app, onEvent, onProjectTreeChanged, onReady, onRuntimeRebuilt, onSessionRecovered } from "./lib/bridge";
 import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-music";
-import { playSuccessChime } from "./lib/sound";
+import { clearAttentionChimeKeys, playAttentionChime, playSuccessChime, shouldPlayAttentionChimeForEvent } from "./lib/sound";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
 import { TodoPanel } from "./components/TodoPanel";
@@ -1010,6 +1010,7 @@ export default function App() {
   const setRightDockPreviewWidth = useLayoutStore((s) => s.setRightDockPreviewWidth);
   const workspacePreviewActive = useLayoutStore((s) => s.workspacePreviewActive);
   const setWorkspacePreviewActive = useLayoutStore((s) => s.setWorkspacePreviewActive);
+  const attentionChimeEvents = useRef(new Set<string>());
   // Bump dockRefreshKey after each turn so WorkspacePanel/ContextPanel re-fetch
   // workspace changes, git history, and session metadata after AI tool writes.
   useEffect(() => {
@@ -1017,11 +1018,31 @@ export default function App() {
       if (e.kind === "turn_done") {
         setDockRefreshKey((v) => v + 1);
       }
+      if (shouldPlayAttentionChimeForEvent(e, attentionChimeEvents.current)) {
+        playAttentionChime();
+      }
       if (e.kind === "turn_done") {
         if (!e.err) playSuccessChime();
       }
     });
-    return unsub;
+    // Runtime rebuilds (model/effort/settings switch) replace the controller,
+    // whose approval/ask ids restart from "1" — stale dedupe keys would mute
+    // the first prompt after a rebuild. agent:ready fires when a (re)build
+    // completes; clear that tab's keys (or all, for tab-less ready events).
+    const unsubReady = onReady((readyTabId) => {
+      clearAttentionChimeKeys(attentionChimeEvents.current, readyTabId);
+    });
+    // Model/effort/token-mode switches and clear-while-running replace the
+    // controller WITHOUT an agent:ready — they signal runtime:rebuilt instead
+    // (a ready here would trigger a full session reload the UI already did).
+    const unsubRebuilt = onRuntimeRebuilt((rebuiltTabId) => {
+      clearAttentionChimeKeys(attentionChimeEvents.current, rebuiltTabId);
+    });
+    return () => {
+      unsub();
+      unsubReady();
+      unsubRebuilt();
+    };
   }, []);
 
   const [workspacePanelResizing, setWorkspacePanelResizing] = useState(false);
@@ -2279,8 +2300,8 @@ export default function App() {
 
   // send wrapper: commits any pending optimistic rewind before sending.
   const commitThenSend = useCallback(async (displayText: string, submitText?: string) => {
-    if (activeTab?.readOnly) throw new Error("channel session is read-only");
-    if (!controllerReady) throw new Error("workspace is still starting");
+    if (activeTab?.readOnly) throw new Error(t("composer.readOnlyChannel"));
+    if (!controllerReady) throw new Error(t("composer.workspaceStarting"));
     const rs = rewindStateRef.current;
     if (rs) {
       rewindStateRef.current = null;
@@ -2296,7 +2317,7 @@ export default function App() {
         // Rewind failed: the Go conversation is intact. Do not send; the
         // controller emits a notice with the reason.
         setRewindState(null);
-        throw new Error("rewind failed");
+        throw new Error(t("rewind.failed"));
       }
       setRewindSignal((v) => v + 1);
       if (rs.scope === "both") {
@@ -2306,7 +2327,7 @@ export default function App() {
       }
     }
     await send(displayText, submitText);
-  }, [activeTab?.readOnly, controllerReady, send, rewind]);
+  }, [activeTab?.readOnly, controllerReady, send, rewind, t]);
 
   const handleTranscriptPrompt = useCallback((text: string) => {
     if (!controllerReady) return;
@@ -2548,7 +2569,7 @@ export default function App() {
       } else {
         throw new Error(scope === "global" && !session.topicId
           ? t("history.failedOpenSession")
-          : (session.topicId ? "Missing workspaceRoot" : t("history.failedOpenSession")));
+          : (session.topicId ? t("history.missingWorkspaceRoot") : t("history.failedOpenSession")));
       }
       if (!latest()) return;
       seedActiveTabMeta(targetTab);
@@ -2593,36 +2614,10 @@ export default function App() {
     enqueueNavigation({ kind: "blank", scope, workspaceRoot: scope === "project" ? workspaceRoot : "" }),
   [enqueueNavigation]);
 
-  useEffect(() => {
-    return onSessionRecovered((event) => {
-      const scope = event.scope === "project" ? "project" : "global";
-      const workspaceRoot = scope === "project" ? event.workspaceRoot || "" : "";
-      setProjectRevision((value) => value + 1);
-      void refreshTabMetas();
-      showToast(t("recovery.toast", { title: event.topicTitle || t("recovery.branch") }), "warn", event.topicId
-        ? {
-            actionLabel: t("recovery.open"),
-            durationMs: 9000,
-            onAction: () => {
-              void enqueueNavigation({
-                kind: "topic",
-                scope,
-                workspaceRoot,
-                topicId: event.topicId || "",
-                sessionPath: event.recoveryPath || "",
-              });
-            },
-          }
-        : { durationMs: 9000 });
-    });
-  }, [enqueueNavigation, refreshTabMetas, showToast, t]);
-
-  useEffect(() => {
-    return onSessionRecoveryFailed((event) => {
-      const key = event.reason === "lease_held" ? "recovery.failedLease" : "recovery.failedUnavailable";
-      showToast(t(key), "error", { durationMs: 9000 });
-    });
-  }, [showToast, t]);
+  useEffect(() => onSessionRecovered(() => {
+    setProjectRevision((value) => value + 1);
+    void refreshTabMetas();
+  }), [refreshTabMetas]);
 
   const handleNewTab = useCallback(async () => {
     closeTransientOverlays();
@@ -2884,13 +2879,6 @@ export default function App() {
     : [topicbarWorkspacePath || topicbarWorkspaceLabel, topicbarImSourceLabel].filter(Boolean).join(" · ");
   const topicbarCanRename = !sidebarImDetailConnection && Boolean(activeTab?.topicId);
   const topicbarTitleEditSize = Math.min(56, Math.max(4, topicTitleDraft.length || topicbarTitle.length || 1));
-  const recoveryBannerTitle = activeTab?.recovered
-    ? [
-        activeTab.recoveryReason ? t("recovery.reason", { reason: activeTab.recoveryReason }) : "",
-        activeTab.recoveryDigest ? t("recovery.digest", { digest: activeTab.recoveryDigest.slice(0, 12) }) : "",
-        activeTab.recoveryParentId ? t("recovery.parent", { parent: activeTab.recoveryParentId }) : "",
-      ].filter(Boolean).join(" · ")
-    : "";
   const sidebarWorkbench = desktopLayoutStyle === "workbench";
   const windowsFramelessChrome = desktopPlatform === "windows";
   const handleWindowsTitlebarDoubleClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
@@ -3440,13 +3428,6 @@ export default function App() {
 
           {state.meta?.startupErr && (
             <div className="banner banner--error">{t("topbar.startupError", { msg: state.meta.startupErr })}</div>
-          )}
-
-          {activeTab?.recovered && !sidebarImDetailConnection && (
-            <div className="banner banner--recovery" title={recoveryBannerTitle || undefined}>
-              <span className="banner__badge">{t("recovery.branch")}</span>
-              <span>{t("recovery.banner")}</span>
-            </div>
           )}
 
           <UpdateBanner enabled={startupUpdateChecksEnabled === true} />

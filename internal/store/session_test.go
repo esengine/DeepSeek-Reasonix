@@ -14,6 +14,7 @@ func TestSessionSidecarLayout(t *testing.T) {
 		{"goal-state", SessionGoalState(p), "/home/u/.reasonix/sessions/abc.goal-state.json"},
 		{"event-log", SessionEventLog(p), "/home/u/.reasonix/sessions/abc.events.jsonl"},
 		{"event-index", SessionEventIndex(p), "/home/u/.reasonix/sessions/abc.event-index.json"},
+		{"conflict-log", SessionConflictLog(p), "/home/u/.reasonix/sessions/abc.conflicts.jsonl"},
 		{"lock", SessionLockFile(p), p + ".lock"},
 		{"lease-lock", SessionLeaseLock(p), p + ".lease.lock"},
 		{"lease-info", SessionLeaseInfo(p), p + ".lease.json"},
@@ -37,6 +38,7 @@ func TestSessionSidecarEmptyPath(t *testing.T) {
 		{"goal-state", SessionGoalState},
 		{"event-log", SessionEventLog},
 		{"event-index", SessionEventIndex},
+		{"conflict-log", SessionConflictLog},
 		{"lock", SessionLockFile},
 		{"lease-lock", SessionLeaseLock},
 		{"lease-info", SessionLeaseInfo},
@@ -57,6 +59,7 @@ func TestIsSessionTranscriptName(t *testing.T) {
 	}{
 		{"session.jsonl", true},
 		{"session.events.jsonl", false},
+		{"session.conflicts.jsonl", false},
 		{"session.guardian.jsonl", false},
 		{"session.guardian.events.jsonl", false},
 		{"session.jsonl.meta", false},
@@ -78,6 +81,7 @@ func TestSessionSidecarFiles(t *testing.T) {
 		"/home/u/.reasonix/sessions/abc.goal-state.json",
 		"/home/u/.reasonix/sessions/abc.events.jsonl",
 		"/home/u/.reasonix/sessions/abc.event-index.json",
+		"/home/u/.reasonix/sessions/abc.conflicts.jsonl",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("SessionSidecarFiles = %v, want %v", got, want)

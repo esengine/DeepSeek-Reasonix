@@ -15,6 +15,7 @@ func init() { tool.RegisterBuiltin(deleteRange{}) }
 
 type deleteRange struct {
 	roots   []string
+	guard   SessionDataGuard
 	workDir string
 }
 
@@ -86,7 +87,7 @@ func (d deleteRange) preview(args json.RawMessage) (diff.Change, error) {
 	}
 
 	p.Path = resolveIn(d.workDir, p.Path)
-	if err := confine(d.roots, p.Path); err != nil {
+	if err := confineWrite(d.roots, d.guard, p.Path); err != nil {
 		return diff.Change{}, err
 	}
 

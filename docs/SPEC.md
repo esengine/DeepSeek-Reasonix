@@ -660,9 +660,9 @@ Linux, and a native helper on Windows): each command is allowed to write only
 the same roots plus platform-specific command temp/cache roots, denied reads
 under `forbid_read`, and allowed to reach the network only when
 `network = true`.
-The native Windows helper delegates the low-level isolation to
-`github.com/SivanCola/windows-sandbox`: AppContainer for read-only commands and
-a low-integrity token for writable commands, with temporary ACL grants for
+The native Windows helper uses Reasonix's bundled Windows sandbox backend:
+AppContainer for read-only commands and a low-integrity token for writable
+commands, with temporary ACL grants for
 writable roots and tool executables, a per-command temp root instead of mutating
 the global Temp directory, temporary deny ACEs for `forbid_read` (files and
 directories), best-effort restoration from pre-run DACL snapshots for touched

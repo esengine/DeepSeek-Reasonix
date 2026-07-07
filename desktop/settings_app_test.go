@@ -1137,6 +1137,30 @@ func TestSaveHooksSettingsPreservesUnknownSettingsKeys(t *testing.T) {
 	}
 }
 
+func TestSaveHooksSettingsNormalizesQuotedNodeEvalHookCommand(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	script := "const payload = JSON.parse(require('fs').readFileSync(0, 'utf8')); console.log(payload.toolName)"
+	bad := `node -e "\"` + script + `\""`
+	want := hook.NormalizeCommand(bad)
+	if want == bad {
+		t.Fatal("test command did not normalize")
+	}
+
+	app := NewApp()
+	if err := app.SaveHooksSettings("global", []HookConfigView{{
+		Event:   string(hook.PreToolUse),
+		Match:   "bash",
+		Command: bad,
+	}}); err != nil {
+		t.Fatalf("SaveHooksSettings: %v", err)
+	}
+
+	view := app.HooksSettings("global")
+	if len(view.Hooks) != 1 || view.Hooks[0].Command != want {
+		t.Fatalf("HooksSettings = %+v, want normalized command %q", view.Hooks, want)
+	}
+}
+
 func TestProjectHooksSettingsUseActiveWorkspaceRootAndTrust(t *testing.T) {
 	home := isolateDesktopUserDirs(t)
 	project := t.TempDir()

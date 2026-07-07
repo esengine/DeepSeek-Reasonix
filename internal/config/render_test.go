@@ -22,6 +22,17 @@ func isolateUserConfigHome(t *testing.T) string {
 	return home
 }
 
+// setRuntimeGOOS overrides the package-level runtimeGOOS for one test. The
+// t.Setenv call is a guard: it panics if the test also uses t.Parallel, which
+// would otherwise race on the shared global.
+func setRuntimeGOOS(t *testing.T, goos string) {
+	t.Helper()
+	t.Setenv("REASONIX_TEST_GOOS", goos)
+	old := runtimeGOOS
+	runtimeGOOS = goos
+	t.Cleanup(func() { runtimeGOOS = old })
+}
+
 func expectedDefaultReasonixHome(home string) string {
 	if runtime.GOOS == "windows" {
 		return filepath.Join(home, "AppData", "Roaming", "reasonix")
@@ -251,8 +262,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.DefaultModel != "mimo-pro" {
 		t.Errorf("default_model = %q, want mimo-pro", got.DefaultModel)
 	}
-	if got.ConfigVersion != 3 {
-		t.Errorf("config_version = %d, want 3", got.ConfigVersion)
+	if got.ConfigVersion != 4 {
+		t.Errorf("config_version = %d, want 4", got.ConfigVersion)
 	}
 	if got.Language != "zh" {
 		t.Errorf("language = %q, want zh", got.Language)
@@ -575,7 +586,7 @@ func TestRenderTOMLCreationLayoutStyle(t *testing.T) {
 
 func TestScopedRenderPreservesLSPConfig(t *testing.T) {
 	const src = `
-config_version = 3
+config_version = 4
 default_model = "mimo"
 
 [lsp]
@@ -699,7 +710,7 @@ func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
 	c.Desktop.CheckUpdates = boolPtr(false)
 
 	user := RenderTOMLForScope(c, RenderScopeUser)
-	for _, want := range []string{"config_version = 3", "[desktop]", `theme = "dark"`, `close_behavior = "background"`, `status_bar_style = "text"`, `default_tool_approval_mode = "auto"`, `check_updates = false`, "[notifications]", "[tools.shell]"} {
+	for _, want := range []string{"config_version = 4", "[desktop]", `theme = "dark"`, `close_behavior = "background"`, `status_bar_style = "text"`, `default_tool_approval_mode = "auto"`, `check_updates = false`, "[notifications]", "[tools.shell]"} {
 		if !strings.Contains(user, want) {
 			t.Fatalf("user render missing %q:\n%s", want, user)
 		}
@@ -998,6 +1009,23 @@ func TestRenderTOMLDefaultStepsCommentedOut(t *testing.T) {
 				t.Errorf("default planner_max_steps should be commented out in [agent], got: %s", line)
 			}
 		}
+	}
+}
+
+func TestRenderTOMLWindowsSandboxDefaultAndExplicitEnforce(t *testing.T) {
+	isolateUserConfigHome(t)
+	setRuntimeGOOS(t, "windows")
+
+	defaultRendered := RenderTOMLForScope(Default(), RenderScopeUser)
+	if !strings.Contains(defaultRendered, `bash    = "off"`) {
+		t.Fatalf("Windows default user config should render bash off:\n%s", defaultRendered)
+	}
+
+	cfg := Default()
+	cfg.Sandbox.Bash = "enforce"
+	delta := RenderTOMLProjectDelta(cfg)
+	if !strings.Contains(delta, `bash = "enforce"`) {
+		t.Fatalf("Windows explicit enforce should be rendered as a delta:\n%s", delta)
 	}
 }
 

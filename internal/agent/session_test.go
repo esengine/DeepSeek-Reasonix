@@ -402,3 +402,73 @@ func TestNewSessionPathEmptyModel(t *testing.T) {
 		t.Errorf("empty model should use 'session' fallback: %s", path)
 	}
 }
+
+// --- rewrite-save baseline ---
+
+// TestNeedsRewriteSaveFollowsSaves pins the baseline's lifecycle on the
+// session object itself: an in-memory rewrite demands a rewrite save, every
+// full save re-anchors (including the plain force Save the depth-cap recovery
+// path uses), and the baseline never moves backwards when a slower save
+// reports an older capture.
+func TestNeedsRewriteSaveFollowsSaves(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
+	if s.NeedsRewriteSave() {
+		t.Fatal("fresh session should not need a rewrite save")
+	}
+	s.IncrementRewrite()
+	if !s.NeedsRewriteSave() {
+		t.Fatal("in-memory rewrite must demand a rewrite save")
+	}
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if s.NeedsRewriteSave() {
+		t.Fatal("force save must re-anchor the rewrite baseline")
+	}
+	s.IncrementRewrite()
+	if err := s.SaveRewrite(path); err != nil {
+		t.Fatalf("SaveRewrite: %v", err)
+	}
+	if s.NeedsRewriteSave() {
+		t.Fatal("SaveRewrite must re-anchor the rewrite baseline")
+	}
+
+	// A slower save that captured an older rewriteVersion must not roll the
+	// baseline back below what a faster save already persisted.
+	digest, err := digestSessionMessages(s.Snapshot())
+	if err != nil {
+		t.Fatalf("digest: %v", err)
+	}
+	s.markPersisted(path, digest, 1, 1, 0)
+	if s.NeedsRewriteSave() {
+		t.Fatal("stale capture rolled the rewrite baseline backwards")
+	}
+}
+
+// TestRewriteBaselineStaysWithClones: an unpersisted rewrite travels with the
+// clone, and the source persisting later does not mark the clone's copy as
+// saved — each session object owns its own baseline, so no swap can orphan or
+// misattribute it.
+func TestRewriteBaselineStaysWithClones(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
+	s.IncrementRewrite()
+	clone := s.CloneWithMessages(s.Snapshot())
+	if !clone.NeedsRewriteSave() {
+		t.Fatal("clone must inherit the unpersisted rewrite")
+	}
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if s.NeedsRewriteSave() {
+		t.Fatal("source baseline not re-anchored by save")
+	}
+	if !clone.NeedsRewriteSave() {
+		t.Fatal("saving the source must not mark the clone's rewrite persisted")
+	}
+}

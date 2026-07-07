@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log/slog"
 	"strings"
 
 	"reasonix/internal/agent"
@@ -14,6 +15,21 @@ func systemPromptFrom(messages []provider.Message) string {
 		}
 	}
 	return ""
+}
+
+// logSystemPromptSwap leaves a trace whenever a resume/rebind replaces a
+// conversation's persisted system prompt with different bytes: that swap
+// invalidates the whole conversation's provider prefix cache (misses bill at
+// 10x hits) and persists the rewrite. With probe snapshots keeping composition
+// deterministic, this should fire only on genuine config changes — if it shows
+// up in field logs without one, a new nondeterminism source crept into the
+// prompt assembly.
+func logSystemPromptSwap(persisted, fresh, path string) {
+	if persisted == "" || fresh == "" || persisted == fresh {
+		return
+	}
+	slog.Warn("desktop: resume swapped a differing system prompt; conversation prefix cache will miss",
+		"path", path, "persisted_len", len(persisted), "fresh_len", len(fresh))
 }
 
 func withFreshSystemPrompt(messages []provider.Message, system string) []provider.Message {
@@ -40,9 +56,11 @@ func sessionWithFreshSystemPrompt(session *agent.Session, system string) *agent.
 		return nil
 	}
 	messages := session.Snapshot()
-	if systemPromptFrom(messages) == "" {
+	persisted := systemPromptFrom(messages)
+	if persisted == "" {
 		return session
 	}
+	logSystemPromptSwap(persisted, system, "")
 	return session.CloneWithMessages(withFreshSystemPrompt(messages, system))
 }
 
@@ -55,7 +73,9 @@ func resumeWithFreshSystemPrompt(ctrl interface {
 		return
 	}
 	if len(messages) > 0 {
-		next := withFreshSystemPrompt(messages, systemPromptFrom(ctrl.History()))
+		fresh := systemPromptFrom(ctrl.History())
+		logSystemPromptSwap(systemPromptFrom(messages), fresh, path)
+		next := withFreshSystemPrompt(messages, fresh)
 		if path != "" {
 			if loaded, err := agent.LoadSession(path); err == nil && loaded != nil {
 				if resumed, ok := loaded.CloneWithMessagesIfCompatible(next); ok {

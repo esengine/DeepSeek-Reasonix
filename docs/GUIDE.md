@@ -484,9 +484,9 @@ Seatbelt on macOS, bubblewrap on Linux, and a native helper on Windows):
 commands may write only those same roots plus platform-specific command
 temp/cache roots, cannot read configured `forbid_read` roots while the OS
 sandbox is active, and reach the network only when `[sandbox] network` is set.
-The native Windows helper delegates the low-level isolation to
-`github.com/SivanCola/windows-sandbox`, which uses AppContainer for read-only
-commands and a low-integrity token for writable commands, temporarily grants
+The native Windows helper uses Reasonix's bundled Windows sandbox backend:
+AppContainer for read-only commands and a low-integrity token for writable
+commands, temporarily grants
 access to the workspace, a per-command temp root, and the target executable,
 applies deny ACEs for `forbid_read` (files as well as directories), snapshots
 touched DACLs before editing them, and restores those snapshots best-effort
@@ -507,6 +507,24 @@ execution instead of running unconfined. Install the platform sandbox backend
 behavior (see
 [`SPEC.md` §9](./SPEC.md#9-roadmap-not-in-current-scope) for the escape-prompt
 and optional elevated Windows hardening still to come).
+
+Windows sandbox troubleshooting: the sandbox relaunches the Reasonix
+executable as a hidden helper, and both the CLI and the desktop app embed that
+helper entry point — if enforce is requested in a build that lacks it, bash
+refuses with a clear error instead of returning empty output. A command that
+queues behind another sandboxed command on the same workspace prints a
+one-line "waiting for another sandboxed command" notice that names the holding
+command and its PID when known. A foreground command gives up after 1 minute
+with the same holder detail (a queued turn should fail fast, not hang);
+background jobs wait up to 10 minutes, and `WINDOWS_SANDBOX_LOCK_MS` overrides
+both. Stop the named command first; raising the wait cap only makes later
+commands wait longer. If sandboxed commands fail
+only under Git-for-Windows/MSYS2 bash, try `[tools.shell] prefer =
+"powershell"` — the MSYS runtime is fragile under a low-integrity token. Run
+`reasonix doctor` to see the resolved shell, sandbox availability, and whether
+a project `reasonix.toml` pins `[sandbox]` (a project file overrides
+Settings/user-config edits, and sandbox changes take effect after a session
+config reload or a new session).
 
 ## Plugins (MCP)
 

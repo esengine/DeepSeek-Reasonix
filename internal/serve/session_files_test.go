@@ -22,6 +22,9 @@ func TestRemoveSessionFilesSweepsEventLogAndSidecars(t *testing.T) {
 	if err := s.SaveSnapshot(path); err != nil {
 		t.Fatalf("SaveSnapshot append: %v", err)
 	}
+	if err := os.WriteFile(store.SessionConflictLog(path), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write conflict log: %v", err)
+	}
 
 	if err := removeSessionFiles(dir, path); err != nil {
 		t.Fatalf("removeSessionFiles: %v", err)
@@ -31,6 +34,7 @@ func TestRemoveSessionFilesSweepsEventLogAndSidecars(t *testing.T) {
 		store.SessionMeta(path),
 		store.SessionEventLog(path),
 		store.SessionEventIndex(path),
+		store.SessionConflictLog(path),
 	} {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {
 			t.Errorf("artifact survived delete: %s (err=%v)", p, err)

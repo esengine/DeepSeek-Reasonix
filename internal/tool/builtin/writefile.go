@@ -13,11 +13,13 @@ import (
 func init() { tool.RegisterBuiltin(writeFile{}) }
 
 // writeFile writes a file. roots, when non-empty, confines the target to the
-// workspace (see confine); the zero value registered at init is unconfined and
-// is overridden per run by ConfineWriters. workDir, when non-empty, is the
-// directory a relative path resolves against (see resolveIn).
+// workspace (see confine); guard rejects Reasonix session-data targets even
+// inside the roots (see SessionDataGuard); the zero value registered at init is
+// unconfined and is overridden per run by ConfineWriters. workDir, when
+// non-empty, is the directory a relative path resolves against (see resolveIn).
 type writeFile struct {
 	roots   []string
+	guard   SessionDataGuard
 	workDir string
 }
 
@@ -45,7 +47,7 @@ func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return "", fmt.Errorf("path is required")
 	}
 	p.Path = resolveIn(w.workDir, p.Path)
-	if err := confine(w.roots, p.Path); err != nil {
+	if err := confineWrite(w.roots, w.guard, p.Path); err != nil {
 		return "", err
 	}
 	// Preserve the existing file's encoding (GBK/UTF-16/BOM) on overwrite instead

@@ -381,6 +381,7 @@ var ChineseTraditional = Messages{
   reasonix mcp <add|remove|list|import>                 管理 reasonix.toml 裡的 MCP 伺服器
   reasonix init                                         查看如何產生專案記憶（AGENTS.md）
   reasonix doctor [--json]                              輸出脫敏的本機診斷資訊
+  reasonix doctor session <branch-id> [--zip] [--out PATH]  匯出會話衝突診斷 zip
   reasonix bot start|doctor|weixin-login                多管道 IM bot 閘道
   reasonix upgrade [--check] [--force]                   自更新至最新版本（也可用：reasonix update）
   reasonix version
