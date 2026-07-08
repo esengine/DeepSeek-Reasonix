@@ -1000,6 +1000,7 @@ export default function App() {
     setToolApprovalMode: setControllerToolApprovalMode,
     setGoal: setControllerGoal,
     clearGoal: clearControllerGoal,
+    newSession,
     clearSession,
     listSessions,
     listTrashedSessions,
@@ -1777,6 +1778,10 @@ export default function App() {
         setClearContextPending(true);
         return;
       }
+      if (trimmed === "/new") {
+        void newSession();
+        return;
+      }
       const goalCommand = /^\/goal(?:\s+(.*))?$/.exec(trimmed);
       if (goalCommand) {
         const arg = (goalCommand[1] ?? "").trim();
@@ -1846,7 +1851,7 @@ export default function App() {
       if (goal.trim()) await setControllerGoal(goal);
       await commitThenSendRef.current(trimmed, submitText.trim());
     },
-    [activeTabId, applyGoal, closeTransientOverlays, collaborationMode, composerProfile, controllerReady, goal, send, runShell, notice, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, steer, switchModel, t, toolApprovalMode, showToast],
+    [activeTabId, applyGoal, closeTransientOverlays, collaborationMode, composerProfile, controllerReady, goal, newSession, send, runShell, notice, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, steer, switchModel, t, toolApprovalMode, showToast],
   );
 
   const refreshTabMetas = useCallback(async (): Promise<TabMeta[]> => {
