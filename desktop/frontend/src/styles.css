@@ -12030,6 +12030,9 @@ body > .mermaid-diagram--fullscreen {
 
 .settings-modal {
   width: min(1360px, calc(100vw - 96px));
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.32);
 }
 
 /* ── settings centre layout ─────────────────────────────────────────────────── */
@@ -13309,6 +13312,8 @@ body > .mermaid-diagram--fullscreen {
     width: 100vw;
     height: 100vh;
     border-radius: 0;
+    border: none;
+    box-shadow: none;
   }
 
   .settings-center__content {
@@ -17851,6 +17856,7 @@ body > .mermaid-diagram--fullscreen {
 @media (max-width: 820px) {
   .layout {
     grid-template-columns: minmax(0, 1fr);
+    justify-content: stretch;
   }
   .sidebar {
     display: none;
@@ -17860,6 +17866,13 @@ body > .mermaid-diagram--fullscreen {
   }
   .layout {
     --chrome-left-toggle-offset: var(--chrome-left-safe-offset);
+  }
+  .layout--workspace-open {
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .layout--workspace-open.layout--sidebar-collapsed {
+    min-width: 0;
   }
   .app--darwin .layout {
     --chrome-left-toggle-offset: 94px;

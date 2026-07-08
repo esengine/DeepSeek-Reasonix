@@ -375,6 +375,14 @@ export interface AppBindings {
   TrashTopic(topicID: string): Promise<void>;
   SetTopicPinned(topicID: string, pinned: boolean): Promise<void>;
   ContextPanel(tabID: string): Promise<ContextPanelInfo>;
+  // ── Terminal ──
+  OpenTerminal(): Promise<void>;
+  OpenTerminalAt(rel: string): Promise<void>;
+  StartTerminal(): Promise<string>;
+  StartTerminalAt(rel: string): Promise<string>;
+  StopTerminal(sessionID: string): Promise<void>;
+  TerminalInput(sessionID: string, data: string): Promise<void>;
+  TerminalResize(sessionID: string, cols: number, rows: number): Promise<void>;
   // New native-feel bindings (added with the desktop native-feel plan).
   ConfirmAction(req: NativeConfirmRequest): Promise<boolean>;
   SaveWindowState(state: DesktopWindowState): Promise<void>;
@@ -3750,5 +3758,13 @@ function makeMockApp(): AppBindings {
         ],
       };
     },
+    // ── Terminal (mock) ──
+    async OpenTerminal() {},
+    async OpenTerminalAt(_rel: string) {},
+    async StartTerminal() { return "term-mock-0"; },
+    async StartTerminalAt(_rel: string) { return "term-mock-0"; },
+    async StopTerminal(_sessionID: string) {},
+    async TerminalInput(_sessionID: string, _data: string) {},
+    async TerminalResize(_sessionID: string, _cols: number, _rows: number) {},
   };
 }
