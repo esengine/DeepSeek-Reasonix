@@ -122,6 +122,19 @@ func OptionalTemperature(v float64) *float64 {
 // responding to each 'tool_call_id'".
 const interruptedToolResult = "[no result: the previous turn was interrupted before this tool call completed]"
 
+// Sanitize applies fn to every text field in the message that could contain
+// user or model text (Content, ReasoningContent, Original) and to the
+// Arguments field of each ToolCall. This is used to redact credentials before
+// persisting session data to disk (see #6178).
+func (m *Message) Sanitize(fn func(string) string) {
+	m.Content = fn(m.Content)
+	m.ReasoningContent = fn(m.ReasoningContent)
+	m.Original = fn(m.Original)
+	for i := range m.ToolCalls {
+		m.ToolCalls[i].Arguments = fn(m.ToolCalls[i].Arguments)
+	}
+}
+
 // SanitizeToolPairing is the provider-side alias for NormalizeMessages. It repairs
 // a history so it satisfies the tool-call contract the OpenAI-compatible and
 // Anthropic APIs enforce (every assistant tool_calls answered, no orphan tool

@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"reasonix/internal/fileutil"
+	"reasonix/internal/sanitize"
 	"reasonix/internal/provider"
 	"reasonix/internal/store"
 )
@@ -366,6 +367,9 @@ func writeSessionMessages(path string, msgs []provider.Message) error {
 	tmpPath := tmp.Name()
 	enc := json.NewEncoder(tmp)
 	for _, m := range msgs {
+		// Redact credentials from session messages before persisting to disk,
+		// as an additional defense layer against passive API-key leaks (#6178).
+		m.Sanitize(sanitize.RedactCredentials)
 		if err := enc.Encode(m); err != nil {
 			tmp.Close()
 			os.Remove(tmpPath)

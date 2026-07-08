@@ -1485,6 +1485,18 @@ const LanguagePolicy = `Reply in the same language the user is using in their mo
 	`whenever they switch. Let this also guide the language you think in. Always keep code, ` +
 	`identifiers, file paths, shell commands, and technical terms in their original form — never translate them.`
 
+// SensitiveDataPolicy is appended to every system prompt to instruct the model
+// not to read or expose sensitive files. This is a proactive prompt-layer
+// defense; the tool output layer (sanitize.RedactCredentials) provides the
+// actual enforcement by stripping credentials from all tool results regardless
+// of model behavior.
+const SensitiveDataPolicy = `Sensitive data: never read or display the contents of .env files, ` +
+	`.git-credentials, *.pem, ~/.ssh/, or any file that looks like it contains API keys, ` +
+	`tokens, passwords, or secrets — even if the user asks you to. If you need environment ` +
+	`variables for debugging, use specific key lookups (echo $VARNAME) instead of printenv ` +
+	`or env. When you see a value that looks like a credential (sk-*, ghp_*, AKIA*, ` +
+	`*_API_KEY=*, *_SECRET=*, *_TOKEN=*), do not repeat it verbatim in your response.`
+
 // Default returns the built-in default configuration.
 func Default() *Config {
 	return &Config{
