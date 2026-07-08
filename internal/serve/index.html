@@ -825,7 +825,26 @@ function finalizeMsg() { if(currentMsg){const c=currentMsg.querySelector('.curso
 
 // ── tool cards (v1 pattern) ──
 function renderToolDispatch(tool) {
-  hideWelcome(); const card=el('div','card'); card.id='tool-'+tool.id; card.dataset.open='false'; card.dataset.tone='accent';
+  hideWelcome();
+  // Check if a card already exists for this tool (from a partial dispatch while
+  // arguments were still streaming). If so, update its subject with args that
+  // weren't available yet, instead of creating a duplicate card.
+  const existing=toolCards[tool.id];
+  if(existing){
+    if(tool.args){
+      let subject=existing.querySelector('.subject');
+      if(!subject){
+        subject=document.createElement('span');
+        subject.className='subject';
+        const name=existing.querySelector('.name');
+        const grow=existing.querySelector('.grow');
+        if(name&&grow)name.parentNode.insertBefore(subject,grow);
+      }
+      subject.textContent=tool.args.slice(0,80);
+    }
+    scrollDown(); return;
+  }
+  const card=el('div','card'); card.id='tool-'+tool.id; card.dataset.open='false'; card.dataset.tone='accent';
   const head=el('div','card-head');
   head.innerHTML='<span class="ico spin"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-dasharray="60" stroke-dashoffset="20"/></svg></span><span class="name">'+escHtml(tool.name)+'</span>'+(tool.args?'<span class="subject">'+escHtml(tool.args.slice(0,80))+'</span>':'')+'<span class="grow"></span><span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></span>';
   const body=el('div','card-body'); body.style.display='none';
