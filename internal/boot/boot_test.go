@@ -2462,6 +2462,7 @@ func systemMessage(msgs []provider.Message) string {
 func stripLanguagePolicy(s string) string {
 	s = strings.TrimSpace(s)
 	for _, policy := range []string{
+		config.SensitiveDataPolicy,
 		config.LanguagePolicy,
 		config.UserDecisionPolicy,
 	} {

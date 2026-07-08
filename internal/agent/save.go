@@ -18,8 +18,8 @@ import (
 	"unicode/utf8"
 
 	"reasonix/internal/fileutil"
-	"reasonix/internal/sanitize"
 	"reasonix/internal/provider"
+	"reasonix/internal/sanitize"
 	"reasonix/internal/store"
 )
 
