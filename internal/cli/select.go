@@ -54,7 +54,7 @@ func maxViewport(totalItems, termRows int, searching bool) int {
 
 // renderSearchBar draws the search input line when searching is active.
 func renderSearchBar(w *os.File, query string) {
-	fmt.Fprintf(w, "\r\033[K%s %s\n", accent("🔍"), query+"_")
+	fmt.Fprintf(w, "\r\033[K%s %s\n", accent("/"), query+"_")
 }
 
 // filterMenuItems returns items whose name or desc contain the query (case-insensitive).
@@ -132,7 +132,7 @@ func selectOne(label string, items []menuItem) (int, error) {
 			it := filtered[i]
 			name := fmt.Sprintf("%-10s", it.name)
 			if i == sel {
-				fmt.Fprintf(w, "\r\033[K%s\r\n", reverse(fmt.Sprintf(" ❯ %s %s ", name, it.desc)))
+				fmt.Fprintf(w, "\r\033[K%s\r\n", reverse(fmt.Sprintf(" ● %s %s ", name, it.desc)))
 			} else {
 				fmt.Fprintf(w, "\r\033[K   %s %s\r\n", name, dim(it.desc))
 			}
@@ -153,10 +153,10 @@ func selectOne(label string, items []menuItem) (int, error) {
 
 	drawHeader := func() {
 		if searching {
-			fmt.Fprintf(w, "\r\033[K%s %s  %s\r\n\r\n", accent("▌"), bold(label), dim(i18n.M.SelectSearchHint))
+			fmt.Fprintf(w, "\r\033[K%s %s  %s\r\n\r\n", accent("▶"), bold(label), dim(i18n.M.SelectSearchHint))
 			renderSearchBar(w, searchQuery)
 		} else {
-			fmt.Fprintf(w, "\r\033[K%s %s  %s\r\n\r\n", accent("▌"), bold(label), dim(i18n.M.SelectOneHint))
+			fmt.Fprintf(w, "\r\033[K%s %s  %s\r\n\r\n", accent("▶"), bold(label), dim(i18n.M.SelectOneHint))
 		}
 	}
 
@@ -321,7 +321,7 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 			}
 			name := fmt.Sprintf("%-14s", it.name)
 			if i == cur {
-				fmt.Fprintf(w, "\r\033[K%s\r\n", reverse(fmt.Sprintf(" ❯ %s %s %s ", box, name, it.desc)))
+				fmt.Fprintf(w, "\r\033[K%s\r\n", reverse(fmt.Sprintf(" ● %s %s %s ", box, name, it.desc)))
 			} else {
 				fmt.Fprintf(w, "\r\033[K   %s %s %s\r\n", box, name, dim(it.desc))
 			}
@@ -339,10 +339,10 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 
 	drawHeader := func() {
 		if searching {
-			fmt.Fprintf(w, "\r\033[K%s %s  %s\r\n\r\n", accent("▌"), bold(label), dim(i18n.M.SelectSearchHint))
+			fmt.Fprintf(w, "\r\033[K%s %s  %s\r\n\r\n", accent("▶"), bold(label), dim(i18n.M.SelectSearchHint))
 			renderSearchBar(w, searchQuery)
 		} else {
-			fmt.Fprintf(w, "\r\033[K%s %s  %s\r\n\r\n", accent("▌"), bold(label), dim(i18n.M.SelectManyHint))
+			fmt.Fprintf(w, "\r\033[K%s %s  %s\r\n\r\n", accent("▶"), bold(label), dim(i18n.M.SelectManyHint))
 		}
 	}
 

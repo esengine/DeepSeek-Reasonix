@@ -8,16 +8,14 @@ import (
 	"reasonix/internal/provider"
 )
 
-// renderUsage drives a Usage event through a fresh TextSink (no renderer) and
-// returns what it wrote — the usage line, exercised through the event path.
+// renderUsage calls FormatUsageLine directly, exercising the formatter that
+// both agent and TUI code rely on.
 func renderUsage(u *provider.Usage, p *provider.Pricing, d ...*event.CacheDiagnostics) string {
-	var b strings.Builder
 	var diag *event.CacheDiagnostics
 	if len(d) > 0 {
 		diag = d[0]
 	}
-	NewTextSink(&b, nil, 80).Emit(event.Event{Kind: event.Usage, Usage: u, Pricing: p, CacheDiagnostics: diag})
-	return b.String()
+	return FormatUsageLine(u, p, diag)
 }
 
 func TestUsageLine(t *testing.T) {

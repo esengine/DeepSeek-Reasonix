@@ -44,7 +44,11 @@ var English = Messages{
 
 	ChatThinking:                           "thinking…",
 	ChatThoughtForFmt:                      "thought for %ds",
+	ChatThoughtWithToolsFmt:                "thought for %[1]ds, ran %[2]d %[4]s",
 	ChatStatusThinkingFmt:                  "%s thinking… (%ds · Esc cancels)",
+	ChatStatusSearchingFmt:                 "searching for %d",
+	ChatStatusEditingFmt:                   "editing %d",
+	ChatStatusRunningFmt:                   "running %d shell tools",
 	ChatToolWorkingFmt:                     "%s working · %ds",
 	ChatStatusRetryingFmt:                  "%s retrying (%d/%d)… (Esc cancels)",
 	ChatStatusCancellingFmt:                "%s stopping… (%ds · Ctrl+C exits)",

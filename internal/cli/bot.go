@@ -396,7 +396,7 @@ func botDoctor(args []string) int {
 		for _, r := range results {
 			marker := "✓"
 			if r.Status == "missing" || r.Status == "disabled" {
-				marker = "✗"
+				marker = "✕"
 			}
 			fmt.Printf("  %s %s: %s", marker, r.Name, r.Status)
 			if r.Detail != "" {

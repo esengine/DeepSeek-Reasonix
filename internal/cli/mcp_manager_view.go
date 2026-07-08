@@ -94,7 +94,7 @@ func (p *mcpManager) renderList(width int) string {
 func (p *mcpManager) renderListRow(i int, s mcpServerView, width int) string {
 	prefix := "    "
 	if i == p.sel {
-		prefix = accent("  › ")
+		prefix = accent("  > ")
 	}
 	nameWidth := min(28, max(12, width/3))
 	name := compactMiddle(s.Name, nameWidth)
@@ -305,7 +305,7 @@ func mcpStatusLabel(v mcpServerView) string {
 	case v.Status == "connected":
 		return green("✓ connected")
 	case v.Status == "failed" && mcpAuthStatus(v) == mcpdiag.AuthRequired:
-		return yellow("⚠ needs authentication")
+		return yellow("! needs authentication")
 	case v.Status == "failed":
 		return red("✕ failed")
 	case v.Status == "deferred":

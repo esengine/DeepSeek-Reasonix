@@ -59,7 +59,7 @@ func TestRenderConstructs(t *testing.T) {
 		{
 			name:     "unordered list",
 			in:       "- one\n- two\n- three\n",
-			contains: []string{"one", "two", "three", "•"},
+			contains: []string{"one", "two", "three", "-"},
 		},
 		{
 			name:     "ordered list",

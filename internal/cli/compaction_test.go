@@ -18,7 +18,7 @@ func TestCompactionCardLines(t *testing.T) {
 	})
 
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(lines[0], "◆") {
+	if !strings.Contains(lines[0], "●") {
 		t.Errorf("header should carry the card glyph, got %q", lines[0])
 	}
 	for _, want := range []string{"Context compacted", "12", "auto"} {

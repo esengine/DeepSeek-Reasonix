@@ -608,7 +608,7 @@ func TestMainManagerFollowsTranscriptWithoutTopPadding(t *testing.T) {
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	m = m0.(chatTUI)
-	m.wrappedLines = []string{"reasonix", "› /mcp"}
+	m.wrappedLines = []string{"reasonix", "> /mcp"}
 
 	out := ansi.Strip(m.renderTranscriptWithMainManager("Manage MCP servers\n1 servers"))
 	lines := strings.Split(out, "\n")
@@ -811,10 +811,8 @@ func TestIngestEventRoutesByKind(t *testing.T) {
 		want string
 	}{
 		{"dispatch", event.Event{Kind: event.ToolDispatch, Tool: event.Tool{Name: "read_file", Args: `{"path":"x"}`}}, "● Read(x)"},
-		{"blocked", event.Event{Kind: event.ToolResult, Tool: event.Tool{Name: "bash", Err: "blocked by permission policy"}}, "● Bash ⊘ blocked by permission policy"},
-		{"usage", event.Event{Kind: event.Usage, Usage: &provider.Usage{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200, CacheHitTokens: 900, CacheMissTokens: 100}}, "  · 1200 tok"},
-		{"usage-diagnostics", event.Event{Kind: event.Usage, Usage: &provider.Usage{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200}, CacheDiagnostics: &event.CacheDiagnostics{PrefixChanged: true, PrefixChangeReasons: []string{"tools"}}}, "cache prefix changed: tools"},
-		{"notice-info", event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "compacted 8 messages → summary"}, "  · compacted 8 messages → summary"},
+		{"blocked", event.Event{Kind: event.ToolResult, Tool: event.Tool{Name: "bash", Err: "blocked by permission policy"}}, "● Bash ✕ blocked by permission policy"},
+		{"notice-info", event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "compacted 8 messages → summary"}, "  compacted 8 messages → summary"},
 		{"notice-warn", event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "response truncated: hit max output tokens"}, "  ! response truncated: hit max output tokens"},
 		{"phase", event.Event{Kind: event.Phase, Text: "planner · planning"}, "[planner · planning]"},
 	} {
@@ -885,7 +883,7 @@ func TestUserBubbleIsLightweightTranscriptLine(t *testing.T) {
 
 	got := renderUserBubble("hello world", 80, false)
 	plain := ansi.Strip(got)
-	if !strings.Contains(plain, "› hello world") {
+	if !strings.Contains(plain, "> hello world") {
 		t.Fatalf("user bubble missing prompt text: %q", plain)
 	}
 	if got == plain {
@@ -1257,7 +1255,7 @@ func TestEchoLocalCommandAddsTranscriptMarker(t *testing.T) {
 	if len(*m.pendingCommit) != 1 {
 		t.Fatalf("pending commits = %d, want 1", len(*m.pendingCommit))
 	}
-	if got := (*m.pendingCommit)[0]; !strings.Contains(got, "› /tree") {
+	if got := (*m.pendingCommit)[0]; !strings.Contains(got, "> /tree") {
 		t.Fatalf("command echo = %q, want /tree marker", got)
 	}
 }

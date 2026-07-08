@@ -253,9 +253,9 @@ func (m chatTUI) chooserTabs() string {
 	c := m.chooser
 	parts := make([]string, 0, len(c.questions)+1)
 	for i, q := range c.questions {
-		mark := "☐"
+		mark := "○"
 		if c.answered(i) {
-			mark = "✔"
+			mark = "✓"
 		}
 		label := mark + " " + headerOr(q, i)
 		if i == c.tab {
@@ -265,9 +265,9 @@ func (m chatTUI) chooserTabs() string {
 		}
 		parts = append(parts, label)
 	}
-	smark := "☐"
+	smark := "○"
 	if c.allAnswered() {
-		smark = "✔"
+		smark = "✓"
 	}
 	submit := smark + " Submit"
 	if c.onSubmitTab() {
@@ -283,9 +283,9 @@ func (m chatTUI) chooserOptionRow(j int, opt event.AskOption, multi bool) string
 	c := m.chooser
 	box := ""
 	if multi {
-		box = "☐ "
+		box = "○ "
 		if c.sel[c.tab][j] {
-			box = "☑ "
+			box = "✓ "
 		}
 	}
 	line := rowLine(c.cursor == j, j+1, box, opt.Label, false)
@@ -299,7 +299,7 @@ func (m chatTUI) chooserOptionRow(j int, opt event.AskOption, multi bool) string
 func rowLine(cur bool, num int, box, label string, active bool) string {
 	prefix := "  "
 	if cur {
-		prefix = accent("❯ ")
+		prefix = accent("● ")
 	}
 	body := fmt.Sprintf("%d. %s%s", num, box, label)
 	if cur {

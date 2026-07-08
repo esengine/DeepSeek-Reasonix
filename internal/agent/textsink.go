@@ -34,6 +34,9 @@ type TextSink struct {
 	// written this turn so a coordinator Phase marker leads with a blank line
 	// only when it follows earlier output.
 	wroteAnything bool
+	// lastWasToolResult flags that the previous event was a ToolResult, so the
+	// next ToolDispatch can insert a blank line between consecutive tool records.
+	lastWasToolResult bool
 }
 
 // NewTextSink builds a TextSink writing to out. renderer/termWidth drive the
@@ -55,6 +58,7 @@ func (s *TextSink) Emit(e event.Event) {
 		s.wroteReasoningBody = false
 		s.textWritten = false
 		s.wroteAnything = false
+		s.lastWasToolResult = false
 
 	case event.Reasoning:
 		if !s.wroteReasoningHeader {
@@ -84,6 +88,10 @@ func (s *TextSink) Emit(e event.Event) {
 		if e.Tool.Partial {
 			break
 		}
+		if s.lastWasToolResult {
+			fmt.Fprintln(s.out)
+			s.lastWasToolResult = false
+		}
 		fmt.Fprintf(s.out, "  -> %s %s\n", e.Tool.Name, CompactArgs(e.Tool.Args))
 		s.wroteAnything = true
 
@@ -94,22 +102,20 @@ func (s *TextSink) Emit(e event.Event) {
 			fmt.Fprintf(s.out, "  ⊘ %s %s\n", e.Tool.Name, e.Tool.Err)
 			s.wroteAnything = true
 		}
+		s.lastWasToolResult = true
 
 	case event.Usage:
-		// Close a still-open raw text block before the usage line, matching the
-		// old Fprintln path for streams that do not emit a Message redraw.
-		if s.textWritten {
-			fmt.Fprintln(s.out)
-			s.textWritten = false
+		if line := FormatUsageLine(e.Usage, e.Pricing, e.CacheDiagnostics); line != "" {
+			fmt.Fprintln(s.out, line)
+			s.wroteAnything = true
 		}
-		s.usageLine(e.Usage, e.Pricing, e.CacheDiagnostics)
 
 	case event.Notice:
-		glyph := "·"
 		if e.Level == event.LevelWarn {
-			glyph = "!"
+			fmt.Fprintf(s.out, "  ! %s\n", e.Text)
+		} else {
+			fmt.Fprintf(s.out, "%s\n", dimText("  "+e.Text))
 		}
-		fmt.Fprintf(s.out, "  %s %s\n", glyph, e.Text)
 		s.wroteAnything = true
 
 	case event.Phase:
@@ -166,14 +172,6 @@ func (s *TextSink) closeTextStream(text, reasoning string) {
 	}
 }
 
-// usageLine writes the one-line token/cache summary; no-op when usage is unset.
-func (s *TextSink) usageLine(u *provider.Usage, p *provider.Pricing, d *event.CacheDiagnostics) {
-	if line := FormatUsageLine(u, p, d); line != "" {
-		fmt.Fprintln(s.out, line)
-		s.wroteAnything = true
-	}
-}
-
 // FormatUsageLine renders the per-turn token/cache summary — the key signal for
 // the cache-first design — as a single line (no trailing newline), or "" when
 // usage is unset or empty. Cache is reported as absolute "(N cached / M new)"
@@ -213,7 +211,7 @@ func FormatUsageLine(u *provider.Usage, p *provider.Pricing, d *event.CacheDiagn
 		}
 		churn = fmt.Sprintf(" · cache prefix changed: %s", reasons)
 	}
-	return fmt.Sprintf("  · %d tok · in %d%s · out %d%s%s%s",
+	return fmt.Sprintf("  %d tok · in %d%s · out %d%s%s%s",
 		u.TotalTokens, u.PromptTokens, cacheCol, u.CompletionTokens, reasoning, cost, churn)
 }
 

@@ -70,7 +70,11 @@ type Messages struct {
 	// chat TUI status line / approval banner.
 	ChatThinking                           string // live reasoning marker label, e.g. "thinking…"
 	ChatThoughtForFmt                      string // collapsed reasoning summary, "%d" = elapsed s
+	ChatThoughtWithToolsFmt                string // collapsed reasoning + tool summary, "%[1]d" = elapsed s, "%[2]d" = tool count, "%[3]d" = shell count, "%[4]s" = tool noun
 	ChatStatusThinkingFmt                  string // "%s thinking… (%ds · <cancel hint>)" — %s = spinner, %d = elapsed s
+	ChatStatusSearchingFmt                 string // "searching for %d" — live status aggregation for read tools, %d = count
+	ChatStatusEditingFmt                   string // "editing %d" — live status aggregation for write tools, %d = count
+	ChatStatusRunningFmt                   string // "running %d shell commands" — live status aggregation for shell tools, %d = count
 	ChatToolWorkingFmt                     string // "%s working · %ds" under a running tool — %s = spinner, %d = elapsed s
 	ChatStatusRetryingFmt                  string // "%s retrying (%d/%d)…" — %s = spinner, %d/%d = attempt/max
 	ChatStatusCancellingFmt                string // "%s stopping… (%ds · Ctrl+C exits)" — %s = spinner, %d = elapsed s

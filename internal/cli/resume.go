@@ -85,7 +85,7 @@ func (m *chatTUI) showSessions(sessions []agent.SessionInfo) {
 	for i, s := range sessions {
 		marker := "  "
 		if s.Path == active {
-			marker = accent("› ")
+			marker = accent("> ")
 		}
 		fmt.Fprintf(&b, "%s%d  %s  %s\n", marker, i+1,
 			s.ModTime.Local().Format("01-02 15:04"), dim(sessionSummary(s)))

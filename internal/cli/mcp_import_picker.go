@@ -92,7 +92,7 @@ func (m chatTUI) renderMCPImport() string {
 		}
 		mark := " "
 		if i == p.cursor {
-			mark = "›"
+			mark = ">"
 		}
 		reasons := strings.Join(c.Reasons, ", ")
 		line := fmt.Sprintf("%s %s %-34s %s", mark, box, c.Entry.Name, dim(reasons))

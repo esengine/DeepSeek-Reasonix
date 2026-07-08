@@ -128,7 +128,18 @@ func (m chatTUI) renderTranscript() string {
 		}
 		if m.sel.active && !m.sel.empty() {
 			if lo, hi, ok := selSpan(idx, start, end, cw); ok {
-				line = lipgloss.StyleRanges(line, lipgloss.NewRange(lo, hi, selStyle))
+				// Skip decorative line prefixes ("● ", "> ", "│ ") in visual
+				// selection, matching Claude Code's behavior where dialogue
+				// bullets are outside the selectable content area.
+				if lo == 0 {
+					plain := ansi.Strip(line)
+					if strings.HasPrefix(plain, "● ") || strings.HasPrefix(plain, "│ ") || strings.HasPrefix(plain, "> ") {
+						lo = 2
+					}
+				}
+				if lo < hi {
+					line = lipgloss.StyleRanges(line, lipgloss.NewRange(lo, hi, selStyle))
+				}
 			}
 		}
 		rows[r] = line
@@ -177,7 +188,21 @@ func (m chatTUI) selectedText() string {
 		if idx == end.line {
 			hi = end.col
 		}
-		out = append(out, strings.TrimRight(ansi.Strip(ansi.Cut(lines[idx], lo, hi)), " "))
+		text := strings.TrimRight(ansi.Strip(ansi.Cut(lines[idx], lo, hi)), " ")
+		// Skip visible line prefixes ("● ", "> ", "│ ") when selection starts at
+		// the left edge, so dialogue bullets and tool connector glyphs are excluded
+		// from copied text — matching Claude Code's behavior where these
+		// decorations are not selectable.
+		if lo == 0 {
+			if strings.HasPrefix(text, "● ") {
+				text = strings.TrimPrefix(text, "● ")
+			} else if strings.HasPrefix(text, "│ ") {
+				text = strings.TrimPrefix(text, "│ ")
+			} else if strings.HasPrefix(text, "> ") {
+				text = strings.TrimPrefix(text, "> ")
+			}
+		}
+		out = append(out, text)
 	}
 	return strings.Join(out, "\n")
 }
@@ -251,7 +276,10 @@ func (m *chatTUI) dragScrollbar(row int) {
 }
 
 // transcriptCaret maps a screen cell (x, y) in the transcript region to an
-// absolute content position, clamping to the visible window.
+// absolute content position, clamping to the visible window.  For lines with
+// decorative prefixes ("● ", "> ", "│ "), columns 0-1 are offset to column 2
+// so the caret never lands on a non-content glyph — matching Claude Code's
+// behavior where dialogue decorations are completely non-selectable.
 func (m chatTUI) transcriptCaret(x, y int) selPos {
 	h := m.viewport.Height()
 	if y < 0 {
@@ -266,5 +294,13 @@ func (m chatTUI) transcriptCaret(x, y int) selPos {
 	if cw := m.viewport.Width(); x > cw {
 		x = cw
 	}
-	return selPos{line: m.viewport.YOffset() + y, col: x}
+	line := m.viewport.YOffset() + y
+	col := x
+	if col < 2 && line >= 0 && line < len(m.wrappedLines) {
+		plain := ansi.Strip(m.wrappedLines[line])
+		if strings.HasPrefix(plain, "● ") || strings.HasPrefix(plain, "│ ") || strings.HasPrefix(plain, "> ") {
+			col = 2
+		}
+	}
+	return selPos{line: line, col: col}
 }

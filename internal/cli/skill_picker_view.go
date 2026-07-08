@@ -255,7 +255,7 @@ func (m chatTUI) renderSkillPickerConfirmDelete() string {
 func renderSkillRow(num int, selected bool, s skill.Skill, enabled bool, w int) string {
 	prefix := "    "
 	if selected {
-		prefix = accent("  › ")
+		prefix = accent("  > ")
 	}
 	nameWidth := min(30, max(14, w/3))
 	name := compactMiddle(s.Name, nameWidth)

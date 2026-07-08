@@ -99,7 +99,7 @@ func diffBody(d event.FileDiff, path string, width, maxLines int) []string {
 				oldNo, newNo = atoi(m[1]), atoi(m[3])
 			}
 			if hunks > 0 {
-				rows = append(rows, "  "+dim("⋮"))
+				rows = append(rows, "  "+dim("..."))
 			}
 			hunks++
 		case '+':

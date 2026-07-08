@@ -508,7 +508,7 @@ func describeCLIThemes() string {
 	for _, st := range cliThemeStyles {
 		marker := "  "
 		if st.name == activeCLITheme.style {
-			marker = accent("› ")
+			marker = accent("> ")
 		}
 		fmt.Fprintf(&b, "%s%-10s %s  %s\n", marker, st.name, dim(st.mode), dim(st.description))
 	}

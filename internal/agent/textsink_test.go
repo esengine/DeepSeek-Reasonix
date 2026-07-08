@@ -31,11 +31,11 @@ func TestTextSinkReproducesInlineOutput(t *testing.T) {
 	want := "\x1b[2m  ▎ thinking\x1b[0m\n" + // reasoning header
 		"Hello" + // answer delta
 		"\n" + // Message close (no renderer)
-		"  · 1200 tok · in 1000 (900 cached / 100 new) · out 200\n" + // usage
+		"  1200 tok · in 1000 (900 cached / 100 new) · out 200\n" + // usage line
 		"  -> read_file {\"path\":\"a\"}\n" + // tool dispatch
 		// successful read_file result is silent
 		"  ⊘ bash blocked by permission policy\n" + // blocked result
-		"  · tool output truncated: 5 of 100 bytes elided\n" + // info notice
+		"\x1b[2m  tool output truncated: 5 of 100 bytes elided\x1b[0m\n" + // info notice
 		"  ! response truncated: hit max output tokens\n" // warn notice
 
 	if got := b.String(); got != want {

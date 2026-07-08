@@ -45,7 +45,11 @@ var Chinese = Messages{
 
 	ChatThinking:                           "思考中…",
 	ChatThoughtForFmt:                      "思考了 %d 秒",
+	ChatThoughtWithToolsFmt:                "思考了 %[1]d 秒，使用了 %[2]d 个%[4]s",
 	ChatStatusThinkingFmt:                  "%s 思考中… (%d 秒 · Esc 取消)",
+	ChatStatusSearchingFmt:                 "搜索中 %d 个",
+	ChatStatusEditingFmt:                   "编辑中 %d 个",
+	ChatStatusRunningFmt:                   "运行 %d 个命令",
 	ChatToolWorkingFmt:                     "%s 运行中 · %d 秒",
 	ChatStatusRetryingFmt:                  "%s 正在重试 (%d/%d)… (Esc 取消)",
 	ChatStatusCancellingFmt:                "%s 正在停止… (%d 秒 · Ctrl+C 退出)",

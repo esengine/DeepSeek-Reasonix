@@ -140,7 +140,7 @@ func describeLanguages(current, resolved string) string {
 	for _, it := range items {
 		marker := "  "
 		if it.tag == current {
-			marker = "• "
+			marker = "- "
 		}
 		hint := it.hint
 		if it.tag == current {

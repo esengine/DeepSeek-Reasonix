@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
@@ -80,6 +81,24 @@ type chatTUI struct {
 	// turnTokens accumulates this turn's output tokens (summed from per-step Usage
 	// events) for the live "↓N" readout in the running status line.
 	turnTokens int
+	// turnToolCalls / turnShellCalls count the tools dispatched this turn so the
+	// collapsed summary can show "thought for Ns, ran N tools". turnReadTools,
+	// turnWriteTools, and turnMCPTools are sub-categories for the live status
+	// bar aggregation.
+	turnToolCalls  int
+	turnShellCalls int
+	turnReadTools  int
+	turnWriteTools int
+	turnMCPTools   int
+	// toolRecordsStart is the transcript index where the first tool record of this
+	// turn was committed; -1 when none. collapseToolRecords truncates from here
+	// to collapse tool entries into the combined summary line.
+	toolRecordsStart int
+	// toolRecordsEnd is the transcript index past the last tool record of this
+	// turn (set when the answer starts streaming); -1 when tools still running.
+	// Together with toolRecordsStart it bounds the tool section to be moved
+	// after the answer.
+	toolRecordsEnd int
 
 	// balance is the last-fetched wallet-balance readout (e.g. "¥110.00"), "" when
 	// the provider declares no balance_url or a fetch failed. Refreshed async on
@@ -131,8 +150,8 @@ type chatTUI struct {
 	renderer      *mdRenderer
 	showReasoning bool // Ctrl+O / /verbose: show raw thinking text in the CLI
 	cfg           *config.Config
-	// reasoningLineIdx is the transcript index of the live "▎ thinking…" marker
-	// while a reasoning block streams; it's rewritten to "▎ thought for Ns" when
+	// reasoningLineIdx is the transcript index of the live "thinking…" marker
+	// while a reasoning block streams; it's rewritten to "thought for Ns" when
 	// the block closes. -1 when no block is open. transcriptDirty forces a
 	// viewport re-feed after that in-place rewrite (length is unchanged).
 	reasoningLineIdx int
@@ -147,6 +166,13 @@ type chatTUI struct {
 	// without a live transcript block, then appended once as a final summary.
 	reasoningNative bool
 	thinkStart      time.Time
+	// thinkSecs captures elapsed thinking seconds in commitReasoning (before indices
+	// reset), so a subsequent collapseToolRecords pass can build the combined summary
+	// with tool counts when the answer arrives.
+	thinkSecs int
+	// thoughtSummaryIdx is the transcript index of the "thought for Ns" line written
+	// by commitReasoning, preserved for collapseToolRecords to rewrite with tool counts.
+	thoughtSummaryIdx int
 	// answerIdx is the transcript index of the streaming answer block (rewritten in
 	// place as completed paragraphs arrive); -1 when none is open. answerFlushed is
 	// how many bytes of pending have already been rendered into it, so a Text packet
@@ -1248,6 +1274,14 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.runStart = time.Now()
 				m.elapsed = 0
 				m.turnTokens = 0
+				m.turnToolCalls = 0
+				m.turnShellCalls = 0
+				m.turnReadTools = 0
+				m.turnWriteTools = 0
+				m.turnMCPTools = 0
+				m.toolRecordsStart = -1
+				m.toolRecordsEnd = -1
+				m.thoughtSummaryIdx = -1
 				m.pendingRestore = line
 				m.bubbleStartIdx = len(m.transcript)
 				m.commitLine("")
@@ -1790,7 +1824,7 @@ func (m *chatTUI) streamReasoning(chunk string) {
 }
 
 // reasoningBlock renders raw thinking text as dim, width-wrapped lines under a
-// "⎿" connector that ties the block to the "▎ thinking…" marker above it. A
+// "⎿" connector that ties the block to the "thinking…" marker above it. A
 // positive maxLines keeps only the trailing visual lines (the live view); 0
 // renders all (verbose collapse).
 func reasoningBlock(raw string, width, maxLines int) string {
@@ -2152,8 +2186,8 @@ func (m *chatTUI) tickToolRunning() {
 	m.transcriptDirty = true
 }
 
-// commitReasoning closes the live thinking block: the "▎ thinking…" marker is
-// rewritten to a dim "▎ thought for Ns" summary and the streamed text below it is
+// commitReasoning closes the live thinking block: the "thinking…" marker is
+// rewritten to a dim "thought for Ns" summary and the streamed text below it is
 // removed (collapsed) — kept only in verbose mode. The viewport re-wraps from
 // m.transcript, so the change is flagged via transcriptDirty.
 func (m *chatTUI) commitReasoning() {
@@ -2161,7 +2195,7 @@ func (m *chatTUI) commitReasoning() {
 		if strings.TrimSpace(m.reasoning.String()) != "" || !m.thinkStart.IsZero() {
 			secs := int(time.Since(m.thinkStart).Seconds())
 			m.commitSpacer()
-			m.commitLine(dim(fmt.Sprintf("  ▎ "+i18n.M.ChatThoughtForFmt, secs)))
+			m.commitLine(dim(fmt.Sprintf("  "+i18n.M.ChatThoughtForFmt, secs)))
 			if m.showReasoning && strings.TrimSpace(m.reasoning.String()) != "" {
 				m.commitLine(reasoningBlock(m.reasoning.String(), m.width, 0))
 			}
@@ -2176,7 +2210,10 @@ func (m *chatTUI) commitReasoning() {
 		return
 	}
 	secs := int(time.Since(m.thinkStart).Seconds())
-	m.transcript[m.reasoningLineIdx] = dim(fmt.Sprintf("  ▎ "+i18n.M.ChatThoughtForFmt, secs))
+	m.thinkSecs = secs
+	m.thoughtSummaryIdx = m.reasoningLineIdx
+
+	m.transcript[m.reasoningLineIdx] = dim(fmt.Sprintf("  "+i18n.M.ChatThoughtForFmt, secs))
 	if m.reasoningTextIdx >= 0 {
 		if m.showReasoning && strings.TrimSpace(m.reasoning.String()) != "" {
 			m.transcript[m.reasoningTextIdx] = reasoningBlock(m.reasoning.String(), m.width, 0)
@@ -2189,6 +2226,49 @@ func (m *chatTUI) commitReasoning() {
 	m.reasoningView = m.reasoningView[:0]
 	m.reasoningLineIdx = -1
 	m.reasoningTextIdx = -1
+}
+
+// moveToolRecordsAfterAnswer moves tool records from their inline position
+// (between thinking summary and answer) to after the answer, like Claude Code.
+// Called after the answer is fully committed in event.Message.
+func (m *chatTUI) moveToolRecordsAfterAnswer() {
+	if m.turnToolCalls <= 0 || m.toolRecordsStart < 0 {
+		return
+	}
+	toolNoun := "tools"
+	if m.turnToolCalls == 1 {
+		toolNoun = "tool"
+	}
+
+	// Save tool records before removing so we can move them after the answer.
+	saved := make([]string, m.toolRecordsEnd-m.toolRecordsStart)
+	copy(saved, m.transcript[m.toolRecordsStart:m.toolRecordsEnd])
+
+	// Remove tool records from their current position (before the answer).
+	m.transcript = append(m.transcript[:m.toolRecordsStart], m.transcript[m.toolRecordsEnd:]...)
+
+	// Append tool records after the answer (Claude Code style).
+	m.transcript = append(m.transcript, saved...)
+
+	// Update or insert the tool count into the thinking summary.
+	if m.thoughtSummaryIdx >= 0 && m.thoughtSummaryIdx < len(m.transcript) {
+		m.transcript[m.thoughtSummaryIdx] = dim("  " + fmt.Sprintf(i18n.M.ChatThoughtWithToolsFmt,
+			m.thinkSecs, m.turnToolCalls, m.turnShellCalls, toolNoun))
+	} else {
+		// No thinking: insert a standalone tool summary after the answer.
+		m.commitLine(dim("  " + fmt.Sprintf(i18n.M.ChatThoughtWithToolsFmt,
+			0, m.turnToolCalls, m.turnShellCalls, toolNoun)))
+	}
+
+	m.turnToolCalls = 0
+	m.turnShellCalls = 0
+	m.turnReadTools = 0
+	m.turnWriteTools = 0
+	m.turnMCPTools = 0
+	m.toolRecordsStart = -1
+	m.toolRecordsEnd = -1
+	m.thoughtSummaryIdx = -1
+	m.transcriptDirty = true
 }
 
 // streamAnswer renders the answer streamed so far up to its last completed
@@ -2210,7 +2290,7 @@ func (m *chatTUI) streamAnswer() {
 		return
 	}
 	m.answerFlushed = len(prefix)
-	block := strings.TrimRight(rendered, "\n")
+	block := strings.TrimRight(wrapAIMarkdown(rendered, transcriptContentWidth(m.width, m.nativeScrollback)), "\n")
 	if m.answerIdx < 0 {
 		m.answerIdx = len(m.transcript)
 		m.commitLine(block)
@@ -2235,7 +2315,7 @@ func (m *chatTUI) commitPending() {
 	if rendered == "" {
 		rendered = raw
 	}
-	block := strings.TrimRight(rendered, "\n")
+	block := strings.TrimRight(wrapAIMarkdown(rendered, transcriptContentWidth(m.width, m.nativeScrollback)), "\n")
 	if m.answerIdx < 0 {
 		m.commitLine(block)
 	} else {
@@ -2365,15 +2445,35 @@ func (m chatTUI) runningWorkingLine(cancelRequested, styled bool) string {
 	} else {
 		working = fmt.Sprintf("  "+i18n.M.ChatStatusThinkingFmt, m.spinner.View(), m.elapsed)
 	}
+	// Append aggregated tool activity (Claude Code style) when tools are
+	// dispatched but the answer hasn't started streaming yet.
+	if m.turnToolCalls > 0 && m.toolRecordsEnd < 0 {
+		parts := make([]string, 0, 3)
+		if m.turnReadTools > 0 {
+			parts = append(parts, fmt.Sprintf(i18n.M.ChatStatusSearchingFmt, m.turnReadTools))
+		}
+		if m.turnWriteTools > 0 {
+			parts = append(parts, fmt.Sprintf(i18n.M.ChatStatusEditingFmt, m.turnWriteTools))
+		}
+		if m.turnShellCalls > 0 {
+			parts = append(parts, fmt.Sprintf(i18n.M.ChatStatusRunningFmt, m.turnShellCalls))
+		}
+		if m.turnMCPTools > 0 {
+			parts = append(parts, fmt.Sprintf("tools %d", m.turnMCPTools))
+		}
+		if len(parts) > 0 {
+			working += " · " + strings.Join(parts, " · ")
+		}
+	}
 	if m.turnTokens > 0 {
 		working += " · ↓" + shortTokens(m.turnTokens)
 	}
 	if n := len(m.pendingInterject); n > 0 {
 		var queued string
 		if n == 1 {
-			queued = " · ✎ feedback queued"
+			queued = " feedback queued"
 		} else {
-			queued = fmt.Sprintf(" · ✎ %d queued", n)
+			queued = fmt.Sprintf(" %d queued", n)
 		}
 		if styled {
 			working += dim(queued)
@@ -2432,7 +2532,7 @@ func (m chatTUI) View() tea.View {
 	var status string
 	switch {
 	case m.rewind != nil:
-		status = "  " + modeTag + " · ⟲ rewind"
+		status = "  " + modeTag + " · > rewind"
 	case m.mcpImport != nil:
 		status = "  " + modeTag + " · MCP import"
 	case m.resumePick != nil:
@@ -2492,10 +2592,10 @@ func (m chatTUI) View() tea.View {
 	if m.balance != "" {
 		data = append(data, dim(m.balance))
 	}
-	dataLine := "  " + strings.Join(data, " · ")
+	dataLine := dim("  " + strings.Join(data, " · "))
 	// A configured custom status line replaces the built-in data row entirely.
 	if m.statuslineCmd != "" && m.statuslineOut != "" {
-		dataLine = "  " + m.statuslineOut
+		dataLine = dim("  " + m.statuslineOut)
 	}
 
 	// Bottom region pinned under the transcript viewport: optional panels, the
@@ -2619,7 +2719,7 @@ func compactionCardLines(c event.Compaction) []string {
 		trigger = i18n.M.CompactionManual
 	}
 	header := fmt.Sprintf("%s · %d %s · %s", i18n.M.CompactionTitle, c.Messages, i18n.M.CompactionUnit, trigger)
-	lines := []string{accent("◆ " + header)}
+	lines := []string{accent("● " + header)}
 	for _, ln := range strings.Split(strings.TrimRight(c.Summary, "\n"), "\n") {
 		lines = append(lines, dim("  │ "+ln))
 	}
@@ -2712,7 +2812,7 @@ func (m chatTUI) jobsTag() string {
 	if n == 0 {
 		return ""
 	}
-	return dim(fmt.Sprintf("⚙ %d", n))
+	return dim(fmt.Sprintf("~ %d", n))
 }
 
 func (m chatTUI) modelTag() string {
@@ -2890,7 +2990,7 @@ func (m chatTUI) renderTodoPanel() string {
 		}
 		switch t.Status {
 		case "completed":
-			b.WriteString(indent + green("✔") + " " + dim(t.Content) + "\n")
+			b.WriteString(indent + green("✓") + " " + dim(t.Content) + "\n")
 		case "in_progress":
 			label := t.Content
 			if t.ActiveForm != "" {
@@ -2974,7 +3074,7 @@ func (m chatTUI) computeStatusLineCount(width int) int {
 	status := "  " + modeTag
 	switch {
 	case m.rewind != nil:
-		status += " · ⟲ rewind"
+		status += " · > rewind"
 	case m.mcpImport != nil:
 		status += " · MCP import"
 	case m.resumePick != nil:
@@ -3027,9 +3127,9 @@ func (m chatTUI) computeStatusLineCount(width int) int {
 	if m.balance != "" {
 		data = append(data, m.balance)
 	}
-	dataLine := "  " + strings.Join(data, " · ")
+	dataLine := dim("  " + strings.Join(data, " · "))
 	if m.statuslineCmd != "" && m.statuslineOut != "" {
-		dataLine = "  " + m.statuslineOut
+		dataLine = dim("  " + m.statuslineOut)
 	}
 
 	// Replicate the working (spinner) line from View(), shown only while a turn runs.
@@ -3228,6 +3328,13 @@ func (m *chatTUI) startTurnWithRaw(sent, displayed, restore, raw string) tea.Cmd
 	m.runStart = time.Now()
 	m.elapsed = 0
 	m.turnTokens = 0
+	m.turnToolCalls = 0
+	m.turnShellCalls = 0
+	m.turnReadTools = 0
+	m.turnWriteTools = 0
+	m.turnMCPTools = 0
+	m.toolRecordsStart = -1
+	m.toolRecordsEnd = -1
 	// The controller owns the run goroutine, its context, and cancellation; it
 	// streams events to eventCh and emits TurnDone when the turn settles.
 	m.ctrl.SendWithRaw(sent, raw)
@@ -3309,7 +3416,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 			m.commitSpacer()
 			m.thinkStart = time.Now()
 			m.reasoningLineIdx = len(m.transcript)
-			m.commitLine(dim("  ▎ " + i18n.M.ChatThinking))
+			m.commitLine(dim("  " + i18n.M.ChatThinking))
 			m.reasoningTextIdx = len(m.transcript)
 			m.commitLine("")
 			m.reasoningView = m.reasoningView[:0]
@@ -3317,14 +3424,31 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		m.streamReasoning(e.Text)
 
 	case event.Text:
+		hadReasoning := m.reasoningLineIdx >= 0 || m.reasoningNative || !m.thinkStart.IsZero()
 		m.commitReasoning() // reasoning ends as the answer begins
+		// Record where tool records end so they can be moved after the answer.
+		if m.toolRecordsStart >= 0 && m.toolRecordsEnd < 0 {
+			m.toolRecordsEnd = len(m.transcript)
+		}
+		if hadReasoning {
+			m.commitSpacer()
+		}
 		m.pending.WriteString(e.Text)
 		m.streamAnswer()
 
 	case event.Message:
 		// The answer stream is complete — freeze reasoning + the markdown answer.
+		hadReasoning := m.reasoningLineIdx >= 0 || m.reasoningNative || !m.thinkStart.IsZero()
 		m.commitReasoning()
+		if m.toolRecordsStart >= 0 && m.toolRecordsEnd < 0 {
+			m.toolRecordsEnd = len(m.transcript)
+		}
+		if hadReasoning {
+			m.commitSpacer()
+		}
 		m.commitPending()
+		// Move tool records after the answer (Claude Code style).
+		m.moveToolRecordsAfterAnswer()
 
 	case event.ToolDispatch:
 		// The early (partial) dispatch only carries the name — the full dispatch
@@ -3340,7 +3464,22 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		case planApprovalTool:
 			// No longer a tool, but guard anyway: the plan is the assistant's reply.
 		default:
+			m.turnToolCalls++
+			if strings.HasPrefix(e.Tool.ID, "shell-") {
+				m.turnShellCalls++
+			}
+			switch toolCategory(e.Tool.Name) {
+			case "read":
+				m.turnReadTools++
+			case "write":
+				m.turnWriteTools++
+			case "mcp":
+				m.turnMCPTools++
+			}
 			m.commitSpacer()
+			if m.toolRecordsStart < 0 {
+				m.toolRecordsStart = len(m.transcript)
+			}
 			if block := diffBlock(e.Tool.Name, e.Tool.Args, e.Tool.FileDiff, m.width, m.diffMaxLines); block != nil {
 				for _, ln := range block {
 					m.commitLine(ln)
@@ -3361,30 +3500,32 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		// output so collapseToolOutput has a last-resort source for the line
 		// count when the live state was already reset by a back-to-back tool.
 		m.collapseToolOutput(e.Tool.ID, e.Tool.Output)
+		m.commitSpacer()
 		if e.Tool.Name == "todo_write" && e.Tool.Err == "" {
 			m.todoArgs = e.Tool.Args
 		}
 		if e.Tool.Err != "" {
 			m.finalizeStreamed()
-			m.commitLine("  " + red("●") + " " + bold(toolDisplayName(e.Tool.Name)) + " " + red("⊘ "+e.Tool.Err))
+			m.commitLine(dim("●") + " " + bold(toolDisplayName(e.Tool.Name)) + " " + red("✕ "+e.Tool.Err))
 		}
 
 	case event.Usage:
 		if e.Usage != nil {
 			m.turnTokens += e.Usage.CompletionTokens
 		}
-		if line := agent.FormatUsageLine(e.Usage, e.Pricing, e.CacheDiagnostics); line != "" {
-			m.finalizeStreamed()
-			m.commitLine(line)
-		}
 
 	case event.Notice:
-		glyph := "·"
-		if e.Level == event.LevelWarn {
-			glyph = "!"
+		if e.Source == "permission" {
+			m.finalizeStreamed()
+			m.commitLine(permissionNoticeLine(e.Text, e.Level, m.width))
+		} else {
+			m.finalizeStreamed()
+			if e.Level == event.LevelWarn {
+				m.commitLine(fmt.Sprintf("  ! %s", e.Text))
+			} else {
+				m.commitLine(dim(fmt.Sprintf("  %s", e.Text)))
+			}
 		}
-		m.finalizeStreamed()
-		m.commitLine(fmt.Sprintf("  %s %s", glyph, e.Text))
 
 	case event.GuardianAssessment:
 		m.finalizeStreamed()
@@ -3410,7 +3551,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 
 	case event.CompactionStarted:
 		m.finalizeStreamed()
-		m.commitLine(dim("  ⋯ " + i18n.M.CompactionWorking))
+		m.commitLine(dim(" ... " + i18n.M.CompactionWorking))
 
 	case event.CompactionDone:
 		// An aborted pass carries no summary; the accompanying Notice (auto) or
@@ -3454,6 +3595,13 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		// semantics.
 		m.commitReasoning()
 		m.commitPending()
+		// Move any leftover tool records after the frozen answer text. This
+		// covers tool-only turns (plan-mode execution, auto-mode) where no
+		// Text/Message events were emitted between tool results and TurnDone.
+		if m.toolRecordsStart >= 0 && m.toolRecordsEnd < 0 {
+			m.toolRecordsEnd = len(m.transcript)
+		}
+		m.moveToolRecordsAfterAnswer()
 		// The bubble was echoed on Enter and an un-sent turn is swallowed above
 		// (turnDiscarded), so any turn reaching here keeps its bubble in scrollback;
 		// just clear the un-sendable flag.
@@ -3872,7 +4020,7 @@ func (m *chatTUI) echoLocalCommand(input string) {
 	if input == "" {
 		return
 	}
-	m.commitLine(dim("  › " + input))
+	m.commitLine(dim("  > " + input))
 }
 
 // commandNames renders the custom command list for /help, "" when there are none.
@@ -4046,7 +4194,7 @@ func replaySectionsFor(history []provider.Message, width int, renderer *mdRender
 		case provider.RoleUser:
 			// Steer messages are surfaced as a notice line, not a user bubble.
 			if steerText, isSteer := agent.SteerText(m.Content); isSteer {
-				out = append(out, fmt.Sprintf("  ↪ %s\n\n", steerText))
+				out = append(out, fmt.Sprintf("  > %s\n\n", steerText))
 				continue
 			}
 			content := control.StripComposePrefixes(m.Content)
@@ -4060,7 +4208,7 @@ func replaySectionsFor(history []provider.Message, width int, renderer *mdRender
 			if rendered == "" {
 				rendered = body
 			}
-			out = append(out, rendered+"\n")
+			out = append(out, wrapAIMarkdown(rendered, width)+"\n")
 		}
 	}
 	return out
@@ -4070,7 +4218,7 @@ func replaySectionsFor(history []provider.Message, width int, renderer *mdRender
 // at the top of the session.
 func renderTUIBanner(label, missing string, width int) string {
 	var b strings.Builder
-	b.WriteString(accent("◆") + " " + bold("reasonix") + "  " + dim("· "+label) + "\n")
+	b.WriteString(accent("●") + " " + bold("reasonix") + "  " + dim("· "+label) + "\n")
 	b.WriteString(dim("  "+i18n.M.ChatTip) + "\n")
 	if missing != "" {
 		b.WriteString(wrapForViewport("  ! "+missing, width, activeCLITheme.warn) + "\n")
@@ -4086,19 +4234,176 @@ func wrapForViewport(text string, width int, fg cliColor) string {
 	return themeStyle(fg).Width(width).Render(text)
 }
 
-// renderUserBubble renders the just-submitted prompt as a transcript line. Keep
-// it visually lighter than the real bottom composer so a fresh session does not
-// look like it has a second input box in the transcript.
+// renderUserBubble renders the just-submitted prompt as a transcript line.
+// The icon appears at column 0 and the text starts at column 2, left-aligned
+// with AI reply text ("● text"). Long lines are pre-wrapped via ansi.Hardwrap
+// so continuation lines align with the text (not the icon) — rendered as
+//
+//	> long prompt
+//	  continues here
+//
+// matching the AI continuation indent of "  ". Only the first line gets the
+// "> " arrow; intentional line breaks get the same indent as word-wrap
+// continuations so multi-paragraph messages keep a single arrow.
 func renderUserBubble(line string, width int, planMode bool) string {
 	line = displayLineForImageRefs(line)
-	prefix := "› "
+	prefix := "> "
 	if planMode {
-		prefix = "› [plan] "
+		prefix = "> [plan] "
 	}
 	if !colorEnabled {
 		return "│ " + prefix + line
 	}
-	return "  " + accent(prefix+line)
+	// Available width for text: terminal width minus scrollbar (1) and icon prefix.
+	textW := width - 1 - ansi.StringWidth(prefix)
+	if textW < 10 {
+		textW = 10
+	}
+	indent := strings.Repeat(" ", ansi.StringWidth(prefix))
+	// Split by intentional line breaks, wrap each paragraph independently.
+	// Only the first line gets the "> " arrow; continuation paragraphs use
+	// the same soft indent so multi-paragraph messages keep a single arrow.
+	paragraphs := strings.Split(line, "\n")
+	var b strings.Builder
+	for i, para := range paragraphs {
+		if i > 0 {
+			b.WriteString("\n" + indent)
+		}
+		wrapped := ansi.Wrap(para, textW, " ")
+		wrapped = strings.ReplaceAll(wrapped, "\n", "\n"+indent)
+		b.WriteString(wrapped)
+	}
+	return accent(prefix + b.String())
+}
+
+// wrapAIMarkdown wraps rendered markdown at width, adding "● " before the first
+// line and "  " before continuation lines so AI output is visually distinct
+// from user messages.
+func wrapAIMarkdown(rendered string, width int) string {
+	lines := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
+	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
+		return rendered
+	}
+	var b strings.Builder
+	needBullet := true // only the very first non-blank line gets the bullet
+	for i, ln := range lines {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		if ln == "" {
+			continue
+		}
+		prefix := "  "
+		if needBullet {
+			prefix = "● "
+			needBullet = false
+		}
+		prefixW := ansi.StringWidth(prefix)
+		contentW := width - prefixW
+		if contentW < 10 {
+			contentW = 10
+		}
+		wrapped := ansi.Wrap(ln, contentW, " ")
+		indent := strings.Repeat(" ", prefixW)
+		wrapped = strings.ReplaceAll(wrapped, "\n", "\n"+indent)
+		b.WriteString(prefix + wrapped)
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// permissionNoticeLine renders a permission-related notice with tool-card
+// styling. It parses the "Verb(args)" rule from the notice text and formats
+// it like a tool dispatch line: ● Verb(args)  ·  status.
+func permissionNoticeLine(text string, level event.Level, width int) string {
+	name, args, status := extractPermissionRule(text)
+	if name == "" {
+		// Fallback: generic notice with the tool dot
+		glyph := "·"
+		if level == event.LevelWarn {
+			glyph = "!"
+		}
+		return fmt.Sprintf("  %s %s", glyph, text)
+	}
+
+	line := toolDot(name) + " " + toolHead(name, args, width)
+	if status != "" {
+		line += "  " + dim("·") + " " + dim(status)
+	}
+	return line
+}
+
+// extractPermissionRule extracts the tool rule (Verb(args)) and the remaining
+// status text from a permission notice message. The rule is expected to be at
+// the end after the last colon separator.
+func extractPermissionRule(text string) (name, args, status string) {
+	// Try to find the last colon separator (EN ":" or CJK "：") that
+	// separates the description from the rule.
+	rule := text
+	desc := ""
+	for _, sep := range []string{"：", ": "} {
+		if idx := strings.LastIndex(text, sep); idx >= 0 {
+			after := strings.TrimSpace(text[idx+len(sep):])
+			if after != "" && looksLikeToolRule(after) {
+				rule = after
+				desc = strings.TrimSpace(text[:idx])
+				break
+			}
+		}
+	}
+
+	if !looksLikeToolRule(rule) {
+		return "", "", text
+	}
+
+	parenIdx := strings.Index(rule, "(")
+	if parenIdx < 0 {
+		return "", "", text
+	}
+	name = rule[:parenIdx]
+	args = rule[parenIdx+1:]
+	if len(args) > 0 && args[len(args)-1] == ')' {
+		args = args[:len(args)-1]
+	}
+
+	// Build a concise status from the description.
+	status = compactPermissionDesc(desc)
+	return name, args, status
+}
+
+// looksLikeToolRule reports whether s looks like a tool rule: an uppercase-
+// starting identifier followed by "(...)".
+func looksLikeToolRule(s string) bool {
+	if len(s) < 3 {
+		return false
+	}
+	r := []rune(s)
+	if !unicode.IsUpper(r[0]) {
+		return false
+	}
+	return strings.Contains(s, "(")
+}
+
+// compactPermissionDesc extracts a short status label from the permission
+// notice description (the part before the rule).
+func compactPermissionDesc(desc string) string {
+	// Collapse common prefixes to short labels.
+	lower := strings.ToLower(desc)
+	switch {
+	case strings.Contains(lower, "failed") || strings.Contains(lower, "失败") || strings.Contains(lower, "失敗"):
+		return "failed"
+	case strings.Contains(lower, "already") || strings.Contains(lower, "已经") || strings.Contains(lower, "已經"):
+		return "already allowed"
+	case strings.Contains(lower, "saved") || strings.Contains(lower, "保存") || strings.Contains(lower, "儲存"):
+		return "saved"
+	}
+	// Use the last meaningful segment.
+	if idx := strings.LastIndex(desc, " "); idx >= 0 {
+		if cand := strings.TrimSpace(desc[idx:]); len(cand) > 0 && len(cand) < 20 {
+			return cand
+		}
+	}
+	return desc
 }
 
 var cliImageRefRe = regexp.MustCompile(`(?:^|\s)@\.reasonix/attachments/clipboard-\d{8}-\d{6}\.\d+(?:-(?:\d{6}|[a-f0-9]{8}))?\.(?:png|jpg|jpeg|gif|webp)`)

@@ -972,7 +972,7 @@ func interactiveSetup(configPath, envPath string) int {
 	// in their language before any substantive prompt.
 	fmt.Println()
 	fmt.Print(boxed([]string{
-		accent("◆") + " " + fmt.Sprintf(i18n.M.WelcomeTitleFmt, bold("reasonix")),
+		accent("●") + " " + fmt.Sprintf(i18n.M.WelcomeTitleFmt, bold("reasonix")),
 		"",
 		dim(i18n.M.NoConfigYet),
 	}))
@@ -1015,7 +1015,7 @@ func interactiveSetup(configPath, envPath string) int {
 		fmt.Printf("%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, displayPath(target)))
 	}
 
-	fmt.Printf("\n%s %s\n", accent("◆"), i18n.M.SetupComplete)
+	fmt.Printf("\n%s %s\n", accent("●"), i18n.M.SetupComplete)
 	return 0
 }
 

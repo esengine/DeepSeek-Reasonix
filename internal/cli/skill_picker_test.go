@@ -686,7 +686,7 @@ func TestSkillRowLabelHasSubagentTag(t *testing.T) {
 func TestRenderSkillRowSelected(t *testing.T) {
 	s := skill.Skill{Name: "test", Description: "A test skill", Scope: skill.ScopeGlobal, RunAs: skill.RunInline}
 	row := renderSkillRow(5, true, s, true, 80)
-	if !strings.Contains(row, "›") {
+	if !strings.Contains(row, ">") {
 		t.Fatalf("selected row missing arrow: %q", row)
 	}
 	// Selected row differs from unselected: has arrow, no dim prefix.

@@ -188,7 +188,16 @@ func (r *mdRenderer) renderBlock(buf *strings.Builder, node ast.Node, src []byte
 	case *extast.Table:
 		r.renderTable(buf, n, src, indent)
 	case *ast.ThematicBreak:
+		// Output a dim horizontal rule at the content width. At top level
+		// (indent == 0) the line carries no leading indent because
+		// wrapAIMarkdown adds a 2-space prefix after rendering, so the dash
+		// count leaves room for it. Nested contexts (blockquote, list) pass
+		// their own indent and the prefix-free inner renderer always expects
+		// leading whitespace from us.
 		w := r.width - indent
+		if indent == 0 {
+			w = r.width - 2 // reserve space for wrapAIMarkdown's 2-char indent
+		}
 		if w < 8 {
 			w = 8
 		}
@@ -228,7 +237,10 @@ func (r *mdRenderer) renderTextBlock(buf *strings.Builder, n *ast.TextBlock, src
 func (r *mdRenderer) renderInlineBlock(buf *strings.Builder, n ast.Node, src []byte, indent int, trailingBlank bool) {
 	inline := r.collectInline(n, src)
 	prefix := strings.Repeat(" ", indent)
-	wrapped := wrapAnsi(inline, r.width-indent)
+	// Use unlimited width — wrapping is handled by wrapAIMarkdown at
+	// display time with visual continuation indent, matching Claude
+	// Code's approach of preserving text flow across terminal resizes.
+	wrapped := wrapAnsi(inline, 999999)
 	for _, line := range strings.Split(wrapped, "\n") {
 		buf.WriteString(prefix)
 		buf.WriteString(line)
@@ -251,7 +263,7 @@ func (r *mdRenderer) renderList(buf *strings.Builder, n *ast.List, src []byte, i
 			marker = fmt.Sprintf("%d.", idx)
 			idx++
 		} else {
-			marker = "•"
+			marker = "-"
 		}
 		buf.WriteString(strings.Repeat(" ", indent))
 		buf.WriteString(accent(marker) + " ")
@@ -264,7 +276,9 @@ func (r *mdRenderer) renderList(buf *strings.Builder, n *ast.List, src []byte, i
 		inlineHost := inlineCarrier(first)
 		if inlineHost != nil {
 			inline := r.collectInline(inlineHost, src)
-			wrapped := wrapAnsi(inline, r.width-indent-markerW)
+			// Unlimited width — wrapping is handled at display time by
+			// wrapAIMarkdown with visual continuation indent.
+			wrapped := wrapAnsi(inline, 999999)
 			lines := strings.Split(wrapped, "\n")
 			buf.WriteString(lines[0] + "\n")
 			for _, l := range lines[1:] {
@@ -297,7 +311,7 @@ func (r *mdRenderer) renderFenced(buf *strings.Builder, n ast.Node, src []byte, 
 func (r *mdRenderer) renderBlockquote(buf *strings.Builder, n *ast.Blockquote, src []byte, indent int) {
 	var inner strings.Builder
 	r.renderBlocks(&inner, n, src, 0)
-	prefix := strings.Repeat(" ", indent) + dim("▎ ")
+	prefix := strings.Repeat(" ", indent) + dim("│ ")
 	for _, line := range strings.Split(strings.TrimRight(inner.String(), "\n"), "\n") {
 		buf.WriteString(prefix)
 		buf.WriteString(dim(line))

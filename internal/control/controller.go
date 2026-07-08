@@ -4650,17 +4650,18 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 func (c *Controller) emitRememberResult(r RememberResult) {
 	if r.Err != nil {
 		c.sink.Emit(event.Event{
-			Kind:  event.Notice,
-			Level: event.LevelWarn,
-			Text:  fmt.Sprintf(i18n.M.PermissionSaveFailedFmt, r.Rule, r.Err),
+			Kind:   event.Notice,
+			Level:  event.LevelWarn,
+			Source: "permission",
+			Text:   fmt.Sprintf(i18n.M.PermissionSaveFailedFmt, r.Rule, r.Err),
 		})
 		return
 	}
 	switch {
 	case r.Saved:
-		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(i18n.M.PermissionSavedFmt, r.Path, r.Rule)})
+		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Source: "permission", Text: fmt.Sprintf(i18n.M.PermissionSavedFmt, r.Path, r.Rule)})
 	case strings.TrimSpace(r.CoveredBy) != "":
-		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(i18n.M.PermissionAlreadyAllowedFmt, r.Path, r.CoveredBy)})
+		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Source: "permission", Text: fmt.Sprintf(i18n.M.PermissionAlreadyAllowedFmt, r.Path, r.CoveredBy)})
 	}
 }
 
@@ -4669,17 +4670,18 @@ func (c *Controller) emitMCPReadOnlyTrustResult(r MCPReadOnlyTrustResult) {
 	toolName := strings.TrimSpace(r.Tool)
 	if r.Err != nil {
 		c.sink.Emit(event.Event{
-			Kind:  event.Notice,
-			Level: event.LevelWarn,
-			Text:  fmt.Sprintf(i18n.M.MCPReadOnlyTrustFailedFmt, server, toolName, r.Err),
+			Kind:   event.Notice,
+			Level:  event.LevelWarn,
+			Source: "permission",
+			Text:   fmt.Sprintf(i18n.M.MCPReadOnlyTrustFailedFmt, server, toolName, r.Err),
 		})
 		return
 	}
 	switch {
 	case r.Saved:
-		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(i18n.M.MCPReadOnlyTrustSavedFmt, r.Path, server, toolName)})
+		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Source: "permission", Text: fmt.Sprintf(i18n.M.MCPReadOnlyTrustSavedFmt, r.Path, server, toolName)})
 	case strings.TrimSpace(r.CoveredBy) != "":
-		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(i18n.M.MCPReadOnlyTrustAlreadyFmt, r.Path, server, r.CoveredBy)})
+		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Source: "permission", Text: fmt.Sprintf(i18n.M.MCPReadOnlyTrustAlreadyFmt, r.Path, server, r.CoveredBy)})
 	}
 }
 
