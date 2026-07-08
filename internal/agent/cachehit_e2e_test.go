@@ -254,7 +254,7 @@ func TestCacheHitSurvivesTooSmallWindow(t *testing.T) {
 	paused := false
 	for _, n := range sink.notices {
 		t.Logf("notice: %s", n)
-		if strings.Contains(n, "Auto-compaction paused") {
+		if strings.Contains(n, "Automatic context cleanup paused") {
 			paused = true
 		}
 	}

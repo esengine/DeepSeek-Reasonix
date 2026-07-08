@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,6 +24,12 @@ func TestMain(m *testing.M) {
 	os.Setenv("REASONIX_STATE_HOME", dir+"/state")
 	os.Setenv("REASONIX_CACHE_HOME", dir+"/cache")
 	os.Setenv("AppData", dir)
+	// Neutralize the Wails runtime-event bridge for the whole test binary:
+	// outside a running Wails app, runtime.EventsEmit log.Fatals on the plain
+	// contexts tests use, killing the process from any emitting code path.
+	// Tests that assert on runtime events install their own capture through
+	// the per-instance runtimeEvents.emit hook, which takes precedence.
+	runtimeEventsEmitFallback = func(context.Context, string, ...interface{}) {}
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)

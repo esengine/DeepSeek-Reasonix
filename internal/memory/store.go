@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"reasonix/internal/config"
 	"reasonix/internal/frontmatter"
 )
 
@@ -77,7 +78,7 @@ func StoreFor(userDir, cwd string) Store {
 		return Store{}
 	}
 	return Store{
-		Dir:       filepath.Join(userDir, "projects", slugify(absOf(cwd)), "memory"),
+		Dir:       filepath.Join(userDir, "projects", config.WorkspaceSlug(absOf(cwd)), "memory"),
 		GlobalDir: filepath.Join(userDir, "memory", "global"),
 	}
 }
@@ -95,14 +96,6 @@ func (s Store) DirFor(t Type) string {
 
 // indexFile is the human-readable index of saved memories.
 const indexFile = "MEMORY.md"
-
-// slugify turns an absolute project path into a single filesystem-safe segment,
-// matching the auto-memory convention (path separators → '-'), e.g.
-// "/Users/me/proj" → "-Users-me-proj".
-func slugify(absPath string) string {
-	r := strings.NewReplacer(string(os.PathSeparator), "-", "/", "-", "\\", "-", ":", "-")
-	return r.Replace(absPath)
-}
 
 // dirs returns the directories to read from, in order: GlobalDir first (shared
 // memories), then Dir (project-specific).
@@ -618,9 +611,14 @@ func splitFrontmatter(s string) (map[string]string, string) {
 // slugRe strips everything but Unicode letters and digits.
 var slugRe = regexp.MustCompile(`[^\p{L}\p{N}]+`)
 
-// slug normalises a name into a kebab-case, filesystem-safe stem.
+// slug normalises a name into a kebab-case, filesystem-safe stem. The stem is
+// bounded so `<stem>.md` stays under the 255-byte filename component limit —
+// a name distilled from a long title/description previously failed the write
+// with ENAMETOOLONG. Names short enough to have ever been written are
+// returned unchanged, so existing files keep resolving.
 func slug(s string) string {
-	return strings.Trim(slugRe.ReplaceAllString(strings.ToLower(strings.TrimSpace(s)), "-"), "-")
+	stem := strings.Trim(slugRe.ReplaceAllString(strings.ToLower(strings.TrimSpace(s)), "-"), "-")
+	return config.BoundFilenameComponent(stem, 255-len(".md"))
 }
 
 // oneLine collapses whitespace so a description can't break the single-line

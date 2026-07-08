@@ -83,17 +83,22 @@ func TestFinishReasonMessage(t *testing.T) {
 	}
 }
 
-// TestEmptyFinalNotice carries the diagnostics that tell the three empty-answer
-// causes apart in reports: which provider, how it stopped, and whether the model
-// produced reasoning-only output.
+// TestEmptyFinalNotice keeps the user-facing line short while preserving the
+// diagnostics that tell empty-answer causes apart in expandable details.
 func TestEmptyFinalNotice(t *testing.T) {
-	msg := emptyFinalNotice("deepseek-flash", &provider.Usage{FinishReason: "stop"}, 512)
-	for _, want := range []string{"deepseek-flash", "finish=stop", "reasoning=512"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("notice %q missing %q", msg, want)
+	msg := emptyFinalNotice()
+	for _, hidden := range []string{"blocked", "finish=", "reasoning="} {
+		if strings.Contains(msg, hidden) {
+			t.Errorf("notice %q should not expose internal diagnostic %q", msg, hidden)
 		}
 	}
-	if got := emptyFinalNotice("p", nil, 0); !strings.Contains(got, "finish=unknown") {
+	detail := emptyFinalNoticeDetail("deepseek-flash", &provider.Usage{FinishReason: "stop"}, 512)
+	for _, want := range []string{"deepseek-flash", "finish=stop", "reasoning=512"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("notice detail %q missing %q", detail, want)
+		}
+	}
+	if got := emptyFinalNoticeDetail("p", nil, 0); !strings.Contains(got, "finish=unknown") {
 		t.Errorf("nil usage should report finish=unknown, got %q", got)
 	}
 }

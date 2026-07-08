@@ -181,8 +181,10 @@ func TestJobPanicRecoveredAsFailed(t *testing.T) {
 		t.Fatalf("panic output = %q, want internal panic message", res[0].Output)
 	}
 	waitFor(t, func() bool {
-		for _, text := range sink.texts() {
-			if strings.Contains(text, "background task failed") && strings.Contains(text, j.ID) && strings.Contains(text, "panic: boom") {
+		sink.mu.Lock()
+		defer sink.mu.Unlock()
+		for _, ev := range sink.events {
+			if strings.Contains(ev.Text, "background task failed") && strings.Contains(ev.Detail, j.ID) && strings.Contains(ev.Detail, "panic: boom") {
 				return true
 			}
 		}

@@ -5,12 +5,18 @@ import (
 	"strings"
 
 	"reasonix/internal/config"
+	"reasonix/internal/control"
+	"reasonix/internal/memorycompiler"
 )
 
 func (m *chatTUI) runMemoryV5Command(input string) {
 	args := tokenizeArgs(input)
 	if len(args) > 2 {
-		m.notice("usage: /memory-v5 off|observe|compact|on|status")
+		m.notice("usage: /memory-v5 off|observe|compact|on|status|learnings")
+		return
+	}
+	if len(args) == 2 && strings.EqualFold(args[1], "learnings") {
+		m.notice(memoryV5LearningsText(m.ctrl))
 		return
 	}
 	if len(args) < 2 || strings.EqualFold(args[1], "status") {
@@ -19,7 +25,7 @@ func (m *chatTUI) runMemoryV5Command(input string) {
 			m.notice("memory-v5: " + err.Error())
 			return
 		}
-		m.notice(fmt.Sprintf("memory-v5: %s (usage: /memory-v5 off|observe|compact|on|status)", cliMemoryV5Mode(cfg.MemoryCompilerEnabled(), cfg.MemoryCompilerVerbosity())))
+		m.notice(fmt.Sprintf("memory-v5: %s (usage: /memory-v5 off|observe|compact|on|status|learnings)", cliMemoryV5Mode(cfg.MemoryCompilerEnabled(), cfg.MemoryCompilerVerbosity())))
 		return
 	}
 	if m.ctrl != nil && m.ctrl.Running() {
@@ -85,8 +91,26 @@ func parseCLIMemoryV5Setting(mode string) (cliMemoryV5Setting, error) {
 	case "on", "compact", "inject", "contract":
 		return cliMemoryV5Setting{enabled: true, verbosity: config.MemoryCompilerVerbosityCompact, setVerbosity: true}, nil
 	default:
-		return cliMemoryV5Setting{}, fmt.Errorf("memory-v5 %q: must be off|observe|compact|on|status", mode)
+		return cliMemoryV5Setting{}, fmt.Errorf("memory-v5 %q: must be off|observe|compact|on|status|learnings", mode)
 	}
+}
+
+// memoryV5LearningsText renders the project's learned Memory v5 state. It is a
+// read-only local view; nothing here reaches a provider.
+func memoryV5LearningsText(ctrl control.SessionAPI) string {
+	root := ""
+	if ctrl != nil {
+		root = ctrl.WorkspaceRoot()
+	}
+	rt := memorycompiler.New(config.MemoryCompilerDir(root))
+	if rt == nil {
+		return "memory-v5: no project state directory"
+	}
+	rep, ok := rt.LearningsReport(0)
+	if !ok {
+		return "memory-v5: no learned state yet"
+	}
+	return memorycompiler.FormatLearningsReport(rep)
 }
 
 func cliMemoryV5Mode(enabled bool, verbosity string) string {

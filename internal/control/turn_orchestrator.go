@@ -209,9 +209,9 @@ func (o *turnOrchestrator) continueGoal(ctx context.Context) error {
 		if msg, ok := c.goals.takeIntercept(); ok {
 			turn = msg
 			if strings.Contains(msg, "AutoResearch readiness check failed") {
-				c.notice("autoresearch readiness blocked completion")
+				c.noticeDetail("Goal is not ready to complete yet; continuing the remaining work.", msg)
 			} else {
-				c.notice("goal intercept: incomplete todos remain (override with a second [goal:complete])")
+				c.noticeDetail("Goal still has unfinished task state; continuing the remaining work.", msg)
 			}
 		}
 		if err := o.runSyntheticTurnWithRawDisplay(ctx, turn, turn, ""); err != nil {
@@ -267,7 +267,7 @@ func (c *Controller) finalizeAutoResearchTask(taskID, notice string) {
 	case notice == goalCompleteNotice:
 		status := autoresearch.StatusComplete
 		if _, err := c.autoResearch.UpdateProgress(taskID, autoresearch.ProgressPatch{Status: &status}); err != nil {
-			c.notice("autoresearch task completion update failed: " + err.Error())
+			c.noticeDetail("AutoResearch status update failed.", "autoresearch task completion update failed: "+err.Error())
 			return
 		}
 		c.notice("autoresearch task completed: " + taskID)
@@ -278,10 +278,10 @@ func (c *Controller) finalizeAutoResearchTask(taskID, notice string) {
 			reason = notice
 		}
 		if _, err := c.autoResearch.UpdateProgress(taskID, autoresearch.ProgressPatch{Status: &status, BlockedReason: &reason}); err != nil {
-			c.notice("autoresearch task blocked update failed: " + err.Error())
+			c.noticeDetail("AutoResearch status update failed.", "autoresearch task blocked update failed: "+err.Error())
 			return
 		}
-		c.notice("autoresearch task blocked: " + taskID)
+		c.noticeDetail("AutoResearch task marked blocked.", "autoresearch task blocked: "+taskID+"\nreason: "+reason)
 	}
 }
 

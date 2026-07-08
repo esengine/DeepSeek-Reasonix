@@ -587,7 +587,7 @@ export function Transcript({
             out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} tabId={tabId} />);
             break;
           case "phase": out.push(<PhaseCard key={it.id} text={it.text} />); break;
-          case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
+          case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} detail={it.detail} />); break;
           case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
         }
       }
@@ -949,7 +949,7 @@ function WarmTurnItems({
         break;
       }
       case "phase": nodes.push(<PhaseCard key={it.id} text={it.text} />); break;
-      case "notice": nodes.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
+      case "notice": nodes.push(<NoticeCard key={it.id} level={it.level} text={it.text} detail={it.detail} />); break;
       case "compaction": nodes.push(<CompactionCard key={it.id} item={it} />); break;
     }
   }
@@ -1268,11 +1268,20 @@ function PhaseCard({ text }: { text: string }) {
   return <div className="phase" data-entrance="true"><ProcessPhaseIcon size={12} /><span>{text}</span></div>;
 }
 
-function NoticeCard({ level, text }: { level: NoticeItem["level"]; text: string }) {
+function NoticeCard({ level, text, detail }: { level: NoticeItem["level"]; text: string; detail?: string }) {
+  const t = useT();
   return (
     <div className={`notice-line notice-line--${level}`} data-entrance="true">
       <span className="notice-line__icon">{level === "warn" ? "⚠ " : "ℹ "}</span>
-      <span className="notice-line__text">{text}</span>
+      <div className="notice-line__text">
+        {text}
+        {detail ? (
+          <details className="notice-line__details">
+            <summary>{t("notice.details")}</summary>
+            <div>{detail}</div>
+          </details>
+        ) : null}
+      </div>
     </div>
   );
 }

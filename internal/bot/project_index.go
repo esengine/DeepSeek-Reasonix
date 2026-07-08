@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/secrets"
 )
 
 const (
@@ -616,6 +617,7 @@ func searchBotProjectsWithRG(ctx context.Context, rg string, projects []botProje
 	}
 	args = append(args, roots...)
 	cmd := exec.CommandContext(ctx, rg, args...)
+	cmd.Env = secrets.ProcessEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError

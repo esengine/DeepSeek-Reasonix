@@ -163,6 +163,53 @@ jobs:
       - name: test
         run: go test ./...
 
+  # Desktop project-root matching is case-insensitive only on Windows
+  # (sameDesktopPath folds case when os.PathSeparator is '\'), so the
+  # regression tests for that contract are named *OnWindows and can never
+  # run on the ubuntu leg above.
+  desktop-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+
+      - name: Install Wails CLI
+        run: |
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      # go:embed of frontend/dist needs a built frontend before the package
+      # compiles, same as the ubuntu desktop leg.
+      - name: Build frontend
+        run: |
+          wails generate module
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend build
+
+      - name: test (Windows-only path semantics)
+        timeout-minutes: 10
+        run: go test . -run 'OnWindows$' -v
+
   lint:
     runs-on: ubuntu-latest
     steps:

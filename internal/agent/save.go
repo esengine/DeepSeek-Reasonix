@@ -19,6 +19,7 @@ import (
 
 	"reasonix/internal/fileutil"
 	"reasonix/internal/provider"
+	"reasonix/internal/secrets"
 	"reasonix/internal/store"
 )
 
@@ -201,6 +202,16 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 	// stalest capture written last would then read the newer transcript it
 	// lost the race to as a bogus stale-prefix conflict.
 	msgs, version, rewriteVersion := s.snapshotWithVersion()
+	// Durable transcripts are always redacted, independent of the live
+	// [secrets] redact_tool_output toggle. Digest consistency holds because
+	// Redact is deterministic and idempotent (see secrets.Redact): a loaded
+	// session's messages are already redacted, so re-redacting them here is a
+	// byte-for-byte no-op and the snapshot keeps its prefix relationship to
+	// the on-disk transcript — the same digest/prefix machinery that guards
+	// against bogus stale-prefix conflicts (#6083) sees identical bytes. The
+	// persisted baseline (markPersisted) is likewise recorded over the
+	// redacted form, matching what LoadSession will digest back.
+	msgs = secrets.RedactMessages(msgs)
 	digest, contentBytes, err := digestAndSizeSessionMessages(msgs)
 	if err != nil {
 		return err
@@ -541,6 +552,11 @@ func (s *Session) SaveRecoveryBranch(opts RecoveryBranchOptions) (RecoveryBranch
 		return RecoveryBranchInfo{}, fmt.Errorf("empty original session path")
 	}
 	msgs, version, rewriteVersion := s.snapshotWithVersion()
+	// Same redaction contract as save(): recovery branches are durable
+	// transcripts too, and the coverage checks below compare against on-disk
+	// content that save() already redacted — comparing a raw snapshot against
+	// it would misread pure coverage as divergence and fork a bogus branch.
+	msgs = secrets.RedactMessages(msgs)
 	preview, turns := SessionPreviewFromMessages(msgs)
 	if turns == 0 {
 		return RecoveryBranchInfo{}, ErrSessionRecoveryNotNeeded

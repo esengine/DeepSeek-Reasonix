@@ -38,14 +38,14 @@ import { useToast } from "./lib/toast";
 import { useWailsResizeFix } from "./lib/useWailsResizeFix";
 import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, useI18n, useT, type Translator } from "./lib/i18n";
-import { useController, type Item, type LiveStream } from "./lib/useController";
-import { app, onEvent, onProjectTreeChanged, onSessionRecovered, onSessionRecoveryFailed } from "./lib/bridge";
+import { localizedBackendNoticeText, useController, type Item, type LiveStream } from "./lib/useController";
+import { app, onEvent, onProjectTreeChanged, onReady, onRuntimeRebuilt, onSessionRecovered } from "./lib/bridge";
 import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-music";
-import { playSuccessChime } from "./lib/sound";
+import { clearAttentionChimeKeys, playAttentionChime, playSuccessChime, shouldPlayAttentionChimeForEvent } from "./lib/sound";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
 import { TodoPanel } from "./components/TodoPanel";
-import { ApprovalModal } from "./components/ApprovalModal";
+import { ApprovalModal, approvalToolLabel } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
 import { UndoRewindBanner } from "./components/UndoRewindBanner";
 import { ClearContextCard } from "./components/ClearContextCard";
@@ -160,6 +160,83 @@ import { useGlobalShortcut } from "./lib/keyboardShortcuts";
 import { topicShortcutIndexFromEvent, useTopicShortcuts, type TopicShortcutEntry } from "./lib/topicShortcuts";
 import { composerDraftKeyForTab } from "./lib/composerDraftKey";
 import logoWordmark from "./assets/logo-wordmark.svg";
+
+function noticePreviewMockEnabled(): boolean {
+  const value = browserMockScenarioParam();
+  return value === "notice" || value === "notices" || value === "notice-preview";
+}
+
+function noticePreviewItems(): Item[] {
+  const notice = (index: number, level: "info" | "warn", text: string, detail: string): Item => ({
+    kind: "notice",
+    id: `notice-preview-${index}`,
+    level,
+    text: localizedBackendNoticeText(text),
+    detail,
+  });
+  return [
+    notice(0, "info", "Task status needs one more check; asking the assistant to finish or explain what is blocking it.", "final-answer readiness blocked: latest successful todo_write still has incomplete items: UI spinner in_progress, settings persistence pending"),
+    notice(1, "info", "No visible answer was produced; asking the assistant to respond again.", "empty final answer blocked: qwen3.7-plus returned no visible answer text (finish=stop, reasoning=2314 chars); retrying"),
+    notice(2, "info", "The assistant answered before taking action; asking it to use the required tools.", "executor handoff: assistant produced a proposal before running required repository commands; nudged to execute"),
+    notice(3, "info", "Tool round limit reached; asking the assistant to summarize progress.", "tool budget reached after 128 tool calls; requesting a progress summary before continuing"),
+    notice(4, "info", "The assistant is stuck retrying a blocked action; asking it to change approach.", "loop guard: repeated command failure matched the same stderr signature across 3 attempts"),
+    notice(5, "info", "Context is getting large; preserving cache until cleanup is needed.", "context window 82% full; deferred cleanup to preserve reusable prompt cache"),
+    notice(6, "info", "Context cleanup skipped for now.", "cleanup skipped: recent turn included unresolved user approval state"),
+    notice(7, "info", "Automatic context cleanup paused because the context window is too small.", "configured compact threshold exceeds current model context window; auto cleanup paused for this model"),
+    notice(8, "info", "Context was compacted without a generated summary.", "compaction completed after upstream summary generation returned empty content; retained transcript checkpoint"),
+    notice(9, "info", "Planning mode enabled for this multi-step task.", "auto plan detector matched implementation task with repository edits and verification steps"),
+    notice(10, "info", "Plan detection requested a plan.", "plan detector confidence=0.83; task includes multiple dependent UI/backend changes"),
+    notice(11, "info", "Plan detection was uncertain; using the fallback planner heuristic.", "plan detector confidence=0.48; fallback heuristic selected because files and tests are involved"),
+    notice(12, "info", "Goal is not ready to complete yet; continuing the remaining work.", "goal completion check found pending validation: desktop/frontend typecheck"),
+    notice(13, "info", "Goal still has unfinished task state; continuing the remaining work.", "active goal has open task state: implement preview, verify browser, report result"),
+    notice(14, "warn", "AutoResearch status update failed.", "autoresearch task completion update failed: write .reasonix/autoresearch/task-42/state/task_spec.json: permission denied"),
+    notice(15, "warn", "AutoResearch task marked blocked.", "autoresearch task blocked: task-42\nreason: missing accepted verification evidence after three turns"),
+    notice(16, "warn", "background export failed: needs attention", "background export failed: session archive upload returned 503 after 3 retries"),
+    notice(17, "warn", "Job artifact migration failed.", "artifact migration failed for job job_123: checksum mismatch while moving output.zip"),
+    notice(18, "warn", "Background job teardown timed out.", "job job_123 did not stop within 10s; process is still marked running by the supervisor"),
+    notice(19, "warn", "Some plan-mode tool settings were ignored.", "plan-mode tool settings ignored: unsupported tool allowlist entry \"browser.screenshot\""),
+    notice(20, "warn", "Some plan-mode command settings were ignored.", "plan-mode command settings ignored: invalid read-only prefix \"npm && test\""),
+    notice(21, "warn", "Config migration did not complete.", "config migration failed at providers.defaultModel: unknown provider reference \"old/deepseek\""),
+    notice(22, "warn", "Selected model is missing its API key.", "selected model deepseek/deepseek-v4-pro requires DEEPSEEK_API_KEY, but no key is configured"),
+    notice(23, "warn", "An MCP server failed to start.", "mcp server \"github\" failed to start: command not found: mcp-server-github"),
+    notice(24, "warn", "Some MCP servers failed to start; run /mcp for details.", "mcp startup failures: github(command not found), linear(authentication expired)"),
+    notice(25, "warn", "Guardian was disabled because its model was not found.", "guardian model \"glm-5-guard\" is not present in the configured provider catalog"),
+    notice(26, "warn", "Guardian was disabled because it could not start.", "guardian startup failed: provider returned 401 unauthorized"),
+  ];
+}
+
+function NoticePreviewPanel({ detailsLabel }: { detailsLabel: string }) {
+  return (
+    <div
+      style={{
+        flex: "1 1 auto",
+        minHeight: 0,
+        overflow: "auto",
+        padding: "44px 24px 128px",
+      }}
+    >
+      <div style={{ maxWidth: 920, margin: "0 auto" }}>
+        {noticePreviewItems().map((item) => {
+          if (item.kind !== "notice") return null;
+          return (
+            <div key={item.id} className={`notice-line notice-line--${item.level}`} data-entrance="true">
+              <span className="notice-line__icon">{item.level === "warn" ? "⚠ " : "ℹ "}</span>
+              <div className="notice-line__text">
+                {item.text}
+                {item.detail ? (
+                  <details className="notice-line__details">
+                    <summary>{detailsLabel}</summary>
+                    <div>{item.detail}</div>
+                  </details>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 const HistoryPanel = lazy(() => import("./components/HistoryPanel").then((module) => ({ default: module.HistoryPanel })));
 const SettingsPanel = lazy(() => import("./components/SettingsPanel").then((module) => ({ default: module.SettingsPanel })));
@@ -854,6 +931,9 @@ function sessionItemsToMarkdown(title: string, items: Item[], live?: LiveStream)
         break;
       case "notice":
         lines.push(`### ${item.level === "warn" ? "Warning" : "Notice"}`, "", item.text.trim(), "");
+        if (item.detail?.trim()) {
+          lines.push("Details:", "", item.detail.trim(), "");
+        }
         break;
       case "compaction":
         lines.push("### Context Compaction", "");
@@ -1010,6 +1090,7 @@ export default function App() {
   const setRightDockPreviewWidth = useLayoutStore((s) => s.setRightDockPreviewWidth);
   const workspacePreviewActive = useLayoutStore((s) => s.workspacePreviewActive);
   const setWorkspacePreviewActive = useLayoutStore((s) => s.setWorkspacePreviewActive);
+  const attentionChimeEvents = useRef(new Set<string>());
   // Bump dockRefreshKey after each turn so WorkspacePanel/ContextPanel re-fetch
   // workspace changes, git history, and session metadata after AI tool writes.
   useEffect(() => {
@@ -1017,11 +1098,31 @@ export default function App() {
       if (e.kind === "turn_done") {
         setDockRefreshKey((v) => v + 1);
       }
+      if (shouldPlayAttentionChimeForEvent(e, attentionChimeEvents.current)) {
+        playAttentionChime();
+      }
       if (e.kind === "turn_done") {
         if (!e.err) playSuccessChime();
       }
     });
-    return unsub;
+    // Runtime rebuilds (model/effort/settings switch) replace the controller,
+    // whose approval/ask ids restart from "1" — stale dedupe keys would mute
+    // the first prompt after a rebuild. agent:ready fires when a (re)build
+    // completes; clear that tab's keys (or all, for tab-less ready events).
+    const unsubReady = onReady((readyTabId) => {
+      clearAttentionChimeKeys(attentionChimeEvents.current, readyTabId);
+    });
+    // Model/effort/token-mode switches and clear-while-running replace the
+    // controller WITHOUT an agent:ready — they signal runtime:rebuilt instead
+    // (a ready here would trigger a full session reload the UI already did).
+    const unsubRebuilt = onRuntimeRebuilt((rebuiltTabId) => {
+      clearAttentionChimeKeys(attentionChimeEvents.current, rebuiltTabId);
+    });
+    return () => {
+      unsub();
+      unsubReady();
+      unsubRebuilt();
+    };
   }, []);
 
   const [workspacePanelResizing, setWorkspacePanelResizing] = useState(false);
@@ -2266,7 +2367,6 @@ export default function App() {
     if (!rewindState) return transcriptItems;
     return transcriptItems.slice(0, rewindState.boundaryIdx).filter((it) => it.kind !== "compaction");
   }, [transcriptItems, rewindState]);
-
   const latestGuidanceConsumed = useMemo(() => {
     for (let i = state.items.length - 1; i >= 0; i--) {
       const item = state.items[i];
@@ -2593,36 +2693,10 @@ export default function App() {
     enqueueNavigation({ kind: "blank", scope, workspaceRoot: scope === "project" ? workspaceRoot : "" }),
   [enqueueNavigation]);
 
-  useEffect(() => {
-    return onSessionRecovered((event) => {
-      const scope = event.scope === "project" ? "project" : "global";
-      const workspaceRoot = scope === "project" ? event.workspaceRoot || "" : "";
-      setProjectRevision((value) => value + 1);
-      void refreshTabMetas();
-      showToast(t("recovery.toast", { title: event.topicTitle || t("recovery.branch") }), "warn", event.topicId
-        ? {
-            actionLabel: t("recovery.open"),
-            durationMs: 9000,
-            onAction: () => {
-              void enqueueNavigation({
-                kind: "topic",
-                scope,
-                workspaceRoot,
-                topicId: event.topicId || "",
-                sessionPath: event.recoveryPath || "",
-              });
-            },
-          }
-        : { durationMs: 9000 });
-    });
-  }, [enqueueNavigation, refreshTabMetas, showToast, t]);
-
-  useEffect(() => {
-    return onSessionRecoveryFailed((event) => {
-      const key = event.reason === "lease_held" ? "recovery.failedLease" : "recovery.failedUnavailable";
-      showToast(t(key), "error", { durationMs: 9000 });
-    });
-  }, [showToast, t]);
+  useEffect(() => onSessionRecovered(() => {
+    setProjectRevision((value) => value + 1);
+    void refreshTabMetas();
+  }), [refreshTabMetas]);
 
   const handleNewTab = useCallback(async () => {
     closeTransientOverlays();
@@ -2744,6 +2818,19 @@ export default function App() {
           ? cur
           : { ...cur, sessions: cur.sessions.filter((s) => s.path !== path) },
       );
+    },
+    [state.running, deleteSession, refreshHistoryView],
+  );
+  const onDeleteManySessions = useCallback(
+    async (paths: string[]) => {
+      if (state.running) return;
+      const uniquePaths = Array.from(new Set(paths));
+      for (const path of uniquePaths) {
+        // Best effort per path: one locked/missing file must not abandon the
+        // rest of the sweep. The final refresh reconciles whatever happened.
+        await deleteSession(path).catch(() => undefined);
+      }
+      await refreshHistoryView();
     },
     [state.running, deleteSession, refreshHistoryView],
   );
@@ -3435,13 +3522,6 @@ export default function App() {
             <div className="banner banner--error">{t("topbar.startupError", { msg: state.meta.startupErr })}</div>
           )}
 
-          {activeTab?.recovered && !sidebarImDetailConnection && (
-            <div className="banner banner--recovery">
-              <span className="banner__badge">{t("recovery.branch")}</span>
-              <span>{t("recovery.banner")}</span>
-            </div>
-          )}
-
           <UpdateBanner enabled={startupUpdateChecksEnabled === true} />
 
           <main className="main">
@@ -3453,6 +3533,8 @@ export default function App() {
                 onManageAllowlist={() => openBotAllowlistSettings(sidebarImDetailConnection.connectionId)}
                 onOpenSession={() => void openSidebarImConnectionSession(sidebarImDetailConnection)}
               />
+            ) : noticePreviewMockEnabled() ? (
+              <NoticePreviewPanel detailsLabel={t("notice.details")} />
             ) : (
               <Transcript
                 items={displayItems}
@@ -3528,6 +3610,7 @@ export default function App() {
                 onStop={() => {
                   cancel();
                 }}
+                toolApprovalMode={toolApprovalMode}
               />
             )}
             {state.ask && (
@@ -3579,6 +3662,8 @@ export default function App() {
               turnStartAt={state.turnStartAt}
               turnTokens={state.turnTokens}
               retry={state.retry}
+              pendingApprovalLabel={state.approval ? approvalToolLabel(state.approval.tool, t) : null}
+              pendingAsk={state.ask != null}
               transientDismissSignal={transientOverlayDismissSignal}
               sessionKey={composerSessionKey}
               fileRefRefreshKey={composerFileRefRefreshKey}
@@ -3724,6 +3809,7 @@ export default function App() {
             onRestore={onRestoreTrashedSession}
             onPurge={onPurgeTrashedSession}
             onPurgeAll={onPurgeAllTrashedSessions}
+            onDeleteMany={onDeleteManySessions}
             onClose={closeHistory}
           />
         </Suspense>

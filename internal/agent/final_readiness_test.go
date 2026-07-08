@@ -99,6 +99,18 @@ func TestFinalReadinessCheckAuditsIncompleteTodos(t *testing.T) {
 	}
 }
 
+func TestFinalReadinessNoticeTextHidesInternalReason(t *testing.T) {
+	msg := finalReadinessNoticeText()
+	for _, hidden := range []string{"final-answer", "readiness blocked", "todo_write", "latest successful"} {
+		if strings.Contains(strings.ToLower(msg), hidden) {
+			t.Fatalf("finalReadinessNoticeText() = %q, should not expose %q", msg, hidden)
+		}
+	}
+	if !strings.Contains(strings.ToLower(msg), "finish or explain") {
+		t.Fatalf("finalReadinessNoticeText() = %q, want user-facing recovery action", msg)
+	}
+}
+
 func TestFinalReadinessAllowsFinalAfterLoopGuardedToolBlocker(t *testing.T) {
 	todo := evidence.Receipt{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{{Content: "edit", Status: "in_progress"}}}
 	writer := evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Paths: []string{"a.go"}}

@@ -246,6 +246,40 @@ func TestPolicyDecideCompoundBash(t *testing.T) {
 	}
 }
 
+func TestPolicyDecideCompoundBashUsesWriterFallback(t *testing.T) {
+	command := `$file = Get-ChildItem -Path "D:\fixtures\reports" -Filter "*sample*.txt" | Select-Object -First 1; python -c "import sys; f=open(sys.argv[1], 'r', encoding='utf-8'); print(f.read()[:10000]); f.close()" $file.FullName`
+
+	cases := []struct {
+		name string
+		mode string
+		want Decision
+	}{
+		{
+			name: "auto writer fallback allows uncovered compound bash segments",
+			mode: "allow",
+			want: Allow,
+		},
+		{
+			name: "ask writer fallback still prompts for uncovered compound bash segments",
+			mode: "ask",
+			want: Ask,
+		},
+		{
+			name: "deny writer fallback still blocks uncovered compound bash segments",
+			mode: "deny",
+			want: Deny,
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			p := New(tt.mode, nil, nil, nil)
+			if got := p.DecideSubject("bash", false, command); got != tt.want {
+				t.Fatalf("DecideSubject(mode=%q) = %v, want %v", tt.mode, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPolicyDecideCompoundBashPreservesWholeCommandRules(t *testing.T) {
 	subject := `git add . && git commit -m "wip" && git push`
 

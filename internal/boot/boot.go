@@ -44,6 +44,7 @@ import (
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/secrets"
 	"reasonix/internal/skill"
 	"reasonix/internal/tool"
 	"reasonix/internal/tool/builtin"
@@ -146,6 +147,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Arm the credential-protection layers from the user-global [secrets]
+	// section before any tool, hook, or plugin subprocess can spawn. Package
+	// globals are correct here because [secrets] is user-global (project
+	// reasonix.toml cannot override it), so concurrent workspaces agree.
+	secrets.SetRedactToolOutput(cfg.SecretsRedactToolOutput())
+	secrets.SetFilterSubprocessEnv(cfg.Secrets.FilterSubprocessEnv)
+	secrets.SetProtectSensitiveFiles(cfg.Secrets.ProtectSensitiveFiles)
 	modelName := opts.Model
 	if modelName == "" {
 		modelName = cfg.DefaultModel
@@ -182,21 +190,25 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		ReadOnlyCommands: cfg.Agent.PlanModeReadOnlyCommands,
 	}
 	if ignored := planModePolicy.IgnoredAllowedTools(); len(ignored) > 0 {
+		detail := fmt.Sprintf("plan_mode_allowed_tools ignored known blocked entries: %s; this setting only declares extra read-only custom tools and cannot unlock known blocked tools or unsafe bash. For shell exploration, declare concrete read-only prefixes in plan_mode_read_only_commands (for example \"gh issue view\"); use read_only_task/read_only_skill instead of task/run_skill while planning.", strings.Join(ignored, ", "))
 		sink.Emit(event.Event{
-			Kind:  event.Notice,
-			Level: event.LevelWarn,
-			Text:  fmt.Sprintf("plan_mode_allowed_tools ignored known blocked entries: %s; this setting only declares extra read-only custom tools and cannot unlock known blocked tools or unsafe bash. For shell exploration, declare concrete read-only prefixes in plan_mode_read_only_commands (for example \"gh issue view\"); use read_only_task/read_only_skill instead of task/run_skill while planning.", strings.Join(ignored, ", ")),
+			Kind:   event.Notice,
+			Level:  event.LevelWarn,
+			Text:   "Some plan-mode tool settings were ignored.",
+			Detail: detail,
 		})
 	}
 	if ignored := planModePolicy.IgnoredReadOnlyCommands(); len(ignored) > 0 {
+		detail := fmt.Sprintf("plan_mode_read_only_commands ignored unsafe entries: %s; declare concrete read-only commands such as \"gh issue view\", not shell interpreters, overly broad prefixes, malformed prefixes, or writer-capable command verbs", strings.Join(ignored, ", "))
 		sink.Emit(event.Event{
-			Kind:  event.Notice,
-			Level: event.LevelWarn,
-			Text:  fmt.Sprintf("plan_mode_read_only_commands ignored unsafe entries: %s; declare concrete read-only commands such as \"gh issue view\", not shell interpreters, overly broad prefixes, malformed prefixes, or writer-capable command verbs", strings.Join(ignored, ", ")),
+			Kind:   event.Notice,
+			Level:  event.LevelWarn,
+			Text:   "Some plan-mode command settings were ignored.",
+			Detail: detail,
 		})
 	}
 	if migErr != nil {
-		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "config migration from ~/.reasonix failed: " + migErr.Error()})
+		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "Config migration did not complete.", Detail: "config migration from ~/.reasonix failed: " + migErr.Error()})
 	} else if migrated != nil {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: migrated.Notice()})
 	}
@@ -207,7 +219,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// (RequireKey is false so the UI stays reachable) and then fail silently on the
 	// first request, showing as an empty/dead model. Surface the cause up front.
 	if !opts.RequireKey && entry.RequiresAPIKey() && entry.APIKey() == "" {
-		sink.Emit(event.Event{Kind: event.Notice, Text: fmt.Sprintf("model %q is selected but its API key %s is not set — requests will fail until you set it", modelName, entry.APIKeyEnv)})
+		sink.Emit(event.Event{Kind: event.Notice, Text: "Selected model is missing its API key.", Detail: fmt.Sprintf("model %q is selected but its API key %s is not set — requests will fail until you set it", modelName, entry.APIKeyEnv)})
 	}
 	jm := jobs.NewManager(sink, jobs.WithStalledWarningAfter(time.Duration(cfg.BackgroundJobStalledWarningSeconds())*time.Second))
 	sessionDir := opts.SessionDir
@@ -435,7 +447,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 						}
 					}
 					sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
-						Text: fmt.Sprintf("mcp %s: %v", s.Name, err)})
+						Text: "An MCP server failed to start.", Detail: fmt.Sprintf("mcp %s: %v", s.Name, err)})
 					continue
 				}
 				for _, t := range tools {
@@ -452,8 +464,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			// controller's session-scoped PluginCtx — so the auxiliary surfaces
 			// keep streaming in after Start returns without holding up the agent.
 			go host.StartPhaseB(ctx, sink)
-			if text, ok := MCPStartupNotice(host.Failures()); ok {
-				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: text})
+			if text, detail, ok := MCPStartupNotice(host.Failures()); ok {
+				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: text, Detail: detail})
 			}
 		}
 	}
@@ -1138,12 +1150,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		ge, ok := cfg.ResolveModel(guardianModel)
 		if !ok {
 			slog.Warn("guardian model is not a configured provider — guardian disabled", "model", guardianModel)
-			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: fmt.Sprintf("guardian_model %q not found — guardian disabled", guardianModel)})
+			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "Guardian was disabled because its model was not found.", Detail: fmt.Sprintf("guardian_model %q not found — guardian disabled", guardianModel)})
 		} else {
 			pProv, err := NewProviderWithProxy(ge, proxySpec)
 			if err != nil {
 				slog.Warn("guardian provider construction failed — guardian disabled", "model", guardianModel, "err", err)
-				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: fmt.Sprintf("guardian construction failed: %v — guardian disabled", err)})
+				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "Guardian was disabled because it could not start.", Detail: fmt.Sprintf("guardian construction failed: %v — guardian disabled", err)})
 			} else {
 				guardianReg := agent.FilterReadOnlyRegistry(reg, agent.SubagentMetaTools()...)
 				ctrlOpts.Guardian = guardian.NewSession(pProv, guardianReg, guardian.PolicyPrompt(), guardianModel, cfg.Agent.GuardianTemperature, ge.Price, sink)
@@ -1739,23 +1751,31 @@ func autoShellPrefer(prefer string) bool {
 
 // MCPStartupNotice formats the warning shown when configured MCP servers failed
 // to connect, naming the first few; ok is false when none failed.
-func MCPStartupNotice(failures []plugin.Failure) (text string, ok bool) {
+func MCPStartupNotice(failures []plugin.Failure) (text, detail string, ok bool) {
 	if len(failures) == 0 {
-		return "", false
+		return "", "", false
 	}
 	names := make([]string, 0, min(len(failures), 3))
+	details := make([]string, 0, len(failures))
 	for i, f := range failures {
 		if i >= 3 {
-			break
+			continue
 		}
 		names = append(names, f.Name)
+	}
+	for _, f := range failures {
+		line := f.Name
+		if strings.TrimSpace(f.Error) != "" {
+			line += ": " + strings.TrimSpace(f.Error)
+		}
+		details = append(details, line)
 	}
 	more := ""
 	if len(failures) > len(names) {
 		more = fmt.Sprintf(" (+%d more)", len(failures)-len(names))
 	}
-	return fmt.Sprintf("%d MCP server(s) failed to start: %s%s — run /mcp for details",
-		len(failures), strings.Join(names, ", "), more), true
+	return "Some MCP servers failed to start; run /mcp for details.", fmt.Sprintf("%d MCP server(s) failed to start: %s%s\n%s",
+		len(failures), strings.Join(names, ", "), more, strings.Join(details, "\n")), true
 }
 
 // LSPSpecs returns the language → server map: the built-in defaults overlaid with

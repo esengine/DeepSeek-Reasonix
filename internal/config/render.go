@@ -618,6 +618,30 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		b.WriteString("\n")
 	}
 
+	// [secrets] is user/global only: LoadForRoot discards project values, so
+	// the project scope never renders it. Rendering it here is what lets a
+	// user's saved toggles survive config rewrites (WriteFile re-renders the
+	// whole file from the struct).
+	if scope != RenderScopeProject {
+		b.WriteString("[secrets]   # credential protection; user/global only, ./reasonix.toml cannot override\n")
+		if c.Secrets.RedactToolOutput != nil {
+			fmt.Fprintf(&b, "redact_tool_output = %v   # mask secret-shaped values in tool output before model context/UI; transcripts and job artifacts are always redacted on disk\n", *c.Secrets.RedactToolOutput)
+		} else {
+			b.WriteString("# redact_tool_output = true   # default on; set false only if masking breaks fixture-heavy edit workflows\n")
+		}
+		if c.Secrets.FilterSubprocessEnv {
+			b.WriteString("filter_subprocess_env = true   # strip credential-named env vars from tool/hook/LSP/MCP subprocesses\n")
+		} else {
+			b.WriteString("# filter_subprocess_env = false   # opt-in; stripping tokens breaks gh, HTTPS git push, npm publish\n")
+		}
+		if c.Secrets.ProtectSensitiveFiles {
+			b.WriteString("protect_sensitive_files = true   # hide .env/.git-credentials/key files/~/.ssh from read tools\n")
+		} else {
+			b.WriteString("# protect_sensitive_files = false   # opt-in; values are already masked by redaction even when files stay readable\n")
+		}
+		b.WriteString("\n")
+	}
+
 	b.WriteString("# External MCP servers. type: \"stdio\" (default, a subprocess) | \"http\" | \"sse\".\n")
 	b.WriteString("# ${VAR} / ${VAR:-default} are expanded from the environment in command/args/env/url/headers.\n")
 	if len(c.Plugins) == 0 {

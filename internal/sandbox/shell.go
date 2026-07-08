@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"reasonix/internal/proc"
+	"reasonix/internal/secrets"
 )
 
 // psUTF8Prologue forces PowerShell to emit UTF-8 instead of the host's OEM code
@@ -166,6 +167,7 @@ func probeBash(path string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, "-c", "true")
+	cmd.Env = secrets.ProcessEnv()
 	proc.HideWindow(cmd)
 	return cmd.Run() == nil
 }

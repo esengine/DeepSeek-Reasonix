@@ -161,8 +161,8 @@ func TestSlashArgItems(t *testing.T) {
 	}
 	// /memory-v5
 	items, _ = SlashArgItems("/memory-v5 ", data)
-	if !has(items, "status") || !has(items, "off") || !has(items, "observe") || !has(items, "compact") || !has(items, "on") {
-		t.Errorf("/memory-v5 should offer status/off/observe/compact/on; got %v", labelsOf(items))
+	if !has(items, "status") || !has(items, "off") || !has(items, "observe") || !has(items, "compact") || !has(items, "on") || !has(items, "learnings") {
+		t.Errorf("/memory-v5 should offer status/off/observe/compact/on/learnings; got %v", labelsOf(items))
 	}
 	// /theme
 	items, _ = SlashArgItems("/theme ", data)
@@ -275,6 +275,27 @@ func TestManagementMemoryV5WritesUserConfig(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(notices, "\n"), "memory-v5 set to off") {
 		t.Fatalf("missing memory-v5 notice: %v", notices)
+	}
+}
+
+func TestManagementMemoryV5LearningsNotice(t *testing.T) {
+	isolateControlConfigHome(t)
+	var notices []string
+	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice {
+			notices = append(notices, e.Text)
+		}
+	})})
+
+	if !c.managementNotice("/memory-v5 learnings") {
+		t.Fatal("/memory-v5 learnings was not handled")
+	}
+	joined := strings.Join(notices, "\n")
+	// A fresh controller has no learned state; either the no-state or the
+	// no-directory notice is acceptable, but it must not fall through to the
+	// usage error.
+	if !strings.Contains(joined, "memory-v5: no") {
+		t.Fatalf("missing learnings notice: %v", notices)
 	}
 }
 

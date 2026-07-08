@@ -42,6 +42,19 @@ function flushPromises(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function installCanvasMock(win: Window) {
+  Object.defineProperty(win.HTMLCanvasElement.prototype, "getContext", {
+    configurable: true,
+    value(type: string) {
+      if (type !== "2d") return null;
+      return {
+        font: "",
+        measureText: () => ({ width: 0 }),
+      } as unknown as CanvasRenderingContext2D;
+    },
+  });
+}
+
 async function waitFor(label: string, predicate: () => boolean) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     await act(async () => {
@@ -172,6 +185,7 @@ const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body>
   pretendToBeVisual: true,
   url: "http://localhost/",
 });
+installCanvasMock(dom.window as unknown as Window);
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 globalThis.window = dom.window as unknown as Window & typeof globalThis;
 globalThis.document = dom.window.document;

@@ -21,6 +21,7 @@ import (
 	"unsafe"
 
 	"reasonix/internal/proc"
+	"reasonix/internal/secrets"
 
 	"golang.org/x/sys/windows"
 )
@@ -1234,7 +1235,7 @@ func windowsSandboxTempRoot(spec Spec) (string, func(), error) {
 
 func windowsSandboxEnv(spec Spec, tempRoot string, env []string) []string {
 	if env == nil {
-		env = os.Environ()
+		env = secrets.ProcessEnv()
 	}
 	env = append([]string(nil), env...)
 	if tempRoot == "" {

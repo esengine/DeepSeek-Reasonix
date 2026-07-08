@@ -2137,6 +2137,7 @@ func TestDeferredRebuildRetryAppliesAfterLeaseRelease(t *testing.T) {
 		sink:        &tabEventSink{tabID: "tab_deferred_retry", app: app},
 		disabledMCP: map[string]ServerView{},
 	}
+	installNoopRuntimeEvents(app, tab.sink)
 	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
 	app.tabOrder = []string{tab.ID}
 	app.activeTabID = tab.ID
@@ -2247,6 +2248,7 @@ func TestDeferredRebuildWaitsForTabToBecomeActive(t *testing.T) {
 		sink:        &tabEventSink{tabID: "tab_pending", app: app},
 		disabledMCP: map[string]ServerView{},
 	}
+	installNoopRuntimeEvents(app, tab.sink)
 	other := &WorkspaceTab{
 		ID:          "tab_other",
 		Scope:       "global",

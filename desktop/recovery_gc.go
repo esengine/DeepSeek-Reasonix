@@ -86,10 +86,11 @@ func recoveryGCDirs() []string {
 	seen := map[string]bool{}
 	var dirs []string
 	add := func(dir string) {
-		if dir == "" || seen[dir] {
+		key := projectRootKey(dir)
+		if dir == "" || seen[key] {
 			return
 		}
-		seen[dir] = true
+		seen[key] = true
 		dirs = append(dirs, dir)
 	}
 	add(desktopSessionDir(globalWorkspaceRoot()))

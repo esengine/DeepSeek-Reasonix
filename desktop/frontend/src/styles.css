@@ -2665,27 +2665,6 @@ a[href] {
   color: var(--ok);
   border-bottom: 1px solid var(--border-soft);
 }
-.banner--recovery {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: color-mix(in srgb, var(--warn) 9%, var(--bg-elev));
-  color: color-mix(in srgb, var(--warn) 72%, var(--fg));
-  border-bottom: 1px solid color-mix(in srgb, var(--warn) 22%, var(--border-soft));
-}
-.banner__badge {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  height: 18px;
-  padding: 0 6px;
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--warn) 13%, transparent);
-  color: color-mix(in srgb, var(--warn) 84%, var(--fg));
-  font-size: 11px;
-  font-weight: 650;
-  line-height: 1;
-}
 .banner--update {
   display: flex;
   align-items: center;
@@ -3309,6 +3288,20 @@ a[href] {
   flex: 1;
   min-width: 0;
   word-break: break-word;
+}
+.notice-line__details {
+  margin-top: 4px;
+  color: var(--fg-faint);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.notice-line__details summary {
+  cursor: pointer;
+  user-select: none;
+}
+.notice-line__details div {
+  margin-top: 4px;
+  white-space: pre-wrap;
 }
 
 /* ── ReadOnly batch (parent fold for read/search tools) ────────────── */
@@ -5283,6 +5276,46 @@ body > .mermaid-diagram--fullscreen {
   font-size: 12px;
   white-space: pre-wrap;
 }
+.tool__err--compact {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+.tool__err-summary {
+  min-width: 0;
+}
+.tool__err-toggle {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  opacity: 0.82;
+}
+.tool__err-toggle:hover {
+  opacity: 1;
+}
+.tool__err-toggle-icon {
+  flex: 0 0 auto;
+  transition: transform 120ms ease;
+}
+.tool__err-toggle-icon--open {
+  transform: rotate(90deg);
+}
+.tool__err-details {
+  max-height: 240px;
+  overflow: auto;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--err) 18%, transparent);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .tag {
   font-size: 10px;
   text-transform: uppercase;
@@ -5431,12 +5464,58 @@ body > .mermaid-diagram--fullscreen {
   transition: border-color 0.12s;
 }
 .composer-card--resized {
-  height: var(--composer-height);
+  /* --composer-height is always the user's logical height; the run strip's
+     reservation lives in this calc so the live resize drag (which writes the
+     raw logical height) and the React render path can never disagree. */
+  height: calc(var(--composer-height) + var(--composer-run-strip-reserved, 0px));
   display: flex;
   flex-direction: column;
 }
 .composer-card:focus-within {
   border-color: var(--fg-faint);
+}
+/* Run strip: an in-flow bar at the top of the card. For user-resized cards
+   (fixed --composer-height), the JS adds the strip's reserved height so the
+   meta row stays fully visible. For auto-height cards the card grows
+   naturally. */
+.composer-run-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding: 4px 14px 0;
+  color: var(--accent);
+  font-family: var(--sans);
+  font-size: 12px;
+}
+.composer-card--waiting .composer-run-strip {
+  /* inherited from the card border tint; no extra rule needed */
+}
+.composer-run-strip__dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.composer-run-strip__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.composer-run-strip--waiting {
+  color: color-mix(in srgb, var(--warn) 74%, var(--fg));
+}
+.composer-run-strip--waiting .composer-run-strip__dot {
+  animation: none;
+}
+/* Attention handoff: while a prompt card is waiting on the user, the card
+   drops the accent running tint and takes a calm warn edge instead. */
+.composer-card--waiting {
+  border-color: color-mix(in srgb, var(--warn) 30%, var(--border));
 }
 .composer-resize-handle {
   --wails-draggable: no-drag;
@@ -5690,6 +5769,22 @@ body > .mermaid-diagram--fullscreen {
   color: var(--control-disabled-fg);
   cursor: default;
   transform: none;
+}
+.composer__btn--stop {
+  margin-right: 6px;
+  border: 1px solid color-mix(in srgb, var(--err) 42%, transparent);
+  background: color-mix(in srgb, var(--err) 14%, var(--bg-elev-2));
+  color: var(--err);
+}
+.composer__btn--stop:hover,
+.composer__btn--stop:focus-visible {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--err) 38%, var(--bg-elev-2));
+  border-color: color-mix(in srgb, var(--err) 70%, var(--border));
+}
+.composer__btn--stop:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 .composer-meta {
   display: flex;
@@ -7208,6 +7303,16 @@ body > .mermaid-diagram--fullscreen {
   margin-top: 8px;
   flex-wrap: wrap;
 }
+.approval-mode-hint {
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--warning, #f59e0b) 30%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning, #f59e0b) 8%, var(--bg-soft));
+  color: color-mix(in srgb, var(--warning, #f59e0b) 62%, var(--fg));
+  font-size: 12px;
+  line-height: 1.45;
+}
 .approval-reason {
   margin: 0;
   padding: 8px 10px;
@@ -7389,14 +7494,14 @@ body > .mermaid-diagram--fullscreen {
 }
 .prompt-shelf--ask .prompt-shelf__actions {
   display: grid;
-  grid-template-columns: 1fr;
-  max-height: 154px;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  max-height: min(220px, 30vh);
   overflow: auto;
   padding-right: 2px;
 }
 .prompt-shelf--ask .prompt-action {
   width: 100%;
-  min-height: 42px;
+  min-height: 36px;
   align-items: center;
   border-radius: 8px;
   padding: 5px 8px;
@@ -7411,6 +7516,69 @@ body > .mermaid-diagram--fullscreen {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.prompt-shelf--ask .prompt-shelf__quick-actions {
+  justify-content: flex-end;
+  gap: 6px;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 6px;
+  margin-top: 2px;
+}
+.prompt-shelf--ask .prompt-shelf__quick-actions > .prompt-action {
+  width: auto;
+  min-height: 28px;
+  padding: 4px 12px;
+  border-radius: 999px;
+}
+.prompt-shelf__footnote {
+  min-width: 0;
+}
+.ask-shelf__detail {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 2px;
+  color: var(--fg-dim);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.ask-shelf__detail-label {
+  flex: 0 0 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-weight: 620;
+}
+.ask-shelf__detail-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* Tool-approval consequence preview: same quick-pick pattern as the ask
+   detail row — pill buttons stay compact, the row spells out what the
+   hovered/selected action will do. */
+.approval-consequence {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 2px;
+  color: var(--fg-dim);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.approval-consequence__label {
+  flex: 0 0 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-weight: 620;
+}
+.approval-consequence__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .prompt-shelf--ask .ask-shelf__custom-row {
   margin-top: 0;
@@ -17291,21 +17459,6 @@ body > .mermaid-diagram--fullscreen {
   padding-left: 18px;
 }
 
-/* ── composer run status ──────────────────────────────────────────────────── */
-.composer-toolbar {
-  --wails-draggable: no-drag;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  max-width: var(--maxw);
-  margin: 0 auto 8px;
-}
-
-.composer-toolbar--status-only {
-  justify-content: flex-end;
-}
-
 .composer-guidance-shelf {
   --wails-draggable: no-drag;
   display: grid;
@@ -17460,79 +17613,6 @@ body > .mermaid-diagram--fullscreen {
   .composer-guidance-item {
     padding-left: 7px;
   }
-}
-
-.composer-runstatus {
-  --wails-draggable: no-drag;
-  flex: 0 1 auto;
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  height: 34px;
-  padding: 0 5px 0 11px;
-  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--accent) 9%, var(--bg-elev));
-  color: var(--accent);
-  font-family: var(--sans);
-  font-size: 12px;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
-}
-
-.composer-runstatus__dot {
-  flex: 0 0 auto;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
-.composer-runstatus__text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.composer-runstatus__stop {
-  --wails-draggable: no-drag;
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 9px;
-  border: 1px solid color-mix(in srgb, var(--err) 42%, transparent);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--err) 14%, var(--bg-elev-2));
-  color: var(--err);
-  font: inherit;
-  font-weight: 620;
-}
-
-.composer-runstatus__stop:hover,
-.composer-runstatus__stop:focus-visible {
-  color: var(--fg);
-  background: color-mix(in srgb, var(--err) 38%, var(--bg-elev-2));
-  border-color: color-mix(in srgb, var(--err) 70%, var(--border));
-}
-.composer-runstatus__stop:disabled {
-  cursor: not-allowed;
-  opacity: 0.48;
-  color: var(--fg-faint);
-  background: var(--button-bg);
-  border-color: var(--border-soft);
-}
-.composer-runstatus__stop:disabled:hover,
-.composer-runstatus__stop:disabled:focus-visible {
-  color: var(--fg-faint);
-  background: var(--button-bg);
-  border-color: var(--border-soft);
 }
 
 .composer-context {
@@ -22767,10 +22847,6 @@ body > .mermaid-diagram--fullscreen {
   padding: 5px 10px 10px 30px;
 }
 
-.composer-toolbar {
-  margin-bottom: 8px;
-}
-
 .composer-modebar {
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg-elev-2) 72%, transparent);
@@ -26845,41 +26921,29 @@ body > .mermaid-diagram--fullscreen {
   margin: 0 auto;
 }
 
-.app--creation .composer-toolbar,
-:root[data-theme-style] .app--creation .composer-toolbar {
-  max-width: 880px;
-  margin: 0 auto 8px;
-}
-
-.app--creation .composer-toolbar--status-only,
-:root[data-theme-style] .app--creation .composer-toolbar--status-only {
-  justify-content: center;
-}
-
-.app--creation .composer-runstatus,
-:root[data-theme-style] .app--creation .composer-runstatus {
-  max-width: min(100%, 340px);
-  height: 28px;
-  gap: 7px;
-  padding: 0 4px 0 10px;
-  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-elev) 24%, transparent);
+.app--creation .composer-run-strip,
+:root[data-theme-style] .app--creation .composer-run-strip {
   color: color-mix(in srgb, var(--accent) 88%, var(--fg-muted));
   font-size: 11.5px;
-  box-shadow: none;
 }
 
-.app--creation .composer-runstatus__dot,
-:root[data-theme-style] .app--creation .composer-runstatus__dot {
+.app--creation .composer-run-strip__dot,
+:root[data-theme-style] .app--creation .composer-run-strip__dot {
   width: 5px;
   height: 5px;
   background: var(--accent);
   box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 48%, transparent);
-  animation: creation-runstatus-dot-breathe 1.65s ease-in-out infinite;
+  animation: creation-run-strip-dot-breathe 1.65s ease-in-out infinite;
 }
 
-@keyframes creation-runstatus-dot-breathe {
+.app--creation .composer-run-strip--waiting .composer-run-strip__dot,
+:root[data-theme-style] .app--creation .composer-run-strip--waiting .composer-run-strip__dot {
+  animation: none;
+  background: currentColor;
+  box-shadow: none;
+}
+
+@keyframes creation-run-strip-dot-breathe {
   0%, 100% {
     opacity: 0.42;
     box-shadow: 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
@@ -26891,46 +26955,22 @@ body > .mermaid-diagram--fullscreen {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .app--creation .composer-runstatus__dot,
-  :root[data-theme-style] .app--creation .composer-runstatus__dot {
+  .app--creation .composer-run-strip__dot,
+  :root[data-theme-style] .app--creation .composer-run-strip__dot {
     animation: none;
     opacity: 0.78;
   }
 }
 
-.app--creation .composer-runstatus__text,
-:root[data-theme-style] .app--creation .composer-runstatus__text {
+.app--creation .composer-run-strip__text,
+:root[data-theme-style] .app--creation .composer-run-strip__text {
   color: color-mix(in srgb, var(--fg-muted) 72%, var(--accent));
   font-weight: 540;
 }
 
-.app--creation .composer-runstatus__stop,
-:root[data-theme-style] .app--creation .composer-runstatus__stop {
-  height: 22px;
-  gap: 4px;
-  padding: 0 8px;
-  border-color: color-mix(in srgb, var(--err) 24%, transparent);
-  border-radius: 999px;
-  background: transparent;
-  color: color-mix(in srgb, var(--err) 76%, var(--fg-muted));
-  font-size: 11.5px;
-  font-weight: 560;
-}
-
-.app--creation .composer-runstatus__stop svg,
-:root[data-theme-style] .app--creation .composer-runstatus__stop svg {
-  width: 8px;
-  height: 8px;
-  opacity: 0.78;
-}
-
-.app--creation .composer-runstatus__stop:hover,
-.app--creation .composer-runstatus__stop:focus-visible,
-:root[data-theme-style] .app--creation .composer-runstatus__stop:hover,
-:root[data-theme-style] .app--creation .composer-runstatus__stop:focus-visible {
-  border-color: color-mix(in srgb, var(--err) 42%, transparent);
-  background: color-mix(in srgb, var(--err) 9%, transparent);
-  color: color-mix(in srgb, var(--err) 90%, var(--fg));
+.app--creation .composer-run-strip--waiting .composer-run-strip__text,
+:root[data-theme-style] .app--creation .composer-run-strip--waiting .composer-run-strip__text {
+  color: color-mix(in srgb, var(--warn) 64%, var(--fg-muted));
 }
 
 .app--creation .composer-card,

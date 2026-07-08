@@ -104,3 +104,28 @@ func TestDoctorSessionCommandOutEqualsForm(t *testing.T) {
 		t.Fatalf("empty --out= rc = %d, want usage error 2", rc)
 	}
 }
+
+func TestDoctorRedactSessionsCommand(t *testing.T) {
+	dir := t.TempDir()
+	const secret = "sk-real-secret-value-123456"
+	path := filepath.Join(dir, "abc.jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"tool","content":"DEEPSEEK_API_KEY=`+secret+`"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		if rc := doctorCommand([]string{"redact-sessions", "--dir", dir}, "test-version"); rc != 0 {
+			t.Fatalf("doctor redact-sessions rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, "session secret cleanup redacted 1/1 files") {
+		t.Fatalf("unexpected output:\n%s", out)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), secret) {
+		t.Fatalf("doctor redact-sessions leaked secret:\n%s", data)
+	}
+}

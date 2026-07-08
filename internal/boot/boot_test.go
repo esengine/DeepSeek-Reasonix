@@ -1985,12 +1985,15 @@ model = "x"
 	defer ctrl.Close()
 
 	for _, notice := range notices {
-		if notice.Level == event.LevelWarn && strings.Contains(notice.Text, "plan_mode_allowed_tools") && strings.Contains(notice.Text, "bash") {
-			if strings.Contains(notice.Text, "custom_reader") {
-				t.Fatalf("warning should name ignored entries only, got %q", notice.Text)
+		if notice.Level == event.LevelWarn && strings.Contains(notice.Detail, "plan_mode_allowed_tools") && strings.Contains(notice.Detail, "bash") {
+			if notice.Text != "Some plan-mode tool settings were ignored." {
+				t.Fatalf("warning text = %q, want short user-facing text", notice.Text)
 			}
-			if !strings.Contains(notice.Text, "plan_mode_read_only_commands") || !strings.Contains(notice.Text, "read_only_task/read_only_skill") {
-				t.Fatalf("warning should suggest plan-mode migration paths, got %q", notice.Text)
+			if strings.Contains(notice.Detail, "custom_reader") {
+				t.Fatalf("warning should name ignored entries only, got %q", notice.Detail)
+			}
+			if !strings.Contains(notice.Detail, "plan_mode_read_only_commands") || !strings.Contains(notice.Detail, "read_only_task/read_only_skill") {
+				t.Fatalf("warning should suggest plan-mode migration paths, got %q", notice.Detail)
 			}
 			return
 		}
@@ -2033,10 +2036,13 @@ model = "x"
 	defer ctrl.Close()
 
 	for _, notice := range notices {
-		if notice.Level == event.LevelWarn && strings.Contains(notice.Text, "plan_mode_read_only_commands") && strings.Contains(notice.Text, "bash") {
-			ignoredList := strings.TrimSpace(strings.SplitN(strings.TrimPrefix(notice.Text, "plan_mode_read_only_commands ignored unsafe entries:"), ";", 2)[0])
+		if notice.Level == event.LevelWarn && strings.Contains(notice.Detail, "plan_mode_read_only_commands") && strings.Contains(notice.Detail, "bash") {
+			if notice.Text != "Some plan-mode command settings were ignored." {
+				t.Fatalf("warning text = %q, want short user-facing text", notice.Text)
+			}
+			ignoredList := strings.TrimSpace(strings.SplitN(strings.TrimPrefix(notice.Detail, "plan_mode_read_only_commands ignored unsafe entries:"), ";", 2)[0])
 			if ignoredList != "bash" {
-				t.Fatalf("warning should name ignored command prefixes only, got %q from %q", ignoredList, notice.Text)
+				t.Fatalf("warning should name ignored command prefixes only, got %q from %q", ignoredList, notice.Detail)
 			}
 			return
 		}

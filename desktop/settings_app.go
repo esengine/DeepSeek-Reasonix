@@ -1563,10 +1563,14 @@ func (a *App) rebuildSettingLocked(setting string) error {
 	})
 	if err != nil {
 		if oldCtrl == nil {
+			leaseHeld := false
 			a.mu.Lock()
-			tab.StartupErr = err.Error()
+			leaseHeld = setTabStartupError(tab, err)
 			tab.Ready = true
 			a.mu.Unlock()
+			if leaseHeld {
+				a.scheduleDeferredStartupBuild(tab.ID)
+			}
 			a.emitReady(a.ctx)
 		}
 		return err
@@ -1601,7 +1605,7 @@ func (a *App) rebuildSettingLocked(setting string) error {
 	tab.Ctrl = ctrl
 	tab.model = model
 	tab.Label = ctrl.Label()
-	tab.StartupErr = ""
+	clearTabStartupError(tab)
 	tab.Ready = true
 	// Supersede any in-flight startup build: it would otherwise finish later,
 	// pass its generation check, and overwrite the controller just installed.
@@ -2379,7 +2383,7 @@ func (a *App) removeBuiltInProviderAccessAndRetargetTabs(name string) error {
 		a.supersedeTabBuildLocked(tab)
 		tab.model = fallbackRef
 		tab.Label = fallbackRef
-		tab.StartupErr = ""
+		clearTabStartupError(tab)
 		tab.Ready = a.ctx == nil
 		if a.ctx != nil {
 			rebuildTabs = append(rebuildTabs, tab)
@@ -2498,7 +2502,7 @@ func (a *App) deleteProviderAndRetargetTabs(name string) error {
 		a.supersedeTabBuildLocked(tab)
 		tab.model = fallbackRef
 		tab.Label = fallbackRef
-		tab.StartupErr = ""
+		clearTabStartupError(tab)
 		tab.Ready = a.ctx == nil
 		if a.ctx != nil {
 			rebuildTabs = append(rebuildTabs, tab)

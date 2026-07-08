@@ -32,6 +32,18 @@ func testAppWithOrderedTabs(t *testing.T, active string, ids ...string) *App {
 	return &App{tabs: tabs, tabOrder: append([]string(nil), ids...), activeTabID: active}
 }
 
+func installNoopRuntimeEvents(app *App, sinks ...*tabEventSink) {
+	emit := func(context.Context, string, ...interface{}) {}
+	if app != nil {
+		app.runtimeEvents.emit = emit
+	}
+	for _, sink := range sinks {
+		if sink != nil {
+			sink.runtimeEvents.emit = emit
+		}
+	}
+}
+
 func tabIDs(tabs []TabMeta) []string {
 	ids := make([]string, 0, len(tabs))
 	for _, tab := range tabs {
@@ -918,6 +930,142 @@ func TestBuildTabControllerBlocksWhenSessionLeaseHeld(t *testing.T) {
 	if strings.Contains(tab.StartupErr, agent.ErrSessionLeaseHeld.Error()) ||
 		strings.Contains(tab.StartupErr, path) {
 		t.Fatalf("startup error leaked raw lease details: %q", tab.StartupErr)
+	}
+}
+
+func TestDeferredStartupRetryBuildsAfterLeaseRelease(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	prevInterval := deferredRebuildRetryInterval
+	deferredRebuildRetryInterval = 20 * time.Millisecond
+	t.Cleanup(func() { deferredRebuildRetryInterval = prevInterval })
+
+	dir := desktopSessionDir(globalTabWorkspaceRoot())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := filepath.Join(dir, "startup-retry.jsonl")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("write placeholder session: %v", err)
+	}
+	lease, err := agent.TryAcquireSessionLease(path)
+	if err != nil {
+		t.Fatalf("TryAcquireSessionLease: %v", err)
+	}
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			lease.Release()
+		}
+	})
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	app.enableDeferredRebuildRetry()
+	t.Cleanup(app.stopDeferredRebuildRetry)
+	tab := app.createTabEntryWithID("global", globalTabWorkspaceRoot(), "", "startup_retry")
+	tab.SessionPath = path
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	installNoopRuntimeEvents(app, tab.sink)
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	t.Cleanup(func() {
+		if ctrl := app.controllerForTab(tab); ctrl != nil {
+			ctrl.Close()
+		}
+		tab.releaseSessionLease()
+	})
+
+	app.buildTabController(tab)
+	if tab.Ctrl != nil {
+		t.Fatalf("controller = %T, want nil while external lease is held", tab.Ctrl)
+	}
+	if !tab.StartupErrLeaseHeld {
+		t.Fatalf("startup retry flag = false, startup err = %q", tab.StartupErr)
+	}
+	if !app.deferredRebuildPending(tab.ID) {
+		t.Fatal("startup retry was not scheduled while the lease was held")
+	}
+
+	lease.Release()
+	released = true
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if !app.deferredRebuildPending(tab.ID) && app.controllerForTab(tab) != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if app.deferredRebuildPending(tab.ID) {
+		t.Fatal("startup retry is still pending after the lease was released")
+	}
+	if ctrl := app.controllerForTab(tab); ctrl == nil {
+		t.Fatal("controller was not rebuilt after the lease was released")
+	}
+	if tab.StartupErr != "" || tab.StartupErrLeaseHeld {
+		t.Fatalf("startup error after retry = %q retryable=%v, want cleared", tab.StartupErr, tab.StartupErrLeaseHeld)
+	}
+}
+
+func TestTabAndCtrlByIDRecoversStartupLeaseBeforeAction(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := desktopSessionDir(globalTabWorkspaceRoot())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := filepath.Join(dir, "startup-before-action.jsonl")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("write placeholder session: %v", err)
+	}
+	lease, err := agent.TryAcquireSessionLease(path)
+	if err != nil {
+		t.Fatalf("TryAcquireSessionLease: %v", err)
+	}
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			lease.Release()
+		}
+	})
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	tab := app.createTabEntryWithID("global", globalTabWorkspaceRoot(), "", "startup_action")
+	tab.SessionPath = path
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	installNoopRuntimeEvents(app, tab.sink)
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	t.Cleanup(func() {
+		if ctrl := app.controllerForTab(tab); ctrl != nil {
+			ctrl.Close()
+		}
+		tab.releaseSessionLease()
+	})
+
+	app.buildTabController(tab)
+	if !tab.StartupErrLeaseHeld {
+		t.Fatalf("startup retry flag = false, startup err = %q", tab.StartupErr)
+	}
+	lease.Release()
+	released = true
+
+	gotTab, ctrl := app.tabAndCtrlByID(tab.ID)
+	if gotTab != tab {
+		t.Fatalf("tabAndCtrlByID tab = %p, want %p", gotTab, tab)
+	}
+	if ctrl == nil {
+		t.Fatal("tabAndCtrlByID did not rebuild the controller before returning")
+	}
+	if app.deferredRebuildPending(tab.ID) {
+		t.Fatal("startup retry remained pending after synchronous recovery")
+	}
+	if tab.StartupErr != "" || tab.StartupErrLeaseHeld {
+		t.Fatalf("startup error after synchronous recovery = %q retryable=%v, want cleared", tab.StartupErr, tab.StartupErrLeaseHeld)
 	}
 }
 

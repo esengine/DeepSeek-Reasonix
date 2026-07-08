@@ -111,6 +111,29 @@ console.log("\nask card layout");
   eq(computed.overflowWrap, "anywhere", "long unspaced ask questions can break within the shelf");
   ok(card.getAttribute("role") === "dialog", "ask prompt shelf keeps dialog semantics");
 
+  // Detail preview row: shows the first described option by default, follows
+  // hover, and each option carries a native-title fallback for truncation.
+  const detail = document.querySelector(".ask-shelf__detail") as HTMLElement | null;
+  if (!detail) throw new Error("ask detail preview row did not render");
+  eq(
+    detail.querySelector(".ask-shelf__detail-text")?.textContent,
+    ask.questions[0].options[0].description,
+    "detail row previews the first described option by default",
+  );
+
+  const optionButtons = [...document.querySelectorAll(".prompt-shelf__actions .prompt-action")] as HTMLElement[];
+  eq(optionButtons[1]?.getAttribute("title"), ask.questions[0].options[1].description, "options carry a native title fallback");
+
+  await act(async () => {
+    optionButtons[1].dispatchEvent(new window.MouseEvent("mouseover", { bubbles: true }));
+    await flushTimers();
+  });
+  eq(
+    document.querySelector(".ask-shelf__detail-text")?.textContent,
+    ask.questions[0].options[1].description,
+    "detail row follows the hovered option",
+  );
+
   await act(async () => {
     root.unmount();
   });

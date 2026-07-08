@@ -14,6 +14,9 @@ func doctorCommand(args []string, version string) int {
 	if len(args) > 0 && args[0] == "session" {
 		return doctorSessionCommand(args[1:], version)
 	}
+	if len(args) > 0 && args[0] == "redact-sessions" {
+		return doctorRedactSessionsCommand(args[1:])
+	}
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "print diagnostics as JSON")
 	if err := fs.Parse(args); err != nil {
@@ -31,6 +34,68 @@ func doctorCommand(args []string, version string) int {
 		return 0
 	}
 	fmt.Print(doctor.RenderText(report))
+	return 0
+}
+
+type stringListFlag []string
+
+func (f *stringListFlag) String() string {
+	if f == nil {
+		return ""
+	}
+	return strings.Join(*f, string(os.PathListSeparator))
+}
+
+func (f *stringListFlag) Set(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("empty path")
+	}
+	*f = append(*f, value)
+	return nil
+}
+
+func doctorRedactSessionsCommand(args []string) int {
+	fs := flag.NewFlagSet("doctor redact-sessions", flag.ContinueOnError)
+	var dirs stringListFlag
+	dryRun := fs.Bool("dry-run", false, "show how many session files would be redacted without writing")
+	jsonOut := fs.Bool("json", false, "print result as JSON")
+	fs.Var(&dirs, "dir", "session directory to scan; repeat to scan multiple directories")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: reasonix doctor redact-sessions [--dry-run] [--json] [--dir PATH]")
+		return 2
+	}
+	res := doctor.RedactSessions(doctor.RedactSessionsOptions{
+		Dirs:   []string(dirs),
+		DryRun: *dryRun,
+	})
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(res); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+	} else {
+		action := "redacted"
+		if *dryRun {
+			action = "would redact"
+		}
+		fmt.Fprintf(os.Stdout, "session secret cleanup %s %d/%d files", action, res.FilesChanged, res.FilesScanned)
+		if res.FilesSkipped > 0 {
+			fmt.Fprintf(os.Stdout, " (%d skipped: active lease held)", res.FilesSkipped)
+		}
+		fmt.Fprintln(os.Stdout)
+	}
+	for _, msg := range res.Errors {
+		fmt.Fprintln(os.Stderr, "warning:", msg)
+	}
+	if len(res.Errors) > 0 {
+		return 1
+	}
 	return 0
 }
 

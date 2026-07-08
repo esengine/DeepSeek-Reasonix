@@ -257,7 +257,7 @@ console.log("\ncomposer goal toggle");
     turnStartAt: Date.now(),
   });
 
-  const stopButton = document.querySelector(".composer-runstatus__stop") as HTMLButtonElement | null;
+  const stopButton = document.querySelector(".composer__btn--stop") as HTMLButtonElement | null;
   if (!stopButton) throw new Error("composer stop button did not render");
 
   await act(async () => {
@@ -643,7 +643,7 @@ console.log("\ncomposer goal toggle");
   const sendButton = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
   if (!sendButton) throw new Error("running composer send button did not render");
 
-  eq(textarea.placeholder, "Add guidance to the queue...", "running composer explains queued guidance input");
+  eq(textarea.placeholder, "Running — type guidance, Enter adds it to the queue", "running composer explains queued guidance input");
   ok(sendButton.classList.contains("composer__btn--steer"), "running composer marks send button as steer");
   ok(sendButton.disabled === true, "running steer button stays disabled without input");
 

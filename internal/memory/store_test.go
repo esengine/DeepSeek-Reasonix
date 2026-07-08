@@ -3,6 +3,7 @@ package memory
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -356,7 +357,13 @@ func TestStoreForSlug(t *testing.T) {
 	if strings.Count(filepath.Base(filepath.Dir(s.Dir)), "/") != 0 {
 		t.Fatalf("slug should have no separators: %s", s.Dir)
 	}
-	if !strings.Contains(s.Dir, "-Users-me-proj") {
+	// config.WorkspaceSlug folds case on Windows (equivalent spellings of one
+	// folder must share a slug); unix slugs keep the original case.
+	want := "-Users-me-proj"
+	if runtime.GOOS == "windows" {
+		want = "-users-me-proj"
+	}
+	if !strings.Contains(s.Dir, want) {
 		t.Fatalf("unexpected slug: %s", s.Dir)
 	}
 }

@@ -635,6 +635,7 @@ export function installPerformancePressureMonitor() {
   const isFocused = () => typeof document === "undefined" || document.hasFocus?.() !== false;
   let visibleSince = isHidden() ? Number.POSITIVE_INFINITY : startedAt;
   let expected = performance.now() + 1000;
+  let eventLoopLagPrimed = false;
 
   const pastGrace = () => performance.now() >= graceUntil;
   const inspectLongTasks = () => {
@@ -651,6 +652,7 @@ export function installPerformancePressureMonitor() {
       longTasks.length = 0;
       lagSamples.length = 0;
       expected = performance.now() + 1000;
+      eventLoopLagPrimed = false;
       if (!isHidden()) visibleSince = performance.now();
     });
   }
@@ -673,9 +675,17 @@ export function installPerformancePressureMonitor() {
 
   window.setInterval(() => {
     const now = performance.now();
+    if (!pastGrace()) {
+      expected = now + 1000;
+      return;
+    }
+    if (!eventLoopLagPrimed) {
+      expected = now + 1000;
+      eventLoopLagPrimed = true;
+      return;
+    }
     const lagMs = Math.max(0, now - expected);
     expected = now + 1000;
-    if (!pastGrace()) return;
     if (!shouldRecordEventLoopLagSample(isHidden(), now - visibleSince, isFocused())) return;
     lagSamples.push(lagMs);
     if (lagSamples.length > MAX_LAG_SAMPLES) lagSamples.shift();

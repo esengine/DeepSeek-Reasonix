@@ -10,6 +10,7 @@ export function PromptShelf({
   actions,
   children,
   crumbs,
+  note,
   quickActions,
   headerActions,
   barRef,
@@ -24,6 +25,9 @@ export function PromptShelf({
   actions?: ReactNode;
   children?: ReactNode;
   crumbs?: ReactNode;
+  // Rendered between the actions grid and the quick actions; used for
+  // focus-following detail previews and similar footnotes.
+  note?: ReactNode;
   quickActions?: ReactNode;
   headerActions?: ReactNode;
   barRef?: RefObject<HTMLDivElement | null>;
@@ -52,6 +56,7 @@ export function PromptShelf({
         {crumbs}
         {children && <div className="prompt-shelf__body">{children}</div>}
         {actions && <div className="prompt-shelf__actions">{actions}</div>}
+        {note && <div className="prompt-shelf__footnote">{note}</div>}
         {quickActions && <div className="prompt-shelf__quick-actions">{quickActions}</div>}
       </div>
     </div>
@@ -92,6 +97,8 @@ export function PromptAction({
   description,
   onClick,
   ariaLabel,
+  title,
+  onHoverChange,
   primary = false,
   selected = false,
   quiet = false,
@@ -102,6 +109,11 @@ export function PromptAction({
   description?: ReactNode;
   onClick: () => void;
   ariaLabel?: string;
+  // Native tooltip fallback for truncated descriptions.
+  title?: string;
+  // Fires on mouse enter/focus (true) and mouse leave/blur (false) so the
+  // parent can drive a focus-following detail preview.
+  onHoverChange?: (hovering: boolean) => void;
   primary?: boolean;
   selected?: boolean;
   quiet?: boolean;
@@ -121,6 +133,11 @@ export function PromptAction({
       onClick={onClick}
       disabled={disabled}
       aria-label={ariaLabel}
+      title={title}
+      onMouseEnter={onHoverChange ? () => onHoverChange(true) : undefined}
+      onMouseLeave={onHoverChange ? () => onHoverChange(false) : undefined}
+      onFocus={onHoverChange ? () => onHoverChange(true) : undefined}
+      onBlur={onHoverChange ? () => onHoverChange(false) : undefined}
     >
       {keyLabel && <span className="prompt-action__key">{keyLabel}</span>}
       {hasCopy && (

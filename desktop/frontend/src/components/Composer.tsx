@@ -51,6 +51,9 @@ const LONG_PASTE_MIN_CHARS = 2000;
 const LONG_PASTE_MIN_LINES = 20;
 const COMPOSER_MIN_HEIGHT = 104;
 const COMPOSER_MAX_HEIGHT = 360;
+// Height reserved for the in-card run strip while a turn runs; applied via a
+// CSS calc so --composer-height always stays in "logical height" space.
+const COMPOSER_RUN_STRIP_RESERVED = 30;
 const COMPOSER_MAX_VIEWPORT_RATIO = 0.4;
 const COMPOSER_AUTO_RESERVED_HEIGHT = 58;
 const PROMPT_HISTORY_PREFETCH_REMAINING = 3;
@@ -255,6 +258,14 @@ function composerMaxHeight(): number {
   return Math.max(COMPOSER_MIN_HEIGHT, Math.min(COMPOSER_MAX_HEIGHT, Math.floor(window.innerHeight * COMPOSER_MAX_VIEWPORT_RATIO)));
 }
 
+// The rendered card includes the run strip while a turn runs; subtract it to
+// recover the user's logical height when measuring from the DOM.
+function composerLogicalHeight(card: HTMLElement): number {
+  const strip = card.querySelector(".composer-run-strip");
+  const stripHeight = strip ? strip.getBoundingClientRect().height : 0;
+  return card.getBoundingClientRect().height - stripHeight;
+}
+
 function clampComposerHeight(height: number): number {
   return Math.min(Math.max(Math.round(height), COMPOSER_MIN_HEIGHT), composerMaxHeight());
 }
@@ -449,6 +460,8 @@ export function Composer({
   turnStartAt,
   turnTokens,
   retry,
+  pendingApprovalLabel,
+  pendingAsk = false,
   transientDismissSignal,
   sessionKey,
   fileRefRefreshKey,
@@ -492,6 +505,11 @@ export function Composer({
   turnStartAt?: number;
   turnTokens?: number;
   retry?: { attempt: number; max: number };
+  // Resolved label of the tool waiting for approval (null/undefined when none);
+  // shifts the run strip into its waiting state so the ticking spinner does not
+  // claim the model is working while a prompt is blocked on the user.
+  pendingApprovalLabel?: string | null;
+  pendingAsk?: boolean;
   transientDismissSignal?: number;
   sessionKey?: string;
   fileRefRefreshKey?: number | string;
@@ -1536,7 +1554,19 @@ export function Composer({
   const handleCancel = () => {
     const restored = onCancel();
     if (goalModeOn && activeGoal) onClearGoal();
-    if (typeof restored === "string") setTextCaretEnd(restored);
+    // Queued guidance the model never consumed would otherwise vanish when the
+    // cancelled turn ends (the running→false effect clears the shelf). Fold it
+    // back into the draft: cancelling means "stop acting", not "discard what I
+    // typed" — the same contract onCancel already honors for un-sent text.
+    const queued = pendingGuidance.map((item) => item.text).filter((part) => part.trim() !== "");
+    if (queued.length === 0) {
+      if (typeof restored === "string") setTextCaretEnd(restored);
+      return;
+    }
+    setPendingGuidance([]);
+    setGuidanceExpanded(false);
+    const base = typeof restored === "string" ? restored : text;
+    setTextCaretEnd([base, ...queued].filter((part) => part.trim() !== "").join("\n"));
   };
 
   const pickCommand = (c: CommandInfo) => setTextCaretEnd("/" + c.name + " ");
@@ -1637,7 +1667,7 @@ export function Composer({
 
     e.preventDefault();
     const startY = e.clientY;
-    const startHeight = composerHeight ?? card.getBoundingClientRect().height;
+    const startHeight = composerHeight ?? composerLogicalHeight(card);
     let nextHeight = clampComposerHeight(startHeight);
     let moved = false;
     card.style.setProperty("--composer-height", `${nextHeight}px`);
@@ -1675,7 +1705,7 @@ export function Composer({
 
   const onComposerResizeKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
     const card = composerCardRef.current;
-    const current = composerHeight ?? card?.getBoundingClientRect().height ?? COMPOSER_MIN_HEIGHT;
+    const current = composerHeight ?? (card ? composerLogicalHeight(card) : COMPOSER_MIN_HEIGHT);
     const step = e.shiftKey ? 32 : 16;
     let next: number | null = null;
     if (e.key === "ArrowUp" || e.key === "PageUp") next = current + step;
@@ -2006,7 +2036,18 @@ export function Composer({
     }
   };
 
-  const composerCardStyle = composerHeight === null ? undefined : ({ "--composer-height": `${composerHeight}px` } as CSSProperties);
+  // When the run strip is visible inside a user-resized card, the card grows
+  // by the strip's reserved height so the meta row stays fully visible.
+  // --composer-height carries only the user's logical height; the reservation
+  // is a separate variable consumed by the CSS calc, so the live resize drag
+  // (which writes raw logical heights) stays consistent with this render path.
+  const showRunStrip = Boolean(retry || running);
+  const composerCardStyle = composerHeight === null
+    ? undefined
+    : ({
+        "--composer-height": `${composerHeight}px`,
+        "--composer-run-strip-reserved": `${showRunStrip ? COMPOSER_RUN_STRIP_RESERVED : 0}px`,
+      } as CSSProperties);
   const textareaStyle = composerHeight === null && textareaAutoHeight !== null
     ? ({ height: `${textareaAutoHeight}px`, overflowY: textareaAutoOverflow ? "auto" : "hidden" } as CSSProperties)
     : undefined;
@@ -2054,17 +2095,45 @@ export function Composer({
       requestAnimationFrame(() => taRef.current?.focus());
     });
   };
-  const runActivity = retry
+  // Run-strip state machine: retry > waiting-approval > waiting-ask > streaming.
+  // The waiting states replace the whimsical ticker — while a prompt is blocked
+  // on the user, the strip must say so instead of counting "working" seconds.
+  const waitingPrompt = pendingApprovalLabel ? "approval" : pendingAsk ? "ask" : null;
+  // The pending approval itself disables the composer; keep the approval bar
+  // usable in exactly that case so the mode can still be changed mid-prompt.
+  const approvalBarDisabled = Boolean(disabled) && !pendingApprovalLabel;
+  // Waiting on the user (approval/ask) is not model work: pause the ticker's
+  // clock while a prompt is blocked so the elapsed time means "model time",
+  // matching what the waiting strip promises. Retries keep counting — they are
+  // system time, not user time. Accumulated in state via the effect cleanup so
+  // leaving the waiting state re-renders with the corrected time immediately.
+  const [waitAccumMs, setWaitAccumMs] = useState(0);
+  useEffect(() => {
+    setWaitAccumMs(0);
+  }, [turnStartAt]);
+  useEffect(() => {
+    if (!waitingPrompt) return;
+    const since = Date.now();
+    return () => setWaitAccumMs((total) => total + (Date.now() - since));
+  }, [waitingPrompt]);
+  const runStateText = retry
     ? t("status.retrying", { attempt: retry.attempt, max: retry.max })
-    : running && turnStartAt
-      ? (() => {
-          const elapsedMs = Math.max(0, now - turnStartAt);
-          const words = SPINNER_WORDS[locale];
-          const word = words[Math.floor(elapsedMs / 3000) % words.length];
-          const tok = turnTokens && turnTokens > 0 ? ` · ↓ ${fmtTokens(turnTokens)} ${t("status.tokens")}` : "";
-          return `${word}… ${fmtElapsed(elapsedMs)}${tok}`;
-        })()
-      : null;
+    : waitingPrompt === "approval"
+      ? t("composer.runWaitingApproval", { tool: pendingApprovalLabel ?? "" })
+      : waitingPrompt === "ask"
+        ? t("composer.runWaitingAsk")
+        : running
+          ? t("composer.runAnnounceRunning")
+          : null;
+  const runTicker = !retry && !waitingPrompt && running && turnStartAt
+    ? (() => {
+        const elapsedMs = Math.max(0, now - turnStartAt - waitAccumMs);
+        const words = SPINNER_WORDS[locale];
+        const word = words[Math.floor(elapsedMs / 3000) % words.length];
+        const tok = turnTokens && turnTokens > 0 ? ` · ↓ ${fmtTokens(turnTokens)} ${t("status.tokens")}` : "";
+        return `${word}… ${fmtElapsed(elapsedMs)}${tok}`;
+      })()
+    : null;
   const submitEmpty = !text.trim() && attachments.length === 0 && workspaceRefs.length === 0;
   const submitBlocked = submitting || pendingPaste > 0 || (submitEmpty && !(goalModeOn && !activeGoal)) || disabled || (!running && submitDisabled) || readOnly;
   const submitTooltip = running ? t("composer.queueGuidance") : t("composer.send");
@@ -2322,20 +2391,6 @@ export function Composer({
           />
         )
       )}
-      {runActivity && (
-        <div className="composer-toolbar composer-toolbar--status-only">
-          <div className="composer-runstatus" role="status" aria-live="polite">
-            <span className="composer-runstatus__dot" />
-            <span className="composer-runstatus__text">{runActivity}</span>
-            <Tooltip label={t("composer.stop")}>
-              <button className="composer-runstatus__stop" type="button" onClick={handleCancel}>
-                <Square size={10} fill="currentColor" />
-                <span>{t("composer.stopShort")}</span>
-              </button>
-            </Tooltip>
-          </div>
-        </div>
-      )}
       {pendingGuidance.length > 0 && (
         <div className="composer-guidance-shelf" aria-label={t("composer.guidanceQueue")}>
           <div className="composer-guidance-head">
@@ -2484,7 +2539,7 @@ export function Composer({
         </div>
       )}
       <div
-        className={`composer-card${composerHeight !== null || composerResizing ? " composer-card--resized" : ""}${composerAutoExpanded ? " composer-card--autosized" : ""}${composerResizing ? " composer-card--resizing" : ""}${running ? " composer-card--running" : ""}`}
+        className={`composer-card${composerHeight !== null || composerResizing ? " composer-card--resized" : ""}${composerAutoExpanded ? " composer-card--autosized" : ""}${composerResizing ? " composer-card--resizing" : ""}${running ? (waitingPrompt ? " composer-card--waiting" : " composer-card--running") : ""}`}
         ref={composerCardRef}
         style={composerCardStyle}
       >
@@ -2502,6 +2557,17 @@ export function Composer({
           onKeyDown={onComposerResizeKeyDown}
           onDoubleClick={resetComposerHeight}
         />
+        {runStateText && (
+          <div className={`composer-run-strip${waitingPrompt ? " composer-run-strip--waiting" : ""}`}>
+            <span className="composer-run-strip__dot" aria-hidden="true" />
+            {/* The ticker re-renders every second; keep it out of the accessibility
+                tree and announce only the stable state text via the live region. */}
+            <span className="composer-run-strip__text" aria-hidden={runTicker ? true : undefined}>
+              {runTicker ?? runStateText}
+            </span>
+            <span className="sr-only" role="status">{runStateText}</span>
+          </div>
+        )}
         <div
           className={`composer${dragOver ? " composer--dragover" : ""}${disabled || readOnly ? " composer--disabled" : ""}${shellModeActive ? " composer--shell" : ""}`}
           onDrop={onDrop}
@@ -2543,6 +2609,18 @@ export function Composer({
               {composerPrompt}
             </span>
           )}
+          {running && (
+            <Tooltip label={t("composer.stop")}>
+              <button
+                className="composer__btn composer__btn--stop"
+                type="button"
+                onClick={handleCancel}
+                aria-label={t("composer.stop")}
+              >
+                <Square size={12} fill="currentColor" />
+              </button>
+            </Tooltip>
+          )}
           <Tooltip label={submitTooltip}>
             <button
               className={`composer__btn composer__btn--send${running ? " composer__btn--steer" : ""}`}
@@ -2550,7 +2628,7 @@ export function Composer({
               disabled={submitBlocked}
               aria-label={submitTooltip}
             >
-              <ArrowUp size={16} />
+              {running ? <CornerDownRight size={16} /> : <ArrowUp size={16} />}
             </button>
           </Tooltip>
         </div>
@@ -2634,13 +2712,17 @@ export function Composer({
               )}
             </div>
             <div className="composer-meta__control composer-meta__control--approval">
+              {/* A pending tool approval disables the composer, but the approval
+                  bar stays usable so mode changes remain possible mid-prompt;
+                  the approval card explains that the pending request still needs
+                  an explicit decision. */}
               <div className="composer-modebar composer-modebar--approval" data-mode={toolApprovalMode} title={t("composer.accessMenuTitle")}>
                 <span className="composer-modebar__thumb" aria-hidden="true" />
                 <button
                   type="button"
                   className={`composer-modebar__item composer-modebar__item--ask${toolApprovalMode === "ask" ? " composer-modebar__item--active" : ""}`}
                   onClick={() => chooseApprovalMode("ask")}
-                  disabled={disabled}
+                  disabled={approvalBarDisabled}
                   aria-pressed={toolApprovalMode === "ask"}
                   title={t("composer.accessAskTitle")}
                 >
@@ -2651,7 +2733,7 @@ export function Composer({
                   type="button"
                   className={`composer-modebar__item composer-modebar__item--auto${toolApprovalMode === "auto" ? " composer-modebar__item--active" : ""}`}
                   onClick={() => chooseApprovalMode("auto")}
-                  disabled={disabled}
+                  disabled={approvalBarDisabled}
                   aria-pressed={toolApprovalMode === "auto"}
                   title={t("composer.accessAutoTitle")}
                 >
@@ -2662,7 +2744,7 @@ export function Composer({
                   type="button"
                   className={`composer-modebar__item composer-modebar__item--yolo${toolApprovalMode === "yolo" ? " composer-modebar__item--active" : ""}`}
                   onClick={() => chooseApprovalMode("yolo")}
-                  disabled={disabled}
+                  disabled={approvalBarDisabled}
                   aria-pressed={toolApprovalMode === "yolo"}
                   title={t("composer.accessYoloTitle")}
                 >

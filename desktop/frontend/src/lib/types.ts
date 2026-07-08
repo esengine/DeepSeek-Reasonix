@@ -155,6 +155,7 @@ export interface MemoryCompilerStats {
 export interface WireEvent {
   kind: EventKind;
   text?: string;
+  detail?: string;
   reasoning?: string;
   memoryCitations?: MemoryCitation[];
   memoryCompiler?: MemoryCompilerStats;
@@ -325,6 +326,7 @@ export interface ChangedFileInfo {
 export interface HistoryMessage {
   role: string;
   content: string;
+  detail?: string;
   submitText?: string;
   checkpointTurn?: number;
   createdAt?: number;

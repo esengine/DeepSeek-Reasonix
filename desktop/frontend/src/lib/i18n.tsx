@@ -114,7 +114,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (typeof document === "undefined") return;
-    document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
+    document.documentElement.lang = locale === "zh" ? "zh-CN" : locale === "zh-TW" ? "zh-TW" : "en";
   }, [locale]);
 
   // setPref updates only the live UI; persistence is handled by desktop config.

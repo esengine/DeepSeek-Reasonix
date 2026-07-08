@@ -21,6 +21,7 @@ import (
 	"reasonix/internal/jobs"
 	"reasonix/internal/proc"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/secrets"
 	"reasonix/internal/shellparse"
 	"reasonix/internal/tool"
 )
@@ -496,7 +497,7 @@ func commandPreview(cmd string) string {
 }
 
 func bashCommandEnv(ctx context.Context) []string {
-	env := os.Environ()
+	env := secrets.ProcessEnv()
 	if runtime.GOOS == "windows" {
 		return env
 	}
@@ -554,6 +555,9 @@ func runShellPATHCommand(parent context.Context, shell string, args []string) []
 	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, shell, args...)
+	// Explicit env so the login-shell probe honors [secrets]
+	// filter_subprocess_env instead of inheriting the full environment.
+	cmd.Env = secrets.ProcessEnv()
 	proc.PrepareShellPATHProbe(cmd)
 	cmd.Stdin = strings.NewReader("")
 	out, _ := cmd.CombinedOutput()

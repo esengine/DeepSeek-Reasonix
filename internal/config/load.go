@@ -48,6 +48,14 @@ func LoadForRoot(root string) (*Config, error) {
 	globalMaxSteps := cfg.Agent.MaxSteps
 	globalPlannerMaxSteps := cfg.Agent.PlannerMaxSteps
 	globalMemoryCompiler := cfg.Agent.MemoryCompiler
+	// Deep-copy: toml.DecodeFile writes through an existing *bool rather than
+	// replacing it, so a shallow struct copy would alias the pointer and the
+	// project merge below would mutate the captured global value in place.
+	globalSecrets := cfg.Secrets
+	if cfg.Secrets.RedactToolOutput != nil {
+		v := *cfg.Secrets.RedactToolOutput
+		globalSecrets.RedactToolOutput = &v
+	}
 
 	tomlSources = append(tomlSources, projectTOML)
 	if err := mergeRuntimeTOMLFile(cfg, projectTOML); err != nil {
@@ -59,6 +67,10 @@ func LoadForRoot(root string) (*Config, error) {
 	cfg.Agent.MaxSteps = globalMaxSteps
 	cfg.Agent.PlannerMaxSteps = globalPlannerMaxSteps
 	cfg.Agent.MemoryCompiler = globalMemoryCompiler
+	// Secret protection is a user-global security control: a cloned repo's
+	// reasonix.toml must not be able to disable redaction or flip on the
+	// workflow-breaking env/path protections.
+	cfg.Secrets = globalSecrets
 	// toml.DecodeFile replaces [[plugins]] wholesale, so cfg.Plugins now holds
 	// only the last file's. Re-merge by name across all sources (later wins) so a
 	// project reasonix.toml doesn't drop the global config's MCP servers.

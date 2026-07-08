@@ -262,6 +262,9 @@ func (m *chatTUI) branchArgItems(val string) ([]compItem, int, bool) {
 		return nil, from, true
 	}
 	branches, err := m.ctrl.Branches()
+	// Branches snapshots first, which can retarget the controller to a
+	// recovery branch; keep the lease on whatever the controller now owns.
+	m.followSessionLease()
 	if err != nil {
 		return nil, from, true
 	}

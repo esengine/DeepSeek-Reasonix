@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"reasonix/internal/pluginpkg"
+	"reasonix/internal/secrets"
 )
 
 func (t *installSourceTool) localPluginPackageAction(req request, root string) (action, []string, error) {
@@ -27,7 +28,7 @@ func (t *installSourceTool) planGitHubPluginPackage(ctx context.Context, req req
 	}
 	var warnings []string
 	for _, branch := range src.branches() {
-		for _, manifestPath := range []string{pluginpkg.NativeManifest, pluginpkg.CodexManifest} {
+		for _, manifestPath := range pluginpkg.ManifestPaths() {
 			rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", src.Owner, src.Repo, branch, joinURLPath(src.Path, manifestPath))
 			body, err := t.fetchText(ctx, rawURL)
 			if err != nil {
@@ -191,6 +192,7 @@ func (t *installSourceTool) preparePluginSource(ctx context.Context, source, mod
 		}
 		args = append(args, cloneURL, tmp)
 		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Env = secrets.ProcessEnv()
 		if out, err := cmd.CombinedOutput(); err != nil {
 			_ = os.RemoveAll(tmp)
 			return "", func() {}, newErr(ErrSourceUnreadable, "git clone failed: %v: %s", err, strings.TrimSpace(string(out)))

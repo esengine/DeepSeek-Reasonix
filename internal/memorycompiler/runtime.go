@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"math"
@@ -147,6 +148,7 @@ type ExecutionTrace struct {
 	Goal                string               `json:"goal"`
 	Steps               []Step               `json:"steps,omitempty"`
 	Outcome             string               `json:"outcome"`
+	Injected            bool                 `json:"injected,omitempty"`
 	EfficiencyScore     float64              `json:"efficiency_score"`
 	MemoryEffectiveness float64              `json:"memory_effectiveness"`
 	StrategyUsed        []string             `json:"strategy_used,omitempty"`
@@ -264,6 +266,7 @@ type LearningTrace struct {
 	ID                   string               `json:"id"`
 	IRVersion            string               `json:"ir_version"`
 	Outcome              string               `json:"outcome"`
+	Injected             bool                 `json:"injected,omitempty"`
 	QualityScore         float64              `json:"quality_score"`
 	StrategyUsed         []string             `json:"strategy_used,omitempty"`
 	MemoryUsed           []string             `json:"memory_used,omitempty"`
@@ -348,13 +351,18 @@ type SystemLearning struct {
 }
 
 type Strategy struct {
-	ID            string    `json:"id"`
-	Preconditions []string  `json:"preconditions,omitempty"`
-	ExecutionPlan []Step    `json:"execution_plan,omitempty"`
-	Successes     int       `json:"successes"`
-	Failures      int       `json:"failures"`
-	LastUsedAt    time.Time `json:"last_used_at,omitempty"`
-	Description   string    `json:"description,omitempty"`
+	ID            string   `json:"id"`
+	Preconditions []string `json:"preconditions,omitempty"`
+	ExecutionPlan []Step   `json:"execution_plan,omitempty"`
+	Successes     int      `json:"successes"`
+	Failures      int      `json:"failures"`
+	// InjectedSuccesses/InjectedFailures split the counters above by whether
+	// the compiled contract was provider-visible that turn, so injected and
+	// observe-only outcomes can be compared for real lift.
+	InjectedSuccesses int       `json:"injected_successes,omitempty"`
+	InjectedFailures  int       `json:"injected_failures,omitempty"`
+	LastUsedAt        time.Time `json:"last_used_at,omitempty"`
+	Description       string    `json:"description,omitempty"`
 }
 
 func (s Strategy) Samples() int { return s.Successes + s.Failures }
@@ -1741,6 +1749,7 @@ func (t *Turn) Finish(err error) {
 		return
 	}
 	t.trace.CompletedAt = time.Now().UTC()
+	t.trace.Injected = t.metrics.Injected
 	t.trace.Outcome = outcomeFor(t.trace.ToolResults, err)
 	if err != nil {
 		t.trace.FailureReason = firstLine(err.Error())
@@ -1775,7 +1784,24 @@ func (t *Turn) Finish(err error) {
 
 func outcomeFor(records []ToolRecord, err error) string {
 	if err != nil {
+		// A user-cancelled turn says nothing about the strategy's quality;
+		// keep it out of the success/failure counters entirely.
+		if errors.Is(err, context.Canceled) {
+			return "aborted"
+		}
 		return "failure"
+	}
+	// Verification-shaped commands (tests, vet, typecheck, lint) are a stronger
+	// signal than ordinary tool errors: a final failing test run caps the turn
+	// at partial_success, and a passing one confirms success unless a later
+	// tool errored after it.
+	if rec, idx, ok := lastVerificationToolRecord(records); ok {
+		if strings.TrimSpace(rec.Error) != "" {
+			return "partial_success"
+		}
+		if !anyToolErrorAfter(records, idx) {
+			return "success"
+		}
 	}
 	if len(records) == 0 {
 		// A turn that finishes without error and without tool calls is a
@@ -1804,6 +1830,54 @@ func isPlanModeBlockedToolRecord(rec ToolRecord) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(rec.Error), planModeBlockedToolError)
+}
+
+// verificationCommandMarkers identify shell commands whose exit status verifies
+// the turn's work (tests, vet, typecheck, lint, build). Matched as lowercase
+// substrings of the bash tool's raw argument JSON.
+var verificationCommandMarkers = []string{
+	"go test", "go vet", "go build", "gofmt -l", "golangci-lint",
+	"npm test", "npm run test", "pnpm test", "pnpm run test", "yarn test",
+	"vitest", "jest", "npx tsc", "tsc ", "typecheck", "type-check", "check:css",
+	"eslint", "pytest", "ruff check", "cargo test", "cargo check", "cargo build",
+	"mvn test", "gradle test", "make test", "ctest", "phpunit", "rspec",
+}
+
+func isVerificationToolRecord(rec ToolRecord) bool {
+	if rec.Blocked || !strings.EqualFold(strings.TrimSpace(rec.Name), "bash") {
+		return false
+	}
+	args := strings.ToLower(rec.Args)
+	if args == "" {
+		return false
+	}
+	for _, marker := range verificationCommandMarkers {
+		if strings.Contains(args, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func lastVerificationToolRecord(records []ToolRecord) (ToolRecord, int, bool) {
+	for i := len(records) - 1; i >= 0; i-- {
+		if isVerificationToolRecord(records[i]) {
+			return records[i], i, true
+		}
+	}
+	return ToolRecord{}, -1, false
+}
+
+func anyToolErrorAfter(records []ToolRecord, idx int) bool {
+	for i := idx + 1; i < len(records); i++ {
+		if strings.TrimSpace(records[i].Name) == "" || isPlanModeBlockedToolRecord(records[i]) {
+			continue
+		}
+		if strings.TrimSpace(records[i].Error) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func efficiencyScore(records []ToolRecord, start, end time.Time) float64 {
@@ -1861,11 +1935,17 @@ func (r *Runtime) writeTraceAndLearn(tr ExecutionTrace, strategyID string) {
 		strategyID = classifyStrategy(tr.Goal)
 	}
 	var evaluations []MutationEvaluation
-	st.Mutations, evaluations = evaluateMutations(st.Mutations, tr)
+	// Aborted turns carry no quality signal: they must not grade mutations
+	// under evaluation or move strategy success/failure counters.
+	if tr.Outcome != "aborted" {
+		st.Mutations, evaluations = evaluateMutations(st.Mutations, tr)
+	}
 	tr.MutationEvaluations = evaluations
 	now := time.Now().UTC()
 	baseline := baselineScore(st, strategyID)
-	st.Strategies = updateStrategy(st.Strategies, strategyID, tr.Outcome)
+	if tr.Outcome != "aborted" {
+		st.Strategies = updateStrategy(st.Strategies, strategyID, tr.Outcome, tr.Injected)
+	}
 	learning := analyzeTrace(tr, strategyID)
 	if hasLearning(learning) {
 		st.Learnings = appendLearning(st.Learnings, learning)
@@ -1917,6 +1997,7 @@ func executionTraceProjection(tr ExecutionTrace) ExecutionTrace {
 		Goal:                tr.Goal,
 		Steps:               append([]Step(nil), tr.Steps...),
 		Outcome:             tr.Outcome,
+		Injected:            tr.Injected,
 		EfficiencyScore:     tr.EfficiencyScore,
 		MemoryEffectiveness: tr.MemoryEffectiveness,
 		StrategyUsed:        append([]string(nil), tr.StrategyUsed...),
@@ -1943,6 +2024,7 @@ func learningTraceFor(tr ExecutionTrace, learning SystemLearning) (LearningTrace
 		ID:                   tr.ID,
 		IRVersion:            tr.IRVersion,
 		Outcome:              tr.Outcome,
+		Injected:             tr.Injected,
 		QualityScore:         traceQualityScore(tr),
 		StrategyUsed:         append([]string(nil), tr.StrategyUsed...),
 		MemoryUsed:           append([]string(nil), tr.MemoryUsed...),
@@ -2687,7 +2769,10 @@ func validMutation(m CompilerMutation) bool {
 	}
 }
 
-func updateStrategy(strategies []Strategy, id, outcome string) []Strategy {
+func updateStrategy(strategies []Strategy, id, outcome string, injected bool) []Strategy {
+	if outcome == "aborted" {
+		return strategies
+	}
 	id = strings.TrimSpace(id)
 	if id == "" {
 		id = "general"
@@ -2699,8 +2784,14 @@ func updateStrategy(strategies []Strategy, id, outcome string) []Strategy {
 		}
 		if outcome == "success" {
 			strategies[i].Successes++
+			if injected {
+				strategies[i].InjectedSuccesses++
+			}
 		} else {
 			strategies[i].Failures++
+			if injected {
+				strategies[i].InjectedFailures++
+			}
 		}
 		strategies[i].LastUsedAt = time.Now().UTC()
 		return strategies
@@ -2708,8 +2799,14 @@ func updateStrategy(strategies []Strategy, id, outcome string) []Strategy {
 	s := Strategy{ID: id, LastUsedAt: time.Now().UTC()}
 	if outcome == "success" {
 		s.Successes = 1
+		if injected {
+			s.InjectedSuccesses = 1
+		}
 	} else {
 		s.Failures = 1
+		if injected {
+			s.InjectedFailures = 1
+		}
 	}
 	return append(strategies, s)
 }
