@@ -3369,9 +3369,7 @@ func (c *Controller) SetSessionPath(p string) {
 	c.mu.Unlock()
 	c.setActiveJobSession(p)
 	c.rebindCheckpoints(p)
-	if c.executor != nil {
-		c.executor.SetPersistPath(p)
-	}
+
 }
 
 // SessionDestroyHandle separates waiting for cancelled jobs from ending the

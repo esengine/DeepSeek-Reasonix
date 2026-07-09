@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -242,11 +241,6 @@ type Agent struct {
 	usageSource          string
 	responseLanguage     atomic.Value // string: auto|zh|en
 	reasoningLanguage    atomic.Value // string: auto|zh|en
-
-	// persistPath is the file path this agent's session is durably saved to.
-	// Set by the controller; used by Run on context.Canceled to flush the
-	// partial assistant message to disk immediately.
-	persistPath atomic.Value // string
 
 	// sink receives the turn's typed event stream (reasoning/text deltas, tool
 	// dispatch/results, usage, notices). The agent no longer formats output
@@ -746,11 +740,6 @@ func (a *Agent) SetSession(s *Session) {
 	a.clearClassifierCache()
 }
 
-// SetPersistPath records the file path that Run will flush the session to on
-// context.Canceled, bypassing the controller's own save chain.
-func (a *Agent) SetPersistPath(p string) {
-	a.persistPath.Store(p)
-}
 
 // LastUsage returns the most recent per-turn token telemetry the provider
 // reported (nil if no turn has run yet). The TUI uses it to show a context
@@ -1147,12 +1136,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 						ReasoningSignature: signature,
 						MemoryCitations:    a.memoryCitations(),
 					})
-					// Flush to disk immediately so retry does not lose it.
-					if p, ok := a.persistPath.Load().(string); ok && p != "" {
-						if saveErr := a.session.Save(p); saveErr != nil {
-							slog.Warn("agent: flush partial response on stream retry", "err", saveErr)
-						}
-					}
+
 				}
 				a.session.Add(provider.Message{
 					Role:    provider.RoleUser,
@@ -1171,15 +1155,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 				if hasVisibleFinalAnswer(text) {
 					text += "\n\n---\n*[用户中断了回复 — Response interrupted by user]*"
 				}
-				// Flush to disk immediately so the partial response survives
-				// a page refresh or tab switch even when the controller's own
-				// save path (replaceSessionAfterCancel) encounters a conflict.
-				if p, ok := a.persistPath.Load().(string); ok && p != "" {
-					if saveErr := a.session.Save(p); saveErr != nil {
-						slog.Warn("agent: flush partial response on cancel", "err", saveErr)
-					}
-				}
-				a.session.Add(provider.Message{
+								a.session.Add(provider.Message{
 					Role:               provider.RoleAssistant,
 					Content:            text,
 					ReasoningContent:   reasoning,
