@@ -943,7 +943,8 @@ func (c *Config) saveProjectIncremental(path string) error {
 		delta = fmt.Sprintf("config_version = %d\n", configVersion(c)) + delta
 	}
 	removePlugins := len(c.Plugins) == 0 && tomlBodyHasSection(body, "plugins")
-	if strings.TrimSpace(delta) == "" && !removePlugins {
+	removeSandboxBash := shouldRemoveIneffectiveProjectSandboxBash(body, c)
+	if strings.TrimSpace(delta) == "" && !removePlugins && !removeSandboxBash {
 		return nil // no changes to write
 	}
 
@@ -954,7 +955,21 @@ func (c *Config) saveProjectIncremental(path string) error {
 	if removePlugins {
 		body = removeTOMLSection(body, "plugins")
 	}
+	if removeSandboxBash {
+		body = removeTOMLSectionKey(body, "sandbox", "bash")
+	}
 	return writeConfigFile(path, body)
+}
+
+func shouldRemoveIneffectiveProjectSandboxBash(body string, c *Config) bool {
+	if c == nil || runtimeGOOS != "windows" {
+		return false
+	}
+	if c.BashMode() != "off" {
+		return false
+	}
+	value, ok := tomlSectionKeyValue(body, "sandbox", "bash")
+	return ok && tomlStringLiteralEquals(value, "enforce")
 }
 
 // mergeTOMLDelta parses delta into named TOML blocks and merges each into body
@@ -1161,6 +1176,50 @@ func removeTOMLSection(body, sectionName string) string {
 	return body
 }
 
+func removeTOMLSectionKey(body, sectionName, key string) string {
+	spans := tomlLineSpans(body)
+	sectionIdx := -1
+	keyIdx := -1
+	endIdx := len(spans)
+	for i, span := range spans {
+		name, isArray, ok := tomlEditSectionHeader(span.text)
+		if ok {
+			if sectionIdx >= 0 {
+				endIdx = i
+				break
+			}
+			if !isArray && name == sectionName {
+				sectionIdx = i
+			}
+			continue
+		}
+		if sectionIdx >= 0 && keyIdx < 0 {
+			if got, _, ok := tomlKeyValue(span.text); ok && got == key {
+				keyIdx = i
+			}
+		}
+	}
+	if sectionIdx < 0 || keyIdx < 0 {
+		return body
+	}
+	for i := sectionIdx + 1; i < endIdx; i++ {
+		if i == keyIdx {
+			continue
+		}
+		trimmed := strings.TrimSpace(spans[i].text)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		return body[:spans[keyIdx].start] + body[spans[keyIdx].end:]
+	}
+	sectionStart := spans[sectionIdx].start
+	sectionEnd := len(body)
+	if endIdx < len(spans) {
+		sectionEnd = spans[endIdx].start
+	}
+	return strings.TrimRight(body[:sectionStart], "\n") + "\n" + body[sectionEnd:]
+}
+
 type tomlLineSpan struct {
 	start int
 	end   int
@@ -1218,22 +1277,56 @@ func replaceTOMLTopLevelField(body, key, newLine string) string {
 }
 
 func tomlTopLevelKey(line string) (string, bool) {
+	key, _, ok := tomlKeyValue(line)
+	return key, ok
+}
+
+func tomlKeyValue(line string) (string, string, bool) {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-		return "", false
+		return "", "", false
 	}
 	if before, _, ok := strings.Cut(trimmed, "#"); ok {
 		trimmed = strings.TrimSpace(before)
 	}
-	key, _, ok := strings.Cut(trimmed, "=")
+	key, value, ok := strings.Cut(trimmed, "=")
 	if !ok {
-		return "", false
+		return "", "", false
 	}
 	key = strings.TrimSpace(key)
 	if key == "" || strings.Contains(key, ".") {
-		return "", false
+		return "", "", false
 	}
-	return key, true
+	return key, strings.TrimSpace(value), true
+}
+
+func tomlSectionKeyValue(body, sectionName, key string) (string, bool) {
+	inSection := false
+	for _, span := range tomlLineSpans(body) {
+		if name, isArray, ok := tomlEditSectionHeader(span.text); ok {
+			inSection = !isArray && name == sectionName
+			continue
+		}
+		if !inSection {
+			continue
+		}
+		got, value, ok := tomlKeyValue(span.text)
+		if ok && got == key {
+			return value, true
+		}
+	}
+	return "", false
+}
+
+func tomlStringLiteralEquals(value, want string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 {
+		quote := value[0]
+		if (quote == '"' || quote == '\'') && value[len(value)-1] == quote {
+			return value[1:len(value)-1] == want
+		}
+	}
+	return value == want
 }
 
 func tomlBodyHasTopLevelKey(body, key string) bool {

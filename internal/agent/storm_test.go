@@ -35,10 +35,10 @@ func (o okTool) Schema() json.RawMessage                                  { retu
 func (o okTool) ReadOnly() bool                                           { return true }
 func (o okTool) Execute(context.Context, json.RawMessage) (string, error) { return "ok", nil }
 
-func warnNoticeRecorder() (event.Sink, *[]string) {
+func noticeRecorder() (event.Sink, *[]string) {
 	var notices []string
 	sink := event.FuncSink(func(e event.Event) {
-		if e.Kind == event.Notice && e.Level == event.LevelWarn {
+		if e.Kind == event.Notice {
 			notices = append(notices, e.Text)
 		}
 	})
@@ -48,13 +48,13 @@ func warnNoticeRecorder() (event.Sink, *[]string) {
 // TestStormBreakerEscalatesRepeatedFailure: once the same tool has failed the
 // same way stormBreakThreshold times in a row, the model-facing result must carry
 // the loop-guard directive (not just the raw error again), and the user must get
-// a warn notice. The arguments DIFFER on every call — mirroring the live failure
+// a notice. The arguments DIFFER on every call — mirroring the live failure
 // mode where a stuck model re-words the payload — to prove detection keys on the
 // error, not the bytes.
 func TestStormBreakerEscalatesRepeatedFailure(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(failTool{name: "write_file"})
-	sink, notices := warnNoticeRecorder()
+	sink, notices := noticeRecorder()
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
 	args := []string{`{"content":"Mountains are`, `{"path":"n.txt","content":"Peaks rise`, `{}`}
@@ -74,7 +74,7 @@ func TestStormBreakerEscalatesRepeatedFailure(t *testing.T) {
 		t.Errorf("loop-guard result should still preserve the original error, got: %q", last)
 	}
 	if len(*notices) == 0 {
-		t.Errorf("loop guard should emit a warn notice to the user")
+		t.Errorf("loop guard should emit a notice to the user")
 	}
 }
 
@@ -86,7 +86,7 @@ func TestStormBreakerEscalatesRepeatedFailure(t *testing.T) {
 func TestStormBreakerEscalatesRepeatedBlockedPermission(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "bash", readOnly: false})
-	sink, notices := warnNoticeRecorder()
+	sink, notices := noticeRecorder()
 	a := New(nil, reg, NewSession(""), Options{
 		Gate: &stubGate{deny: map[string]bool{"bash": true}},
 	}, sink)
@@ -109,7 +109,7 @@ func TestStormBreakerEscalatesRepeatedBlockedPermission(t *testing.T) {
 		t.Fatalf("permission loop guard should preserve blocked context, got: %q", last)
 	}
 	if len(*notices) == 0 {
-		t.Errorf("loop guard should emit a warn notice to the user")
+		t.Errorf("loop guard should emit a notice to the user")
 	}
 }
 
@@ -121,7 +121,7 @@ func TestStormBreakerEscalatesAlternatingBlockedShapes(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "bash", readOnly: false})
 	reg.Add(fakeTool{name: "web_fetch", readOnly: false})
-	sink, notices := warnNoticeRecorder()
+	sink, notices := noticeRecorder()
 	a := New(nil, reg, NewSession(""), Options{
 		Gate: &stubGate{deny: map[string]bool{"bash": true, "web_fetch": true}},
 	}, sink)
@@ -143,7 +143,7 @@ func TestStormBreakerEscalatesAlternatingBlockedShapes(t *testing.T) {
 		t.Fatal("streak guard should arm the final-readiness loop-guard pass")
 	}
 	if len(*notices) == 0 {
-		t.Errorf("streak loop guard should emit a warn notice to the user")
+		t.Errorf("streak loop guard should emit a notice to the user")
 	}
 }
 
@@ -183,7 +183,7 @@ func TestStormBreakerEscalatesRepeatedBatch(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(failTool{name: "write_a"})
 	reg.Add(failTool{name: "write_b"})
-	sink, notices := warnNoticeRecorder()
+	sink, notices := noticeRecorder()
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
 	batch := []provider.ToolCall{
@@ -202,7 +202,7 @@ func TestStormBreakerEscalatesRepeatedBatch(t *testing.T) {
 		t.Errorf("guard should name the repeated batch, got: %q", first)
 	}
 	if len(*notices) == 0 {
-		t.Errorf("loop guard should emit a warn notice for a repeated batch")
+		t.Errorf("loop guard should emit a notice for a repeated batch")
 	}
 }
 
@@ -213,7 +213,7 @@ func TestStormBreakerBatchResetsOnPartialSuccess(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(failTool{name: "write_file"})
 	reg.Add(okTool{name: "read_file"})
-	sink, notices := warnNoticeRecorder()
+	sink, notices := noticeRecorder()
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
 	batch := []provider.ToolCall{
@@ -229,7 +229,7 @@ func TestStormBreakerBatchResetsOnPartialSuccess(t *testing.T) {
 		t.Fatalf("a batch with a succeeding call should never trip the guard, got: %q", first)
 	}
 	if len(*notices) != 0 {
-		t.Errorf("no warn notice expected when part of the batch succeeds, got %v", *notices)
+		t.Errorf("no notice expected when part of the batch succeeds, got %v", *notices)
 	}
 }
 
@@ -238,7 +238,7 @@ func TestStormBreakerBatchResetsOnPartialSuccess(t *testing.T) {
 func TestStormBreakerSilentBelowThreshold(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(failTool{name: "write_file"})
-	sink, notices := warnNoticeRecorder()
+	sink, notices := noticeRecorder()
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
 	call := provider.ToolCall{Name: "write_file", Arguments: `{"content":"x`}
@@ -251,7 +251,7 @@ func TestStormBreakerSilentBelowThreshold(t *testing.T) {
 		t.Fatalf("guard fired after only %d repeats (threshold %d)", stormBreakThreshold-1, stormBreakThreshold)
 	}
 	if len(*notices) != 0 {
-		t.Errorf("no warn notice expected below threshold, got %v", *notices)
+		t.Errorf("no notice expected below threshold, got %v", *notices)
 	}
 }
 
@@ -261,7 +261,7 @@ func TestStormBreakerResetsOnSuccess(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(failTool{name: "write_file"})
 	reg.Add(okTool{name: "read_file"})
-	sink, notices := warnNoticeRecorder()
+	sink, notices := noticeRecorder()
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
 	fail := provider.ToolCall{Name: "write_file", Arguments: `{"content":"x`}
@@ -278,6 +278,6 @@ func TestStormBreakerResetsOnSuccess(t *testing.T) {
 		t.Fatalf("guard should have reset after a successful turn, got: %q", last)
 	}
 	if len(*notices) != 0 {
-		t.Errorf("no warn notice expected when a success breaks the run, got %v", *notices)
+		t.Errorf("no notice expected when a success breaks the run, got %v", *notices)
 	}
 }

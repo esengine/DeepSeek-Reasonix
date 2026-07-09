@@ -65,6 +65,11 @@ type Skill struct {
 	RunAs        RunAs  // inline | subagent
 	Model        string // optional model override for runAs=subagent (frontmatter `model:`)
 	Effort       string // optional effort for runAs=subagent (frontmatter `effort:`)
+	// ReadOnly, when true, runs a subagent skill against the read-only tool
+	// registry: writer tools are stripped and bash enforces the plan-mode safe
+	// command policy at execution time (frontmatter `read-only:`). This is a
+	// tool-boundary contract, not a prompt promise.
+	ReadOnly bool
 	// Routing metadata is intentionally kept out of the cache-stable Skills
 	// index; it feeds per-turn capability hints only.
 	Triggers         []string
@@ -493,6 +498,7 @@ func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bo
 		RunAs:        parseRunAs(fm[skillFrontmatterRunAs], fm[skillFrontmatterContext], fm[skillFrontmatterAgent]),
 		Model:        strings.TrimSpace(fm[skillFrontmatterModel]),
 		Effort:       strings.TrimSpace(fm[skillFrontmatterEffort]),
+		ReadOnly:     parseBoolFrontmatter(fm[skillFrontmatterReadOnly]),
 		Triggers:     parseCSVFrontmatter(fm[skillFrontmatterTriggers]),
 		NegativeTriggers: parseCSVFrontmatter(
 			fm[skillFrontmatterNegativeTriggers],
@@ -512,6 +518,7 @@ const (
 	skillFrontmatterAllowedTools     = "allowed-tools"
 	skillFrontmatterModel            = "model"
 	skillFrontmatterEffort           = "effort"
+	skillFrontmatterReadOnly         = "read-only"
 	skillFrontmatterTriggers         = "triggers"
 	skillFrontmatterNegativeTriggers = "negative-triggers"
 	skillFrontmatterAutoUse          = "auto-use"
@@ -528,6 +535,7 @@ var skillMarkerFrontmatterKeys = []string{
 	skillFrontmatterAllowedTools,
 	skillFrontmatterModel,
 	skillFrontmatterEffort,
+	skillFrontmatterReadOnly,
 	skillFrontmatterTriggers,
 	skillFrontmatterNegativeTriggers,
 	skillFrontmatterAutoUse,

@@ -24,6 +24,7 @@ import (
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/secrets"
 	"reasonix/internal/shellparse"
 	"reasonix/internal/tool"
 )
@@ -283,6 +284,10 @@ type Agent struct {
 	// command may rerun unconfined after the OS sandbox failed to start.
 	sandboxEscapeApprover sandbox.EscapeApprover
 
+	// configWriteApprover, when non-nil, can ask the user whether a file tool
+	// may write a Reasonix-managed config file outside the workspace roots.
+	configWriteApprover tool.ConfigWriteApprover
+
 	// hooks, when non-nil, fires PreToolUse / PostToolUse shell hooks around each
 	// tool call. nil disables hook firing.
 	hooks ToolHooks
@@ -348,6 +353,13 @@ type Agent struct {
 	// provider-visible execution contract. compact preserves the old injection.
 	memoryCompilerVerbosity string
 	compilerTurn            *memorycompiler.Turn
+	// lastCompilerOutcome is the previous finished turn's persisted outcome.
+	// The immediately following user message may retroactively downgrade it
+	// when it reports the result wrong. Every non-synthetic turn start
+	// consumes it (one-shot) — even while the runtime is nil — so a ref can
+	// never survive intervening turns and be replayed after Memory v5 is
+	// re-enabled. Session switches clear it. Guarded by memoryCompilerMu.
+	lastCompilerOutcome *memorycompiler.OutcomeRef
 
 	// compilerInjectionMu bounds how often Memory v5 may replace a visible user
 	// turn with an execution contract. The runtime can still observe throttled
@@ -540,6 +552,25 @@ func (a *Agent) clearClassifierCache() {
 	}
 }
 
+// reviseMemoryCompilerOutcomeForFeedback retroactively downgrades the previous
+// turn's recorded success when the user's immediate follow-up reports the
+// result wrong. The ref is consumed unconditionally so it can never outlive
+// the turn that follows it; the revision itself additionally requires a live
+// runtime and corrective feedback.
+func (a *Agent) reviseMemoryCompilerOutcomeForFeedback(rt *memorycompiler.Runtime, input string) {
+	a.memoryCompilerMu.Lock()
+	ref := a.lastCompilerOutcome
+	a.lastCompilerOutcome = nil
+	a.memoryCompilerMu.Unlock()
+	if ref == nil || rt == nil {
+		return
+	}
+	if !memorycompiler.IsCorrectiveFeedback(input) {
+		return
+	}
+	rt.ReviseOutcomeFromFeedback(*ref, input)
+}
+
 func shouldStartMemoryCompiler(input string) bool {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {
@@ -633,6 +664,16 @@ func (a *Agent) SetSandboxEscapeApprover(g sandbox.EscapeApprover) {
 	a.sandboxEscapeApprover = g
 }
 
+// SetConfigWriteApprover installs the optional per-write approval path used by
+// the file tools when a target is a Reasonix-managed config file outside the
+// workspace write roots.
+func (a *Agent) SetConfigWriteApprover(g tool.ConfigWriteApprover) {
+	if nilutil.IsNil(g) {
+		g = nil
+	}
+	a.configWriteApprover = g
+}
+
 func (a *Agent) withTurnPreferences(input string) string {
 	if a == nil {
 		return input
@@ -691,6 +732,12 @@ func (a *Agent) SetSession(s *Session) {
 		a.rebuildTodoState(s.Snapshot())
 	}
 	a.resetMemoryCompilerInjectionGate()
+	// A session switch breaks the "immediately preceding turn" relationship:
+	// the next input belongs to a different conversation, so the pending
+	// outcome ref must not be revisable from it.
+	a.memoryCompilerMu.Lock()
+	a.lastCompilerOutcome = nil
+	a.memoryCompilerMu.Unlock()
 	// 清除分类缓存（会话边界）
 	a.clearClassifierCache()
 }
@@ -810,6 +857,10 @@ type Options struct {
 	// enforced OS sandbox fails. nil keeps fail-closed behavior.
 	SandboxEscapeApprover sandbox.EscapeApprover
 
+	// ConfigWriteApprover confirms file-tool writes to Reasonix-managed config
+	// files outside the workspace roots. nil keeps fail-closed behavior.
+	ConfigWriteApprover tool.ConfigWriteApprover
+
 	// Context management. ContextWindow <= 0 disables compaction. Ratios and
 	// RecentKeep fall back to defaults when unset.
 	ContextWindow       int
@@ -902,6 +953,10 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	if nilutil.IsNil(sandboxEscapeApprover) {
 		sandboxEscapeApprover = nil
 	}
+	configWriteApprover := opts.ConfigWriteApprover
+	if nilutil.IsNil(configWriteApprover) {
+		configWriteApprover = nil
+	}
 	hooks := opts.Hooks
 	if nilutil.IsNil(hooks) {
 		hooks = nil
@@ -933,6 +988,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		gate:                     gate,
 		planModeReadOnlyTrust:    planModeReadOnlyTrust,
 		sandboxEscapeApprover:    sandboxEscapeApprover,
+		configWriteApprover:      configWriteApprover,
 		hooks:                    hooks,
 		jobs:                     opts.Jobs,
 		evidence:                 evidence.NewLedger(),
@@ -999,6 +1055,12 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		memoryCompilerInput = sourceInput
 	}
 	input = a.withTurnPreferences(rawInput)
+	// Consume the previous turn's outcome ref on every non-synthetic turn,
+	// even while the runtime is nil (/memory-v5 off): revision must only ever
+	// target the immediately preceding turn.
+	if !MemoryCompilerSkipFromContext(ctx) {
+		a.reviseMemoryCompilerOutcomeForFeedback(a.memoryCompilerRuntime(), memoryCompilerInput)
+	}
 	if memCompiler := a.memoryCompilerRuntime(); memCompiler != nil && !MemoryCompilerSkipFromContext(ctx) && shouldStartMemoryCompiler(memoryCompilerInput) {
 		// 使用分类器判断是否为任务
 		isTask := true // 默认为任务
@@ -1024,6 +1086,10 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 				a.emitMemoryCompilerStats(turn)
 				defer func() {
 					turn.Finish(runErr)
+					ref := turn.OutcomeRef()
+					a.memoryCompilerMu.Lock()
+					a.lastCompilerOutcome = &ref
+					a.memoryCompilerMu.Unlock()
 					if a.compilerTurn == turn {
 						a.compilerTurn = nil
 					}
@@ -1101,6 +1167,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		// when building the request, since re-sent reasoning is billable prompt
 		// input for no cache or coherence gain.
 		calls = a.withPreviewFileDiffs(calls)
+		a.warnMissingToolCallReasoning(calls, reasoning)
 		a.session.Add(provider.Message{
 			Role:               provider.RoleAssistant,
 			Content:            text,
@@ -1121,7 +1188,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 					return fmt.Errorf("final-answer readiness failed %d times: %s", finalReadinessBlocks, readiness.reason)
 				}
 				event.RecordReadinessAudit(a.sink, readiness.audit(result, false))
-				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "final-answer readiness blocked: " + readiness.reason})
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: finalReadinessNoticeText(), Detail: readiness.reason})
 				a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(finalReadinessRetryMessage(readiness.reason))})
 				a.maybeCompact(ctx, usage)
 				continue
@@ -1131,14 +1198,14 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 				if emptyFinalBlocks >= maxEmptyFinalBlocks {
 					return fmt.Errorf("model finished without a visible final answer %d times", emptyFinalBlocks)
 				}
-				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: emptyFinalNotice(a.prov.Name(), usage, len(reasoning))})
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: emptyFinalNotice(), Detail: emptyFinalNoticeDetail(a.prov.Name(), usage, len(reasoning))})
 				a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(emptyFinalRetryMessage())})
 				a.maybeCompact(ctx, usage)
 				continue
 			}
 			if executorHandoff && !usedAnyTool && handoffNudges < maxExecutorHandoffNudges && shouldNudgeExecutorHandoff(input, text) {
 				handoffNudges++
-				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "executor answered without taking any action; nudging it to use its tools"})
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: executorHandoffNoticeText(), Detail: "executor answered without taking any action; nudging it to use its tools"})
 				a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(executorHandoffRetryMessage())})
 				a.maybeCompact(ctx, usage)
 				continue
@@ -1161,7 +1228,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		// Grace round guard: if we already gave the model one extra response
 		// and it still wants to call tools, stop here.
 		if graceRound {
-			return fmt.Errorf("paused after %d tool-call rounds (%s) — the work so far is saved; send another message to continue, or set %s higher or to 0 for no limit", a.maxSteps, a.maxStepsKey, a.maxStepsKey)
+			return &maxStepsPause{steps: a.maxSteps, key: a.maxStepsKey}
 		}
 
 		results := a.executeBatch(ctx, calls)
@@ -1189,13 +1256,44 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			graceRound = true
 			nudge := fmt.Sprintf("Do not call any more tools — your tool-call round limit (%s) has been reached. Instead, synthesize a final answer from all the work already completed: summarize what was accomplished, what remains to be done, and any decisions the user should make. The user can increase %s or continue in the next turn if more work is needed.", a.maxStepsKey, a.maxStepsKey)
 			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("budget (%s=%d) exhausted: one grace round to finalize", a.maxStepsKey, a.maxSteps)})
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: toolBudgetNoticeText(), Detail: fmt.Sprintf("budget (%s=%d) exhausted: one grace round to finalize", a.maxStepsKey, a.maxSteps)})
 		}
 	}
 	// Only reached when a positive maxSteps guard is configured. The work so far
 	// is already in the session, so the user can just send another message to pick
 	// up where it left off.
-	return fmt.Errorf("paused after %d tool-call rounds (%s) — the work so far is saved; send another message to continue, or set %s higher or to 0 for no limit", a.maxSteps, a.maxStepsKey, a.maxStepsKey)
+	return &maxStepsPause{steps: a.maxSteps, key: a.maxStepsKey}
+}
+
+// warnMissingToolCallReasoning surfaces a DeepSeek thinking-mode tool_calls
+// turn that arrived without reasoning text — usually a gateway renaming or
+// dropping the reasoning field. The turn is still saved and the replay still
+// succeeds (the wire layer always emits the reasoning_content key for such
+// turns), but the model continues without its chain-of-thought context, so the
+// degradation is worth a visible warning.
+func (a *Agent) warnMissingToolCallReasoning(calls []provider.ToolCall, reasoning string) {
+	if len(calls) == 0 || !provider.RequiresToolCallReasoning(a.prov) {
+		return
+	}
+	if strings.TrimSpace(reasoning) != "" {
+		return
+	}
+	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+		Text: fmt.Sprintf("%s returned %d tool call(s) without reasoning_content; continuing, but thinking context is lost for this turn (is a gateway dropping the reasoning field?)", a.prov.Name(), len(calls))})
+}
+
+// maxStepsPause is the deliberate stop when a positive tool-call budget runs
+// out: the session already holds the completed work and the user is asked to
+// continue. It is a control-flow signal, not a provider failure — Coordinator
+// matches on it to surface the pause instead of degrading the turn to
+// executor-only.
+type maxStepsPause struct {
+	steps int
+	key   string
+}
+
+func (e *maxStepsPause) Error() string {
+	return fmt.Sprintf("paused after %d tool-call rounds (%s) — the work so far is saved; send another message to continue, or set %s higher or to 0 for no limit", e.steps, e.key, e.key)
 }
 
 func (a *Agent) emitMemoryCompilerStats(turn *memorycompiler.Turn) {
@@ -1341,6 +1439,10 @@ func finalReadinessIncompleteTodos(items []evidence.TodoStepMatch) string {
 		parts = append(parts, fmt.Sprintf("%s: %s", label, item.Status))
 	}
 	return "latest successful todo_write still has incomplete items: " + strings.Join(parts, ", ")
+}
+
+func finalReadinessNoticeText() string {
+	return "Task status needs one more check; asking the assistant to finish or explain what is blocking it."
 }
 
 func (a *Agent) setTodoState(todos []evidence.TodoItem) {
@@ -1690,12 +1792,24 @@ func emptyFinalRetryMessage() string {
 	return "The previous assistant response finished without any visible answer text. Continue the same task now and provide a concise visible answer to the user. Do not send reasoning only."
 }
 
-func emptyFinalNotice(prov string, u *provider.Usage, reasoningLen int) string {
+func emptyFinalNotice() string {
+	return "No visible answer was produced; asking the assistant to respond again."
+}
+
+func emptyFinalNoticeDetail(prov string, u *provider.Usage, reasoningLen int) string {
 	finish := "unknown"
 	if u != nil && u.FinishReason != "" {
 		finish = u.FinishReason
 	}
 	return fmt.Sprintf("empty final answer blocked: %s returned no visible answer text (finish=%s, reasoning=%d chars); retrying", prov, finish, reasoningLen)
+}
+
+func executorHandoffNoticeText() string {
+	return "The assistant answered before taking action; asking it to use the required tools."
+}
+
+func toolBudgetNoticeText() string {
+	return "Tool round limit reached; asking the assistant to summarize progress."
 }
 
 func streamRecoveryMessage(hasPartialText, hadPartialTool bool) string {
@@ -1748,7 +1862,7 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 			}
 		}
 		stored = display
-		if signature != "" {
+		if signature != "" || (len(calls) > 0 && provider.RequiresToolCallReasoning(a.prov)) {
 			stored = original
 		}
 		return stored, display
@@ -2145,7 +2259,7 @@ func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutc
 	}
 
 	const blockedAdvice = "Change approach: do not keep retrying a blocked tool by changing the tool, command, or arguments. Respect the permission, plan-mode, hook, or loop-guard blocker; use an already-allowed tool, ask the user for the specific approval or choice if appropriate, or explain the blocker in your final answer."
-	var guard, notice string
+	var guard, detail string
 	if stormHit {
 		subject := fmt.Sprintf("%q", calls[0].Name)
 		short := calls[0].Name
@@ -2169,20 +2283,24 @@ func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutc
 		guard = fmt.Sprintf(
 			"[loop guard] %s has now %s %d times in a row with the same host response. Re-sending it — even with the wording changed — will not help: the calls keep hitting the same outcome. %s",
 			subject, action, a.stormCount, advice)
-		notice = fmt.Sprintf(
+		detail = fmt.Sprintf(
 			"loop guard: %s hit the same host response %d× — nudging the model to change approach",
 			short, a.stormCount)
 	} else {
 		guard = fmt.Sprintf(
 			"[loop guard] every tool call in the last %d turns has been blocked by the host (permission, plan mode, hook, or loop guard). Switching tools, reordering calls, or rewording arguments will not help while the blockers stand. %s",
 			a.blockedTurnStreak, blockedAdvice)
-		notice = fmt.Sprintf(
+		detail = fmt.Sprintf(
 			"loop guard: every tool call blocked %d turns in a row — nudging the model to change approach",
 			a.blockedTurnStreak)
 	}
 	results[0] = outcomes[0].output + "\n\n" + guard
-	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: notice})
+	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: loopGuardNoticeText(), Detail: detail})
 	a.armLoopGuardPass(receiptMark)
+}
+
+func loopGuardNoticeText() string {
+	return "The assistant is stuck retrying a blocked action; asking it to change approach."
 }
 
 // batchStormSignature returns a per-turn fixation signature — each call's
@@ -2359,6 +2477,9 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	if a.sandboxEscapeApprover != nil {
 		cctx = sandbox.WithEscapeApprover(cctx, a.sandboxEscapeApprover)
 	}
+	if a.configWriteApprover != nil {
+		cctx = tool.WithConfigWriteApprover(cctx, a.configWriteApprover)
+	}
 	if v := a.responseLanguage.Load(); v != nil {
 		if lang, ok := v.(string); ok {
 			cctx = WithResponseLanguagePreference(cctx, lang)
@@ -2374,9 +2495,10 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	}
 	callID := call.ID
 	cctx = tool.WithProgress(cctx, func(chunk string) {
-		a.sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: callID, Output: chunk}})
+		a.sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: callID, Output: secrets.RedactToolOutput(chunk)}})
 	})
 	result, err := t.Execute(cctx, json.RawMessage(call.Arguments))
+	result = secrets.RedactToolOutput(result)
 	if a.evidence != nil {
 		if call.Name == "complete_step" {
 			rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, t.ReadOnly())

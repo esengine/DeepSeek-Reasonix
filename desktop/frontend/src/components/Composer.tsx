@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ArrowUp, Check, ChevronDown, ChevronUp, ChevronsUpDown, CornerDownRight, Eye, FileText, Folder, Gauge, List, MessageSquare, Search, Shield, ShieldAlert, ShieldCheck, SlidersHorizontal, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
@@ -8,11 +8,11 @@ import { app, onFilesDropped } from "../lib/bridge";
 import { canUsePromptHistory, isFnKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
-import { detectShortcutPlatform, matchesShortcut } from "../lib/keyboardShortcuts";
+import { detectShortcutPlatform, formatShortcutCombo, matchesShortcut } from "../lib/keyboardShortcuts";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import { createRafResizeUpdater } from "../lib/resizeDrag";
 import { useToast } from "../lib/toast";
-import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type DirEntry, type EffortInfo, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type TokenMode, type ToolApprovalMode } from "../lib/types";
+import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type TokenMode, type ToolApprovalMode, type BalanceInfo } from "../lib/types";
 import {
   formatWorkspaceReference,
   parseWorkspaceReference,
@@ -26,10 +26,11 @@ import { EffortSwitcher } from "./EffortSwitcher";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { Tooltip } from "./Tooltip";
 import { ComposerContextCard } from "./ComposerContextCard";
+import { ContextWindowRing } from "./ContextWindowRing";
 import { ImageViewer } from "./ImageViewer";
 import { VirtualMenu } from "./VirtualMenu";
 import { dirEntryMenuLabel, dirEntrySubmitPath } from "./FileReferenceMenu";
-
+import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 interface Attachment {
   path: string;
   previewUrl?: string;
@@ -51,6 +52,9 @@ const LONG_PASTE_MIN_CHARS = 2000;
 const LONG_PASTE_MIN_LINES = 20;
 const COMPOSER_MIN_HEIGHT = 104;
 const COMPOSER_MAX_HEIGHT = 360;
+// Height reserved for the in-card run strip while a turn runs; applied via a
+// CSS calc so --composer-height always stays in "logical height" space.
+const COMPOSER_RUN_STRIP_RESERVED = 30;
 const COMPOSER_MAX_VIEWPORT_RATIO = 0.4;
 const COMPOSER_AUTO_RESERVED_HEIGHT = 58;
 const PROMPT_HISTORY_PREFETCH_REMAINING = 3;
@@ -250,9 +254,50 @@ async function dataURLHash(dataUrl: string): Promise<string> {
   }
 }
 
+function fallbackCopyText(value: string): boolean {
+  const activeElement = document.activeElement;
+  const selection = document.getSelection();
+  const ranges: Range[] = [];
+  if (selection) {
+    for (let index = 0; index < selection.rangeCount; index += 1) {
+      ranges.push(selection.getRangeAt(index));
+    }
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.inset = "0 auto auto 0";
+  textarea.style.width = "1px";
+  textarea.style.height = "1px";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } finally {
+    textarea.remove();
+    if (selection) {
+      selection.removeAllRanges();
+      for (const range of ranges) selection.addRange(range);
+    }
+    if (activeElement instanceof HTMLElement) activeElement.focus();
+  }
+  return ok;
+}
+
 function composerMaxHeight(): number {
   if (typeof window === "undefined") return COMPOSER_MAX_HEIGHT;
   return Math.max(COMPOSER_MIN_HEIGHT, Math.min(COMPOSER_MAX_HEIGHT, Math.floor(window.innerHeight * COMPOSER_MAX_VIEWPORT_RATIO)));
+}
+
+// The rendered card includes the run strip while a turn runs; subtract it to
+// recover the user's logical height when measuring from the DOM.
+function composerLogicalHeight(card: HTMLElement): number {
+  const strip = card.querySelector(".composer-run-strip");
+  const stripHeight = strip ? strip.getBoundingClientRect().height : 0;
+  return card.getBoundingClientRect().height - stripHeight;
 }
 
 function clampComposerHeight(height: number): number {
@@ -449,12 +494,20 @@ export function Composer({
   turnStartAt,
   turnTokens,
   retry,
+  pendingApprovalLabel,
+  pendingAsk = false,
   transientDismissSignal,
   sessionKey,
   fileRefRefreshKey,
   guidanceConsumedKey,
   guidanceConsumedText,
   guidanceQueuePreviewItems,
+  showContextWindowRing = false,
+  context,
+  turnCost,
+  cacheHitTokens,
+  cacheMissTokens,
+  balance,
 }: {
   running: boolean;
   collaborationMode: CollaborationMode;
@@ -492,12 +545,23 @@ export function Composer({
   turnStartAt?: number;
   turnTokens?: number;
   retry?: { attempt: number; max: number };
+  // Resolved label of the tool waiting for approval (null/undefined when none);
+  // shifts the run strip into its waiting state so the ticking spinner does not
+  // claim the model is working while a prompt is blocked on the user.
+  pendingApprovalLabel?: string | null;
+  pendingAsk?: boolean;
   transientDismissSignal?: number;
   sessionKey?: string;
   fileRefRefreshKey?: number | string;
   guidanceConsumedKey?: string;
   guidanceConsumedText?: string;
   guidanceQueuePreviewItems?: readonly string[];
+  showContextWindowRing?: boolean;
+  context?: ContextInfo;
+  turnCost?: number;
+  cacheHitTokens?: number;
+  cacheMissTokens?: number;
+  balance?: BalanceInfo;
 }) {
   const { t, locale } = useI18n();
   const { showToast } = useToast();
@@ -541,6 +605,7 @@ export function Composer({
   const nextGuidanceId = useRef(1);
   const [loadingPastChats, setLoadingPastChats] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [inputMenuPoint, setInputMenuPoint] = useState<ContextMenuPoint | null>(null);
   const [composerPrompt, setComposerPrompt] = useState<string | null>(null);
   // Prompt history navigation (plain ↑/↓)
   // Use refs for values read inside async closures to avoid stale captures
@@ -654,7 +719,6 @@ export function Composer({
 
   useEffect(() => {
     if (wasRunning.current && !running) {
-      setPendingGuidance([]);
       setGuidanceExpanded(false);
       if (text.trim() === "") {
         pastedBlocksRef.current = [];
@@ -664,6 +728,23 @@ export function Composer({
     }
     wasRunning.current = running;
   }, [running, text]);
+
+  // A message queued while a turn was running (without the explicit "guide"
+  // steer click) is the user's next turn, not scratch text to discard — send
+  // it once the turn is done. Gated on submitDisabled, not just running:
+  // if the turn ends while the controller is still activating/hydrating,
+  // App's onSend silently no-ops on !controllerReady, but sendQueuedGuidance
+  // still removes the item as if it had sent — so wait for submitDisabled to
+  // clear instead of firing into that no-op window (#6210 follow-up). Once
+  // both conditions hold, a successful send removes the head and starts a
+  // new turn, which flips `running` true then false again, re-running this
+  // effect to drain the shelf one item at a time; a failed send is left in
+  // place (dismissible via the trash button) rather than silently dropped.
+  useEffect(() => {
+    if (running || submitDisabled) return;
+    const next = pendingGuidance[0];
+    if (next) void sendQueuedGuidance(next);
+  }, [running, submitDisabled, pendingGuidance]);
 
   useEffect(() => {
     setPendingGuidance([]);
@@ -1463,6 +1544,137 @@ export function Composer({
     }
   };
 
+  const getInputSelection = () => {
+    const node = taRef.current;
+    const start = node?.selectionStart ?? text.length;
+    const end = node?.selectionEnd ?? text.length;
+    const from = Math.min(start, end);
+    const to = Math.max(start, end);
+    return {
+      from,
+      to,
+      selected: text.slice(from, to),
+    };
+  };
+
+  const focusInputRange = (start: number, end = start) => {
+    requestAnimationFrame(() => {
+      const node = taRef.current;
+      if (!node) return;
+      node.focus();
+      node.setSelectionRange(start, end);
+      lastSelectionRef.current = { start, end };
+    });
+  };
+
+  const replaceInputRange = (value: string, start: number, end: number) => {
+    const next = text.slice(0, start) + value + text.slice(end);
+    setText(next);
+    focusInputRange(start + value.length);
+  };
+
+  const insertPastedText = (pasted: string, start: number, end: number) => {
+    const normalizedPasted = pasted.replace(/\r\n/g, "\n");
+
+    if (shouldFoldPaste(pasted)) {
+      const id = nextPasteId.current++;
+      const lines = lineCount(pasted);
+      const label = t("composer.pastedLabel", { id, lines });
+      const block: PastedBlock = { label, text: pasted };
+      const next = text.slice(0, start) + label + text.slice(end);
+      pastedBlocksRef.current = [...pastedBlocksRef.current, block];
+      setPastedBlocks((prev) => [...prev, block]);
+      setText(next);
+      focusInputRange(start + label.length);
+    } else {
+      resetPromptHistoryNavigation();
+      const next = text.slice(0, start) + normalizedPasted + text.slice(end);
+      setText(next);
+      focusInputRange(start + normalizedPasted.length);
+    }
+  };
+
+  const copyComposerSelection = async (cut = false) => {
+    const selection = getInputSelection();
+    setInputMenuPoint(null);
+    if (!selection.selected) {
+      focusInputRange(selection.from, selection.to);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(selection.selected);
+    } catch {
+      // Fall back to Wails desktop runtime, then execCommand
+      try {
+        if (typeof window !== "undefined" && (await window.runtime?.ClipboardSetText?.(selection.selected))) {
+          /* ok */
+        } else if (!fallbackCopyText(selection.selected)) {
+          // Every clipboard path failed. Cutting now would delete text that
+          // never reached the clipboard, so keep the draft intact.
+          focusInputRange(selection.from, selection.to);
+          return;
+        }
+      } catch {
+        focusInputRange(selection.from, selection.to);
+        return;
+      }
+    }
+    if (cut) {
+      resetPromptHistoryNavigation();
+      replaceInputRange("", selection.from, selection.to);
+    } else {
+      focusInputRange(selection.from, selection.to);
+    }
+  };
+
+  const pasteIntoComposer = async () => {
+    const selection = getInputSelection();
+    setInputMenuPoint(null);
+
+    // Try reading clipboard items for image detection (no event in menu path)
+    try {
+      const items = await navigator.clipboard.read();
+      if (items.some((item) => item.types.some((t) => t.startsWith("image/")))) {
+        void attachNativeClipboardImage(true, activeDraftKeyRef.current);
+        return;
+      }
+    } catch {
+      /* clipboard.read() not supported or permission denied; fall through */
+    }
+
+    if (!navigator.clipboard?.readText) {
+      focusInputRange(selection.from, selection.to);
+      return;
+    }
+    try {
+      const pasted = await navigator.clipboard.readText();
+      if (pasted === "") {
+        // Match the keyboard paste handler: an empty text read means "nothing
+        // to insert" (empty clipboard, files, or unsupported types) — never
+        // replace the current selection with nothing. An image may still be
+        // attachable through the native clipboard path.
+        focusInputRange(selection.from, selection.to);
+        void attachNativeClipboardImage(false, activeDraftKeyRef.current);
+        return;
+      }
+      insertPastedText(pasted, selection.from, selection.to);
+    } catch {
+      focusInputRange(selection.from, selection.to);
+    }
+  };
+
+  const selectAllComposerText = () => {
+    setInputMenuPoint(null);
+    focusInputRange(0, text.length);
+  };
+
+  const openInputMenu = (event: ReactMouseEvent<HTMLTextAreaElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    rememberCaret();
+    setInputMenuPoint(contextMenuPointFromEvent(event));
+  };
+
   const hasWorkspaceReferenceDrag = (dataTransfer: DataTransfer): boolean =>
     Array.from(dataTransfer.types).includes(WORKSPACE_REF_DRAG_TYPE);
 
@@ -1536,7 +1748,19 @@ export function Composer({
   const handleCancel = () => {
     const restored = onCancel();
     if (goalModeOn && activeGoal) onClearGoal();
-    if (typeof restored === "string") setTextCaretEnd(restored);
+    // Queued guidance the model never consumed would otherwise vanish when the
+    // cancelled turn ends (the running→false effect clears the shelf). Fold it
+    // back into the draft: cancelling means "stop acting", not "discard what I
+    // typed" — the same contract onCancel already honors for un-sent text.
+    const queued = pendingGuidance.map((item) => item.text).filter((part) => part.trim() !== "");
+    if (queued.length === 0) {
+      if (typeof restored === "string") setTextCaretEnd(restored);
+      return;
+    }
+    setPendingGuidance([]);
+    setGuidanceExpanded(false);
+    const base = typeof restored === "string" ? restored : text;
+    setTextCaretEnd([base, ...queued].filter((part) => part.trim() !== "").join("\n"));
   };
 
   const pickCommand = (c: CommandInfo) => setTextCaretEnd("/" + c.name + " ");
@@ -1637,7 +1861,7 @@ export function Composer({
 
     e.preventDefault();
     const startY = e.clientY;
-    const startHeight = composerHeight ?? card.getBoundingClientRect().height;
+    const startHeight = composerHeight ?? composerLogicalHeight(card);
     let nextHeight = clampComposerHeight(startHeight);
     let moved = false;
     card.style.setProperty("--composer-height", `${nextHeight}px`);
@@ -1675,7 +1899,7 @@ export function Composer({
 
   const onComposerResizeKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
     const card = composerCardRef.current;
-    const current = composerHeight ?? card?.getBoundingClientRect().height ?? COMPOSER_MIN_HEIGHT;
+    const current = composerHeight ?? (card ? composerLogicalHeight(card) : COMPOSER_MIN_HEIGHT);
     const step = e.shiftKey ? 32 : 16;
     let next: number | null = null;
     if (e.key === "ArrowUp" || e.key === "PageUp") next = current + step;
@@ -2006,7 +2230,18 @@ export function Composer({
     }
   };
 
-  const composerCardStyle = composerHeight === null ? undefined : ({ "--composer-height": `${composerHeight}px` } as CSSProperties);
+  // When the run strip is visible inside a user-resized card, the card grows
+  // by the strip's reserved height so the meta row stays fully visible.
+  // --composer-height carries only the user's logical height; the reservation
+  // is a separate variable consumed by the CSS calc, so the live resize drag
+  // (which writes raw logical heights) stays consistent with this render path.
+  const showRunStrip = Boolean(retry || running);
+  const composerCardStyle = composerHeight === null
+    ? undefined
+    : ({
+        "--composer-height": `${composerHeight}px`,
+        "--composer-run-strip-reserved": `${showRunStrip ? COMPOSER_RUN_STRIP_RESERVED : 0}px`,
+      } as CSSProperties);
   const textareaStyle = composerHeight === null && textareaAutoHeight !== null
     ? ({ height: `${textareaAutoHeight}px`, overflowY: textareaAutoOverflow ? "auto" : "hidden" } as CSSProperties)
     : undefined;
@@ -2054,17 +2289,45 @@ export function Composer({
       requestAnimationFrame(() => taRef.current?.focus());
     });
   };
-  const runActivity = retry
+  // Run-strip state machine: retry > waiting-approval > waiting-ask > streaming.
+  // The waiting states replace the whimsical ticker — while a prompt is blocked
+  // on the user, the strip must say so instead of counting "working" seconds.
+  const waitingPrompt = pendingApprovalLabel ? "approval" : pendingAsk ? "ask" : null;
+  // The pending approval itself disables the composer; keep the approval bar
+  // usable in exactly that case so the mode can still be changed mid-prompt.
+  const approvalBarDisabled = Boolean(disabled) && !pendingApprovalLabel;
+  // Waiting on the user (approval/ask) is not model work: pause the ticker's
+  // clock while a prompt is blocked so the elapsed time means "model time",
+  // matching what the waiting strip promises. Retries keep counting — they are
+  // system time, not user time. Accumulated in state via the effect cleanup so
+  // leaving the waiting state re-renders with the corrected time immediately.
+  const [waitAccumMs, setWaitAccumMs] = useState(0);
+  useEffect(() => {
+    setWaitAccumMs(0);
+  }, [turnStartAt]);
+  useEffect(() => {
+    if (!waitingPrompt) return;
+    const since = Date.now();
+    return () => setWaitAccumMs((total) => total + (Date.now() - since));
+  }, [waitingPrompt]);
+  const runStateText = retry
     ? t("status.retrying", { attempt: retry.attempt, max: retry.max })
-    : running && turnStartAt
-      ? (() => {
-          const elapsedMs = Math.max(0, now - turnStartAt);
-          const words = SPINNER_WORDS[locale];
-          const word = words[Math.floor(elapsedMs / 3000) % words.length];
-          const tok = turnTokens && turnTokens > 0 ? ` · ↓ ${fmtTokens(turnTokens)} ${t("status.tokens")}` : "";
-          return `${word}… ${fmtElapsed(elapsedMs)}${tok}`;
-        })()
-      : null;
+    : waitingPrompt === "approval"
+      ? t("composer.runWaitingApproval", { tool: pendingApprovalLabel ?? "" })
+      : waitingPrompt === "ask"
+        ? t("composer.runWaitingAsk")
+        : running
+          ? t("composer.runAnnounceRunning")
+          : null;
+  const runTicker = !retry && !waitingPrompt && running && turnStartAt
+    ? (() => {
+        const elapsedMs = Math.max(0, now - turnStartAt - waitAccumMs);
+        const words = SPINNER_WORDS[locale];
+        const word = words[Math.floor(elapsedMs / 3000) % words.length];
+        const tok = turnTokens && turnTokens > 0 ? ` · ↓ ${fmtTokens(turnTokens)} ${t("status.tokens")}` : "";
+        return `${word}… ${fmtElapsed(elapsedMs)}${tok}`;
+      })()
+    : null;
   const submitEmpty = !text.trim() && attachments.length === 0 && workspaceRefs.length === 0;
   const submitBlocked = submitting || pendingPaste > 0 || (submitEmpty && !(goalModeOn && !activeGoal)) || disabled || (!running && submitDisabled) || readOnly;
   const submitTooltip = running ? t("composer.queueGuidance") : t("composer.send");
@@ -2085,6 +2348,46 @@ export function Composer({
     hasEffort ? "composer-meta--has-effort" : "composer-meta--no-effort",
     planModeOn || goalModeOn || tokenModeOn ? "composer-meta--has-intent-chip" : "composer-meta--no-intent-chip",
   ].join(" ");
+
+  const inputSelection = getInputSelection();
+  const hasInputSelection = inputSelection.from !== inputSelection.to;
+  // Platform-correct hint: ⌘ on macOS, Ctrl elsewhere — same formatter the
+  // shortcut settings UI uses.
+  const editMenuShortcut = (key: string) =>
+    formatShortcutCombo(
+      shortcutPlatform === "darwin" ? { key, meta: true } : { key, ctrl: true },
+      shortcutPlatform,
+    );
+  const inputMenuItems: ContextMenuItem[] = [
+    {
+      key: "cut",
+      label: t("common.cut"),
+      shortcut: editMenuShortcut("x"),
+      disabled: disabled || !hasInputSelection,
+      onSelect: () => void copyComposerSelection(true),
+    },
+    {
+      key: "copy",
+      label: t("common.copy"),
+      shortcut: editMenuShortcut("c"),
+      disabled: !hasInputSelection,
+      onSelect: () => void copyComposerSelection(),
+    },
+    {
+      key: "paste",
+      label: t("common.paste"),
+      shortcut: editMenuShortcut("v"),
+      disabled,
+      onSelect: () => void pasteIntoComposer(),
+    },
+    {
+      key: "select-all",
+      label: t("common.selectAll"),
+      shortcut: editMenuShortcut("a"),
+      disabled: text.length === 0,
+      onSelect: selectAllComposerText,
+    },
+  ];
 
   return (
     <div
@@ -2322,20 +2625,6 @@ export function Composer({
           />
         )
       )}
-      {runActivity && (
-        <div className="composer-toolbar composer-toolbar--status-only">
-          <div className="composer-runstatus" role="status" aria-live="polite">
-            <span className="composer-runstatus__dot" />
-            <span className="composer-runstatus__text">{runActivity}</span>
-            <Tooltip label={t("composer.stop")}>
-              <button className="composer-runstatus__stop" type="button" onClick={handleCancel}>
-                <Square size={10} fill="currentColor" />
-                <span>{t("composer.stopShort")}</span>
-              </button>
-            </Tooltip>
-          </div>
-        </div>
-      )}
       {pendingGuidance.length > 0 && (
         <div className="composer-guidance-shelf" aria-label={t("composer.guidanceQueue")}>
           <div className="composer-guidance-head">
@@ -2484,7 +2773,7 @@ export function Composer({
         </div>
       )}
       <div
-        className={`composer-card${composerHeight !== null || composerResizing ? " composer-card--resized" : ""}${composerAutoExpanded ? " composer-card--autosized" : ""}${composerResizing ? " composer-card--resizing" : ""}${running ? " composer-card--running" : ""}`}
+        className={`composer-card${composerHeight !== null || composerResizing ? " composer-card--resized" : ""}${composerAutoExpanded ? " composer-card--autosized" : ""}${composerResizing ? " composer-card--resizing" : ""}${running ? (waitingPrompt ? " composer-card--waiting" : " composer-card--running") : ""}`}
         ref={composerCardRef}
         style={composerCardStyle}
       >
@@ -2502,6 +2791,17 @@ export function Composer({
           onKeyDown={onComposerResizeKeyDown}
           onDoubleClick={resetComposerHeight}
         />
+        {runStateText && (
+          <div className={`composer-run-strip${waitingPrompt ? " composer-run-strip--waiting" : ""}`}>
+            <span className="composer-run-strip__dot" aria-hidden="true" />
+            {/* The ticker re-renders every second; keep it out of the accessibility
+                tree and announce only the stable state text via the live region. */}
+            <span className="composer-run-strip__text" aria-hidden={runTicker ? true : undefined}>
+              {runTicker ?? runStateText}
+            </span>
+            <span className="sr-only" role="status">{runStateText}</span>
+          </div>
+        )}
         <div
           className={`composer${dragOver ? " composer--dragover" : ""}${disabled || readOnly ? " composer--disabled" : ""}${shellModeActive ? " composer--shell" : ""}`}
           onDrop={onDrop}
@@ -2524,6 +2824,7 @@ export function Composer({
             onClick={rememberCaret}
             onKeyUp={rememberCaret}
             onFocus={rememberCaret}
+            onContextMenu={openInputMenu}
             onPaste={onPaste}
             onKeyDown={onKeyDown}
             onCompositionStart={() => {
@@ -2543,6 +2844,18 @@ export function Composer({
               {composerPrompt}
             </span>
           )}
+          {running && (
+            <Tooltip label={t("composer.stop")}>
+              <button
+                className="composer__btn composer__btn--stop"
+                type="button"
+                onClick={handleCancel}
+                aria-label={t("composer.stop")}
+              >
+                <Square size={12} fill="currentColor" />
+              </button>
+            </Tooltip>
+          )}
           <Tooltip label={submitTooltip}>
             <button
               className={`composer__btn composer__btn--send${running ? " composer__btn--steer" : ""}`}
@@ -2550,10 +2863,19 @@ export function Composer({
               disabled={submitBlocked}
               aria-label={submitTooltip}
             >
-              <ArrowUp size={16} />
+              {running ? <CornerDownRight size={16} /> : <ArrowUp size={16} />}
             </button>
           </Tooltip>
         </div>
+        <ContextMenu
+          open={inputMenuPoint !== null}
+          point={inputMenuPoint}
+          items={inputMenuItems}
+          className="context-menu--composer-input"
+          minWidth={64}
+          ariaLabel={t("composer.inputActions")}
+          onClose={() => setInputMenuPoint(null)}
+        />
         <div className={composerMetaClass}>
           <div className="composer-meta__params">
             <div className="composer-meta__control composer-meta__control--intent">
@@ -2634,13 +2956,17 @@ export function Composer({
               )}
             </div>
             <div className="composer-meta__control composer-meta__control--approval">
+              {/* A pending tool approval disables the composer, but the approval
+                  bar stays usable so mode changes remain possible mid-prompt;
+                  the approval card explains that the pending request still needs
+                  an explicit decision. */}
               <div className="composer-modebar composer-modebar--approval" data-mode={toolApprovalMode} title={t("composer.accessMenuTitle")}>
                 <span className="composer-modebar__thumb" aria-hidden="true" />
                 <button
                   type="button"
                   className={`composer-modebar__item composer-modebar__item--ask${toolApprovalMode === "ask" ? " composer-modebar__item--active" : ""}`}
                   onClick={() => chooseApprovalMode("ask")}
-                  disabled={disabled}
+                  disabled={approvalBarDisabled}
                   aria-pressed={toolApprovalMode === "ask"}
                   title={t("composer.accessAskTitle")}
                 >
@@ -2651,7 +2977,7 @@ export function Composer({
                   type="button"
                   className={`composer-modebar__item composer-modebar__item--auto${toolApprovalMode === "auto" ? " composer-modebar__item--active" : ""}`}
                   onClick={() => chooseApprovalMode("auto")}
-                  disabled={disabled}
+                  disabled={approvalBarDisabled}
                   aria-pressed={toolApprovalMode === "auto"}
                   title={t("composer.accessAutoTitle")}
                 >
@@ -2662,7 +2988,7 @@ export function Composer({
                   type="button"
                   className={`composer-modebar__item composer-modebar__item--yolo${toolApprovalMode === "yolo" ? " composer-modebar__item--active" : ""}`}
                   onClick={() => chooseApprovalMode("yolo")}
-                  disabled={disabled}
+                  disabled={approvalBarDisabled}
                   aria-pressed={toolApprovalMode === "yolo"}
                   title={t("composer.accessYoloTitle")}
                 >
@@ -2672,6 +2998,17 @@ export function Composer({
               </div>
             </div>
             <div className="composer-meta__control composer-meta__control--model">
+              {showContextWindowRing && (
+                <ContextWindowRing
+                  enabled={showContextWindowRing}
+                  context={context}
+                  tabId={tabId}
+                  turnCost={turnCost}
+                  cacheHitTokens={cacheHitTokens}
+                  cacheMissTokens={cacheMissTokens}
+                  balance={balance}
+                />
+              )}
               <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} />
             </div>
             {hasEffort && (

@@ -663,7 +663,7 @@ func TestMaybeCompactThreshold(t *testing.T) {
 	if len(prov.got) != 0 {
 		t.Fatalf("soft threshold called summarizer: %+v", prov.got)
 	}
-	if len(notices) != 1 || !strings.Contains(notices[0].Text, "context reached 50%") {
+	if len(notices) != 1 || notices[0].Text != "Context is getting large; preserving cache until cleanup is needed." || !strings.Contains(notices[0].Detail, "context reached 50%") {
 		t.Fatalf("soft threshold notice = %+v", notices)
 	}
 	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 60})

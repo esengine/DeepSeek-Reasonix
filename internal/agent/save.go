@@ -19,6 +19,7 @@ import (
 
 	"reasonix/internal/fileutil"
 	"reasonix/internal/provider"
+	"reasonix/internal/secrets"
 	"reasonix/internal/store"
 )
 
@@ -201,6 +202,16 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 	// stalest capture written last would then read the newer transcript it
 	// lost the race to as a bogus stale-prefix conflict.
 	msgs, version, rewriteVersion := s.snapshotWithVersion()
+	// Durable transcripts are always redacted, independent of the live
+	// [secrets] redact_tool_output toggle. Digest consistency holds because
+	// Redact is deterministic and idempotent (see secrets.Redact): a loaded
+	// session's messages are already redacted, so re-redacting them here is a
+	// byte-for-byte no-op and the snapshot keeps its prefix relationship to
+	// the on-disk transcript — the same digest/prefix machinery that guards
+	// against bogus stale-prefix conflicts (#6083) sees identical bytes. The
+	// persisted baseline (markPersisted) is likewise recorded over the
+	// redacted form, matching what LoadSession will digest back.
+	msgs = secrets.RedactMessages(msgs)
 	digest, contentBytes, err := digestAndSizeSessionMessages(msgs)
 	if err != nil {
 		return err
@@ -391,7 +402,7 @@ func writeSessionMessages(path string, msgs []provider.Message) error {
 // checkSnapshotWrite decides whether this session may write msgs over path, and
 // whether the safe write shape is a no-op, append-only suffix, or full rewrite.
 func (s *Session) checkSnapshotWrite(path string, next []provider.Message, nextDigest [sha256.Size]byte, nextVersion uint64, allowOwnedRewrite bool) (snapshotWriteDecision, error) {
-	current, err := LoadSession(path)
+	current, err := loadSessionUnlocked(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return snapshotWriteDecision{}, nil
@@ -541,6 +552,11 @@ func (s *Session) SaveRecoveryBranch(opts RecoveryBranchOptions) (RecoveryBranch
 		return RecoveryBranchInfo{}, fmt.Errorf("empty original session path")
 	}
 	msgs, version, rewriteVersion := s.snapshotWithVersion()
+	// Same redaction contract as save(): recovery branches are durable
+	// transcripts too, and the coverage checks below compare against on-disk
+	// content that save() already redacted — comparing a raw snapshot against
+	// it would misread pure coverage as divergence and fork a bogus branch.
+	msgs = secrets.RedactMessages(msgs)
 	preview, turns := SessionPreviewFromMessages(msgs)
 	if turns == 0 {
 		return RecoveryBranchInfo{}, ErrSessionRecoveryNotNeeded
@@ -557,7 +573,7 @@ func (s *Session) SaveRecoveryBranch(opts RecoveryBranchOptions) (RecoveryBranch
 		unlockOriginal()
 		return RecoveryBranchInfo{}, fmt.Errorf("lock original session file: %w", lockErr)
 	}
-	current, err := LoadSession(originalPath)
+	current, err := loadSessionUnlocked(originalPath)
 	unlockOriginalFile()
 	unlockOriginal()
 	if err != nil && !os.IsNotExist(err) {
@@ -616,7 +632,7 @@ func (s *Session) SaveRecoveryBranch(opts RecoveryBranchOptions) (RecoveryBranch
 		return RecoveryBranchInfo{}, fmt.Errorf("lock recovery session file: %w", err)
 	}
 	defer unlockRecoveryFile()
-	if loaded, loadErr := LoadSession(recoveryPath); loadErr == nil && loaded != nil {
+	if loaded, loadErr := loadSessionUnlocked(recoveryPath); loadErr == nil && loaded != nil {
 		existingDigest, digestErr := digestSessionMessages(loaded.Snapshot())
 		if digestErr != nil {
 			return RecoveryBranchInfo{}, digestErr
@@ -1089,9 +1105,17 @@ func CanonicalSessionPath(path string) string {
 // back to the compatibility .jsonl checkpoint. A damaged log is replayed to its
 // last clean record (or the checkpoint when nothing decodes) and flagged so the
 // next save heals it with a rewrite-and-compact.
+// In-process loads share the save path mutex so they cannot observe a local
+// SaveSnapshot between appending an event-log record and refreshing the index.
 // Missing files surface as os.IsNotExist so callers can fall through to a
 // new session.
 func LoadSession(path string) (*Session, error) {
+	unlock := lockSessionSavePath(path)
+	defer unlock()
+	return loadSessionUnlocked(path)
+}
+
+func loadSessionUnlocked(path string) (*Session, error) {
 	msgs, _, damaged, err := loadSessionMessages(path)
 	if err != nil {
 		return nil, err

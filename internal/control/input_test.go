@@ -782,7 +782,7 @@ func TestRunTurnAutoPlanComplexTask(t *testing.T) {
 	if !c.PlanMode() {
 		t.Fatal("controller plan mode should be on after auto-plan")
 	}
-	if len(notices) != 1 || !strings.Contains(notices[0], "auto plan") {
+	if len(notices) != 1 || notices[0] != "Planning mode enabled for this multi-step task." {
 		t.Fatalf("notice = %v, want one auto-plan notice", notices)
 	}
 }

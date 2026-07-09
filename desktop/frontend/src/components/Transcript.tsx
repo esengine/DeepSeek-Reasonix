@@ -129,6 +129,10 @@ export function Transcript({
     scrollRef,
     stick,
     onScroll,
+    onWheelIntent,
+    onTouchStartIntent,
+    onTouchMoveIntent,
+    onKeyScrollIntent,
     isAtBottom,
     smoothScrollTo,
     scrollToBottomAfterLayout,
@@ -147,6 +151,25 @@ export function Transcript({
 
   const [displayMode, setDisplayMode] = useState<DisplayMode>(() => getDisplayMode());
   useEffect(() => onDisplayModeChange((mode) => setDisplayMode(mode)), []);
+
+  const cancelStreamingAutoScroll = useCallback(() => {
+    if (autoScrollFrame.current !== null) {
+      cancelAnimationFrame(autoScrollFrame.current);
+      autoScrollFrame.current = null;
+    }
+  }, []);
+
+  const handleWheelIntent = useCallback((event: React.WheelEvent<HTMLElement>) => {
+    if (onWheelIntent(event)) cancelStreamingAutoScroll();
+  }, [cancelStreamingAutoScroll, onWheelIntent]);
+
+  const handleTouchMoveIntent = useCallback((event: React.TouchEvent<HTMLElement>) => {
+    if (onTouchMoveIntent(event)) cancelStreamingAutoScroll();
+  }, [cancelStreamingAutoScroll, onTouchMoveIntent]);
+
+  const handleKeyScrollIntent = useCallback((event: React.KeyboardEvent<HTMLElement>) => {
+    if (onKeyScrollIntent(event)) cancelStreamingAutoScroll();
+  }, [cancelStreamingAutoScroll, onKeyScrollIntent]);
 
   const questions = useMemo<QuestionAnchor[]>(() => {
     const anchors: QuestionAnchor[] = [];
@@ -587,7 +610,7 @@ export function Transcript({
             out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} tabId={tabId} />);
             break;
           case "phase": out.push(<PhaseCard key={it.id} text={it.text} />); break;
-          case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
+          case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} detail={it.detail} />); break;
           case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
         }
       }
@@ -608,6 +631,10 @@ export function Transcript({
         className={`transcript${empty ? " transcript--empty" : ""}`}
         ref={scrollRef}
         onScroll={onScroll}
+        onWheelCapture={handleWheelIntent}
+        onTouchStartCapture={onTouchStartIntent}
+        onTouchMoveCapture={handleTouchMoveIntent}
+        onKeyDownCapture={handleKeyScrollIntent}
       >
         {empty && !hydrating && <Welcome onPrompt={onPrompt} variant={welcomeVariant} />}
 
@@ -949,7 +976,7 @@ function WarmTurnItems({
         break;
       }
       case "phase": nodes.push(<PhaseCard key={it.id} text={it.text} />); break;
-      case "notice": nodes.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
+      case "notice": nodes.push(<NoticeCard key={it.id} level={it.level} text={it.text} detail={it.detail} />); break;
       case "compaction": nodes.push(<CompactionCard key={it.id} item={it} />); break;
     }
   }
@@ -1268,11 +1295,20 @@ function PhaseCard({ text }: { text: string }) {
   return <div className="phase" data-entrance="true"><ProcessPhaseIcon size={12} /><span>{text}</span></div>;
 }
 
-function NoticeCard({ level, text }: { level: NoticeItem["level"]; text: string }) {
+function NoticeCard({ level, text, detail }: { level: NoticeItem["level"]; text: string; detail?: string }) {
+  const t = useT();
   return (
     <div className={`notice-line notice-line--${level}`} data-entrance="true">
       <span className="notice-line__icon">{level === "warn" ? "⚠ " : "ℹ "}</span>
-      <span className="notice-line__text">{text}</span>
+      <div className="notice-line__text">
+        {text}
+        {detail ? (
+          <details className="notice-line__details">
+            <summary>{t("notice.details")}</summary>
+            <div>{detail}</div>
+          </details>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -660,6 +660,12 @@ Linux, and a native helper on Windows): each command is allowed to write only
 the same roots plus platform-specific command temp/cache roots, denied reads
 under `forbid_read`, and allowed to reach the network only when
 `network = true`.
+**Current status:** stable builds force the effective Bash sandbox mode to
+`off` on Windows — even an explicit `bash = "enforce"` resolves to `off` (and
+`reasonix doctor` flags the ignored setting) — because the native backend
+described below still breaks common Git Bash/MSYS2, Docker, and git workflows.
+The description is kept as the design of record until the backend is reliable
+enough to re-enable.
 The native Windows helper uses Reasonix's bundled Windows sandbox backend:
 AppContainer for read-only commands and a low-integrity token for writable
 commands, with temporary ACL grants for

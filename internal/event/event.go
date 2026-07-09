@@ -241,6 +241,7 @@ const (
 type Event struct {
 	Kind             Kind
 	Text             string                    // Reasoning / Text / Message / Notice / Phase
+	Detail           string                    // Notice: optional diagnostic text for expandable details
 	Reasoning        string                    // Message: the full reasoning chain
 	MemoryCitations  []provider.MemoryCitation // Message: local memory references displayed by rich frontends
 	MemoryCompiler   *MemoryCompilerStats      // MemoryCompilerStats: content-free Memory v5 usage counters

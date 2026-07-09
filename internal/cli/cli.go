@@ -801,8 +801,7 @@ func chatREPL(args []string) int {
 	signal.Notify(hangup, syscall.SIGHUP, syscall.SIGTERM)
 	go func() {
 		for range hangup {
-			_ = ctrl.Snapshot()
-			p.Quit()
+			p.Send(tuiShutdownMsg{})
 		}
 	}()
 	final, runErr := p.Run()

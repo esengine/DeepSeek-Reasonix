@@ -13,6 +13,12 @@ import (
 	"reasonix/internal/tool"
 )
 
+type toolCallReasoningRequiredProvider struct {
+	*testutil.MockProvider
+}
+
+func (p toolCallReasoningRequiredProvider) RequiresToolCallReasoning() bool { return true }
+
 func echoRegistry() *tool.Registry {
 	reg := tool.NewRegistry()
 	reg.Add(echoTool{})
@@ -521,6 +527,78 @@ func TestRunWellFormedToolLoopRoundTrips(t *testing.T) {
 	before := len(msgs)
 	if after := len(provider.SanitizeToolPairing(msgs)); after != before {
 		t.Errorf("repair mutated a well-formed session: %d -> %d", before, after)
+	}
+}
+
+// TestRunWarnsAndContinuesOnMissingToolCallReasoning: a DeepSeek thinking-mode
+// tool_calls turn arriving without reasoning (gateway dropped the field) is a
+// quality degradation, not a failure — the turn is saved, the loop continues to
+// completion, and the user sees a warn notice naming the likely cause. The
+// wire layer keeps the replay valid by always serializing the reasoning_content
+// key on such turns.
+func TestRunWarnsAndContinuesOnMissingToolCallReasoning(t *testing.T) {
+	mp := testutil.NewMock("deepseek-proxy",
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}}},
+		testutil.Turn{Text: "done"},
+	)
+	sink := &recordSink{}
+	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{}, sink)
+
+	if err := a.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var savedToolTurn bool
+	for _, m := range a.Session().Messages {
+		if m.Role == provider.RoleAssistant && len(m.ToolCalls) > 0 {
+			savedToolTurn = true
+		}
+	}
+	if !savedToolTurn {
+		t.Fatalf("tool-call turn should be saved despite missing reasoning, session=%+v", a.Session().Messages)
+	}
+	var warned bool
+	for _, e := range sink.kinds(event.Notice) {
+		if e.Level == event.LevelWarn && strings.Contains(e.Text, "without reasoning_content") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Fatal("missing-reasoning tool_calls turn should emit a warn notice")
+	}
+}
+
+func TestRunPreservesOriginalRequiredToolCallReasoningAcrossHook(t *testing.T) {
+	mp := testutil.NewMock("deepseek-proxy",
+		testutil.Turn{
+			Reasoning: "original reasoning",
+			ToolCalls: []provider.ToolCall{{
+				ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`,
+			}},
+		},
+		testutil.Turn{Text: "done"},
+	)
+	h := &stubHooks{hasPostLLM: true, postLLMOut: "translated display"}
+	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{Hooks: h}, event.Discard)
+
+	if err := a.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := mp.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("provider calls = %d, want 2", len(reqs))
+	}
+	var toolCallAssistant provider.Message
+	for _, m := range reqs[1].Messages {
+		if m.Role == provider.RoleAssistant && len(m.ToolCalls) > 0 {
+			toolCallAssistant = m
+			break
+		}
+	}
+	if toolCallAssistant.ReasoningContent != "original reasoning" {
+		t.Fatalf("tool-call reasoning = %q, want original provider reasoning", toolCallAssistant.ReasoningContent)
+	}
+	if toolCallAssistant.ReasoningContent == "translated display" {
+		t.Fatal("translated display text leaked into provider-visible tool-call reasoning")
 	}
 }
 

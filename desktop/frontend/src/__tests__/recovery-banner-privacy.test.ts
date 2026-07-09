@@ -20,16 +20,12 @@ function ok(cond: boolean, label: string) {
 const here = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
 
-console.log("\nrecovery banner privacy");
+console.log("\nquiet recovery prompt privacy");
 
-const recoveryBannerMatch = /<div className="banner banner--recovery"[\s\S]*?<\/div>/.exec(appSource);
-const recoveryBanner = recoveryBannerMatch?.[0] ?? "";
-
-ok(Boolean(recoveryBannerMatch), "App renders a recovery banner");
-ok(!recoveryBanner.includes("title="), "recovery banner does not expose internals through a tooltip");
-ok(!recoveryBanner.includes("recoveryDigest"), "recovery banner does not expose recovery digest");
-ok(!recoveryBanner.includes("recoveryParentId"), "recovery banner does not expose parent session id");
-ok(!appSource.includes("recoveryBannerTitle"), "App no longer builds a detailed recovery tooltip");
+ok(!appSource.includes("banner--recovery"), "App does not render a persistent recovery banner");
+ok(!appSource.includes("recoveryDigest"), "App does not expose recovery digest through recovery prompts");
+ok(!appSource.includes("recoveryParentId"), "App does not expose parent session id through recovery prompts");
+ok(!appSource.includes("recoveryBannerTitle"), "App does not build a detailed recovery tooltip");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

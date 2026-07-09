@@ -55,6 +55,11 @@ func (g SessionDataGuard) Check(target string) error {
 	if err != nil {
 		return nil // can't resolve -> let the caller's normal error path handle it
 	}
+	if g.deniesSecurity(abs) {
+		return fmt.Errorf("path %q is a Reasonix security boundary file (%s holds the global hooks and hook trust store; hooks execute arbitrary shell commands on every future session). Agents may not modify it. "+
+			"Ask the user to edit it themselves, or to add the directory to [sandbox] allow_write in reasonix.toml if raw access is truly intended",
+			target, g.stateRoot)
+	}
 	if !g.denies(abs) {
 		return nil
 	}
@@ -63,12 +68,58 @@ func (g SessionDataGuard) Check(target string) error {
 		target, g.stateRoot)
 }
 
+// securityStateFile reports whether name (a state-root-direct file name,
+// already case-folded when the platform folds) is a security boundary rather
+// than a mere runtime ledger: settings.json defines the global hooks —
+// arbitrary shell commands executed on harness events in every project — and
+// trust.json records which projects' hooks are trusted to run at all. An agent
+// that can write either one can persist code execution across all future
+// sessions, so these deny even when the racing-saves rationale of
+// runtimeStateFile does not apply.
+func securityStateFile(name string) bool {
+	switch name {
+	case "settings.json", "trust.json":
+		return true
+	}
+	return false
+}
+
+// deniesSecurity reports whether abs (absolute, symlink-free) is a state-root-
+// direct security boundary file (see securityStateFile) not covered by an
+// explicit allow_write root. Deny-side, so comparisons fold case on
+// case-insensitive platforms, mirroring denies.
+func (g SessionDataGuard) deniesSecurity(abs string) bool {
+	root := g.stateRoot
+	allow := g.allowRoots
+	if foldPaths {
+		abs = strings.ToLower(abs)
+		root = strings.ToLower(root)
+		folded := make([]string, len(allow))
+		for i, a := range allow {
+			folded[i] = strings.ToLower(a)
+		}
+		allow = folded
+	}
+	for _, a := range allow {
+		if within(a, abs) {
+			return false
+		}
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil || rel == "." || strings.Contains(rel, string(filepath.Separator)) {
+		return false
+	}
+	return securityStateFile(rel)
+}
+
 // runtimeStateFile reports whether name (a state-root-direct file name, already
 // case-folded when the platform folds) is a desktop runtime ledger the app
 // rewrites wholesale while running — quit snapshots, topic-index rebuilds,
 // periodic flushes — so an agent edit vanishes the same way a session-file edit
 // does. config.toml / credentials / skills stay writable: editing those on the
-// user's request is a legitimate flow with no autonomous rewriter racing it.
+// user's request is a legitimate flow with no autonomous rewriter racing it —
+// but settings.json / trust.json are a security boundary, not a ledger, and are
+// denied separately by securityStateFile.
 // heartbeat-tasks.json stays writable too — it is documented as human- and
 // AI-editable (desktop/heartbeat.go, and the heartbeat panel tip says "AI
 // agents can also edit heartbeat-tasks.json"), so the product explicitly

@@ -433,7 +433,7 @@ func TestFinalReadinessPermissionLoopGuardAllowsBlockedFinal(t *testing.T) {
 		{toolCallChunk("b3", "bash", `{"command":"ls -la"}`), {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "blocked by permission"}, {Type: provider.ChunkDone}},
 	}}
-	sink, notices := warnNoticeRecorder()
+	sink, notices := noticeRecorder()
 	a := New(prov, reg, NewSession(""), Options{
 		Gate: &stubGate{deny: map[string]bool{"bash": true}},
 	}, sink)
@@ -454,7 +454,7 @@ func TestFinalReadinessPermissionLoopGuardAllowsBlockedFinal(t *testing.T) {
 		t.Fatalf("bash results = %d, want exactly %d blocked attempts", len(got), stormBreakThreshold)
 	}
 	if len(*notices) == 0 {
-		t.Fatal("loop guard should emit a user-facing warning notice")
+		t.Fatal("loop guard should emit a user-facing notice")
 	}
 }
 

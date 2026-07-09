@@ -234,6 +234,10 @@ type client struct {
 
 func (c *client) Name() string { return c.name }
 
+func (c *client) RequiresToolCallReasoning() bool {
+	return c != nil && c.deepseek && c.thinkingType != "disabled"
+}
+
 func (c *client) sendOpts() provider.SendOptions {
 	return provider.SendOptions{
 		Provider:   c.name,
@@ -437,11 +441,21 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 			ToolCallID: m.ToolCallID,
 			Name:       m.Name,
 		}
-		// DeepSeek thinking mode 400s a tool_calls turn whose reasoning_content was
-		// dropped on a cache-miss replay ("reasoning_content … must be passed back"),
-		// so round it back — but only on the turn that carries the tool calls.
+		// DeepSeek thinking mode 400s an assistant tool_calls turn whose
+		// reasoning_content KEY is absent from the request JSON ("reasoning_content
+		// … must be passed back"). The API accepts an empty string, and only
+		// validates turns after the last user message, but emitting the field on
+		// every tool_calls turn is uniform and verified accepted — so always send
+		// it (empty included) rather than fail the request when reasoning was lost
+		// upstream (e.g. a gateway renamed the field). With thinking disabled the
+		// API tolerates every shape, so keep the exact pre-fix bytes there: send
+		// the key only when a thinking-mode round left reasoning in the history
+		// (dropping it would invalidate the prompt-cache prefix of mixed
+		// thinking-on→off sessions for no gain).
 		if c.deepseek && m.Role == provider.RoleAssistant && len(m.ToolCalls) > 0 {
-			cm.ReasoningContent = m.ReasoningContent
+			if c.RequiresToolCallReasoning() || m.ReasoningContent != "" {
+				cm.ReasoningContent = &m.ReasoningContent
+			}
 		}
 		for _, tc := range m.ToolCalls {
 			wire := chatToolCall{ID: tc.ID, Type: "function"}
@@ -632,9 +646,13 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		}
 
 		delta := sr.Choices[0].Delta
-		if delta.ReasoningContent != "" {
+		reasoningDelta := delta.ReasoningContent
+		if reasoningDelta == "" {
+			reasoningDelta = delta.Reasoning
+		}
+		if reasoningDelta != "" {
 			emitted = true
-			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkReasoning, Text: delta.ReasoningContent}) {
+			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkReasoning, Text: reasoningDelta}) {
 				return emitted, ctx.Err()
 			}
 		}
@@ -807,8 +825,12 @@ type chatMessage struct {
 	// serializes as null (nil here); a string for every other text message
 	// (empty included — null is rejected by some backends for a tool message);
 	// and a []chatContentPart array for a vision user turn carrying images.
-	Content          any            `json:"content"`
-	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	Content any `json:"content"`
+	// A pointer so the field can serialize as an empty string: DeepSeek thinking
+	// mode requires the reasoning_content key to be PRESENT on assistant
+	// tool_calls turns (an empty value passes; a missing key 400s), while every
+	// other message must keep omitting it.
+	ReasoningContent *string        `json:"reasoning_content,omitempty"`
 	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string         `json:"tool_call_id,omitempty"`
 	Name             string         `json:"name,omitempty"`
@@ -862,6 +884,7 @@ type streamResponse struct {
 		Delta struct {
 			Content          string         `json:"content"`
 			ReasoningContent string         `json:"reasoning_content"`
+			Reasoning        string         `json:"reasoning"`
 			ToolCalls        []chatToolCall `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`

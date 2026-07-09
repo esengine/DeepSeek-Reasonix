@@ -309,7 +309,7 @@ func (m *metricsAggregator) observe(e event.Event) {
 	case event.MemoryCompilerStatsEvent:
 		m.observeMemoryCompilerStats(e.MemoryCompiler)
 	case event.Notice:
-		if strings.HasPrefix(e.Text, "empty final answer blocked") {
+		if e.Text == "No visible answer was produced; asking the assistant to respond again." || strings.HasPrefix(e.Detail, "empty final answer blocked") {
 			m.inc("empty_final", "total")
 		}
 	}

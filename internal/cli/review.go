@@ -86,6 +86,11 @@ func reviewCommand(args []string) int {
 
 	// 7. Run the review subagent.
 	ctx := context.Background()
+	// Deliberately minimal Options: this one-shot CLI path has no gate, no
+	// compaction, and no session, unlike the in-session sub-agent paths built
+	// through TaskTool.subagentOptions / boot's subagentSkillOptions. If a new
+	// Options field becomes load-bearing for sub-agents, decide explicitly
+	// whether this path needs it too.
 	result, err := agent.RunSubAgentWithSession(ctx, prov, reg, agent.NewSession(reviewSk.Body), task, agent.Options{
 		MaxSteps:      12,
 		Temperature:   cfg.Agent.Temperature,
@@ -111,12 +116,17 @@ func buildReviewSubagentRegistry(reviewSk skill.Skill, cfg *config.Config) *tool
 			parentReg.Add(tl)
 		}
 	}
-	// Keep review bash unconfined as before (read-oriented skill), but attach
-	// the session-data guard so commands touching Reasonix's own state warn the
-	// same way the boot-assembled bash does.
+	// Attach the session-data guard so commands touching Reasonix's own state
+	// warn the same way the boot-assembled bash does.
 	if _, ok := parentReg.Get("bash"); ok {
 		guard := builtin.NewSessionDataGuard(config.MemoryUserDir(), cfg.AllowWriteRoots())
 		parentReg.Add(builtin.ConfineBash(sandbox.Spec{}, guard))
+	}
+	if reviewSk.ReadOnly {
+		// The built-in review skill declares read-only; enforce it here exactly
+		// like the in-session runner does (writer tools stripped, bash under the
+		// plan-mode safe policy) so `reasonix review` is not a writable backdoor.
+		return agent.ReadOnlySubagentToolRegistry(parentReg, reviewSk.AllowedTools)
 	}
 	return agent.SubagentToolRegistry(parentReg, reviewSk.AllowedTools)
 }

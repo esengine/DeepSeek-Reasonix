@@ -25,6 +25,7 @@ import (
 
 	"reasonix/internal/event"
 	"reasonix/internal/nilutil"
+	"reasonix/internal/secrets"
 )
 
 var renamePath = os.Rename
@@ -216,12 +217,13 @@ func NewManager(sink event.Sink, opts ...Option) *Manager {
 type jobWriter struct{ j *Job }
 
 func (w jobWriter) Write(p []byte) (int, error) {
+	redacted := []byte(secrets.Redact(string(p)))
 	w.j.mu.Lock()
 	defer w.j.mu.Unlock()
 	w.j.activityAt = nowMs()
-	w.j.tail = appendTail(w.j.tail, p, defaultTailBytes)
+	w.j.tail = appendTail(w.j.tail, redacted, defaultTailBytes)
 	if w.j.artifactFile != nil {
-		if _, err := w.j.artifactFile.Write(p); err != nil {
+		if _, err := w.j.artifactFile.Write(redacted); err != nil {
 			w.j.artifactErr = err.Error()
 		}
 	}
@@ -241,6 +243,7 @@ func (m *Manager) Start(kind, label string, run func(ctx context.Context, out io
 // only see jobs whose owner matches the active session.
 func (m *Manager) StartForSession(parentSession, kind, label string, run func(ctx context.Context, out io.Writer) (string, error)) *Job {
 	parentSession = strings.TrimSpace(parentSession)
+	label = secrets.Redact(label)
 	m.mu.Lock()
 	m.seq++
 	id := fmt.Sprintf("%s-%d", kind, m.seq)
@@ -296,6 +299,7 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 		}
 		finishedAt := nowMs()
 		if result != "" {
+			result = secrets.Redact(result)
 			j.mu.Lock()
 			if j.artifactFile != nil {
 				if _, writeErr := j.artifactFile.WriteString(result); writeErr != nil {
@@ -513,14 +517,16 @@ func (m *Manager) recordCompletion(parentSession, id, kind, label string, st Sta
 	m.mu.Unlock()
 
 	level, text := event.LevelInfo, fmt.Sprintf("background %s finished: %s", kind, id)
+	detail := ""
 	switch st {
 	case Failed:
-		level, text = event.LevelWarn, fmt.Sprintf("background %s failed: %s — %v", kind, id, err)
+		level, text = event.LevelWarn, fmt.Sprintf("background %s failed: needs attention", kind)
+		detail = fmt.Sprintf("background %s failed: %s — %v", kind, id, err)
 	case Killed:
 		text = fmt.Sprintf("background %s killed: %s", kind, id)
 	}
 	if shouldEmit {
-		m.sink.Emit(event.Event{Kind: event.Notice, Level: level, Text: text})
+		m.sink.Emit(event.Event{Kind: event.Notice, Level: level, Text: text, Detail: detail})
 	}
 }
 
@@ -976,7 +982,7 @@ func (m *Manager) recordArtifactMigrationError(parentSession string, err error) 
 	active := m.active
 	m.mu.Unlock()
 	if active == "" || active == parentSession {
-		m.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: text})
+		m.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "Job artifact migration failed.", Detail: text})
 	}
 }
 
@@ -1433,7 +1439,7 @@ func (m *Manager) emitTeardownTimeout(action string, result TeardownResult) {
 			fmt.Fprintf(&b, " waited=%s", job.Waited.Round(time.Millisecond))
 		}
 	}
-	m.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: b.String()})
+	m.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "Background job teardown timed out.", Detail: b.String()})
 }
 
 func (m *Manager) removeTempRoot() {

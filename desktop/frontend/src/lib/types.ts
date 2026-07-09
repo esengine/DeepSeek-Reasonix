@@ -155,6 +155,7 @@ export interface MemoryCompilerStats {
 export interface WireEvent {
   kind: EventKind;
   text?: string;
+  detail?: string;
   reasoning?: string;
   memoryCitations?: MemoryCitation[];
   memoryCompiler?: MemoryCompilerStats;
@@ -324,6 +325,7 @@ export interface ChangedFileInfo {
 export interface HistoryMessage {
   role: string;
   content: string;
+  detail?: string;
   submitText?: string;
   checkpointTurn?: number;
   createdAt?: number;
@@ -953,6 +955,7 @@ export interface SandboxView {
   effectiveWorkspaceRoot: string;
   effectiveWriteRoots: string[];
   shell: string; // "auto" | "bash" | "powershell" | "pwsh"
+  effectiveShell?: string; // "bash" | "git-bash" | "powershell" | "pwsh"
 }
 
 export interface NetworkProxyView {

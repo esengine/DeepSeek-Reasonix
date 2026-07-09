@@ -17,8 +17,8 @@ directory.
   `https://github.com/obra/superpowers`.
 - A GitHub branch or subdirectory URL, such as
   `https://github.com/owner/repo/tree/main/path/to/plugin`.
-- A local directory that contains `reasonix-plugin.json` or
-  `.codex-plugin/plugin.json`.
+- A local directory that contains `reasonix-plugin.json`,
+  `.codex-plugin/plugin.json`, or `.claude-plugin/plugin.json`.
 
 Preview the install plan without writing files:
 
@@ -222,12 +222,19 @@ Reasonix plugins can declare `reasonix-plugin.json` at the plugin root:
 Relative paths are resolved inside the plugin root. Reasonix does not run
 third-party install scripts during plugin installation.
 
-## Codex Compatibility
+## Codex & Claude Compatibility
 
-Reasonix also reads Codex plugin manifests at `.codex-plugin/plugin.json`.
-For packages such as Superpowers and Claude-style skill packs, Reasonix maps:
+Reasonix also reads Codex plugin manifests at `.codex-plugin/plugin.json` and
+Claude Marketplace manifests at `.claude-plugin/plugin.json`. Claude plugin
+capabilities Reasonix does not map yet (`commands/`, `agents/`,
+`hooks/hooks.json`, `.mcp.json`) surface as install warnings instead of being
+silently dropped; multi-plugin `marketplace.json` indexes are not supported —
+install each plugin directory individually. For packages such
+as Superpowers and Claude-style skill packs, Reasonix maps:
 
-- `skills` to Reasonix skill roots.
+- `skills` to Reasonix skill roots. A Claude manifest that declares no
+  `skills` field falls back to the conventional `skills/` (or `.claude/skills/`)
+  directory, matching Claude's own auto-discovery.
 - `hooks/session-start-codex` to the Reasonix `SessionStart` hook when present.
 - A plugin-root `CLAUDE.md` file to a built-in `SessionStart` context hook. The
   file is read directly by Reasonix, without spawning a shell command.

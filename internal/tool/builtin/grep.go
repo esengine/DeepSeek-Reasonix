@@ -19,6 +19,7 @@ import (
 	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/proc"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/secrets"
 	"reasonix/internal/tool"
 )
 
@@ -280,17 +281,32 @@ func (g grepTool) runNative(ctx context.Context, pattern, path string, info os.F
 func (g grepTool) runRipgrep(ctx context.Context, pattern, path string, to time.Duration, rp ResolvedPath) (string, bool, error) {
 	// Build the ripgrep argv and wrap it in the OS sandbox so forbid-read
 	// directories are invisible to the ripgrep subprocess.
-	argv, wrapped := sandbox.CommandArgs(g.sb, []string{
+	args := []string{
 		g.rg,
 		"--no-heading", "--line-number", "--with-filename", "--color", "never",
-		"--regexp", pattern,
-		"--", path,
-	})
+	}
+	if secrets.ProtectSensitiveFiles() {
+		// Mirror sensitiveReadPath for the subprocess: ripgrep cannot call
+		// back into confineRead, so the denylist rides along as glob excludes.
+		args = append(args,
+			"--glob", "!.env",
+			"--glob", "!.git-credentials",
+			"--glob", "!.netrc",
+			"--glob", "!*.pem",
+			"--glob", "!*.key",
+			"--glob", "!*.p12",
+			"--glob", "!*.pfx",
+			"--glob", "!.ssh/**",
+		)
+	}
+	args = append(args, "--regexp", pattern, "--", path)
+	argv, wrapped := sandbox.CommandArgs(g.sb, args)
 	if len(g.forbidRoots) > 0 && !wrapped {
 		return "", wrapped, nil
 	}
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Env = secrets.ProcessEnv()
 	proc.HideWindow(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

@@ -17,6 +17,7 @@ func init() { tool.RegisterBuiltin(multiEdit{}) }
 type multiEdit struct {
 	roots   []string
 	guard   SessionDataGuard
+	managed ManagedConfigPaths
 	workDir string
 }
 
@@ -77,7 +78,7 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return "", fmt.Errorf("edits must not be empty")
 	}
 	p.Path = resolveIn(m.workDir, p.Path)
-	if err := confineWrite(m.roots, m.guard, p.Path); err != nil {
+	if err := confineWrite(ctx, m.roots, m.guard, m.managed, p.Path); err != nil {
 		return "", err
 	}
 

@@ -48,6 +48,7 @@ func TestDesktopWireEventKindTypeCoversSharedKinds(t *testing.T) {
 func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 	ts := readDesktopTypes(t)
 	for _, want := range []string{
+		"detail?: string;",
 		"retryAttempt?: number;",
 		"retryMax?: number;",
 		"memoryCitations?: MemoryCitation[];",
@@ -63,6 +64,22 @@ func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 	} {
 		if !strings.Contains(ts, want) {
 			t.Fatalf("desktop WireEvent types are missing %q", want)
+		}
+	}
+}
+
+func TestToWireNoticeDetail(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "short", Detail: "diagnostics"})
+	if w.Kind != "notice" || w.Level != "warn" || w.Text != "short" || w.Detail != "diagnostics" {
+		t.Fatalf("wire notice = %+v", w)
+	}
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"kind":"notice"`, `"text":"short"`, `"detail":"diagnostics"`, `"level":"warn"`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("notice JSON = %s, want it to contain %s", string(b), want)
 		}
 	}
 }

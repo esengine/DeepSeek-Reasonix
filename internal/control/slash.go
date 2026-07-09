@@ -10,6 +10,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/hook"
 	"reasonix/internal/i18n"
+	"reasonix/internal/memorycompiler"
 	"reasonix/internal/migration"
 	"reasonix/internal/pluginpkg"
 	"reasonix/internal/skill"
@@ -131,6 +132,7 @@ func memoryV5ArgItems(prior []string) []SlashItem {
 	}
 	return []SlashItem{
 		{Label: "status", Insert: "status", Hint: "show current Memory v5 state"},
+		{Label: "learnings", Insert: "learnings", Hint: "show learned strategies and patterns"},
 		{Label: "off", Insert: "off", Hint: "disable Memory v5 for future turns"},
 		{Label: "observe", Insert: "observe", Hint: "learn without injecting IR"},
 		{Label: "compact", Insert: "compact", Hint: "inject compact execution contracts"},
@@ -515,7 +517,11 @@ func (c *Controller) managementNotice(trimmed string) bool {
 
 func (c *Controller) memoryV5Notice(fields []string) {
 	if len(fields) > 2 {
-		c.notice("usage: /memory-v5 off|observe|compact|on|status")
+		c.notice("usage: /memory-v5 off|observe|compact|on|status|learnings")
+		return
+	}
+	if len(fields) == 2 && strings.EqualFold(fields[1], "learnings") {
+		c.notice(c.memoryV5LearningsText())
 		return
 	}
 	if len(fields) < 2 || strings.EqualFold(fields[1], "status") {
@@ -524,7 +530,7 @@ func (c *Controller) memoryV5Notice(fields []string) {
 			c.notice("memory-v5: " + err.Error())
 			return
 		}
-		c.notice(fmt.Sprintf("memory-v5: %s (usage: /memory-v5 off|observe|compact|on|status)", memoryV5Mode(cfg.MemoryCompilerEnabled(), cfg.MemoryCompilerVerbosity())))
+		c.notice(fmt.Sprintf("memory-v5: %s (usage: /memory-v5 off|observe|compact|on|status|learnings)", memoryV5Mode(cfg.MemoryCompilerEnabled(), cfg.MemoryCompilerVerbosity())))
 		return
 	}
 	if c.Running() {
@@ -586,8 +592,22 @@ func parseMemoryV5Setting(mode string) (memoryV5Setting, error) {
 	case "on", "compact", "inject", "contract":
 		return memoryV5Setting{enabled: true, verbosity: config.MemoryCompilerVerbosityCompact, setVerbosity: true}, nil
 	default:
-		return memoryV5Setting{}, fmt.Errorf("memory-v5 %q: must be off|observe|compact|on|status", mode)
+		return memoryV5Setting{}, fmt.Errorf("memory-v5 %q: must be off|observe|compact|on|status|learnings", mode)
 	}
+}
+
+// memoryV5LearningsText renders the project's learned Memory v5 state. It is a
+// read-only local view; nothing here reaches a provider.
+func (c *Controller) memoryV5LearningsText() string {
+	rt := memorycompiler.New(config.MemoryCompilerDir(c.workspaceRoot))
+	if rt == nil {
+		return "memory-v5: no project state directory"
+	}
+	rep, ok := rt.LearningsReport(0)
+	if !ok {
+		return "memory-v5: no learned state yet"
+	}
+	return memorycompiler.FormatLearningsReport(rep)
 }
 
 func memoryV5Mode(enabled bool, verbosity string) string {

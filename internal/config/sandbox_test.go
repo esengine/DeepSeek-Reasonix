@@ -2,15 +2,15 @@ package config
 
 import "testing"
 
-func TestBashModeWindowsDefaultOffButExplicitEnforceWins(t *testing.T) {
+func TestBashModeWindowsAlwaysOff(t *testing.T) {
 	cfg := Default()
 	if got := cfg.BashModeForGOOS("windows"); got != "off" {
 		t.Fatalf("empty Windows bash mode = %q, want off", got)
 	}
 
 	cfg.Sandbox.Bash = "enforce"
-	if got := cfg.BashModeForGOOS("windows"); got != "enforce" {
-		t.Fatalf("explicit Windows bash mode = %q, want enforce", got)
+	if got := cfg.BashModeForGOOS("windows"); got != "off" {
+		t.Fatalf("explicit Windows bash mode = %q, want off", got)
 	}
 
 	cfg.Sandbox.Bash = ""

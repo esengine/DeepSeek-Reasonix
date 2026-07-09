@@ -69,6 +69,7 @@ func (a *App) SaveHooksSettingsForRoot(scope, projectRoot string, hooks []HookCo
 		if cmd == "" {
 			continue
 		}
+		cmd = hook.NormalizeCommand(cmd)
 		settings.Hooks[event] = append(settings.Hooks[event], hook.HookConfig{
 			Match:       strings.TrimSpace(h.Match),
 			Command:     cmd,

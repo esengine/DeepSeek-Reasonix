@@ -647,6 +647,13 @@ const planApprovalTool = "exit_plan_mode"
 // to rerun a shell command without the OS sandbox after the sandbox failed.
 const SandboxEscapeApprovalTool = "sandbox_escape"
 
+// ManagedConfigWriteApprovalTool is the internal Tool name used for per-write
+// approval when a file tool targets a Reasonix-managed config file outside the
+// workspace write roots. It is a fresh human decision: config files control
+// providers, sandbox rules, permissions, and MCP servers for future sessions,
+// so YOLO/auto approval must never answer it.
+const ManagedConfigWriteApprovalTool = "config_write"
+
 // planApprovedMessage is the follow-up turn sent once the user approves a plan —
 // the in-context nudge to execute and keep the (already-seeded) task list honest.
 const planApprovedMessage = "Plan approved — plan mode is off; you’re cleared to make the changes without asking again. Implement the plan now. Use this serial workflow: 1) mark the first sub-step in_progress with todo_write (this establishes the task list); 2) execute the sub-step; 3) call complete_step with evidence — the host then marks that sub-step completed and moves the next one to in_progress for you. Repeat 2–3 for each remaining sub-step. You don’t need another todo_write to mark steps completed; each complete_step advances the list. Sign off one sub-step at a time — never batch multiple completions."
@@ -1359,6 +1366,10 @@ func (c *Controller) notice(text string) {
 	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: text})
 }
 
+func (c *Controller) noticeDetail(text, detail string) {
+	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: text, Detail: detail})
+}
+
 // Run executes a turn synchronously, returning the agent's error. Used by the
 // headless `reasonix run` path, where the Sink renders to stdout and the caller
 // just needs the exit status — no TurnDone event, no cancel bookkeeping.
@@ -1496,10 +1507,12 @@ func (c *Controller) Approve(id string, allow, session, persist bool) {
 func (c *Controller) EnableInteractiveApproval() {
 	trustGate := planModeReadOnlyTrustApprover{c}
 	escapeApprover := sandboxEscapeApprover{c}
+	configApprover := managedConfigWriteApprover{c}
 	if c.executor != nil {
 		c.executor.SetGate(c.newInteractiveGate())
 		c.executor.SetPlanModeReadOnlyTrustGate(trustGate)
 		c.executor.SetSandboxEscapeApprover(escapeApprover)
+		c.executor.SetConfigWriteApprover(configApprover)
 		c.executor.SetAsker(c)
 	}
 	if setter, ok := c.runner.(interface {
@@ -1511,6 +1524,11 @@ func (c *Controller) EnableInteractiveApproval() {
 		SetSandboxEscapeApprover(sandbox.EscapeApprover)
 	}); ok {
 		setter.SetSandboxEscapeApprover(escapeApprover)
+	}
+	if setter, ok := c.runner.(interface {
+		SetConfigWriteApprover(tool.ConfigWriteApprover)
+	}); ok {
+		setter.SetConfigWriteApprover(configApprover)
 	}
 }
 
@@ -4140,6 +4158,37 @@ func sandboxEscapeApprovalReason(reason string) string {
 		return i18n.M.SandboxEscapeRuntimeReason
 	}
 	return reason
+}
+
+// managedConfigWriteApprover routes a file tool's Reasonix-managed config write
+// through the fresh-human approval prompt (see ManagedConfigWriteApprovalTool).
+// A session grant is tool-wide (mirroring sandbox_escape): one "allow for this
+// session" covers the rest of the repair flow across the handful of managed
+// config files without re-prompting on every incremental edit.
+type managedConfigWriteApprover struct{ c *Controller }
+
+func (m managedConfigWriteApprover) ApproveManagedConfigWrite(ctx context.Context, req tool.ConfigWriteRequest) (bool, string, error) {
+	subject := managedConfigWriteApprovalSubject(req.Path)
+	args, _ := json.Marshal(map[string]string{"path": req.Path})
+	reply, err := m.c.requestFreshApprovalDecision(ctx, ManagedConfigWriteApprovalTool, subject, args, i18n.M.ConfigWriteReason)
+	if err != nil {
+		return false, "approval aborted", err
+	}
+	if !reply.allow {
+		return false, i18n.M.ConfigWriteDeclined, nil
+	}
+	if reply.session {
+		m.c.approval.grantSession(ManagedConfigWriteApprovalTool, subject)
+	}
+	return true, "", nil
+}
+
+func (m managedConfigWriteApprover) ManagedConfigWriteSessionAllowed(_ context.Context, req tool.ConfigWriteRequest) bool {
+	return m.c.approval.preApprovedForDecision(ManagedConfigWriteApprovalTool, managedConfigWriteApprovalSubject(req.Path), true)
+}
+
+func managedConfigWriteApprovalSubject(path string) string {
+	return i18n.M.ConfigWriteSubjectPrefix + strings.TrimSpace(path)
 }
 
 func (p planModeReadOnlyTrustApprover) CheckPlanModeReadOnlyTrust(ctx context.Context, req agent.PlanModeReadOnlyTrustRequest) (bool, string, error) {

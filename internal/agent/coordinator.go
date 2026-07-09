@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -27,9 +28,28 @@ have enough evidence. Do not write full implementations or attempt side effects.
 Do not ask the user how to trigger the executor and do not say you are waiting
 for the executor. Output executor-ready instructions: what to do, which files or
 commands are relevant, expected blockers, and key decisions. Keep it short and
-actionable.`
+actionable.
+
+Crucial: You only have read-only tools. You do NOT have bash, execute, or
+side-effect tools — those belong to the executor. Never question or dwell
+on the lack of execution tools; it is by design. Just plan what the executor
+should do with its tools.
+
+If your research shows the task needs no changes and no actions at all (already
+implemented, already resolved), explain that briefly and end your reply with a
+final line containing exactly [no_changes]. Never emit that marker when any
+work, verification, or follow-up remains.`
 
 const executorHandoffMarker = "Reasonix executor handoff"
+
+// plannerFallbackNotice is shown when the planner fails and the turn degrades
+// to executor-only instead of failing outright.
+const plannerFallbackNotice = "Planner failed; continuing this turn with the executor only."
+
+// noChangesMarker is the explicit no-op conclusion the planner is asked to emit
+// on its final line (see DefaultPlannerPrompt). isNoOpPlan trusts it over the
+// legacy phrase heuristics.
+const noChangesMarker = "[no_changes]"
 
 // PlannerPromptWithContext appends cache-stable standing context, such as loaded
 // REASONIX.md / AGENTS.md memory, to the planner's smaller system prompt.
@@ -56,15 +76,17 @@ type Coordinator struct {
 	sink           event.Sink
 	// shouldPlan gates the planner pass per turn; nil plans every turn. Lets a
 	// trivial, non-work turn (a question, a greeting) skip straight to the
-	// executor instead of paying a planner round on it.
-	shouldPlan func(string) bool
+	// executor instead of paying a planner round on it. The turn context is
+	// passed through so a classifier-backed gate stops with the turn instead
+	// of running out its own timeout after the user cancels.
+	shouldPlan func(context.Context, string) bool
 }
 
 // NewCoordinator wires a planner provider (with its own session) to an executor.
 // sink receives the planner's phase/text/usage events; the executor emits its
 // own events to its own sink (the CLI wires the same sink into both). A nil
 // sink is replaced with event.Discard.
-func NewCoordinator(planner provider.Provider, plannerSession *Session, plannerPricing *provider.Pricing, plannerTools *tool.Registry, plannerOptions Options, executor *Agent, temperature float64, sink event.Sink, shouldPlan func(string) bool) *Coordinator {
+func NewCoordinator(planner provider.Provider, plannerSession *Session, plannerPricing *provider.Pricing, plannerTools *tool.Registry, plannerOptions Options, executor *Agent, temperature float64, sink event.Sink, shouldPlan func(context.Context, string) bool) *Coordinator {
 	if nilutil.IsNil(sink) {
 		sink = event.Discard
 	}
@@ -198,84 +220,76 @@ func (c *Coordinator) SetSandboxEscapeApprover(g sandbox.EscapeApprover) {
 	}
 }
 
+// SetConfigWriteApprover propagates Reasonix-managed config write approvals to
+// both tool-using agents in two-model mode.
+func (c *Coordinator) SetConfigWriteApprover(g tool.ConfigWriteApprover) {
+	if c == nil {
+		return
+	}
+	if c.plannerAgent != nil {
+		c.plannerAgent.SetConfigWriteApprover(g)
+	}
+	if c.executor != nil {
+		c.executor.SetConfigWriteApprover(g)
+	}
+}
+
 // Run plans with the planner model, then hands the plan to the executor.
 func (c *Coordinator) Run(ctx context.Context, input string) error {
 	c.sink.Emit(event.Event{Kind: event.TurnStarted})
-	if c.shouldPlan != nil && !c.shouldPlan(input) {
+	if c.shouldPlan != nil && !c.shouldPlan(ctx, input) {
 		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing", Source: event.UsageSourceExecutor})
 		return c.executor.Run(ctx, input)
 	}
 	c.sink.Emit(event.Event{Kind: event.Phase, Text: c.planner.Name() + " · planning", Source: event.UsageSourcePlanner})
 	plan, err := c.plan(ctx, input)
 	if err != nil {
-		return fmt.Errorf("planner: %w", err)
+		// Cancellation and max-steps pauses are control flow, not planner
+		// failures: the first is the user aborting the turn, the second has
+		// saved work in the planner session and asks the user to continue.
+		// Neither may silently restart on the executor.
+		var pause *maxStepsPause
+		if ctx.Err() != nil || errors.As(err, &pause) {
+			return fmt.Errorf("planner: %w", err)
+		}
+		// A planner failure must not take down the turn: the executor is
+		// healthy and owns the full tool set, so degrade to single-model for
+		// this turn (mirroring the auto-plan classifier's fallback to the
+		// heuristic when it errors).
+		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: plannerFallbackNotice, Detail: "planner failed; running the executor without a plan: " + err.Error(), Source: event.UsageSourcePlanner})
+		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing", Source: event.UsageSourceExecutor})
+		return c.executor.Run(ctx, input)
 	}
 	c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing", Source: event.UsageSourceExecutor})
 	if isNoOpPlan(plan) {
 		c.persistExecutorNoOp(ctx, input, plan)
-		c.sink.Emit(event.Event{Kind: event.Text, Text: plan})
+		// The relayed conclusion is planner text; keep its source so sinks
+		// attribute it like every other planner emission.
+		c.sink.Emit(event.Event{Kind: event.Text, Text: plan, Source: event.UsageSourcePlanner})
 		return nil
 	}
 	return c.executor.Run(ctx, formatHandoff(input, plan, executorToolHandoffContext(c.executor)))
 }
 
+// isNoOpPlan reports whether the plan explicitly concludes that nothing needs
+// to change: the final non-empty line is exactly the [no_changes] marker that
+// DefaultPlannerPrompt requests. The marker is trusted as-is, so research notes
+// above it (which may mention tests, runs, or edits that already exist) cannot
+// veto the conclusion. There is deliberately no phrase heuristic behind it: a
+// wrong skip silently drops the task, while a planner that ignores the marker
+// contract just costs one executor round.
 func isNoOpPlan(plan string) bool {
-	lower := strings.ToLower(strings.TrimSpace(plan))
-	if lower == "" {
-		return false
-	}
-	if containsNoOpActionTerm(lower) {
-		return false
-	}
-	noOp := []string{
-		"no changes needed",
-		"no changes are needed",
-		"no changes required",
-		"no changes are required",
-		"no action needed",
-		"no action required",
-		"nothing to change",
-		"nothing to do",
-		"already handled",
-		"already implemented",
-		"already resolved",
-		"[no_changes]",
-		"无需改动",
-		"无需修改",
-		"无需更改",
-		"不需要修改",
-		"不需要改",
-		"不用改",
-		"不用修改",
-		"不必改动",
-		"没有需要修改",
-		"已经正确处理",
-		"已经实现",
-		"已经解决",
-	}
-	for _, phrase := range noOp {
-		if strings.Contains(lower, phrase) && !strings.Contains(lower, "not "+phrase) && !strings.Contains(lower, "不是"+phrase) {
-			return true
-		}
-	}
-	return false
+	return strings.ToLower(lastNonEmptyLine(plan)) == noChangesMarker
 }
 
-func containsNoOpActionTerm(lower string) bool {
-	terms := []string{
-		" add ", " add docs", " add tests", " update ", " edit ", " write ",
-		" create ", " delete ", " remove ", " patch ", " refactor ", " implement ",
-		" run ", " test ", " build ", " fix ",
-		"新增", "补充", "更新", "编辑", "写入", "创建", "删除", "移除",
-		"运行", "测试", "构建", "修复", "实现", "重构",
-	}
-	padded := " " + lower + " "
-	for _, term := range terms {
-		if strings.Contains(padded, term) {
-			return true
+func lastNonEmptyLine(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if t := strings.TrimSpace(lines[i]); t != "" {
+			return t
 		}
 	}
-	return false
+	return ""
 }
 
 func (c *Coordinator) persistExecutorNoOp(ctx context.Context, input, plan string) {
@@ -292,6 +306,11 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 	if c.plannerAgent != nil {
 		return c.planWithTools(ctx, input)
 	}
+	// On failure, roll the just-added user message back: a dangling user turn
+	// would produce consecutive user roles on the next plan (which some
+	// providers reject), and Run's executor fallback keeps the turn alive
+	// after this error, so the planner session must stay coherent.
+	before := c.plannerSess.Snapshot()
 	c.plannerSess.Add(provider.Message{Role: provider.RoleUser, Content: input})
 
 	ch, err := c.planner.Stream(ctx, provider.Request{
@@ -299,6 +318,7 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 		Temperature: provider.OptionalTemperature(c.temperature),
 	})
 	if err != nil {
+		c.plannerSess.Replace(before)
 		return "", err
 	}
 
@@ -312,6 +332,7 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 		case provider.ChunkUsage:
 			usage = chunk.Usage
 		case provider.ChunkError:
+			c.plannerSess.Replace(before)
 			return "", chunk.Err
 		}
 	}
@@ -328,17 +349,66 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 // read-only registry. That gives the planner the same tool-call contract as the
 // executor while preserving its separate session and cache prefix.
 func (c *Coordinator) planWithTools(ctx context.Context, input string) (string, error) {
-	before := len(c.plannerSess.Messages)
+	before := c.plannerSess.Snapshot()
+	rewriteBefore := c.plannerSess.RewriteVersion()
 	if err := c.plannerAgent.Run(ctx, input); err != nil {
+		// Mirror plan()'s rollback: Run already appended the user message
+		// (and possibly partial assistant/tool rounds) to the planner
+		// session, and Coordinator.Run degrades to the executor on planner
+		// failure, so a dangling user message would produce consecutive
+		// user roles on the next plan. A max-steps pause is exempt: its
+		// saved work is what the user is asked to continue from.
+		var pause *maxStepsPause
+		if !errors.As(err, &pause) {
+			c.rollbackPlannerTurn(before, rewriteBefore)
+		}
 		return "", err
 	}
-	for i := len(c.plannerSess.Messages) - 1; i >= before; i-- {
+	// The plan is this turn's final answer: the last non-empty assistant
+	// message appended after the pre-turn boundary. When a session rewrite
+	// landed during the turn (auto-compaction fires right after the final
+	// answer), the pre-turn length no longer maps to a boundary in the
+	// rewritten log — it can even exceed it, hiding a successfully produced
+	// plan. Rewrites keep the recent tail verbatim, so scanning the whole
+	// rewritten session from the end still finds the final answer first.
+	floor := len(before)
+	if c.plannerSess.RewriteVersion() != rewriteBefore {
+		floor = 0
+	}
+	for i := len(c.plannerSess.Messages) - 1; i >= floor; i-- {
 		m := c.plannerSess.Messages[i]
 		if m.Role == provider.RoleAssistant && strings.TrimSpace(m.Content) != "" {
 			return m.Content, nil
 		}
 	}
+	// No usable plan came back: roll back too, so the executor-fallback turn
+	// does not leave the planner session ending in a user message.
+	c.rollbackPlannerTurn(before, rewriteBefore)
 	return "", fmt.Errorf("planner finished without producing a plan")
+}
+
+// rollbackPlannerTurn discards a failed planning turn from the planner session.
+// Without a mid-turn rewrite the pre-turn snapshot is restored exactly. When
+// auto-compaction rewrote the log during the turn, restoring the snapshot would
+// also revert the compaction — wasting its summarizer call and re-growing the
+// prompt the fold just paid to shrink — so only the trailing plain user
+// messages are dropped (the dangling turn input plus any steer/nudge messages):
+// those are what would produce consecutive user roles on the next plan, while
+// completed tool rounds and the compaction digest stay coherent history.
+func (c *Coordinator) rollbackPlannerTurn(before []provider.Message, rewriteBefore int) {
+	if c.plannerSess.RewriteVersion() == rewriteBefore {
+		c.plannerSess.Replace(before)
+		return
+	}
+	msgs := c.plannerSess.Snapshot()
+	for len(msgs) > 0 {
+		last := msgs[len(msgs)-1]
+		if last.Role != provider.RoleUser || isCompactionSummary(last) {
+			break
+		}
+		msgs = msgs[:len(msgs)-1]
+	}
+	c.plannerSess.Replace(msgs)
 }
 
 func plannerSink(sink event.Sink) event.Sink {
@@ -391,6 +461,11 @@ Executor instructions:
 Carry out the task, adapting the plan as needed.`, executorHandoffMarker, task, plan, toolBlock)
 }
 
+// executorToolHandoffContext counters planner "tool unavailable" hallucinations
+// in the handoff. MCP tools are the surface planners actually mis-report (the
+// planner registry filters them away), so the block is only emitted when the
+// executor carries MCP tools; the built-in tool list would just restate the
+// schema already attached to the request and pay its tokens every planned turn.
 func executorToolHandoffContext(a *Agent) string {
 	if a == nil || a.tools == nil {
 		return ""
@@ -411,15 +486,13 @@ func executorToolHandoffContext(a *Agent) string {
 			mcpNames = append(mcpNames, name)
 		}
 	}
-	if len(toolNames) == 0 {
+	if len(mcpNames) == 0 {
 		return ""
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "- The executor request includes the full tool schema (%d tools). Tool names include: %s.", len(toolNames), boundedToolNames(toolNames, 24))
-	if len(mcpNames) > 0 {
-		fmt.Fprintf(&b, "\n- MCP tools are already registered for the executor in this request (%d MCP tools). MCP tool names include: %s.", len(mcpNames), boundedToolNames(mcpNames, 16))
-	}
+	fmt.Fprintf(&b, "- The executor request includes the full tool schema (%d tools).", len(toolNames))
+	fmt.Fprintf(&b, "\n- MCP tools are already registered for the executor in this request (%d MCP tools). MCP tool names include: %s.", len(mcpNames), boundedToolNames(mcpNames, 16))
 	return b.String()
 }
 

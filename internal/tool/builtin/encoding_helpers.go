@@ -115,11 +115,24 @@ func applyOldStringEdit(content, oldString, newString string, replaceAll bool) e
 }
 
 func oldStringNotFoundError(path, oldString, content string) error {
-	hint := " Re-read the current file before retrying; if several related edits target the same area, combine the final replacements in one multi_edit call."
+	hint := oldStringNotFoundHint(oldString, content)
 	if line, text, ok := nearestContentLine(oldString, content); ok {
 		return fmt.Errorf("old_string not found in %s (nearest line %d: %q).%s", path, line, text, hint)
 	}
 	return fmt.Errorf("old_string not found in %s.%s", path, hint)
+}
+
+func oldStringNotFoundHint(oldString, content string) string {
+	base := " Re-read the current file before retrying; if several related edits target the same area, combine the final replacements in one multi_edit call."
+	if !strings.Contains(content, "\r\n") {
+		return base
+	}
+	normalizedContent := strings.ReplaceAll(content, "\r\n", "\n")
+	normalizedOld := strings.ReplaceAll(oldString, "\r\n", "\n")
+	if strings.Contains(normalizedContent, normalizedOld) {
+		return " The target file uses CRLF line endings; edit_file/multi_edit normally normalize LF-only old_string for CRLF files, so this is likely stale context. Re-read the current file before retrying."
+	}
+	return " The target file uses CRLF line endings, but edit_file/multi_edit already tolerate LF-only old_string for CRLF files; check for stale, incomplete, or non-unique context before retrying."
 }
 
 func oldStringNotUniqueError(path, oldString, content string, matches int, replaceAllHint bool) error {

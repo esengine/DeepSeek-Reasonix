@@ -174,10 +174,21 @@ func (m *chatTUI) scheduleSkillSessionRefresh(reason, notice string) bool {
 		m.notice("cannot refresh skills while a turn is running")
 		return false
 	}
-	carried := m.ctrl.History()
-	prevPath := m.ctrl.SessionPath()
 	if err := m.ctrl.Snapshot(); err != nil {
 		slog.Warn(reason+": snapshot failed", "err", err)
+	}
+	// Snapshot can retarget the controller to a recovery branch. Carry the
+	// post-snapshot path so the rebuild does not bind recovered history back to
+	// the stale original transcript.
+	carried := m.ctrl.History()
+	prevPath := m.ctrl.SessionPath()
+	// Move the lease before the rebuilt controller binds prevPath for writing
+	// (AdoptHistory resumes there): after a snapshot retarget the lease still
+	// guards the old path, and the async build must not open an unguarded
+	// writer on the recovery branch.
+	if err := m.rebindSessionLease(prevPath); err != nil {
+		m.notice(reason + ": " + sessionLeaseHeldNotice(err))
+		return false
 	}
 	if notice != "" {
 		m.notice(notice)

@@ -59,3 +59,6 @@ Thumbs.db
 /site/public/av/
 
 benchmarks/context-maintenance-e2e/run/
+
+# Local scratch
+temp/

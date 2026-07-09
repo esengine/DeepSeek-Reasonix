@@ -47,6 +47,57 @@ func TestCompletedJobPersistsOutputAndReleasesMemory(t *testing.T) {
 	}
 }
 
+func TestJobArtifactRedactsSecrets(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	m := NewManager(event.Discard)
+	defer m.Close()
+	m.SetActiveSessionPath("session", sessionPath)
+	secret := "sk-real-secret-value-123456"
+
+	j := m.StartForSession("session", "bash", "persist secret", func(_ context.Context, out io.Writer) (string, error) {
+		_, _ = io.WriteString(out, "DEEPSEEK_API_KEY="+secret+"\n")
+		return "Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz", nil
+	})
+	<-j.done
+
+	res := m.WaitForSession(context.Background(), "session", []string{j.ID}, 1)
+	if len(res) != 1 {
+		t.Fatalf("wait result = %+v", res)
+	}
+	if strings.Contains(res[0].Output, secret) || strings.Contains(res[0].Output, "ghp_abcdefghijklmnopqrstuvwxyz") {
+		t.Fatalf("wait output leaked secret:\n%s", res[0].Output)
+	}
+
+	data, err := os.ReadFile(filepath.Join(ArtifactDir(sessionPath), j.ID+jobLogExt))
+	if err != nil {
+		t.Fatalf("read artifact: %v", err)
+	}
+	if strings.Contains(string(data), secret) || strings.Contains(string(data), "ghp_abcdefghijklmnopqrstuvwxyz") {
+		t.Fatalf("artifact leaked secret:\n%s", data)
+	}
+}
+
+func TestJobArtifactMetadataRedactsLabel(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	m := NewManager(event.Discard)
+	defer m.Close()
+	m.SetActiveSessionPath("session", sessionPath)
+	const secret = "sk-real-secret-value-123456"
+
+	j := m.StartForSession("session", "bash", "echo DEEPSEEK_API_KEY="+secret, func(context.Context, io.Writer) (string, error) {
+		return "", nil
+	})
+	<-j.done
+
+	data, err := os.ReadFile(filepath.Join(ArtifactDir(sessionPath), j.ID+jobMetaExt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), secret) {
+		t.Fatalf("job metadata leaked label secret:\n%s", data)
+	}
+}
+
 func TestRestoreSessionArtifactsAndAdvanceSequence(t *testing.T) {
 	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
 	first := NewManager(event.Discard)
@@ -258,10 +309,10 @@ func TestSetActiveSessionPathReportsMigrationFailure(t *testing.T) {
 	if err := os.WriteFile(ArtifactDir(sessionPath), []byte("not a dir"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	var notices []string
+	var notices []event.Event
 	m := NewManager(event.FuncSink(func(e event.Event) {
 		if e.Kind == event.Notice {
-			notices = append(notices, e.Text)
+			notices = append(notices, e)
 		}
 	}))
 	defer m.Close()
@@ -278,13 +329,13 @@ func TestSetActiveSessionPathReportsMigrationFailure(t *testing.T) {
 	}
 	found := false
 	for _, notice := range notices {
-		if strings.Contains(notice, "job artifact migration failed") {
+		if notice.Text == "Job artifact migration failed." && strings.Contains(notice.Detail, "job artifact migration failed") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("migration failure notice not emitted, got %q", notices)
+		t.Fatalf("migration failure notice not emitted, got %+v", notices)
 	}
 }
 

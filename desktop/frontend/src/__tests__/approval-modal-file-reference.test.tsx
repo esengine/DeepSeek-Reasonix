@@ -312,6 +312,25 @@ console.log("\napproval modal file references");
   );
   ok(document.body.textContent?.includes("Hide") === true, "tool approval details start expanded");
 
+  // Consequence preview row: follows the keyboard-selected action by default,
+  // arrow navigation, and hover; each pill carries a native title fallback.
+  const consequence = () => document.querySelector(".approval-consequence__text")?.textContent ?? null;
+  eq(consequence(), "Allow this call only; the next one asks again.", "consequence row previews the selected action by default");
+
+  await act(async () => {
+    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    await flushTimers();
+  });
+  eq(consequence(), "Allow matching calls until this session ends; resets on restart.", "arrow navigation moves the consequence preview");
+
+  const pills = [...document.querySelectorAll(".prompt-shelf__actions .prompt-action")] as HTMLElement[];
+  eq(pills[2]?.getAttribute("title"), "Save a persistent allow rule; future sessions stop asking too.", "action pills carry a native title fallback");
+  await act(async () => {
+    pills[3].dispatchEvent(new window.MouseEvent("mouseover", { bubbles: true }));
+    await flushTimers();
+  });
+  eq(consequence(), "Reject this call; the model sees the refusal and continues.", "hover overrides the consequence preview");
+
   await act(async () => {
     root.unmount();
   });

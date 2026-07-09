@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/hook"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 )
 
 type captureTurnRunner struct {
@@ -164,6 +165,27 @@ func TestSettingsExposesEffectiveSandboxWriteRoots(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.AllowWrite, cfg.Sandbox.AllowWrite) {
 		t.Fatalf("AllowWrite = %v, want raw configured paths %v", got.AllowWrite, cfg.Sandbox.AllowWrite)
+	}
+	if got.EffectiveShell == "" {
+		t.Fatal("EffectiveShell is empty")
+	}
+}
+
+func TestSandboxEffectiveShellViewLabels(t *testing.T) {
+	cases := []struct {
+		name  string
+		shell sandbox.Shell
+		want  string
+	}{
+		{"bash", sandbox.Shell{Kind: sandbox.ShellBash, Path: "bash"}, "bash"},
+		{"git bash", sandbox.Shell{Kind: sandbox.ShellBash, Path: `C:\Program Files\Git\bin\bash.exe`}, "git-bash"},
+		{"windows powershell", sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: "powershell"}, "powershell"},
+		{"pwsh", sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: "pwsh"}, "pwsh"},
+	}
+	for _, tc := range cases {
+		if got := sandboxEffectiveShellView(tc.shell); got != tc.want {
+			t.Errorf("%s: sandboxEffectiveShellView() = %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }
 
@@ -1134,6 +1156,30 @@ func TestSaveHooksSettingsPreservesUnknownSettingsKeys(t *testing.T) {
 	view := app.HooksSettings("global")
 	if len(view.Hooks) != 1 || view.Hooks[0].Event != string(hook.PreToolUse) || view.Hooks[0].Command != "echo guard" {
 		t.Fatalf("HooksSettings = %+v, want saved PreToolUse hook", view)
+	}
+}
+
+func TestSaveHooksSettingsNormalizesQuotedNodeEvalHookCommand(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	script := "const payload = JSON.parse(require('fs').readFileSync(0, 'utf8')); console.log(payload.toolName)"
+	bad := `node -e "\"` + script + `\""`
+	want := hook.NormalizeCommand(bad)
+	if want == bad {
+		t.Fatal("test command did not normalize")
+	}
+
+	app := NewApp()
+	if err := app.SaveHooksSettings("global", []HookConfigView{{
+		Event:   string(hook.PreToolUse),
+		Match:   "bash",
+		Command: bad,
+	}}); err != nil {
+		t.Fatalf("SaveHooksSettings: %v", err)
+	}
+
+	view := app.HooksSettings("global")
+	if len(view.Hooks) != 1 || view.Hooks[0].Command != want {
+		t.Fatalf("HooksSettings = %+v, want normalized command %q", view.Hooks, want)
 	}
 }
 

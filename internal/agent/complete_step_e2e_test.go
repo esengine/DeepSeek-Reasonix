@@ -62,7 +62,7 @@ func hostAdvances(sink *recordSink) int {
 
 func readinessBlocked(sink *recordSink) bool {
 	for _, e := range sink.kinds(event.Notice) {
-		if strings.Contains(e.Text, "readiness blocked") {
+		if e.Text == finalReadinessNoticeText() && strings.Contains(e.Detail, "latest successful todo_write") {
 			return true
 		}
 	}

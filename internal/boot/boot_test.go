@@ -819,7 +819,10 @@ model = "x"
 	}
 }
 
-func TestBuildSubagentSkillGetsForegroundOnlyBash(t *testing.T) {
+// TestBuildReviewSubagentSkillEnforcesReadOnlyBash pins the review builtin's
+// read-only contract at the tool boundary: its sub-agent gets the plan-mode
+// safe bash wrapper, not the writer-capable foreground bash.
+func TestBuildReviewSubagentSkillEnforcesReadOnlyBash(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
@@ -868,10 +871,99 @@ model = "x"
 		}
 	}
 	if !requestHasTool(subReq, "bash") {
-		t.Fatalf("skill subagent request should keep foreground bash; tools=%v", toolSchemaNames(subReq.Tools))
+		t.Fatalf("skill subagent request should keep bash; tools=%v", toolSchemaNames(subReq.Tools))
 	}
 	if requestToolSchemaContains(subReq, "bash", "run_in_background") {
 		t.Fatalf("skill subagent bash schema should not include run_in_background")
+	}
+	if !requestToolDescriptionContains(subReq, "bash", "Only plan-mode safe read-only commands are allowed") {
+		t.Fatalf("review subagent bash must advertise the plan-mode safe read-only policy; got %q", requestToolDescription(subReq, "bash"))
+	}
+}
+
+func requestToolDescription(req provider.Request, name string) string {
+	for _, schema := range req.Tools {
+		if schema.Name == name {
+			return schema.Description
+		}
+	}
+	return ""
+}
+
+func requestToolDescriptionContains(req provider.Request, name, want string) bool {
+	return strings.Contains(requestToolDescription(req, name), want)
+}
+
+// TestBuildRunSkillSubagentRegistryHonorsReadOnlyFlag proves the registry split
+// for user-defined subagent skills: a plain skill keeps writer tools and the
+// foreground-only bash, while a `read-only: true` skill is stripped to research
+// tools plus the plan-mode safe bash.
+func TestBuildRunSkillSubagentRegistryHonorsReadOnlyFlag(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("run-skill-readonly",
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "w-1", Name: "run_skill", Arguments: `{"name":"wskill","arguments":"write things"}`},
+		}},
+		testutil.Turn{Text: "writer sub done"},
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "ro-1", Name: "run_skill", Arguments: `{"name":"roskill","arguments":"inspect things"}`},
+		}},
+		testutil.Turn{Text: "read-only sub done"},
+		testutil.Turn{Text: "done"},
+	)
+	setBootTokenProfileTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+	writeFile(t, dir, ".reasonix/skills/wskill.md",
+		"---\ndescription: writer skill\nrunAs: subagent\nallowed-tools: bash, read_file, write_file\n---\nwriter body")
+	writeFile(t, dir, ".reasonix/skills/roskill.md",
+		"---\ndescription: read-only skill\nrunAs: subagent\nallowed-tools: bash, read_file, write_file\nread-only: true\n---\nread-only body")
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	if err := ctrl.Run(context.Background(), "run both skills"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) != 5 {
+		t.Fatalf("provider requests = %d, want 5 (parent, writer sub, parent, read-only sub, parent)", len(reqs))
+	}
+	writerReq, roReq := reqs[1], reqs[3]
+
+	if !requestHasTool(writerReq, "write_file") {
+		t.Fatalf("writer skill subagent should keep write_file; tools=%v", toolSchemaNames(writerReq.Tools))
+	}
+	if !requestToolDescriptionContains(writerReq, "bash", "Background execution is unavailable inside subagents") {
+		t.Fatalf("writer skill subagent bash should be the foreground-only wrapper; got %q", requestToolDescription(writerReq, "bash"))
+	}
+	if requestToolDescriptionContains(writerReq, "bash", "Only plan-mode safe read-only commands are allowed") {
+		t.Fatalf("writer skill subagent bash must not be the read-only wrapper; got %q", requestToolDescription(writerReq, "bash"))
+	}
+
+	if requestHasTool(roReq, "write_file") {
+		t.Fatalf("read-only skill subagent must strip write_file; tools=%v", toolSchemaNames(roReq.Tools))
+	}
+	if !requestHasTool(roReq, "read_file") {
+		t.Fatalf("read-only skill subagent should keep read_file; tools=%v", toolSchemaNames(roReq.Tools))
+	}
+	if !requestToolDescriptionContains(roReq, "bash", "Only plan-mode safe read-only commands are allowed") {
+		t.Fatalf("read-only skill subagent bash must be the plan-mode safe wrapper; got %q", requestToolDescription(roReq, "bash"))
 	}
 }
 
@@ -2220,12 +2312,15 @@ model = "x"
 	defer ctrl.Close()
 
 	for _, notice := range notices {
-		if notice.Level == event.LevelWarn && strings.Contains(notice.Text, "plan_mode_allowed_tools") && strings.Contains(notice.Text, "bash") {
-			if strings.Contains(notice.Text, "custom_reader") {
-				t.Fatalf("warning should name ignored entries only, got %q", notice.Text)
+		if notice.Level == event.LevelWarn && strings.Contains(notice.Detail, "plan_mode_allowed_tools") && strings.Contains(notice.Detail, "bash") {
+			if notice.Text != "Some plan-mode tool settings were ignored." {
+				t.Fatalf("warning text = %q, want short user-facing text", notice.Text)
 			}
-			if !strings.Contains(notice.Text, "plan_mode_read_only_commands") || !strings.Contains(notice.Text, "read_only_task/read_only_skill") {
-				t.Fatalf("warning should suggest plan-mode migration paths, got %q", notice.Text)
+			if strings.Contains(notice.Detail, "custom_reader") {
+				t.Fatalf("warning should name ignored entries only, got %q", notice.Detail)
+			}
+			if !strings.Contains(notice.Detail, "plan_mode_read_only_commands") || !strings.Contains(notice.Detail, "read_only_task/read_only_skill") {
+				t.Fatalf("warning should suggest plan-mode migration paths, got %q", notice.Detail)
 			}
 			return
 		}
@@ -2268,10 +2363,13 @@ model = "x"
 	defer ctrl.Close()
 
 	for _, notice := range notices {
-		if notice.Level == event.LevelWarn && strings.Contains(notice.Text, "plan_mode_read_only_commands") && strings.Contains(notice.Text, "bash") {
-			ignoredList := strings.TrimSpace(strings.SplitN(strings.TrimPrefix(notice.Text, "plan_mode_read_only_commands ignored unsafe entries:"), ";", 2)[0])
+		if notice.Level == event.LevelWarn && strings.Contains(notice.Detail, "plan_mode_read_only_commands") && strings.Contains(notice.Detail, "bash") {
+			if notice.Text != "Some plan-mode command settings were ignored." {
+				t.Fatalf("warning text = %q, want short user-facing text", notice.Text)
+			}
+			ignoredList := strings.TrimSpace(strings.SplitN(strings.TrimPrefix(notice.Detail, "plan_mode_read_only_commands ignored unsafe entries:"), ";", 2)[0])
 			if ignoredList != "bash" {
-				t.Fatalf("warning should name ignored command prefixes only, got %q from %q", ignoredList, notice.Text)
+				t.Fatalf("warning should name ignored command prefixes only, got %q from %q", ignoredList, notice.Detail)
 			}
 			return
 		}
@@ -2393,7 +2491,7 @@ model = "x"
 func TestAddBuiltinsWithWorkspaceRootKeepsSessionTools(t *testing.T) {
 	reg := tool.NewRegistry()
 	var stderr bytes.Buffer
-	addBuiltins(reg, nil, []string{robustTempDir(t)}, sandbox.Spec{}, 120*time.Second, builtin.SearchSpec{}, &stderr, robustTempDir(t), netclient.ProxySpec{}, nil, nil, builtin.SessionDataGuard{})
+	addBuiltins(reg, nil, []string{robustTempDir(t)}, sandbox.Spec{}, 120*time.Second, builtin.SearchSpec{}, &stderr, robustTempDir(t), netclient.ProxySpec{}, nil, nil, builtin.SessionDataGuard{}, builtin.ManagedConfigPaths{}, nil, nil)
 	for _, name := range []string{
 		"todo_write",
 		"complete_step",

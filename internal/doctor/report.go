@@ -90,6 +90,11 @@ type SandboxReport struct {
 	// Git-for-Windows/MSYS2 bash is far more fragile under a low-integrity
 	// token than PowerShell.
 	Shell string `json:"shell,omitempty"`
+	// BashConfigIgnored is set when the config file requests bash = "enforce"
+	// but the platform force-resolves it to "off" (Windows, until the native
+	// backend is reliable) — the one case where Bash silently disagrees with
+	// what the user wrote.
+	BashConfigIgnored bool `json:"bash_config_ignored,omitempty"`
 }
 
 type NetworkReport struct {
@@ -136,6 +141,14 @@ func Collect(opts Options) Report {
 			}
 		}
 	}
+	// A config that says enforce while the platform force-resolves it to off is
+	// the one case where bash behavior silently disagrees with the file the user
+	// edited (Windows forces off until the native backend is reliable) — say it
+	// out loud instead of leaving it to be discovered from unconfined commands.
+	bashConfigIgnored := strings.TrimSpace(cfg.Sandbox.Bash) == "enforce" && cfg.BashMode() == "off"
+	if bashConfigIgnored {
+		warnings = append(warnings, `config requests [sandbox] bash = "enforce", but this platform currently forces the Bash sandbox off; bash runs unconfined`)
+	}
 	report := Report{
 		Version: opts.Version,
 		OS:      runtime.GOOS,
@@ -152,11 +165,12 @@ func Collect(opts Options) Report {
 		},
 		Sessions: collectSessions(config.SessionDir()),
 		Sandbox: SandboxReport{
-			Bash:       cfg.BashMode(),
-			Network:    cfg.Sandbox.Network,
-			WriteRoots: redactHomeAll(cfg.WriteRoots()),
-			Available:  sandbox.Available(),
-			Shell:      resolvedShellSummary(cfg),
+			Bash:              cfg.BashMode(),
+			Network:           cfg.Sandbox.Network,
+			WriteRoots:        redactHomeAll(cfg.WriteRoots()),
+			Available:         sandbox.Available(),
+			Shell:             resolvedShellSummary(cfg),
+			BashConfigIgnored: bashConfigIgnored,
 		},
 		Network: NetworkReport{
 			ProxyMode: cfg.NetworkProxyMode(),
@@ -257,6 +271,9 @@ func RenderText(r Report) string {
 	bashLine := r.Sandbox.Bash
 	if r.Sandbox.Bash == "enforce" && !r.Sandbox.Available {
 		bashLine += " (unavailable: no OS sandbox on this host; bash execution is refused. " + sandbox.UnavailableRemediation() + ")"
+	}
+	if r.Sandbox.BashConfigIgnored {
+		bashLine += ` (config requests "enforce", ignored: this platform currently forces the Bash sandbox off)`
 	}
 	fmt.Fprintf(&b, "  bash         %s\n", bashLine)
 	if r.Sandbox.Shell != "" {

@@ -68,6 +68,91 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveRedactsSecretsOnDisk(t *testing.T) {
+	secret := "sk-real-secret-value-123456"
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "inspect"})
+	s.Add(provider.Message{
+		Role:       provider.RoleTool,
+		Name:       "bash",
+		ToolCallID: "call_1",
+		Content:    "DEEPSEEK_API_KEY=" + secret + "\n",
+	})
+
+	path := filepath.Join(t.TempDir(), "redacted.jsonl")
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved session: %v", err)
+	}
+	if strings.Contains(string(body), secret) {
+		t.Fatalf("session persisted raw secret:\n%s", body)
+	}
+	if !strings.Contains(string(body), "DEEPSEEK_API_KEY=sk-rea") {
+		t.Fatalf("session did not persist a masked credential marker:\n%s", body)
+	}
+}
+
+// TestSaveRedactionKeepsSnapshotBaselineStable is the digest-consistency
+// contract behind redact-on-save: because Redact is idempotent, a loaded
+// (already-redacted) transcript re-saves as the exact same bytes, so
+// SaveSnapshot must take the up-to-date path — no rewrite, no revision bump,
+// and above all no bogus snapshot conflict / recovery fork (#6083's failure
+// shape). Appending after the resave must land as a plain append.
+func TestSaveRedactionKeepsSnapshotBaselineStable(t *testing.T) {
+	secret := "sk-real-secret-value-123456"
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "inspect"})
+	s.Add(provider.Message{
+		Role:       provider.RoleTool,
+		Name:       "bash",
+		ToolCallID: "call_1",
+		Content:    "DEEPSEEK_API_KEY=" + secret + "\n",
+	})
+
+	path := filepath.Join(t.TempDir(), "stable.jsonl")
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("first SaveSnapshot: %v", err)
+	}
+	rev1, _, err := sessionContentRevision(path)
+	if err != nil {
+		t.Fatalf("read revision: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	// Re-saving the loaded transcript re-runs RedactMessages over content that
+	// is already masked; idempotence means identical bytes and the up-to-date
+	// skip, not a conflict or a revision bump.
+	if err := loaded.SaveSnapshot(path); err != nil {
+		t.Fatalf("resave of loaded redacted session: %v", err)
+	}
+	rev2, _, err := sessionContentRevision(path)
+	if err != nil {
+		t.Fatalf("read revision after resave: %v", err)
+	}
+	if rev1 != rev2 {
+		t.Fatalf("no-op resave bumped revision %d -> %d; redaction broke digest stability", rev1, rev2)
+	}
+
+	// A continued conversation still append-saves cleanly on top.
+	loaded.Add(provider.Message{Role: provider.RoleAssistant, Content: "done"})
+	if err := loaded.SaveSnapshot(path); err != nil {
+		t.Fatalf("append snapshot after redacted round-trip: %v", err)
+	}
+	reloaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got := len(reloaded.Messages); got != 4 {
+		t.Fatalf("message count after append = %d, want 4", got)
+	}
+}
+
 func TestSaveLoadLargeMessage(t *testing.T) {
 	s := NewSession("sys")
 	s.Add(provider.Message{Role: provider.RoleUser, Content: "run it"})

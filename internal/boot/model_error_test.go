@@ -83,11 +83,11 @@ model = "m"
 api_key_env = "`+keyEnv+`"
 `)
 
-	var notices []string
+	var notices []event.Event
 	ctrl, err := Build(context.Background(), Options{
 		Sink: event.FuncSink(func(e event.Event) {
 			if e.Kind == event.Notice {
-				notices = append(notices, e.Text)
+				notices = append(notices, e)
 			}
 		}),
 	})
@@ -98,7 +98,7 @@ api_key_env = "`+keyEnv+`"
 
 	found := false
 	for _, n := range notices {
-		if strings.Contains(n, keyEnv) {
+		if n.Text == "Selected model is missing its API key." && strings.Contains(n.Detail, keyEnv) {
 			found = true
 		}
 	}

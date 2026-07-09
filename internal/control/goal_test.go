@@ -495,8 +495,8 @@ func TestResearchGoalCompletionIsInterceptedWhenReadinessFails(t *testing.T) {
 	if !sessionContainsUserText(ag.Session().Messages, "AutoResearch readiness check failed", "objective_evidence", "verification") {
 		t.Fatalf("transcript missing readiness intercept; last user:\n%s", lastUserMessage(ag.Session().Messages))
 	}
-	if !containsNotice(notices, "autoresearch readiness blocked completion") {
-		t.Fatalf("notices = %+v, want autoresearch readiness blocked completion", notices)
+	if !containsNotice(notices, "Goal is not ready to complete yet; continuing the remaining work.") {
+		t.Fatalf("notices = %+v, want readiness continuation notice", notices)
 	}
 }
 
@@ -665,8 +665,8 @@ func TestResearchGoalBlockedMarksAutoResearchTaskBlocked(t *testing.T) {
 	if summary.Status != "blocked" || !strings.Contains(summary.Blocker, "needs credentials") {
 		t.Fatalf("AutoResearch summary = %+v, want blocked with reason", summary)
 	}
-	if !containsNotice(notices, "autoresearch task blocked") {
-		t.Fatalf("notices = %+v, want autoresearch task blocked", notices)
+	if !containsNotice(notices, "AutoResearch task marked blocked.") {
+		t.Fatalf("notices = %+v, want autoresearch blocked notice", notices)
 	}
 }
 
@@ -886,13 +886,13 @@ func TestGoalInterceptsCompleteWithIncompleteTodos(t *testing.T) {
 	// (second [goal:complete] overrides the intercept).
 	found := false
 	for _, n := range allNotices {
-		if strings.Contains(n, "goal intercept") {
+		if strings.Contains(n, "Goal still has unfinished task state") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected a 'goal intercept' notice, got %v", allNotices)
+		t.Fatalf("expected an unfinished-goal notice, got %v", allNotices)
 	}
 	if c.GoalStatus() != GoalStatusComplete {
 		t.Fatalf("GoalStatus() = %q, want complete (second [goal:complete] should override)", c.GoalStatus())

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "../lib/i18n";
 import type { QuestionAnswer, WireAsk, WireAskQuestion } from "../lib/types";
 import { PromptAction, PromptHeaderAction, PromptShelf } from "./PromptShelf";
-import { playAttentionChime } from "../lib/sound";
 
 // AskCard renders the `ask` tool as a compact prompt shelf near the composer. It
 // walks multi-question asks one at a time; single-select answers advance
@@ -24,6 +23,8 @@ export function AskCard({
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [customOpen, setCustomOpen] = useState(false);
   const [active, setActive] = useState(0);
+  // Option label currently hovered/focused; drives the detail preview row.
+  const [hoverLabel, setHoverLabel] = useState<string | null>(null);
   const shelfRef = useRef<HTMLDivElement | null>(null);
   const customInputRef = useRef<HTMLInputElement | null>(null);
   const advanceTimer = useRef<number | null>(null);
@@ -40,8 +41,11 @@ export function AskCard({
     setCustom({});
     setCustomOpen(false);
     setActive(0);
+    setHoverLabel(null);
     if (advanceTimer.current != null) window.clearTimeout(advanceTimer.current);
-    playAttentionChime();
+    // The attention chime plays from the global runtime event stream (App.tsx),
+    // keyed by prompt id — not here. A mount-time chime would double-fire for
+    // the active tab and stay silent for background tabs.
   }, [ask.id]);
 
   useEffect(() => {
@@ -73,6 +77,7 @@ export function AskCard({
 
   useEffect(() => {
     setCustomOpen(false);
+    setHoverLabel(null);
   }, [active]);
 
   useEffect(() => {
@@ -156,6 +161,23 @@ export function AskCard({
     [active, custom, questions, sel],
   );
 
+  // Grid cells truncate descriptions to one line; this row previews the full
+  // description of the hovered/focused option, falling back to the latest
+  // selected option and then the first described option so it never blanks.
+  const detailOption = useMemo(() => {
+    if (!q) return null;
+    const withDescription = (label?: string | null) =>
+      label ? q.options.find((option) => option.label === label && option.description) : undefined;
+    const hovered = withDescription(hoverLabel);
+    if (hovered) return hovered;
+    const selectedLabels = sel[q.id] ?? [];
+    for (let i = selectedLabels.length - 1; i >= 0; i -= 1) {
+      const chosen = withDescription(selectedLabels[i]);
+      if (chosen) return chosen;
+    }
+    return q.options.find((option) => option.description) ?? null;
+  }, [hoverLabel, q, sel]);
+
   if (!q) return null;
 
   return (
@@ -196,10 +218,22 @@ export function AskCard({
                 description={o.description}
                 onClick={() => toggle(q, o.label)}
                 selected={on}
+                title={o.description || undefined}
+                onHoverChange={(hovering) =>
+                  setHoverLabel((current) => (hovering ? o.label : current === o.label ? null : current))
+                }
               />
             );
           })}
         </>
+      }
+      note={
+        detailOption && (
+          <div className="ask-shelf__detail">
+            <span className="ask-shelf__detail-label">{detailOption.label}</span>
+            <span className="ask-shelf__detail-text">{detailOption.description}</span>
+          </div>
+        )
       }
       quickActions={
         <>

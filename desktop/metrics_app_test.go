@@ -34,7 +34,7 @@ func TestObserveClassifiesEvents(t *testing.T) {
 			StrategyCount:    3,
 			LearningCount:    6,
 		}},
-		{Kind: event.Notice, Text: "empty final answer blocked: model returned no visible answer text; retrying"},
+		{Kind: event.Notice, Text: "No visible answer was produced; asking the assistant to respond again.", Detail: "empty final answer blocked: model returned no visible answer text; retrying"},
 		{Kind: event.TurnDone, Err: errors.New("deepseek-flash: status 429: rate limited")},
 		{Kind: event.TurnDone},
 	}

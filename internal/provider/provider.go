@@ -617,6 +617,28 @@ type Provider interface {
 	Stream(ctx context.Context, req Request) (<-chan Chunk, error)
 }
 
+// ToolCallReasoningPolicy is optionally implemented by providers whose protocol
+// replays the provider-issued reasoning block on assistant tool_calls turns
+// (DeepSeek thinking mode). The agent uses it to archive the original reasoning
+// text on those turns (a display-translated copy must not round-trip to the
+// API) and to warn when a turn arrives with none — the request still succeeds
+// because the wire layer always emits the reasoning_content key for such turns,
+// but the model loses its chain-of-thought context. Most providers leave this
+// unset; callers must treat it as false.
+type ToolCallReasoningPolicy interface {
+	RequiresToolCallReasoning() bool
+}
+
+// RequiresToolCallReasoning reports whether p replays reasoning_content on
+// assistant tool_calls turns sent back in history.
+func RequiresToolCallReasoning(p Provider) bool {
+	if nilutil.IsNil(p) {
+		return false
+	}
+	policy, ok := p.(ToolCallReasoningPolicy)
+	return ok && policy.RequiresToolCallReasoning()
+}
+
 // Config is a resolved provider instance configuration.
 type Config struct {
 	Name    string         // instance name, e.g. "deepseek"

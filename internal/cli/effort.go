@@ -90,6 +90,14 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 	// controller back to the original file, re-conflicting on every later save.
 	carried := m.ctrl.History()
 	prevPath := m.ctrl.SessionPath()
+	// Move the lease before the rebuilt controller binds prevPath for writing
+	// (AdoptHistory resumes there): after a snapshot retarget the lease still
+	// guards the old path, and the async build must not open an unguarded
+	// writer on the recovery branch.
+	if err := m.rebindSessionLease(prevPath); err != nil {
+		m.notice("effort: " + sessionLeaseHeldNotice(err))
+		return nil
+	}
 	oldCtrl := m.ctrl
 	build := m.buildController
 	m.modelSwitchPending = true

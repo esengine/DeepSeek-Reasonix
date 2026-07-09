@@ -40,7 +40,7 @@ func normalizeAutoPlan(mode string) string {
 func (c *Controller) maybeAutoPlan(ctx context.Context, input string) {
 	if c.shouldAutoPlan(ctx, input) {
 		c.SetPlanMode(true)
-		c.notice("auto plan: task looks multi-step; drafting a plan first")
+		c.noticeDetail("Planning mode enabled for this multi-step task.", "auto plan: task looks multi-step; drafting a plan first")
 	}
 }
 
@@ -63,11 +63,11 @@ func (c *Controller) shouldAutoPlan(ctx context.Context, input string) bool {
 		needsPlan, reason, err := classifier.NeedsPlan(ctx, input, score)
 		if err == nil {
 			if needsPlan && reason != "" {
-				c.notice("auto plan classifier: " + reason)
+				c.noticeDetail("Plan detection requested a plan.", "auto plan classifier: "+reason)
 			}
 			return needsPlan
 		}
-		c.notice("auto plan classifier failed; falling back to heuristic: " + err.Error())
+		c.noticeDetail("Plan detection was uncertain; using the fallback planner heuristic.", "auto plan classifier failed; falling back to heuristic: "+err.Error())
 	}
 	return score >= 2
 }
@@ -286,17 +286,22 @@ var docsAndIssueTerms = []string{
 	"需求", "产品文档", "接口文档", "方案", "规划",
 }
 
-func NewPlannerGate(classifier AutoPlanClassifier) func(string) bool {
+// NewPlannerGate builds the per-turn planner gate for two-model mode. The turn
+// context is threaded into the classifier call so a cancelled turn stops the
+// borderline check immediately instead of letting it run out its own timeout.
+func NewPlannerGate(classifier AutoPlanClassifier) func(context.Context, string) bool {
 	if nilutil.IsNil(classifier) {
-		return TaskWarrantsPlanner
+		return func(_ context.Context, input string) bool {
+			return TaskWarrantsPlanner(input)
+		}
 	}
-	return func(input string) bool {
+	return func(ctx context.Context, input string) bool {
 		if !TaskWarrantsPlanner(input) {
 			return false
 		}
 		score := autoPlanScore(input)
 		if score <= 2 {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 			defer cancel()
 			needsPlan, _, err := classifier.NeedsPlan(ctx, input, score)
 			if err == nil {

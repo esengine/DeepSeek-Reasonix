@@ -574,6 +574,16 @@ export function onFilesDropped(cb: (paths: string[]) => void): () => void {
 
 // onReady subscribes to the agent:ready event fired when boot.Build completes.
 // The frontend re-fetches Meta/Context/History when this lands.
+// onRuntimeRebuilt fires when a tab's controller is replaced in place
+// (model/effort/token-mode switch, clear-while-running). The rebuilt
+// controller restarts prompt ids, so per-tab id-keyed state must reset.
+export function onRuntimeRebuilt(cb: (tabId?: string) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("runtime:rebuilt", (tabId?: unknown) => cb(typeof tabId === "string" ? tabId : undefined));
+  }
+  return () => {};
+}
+
 export function onReady(cb: (tabId?: string) => void): () => void {
   if (realApp() && typeof window !== "undefined" && window.runtime) {
     return window.runtime.EventsOn("agent:ready", (tabId?: unknown) => cb(typeof tabId === "string" ? tabId : undefined));
@@ -627,6 +637,11 @@ function bridgeBreadcrumb(method: string): string {
   return "";
 }
 
+function elapsedMs(startedAt: number): number {
+  const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+  return Math.max(0, Math.round(now - startedAt));
+}
+
 export const app: AppBindings = new Proxy({} as AppBindings, {
   get(_t, prop) {
     const target = realApp() ?? getMock();
@@ -635,18 +650,26 @@ export const app: AppBindings = new Proxy({} as AppBindings, {
     return (...args: unknown[]) => {
       const method = String(prop);
       const crumb = bridgeBreadcrumb(method);
+      const startedAt = crumb ? (typeof performance !== "undefined" ? performance.now() : Date.now()) : 0;
       if (crumb) addBreadcrumb("bridge", crumb);
       try {
         const result = (v as (...a: unknown[]) => unknown).apply(target, args);
         if (result && typeof (result as Promise<unknown>).then === "function") {
-          return (result as Promise<unknown>).catch((err) => {
-            if (crumb) addBreadcrumb("bridge.error", method);
-            throw err;
-          });
+          return (result as Promise<unknown>).then(
+            (value) => {
+              if (crumb) addBreadcrumb("bridge", `${crumb} done ms=${elapsedMs(startedAt)}`);
+              return value;
+            },
+            (err) => {
+              if (crumb) addBreadcrumb("bridge.error", `${method} ms=${elapsedMs(startedAt)}`);
+              throw err;
+            },
+          );
         }
+        if (crumb) addBreadcrumb("bridge", `${crumb} done ms=${elapsedMs(startedAt)}`);
         return result;
       } catch (err) {
-        if (crumb) addBreadcrumb("bridge.error", method);
+        if (crumb) addBreadcrumb("bridge.error", `${method} ms=${elapsedMs(startedAt)}`);
         throw err;
       }
     };
@@ -719,13 +742,24 @@ function browserPlatformOverride(): "darwin" | "windows" | "linux" | "" {
   return value === "darwin" || value === "windows" || value === "linux" ? value : "";
 }
 
-function mockScenario(): "demo" | "fresh" | "running" | "guidance" | "sandbox_escape" {
+function browserPreviewBashSandboxMode(): "enforce" | "off" {
+  return browserPlatformOverride() === "windows" ? "off" : "enforce";
+}
+
+function browserPreviewEffectiveShell(prefer = "auto"): "bash" | "git-bash" | "powershell" | "pwsh" {
+  const normalized = prefer.trim().toLowerCase();
+  if (normalized === "powershell" || normalized === "pwsh") return normalized;
+  return browserPlatformOverride() === "windows" ? "git-bash" : "bash";
+}
+
+function mockScenario(): "demo" | "fresh" | "running" | "guidance" | "sandbox_escape" | "notice" {
   if (typeof window === "undefined") return "demo";
   const value = new URLSearchParams(window.location.search).get("mock")?.trim().toLowerCase();
   if (value === "fresh" || value === "empty" || value === "first-run") return "fresh";
   if (value === "guidance" || value === "guide" || value === "steer") return "guidance";
   if (value === "running" || value === "busy" || value === "streaming") return "running";
   if (value === "sandbox_escape" || value === "sandbox-escape" || value === "sandboxescape") return "sandbox_escape";
+  if (value === "notice" || value === "notices" || value === "notice-preview") return "notice";
   return "demo";
 }
 
@@ -874,6 +908,7 @@ function makeMockApp(): AppBindings {
   const guidanceMock = scenario === "guidance";
   const runningMock = scenario === "running" || guidanceMock;
   const sandboxEscapeMock = scenario === "sandbox_escape";
+  const noticePreviewMock = scenario === "notice";
   const mockAttachmentDataURLs = new Map<string, string>();
   let cancelled = false;
   let pendingAskPreview = false;
@@ -982,7 +1017,7 @@ function makeMockApp(): AppBindings {
   // Mutable so delete/rename are observable in browser dev.
   const sessions: SessionMeta[] = [
     { path: "/mock/sessions/a.jsonl", preview: "fix the login bug in auth.go", turns: 12, createdAt: t0 - 2 * day, lastActivityAt: t0 - 3_600_000, modTime: t0 - 3_600_000, current: true, open: true },
-    { path: "/mock/sessions/b.jsonl", preview: "refactor the payment module", turns: 5, createdAt: t0 - 3 * day, lastActivityAt: t0 - 6 * 3_600_000, modTime: t0 - 6 * 3_600_000, current: false, open: true },
+    { path: "/mock/sessions/b-recovery-0123456789abcdef.jsonl", preview: "refactor the payment module", turns: 5, createdAt: t0 - 3 * day, lastActivityAt: t0 - 6 * 3_600_000, modTime: t0 - 6 * 3_600_000, current: false, open: true, recovered: true },
     { path: "/mock/sessions/c.jsonl", preview: "write the README and badges", turns: 8, createdAt: t0 - 4 * day, lastActivityAt: t0 - day - 3_600_000, modTime: t0 - day - 3_600_000, current: false, open: false },
     { path: "/mock/sessions/d.jsonl", preview: "explain the plugin host design", turns: 3, createdAt: t0 - 5 * day, lastActivityAt: t0 - 4 * day, modTime: t0 - 4 * day, current: false, open: false },
   ];
@@ -1033,6 +1068,7 @@ function makeMockApp(): AppBindings {
       scope: "global",
       topicId: "topic_product",
       topicTitle: t("mock.trashGlobalProductTitle"),
+      recovered: true,
     },
   ];
   if (freshMock) {
@@ -1054,7 +1090,7 @@ function makeMockApp(): AppBindings {
     ],
     providerPresets: mockProviderPresetViews(),
     permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["Bash(rm:*)"] },
-    sandbox: { bash: "enforce", network: true, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: cwd, effectiveWriteRoots: [cwd], shell: "auto" },
+    sandbox: { bash: browserPreviewBashSandboxMode(), network: true, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: cwd, effectiveWriteRoots: [cwd], shell: "auto", effectiveShell: browserPreviewEffectiveShell("auto") },
     network: {
       proxyMode: "auto",
       proxyUrl: "",
@@ -1557,7 +1593,28 @@ function makeMockApp(): AppBindings {
     setMockTabRunning(currentMockTurnTabId(), false);
     emit({ kind: "turn_done" });
   };
-  let mockTabs: TabMeta[] = freshMock ? [
+  let mockTabs: TabMeta[] = noticePreviewMock ? [
+    {
+      id: "tab_notice_preview",
+      scope: "project",
+      workspaceRoot: "~/projects/reasonix",
+      workspaceName: "reasonix",
+      workspacePath: "~/projects/reasonix",
+      gitBranch: "codex/compact-chat-notices-i18n",
+      topicId: "topic_notice_preview",
+      topicTitle: "Compact notice preview",
+      projectColor: "green",
+      label: "DeepSeek-R1",
+      ready: true,
+      running: false,
+      mode: "normal",
+      collaborationMode: "normal",
+      toolApprovalMode: "ask",
+      tokenMode: "full",
+      active: true,
+      cwd: "~/projects/reasonix",
+    },
+  ] : freshMock ? [
     {
       id: "tab_global",
       scope: "global",
@@ -3173,7 +3230,7 @@ function makeMockApp(): AppBindings {
         async ReloadSettings() {},
         async SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string) {
           const effectiveWorkspaceRoot = workspaceRoot.trim() || cwd;
-          settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell };
+          settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell, effectiveShell: browserPreviewEffectiveShell(shell) };
         },
         async SetNetwork(n: NetworkView) {
           settings.network = n;

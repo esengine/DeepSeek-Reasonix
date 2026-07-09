@@ -34,11 +34,27 @@ const (
 
 // --- initialize ---
 
-// InitializeParams is the client's handshake. We accept and ignore its
-// capabilities/info — the agent advertises a fixed capability set in reply.
+// InitializeParams is the client's handshake. The agent records the client's
+// capabilities — fs read/write proxying and host terminals are used when
+// offered — and advertises its own fixed capability set in reply.
 type InitializeParams struct {
-	ProtocolVersion int             `json:"protocolVersion"`
-	ClientInfo      *Implementation `json:"clientInfo,omitempty"`
+	ProtocolVersion    int                `json:"protocolVersion"`
+	ClientInfo         *Implementation    `json:"clientInfo,omitempty"`
+	ClientCapabilities ClientCapabilities `json:"clientCapabilities,omitempty"`
+}
+
+// ClientCapabilities is what the client offers the agent: filesystem proxy
+// methods (fs/read_text_file, fs/write_text_file) that see unsaved editor
+// buffers, and host-owned terminals (terminal/*).
+type ClientCapabilities struct {
+	FS       FSCapabilities `json:"fs,omitempty"`
+	Terminal bool           `json:"terminal,omitempty"`
+}
+
+// FSCapabilities reports which client filesystem methods are available.
+type FSCapabilities struct {
+	ReadTextFile  bool `json:"readTextFile,omitempty"`
+	WriteTextFile bool `json:"writeTextFile,omitempty"`
 }
 
 // Implementation names a participant (client or agent) on the wire.
@@ -197,8 +213,33 @@ func unmarshalNameValueMap(raw []byte, field string) (map[string]string, error) 
 type SessionNewResult struct {
 	SessionID     string                `json:"sessionId"`
 	Models        *SessionModelState    `json:"models,omitempty"`
+	Modes         *SessionModeState     `json:"modes,omitempty"`
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 }
+
+// --- session modes ---
+
+// SessionMode is one operating mode the client can switch the session into.
+type SessionMode struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// SessionModeState reports the current mode and the full mode list.
+type SessionModeState struct {
+	CurrentModeID  string        `json:"currentModeId"`
+	AvailableModes []SessionMode `json:"availableModes"`
+}
+
+// SessionSetModeParams switches a session's operating mode.
+type SessionSetModeParams struct {
+	SessionID string `json:"sessionId"`
+	ModeID    string `json:"modeId"`
+}
+
+// SessionSetModeResult is the empty ack.
+type SessionSetModeResult struct{}
 
 // ModelInfo describes one selectable model in ACP's legacy model selector.
 type ModelInfo struct {
@@ -230,6 +271,7 @@ type SessionLoadParams struct {
 // burst of session/update notifications by the time it is sent.
 type SessionLoadResult struct {
 	Models        *SessionModelState    `json:"models,omitempty"`
+	Modes         *SessionModeState     `json:"modes,omitempty"`
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 }
 
@@ -245,6 +287,7 @@ type SessionResumeParams struct {
 // SessionResumeResult is the empty ack returned once the session is ready.
 type SessionResumeResult struct {
 	Models        *SessionModelState    `json:"models,omitempty"`
+	Modes         *SessionModeState     `json:"modes,omitempty"`
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 }
 
@@ -433,12 +476,20 @@ type updateError struct {
 
 // toolCall is a "tool_call" update (announces a call, with title/kind/rawInput).
 type toolCall struct {
-	SessionUpdate string          `json:"sessionUpdate"`
-	ToolCallID    string          `json:"toolCallId"`
-	Title         string          `json:"title,omitempty"`
-	Kind          string          `json:"kind,omitempty"`
-	Status        string          `json:"status,omitempty"`
-	RawInput      json.RawMessage `json:"rawInput,omitempty"`
+	SessionUpdate string             `json:"sessionUpdate"`
+	ToolCallID    string             `json:"toolCallId"`
+	Title         string             `json:"title,omitempty"`
+	Kind          string             `json:"kind,omitempty"`
+	Status        string             `json:"status,omitempty"`
+	RawInput      json.RawMessage    `json:"rawInput,omitempty"`
+	Locations     []ToolCallLocation `json:"locations,omitempty"`
+}
+
+// ToolCallLocation names a file (and optionally a line) a tool call touches, so
+// the client can follow along in the editor.
+type ToolCallLocation struct {
+	Path string `json:"path"`
+	Line *int   `json:"line,omitempty"`
 }
 
 // toolCallUpdateMsg is a "tool_call_update" update (status + result content).
@@ -479,6 +530,93 @@ type AvailableCommandInput struct {
 type configOptionUpdate struct {
 	SessionUpdate string                `json:"sessionUpdate"`
 	ConfigOptions []SessionConfigOption `json:"configOptions"`
+}
+
+// planUpdate is a "plan" update: the agent's current task list. Each update
+// carries the complete plan and replaces the previous one, mirroring the
+// todo_write contract it is derived from.
+type planUpdate struct {
+	SessionUpdate string      `json:"sessionUpdate"`
+	Entries       []PlanEntry `json:"entries"`
+}
+
+// PlanEntry is one task in a plan update.
+type PlanEntry struct {
+	Content  string `json:"content"`
+	Priority string `json:"priority"`
+	Status   string `json:"status"`
+}
+
+// currentModeUpdate reports that the session switched operating modes.
+type currentModeUpdate struct {
+	SessionUpdate string `json:"sessionUpdate"`
+	CurrentModeID string `json:"currentModeId"`
+}
+
+// --- fs/* (agent → client requests) ---
+
+// FSReadTextFileParams asks the client for a file's current text, including
+// unsaved editor state. Line (1-based) and Limit page the content; Reasonix
+// always reads whole files and pages locally, so it sends neither.
+type FSReadTextFileParams struct {
+	SessionID string `json:"sessionId"`
+	Path      string `json:"path"`
+	Line      *int   `json:"line,omitempty"`
+	Limit     *int   `json:"limit,omitempty"`
+}
+
+// FSReadTextFileResult carries the file content.
+type FSReadTextFileResult struct {
+	Content string `json:"content"`
+}
+
+// FSWriteTextFileParams asks the client to write content to path, updating any
+// open buffer as well as the file on disk.
+type FSWriteTextFileParams struct {
+	SessionID string `json:"sessionId"`
+	Path      string `json:"path"`
+	Content   string `json:"content"`
+}
+
+// --- terminal/* (agent → client requests) ---
+
+// TerminalCreateParams starts a command in a client-owned terminal.
+type TerminalCreateParams struct {
+	SessionID       string   `json:"sessionId"`
+	Command         string   `json:"command"`
+	Args            []string `json:"args,omitempty"`
+	Cwd             string   `json:"cwd,omitempty"`
+	OutputByteLimit int      `json:"outputByteLimit,omitempty"`
+}
+
+// TerminalCreateResult returns the id used by the other terminal methods.
+type TerminalCreateResult struct {
+	TerminalID string `json:"terminalId"`
+}
+
+// TerminalIDParams addresses one terminal (output / kill / wait / release).
+type TerminalIDParams struct {
+	SessionID  string `json:"sessionId"`
+	TerminalID string `json:"terminalId"`
+}
+
+// TerminalOutputResult is the terminal's captured output so far.
+type TerminalOutputResult struct {
+	Output     string              `json:"output"`
+	Truncated  bool                `json:"truncated"`
+	ExitStatus *TerminalExitStatus `json:"exitStatus,omitempty"`
+}
+
+// TerminalWaitResult reports how the command exited.
+type TerminalWaitResult struct {
+	ExitCode *int    `json:"exitCode,omitempty"`
+	Signal   *string `json:"signal,omitempty"`
+}
+
+// TerminalExitStatus mirrors TerminalWaitResult inside terminal/output.
+type TerminalExitStatus struct {
+	ExitCode *int    `json:"exitCode,omitempty"`
+	Signal   *string `json:"signal,omitempty"`
 }
 
 // --- session/cancel (client → agent notification) ---

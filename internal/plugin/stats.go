@@ -12,6 +12,7 @@ package plugin
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -44,6 +45,13 @@ type StartupStats struct {
 	Version   int       `json:"version"`
 	SamplesMs []int64   `json:"samples_ms"`
 	LastSeen  time.Time `json:"last_seen"`
+	// Name is the raw (pre-slug) server name that owns these samples. The
+	// filename slug is lossy — "foo.bar" and "foo-bar" share one file — so
+	// readers verify ownership before trusting samples, or a slow server's
+	// history could demote an unrelated healthy one. Empty on files written
+	// by older versions; those are adopted by the first writer (additive
+	// field, no version bump, so downgraded builds still read the file).
+	Name string `json:"name,omitempty"`
 }
 
 // Recommendation is the result of inspecting a plugin's recent startup
@@ -75,13 +83,14 @@ func RecordStartup(name string, dur time.Duration) error {
 		return nil
 	}
 
-	stats := loadStats(path) // missing/corrupt → fresh zero value
+	stats := loadStatsForOwner(name) // missing/corrupt/foreign → fresh zero value
 	if stats.Version != statsVersion {
 		// Version mismatch: start over rather than try to migrate. The window
 		// is small enough that "lose 20 samples" is cheap, and it keeps the
 		// migration path trivial as the format evolves.
 		stats = StartupStats{Version: statsVersion}
 	}
+	stats.Name = name
 
 	ms := dur.Milliseconds()
 	if ms < 0 {
@@ -122,7 +131,7 @@ func Recommend(name string, budget time.Duration, demoteAfter int) Recommendatio
 	if path == "" {
 		return Recommendation{}
 	}
-	stats := loadStats(path)
+	stats := loadStatsForOwner(name)
 	if stats.Version != statsVersion || len(stats.SamplesMs) == 0 {
 		// Either no history yet or a format we can't read — give the plugin a
 		// chance. The cost of one slow start is small compared to wrongly
@@ -151,11 +160,35 @@ func Recommend(name string, budget time.Duration, demoteAfter int) Recommendatio
 }
 
 // statsPath returns the canonical path for one plugin's stats file:
-// <config.CacheDir()>/mcp/<slug>.stats.json. Shares the cache root and slug
-// rule with the schema cache so a `<plugin>.json` and `<plugin>.stats.json`
-// sit side by side under the same per-server folder. Returns "" when no cache
-// dir is resolvable, which all callers treat as "skip telemetry".
+// <config.CacheDir()>/mcp/<slug>-<hash>.stats.json. The slug alone is lossy —
+// "foo.bar" and "foo-bar" collapse to one slug — and two colliding servers
+// sharing a file would alternately reset each other's window, so neither
+// could ever accumulate enough consecutive samples to demote. Hashing the raw
+// name into the filename gives every server its own history. The slug portion
+// is bounded so the whole component stays under the 255-byte filesystem limit
+// even for very long server names — the hash carries the uniqueness, so
+// truncating the slug is safe. Returns "" when no cache dir is resolvable,
+// which all callers treat as "skip telemetry".
 func statsPath(name string) string {
+	base := config.CacheDir()
+	if base == "" {
+		return ""
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(name))
+	// 255-byte component budget: slug + "-" + 8 hex digits + ".stats.json".
+	stem := slug(name)
+	if maxStem := 255 - len("-00000000.stats.json"); len(stem) > maxStem {
+		stem = stem[:maxStem]
+	}
+	return filepath.Join(base, "mcp", fmt.Sprintf("%s-%08x.stats.json", stem, h.Sum32()))
+}
+
+// legacyStatsPath is the pre-hash location, shared by every server whose name
+// collapses to the same slug. Read-only for migration: a named legacy file is
+// adopted by its owner; a nameless one (pre-Name builds) has no provable owner
+// and is never trusted for demotion or adopted into a new window.
+func legacyStatsPath(name string) string {
 	base := config.CacheDir()
 	if base == "" {
 		return ""
@@ -182,6 +215,29 @@ func loadStats(path string) StartupStats {
 		return StartupStats{}
 	}
 	return s
+}
+
+// loadStatsForOwner reads name's history from its hashed path, falling back to
+// the shared legacy (pre-hash) file for a one-time migration. Legacy files are
+// trusted only when their recorded Name matches: a nameless legacy file
+// (written before ownership tracking) is shared by every server whose name
+// collapses to the same slug, so its samples cannot be attributed and must not
+// seed anyone's window or demote anyone.
+func loadStatsForOwner(name string) StartupStats {
+	if s := loadStats(statsPath(name)); s.Version != 0 || len(s.SamplesMs) > 0 {
+		if s.Name == "" || s.Name == name {
+			return s
+		}
+		return StartupStats{}
+	}
+	legacy := legacyStatsPath(name)
+	if legacy == "" {
+		return StartupStats{}
+	}
+	if s := loadStats(legacy); s.Name == name {
+		return s
+	}
+	return StartupStats{}
 }
 
 // writeStatsAtomic serialises s and writes it via tmpfile + os.Rename so that

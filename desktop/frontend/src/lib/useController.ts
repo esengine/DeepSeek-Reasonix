@@ -53,7 +53,7 @@ export type Item =
   | { kind: "user"; id: string; text: string; submitText?: string; failed?: boolean; createdAt?: number; checkpointTurn?: number }
   | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; reasoningComplete?: boolean; memoryCitations?: MemoryCitation[] }
   | { kind: "phase"; id: string; text: string }
-  | { kind: "notice"; id: string; level: "info" | "warn"; text: string }
+  | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string }
   | {
       kind: "compaction";
       id: string;
@@ -244,6 +244,8 @@ export function sameMeta(a?: Meta, b?: Meta): boolean {
 
 const STALE_TURN_RECONCILE_MS = 30_000;
 const CANCEL_RECONCILE_DELAYS_MS = [0, 100, 300, 1_000] as const;
+const STARTUP_READY_META_RECONCILE_MS = 250;
+const STARTUP_READY_META_RECONCILE_ATTEMPTS = 60;
 
 export function shouldReconcileStaleTurn(
   state: Pick<State, "running" | "turnActive"> | undefined,
@@ -394,7 +396,7 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
     }
     if (m.role === "notice") {
       if (m.content.trim() !== "") {
-        const next = appendNoticeItem(items, seq, `${idPrefix}${seq}`, m.level === "warn" ? "warn" : "info", m.content);
+        const next = appendNoticeItem(items, seq, `${idPrefix}${seq}`, m.level === "warn" ? "warn" : "info", m.content, m.detail);
         items = next.items;
         seq = next.seq;
       }
@@ -726,7 +728,7 @@ function applyEvent(s: State, e: WireEvent): State {
       return { ...s, usage, context: { ...s.context, used, sessionTokens }, turnTokens, turnTotalTokens, turnCost, sessionTokens, sessionCost, sessionCurrency };
     }
     case "notice":
-      return appendNoticeToState(s, e.level ?? "info", e.text ?? "");
+      return appendNoticeToState(s, e.level ?? "info", e.text ?? "", e.detail);
     case "phase":
       return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "phase", id: `p${s.seq}`, text: e.text ?? "" }] };
     case "compaction_started":
@@ -1010,6 +1012,14 @@ export function localizedBackendNoticeText(text: string): string {
   if (modelFallback) {
     return t("status.modelFallbackSwitched", { model: modelFallback[1], fallback: modelFallback[2] });
   }
+  const backgroundJob = /^background (.+) failed: needs attention$/s.exec(msg);
+  if (backgroundJob) {
+    return t("notice.backgroundJobFailed", { kind: backgroundJob[1] });
+  }
+  const canonicalNoticeKey = backendNoticeKey(msg);
+  if (canonicalNoticeKey) {
+    return t(canonicalNoticeKey);
+  }
   if (
     /^session changed on disk; unsaved local transcript was saved as a conflict copy$/i.test(msg) ||
     /^session changed on disk; unsaved local transcript was saved as recovery branch\b/i.test(msg)
@@ -1029,6 +1039,65 @@ export function localizedBackendNoticeText(text: string): string {
     return t("recovery.noticeAdopted");
   }
   return msg;
+}
+
+function backendNoticeKey(msg: string): DictKey | "" {
+  switch (msg) {
+    case "Task status needs one more check; asking the assistant to finish or explain what is blocking it.":
+      return "notice.finalReadiness";
+    case "No visible answer was produced; asking the assistant to respond again.":
+      return "notice.emptyFinal";
+    case "The assistant answered before taking action; asking it to use the required tools.":
+      return "notice.executorHandoff";
+    case "Tool round limit reached; asking the assistant to summarize progress.":
+      return "notice.toolBudget";
+    case "The assistant is stuck retrying a blocked action; asking it to change approach.":
+      return "notice.loopGuard";
+    case "Context is getting large; preserving cache until cleanup is needed.":
+      return "notice.contextLarge";
+    case "Context cleanup skipped for now.":
+      return "notice.contextCleanupSkipped";
+    case "Automatic context cleanup paused because the context window is too small.":
+      return "notice.contextCleanupPaused";
+    case "Context was compacted without a generated summary.":
+      return "notice.compactionNoSummary";
+    case "Planning mode enabled for this multi-step task.":
+      return "notice.autoPlanEnabled";
+    case "Plan detection requested a plan.":
+      return "notice.autoPlanRequested";
+    case "Plan detection was uncertain; using the fallback planner heuristic.":
+      return "notice.autoPlanFallback";
+    case "Goal is not ready to complete yet; continuing the remaining work.":
+      return "notice.goalNotReady";
+    case "Goal still has unfinished task state; continuing the remaining work.":
+      return "notice.goalUnfinished";
+    case "AutoResearch status update failed.":
+      return "notice.autoresearchStatusFailed";
+    case "AutoResearch task marked blocked.":
+      return "notice.autoresearchBlocked";
+    case "Job artifact migration failed.":
+      return "notice.jobArtifactMigrationFailed";
+    case "Background job teardown timed out.":
+      return "notice.jobTeardownTimeout";
+    case "Some plan-mode tool settings were ignored.":
+      return "notice.planModeToolSettingsIgnored";
+    case "Some plan-mode command settings were ignored.":
+      return "notice.planModeCommandSettingsIgnored";
+    case "Config migration did not complete.":
+      return "notice.configMigrationIncomplete";
+    case "Selected model is missing its API key.":
+      return "notice.modelMissingApiKey";
+    case "An MCP server failed to start.":
+      return "notice.mcpServerFailed";
+    case "Some MCP servers failed to start; run /mcp for details.":
+      return "notice.mcpServersFailed";
+    case "Guardian was disabled because its model was not found.":
+      return "notice.guardianModelMissing";
+    case "Guardian was disabled because it could not start.":
+      return "notice.guardianStartFailed";
+    default:
+      return "";
+  }
 }
 
 function recoveryNoticeDedupeKey(text: string): string {
@@ -1062,17 +1131,47 @@ function recoveryNoticeDedupeKey(text: string): string {
   return "";
 }
 
-function appendNoticeItem(items: Item[], seq: number, id: string, level: "info" | "warn", rawText: string): { items: Item[]; seq: number } {
-  const text = localizedBackendNoticeText(rawText);
-  const key = recoveryNoticeDedupeKey(rawText) || recoveryNoticeDedupeKey(text);
-  if (key && items.some((item) => item.kind === "notice" && recoveryNoticeDedupeKey(item.text) === key)) {
-    return { items, seq };
+function quietTranscriptNoticeKey(text: string): string {
+  const recovery = recoveryNoticeDedupeKey(text);
+  if (recovery) return recovery;
+
+  const msg = text.trim();
+  if (/^guardian enabled · model=.+$/i.test(msg)) {
+    return "startup:guardian-enabled";
   }
-  return { items: [...items, { kind: "notice", id, level, text }], seq: seq + 1 };
+  if (/^\d+ MCP server\(s\) failed to start: .+ \u2014 run \/mcp for details$/i.test(msg)) {
+    return "startup:mcp-failures";
+  }
+  const directMCPFailure = /^mcp\s+([A-Za-z0-9._-]+):\s+.+$/i.exec(msg);
+  if (directMCPFailure) {
+    const name = directMCPFailure[1].toLowerCase();
+    if (!["add", "auth", "config", "connect", "import", "mode", "remove"].includes(name)) {
+      return "startup:mcp-failure";
+    }
+  }
+  if (/^plugin ".+" has been slow \d+ startups in a row \(last \d+ms, budget \d+ms\); demoting to background startup this session$/i.test(msg)) {
+    return "startup:plugin-demote";
+  }
+  if (/^.+ applied: session refreshed after the lease was released$/i.test(msg)) {
+    return "settings:deferred-refresh-applied";
+  }
+  return "";
 }
 
-function appendNoticeToState(s: State, level: "info" | "warn", text: string): State {
-  const next = appendNoticeItem(s.items, s.seq, `n${s.seq}`, level, text);
+function appendNoticeItem(items: Item[], seq: number, id: string, level: "info" | "warn", rawText: string, detail?: string): { items: Item[]; seq: number } {
+  if (quietTranscriptNoticeKey(rawText)) {
+    return { items, seq };
+  }
+  const text = localizedBackendNoticeText(rawText);
+  if (quietTranscriptNoticeKey(text)) {
+    return { items, seq };
+  }
+  const trimmedDetail = detail?.trim();
+  return { items: [...items, { kind: "notice", id, level, text, ...(trimmedDetail ? { detail: trimmedDetail } : {}) }], seq: seq + 1 };
+}
+
+function appendNoticeToState(s: State, level: "info" | "warn", text: string, detail?: string): State {
+  const next = appendNoticeItem(s.items, s.seq, `n${s.seq}`, level, text, detail);
   return { ...s, running: s.turnActive ? s.running : false, seq: next.seq, items: next.items };
 }
 
@@ -1139,6 +1238,16 @@ async function refreshMetaForTab(tabId: string, dispatchTo: (tabId: string, acti
   }
 }
 
+async function refreshMetaOnlyForTab(tabId: string, dispatchTo: (tabId: string, action: Action) => void): Promise<Meta | undefined> {
+  try {
+    const meta = await app.MetaForTab(tabId);
+    dispatchTo(tabId, { type: "meta", meta });
+    return meta;
+  } catch {
+    return undefined;
+  }
+}
+
 export function replayPendingPromptsForActiveTab(activeTabId: string | undefined, replay: () => Promise<void> = () => app.ReplayPendingPrompts()): void {
   if (!activeTabId) return;
   void replay().catch(() => {});
@@ -1160,6 +1269,8 @@ export function useController() {
   const stateRef = useRef(activeState);
   const backendActiveTabIdRef = useRef<string | undefined>(undefined);
   const backendActivationPromises = useRef(new Map<string, Promise<boolean>>());
+  const readyMetaReconcileSeq = useRef(0);
+  const readyMetaReconcileActive = useRef<{ tabId: string; seq: number } | undefined>(undefined);
   activeTabIdRef.current = activeTabId;
   stateRef.current = activeState;
 
@@ -1568,6 +1679,51 @@ export function useController() {
       offReady();
     };
   }, [dispatchTo, loadSessionDataForTab, refreshCheckpoints, syncActiveTabFromBackend]);
+
+  // If the startup ready event is missed, keep the composer lock in sync with
+  // the active tab's backend metadata without kicking off tab activation work.
+  useEffect(() => {
+    const tabId = activeTabId;
+    const meta = activeState.meta;
+    if (!tabId || !meta || meta.ready || meta.startupErr || activeState.backendActivationPending) {
+      readyMetaReconcileSeq.current += 1;
+      readyMetaReconcileActive.current = undefined;
+      return;
+    }
+
+    let cancelled = false;
+    let timer: number | undefined;
+    const seq = readyMetaReconcileSeq.current + 1;
+    readyMetaReconcileSeq.current = seq;
+    readyMetaReconcileActive.current = { tabId, seq };
+
+    const stillCurrent = () => {
+      const active = readyMetaReconcileActive.current;
+      return !cancelled && active?.tabId === tabId && active.seq === seq && activeTabIdRef.current === tabId;
+    };
+
+    const schedule = (attempt: number) => {
+      timer = window.setTimeout(() => {
+        void tick(attempt);
+      }, STARTUP_READY_META_RECONCILE_MS);
+    };
+
+    const tick = async (attempt: number) => {
+      if (!stillCurrent()) return;
+      const current = statesRef.current.get(tabId);
+      if (!current?.meta || current.meta.ready || current.meta.startupErr || current.backendActivationPending) return;
+      const nextMeta = await refreshMetaOnlyForTab(tabId, dispatchTo);
+      if (!stillCurrent()) return;
+      if (nextMeta?.ready || nextMeta?.startupErr || attempt + 1 >= STARTUP_READY_META_RECONCILE_ATTEMPTS) return;
+      schedule(attempt + 1);
+    };
+
+    schedule(0);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [activeTabId, activeState.meta?.ready, activeState.meta?.startupErr, activeState.backendActivationPending, dispatchTo]);
 
   // Stale-turn watchdog: if the frontend thinks the agent is running but the
   // turn stream has gone quiet, reconcile with the backend. This catches cases
