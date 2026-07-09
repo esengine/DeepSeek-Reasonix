@@ -1181,7 +1181,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 					MemoryCitations:    a.memoryCitations(),
 				})
 			}
-						return err
+			return err
 		}
 		streamRecoveries = 0
 		cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage)
