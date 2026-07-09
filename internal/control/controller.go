@@ -3336,13 +3336,10 @@ func (c *Controller) replaceSessionAfterCancel(msgs []provider.Message) {
 	if path != "" {
 		if err := c.executor.Session().SaveRewrite(path); err != nil {
 			if errors.Is(err, agent.ErrSessionSnapshotConflict) {
-				// Mid-turn autosave may have advanced the file revision, causing
-				// the rewrite baseline check to reject our save.  Force-write
-				// the in-memory transcript (which includes the partial assistant
-				// message preserved on cancel) to ensure the interrupted turn's
-				// data survives a page refresh or tab switch.
-				if forceErr := c.executor.Session().Save(path); forceErr != nil {
-					slog.Warn("controller: post-cancel conflict force-save failed", "err", forceErr, "conflict", err)
+				if _, outcome, recoverErr := c.recoverSnapshotConflict(path, err, true); recoverErr != nil {
+					slog.Warn("controller: post-cancel transcript recovery", "err", recoverErr)
+				} else if outcome == conflictDropped {
+					slog.Warn("controller: post-cancel transcript dropped after conflict", "path", path)
 				}
 			} else {
 				slog.Warn("controller: post-cancel transcript flush", "err", err)

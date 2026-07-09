@@ -107,6 +107,18 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		modelInput = c.withCapabilityRoute(input, turn.raw)
 	}
 	err := c.runner.Run(ctx, modelInput)
+
+	// An explicitly cancelled turn that produced visible output is treated
+	// as gracefully ended: the partial response is already in the session
+	// and flushed to disk, so skip both the error-path cleanup and the
+	// success-path follow-up (plan approval, goal continuation, etc.).
+	if errors.Is(err, agent.ErrTurnInterrupted) {
+		c.clearInFlightTurn()
+		if c.CancelRequested() {
+			c.stopGoal(GoalStatusStopped)
+		}
+		return nil
+	}
 	if err == nil {
 		c.recordAutoResearchEvidenceFromAssistant(autoResearchTaskID, lastAssistantText(c.History()))
 		c.recordAutoResearchTurnProgress(autoResearchTaskID, autoResearchAcceptedBefore)

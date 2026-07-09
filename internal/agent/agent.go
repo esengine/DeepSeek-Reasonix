@@ -44,6 +44,12 @@ const maxExecutorHandoffNudges = 1
 const memoryCompilerInjectionMax = 5
 const memoryCompilerInjectionCooldown = 30 * time.Second
 
+// ErrTurnInterrupted is returned by Run when a streaming turn is explicitly
+// cancelled by the user after producing visible output. The partial assistant
+// message is already saved to the session and flushed to disk; callers should
+// treat the turn as gracefully ended rather than as a failure.
+var ErrTurnInterrupted = errors.New("turn interrupted with partial response saved")
+
 // Renderer redraws the assistant's final-answer text as styled output. It is
 // applied only after a turn's text stream completes, so the user sees raw
 // markdown stream live, then a single redraw replaces it with formatted
@@ -1180,6 +1186,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 					ReasoningSignature: signature,
 					MemoryCitations:    a.memoryCitations(),
 				})
+				return ErrTurnInterrupted
 			}
 			return err
 		}
