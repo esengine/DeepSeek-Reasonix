@@ -793,10 +793,12 @@ export const AssistantMessage = memo(function AssistantMessage({
   const userOverridden = useRef(false);
   const prevStreamingRef = useRef(item.streaming);
   const prevReasoningCompleteRef = useRef(item.reasoningComplete ?? false);
+  const [bounded, setBounded] = useState(item.streaming);
   useGSAPCollapse(reasoningBodyRef, reasoningOpen);
 
   // Follow the current display mode while streaming unless the user manually
-  // toggled this message; auto-close at stream end for untouched messages.
+  // toggled this message; auto-close at stream end — but thanks to 240px
+  // max-height the layout jump is small and much less jarring.
   useEffect(() => {
     const wasStreaming = prevStreamingRef.current;
     const nowStreaming = item.streaming;
@@ -807,7 +809,10 @@ export const AssistantMessage = memo(function AssistantMessage({
     prevReasoningCompleteRef.current = nowRC;
 
     if (nowStreaming) {
-      if (!wasStreaming) userOverridden.current = false;
+      if (!wasStreaming) {
+        userOverridden.current = false;
+        setBounded(true);
+      }
       if (defaultExpanded) {
         setReasoningOpen(true);
       } else if (!userOverridden.current) {
@@ -825,6 +830,19 @@ export const AssistantMessage = memo(function AssistantMessage({
       }
     }
   }, [item.streaming, item.reasoningComplete, defaultExpanded, expandWhileStreaming]);
+
+  // Clear bounded flag when auto-close or manual toggle actually closes
+  // the panel. This prevents a flash of unbounded content between the
+  // moment item.streaming flips to false and the auto-close effect runs.
+  useEffect(() => {
+    if (!reasoningOpen) setBounded(false);
+  }, [reasoningOpen]);
+
+  // Auto-scroll reasoning body to the latest content during streaming.
+  useEffect(() => {
+    if (!item.streaming || !reasoningBodyRef.current) return;
+    reasoningBodyRef.current.scrollTop = reasoningBodyRef.current.scrollHeight;
+  }, [item.reasoning, item.streaming, reasoningOpen]);
 
   const toggleReasoning = () => {
     userOverridden.current = true;
@@ -856,7 +874,7 @@ export const AssistantMessage = memo(function AssistantMessage({
             <ChevronRight className={`reasoning__chevron${reasoningOpen ? " reasoning__chevron--open" : ""}`} size={12} />
           </button>
           {reasoningOpen && (
-            <div ref={reasoningBodyRef} className="reasoning__body">{visibleReasoning}</div>
+            <div ref={reasoningBodyRef} className={`reasoning__body${reasoningOpen && bounded ? " reasoning__body--live" : ""}`}>{visibleReasoning}</div>
           )}
         </div>
       )}
