@@ -958,7 +958,8 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 			})
 			return
 		}
-		c.notice("unknown command: " + trimmed)
+		c.notice("unknown command: " + trimmed + " — sent as a regular message")
+		runRefTurn(input, display)
 	default:
 		if c.maybeAutoStartResearchGoal(input, display, editedOriginal) {
 			return

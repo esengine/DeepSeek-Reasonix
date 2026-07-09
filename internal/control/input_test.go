@@ -671,27 +671,27 @@ func TestSubmitBlockCommentPrefixStartsTurn(t *testing.T) {
 
 func TestSubmitUnknownSlashCommandStillReportsNotice(t *testing.T) {
 	runner := &fakeTurnRunner{}
+	var noticeText string
 	events := make(chan event.Event, 4)
 	c := New(Options{
 		AutoPlan: "off",
 		Runner:   runner,
 		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				noticeText = e.Text
+			}
 			events <- e
 		}),
 	})
 
 	c.Submit("/definitely-not-a-command")
+	waitForTurnDone(t, events)
 
-	if len(runner.inputs) != 0 {
-		t.Fatalf("unknown slash command should not start a model turn, inputs=%q", runner.inputs)
+	if len(runner.inputs) != 1 {
+		t.Fatalf("unknown slash command should start a model turn (as a regular message), got %d inputs", len(runner.inputs))
 	}
-	select {
-	case e := <-events:
-		if e.Kind != event.Notice || !strings.Contains(e.Text, "unknown command: /definitely-not-a-command") {
-			t.Fatalf("event = %+v, want unknown-command notice", e)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for unknown-command notice")
+	if !strings.Contains(noticeText, "unknown command: /definitely-not-a-command") {
+		t.Fatalf("notice = %q, want unknown-command notice", noticeText)
 	}
 }
 

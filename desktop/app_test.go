@@ -3702,10 +3702,10 @@ func runQuickClickWorkspaceReconcileTest(t *testing.T, layoutStyle string) {
 		run  func() error
 	}
 	actions := []quickAction{
-		{name: "submit", run: func() error { return f.app.SubmitToTab(f.tab.ID, "/unknown-command") }},
-		{name: "steer", run: func() error { return f.app.SteerForTab(f.tab.ID, "/unknown-command") }},
-		{name: "compact", run: func() error { return f.app.Compact() }},
-		{name: "submit-display", run: func() error { return f.app.SubmitDisplayToTab(f.tab.ID, "/unknown display", "/unknown-command") }},
+		{name: "rebuild-1", run: func() error { return f.app.ensureTabControllerWorkspace(f.tab) }},
+		{name: "rebuild-2", run: func() error { return f.app.ensureTabControllerWorkspace(f.tab) }},
+		{name: "rebuild-3", run: func() error { return f.app.ensureTabControllerWorkspace(f.tab) }},
+		{name: "rebuild-4", run: func() error { return f.app.ensureTabControllerWorkspace(f.tab) }},
 	}
 
 	start := make(chan struct{})
