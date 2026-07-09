@@ -113,7 +113,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	// and flushed to disk, so skip both the error-path cleanup and the
 	// success-path follow-up (plan approval, goal continuation, etc.).
 	if errors.Is(err, agent.ErrTurnInterrupted) {
-		_ = c.SnapshotActivity()
+		c.saveInterruptedTranscript()
 		c.clearInFlightTurn()
 		if c.CancelRequested() {
 			c.stopGoal(GoalStatusStopped)

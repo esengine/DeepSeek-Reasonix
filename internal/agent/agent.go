@@ -740,7 +740,6 @@ func (a *Agent) SetSession(s *Session) {
 	a.clearClassifierCache()
 }
 
-
 // LastUsage returns the most recent per-turn token telemetry the provider
 // reported (nil if no turn has run yet). The TUI uses it to show a context
 // gauge alongside the prompt; the actual cache decisions still live inside
@@ -1136,7 +1135,6 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 						ReasoningSignature: signature,
 						MemoryCitations:    a.memoryCitations(),
 					})
-
 				}
 				a.session.Add(provider.Message{
 					Role:    provider.RoleUser,

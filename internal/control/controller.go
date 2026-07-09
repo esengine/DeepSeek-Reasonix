@@ -3339,12 +3339,37 @@ func (c *Controller) replaceSessionAfterCancel(msgs []provider.Message) {
 				if _, outcome, recoverErr := c.recoverSnapshotConflict(path, err, true); recoverErr != nil {
 					slog.Warn("controller: post-cancel transcript recovery", "err", recoverErr)
 				} else if outcome == conflictDropped {
-					slog.Warn("controller: post-cancel transcript dropped after conflict", "path", path)
+					// Conflict recovery gave up; force-write the in-memory
+					// transcript to ensure the partial response survives.
+					if forceErr := c.executor.Session().Save(path); forceErr != nil {
+						slog.Warn("controller: post-cancel conflict force-save", "err", forceErr, "conflict", err)
+					}
 				}
 			} else {
 				slog.Warn("controller: post-cancel transcript flush", "err", err)
 			}
 		}
+	}
+}
+
+// saveInterruptedTranscript force-saves the session to disk when a turn was
+// explicitly cancelled after producing visible output. The partial assistant
+// message is already in the in-memory session; this method persists it using
+// sessionSaveForce mode to bypass any snapshot-vs-rewrite conflict detection
+// that the mid-turn autosave may have triggered. Must be called from the turn
+// orchestrator's sentinel handler where the autosave goroutine has already
+// exited (ctx cancelled), so there is no concurrent write to this file.
+func (c *Controller) saveInterruptedTranscript() {
+	c.snapshotMu.Lock()
+	defer c.snapshotMu.Unlock()
+	c.mu.Lock()
+	path := c.sessionPath
+	c.mu.Unlock()
+	if path == "" || c.executor == nil {
+		return
+	}
+	if err := c.executor.Session().Save(path); err != nil {
+		slog.Warn("controller: interrupted transcript save", "err", err)
 	}
 }
 
@@ -3369,7 +3394,6 @@ func (c *Controller) SetSessionPath(p string) {
 	c.mu.Unlock()
 	c.setActiveJobSession(p)
 	c.rebindCheckpoints(p)
-
 }
 
 // SessionDestroyHandle separates waiting for cancelled jobs from ending the
