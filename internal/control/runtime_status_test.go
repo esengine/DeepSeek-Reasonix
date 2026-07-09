@@ -57,7 +57,9 @@ func TestCancelClearsPendingApprovalRuntimeStatus(t *testing.T) {
 	c.Cancel()
 	c.Cancel()
 	assertCancelClearedPendingRuntimeStatus(t, c.RuntimeStatus())
-	waitTurnDoneEvent(t, done)
+	if e := waitTurnDoneEvent(t, done); !e.Cancelled {
+		t.Fatal("cancelled turn_done event was not marked as user-cancelled")
+	}
 	if st := c.RuntimeStatus(); st.Running || st.PendingPrompt || st.Cancellable || st.CancelRequested {
 		t.Fatalf("status after turn done = %+v, want idle", st)
 	}
@@ -111,14 +113,16 @@ func assertCancelClearedPendingRuntimeStatus(t *testing.T, st RuntimeStatus) {
 	}
 }
 
-func waitTurnDoneEvent(t *testing.T, done <-chan event.Event) {
+func waitTurnDoneEvent(t *testing.T, done <-chan event.Event) event.Event {
 	t.Helper()
 	select {
 	case e := <-done:
 		if e.Kind != event.TurnDone {
 			t.Fatalf("event = %v, want TurnDone", e.Kind)
 		}
+		return e
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for turn_done")
 	}
+	return event.Event{}
 }

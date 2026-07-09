@@ -603,11 +603,12 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 		}()
 		err := body(ctx)
 		c.mu.Lock()
+		cancelRequested := c.canceling
 		c.running = false
 		c.cancel = nil
 		c.canceling = false
 		c.mu.Unlock()
-		c.sink.Emit(event.Event{Kind: event.TurnDone, Err: explainError(err)})
+		c.sink.Emit(event.Event{Kind: event.TurnDone, Err: explainError(err), Cancelled: cancelRequested})
 	}()
 }
 
@@ -3365,6 +3366,7 @@ func (c *Controller) stripCancelledVisibleTurnMessagesAfter(idx int) {
 		if _, ok := agent.SteerText(m.Content); ok {
 			continue
 		}
+		m.Content = StripComposePrefixes(m.Content)
 		next = append(next, m)
 		break
 	}

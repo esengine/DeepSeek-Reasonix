@@ -261,6 +261,7 @@ type Event struct {
 	Approval     Approval   // ApprovalRequest
 	Ask          Ask        // AskRequest
 	Err          error      // TurnDone: non-nil on failure
+	Cancelled    bool       // TurnDone: Cancel was requested while the turn was active
 	Compaction   Compaction // Compaction
 	Guardian     GuardianResult
 	RetryAttempt int // Retrying: 1-based attempt about to be made

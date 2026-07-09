@@ -11,7 +11,7 @@ import (
 // a reload even though the live transcript showed them.
 func TestRecordPlannerDisplayEventKeepsNoticeDetail(t *testing.T) {
 	tab := &WorkspaceTab{}
-	tab.recordPlannerDisplayEvent(event.Event{
+	tab.recordDisplayEvent(event.Event{
 		Kind:   event.Notice,
 		Level:  event.LevelWarn,
 		Source: event.UsageSourcePlanner,

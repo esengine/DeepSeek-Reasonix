@@ -288,6 +288,8 @@ func TestHistoryForTabRestoresPlannerDisplayAfterReload(t *testing.T) {
 	tab.sink.Emit(event.Event{Kind: event.Text, Text: "planner visible plan", Source: event.UsageSourcePlanner})
 	tab.sink.Emit(event.Event{Kind: event.Message, Text: "planner visible plan", Reasoning: "planner thinking\n", Source: event.UsageSourcePlanner})
 	tab.sink.Emit(event.Event{Kind: event.TurnStarted})
+	tab.sink.Emit(event.Event{Kind: event.Text, Text: "executor kept working", Source: event.UsageSourceExecutor})
+	tab.sink.Emit(event.Event{Kind: event.Message, Text: "executor kept working", Source: event.UsageSourceExecutor})
 	tab.sink.Emit(event.Event{Kind: event.TurnDone})
 	waitForAutosaveIdle(t, tab)
 
@@ -306,6 +308,48 @@ func TestHistoryForTabRestoresPlannerDisplayAfterReload(t *testing.T) {
 	}
 	if got[4].Role != "assistant" || got[4].Content != "executor kept working" {
 		t.Fatalf("executor answer missing after reload: %+v", got[4])
+	}
+}
+
+func TestHistoryForTabRestoresCancelledExecutorDisplayAfterReload(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	sess := agent.NewSession("system")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "continue setup"})
+	ag := agent.New(stubProvider{}, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{Executor: ag, SessionDir: dir, SessionPath: path, Sink: event.Discard})
+
+	app := &App{tabs: map[string]*WorkspaceTab{}, activeTabID: "cancelled_tab"}
+	tab := &WorkspaceTab{ID: "cancelled_tab", Scope: "global", Ctrl: ctrl, Ready: true, disabledMCP: map[string]ServerView{}}
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	app.tabs[tab.ID] = tab
+
+	tab.sink.Emit(event.Event{Kind: event.TurnStarted})
+	tab.sink.Emit(event.Event{Kind: event.Reasoning, Text: "checking settings\n", Source: event.UsageSourceExecutor})
+	tab.sink.Emit(event.Event{Kind: event.ToolDispatch, Source: event.UsageSourceExecutor, Tool: event.Tool{
+		ID: "call_1", Name: "read_file", Args: `{"path":"settings.json"}`, ReadOnly: true,
+	}})
+	tab.sink.Emit(event.Event{Kind: event.ToolResult, Source: event.UsageSourceExecutor, Tool: event.Tool{
+		ID: "call_1", Name: "read_file", Output: "partial settings", Err: "cancelled",
+	}})
+	tab.sink.Emit(event.Event{Kind: event.TurnDone, Cancelled: true})
+	waitForAutosaveIdle(t, tab)
+
+	if got := ctrl.History(); len(got) != 2 {
+		t.Fatalf("model transcript length = %d, want system + user only: %+v", len(got), got)
+	}
+	got := app.HistoryForTab(tab.ID)
+	if len(got) != 4 {
+		t.Fatalf("history length = %d, want system + user + assistant + tool: %+v", len(got), got)
+	}
+	if got[1].Role != "user" || got[1].Content != "continue setup" {
+		t.Fatalf("cancelled turn user missing after reload: %+v", got[1])
+	}
+	if got[2].Role != "assistant" || got[2].Reasoning != "checking settings\n" || len(got[2].ToolCalls) != 1 || got[2].ToolCalls[0].Name != "read_file" {
+		t.Fatalf("cancelled assistant display missing after reload: %+v", got[2])
+	}
+	if got[3].Role != "tool" || got[3].ToolName != "read_file" || got[3].Content != "partial settings" || got[3].ToolResultError != "partial settings" {
+		t.Fatalf("cancelled tool display missing after reload: %+v", got[3])
 	}
 }
 

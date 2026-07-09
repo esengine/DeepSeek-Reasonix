@@ -476,6 +476,7 @@ func TestTurnOrchestratorCancelPreservesVisibleUserPrompt(t *testing.T) {
 
 	ex := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
 	c := New(Options{Runner: runner, Executor: ex})
+	c.SetPlanMode(true)
 	// Simulate a user-initiated cancel: set the cancelling flag.
 	c.mu.Lock()
 	c.canceling = true
@@ -500,7 +501,7 @@ func TestTurnOrchestratorCancelPreservesVisibleUserPrompt(t *testing.T) {
 	}
 	last := msgs[len(msgs)-1]
 	if last.Role != provider.RoleUser || last.Content != "add config file abc" {
-		t.Fatalf("last message after cancel = %+v, want preserved visible user prompt", last)
+		t.Fatalf("last message after cancel = %+v, want preserved user prompt without compose prefixes", last)
 	}
 	for _, m := range msgs[preCount+1:] {
 		if m.Role == provider.RoleAssistant || m.Role == provider.RoleTool {
@@ -550,6 +551,7 @@ func TestTurnOrchestratorCancelFlushesCleanTranscriptToDisk(t *testing.T) {
 		Executor:    agent.New(nil, nil, sess, agent.Options{}, event.Discard),
 		SessionPath: sessionPath,
 	})
+	c.SetPlanMode(true)
 	c.mu.Lock()
 	c.canceling = true
 	c.mu.Unlock()

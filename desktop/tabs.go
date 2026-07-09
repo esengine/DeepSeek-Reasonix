@@ -93,12 +93,15 @@ type WorkspaceTab struct {
 	telemetrySessionKey string
 	telemMu             sync.Mutex
 
-	// plannerDisplay keeps display-only planner output for the in-flight turn.
-	// The executor session remains the model-facing transcript; this sidecar
-	// lets frontend history restore the planner cards after a rebuild/reload.
-	plannerDisplay      []HistoryMessage
-	plannerDisplayTools map[string]string
-	plannerDisplayMu    sync.Mutex
+	// Display-only output for the in-flight turn. The executor session remains
+	// the model-facing transcript; these buffers let history restore planner
+	// cards and user-cancelled executor output without replaying either to the
+	// model after a rebuild/reload.
+	plannerDisplay       []HistoryMessage
+	plannerDisplayTools  map[string]string
+	executorDisplay      []HistoryMessage
+	executorDisplayTools map[string]string
+	displayMu            sync.Mutex
 
 	model            string // active model ref (for meta)
 	effort           *string
@@ -768,38 +771,48 @@ func (t *WorkspaceTab) syncTelemetryToSession(sessionPath string) {
 	t.telemMu.Unlock()
 }
 
-func (t *WorkspaceTab) resetPlannerDisplayTurn() {
-	t.plannerDisplayMu.Lock()
+func (t *WorkspaceTab) resetDisplayTurn() {
+	t.displayMu.Lock()
 	if len(t.plannerDisplay) == 0 {
 		t.plannerDisplayTools = nil
 	}
-	t.plannerDisplayMu.Unlock()
+	if len(t.executorDisplay) == 0 {
+		t.executorDisplayTools = nil
+	}
+	t.displayMu.Unlock()
 }
 
-func (t *WorkspaceTab) recordPlannerDisplayEvent(e event.Event) {
-	if strings.TrimSpace(e.Source) != event.UsageSourcePlanner {
-		return
+func (t *WorkspaceTab) recordDisplayEvent(e event.Event) {
+	t.displayMu.Lock()
+	defer t.displayMu.Unlock()
+	messages := &t.executorDisplay
+	tools := &t.executorDisplayTools
+	if strings.TrimSpace(e.Source) == event.UsageSourcePlanner {
+		messages = &t.plannerDisplay
+		tools = &t.plannerDisplayTools
 	}
-	t.plannerDisplayMu.Lock()
-	defer t.plannerDisplayMu.Unlock()
+	recordHistoryDisplayEvent(messages, tools, e)
+}
+
+func recordHistoryDisplayEvent(messages *[]HistoryMessage, tools *map[string]string, e event.Event) {
 	switch e.Kind {
 	case event.Phase:
 		if strings.TrimSpace(e.Text) != "" {
-			t.plannerDisplay = append(t.plannerDisplay, HistoryMessage{Role: "phase", Content: e.Text})
+			*messages = append(*messages, HistoryMessage{Role: "phase", Content: e.Text})
 		}
 	case event.Reasoning:
 		if e.Text != "" {
-			hm := t.ensurePlannerAssistantLocked()
+			hm := ensureDisplayAssistant(messages)
 			hm.Reasoning += e.Text
 		}
 	case event.Text:
 		if e.Text != "" {
-			hm := t.ensurePlannerAssistantLocked()
+			hm := ensureDisplayAssistant(messages)
 			hm.Content += e.Text
 		}
 	case event.Message:
 		if e.Text != "" || e.Reasoning != "" || len(e.MemoryCitations) > 0 {
-			hm := t.ensurePlannerAssistantLocked()
+			hm := ensureDisplayAssistant(messages)
 			if e.Text != "" {
 				hm.Content = e.Text
 			}
@@ -814,7 +827,7 @@ func (t *WorkspaceTab) recordPlannerDisplayEvent(e event.Event) {
 		if e.Tool.Partial || strings.TrimSpace(e.Tool.Name) == "" {
 			return
 		}
-		hm := t.ensurePlannerAssistantForToolLocked()
+		hm := ensureDisplayAssistantForTool(messages)
 		call := HistoryToolCall{
 			ID:        e.Tool.ID,
 			Name:      e.Tool.Name,
@@ -834,10 +847,10 @@ func (t *WorkspaceTab) recordPlannerDisplayEvent(e event.Event) {
 					break
 				}
 			}
-			if t.plannerDisplayTools == nil {
-				t.plannerDisplayTools = map[string]string{}
+			if *tools == nil {
+				*tools = map[string]string{}
 			}
-			t.plannerDisplayTools[call.ID] = call.Name
+			(*tools)[call.ID] = call.Name
 		}
 		if !replaced {
 			hm.ToolCalls = append(hm.ToolCalls, call)
@@ -847,13 +860,13 @@ func (t *WorkspaceTab) recordPlannerDisplayEvent(e event.Event) {
 		content := firstNonEmpty(e.Tool.Output, e.Tool.Err)
 		display, errPreview := plannerToolResultDisplay(content, e.Tool.Err != "")
 		if callID != "" {
-			updateHistoryToolCallSummary(t.plannerDisplay, callID, content)
+			updateHistoryToolCallSummary(*messages, callID, content)
 		}
 		toolName := e.Tool.Name
-		if toolName == "" && t.plannerDisplayTools != nil {
-			toolName = t.plannerDisplayTools[callID]
+		if toolName == "" && *tools != nil {
+			toolName = (*tools)[callID]
 		}
-		t.plannerDisplay = append(t.plannerDisplay, HistoryMessage{
+		*messages = append(*messages, HistoryMessage{
 			Role:            "tool",
 			ToolCallID:      callID,
 			ToolName:        toolName,
@@ -866,25 +879,25 @@ func (t *WorkspaceTab) recordPlannerDisplayEvent(e event.Event) {
 			if e.Level == event.LevelWarn {
 				level = "warn"
 			}
-			t.plannerDisplay = append(t.plannerDisplay, HistoryMessage{Role: "notice", Level: level, Content: e.Text, Detail: e.Detail})
+			*messages = append(*messages, HistoryMessage{Role: "notice", Level: level, Content: e.Text, Detail: e.Detail})
 		}
 	}
 }
 
-func (t *WorkspaceTab) ensurePlannerAssistantLocked() *HistoryMessage {
-	if n := len(t.plannerDisplay); n > 0 && t.plannerDisplay[n-1].Role == "assistant" {
-		return &t.plannerDisplay[n-1]
+func ensureDisplayAssistant(messages *[]HistoryMessage) *HistoryMessage {
+	if n := len(*messages); n > 0 && (*messages)[n-1].Role == "assistant" {
+		return &(*messages)[n-1]
 	}
-	t.plannerDisplay = append(t.plannerDisplay, HistoryMessage{Role: "assistant"})
-	return &t.plannerDisplay[len(t.plannerDisplay)-1]
+	*messages = append(*messages, HistoryMessage{Role: "assistant"})
+	return &(*messages)[len(*messages)-1]
 }
 
-func (t *WorkspaceTab) ensurePlannerAssistantForToolLocked() *HistoryMessage {
-	if n := len(t.plannerDisplay); n > 0 && t.plannerDisplay[n-1].Role == "assistant" && strings.TrimSpace(t.plannerDisplay[n-1].Content) == "" {
-		return &t.plannerDisplay[n-1]
+func ensureDisplayAssistantForTool(messages *[]HistoryMessage) *HistoryMessage {
+	if n := len(*messages); n > 0 && (*messages)[n-1].Role == "assistant" && strings.TrimSpace((*messages)[n-1].Content) == "" {
+		return &(*messages)[n-1]
 	}
-	t.plannerDisplay = append(t.plannerDisplay, HistoryMessage{Role: "assistant"})
-	return &t.plannerDisplay[len(t.plannerDisplay)-1]
+	*messages = append(*messages, HistoryMessage{Role: "assistant"})
+	return &(*messages)[len(*messages)-1]
 }
 
 func plannerToolResultDisplay(content string, failed bool) (display, errPreview string) {
@@ -898,12 +911,17 @@ func plannerToolResultDisplay(content string, failed bool) (display, errPreview 
 	return "", ""
 }
 
-func (t *WorkspaceTab) takePlannerDisplayTurn() []HistoryMessage {
-	t.plannerDisplayMu.Lock()
-	defer t.plannerDisplayMu.Unlock()
+func (t *WorkspaceTab) takeDisplayTurn(cancelled bool) []HistoryMessage {
+	t.displayMu.Lock()
+	defer t.displayMu.Unlock()
 	out := cloneHistoryMessages(t.plannerDisplay)
+	if cancelled {
+		out = append(out, cloneHistoryMessages(t.executorDisplay)...)
+	}
 	t.plannerDisplay = nil
 	t.plannerDisplayTools = nil
+	t.executorDisplay = nil
+	t.executorDisplayTools = nil
 	return out
 }
 
@@ -950,7 +968,7 @@ func (s *tabEventSink) Emit(e event.Event) {
 	if app != nil {
 		switch e.Kind {
 		case event.TurnStarted:
-			s.resetPlannerDisplayTurn()
+			s.resetDisplayTurn()
 			s.recordTurnStarted()
 		case event.Usage:
 			s.recordUsageTelemetry(e)
@@ -964,7 +982,7 @@ func (s *tabEventSink) Emit(e event.Event) {
 			}
 		}
 		if e.Kind == event.TurnDone {
-			s.flushPlannerDisplay()
+			s.flushDisplay(e.Cancelled)
 		}
 	}
 	s.emitRuntimeEvent(eventChannel, toWireTab(e, tabID))
@@ -981,7 +999,7 @@ func (s *tabEventSink) Emit(e event.Event) {
 		s.recordReadTelemetry(e)
 	}
 	if app != nil {
-		s.recordPlannerDisplay(e)
+		s.recordDisplay(e)
 	}
 	// Persist after each turn so a force-kill loses at most the in-flight prompt.
 	if e.Kind == event.TurnDone && app != nil {
@@ -1310,26 +1328,28 @@ func (s *tabEventSink) recordUsageTelemetry(e event.Event) {
 	}
 }
 
-func (s *tabEventSink) resetPlannerDisplayTurn() {
+func (s *tabEventSink) resetDisplayTurn() {
 	tab, _ := s.eventTabAndController()
 	if tab != nil {
-		tab.resetPlannerDisplayTurn()
+		tab.resetDisplayTurn()
 	}
 }
 
-func (s *tabEventSink) recordPlannerDisplay(e event.Event) {
+func (s *tabEventSink) recordDisplay(e event.Event) {
 	tab, _ := s.eventTabAndController()
 	if tab != nil {
-		tab.recordPlannerDisplayEvent(e)
+		tab.recordDisplayEvent(e)
 	}
 }
 
-func (s *tabEventSink) flushPlannerDisplay() {
+func (s *tabEventSink) flushDisplay(cancelRequested bool) {
 	tab, ctrl := s.eventTabAndController()
 	if tab == nil || ctrl == nil {
 		return
 	}
-	messages := tab.takePlannerDisplayTurn()
+	history := ctrl.History()
+	keepExecutorDisplay := cancelRequested && len(history) > 0 && history[len(history)-1].Role == provider.RoleUser
+	messages := tab.takeDisplayTurn(keepExecutorDisplay)
 	if len(messages) == 0 {
 		return
 	}
@@ -1337,7 +1357,7 @@ func (s *tabEventSink) flushPlannerDisplay() {
 	if sessionPath == "" {
 		return
 	}
-	userContent := lastUserMessageContent(ctrl.History())
+	userContent := lastUserMessageContent(history)
 	if strings.TrimSpace(userContent) == "" {
 		return
 	}
