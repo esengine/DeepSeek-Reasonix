@@ -1,6 +1,6 @@
 // Package sessiontool provides list_sessions and read_session tools that let
 // the AI discover and read past conversation sessions, enabling cross-session
-// AI context sharing. The tools reuse agent.ListSessionOrder, agent.LoadSession,
+// AI context sharing. The tools reuse agent.ListSessions, agent.LoadSession,
 // and agent.IsCleanupPending — the same infrastructure used by the history
 // tool and session picker — to avoid duplicating session-file logic.
 package sessiontool
@@ -40,24 +40,23 @@ func (t *listSessionsTool) Schema() json.RawMessage {
 }
 
 func (t *listSessionsTool) Execute(_ context.Context, _ json.RawMessage) (string, error) {
-	ordered, err := agent.ListSessionOrder(t.sessionDir)
+	sessions, err := agent.ListSessions(t.sessionDir)
 	if err != nil {
 		return "", fmt.Errorf("list_sessions: %w", err)
 	}
-	if len(ordered) == 0 {
+	if len(sessions) == 0 {
 		return "No sessions found.\n", nil
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Saved Sessions (%d total)\n\n", len(ordered))
+	fmt.Fprintf(&b, "# Saved Sessions (%d total)\n\n", len(sessions))
 	b.WriteString("| # | Timestamp | Model | Turns | Preview | File\n")
 	b.WriteString("|---|-----------|-------|-------|-----------------|-----\n")
-	for i, s := range ordered {
+	for i, s := range sessions {
 		ts := s.LastActivityAt.Format("2006-01-02 15:04")
 		model := modelFromPath(s.Path)
-		preview, turns := agent.SessionPreview(s.Path)
 		fmt.Fprintf(&b, "| %d | %s | %s | %d | %s | `%s`\n",
-			i+1, ts, model, turns, preview, filepath.Base(s.Path))
+			i+1, ts, model, s.Turns, s.Preview, filepath.Base(s.Path))
 	}
 	b.WriteString("\nUse `read_session` with the filename under \"File\" to view the session.\n")
 	return b.String(), nil
