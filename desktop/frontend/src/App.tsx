@@ -1779,7 +1779,35 @@ export default function App() {
         return;
       }
       if (trimmed === "/new") {
-        void newSession();
+        // During a running turn, don't intercept — let the steer path below
+        // (runningRef.current) handle it, avoiding a frontend reset that the
+        // backend will refuse while a turn is in progress.
+        if (!runningRef.current) {
+          // Resolve any pending rewind before rotating the session, so the
+          // rewind state doesn't orphan on the now-empty transcript.
+          const rs = rewindStateRef.current;
+          if (rs) {
+            rewindStateRef.current = null;
+            setRewindState(null);
+            setRewindCommitting(true);
+            try {
+              const ok = await rewind(rs.turn, rs.scope);
+              if (!ok) {
+                setRewindState(null);
+                notice(t("rewind.failed"));
+                return;
+              }
+            } finally {
+              setRewindCommitting(false);
+            }
+            setRewindSignal((v) => v + 1);
+            if (rs.scope === "both") {
+              setDockRefreshKey((v) => v + 1);
+              setProjectRevision((v) => v + 1);
+            }
+          }
+          await newSession();
+        }
         return;
       }
       const goalCommand = /^\/goal(?:\s+(.*))?$/.exec(trimmed);
@@ -1851,7 +1879,7 @@ export default function App() {
       if (goal.trim()) await setControllerGoal(goal);
       await commitThenSendRef.current(trimmed, submitText.trim());
     },
-    [activeTabId, applyGoal, closeTransientOverlays, collaborationMode, composerProfile, controllerReady, goal, newSession, send, runShell, notice, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, steer, switchModel, t, toolApprovalMode, showToast],
+    [activeTabId, applyGoal, closeTransientOverlays, collaborationMode, composerProfile, controllerReady, goal, newSession, notice, rewind, send, runShell, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, steer, switchModel, t, toolApprovalMode, showToast],
   );
 
   const refreshTabMetas = useCallback(async (): Promise<TabMeta[]> => {
