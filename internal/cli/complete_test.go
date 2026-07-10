@@ -64,6 +64,24 @@ func TestSlashCompletionIncludesCustomCommands(t *testing.T) {
 	}
 }
 
+func TestSlashItemsIncludeBtwOnMainSurface(t *testing.T) {
+	m := newTestChatTUI()
+	m.surface = tuiSurfaceMain
+	if !hasLabel(m.slashItems(), "/btw") {
+		t.Fatalf("/btw should appear on the main surface: %v", labels(m.slashItems()))
+	}
+}
+
+func TestSlashCompletionHiddenOnSideSurface(t *testing.T) {
+	m := newTestChatTUI()
+	m.surface = tuiSurfaceSide
+	m.input.SetValue("/he")
+	m.updateCompletion()
+	if m.completion.active {
+		t.Fatalf("slash completion should be hidden on side surface: %+v", m.completion)
+	}
+}
+
 func TestCompletionClosesOnSpaceAndNonMatch(t *testing.T) {
 	m := newTestChatTUI()
 

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -186,7 +187,14 @@ type chatTUI struct {
 	// regardless of the previous wasAtBottom state (#4584).
 	forceGotoBottom bool
 	eventCh         chan event.Event
+	sideEventCh     chan event.Event
+	sideReleaseCh   chan struct{}
+	sideEventWait   bool
+	sideGeneration  int
 	started         bool // banner + resumed history committed once
+	surface         tuiSurface
+	mainSurface     conversationSurface
+	sideSurface     conversationSurface
 
 	// transcript holds every finalized line commitLine emits; the viewport
 	// renders a scrollable window of it (alt-screen owns the grid, so there's no
@@ -233,6 +241,11 @@ type chatTUI struct {
 	// chooser holds the `ask` tool's question card (nil when none). While set, the
 	// run goroutine is blocked awaiting ctrl.AnswerQuestion and keys drive the card.
 	chooser *chooser
+
+	// mainNoticePending reminds the side surface that a main-thread notice arrived
+	// while it was hidden. Approval/ask reminders derive from their existing state.
+	mainNoticePending bool
+	mainDonePending   bool
 
 	// rewind holds the Esc-Esc / "/rewind" picker (nil when closed); while set,
 	// keys drive it and it renders as an overlay. lastEsc times the double-Esc
@@ -343,8 +356,22 @@ const (
 	tuiRunning
 )
 
+type tuiSurface int
+
+const (
+	tuiSurfaceMain tuiSurface = iota
+	tuiSurfaceSide
+)
+
 // agentEventMsg is one typed event from the agent's run loop.
 type agentEventMsg event.Event
+
+type sideEventMsg struct {
+	generation int
+	event      event.Event
+}
+
+type sideWaitReleaseMsg struct{ generation int }
 
 // maxEventDrain caps how many buffered events one Update coalesces before
 // yielding to render, so a sustained output flood still shows live progress.
@@ -500,7 +527,7 @@ type clipboardPasteMsg struct {
 // with an event sink that feeds eventCh; the TUI issues commands to it and
 // renders the events it emits. Label, history, host, and commands are read from
 // the controller, so a resumed session pre-populates scrollback.
-func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Event, termW int) chatTUI {
+func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Event, termW int, sideEventChOpt ...chan event.Event) chatTUI {
 	ti := textarea.New()
 	configureChatTextarea(&ti)
 
@@ -511,6 +538,12 @@ func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Even
 	commitBuf := []string{}
 	nativeScrollback := detectTermuxTerminal()
 	renderW := transcriptContentWidth(termW, nativeScrollback)
+	mainSurface := newConversationSurface(mainSurfaceCaps(), nativeScrollback)
+	sideSurface := newConversationSurface(sideSurfaceCaps(), nativeScrollback)
+	var sideEventCh chan event.Event
+	if len(sideEventChOpt) > 0 {
+		sideEventCh = sideEventChOpt[0]
+	}
 	return chatTUI{
 		ctrl:                 ctrl,
 		label:                ctrl.Label(),
@@ -522,21 +555,24 @@ func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Even
 		submittedInputCursor: -1,
 		queueEditCursor:      -1,
 		nextPasteID:          1,
-		reasoningLineIdx:     -1,
-		reasoningTextIdx:     -1,
-		answerIdx:            -1,
-		toolStreamIdx:        -1,
-		reasoning:            &strings.Builder{},
-		pending:              &strings.Builder{},
+		reasoningLineIdx:     mainSurface.reasoningLineIdx,
+		reasoningTextIdx:     mainSurface.reasoningTextIdx,
+		answerIdx:            mainSurface.answerIdx,
+		toolStreamIdx:        mainSurface.toolStreamIdx,
+		reasoning:            mainSurface.reasoning,
+		pending:              mainSurface.pending,
 		pendingCommit:        &commitBuf,
 		renderer:             newMarkdownRenderer(renderW),
 		diffMaxLines:         diffFoldLimit,
 		showReasoning:        nativeScrollback,
-		shellOutputs:         make(map[string]string),
-		shellExpanded:        make(map[string]bool),
-		shellTranscriptIdx:   make(map[string]int),
-		toolLineCountByID:    make(map[string]int),
+		shellOutputs:         mainSurface.shellOutputs,
+		shellExpanded:        mainSurface.shellExpanded,
+		shellTranscriptIdx:   mainSurface.shellTranscriptIdx,
+		toolLineCountByID:    mainSurface.toolLineCountByID,
 		eventCh:              eventCh,
+		sideEventCh:          sideEventCh,
+		mainSurface:          mainSurface,
+		sideSurface:          sideSurface,
 		history:              ctrl.History(),
 		host:                 ctrl.Host(),
 		commands:             ctrl.Commands(),
@@ -733,8 +769,9 @@ func suspendWithMouseReset() tea.Cmd {
 
 func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	wasAtBottom := m.viewport.AtBottom()
-	prevLines := len(m.transcript)
+	prevLines := len(m.activeTranscript())
 	prevWidth := m.width
+	prevSurface := m.surface
 	prevYOff := m.viewport.YOffset()
 
 	next, cmd := m.update(msg)
@@ -749,8 +786,8 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cm.viewport.SetHeight(cm.transcriptHeight())
 	// Re-feed only when the content grew or the width changed (re-wrapping is
 	// the expensive part); a bare scroll or spinner tick keeps the offset.
-	if len(cm.transcript) != prevLines || cm.width != prevWidth || cm.transcriptDirty {
-		wrapped := wrapTranscript(strings.Join(cm.transcript, "\n"), contentW)
+	if len(cm.activeTranscript()) != prevLines || cm.width != prevWidth || cm.surface != prevSurface || cm.transcriptDirty || cm.activeConversation().dirty {
+		wrapped := wrapTranscript(strings.Join(cm.activeTranscript(), "\n"), contentW)
 		cm.viewport.SetContent(wrapped)
 		cm.wrappedLines = strings.Split(wrapped, "\n")
 		if wasAtBottom {
@@ -762,6 +799,8 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cm.forceGotoBottom = false
 	}
 	cm.transcriptDirty = false
+	cm.mainSurface.dirty = false
+	cm.sideSurface.dirty = false
 	// Any viewport scroll (wheel, PgUp/PgDn, edge auto-scroll, or tail-follow to
 	// newest output) shifts the whole window. Some terminals (Warp) mishandle
 	// the renderer's scroll/insert-line optimization and strand stale rows, so
@@ -945,6 +984,58 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, finalize(m, cmds)
 		case "ctrl+z":
 			return m, suspendWithMouseReset()
+		}
+		if m.surface == tuiSurfaceSide {
+			switch msg.String() {
+			case "ctrl+c", "super+c", "meta+c":
+				if sel.active && !sel.empty() {
+					m.sel = sel
+					text := m.selectedText()
+					m.sel = selection{}
+					return m, tea.Batch(copyToClipboard(text), finalize(m, cmds))
+				}
+				m.ctrl.ReturnFromSide()
+				m.releaseSideEventWait()
+				m.sideGeneration++
+				m.drainSideEvents()
+				m.surface = tuiSurfaceMain
+				m.mainNoticePending = false
+				m.mainDonePending = false
+				m.conversation(tuiSurfaceSide).resetTranscript()
+				m.input.Reset()
+				m.pastedBlocks = nil
+				m.notice("returned to main conversation")
+				m.forceGotoBottom = true
+				return m, finalize(m, cmds)
+			case "enter":
+				line := strings.TrimSpace(m.input.Value())
+				if line == "" {
+					m.viewport.GotoBottom()
+					return m, nil
+				}
+				if isBtwCommand(line) {
+					m.commitLineTo(m.conversation(tuiSurfaceSide), dim("  · /btw is only available from the main conversation"))
+					return m, finalize(m, cmds)
+				}
+				if m.ctrl.SideState().Runtime.Running {
+					m.commitLineTo(m.conversation(tuiSurfaceSide), dim("  · side turn is still running"))
+					return m, finalize(m, cmds)
+				}
+				m.input.Reset()
+				m.pastedBlocks = nil
+				m.rememberSubmittedInput(line)
+				cmds = append(cmds, m.startSideTurn(line, line, line))
+				m.scheduleSideEventWait(&cmds)
+				return m, finalize(m, cmds)
+			}
+			if msg.String() == "esc" {
+				return m, finalize(m, cmds)
+			}
+			var ic tea.Cmd
+			m.input, ic = m.input.Update(msg)
+			cmds = append(cmds, ic)
+			m.growInputToFit()
+			return m, finalize(m, cmds)
 		}
 		// A question card is modal: keys drive it. In its free-text ("Type
 		// something") mode, the keystroke goes to the textarea — Enter confirms the
@@ -1193,6 +1284,14 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewport.GotoBottom()
 					return m, nil
 				}
+				if isBtwCommand(line) {
+					m.input.Reset()
+					m.pastedBlocks = nil
+					if cmd := m.runBtwCommand(line); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+					return m, finalize(m, cmds)
+				}
 				if m.queueEditCursor >= 0 && m.queueEditCursor < len(m.pendingInterject) {
 					// Save the edited text back to the queue slot.
 					m.pendingInterject[m.queueEditCursor] = m.expandPastedBlocks(line)
@@ -1355,6 +1454,39 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case sideEventMsg:
+		if msg.generation != m.sideGeneration {
+			return m, finalize(m, cmds)
+		}
+		m.sideEventWait = false
+		e := msg.event
+		turnDone := e.Kind == event.TurnDone
+		if m.surface == tuiSurfaceSide || m.ctrl.SideState().Active {
+			m.ingestEventFor(m.conversation(tuiSurfaceSide), e)
+		}
+	sideDrain:
+		for drained := 0; drained < maxEventDrain; drained++ {
+			select {
+			case e2 := <-m.sideEventCh:
+				if e2.Kind == event.TurnDone {
+					turnDone = true
+				}
+				if m.surface == tuiSurfaceSide || m.ctrl.SideState().Active {
+					m.ingestEventFor(m.conversation(tuiSurfaceSide), e2)
+				}
+			default:
+				break sideDrain
+			}
+		}
+		if !turnDone && (m.surface == tuiSurfaceSide || m.ctrl.SideState().Active) {
+			m.scheduleSideEventWait(&cmds)
+		}
+
+	case sideWaitReleaseMsg:
+		if msg.generation == m.sideGeneration {
+			m.sideEventWait = false
+		}
+
 	case balanceMsg:
 		m.balance = msg.text
 
@@ -1485,14 +1617,22 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case elapsedTickMsg:
+		ticked := false
 		if m.state == tuiRunning {
 			m.elapsed = int(time.Since(m.runStart).Seconds())
 			m.tickToolRunning()
+			ticked = true
+		}
+		if m.sideSurface.running {
+			m.tickSurfaceToolRunning(m.conversation(tuiSurfaceSide))
+			ticked = true
+		}
+		if ticked {
 			cmds = append(cmds, elapsedTick())
 		}
 
 	case spinner.TickMsg:
-		if m.state == tuiRunning {
+		if m.state == tuiRunning || m.sideSurface.running {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			cmds = append(cmds, cmd)
@@ -1618,14 +1758,154 @@ func clampWidth(s string, width int) string {
 func (m *chatTUI) commitLine(s string) {
 	*m.pendingCommit = append(*m.pendingCommit, s)
 	m.transcript = append(m.transcript, s)
+	m.mainSurface.transcript = m.transcript
+	m.mainSurface.dirty = true
 }
 
-// commitSpacer separates the next block (a thinking marker or a tool line) from
-// the previous one with a single blank line, skipping it at the top of the
-// transcript or when a blank already trails so spacers never double up.
-func (m *chatTUI) commitSpacer() {
-	if n := len(m.transcript); n > 0 && strings.TrimSpace(m.transcript[n-1]) != "" {
-		m.commitLine("")
+func (m *chatTUI) activeConversation() *conversationSurface {
+	if m.surface == tuiSurfaceSide {
+		return &m.sideSurface
+	}
+	return &m.mainSurface
+}
+
+func (m *chatTUI) conversation(surface tuiSurface) *conversationSurface {
+	if surface == tuiSurfaceSide {
+		return &m.sideSurface
+	}
+	return &m.mainSurface
+}
+
+func (m chatTUI) activeCaps() surfaceCaps {
+	if m.surface == tuiSurfaceSide {
+		return m.sideSurface.caps
+	}
+	return m.mainSurface.caps
+}
+
+func (m *chatTUI) commitLineTo(surface *conversationSurface, s string) {
+	*m.pendingCommit = append(*m.pendingCommit, s)
+	surface.transcript = append(surface.transcript, s)
+	m.markSurfaceDirty(surface)
+}
+
+func (m chatTUI) activeTranscript() []string {
+	if m.surface == tuiSurfaceSide {
+		return m.sideSurface.transcript
+	}
+	return m.transcript
+}
+
+func (m *chatTUI) markSurfaceDirty(surface *conversationSurface) {
+	surface.dirty = true
+	if surface == &m.mainSurface {
+		m.transcript = surface.transcript
+		m.transcriptDirty = true
+	}
+}
+
+func (m *chatTUI) syncMainSurfaceLegacy() {
+	s := &m.mainSurface
+	if s.pending == nil {
+		s.pending = &strings.Builder{}
+	}
+	if s.reasoning == nil {
+		s.reasoning = &strings.Builder{}
+	}
+	m.pending = s.pending
+	m.reasoning = s.reasoning
+	m.transcript = s.transcript
+	m.showReasoning = s.showReasoning
+	m.reasoningLineIdx = s.reasoningLineIdx
+	m.reasoningTextIdx = s.reasoningTextIdx
+	m.reasoningView = s.reasoningView
+	m.reasoningNative = s.reasoningNative
+	m.thinkStart = s.thinkStart
+	m.answerIdx = s.answerIdx
+	m.answerFlushed = s.answerFlushed
+	m.toolStreamIdx = s.toolStreamIdx
+	m.toolStreamID = s.toolStreamID
+	m.toolTail = s.toolTail
+	m.toolPartial = s.toolPartial
+	m.toolLineCount = s.toolLineCount
+	m.toolLineCountByID = s.toolLineCountByID
+	m.toolStreamStart = s.toolStreamStart
+	m.toolStreamFrame = s.toolStreamFrame
+	m.shellOutputs = s.shellOutputs
+	m.shellExpanded = s.shellExpanded
+	m.shellTranscriptIdx = s.shellTranscriptIdx
+	m.pendingRestore = s.pendingRestore
+	m.pendingPastes = s.pendingPastes
+	m.bubbleStartIdx = s.bubbleStartIdx
+	m.bubblePending = s.bubblePending
+	m.turnDiscarded = s.turnDiscarded
+	m.runStart = s.runStart
+	m.elapsed = s.elapsed
+	m.turnTokens = s.turnTokens
+	m.retryAttempt = s.retryAttempt
+	m.retryMax = s.retryMax
+}
+
+func (m *chatTUI) syncMainLegacyToSurface() {
+	s := &m.mainSurface
+	s.transcript = m.transcript
+	s.dirty = s.dirty || m.transcriptDirty
+	s.showReasoning = m.showReasoning
+	s.reasoningLineIdx = m.reasoningLineIdx
+	s.reasoningTextIdx = m.reasoningTextIdx
+	s.reasoningView = m.reasoningView
+	s.reasoningNative = m.reasoningNative
+	s.thinkStart = m.thinkStart
+	s.answerIdx = m.answerIdx
+	s.answerFlushed = m.answerFlushed
+	s.toolStreamIdx = m.toolStreamIdx
+	s.toolStreamID = m.toolStreamID
+	s.toolTail = m.toolTail
+	s.toolPartial = m.toolPartial
+	s.toolLineCount = m.toolLineCount
+	s.toolLineCountByID = m.toolLineCountByID
+	s.toolStreamStart = m.toolStreamStart
+	s.toolStreamFrame = m.toolStreamFrame
+	s.shellOutputs = m.shellOutputs
+	s.shellExpanded = m.shellExpanded
+	s.shellTranscriptIdx = m.shellTranscriptIdx
+	s.pendingRestore = m.pendingRestore
+	s.pendingPastes = m.pendingPastes
+	s.bubbleStartIdx = m.bubbleStartIdx
+	s.bubblePending = m.bubblePending
+	s.turnDiscarded = m.turnDiscarded
+	s.runStart = m.runStart
+	s.elapsed = m.elapsed
+	s.turnTokens = m.turnTokens
+	s.retryAttempt = m.retryAttempt
+	s.retryMax = m.retryMax
+	if m.pending != nil {
+		s.pending = m.pending
+	} else if s.pending == nil {
+		s.pending = &strings.Builder{}
+	}
+	if m.reasoning != nil {
+		s.reasoning = m.reasoning
+	} else if s.reasoning == nil {
+		s.reasoning = &strings.Builder{}
+	}
+	if s.toolLineCountByID == nil {
+		s.toolLineCountByID = map[string]int{}
+	}
+	if s.shellOutputs == nil {
+		s.shellOutputs = map[string]string{}
+	}
+	if s.shellExpanded == nil {
+		s.shellExpanded = map[string]bool{}
+	}
+	if s.shellTranscriptIdx == nil {
+		s.shellTranscriptIdx = map[string]int{}
+	}
+}
+
+func (m *chatTUI) commitSpacerFor(surface *conversationSurface) {
+	if n := len(surface.transcript); n > 0 && strings.TrimSpace(surface.transcript[n-1]) != "" {
+		m.commitLineTo(surface, "")
 	}
 }
 
@@ -1635,32 +1915,45 @@ func (m *chatTUI) commitSpacer() {
 // and skills normally render inside the main transcript area; in native
 // scrollback mode they join the bottom rail because there is no main viewport.
 func (m chatTUI) bottomRows() int {
+	caps := m.activeCaps()
 	rows := 0
-	for _, s := range []string{
-		m.renderTodoPanel(),
-		m.renderApprovalBanner(),
-		m.renderChooser(),
-		m.renderRewind(),
-		m.renderMCPImport(),
-		m.renderResumePicker(),
-		m.renderCopyPicker(),
-		m.renderCompletion(),
-	} {
-		if s != "" {
-			rows += strings.Count(s, "\n") + 1
+	addRows := func(s string) {
+		if s == "" {
+			return
 		}
+		rows += strings.Count(s, "\n") + 1
+	}
+	if caps.todoPanel {
+		addRows(m.renderTodoPanel())
+	}
+	if caps.approvals {
+		addRows(m.renderApprovalBanner())
+	}
+	if caps.askRequests {
+		addRows(m.renderChooser())
+	}
+	if caps.managerFooter {
+		addRows(m.renderRewind())
+		addRows(m.renderMCPImport())
+		addRows(m.renderResumePicker())
+		addRows(m.renderCopyPicker())
+	}
+	if caps.slashCompletion {
+		addRows(m.renderCompletion())
 	}
 	// Remove the hardcoded working-line increment — it is counted inside
 	// statusLineCount via computeStatusLineCount, which also accounts for
 	// wrapping. The fallback to 2 (unwrapped) covers the initial frame and
 	// tests that don't call Update first.
-	if m.nativeScrollback {
+	if caps.managerFooter && m.nativeScrollback {
 		if main := m.renderMainManager(); main != "" {
 			rows += strings.Count(main, "\n") + 1
 		}
 	}
-	if footer := m.renderMainManagerFooter(); footer != "" {
-		rows += strings.Count(footer, "\n") + 1
+	if caps.managerFooter {
+		if footer := m.renderMainManagerFooter(); footer != "" {
+			rows += strings.Count(footer, "\n") + 1
+		}
 	}
 	if !m.hideComposer() {
 		rows += m.input.Height() + 2
@@ -1684,10 +1977,17 @@ func (m chatTUI) bottomRows() int {
 // reserve rows for a composer that cannot receive input, leaving a confusing
 // blank/bordered area at the bottom of the TUI.
 func (m chatTUI) hideComposer() bool {
-	if m.mcp != nil || m.clearConfirm != nil || m.mcpImport != nil || m.skillPick != nil || m.resumePick != nil || m.copyPick != nil || m.rewind != nil || m.pendingApproval != nil {
+	caps := m.activeCaps()
+	if caps.managerFooter && (m.mcp != nil || m.clearConfirm != nil || m.mcpImport != nil || m.skillPick != nil || m.resumePick != nil || m.copyPick != nil || m.rewind != nil) {
 		return true
 	}
-	return m.chooser != nil && !m.chooser.typing
+	if caps.approvals && m.pendingApproval != nil {
+		return true
+	}
+	if caps.askRequests {
+		return m.chooser != nil && !m.chooser.typing
+	}
+	return false
 }
 
 // transcriptHeight is the row budget left for the transcript viewport once the
@@ -1785,24 +2085,21 @@ const reasoningViewMax = 4096
 // reasoningTailLines caps how many trailing visual lines the live block shows.
 const reasoningTailLines = 12
 
-// streamReasoning appends a chunk and rewrites the live reasoning block from a
-// bounded trailing view (mirrors streamToolOutput), so the chain of thought is
-// visible while the model works without re-rendering the whole thing per token.
-func (m *chatTUI) streamReasoning(chunk string) {
-	m.reasoning.WriteString(chunk) // full text retained for verbose mode
-	if m.reasoningTextIdx < 0 {
+func (m *chatTUI) streamReasoningFor(surface *conversationSurface, chunk string) {
+	surface.reasoning.WriteString(chunk) // full text retained for verbose mode
+	if surface.reasoningTextIdx < 0 {
 		return
 	}
-	m.reasoningView = append(m.reasoningView, chunk...)
-	if len(m.reasoningView) > reasoningViewMax {
-		drop := len(m.reasoningView) - reasoningViewMax
-		for drop < len(m.reasoningView) && !utf8.RuneStart(m.reasoningView[drop]) {
+	surface.reasoningView = append(surface.reasoningView, chunk...)
+	if len(surface.reasoningView) > reasoningViewMax {
+		drop := len(surface.reasoningView) - reasoningViewMax
+		for drop < len(surface.reasoningView) && !utf8.RuneStart(surface.reasoningView[drop]) {
 			drop++
 		}
-		m.reasoningView = m.reasoningView[:copy(m.reasoningView, m.reasoningView[drop:])]
+		surface.reasoningView = surface.reasoningView[:copy(surface.reasoningView, surface.reasoningView[drop:])]
 	}
-	m.transcript[m.reasoningTextIdx] = reasoningBlock(string(m.reasoningView), m.width, reasoningTailLines)
-	m.transcriptDirty = true
+	surface.transcript[surface.reasoningTextIdx] = reasoningBlock(string(surface.reasoningView), m.width, reasoningTailLines)
+	m.markSurfaceDirty(surface)
 }
 
 // reasoningBlock renders raw thinking text as dim, width-wrapped lines under a
@@ -1839,14 +2136,11 @@ const shellPreviewLines = 10
 // input box off-screen.
 const shellExpandMaxLines = 200
 
-// streamToolOutput appends a chunk of a running tool's output and re-renders its
-// live block (the last toolStreamTailLines lines) under the tool card, opening
-// the block on the first chunk. Mirrors streamReasoning.
-func (m *chatTUI) streamToolOutput(id, chunk string) {
+func (m *chatTUI) streamToolOutputFor(surface *conversationSurface, id, chunk string) {
 	if id == "" {
 		return
 	}
-	if m.toolStreamID != id {
+	if surface.toolStreamID != id {
 		// Switching to a different id means either:
 		//   (a) the previous tool finished and a new one is starting — collapse
 		//       the current id's live block, then append a fresh slot at the
@@ -1855,57 +2149,57 @@ func (m *chatTUI) streamToolOutput(id, chunk string) {
 		//       possibly collapsed) tool — reuse the slot beginToolRunning
 		//       already wrote for that id, so the live block stays directly
 		//       under the earlier tool's card rather than stacking at the end.
-		if existingIdx, ok := m.shellTranscriptIdx[id]; ok && existingIdx >= 0 && existingIdx < len(m.transcript) {
+		if existingIdx, ok := surface.shellTranscriptIdx[id]; ok && existingIdx >= 0 && existingIdx < len(surface.transcript) {
 			// Stash the switched-away id's live count before resetting it;
 			// its late ToolResult reads it back via toolLineCountByID.
-			if m.toolStreamID != "" && m.toolStreamID != id {
-				n := m.toolLineCount
-				if m.toolPartial != "" {
+			if surface.toolStreamID != "" && surface.toolStreamID != id {
+				n := surface.toolLineCount
+				if surface.toolPartial != "" {
 					n++
 				}
 				if n > 0 {
-					m.toolLineCountByID[m.toolStreamID] = n
+					surface.toolLineCountByID[surface.toolStreamID] = n
 				}
 			}
-			m.toolStreamID = id
-			m.toolStreamIdx = existingIdx
-			m.toolTail = m.toolTail[:0]
-			m.toolPartial = ""
-			m.toolLineCount = 0
+			surface.toolStreamID = id
+			surface.toolStreamIdx = existingIdx
+			surface.toolTail = surface.toolTail[:0]
+			surface.toolPartial = ""
+			surface.toolLineCount = 0
 		} else {
 			// Unknown id: collapse the active stream (its live count is intact).
-			m.collapseToolOutput(m.toolStreamID, "")
-			m.toolStreamID = id
-			m.toolTail = m.toolTail[:0]
-			m.toolPartial = ""
-			m.toolLineCount = 0
+			m.collapseToolOutputFor(surface, surface.toolStreamID, "")
+			surface.toolStreamID = id
+			surface.toolTail = surface.toolTail[:0]
+			surface.toolPartial = ""
+			surface.toolLineCount = 0
 			if m.nativeScrollback {
-				m.toolStreamIdx = -1
+				surface.toolStreamIdx = -1
 			} else {
-				m.toolStreamIdx = len(m.transcript)
-				m.commitLine("")
+				surface.toolStreamIdx = len(surface.transcript)
+				m.commitLineTo(surface, "")
 			}
 		}
 	}
 	// Accumulate full output for shell commands so Ctrl+B can expand it.
 	if strings.HasPrefix(id, "shell-") {
-		m.shellOutputs[id] += chunk
+		surface.shellOutputs[id] += chunk
 	}
 	// Fold completed lines into the bounded tail; keep the trailing partial.
-	data := m.toolPartial + chunk
+	data := surface.toolPartial + chunk
 	for {
 		i := strings.IndexByte(data, '\n')
 		if i < 0 {
 			break
 		}
-		m.pushToolLine(strings.TrimRight(data[:i], "\r"))
+		m.pushToolLineFor(surface, strings.TrimRight(data[:i], "\r"))
 		data = data[i+1:]
 	}
-	m.toolPartial = data
+	surface.toolPartial = data
 
-	vis := m.toolTail
-	if m.toolPartial != "" {
-		vis = append(append([]string{}, m.toolTail...), m.toolPartial)
+	vis := surface.toolTail
+	if surface.toolPartial != "" {
+		vis = append(append([]string{}, surface.toolTail...), surface.toolPartial)
 	}
 	if m.nativeScrollback {
 		return
@@ -1914,38 +2208,30 @@ func (m *chatTUI) streamToolOutput(id, chunk string) {
 	for i, ln := range vis {
 		lines[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
 	}
-	m.transcript[m.toolStreamIdx] = connectorBlock(lines)
-	m.transcriptDirty = true
+	surface.transcript[surface.toolStreamIdx] = connectorBlock(lines)
+	m.markSurfaceDirty(surface)
 }
 
-// pushToolLine appends a completed output line to the bounded tail, dropping the
-// oldest when it exceeds the window (the backing array stays ≤ window+1).
-func (m *chatTUI) pushToolLine(line string) {
-	m.toolLineCount++
-	m.toolTail = append(m.toolTail, line)
-	if len(m.toolTail) > toolStreamTailLines {
-		copy(m.toolTail, m.toolTail[1:])
-		m.toolTail = m.toolTail[:toolStreamTailLines]
+func (m *chatTUI) pushToolLineFor(surface *conversationSurface, line string) {
+	surface.toolLineCount++
+	surface.toolTail = append(surface.toolTail, line)
+	if len(surface.toolTail) > toolStreamTailLines {
+		copy(surface.toolTail, surface.toolTail[1:])
+		surface.toolTail = surface.toolTail[:toolStreamTailLines]
 	}
 }
 
-// collapseToolOutput replaces a finished tool's live block with a dim
-// "⎿ N lines" summary, so the scrollback keeps a marker of the run without the
-// full output (which the model already received). For shell commands ("shell-"
-// prefix), it shows the first shellPreviewLines with a Ctrl+B hint instead.
-// No-op when id isn't streaming. resultOutput (the ToolResult's final output)
-// is the last-resort line-count source when the live state was already reset.
-func (m *chatTUI) collapseToolOutput(id, resultOutput string) {
+func (m *chatTUI) collapseToolOutputFor(surface *conversationSurface, id, resultOutput string) {
 	if m.nativeScrollback {
-		if id == "" || m.toolStreamID != id {
+		if id == "" || surface.toolStreamID != id {
 			return
 		}
-		n := m.toolLineCount
-		if m.toolPartial != "" {
+		n := surface.toolLineCount
+		if surface.toolPartial != "" {
 			n++
 		}
 		if n > 0 {
-			if full, ok := m.shellOutputs[id]; ok {
+			if full, ok := surface.shellOutputs[id]; ok {
 				lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
 				total := len(lines)
 				if total > shellPreviewLines {
@@ -1954,41 +2240,41 @@ func (m *chatTUI) collapseToolOutput(id, resultOutput string) {
 						preview[i] = dim(clampPlain(lines[i], m.width-len([]rune(connector))))
 					}
 					preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
-					m.commitLine(connectorBlock(preview))
+					m.commitLineTo(surface, connectorBlock(preview))
 				} else {
 					rendered := make([]string, total)
 					for i, ln := range lines {
 						rendered[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
 					}
-					m.commitLine(connectorBlock(rendered))
+					m.commitLineTo(surface, connectorBlock(rendered))
 				}
-				m.shellTranscriptIdx[id] = len(m.transcript) - 1
+				surface.shellTranscriptIdx[id] = len(surface.transcript) - 1
 			} else {
-				m.commitLine(connectorBlock([]string{dim(fmt.Sprintf("%d lines", n))}))
+				m.commitLineTo(surface, connectorBlock([]string{dim(fmt.Sprintf("%d lines", n))}))
 			}
 		}
-		m.toolStreamIdx = -1
-		m.toolStreamID = ""
-		m.toolTail = m.toolTail[:0]
-		m.toolPartial = ""
-		m.toolLineCount = 0
+		surface.toolStreamIdx = -1
+		surface.toolStreamID = ""
+		surface.toolTail = surface.toolTail[:0]
+		surface.toolPartial = ""
+		surface.toolLineCount = 0
 		return
 	}
-	if m.toolStreamIdx < 0 || id == "" || m.toolStreamID != id {
+	if surface.toolStreamIdx < 0 || id == "" || surface.toolStreamID != id {
 		// Slot no longer active (another tool took over, or this id never
 		// streamed). If beginToolRunning recorded a transcript index, collapse
 		// in place so a late ToolResult doesn't leave raw streamed text behind.
-		if idx, ok := m.shellTranscriptIdx[id]; ok && idx >= 0 && idx < len(m.transcript) {
-			m.collapseShellSlot(id, idx, resultOutput)
+		if idx, ok := surface.shellTranscriptIdx[id]; ok && idx >= 0 && idx < len(surface.transcript) {
+			m.collapseShellSlotFor(surface, id, idx, resultOutput)
 		}
 		return
 	}
-	m.collapseShellSlot(id, m.toolStreamIdx, resultOutput)
-	m.toolStreamIdx = -1
-	m.toolStreamID = ""
-	m.toolTail = m.toolTail[:0]
-	m.toolPartial = ""
-	m.toolLineCount = 0
+	m.collapseShellSlotFor(surface, id, surface.toolStreamIdx, resultOutput)
+	surface.toolStreamIdx = -1
+	surface.toolStreamID = ""
+	surface.toolTail = surface.toolTail[:0]
+	surface.toolPartial = ""
+	surface.toolLineCount = 0
 }
 
 // collapseShellSlot finalises a tool's live block at idx. Used both by the
@@ -1997,13 +2283,19 @@ func (m *chatTUI) collapseToolOutput(id, resultOutput string) {
 // sources, in order: live streaming state, shellOutputs ("shell-" ids only),
 // the per-id count stashed by streamToolOutput, then the ToolResult's output.
 func (m *chatTUI) collapseShellSlot(id string, idx int, resultOutput string) {
-	m.transcriptDirty = true
+	m.syncMainLegacyToSurface()
+	m.collapseShellSlotFor(m.conversation(tuiSurfaceMain), id, idx, resultOutput)
+	m.syncMainSurfaceLegacy()
+}
+
+func (m *chatTUI) collapseShellSlotFor(surface *conversationSurface, id string, idx int, resultOutput string) {
+	m.markSurfaceDirty(surface)
 	n := -1
-	if id == m.toolStreamID {
+	if id == surface.toolStreamID {
 		// Prefer the larger of the live count and resultOutput: resultOutput
 		// is the authoritative end-state, the live state may lag behind it.
-		n = m.toolLineCount
-		if m.toolPartial != "" {
+		n = surface.toolLineCount
+		if surface.toolPartial != "" {
 			n++
 		}
 		if resultOutput != "" {
@@ -2014,9 +2306,9 @@ func (m *chatTUI) collapseShellSlot(id string, idx int, resultOutput string) {
 		}
 	}
 	if n < 0 {
-		if full, ok := m.shellOutputs[id]; ok {
+		if full, ok := surface.shellOutputs[id]; ok {
 			n = len(strings.Split(strings.TrimRight(full, "\n"), "\n"))
-		} else if c, ok := m.toolLineCountByID[id]; ok {
+		} else if c, ok := surface.toolLineCountByID[id]; ok {
 			n = c
 		} else if resultOutput != "" {
 			n = len(strings.Split(strings.TrimRight(resultOutput, "\n"), "\n"))
@@ -2030,10 +2322,10 @@ func (m *chatTUI) collapseShellSlot(id string, idx int, resultOutput string) {
 	if n == 0 {
 		// Tool finished with no output: clear the "working…" placeholder but
 		// keep the slot (shellTranscriptIdx still points here for late progress).
-		m.transcript[idx] = ""
+		surface.transcript[idx] = ""
 		return
 	}
-	if full, ok := m.shellOutputs[id]; ok {
+	if full, ok := surface.shellOutputs[id]; ok {
 		// Shell command: show first N lines + hint.
 		lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
 		total := len(lines)
@@ -2043,18 +2335,18 @@ func (m *chatTUI) collapseShellSlot(id string, idx int, resultOutput string) {
 				preview[i] = dim(clampPlain(lines[i], m.width-len([]rune(connector))))
 			}
 			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
-			m.transcript[idx] = connectorBlock(preview)
+			surface.transcript[idx] = connectorBlock(preview)
 		} else {
 			rendered := make([]string, total)
 			for i, ln := range lines {
 				rendered[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
 			}
-			m.transcript[idx] = connectorBlock(rendered)
+			surface.transcript[idx] = connectorBlock(rendered)
 		}
 	} else {
-		m.transcript[idx] = connectorBlock([]string{dim(fmt.Sprintf("%d lines", n))})
+		surface.transcript[idx] = connectorBlock([]string{dim(fmt.Sprintf("%d lines", n))})
 	}
-	m.shellTranscriptIdx[id] = idx
+	surface.shellTranscriptIdx[id] = idx
 }
 
 // toggleShellOutput expands or collapses the output of the most recent shell
@@ -2121,90 +2413,88 @@ func (m *chatTUI) toggleShellOutput() {
 // "⎿ working · Ns" line of a tool that hasn't streamed output yet.
 var toolWorkingFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
-// beginToolRunning opens an empty live block under a just-dispatched tool card,
-// keyed by the call id. tickToolRunning fills it with a "working · Ns" line each
-// second; if the tool later streams output, streamToolOutput reuses the same
-// block; collapseToolOutput closes it on the result.
-func (m *chatTUI) beginToolRunning(id string) {
+func (m *chatTUI) beginToolRunningFor(surface *conversationSurface, id string) {
 	if id == "" {
 		return
 	}
-	m.toolStreamID = id
-	m.toolTail = m.toolTail[:0]
-	m.toolPartial = ""
-	m.toolLineCount = 0
+	surface.toolStreamID = id
+	surface.toolTail = surface.toolTail[:0]
+	surface.toolPartial = ""
+	surface.toolLineCount = 0
 	// Clear accumulated output for this tool ID so a re-run (e.g. repeated
 	// !pwd with the same "shell-pwd" id) doesn't append to old output.
-	delete(m.shellOutputs, id)
-	m.toolStreamStart = time.Now()
-	m.toolStreamFrame = 0
+	delete(surface.shellOutputs, id)
+	surface.toolStreamStart = time.Now()
+	surface.toolStreamFrame = 0
 	if m.nativeScrollback {
-		m.toolStreamIdx = -1
+		surface.toolStreamIdx = -1
 		return
 	}
-	m.toolStreamIdx = len(m.transcript)
-	m.commitLine(connectorBlock([]string{dim(fmt.Sprintf(i18n.M.ChatToolWorkingFmt, toolWorkingFrames[0], 0))}))
+	surface.toolStreamIdx = len(surface.transcript)
+	m.commitLineTo(surface, connectorBlock([]string{dim(fmt.Sprintf(i18n.M.ChatToolWorkingFmt, toolWorkingFrames[0], 0))}))
 	// Remember the transcript slot for this id so a late ToolProgress for a
 	// previously dispatched (and possibly already collapsed) tool can reuse
 	// it instead of appending a fresh slot at the end of the transcript. For
 	// back-to-back tool calls this keeps each tool's live block directly
 	// under its own card.
-	m.shellTranscriptIdx[id] = m.toolStreamIdx
+	surface.shellTranscriptIdx[id] = surface.toolStreamIdx
 }
 
 // tickToolRunning re-renders the working line of a tool that's dispatched but
 // hasn't produced output yet. A no-op once output streams in or no tool runs.
 func (m *chatTUI) tickToolRunning() {
+	m.syncMainLegacyToSurface()
+	m.tickToolRunningFor(m.conversation(tuiSurfaceMain))
+	m.syncMainSurfaceLegacy()
+}
+
+func (m *chatTUI) tickToolRunningFor(surface *conversationSurface) {
 	if m.nativeScrollback {
 		return
 	}
-	if m.toolStreamIdx < 0 || m.toolLineCount != 0 || m.toolPartial != "" {
+	if surface.toolStreamIdx < 0 || surface.toolLineCount != 0 || surface.toolPartial != "" {
 		return
 	}
-	m.toolStreamFrame++
-	frame := toolWorkingFrames[m.toolStreamFrame%len(toolWorkingFrames)]
-	secs := int(time.Since(m.toolStreamStart).Seconds())
-	m.transcript[m.toolStreamIdx] = connectorBlock([]string{dim(fmt.Sprintf(i18n.M.ChatToolWorkingFmt, frame, secs))})
-	m.transcriptDirty = true
+	surface.toolStreamFrame++
+	frame := toolWorkingFrames[surface.toolStreamFrame%len(toolWorkingFrames)]
+	secs := int(time.Since(surface.toolStreamStart).Seconds())
+	surface.transcript[surface.toolStreamIdx] = connectorBlock([]string{dim(fmt.Sprintf(i18n.M.ChatToolWorkingFmt, frame, secs))})
+	m.markSurfaceDirty(surface)
 }
 
-// commitReasoning closes the live thinking block: the "▎ thinking…" marker is
-// rewritten to a dim "▎ thought for Ns" summary and the streamed text below it is
-// removed (collapsed) — kept only in verbose mode. The viewport re-wraps from
-// m.transcript, so the change is flagged via transcriptDirty.
-func (m *chatTUI) commitReasoning() {
-	if m.reasoningNative {
-		if strings.TrimSpace(m.reasoning.String()) != "" || !m.thinkStart.IsZero() {
-			secs := int(time.Since(m.thinkStart).Seconds())
-			m.commitSpacer()
-			m.commitLine(dim(fmt.Sprintf("  ▎ "+i18n.M.ChatThoughtForFmt, secs)))
-			if m.showReasoning && strings.TrimSpace(m.reasoning.String()) != "" {
-				m.commitLine(reasoningBlock(m.reasoning.String(), m.width, 0))
+func (m *chatTUI) commitReasoningFor(surface *conversationSurface) {
+	if surface.reasoningNative {
+		if strings.TrimSpace(surface.reasoning.String()) != "" || !surface.thinkStart.IsZero() {
+			secs := int(time.Since(surface.thinkStart).Seconds())
+			m.commitSpacerFor(surface)
+			m.commitLineTo(surface, dim(fmt.Sprintf("  ▎ "+i18n.M.ChatThoughtForFmt, secs)))
+			if surface.showReasoning && strings.TrimSpace(surface.reasoning.String()) != "" {
+				m.commitLineTo(surface, reasoningBlock(surface.reasoning.String(), m.width, 0))
 			}
 		}
-		m.reasoning.Reset()
-		m.reasoningView = m.reasoningView[:0]
-		m.reasoningNative = false
-		m.thinkStart = time.Time{}
+		surface.reasoning.Reset()
+		surface.reasoningView = surface.reasoningView[:0]
+		surface.reasoningNative = false
+		surface.thinkStart = time.Time{}
 		return
 	}
-	if m.reasoningLineIdx < 0 {
+	if surface.reasoningLineIdx < 0 {
 		return
 	}
-	secs := int(time.Since(m.thinkStart).Seconds())
-	m.transcript[m.reasoningLineIdx] = dim(fmt.Sprintf("  ▎ "+i18n.M.ChatThoughtForFmt, secs))
-	if m.reasoningTextIdx >= 0 {
-		if m.showReasoning && strings.TrimSpace(m.reasoning.String()) != "" {
-			m.transcript[m.reasoningTextIdx] = reasoningBlock(m.reasoning.String(), m.width, 0)
+	secs := int(time.Since(surface.thinkStart).Seconds())
+	surface.transcript[surface.reasoningLineIdx] = dim(fmt.Sprintf("  ▎ "+i18n.M.ChatThoughtForFmt, secs))
+	if surface.reasoningTextIdx >= 0 {
+		if surface.showReasoning && strings.TrimSpace(surface.reasoning.String()) != "" {
+			surface.transcript[surface.reasoningTextIdx] = reasoningBlock(surface.reasoning.String(), m.width, 0)
 		} else {
-			m.transcript = append(m.transcript[:m.reasoningTextIdx], m.transcript[m.reasoningTextIdx+1:]...)
+			surface.transcript = append(surface.transcript[:surface.reasoningTextIdx], surface.transcript[surface.reasoningTextIdx+1:]...)
 		}
 	}
-	m.transcriptDirty = true
-	m.reasoning.Reset()
-	m.reasoningView = m.reasoningView[:0]
-	m.reasoningLineIdx = -1
-	m.reasoningTextIdx = -1
+	m.markSurfaceDirty(surface)
+	surface.reasoning.Reset()
+	surface.reasoningView = surface.reasoningView[:0]
+	surface.reasoningLineIdx = -1
+	surface.reasoningTextIdx = -1
 }
 
 // streamAnswer renders the answer streamed so far up to its last completed
@@ -2214,25 +2504,31 @@ func (m *chatTUI) commitReasoning() {
 // stays buffered (a half-written fence/list never renders early), and it only
 // re-renders when a new paragraph actually closes.
 func (m *chatTUI) streamAnswer() {
+	m.syncMainLegacyToSurface()
+	m.streamAnswerFor(m.conversation(tuiSurfaceMain))
+	m.syncMainSurfaceLegacy()
+}
+
+func (m *chatTUI) streamAnswerFor(surface *conversationSurface) {
 	if m.nativeScrollback {
 		return
 	}
-	prefix := flushableMarkdownPrefix(m.pending.String())
-	if len(prefix) <= m.answerFlushed {
+	prefix := flushableMarkdownPrefix(surface.pending.String())
+	if len(prefix) <= surface.answerFlushed {
 		return
 	}
 	rendered := m.renderer.Render(prefix)
 	if rendered == "" {
 		return
 	}
-	m.answerFlushed = len(prefix)
+	surface.answerFlushed = len(prefix)
 	block := strings.TrimRight(rendered, "\n")
-	if m.answerIdx < 0 {
-		m.answerIdx = len(m.transcript)
-		m.commitLine(block)
+	if surface.answerIdx < 0 {
+		surface.answerIdx = len(surface.transcript)
+		m.commitLineTo(surface, block)
 	} else {
-		m.transcript[m.answerIdx] = block
-		m.transcriptDirty = true
+		surface.transcript[surface.answerIdx] = block
+		m.markSurfaceDirty(surface)
 	}
 }
 
@@ -2241,26 +2537,229 @@ func (m *chatTUI) streamAnswer() {
 // commitReasoning then commitPending puts the answer on its own line, restoring
 // the thinking→answer break the renderer strips.
 func (m *chatTUI) commitPending() {
-	if m.pending.Len() == 0 {
-		m.answerIdx = -1
-		m.answerFlushed = 0
+	m.syncMainLegacyToSurface()
+	m.commitPendingFor(m.conversation(tuiSurfaceMain))
+	m.syncMainSurfaceLegacy()
+}
+
+func (m *chatTUI) commitPendingFor(surface *conversationSurface) {
+	if surface.pending.Len() == 0 {
+		surface.answerIdx = -1
+		surface.answerFlushed = 0
 		return
 	}
-	raw := m.pending.String()
+	raw := surface.pending.String()
 	rendered := m.renderer.Render(raw)
 	if rendered == "" {
 		rendered = raw
 	}
 	block := strings.TrimRight(rendered, "\n")
-	if m.answerIdx < 0 {
-		m.commitLine(block)
+	if surface.answerIdx < 0 {
+		m.commitLineTo(surface, block)
 	} else {
-		m.transcript[m.answerIdx] = block
-		m.transcriptDirty = true
+		surface.transcript[surface.answerIdx] = block
+		m.markSurfaceDirty(surface)
 	}
-	m.pending.Reset()
-	m.answerIdx = -1
-	m.answerFlushed = 0
+	surface.pending.Reset()
+	surface.answerIdx = -1
+	surface.answerFlushed = 0
+}
+
+func (m *chatTUI) ingestEventFor(surface *conversationSurface, e event.Event) {
+	if e.Kind == event.Retrying {
+		surface.retryAttempt = e.RetryAttempt
+		surface.retryMax = e.RetryMax
+		if surface == &m.mainSurface {
+			m.syncMainSurfaceLegacy()
+		}
+		return
+	}
+	surface.retryAttempt = 0
+	surface.retryMax = 0
+	if surface.turnDiscarded {
+		if e.Kind == event.TurnDone {
+			surface.turnDiscarded = false
+			surface.running = false
+			if surface == &m.mainSurface {
+				m.state = tuiIdle
+				m.syncMainSurfaceLegacy()
+			}
+		}
+		return
+	}
+	if e.Kind != event.TurnStarted && e.Kind != event.TurnDone {
+		m.confirmBubbleSentFor(surface)
+	}
+	switch e.Kind {
+	case event.Reasoning:
+		if m.nativeScrollback {
+			if !surface.reasoningNative {
+				surface.thinkStart = time.Now()
+				surface.reasoningNative = true
+			}
+			m.streamReasoningFor(surface, e.Text)
+			break
+		}
+		if surface.reasoningLineIdx < 0 {
+			m.commitSpacerFor(surface)
+			surface.thinkStart = time.Now()
+			surface.reasoningLineIdx = len(surface.transcript)
+			m.commitLineTo(surface, dim("  ▎ "+i18n.M.ChatThinking))
+			surface.reasoningTextIdx = len(surface.transcript)
+			m.commitLineTo(surface, "")
+			surface.reasoningView = surface.reasoningView[:0]
+		}
+		m.streamReasoningFor(surface, e.Text)
+
+	case event.Text:
+		m.commitReasoningFor(surface)
+		surface.pending.WriteString(e.Text)
+		m.streamAnswerFor(surface)
+
+	case event.Message:
+		m.commitReasoningFor(surface)
+		m.commitPendingFor(surface)
+
+	case event.ToolDispatch:
+		if e.Tool.Partial {
+			break
+		}
+		m.finalizeStreamedFor(surface)
+		switch e.Tool.Name {
+		case "todo_write", planApprovalTool:
+		default:
+			m.commitSpacerFor(surface)
+			if block := diffBlock(e.Tool.Name, e.Tool.Args, e.Tool.FileDiff, m.width, m.diffMaxLines); block != nil {
+				for _, ln := range block {
+					m.commitLineTo(surface, ln)
+				}
+				break
+			}
+			m.commitLineTo(surface, toolCard(e.Tool.Name, e.Tool.Args, m.width))
+			m.beginToolRunningFor(surface, e.Tool.ID)
+		}
+
+	case event.ToolProgress:
+		m.streamToolOutputFor(surface, e.Tool.ID, e.Tool.Output)
+
+	case event.ToolResult:
+		m.collapseToolOutputFor(surface, e.Tool.ID, e.Tool.Output)
+		if e.Tool.Name == "todo_write" && e.Tool.Err == "" && surface.caps.todoPanel {
+			m.todoArgs = e.Tool.Args
+		}
+		if e.Tool.Err != "" {
+			m.finalizeStreamedFor(surface)
+			m.commitLineTo(surface, "  "+red("●")+" "+bold(toolDisplayName(e.Tool.Name))+" "+red("⊘ "+e.Tool.Err))
+		}
+
+	case event.Usage:
+		if e.Usage != nil {
+			surface.turnTokens += e.Usage.CompletionTokens
+		}
+		if line := agent.FormatUsageLine(e.Usage, e.Pricing, e.CacheDiagnostics); line != "" {
+			m.finalizeStreamedFor(surface)
+			m.commitLineTo(surface, line)
+		}
+
+	case event.Notice:
+		glyph := "·"
+		if e.Level == event.LevelWarn {
+			glyph = "!"
+		}
+		m.finalizeStreamedFor(surface)
+		m.commitLineTo(surface, fmt.Sprintf("  %s %s", glyph, e.Text))
+
+	case event.GuardianAssessment:
+		m.finalizeStreamedFor(surface)
+		g := e.Guardian
+		line := fmt.Sprintf("Guardian %s · %s", g.Outcome, g.Tool)
+		if g.Subject != "" {
+			line += " · " + truncateSubject(g.Subject, m.width)
+		}
+		if g.RiskLevel != "" {
+			line += " · risk=" + g.RiskLevel
+		}
+		if g.UserAuthorization != "" {
+			line += " · authorization=" + g.UserAuthorization
+		}
+		if g.Rationale != "" {
+			line += " · " + g.Rationale
+		}
+		if g.Outcome == "deny" {
+			m.commitLineTo(surface, "  ! "+line)
+		} else {
+			m.commitLineTo(surface, "  · "+line)
+		}
+
+	case event.CompactionStarted:
+		m.finalizeStreamedFor(surface)
+		m.commitLineTo(surface, dim("  ⋯ "+i18n.M.CompactionWorking))
+
+	case event.CompactionDone:
+		if e.Compaction.Summary == "" {
+			break
+		}
+		m.finalizeStreamedFor(surface)
+		for _, ln := range compactionCardLines(e.Compaction) {
+			m.commitLineTo(surface, ln)
+		}
+
+	case event.Phase:
+		m.finalizeStreamedFor(surface)
+		m.commitLineTo(surface, fmt.Sprintf("[%s]", e.Text))
+
+	case event.ApprovalRequest:
+		if !surface.caps.approvals {
+			m.finalizeStreamedFor(surface)
+			m.commitLineTo(surface, dim("  · approval request unavailable in this surface"))
+			break
+		}
+		a := e.Approval
+		m.pendingApproval = &a
+
+	case event.AskRequest:
+		if !surface.caps.askRequests {
+			m.finalizeStreamedFor(surface)
+			m.commitLineTo(surface, dim("  · question unavailable in this surface"))
+			break
+		}
+		m.finalizeStreamedFor(surface)
+		m.chooser = newChooser(e.Ask)
+
+	case event.MCPSurfaceReady:
+		if m.ctrl != nil {
+			m.host = m.ctrl.Host()
+		}
+		m.refreshMCPManager()
+
+	case event.TurnDone:
+		m.commitReasoningFor(surface)
+		m.commitPendingFor(surface)
+		m.confirmBubbleSentFor(surface)
+		surface.running = false
+		surface.retryAttempt = 0
+		surface.retryMax = 0
+		if surface == &m.mainSurface {
+			m.state = tuiIdle
+			m.queueEditCursor = -1
+			m.queueEditDraft = ""
+			m.clearSubmittedPastesFor(surface)
+		}
+		if e.Err != nil && e.Err.Error() != "" && !strings.Contains(e.Err.Error(), "context canceled") {
+			m.commitLineTo(surface, wrapForViewport(i18n.M.ErrorPrefix+" "+e.Err.Error(), m.width, activeCLITheme.warn))
+		}
+	}
+	if surface == &m.mainSurface {
+		m.syncMainSurfaceLegacy()
+	}
+}
+
+func (m *chatTUI) tickSurfaceToolRunning(surface *conversationSurface) {
+	surface.elapsed = int(time.Since(surface.runStart).Seconds())
+	m.tickToolRunningFor(surface)
+	if surface == &m.mainSurface {
+		m.syncMainSurfaceLegacy()
+	}
 }
 
 // flushableMarkdownPrefix returns the longest prefix of buf made of complete
@@ -2400,53 +2899,47 @@ func (m chatTUI) runningWorkingLine(cancelRequested, styled bool) string {
 	return working
 }
 
-func (m chatTUI) View() tea.View {
-	boxW := m.width
-	if boxW < 10 {
-		boxW = 10
+func (m chatTUI) renderModeTag(shellMode bool) string {
+	if m.surface == tuiSurfaceSide {
+		return lipgloss.NewStyle().
+			Background(lipgloss.Color(statusPlanColor.hex)).
+			Foreground(lipgloss.Color("#ffffff")).
+			Bold(true).
+			Padding(0, 1).
+			Render("BTW")
 	}
-	hideComposer := m.hideComposer()
-	shellMode := strings.HasPrefix(strings.TrimSpace(m.input.Value()), "!")
-	cancelRequested := m.cancelRequested()
-	var box string
-	if !hideComposer {
-		style := inputBoxStyle.Width(boxW)
-		if shellMode {
-			style = style.BorderForeground(lipgloss.Color(statusShellColor.hex))
-		}
-		box = style.Render(m.input.View())
-	}
-
-	var modeTag string
 	if shellMode {
-		modeTag = lipgloss.NewStyle().
+		return lipgloss.NewStyle().
 			Background(lipgloss.Color(statusShellColor.hex)).
 			Foreground(lipgloss.Color("#ffffff")).
 			Bold(true).
 			Padding(0, 1).
 			Render("Shell")
-	} else {
-		color := statusAutoColor
-		foreground := "#111827"
-		switch {
-		case m.ctrl.AutoApproveTools():
-			color = statusYoloColor
-			foreground = "#ffffff"
-		case m.planMode:
-			color = statusPlanColor
-			foreground = "#ffffff"
-		}
-		modeTag = lipgloss.NewStyle().
-			Background(lipgloss.Color(color.hex)).
-			Foreground(lipgloss.Color(foreground)).
-			Bold(true).
-			Padding(0, 1).
-			Render(m.modeTagText())
 	}
+	color := statusAutoColor
+	foreground := "#111827"
+	switch {
+	case m.ctrl.AutoApproveTools():
+		color = statusYoloColor
+		foreground = "#ffffff"
+	case m.planMode:
+		color = statusPlanColor
+		foreground = "#ffffff"
+	}
+	return lipgloss.NewStyle().
+		Background(lipgloss.Color(color.hex)).
+		Foreground(lipgloss.Color(foreground)).
+		Bold(true).
+		Padding(0, 1).
+		Render(m.modeTagText())
+}
 
-	ctxTag := m.contextTag()
+func (m chatTUI) primaryStatusLine(modeTag string, shellMode, cancelRequested bool) string {
 	var status string
 	switch {
+	case m.surface == tuiSurfaceSide:
+		side := m.ctrl.SideState()
+		status = "  " + modeTag + m.sideContextStatus(side.Runtime.Running)
 	case m.rewind != nil:
 		status = "  " + modeTag + " · ⟲ rewind"
 	case m.mcpImport != nil:
@@ -2474,24 +2967,58 @@ func (m chatTUI) View() tea.View {
 	default:
 		status = "  " + modeTag + " · " + i18n.M.ChatStatusIdle + " " + dim("("+m.cycleHint()+")")
 	}
-	if et := m.effortTag(); et != "" {
-		status += " · " + et
+	if m.activeCaps().statusDataRow {
+		if et := m.effortTag(); et != "" {
+			status += " · " + et
+		}
+		if gt := m.gitTag(); gt != "" {
+			status += " · " + gt
+		}
+		if mt := m.mouseTag(); mt != "" {
+			status += " · " + mt
+		}
 	}
-	if gt := m.gitTag(); gt != "" {
-		status += " · " + gt
+	return status
+}
+
+func (m chatTUI) sideContextStatus(sideRunning bool) string {
+	parts := []string{"from main"}
+	if sideRunning {
+		parts = append(parts, "side working")
 	}
-	if mt := m.mouseTag(); mt != "" {
-		status += " · " + mt
+	if attention := m.mainAttentionStatus(); attention != "" {
+		parts = append(parts, attention)
 	}
-	// The spinning "thinking…" indicator is its own line ABOVE the input box (shown
-	// only while a turn runs); the status/data rows stay below. This mirrors Claude
-	// Code: live progress over the composer, shortcuts + stats under it.
-	working := m.runningWorkingLine(cancelRequested, true)
-	// Second status row: the live data (model, git, effort, context gauge, cache
-	// rates, jobs, balance). It lives on its own row so it's always visible; if it
-	// exceeds the terminal width it wraps to additional rows instead of being
-	// truncated. Wrapping is safe in the alt-screen view — there's no scrollback
-	// to strand — and computeStatusLineCount reserves the correct height.
+	parts = append(parts, "Ctrl+C to return")
+	return " " + accent(strings.Join(parts, " · "))
+}
+
+func (m chatTUI) mainAttentionStatus() string {
+	if m.surface != tuiSurfaceSide {
+		return ""
+	}
+	switch {
+	case m.pendingApproval != nil && m.pendingApproval.Tool == planApprovalTool:
+		return "main needs plan approval"
+	case m.pendingApproval != nil:
+		return "main needs approval"
+	case m.chooser != nil:
+		return "main needs input"
+	case m.state == tuiRunning:
+		return "main working"
+	case m.mainDonePending:
+		return "main finished"
+	case m.mainNoticePending:
+		return "main notice"
+	default:
+		return ""
+	}
+}
+
+func (m chatTUI) dataStatusLine() string {
+	if !m.activeCaps().statusDataRow {
+		return "  "
+	}
 	var data []string
 	if mt := m.modelTag(); mt != "" {
 		data = append(data, mt)
@@ -2499,7 +3026,7 @@ func (m chatTUI) View() tea.View {
 	if cache := m.cacheTag(); cache != "" {
 		data = append(data, cache)
 	}
-	if ctxTag != "" {
+	if ctxTag := m.contextTag(); ctxTag != "" {
 		data = append(data, ctxTag)
 	}
 	if jt := m.jobsTag(); jt != "" {
@@ -2509,52 +3036,99 @@ func (m chatTUI) View() tea.View {
 		data = append(data, dim(m.balance))
 	}
 	dataLine := "  " + strings.Join(data, " · ")
-	// A configured custom status line replaces the built-in data row entirely.
 	if m.statuslineCmd != "" && m.statuslineOut != "" {
 		dataLine = "  " + m.statuslineOut
 	}
+	return dataLine
+}
+
+func (m chatTUI) View() tea.View {
+	caps := m.activeCaps()
+	boxW := m.width
+	if boxW < 10 {
+		boxW = 10
+	}
+	hideComposer := m.hideComposer()
+	shellMode := m.surface == tuiSurfaceMain && strings.HasPrefix(strings.TrimSpace(m.input.Value()), "!")
+	cancelRequested := m.cancelRequested()
+	var box string
+	if !hideComposer {
+		style := inputBoxStyle.Width(boxW)
+		if shellMode {
+			style = style.BorderForeground(lipgloss.Color(statusShellColor.hex))
+		}
+		box = style.Render(m.input.View())
+	}
+
+	modeTag := m.renderModeTag(shellMode)
+	status := m.primaryStatusLine(modeTag, shellMode, cancelRequested)
+	// The spinning "thinking…" indicator is its own line ABOVE the input box (shown
+	// only while a turn runs); the status/data rows stay below. This mirrors Claude
+	// Code: live progress over the composer, shortcuts + stats under it.
+	working := ""
+	if caps.statusDataRow {
+		working = m.runningWorkingLine(cancelRequested, true)
+	}
+	// Second status row: the live data (model, git, effort, context gauge, cache
+	// rates, jobs, balance). It lives on its own row so it's always visible; if it
+	// exceeds the terminal width it wraps to additional rows instead of being
+	// truncated. Wrapping is safe in the alt-screen view — there's no scrollback
+	// to strand — and computeStatusLineCount reserves the correct height.
+	dataLine := m.dataStatusLine()
 
 	// Bottom region pinned under the transcript viewport: optional panels, the
 	// composer when visible, then the two status rows. Its height feeds
 	// transcriptHeight so the viewport above fills exactly the rest of the screen.
 	var parts []string
 	rowsAboveBox := 0 // terminal rows occupied by panels/working line before the composer
-	if todo := m.renderTodoPanel(); todo != "" {
-		parts = append(parts, todo)
-		rowsAboveBox += strings.Count(todo, "\n") + 1
+	if caps.todoPanel {
+		if todo := m.renderTodoPanel(); todo != "" {
+			parts = append(parts, todo)
+			rowsAboveBox += strings.Count(todo, "\n") + 1
+		}
 	}
-	if banner := m.renderApprovalBanner(); banner != "" {
-		parts = append(parts, banner)
-		rowsAboveBox += strings.Count(banner, "\n") + 1
+	if caps.approvals {
+		if banner := m.renderApprovalBanner(); banner != "" {
+			parts = append(parts, banner)
+			rowsAboveBox += strings.Count(banner, "\n") + 1
+		}
 	}
-	if card := m.renderChooser(); card != "" {
-		parts = append(parts, card)
-		rowsAboveBox += strings.Count(card, "\n") + 1
-	}
-	if card := m.renderRewind(); card != "" {
-		parts = append(parts, card)
-		rowsAboveBox += strings.Count(card, "\n") + 1
-	}
-	if card := m.renderMCPImport(); card != "" {
-		parts = append(parts, card)
-		rowsAboveBox += strings.Count(card, "\n") + 1
-	}
-	if card := m.renderResumePicker(); card != "" {
-		parts = append(parts, card)
-		rowsAboveBox += strings.Count(card, "\n") + 1
-	}
-	if card := m.renderCopyPicker(); card != "" {
-		parts = append(parts, card)
-		rowsAboveBox += strings.Count(card, "\n") + 1
-	}
-	if menu := m.renderCompletion(); menu != "" {
-		parts = append(parts, menu)
-		rowsAboveBox += strings.Count(menu, "\n") + 1
-	}
-	if m.nativeScrollback {
-		if card := m.renderMainManager(); card != "" {
+	if caps.askRequests {
+		if card := m.renderChooser(); card != "" {
 			parts = append(parts, card)
 			rowsAboveBox += strings.Count(card, "\n") + 1
+		}
+	}
+	if caps.managerFooter {
+		if card := m.renderRewind(); card != "" {
+			parts = append(parts, card)
+			rowsAboveBox += strings.Count(card, "\n") + 1
+		}
+		if card := m.renderMCPImport(); card != "" {
+			parts = append(parts, card)
+			rowsAboveBox += strings.Count(card, "\n") + 1
+		}
+		if card := m.renderResumePicker(); card != "" {
+			parts = append(parts, card)
+			rowsAboveBox += strings.Count(card, "\n") + 1
+		}
+		if card := m.renderCopyPicker(); card != "" {
+			parts = append(parts, card)
+			rowsAboveBox += strings.Count(card, "\n") + 1
+		}
+	}
+	if caps.slashCompletion {
+		if menu := m.renderCompletion(); menu != "" {
+			parts = append(parts, menu)
+			rowsAboveBox += strings.Count(menu, "\n") + 1
+		}
+	}
+	if caps.managerFooter {
+		if m.nativeScrollback {
+			if card := m.renderMainManager(); card != "" {
+				parts = append(parts, card)
+				rowsAboveBox += strings.Count(card, "\n") + 1
+			}
 		}
 	}
 	// Layout: the working spinner (when running), then the composer when visible,
@@ -2565,15 +3139,19 @@ func (m chatTUI) View() tea.View {
 		parts = append(parts, workingStyle.Width(boxW).MaxWidth(boxW).Render(wrapStatusLine(working, boxW)))
 		rowsAboveBox++
 	}
-	if footer := m.renderMainManagerFooter(); footer != "" {
-		parts = append(parts, footer)
-		rowsAboveBox += strings.Count(footer, "\n") + 1
+	if caps.managerFooter {
+		if footer := m.renderMainManagerFooter(); footer != "" {
+			parts = append(parts, footer)
+			rowsAboveBox += strings.Count(footer, "\n") + 1
+		}
 	}
 	statusBlock := wrapStatusLine(status, boxW) + "\n" + wrapStatusLine(dataLine, boxW)
 	if !hideComposer {
-		if qi := m.renderQueueIndicator(); qi != "" {
-			parts = append(parts, qi)
-			rowsAboveBox += strings.Count(qi, "\n") + 1
+		if caps.queueIndicator {
+			if qi := m.renderQueueIndicator(); qi != "" {
+				parts = append(parts, qi)
+				rowsAboveBox += strings.Count(qi, "\n") + 1
+			}
 		}
 		parts = append(parts, box)
 	}
@@ -2595,8 +3173,10 @@ func (m chatTUI) View() tea.View {
 	// height), the pinned bottom region beneath. Alt-screen owns the grid, so
 	// resize repaints cleanly — no scrollback reflow, no ghost borders.
 	mainArea := m.renderTranscript()
-	if card := m.renderMainManager(); card != "" {
-		mainArea = m.renderTranscriptWithMainManager(card)
+	if caps.managerFooter {
+		if card := m.renderMainManager(); card != "" {
+			mainArea = m.renderTranscriptWithMainManager(card)
+		}
 	}
 	v := tea.NewView(mainArea + "\n" + strings.Join(parts, "\n"))
 	v.AltScreen = true
@@ -2985,81 +3565,17 @@ func (m chatTUI) computeStatusLineCount(width int) int {
 	}
 	shellMode := strings.HasPrefix(strings.TrimSpace(m.input.Value()), "!")
 	cancelRequested := m.cancelRequested()
-
-	// Replicate the first status line (mode tag + state) from View().
-	// ModeTag is rendered with Padding(0,1) in View() — add the same padding
-	// here so the visible width matches exactly.
-	modeTag := " " + m.modeTagText() + " "
-	if shellMode {
-		modeTag = " Shell "
+	modeTag := m.renderModeTag(shellMode)
+	status := m.primaryStatusLine(modeTag, shellMode, cancelRequested)
+	dataLine := m.dataStatusLine()
+	working := ""
+	if m.activeCaps().statusDataRow {
+		working = m.runningWorkingLine(cancelRequested, false)
 	}
-	status := "  " + modeTag
-	switch {
-	case m.rewind != nil:
-		status += " · ⟲ rewind"
-	case m.mcpImport != nil:
-		status += " · MCP import"
-	case m.resumePick != nil:
-		status += " · " + i18n.M.StatusResumePicker
-	case m.mcp != nil:
-		status += " · MCP"
-	case m.skillPick != nil:
-		status += " · " + i18n.M.SkillPickerStatusLabel
-	case m.chooser != nil:
-		status += " · " + i18n.M.ChatStatusQuestion
-	case m.pendingApproval != nil && m.pendingApproval.Tool == planApprovalTool:
-		status += " · " + i18n.M.ChatStatusPlanApproval
-	case m.pendingApproval != nil:
-		status += " · " + i18n.M.ChatStatusToolApproval
-	case m.copyNoticeText != "":
-		status += " · " + m.copyNoticeText
-	case cancelRequested:
-		status += " · " + i18n.M.CtrlCQuitHint
-	case shellMode:
-		status += " · " + i18n.M.ShellModeHint
-	case m.ctrl.AutoApproveTools():
-		status += " · " + i18n.M.ChatStatusYoloIdle + " (" + m.cycleHint() + ")"
-	default:
-		status += " · " + i18n.M.ChatStatusIdle + " (" + m.cycleHint() + ")"
-	}
-	if et := m.effortTag(); et != "" {
-		status += " · " + et
-	}
-	if gt := m.gitTag(); gt != "" {
-		status += " · " + gt
-	}
-	if mt := m.mouseTag(); mt != "" {
-		status += " · " + mt
-	}
-
-	// Replicate the data line from View().
-	var data []string
-	if mt := m.modelTag(); mt != "" {
-		data = append(data, mt)
-	}
-	if cache := m.cacheTag(); cache != "" {
-		data = append(data, cache)
-	}
-	if ct := m.contextTag(); ct != "" {
-		data = append(data, ct)
-	}
-	if jt := m.jobsTag(); jt != "" {
-		data = append(data, jt)
-	}
-	if m.balance != "" {
-		data = append(data, m.balance)
-	}
-	dataLine := "  " + strings.Join(data, " · ")
-	if m.statuslineCmd != "" && m.statuslineOut != "" {
-		dataLine = "  " + m.statuslineOut
-	}
-
-	// Replicate the working (spinner) line from View(), shown only while a turn runs.
-	working := m.runningWorkingLine(cancelRequested, false)
 
 	// Count wrapped rows for every piece that View() renders as wrapped.
 	var lines int
-	if m.state == tuiRunning {
+	if working != "" {
 		// working (spinner) line — wraps independently of the status block below.
 		lines += strings.Count(wrapStatusLine(working, width), "\n") + 1
 	}
@@ -3230,41 +3746,63 @@ func (m *chatTUI) startTurn(sent, displayed, restore string) tea.Cmd {
 // prompt) used only for the controller's auto-plan scoring, so resolved
 // @-reference payloads can't inflate the complexity signal.
 func (m *chatTUI) startTurnWithRaw(sent, displayed, restore, raw string) tea.Cmd {
-	// Flush any half-streamed leftover before the new turn (defensive).
-	m.commitReasoning()
-	m.commitPending()
+	m.syncMainLegacyToSurface()
+	return m.startTurnFor(m.conversation(tuiSurfaceMain), sent, displayed, restore, raw, func(sent, raw string) {
+		m.state = tuiRunning
+		m.ctrl.SendWithRaw(sent, raw)
+	})
+}
 
-	// Echo the user bubble to scrollback now so it appears the instant Enter is
-	// pressed, not when the server's first packet lands. It stays un-sendable until
-	// then: Esc before the reply pops these lines back off (unsendPending) and
-	// restores the text to the input box, leaving nothing stranded.
-	m.pendingRestore = restore
-	m.pendingPastes = m.pasteLabelsIn(restore)
-	m.bubbleStartIdx = len(m.transcript)
-	m.commitLine("") // blank line separating turns
-	m.commitLine(renderUserBubble(displayed, m.width, m.planMode))
-	m.bubblePending = true
-	m.turnDiscarded = false
+type turnSubmitFunc func(sent, raw string)
 
-	m.state = tuiRunning
-	m.runStart = time.Now()
-	m.elapsed = 0
-	m.turnTokens = 0
-	// The controller owns the run goroutine, its context, and cancellation; it
-	// streams events to eventCh and emits TurnDone when the turn settles.
-	m.ctrl.SendWithRaw(sent, raw)
+func (m *chatTUI) startTurnFor(surface *conversationSurface, sent, displayed, restore, raw string, submit turnSubmitFunc) tea.Cmd {
+	m.commitReasoningFor(surface)
+	m.commitPendingFor(surface)
+
+	surface.pendingRestore = restore
+	surface.pendingPastes = m.pasteLabelsIn(restore)
+	surface.bubbleStartIdx = len(surface.transcript)
+	m.commitLineTo(surface, "")
+	m.commitLineTo(surface, renderUserBubble(displayed, m.width, m.planMode))
+	surface.bubblePending = true
+	surface.turnDiscarded = false
+	surface.running = true
+	surface.runStart = time.Now()
+	surface.elapsed = 0
+	surface.turnTokens = 0
+
+	if submit != nil {
+		submit(sent, raw)
+	}
+	if surface == &m.mainSurface {
+		m.syncMainSurfaceLegacy()
+	}
 	return tea.Batch(m.spinner.Tick, elapsedTick())
+}
+
+func (m *chatTUI) startSideTurn(sent, displayed, restore string) tea.Cmd {
+	return m.startTurnFor(m.conversation(tuiSurfaceSide), sent, displayed, restore, sent, func(sent, _ string) {
+		if m.ctrl != nil {
+			m.ctrl.SubmitSide(sent)
+		}
+	})
 }
 
 // confirmBubbleSent marks the already-echoed user bubble as really sent once a
 // turn's first response packet arrives, so Esc no longer un-sends it (it cancels
 // the stream instead). Also called defensively at turn end. A no-op once confirmed.
 func (m *chatTUI) confirmBubbleSent() {
-	if !m.bubblePending {
+	m.syncMainLegacyToSurface()
+	m.confirmBubbleSentFor(m.conversation(tuiSurfaceMain))
+	m.syncMainSurfaceLegacy()
+}
+
+func (m *chatTUI) confirmBubbleSentFor(surface *conversationSurface) {
+	if !surface.bubblePending {
 		return
 	}
-	m.bubblePending = false
-	m.pendingRestore = ""
+	surface.bubblePending = false
+	surface.pendingRestore = ""
 }
 
 // unsendPending "un-sends" the in-flight turn while the server hasn't replied yet
@@ -3273,14 +3811,17 @@ func (m *chatTUI) confirmBubbleSent() {
 // discarded so its already-buffered events reach nothing. Once a packet has arrived
 // the bubble is confirmed and this path isn't taken (Esc cancels normally instead).
 func (m *chatTUI) unsendPending() {
-	m.input.SetValue(m.pendingRestore)
+	m.syncMainLegacyToSurface()
+	surface := m.conversation(tuiSurfaceMain)
+	m.input.SetValue(surface.pendingRestore)
 	m.growInputToFit()
-	m.transcript = m.transcript[:m.bubbleStartIdx]
-	m.transcriptDirty = true
-	m.bubblePending = false
-	m.pendingRestore = ""
-	m.pendingPastes = nil
-	m.turnDiscarded = true
+	surface.transcript = surface.transcript[:surface.bubbleStartIdx]
+	m.markSurfaceDirty(surface)
+	surface.bubblePending = false
+	surface.pendingRestore = ""
+	surface.pendingPastes = nil
+	surface.turnDiscarded = true
+	m.syncMainSurfaceLegacy()
 	m.ctrl.Cancel()
 }
 
@@ -3290,223 +3831,91 @@ func (m *chatTUI) unsendPending() {
 // preserving order. Switching on the event Kind replaces the old prefix-sniffing
 // of a flattened byte stream: the structure is now explicit.
 func (m *chatTUI) ingestEvent(e event.Event) {
-	if e.Kind == event.Retrying {
-		m.retryAttempt = e.RetryAttempt
-		m.retryMax = e.RetryMax
+	m.markMainAttention(e)
+	m.syncMainLegacyToSurface()
+	m.ingestEventFor(m.conversation(tuiSurfaceMain), e)
+}
+
+func (m *chatTUI) markMainAttention(e event.Event) {
+	if m.surface != tuiSurfaceSide {
 		return
-	}
-	// Any other event means the connection got past the retry window (or the turn
-	// ended), so the transient "retrying" indicator clears.
-	m.retryAttempt = 0
-	m.retryMax = 0
-	if m.turnDiscarded {
-		// The turn was un-sent (Esc before any packet); swallow whatever was already
-		// buffered for it until it settles, so nothing lands in scrollback.
-		if e.Kind == event.TurnDone {
-			m.turnDiscarded = false
-			m.state = tuiIdle
-		}
-		return
-	}
-	// The first packet of any kind means the server replied — confirm the send so
-	// Esc cancels the stream instead of un-sending. TurnStarted is local (emitted
-	// before the request) and TurnDone is handled in its own case.
-	if e.Kind != event.TurnStarted && e.Kind != event.TurnDone {
-		m.confirmBubbleSent()
 	}
 	switch e.Kind {
-	case event.Reasoning:
-		if m.nativeScrollback {
-			if !m.reasoningNative {
-				m.thinkStart = time.Now()
-				m.reasoningNative = true
-			}
-			m.streamReasoning(e.Text)
-			break
-		}
-		if m.reasoningLineIdx < 0 {
-			// Show the marker plus a live text block the moment thinking starts; the
-			// text streams in below it and the block collapses to "thought for Ns"
-			// when it closes (kept expanded only in verbose mode).
-			m.commitSpacer()
-			m.thinkStart = time.Now()
-			m.reasoningLineIdx = len(m.transcript)
-			m.commitLine(dim("  ▎ " + i18n.M.ChatThinking))
-			m.reasoningTextIdx = len(m.transcript)
-			m.commitLine("")
-			m.reasoningView = m.reasoningView[:0]
-		}
-		m.streamReasoning(e.Text)
-
-	case event.Text:
-		m.commitReasoning() // reasoning ends as the answer begins
-		m.pending.WriteString(e.Text)
-		m.streamAnswer()
-
-	case event.Message:
-		// The answer stream is complete — freeze reasoning + the markdown answer.
-		m.commitReasoning()
-		m.commitPending()
-
-	case event.ToolDispatch:
-		// The early (partial) dispatch only carries the name — the full dispatch
-		// with args prints the line. The running spinner covers the gap meanwhile.
-		if e.Tool.Partial {
-			break
-		}
-		m.finalizeStreamed()
-		switch e.Tool.Name {
-		case "todo_write":
-			// The result decides whether this list becomes canonical; dispatch only
-			// means the model asked for an update.
-		case planApprovalTool:
-			// No longer a tool, but guard anyway: the plan is the assistant's reply.
-		default:
-			m.commitSpacer()
-			if block := diffBlock(e.Tool.Name, e.Tool.Args, e.Tool.FileDiff, m.width, m.diffMaxLines); block != nil {
-				for _, ln := range block {
-					m.commitLine(ln)
-				}
-				break
-			}
-			m.commitLine(toolCard(e.Tool.Name, e.Tool.Args, m.width))
-			m.beginToolRunning(e.Tool.ID)
-		}
-
-	case event.ToolProgress:
-		m.streamToolOutput(e.Tool.ID, e.Tool.Output)
-
-	case event.ToolResult:
-		// A successful result is silent (it only feeds the model); a blocked/failed
-		// call surfaces a red "⏺ Verb ⊘ <reason>" card. A live-output block (bash)
-		// collapses to a one-line "⎿ N lines" summary first. Pass the final
-		// output so collapseToolOutput has a last-resort source for the line
-		// count when the live state was already reset by a back-to-back tool.
-		m.collapseToolOutput(e.Tool.ID, e.Tool.Output)
-		if e.Tool.Name == "todo_write" && e.Tool.Err == "" {
-			m.todoArgs = e.Tool.Args
-		}
-		if e.Tool.Err != "" {
-			m.finalizeStreamed()
-			m.commitLine("  " + red("●") + " " + bold(toolDisplayName(e.Tool.Name)) + " " + red("⊘ "+e.Tool.Err))
-		}
-
-	case event.Usage:
-		if e.Usage != nil {
-			m.turnTokens += e.Usage.CompletionTokens
-		}
-		if line := agent.FormatUsageLine(e.Usage, e.Pricing, e.CacheDiagnostics); line != "" {
-			m.finalizeStreamed()
-			m.commitLine(line)
-		}
-
 	case event.Notice:
-		glyph := "·"
-		if e.Level == event.LevelWarn {
-			glyph = "!"
-		}
-		m.finalizeStreamed()
-		m.commitLine(fmt.Sprintf("  %s %s", glyph, e.Text))
-
-	case event.GuardianAssessment:
-		m.finalizeStreamed()
-		g := e.Guardian
-		line := fmt.Sprintf("Guardian %s · %s", g.Outcome, g.Tool)
-		if g.Subject != "" {
-			line += " · " + truncateSubject(g.Subject, m.width)
-		}
-		if g.RiskLevel != "" {
-			line += " · risk=" + g.RiskLevel
-		}
-		if g.UserAuthorization != "" {
-			line += " · authorization=" + g.UserAuthorization
-		}
-		if g.Rationale != "" {
-			line += " · " + g.Rationale
-		}
-		if g.Outcome == "deny" {
-			m.commitLine("  ! " + line)
-		} else {
-			m.commitLine("  · " + line)
-		}
-
-	case event.CompactionStarted:
-		m.finalizeStreamed()
-		m.commitLine(dim("  ⋯ " + i18n.M.CompactionWorking))
-
-	case event.CompactionDone:
-		// An aborted pass carries no summary; the accompanying Notice (auto) or
-		// compactDoneMsg error (manual) explains why, so don't draw an empty card.
-		if e.Compaction.Summary == "" {
-			break
-		}
-		m.finalizeStreamed()
-		for _, ln := range compactionCardLines(e.Compaction) {
-			m.commitLine(ln)
-		}
-
-	case event.Phase:
-		m.finalizeStreamed()
-		m.commitLine(fmt.Sprintf("[%s]", e.Text))
-
-	case event.ApprovalRequest:
-		// The controller's run goroutine is now blocked inside the gate awaiting
-		// this decision; the banner shows it in View and key input answers it via
-		// ctrl.Approve. At most one prompt is outstanding (the controller
-		// serialises them), so a plain field holds the current one.
-		a := e.Approval
-		m.pendingApproval = &a
-
-	case event.AskRequest:
-		// The `ask` tool raised a question card; the run goroutine blocks until
-		// ctrl.AnswerQuestion resolves it. Keys drive the card while it's set.
-		m.finalizeStreamed()
-		m.chooser = newChooser(e.Ask)
-
-	case event.MCPSurfaceReady:
-		if m.ctrl != nil {
-			m.host = m.ctrl.Host()
-		}
-		m.refreshMCPManager()
-
+		m.mainNoticePending = true
 	case event.TurnDone:
-		// The turn settled — freeze anything still streaming, surface a real error,
-		// and gate a plan-mode proposal on the user's approval. Autosave already
-		// happened in Controller so every frontend shares the same activity-time
-		// semantics.
-		m.commitReasoning()
-		m.commitPending()
-		// The bubble was echoed on Enter and an un-sent turn is swallowed above
-		// (turnDiscarded), so any turn reaching here keeps its bubble in scrollback;
-		// just clear the un-sendable flag.
-		m.confirmBubbleSent()
-		m.state = tuiIdle
-		m.queueEditCursor = -1
-		m.queueEditDraft = ""
-		m.clearSubmittedPastes()
-		if e.Err != nil && e.Err.Error() != "" && !strings.Contains(e.Err.Error(), "context canceled") {
-			m.commitLine(wrapForViewport(i18n.M.ErrorPrefix+" "+e.Err.Error(), m.width, activeCLITheme.warn))
-		}
-		// Plan-mode approval is now driven by the controller (it emits an
-		// ApprovalRequest when a plan-mode turn produces a proposal), so there's
-		// nothing to detect here.
+		m.mainDonePending = true
 	}
 }
 
 // finalizeStreamed freezes any in-progress reasoning + answer into scrollback so
 // a following event line lands after them, preserving chronological order.
 func (m *chatTUI) finalizeStreamed() {
-	m.collapseToolOutput(m.toolStreamID, "")
-	m.commitReasoning()
-	m.commitPending()
+	m.syncMainLegacyToSurface()
+	m.finalizeStreamedFor(m.conversation(tuiSurfaceMain))
+	m.syncMainSurfaceLegacy()
+}
+
+func (m *chatTUI) finalizeStreamedFor(surface *conversationSurface) {
+	m.collapseToolOutputFor(surface, surface.toolStreamID, "")
+	m.commitReasoningFor(surface)
+	m.commitPendingFor(surface)
 }
 
 func waitForAgentEvent(ch chan event.Event) tea.Cmd {
 	return func() tea.Msg { return agentEventMsg(<-ch) }
 }
 
+func waitForSideEvent(ch chan event.Event, release <-chan struct{}, generation int) tea.Cmd {
+	return func() tea.Msg {
+		select {
+		case e := <-ch:
+			return sideEventMsg{generation: generation, event: e}
+		case <-release:
+			return sideWaitReleaseMsg{generation: generation}
+		}
+	}
+}
+
+func (m *chatTUI) scheduleSideEventWait(cmds *[]tea.Cmd) {
+	if m.sideEventCh == nil || m.sideEventWait {
+		return
+	}
+	m.sideReleaseCh = make(chan struct{})
+	m.sideEventWait = true
+	*cmds = append(*cmds, waitForSideEvent(m.sideEventCh, m.sideReleaseCh, m.sideGeneration))
+}
+
+func (m *chatTUI) releaseSideEventWait() {
+	if !m.sideEventWait {
+		return
+	}
+	if m.sideReleaseCh != nil {
+		close(m.sideReleaseCh)
+		m.sideReleaseCh = nil
+	}
+	m.sideEventWait = false
+}
+
+func (m *chatTUI) drainSideEvents() {
+	if m.sideEventCh == nil {
+		return
+	}
+	for {
+		select {
+		case <-m.sideEventCh:
+		default:
+			return
+		}
+	}
+}
+
 func elapsedTick() tea.Cmd {
 	return tea.Tick(time.Second, func(_ time.Time) tea.Msg { return elapsedTickMsg{} })
+}
+
+func isBtwCommand(input string) bool {
+	return strings.TrimSpace(strings.SplitN(input, " ", 2)[0]) == "/btw"
 }
 
 // runSlashCommand handles "/<cmd> <args>" input. Local commands queue their
@@ -3519,6 +3928,8 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	}
 
 	switch cmd {
+	case "/btw":
+		return m.runBtwCommand(input)
 	case "/compact":
 		m.echoLocalCommand(input)
 		// Compaction makes a (network) summarizer call; run it off the Update loop
@@ -3704,6 +4115,43 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.notice(fmt.Sprintf("%s: %s", i18n.M.SlashUnknown, cmd))
 	}
 	return nil
+}
+
+func (m *chatTUI) runBtwCommand(input string) tea.Cmd {
+	if m.surface == tuiSurfaceSide {
+		m.commitLineTo(m.conversation(tuiSurfaceSide), dim("  · /btw is only available from the main conversation"))
+		return nil
+	}
+	args := strings.TrimSpace(strings.TrimPrefix(input, "/btw"))
+	m.sideGeneration++
+	m.drainSideEvents()
+	if err := m.ctrl.StartSide(""); err != nil {
+		m.echoLocalCommand(input)
+		if errors.Is(err, control.ErrSideUnavailable) {
+			m.notice("btw: send a main-thread message before starting a side conversation")
+		} else {
+			m.notice("btw: " + err.Error())
+		}
+		return nil
+	}
+	m.surface = tuiSurfaceSide
+	m.mainNoticePending = false
+	m.mainDonePending = false
+	m.conversation(tuiSurfaceSide).resetTranscript()
+	m.forceGotoBottom = true
+	if args == "" {
+		m.commitLineTo(m.conversation(tuiSurfaceSide), dim("  · side conversation started"))
+	}
+	if args == "" {
+		return nil
+	}
+	cmd := m.startSideTurn(args, args, args)
+	if m.sideEventCh == nil || m.sideEventWait {
+		return cmd
+	}
+	m.sideEventWait = true
+	m.sideReleaseCh = make(chan struct{})
+	return tea.Batch(cmd, waitForSideEvent(m.sideEventCh, m.sideReleaseCh, m.sideGeneration))
 }
 
 func (m *chatTUI) runGoalSubcommand(input string) tea.Cmd {

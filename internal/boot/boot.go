@@ -77,12 +77,13 @@ func agentKeepPolicy(keep []string) agent.KeepPolicy {
 // MaxSteps 0 uses the config/default. RequireKey forces the executor's API key to
 // be present (run/serve pass true so a missing key fails fast; chat/desktop pass
 // false so the UI is reachable before a key is set). Sink receives the agent's
-// typed event stream.
+// typed event stream. SideSink receives events from ephemeral side conversations.
 type Options struct {
 	Model      string
 	MaxSteps   int
 	RequireKey bool
 	Sink       event.Sink
+	SideSink   event.Sink
 	// EffortOverride is a session-local reasoning effort override. Nil means use
 	// the resolved provider config; a non-nil empty string means provider default.
 	EffortOverride *string
@@ -190,6 +191,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// shares this synchronized sink. The job manager is session-scoped — its jobs
 	// outlive a turn and are cancelled by Controller.Close.
 	sink := event.Sync(opts.Sink)
+	sideSink := event.Sync(opts.SideSink)
 
 	planModePolicy := planmode.Policy{
 		AllowedTools:     cfg.Agent.PlanModeAllowedTools,
@@ -1042,7 +1044,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if cfg.MemoryCompilerEnabled() {
 		memCompiler = memorycompiler.New(config.MemoryCompilerDir(root))
 	}
-	executor := agent.New(execProv, reg, execSess, agent.Options{
+	executorOpts := agent.Options{
 		MaxSteps:                           maxSteps,
 		Temperature:                        cfg.Agent.Temperature,
 		Pricing:                            entry.Price,
@@ -1066,7 +1068,18 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		MemoryCompiler:                     memCompiler,
 		MemoryCompilerVerbosity:            cfg.MemoryCompilerVerbosity(),
 		UseMemoryCompilerLLMClassification: strings.TrimSpace(os.Getenv("REASONIX_MEMORY_COMPILER_LLM_CLASSIFICATION")) == "true",
-	}, sink)
+	}
+	executor := agent.New(execProv, reg, execSess, executorOpts, sink)
+	sideFactory := func(_ context.Context, sess *agent.Session, sink event.Sink) (*agent.Agent, error) {
+		sideOpts := executorOpts
+		sideOpts.Hooks = nil
+		sideOpts.Jobs = nil
+		sideOpts.ArchiveDir = ""
+		sideOpts.MemoryCompiler = nil
+		sideOpts.UseMemoryCompilerLLMClassification = false
+		child := agent.New(execProv, reg, sess, sideOpts, sink)
+		return child, nil
+	}
 
 	var runner agent.Runner = executor
 	label := entry.Model
@@ -1124,6 +1137,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Runner:                 runner,
 		Executor:               executor,
 		Sink:                   sink,
+		SideFactory:            sideFactory,
+		SideSink:               sideSink,
 		Policy:                 policy,
 		Label:                  label,
 		ModelRef:               modelRef,

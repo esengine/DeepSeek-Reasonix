@@ -1,8 +1,8 @@
 // Package control is the transport-agnostic session driver. A Controller owns
 // the agent run loop and session lifecycle, takes commands (Send/Cancel/Approve/
-// SetPlanMode/Compact/NewSession/…), and emits everything that happens —
-// reasoning, tool calls, approvals, turn completion — as a typed event stream to
-// a single event.Sink.
+// SetPlanMode/Compact/NewSession/…), and emits foreground reasoning, tool
+// calls, approvals, and turn completion as a typed event stream to event.Sink.
+// Ephemeral side-conversation events use a separate side sink.
 //
 // The point is one orchestration layer behind every frontend: a terminal TUI, a
 // desktop webview, or an HTTP/SSE server each drive the Controller identically
@@ -81,6 +81,8 @@ type Controller struct {
 	guardianSess *guardian.Session // nil when guardian is disabled
 	guardianPath string            // persisted guardian session file ("" when disabled)
 	sink         event.Sink
+	sideFactory  SideFactory
+	sideSink     event.Sink
 	policy       permission.Policy
 
 	label        string
@@ -208,6 +210,8 @@ type Controller struct {
 	turn int
 
 	displayRecorder func(content, display string)
+
+	side *sideState
 }
 
 type approvalReply struct {
@@ -326,6 +330,8 @@ type Options struct {
 	Executor      *agent.Agent
 	Guardian      *guardian.Session
 	Sink          event.Sink
+	SideFactory   SideFactory
+	SideSink      event.Sink
 	Policy        permission.Policy
 	Label         string
 	ModelRef      string
@@ -401,11 +407,15 @@ type Options struct {
 	ApprovalTimeout time.Duration
 }
 
-// New builds a Controller. A nil Sink is replaced with event.Discard.
+// New builds a Controller. A nil Sink or SideSink is replaced with event.Discard.
 func New(opts Options) *Controller {
 	sink := opts.Sink
 	if nilutil.IsNil(sink) {
 		sink = event.Discard
+	}
+	sideSink := opts.SideSink
+	if nilutil.IsNil(sideSink) {
+		sideSink = event.Discard
 	}
 	classifier := opts.Classifier
 	if nilutil.IsNil(classifier) {
@@ -421,6 +431,8 @@ func New(opts Options) *Controller {
 		guardianSess:                      opts.Guardian,
 		guardianPath:                      guardian.PathFor(opts.SessionPath),
 		sink:                              sink,
+		sideFactory:                       opts.SideFactory,
+		sideSink:                          sideSink,
 		policy:                            opts.Policy,
 		label:                             opts.Label,
 		modelRef:                          opts.ModelRef,
@@ -4004,6 +4016,7 @@ func (c *Controller) close(fireSessionEnd bool, jobsMode closeJobsMode) {
 	// controller; make teardown idempotent so a duplicate Close cannot re-fire
 	// SessionEnd hooks or re-run cleanup. The first caller's jobsMode wins.
 	c.closeOnce.Do(func() {
+		c.ReturnFromSide()
 		c.mu.Lock()
 		started := c.startedOnce
 		c.mu.Unlock()

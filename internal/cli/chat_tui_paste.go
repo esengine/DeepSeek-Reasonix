@@ -88,12 +88,12 @@ func (m *chatTUI) pasteLabelsIn(s string) []string {
 	return labels
 }
 
-func (m *chatTUI) clearSubmittedPastes() {
-	if len(m.pendingPastes) == 0 {
+func (m *chatTUI) clearSubmittedPastesFor(surface *conversationSurface) {
+	if len(surface.pendingPastes) == 0 {
 		return
 	}
-	submitted := make(map[string]bool, len(m.pendingPastes))
-	for _, label := range m.pendingPastes {
+	submitted := make(map[string]bool, len(surface.pendingPastes))
+	for _, label := range surface.pendingPastes {
 		submitted[label] = true
 	}
 	kept := m.pastedBlocks[:0]
@@ -103,7 +103,7 @@ func (m *chatTUI) clearSubmittedPastes() {
 		}
 	}
 	m.pastedBlocks = kept
-	m.pendingPastes = nil
+	surface.pendingPastes = nil
 }
 
 func pasteClipboardImage() tea.Cmd {

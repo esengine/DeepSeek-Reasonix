@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"reasonix/internal/event"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"reasonix/internal/planmode"
@@ -101,6 +102,18 @@ func bashCommandArgs(t *testing.T, cmd string) json.RawMessage {
 	args, err := json.Marshal(struct {
 		Command string `json:"command"`
 	}{Command: cmd})
+	if err != nil {
+		t.Fatalf("marshal bash args: %v", err)
+	}
+	return args
+}
+
+func bashBackgroundArgs(t *testing.T, cmd string) json.RawMessage {
+	t.Helper()
+	args, err := json.Marshal(struct {
+		Command         string `json:"command"`
+		RunInBackground bool   `json:"run_in_background"`
+	}{Command: cmd, RunInBackground: true})
 	if err != nil {
 		t.Fatalf("marshal bash args: %v", err)
 	}
@@ -674,6 +687,100 @@ func TestPlanModeBash_BashToolIntegration(t *testing.T) {
 	})
 	if !strings.HasPrefix(preserveResult.output, "blocked:") {
 		t.Errorf("process-preserving bash should be blocked in plan mode: %s", preserveResult.output)
+	}
+}
+
+func TestSideReadOnlyBlocksWritersWithSideMessage(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "read_only_tool", readOnly: true})
+	reg.Add(fakeTool{name: "writer_tool", readOnly: false})
+
+	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
+	a.SetSideReadOnly(true)
+
+	ro := a.executeOne(context.Background(), provider.ToolCall{Name: "read_only_tool"})
+	if !strings.Contains(ro.output, "done") {
+		t.Errorf("read-only tool in side mode should still run: %q", ro.output)
+	}
+
+	wr := a.executeOne(context.Background(), provider.ToolCall{Name: "writer_tool"})
+	if !strings.HasPrefix(wr.output, "blocked:") {
+		t.Fatalf("writer tool in side mode should return a blocked result, got: %q", wr.output)
+	}
+	if strings.Contains(wr.output, "plan mode") {
+		t.Fatalf("side block text must not mention plan mode: %q", wr.output)
+	}
+	if !strings.Contains(wr.output, "side read-only mode") {
+		t.Fatalf("side block text should mention side read-only mode: %q", wr.output)
+	}
+}
+
+func TestSideReadOnlyBlocksUntrustedReadOnlyTool(t *testing.T) {
+	var calls int32
+	reg := tool.NewRegistry()
+	reg.Add(untrustedReadOnlyTool{fakeTool{name: "mcp__srv__query", readOnly: true, calls: &calls}})
+
+	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
+	a.SetSideReadOnly(true)
+
+	out := a.executeOne(context.Background(), provider.ToolCall{Name: "mcp__srv__query"})
+	if !strings.HasPrefix(out.output, "blocked:") {
+		t.Fatalf("untrusted read-only MCP tool should fail closed in side mode, got: %q", out.output)
+	}
+	if atomic.LoadInt32(&calls) != 0 {
+		t.Fatalf("untrusted read-only MCP tool executed in side mode")
+	}
+}
+
+func TestSideReadOnlyBashUsesReadOnlyClassifier(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "bash", readOnly: false})
+
+	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
+	a.SetSideReadOnly(true)
+
+	safe := a.executeOne(context.Background(), provider.ToolCall{
+		Name:      "bash",
+		Arguments: `{"command":"git status"}`,
+	})
+	if strings.HasPrefix(safe.output, "blocked:") {
+		t.Fatalf("git status should not be blocked in side read-only mode: %s", safe.output)
+	}
+
+	unsafe := a.executeOne(context.Background(), provider.ToolCall{
+		Name:      "bash",
+		Arguments: `{"command":"git status && rm file.go"}`,
+	})
+	if !strings.HasPrefix(unsafe.output, "blocked:") {
+		t.Fatalf("chained command should be blocked in side read-only mode: %s", unsafe.output)
+	}
+	if strings.Contains(unsafe.output, "plan mode") {
+		t.Fatalf("side bash block text must not mention plan mode: %q", unsafe.output)
+	}
+
+	background := a.executeOne(context.Background(), provider.ToolCall{
+		Name:      "bash",
+		Arguments: string(bashBackgroundArgs(t, "git status")),
+	})
+	if !strings.HasPrefix(background.output, "blocked:") {
+		t.Fatalf("background bash should be blocked in side read-only mode: %s", background.output)
+	}
+	if !strings.Contains(background.output, "run_in_background") {
+		t.Fatalf("side background block should mention run_in_background: %q", background.output)
+	}
+}
+
+func TestPlanModeMessagesRemainPlanSpecific(t *testing.T) {
+	a := &Agent{}
+	blocked, msg := a.planModeBlocked("writer_tool", false, false, planmode.PlanSafetyUnknown, nil)
+	if !blocked {
+		t.Fatal("plan mode should still block writer tools")
+	}
+	if !strings.Contains(msg, "plan mode") {
+		t.Fatalf("plan block text should still mention plan mode: %q", msg)
+	}
+	if strings.Contains(msg, "side read-only mode") {
+		t.Fatalf("plan block text should not mention side mode: %q", msg)
 	}
 }
 

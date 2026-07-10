@@ -69,6 +69,16 @@ type TurnControl interface {
 	ToolResult(toolID string) *ToolResultData
 }
 
+// SideControl covers the ephemeral `/btw` side conversation lifecycle. Side
+// sessions are in-memory only and do not participate in foreground persistence
+// or branch/fork history.
+type SideControl interface {
+	StartSide(input string) error
+	SubmitSide(input string)
+	ReturnFromSide()
+	SideState() SideState
+}
+
 // Approvals covers tool-approval and ask prompts plus the runtime approval
 // posture (ask/auto/yolo). It mirrors the approvalManager surface.
 type Approvals interface {
@@ -209,6 +219,7 @@ type Settings interface {
 type SessionAPI interface {
 	Lifecycle
 	TurnControl
+	SideControl
 	Approvals
 	Goals
 	SessionHistory
@@ -226,6 +237,7 @@ type SessionAPI interface {
 var (
 	_ Lifecycle          = (*Controller)(nil)
 	_ TurnControl        = (*Controller)(nil)
+	_ SideControl        = (*Controller)(nil)
 	_ Approvals          = (*Controller)(nil)
 	_ Goals              = (*Controller)(nil)
 	_ SessionHistory     = (*Controller)(nil)

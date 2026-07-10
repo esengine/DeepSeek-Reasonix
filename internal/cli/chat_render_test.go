@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 
 	"reasonix/internal/event"
+	"reasonix/internal/provider"
 )
 
 // newTestChatTUI builds a chatTUI with just the pieces the streaming/commit and
@@ -16,9 +17,8 @@ func newTestChatTUI() chatTUI {
 	ti := textarea.New()
 	configureChatTextarea(&ti)
 	ti.SetWidth(80)
-	shellIdx := map[string]int{}
-	shellOut := map[string]string{}
-	shellExp := map[string]bool{}
+	mainSurface := newConversationSurface(mainSurfaceCaps(), false)
+	sideSurface := newConversationSurface(sideSurfaceCaps(), false)
 	return chatTUI{
 		input:                ti,
 		width:                80,
@@ -26,18 +26,20 @@ func newTestChatTUI() chatTUI {
 		submittedInputCursor: -1,
 		queueEditCursor:      -1,
 		nextPasteID:          1,
-		reasoningLineIdx:     -1,
-		reasoningTextIdx:     -1,
-		answerIdx:            -1,
-		toolStreamIdx:        -1,
-		reasoning:            &strings.Builder{},
-		pending:              &strings.Builder{},
+		reasoningLineIdx:     mainSurface.reasoningLineIdx,
+		reasoningTextIdx:     mainSurface.reasoningTextIdx,
+		answerIdx:            mainSurface.answerIdx,
+		toolStreamIdx:        mainSurface.toolStreamIdx,
+		reasoning:            mainSurface.reasoning,
+		pending:              mainSurface.pending,
 		pendingCommit:        &commit,
 		renderer:             newMarkdownRenderer(80),
-		shellOutputs:         shellOut,
-		shellExpanded:        shellExp,
-		shellTranscriptIdx:   shellIdx,
-		toolLineCountByID:    map[string]int{},
+		shellOutputs:         mainSurface.shellOutputs,
+		shellExpanded:        mainSurface.shellExpanded,
+		shellTranscriptIdx:   mainSurface.shellTranscriptIdx,
+		toolLineCountByID:    mainSurface.toolLineCountByID,
+		mainSurface:          mainSurface,
+		sideSurface:          sideSurface,
 	}
 }
 
@@ -50,6 +52,66 @@ func TestCacheRateLabelKeepsTwoDecimals(t *testing.T) {
 	}
 	if got := cacheRateLabel("avg %s", 1, 0); got != "" {
 		t.Fatalf("cacheRateLabel with zero denominator = %q, want empty", got)
+	}
+}
+
+func TestSurfaceCommitLineWritesOnlySelectedTranscript(t *testing.T) {
+	m := newTestChatTUI()
+
+	m.commitLineTo(m.conversation(tuiSurfaceMain), "main line")
+	m.commitLineTo(m.conversation(tuiSurfaceSide), "side line")
+
+	if got := strings.Join(m.conversation(tuiSurfaceMain).transcript, "\n"); got != "main line" {
+		t.Fatalf("main transcript = %q", got)
+	}
+	if got := strings.Join(m.conversation(tuiSurfaceSide).transcript, "\n"); got != "side line" {
+		t.Fatalf("side transcript = %q", got)
+	}
+}
+
+func TestSideSurfaceUsesMainMarkdownFlushRules(t *testing.T) {
+	m := newTestChatTUI()
+	side := m.conversation(tuiSurfaceSide)
+
+	m.ingestEventFor(side, event.Event{Kind: event.Text, Text: "```go\n"})
+	m.ingestEventFor(side, event.Event{Kind: event.Text, Text: "fmt.Println(1)\n"})
+	if got := strings.Join(side.transcript, "\n"); got != "" {
+		t.Fatalf("open code fence should not flush yet, got %q", got)
+	}
+
+	m.ingestEventFor(side, event.Event{Kind: event.Text, Text: "```\n\n"})
+	if got := strings.Join(side.transcript, "\n"); !strings.Contains(got, "fmt.Println") {
+		t.Fatalf("closed code fence should flush through shared renderer, got %q", got)
+	}
+}
+
+func TestSideSurfaceHandlesMainEventKinds(t *testing.T) {
+	m := newTestChatTUI()
+	side := m.conversation(tuiSurfaceSide)
+
+	events := []event.Event{
+		{Kind: event.Reasoning, Text: "thinking"},
+		{Kind: event.Text, Text: "answer\n\n"},
+		{Kind: event.ToolDispatch, Tool: event.Tool{ID: "shell-1", Name: "bash", Args: `{"command":"echo hi"}`}},
+		{Kind: event.ToolProgress, Tool: event.Tool{ID: "shell-1", Output: "hi\n"}},
+		{Kind: event.ToolResult, Tool: event.Tool{ID: "shell-1", Name: "bash", Output: "hi\n"}},
+		{Kind: event.Usage, Usage: &provider.Usage{CompletionTokens: 7}},
+		{Kind: event.CompactionStarted},
+		{Kind: event.CompactionDone, Compaction: event.Compaction{Summary: "summary"}},
+		{Kind: event.TurnDone},
+	}
+	for _, e := range events {
+		m.ingestEventFor(side, e)
+	}
+
+	joined := strings.Join(side.transcript, "\n")
+	for _, want := range []string{"thought for", "answer", "echo hi", "hi", "summary"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("side transcript missing %q:\n%s", want, joined)
+		}
+	}
+	if side.turnTokens != 7 {
+		t.Fatalf("side turnTokens = %d, want 7", side.turnTokens)
 	}
 }
 

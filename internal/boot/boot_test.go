@@ -135,6 +135,241 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 }
 
+func TestBuildWiresSideFactoryAndSink(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-retrieval-tool-test"
+model = "x"
+`)
+	registerBootRetrievalToolTestProvider()
+	setBootRetrievalToolTestProvider(t, testutil.NewMock("boot-side-test",
+		testutil.Turn{Text: "side reply"},
+	))
+
+	mainEvents := make(chan event.Event, 8)
+	sideEvents := make(chan event.Event, 8)
+	ctrl, err := Build(context.Background(), Options{
+		WorkspaceRoot: dir,
+		Sink:          event.FuncSink(func(e event.Event) { mainEvents <- e }),
+		SideSink:      event.FuncSink(func(e event.Event) { sideEvents <- e }),
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	sess := agent.NewSession(systemMessage(ctrl.History()))
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "main context"})
+	ctrl.Resume(sess, "")
+	for len(mainEvents) > 0 {
+		<-mainEvents
+	}
+
+	if err := ctrl.StartSide("side question"); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+	waitForEventText(t, sideEvents, event.Text, "side reply")
+	waitForEventKind(t, sideEvents, event.TurnDone)
+	select {
+	case e := <-mainEvents:
+		t.Fatalf("side event leaked to main sink: %+v", e)
+	case <-time.After(25 * time.Millisecond):
+	}
+}
+
+func TestBuildSideAgentHasNoBackgroundJobs(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-retrieval-tool-test"
+model = "x"
+`)
+	registerBootRetrievalToolTestProvider()
+	setBootRetrievalToolTestProvider(t, testutil.NewMock("boot-side-test",
+		testutil.Turn{ToolCalls: []provider.ToolCall{{
+			ID:        "bg-1",
+			Name:      "bash",
+			Arguments: `{"command":"echo side","run_in_background":true}`,
+		}}},
+		testutil.Turn{Text: "done"},
+	))
+
+	mainEvents := make(chan event.Event, 8)
+	sideEvents := make(chan event.Event, 8)
+	ctrl, err := Build(context.Background(), Options{
+		WorkspaceRoot: dir,
+		Sink:          event.FuncSink(func(e event.Event) { mainEvents <- e }),
+		SideSink:      event.FuncSink(func(e event.Event) { sideEvents <- e }),
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	sess := agent.NewSession(systemMessage(ctrl.History()))
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "main context"})
+	ctrl.Resume(sess, "")
+	for len(mainEvents) > 0 {
+		<-mainEvents
+	}
+
+	if err := ctrl.StartSide("try background"); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+	waitForEventToolOutput(t, sideEvents, event.ToolResult, "run_in_background")
+	waitForEventKind(t, sideEvents, event.TurnDone)
+	select {
+	case e := <-mainEvents:
+		t.Fatalf("side background job event leaked to main sink: %+v", e)
+	case <-time.After(25 * time.Millisecond):
+	}
+}
+
+func TestBuildSideAgentDisablesPersistence(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+memory_compiler = { enabled = true }
+
+[[providers]]
+name = "test-model"
+kind = "boot-retrieval-tool-test"
+model = "x"
+`)
+	registerBootRetrievalToolTestProvider()
+	setBootRetrievalToolTestProvider(t, testutil.NewMock("boot-side-test",
+		testutil.Turn{Text: "side reply"},
+	))
+
+	mainEvents := make(chan event.Event, 8)
+	sideEvents := make(chan event.Event, 8)
+	ctrl, err := Build(context.Background(), Options{
+		WorkspaceRoot: dir,
+		Sink:          event.FuncSink(func(e event.Event) { mainEvents <- e }),
+		SideSink:      event.FuncSink(func(e event.Event) { sideEvents <- e }),
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	sess := agent.NewSession(systemMessage(ctrl.History()))
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "main context"})
+	ctrl.Resume(sess, "")
+	for len(mainEvents) > 0 {
+		<-mainEvents
+	}
+
+	if err := ctrl.StartSide("fix the side bug"); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+
+	deadline := time.After(500 * time.Millisecond)
+	var seen []event.Event
+	textSeen := false
+	for {
+		select {
+		case e := <-sideEvents:
+			seen = append(seen, e)
+			if e.Kind == event.Text && strings.Contains(e.Text, "side reply") {
+				textSeen = true
+			}
+			if e.Kind == event.TurnDone {
+				if e.Err != nil {
+					t.Fatalf("side turn failed: %v; seen=%+v", e.Err, seen)
+				}
+				if !textSeen {
+					t.Fatalf("side reply missing; seen=%+v", seen)
+				}
+				for _, ev := range seen {
+					if ev.Kind == event.MemoryCompilerStatsEvent {
+						t.Fatalf("side agent emitted memory compiler stats despite side persistence being disabled; seen=%+v", seen)
+					}
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for side turn; seen=%+v", seen)
+		}
+	}
+}
+
+func waitForEventKind(t *testing.T, ch <-chan event.Event, kind event.Kind) event.Event {
+	t.Helper()
+	deadline := time.After(500 * time.Millisecond)
+	var seen []event.Event
+	for {
+		select {
+		case e := <-ch:
+			seen = append(seen, e)
+			if e.Kind == kind {
+				return e
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for event kind %v; seen=%+v", kind, seen)
+		}
+	}
+}
+
+func waitForEventText(t *testing.T, ch <-chan event.Event, kind event.Kind, text string) event.Event {
+	t.Helper()
+	deadline := time.After(500 * time.Millisecond)
+	var seen []event.Event
+	for {
+		select {
+		case e := <-ch:
+			seen = append(seen, e)
+			if e.Kind == kind && strings.Contains(e.Text, text) {
+				return e
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for event kind %v containing %q; seen=%+v", kind, text, seen)
+		}
+	}
+}
+
+func waitForEventToolOutput(t *testing.T, ch <-chan event.Event, kind event.Kind, text string) event.Event {
+	t.Helper()
+	deadline := time.After(500 * time.Millisecond)
+	var seen []event.Event
+	for {
+		select {
+		case e := <-ch:
+			seen = append(seen, e)
+			if e.Kind == kind && strings.Contains(e.Tool.Output, text) {
+				return e
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for event kind %v with tool output containing %q; seen=%+v", kind, text, seen)
+		}
+	}
+}
+
 func TestBuildRegistersUsableHistoryAndMemoryRetrievalTools(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)
