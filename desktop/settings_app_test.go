@@ -1435,3 +1435,25 @@ func TestLoadDesktopUserConfigViewKeepsLegacyBotConfigMigrationInMemory(t *testi
 		t.Fatalf("migration must not rewrite the legacy config, got:\n%s", rawLegacy)
 	}
 }
+
+func TestSetBotSettingsPreservesFeishuOutboundMediaRoots(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.Bot.Feishu.OutboundMediaRoots = []string{root}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save initial config: %v", err)
+	}
+
+	app := NewApp()
+	view := botSettingsView(cfg.Bot)
+	view.QueueCap++
+	if err := app.SetBotSettings(view); err != nil {
+		t.Fatalf("SetBotSettings: %v", err)
+	}
+
+	got := config.LoadForEditWithoutCredentials(config.UserConfigPath())
+	if !reflect.DeepEqual(got.Bot.Feishu.OutboundMediaRoots, []string{root}) {
+		t.Fatalf("outbound media roots = %v, want preserved %q", got.Bot.Feishu.OutboundMediaRoots, root)
+	}
+}

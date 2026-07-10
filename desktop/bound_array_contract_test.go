@@ -23,6 +23,8 @@ func TestBoundArrayPayloadsAreNonNilBeforeStartup(t *testing.T) {
 		{"Commands", app.Commands()},
 		{"Models", app.Models()},
 		{"ListDir", app.ListDir("__missing__")},
+		{"ListDirForTab", app.ListDirForTab("missing", "")},
+		{"SearchFileRefsForTab", app.SearchFileRefsForTab("missing", "file")},
 		{"ListTabs", app.ListTabs()},
 		{"ListProjectTree", app.ListProjectTree()},
 	}

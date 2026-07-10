@@ -11,6 +11,9 @@ const commandPaletteSource = readFileSync(resolve(testDir, "../components/Comman
 const projectTreeSource = readFileSync(resolve(testDir, "../components/ProjectTree.tsx"), "utf8");
 const topicShortcutsSource = readFileSync(resolve(testDir, "../lib/topicShortcuts.ts"), "utf8");
 const transcriptSource = readFileSync(resolve(testDir, "../components/Transcript.tsx"), "utf8");
+const composerSource = readFileSync(resolve(testDir, "../components/Composer.tsx"), "utf8");
+const controllerSource = readFileSync(resolve(testDir, "../lib/useController.ts"), "utf8");
+const bridgeSource = readFileSync(resolve(testDir, "../lib/bridge.ts"), "utf8");
 const layoutStoreSource = readFileSync(resolve(testDir, "../store/layout.ts"), "utf8");
 const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 
@@ -179,24 +182,79 @@ ok(
 );
 
 ok(
-  /const \[rewindCommitting, setRewindCommitting\] = useState\(false\);/.test(appSource) &&
-    /rewindStateRef\.current = null;/.test(appSource) &&
-    /setRewindCommitting\(true\);/.test(appSource),
-  "committing optimistic rewind clears undo state before awaiting the backend",
+  /const \[rewindStatesByTab, setRewindStatesByTab\] = useState<Record<string, RewindState>>\(\{\}\);/.test(appSource) &&
+    /setRewindStateForTab\(sourceTabId, null\);/.test(appSource) &&
+    /setRewindCommittingForTab\(sourceTabId, true\);/.test(appSource),
+  "committing optimistic rewind clears only the source tab before awaiting the backend",
 );
 
 ok(
   /const controllerReady = state\.meta\?\.ready === true && !state\.backendActivationPending;/.test(appSource) &&
-    /if \(!controllerReady\) return;\s*void commitThenSend\(text\)\.catch/.test(appSource) &&
+    /if \(!activeTabId \|\| !controllerReady\) return;\s*void commitThenSend\(activeTabId, text\)\.catch/.test(appSource) &&
     /onPrompt=\{handleTranscriptPrompt\}/.test(appSource) &&
     /submitDisabled=\{!controllerReady\}/.test(appSource),
   "welcome prompts and composer submit share the controller readiness gate",
 );
 
 ok(
+  /pendingPlanRevisionsByTab\[activeTabId\]/.test(appSource) &&
+    /commitThenSendRef\.current\(activeTabId, text\)/.test(appSource) &&
+    !/const \[pendingPlanRevision, setPendingPlanRevision\]/.test(appSource),
+  "queued plan revisions stay scoped to their source tab",
+);
+
+ok(
+  /commitThenSendRef\.current\(sourceTabId, trimmed, submitText\.trim\(\)\)/.test(appSource) &&
+    /sendToTab\(sourceTabId, displayText, submitText\)/.test(appSource) &&
+    /onSteer=\{handleSteer\}/.test(appSource) &&
+    /composerInsertRequestsByTab\[activeTabId\]/.test(appSource) &&
+    /consumedInsertIdByDraftRef\.current\[draftKey\]/.test(composerSource),
+  "composer sends and steers carry an explicit source tab through async preparation",
+);
+
+ok(
+  appSource.includes('key={`${activeTabId ?? ""}:${state.approval.id}`}') &&
+    appSource.includes('key={`${activeTabId ?? ""}:${state.ask.id}`}') &&
+    /planRevisionInsertRequest\.tabId === activeTabId/.test(appSource) &&
+    /planRevisionInsertRequest\.approvalId === state\.approval\?\.id/.test(appSource),
+  "approval and ask local state is scoped by tab plus prompt identity",
+);
+
+ok(
+  /app\.NewSessionForTab\(tabId\)/.test(controllerSource) &&
+    /app\.ClearSessionForTab\(tabId\)/.test(controllerSource) &&
+    /app\.CompactForTab\(tabId\)/.test(controllerSource) &&
+    /app\.RewindForTab\(sourceTabId, turn, actionScope\)/.test(controllerSource) &&
+    /app\.ForkForTab\(sourceTabId, turn\)/.test(controllerSource) &&
+    /app\.SummarizeFromForTab\(sourceTabId, turn\)/.test(controllerSource) &&
+    /NewSessionForTab\(tabID: string\)/.test(bridgeSource) &&
+    /CompactForTab\(tabID: string\)/.test(bridgeSource) &&
+    /RewindForTab\(tabID: string, turn: number, scope: string\)/.test(bridgeSource),
+  "session-changing controller actions use explicit tab-scoped Wails bindings",
+);
+
+ok(
   /const transcriptHydrating = state\.hydrating && !state\.hydrateHistoryLoaded;/.test(appSource) &&
     /hydrating=\{transcriptHydrating\}/.test(appSource),
   "Welcome is suppressed only until transcript history has loaded",
+);
+
+ok(
+  /const \[workspaceControllerEpoch, setWorkspaceControllerEpoch\] = useState\(0\);/.test(appSource) &&
+    /const workspaceScopeKey = \[/.test(appSource) &&
+    /activeTab\?\.sessionPath/.test(appSource) &&
+    /state\.meta\?\.sessionPath/.test(appSource) &&
+    /state\.meta\?\.cwd/.test(appSource) &&
+    /state\.sessionGen/.test(appSource) &&
+    /workspaceControllerEpoch/.test(appSource) &&
+    Array.from(appSource.matchAll(/workspaceScopeKey=\{workspaceScopeKey\}/g)).length === 3,
+  "workspace file consumers receive a session and controller scoped identity",
+);
+
+ok(
+  /const unsubReady = onReady\(\(readyTabId\) => \{[\s\S]*?setWorkspaceControllerEpoch[\s\S]*?\n    \}\);/.test(appSource) &&
+    /const unsubRebuilt = onRuntimeRebuilt\(\(rebuiltTabId\) => \{[\s\S]*?setWorkspaceControllerEpoch[\s\S]*?\n    \}\);/.test(appSource),
+  "controller ready and rebuilt events invalidate active workspace file scopes",
 );
 
 const navigationBlock = appSource.match(/const runNavigationRequest = useCallback\([\s\S]*?\n  \}, \[[^\]]*singleSurfaceLayout[^\]]*\]\);/)?.[0] ?? "";
@@ -287,6 +345,13 @@ ok(
     finalDeclaration(".app--windows-frameless:not(.app--workbench):not(.app--creation) .app-chrome--native-tabs .app-chrome__drag-rail", "right")?.includes("--windows-window-controls-safe") &&
     finalDeclaration(".app--windows .app-chrome--native-tabs .tabbar", "--wails-draggable") === "no-drag",
   "Windows classic chrome keeps a draggable rail while tabs remain clickable",
+);
+
+ok(
+  finalDeclaration(".sidebar", "--wails-draggable") === "drag" &&
+    finalDeclaration(".app--windows .sidebar", "--wails-draggable") === "no-drag" &&
+    finalDeclaration(".sidebar-resizer", "--wails-draggable") === "no-drag",
+  "Windows sidebar avoids native window drag without changing other platforms",
 );
 
 for (const selector of [

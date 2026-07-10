@@ -103,6 +103,7 @@ func (s *heartbeatExecuteTaskCtrlStub) RuntimeStatus() control.RuntimeStatus {
 
 func (s *heartbeatExecuteTaskCtrlStub) SubmitUserTurn(input, display string) {
 	s.submitted = append(s.submitted, input)
+	s.status.Running = true
 }
 
 func (s *heartbeatExecuteTaskCtrlStub) SetToolApprovalMode(mode string) {

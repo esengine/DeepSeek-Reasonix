@@ -451,6 +451,9 @@ func trashSessionArtifactsBeforeMove(dir, sessionPath, key string, beforeMove fu
 		return err
 	}
 	defer guard.Release()
+	if err := invalidateTopicDirMarkers(dir); err != nil {
+		return err
+	}
 	itemDir := target.itemDir
 	if target.allocateUnique {
 		itemDir, err = reserveUniqueSessionTrashItemDir(dir, key)

@@ -2029,6 +2029,49 @@ func TestListSessionOrderIncludesEmptySessionsWithoutPreviewScan(t *testing.T) {
 	}
 }
 
+func TestSessionListingsExposeRecoveryMetadata(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "recovered.jsonl")
+	s := NewSession("")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "continued recovery"})
+	if err := s.Save(path); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta: ok=%v err=%v", ok, err)
+	}
+	meta.Recovered = true
+	meta.RecoveryDigest = strings.Repeat("a", 64)
+	meta.ParentID = "parent"
+	if err := SaveBranchMetaPreserveUpdated(path, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	ordered, err := ListSessionOrder(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ordered) != 1 {
+		t.Fatalf("ListSessionOrder len = %d, want 1", len(ordered))
+	}
+	if ordered[0].RecoveryDigest != meta.RecoveryDigest || ordered[0].ParentID != meta.ParentID {
+		t.Fatalf("ordered recovery metadata = digest:%q parent:%q, want digest:%q parent:%q", ordered[0].RecoveryDigest, ordered[0].ParentID, meta.RecoveryDigest, meta.ParentID)
+	}
+
+	listed, err := ListSessions(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("ListSessions len = %d, want 1", len(listed))
+	}
+	if listed[0].RecoveryDigest != meta.RecoveryDigest || listed[0].ParentID != meta.ParentID {
+		t.Fatalf("listed recovery metadata = digest:%q parent:%q, want digest:%q parent:%q", listed[0].RecoveryDigest, listed[0].ParentID, meta.RecoveryDigest, meta.ParentID)
+	}
+}
+
 func writeBranchMeta(t *testing.T, path string, createdAt, updatedAt time.Time) {
 	t.Helper()
 	meta := BranchMeta{

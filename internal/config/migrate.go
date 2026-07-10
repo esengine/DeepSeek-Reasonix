@@ -274,6 +274,15 @@ func mcpGlobalMigrationMarkerPath() string {
 	return filepath.Join(dir, "mcp-global-migration-v1")
 }
 
+func mcpGlobalMigrationComplete() bool {
+	marker := mcpGlobalMigrationMarkerPath()
+	if marker == "" {
+		return false
+	}
+	_, err := os.Stat(marker)
+	return err == nil
+}
+
 func mcpMigrationLegacyTOMLPaths(dest, home string) []string {
 	var paths []string
 	for _, path := range legacyTOMLPaths(dest, home) {

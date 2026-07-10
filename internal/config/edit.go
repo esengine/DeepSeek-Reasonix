@@ -1,6 +1,8 @@
 package config
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -808,6 +810,243 @@ func ClearPluginAuthenticationInSource(name string) (PluginEntry, bool, string, 
 
 func pluginTOMLSourcePath(name string) string {
 	return pluginTOMLSourcePathForRoot(".", name)
+}
+
+type configSourceEdit struct {
+	path   string
+	before []byte
+	perm   os.FileMode
+	write  func() error
+}
+
+func newConfigSourceEdit(path string, write func() error) (configSourceEdit, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return configSourceEdit{}, err
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		return configSourceEdit{}, err
+	}
+	return configSourceEdit{path: path, before: before, perm: info.Mode().Perm(), write: write}, nil
+}
+
+func applyConfigSourceEdits(edits []configSourceEdit) error {
+	for i := range edits {
+		if err := edits[i].write(); err != nil {
+			var rollbackErrs []error
+			for j := i; j >= 0; j-- {
+				if rollbackErr := fileutil.AtomicWriteFile(edits[j].path, edits[j].before, edits[j].perm); rollbackErr != nil {
+					rollbackErrs = append(rollbackErrs, fmt.Errorf("restore %s: %w", edits[j].path, rollbackErr))
+				}
+			}
+			if rollbackErr := errors.Join(rollbackErrs...); rollbackErr != nil {
+				return errors.Join(err, fmt.Errorf("roll back MCP config removal: %w", rollbackErr))
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+func planTOMLPluginRemoval(path, name string) (configSourceEdit, bool, error) {
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return configSourceEdit{}, false, nil
+		}
+		return configSourceEdit{}, false, err
+	}
+	cfg := Default()
+	if err := mergeFile(cfg, path); err != nil {
+		return configSourceEdit{}, false, err
+	}
+	normalizeConfigForEdit(cfg)
+	if !cfg.RemovePlugin(name) {
+		return configSourceEdit{}, false, nil
+	}
+	edit, err := newConfigSourceEdit(path, func() error { return cfg.SaveTo(path) })
+	return edit, err == nil, err
+}
+
+func planMCPJSONPluginRemoval(path, name string) (configSourceEdit, bool, error) {
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return configSourceEdit{}, false, nil
+		}
+		return configSourceEdit{}, false, err
+	}
+	root, servers, err := readMCPJSONRaw(path)
+	if err != nil {
+		return configSourceEdit{}, false, err
+	}
+	if _, ok := servers[name]; !ok {
+		return configSourceEdit{}, false, nil
+	}
+	delete(servers, name)
+	edit, err := newConfigSourceEdit(path, func() error { return writeMCPJSONServers(path, root, servers) })
+	return edit, err == nil, err
+}
+
+func planLegacyMCPDisable(path, name string) (configSourceEdit, bool, error) {
+	if strings.TrimSpace(path) == "" {
+		return configSourceEdit{}, false, nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return configSourceEdit{}, false, nil
+		}
+		return configSourceEdit{}, false, err
+	}
+	data, err := fileencoding.ReadFileUTF8(path)
+	if err != nil {
+		return configSourceEdit{}, false, err
+	}
+	var root map[string]json.RawMessage
+	var view struct {
+		MCP         []string                   `json:"mcp"`
+		MCPServers  map[string]json.RawMessage `json:"mcpServers"`
+		MCPDisabled []string                   `json:"mcpDisabled"`
+	}
+	if err := json.Unmarshal(data, &root); err != nil {
+		return configSourceEdit{}, false, nil
+	}
+	if err := json.Unmarshal(data, &view); err != nil {
+		return configSourceEdit{}, false, nil
+	}
+
+	foundNamed := false
+	changed := false
+	filtered := make([]string, 0, len(view.MCP))
+	for i, raw := range view.MCP {
+		entry, ok := parseLegacyMCPSpec(raw)
+		if !ok {
+			filtered = append(filtered, raw)
+			continue
+		}
+		effectiveName := entry.Name
+		if effectiveName == "" {
+			effectiveName = anonymousMCPName(i)
+		}
+		if effectiveName != name {
+			filtered = append(filtered, raw)
+			continue
+		}
+		if entry.Name == "" {
+			changed = true
+			continue
+		}
+		foundNamed = true
+		filtered = append(filtered, raw)
+	}
+	if _, ok := view.MCPServers[name]; ok {
+		foundNamed = true
+	}
+	if foundNamed && !containsString(view.MCPDisabled, name) {
+		view.MCPDisabled = append(view.MCPDisabled, name)
+		changed = true
+	}
+	if !changed {
+		return configSourceEdit{}, false, nil
+	}
+	if len(filtered) != len(view.MCP) {
+		raw, marshalErr := json.Marshal(filtered)
+		if marshalErr != nil {
+			return configSourceEdit{}, false, marshalErr
+		}
+		root["mcp"] = raw
+	}
+	disabledRaw, err := json.Marshal(view.MCPDisabled)
+	if err != nil {
+		return configSourceEdit{}, false, err
+	}
+	root["mcpDisabled"] = disabledRaw
+	out, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return configSourceEdit{}, false, err
+	}
+	out = append(out, '\n')
+	edit, err := newConfigSourceEdit(path, func() error {
+		return fileutil.AtomicWriteFile(path, out, info.Mode().Perm())
+	})
+	return edit, err == nil, err
+}
+
+// RemovePluginFromSourcesForRoot removes an MCP server from every writable
+// config source that can contribute it for root. Removing all matching TOML
+// declarations prevents a lower-priority duplicate from reappearing after the
+// higher-priority entry is deleted. Every edit is planned before the first write,
+// and legacy JSON receives a disable marker for older Reasonix versions.
+func RemovePluginFromSourcesForRoot(root, name string) (bool, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false, fmt.Errorf("remove MCP server: name is required")
+	}
+
+	unlock := LockUserConfigEdits()
+	defer unlock()
+
+	var edits []configSourceEdit
+	planTOML := func(path string) error {
+		edit, changed, err := planTOMLPluginRemoval(path, name)
+		if err != nil {
+			return err
+		}
+		if changed {
+			edits = append(edits, edit)
+		}
+		return nil
+	}
+	userPaths := userConfigCandidatePaths()
+	for _, path := range userPaths {
+		if err := planTOML(path); err != nil {
+			return false, err
+		}
+	}
+
+	resolvedRoot := resolveRoot(root)
+	projectTOML := "reasonix.toml"
+	if resolvedRoot != "." {
+		projectTOML = filepath.Join(resolvedRoot, "reasonix.toml")
+	}
+	isUserPath := false
+	for _, path := range userPaths {
+		if samePath(path, projectTOML) {
+			isUserPath = true
+			break
+		}
+	}
+	if !isUserPath {
+		if err := planTOML(projectTOML); err != nil {
+			return false, err
+		}
+	}
+
+	mcpPath := mcpJSONFile
+	if resolvedRoot != "." {
+		mcpPath = filepath.Join(resolvedRoot, mcpJSONFile)
+	}
+	mcpEdit, changed, err := planMCPJSONPluginRemoval(mcpPath, name)
+	if err != nil {
+		return false, err
+	}
+	if changed {
+		edits = append(edits, mcpEdit)
+	}
+	legacyEdit, changed, err := planLegacyMCPDisable(legacyConfigPath(), name)
+	if err != nil {
+		return false, err
+	}
+	if changed {
+		edits = append(edits, legacyEdit)
+	}
+	if len(edits) == 0 {
+		return false, nil
+	}
+	if err := applyConfigSourceEdits(edits); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // TrustPluginReadOnlyToolInSourceForRoot persists one trusted MCP read-only tool

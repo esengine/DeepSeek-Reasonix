@@ -176,6 +176,7 @@ type Controller struct {
 	mu        sync.Mutex
 	cancel    context.CancelFunc
 	running   bool
+	finishing bool // TurnDone is still being delivered; reject a replacement turn
 	canceling bool
 	// rotating is set under mu while NewSession/ClearSession swap the executor
 	// session out. Checking running once and then swapping later leaves a
@@ -574,7 +575,7 @@ func (c *Controller) beginCheckpoint(input string) {
 // turn is already in flight.
 func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 	c.mu.Lock()
-	if c.running || c.rotating {
+	if c.running || c.finishing || c.rotating {
 		c.mu.Unlock()
 		return
 	}
@@ -593,22 +594,32 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 		defer cancel()
 		defer func() {
 			if r := recover(); r != nil {
-				c.mu.Lock()
-				c.running = false
-				c.cancel = nil
-				c.canceling = false
-				c.mu.Unlock()
-				c.sink.Emit(event.Event{Kind: event.TurnDone, Err: fmt.Errorf("internal error: %v", r)})
+				c.finishGuardedTurn(fmt.Errorf("internal error: %v", r))
 			}
 		}()
 		err := body(ctx)
-		c.mu.Lock()
-		c.running = false
-		c.cancel = nil
-		c.canceling = false
-		c.mu.Unlock()
-		c.sink.Emit(event.Event{Kind: event.TurnDone, Err: explainError(err)})
+		c.finishGuardedTurn(explainError(err))
 	}()
+}
+
+// finishGuardedTurn keeps admission closed while TurnDone is delivered. The
+// sink fan-out may detach per-turn transports; allowing a replacement turn in
+// after running=false but before that fan-out completed let the old completion
+// clear or inherit the replacement turn's transport.
+func (c *Controller) finishGuardedTurn(err error) {
+	c.mu.Lock()
+	c.running = false
+	c.finishing = true
+	c.cancel = nil
+	c.canceling = false
+	c.mu.Unlock()
+
+	defer func() {
+		c.mu.Lock()
+		c.finishing = false
+		c.mu.Unlock()
+	}()
+	c.sink.Emit(event.Event{Kind: event.TurnDone, Err: err})
 }
 
 // Send starts a turn with an uncomposed message. The controller applies
@@ -1412,7 +1423,7 @@ func (c *Controller) Cancel() {
 func (c *Controller) Running() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.running
+	return c.running || c.finishing
 }
 
 // beginRotation claims the session-rotation gate. It fails if a turn is running
@@ -1424,7 +1435,7 @@ func (c *Controller) Running() bool {
 func (c *Controller) beginRotation() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.running {
+	if c.running || c.finishing {
 		return errTurnRunningRotation
 	}
 	if c.rotating {
@@ -1457,12 +1468,13 @@ func (c *Controller) PendingPrompt() bool {
 func (c *Controller) RuntimeStatus() RuntimeStatus {
 	c.mu.Lock()
 	running := c.running
+	active := running || c.finishing
 	canceling := c.canceling
 	c.mu.Unlock()
 	pending := c.approval.hasPending()
 	backgroundJobs := len(c.Jobs())
 	return RuntimeStatus{
-		Running:         running,
+		Running:         active,
 		PendingPrompt:   pending,
 		BackgroundJobs:  backgroundJobs,
 		CancelRequested: canceling,
@@ -3877,28 +3889,28 @@ func (c *Controller) ConnectConfiguredMCPServer(name string) (int, error) {
 	return 0, fmt.Errorf("no configured MCP server named %q", name)
 }
 
-// RemoveMCPServer disconnects a live MCP server — its tools vanish from the next
-// turn — and removes it from the config file. It reports whether a live server was
-// disconnected; an error only when the name is neither connected nor in config (or
-// the config save fails). A server declared in .mcp.json disconnects for this
-// session but returns on the next start, since that file isn't ours to edit.
+// RemoveMCPServer removes a writable MCP configuration before disconnecting the
+// live server, so a persistence failure never produces a false-successful
+// session-only removal. MCPs contributed by an installed plugin package are
+// managed with that package and cannot be removed independently.
 func (c *Controller) RemoveMCPServer(name string) (disconnected bool, err error) {
-	disconnected = c.mcp.disconnect(name)
-	cfg, lerr := config.Load()
+	cfg, lerr := config.LoadForRoot(c.workspaceRoot)
 	if lerr != nil {
-		return disconnected, lerr
+		return false, lerr
 	}
-	inConfig := cfg.RemovePlugin(name)
-	if inConfig {
-		if !disconnected {
-			c.mcp.removeToolPrefix(name)
-		}
-		if serr := cfg.Save(); serr != nil {
-			return disconnected, serr
-		}
+	if owner, ok := cfg.PluginPackageOwner(name); ok {
+		return false, fmt.Errorf("MCP server %q is managed by plugin %q; disable or remove the plugin instead", name, owner)
 	}
-	if !disconnected && !inConfig {
-		return false, fmt.Errorf("no MCP server named %q", name)
+	removed, rerr := config.RemovePluginFromSourcesForRoot(c.workspaceRoot, name)
+	if rerr != nil {
+		return false, rerr
+	}
+	if !removed {
+		return false, fmt.Errorf("no removable MCP server named %q", name)
+	}
+	disconnected = c.mcp.disconnect(name)
+	if !disconnected {
+		c.mcp.removeToolPrefix(name)
 	}
 	return disconnected, nil
 }

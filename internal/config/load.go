@@ -106,10 +106,13 @@ func LoadForRoot(root string) (*Config, error) {
 	}
 	cfg.mergeMCPJSON(entries)
 
-	// Lowest priority: the v0.x ~/.reasonix/config.json's mcpServers, so upgrading
-	// from the TypeScript line keeps MCP servers without rewriting them. Anything
-	// the v2 config or .mcp.json already declared wins on a name collision.
-	cfg.mergeMCPJSON(loadLegacyMCP(legacyConfigPath()))
+	// Lowest priority before the one-time v1.9.1 MCP migration: the v0.x
+	// ~/.reasonix/config.json's mcpServers. Once the migration marker exists, the
+	// current config is authoritative even when it is empty; reading the legacy
+	// source again would resurrect servers the user removed from current config.
+	if !mcpGlobalMigrationComplete() {
+		cfg.mergeMCPJSON(loadLegacyMCP(legacyConfigPath()))
+	}
 	_ = mergeInstalledPluginPackages(cfg, root)
 	normalizePluginCommandLines(cfg)
 	normalizeLegacyEffort(cfg)

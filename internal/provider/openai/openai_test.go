@@ -512,13 +512,13 @@ func TestBuildRequestDropsReasoningOnPlainAssistantTurn(t *testing.T) {
 	}
 }
 
-func TestBuildRequestDropsMemoryCitations(t *testing.T) {
+func TestBuildRequestDropsLocalMetadata(t *testing.T) {
 	c := &client{model: "deepseek-chat", deepseek: true}
 	req := c.buildRequest(provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Content: "continue"},
 			{Role: provider.RoleUser, Content: "edited prompt", Edited: true, Original: "original prompt"},
-			{Role: provider.RoleAssistant, Content: "done", MemoryCitations: []provider.MemoryCitation{{
+			{Role: provider.RoleAssistant, Content: "done", WorkDurationMs: 24_000, MemoryCitations: []provider.MemoryCitation{{
 				ID: "mem-1", Source: "MEMORY.md", LineStart: 116, LineEnd: 123, Note: "workflow",
 			}}},
 		},
@@ -529,6 +529,9 @@ func TestBuildRequestDropsMemoryCitations(t *testing.T) {
 	}
 	if strings.Contains(string(b), "memoryCitations") || strings.Contains(string(b), "MEMORY.md") {
 		t.Fatalf("local memory citations leaked into OpenAI-compatible request: %s", b)
+	}
+	if strings.Contains(string(b), "workDurationMs") || strings.Contains(string(b), "work_duration_ms") {
+		t.Fatalf("local work duration leaked into OpenAI-compatible request: %s", b)
 	}
 	if strings.Contains(string(b), "original prompt") || strings.Contains(string(b), `"edited"`) || strings.Contains(string(b), `"original"`) {
 		t.Fatalf("local edit metadata leaked into OpenAI-compatible request: %s", b)
@@ -1085,6 +1088,61 @@ func TestBuildRequestAlwaysSendsReasoningKeyOnDeepSeekToolCalls(t *testing.T) {
 	}
 	if _, ok := req.Messages[3]["reasoning_content"]; ok {
 		t.Fatal("plain assistant text turn must keep omitting reasoning_content")
+	}
+}
+
+func TestWarnOnMissingToolCallReasoningMatchesDeepSeekModelFamily(t *testing.T) {
+	tests := []struct {
+		name  string
+		model string
+		want  bool
+	}{
+		{name: "exact flash", model: "deepseek-v4-flash", want: false},
+		{name: "namespaced flash", model: "deepseek/deepseek-v4-flash", want: false},
+		{name: "exact pro", model: "deepseek-v4-pro", want: true},
+		{name: "namespaced pro", model: "deepseek/deepseek-v4-pro", want: true},
+		{name: "mixed case pro", model: "deepseek-ai/DeepSeek-V4-Pro", want: true},
+		{name: "reasoner", model: "deepseek-reasoner", want: true},
+		{name: "r1", model: "deepseek-ai/DeepSeek-R1-0528", want: true},
+		{name: "generic deepseek", model: "deepseek-chat", want: false},
+		{name: "gateway deepseek v3", model: "deepseek-ai/DeepSeek-V3.2", want: false},
+		{name: "prover is not pro", model: "deepseek-ai/DeepSeek-Prover-V2", want: false},
+		{name: "dated pro variant", model: "deepseek-v4-pro-0923", want: true},
+		{name: "dotted pro variant", model: "deepseek-v4-pro.1", want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := New(provider.Config{
+				Name:    "deepseek-proxy",
+				BaseURL: "https://gateway.example/v1",
+				Model:   tc.model,
+				APIKey:  "k",
+				Extra:   map[string]any{"reasoning_protocol": "deepseek"},
+			})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			if !provider.RequiresToolCallReasoning(p) {
+				t.Fatal("DeepSeek protocol should keep conservative reasoning_content replay for tool-call turns")
+			}
+			if got := provider.WarnOnMissingToolCallReasoning(p); got != tc.want {
+				t.Fatalf("WarnOnMissingToolCallReasoning() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	p, err := New(provider.Config{
+		Name:    "deepseek-v4-pro-openai-protocol",
+		BaseURL: "https://gateway.example/v1",
+		Model:   "deepseek-v4-pro",
+		APIKey:  "k",
+		Extra:   map[string]any{"reasoning_protocol": "openai"},
+	})
+	if err != nil {
+		t.Fatalf("New OpenAI protocol: %v", err)
+	}
+	if provider.WarnOnMissingToolCallReasoning(p) {
+		t.Fatal("OpenAI protocol should not warn using DeepSeek reasoning_content policy")
 	}
 }
 

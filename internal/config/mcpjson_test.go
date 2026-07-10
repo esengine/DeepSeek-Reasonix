@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -683,5 +684,116 @@ func TestLoadLegacyMCP(t *testing.T) {
 	}
 	if got := loadLegacyMCP(""); got != nil {
 		t.Errorf("empty path: got %+v, want nil", got)
+	}
+}
+
+func TestRemovePluginFromSourcesForRootRemovesEveryWritableDeclaration(t *testing.T) {
+	_, userConfig, _ := legacyHome(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Dir(userConfig), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{userConfig, filepath.Join(root, "reasonix.toml")} {
+		if err := os.WriteFile(path, []byte(`
+[[plugins]]
+name = "duplicate"
+command = "duplicate-mcp"
+`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mcpPath := filepath.Join(root, mcpJSONFile)
+	if err := os.WriteFile(mcpPath, []byte(`{
+  "mcpServers": {
+    "duplicate": { "command": "duplicate-json" },
+    "keep": { "command": "keep-json" }
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := RemovePluginFromSourcesForRoot(root, "duplicate")
+	if err != nil {
+		t.Fatalf("RemovePluginFromSourcesForRoot: %v", err)
+	}
+	if !removed {
+		t.Fatal("RemovePluginFromSourcesForRoot reported no removal")
+	}
+	for _, path := range []string{userConfig, filepath.Join(root, "reasonix.toml")} {
+		for _, p := range LoadForEdit(path).Plugins {
+			if p.Name == "duplicate" {
+				t.Fatalf("duplicate MCP survived in %s: %+v", path, p)
+			}
+		}
+	}
+	if _, found, err := LoadMCPJSONPlugin(mcpPath, "duplicate"); err != nil || found {
+		t.Fatalf("duplicate .mcp.json entry survived: found=%v err=%v", found, err)
+	}
+	if _, found, err := LoadMCPJSONPlugin(mcpPath, "keep"); err != nil || !found {
+		t.Fatalf("unrelated .mcp.json entry was lost: found=%v err=%v", found, err)
+	}
+}
+
+func TestRemovePluginFromSourcesForRootPreflightsEverySource(t *testing.T) {
+	_, userConfig, _ := legacyHome(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Dir(userConfig), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const original = `[[plugins]]
+name = "duplicate"
+command = "duplicate-mcp"
+`
+	if err := os.WriteFile(userConfig, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, mcpJSONFile), []byte(`{"mcpServers":`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if removed, err := RemovePluginFromSourcesForRoot(root, "duplicate"); err == nil || removed {
+		t.Fatalf("RemovePluginFromSourcesForRoot = (%v, %v), want false and malformed .mcp.json error", removed, err)
+	}
+	got, err := os.ReadFile(userConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Fatalf("user config changed before every source was validated:\n%s", got)
+	}
+}
+
+func TestApplyConfigSourceEditsRollsBackEarlierWrites(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "first.toml")
+	second := filepath.Join(dir, "second.toml")
+	for _, path := range []string{first, second} {
+		if err := os.WriteFile(path, []byte("before\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	firstEdit, err := newConfigSourceEdit(first, func() error {
+		return os.WriteFile(first, []byte("after\n"), 0o600)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondEdit, err := newConfigSourceEdit(second, func() error {
+		return errors.New("publish failed")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := applyConfigSourceEdits([]configSourceEdit{firstEdit, secondEdit}); err == nil {
+		t.Fatal("applyConfigSourceEdits unexpectedly succeeded")
+	}
+	for _, path := range []string{first, second} {
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != "before\n" {
+			t.Fatalf("%s was not rolled back: %q", path, got)
+		}
 	}
 }
