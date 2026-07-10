@@ -40,6 +40,7 @@ type Lifecycle interface {
 	SessionPath() string
 	SessionDir() string
 	Label() string
+	ModelRef() string
 	WorkspaceRoot() string
 	Close()
 }

@@ -451,6 +451,9 @@ func trashSessionArtifactsBeforeMove(dir, sessionPath, key string, beforeMove fu
 		return err
 	}
 	defer guard.Release()
+	if err := invalidateTopicDirMarkers(dir); err != nil {
+		return err
+	}
 	itemDir := target.itemDir
 	if target.allocateUnique {
 		itemDir, err = reserveUniqueSessionTrashItemDir(dir, key)
@@ -504,7 +507,7 @@ func listTrashedSessionFiles(dir string) ([]string, error) {
 		}
 		itemDir := filepath.Join(root, e.Name())
 		keys := []string{}
-		if b, err := os.ReadFile(filepath.Join(itemDir, sessionTrashMetaFile)); err == nil {
+		if b, err := readFileUTF8(filepath.Join(itemDir, sessionTrashMetaFile)); err == nil {
 			var meta trashedSessionMeta
 			if json.Unmarshal(b, &meta) == nil && store.IsSessionTranscriptName(meta.Key) {
 				keys = append(keys, meta.Key)
@@ -529,7 +532,7 @@ func listTrashedSessionFiles(dir string) ([]string, error) {
 }
 
 func trashedSessionDeletedAt(path string) int64 {
-	b, err := os.ReadFile(filepath.Join(filepath.Dir(path), sessionTrashMetaFile))
+	b, err := readFileUTF8(filepath.Join(filepath.Dir(path), sessionTrashMetaFile))
 	if err != nil {
 		return 0
 	}
@@ -892,7 +895,7 @@ func validateTrashedSessionPath(dir, sessionPath string) (string, string, string
 		return "", "", "", fmt.Errorf("invalid trash session path: %s", sessionPath)
 	}
 	if parts[0] != parts[1] {
-		b, err := os.ReadFile(filepath.Join(root, parts[0], sessionTrashMetaFile))
+		b, err := readFileUTF8(filepath.Join(root, parts[0], sessionTrashMetaFile))
 		if err != nil {
 			return "", "", "", fmt.Errorf("invalid trash session path: %s", sessionPath)
 		}
@@ -939,7 +942,7 @@ func messageDisplayKey(content string) string {
 
 func loadSessionDisplays(dir string) sessionDisplayMap {
 	m := sessionDisplayMap{}
-	b, err := os.ReadFile(sessionDisplayPath(dir))
+	b, err := readFileUTF8(sessionDisplayPath(dir))
 	if err != nil {
 		return m
 	}
@@ -956,7 +959,7 @@ func loadSessionPlannerDisplays(dir string) sessionPlannerDisplayMap {
 	if strings.TrimSpace(dir) == "" {
 		return m
 	}
-	b, err := os.ReadFile(sessionPlannerDisplayPath(dir))
+	b, err := readFileUTF8(sessionPlannerDisplayPath(dir))
 	if err != nil {
 		return m
 	}

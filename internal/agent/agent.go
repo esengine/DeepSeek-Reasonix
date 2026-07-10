@@ -279,6 +279,10 @@ type Agent struct {
 	// command may rerun unconfined after the OS sandbox failed to start.
 	sandboxEscapeApprover sandbox.EscapeApprover
 
+	// configWriteApprover, when non-nil, can ask the user whether a file tool
+	// may write a Reasonix-managed config file outside the workspace roots.
+	configWriteApprover tool.ConfigWriteApprover
+
 	// hooks, when non-nil, fires PreToolUse / PostToolUse shell hooks around each
 	// tool call. nil disables hook firing.
 	hooks ToolHooks
@@ -651,6 +655,16 @@ func (a *Agent) SetSandboxEscapeApprover(g sandbox.EscapeApprover) {
 	a.sandboxEscapeApprover = g
 }
 
+// SetConfigWriteApprover installs the optional per-write approval path used by
+// the file tools when a target is a Reasonix-managed config file outside the
+// workspace write roots.
+func (a *Agent) SetConfigWriteApprover(g tool.ConfigWriteApprover) {
+	if nilutil.IsNil(g) {
+		g = nil
+	}
+	a.configWriteApprover = g
+}
+
 func (a *Agent) withTurnPreferences(input string) string {
 	if a == nil {
 		return input
@@ -834,6 +848,10 @@ type Options struct {
 	// enforced OS sandbox fails. nil keeps fail-closed behavior.
 	SandboxEscapeApprover sandbox.EscapeApprover
 
+	// ConfigWriteApprover confirms file-tool writes to Reasonix-managed config
+	// files outside the workspace roots. nil keeps fail-closed behavior.
+	ConfigWriteApprover tool.ConfigWriteApprover
+
 	// Context management. ContextWindow <= 0 disables compaction. Ratios and
 	// RecentKeep fall back to defaults when unset.
 	ContextWindow       int
@@ -926,6 +944,10 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	if nilutil.IsNil(sandboxEscapeApprover) {
 		sandboxEscapeApprover = nil
 	}
+	configWriteApprover := opts.ConfigWriteApprover
+	if nilutil.IsNil(configWriteApprover) {
+		configWriteApprover = nil
+	}
 	hooks := opts.Hooks
 	if nilutil.IsNil(hooks) {
 		hooks = nil
@@ -957,6 +979,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		gate:                     gate,
 		planModeReadOnlyTrust:    planModeReadOnlyTrust,
 		sandboxEscapeApprover:    sandboxEscapeApprover,
+		configWriteApprover:      configWriteApprover,
 		hooks:                    hooks,
 		jobs:                     opts.Jobs,
 		evidence:                 evidence.NewLedger(),
@@ -1005,6 +1028,13 @@ func usageSourceOrDefault(source, fallback string) string {
 // a round count. A positive maxSteps imposes an optional hard guard, surfaced as
 // a resumable notice when hit.
 func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
+	turnStartedAt := time.Now()
+	workDurationMs := func() int64 {
+		if elapsed := time.Since(turnStartedAt).Milliseconds(); elapsed > 0 {
+			return elapsed
+		}
+		return 1
+	}
 	defer a.clearSteerQueue()
 	a.steerMu.Lock()
 	a.steerConsumed = false
@@ -1104,6 +1134,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 						ReasoningContent:   reasoning,
 						ReasoningSignature: signature,
 						MemoryCitations:    a.memoryCitations(),
+						WorkDurationMs:     workDurationMs(),
 					})
 				}
 				a.session.Add(provider.Message{
@@ -1135,6 +1166,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		// when building the request, since re-sent reasoning is billable prompt
 		// input for no cache or coherence gain.
 		calls = a.withPreviewFileDiffs(calls)
+		a.warnMissingToolCallReasoning(calls, reasoning)
 		a.session.Add(provider.Message{
 			Role:               provider.RoleAssistant,
 			Content:            text,
@@ -1142,6 +1174,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			ReasoningSignature: signature,
 			ToolCalls:          calls,
 			MemoryCitations:    a.memoryCitations(),
+			WorkDurationMs:     workDurationMs(),
 		})
 
 		if len(calls) == 0 {
@@ -1195,7 +1228,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		// Grace round guard: if we already gave the model one extra response
 		// and it still wants to call tools, stop here.
 		if graceRound {
-			return fmt.Errorf("paused after %d tool-call rounds (%s) — the work so far is saved; send another message to continue, or set %s higher or to 0 for no limit", a.maxSteps, a.maxStepsKey, a.maxStepsKey)
+			return &maxStepsPause{steps: a.maxSteps, key: a.maxStepsKey}
 		}
 
 		results := a.executeBatch(ctx, calls)
@@ -1229,7 +1262,38 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	// Only reached when a positive maxSteps guard is configured. The work so far
 	// is already in the session, so the user can just send another message to pick
 	// up where it left off.
-	return fmt.Errorf("paused after %d tool-call rounds (%s) — the work so far is saved; send another message to continue, or set %s higher or to 0 for no limit", a.maxSteps, a.maxStepsKey, a.maxStepsKey)
+	return &maxStepsPause{steps: a.maxSteps, key: a.maxStepsKey}
+}
+
+// warnMissingToolCallReasoning surfaces a thinking-mode tool_calls turn that
+// arrived without reasoning text only when the provider/model is expected to
+// emit it. The turn is still saved and the replay still succeeds (the wire
+// layer can conservatively emit the reasoning_content key), but models that do
+// rely on tool-call reasoning continue without their chain-of-thought context,
+// so that degradation is worth a visible warning.
+func (a *Agent) warnMissingToolCallReasoning(calls []provider.ToolCall, reasoning string) {
+	if len(calls) == 0 || !provider.WarnOnMissingToolCallReasoning(a.prov) {
+		return
+	}
+	if strings.TrimSpace(reasoning) != "" {
+		return
+	}
+	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+		Text: fmt.Sprintf("%s returned %d tool call(s) without reasoning_content; continuing, but thinking context is lost for this turn (is a gateway dropping the reasoning field?)", a.prov.Name(), len(calls))})
+}
+
+// maxStepsPause is the deliberate stop when a positive tool-call budget runs
+// out: the session already holds the completed work and the user is asked to
+// continue. It is a control-flow signal, not a provider failure — Coordinator
+// matches on it to surface the pause instead of degrading the turn to
+// executor-only.
+type maxStepsPause struct {
+	steps int
+	key   string
+}
+
+func (e *maxStepsPause) Error() string {
+	return fmt.Sprintf("paused after %d tool-call rounds (%s) — the work so far is saved; send another message to continue, or set %s higher or to 0 for no limit", e.steps, e.key, e.key)
 }
 
 func (a *Agent) emitMemoryCompilerStats(turn *memorycompiler.Turn) {
@@ -1798,7 +1862,7 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 			}
 		}
 		stored = display
-		if signature != "" {
+		if signature != "" || (len(calls) > 0 && provider.RequiresToolCallReasoning(a.prov)) {
 			stored = original
 		}
 		return stored, display
@@ -2403,6 +2467,9 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	}
 	if a.sandboxEscapeApprover != nil {
 		cctx = sandbox.WithEscapeApprover(cctx, a.sandboxEscapeApprover)
+	}
+	if a.configWriteApprover != nil {
+		cctx = tool.WithConfigWriteApprover(cctx, a.configWriteApprover)
 	}
 	if v := a.responseLanguage.Load(); v != nil {
 		if lang, ok := v.(string); ok {

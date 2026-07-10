@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/frontmatter"
 )
 
@@ -132,7 +133,7 @@ func walkCommands(root, dir string, visited map[string]bool, fn func(path string
 // to root: drop the .md suffix and turn subdirectories into ":" namespaces
 // (git/commit.md → git:commit).
 func parseFile(root, path string) (Command, error) {
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return Command{}, err
 	}

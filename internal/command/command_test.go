@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 func TestRender(t *testing.T) {
@@ -63,6 +65,23 @@ func TestLoad(t *testing.T) {
 	}
 	if _, ok := byName["git:commit"]; !ok {
 		t.Errorf("subdir namespacing failed: %v", names(cmds))
+	}
+}
+
+func TestLoadDecodesGB18030CommandFile(t *testing.T) {
+	dir := t.TempDir()
+	body := "---\ndescription: 中文命令\nargument-hint: [主题]\n---\n请总结 $ARGUMENTS。"
+	path := filepath.Join(dir, "summary.md")
+	if err := os.WriteFile(path, fileencoding.Encode(body, fileencoding.GB18030), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmds, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cmds) != 1 || cmds[0].Description != "中文命令" || cmds[0].ArgHint != "[主题]" || cmds[0].Body != "请总结 $ARGUMENTS。" {
+		t.Fatalf("decoded command = %+v", cmds)
 	}
 }
 

@@ -2,7 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"sort"
 	"strings"
 
 	"reasonix/internal/config"
@@ -160,6 +162,8 @@ func mcpCommand(args []string) int {
 		return mcpList()
 	case "add":
 		return mcpAddCLI(args[1:])
+	case "get":
+		return mcpGetCLI(args[1:])
 	case "remove", "rm":
 		return mcpRemoveCLI(args[1:])
 	case "import":
@@ -214,6 +218,127 @@ func mcpList() int {
 	return 0
 }
 
+func mcpGetCLI(args []string) int {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: reasonix mcp get <name>")
+		return 2
+	}
+	name := args[0]
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	for _, p := range cfg.Plugins {
+		if p.Name != name {
+			continue
+		}
+		printMCPEntry(p)
+		return 0
+	}
+	fmt.Fprintf(os.Stderr, "no MCP server named %q in config\n", name)
+	return 1
+}
+
+func printMCPEntry(p config.PluginEntry) {
+	typ := p.Type
+	if typ == "" {
+		typ = "stdio"
+	}
+	fmt.Printf("name: %s\n", p.Name)
+	fmt.Printf("type: %s\n", typ)
+	if typ == "stdio" {
+		fmt.Printf("command: %s\n", p.Command)
+		if len(p.Args) > 0 {
+			fmt.Printf("args: %s\n", strings.Join(p.Args, "\n      "))
+		}
+		if len(p.Env) > 0 {
+			fmt.Println("env:")
+			for _, k := range sortedMapKeys(p.Env) {
+				fmt.Printf("  %s=%s\n", k, redactMCPConfigValue(k, p.Env[k]))
+			}
+		}
+	} else {
+		fmt.Printf("url: %s\n", redactMCPURL(p.URL))
+		if len(p.Headers) > 0 {
+			fmt.Println("headers:")
+			for _, k := range sortedMapKeys(p.Headers) {
+				fmt.Printf("  %s=%s\n", k, redactMCPConfigValue(k, p.Headers[k]))
+			}
+		}
+	}
+	if !p.ShouldAutoStart() {
+		fmt.Println("auto_start: false")
+	}
+}
+
+func sortedMapKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func redactMCPConfigValue(key, value string) string {
+	if looksSensitiveMCPKey(key) || looksSensitiveMCPValue(value) {
+		return "<redacted>"
+	}
+	return value
+}
+
+func looksSensitiveMCPKey(key string) bool {
+	lower := strings.ToLower(strings.TrimSpace(key))
+	for _, needle := range []string{"auth", "token", "secret", "credential", "api_key", "api-key", "apikey", "cookie"} {
+		if strings.Contains(lower, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksSensitiveMCPQueryKey(key string) bool {
+	return strings.EqualFold(strings.TrimSpace(key), "key") || looksSensitiveMCPKey(key)
+}
+
+func looksSensitiveMCPValue(value string) bool {
+	lower := strings.ToLower(value)
+	for _, needle := range []string{"access_token", "id_token", "refresh_token", "api_key", "api-key", "apikey", "bearer "} {
+		if strings.Contains(lower, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func redactMCPURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return raw
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil || u == nil {
+		if looksSensitiveMCPValue(raw) {
+			return "<redacted>"
+		}
+		return raw
+	}
+	q := u.Query()
+	changed := false
+	for key := range q {
+		if looksSensitiveMCPQueryKey(key) {
+			q.Set(key, "<redacted>")
+			changed = true
+		}
+	}
+	if !changed {
+		return raw
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
 func mcpAddCLI(args []string) int {
 	entry, err := parseMCPAdd(args)
 	if err != nil {
@@ -265,6 +390,7 @@ func mcpUsage() {
 
 Usage:
   reasonix mcp list
+  reasonix mcp get <name>
   reasonix mcp add <name> <command> [args...]        stdio server
   reasonix mcp add <name> --http <url> [--header K=V] remote (Streamable HTTP)
   reasonix mcp add <name> --sse  <url>               remote (legacy SSE)

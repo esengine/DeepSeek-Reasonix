@@ -7,6 +7,7 @@ package encoding
 import (
 	"bytes"
 	"encoding/binary"
+	"os"
 	"unicode/utf8"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
@@ -141,6 +142,23 @@ func Decode(data []byte, enc Kind) []byte {
 	// UTF8 and LossyUTF8 both pass through — LossyUTF8 is already
 	// "best effort" and Go strings can hold arbitrary bytes.
 	return data
+}
+
+// DecodeToUTF8 converts raw text-like file bytes to UTF-8 using Reasonix's
+// shared detection cascade. It is intended for user-editable structured files
+// (TOML, JSON, dotenv, Markdown) before handing the content to strict parsers.
+func DecodeToUTF8(data []byte) []byte {
+	enc, raw := Detect(data)
+	return Decode(raw, enc)
+}
+
+// ReadFileUTF8 reads path and decodes text-like content to UTF-8.
+func ReadFileUTF8(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return DecodeToUTF8(data), nil
 }
 
 // Decoder returns a streaming transform.Transformer for the given encoding,

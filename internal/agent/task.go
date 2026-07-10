@@ -38,12 +38,14 @@ const subagentStartContext = `<subagent-context event="SubagentStart">
 Before acting, check the available skills and tools. If a relevant skill is available, invoke it before continuing. Delegate to another sub-agent only when the task genuinely benefits from isolated context and the delegation tool is available.
 </subagent-context>`
 
+// read_skill is deliberately not listed: it renders playbook text inline and
+// cannot recurse, so depth-capped sub-agents keep it and can still read
+// playbooks even when they can no longer delegate.
 var subagentRecursiveTools = []string{
 	"task",
 	"read_only_task",
 	"run_skill",
 	"read_only_skill",
-	"read_skill",
 	"explore",
 	"research",
 	"review",
@@ -72,8 +74,12 @@ const subagentToolBoundarySummary = "Recursive agent/skill tools are exposed onl
 // from the parent registry unless a future call site deliberately opts into a
 // different boundary. They can spawn or author more agent work, so excluding them
 // preserves one layer of delegation without adding a spawn-count cap.
+// read_skill stays listed here so the guardian and planner surfaces, which
+// exclude these names, keep their provider-visible tool sets byte-identical —
+// only the sub-agent depth cap deliberately stopped stripping it.
 func SubagentMetaTools() []string {
 	out := append([]string(nil), subagentRecursiveTools...)
+	out = append(out, "read_skill")
 	out = append(out, subagentAlwaysHiddenTools...)
 	return out
 }
@@ -366,13 +372,7 @@ func (r *ReadOnlyTaskTool) Execute(ctx context.Context, args json.RawMessage) (s
 		return "", fmt.Errorf("prompt is required")
 	}
 
-	maxSteps := p.MaxSteps
-	if maxSteps <= 0 && r.task.maxSteps > 0 {
-		maxSteps = r.task.maxSteps / 2
-		if maxSteps < 5 {
-			maxSteps = 5
-		}
-	}
+	maxSteps := r.task.childMaxSteps(p.MaxSteps)
 
 	childDepth, err := r.task.nextSubagentDepth(ctx)
 	if err != nil {
@@ -387,7 +387,32 @@ func (r *ReadOnlyTaskTool) Execute(ctx context.Context, args json.RawMessage) (s
 	if err != nil {
 		return "", fmt.Errorf("read-only sub-agent profile: %w", err)
 	}
-	return r.task.runSubSession(ctx, p.Prompt, subReg, subSink(ctx), maxSteps, prov, pricing, ctxWin, NewSession(DefaultReadOnlyTaskSystemPrompt), childDepth)
+	answer, err := r.task.runSubSession(ctx, p.Prompt, subReg, subSink(ctx), maxSteps, prov, pricing, ctxWin, NewSession(DefaultReadOnlyTaskSystemPrompt), childDepth)
+	if err != nil {
+		return "", err
+	}
+	return GuardSubagentHostDecisionText(answer), nil
+}
+
+// childMaxSteps resolves a sub-agent's step budget. An explicit request wins.
+// Otherwise mirror the parent: a finite parent caps the child at half its
+// budget (min 5) so a delegated sub-task stays shorter than the whole turn; an
+// unbounded parent yields an unbounded child (it shares the parent's ctx, so
+// cancelling the turn stops it, and it compacts its own context — the same
+// bounds the parent has). Shared by task, read_only_task, and parallel_tasks
+// children so the default cannot drift per call site.
+func (t *TaskTool) childMaxSteps(requested int) int {
+	if requested > 0 {
+		return requested
+	}
+	if t.maxSteps <= 0 {
+		return 0
+	}
+	half := t.maxSteps / 2
+	if half < 5 {
+		half = 5
+	}
+	return half
 }
 
 func (t *TaskTool) effectiveProfile(model, effort string) (string, string) {
@@ -421,20 +446,7 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return "", fmt.Errorf("prompt is required")
 	}
 
-	maxSteps := p.MaxSteps
-	if maxSteps <= 0 {
-		// No explicit cap from the caller: mirror the parent. A finite parent caps
-		// the sub-agent at half its budget (min 5) so a delegated sub-task stays
-		// shorter than the whole turn; an unbounded parent yields an unbounded
-		// sub-agent. The sub-agent shares the parent's ctx, so cancelling the turn
-		// stops it, and it compacts its own context — the same bounds the parent has.
-		if t.maxSteps > 0 {
-			maxSteps = t.maxSteps / 2
-			if maxSteps < 5 {
-				maxSteps = 5
-			}
-		}
-	}
+	maxSteps := t.childMaxSteps(p.MaxSteps)
 
 	childDepth, err := t.nextSubagentDepth(ctx)
 	if err != nil {
@@ -512,7 +524,7 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		}
 		return FormatSubagentRunResult(answer, run, false), nil
 	}
-	return answer, nil
+	return GuardSubagentHostDecisionText(answer), nil
 }
 
 func (t *TaskTool) prepareTranscriptRun(subReg *tool.Registry, modelRef, effortRef, parentSession, parentID, continueFrom, legacyForkFrom string) (*SubagentRun, error) {
@@ -522,6 +534,8 @@ func (t *TaskTool) prepareTranscriptRun(subReg *tool.Registry, modelRef, effortR
 	if continueFrom != "" && legacyForkFrom != "" {
 		return nil, fmt.Errorf("continue_from and fork_from are mutually exclusive; pass only continue_from")
 	}
+	// A task tool wired without a transcript store is a caller bug: fail loudly
+	// instead of silently dropping persistence (contract pinned since #3586).
 	if t.transcripts == nil {
 		return nil, fmt.Errorf("subagent transcript store is required")
 	}
@@ -749,7 +763,15 @@ func (t *TaskTool) resolveSubSessionRuntime(modelRef, effort string) (provider.P
 
 func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int) (string, error) {
 	prompt = t.withWorkspaceContext(prompt)
-	return RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, Options{
+	return RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, t.subagentOptions(ctx, maxSteps, pricing, ctxWin, childDepth), sink)
+}
+
+// subagentOptions is the single construction point for the run options every
+// sub-agent spawned through this tool shares (task, read_only_task, and
+// parallel_tasks children). Compaction, language preferences, and depth limits
+// must stay uniform across those paths — add new fields here, not at call sites.
+func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *provider.Pricing, ctxWin, childDepth int) Options {
+	return Options{
 		MaxSteps:            maxSteps,
 		Temperature:         t.temperature,
 		Pricing:             pricing,
@@ -767,7 +789,7 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 		ReasoningLanguage:   ReasoningLanguageFromContext(ctx),
 		SubagentDepth:       childDepth,
 		MaxSubagentDepth:    t.maxDepth(),
-	}, sink)
+	}
 }
 
 func (t *TaskTool) withWorkspaceContext(prompt string) string {
@@ -810,6 +832,7 @@ func FormatSubagentReference(run *SubagentRun) string {
 }
 
 func FormatSubagentRunResult(answer string, run *SubagentRun, failed bool) string {
+	answer = GuardSubagentHostDecisionText(answer)
 	if run == nil || run.Ref == "" {
 		return answer
 	}
@@ -820,6 +843,14 @@ func FormatSubagentRunResult(answer string, run *SubagentRun, failed bool) strin
 		return "Subagent reference (failed): " + run.Ref + "\n\nFinal answer:\n" + answer
 	}
 	return FormatSubagentReference(run) + "\n\nFinal answer:\n" + answer
+}
+
+// GuardSubagentHostDecisionText appends a fixed boundary warning only when a
+// child agent result appears to discuss host approval or user-owned decisions.
+// The implementation lives in internal/tool so the skill tools share the exact
+// same phrase list and notice.
+func GuardSubagentHostDecisionText(answer string) string {
+	return tool.GuardSubagentHostDecisionText(answer)
 }
 
 // RunSubAgentWithSession continues an existing sub-agent session with prompt and

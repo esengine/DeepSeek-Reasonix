@@ -345,7 +345,7 @@ func normalizeToolApprovalMode(mode string) string {
 // approver. A small subset may still opt into explicit session grants.
 func RequiresFreshHumanApprovalTool(tool string) bool {
 	switch tool {
-	case planApprovalTool, memoryRememberTool, memoryForgetTool, SandboxEscapeApprovalTool:
+	case planApprovalTool, memoryRememberTool, memoryForgetTool, SandboxEscapeApprovalTool, ManagedConfigWriteApprovalTool:
 		return true
 	default:
 		return false
@@ -358,7 +358,7 @@ func requiresFreshApprovalTool(tool string) bool {
 
 func allowsFreshSessionGrantTool(tool string) bool {
 	switch tool {
-	case SandboxEscapeApprovalTool:
+	case SandboxEscapeApprovalTool, ManagedConfigWriteApprovalTool:
 		return true
 	default:
 		return false

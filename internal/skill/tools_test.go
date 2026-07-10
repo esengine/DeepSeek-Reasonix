@@ -67,6 +67,22 @@ func TestRunSkillSubagentRuns(t *testing.T) {
 	}
 }
 
+func TestRunSkillSubagentResultWarnsOnHostDecisionLanguage(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
+	runner := func(_ context.Context, sk Skill, task string, _ SubagentRunOptions) (string, error) {
+		return "等待用户批准后再执行 " + sk.Name + " " + task, nil
+	}
+	tl := NewRunSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), runner)
+	out, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"dig","arguments":"find X"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(out, "Subagent boundary") {
+		t.Fatalf("subagent skill output missing boundary warning:\n%s", out)
+	}
+}
+
 func TestRunSkillSubagentCancellationReachesRunner(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")

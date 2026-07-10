@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/provider"
 	"reasonix/internal/secrets"
 	"reasonix/internal/store"
@@ -402,7 +403,7 @@ func writeSessionMessages(path string, msgs []provider.Message) error {
 // checkSnapshotWrite decides whether this session may write msgs over path, and
 // whether the safe write shape is a no-op, append-only suffix, or full rewrite.
 func (s *Session) checkSnapshotWrite(path string, next []provider.Message, nextDigest [sha256.Size]byte, nextVersion uint64, allowOwnedRewrite bool) (snapshotWriteDecision, error) {
-	current, err := LoadSession(path)
+	current, err := loadSessionUnlocked(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return snapshotWriteDecision{}, nil
@@ -573,7 +574,7 @@ func (s *Session) SaveRecoveryBranch(opts RecoveryBranchOptions) (RecoveryBranch
 		unlockOriginal()
 		return RecoveryBranchInfo{}, fmt.Errorf("lock original session file: %w", lockErr)
 	}
-	current, err := LoadSession(originalPath)
+	current, err := loadSessionUnlocked(originalPath)
 	unlockOriginalFile()
 	unlockOriginal()
 	if err != nil && !os.IsNotExist(err) {
@@ -632,7 +633,7 @@ func (s *Session) SaveRecoveryBranch(opts RecoveryBranchOptions) (RecoveryBranch
 		return RecoveryBranchInfo{}, fmt.Errorf("lock recovery session file: %w", err)
 	}
 	defer unlockRecoveryFile()
-	if loaded, loadErr := LoadSession(recoveryPath); loadErr == nil && loaded != nil {
+	if loaded, loadErr := loadSessionUnlocked(recoveryPath); loadErr == nil && loaded != nil {
 		existingDigest, digestErr := digestSessionMessages(loaded.Snapshot())
 		if digestErr != nil {
 			return RecoveryBranchInfo{}, digestErr
@@ -1105,9 +1106,17 @@ func CanonicalSessionPath(path string) string {
 // back to the compatibility .jsonl checkpoint. A damaged log is replayed to its
 // last clean record (or the checkpoint when nothing decodes) and flagged so the
 // next save heals it with a rewrite-and-compact.
+// In-process loads share the save path mutex so they cannot observe a local
+// SaveSnapshot between appending an event-log record and refreshing the index.
 // Missing files surface as os.IsNotExist so callers can fall through to a
 // new session.
 func LoadSession(path string) (*Session, error) {
+	unlock := lockSessionSavePath(path)
+	defer unlock()
+	return loadSessionUnlocked(path)
+}
+
+func loadSessionUnlocked(path string) (*Session, error) {
 	msgs, _, damaged, err := loadSessionMessages(path)
 	if err != nil {
 		return nil, err
@@ -1286,7 +1295,7 @@ func ListCleanupPending(dir string) ([]CleanupPendingInfo, error) {
 		}
 		markerPath := filepath.Join(dir, e.Name())
 		var meta CleanupPendingMeta
-		b, err := os.ReadFile(markerPath)
+		b, err := fileencoding.ReadFileUTF8(markerPath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue

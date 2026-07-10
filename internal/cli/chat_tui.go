@@ -2347,7 +2347,7 @@ func (m chatTUI) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func freshApprovalAllowsSession(toolName string) bool {
-	return toolName == control.SandboxEscapeApprovalTool
+	return toolName == control.SandboxEscapeApprovalTool || toolName == control.ManagedConfigWriteApprovalTool
 }
 
 var (
@@ -2800,6 +2800,9 @@ func (m chatTUI) renderApprovalBanner() string {
 	if m.pendingApproval.Tool == control.SandboxEscapeApprovalTool {
 		choices = i18n.M.SandboxEscapeApprovalChoices
 	}
+	if m.pendingApproval.Tool == control.ManagedConfigWriteApprovalTool {
+		choices = i18n.M.ConfigWriteApprovalChoices
+	}
 	if m.pendingApproval.Tool == agent.PlanModeReadOnlyCommandApprovalTool {
 		choices = i18n.M.PlanModeReadOnlyCommandChoices
 	}
@@ -2823,6 +2826,9 @@ func approvalToolDetails(toolName string) (name, detail string) {
 	}
 	if toolName == control.SandboxEscapeApprovalTool {
 		return i18n.M.ApprovalToolLabelSandboxEscape, fmt.Sprintf(i18n.M.ToolApprovalSourceFmt, i18n.M.ToolApprovalBuiltIn)
+	}
+	if toolName == control.ManagedConfigWriteApprovalTool {
+		return i18n.M.ApprovalToolLabelConfigWrite, fmt.Sprintf(i18n.M.ToolApprovalSourceFmt, i18n.M.ToolApprovalBuiltIn)
 	}
 	if server, short, ok := tool.SplitMCPName(toolName); ok {
 		lines := []string{}

@@ -78,15 +78,22 @@ const ld = {
         <span class="l-zh"><span class="grad">DeepSeek</span> 原生的<br />终端编码 Agent。</span>
       </h1>
       <p class="sub reveal" style="--d:0.12s">
-        <span class="l-en">The loop is append-only, aligned to DeepSeek's byte-stable prefix cache — so long sessions hold <b>90%+ cache hit</b> and input-token cost collapses to <b>~1/5</b>. Terminal-first, with a local browser UI when you want one.</span>
-        <span class="l-zh">运行循环 append-only,对齐 DeepSeek 字节稳定的 prefix-cache —— 长会话缓存命中 <b>90%+</b>,输入 token 成本降到 <b>约 1/5</b>。终端优先,需要时也可启动本地浏览器 UI。</span>
+        <span class="l-en">The loop is append-only, aligned to DeepSeek's byte-stable prefix cache — so long sessions hold <b>90%+ cache hit</b> and input-token cost collapses to <b>~1/5</b>. Use the same engine from the CLI/TUI, desktop app, or local browser UI.</span>
+        <span class="l-zh">运行循环 append-only,对齐 DeepSeek 字节稳定的 prefix-cache —— 长会话缓存命中 <b>90%+</b>,输入 token 成本降到 <b>约 1/5</b>。CLI/TUI、桌面端和本地浏览器 UI 共用同一引擎。</span>
       </p>
-      <div class="hero-cta reveal" style="--d:0.18s">
-        <a class="btn btn-dark" data-os-dl data-goto="desktop" href="#start"><span class="l-en">Download for <span class="os-name">macOS</span></span><span class="l-zh">下载 <span class="os-name">macOS</span> 版</span></a>
-        <span class="install"><span class="ps1">$</span>npm i -g reasonix@next<button data-copy="npm i -g reasonix@next">Copy</button></span>
-        <a class="btn btn-ghost" href="#how"><span class="l-en">How it works ↓</span><span class="l-zh">工作原理 ↓</span></a>
+      <div class="hero-install reveal" style="--d:0.18s" aria-label="Reasonix install options">
+        <div class="install-option install-option--desktop">
+          <span class="install-kicker"><span class="l-en">Desktop app</span><span class="l-zh">桌面端</span></span>
+          <strong><span class="l-en">Visual workspace for sessions, settings, approvals, and updates.</span><span class="l-zh">可视化管理会话、设置、审批与自动更新。</span></strong>
+          <a class="btn btn-dark" data-os-dl data-goto="desktop" href="#start"><span class="l-en">Download desktop</span><span class="l-zh">下载桌面版</span></a>
+        </div>
+        <div class="install-option install-option--cli">
+          <span class="install-kicker"><span class="l-en">CLI / TUI</span><span class="l-zh">CLI / TUI</span></span>
+          <strong><span class="l-en">Terminal-native agent with the same local Reasonix engine.</span><span class="l-zh">终端原生入口,使用同一套本地 Reasonix 引擎。</span></strong>
+          <span class="install"><span class="ps1">$</span>npm i -g reasonix<button data-copy="npm i -g reasonix">Copy</button></span>
+        </div>
       </div>
-      <div class="also reveal" style="--d:0.22s"><span class="l-en">Also via <a href="#start" data-goto="brew">Homebrew</a> and <a href="#start" data-goto="desktop">desktop apps</a> · run <code>reasonix serve</code> for the browser UI</span><span class="l-zh">也可通过 <a href="#start" data-goto="brew">Homebrew</a> 与<a href="#start" data-goto="desktop">桌面端</a>安装 · 运行 <code>reasonix serve</code> 打开浏览器 UI</span></div>
+      <div class="also reveal" style="--d:0.22s"><span class="l-en">Prefer package managers? Use <a href="#start" data-goto="brew">Homebrew</a>. Need a local browser UI? Run <code>reasonix serve</code>.</span><span class="l-zh">偏好包管理器? 可用 <a href="#start" data-goto="brew">Homebrew</a>。需要本地浏览器 UI? 运行 <code>reasonix serve</code>。</span></div>
 
       <div class="term-stage reveal" style="--d:0.26s">
         <div class="fig"><span class="l-en">fig. 01 — a live session, cache still warm</span><span class="l-zh">图 01 —— 一场实时会话,缓存依然温热</span></div>
@@ -189,7 +196,7 @@ const ld = {
           <span class="num">01</span>
           <h3><span class="l-en">Install</span><span class="l-zh">安装</span></h3>
           <p><span class="l-en">One command. macOS, Linux, Windows, and WSL.</span><span class="l-zh">一条命令,支持 macOS、Linux、Windows 与 WSL。</span></p>
-          <code>npm i -g reasonix@next</code>
+          <code>npm i -g reasonix</code>
         </div>
         <div class="step reveal" style="--d:0.08s">
           <span class="num">02</span>
@@ -265,20 +272,20 @@ const ld = {
       </div>
 
       <div class="dl-pane active" data-pane="npm">
-        <span class="install"><span class="ps1">$</span>npm i -g reasonix@next<button data-copy="npm i -g reasonix@next">Copy</button></span>
+        <span class="install"><span class="ps1">$</span>npm i -g reasonix<button data-copy="npm i -g reasonix">Copy</button></span>
         <div class="chan">
           <div class="chan-row rec">
-            <code>npm i -g reasonix@next</code><span class="v">v<span class="rxv">{goVer}</span></span>
-            <span class="s"><span class="l-en">Go rewrite · one binary · no Node · actively developed</span><span class="l-zh">Go 重写 · 单二进制 · 无需 Node · 主力开发中</span></span>
+            <code>npm i -g reasonix</code><span class="v">v<span class="rxv">{goVer}</span></span>
+            <span class="s"><span class="l-en">Stable 1.x · one binary · no Node · actively developed</span><span class="l-zh">稳定 1.x · 单二进制 · 无需 Node · 主力开发中</span></span>
             <span class="chan-badge"><span class="l-en">recommended</span><span class="l-zh">推荐</span></span>
           </div>
           <div class="chan-row">
-            <code>npm i -g reasonix</code><span class="v">v0.53</span>
+            <code>npm i -g reasonix@0.53.2</code><span class="v">v0.53.2</span>
             <span class="s"><span class="l-en">deprecated 0.x line · no longer maintained</span><span class="l-zh">已废弃的 0.x 线 · 不再维护</span></span>
             <span class="chan-badge pre"><span class="l-en">deprecated</span><span class="l-zh">已废弃</span></span>
           </div>
         </div>
-        <div class="dl-note"><span class="l-en">macOS / Linux / Windows / WSL · the <span class="mono">latest</span> tag is pinned at v0.53 — always install from <span class="mono">@next</span> · <a class="rxnotes" href={`${repo}/releases/tag/v${goVer}`}>v<span class="rxv">{goVer}</span> release notes →</a></span><span class="l-zh">macOS / Linux / Windows / WSL · <span class="mono">latest</span> 标签固定在 v0.53——请始终通过 <span class="mono">@next</span> 安装 · <a class="rxnotes" href={`${repo}/releases/tag/v${goVer}`}>v<span class="rxv">{goVer}</span> 更新说明 →</a></span></div>
+        <div class="dl-note"><span class="l-en">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> tracks the current 1.x stable · <a class="rxnotes" href={`${repo}/releases/tag/v${goVer}`}>v<span class="rxv">{goVer}</span> release notes →</a></span><span class="l-zh">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> 指向当前 1.x 稳定版 · <a class="rxnotes" href={`${repo}/releases/tag/v${goVer}`}>v<span class="rxv">{goVer}</span> 更新说明 →</a></span></div>
       </div>
 
       <div class="dl-pane" data-pane="brew">
@@ -344,7 +351,7 @@ const ld = {
     </div>
     <div class="foot-sub">
       <span><span class="l-en">Engineered around DeepSeek's prefix cache.</span><span class="l-zh">围绕 DeepSeek 前缀缓存而设计。</span></span>
-      <span class="ver">v<span class="rxv">{goVer}</span> · @next</span>
+      <span class="ver">v<span class="rxv">{goVer}</span> · stable</span>
     </div>
   </footer>
 </Base>

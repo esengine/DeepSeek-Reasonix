@@ -8,8 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/BurntSushi/toml"
-
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/provider"
 )
 
@@ -48,7 +47,7 @@ func LoadForRoot(root string) (*Config, error) {
 	globalMaxSteps := cfg.Agent.MaxSteps
 	globalPlannerMaxSteps := cfg.Agent.PlannerMaxSteps
 	globalMemoryCompiler := cfg.Agent.MemoryCompiler
-	// Deep-copy: toml.DecodeFile writes through an existing *bool rather than
+	// Deep-copy: TOML decoding writes through an existing *bool rather than
 	// replacing it, so a shallow struct copy would alias the pointer and the
 	// project merge below would mutate the captured global value in place.
 	globalSecrets := cfg.Secrets
@@ -71,7 +70,7 @@ func LoadForRoot(root string) (*Config, error) {
 	// reasonix.toml must not be able to disable redaction or flip on the
 	// workflow-breaking env/path protections.
 	cfg.Secrets = globalSecrets
-	// toml.DecodeFile replaces [[plugins]] wholesale, so cfg.Plugins now holds
+	// TOML decoding replaces [[plugins]] wholesale, so cfg.Plugins now holds
 	// only the last file's. Re-merge by name across all sources (later wins) so a
 	// project reasonix.toml doesn't drop the global config's MCP servers.
 	plugins, err := mergeTOMLPlugins(tomlSources)
@@ -105,10 +104,13 @@ func LoadForRoot(root string) (*Config, error) {
 	}
 	cfg.mergeMCPJSON(entries)
 
-	// Lowest priority: the v0.x ~/.reasonix/config.json's mcpServers, so upgrading
-	// from the TypeScript line keeps MCP servers without rewriting them. Anything
-	// the v2 config or .mcp.json already declared wins on a name collision.
-	cfg.mergeMCPJSON(loadLegacyMCP(legacyConfigPath()))
+	// Lowest priority before the one-time v1.9.1 MCP migration: the v0.x
+	// ~/.reasonix/config.json's mcpServers. Once the migration marker exists, the
+	// current config is authoritative even when it is empty; reading the legacy
+	// source again would resurrect servers the user removed from current config.
+	if !mcpGlobalMigrationComplete() {
+		cfg.mergeMCPJSON(loadLegacyMCP(legacyConfigPath()))
+	}
 	_ = mergeInstalledPluginPackages(cfg, root)
 	normalizePluginCommandLines(cfg)
 	normalizeLegacyEffort(cfg)
@@ -271,7 +273,7 @@ func mergeTOMLPlugins(paths []string) ([]PluginEntry, error) {
 			continue
 		}
 		var f Config
-		if _, err := toml.DecodeFile(path, &f); err != nil {
+		if _, err := decodeTOMLFile(path, &f); err != nil {
 			return nil, fmt.Errorf("config %s: %w", path, err)
 		}
 		for _, p := range f.Plugins {
@@ -303,7 +305,7 @@ func mergeTOMLProviders(paths []string) ([]ProviderEntry, map[string]providerSou
 			continue
 		}
 		var f Config
-		if _, err := toml.DecodeFile(path, &f); err != nil {
+		if _, err := decodeTOMLFile(path, &f); err != nil {
 			return nil, nil, nil, false, fmt.Errorf("config %s: %w", path, err)
 		}
 		if len(f.Providers) == 0 {
@@ -356,7 +358,7 @@ func mergeTOMLProviderAccess(paths []string) ([]string, bool, error) {
 			continue
 		}
 		var f Config
-		meta, err := toml.DecodeFile(path, &f)
+		meta, err := decodeTOMLFile(path, &f)
 		if err != nil {
 			return nil, false, fmt.Errorf("config %s: %w", path, err)
 		}
@@ -456,7 +458,7 @@ func mergeFile(cfg *Config, path string) error {
 	if _, err := os.Stat(path); err != nil {
 		return nil
 	}
-	if _, err := toml.DecodeFile(path, cfg); err != nil {
+	if _, err := decodeTOMLFile(path, cfg); err != nil {
 		return fmt.Errorf("config %s: %w", path, err)
 	}
 	return nil
@@ -488,7 +490,7 @@ func migrateLegacyMCPTiersFile(path string) error {
 	if err != nil {
 		return err
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return err
 	}

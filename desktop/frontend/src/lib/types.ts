@@ -331,6 +331,7 @@ export interface HistoryMessage {
   checkpointTurn?: number;
   createdAt?: number;
   reasoning?: string;
+  workDurationMs?: number;
   memoryCitations?: MemoryCitation[];
   level?: "info" | "warn";
   toolCalls?: HistoryToolCall[];
@@ -416,7 +417,8 @@ export interface SessionMeta {
   userId?: string;
   threadId?: string;
   sessionSource?: string;
-  recovered?: boolean; // conflict-recovery copy of another session
+  recovered?: boolean; // created by conflict recovery, including a continued branch
+  recoveryCopy?: boolean; // actual branch content is unchanged and covered by its parent
 }
 
 // SessionReference is a session selected via @ past:chats for context injection.
@@ -681,6 +683,7 @@ export interface ServerView {
   authStatus?: "none" | "possible" | "required" | string;
   authUrl?: string;
   authConfigured?: boolean;
+  managedByPlugin?: string;
 }
 export interface MCPToolView {
   name: string;
@@ -958,6 +961,7 @@ export interface SandboxView {
   effectiveWorkspaceRoot: string;
   effectiveWriteRoots: string[];
   shell: string; // "auto" | "bash" | "powershell" | "pwsh"
+  effectiveShell?: string; // "bash" | "git-bash" | "powershell" | "pwsh"
 }
 
 export interface NetworkProxyView {

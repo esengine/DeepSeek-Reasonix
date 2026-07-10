@@ -66,7 +66,6 @@ func TestSubagentToolRegistryFiltersUnavailableToolsAndWrapsBash(t *testing.T) {
 		"parallel_tasks",
 		"run_skill",
 		"read_only_skill",
-		"read_skill",
 		"install_skill",
 		"install_source",
 		"explore",
@@ -83,6 +82,9 @@ func TestSubagentToolRegistryFiltersUnavailableToolsAndWrapsBash(t *testing.T) {
 	}
 	if _, ok := sub.Get("read_file"); !ok {
 		t.Fatalf("subagent registry should keep read_file; got %v", sub.Names())
+	}
+	if _, ok := sub.Get("read_skill"); !ok {
+		t.Fatalf("depth-capped subagent registry should keep read_skill (it renders text, it cannot recurse); got %v", sub.Names())
 	}
 	bash, ok := sub.Get("bash")
 	if !ok {
@@ -173,10 +175,13 @@ func TestReadOnlySubagentToolRegistryAllowsOnlyReadOnlyDelegationBeforeDepthLimi
 	}
 
 	secondLayer := ReadOnlySubagentToolRegistryForDepth(parent, nil, 2, 2)
-	for _, hidden := range []string{"task", "run_skill", "read_only_task", "read_only_skill", "read_skill", "explore", "write_file"} {
+	for _, hidden := range []string{"task", "run_skill", "read_only_task", "read_only_skill", "explore", "write_file"} {
 		if _, ok := secondLayer.Get(hidden); ok {
 			t.Fatalf("depth-limited read-only registry should hide %q; got %v", hidden, secondLayer.Names())
 		}
+	}
+	if _, ok := secondLayer.Get("read_skill"); !ok {
+		t.Fatalf("depth-limited read-only registry should keep read_skill (it renders text, it cannot recurse); got %v", secondLayer.Names())
 	}
 }
 

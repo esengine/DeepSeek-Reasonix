@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 func TestResolveBuiltin(t *testing.T) {
@@ -78,6 +80,22 @@ func TestCustomFileOverridesBuiltinAndParses(t *testing.T) {
 	}
 	if got := Apply("CODING PROMPT", st); got != st.Body {
 		t.Errorf("a replace-style should drop the base prompt, got %q", got)
+	}
+}
+
+func TestResolveDecodesGB18030CustomFile(t *testing.T) {
+	dir := t.TempDir()
+	body := "---\nname: concise-cn\ndescription: 中文风格\n---\n请用中文简洁回答。"
+	if err := os.WriteFile(filepath.Join(dir, "concise-cn.md"), fileencoding.Encode(body, fileencoding.GB18030), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	st, ok := Resolve("concise-cn", []string{dir})
+	if !ok {
+		t.Fatal("custom style should resolve")
+	}
+	if st.Description != "中文风格" || st.Body != "请用中文简洁回答。" {
+		t.Fatalf("decoded style = %+v", st)
 	}
 }
 

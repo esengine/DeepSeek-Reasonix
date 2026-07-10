@@ -119,6 +119,11 @@ type Messages struct {
 	SandboxEscapeWrapReason                string // reason when the Windows sandbox cannot wrap the command
 	SandboxEscapeRuntimeReason             string // reason when the Windows sandbox helper fails while starting the command
 	SandboxEscapeDeclined                  string // model-facing denial when the user declines a one-shot unconfined retry
+	ApprovalToolLabelConfigWrite           string // user-facing label for Reasonix-managed config write approvals
+	ConfigWriteSubjectPrefix               string // subject prefix before the config file path for managed config write approval
+	ConfigWriteReason                      string // reason shown for managed config write approval
+	ConfigWriteDeclined                    string // model-facing denial when the user declines a managed config write
+	ConfigWriteApprovalChoices             string // approval choice list for managed config write prompts
 	PermissionSavedFmt                     string // permission rule saved notice: path, rule
 	PermissionAlreadyAllowedFmt            string // permission rule already covered notice: path, rule
 	PermissionSaveFailedFmt                string // permission rule save failure notice: rule, error

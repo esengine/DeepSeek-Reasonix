@@ -770,20 +770,24 @@ export function TurnActions({
   );
 }
 
-export const AssistantMessage = memo(function AssistantMessage({
+function reasoningDurationLabel(durationMs: number | undefined, t: ReturnType<typeof useT>): string {
+  if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs <= 0) {
+    return t("msg.thinkingDone");
+  }
+  const seconds = Math.max(1, Math.round(durationMs / 1000));
+  return t("msg.thinkingDuration", { s: seconds });
+}
+
+function ReasoningPanel({
   item,
-  defaultExpanded = false,
-  expandWhileStreaming = true,
-  truncateStreamingReasoning = false,
-  creationMode = false,
+  defaultExpanded,
+  expandWhileStreaming,
+  truncateStreamingReasoning,
 }: {
   item: AssistantItem;
-  defaultExpanded?: boolean;
-  /** false in compact mode: completed steps fold away, so auto-open + fold reads as flicker. */
-  expandWhileStreaming?: boolean;
-  /** Opt-in for compact mode to keep live DeepSeek reasoning from growing an unbounded DOM. */
-  truncateStreamingReasoning?: boolean;
-  creationMode?: boolean;
+  defaultExpanded: boolean;
+  expandWhileStreaming: boolean;
+  truncateStreamingReasoning: boolean;
 }) {
   const t = useT();
   const reasoningBodyRef = useRef<HTMLDivElement>(null);
@@ -811,7 +815,7 @@ export const AssistantMessage = memo(function AssistantMessage({
       if (defaultExpanded) {
         setReasoningOpen(true);
       } else if (!userOverridden.current) {
-        setReasoningOpen(expandWhileStreaming);
+        setReasoningOpen(expandWhileStreaming && !nowRC);
       }
     } else if (nowRC && !wasRC) {
       // Reasoning just finished — auto-close while we wait for text.
@@ -830,35 +834,64 @@ export const AssistantMessage = memo(function AssistantMessage({
     userOverridden.current = true;
     setReasoningOpen((v) => !v);
   };
-  const hasText = item.streaming || item.text.trim() !== "";
-  const processOnly = Boolean(item.reasoning) && !hasText;
-  const processWithText = Boolean(item.reasoning) && hasText;
+  const isReasoningRunning = item.streaming && !item.reasoningComplete;
   const visibleReasoning = reasoningOpen
     ? displayReasoningText(item.reasoning, {
         streaming: item.streaming,
         truncateStreaming: truncateStreamingReasoning,
       })
     : "";
+  const label = isReasoningRunning ? t("msg.thinkingRunning") : t("msg.thinking");
+  const meta = isReasoningRunning ? "" : reasoningDurationLabel(item.reasoningDurationMs, t);
+
+  return (
+    <div className="reasoning">
+      <button
+        type="button"
+        className="reasoning__head"
+        data-running={isReasoningRunning ? "" : undefined}
+        onClick={toggleReasoning}
+        aria-expanded={reasoningOpen}
+      >
+        <ProcessBrainIcon size={12} />
+        <span data-creation-label={t("creation.reasoningLabel")}>{label}</span>
+        {meta && <span className="reasoning__meta">{meta}</span>}
+        <ChevronRight className={`reasoning__chevron${reasoningOpen ? " reasoning__chevron--open" : ""}`} size={12} />
+      </button>
+      {reasoningOpen && (
+        <div ref={reasoningBodyRef} className="reasoning__body">{visibleReasoning}</div>
+      )}
+    </div>
+  );
+}
+
+export const AssistantMessage = memo(function AssistantMessage({
+  item,
+  defaultExpanded = false,
+  expandWhileStreaming = true,
+  truncateStreamingReasoning = false,
+  creationMode = false,
+}: {
+  item: AssistantItem;
+  defaultExpanded?: boolean;
+  /** false in compact mode: completed steps fold away, so auto-open + fold reads as flicker. */
+  expandWhileStreaming?: boolean;
+  /** Opt-in for compact mode to keep live DeepSeek reasoning from growing an unbounded DOM. */
+  truncateStreamingReasoning?: boolean;
+  creationMode?: boolean;
+}) {
+  const hasText = item.streaming || item.text.trim() !== "";
+  const processOnly = Boolean(item.reasoning) && !hasText;
+  const processWithText = Boolean(item.reasoning) && hasText;
   return (
     <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`} data-history-restore={item.id.startsWith("h") ? "" : undefined} data-entrance={item.id}>
       {item.reasoning && (
-        <div className="reasoning">
-          <button
-            type="button"
-            className="reasoning__head"
-            data-running={item.streaming && !item.reasoningComplete ? "" : undefined}
-            onClick={toggleReasoning}
-            aria-expanded={reasoningOpen}
-          >
-            <ProcessBrainIcon size={12} />
-            <span data-creation-label={t("creation.reasoningLabel")}>{t("msg.thinking")}</span>
-            <span className="reasoning__meta">{item.streaming && !item.reasoningComplete ? t("msg.thinkingRunning") : t("msg.thinkingDone")}</span>
-            <ChevronRight className={`reasoning__chevron${reasoningOpen ? " reasoning__chevron--open" : ""}`} size={12} />
-          </button>
-          {reasoningOpen && (
-            <div ref={reasoningBodyRef} className="reasoning__body">{visibleReasoning}</div>
-          )}
-        </div>
+        <ReasoningPanel
+          item={item}
+          defaultExpanded={defaultExpanded}
+          expandWhileStreaming={expandWhileStreaming}
+          truncateStreamingReasoning={truncateStreamingReasoning}
+        />
       )}
       {hasText && (
         <div className="msg__body">

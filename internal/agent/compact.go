@@ -355,6 +355,12 @@ func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
 	return nil
 }
 
+// IsCompactionSummary reports whether m is a rolling digest inserted by a
+// prior compaction fold. Exported for session owners outside this package
+// (e.g. the guardian) whose turn rollback must not treat a digest as a
+// disposable user message.
+func IsCompactionSummary(m provider.Message) bool { return isCompactionSummary(m) }
+
 // isCompactionSummary reports whether m is a rolling summary from a prior fold.
 func isCompactionSummary(m provider.Message) bool {
 	return m.Role == provider.RoleUser &&

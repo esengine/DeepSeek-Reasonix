@@ -18,6 +18,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 )
 
 // settings_app.go is the desktop Settings panel's command surface: it reads the
@@ -108,6 +109,7 @@ type SandboxView struct {
 	EffectiveWorkspaceRoot string   `json:"effectiveWorkspaceRoot"`
 	EffectiveWriteRoots    []string `json:"effectiveWriteRoots"`
 	Shell                  string   `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
+	EffectiveShell         string   `json:"effectiveShell,omitempty"`
 }
 
 type NetworkProxyView struct {
@@ -795,7 +797,7 @@ func (a *App) Settings() SettingsView {
 				Ask:   []string{},
 				Deny:  []string{},
 			},
-			Sandbox:                 SandboxView{Bash: config.Default().BashMode(), AllowWrite: []string{}, EffectiveWriteRoots: []string{}, Shell: "auto"},
+			Sandbox:                 SandboxView{Bash: config.Default().BashMode(), AllowWrite: []string{}, EffectiveWriteRoots: []string{}, Shell: "auto", EffectiveShell: sandboxEffectiveShellView(sandbox.ResolveShell("", "", nil))},
 			Agent:                   AgentView{PlannerMaxSteps: 0, MaxSubagentDepth: agent.DefaultMaxSubagentDepth, ColdResumePrune: true, ReasoningLanguage: "auto"},
 			Bot:                     botSettingsView(config.BotConfig{}),
 			AutoPlan:                "off",
@@ -826,6 +828,7 @@ func (a *App) Settings() SettingsView {
 	if len(writeRoots) > 0 {
 		effectiveWorkspaceRoot = writeRoots[0]
 	}
+	effectiveShell := sandbox.ResolveShell(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, nil)
 	v := SettingsView{
 		DefaultModel:      cfg.DefaultModel,
 		PlannerModel:      cfg.Agent.PlannerModel,
@@ -845,7 +848,7 @@ func (a *App) Settings() SettingsView {
 			Bash: bash, Network: cfg.Sandbox.Network,
 			WorkspaceRoot: cfg.Sandbox.WorkspaceRoot, AllowWrite: nonNil(cfg.Sandbox.AllowWrite),
 			EffectiveWorkspaceRoot: effectiveWorkspaceRoot, EffectiveWriteRoots: nonNil(writeRoots),
-			Shell: shell,
+			Shell: shell, EffectiveShell: sandboxEffectiveShellView(effectiveShell),
 		},
 		Network: NetworkView{
 			ProxyMode: cfg.NetworkProxyMode(),
@@ -889,6 +892,20 @@ func (a *App) Settings() SettingsView {
 		v.Providers = append(v.Providers, providerViewFromEntryForRootWithResolver(*p, isOfficialBuiltInProvider(*p), added[p.Name], root, resolver))
 	}
 	return v
+}
+
+func sandboxEffectiveShellView(sh sandbox.Shell) string {
+	if sh.Kind == sandbox.ShellPowerShell {
+		if sh.SupportsChaining() {
+			return "pwsh"
+		}
+		return "powershell"
+	}
+	path := strings.ToLower(strings.ReplaceAll(sh.Path, "\\", "/"))
+	if strings.Contains(path, "/git/") && strings.HasSuffix(path, "bash.exe") {
+		return "git-bash"
+	}
+	return "bash"
 }
 
 func botSettingsView(b config.BotConfig) BotSettingsView {
@@ -1408,7 +1425,7 @@ func configDeclaresProviderAccess(path string) bool {
 	if strings.TrimSpace(path) == "" {
 		return false
 	}
-	body, err := os.ReadFile(path)
+	body, err := readFileUTF8(path)
 	if err != nil {
 		return false
 	}
@@ -2748,14 +2765,15 @@ func (a *App) SetBotSettings(b BotSettingsView) error {
 			Access:           botAccessConfigFromView(b.QQ.Access),
 		}
 		c.Bot.Feishu = config.FeishuBotConfig{
-			Enabled:           b.Feishu.Enabled,
-			Domain:            botDomainOrDefault(b.Feishu.Domain),
-			AppID:             strings.TrimSpace(b.Feishu.AppID),
-			AppSecretEnv:      strings.TrimSpace(b.Feishu.AppSecretEnv),
-			VerificationToken: strings.TrimSpace(b.Feishu.VerificationToken),
-			Mode:              strings.TrimSpace(b.Feishu.Mode),
-			WebhookPort:       b.Feishu.WebhookPort,
-			RequireMention:    b.Feishu.RequireMention,
+			Enabled:            b.Feishu.Enabled,
+			Domain:             botDomainOrDefault(b.Feishu.Domain),
+			AppID:              strings.TrimSpace(b.Feishu.AppID),
+			AppSecretEnv:       strings.TrimSpace(b.Feishu.AppSecretEnv),
+			VerificationToken:  strings.TrimSpace(b.Feishu.VerificationToken),
+			Mode:               strings.TrimSpace(b.Feishu.Mode),
+			WebhookPort:        b.Feishu.WebhookPort,
+			RequireMention:     b.Feishu.RequireMention,
+			OutboundMediaRoots: append([]string(nil), c.Bot.Feishu.OutboundMediaRoots...),
 		}
 		c.Bot.Weixin = config.WeixinBotConfig{
 			Enabled:   b.Weixin.Enabled,

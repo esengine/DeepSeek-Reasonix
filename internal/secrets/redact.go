@@ -60,6 +60,12 @@ func SetRedactToolOutput(enabled bool) { redactToolOutputEnabled.Store(enabled) 
 // filter_subprocess_env).
 func SetFilterSubprocessEnv(enabled bool) { filterSubprocessEnvEnabled.Store(enabled) }
 
+// FilterSubprocessEnv reports whether credential-like variables are stripped
+// from tool subprocess environments. Callers that would launch a command in an
+// environment they cannot filter (a host-owned terminal, say) must check this
+// and keep execution local.
+func FilterSubprocessEnv() bool { return filterSubprocessEnvEnabled.Load() }
+
 // SetProtectSensitiveFiles enables or disables the built-in credential-path
 // read denylist for read/list/search tools ([secrets] protect_sensitive_files).
 func SetProtectSensitiveFiles(enabled bool) { protectSensitiveFilesEnabled.Store(enabled) }

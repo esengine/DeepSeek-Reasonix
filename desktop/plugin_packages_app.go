@@ -156,8 +156,7 @@ func (a *App) RemovePlugin(name string) error {
 			if tab == nil || tab.Ctrl == nil {
 				return false
 			}
-			removed, _ := tab.Ctrl.RemoveMCPServer(serverName)
-			return removed
+			return tab.Ctrl.DisconnectMCPServer(serverName)
 		},
 	})
 	if _, err := tl.Execute(context.Background(), raw); err != nil {

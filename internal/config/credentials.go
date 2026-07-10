@@ -8,10 +8,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/BurntSushi/toml"
 	"github.com/joho/godotenv"
 
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 const (
@@ -124,7 +124,7 @@ func credentialsStoreMode() string {
 		CredentialsStore string `toml:"credentials_store"`
 	}
 	if path := userConfigLoadPath(); path != "" {
-		_, _ = toml.DecodeFile(path, &partial)
+		_, _ = decodeTOMLFile(path, &partial)
 	}
 	return normalizeCredentialsStore(partial.CredentialsStore)
 }
@@ -580,7 +580,7 @@ func removeCredentialFromFile(path, key string) error {
 }
 
 func readCredentialFileLines(path string) ([]string, error) {
-	data, err := os.ReadFile(path)
+	data, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

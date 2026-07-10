@@ -136,6 +136,46 @@ func TestSessionDataGuardZeroValueUnconfined(t *testing.T) {
 	}
 }
 
+func TestSessionDataGuardDeniesSecurityBoundaryFiles(t *testing.T) {
+	root, _, _ := stateRootFor(t)
+	g := NewSessionDataGuard(root, nil)
+
+	// settings.json holds the global hooks (arbitrary shell commands run on
+	// every future session); trust.json decides whose project hooks run at
+	// all. Both are a security boundary, not a runtime ledger.
+	for _, target := range []string{
+		filepath.Join(root, "settings.json"),
+		filepath.Join(root, "trust.json"),
+	} {
+		if err := g.Check(target); err == nil {
+			t.Errorf("Check(%q) = nil, want security-boundary denial", target)
+		} else if !strings.Contains(err.Error(), "security boundary") {
+			t.Errorf("Check(%q) error %q should name the security boundary", target, err)
+		}
+	}
+	// The same names nested below the state root are ordinary files (a project
+	// checkout under a home workspace may legitimately contain them).
+	if err := g.Check(filepath.Join(root, "backups", "settings.json")); err != nil {
+		t.Errorf("nested settings.json should be writable: %v", err)
+	}
+	// An explicit allow_write entry stays the sanctioned escape hatch.
+	allowed := NewSessionDataGuard(root, []string{root})
+	if err := allowed.Check(filepath.Join(root, "settings.json")); err != nil {
+		t.Errorf("allow_write-covered settings.json should pass, got %v", err)
+	}
+}
+
+func TestSessionDataGuardSecurityFilesCaseVariantOnFoldingSystems(t *testing.T) {
+	if !foldPaths {
+		t.Skip("case-sensitive default filesystem: a case variant is a genuinely different path")
+	}
+	root, _, _ := stateRootFor(t)
+	g := NewSessionDataGuard(root, nil)
+	if err := g.Check(filepath.Join(root, "Settings.JSON")); err == nil {
+		t.Fatal("case variant of settings.json reaches the same bytes on this filesystem and must be denied")
+	}
+}
+
 func TestSessionDataGuardAllowWriteEscapeHatch(t *testing.T) {
 	root, cliSession, projectSession := stateRootFor(t)
 	g := NewSessionDataGuard(root, []string{filepath.Join(root, "sessions")})
@@ -154,7 +194,7 @@ func TestWriteToolsRejectSessionData(t *testing.T) {
 	// Workspace root covers the state root — the accidental self-write shape
 	// (e.g. a home-directory workspace).
 	guard := NewSessionDataGuard(root, nil)
-	tools := ConfineWriters([]string{root}, guard)
+	tools := ConfineWriters([]string{root}, guard, ManagedConfigPaths{})
 
 	argsFor := func(name, target string) json.RawMessage {
 		var m map[string]any

@@ -62,6 +62,51 @@ func TestUserConfigPathUsesReasonixHome(t *testing.T) {
 	}
 }
 
+func TestReasonixManagedConfigPathsAreConfigFilesOnly(t *testing.T) {
+	home := isolateUserConfigHome(t)
+	setRuntimeGOOS(t, "windows")
+	oldConfigDir := osUserConfigDir
+	osUserConfigDir = func() string { return filepath.Join(home, "AppData", "Roaming") }
+	t.Cleanup(func() { osUserConfigDir = oldConfigDir })
+
+	paths := ReasonixManagedConfigPaths()
+	for _, want := range []string{
+		filepath.Join(home, "AppData", "Roaming", "reasonix", "config.toml"),
+		filepath.Join(home, ".reasonix", "config.json"),
+	} {
+		found := false
+		for _, got := range paths {
+			if samePath(got, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("managed config paths = %v, want %s", paths, want)
+		}
+	}
+	// The escape hatch is file-level by contract: no directories, and none of
+	// the sensitive Reasonix-home siblings (credentials, hooks, skills,
+	// sessions) may ride along.
+	for _, got := range paths {
+		if base := filepath.Base(got); base != "config.toml" && base != "config.json" {
+			t.Fatalf("managed config path %q is not a known config file (paths must be files, not directories): %v", got, paths)
+		}
+		for _, forbidden := range []string{
+			home,
+			ReasonixHomeDir(),
+			UserCredentialsPath(),
+			filepath.Join(ReasonixHomeDir(), "settings.json"),
+			filepath.Join(ReasonixHomeDir(), "skills"),
+			filepath.Join(ReasonixHomeDir(), "sessions"),
+		} {
+			if samePath(got, forbidden) {
+				t.Fatalf("managed config paths must not include %q: %v", forbidden, paths)
+			}
+		}
+	}
+}
+
 func TestUserConfigPathHonorsReasonixHome(t *testing.T) {
 	home := isolateUserConfigHome(t)
 	custom := filepath.Join(home, "custom-home")
@@ -198,6 +243,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Skills.MaxDepth = 2
 	orig.Bot.ToolApprovalMode = "auto"
 	orig.Bot.Control = BotControlConfig{Enabled: true, Addr: "127.0.0.1:39001", TokenEnv: "BOT_CONTROL_TOKEN"}
+	orig.Bot.Feishu.OutboundMediaRoots = []string{"/tmp/reasonix-media", "/srv/shots"}
 	orig.Bot.Routes = []BotRouteConfig{{
 		ConnectionID:     "feishu-lark",
 		ChatType:         "group",
@@ -205,6 +251,13 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 		Model:            "deepseek-pro",
 		ToolApprovalMode: "ask",
 		WorkspaceRoot:    "/tmp/reasonix-route",
+	}}
+	orig.Bot.DesktopWatchers = []BotDesktopWatcherConfig{{
+		Platform:     "feishu",
+		ConnectionID: "feishu-lark",
+		Domain:       "lark",
+		ChatType:     "dm",
+		ChatID:       "oc_watcher",
 	}}
 	orig.Bot.Connections = []BotConnectionConfig{{
 		ID:               "feishu-lark",
@@ -328,8 +381,14 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if !got.Bot.Control.Enabled || got.Bot.Control.Addr != "127.0.0.1:39001" || got.Bot.Control.TokenEnv != "BOT_CONTROL_TOKEN" {
 		t.Errorf("bot control not preserved: %+v", got.Bot.Control)
 	}
+	if len(got.Bot.Feishu.OutboundMediaRoots) != 2 || got.Bot.Feishu.OutboundMediaRoots[0] != "/tmp/reasonix-media" {
+		t.Errorf("feishu outbound_media_roots not preserved: %+v", got.Bot.Feishu.OutboundMediaRoots)
+	}
 	if len(got.Bot.Routes) != 1 || got.Bot.Routes[0].WorkspaceRoot != "/tmp/reasonix-route" || got.Bot.Routes[0].ChatID != "oc_group" {
 		t.Errorf("bot routes not preserved: %+v", got.Bot.Routes)
+	}
+	if len(got.Bot.DesktopWatchers) != 1 || got.Bot.DesktopWatchers[0].ChatID != "oc_watcher" || got.Bot.DesktopWatchers[0].Platform != "feishu" || got.Bot.DesktopWatchers[0].Domain != "lark" {
+		t.Errorf("bot desktop watchers not preserved: %+v", got.Bot.DesktopWatchers)
 	}
 	if len(got.Bot.Connections[0].SessionMappings) != 1 || got.Bot.Connections[0].SessionMappings[0].Scope != "project" || got.Bot.Connections[0].SessionMappings[0].WorkspaceRoot != "/tmp/reasonix-bot" {
 		t.Errorf("bot session mapping scope not preserved: %+v", got.Bot.Connections[0].SessionMappings)
@@ -1012,7 +1071,7 @@ func TestRenderTOMLDefaultStepsCommentedOut(t *testing.T) {
 	}
 }
 
-func TestRenderTOMLWindowsSandboxDefaultAndExplicitEnforce(t *testing.T) {
+func TestRenderTOMLWindowsSandboxDefaultAndExplicitEnforceDisabled(t *testing.T) {
 	isolateUserConfigHome(t)
 	setRuntimeGOOS(t, "windows")
 
@@ -1024,8 +1083,8 @@ func TestRenderTOMLWindowsSandboxDefaultAndExplicitEnforce(t *testing.T) {
 	cfg := Default()
 	cfg.Sandbox.Bash = "enforce"
 	delta := RenderTOMLProjectDelta(cfg)
-	if !strings.Contains(delta, `bash = "enforce"`) {
-		t.Fatalf("Windows explicit enforce should be rendered as a delta:\n%s", delta)
+	if strings.Contains(delta, `[sandbox]`) || strings.Contains(delta, `bash = `) {
+		t.Fatalf("Windows explicit enforce should not render as an effective project delta:\n%s", delta)
 	}
 }
 

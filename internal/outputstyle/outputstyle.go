@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/frontmatter"
 )
 
@@ -148,7 +149,7 @@ func Apply(base string, st OutputStyle) string {
 // stem; frontmatter supplies description and keep-coding-instructions; the body
 // is the prompt text.
 func parseFile(path string) (OutputStyle, bool) {
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return OutputStyle{}, false
 	}

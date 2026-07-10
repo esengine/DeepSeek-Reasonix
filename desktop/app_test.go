@@ -5136,6 +5136,56 @@ func TestFileRefsUseActiveTabWorkspaceRoot(t *testing.T) {
 	}
 }
 
+func TestFileRefsForTabIgnoreActiveParentWorkspace(t *testing.T) {
+	parentRoot := robustTempDir(t)
+	childRoot := filepath.Join(parentRoot, "child")
+	if err := os.MkdirAll(childRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parentRoot, "parent-only.txt"), []byte("parent"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parentRoot, "shared.txt"), []byte("parent shared"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(childRoot, "child-only.txt"), []byte("child"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(childRoot, "shared.txt"), []byte("child shared"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"parent": {ID: "parent", Scope: "project", WorkspaceRoot: parentRoot},
+			"child":  {ID: "child", Scope: "project", WorkspaceRoot: childRoot},
+		},
+		activeTabID: "parent",
+	}
+
+	listed := app.ListDirForTab("child", "")
+	if !hasDirEntry(listed, "child-only.txt") || hasDirEntry(listed, "parent-only.txt") {
+		t.Fatalf("ListDirForTab(child) = %+v, want only child workspace entries", listed)
+	}
+	found := app.SearchFileRefsForTab("child", "child-only")
+	if !hasDirEntry(found, "child-only.txt") {
+		t.Fatalf("SearchFileRefsForTab(child) = %+v, want child-only.txt", found)
+	}
+	preview := app.ReadFileForTab("child", "shared.txt")
+	if preview.Err != "" || preview.Body != "child shared" {
+		t.Fatalf("ReadFileForTab(child) = %+v, want child workspace file", preview)
+	}
+	path, ok, err := app.workspaceOrExternalPathForTab("child", "shared.txt")
+	if err != nil || !ok || path != filepath.Join(childRoot, "shared.txt") {
+		t.Fatalf("workspaceOrExternalPathForTab(child) = (%q, %v, %v)", path, ok, err)
+	}
+
+	legacy := app.ReadFile("shared.txt")
+	if legacy.Err != "" || legacy.Body != "parent shared" {
+		t.Fatalf("ReadFile legacy active-tab behavior = %+v, want parent workspace file", legacy)
+	}
+}
+
 func TestFileRefsIncludeRegisteredExternalFolderChildren(t *testing.T) {
 	workspace := robustTempDir(t)
 	external := filepath.Join(robustTempDir(t), "Folder With Spaces")
@@ -5159,11 +5209,12 @@ func TestFileRefsIncludeRegisteredExternalFolderChildren(t *testing.T) {
 	app := &App{
 		tabs: map[string]*WorkspaceTab{
 			"project": {ID: "project", WorkspaceRoot: workspace, Ctrl: ctrl},
+			"other":   {ID: "other", WorkspaceRoot: robustTempDir(t)},
 		},
-		activeTabID: "project",
+		activeTabID: "other",
 	}
 
-	listed := app.ListDir(token + "/src/")
+	listed := app.ListDirForTab("project", token+"/src/")
 	if len(listed) != 1 ||
 		listed[0].Name != "outside.txt" ||
 		listed[0].Path != token+"/src/outside.txt" ||
@@ -5171,7 +5222,7 @@ func TestFileRefsIncludeRegisteredExternalFolderChildren(t *testing.T) {
 		t.Fatalf("ListDir external src = %+v, want outside token/display path", listed)
 	}
 
-	found := app.SearchFileRefs("outside")
+	found := app.SearchFileRefsForTab("project", "outside")
 	var externalHit *DirEntry
 	for i := range found {
 		if found[i].Path == token+"/src/outside.txt" {
@@ -5183,7 +5234,7 @@ func TestFileRefsIncludeRegisteredExternalFolderChildren(t *testing.T) {
 		t.Fatalf("SearchFileRefs external hit = %+v, all results %+v", externalHit, found)
 	}
 
-	preview := app.ReadFile(token + "/src/outside.txt")
+	preview := app.ReadFileForTab("project", token+"/src/outside.txt")
 	if preview.Err != "" || preview.Body != "outside" {
 		t.Fatalf("ReadFile external token preview = %+v, want outside file body", preview)
 	}
@@ -6800,6 +6851,104 @@ func TestRemoveMCPServerDeletesProjectMCPJSONEntry(t *testing.T) {
 	}
 	if _, ok := findPluginEntry(cfg.Plugins, "keep"); !ok {
 		t.Fatalf("unrelated .mcp.json server should be preserved: %+v", cfg.Plugins)
+	}
+}
+
+func TestRemoveMCPServerRejectsPluginManagedServerWithoutDisconnecting(t *testing.T) {
+	home := isolateDesktopUserDirs(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	srv := desktopMCPHTTPServer(t)
+	defer srv.Close()
+	reasonixHome := filepath.Join(home, ".reasonix")
+	root := filepath.Join(reasonixHome, "plugins", "superpowers")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), []byte(fmt.Sprintf(`{
+  "name": "superpowers",
+  "version": "1.0.0",
+  "mcpServers": {
+    "helper": { "type": "http", "url": %q }
+  }
+}`, srv.URL)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := pluginpkg.Upsert(reasonixHome, pluginpkg.InstalledPlugin{
+		Name:         "superpowers",
+		Root:         "plugins/superpowers",
+		Version:      "1.0.0",
+		ManifestKind: "reasonix",
+		Enabled:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadForRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := findPluginEntry(cfg.Plugins, "helper")
+	if !ok {
+		t.Fatalf("plugin-managed MCP missing from config: %+v", cfg.Plugins)
+	}
+	ctrl := control.New(control.Options{Host: plugin.NewHost()})
+	defer ctrl.Close()
+	if _, err := ctrl.ConnectMCPServer(entry); err != nil {
+		t.Fatalf("connect plugin-managed MCP: %v", err)
+	}
+
+	app := NewApp()
+	app.setTestCtrl(ctrl, "")
+	app.activeTab().WorkspaceRoot = dir
+	err = app.RemoveMCPServer("helper")
+	if err == nil || !strings.Contains(err.Error(), "managed by plugin") || !strings.Contains(err.Error(), "superpowers") {
+		t.Fatalf("RemoveMCPServer(plugin-managed) error = %v", err)
+	}
+	if !mcpConnected(ctrl, "helper") {
+		t.Fatal("plugin-managed MCP was disconnected despite rejected removal")
+	}
+	for action, actionErr := range map[string]error{
+		"trust tool": app.TrustMCPServerTool("helper", "echo"),
+		"clear auth": app.ClearMCPServerAuthentication("helper"),
+		"update":     app.UpdateMCPServer("helper", MCPServerInput{Name: "helper", Transport: "http", URL: srv.URL}),
+	} {
+		if actionErr == nil || !strings.Contains(actionErr.Error(), "managed by plugin") {
+			t.Fatalf("%s plugin-managed MCP error = %v", action, actionErr)
+		}
+	}
+	if _, found := findPluginEntry(config.LoadForEdit(config.UserConfigPath()).Plugins, "helper"); found {
+		t.Fatal("plugin-managed MCP mutation created a user-config shadow")
+	}
+	servers := app.MCPServers()
+	if len(servers) != 1 || servers[0].Name != "helper" || servers[0].ManagedByPlugin != "superpowers" {
+		t.Fatalf("MCPServers() = %+v, want helper managed by superpowers", servers)
+	}
+}
+
+func TestRemoveMCPServerRejectsRuntimeOnlyServerWithoutDisconnecting(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	srv := desktopMCPHTTPServer(t)
+	defer srv.Close()
+	ctrl := control.New(control.Options{Host: plugin.NewHost()})
+	defer ctrl.Close()
+	if _, err := ctrl.ConnectMCPServer(config.PluginEntry{Name: "runtime-only", Type: "http", URL: srv.URL}); err != nil {
+		t.Fatalf("connect runtime-only MCP: %v", err)
+	}
+
+	app := NewApp()
+	app.setTestCtrl(ctrl, "")
+	app.activeTab().WorkspaceRoot = dir
+	err := app.RemoveMCPServer("runtime-only")
+	if err == nil || !strings.Contains(err.Error(), "no removable MCP server") {
+		t.Fatalf("RemoveMCPServer(runtime-only) error = %v", err)
+	}
+	if !mcpConnected(ctrl, "runtime-only") {
+		t.Fatal("runtime-only MCP was disconnected despite failed persistence removal")
 	}
 }
 

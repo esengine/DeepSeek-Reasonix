@@ -28,7 +28,7 @@ func upsertEnvFile(path, key, value string) error {
 		return nil
 	}
 	var lines []string
-	if b, err := os.ReadFile(path); err == nil {
+	if b, err := readFileUTF8(path); err == nil {
 		lines = strings.Split(strings.TrimRight(string(b), "\n"), "\n")
 	}
 	replaced := false
@@ -80,7 +80,7 @@ func removeEnvFile(path, key string) error {
 	if key == "" {
 		return nil
 	}
-	data, err := os.ReadFile(path)
+	data, err := readFileUTF8(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return os.Unsetenv(key)

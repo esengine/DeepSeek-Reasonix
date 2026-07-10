@@ -14,6 +14,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/secrets"
+	"reasonix/internal/tool"
 )
 
 func TestWithin(t *testing.T) {
@@ -136,6 +137,123 @@ func TestWriteFileDefaultRootsDenyUserConfigUnlessAllowed(t *testing.T) {
 	}
 	if _, err := os.Stat(userConfig); err != nil {
 		t.Fatalf("user config was not created with allow_write: %v", err)
+	}
+}
+
+// stubConfigWriteApprover is a scripted tool.ConfigWriteApprover recording the
+// paths it was asked about.
+type stubConfigWriteApprover struct {
+	allow  bool
+	reason string
+	asked  []string
+}
+
+func (s *stubConfigWriteApprover) ApproveManagedConfigWrite(_ context.Context, req tool.ConfigWriteRequest) (bool, string, error) {
+	s.asked = append(s.asked, req.Path)
+	return s.allow, s.reason, nil
+}
+
+func TestManagedConfigWriteFailsClosedWithoutApprover(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData", "Roaming"))
+
+	project := filepath.Join(home, "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	managed := NewManagedConfigPaths(config.ReasonixManagedConfigPaths())
+	w := writeFile{roots: realRoots(cfg.WriteRootsForRoot(project)), managed: managed}
+
+	// Headless runs and sub-agents with no interactive parent carry no approver
+	// on ctx: the managed-config escape hatch must fail closed.
+	userConfig := config.UserConfigPath()
+	args, _ := json.Marshal(map[string]string{"path": userConfig, "content": "{}\n"})
+	_, err := w.Execute(context.Background(), args)
+	if err == nil {
+		t.Fatalf("managed config write without an approver should be denied")
+	}
+	if !strings.Contains(err.Error(), "interactive user approval") {
+		t.Fatalf("fail-closed error should name the missing approval, got: %v", err)
+	}
+	if _, err := os.Stat(userConfig); !os.IsNotExist(err) {
+		t.Fatalf("user config must not be created without approval, stat err=%v", err)
+	}
+}
+
+func TestManagedConfigWriteGatedOnApprover(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData", "Roaming"))
+
+	project := filepath.Join(home, "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	managed := NewManagedConfigPaths(config.ReasonixManagedConfigPaths())
+	w := writeFile{roots: realRoots(cfg.WriteRootsForRoot(project)), managed: managed}
+
+	// Approved: current config.toml and the legacy v0.x config.json become
+	// writable, and the approver sees each target.
+	approve := &stubConfigWriteApprover{allow: true}
+	ctx := tool.WithConfigWriteApprover(context.Background(), approve)
+	for _, target := range []string{
+		config.UserConfigPath(),
+		filepath.Join(home, ".reasonix", "config.json"),
+	} {
+		args, _ := json.Marshal(map[string]string{"path": target, "content": "{}\n"})
+		if _, err := w.Execute(ctx, args); err != nil {
+			t.Fatalf("approved managed config write %s: %v", target, err)
+		}
+		if _, err := os.Stat(target); err != nil {
+			t.Fatalf("managed config was not created %s: %v", target, err)
+		}
+	}
+	if len(approve.asked) != 2 {
+		t.Fatalf("approver should be asked once per write, asked=%v", approve.asked)
+	}
+
+	// Declined: the approver's reason surfaces to the model and nothing lands.
+	decline := &stubConfigWriteApprover{allow: false, reason: "the user declined this Reasonix config write"}
+	dctx := tool.WithConfigWriteApprover(context.Background(), decline)
+	declinedTarget := config.UserConfigPath()
+	if err := os.Remove(declinedTarget); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("remove approved config before declined write: %v", err)
+	}
+	args, _ := json.Marshal(map[string]string{"path": declinedTarget, "content": "{}\n"})
+	if _, err := w.Execute(dctx, args); err == nil || !strings.Contains(err.Error(), "declined") {
+		t.Fatalf("declined managed config write should surface the reason, got: %v", err)
+	}
+	if _, err := os.Stat(declinedTarget); !os.IsNotExist(err) {
+		t.Fatalf("declined config must not be created, stat err=%v", err)
+	}
+
+	// Even with an always-allowing approver, non-config files in the Reasonix
+	// home and the rest of the OS home stay denied — the escape hatch is
+	// file-level, not directory-level.
+	for _, target := range []string{
+		filepath.Join(home, "notes.txt"),
+		filepath.Join(home, ".reasonix", ".env"),
+		filepath.Join(home, ".reasonix", "settings.json"),
+		filepath.Join(home, ".reasonix", "skills", "evil", "SKILL.md"),
+	} {
+		asked := len(approve.asked)
+		args, _ := json.Marshal(map[string]string{"path": target, "content": "nope\n"})
+		if _, err := w.Execute(ctx, args); err == nil {
+			t.Fatalf("write outside managed config files should be denied: %s", target)
+		}
+		if len(approve.asked) != asked {
+			t.Fatalf("non-managed target %s must not reach the approver", target)
+		}
+		if _, err := os.Stat(target); !os.IsNotExist(err) {
+			t.Fatalf("file must not be created %s, stat err=%v", target, err)
+		}
 	}
 }
 

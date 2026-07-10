@@ -176,7 +176,7 @@ Token 模式会在终端打印带 `?token=...` 的分享链接；可通过 `--to
 ```bash
 reasonix serve --hash-password --password 'strong-password'
 
-# ~/.reasonix/config.toml
+# <Reasonix home>/config.toml
 [serve]
 auth_mode = "password" # none|token|password
 password_hash = "$2a$12$..."
@@ -404,7 +404,14 @@ workspace、每次命令专用 temp root 和目标可执行文件的访问权，
 low-integrity token 下，除配置的 root 外它仍能写入 Windows 对任何 low-integrity 进程开放的
 少数位置（例如 `%USERPROFILE%\AppData\LocalLow`），但 workspace 边界与 `forbid_read`
 拒绝依然有效。只读 AppContainer 命令在关闭网络时不给 network capability；可写 Windows 命令遇到
-`[sandbox] network = false` 时会 fail closed。没有可用 OS 沙盒时，`bash = "enforce"` 会拒绝 bash 执行，不会无沙盒运行
+`[sandbox] network = false` 时会 fail closed。
+
+**Windows 现状说明：**稳定版目前在 Windows 上把 Bash 沙箱的生效模式强制为
+`off`——即使显式写了 `bash = "enforce"` 也会解析为 `off`（`reasonix doctor`
+会提示该设置被忽略）——因为原生 Windows 后端仍会破坏常见的 Git Bash/MSYS2、
+Docker 和 git 工作流。上面的 Windows 沙盒描述保留为后端修复后重新启用时的设计基准。
+
+没有可用 OS 沙盒时，`bash = "enforce"` 会拒绝 bash 执行，不会无沙盒运行
 （越界询问与可选的 Windows elevated 加固见
 [`SPEC.md` §9](./SPEC.md#9-roadmap-not-in-current-scope)）。
 

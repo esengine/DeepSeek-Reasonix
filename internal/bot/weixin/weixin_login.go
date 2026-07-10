@@ -12,6 +12,7 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 type savedAccount struct {
@@ -53,7 +54,7 @@ func loadSavedAccount(accountID string) (savedAccount, error) {
 	if path == "" {
 		return savedAccount{}, fmt.Errorf("reasonix user config dir is unavailable")
 	}
-	data, err := os.ReadFile(path)
+	data, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return savedAccount{}, err
 	}

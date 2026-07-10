@@ -53,6 +53,17 @@ func TestTaskToolReturnsSubAgentFinalAnswer(t *testing.T) {
 	}
 }
 
+func TestSubagentResultWarnsOnHostDecisionLanguage(t *testing.T) {
+	out := GuardSubagentHostDecisionText("等待用户批准后再执行修改")
+	if !strings.Contains(out, "Subagent boundary") {
+		t.Fatalf("guarded output missing boundary warning:\n%s", out)
+	}
+	plain := "found 3 callers of Foo"
+	if got := GuardSubagentHostDecisionText(plain); got != plain {
+		t.Fatalf("plain output changed: %q", got)
+	}
+}
+
 func TestTaskToolInjectsWorkspaceContextIntoSubagentPrompt(t *testing.T) {
 	sub := &mockProvider{name: "sub", chunks: []provider.Chunk{
 		{Type: provider.ChunkText, Text: "answer"},

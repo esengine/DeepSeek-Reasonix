@@ -100,6 +100,93 @@ func TestTokenizeArgs(t *testing.T) {
 	}
 }
 
+func TestMCPGetOpenDesignStyleInstall(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	addOut := captureStdout(t, func() {
+		if rc := Run([]string{
+			"mcp", "add", "open-design",
+			"--env", "OD_DAEMON_URL=http://127.0.0.1:7456",
+			"--env", "OPEN_DESIGN_TOKEN=placeholder-value",
+			"node", "open-design-mcp.js", "--stdio",
+		}, "test-version"); rc != 0 {
+			t.Fatalf("mcp add rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(addOut, `added MCP server "open-design"`) {
+		t.Fatalf("mcp add output = %q", addOut)
+	}
+
+	getOut := captureStdout(t, func() {
+		if rc := Run([]string{"mcp", "get", "open-design"}, "test-version"); rc != 0 {
+			t.Fatalf("mcp get rc = %d, want 0", rc)
+		}
+	})
+	for _, want := range []string{
+		"name: open-design",
+		"type: stdio",
+		"command: node",
+		"args: open-design-mcp.js",
+		"      --stdio",
+		"OD_DAEMON_URL=http://127.0.0.1:7456",
+		"OPEN_DESIGN_TOKEN=<redacted>",
+	} {
+		if !strings.Contains(getOut, want) {
+			t.Fatalf("mcp get output missing %q:\n%s", want, getOut)
+		}
+	}
+	if strings.Contains(getOut, "placeholder-value") {
+		t.Fatalf("mcp get leaked sensitive env value:\n%s", getOut)
+	}
+}
+
+func TestMCPGetMissingServerFails(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	errOut := captureStderr(t, func() {
+		if rc := Run([]string{"mcp", "get", "open-design"}, "test-version"); rc != 1 {
+			t.Fatalf("mcp get missing rc = %d, want 1", rc)
+		}
+	})
+	if !strings.Contains(errOut, `no MCP server named "open-design"`) {
+		t.Fatalf("mcp get missing stderr = %q", errOut)
+	}
+}
+
+func TestMCPGetRedactsRemoteAuthMaterial(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	_ = captureStdout(t, func() {
+		if rc := Run([]string{
+			"mcp", "add", "stripe",
+			"--http", "https://mcp.example.test/mcp?access_token=abc&key=xyz&workspace=main",
+			"--header", "Authorization=Bearer abc",
+		}, "test-version"); rc != 0 {
+			t.Fatalf("mcp add remote rc = %d, want 0", rc)
+		}
+	})
+
+	getOut := captureStdout(t, func() {
+		if rc := Run([]string{"mcp", "get", "stripe"}, "test-version"); rc != 0 {
+			t.Fatalf("mcp get remote rc = %d, want 0", rc)
+		}
+	})
+	for _, want := range []string{
+		"type: http",
+		"workspace=main",
+		"access_token=%3Credacted%3E",
+		"key=%3Credacted%3E",
+		"Authorization=<redacted>",
+	} {
+		if !strings.Contains(getOut, want) {
+			t.Fatalf("mcp get remote output missing %q:\n%s", want, getOut)
+		}
+	}
+	if strings.Contains(getOut, "Bearer abc") || strings.Contains(getOut, "access_token=abc") || strings.Contains(getOut, "key=xyz") {
+		t.Fatalf("mcp get leaked remote auth material:\n%s", getOut)
+	}
+}
+
 func TestRenderMCPStatusGroupsAndCompactsResources(t *testing.T) {
 	longURI := "file:///Users/example/project/docs/really/deep/path/with/a/very/long/resource-name.md"
 	got := renderMCPStatus(110,

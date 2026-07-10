@@ -29,7 +29,7 @@ func windowStatePath() string {
 // valid window origin.
 func loadWindowState() (DesktopWindowState, bool) {
 	path := windowStatePath()
-	data, err := os.ReadFile(path)
+	data, err := readFileUTF8(path)
 	if err != nil {
 		return DesktopWindowState{}, false
 	}

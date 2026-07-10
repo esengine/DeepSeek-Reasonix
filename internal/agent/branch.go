@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/store"
 )
 
@@ -120,7 +121,7 @@ func LoadBranchMeta(sessionPath string) (BranchMeta, bool, error) {
 	if metaPath == "" {
 		return BranchMeta{}, false, nil
 	}
-	b, err := os.ReadFile(metaPath)
+	b, err := fileencoding.ReadFileUTF8(metaPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return BranchMeta{}, false, nil

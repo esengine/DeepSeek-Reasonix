@@ -266,6 +266,37 @@ func LegacyUserConfigPaths() []string {
 	return out
 }
 
+// ReasonixManagedConfigPaths returns the Reasonix-owned user configuration
+// FILES that model-driven tools may repair on the user's request, each gated
+// by a fresh per-write human approval: the current config.toml, compatibility
+// TOML locations, and the legacy v0.x ~/.reasonix/config.json. Individual
+// files, never directories — the Reasonix home also holds credentials (.env),
+// global hooks (settings.json), skills, and session stores, and none of those
+// may ride along on a config repair.
+func ReasonixManagedConfigPaths() []string {
+	var out []string
+	out = appendUniquePath(out, UserConfigPath())
+	for _, path := range LegacyUserConfigPaths() {
+		out = appendUniquePath(out, path)
+	}
+	out = appendUniquePath(out, legacyConfigPath())
+	return out
+}
+
+func appendUniquePath(paths []string, path string) []string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return paths
+	}
+	clean := filepath.Clean(path)
+	for _, existing := range paths {
+		if samePath(existing, clean) {
+			return paths
+		}
+	}
+	return append(paths, clean)
+}
+
 // ReasonixHomeDir is the current Reasonix home directory. It honors
 // REASONIX_HOME, then uses ~/.reasonix on macOS/Linux or %APPDATA%/reasonix on
 // Windows, with a %USERPROFILE%/AppData/Roaming fallback when %APPDATA% is

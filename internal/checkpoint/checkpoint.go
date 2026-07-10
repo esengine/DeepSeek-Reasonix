@@ -85,7 +85,7 @@ func (s *Store) load() {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(s.dir, e.Name()))
+		b, err := fileenc.ReadFileUTF8(filepath.Join(s.dir, e.Name()))
 		if err != nil {
 			continue
 		}

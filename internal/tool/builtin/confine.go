@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -44,17 +45,19 @@ func ConfineWebFetch(proxySpec netclient.ProxySpec) tool.Tool {
 // workspace by default. roots may be relative; they are resolved to absolute,
 // symlink-free paths once here. An empty roots slice yields unconfined writers.
 // guard additionally rejects writes into Reasonix's own session stores even
-// when the roots would allow them (see SessionDataGuard).
-func ConfineWriters(roots []string, guard SessionDataGuard) []tool.Tool {
+// when the roots would allow them (see SessionDataGuard). managed names the
+// Reasonix-owned config files writable outside the roots after a fresh human
+// approval (see ManagedConfigPaths).
+func ConfineWriters(roots []string, guard SessionDataGuard, managed ManagedConfigPaths) []tool.Tool {
 	rs := realRoots(roots)
 	return []tool.Tool{
-		writeFile{roots: rs, guard: guard},
-		editFile{roots: rs, guard: guard},
-		multiEdit{roots: rs, guard: guard},
-		moveFile{roots: rs, guard: guard},
-		notebookEdit{roots: rs, guard: guard},
-		deleteRange{roots: rs, guard: guard},
-		deleteSymbol{roots: rs, guard: guard},
+		writeFile{roots: rs, guard: guard, managed: managed},
+		editFile{roots: rs, guard: guard, managed: managed},
+		multiEdit{roots: rs, guard: guard, managed: managed},
+		moveFile{roots: rs, guard: guard, managed: managed},
+		notebookEdit{roots: rs, guard: guard, managed: managed},
+		deleteRange{roots: rs, guard: guard, managed: managed},
+		deleteSymbol{roots: rs, guard: guard, managed: managed},
 	}
 }
 
@@ -160,10 +163,34 @@ func confine(roots []string, target string) error {
 // confineWrite is the write-tool boundary check: workspace confinement first,
 // then the session-data guard, so a write can be inside the roots (e.g. a
 // home-directory workspace covering the state root) and still be refused when
-// it targets Reasonix's own session stores.
-func confineWrite(roots []string, guard SessionDataGuard, target string) error {
-	if err := confine(roots, target); err != nil {
+// it targets Reasonix's own session stores. A target outside every root that
+// matches a Reasonix-managed config file (see ManagedConfigPaths) may proceed
+// after a fresh per-write human approval carried on ctx; without an approver it
+// fails closed with the original confinement error semantics.
+func confineWrite(ctx context.Context, roots []string, guard SessionDataGuard, managed ManagedConfigPaths, target string) error {
+	confineErr := confine(roots, target)
+	if confineErr == nil {
+		return guard.Check(target)
+	}
+	if !managed.Match(target) {
+		return confineErr
+	}
+	if err := guard.Check(target); err != nil {
 		return err
+	}
+	return managed.approve(ctx, target)
+}
+
+// confinePreview mirrors confineWrite for ctx-less diff previews: they read the
+// target to render a diff but never write, so a managed config file passes
+// without the per-write approval — Execute still gates the actual write.
+func confinePreview(roots []string, guard SessionDataGuard, managed ManagedConfigPaths, target string) error {
+	confineErr := confine(roots, target)
+	if confineErr == nil {
+		return guard.Check(target)
+	}
+	if !managed.Match(target) {
+		return confineErr
 	}
 	return guard.Check(target)
 }

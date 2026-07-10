@@ -34,6 +34,9 @@ import (
 //go:embed index.html
 var indexHTML []byte
 
+//go:embed logo-wordmark.svg
+var logoWordmarkSVG []byte
+
 // Server wires a controller to its HTTP surface. The Broadcaster must be the
 // same sink the controller was constructed with, so events reach SSE clients.
 type Server struct {
@@ -249,7 +252,7 @@ func (s *Server) switchEffort(ctx context.Context, level string) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-	ref := cur.Label()
+	ref := currentModelRef(cur)
 	entry, ok := cfg.ResolveModel(ref)
 	if !ok {
 		return fmt.Errorf("cannot resolve current provider %q", ref)
@@ -319,6 +322,7 @@ func (s *Server) HandlerWithCORS(origin string) http.Handler {
 func (s *Server) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.index)
+	mux.HandleFunc("GET /assets/logo-wordmark.svg", s.logoWordmark)
 	mux.HandleFunc("GET /events", s.events)
 	mux.HandleFunc("GET /history", s.history)
 	mux.HandleFunc("GET /context", s.context)
@@ -340,6 +344,7 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("POST /forget", s.forget)
 	mux.HandleFunc("GET /checkpoints", s.checkpoints)
 	mux.HandleFunc("GET /branches", s.branches)
+	mux.HandleFunc("GET /models", s.models)
 	mux.HandleFunc("GET /status", s.status)
 	mux.HandleFunc("GET /sessions", s.sessions)
 	mux.HandleFunc("GET /skills", s.skills)
@@ -419,6 +424,12 @@ func (s *Server) index(w http.ResponseWriter, _ *http.Request) {
 	html := string(indexHTML)
 	html = strings.ReplaceAll(html, "__LANG__", lang)
 	_, _ = w.Write([]byte(html))
+}
+
+func (s *Server) logoWordmark(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	_, _ = w.Write(logoWordmarkSVG)
 }
 
 // sseKeepaliveInterval is how often the /events handler emits a `: ping`
@@ -992,6 +1003,81 @@ func (s *Server) branches(w http.ResponseWriter, _ *http.Request) {
 	}
 	tree := s.ctl().BranchTreeText()
 	writeJSON(w, map[string]any{"branches": branches, "tree": tree})
+}
+
+// models lists configured chat models for the browser model picker.
+func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
+	cfg, err := config.Load()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	type modelEntry struct {
+		Ref      string `json:"ref"`
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+		Kind     string `json:"kind,omitempty"`
+		Active   bool   `json:"active,omitempty"`
+		Default  bool   `json:"default,omitempty"`
+	}
+	current := currentModelRef(s.ctl())
+	label := s.ctl().Label()
+	modelCounts := make(map[string]int)
+	for i := range cfg.Providers {
+		p := &cfg.Providers[i]
+		if !p.Configured() {
+			continue
+		}
+		models := p.ChatModelList()
+		if len(models) == 0 {
+			models = p.ModelList()
+		}
+		for _, model := range models {
+			modelCounts[model]++
+		}
+	}
+	var out []modelEntry
+	for i := range cfg.Providers {
+		p := &cfg.Providers[i]
+		if !p.Configured() {
+			continue
+		}
+		models := p.ChatModelList()
+		if len(models) == 0 {
+			models = p.ModelList()
+		}
+		for _, model := range models {
+			ref := p.Name + "/" + model
+			active := ref == current || p.Name == current
+			if !active && current == label && model == label {
+				if modelCounts[model] == 1 {
+					active = true
+				} else {
+					active = ref == cfg.DefaultModel
+				}
+			}
+			out = append(out, modelEntry{
+				Ref:      ref,
+				Provider: p.Name,
+				Model:    model,
+				Kind:     p.Kind,
+				Active:   active,
+				Default:  ref == cfg.DefaultModel || p.Name == cfg.DefaultModel,
+			})
+		}
+	}
+	if out == nil {
+		out = []modelEntry{}
+	}
+	writeJSON(w, map[string]any{"current": current, "label": label, "default": cfg.DefaultModel, "models": out})
+}
+
+func currentModelRef(c control.SessionAPI) string {
+	ref := strings.TrimSpace(c.ModelRef())
+	if ref != "" {
+		return ref
+	}
+	return strings.TrimSpace(c.Label())
 }
 
 // status returns a combined status snapshot.

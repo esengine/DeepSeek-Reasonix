@@ -13,6 +13,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -29,6 +30,7 @@ import (
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher"
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
+	larkcontact "github.com/larksuite/oapi-sdk-go/v3/service/contact/v3"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 )
@@ -58,6 +60,7 @@ type feishuMsgEvent struct {
 	MessageID string          `json:"message_id"`
 	RootID    string          `json:"root_id"`
 	ParentID  string          `json:"parent_id"`
+	ThreadID  string          `json:"thread_id"`
 	ChatID    string          `json:"chat_id"`
 	ChatType  string          `json:"chat_type"`
 	MsgType   string          `json:"msg_type"`
@@ -75,10 +78,19 @@ type feishuSender struct {
 }
 
 type feishuMention struct {
-	Key string `json:"key"`
-	ID  struct {
+	Key  string `json:"key"`
+	Name string `json:"name"`
+	ID   struct {
 		OpenID string `json:"open_id"`
 	} `json:"id"`
+}
+
+func webhookMentionRefs(mentions []feishuMention) []mentionRef {
+	refs := make([]mentionRef, 0, len(mentions))
+	for _, m := range mentions {
+		refs = append(refs, mentionRef{Key: m.Key, OpenID: m.ID.OpenID, Name: m.Name})
+	}
+	return refs
 }
 
 // adapter 飞书适配器实现。
@@ -90,9 +102,30 @@ type adapter struct {
 	client   *lark.Client
 	wsClient *larkws.Client
 
+	// fetchResource 覆盖消息资源下载（测试注入）；nil 时用 sdkFetchResource。
+	fetchResource func(ctx context.Context, messageID, key, typ string) ([]byte, string, error)
+
+	clientMu sync.Mutex // 保护 client 懒初始化
+
 	seenMu sync.Mutex
 	seen   map[string]bool // 消息去重
+
+	botMu sync.Mutex
+	botID string // bot 自身 open_id，用于群聊 @ 门控与占位符剔除
+
+	nameMu sync.Mutex
+	names  map[string]nameCacheEntry // open_id -> 显示名缓存
 }
+
+type nameCacheEntry struct {
+	name    string
+	expires time.Time
+}
+
+const (
+	userNameCacheTTL         = time.Hour
+	userNameFallbackCacheTTL = 5 * time.Minute
+)
 
 // New 创建飞书 Bot 适配器。
 func New(cfg config.FeishuBotConfig, logger *slog.Logger) bot.Adapter {
@@ -130,7 +163,93 @@ func (a *adapter) Start(ctx context.Context) error {
 		}
 		go a.runWebSocket(ctx)
 	}
+	// bot open_id 用于把群聊 @ 门控收紧为“必须 @ 本 bot”；拉取失败只降级为
+	// 旧行为（任意 @ 放行），不阻塞启动。
+	go a.fetchBotOpenID(ctx)
 	return nil
+}
+
+func (a *adapter) botOpenID() string {
+	a.botMu.Lock()
+	defer a.botMu.Unlock()
+	return a.botID
+}
+
+func (a *adapter) fetchBotOpenID(ctx context.Context) {
+	client, err := a.sdkClient()
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	resp, err := client.Get(ctx, "/open-apis/bot/v3/info", nil, larkcore.AccessTokenTypeTenant)
+	if err != nil {
+		a.logger.Warn("feishu bot info fetch failed; group mention gating stays permissive", "err", err)
+		return
+	}
+	var payload struct {
+		Code int `json:"code"`
+		Bot  struct {
+			OpenID string `json:"open_id"`
+		} `json:"bot"`
+	}
+	if err := json.Unmarshal(resp.RawBody, &payload); err != nil || payload.Code != 0 || payload.Bot.OpenID == "" {
+		a.logger.Warn("feishu bot info unavailable; group mention gating stays permissive", "code", payload.Code, "err", err)
+		return
+	}
+	a.botMu.Lock()
+	a.botID = payload.Bot.OpenID
+	a.botMu.Unlock()
+	a.logger.Info("feishu bot identity resolved", "open_id", logHash(payload.Bot.OpenID))
+}
+
+// resolveUserName 把 open_id 解析为显示名（1 小时缓存）。缺少 contact 权限或
+// 调用失败时回退 open_id 本身，并短暂缓存回退值避免每条消息都打一次 API。
+func (a *adapter) resolveUserName(ctx context.Context, openID string) string {
+	openID = strings.TrimSpace(openID)
+	if openID == "" {
+		return ""
+	}
+	now := time.Now()
+	a.nameMu.Lock()
+	if entry, ok := a.names[openID]; ok && now.Before(entry.expires) {
+		a.nameMu.Unlock()
+		return entry.name
+	}
+	a.nameMu.Unlock()
+	name, ttl := a.lookupUserName(ctx, openID)
+	a.nameMu.Lock()
+	if a.names == nil {
+		a.names = make(map[string]nameCacheEntry)
+	}
+	if len(a.names) > 10000 {
+		a.names = make(map[string]nameCacheEntry)
+	}
+	a.names[openID] = nameCacheEntry{name: name, expires: now.Add(ttl)}
+	a.nameMu.Unlock()
+	return name
+}
+
+func (a *adapter) lookupUserName(ctx context.Context, openID string) (string, time.Duration) {
+	client, err := a.sdkClient()
+	if err != nil {
+		return openID, userNameFallbackCacheTTL
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req := larkcontact.NewGetUserReqBuilder().
+		UserId(openID).
+		UserIdType(larkcontact.UserIdTypeOpenId).
+		Build()
+	resp, err := client.Contact.User.Get(ctx, req)
+	if err != nil || resp == nil || !resp.Success() || resp.Data == nil || resp.Data.User == nil {
+		return openID, userNameFallbackCacheTTL
+	}
+	name := stringPtrValue(resp.Data.User.Name)
+	if name == "" {
+		return openID, userNameFallbackCacheTTL
+	}
+	return name, userNameCacheTTL
 }
 
 func (a *adapter) Stop() error {
@@ -205,7 +324,7 @@ func (a *adapter) runWebSocket(ctx context.Context) {
 func (a *adapter) newEventDispatcher() *dispatcher.EventDispatcher {
 	return dispatcher.NewEventDispatcher(a.cfg.VerificationToken, "").
 		OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
-			a.handleSDKMessage(event)
+			a.handleSDKMessage(ctx, event)
 			return nil
 		}).
 		OnP2MessageReadV1(func(ctx context.Context, event *larkim.P2MessageReadV1) error {
@@ -226,7 +345,7 @@ func (a *adapter) newEventDispatcher() *dispatcher.EventDispatcher {
 		})
 }
 
-func (a *adapter) handleSDKMessage(event *larkim.P2MessageReceiveV1) {
+func (a *adapter) handleSDKMessage(ctx context.Context, event *larkim.P2MessageReceiveV1) {
 	if event == nil || event.Event == nil || event.Event.Message == nil {
 		return
 	}
@@ -240,45 +359,60 @@ func (a *adapter) handleSDKMessage(event *larkim.P2MessageReceiveV1) {
 		}
 	}
 	msg := event.Event.Message
-	if stringPtrValue(msg.MessageType) != "text" {
-		a.logger.Info("feishu message ignored", "reason", "non_text", "msg_type", stringPtrValue(msg.MessageType), "chat_type", stringPtrValue(msg.ChatType), "message", logHash(stringPtrValue(msg.MessageId)))
-		return
-	}
-	var content textContent
-	if err := json.Unmarshal([]byte(stringPtrValue(msg.Content)), &content); err != nil {
-		a.logger.Warn("feishu message ignored", "reason", "bad_content", "message", logHash(stringPtrValue(msg.MessageId)), "err", err)
-		return
-	}
+	messageID := stringPtrValue(msg.MessageId)
+	mentions := sdkMentionRefs(msg.Mentions)
 	chatType := bot.ChatDM
 	if stringPtrValue(msg.ChatType) == "group" || stringPtrValue(msg.ChatType) == "topic_group" {
 		chatType = bot.ChatGroup
-		if a.cfg.RequireMention && len(msg.Mentions) == 0 {
-			a.logger.Info("feishu message ignored", "reason", "missing_mention", "chat", logHash(stringPtrValue(msg.ChatId)), "message", logHash(stringPtrValue(msg.MessageId)))
+		if a.cfg.RequireMention && !a.mentionsBot(mentions) {
+			a.logger.Info("feishu message ignored", "reason", "missing_mention", "chat", logHash(stringPtrValue(msg.ChatId)), "message", logHash(messageID))
 			return
 		}
 	}
+	msgType := stringPtrValue(msg.MessageType)
+	text, media, ok := a.parseInboundContent(msgType, stringPtrValue(msg.Content), messageID)
+	if !ok {
+		a.logger.Info("feishu message ignored", "reason", "unsupported_type", "msg_type", msgType, "chat_type", stringPtrValue(msg.ChatType), "message", logHash(messageID))
+		return
+	}
+	text = a.replaceMentionPlaceholders(text, mentions)
+	if strings.TrimSpace(text) == "" && len(media) == 0 {
+		a.logger.Info("feishu message ignored", "reason", "empty_after_parse", "msg_type", msgType, "message", logHash(messageID))
+		return
+	}
 	userID := ""
+	senderOpenID := ""
 	if event.Event.Sender != nil && event.Event.Sender.SenderId != nil {
+		senderOpenID = stringPtrValue(event.Event.Sender.SenderId.OpenId)
 		userID = firstNonEmpty(
-			stringPtrValue(event.Event.Sender.SenderId.OpenId),
+			senderOpenID,
 			stringPtrValue(event.Event.Sender.SenderId.UnionId),
 			stringPtrValue(event.Event.Sender.SenderId.UserId),
 		)
 	}
+	userName := userID
+	var resolveUserName func(context.Context) string
+	if senderOpenID != "" {
+		resolveUserName = func(ctx context.Context) string {
+			return a.resolveUserName(ctx, senderOpenID)
+		}
+	}
 	ib := bot.InboundMessage{
-		Platform:  bot.PlatformFeishu,
-		ChatType:  chatType,
-		ChatID:    stringPtrValue(msg.ChatId),
-		UserID:    userID,
-		UserName:  userID,
-		Text:      content.Text,
-		MessageID: stringPtrValue(msg.MessageId),
-		ThreadID:  stringPtrValue(msg.ThreadId),
-		Raw:       event,
+		Platform:        bot.PlatformFeishu,
+		ChatType:        chatType,
+		ChatID:          stringPtrValue(msg.ChatId),
+		UserID:          userID,
+		UserName:        userName,
+		Text:            text,
+		MessageID:       messageID,
+		ThreadID:        stringPtrValue(msg.ThreadId),
+		Media:           media,
+		ResolveUserName: resolveUserName,
+		Raw:             event,
 	}
 	select {
 	case a.msgCh <- ib:
-		a.logger.Info("feishu inbound queued", "chat_type", chatType, "chat", logHash(ib.ChatID), "user", logHash(ib.UserID), "message", logHash(ib.MessageID), "text_chars", len([]rune(ib.Text)))
+		a.logger.Info("feishu inbound queued", "chat_type", chatType, "msg_type", msgType, "chat", logHash(ib.ChatID), "user", logHash(ib.UserID), "message", logHash(ib.MessageID), "text_chars", len([]rune(ib.Text)), "media_items", len(media))
 	default:
 		a.logger.Warn("feishu message channel full")
 	}
@@ -300,7 +434,7 @@ func (a *adapter) handleWSEvent(ctx context.Context, raw json.RawMessage) {
 		if err := json.Unmarshal(evt.Event, &msg); err != nil {
 			return
 		}
-		a.handleMessage(msg)
+		a.handleMessage(ctx, msg)
 	}
 }
 
@@ -427,47 +561,54 @@ func logHash(id string) string {
 	return hex.EncodeToString(sum[:])[:12]
 }
 
-func (a *adapter) handleMessage(msg feishuMsgEvent) {
-	if msg.MsgType != "text" {
-		a.logger.Info("feishu message ignored", "reason", "non_text", "msg_type", msg.MsgType, "chat_type", msg.ChatType, "message", logHash(msg.MessageID))
-		return
-	}
-
-	// 解析文本内容
-	var content textContent
-	if err := json.Unmarshal([]byte(msg.Content), &content); err != nil {
-		a.logger.Warn("feishu message ignored", "reason", "bad_content", "message", logHash(msg.MessageID), "err", err)
-		return
-	}
+func (a *adapter) handleMessage(ctx context.Context, msg feishuMsgEvent) {
+	mentions := webhookMentionRefs(msg.Mentions)
 
 	// @mention gating：仅在群聊中检查是否 @了 bot
 	chatType := bot.ChatDM
 	if msg.ChatType == "group" || msg.ChatType == "topic_group" {
 		chatType = bot.ChatGroup
-		if a.cfg.RequireMention && len(msg.Mentions) == 0 {
+		if a.cfg.RequireMention && !a.mentionsBot(mentions) {
 			a.logger.Info("feishu message ignored", "reason", "missing_mention", "chat", logHash(msg.ChatID), "message", logHash(msg.MessageID))
 			return
 		}
 	}
 
-	ib := bot.InboundMessage{
-		Platform:  bot.PlatformFeishu,
-		ChatType:  chatType,
-		ChatID:    msg.ChatID,
-		UserID:    msg.Sender.SenderID.OpenID,
-		UserName:  "",
-		Text:      content.Text,
-		MessageID: msg.MessageID,
+	text, media, ok := a.parseInboundContent(msg.MsgType, msg.Content, msg.MessageID)
+	if !ok {
+		a.logger.Info("feishu message ignored", "reason", "unsupported_type", "msg_type", msg.MsgType, "chat_type", msg.ChatType, "message", logHash(msg.MessageID))
+		return
+	}
+	text = a.replaceMentionPlaceholders(text, mentions)
+	if strings.TrimSpace(text) == "" && len(media) == 0 {
+		a.logger.Info("feishu message ignored", "reason", "empty_after_parse", "msg_type", msg.MsgType, "message", logHash(msg.MessageID))
+		return
 	}
 
-	// 获取用户信息填充用户名
-	if msg.Sender.SenderID.OpenID != "" {
-		ib.UserName = msg.Sender.SenderID.OpenID
+	userName := msg.Sender.SenderID.OpenID
+	var resolveUserName func(context.Context) string
+	if userName != "" {
+		openID := msg.Sender.SenderID.OpenID
+		resolveUserName = func(ctx context.Context) string {
+			return a.resolveUserName(ctx, openID)
+		}
+	}
+	ib := bot.InboundMessage{
+		Platform:        bot.PlatformFeishu,
+		ChatType:        chatType,
+		ChatID:          msg.ChatID,
+		UserID:          msg.Sender.SenderID.OpenID,
+		UserName:        userName,
+		Text:            text,
+		MessageID:       msg.MessageID,
+		ThreadID:        msg.ThreadID,
+		Media:           media,
+		ResolveUserName: resolveUserName,
 	}
 
 	select {
 	case a.msgCh <- ib:
-		a.logger.Info("feishu inbound queued", "chat_type", chatType, "chat", logHash(ib.ChatID), "user", logHash(ib.UserID), "message", logHash(ib.MessageID), "text_chars", len([]rune(ib.Text)))
+		a.logger.Info("feishu inbound queued", "chat_type", chatType, "msg_type", msg.MsgType, "chat", logHash(ib.ChatID), "user", logHash(ib.UserID), "message", logHash(ib.MessageID), "text_chars", len([]rune(ib.Text)), "media_items", len(media))
 	default:
 		a.logger.Warn("feishu message channel full")
 	}
@@ -483,10 +624,34 @@ func SendText(ctx context.Context, cfg config.FeishuBotConfig, chatID, text stri
 // sendMessage 使用飞书/Lark SDK 以 Interactive Card (JSON 2.0) 发送消息。
 // Card 内嵌 markdown 元素，支持 CommonMark 标准语法。
 // 当卡片体积超过 30KB 限制（如大段代码），自动降级为纯文本消息。
+// MediaURLs are bare filenames staged in an operator-configured outbound media
+// root. URL fetching and arbitrary-path reads are intentionally unsupported.
 func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot.SendResult, error) {
 	if msg.Card != nil {
 		return a.sendCard(ctx, msg)
 	}
+	if len(msg.MediaURLs) == 0 {
+		return a.sendRenderedText(ctx, msg)
+	}
+	media, err := a.loadOutboundMedia(msg.MediaURLs)
+	if err != nil {
+		return bot.SendResult{}, err
+	}
+
+	var result bot.SendResult
+	if strings.TrimSpace(msg.Text) != "" {
+		textResult, err := a.sendRenderedText(ctx, msg)
+		result.Merge(textResult)
+		if err != nil {
+			return result, err
+		}
+	}
+	mediaResult, err := a.sendMedia(ctx, msg, media)
+	result.Merge(mediaResult)
+	return result, err
+}
+
+func (a *adapter) sendRenderedText(ctx context.Context, msg bot.OutboundMessage) (bot.SendResult, error) {
 	cardContent, err := buildMarkdownCard(msg.Text)
 	if err != nil {
 		a.logger.Warn("build markdown card failed, falling back to text", "err", err)
@@ -503,6 +668,13 @@ func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot
 func buildMarkdownCard(content string) (string, error) {
 	card := map[string]any{
 		"schema": "2.0",
+		// update_multi marks the card as a shared card that can be patched for
+		// all recipients after sending; without it Im.Message.Patch (used by
+		// EditMessage for streaming) is rejected, which would collapse
+		// streaming into a flood of new messages. See references/desktop-ui.
+		"config": map[string]any{
+			"update_multi": true,
+		},
 		"body": map[string]any{
 			"elements": []map[string]any{
 				{
@@ -532,7 +704,30 @@ func isCardLimitError(err error) bool {
 	return strings.Contains(s, "11310") || strings.Contains(s, "11325")
 }
 
+const feishuReplyRecalledCode = 230011
+
+type feishuAPIError struct {
+	op   string
+	code int
+	msg  string
+}
+
+func (e *feishuAPIError) Error() string {
+	return fmt.Sprintf("feishu %s error: %s", e.op, feishuCodeError(e.code, e.msg))
+}
+
+func isReplyFallbackError(err error) bool {
+	var apiErr *feishuAPIError
+	return errors.As(err, &apiErr) && apiErr.op == "reply" && apiErr.code == feishuReplyRecalledCode
+}
+
+// sdkClient lazily builds the shared lark client. It is called concurrently —
+// the fetchBotOpenID goroutine, per-message resolveUserName, and per-resource
+// downloads all race on first use at startup — so the check-and-build is guarded
+// by clientMu (a bare a.client read/write would data-race, tripping -race).
 func (a *adapter) sdkClient() (*lark.Client, error) {
+	a.clientMu.Lock()
+	defer a.clientMu.Unlock()
 	if a.client != nil {
 		return a.client, nil
 	}
@@ -561,24 +756,88 @@ func (a *adapter) sendSDKContent(ctx context.Context, msg bot.OutboundMessage, m
 	if chatID == "" {
 		return bot.SendResult{}, fmt.Errorf("feishu chat_id is empty")
 	}
-	req := larkim.NewCreateMessageReqBuilder().
-		ReceiveIdType(larkim.CreateMessageV1ReceiveIDTypeChatId).
-		Body(larkim.NewCreateMessageReqBodyBuilder().ReceiveId(chatID).MsgType(msgType).Content(content).Build()).
-		Build()
-	resp, err := client.Im.Message.Create(ctx, req)
+	// 带触发消息 ID 时用 Reply 引用回复：话题群里回复会落到对应话题，
+	// 普通群里带引用上下文。只有飞书明确返回“消息已撤回”时才回退普通
+	// 发送；传输错误的提交结果不确定，回退 Create 可能产生重复消息。
+	if replyTo := strings.TrimSpace(msg.ReplyToMsgID); replyTo != "" {
+		result, err := a.replySDKContent(ctx, replyTo, msgType, content)
+		if err == nil {
+			return result, nil
+		}
+		if !isReplyFallbackError(err) {
+			return bot.SendResult{}, err
+		}
+		a.logger.Warn("feishu reply failed; falling back to create", "message", logHash(replyTo), "err", err)
+	}
+	// Stable across retries so a retry after a post-commit connection drop does
+	// not send a duplicate visible message (Feishu dedups on uuid).
+	uuid := newIdempotencyKey()
+	var result bot.SendResult
+	err = withTransientRetry(ctx, a.logger, "create message", func(ctx context.Context) error {
+		body := larkim.NewCreateMessageReqBodyBuilder().ReceiveId(chatID).MsgType(msgType).Content(content)
+		if uuid != "" {
+			body = body.Uuid(uuid)
+		}
+		req := larkim.NewCreateMessageReqBuilder().
+			ReceiveIdType(larkim.CreateMessageV1ReceiveIDTypeChatId).
+			Body(body.Build()).
+			Build()
+		resp, err := client.Im.Message.Create(ctx, req)
+		if err != nil {
+			return err
+		}
+		if resp == nil {
+			return fmt.Errorf("feishu send error: empty response")
+		}
+		if !resp.Success() {
+			return fmt.Errorf("feishu send error: %s", feishuCodeError(resp.Code, resp.Msg))
+		}
+		if resp.Data != nil {
+			result = bot.SendResult{MessageID: stringPtrValue(resp.Data.MessageId)}
+		}
+		return nil
+	})
 	if err != nil {
 		return bot.SendResult{}, err
 	}
-	if resp == nil {
-		return bot.SendResult{}, fmt.Errorf("feishu send error: empty response")
+	return result, nil
+}
+
+func (a *adapter) replySDKContent(ctx context.Context, replyTo, msgType, content string) (bot.SendResult, error) {
+	client, err := a.sdkClient()
+	if err != nil {
+		return bot.SendResult{}, err
 	}
-	if !resp.Success() {
-		return bot.SendResult{}, fmt.Errorf("feishu send error: %s", feishuCodeError(resp.Code, resp.Msg))
+	uuid := newIdempotencyKey()
+	var result bot.SendResult
+	err = withTransientRetry(ctx, a.logger, "reply message", func(ctx context.Context) error {
+		body := larkim.NewReplyMessageReqBodyBuilder().MsgType(msgType).Content(content)
+		if uuid != "" {
+			body = body.Uuid(uuid)
+		}
+		req := larkim.NewReplyMessageReqBuilder().
+			MessageId(replyTo).
+			Body(body.Build()).
+			Build()
+		resp, err := client.Im.Message.Reply(ctx, req)
+		if err != nil {
+			return err
+		}
+		if resp == nil {
+			return fmt.Errorf("feishu reply error: empty response")
+		}
+		if !resp.Success() {
+			return &feishuAPIError{op: "reply", code: resp.Code, msg: resp.Msg}
+		}
+		if resp.Data != nil {
+			result = bot.SendResult{MessageID: stringPtrValue(resp.Data.MessageId)}
+		}
+		return nil
+	})
+	if err != nil {
+		return bot.SendResult{}, err
 	}
-	if resp.Data == nil {
-		return bot.SendResult{}, nil
-	}
-	return bot.SendResult{MessageID: stringPtrValue(resp.Data.MessageId)}, nil
+	return result, nil
 }
 
 func (a *adapter) AddPendingReaction(ctx context.Context, messageID string) (func(), error) {

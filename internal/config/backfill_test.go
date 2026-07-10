@@ -662,6 +662,9 @@ func TestApplyUserConfigUpgradesOnStartupWindowsBashEnforceDefaultsOffOnce(t *te
 	}
 
 	got.Sandbox.Bash = "enforce"
+	if got.BashMode() != "off" {
+		t.Fatalf("manual Windows enforce should still resolve off before save, got %q", got.BashMode())
+	}
 	if err := got.SaveTo(path); err != nil {
 		t.Fatalf("SaveTo manual enforce: %v", err)
 	}
@@ -670,11 +673,11 @@ func TestApplyUserConfigUpgradesOnStartupWindowsBashEnforceDefaultsOffOnce(t *te
 		t.Fatalf("second ApplyUserConfigUpgradesOnStartup: %v", err)
 	}
 	if changed {
-		t.Fatal("v4 config should not be migrated again after user re-enables enforce")
+		t.Fatal("v4 config should not be migrated again after user attempts to re-enable enforce")
 	}
 	got = LoadForEdit(path)
-	if got.Sandbox.Bash != "enforce" || got.BashMode() != "enforce" {
-		t.Fatalf("manual Windows enforce = raw %q effective %q, want enforce/enforce", got.Sandbox.Bash, got.BashMode())
+	if got.Sandbox.Bash != "off" || got.BashMode() != "off" {
+		t.Fatalf("manual Windows enforce after save = raw %q effective %q, want off/off", got.Sandbox.Bash, got.BashMode())
 	}
 }
 

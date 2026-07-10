@@ -1,0 +1,37 @@
+name: Update acknowledgments
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Update README contributor tables
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/update-acknowledgments.mjs
+      - name: Open pull request
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: chore/update-acknowledgments
+          delete-branch: true
+          title: 'Update acknowledgments contributors / 更新致谢贡献者'
+          commit-message: 'docs: update acknowledgments contributors'
+          body: |
+            Refreshes the README acknowledgments tables from the GitHub contributors API.
+
+            - Source: `repos/esengine/DeepSeek-Reasonix/contributors?per_page=20&anon=1`
+            - Anonymous contributors are shown without email addresses.
+          labels: documentation

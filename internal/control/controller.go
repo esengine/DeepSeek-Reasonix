@@ -176,6 +176,7 @@ type Controller struct {
 	mu        sync.Mutex
 	cancel    context.CancelFunc
 	running   bool
+	finishing bool // TurnDone is still being delivered; reject a replacement turn
 	canceling bool
 	// rotating is set under mu while NewSession/ClearSession swap the executor
 	// session out. Checking running once and then swapping later leaves a
@@ -574,7 +575,7 @@ func (c *Controller) beginCheckpoint(input string) {
 // turn is already in flight.
 func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 	c.mu.Lock()
-	if c.running || c.rotating {
+	if c.running || c.finishing || c.rotating {
 		c.mu.Unlock()
 		return
 	}
@@ -593,22 +594,32 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 		defer cancel()
 		defer func() {
 			if r := recover(); r != nil {
-				c.mu.Lock()
-				c.running = false
-				c.cancel = nil
-				c.canceling = false
-				c.mu.Unlock()
-				c.sink.Emit(event.Event{Kind: event.TurnDone, Err: fmt.Errorf("internal error: %v", r)})
+				c.finishGuardedTurn(fmt.Errorf("internal error: %v", r))
 			}
 		}()
 		err := body(ctx)
-		c.mu.Lock()
-		c.running = false
-		c.cancel = nil
-		c.canceling = false
-		c.mu.Unlock()
-		c.sink.Emit(event.Event{Kind: event.TurnDone, Err: explainError(err)})
+		c.finishGuardedTurn(explainError(err))
 	}()
+}
+
+// finishGuardedTurn keeps admission closed while TurnDone is delivered. The
+// sink fan-out may detach per-turn transports; allowing a replacement turn in
+// after running=false but before that fan-out completed let the old completion
+// clear or inherit the replacement turn's transport.
+func (c *Controller) finishGuardedTurn(err error) {
+	c.mu.Lock()
+	c.running = false
+	c.finishing = true
+	c.cancel = nil
+	c.canceling = false
+	c.mu.Unlock()
+
+	defer func() {
+		c.mu.Lock()
+		c.finishing = false
+		c.mu.Unlock()
+	}()
+	c.sink.Emit(event.Event{Kind: event.TurnDone, Err: err})
 }
 
 // Send starts a turn with an uncomposed message. The controller applies
@@ -634,6 +645,13 @@ const planApprovalTool = "exit_plan_mode"
 // SandboxEscapeApprovalTool is the internal Tool name used for one-shot approval
 // to rerun a shell command without the OS sandbox after the sandbox failed.
 const SandboxEscapeApprovalTool = "sandbox_escape"
+
+// ManagedConfigWriteApprovalTool is the internal Tool name used for per-write
+// approval when a file tool targets a Reasonix-managed config file outside the
+// workspace write roots. It is a fresh human decision: config files control
+// providers, sandbox rules, permissions, and MCP servers for future sessions,
+// so YOLO/auto approval must never answer it.
+const ManagedConfigWriteApprovalTool = "config_write"
 
 // planApprovedMessage is the follow-up turn sent once the user approves a plan —
 // the in-context nudge to execute and keep the (already-seeded) task list honest.
@@ -1405,7 +1423,7 @@ func (c *Controller) Cancel() {
 func (c *Controller) Running() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.running
+	return c.running || c.finishing
 }
 
 // beginRotation claims the session-rotation gate. It fails if a turn is running
@@ -1417,7 +1435,7 @@ func (c *Controller) Running() bool {
 func (c *Controller) beginRotation() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.running {
+	if c.running || c.finishing {
 		return errTurnRunningRotation
 	}
 	if c.rotating {
@@ -1450,12 +1468,13 @@ func (c *Controller) PendingPrompt() bool {
 func (c *Controller) RuntimeStatus() RuntimeStatus {
 	c.mu.Lock()
 	running := c.running
+	active := running || c.finishing
 	canceling := c.canceling
 	c.mu.Unlock()
 	pending := c.approval.hasPending()
 	backgroundJobs := len(c.Jobs())
 	return RuntimeStatus{
-		Running:         running,
+		Running:         active,
 		PendingPrompt:   pending,
 		BackgroundJobs:  backgroundJobs,
 		CancelRequested: canceling,
@@ -1488,10 +1507,12 @@ func (c *Controller) Approve(id string, allow, session, persist bool) {
 func (c *Controller) EnableInteractiveApproval() {
 	trustGate := planModeReadOnlyTrustApprover{c}
 	escapeApprover := sandboxEscapeApprover{c}
+	configApprover := managedConfigWriteApprover{c}
 	if c.executor != nil {
 		c.executor.SetGate(c.newInteractiveGate())
 		c.executor.SetPlanModeReadOnlyTrustGate(trustGate)
 		c.executor.SetSandboxEscapeApprover(escapeApprover)
+		c.executor.SetConfigWriteApprover(configApprover)
 		c.executor.SetAsker(c)
 	}
 	if setter, ok := c.runner.(interface {
@@ -1504,6 +1525,79 @@ func (c *Controller) EnableInteractiveApproval() {
 	}); ok {
 		setter.SetSandboxEscapeApprover(escapeApprover)
 	}
+	if setter, ok := c.runner.(interface {
+		SetConfigWriteApprover(tool.ConfigWriteApprover)
+	}); ok {
+		setter.SetConfigWriteApprover(configApprover)
+	}
+	if setter, ok := c.runner.(interface {
+		SetPlannerPlanApprover(agent.PlannerPlanApprover)
+	}); ok {
+		setter.SetPlannerPlanApprover(plannerPlanApprover{c: c})
+	}
+	if setter, ok := c.runner.(interface {
+		SetPlannerUserDecisionAsker(agent.PlannerUserDecisionAsker)
+	}); ok {
+		setter.SetPlannerUserDecisionAsker(plannerUserDecisionAsker{c: c})
+	}
+}
+
+type plannerPlanApprover struct {
+	c *Controller
+}
+
+func (p plannerPlanApprover) RunWithPlannerApproval(ctx context.Context, plan string, run func(context.Context) error) error {
+	c := p.c
+	allow, _, err := c.requestApprovalWithReason(ctx, planApprovalTool, "", nil, "Planner requested host approval before execution.")
+	if err != nil {
+		return err
+	}
+	if !allow {
+		return nil
+	}
+	todoArgs := c.seedPlanTodos(plan)
+	execStart := c.sessionMessageCount()
+	c.approval.setPlanAutoApprove(true)
+	defer c.approval.setPlanAutoApprove(false)
+	if err := run(ctx); err != nil {
+		return err
+	}
+	if todoArgs != "" && !c.hasTodoUpdateSince(execStart) {
+		c.completePlanTodos(todoArgs)
+	}
+	return nil
+}
+
+type plannerUserDecisionAsker struct {
+	c *Controller
+}
+
+func (p plannerUserDecisionAsker) RunWithPlannerUserDecision(ctx context.Context, _ string, question event.AskQuestion, run func(context.Context, string) error) error {
+	answers, err := p.c.Ask(ctx, []event.AskQuestion{question})
+	if err != nil {
+		return err
+	}
+	answer := plannerUserDecisionAnswer(question, answers)
+	if strings.TrimSpace(answer) == "" {
+		return nil
+	}
+	return run(ctx, answer)
+}
+
+func plannerUserDecisionAnswer(question event.AskQuestion, answers []event.AskAnswer) string {
+	for _, answer := range answers {
+		if answer.QuestionID != question.ID {
+			continue
+		}
+		selected := make([]string, 0, len(answer.Selected))
+		for _, item := range answer.Selected {
+			if s := strings.TrimSpace(item); s != "" {
+				selected = append(selected, s)
+			}
+		}
+		return strings.Join(selected, ", ")
+	}
+	return ""
 }
 
 func (c *Controller) newInteractiveGate() *permission.Gate {
@@ -3795,28 +3889,28 @@ func (c *Controller) ConnectConfiguredMCPServer(name string) (int, error) {
 	return 0, fmt.Errorf("no configured MCP server named %q", name)
 }
 
-// RemoveMCPServer disconnects a live MCP server — its tools vanish from the next
-// turn — and removes it from the config file. It reports whether a live server was
-// disconnected; an error only when the name is neither connected nor in config (or
-// the config save fails). A server declared in .mcp.json disconnects for this
-// session but returns on the next start, since that file isn't ours to edit.
+// RemoveMCPServer removes a writable MCP configuration before disconnecting the
+// live server, so a persistence failure never produces a false-successful
+// session-only removal. MCPs contributed by an installed plugin package are
+// managed with that package and cannot be removed independently.
 func (c *Controller) RemoveMCPServer(name string) (disconnected bool, err error) {
-	disconnected = c.mcp.disconnect(name)
-	cfg, lerr := config.Load()
+	cfg, lerr := config.LoadForRoot(c.workspaceRoot)
 	if lerr != nil {
-		return disconnected, lerr
+		return false, lerr
 	}
-	inConfig := cfg.RemovePlugin(name)
-	if inConfig {
-		if !disconnected {
-			c.mcp.removeToolPrefix(name)
-		}
-		if serr := cfg.Save(); serr != nil {
-			return disconnected, serr
-		}
+	if owner, ok := cfg.PluginPackageOwner(name); ok {
+		return false, fmt.Errorf("MCP server %q is managed by plugin %q; disable or remove the plugin instead", name, owner)
 	}
-	if !disconnected && !inConfig {
-		return false, fmt.Errorf("no MCP server named %q", name)
+	removed, rerr := config.RemovePluginFromSourcesForRoot(c.workspaceRoot, name)
+	if rerr != nil {
+		return false, rerr
+	}
+	if !removed {
+		return false, fmt.Errorf("no removable MCP server named %q", name)
+	}
+	disconnected = c.mcp.disconnect(name)
+	if !disconnected {
+		c.mcp.removeToolPrefix(name)
 	}
 	return disconnected, nil
 }
@@ -3844,6 +3938,9 @@ func (c *Controller) UnregisterMCPServerTools(name string) bool {
 
 // Label returns the human-readable model label, e.g. "deepseek-flash".
 func (c *Controller) Label() string { return c.label }
+
+// ModelRef returns the canonical provider/model reference for the session.
+func (c *Controller) ModelRef() string { return c.modelRef }
 
 // WorkspaceRoot returns the workspace root for this controller's session
 // (the directory that file-writers and @-references are scoped to).
@@ -4131,6 +4228,37 @@ func sandboxEscapeApprovalReason(reason string) string {
 		return i18n.M.SandboxEscapeRuntimeReason
 	}
 	return reason
+}
+
+// managedConfigWriteApprover routes a file tool's Reasonix-managed config write
+// through the fresh-human approval prompt (see ManagedConfigWriteApprovalTool).
+// A session grant is tool-wide (mirroring sandbox_escape): one "allow for this
+// session" covers the rest of the repair flow across the handful of managed
+// config files without re-prompting on every incremental edit.
+type managedConfigWriteApprover struct{ c *Controller }
+
+func (m managedConfigWriteApprover) ApproveManagedConfigWrite(ctx context.Context, req tool.ConfigWriteRequest) (bool, string, error) {
+	subject := managedConfigWriteApprovalSubject(req.Path)
+	args, _ := json.Marshal(map[string]string{"path": req.Path})
+	reply, err := m.c.requestFreshApprovalDecision(ctx, ManagedConfigWriteApprovalTool, subject, args, i18n.M.ConfigWriteReason)
+	if err != nil {
+		return false, "approval aborted", err
+	}
+	if !reply.allow {
+		return false, i18n.M.ConfigWriteDeclined, nil
+	}
+	if reply.session {
+		m.c.approval.grantSession(ManagedConfigWriteApprovalTool, subject)
+	}
+	return true, "", nil
+}
+
+func (m managedConfigWriteApprover) ManagedConfigWriteSessionAllowed(_ context.Context, req tool.ConfigWriteRequest) bool {
+	return m.c.approval.preApprovedForDecision(ManagedConfigWriteApprovalTool, managedConfigWriteApprovalSubject(req.Path), true)
+}
+
+func managedConfigWriteApprovalSubject(path string) string {
+	return i18n.M.ConfigWriteSubjectPrefix + strings.TrimSpace(path)
 }
 
 func (p planModeReadOnlyTrustApprover) CheckPlanModeReadOnlyTrust(ctx context.Context, req agent.PlanModeReadOnlyTrustRequest) (bool, string, error) {

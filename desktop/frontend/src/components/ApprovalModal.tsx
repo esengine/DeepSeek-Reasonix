@@ -27,7 +27,7 @@ function animateShelfExit(
 }
 
 function requiresFreshHumanApproval(tool: string): boolean {
-  return tool === "remember" || tool === "forget" || tool === "exit_plan_mode" || tool === "sandbox_escape";
+  return tool === "remember" || tool === "forget" || tool === "exit_plan_mode" || tool === "sandbox_escape" || tool === "config_write";
 }
 
 const APPROVAL_MODE_RANK: Record<ToolApprovalMode, number> = { ask: 0, auto: 1, yolo: 2 };
@@ -54,6 +54,8 @@ export function approvalToolLabel(tool: string, t: Translator): string {
       return t("approval.toolLabelForget");
     case "sandbox_escape":
       return t("approval.toolLabelSandboxEscape");
+    case "config_write":
+      return t("approval.toolLabelConfigWrite");
     case "plan_mode_read_only_command":
       return t("approval.toolLabelPlanModeReadOnly");
     case "exit_plan_mode":
@@ -65,6 +67,7 @@ export function approvalToolLabel(tool: string, t: Translator): string {
 
 const sandboxEscapeEnglishSubjectFallback = "run shell command unconfined once";
 const sandboxEscapeEnglishSubjectPrefix = "run unconfined once: ";
+const configWriteEnglishSubjectPrefix = "write Reasonix config: ";
 const planModeMcpEnglishSubject = /^MCP (.+) as read-only for planning and research$/;
 const planModeBashEnglishSubject = /^Trust (.+) as a read-only command prefix while planning\r?\nCommand: ([\s\S]+)$/;
 
@@ -74,6 +77,12 @@ function localizeApprovalSubject(tool: string, subject: string, t: Translator): 
     if (!trimmed || trimmed === sandboxEscapeEnglishSubjectFallback) return t("approval.sandboxEscapeSubjectFallback");
     if (trimmed.startsWith(sandboxEscapeEnglishSubjectPrefix)) {
       return `${t("approval.sandboxEscapeSubjectPrefix")}${trimmed.slice(sandboxEscapeEnglishSubjectPrefix.length)}`;
+    }
+    return trimmed;
+  }
+  if (tool === "config_write") {
+    if (trimmed.startsWith(configWriteEnglishSubjectPrefix)) {
+      return `${t("approval.configWriteSubjectPrefix")}${trimmed.slice(configWriteEnglishSubjectPrefix.length)}`;
     }
     return trimmed;
   }
@@ -98,6 +107,10 @@ function localizeApprovalSubject(tool: string, subject: string, t: Translator): 
 
 function localizeApprovalReason(tool: string, reason: string | undefined, t: Translator): string {
   const trimmed = reason?.trim() ?? "";
+  if (tool === "config_write") {
+    if (!trimmed || trimmed.includes("Reasonix-managed configuration file")) return t("approval.configWriteReason");
+    return trimmed;
+  }
   if (tool !== "sandbox_escape") return trimmed;
   if (trimmed.includes("could not wrap this command")) return t("approval.sandboxEscapeWrapReason");
   if (trimmed.includes("failed while starting this command") || trimmed.includes("Run this command unconfined once?")) {
@@ -123,6 +136,8 @@ export function ApprovalModal({
   onExitPlan,
   onStop,
   cwd,
+  tabId,
+  workspaceScopeKey,
   insertRequest,
   onRevisionActiveChange,
   toolApprovalMode,
@@ -133,6 +148,8 @@ export function ApprovalModal({
   onExitPlan?: () => void;
   onStop: () => void;
   cwd?: string;
+  tabId?: string;
+  workspaceScopeKey?: string;
   insertRequest?: ComposerInsertRequest | null;
   onRevisionActiveChange?: (active: boolean) => void;
   toolApprovalMode?: ToolApprovalMode;
@@ -141,7 +158,7 @@ export function ApprovalModal({
   const isPlanApproval = approval.tool === "exit_plan_mode";
   const toolLabel = approvalToolLabel(approval.tool, t);
   const isFreshHumanApproval = requiresFreshHumanApproval(approval.tool);
-  const hasFreshSessionGrant = approval.tool === "sandbox_escape";
+  const hasFreshSessionGrant = approval.tool === "sandbox_escape" || approval.tool === "config_write";
   // Switching the approval segmented control to a more permissive mode does not
   // resolve an already-pending request; say so on the card instead of leaving
   // the user to wonder why the switch "did nothing".
@@ -172,7 +189,7 @@ export function ApprovalModal({
   // the new one slides in.  GSAP fromTo on the shelf wrapper avoids the
   // jarring pop when the API cycles through 4+ pending approvals.
   const closingRef = useRef(false);
-  const fileMenu = useFileReferenceMenu(revisionText, cwd);
+  const fileMenu = useFileReferenceMenu(revisionText, cwd, tabId, workspaceScopeKey);
 
   const answerWithExit = (fn: () => void) => {
     if (closingRef.current) return;
@@ -409,7 +426,12 @@ export function ApprovalModal({
     ...(isFreshHumanApproval
       ? hasFreshSessionGrant
         ? [
-            { key: "2", label: t("approval.allowSandboxEscapeSession"), desc: t("approval.allowSandboxEscapeSessionDesc"), run: () => onAnswer(true, true, false) },
+            {
+              key: "2",
+              label: t(approval.tool === "config_write" ? "approval.allowConfigWriteSession" : "approval.allowSandboxEscapeSession"),
+              desc: t(approval.tool === "config_write" ? "approval.allowConfigWriteSessionDesc" : "approval.allowSandboxEscapeSessionDesc"),
+              run: () => onAnswer(true, true, false),
+            },
             { key: "3", label: t("approval.deny"), desc: t("approval.denyDesc"), run: () => onAnswer(false, false, false) },
           ]
         : [{ key: "2", label: t("approval.deny"), desc: t("approval.denyDesc"), run: () => onAnswer(false, false, false) }]

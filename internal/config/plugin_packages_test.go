@@ -52,6 +52,9 @@ func TestLoadMergesInstalledPluginSkillRootsAndMCP(t *testing.T) {
 	if !found {
 		t.Fatalf("plugin MCP server missing: %#v", cfg.Plugins)
 	}
+	if owner, ok := cfg.PluginPackageOwner("helper"); !ok || owner != "superpowers" {
+		t.Fatalf("plugin MCP owner = %q, %v; want superpowers, true", owner, ok)
+	}
 }
 
 func writeConfigTestFile(t *testing.T, path, body string) {

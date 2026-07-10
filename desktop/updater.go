@@ -342,7 +342,7 @@ func loadCachedUpdate() (*cachedUpdate, error) {
 	if err != nil {
 		return nil, err
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := readFileUTF8(path)
 	if err != nil {
 		return nil, err
 	}

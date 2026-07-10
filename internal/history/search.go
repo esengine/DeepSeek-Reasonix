@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"reasonix/internal/agent"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/provider"
 	"reasonix/internal/retrieval"
 	"reasonix/internal/store"
@@ -525,7 +526,7 @@ func subagentParentSession(path string) (string, bool) {
 	if ref == "" || ref == filepath.Base(path) {
 		return "", false
 	}
-	b, err := os.ReadFile(filepath.Join(filepath.Dir(path), ref+".meta.json"))
+	b, err := fileencoding.ReadFileUTF8(filepath.Join(filepath.Dir(path), ref+".meta.json"))
 	if err != nil {
 		return "", false
 	}

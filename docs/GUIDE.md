@@ -202,7 +202,7 @@ Token mode prints a share URL with `?token=...`; pass `--token` or set
 ```bash
 reasonix serve --hash-password --password 'strong-password'
 
-# ~/.reasonix/config.toml
+# <Reasonix home>/config.toml
 [serve]
 auth_mode = "password" # none|token|password
 password_hash = "$2a$12$..."
@@ -500,6 +500,13 @@ in addition to the configured roots; the workspace boundary and `forbid_read`
 denials still hold. Read-only AppContainer commands omit network capabilities
 when networking is disabled; writable Windows commands fail closed when
 `[sandbox] network = false`.
+**Windows note:** stable builds currently force the effective Bash sandbox
+mode to `off` on Windows — even an explicit `bash = "enforce"` resolves to
+`off`, and `reasonix doctor` flags the ignored setting — because the native
+Windows backend still breaks common Git Bash/MSYS2, Docker, and git workflows.
+The Windows sandbox description here is the design of record for when the
+backend is re-enabled.
+
 When no OS sandbox backend is available, `bash = "enforce"` refuses bash
 execution instead of running unconfined. Install the platform sandbox backend
 (bubblewrap/`bwrap` on Linux, `sandbox-exec` on macOS) or set

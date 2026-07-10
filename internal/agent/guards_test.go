@@ -253,7 +253,7 @@ func TestExecuteBatchSegmentsAroundWrites(t *testing.T) {
 	// A larger per-call delay keeps fixed scheduler jitter on loaded CI a small
 	// fraction of the segment time, so the tight relative bound below stays
 	// reliable instead of being widened toward the serial floor.
-	const delay = 100 * time.Millisecond
+	const delay = 150 * time.Millisecond
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "ro1", readOnly: true, delay: delay})
 	reg.Add(fakeTool{name: "ro2", readOnly: true, delay: delay})

@@ -127,22 +127,72 @@ body[data-lang="zh"] .hero h1 { font-size: clamp(42px, 5.6vw, 72px); line-height
 }
 .hero .sub b { color: var(--ink); font-weight: 600; }
 
-.hero-cta { margin-top: 40px; display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; }
+.hero-install {
+  --hero-action-height: 48px;
+  --hero-action-width: 160px;
+  width: min(850px, 100%); margin: 40px auto 0;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
+}
+.install-option {
+  display: grid; align-content: start; justify-items: start; gap: 12px;
+  min-height: 172px; padding: 20px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--bg-soft) 68%, white);
+  text-align: left;
+}
+.install-option--desktop {
+  background: linear-gradient(180deg, color-mix(in oklch, var(--accent) 11%, white), #fff 78%);
+  border-color: color-mix(in oklch, var(--accent) 22%, var(--line));
+}
+.install-kicker {
+  display: inline-flex; align-items: center; gap: 7px;
+  min-height: 16px; line-height: 16px;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--accent);
+}
+.install-kicker::before {
+  content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+}
+.install-option strong {
+  max-width: 330px; font-size: 15px; line-height: 1.45;
+  font-weight: 600; color: var(--ink);
+}
+.install-option .btn { align-self: end; margin-top: auto; }
+.hero-install .btn,
+.hero-install .install button {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--hero-action-width); height: var(--hero-action-height);
+  padding: 0 22px; box-sizing: border-box;
+  font-size: 15px; font-weight: 600; line-height: 1;
+}
+.install-option .install { align-self: end; margin-top: auto; max-width: 100%; }
 
 .install {
-  display: inline-flex; align-items: center; gap: 14px;
+  display: inline-flex; align-items: center; gap: 14px; min-width: 0;
   font-family: var(--font-mono); font-size: 14px; color: var(--ink);
   background: var(--bg-soft); border-radius: 999px;
   padding: 12px 10px 12px 22px;
+  white-space: nowrap;
 }
 .install .ps1 { color: var(--accent); user-select: none; }
 .install button {
+  flex: none;
   font-family: var(--font-sans); font-size: 13px; font-weight: 600;
   background: #fff; color: var(--accent); border: none; cursor: pointer;
   padding: 7px 16px; border-radius: 999px; box-shadow: var(--shadow-1);
   transition: background 0.2s, color 0.2s, box-shadow 0.2s;
 }
 .install button:hover { box-shadow: var(--shadow-2); }
+.hero-install .install {
+  height: var(--hero-action-height);
+  padding: 0 0 0 22px;
+}
+.hero-install .install button {
+  background: var(--accent); color: #fff; box-shadow: none;
+}
+.hero-install .install button:hover {
+  background: var(--accent-deep); box-shadow: var(--shadow-1);
+}
 .install button.copied { background: oklch(0.55 0.14 155); color: #fff; }
 
 .also { margin-top: 22px; font-size: 14px; color: var(--ink-3); }
@@ -836,12 +886,23 @@ footer { background: var(--bg); border-top: 1px solid var(--line); margin-top: 0
   .dl-help button { justify-self: start; }
   .cache-panel { padding: 36px 24px; }
   .hero { padding-top: 130px; }
+  .hero-install { grid-template-columns: 1fr; max-width: 560px; }
+  .install-option { min-height: 0; }
   section { padding-top: 100px; }
 }
 
 @media (max-width: 640px) {
   .docs-path-grid { grid-template-columns: 1fr; }
   .docs-main h1 { font-size: 34px; }
+  .hero-install { --hero-action-width: 100%; }
+  .install-option { padding: 18px; }
+  .hero-install .install {
+    height: auto;
+    width: 100%; flex-wrap: wrap; justify-content: space-between;
+    gap: 12px; padding: 14px;
+    border-radius: 24px;
+  }
+  .hero-install .install button { flex-basis: 100%; }
 }
 
 /* account / auth pages */

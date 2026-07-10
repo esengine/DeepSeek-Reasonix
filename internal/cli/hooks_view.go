@@ -28,9 +28,9 @@ func renderHooks(width int, hooks []hook.ResolvedHook, trusted bool, projectDefi
 	case projectDefines && !trusted:
 		b.WriteString(viewHint(viewCompactText("project hooks are not trusted; run /hooks trust to enable shell-command hooks", viewBudget(width, 2))))
 	case trusted:
-		b.WriteString(viewHint(viewCompactText("project trusted · config: project .reasonix/settings.json + global ~/.reasonix/settings.json", viewBudget(width, 2))))
+		b.WriteString(viewHint(viewCompactText("project trusted · config: project .reasonix/settings.json + global <Reasonix home>/settings.json", viewBudget(width, 2))))
 	default:
-		b.WriteString(viewHint(viewCompactText("project not trusted · config: project .reasonix/settings.json + global ~/.reasonix/settings.json", viewBudget(width, 2))))
+		b.WriteString(viewHint(viewCompactText("project not trusted · config: project .reasonix/settings.json + global <Reasonix home>/settings.json", viewBudget(width, 2))))
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

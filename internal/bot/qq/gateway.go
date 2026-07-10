@@ -515,7 +515,7 @@ func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot
 	if truncated {
 		a.logger.Warn("qq passive reply truncated", "chat_type", msg.ChatType, "chunks", originalChunkCount, "limit", len(chunks))
 	}
-	var last bot.SendResult
+	var delivered bot.SendResult
 	for _, chunk := range chunks {
 		seq := a.nextMessageSeq(msg.ReplyToMsgID)
 		var result bot.SendResult
@@ -532,12 +532,12 @@ func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot
 		}
 		if err != nil {
 			a.logger.Error("qq message send failed", "chat_type", msg.ChatType, "err", err)
-			return last, err
+			return delivered, err
 		}
 		a.logger.Info("qq message sent", "chat_type", msg.ChatType, "message_id_set", strings.TrimSpace(result.MessageID) != "")
-		last = result
+		delivered.Merge(result)
 	}
-	return last, nil
+	return delivered, nil
 }
 
 func (a *adapter) sendPlainMessageChunk(ctx context.Context, msg bot.OutboundMessage, text string, seq int) (bot.SendResult, error) {

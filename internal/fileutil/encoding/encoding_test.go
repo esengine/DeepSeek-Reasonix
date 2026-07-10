@@ -3,6 +3,8 @@ package encoding
 import (
 	"bytes"
 	"encoding/binary"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -76,6 +78,20 @@ func TestDecodeUTF8(t *testing.T) {
 	out := Decode(in, UTF8)
 	if string(out) != "hello\n世界" {
 		t.Errorf("got %q", out)
+	}
+}
+
+func TestReadFileUTF8DecodesGB18030(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, Encode(`{"label":"中文"}`, GB18030), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadFileUTF8(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `{"label":"中文"}` {
+		t.Fatalf("ReadFileUTF8 = %q", got)
 	}
 }
 

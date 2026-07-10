@@ -286,17 +286,22 @@ var docsAndIssueTerms = []string{
 	"需求", "产品文档", "接口文档", "方案", "规划",
 }
 
-func NewPlannerGate(classifier AutoPlanClassifier) func(string) bool {
+// NewPlannerGate builds the per-turn planner gate for two-model mode. The turn
+// context is threaded into the classifier call so a cancelled turn stops the
+// borderline check immediately instead of letting it run out its own timeout.
+func NewPlannerGate(classifier AutoPlanClassifier) func(context.Context, string) bool {
 	if nilutil.IsNil(classifier) {
-		return TaskWarrantsPlanner
+		return func(_ context.Context, input string) bool {
+			return TaskWarrantsPlanner(input)
+		}
 	}
-	return func(input string) bool {
+	return func(ctx context.Context, input string) bool {
 		if !TaskWarrantsPlanner(input) {
 			return false
 		}
 		score := autoPlanScore(input)
 		if score <= 2 {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 			defer cancel()
 			needsPlan, _, err := classifier.NeedsPlan(ctx, input, score)
 			if err == nil {

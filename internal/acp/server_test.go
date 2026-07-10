@@ -79,6 +79,8 @@ func (f *configurableFactory) NewSession(_ context.Context, p SessionParams) (*c
 		Cwd:            p.Cwd,
 		Model:          p.Model,
 		EffortOverride: cloneStringPtr(p.EffortOverride),
+		FileOverlay:    p.FileOverlay,
+		Terminal:       p.Terminal,
 	})
 	f.mu.Unlock()
 	behavior := f.behavior

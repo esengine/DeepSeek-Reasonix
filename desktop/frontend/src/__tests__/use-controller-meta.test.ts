@@ -280,6 +280,15 @@ console.log("\nuse controller meta");
 }
 
 {
+  const hydrated = historyMessagesToItems([
+    { role: "user", content: "finish" },
+    { role: "assistant", content: "done", reasoning: "worked", workDurationMs: 24_000 },
+  ], "h");
+  const assistant = hydrated.items.find((item) => item.kind === "assistant");
+  eq(assistant?.kind === "assistant" && assistant.workDurationMs, 24_000, "history restores persisted turn work duration");
+}
+
+{
   eq(sameMeta(meta(), meta()), true, "identical meta is unchanged");
   eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "plan" })), false, "collaboration mode changes invalidate meta equality");
   eq(sameMeta(meta({ workspacePath: "/repo" }), meta({ workspacePath: "/other" })), false, "workspace path changes invalidate meta equality");
@@ -302,6 +311,48 @@ console.log("\nuse controller meta");
   eq(shouldReconcileStaleTurn(rendered, 1_000, 31_000), true, "stale completed stream still reconciles missed turn_done");
   eq(shouldReconcileStaleTurn(rendered, 1_000, 20_000), false, "fresh completed stream waits before reconciling");
   eq(shouldReconcileStaleTurn({ ...rendered, turnActive: false }, 1_000, 31_000), false, "local pending send before turn_started does not reconcile");
+}
+
+{
+  const originalNow = Date.now;
+  let now = 1_000;
+  Date.now = () => now;
+  try {
+    let s = reducer(initialState, { type: "event", e: { kind: "turn_started" } });
+    now = 1_200;
+    s = reducer(s, { type: "event", e: { kind: "reasoning", reasoning: "plan" } });
+    eq(s.live?.reasoningStartedAt, 1_200, "first reasoning delta records a reasoning start time");
+    now = 3_700;
+    s = reducer(s, { type: "event", e: { kind: "text", text: "answer" } });
+    eq(s.live?.reasoningComplete, true, "first answer token marks reasoning complete");
+    eq(s.live?.reasoningCompletedAt, 3_700, "first answer token records reasoning completion time");
+    now = 4_200;
+    s = reducer(s, { type: "event", e: { kind: "turn_done" } });
+    const assistant = s.items.find((item) => item.kind === "assistant");
+    eq(assistant?.kind === "assistant" && assistant.reasoningDurationMs, 2_500, "turn_done persists the live reasoning duration");
+    eq(assistant?.kind === "assistant" && assistant.workDurationMs, 3_200, "turn_done persists the full turn wall-clock duration");
+  } finally {
+    Date.now = originalNow;
+  }
+}
+
+{
+  const originalNow = Date.now;
+  let now = 5_000;
+  Date.now = () => now;
+  try {
+    let s = reducer(initialState, { type: "event", e: { kind: "turn_started" } });
+    now = 5_100;
+    s = reducer(s, { type: "event", e: { kind: "reasoning", reasoning: "diagnose" } });
+    now = 6_400;
+    s = reducer(s, { type: "event", e: { kind: "message", text: "done", reasoning: "diagnose" } });
+    const assistant = s.items.find((item) => item.kind === "assistant");
+    eq(assistant?.kind === "assistant" && assistant.reasoningDurationMs, 1_300, "final message records reasoning duration when no text delta arrived");
+    eq(assistant?.kind === "assistant" && assistant.workDurationMs, 1_400, "final message records cumulative turn work duration before turn_done");
+    eq(s.live, undefined, "final message still closes live reasoning state");
+  } finally {
+    Date.now = originalNow;
+  }
 }
 
 {

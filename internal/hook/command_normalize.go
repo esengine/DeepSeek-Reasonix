@@ -6,15 +6,18 @@ import (
 	"reasonix/internal/shellparse"
 )
 
-// NormalizeCommand repairs a narrow class of copied JSON-escaped node -e hooks.
+// NormalizeCommand repairs narrow classes of copied JSON-escaped hook commands.
 // It is intentionally conservative: hook commands can be security controls, so
-// only a single static node -e command whose script clearly reads hook payload
-// JSON from stdin is rewritten.
+// only commands that were already malformed and match a known hook shape are
+// rewritten.
 func NormalizeCommand(command string) string {
 	if fixed, ok := normalizeStaticNodeEval(command); ok {
 		return fixed
 	}
 	if fixed, ok := normalizeEscapedNodeEval(command); ok {
+		return fixed
+	}
+	if fixed, ok := normalizeEscapedPowerShellFile(command); ok {
 		return fixed
 	}
 	return command
@@ -52,6 +55,195 @@ func repairableNodeEvalArgs(command string) (string, string, string, bool) {
 		}
 	}
 	return escapedNodeEvalArgs(command)
+}
+
+func normalizeEscapedPowerShellFile(command string) (string, bool) {
+	trimmed := strings.TrimSpace(command)
+	_, spans, ok := repairablePowerShellFileParse(trimmed)
+	if !ok || len(spans) == 0 {
+		return "", false
+	}
+	// Replace only the escaped-quote sequences found during parsing, so
+	// well-formed sibling arguments keep their bytes verbatim.
+	var b strings.Builder
+	prev := 0
+	for _, span := range spans {
+		b.WriteString(trimmed[prev:span[0]])
+		b.WriteByte('"')
+		prev = span[1]
+	}
+	b.WriteString(trimmed[prev:])
+	return b.String(), true
+}
+
+func repairablePowerShellFileArgs(command string) (string, []string, bool) {
+	fields, _, ok := repairablePowerShellFileParse(command)
+	if !ok {
+		return "", nil, false
+	}
+	return fields[0], fields[1:], true
+}
+
+func repairablePowerShellFileParse(command string) ([]string, [][2]int, bool) {
+	fields, repaired, spans, ok := parseSimpleHookCommandFields(command)
+	if !ok || len(fields) < 3 || !isPowerShellCommand(fields[0]) {
+		return nil, nil, false
+	}
+	fileIdx := powerShellFileFlagIndex(fields)
+	if fileIdx < 0 || fileIdx+1 >= len(fields) {
+		return nil, nil, false
+	}
+	if !powerShellFileRepairApplies(repaired, fileIdx) {
+		return nil, nil, false
+	}
+	return fields, spans, true
+}
+
+func powerShellFileRepairApplies(repaired []bool, fileIdx int) bool {
+	for i, ok := range repaired {
+		if !ok {
+			continue
+		}
+		if i == 0 || i > fileIdx {
+			return true
+		}
+	}
+	return false
+}
+
+func powerShellFileFlagIndex(fields []string) int {
+	for i := 1; i < len(fields); i++ {
+		if strings.EqualFold(fields[i], "-File") {
+			return i
+		}
+	}
+	return -1
+}
+
+func parseSimpleHookCommandFields(command string) ([]string, []bool, [][2]int, bool) {
+	// A newline is a shell command separator, not argument whitespace; leave
+	// multi-command strings alone like other compound commands.
+	if strings.ContainsAny(command, "\n\r") {
+		return nil, nil, nil, false
+	}
+	s := strings.TrimSpace(command)
+	fields := []string{}
+	repaired := []bool{}
+	spans := [][2]int{}
+	for i := 0; i < len(s); {
+		for i < len(s) && isShellWhitespace(s[i]) {
+			i++
+		}
+		if i >= len(s) {
+			break
+		}
+		var b strings.Builder
+		fieldStarted := false
+		fieldRepaired := false
+		var quote byte
+		escapedQuote := false
+		for i < len(s) {
+			c := s[i]
+			if quote == 0 {
+				if isShellWhitespace(c) {
+					break
+				}
+				if isShellControl(c) {
+					return nil, nil, nil, false
+				}
+				if n := escapedShellQuoteLen(s, i); n > 0 {
+					quote = '"'
+					escapedQuote = true
+					fieldStarted = true
+					fieldRepaired = true
+					spans = append(spans, [2]int{i, i + n})
+					i += n
+					continue
+				}
+				if c == '"' || c == '\'' {
+					quote = c
+					escapedQuote = false
+					fieldStarted = true
+					i++
+					continue
+				}
+				b.WriteByte(c)
+				fieldStarted = true
+				i++
+				continue
+			}
+			if escapedQuote {
+				if n := escapedShellQuoteLen(s, i); n > 0 {
+					quote = 0
+					escapedQuote = false
+					fieldRepaired = true
+					spans = append(spans, [2]int{i, i + n})
+					i += n
+					continue
+				}
+				b.WriteByte(c)
+				i++
+				continue
+			}
+			if c == quote {
+				quote = 0
+				i++
+				continue
+			}
+			if quote == '"' && c == '\\' && i+1 < len(s) && isDoubleQuoteEscapedByte(s[i+1]) {
+				b.WriteByte(s[i+1])
+				i += 2
+				continue
+			}
+			b.WriteByte(c)
+			i++
+		}
+		if quote != 0 {
+			return nil, nil, nil, false
+		}
+		if !fieldStarted {
+			return nil, nil, nil, false
+		}
+		fields = append(fields, b.String())
+		repaired = append(repaired, fieldRepaired)
+		for i < len(s) && isShellWhitespace(s[i]) {
+			i++
+		}
+	}
+	return fields, repaired, spans, len(fields) > 0
+}
+
+func escapedShellQuoteLen(s string, i int) int {
+	j := i
+	for j < len(s) && s[j] == '\\' {
+		j++
+	}
+	if j == i || j >= len(s) || s[j] != '"' {
+		return 0
+	}
+	return j - i + 1
+}
+
+func isShellWhitespace(c byte) bool {
+	return c == ' ' || c == '\t'
+}
+
+func isShellControl(c byte) bool {
+	switch c {
+	case '&', '|', ';', '<', '>':
+		return true
+	default:
+		return false
+	}
+}
+
+func isDoubleQuoteEscapedByte(c byte) bool {
+	switch c {
+	case '"', '\\', '$', '`', '\n':
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeEscapedNodeEval(command string) (string, bool) {
@@ -152,6 +344,14 @@ func startsLikeJSStatement(script string) bool {
 func isNodeCommand(command string) bool {
 	base := strings.ToLower(shellparse.WordBase(command))
 	return base == "node" || base == "node.exe"
+}
+
+func isPowerShellCommand(command string) bool {
+	base := strings.ToLower(command)
+	if i := strings.LastIndexAny(base, `/\`); i >= 0 {
+		base = base[i+1:]
+	}
+	return base == "powershell" || base == "powershell.exe" || base == "pwsh" || base == "pwsh.exe"
 }
 
 func isNodeEvalFlag(flag string) bool {

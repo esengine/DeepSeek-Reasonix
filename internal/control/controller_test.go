@@ -24,6 +24,7 @@ import (
 	"reasonix/internal/jobs"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
+	"reasonix/internal/pluginpkg"
 	"reasonix/internal/provider"
 	"reasonix/internal/skill"
 	"reasonix/internal/tool"
@@ -2028,6 +2029,132 @@ func TestNewSessionResetsTwoModelPlannerContext(t *testing.T) {
 	}
 }
 
+func TestTwoModelPlannerApprovalUsesHostGate(t *testing.T) {
+	dir := t.TempDir()
+	planner := &recordingProvider{name: "planner", streams: [][]provider.Chunk{
+		textTurn("Plan:\n1. Edit main.go\n\n是否批准这个方案？"),
+	}}
+	execProv := &recordingProvider{name: "executor", streams: [][]provider.Chunk{
+		textTurn("approved execution complete"),
+	}}
+	exec := agent.New(execProv, tool.NewRegistry(), agent.NewSession("exec sys"), agent.Options{}, event.Discard)
+	coord := agent.NewCoordinator(planner, agent.NewSession("planner sys"), nil, tool.NewRegistry(), agent.Options{}, exec, 0, event.Discard, nil)
+
+	ids := make(chan string, 1)
+	var prompts int
+	c := New(Options{
+		Runner:       coord,
+		Executor:     exec,
+		SystemPrompt: "exec sys",
+		SessionDir:   dir,
+		SessionPath:  filepath.Join(dir, "session.jsonl"),
+		Label:        "test",
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind != event.ApprovalRequest {
+				return
+			}
+			prompts++
+			if e.Approval.Tool != planApprovalTool {
+				t.Errorf("approval tool = %q, want %q", e.Approval.Tool, planApprovalTool)
+			}
+			if !strings.Contains(e.Approval.Reason, "Planner requested") {
+				t.Errorf("approval reason = %q, want planner source", e.Approval.Reason)
+			}
+			ids <- e.Approval.ID
+		}),
+	})
+	c.EnableInteractiveApproval()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Run(context.Background(), "fix the planner approval bug")
+	}()
+	id := waitApprovalID(t, ids)
+	if got := len(execProv.requests); got != 0 {
+		t.Fatalf("executor requests before approval = %d, want 0", got)
+	}
+	c.Approve(id, true, false, false)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("approved two-model turn did not finish")
+	}
+	if prompts != 1 {
+		t.Fatalf("approval prompts = %d, want 1", prompts)
+	}
+	if got := len(execProv.requests); got == 0 {
+		t.Fatal("executor did not run after approval")
+	}
+	reqText := requestMessagesText(execProv.requests[0].Messages)
+	if !strings.Contains(reqText, "Reasonix executor handoff") || !strings.Contains(reqText, "Edit main.go") {
+		t.Fatalf("approved executor request missing planner handoff:\n%s", reqText)
+	}
+}
+
+func TestTwoModelPlannerUserDecisionUsesAskGate(t *testing.T) {
+	dir := t.TempDir()
+	planner := &recordingProvider{name: "planner", streams: [][]provider.Chunk{
+		textTurn("需要用户选择方案：\n方案一：小改当前逻辑\n方案二：重构控制流\n请选择哪个方案。"),
+	}}
+	execProv := &recordingProvider{name: "executor", streams: [][]provider.Chunk{
+		textTurn("selected execution complete"),
+	}}
+	exec := agent.New(execProv, tool.NewRegistry(), agent.NewSession("exec sys"), agent.Options{}, event.Discard)
+	coord := agent.NewCoordinator(planner, agent.NewSession("planner sys"), nil, tool.NewRegistry(), agent.Options{}, exec, 0, event.Discard, nil)
+
+	asks := make(chan event.Ask, 1)
+	c := New(Options{
+		Runner:       coord,
+		Executor:     exec,
+		SystemPrompt: "exec sys",
+		SessionDir:   dir,
+		SessionPath:  filepath.Join(dir, "session.jsonl"),
+		Label:        "test",
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.AskRequest {
+				asks <- e.Ask
+			}
+		}),
+	})
+	c.EnableInteractiveApproval()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Run(context.Background(), "fix the planner decision bug")
+	}()
+	var ask event.Ask
+	select {
+	case ask = <-asks:
+	case <-time.After(2 * time.Second):
+		t.Fatal("AskRequest was not emitted")
+	}
+	if got := len(execProv.requests); got != 0 {
+		t.Fatalf("executor requests before user decision = %d, want 0", got)
+	}
+	if len(ask.Questions) != 1 || ask.Questions[0].ID != "planner_user_decision" {
+		t.Fatalf("ask questions = %+v, want planner decision question", ask.Questions)
+	}
+	c.AnswerQuestion(ask.ID, []event.AskAnswer{{QuestionID: "planner_user_decision", Selected: []string{"方案二：重构控制流"}}})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("answered two-model turn did not finish")
+	}
+	if got := len(execProv.requests); got == 0 {
+		t.Fatal("executor did not run after user decision")
+	}
+	reqText := requestMessagesText(execProv.requests[0].Messages)
+	if !strings.Contains(reqText, "Host user answer to planner question") || !strings.Contains(reqText, "方案二") {
+		t.Fatalf("executor request missing host user answer:\n%s", reqText)
+	}
+}
+
 func TestResumeResetsTwoModelPlannerContext(t *testing.T) {
 	dir := t.TempDir()
 	planner := &recordingProvider{name: "planner", streams: [][]provider.Chunk{
@@ -2145,7 +2272,13 @@ func TestSubmitClearDiscardsCurrentContextWithoutSavingTranscript(t *testing.T) 
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "old context"})
 	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
 	path := filepath.Join(dir, "session.jsonl")
-	c := New(Options{Executor: exec, SystemPrompt: "sys", SessionDir: dir, SessionPath: path, Label: "test"})
+	cleared := make(chan struct{})
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice && e.Text == "context cleared" {
+			close(cleared)
+		}
+	})
+	c := New(Options{Executor: exec, SystemPrompt: "sys", SessionDir: dir, SessionPath: path, Label: "test", Sink: sink})
 	if err := c.Snapshot(); err != nil {
 		t.Fatal(err)
 	}
@@ -2158,9 +2291,10 @@ func TestSubmitClearDiscardsCurrentContextWithoutSavingTranscript(t *testing.T) 
 	}
 
 	c.submit("/clear", "", "")
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) && c.SessionPath() == path {
-		time.Sleep(time.Millisecond)
+	select {
+	case <-cleared:
+	case <-time.After(2 * time.Second):
+		t.Fatal("/clear did not finish")
 	}
 	if c.SessionPath() == path {
 		t.Fatal("/clear did not rotate to a fresh session path")
@@ -2244,6 +2378,98 @@ tier = "lazy"
 	}
 	if names := c.ConfiguredMCPNames(); len(names) != 0 {
 		t.Fatalf("ConfiguredMCPNames() = %v, want empty after remove", names)
+	}
+}
+
+func TestRemoveMCPServerKeepsRuntimeOnlyToolsWhenPersistenceRemovalFails(t *testing.T) {
+	isolateControlConfigHome(t)
+	reg := tool.NewRegistry()
+	reg.Add(fakeControlTool{name: "mcp__runtime_only__echo"})
+	c := New(Options{Host: plugin.NewHost(), Registry: reg})
+
+	if disconnected, err := c.RemoveMCPServer("runtime_only"); err == nil || disconnected || !strings.Contains(err.Error(), "no removable MCP server") {
+		t.Fatalf("RemoveMCPServer(runtime_only) = (%v, %v)", disconnected, err)
+	}
+	if _, found := reg.Get("mcp__runtime_only__echo"); !found {
+		t.Fatalf("runtime-only tool was removed despite failed persistence; names=%v", reg.Names())
+	}
+}
+
+func TestRemoveMCPServerRejectsPluginManagedTools(t *testing.T) {
+	home := isolateControlConfigHome(t)
+	reasonixHome := filepath.Join(home, ".reasonix")
+	t.Setenv("REASONIX_HOME", reasonixHome)
+	root := filepath.Join(reasonixHome, "plugins", "superpowers")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), []byte(`{
+  "name": "superpowers",
+  "version": "1.0.0",
+  "mcpServers": {
+    "helper": { "command": "bin/helper" }
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := pluginpkg.Upsert(reasonixHome, pluginpkg.InstalledPlugin{
+		Name:         "superpowers",
+		Root:         "plugins/superpowers",
+		Version:      "1.0.0",
+		ManifestKind: "reasonix",
+		Enabled:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := tool.NewRegistry()
+	reg.Add(fakeControlTool{name: "mcp__helper__echo"})
+	c := New(Options{Host: plugin.NewHost(), Registry: reg})
+	disconnected, err := c.RemoveMCPServer("helper")
+	if err == nil || disconnected || !strings.Contains(err.Error(), "managed by plugin") || !strings.Contains(err.Error(), "superpowers") {
+		t.Fatalf("RemoveMCPServer(plugin-managed) = (%v, %v)", disconnected, err)
+	}
+	if _, found := reg.Get("mcp__helper__echo"); !found {
+		t.Fatalf("plugin-managed tool was removed despite rejected removal; names=%v", reg.Names())
+	}
+	if disconnected := c.DisconnectMCPServer("helper"); !disconnected {
+		t.Fatal("session-only disconnect should be allowed for a plugin-managed MCP")
+	}
+	if _, found := reg.Get("mcp__helper__echo"); found {
+		t.Fatalf("plugin-managed tool survived session-only disconnect; names=%v", reg.Names())
+	}
+}
+
+func TestRemoveMCPServerDeletesProjectMCPJSONSource(t *testing.T) {
+	isolateControlConfigHome(t)
+	if err := os.WriteFile(".mcp.json", []byte(`{
+  "mcpServers": {
+    "mock": { "command": "mock-mcp" },
+    "keep": { "command": "keep-mcp" }
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := tool.NewRegistry()
+	reg.Add(fakeControlTool{name: "mcp__mock__connect"})
+	c := New(Options{Host: plugin.NewHost(), Registry: reg})
+	disconnected, err := c.RemoveMCPServer("mock")
+	if err != nil {
+		t.Fatalf("RemoveMCPServer(.mcp.json): %v", err)
+	}
+	if disconnected {
+		t.Fatal("RemoveMCPServer reported a live disconnect for an idle .mcp.json server")
+	}
+	if _, found := reg.Get("mcp__mock__connect"); found {
+		t.Fatalf(".mcp.json placeholder survived removal; names=%v", reg.Names())
+	}
+	raw, err := os.ReadFile(".mcp.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"mock"`) || !strings.Contains(string(raw), `"keep"`) {
+		t.Fatalf(".mcp.json removal did not preserve unrelated servers:\n%s", raw)
 	}
 }
 
@@ -3175,6 +3401,51 @@ func TestRunGuardedPanicEmitsTurnDone(t *testing.T) {
 	c.mu.Unlock()
 	if running {
 		t.Fatal("c.running should be false after panic recovery")
+	}
+}
+
+func TestRunGuardedRejectsReplacementUntilTurnDoneReturns(t *testing.T) {
+	turnDoneEntered := make(chan struct{})
+	releaseTurnDone := make(chan struct{})
+	firstBodyDone := make(chan struct{})
+	secondBodyRan := make(chan struct{}, 1)
+	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
+		if e.Kind == event.TurnDone {
+			close(turnDoneEntered)
+			<-releaseTurnDone
+		}
+	})})
+
+	c.runGuarded(func(context.Context) error {
+		close(firstBodyDone)
+		return nil
+	})
+	<-firstBodyDone
+	select {
+	case <-turnDoneEntered:
+	case <-time.After(time.Second):
+		t.Fatal("TurnDone delivery did not start")
+	}
+	if !c.RuntimeStatus().Running {
+		t.Fatal("controller reported idle while TurnDone was still being delivered")
+	}
+	c.runGuarded(func(context.Context) error {
+		secondBodyRan <- struct{}{}
+		return nil
+	})
+	select {
+	case <-secondBodyRan:
+		t.Fatal("replacement turn started before TurnDone delivery completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(releaseTurnDone)
+	deadline := time.Now().Add(time.Second)
+	for c.RuntimeStatus().Running && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if c.RuntimeStatus().Running {
+		t.Fatal("controller remained busy after TurnDone returned")
 	}
 }
 

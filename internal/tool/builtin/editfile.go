@@ -17,6 +17,7 @@ func init() { tool.RegisterBuiltin(editFile{}) }
 type editFile struct {
 	roots   []string
 	guard   SessionDataGuard
+	managed ManagedConfigPaths
 	workDir string
 }
 
@@ -48,7 +49,7 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "", fmt.Errorf("old_string is required")
 	}
 	p.Path = resolveIn(e.workDir, p.Path)
-	if err := confineWrite(e.roots, e.guard, p.Path); err != nil {
+	if err := confineWrite(ctx, e.roots, e.guard, e.managed, p.Path); err != nil {
 		return "", err
 	}
 

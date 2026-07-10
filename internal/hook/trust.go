@@ -4,14 +4,16 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 // Trust gates project hooks. A project's .reasonix/settings.json can run
 // arbitrary shell commands, so cloning a repo must not silently execute its
 // hooks: project hooks load only after the user explicitly trusts that project
-// root. The trust flag lives in user-global state (~/.reasonix/trust.json),
+// root. The trust flag lives in user-global state (<Reasonix home>/trust.json),
 // NOT in the project file itself — an attacker controls the latter. Global
-// hooks (~/.reasonix/settings.json) are the user's own and always run.
+// hooks (<Reasonix home>/settings.json) are the user's own and always run.
 
 // TrustFilename is the user-global trust store under ~/.reasonix.
 const TrustFilename = "trust.json"
@@ -58,11 +60,11 @@ func absRoot(root string) string {
 func readTrust(homeDir string) trustFile {
 	var tf trustFile
 	path := TrustPath(homeDir)
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			if legacy := legacyTrustPath(homeDir); legacy != "" {
-				if legacyBytes, legacyErr := os.ReadFile(legacy); legacyErr == nil {
+				if legacyBytes, legacyErr := fileencoding.ReadFileUTF8(legacy); legacyErr == nil {
 					_ = json.Unmarshal(legacyBytes, &tf)
 					return tf
 				}

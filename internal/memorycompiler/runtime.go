@@ -22,6 +22,7 @@ import (
 	"unicode"
 
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/provider"
 )
 
@@ -2973,7 +2974,7 @@ func (r *Runtime) loadState() state {
 func (r *Runtime) loadStateLocked() state {
 	var st state
 	path := filepath.Join(r.dir, stateFile)
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return state{NoisyRefs: map[string]int{}}
 	}
@@ -3015,7 +3016,7 @@ func appendBoundedJSONL(path string, v any, maxLines int) error {
 	if err != nil {
 		return err
 	}
-	existing, err := os.ReadFile(path)
+	existing, err := fileencoding.ReadFileUTF8(path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}

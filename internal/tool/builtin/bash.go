@@ -89,6 +89,11 @@ type bash struct {
 	guard   SessionDataGuard
 	workDir string
 	timeout time.Duration
+	// terminal, when non-nil, runs foreground commands in a host-owned terminal
+	// (ACP terminal/*). Only consulted when the local OS sandbox is not
+	// enforcing — a host terminal cannot honor the confinement configuration —
+	// and never for background jobs, which need the local job manager.
+	terminal TerminalRunner
 }
 
 type bashParams struct {
@@ -167,6 +172,18 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 		return "", fmt.Errorf("this shell is Windows PowerShell, which does not parse '&&' or '||'. " +
 			"Sequence with ';' (both run regardless of the first's result), use 'if ($?) { ... }' for " +
 			"conditional chaining, or issue the commands as separate calls")
+	}
+
+	// A host-owned terminal runs the command where the user watches it live.
+	// Never when the OS sandbox is enforcing (the host cannot honor the local
+	// confinement config), never when [secrets].filter_subprocess_env is on
+	// (the host terminal spawns with its own unfiltered environment, which
+	// would leak the credentials the user asked to strip), and never for
+	// background jobs. ok=false falls back to local execution unchanged.
+	if b.terminal != nil && !p.RunInBackground && !b.sb.Enforce() && !secrets.FilterSubprocessEnv() {
+		if out, ok, err := b.terminal.RunCommand(ctx, p.Command, b.workDir, b.timeout); ok {
+			return appendSessionDataHint(out, b.guard.CommandHint(b.workDir, p.Command)), err
+		}
 	}
 
 	// Wrap in the OS sandbox when configured; otherwise argv is just the shell.

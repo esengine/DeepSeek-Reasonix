@@ -162,8 +162,11 @@ export interface AppBindings {
   ClearGoal(): Promise<void>;
   ClearGoalForTab(tabID: string): Promise<void>;
   Compact(): Promise<void>;
+  CompactForTab(tabID: string): Promise<void>;
   NewSession(): Promise<void>;
+  NewSessionForTab(tabID: string): Promise<void>;
   ClearSession(): Promise<void>;
+  ClearSessionForTab(tabID: string): Promise<void>;
   History(): Promise<HistoryMessage[]>;
   HistoryForTab(tabID: string): Promise<HistoryMessage[]>;
   HistoryPage(beforeTurn: number, limit: number): Promise<HistoryPage>;
@@ -172,9 +175,13 @@ export interface AppBindings {
   Checkpoints(): Promise<CheckpointMeta[]>;
   CheckpointsForTab(tabID: string): Promise<CheckpointMeta[]>;
   Rewind(turn: number, scope: string): Promise<void>;
+  RewindForTab(tabID: string, turn: number, scope: string): Promise<void>;
   Fork(turn: number): Promise<TabMeta>;
+  ForkForTab(tabID: string, turn: number): Promise<TabMeta>;
   SummarizeFrom(turn: number): Promise<void>;
+  SummarizeFromForTab(tabID: string, turn: number): Promise<void>;
   SummarizeUpTo(turn: number): Promise<void>;
+  SummarizeUpToForTab(tabID: string, turn: number): Promise<void>;
   ListSessions(): Promise<SessionMeta[]>;
   ListTrashedSessions(): Promise<SessionMeta[]>;
   ResumeSession(path: string): Promise<HistoryMessage[]>;
@@ -185,8 +192,10 @@ export interface AppBindings {
   OpenChannelSessionPageForTab(tabID: string, path: string, limit: number): Promise<HistoryPage>;
   PreviewSession(path: string): Promise<HistoryMessage[]>;
   DeleteSession(path: string): Promise<void>;
+  DeleteRecoveryCopy(path: string): Promise<void>;
   RestoreSession(path: string): Promise<void>;
   PurgeTrashedSession(path: string): Promise<void>;
+  PurgeRecoveryCopy(path: string): Promise<void>;
   RenameSession(path: string, title: string): Promise<void>;
   ScanPromptHistory(nonce: string): Promise<PromptHistoryResult>;
   ListWorkspaces(): Promise<WorkspaceView[]>;
@@ -238,15 +247,20 @@ export interface AppBindings {
   SetMCPServerTier(name: string, tier: string): Promise<void>;
   SlashArgs(input: string): Promise<SlashArgsResult>;
   ListDir(rel: string): Promise<DirEntry[]>;
+  ListDirForTab(tabID: string, rel: string): Promise<DirEntry[]>;
   SearchFileRefs(query: string): Promise<DirEntry[]>;
+  SearchFileRefsForTab(tabID: string, query: string): Promise<DirEntry[]>;
   ReadFile(rel: string): Promise<FilePreview>;
+  ReadFileForTab(tabID: string, rel: string): Promise<FilePreview>;
   WorkspaceChanges(tabID: string): Promise<WorkspaceChangesView>;
   GitBranches(): Promise<string[]>;
   GitCheckout(branch: string): Promise<void>;
   WorkspaceGitHistory(tabID: string, path: string): Promise<GitCommitView[]>;
   WorkspaceGitCommitDetail(tabID: string, hash: string, path: string): Promise<GitCommitDetailView>;
   OpenWorkspacePath(rel: string): Promise<void>;
+  OpenWorkspacePathForTab(tabID: string, rel: string): Promise<void>;
   RevealWorkspacePath(rel: string): Promise<void>;
+  RevealWorkspacePathForTab(tabID: string, rel: string): Promise<void>;
   RevealPath(path: string): Promise<void>;
   SavePastedImage(dataUrl: string): Promise<string>;
   SaveClipboardImage(): Promise<string>;
@@ -742,6 +756,16 @@ function browserPlatformOverride(): "darwin" | "windows" | "linux" | "" {
   return value === "darwin" || value === "windows" || value === "linux" ? value : "";
 }
 
+function browserPreviewBashSandboxMode(): "enforce" | "off" {
+  return browserPlatformOverride() === "windows" ? "off" : "enforce";
+}
+
+function browserPreviewEffectiveShell(prefer = "auto"): "bash" | "git-bash" | "powershell" | "pwsh" {
+  const normalized = prefer.trim().toLowerCase();
+  if (normalized === "powershell" || normalized === "pwsh") return normalized;
+  return browserPlatformOverride() === "windows" ? "git-bash" : "bash";
+}
+
 function mockScenario(): "demo" | "fresh" | "running" | "guidance" | "sandbox_escape" | "notice" {
   if (typeof window === "undefined") return "demo";
   const value = new URLSearchParams(window.location.search).get("mock")?.trim().toLowerCase();
@@ -1007,7 +1031,7 @@ function makeMockApp(): AppBindings {
   // Mutable so delete/rename are observable in browser dev.
   const sessions: SessionMeta[] = [
     { path: "/mock/sessions/a.jsonl", preview: "fix the login bug in auth.go", turns: 12, createdAt: t0 - 2 * day, lastActivityAt: t0 - 3_600_000, modTime: t0 - 3_600_000, current: true, open: true },
-    { path: "/mock/sessions/b-recovery-0123456789abcdef.jsonl", preview: "refactor the payment module", turns: 5, createdAt: t0 - 3 * day, lastActivityAt: t0 - 6 * 3_600_000, modTime: t0 - 6 * 3_600_000, current: false, open: true, recovered: true },
+    { path: "/mock/sessions/b-recovery-0123456789abcdef.jsonl", preview: "refactor the payment module", turns: 5, createdAt: t0 - 3 * day, lastActivityAt: t0 - 6 * 3_600_000, modTime: t0 - 6 * 3_600_000, current: false, open: true, recovered: true, recoveryCopy: true },
     { path: "/mock/sessions/c.jsonl", preview: "write the README and badges", turns: 8, createdAt: t0 - 4 * day, lastActivityAt: t0 - day - 3_600_000, modTime: t0 - day - 3_600_000, current: false, open: false },
     { path: "/mock/sessions/d.jsonl", preview: "explain the plugin host design", turns: 3, createdAt: t0 - 5 * day, lastActivityAt: t0 - 4 * day, modTime: t0 - 4 * day, current: false, open: false },
   ];
@@ -1059,6 +1083,7 @@ function makeMockApp(): AppBindings {
       topicId: "topic_product",
       topicTitle: t("mock.trashGlobalProductTitle"),
       recovered: true,
+      recoveryCopy: true,
     },
   ];
   if (freshMock) {
@@ -1080,7 +1105,7 @@ function makeMockApp(): AppBindings {
     ],
     providerPresets: mockProviderPresetViews(),
     permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["Bash(rm:*)"] },
-    sandbox: { bash: "enforce", network: true, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: cwd, effectiveWriteRoots: [cwd], shell: "auto" },
+    sandbox: { bash: browserPreviewBashSandboxMode(), network: true, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: cwd, effectiveWriteRoots: [cwd], shell: "auto", effectiveShell: browserPreviewEffectiveShell("auto") },
     network: {
       proxyMode: "auto",
       proxyUrl: "",
@@ -1996,6 +2021,18 @@ function makeMockApp(): AppBindings {
       // dev. Bail if cancelled during the wait — nothing was streamed yet.
       await delay(700);
       if (cancelled) return;
+      const reasoningChunks = [
+        "我先判断这是浏览器预览环境，所以不会调用真实 kernel。\n",
+        "接着模拟 provider 的 reasoning delta：先展示思考过程，再切到正式回复。\n",
+        "完成后前端应该把过程区折叠成“已工作 N 秒”。\n",
+      ];
+      for (const chunk of reasoningChunks) {
+        if (cancelled) return;
+        emit({ kind: "reasoning", reasoning: chunk });
+        await delay(520);
+      }
+      if (cancelled) return;
+      await delay(260);
       const reply =
         `You said: **${input}**\n\n` +
         "This is the browser dev mock — the real reply comes from the kernel " +
@@ -2190,8 +2227,11 @@ function makeMockApp(): AppBindings {
           await this.SetGoalForTab(tabID, "");
         },
         async Compact() {},
+        async CompactForTab() {},
         async NewSession() {},
+        async NewSessionForTab() {},
         async ClearSession() {},
+        async ClearSessionForTab() {},
     async Checkpoints() {
       return [
         { turn: 0, prompt: "你好呀", files: ["src/App.tsx"], fileCount: 1, turnFileCount: 1, time: Date.now() - 30_000, canCode: true, canConversation: true },
@@ -2201,6 +2241,7 @@ function makeMockApp(): AppBindings {
       return this.Checkpoints();
     },
     async Rewind() {},
+    async RewindForTab() {},
     async Fork() {
       const active = mockTabs.find((tab) => tab.active) ?? mockTabs[0];
       const tab: TabMeta = {
@@ -2214,8 +2255,14 @@ function makeMockApp(): AppBindings {
       mockTabs = [...mockTabs.map((item) => ({ ...item, active: false })), tab];
       return { ...tab };
     },
+    async ForkForTab(tabID, turn) {
+      mockTabs = mockTabs.map((tab) => ({ ...tab, active: tab.id === tabID }));
+      return this.Fork(turn);
+    },
     async SummarizeFrom() {},
+    async SummarizeFromForTab() {},
     async SummarizeUpTo() {},
+    async SummarizeUpToForTab() {},
         async History() {
           return [];
         },
@@ -2300,6 +2347,9 @@ function makeMockApp(): AppBindings {
         });
       }
     },
+    async DeleteRecoveryCopy(path: string) {
+      return this.DeleteSession(path);
+    },
     async RestoreSession(path: string) {
       const i = trashedSessions.findIndex((s) => s.path === path);
       if (i >= 0) {
@@ -2314,6 +2364,9 @@ function makeMockApp(): AppBindings {
     async PurgeTrashedSession(path: string) {
       const i = trashedSessions.findIndex((s) => s.path === path);
       if (i >= 0) trashedSessions.splice(i, 1);
+    },
+    async PurgeRecoveryCopy(path: string) {
+      return this.PurgeTrashedSession(path);
     },
     async RenameSession(path: string, title: string) {
       const s = sessions.find((x) => x.path === path);
@@ -2795,11 +2848,17 @@ function makeMockApp(): AppBindings {
       }
       return [{ name: "file.go", isDir: false }];
     },
+    async ListDirForTab(_tabID: string, rel: string) {
+      return this.ListDir(rel);
+    },
     async SearchFileRefs(query: string) {
       const q = query.toLowerCase();
       return ["desktop/frontend/src/lib/bridge.ts", "frontend/wailsjs/runtime/runtime.js", "internal/control/refs.go"]
         .filter((path) => path.split("/").pop()?.toLowerCase().includes(q))
         .map((name) => ({ name, isDir: false }));
+    },
+    async SearchFileRefsForTab(_tabID: string, query: string) {
+      return this.SearchFileRefs(query);
     },
     async ReadFile(rel: string) {
       const samples: Record<string, string> = {
@@ -2815,6 +2874,9 @@ function makeMockApp(): AppBindings {
         truncated: false,
         binary: false,
       };
+    },
+    async ReadFileForTab(_tabID: string, rel: string) {
+      return this.ReadFile(rel);
     },
     async WorkspaceChanges(_tabID: string) {
       return {
@@ -2854,8 +2916,14 @@ function makeMockApp(): AppBindings {
     async OpenWorkspacePath(rel: string) {
       console.info("mock OpenWorkspacePath", rel);
     },
+    async OpenWorkspacePathForTab(_tabID: string, rel: string) {
+      await this.OpenWorkspacePath(rel);
+    },
     async RevealWorkspacePath(rel: string) {
       console.info("mock RevealWorkspacePath", rel);
+    },
+    async RevealWorkspacePathForTab(_tabID: string, rel: string) {
+      await this.RevealWorkspacePath(rel);
     },
     async RevealPath(path: string) {
       console.info("mock RevealPath", path);
@@ -3220,7 +3288,7 @@ function makeMockApp(): AppBindings {
         async ReloadSettings() {},
         async SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string) {
           const effectiveWorkspaceRoot = workspaceRoot.trim() || cwd;
-          settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell };
+          settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell, effectiveShell: browserPreviewEffectiveShell(shell) };
         },
         async SetNetwork(n: NetworkView) {
           settings.network = n;

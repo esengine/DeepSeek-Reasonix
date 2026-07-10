@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"reasonix/internal/config"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/tool"
 )
 
@@ -107,7 +108,7 @@ func LoadCachedSchema(name, expectedHash string) (*CachedSchema, bool) {
 	if p == "" {
 		return nil, false
 	}
-	b, err := os.ReadFile(p)
+	b, err := fileencoding.ReadFileUTF8(p)
 	if err != nil {
 		return nil, false
 	}

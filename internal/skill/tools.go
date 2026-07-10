@@ -104,7 +104,11 @@ func (t *runSkillTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		if rawArgs == "" {
 			return "", fmt.Errorf("run_skill: skill %q is a subagent and requires 'arguments' — the subagent has no other context, so describe the concrete task", name)
 		}
-		return t.runner(ctx, sk, rawArgs, opts)
+		out, err := t.runner(ctx, sk, rawArgs, opts)
+		if err != nil {
+			return "", err
+		}
+		return tool.GuardSubagentHostDecisionText(out), nil
 	}
 	if opts.ContinueFrom != "" || opts.ForkFrom != "" {
 		return "", fmt.Errorf("run_skill: subagent continuation is only valid for runAs=subagent skills")
@@ -201,7 +205,11 @@ func (t *readOnlySkillTool) Execute(ctx context.Context, args json.RawMessage) (
 		if rawArgs == "" {
 			return "", fmt.Errorf("read_only_skill: skill %q is a subagent and requires 'arguments' — the subagent has no other context, so describe the concrete read-only task", name)
 		}
-		return t.runner(ctx, sk, rawArgs, SubagentRunOptions{})
+		out, err := t.runner(ctx, sk, rawArgs, SubagentRunOptions{})
+		if err != nil {
+			return "", err
+		}
+		return tool.GuardSubagentHostDecisionText(out), nil
 	}
 	return renderInline(sk, rawArgs), nil
 }
@@ -339,7 +347,11 @@ func (t *subagentSkillTool) Execute(ctx context.Context, args json.RawMessage) (
 	if opts.ContinueFrom != "" && opts.ForkFrom != "" {
 		return "", fmt.Errorf("%s: continue_from and fork_from are mutually exclusive; pass only continue_from", t.toolName)
 	}
-	return t.runner(ctx, sk, task, opts)
+	out, err := t.runner(ctx, sk, task, opts)
+	if err != nil {
+		return "", err
+	}
+	return tool.GuardSubagentHostDecisionText(out), nil
 }
 
 func (t *subagentSkillTool) ResolveProfile(json.RawMessage) *event.Profile {

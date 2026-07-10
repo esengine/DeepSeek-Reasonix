@@ -102,6 +102,11 @@ var Chinese = Messages{
 	SandboxEscapeWrapReason:                "Windows 沙箱无法包装这条命令。是否仅本次不进 OS 沙箱运行？这会只对此命令绕过 OS 沙箱。",
 	SandboxEscapeRuntimeReason:             "Windows 沙箱启动这条命令时失败。是否仅本次不进 OS 沙箱运行？这会只对此命令绕过 OS 沙箱。",
 	SandboxEscapeDeclined:                  "用户拒绝在没有 OS 沙箱的情况下运行这条命令；不要不进沙箱重试，请询问用户希望如何继续。",
+	ApprovalToolLabelConfigWrite:           "Reasonix 配置写入审批",
+	ConfigWriteSubjectPrefix:               "写入 Reasonix 配置：",
+	ConfigWriteReason:                      "这次写入的目标是工作区之外的 Reasonix 托管配置文件。它可以改变后续会话的模型服务商、沙箱规则、权限和 MCP 服务器，因此需要你的明确批准。",
+	ConfigWriteDeclined:                    "用户拒绝了这次 Reasonix 配置写入；不要重试，请询问用户希望如何继续。",
+	ConfigWriteApprovalChoices:             "1. 允许一次\n2. 本会话允许\n3. 拒绝\n选择 [1/2/3]（兼容 y/a/n）",
 	PermissionSavedFmt:                     "授权已保存到 %s：%s",
 	PermissionAlreadyAllowedFmt:            "授权已由 %s 中的规则覆盖：%s",
 	PermissionSaveFailedFmt:                "保存授权 %s 失败：%v",
@@ -278,7 +283,7 @@ var Chinese = Messages{
 	ListSkillsHeaderFmt: "skills（%d 个）",
 	ListSkillsNone:      "暂无 skill — 调用内置的（如 /init），或用 install_skill 创建一个",
 	ListHooksHeaderFmt:  "hooks（生效 %d 个）",
-	ListHooksNone:       "无生效 hooks — 在 .reasonix/settings.json（项目，需信任后）或 ~/.reasonix/settings.json（全局）配置",
+	ListHooksNone:       "无生效 hooks — 在 .reasonix/settings.json（项目，需信任后）或 <Reasonix home>/settings.json（全局）配置",
 	ListMcpHeader:       "MCP 服务器",
 	ListMcpNone:         "未连接 MCP 服务器 — 在 reasonix.toml（[[plugins]]）或项目 .mcp.json 中添加",
 
@@ -447,7 +452,7 @@ var Chinese = Messages{
   echo "解释这段代码" | reasonix run
 
 配置：
-  优先级：flag > ./reasonix.toml > ~/.reasonix/config.toml > 内置默认值
+  优先级：flag > ./reasonix.toml > <Reasonix home>/config.toml > 内置默认值
   密钥通过 api_key_env 从环境变量注入（如 DEEPSEEK_API_KEY）。
   运行 'reasonix setup' 生成配置；详见 docs/SPEC.md。
 `,

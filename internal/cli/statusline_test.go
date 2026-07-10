@@ -55,7 +55,11 @@ func TestRunStatuslineCmdNormalizesQuotedNodeEval(t *testing.T) {
 	cmd := `node -e "\"` + script + `\""`
 	timeout := statuslineCommandTimeout
 	if runtime.GOOS == "windows" {
-		timeout = 10 * time.Second
+		// Windows CI cold-starts node.exe through Defender scanning while the
+		// rest of the module compiles and tests in parallel; a fresh toolchain
+		// (empty setup-go cache) pushes that past 10s. The production timeout
+		// is not under test here — only the quoted-eval normalization is.
+		timeout = 30 * time.Second
 	}
 
 	if got := runStatuslineCmdWithTimeout(cmd, `{"model":"deepseek"}`, timeout); got != "deepseek" {

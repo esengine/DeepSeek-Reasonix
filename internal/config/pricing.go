@@ -5,8 +5,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/BurntSushi/toml"
-
 	"reasonix/internal/provider"
 )
 
@@ -156,7 +154,7 @@ func ApplyUserConfigUpgradesOnStartup(path string) (bool, error) {
 		return false, err
 	}
 	var header Config
-	if _, err := toml.DecodeFile(path, &header); err != nil {
+	if _, err := decodeTOMLFile(path, &header); err != nil {
 		return false, fmt.Errorf("config %s: %w", path, err)
 	}
 	if header.ConfigVersion >= Default().ConfigVersion {

@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 type task struct {
@@ -155,7 +157,11 @@ func loadTasks(suite string) ([]task, error) {
 		}
 		dir := filepath.Join(tasksDir, e.Name())
 		var t task
-		if _, err := toml.DecodeFile(filepath.Join(dir, "task.toml"), &t); err != nil {
+		data, err := fileencoding.ReadFileUTF8(filepath.Join(dir, "task.toml"))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", e.Name(), err)
+		}
+		if _, err := toml.Decode(string(data), &t); err != nil {
 			return nil, fmt.Errorf("%s: %w", e.Name(), err)
 		}
 		t.ID = e.Name()
@@ -333,7 +339,7 @@ func currencySym(c string) string {
 
 func readMetrics(path string) (runMetrics, error) {
 	var m runMetrics
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return m, err
 	}

@@ -450,7 +450,7 @@ func (m *metricsAggregator) persist() {
 }
 
 func readCounters(path string) counters {
-	b, err := os.ReadFile(path)
+	b, err := readFileUTF8(path)
 	if err != nil {
 		return counters{}
 	}
