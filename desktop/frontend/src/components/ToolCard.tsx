@@ -13,6 +13,7 @@ import { ReadOnlyBatch } from "./ReadOnlyBatch";
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
 const SUBAGENT_TOOLS = new Set(["task", "run_skill", "explore", "research", "review", "security_review"]);
+const WRITE_TOOLS = new Set(["write_file", "edit_file", "multi_edit", "move_file", "delete_range", "delete_symbol", "notebook_edit"]);
 
 /** Lines shown by default in a shell output block before the "show all" button. */
 const SHELL_PREVIEW_LINES = 10;
@@ -88,10 +89,14 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
       ? [item.profile.model, item.profile.effort ? `effort ${item.profile.effort}` : ""].filter(Boolean).join(" · ")
       : "";
 
-  // All tools default to collapsed. Sub-agent tools open while running so the
-  // user sees nested calls; they collapse when done. Reasoning (AssistantMessage)
-  // also opens while streaming and closes on finish.
-  const defaultOpen = hasNested ? item.status === "running" : false;
+  // Write/edit tools show their diff inline — that's the primary signal — so they
+  // default to OPEN. Sub-agent tools open while running so the user sees nested
+  // calls; they collapse when done. All other tools default to collapsed.
+  const isWriteTool = WRITE_TOOLS.has(item.name);
+  const hasFileDiff = Boolean(item.fileDiff?.diff && item.fileDiff.diff.trim());
+  const hasArgsDiff = !archivedWithoutFullData && diffsFor(item.name, effectiveArgs).length > 0;
+  const hasDiff = hasFileDiff || hasArgsDiff;
+  const defaultOpen = isWriteTool && hasDiff ? true : hasNested ? item.status === "running" : false;
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const open = userOpen ?? defaultOpen;
   const openRef = useRef(open);
