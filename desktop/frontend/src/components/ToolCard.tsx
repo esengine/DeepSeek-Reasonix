@@ -92,26 +92,84 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // Write/edit tools show their diff inline — that's the primary signal — so they
   // default to OPEN. Sub-agent tools open while running so the user sees nested
   // calls; they collapse when done. All other tools default to collapsed.
-  const isWriteTool = WRITE_TOOLS.has(item.name);
-  const hasFileDiff = Boolean(item.fileDiff?.diff && item.fileDiff.diff.trim());
-  const hasArgsDiff = !archivedWithoutFullData && diffsFor(item.name, effectiveArgs).length > 0;
-  const hasDiff = hasFileDiff || hasArgsDiff;
-  const defaultOpen = isWriteTool && hasDiff ? true : hasNested ? item.status === "running" : false;
-  const [userOpen, setUserOpen] = useState<boolean | null>(null);
-  const open = userOpen ?? defaultOpen;
-  const openRef = useRef(open);
-  openRef.current = open;
-  const [showAll, setShowAll] = useState(false);
-  const [showErrorDetails, setShowErrorDetails] = useState(false);
-  // Lazy-load full tool data from the backend when the card is expanded and
-  // the in-memory copy was archived for memory efficiency.
   const [fullData, setFullData] = useState<{ args: string; output?: string } | null>(null);
   const archivedWithoutFullData = Boolean(item.dataArchived && !fullData);
   const effectiveArgs = archivedWithoutFullData ? "" : fullData?.args ?? item.args;
   const effectiveOutput = fullData?.output ?? item.output;
   const displayOutput = toolOutputDuplicatesError(effectiveOutput, item.error) ? undefined : effectiveOutput;
   const previewDiff = item.fileDiff?.diff ? item.fileDiff : undefined;
-  const diffs = previewDiff || archivedWithoutFullData ? [] : diffsFor(item.name, effectiveArgs);
+
+  // Cache diffsFor result to avoid calling it twice
+  const argsDiffs = archivedWithoutFullData ? [] : diffsFor(item.name, effectiveArgs);
+  const diffs = previewDiff ? [] : argsDiffs;
+
+  const isWriteTool = WRITE_TOOLS.has(item.name);
+  const hasFileDiff = Boolean(item.fileDiff?.diff && item.fileDiff.diff.trim());
+  const hasArgsDiff = !archivedWithoutFullData && argsDiffs.length > 0;
+  const hasDiff = hasFileDiff || hasArgsDiff;
+  const defaultOpen = isWriteTool && hasDiff ? true : hasNested ? item.status === "running" : false;
+  
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const open = userOpen ?? defaultOpen;
+  const openRef = useRef(open);
+  openRef.current = open;
+
+  // Track first render to avoid mount noise in debug logs
+  const isFirstRenderRef = useRef(true);
+
+  // Debug logging (after variable declarations) - stripped in production builds
+  if (import.meta.env.DEV) {
+    console.debug("[ToolCard] render", {
+      toolName: item.name,
+      itemId: item.id,
+      status: item.status,
+      isWriteTool,
+      hasFileDiff,
+      hasArgsDiff,
+      hasDiff,
+      archivedWithoutFullData,
+      effectiveArgsLength: effectiveArgs?.length ?? 0,
+      previewDiffExists: !!previewDiff,
+      diffsCount: diffs.length,
+      defaultOpen,
+      userOpen,
+      open,
+      hasNested,
+      nestedCount: nested.length,
+    });
+  }
+
+  // Debug: log open state changes - stripped in production builds
+  // Skip first render to avoid mount noise; use ref to track previous open
+  const prevOpenRef = useRef(open);
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      if (isFirstRenderRef.current) {
+        isFirstRenderRef.current = false;
+      } else if (prevOpenRef.current !== open) {
+        console.debug("[ToolCard] open changed", { itemId: item.id, toolName: item.name, open, userOpen, defaultOpen });
+        prevOpenRef.current = open;
+      }
+    }
+  }, [open, item.id, item.name, userOpen, defaultOpen]);
+
+  // Debug: log fullData changes - stripped in production builds
+  // Skip first render
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      if (isFirstRenderRef.current) {
+        isFirstRenderRef.current = false;
+      } else {
+        console.debug("[ToolCard] fullData changed", { itemId: item.id, hasFullData: !!fullData, argsLength: fullData?.args?.length ?? 0 });
+      }
+    }
+  }, [fullData, item.id]);
+
+  const [showAll, setShowAll] = useState(false);
+  const [showErrorDetails, setShowErrorDetails] = useState(false);
+
+  // Lazy-load full tool data from the backend when the card is expanded and
+  // the in-memory copy was archived for memory efficiency.
   const subject = fullData ? subjectOf(item.name, effectiveArgs) : item.subject || subjectOf(item.name, effectiveArgs);
   // Reset cached fullData when the item identity changes (e.g. after rewind).
   useEffect(() => {
@@ -133,10 +191,14 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   const hasErrorDetails = errorText ? errorNeedsDetails(errorText, errorSummary) : false;
   useEffect(() => {
     if (!open || !item.dataArchived || fullData || !tabId) return;
+    if (import.meta.env.DEV) console.debug("[ToolCard] loading fullData", { itemId: item.id, tabId });
     let cancelled = false;
     import("../lib/bridge").then(({ app }) =>
       app.ToolResultForTab(tabId, item.id).then((d) => {
-        if (!cancelled && d) setFullData(d);
+        if (!cancelled && d) {
+          if (import.meta.env.DEV) console.debug("[ToolCard] fullData loaded", { itemId: item.id, hasArgs: !!d.args, hasOutput: !!d.output });
+          setFullData(d);
+        }
       }).catch(() => {}),
     ).catch(() => {});
     return () => { cancelled = true; };
