@@ -3564,6 +3564,24 @@ func (c *Controller) SessionCache() (hit, miss int) {
 	return c.executor.SessionCache()
 }
 
+// SessionCost returns the total API spend this session (in the provider's
+// currency). Zero before the first turn or when no pricing is configured.
+func (c *Controller) SessionCost() float64 {
+	if c.executor == nil {
+		return 0
+	}
+	return c.executor.SessionCost()
+}
+
+// PricingSymbol returns the currency symbol used by the active pricing
+// (defaults to "¥" when nil or not set).
+func (c *Controller) PricingSymbol() string {
+	if c.executor == nil {
+		return "¥"
+	}
+	return c.executor.PricingSymbol()
+}
+
 // Todos returns a copy of the canonical task list (the latest todo_write state
 // merged with complete_step advances) so frontends can render a live task panel.
 func (c *Controller) Todos() []evidence.TodoItem {
