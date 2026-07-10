@@ -20,6 +20,8 @@ const SHELL_PREVIEW_LINES = 10;
 const ERROR_SUMMARY_MAX_CHARS = 140;
 const ERROR_DETAILS_THRESHOLD = 220;
 
+const IS_DEV = import.meta.env?.DEV === true;
+
 function pretty(json: string): string {
   try {
     return JSON.stringify(JSON.parse(json), null, 2);
@@ -108,7 +110,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   const hasArgsDiff = !archivedWithoutFullData && argsDiffs.length > 0;
   const hasDiff = hasFileDiff || hasArgsDiff;
   const defaultOpen = isWriteTool && hasDiff ? true : hasNested ? item.status === "running" : false;
-  
+
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const open = userOpen ?? defaultOpen;
   const openRef = useRef(open);
@@ -118,7 +120,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   const isFirstRenderRef = useRef(true);
 
   // Debug logging (after variable declarations) - stripped in production builds
-  if (import.meta.env.DEV) {
+  if (IS_DEV) {
     console.debug("[ToolCard] render", {
       toolName: item.name,
       itemId: item.id,
@@ -143,7 +145,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // Skip first render to avoid mount noise; use ref to track previous open
   const prevOpenRef = useRef(open);
   useEffect(() => {
-    if (import.meta.env.DEV) {
+    if (IS_DEV) {
       if (isFirstRenderRef.current) {
         isFirstRenderRef.current = false;
       } else if (prevOpenRef.current !== open) {
@@ -156,7 +158,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // Debug: log fullData changes - stripped in production builds
   // Skip first render
   useEffect(() => {
-    if (import.meta.env.DEV) {
+    if (IS_DEV) {
       if (isFirstRenderRef.current) {
         isFirstRenderRef.current = false;
       } else {
@@ -191,12 +193,12 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   const hasErrorDetails = errorText ? errorNeedsDetails(errorText, errorSummary) : false;
   useEffect(() => {
     if (!open || !item.dataArchived || fullData || !tabId) return;
-    if (import.meta.env.DEV) console.debug("[ToolCard] loading fullData", { itemId: item.id, tabId });
+    if (IS_DEV) console.debug("[ToolCard] loading fullData", { itemId: item.id, tabId });
     let cancelled = false;
     import("../lib/bridge").then(({ app }) =>
       app.ToolResultForTab(tabId, item.id).then((d) => {
         if (!cancelled && d) {
-          if (import.meta.env.DEV) console.debug("[ToolCard] fullData loaded", { itemId: item.id, hasArgs: !!d.args, hasOutput: !!d.output });
+          if (IS_DEV) console.debug("[ToolCard] fullData loaded", { itemId: item.id, hasArgs: !!d.args, hasOutput: !!d.output });
           setFullData(d);
         }
       }).catch(() => {}),
