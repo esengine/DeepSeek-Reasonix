@@ -76,6 +76,9 @@ eq(finalDeclaration(".workspace-preview__body--code .code-block__wrap", "min-hei
 eq(finalDeclaration(".workspace-preview__body--code .code", "overflow"), "auto", "code viewport owns horizontal and vertical scrolling");
 eq(finalDeclaration(".workspace-preview__body--code .code", "min-height"), "0", "code viewport can shrink inside the preview pane");
 eq(finalDeclaration(".workspace-preview__body--code .code", "margin"), "0", "code viewport scrollbar sits at the visible pane bottom");
+eq(finalDeclaration(".workspace-preview__body--code .workspace-monaco-preview", "flex"), "1 1 auto", "Monaco preview fills the code preview height");
+eq(finalDeclaration(".workspace-preview__body--code .workspace-monaco-preview", "min-height"), "0", "Monaco preview can shrink inside the preview pane");
+eq(finalDeclaration(".workspace-preview__body--code .workspace-monaco-preview", "width"), "100%", "Monaco preview spans the preview width");
 eq(
   finalDeclaration(".workspace-panel--with-tree-rail:not(.workspace-panel--tree-hidden)", "grid-template-columns"),
   "var(--workspace-tree-rail-width) var(--workspace-tree-width) minmax(var(--workspace-preview-min-width), 1fr)",

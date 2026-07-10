@@ -10,7 +10,9 @@ import { app, onEvent, onReady } from "./bridge";
 import { invalidateCache } from "./composerHistory";
 import { formatGuardianAssessmentNotice } from "./guardianEvents";
 import { createRafBatch } from "./rafBatch";
+import { recordControllerEvent, recordToolProgressMerge } from "./eventPressure";
 import { t, type DictKey } from "./i18n";
+import type { TurnTimeline } from "./turnTimeline";
 import { fileDiffFromWire, summarize, summarizeFileDiff, type ToolFileDiff } from "./tools";
 import { modeHasAutoApproveTools, normalizeMode, normalizeToolApprovalMode } from "./types";
 import type {
@@ -51,7 +53,7 @@ const HISTORY_PAGE_TURNS = 60;
 
 export type Item =
   | { kind: "user"; id: string; text: string; submitText?: string; failed?: boolean; createdAt?: number; checkpointTurn?: number }
-  | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; reasoningComplete?: boolean; memoryCitations?: MemoryCitation[] }
+  | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; reasoningComplete?: boolean; memoryCitations?: MemoryCitation[]; createdAt?: number; completedAt?: number }
   | { kind: "phase"; id: string; text: string }
   | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string }
   | {
@@ -81,9 +83,50 @@ export type Item =
       isShell?: boolean; // true for !-prefix shell commands (controls default expand)
       parentId?: string; // a sub-agent call nests under the `task` call with this id
       profile?: { model?: string; effort?: string }; // subagent model/effort from tool event
+      dispatchedAt?: number;
+      firstOutputAt?: number;
+      completedAt?: number;
     };
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
+type BatchedWireEvent = { tabId: string; e: WireEvent };
+
+export function mergeToolProgressEvents(batch: BatchedWireEvent[]): BatchedWireEvent[] {
+  const merged: BatchedWireEvent[] = [];
+  const indexByTool = new Map<string, number>();
+  for (const item of batch) {
+    const toolId = item.e.kind === "tool_progress" ? item.e.tool?.id : undefined;
+    if (!toolId) {
+      merged.push(item);
+      continue;
+    }
+    const key = `${item.tabId}\0${toolId}`;
+    const existingIndex = indexByTool.get(key);
+    if (existingIndex === undefined) {
+      indexByTool.set(key, merged.length);
+      merged.push(item);
+      continue;
+    }
+    const existing = merged[existingIndex];
+    const existingTool = existing.e.tool;
+    const nextTool = item.e.tool;
+    if (!existingTool || !nextTool) {
+      merged.push(item);
+      continue;
+    }
+    merged[existingIndex] = {
+      tabId: existing.tabId,
+      e: {
+        ...existing.e,
+        tool: {
+          ...existingTool,
+          output: `${existingTool.output ?? ""}${nextTool.output ?? ""}`,
+        },
+      },
+    };
+  }
+  return merged;
+}
 
 interface State {
   items: Item[];
@@ -124,6 +167,7 @@ interface State {
   sessionTokens: number;
   sessionCost: number;
   sessionCurrency: string;
+  turnTimeline?: TurnTimeline;
   retry?: { attempt: number; max: number };
   seq: number;
   sessionGen: number;
@@ -336,6 +380,8 @@ type Action =
   | { type: "meta"; meta: Meta }
   | { type: "optimistic_meta"; meta: Meta }
   | { type: "context"; context: ContextInfo }
+  | { type: "context_refresh_started"; at: number }
+  | { type: "context_refresh_done"; at: number }
   | { type: "balance"; balance: BalanceInfo }
   | { type: "effort"; effort: EffortInfo }
   | { type: "jobs"; jobs: JobView[] }
@@ -431,6 +477,8 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
           text: m.content,
           reasoning: m.reasoning ?? "",
           streaming: false,
+          createdAt: m.createdAt,
+          completedAt: m.createdAt,
           memoryCitations: memoryCitations.length > 0 ? memoryCitations : undefined,
         });
         seq++;
@@ -558,7 +606,7 @@ function ensureAssistant(s: State): { items: Item[]; id: string; seq: number } {
     if (exists) return { items: s.items, id: s.currentAssistant, seq: s.seq };
   }
   const id = `a${s.seq}`;
-  const item: Item = { kind: "assistant", id, text: "", reasoning: "", streaming: true };
+  const item: Item = { kind: "assistant", id, text: "", reasoning: "", streaming: true, createdAt: Date.now() };
   return { items: [...s.items, item], id, seq: s.seq + 1 };
 }
 
@@ -592,6 +640,7 @@ function applyEvent(s: State, e: WireEvent): State {
     return { ...s, retry: { attempt: e.retryAttempt ?? 0, max: e.retryMax ?? 0 } };
   }
   if (s.retry) s = { ...s, retry: undefined };
+  const now = Date.now();
   switch (e.kind) {
     case "turn_started": {
       // Flush the user message and pre-create an empty assistant bubble
@@ -601,7 +650,7 @@ function applyEvent(s: State, e: WireEvent): State {
       let cur: State = s;
       if (cur.pendingUser !== undefined) cur = flushPendingUser(cur);
       const { items, id, seq } = ensureAssistant(cur);
-      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "", reasoningComplete: false }, running: true, turnActive: true, pendingPrompt: false, cancelRequested: false, cancellable: true, turnStartAt: Date.now(), turnTokens: 0, turnTotalTokens: 0, turnCost: 0 };
+      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "", reasoningComplete: false }, running: true, turnActive: true, pendingPrompt: false, cancelRequested: false, cancellable: true, turnStartAt: now, turnTokens: 0, turnTotalTokens: 0, turnCost: 0, turnTimeline: { turnStartedAt: now } };
     }
     case "text":
     case "reasoning": {
@@ -612,7 +661,12 @@ function applyEvent(s: State, e: WireEvent): State {
         e.kind === "text"
           ? { ...base, text: base.text + delta, reasoningComplete: base.reasoning !== "" || base.reasoningComplete }
           : { ...base, reasoning: base.reasoning + delta, reasoningComplete: false };
-      return { ...s, items, live, currentAssistant: id, seq };
+      const turnTimeline = {
+        ...s.turnTimeline,
+        firstModelEventAt: s.turnTimeline?.firstModelEventAt ?? now,
+        firstTokenAt: s.turnTimeline?.firstTokenAt ?? now,
+      };
+      return { ...s, items, live, currentAssistant: id, seq, turnTimeline };
     }
     case "message": {
       const existingAssistant =
@@ -626,7 +680,7 @@ function applyEvent(s: State, e: WireEvent): State {
           existingAssistant && existingAssistant.text.trim() === "" && existingAssistant.reasoning.trim() === "" && !existingAssistant.memoryCitations?.length
             ? s.items.filter((it) => !(it.kind === "assistant" && it.id === existingAssistant.id))
             : s.items;
-        return { ...s, items, live: undefined, currentAssistant: undefined };
+        return { ...s, items, live: undefined, currentAssistant: undefined, turnTimeline: { ...s.turnTimeline, firstModelEventAt: s.turnTimeline?.firstModelEventAt ?? now, messageDoneAt: now } };
       }
       const { items, id, seq } = ensureAssistant(s);
       const next = items.map((it) =>
@@ -638,12 +692,13 @@ function applyEvent(s: State, e: WireEvent): State {
                 text,
                 reasoning,
                 streaming: false,
+                completedAt: now,
                 memoryCitations: memoryCitations.length > 0 ? memoryCitations : undefined,
               };
             })()
           : it,
       );
-      return { ...s, items: next, live: undefined, currentAssistant: undefined, seq };
+      return { ...s, items: next, live: undefined, currentAssistant: undefined, seq, turnTimeline: { ...s.turnTimeline, firstModelEventAt: s.turnTimeline?.firstModelEventAt ?? now, messageDoneAt: now } };
     }
     case "tool_dispatch": {
       const t = e.tool;
@@ -662,13 +717,13 @@ function applyEvent(s: State, e: WireEvent): State {
           const args = t.args ? t.args : it.args;
           const fileDiff = fileDiffFromWire(t);
           const summary = summarizeFileDiff(fileDiff) || summarize(t.name, args) || (t.name === it.name && args === it.args ? it.summary : undefined);
-          next[idx] = { ...it, name: t.name, args, readOnly: t.readOnly, profile: t.profile ?? it.profile, summary, fileDiff };
+          next[idx] = { ...it, name: t.name, args, readOnly: t.readOnly, profile: t.profile ?? it.profile, summary, fileDiff, dispatchedAt: it.dispatchedAt ?? now };
         }
-        return { ...s, items: next };
+        return { ...s, items: next, turnTimeline: { ...s.turnTimeline, firstModelEventAt: s.turnTimeline?.firstModelEventAt ?? now } };
       }
       const args = t.args ?? "";
       const fileDiff = fileDiffFromWire(t);
-      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "tool", id, name: t.name, args, readOnly: t.readOnly, status: "running", summary: summarizeFileDiff(fileDiff) || summarize(t.name, args), fileDiff, isShell: id.startsWith("shell-"), parentId: t.parentId, profile: t.profile }] };
+      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "tool", id, name: t.name, args, readOnly: t.readOnly, status: "running", summary: summarizeFileDiff(fileDiff) || summarize(t.name, args), fileDiff, isShell: id.startsWith("shell-"), parentId: t.parentId, profile: t.profile, dispatchedAt: now }], turnTimeline: { ...s.turnTimeline, firstModelEventAt: s.turnTimeline?.firstModelEventAt ?? now } };
     }
     case "tool_result": {
       const t = e.tool;
@@ -697,6 +752,7 @@ function applyEvent(s: State, e: WireEvent): State {
             truncated: t.truncated,
             durationMs: t.durationMs,
             summary,
+            completedAt: now,
           };
         }
       }
@@ -709,7 +765,7 @@ function applyEvent(s: State, e: WireEvent): State {
       if (idx < 0) return s;
       const next = [...s.items];
       const it = next[idx];
-      if (it.kind === "tool") next[idx] = { ...it, output: (it.output ?? "") + (t.output ?? "") };
+      if (it.kind === "tool") next[idx] = { ...it, output: (it.output ?? "") + (t.output ?? ""), firstOutputAt: it.firstOutputAt ?? now };
       return { ...s, items: next };
     }
     case "usage": {
@@ -763,9 +819,9 @@ function applyEvent(s: State, e: WireEvent): State {
     case "turn_done": {
       if (s.pendingUser !== undefined) s = flushPendingUser(s);
       const finalized = s.items.map((it) => {
-        if (it.kind === "assistant" && s.live && it.id === s.live.id) return { ...it, text: s.live.text, reasoning: s.live.reasoning, streaming: false };
-        if (it.kind === "assistant" && it.streaming) return { ...it, streaming: false };
-        if (it.kind === "tool" && it.status === "running") return { ...it, status: "stopped" as const };
+        if (it.kind === "assistant" && s.live && it.id === s.live.id) return { ...it, text: s.live.text, reasoning: s.live.reasoning, streaming: false, completedAt: it.completedAt ?? now };
+        if (it.kind === "assistant" && it.streaming) return { ...it, streaming: false, completedAt: it.completedAt ?? now };
+        if (it.kind === "tool" && it.status === "running") return { ...it, status: "stopped" as const, completedAt: it.completedAt ?? now };
         return it;
       });
       let items: Item[] = e.err ? [...finalized, { kind: "notice", id: `e${s.seq}`, level: "warn", text: e.err }] : finalized;
@@ -785,6 +841,7 @@ function applyEvent(s: State, e: WireEvent): State {
         approval: keepPlanApproval ? s.approval : undefined,
         ask: undefined,
         seq: s.seq + 1,
+        turnTimeline: { ...s.turnTimeline, turnDoneAt: now },
       };
     }
     default: return s;
@@ -795,18 +852,20 @@ export function reducer(s: State, a: Action): State {
   switch (a.type) {
     case "user": {
       const seq = a.seq !== undefined ? a.seq : s.seq;
+      const now = Date.now();
       return {
         ...s,
         seq: seq + 1,
-        items: [...s.items, { kind: "user", id: `u${seq}`, text: a.text, submitText: a.submitText, createdAt: Date.now() }],
+        items: [...s.items, { kind: "user", id: `u${seq}`, text: a.text, submitText: a.submitText, createdAt: now }],
         running: true,
         pendingPrompt: false,
         cancelRequested: false,
         cancellable: true,
-        turnStartAt: Date.now(),
+        turnStartAt: now,
         turnTokens: 0,
         turnTotalTokens: 0,
         turnCost: 0,
+        turnTimeline: { turnStartedAt: now },
         pendingUser: a.text,
         discardTurn: false,
       };
@@ -850,8 +909,8 @@ export function reducer(s: State, a: Action): State {
         };
       }
       const finalized = s.items.map((it) => {
-        if (it.kind === "assistant" && s.live && it.id === s.live.id) return { ...it, text: s.live.text, reasoning: s.live.reasoning, streaming: false };
-        if (it.kind === "assistant" && it.streaming) return { ...it, streaming: false };
+        if (it.kind === "assistant" && s.live && it.id === s.live.id) return { ...it, text: s.live.text, reasoning: s.live.reasoning, streaming: false, completedAt: it.completedAt ?? Date.now() };
+        if (it.kind === "assistant" && it.streaming) return { ...it, streaming: false, completedAt: it.completedAt ?? Date.now() };
         if (it.kind === "tool" && it.status === "running") return { ...it, status: "stopped" as const };
         return it;
       });
@@ -872,6 +931,10 @@ export function reducer(s: State, a: Action): State {
       const sessionCurrency = a.context.sessionCurrency || s.sessionCurrency;
       return { ...s, context: a.context, sessionTokens, sessionCost, sessionCurrency };
     }
+    case "context_refresh_started":
+      return { ...s, turnTimeline: { ...s.turnTimeline, contextRefreshStartedAt: a.at, contextRefreshDoneAt: undefined } };
+    case "context_refresh_done":
+      return { ...s, turnTimeline: { ...s.turnTimeline, contextRefreshDoneAt: a.at } };
     case "balance": return { ...s, balance: a.balance };
     case "effort": return { ...s, effort: a.effort };
     case "jobs": return { ...s, jobs: a.jobs };
@@ -1608,12 +1671,18 @@ export function useController() {
   }, [clearCancelReconcileTimer, reconcileTabRuntime]);
 
   useEffect(() => {
-    const textBatch = createRafBatch<{ tabId: string; e: WireEvent }>((batch) => {
+    const textBatch = createRafBatch<BatchedWireEvent>((batch) => {
       for (const { tabId, e } of batch) dispatchTo(tabId, { type: "event", e });
+    });
+    const toolProgressBatch = createRafBatch<BatchedWireEvent>((batch) => {
+      const merged = mergeToolProgressEvents(batch);
+      recordToolProgressMerge(batch.length, merged.length);
+      for (const { tabId, e } of merged) dispatchTo(tabId, { type: "event", e });
     });
     const off = onEvent((e) => {
       const targetTabId = e.tabId || activeTabIdRef.current;
       if (!targetTabId) return;
+      recordControllerEvent(e.kind);
       if (
         e.kind === "turn_started" ||
         e.kind === "text" ||
@@ -1626,9 +1695,14 @@ export function useController() {
         lastTurnActivityAtByTab.current.set(targetTabId, Date.now());
       }
       if (e.kind === "text" || e.kind === "reasoning") {
+        toolProgressBatch.drain();
         textBatch.push({ tabId: targetTabId, e });
+      } else if (e.kind === "tool_progress") {
+        textBatch.drain();
+        toolProgressBatch.push({ tabId: targetTabId, e });
       } else {
         textBatch.drain();
+        toolProgressBatch.drain();
         dispatchTo(targetTabId, { type: "event", e });
       }
       if (e.kind === "turn_done") {
@@ -1637,10 +1711,14 @@ export function useController() {
             .then((turns) => dispatchTo(targetTabId, { type: "history_checkpoint_turns", turns: asArray(turns) }))
             .catch(() => {});
         }
+        dispatchTo(targetTabId, { type: "context_refresh_started", at: Date.now() });
         app
           .ContextUsageForTab(targetTabId)
-          .then((context) => dispatchTo(targetTabId, { type: "context", context }))
-          .catch(() => {});
+          .then((context) => {
+            dispatchTo(targetTabId, { type: "context", context });
+            dispatchTo(targetTabId, { type: "context_refresh_done", at: Date.now() });
+          })
+          .catch(() => dispatchTo(targetTabId, { type: "context_refresh_done", at: Date.now() }));
         app.BalanceForTab(targetTabId).then((balance) => dispatchTo(targetTabId, { type: "balance", balance })).catch(() => {});
         app.EffortForTab(targetTabId).then((effort) => dispatchTo(targetTabId, { type: "effort", effort })).catch(() => {});
         void refreshCheckpoints(targetTabId);
@@ -1671,6 +1749,7 @@ export function useController() {
 
     return () => {
       textBatch.drain();
+      toolProgressBatch.drain();
       for (const timer of cancelReconcileTimers.current.values()) {
         window.clearTimeout(timer);
       }

@@ -16,6 +16,7 @@ const SUBAGENT_TOOLS = new Set(["task", "run_skill", "explore", "research", "rev
 
 /** Lines shown by default in a shell output block before the "show all" button. */
 const SHELL_PREVIEW_LINES = 10;
+const TOOL_PREVIEW_LINES = 24;
 const ERROR_SUMMARY_MAX_CHARS = 140;
 const ERROR_DETAILS_THRESHOLD = 220;
 
@@ -25,11 +26,6 @@ function pretty(json: string): string {
   } catch {
     return json;
   }
-}
-
-function formatToolDuration(ms?: number): string {
-  if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return "";
-  return `${Math.round(ms)} ms`;
 }
 
 function normalizeErrorText(text: string): string {
@@ -122,6 +118,8 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // Shell output: split into preview + "show all" toggle.
   const shellOutput = item.isShell && displayOutput ? displayOutput : null;
   const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_PREVIEW_LINES) : null;
+  const genericOutput = !shellOutput && displayOutput ? displayOutput : null;
+  const genericOutputPreview = genericOutput ? splitPreview(genericOutput, TOOL_PREVIEW_LINES) : null;
   const hasBody = Boolean(previewDiff || diffs.length || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error);
   const errorText = item.error ? normalizeErrorText(item.error) : "";
   const errorSummary = errorText ? summarizeToolError(errorText, t("tool.errorReceiptMismatch")) : "";
@@ -152,7 +150,6 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   const quiet =
     item.readOnly && !hasNested && item.status !== "error" && item.status !== "stopped";
 
-  const duration = item.status === "running" ? "" : formatToolDuration(item.durationMs);
   const summary = item.status === "running" ? "" : item.summary || summarizeFileDiff(item.fileDiff) || (item.error ? errorSummary : archivedWithoutFullData ? "" : summarize(item.name, effectiveArgs, displayOutput, item.error));
 
   // GSAP-driven collapse/expand for tool body
@@ -183,7 +180,6 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
         </span>
         {profileText && <span className="tool__profile">{profileText}</span>}
         {summary && <span className="tool__summary">{summary}</span>}
-        {duration && <span className="tool__duration">{duration}</span>}
         {hasBody && (
           <span className={`tool__chevron${open ? " tool__chevron--open" : ""}`}>
             <ChevronRight size={12} />
@@ -249,9 +245,14 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
         {!shellPreview && hasArgsOrOutput && (
           <>
             {effectiveArgs && <CodeViewer value={pretty(effectiveArgs)} language="json" maxHeight={180} />}
-            {displayOutput && (
+            {genericOutputPreview && (
               <>
-                <CodeViewer value={displayOutput} maxHeight={280} />
+                <CodeViewer value={showAll ? genericOutput! : genericOutputPreview.preview} maxHeight={showAll ? 480 : 280} />
+                {genericOutputPreview.hasMore && !showAll && (
+                  <button className="tool__showall" onClick={() => setShowAll(true)}>
+                    {t("tool.showAllLines", { n: genericOutputPreview.total })}
+                  </button>
+                )}
                 {item.truncated && <div className="tool__note">{t("tool.truncated")}</div>}
               </>
             )}

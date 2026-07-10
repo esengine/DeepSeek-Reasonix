@@ -220,12 +220,13 @@ type ToolHooks interface {
 // Agent drives a single task: a Provider, a tool Registry, and a Session wired
 // into the main loop.
 type Agent struct {
-	prov        provider.Provider
-	tools       *tool.Registry
-	session     *Session
-	sessMu      sync.Mutex // guards the session pointer for external Session()/SetSession
-	maxSteps    int
-	maxStepsKey string
+	prov                 provider.Provider
+	tools                *tool.Registry
+	session              *Session
+	sessMu               sync.Mutex // guards the session pointer for external Session()/SetSession
+	maxSteps             int
+	maxStepsKey          string
+	maxParallelReadTools int
 	// executorHandoffGuard is enabled by Coordinator for the executor agent. The
 	// per-turn marker check in Run keeps ordinary single-model turns unaffected.
 	executorHandoffGuard bool
@@ -833,9 +834,12 @@ type Options struct {
 	// MaxStepsKey names the configuration knob shown when the MaxSteps guard is
 	// hit. Empty defaults to agent.max_steps.
 	MaxStepsKey string
-	Temperature float64
-	Pricing     *provider.Pricing // optional, for per-turn cost display
-	UsageSource string            // optional billable usage source; default executor
+	// MaxParallelReadTools bounds concurrent read-only calls in one contiguous
+	// batch. <=0 uses the default; values above 32 are clamped.
+	MaxParallelReadTools int
+	Temperature          float64
+	Pricing              *provider.Pricing // optional, for per-turn cost display
+	UsageSource          string            // optional billable usage source; default executor
 
 	// Gate is the per-call permission gate. nil disables gating.
 	Gate Gate
@@ -972,6 +976,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		session:                  session,
 		maxSteps:                 opts.MaxSteps,
 		maxStepsKey:              maxStepsKey,
+		maxParallelReadTools:     NormalizeMaxParallelReadTools(opts.MaxParallelReadTools),
 		temperature:              opts.Temperature,
 		pricing:                  opts.Pricing,
 		usageSource:              usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
@@ -2012,7 +2017,7 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 			break
 		}
 		if batch.parallel && batch.end-batch.start > 1 {
-			ranUntil := runParallel(ctx, batch.start, batch.end, run)
+			ranUntil := runParallel(ctx, batch.start, batch.end, a.maxParallelReadTools, run)
 			// After parallel execution completes, check if context was cancelled.
 			// The individual tool executions should have detected ctx.Done(), but
 			// we verify here to ensure we don't continue to subsequent batches.
@@ -2147,8 +2152,23 @@ func parallelisable(r *tool.Registry, name string) bool {
 	return ok && t.ReadOnly()
 }
 
-func runParallel(ctx context.Context, start, end int, run func(int)) int {
-	const maxParallel = 8
+const (
+	DefaultMaxParallelReadTools = 8
+	MaxParallelReadToolsLimit   = 32
+)
+
+func NormalizeMaxParallelReadTools(value int) int {
+	if value <= 0 {
+		return DefaultMaxParallelReadTools
+	}
+	if value > MaxParallelReadToolsLimit {
+		return MaxParallelReadToolsLimit
+	}
+	return value
+}
+
+func runParallel(ctx context.Context, start, end, maxParallel int, run func(int)) int {
+	maxParallel = NormalizeMaxParallelReadTools(maxParallel)
 	sem := make(chan struct{}, maxParallel)
 	var wg sync.WaitGroup
 	ranUntil := start

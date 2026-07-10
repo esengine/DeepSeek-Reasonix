@@ -46,6 +46,7 @@ func LoadForRoot(root string) (*Config, error) {
 	}
 	globalMaxSteps := cfg.Agent.MaxSteps
 	globalPlannerMaxSteps := cfg.Agent.PlannerMaxSteps
+	globalMaxParallelReadTools := cfg.Agent.MaxParallelReadTools
 	globalMemoryCompiler := cfg.Agent.MemoryCompiler
 	// Deep-copy: TOML decoding writes through an existing *bool rather than
 	// replacing it, so a shallow struct copy would alias the pointer and the
@@ -65,6 +66,7 @@ func LoadForRoot(root string) (*Config, error) {
 	// the user's execution and planner round limits.
 	cfg.Agent.MaxSteps = globalMaxSteps
 	cfg.Agent.PlannerMaxSteps = globalPlannerMaxSteps
+	cfg.Agent.MaxParallelReadTools = globalMaxParallelReadTools
 	cfg.Agent.MemoryCompiler = globalMemoryCompiler
 	// Secret protection is a user-global security control: a cloned repo's
 	// reasonix.toml must not be able to disable redaction or flip on the

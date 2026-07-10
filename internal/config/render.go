@@ -195,6 +195,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		} else {
 			b.WriteString("# planner_max_steps = 0    # planner read-only tool-call rounds; 0 = no limit\n")
 		}
+		if c.Agent.MaxParallelReadTools != defaults.Agent.MaxParallelReadTools {
+			fmt.Fprintf(&b, "max_parallel_read_tools = %d   # concurrent read-only tools; <=0 = 8, max 32\n", c.Agent.MaxParallelReadTools)
+		} else {
+			b.WriteString("# max_parallel_read_tools = 8   # concurrent read-only tools; <=0 = 8, max 32\n")
+		}
 	}
 	fmt.Fprintf(&b, "temperature       = %s\n", formatFloat(c.Agent.Temperature))
 	if scope != RenderScopeProject {

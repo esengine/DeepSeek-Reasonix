@@ -207,6 +207,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Notifications.AskRequest = true
 	orig.Agent.MaxSteps = 30
 	orig.Agent.PlannerMaxSteps = 0
+	orig.Agent.MaxParallelReadTools = 3
 	orig.Agent.AutoPlanClassifier = "deepseek-flash"
 	orig.Agent.ReasoningLanguage = "zh"
 	orig.Agent.ToolResultSnipRatio = 0.65
@@ -363,6 +364,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if got.Agent.PlannerMaxSteps != orig.Agent.PlannerMaxSteps {
 		t.Errorf("planner_max_steps = %d, want %d", got.Agent.PlannerMaxSteps, orig.Agent.PlannerMaxSteps)
+	}
+	if got.Agent.MaxParallelReadTools != orig.Agent.MaxParallelReadTools {
+		t.Errorf("max_parallel_read_tools = %d, want %d", got.Agent.MaxParallelReadTools, orig.Agent.MaxParallelReadTools)
 	}
 	if len(got.Bot.Connections) != 1 || got.Bot.Connections[0].Model != "deepseek-pro" || got.Bot.Connections[0].WorkspaceRoot != "/tmp/reasonix-bot" {
 		t.Errorf("bot connection not preserved: %+v", got.Bot.Connections)
@@ -1054,6 +1058,11 @@ func TestRenderTOMLDefaultStepsCommentedOut(t *testing.T) {
 				t.Errorf("default planner_max_steps should be commented out in [agent], got: %s", line)
 			}
 		}
+		if strings.HasPrefix(line, "max_parallel_read_tools ") || strings.HasPrefix(line, "max_parallel_read_tools=") {
+			if !strings.HasPrefix(line, "#") {
+				t.Errorf("default max_parallel_read_tools should be commented out in [agent], got: %s", line)
+			}
+		}
 	}
 }
 
@@ -1098,9 +1107,10 @@ func TestRenderTOMLNonDefaultStepsWrittenExplicitly(t *testing.T) {
 	c := Default()
 	c.Agent.MaxSteps = 5
 	c.Agent.PlannerMaxSteps = 7
+	c.Agent.MaxParallelReadTools = 2
 	out := RenderTOML(c)
 	agentLines := extractSectionLines(out, "[agent]")
-	foundMax, foundPlanner := false, false
+	foundMax, foundPlanner, foundParallel := false, false, false
 	for _, line := range agentLines {
 		if !strings.HasPrefix(line, "#") && strings.HasPrefix(line, "max_steps ") {
 			foundMax = true
@@ -1108,12 +1118,18 @@ func TestRenderTOMLNonDefaultStepsWrittenExplicitly(t *testing.T) {
 		if !strings.HasPrefix(line, "#") && strings.HasPrefix(line, "planner_max_steps ") {
 			foundPlanner = true
 		}
+		if !strings.HasPrefix(line, "#") && strings.HasPrefix(line, "max_parallel_read_tools ") {
+			foundParallel = true
+		}
 	}
 	if !foundMax {
 		t.Error("non-default max_steps should be written explicitly in [agent]")
 	}
 	if !foundPlanner {
 		t.Error("non-default planner_max_steps should be written explicitly in [agent]")
+	}
+	if !foundParallel {
+		t.Error("non-default max_parallel_read_tools should be written explicitly in [agent]")
 	}
 }
 
@@ -1124,7 +1140,7 @@ func TestRenderTOMLDefaultStepsDoNotOverrideGlobalConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	globalPath := filepath.Join(globalDir, "config.toml")
-	if err := os.WriteFile(globalPath, []byte("[agent]\nplanner_max_steps = 9\nmax_steps = 100\n"), 0o644); err != nil {
+	if err := os.WriteFile(globalPath, []byte("[agent]\nplanner_max_steps = 9\nmax_steps = 100\nmax_parallel_read_tools = 2\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1145,6 +1161,9 @@ func TestRenderTOMLDefaultStepsDoNotOverrideGlobalConfig(t *testing.T) {
 	if cfg.Agent.MaxSteps != 100 {
 		t.Fatalf("after global: max_steps = %d, want 100", cfg.Agent.MaxSteps)
 	}
+	if cfg.Agent.MaxParallelReadTools != 2 {
+		t.Fatalf("after global: max_parallel_read_tools = %d, want 2", cfg.Agent.MaxParallelReadTools)
+	}
 
 	if err := mergeFile(cfg, projectPath); err != nil {
 		t.Fatalf("project merge failed: %v", err)
@@ -1154,6 +1173,9 @@ func TestRenderTOMLDefaultStepsDoNotOverrideGlobalConfig(t *testing.T) {
 	}
 	if cfg.Agent.MaxSteps != 100 {
 		t.Errorf("after project: max_steps = %d, want 100 (global should not be overridden by commented-out default)", cfg.Agent.MaxSteps)
+	}
+	if cfg.Agent.MaxParallelReadTools != 2 {
+		t.Errorf("after project: max_parallel_read_tools = %d, want 2 (global should not be overridden by commented-out default)", cfg.Agent.MaxParallelReadTools)
 	}
 }
 

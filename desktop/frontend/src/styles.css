@@ -4107,6 +4107,66 @@ a[href] {
   flex-direction: column;
   gap: 8px;
 }
+.msg-assistant-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  min-width: 0;
+  color: var(--fg-faint);
+  font-size: 12px;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+.msg-assistant-meta time {
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+.msg-assistant-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msg-assistant-meta span::after {
+  content: "›";
+  margin-left: 8px;
+  color: var(--fg-faint);
+}
+.turn-runtime-fold {
+  align-self: flex-start;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+.turn-runtime-meta__toggle {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-faint);
+  font: inherit;
+  cursor: pointer;
+}
+.turn-runtime-meta__toggle:hover {
+  color: var(--fg);
+}
+.turn-runtime-meta__chevron {
+  flex: 0 0 auto;
+  color: var(--fg-faint);
+  transition: transform 160ms ease;
+}
+.turn-runtime-meta__chevron--open {
+  transform: rotate(90deg);
+}
+.turn-runtime-fold__body {
+  height: 0;
+  margin-top: 0;
+}
+.turn-runtime-fold--open .turn-runtime-fold__body {
+  height: auto;
+  padding: 0 11px 10px 12px;
+  margin-top: 6px;
+}
 .msg--process-only {
   margin-top: 6px;
   margin-bottom: 6px;
@@ -5173,6 +5233,17 @@ body > .mermaid-diagram--fullscreen {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   flex-shrink: 0;
+}
+.tool__duration--slow {
+  color: var(--warn);
+}
+.tool__duration--very-slow {
+  color: #f97316;
+  font-weight: 650;
+}
+.tool__duration--action {
+  color: #ef4444;
+  font-weight: 720;
 }
 .tool__summary {
   color: inherit;
@@ -8094,6 +8165,36 @@ body > .mermaid-diagram--fullscreen {
   border: 0;
   border-radius: 0;
   overflow: auto;
+}
+.workspace-preview__body--code .workspace-monaco-preview {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+}
+.workspace-preview__body--code .workspace-monaco-preview .monaco-editor,
+.workspace-preview__body--code .workspace-monaco-preview .monaco-editor-background,
+.workspace-preview__body--code .workspace-monaco-preview .margin {
+  background: var(--workspace-preview-bg);
+}
+.workspace-preview__body--code .workspace-monaco-preview:hover .code-block__copy {
+  opacity: 1;
+}
+.workspace-code-fallback {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 14px 16px;
+  overflow: auto;
+  border: 0;
+  background: var(--workspace-preview-bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--font-code);
+  line-height: 1.55;
+  white-space: pre;
 }
 .workspace-preview__body .code-block,
 .workspace-preview__body .code {
@@ -21118,6 +21219,11 @@ body > .mermaid-diagram--fullscreen {
   border-left: none;
 }
 
+.workspace-panel--loading {
+  flex: 0 0 auto;
+  background: var(--bg-elev);
+}
+
 .layout--workspace-maximized .context-inspector,
 .layout--workspace-maximized .workbench-dock {
   grid-column: 2;
@@ -21614,6 +21720,48 @@ body > .mermaid-diagram--fullscreen {
   order: 2;
   flex: 0 1 auto;
   font-size: 16px;
+}
+
+.context-panel__timeline-list {
+  display: grid;
+  gap: 0;
+}
+
+.context-panel__timeline-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 0;
+  border-top: 1px solid var(--border-soft);
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.context-panel__timeline-row span,
+.context-panel__timeline-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-panel__timeline-row strong {
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 640;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-panel__timeline-row--notice strong {
+  color: var(--warn);
+}
+
+.context-panel__timeline-row--warn strong {
+  color: #ef4444;
 }
 
 .context-panel__mini-stat--accent strong {

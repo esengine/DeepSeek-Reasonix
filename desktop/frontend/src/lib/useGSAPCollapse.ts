@@ -25,6 +25,9 @@ export function useGSAPCollapse(
     onOpenComplete?: () => void;
     /** Called after the close animation completes. */
     onCloseComplete?: () => void;
+    /** Re-sync the resting height when collapsed content is mounted or swapped
+     * without an `open` state change. */
+    contentVersion?: unknown;
     /** When closing, use this height as the starting point instead of
      *  measuring scrollHeight (which may have already shrunk due to
      *  content being conditionally removed). */
@@ -32,6 +35,7 @@ export function useGSAPCollapse(
   },
 ) {
   const prevOpen = useRef<boolean | null>(null);
+  const prevContentVersion = useRef<unknown>(undefined);
   const onOpenRef = useRef(opts?.onOpenComplete);
   const onCloseRef = useRef(opts?.onCloseComplete);
   onOpenRef.current = opts?.onOpenComplete;
@@ -40,6 +44,7 @@ export function useGSAPCollapse(
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const contentVersion = opts?.contentVersion;
 
     // Skip the very first render — we don't want to animate from 0→auto
     // on mount.  Use a direct style write (no GSAP overhead) for the
@@ -47,13 +52,28 @@ export function useGSAPCollapse(
     // gsap.set property resolution.
     if (prevOpen.current === null) {
       prevOpen.current = open;
+      prevContentVersion.current = contentVersion;
       el.style.height = open ? "auto" : "0px";
       return;
     }
 
-    // No change — nothing to do.
-    if (prevOpen.current === open) return;
+    const openChanged = prevOpen.current !== open;
+    const contentChanged = prevContentVersion.current !== contentVersion;
+
+    // If only the collapsed content changed, keep the resting state correct.
+    // This covers the completed-turn transition where the fold body appears
+    // while `open` remains false.
+    if (!openChanged) {
+      if (contentChanged) {
+        prevContentVersion.current = contentVersion;
+        gsap.killTweensOf(el);
+        el.style.height = open ? "auto" : "0px";
+      }
+      return;
+    }
+
     prevOpen.current = open;
+    prevContentVersion.current = contentVersion;
 
     const reduced = prefersReducedMotion();
     const dur = reduced ? 0.001 : (opts?.duration ?? DUR_BASE);
@@ -98,5 +118,5 @@ export function useGSAPCollapse(
         },
       );
     }
-  }, [open, ref]);
+  }, [open, ref, opts?.contentVersion]);
 }

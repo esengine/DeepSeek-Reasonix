@@ -776,6 +776,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   expandWhileStreaming = true,
   truncateStreamingReasoning = false,
   creationMode = false,
+  hideReasoning = false,
 }: {
   item: AssistantItem;
   defaultExpanded?: boolean;
@@ -784,6 +785,8 @@ export const AssistantMessage = memo(function AssistantMessage({
   /** Opt-in for compact mode to keep live DeepSeek reasoning from growing an unbounded DOM. */
   truncateStreamingReasoning?: boolean;
   creationMode?: boolean;
+  /** Used when a completed turn moves reasoning into the turn-level process fold. */
+  hideReasoning?: boolean;
 }) {
   const t = useT();
   const reasoningBodyRef = useRef<HTMLDivElement>(null);
@@ -831,8 +834,9 @@ export const AssistantMessage = memo(function AssistantMessage({
     setReasoningOpen((v) => !v);
   };
   const hasText = item.streaming || item.text.trim() !== "";
-  const processOnly = Boolean(item.reasoning) && !hasText;
-  const processWithText = Boolean(item.reasoning) && hasText;
+  const hasReasoning = Boolean(item.reasoning) && !hideReasoning;
+  const processOnly = hasReasoning && !hasText;
+  const processWithText = hasReasoning && hasText;
   const visibleReasoning = reasoningOpen
     ? displayReasoningText(item.reasoning, {
         streaming: item.streaming,
@@ -841,7 +845,7 @@ export const AssistantMessage = memo(function AssistantMessage({
     : "";
   return (
     <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`} data-history-restore={item.id.startsWith("h") ? "" : undefined} data-entrance={item.id}>
-      {item.reasoning && (
+      {hasReasoning && (
         <div className="reasoning">
           <button
             type="button"

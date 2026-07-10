@@ -21,6 +21,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
 const settingsSource = readFileSync(resolve(here, "../components/SettingsPanel.tsx"), "utf8");
 const markdownSource = readFileSync(resolve(here, "../components/Markdown.tsx"), "utf8");
+const workspaceSource = readFileSync(resolve(here, "../components/WorkspacePanel.tsx"), "utf8");
 
 console.log("\nbundle contract");
 
@@ -34,13 +35,15 @@ ok(
 );
 ok(
   !/import\s+\{[^}]*\}\s+from\s+["']\.\/components\/SettingsPanel["']/.test(appSource) &&
-    !/import\s+\{[^}]*\}\s+from\s+["']\.\/components\/HistoryPanel["']/.test(appSource),
-  "App keeps secondary drawers out of the initial chunk",
+    !/import\s+\{[^}]*\}\s+from\s+["']\.\/components\/HistoryPanel["']/.test(appSource) &&
+    !/import\s+\{[^}]*\}\s+from\s+["']\.\/components\/WorkspacePanel["']/.test(appSource),
+  "App keeps secondary drawers and workspace panel out of the initial chunk",
 );
 ok(
   appSource.includes('import("./components/SettingsPanel")') &&
-    appSource.includes('import("./components/HistoryPanel")'),
-  "App loads secondary drawers on demand",
+    appSource.includes('import("./components/HistoryPanel")') &&
+    appSource.includes('import("./components/WorkspacePanel")'),
+  "App loads secondary drawers and workspace panel on demand",
 );
 ok(
   !/import\s+\{[^}]*\b(?:MCPServersSettingsPage|SkillsSettingsPage|PluginsSettingsPage)\b[^}]*\}\s+from\s+["']\.\/CapabilitiesPanel["']/.test(settingsSource) &&
@@ -71,6 +74,15 @@ ok(
 ok(
   markdownSource.includes('import("./MarkdownRenderer")'),
   "Markdown wrapper loads markdown renderer on demand",
+);
+ok(
+  !/from\s+["']\.\/CodeViewer["']/.test(workspaceSource),
+  "WorkspacePanel keeps CodeViewer out of its first chunk",
+);
+ok(
+  workspaceSource.includes('import("./CodeViewer")') &&
+    workspaceSource.includes('import("./WorkspaceMonacoPreview")'),
+  "WorkspacePanel loads code viewers on demand",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

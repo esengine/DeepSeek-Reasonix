@@ -7,6 +7,8 @@ import { useI18n, type Locale, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
 import type { DictKey } from "../locales/en";
 import type { BalanceInfo, ContextInfo, ContextPanelInfo, UsageSourceStats, WireUsage } from "../lib/types";
+import type { Item } from "../lib/useController";
+import { estimateToolQueueMs, relativeMs, toolDurationSeverity, turnElapsedMs, type TurnTimeline } from "../lib/turnTimeline";
 
 interface ContextPanelProps {
   tabId?: string;
@@ -21,6 +23,8 @@ interface ContextPanelProps {
   balance?: BalanceInfo;
   sessionGen?: number;
   refreshKey?: number;
+  timeline?: TurnTimeline;
+  items?: Item[];
 }
 
 function fmtFullTokens(n: number): string {
@@ -35,6 +39,47 @@ function fmtDuration(ms: number, t: Translator): string {
   const seconds = totalSeconds % 60;
   if (minutes <= 0) return t("context.durationSeconds", { seconds });
   return t("context.durationMinutesSeconds", { minutes, seconds });
+}
+
+function fmtCompactDuration(ms?: number): string {
+  if (typeof ms !== "number" || !Number.isFinite(ms)) return "-";
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))} ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
+  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
+}
+
+export function turnTimelineRows(
+  timeline: TurnTimeline | undefined,
+  items: Item[],
+  t: Translator,
+): Array<{ key: string; label: string; value: string; tone?: "notice" | "warn" }> {
+  if (!timeline?.turnStartedAt) return [];
+  const rows: Array<{ key: string; label: string; value: string; tone?: "notice" | "warn" }> = [
+    { key: "elapsed", label: t("context.timelineElapsed"), value: fmtCompactDuration(turnElapsedMs(timeline)) },
+    { key: "first-token", label: t("context.timelineFirstToken"), value: fmtCompactDuration(relativeMs(timeline.firstTokenAt, timeline.turnStartedAt)) },
+    { key: "llm", label: t("context.timelineModel"), value: fmtCompactDuration(relativeMs(timeline.firstModelEventAt, timeline.turnStartedAt)) },
+    { key: "context", label: t("context.timelineContextRefresh"), value: fmtCompactDuration(relativeMs(timeline.contextRefreshDoneAt, timeline.contextRefreshStartedAt)) },
+  ];
+  const tools = items
+    .filter((item): item is Extract<Item, { kind: "tool" }> => item.kind === "tool" && item.status !== "running")
+    .filter((item) => typeof item.durationMs === "number" || typeof item.completedAt === "number")
+    .sort((a, b) => (b.durationMs ?? 0) - (a.durationMs ?? 0))
+    .slice(0, 3);
+  for (const tool of tools) {
+    const queueMs = estimateToolQueueMs(tool);
+    const severity = toolDurationSeverity(tool.durationMs);
+    rows.push({
+      key: `tool-${tool.id}`,
+      label: t("context.timelineTool", { name: tool.name }),
+      value: t("context.timelineToolValue", {
+        queue: fmtCompactDuration(queueMs),
+        exec: fmtCompactDuration(tool.durationMs),
+        total: fmtCompactDuration(relativeMs(tool.completedAt, tool.dispatchedAt)),
+      }),
+      tone: severity === "action" || severity === "very-slow" ? "warn" : severity === "slow" ? "notice" : undefined,
+    });
+  }
+  return rows.filter((row) => row.value !== "-");
 }
 
 function fmtOptionalTokens(tokens?: number): string {
@@ -249,6 +294,41 @@ function sourceLabel(source: string, t: Translator): string {
   }
 }
 
+function cacheReasonLabel(reason: string, t: Translator): string {
+  switch (reason) {
+    case "system": return t("context.cacheReasonSystem");
+    case "tools": return t("context.cacheReasonTools");
+    case "log_rewrite": return t("context.cacheReasonLogRewrite");
+    default: return reason;
+  }
+}
+
+export function cacheDiagnosticView(
+  usage: Pick<WireUsage, "cacheDiagnostics" | "source"> | undefined,
+  t: Translator,
+  locale: Locale | string = "en",
+): { value: string; title: string; tone: MetricTone } | null {
+  const diag = usage?.cacheDiagnostics;
+  if (!diag) return null;
+  const reasons = asArray(diag.prefixChangeReasons).filter((reason) => reason.trim() !== "").map((reason) => cacheReasonLabel(reason, t));
+  const tag = numberLocale(locale);
+  const schemaTokens = diag.toolSchemaTokens > 0 ? diag.toolSchemaTokens.toLocaleString(tag) : "0";
+  const cacheHit = diag.cacheHitTokens > 0 ? diag.cacheHitTokens.toLocaleString(tag) : "0";
+  const cacheMiss = diag.cacheMissTokens > 0 ? diag.cacheMissTokens.toLocaleString(tag) : "0";
+  const source = usage?.source ? sourceLabel(usage.source, t) : "";
+  const value = diag.prefixChanged
+    ? (reasons.length > 0 ? reasons.join(", ") : t("context.cachePrefixChanged"))
+    : t("context.cachePrefixStable");
+  const titleParts = [
+    diag.prefixChanged ? t("context.cachePrefixChanged") : t("context.cachePrefixStable"),
+    reasons.length > 0 ? t("context.cacheReasonList", { reasons: reasons.join(", ") }) : "",
+    source ? t("context.cacheSource", { source }) : "",
+    t("context.cacheToolSchemaTokens", { tokens: schemaTokens }),
+    t("context.cacheTurnShape", { hit: cacheHit, miss: cacheMiss }),
+  ].filter(Boolean);
+  return { value, title: titleParts.join(" · "), tone: diag.prefixChanged ? "warn" : "good" };
+}
+
 function sourceCost(stats: UsageSourceStats): number {
   return stats.sessionCost && stats.sessionCost > 0 ? stats.sessionCost : stats.sessionCostUsd ?? 0;
 }
@@ -314,6 +394,8 @@ export function ContextPanel({
   balance,
   sessionGen,
   refreshKey,
+  timeline,
+  items = [],
 }: ContextPanelProps) {
   const { locale, t } = useI18n();
   const [info, setInfo] = useState<ContextPanelInfo | null>(null);
@@ -414,6 +496,8 @@ export function ContextPanel({
   const usageSummary = t("context.windowUsageSummary", { used: usedLabel, window: windowLabel, pct: usagePct });
   const compactSummary = t("context.windowCompactRemaining", { used: usedLabel, window: windowLabel, tokens: compactRemainingLabel, pct: compactPct });
   const activeAnalysisView: UsageAnalysisView = showSourceUsageRows ? analysisView : "type";
+  const cacheDiag = cacheDiagnosticView(usage, t, locale);
+  const timelineRows = turnTimelineRows(timeline, items, t);
   const tokenTypeRows = [
     { key: "prompt", label: t("context.prompt"), value: breakdown.promptTokens },
     { key: "completion", label: t("context.completion"), value: breakdown.completionTokens },
@@ -520,6 +604,7 @@ export function ContextPanel({
                 <MiniStat label={t("context.time")} value={fmtDuration(elapsed, t)} />
                 <MiniStat label={t("context.requests")} value={requestCount > 0 ? String(requestCount) : "-"} />
                 <MiniStat label={t("context.sessionTokensShort")} value={totalTokensMetric.display} title={totalTokensTitle} wide />
+                {cacheDiag && <MiniStat label={t("context.cacheDiagnostics")} value={cacheDiag.value} title={cacheDiag.title} tone={cacheDiag.tone} wide />}
               </div>
             </div>
           </section>
@@ -529,6 +614,19 @@ export function ContextPanel({
             <MetricCard label={t("status.turnCostLabel")} value={turnCostLabel} />
             <MetricCard label={t("status.balanceLabel")} value={balanceLabel} tone="accent" />
           </section>
+          {timelineRows.length > 0 && (
+            <section className="context-panel__section context-panel__timeline">
+              <SectionHeading title={t("context.timelineTitle")} />
+              <div className="context-panel__timeline-list">
+                {timelineRows.map((row) => (
+                  <div className={`context-panel__timeline-row${row.tone ? ` context-panel__timeline-row--${row.tone}` : ""}`} key={row.key}>
+                    <span>{row.label}</span>
+                    <strong>{row.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
           <section className="context-panel__section context-panel__analysis">
             <SectionHeading title={t("context.usageAnalysis")}>
               {showSourceUsageRows && (

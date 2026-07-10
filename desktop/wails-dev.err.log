@@ -1,0 +1,490 @@
+[0;92mExecuting: go mod tidy[0m
+$ vite
+[0;92mVite Server URL: http://127.0.0.1:5173/[0m
+[0;92mRunning frontend DevWatcher command: 'pnpm dev'[0m
+
+[0;92mUsing DevServer URL: http://localhost:34115[0m
+[0;92mUsing Frontend DevServer URL: http://127.0.0.1:5173/[0m
+[0;92mUsing reload debounce setting of 100 milliseconds[0m
+INF | Serving assets from frontend DevServer URL: http://127.0.0.1:5173/
+2026/07/10 09:42:49 [WebView2] Environment created successfully
+2026/07/10 09:42:50 [heartbeat] engine started (0 tasks)
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: bash not found on PATH; the shell tool will run commands under Windows PowerShell. Install Git for Windows or WSL to use bash, or set [tools.shell] prefer="powershell" to silence this.
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[0;92m
+
+To develop in the browser and call your bound Go methods from Javascript, navigate to: http://localhost:34115[0m
+[0;92mWatching (sub)/directory: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop[0m
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: bash not found on PATH; the shell tool will run commands under Windows PowerShell. Install Git for Windows or WSL to use bash, or set [tools.shell] prefer="powershell" to silence this.
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: bash not found on PATH; the shell tool will run commands under Windows PowerShell. Install Git for Windows or WSL to use bash, or set [tools.shell] prefer="powershell" to silence this.
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: bash not found on PATH; the shell tool will run commands under Windows PowerShell. Install Git for Windows or WSL to use bash, or set [tools.shell] prefer="powershell" to silence this.
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\dist\sounds[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\dist\assets[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\dist\sounds[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\dist\assets[0m
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m11:05:30[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mCannot update a component (`App`) while rendering a different component (`WorkspacePanel`). To locate the bad setState() call inside `WorkspacePanel`, follow the stack trace as described in https://react.dev/link/setstate-in-render
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m11:40:00[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mCallback 'main.App.CheckUpdate-80061735' not registered!!!
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m11:48:20[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mCallback 'main.App.CheckUpdate-2508314200' not registered!!!
+[2m11:48:20[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mCallback 'main.App.CheckUpdate-2118005043' not registered!!!
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: bash not found on PATH; the shell tool will run commands under Windows PowerShell. Install Git for Windows or WSL to use bash, or set [tools.shell] prefer="powershell" to silence this.
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m12:00:11[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mTypeError: Cannot read properties of undefined (reading 'find')
+    at turnRuntimeSummary (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656011147:38:26)
+    at http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656011147:419:20
+    at mountMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4931:20)
+    at Object.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:13024:13)
+    at exports.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react.js?v=d5ec7fbe:736:31)
+    at Transcript (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656011147:414:26)
+    at Object.react_stack_bottom_frame (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:12868:12)
+    at renderWithHooks (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4213:19)
+    at updateFunctionComponent (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:5569:16)
+    at beginWork (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:6140:20)
+
+The above error occurred in the <Transcript> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m12:00:28[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mTypeError: Cannot read properties of undefined (reading 'find')
+    at turnRuntimeSummary (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656028294:38:26)
+    at http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656028294:419:20
+    at updateMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4948:16)
+    at Object.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:13276:13)
+    at exports.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react.js?v=d5ec7fbe:736:31)
+    at Transcript (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656028294:414:26)
+    at Object.react_stack_bottom_frame (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:12868:12)
+    at renderWithHooks (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4213:19)
+    at updateFunctionComponent (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:5569:16)
+    at beginWork (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:6140:20)
+
+The above error occurred in the <Transcript> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m12:00:44[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mTypeError: Cannot read properties of undefined (reading 'find')
+    at turnRuntimeSummary (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656043871:38:26)
+    at http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656043871:419:20
+    at updateMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4948:16)
+    at Object.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:13276:13)
+    at exports.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react.js?v=d5ec7fbe:736:31)
+    at Transcript (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656043871:414:26)
+    at Object.react_stack_bottom_frame (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:12868:12)
+    at renderWithHooks (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4213:19)
+    at updateFunctionComponent (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:5569:16)
+    at beginWork (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:6140:20)
+
+The above error occurred in the <Transcript> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m12:00:57[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mTypeError: Cannot read properties of undefined (reading 'find')
+    at turnRuntimeSummary (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656056890:38:26)
+    at http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656056890:419:20
+    at updateMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4948:16)
+    at Object.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:13276:13)
+    at exports.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react.js?v=d5ec7fbe:736:31)
+    at Transcript (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656056890:414:26)
+    at Object.react_stack_bottom_frame (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:12868:12)
+    at renderWithHooks (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4213:19)
+    at updateFunctionComponent (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:5569:16)
+    at beginWork (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:6140:20)
+
+The above error occurred in the <Transcript> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m12:01:14[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mTypeError: Cannot read properties of undefined (reading 'find')
+    at turnRuntimeSummary (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656073866:38:26)
+    at http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656073866:419:20
+    at updateMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4948:16)
+    at Object.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:13276:13)
+    at exports.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react.js?v=d5ec7fbe:736:31)
+    at Transcript (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656073866:414:26)
+    at Object.react_stack_bottom_frame (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:12868:12)
+    at renderWithHooks (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4213:19)
+    at updateFunctionComponent (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:5569:16)
+    at beginWork (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:6140:20)
+
+The above error occurred in the <Transcript> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m12:01:29[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mTypeError: Cannot read properties of undefined (reading 'find')
+    at turnRuntimeSummary (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656089201:38:26)
+    at http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656089201:419:20
+    at updateMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4948:16)
+    at Object.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:13276:13)
+    at exports.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react.js?v=d5ec7fbe:736:31)
+    at Transcript (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656089201:414:26)
+    at Object.react_stack_bottom_frame (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:12868:12)
+    at renderWithHooks (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4213:19)
+    at updateFunctionComponent (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:5569:16)
+    at beginWork (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:6140:20)
+
+The above error occurred in the <Transcript> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m12:01:46[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mTypeError: Cannot read properties of undefined (reading 'find')
+    at turnRuntimeSummary (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656106203:38:26)
+    at http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656106203:419:20
+    at updateMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4948:16)
+    at Object.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:13276:13)
+    at exports.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react.js?v=d5ec7fbe:736:31)
+    at Transcript (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656106203:414:26)
+    at Object.react_stack_bottom_frame (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:12868:12)
+    at renderWithHooks (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4213:19)
+    at updateFunctionComponent (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:5569:16)
+    at beginWork (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:6140:20)
+
+The above error occurred in the <Transcript> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m12:02:00[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mTypeError: Cannot read properties of undefined (reading 'find')
+    at turnRuntimeSummary (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656120765:38:26)
+    at http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656120765:419:20
+    at updateMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4948:16)
+    at Object.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:13276:13)
+    at exports.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react.js?v=d5ec7fbe:736:31)
+    at Transcript (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656120765:414:26)
+    at Object.react_stack_bottom_frame (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:12868:12)
+    at renderWithHooks (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4213:19)
+    at updateFunctionComponent (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:5569:16)
+    at beginWork (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:6140:20)
+
+The above error occurred in the <Transcript> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m12:02:36[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mTypeError: Cannot read properties of undefined (reading 'find')
+    at turnRuntimeSummary (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656156716:38:26)
+    at http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656156716:419:20
+    at updateMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4948:16)
+    at Object.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:13276:13)
+    at exports.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react.js?v=d5ec7fbe:736:31)
+    at Transcript (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656156716:414:26)
+    at Object.react_stack_bottom_frame (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:12868:12)
+    at renderWithHooks (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4213:19)
+    at updateFunctionComponent (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:5569:16)
+    at beginWork (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:6140:20)
+
+The above error occurred in the <Transcript> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m12:02:49[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mTypeError: Cannot read properties of undefined (reading 'find')
+    at turnRuntimeSummary (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656156716:38:26)
+    at http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656156716:419:20
+    at updateMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4948:16)
+    at Object.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:13276:13)
+    at exports.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react.js?v=d5ec7fbe:736:31)
+    at Transcript (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656156716:414:26)
+    at Object.react_stack_bottom_frame (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:12868:12)
+    at renderWithHooks (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4213:19)
+    at updateFunctionComponent (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:5569:16)
+    at beginWork (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:6140:20)
+
+The above error occurred in the <Transcript> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m12:03:06[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mTypeError: Cannot read properties of undefined (reading 'find')
+    at turnRuntimeSummary (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656156716:38:26)
+    at http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656156716:419:20
+    at updateMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4948:16)
+    at Object.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:13276:13)
+    at exports.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react.js?v=d5ec7fbe:736:31)
+    at Transcript (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656156716:414:26)
+    at Object.react_stack_bottom_frame (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:12868:12)
+    at renderWithHooks (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4213:19)
+    at updateFunctionComponent (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:5569:16)
+    at beginWork (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:6140:20)
+
+The above error occurred in the <Transcript> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m12:03:19[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mTypeError: Cannot read properties of undefined (reading 'find')
+    at turnRuntimeSummary (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656156716:38:26)
+    at http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656156716:419:20
+    at updateMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4948:16)
+    at Object.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:13276:13)
+    at exports.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react.js?v=d5ec7fbe:736:31)
+    at Transcript (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656156716:414:26)
+    at Object.react_stack_bottom_frame (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:12868:12)
+    at renderWithHooks (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4213:19)
+    at updateFunctionComponent (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:5569:16)
+    at beginWork (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:6140:20)
+
+The above error occurred in the <Transcript> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m12:03:35[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mTypeError: Cannot read properties of undefined (reading 'find')
+    at turnRuntimeSummary (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656156716:38:26)
+    at http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656156716:419:20
+    at updateMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4948:16)
+    at Object.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:13276:13)
+    at exports.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react.js?v=d5ec7fbe:736:31)
+    at Transcript (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656156716:414:26)
+    at Object.react_stack_bottom_frame (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:12868:12)
+    at renderWithHooks (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4213:19)
+    at updateFunctionComponent (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:5569:16)
+    at beginWork (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:6140:20)
+
+The above error occurred in the <Transcript> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m12:03:49[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mTypeError: Cannot read properties of undefined (reading 'find')
+    at turnRuntimeSummary (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656228378:38:26)
+    at http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656228378:419:20
+    at updateMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4948:16)
+    at Object.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:13276:13)
+    at exports.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react.js?v=d5ec7fbe:736:31)
+    at Transcript (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656228378:414:26)
+    at Object.react_stack_bottom_frame (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:12868:12)
+    at renderWithHooks (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4213:19)
+    at updateFunctionComponent (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:5569:16)
+    at beginWork (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:6140:20)
+
+The above error occurred in the <Transcript> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m12:04:01[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mTypeError: Cannot read properties of undefined (reading 'find')
+    at turnRuntimeSummary (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656240339:38:26)
+    at http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656240339:419:20
+    at updateMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4948:16)
+    at Object.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:13276:13)
+    at exports.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react.js?v=d5ec7fbe:736:31)
+    at Transcript (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656240339:414:26)
+    at Object.react_stack_bottom_frame (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:12868:12)
+    at renderWithHooks (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4213:19)
+    at updateFunctionComponent (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:5569:16)
+    at beginWork (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:6140:20)
+
+The above error occurred in the <Transcript> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+warning: skill "guanzhi-knowledge-search" at C:\Users\艾红飞\.claude\skills\guanzhi-knowledge-search\SKILL.md has no description: — it will load but won't appear in the skills index
+[2m12:04:13[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mTypeError: Cannot read properties of undefined (reading 'find')
+    at turnRuntimeSummary (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656252355:38:26)
+    at http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656252355:419:20
+    at updateMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4948:16)
+    at Object.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:13276:13)
+    at exports.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react.js?v=d5ec7fbe:736:31)
+    at Transcript (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783656252355:414:26)
+    at Object.react_stack_bottom_frame (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:12868:12)
+    at renderWithHooks (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4213:19)
+    at updateFunctionComponent (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:5569:16)
+    at beginWork (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:6140:20)
+
+The above error occurred in the <Transcript> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+panic: runtime error: integer divide by zero
+
+goroutine 1 [running, locked to thread]:
+github.com/wailsapp/wails/v2/internal/frontend/desktop/windows/winc.ScaleToDefaultDPI(0x0, 0x0)
+	C:/Users/艾红飞/go/pkg/mod/github.com/wailsapp/wails/v2@v2.12.0/internal/frontend/desktop/windows/winc/utils.go:155 +0x4a
+github.com/wailsapp/wails/v2/internal/frontend/desktop/windows/winc.(*ControlBase).scaleToDefaultDPI(0x3cc2a4afc000, 0x0, 0x0)
+	C:/Users/艾红飞/go/pkg/mod/github.com/wailsapp/wails/v2@v2.12.0/internal/frontend/desktop/windows/winc/controlbase.go:528 +0x73
+github.com/wailsapp/wails/v2/internal/frontend/desktop/windows/winc.(*ControlBase).Size(0x3cc2a4afc000)
+	C:/Users/艾红飞/go/pkg/mod/github.com/wailsapp/wails/v2@v2.12.0/internal/frontend/desktop/windows/winc/controlbase.go:261 +0x6a
+github.com/wailsapp/wails/v2/internal/frontend/desktop/windows.(*Frontend).WindowGetSize(0x3cc2a4acec80)
+	C:/Users/艾红飞/go/pkg/mod/github.com/wailsapp/wails/v2@v2.12.0/internal/frontend/desktop/windows/frontend.go:273 +0x65
+github.com/wailsapp/wails/v2/pkg/runtime.WindowGetSize({0x7ff677755ff8, 0x3cc2a4d241e0})
+	C:/Users/艾红飞/go/pkg/mod/github.com/wailsapp/wails/v2@v2.12.0/pkg/runtime/window.go:80 +0x47
+main.(*App).saveWindowStateSync(0x3cc2a4b023c0)
+	C:/Users/艾红飞/Desktop/DeepSeek-Reasonix/desktop/window_state.go:76 +0x50
+main.(*App).shutdown(0x3cc2a4b023c0, {0x7ff677755ff8, 0x3cc2a4d241e0})
+	C:/Users/艾红飞/Desktop/DeepSeek-Reasonix/desktop/app.go:740 +0xa6
+github.com/wailsapp/wails/v2/internal/app.(*App).Run(0x3cc2a4b5e0a0)
+	C:/Users/艾红飞/go/pkg/mod/github.com/wailsapp/wails/v2@v2.12.0/internal/app/app_dev.go:36 +0xc4
+github.com/wailsapp/wails/v2/pkg/application.(*Application).Run(0x3cc2a4d46160)
+	C:/Users/艾红飞/go/pkg/mod/github.com/wailsapp/wails/v2@v2.12.0/pkg/application/application.go:73 +0x18a
+github.com/wailsapp/wails/v2.Run(0x3cc2a4cd8300)
+	C:/Users/艾红飞/go/pkg/mod/github.com/wailsapp/wails/v2@v2.12.0/wails.go:14 +0x2f
+main.main()
+	C:/Users/艾红飞/Desktop/DeepSeek-Reasonix/desktop/main.go:134 +0xbc5
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\runtime[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\go[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\dist\sounds[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\dist\assets[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\runtime[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\go[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\dist\sounds[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\dist\assets[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\runtime[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\go[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\runtime[0m
+[2m14:04:14[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mReferenceError: processDisplayItems is not defined
+    at http://wails.localhost:34115/src/components/Transcript.tsx?t=1783663453756:66:37
+    at mountMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4931:20)
+    at Object.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:13024:13)
+    at exports.useMemo (http://wails.localhost:34115/node_modules/.vite/deps/react.js?v=d5ec7fbe:736:31)
+    at TurnRuntimeMeta (http://wails.localhost:34115/src/components/Transcript.tsx?t=1783663453756:66:23)
+    at Object.react_stack_bottom_frame (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:12868:12)
+    at renderWithHooks (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:4213:19)
+    at updateFunctionComponent (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:5569:16)
+    at beginWork (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:6140:20)
+    at runWithFiberInDEV (http://wails.localhost:34115/node_modules/.vite/deps/react-dom_client.js?v=d5ec7fbe:851:66)
+
+The above error occurred in the <TurnRuntimeMeta> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+[0;92mVite Server URL: http://127.0.0.1:5173/[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\runtime[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\go[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\dist\sounds[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\dist\assets[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\runtime[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\go[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\runtime[0m
+�Ҳ����������ļ���
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\runtime[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\go[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\dist\sounds[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\dist\assets[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\runtime[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\go[0m
+[0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\runtime[0m

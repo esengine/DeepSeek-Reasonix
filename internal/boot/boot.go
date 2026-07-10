@@ -554,6 +554,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if opts.MaxSteps > 0 {
 		maxSteps = opts.MaxSteps
 	}
+	maxParallelReadTools := cfg.MaxParallelReadTools()
 	subagentStore, err := newSubagentStore(sessionDir)
 	if err != nil {
 		return nil, err
@@ -636,7 +637,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			taskModel, taskEffort, resolveSubagentProvider).
 			WithTranscripts(subagentStore, root, modelName, entry.Effort).
 			WithTranscriptIdentityResolver(subagentIdentity).
-			WithMaxSubagentDepth(maxSubagentDepth)
+			WithMaxSubagentDepth(maxSubagentDepth).
+			WithMaxParallelReadTools(maxParallelReadTools)
 	}
 	addTaskTool := func() string {
 		if taskToolAdded {
@@ -699,23 +701,24 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// compaction or language settings — add new fields here, not per runner.
 	subagentSkillOptions := func(sctx context.Context, steps int, price *provider.Pricing, ctxWin, childDepth int) agent.Options {
 		return agent.Options{
-			MaxSteps:            steps,
-			Temperature:         cfg.Agent.Temperature,
-			Pricing:             price,
-			UsageSource:         event.UsageSourceSubagent,
-			Gate:                headlessGate,
-			ContextWindow:       ctxWin,
-			RecentKeep:          cfg.Agent.RecentKeep,
-			SoftCompactRatio:    cfg.Agent.SoftCompactRatio,
-			ToolResultSnipRatio: cfg.Agent.ToolResultSnipRatio,
-			CompactRatio:        cfg.Agent.CompactRatio,
-			CompactForceRatio:   cfg.Agent.CompactForceRatio,
-			ArchiveDir:          config.ArchiveDir(),
-			KeepPolicy:          keepPolicy,
-			ResponseLanguage:    agent.ResponseLanguageFromContext(sctx),
-			ReasoningLanguage:   agent.ReasoningLanguageFromContext(sctx),
-			SubagentDepth:       childDepth,
-			MaxSubagentDepth:    maxSubagentDepth,
+			MaxSteps:             steps,
+			MaxParallelReadTools: maxParallelReadTools,
+			Temperature:          cfg.Agent.Temperature,
+			Pricing:              price,
+			UsageSource:          event.UsageSourceSubagent,
+			Gate:                 headlessGate,
+			ContextWindow:        ctxWin,
+			RecentKeep:           cfg.Agent.RecentKeep,
+			SoftCompactRatio:     cfg.Agent.SoftCompactRatio,
+			ToolResultSnipRatio:  cfg.Agent.ToolResultSnipRatio,
+			CompactRatio:         cfg.Agent.CompactRatio,
+			CompactForceRatio:    cfg.Agent.CompactForceRatio,
+			ArchiveDir:           config.ArchiveDir(),
+			KeepPolicy:           keepPolicy,
+			ResponseLanguage:     agent.ResponseLanguageFromContext(sctx),
+			ReasoningLanguage:    agent.ReasoningLanguageFromContext(sctx),
+			SubagentDepth:        childDepth,
+			MaxSubagentDepth:     maxSubagentDepth,
 		}
 	}
 	readOnlySkillRunner := func(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
@@ -1044,6 +1047,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	executor := agent.New(execProv, reg, execSess, agent.Options{
 		MaxSteps:                           maxSteps,
+		MaxParallelReadTools:               maxParallelReadTools,
 		Temperature:                        cfg.Agent.Temperature,
 		Pricing:                            entry.Price,
 		Gate:                               headlessGate,
@@ -1104,6 +1108,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			runner = agent.NewCoordinator(plannerProv, plannerSess, pe.Price, plannerTools, agent.Options{
 				MaxSteps:                 cfg.Agent.PlannerMaxSteps,
 				MaxStepsKey:              "agent.planner_max_steps",
+				MaxParallelReadTools:     maxParallelReadTools,
 				Gate:                     headlessGate,
 				ContextWindow:            pe.ContextWindow,
 				SoftCompactRatio:         cfg.Agent.SoftCompactRatio,

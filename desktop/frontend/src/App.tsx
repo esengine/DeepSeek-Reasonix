@@ -53,7 +53,6 @@ import { StatusBar } from "./components/StatusBar";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ContextPanel } from "./components/ContextPanel";
-import { WorkspacePanel } from "./components/WorkspacePanel";
 import { Tooltip } from "./components/Tooltip";
 import { StartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
@@ -240,6 +239,7 @@ function NoticePreviewPanel({ detailsLabel }: { detailsLabel: string }) {
 
 const HistoryPanel = lazy(() => import("./components/HistoryPanel").then((module) => ({ default: module.HistoryPanel })));
 const SettingsPanel = lazy(() => import("./components/SettingsPanel").then((module) => ({ default: module.SettingsPanel })));
+const WorkspacePanel = lazy(() => import("./components/WorkspacePanel").then((module) => ({ default: module.WorkspacePanel })));
 
 const CHAT_MIN_WIDTH = 400;
 const CHAT_COMFORT_MIN_WIDTH = 560;
@@ -2242,12 +2242,12 @@ export default function App() {
     }
   }, [closeWorkspacePanel, openWorkspacePanel]);
 
-  const addWorkspaceTextToComposer = useCallback((text: string) => {
+  const addWorkspaceTextToComposer = useCallback((text: string, options?: Pick<ComposerInsertRequest, "parseWorkspaceRef" | "insertSpacing">) => {
     if (workspaceInsertTarget === "planRevision" && state.approval?.tool === "exit_plan_mode") {
-      setPlanRevisionInsertRequest({ id: Date.now(), text });
+      setPlanRevisionInsertRequest({ id: Date.now(), text, ...options });
       return;
     }
-    setComposerInsertRequest({ id: Date.now(), text });
+    setComposerInsertRequest({ id: Date.now(), text, ...options });
   }, [state.approval?.tool, workspaceInsertTarget]);
 
   // Coalesce tab-bar switches through the same last-click-wins scheduler that
@@ -3775,27 +3775,40 @@ export default function App() {
                   balance={state.balance}
                   sessionGen={state.sessionGen}
                   refreshKey={dockRefreshKey}
+                  timeline={state.turnTimeline}
+                  items={state.items}
                 />
               ) : (
-                <WorkspacePanel
-                  open={workspacePanelRenderable}
-                  tabId={activeTabId}
-                  cwd={state.meta?.cwd}
-                  maximized={workspacePanelMaximized}
-                  panelWidth={workspacePanelRenderWidth}
-                  onClose={() => setWorkspacePanel(false)}
-                  onToggleMaximized={() => {
-                    closeTransientOverlays();
-                    setWorkspacePanelMaximized((value) => !value);
-                  }}
-                  onPreviewModeChange={handleWorkspacePreviewModeChange}
-                  onAddToChat={addWorkspaceTextToComposer}
-                  onRequestPanelWidth={ensureWorkspacePanelWidth}
-                  onFileTreeRefresh={refreshComposerFileRefs}
-                  refreshKey={dockRefreshKey}
-                  initialViewMode={rightDockMode === "changed" ? "changed" : "files"}
-                  showViewTabs={false}
-                />
+                <Suspense
+                  fallback={(
+                    <div
+                      className="workspace-panel workspace-panel--loading"
+                      style={{ width: workspacePanelRenderWidth }}
+                      aria-busy="true"
+                      aria-label={t("workspace.loading")}
+                    />
+                  )}
+                >
+                  <WorkspacePanel
+                    open={workspacePanelRenderable}
+                    tabId={activeTabId}
+                    cwd={state.meta?.cwd}
+                    maximized={workspacePanelMaximized}
+                    panelWidth={workspacePanelRenderWidth}
+                    onClose={() => setWorkspacePanel(false)}
+                    onToggleMaximized={() => {
+                      closeTransientOverlays();
+                      setWorkspacePanelMaximized((value) => !value);
+                    }}
+                    onPreviewModeChange={handleWorkspacePreviewModeChange}
+                    onAddToChat={addWorkspaceTextToComposer}
+                    onRequestPanelWidth={ensureWorkspacePanelWidth}
+                    onFileTreeRefresh={refreshComposerFileRefs}
+                    refreshKey={dockRefreshKey}
+                    initialViewMode={rightDockMode === "changed" ? "changed" : "files"}
+                    showViewTabs={false}
+                  />
+                </Suspense>
               )}
             </div>
           </aside>

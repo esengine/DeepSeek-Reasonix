@@ -181,30 +181,31 @@ func (readOnlyBash) ReadOnly() bool { return true }
 // parallel research across independent areas (the parallel-dispatch path picks
 // these up only when readOnly, which task is not).
 type TaskTool struct {
-	prov                provider.Provider
-	pricing             *provider.Pricing
-	parentReg           *tool.Registry
-	maxSteps            int
-	contextWindow       int
-	softCompactRatio    float64
-	toolResultSnipRatio float64
-	compactRatio        float64
-	compactForceRatio   float64
-	recentKeep          int
-	temperature         float64
-	archiveDir          string
-	keepPolicy          KeepPolicy
-	sysPrompt           string
-	gate                Gate
-	subagentModel       string
-	subagentEffort      string
-	resolveProvider     func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error)
-	transcripts         *SubagentStore
-	workspaceRoot       string
-	baseModel           string
-	baseEffort          string
-	identityProfile     func(modelRef, effort string) (string, string)
-	maxSubagentDepth    int
+	prov                 provider.Provider
+	pricing              *provider.Pricing
+	parentReg            *tool.Registry
+	maxSteps             int
+	maxParallelReadTools int
+	contextWindow        int
+	softCompactRatio     float64
+	toolResultSnipRatio  float64
+	compactRatio         float64
+	compactForceRatio    float64
+	recentKeep           int
+	temperature          float64
+	archiveDir           string
+	keepPolicy           KeepPolicy
+	sysPrompt            string
+	gate                 Gate
+	subagentModel        string
+	subagentEffort       string
+	resolveProvider      func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error)
+	transcripts          *SubagentStore
+	workspaceRoot        string
+	baseModel            string
+	baseEffort           string
+	identityProfile      func(modelRef, effort string) (string, string)
+	maxSubagentDepth     int
 }
 
 // NewTaskTool wires a task tool to the parent agent's environment so its
@@ -220,25 +221,26 @@ func NewTaskTool(prov provider.Provider, pricing *provider.Pricing, parentReg *t
 		sysPrompt = DefaultTaskSystemPrompt
 	}
 	return &TaskTool{
-		prov:                prov,
-		pricing:             pricing,
-		parentReg:           parentReg,
-		maxSteps:            maxSteps,
-		contextWindow:       contextWindow,
-		recentKeep:          recentKeep,
-		softCompactRatio:    softCompactRatio,
-		toolResultSnipRatio: toolResultSnipRatio,
-		compactRatio:        compactRatio,
-		compactForceRatio:   compactForceRatio,
-		temperature:         temperature,
-		archiveDir:          archiveDir,
-		keepPolicy:          keepPolicy,
-		sysPrompt:           sysPrompt,
-		gate:                gate,
-		subagentModel:       subagentModel,
-		subagentEffort:      subagentEffort,
-		resolveProvider:     resolveProvider,
-		maxSubagentDepth:    DefaultMaxSubagentDepth,
+		prov:                 prov,
+		pricing:              pricing,
+		parentReg:            parentReg,
+		maxSteps:             maxSteps,
+		maxParallelReadTools: DefaultMaxParallelReadTools,
+		contextWindow:        contextWindow,
+		recentKeep:           recentKeep,
+		softCompactRatio:     softCompactRatio,
+		toolResultSnipRatio:  toolResultSnipRatio,
+		compactRatio:         compactRatio,
+		compactForceRatio:    compactForceRatio,
+		temperature:          temperature,
+		archiveDir:           archiveDir,
+		keepPolicy:           keepPolicy,
+		sysPrompt:            sysPrompt,
+		gate:                 gate,
+		subagentModel:        subagentModel,
+		subagentEffort:       subagentEffort,
+		resolveProvider:      resolveProvider,
+		maxSubagentDepth:     DefaultMaxSubagentDepth,
 	}
 }
 
@@ -260,6 +262,11 @@ func (t *TaskTool) WithTranscriptIdentityResolver(resolve func(modelRef, effort 
 
 func (t *TaskTool) WithMaxSubagentDepth(depth int) *TaskTool {
 	t.maxSubagentDepth = NormalizeMaxSubagentDepth(depth)
+	return t
+}
+
+func (t *TaskTool) WithMaxParallelReadTools(value int) *TaskTool {
+	t.maxParallelReadTools = NormalizeMaxParallelReadTools(value)
 	return t
 }
 
@@ -772,23 +779,24 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 // must stay uniform across those paths — add new fields here, not at call sites.
 func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *provider.Pricing, ctxWin, childDepth int) Options {
 	return Options{
-		MaxSteps:            maxSteps,
-		Temperature:         t.temperature,
-		Pricing:             pricing,
-		UsageSource:         event.UsageSourceSubagent,
-		Gate:                t.gate,
-		ContextWindow:       ctxWin,
-		RecentKeep:          t.recentKeep,
-		SoftCompactRatio:    t.softCompactRatio,
-		ToolResultSnipRatio: t.toolResultSnipRatio,
-		CompactRatio:        t.compactRatio,
-		CompactForceRatio:   t.compactForceRatio,
-		ArchiveDir:          t.archiveDir,
-		KeepPolicy:          t.keepPolicy,
-		ResponseLanguage:    ResponseLanguageFromContext(ctx),
-		ReasoningLanguage:   ReasoningLanguageFromContext(ctx),
-		SubagentDepth:       childDepth,
-		MaxSubagentDepth:    t.maxDepth(),
+		MaxSteps:             maxSteps,
+		MaxParallelReadTools: NormalizeMaxParallelReadTools(t.maxParallelReadTools),
+		Temperature:          t.temperature,
+		Pricing:              pricing,
+		UsageSource:          event.UsageSourceSubagent,
+		Gate:                 t.gate,
+		ContextWindow:        ctxWin,
+		RecentKeep:           t.recentKeep,
+		SoftCompactRatio:     t.softCompactRatio,
+		ToolResultSnipRatio:  t.toolResultSnipRatio,
+		CompactRatio:         t.compactRatio,
+		CompactForceRatio:    t.compactForceRatio,
+		ArchiveDir:           t.archiveDir,
+		KeepPolicy:           t.keepPolicy,
+		ResponseLanguage:     ResponseLanguageFromContext(ctx),
+		ReasoningLanguage:    ReasoningLanguageFromContext(ctx),
+		SubagentDepth:        childDepth,
+		MaxSubagentDepth:     t.maxDepth(),
 	}
 }
 

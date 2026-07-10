@@ -649,6 +649,8 @@ export interface ComposerInsertRequest {
   id: number;
   text: string;
   mode?: "insert" | "replace";
+  parseWorkspaceRef?: boolean;
+  insertSpacing?: "block" | "inline";
 }
 
 // MCP & Skills drawer (desktop/app.go Capabilities) — the GUI counterpart to

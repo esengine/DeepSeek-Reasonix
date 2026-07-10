@@ -150,6 +150,32 @@ function workspaceReferenceKey(ref: WorkspaceReference): string {
   return `${ref.isDir ? "dir" : "file"}:${ref.path}`;
 }
 
+export function shouldParseWorkspaceInsertRequest(request: ComposerInsertRequest): boolean {
+  return request.parseWorkspaceRef !== false;
+}
+
+export function composeComposerInsertText(
+  text: string,
+  snippet: string,
+  start: number,
+  end: number,
+  spacing: ComposerInsertRequest["insertSpacing"] = "block",
+): { next: string; caret: number } {
+  const safeStart = Math.max(0, Math.min(start, text.length));
+  const safeEnd = Math.max(safeStart, Math.min(end, text.length));
+  const before = text.slice(0, safeStart);
+  const after = text.slice(safeEnd);
+  if (spacing === "inline") {
+    const next = before + snippet + after;
+    return { next, caret: before.length + snippet.length };
+  }
+  const leading = before.length === 0 || before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
+  const body = snippet.trimEnd();
+  const trailing = after.length === 0 ? "\n" : after.startsWith("\n") ? "" : "\n\n";
+  const inserted = leading + body + trailing;
+  return { next: before + inserted + after, caret: before.length + inserted.length };
+}
+
 export function composerPickFileEntry(
   text: string,
   atRaw: string | null,
@@ -1071,25 +1097,18 @@ export function Composer({
     lastSelectionRef.current = { start: ta.selectionStart ?? text.length, end: ta.selectionEnd ?? text.length };
   };
 
-  const insertTextAtCaret = (snippet: string) => {
+  const insertTextAtCaret = (snippet: string, spacing?: ComposerInsertRequest["insertSpacing"]) => {
     const ta = taRef.current;
     const start = ta ? (ta.selectionStart ?? text.length) : Math.min(lastSelectionRef.current.start, text.length);
     const end = ta ? (ta.selectionEnd ?? start) : Math.min(lastSelectionRef.current.end, text.length);
-    const before = text.slice(0, start);
-    const after = text.slice(end);
-    const leading = before.length === 0 || before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
-    const body = snippet.trimEnd();
-    const trailing = after.length === 0 ? "\n" : after.startsWith("\n") ? "" : "\n\n";
-    const inserted = leading + body + trailing;
-    const next = before + inserted + after;
-    const pos = before.length + inserted.length;
+    const { next, caret } = composeComposerInsertText(text, snippet, start, end, spacing);
     setText(next);
     requestAnimationFrame(() => {
       const node = taRef.current;
       if (!node) return;
       node.focus();
-      node.selectionStart = node.selectionEnd = pos;
-      lastSelectionRef.current = { start: pos, end: pos };
+      node.selectionStart = node.selectionEnd = caret;
+      lastSelectionRef.current = { start: caret, end: caret };
     });
   };
 
@@ -1121,12 +1140,14 @@ export function Composer({
       replaceComposerText(insertRequest.text);
       return;
     }
-    const ref = parseWorkspaceReference(insertRequest.text);
+    const ref = shouldParseWorkspaceInsertRequest(insertRequest)
+      ? parseWorkspaceReference(insertRequest.text)
+      : null;
     if (ref) {
       addWorkspaceReference(ref);
       return;
     }
-    insertTextAtCaret(insertRequest.text);
+    insertTextAtCaret(insertRequest.text, insertRequest.insertSpacing);
   }, [insertRequest]);
 
   const expandPastedBlocks = (displayText: string): string => {

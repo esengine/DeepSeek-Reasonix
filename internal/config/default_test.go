@@ -24,6 +24,25 @@ func TestDefaultMemoryCompilerEnabled(t *testing.T) {
 	}
 }
 
+func TestMaxParallelReadToolsDefaultAndClamp(t *testing.T) {
+	cfg := Default()
+	if got := cfg.MaxParallelReadTools(); got != DefaultMaxParallelReadTools {
+		t.Fatalf("default max_parallel_read_tools = %d, want %d", got, DefaultMaxParallelReadTools)
+	}
+	cfg.Agent.MaxParallelReadTools = 2
+	if got := cfg.MaxParallelReadTools(); got != 2 {
+		t.Fatalf("configured max_parallel_read_tools = %d, want 2", got)
+	}
+	cfg.Agent.MaxParallelReadTools = 99
+	if got := cfg.MaxParallelReadTools(); got != MaxParallelReadToolsLimit {
+		t.Fatalf("clamped max_parallel_read_tools = %d, want %d", got, MaxParallelReadToolsLimit)
+	}
+	cfg.Agent.MaxParallelReadTools = -1
+	if got := cfg.MaxParallelReadTools(); got != DefaultMaxParallelReadTools {
+		t.Fatalf("non-positive max_parallel_read_tools = %d, want default %d", got, DefaultMaxParallelReadTools)
+	}
+}
+
 func TestDefaultDesktopAppearanceAutoGraphite(t *testing.T) {
 	cfg := Default()
 	if got := cfg.DesktopTheme(); got != "auto" {
