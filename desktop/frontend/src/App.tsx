@@ -54,6 +54,7 @@ import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ContextPanel } from "./components/ContextPanel";
 import { WorkspacePanel } from "./components/WorkspacePanel";
+import { BtwPanel } from "./components/BtwPanel";
 import { Tooltip } from "./components/Tooltip";
 import { StartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
@@ -115,6 +116,9 @@ import {
 } from "./lib/toolApprovalMode";
 import {
   CREATION_SIDEBAR_MIN_WIDTH,
+  RIGHT_DOCK_BTW_DEFAULT_WIDTH,
+  RIGHT_DOCK_BTW_MAX_WIDTH,
+  RIGHT_DOCK_BTW_MIN_WIDTH,
   RIGHT_DOCK_MAX_WIDTH,
   RIGHT_DOCK_MIN_RENDER_WIDTH,
   RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH,
@@ -125,11 +129,13 @@ import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
   clampCreationSidebarWidth,
+  clampRightDockBtwWidth,
   clampRightDockPreviewWidth,
   clampRightDockTreeWidth,
   clampSidebarWidth,
   defaultRightDockTreeWidth,
   defaultSidebarWidth,
+  saveRightDockBtwWidth,
   saveRightDockPreviewWidth,
   saveRightDockTreeWidth,
   saveSidebarCollapsed,
@@ -159,6 +165,8 @@ import { createRafResizeUpdater } from "./lib/resizeDrag";
 import { useGlobalShortcut } from "./lib/keyboardShortcuts";
 import { topicShortcutIndexFromEvent, useTopicShortcuts, type TopicShortcutEntry } from "./lib/topicShortcuts";
 import { composerDraftKeyForTab } from "./lib/composerDraftKey";
+import { parseBtwCommandInput } from "./lib/btwCommand";
+import { btwSessionKeyForTab, shouldMigrateBtwSessionKey } from "./lib/btwSessionKey";
 import logoWordmark from "./assets/logo-wordmark.svg";
 
 function noticePreviewMockEnabled(): boolean {
@@ -271,12 +279,14 @@ function normalizeDesktopLayoutStyle(style: string | undefined): DesktopLayoutSt
   if (style === "creation") return "creation";
   return "classic";
 }
+
 const SHOW_CONTEXT_DOCK = true;
 const DISMISSED_TODO_STORAGE_KEY = "todoPanel:dismissedKeys";
 const MAX_DISMISSED_TODO_KEYS = 160;
 type HistoryScopeFilter = { scope: "global" | "project"; workspaceRoot: string };
 type WorkspaceInsertTarget = "composer" | "planRevision";
 type DesktopPlatform = "darwin" | "windows" | "linux";
+type BtwStartRequest = { id: number; tabId: string; sessionKey: string; input: string };
 
 function WindowsWindowControls() {
   const [maximised, setMaximised] = useState(false);
@@ -1088,6 +1098,8 @@ export default function App() {
   const setRightDockTreeWidth = useLayoutStore((s) => s.setRightDockTreeWidth);
   const rightDockPreviewWidth = useLayoutStore((s) => s.rightDockPreviewWidth);
   const setRightDockPreviewWidth = useLayoutStore((s) => s.setRightDockPreviewWidth);
+  const rightDockBtwWidth = useLayoutStore((s) => s.rightDockBtwWidth);
+  const setRightDockBtwWidth = useLayoutStore((s) => s.setRightDockBtwWidth);
   const workspacePreviewActive = useLayoutStore((s) => s.workspacePreviewActive);
   const setWorkspacePreviewActive = useLayoutStore((s) => s.setWorkspacePreviewActive);
   const attentionChimeEvents = useRef(new Set<string>());
@@ -1157,8 +1169,14 @@ export default function App() {
   const [sidebarTogglePressed, setSidebarTogglePressed] = useState(false);
   const [workspaceTogglePressed, setWorkspaceTogglePressed] = useState(false);
   const [clearContextPending, setClearContextPending] = useState(false);
+  const [btwOpenBySessionKey, setBtwOpenBySessionKey] = useState<Record<string, boolean>>({});
+  const [btwStartRequestsBySessionKey, setBtwStartRequestsBySessionKey] = useState<Record<string, BtwStartRequest[]>>({});
   const topicRenameSkipCommitRef = useRef(false);
   const topicRenameCommitHandledRef = useRef(false);
+  const nextBtwStartRequestIdRef = useRef(1);
+  const btwToggleRef = useRef<HTMLButtonElement>(null);
+  const btwPreviousDockRef = useRef<{ mode: Exclude<RightDockMode, "btw">; open: boolean } | null>(null);
+  const btwSessionKeyByTabRef = useRef<Record<string, string>>({});
   const appRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const sidebarTogglePressTimerRef = useRef<number | null>(null);
@@ -1174,6 +1192,188 @@ export default function App() {
   const closeTransientOverlays = useCallback(() => {
     setTransientOverlayDismissSignal((signal) => signal + 1);
   }, []);
+
+  const activeBtwTab = useMemo(
+    () => tabMetas.find((tab) => tab.id === activeTabId) ?? tabMetas.find((tab) => tab.active),
+    [activeTabId, tabMetas],
+  );
+  const activeBtwSessionKey = useMemo(
+    () => btwSessionKeyForTab(activeBtwTab, activeTabId, state.meta?.sessionPath),
+    [activeBtwTab, activeTabId, state.meta?.sessionPath],
+  );
+  const btwSessionKeyByTabId = useMemo(() => {
+    const entries: Record<string, string> = {};
+    for (const tab of tabMetas) {
+      const key = btwSessionKeyForTab(tab, tab.id, tab.id === activeTabId ? state.meta?.sessionPath : undefined);
+      if (tab.id && key) entries[tab.id] = key;
+    }
+    if (activeTabId && activeBtwSessionKey) entries[activeTabId] = activeBtwSessionKey;
+    return entries;
+  }, [activeBtwSessionKey, activeTabId, state.meta?.sessionPath, tabMetas]);
+  const { btwSessionKeyMigrations, btwSessionKeyInvalidations } = useMemo(() => {
+    const migrations: Array<{ tabId: string; from: string; to: string }> = [];
+    const invalidations: Array<{ tabId: string; from: string; to: string }> = [];
+    for (const [tabId, to] of Object.entries(btwSessionKeyByTabId)) {
+      const from = btwSessionKeyByTabRef.current[tabId];
+      if (!from || from === to) continue;
+      if (shouldMigrateBtwSessionKey(from, to)) {
+        migrations.push({ tabId, from, to });
+      } else {
+        invalidations.push({ tabId, from, to });
+      }
+    }
+    return { btwSessionKeyMigrations: migrations, btwSessionKeyInvalidations: invalidations };
+  }, [btwSessionKeyByTabId]);
+  const activeBtwSessionKeyMigration = btwSessionKeyMigrations.find(({ tabId }) => tabId === activeTabId) ?? null;
+
+  const openBtwFromCommand = useCallback((input: string) => {
+    if (!activeTabId || !activeBtwSessionKey) return;
+    closeTransientOverlays();
+    if (rightDockMode !== "btw") {
+      btwPreviousDockRef.current = { mode: rightDockMode, open: workspacePanelOpen };
+    }
+    setBtwOpenBySessionKey((current) => ({ ...current, [activeBtwSessionKey]: true }));
+    setWorkspacePreviewActive(false);
+    setWorkspacePanelMaximized(false);
+    setRightDockMode("btw");
+    setWorkspacePanelOpen(true);
+    const trimmed = input.trim();
+    if (trimmed) {
+      const request = { id: nextBtwStartRequestIdRef.current++, tabId: activeTabId, sessionKey: activeBtwSessionKey, input: trimmed };
+      setBtwStartRequestsBySessionKey((current) => ({
+        ...current,
+        [activeBtwSessionKey]: [...(current[activeBtwSessionKey] ?? []), request],
+      }));
+    }
+  }, [activeBtwSessionKey, activeTabId, closeTransientOverlays, rightDockMode, setRightDockMode, setWorkspacePanelMaximized, setWorkspacePanelOpen, setWorkspacePreviewActive, workspacePanelOpen]);
+
+  const activeBtwStateKey = activeBtwSessionKey && btwOpenBySessionKey[activeBtwSessionKey]
+    ? activeBtwSessionKey
+    : activeBtwSessionKeyMigration && btwOpenBySessionKey[activeBtwSessionKeyMigration.from]
+      ? activeBtwSessionKeyMigration.from
+      : activeBtwSessionKey;
+  const btwOpen = Boolean(activeBtwStateKey && btwOpenBySessionKey[activeBtwStateKey]);
+  const btwPanelMounted = Object.values(btwOpenBySessionKey).some(Boolean);
+  const btwDockVisible = btwOpen && workspacePanelOpen && rightDockMode === "btw";
+  const queuedBtwStartRequest = activeBtwStateKey ? btwStartRequestsBySessionKey[activeBtwStateKey]?.[0] ?? null : null;
+  const activeBtwStartRequest = queuedBtwStartRequest && queuedBtwStartRequest.tabId === activeTabId
+    ? queuedBtwStartRequest
+    : null;
+
+  const endActiveBtwPanel = useCallback(() => {
+    if (!activeBtwSessionKey) return;
+    const keys = new Set([activeBtwSessionKey, activeBtwStateKey].filter((key): key is string => Boolean(key)));
+    setBtwOpenBySessionKey((current) => {
+      if (![...keys].some((key) => current[key])) return current;
+      const next = { ...current };
+      for (const key of keys) delete next[key];
+      return next;
+    });
+    setBtwStartRequestsBySessionKey((current) => {
+      if (![...keys].some((key) => key in current)) return current;
+      const next = { ...current };
+      for (const key of keys) delete next[key];
+      return next;
+    });
+    if (rightDockMode === "btw") {
+      const previous = btwPreviousDockRef.current;
+      if (previous?.open) {
+        setRightDockMode(previous.mode);
+        setWorkspacePanelOpen(true);
+      } else {
+        setWorkspacePanelOpen(false);
+      }
+    }
+    window.requestAnimationFrame(() => btwToggleRef.current?.focus());
+  }, [activeBtwSessionKey, activeBtwStateKey, rightDockMode, setRightDockMode, setWorkspacePanelOpen]);
+
+  const hideActiveBtwPanel = useCallback(() => {
+    setWorkspacePanelOpen(false);
+    window.requestAnimationFrame(() => btwToggleRef.current?.focus());
+  }, [setWorkspacePanelOpen]);
+
+  useEffect(() => {
+    for (const [tabId, nextKey] of Object.entries(btwSessionKeyByTabId)) {
+      const previousKey = btwSessionKeyByTabRef.current[tabId];
+      btwSessionKeyByTabRef.current[tabId] = nextKey;
+      if (!previousKey || previousKey === nextKey) continue;
+
+      if (shouldMigrateBtwSessionKey(previousKey, nextKey)) {
+        setBtwOpenBySessionKey((current) => {
+          if (!current[previousKey]) return current;
+          const next = { ...current, [nextKey]: true };
+          delete next[previousKey];
+          return next;
+        });
+        setBtwStartRequestsBySessionKey((current) => {
+          const previousQueue = current[previousKey];
+          if (!previousQueue?.length) return current;
+          const next = {
+            ...current,
+            [nextKey]: [
+              ...previousQueue.map((request) => ({ ...request, sessionKey: nextKey })),
+              ...(current[nextKey] ?? []),
+            ],
+          };
+          delete next[previousKey];
+          return next;
+        });
+        continue;
+      }
+
+      setBtwOpenBySessionKey((current) => {
+        if (!(previousKey in current)) return current;
+        const next = { ...current };
+        delete next[previousKey];
+        return next;
+      });
+      setBtwStartRequestsBySessionKey((current) => {
+        if (!(previousKey in current)) return current;
+        const next = { ...current };
+        delete next[previousKey];
+        return next;
+      });
+      void app.ReturnFromBtwForTab(tabId).catch(() => undefined);
+    }
+  }, [btwSessionKeyByTabId]);
+
+  useEffect(() => {
+    const liveSessionKeys = new Set<string>();
+    for (const tab of tabMetas) {
+      const key = btwSessionKeyForTab(tab, tab.id, tab.id === activeTabId ? state.meta?.sessionPath : undefined);
+      if (key) liveSessionKeys.add(key);
+    }
+    if (activeBtwSessionKey) liveSessionKeys.add(activeBtwSessionKey);
+    setBtwOpenBySessionKey((current) => {
+      let changed = false;
+      const next: Record<string, boolean> = {};
+      for (const [sessionKey, open] of Object.entries(current)) {
+        if (open && liveSessionKeys.has(sessionKey)) {
+          next[sessionKey] = true;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+    setBtwStartRequestsBySessionKey((current) => {
+      let changed = false;
+      const next: Record<string, BtwStartRequest[]> = {};
+      for (const [sessionKey, requests] of Object.entries(current)) {
+        if (liveSessionKeys.has(sessionKey)) {
+          next[sessionKey] = requests;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [activeBtwSessionKey, activeTabId, state.meta?.sessionPath, tabMetas]);
+
+  useEffect(() => {
+    if (!workspacePanelOpen || rightDockMode !== "btw" || btwOpen) return;
+    setWorkspacePanelOpen(false);
+  }, [btwOpen, rightDockMode, setWorkspacePanelOpen, workspacePanelOpen]);
 
   const reloadSidebarImConnections = useCallback(async () => {
     const [settings, runtimeStatus] = await Promise.all([
@@ -1344,9 +1544,14 @@ export default function App() {
   const runningRef = useRef(state.running);
   const activeTabIdRef = useRef(activeTabId);
   const commitThenSendRef = useRef<(displayText: string, submitText?: string) => Promise<void>>(async () => {});
-  const rightDockDetailActive = rightDockMode !== "context" && workspacePreviewActive;
-  const preferredWorkspacePanelWidth = rightDockDetailActive ? rightDockPreviewWidth : rightDockTreeWidth;
-  const workspacePanelMinWidth = rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
+  const rightDockBtwActive = rightDockMode === "btw";
+  const rightDockDetailActive = rightDockMode !== "context" && rightDockMode !== "btw" && workspacePreviewActive;
+  const preferredWorkspacePanelWidth = rightDockBtwActive
+    ? rightDockBtwWidth
+    : rightDockDetailActive ? rightDockPreviewWidth : rightDockTreeWidth;
+  const workspacePanelMinWidth = rightDockBtwActive
+    ? RIGHT_DOCK_BTW_MIN_WIDTH
+    : rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
   const chatReservedWidth = workspacePanelOpen && !workspacePanelMaximized ? CHAT_COMFORT_MIN_WIDTH : CHAT_MIN_WIDTH;
   const workspacePanelAvailableWidth = availableWorkspacePanelWidth({
     viewportWidth,
@@ -1366,9 +1571,13 @@ export default function App() {
 
   const storedWorkspacePanelRenderWidth = workspacePanelMaximized ? preferredWorkspacePanelWidth : resolvedWorkspacePanelWidth;
   const workspacePanelRenderWidth = liveWorkspacePanelRenderWidth ?? storedWorkspacePanelRenderWidth;
+  const btwDockFocused = rightDockBtwActive
+    && workspacePanelOpen
+    && !workspacePanelMaximized
+    && workspacePanelRenderWidth < RIGHT_DOCK_BTW_MIN_WIDTH;
   const workspacePanelRenderable =
-    workspacePanelOpen && (workspacePanelMaximized || workspacePanelRenderWidth >= RIGHT_DOCK_MIN_RENDER_WIDTH);
-  const workspacePanelGridOpen = workspacePanelRenderable && !workspacePanelMaximized;
+    workspacePanelOpen && (rightDockBtwActive || workspacePanelMaximized || workspacePanelRenderWidth >= RIGHT_DOCK_MIN_RENDER_WIDTH);
+  const workspacePanelGridOpen = workspacePanelRenderable && !workspacePanelMaximized && !btwDockFocused;
   const resolveLiveWorkspacePanelRenderWidth = useCallback(
     (preferredWidth: number, nextSidebarWidth = sidebarWidth) =>
       resolveLiveWorkspacePanelWidth({
@@ -1746,7 +1955,7 @@ export default function App() {
 
   // handleSend intercepts slash commands that need a desktop-native action before
   // they reach the backend: "/model <ref>" rebuilds on that model, "/memory"
-  // opens Settings, and "/clear" shows an in-app confirmation card. Everything else — skills (/init, …),
+  // opens Settings, "/btw" opens a side conversation, and "/clear" shows an in-app confirmation card. Everything else — skills (/init, …),
   // custom commands, bare /model and the other read-only management verbs
   // (/skill, /hooks, /mcp) — goes straight to Submit, which the controller
   // resolves (a turn, or a listing Notice).
@@ -1761,6 +1970,12 @@ export default function App() {
           return;
         }
         await runShell(cmd);
+        return;
+      }
+      const btwInput = parseBtwCommandInput(displayText);
+      if (btwInput !== null) {
+        if (!controllerReady) throw new Error(t("composer.workspaceStarting"));
+        openBtwFromCommand(parseBtwCommandInput(submitText) ?? btwInput);
         return;
       }
       const model = /^\/model\s+(\S+)$/.exec(trimmed);
@@ -1846,7 +2061,7 @@ export default function App() {
       if (goal.trim()) await setControllerGoal(goal);
       await commitThenSendRef.current(trimmed, submitText.trim());
     },
-    [activeTabId, applyGoal, closeTransientOverlays, collaborationMode, composerProfile, controllerReady, goal, send, runShell, notice, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, steer, switchModel, t, toolApprovalMode, showToast],
+    [activeTabId, applyGoal, closeTransientOverlays, collaborationMode, composerProfile, controllerReady, goal, openBtwFromCommand, send, runShell, notice, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, steer, switchModel, t, toolApprovalMode, showToast],
   );
 
   const refreshTabMetas = useCallback(async (): Promise<TabMeta[]> => {
@@ -2076,6 +2291,12 @@ export default function App() {
   const setSavedWorkspacePanelWidth = useCallback(
     (width: number) => {
       closeTransientOverlays();
+      if (rightDockBtwActive) {
+        const next = clampRightDockBtwWidth(width);
+        setRightDockBtwWidth(next);
+        saveRightDockBtwWidth(next);
+        return;
+      }
       if (rightDockDetailActive) {
         const next = clampRightDockPreviewWidth(width);
         setRightDockPreviewWidth(next);
@@ -2086,7 +2307,7 @@ export default function App() {
       setRightDockTreeWidth(next);
       saveRightDockTreeWidth(next);
     },
-    [closeTransientOverlays, rightDockDetailActive],
+    [closeTransientOverlays, rightDockBtwActive, rightDockDetailActive, setRightDockBtwWidth],
   );
 
   const ensureWorkspacePanelWidth = useCallback(
@@ -2120,7 +2341,9 @@ export default function App() {
       const onMove = (moveEvent: PointerEvent) => {
         const delta = moveEvent.clientX - startX;
         nextDockWidth = startDockWidth - delta;
-        if (rightDockDetailActive) {
+        if (rightDockBtwActive) {
+          nextDockWidth = clampRightDockBtwWidth(nextDockWidth);
+        } else if (rightDockDetailActive) {
           nextDockWidth = clampRightDockPreviewWidth(nextDockWidth);
         } else {
           nextDockWidth = clampRightDockTreeWidth(nextDockWidth);
@@ -2144,7 +2367,7 @@ export default function App() {
       window.addEventListener("pointerup", onDone);
       window.addEventListener("pointercancel", onDone);
     },
-    [closeTransientOverlays, resolveLiveWorkspacePanelRenderWidth, rightDockDetailActive, setSavedWorkspacePanelWidth, workspacePanelOpen, workspacePanelRenderWidth],
+    [closeTransientOverlays, resolveLiveWorkspacePanelRenderWidth, rightDockBtwActive, rightDockDetailActive, setSavedWorkspacePanelWidth, workspacePanelOpen, workspacePanelRenderWidth],
   );
 
   const resizeWorkspacePanelWithKeyboard = useCallback(
@@ -2154,13 +2377,13 @@ export default function App() {
         setSavedWorkspacePanelWidth(workspacePanelRenderWidth + (event.key === "ArrowLeft" ? 16 : -16));
       } else if (event.key === "Home") {
         event.preventDefault();
-        setSavedWorkspacePanelWidth(rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH);
+        setSavedWorkspacePanelWidth(rightDockBtwActive ? RIGHT_DOCK_BTW_MIN_WIDTH : rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH);
       } else if (event.key === "End") {
         event.preventDefault();
-        setSavedWorkspacePanelWidth(rightDockDetailActive ? RIGHT_DOCK_MAX_WIDTH : RIGHT_DOCK_TREE_MAX_WIDTH);
+        setSavedWorkspacePanelWidth(rightDockBtwActive ? RIGHT_DOCK_BTW_MAX_WIDTH : rightDockDetailActive ? RIGHT_DOCK_MAX_WIDTH : RIGHT_DOCK_TREE_MAX_WIDTH);
       }
     },
-    [rightDockDetailActive, setSavedWorkspacePanelWidth, workspacePanelRenderWidth],
+    [rightDockBtwActive, rightDockDetailActive, setSavedWorkspacePanelWidth, workspacePanelRenderWidth],
   );
 
   const openWorkspacePanel = useCallback(
@@ -2951,11 +3174,13 @@ export default function App() {
   const browserPreviewChrome = typeof window !== "undefined" && !window.runtime;
   const browserMockScenario = browserPreviewChrome ? browserMockScenarioParam() : "";
   const guidanceQueueMockItems = isGuidanceMockScenario(browserMockScenario) ? GUIDANCE_QUEUE_MOCK_ITEMS : undefined;
-  const workspacePanelResetWidth = rightDockDetailActive
-    ? RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH
-    : defaultRightDockTreeWidth();
+  const workspacePanelResetWidth = rightDockBtwActive
+    ? RIGHT_DOCK_BTW_DEFAULT_WIDTH
+    : rightDockDetailActive ? RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH : defaultRightDockTreeWidth();
   const workspacePanelResizeMinWidth = workspacePanelAriaMinWidth(workspacePanelMinWidth, workspacePanelRenderWidth);
-  const workspacePanelMaxWidth = rightDockDetailActive ? RIGHT_DOCK_MAX_WIDTH : RIGHT_DOCK_TREE_MAX_WIDTH;
+  const workspacePanelMaxWidth = rightDockBtwActive
+    ? RIGHT_DOCK_BTW_MAX_WIDTH
+    : rightDockDetailActive ? RIGHT_DOCK_MAX_WIDTH : RIGHT_DOCK_TREE_MAX_WIDTH;
   const sidebarCreation = desktopLayoutStyle === "creation";
   const topicbarTitle = sidebarImDetailConnection ? t("botDetail.title", { name: sidebarImDetailConnection.title }) : topicDisplayTitle(activeTab);
   const topicbarWorkspaceLabel = sidebarImDetailConnection ? t("botDetail.subtitle") : activeTab ? tabWorkspaceTitle(activeTab) : "";
@@ -3018,6 +3243,7 @@ export default function App() {
           sidebarResizing ? "layout--resizing layout--sidebar-resizing" : "",
           workspacePanelGridOpen ? "layout--workspace-open" : "",
           workspacePanelOpen && workspacePanelMaximized ? "layout--workspace-maximized" : "",
+          btwDockFocused ? "layout--btw-focused" : "",
           workspacePanelResizing ? "layout--resizing layout--workspace-resizing" : "",
         ]
           .filter(Boolean)
@@ -3460,6 +3686,20 @@ export default function App() {
               </div>
               </>
               )}
+              <Tooltip label={btwDockVisible ? t("btw.hide") : t("btw.open")}>
+                <button
+                  ref={btwToggleRef}
+                  className={`topicbar__action-btn topicbar__action-btn--label${btwOpen ? " topicbar__action-btn--active" : ""}`}
+                  type="button"
+                  aria-label={btwDockVisible ? t("btw.hide") : t("btw.open")}
+                  aria-expanded={btwDockVisible}
+                  aria-controls="btw-panel"
+                  onClick={() => btwDockVisible ? hideActiveBtwPanel() : openBtwFromCommand("")}
+                >
+                  <MessageSquare size={14} />
+                  <span>{t("btw.title")}</span>
+                </button>
+              </Tooltip>
               <Tooltip label={t("workspace.changedTab")}>
                 <button
                   className="topicbar__action-btn topicbar__action-btn--label"
@@ -3536,29 +3776,31 @@ export default function App() {
             ) : noticePreviewMockEnabled() ? (
               <NoticePreviewPanel detailsLabel={t("notice.details")} />
             ) : (
-              <Transcript
-                items={displayItems}
-                live={state.live}
-                tabId={activeTabId}
-                footerHeight={footerHeight}
-                onPrompt={handleTranscriptPrompt}
-                onEditPrompt={handleEditPrompt}
-                onRewind={handleMessageAction}
-                checkpoints={state.checkpoints}
-                actionPending={state.messageAction != null}
-                rewindDisabled={Boolean(activeTab?.readOnly) || !controllerReady || hydratePlaceholderActive || rewindState != null || rewindCommitting || state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
-                running={state.running || rewindCommitting}
-                welcomeVariant={sidebarCreation ? "creation" : "default"}
-                creationMode={sidebarCreation}
-                actionHoverMenus={sidebarCreation && !hydratePlaceholderActive}
-                rewindSignal={rewindSignal}
-                revealSignal={transcriptRevealSignal}
-                hydrating={transcriptHydrating}
-                hasOlderHistory={state.historyHasOlder && !rewindState}
-                olderHistoryCount={state.historyStartTurn}
-                loadingOlderHistory={state.historyOlderLoading}
-                onLoadOlderHistory={() => activeTabId && loadOlderHistory(activeTabId)}
-              />
+                <div className="main__conversation">
+                  <Transcript
+                    items={displayItems}
+                    live={state.live}
+                    tabId={activeTabId}
+                    footerHeight={footerHeight}
+                    onPrompt={handleTranscriptPrompt}
+                    onEditPrompt={handleEditPrompt}
+                    onRewind={handleMessageAction}
+                    checkpoints={state.checkpoints}
+                    actionPending={state.messageAction != null}
+                    rewindDisabled={Boolean(activeTab?.readOnly) || !controllerReady || hydratePlaceholderActive || rewindState != null || rewindCommitting || state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
+                    running={state.running || rewindCommitting}
+                    welcomeVariant={sidebarCreation ? "creation" : "default"}
+                    creationMode={sidebarCreation}
+                    actionHoverMenus={sidebarCreation && !hydratePlaceholderActive}
+                    rewindSignal={rewindSignal}
+                    revealSignal={transcriptRevealSignal}
+                    hydrating={transcriptHydrating}
+                    hasOlderHistory={state.historyHasOlder && !rewindState}
+                    olderHistoryCount={state.historyStartTurn}
+                    loadingOlderHistory={state.historyOlderLoading}
+                    onLoadOlderHistory={() => activeTabId && loadOlderHistory(activeTabId)}
+                  />
+                </div>
             )}
           </main>
 
@@ -3716,13 +3958,14 @@ export default function App() {
           />
         )}
 
-        {workspacePanelRenderable && (
+        {(workspacePanelRenderable || btwPanelMounted) && (
           <aside
             className={[
               "workbench-dock",
               `workbench-dock--${rightDockMode}`,
             ].join(" ")}
             aria-label={t("rightDock.workbench")}
+            hidden={!workspacePanelRenderable}
           >
             <div className="workbench-dock__tools">
               <div className="workbench-dock__tabs" role="tablist" aria-label={t("rightDock.views")}>
@@ -3738,6 +3981,16 @@ export default function App() {
                     <span className="workbench-dock__tab-label">{t("rightDock.overview")}</span>
                   </button>
                 )}
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={rightDockMode === "btw"}
+                  className={`workbench-dock__tab${rightDockMode === "btw" ? " workbench-dock__tab--active" : ""}${btwOpen ? " workbench-dock__tab--live" : ""}`}
+                  onClick={() => openBtwFromCommand("")}
+                >
+                  <MessageSquare size={13} />
+                  <span className="workbench-dock__tab-label">{t("btw.title")}</span>
+                </button>
                 <button
                   type="button"
                   role="tab"
@@ -3761,41 +4014,72 @@ export default function App() {
               </div>
             </div>
             <div className="workbench-dock__body">
-              {rightDockMode === "context" && desktopLayoutStyle !== "creation" ? (
-                <ContextPanel
+              {btwPanelMounted && (
+                <BtwPanel
                   tabId={activeTabId}
-                  context={state.context}
-                  usage={state.usage}
-                  sessionTokens={state.sessionTokens}
-                  sessionCost={state.sessionCost}
-                  sessionCurrency={state.sessionCurrency}
-                  sessionTurns={sessionTurns}
-                  turnTokens={state.turnTotalTokens}
-                  turnCost={state.turnCost}
-                  balance={state.balance}
-                  sessionGen={state.sessionGen}
-                  refreshKey={dockRefreshKey}
-                />
-              ) : (
-                <WorkspacePanel
-                  open={workspacePanelRenderable}
-                  tabId={activeTabId}
-                  cwd={state.meta?.cwd}
-                  maximized={workspacePanelMaximized}
-                  panelWidth={workspacePanelRenderWidth}
-                  onClose={() => setWorkspacePanel(false)}
-                  onToggleMaximized={() => {
-                    closeTransientOverlays();
-                    setWorkspacePanelMaximized((value) => !value);
+                  sessionKey={activeBtwSessionKey}
+                  tabSessionKeys={btwSessionKeyByTabId}
+                  ready={controllerReady}
+                  sessionOpen={btwOpen}
+                  hasParentContext={sessionHasContent}
+                  modelLabel={state.meta?.label ?? t("status.connecting")}
+                  visible={workspacePanelRenderable && rightDockMode === "btw" && btwOpen}
+                  startRequest={activeBtwStartRequest}
+                  onStartRequestHandled={(id: number) => {
+                    setBtwStartRequestsBySessionKey((current) => {
+                      let changed = false;
+                      const next: Record<string, BtwStartRequest[]> = {};
+                      for (const [sessionKey, queue] of Object.entries(current)) {
+                        const filtered = queue.filter((request) => request.id !== id);
+                        if (filtered.length !== queue.length) changed = true;
+                        if (filtered.length > 0) next[sessionKey] = filtered;
+                      }
+                      return changed ? next : current;
+                    });
                   }}
-                  onPreviewModeChange={handleWorkspacePreviewModeChange}
-                  onAddToChat={addWorkspaceTextToComposer}
-                  onRequestPanelWidth={ensureWorkspacePanelWidth}
-                  onFileTreeRefresh={refreshComposerFileRefs}
-                  refreshKey={dockRefreshKey}
-                  initialViewMode={rightDockMode === "changed" ? "changed" : "files"}
-                  showViewTabs={false}
+                  sessionKeyMigrations={btwSessionKeyMigrations}
+                  sessionKeyInvalidations={btwSessionKeyInvalidations}
+                  onHide={hideActiveBtwPanel}
+                  onEnd={endActiveBtwPanel}
                 />
+              )}
+              {rightDockMode !== "btw" && (
+                rightDockMode === "context" && desktopLayoutStyle !== "creation" ? (
+                  <ContextPanel
+                    tabId={activeTabId}
+                    context={state.context}
+                    usage={state.usage}
+                    sessionTokens={state.sessionTokens}
+                    sessionCost={state.sessionCost}
+                    sessionCurrency={state.sessionCurrency}
+                    sessionTurns={sessionTurns}
+                    turnTokens={state.turnTotalTokens}
+                    turnCost={state.turnCost}
+                    balance={state.balance}
+                    sessionGen={state.sessionGen}
+                    refreshKey={dockRefreshKey}
+                  />
+                ) : (
+                  <WorkspacePanel
+                    open={workspacePanelRenderable}
+                    tabId={activeTabId}
+                    cwd={state.meta?.cwd}
+                    maximized={workspacePanelMaximized}
+                    panelWidth={workspacePanelRenderWidth}
+                    onClose={() => setWorkspacePanel(false)}
+                    onToggleMaximized={() => {
+                      closeTransientOverlays();
+                      setWorkspacePanelMaximized((value) => !value);
+                    }}
+                    onPreviewModeChange={handleWorkspacePreviewModeChange}
+                    onAddToChat={addWorkspaceTextToComposer}
+                    onRequestPanelWidth={ensureWorkspacePanelWidth}
+                    onFileTreeRefresh={refreshComposerFileRefs}
+                    refreshKey={dockRefreshKey}
+                    initialViewMode={rightDockMode === "changed" ? "changed" : "files"}
+                    showViewTabs={false}
+                  />
+                )
               )}
             </div>
           </aside>

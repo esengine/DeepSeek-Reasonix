@@ -83,7 +83,10 @@ type Controller struct {
 	sink         event.Sink
 	sideFactory  SideFactory
 	sideSink     event.Sink
-	policy       permission.Policy
+	// sideIdleTimeout closes an inactive side conversation after this duration.
+	// Zero disables automatic cleanup.
+	sideIdleTimeout time.Duration
+	policy          permission.Policy
 
 	label        string
 	modelRef     string
@@ -326,27 +329,30 @@ type externalFolderToolRefs interface {
 // lets the controller mint and rotate session files; Host/Commands are surfaced
 // to frontends that resolve MCP prompts and slash commands.
 type Options struct {
-	Runner        agent.Runner
-	Executor      *agent.Agent
-	Guardian      *guardian.Session
-	Sink          event.Sink
-	SideFactory   SideFactory
-	SideSink      event.Sink
-	Policy        permission.Policy
-	Label         string
-	ModelRef      string
-	SystemPrompt  string
-	SessionDir    string
-	SessionPath   string
-	Host          *plugin.Host
-	Commands      []command.Command
-	Skills        []skill.Skill
-	AllSkills     []skill.Skill
-	SkillStore    *skill.Store
-	AllSkillStore *skill.Store
-	Hooks         *hook.Runner
-	Memory        *memory.Set
-	Cleanup       func()
+	Runner      agent.Runner
+	Executor    *agent.Agent
+	Guardian    *guardian.Session
+	Sink        event.Sink
+	SideFactory SideFactory
+	SideSink    event.Sink
+	// SideIdleTimeout bounds how long an inactive side conversation remains
+	// attached to this controller. Zero disables automatic cleanup.
+	SideIdleTimeout time.Duration
+	Policy          permission.Policy
+	Label           string
+	ModelRef        string
+	SystemPrompt    string
+	SessionDir      string
+	SessionPath     string
+	Host            *plugin.Host
+	Commands        []command.Command
+	Skills          []skill.Skill
+	AllSkills       []skill.Skill
+	SkillStore      *skill.Store
+	AllSkillStore   *skill.Store
+	Hooks           *hook.Runner
+	Memory          *memory.Set
+	Cleanup         func()
 	// BalanceURL/BalanceKey wire the active provider's optional wallet-balance
 	// endpoint and bearer key; empty when the provider declares no balance_url.
 	BalanceURL    string
@@ -433,6 +439,7 @@ func New(opts Options) *Controller {
 		sink:                              sink,
 		sideFactory:                       opts.SideFactory,
 		sideSink:                          sideSink,
+		sideIdleTimeout:                   opts.SideIdleTimeout,
 		policy:                            opts.Policy,
 		label:                             opts.Label,
 		modelRef:                          opts.ModelRef,

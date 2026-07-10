@@ -4,6 +4,7 @@ export type LayoutSizeKey =
   | "rightDockWidth"
   | "rightDockTreeWidth"
   | "rightDockPreviewWidth"
+  | "rightDockBtwWidth"
   | "workspaceFileTreePanelWidth"
   | "workspaceTreeWidth"
   | "composerHeight"
@@ -22,6 +23,7 @@ const LEGACY_SIZE_KEYS: Record<LayoutSizeKey, string[]> = {
   rightDockWidth: [],
   rightDockTreeWidth: [],
   rightDockPreviewWidth: [],
+  rightDockBtwWidth: [],
   workspaceFileTreePanelWidth: [],
   workspaceTreeWidth: ["reasonix.workspaceTree.width"],
   composerHeight: ["reasonix.composerHeight"],

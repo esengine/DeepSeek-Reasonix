@@ -320,6 +320,16 @@ func (c *Config) SetDesktopCheckUpdates(enabled bool) error {
 	return nil
 }
 
+// SetDesktopBtwIdleTimeoutMinutes sets how long an idle desktop BTW side
+// conversation stays alive. A value of 0 disables automatic cleanup.
+func (c *Config) SetDesktopBtwIdleTimeoutMinutes(minutes int) error {
+	if minutes < 0 {
+		return fmt.Errorf("btw_idle_timeout_minutes %d: must be >= 0", minutes)
+	}
+	c.Desktop.BtwIdleTimeoutMinutes = &minutes
+	return nil
+}
+
 // SetColdResumePrune toggles auto-elision of stale tool results on cold resume.
 func (c *Config) SetColdResumePrune(enabled bool) error {
 	c.Agent.ColdResumePrune = &enabled

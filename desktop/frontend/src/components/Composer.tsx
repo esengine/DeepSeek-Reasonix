@@ -5,6 +5,7 @@ import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
+import { isBtwCommand } from "../lib/btwCommand";
 import { canUsePromptHistory, isFnKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
@@ -1336,7 +1337,8 @@ export function Composer({
       const sessionContext = currentSessionRefs.length === 0 ? "" : await buildSessionContext(currentSessionRefs);
       const baseSubmitText = [expandPastedBlocks(trimmedText), refs].filter(Boolean).join(trimmedText && refs ? " " : "");
       const submitText = sessionContext ? `${sessionContext}${baseSubmitText}` : baseSubmitText;
-      if (running) {
+      const runImmediately = !submitDisabled && isBtwCommand(trimmedText);
+      if (running && !runImmediately) {
         const guidanceText = displayText.trim();
         const guidanceSubmitText = submitText.trim();
         if (guidanceText) {

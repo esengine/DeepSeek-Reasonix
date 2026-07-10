@@ -1164,6 +1164,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		AutoPlan:               cfg.Agent.AutoPlan,
 		ResponseLanguage:       cfg.ResponseLanguage(),
 		ReasoningLanguage:      cfg.ReasoningLanguage(),
+		SideIdleTimeout:        time.Duration(cfg.DesktopBtwIdleTimeoutMinutes()) * time.Minute,
 		DisableColdResumePrune: !cfg.ColdResumePruneEnabled(),
 		Shell:                  shell,
 		PlanModeAllowedTools:   cfg.Agent.PlanModeAllowedTools,

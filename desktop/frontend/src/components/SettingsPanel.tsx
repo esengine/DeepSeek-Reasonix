@@ -1216,6 +1216,7 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
   agent.plannerMaxSteps = Number.isFinite(agent.plannerMaxSteps) ? Math.max(0, Math.trunc(agent.plannerMaxSteps)) : 0;
   agent.maxSteps = Number.isFinite(agent.maxSteps) ? Math.max(0, Math.trunc(agent.maxSteps)) : 0;
   agent.maxSubagentDepth = Number.isFinite(agent.maxSubagentDepth) && agent.maxSubagentDepth <= 1 ? 1 : 2;
+  view.btwIdleTimeoutMinutes = Number.isFinite(view.btwIdleTimeoutMinutes) ? Math.max(0, Math.trunc(view.btwIdleTimeoutMinutes)) : 30;
   agent.reasoningLanguage = normalizeReasoningLanguage(agent.reasoningLanguage);
   return {
     ...view,
@@ -1935,11 +1936,15 @@ function StepLimitControl({
   value,
   presets,
   busy,
+  zeroLabel,
+  ariaLabel,
   onChange,
 }: {
   value: number;
   presets: number[];
   busy: boolean;
+  zeroLabel?: string;
+  ariaLabel?: string;
   onChange: (value: number) => void;
 }) {
   const t = useT();
@@ -1966,7 +1971,7 @@ function StepLimitControl({
               disabled={busy}
               onClick={() => n !== normalized && onChange(n)}
             >
-              {stepLimitLabel(n, t)}
+              {stepLimitLabel(n, t, zeroLabel)}
             </button>
           );
         })}
@@ -1986,7 +1991,7 @@ function StepLimitControl({
         value={custom}
         disabled={busy}
         inputMode="numeric"
-        aria-label={t("settings.stepLimit.custom")}
+        aria-label={ariaLabel ?? t("settings.stepLimit.custom")}
         onChange={(e) => setCustom(e.target.value.replace(/[^\d]/g, ""))}
         onBlur={commitCustom}
         onKeyDown={(e) => {
@@ -2001,8 +2006,8 @@ function normalizeStepLimit(value: number): number {
   return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
 }
 
-function stepLimitLabel(value: number, t: ReturnType<typeof useT>): string {
-  return value === 0 ? t("settings.stepLimit.unlimited") : String(value);
+function stepLimitLabel(value: number, t: ReturnType<typeof useT>, zeroLabel?: string): string {
+  return value === 0 ? zeroLabel ?? t("settings.stepLimit.unlimited") : String(value);
 }
 
 function NetworkSection({ s, busy, apply }: SectionProps) {
@@ -3986,6 +3991,7 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
       : "";
   const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" };
   const subagentDepth = Number.isFinite(agent.maxSubagentDepth) && agent.maxSubagentDepth <= 1 ? 1 : 2;
+  const btwIdleTimeoutMinutes = Number.isFinite(s.btwIdleTimeoutMinutes) ? Math.max(0, Math.trunc(s.btwIdleTimeoutMinutes)) : 30;
   const setAgentSteps = (maxSteps: number, plannerMaxSteps: number) => (
     app.SetAgentParams(agent.temperature, maxSteps, plannerMaxSteps, agent.systemPrompt)
   );
@@ -4146,6 +4152,16 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
                   </button>
                 ))}
               </div>
+            </SettingsField>
+            <SettingsField label={t("settings.btwIdleTimeout")} hint={t("settings.btwIdleTimeoutHint")}>
+              <StepLimitControl
+                value={btwIdleTimeoutMinutes}
+                presets={[15, 30, 60, 0]}
+                busy={busy}
+                zeroLabel={t("settings.btwIdleTimeout.off")}
+                ariaLabel={t("settings.btwIdleTimeout")}
+                onChange={(next) => void apply(() => app.SetBtwIdleTimeoutMinutes(next))}
+              />
             </SettingsField>
             <SettingsField label={t("settings.reasoningLanguage")} hint={t("settings.reasoningLanguageHint")}>
               <div className="set-seg">

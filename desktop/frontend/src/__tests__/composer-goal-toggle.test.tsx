@@ -580,6 +580,63 @@ console.log("\ncomposer goal toggle");
 
 {
   const dom = installDom();
+  const { root, calls, rerender } = await renderComposer({ running: true });
+  await rerender({ insertRequest: { id: 41, text: "/btw explain the current approach", mode: "replace" } });
+  const sendButton = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
+  if (!sendButton) throw new Error("running composer send button did not render for BTW");
+  await act(async () => {
+    sendButton.click();
+    await flushTimers();
+  });
+  eq(calls.send.join(","), "/btw explain the current approach", "/btw bypasses the main-turn guidance queue");
+  eq(document.querySelector(".composer-guidance-item"), null, "/btw does not become queued main-turn guidance");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  const { root, calls, rerender } = await renderComposer({
+    running: true,
+    submitDisabled: true,
+    onSend: (displayText, submitText) => {
+      calls.send.push(displayText);
+      calls.submit.push(submitText);
+      return Promise.reject(new Error("Workspace is still starting"));
+    },
+  });
+  await rerender({ insertRequest: { id: 42, text: "/btw keep this until the controller is ready", mode: "replace" } });
+  const sendButton = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
+  if (!sendButton) throw new Error("activating composer send button did not render for BTW");
+  await act(async () => {
+    sendButton.click();
+    await flushTimers();
+  });
+  eq(calls.send.join(","), "", "not-ready /btw does not dispatch into an inactive controller");
+  ok(
+    document.querySelector(".composer-guidance-item")?.textContent?.includes("/btw keep this until the controller is ready") === true,
+    "not-ready /btw is preserved in the guidance queue",
+  );
+  const guideButton = document.querySelector(".composer-guidance-item__guide") as HTMLButtonElement | null;
+  if (!guideButton) throw new Error("queued not-ready BTW guide button did not render");
+  await act(async () => {
+    guideButton.click();
+    await flushTimers();
+  });
+  eq(calls.send.join(","), "/btw keep this until the controller is ready", "manual Guide retries queued /btw once");
+  ok(document.querySelector(".composer-guidance-item") !== null, "failed manual /btw Guide keeps the queued command");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
   const { root, rerender } = await renderComposer({
     running: true,
     guidanceQueuePreviewItems: ["confirm the send lifecycle", "keep steer protocol unchanged", "add a hanging submit regression"],

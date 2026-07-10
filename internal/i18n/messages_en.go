@@ -210,6 +210,7 @@ var English = Messages{
 
 	CmdNew:              "start new session; save transcript",
 	CmdClear:            "discard current context",
+	CmdBtw:              "ask a temporary side question about this conversation",
 	CmdCls:              "clear screen only (keep LLM context)",
 	CmdCompact:          "compact context",
 	CmdRewind:           "rewind to an earlier turn",

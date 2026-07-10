@@ -30,6 +30,9 @@ export const RIGHT_DOCK_TREE_MIN_WIDTH = 300;
 export const RIGHT_DOCK_TREE_MAX_WIDTH = 560;
 export const RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH = 660;
 export const RIGHT_DOCK_PREVIEW_MIN_WIDTH = 420;
+export const RIGHT_DOCK_BTW_DEFAULT_WIDTH = 440;
+export const RIGHT_DOCK_BTW_MIN_WIDTH = 360;
+export const RIGHT_DOCK_BTW_MAX_WIDTH = 640;
 export const RIGHT_DOCK_MIN_RENDER_WIDTH = 280;
 export const RIGHT_DOCK_MAX_WIDTH = 860;
 const WORKSPACE_PANEL_DEFAULT_OPEN = false;
@@ -52,6 +55,10 @@ export function clampRightDockPreviewWidth(width: number): number {
 
 export function clampRightDockTreeWidth(width: number): number {
   return Math.min(RIGHT_DOCK_TREE_MAX_WIDTH, Math.max(RIGHT_DOCK_TREE_MIN_WIDTH, Math.round(width)));
+}
+
+export function clampRightDockBtwWidth(width: number): number {
+  return Math.min(RIGHT_DOCK_BTW_MAX_WIDTH, Math.max(RIGHT_DOCK_BTW_MIN_WIDTH, Math.round(width)));
 }
 
 export function defaultSidebarWidth(): number {
@@ -107,6 +114,14 @@ export function saveRightDockPreviewWidth(width: number): void {
   saveLayoutSize("rightDockPreviewWidth", width, clampRightDockPreviewWidth);
 }
 
+function loadRightDockBtwWidth(): number {
+  return loadLayoutSize("rightDockBtwWidth", RIGHT_DOCK_BTW_DEFAULT_WIDTH, clampRightDockBtwWidth);
+}
+
+export function saveRightDockBtwWidth(width: number): void {
+  saveLayoutSize("rightDockBtwWidth", width, clampRightDockBtwWidth);
+}
+
 // rightDockMode selects what the right dock shows; the workspace-panel flags are
 // its open/maximized/preview layout configuration. None of these four are
 // persisted — they reset to the defaults below on launch, exactly as the prior
@@ -114,13 +129,14 @@ export function saveRightDockPreviewWidth(width: number): void {
 // drag flags, button-press animation flags, measured footer height, viewport
 // width — deliberately stay as useState in App.tsx; they have no cross-component
 // readers and don't belong in shared state.)
-export type RightDockMode = "context" | "files" | "changed";
+export type RightDockMode = "context" | "files" | "changed" | "btw";
 
 export type LayoutState = {
   sidebarCollapsed: boolean;
   sidebarWidth: number;
   rightDockTreeWidth: number;
   rightDockPreviewWidth: number;
+  rightDockBtwWidth: number;
   workspacePanelOpen: boolean;
   workspacePanelMaximized: boolean;
   workspacePreviewActive: boolean;
@@ -129,6 +145,7 @@ export type LayoutState = {
   setSidebarWidth: (width: number) => void;
   setRightDockTreeWidth: (width: number) => void;
   setRightDockPreviewWidth: (width: number) => void;
+  setRightDockBtwWidth: (width: number) => void;
   setWorkspacePanelOpen: Dispatch<SetStateAction<boolean>>;
   setWorkspacePanelMaximized: Dispatch<SetStateAction<boolean>>;
   setWorkspacePreviewActive: Dispatch<SetStateAction<boolean>>;
@@ -140,6 +157,7 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   sidebarWidth: loadSidebarWidth(),
   rightDockTreeWidth: loadRightDockTreeWidth(),
   rightDockPreviewWidth: loadRightDockPreviewWidth(),
+  rightDockBtwWidth: loadRightDockBtwWidth(),
   workspacePanelOpen: WORKSPACE_PANEL_DEFAULT_OPEN,
   workspacePanelMaximized: false,
   workspacePreviewActive: false,
@@ -148,6 +166,7 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   setSidebarWidth: (width) => set({ sidebarWidth: width }),
   setRightDockTreeWidth: (width) => set({ rightDockTreeWidth: width }),
   setRightDockPreviewWidth: (width) => set({ rightDockPreviewWidth: width }),
+  setRightDockBtwWidth: (width) => set({ rightDockBtwWidth: width }),
   setWorkspacePanelOpen: (update) => set((s) => ({ workspacePanelOpen: applySetState(s.workspacePanelOpen, update) })),
   setWorkspacePanelMaximized: (update) => set((s) => ({ workspacePanelMaximized: applySetState(s.workspacePanelMaximized, update) })),
   setWorkspacePreviewActive: (update) => set((s) => ({ workspacePreviewActive: applySetState(s.workspacePreviewActive, update) })),

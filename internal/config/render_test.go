@@ -199,6 +199,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Desktop.StatusBarStyle = "text"
 	orig.Desktop.StatusBarItems = []string{"model", "balance", "cache"}
 	orig.Desktop.DefaultToolApprovalMode = "auto"
+	orig.Desktop.BtwIdleTimeoutMinutes = intPtr(45)
 	orig.Desktop.CheckUpdates = boolPtr(false)
 	orig.Desktop.Telemetry = boolPtr(false)
 	orig.Notifications.Enabled = true
@@ -351,6 +352,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if got.DesktopDefaultToolApprovalMode() != "auto" {
 		t.Errorf("desktop.default_tool_approval_mode = %q, want auto", got.DesktopDefaultToolApprovalMode())
+	}
+	if got.DesktopBtwIdleTimeoutMinutes() != 45 {
+		t.Errorf("desktop.btw_idle_timeout_minutes = %d, want 45", got.DesktopBtwIdleTimeoutMinutes())
 	}
 	if got.Desktop.CheckUpdates == nil || *got.Desktop.CheckUpdates {
 		t.Errorf("desktop.check_updates = %+v, want false", got.Desktop.CheckUpdates)

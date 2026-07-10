@@ -130,6 +130,7 @@ type DesktopConfig struct {
 	Metrics                 *bool    `toml:"metrics"`                    // aggregate desktop metrics (anonymous signal/bucket counts; no content); nil keeps the default enabled
 	ProviderAccess          []string `toml:"provider_access"`            // desktop-only list of provider entries shown in Settings > Model > Access
 	ExpandThinking          bool     `toml:"expand_thinking"`            // true = show reasoning text expanded by default; false = collapsed
+	BtwIdleTimeoutMinutes   *int     `toml:"btw_idle_timeout_minutes"`   // minutes before idle BTW side runtime is closed; nil/negative = default, 0 = disabled
 }
 
 // NotificationsConfig controls optional system notifications for CLI chat/run.
@@ -323,6 +324,22 @@ func (c *Config) DesktopDefaultToolApprovalMode() string {
 		return "ask"
 	}
 	return NormalizeToolApprovalMode(c.Desktop.DefaultToolApprovalMode)
+}
+
+const defaultDesktopBtwIdleTimeoutMinutes = 30
+
+// DesktopBtwIdleTimeoutMinutes returns the idle lifetime for desktop BTW side
+// runtimes. Missing or negative values use the conservative default; explicit 0
+// disables automatic cleanup.
+func (c *Config) DesktopBtwIdleTimeoutMinutes() int {
+	if c == nil || c.Desktop.BtwIdleTimeoutMinutes == nil {
+		return defaultDesktopBtwIdleTimeoutMinutes
+	}
+	minutes := *c.Desktop.BtwIdleTimeoutMinutes
+	if minutes < 0 {
+		return defaultDesktopBtwIdleTimeoutMinutes
+	}
+	return minutes
 }
 
 // DesktopStatusBarStyle normalizes the desktop status bar metric label style.

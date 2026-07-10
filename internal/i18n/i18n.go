@@ -199,6 +199,7 @@ type Messages struct {
 	// share these via i18n.M, so both frontends localize identically).
 	CmdNew              string // /new
 	CmdClear            string // /clear
+	CmdBtw              string // /btw
 	CmdCls              string // /cls
 	CmdCompact          string // /compact
 	CmdRewind           string // /rewind

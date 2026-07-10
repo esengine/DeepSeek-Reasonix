@@ -927,6 +927,25 @@ type closeableEventSink interface {
 	Close()
 }
 
+type tabSideEventSink struct {
+	parent *tabEventSink
+}
+
+func sideEventSinkFor(parent *tabEventSink) event.Sink {
+	if parent == nil {
+		return event.Discard
+	}
+	return tabSideEventSink{parent: parent}
+}
+
+func (s tabSideEventSink) Emit(e event.Event) {
+	if s.parent == nil {
+		return
+	}
+	tabID, _ := s.parent.binding()
+	s.parent.emitRuntimeEvent(sideEventChannel, toWireTab(e, tabID))
+}
+
 // binding snapshots the sink's current tab routing under the sink lock.
 func (s *tabEventSink) binding() (string, *App) {
 	s.mu.RLock()
@@ -2849,6 +2868,7 @@ func (a *App) buildTabControllerWithContext(tab *WorkspaceTab, loadedSession loa
 		Model:                    model,
 		RequireKey:               false,
 		Sink:                     sink,
+		SideSink:                 sideEventSinkFor(buildSink),
 		WorkspaceRoot:            root,
 		SessionDir:               sessionDir,
 		EffortOverride:           cloneStringPtr(buildEffort),

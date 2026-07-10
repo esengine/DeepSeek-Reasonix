@@ -180,6 +180,13 @@ export interface WireEvent {
   sessionCostUsd?: number;
 }
 
+export interface BtwStateView {
+  active: boolean;
+  running: boolean;
+  cancelRequested: boolean;
+  cancellable: boolean;
+}
+
 // Tab management types (desktop/tabs.go).
 export interface TabMeta {
   id: string;
@@ -1197,6 +1204,7 @@ export interface SettingsView {
   subagentModel: string;
   subagentEffort: string;
   autoPlan: string;
+  btwIdleTimeoutMinutes: number;
   providers: ProviderView[];
   officialProviders: ProviderView[];
   providerPresets: ProviderPresetView[];

@@ -215,6 +215,9 @@ func (r *desktopAskRuntimeRunner) Run(ctx context.Context, _ string) error {
 func TestCommandsIncludesEffortNotThinking(t *testing.T) {
 	app := NewApp()
 	cmds := app.Commands()
+	if !hasCommand(cmds, "btw") {
+		t.Fatalf("Commands() should include desktop BTW: %+v", cmds)
+	}
 	if !hasCommand(cmds, "effort") {
 		t.Fatalf("Commands() should include effort: %+v", cmds)
 	}

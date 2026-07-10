@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/autoresearch"
@@ -207,6 +208,7 @@ type Input interface {
 type Settings interface {
 	SetResponseLanguage(lang string)
 	SetReasoningLanguage(lang string)
+	SetSideIdleTimeout(timeout time.Duration)
 	SetMemoryCompilerEnabled(enabled bool)
 	SetMemoryCompilerVerbosity(verbosity string)
 	SetDisplayRecorder(fn func(content, display string))

@@ -200,6 +200,7 @@ var ChineseTraditional = Messages{
 	ShellModeHint:       "Enter 執行 Shell · Esc 取消 · 點擊輸出展開",
 
 	CmdNew:              "清空上下文並儲存歷史",
+	CmdBtw:              "根據目前對話發起臨時追問",
 	CmdCls:              "清除畫面（保留 LLM 上下文）",
 	CmdCompact:          "壓縮上下文",
 	CmdRewind:           "回滾到更早的一輪",

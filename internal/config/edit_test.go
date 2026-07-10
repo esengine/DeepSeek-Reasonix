@@ -274,6 +274,25 @@ func TestDesktopStatusBarItemsNormalizeAndValidate(t *testing.T) {
 	}
 }
 
+func TestSetDesktopBtwIdleTimeoutMinutes(t *testing.T) {
+	c := Default()
+	if err := c.SetDesktopBtwIdleTimeoutMinutes(45); err != nil {
+		t.Fatalf("SetDesktopBtwIdleTimeoutMinutes: %v", err)
+	}
+	if got := c.DesktopBtwIdleTimeoutMinutes(); got != 45 {
+		t.Fatalf("BTW idle timeout = %d, want 45", got)
+	}
+	if err := c.SetDesktopBtwIdleTimeoutMinutes(0); err != nil {
+		t.Fatalf("SetDesktopBtwIdleTimeoutMinutes zero: %v", err)
+	}
+	if got := c.DesktopBtwIdleTimeoutMinutes(); got != 0 {
+		t.Fatalf("BTW idle timeout zero = %d, want 0", got)
+	}
+	if err := c.SetDesktopBtwIdleTimeoutMinutes(-1); err == nil {
+		t.Fatal("negative BTW idle timeout should fail")
+	}
+}
+
 func TestDesktopCloseBehaviorFallsBackToLegacyUI(t *testing.T) {
 	c := Default()
 	c.UI.CloseBehavior = "quit"

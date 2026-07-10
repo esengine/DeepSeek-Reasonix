@@ -1095,6 +1095,8 @@ function backendNoticeKey(msg: string): DictKey | "" {
       return "notice.guardianModelMissing";
     case "Guardian was disabled because it could not start.":
       return "notice.guardianStartFailed";
+    case "BTW side conversation closed after being idle.":
+      return "notice.btwIdleClosed";
     default:
       return "";
   }

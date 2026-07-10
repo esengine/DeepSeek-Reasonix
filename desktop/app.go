@@ -56,6 +56,7 @@ import (
 // `kind` field discriminates — the desktop analogue of the serve transport's SSE
 // `data:` frames.
 const eventChannel = "agent:event"
+const sideEventChannel = "agent:side-event"
 
 const singleInstanceIDPrefix = "com.reasonix.desktop"
 
@@ -957,6 +958,85 @@ func (a *App) CancelTab(tabID string) {
 	}
 }
 
+// StartBtw starts an ephemeral side conversation for the active tab. The side
+// conversation inherits the main session history as read-only context and emits
+// events on sideEventChannel instead of the main transcript channel.
+func (a *App) StartBtw(input string) error {
+	return a.StartBtwForTab("", input)
+}
+
+func (a *App) StartBtwForTab(tabID, input string) error {
+	tab, ctrl := a.tabAndCtrlByID(tabID)
+	if ctrl == nil {
+		return a.workspaceNotReadyErr(tab)
+	}
+	if err := a.ensureTabControllerWorkspace(tab); err != nil {
+		return err
+	}
+	ctrl = a.controllerForTab(tab)
+	if ctrl == nil {
+		return a.workspaceNotReadyErr(tab)
+	}
+	return ctrl.StartSide(input)
+}
+
+// SubmitBtw sends a prompt to the active tab's already-open side conversation.
+func (a *App) SubmitBtw(input string) error {
+	return a.SubmitBtwForTab("", input)
+}
+
+func (a *App) SubmitBtwForTab(tabID, input string) error {
+	tab, ctrl := a.tabAndCtrlByID(tabID)
+	if ctrl == nil {
+		return a.workspaceNotReadyErr(tab)
+	}
+	state := ctrl.SideState()
+	if !state.Active {
+		return control.ErrSideUnavailable
+	}
+	if state.Runtime.Running {
+		return control.ErrSideActive
+	}
+	ctrl.SubmitSide(input)
+	return nil
+}
+
+// ReturnFromBtw closes the active tab's side conversation, cancelling any
+// in-flight side turn.
+func (a *App) ReturnFromBtw() {
+	a.ReturnFromBtwForTab("")
+}
+
+func (a *App) ReturnFromBtwForTab(tabID string) {
+	if ctrl := a.ctrlByTabID(tabID); ctrl != nil {
+		ctrl.ReturnFromSide()
+	}
+}
+
+type BtwStateView struct {
+	Active          bool `json:"active"`
+	Running         bool `json:"running"`
+	CancelRequested bool `json:"cancelRequested"`
+	Cancellable     bool `json:"cancellable"`
+}
+
+func (a *App) BtwState() BtwStateView {
+	return a.BtwStateForTab("")
+}
+
+func (a *App) BtwStateForTab(tabID string) BtwStateView {
+	if ctrl := a.ctrlByTabID(tabID); ctrl != nil {
+		state := ctrl.SideState()
+		return BtwStateView{
+			Active:          state.Active,
+			Running:         state.Runtime.Running,
+			CancelRequested: state.Runtime.CancelRequested,
+			Cancellable:     state.Runtime.Cancellable,
+		}
+	}
+	return BtwStateView{}
+}
+
 // Steer sends mid-turn guidance to the agent without interrupting the in-flight request.
 func (a *App) Steer(text string) error {
 	return a.SteerForTab("", text)
@@ -1713,6 +1793,7 @@ func (a *App) clearActiveSessionRuntime(tab *WorkspaceTab, oldCtrl control.Sessi
 		Model:                    snap.model,
 		RequireKey:               false,
 		Sink:                     newSink,
+		SideSink:                 sideEventSinkFor(newSink),
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
 		EffortOverride:           cloneStringPtr(snap.effort),
@@ -5509,6 +5590,7 @@ func (a *App) Commands() []CommandInfo {
 	out := []CommandInfo{
 		{Name: "new", Description: i18n.M.CmdNew, Kind: "builtin"},
 		{Name: "clear", Description: i18n.M.CmdClear, Kind: "builtin"},
+		{Name: "btw", Description: i18n.M.CmdBtw, Hint: "[question]", Kind: "builtin"},
 		{Name: "compact", Description: i18n.M.CmdCompact, Kind: "builtin"},
 		{Name: "model", Description: i18n.M.CmdModel, Kind: "builtin"},
 		{Name: "provider", Description: i18n.M.CmdProvider, Kind: "builtin"},
@@ -7079,7 +7161,20 @@ func controllerHasActiveRuntimeWork(ctrl control.SessionAPI) bool {
 		return false
 	}
 	status := ctrl.RuntimeStatus()
-	return status.Running || status.PendingPrompt || status.BackgroundJobs > 0
+	side := controllerSideRuntimeStatus(ctrl)
+	return status.Running || status.PendingPrompt || status.BackgroundJobs > 0 || side.Running || side.PendingPrompt || side.BackgroundJobs > 0
+}
+
+func controllerSideRuntimeStatus(ctrl control.SessionAPI) (status control.RuntimeStatus) {
+	if ctrl == nil {
+		return control.RuntimeStatus{}
+	}
+	defer func() {
+		if recover() != nil {
+			status = control.RuntimeStatus{}
+		}
+	}()
+	return ctrl.SideState().Runtime
 }
 
 // rebuildBusyError reports a rebuild rejected because the controller still has
@@ -7299,6 +7394,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 		Model:                    name,
 		RequireKey:               false,
 		Sink:                     snap.sink,
+		SideSink:                 sideEventSinkFor(snap.sink),
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
 		EffortOverride:           cloneStringPtr(effortOverride),
@@ -7455,6 +7551,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 		Model:                    modelRef,
 		RequireKey:               false,
 		Sink:                     snap.sink,
+		SideSink:                 sideEventSinkFor(snap.sink),
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
 		EffortOverride:           &effort,
@@ -7583,6 +7680,7 @@ func (a *App) SetTokenModeForTab(tabID, mode string) error {
 		Model:                    modelRef,
 		RequireKey:               false,
 		Sink:                     snap.sink,
+		SideSink:                 sideEventSinkFor(snap.sink),
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
 		EffortOverride:           cloneStringPtr(snap.effort),

@@ -75,6 +75,18 @@ func drainEvent(ch <-chan event.Event, timeout time.Duration) (event.Event, bool
 	}
 }
 
+func waitForSideActive(t *testing.T, ctrl *Controller, active bool, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if ctrl.SideState().Active == active {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("side active = %v, want %v", ctrl.SideState().Active, active)
+}
+
 type sideReturnNoError interface {
 	ReturnFromSide()
 }
@@ -166,6 +178,107 @@ func TestStartSideInlineInputRunsSideOnly(t *testing.T) {
 	if len(mainSess.Snapshot()) != 2 {
 		t.Fatalf("main session should not receive side input, got len=%d", len(mainSess.Snapshot()))
 	}
+}
+
+func TestSideIdleTimeoutClosesInactiveSide(t *testing.T) {
+	mainSess := agent.NewSession("sys")
+	mainSess.Add(provider.Message{Role: provider.RoleUser, Content: "main question"})
+	mainExec := agent.New(nil, nil, mainSess, agent.Options{}, event.Discard)
+	sideEvents := make(chan event.Event, 4)
+
+	ctrl := New(Options{
+		Executor:        mainExec,
+		SideIdleTimeout: 25 * time.Millisecond,
+		SideSink: event.FuncSink(func(e event.Event) {
+			sideEvents <- e
+		}),
+		SideFactory: func(ctx context.Context, sess *agent.Session, sink event.Sink) (*agent.Agent, error) {
+			return newSideTestAgent(sess, sink, &sideTestProvider{}), nil
+		},
+	})
+
+	if err := ctrl.StartSide(""); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+	if st := ctrl.SideState(); !st.Active {
+		t.Fatal("side should start active")
+	}
+	waitForSideActive(t, ctrl, false, time.Second)
+	if e, ok := drainEvent(sideEvents, time.Second); !ok || e.Kind != event.Notice || e.Text != sideIdleTimeoutNotice {
+		t.Fatalf("idle timeout event = %+v ok=%v", e, ok)
+	}
+}
+
+func TestSideIdleTimeoutWaitsForRunningTurn(t *testing.T) {
+	mainSess := agent.NewSession("sys")
+	mainSess.Add(provider.Message{Role: provider.RoleUser, Content: "main question"})
+	mainExec := agent.New(nil, nil, mainSess, agent.Options{}, event.Discard)
+	started := make(chan string, 1)
+	release := make(chan struct{})
+	sideEvents := make(chan event.Event, 8)
+
+	ctrl := New(Options{
+		Executor:        mainExec,
+		SideIdleTimeout: 25 * time.Millisecond,
+		SideSink: event.FuncSink(func(e event.Event) {
+			sideEvents <- e
+		}),
+		SideFactory: func(ctx context.Context, sess *agent.Session, sink event.Sink) (*agent.Agent, error) {
+			return newSideTestAgent(sess, sink, &sideTestProvider{started: started, release: release}), nil
+		},
+	})
+
+	if err := ctrl.StartSide("hold"); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+	<-started
+	if e, ok := drainEvent(sideEvents, time.Second); !ok || e.Kind != event.TurnStarted {
+		t.Fatalf("expected TurnStarted, got %+v ok=%v", e, ok)
+	}
+	time.Sleep(75 * time.Millisecond)
+	st := ctrl.SideState()
+	if !st.Active || !st.Runtime.Running {
+		t.Fatalf("running side should survive idle timeout: %+v", st)
+	}
+	close(release)
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case e := <-sideEvents:
+			if e.Kind == event.TurnDone {
+				goto done
+			}
+		case <-deadline:
+			t.Fatal("expected TurnDone after release")
+		}
+	}
+done:
+	waitForSideActive(t, ctrl, false, time.Second)
+}
+
+func TestSetSideIdleTimeoutDisablesAndRearms(t *testing.T) {
+	mainSess := agent.NewSession("sys")
+	mainSess.Add(provider.Message{Role: provider.RoleUser, Content: "main question"})
+	mainExec := agent.New(nil, nil, mainSess, agent.Options{}, event.Discard)
+
+	ctrl := New(Options{
+		Executor:        mainExec,
+		SideIdleTimeout: 20 * time.Millisecond,
+		SideFactory: func(ctx context.Context, sess *agent.Session, sink event.Sink) (*agent.Agent, error) {
+			return newSideTestAgent(sess, sink, &sideTestProvider{}), nil
+		},
+	})
+
+	if err := ctrl.StartSide(""); err != nil {
+		t.Fatalf("StartSide: %v", err)
+	}
+	ctrl.SetSideIdleTimeout(0)
+	time.Sleep(60 * time.Millisecond)
+	if st := ctrl.SideState(); !st.Active {
+		t.Fatalf("side should remain active after disabling idle timeout: %+v", st)
+	}
+	ctrl.SetSideIdleTimeout(20 * time.Millisecond)
+	waitForSideActive(t, ctrl, false, time.Second)
 }
 
 func TestReturnFromSideCancelsAndDiscards(t *testing.T) {

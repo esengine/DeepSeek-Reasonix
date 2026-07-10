@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/event"
@@ -16,6 +17,8 @@ var (
 	ErrSideUnavailable = errors.New("side conversation unavailable")
 	ErrSideActive      = errors.New("side conversation already active")
 )
+
+const sideIdleTimeoutNotice = "BTW side conversation closed after being idle."
 
 // SideFactory builds a side agent. ctx covers construction only; the agent gets
 // a separate per-turn context when SubmitSide calls Run.
@@ -31,6 +34,8 @@ type sideState struct {
 	cancel    context.CancelFunc
 	running   bool
 	canceling bool
+	idleTimer *time.Timer
+	idleGen   uint64
 }
 
 const sideBoundaryPrompt = `You are now in a side conversation.
@@ -101,6 +106,9 @@ func (c *Controller) StartSide(input string) error {
 	}
 	state = candidate
 	c.side = state
+	if input == "" {
+		c.armSideIdleTimerLocked(state)
+	}
 	c.mu.Unlock()
 
 	if input != "" {
@@ -121,6 +129,7 @@ func (c *Controller) SubmitSide(input string) {
 		c.mu.Unlock()
 		return
 	}
+	c.stopSideIdleTimerLocked(state)
 	ctx, cancel := context.WithCancel(context.Background())
 	state.cancel = cancel
 	state.running = true
@@ -149,6 +158,11 @@ func (c *Controller) SubmitSide(input string) {
 			cancel()
 			if emit {
 				sink.Emit(event.Event{Kind: event.TurnDone, Err: explainError(err)})
+				c.mu.Lock()
+				if c.side == state && !state.running {
+					c.armSideIdleTimerLocked(state)
+				}
+				c.mu.Unlock()
 			}
 		}()
 		err = child.Run(ctx, input)
@@ -162,11 +176,33 @@ func (c *Controller) ReturnFromSide() {
 	if state != nil && state.cancel != nil {
 		state.canceling = true
 	}
+	if state != nil {
+		c.stopSideIdleTimerLocked(state)
+	}
 	c.mu.Unlock()
 
 	if state != nil && state.cancel != nil {
 		state.cancel()
 	}
+}
+
+// SetSideIdleTimeout updates the idle cleanup timeout for the current and
+// future side conversations. A zero or negative timeout disables automatic
+// cleanup.
+func (c *Controller) SetSideIdleTimeout(timeout time.Duration) {
+	if timeout < 0 {
+		timeout = 0
+	}
+	c.mu.Lock()
+	c.sideIdleTimeout = timeout
+	if state := c.side; state != nil {
+		if state.running {
+			c.stopSideIdleTimerLocked(state)
+		} else {
+			c.armSideIdleTimerLocked(state)
+		}
+	}
+	c.mu.Unlock()
 }
 
 func (c *Controller) SideState() SideState {
@@ -188,6 +224,54 @@ func (c *Controller) SideState() SideState {
 			Cancellable:     running,
 		},
 	}
+}
+
+func (c *Controller) armSideIdleTimerLocked(state *sideState) {
+	if state == nil || c.side != state {
+		return
+	}
+	if state.idleTimer != nil {
+		state.idleTimer.Stop()
+		state.idleTimer = nil
+	}
+	state.idleGen++
+	timeout := c.sideIdleTimeout
+	if timeout <= 0 || state.running {
+		return
+	}
+	gen := state.idleGen
+	state.idleTimer = time.AfterFunc(timeout, func() {
+		c.expireSideIdle(state, gen)
+	})
+}
+
+func (c *Controller) stopSideIdleTimerLocked(state *sideState) {
+	if state == nil {
+		return
+	}
+	state.idleGen++
+	if state.idleTimer != nil {
+		state.idleTimer.Stop()
+		state.idleTimer = nil
+	}
+}
+
+func (c *Controller) expireSideIdle(state *sideState, gen uint64) {
+	sink := c.sideSink
+	if nilutil.IsNil(sink) {
+		sink = event.Discard
+	}
+	c.mu.Lock()
+	if c.side != state || state.running || state.idleGen != gen {
+		c.mu.Unlock()
+		return
+	}
+	state.idleTimer = nil
+	state.idleGen++
+	c.side = nil
+	c.mu.Unlock()
+
+	sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: sideIdleTimeoutNotice})
 }
 
 func sideHistoryHasContent(msgs []provider.Message) bool {

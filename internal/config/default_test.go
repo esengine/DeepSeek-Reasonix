@@ -45,3 +45,20 @@ func TestDefaultDesktopMetricsOn(t *testing.T) {
 		t.Fatal("desktop metrics explicit false = true, want false")
 	}
 }
+
+func TestDefaultDesktopBtwIdleTimeoutMinutes(t *testing.T) {
+	cfg := Default()
+	if got := cfg.DesktopBtwIdleTimeoutMinutes(); got != 30 {
+		t.Fatalf("default BTW idle timeout = %d, want 30", got)
+	}
+	disabled := 0
+	cfg.Desktop.BtwIdleTimeoutMinutes = &disabled
+	if got := cfg.DesktopBtwIdleTimeoutMinutes(); got != 0 {
+		t.Fatalf("explicit zero BTW idle timeout = %d, want 0", got)
+	}
+	negative := -1
+	cfg.Desktop.BtwIdleTimeoutMinutes = &negative
+	if got := cfg.DesktopBtwIdleTimeoutMinutes(); got != 30 {
+		t.Fatalf("negative BTW idle timeout = %d, want default 30", got)
+	}
+}

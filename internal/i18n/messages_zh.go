@@ -211,6 +211,7 @@ var Chinese = Messages{
 
 	CmdNew:              "开启新会话并保存历史",
 	CmdClear:            "丢弃当前上下文",
+	CmdBtw:              "基于当前对话发起临时追问",
 	CmdCls:              "清屏（保留 LLM 上下文）",
 	CmdCompact:          "压缩上下文",
 	CmdRewind:           "回滚到更早的一轮",

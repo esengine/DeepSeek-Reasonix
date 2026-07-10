@@ -20,6 +20,7 @@ import type {
   AutoResearchEvidenceView,
   AutoResearchStatusView,
   BalanceInfo,
+  BtwStateView,
   BotConnectionDiagnostic,
   BotInstallPollResult,
   BotInstallStartResult,
@@ -144,6 +145,14 @@ export interface AppBindings {
   SteerForTab(tabID: string, text: string): Promise<void>;
   Cancel(): Promise<void>;
   CancelTab(tabID: string): Promise<void>;
+  StartBtw(input: string): Promise<void>;
+  StartBtwForTab(tabID: string, input: string): Promise<void>;
+  SubmitBtw(input: string): Promise<void>;
+  SubmitBtwForTab(tabID: string, input: string): Promise<void>;
+  ReturnFromBtw(): Promise<void>;
+  ReturnFromBtwForTab(tabID: string): Promise<void>;
+  BtwState(): Promise<BtwStateView>;
+  BtwStateForTab(tabID: string): Promise<BtwStateView>;
   Approve(id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
   ApproveTab(tabID: string, id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
   AnswerQuestion(id: string, answers: QuestionAnswer[]): Promise<void>;
@@ -337,6 +346,7 @@ export interface AppBindings {
   MigrateDesktopPreferences(language: string, theme: string, style: string): Promise<void>;
   SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
   SetColdResumePrune(enabled: boolean): Promise<void>;
+  SetBtwIdleTimeoutMinutes(minutes: number): Promise<void>;
   SetReasoningLanguage(lang: string): Promise<void>;
   SetTrayLocale(locale: "en" | "zh" | "zh-TW"): Promise<void>;
   // SetBypass is the legacy Wails name for YOLO/full-access tool auto-approval
@@ -426,6 +436,7 @@ declare global {
 
 // Must match desktop/app.go's eventChannel constant.
 const EVENT_CHANNEL = "agent:event";
+const BTW_EVENT_CHANNEL = "agent:side-event";
 const RECENT_NATIVE_FILE_DRAG_MS = 2000;
 const WAILS_NON_FILE_DRAG_MESSAGE = "additional File object is not a file on the disk";
 const UNCAUGHT_ERROR_PREFIX_RE = /^Uncaught(?:\s+\(in promise\))?(?:\s+\w*Error)?:\s*/i;
@@ -452,6 +463,16 @@ export function onEvent(cb: (e: WireEvent) => void): () => void {
     return window.runtime.EventsOn(EVENT_CHANNEL, (payload) => cb(payload as WireEvent));
   }
   return mockSubscribe(cb);
+}
+
+// onBtwEvent subscribes to ephemeral `/btw` side-conversation events. They use
+// the same event payload shape as the main agent stream but never hydrate the
+// persisted transcript.
+export function onBtwEvent(cb: (e: WireEvent) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn(BTW_EVENT_CHANNEL, (payload) => cb(payload as WireEvent));
+  }
+  return mockBtwSubscribe(cb);
 }
 
 // onUpdaterProgress subscribes to the auto-updater's progress events (a separate
@@ -618,7 +639,7 @@ export function onSessionRecoveryFailed(cb: (payload: SessionRecoveryFailedEvent
 // outside the shell), so a late-injected window.go is picked up transparently.
 function bridgeBreadcrumb(method: string): string {
   if (method === "ReportCrash") return "";
-  if (/^(Submit|SubmitDisplay|RunShell|Steer|Cancel|Approve|AnswerQuestion|ReplayPendingPrompts)/.test(method))
+  if (/^(Submit|SubmitDisplay|RunShell|Steer|Cancel|StartBtw|SubmitBtw|ReturnFromBtw|Approve|AnswerQuestion|ReplayPendingPrompts)/.test(method))
     return `turn ${method}`;
   if (/^(SetModel|SetEffort|SetTokenMode|SetDefaultModel|SetPlannerModel|SetSubagentModel|SetSubagentEffort|SetMaxSubagentDepth)/.test(method))
     return `model ${method}`;
@@ -690,7 +711,9 @@ export function openExternal(url: string): void {
 // --- browser dev mock --------------------------------------------------------
 
 const listeners = new Set<(e: WireEvent) => void>();
+const btwListeners = new Set<(e: WireEvent) => void>();
 let mockScopedTabId: string | undefined;
+const mockBtwStates = new Map<string, BtwStateView>();
 
 function mockSubscribe(cb: (e: WireEvent) => void): () => void {
   listeners.add(cb);
@@ -702,6 +725,18 @@ function mockSubscribe(cb: (e: WireEvent) => void): () => void {
 function emit(e: WireEvent) {
   const event = mockScopedTabId && !e.tabId ? { ...e, tabId: mockScopedTabId } : e;
   listeners.forEach((l) => l(event));
+}
+
+function mockBtwSubscribe(cb: (e: WireEvent) => void): () => void {
+  btwListeners.add(cb);
+  return () => {
+    btwListeners.delete(cb);
+  };
+}
+
+function emitBtw(e: WireEvent, tabId?: string) {
+  const event = tabId && !e.tabId ? { ...e, tabId } : e;
+  btwListeners.forEach((l) => l(event));
 }
 
 export function mockToolApprovalModeAfterModeChange(current: string | undefined, nextMode: Mode): ToolApprovalMode {
@@ -1097,6 +1132,7 @@ function makeMockApp(): AppBindings {
       noProxy: "",
       proxy: { type: "socks5", server: "127.0.0.1", port: 7890, username: "", password: "" },
     },
+    btwIdleTimeoutMinutes: 30,
     agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, systemPrompt: "You are Reasonix, a coding agent.", coldResumePrune: true, reasoningLanguage: "auto" },
     bot: {
       enabled: !freshMock,
@@ -1739,6 +1775,36 @@ function makeMockApp(): AppBindings {
       mockTabs = mockTabs.map((tab, index) => (index === 0 ? { ...tab, label } : tab));
     }
   };
+  const mockBtwTabId = (tabID?: string) => tabID || currentMockTurnTabId() || mockTabs[0]?.id || "mock-tab";
+  const setMockBtwState = (tabID: string, patch: Partial<BtwStateView>) => {
+    const current = mockBtwStates.get(tabID) ?? { active: false, running: false, cancelRequested: false, cancellable: false };
+    mockBtwStates.set(tabID, { ...current, ...patch });
+  };
+  const runMockBtwTurn = async (tabID: string, input: string) => {
+    setMockBtwState(tabID, { active: true, running: true, cancelRequested: false, cancellable: true });
+    emitBtw({ kind: "turn_started" }, tabID);
+    await delay(160);
+    emitBtw({ kind: "reasoning", text: "Reading the current thread as side context.\n" }, tabID);
+    await delay(260);
+    emitBtw({
+      kind: "message",
+      text: `BTW mock reply for: **${input.trim() || "side question"}**\n\nThis answer is emitted on the side channel and is not added to the main transcript.`,
+    }, tabID);
+    emitBtw({
+      kind: "usage",
+      usage: {
+        promptTokens: 320,
+        completionTokens: 48,
+        totalTokens: 368,
+        cacheHitTokens: 160,
+        cacheMissTokens: 160,
+        sessionCacheHitTokens: 160,
+        sessionCacheMissTokens: 160,
+      },
+    }, tabID);
+    setMockBtwState(tabID, { running: false, cancelRequested: false, cancellable: false });
+    emitBtw({ kind: "turn_done" }, tabID);
+  };
   return {
     async MinimiseMainWindow() {
       console.info("mock MinimiseMainWindow");
@@ -2088,6 +2154,50 @@ function makeMockApp(): AppBindings {
         },
         async CancelTab(_tabID) {
           await withMockTabScope(_tabID, () => this.Cancel());
+        },
+        async StartBtw(input) {
+          const tabID = mockBtwTabId();
+          const active = mockBtwStates.get(tabID)?.active;
+          if (active) throw new Error("side conversation already active");
+          setMockBtwState(tabID, { active: true, running: false, cancelRequested: false, cancellable: false });
+          if (input.trim()) void runMockBtwTurn(tabID, input);
+        },
+        async StartBtwForTab(_tabID, input) {
+          const tabID = mockBtwTabId(_tabID);
+          const active = mockBtwStates.get(tabID)?.active;
+          if (active) throw new Error("side conversation already active");
+          setMockBtwState(tabID, { active: true, running: false, cancelRequested: false, cancellable: false });
+          if (input.trim()) void runMockBtwTurn(tabID, input);
+        },
+        async SubmitBtw(input) {
+          const tabID = mockBtwTabId();
+          const state = mockBtwStates.get(tabID);
+          if (!state?.active) throw new Error("side conversation unavailable");
+          if (state.running) throw new Error("side conversation already running");
+          void runMockBtwTurn(tabID, input);
+        },
+        async SubmitBtwForTab(_tabID, input) {
+          const tabID = mockBtwTabId(_tabID);
+          const state = mockBtwStates.get(tabID);
+          if (!state?.active) throw new Error("side conversation unavailable");
+          if (state.running) throw new Error("side conversation already running");
+          void runMockBtwTurn(tabID, input);
+        },
+        async ReturnFromBtw() {
+          const tabID = mockBtwTabId();
+          setMockBtwState(tabID, { active: false, running: false, cancelRequested: false, cancellable: false });
+        },
+        async ReturnFromBtwForTab(_tabID) {
+          const tabID = mockBtwTabId(_tabID);
+          setMockBtwState(tabID, { active: false, running: false, cancelRequested: false, cancellable: false });
+        },
+        async BtwState() {
+          const tabID = mockBtwTabId();
+          return mockBtwStates.get(tabID) ?? { active: false, running: false, cancelRequested: false, cancellable: false };
+        },
+        async BtwStateForTab(_tabID) {
+          const tabID = mockBtwTabId(_tabID);
+          return mockBtwStates.get(tabID) ?? { active: false, running: false, cancelRequested: false, cancellable: false };
         },
         async Approve(_id, allow, session, persist) {
           if (!pendingApprovalPreview) return;
@@ -3391,6 +3501,9 @@ function makeMockApp(): AppBindings {
     },
     async SetColdResumePrune(enabled: boolean) {
       settings.agent = { ...settings.agent, coldResumePrune: enabled };
+    },
+    async SetBtwIdleTimeoutMinutes(minutes: number) {
+      settings.btwIdleTimeoutMinutes = Number.isFinite(minutes) && minutes > 0 ? Math.trunc(minutes) : 0;
     },
     async SetReasoningLanguage(lang: string) {
       const normalized = lang === "zh" || lang === "en" ? lang : "auto";

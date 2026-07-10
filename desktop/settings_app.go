@@ -254,6 +254,7 @@ type SettingsView struct {
 	SubagentModel           string               `json:"subagentModel"`
 	SubagentEffort          string               `json:"subagentEffort"`
 	AutoPlan                string               `json:"autoPlan"`
+	BtwIdleTimeoutMinutes   int                  `json:"btwIdleTimeoutMinutes"`
 	Providers               []ProviderView       `json:"providers"`
 	OfficialProviders       []ProviderView       `json:"officialProviders"`
 	ProviderPresets         []ProviderPresetView `json:"providerPresets"`
@@ -809,6 +810,7 @@ func (a *App) Settings() SettingsView {
 			StatusBarStyle:          "text",
 			StatusBarItems:          config.DefaultDesktopStatusBarItems(),
 			DefaultToolApprovalMode: "ask",
+			BtwIdleTimeoutMinutes:   config.Default().DesktopBtwIdleTimeoutMinutes(),
 			CheckUpdates:            true,
 			Telemetry:               true,
 			Metrics:                 true,
@@ -873,6 +875,7 @@ func (a *App) Settings() SettingsView {
 		StatusBarStyle:          cfg.DesktopStatusBarStyle(),
 		StatusBarItems:          cfg.DesktopStatusBarItems(),
 		DefaultToolApprovalMode: cfg.DesktopDefaultToolApprovalMode(),
+		BtwIdleTimeoutMinutes:   cfg.DesktopBtwIdleTimeoutMinutes(),
 		CheckUpdates:            cfg.DesktopCheckUpdates(),
 		Telemetry:               cfg.DesktopTelemetry(),
 		Metrics:                 cfg.DesktopMetrics(),
@@ -1569,6 +1572,7 @@ func (a *App) rebuildSettingLocked(setting string) error {
 	ctrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model: model, RequireKey: false,
 		Sink:                     snap.sink,
+		SideSink:                 sideEventSinkFor(snap.sink),
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
 		EffortOverride:           cloneStringPtr(snap.effort),
@@ -2993,6 +2997,33 @@ func (a *App) SetColdResumePrune(enabled bool) error {
 	return a.applyConfigChange(func(c *config.Config) error { return c.SetColdResumePrune(enabled) })
 }
 
+func (a *App) SetBtwIdleTimeoutMinutes(minutes int) error {
+	if minutes < 0 {
+		return fmt.Errorf("btw idle timeout must be >= 0")
+	}
+	var cfg *config.Config
+	if err := func() error {
+		unlock := config.LockUserConfigEdits()
+		defer unlock()
+		loaded, path, err := a.loadDesktopUserConfigForEdit()
+		if err != nil {
+			return err
+		}
+		if err := loaded.SetDesktopBtwIdleTimeoutMinutes(minutes); err != nil {
+			return err
+		}
+		if err := loaded.SaveTo(path); err != nil {
+			return err
+		}
+		cfg = loaded
+		return nil
+	}(); err != nil {
+		return err
+	}
+	a.applyBtwIdleTimeoutToLiveControllers(cfg.DesktopBtwIdleTimeoutMinutes())
+	return nil
+}
+
 func (a *App) SetReasoningLanguage(lang string) error {
 	if err := a.ensureLiveControllersRuntimeMutationAllowed("reasoning language"); err != nil {
 		return err
@@ -3041,6 +3072,28 @@ func (a *App) applyReasoningLanguageToLiveControllers(fallback string) {
 			mode = cfg.ReasoningLanguage()
 		}
 		tab.ctrl.SetReasoningLanguage(mode)
+	}
+}
+
+func (a *App) applyBtwIdleTimeoutToLiveControllers(fallbackMinutes int) {
+	type liveTab struct {
+		root string
+		ctrl control.SessionAPI
+	}
+	var tabs []liveTab
+	a.mu.RLock()
+	for _, tab := range a.tabs {
+		if tab != nil && tab.Ctrl != nil {
+			tabs = append(tabs, liveTab{root: tab.WorkspaceRoot, ctrl: tab.Ctrl})
+		}
+	}
+	a.mu.RUnlock()
+	for _, tab := range tabs {
+		minutes := fallbackMinutes
+		if cfg, err := config.LoadForRoot(tab.root); err == nil {
+			minutes = cfg.DesktopBtwIdleTimeoutMinutes()
+		}
+		tab.ctrl.SetSideIdleTimeout(time.Duration(minutes) * time.Minute)
 	}
 }
 
