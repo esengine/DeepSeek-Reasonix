@@ -80,6 +80,10 @@ const LiveAssistantMessage = memo(function LiveAssistantMessage({
 function InlineAssistantReasoning({ item }: { item: AssistantItem }) {
   const t = useT();
   const live = useContext(LiveStreamContext);
+  const reasoningBodyRef = useRef<HTMLDivElement>(null);
+  const [reasoningOpen, setReasoningOpen] = useState(false);
+  const reasoningContentId = useRef(`reasoning-content-${item.id}`).current;
+  useGSAPCollapse(reasoningBodyRef, reasoningOpen);
   const shown = live && live.id === item.id
     ? {
         reasoning: live.reasoning,
@@ -96,12 +100,19 @@ function InlineAssistantReasoning({ item }: { item: AssistantItem }) {
   const running = shown.streaming && !shown.reasoningComplete;
   return (
     <div className="turn-collapse__reasoning-phase">
-      <div className="turn-collapse__reasoning-head" data-running={running ? "" : undefined}>
+      <button
+        type="button"
+        className="turn-collapse__reasoning-head"
+        data-running={running ? "" : undefined}
+        onClick={() => setReasoningOpen((v) => !v)}
+        aria-expanded={reasoningOpen}
+        aria-controls={reasoningContentId}
+      >
         <ProcessBrainIcon size={12} />
         <span>{running ? t("msg.thinkingRunning") : t("msg.thinking")}</span>
-        <ChevronRight className="reasoning__chevron reasoning__chevron--open" size={12} />
-      </div>
-      <div className="turn-collapse__inline-reasoning">{visibleReasoning}</div>
+        <ChevronRight className={`reasoning__chevron${reasoningOpen ? " reasoning__chevron--open" : ""}`} size={12} />
+      </button>
+      <div ref={reasoningBodyRef} id={reasoningContentId} className="turn-collapse__inline-reasoning">{visibleReasoning}</div>
     </div>
   );
 }

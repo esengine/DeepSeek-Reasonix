@@ -4213,10 +4213,20 @@ a[href] {
   align-items: center;
   gap: 6px;
   min-height: 24px;
-  color: var(--fg-faint);
+  padding: 2px 7px;
+  border: none;
+  background: none;
+  cursor: pointer;
   font-size: 13px;
   font-weight: 560;
   line-height: 1.4;
+  color: var(--fg-faint);
+  border-radius: 6px;
+  -webkit-app-region: no-drag;
+}
+.turn-collapse__reasoning-head:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
 }
 
 .turn-collapse__reasoning-head > svg:first-child {
@@ -4479,10 +4489,14 @@ a[href] {
   color: var(--fg-faint);
   background: var(--fg-faint);
 }
-.reasoning__body,
-.turn-collapse__inline-reasoning {
+.reasoning__body {
   overflow: hidden;
   margin: 2px 0 6px 8px;
+  border-left: 2px solid color-mix(in srgb, var(--border) 82%, transparent);
+  padding-left: 12px;
+}
+.turn-collapse__inline-reasoning {
+  overflow: hidden;
   border-left: 2px solid color-mix(in srgb, var(--border) 82%, transparent);
   padding-left: 12px;
   color: color-mix(in srgb, var(--fg-dim) 78%, transparent);
