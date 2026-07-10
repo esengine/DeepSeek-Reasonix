@@ -114,6 +114,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	// success-path follow-up (plan approval, goal continuation, etc.).
 	if errors.Is(err, agent.ErrTurnInterrupted) {
 		c.saveInterruptedTranscript()
+		startMessages = c.messageCount() // snapshot already done; skip defer
 		c.clearInFlightTurn()
 		if c.CancelRequested() {
 			c.stopGoal(GoalStatusStopped)
@@ -188,7 +189,12 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 }
 
 func (o *turnOrchestrator) runGoalLoopWithRawDisplay(ctx context.Context, input, raw, display string) error {
-	if err := o.runTurnWithRawDisplay(ctx, input, raw, display); err != nil {
+	err := o.runTurnWithRawDisplay(ctx, input, raw, display)
+	if errors.Is(err, agent.ErrTurnInterrupted) {
+		// Interrupted turn already saved partial content and stopped the goal.
+		return nil
+	}
+	if err != nil {
 		if ctx.Err() != nil {
 			o.c.stopGoal(GoalStatusStopped)
 		}

@@ -3288,12 +3288,6 @@ func (c *Controller) stripCancelledVisibleTurnMessagesAfter(idx int) {
 	}
 	next := append([]provider.Message{}, msgs[:idx]...)
 	for _, m := range msgs[idx:] {
-		if m.Role == provider.RoleAssistant && (strings.TrimSpace(m.Content) != "" || m.ReasoningContent != "") {
-			// Preserve assistant messages that have visible content so the user
-			// can see the partial response after a page refresh.
-			next = append(next, m)
-			continue
-		}
 		if m.Role != provider.RoleUser {
 			continue
 		}

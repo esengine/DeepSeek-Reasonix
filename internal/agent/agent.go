@@ -1098,6 +1098,10 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			}
 		}
 	}
+	// Record the message count before appending user input so we can later
+	// detect assistant content saved by a prior stream-recovery attempt.
+	turnStartMsgCount := a.session.Len()
+
 	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input, Images: userImages(ctx)})
 
 	finalReadinessBlocks := 0
@@ -1162,7 +1166,25 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 				})
 				return ErrTurnInterrupted
 			}
-			return err
+		// When context is cancelled but the current stream produced no visible
+		// text, check whether a prior stream-recovery attempt already saved
+		// partial assistant content to the session. If so, add the interruption
+		// marker and treat the turn as gracefully ended so the partial response
+		// is preserved on disk via saveInterruptedTranscript.
+		if errors.Is(err, context.Canceled) {
+			msgs := a.session.Snapshot()
+			for i := turnStartMsgCount; i < len(msgs); i++ {
+				m := msgs[i]
+				if m.Role == provider.RoleAssistant &&
+					(strings.TrimSpace(m.Content) != "" || m.ReasoningContent != "") {
+					m.Content += "\n\n---\n*[用户中断了回复 — Response interrupted by user]*"
+					msgs[i] = m
+					a.session.Replace(msgs)
+					return ErrTurnInterrupted
+				}
+			}
+		}
+		return err
 		}
 		streamRecoveries = 0
 		cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage)
