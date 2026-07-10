@@ -165,3 +165,6 @@ C:\Users\°¬ºì·É\Desktop\DeepSeek-Reasonix\desktop\frontend>(
 [2m14:19:23[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
 [2m14:19:54[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
 [ELIFECYCLE] Command failed with exit code 4294967295.
+  [90m[90mâ€¢[0m[0m [39m[39mGenerating bindings: [0m[0mDone.
+  [90m[90mâ€¢[0m[0m [39m[39mGenerating application assets: [0m[0mDone.
+  [90m[90mâ€¢[0m[0m [39m[39mCompiling application: [0m[0m[30;101m[30;101m  FATAL  [0m[0m [91m[91mremove C:\Users\è‰¾çº¢é£ž\Desktop\DeepSeek-Reasonix\desktop\reasonix-desktop-res.syso: The system cannot find the file specified.[0m[0m

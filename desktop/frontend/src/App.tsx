@@ -28,6 +28,7 @@ import {
   Settings as SettingsIcon,
   Pencil,
   Trash2,
+  TerminalSquare,
   AlarmClock,
   Brain,
   Cpu,
@@ -240,6 +241,7 @@ function NoticePreviewPanel({ detailsLabel }: { detailsLabel: string }) {
 const HistoryPanel = lazy(() => import("./components/HistoryPanel").then((module) => ({ default: module.HistoryPanel })));
 const SettingsPanel = lazy(() => import("./components/SettingsPanel").then((module) => ({ default: module.SettingsPanel })));
 const WorkspacePanel = lazy(() => import("./components/WorkspacePanel").then((module) => ({ default: module.WorkspacePanel })));
+const TerminalPanel = lazy(() => import("./components/TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
 
 const CHAT_MIN_WIDTH = 400;
 const CHAT_COMFORT_MIN_WIDTH = 560;
@@ -1344,7 +1346,7 @@ export default function App() {
   const runningRef = useRef(state.running);
   const activeTabIdRef = useRef(activeTabId);
   const commitThenSendRef = useRef<(displayText: string, submitText?: string) => Promise<void>>(async () => {});
-  const rightDockDetailActive = rightDockMode !== "context" && workspacePreviewActive;
+  const rightDockDetailActive = rightDockMode === "terminal" || (rightDockMode !== "context" && workspacePreviewActive);
   const preferredWorkspacePanelWidth = rightDockDetailActive ? rightDockPreviewWidth : rightDockTreeWidth;
   const workspacePanelMinWidth = rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
   const chatReservedWidth = workspacePanelOpen && !workspacePanelMaximized ? CHAT_COMFORT_MIN_WIDTH : CHAT_MIN_WIDTH;
@@ -3758,6 +3760,16 @@ export default function App() {
                   <GitBranch size={13} />
                   <span className="workbench-dock__tab-label">{t("workspace.changedTab")}</span>
                 </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={rightDockMode === "terminal"}
+                  className={`workbench-dock__tab${rightDockMode === "terminal" ? " workbench-dock__tab--active" : ""}`}
+                  onClick={() => openRightDockMode("terminal")}
+                >
+                  <TerminalSquare size={13} />
+                  <span className="workbench-dock__tab-label">{t("terminal.title")}</span>
+                </button>
               </div>
             </div>
             <div className="workbench-dock__body">
@@ -3778,6 +3790,22 @@ export default function App() {
                   timeline={state.turnTimeline}
                   items={state.items}
                 />
+              ) : rightDockMode === "terminal" ? (
+                <Suspense
+                  fallback={(
+                    <div
+                      className="terminal-panel terminal-panel--loading"
+                      aria-busy="true"
+                      aria-label={t("terminal.starting")}
+                    />
+                  )}
+                >
+                  {activeTabId ? (
+                    <TerminalPanel key={activeTabId} tabId={activeTabId} />
+                  ) : (
+                    <div className="terminal-panel terminal-panel--loading" aria-busy="true" />
+                  )}
+                </Suspense>
               ) : (
                 <Suspense
                   fallback={(

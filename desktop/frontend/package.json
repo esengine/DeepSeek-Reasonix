@@ -18,6 +18,8 @@
     "@gsap/react": "^2.1.2",
     "@monaco-editor/react": "^4.7.0",
     "@tanstack/react-virtual": "^3.14.3",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "gsap": "^3.15.0",
     "highlight.js": "^11.10.0",
     "katex": "^0.17.0",

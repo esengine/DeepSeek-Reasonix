@@ -488,3 +488,6 @@ React will try to recreate this component tree from scratch using the error boun
 [0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\runtime[0m
 [0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\go[0m
 [0;92mAdded new directory to watcher: C:\Users\艾红飞\Desktop\DeepSeek-Reasonix\desktop\frontend\wailsjs\runtime[0m
+[0;92m[Rebuild triggered] files updated[0m
+# reasonix/desktop
+.\terminal.go:394:7: undefined: io

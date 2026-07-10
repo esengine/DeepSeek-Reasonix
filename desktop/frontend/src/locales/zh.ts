@@ -146,6 +146,15 @@ export const zh: Record<DictKey, string> = {
   "rightDock.views": "工作区视图",
   "rightDock.overview": "概览",
 
+  // 终端
+  "terminal.title": "终端",
+  "terminal.starting": "正在启动终端…",
+  "terminal.running": "运行中",
+  "terminal.exited": "终端已退出",
+  "terminal.failed": "终端启动失败",
+  "terminal.restart": "重新启动终端",
+  "terminal.browserOnly": "当前为浏览器预览模式；交互式终端仅在 Reasonix 桌面应用中可用。",
+
   // 话题栏
   "topicBar.renameSession": "重命名会话",
   "topicBar.more": "更多",

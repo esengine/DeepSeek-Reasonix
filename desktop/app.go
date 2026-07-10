@@ -191,6 +191,7 @@ type App struct {
 	skillRootsCache skillRootsCache
 
 	heartbeat *HeartbeatEngine // scheduled heartbeat tasks; nil until startup
+	terminals *terminalManager
 }
 
 type skillRootsCache struct {
@@ -365,13 +366,15 @@ func (a *App) workspaceMediaMiddleware() func(http.Handler) http.Handler {
 // NewApp constructs the bound object. Tabs are restored in startup from the
 // last session's desktop-tabs.json.
 func NewApp() *App {
-	return &App{
+	app := &App{
 		tabs:             map[string]*WorkspaceTab{},
 		detachedSessions: map[string]*WorkspaceTab{},
 		mediaTokens:      newMediaTokenStore(),
 		botInstalls:      map[string]*botInstallSession{},
 		botRuntime:       newDesktopBotRuntime(),
 	}
+	app.terminals = newTerminalManager(app)
+	return app
 }
 
 func (a *App) bootContext() context.Context {
@@ -730,6 +733,9 @@ func (a *App) snapshotAllTabs() {
 func (a *App) shutdown(context.Context) {
 	a.stopDeferredRebuildRetry()
 	a.stopMainThreadWatchdog()
+	if a.terminals != nil {
+		a.terminals.closeAll()
+	}
 	if a.heartbeat != nil {
 		a.heartbeat.Stop()
 	}

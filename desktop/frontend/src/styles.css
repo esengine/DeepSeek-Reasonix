@@ -21224,6 +21224,153 @@ body > .mermaid-diagram--fullscreen {
   background: var(--bg-elev);
 }
 
+.terminal-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg);
+  color: var(--fg);
+  overflow: hidden;
+}
+
+.terminal-panel--loading {
+  background: var(--bg);
+}
+
+.terminal-panel__toolbar {
+  flex: 0 0 36px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 10px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--workspace-files-bg);
+}
+
+.terminal-panel__identity {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-dim);
+  font-size: 11.5px;
+}
+
+.terminal-panel__identity svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.terminal-panel__identity span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.terminal-panel__status {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--fg-faint);
+}
+
+.terminal-panel__status--running {
+  color: var(--success, #57c785);
+}
+
+.terminal-panel__status--error {
+  color: var(--danger, #e06c75);
+}
+
+.terminal-panel__action {
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-faint);
+}
+
+.terminal-panel__action:hover:not(:disabled) {
+  border-color: var(--border-soft);
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+
+.terminal-panel__action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.terminal-panel__viewport {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 0 6px 8px;
+  background: var(--bg);
+}
+
+.terminal-panel__viewport .xterm,
+.terminal-panel__viewport .xterm-viewport,
+.terminal-panel__viewport .xterm-screen {
+  height: 100%;
+}
+
+.terminal-panel__viewport .xterm-viewport {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.terminal-panel__overlay {
+  position: absolute;
+  inset: 36px 0 0;
+  z-index: var(--z-local-raised);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px;
+  background: color-mix(in srgb, var(--bg) 96%, transparent);
+  color: var(--fg-dim);
+  text-align: center;
+  font-size: 12px;
+}
+
+.terminal-panel__overlay span {
+  max-width: 100%;
+  color: var(--fg-faint);
+  overflow-wrap: anywhere;
+}
+
+.terminal-panel__overlay button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+}
+
+.terminal-panel__overlay button:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  color: var(--accent);
+}
+
 .layout--workspace-maximized .context-inspector,
 .layout--workspace-maximized .workbench-dock {
   grid-column: 2;

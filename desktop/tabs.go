@@ -2302,6 +2302,9 @@ func (a *App) CloseTab(tabID string) error {
 	closeCtrl := tab.Ctrl
 	closeSink := tab.sink
 	a.mu.Unlock()
+	if a.terminals != nil {
+		a.terminals.closeTab(tabID)
+	}
 
 	// Tear down outside the lock.
 	discardPath, discardTransientBlank := a.transientBlankSessionArtifactPath(tab)

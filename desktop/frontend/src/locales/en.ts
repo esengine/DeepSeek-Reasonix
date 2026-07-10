@@ -145,6 +145,15 @@ export const en = {
   "rightDock.views": "Workspace views",
   "rightDock.overview": "Overview",
 
+  // terminal
+  "terminal.title": "Terminal",
+  "terminal.starting": "Starting terminal…",
+  "terminal.running": "Running",
+  "terminal.exited": "Terminal exited",
+  "terminal.failed": "Terminal failed",
+  "terminal.restart": "Restart terminal",
+  "terminal.browserOnly": "Browser preview only. The interactive terminal is available in the Reasonix desktop app.",
+
   // topic bar
   "topicBar.renameSession": "Rename session",
   "topicBar.more": "More",

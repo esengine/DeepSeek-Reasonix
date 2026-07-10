@@ -114,7 +114,7 @@ export function saveRightDockPreviewWidth(width: number): void {
 // drag flags, button-press animation flags, measured footer height, viewport
 // width — deliberately stay as useState in App.tsx; they have no cross-component
 // readers and don't belong in shared state.)
-export type RightDockMode = "context" | "files" | "changed";
+export type RightDockMode = "context" | "files" | "changed" | "terminal";
 
 export type LayoutState = {
   sidebarCollapsed: boolean;

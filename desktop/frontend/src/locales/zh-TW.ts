@@ -82,6 +82,15 @@ export const zhTW: Record<DictKey, string> = {
   "rightDock.views": "右側工作台視圖",
   "rightDock.overview": "概覽",
 
+  // 終端機
+  "terminal.title": "終端機",
+  "terminal.starting": "正在啟動終端機…",
+  "terminal.running": "執行中",
+  "terminal.exited": "終端機已結束",
+  "terminal.failed": "終端機啟動失敗",
+  "terminal.restart": "重新啟動終端機",
+  "terminal.browserOnly": "目前為瀏覽器預覽模式；互動式終端機僅能在 Reasonix 桌面應用程式中使用。",
+
   // 話題欄
   "topicBar.renameSession": "重新命名會話",
   "topicBar.more": "更多",
