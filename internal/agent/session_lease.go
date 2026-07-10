@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/store"
 )
 
@@ -237,7 +238,7 @@ func newSessionLeaseInfo(path string) SessionLeaseInfo {
 }
 
 func LoadSessionLeaseInfo(path string) (*SessionLeaseInfo, error) {
-	b, err := os.ReadFile(sessionLeaseInfoPath(path))
+	b, err := fileencoding.ReadFileUTF8(sessionLeaseInfoPath(path))
 	if err != nil {
 		return nil, err
 	}

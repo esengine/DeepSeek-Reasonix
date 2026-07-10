@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 func TestLoadDotEnvDoesNotImportProjectOrHomeEnv(t *testing.T) {
@@ -84,6 +86,29 @@ func TestLoadDotEnvReadsGlobalCredentials(t *testing.T) {
 	}
 	if got := os.Getenv("KEY_SHARED"); got != "global_wins" {
 		t.Errorf("global credentials should win over project .env: KEY_SHARED=%q want global_wins", got)
+	}
+}
+
+func TestLoadDotEnvDecodesGB18030Credentials(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("REASONIX_HOME", filepath.Join(home, "reasonix-home"))
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	t.Setenv("PINNED_CN", "")
+	os.Unsetenv("PINNED_CN")
+
+	cred := UserCredentialsPath()
+	if err := os.MkdirAll(filepath.Dir(cred), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cred, fileencoding.Encode("PINNED_CN=中文\n", fileencoding.GB18030), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loadDotEnv()
+	if got := os.Getenv("PINNED_CN"); got != "中文" {
+		t.Fatalf("PINNED_CN = %q, want decoded Chinese value", got)
 	}
 }
 

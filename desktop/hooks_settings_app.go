@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/hook"
 )
 
@@ -146,7 +147,7 @@ func hookConfigView(event hook.Event, cfg hook.HookConfig) HookConfigView {
 
 func readHooksSettingsFile(path string) (hook.Settings, error) {
 	var settings hook.Settings
-	body, err := os.ReadFile(path)
+	body, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return settings, err
 	}
@@ -164,7 +165,7 @@ func writeHooksSettingsFile(path string, settings hook.Settings) error {
 		return fmt.Errorf("empty hooks settings path")
 	}
 	raw := map[string]json.RawMessage{}
-	if body, err := os.ReadFile(path); err == nil {
+	if body, err := fileencoding.ReadFileUTF8(path); err == nil {
 		if err := json.Unmarshal(body, &raw); err != nil {
 			return err
 		}

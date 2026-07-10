@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/pluginpkg"
 )
 
@@ -27,10 +28,15 @@ func writeSettings(t *testing.T, dir, json string) {
 
 func writeHookTestFile(t *testing.T, path, body string) {
 	t.Helper()
+	writeHookTestBytes(t, path, []byte(body))
+}
+
+func writeHookTestBytes(t *testing.T, path string, body []byte) {
+	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(path, body, 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -73,6 +79,35 @@ func TestLoadTrustGating(t *testing.T) {
 	}
 	if got[0].Scope != ScopeProject {
 		t.Errorf("project hooks should sort first, got %s", got[0].Scope)
+	}
+}
+
+func TestLoadDecodesGB18030GlobalSettings(t *testing.T) {
+	home := t.TempDir()
+	body := `{"hooks":{"Stop":[{"command":"echo 中文","description":"全局"}]}}`
+	writeHookTestBytes(t, GlobalSettingsPath(home), fileencoding.Encode(body, fileencoding.GB18030))
+
+	got := Load(LoadOptions{HomeDir: home})
+	if len(got) != 1 {
+		t.Fatalf("Load hooks = %+v, want one decoded global hook", got)
+	}
+	if got[0].Scope != ScopeGlobal || got[0].Event != Stop || got[0].Command != "echo 中文" || got[0].Description != "全局" {
+		t.Fatalf("decoded global hook = %+v", got[0])
+	}
+}
+
+func TestLoadDecodesUTF8BOMProjectSettings(t *testing.T) {
+	home := t.TempDir()
+	proj := t.TempDir()
+	body := `{"hooks":{"PreToolUse":[{"match":"bash","command":"echo pre"}]}}`
+	writeHookTestBytes(t, ProjectSettingsPath(proj), fileencoding.Encode(body, fileencoding.UTF8BOM))
+
+	got := Load(LoadOptions{HomeDir: home, ProjectRoot: proj, Trusted: true})
+	if len(got) != 1 {
+		t.Fatalf("Load hooks = %+v, want one decoded project hook", got)
+	}
+	if got[0].Scope != ScopeProject || got[0].Event != PreToolUse || got[0].Match != "bash" || got[0].Command != "echo pre" {
+		t.Fatalf("decoded project hook = %+v", got[0])
 	}
 }
 

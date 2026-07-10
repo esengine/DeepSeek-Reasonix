@@ -61,6 +61,30 @@ func TestRunMultiToolRoundEmptyIDsSurvivePairing(t *testing.T) {
 	}
 }
 
+func TestRunPersistsCumulativeAssistantWorkDuration(t *testing.T) {
+	mp := testutil.NewMock("m",
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "echo", Arguments: `{"text":"hello"}`}}},
+		testutil.Turn{Text: "done"},
+	)
+	a := New(mp, echoRegistry(), NewSession(""), Options{}, event.Discard)
+	if err := a.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var durations []int64
+	for _, message := range a.Session().Messages {
+		if message.Role == provider.RoleAssistant {
+			durations = append(durations, message.WorkDurationMs)
+		}
+	}
+	if len(durations) != 2 {
+		t.Fatalf("assistant durations = %v, want two rounds", durations)
+	}
+	if durations[0] <= 0 || durations[1] < durations[0] {
+		t.Fatalf("assistant durations must be positive and cumulative: %v", durations)
+	}
+}
+
 func TestRunSkipsMemoryCompilerForSyntheticTurn(t *testing.T) {
 	rt := memorycompiler.New(t.TempDir())
 	_, seed := rt.StartTurn(context.Background(), "fix a bug", nil)

@@ -2,9 +2,11 @@ package bot
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -210,6 +212,220 @@ func TestRenderSinkLimitsProgressMessages(t *testing.T) {
 	sent := adapter.sentMessages()
 	if len(sent) != renderMaxProgressMessages {
 		t.Fatalf("sent count = %d, want capped progress count %d", len(sent), renderMaxProgressMessages)
+	}
+}
+
+type fakeEditorAdapter struct {
+	*fakeAdapter
+	mu      sync.Mutex
+	edits   []editRecord
+	editErr error
+}
+
+type editRecord struct {
+	messageID string
+	text      string
+}
+
+func newFakeEditorAdapter() *fakeEditorAdapter {
+	return &fakeEditorAdapter{fakeAdapter: newFakeAdapter(PlatformFeishu, "fake-feishu")}
+}
+
+func (f *fakeEditorAdapter) EditMessage(ctx context.Context, messageID string, msg OutboundMessage) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.editErr != nil {
+		return f.editErr
+	}
+	f.edits = append(f.edits, editRecord{messageID: messageID, text: msg.Text})
+	return nil
+}
+
+func (f *fakeEditorAdapter) editRecords() []editRecord {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]editRecord, len(f.edits))
+	copy(out, f.edits)
+	return out
+}
+
+func TestRenderSinkStreamsIntoLiveMessage(t *testing.T) {
+	adapter := newFakeEditorAdapter()
+	sink := newRenderSink(context.Background(), adapter, "feishu-feishu", "feishu", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+
+	// 第一个增量：超过软窗口后创建 live 消息。
+	sink.lastFlush = time.Now().Add(-2 * renderSoftFlushAfter)
+	sink.Emit(event.Event{Kind: event.Text, Text: "第一段内容"})
+	if sent := adapter.sentMessages(); len(sent) != 1 || sent[0].Text != "第一段内容" {
+		t.Fatalf("sent = %+v, want live message created with first chunk", sent)
+	}
+	if sink.liveMsgID != "fake_msg_1" {
+		t.Fatalf("liveMsgID = %q, want fake_msg_1", sink.liveMsgID)
+	}
+
+	// 第二个增量：原地编辑同一条消息，而不是再发一条。
+	sink.lastEdit = time.Now().Add(-2 * renderSoftFlushAfter)
+	sink.Emit(event.Event{Kind: event.Text, Text: "，第二段内容。"})
+	if sent := adapter.sentMessages(); len(sent) != 1 {
+		t.Fatalf("sent count = %d, want still one message after streaming edit", len(sent))
+	}
+	edits := adapter.editRecords()
+	if len(edits) != 1 || edits[0].messageID != "fake_msg_1" {
+		t.Fatalf("edits = %+v, want one edit to live message", edits)
+	}
+	if edits[0].text != "第一段内容，第二段内容。" {
+		t.Fatalf("edit text = %q, want cumulative content", edits[0].text)
+	}
+
+	// 回合结束：最终内容编辑进 live 消息，不再新发。
+	sink.Emit(event.Event{Kind: event.Text, Text: "收尾。"})
+	sink.Emit(event.Event{Kind: event.TurnDone})
+	if sent := adapter.sentMessages(); len(sent) != 1 {
+		t.Fatalf("sent count = %d, want no extra message at turn end", len(sent))
+	}
+	edits = adapter.editRecords()
+	final := edits[len(edits)-1]
+	if final.text != "第一段内容，第二段内容。收尾。" {
+		t.Fatalf("final edit = %q, want full content", final.text)
+	}
+	if sink.liveMsgID != "" {
+		t.Fatalf("liveMsgID = %q, want cleared after turn done", sink.liveMsgID)
+	}
+}
+
+func TestRenderSinkStreamingThrottledBySoftWindow(t *testing.T) {
+	adapter := newFakeEditorAdapter()
+	sink := newRenderSink(context.Background(), adapter, "feishu-feishu", "feishu", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+
+	// 软窗口内的增量不触发任何网络调用。
+	sink.Emit(event.Event{Kind: event.Text, Text: "刚开始的内容"})
+	if sent := adapter.sentMessages(); len(sent) != 0 {
+		t.Fatalf("sent = %+v, want throttled inside soft window", sent)
+	}
+	if edits := adapter.editRecords(); len(edits) != 0 {
+		t.Fatalf("edits = %+v, want none inside soft window", edits)
+	}
+}
+
+func TestRenderSinkStreamingEditFailureRotatesWithoutDuplication(t *testing.T) {
+	adapter := newFakeEditorAdapter()
+	sink := newRenderSink(context.Background(), adapter, "feishu-feishu", "feishu", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+
+	sink.lastFlush = time.Now().Add(-2 * renderSoftFlushAfter)
+	sink.Emit(event.Event{Kind: event.Text, Text: "已送达的内容。"})
+	if sink.liveMsgID == "" {
+		t.Fatal("live message should be created")
+	}
+
+	// 编辑失败：块轮转，已送达前缀不重发。
+	adapter.mu.Lock()
+	adapter.editErr = context.DeadlineExceeded
+	adapter.mu.Unlock()
+	sink.lastEdit = time.Now().Add(-2 * renderSoftFlushAfter)
+	sink.Emit(event.Event{Kind: event.Text, Text: "后续内容。"})
+	if sink.liveMsgID != "" {
+		t.Fatalf("liveMsgID = %q, want rotation after edit failure", sink.liveMsgID)
+	}
+
+	adapter.mu.Lock()
+	adapter.editErr = nil
+	adapter.mu.Unlock()
+	sink.Emit(event.Event{Kind: event.TurnDone})
+	sent := adapter.sentMessages()
+	if len(sent) != 2 {
+		t.Fatalf("sent count = %d, want live message plus rotated tail: %+v", len(sent), sent)
+	}
+	if sent[1].Text != "后续内容。" {
+		t.Fatalf("rotated tail = %q, want only undelivered content", sent[1].Text)
+	}
+}
+
+func TestRenderSinkStreamingHardCapRotatesBlocks(t *testing.T) {
+	adapter := newFakeEditorAdapter()
+	sink := newRenderSink(context.Background(), adapter, "feishu-feishu", "feishu", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+
+	sink.lastFlush = time.Now().Add(-2 * renderSoftFlushAfter)
+	sink.Emit(event.Event{Kind: event.Text, Text: "第一句。"})
+	if sink.liveMsgID == "" {
+		t.Fatal("live message should be created")
+	}
+
+	// 超过硬上限：live 消息按语义边界收尾，剩余进入下一块。
+	sink.Emit(event.Event{Kind: event.Text, Text: strings.Repeat("长", renderHardChunkRunes) + "。尾部"})
+	if sink.liveMsgID != "" {
+		t.Fatalf("liveMsgID = %q, want block closed at hard cap", sink.liveMsgID)
+	}
+	edits := adapter.editRecords()
+	if len(edits) == 0 {
+		t.Fatal("hard cap should finalize the live message via edit")
+	}
+	if got := len([]rune(edits[len(edits)-1].text)); got > renderMaxChunkRunes {
+		t.Fatalf("finalized block runes = %d, want <= %d", got, renderMaxChunkRunes)
+	}
+
+	sink.Emit(event.Event{Kind: event.TurnDone})
+	sent := adapter.sentMessages()
+	if len(sent) < 2 {
+		t.Fatalf("sent count = %d, want new message for the next block", len(sent))
+	}
+}
+
+// failingEditorAdapter accepts the initial Send (returns a message id so
+// streaming engages) but fails every edit, simulating a rate-limited / recalled
+// live message mid-turn.
+type failingEditorAdapter struct {
+	*fakeAdapter
+}
+
+func (f *failingEditorAdapter) EditMessage(ctx context.Context, id string, msg OutboundMessage) error {
+	return fmt.Errorf("simulated edit failure")
+}
+
+func TestRenderSinkStreamingEditFailureDoesNotDuplicate(t *testing.T) {
+	adapter := &failingEditorAdapter{fakeAdapter: newFakeAdapter(PlatformFeishu, "fake-feishu")}
+	sink := newRenderSink(context.Background(), adapter, "feishu-feishu", "feishu", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+
+	// Stream a first chunk so a live message is created (liveSentBytes == full).
+	sink.lastFlush = time.Now().Add(-2 * renderSoftFlushAfter)
+	head := strings.Repeat("a", 2000)
+	sink.Emit(event.Event{Kind: event.Text, Text: head})
+	if sink.liveMsgID == "" {
+		t.Fatalf("streaming did not engage; sent=%d", len(adapter.sentMessages()))
+	}
+	// Push past the hard cap so flushPrefix runs with idx < liveSentBytes, then
+	// finish. Every edit fails, so rotation must not re-queue already-shown text.
+	tail := strings.Repeat("b", renderHardChunkRunes)
+	sink.Emit(event.Event{Kind: event.Text, Text: tail})
+	sink.Emit(event.Event{Kind: event.TurnDone})
+
+	var shown strings.Builder
+	shown.WriteString(head) // live message frozen at last successful state
+	for _, m := range adapter.sentMessages()[1:] {
+		shown.WriteString(m.Text)
+	}
+	wantRunes := len([]rune(head + tail))
+	if gotRunes := len([]rune(shown.String())); gotRunes > wantRunes {
+		t.Fatalf("duplication: user would see %d runes, expected at most %d (%d duplicated)", gotRunes, wantRunes, gotRunes-wantRunes)
+	}
+}
+
+func TestRenderSinkStreamingFinalizesInOneEditWithoutSplit(t *testing.T) {
+	adapter := newFakeEditorAdapter()
+	sink := newRenderSink(context.Background(), adapter, "feishu-feishu", "feishu", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+
+	// A final answer that does NOT end on a semantic boundary (ends inside a
+	// code fence) must be finalized as a single in-place edit, not shrunk +
+	// tail-as-new-message.
+	sink.lastFlush = time.Now().Add(-2 * renderSoftFlushAfter)
+	sink.Emit(event.Event{Kind: event.Text, Text: "结论如下。这里是代码:\n```go\nfmt.Println(\"x\")\n```"})
+	sink.Emit(event.Event{Kind: event.TurnDone})
+
+	if sent := adapter.sentMessages(); len(sent) != 1 {
+		t.Fatalf("sent %d messages, want exactly one live message (no split): %+v", len(sent), sent)
+	}
+	edits := adapter.editRecords()
+	if len(edits) == 0 || !strings.Contains(edits[len(edits)-1].text, "```") {
+		t.Fatalf("final edit should carry the full text including the code fence: %+v", edits)
 	}
 }
 

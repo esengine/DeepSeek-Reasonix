@@ -9,6 +9,7 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 func TestHeartbeatConfigPathUsesReasonixUserStateDir(t *testing.T) {
@@ -18,6 +19,23 @@ func TestHeartbeatConfigPathUsesReasonixUserStateDir(t *testing.T) {
 
 	if got := engine.configPath(); got != want {
 		t.Fatalf("configPath = %q, want %q", got, want)
+	}
+}
+
+func TestHeartbeatLoadTasksDecodesGB18030Config(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	engine := &HeartbeatEngine{}
+	body := `{"tasks":[{"id":"daily","title":"每日检查","prompt":"总结中文状态","interval":"1h","enabled":true}]}`
+	if err := os.MkdirAll(filepath.Dir(engine.configPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(engine.configPath(), fileencoding.Encode(body, fileencoding.GB18030), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tasks := engine.loadTasks()
+	if len(tasks) != 1 || tasks[0].Title != "每日检查" || tasks[0].Prompt != "总结中文状态" {
+		t.Fatalf("loadTasks = %+v, want decoded Chinese task", tasks)
 	}
 }
 
@@ -85,6 +103,7 @@ func (s *heartbeatExecuteTaskCtrlStub) RuntimeStatus() control.RuntimeStatus {
 
 func (s *heartbeatExecuteTaskCtrlStub) SubmitUserTurn(input, display string) {
 	s.submitted = append(s.submitted, input)
+	s.status.Running = true
 }
 
 func (s *heartbeatExecuteTaskCtrlStub) SetToolApprovalMode(mode string) {

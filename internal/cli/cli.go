@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 	"unicode/utf16"
 
 	"reasonix/internal/agent"
@@ -27,13 +28,13 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/i18n"
 	"reasonix/internal/notify"
 	"reasonix/internal/provider"
 	"reasonix/internal/provider/openai"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/serve"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"
@@ -1815,7 +1816,7 @@ func appendEnv(path string, lines []string) error {
 	}
 
 	var kept []string
-	if data, err := os.ReadFile(path); err == nil {
+	if data, err := fileencoding.ReadFileUTF8(path); err == nil {
 		for _, raw := range strings.Split(string(data), "\n") {
 			trimmed := strings.TrimSpace(raw)
 			check := strings.TrimPrefix(trimmed, "export ")

@@ -1425,7 +1425,7 @@ func configDeclaresProviderAccess(path string) bool {
 	if strings.TrimSpace(path) == "" {
 		return false
 	}
-	body, err := os.ReadFile(path)
+	body, err := readFileUTF8(path)
 	if err != nil {
 		return false
 	}
@@ -2765,14 +2765,15 @@ func (a *App) SetBotSettings(b BotSettingsView) error {
 			Access:           botAccessConfigFromView(b.QQ.Access),
 		}
 		c.Bot.Feishu = config.FeishuBotConfig{
-			Enabled:           b.Feishu.Enabled,
-			Domain:            botDomainOrDefault(b.Feishu.Domain),
-			AppID:             strings.TrimSpace(b.Feishu.AppID),
-			AppSecretEnv:      strings.TrimSpace(b.Feishu.AppSecretEnv),
-			VerificationToken: strings.TrimSpace(b.Feishu.VerificationToken),
-			Mode:              strings.TrimSpace(b.Feishu.Mode),
-			WebhookPort:       b.Feishu.WebhookPort,
-			RequireMention:    b.Feishu.RequireMention,
+			Enabled:            b.Feishu.Enabled,
+			Domain:             botDomainOrDefault(b.Feishu.Domain),
+			AppID:              strings.TrimSpace(b.Feishu.AppID),
+			AppSecretEnv:       strings.TrimSpace(b.Feishu.AppSecretEnv),
+			VerificationToken:  strings.TrimSpace(b.Feishu.VerificationToken),
+			Mode:               strings.TrimSpace(b.Feishu.Mode),
+			WebhookPort:        b.Feishu.WebhookPort,
+			RequireMention:     b.Feishu.RequireMention,
+			OutboundMediaRoots: append([]string(nil), c.Bot.Feishu.OutboundMediaRoots...),
 		}
 		c.Bot.Weixin = config.WeixinBotConfig{
 			Enabled:   b.Weixin.Enabled,

@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"reasonix/internal/evidence"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/store"
 )
 
@@ -347,7 +348,7 @@ func (g *goalMachine) terminalTodosFromState(sessionPath string) ([]evidence.Tod
 	if strings.TrimSpace(sessionPath) == "" {
 		return nil, false
 	}
-	data, err := os.ReadFile(goalStatePath(sessionPath))
+	data, err := fileencoding.ReadFileUTF8(goalStatePath(sessionPath))
 	if err != nil {
 		if !os.IsNotExist(err) {
 			slog.Warn("controller: read goal state", "err", err)
@@ -378,7 +379,7 @@ func (g *goalMachine) restoreRunningFromState(sessionPath string) {
 	if strings.TrimSpace(sessionPath) == "" {
 		return
 	}
-	data, err := os.ReadFile(goalStatePath(sessionPath))
+	data, err := fileencoding.ReadFileUTF8(goalStatePath(sessionPath))
 	if err != nil {
 		if !os.IsNotExist(err) {
 			slog.Warn("controller: read goal state", "err", err)

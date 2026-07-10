@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"reasonix/internal/config"
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 const (
@@ -203,7 +204,7 @@ func legacyStatsPath(name string) string {
 // to be worth a trace, but they still must not stop the caller.
 func loadStats(path string) StartupStats {
 	var s StartupStats
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			slog.Warn("plugin: read startup stats failed", "path", path, "err", err)

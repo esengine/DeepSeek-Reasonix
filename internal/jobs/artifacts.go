@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/store"
 )
 
@@ -74,7 +75,7 @@ func writeMeta(path string, meta artifactMeta) error {
 
 func readMeta(path string) (artifactMeta, error) {
 	var meta artifactMeta
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return meta, err
 	}

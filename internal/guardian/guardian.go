@@ -12,6 +12,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/event"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
@@ -368,7 +369,7 @@ func loadCursor(path string) TranscriptCursor {
 	if path == "" {
 		return TranscriptCursor{}
 	}
-	data, err := os.ReadFile(path)
+	data, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return TranscriptCursor{}
 	}

@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"reasonix/internal/config"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/frontmatter"
 )
 
@@ -470,7 +471,7 @@ func (s *Store) parseFlat(path, stem string, scope Scope, requireSkillMarker boo
 }
 
 func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bool) (Skill, bool) {
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return Skill{}, false
 	}
@@ -666,7 +667,7 @@ func loadBodyWithReferences(skillPath, body string) string {
 	var b strings.Builder
 	b.WriteString(body)
 	for _, n := range names {
-		content, err := os.ReadFile(filepath.Join(refsDir, n))
+		content, err := fileencoding.ReadFileUTF8(filepath.Join(refsDir, n))
 		if err != nil {
 			continue
 		}

@@ -42,6 +42,7 @@ type Message struct {
 	ToolCallID         string           `json:"tool_call_id,omitempty"`    // links a tool result to its call
 	Name               string           `json:"name,omitempty"`            // tool message: tool name
 	MemoryCitations    []MemoryCitation `json:"memoryCitations,omitempty"` // local UI metadata; provider requests ignore it
+	WorkDurationMs     int64            `json:"workDurationMs,omitempty"`  // local UI metadata; provider requests ignore it
 	Edited             bool             `json:"edited,omitempty"`          // local UI metadata; provider requests ignore it
 	Original           string           `json:"original,omitempty"`        // user prompt before inline edit
 }
@@ -637,6 +638,28 @@ func RequiresToolCallReasoning(p Provider) bool {
 	}
 	policy, ok := p.(ToolCallReasoningPolicy)
 	return ok && policy.RequiresToolCallReasoning()
+}
+
+// MissingToolCallReasoningWarningPolicy is optionally implemented by providers
+// whose replay protocol requires reasoning_content, but whose active model may
+// not reliably emit it. Request serialization should stay conservative while
+// user-visible diagnostics can be quieter for models where missing reasoning is
+// expected behavior.
+type MissingToolCallReasoningWarningPolicy interface {
+	WarnOnMissingToolCallReasoning() bool
+}
+
+// WarnOnMissingToolCallReasoning reports whether a tool_calls turn with empty
+// reasoning_content should surface a visible warning.
+func WarnOnMissingToolCallReasoning(p Provider) bool {
+	if nilutil.IsNil(p) {
+		return false
+	}
+	policy, ok := p.(MissingToolCallReasoningWarningPolicy)
+	if ok {
+		return policy.WarnOnMissingToolCallReasoning()
+	}
+	return RequiresToolCallReasoning(p)
 }
 
 // Config is a resolved provider instance configuration.

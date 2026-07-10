@@ -521,6 +521,12 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 				renderBotRoute(&b, route)
 			}
 		}
+		if len(c.Bot.DesktopWatchers) > 0 {
+			for _, watcher := range c.Bot.DesktopWatchers {
+				b.WriteString("\n[[bot.desktop_watchers]]\n")
+				renderBotDesktopWatcher(&b, watcher)
+			}
+		}
 		b.WriteString("\n[bot.pairing]\n")
 		fmt.Fprintf(&b, "enabled = %v\n", c.Bot.Pairing.Enabled)
 		if c.Bot.Pairing.RequestTTLMinutes > 0 {
@@ -574,6 +580,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		fmt.Fprintf(&b, "mode = %q\n", c.Bot.Feishu.Mode)
 		fmt.Fprintf(&b, "webhook_port = %d\n", c.Bot.Feishu.WebhookPort)
 		fmt.Fprintf(&b, "require_mention = %v\n", c.Bot.Feishu.RequireMention)
+		if len(c.Bot.Feishu.OutboundMediaRoots) > 0 {
+			fmt.Fprintf(&b, "outbound_media_roots = %s\n", renderStringArray(c.Bot.Feishu.OutboundMediaRoots))
+		}
 		b.WriteString("\n[bot.weixin]\n")
 		fmt.Fprintf(&b, "enabled = %v\n", c.Bot.Weixin.Enabled)
 		fmt.Fprintf(&b, "account_id = %q\n", c.Bot.Weixin.AccountID)
@@ -1611,6 +1620,24 @@ func renderBotRoute(b *strings.Builder, route BotRouteConfig) {
 	}
 	if strings.TrimSpace(route.WorkspaceRoot) != "" {
 		fmt.Fprintf(b, "workspace_root = %q\n", strings.TrimSpace(route.WorkspaceRoot))
+	}
+}
+
+func renderBotDesktopWatcher(b *strings.Builder, watcher BotDesktopWatcherConfig) {
+	if strings.TrimSpace(watcher.Platform) != "" {
+		fmt.Fprintf(b, "platform = %q\n", strings.TrimSpace(watcher.Platform))
+	}
+	if strings.TrimSpace(watcher.ConnectionID) != "" {
+		fmt.Fprintf(b, "connection_id = %q\n", strings.TrimSpace(watcher.ConnectionID))
+	}
+	if strings.TrimSpace(watcher.Domain) != "" {
+		fmt.Fprintf(b, "domain = %q\n", strings.TrimSpace(watcher.Domain))
+	}
+	if strings.TrimSpace(watcher.ChatType) != "" {
+		fmt.Fprintf(b, "chat_type = %q\n", strings.TrimSpace(watcher.ChatType))
+	}
+	if strings.TrimSpace(watcher.ChatID) != "" {
+		fmt.Fprintf(b, "chat_id = %q\n", strings.TrimSpace(watcher.ChatID))
 	}
 }
 

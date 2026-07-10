@@ -19,6 +19,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/jobs"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
@@ -1753,7 +1754,7 @@ func loadACPMeta(sessionPath string) (acpSessionMeta, bool, error) {
 	if path == "" {
 		return acpSessionMeta{}, false, nil
 	}
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return acpSessionMeta{}, false, nil

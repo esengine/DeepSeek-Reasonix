@@ -655,6 +655,11 @@ func (j *Job) readArtifactSinceOffsetLocked() string {
 	return text
 }
 
+// readArtifactAllLocked deliberately reads raw bytes: the artifact is captured
+// subprocess output (possibly binary), not a user-edited config file, and the
+// incremental reader (readArtifactSinceOffsetLocked) is raw byte-offset based —
+// decoding only the whole-file path would render the same artifact in two
+// different encodings and could garble binary output via UTF-16 misdetection.
 func (j *Job) readArtifactAllLocked() string {
 	if j.artifactPath == "" {
 		return ""

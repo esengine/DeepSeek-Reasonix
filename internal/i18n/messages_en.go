@@ -282,7 +282,7 @@ var English = Messages{
 	ListSkillsHeaderFmt: "skills (%d)",
 	ListSkillsNone:      "skills: none defined — invoke a built-in like /init, or author one with install_skill",
 	ListHooksHeaderFmt:  "hooks (%d active)",
-	ListHooksNone:       "hooks: none active — configure in .reasonix/settings.json (project, after trust) or ~/.reasonix/settings.json (global)",
+	ListHooksNone:       "hooks: none active — configure in .reasonix/settings.json (project, after trust) or <Reasonix home>/settings.json (global)",
 	ListMcpHeader:       "mcp servers",
 	ListMcpNone:         "mcp: no servers connected — add one in reasonix.toml ([[plugins]]) or a project .mcp.json",
 
@@ -451,7 +451,7 @@ Examples:
   echo "explain this code" | reasonix run
 
 Configuration:
-  Resolution: flag > ./reasonix.toml > ~/.reasonix/config.toml > built-in defaults
+  Resolution: flag > ./reasonix.toml > <Reasonix home>/config.toml > built-in defaults
   Secrets come from the environment via api_key_env (e.g. DEEPSEEK_API_KEY).
   Run 'reasonix setup' to scaffold a config; see docs/SPEC.md.
 `,

@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 // TestStoreSaveAndIndex covers the round-trip: Save writes a frontmatter file,
@@ -42,6 +44,31 @@ func TestStoreSaveAndIndex(t *testing.T) {
 	}
 	if !strings.Contains(m.Body, "indent with tabs") {
 		t.Fatalf("body not preserved: %q", m.Body)
+	}
+}
+
+func TestStoreListDecodesGB18030MemoryFile(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `---
+title: 中文偏好
+description: 使用中文回答
+type: user
+---
+用户希望默认使用中文。`
+	if err := os.WriteFile(filepath.Join(s.Dir, "cn-pref.md"), fileencoding.Encode(body, fileencoding.GB18030), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	memories := s.List()
+	if len(memories) != 1 {
+		t.Fatalf("List() = %+v, want one decoded memory", memories)
+	}
+	m := memories[0]
+	if m.Title != "中文偏好" || m.Description != "使用中文回答" || !strings.Contains(m.Body, "默认使用中文") {
+		t.Fatalf("decoded memory = %+v", m)
 	}
 }
 

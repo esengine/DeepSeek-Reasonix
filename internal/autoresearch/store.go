@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 var safeTaskID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -271,7 +273,7 @@ func (s *Store) Findings(taskID string, limit int) ([]Finding, error) {
 	var findings []Finding
 	for _, line := range lines {
 		var f Finding
-		if err := json.Unmarshal(line, &f); err != nil {
+		if err := json.Unmarshal(fileencoding.DecodeToUTF8(line), &f); err != nil {
 			return nil, fmt.Errorf("autoresearch: parse %s: %w", path, err)
 		}
 		findings = append(findings, f)
@@ -323,7 +325,7 @@ func (s *Store) Heartbeats(taskID string, limit int) ([]Heartbeat, error) {
 	var heartbeats []Heartbeat
 	for _, line := range lines {
 		var h Heartbeat
-		if err := json.Unmarshal(line, &h); err != nil {
+		if err := json.Unmarshal(fileencoding.DecodeToUTF8(line), &h); err != nil {
 			return nil, fmt.Errorf("autoresearch: parse %s: %w", path, err)
 		}
 		heartbeats = append(heartbeats, h)
@@ -591,6 +593,7 @@ func readJSONFile(root *os.Root, path string, out any) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
+	data = fileencoding.DecodeToUTF8(data)
 	if err := json.Unmarshal(data, out); err != nil {
 		return fmt.Errorf("parse %s: %w", path, err)
 	}
@@ -721,6 +724,7 @@ func (s *Store) loadDirections(root *os.Root, taskRel string) ([]DirectionTried,
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
+	data = fileencoding.DecodeToUTF8(data)
 	if strings.TrimSpace(string(data)) == "" {
 		return nil, nil
 	}

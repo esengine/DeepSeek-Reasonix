@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"reasonix/internal/config"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/frontmatter"
 	"reasonix/internal/skill"
 )
@@ -170,7 +171,7 @@ func (t *installSourceTool) skillConflictTargets(name, scope string) ([]string, 
 // readSkillFile reads and validates a single skill file. The fallback name
 // is used when the frontmatter does not declare one.
 func readSkillFile(path, fallbackName string, strict bool) (skillCandidate, error) {
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return skillCandidate{}, err
 	}

@@ -14,6 +14,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/netclient"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/store"
@@ -128,7 +129,7 @@ func Collect(opts Options) Report {
 	// Settings while the project file pins [sandbox] read the no-op as "bash is
 	// broken" (#5961, #6046) — surface the layering explicitly.
 	if sourcePath != "" && filepath.Base(sourcePath) == "reasonix.toml" {
-		if raw, err := os.ReadFile(sourcePath); err == nil && tomlHasSandboxTable(raw) {
+		if raw, err := fileencoding.ReadFileUTF8(sourcePath); err == nil && tomlHasSandboxTable(raw) {
 			warnings = append(warnings, "project "+redactHome(sourcePath)+" sets [sandbox]; it overrides user-level Settings -> Sandbox for this workspace — edit the project file to change sandbox behavior here")
 		}
 	}

@@ -59,6 +59,7 @@ type WorkspaceTab struct {
 	buildGeneration     uint64             // identifies the current in-flight build
 	removed             bool               // set when the visible tab is pruned/closed before build completes
 	reconcileMu         sync.Mutex         // serializes stale controller workspace repair for this tab
+	turnStartMu         sync.Mutex         // serializes foreground turn admission for this tab
 
 	ActivityStatus string // transient project-tree status for the in-flight turn
 
@@ -939,6 +940,8 @@ type tabEventSink struct {
 	ctx           context.Context
 	runtimeEvents asyncRuntimeEmitter
 	botSink       event.Sink // optional: when set, events are also forwarded here
+	botSinkGen    uint64
+	turnInFlight  bool // stays true through the end of TurnDone fan-out
 }
 
 type closeableEventSink interface {
@@ -964,6 +967,11 @@ func (s *tabEventSink) setBinding(tabID string, app *App) {
 }
 
 func (s *tabEventSink) Emit(e event.Event) {
+	if e.Kind == event.TurnStarted {
+		s.mu.Lock()
+		s.turnInFlight = true
+		s.mu.Unlock()
+	}
 	tabID, app := s.binding()
 	if app != nil {
 		switch e.Kind {
@@ -1008,31 +1016,86 @@ func (s *tabEventSink) Emit(e event.Event) {
 	// Forward event to bot channels when a bot forwarder is attached.
 	// Read the sink under the read lock so SetBotSink can safely swap it
 	// from another goroutine.
-	s.mu.RLock()
-	bs := s.botSink
-	s.mu.RUnlock()
+	bs, botSinkGen := s.botSinkSnapshot()
 	if bs != nil {
 		bs.Emit(e)
 		// Detach the forwarder after TurnDone so subsequent turns on the
 		// same tab do not keep pushing to bot channels.
 		if e.Kind == event.TurnDone {
-			s.SetBotSink(nil)
+			s.clearBotSink(botSinkGen)
 		}
+	}
+	// Unlike the transient botSink above, the bridge observes every tab for
+	// its whole lifetime (god view: /desktop status, watch subscriptions,
+	// remote approvals). observe only does in-memory bookkeeping and queueing.
+	if app != nil && app.botBridge != nil {
+		app.botBridge.observe(tabID, e)
+	}
+	if e.Kind == event.TurnDone {
+		s.mu.Lock()
+		s.turnInFlight = false
+		s.mu.Unlock()
 	}
 }
 
 // SetBotSink atomically sets or clears the bot event forwarder on this sink.
 // It is safe to call concurrently with Emit.
-func (s *tabEventSink) SetBotSink(sink event.Sink) {
+func (s *tabEventSink) SetBotSink(sink event.Sink) uint64 {
 	s.mu.Lock()
 	old := s.botSink
 	s.botSink = sink
+	s.botSinkGen++
+	generation := s.botSinkGen
 	s.mu.Unlock()
 	if old != nil && old != sink {
 		if closer, ok := old.(closeableEventSink); ok {
 			closer.Close()
 		}
 	}
+	return generation
+}
+
+func (s *tabEventSink) botSinkSnapshot() (event.Sink, uint64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.botSink, s.botSinkGen
+}
+
+// clearBotSink clears only the forwarder generation observed by the finishing
+// turn. A delayed TurnDone must not detach a replacement installed meanwhile.
+func (s *tabEventSink) clearBotSink(generation uint64) {
+	s.mu.Lock()
+	if s.botSinkGen != generation {
+		s.mu.Unlock()
+		return
+	}
+	old := s.botSink
+	s.botSink = nil
+	s.botSinkGen++
+	s.mu.Unlock()
+	if closer, ok := old.(closeableEventSink); ok {
+		closer.Close()
+	}
+}
+
+// tryBeginTurn reserves the tab until its TurnDone has finished fan-out. The
+// controller clears RuntimeStatus().Running before it emits TurnDone, so the
+// controller status alone leaves a window where a new turn can inherit the old
+// turn's forwarder or have its replacement cleared by the old completion.
+func (s *tabEventSink) tryBeginTurn() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.turnInFlight {
+		return false
+	}
+	s.turnInFlight = true
+	return true
+}
+
+func (s *tabEventSink) cancelTurnStart() {
+	s.mu.Lock()
+	s.turnInFlight = false
+	s.mu.Unlock()
 }
 
 func (s *tabEventSink) setContext(ctx context.Context) {
@@ -1462,6 +1525,7 @@ type TabMeta struct {
 	Ready             bool                     `json:"ready"`
 	Running           bool                     `json:"running"`
 	PendingPrompt     bool                     `json:"pendingPrompt,omitempty"`
+	RemoteControlled  bool                     `json:"remoteControlled,omitempty"`
 	BackgroundJobs    int                      `json:"backgroundJobs,omitempty"`
 	CancelRequested   bool                     `json:"cancelRequested,omitempty"`
 	Cancellable       bool                     `json:"cancellable"`
@@ -1535,6 +1599,9 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		m.BackgroundJobs = status.BackgroundJobs
 		m.CancelRequested = status.CancelRequested
 		m.Cancellable = status.Cancellable
+	}
+	if a.botBridge != nil {
+		m.RemoteControlled = a.botBridge.remoteControlledTabs()[tab.ID]
 	}
 	if meta, ok, err := agent.LoadBranchMeta(tab.currentSessionPath()); err == nil && ok && meta.Recovered {
 		m.Recovered = true
@@ -3071,16 +3138,25 @@ func (a *App) reconcileTabWithPinnedSessionMeta(tab *WorkspaceTab) (string, bool
 	if tab == nil {
 		return "", false
 	}
+	a.mu.RLock()
+	current := a.tabs[tab.ID]
 	path := strings.TrimSpace(tab.SessionPath)
+	ctrl := tab.Ctrl
+	scope := tab.Scope
+	workspaceRoot := tab.WorkspaceRoot
+	a.mu.RUnlock()
+	if current != tab {
+		return "", false
+	}
 	if path != "" {
 		if resolved, ok := a.reconcileTabWithSessionPath(tab, path); ok {
 			return resolved, true
 		}
 	}
-	if tab.Ctrl == nil {
+	if ctrl == nil {
 		return "", false
 	}
-	path = strings.TrimSpace(tab.Ctrl.SessionPath())
+	path = strings.TrimSpace(ctrl.SessionPath())
 	if path == "" {
 		return "", false
 	}
@@ -3088,8 +3164,8 @@ func (a *App) reconcileTabWithPinnedSessionMeta(tab *WorkspaceTab) (string, bool
 	if !ok {
 		return "", false
 	}
-	if tab.Scope == "project" && binding.scope != "project" && normalizeProjectRoot(tab.WorkspaceRoot) != "" {
-		if root, ok := safeControllerWorkspaceRoot(tab.Ctrl); ok && sameProjectRoot(root, tab.WorkspaceRoot) {
+	if scope == "project" && binding.scope != "project" && normalizeProjectRoot(workspaceRoot) != "" {
+		if root, ok := safeControllerWorkspaceRoot(ctrl); ok && sameProjectRoot(root, workspaceRoot) {
 			return "", false
 		}
 	}
@@ -3918,7 +3994,7 @@ func (a *App) removeTabOrderLocked(tabID string) {
 
 func loadTabsFile() desktopTabsFile {
 	path := filepath.Join(desktopConfigDir(), tabsFileName)
-	b, err := os.ReadFile(path)
+	b, err := readFileUTF8(path)
 	if err != nil {
 		return desktopTabsFile{}
 	}
@@ -4015,7 +4091,7 @@ func writeLegacyProjectSidebarRecoveryMarker(path string) error {
 
 func loadProjectsFile() desktopProjectFile {
 	path := filepath.Join(desktopConfigDir(), desktopProjectsFile)
-	b, err := os.ReadFile(path)
+	b, err := readFileUTF8(path)
 	if err != nil {
 		return desktopProjectFile{}
 	}
@@ -4647,7 +4723,7 @@ var readFileWithTimeoutSlots = make(chan struct{}, 16)
 
 func readFileWithTimeout(path string, timeout time.Duration) ([]byte, error) {
 	if timeout <= 0 {
-		return os.ReadFile(path)
+		return readFileUTF8(path)
 	}
 	select {
 	case readFileWithTimeoutSlots <- struct{}{}:
@@ -4660,7 +4736,7 @@ func readFileWithTimeout(path string, timeout time.Duration) ([]byte, error) {
 	}
 	ch := make(chan result, 1)
 	go func() {
-		data, err := os.ReadFile(path)
+		data, err := readFileUTF8(path)
 		<-readFileWithTimeoutSlots
 		ch <- result{data: data, err: err}
 	}()
@@ -4723,7 +4799,7 @@ func loadTopicAutoTitleMeta(workspaceRoot string) map[string]topicAutoTitleMeta 
 
 func loadStringMapForUpdate(path string) (map[string]string, error) {
 	m := map[string]string{}
-	b, err := os.ReadFile(path)
+	b, err := readFileUTF8(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return m, nil
@@ -4739,7 +4815,7 @@ func loadStringMapForUpdate(path string) (map[string]string, error) {
 func loadTopicAutoTitleMetaForUpdate(workspaceRoot string) (map[string]topicAutoTitleMeta, error) {
 	m := map[string]topicAutoTitleMeta{}
 	path := topicAutoTitleMetaPath(workspaceRoot)
-	b, err := os.ReadFile(path)
+	b, err := readFileUTF8(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return m, nil
@@ -4754,7 +4830,7 @@ func loadTopicAutoTitleMetaForUpdate(workspaceRoot string) (map[string]topicAuto
 
 func loadInt64MapForUpdate(path string) (map[string]int64, error) {
 	m := map[string]int64{}
-	b, err := os.ReadFile(path)
+	b, err := readFileUTF8(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return m, nil
@@ -5211,7 +5287,7 @@ func saveTelemetry(path string, snapshot tabTelemetrySnapshot) error {
 }
 
 func loadTelemetry(path string) tabTelemetrySnapshot {
-	b, err := os.ReadFile(path)
+	b, err := readFileUTF8(path)
 	if err != nil {
 		return tabTelemetrySnapshot{Version: 2, ReadFiles: []readFileRecord{}}
 	}
@@ -5313,8 +5389,24 @@ var legacyMigrationMu sync.Mutex
 // It is stamped only when the pass left nothing deferred (an empty legacy
 // session that could gain content later keeps the dir unmarked), so the gate
 // never hides a session that should still be migrated.
-const topicMigrationMarker = ".topics-migrated"
-const topicIndexRepairMarker = ".topic-indexes-repaired"
+// v2 re-evaluates recovery-named sessions that v1 skipped solely by filename.
+// The old marker cannot safely suppress this one-time data-preservation pass.
+const topicMigrationMarker = ".topics-migrated-v2"
+const topicIndexRepairMarker = ".topic-indexes-repaired-v2"
+
+func invalidateTopicDirMarkers(dir string) error {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return nil
+	}
+	var errs []error
+	for _, marker := range []string{topicMigrationMarker, topicIndexRepairMarker} {
+		if err := os.Remove(filepath.Join(dir, marker)); err != nil && !os.IsNotExist(err) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
 
 func topicDirMarkerDone(dir, marker string) bool {
 	dir = strings.TrimSpace(dir)
@@ -5414,7 +5506,7 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 	// unmarked so the next render retries instead of the gate hiding it forever.
 	deferred := false
 	for _, info := range infos {
-		if sessionOrderInfoIsAutomaticRecovery(info) {
+		if sessionOrderInfoIsUnmodifiedRecoveryCopy(info, dir) {
 			continue
 		}
 		if strings.TrimSpace(info.TopicID) != "" {
@@ -5594,7 +5686,7 @@ func repairIndexedSessionTopics(dir string) []string {
 	sourcesChanged := false
 	deferred := false
 	for _, info := range infos {
-		if sessionOrderInfoIsAutomaticRecovery(info) {
+		if sessionOrderInfoIsUnmodifiedRecoveryCopy(info, dir) {
 			continue
 		}
 		topicID := strings.TrimSpace(info.TopicID)
@@ -5703,6 +5795,16 @@ func sessionInfoIsAutomaticRecovery(info agent.SessionInfo) bool {
 	return info.Recovered ||
 		strings.TrimSpace(info.RecoveryDigest) != "" ||
 		isAutomaticRecoverySessionPath(info.Path)
+}
+
+func sessionOrderInfoIsUnmodifiedRecoveryCopy(info agent.SessionOrderInfo, parentDir string) bool {
+	return sessionOrderInfoIsAutomaticRecovery(info) &&
+		agent.RecoveryBranchCoveredByParent(info.Path, parentDir)
+}
+
+func sessionInfoIsUnmodifiedRecoveryCopy(info agent.SessionInfo, parentDir string) bool {
+	return sessionInfoIsAutomaticRecovery(info) &&
+		agent.RecoveryBranchCoveredByParent(info.Path, parentDir)
 }
 
 func isAutomaticRecoverySessionPath(path string) bool {
@@ -6470,10 +6572,19 @@ func (a *App) topicTrashTargets(topicID string) ([]topicTrashTarget, error) {
 // topicSummary is used by ListProjectTree and mergeSessionInfos to track
 // per-topic turn count and last activity.
 type topicSummary struct {
-	turns            int
-	lastActivityAt   int64
-	hasNormalSession bool
-	hasRecoveryOnly  bool
+	turns                int
+	adoptedRecoveryTurns int
+	lastActivityAt       int64
+	hasNormalSession     bool
+	hasRecoveryOnly      bool
+	hasAdoptedRecovery   bool
+}
+
+func (s topicSummary) displayTurns() int {
+	if s.adoptedRecoveryTurns > s.turns {
+		return s.adoptedRecoveryTurns
+	}
+	return s.turns
 }
 
 // runtimeSessionStatus is one open or detached runtime session, as shown in
@@ -6500,7 +6611,7 @@ type runtimeSessionStatus struct {
 // reports open/running only for single-session topics, so it must not gate
 // topic existence.
 func topicHiddenAsRecoveryOnly(summary topicSummary, pinned bool, runtimeSessions []runtimeSessionStatus) bool {
-	if !summary.hasRecoveryOnly || summary.hasNormalSession || pinned {
+	if !summary.hasRecoveryOnly || summary.hasNormalSession || summary.hasAdoptedRecovery || pinned {
 		return false
 	}
 	for _, session := range runtimeSessions {
@@ -6720,7 +6831,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 				Label:          title,
 				TopicID:        id,
 				ProjectColor:   globalColor,
-				Turns:          summary.turns,
+				Turns:          summary.displayTurns(),
 				CreatedAt:      topicCreatedAtForTree(globalCreatedMap, id),
 				LastActivityAt: summary.lastActivityAt,
 				Open:           open,
@@ -6802,7 +6913,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 				Root:           p.Root,
 				TopicID:        tid,
 				ProjectColor:   p.Color,
-				Turns:          summary.turns,
+				Turns:          summary.displayTurns(),
 				CreatedAt:      topicCreatedAtForTree(createdMap, tid),
 				LastActivityAt: summary.lastActivityAt,
 				Open:           open,
@@ -7636,7 +7747,7 @@ func runningTabSessionGoal(sessionPath, fallback string) string {
 	if fallback == "" {
 		return ""
 	}
-	data, err := os.ReadFile(store.SessionGoalState(sessionPath))
+	data, err := readFileUTF8(store.SessionGoalState(sessionPath))
 	if err != nil {
 		return fallback
 	}
@@ -7870,12 +7981,16 @@ func mergeSessionInfos(dir string, infos []agent.SessionInfo, titles map[string]
 		summary := topicSummaries[key]
 		lastActivityAt := info.LastActivityAt.UnixMilli()
 		if sessionInfoIsAutomaticRecovery(info) {
-			// A conflict copy duplicates its original, so its turns would
-			// double-count — but its activity is real: once a tab adopts the
-			// copy as its live transcript, all new work lands here, and
-			// skipping it would freeze the topic's recency, unread state, and
-			// time filters at the original's last save.
-			summary.hasRecoveryOnly = true
+			// A covered conflict copy duplicates its parent, so its turns must not
+			// be added. Any branch with unique content keeps the topic visible.
+			if sessionInfoIsUnmodifiedRecoveryCopy(info, dir) {
+				summary.hasRecoveryOnly = true
+			} else {
+				summary.hasAdoptedRecovery = true
+				if info.Turns > summary.adoptedRecoveryTurns {
+					summary.adoptedRecoveryTurns = info.Turns
+				}
+			}
 			if lastActivityAt > summary.lastActivityAt {
 				summary.lastActivityAt = lastActivityAt
 			}

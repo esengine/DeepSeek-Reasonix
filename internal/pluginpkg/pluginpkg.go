@@ -17,6 +17,7 @@ import (
 	"sync"
 
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/frontmatter"
 )
 
@@ -140,7 +141,7 @@ func InstallRoot(reasonixHome, name string) string {
 
 func LoadState(reasonixHome string) (State, error) {
 	var st State
-	b, err := os.ReadFile(StatePath(reasonixHome))
+	b, err := fileencoding.ReadFileUTF8(StatePath(reasonixHome))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return State{Version: 1}, nil
@@ -466,7 +467,7 @@ func appendRootClaudeInstructions(root string, manifest *Manifest) {
 
 func appendClaudeSettingsHooks(root string, manifest *Manifest) []string {
 	path := filepath.Join(root, claudeSettingsPath)
-	body, err := os.ReadFile(path)
+	body, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return nil
 	}
@@ -558,7 +559,7 @@ func firstNonEmpty(values ...string) string {
 }
 
 func readJSONFile(path string, v any) error {
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return err
 	}
@@ -809,7 +810,7 @@ func parseSkillRef(path, stem string) (SkillRef, bool) {
 	if !IsValidName(stem) {
 		return SkillRef{}, false
 	}
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return SkillRef{}, false
 	}

@@ -20,6 +20,17 @@ func (s *closeTrackingSink) Close() {
 	s.closed.Store(true)
 }
 
+type blockingCloseTrackingSink struct {
+	closeTrackingSink
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingCloseTrackingSink) Emit(event.Event) {
+	close(s.entered)
+	<-s.release
+}
+
 func TestTabEventSinkSetBotSinkClosesPreviousSink(t *testing.T) {
 	sink := &tabEventSink{}
 	first := &closeTrackingSink{}
@@ -42,6 +53,54 @@ func TestTabEventSinkSetBotSinkClosesPreviousSink(t *testing.T) {
 	if !second.closed.Load() {
 		t.Fatal("second sink was not closed when cleared")
 	}
+}
+
+func TestTabEventSinkOldTurnDoneDoesNotClearReplacement(t *testing.T) {
+	sink := &tabEventSink{}
+	old := &blockingCloseTrackingSink{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	replacement := &closeTrackingSink{}
+
+	if !sink.tryBeginTurn() {
+		t.Fatal("failed to reserve initial turn")
+	}
+	sink.SetBotSink(old)
+	done := make(chan struct{})
+	go func() {
+		sink.Emit(event.Event{Kind: event.TurnDone})
+		close(done)
+	}()
+	select {
+	case <-old.entered:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("old forwarder did not receive TurnDone")
+	}
+
+	sink.SetBotSink(replacement)
+	if sink.tryBeginTurn() {
+		t.Fatal("new turn admitted before old TurnDone completed")
+	}
+	close(old.release)
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("TurnDone did not finish")
+	}
+
+	if replacement.closed.Load() {
+		t.Fatal("old TurnDone cleared the replacement forwarder")
+	}
+	got, _ := sink.botSinkSnapshot()
+	if got != replacement {
+		t.Fatalf("attached forwarder = %T, want replacement", got)
+	}
+	if !sink.tryBeginTurn() {
+		t.Fatal("next turn was not admitted after TurnDone completed")
+	}
+	sink.cancelTurnStart()
+	sink.SetBotSink(nil)
 }
 
 func TestTabEventSinkDoesNotBlockOnRuntimeEventsEmit(t *testing.T) {

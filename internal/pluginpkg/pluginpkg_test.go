@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 func TestParseCodexSuperpowersManifest(t *testing.T) {
@@ -40,6 +42,26 @@ func TestParseCodexSuperpowersManifest(t *testing.T) {
 	}
 	if skills, hooks, _ := pkg.CapabilityCounts(); skills != 1 || hooks != 1 {
 		t.Fatalf("CapabilityCounts skills=%d hooks=%d", skills, hooks)
+	}
+}
+
+func TestParseDirDecodesGB18030Manifest(t *testing.T) {
+	root := t.TempDir()
+	manifest := `{"name":"cn-plugin","version":"1.0.0","description":"中文插件"}`
+	path := filepath.Join(root, NativeManifest)
+	if err := os.WriteFile(path, fileencoding.Encode(manifest, fileencoding.GB18030), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pkg, warnings, err := ParseDir(root)
+	if err != nil {
+		t.Fatalf("ParseDir: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v", warnings)
+	}
+	if pkg.Manifest.Description != "中文插件" {
+		t.Fatalf("decoded manifest = %+v", pkg.Manifest)
 	}
 }
 

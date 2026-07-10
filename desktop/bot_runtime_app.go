@@ -76,12 +76,25 @@ func (a *App) refreshBotRuntime() {
 	if a.botRuntime == nil {
 		return
 	}
+	var watcherVersion uint64
+	if a.botBridge != nil {
+		watcherVersion = a.botBridge.watcherVersion()
+	}
 	cfg, err := a.loadDesktopBotConfig()
 	if err != nil {
 		a.botRuntime.stop("error", err.Error())
 		return
 	}
-	_ = a.botRuntime.apply(a.bootContext(), cfg, globalTabWorkspaceRoot(), a.persistRemoteBotToolApprovalMode)
+	// Assign through a typed local so a nil *botBridgeHub never becomes a
+	// non-nil bot.DesktopBridge interface inside the gateway config.
+	var bridge bot.DesktopBridge
+	if a.botBridge != nil {
+		// 配置是订阅的持久化事实源：每次运行时重算前重新种子，桌面重启后
+		// /desktop watch 的订阅继续生效。
+		a.botBridge.seedWatchers(bridgeRoutesFromConfig(cfg.Bot.DesktopWatchers), watcherVersion)
+		bridge = a.botBridge
+	}
+	_ = a.botRuntime.apply(a.bootContext(), cfg, globalTabWorkspaceRoot(), a.persistRemoteBotToolApprovalMode, bridge)
 }
 
 func (a *App) loadDesktopBotConfig() (*config.Config, error) {
@@ -109,7 +122,7 @@ func (a *App) BotRuntimeStatus() BotRuntimeStatusView {
 	return a.botRuntime.snapshot()
 }
 
-func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, workspaceRoot string, onToolApprovalModeChange func(bot.InboundMessage, string) error) error {
+func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, workspaceRoot string, onToolApprovalModeChange func(bot.InboundMessage, string) error, bridge bot.DesktopBridge) error {
 	if r == nil {
 		return nil
 	}
@@ -184,6 +197,7 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 		OnInbound:                botruntime.NewRemoteRememberer(logger),
 		OnSessionReady:           botruntime.NewSessionRemembererWithWorkspace(logger, workspaceRoot),
 		OnToolApprovalModeChange: onToolApprovalModeChange,
+		Desktop:                  bridge,
 	}
 	bindings := botruntime.AdapterBindings(cfg, plan.Enabled, nil, logger)
 	if len(bindings) == 0 {

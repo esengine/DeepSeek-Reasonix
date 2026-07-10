@@ -25,7 +25,7 @@ func zoomFactorPath() string {
 // back to 1.0 (no zoom) in that case.
 func loadZoomFactor() (float64, bool) {
 	path := zoomFactorPath()
-	data, err := os.ReadFile(path)
+	data, err := readFileUTF8(path)
 	if err != nil {
 		return 0, false
 	}

@@ -91,6 +91,11 @@ type ComposerDraft = {
   nextPasteId: number;
   historyIndex: number;
   savedText: string;
+  pendingGuidance: PendingGuidance[];
+  guidanceExpanded: boolean;
+  guidanceSendingId: number | null;
+  pendingPaste: number;
+  submitting: boolean;
 };
 
 type WebkitFileEntry = {
@@ -177,6 +182,11 @@ function emptyComposerDraft(): ComposerDraft {
     nextPasteId: 1,
     historyIndex: -1,
     savedText: "",
+    pendingGuidance: [],
+    guidanceExpanded: false,
+    guidanceSendingId: null,
+    pendingPaste: 0,
+    submitting: false,
   };
 }
 
@@ -199,6 +209,11 @@ function cloneComposerDraft(draft: ComposerDraft): ComposerDraft {
     nextPasteId: draft.nextPasteId,
     historyIndex: draft.historyIndex,
     savedText: draft.savedText,
+    pendingGuidance: draft.pendingGuidance.map((item) => ({ ...item })),
+    guidanceExpanded: draft.guidanceExpanded,
+    guidanceSendingId: draft.guidanceSendingId,
+    pendingPaste: draft.pendingPaste,
+    submitting: draft.submitting,
   };
 }
 
@@ -475,6 +490,7 @@ export function Composer({
   tabId,
   effort,
   onSend,
+  onSteer,
   onCancel,
   onCycleMode,
   onSetMode,
@@ -498,6 +514,7 @@ export function Composer({
   pendingAsk = false,
   transientDismissSignal,
   sessionKey,
+  workspaceScopeKey,
   fileRefRefreshKey,
   guidanceConsumedKey,
   guidanceConsumedText,
@@ -519,7 +536,8 @@ export function Composer({
   imageInputEnabled?: boolean;
   tabId?: string;
   effort?: EffortInfo;
-  onSend: (displayText: string, submitText?: string) => void | Promise<void>;
+  onSend: (displayText: string, submitText?: string, tabId?: string) => void | Promise<void>;
+  onSteer?: (submitText: string, tabId?: string) => void | Promise<void>;
   // Returns the un-sent text when cancelling before the server replied (so it can
   // be restored to the input); undefined for a normal cancel.
   onCancel: () => string | undefined;
@@ -552,6 +570,7 @@ export function Composer({
   pendingAsk?: boolean;
   transientDismissSignal?: number;
   sessionKey?: string;
+  workspaceScopeKey?: string;
   fileRefRefreshKey?: number | string;
   guidanceConsumedKey?: string;
   guidanceConsumedText?: string;
@@ -566,6 +585,7 @@ export function Composer({
   const { t, locale } = useI18n();
   const { showToast } = useToast();
   const shortcutPlatform = useMemo(() => detectShortcutPlatform(), []);
+  const draftKey = sessionKey || tabId || DEFAULT_COMPOSER_DRAFT_KEY;
   const now = useTick(running);
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -582,6 +602,7 @@ export function Composer({
   const [pastedBlocks, setPastedBlocks] = useState<PastedBlock[]>([]);
   const [openPastedLabels, setOpenPastedLabels] = useState<string[]>([]);
   const [pendingPaste, setPendingPaste] = useState(0);
+  const pendingPasteRef = useRef(0);
   const pastedBlocksRef = useRef<PastedBlock[]>([]);
   const nextPasteId = useRef(1);
   const [active, setActive] = useState(0);
@@ -602,6 +623,10 @@ export function Composer({
   const [pendingGuidance, setPendingGuidance] = useState<PendingGuidance[]>([]);
   const [guidanceExpanded, setGuidanceExpanded] = useState(false);
   const [guidanceSendingId, setGuidanceSendingId] = useState<number | null>(null);
+  const [guidanceDraftKey, setGuidanceDraftKey] = useState(draftKey);
+  const pendingGuidanceRef = useRef<PendingGuidance[]>([]);
+  const guidanceExpandedRef = useRef(false);
+  const guidanceSendingIdRef = useRef<number | null>(null);
   const nextGuidanceId = useRef(1);
   const [loadingPastChats, setLoadingPastChats] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -624,14 +649,16 @@ export function Composer({
   const moreMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const intentCloseTimerRef = useRef<number | null>(null);
   const moreCloseTimerRef = useRef<number | null>(null);
-  const wasRunning = useRef(running);
+  const wasRunningByDraftRef = useRef<Record<string, boolean>>({ [draftKey]: running });
   const composingRef = useRef(false);
   const lastCompositionEndAt = useRef(0);
   const lastSelectionRef = useRef({ start: 0, end: 0 });
-  const consumedInsertIdRef = useRef(0);
+  const consumedInsertIdByDraftRef = useRef<Record<string, number>>({});
   const lastTransientDismissSignal = useRef(transientDismissSignal);
-  const lastGuidanceConsumedKey = useRef(guidanceConsumedKey);
-  const selfDispatchedGuidanceRef = useRef<string[]>([]);
+  const lastGuidanceConsumedKeyByDraftRef = useRef<Record<string, string | undefined>>(
+    guidanceConsumedKey ? { [draftKey]: guidanceConsumedKey } : {},
+  );
+  const selfDispatchedGuidanceByDraftRef = useRef<Record<string, string[]>>({});
   const submittingRef = useRef(false);
   const nativeClipboardPasteTimerRef = useRef<number | null>(null);
   // Snapshot of the current cwd so async callbacks (openPastChats) can detect
@@ -640,7 +667,6 @@ export function Composer({
   cwdRef.current = cwd;
   const attachmentDedupRef = useRef(new DedupIndex());
   const attachmentDedupKeysRef = useRef<Record<string, AttachmentDedupKey>>({});
-  const draftKey = sessionKey || tabId || DEFAULT_COMPOSER_DRAFT_KEY;
   const guidanceQueuePreviewKey = (guidanceQueuePreviewItems ?? []).map((item) => item.trim()).filter(Boolean).join("\n");
   const draftsBySessionRef = useRef<Record<string, ComposerDraft>>({});
   const activeDraftKeyRef = useRef(draftKey);
@@ -655,6 +681,11 @@ export function Composer({
   pastedBlocksRef.current = pastedBlocks;
   openPastedLabelsRef.current = openPastedLabels;
   sessionRefsRef.current = sessionRefs;
+  pendingGuidanceRef.current = pendingGuidance;
+  guidanceExpandedRef.current = guidanceExpanded;
+  guidanceSendingIdRef.current = guidanceSendingId;
+  pendingPasteRef.current = pendingPaste;
+  submittingRef.current = submitting;
 
   const snapshotComposerDraft = (): ComposerDraft => ({
     text: textRef.current,
@@ -667,10 +698,20 @@ export function Composer({
     nextPasteId: nextPasteId.current,
     historyIndex: historyIndexRef.current,
     savedText: savedTextRef.current,
+    pendingGuidance: pendingGuidanceRef.current.map((item) => ({ ...item })),
+    guidanceExpanded: guidanceExpandedRef.current,
+    guidanceSendingId: guidanceSendingIdRef.current,
+    pendingPaste: pendingPasteRef.current,
+    submitting: submittingRef.current,
   });
 
   const restoreComposerDraft = (draft: ComposerDraft) => {
     const next = cloneComposerDraft(draft);
+    textRef.current = next.text;
+    attachmentsRef.current = next.attachments;
+    workspaceRefsRef.current = next.workspaceRefs;
+    openPastedLabelsRef.current = next.openPastedLabels;
+    sessionRefsRef.current = next.sessionRefs;
     setText(next.text);
     setAttachments(next.attachments);
     setWorkspaceRefs(next.workspaceRefs);
@@ -683,23 +724,97 @@ export function Composer({
     nextPasteId.current = next.nextPasteId;
     historyIndexRef.current = next.historyIndex;
     savedTextRef.current = next.savedText;
+    pendingGuidanceRef.current = next.pendingGuidance;
+    guidanceExpandedRef.current = next.guidanceExpanded;
+    guidanceSendingIdRef.current = next.guidanceSendingId;
+    pendingPasteRef.current = next.pendingPaste;
+    submittingRef.current = next.submitting;
+    setPendingGuidance(next.pendingGuidance);
+    setGuidanceExpanded(next.guidanceExpanded);
+    setGuidanceSendingId(next.guidanceSendingId);
+    setPendingPaste(next.pendingPaste);
+    setSubmitting(next.submitting);
     setHistoryIndex(next.historyIndex);
     lastSelectionRef.current = { start: next.text.length, end: next.text.length };
     setComposerPrompt(null);
     setShowPastChats(false);
     setPastChatQuery("");
+    setLoadingPastChats(false);
     setActive(0);
+    setInputMenuPoint(null);
+    setDragOver(false);
+    setImageViewer((current) => current.open ? { ...current, open: false } : current);
     setIntentMenuOpen(false);
     setIntentMenuClosing(false);
     setMoreMenuOpen(false);
     setMoreMenuClosing(false);
   };
 
+  const updatePendingGuidanceForDraft = (
+    targetDraftKey: string,
+    update: (items: PendingGuidance[]) => PendingGuidance[],
+  ) => {
+    if (targetDraftKey === activeDraftKeyRef.current) {
+      const next = update(pendingGuidanceRef.current);
+      pendingGuidanceRef.current = next;
+      setPendingGuidance(next);
+      return;
+    }
+    const draft = cloneComposerDraft(draftsBySessionRef.current[targetDraftKey] ?? emptyComposerDraft());
+    draft.pendingGuidance = update(draft.pendingGuidance);
+    draftsBySessionRef.current[targetDraftKey] = draft;
+  };
+
+  const updateGuidanceSendingIdForDraft = (targetDraftKey: string, next: number | null) => {
+    if (targetDraftKey === activeDraftKeyRef.current) {
+      guidanceSendingIdRef.current = next;
+      setGuidanceSendingId(next);
+      return;
+    }
+    const draft = cloneComposerDraft(draftsBySessionRef.current[targetDraftKey] ?? emptyComposerDraft());
+    draft.guidanceSendingId = next;
+    draftsBySessionRef.current[targetDraftKey] = draft;
+  };
+
+  const updatePendingPasteForDraft = (targetDraftKey: string, delta: number) => {
+    if (targetDraftKey === activeDraftKeyRef.current) {
+      const next = Math.max(0, pendingPasteRef.current + delta);
+      pendingPasteRef.current = next;
+      setPendingPaste(next);
+      return;
+    }
+    const draft = cloneComposerDraft(draftsBySessionRef.current[targetDraftKey] ?? emptyComposerDraft());
+    draft.pendingPaste = Math.max(0, draft.pendingPaste + delta);
+    draftsBySessionRef.current[targetDraftKey] = draft;
+  };
+
+  const updateSubmittingForDraft = (targetDraftKey: string, next: boolean) => {
+    if (targetDraftKey === activeDraftKeyRef.current) {
+      submittingRef.current = next;
+      setSubmitting(next);
+      return;
+    }
+    const draft = cloneComposerDraft(draftsBySessionRef.current[targetDraftKey] ?? emptyComposerDraft());
+    draft.submitting = next;
+    draftsBySessionRef.current[targetDraftKey] = draft;
+  };
+
+  const draftIsSubmitting = (targetDraftKey: string): boolean =>
+    targetDraftKey === activeDraftKeyRef.current
+      ? submittingRef.current
+      : Boolean(draftsBySessionRef.current[targetDraftKey]?.submitting);
+
+  const draftHasPendingPaste = (targetDraftKey: string): boolean =>
+    targetDraftKey === activeDraftKeyRef.current
+      ? pendingPasteRef.current > 0
+      : (draftsBySessionRef.current[targetDraftKey]?.pendingPaste ?? 0) > 0;
+
   useLayoutEffect(() => {
     const previousKey = activeDraftKeyRef.current;
     if (previousKey === draftKey) return;
     draftsBySessionRef.current[previousKey] = snapshotComposerDraft();
     activeDraftKeyRef.current = draftKey;
+    setGuidanceDraftKey(draftKey);
     restoreComposerDraft(draftsBySessionRef.current[draftKey] ?? emptyComposerDraft());
   }, [draftKey]);
 
@@ -718,7 +833,8 @@ export function Composer({
   useEffect(() => () => clearNativeClipboardPasteTimer(), []);
 
   useEffect(() => {
-    if (wasRunning.current && !running) {
+    const wasRunning = wasRunningByDraftRef.current[draftKey] ?? running;
+    if (wasRunning && !running) {
       setGuidanceExpanded(false);
       if (text.trim() === "") {
         pastedBlocksRef.current = [];
@@ -726,8 +842,8 @@ export function Composer({
         setOpenPastedLabels([]);
       }
     }
-    wasRunning.current = running;
-  }, [running, text]);
+    wasRunningByDraftRef.current[draftKey] = running;
+  }, [draftKey, running, text]);
 
   // A message queued while a turn was running (without the explicit "guide"
   // steer click) is the user's next turn, not scratch text to discard — send
@@ -740,26 +856,26 @@ export function Composer({
   // new turn, which flips `running` true then false again, re-running this
   // effect to drain the shelf one item at a time; a failed send is left in
   // place (dismissible via the trash button) rather than silently dropped.
+  // guidanceDraftKey identifies which session the rendered queue belongs to:
+  // during a tab switch React still renders once with the previous queue, and
+  // that stale render must never submit through the new session's onSend.
   useEffect(() => {
-    if (running || submitDisabled) return;
+    if (guidanceDraftKey !== draftKey || running || submitDisabled) return;
     const next = pendingGuidance[0];
-    if (next) void sendQueuedGuidance(next);
-  }, [running, submitDisabled, pendingGuidance]);
+    if (next) void sendQueuedGuidance(next, draftKey);
+  }, [draftKey, guidanceDraftKey, running, submitDisabled, pendingGuidance]);
 
   useEffect(() => {
-    setPendingGuidance([]);
+    if (guidanceDraftKey !== draftKey || !running || !guidanceQueuePreviewKey) return;
     setGuidanceExpanded(false);
-  }, [draftKey]);
-
-  useEffect(() => {
-    if (!running || !guidanceQueuePreviewKey) return;
-    setGuidanceExpanded(false);
-    setPendingGuidance(
-      guidanceQueuePreviewKey
-        .split("\n")
-        .map((text) => ({ id: nextGuidanceId.current++, text, submitText: text })),
+    updatePendingGuidanceForDraft(
+      draftKey,
+      () =>
+        guidanceQueuePreviewKey
+          .split("\n")
+          .map((text) => ({ id: nextGuidanceId.current++, text, submitText: text })),
     );
-  }, [guidanceQueuePreviewKey, running]);
+  }, [draftKey, guidanceDraftKey, guidanceQueuePreviewKey, running]);
 
   useEffect(() => {
     if (guidanceExpanded && pendingGuidance.length <= 2) setGuidanceExpanded(false);
@@ -843,6 +959,8 @@ export function Composer({
   const [searchEntries, setSearchEntries] = useState<DirEntry[]>([]);
   const dirCache = useRef<Record<string, DirEntry[]>>({});
   const searchCache = useRef<Record<string, FileRefSearchCacheEntry>>({});
+  const fileRefTabId = tabId ?? "";
+  const fileRefScopeKey = workspaceScopeKey ?? `${fileRefTabId}\u0000${cwd ?? ""}`;
 
   const clearFileRefState = useCallback(() => {
     dirCache.current = {};
@@ -857,16 +975,14 @@ export function Composer({
     setDismissed(false);
   }, []);
 
-  // When the workspace/project changes (cwd prop), invalidate all @ mention
-  // state so the picker reloads candidates for the new project. Without this,
-  // dirCache/searchCache retain entries from the old project and the picker
-  // shows stale results (issue #3601).
-  const prevCwdRef = useRef(cwd);
+  // Controller/session changes invalidate @ mention state even when tab and
+  // workspace identities stay the same (saved-session rebinds and rebuilds).
+  const prevFileRefScopeRef = useRef(fileRefScopeKey);
   useEffect(() => {
-    if (prevCwdRef.current === cwd) return; // skip mount — state already initial
-    prevCwdRef.current = cwd;
+    if (prevFileRefScopeRef.current === fileRefScopeKey) return;
+    prevFileRefScopeRef.current = fileRefScopeKey;
     clearFileRefState();
-  }, [clearFileRefState, cwd]);
+  }, [clearFileRefState, fileRefScopeKey]);
 
   const prevFileRefRefreshKeyRef = useRef(fileRefRefreshKey);
   useEffect(() => {
@@ -885,7 +1001,7 @@ export function Composer({
     }
     let live = true;
     app
-      .ListDir(atDir)
+      .ListDirForTab(fileRefTabId, atDir)
       .then((es) => {
         const list = asArray(es);
         if (!live) return;
@@ -898,7 +1014,7 @@ export function Composer({
     };
     // Re-fetch when the menu opens, the directory level changes, or the
     // workspace tree refreshes; cached data is only a fast first paint.
-  }, [atRaw === null, atDir, cwd, fileRefRefreshKey]);
+  }, [atRaw === null, atDir, fileRefRefreshKey, fileRefScopeKey, fileRefTabId]);
   useEffect(() => {
     if (atRaw === null || atDir !== "" || atFrag === "") {
       setSearchEntries([]);
@@ -913,7 +1029,7 @@ export function Composer({
     }
     let live = true;
     app
-      .SearchFileRefs(atFrag)
+      .SearchFileRefsForTab(fileRefTabId, atFrag)
       .then((es) => {
         const list = asArray(es);
         if (!live) return;
@@ -924,7 +1040,7 @@ export function Composer({
     return () => {
       live = false;
     };
-  }, [atRaw === null, atDir, atFrag, cwd, fileRefRefreshKey]);
+  }, [atRaw === null, atDir, atFrag, fileRefRefreshKey, fileRefScopeKey, fileRefTabId]);
   const atMatches = useMemo(
     () => {
       if (atRaw === null) return [];
@@ -981,19 +1097,22 @@ export function Composer({
     setDismissed(true);
   }, [transientDismissSignal]);
 
-  const takeSelfDispatchedGuidance = useCallback((text: string): boolean => {
-    const idx = selfDispatchedGuidanceRef.current.findIndex((queued) => guidanceTextMatches(queued, text));
+  const takeSelfDispatchedGuidance = useCallback((text: string, targetDraftKey: string): boolean => {
+    const selfDispatched = selfDispatchedGuidanceByDraftRef.current[targetDraftKey] ?? [];
+    const idx = selfDispatched.findIndex((queued) => guidanceTextMatches(queued, text));
     if (idx < 0) return false;
-    selfDispatchedGuidanceRef.current.splice(idx, 1);
+    selfDispatched.splice(idx, 1);
+    if (selfDispatched.length === 0) delete selfDispatchedGuidanceByDraftRef.current[targetDraftKey];
     return true;
   }, []);
 
   useEffect(() => {
-    if (!guidanceConsumedKey || guidanceConsumedKey === lastGuidanceConsumedKey.current) return;
-    lastGuidanceConsumedKey.current = guidanceConsumedKey;
+    if (guidanceDraftKey !== draftKey || !guidanceConsumedKey) return;
+    if (guidanceConsumedKey === lastGuidanceConsumedKeyByDraftRef.current[draftKey]) return;
+    lastGuidanceConsumedKeyByDraftRef.current[draftKey] = guidanceConsumedKey;
     const consumed = (guidanceConsumedText ?? "").trim();
-    if (consumed && takeSelfDispatchedGuidance(consumed)) return;
-    setPendingGuidance((items) => {
+    if (consumed && takeSelfDispatchedGuidance(consumed, draftKey)) return;
+    updatePendingGuidanceForDraft(draftKey, (items) => {
       if (items.length === 0) return items;
       const idx = consumed
         ? items.findIndex((item) => guidanceTextMatches(item.submitText, consumed) || guidanceTextMatches(item.text, consumed))
@@ -1001,7 +1120,7 @@ export function Composer({
       const removeAt = idx >= 0 ? idx : 0;
       return items.filter((_, index) => index !== removeAt);
     });
-  }, [guidanceConsumedKey, guidanceConsumedText, takeSelfDispatchedGuidance]);
+  }, [draftKey, guidanceDraftKey, guidanceConsumedKey, guidanceConsumedText, takeSelfDispatchedGuidance]);
 
   // When the @ trigger disappears (user deleted the @), close the past:chats
   // sub-menu and reset related state. Without this, showPastChats can outlive
@@ -1115,8 +1234,8 @@ export function Composer({
   };
 
   useEffect(() => {
-    if (!insertRequest || insertRequest.id === consumedInsertIdRef.current) return;
-    consumedInsertIdRef.current = insertRequest.id;
+    if (!insertRequest || insertRequest.id === consumedInsertIdByDraftRef.current[draftKey]) return;
+    consumedInsertIdByDraftRef.current[draftKey] = insertRequest.id;
     if (insertRequest.mode === "replace") {
       replaceComposerText(insertRequest.text);
       return;
@@ -1127,11 +1246,11 @@ export function Composer({
       return;
     }
     insertTextAtCaret(insertRequest.text);
-  }, [insertRequest]);
+  }, [draftKey, insertRequest]);
 
-  const expandPastedBlocks = (displayText: string): string => {
+  const expandPastedBlocks = (displayText: string, blocks = pastedBlocksRef.current): string => {
     let expanded = displayText;
-    for (const block of pastedBlocksRef.current) {
+    for (const block of blocks) {
       if (expanded.includes(block.label)) {
         expanded = expanded.split(block.label).join(renderPastedBlock(block));
       }
@@ -1297,11 +1416,13 @@ export function Composer({
   }, [showToast, t]);
 
   const submit = async () => {
-    if (disabled || (!running && submitDisabled) || readOnly || submittingRef.current) return;
+    if (disabled || (!running && submitDisabled) || readOnly) return;
     const submitDraftKey = activeDraftKeyRef.current;
+    const submitTabId = tabId;
+    if (draftIsSubmitting(submitDraftKey)) return;
     const currentText = textRef.current;
     const trimmedText = currentText.trim();
-    if (pendingPaste > 0) return;
+    if (draftHasPendingPaste(submitDraftKey)) return;
     if (!imageInputEnabled && hasImageAttachments(attachmentsRef.current)) {
       warnImageInputFallback();
     }
@@ -1315,8 +1436,7 @@ export function Composer({
       return;
     }
     setComposerPrompt(null);
-    submittingRef.current = true;
-    setSubmitting(true);
+    updateSubmittingForDraft(submitDraftKey, true);
     try {
       const orderedAttachments = sortComposerAttachments(currentAttachments);
       const refs = [
@@ -1333,47 +1453,60 @@ export function Composer({
       // original prompt in the input preview). With no refs we keep the original
       // submitText verbatim — no header, no rewording, byte-identical to pre-PR-B.
       const currentSessionRefs = sessionRefsRef.current;
+      const currentPastedBlocks = [...pastedBlocksRef.current];
       const sessionContext = currentSessionRefs.length === 0 ? "" : await buildSessionContext(currentSessionRefs);
-      const baseSubmitText = [expandPastedBlocks(trimmedText), refs].filter(Boolean).join(trimmedText && refs ? " " : "");
+      const baseSubmitText = [expandPastedBlocks(trimmedText, currentPastedBlocks), refs].filter(Boolean).join(trimmedText && refs ? " " : "");
       const submitText = sessionContext ? `${sessionContext}${baseSubmitText}` : baseSubmitText;
       if (running) {
         const guidanceText = displayText.trim();
         const guidanceSubmitText = submitText.trim();
         if (guidanceText) {
           const id = nextGuidanceId.current++;
-          setPendingGuidance((items) => [...items, { id, text: guidanceText, submitText: guidanceSubmitText || guidanceText }]);
+          updatePendingGuidanceForDraft(submitDraftKey, (items) => [
+            ...items,
+            { id, text: guidanceText, submitText: guidanceSubmitText || guidanceText },
+          ]);
         }
         clearSubmittedDraft(submitDraftKey);
         return;
       }
-      await onSend(displayText, submitText);
+      await onSend(displayText, submitText, submitTabId);
       clearSubmittedDraft(submitDraftKey);
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), "warn");
     } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
+      updateSubmittingForDraft(submitDraftKey, false);
     }
   };
 
-  const sendQueuedGuidance = async (item: PendingGuidance) => {
-    if (disabled || readOnly || guidanceSendingId !== null) return;
+  const sendQueuedGuidance = async (
+    item: PendingGuidance,
+    targetDraftKey = activeDraftKeyRef.current,
+    targetTabId = tabId,
+  ) => {
+    if (targetDraftKey !== activeDraftKeyRef.current || disabled || readOnly || guidanceSendingIdRef.current !== null) return;
     const displayText = item.text.trim();
     const submitText = item.submitText.trim() || displayText;
     if (!displayText || !submitText) return;
-    selfDispatchedGuidanceRef.current.push(submitText);
-    setGuidanceSendingId(item.id);
+    const selfDispatched = selfDispatchedGuidanceByDraftRef.current[targetDraftKey] ?? [];
+    selfDispatched.push(submitText);
+    selfDispatchedGuidanceByDraftRef.current[targetDraftKey] = selfDispatched;
+    updateGuidanceSendingIdForDraft(targetDraftKey, item.id);
     try {
-      await onSend(displayText, submitText);
-      setPendingGuidance((items) => items.filter((queued) => queued.id !== item.id));
+      if (running && onSteer) await onSteer(submitText, targetTabId);
+      else await onSend(displayText, submitText, targetTabId);
+      updatePendingGuidanceForDraft(targetDraftKey, (items) => items.filter((queued) => queued.id !== item.id));
       window.setTimeout(() => {
-        takeSelfDispatchedGuidance(submitText);
+        takeSelfDispatchedGuidance(submitText, targetDraftKey);
       }, 5000);
     } catch (error) {
-      takeSelfDispatchedGuidance(submitText);
+      takeSelfDispatchedGuidance(submitText, targetDraftKey);
       showToast(error instanceof Error ? error.message : String(error), "warn");
     } finally {
-      setGuidanceSendingId((current) => (current === item.id ? null : current));
+      const current = targetDraftKey === activeDraftKeyRef.current
+        ? guidanceSendingIdRef.current
+        : draftsBySessionRef.current[targetDraftKey]?.guidanceSendingId;
+      if (current === item.id) updateGuidanceSendingIdForDraft(targetDraftKey, null);
     }
   };
 
@@ -1389,7 +1522,7 @@ export function Composer({
     const images = files.filter((f) => f.type.startsWith("image/"));
     if (images.length === 0) return;
     for (const file of images) {
-      setPendingPaste((n) => n + 1);
+      updatePendingPasteForDraft(sourceDraftKey, 1);
       try {
         const key = await fileDedupKey(file);
         if (attachmentSeenInDraft(sourceDraftKey, key)) continue;
@@ -1402,7 +1535,7 @@ export function Composer({
         showToast(t("composer.attachImageFailed"), "warn");
         // non-fatal: a failed image attach must not block normal text input
       } finally {
-        setPendingPaste((n) => Math.max(0, n - 1));
+        updatePendingPasteForDraft(sourceDraftKey, -1);
       }
     }
   };
@@ -1413,7 +1546,7 @@ export function Composer({
     const others = files.filter((f) => !f.type.startsWith("image/"));
     if (others.length === 0) return;
     for (const file of others) {
-      setPendingPaste((n) => n + 1);
+      updatePendingPasteForDraft(sourceDraftKey, 1);
       try {
         const key = await fileDedupKey(file);
         if (attachmentSeenInDraft(sourceDraftKey, key)) continue;
@@ -1425,7 +1558,7 @@ export function Composer({
         showToast(t("composer.attachFileFailed"), "warn");
         // non-fatal: a failed attach must not block normal text input
       } finally {
-        setPendingPaste((n) => Math.max(0, n - 1));
+        updatePendingPasteForDraft(sourceDraftKey, -1);
       }
     }
   };
@@ -1437,7 +1570,7 @@ export function Composer({
   };
 
   const attachNativeClipboardImage = async (notifyOnError: boolean, sourceDraftKey: string) => {
-    setPendingPaste((n) => n + 1);
+    updatePendingPasteForDraft(sourceDraftKey, 1);
     try {
       const path = await app.SaveClipboardImage();
       const previewUrl = await app.AttachmentDataURL(path);
@@ -1448,7 +1581,7 @@ export function Composer({
       console.warn("[composer] failed to read native clipboard image", error);
       if (notifyOnError) showToast(t("composer.pasteImageFailed"), "warn");
     } finally {
-      setPendingPaste((n) => Math.max(0, n - 1));
+      updatePendingPasteForDraft(sourceDraftKey, -1);
     }
   };
 
@@ -1458,7 +1591,7 @@ export function Composer({
   const attachDroppedPaths = async (paths: string[], sourceDraftKey = activeDraftKeyRef.current) => {
     setDragOver(false);
     for (const path of paths) {
-      setPendingPaste((n) => n + 1);
+      updatePendingPasteForDraft(sourceDraftKey, 1);
       try {
         const key = { hash: "", source: `path:${path}` };
         if (attachmentSeenInDraft(sourceDraftKey, key)) continue;
@@ -1473,7 +1606,7 @@ export function Composer({
         showToast(t("composer.attachDropFailed"), "warn");
         // non-fatal: a failed drop attach must not block normal text input
       } finally {
-        setPendingPaste((n) => Math.max(0, n - 1));
+        updatePendingPasteForDraft(sourceDraftKey, -1);
       }
     }
   };
@@ -1567,28 +1700,65 @@ export function Composer({
     });
   };
 
-  const replaceInputRange = (value: string, start: number, end: number) => {
-    const next = text.slice(0, start) + value + text.slice(end);
-    setText(next);
-    focusInputRange(start + value.length);
+  const replaceInputRange = (
+    value: string,
+    start: number,
+    end: number,
+    targetDraftKey = activeDraftKeyRef.current,
+  ) => {
+    if (targetDraftKey === activeDraftKeyRef.current) {
+      const current = textRef.current;
+      const next = current.slice(0, start) + value + current.slice(end);
+      textRef.current = next;
+      setText(next);
+      focusInputRange(start + value.length);
+      return;
+    }
+    const draft = cloneComposerDraft(draftsBySessionRef.current[targetDraftKey] ?? emptyComposerDraft());
+    draft.text = draft.text.slice(0, start) + value + draft.text.slice(end);
+    draftsBySessionRef.current[targetDraftKey] = draft;
   };
 
-  const insertPastedText = (pasted: string, start: number, end: number) => {
+  const insertPastedText = (
+    pasted: string,
+    start: number,
+    end: number,
+    targetDraftKey = activeDraftKeyRef.current,
+  ) => {
     const normalizedPasted = pasted.replace(/\r\n/g, "\n");
+    if (targetDraftKey !== activeDraftKeyRef.current) {
+      const draft = cloneComposerDraft(draftsBySessionRef.current[targetDraftKey] ?? emptyComposerDraft());
+      if (shouldFoldPaste(pasted)) {
+        const id = draft.nextPasteId++;
+        const lines = lineCount(pasted);
+        const label = t("composer.pastedLabel", { id, lines });
+        draft.pastedBlocks = [...draft.pastedBlocks, { label, text: pasted }];
+        draft.text = draft.text.slice(0, start) + label + draft.text.slice(end);
+      } else {
+        draft.historyIndex = -1;
+        draft.text = draft.text.slice(0, start) + normalizedPasted + draft.text.slice(end);
+      }
+      draftsBySessionRef.current[targetDraftKey] = draft;
+      return;
+    }
 
     if (shouldFoldPaste(pasted)) {
       const id = nextPasteId.current++;
       const lines = lineCount(pasted);
       const label = t("composer.pastedLabel", { id, lines });
       const block: PastedBlock = { label, text: pasted };
-      const next = text.slice(0, start) + label + text.slice(end);
+      const current = textRef.current;
+      const next = current.slice(0, start) + label + current.slice(end);
       pastedBlocksRef.current = [...pastedBlocksRef.current, block];
       setPastedBlocks((prev) => [...prev, block]);
+      textRef.current = next;
       setText(next);
       focusInputRange(start + label.length);
     } else {
       resetPromptHistoryNavigation();
-      const next = text.slice(0, start) + normalizedPasted + text.slice(end);
+      const current = textRef.current;
+      const next = current.slice(0, start) + normalizedPasted + current.slice(end);
+      textRef.current = next;
       setText(next);
       focusInputRange(start + normalizedPasted.length);
     }
@@ -1596,6 +1766,7 @@ export function Composer({
 
   const copyComposerSelection = async (cut = false) => {
     const selection = getInputSelection();
+    const sourceDraftKey = activeDraftKeyRef.current;
     setInputMenuPoint(null);
     if (!selection.selected) {
       focusInputRange(selection.from, selection.to);
@@ -1611,31 +1782,32 @@ export function Composer({
         } else if (!fallbackCopyText(selection.selected)) {
           // Every clipboard path failed. Cutting now would delete text that
           // never reached the clipboard, so keep the draft intact.
-          focusInputRange(selection.from, selection.to);
+          if (sourceDraftKey === activeDraftKeyRef.current) focusInputRange(selection.from, selection.to);
           return;
         }
       } catch {
-        focusInputRange(selection.from, selection.to);
+        if (sourceDraftKey === activeDraftKeyRef.current) focusInputRange(selection.from, selection.to);
         return;
       }
     }
     if (cut) {
-      resetPromptHistoryNavigation();
-      replaceInputRange("", selection.from, selection.to);
-    } else {
+      if (sourceDraftKey === activeDraftKeyRef.current) resetPromptHistoryNavigation();
+      replaceInputRange("", selection.from, selection.to, sourceDraftKey);
+    } else if (sourceDraftKey === activeDraftKeyRef.current) {
       focusInputRange(selection.from, selection.to);
     }
   };
 
   const pasteIntoComposer = async () => {
     const selection = getInputSelection();
+    const sourceDraftKey = activeDraftKeyRef.current;
     setInputMenuPoint(null);
 
     // Try reading clipboard items for image detection (no event in menu path)
     try {
       const items = await navigator.clipboard.read();
       if (items.some((item) => item.types.some((t) => t.startsWith("image/")))) {
-        void attachNativeClipboardImage(true, activeDraftKeyRef.current);
+        void attachNativeClipboardImage(true, sourceDraftKey);
         return;
       }
     } catch {
@@ -1643,7 +1815,7 @@ export function Composer({
     }
 
     if (!navigator.clipboard?.readText) {
-      focusInputRange(selection.from, selection.to);
+      if (sourceDraftKey === activeDraftKeyRef.current) focusInputRange(selection.from, selection.to);
       return;
     }
     try {
@@ -1653,13 +1825,13 @@ export function Composer({
         // to insert" (empty clipboard, files, or unsupported types) — never
         // replace the current selection with nothing. An image may still be
         // attachable through the native clipboard path.
-        focusInputRange(selection.from, selection.to);
-        void attachNativeClipboardImage(false, activeDraftKeyRef.current);
+        if (sourceDraftKey === activeDraftKeyRef.current) focusInputRange(selection.from, selection.to);
+        void attachNativeClipboardImage(false, sourceDraftKey);
         return;
       }
-      insertPastedText(pasted, selection.from, selection.to);
+      insertPastedText(pasted, selection.from, selection.to, sourceDraftKey);
     } catch {
-      focusInputRange(selection.from, selection.to);
+      if (sourceDraftKey === activeDraftKeyRef.current) focusInputRange(selection.from, selection.to);
     }
   };
 
@@ -1748,16 +1920,16 @@ export function Composer({
   const handleCancel = () => {
     const restored = onCancel();
     if (goalModeOn && activeGoal) onClearGoal();
-    // Queued guidance the model never consumed would otherwise vanish when the
-    // cancelled turn ends (the running→false effect clears the shelf). Fold it
-    // back into the draft: cancelling means "stop acting", not "discard what I
-    // typed" — the same contract onCancel already honors for un-sent text.
+    // A user-requested cancel must not let the natural-completion effect submit
+    // the queued follow-up. Fold it back into the draft: cancelling means "stop
+    // acting", not "discard what I typed" — the same contract onCancel already
+    // honors for un-sent text.
     const queued = pendingGuidance.map((item) => item.text).filter((part) => part.trim() !== "");
     if (queued.length === 0) {
       if (typeof restored === "string") setTextCaretEnd(restored);
       return;
     }
-    setPendingGuidance([]);
+    updatePendingGuidanceForDraft(activeDraftKeyRef.current, () => []);
     setGuidanceExpanded(false);
     const base = typeof restored === "string" ? restored : text;
     setTextCaretEnd([base, ...queued].filter((part) => part.trim() !== "").join("\n"));
@@ -1927,6 +2099,7 @@ export function Composer({
   // --- past:chats session reference ---
   const openPastChats = async () => {
     const snapshotCwd = cwdRef.current;
+    const sourceDraftKey = activeDraftKeyRef.current;
     setShowPastChats(true);
     setActive(0);
     setPastChatQuery("");
@@ -1934,7 +2107,7 @@ export function Composer({
     try {
       const sessions = await app.ListSessions();
       // Discard stale response if workspace changed while the request was in-flight.
-      if (cwdRef.current !== snapshotCwd) return;
+      if (cwdRef.current !== snapshotCwd || activeDraftKeyRef.current !== sourceDraftKey) return;
       const sorted = asArray(sessions)
         .filter((s) => !s.current)
         .sort((a, b) => {
@@ -1945,10 +2118,10 @@ export function Composer({
         .slice(0, 50);
       setPastChats(sorted);
     } catch {
-      if (cwdRef.current !== snapshotCwd) return;
+      if (cwdRef.current !== snapshotCwd || activeDraftKeyRef.current !== sourceDraftKey) return;
       setPastChats([]);
     } finally {
-      if (cwdRef.current === snapshotCwd) setLoadingPastChats(false);
+      if (cwdRef.current === snapshotCwd && activeDraftKeyRef.current === sourceDraftKey) setLoadingPastChats(false);
     }
   };
 
@@ -2130,18 +2303,20 @@ export function Composer({
 
     if (canUseCurrentPromptHistory()) {
       e.preventDefault();
+      const sourceDraftKey = activeDraftKeyRef.current;
       void (async () => {
-        // Use refs for all mutable reads inside the async closure so rapid
-        // successive key presses always see the latest values.
+        // Keep the navigation result with the draft where the key was pressed;
+        // loading older history may outlive a tab switch.
         if (historyIndexRef.current === -1) {
           savedTextRef.current = text; // save current draft
         }
+        const sourceIndex = historyIndexRef.current;
         const target =
           historyDirection === "up"
-            ? historyIndexRef.current + 1
+            ? sourceIndex + 1
             : historyDirection === "down"
-              ? historyIndexRef.current - 1
-              : historyIndexRef.current;
+              ? sourceIndex - 1
+              : sourceIndex;
         if (target >= historyEntriesRef.current.length && !(await ensurePromptHistoryIndex(target))) {
           return;
         }
@@ -2150,16 +2325,20 @@ export function Composer({
             ? Math.min(target, historyEntriesRef.current.length - 1)
             : historyDirection === "down"
               ? Math.max(target, -1)
-              : historyIndexRef.current;
-        historyIndexRef.current = next;
-        setHistoryIndex(next);
-        if (next === -1) {
-          setTextCaretEnd(savedTextRef.current);
+              : sourceIndex;
+        const historyText = next === -1 ? null : historyEntriesRef.current[next]?.text ?? "";
+        if (sourceDraftKey === activeDraftKeyRef.current) {
+          historyIndexRef.current = next;
+          setHistoryIndex(next);
+          setTextCaretEnd(historyText ?? savedTextRef.current);
         } else {
-          setTextCaretEnd(historyEntriesRef.current[next].text);
-          if (historyDirection === "up" && historyEntriesRef.current.length - 1 - next <= PROMPT_HISTORY_PREFETCH_REMAINING) {
-            prefetchPromptHistoryTail();
-          }
+          const draft = cloneComposerDraft(draftsBySessionRef.current[sourceDraftKey] ?? emptyComposerDraft());
+          draft.historyIndex = next;
+          draft.text = historyText ?? draft.savedText;
+          draftsBySessionRef.current[sourceDraftKey] = draft;
+        }
+        if (historyDirection === "up" && historyEntriesRef.current.length - 1 - next <= PROMPT_HISTORY_PREFETCH_REMAINING) {
+          prefetchPromptHistoryTail();
         }
       })();
       return;
@@ -2656,7 +2835,10 @@ export function Composer({
                     type="button"
                     aria-label={t("composer.guidanceDismiss")}
                     disabled={guidanceSendingId === item.id}
-                    onClick={() => setPendingGuidance((items) => items.filter((queued) => queued.id !== item.id))}
+                    onClick={() => updatePendingGuidanceForDraft(
+                      activeDraftKeyRef.current,
+                      (items) => items.filter((queued) => queued.id !== item.id),
+                    )}
                   >
                     <Trash2 size={14} />
                   </button>

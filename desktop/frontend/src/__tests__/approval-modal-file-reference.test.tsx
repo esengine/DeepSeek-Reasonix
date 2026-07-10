@@ -86,6 +86,8 @@ function mockApp(methods: Partial<AppBindings>) {
     main: {
       App: {
         ...methods,
+        ListDirForTab: methods.ListDirForTab ?? (async (_tabId: string, rel: string) => methods.ListDir?.(rel) ?? []),
+        SearchFileRefsForTab: methods.SearchFileRefsForTab ?? (async (_tabId: string, query: string) => methods.SearchFileRefs?.(query) ?? []),
       } as Partial<AppBindings> as AppBindings,
     },
   };
@@ -105,6 +107,7 @@ async function renderApproval(props: Partial<Parameters<typeof ApprovalModal>[0]
   let currentProps: Parameters<typeof ApprovalModal>[0] = {
     approval,
     cwd: "/repo",
+    tabId: "tab-a",
     onAnswer: () => undefined,
     onRevisePlan: (text) => revisions.push(text),
     onExitPlan: () => undefined,
@@ -131,9 +134,13 @@ console.log("\napproval modal file references");
 
 {
   const dom = installDom("en-US");
+  const fileScopeCalls: string[] = [];
   mockApp({
-    ListDir: async () => [{ name: "src", isDir: true }, { name: "README.md", isDir: false }],
-    SearchFileRefs: async () => [],
+    ListDirForTab: async (tabId) => {
+      fileScopeCalls.push(tabId);
+      return [{ name: "src", isDir: true }, { name: "README.md", isDir: false }];
+    },
+    SearchFileRefsForTab: async () => [],
   });
   const { root, revisions, rerender } = await renderApproval();
 
@@ -152,6 +159,7 @@ console.log("\napproval modal file references");
   await waitFor("plan revision @ text opens file suggestions", () => document.body.textContent?.includes("README.md") === true);
 
   ok(document.body.textContent?.includes("README.md") === true, "plan revision @ text opens file suggestions");
+  ok(fileScopeCalls.every((tabId) => tabId === "tab-a"), "plan revision file suggestions stay scoped to the active tab");
 
   const readmeButton = Array.from(document.querySelectorAll(".slashmenu__item")).find((button) => button.textContent?.includes("README.md")) as HTMLButtonElement | undefined;
   if (!readmeButton) throw new Error("README file suggestion did not render");
@@ -476,6 +484,45 @@ console.log("\napproval modal file references");
     await flushTimers();
   });
   eq(JSON.stringify(answers), JSON.stringify([{ allow: false, session: false, persist: false }]), "sandbox escape numeric 3 denies");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom("en-US");
+  const pending: Array<(entries: Array<{ name: string; isDir: boolean }>) => void> = [];
+  mockApp({
+    ListDirForTab: async () => new Promise((resolve) => pending.push(resolve)),
+    SearchFileRefsForTab: async () => [],
+  });
+  const { root, rerender } = await renderApproval({ workspaceScopeKey: "session-a" });
+
+  const reviseButton = Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.includes("Revise plan")) as HTMLButtonElement | undefined;
+  if (!reviseButton) throw new Error("revise button did not render");
+  await act(async () => {
+    reviseButton.click();
+    await flushTimers();
+  });
+  await rerender({ insertRequest: { id: 20, text: "inspect @" } });
+  await waitFor("initial approval session scope request", () => pending.length === 1);
+  await rerender({ workspaceScopeKey: "session-b" });
+  await waitFor("next approval session scope request", () => pending.length === 2);
+
+  await act(async () => {
+    pending[1]([{ name: "current-plan-file.ts", isDir: false }]);
+    await flushTimers();
+  });
+  await waitFor("current approval session file result", () => document.body.textContent?.includes("current-plan-file.ts") === true);
+
+  await act(async () => {
+    pending[0]([{ name: "stale-plan-file.ts", isDir: false }]);
+    await flushTimers();
+  });
+  ok(document.body.textContent?.includes("current-plan-file.ts") === true, "current approval session file refs stay visible");
+  ok(document.body.textContent?.includes("stale-plan-file.ts") === false, "late approval session file refs are ignored");
 
   await act(async () => {
     root.unmount();

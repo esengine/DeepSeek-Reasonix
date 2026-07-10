@@ -176,7 +176,7 @@ Token 模式会在终端打印带 `?token=...` 的分享链接；可通过 `--to
 ```bash
 reasonix serve --hash-password --password 'strong-password'
 
-# ~/.reasonix/config.toml
+# <Reasonix home>/config.toml
 [serve]
 auth_mode = "password" # none|token|password
 password_hash = "$2a$12$..."

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/provider"
 	"reasonix/internal/store"
 )
@@ -428,7 +429,7 @@ func readSessionEventIndex(sessionPath string) (*sessionEventIndex, error) {
 	if path == "" {
 		return nil, nil
 	}
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return nil, err
 	}

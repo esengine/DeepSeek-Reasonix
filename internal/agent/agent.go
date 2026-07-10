@@ -1028,6 +1028,13 @@ func usageSourceOrDefault(source, fallback string) string {
 // a round count. A positive maxSteps imposes an optional hard guard, surfaced as
 // a resumable notice when hit.
 func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
+	turnStartedAt := time.Now()
+	workDurationMs := func() int64 {
+		if elapsed := time.Since(turnStartedAt).Milliseconds(); elapsed > 0 {
+			return elapsed
+		}
+		return 1
+	}
 	defer a.clearSteerQueue()
 	a.steerMu.Lock()
 	a.steerConsumed = false
@@ -1127,6 +1134,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 						ReasoningContent:   reasoning,
 						ReasoningSignature: signature,
 						MemoryCitations:    a.memoryCitations(),
+						WorkDurationMs:     workDurationMs(),
 					})
 				}
 				a.session.Add(provider.Message{
@@ -1166,6 +1174,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			ReasoningSignature: signature,
 			ToolCalls:          calls,
 			MemoryCitations:    a.memoryCitations(),
+			WorkDurationMs:     workDurationMs(),
 		})
 
 		if len(calls) == 0 {
@@ -1256,14 +1265,14 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	return &maxStepsPause{steps: a.maxSteps, key: a.maxStepsKey}
 }
 
-// warnMissingToolCallReasoning surfaces a DeepSeek thinking-mode tool_calls
-// turn that arrived without reasoning text — usually a gateway renaming or
-// dropping the reasoning field. The turn is still saved and the replay still
-// succeeds (the wire layer always emits the reasoning_content key for such
-// turns), but the model continues without its chain-of-thought context, so the
-// degradation is worth a visible warning.
+// warnMissingToolCallReasoning surfaces a thinking-mode tool_calls turn that
+// arrived without reasoning text only when the provider/model is expected to
+// emit it. The turn is still saved and the replay still succeeds (the wire
+// layer can conservatively emit the reasoning_content key), but models that do
+// rely on tool-call reasoning continue without their chain-of-thought context,
+// so that degradation is worth a visible warning.
 func (a *Agent) warnMissingToolCallReasoning(calls []provider.ToolCall, reasoning string) {
-	if len(calls) == 0 || !provider.RequiresToolCallReasoning(a.prov) {
+	if len(calls) == 0 || !provider.WarnOnMissingToolCallReasoning(a.prov) {
 		return
 	}
 	if strings.TrimSpace(reasoning) != "" {

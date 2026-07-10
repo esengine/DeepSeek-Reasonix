@@ -2038,6 +2038,12 @@ a[href] {
   overflow: hidden;
 }
 
+/* Windows window movement belongs to the dedicated chrome surfaces. Keep the
+   navigation sidebar and its adjacent resize handle out of the native drag path. */
+.app--windows .sidebar {
+  --wails-draggable: no-drag;
+}
+
 .app--darwin .sidebar {
   transform: translateX(0);
   opacity: 1;
@@ -4157,28 +4163,64 @@ a[href] {
   from { background-position: -40% 0; }
   to { background-position: 140% 0; }
 }
+.reasoning {
+  margin: 2px 0 4px;
+}
 .reasoning__head {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
+  gap: 6px;
+  min-height: 24px;
+  padding: 2px 7px;
   border: none;
   background: none;
   cursor: pointer;
   font-size: 13px;
+  font-weight: 560;
   color: var(--fg-faint);
-  border-radius: 4px;
+  border-radius: 6px;
   -webkit-app-region: no-drag;
 }
 .reasoning__head:hover {
   color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+}
+.reasoning__head > svg:first-child {
+  color: color-mix(in srgb, var(--fg-faint) 88%, transparent);
+}
+.reasoning__meta {
+  color: color-mix(in srgb, var(--fg-faint) 88%, transparent);
+  font-weight: 500;
 }
 .reasoning__chevron {
   flex: 0 0 auto;
+  color: color-mix(in srgb, var(--fg-faint) 76%, transparent);
   transition: transform 0.2s;
 }
 .reasoning__chevron--open {
   transform: rotate(90deg);
+}
+
+.turn-collapse__reasoning-phase {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.turn-collapse__reasoning-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  color: var(--fg-faint);
+  font-size: 13px;
+  font-weight: 560;
+  line-height: 1.4;
+}
+
+.turn-collapse__reasoning-head > svg:first-child {
+  color: color-mix(in srgb, var(--fg-faint) 88%, transparent);
 }
 
 .msg-memory-citations {
@@ -4248,7 +4290,8 @@ a[href] {
 
 /* ── Shimmer sweep for running items ──────────────────────────────── */
 .tool__head[data-running],
-.reasoning__head[data-running] {
+.reasoning__head[data-running],
+.turn-collapse__reasoning-head[data-running] {
   background: linear-gradient(
     105deg,
     var(--fg-faint) 0%,
@@ -4268,7 +4311,8 @@ a[href] {
 .tool__head[data-running] .tool__chevron,
 .tool__head[data-running] .tool__duration,
 .reasoning__head[data-running] svg,
-.reasoning__head[data-running] .reasoning__meta {
+.reasoning__head[data-running] .reasoning__meta,
+.turn-collapse__reasoning-head[data-running] svg {
   color: var(--fg-faint);
 }
 .tool__head[data-running]:hover,
@@ -4435,15 +4479,17 @@ a[href] {
   color: var(--fg-faint);
   background: var(--fg-faint);
 }
-.reasoning__body {
+.reasoning__body,
+.turn-collapse__inline-reasoning {
   overflow: hidden;
-  border-left: 2px solid var(--border);
+  margin: 2px 0 6px 8px;
+  border-left: 2px solid color-mix(in srgb, var(--border) 82%, transparent);
   padding-left: 12px;
-  color: var(--fg-dim);
+  color: color-mix(in srgb, var(--fg-dim) 78%, transparent);
   font-family: var(--font-content-family);
   font-size: var(--font-control);
-  font-style: italic;
-  line-height: 1.7;
+  font-style: normal;
+  line-height: 1.72;
   white-space: pre-wrap;
 }
 /* ── markdown prose ──────────────────────────────────────────────────────── */
@@ -28812,7 +28858,9 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .app--creation .reasoning__body,
-:root[data-theme-style] .app--creation .reasoning__body {
+.app--creation .turn-collapse__inline-reasoning,
+:root[data-theme-style] .app--creation .reasoning__body,
+:root[data-theme-style] .app--creation .turn-collapse__inline-reasoning {
   font-family: "Source Han Sans CN", "Source Han Sans SC", "Noto Sans CJK SC",
     "Source Han Sans", "思源黑体", "Source Han Sans HC", "Microsoft YaHei UI",
     "Microsoft YaHei", sans-serif;

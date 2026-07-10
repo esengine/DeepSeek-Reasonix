@@ -3,7 +3,7 @@
 // before a tool approval prompt is shown, UserPromptSubmit before a turn, Stop
 // after it. Hooks come from settings.json — a project
 // (.reasonix/settings.json, only when the project is trusted) and a global
-// (~/.reasonix/settings.json) file. A hook's exit
+// (<Reasonix home>/settings.json) file. A hook's exit
 // code is its verdict: 0 = pass, 2 = block (only on the gating events), other =
 // warn. The payload is delivered as JSON on stdin; output is captured (capped)
 // and surfaced to the user. This package only loads, matches, and runs hooks;
@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"reasonix/internal/config"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/pluginpkg"
 	"reasonix/internal/proc"
 	"reasonix/internal/secrets"
@@ -202,7 +203,7 @@ func ProjectDefinesHooks(projectRoot string) bool {
 }
 
 func readSettings(path string) *Settings {
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return nil
 	}
@@ -511,7 +512,7 @@ func runResolvedHook(ctx context.Context, h ResolvedHook, in SpawnInput, spawner
 }
 
 func readContextFile(path string) SpawnResult {
-	body, err := os.ReadFile(path)
+	body, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return SpawnResult{ExitCode: -1, SpawnErr: err}
 	}

@@ -3,12 +3,12 @@ package installsource
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"reasonix/internal/config"
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 // mcpEntryAction assembles the DTO for a single MCP server install. The
@@ -148,7 +148,7 @@ func (t *installSourceTool) packageMCPAction(req request) action {
 // convenience wrapper used by planLocal; the parser itself is exported as
 // parseMCPJSON for tests.
 func readMCPJSON(path string) ([]config.PluginEntry, []string, error) {
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return nil, nil, err
 	}

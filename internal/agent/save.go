@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/provider"
 	"reasonix/internal/secrets"
 	"reasonix/internal/store"
@@ -1294,7 +1295,7 @@ func ListCleanupPending(dir string) ([]CleanupPendingInfo, error) {
 		}
 		markerPath := filepath.Join(dir, e.Name())
 		var meta CleanupPendingMeta
-		b, err := os.ReadFile(markerPath)
+		b, err := fileencoding.ReadFileUTF8(markerPath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue

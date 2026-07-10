@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"reasonix/internal/config"
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 func writeSkill(t *testing.T, base, rel, content string) string {
@@ -19,6 +20,18 @@ func writeSkill(t *testing.T, base, rel, content string) string {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return full
+}
+
+func writeSkillBytes(t *testing.T, base, rel string, content []byte) string {
+	t.Helper()
+	full := filepath.Join(base, rel)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, content, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return full
@@ -65,6 +78,19 @@ func TestListPrecedenceProjectOverGlobal(t *testing.T) {
 	}
 	if _, ok := find(list, "onlyglobal"); !ok {
 		t.Fatal("global-only skill should be discovered")
+	}
+}
+
+func TestListDecodesGB18030SkillFile(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	body := "---\ndescription: 中文技能\n---\n用中文处理任务。"
+	writeSkillBytes(t, root, filepath.Join("cn", SkillFile), fileencoding.Encode(body, fileencoding.GB18030))
+
+	st := New(Options{HomeDir: home, CustomPaths: []string{root}, DisableBuiltins: true})
+	skills := st.List()
+	if len(skills) != 1 || skills[0].Description != "中文技能" || !strings.Contains(skills[0].Body, "用中文处理任务") {
+		t.Fatalf("decoded skills = %+v", skills)
 	}
 }
 

@@ -202,7 +202,7 @@ Token mode prints a share URL with `?token=...`; pass `--token` or set
 ```bash
 reasonix serve --hash-password --password 'strong-password'
 
-# ~/.reasonix/config.toml
+# <Reasonix home>/config.toml
 [serve]
 auth_mode = "password" # none|token|password
 password_hash = "$2a$12$..."

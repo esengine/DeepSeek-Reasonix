@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 )
@@ -64,6 +65,7 @@ type Config struct {
 	providerSources          map[string]providerSourceScope
 	shadowedProjectProviders []ProviderEntry
 	expansionEnv             map[string]string
+	pluginPackageOwners      map[string]string
 }
 
 // SecretsConfig controls the credential protection layers. It is a user-global
@@ -529,6 +531,20 @@ type BotConfig struct {
 	Weixin             WeixinBotConfig       `toml:"weixin"`
 	Routes             []BotRouteConfig      `toml:"routes"`
 	Connections        []BotConnectionConfig `toml:"connections"`
+	// DesktopWatchers persists /desktop watch subscriptions so god-view
+	// notifications survive a desktop restart. Managed by the desktop bot
+	// bridge, not the settings UI.
+	DesktopWatchers []BotDesktopWatcherConfig `toml:"desktop_watchers"`
+}
+
+// BotDesktopWatcherConfig is one bot chat subscribed to desktop events
+// (/desktop watch on).
+type BotDesktopWatcherConfig struct {
+	Platform     string `toml:"platform"`
+	ConnectionID string `toml:"connection_id"`
+	Domain       string `toml:"domain"`
+	ChatType     string `toml:"chat_type"`
+	ChatID       string `toml:"chat_id"`
 }
 
 type BotSelfUserIDs struct {
@@ -612,6 +628,11 @@ type FeishuBotConfig struct {
 	Mode              string `toml:"mode"`               // webhook（默认）| websocket
 	WebhookPort       int    `toml:"webhook_port"`       // webhook 模式端口
 	RequireMention    bool   `toml:"require_mention"`
+	// OutboundMediaRoots contains absolute local directories the loopback /send
+	// control API may attach files from. Media refs must be bare filenames and
+	// must exist in exactly one configured root. Empty (the default) disables
+	// outbound file sending.
+	OutboundMediaRoots []string `toml:"outbound_media_roots"`
 }
 
 // WeixinBotConfig 微信 iLink Bot 配置。
@@ -1787,7 +1808,7 @@ func (c *Config) ResolveSystemPromptForRoot(root string) (string, error) {
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(resolveRoot(root), path)
 		}
-		b, err := os.ReadFile(path)
+		b, err := fileencoding.ReadFileUTF8(path)
 		if err != nil {
 			return "", fmt.Errorf("system_prompt_file: %w", err)
 		}

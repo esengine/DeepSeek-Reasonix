@@ -89,7 +89,7 @@ func (a *App) flushPendingCrash() {
 		return
 	}
 	path := pendingCrashPath()
-	body, err := os.ReadFile(path)
+	body, err := readFileUTF8(path)
 	if err != nil {
 		return
 	}

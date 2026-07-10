@@ -1,8 +1,8 @@
 # Reasonix configuration.
-# Resolution order: flag > ./reasonix.toml > ~/.reasonix/config.toml > built-in defaults.
+# Resolution order: flag > ./reasonix.toml > <Reasonix home>/config.toml > built-in defaults.
 # Fields marked user/global only are not overridden by ./reasonix.toml.
 # Provider entries name secrets via api_key_env; saved key values live in
-# Reasonix's global ~/.reasonix/.env. Never put API key values here.
+# Reasonix's global <Reasonix home>/.env. Never put API key values here.
 
 default_model = "deepseek"   # a provider name (→ its default model) or "provider/model"
 # language      = "zh"   # ui language; empty = auto-detect from $LANG / $REASONIX_LANG
@@ -149,10 +149,10 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 
 # Hooks run shell commands around the loop (PreToolUse / PostToolUse /
 # PermissionRequest / UserPromptSubmit / Stop). They are NOT configured here — put them in
-# settings.json: ~/.reasonix/settings.json (global, always on) and
+# settings.json: <Reasonix home>/settings.json (global, always on) and
 # <project>/.reasonix/settings.json (project, runs only after `/hooks trust`).
 # Exit 0 = pass, exit 2 = block (PreToolUse / UserPromptSubmit only). Example
-# ~/.reasonix/settings.json:
+# <Reasonix home>/settings.json:
 #   { "hooks": {
 #       "PreToolUse":  [ { "match": "bash", "command": "my-guard.sh" } ],
 #       "PermissionRequest": [ { "match": "bash", "command": "notify-send 'approval needed'" } ],

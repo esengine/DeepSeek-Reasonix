@@ -267,7 +267,7 @@ var ChineseTraditional = Messages{
 	ListSkillsHeaderFmt: "skills（%d 個）",
 	ListSkillsNone:      "暫無 skill — 呼叫內建的（如 /init），或用 install_skill 建立一個",
 	ListHooksHeaderFmt:  "hooks（生效 %d 個）",
-	ListHooksNone:       "無生效 hooks — 在 .reasonix/settings.json（專案，需信任後）或 ~/.reasonix/settings.json（全域）設定",
+	ListHooksNone:       "無生效 hooks — 在 .reasonix/settings.json（專案，需信任後）或 <Reasonix home>/settings.json（全域）設定",
 	ListMcpHeader:       "MCP 伺服器",
 	ListMcpNone:         "未連線 MCP 伺服器 — 在 reasonix.toml（[[plugins]]）或專案 .mcp.json 中新增",
 
@@ -400,7 +400,7 @@ var ChineseTraditional = Messages{
   echo "解釋這段程式碼" | reasonix run
 
 設定：
-  優先順序：flag > ./reasonix.toml > ~/.reasonix/config.toml > 內建預設值
+  優先順序：flag > ./reasonix.toml > <Reasonix home>/config.toml > 內建預設值
   金鑰透過 api_key_env 從環境變數注入（如 DEEPSEEK_API_KEY）。
   執行 'reasonix setup' 生成設定；詳見 docs/SPEC.md。
 `,

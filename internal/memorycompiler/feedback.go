@@ -3,12 +3,12 @@ package memorycompiler
 import (
 	"bytes"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 // OutcomeRef identifies one finished turn's persisted outcome so the next user
@@ -137,7 +137,7 @@ func (r *Runtime) ReviseOutcomeFromFeedback(ref OutcomeRef, feedback string) boo
 }
 
 func reviseTraceOutcomeInJSONL(path, traceID, outcome, reason string) bool {
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return false
 	}
