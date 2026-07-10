@@ -62,7 +62,9 @@ func TestGenManifest(t *testing.T) {
 		"Reasonix-linux-amd64.tar.gz",
 		"Reasonix-linux-amd64.deb",            // human download, not the updater channel
 		"Reasonix-linux-amd64.tar.gz.minisig", // must be skipped
-		"README.txt",                          // unmatched, must be skipped
+		"Reasonix-linux-arm64.tar.gz",
+		"Reasonix-linux-arm64.deb", // human download, not the updater channel
+		"README.txt",               // unmatched, must be skipped
 	}
 	for _, n := range names {
 		if err := os.WriteFile(filepath.Join(dir, n), []byte(n), 0o644); err != nil {
@@ -88,8 +90,8 @@ func TestGenManifest(t *testing.T) {
 	if m.DownloadPage != "https://reasonix.io/#start" {
 		t.Fatalf("download_page = %q, want official install page", m.DownloadPage)
 	}
-	if len(m.Platforms) != 5 {
-		t.Fatalf("want 5 platforms, got %d: %v", len(m.Platforms), m.Platforms)
+	if len(m.Platforms) != 6 {
+		t.Fatalf("want 6 platforms, got %d: %v", len(m.Platforms), m.Platforms)
 	}
 	win, ok := m.Platforms["windows-amd64"]
 	if !ok {
@@ -122,5 +124,12 @@ func TestGenManifest(t *testing.T) {
 	}
 	if !strings.HasSuffix(lin.URL, "/Reasonix-linux-amd64.tar.gz") {
 		t.Fatalf("linux-amd64 url = %q, want the .tar.gz, not the .deb", lin.URL)
+	}
+	linArm, ok := m.Platforms["linux-arm64"]
+	if !ok {
+		t.Fatal("linux-arm64 missing")
+	}
+	if !strings.HasSuffix(linArm.URL, "/Reasonix-linux-arm64.tar.gz") {
+		t.Fatalf("linux-arm64 url = %q, want the .tar.gz, not the .deb", linArm.URL)
 	}
 }

@@ -645,12 +645,37 @@ export interface GitCommitDetailView {
   files?: string[];
 }
 
+export interface ComposerInsertAttachment {
+  path: string;
+  previewUrl?: string;
+  displayName?: string;
+}
+
 export interface ComposerInsertRequest {
   id: number;
   text: string;
   mode?: "insert" | "replace";
   parseWorkspaceRef?: boolean;
   insertSpacing?: "block" | "inline";
+  attachments?: ComposerInsertAttachment[];
+}
+
+export interface BrowserAnnotation {
+  page: {
+    url: string;
+    title?: string;
+  };
+  element: {
+    tag: string;
+    selector: string;
+    accessibleName?: string;
+    text?: string;
+    box: { x: number; y: number; width: number; height: number };
+  };
+  viewport: { width: number; height: number };
+  styleChanges: Record<string, { before: string; after: string }>;
+  screenshotPath?: string;
+  elementScreenshotPath?: string;
 }
 
 // MCP & Skills drawer (desktop/app.go Capabilities) — the GUI counterpart to

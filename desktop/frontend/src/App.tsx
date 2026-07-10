@@ -23,6 +23,7 @@ import {
   FileText,
   FileJson,
   GitBranch,
+  Globe2,
   History,
   MessageSquare,
   Settings as SettingsIcon,
@@ -242,6 +243,7 @@ const HistoryPanel = lazy(() => import("./components/HistoryPanel").then((module
 const SettingsPanel = lazy(() => import("./components/SettingsPanel").then((module) => ({ default: module.SettingsPanel })));
 const WorkspacePanel = lazy(() => import("./components/WorkspacePanel").then((module) => ({ default: module.WorkspacePanel })));
 const TerminalPanel = lazy(() => import("./components/TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
+const BrowserPanel = lazy(() => import("./components/BrowserPanel").then((module) => ({ default: module.BrowserPanel })));
 
 const CHAT_MIN_WIDTH = 400;
 const CHAT_COMFORT_MIN_WIDTH = 560;
@@ -1346,7 +1348,7 @@ export default function App() {
   const runningRef = useRef(state.running);
   const activeTabIdRef = useRef(activeTabId);
   const commitThenSendRef = useRef<(displayText: string, submitText?: string) => Promise<void>>(async () => {});
-  const rightDockDetailActive = rightDockMode === "terminal" || (rightDockMode !== "context" && workspacePreviewActive);
+  const rightDockDetailActive = rightDockMode === "terminal" || rightDockMode === "browser" || (rightDockMode !== "context" && workspacePreviewActive);
   const preferredWorkspacePanelWidth = rightDockDetailActive ? rightDockPreviewWidth : rightDockTreeWidth;
   const workspacePanelMinWidth = rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
   const chatReservedWidth = workspacePanelOpen && !workspacePanelMaximized ? CHAT_COMFORT_MIN_WIDTH : CHAT_MIN_WIDTH;
@@ -2244,13 +2246,18 @@ export default function App() {
     }
   }, [closeWorkspacePanel, openWorkspacePanel]);
 
-  const addWorkspaceTextToComposer = useCallback((text: string, options?: Pick<ComposerInsertRequest, "parseWorkspaceRef" | "insertSpacing">) => {
+  const insertComposerRequest = useCallback((request: Omit<ComposerInsertRequest, "id">) => {
+    const next = { id: Date.now(), ...request };
     if (workspaceInsertTarget === "planRevision" && state.approval?.tool === "exit_plan_mode") {
-      setPlanRevisionInsertRequest({ id: Date.now(), text, ...options });
+      setPlanRevisionInsertRequest(next);
       return;
     }
-    setComposerInsertRequest({ id: Date.now(), text, ...options });
+    setComposerInsertRequest(next);
   }, [state.approval?.tool, workspaceInsertTarget]);
+
+  const addWorkspaceTextToComposer = useCallback((text: string, options?: Pick<ComposerInsertRequest, "parseWorkspaceRef" | "insertSpacing">) => {
+    insertComposerRequest({ text, ...options });
+  }, [insertComposerRequest]);
 
   // Coalesce tab-bar switches through the same last-click-wins scheduler that
   // openTopic/blank/resume navigation uses, so rapidly clicking between two
@@ -3770,6 +3777,16 @@ export default function App() {
                   <TerminalSquare size={13} />
                   <span className="workbench-dock__tab-label">{t("terminal.title")}</span>
                 </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={rightDockMode === "browser"}
+                  className={`workbench-dock__tab${rightDockMode === "browser" ? " workbench-dock__tab--active" : ""}`}
+                  onClick={() => openRightDockMode("browser")}
+                >
+                  <Globe2 size={13} />
+                  <span className="workbench-dock__tab-label">{t("browser.title")}</span>
+                </button>
               </div>
             </div>
             <div className="workbench-dock__body">
@@ -3804,6 +3821,22 @@ export default function App() {
                     <TerminalPanel key={activeTabId} tabId={activeTabId} />
                   ) : (
                     <div className="terminal-panel terminal-panel--loading" aria-busy="true" />
+                  )}
+                </Suspense>
+              ) : rightDockMode === "browser" ? (
+                <Suspense
+                  fallback={(
+                    <div
+                      className="browser-panel browser-panel--loading"
+                      aria-busy="true"
+                      aria-label={t("browser.starting")}
+                    />
+                  )}
+                >
+                  {activeTabId ? (
+                    <BrowserPanel key={activeTabId} tabId={activeTabId} onInsertAnnotation={insertComposerRequest} />
+                  ) : (
+                    <div className="browser-panel browser-panel--loading" aria-busy="true" />
                   )}
                 </Suspense>
               ) : (

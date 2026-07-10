@@ -636,6 +636,9 @@ func (a *App) attachExistingSessionRuntime(tab *WorkspaceTab, path string, wails
 	attachedCtrl := tab.Ctrl
 	a.mu.Unlock()
 
+	if a.browsers != nil {
+		a.browsers.closeForTab(source.ID)
+	}
 	if attachedCtrl != nil {
 		attachedCtrl.ReplayPendingPrompts()
 	}
@@ -2305,6 +2308,9 @@ func (a *App) CloseTab(tabID string) error {
 	if a.terminals != nil {
 		a.terminals.closeTab(tabID)
 	}
+	if a.browsers != nil {
+		a.browsers.closeForTab(tabID)
+	}
 
 	// Tear down outside the lock.
 	discardPath, discardTransientBlank := a.transientBlankSessionArtifactPath(tab)
@@ -2455,6 +2461,9 @@ func (a *App) removeVisibleTabRuntime(tab *WorkspaceTab) {
 	if tab == nil {
 		return
 	}
+	if a.browsers != nil {
+		a.browsers.closeForTab(tab.ID)
+	}
 	if err := a.snapshotTab(tab); err != nil {
 		slog.Warn("desktop: snapshot before removing visible tab runtime failed", "tab", tab.ID, "err", err)
 	}
@@ -2600,6 +2609,9 @@ func (a *App) clearTabBuildCancel(tab *WorkspaceTab, generation uint64, cancel c
 func (a *App) closeTabRuntime(tab *WorkspaceTab) {
 	if tab == nil {
 		return
+	}
+	if a.browsers != nil {
+		a.browsers.closeForTab(tab.ID)
 	}
 	a.mu.RLock()
 	ctrl := tab.Ctrl

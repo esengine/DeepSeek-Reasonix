@@ -15,6 +15,8 @@ require (
 	aead.dev/minisign v0.3.0
 	fyne.io/systray v1.12.2
 	github.com/aymanbagabas/go-pty v0.2.3
+	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327
+	github.com/chromedp/chromedp v0.14.2
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/minio/selfupdate v0.6.0
 	github.com/wailsapp/wails/v2 v2.12.0
@@ -29,10 +31,15 @@ require (
 	github.com/aymanbagabas/go-udiff v0.4.1 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
+	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/creack/pty v1.1.24 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
+	github.com/go-json-experiment/json v0.0.0-20250725192818-e39067aee2d2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
+	github.com/gobwas/httphead v0.1.0 // indirect
+	github.com/gobwas/pool v0.2.1 // indirect
+	github.com/gobwas/ws v1.4.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect

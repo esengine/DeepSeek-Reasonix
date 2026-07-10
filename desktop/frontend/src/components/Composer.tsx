@@ -1136,8 +1136,19 @@ export function Composer({
   useEffect(() => {
     if (!insertRequest || insertRequest.id === consumedInsertIdRef.current) return;
     consumedInsertIdRef.current = insertRequest.id;
+    const addInsertedAttachments = () => {
+      const next = [...attachmentsRef.current];
+      for (const attachment of insertRequest.attachments ?? []) {
+        if (!next.some((item) => item.path === attachment.path)) next.push(attachment);
+      }
+      if (next.length !== attachmentsRef.current.length) {
+        attachmentsRef.current = next;
+        setAttachments(next);
+      }
+    };
     if (insertRequest.mode === "replace") {
       replaceComposerText(insertRequest.text);
+      addInsertedAttachments();
       return;
     }
     const ref = shouldParseWorkspaceInsertRequest(insertRequest)
@@ -1145,9 +1156,11 @@ export function Composer({
       : null;
     if (ref) {
       addWorkspaceReference(ref);
+      addInsertedAttachments();
       return;
     }
     insertTextAtCaret(insertRequest.text, insertRequest.insertSpacing);
+    addInsertedAttachments();
   }, [insertRequest]);
 
   const expandPastedBlocks = (displayText: string): string => {

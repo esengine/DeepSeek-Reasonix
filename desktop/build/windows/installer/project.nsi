@@ -78,6 +78,7 @@ Name "${INFO_PRODUCTNAME}"
 OutFile "..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the installer's file.
 !define REASONIX_DEFAULT_INSTALLDIR "$LOCALAPPDATA\Programs\${INFO_PRODUCTNAME}"
 !define REASONIX_UPDATE_HELPER "reasonix-update-helper.exe"
+!define REASONIX_CHROMIUM_SOURCE "..\..\runtime\chromium\windows-${ARCH}"
 !define REASONIX_UNLOCK_RETRIES 60
 InstallDirRegKey HKCU "${UNINST_KEY}" "InstallLocation" # Reuse the previous install path on update; .onInit falls back to the default on first install.
 InstallDir "${REASONIX_DEFAULT_INSTALLDIR}" # Per-user install location (no admin rights required).
@@ -173,6 +174,19 @@ Section
 
     Call reasonix.waitForExecutableUnlock
 
+    !if /FileExists "${REASONIX_CHROMIUM_SOURCE}\chrome.exe"
+    !else
+    !error "Bundled Chromium runtime is missing for windows-${ARCH}. Run the Chromium preparation step before packaging."
+    !endif
+
+    ; Never merge versions: stale DLL/resource files can make Chromium fail in
+    ; ways that look unrelated to the updater.
+    RMDir /r "$INSTDIR\chromium"
+    IfFileExists "$INSTDIR\chromium\*.*" 0 chromium_clean
+    Abort "The previous bundled Chromium runtime is still in use. Close Reasonix and retry."
+
+chromium_clean:
+
     SetOutPath $INSTDIR
 
     !insertmacro wails.files
@@ -181,6 +195,10 @@ Section
     !else
     !warning "${REASONIX_UPDATE_HELPER} was not found; Windows auto-update will fall back to installer-side waiting only."
     !endif
+
+    SetOutPath "$INSTDIR\chromium"
+    File /r "${REASONIX_CHROMIUM_SOURCE}\*.*"
+    SetOutPath $INSTDIR
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
@@ -199,6 +217,7 @@ Section "uninstall"
     ; Precision uninstall: delete main application files
     Delete "$INSTDIR\${PRODUCT_EXECUTABLE}"
     Delete "$INSTDIR\${REASONIX_UPDATE_HELPER}"
+    RMDir /r "$INSTDIR\chromium"
 
     Delete "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk"
     Delete "$DESKTOP\${INFO_PRODUCTNAME}.lnk"

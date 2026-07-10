@@ -35,7 +35,7 @@ import (
 // platforms are the manifest keys we publish. A built artifact is matched to a key
 // by substring (file names embed the key, e.g. Reasonix-darwin-arm64.zip), so the
 // generator and the updater agree on update.PlatformKey output.
-var platforms = []string{"darwin-arm64", "darwin-amd64", "windows-amd64", "windows-arm64", "linux-amd64"}
+var platforms = []string{"darwin-arm64", "darwin-amd64", "windows-amd64", "windows-arm64", "linux-amd64", "linux-arm64"}
 
 func main() {
 	if len(os.Args) < 2 {

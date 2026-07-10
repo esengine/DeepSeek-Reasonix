@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "runtimeVersion": "149.0.7827.55",
+  "platforms": {
+    "windows-amd64": {
+      "source": "chrome-for-testing",
+      "sourceVersion": "149.0.7827.55",
+      "sourceRevision": "1625079",
+      "url": "https://storage.googleapis.com/chrome-for-testing-public/149.0.7827.55/win64/chrome-win64.zip",
+      "sha256": "ebc0c2b75e2ea98151a7f18ff47037bfcbab44a8660e79b9ffa6520f9b7607ab",
+      "archiveSize": 192511857,
+      "archiveRoot": "chrome-win64",
+      "executable": "chrome.exe",
+      "requiredPaths": [
+        "chrome.exe",
+        "chrome.dll",
+        "chrome_elf.dll",
+        "D3DCompiler_47.dll",
+        "libEGL.dll",
+        "libGLESv2.dll",
+        "chrome_100_percent.pak",
+        "chrome_200_percent.pak",
+        "icudtl.dat",
+        "resources.pak",
+        "v8_context_snapshot.bin",
+        "locales",
+        "vk_swiftshader.dll",
+        "vk_swiftshader_icd.json"
+      ]
+    },
+    "windows-arm64": {
+      "source": "chromium-snapshot",
+      "sourceVersion": "149.0.7827.0",
+      "sourceRevision": "1625036",
+      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Win_Arm64/1625036/chrome-win.zip",
+      "sha256": "b105eb9c8084b4d38aca5e2fc47911f00abe847fee2a4788fbe72d7a600efdc7",
+      "archiveSize": 307537820,
+      "archiveRoot": "chrome-win",
+      "executable": "chrome.exe",
+      "requiredPaths": [
+        "chrome.exe",
+        "chrome.dll",
+        "chrome_elf.dll",
+        "D3DCompiler_47.dll",
+        "libEGL.dll",
+        "libGLESv2.dll",
+        "chrome_100_percent.pak",
+        "chrome_200_percent.pak",
+        "icudtl.dat",
+        "resources.pak",
+        "v8_context_snapshot.bin",
+        "locales",
+        "vk_swiftshader.dll",
+        "vk_swiftshader_icd.json"
+      ]
+    },
+    "linux-amd64": {
+      "source": "chrome-for-testing",
+      "sourceVersion": "149.0.7827.55",
+      "sourceRevision": "1625079",
+      "url": "https://storage.googleapis.com/chrome-for-testing-public/149.0.7827.55/linux64/chrome-linux64.zip",
+      "sha256": "13113b963ac22fffdad898a677591028e4397c46c1daa9e61811258eed6e35b5",
+      "archiveSize": 185646494,
+      "archiveRoot": "chrome-linux64",
+      "executable": "chrome",
+      "executablePaths": ["chrome", "chrome-wrapper", "chrome_crashpad_handler", "chrome_sandbox"],
+      "requiredPaths": [
+        "chrome",
+        "chrome_sandbox",
+        "chrome_100_percent.pak",
+        "chrome_200_percent.pak",
+        "icudtl.dat",
+        "resources.pak",
+        "v8_context_snapshot.bin",
+        "locales",
+        "libEGL.so",
+        "libGLESv2.so",
+        "libvk_swiftshader.so",
+        "libvulkan.so.1",
+        "vk_swiftshader_icd.json"
+      ]
+    },
+    "linux-arm64": {
+      "source": "playwright-chromium",
+      "sourceVersion": "149.0.7827.55",
+      "sourceRevision": "1228",
+      "url": "https://cdn.playwright.dev/dbazure/download/playwright/builds/chromium/1228/chromium-linux-arm64.zip",
+      "sha256": "ec044b50ed065adeb4c5ffdb42d1529901cbaf897cdf542bfef8af01d6e0cc79",
+      "archiveSize": 196280473,
+      "archiveRoot": "chrome-linux",
+      "executable": "chrome",
+      "executablePaths": ["chrome", "chrome-wrapper", "chrome_crashpad_handler", "chrome_sandbox"],
+      "requiredPaths": [
+        "chrome",
+        "chrome_sandbox",
+        "chrome_100_percent.pak",
+        "chrome_200_percent.pak",
+        "icudtl.dat",
+        "resources.pak",
+        "v8_context_snapshot.bin",
+        "locales",
+        "libEGL.so",
+        "libGLESv2.so",
+        "libvk_swiftshader.so",
+        "libvulkan.so.1",
+        "vk_swiftshader_icd.json"
+      ]
+    },
+    "darwin-amd64": {
+      "source": "chrome-for-testing",
+      "sourceVersion": "149.0.7827.55",
+      "sourceRevision": "1625079",
+      "url": "https://storage.googleapis.com/chrome-for-testing-public/149.0.7827.55/mac-x64/chrome-mac-x64.zip",
+      "sha256": "4fff3b1bff4ab5acab495438d501fd56ecd326fc2e18670858930386dca864e6",
+      "archiveSize": 189658978,
+      "archiveRoot": "chrome-mac-x64",
+      "bundleSource": "Google Chrome for Testing.app",
+      "bundleTarget": "Chromium.app",
+      "executable": "Chromium.app/Contents/MacOS/Google Chrome for Testing",
+      "executablePaths": ["Chromium.app/Contents/MacOS/Google Chrome for Testing"],
+      "requiredPaths": [
+        "Chromium.app/Contents/Info.plist",
+        "Chromium.app/Contents/MacOS/Google Chrome for Testing",
+        "Chromium.app/Contents/Frameworks",
+        "Chromium.app/Contents/Resources"
+      ]
+    },
+    "darwin-arm64": {
+      "source": "chrome-for-testing",
+      "sourceVersion": "149.0.7827.55",
+      "sourceRevision": "1625079",
+      "url": "https://storage.googleapis.com/chrome-for-testing-public/149.0.7827.55/mac-arm64/chrome-mac-arm64.zip",
+      "sha256": "311211b54c429245e2cec0314ee1e314085e9c00350215b95e1a879350786630",
+      "archiveSize": 179277110,
+      "archiveRoot": "chrome-mac-arm64",
+      "bundleSource": "Google Chrome for Testing.app",
+      "bundleTarget": "Chromium.app",
+      "executable": "Chromium.app/Contents/MacOS/Google Chrome for Testing",
+      "executablePaths": ["Chromium.app/Contents/MacOS/Google Chrome for Testing"],
+      "requiredPaths": [
+        "Chromium.app/Contents/Info.plist",
+        "Chromium.app/Contents/MacOS/Google Chrome for Testing",
+        "Chromium.app/Contents/Frameworks",
+        "Chromium.app/Contents/Resources"
+      ]
+    }
+  }
+}
